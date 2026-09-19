@@ -301,6 +301,93 @@ pub fn slice_median_filter(sl_out: &mut Islice, stack: &[Islice], size: i32) -> 
     }) {
         return -1;
     }
+
+    /* `sliceproc.c:369-439`.  A 2-D 3x3 filter from float to float takes a
+    separate, highly optimised path, and it is not merely faster: it produces
+    *different* values at the two end columns.  The interior loop runs
+    `ox = 1 .. xsize - 1` and the two ends are then filled from the **first** and
+    **last complete** nine-value windows, so native's `x = 0` output equals its
+    `x = 1` output and `x = xsize - 1` equals `x = xsize - 2`, where the general
+    path below builds a clipped six-value window at each end.  `clip median
+    -3 -n 3` on a 50x40 float image differed from native in 176 pixels across
+    all 40 rows with this path missing.
+
+    The source parallelises the row loop with OpenMP, keeping the three
+    interleaved lines and the rotating `offset` private to each thread.  The
+    result does not depend on the thread count, so one sequential pass
+    reproduces it exactly: a thread's first row rebuilds the buffer from rows
+    `oy - 1`, `oy`, `oy + 1`, every later row overwrites one of the three in
+    rotation, and `opt_med9` sorts its copy — so each row always sees the same
+    *set* of nine values however they are ordered within the triple. */
+    if stack.len() == 1
+        && size == 3
+        && sl_in.mode == SLICE_MODE_FLOAT
+        && sl_out.mode == SLICE_MODE_FLOAT
+        // `lineVals` holds `3 * xsize` floats, so for a width under 3 both
+        // endpoint copies run outside it: `memcpy(fVals, lineVals, 9 * 4)`
+        // reads three floats past the end, and `lineVals + 3 * (xsize - 3)` is
+        // `lineVals - 3` for width 2, reading three floats *before* it.  Native
+        // is stable across runs there — the reads land on adjacent heap — but
+        // reproducing them would mean matching glibc's allocator layout, so
+        // fall through to the general path instead.  This is the documented
+        // source-level-UB deviation, not a defect; `clip median -3 -n 3` on a
+        // 2-pixel-wide float image is the only input that reaches it.
+        && sl_in.xsize >= 3
+    {
+        let in_nx = sl_in.xsize as usize;
+        let ny = sl_in.ysize as usize;
+        let out_nx = sl_out.xsize as usize;
+        let mut line_vals = vec![0f32; 3 * in_nx];
+        let mut f_vals = [0f32; 9];
+        let mut offset = 0usize;
+        let mut initial_loaded = false;
+        for oy in 0..ny {
+            if !initial_loaded {
+                /* Set up pointers and copy the three lines interleaved the
+                first time */
+                let line1 = if oy == 0 { 0 } else { oy - 1 };
+                let line2 = oy;
+                let line3 = (ny - 1).min(oy + 1);
+                for ox in 0..in_nx {
+                    for (slot, row) in [line1, line2, line3].into_iter().enumerate() {
+                        let at = (ox + row * in_nx) * 4;
+                        line_vals[3 * ox + slot] =
+                            f32::from_ne_bytes(sl_in.data[at..at + 4].try_into().unwrap());
+                    }
+                }
+                offset = 0;
+                initial_loaded = true;
+            } else {
+                /* Thereafter just copy the third line into the free slot */
+                let line3 = (ny - 1).min(oy + 1);
+                for ox in 0..in_nx {
+                    let at = (ox + line3 * in_nx) * 4;
+                    line_vals[3 * ox + offset] =
+                        f32::from_ne_bytes(sl_in.data[at..at + 4].try_into().unwrap());
+                }
+                offset = (offset + 1) % 3;
+            }
+
+            /* Step across, copying the chunk of values as needed and taking the
+            median */
+            for ox in 1..in_nx - 1 {
+                f_vals.copy_from_slice(&line_vals[3 * (ox - 1)..3 * (ox - 1) + 9]);
+                let at = (ox + oy * out_nx) * 4;
+                sl_out.data[at..at + 4].copy_from_slice(&opt_med9(&mut f_vals).to_ne_bytes());
+            }
+
+            /* Handle the endpoints.  Note the source indexes the far end with
+            the *input* width and the row with the output width. */
+            f_vals.copy_from_slice(&line_vals[..9]);
+            let at = (oy * out_nx) * 4;
+            sl_out.data[at..at + 4].copy_from_slice(&opt_med9(&mut f_vals).to_ne_bytes());
+            f_vals.copy_from_slice(&line_vals[3 * (in_nx - 3)..3 * (in_nx - 3) + 9]);
+            let at = (in_nx + oy * out_nx - 1) * 4;
+            sl_out.data[at..at + 4].copy_from_slice(&opt_med9(&mut f_vals).to_ne_bytes());
+        }
+        return 0;
+    }
+
     let block_size = stack.len() * size as usize * size as usize;
     let mut f_vals = vec![0.0; block_size];
     let mut i_vals = vec![0; block_size];

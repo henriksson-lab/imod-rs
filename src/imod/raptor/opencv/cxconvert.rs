@@ -223,6 +223,36 @@ pub fn cv_convert_scale_abs<T: CvConvertValue>(
     }
     Ok(())
 }
+/// `icvCvtScaleAbsTo_8u_C1R` (`cxconvert.cpp:951`), preserving independent
+/// source/destination row strides.  Strides are element counts at this safe
+/// generic boundary; the C routine's byte stride is its raw-pointer analogue.
+pub fn icv_cvt_scale_abs_to_8u_c1r<T: CvConvertValue>(
+    source: &[T],
+    source_stride: usize,
+    destination: &mut [u8],
+    destination_stride: usize,
+    width: usize,
+    height: usize,
+    scale: f64,
+    shift: f64,
+) -> Result<(), CvUtilsError> {
+    let valid = |length: usize, stride: usize| {
+        stride >= width && (height == 0 || length >= (height - 1) * stride + width)
+    };
+    if !valid(source.len(), source_stride) || !valid(destination.len(), destination_stride) {
+        return Err(CvUtilsError::UnmatchedSizes);
+    }
+    for row in 0..height {
+        for column in 0..width {
+            destination[row * destination_stride + column] =
+                (source[row * source_stride + column].as_f64() * scale + shift)
+                    .round()
+                    .abs()
+                    .clamp(0., 255.) as u8;
+        }
+    }
+    Ok(())
+}
 /// C `cvConvertScale`, with the source generated destination-depth dispatch represented by `CvConvertValue`.
 pub fn cv_convert_scale<S: CvConvertValue, D: CvConvertValue>(
     source: &[S],
@@ -303,5 +333,13 @@ mod tests {
             cv_split(&source, &mut destinations),
             Err(CvUtilsError::BadArgument)
         );
+    }
+
+    #[test]
+    fn scale_abs_kernel_preserves_source_and_destination_row_padding() {
+        let source = [-2_i16, 3, 99, -4, 5, 99];
+        let mut destination = [77_u8; 6];
+        icv_cvt_scale_abs_to_8u_c1r(&source, 3, &mut destination, 3, 2, 2, 2., 1.).unwrap();
+        assert_eq!(destination, [3, 7, 77, 7, 11, 77]);
     }
 }

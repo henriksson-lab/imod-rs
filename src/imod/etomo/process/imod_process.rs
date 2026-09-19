@@ -1,18 +1,19 @@
 //! `IMOD/Etomo/src/etomo/process/ImodProcess.java`.
 //!
-//! This is the source-shaped 3dmod command and message owner.  A live 3dmod child and
-//! its Qt/X11 IPC are deliberately an explicit boundary: command construction and all
-//! state/message encoding are implemented here, but [`ImodProcess::open`] records the
-//! command and returns [`ImodProcessError::ViewerBoundary`] instead of claiming that a
-//! viewer was opened.
+//! This is the source-shaped 3dmod command and message owner.  It owns a live
+//! pipe-backed 3dmod child, obtains its `-W` window identity during startup,
+//! and routes the stdin/imodsendevent protocol through that child.
 #![allow(dead_code)]
 
 use crate::imod::etomo::base_manager::{BaseManager, get_imod_bin_path};
+use crate::imod::etomo::process::system_program::{ProcessCommand, ProcessStream, SystemProgram};
 use crate::imod::etomo::r#type::axis_id::AxisID;
 use std::collections::{HashMap, VecDeque};
 use std::fmt;
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
+use std::thread;
+use std::time::{Duration, Instant};
 
 pub const MESSAGE_OPEN_MODEL: &str = "1";
 pub const MESSAGE_SAVE_MODEL: &str = "2";
@@ -83,6 +84,7 @@ pub enum ImodProcessError {
     ViewerBoundary { command: Vec<String> },
     NotRunning,
     NoWindowId,
+    ResponseTimeout,
     Io(String),
 }
 impl fmt::Display for ImodProcessError {
@@ -93,6 +95,7 @@ impl fmt::Display for ImodProcessError {
             }
             Self::NotRunning => f.write_str("3dmod is not running."),
             Self::NoWindowId => f.write_str("No window ID available for imod"),
+            Self::ResponseTimeout => f.write_str("No response received from 3dmod."),
             Self::Io(message) => f.write_str(message),
         }
     }
@@ -259,8 +262,8 @@ impl fmt::Display for QuickListenerQueueTestWrapper {
     }
 }
 
-/// Java `ImodProcess` fields.  `last_command` is the explicit boundary record for the
-/// untranslated `InteractiveSystemProgram` / child thread pair.
+/// Java `ImodProcess` fields, including the local `InteractiveSystemProgram`
+/// replacement used by normal eTomo launches.
 pub struct ImodProcess {
     dataset_name: String,
     model_name: String,
@@ -298,6 +301,7 @@ pub struct ImodProcess {
     stderr_reg_id: i32,
     running: bool,
     last_command: Option<Vec<String>>,
+    program: Option<SystemProgram>,
 }
 
 impl ImodProcess {
@@ -347,6 +351,7 @@ impl ImodProcess {
             stderr_reg_id,
             running: false,
             last_command: None,
+            program: None,
         }
     }
     pub fn new(manager: Option<&'static dyn BaseManager>, axis_id: Option<AxisID>) -> Self {
@@ -459,7 +464,7 @@ impl ImodProcess {
             binning
         }) + if menu_options.bin_by_2 { 2 } else { 0 }
     }
-    /// Java `open`: records the exact constructed command, then stops at real child/UI boundary.
+    /// Java `open`: start 3dmod with a pipe-backed interactive program.
     pub fn open(&mut self, menu_options: Run3dmodMenuOptions) -> Result<(), ImodProcessError> {
         if self.is_running() {
             return self.raise_3dmod();
@@ -467,7 +472,20 @@ impl ImodProcess {
         self.window_id.clear();
         let command = self.build_command(menu_options);
         self.last_command = Some(command.clone());
-        Err(ImodProcessError::ViewerBoundary { command })
+        let (program, args) = command
+            .split_first()
+            .ok_or_else(|| ImodProcessError::Io("empty 3dmod command".into()))?;
+        let mut launch = ProcessCommand::new(program)
+            .args(args.iter().cloned())
+            .keep_stdin_open();
+        if let Some(directory) = &self.working_directory {
+            launch = launch.current_dir(directory);
+        }
+        let program = SystemProgram::spawn(&launch)
+            .map_err(|error| ImodProcessError::Io(error.to_string()))?;
+        self.program = Some(program);
+        self.running = true;
+        self.wait_for_window_id()
     }
     /// Command body of Java `open`, separately observable because launch is a boundary.
     pub fn build_command(&self, menu_options: Run3dmodMenuOptions) -> Vec<String> {
@@ -593,11 +611,41 @@ impl ImodProcess {
     pub fn is_running(&self) -> bool {
         self.running
     }
+    /// The synchronized startup section of Java `ImodProcess::open`.  The
+    /// `-W` contract is not optional when requested: subsequent
+    /// `imodsendevent` calls need this identifier, so do not report a launched
+    /// viewer as usable until its reader has observed one.
+    fn wait_for_window_id(&mut self) -> Result<(), ImodProcessError> {
+        if !self.output_window_id {
+            return Ok(());
+        }
+        let deadline = Instant::now() + Duration::from_secs(5);
+        while self.window_id.is_empty() && self.running {
+            self.poll_program();
+            if self.window_id.is_empty() && self.running {
+                if Instant::now() >= deadline {
+                    return Err(ImodProcessError::ResponseTimeout);
+                }
+                thread::sleep(Duration::from_millis(10));
+            }
+        }
+        if self.window_id.is_empty() {
+            return Err(ImodProcessError::NoWindowId);
+        }
+        Ok(())
+    }
     /// Native lifecycle hook for Java private `Stderr.setImod`.
     /// The real `InteractiveSystemProgram` is supplied by the process frontend; after it
     /// is attached, this source object may accept its stderr stream and send commands.
     pub fn set_imod(&mut self, running: bool) {
         self.running = running;
+    }
+    /// Controlled-child fixture hook used by the eTomo state integration
+    /// tests.  Production callers always enter through [`Self::open`].
+    #[cfg(test)]
+    pub fn attach_test_program(&mut self, program: SystemProgram) {
+        self.program = Some(program);
+        self.running = true;
     }
     /// Native stream form of Java private `Stderr.readStderr()`.
     pub fn read_stderr<I, S>(&mut self, lines: I)
@@ -620,6 +668,7 @@ impl ImodProcess {
     /// One native event-loop iteration of Java `ContinuousListener.run()` and
     /// `MessageSender.run()`: deliver a queued continuous message and handle requests.
     pub fn run(&mut self) {
+        self.poll_program();
         let message = self.stderr.lock().unwrap().get_continuous_message();
         if let (Some(message), Some(target)) = (message, self.continuous_listener_target.as_ref()) {
             target.get_continuous_message(&message, self.axis_id);
@@ -843,8 +892,7 @@ impl ImodProcess {
         &mut self,
         args: &[&str],
     ) -> Result<Vec<String>, ImodProcessError> {
-        self.imod_send_event(args)?;
-        Ok(vec![])
+        self.imod_send_event(args)
     }
     pub fn parse_error(line: &str, error_message: &mut Vec<String>) -> bool {
         let index = line.find("ERROR:").or_else(|| line.find("WARNING:"));
@@ -873,20 +921,87 @@ impl ImodProcess {
         let mut command = vec!["imodsendevent".to_string(), self.window_id.clone()];
         command.extend(args.iter().map(|value| (*value).to_string()));
         self.last_command = Some(command.clone());
-        Err(ImodProcessError::ViewerBoundary { command })
+        let executable = std::env::var("IMOD_SEND_EVENT").unwrap_or_else(|_| {
+            format!("{}imodsendevent", get_imod_bin_path().unwrap_or_default())
+        });
+        let launch = ProcessCommand::new(executable).args(command.iter().skip(1).cloned());
+        let mut program = SystemProgram::spawn(&launch)
+            .map_err(|error| ImodProcessError::Io(error.to_string()))?;
+        let status = program
+            .wait()
+            .map_err(|error| ImodProcessError::Io(error.to_string()))?;
+        let lines = program.drain_lines();
+        let output: Vec<_> = lines.iter().map(|line| line.line.clone()).collect();
+        for line in lines {
+            if line.stream == ProcessStream::Stderr {
+                self.accept_stderr(line.line);
+            }
+        }
+        if status.success() {
+            Ok(output)
+        } else {
+            Err(ImodProcessError::Io(format!(
+                "{} {}",
+                IMOD_SEND_EVENT_STRING,
+                output.join("\n")
+            )))
+        }
     }
     fn send_request(&mut self, args: &[&str]) -> Result<Vec<String>, ImodProcessError> {
         self.send_commands(args)?;
-        Ok(vec![])
+        // `MessageSender.readResponse` in the Java source waits for the final
+        // `OK`, while keeping the whitespace-separated payload emitted before
+        // it.  The child reader threads feed `Stderr`, so polling here is the
+        // Rust equivalent of its bounded wait loop, rather than treating a
+        // stdin request as fire-and-forget.
+        let deadline = Instant::now() + Duration::from_secs(5);
+        let mut values = Vec::new();
+        let mut received_response = false;
+        loop {
+            self.poll_program();
+            while let Some(response) = self
+                .stderr
+                .lock()
+                .unwrap()
+                .get_quick_message(self.message_sender_reg_id)
+            {
+                received_response = true;
+                let response = response.trim();
+                if response == "OK" {
+                    return Ok(values);
+                }
+                let mut user_messages = String::new();
+                if !Self::parse_user_messages(response, &mut user_messages)
+                    && !response.starts_with("imodExecuteMessage:")
+                {
+                    values.extend(response.split_whitespace().map(str::to_owned));
+                }
+            }
+            if !self.running {
+                return if received_response {
+                    Ok(values)
+                } else {
+                    Err(ImodProcessError::NotRunning)
+                };
+            }
+            if Instant::now() >= deadline {
+                return Err(ImodProcessError::ResponseTimeout);
+            }
+            thread::sleep(Duration::from_millis(10));
+        }
     }
     fn send_commands(&mut self, args: &[&str]) -> Result<(), ImodProcessError> {
         if !self.running {
             return Err(ImodProcessError::NotRunning);
         }
         self.last_command = Some(args.iter().map(|value| (*value).to_string()).collect());
-        Err(ImodProcessError::ViewerBoundary {
-            command: self.last_command.clone().unwrap_or_default(),
-        })
+        let program = self.program.as_mut().ok_or(ImodProcessError::NotRunning)?;
+        for arg in args {
+            program
+                .send_line(arg)
+                .map_err(|error| ImodProcessError::Io(error.to_string()))?;
+        }
+        Ok(())
     }
     fn send_commands_no_wait(&mut self, args: &[&str]) -> Result<(), ImodProcessError> {
         self.send_commands(args)
@@ -989,6 +1104,49 @@ impl ImodProcess {
             }
         }
     }
+
+    /// Drain the real child streams into the Java-shaped stderr/message queues.
+    /// 3dmod prints the `-W` window ID on stdout; retain the first nonempty line
+    /// as that handle while all other output remains observable to listeners.
+    pub fn poll_program(&mut self) {
+        let Some(program) = self.program.as_mut() else {
+            return;
+        };
+        let lines = program.drain_lines();
+        let status = program.try_wait();
+        for line in lines {
+            if self.window_id.is_empty() {
+                // Java 3dmod reports this on stderr as `Window id = N`; the
+                // Rust native host uses the first stdout line.  Accept both
+                // contracts so eTomo can drive either backend.
+                if let Some((_, window_id)) = line.line.split_once("Window id =") {
+                    let window_id = window_id.trim();
+                    if !window_id.is_empty() {
+                        self.window_id = window_id
+                            .split_whitespace()
+                            .next()
+                            .unwrap_or_default()
+                            .to_owned();
+                        continue;
+                    }
+                }
+                if line.stream == ProcessStream::Stdout && !line.line.trim().is_empty() {
+                    self.window_id = line.line.trim().to_owned();
+                    continue;
+                }
+            }
+            {
+                self.accept_stderr(line.line);
+            }
+        }
+        match status {
+            Ok(Some(_)) | Err(_) => {
+                self.running = false;
+                self.program = None;
+            }
+            Ok(None) => {}
+        }
+    }
 }
 impl fmt::Display for ImodProcess {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
@@ -1042,5 +1200,80 @@ mod tests {
         }
         queue.purge();
         assert_eq!(queue.get_quick_message(one), Some("6".to_string()));
+    }
+    #[test]
+    fn external_event_transport_returns_program_output() {
+        // Test-only executable override; the workspace serializes tests because
+        // the translated code retains process-global state.
+        unsafe { std::env::set_var("IMOD_SEND_EVENT", "echo") };
+        let mut process = ImodProcess::new(None, None);
+        process.window_id = "42".into();
+        process.running = true;
+        process.listen_to_stdin = false;
+        assert_eq!(
+            process.imod_send_and_receive(&["open"]).unwrap(),
+            ["42 open"]
+        );
+        unsafe { std::env::remove_var("IMOD_SEND_EVENT") };
+    }
+    #[test]
+    fn stdin_request_waits_for_ok_and_returns_response_values() {
+        let launch = ProcessCommand::new("sh")
+            .args(["-c", "read command; printf 'Rubberband: 10 20\\nOK\\n' >&2"])
+            .keep_stdin_open();
+        let mut process = ImodProcess::new(None, None);
+        process.program = Some(SystemProgram::spawn(&launch).unwrap());
+        process.running = true;
+        process.listen_to_stdin = true;
+        assert_eq!(
+            process.get_rubberband_coordinates().unwrap(),
+            ["Rubberband:", "10", "20"]
+        );
+    }
+    #[test]
+    fn native_and_java_window_id_reports_are_accepted() {
+        let mut process = ImodProcess::new(None, None);
+        process.accept_stderr("Window id = 812");
+        // Direct queue injection is still visible, but parsing happens while
+        // draining a live child.  Use the executable path to cover that case.
+        let launch =
+            ProcessCommand::new("sh").args(["-c", "printf 'Window id = 812\\n' >&2; sleep 0.05"]);
+        process.program = Some(SystemProgram::spawn(&launch).unwrap());
+        process.running = true;
+        for _ in 0..20 {
+            process.poll_program();
+            if process.get_window_id() == "812" {
+                break;
+            }
+            thread::sleep(Duration::from_millis(10));
+        }
+        assert_eq!(process.get_window_id(), "812");
+    }
+
+    #[test]
+    fn startup_waits_for_a_live_child_window_identity() {
+        let launch = ProcessCommand::new("sh")
+            .args(["-c", "printf 'Window id = 73\\n' >&2; sleep 0.03"])
+            .keep_stdin_open();
+        let mut process = ImodProcess::new(None, None);
+        process.program = Some(SystemProgram::spawn(&launch).unwrap());
+        process.running = true;
+        process.wait_for_window_id().unwrap();
+        assert_eq!(process.get_window_id(), "73");
+    }
+
+    #[test]
+    fn startup_reports_a_missing_window_identity_after_child_exit() {
+        let launch = ProcessCommand::new("sh")
+            .args(["-c", "printf 'viewer failed\\n' >&2"])
+            .keep_stdin_open();
+        let mut process = ImodProcess::new(None, None);
+        process.program = Some(SystemProgram::spawn(&launch).unwrap());
+        process.running = true;
+        assert_eq!(
+            process.wait_for_window_id(),
+            Err(ImodProcessError::NoWindowId)
+        );
+        assert!(!process.is_running());
     }
 }

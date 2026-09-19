@@ -8,6 +8,9 @@
 
 use crate::imod::clip::clip::{ScanArg, fscanf};
 use crate::imod::libcfshr::b3dutil::ImodFile;
+use crate::imod::libcfshr::zoomdown::{
+    SLICE_MODE_BYTE, SLICE_MODE_FLOAT, SLICE_MODE_SHORT, SLICE_MODE_USHORT,
+};
 use std::cell::Cell;
 use std::fmt::Write as _;
 use std::io::{Read as _, Write as _};
@@ -68,135 +71,372 @@ pub enum PixelData<'a> {
     Float(&'a mut [f32]),
 }
 
-/// `CorrectColumn` (`CorrectDefects.cpp:429`) for the primary correction
-/// path.  Defect columns are filled by the source's left/right fractional
-/// interpolation, respecting callers' transposed row correction strides.
-/// The super-resolution pre-averaging and wider contextual filters are kept
-/// in the higher-level correction route; this routine is the reusable
-/// stride-aware column primitive.
+/// C++ macro `CAC_SUM_TWO`/`CAC_SUM_FOUR` plus their remainder macros, and the
+/// three column-fill macros `CORRECT_ONE_TWO_COL`, `CORRECT_THREE_FOUR_COL`
+/// and `CORRECT_FIVE_PLUS_COL` (`CorrectDefects.cpp:320-385`).  The C expands
+/// one copy per `SLICE_MODE_*`; these expand the same way, because the integer
+/// arms sum in `int` and round through `RandomIntFillFromFloat` while the
+/// float arm sums in `float` and assigns directly.
+macro_rules! correct_column_body {
+    ($data:expr, $elem:ty, $sum:ty, $fill:expr, $is_float:expr, $nx:expr, $ny:expr,
+     $x_stride:expr, $y_stride:expr, $ind_start:expr, $num:expr, $ystart:expr,
+     $yend:expr, $super_fac:expr, $num_avg_super:expr) => {{
+        let data = $data;
+        let is_float = $is_float;
+        let nx = $nx;
+        let ny = $ny;
+        let x_stride = $x_stride;
+        let y_stride = $y_stride;
+        let ind_start = $ind_start;
+        let num = $num;
+        let ystart = $ystart;
+        let yend = $yend;
+        let super_fac = $super_fac;
+        let num_avg_super = $num_avg_super;
+        // Remove super-resolution in pixels outside the columns perpendicular
+        // to the column (`CorrectDefects.cpp:487-510`).
+        if super_fac > 0 {
+            let mut nloop = 0usize;
+            let mut side_starts = [0i32; 2 * MAX_AVG_SUPER_RES];
+            for i in 0..num_avg_super {
+                let mut ind_left = ind_start - (i + 1) * super_fac;
+                if ind_left >= 0 {
+                    side_starts[nloop] = ind_left;
+                    nloop += 1;
+                }
+                ind_left = ind_start + num + i * super_fac;
+                if ind_left < nx {
+                    side_starts[nloop] = ind_left;
+                    nloop += 1;
+                }
+            }
+            for &ind_left in &side_starts[..nloop] {
+                if super_fac == 2 {
+                    for iy1 in ystart..=yend {
+                        let ind = (ind_left * x_stride + iy1 * y_stride) as usize;
+                        let xs = x_stride as usize;
+                        let isum = data[ind] as $sum + data[ind + xs] as $sum;
+                        let imean = isum / (2 as $sum);
+                        data[ind] = imean as $elem;
+                        data[ind + xs] = imean as $elem;
+                        if !is_float {
+                            if (isum as i64) % 2 != 0 {
+                                let pseudo = PSEUDO_SEEDS.with(|seeds| {
+                                    let mut state = seeds.get();
+                                    state.column = (197 * (state.column + 1)) & 0x000f_ffff;
+                                    seeds.set(state);
+                                    state.column
+                                });
+                                let ifx1 = ((pseudo >> 2) & 1) as usize;
+                                data[ind + ifx1 * xs] = data[ind + ifx1 * xs] + (1 as $elem);
+                            }
+                        }
+                    }
+                } else {
+                    for iy1 in ystart..=yend {
+                        let ind = (ind_left * x_stride + iy1 * y_stride) as usize;
+                        let xs = x_stride as usize;
+                        let isum = data[ind] as $sum
+                            + data[ind + xs] as $sum
+                            + data[ind + 2 * xs] as $sum
+                            + data[ind + 3 * xs] as $sum;
+                        let imean = isum / (4 as $sum);
+                        data[ind] = imean as $elem;
+                        data[ind + xs] = imean as $elem;
+                        data[ind + 2 * xs] = imean as $elem;
+                        data[ind + 3 * xs] = imean as $elem;
+                        if !is_float {
+                            let irem = (isum as i64) % 4;
+                            for _ in 0..irem {
+                                let pseudo = PSEUDO_SEEDS.with(|seeds| {
+                                    let mut state = seeds.get();
+                                    state.column = (197 * (state.column + 1)) & 0x000f_ffff;
+                                    seeds.set(state);
+                                    state.column
+                                });
+                                let ifx1 = ((pseudo >> 2) & 3) as usize;
+                                data[ind + ifx1 * xs] = data[ind + ifx1 * xs] + (1 as $elem);
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        for col in 0..num {
+            // Set up fractions on left and right columns
+            let f_right = ((col + 1) as f64 / (num + 1) as f64) as f32;
+            let f_left = 1.0f32 - f_right;
+
+            // Set up indexes for left and right columns; just use one side if
+            // on edge
+            let mut ind_left = ind_start - 1;
+            let mut ind_right = ind_start + num;
+            if ind_left < 0 {
+                ind_left = ind_right;
+            }
+            if ind_right >= nx {
+                ind_right = ind_left;
+            }
+            let five_plus_ok = ind_left > 14 && ind_right < nx - 15;
+            ind_left *= x_stride;
+            ind_right *= x_stride;
+            let mut ind = (ind_start + col) * x_stride;
+            ind += y_stride * ystart;
+            ind_left += y_stride * ystart;
+            ind_right += y_stride * ystart;
+            let mut full_start = ystart;
+            let mut full_end = yend;
+            if ystart < 7 {
+                full_start += 7 - ystart;
+            }
+            if yend >= ny - 7 {
+                full_end -= yend + 8 - ny;
+            }
+
+            if num >= 3 && yend - ystart >= 15 && five_plus_ok {
+                // CORRECT_FIVE_PLUS_COL
+                let mut i = ystart;
+                while i < full_start {
+                    let fill = (f_left
+                        * (data[ind_left as usize] as $sum
+                            + data[(ind_left + y_stride) as usize] as $sum
+                            + data[(ind_left - x_stride) as usize] as $sum
+                            + data[(ind_left + y_stride - x_stride) as usize] as $sum)
+                            as f32
+                        + f_right
+                            * (data[ind_right as usize] as $sum
+                                + data[(ind_right + y_stride) as usize] as $sum
+                                + data[(ind_right + x_stride) as usize] as $sum
+                                + data[(ind_right + y_stride + x_stride) as usize] as $sum)
+                                as f32)
+                        / 4.0f32;
+                    data[ind as usize] = $fill(fill);
+                    i += 1;
+                    ind += y_stride;
+                    ind_left += y_stride;
+                    ind_right += y_stride;
+                }
+                let mut i = full_start;
+                while i <= full_end {
+                    let pseudo = PSEUDO_SEEDS.with(|seeds| {
+                        let mut state = seeds.get();
+                        state.column = (197 * (state.column + 1)) & 0x000f_ffff;
+                        seeds.set(state);
+                        state.column
+                    });
+                    let iy1 = (pseudo >> 2) % 15;
+                    let ifx1 = (pseudo >> 6) & 15;
+                    let fill = if pseudo & 2048 != 0 {
+                        data[(ind_left + (iy1 - 7) * y_stride - ifx1 * x_stride) as usize] as f32
+                    } else {
+                        data[(ind_right + (iy1 - 7) * y_stride + ifx1 * x_stride) as usize] as f32
+                    };
+                    data[ind as usize] = $fill(fill);
+                    i += 1;
+                    ind += y_stride;
+                    ind_left += y_stride;
+                    ind_right += y_stride;
+                }
+                let mut i = full_end + 1;
+                while i <= yend {
+                    let fill = (f_left
+                        * (data[(ind_left - y_stride) as usize] as $sum
+                            + data[ind_left as usize] as $sum
+                            + data[(ind_left - x_stride - y_stride) as usize] as $sum
+                            + data[(ind_left - x_stride) as usize] as $sum)
+                            as f32
+                        + f_right
+                            * (data[(ind_right - y_stride) as usize] as $sum
+                                + data[ind_right as usize] as $sum
+                                + data[(ind_right + x_stride - y_stride) as usize] as $sum
+                                + data[(ind_right + x_stride) as usize] as $sum)
+                                as f32)
+                        / 4.0f32;
+                    data[ind as usize] = $fill(fill);
+                    i += 1;
+                    ind += y_stride;
+                    ind_left += y_stride;
+                    ind_right += y_stride;
+                }
+            } else if num >= 3 && yend - ystart >= 1 {
+                // CORRECT_THREE_FOUR_COL.  Note the leading row is a single
+                // `if`, not a loop: with `ystart == 0` the running indexes
+                // advance only once before the full loop, and the rows past
+                // `fullEnd + 1` are never written.
+                if ystart < full_start {
+                    let fill = (f_left
+                        * (data[ind_left as usize] as $sum
+                            + data[(ind_left + y_stride) as usize] as $sum)
+                            as f32
+                        + f_right
+                            * (data[ind_right as usize] as $sum
+                                + data[(ind_right + y_stride) as usize] as $sum)
+                                as f32)
+                        / 2.0f32;
+                    data[ind as usize] = $fill(fill);
+                    ind += y_stride;
+                    ind_left += y_stride;
+                    ind_right += y_stride;
+                }
+                let mut i = full_start;
+                while i <= full_end {
+                    let fill = (f_left
+                        * (data[(ind_left - y_stride) as usize] as $sum
+                            + data[ind_left as usize] as $sum
+                            + data[(ind_left + y_stride) as usize] as $sum)
+                            as f32
+                        + f_right
+                            * (data[(ind_right - y_stride) as usize] as $sum
+                                + data[ind_right as usize] as $sum
+                                + data[(ind_right + y_stride) as usize] as $sum)
+                                as f32)
+                        / 3.0f32;
+                    data[ind as usize] = $fill(fill);
+                    i += 1;
+                    ind += y_stride;
+                    ind_left += y_stride;
+                    ind_right += y_stride;
+                }
+                if yend > full_end {
+                    let fill = (f_left
+                        * (data[(ind_left - y_stride) as usize] as $sum
+                            + data[ind_left as usize] as $sum) as f32
+                        + f_right
+                            * (data[(ind_right - y_stride) as usize] as $sum
+                                + data[ind_right as usize] as $sum)
+                                as f32)
+                        / 2.0f32;
+                    data[ind as usize] = $fill(fill);
+                }
+            } else {
+                // CORRECT_ONE_TWO_COL
+                let mut i = ystart;
+                while i <= yend {
+                    let fill = f_left * data[ind_left as usize] as f32
+                        + f_right * data[ind_right as usize] as f32;
+                    data[ind as usize] = $fill(fill);
+                    i += 1;
+                    ind += y_stride;
+                    ind_left += y_stride;
+                    ind_right += y_stride;
+                }
+            }
+        }
+    }};
+}
+
+/// C++ `CorrectColumn` (`CorrectDefects.cpp:429`).
+///
+/// Corrects a column defect which can be multiple columns.  `x_stride` and
+/// `y_stride` are swapped by the row callers, which is how one routine corrects
+/// both columns and rows.
+#[allow(clippy::too_many_arguments)]
 pub fn correct_column(
     array: &mut PixelData<'_>,
     nx: i32,
     ny: i32,
     x_stride: i32,
     y_stride: i32,
-    mut index_start: i32,
-    mut count: i32,
-    y_start: i32,
-    y_end: i32,
-) -> Result<(), String> {
-    if nx <= 0
-        || ny <= 0
-        || x_stride <= 0
-        || y_stride <= 0
-        || y_start < 0
-        || y_end >= ny
-        || y_start > y_end
-    {
-        return Err("invalid column correction geometry".into());
+    mut ind_start: i32,
+    mut num: i32,
+    ystart: i32,
+    yend: i32,
+    super_fac: i32,
+    num_avg_super: i32,
+) {
+    const MAX_AVG_SUPER_RES: usize = 4;
+
+    // Adjust indStart or num if on edge of image; return if nothing left
+    if ind_start < 0 {
+        num += ind_start;
+        ind_start = 0;
     }
-    if index_start < 0 {
-        count += index_start;
-        index_start = 0;
+    if ind_start + num > nx {
+        num = nx - ind_start;
     }
-    if index_start + count > nx {
-        count = nx - index_start;
+    if num <= 0 {
+        return;
     }
-    if count <= 0 {
-        return Ok(());
-    }
-    fn interpolate(
-        data: &mut [f32],
-        nx: i32,
-        x_stride: i32,
-        y_stride: i32,
-        start: i32,
-        count: i32,
-        ys: i32,
-        ye: i32,
-    ) {
-        for column in 0..count {
-            let mut left = start - 1;
-            let mut right = start + count;
-            if left < 0 {
-                left = right;
-            }
-            if right >= nx {
-                right = left;
-            }
-            let left_base = left * x_stride;
-            let right_base = right * x_stride;
-            let destination_base = (start + column) * x_stride;
-            let right_fraction = (column + 1) as f32 / (count + 1) as f32;
-            for y in ys..=ye {
-                let destination = (destination_base + y * y_stride) as usize;
-                data[destination] = (1. - right_fraction)
-                    * data[(left_base + y * y_stride) as usize]
-                    + right_fraction * data[(right_base + y * y_stride) as usize];
-            }
-        }
-    }
+
     match array {
-        PixelData::Float(data) => interpolate(
-            data,
-            nx,
-            x_stride,
-            y_stride,
-            index_start,
-            count,
-            y_start,
-            y_end,
-        ),
         PixelData::Byte(data) => {
-            let mut work: Vec<f32> = data.iter().map(|&value| value as f32).collect();
-            interpolate(
-                &mut work,
+            correct_column_body!(
+                data,
+                u8,
+                i32,
+                |fill| random_int_fill_from_float(fill) as u8,
+                false,
                 nx,
+                ny,
                 x_stride,
                 y_stride,
-                index_start,
-                count,
-                y_start,
-                y_end,
-            );
-            for (target, value) in data.iter_mut().zip(work) {
-                *target = value.round().clamp(0., 255.) as u8;
-            }
+                ind_start,
+                num,
+                ystart,
+                yend,
+                super_fac,
+                num_avg_super
+            )
         }
         PixelData::Short(data) => {
-            let mut work: Vec<f32> = data.iter().map(|&value| value as f32).collect();
-            interpolate(
-                &mut work,
+            correct_column_body!(
+                data,
+                i16,
+                i32,
+                |fill| random_int_fill_from_float(fill) as i16,
+                false,
                 nx,
+                ny,
                 x_stride,
                 y_stride,
-                index_start,
-                count,
-                y_start,
-                y_end,
-            );
-            for (target, value) in data.iter_mut().zip(work) {
-                *target = value.round().clamp(i16::MIN as f32, i16::MAX as f32) as i16;
-            }
+                ind_start,
+                num,
+                ystart,
+                yend,
+                super_fac,
+                num_avg_super
+            )
         }
         PixelData::UShort(data) => {
-            let mut work: Vec<f32> = data.iter().map(|&value| value as f32).collect();
-            interpolate(
-                &mut work,
+            correct_column_body!(
+                data,
+                u16,
+                i32,
+                |fill| random_int_fill_from_float(fill) as u16,
+                false,
                 nx,
+                ny,
                 x_stride,
                 y_stride,
-                index_start,
-                count,
-                y_start,
-                y_end,
-            );
-            for (target, value) in data.iter_mut().zip(work) {
-                *target = value.round().clamp(0., u16::MAX as f32) as u16;
-            }
+                ind_start,
+                num,
+                ystart,
+                yend,
+                super_fac,
+                num_avg_super
+            )
+        }
+        PixelData::Float(data) => {
+            correct_column_body!(
+                data,
+                f32,
+                f32,
+                |fill: f32| fill,
+                true,
+                nx,
+                ny,
+                x_stride,
+                y_stride,
+                ind_start,
+                num,
+                ystart,
+                yend,
+                super_fac,
+                num_avg_super
+            )
         }
     }
-    Ok(())
 }
 
 impl CameraDefects {
@@ -239,126 +479,15 @@ impl Default for CameraDefects {
     }
 }
 
-/// Typed, allocation-owned entry point for frame alignment.  Coordinates are
-/// converted from camera pixels through `binning` and the requested camera
-/// region before correction, so callers never reinterpret image bytes.
-pub fn cor_def_correct_defects_f32(
-    defects: &CameraDefects,
-    image: &mut [f32],
-    nx: usize,
-    ny: usize,
-    binning: usize,
-    top: usize,
-    left: usize,
-) -> Result<(), String> {
-    if nx.checked_mul(ny) != Some(image.len()) || binning == 0 {
-        return Err("invalid typed defect-correction geometry".into());
-    }
-    let mut bad = vec![false; image.len()];
-    let mut mark = |x: isize, y: isize| {
-        if x >= 0 && y >= 0 && (x as usize) < nx && (y as usize) < ny {
-            bad[x as usize + y as usize * nx] = true;
-        }
-    };
-    for (&start, &width) in defects
-        .bad_column_start
-        .iter()
-        .zip(&defects.bad_column_width)
-    {
-        let first = start as usize / binning;
-        let last = (start as usize + width.max(0) as usize).saturating_sub(1) / binning;
-        for x in first..=last {
-            for y in top..top + ny {
-                mark(x as isize - left as isize, y as isize - top as isize);
-            }
-        }
-    }
-    for ((&start, &width), (&first_y, &last_y)) in defects
-        .partial_bad_col
-        .iter()
-        .zip(&defects.partial_bad_width)
-        .zip(
-            defects
-                .partial_bad_start_y
-                .iter()
-                .zip(&defects.partial_bad_end_y),
-        )
-    {
-        let first = start as usize / binning;
-        let last = (start as usize + width.max(0) as usize).saturating_sub(1) / binning;
-        for x in first..=last {
-            for y in first_y as usize / binning..=last_y as usize / binning {
-                mark(x as isize - left as isize, y as isize - top as isize);
-            }
-        }
-    }
-    for (&start, &height) in defects.bad_row_start.iter().zip(&defects.bad_row_height) {
-        let first = start as usize / binning;
-        let last = (start as usize + height.max(0) as usize).saturating_sub(1) / binning;
-        for y in first..=last {
-            for x in left..left + nx {
-                mark(x as isize - left as isize, y as isize - top as isize);
-            }
-        }
-    }
-    for ((&start, &height), (&first_x, &last_x)) in defects
-        .partial_bad_row
-        .iter()
-        .zip(&defects.partial_bad_height)
-        .zip(
-            defects
-                .partial_bad_start_x
-                .iter()
-                .zip(&defects.partial_bad_end_x),
-        )
-    {
-        let first = start as usize / binning;
-        let last = (start as usize + height.max(0) as usize).saturating_sub(1) / binning;
-        for y in first..=last {
-            for x in first_x as usize / binning..=last_x as usize / binning {
-                mark(x as isize - left as isize, y as isize - top as isize);
-            }
-        }
-    }
-    for (&x, &y) in defects.bad_pixel_x.iter().zip(&defects.bad_pixel_y) {
-        mark(
-            x as isize / binning as isize - left as isize,
-            y as isize / binning as isize - top as isize,
-        );
-    }
-    let original = image.to_vec();
-    for y in 0..ny {
-        for x in 0..nx {
-            let at = x + y * nx;
-            if !bad[at] {
-                continue;
-            }
-            let mut sum = 0.;
-            let mut count = 0.;
-            for (dx, dy) in [(-1isize, 0isize), (1, 0), (0, -1), (0, 1)] {
-                let xx = x as isize + dx;
-                let yy = y as isize + dy;
-                if xx >= 0
-                    && yy >= 0
-                    && (xx as usize) < nx
-                    && (yy as usize) < ny
-                    && !bad[xx as usize + yy as usize * nx]
-                {
-                    sum += original[xx as usize + yy as usize * nx];
-                    count += 1.;
-                }
-            }
-            if count > 0. {
-                image[at] = sum / count;
-            }
-        }
-    }
-    Ok(())
-}
-
 /// C++ `CorDefCorrectDefects` (`CorrectDefects.cpp:78`).
+///
+/// Corrects defects in the image in `array`, whose slice mode is `data_type`.
+/// The image is a sub-area of the camera field: `binning` is the binning it was
+/// acquired at, and `top`/`left`/`bottom`/`right` are its coordinates in the
+/// binned camera field.
+#[allow(clippy::too_many_arguments)]
 pub fn cor_def_correct_defects(
-    defects: &crate::imod::clip::clip::CameraDefects,
+    param: &crate::imod::clip::clip::CameraDefects,
     array: &mut [u8],
     data_type: i32,
     binning: i32,
@@ -367,98 +496,246 @@ pub fn cor_def_correct_defects(
     bottom: i32,
     right: i32,
 ) {
-    // The public byte API owns conversion at its boundary.  All correction
-    // thereafter uses the typed indexed kernel; no caller can reach a typed
-    // pointer reinterpretation.
-    let width = match usize::try_from(right - left) {
-        Ok(value) if value > 0 => value,
-        _ => return,
-    };
-    let height = match usize::try_from(bottom - top) {
-        Ok(value) if value > 0 => value,
-        _ => return,
-    };
-    let pixels = match width.checked_mul(height) {
+    let taper = 5;
+    let mut super_fac = 0;
+    let size_x = right - left;
+    let size_y = bottom - top;
+    let mut sum_x = (size_x + 9) / 10;
+    let mut sum_y = (size_y + 9) / 10;
+    if sum_x > 50 {
+        sum_x = 50;
+    }
+    if sum_y > 50 {
+        sum_y = 50;
+    }
+
+    if param.falcon_type != 0 && param.was_scaled == 1 {
+        super_fac = 2;
+    }
+    if param.falcon_type != 0 && param.was_scaled == 2 {
+        super_fac = 4;
+    }
+
+    if size_x <= 0 || size_y <= 0 {
+        return;
+    }
+    let pixels = match (size_x as usize).checked_mul(size_y as usize) {
         Some(value) => value,
         None => return,
     };
-    let bytes = match data_type {
-        0 => 1,
-        1 | 6 => 2,
-        2 => 4,
+
+    /* The C reaches the image through four type-punned pointers onto the one
+    `void *array`.  `PixelData` is that choice made once, at the boundary: the
+    byte slice is reinterpreted in place — not copied through an `f32` buffer,
+    which would round every pixel the correction never touches.  The sample
+    mean is taken from the bytes first, because that is the order the source
+    uses and because it is the last read before the view is created. */
+    let mut mean = 0f32;
+    let mut sd = 0f32;
+    if !param.pix_use_mean.is_empty() {
+        cor_def_sample_mean_sd_1(array, data_type, size_x, size_y, &mut mean, &mut sd);
+    }
+    let base = array.as_mut_ptr();
+    let length = array.len();
+    let mut data = match data_type {
+        SLICE_MODE_BYTE => {
+            if length < pixels {
+                return;
+            }
+            PixelData::Byte(unsafe { core::slice::from_raw_parts_mut(base, pixels) })
+        }
+        SLICE_MODE_SHORT => {
+            if length < pixels * 2 || base.align_offset(align_of::<i16>()) != 0 {
+                return;
+            }
+            PixelData::Short(unsafe { core::slice::from_raw_parts_mut(base.cast::<i16>(), pixels) })
+        }
+        SLICE_MODE_USHORT => {
+            if length < pixels * 2 || base.align_offset(align_of::<u16>()) != 0 {
+                return;
+            }
+            PixelData::UShort(unsafe {
+                core::slice::from_raw_parts_mut(base.cast::<u16>(), pixels)
+            })
+        }
+        SLICE_MODE_FLOAT => {
+            if length < pixels * 4 || base.align_offset(align_of::<f32>()) != 0 {
+                return;
+            }
+            PixelData::Float(unsafe { core::slice::from_raw_parts_mut(base.cast::<f32>(), pixels) })
+        }
         _ => return,
     };
-    if array.len() < pixels * bytes {
-        return;
+
+    // If there are any pixels that should use mean, get the mean and correct
+    // them first
+    if !param.pix_use_mean.is_empty() {
+        correct_pixels_3_ways(
+            param, &mut data, size_x, size_y, binning, top, left, 1, mean,
+        );
     }
-    let mut typed: Vec<f32> = match data_type {
-        0 => array[..pixels].iter().map(|&value| value as f32).collect(),
-        1 => array[..pixels * 2]
-            .chunks_exact(2)
-            .map(|value| i16::from_ne_bytes([value[0], value[1]]) as f32)
-            .collect(),
-        6 => array[..pixels * 2]
-            .chunks_exact(2)
-            .map(|value| u16::from_ne_bytes([value[0], value[1]]) as f32)
-            .collect(),
-        _ => array[..pixels * 4]
-            .chunks_exact(4)
-            .map(|value| f32::from_ne_bytes([value[0], value[1], value[2], value[3]]))
-            .collect(),
-    };
-    if cor_def_correct_defects_f32(
-        defects,
-        &mut typed,
-        width,
-        height,
-        binning.max(1) as usize,
-        top.max(0) as usize,
-        left.max(0) as usize,
-    )
-    .is_err()
-    {
-        return;
+
+    // Correct on the top
+    // Number of bad rows  = index of first good one
+    let mut num_bad = (param.usable_top - 1) / binning + 1 - top;
+    if param.usable_top > 0 && num_bad > 0 {
+        // pass length of row, starting index at good row, step along row,
+        // step between rows
+        correct_edge(
+            &mut data,
+            num_bad,
+            taper,
+            size_x,
+            sum_x,
+            num_bad * size_x,
+            1,
+            -size_x,
+        );
     }
-    match data_type {
-        0 => {
-            for (destination, value) in array[..pixels].iter_mut().zip(typed) {
-                *destination = value.round().clamp(0., 255.) as u8;
-            }
-            // Preserve the source's byte-specific `CorrectPixel` edge path;
-            // the float kernel above cannot represent its integer edge sum.
-            correct_pixels_3_ways(
-                defects,
-                &mut PixelData::Byte(&mut array[..pixels]),
-                width as i32,
-                height as i32,
-                binning.max(1),
-                top,
-                left,
-                0,
-                0.,
+
+    // first bad row index on the bottom: correct if it is in image
+    let mut first_bad = (param.usable_bottom + 1) / binning - top;
+    num_bad = size_y - first_bad;
+    if param.usable_bottom > 0 && num_bad > 0 {
+        correct_edge(
+            &mut data,
+            num_bad,
+            taper,
+            size_x,
+            sum_x,
+            (first_bad - 1) * size_x,
+            1,
+            size_x,
+        );
+    }
+
+    // Correct on the left
+    // Number of bad columns  = index of first good one
+    num_bad = (param.usable_left - 1) / binning + 1 - left;
+    if param.usable_left > 0 && num_bad > 0 {
+        correct_edge(
+            &mut data, num_bad, taper, size_y, sum_y, num_bad, size_x, -1,
+        );
+    }
+
+    // first bad column index on the right: correct if it is in image
+    first_bad = (param.usable_right + 1) / binning - left;
+    num_bad = size_x - first_bad;
+    if param.usable_right > 0 && num_bad > 0 {
+        correct_edge(
+            &mut data,
+            num_bad,
+            taper,
+            size_y,
+            sum_y,
+            first_bad - 1,
+            size_x,
+            1,
+        );
+    }
+
+    // Correct column defects
+    for i in 0..param.bad_column_start.len() {
+        // convert starting and ending columns to columns in binned image
+        // to get starting column and width
+        let bad_start = param.bad_column_start[i] as i32 / binning;
+        let bad_end =
+            (param.bad_column_start[i] as i32 + param.bad_column_width[i] as i32 - 1) / binning;
+
+        correct_column(
+            &mut data,
+            size_x,
+            size_y,
+            1,
+            size_x,
+            bad_start - left,
+            bad_end + 1 - bad_start,
+            0,
+            size_y - 1,
+            super_fac,
+            param.num_avg_super_res,
+        );
+    }
+
+    // Correct partial bad columns
+    for i in 0..param.partial_bad_col.len() {
+        // convert column to column and start and end in binned image
+        let bad_start = param.partial_bad_col[i] as i32 / binning;
+        let bad_end =
+            (param.partial_bad_col[i] as i32 + param.partial_bad_width[i] as i32 - 1) / binning;
+        let mut y_start = param.partial_bad_start_y[i] as i32 / binning - top;
+        let mut y_end = param.partial_bad_end_y[i] as i32 / binning - top;
+        if y_start < size_y && y_end >= 0 && y_start <= y_end {
+            y_start = 0.max(y_start);
+            y_end = (size_y - 1).min(y_end);
+            correct_column(
+                &mut data,
+                size_x,
+                size_y,
+                1,
+                size_x,
+                bad_start - left,
+                bad_end + 1 - bad_start,
+                y_start,
+                y_end,
+                super_fac,
+                param.num_avg_super_res,
             );
         }
-        1 => {
-            for (destination, value) in array[..pixels * 2].chunks_exact_mut(2).zip(typed) {
-                destination.copy_from_slice(
-                    &(value.round().clamp(i16::MIN as f32, i16::MAX as f32) as i16).to_ne_bytes(),
-                );
-            }
-        }
-        6 => {
-            for (destination, value) in array[..pixels * 2].chunks_exact_mut(2).zip(typed) {
-                destination.copy_from_slice(
-                    &(value.round().clamp(0., u16::MAX as f32) as u16).to_ne_bytes(),
-                );
-            }
-        }
-        _ => {
-            for (destination, value) in array[..pixels * 4].chunks_exact_mut(4).zip(typed) {
-                destination.copy_from_slice(&value.to_ne_bytes());
-            }
+    }
+
+    // Correct row defects
+    for i in 0..param.bad_row_start.len() {
+        // convert starting and ending columns to columns in binned image
+        // to get starting column and width
+        let bad_start = param.bad_row_start[i] as i32 / binning;
+        let bad_end =
+            (param.bad_row_start[i] as i32 + param.bad_row_height[i] as i32 - 1) / binning;
+
+        correct_column(
+            &mut data,
+            size_y,
+            size_x,
+            size_x,
+            1,
+            bad_start - top,
+            bad_end + 1 - bad_start,
+            0,
+            size_x - 1,
+            super_fac,
+            param.num_avg_super_res,
+        );
+    }
+
+    // Correct partial bad rows
+    for i in 0..param.partial_bad_row.len() {
+        // convert column to column and start and end in binned image
+        let bad_start = param.partial_bad_row[i] as i32 / binning;
+        let bad_end =
+            (param.partial_bad_row[i] as i32 + param.partial_bad_height[i] as i32 - 1) / binning;
+        let mut y_start = param.partial_bad_start_x[i] as i32 / binning - left;
+        let mut y_end = param.partial_bad_end_x[i] as i32 / binning - left;
+        if y_start < size_x && y_end >= 0 && y_start <= y_end {
+            y_start = 0.max(y_start);
+            y_end = (size_x - 1).min(y_end);
+            correct_column(
+                &mut data,
+                size_y,
+                size_x,
+                size_x,
+                1,
+                bad_start - top,
+                bad_end + 1 - bad_start,
+                y_start,
+                y_end,
+                super_fac,
+                param.num_avg_super_res,
+            );
         }
     }
-    return;
+
+    // Correct bad pixels with neighboring values
+    correct_pixels_3_ways(param, &mut data, size_x, size_y, binning, top, left, 0, 0.);
 }
 /// C++ `CorrectEdge` (`CorrectDefects.cpp:190`).
 fn correct_edge(

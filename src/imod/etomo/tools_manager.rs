@@ -33,6 +33,7 @@ pub const STATUS_BAR_SIZE: i32 = 65;
 /// Its source owns parameter-file persistence and has not yet been translated.
 pub struct ToolsMetaData {
     root_name: Mutex<Option<String>>,
+    tool_type: ToolType,
 }
 
 impl ToolsMetaData {
@@ -43,7 +44,11 @@ impl ToolsMetaData {
 
     /// Java `getName`.
     pub fn get_name(&self) -> Option<String> {
-        self.root_name.lock().unwrap().clone()
+        self.root_name
+            .lock()
+            .unwrap()
+            .clone()
+            .or_else(|| Some(self.tool_type.label().to_owned()))
     }
 }
 
@@ -78,6 +83,7 @@ impl ToolsManager {
             align_frames_tilt_angle_file: Mutex::new(false),
             meta_data: ToolsMetaData {
                 root_name: Mutex::new(None),
+                tool_type,
             },
             tool_type,
             main_panel: None,

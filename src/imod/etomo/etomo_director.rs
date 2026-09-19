@@ -8,15 +8,29 @@
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 
+use super::application_manager::ApplicationManager;
 use super::arguments::Arguments;
 use super::base_manager::BaseManager;
 use super::batch_run_tomo_manager::BatchRunTomoManager;
+use super::directive_editor_manager::DirectiveEditorManager;
+use super::front_page_manager::FrontPageManager;
 use super::join_manager::JoinManager;
 use super::manager_key::ManagerKey;
 use super::parallel_manager::ParallelManager;
 use super::serial_sections_manager::SerialSectionsManager;
+use super::storage::etomo_file_filter::EtomoFileFilter;
+use super::storage::join_file_filter::JoinFileFilter;
+use super::storage::parameter_store::ParameterStore;
+use super::storage::peet_file_filter::PeetFileFilter;
+use super::storage::serial_sections_file_filter::SerialSectionsFileFilter;
+use super::storage::storable::Storable;
+use super::tools_manager::ToolsManager;
 use super::r#type::axis_id::AxisID;
+use super::r#type::data_file_type::DataFileType;
 use super::r#type::dialog_type::DialogType;
+use super::r#type::directive_file_type::DirectiveFileType;
+use super::ui::swing::etomo_menu::ToolType;
+use super::ui::swing::settings_dialog::{SettingsDialog, UserConfigurationValues};
 use super::util::unique_hashed_array::UniqueHashedArray;
 use super::util::unique_key::UniqueKey;
 
@@ -63,6 +77,11 @@ pub struct EtomoDirector {
     user_preference_loaded: bool,
     user_font_size: i32,
     user_configuration_path: Option<PathBuf>,
+    parameter_store: Option<ParameterStore>,
+    user_configuration: UserConfigurationValues,
+    settings_dialog: Option<SettingsDialog>,
+    native_look_and_feel: bool,
+    ui_font_family: String,
     maintain_etomo: bool,
     pub test_failed: bool,
     pub java_memory_limit: i64,
@@ -187,12 +206,28 @@ impl EtomoDirector {
         if !path.exists() {
             std::fs::File::create(&path).map_err(|error| error.to_string())?;
         }
+        let mut parameter_store = ParameterStore::get_instance(Some(path.clone()))
+            .map_err(|error| error.to_string())?
+            .ok_or_else(|| "unable to create user parameter store".to_owned())?;
+        parameter_store.load(&mut self.user_configuration);
         self.user_configuration_path = Some(path);
+        self.parameter_store = Some(parameter_store);
         self.user_preference_loaded = true;
         Ok(self.user_configuration_path.as_deref().unwrap())
     }
     pub fn get_user_configuration_path(&self) -> Option<&Path> {
         self.user_configuration_path.as_deref()
+    }
+    /// Java `getUserConfiguration()`, represented by the fully-owned native
+    /// values rather than a JVM singleton.
+    pub fn get_user_configuration(&self) -> &UserConfigurationValues {
+        &self.user_configuration
+    }
+    /// Java `getParameterStore()`: the user-preference store is established
+    /// during setup/load and remains the single persistence owner used by the
+    /// settings dialog.
+    pub fn get_parameter_store(&self) -> Option<&ParameterStore> {
+        self.parameter_store.as_ref()
     }
     /// Java `setMaintainEtomo(UITester)` at the director state boundary.
     pub fn set_maintain_etomo(&mut self, maintain: bool) {
@@ -427,6 +462,181 @@ impl EtomoDirector {
     pub fn get_original_user_dir(&self) -> Option<&str> {
         self.original_user_dir.as_deref()
     }
+    /// Java `getPropertyUserDir`: a current manager owns its project
+    /// directory; otherwise the director keeps the process's original user
+    /// directory captured during setup.
+    pub fn get_property_user_dir(&self) -> Option<String> {
+        self.get_current_manager()
+            .and_then(BaseManager::get_property_user_dir)
+            .or_else(|| self.original_user_dir.clone())
+    }
+    /// Java `setTestFailed`.  The source rejects this outside UI-test mode so
+    /// a normal shutdown cannot accidentally suppress an error dialog.
+    pub fn set_test_failed(&mut self, input: bool) -> Result<(), String> {
+        if !self.test {
+            return Err(format!("test={}", self.test));
+        }
+        self.test_failed = input;
+        Ok(())
+    }
+    /// Java `isTestFailed`.
+    pub const fn is_test_failed(&self) -> bool {
+        self.test_failed
+    }
+    /// Java private `printUsageMessage`, returned for the command/UI frontend
+    /// to emit using its own output sink.
+    pub fn print_usage_message(&self) -> String {
+        "Usage: etomo [options] [data files]\n".to_owned()
+    }
+    /// Java `pack(BaseManager)`.  Geometry is presentation-owned, but the
+    /// director performs the exact UIHarness dispatch rather than recording a
+    /// request for a future frontend to interpret.
+    #[cfg(feature = "gui")]
+    pub fn pack(&self, manager: &dyn BaseManager) {
+        let manager_name = manager.get_name();
+        super::ui::swing::ui_harness::INSTANCE.with(|ui_harness| {
+            ui_harness
+                .borrow_mut()
+                .pack_manager(manager_name.as_deref());
+        });
+    }
+    /// Java private `setUserPreferences`.  The native frontend consumes the
+    /// retained appearance values; tooltip timing and advanced-dialog state
+    /// are already represented in `UserConfigurationValues`.
+    pub fn set_user_preferences(&mut self) {
+        if self.headless {
+            return;
+        }
+        let config = self.user_configuration.clone();
+        self.set_ui_font(&config.font_family, config.font_size);
+        self.set_look_and_feel(config.native_laf);
+        self.is_advanced = config.advanced_dialogs;
+    }
+
+    /// Java private `setLookAndFeel`.  Selecting a Slint style is owned by
+    /// the GUI bootstrap, while this director preserves the source setting
+    /// and makes it observable before that bootstrap runs.
+    pub fn set_look_and_feel(&mut self, native_look_and_feel: bool) {
+        self.native_look_and_feel = native_look_and_feel;
+    }
+
+    /// Java private `setUIFont`.  Font discovery/application is a frontend
+    /// concern, but the selected family and size are director-owned user
+    /// preferences and must survive opening/saving Settings.
+    pub fn set_ui_font(&mut self, font_family: &str, font_size: i32) {
+        self.ui_font_family = font_family.to_owned();
+        self.user_font_size = font_size;
+    }
+
+    /// Java `getSettingsParameters`.  Returns whether the selected appearance
+    /// needs a restart, which is the source's informational-dialog condition.
+    pub fn get_settings_parameters(&mut self) -> Result<bool, String> {
+        let dialog = self
+            .settings_dialog
+            .as_ref()
+            .ok_or_else(|| "settingsDialog is null".to_owned())?;
+        let appearance_changed = dialog.is_appearance_setting_changed(&self.user_configuration);
+        dialog.get_parameters(&mut self.user_configuration)?;
+        self.set_user_preferences();
+        Ok(appearance_changed)
+    }
+
+    /// Java `openSettingsDialog`: one non-modal dialog is retained and reused
+    /// for the active manager, seeded from the currently loaded preferences.
+    pub fn open_settings_dialog(&mut self) -> Result<(), String> {
+        if self.settings_dialog.is_none() {
+            let manager = self
+                .get_current_manager()
+                .ok_or_else(|| "current manager is required for settings".to_owned())?;
+            let property_user_dir = self.get_property_user_dir().unwrap_or_default();
+            let mut dialog = SettingsDialog::get_instance(
+                manager,
+                property_user_dir,
+                &["Dialog".to_owned()],
+                false,
+            );
+            dialog.set_parameters(&self.user_configuration);
+            self.settings_dialog = Some(dialog);
+        }
+        self.settings_dialog.as_mut().unwrap().visible = true;
+        Ok(())
+    }
+
+    /// Java `saveSettingsDialog`: persist the current configuration through
+    /// the user `.etomo` parameter store.
+    pub fn save_settings_dialog(&mut self) -> Result<(), String> {
+        let parameter_store = self
+            .parameter_store
+            .as_mut()
+            .ok_or_else(|| "user parameter store has not been initialized".to_owned())?;
+        parameter_store
+            .save(Some(&self.user_configuration))
+            .map_err(|error| error.to_string())
+    }
+
+    /// Java `closeSettingsDialog` disposes its presentation.  The native
+    /// dialog state is retained so a later open preserves its source-owned
+    /// singleton lifecycle while becoming visible again.
+    pub fn close_settings_dialog(&mut self) {
+        if let Some(dialog) = &mut self.settings_dialog {
+            dialog.visible = false;
+            dialog.closed = true;
+        }
+    }
+    /// Java `renameCurrentManager`.  The native UI observes the resulting
+    /// `ManagerKey`; this director-owned portion rekeys the ordered manager
+    /// list and updates the shared current-key holder atomically with respect
+    /// to subsequent manager lookups.
+    pub fn rename_current_manager(
+        &mut self,
+        manager_name: impl Into<String>,
+    ) -> Result<(), String> {
+        let manager_key = self
+            .current_manager_key
+            .as_ref()
+            .ok_or_else(|| "currentManagerKey is null".to_owned())?
+            .clone();
+        let old_key = manager_key
+            .lock()
+            .unwrap()
+            .get_key()
+            .cloned()
+            .ok_or_else(|| "currentManagerKey.key is null".to_owned())?;
+        let new_key = self
+            .manager_list
+            .as_mut()
+            .ok_or_else(|| "managerList is null".to_owned())?
+            .rekey_with_name(&old_key, manager_name.into())
+            .ok_or_else(|| format!("manager key {old_key} is not open"))?;
+        manager_key.lock().unwrap().set_key(Some(new_key));
+        Ok(())
+    }
+
+    /// Java private `enableOpenManagerMenuItem`.  New-project menu entries
+    /// are disabled while their unique untitled manager exists and restored
+    /// when that manager is closed or renamed.
+    pub fn enable_open_manager_menu_item(&self, key: &UniqueKey) {
+        #[cfg(feature = "gui")]
+        super::ui::swing::ui_harness::INSTANCE.with(|ui_harness| {
+            let mut ui_harness = ui_harness.borrow_mut();
+            match key.get_name() {
+                "Setup Tomogram" => ui_harness.set_enabled_new_tomogram_menu_item(true),
+                "New Join" => ui_harness.set_enabled_new_join_menu_item(true),
+                "Parallel Processing" => {
+                    ui_harness.set_enabled_new_generic_parallel_menu_item(true)
+                }
+                "Nonlinear Anisotropic Diffusion" => {
+                    ui_harness.set_enabled_new_anisotropic_diffusion_menu_item(true)
+                }
+                "Batch Run Tomo" => ui_harness.set_enabled_new_batch_run_tomo_menu_item(true),
+                "PEET" => ui_harness.set_enabled_new_peet_menu_item(true),
+                "Serial Sections" => ui_harness.set_enabled_new_serial_sections_menu_item(true),
+                _ => {}
+            }
+        });
+        #[cfg(not(feature = "gui"))]
+        let _ = key;
+    }
 
     /// Java `getManager(UniqueKey)` (`EtomoDirector.java:650`).
     pub(crate) fn get_manager(&self, key: Option<&UniqueKey>) -> Option<&'static dyn BaseManager> {
@@ -558,6 +768,103 @@ impl EtomoDirector {
             SerialSectionsManager::get_instance_with_param_file_name(param_file_name),
             make_current,
         )
+    }
+    /// Java `openFrontPage`.  This is the director's ordinary default-window
+    /// path: the concrete FrontPageManager is registered exactly like the
+    /// other dataset managers and can be made current immediately.
+    pub fn open_front_page(
+        &mut self,
+        make_current: bool,
+        axis_id: AxisID,
+    ) -> Result<Arc<Mutex<ManagerKey>>, String> {
+        self.close_default_window(Some(axis_id));
+        self.set_manager(FrontPageManager::new(), make_current)
+    }
+    pub fn open_tomogram(
+        &mut self,
+        param_file_name: Option<&str>,
+        make_current: bool,
+        axis_id: AxisID,
+    ) -> Result<Arc<Mutex<ManagerKey>>, String> {
+        self.close_default_window(Some(axis_id));
+        self.set_manager(
+            ApplicationManager::new(param_file_name, axis_id),
+            make_current,
+        )
+    }
+    /// Java `openManager(File, boolean, AxisID, UIComponent)`.  Dispatch only
+    /// reaches concrete Rust managers; recognised formats whose source manager
+    /// is still absent fail explicitly instead of being opened as another type.
+    pub fn open_manager(
+        &mut self,
+        data_file: &Path,
+        make_current: bool,
+        axis_id: AxisID,
+    ) -> Result<Arc<Mutex<ManagerKey>>, String> {
+        self.close_default_window(Some(axis_id));
+        if JoinFileFilter::new().accept(data_file) {
+            return self.open_join(data_file.to_str(), make_current, axis_id);
+        }
+        if data_file
+            .to_str()
+            .is_some_and(|name| name.ends_with(DataFileType::Parallel.extension().unwrap()))
+        {
+            return self.open_parallel(data_file.to_str(), make_current, axis_id);
+        }
+        if data_file
+            .to_str()
+            .is_some_and(|name| name.ends_with(DataFileType::BatchRunTomo.extension().unwrap()))
+        {
+            return self.open_batch_run_tomo(data_file.to_str(), make_current, axis_id);
+        }
+        if SerialSectionsFileFilter::new().accept(data_file) {
+            return self.open_serial_sections(data_file.to_str(), make_current, axis_id);
+        }
+        if EtomoFileFilter.accept(data_file) {
+            return self.open_tomogram(data_file.to_str(), make_current, axis_id);
+        }
+        if PeetFileFilter::new().accept(data_file) {
+            return Err("PEET manager is not translated yet".to_owned());
+        }
+        Err(format!("unknown dataFile {}", data_file.display()))
+    }
+    /// Java `openTool`.  The director owns replacement of its default window,
+    /// construction/initialization of the typed tools manager, and manager-list
+    /// registration; the Slint frontend observes that registered manager to add
+    /// its concrete window.
+    pub fn open_tool(
+        &mut self,
+        make_current: bool,
+        tool_type: ToolType,
+    ) -> Result<Arc<Mutex<ManagerKey>>, String> {
+        self.close_default_window(Some(AxisID::First));
+        let manager = ToolsManager::new(tool_type);
+        manager.initialize();
+        self.set_manager(manager, make_current)
+    }
+    /// Java `openToolInSeparateFrame`.  Unlike `openTool`, this manager is not
+    /// placed in the director's document-manager list; it is returned to the
+    /// UI owner that creates the independent frame.
+    pub fn open_tool_in_separate_frame(&self, tool_type: ToolType) -> &'static ToolsManager {
+        let manager = ToolsManager::new(tool_type);
+        manager.initialize();
+        manager
+    }
+    /// Java `openDirectiveEditor`.  Directive editing uses its own frame and
+    /// intentionally does not become a dataset manager-list entry; retain the
+    /// source manager construction, initialization, data-source link and
+    /// timestamp/error-message inputs for the native frontend to present.
+    pub fn open_directive_editor(
+        &self,
+        directive_file_type: Option<DirectiveFileType>,
+        data_source: Option<&'static dyn BaseManager>,
+        timestamp: Option<&str>,
+        errmsg: Option<&str>,
+    ) -> &'static DirectiveEditorManager {
+        let manager =
+            DirectiveEditorManager::new(directive_file_type, data_source, timestamp, errmsg);
+        manager.initialize();
+        manager
     }
 
     /// Java `setCurrentManager(ManagerKey, boolean, boolean)`
@@ -727,6 +1034,7 @@ impl EtomoDirector {
         let Some(key) = current_manager_key.lock().unwrap().get_key().cloned() else {
             return true;
         };
+        self.enable_open_manager_menu_item(&key);
         let Some(manager_list) = self.manager_list.as_mut() else {
             return true;
         };
@@ -749,6 +1057,7 @@ mod tests {
     use super::{BaseManager, EtomoDirector};
     use crate::imod::etomo::base_manager::BaseManagerBase;
     use crate::imod::etomo::storage::storable::Storable;
+    use crate::imod::etomo::r#type::axis_id::AxisID;
     use crate::imod::etomo::r#type::base_meta_data::BaseMetaData;
     use crate::imod::etomo::r#type::interface_type::InterfaceType;
     use crate::imod::etomo::ui::browsing_directory::BrowsingDirectory;
@@ -896,5 +1205,219 @@ mod tests {
         director.original_user_dir = Some("before".into());
         assert_eq!(director.set_current_property_user_dir("after"), "before");
         assert_eq!(director.get_original_user_dir(), Some("after"));
+    }
+
+    #[test]
+    fn settings_dialog_is_retained_applied_and_closed_by_the_director() {
+        let mut director = EtomoDirector::new();
+        director.manager_list = Some(super::UniqueHashedArray::new());
+        director.set_manager(manager("settings.edf"), true).unwrap();
+
+        director.open_settings_dialog().unwrap();
+        let dialog = director.settings_dialog.as_mut().unwrap();
+        assert!(dialog.visible);
+        dialog.font_size = "16".to_owned();
+        dialog.native_laf = true;
+        dialog.advanced_dialogs = true;
+
+        assert!(director.get_settings_parameters().unwrap());
+        assert_eq!(director.get_user_font_size(), 16);
+        assert!(director.native_look_and_feel);
+        assert!(director.is_advanced);
+
+        director.close_settings_dialog();
+        let dialog = director.settings_dialog.as_ref().unwrap();
+        assert!(!dialog.visible && dialog.closed);
+    }
+
+    #[test]
+    fn front_page_opening_registers_the_default_manager_lifecycle() {
+        let mut director = EtomoDirector::new();
+        director.manager_list = Some(super::UniqueHashedArray::new());
+        let key = director.open_front_page(true, AxisID::Only).unwrap();
+        assert_eq!(
+            key.lock().unwrap().get_key().unwrap().get_name(),
+            "Front Page"
+        );
+        assert_eq!(
+            director.get_current_manager().unwrap().get_interface_type(),
+            Some(InterfaceType::FrontPage)
+        );
+    }
+
+    #[test]
+    fn open_manager_dispatches_a_join_file_to_its_concrete_manager() {
+        let mut director = EtomoDirector::new();
+        director.manager_list = Some(super::UniqueHashedArray::new());
+        let key = director
+            .open_manager(std::path::Path::new("joined.ejf"), true, AxisID::Only)
+            .unwrap();
+        assert_eq!(
+            key.lock().unwrap().get_key().unwrap().get_name(),
+            "joined.ejf"
+        );
+        assert_eq!(
+            director.get_current_manager().unwrap().get_interface_type(),
+            Some(InterfaceType::Join)
+        );
+    }
+
+    #[test]
+    fn open_manager_dispatches_serial_sections_to_its_concrete_manager() {
+        let root = std::env::temp_dir().join(format!(
+            "imod_rs_director_serial_dispatch_{}",
+            std::process::id()
+        ));
+        std::fs::create_dir_all(&root).unwrap();
+        let data_file = root.join("serial.ess");
+        std::fs::write(&data_file, []).unwrap();
+        let mut director = EtomoDirector::new();
+        director.manager_list = Some(super::UniqueHashedArray::new());
+        let key = director
+            .open_manager(&data_file, true, AxisID::Only)
+            .unwrap();
+        assert_eq!(
+            key.lock().unwrap().get_key().unwrap().get_name(),
+            data_file.to_string_lossy()
+        );
+        assert_eq!(
+            director.get_current_manager().unwrap().get_interface_type(),
+            Some(InterfaceType::SerialSections)
+        );
+        std::fs::remove_file(data_file).unwrap();
+        std::fs::remove_dir(root).unwrap();
+    }
+
+    #[test]
+    fn generic_parallel_opening_registers_its_source_identity() {
+        let mut director = EtomoDirector::new();
+        director.manager_list = Some(super::UniqueHashedArray::new());
+        let key = director.open_generic_parallel(true, AxisID::Only).unwrap();
+        assert_eq!(
+            key.lock().unwrap().get_key().unwrap().get_name(),
+            "Parallel Processing"
+        );
+        assert_eq!(
+            director.get_current_manager().unwrap().get_interface_type(),
+            Some(InterfaceType::Pp)
+        );
+    }
+
+    #[test]
+    fn tomogram_opening_registers_new_dataset_identity() {
+        let mut director = EtomoDirector::new();
+        director.manager_list = Some(super::UniqueHashedArray::new());
+        let key = director.open_tomogram(None, true, AxisID::Only).unwrap();
+        assert_eq!(
+            key.lock().unwrap().get_key().unwrap().get_name(),
+            "Setup Tomogram"
+        );
+        assert_eq!(
+            director.get_current_manager().unwrap().get_interface_type(),
+            Some(InterfaceType::Recon)
+        );
+    }
+
+    #[test]
+    fn open_manager_dispatches_existing_parallel_file_to_parallel_manager() {
+        let root = std::env::temp_dir().join(format!(
+            "imod_rs_director_parallel_dispatch_{}",
+            std::process::id()
+        ));
+        std::fs::create_dir_all(&root).unwrap();
+        let data_file = root.join("parallel.epp");
+        std::fs::write(&data_file, []).unwrap();
+        let mut director = EtomoDirector::new();
+        director.manager_list = Some(super::UniqueHashedArray::new());
+        let key = director
+            .open_manager(&data_file, true, AxisID::Only)
+            .unwrap();
+        assert_eq!(
+            key.lock().unwrap().get_key().unwrap().get_name(),
+            data_file.to_string_lossy()
+        );
+        assert_eq!(
+            director.get_current_manager().unwrap().get_interface_type(),
+            Some(InterfaceType::Pp)
+        );
+        std::fs::remove_file(data_file).unwrap();
+        std::fs::remove_dir(root).unwrap();
+    }
+
+    #[test]
+    fn open_manager_dispatches_existing_batch_file_to_batch_manager() {
+        let root = std::env::temp_dir().join(format!(
+            "imod_rs_director_batch_dispatch_{}",
+            std::process::id()
+        ));
+        std::fs::create_dir_all(&root).unwrap();
+        let data_file = root.join("batch.ebt");
+        std::fs::write(&data_file, []).unwrap();
+        let mut director = EtomoDirector::new();
+        director.manager_list = Some(super::UniqueHashedArray::new());
+        let key = director
+            .open_manager(&data_file, true, AxisID::Only)
+            .unwrap();
+        assert_eq!(
+            key.lock().unwrap().get_key().unwrap().get_name(),
+            data_file.to_string_lossy()
+        );
+        assert_eq!(
+            director.get_current_manager().unwrap().get_interface_type(),
+            Some(InterfaceType::BatchRunTomo)
+        );
+        std::fs::remove_file(data_file).unwrap();
+        std::fs::remove_dir(root).unwrap();
+    }
+
+    #[test]
+    fn test_failure_and_usage_retain_director_only_contracts() {
+        let mut director = EtomoDirector::new();
+        assert_eq!(director.set_test_failed(true), Err("test=false".to_owned()));
+        director.test = true;
+        director.set_test_failed(true).unwrap();
+        assert!(director.is_test_failed());
+        assert_eq!(
+            director.print_usage_message(),
+            "Usage: etomo [options] [data files]\n"
+        );
+        director.original_user_dir = Some("original".to_owned());
+        assert_eq!(
+            director.get_property_user_dir(),
+            Some("original".to_owned())
+        );
+    }
+
+    #[test]
+    fn tool_opening_constructs_the_translated_tools_manager_in_its_source_lifetime() {
+        use crate::imod::etomo::ui::swing::etomo_menu::ToolType;
+
+        let mut director = EtomoDirector::new();
+        director.manager_list = Some(super::UniqueHashedArray::new());
+        let key = director.open_tool(true, ToolType::AlignFrames).unwrap();
+        assert!(director.is_open(key.lock().unwrap().get_key()));
+        let separate = director.open_tool_in_separate_frame(ToolType::FlattenVolume);
+        assert_eq!(separate.get_name(), Some("Flatten Volume".to_owned()));
+    }
+
+    #[test]
+    fn directive_editor_opening_uses_its_separate_manager_lifetime() {
+        let director = EtomoDirector::new();
+        let manager = director.open_directive_editor(None, None, Some("stamp"), Some("error"));
+        assert_eq!(
+            manager.get_interface_type(),
+            Some(crate::imod::etomo::r#type::interface_type::InterfaceType::Tools)
+        );
+    }
+
+    #[test]
+    fn rename_current_manager_rekeys_the_shared_manager_key() {
+        let mut director = EtomoDirector::new();
+        director.manager_list = Some(super::UniqueHashedArray::new());
+        let current = director.set_manager(manager("old.edf"), true).unwrap();
+        director.rename_current_manager("renamed.edf").unwrap();
+        let key = current.lock().unwrap().get_key().cloned().unwrap();
+        assert_eq!(key.get_name(), "renamed.edf");
+        assert!(director.is_open(Some(&key)));
     }
 }

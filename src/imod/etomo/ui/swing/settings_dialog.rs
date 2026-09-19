@@ -5,6 +5,8 @@
 //! field values and SettingsDialog's transformations/actions around them.
 #![allow(dead_code)]
 use crate::imod::etomo::base_manager::BaseManager;
+use crate::imod::etomo::storage::storable::Storable;
+use std::collections::BTreeMap;
 use std::path::PathBuf;
 
 pub const TITLE: &str = "Etomo Settings";
@@ -12,7 +14,7 @@ pub const CANCEL: &str = "Cancel";
 pub const APPLY: &str = "Apply";
 pub const DONE: &str = "Done";
 /// Direct data boundary corresponding to the source's `UserConfiguration` getters/setters.
-#[derive(Clone, Debug, Default, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub struct UserConfigurationValues {
     pub tooltips_initial_delay_ms: i32,
     pub tooltips_dismiss_delay_ms: i32,
@@ -40,6 +42,114 @@ pub struct UserConfigurationValues {
     pub batch_table_size: String,
     pub user_template_dir: Option<PathBuf>,
     pub smtp_server: String,
+}
+
+impl Default for UserConfigurationValues {
+    fn default() -> Self {
+        Self {
+            // These are the values the director has historically exposed
+            // before a user configuration is loaded.  Keeping them here also
+            // means an absent .etomo file produces a usable settings dialog.
+            tooltips_initial_delay_ms: 1_000,
+            tooltips_dismiss_delay_ms: 4_000,
+            auto_fit: false,
+            native_laf: false,
+            advanced_dialogs: false,
+            compact_display: false,
+            font_size: 12,
+            font_family: "Dialog".to_owned(),
+            single_axis: false,
+            montage: false,
+            no_parallel_processing: false,
+            gpu_processing_default: false,
+            remove_excluded_views: false,
+            tilt_angles_rawtlt_file: false,
+            swap_y_and_z: false,
+            set_fei_pixel_size: false,
+            parallel_processing: false,
+            gpu_processing: false,
+            cpus: String::new(),
+            local_gpus: String::new(),
+            parallel_table_size: String::new(),
+            join_table_size: String::new(),
+            peet_table_size: String::new(),
+            batch_table_size: String::new(),
+            user_template_dir: None,
+            smtp_server: String::new(),
+        }
+    }
+}
+
+/// Persistent subset of Java's `UserConfiguration` used by the translated
+/// director/settings path.  A deterministic `Settings.` namespace prevents
+/// settings from colliding with project parameter files.
+impl Storable for UserConfigurationValues {
+    fn store(&self, properties: &mut BTreeMap<String, String>) {
+        macro_rules! put {
+            ($name:literal, $value:expr) => {
+                properties.insert(concat!("Settings.", $name).to_owned(), $value.to_string());
+            };
+        }
+        put!("TooltipsInitialDelay", self.tooltips_initial_delay_ms);
+        put!("TooltipsDismissDelay", self.tooltips_dismiss_delay_ms);
+        put!("AutoFit", self.auto_fit);
+        put!("NativeLookAndFeel", self.native_laf);
+        put!("AdvancedDialogs", self.advanced_dialogs);
+        put!("CompactDisplay", self.compact_display);
+        put!("FontSize", self.font_size);
+        put!("FontFamily", self.font_family);
+        put!("ParallelProcessing", self.parallel_processing);
+        put!("GpuProcessing", self.gpu_processing);
+        put!("Cpus", self.cpus);
+        put!("LocalGpus", self.local_gpus);
+        put!("SmtpServer", self.smtp_server);
+        if let Some(directory) = &self.user_template_dir {
+            put!("UserTemplateDir", directory.display());
+        }
+    }
+
+    fn store_with_prepend(&self, properties: &mut BTreeMap<String, String>, _prepend: &str) {
+        self.store(properties);
+    }
+
+    fn load(&mut self, properties: &BTreeMap<String, String>) {
+        let get = |name| {
+            properties
+                .get(&format!("Settings.{name}"))
+                .map(String::as_str)
+        };
+        macro_rules! read {
+            ($field:ident, $name:literal, $type:ty) => {
+                if let Some(value) = get($name).and_then(|value| value.parse::<$type>().ok()) {
+                    self.$field = value;
+                }
+            };
+        }
+        read!(tooltips_initial_delay_ms, "TooltipsInitialDelay", i32);
+        read!(tooltips_dismiss_delay_ms, "TooltipsDismissDelay", i32);
+        read!(auto_fit, "AutoFit", bool);
+        read!(native_laf, "NativeLookAndFeel", bool);
+        read!(advanced_dialogs, "AdvancedDialogs", bool);
+        read!(compact_display, "CompactDisplay", bool);
+        read!(font_size, "FontSize", i32);
+        read!(parallel_processing, "ParallelProcessing", bool);
+        read!(gpu_processing, "GpuProcessing", bool);
+        for (name, field) in [
+            ("FontFamily", &mut self.font_family),
+            ("Cpus", &mut self.cpus),
+            ("LocalGpus", &mut self.local_gpus),
+            ("SmtpServer", &mut self.smtp_server),
+        ] {
+            if let Some(value) = get(name) {
+                *field = value.to_owned();
+            }
+        }
+        self.user_template_dir = get("UserTemplateDir").map(PathBuf::from);
+    }
+
+    fn load_with_prepend(&mut self, properties: &BTreeMap<String, String>, _prepend: &str) {
+        self.load(properties);
+    }
 }
 /// Java private static `FontFamilies`.
 #[derive(Clone, Debug, Default)]

@@ -31,6 +31,7 @@
 
 use crate::imod::etomo::etomo_director;
 use crate::imod::etomo::manager_key::ManagerKey;
+use crate::imod::etomo::process::base_process_manager::BaseProcessManager;
 use crate::imod::etomo::process::emergency_monitor::EmergencyMonitor;
 use crate::imod::etomo::process::imod_manager::ImodManager;
 use crate::imod::etomo::process::tomosetexts_output::TomosetextsOutput;
@@ -449,14 +450,13 @@ pub trait BaseManager: Send + Sync {
     /// Java `tomosetexts`.
     // Bug# 2403
     fn tomosetexts(&self) -> Option<TomosetextsOutput> {
-        if self.base().property_user_dir.lock().unwrap().is_some() {
-            // TODO(unit): needs etomo/process/BaseProcessManager.java - the source
-            // returns `BaseProcessManager.tomosetexts(this, AxisID.ONLY, new
-            // File(propertyUserDir))`, which runs `b3dtomosetexts` through
-            // `etomo/process/SystemProgram.java`.
-            return None;
-        }
-        None
+        let directory = self.base().property_user_dir.lock().unwrap().clone()?;
+        let bin_path = get_imod_bin_path()?;
+        BaseProcessManager::tomosetexts_local(
+            Path::new(&directory),
+            std::ffi::OsStr::new("python"),
+            &Path::new(&bin_path).join("b3dtomosetexts"),
+        )
     }
 
     /// Java `getVerticalScrollBarValue`.

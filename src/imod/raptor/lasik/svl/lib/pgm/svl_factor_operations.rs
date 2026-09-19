@@ -55,6 +55,35 @@ impl SvlFactorOperation {
         self.index_cache
             .find(mapping, self.config.use_shared_index_cache)
     }
+
+    /// Select the exact mapping representation used by
+    /// `svlFactorBinaryOp::initialize` and `svlFactorNAryOp::initialize`.
+    /// `cacheIndexMapping` uses `target.mapFrom(source)` (one index for each
+    /// target cell); the alternate source branch stores `source.strideMapping`
+    /// (one increment for each target variable).  Both are consumed by the
+    /// respective C++ execute fast paths, so retaining the distinction matters
+    /// even though the checked Rust operation functions compute assignments
+    /// directly.
+    pub fn mapping_for(
+        &mut self,
+        target: &SvlFactor,
+        source: &SvlFactor,
+    ) -> Result<Vec<usize>, String> {
+        let mapping = if self.config.cache_index_mapping {
+            target
+                .map_from(source)
+                .ok_or_else(|| "unable to map factor onto target".to_owned())?
+        } else {
+            source
+                .stride_mapping(&target.variables)
+                .into_iter()
+                .map(|stride| {
+                    usize::try_from(stride).map_err(|_| "negative factor stride".to_owned())
+                })
+                .collect::<Result<Vec<_>, _>>()?
+        };
+        Ok(self.index_ref(&mapping))
+    }
 }
 
 /// C++ `svlFactorBinaryOp` initialization expressed without retained pointers.
@@ -73,16 +102,8 @@ impl SvlFactorBinaryOp {
         operation: &mut SvlFactorOperation,
     ) -> Result<Self, String> {
         initialize_target(target, &[&first, &second])?;
-        let first_mapping = operation.index_ref(
-            &target
-                .map_from(&first)
-                .ok_or("unable to map first factor onto target")?,
-        );
-        let second_mapping = operation.index_ref(
-            &target
-                .map_from(&second)
-                .ok_or("unable to map second factor onto target")?,
-        );
+        let first_mapping = operation.mapping_for(target, &first)?;
+        let second_mapping = operation.mapping_for(target, &second)?;
         Ok(Self {
             first,
             second,
@@ -119,12 +140,7 @@ impl SvlFactorNAryOp {
         initialize_target(target, &factors.iter().collect::<Vec<_>>())?;
         let mappings = factors
             .iter()
-            .map(|factor| {
-                target
-                    .map_from(factor)
-                    .ok_or_else(|| "unable to map factor onto target".to_owned())
-                    .map(|mapping| operation.index_ref(&mapping))
-            })
+            .map(|factor| operation.mapping_for(target, factor))
             .collect::<Result<Vec<_>, _>>()?;
         Ok(Self { factors, mappings })
     }
@@ -668,5 +684,34 @@ mod tests {
         operations.add_operation(SvlFactorNormalizeOp);
         operations.execute(&mut target).unwrap();
         assert_eq!(target.data, vec![1. / 3., 2. / 3.]);
+    }
+
+    #[test]
+    fn constructor_retains_native_cell_or_stride_mapping_configuration() {
+        let first = SvlFactor::from_parts(vec![1], vec![2], Some(vec![2., 3.])).unwrap();
+        let second = SvlFactor::from_parts(vec![2], vec![3], Some(vec![4., 5., 6.])).unwrap();
+
+        let mut cached_target = SvlFactor::new();
+        let mut cached = SvlFactorOperation::new(SvlFactorOperationsConfig::default());
+        let cached_op = SvlFactorBinaryOp::new(
+            &mut cached_target,
+            first.clone(),
+            second.clone(),
+            &mut cached,
+        )
+        .unwrap();
+        // `mapFrom`: a source index for every target assignment.
+        assert_eq!(cached_op.first_mapping, vec![0, 1, 0, 1, 0, 1]);
+        assert_eq!(cached_op.second_mapping, vec![0, 0, 1, 1, 2, 2]);
+
+        let mut stride_target = SvlFactor::new();
+        let mut stride_config = SvlFactorOperationsConfig::default();
+        stride_config.cache_index_mapping = false;
+        let mut stride = SvlFactorOperation::new(stride_config);
+        let stride_op =
+            SvlFactorBinaryOp::new(&mut stride_target, first, second, &mut stride).unwrap();
+        // `strideMapping(target.vars())`: one increment per target variable.
+        assert_eq!(stride_op.first_mapping, vec![1, 0]);
+        assert_eq!(stride_op.second_mapping, vec![0, 1]);
     }
 }

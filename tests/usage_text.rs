@@ -57,6 +57,17 @@ fn clip_usage_matches_the_reference_text() {
 /// a float image with scale 1 and offset 0, so it reaches the writer unscaled.
 /// The goldens are the reference `mrc2tif -p`/`-j` output for
 /// `fixtures/mrcsec-mode2.mrc` (a float volume), section 0.
+///
+/// The comparison is on **decoded pixels**, not on the encoded bytes, because
+/// the Qt `QImage::save` boundary this command used to link against is gone —
+/// the encoder is now `qttools/mrc2tif/rust_encoder.rs`.  Two container
+/// differences follow from that and neither is a scaling defect: Qt writes a
+/// PNG `pHYs` chunk unconditionally (its default 3937 dots/metre, i.e. 100
+/// dpi) where the `png` crate writes one only for a non-zero `-r`/`-P`, and
+/// the two deflate streams differ.  The PNG pixels are still byte-identical to
+/// the reference, which is what the scaling fix is about.  JPEG is lossy and
+/// the Rust encoder is not libjpeg, so that arm allows a small per-pixel
+/// tolerance; measured against this golden the worst pixel is 2 grey levels.
 #[test]
 fn mrc2tif_scales_a_float_image_for_png_and_jpeg_output() {
     let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR"));
@@ -65,9 +76,9 @@ fn mrc2tif_scales_a_float_image_for_png_and_jpeg_output() {
     std::fs::create_dir_all(&dir).unwrap();
     std::fs::copy(root.join("fixtures/mrcsec-mode2.mrc"), dir.join("in.mrc")).unwrap();
 
-    for (flag, root_name, golden, ext) in [
-        ("-p", "o", "fixtures/mrc2tif-float-scaled.png", "png"),
-        ("-j", "j", "fixtures/mrc2tif-float-scaled.jpg", "jpg"),
+    for (flag, root_name, golden, ext, tolerance) in [
+        ("-p", "o", "fixtures/mrc2tif-float-scaled.png", "png", 0u8),
+        ("-j", "j", "fixtures/mrc2tif-float-scaled.jpg", "jpg", 2u8),
     ] {
         let out = common::imod_cmd("mrc2tif")
             .current_dir(&dir)
@@ -79,9 +90,27 @@ fn mrc2tif_scales_a_float_image_for_png_and_jpeg_output() {
             "mrc2tif {flag} failed: {}",
             String::from_utf8_lossy(&out.stdout)
         );
-        let got = std::fs::read(dir.join(format!("{root_name}.000.{ext}"))).unwrap();
-        let want = std::fs::read(root.join(golden)).unwrap();
-        assert_eq!(got, want, "mrc2tif {flag} must match the reference output");
+        let got = image::open(dir.join(format!("{root_name}.000.{ext}")))
+            .expect("the written image must decode")
+            .to_luma8();
+        let want = image::open(root.join(golden))
+            .expect("the reference image must decode")
+            .to_luma8();
+        assert_eq!(
+            (got.width(), got.height()),
+            (want.width(), want.height()),
+            "mrc2tif {flag} must produce the reference dimensions"
+        );
+        let worst = got
+            .pixels()
+            .zip(want.pixels())
+            .map(|(a, b)| a.0[0].abs_diff(b.0[0]))
+            .max()
+            .unwrap_or(0);
+        assert!(
+            worst <= tolerance,
+            "mrc2tif {flag} pixels differ from the reference by {worst} (tolerance {tolerance})"
+        );
     }
     let _ = std::fs::remove_dir_all(&dir);
 }

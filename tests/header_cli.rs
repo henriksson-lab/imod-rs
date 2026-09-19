@@ -2,7 +2,7 @@ mod common;
 
 use imod_rs::imod::libiimod::iihdf::ii_hdf_open_new;
 use imod_rs::imod::libiimod::iimage::{
-    IIFILE_HDF, ii_delete, ii_open_new, ii_sync_from_mrc_header, ii_write_header,
+    IIFILE_HDF, ii_close, ii_delete, ii_open_new, ii_sync_from_mrc_header, ii_write_header,
 };
 use imod_rs::imod::libiimod::mrcfiles::{MRC_MODE_FLOAT, MrcHeader, mrc_head_new, mrc_head_write};
 use std::ffi::CString;
@@ -270,8 +270,17 @@ fn header_opens_source_hdf_multivolume_and_selects_requested_volume() {
         ii_sync_from_mrc_header(second_volume, &mut second_header);
         second_volume.mrc_header = Some(second_header);
         assert_eq!(ii_write_header(second_volume), 0);
+        // Close the sub-volume, do not *delete* it: `image.owned_hdf_volumes`
+        // is a `Vec<Box<ImodImageFile>>`, so the parent owns this allocation,
+        // and `ii_delete` ends in `Box::from_raw` — calling it here reclaimed
+        // the same box that `ii_delete(image)` then frees again.  That double
+        // free ran `MrcHeader`'s drop glue over freed memory and **segfaulted
+        // the whole test binary in a release build**, while the debug allocator
+        // happened to survive it.  `ii_close` is the half that was actually
+        // wanted here: it flushes and closes the volume's dataset, which is
+        // what makes `header -volume 2` able to read it back.
         let second_volume = second_volume as *mut _;
-        ii_delete(second_volume);
+        ii_close(second_volume);
         ii_delete(image);
         let result = common::imod_cmd("header")
             .env("AUTODOC_DIR", AUTODOC)

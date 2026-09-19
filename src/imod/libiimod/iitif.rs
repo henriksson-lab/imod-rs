@@ -1317,6 +1317,14 @@ pub fn tiff_fill_mrc_header(in_file: &ImodImageFile, hdata: &mut MrcHeader) -> i
                 let dest = &mut hdata.labels[hdata.nlabl as usize];
                 let count = (end_ind - start_ind).min(MRC_LABEL_SIZE);
                 dest[..count].copy_from_slice(&description[start_ind..start_ind + count]);
+                // `iitif.c:744` copies with `strncpy(.., .., MRC_LABEL_SIZE)`,
+                // whose NUL padding out to 80 is what `fixTitlePadding`'s
+                // `strlen` then finds.  `mrc_head_new` never clears `labels`,
+                // so without the fill that `strlen` runs into the slot's prior
+                // contents.  The `else` arm below needs no fill: its count is
+                // `B3DMIN(endInd - startInd, MRC_LABEL_SIZE)`, so the source is
+                // never shorter than the count and `strncpy` pads nothing.
+                dest[count..MRC_LABEL_SIZE].fill(0);
                 fix_title_padding(dest);
                 hdata.nlabl += 1;
                 break;

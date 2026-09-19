@@ -29,7 +29,7 @@ fn planefit_sums_each_real_mrc_input_before_fitting() {
         for path in [&first, &second] {
             let name = CString::new(path.to_string_lossy().as_bytes()).unwrap();
             let file = ii_open_new(name.to_bytes(), "wb", IIFILE_DEFAULT);
-            let header = (*file).mrc_header.as_deref_mut().expect("MRC header");
+            let header = (*file).mrc_header.as_mut().expect("MRC header");
             assert_eq!(mrc_head_new(header, 11, 11, 1, 2), 0);
             ii_sync_from_mrc_header(&mut *file, header);
             assert_eq!(
@@ -91,7 +91,7 @@ fn flatfield_order_one_writes_polynomial_inverse_for_real_mrc() {
     unsafe {
         let name = CString::new(input.to_string_lossy().as_bytes()).unwrap();
         let file = ii_open_new(name.to_bytes(), "wb", IIFILE_DEFAULT);
-        let header = (*file).mrc_header.as_deref_mut().expect("MRC header");
+        let header = (*file).mrc_header.as_mut().expect("MRC header");
         assert_eq!(mrc_head_new(header, 15, 15, 1, 2), 0);
         ii_sync_from_mrc_header(&mut *file, header);
         assert_eq!(
@@ -134,7 +134,7 @@ fn flatfield_order_one_writes_polynomial_inverse_for_real_mrc() {
     unsafe {
         let name = CString::new(output.to_string_lossy().as_bytes()).unwrap();
         let file = ii_open(name.to_bytes(), "rb");
-        let header = (*file).mrc_header.as_deref_mut().expect("MRC header");
+        let header = (*file).mrc_header.as_mut().expect("MRC header");
         assert!(
             std::str::from_utf8(&header.labels[0])
                 .unwrap()
@@ -169,7 +169,7 @@ fn planefit_reports_source_dimension_mismatch_for_real_mrc_inputs() {
         for (path, nx) in [(&first, 11), (&second, 10)] {
             let name = CString::new(path.to_string_lossy().as_bytes()).unwrap();
             let file = ii_open_new(name.to_bytes(), "wb", IIFILE_DEFAULT);
-            let header = (*file).mrc_header.as_deref_mut().expect("MRC header");
+            let header = (*file).mrc_header.as_mut().expect("MRC header");
             assert_eq!(mrc_head_new(header, nx, 11, 1, MRC_MODE_FLOAT), 0);
             ii_sync_from_mrc_header(&mut *file, header);
             assert_eq!(
@@ -211,7 +211,7 @@ fn stat_reports_source_table_for_real_multisection_mrc() {
     unsafe {
         let name = CString::new(input.to_string_lossy().as_bytes()).unwrap();
         let file = ii_open_new(name.to_bytes(), "wb", IIFILE_DEFAULT);
-        let header = (*file).mrc_header.as_deref_mut().expect("MRC header");
+        let header = (*file).mrc_header.as_mut().expect("MRC header");
         assert_eq!(mrc_head_new(header, 3, 3, 2, MRC_MODE_FLOAT), 0);
         ii_sync_from_mrc_header(&mut *file, header);
         assert_eq!(
@@ -259,7 +259,7 @@ fn stat_uses_real_piece_list_coordinates_and_overlap_path() {
     unsafe {
         let name = CString::new(input.to_string_lossy().as_bytes()).unwrap();
         let file = ii_open_new(name.to_bytes(), "wb", IIFILE_DEFAULT);
-        let header = (*file).mrc_header.as_deref_mut().expect("MRC header");
+        let header = (*file).mrc_header.as_mut().expect("MRC header");
         assert_eq!(mrc_head_new(header, 3, 3, 2, MRC_MODE_FLOAT), 0);
         ii_sync_from_mrc_header(&mut *file, header);
         assert_eq!(
@@ -315,7 +315,7 @@ fn stat_marks_real_mrc_extreme_sections_with_mad_windows() {
     unsafe {
         let name = CString::new(input.to_string_lossy().as_bytes()).unwrap();
         let file = ii_open_new(name.to_bytes(), "wb", IIFILE_DEFAULT);
-        let header = (*file).mrc_header.as_deref_mut().expect("MRC header");
+        let header = (*file).mrc_header.as_mut().expect("MRC header");
         assert_eq!(mrc_head_new(header, 2, 2, 5, MRC_MODE_FLOAT), 0);
         ii_sync_from_mrc_header(&mut *file, header);
         assert_eq!(
@@ -356,7 +356,7 @@ fn stat_marks_piece_coordinates_in_real_mrc_mad_outlier_rows() {
     unsafe {
         let name = CString::new(input.to_string_lossy().as_bytes()).unwrap();
         let file = ii_open_new(name.to_bytes(), "wb", IIFILE_DEFAULT);
-        let header = (*file).mrc_header.as_deref_mut().expect("MRC header");
+        let header = (*file).mrc_header.as_mut().expect("MRC header");
         assert_eq!(mrc_head_new(header, 2, 2, 5, MRC_MODE_FLOAT), 0);
         ii_sync_from_mrc_header(&mut *file, header);
         assert_eq!(
@@ -410,7 +410,7 @@ fn clip_accepts_source_two_letter_histogram_prefix_for_real_mrc() {
     unsafe {
         let name = CString::new(input.to_string_lossy().as_bytes()).unwrap();
         let file = ii_open_new(name.to_bytes(), "wb", IIFILE_DEFAULT);
-        let header = (*file).mrc_header.as_deref_mut().expect("MRC header");
+        let header = (*file).mrc_header.as_mut().expect("MRC header");
         assert_eq!(mrc_head_new(header, 2, 2, 1, MRC_MODE_BYTE), 0);
         ii_sync_from_mrc_header(&mut *file, header);
         assert_eq!(
@@ -443,7 +443,7 @@ fn resize_accepts_source_semicolon_coordinate_pairs_for_real_mrc() {
     unsafe {
         let name = CString::new(input.to_string_lossy().as_bytes()).unwrap();
         let file = ii_open_new(name.to_bytes(), "wb", IIFILE_DEFAULT);
-        let header = (*file).mrc_header.as_deref_mut().expect("MRC header");
+        let header = (*file).mrc_header.as_mut().expect("MRC header");
         assert_eq!(mrc_head_new(header, 3, 2, 1, MRC_MODE_FLOAT), 0);
         ii_sync_from_mrc_header(&mut *file, header);
         assert_eq!(
@@ -472,7 +472,7 @@ fn resize_accepts_source_semicolon_coordinate_pairs_for_real_mrc() {
     unsafe {
         let name = CString::new(output.to_string_lossy().as_bytes()).unwrap();
         let file = ii_open(name.to_bytes(), "rb");
-        let header = (*file).mrc_header.as_deref_mut().expect("MRC header");
+        let header = (*file).mrc_header.as_mut().expect("MRC header");
         assert_eq!((header.nx, header.ny), (2, 2));
         let mut pixels = [0_f32; 4];
         assert_eq!(ii_read_section_float(&mut *file, &mut pixels, 0), 0);
@@ -497,7 +497,7 @@ fn brightness_real_mrc_normalizes_reversed_source_x_range() {
     unsafe {
         let name = CString::new(input.to_string_lossy().as_bytes()).unwrap();
         let file = ii_open_new(name.to_bytes(), "wb", IIFILE_DEFAULT);
-        let header = (*file).mrc_header.as_deref_mut().expect("MRC header");
+        let header = (*file).mrc_header.as_mut().expect("MRC header");
         assert_eq!(mrc_head_new(header, 3, 1, 1, MRC_MODE_FLOAT), 0);
         ii_sync_from_mrc_header(&mut *file, header);
         assert_eq!(
@@ -526,7 +526,7 @@ fn brightness_real_mrc_normalizes_reversed_source_x_range() {
     unsafe {
         let name = CString::new(output.to_string_lossy().as_bytes()).unwrap();
         let file = ii_open(name.to_bytes(), "rb");
-        let header = (*file).mrc_header.as_deref_mut().expect("MRC header");
+        let header = (*file).mrc_header.as_mut().expect("MRC header");
         assert_eq!(
             mrc_head_read((&mut (*file).fp).as_mut().unwrap(), header),
             0
@@ -553,7 +553,7 @@ fn resize_keeps_a_nondefault_negative_fractional_center_for_real_mrc_coordinates
     unsafe {
         let name = CString::new(input.to_string_lossy().as_bytes()).unwrap();
         let file = ii_open_new(name.to_bytes(), "wb", IIFILE_DEFAULT);
-        let header = (*file).mrc_header.as_deref_mut().expect("MRC header");
+        let header = (*file).mrc_header.as_mut().expect("MRC header");
         assert_eq!(mrc_head_new(header, 3, 2, 1, MRC_MODE_FLOAT), 0);
         header.xorg = 10.;
         header.xlen = 6.;
@@ -592,7 +592,7 @@ fn resize_keeps_a_nondefault_negative_fractional_center_for_real_mrc_coordinates
     unsafe {
         let name = CString::new(output.to_string_lossy().as_bytes()).unwrap();
         let file = ii_open(name.to_bytes(), "rb");
-        let header = (*file).mrc_header.as_deref_mut().expect("MRC header");
+        let header = (*file).mrc_header.as_mut().expect("MRC header");
         assert_eq!(
             mrc_head_read((&mut (*file).fp).as_mut().unwrap(), header),
             0
@@ -639,7 +639,7 @@ fn two_input_process_reports_source_error_when_second_real_mrc_is_missing() {
     unsafe {
         let name = CString::new(input.to_string_lossy().as_bytes()).unwrap();
         let file = ii_open_new(name.to_bytes(), "wb", IIFILE_DEFAULT);
-        let header = (*file).mrc_header.as_deref_mut().expect("MRC header");
+        let header = (*file).mrc_header.as_mut().expect("MRC header");
         assert_eq!(mrc_head_new(header, 1, 1, 1, MRC_MODE_FLOAT), 0);
         ii_sync_from_mrc_header(&mut *file, header);
         assert_eq!(
@@ -679,7 +679,7 @@ fn info_reports_source_open_error_for_corrupt_second_mrc() {
     unsafe {
         let name = CString::new(input.to_string_lossy().as_bytes()).unwrap();
         let file = ii_open_new(name.to_bytes(), "wb", IIFILE_DEFAULT);
-        let header = (*file).mrc_header.as_deref_mut().expect("MRC header");
+        let header = (*file).mrc_header.as_mut().expect("MRC header");
         assert_eq!(mrc_head_new(header, 1, 1, 1, MRC_MODE_FLOAT), 0);
         ii_sync_from_mrc_header(&mut *file, header);
         assert_eq!(
@@ -714,7 +714,7 @@ fn info_real_mrc_prints_source_idtype_metadata_fields() {
     unsafe {
         let name = CString::new(input.to_string_lossy().as_bytes()).unwrap();
         let file = ii_open_new(name.to_bytes(), "wb", IIFILE_DEFAULT);
-        let header = (*file).mrc_header.as_deref_mut().expect("MRC header");
+        let header = (*file).mrc_header.as_mut().expect("MRC header");
         assert_eq!(mrc_head_new(header, 1, 1, 1, MRC_MODE_FLOAT), 0);
         header.idtype = 42;
         header.ispg = 7;
@@ -817,7 +817,7 @@ fn info_real_byte_mrc_uses_source_byte_mode_report() {
     unsafe {
         let name = CString::new(input.to_string_lossy().as_bytes()).unwrap();
         let file = ii_open_new(name.to_bytes(), "wb", IIFILE_DEFAULT);
-        let header = (*file).mrc_header.as_deref_mut().expect("MRC header");
+        let header = (*file).mrc_header.as_mut().expect("MRC header");
         assert_eq!(mrc_head_new(header, 1, 1, 1, MRC_MODE_BYTE), 0);
         ii_sync_from_mrc_header(&mut *file, header);
         assert_eq!(
@@ -854,7 +854,7 @@ fn info_real_rgb_mrc_uses_source_rgb_mode_report() {
     unsafe {
         let name = CString::new(input.to_string_lossy().as_bytes()).unwrap();
         let file = ii_open_new(name.to_bytes(), "wb", IIFILE_DEFAULT);
-        let header = (*file).mrc_header.as_deref_mut().expect("MRC header");
+        let header = (*file).mrc_header.as_mut().expect("MRC header");
         assert_eq!(mrc_head_new(header, 1, 1, 1, MRC_MODE_RGB), 0);
         ii_sync_from_mrc_header(&mut *file, header);
         assert_eq!(
@@ -889,7 +889,7 @@ fn info_real_complex_float_mrc_uses_source_complex_mode_report() {
     unsafe {
         let name = CString::new(input.to_string_lossy().as_bytes()).unwrap();
         let file = ii_open_new(name.to_bytes(), "wb", IIFILE_DEFAULT);
-        let header = (*file).mrc_header.as_deref_mut().expect("MRC header");
+        let header = (*file).mrc_header.as_mut().expect("MRC header");
         assert_eq!(mrc_head_new(header, 1, 1, 1, MRC_MODE_COMPLEX_FLOAT), 0);
         ii_sync_from_mrc_header(&mut *file, header);
         assert_eq!(
@@ -924,7 +924,7 @@ fn info_real_unsigned_short_mrc_uses_source_ushort_mode_report() {
     unsafe {
         let name = CString::new(input.to_string_lossy().as_bytes()).unwrap();
         let file = ii_open_new(name.to_bytes(), "wb", IIFILE_DEFAULT);
-        let header = (*file).mrc_header.as_deref_mut().expect("MRC header");
+        let header = (*file).mrc_header.as_mut().expect("MRC header");
         assert_eq!(mrc_head_new(header, 1, 1, 1, MRC_MODE_USHORT), 0);
         ii_sync_from_mrc_header(&mut *file, header);
         assert_eq!(
@@ -959,7 +959,7 @@ fn info_real_complex_short_mrc_uses_source_complex_short_mode_report() {
     unsafe {
         let name = CString::new(input.to_string_lossy().as_bytes()).unwrap();
         let file = ii_open_new(name.to_bytes(), "wb", IIFILE_DEFAULT);
-        let header = (*file).mrc_header.as_deref_mut().expect("MRC header");
+        let header = (*file).mrc_header.as_mut().expect("MRC header");
         assert_eq!(mrc_head_new(header, 1, 1, 1, MRC_MODE_COMPLEX_SHORT), 0);
         ii_sync_from_mrc_header(&mut *file, header);
         assert_eq!(
@@ -994,7 +994,7 @@ fn info_real_short_mrc_uses_source_short_mode_report() {
     unsafe {
         let name = CString::new(input.to_string_lossy().as_bytes()).unwrap();
         let file = ii_open_new(name.to_bytes(), "wb", IIFILE_DEFAULT);
-        let header = (*file).mrc_header.as_deref_mut().expect("MRC header");
+        let header = (*file).mrc_header.as_mut().expect("MRC header");
         assert_eq!(mrc_head_new(header, 1, 1, 1, MRC_MODE_SHORT), 0);
         ii_sync_from_mrc_header(&mut *file, header);
         assert_eq!(
@@ -1031,7 +1031,7 @@ fn clip_append_reports_source_missing_output_error_for_real_mrc_input() {
     unsafe {
         let name = CString::new(input.to_string_lossy().as_bytes()).unwrap();
         let file = ii_open_new(name.to_bytes(), "wb", IIFILE_DEFAULT);
-        let header = (*file).mrc_header.as_deref_mut().expect("MRC header");
+        let header = (*file).mrc_header.as_mut().expect("MRC header");
         assert_eq!(mrc_head_new(header, 1, 1, 1, MRC_MODE_FLOAT), 0);
         ii_sync_from_mrc_header(&mut *file, header);
         assert_eq!(
@@ -1071,7 +1071,7 @@ fn clip_append_reports_source_error_for_unreadable_existing_output_header() {
     unsafe {
         let name = CString::new(input.to_string_lossy().as_bytes()).unwrap();
         let file = ii_open_new(name.to_bytes(), "wb", IIFILE_DEFAULT);
-        let header = (*file).mrc_header.as_deref_mut().expect("MRC header");
+        let header = (*file).mrc_header.as_mut().expect("MRC header");
         assert_eq!(mrc_head_new(header, 1, 1, 1, MRC_MODE_FLOAT), 0);
         ii_sync_from_mrc_header(&mut *file, header);
         assert_eq!(
@@ -1118,7 +1118,7 @@ fn threshold_process_error_exits_before_clip_main_finalization_for_real_mrc() {
         for (path, value) in [(&input, 3_f32), (&output, 97_f32)] {
             let name = CString::new(path.to_string_lossy().as_bytes()).unwrap();
             let file = ii_open_new(name.to_bytes(), "wb", IIFILE_DEFAULT);
-            let header = (*file).mrc_header.as_deref_mut().expect("MRC header");
+            let header = (*file).mrc_header.as_mut().expect("MRC header");
             assert_eq!(mrc_head_new(header, 1, 1, 1, MRC_MODE_FLOAT), 0);
             ii_sync_from_mrc_header(&mut *file, header);
             assert_eq!(
@@ -1165,7 +1165,7 @@ fn fft_with_tiff_output_environment_warns_and_writes_source_forced_real_mrc() {
     unsafe {
         let name = CString::new(input.to_string_lossy().as_bytes()).unwrap();
         let file = ii_open_new(name.to_bytes(), "wb", IIFILE_DEFAULT);
-        let header = (*file).mrc_header.as_deref_mut().expect("MRC header");
+        let header = (*file).mrc_header.as_mut().expect("MRC header");
         assert_eq!(mrc_head_new(header, 4, 4, 1, MRC_MODE_FLOAT), 0);
         ii_sync_from_mrc_header(&mut *file, header);
         assert_eq!(
@@ -1198,7 +1198,7 @@ fn fft_with_tiff_output_environment_warns_and_writes_source_forced_real_mrc() {
     unsafe {
         let name = CString::new(output.to_string_lossy().as_bytes()).unwrap();
         let file = ii_open(name.to_bytes(), "rb");
-        let header = (*file).mrc_header.as_deref_mut().expect("MRC header");
+        let header = (*file).mrc_header.as_mut().expect("MRC header");
         assert_eq!(
             mrc_head_read((&mut (*file).fp).as_mut().unwrap(), header),
             0
@@ -1234,7 +1234,7 @@ fn view_option_runs_source_3dmod_command_after_real_mrc_output_close() {
     unsafe {
         let name = CString::new(input.to_string_lossy().as_bytes()).unwrap();
         let file = ii_open_new(name.to_bytes(), "wb", IIFILE_DEFAULT);
-        let header = (*file).mrc_header.as_deref_mut().expect("MRC header");
+        let header = (*file).mrc_header.as_mut().expect("MRC header");
         assert_eq!(mrc_head_new(header, 1, 1, 1, MRC_MODE_FLOAT), 0);
         ii_sync_from_mrc_header(&mut *file, header);
         assert_eq!(
@@ -1283,7 +1283,7 @@ fn nonappend_real_mrc_output_is_renamed_to_source_backup_before_replacement() {
         for (path, value) in [(&input, 3_f32), (&output, 97_f32)] {
             let name = CString::new(path.to_string_lossy().as_bytes()).unwrap();
             let file = ii_open_new(name.to_bytes(), "wb", IIFILE_DEFAULT);
-            let header = (*file).mrc_header.as_deref_mut().expect("MRC header");
+            let header = (*file).mrc_header.as_mut().expect("MRC header");
             assert_eq!(mrc_head_new(header, 1, 1, 1, MRC_MODE_FLOAT), 0);
             ii_sync_from_mrc_header(&mut *file, header);
             assert_eq!(
@@ -1324,7 +1324,7 @@ fn average_2d_means_all_real_input_sections() {
     unsafe {
         let name = CString::new(input.to_string_lossy().as_bytes()).unwrap();
         let file = ii_open_new(name.to_bytes(), "wb", IIFILE_DEFAULT);
-        let header = (*file).mrc_header.as_deref_mut().expect("MRC header");
+        let header = (*file).mrc_header.as_mut().expect("MRC header");
         assert_eq!(mrc_head_new(header, 2, 2, 2, 2), 0);
         ii_sync_from_mrc_header(&mut *file, header);
         assert_eq!(
@@ -1370,7 +1370,7 @@ fn standev_2d_thresholds_real_mrc_pixels_before_source_variance() {
     unsafe {
         let name = CString::new(input.to_string_lossy().as_bytes()).unwrap();
         let file = ii_open_new(name.to_bytes(), "wb", IIFILE_DEFAULT);
-        let header = (*file).mrc_header.as_deref_mut().expect("MRC header");
+        let header = (*file).mrc_header.as_mut().expect("MRC header");
         assert_eq!(mrc_head_new(header, 2, 1, 2, MRC_MODE_FLOAT), 0);
         ii_sync_from_mrc_header(&mut *file, header);
         assert_eq!(
@@ -1432,7 +1432,7 @@ fn append_real_mrc_keeps_existing_mode_with_source_file_io_warning() {
         ] {
             let name = CString::new(path.to_string_lossy().as_bytes()).unwrap();
             let file = ii_open_new(name.to_bytes(), "wb", IIFILE_DEFAULT);
-            let header = (*file).mrc_header.as_deref_mut().expect("MRC header");
+            let header = (*file).mrc_header.as_mut().expect("MRC header");
             assert_eq!(mrc_head_new(header, 2, 1, 1, mode), 0);
             ii_sync_from_mrc_header(&mut *file, header);
             assert_eq!(
@@ -1466,7 +1466,7 @@ fn append_real_mrc_keeps_existing_mode_with_source_file_io_warning() {
     unsafe {
         let name = CString::new(output.to_string_lossy().as_bytes()).unwrap();
         let file = ii_open(name.to_bytes(), "rb");
-        let header = (*file).mrc_header.as_deref_mut().expect("MRC header");
+        let header = (*file).mrc_header.as_mut().expect("MRC header");
         assert_eq!((header.nz, header.mode), (2, MRC_MODE_SHORT));
         ii_close(file);
     }
@@ -1490,7 +1490,7 @@ fn brightness_real_mrc_append_updates_source_weighted_header_mean() {
         ] {
             let name = CString::new(path.to_string_lossy().as_bytes()).unwrap();
             let file = ii_open_new(name.to_bytes(), "wb", IIFILE_DEFAULT);
-            let header = (*file).mrc_header.as_deref_mut().expect("MRC header");
+            let header = (*file).mrc_header.as_mut().expect("MRC header");
             assert_eq!(mrc_head_new(header, 2, 1, 1, MRC_MODE_FLOAT), 0);
             header.amean = mean;
             // `mrcFillLabelString` must replace all 80 bytes of a reused
@@ -1524,7 +1524,7 @@ fn brightness_real_mrc_append_updates_source_weighted_header_mean() {
     unsafe {
         let name = CString::new(output.to_string_lossy().as_bytes()).unwrap();
         let file = ii_open(name.to_bytes(), "rb");
-        let header = (*file).mrc_header.as_deref_mut().expect("MRC header");
+        let header = (*file).mrc_header.as_mut().expect("MRC header");
         assert_eq!(
             mrc_head_read((&mut (*file).fp).as_mut().unwrap(), header),
             0
@@ -1554,7 +1554,7 @@ fn brightness_real_mrc_preserves_source_input_header_label() {
     unsafe {
         let name = CString::new(input.to_string_lossy().as_bytes()).unwrap();
         let file = ii_open_new(name.to_bytes(), "wb", IIFILE_DEFAULT);
-        let header = (*file).mrc_header.as_deref_mut().expect("MRC header");
+        let header = (*file).mrc_header.as_mut().expect("MRC header");
         assert_eq!(mrc_head_new(header, 1, 1, 1, MRC_MODE_FLOAT), 0);
         header.nlabl = 1;
         core::ptr::copy_nonoverlapping(
@@ -1587,7 +1587,7 @@ fn brightness_real_mrc_preserves_source_input_header_label() {
     unsafe {
         let name = CString::new(output.to_string_lossy().as_bytes()).unwrap();
         let file = ii_open(name.to_bytes(), "rb");
-        let header = (*file).mrc_header.as_deref_mut().expect("MRC header");
+        let header = (*file).mrc_header.as_mut().expect("MRC header");
         assert_eq!(
             mrc_head_read((&mut (*file).fp).as_mut().unwrap(), header),
             0
@@ -1623,7 +1623,7 @@ fn append_real_mrc_keeps_existing_size_and_resizes_the_written_slice() {
         ] {
             let name = CString::new(path.to_string_lossy().as_bytes()).unwrap();
             let file = ii_open_new(name.to_bytes(), "wb", IIFILE_DEFAULT);
-            let header = (*file).mrc_header.as_deref_mut().expect("MRC header");
+            let header = (*file).mrc_header.as_mut().expect("MRC header");
             assert_eq!(mrc_head_new(header, nx, 1, 1, MRC_MODE_FLOAT), 0);
             ii_sync_from_mrc_header(&mut *file, header);
             assert_eq!(
@@ -1655,7 +1655,7 @@ fn append_real_mrc_keeps_existing_size_and_resizes_the_written_slice() {
     unsafe {
         let name = CString::new(output.to_string_lossy().as_bytes()).unwrap();
         let file = ii_open(name.to_bytes(), "rb");
-        let header = (*file).mrc_header.as_deref_mut().expect("MRC header");
+        let header = (*file).mrc_header.as_mut().expect("MRC header");
         assert_eq!(
             mrc_head_read((&mut (*file).fp).as_mut().unwrap(), header),
             0
@@ -1690,7 +1690,7 @@ fn brightness_real_mrc_truncate_replaces_at_source_section_and_updates_header() 
         ] {
             let name = CString::new(path.to_string_lossy().as_bytes()).unwrap();
             let file = ii_open_new(name.to_bytes(), "wb", IIFILE_DEFAULT);
-            let header = (*file).mrc_header.as_deref_mut().expect("MRC header");
+            let header = (*file).mrc_header.as_mut().expect("MRC header");
             assert_eq!(mrc_head_new(header, 2, 1, nz, MRC_MODE_FLOAT), 0);
             ii_sync_from_mrc_header(&mut *file, header);
             assert_eq!(
@@ -1725,7 +1725,7 @@ fn brightness_real_mrc_truncate_replaces_at_source_section_and_updates_header() 
     unsafe {
         let name = CString::new(output.to_string_lossy().as_bytes()).unwrap();
         let file = ii_open(name.to_bytes(), "rb");
-        let header = (*file).mrc_header.as_deref_mut().expect("MRC header");
+        let header = (*file).mrc_header.as_mut().expect("MRC header");
         assert_eq!(
             mrc_head_read((&mut (*file).fp).as_mut().unwrap(), header),
             0
@@ -1762,7 +1762,7 @@ fn brightness_real_mrc_overwrite_retains_tail_at_source_section() {
         ] {
             let name = CString::new(path.to_string_lossy().as_bytes()).unwrap();
             let file = ii_open_new(name.to_bytes(), "wb", IIFILE_DEFAULT);
-            let header = (*file).mrc_header.as_deref_mut().expect("MRC header");
+            let header = (*file).mrc_header.as_mut().expect("MRC header");
             assert_eq!(mrc_head_new(header, 2, 1, nz, MRC_MODE_FLOAT), 0);
             ii_sync_from_mrc_header(&mut *file, header);
             assert_eq!(
@@ -1797,7 +1797,7 @@ fn brightness_real_mrc_overwrite_retains_tail_at_source_section() {
     unsafe {
         let name = CString::new(output.to_string_lossy().as_bytes()).unwrap();
         let file = ii_open(name.to_bytes(), "rb");
-        let header = (*file).mrc_header.as_deref_mut().expect("MRC header");
+        let header = (*file).mrc_header.as_mut().expect("MRC header");
         assert_eq!(
             mrc_head_read((&mut (*file).fp).as_mut().unwrap(), header),
             0
@@ -1826,7 +1826,7 @@ fn brightness_expands_a_real_mrc_with_source_blank_slices_before_and_after() {
     unsafe {
         let name = CString::new(input.to_string_lossy().as_bytes()).unwrap();
         let file = ii_open_new(name.to_bytes(), "wb", IIFILE_DEFAULT);
-        let header = (*file).mrc_header.as_deref_mut().expect("MRC header");
+        let header = (*file).mrc_header.as_mut().expect("MRC header");
         assert_eq!(mrc_head_new(header, 2, 1, 1, MRC_MODE_FLOAT), 0);
         header.amean = 9.;
         ii_sync_from_mrc_header(&mut *file, header);
@@ -1857,7 +1857,7 @@ fn brightness_expands_a_real_mrc_with_source_blank_slices_before_and_after() {
     unsafe {
         let name = CString::new(output.to_string_lossy().as_bytes()).unwrap();
         let file = ii_open(name.to_bytes(), "rb");
-        let header = (*file).mrc_header.as_deref_mut().expect("MRC header");
+        let header = (*file).mrc_header.as_mut().expect("MRC header");
         assert_eq!(
             mrc_head_read((&mut (*file).fp).as_mut().unwrap(), header),
             0
@@ -1890,7 +1890,7 @@ fn brightness_2d_real_mrc_keeps_only_source_centered_output_window() {
     unsafe {
         let name = CString::new(input.to_string_lossy().as_bytes()).unwrap();
         let file = ii_open_new(name.to_bytes(), "wb", IIFILE_DEFAULT);
-        let header = (*file).mrc_header.as_deref_mut().expect("MRC header");
+        let header = (*file).mrc_header.as_mut().expect("MRC header");
         assert_eq!(mrc_head_new(header, 1, 1, 3, MRC_MODE_FLOAT), 0);
         ii_sync_from_mrc_header(&mut *file, header);
         assert_eq!(
@@ -1924,7 +1924,7 @@ fn brightness_2d_real_mrc_keeps_only_source_centered_output_window() {
     unsafe {
         let name = CString::new(output.to_string_lossy().as_bytes()).unwrap();
         let file = ii_open(name.to_bytes(), "rb");
-        let header = (*file).mrc_header.as_deref_mut().expect("MRC header");
+        let header = (*file).mrc_header.as_mut().expect("MRC header");
         assert_eq!(
             mrc_head_read((&mut (*file).fp).as_mut().unwrap(), header),
             0
@@ -1951,7 +1951,7 @@ fn brightness_real_mrc_explicit_pad_overrides_source_default_for_blank_sections(
     unsafe {
         let name = CString::new(input.to_string_lossy().as_bytes()).unwrap();
         let file = ii_open_new(name.to_bytes(), "wb", IIFILE_DEFAULT);
-        let header = (*file).mrc_header.as_deref_mut().expect("MRC header");
+        let header = (*file).mrc_header.as_mut().expect("MRC header");
         assert_eq!(mrc_head_new(header, 2, 1, 1, MRC_MODE_FLOAT), 0);
         header.amean = 9.;
         ii_sync_from_mrc_header(&mut *file, header);
@@ -1983,7 +1983,7 @@ fn brightness_real_mrc_explicit_pad_overrides_source_default_for_blank_sections(
     unsafe {
         let name = CString::new(output.to_string_lossy().as_bytes()).unwrap();
         let file = ii_open(name.to_bytes(), "rb");
-        let header = (*file).mrc_header.as_deref_mut().expect("MRC header");
+        let header = (*file).mrc_header.as_mut().expect("MRC header");
         assert_eq!(
             mrc_head_read((&mut (*file).fp).as_mut().unwrap(), header),
             0
@@ -2012,7 +2012,7 @@ fn brightness_3d_real_mrc_places_source_boundary_pad_slices() {
     unsafe {
         let name = CString::new(input.to_string_lossy().as_bytes()).unwrap();
         let file = ii_open_new(name.to_bytes(), "wb", IIFILE_DEFAULT);
-        let header = (*file).mrc_header.as_deref_mut().expect("MRC header");
+        let header = (*file).mrc_header.as_mut().expect("MRC header");
         assert_eq!(mrc_head_new(header, 1, 1, 2, MRC_MODE_FLOAT), 0);
         ii_sync_from_mrc_header(&mut *file, header);
         assert_eq!(
@@ -2049,7 +2049,7 @@ fn brightness_3d_real_mrc_places_source_boundary_pad_slices() {
     unsafe {
         let name = CString::new(output.to_string_lossy().as_bytes()).unwrap();
         let file = ii_open(name.to_bytes(), "rb");
-        let header = (*file).mrc_header.as_deref_mut().expect("MRC header");
+        let header = (*file).mrc_header.as_mut().expect("MRC header");
         assert_eq!(
             mrc_head_read((&mut (*file).fp).as_mut().unwrap(), header),
             0
@@ -2078,7 +2078,7 @@ fn brightness_3d_real_mrc_trims_input_to_source_center_section() {
     unsafe {
         let name = CString::new(input.to_string_lossy().as_bytes()).unwrap();
         let file = ii_open_new(name.to_bytes(), "wb", IIFILE_DEFAULT);
-        let header = (*file).mrc_header.as_deref_mut().expect("MRC header");
+        let header = (*file).mrc_header.as_mut().expect("MRC header");
         assert_eq!(mrc_head_new(header, 1, 1, 3, MRC_MODE_FLOAT), 0);
         ii_sync_from_mrc_header(&mut *file, header);
         assert_eq!(
@@ -2111,7 +2111,7 @@ fn brightness_3d_real_mrc_trims_input_to_source_center_section() {
     unsafe {
         let name = CString::new(output.to_string_lossy().as_bytes()).unwrap();
         let file = ii_open(name.to_bytes(), "rb");
-        let header = (*file).mrc_header.as_deref_mut().expect("MRC header");
+        let header = (*file).mrc_header.as_mut().expect("MRC header");
         assert_eq!(
             mrc_head_read((&mut (*file).fp).as_mut().unwrap(), header),
             0
@@ -2138,7 +2138,7 @@ fn brightness_3d_iz_sets_source_input_z_range_before_section_list_rebuild() {
     unsafe {
         let name = CString::new(input.to_string_lossy().as_bytes()).unwrap();
         let file = ii_open_new(name.to_bytes(), "wb", IIFILE_DEFAULT);
-        let header = (*file).mrc_header.as_deref_mut().expect("MRC header");
+        let header = (*file).mrc_header.as_mut().expect("MRC header");
         assert_eq!(mrc_head_new(header, 1, 1, 4, MRC_MODE_FLOAT), 0);
         ii_sync_from_mrc_header(&mut *file, header);
         assert_eq!(
@@ -2172,7 +2172,7 @@ fn brightness_3d_iz_sets_source_input_z_range_before_section_list_rebuild() {
     unsafe {
         let name = CString::new(output.to_string_lossy().as_bytes()).unwrap();
         let file = ii_open(name.to_bytes(), "rb");
-        let header = (*file).mrc_header.as_deref_mut().expect("MRC header");
+        let header = (*file).mrc_header.as_mut().expect("MRC header");
         assert_eq!(
             mrc_head_read((&mut (*file).fp).as_mut().unwrap(), header),
             0
@@ -2201,7 +2201,7 @@ fn brightness_real_mrc_allows_requested_output_resize() {
     unsafe {
         let name = CString::new(input.to_string_lossy().as_bytes()).unwrap();
         let file = ii_open_new(name.to_bytes(), "wb", IIFILE_DEFAULT);
-        let header = (*file).mrc_header.as_deref_mut().expect("MRC header");
+        let header = (*file).mrc_header.as_mut().expect("MRC header");
         assert_eq!(mrc_head_new(header, 2, 1, 1, MRC_MODE_FLOAT), 0);
         ii_sync_from_mrc_header(&mut *file, header);
         assert_eq!(
@@ -2231,7 +2231,7 @@ fn brightness_real_mrc_allows_requested_output_resize() {
     unsafe {
         let name = CString::new(output.to_string_lossy().as_bytes()).unwrap();
         let file = ii_open(name.to_bytes(), "rb");
-        let header = (*file).mrc_header.as_deref_mut().expect("MRC header");
+        let header = (*file).mrc_header.as_mut().expect("MRC header");
         assert_eq!(
             mrc_head_read((&mut (*file).fp).as_mut().unwrap(), header),
             0
@@ -2255,7 +2255,7 @@ fn brightness_real_mrc_converts_new_output_to_requested_source_mode() {
     unsafe {
         let name = CString::new(input.to_string_lossy().as_bytes()).unwrap();
         let file = ii_open_new(name.to_bytes(), "wb", IIFILE_DEFAULT);
-        let header = (*file).mrc_header.as_deref_mut().expect("MRC header");
+        let header = (*file).mrc_header.as_mut().expect("MRC header");
         assert_eq!(mrc_head_new(header, 2, 1, 1, MRC_MODE_FLOAT), 0);
         ii_sync_from_mrc_header(&mut *file, header);
         assert_eq!(
@@ -2284,7 +2284,7 @@ fn brightness_real_mrc_converts_new_output_to_requested_source_mode() {
     unsafe {
         let name = CString::new(output.to_string_lossy().as_bytes()).unwrap();
         let file = ii_open(name.to_bytes(), "rb");
-        let header = (*file).mrc_header.as_deref_mut().expect("MRC header");
+        let header = (*file).mrc_header.as_mut().expect("MRC header");
         assert_eq!(
             mrc_head_read((&mut (*file).fp).as_mut().unwrap(), header),
             0
@@ -2311,7 +2311,7 @@ fn flatfield_real_mrc_keeps_source_fixed_output_size_with_warning() {
     unsafe {
         let name = CString::new(input.to_string_lossy().as_bytes()).unwrap();
         let file = ii_open_new(name.to_bytes(), "wb", IIFILE_DEFAULT);
-        let header = (*file).mrc_header.as_deref_mut().expect("MRC header");
+        let header = (*file).mrc_header.as_mut().expect("MRC header");
         assert_eq!(mrc_head_new(header, 3, 3, 1, MRC_MODE_FLOAT), 0);
         ii_sync_from_mrc_header(&mut *file, header);
         assert_eq!(
@@ -2345,7 +2345,7 @@ fn flatfield_real_mrc_keeps_source_fixed_output_size_with_warning() {
     unsafe {
         let name = CString::new(output.to_string_lossy().as_bytes()).unwrap();
         let file = ii_open(name.to_bytes(), "rb");
-        let header = (*file).mrc_header.as_deref_mut().expect("MRC header");
+        let header = (*file).mrc_header.as_mut().expect("MRC header");
         assert_eq!(
             mrc_head_read((&mut (*file).fp).as_mut().unwrap(), header),
             0
@@ -2369,7 +2369,7 @@ fn grap_volume_read_pads_and_crops_real_mrc_with_source_coordinates() {
     unsafe {
         let name = CString::new(input.to_string_lossy().as_bytes()).unwrap();
         let file = ii_open_new(name.to_bytes(), "wb", IIFILE_DEFAULT);
-        let header = (*file).mrc_header.as_deref_mut().expect("MRC header");
+        let header = (*file).mrc_header.as_mut().expect("MRC header");
         assert_eq!(mrc_head_new(header, 2, 2, 1, MRC_MODE_FLOAT), 0);
         ii_sync_from_mrc_header(&mut *file, header);
         assert_eq!(
@@ -2380,7 +2380,7 @@ fn grap_volume_read_pads_and_crops_real_mrc_with_source_coordinates() {
         assert_eq!(ii_write_section_float(&mut *file, &mut pixels, 0), 0);
         ii_close(file);
         let file = ii_open(name.to_bytes(), "rb");
-        let header = (*file).mrc_header.as_deref_mut().expect("MRC header");
+        let header = (*file).mrc_header.as_mut().expect("MRC header");
         let mut options = ClipOptions {
             pname: String::new(),
             command: String::new(),
@@ -2479,10 +2479,7 @@ fn grap_volume_read_pads_and_crops_real_mrc_with_source_coordinates() {
         let output_name = CString::new(output.to_string_lossy().as_bytes()).unwrap();
         let output_file = ii_open_new(output_name.to_bytes(), "wb", IIFILE_DEFAULT);
         assert!(!output_file.is_null());
-        let output_header = (*output_file)
-            .mrc_header
-            .as_deref_mut()
-            .expect("MRC header");
+        let output_header = (*output_file).mrc_header.as_mut().expect("MRC header");
         assert_eq!(
             imod_rs::imod::clip::file_io::grap_volume_write(
                 &mut volume,
@@ -2494,10 +2491,7 @@ fn grap_volume_read_pads_and_crops_real_mrc_with_source_coordinates() {
         ii_close(output_file);
         let append_file = ii_open(output_name.to_bytes(), "rb+");
         assert!(!append_file.is_null());
-        let append_header = (*append_file)
-            .mrc_header
-            .as_deref_mut()
-            .expect("MRC header");
+        let append_header = (*append_file).mrc_header.as_mut().expect("MRC header");
         assert_eq!(
             mrc_head_read((&mut (*append_file).fp).as_mut().unwrap(), append_header),
             0
@@ -2514,10 +2508,7 @@ fn grap_volume_read_pads_and_crops_real_mrc_with_source_coordinates() {
         ii_close(append_file);
         let truncate_file = ii_open(output_name.to_bytes(), "rb+");
         assert!(!truncate_file.is_null());
-        let truncate_header = (*truncate_file)
-            .mrc_header
-            .as_deref_mut()
-            .expect("MRC header");
+        let truncate_header = (*truncate_file).mrc_header.as_mut().expect("MRC header");
         assert_eq!(
             mrc_head_read(
                 (&mut (*truncate_file).fp).as_mut().unwrap(),
@@ -2538,10 +2529,7 @@ fn grap_volume_read_pads_and_crops_real_mrc_with_source_coordinates() {
         ii_close(truncate_file);
         let overwrite_file = ii_open(output_name.to_bytes(), "rb+");
         assert!(!overwrite_file.is_null());
-        let overwrite_header = (*overwrite_file)
-            .mrc_header
-            .as_deref_mut()
-            .expect("MRC header");
+        let overwrite_header = (*overwrite_file).mrc_header.as_mut().expect("MRC header");
         assert_eq!(
             mrc_head_read(
                 (&mut (*overwrite_file).fp).as_mut().unwrap(),
@@ -2563,10 +2551,7 @@ fn grap_volume_read_pads_and_crops_real_mrc_with_source_coordinates() {
         let mismatch_name = CString::new(mode_mismatch.to_string_lossy().as_bytes()).unwrap();
         let mismatch_file = ii_open_new(mismatch_name.to_bytes(), "wb", IIFILE_DEFAULT);
         assert!(!mismatch_file.is_null());
-        let mismatch_header = (*mismatch_file)
-            .mrc_header
-            .as_deref_mut()
-            .expect("MRC header");
+        let mismatch_header = (*mismatch_file).mrc_header.as_mut().expect("MRC header");
         assert_eq!(mrc_head_new(mismatch_header, 3, 3, 6, MRC_MODE_SHORT), 0);
         ii_sync_from_mrc_header(&mut *mismatch_file, mismatch_header);
         assert_eq!(
@@ -2593,7 +2578,7 @@ fn grap_volume_read_pads_and_crops_real_mrc_with_source_coordinates() {
     unsafe {
         let name = CString::new(output.to_string_lossy().as_bytes()).unwrap();
         let file = ii_open(name.to_bytes(), "rb");
-        let header = (*file).mrc_header.as_deref_mut().expect("MRC header");
+        let header = (*file).mrc_header.as_mut().expect("MRC header");
         assert_eq!((header.nx, header.ny, header.nz), (3, 3, 6));
         let mut pixels = [0_f32; 9];
         assert_eq!(ii_read_section_float(&mut *file, &mut pixels, 3), 0);
@@ -2618,7 +2603,7 @@ fn multifile_real_mrc_mismatch_reports_source_file_io_diagnostic() {
         for (path, nx, mut pixels) in [(&first, 2, vec![1_f32; 4]), (&second, 3, vec![2_f32; 6])] {
             let name = CString::new(path.to_string_lossy().as_bytes()).unwrap();
             let file = ii_open_new(name.to_bytes(), "wb", IIFILE_DEFAULT);
-            let header = (*file).mrc_header.as_deref_mut().expect("MRC header");
+            let header = (*file).mrc_header.as_mut().expect("MRC header");
             assert_eq!(mrc_head_new(header, nx, 2, 1, MRC_MODE_FLOAT), 0);
             ii_sync_from_mrc_header(&mut *file, header);
             assert_eq!(
@@ -2665,7 +2650,7 @@ fn multifile_real_mrc_combines_source_sections_into_output_depth() {
         for (path, mut pixels) in [(&first, vec![1_f32, 2.]), (&second, vec![3_f32, 4.])] {
             let name = CString::new(path.to_string_lossy().as_bytes()).unwrap();
             let file = ii_open_new(name.to_bytes(), "wb", IIFILE_DEFAULT);
-            let header = (*file).mrc_header.as_deref_mut().expect("MRC header");
+            let header = (*file).mrc_header.as_mut().expect("MRC header");
             assert_eq!(mrc_head_new(header, 2, 1, 1, MRC_MODE_FLOAT), 0);
             ii_sync_from_mrc_header(&mut *file, header);
             assert_eq!(
@@ -2694,7 +2679,7 @@ fn multifile_real_mrc_combines_source_sections_into_output_depth() {
     unsafe {
         let name = CString::new(output.to_string_lossy().as_bytes()).unwrap();
         let file = ii_open(name.to_bytes(), "rb");
-        let header = (*file).mrc_header.as_deref_mut().expect("MRC header");
+        let header = (*file).mrc_header.as_mut().expect("MRC header");
         assert_eq!(
             mrc_head_read((&mut (*file).fp).as_mut().unwrap(), header),
             0
@@ -2729,7 +2714,7 @@ fn multifile_real_mrc_append_is_rejected_before_output_lifecycle_setup() {
         ] {
             let name = CString::new(path.to_string_lossy().as_bytes()).unwrap();
             let file = ii_open_new(name.to_bytes(), "wb", IIFILE_DEFAULT);
-            let header = (*file).mrc_header.as_deref_mut().expect("MRC header");
+            let header = (*file).mrc_header.as_mut().expect("MRC header");
             assert_eq!(mrc_head_new(header, 2, 1, 1, MRC_MODE_FLOAT), 0);
             ii_sync_from_mrc_header(&mut *file, header);
             assert_eq!(
@@ -2774,7 +2759,7 @@ fn multifile_real_mrc_rejects_source_blank_output_sections() {
         for (path, mut pixels) in [(&first, vec![1_f32, 2.]), (&second, vec![3_f32, 4.])] {
             let name = CString::new(path.to_string_lossy().as_bytes()).unwrap();
             let file = ii_open_new(name.to_bytes(), "wb", IIFILE_DEFAULT);
-            let header = (*file).mrc_header.as_deref_mut().expect("MRC header");
+            let header = (*file).mrc_header.as_mut().expect("MRC header");
             assert_eq!(mrc_head_new(header, 2, 1, 1, MRC_MODE_FLOAT), 0);
             ii_sync_from_mrc_header(&mut *file, header);
             assert_eq!(
@@ -2820,7 +2805,7 @@ fn divide_reuses_single_second_mrc_slice_and_rounds_integer_output() {
         ] {
             let name = CString::new(path.to_string_lossy().as_bytes()).unwrap();
             let file = ii_open_new(name.to_bytes(), "wb", IIFILE_DEFAULT);
-            let header = (*file).mrc_header.as_deref_mut().expect("MRC header");
+            let header = (*file).mrc_header.as_mut().expect("MRC header");
             assert_eq!(
                 mrc_head_new(header, 2, 2, sections.len() as i32, MRC_MODE_SHORT),
                 0
@@ -2860,7 +2845,7 @@ fn divide_reuses_single_second_mrc_slice_and_rounds_integer_output() {
     unsafe {
         let name = CString::new(output.to_string_lossy().as_bytes()).unwrap();
         let file = ii_open(name.to_bytes(), "rb");
-        let header = (*file).mrc_header.as_deref_mut().expect("MRC header");
+        let header = (*file).mrc_header.as_mut().expect("MRC header");
         assert_eq!(
             (header.nx, header.ny, header.nz, header.mode),
             (2, 2, 2, MRC_MODE_SHORT)
@@ -2898,7 +2883,7 @@ fn normalize_applies_real_float_gain_reference_to_real_mrc() {
         ] {
             let name = CString::new(path.to_string_lossy().as_bytes()).unwrap();
             let file = ii_open_new(name.to_bytes(), "wb", IIFILE_DEFAULT);
-            let header = (*file).mrc_header.as_deref_mut().expect("MRC header");
+            let header = (*file).mrc_header.as_mut().expect("MRC header");
             assert_eq!(mrc_head_new(header, 2, 2, 1, mode), 0);
             ii_sync_from_mrc_header(&mut *file, header);
             assert_eq!(
@@ -2932,7 +2917,7 @@ fn normalize_applies_real_float_gain_reference_to_real_mrc() {
     unsafe {
         let name = CString::new(output.to_string_lossy().as_bytes()).unwrap();
         let file = ii_open(name.to_bytes(), "rb");
-        let header = (*file).mrc_header.as_deref_mut().expect("MRC header");
+        let header = (*file).mrc_header.as_mut().expect("MRC header");
         assert_eq!(
             (header.nx, header.ny, header.nz, header.mode),
             (2, 2, 1, MRC_MODE_FLOAT)
@@ -2965,7 +2950,7 @@ fn average_reads_all_rows_of_real_multifile_mrc_inputs() {
         ] {
             let name = CString::new(path.to_string_lossy().as_bytes()).unwrap();
             let file = ii_open_new(name.to_bytes(), "wb", IIFILE_DEFAULT);
-            let header = (*file).mrc_header.as_deref_mut().expect("MRC header");
+            let header = (*file).mrc_header.as_mut().expect("MRC header");
             assert_eq!(mrc_head_new(header, 2, 3, 1, 2), 0);
             if path == &first {
                 mrc_head_label(header, b"first input lifecycle label");
@@ -3008,7 +2993,7 @@ fn average_reads_all_rows_of_real_multifile_mrc_inputs() {
     unsafe {
         let name = CString::new(output.to_string_lossy().as_bytes()).unwrap();
         let file = ii_open(name.to_bytes(), "rb");
-        let header = (*file).mrc_header.as_deref_mut().expect("MRC header");
+        let header = (*file).mrc_header.as_mut().expect("MRC header");
         assert_eq!(&(&header.labels[0])[..27], b"first input lifecycle label");
         let mut pixels = [0.0_f32; 6];
         assert_eq!(ii_read_section_float(&mut *file, &mut pixels, 0), 0);
@@ -3028,7 +3013,7 @@ fn brightness_reads_and_writes_real_mrc_pixels() {
     let input_c = CString::new(input.to_string_lossy().as_bytes()).unwrap();
     unsafe {
         let file = ii_open_new(input_c.to_bytes(), "wb", IIFILE_DEFAULT);
-        let header = (*file).mrc_header.as_deref_mut().expect("MRC header");
+        let header = (*file).mrc_header.as_mut().expect("MRC header");
         assert_eq!(mrc_head_new(header, 2, 2, 1, 2), 0);
         header.amin = 1.;
         header.amean = 2.5;
@@ -3096,7 +3081,7 @@ fn brightness_reads_each_real_multifile_mrc_header_and_slice() {
         ] {
             let name = CString::new(path.to_string_lossy().as_bytes()).unwrap();
             let file = ii_open_new(name.to_bytes(), "wb", IIFILE_DEFAULT);
-            let header = (*file).mrc_header.as_deref_mut().expect("MRC header");
+            let header = (*file).mrc_header.as_mut().expect("MRC header");
             assert_eq!(mrc_head_new(header, 2, 2, 1, 2), 0);
             header.amin = pixels[0];
             header.amean = (pixels[0] + pixels[1] + pixels[2] + pixels[3]) / 4.0;
@@ -3130,7 +3115,7 @@ fn brightness_reads_each_real_multifile_mrc_header_and_slice() {
     let output_c = CString::new(output.to_string_lossy().as_bytes()).unwrap();
     unsafe {
         let file = ii_open(output_c.to_bytes(), "rb");
-        let header = (*file).mrc_header.as_deref_mut().expect("MRC header");
+        let header = (*file).mrc_header.as_mut().expect("MRC header");
         assert_eq!(
             mrc_head_read((&mut (*file).fp).as_mut().unwrap(), header),
             0
@@ -3256,7 +3241,7 @@ fn boxsd_keeps_source_output_scale_after_real_map_setup() {
     let input_c = CString::new(input.to_string_lossy().as_bytes()).unwrap();
     unsafe {
         let file = ii_open_new(input_c.to_bytes(), "wb", IIFILE_DEFAULT);
-        let header = (*file).mrc_header.as_deref_mut().expect("MRC header");
+        let header = (*file).mrc_header.as_mut().expect("MRC header");
         assert_eq!(mrc_head_new(header, 16, 16, 1, 2), 0);
         header.xlen = 12.;
         header.ylen = 20.;
@@ -3292,7 +3277,7 @@ fn boxsd_keeps_source_output_scale_after_real_map_setup() {
     let output_c = CString::new(output.to_string_lossy().as_bytes()).unwrap();
     unsafe {
         let file = ii_open(output_c.to_bytes(), "rb");
-        let header = (*file).mrc_header.as_deref_mut().expect("MRC header");
+        let header = (*file).mrc_header.as_mut().expect("MRC header");
         assert_eq!(
             mrc_head_read((&mut (*file).fp).as_mut().unwrap(), header),
             0
@@ -3324,7 +3309,7 @@ fn boxsd_rejects_subunit_reduction_before_real_mrc_output_open() {
     unsafe {
         let name = CString::new(input.to_string_lossy().as_bytes()).unwrap();
         let file = ii_open_new(name.to_bytes(), "wb", IIFILE_DEFAULT);
-        let header = (*file).mrc_header.as_deref_mut().expect("MRC header");
+        let header = (*file).mrc_header.as_mut().expect("MRC header");
         assert_eq!(mrc_head_new(header, 1, 1, 1, MRC_MODE_FLOAT), 0);
         ii_sync_from_mrc_header(&mut *file, header);
         assert_eq!(
@@ -3366,7 +3351,7 @@ fn defect_list_without_both_camera_sizes_fatals_before_real_mrc_output_open() {
     unsafe {
         let name = CString::new(input.to_string_lossy().as_bytes()).unwrap();
         let file = ii_open_new(name.to_bytes(), "wb", IIFILE_DEFAULT);
-        let header = (*file).mrc_header.as_deref_mut().expect("MRC header");
+        let header = (*file).mrc_header.as_mut().expect("MRC header");
         assert_eq!(mrc_head_new(header, 1, 1, 1, MRC_MODE_FLOAT), 0);
         ii_sync_from_mrc_header(&mut *file, header);
         assert_eq!(
@@ -3408,7 +3393,7 @@ fn supergain_rejects_eer_option_before_real_mrc_lifecycle() {
     unsafe {
         let name = CString::new(input.to_string_lossy().as_bytes()).unwrap();
         let file = ii_open_new(name.to_bytes(), "wb", IIFILE_DEFAULT);
-        let header = (*file).mrc_header.as_deref_mut().expect("MRC header");
+        let header = (*file).mrc_header.as_mut().expect("MRC header");
         assert_eq!(mrc_head_new(header, 1, 1, 1, MRC_MODE_FLOAT), 0);
         ii_sync_from_mrc_header(&mut *file, header);
         assert_eq!(
@@ -3449,7 +3434,7 @@ fn defect_binning_below_source_minimum_fatals_before_real_mrc_output_open() {
     unsafe {
         let name = CString::new(input.to_string_lossy().as_bytes()).unwrap();
         let file = ii_open_new(name.to_bytes(), "wb", IIFILE_DEFAULT);
-        let header = (*file).mrc_header.as_deref_mut().expect("MRC header");
+        let header = (*file).mrc_header.as_mut().expect("MRC header");
         assert_eq!(mrc_head_new(header, 1, 1, 1, MRC_MODE_FLOAT), 0);
         ii_sync_from_mrc_header(&mut *file, header);
         assert_eq!(
@@ -3491,7 +3476,7 @@ fn missing_defect_list_reports_source_open_error_before_real_mrc_lifecycle() {
     unsafe {
         let name = CString::new(input.to_string_lossy().as_bytes()).unwrap();
         let file = ii_open_new(name.to_bytes(), "wb", IIFILE_DEFAULT);
-        let header = (*file).mrc_header.as_deref_mut().expect("MRC header");
+        let header = (*file).mrc_header.as_mut().expect("MRC header");
         assert_eq!(mrc_head_new(header, 1, 1, 1, MRC_MODE_FLOAT), 0);
         ii_sync_from_mrc_header(&mut *file, header);
         assert_eq!(
@@ -3532,7 +3517,7 @@ fn invalid_mode_reports_source_error_before_real_mrc_output_open() {
     unsafe {
         let name = CString::new(input.to_string_lossy().as_bytes()).unwrap();
         let file = ii_open_new(name.to_bytes(), "wb", IIFILE_DEFAULT);
-        let header = (*file).mrc_header.as_deref_mut().expect("MRC header");
+        let header = (*file).mrc_header.as_mut().expect("MRC header");
         assert_eq!(mrc_head_new(header, 1, 1, 1, MRC_MODE_FLOAT), 0);
         ii_sync_from_mrc_header(&mut *file, header);
         assert_eq!(
@@ -3573,7 +3558,7 @@ fn flatfield_forces_source_float_mode_for_real_mrc_byte_request() {
     unsafe {
         let name = CString::new(input.to_string_lossy().as_bytes()).unwrap();
         let file = ii_open_new(name.to_bytes(), "wb", IIFILE_DEFAULT);
-        let header = (*file).mrc_header.as_deref_mut().expect("MRC header");
+        let header = (*file).mrc_header.as_mut().expect("MRC header");
         assert_eq!(mrc_head_new(header, 15, 15, 1, MRC_MODE_FLOAT), 0);
         ii_sync_from_mrc_header(&mut *file, header);
         assert_eq!(
@@ -3614,7 +3599,7 @@ fn flatfield_forces_source_float_mode_for_real_mrc_byte_request() {
     unsafe {
         let name = CString::new(output.to_string_lossy().as_bytes()).unwrap();
         let file = ii_open(name.to_bytes(), "rb");
-        let header = (*file).mrc_header.as_deref_mut().expect("MRC header");
+        let header = (*file).mrc_header.as_mut().expect("MRC header");
         assert_eq!(header.mode, MRC_MODE_FLOAT);
         ii_close(file);
     }
@@ -3634,7 +3619,7 @@ fn invalid_option_reports_source_fatal_before_real_mrc_lifecycle() {
     unsafe {
         let name = CString::new(input.to_string_lossy().as_bytes()).unwrap();
         let file = ii_open_new(name.to_bytes(), "wb", IIFILE_DEFAULT);
-        let header = (*file).mrc_header.as_deref_mut().expect("MRC header");
+        let header = (*file).mrc_header.as_mut().expect("MRC header");
         assert_eq!(mrc_head_new(header, 1, 1, 1, MRC_MODE_FLOAT), 0);
         ii_sync_from_mrc_header(&mut *file, header);
         assert_eq!(
@@ -3674,7 +3659,7 @@ fn invalid_output_format_reports_source_fatal_before_real_mrc_lifecycle() {
     unsafe {
         let name = CString::new(input.to_string_lossy().as_bytes()).unwrap();
         let file = ii_open_new(name.to_bytes(), "wb", IIFILE_DEFAULT);
-        let header = (*file).mrc_header.as_deref_mut().expect("MRC header");
+        let header = (*file).mrc_header.as_mut().expect("MRC header");
         assert_eq!(mrc_head_new(header, 1, 1, 1, MRC_MODE_FLOAT), 0);
         ii_sync_from_mrc_header(&mut *file, header);
         assert_eq!(
@@ -3712,7 +3697,7 @@ fn average_accepts_source_short_2d_option_for_real_mrc() {
     unsafe {
         let name = CString::new(input.to_string_lossy().as_bytes()).unwrap();
         let file = ii_open_new(name.to_bytes(), "wb", IIFILE_DEFAULT);
-        let header = (*file).mrc_header.as_deref_mut().expect("MRC header");
+        let header = (*file).mrc_header.as_mut().expect("MRC header");
         assert_eq!(mrc_head_new(header, 1, 1, 2, MRC_MODE_FLOAT), 0);
         ii_sync_from_mrc_header(&mut *file, header);
         assert_eq!(
@@ -3740,7 +3725,7 @@ fn average_accepts_source_short_2d_option_for_real_mrc() {
     unsafe {
         let name = CString::new(output.to_string_lossy().as_bytes()).unwrap();
         let file = ii_open(name.to_bytes(), "rb");
-        let header = (*file).mrc_header.as_deref_mut().expect("MRC header");
+        let header = (*file).mrc_header.as_mut().expect("MRC header");
         assert_eq!(header.nz, 1);
         let mut pixel = [f32::NAN];
         assert_eq!(ii_read_section_float(&mut *file, &mut pixel, 0), 0);
@@ -3762,7 +3747,7 @@ fn append_accepts_source_second_character_option_spelling_for_real_mrc() {
         for (path, value) in [(&input, 3_f32), (&output, 2_f32)] {
             let name = CString::new(path.to_string_lossy().as_bytes()).unwrap();
             let file = ii_open_new(name.to_bytes(), "wb", IIFILE_DEFAULT);
-            let header = (*file).mrc_header.as_deref_mut().expect("MRC header");
+            let header = (*file).mrc_header.as_mut().expect("MRC header");
             assert_eq!(mrc_head_new(header, 1, 1, 1, MRC_MODE_FLOAT), 0);
             ii_sync_from_mrc_header(&mut *file, header);
             assert_eq!(
@@ -3787,7 +3772,7 @@ fn append_accepts_source_second_character_option_spelling_for_real_mrc() {
     unsafe {
         let name = CString::new(output.to_string_lossy().as_bytes()).unwrap();
         let file = ii_open(name.to_bytes(), "rb");
-        let header = (*file).mrc_header.as_deref_mut().expect("MRC header");
+        let header = (*file).mrc_header.as_mut().expect("MRC header");
         assert_eq!(header.nz, 2);
         let mut old = [f32::NAN];
         let mut appended = [f32::NAN];
@@ -3811,7 +3796,7 @@ fn brightness_accepts_source_second_character_number_option_for_real_mrc() {
     unsafe {
         let name = CString::new(input.to_string_lossy().as_bytes()).unwrap();
         let file = ii_open_new(name.to_bytes(), "wb", IIFILE_DEFAULT);
-        let header = (*file).mrc_header.as_deref_mut().expect("MRC header");
+        let header = (*file).mrc_header.as_mut().expect("MRC header");
         assert_eq!(mrc_head_new(header, 2, 1, 1, MRC_MODE_FLOAT), 0);
         header.amin = 1.;
         header.amax = 3.;
@@ -3858,7 +3843,7 @@ fn threshold_accepts_source_second_character_sano_option_for_real_mrc() {
     unsafe {
         let name = CString::new(input.to_string_lossy().as_bytes()).unwrap();
         let file = ii_open_new(name.to_bytes(), "wb", IIFILE_DEFAULT);
-        let header = (*file).mrc_header.as_deref_mut().expect("MRC header");
+        let header = (*file).mrc_header.as_mut().expect("MRC header");
         assert_eq!(mrc_head_new(header, 2, 1, 1, MRC_MODE_FLOAT), 0);
         header.amin = 1.;
         header.amax = 3.;
@@ -3941,7 +3926,7 @@ fn missing_output_for_real_mrc_exits_with_source_usage_status() {
     unsafe {
         let name = CString::new(input.to_string_lossy().as_bytes()).unwrap();
         let file = ii_open_new(name.to_bytes(), "wb", IIFILE_DEFAULT);
-        let header = (*file).mrc_header.as_deref_mut().expect("MRC header");
+        let header = (*file).mrc_header.as_mut().expect("MRC header");
         assert_eq!(mrc_head_new(header, 1, 1, 1, MRC_MODE_FLOAT), 0);
         ii_sync_from_mrc_header(&mut *file, header);
         assert_eq!(
@@ -3976,7 +3961,7 @@ fn unknown_command_exits_with_source_usage_status_before_real_mrc_open() {
     unsafe {
         let name = CString::new(input.to_string_lossy().as_bytes()).unwrap();
         let file = ii_open_new(name.to_bytes(), "wb", IIFILE_DEFAULT);
-        let header = (*file).mrc_header.as_deref_mut().expect("MRC header");
+        let header = (*file).mrc_header.as_mut().expect("MRC header");
         assert_eq!(mrc_head_new(header, 1, 1, 1, MRC_MODE_FLOAT), 0);
         ii_sync_from_mrc_header(&mut *file, header);
         assert_eq!(
@@ -4014,7 +3999,7 @@ fn standalone_z_option_reports_source_invalid_option_for_real_mrc() {
     unsafe {
         let name = CString::new(input.to_string_lossy().as_bytes()).unwrap();
         let file = ii_open_new(name.to_bytes(), "wb", IIFILE_DEFAULT);
-        let header = (*file).mrc_header.as_deref_mut().expect("MRC header");
+        let header = (*file).mrc_header.as_mut().expect("MRC header");
         assert_eq!(mrc_head_new(header, 1, 1, 1, MRC_MODE_FLOAT), 0);
         ii_sync_from_mrc_header(&mut *file, header);
         assert_eq!(
@@ -4056,7 +4041,7 @@ fn long_one_based_option_overwrites_source_first_section_in_real_mrc() {
         for (path, values) in [(&input, vec![3_f32]), (&output, vec![2_f32, 4_f32])] {
             let name = CString::new(path.to_string_lossy().as_bytes()).unwrap();
             let file = ii_open_new(name.to_bytes(), "wb", IIFILE_DEFAULT);
-            let header = (*file).mrc_header.as_deref_mut().expect("MRC header");
+            let header = (*file).mrc_header.as_mut().expect("MRC header");
             assert_eq!(
                 mrc_head_new(header, 1, 1, values.len() as i32, MRC_MODE_FLOAT),
                 0
@@ -4091,7 +4076,7 @@ fn long_one_based_option_overwrites_source_first_section_in_real_mrc() {
     unsafe {
         let name = CString::new(output.to_string_lossy().as_bytes()).unwrap();
         let file = ii_open(name.to_bytes(), "rb");
-        let header = (*file).mrc_header.as_deref_mut().expect("MRC header");
+        let header = (*file).mrc_header.as_mut().expect("MRC header");
         assert_eq!(header.nz, 2);
         let mut first = [f32::NAN];
         let mut second = [f32::NAN];
@@ -4116,7 +4101,7 @@ fn defectmap_writes_source_byte_map_for_real_mrc_defect_list() {
     unsafe {
         let name = CString::new(input.to_string_lossy().as_bytes()).unwrap();
         let file = ii_open_new(name.to_bytes(), "wb", IIFILE_DEFAULT);
-        let header = (*file).mrc_header.as_deref_mut().expect("MRC header");
+        let header = (*file).mrc_header.as_mut().expect("MRC header");
         assert_eq!(mrc_head_new(header, 2, 2, 1, MRC_MODE_FLOAT), 0);
         ii_sync_from_mrc_header(&mut *file, header);
         assert_eq!(
@@ -4150,7 +4135,7 @@ fn defectmap_writes_source_byte_map_for_real_mrc_defect_list() {
     unsafe {
         let name = CString::new(output.to_string_lossy().as_bytes()).unwrap();
         let file = ii_open(name.to_bytes(), "rb");
-        let header = (*file).mrc_header.as_deref_mut().expect("MRC header");
+        let header = (*file).mrc_header.as_mut().expect("MRC header");
         assert_eq!((header.mode, header.nz), (MRC_MODE_BYTE, 1));
         let mut pixels = [f32::NAN; 4];
         assert_eq!(ii_read_section_float(&mut *file, &mut pixels, 0), 0);
@@ -4174,7 +4159,7 @@ fn defectmap_writes_real_tiff_through_source_iimage_dispatch() {
     unsafe {
         let name = CString::new(input.to_string_lossy().as_bytes()).unwrap();
         let file = ii_open_new(name.to_bytes(), "wb", IIFILE_DEFAULT);
-        let header = (*file).mrc_header.as_deref_mut().expect("MRC header");
+        let header = (*file).mrc_header.as_mut().expect("MRC header");
         assert_eq!(mrc_head_new(header, 2, 2, 1, MRC_MODE_FLOAT), 0);
         ii_sync_from_mrc_header(&mut *file, header);
         assert_eq!(
@@ -4239,7 +4224,7 @@ fn brightness_forces_source_bigtiff_output_for_real_mrc() {
     unsafe {
         let name = CString::new(input.to_string_lossy().as_bytes()).unwrap();
         let file = ii_open_new(name.to_bytes(), "wb", IIFILE_DEFAULT);
-        let header = (*file).mrc_header.as_deref_mut().expect("MRC header");
+        let header = (*file).mrc_header.as_mut().expect("MRC header");
         assert_eq!(mrc_head_new(header, 2, 2, 1, MRC_MODE_FLOAT), 0);
         ii_sync_from_mrc_header(&mut *file, header);
         assert_eq!(
@@ -4293,7 +4278,7 @@ fn brightness_writes_source_serialemccd_tiff_description() {
     unsafe {
         let name = CString::new(input.to_string_lossy().as_bytes()).unwrap();
         let file = ii_open_new(name.to_bytes(), "wb", IIFILE_DEFAULT);
-        let header = (*file).mrc_header.as_deref_mut().expect("MRC header");
+        let header = (*file).mrc_header.as_mut().expect("MRC header");
         assert_eq!(mrc_head_new(header, 1, 1, 1, MRC_MODE_FLOAT), 0);
         mrc_head_label(header, b"SerialEMCCD 4 bits packed");
         ii_sync_from_mrc_header(&mut *file, header);
@@ -4352,7 +4337,7 @@ fn brightness_tiff_readback_strips_source_cr_before_description_newline() {
     unsafe {
         let name = CString::new(input.to_string_lossy().as_bytes()).unwrap();
         let file = ii_open_new(name.to_bytes(), "wb", IIFILE_DEFAULT);
-        let header = (*file).mrc_header.as_deref_mut().expect("MRC header");
+        let header = (*file).mrc_header.as_mut().expect("MRC header");
         assert_eq!(mrc_head_new(header, 1, 1, 1, MRC_MODE_FLOAT), 0);
         (&mut header.labels[0])[..6].copy_from_slice(b"first\r");
         (&mut header.labels[1])[..6].copy_from_slice(b"second");
@@ -4411,7 +4396,7 @@ fn threshold_accepts_source_second_character_lower_option_for_real_mrc() {
     unsafe {
         let name = CString::new(input.to_string_lossy().as_bytes()).unwrap();
         let file = ii_open_new(name.to_bytes(), "wb", IIFILE_DEFAULT);
-        let header = (*file).mrc_header.as_deref_mut().expect("MRC header");
+        let header = (*file).mrc_header.as_mut().expect("MRC header");
         assert_eq!(mrc_head_new(header, 2, 1, 1, MRC_MODE_FLOAT), 0);
         header.amin = 1.;
         header.amax = 3.;
@@ -4460,7 +4445,7 @@ fn threshold_accepts_source_second_character_higher_option_for_real_mrc() {
     unsafe {
         let name = CString::new(input.to_string_lossy().as_bytes()).unwrap();
         let file = ii_open_new(name.to_bytes(), "wb", IIFILE_DEFAULT);
-        let header = (*file).mrc_header.as_deref_mut().expect("MRC header");
+        let header = (*file).mrc_header.as_mut().expect("MRC header");
         assert_eq!(mrc_head_new(header, 2, 1, 1, MRC_MODE_FLOAT), 0);
         header.amin = 1.;
         header.amax = 3.;
@@ -4508,7 +4493,7 @@ fn integral_uses_a_real_immutable_float_reference_slice() {
     let input_c = CString::new(input.to_string_lossy().as_bytes()).unwrap();
     unsafe {
         let file = ii_open_new(input_c.to_bytes(), "wb", IIFILE_DEFAULT);
-        let header = (*file).mrc_header.as_deref_mut().expect("MRC header");
+        let header = (*file).mrc_header.as_mut().expect("MRC header");
         assert_eq!(mrc_head_new(header, 10, 10, 1, 2), 0);
         ii_sync_from_mrc_header(&mut *file, header);
         assert_eq!(
@@ -4569,7 +4554,7 @@ fn integral_uses_source_x_extent_for_its_lower_y_border_on_non_square_mrc() {
     let input_c = CString::new(input.to_string_lossy().as_bytes()).unwrap();
     unsafe {
         let file = ii_open_new(input_c.to_bytes(), "wb", IIFILE_DEFAULT);
-        let header = (*file).mrc_header.as_deref_mut().expect("MRC header");
+        let header = (*file).mrc_header.as_mut().expect("MRC header");
         assert_eq!(mrc_head_new(header, 10, 12, 1, MRC_MODE_FLOAT), 0);
         ii_sync_from_mrc_header(&mut *file, header);
         assert_eq!(
@@ -4620,7 +4605,7 @@ fn logarithm_and_square_root_follow_single_precision_real_mrc_transforms() {
     let input_c = CString::new(input.to_string_lossy().as_bytes()).unwrap();
     unsafe {
         let file = ii_open_new(input_c.to_bytes(), "wb", IIFILE_DEFAULT);
-        let header = (*file).mrc_header.as_deref_mut().expect("MRC header");
+        let header = (*file).mrc_header.as_mut().expect("MRC header");
         assert_eq!(mrc_head_new(header, 2, 2, 1, 2), 0);
         header.amin = -5.;
         header.amax = 100.;
@@ -4673,7 +4658,7 @@ fn logarithm_and_square_root_follow_single_precision_real_mrc_transforms() {
         ] {
             let name = CString::new(path.to_string_lossy().as_bytes()).unwrap();
             let file = ii_open(name.to_bytes(), "rb");
-            let header = (*file).mrc_header.as_deref_mut().expect("MRC header");
+            let header = (*file).mrc_header.as_mut().expect("MRC header");
             assert_eq!(
                 mrc_head_read((&mut (*file).fp).as_mut().unwrap(), header),
                 0
@@ -4710,7 +4695,7 @@ fn threshold_writes_source_formatted_points_for_real_mrc_pixels() {
     let input_c = CString::new(input.to_string_lossy().as_bytes()).unwrap();
     unsafe {
         let file = ii_open_new(input_c.to_bytes(), "wb", IIFILE_DEFAULT);
-        let header = (*file).mrc_header.as_deref_mut().expect("MRC header");
+        let header = (*file).mrc_header.as_mut().expect("MRC header");
         assert_eq!(mrc_head_new(header, 2, 2, 1, 2), 0);
         ii_sync_from_mrc_header(&mut *file, header);
         assert_eq!(
@@ -4786,7 +4771,7 @@ fn brightness_keeps_a_nondefault_float_near_the_source_sentinel() {
     let input_c = CString::new(input.to_string_lossy().as_bytes()).unwrap();
     unsafe {
         let file = ii_open_new(input_c.to_bytes(), "wb", IIFILE_DEFAULT);
-        let header = (*file).mrc_header.as_deref_mut().expect("MRC header");
+        let header = (*file).mrc_header.as_mut().expect("MRC header");
         assert_eq!(mrc_head_new(header, 2, 1, 1, 2), 0);
         header.amin = 1.;
         header.amax = 2.;
@@ -4836,7 +4821,7 @@ fn contrast_2d_uses_each_real_slice_mean_from_source_slice_mmm() {
     let input_c = CString::new(input.to_string_lossy().as_bytes()).unwrap();
     unsafe {
         let file = ii_open_new(input_c.to_bytes(), "wb", IIFILE_DEFAULT);
-        let header = (*file).mrc_header.as_deref_mut().expect("MRC header");
+        let header = (*file).mrc_header.as_mut().expect("MRC header");
         assert_eq!(mrc_head_new(header, 2, 1, 2, 2), 0);
         ii_sync_from_mrc_header(&mut *file, header);
         assert_eq!(
@@ -4868,7 +4853,7 @@ fn contrast_2d_uses_each_real_slice_mean_from_source_slice_mmm() {
     let output_c = CString::new(output.to_string_lossy().as_bytes()).unwrap();
     unsafe {
         let file = ii_open(output_c.to_bytes(), "rb");
-        let header = (*file).mrc_header.as_deref_mut().expect("MRC header");
+        let header = (*file).mrc_header.as_mut().expect("MRC header");
         assert_eq!(
             mrc_head_read((&mut (*file).fp).as_mut().unwrap(), header),
             0
@@ -4893,7 +4878,7 @@ fn sobel_uses_clip_edge_float_to_byte_and_real_mrc_header_path() {
     let input_c = CString::new(input.to_string_lossy().as_bytes()).unwrap();
     unsafe {
         let file = ii_open_new(input_c.to_bytes(), "wb", IIFILE_DEFAULT);
-        let header = (*file).mrc_header.as_deref_mut().expect("MRC header");
+        let header = (*file).mrc_header.as_mut().expect("MRC header");
         assert_eq!(mrc_head_new(header, 8, 8, 1, 2), 0);
         ii_sync_from_mrc_header(&mut *file, header);
         assert_eq!(
@@ -4925,7 +4910,7 @@ fn sobel_uses_clip_edge_float_to_byte_and_real_mrc_header_path() {
     let output_c = CString::new(output.to_string_lossy().as_bytes()).unwrap();
     unsafe {
         let file = ii_open(output_c.to_bytes(), "rb");
-        let header = (*file).mrc_header.as_deref_mut().expect("MRC header");
+        let header = (*file).mrc_header.as_mut().expect("MRC header");
         assert_eq!(
             mrc_head_read((&mut (*file).fp).as_mut().unwrap(), header),
             0
@@ -5040,7 +5025,7 @@ fn color_2d_writes_source_rounded_rgb_bytes_to_real_mrc() {
     let input_c = CString::new(input.to_string_lossy().as_bytes()).unwrap();
     unsafe {
         let file = ii_open_new(input_c.to_bytes(), "wb", IIFILE_DEFAULT);
-        let header = (*file).mrc_header.as_deref_mut().expect("MRC header");
+        let header = (*file).mrc_header.as_mut().expect("MRC header");
         assert_eq!(mrc_head_new(header, 2, 1, 1, 2), 0);
         header.amin = 10.;
         header.amean = 55.;
@@ -5122,7 +5107,7 @@ fn laplacian_convolve_filters_a_real_mrc_slice() {
     let input_c = CString::new(input.to_string_lossy().as_bytes()).unwrap();
     unsafe {
         let file = ii_open_new(input_c.to_bytes(), "wb", IIFILE_DEFAULT);
-        let header = (*file).mrc_header.as_deref_mut().expect("MRC header");
+        let header = (*file).mrc_header.as_mut().expect("MRC header");
         assert_eq!(mrc_head_new(header, 3, 3, 1, 2), 0);
         header.amin = 1.;
         header.amean = 5.;
@@ -5156,7 +5141,7 @@ fn laplacian_convolve_filters_a_real_mrc_slice() {
     let output_c = CString::new(output.to_string_lossy().as_bytes()).unwrap();
     unsafe {
         let file = ii_open(output_c.to_bytes(), "rb");
-        let header = (*file).mrc_header.as_deref_mut().expect("MRC header");
+        let header = (*file).mrc_header.as_mut().expect("MRC header");
         assert_eq!(
             mrc_head_read((&mut (*file).fp).as_mut().unwrap(), header),
             0
@@ -5182,7 +5167,7 @@ fn smooth_default_uses_the_source_3d_gaussian_route_on_real_mrc_data() {
     let input_c = CString::new(input.to_string_lossy().as_bytes()).unwrap();
     unsafe {
         let file = ii_open_new(input_c.to_bytes(), "wb", IIFILE_DEFAULT);
-        let header = (*file).mrc_header.as_deref_mut().expect("MRC header");
+        let header = (*file).mrc_header.as_mut().expect("MRC header");
         assert_eq!(mrc_head_new(header, 3, 3, 3, 2), 0);
         header.amin = 0.;
         header.amean = 1. / 27.;
@@ -5217,7 +5202,7 @@ fn smooth_default_uses_the_source_3d_gaussian_route_on_real_mrc_data() {
     let output_c = CString::new(output.to_string_lossy().as_bytes()).unwrap();
     unsafe {
         let file = ii_open(output_c.to_bytes(), "rb");
-        let header = (*file).mrc_header.as_deref_mut().expect("MRC header");
+        let header = (*file).mrc_header.as_mut().expect("MRC header");
         assert_eq!(
             mrc_head_read((&mut (*file).fp).as_mut().unwrap(), header),
             0
@@ -5246,7 +5231,7 @@ fn median_2d_removes_a_real_mrc_salt_pixel() {
     let input_c = CString::new(input.to_string_lossy().as_bytes()).unwrap();
     unsafe {
         let file = ii_open_new(input_c.to_bytes(), "wb", IIFILE_DEFAULT);
-        let header = (*file).mrc_header.as_deref_mut().expect("MRC header");
+        let header = (*file).mrc_header.as_mut().expect("MRC header");
         assert_eq!(mrc_head_new(header, 3, 3, 1, 2), 0);
         header.amin = 1.;
         header.amean = 12.;
@@ -5283,7 +5268,7 @@ fn median_2d_removes_a_real_mrc_salt_pixel() {
     let output_c = CString::new(output.to_string_lossy().as_bytes()).unwrap();
     unsafe {
         let file = ii_open(output_c.to_bytes(), "rb");
-        let header = (*file).mrc_header.as_deref_mut().expect("MRC header");
+        let header = (*file).mrc_header.as_mut().expect("MRC header");
         assert_eq!(
             mrc_head_read((&mut (*file).fp).as_mut().unwrap(), header),
             0
@@ -5311,7 +5296,7 @@ fn median_3d_uses_the_source_slice_window_on_real_mrc_data() {
     let input_c = CString::new(input.to_string_lossy().as_bytes()).unwrap();
     unsafe {
         let file = ii_open_new(input_c.to_bytes(), "wb", IIFILE_DEFAULT);
-        let header = (*file).mrc_header.as_deref_mut().expect("MRC header");
+        let header = (*file).mrc_header.as_mut().expect("MRC header");
         assert_eq!(mrc_head_new(header, 3, 3, 3, 2), 0);
         header.amin = 1.;
         header.amean = 14. / 27.;
@@ -5391,7 +5376,7 @@ fn blankfile_writes_a_real_constant_mrc_volume() {
     let output_c = CString::new(output.to_string_lossy().as_bytes()).unwrap();
     unsafe {
         let file = ii_open(output_c.to_bytes(), "rb");
-        let header = (*file).mrc_header.as_deref_mut().expect("MRC header");
+        let header = (*file).mrc_header.as_mut().expect("MRC header");
         assert_eq!(
             mrc_head_read((&mut (*file).fp).as_mut().unwrap(), header),
             0
@@ -5454,7 +5439,7 @@ fn chunk_sizes_reject_explicit_nonhdf_output_format_before_real_mrc_open() {
     unsafe {
         let name = CString::new(input.to_string_lossy().as_bytes()).unwrap();
         let file = ii_open_new(name.to_bytes(), "wb", IIFILE_DEFAULT);
-        let header = (*file).mrc_header.as_deref_mut().expect("MRC header");
+        let header = (*file).mrc_header.as_mut().expect("MRC header");
         assert_eq!(mrc_head_new(header, 1, 1, 1, MRC_MODE_FLOAT), 0);
         ii_sync_from_mrc_header(&mut *file, header);
         assert_eq!(
@@ -5497,7 +5482,7 @@ fn resize_rejects_source_x_and_center_conflict_before_real_mrc_output_open() {
     unsafe {
         let name = CString::new(input.to_string_lossy().as_bytes()).unwrap();
         let file = ii_open_new(name.to_bytes(), "wb", IIFILE_DEFAULT);
-        let header = (*file).mrc_header.as_deref_mut().expect("MRC header");
+        let header = (*file).mrc_header.as_mut().expect("MRC header");
         assert_eq!(mrc_head_new(header, 1, 1, 1, MRC_MODE_FLOAT), 0);
         ii_sync_from_mrc_header(&mut *file, header);
         assert_eq!(
@@ -5537,7 +5522,7 @@ fn diffusion_filters_a_real_mrc_slice_with_source_status_and_title() {
     let input_c = CString::new(input.to_string_lossy().as_bytes()).unwrap();
     unsafe {
         let file = ii_open_new(input_c.to_bytes(), "wb", IIFILE_DEFAULT);
-        let header = (*file).mrc_header.as_deref_mut().expect("MRC header");
+        let header = (*file).mrc_header.as_mut().expect("MRC header");
         assert_eq!(mrc_head_new(header, 5, 5, 1, 2), 0);
         header.amin = 0.;
         header.amean = 4.;
@@ -5580,7 +5565,7 @@ fn diffusion_filters_a_real_mrc_slice_with_source_status_and_title() {
     let output_c = CString::new(output.to_string_lossy().as_bytes()).unwrap();
     unsafe {
         let file = ii_open(output_c.to_bytes(), "rb");
-        let header = (*file).mrc_header.as_deref_mut().expect("MRC header");
+        let header = (*file).mrc_header.as_mut().expect("MRC header");
         assert_eq!(
             mrc_head_read((&mut (*file).fp).as_mut().unwrap(), header),
             0
@@ -5607,7 +5592,7 @@ fn flipxy_transposes_each_real_mrc_volume_slice() {
     let input_c = CString::new(input.to_string_lossy().as_bytes()).unwrap();
     unsafe {
         let file = ii_open_new(input_c.to_bytes(), "wb", IIFILE_DEFAULT);
-        let header = (*file).mrc_header.as_deref_mut().expect("MRC header");
+        let header = (*file).mrc_header.as_mut().expect("MRC header");
         assert_eq!(mrc_head_new(header, 2, 3, 2, 2), 0);
         header.amin = 1.;
         header.amean = 6.5;
@@ -5640,7 +5625,7 @@ fn flipxy_transposes_each_real_mrc_volume_slice() {
     let output_c = CString::new(output.to_string_lossy().as_bytes()).unwrap();
     unsafe {
         let file = ii_open(output_c.to_bytes(), "rb");
-        let header = (*file).mrc_header.as_deref_mut().expect("MRC header");
+        let header = (*file).mrc_header.as_mut().expect("MRC header");
         assert_eq!(
             mrc_head_read((&mut (*file).fp).as_mut().unwrap(), header),
             0
@@ -5667,7 +5652,7 @@ fn rotx_rotates_real_mrc_yz_planes_in_source_order() {
     let input_c = CString::new(input.to_string_lossy().as_bytes()).unwrap();
     unsafe {
         let file = ii_open_new(input_c.to_bytes(), "wb", IIFILE_DEFAULT);
-        let header = (*file).mrc_header.as_deref_mut().expect("MRC header");
+        let header = (*file).mrc_header.as_mut().expect("MRC header");
         assert_eq!(mrc_head_new(header, 2, 3, 2, 2), 0);
         header.amin = 1.;
         header.amean = 6.5;
@@ -5700,7 +5685,7 @@ fn rotx_rotates_real_mrc_yz_planes_in_source_order() {
     let output_c = CString::new(output.to_string_lossy().as_bytes()).unwrap();
     unsafe {
         let file = ii_open(output_c.to_bytes(), "rb");
-        let header = (*file).mrc_header.as_deref_mut().expect("MRC header");
+        let header = (*file).mrc_header.as_mut().expect("MRC header");
         assert_eq!(
             mrc_head_read((&mut (*file).fp).as_mut().unwrap(), header),
             0
@@ -5732,7 +5717,7 @@ fn quadrant_corrects_real_mrc_quadrant_intensities() {
     let input_c = CString::new(input.to_string_lossy().as_bytes()).unwrap();
     unsafe {
         let file = ii_open_new(input_c.to_bytes(), "wb", IIFILE_DEFAULT);
-        let header = (*file).mrc_header.as_deref_mut().expect("MRC header");
+        let header = (*file).mrc_header.as_mut().expect("MRC header");
         assert_eq!(mrc_head_new(header, 100, 100, 1, 2), 0);
         header.amin = 40.;
         header.amean = 70.;
@@ -5780,7 +5765,7 @@ fn quadrant_corrects_real_mrc_quadrant_intensities() {
     let output_c = CString::new(output.to_string_lossy().as_bytes()).unwrap();
     unsafe {
         let file = ii_open(output_c.to_bytes(), "rb");
-        let header = (*file).mrc_header.as_deref_mut().expect("MRC header");
+        let header = (*file).mrc_header.as_mut().expect("MRC header");
         assert_eq!(
             mrc_head_read((&mut (*file).fp).as_mut().unwrap(), header),
             0
@@ -5815,7 +5800,7 @@ fn edgefill_processes_real_short_mrc_drift_edges() {
     let input_c = CString::new(input.to_string_lossy().as_bytes()).unwrap();
     unsafe {
         let file = ii_open_new(input_c.to_bytes(), "wb", IIFILE_DEFAULT);
-        let header = (*file).mrc_header.as_deref_mut().expect("MRC header");
+        let header = (*file).mrc_header.as_mut().expect("MRC header");
         assert_eq!(mrc_head_new(header, 64, 64, 1, 1), 0);
         header.amin = 0.;
         header.amean = 90.;
@@ -5861,7 +5846,7 @@ fn edgefill_processes_real_short_mrc_drift_edges() {
     let output_c = CString::new(output.to_string_lossy().as_bytes()).unwrap();
     unsafe {
         let file = ii_open(output_c.to_bytes(), "rb");
-        let header = (*file).mrc_header.as_deref_mut().expect("MRC header");
+        let header = (*file).mrc_header.as_mut().expect("MRC header");
         assert_eq!(
             mrc_head_read((&mut (*file).fp).as_mut().unwrap(), header),
             0
@@ -5893,7 +5878,7 @@ fn spectrum_writes_a_real_mrc_slice_with_source_header_scale() {
     let input_c = CString::new(input.to_string_lossy().as_bytes()).unwrap();
     unsafe {
         let file = ii_open_new(input_c.to_bytes(), "wb", IIFILE_DEFAULT);
-        let header = (*file).mrc_header.as_deref_mut().expect("MRC header");
+        let header = (*file).mrc_header.as_mut().expect("MRC header");
         assert_eq!(mrc_head_new(header, 8, 8, 1, 2), 0);
         header.amin = 0.;
         header.amean = 1. / 64.;
@@ -5933,7 +5918,7 @@ fn spectrum_writes_a_real_mrc_slice_with_source_header_scale() {
     let output_c = CString::new(output.to_string_lossy().as_bytes()).unwrap();
     unsafe {
         let file = ii_open(output_c.to_bytes(), "rb");
-        let header = (*file).mrc_header.as_deref_mut().expect("MRC header");
+        let header = (*file).mrc_header.as_mut().expect("MRC header");
         assert_eq!(
             mrc_head_read((&mut (*file).fp).as_mut().unwrap(), header),
             0
@@ -5969,7 +5954,7 @@ fn joinrgb_combines_three_real_byte_mrc_files() {
         ] {
             let name = CString::new(path.to_string_lossy().as_bytes()).unwrap();
             let file = ii_open_new(name.to_bytes(), "wb", IIFILE_DEFAULT);
-            let header = (*file).mrc_header.as_deref_mut().expect("MRC header");
+            let header = (*file).mrc_header.as_mut().expect("MRC header");
             assert_eq!(mrc_head_new(header, 2, 1, 1, 0), 0);
             header.amin = pixels[0];
             header.amean = (pixels[0] + pixels[1]) / 2.;
@@ -6156,7 +6141,7 @@ fn fft_writes_real_complex_mrc_with_source_dimensions() {
     let input_c = CString::new(input.to_string_lossy().as_bytes()).unwrap();
     unsafe {
         let file = ii_open_new(input_c.to_bytes(), "wb", IIFILE_DEFAULT);
-        let header = (*file).mrc_header.as_deref_mut().expect("MRC header");
+        let header = (*file).mrc_header.as_mut().expect("MRC header");
         assert_eq!(mrc_head_new(header, 4, 4, 1, 2), 0);
         ii_sync_from_mrc_header(&mut *file, header);
         assert_eq!(
@@ -6179,7 +6164,7 @@ fn fft_writes_real_complex_mrc_with_source_dimensions() {
     let output_c = CString::new(output.to_string_lossy().as_bytes()).unwrap();
     unsafe {
         let file = ii_open(output_c.to_bytes(), "rb");
-        let header = (*file).mrc_header.as_deref_mut().expect("MRC header");
+        let header = (*file).mrc_header.as_mut().expect("MRC header");
         assert_eq!(
             mrc_head_read((&mut (*file).fp).as_mut().unwrap(), header),
             0
@@ -6202,7 +6187,7 @@ fn filter_reads_real_mrc_through_slice_read_subm() {
     let input_c = CString::new(input.to_string_lossy().as_bytes()).unwrap();
     unsafe {
         let file = ii_open_new(input_c.to_bytes(), "wb", IIFILE_DEFAULT);
-        let header = (*file).mrc_header.as_deref_mut().expect("MRC header");
+        let header = (*file).mrc_header.as_mut().expect("MRC header");
         assert_eq!(mrc_head_new(header, 4, 4, 1, 2), 0);
         ii_sync_from_mrc_header(&mut *file, header);
         assert_eq!(
@@ -6233,7 +6218,7 @@ fn filter_reads_real_mrc_through_slice_read_subm() {
     let output_c = CString::new(output.to_string_lossy().as_bytes()).unwrap();
     unsafe {
         let file = ii_open(output_c.to_bytes(), "rb");
-        let header = (*file).mrc_header.as_deref_mut().expect("MRC header");
+        let header = (*file).mrc_header.as_mut().expect("MRC header");
         assert_eq!(
             mrc_head_read((&mut (*file).fp).as_mut().unwrap(), header),
             0
@@ -6251,7 +6236,7 @@ fn info_prints_complete_real_mrc_header_path() {
     let path_c = CString::new(path.to_string_lossy().as_bytes()).unwrap();
     unsafe {
         let file = ii_open_new(path_c.to_bytes(), "wb", IIFILE_DEFAULT);
-        let header = (*file).mrc_header.as_deref_mut().expect("MRC header");
+        let header = (*file).mrc_header.as_mut().expect("MRC header");
         assert_eq!(mrc_head_new(header, 2, 3, 1, 2), 0);
         header.xorg = 1.5;
         header.yorg = 2.5;
@@ -6289,7 +6274,7 @@ fn correlate_auto_reads_and_writes_real_mrc() {
     let input_c = CString::new(input.to_string_lossy().as_bytes()).unwrap();
     unsafe {
         let file = ii_open_new(input_c.to_bytes(), "wb", IIFILE_DEFAULT);
-        let header = (*file).mrc_header.as_deref_mut().expect("MRC header");
+        let header = (*file).mrc_header.as_mut().expect("MRC header");
         assert_eq!(mrc_head_new(header, 4, 4, 1, 2), 0);
         ii_sync_from_mrc_header(&mut *file, header);
         assert_eq!(
@@ -6317,7 +6302,7 @@ fn correlate_auto_reads_and_writes_real_mrc() {
     let output_c = CString::new(output.to_string_lossy().as_bytes()).unwrap();
     unsafe {
         let file = ii_open(output_c.to_bytes(), "rb");
-        let header = (*file).mrc_header.as_deref_mut().expect("MRC header");
+        let header = (*file).mrc_header.as_mut().expect("MRC header");
         assert_eq!(
             mrc_head_read((&mut (*file).fp).as_mut().unwrap(), header),
             0
@@ -6338,7 +6323,7 @@ fn defectmap_uses_correct_defects_header_layout_on_real_mrc() {
     let input_c = CString::new(input.to_string_lossy().as_bytes()).unwrap();
     unsafe {
         let file = ii_open_new(input_c.to_bytes(), "wb", IIFILE_DEFAULT);
-        let header = (*file).mrc_header.as_deref_mut().expect("MRC header");
+        let header = (*file).mrc_header.as_mut().expect("MRC header");
         assert_eq!(mrc_head_new(header, 4, 4, 1, 2), 0);
         ii_sync_from_mrc_header(&mut *file, header);
         assert_eq!(
@@ -6369,7 +6354,7 @@ fn defectmap_uses_correct_defects_header_layout_on_real_mrc() {
     let output_c = CString::new(output.to_string_lossy().as_bytes()).unwrap();
     unsafe {
         let file = ii_open(output_c.to_bytes(), "rb");
-        let header = (*file).mrc_header.as_deref_mut().expect("MRC header");
+        let header = (*file).mrc_header.as_mut().expect("MRC header");
         assert_eq!((header.nx, header.ny, header.nz, header.mode), (4, 4, 1, 0));
         assert_eq!(header.bytes_signed, 0);
         assert_eq!((header.amin, header.amax, header.amean), (0., 1., 0.25));
@@ -6397,7 +6382,7 @@ fn supergain_rejects_a_real_non_eer_byte_mrc_with_source_diagnostic() {
     unsafe {
         let name = CString::new(input.to_string_lossy().as_bytes()).unwrap();
         let file = ii_open_new(name.to_bytes(), "wb", IIFILE_DEFAULT);
-        let header = (*file).mrc_header.as_deref_mut().expect("MRC header");
+        let header = (*file).mrc_header.as_mut().expect("MRC header");
         assert_eq!(mrc_head_new(header, 64, 64, 1, MRC_MODE_BYTE), 0);
         ii_sync_from_mrc_header(&mut *file, header);
         assert_eq!(
@@ -6433,7 +6418,7 @@ fn histogram_prints_source_integer_bins_for_real_byte_mrc() {
     unsafe {
         let name = CString::new(input.to_string_lossy().as_bytes()).unwrap();
         let file = ii_open_new(name.to_bytes(), "wb", IIFILE_DEFAULT);
-        let header = (*file).mrc_header.as_deref_mut().expect("MRC header");
+        let header = (*file).mrc_header.as_mut().expect("MRC header");
         assert_eq!(mrc_head_new(header, 2, 2, 1, MRC_MODE_BYTE), 0);
         ii_sync_from_mrc_header(&mut *file, header);
         assert_eq!(
@@ -6470,7 +6455,7 @@ fn histogram_post_bin_options_report_source_failures_for_real_mrc() {
     unsafe {
         let name = CString::new(input.to_string_lossy().as_bytes()).unwrap();
         let file = ii_open_new(name.to_bytes(), "wb", IIFILE_DEFAULT);
-        let header = (*file).mrc_header.as_deref_mut().expect("MRC header");
+        let header = (*file).mrc_header.as_mut().expect("MRC header");
         assert_eq!(mrc_head_new(header, 2, 2, 1, MRC_MODE_BYTE), 0);
         ii_sync_from_mrc_header(&mut *file, header);
         assert_eq!(
@@ -6511,7 +6496,7 @@ fn correlation_3d_real_mrc_reports_source_parabolic_peak_location() {
         for path in [&first, &second] {
             let name = CString::new(path.to_string_lossy().as_bytes()).unwrap();
             let file = ii_open_new(name.to_bytes(), "wb", IIFILE_DEFAULT);
-            let header = (*file).mrc_header.as_deref_mut().expect("MRC header");
+            let header = (*file).mrc_header.as_mut().expect("MRC header");
             assert_eq!(mrc_head_new(header, 4, 4, 4, MRC_MODE_FLOAT), 0);
             ii_sync_from_mrc_header(&mut *file, header);
             assert_eq!(
@@ -6559,7 +6544,7 @@ fn threshold_minimum_size_semicolon_sign_uses_source_fill_behavior() {
     let input_c = CString::new(input.to_string_lossy().as_bytes()).unwrap();
     unsafe {
         let file = ii_open_new(input_c.to_bytes(), "wb", IIFILE_DEFAULT);
-        let header = (*file).mrc_header.as_deref_mut().expect("MRC header");
+        let header = (*file).mrc_header.as_mut().expect("MRC header");
         assert_eq!(mrc_head_new(header, 2, 2, 1, 2), 0);
         ii_sync_from_mrc_header(&mut *file, header);
         assert_eq!(
@@ -6605,7 +6590,7 @@ fn write_edge_sensitive_volume(path: &std::path::Path, z_first: i32, nz: i32) {
     unsafe {
         let name = CString::new(path.to_string_lossy().as_bytes()).unwrap();
         let file = ii_open_new(name.to_bytes(), "wb", IIFILE_DEFAULT);
-        let header = (*file).mrc_header.as_deref_mut().expect("MRC header");
+        let header = (*file).mrc_header.as_mut().expect("MRC header");
         assert_eq!(mrc_head_new(header, 8, 6, nz, MRC_MODE_FLOAT), 0);
         ii_sync_from_mrc_header(&mut *file, header);
         assert_eq!(
@@ -6820,7 +6805,7 @@ fn writing_16_bit_floats_does_not_take_the_half_float_path_for_integer_modes() {
         unsafe {
             let name = CString::new(input.to_string_lossy().as_bytes()).unwrap();
             let file = ii_open_new(name.to_bytes(), "wb", IIFILE_DEFAULT);
-            let header = (*file).mrc_header.as_deref_mut().expect("MRC header");
+            let header = (*file).mrc_header.as_mut().expect("MRC header");
             assert_eq!(mrc_head_new(header, 9, 4, 2, mode), 0);
             ii_sync_from_mrc_header(&mut *file, header);
             assert_eq!(
@@ -6879,7 +6864,7 @@ fn bandpass_filter_matches_native_rounding_on_real_mrc() {
     unsafe {
         let name = CString::new(input.to_string_lossy().as_bytes()).unwrap();
         let file = ii_open_new(name.to_bytes(), "wb", IIFILE_DEFAULT);
-        let header = (*file).mrc_header.as_deref_mut().expect("MRC header");
+        let header = (*file).mrc_header.as_mut().expect("MRC header");
         assert_eq!(mrc_head_new(header, 12, 8, 1, MRC_MODE_FLOAT), 0);
         ii_sync_from_mrc_header(&mut *file, header);
         assert_eq!(
@@ -6909,7 +6894,7 @@ fn bandpass_filter_matches_native_rounding_on_real_mrc() {
     unsafe {
         let name = CString::new(output.to_string_lossy().as_bytes()).unwrap();
         let file = ii_open(name.to_bytes(), "rb");
-        let header = (*file).mrc_header.as_deref_mut().expect("MRC header");
+        let header = (*file).mrc_header.as_mut().expect("MRC header");
         assert_eq!(
             mrc_head_read((&mut (*file).fp).as_mut().unwrap(), header),
             0
@@ -6948,7 +6933,7 @@ fn boxsd_matches_native_rounding_on_real_mrc() {
     unsafe {
         let name = CString::new(input.to_string_lossy().as_bytes()).unwrap();
         let file = ii_open_new(name.to_bytes(), "wb", IIFILE_DEFAULT);
-        let header = (*file).mrc_header.as_deref_mut().expect("MRC header");
+        let header = (*file).mrc_header.as_mut().expect("MRC header");
         assert_eq!(mrc_head_new(header, 12, 8, 1, MRC_MODE_FLOAT), 0);
         ii_sync_from_mrc_header(&mut *file, header);
         assert_eq!(
@@ -6976,7 +6961,7 @@ fn boxsd_matches_native_rounding_on_real_mrc() {
     unsafe {
         let name = CString::new(output.to_string_lossy().as_bytes()).unwrap();
         let file = ii_open(name.to_bytes(), "rb");
-        let header = (*file).mrc_header.as_deref_mut().expect("MRC header");
+        let header = (*file).mrc_header.as_mut().expect("MRC header");
         assert_eq!(
             mrc_head_read((&mut (*file).fp).as_mut().unwrap(), header),
             0
@@ -7016,7 +7001,7 @@ fn flatfield_sum_matches_native_rounding_on_real_mrc() {
     unsafe {
         let name = CString::new(input.to_string_lossy().as_bytes()).unwrap();
         let file = ii_open_new(name.to_bytes(), "wb", IIFILE_DEFAULT);
-        let header = (*file).mrc_header.as_deref_mut().expect("MRC header");
+        let header = (*file).mrc_header.as_mut().expect("MRC header");
         assert_eq!(mrc_head_new(header, 12, 8, 3, MRC_MODE_FLOAT), 0);
         ii_sync_from_mrc_header(&mut *file, header);
         assert_eq!(
@@ -7052,7 +7037,7 @@ fn flatfield_sum_matches_native_rounding_on_real_mrc() {
     unsafe {
         let name = CString::new(output.to_string_lossy().as_bytes()).unwrap();
         let file = ii_open(name.to_bytes(), "rb");
-        let header = (*file).mrc_header.as_deref_mut().expect("MRC header");
+        let header = (*file).mrc_header.as_mut().expect("MRC header");
         assert_eq!(
             mrc_head_read((&mut (*file).fp).as_mut().unwrap(), header),
             0
@@ -7088,7 +7073,7 @@ fn write_audit_float_volume(path: &std::path::Path, nx: i32, ny: i32, nz: i32) {
     unsafe {
         let name = CString::new(path.to_string_lossy().as_bytes()).unwrap();
         let file = ii_open_new(name.to_bytes(), "wb", IIFILE_DEFAULT);
-        let header = (*file).mrc_header.as_deref_mut().expect("MRC header");
+        let header = (*file).mrc_header.as_mut().expect("MRC header");
         assert_eq!(mrc_head_new(header, nx, ny, nz, MRC_MODE_FLOAT), 0);
         ii_sync_from_mrc_header(&mut *file, header);
         assert_eq!(
@@ -7341,7 +7326,7 @@ fn histogram_rejects_a_sub_unit_bin_size_with_the_source_message() {
     unsafe {
         let name = CString::new(input.to_string_lossy().as_bytes()).unwrap();
         let file = ii_open_new(name.to_bytes(), "wb", IIFILE_DEFAULT);
-        let header = (*file).mrc_header.as_deref_mut().expect("MRC header");
+        let header = (*file).mrc_header.as_mut().expect("MRC header");
         assert_eq!(mrc_head_new(header, 8, 6, 1, MRC_MODE_BYTE), 0);
         ii_sync_from_mrc_header(&mut *file, header);
         assert_eq!(
@@ -7422,7 +7407,7 @@ fn logarithm_uses_the_single_precision_log_routine() {
     unsafe {
         let name = CString::new(input.to_string_lossy().as_bytes()).unwrap();
         let file = ii_open_new(name.to_bytes(), "wb", IIFILE_DEFAULT);
-        let header = (*file).mrc_header.as_deref_mut().expect("MRC header");
+        let header = (*file).mrc_header.as_mut().expect("MRC header");
         assert_eq!(mrc_head_new(header, 4, 2, 1, MRC_MODE_FLOAT), 0);
         ii_sync_from_mrc_header(&mut *file, header);
         assert_eq!(
@@ -7454,7 +7439,7 @@ fn logarithm_uses_the_single_precision_log_routine() {
     unsafe {
         let name = CString::new(output.to_string_lossy().as_bytes()).unwrap();
         let file = ii_open(name.to_bytes(), "rb");
-        let header = (*file).mrc_header.as_deref_mut().expect("MRC header");
+        let header = (*file).mrc_header.as_mut().expect("MRC header");
         assert_eq!(
             mrc_head_read((&mut (*file).fp).as_mut().unwrap(), header),
             0
@@ -7517,7 +7502,7 @@ fn a_full_bad_column_run_leaves_the_rows_the_source_never_reaches() {
     unsafe {
         let name = CString::new(output.to_string_lossy().as_bytes()).unwrap();
         let file = ii_open(name.to_bytes(), "rb");
-        let header = (*file).mrc_header.as_deref_mut().expect("MRC header");
+        let header = (*file).mrc_header.as_mut().expect("MRC header");
         assert_eq!(
             mrc_head_read((&mut (*file).fp).as_mut().unwrap(), header),
             0
@@ -7589,7 +7574,7 @@ fn edge_fill_accepts_the_sizes_the_source_accepts() {
     unsafe {
         let name = CString::new(input.to_string_lossy().as_bytes()).unwrap();
         let file = ii_open_new(name.to_bytes(), "wb", IIFILE_DEFAULT);
-        let header = (*file).mrc_header.as_deref_mut().expect("MRC header");
+        let header = (*file).mrc_header.as_mut().expect("MRC header");
         assert_eq!(mrc_head_new(header, 32, 24, 2, MRC_MODE_SHORT), 0);
         ii_sync_from_mrc_header(&mut *file, header);
         assert_eq!(
@@ -7664,7 +7649,7 @@ fn fft_rustfft_transforms_match_the_parity_volume() {
         unsafe {
             let name = CString::new(input.to_string_lossy().as_bytes()).unwrap();
             let file = ii_open_new(name.to_bytes(), "wb", IIFILE_DEFAULT);
-            let header = (*file).mrc_header.as_deref_mut().expect("MRC header");
+            let header = (*file).mrc_header.as_mut().expect("MRC header");
             assert_eq!(mrc_head_new(header, nx, ny, nz, MRC_MODE_FLOAT), 0);
             ii_sync_from_mrc_header(&mut *file, header);
             assert_eq!(
@@ -7851,7 +7836,7 @@ fn fourier_processes_rustfft_outputs_match_the_parity_outputs() {
         unsafe {
             let name = CString::new(input.to_string_lossy().as_bytes()).unwrap();
             let file = ii_open_new(name.to_bytes(), "wb", IIFILE_DEFAULT);
-            let header = (*file).mrc_header.as_deref_mut().expect("MRC header");
+            let header = (*file).mrc_header.as_mut().expect("MRC header");
             assert_eq!(mrc_head_new(header, nx, ny, nz, MRC_MODE_FLOAT), 0);
             ii_sync_from_mrc_header(&mut *file, header);
             assert_eq!(
@@ -7888,7 +7873,7 @@ fn fourier_processes_rustfft_outputs_match_the_parity_outputs() {
                 let name = CString::new(output.to_string_lossy().as_bytes()).unwrap();
                 let file = ii_open(name.to_bytes(), "rb");
                 let (nx, ny, nz, mode) = {
-                    let header = (*file).mrc_header.as_deref_mut().expect("MRC header");
+                    let header = (*file).mrc_header.as_mut().expect("MRC header");
                     assert_eq!(
                         mrc_head_read((&mut (*file).fp).as_mut().unwrap(), header),
                         0

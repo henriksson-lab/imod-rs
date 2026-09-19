@@ -1439,11 +1439,14 @@ pub unsafe fn putimod(
                 if name_put.ob == 255 - (ob as i32 + mincolor) {
                     let src = name_put.name.as_bytes();
                     if !src.is_empty() {
-                        // `imodel_fwrap.c:1412` `strncpy(name, src, IOBJ_STRSIZE - 1)`.
+                        // `imodel_fwrap.c:1435` `strncpy(name, src, IOBJ_STRSIZE - 1)`.
                         // `Iobj::name` is `[u8; N]` now (NATIVE.md §3), so the C
-                        // string is copied byte for byte with the same bound.
+                        // string is copied byte for byte with the same bound —
+                        // *and* the rest of the field is zero-filled, which is
+                        // what `strncpy` does and a bounded copy does not.
                         let count = src.len().min(IOBJ_STRSIZE - 1);
                         imod.obj[nobj].name[..count].copy_from_slice(&src[..count]);
+                        imod.obj[nobj].name[count..IOBJ_STRSIZE - 1].fill(0);
                     }
                     imod.obj[nobj].name[IOBJ_STRSIZE - 1] = 0;
                     ci = 1;
@@ -2346,7 +2349,13 @@ pub unsafe fn putmodelname(fname: *const c_char, fsize: FortStrLenT) -> i32 {
         let tmpstr = fortran_string(fname, fsize);
         let bytes = tmpstr.as_bytes();
         let count = bytes.len().min(IMOD_STRSIZE - 1);
+        // `strncpy(sImod->name, tmpstr, IMOD_STRSIZE - 1)` does not stop at
+        // the source string: it zero-**pads** the whole destination out to
+        // `IMOD_STRSIZE - 1`.  Copying only `count` bytes leaves whatever the
+        // previous model left in `name`, which `imodel_write` then emits — so
+        // the written model carried heap residue where the source writes NULs.
         imod.name[..count].copy_from_slice(&bytes[..count]);
+        imod.name[count..IMOD_STRSIZE - 1].fill(0);
         imod.name[IMOD_STRSIZE - 1] = 0;
         FWRAP_NOERROR
     })

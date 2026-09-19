@@ -5,11 +5,33 @@
 //! representation through `is_in_real_space`, while Rust keeps ownership and
 //! element validity explicit.
 
+use std::sync::{LazyLock, Mutex};
+
 use rustfft::{FftPlanner, num_complex::Complex32};
+
+use crate::imod::libcfshr::b3dutil::ImodFile;
+use crate::imod::libiimod::mrcfiles::{
+    MRC_MODE_FLOAT, MrcHeader, mrc_head_new, mrc_head_read, mrc_head_write, mrc_read_float_slice,
+    mrc_write_slice,
+};
 
 use super::ctf::Ctf;
 use super::curve::Curve;
 use super::globals::GLOBAL_RANDOM_NUMBER_GENERATOR;
+
+/// `WriteSliceType` (`image_trim.cpp`): the IMOD bridge owns output format
+/// selection, while this image unit supplies a compact unpadded real slice.
+pub type WriteSliceCallback = fn(&str, &[f32], i32, i32);
+
+/// `sSliceWriteFunc`.  The native source deliberately treats an absent bridge
+/// as a no-op, which allows CTF code to run without an IMOD image writer.
+static SLICE_WRITE_FUNC: LazyLock<Mutex<Option<WriteSliceCallback>>> =
+    LazyLock::new(|| Mutex::new(None));
+
+/// `internalSetWriteSliceFunc` (`image_trim.cpp:1280`).
+pub fn internal_set_write_slice_func(callback: Option<WriteSliceCallback>) {
+    *SLICE_WRITE_FUNC.lock().unwrap() = callback;
+}
 
 #[derive(Clone, Debug)]
 pub struct Image {
@@ -522,6 +544,39 @@ impl Image {
         }
         self.is_in_real_space = true;
     }
+    /// `PhaseShift` (`image_trim.cpp:3610`).  A real image is transformed
+    /// temporarily, while an already-Fourier image retains that representation.
+    /// The physical Y/Z indices are converted to their signed logical
+    /// frequencies before the source's separable phase product is applied.
+    pub fn phase_shift(&mut self, wanted_x_shift: f32, wanted_y_shift: f32, wanted_z_shift: f32) {
+        assert!(self.real_memory_allocated != 0, "Memory not allocated");
+        let need_to_fft = self.is_in_real_space;
+        if need_to_fft {
+            self.forward_fft(false);
+        }
+        for z in 0..=self.physical_upper_bound_complex_z {
+            let z_logical = self.return_fourier_logical_coord_given_physical_coord_z(z);
+            let phase_z = std::f32::consts::TAU * wanted_z_shift * z_logical as f32
+                / self.logical_z_dimension as f32;
+            for y in 0..=self.physical_upper_bound_complex_y {
+                let y_logical = self.return_fourier_logical_coord_given_physical_coord_y(y);
+                let phase_y = std::f32::consts::TAU * wanted_y_shift * y_logical as f32
+                    / self.logical_y_dimension as f32;
+                for x in 0..=self.physical_upper_bound_complex_x {
+                    let phase_x = std::f32::consts::TAU * wanted_x_shift * x as f32
+                        / self.logical_x_dimension as f32;
+                    let address = self
+                        .return_fourier_1d_address_from_physical_coord(x, y, z)
+                        .expect("source loop is within Fourier storage");
+                    self.complex_values[address] *=
+                        Complex32::from_polar(1., phase_x + phase_y + phase_z);
+                }
+            }
+        }
+        if need_to_fft {
+            self.backward_fft();
+        }
+    }
     pub fn divide_by_constant(&mut self, value: f32) {
         self.multiply_by_constant(1. / value);
     }
@@ -621,6 +676,460 @@ impl Image {
                 let destination = (z * self.logical_y_dimension as usize + y) * width;
                 self.real_values
                     .copy_within(source..source + width, destination);
+            }
+        }
+    }
+    /// `QuickAndDirtyWriteSlice` (`image_trim.cpp:1288`).  The C code writes
+    /// only slice one and copies each padded row into temporary contiguous
+    /// memory before invoking its IMOD-installed callback.
+    pub fn quick_and_dirty_write_slice(&self, filename: &str, slice_to_write: i64) {
+        assert_eq!(slice_to_write, 1, "Slice is not 1, can write only 1 slice");
+        let callback = *SLICE_WRITE_FUNC.lock().unwrap();
+        let Some(callback) = callback else {
+            return;
+        };
+        let width = self.logical_x_dimension as usize;
+        let height = self.logical_y_dimension as usize;
+        let stride = width + self.padding_jump_value as usize;
+        let mut compact = Vec::with_capacity(width * height);
+        for row in 0..height {
+            let start = row * stride;
+            compact.extend_from_slice(&self.real_values[start..start + width]);
+        }
+        callback(
+            filename,
+            &compact,
+            self.logical_x_dimension,
+            self.logical_y_dimension,
+        );
+    }
+    /// `QuickAndDirtyReadSlice` (`image_trim.cpp:1271`, in the pre-IMOD CTF
+    /// source).  MRC sections are one-based at this Image boundary; the MRC
+    /// reader is zero-based.  Data is first read into the source's compact
+    /// layout, then expanded in-place into this image's FFTW-padded rows.
+    pub fn quick_and_dirty_read_slice(
+        &mut self,
+        filename: &str,
+        slice_to_read: i64,
+    ) -> Result<(), String> {
+        self.read_mrc_slices(filename, slice_to_read, slice_to_read)
+    }
+    /// MRC specialization of `Image::ReadSlices`. Both bounds are one-based
+    /// and inclusive, matching the source Image API rather than the low-level
+    /// MRC reader's zero-based section numbering.
+    pub fn read_mrc_slices(
+        &mut self,
+        filename: &str,
+        start_slice: i64,
+        end_slice: i64,
+    ) -> Result<(), String> {
+        if start_slice > end_slice {
+            return Err("Start slice larger than end slice".into());
+        }
+        if start_slice <= 0 {
+            return Err("Slice is less than 1, first slice is 1".into());
+        }
+        let mut file = ImodFile::open(filename, "rb")
+            .ok_or_else(|| format!("unable to open MRC file {filename}"))?;
+        let mut header = MrcHeader::default();
+        if mrc_head_read(&mut file, &mut header) != 0 {
+            return Err(format!("unable to read MRC header from {filename}"));
+        }
+        if end_slice > i64::from(header.nz) {
+            return Err(format!("slice {end_slice} exceeds MRC depth {}", header.nz));
+        }
+        let depth = i32::try_from(end_slice - start_slice + 1)
+            .map_err(|_| "MRC slice range is too large")?;
+        self.allocate(header.nx, header.ny, depth, true)?;
+        let pixels = usize::try_from(header.nx)
+            .ok()
+            .and_then(|x| usize::try_from(header.ny).ok()?.checked_mul(x))
+            .ok_or_else(|| "MRC slice dimensions overflow".to_owned())?;
+        let total = pixels
+            .checked_mul(depth as usize)
+            .ok_or_else(|| "MRC slice range dimensions overflow".to_owned())?;
+        let mut compact = vec![0.; total];
+        for output_slice in 0..depth as usize {
+            if mrc_read_float_slice(
+                &mut compact[output_slice * pixels..(output_slice + 1) * pixels],
+                &mut header,
+                start_slice as i32 - 1 + output_slice as i32,
+            ) != 0
+            {
+                return Err(format!(
+                    "unable to read MRC slice {} from {filename}",
+                    start_slice + output_slice as i64
+                ));
+            }
+        }
+        self.real_values[..total].copy_from_slice(&compact);
+        self.add_fftw_padding();
+        self.is_in_real_space = true;
+        self.object_is_centred_in_box = true;
+        Ok(())
+    }
+    /// Source `QuickAndDirtyWriteSlices` backed by the translated MRC writer.
+    /// The requested destination interval is one-based and inclusive; this
+    /// image must contain exactly that many Z sections.  Unlike the callback
+    /// bridge, this emits a complete float MRC stack.
+    pub fn quick_and_dirty_write_mrc_slices(
+        &self,
+        filename: &str,
+        first_slice_to_write: i64,
+        last_slice_to_write: i64,
+    ) -> Result<(), String> {
+        if first_slice_to_write <= 0 {
+            return Err("Slice is less than 1, first slice is 1".into());
+        }
+        if first_slice_to_write > last_slice_to_write {
+            return Err("Start slice larger than end slice".into());
+        }
+        // `WriteSlices` transforms a temporary copy when the source image is
+        // Fourier-space, preserving the caller's representation and padding.
+        let transformed = if self.is_in_real_space {
+            None
+        } else {
+            let mut copy = self.clone();
+            copy.backward_fft();
+            Some(copy)
+        };
+        let image = transformed.as_ref().unwrap_or(self);
+        let output_depth =
+            i32::try_from(last_slice_to_write).map_err(|_| "MRC output depth is too large")?;
+        let selected_depth = i32::try_from(last_slice_to_write - first_slice_to_write + 1)
+            .map_err(|_| "MRC output range is too large")?;
+        if selected_depth != image.logical_z_dimension {
+            return Err(format!(
+                "image has {} slices but output range has {selected_depth}",
+                image.logical_z_dimension
+            ));
+        }
+        let mut file = ImodFile::open(filename, "wb")
+            .ok_or_else(|| format!("unable to create MRC file {filename}"))?;
+        let mut header = MrcHeader::default();
+        if mrc_head_new(
+            &mut header,
+            image.logical_x_dimension,
+            image.logical_y_dimension,
+            output_depth,
+            MRC_MODE_FLOAT,
+        ) != 0
+            || mrc_head_write(&mut file, &mut header) != 0
+        {
+            return Err(format!("unable to create MRC header in {filename}"));
+        }
+        let width = image.logical_x_dimension as usize;
+        let height = image.logical_y_dimension as usize;
+        let mut compact = vec![0.; width * height];
+        for source_z in 0..image.logical_z_dimension {
+            for y in 0..image.logical_y_dimension {
+                for x in 0..image.logical_x_dimension {
+                    compact[y as usize * width + x as usize] = image
+                        .return_real_pixel_from_physical_coord(x, y, source_z)
+                        .ok_or_else(|| "image has no real-space pixel data".to_owned())?;
+                }
+            }
+            let bytes = compact
+                .iter()
+                .flat_map(|value| value.to_ne_bytes())
+                .collect::<Vec<_>>();
+            if mrc_write_slice(
+                &bytes,
+                &mut file,
+                &mut header,
+                first_slice_to_write as i32 - 1 + source_z,
+                b'Z',
+            ) != 0
+            {
+                return Err(format!(
+                    "unable to write MRC slice {} to {filename}",
+                    first_slice_to_write + i64::from(source_z)
+                ));
+            }
+        }
+        Ok(())
+    }
+    /// MRC-backed `Image::WriteSlices` for an already-openable stack.  Slice
+    /// bounds are one-based and inclusive, as in the C++ API.  A stack may be
+    /// extended, but changing either in-plane dimension would relocate the
+    /// existing sections, so this adapter rejects that unsafe case.
+    pub fn write_mrc_slices(
+        &self,
+        filename: &str,
+        start_slice: i64,
+        end_slice: i64,
+    ) -> Result<(), String> {
+        if start_slice > end_slice {
+            return Err("Start slice larger than end slice".into());
+        }
+        if start_slice <= 0 {
+            return Err("Slice is less than 1, first slice is 1".into());
+        }
+        let selected_depth = i32::try_from(end_slice - start_slice + 1)
+            .map_err(|_| "MRC output range is too large")?;
+        if selected_depth != self.logical_z_dimension {
+            return Err(format!(
+                "image has {} slices but output range has {selected_depth}",
+                self.logical_z_dimension
+            ));
+        }
+        let transformed = if self.is_in_real_space {
+            None
+        } else {
+            let mut copy = self.clone();
+            copy.backward_fft();
+            Some(copy)
+        };
+        let image = transformed.as_ref().unwrap_or(self);
+        let mut file = ImodFile::open(filename, "r+b")
+            .ok_or_else(|| format!("unable to open MRC file {filename} for update"))?;
+        let mut header = MrcHeader::default();
+        if mrc_head_read(&mut file, &mut header) != 0 {
+            return Err(format!("unable to read MRC header from {filename}"));
+        }
+        if header.nx != image.logical_x_dimension || header.ny != image.logical_y_dimension {
+            return Err(format!(
+                "image dimensions ({}, {}) and file dimensions ({}, {}) differ",
+                image.logical_x_dimension, image.logical_y_dimension, header.nx, header.ny
+            ));
+        }
+        let requested_depth =
+            i32::try_from(end_slice).map_err(|_| "MRC output depth is too large")?;
+        if requested_depth > header.nz {
+            header.nz = requested_depth;
+            if header.mz < requested_depth {
+                header.mz = requested_depth;
+            }
+            if mrc_head_write(&mut file, &mut header) != 0 {
+                return Err(format!("unable to update MRC header in {filename}"));
+            }
+        }
+        let width = image.logical_x_dimension as usize;
+        let height = image.logical_y_dimension as usize;
+        let mut compact = vec![0.; width * height];
+        for source_z in 0..image.logical_z_dimension {
+            for y in 0..image.logical_y_dimension {
+                for x in 0..image.logical_x_dimension {
+                    compact[y as usize * width + x as usize] = image
+                        .return_real_pixel_from_physical_coord(x, y, source_z)
+                        .ok_or_else(|| "image has no real-space pixel data".to_owned())?;
+                }
+            }
+            let bytes = compact
+                .iter()
+                .flat_map(|value| value.to_ne_bytes())
+                .collect::<Vec<_>>();
+            if mrc_write_slice(
+                &bytes,
+                &mut file,
+                &mut header,
+                start_slice as i32 - 1 + source_z,
+                b'Z',
+            ) != 0
+            {
+                return Err(format!(
+                    "unable to write MRC slice {} to {filename}",
+                    start_slice + i64::from(source_z)
+                ));
+            }
+        }
+        Ok(())
+    }
+    /// `DilateBinarizedMask` (`image_trim.cpp:3528`).  This deliberately
+    /// preserves the native routine's periodic linear-buffer addressing and
+    /// odd-step neighbourhood: callers relying on its historical mask shape
+    /// therefore get the same edge wrapping behaviour.
+    pub fn dilate_binarized_mask(&mut self, dilation_radius: f32) {
+        assert!(self.real_memory_allocated != 0, "Memory not allocated");
+        assert!(self.is_in_real_space, "Not in real space");
+
+        let width = self.logical_x_dimension as isize;
+        let height = self.logical_y_dimension as isize;
+        let depth = self.logical_z_dimension as isize;
+        let count = self.number_of_real_space_pixels as isize;
+        let source = self.real_pixels().collect::<Vec<_>>();
+        let radius_squared = dilation_radius.powi(2);
+        let mut limit = dilation_radius.round() as isize;
+        if limit % 2 == 0 {
+            limit += 1;
+        }
+        let depth_limit = if depth == 1 { 0 } else { limit };
+
+        for z_offset in (-depth_limit..=depth_limit).step_by(2) {
+            let z_squared = z_offset * z_offset;
+            for y_offset in (-limit..=limit).step_by(2) {
+                let y_squared = y_offset * y_offset;
+                for x_offset in (-limit..=limit).step_by(2) {
+                    if (x_offset * x_offset + y_squared + z_squared) as f32 > radius_squared {
+                        continue;
+                    }
+                    let shift = (-x_offset - width * (y_offset + height * z_offset))
+                        .rem_euclid(count) as usize;
+                    for (index, value) in source
+                        .iter()
+                        .cycle()
+                        .skip(shift)
+                        .take(source.len())
+                        .enumerate()
+                    {
+                        let x = index as isize % width;
+                        let y = (index as isize / width) % height;
+                        let z = index as isize / (width * height);
+                        let destination = self
+                            .return_real_1d_address_from_physical_coord(
+                                x as i32, y as i32, z as i32,
+                            )
+                            .expect("source index is within image");
+                        self.real_values[destination] += value;
+                    }
+                }
+            }
+        }
+        for index in self.real_pixel_indices().collect::<Vec<_>>() {
+            self.real_values[index] = if self.real_values[index] != 0. {
+                1.
+            } else {
+                0.
+            };
+        }
+    }
+    /// `TaperEdges` (`image_trim.cpp:2814`).  This is the source's
+    /// taperedgek-derived pass: for each active axis it subtracts smoothed
+    /// edge averages over the outer one-thirtieth of the image.  Logical
+    /// coordinates deliberately go through the physical-address helper so
+    /// FFTW row padding never participates in the calculation.
+    pub fn taper_edges(&mut self) {
+        assert!(self.real_memory_allocated != 0, "Image not in memory");
+        assert!(self.is_in_real_space, "Image not in real space");
+        let dimensions = [
+            self.logical_x_dimension as usize,
+            self.logical_y_dimension as usize,
+            self.logical_z_dimension as usize,
+        ];
+        let number_of_dimensions = if dimensions[2] > 1 { 3 } else { 2 };
+        // The C++ routine divides its averaging/taper strips by 30.  It was
+        // only called for sufficiently sized reconstruction volumes; reject
+        // the source's otherwise undefined zero-width division explicitly.
+        assert!(
+            dimensions[..number_of_dimensions]
+                .iter()
+                .all(|dimension| *dimension >= 30),
+            "input image dimensions are too small for tapering"
+        );
+        for axis in 0..number_of_dimensions {
+            let (second_axis, third_axis) = match axis {
+                0 => (1, 2),
+                1 => (0, 2),
+                2 => (0, 1),
+                _ => unreachable!(),
+            };
+            let current_dimension = dimensions[axis];
+            let second_dimension = dimensions[second_axis];
+            let third_dimension = dimensions[third_axis];
+            let averaging_strip_width = current_dimension / 30;
+            let tapering_strip_width = current_dimension / 30;
+            let mut average_start = vec![0.; second_dimension * third_dimension];
+            let mut average_finish = vec![0.; second_dimension * third_dimension];
+            let mut smooth_start = vec![0.; second_dimension * third_dimension];
+            let mut smooth_finish = vec![0.; second_dimension * third_dimension];
+
+            for third in 0..third_dimension {
+                for second in 0..second_dimension {
+                    let index = second + third * second_dimension;
+                    for offset in 0..averaging_strip_width {
+                        let (start, finish) = match axis {
+                            0 => (
+                                (offset, second, third),
+                                (current_dimension - 1 - offset, second, third),
+                            ),
+                            1 => (
+                                (second, offset, third),
+                                (second, current_dimension - 1 - offset, third),
+                            ),
+                            2 => (
+                                (second, third, offset),
+                                (second, third, current_dimension - 1 - offset),
+                            ),
+                            _ => unreachable!(),
+                        };
+                        average_start[index] += self.real_values[self
+                            .return_real_1d_address_from_physical_coord(
+                                start.0 as i32,
+                                start.1 as i32,
+                                start.2 as i32,
+                            )
+                            .expect("source edge coordinate is in range")];
+                        average_finish[index] += self.real_values[self
+                            .return_real_1d_address_from_physical_coord(
+                                finish.0 as i32,
+                                finish.1 as i32,
+                                finish.2 as i32,
+                            )
+                            .expect("source edge coordinate is in range")];
+                    }
+                    average_start[index] /= averaging_strip_width as f32;
+                    average_finish[index] /= averaging_strip_width as f32;
+                    let average = 0.5 * (average_start[index] + average_finish[index]);
+                    average_start[index] -= average;
+                    average_finish[index] -= average;
+                }
+            }
+            // `smoothing_half_width_{second,third}` is one for every source
+            // axis.  Clip the 3x3 neighbourhood at the image boundary.
+            for third in 0..third_dimension {
+                for second in 0..second_dimension {
+                    let index = second + third * second_dimension;
+                    let second_min = second.saturating_sub(1);
+                    let third_min = third.saturating_sub(1);
+                    let second_max = (second + 1).min(second_dimension - 1);
+                    let third_max = (third + 1).min(third_dimension - 1);
+                    let mut count = 0usize;
+                    for nearby_third in third_min..=third_max {
+                        for nearby_second in second_min..=second_max {
+                            let nearby = nearby_second + nearby_third * second_dimension;
+                            smooth_start[index] += average_start[nearby];
+                            smooth_finish[index] += average_finish[nearby];
+                            count += 1;
+                        }
+                    }
+                    smooth_start[index] /= count as f32;
+                    smooth_finish[index] /= count as f32;
+                }
+            }
+            for current in 0..current_dimension {
+                let (edge, factor) = if current < tapering_strip_width {
+                    (
+                        &smooth_start,
+                        (tapering_strip_width - current) as f32 / tapering_strip_width as f32,
+                    )
+                } else if current >= current_dimension - tapering_strip_width {
+                    (
+                        &smooth_finish,
+                        (tapering_strip_width + current + 1 - current_dimension) as f32
+                            / tapering_strip_width as f32,
+                    )
+                } else {
+                    continue;
+                };
+                for third in 0..third_dimension {
+                    for second in 0..second_dimension {
+                        let coordinate = match axis {
+                            0 => (current, second, third),
+                            1 => (second, current, third),
+                            2 => (second, third, current),
+                            _ => unreachable!(),
+                        };
+                        let address = self
+                            .return_real_1d_address_from_physical_coord(
+                                coordinate.0 as i32,
+                                coordinate.1 as i32,
+                                coordinate.2 as i32,
+                            )
+                            .expect("source taper coordinate is in range");
+                        self.real_values[address] -=
+                            edge[second + third * second_dimension] * factor;
+                    }
+                }
             }
         }
     }
@@ -1988,7 +2497,229 @@ impl Image {
 
 #[cfg(test)]
 mod tests {
-    use super::{Complex32, Ctf, Curve, Image};
+    use super::{Complex32, Ctf, Curve, Image, internal_set_write_slice_func};
+    use std::sync::Mutex;
+
+    static WRITTEN_SLICE: Mutex<Option<(String, Vec<f32>, i32, i32)>> = Mutex::new(None);
+
+    fn capture_slice(filename: &str, values: &[f32], width: i32, height: i32) {
+        *WRITTEN_SLICE.lock().unwrap() = Some((filename.into(), values.into(), width, height));
+    }
+
+    #[test]
+    fn quick_writer_removes_fftw_row_padding_before_callback() {
+        let mut image = Image::default();
+        image.allocate(4, 2, 1, true).unwrap();
+        for y in 0..2 {
+            for x in 0..4 {
+                image.set_real_pixel_from_physical_coord(x, y, 0, (y * 10 + x) as f32);
+            }
+        }
+        internal_set_write_slice_func(Some(capture_slice));
+        image.quick_and_dirty_write_slice("output.mrc", 1);
+        internal_set_write_slice_func(None);
+        assert_eq!(
+            *WRITTEN_SLICE.lock().unwrap(),
+            Some((
+                "output.mrc".into(),
+                vec![0., 1., 2., 3., 10., 11., 12., 13.],
+                4,
+                2,
+            ))
+        );
+    }
+
+    #[test]
+    fn quick_reader_loads_one_based_mrc_slice_into_padded_rows() {
+        let path = std::env::temp_dir().join(format!(
+            "imod-rs-image-quick-read-{}-{}.mrc",
+            std::process::id(),
+            std::thread::current().name().unwrap_or("unnamed")
+        ));
+        assert_eq!(
+            crate::imod::librgctf::testctffind::write_slice(
+                path.to_str().unwrap(),
+                &[1., 2., 3., 4.],
+                2,
+                2,
+            ),
+            0
+        );
+        let mut image = Image::default();
+        image
+            .quick_and_dirty_read_slice(path.to_str().unwrap(), 1)
+            .unwrap();
+        assert_eq!(
+            (image.logical_x_dimension, image.logical_y_dimension),
+            (2, 2)
+        );
+        assert_eq!(
+            image.return_real_pixel_from_physical_coord(0, 0, 0),
+            Some(1.)
+        );
+        assert_eq!(
+            image.return_real_pixel_from_physical_coord(1, 1, 0),
+            Some(4.)
+        );
+        assert!(
+            image
+                .quick_and_dirty_read_slice(path.to_str().unwrap(), 2)
+                .is_err()
+        );
+        let _ = std::fs::remove_file(path);
+    }
+
+    #[test]
+    fn mrc_slice_reader_preserves_selected_section_order_and_padding() {
+        use crate::imod::libcfshr::b3dutil::ImodFile;
+        use crate::imod::libiimod::mrcfiles::{
+            MRC_MODE_FLOAT, MrcHeader, mrc_head_new, mrc_head_write, mrc_write_slice,
+        };
+
+        let path = std::env::temp_dir().join(format!(
+            "imod-rs-image-read-slices-{}-{}.mrc",
+            std::process::id(),
+            std::thread::current().name().unwrap_or("unnamed")
+        ));
+        let mut file = ImodFile::open(&path, "wb").unwrap();
+        let mut header = MrcHeader::default();
+        assert_eq!(mrc_head_new(&mut header, 2, 2, 2, MRC_MODE_FLOAT), 0);
+        assert_eq!(mrc_head_write(&mut file, &mut header), 0);
+        for (section, values) in [[1_f32, 2., 3., 4.], [10., 20., 30., 40.]]
+            .iter()
+            .enumerate()
+        {
+            let bytes = values
+                .iter()
+                .flat_map(|value| value.to_ne_bytes())
+                .collect::<Vec<_>>();
+            assert_eq!(
+                mrc_write_slice(&bytes, &mut file, &mut header, section as i32, b'Z'),
+                0
+            );
+        }
+        let mut image = Image::default();
+        image.read_mrc_slices(path.to_str().unwrap(), 1, 2).unwrap();
+        assert_eq!(image.logical_z_dimension, 2);
+        assert_eq!(
+            image.return_real_pixel_from_physical_coord(1, 1, 0),
+            Some(4.)
+        );
+        assert_eq!(
+            image.return_real_pixel_from_physical_coord(1, 1, 1),
+            Some(40.)
+        );
+        assert_eq!(
+            image.return_real_pixel_from_physical_coord(0, 1, 1),
+            Some(30.),
+            "row padding is skipped when addressing the selected second section"
+        );
+        let _ = std::fs::remove_file(path);
+    }
+
+    #[test]
+    fn quick_mrc_writer_places_one_based_selected_stack_sections() {
+        let path = std::env::temp_dir().join(format!(
+            "imod-rs-image-write-slices-{}-{}.mrc",
+            std::process::id(),
+            std::thread::current().name().unwrap_or("unnamed")
+        ));
+        let mut source = Image::default();
+        source.allocate(2, 2, 2, true).unwrap();
+        for z in 0..2 {
+            for y in 0..2 {
+                for x in 0..2 {
+                    source.set_real_pixel_from_physical_coord(x, y, z, (z * 10 + y * 2 + x) as f32);
+                }
+            }
+        }
+        source
+            .quick_and_dirty_write_mrc_slices(path.to_str().unwrap(), 2, 3)
+            .unwrap();
+        let mut restored = Image::default();
+        restored
+            .read_mrc_slices(path.to_str().unwrap(), 2, 3)
+            .unwrap();
+        assert_eq!(
+            restored.return_real_pixel_from_physical_coord(1, 1, 0),
+            Some(3.)
+        );
+        assert_eq!(
+            restored.return_real_pixel_from_physical_coord(1, 1, 1),
+            Some(13.)
+        );
+        let _ = std::fs::remove_file(path);
+    }
+
+    #[test]
+    fn mrc_slice_writer_replaces_existing_sections_and_grows_the_header() {
+        let path = std::env::temp_dir().join(format!(
+            "imod-rs-image-update-slices-{}-{}.mrc",
+            std::process::id(),
+            std::thread::current().name().unwrap_or("unnamed")
+        ));
+        let mut initial = Image::default();
+        initial.allocate(2, 2, 1, true).unwrap();
+        initial.set_to_constant(1.);
+        initial
+            .quick_and_dirty_write_mrc_slices(path.to_str().unwrap(), 1, 1)
+            .unwrap();
+
+        let mut replacement = Image::default();
+        replacement.allocate(2, 2, 2, true).unwrap();
+        replacement.set_to_constant(4.);
+        replacement.set_real_pixel_from_physical_coord(1, 1, 1, 9.);
+        replacement
+            .write_mrc_slices(path.to_str().unwrap(), 2, 3)
+            .unwrap();
+
+        let mut restored = Image::default();
+        restored
+            .read_mrc_slices(path.to_str().unwrap(), 1, 3)
+            .unwrap();
+        assert_eq!(
+            restored.return_real_pixel_from_physical_coord(0, 0, 0),
+            Some(1.)
+        );
+        assert_eq!(
+            restored.return_real_pixel_from_physical_coord(0, 0, 1),
+            Some(4.)
+        );
+        assert_eq!(
+            restored.return_real_pixel_from_physical_coord(1, 1, 2),
+            Some(9.)
+        );
+        let _ = std::fs::remove_file(path);
+    }
+
+    #[test]
+    fn dilate_binarized_mask_preserves_native_odd_step_periodic_neighbourhood() {
+        let mut image = Image::default();
+        image.allocate(5, 5, 1, true).unwrap();
+        image.set_real_pixel_from_physical_coord(0, 0, 0, 1.);
+        // Padding is not a pixel and must not participate in the operation.
+        image.real_values[5] = 19.;
+
+        image.dilate_binarized_mask(1.5);
+
+        // The C++ code wraps one flattened volume index rather than each
+        // coordinate independently, so crossing a row boundary carries into
+        // the preceding/following row.
+        for (x, y) in [(4, 3), (1, 4), (4, 0), (1, 1)] {
+            assert_eq!(
+                image.return_real_pixel_from_physical_coord(x, y, 0),
+                Some(1.),
+                "source offset result at ({x}, {y})"
+            );
+        }
+        assert_eq!(
+            image.return_real_pixel_from_physical_coord(0, 0, 0),
+            Some(1.),
+            "the source adds neighbours to the pre-existing binary mask"
+        );
+        assert_eq!(image.real_values[5], 19.);
+    }
+
     #[test]
     fn allocation_uses_owned_padded_rows_and_source_bounds() {
         let mut image = Image::default();
@@ -2375,5 +3106,84 @@ mod tests {
                 }
             }
         }
+    }
+
+    #[test]
+    fn taper_edges_uses_smoothed_one_thirtieth_edge_strips_without_touching_padding() {
+        let mut image = Image::default();
+        image.allocate(30, 30, 1, true).unwrap();
+        for y in 0..30 {
+            for x in 0..30 {
+                image.set_real_pixel_from_physical_coord(x, y, 0, x as f32);
+            }
+        }
+        let padding = image
+            .return_real_1d_address_from_physical_coord(0, 1, 0)
+            .unwrap()
+            - 1;
+        image.real_values[padding] = 1234.;
+        image.taper_edges();
+        // With one-pixel strips, the source's X-axis edge average is 14.5;
+        // the Y pass is zero for an X-only gradient.
+        assert_eq!(
+            image.return_real_pixel_from_physical_coord(0, 9, 0),
+            Some(14.5)
+        );
+        assert_eq!(
+            image.return_real_pixel_from_physical_coord(29, 9, 0),
+            Some(14.5)
+        );
+        assert_eq!(
+            image.return_real_pixel_from_physical_coord(14, 9, 0),
+            Some(14.)
+        );
+        assert_eq!(image.real_values[padding], 1234.);
+    }
+
+    #[test]
+    fn taper_edges_applies_the_same_strip_rule_to_the_z_axis() {
+        let mut image = Image::default();
+        image.allocate(30, 30, 30, true).unwrap();
+        for z in 0..30 {
+            for y in 0..30 {
+                for x in 0..30 {
+                    image.set_real_pixel_from_physical_coord(x, y, z, z as f32);
+                }
+            }
+        }
+        image.taper_edges();
+        assert_eq!(
+            image.return_real_pixel_from_physical_coord(9, 9, 0),
+            Some(14.5)
+        );
+        assert_eq!(
+            image.return_real_pixel_from_physical_coord(9, 9, 29),
+            Some(14.5)
+        );
+        assert_eq!(
+            image.return_real_pixel_from_physical_coord(9, 9, 14),
+            Some(14.)
+        );
+    }
+
+    #[test]
+    fn phase_shift_preserves_source_representation_and_zero_shift_values() {
+        let mut image = Image::default();
+        image.allocate(4, 3, 1, true).unwrap();
+        for y in 0..3 {
+            for x in 0..4 {
+                image.set_real_pixel_from_physical_coord(x, y, 0, (x + 4 * y) as f32);
+            }
+        }
+        let expected = image.real_values.clone();
+        image.phase_shift(0., 0., 0.);
+        assert!(image.is_in_real_space);
+        assert_eq!(image.real_values, expected);
+
+        image.forward_fft(false);
+        let expected = image.complex_values.clone();
+        image.phase_shift(0., 0., 0.);
+        assert!(!image.is_in_real_space);
+        assert_eq!(image.complex_values, expected);
     }
 }

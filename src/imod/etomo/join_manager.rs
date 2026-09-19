@@ -38,6 +38,10 @@ use crate::imod::etomo::r#type::interface_type::InterfaceType;
 pub struct JoinManager {
     /// Java superclass `BaseManager` state.
     base: BaseManagerBase,
+    /// `JoinMetaData.getName()` until its full typed metadata model is
+    /// translated.  The constructor's file name is already a source-owned
+    /// identity and is needed by EtomoDirector's manager list immediately.
+    name: String,
     /// Java private field `joinDialog`, a process dialog reference which defaults to
     /// null.
     // TODO(unit): needs etomo/ui/swing/JoinDialog.java - the field's declared type.
@@ -83,6 +87,7 @@ impl JoinManager {
     pub fn new(param_file_name: Option<&str>, axis_id: Option<AxisID>) -> &'static JoinManager {
         let instance: &'static JoinManager = Box::leak(Box::new(JoinManager {
             base: BaseManagerBase::initial(),
+            name: param_file_name.unwrap_or("New Join").to_owned(),
             join_dialog: None,
             auto_alignment_controller: None,
             main_panel: None,
@@ -669,7 +674,7 @@ impl BaseManager for JoinManager {
     /// Java `getName`.
     // TODO(unit): needs etomo/type/JoinMetaData.java - the body is `metaData.getName()`.
     fn get_name(&self) -> Option<String> {
-        None
+        Some(self.name.clone())
     }
 }
 

@@ -9,11 +9,14 @@
 #![allow(dead_code)]
 
 use std::convert::Infallible;
+use std::ffi::OsStr;
 use std::fs::{self, File};
 use std::path::Path;
 use std::process::Command as OsCommand;
 use std::sync::Mutex;
 
+use crate::imod::etomo::process::background_process::BackgroundProcess;
+use crate::imod::etomo::process::system_program::ProcessCommand;
 use crate::imod::etomo::process::tomosetexts_output::TomosetextsOutput;
 use crate::imod::etomo::r#type::axis_id::AxisID;
 
@@ -46,6 +49,19 @@ impl BaseProcessManager {
             etomo_director: None,
             axis_process_data: None,
         }
+    }
+
+    /// Runnable local form of Java's String-array `startBackgroundProcess`.
+    /// Source UI/monitor references are optional decorations; local command execution
+    /// itself belongs to `BackgroundProcess` and must not be dropped when absent.
+    pub fn start_background_process_local(
+        &self,
+        command: ProcessCommand,
+        axis_id: AxisID,
+    ) -> Result<BackgroundProcess, String> {
+        let mut process = BackgroundProcess::new(command, axis_id);
+        process.start()?;
+        Ok(process)
     }
 
     /// Java `dumpState`.
@@ -110,6 +126,29 @@ impl BaseProcessManager {
         file_name: Option<&str>,
     ) {
         let _ = (process, axis_id, file_name);
+    }
+
+    /// Runnable form of Java `writeLogFile(BackgroundProcess, AxisID, String)`.
+    ///
+    /// The source copies only the process standard-output records into the
+    /// requested log, one line at a time.  `BackgroundProcess` retains those
+    /// records after polling, so this has the same post-process lifetime as
+    /// the Java implementation without requiring the untranslated manager
+    /// and emergency-monitor ownership graph.
+    pub fn write_log_file_local(
+        &self,
+        process: &BackgroundProcess,
+        file_name: &Path,
+    ) -> std::io::Result<()> {
+        if let Some(parent) = file_name.parent() {
+            fs::create_dir_all(parent)?;
+        }
+        use std::io::Write;
+        let mut log = File::create(file_name)?;
+        for line in process.get_std_output() {
+            writeln!(log, "{line}")?;
+        }
+        Ok(())
     }
     /// Java final `startLoad`.
     pub fn start_load(&self, param: Option<Infallible>, monitor: Option<Infallible>) {
@@ -243,10 +282,51 @@ impl BaseProcessManager {
         let _ = (manager, axis_id, dir);
         None
     }
+
+    /// Runnable core of Java static `tomosetexts(BaseManager, AxisID, File)`.
+    /// The caller supplies the configured Python interpreter and IMOD script
+    /// path, while this source unit owns directory validation, child lifetime,
+    /// and conversion of stdout to `TomosetextsOutput`.
+    pub fn tomosetexts_local(
+        dir: &Path,
+        python: &OsStr,
+        script: &Path,
+    ) -> Option<TomosetextsOutput> {
+        if !dir.is_dir() || fs::read_dir(dir).is_err() {
+            return None;
+        }
+        let command = ProcessCommand::new(python)
+            .args([script.as_os_str(), dir.as_os_str()])
+            .current_dir(dir);
+        let mut program = super::system_program::SystemProgram::spawn(&command).ok()?;
+        let (_, lines) = program.wait_and_drain().ok()?;
+        let stdout: Vec<String> = lines
+            .into_iter()
+            .filter(|line| line.stream == super::system_program::ProcessStream::Stdout)
+            .map(|line| line.line)
+            .collect();
+        Some(TomosetextsOutput::new(Some(&stdout)))
+    }
     /// Java `imodqtassistQuery`.
     pub fn imodqtassist_query(&self, axis_id: AxisID) -> Option<Vec<String>> {
         let _ = axis_id;
-        None
+        Self::imodqtassist_query_local(OsStr::new("imodqtassist"))
+    }
+
+    /// Runnable query mode of `ImodqtassistProcess.getQueryInstance()`.
+    /// `imodqtassist` is resolved through PATH exactly as the Java command
+    /// list does; callers/tests can provide a configured absolute program.
+    pub fn imodqtassist_query_local(program: &OsStr) -> Option<Vec<String>> {
+        let command = ProcessCommand::new(program).args(["-t"]);
+        let mut child = super::system_program::SystemProgram::spawn(&command).ok()?;
+        let (_, lines) = child.wait_and_drain().ok()?;
+        Some(
+            lines
+                .into_iter()
+                .filter(|line| line.stream == super::system_program::ProcessStream::Stdout)
+                .map(|line| line.line)
+                .collect(),
+        )
     }
 
     // The following overload families require process/comscript classes.  Each body is
@@ -914,6 +994,9 @@ impl BackgroundProcessMonitorRunnable {
 #[cfg(test)]
 mod tests {
     use super::BaseProcessManager;
+    use crate::imod::etomo::process::system_program::ProcessCommand;
+    use crate::imod::etomo::r#type::axis_id::AxisID;
+    use crate::imod::etomo::r#type::process_end_state::ProcessEndState;
     #[test]
     fn create_new_file_creates_parent_and_preserves_existing_file() {
         let root =
@@ -923,6 +1006,97 @@ mod tests {
         manager.create_new_file(&file).unwrap();
         manager.create_new_file(&file).unwrap();
         assert!(file.is_file());
+        std::fs::remove_dir_all(root).unwrap();
+    }
+    #[cfg(unix)]
+    #[test]
+    fn local_background_entry_point_starts_a_real_child() {
+        let manager = BaseProcessManager::new(None);
+        let mut process = manager
+            .start_background_process_local(
+                ProcessCommand::new("sh").args(["-c", "exit 0"]),
+                AxisID::First,
+            )
+            .unwrap();
+        while process.poll().unwrap().is_none() {
+            std::thread::yield_now();
+        }
+        assert_eq!(process.end_state(), Some(ProcessEndState::Done));
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn local_log_writer_keeps_stdout_and_excludes_stderr() {
+        let manager = BaseProcessManager::new(None);
+        let mut process = manager
+            .start_background_process_local(
+                ProcessCommand::new("sh")
+                    .args(["-c", "printf first; printf bad >&2; printf '\\nsecond'"]),
+                AxisID::First,
+            )
+            .unwrap();
+        while process.poll().unwrap().is_none() {
+            std::thread::yield_now();
+        }
+        let path = std::env::temp_dir().join(format!(
+            "imod-rs-base-process-log-{}-{}.log",
+            std::process::id(),
+            std::thread::current().name().unwrap_or("test")
+        ));
+        manager.write_log_file_local(&process, &path).unwrap();
+        assert_eq!(std::fs::read_to_string(&path).unwrap(), "first\nsecond\n");
+        std::fs::remove_file(path).unwrap();
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn tomosetexts_runner_parses_the_first_stdout_line() {
+        let root = std::env::temp_dir().join(format!(
+            "imod-rs-tomosetexts-{}-{}",
+            std::process::id(),
+            std::thread::current().name().unwrap_or("test")
+        ));
+        std::fs::create_dir_all(&root).unwrap();
+        let script = root.join("b3dtomosetexts-test.sh");
+        std::fs::write(
+            &script,
+            "#!/bin/sh\nprintf 'MRC ignored-second-line\\nextra\\n'\n",
+        )
+        .unwrap();
+        let output =
+            BaseProcessManager::tomosetexts_local(&root, std::ffi::OsStr::new("sh"), &script)
+                .unwrap();
+        assert_eq!(
+            output.get_image_filename_style(),
+            Some(crate::imod::etomo::r#type::image_filename_style::ImageFilenameStyle::Mrc)
+        );
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn imodqtassist_query_runs_the_source_thread_query_switch() {
+        use std::os::unix::fs::PermissionsExt;
+
+        let root = std::env::temp_dir().join(format!(
+            "imod-rs-imodqtassist-{}-{}",
+            std::process::id(),
+            std::thread::current().name().unwrap_or("test")
+        ));
+        std::fs::create_dir_all(&root).unwrap();
+        let program = root.join("imodqtassist-test");
+        std::fs::write(
+            &program,
+            "#!/bin/sh\nprintf 'argument=%s\\n' \"$1\"\nprintf stderr >&2\n",
+        )
+        .unwrap();
+        let mut permissions = std::fs::metadata(&program).unwrap().permissions();
+        permissions.set_mode(0o755);
+        std::fs::set_permissions(&program, permissions).unwrap();
+        assert_eq!(
+            BaseProcessManager::imodqtassist_query_local(program.as_os_str()),
+            Some(vec!["argument=-t".to_owned()])
+        );
         std::fs::remove_dir_all(root).unwrap();
     }
 }

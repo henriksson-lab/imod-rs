@@ -7,13 +7,15 @@
 //! null-equivalent boundaries rather than simulated process-state answers.
 #![allow(dead_code)]
 
-use std::collections::BTreeMap;
-use std::convert::Infallible;
-
+use crate::imod::etomo::base_manager::BaseManager;
 use crate::imod::etomo::storage::storable::Storable;
 use crate::imod::etomo::r#type::axis_id::AxisID;
+use crate::imod::etomo::r#type::debug_level::DebugLevel;
 use crate::imod::etomo::r#type::dialog_type::DialogType;
 use crate::imod::etomo::r#type::process_name::ProcessName;
+use crate::imod::etomo::r#type::processing_method::ProcessingMethod;
+use std::collections::BTreeMap;
+use std::convert::Infallible;
 
 const PID_KEY: &str = "PID";
 const GROUP_PID_KEY: &str = "GroupPID";
@@ -23,6 +25,14 @@ const OS_TYPE_KEY: &str = "OS";
 const COMPUTER_KEY: &str = "Computer";
 const LINE_NUMBER_KEY: &str = "LineNumber";
 const LINE_NUMBER_DEFAULT: i32 = 0;
+
+/// One local `ps` row consumed by Java `PsParam` in `runPs`.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct PsRecord {
+    pub pid: String,
+    pub group_pid: String,
+    pub start_time: String,
+}
 
 /// Java final `ProcessData implements Storable`.
 pub struct ProcessData {
@@ -35,8 +45,9 @@ pub struct ProcessData {
     secondary_queue: Option<String>,
     axis_id: AxisID,
     process_data_prepend: String,
-    /// Java final `manager` (untranslated ownership/UI boundary).
-    manager: Option<Infallible>,
+    /// Java final `manager`.  Managers are process-lifetime objects in both
+    /// implementations, hence the shared static reference convention.
+    manager: Option<&'static dyn BaseManager>,
     pid: Option<String>,
     group_pid: Option<String>,
     /// Java `Time`; its serialized source representation is retained verbatim.
@@ -47,11 +58,11 @@ pub struct ProcessData {
     os_type: Option<String>,
     ssh_failed: bool,
     computer_map: Option<BTreeMap<String, String>>,
-    /// Java `ProcessingMethod`, not yet translated.
-    processing_method: Option<Infallible>,
+    /// Java `ProcessingMethod`.
+    processing_method: Option<ProcessingMethod>,
     dialog_type: Option<DialogType>,
-    /// Java `DebugLevel`, not yet translated.
-    debug: Option<Infallible>,
+    /// Java `DebugLevel`.
+    debug: Option<DebugLevel>,
     line_number: i32,
     num_done: i32,
     chunk_map: Option<BTreeMap<i32, Chunk>>,
@@ -59,7 +70,7 @@ pub struct ProcessData {
 
 impl ProcessData {
     /// Java package-private `ProcessData(AxisID, BaseManager)`.
-    pub fn new(axis_id: Option<AxisID>, manager: Option<Infallible>) -> Self {
+    pub fn new(axis_id: Option<AxisID>, manager: Option<&'static dyn BaseManager>) -> Self {
         let axis_id = match axis_id {
             Some(AxisID::Only) | None => AxisID::First,
             Some(axis) => axis,
@@ -96,7 +107,7 @@ impl ProcessData {
     /// OSType dependencies, but its managed/load invariant and fixed process name hold.
     pub fn get_managed_instance(
         axis_id: Option<AxisID>,
-        manager: Option<Infallible>,
+        manager: Option<&'static dyn BaseManager>,
         process_name: ProcessName,
     ) -> Self {
         let mut data = Self::new(axis_id, manager);
@@ -172,13 +183,68 @@ impl ProcessData {
     pub fn is_empty(&self) -> bool {
         self.pid.is_none() || self.group_pid.is_none() || self.start_time.is_none()
     }
-    /// Java `isRunning`; PsParam/SystemProgram is an intentional unavailable boundary.
+    /// Java `isRunning`; local process records use the OS PID probe while
+    /// remote-host records remain unavailable until the SSH process runner lands.
     pub fn is_running(&self) -> bool {
-        !self.is_empty() && false
+        if self.is_empty() || self.is_on_different_host() {
+            return false;
+        }
+        let Some(pid) = self.pid.as_deref().and_then(|pid| pid.parse::<i32>().ok()) else {
+            return false;
+        };
+        #[cfg(unix)]
+        unsafe {
+            // `kill(pid, 0)` is the POSIX query used by the Java PsParam path:
+            // EPERM still means the process exists.
+            libc::kill(pid, 0) == 0
+                || std::io::Error::last_os_error().raw_os_error() == Some(libc::EPERM)
+        }
+        #[cfg(not(unix))]
+        {
+            false
+        }
     }
-    /// Java `isOnDifferentHost`; Network lookup is an unavailable boundary.
+    /// Java `isOnDifferentHost`.  `Network` compares the persisted host with
+    /// the local machine before attempting a PID query.  Keep `localhost`
+    /// local for records created by the Rust runner, then use gethostname on
+    /// POSIX; a loaded nonempty name that cannot match is necessarily remote.
     pub fn is_on_different_host(&self) -> bool {
-        false
+        let Some(host_name) = self
+            .host_name
+            .as_deref()
+            .filter(|name| !name.trim().is_empty())
+        else {
+            return false;
+        };
+        if host_name.eq_ignore_ascii_case("localhost")
+            || host_name == "127.0.0.1"
+            || host_name == "::1"
+        {
+            return false;
+        }
+        #[cfg(unix)]
+        {
+            let mut buffer = [0i8; 256];
+            let local = unsafe {
+                if libc::gethostname(buffer.as_mut_ptr(), buffer.len()) != 0 {
+                    return true;
+                }
+                std::ffi::CStr::from_ptr(buffer.as_ptr())
+                    .to_string_lossy()
+                    .into_owned()
+            };
+            // Hostname services commonly return the short host name while a
+            // persisted record may contain its FQDN; Java Network treats these
+            // as the same local computer.
+            let local_short = local.split('.').next().unwrap_or(&local);
+            let record_short = host_name.split('.').next().unwrap_or(host_name);
+            !host_name.eq_ignore_ascii_case(&local)
+                && !record_short.eq_ignore_ascii_case(local_short)
+        }
+        #[cfg(not(unix))]
+        {
+            true
+        }
     }
     /// Java `isSshFailed`.
     pub fn is_ssh_failed(&self) -> bool {
@@ -195,24 +261,71 @@ impl ProcessData {
             .map(str::to_owned);
     }
     /// Java `setProcessingMethod`.
-    pub fn set_processing_method(&mut self, processing_method: Option<Infallible>) {
+    pub fn set_processing_method(&mut self, processing_method: Option<ProcessingMethod>) {
         self.processing_method = processing_method;
     }
-    /// Java package-private `setPid`; ps lookup is unavailable, so a supplied PID clears
-    /// the associated ps-derived fields exactly as the source does before its lookup.
+    /// Java package-private `setPid`, retaining a local PID/provenance record.
     pub fn set_pid(&mut self, pid: Option<&str>) {
         self.pid = None;
         self.group_pid = None;
         self.start_time = None;
         if let Some(pid) = pid.filter(|pid| !pid.trim().is_empty()) {
-            let _ = pid;
+            if let Some(record) = self.run_ps(Some(pid)) {
+                self.pid = Some(record.pid);
+                self.group_pid = Some(record.group_pid);
+                self.start_time = Some(record.start_time);
+            }
         }
     }
-    /// Java private `runPs`.
-    pub fn run_ps(&mut self, pid: Option<&str>) -> Option<Infallible> {
-        let _ = pid;
-        self.ssh_failed = false;
-        None
+    /// Register a child launched by the typed Rust `SystemProgram` path.
+    pub fn set_local_process(&mut self, pid: u32, process_name: Option<ProcessName>) {
+        self.set_pid(Some(&pid.to_string()));
+        self.process_name = process_name;
+        self.host_name = Some("localhost".to_owned());
+        self.os_type = Some(std::env::consts::OS.to_owned());
+    }
+    /// Java private `runPs`.  The translated local process runner uses the
+    /// same PID query instead of manufacturing process-group/start metadata.
+    /// Remote records remain a deliberate SSH-runner frontier.
+    pub fn run_ps(&mut self, pid: Option<&str>) -> Option<PsRecord> {
+        let pid = pid?.trim();
+        if pid.is_empty() || self.is_on_different_host() {
+            self.ssh_failed = self.is_on_different_host();
+            return None;
+        }
+        #[cfg(unix)]
+        {
+            if self.debug.is_some_and(DebugLevel::is_verbose) {
+                eprintln!("ProcessData.runPs");
+            }
+            let output = std::process::Command::new("ps")
+                .args(["-o", "pid=", "-o", "pgid=", "-o", "lstart=", "-p", pid])
+                .output();
+            let Ok(output) = output else {
+                self.ssh_failed = true;
+                return None;
+            };
+            let stdout = String::from_utf8_lossy(&output.stdout);
+            self.ssh_failed = stdout.trim().is_empty();
+            let mut fields = stdout.split_whitespace();
+            let actual_pid = fields.next()?;
+            let group_pid = fields.next()?;
+            let start_time = fields.collect::<Vec<_>>().join(" ");
+            if actual_pid != pid || start_time.is_empty() {
+                return None;
+            }
+            Some(PsRecord {
+                pid: actual_pid.to_owned(),
+                group_pid: group_pid.to_owned(),
+                start_time,
+            })
+        }
+        #[cfg(not(unix))]
+        {
+            let _ = pid;
+            self.ssh_failed = true;
+            None
+        }
     }
     /// Java `store(Properties)`.
     pub fn store_properties(&self, properties: &mut BTreeMap<String, String>) {
@@ -251,7 +364,7 @@ impl ProcessData {
         self.computer_map.as_ref()
     }
     /// Java package-private `getProcessingMethod`.
-    pub fn get_processing_method(&self) -> Option<Infallible> {
+    pub fn get_processing_method(&self) -> Option<ProcessingMethod> {
         self.processing_method
     }
     /// Java private `createPrepend`.
@@ -505,6 +618,12 @@ impl Storable for ProcessData {
         } else {
             properties.remove(&format!("{prepend}.DialogType"));
         }
+        let processing_key = ProcessingMethod::create_key(Some(&prepend));
+        if let Some(method) = self.processing_method {
+            properties.insert(processing_key, method.to_string());
+        } else {
+            properties.remove(&processing_key);
+        }
         properties.insert(
             format!("{group}{LINE_NUMBER_KEY}"),
             self.line_number.to_string(),
@@ -546,6 +665,11 @@ impl Storable for ProcessData {
             .cloned();
         self.os_type = properties.get(&format!("{prepend}.OS")).cloned();
         self.dialog_type = DialogType::load(properties, &prepend);
+        self.processing_method = ProcessingMethod::get_instance(
+            properties
+                .get(&ProcessingMethod::create_key(Some(&prepend)))
+                .map(String::as_str),
+        );
         self.line_number = properties
             .get(&format!("{prepend}.{LINE_NUMBER_KEY}"))
             .and_then(|value| value.parse().ok())
@@ -639,6 +763,7 @@ mod tests {
         data.group_pid = Some("10".into());
         data.start_time = Some("now".into());
         data.set_sub_dir_name(Some("chunks"));
+        data.set_processing_method(Some(ProcessingMethod::PpGpu));
         data.set_computer_map(Some(BTreeMap::from([("host".into(), "4".into())])));
         data.increment_chunk_line_number(3);
         data.increment_chunk_line_number(3);
@@ -649,5 +774,40 @@ mod tests {
         assert_eq!(loaded.get_sub_dir_name().as_deref(), Some("chunks"));
         assert_eq!(loaded.get_chunk_line_number(3), 2);
         assert_eq!(loaded.get_computer_map().unwrap()["host"], "4");
+        assert_eq!(
+            loaded.get_processing_method(),
+            Some(ProcessingMethod::PpGpu)
+        );
+    }
+
+    #[test]
+    fn persisted_host_distinguishes_local_and_remote_process_records() {
+        let mut data = ProcessData::new(Some(AxisID::First), None);
+        data.host_name = Some("localhost".into());
+        assert!(!data.is_on_different_host());
+        data.host_name = Some("remote.example.invalid".into());
+        assert!(data.is_on_different_host());
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn set_pid_uses_real_process_group_and_start_metadata() {
+        let mut data = ProcessData::new(Some(AxisID::First), None);
+        let pid = std::process::id().to_string();
+        data.set_pid(Some(&pid));
+        assert_eq!(data.get_pid().as_deref(), Some(pid.as_str()));
+        let mut properties = BTreeMap::new();
+        data.store_properties(&mut properties);
+        let group_pid = properties
+            .iter()
+            .find(|(key, _)| key.ends_with(".GroupPID"))
+            .map(|(_, value)| value.as_str());
+        let start_time = properties
+            .iter()
+            .find(|(key, _)| key.ends_with(".StartTime"))
+            .map(|(_, value)| value.as_str());
+        assert!(group_pid.is_some_and(|value| !value.is_empty()));
+        assert!(start_time.is_some_and(|value| value.split_whitespace().count() >= 5));
+        assert!(!data.is_ssh_failed());
     }
 }

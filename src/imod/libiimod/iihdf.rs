@@ -1957,8 +1957,16 @@ unsafe fn hdf_delete(in_file: *mut ImodImageFile) {
     {
         // `iiDelete` immediately reclaims this legacy cursor after its cleanup
         // callback returns, so relinquish exactly this box to that boundary.
+        //
+        // `Box::into_raw` MUST NOT sit inside a `debug_assert_eq!`: that macro
+        // expands to nothing in a release build, so the call never ran, the
+        // `Box` was dropped here instead of being relinquished, and
+        // `iiDelete`'s `Box::from_raw` then freed the same allocation a second
+        // time.  `header -volume 2` on a multi-volume HDF file printed its
+        // correct output and *then* segfaulted, in release only.
         let volume = (*primary).owned_hdf_volumes.swap_remove(index);
-        debug_assert_eq!(Box::into_raw(volume), in_file);
+        let raw = Box::into_raw(volume);
+        debug_assert_eq!(raw, in_file);
     }
 }
 /// C `hdfReadSection` (`iihdf.c:1611`).

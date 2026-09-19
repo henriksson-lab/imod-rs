@@ -1,11 +1,13 @@
 //! Non-GUI eTomo Java-source translations.
 
+pub mod application_manager;
 pub mod arguments;
 pub mod base_manager;
 pub mod batch_run_tomo_manager;
 pub mod comscript;
 pub mod directive_editor_manager;
 pub mod etomo_director;
+pub mod front_page_manager;
 pub mod join_manager;
 pub mod local_arguments;
 pub mod logic;

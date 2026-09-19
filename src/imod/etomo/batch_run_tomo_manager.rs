@@ -41,6 +41,8 @@ impl TaskInterface for Task {
 /// Java `BatchRunTomoManager extends BaseManager`.
 pub struct BatchRunTomoManager {
     base: BaseManagerBase,
+    /// `BatchRunTomoMetaData.getName()` until its typed metadata is present.
+    name: String,
     /// Java `tableReference`.
     // TODO(unit): etomo/type/TableReference.java.
     table_reference: Option<Infallible>,
@@ -92,6 +94,10 @@ impl BatchRunTomoManager {
     pub fn new_with_param_file_name(param_file_name: Option<&str>) -> &'static Self {
         let instance = Box::leak(Box::new(Self {
             base: BaseManagerBase::initial(),
+            name: param_file_name
+                .filter(|name| !name.is_empty())
+                .unwrap_or("Batch Run Tomo")
+                .to_owned(),
             table_reference: None,
             com_script_manager: None,
             screen_state: None,
@@ -417,7 +423,7 @@ impl BaseManager for BatchRunTomoManager {
         None
     }
     fn get_name(&self) -> Option<String> {
-        None
+        Some(self.name.clone())
     }
     /// Java `isAddGPUMachineToProcessChunks`.
     fn is_add_gpu_machine_to_process_chunks(&self) -> bool {

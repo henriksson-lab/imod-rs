@@ -11,6 +11,7 @@ use std::path::Path;
 
 use super::message::Message;
 use super::message_parser::MessageParser;
+use crate::imod::etomo::arguments::{Arguments, GrabItParameter};
 
 pub const END_FEED_TOKEN: &str =
     "This the END of the String Feed!!!  239asdlkjgsafT$LSFJsGHW($(gjhaehgpasjdhf0w235";
@@ -261,6 +262,40 @@ impl<'a> ListTypeIterator<'a> {
     }
 }
 impl ProcessMessages {
+    /// Java static `grabIt`.  This headless route chooses the same parser
+    /// configuration from `Arguments.GrabItParameter`, reads every supplied
+    /// log/parameter file in source order, and returns each parsed model for
+    /// the caller that owns reporting or UI presentation.
+    pub fn grab_it(arguments: &Arguments) -> std::io::Result<Vec<Self>> {
+        let mut results = Vec::with_capacity(arguments.get_param_file_name_list().len());
+        for file in arguments.get_param_file_name_list() {
+            let mut messages = match arguments.get_grab_it_parameter() {
+                Some(GrabItParameter::CopyTomoComs) => {
+                    Self::get_multi_line_instance_with_options(true, true, false)
+                }
+                Some(GrabItParameter::ParallelProcessing) => {
+                    Self::get_instance_for_parallel_processing(false)
+                }
+                Some(GrabItParameter::Batchruntomo) => Self::get_batchruntomo_test_instance(
+                    true,
+                    false,
+                    Some("ERROR: batchruntomo -".to_owned()),
+                    Some("ABORT".to_owned()),
+                    false,
+                    false,
+                ),
+                None => Self::new(
+                    false, false, None, None, false, false, false, None, None, false, false, false,
+                    false,
+                ),
+            };
+            messages.add_process_output_file(Path::new(file))?;
+            messages.end_parse();
+            results.push(messages);
+        }
+        Ok(results)
+    }
+
     #[allow(clippy::too_many_arguments)]
     pub fn new(
         multi_line_messages: bool,
@@ -318,6 +353,31 @@ impl ProcessMessages {
     pub fn get_multi_line_instance() -> Self {
         Self::new(
             true, false, None, None, false, false, false, None, None, false, false, true, false,
+        )
+    }
+    /// Java's `getMultiLineInstance(BaseManager, AxisID, boolean, boolean,
+    /// boolean)` overload.  Unlike the all-message multiline factory, this
+    /// leaves errors single-line and selects only warning/info continuation
+    /// behavior and project-log routing.
+    pub fn get_multi_line_instance_with_options(
+        multi_line_warning: bool,
+        multi_line_info: bool,
+        log_info_messages: bool,
+    ) -> Self {
+        Self::new(
+            false,
+            false,
+            None,
+            None,
+            multi_line_warning,
+            multi_line_info,
+            false,
+            None,
+            None,
+            false,
+            false,
+            log_info_messages,
+            false,
         )
     }
     pub fn get_instance_for_parallel_processing(multi_line_messages: bool) -> Self {
@@ -970,5 +1030,43 @@ mod tests {
         );
         messages.close_secondary_log();
         assert!(!messages.is_secondary_log_open());
+    }
+
+    #[test]
+    fn selective_multiline_factory_preserves_java_overload_configuration() {
+        let messages = ProcessMessages::get_multi_line_instance_with_options(true, false, false);
+        assert!(!messages.is_multi_line_all_messages());
+        assert!(messages.is_multi_line_warning());
+        assert!(!messages.is_multi_line_info());
+        assert!(!messages.is_log_info_messages());
+        assert!(!messages.is_chunks());
+    }
+
+    #[test]
+    fn grab_it_reads_each_argument_file_with_selected_source_policy() {
+        let path = std::env::temp_dir().join(format!(
+            "imod-rs-grabit-{}-{}.log",
+            std::process::id(),
+            std::thread::current().name().unwrap_or("test")
+        ));
+        std::fs::write(&path, "WARNING: first\nsecond\n\nINFO: retained\n").unwrap();
+        let mut arguments = Arguments::new();
+        arguments.param_file_name_list = vec![path.to_string_lossy().into_owned()];
+        arguments.grab_it_parameter = Some(GrabItParameter::CopyTomoComs);
+        let parsed = ProcessMessages::grab_it(&arguments).unwrap();
+        assert_eq!(parsed.len(), 1);
+        // The current Java `MessageParser` queues one `Message` per interior
+        // line before `ProcessMessages.storeMessage` drains that queue.
+        assert_eq!(parsed[0].size(MessageType::Warning), 2);
+        assert_eq!(
+            parsed[0].get(MessageType::Warning, 0),
+            Some("WARNING: first\n")
+        );
+        assert_eq!(parsed[0].get(MessageType::Warning, 1), Some("second\n"));
+        assert_eq!(
+            parsed[0].get(MessageType::Info, 0),
+            Some("INFO: retained\n")
+        );
+        std::fs::remove_file(path).unwrap();
     }
 }

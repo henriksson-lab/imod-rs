@@ -944,8 +944,19 @@ pub fn imod_cont_edit_surf_show(
 ) -> Option<ContourSurfacePointDisplay> {
     let obj = imod.obj.get(current.object as usize)?;
     let cont = obj.cont.get(current.contour as usize);
-    let label_text =
-        |bytes: Option<&[u8]>| bytes.map(|text| String::from_utf8_lossy(text).into_owned());
+    // `imodLabel*Get` exposes C label storage; forms receive its NUL-terminated
+    // text, not the backing terminator retained by the model label item.
+    let label_text = |bytes: Option<&[u8]>| {
+        bytes.map(|text| {
+            String::from_utf8_lossy(
+                &text[..text
+                    .iter()
+                    .position(|&byte| byte == 0)
+                    .unwrap_or(text.len())],
+            )
+            .into_owned()
+        })
+    };
     let (point_size, point_size_default) = match cont {
         Some(cont) if current.point >= 0 && (current.point as usize) < cont.pts.len() => (
             imod_point_get_size(obj, cont, current.point),

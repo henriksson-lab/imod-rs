@@ -271,10 +271,7 @@ fn newstack_replaces_generic_extended_header_tilts_for_selected_sections() {
             .flat_map(f32::to_ne_bytes)
             .collect::<Vec<_>>();
         assert_eq!(
-            mrc_write_extra_header(
-                (*file).mrc_header.as_deref_mut().unwrap(),
-                &initial_angle_bytes,
-            ),
+            mrc_write_extra_header((*file).mrc_header.as_mut().unwrap(), &initial_angle_bytes,),
             0
         );
         for (section, value) in [10.0_f32, 20.0, 30.0].into_iter().enumerate() {
@@ -394,7 +391,7 @@ fn newstack_replaces_selected_serialem_extended_header_tilts() {
             serialem[8 * record + 2..8 * record + 8].copy_from_slice(&[record as u8 + 1; 6]);
         }
         assert_eq!(
-            mrc_write_extra_header((*file).mrc_header.as_deref_mut().unwrap(), &serialem),
+            mrc_write_extra_header((*file).mrc_header.as_mut().unwrap(), &serialem),
             0
         );
         for (section, value) in [10.0_f32, 20.0, 30.0].into_iter().enumerate() {
@@ -1616,7 +1613,7 @@ fn newstack_blank_accepts_out_of_range_sections_and_writes_zero_metadata() {
     let output_c = CString::new(output.to_string_lossy().as_bytes()).unwrap();
     unsafe {
         let file = ii_open(output_c.to_bytes(), "rb");
-        let header = (*file).mrc_header.as_deref().unwrap();
+        let header = (*file).mrc_header.as_ref().unwrap();
         assert_eq!(header.nz, 2);
         assert_eq!(header.amin, 0.0);
         assert_eq!(header.amax, 0.0);
@@ -2991,7 +2988,7 @@ fn newstack_blank_section_fills_with_input_mean_or_fill_value() {
     let output_c = CString::new(output.to_string_lossy().as_bytes()).unwrap();
     unsafe {
         let file = ii_open(output_c.to_bytes(), "rb");
-        let header = (*file).mrc_header.as_deref().unwrap();
+        let header = (*file).mrc_header.as_ref().unwrap();
         assert_eq!(header.nz, 2);
         assert_eq!(header.amin, 3.0);
         assert_eq!(header.amax, 3.0);
@@ -3984,7 +3981,7 @@ fn newstack_output_section_counts_follow_source_three_way_branch() {
             unsafe {
                 let file = ii_open(name.to_bytes(), "rb");
                 assert!(!file.is_null(), "{tag}");
-                assert_eq!((*file).mrc_header.as_deref().unwrap().nz, nz, "{tag}");
+                assert_eq!((*file).mrc_header.as_ref().unwrap().nz, nz, "{tag}");
                 ii_close(file);
             }
         }
@@ -4000,7 +3997,7 @@ fn newstack_output_section_counts_follow_source_three_way_branch() {
     let name = CString::new(out("a").to_string_lossy().as_bytes()).unwrap();
     unsafe {
         let file = ii_open(name.to_bytes(), "rb");
-        assert_eq!((*file).mrc_header.as_deref().unwrap().nz, 5);
+        assert_eq!((*file).mrc_header.as_ref().unwrap().nz, 5);
         ii_close(file);
     }
     let five: Vec<std::path::PathBuf> = ["a", "b", "c", "d", "e"].iter().map(|t| out(t)).collect();
@@ -4014,7 +4011,7 @@ fn newstack_output_section_counts_follow_source_three_way_branch() {
         let name = CString::new(path.to_string_lossy().as_bytes()).unwrap();
         unsafe {
             let file = ii_open(name.to_bytes(), "rb");
-            assert_eq!((*file).mrc_header.as_deref().unwrap().nz, 1);
+            assert_eq!((*file).mrc_header.as_ref().unwrap().nz, 1);
             ii_close(file);
         }
         let _ = std::fs::remove_file(path);

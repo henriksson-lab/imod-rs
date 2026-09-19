@@ -608,6 +608,8 @@ pub struct ImodNativeHost {
     load_info: Option<Box<LoadInfo>>,
     model: Option<Box<Imod>>,
     slicers: SlicerRegistry,
+    #[cfg(feature = "three-dmod-gl")]
+    normal_host_proxy: Option<crate::imod::three_dmod::imod_window::NormalHostProxy>,
 }
 
 impl Default for ImodNativeHost {
@@ -618,6 +620,8 @@ impl Default for ImodNativeHost {
             load_info: None,
             model: None,
             slicers: SlicerRegistry::default(),
+            #[cfg(feature = "three-dmod-gl")]
+            normal_host_proxy: None,
         }
     }
 }
@@ -774,6 +778,7 @@ impl ImodNativeBoundary for ImodNativeHost {
                 },
             );
         }
+        #[cfg(not(feature = "three-dmod-gl"))]
         if launch.slicer_open {
             if slicer_open(
                 &mut self.slicers,
@@ -818,10 +823,22 @@ impl ImodNativeBoundary for ImodNativeHost {
                 .load_info
                 .take()
                 .expect("normal viewer load info was installed");
+            let mut initial_tools = Vec::new();
+            if launch.zap_open {
+                initial_tools.push(crate::imod::three_dmod::imod_window::InitialToolWindow::Zap);
+            }
+            if launch.slicer_open {
+                initial_tools.push(crate::imod::three_dmod::imod_window::InitialToolWindow::Slicer);
+            }
+            if launch.xyz_window_open {
+                initial_tools.push(crate::imod::three_dmod::imod_window::InitialToolWindow::Xyz);
+            }
             let result = crate::imod::three_dmod::imod_window::run_native_image_host(
                 crate::imod::three_dmod::imod_window::ImodImageHost::new(
                     view, model, load_info, "3dmod",
-                ),
+                )
+                .with_initial_tools(initial_tools),
+                |proxy| self.normal_host_proxy = Some(proxy),
             );
             NORMAL_CURRENT_VIEW.with(|current| current.set(std::ptr::null_mut()));
             return result.map(|()| 0);
@@ -836,6 +853,10 @@ impl ImodNativeBoundary for ImodNativeHost {
     }
     /// `imodDrawModel(vi, imod, drawCurrent, zscale)` (`model_draw.cpp:40`).
     fn imod_draw_model(&mut self) -> Result<(), String> {
+        #[cfg(feature = "three-dmod-gl")]
+        if let Some(proxy) = &self.normal_host_proxy {
+            return proxy.request_model_draw();
+        }
         Err(
             "3dmod: the model cannot be drawn into the image windows: imodDrawModel \
              (model_draw.cpp:40) needs a ModelDrawBoundary host on an image window, which the \

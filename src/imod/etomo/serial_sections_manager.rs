@@ -26,6 +26,9 @@ const AXIS_ID: AxisID = AxisID::Only;
 pub struct SerialSectionsManager {
     /// Java superclass `BaseManager` state.
     base: BaseManagerBase,
+    /// `SerialSectionsMetaData.getName()` until its typed metadata unit is
+    /// translated; required immediately by EtomoDirector manager registration.
+    name: String,
     /// Java final `state = new SerialSectionsState()`.
     // TODO(unit): etomo/type/SerialSectionsState.java.
     state: Option<Infallible>,
@@ -68,6 +71,7 @@ impl SerialSectionsManager {
     ) -> &'static SerialSectionsManager {
         let instance = Box::leak(Box::new(SerialSectionsManager {
             base: BaseManagerBase::initial(),
+            name: param_file_name.unwrap_or("Serial Sections").to_owned(),
             state: None,
             meta_data: None,
             process_mgr: None,
@@ -464,7 +468,7 @@ impl BaseManager for SerialSectionsManager {
     }
     /// Java `getName`.
     fn get_name(&self) -> Option<String> {
-        None
+        Some(self.name.clone())
     }
     /// Java `getViewType`.
     fn get_view_type(&self) -> ViewType {

@@ -127,6 +127,53 @@ pub fn find_skeleton_start_point(
     None
 }
 
+/// Original static `TakeFreemanStep` (`libmesh/skeletonize.c`).
+/// Advances a bitmap coordinate by one Freeman-chain direction.
+pub fn take_freeman_step(freeman: usize, x: &mut isize, y: &mut isize) {
+    const DX: [isize; 8] = [1, 1, 0, -1, -1, -1, 0, 1];
+    const DY: [isize; 8] = [0, -1, -1, -1, 0, 1, 1, 1];
+    if let (Some(dx), Some(dy)) = (DX.get(freeman), DY.get(freeman)) {
+        *x += dx;
+        *y += dy;
+    }
+}
+
+/// Original static `ptcompare` (`libmesh/remesh.c`).
+///
+/// Orders points by X then Y.  As in the C helper, values which are not
+/// ordered by either comparison (including NaN) compare equal.
+pub fn compare_points_xy(
+    left: &crate::imod::libimod::imodel::Ipoint,
+    right: &crate::imod::libimod::imodel::Ipoint,
+) -> std::cmp::Ordering {
+    if left.x < right.x {
+        std::cmp::Ordering::Less
+    } else if left.x > right.x {
+        std::cmp::Ordering::Greater
+    } else if left.y > right.y {
+        std::cmp::Ordering::Greater
+    } else if left.y < right.y {
+        std::cmp::Ordering::Less
+    } else {
+        std::cmp::Ordering::Equal
+    }
+}
+
+/// Original static `floatcmp` (`libmesh/objprep.c`).
+///
+/// This preserves C's qsort ordering for unordered values: neither comparison
+/// succeeds for NaN, so such values compare equal rather than being given a
+/// Rust total order.
+pub fn compare_f32_native(left: f32, right: f32) -> std::cmp::Ordering {
+    if left < right {
+        std::cmp::Ordering::Less
+    } else if left > right {
+        std::cmp::Ordering::Greater
+    } else {
+        std::cmp::Ordering::Equal
+    }
+}
+
 /// Original static `EliminateLinearPart` (`libmesh/skeletonize.c`).
 /// Removes matching, nearly linear arms around a skeleton endpoint.  Point
 /// arrays omit the duplicate closing point, as do the native work arrays.
@@ -237,8 +284,6 @@ pub fn trace_skeleton_axis(width: usize, height: usize, axis: &mut [u8]) -> Vec<
     let Some((start_x, start_y)) = find_skeleton_start_point(width, height, axis) else {
         return Vec::new();
     };
-    const DX: [isize; 8] = [1, 1, 0, -1, -1, -1, 0, 1];
-    const DY: [isize; 8] = [0, -1, -1, -1, 0, 1, 1, 1];
     let (mut x, mut y, mut freeman) = (start_x as isize, start_y as isize, 0usize);
     let mut points = Vec::new();
     loop {
@@ -246,6 +291,8 @@ pub fn trace_skeleton_axis(width: usize, height: usize, axis: &mut [u8]) -> Vec<
         let mut candidates = Vec::new();
         let mut next = (freeman + 2) % 8;
         for _ in 0..8 {
+            const DX: [isize; 8] = [1, 1, 0, -1, -1, -1, 0, 1];
+            const DY: [isize; 8] = [0, -1, -1, -1, 0, 1, 1, 1];
             if axis[((y + DY[next]) as usize) * width + (x + DX[next]) as usize] != 0 {
                 candidates.push(next);
                 if candidates.len() == 2 {
@@ -263,8 +310,7 @@ pub fn trace_skeleton_axis(width: usize, height: usize, axis: &mut [u8]) -> Vec<
         } else {
             first
         };
-        x += DX[freeman];
-        y += DY[freeman];
+        take_freeman_step(freeman, &mut x, &mut y);
         if x as usize == start_x && y as usize == start_y {
             break;
         }
@@ -2413,7 +2459,7 @@ pub fn concavity_area_fraction(
     };
     let contour_area = area(&contour.pts);
     let mut points = contour.pts.clone();
-    points.sort_by(|left, right| left.x.total_cmp(&right.x).then(left.y.total_cmp(&right.y)));
+    points.sort_by(compare_points_xy);
     points.dedup_by(|left, right| left.x == right.x && left.y == right.y);
     let cross = |origin: crate::imod::libimod::imodel::Ipoint,
                  first: crate::imod::libimod::imodel::Ipoint,
@@ -4298,7 +4344,7 @@ pub fn skin_orphan_break_candidates(
             ));
         }
     }
-    candidates.sort_unstable_by(|left, right| right.2.total_cmp(&left.2));
+    candidates.sort_unstable_by(|left, right| compare_f32_native(right.2, left.2));
     candidates
 }
 
@@ -7220,6 +7266,36 @@ mod tests {
         axis[2 * 5 + 2] = 1;
         axis[2 * 5 + 3] = 1;
         assert_eq!(find_skeleton_start_point(5, 5, &axis), Some((2, 2)));
+    }
+
+    #[test]
+    fn freeman_step_and_xy_comparator_match_native_helpers() {
+        let mut x = 3;
+        let mut y = 4;
+        take_freeman_step(1, &mut x, &mut y);
+        assert_eq!((x, y), (4, 3));
+
+        let low = Ipoint {
+            x: 1.,
+            y: 9.,
+            z: 0.,
+        };
+        let high = Ipoint {
+            x: 2.,
+            y: 0.,
+            z: 0.,
+        };
+        let same_x_lower_y = Ipoint {
+            x: 1.,
+            y: 2.,
+            z: 0.,
+        };
+        // Native `remesh.c:ptcompare` returns -1 and 1 respectively for
+        // these two probes (compiled against the vendored IMOD headers).
+        assert!(compare_points_xy(&low, &high).is_lt());
+        assert!(compare_points_xy(&low, &same_x_lower_y).is_gt());
+        assert!(compare_f32_native(1., 2.).is_lt());
+        assert_eq!(compare_f32_native(f32::NAN, 1.), std::cmp::Ordering::Equal);
     }
 
     #[test]

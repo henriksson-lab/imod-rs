@@ -34,6 +34,17 @@ pub enum ToolType {
     GpuTiltTest,
     AlignFrames,
 }
+impl ToolType {
+    /// Java `etomo.type.ToolType.toString` labels used by ToolsMetaData before
+    /// the user selects an input/root name.
+    pub const fn label(self) -> &'static str {
+        match self {
+            Self::FlattenVolume => "Flatten Volume",
+            Self::GpuTiltTest => "GPU Test",
+            Self::AlignFrames => "Align Frames",
+        }
+    }
+}
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum MenuTarget {
     Save,

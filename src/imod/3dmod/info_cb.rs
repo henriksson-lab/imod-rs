@@ -24,7 +24,7 @@ pub struct MeanSdData {
     pub cache_sum: i32,
 }
 /// `TimeRampData` in the source.
-#[derive(Clone, Copy, Debug, Default)]
+#[derive(Clone, Copy, Debug)]
 pub struct TimeRampData {
     pub last_section: i32,
     pub ref_black: f32,
@@ -38,6 +38,26 @@ pub struct TimeRampData {
     pub reverse: i32,
     pub false_color: i32,
     pub cramp_ind: i32,
+}
+impl Default for TimeRampData {
+    fn default() -> Self {
+        Self {
+            // `sTRampData` is initialized with an unvisited time marker; zero
+            // is a valid section and would suppress the source global-float path.
+            last_section: -1,
+            ref_black: 0.,
+            ref_white: 0.,
+            black_in_range: 0,
+            white_in_range: 0,
+            range_low: 0,
+            range_high: 0,
+            subsets: 0,
+            float_on: 0,
+            reverse: 0,
+            false_color: 0,
+            cramp_ind: 0,
+        }
+    }
 }
 /// Source `Cramp` fields accessed by this unit.
 #[derive(Clone, Copy, Debug, Default)]

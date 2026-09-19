@@ -391,6 +391,20 @@ pub fn pip_exit_on_error(use_std_err: i32, prefix: &[u8]) -> i32 {
 /// Original C `setExitPrefix` (`parse_params.c:283`).
 ///
 /// Function for compatibility with Fortran routines, so `setExitPrefix` and
+/// C `setStandardExitPrefix` (`parse_params.c:295`).
+///
+/// `sprintf(prefix, "\nERROR: %s - ", progName)` then `PipExitOnError(0, prefix)`.
+/// The leading newline and the `0` (meaning *not* stderr) are both part of the
+/// behaviour: `PipSetError` prints the prefix with `"%s "`, adding a second
+/// space, and sends the whole thing to **stdout**.
+pub fn set_standard_exit_prefix(prog_name: &[u8]) {
+    let mut prefix = Vec::with_capacity(prog_name.len() + 15);
+    prefix.extend_from_slice(b"\nERROR: ");
+    prefix.extend_from_slice(prog_name);
+    prefix.extend_from_slice(b" - ");
+    pip_exit_on_error(0, &prefix);
+}
+
 /// `exitError` can be used without using PIP.
 #[allow(non_snake_case)]
 pub fn setExitPrefix(prefix: &[u8]) {
@@ -1473,17 +1487,22 @@ pub fn pip_set_error(err_string: &[u8]) -> i32 {
         /* `fprintf(outFile, "%s ", sExitPrefix)` -- the space is a second one
         after a prefix that already ends in one -- then `"%s\n"` with the
         message, on *stdout* unless sErrorDest was set. */
-        let mut out: Box<dyn Write> = if S_ERROR_DEST.get() != 0 {
-            Box::new(io::stderr())
+        /* These must be the *C* streams, not `io::stdout()`.  Translated
+        programs write their other diagnostics through `ImodFile::Stdout`
+        (libc `stdout`), and mixing the two buffers reorders the output under a
+        redirect: `mrcbyte -q` emitted its usage text before the illegal-option
+        error that the source prints first. */
+        let mut out = if S_ERROR_DEST.get() != 0 {
+            ImodFile::Stderr
         } else {
-            Box::new(io::stdout())
+            ImodFile::Stdout
         };
         let _ = out.write_all(&prefix);
         let _ = out.write_all(b" ");
         let _ = out.write_all(err_string);
         let _ = out.write_all(b"\n");
         let _ = out.flush();
-        /* Flush PIP's Rust standard output before terminating. */
+        /* Flush Rust's standard output too, for any caller that used it. */
         let _ = io::stdout().flush();
         std::process::exit(1);
     }

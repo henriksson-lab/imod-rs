@@ -10,6 +10,7 @@ use std::convert::Infallible;
 use std::path::Path;
 use std::sync::Mutex;
 
+use crate::imod::etomo::comscript::com_script_file::ComScriptFile;
 use crate::imod::etomo::tools_manager::ToolsManager;
 use crate::imod::etomo::r#type::axis_id::AxisID;
 
@@ -23,6 +24,11 @@ pub struct ToolsComScriptManager {
     script_align_frames_input: Mutex<Option<Infallible>>,
     /// Java `scriptAlignFramesOutput`, initially null.
     script_align_frames_output: Mutex<Option<Infallible>>,
+    /// Typed COM documents used by the translated manager workflow.  The
+    /// parameter objects can be layered on these documents as they land.
+    flatten_document: Mutex<Option<ComScriptFile>>,
+    align_frames_input_document: Mutex<Option<ComScriptFile>>,
+    align_frames_output_document: Mutex<Option<ComScriptFile>>,
 }
 
 impl ToolsComScriptManager {
@@ -33,6 +39,9 @@ impl ToolsComScriptManager {
             script_flatten: Mutex::new(None),
             script_align_frames_input: Mutex::new(None),
             script_align_frames_output: Mutex::new(None),
+            flatten_document: Mutex::new(None),
+            align_frames_input_document: Mutex::new(None),
+            align_frames_output_document: Mutex::new(None),
         }
     }
 
@@ -45,33 +54,31 @@ impl ToolsComScriptManager {
 
     /// Java `loadAlignFramesInput(File, boolean)`.
     pub fn load_align_frames_input(&self, com_file: &Path, required: bool) -> bool {
-        let _ = (
-            self.manager,
-            com_file.parent(),
-            com_file.file_name(),
-            required,
-        );
-        // TODO(unit): ComScriptUtil.java and ComScript.java.
+        let _ = (self.manager, required);
+        *self.align_frames_input_document.lock().unwrap() = ComScriptFile::load(com_file).ok();
         *self.script_align_frames_input.lock().unwrap() = None;
-        self.script_align_frames_input.lock().unwrap().is_some()
+        self.align_frames_input_document.lock().unwrap().is_some()
     }
 
     /// Java `loadAlignFramesOutput(File, boolean)`.
     pub fn load_align_frames_output(&self, com_file: &Path, required: bool) -> bool {
-        let _ = (
-            self.manager,
-            com_file.parent(),
-            com_file.file_name(),
-            required,
-        );
-        // TODO(unit): ComScriptUtil.java and ComScript.java.
+        let _ = (self.manager, required);
+        *self.align_frames_output_document.lock().unwrap() = ComScriptFile::load(com_file).ok();
         *self.script_align_frames_output.lock().unwrap() = None;
-        self.script_align_frames_output.lock().unwrap().is_some()
+        self.align_frames_output_document.lock().unwrap().is_some()
     }
 
     /// Java `resetAlignFramesOutput()`.
     pub fn reset_align_frames_output(&self) {
         *self.script_align_frames_output.lock().unwrap() = None;
+        *self.align_frames_output_document.lock().unwrap() = None;
+    }
+
+    pub fn align_frames_input_document(&self) -> Option<ComScriptFile> {
+        self.align_frames_input_document.lock().unwrap().clone()
+    }
+    pub fn align_frames_output_document(&self) -> Option<ComScriptFile> {
+        self.align_frames_output_document.lock().unwrap().clone()
     }
 
     /// Java `isWarpVolParamInFlatten(AxisID)`.

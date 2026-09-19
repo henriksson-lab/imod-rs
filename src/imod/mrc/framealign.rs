@@ -4,11 +4,12 @@
 //! methods; higher frame-stack alignment methods build on these primitives.
 
 use crate::imod::clip::correct_defects::CameraDefects;
-use crate::imod::clip::correct_defects::cor_def_correct_defects_f32;
+use crate::imod::clip::correct_defects::cor_def_correct_defects;
 use crate::imod::libcfshr::filtxcorr::{
     FilterIn, dose_weight_filter, xcorr_filter_part, xcorr_set_ctf,
 };
 use crate::imod::libcfshr::gcvspl::{gcvspl, splder};
+use crate::imod::libcfshr::zoomdown::SLICE_MODE_FLOAT;
 use crate::imod::libiimod::mrcfiles::{
     MRC_MODE_BYTE, MRC_MODE_FLOAT, MRC_MODE_SHORT, MRC_MODE_USHORT,
 };
@@ -337,7 +338,22 @@ impl FrameAlign {
             self.truncation_limit,
         )?;
         if let Some(defects) = defects {
-            cor_def_correct_defects_f32(defects, &mut processed, self.nx, self.ny, 1, 0, 0)?;
+            // `framealign.cpp:940-946`: the correction is the same
+            // `CorDefCorrectDefects` the `clip` commands call, with
+            // `MRC_MODE_FLOAT` and the frame's own coordinates.  Reach it
+            // through the image's bytes, which is the C's `void *fOut`.
+            let (head, bytes, tail) = unsafe { processed.align_to_mut::<u8>() };
+            debug_assert!(head.is_empty() && tail.is_empty());
+            cor_def_correct_defects(
+                defects,
+                bytes,
+                SLICE_MODE_FLOAT,
+                1,
+                0,
+                0,
+                self.ny as i32,
+                self.nx as i32,
+            );
         }
         let shift = if let Some(reference) = self.frames.last() {
             self.align_two_frames(reference, &processed, 0., 0.)?

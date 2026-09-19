@@ -10,6 +10,8 @@ use std::collections::BTreeMap;
 
 use crate::imod::etomo::r#type::dialog_type::DialogType;
 use crate::imod::etomo::r#type::file_key::FileKey;
+use crate::imod::etomo::r#type::process_end_state::ProcessEndState;
+use crate::imod::etomo::r#type::process_result::ProcessResult;
 use crate::imod::etomo::util::utilities;
 
 use super::panel::Dimension;
@@ -106,18 +108,17 @@ impl BaseScreenState {
     }
 }
 
-/// Direct `ProcessResult` dependency boundary.
-#[derive(Clone, Debug, Default, Eq, PartialEq)]
-pub struct ProcessResult;
-/// Direct `ProcessEndState` dependency boundary.
-#[derive(Clone, Debug, Default, Eq, PartialEq)]
-pub struct ProcessEndState;
-
 /// State owned by Java `ProcessResultDisplayState` at this unit's dependency boundary.
 #[derive(Clone, Debug, Default, Eq, PartialEq)]
 pub struct ProcessResultDisplayState {
     pub debug: bool,
     pub original_state: bool,
+    /// Java `secondaryProcess`: changes failed-to-start handling after the
+    /// first command in a process series.
+    pub secondary_process: bool,
+    /// Java `processRunning`: terminal messages are ignored until a process
+    /// has actually started, preventing stale callbacks from changing a UI.
+    pub process_running: bool,
     pub display_id: i32,
     pub factory_id: Option<String>,
     pub next_present: bool,
@@ -631,33 +632,66 @@ impl MultiLineButton {
     }
     /// Java `msgProcessStarting`.
     pub fn msg_process_starting(&mut self) {
-        self.process_result_display_state.messages.push("starting");
+        if !self.process_result_display_state.process_running {
+            // Java snapshots `display.getOriginalState()` before it marks the
+            // display done, in case launching ultimately fails.
+            let original_state = !self.is_selected();
+            self.set_process_done(true);
+            let state = &mut self.process_result_display_state;
+            state.original_state = original_state;
+            state.secondary_process = false;
+        }
+        self.process_result_display_state.process_running = true;
     }
     /// Java `msg(ProcessResult)`.
-    pub fn msg(&mut self, _process_result: &ProcessResult) {
-        self.process_result_display_state.messages.push("result");
+    pub fn msg(&mut self, process_result: ProcessResult) {
+        match process_result {
+            ProcessResult::Succeeded => self.msg_process_succeeded(),
+            ProcessResult::Failed => self.msg_process_failed(),
+            ProcessResult::FailedToStart => self.msg_process_failed_to_start(),
+        }
     }
     /// Java `msg(ProcessEndState)`.
-    pub fn msg_end_state(&mut self, _end_state: &ProcessEndState) {
-        self.process_result_display_state.messages.push("end_state");
+    pub fn msg_end_state(&mut self, end_state: ProcessEndState) {
+        match end_state {
+            ProcessEndState::Done | ProcessEndState::Killed | ProcessEndState::Paused => {
+                self.msg_process_succeeded()
+            }
+            ProcessEndState::Cancelled => self.msg_process_failed_to_start(),
+            ProcessEndState::Failed | ProcessEndState::FileLockFailure => self.msg_process_failed(),
+        }
     }
     /// Java `msgProcessSucceeded`.
     pub fn msg_process_succeeded(&mut self) {
-        self.process_result_display_state.messages.push("succeeded");
+        if !self.process_result_display_state.process_running {
+            return;
+        }
+        self.set_process_done(true);
+        self.process_result_display_state.process_running = false;
     }
     /// Java `msgProcessFailed`.
     pub fn msg_process_failed(&mut self) {
-        self.process_result_display_state.messages.push("failed");
+        if !self.process_result_display_state.process_running {
+            return;
+        }
+        self.set_process_done(false);
+        self.process_result_display_state.process_running = false;
     }
     /// Java `msgProcessFailedToStart`.
     pub fn msg_process_failed_to_start(&mut self) {
-        self.process_result_display_state
-            .messages
-            .push("failed_to_start");
+        if !self.process_result_display_state.process_running {
+            return;
+        }
+        if self.process_result_display_state.secondary_process {
+            self.msg_process_failed();
+        } else {
+            self.set_process_done(self.process_result_display_state.original_state);
+            self.process_result_display_state.process_running = false;
+        }
     }
     /// Java `msgSecondaryProcess`.
     pub fn msg_secondary_process(&mut self) {
-        self.process_result_display_state.messages.push("secondary");
+        self.process_result_display_state.secondary_process = true;
     }
     /// Java `addDependentDisplay`.
     pub fn add_dependent_display(&mut self) {
@@ -969,5 +1003,47 @@ mod tests {
         assert!(button.is_selected());
         button.set_selected(false);
         assert!(!button.screen_state.unwrap().get_button_state(Some(&key)));
+    }
+
+    #[test]
+    fn process_result_state_restores_first_launch_but_fails_secondary_launch() {
+        let mut button = MultiLineButton::new();
+        assert!(!button.is_selected());
+        button.msg_process_starting();
+        assert!(button.is_selected());
+        assert!(button.process_result_display_state.process_running);
+        button.msg_process_failed_to_start();
+        // Java's `getOriginalState` is `!isSelected()`, so the first launch
+        // restores that source-defined state rather than the visual flag.
+        assert!(button.is_selected());
+        assert!(!button.process_result_display_state.process_running);
+
+        button.msg_process_starting();
+        button.msg_secondary_process();
+        button.msg_process_failed_to_start();
+        assert!(!button.is_selected());
+        assert!(!button.process_result_display_state.process_running);
+
+        button.msg_process_starting();
+        button.msg_process_succeeded();
+        assert!(button.is_selected());
+    }
+
+    #[test]
+    fn source_result_and_end_state_messages_dispatch_to_terminal_lifecycle() {
+        let mut button = MultiLineButton::new();
+        button.msg_process_starting();
+        button.msg(ProcessResult::FAILED);
+        assert!(!button.is_selected());
+
+        button.msg_process_starting();
+        button.msg_end_state(ProcessEndState::Paused);
+        assert!(button.is_selected());
+
+        button.msg_process_starting();
+        button.msg_end_state(ProcessEndState::Cancelled);
+        // Source maps CANCELLED to failed-to-start and therefore restores
+        // the stored original-state convention.
+        assert!(!button.process_result_display_state.process_running);
     }
 }

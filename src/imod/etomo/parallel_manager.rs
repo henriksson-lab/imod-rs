@@ -27,6 +27,8 @@ use crate::imod::etomo::r#type::interface_type::InterfaceType;
 pub struct ParallelManager {
     /// Java superclass `BaseManager` state.
     base: BaseManagerBase,
+    /// `ParallelMetaData.getName()` until that metadata unit is translated.
+    name: String,
     /// Java private final `screenState`.
     // TODO(unit): etomo/type/BaseScreenState.java.
     screen_state: Option<Infallible>,
@@ -76,6 +78,14 @@ impl ParallelManager {
     ) -> &'static ParallelManager {
         let instance = Box::leak(Box::new(Self {
             base: BaseManagerBase::initial(),
+            name: param_file_name
+                .map(str::to_owned)
+                .unwrap_or_else(|| match dialog_type {
+                    Some(DialogType::AnisotropicDiffusion) => {
+                        "Nonlinear Anisotropic Diffusion".to_owned()
+                    }
+                    _ => "Parallel Processing".to_owned(),
+                }),
             screen_state: None,
             state: None,
             process_mgr: OnceLock::new(),
@@ -580,7 +590,7 @@ impl BaseManager for ParallelManager {
     /// Java `getName`.
     // TODO(unit): etomo/type/ParallelMetaData.java.
     fn get_name(&self) -> Option<String> {
-        None
+        Some(self.name.clone())
     }
 }
 

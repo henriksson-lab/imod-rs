@@ -1115,9 +1115,22 @@ fn tif2mrc_rust_reader_expands_four_bit_grayscale_like_libtiff() {
                 String::from_utf8_lossy(&result.stderr)
             );
         }
+        // The two runs are separate processes, so each stamps its own
+        // `dd-Mmm-yy  HH:MM:SS` into the MRC label it writes.  A run that
+        // straddles a second boundary differs in exactly that byte and nothing
+        // else, so mask the stamp: it is one of the documented non-achievable
+        // differences, and the assertion here is about the expanded samples.
+        let mut rust_bytes = std::fs::read(&rust_output).unwrap();
+        let mut parity_bytes = std::fs::read(&parity_output).unwrap();
+        for bytes in [&mut rust_bytes, &mut parity_bytes] {
+            // `labels` starts at byte 224; the stamp is the last 20 bytes of
+            // the 80-byte label `tif2mrc` writes.
+            if bytes.len() >= 304 {
+                bytes[284..304].fill(b' ');
+            }
+        }
         assert_eq!(
-            std::fs::read(&rust_output).unwrap(),
-            std::fs::read(&parity_output).unwrap(),
+            rust_bytes, parity_bytes,
             "the Rust reader must expand {name} samples in the same fill order as libtiff"
         );
         std::fs::remove_file(tiff).unwrap();
