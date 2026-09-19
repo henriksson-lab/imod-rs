@@ -329,14 +329,26 @@ fn read_section_unscaled(
             ii_change_call_count(-1);
             return IIERR_BAD_CALL;
         }
-        let mut output = vec![0.0_f32; pixels];
-        let err = mrc_read_section_float(header, &mut li, &mut output, in_section);
-        if err == 0 {
-            for (value, bytes) in output.iter().zip(buf[..output_len].chunks_exact_mut(4)) {
-                bytes.copy_from_slice(&value.to_ne_bytes());
+        // `iimrc.c:211` is `mrcReadSectionFloat(h, &li, (b3dFloat *)buf, inSection)`:
+        // the caller's buffer *is* the float buffer, so read straight into it.
+        // Every caller's buffer originates from a `Vec<f32>`; if one ever is not
+        // 4-byte aligned, stage through a vector rather than reinterpret it.
+        if buf.as_ptr().align_offset(core::mem::align_of::<f32>()) == 0 {
+            // Sound: `f32` has no invalid bit patterns, and the checked alignment
+            // plus `output_len == 4 * pixels` makes the middle slice the whole
+            // buffer.
+            let (_, output, _) = unsafe { buf[..output_len].align_to_mut::<f32>() };
+            mrc_read_section_float(header, &mut li, output, in_section)
+        } else {
+            let mut output = vec![0.0_f32; pixels];
+            let err = mrc_read_section_float(header, &mut li, &mut output, in_section);
+            if err == 0 {
+                for (value, bytes) in output.iter().zip(buf[..output_len].chunks_exact_mut(4)) {
+                    bytes.copy_from_slice(&value.to_ne_bytes());
+                }
             }
+            err
         }
-        err
     } else {
         let mut bytes = 0;
         let mut channels = 0;
@@ -482,14 +494,21 @@ fn read_section_scaled(
             ii_change_call_count(-1);
             return IIERR_BAD_CALL;
         }
-        let mut output = vec![0_u16; pixels];
-        let err = mrc_read_section_ushort(header, &mut li, &mut output, in_section);
-        if err == 0 {
-            for (value, bytes) in output.iter().zip(buf[..output_len].chunks_exact_mut(2)) {
-                bytes.copy_from_slice(&value.to_ne_bytes());
+        // `iimrc.c:246` hands `mrcReadSectionUShort` the caller's buffer directly;
+        // do the same rather than staging a copy.  See `read_section_unscaled`.
+        if buf.as_ptr().align_offset(core::mem::align_of::<u16>()) == 0 {
+            let (_, output, _) = unsafe { buf[..output_len].align_to_mut::<u16>() };
+            mrc_read_section_ushort(header, &mut li, output, in_section)
+        } else {
+            let mut output = vec![0_u16; pixels];
+            let err = mrc_read_section_ushort(header, &mut li, &mut output, in_section);
+            if err == 0 {
+                for (value, bytes) in output.iter().zip(buf[..output_len].chunks_exact_mut(2)) {
+                    bytes.copy_from_slice(&value.to_ne_bytes());
+                }
             }
+            err
         }
-        err
     } else {
         if buf.len() < pixels {
             ii_change_call_count(-1);

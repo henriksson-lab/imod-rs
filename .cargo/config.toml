@@ -1,9 +1,20 @@
-[env]
-# This crate is a line-faithful translation, so it keeps the C sources'
-# file-scope statics: the autodoc collection, the Clarkson hull working
-# arrays, the zoom-filter caches, the taper-pad RNG, the unit-number tables.
-# Those are process-global exactly as in IMOD, and several unit tests also
-# redirect the process's real stdout to capture `printf` output.  Running the
-# test binaries' cases concurrently corrupts that shared state, so the gate is
-# serial.  It costs about eight seconds over the whole suite.
-RUST_TEST_THREADS = "1"
+# Recover an inline expansion gcc performs at -O3 and LLVM declines without it.
+#
+# `iiConvertLineOfFloats` (`IMOD/libiimod/iimage.c`) calls `floor()` per pixel in
+# its signed-byte and short arms.  gcc expands that inline as bit manipulation —
+# the native `iiConvertLineOfFloats` has *zero* calls in 873 instructions — while
+# rustc emits an out-of-line `floor` call, measured at 8.12% of
+# `newstack -mode 0 -float 2`.  With SSE4.1 available, `f64::floor` lowers to a
+# single `roundsd $1`, which is exactly IEEE floor, so this changes no result.
+#
+# Deliberately NOT `-C target-cpu=native`: that also enables FMA, and while rustc
+# does not contract floating point by default, the blast radius is far larger
+# than this one instruction.  The reference build itself uses only `-m64 -O3`
+# with no `-march`, so this is not beating native by using a better ISA — it is
+# recovering an expansion gcc already does at the same baseline.
+# NOTE: a `RUSTFLAGS` environment variable REPLACES this list wholesale — it does
+# not merge.  `-Awarnings` therefore lives here rather than in the documented
+# command lines; setting `RUSTFLAGS=-Awarnings` by hand silently discards
+# `+sse4.1` and costs ~8% on the byte/short output paths with no visible sign.
+[build]
+rustflags = ["-Awarnings", "-C", "target-feature=+sse4.1"]

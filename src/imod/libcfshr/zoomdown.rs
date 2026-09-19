@@ -14,8 +14,10 @@
 //! (`zoomdown.c:314`) becomes a [`FiltBuf`].
 #![allow(dead_code)]
 
-use crate::imod::libcfshr::b3dutil::{b3d_omp_thread_num, num_omp_threads};
+use crate::imod::libcfshr::b3dutil::num_omp_threads;
 use core::cell::Cell;
+use rayon::ThreadPoolBuilder;
+use rayon::iter::{IntoParallelIterator, ParallelIterator};
 
 /// Complete non-preprocessor function inventory for `zoomdown.c`.
 pub const ZOOMDOWN_SOURCE_FUNCTIONS: &[&str] = &[
@@ -516,114 +518,229 @@ pub fn zoom_with_filter(
         );
     }
 
-    for by in 0..b_ysize {
-        let thr = b3d_omp_thread_num();
+    // `zoomdown.c:373` is `#pragma omp parallel for num_threads(numThreads)`
+    // over this loop.  It is parallelised here over the same iteration space,
+    // partitioned into `numThreads` contiguous groups of scanlines.  Iteration
+    // `by` writes only output scanline `by` and only its own thread's scratch,
+    // and `accumBuf[thr]` is re-zeroed at the top of every iteration, so
+    // nothing carries between iterations: the sum order for any one output
+    // pixel is the sequential inner loop over source scanlines, and the output
+    // is independent of the schedule and of the thread count.  Handing each
+    // group its own scratch by reference is what the source's
+    // `b3dOMPthreadNum()` indexing of `accumBuf` / `yweight` / `filtBuf` does.
+    let num_groups = if b_ysize < num_threads {
+        b_ysize as usize
+    } else {
+        num_threads as usize
+    };
 
-        /* prepare a weighttab for dest y position by */
-        yweight[thr as usize].weight = 0;
-        make_weighttab(
-            by,
-            a_yoff as f64 + (by as f64 + 0.5) * s_y_scale,
-            a_ysize,
-            s_y_scale,
-            s_y_support,
-            dtype,
-            &mut yweight[thr as usize],
-            &mut yweight_buf[thr as usize],
-        );
+    // The source's file statics are thread locals here (the `thread_local!`
+    // block above), so the values `make_weighttab` and the selected filter
+    // function read have to be carried onto each worker thread.
+    let filt_func = S_FILT_FUNC.with(|c| c.get());
+    let zoom_debug = ZOOM_DEBUG.with(|c| c.get());
+    let mitch = [
+        S_MITCH_P0.with(|c| c.get()),
+        S_MITCH_P2.with(|c| c.get()),
+        S_MITCH_P3.with(|c| c.get()),
+        S_MITCH_Q0.with(|c| c.get()),
+        S_MITCH_Q1.with(|c| c.get()),
+        S_MITCH_Q2.with(|c| c.get()),
+        S_MITCH_Q3.with(|c| c.get()),
+    ];
 
-        /* Zero the scanline accum buffer */
-        for i in 0..(a_xsize * psize_accum / 4) as usize {
-            match &mut accum_buf[thr as usize] {
-                AccumBuf::Int(v) => v[i] = 0,
-                AccumBuf::Float(v) => v[i] = 0.,
+    // The same contiguous partition of the output.  A group owning rows
+    // `[by0, by1)` owns elements `[by0 * bXdim, by1 * bXdim)` of `outData`,
+    // scaled by the element size the variant addresses — `psizeFilt` bytes for
+    // the byte output, one element otherwise — so the pieces are disjoint.
+    let mut group_start: Vec<i32> = Vec::with_capacity(num_groups + 1);
+    for g in 0..=num_groups {
+        group_start.push((b_ysize as i64 * g as i64 / num_groups as i64) as i32);
+    }
+    let mut out_parts: Vec<ZoomOut<'_>> = Vec::with_capacity(num_groups);
+    macro_rules! split_output {
+        ($slice:expr, $variant:path, $mult:expr) => {{
+            let mut rest: &mut [_] = &mut **$slice;
+            for g in 0..num_groups {
+                let want = ((group_start[g + 1] - group_start[g]) * b_xdim * $mult) as usize;
+                let take = if want < rest.len() { want } else { rest.len() };
+                let (head, tail) = rest.split_at_mut(take);
+                out_parts.push($variant(head));
+                rest = tail;
             }
-        }
+        }};
+    }
+    match out_data {
+        ZoomOut::Byte(v) => split_output!(v, ZoomOut::Byte, psize_filt),
+        ZoomOut::Short(v) => split_output!(v, ZoomOut::Short, 1),
+        ZoomOut::UShort(v) => split_output!(v, ZoomOut::UShort, 1),
+        ZoomOut::Float(v) => split_output!(v, ZoomOut::Float, 1),
+        ZoomOut::Index(v) => split_output!(v, ZoomOut::Index, 1),
+    }
 
-        /* loop over source scanlines that influence this dest scanline */
-        for ayf in yweight[thr as usize].i0..yweight[thr as usize].i1 {
-            let k = (ayf - yweight[thr as usize].i0) as usize;
-            match &yweight_buf[thr as usize] {
-                WeightBuf::Short(v) => {
-                    if psize_wgt == 2 {
-                        sweight = v[k];
+    type ZoomGroup<'a> = (
+        i32,
+        i32,
+        ZoomOut<'a>,
+        &'a mut AccumBuf,
+        &'a mut WeightBuf,
+        &'a mut Option<FiltBuf>,
+        &'a mut Weighttab,
+    );
+    let mut tasks: Vec<ZoomGroup<'_>> = Vec::with_capacity(num_groups);
+    let mut accum_iter = accum_buf.iter_mut();
+    let mut yweight_buf_iter = yweight_buf.iter_mut();
+    let mut filt_buf_iter = filt_buf.iter_mut();
+    let mut yweight_iter = yweight.iter_mut();
+    for (g, part) in out_parts.into_iter().enumerate() {
+        tasks.push((
+            group_start[g],
+            group_start[g + 1],
+            part,
+            accum_iter.next().unwrap(),
+            yweight_buf_iter.next().unwrap(),
+            filt_buf_iter.next().unwrap(),
+            yweight_iter.next().unwrap(),
+        ));
+    }
+
+    let run_group = |group: ZoomGroup<'_>| {
+        let (by0, by1, mut out_part, accum, yweight_buf, filt_buf, yweight) = group;
+        S_FILT_FUNC.with(|c| c.set(filt_func));
+        ZOOM_DEBUG.with(|c| c.set(zoom_debug));
+        S_MITCH_P0.with(|c| c.set(mitch[0]));
+        S_MITCH_P2.with(|c| c.set(mitch[1]));
+        S_MITCH_P3.with(|c| c.set(mitch[2]));
+        S_MITCH_Q0.with(|c| c.set(mitch[3]));
+        S_MITCH_Q1.with(|c| c.set(mitch[4]));
+        S_MITCH_Q2.with(|c| c.set(mitch[5]));
+        S_MITCH_Q3.with(|c| c.set(mitch[6]));
+        // The source declares `sweight` and `fweight` `private`, so they start
+        // each partition uninitialised; only the one `psizeWgt` selects is read,
+        // and it is written on every source scanline before it is read.
+        let mut fweight: f32 = 0.;
+        let mut sweight: i16 = 0;
+
+        for by in by0..by1 {
+            /* prepare a weighttab for dest y position by */
+            yweight.weight = 0;
+            make_weighttab(
+                by,
+                a_yoff as f64 + (by as f64 + 0.5) * s_y_scale,
+                a_ysize,
+                s_y_scale,
+                s_y_support,
+                dtype,
+                yweight,
+                yweight_buf,
+            );
+
+            /* Zero the scanline accum buffer */
+            for i in 0..(a_xsize * psize_accum / 4) as usize {
+                match &mut *accum {
+                    AccumBuf::Int(v) => v[i] = 0,
+                    AccumBuf::Float(v) => v[i] = 0.,
+                }
+            }
+
+            /* loop over source scanlines that influence this dest scanline */
+            for ayf in yweight.i0..yweight.i1 {
+                let k = (ayf - yweight.i0) as usize;
+                match &*yweight_buf {
+                    WeightBuf::Short(v) => {
+                        if psize_wgt == 2 {
+                            sweight = v[k];
+                        }
+                    }
+                    WeightBuf::Float(v) => {
+                        if psize_wgt != 2 {
+                            fweight = v[k] * s_value_scaling;
+                        }
                     }
                 }
-                WeightBuf::Float(v) => {
-                    if psize_wgt != 2 {
-                        fweight = v[k] * s_value_scaling;
-                    }
-                }
+
+                let lineb = match slines {
+                    ZoomLines::Byte(l) => ZoomLine::Byte(l[ayf as usize]),
+                    ZoomLines::Short(l) => ZoomLine::Short(l[ayf as usize]),
+                    ZoomLines::UShort(l) => ZoomLine::UShort(l[ayf as usize]),
+                    ZoomLines::Float(l) => ZoomLine::Float(l[ayf as usize]),
+                };
+                /* add weighted tbuf into accum (these do yfilt) */
+                scanline_accum(lineb, dtype, a_xsize, accum, sweight, fweight);
             }
 
-            let lineb = match slines {
-                ZoomLines::Byte(l) => ZoomLine::Byte(l[ayf as usize]),
-                ZoomLines::Short(l) => ZoomLine::Short(l[ayf as usize]),
-                ZoomLines::UShort(l) => ZoomLine::UShort(l[ayf as usize]),
-                ZoomLines::Float(l) => ZoomLine::Float(l[ayf as usize]),
-            };
-            /* add weighted tbuf into accum (these do yfilt) */
-            scanline_accum(
-                lineb,
-                dtype,
-                a_xsize,
-                &mut accum_buf[thr as usize],
-                sweight,
-                fweight,
-            );
-        }
+            /* and filter it into the appropriate line of output or into filtBuf */
+            let line_index = ((by - by0) * b_xdim + b_xoff) as usize;
+            if mapping != 0 {
+                let mut obufb = match filt_buf.as_mut().unwrap() {
+                    FiltBuf::Byte(v) => ZoomOut::Byte(v),
+                    FiltBuf::Short(v) => ZoomOut::Short(v),
+                    FiltBuf::UShort(v) => ZoomOut::UShort(v),
+                };
+                scanline_filter(
+                    accum,
+                    dtype,
+                    a_xsize,
+                    &mut obufb,
+                    b_xsize,
+                    &xweights,
+                    &xweight_buf,
+                    FINALSHIFT,
+                );
 
-        /* and filter it into the appropriate line of output or into filtBuf */
-        let line_index = (by * b_xdim + b_xoff) as usize;
-        if mapping != 0 {
-            let mut obufb = match filt_buf[thr as usize].as_mut().unwrap() {
-                FiltBuf::Byte(v) => ZoomOut::Byte(v),
-                FiltBuf::Short(v) => ZoomOut::Short(v),
-                FiltBuf::UShort(v) => ZoomOut::UShort(v),
-            };
-            scanline_filter(
-                &accum_buf[thr as usize],
-                dtype,
-                a_xsize,
-                &mut obufb,
-                b_xsize,
-                &xweights,
-                &xweight_buf,
-                FINALSHIFT,
-            );
-
-            /* Map to RGBA output, always 4 bytes, if index tables provided */
-            scanline_remap(
-                filt_buf[thr as usize].as_ref().unwrap(),
-                dtype,
-                b_xsize,
-                out_data,
-                line_index,
-                cindex,
-                bindex,
-            );
-        } else {
-            let mut obufb = match out_data {
-                ZoomOut::Byte(v) => ZoomOut::Byte(&mut v[psize_filt as usize * line_index..]),
-                ZoomOut::Short(v) => ZoomOut::Short(&mut v[line_index..]),
-                ZoomOut::UShort(v) => ZoomOut::UShort(&mut v[line_index..]),
-                ZoomOut::Float(v) => ZoomOut::Float(&mut v[line_index..]),
-                ZoomOut::Index(v) => ZoomOut::Index(&mut v[line_index..]),
-            };
-            /*for (i = 30; i < 45; i++)
-            printf("%.1f ", *((float *)accumBuf[thr] + i));
-            printf("\n"); */
-            scanline_filter(
-                &accum_buf[thr as usize],
-                dtype,
-                a_xsize,
-                &mut obufb,
-                b_xsize,
-                &xweights,
-                &xweight_buf,
-                FINALSHIFT,
-            );
+                /* Map to RGBA output, always 4 bytes, if index tables provided */
+                scanline_remap(
+                    filt_buf.as_ref().unwrap(),
+                    dtype,
+                    b_xsize,
+                    &mut out_part,
+                    line_index,
+                    cindex,
+                    bindex,
+                );
+            } else {
+                let mut obufb = match &mut out_part {
+                    ZoomOut::Byte(v) => ZoomOut::Byte(&mut v[psize_filt as usize * line_index..]),
+                    ZoomOut::Short(v) => ZoomOut::Short(&mut v[line_index..]),
+                    ZoomOut::UShort(v) => ZoomOut::UShort(&mut v[line_index..]),
+                    ZoomOut::Float(v) => ZoomOut::Float(&mut v[line_index..]),
+                    ZoomOut::Index(v) => ZoomOut::Index(&mut v[line_index..]),
+                };
+                /*for (i = 30; i < 45; i++)
+                printf("%.1f ", *((float *)accumBuf[thr] + i));
+                printf("\n"); */
+                scanline_filter(
+                    accum,
+                    dtype,
+                    a_xsize,
+                    &mut obufb,
+                    b_xsize,
+                    &xweights,
+                    &xweight_buf,
+                    FINALSHIFT,
+                );
+            }
         }
+    };
+
+    // One task per partition, so at most `numThreads` of them run at once and
+    // the crate honours `OMP_NUM_THREADS` / `IMOD_FORCE_OMP_THREADS` through
+    // `numOMPthreads` exactly as the source does.
+    if num_groups > 1 {
+        // Native's OpenMP runtime creates at most `omp_get_num_procs()` workers
+        // and `numOMPthreads` never asks for more than the physical-core count
+        // (or whatever `OMP_NUM_THREADS` / `IMOD_FORCE_OMP_THREADS` allow).
+        // rayon's default global pool is sized from `available_parallelism()`,
+        // which counts *logical* processors, so it is bounded to the same count
+        // here.  `build_global` succeeds for whichever translated unit reaches
+        // it first and returns an error afterwards, which is the intended
+        // no-op: every unit asks for the same size.
+        let _ = rayon::ThreadPoolBuilder::new()
+            .num_threads(num_omp_threads(i32::MAX) as usize)
+            .build_global();
+        tasks.into_par_iter().for_each(&run_group);
+    } else {
+        tasks.into_iter().for_each(run_group);
     }
     0
 }

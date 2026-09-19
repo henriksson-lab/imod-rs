@@ -281,7 +281,174 @@ pub fn clip_scaling(hin: &mut MrcHeader, hout: &mut MrcHeader, opt: &mut ClipOpt
                 );
                 return -1;
             };
-            if opt.process == IP_BOXSD {
+            if (opt.dim == 2 && opt.process != IP_RESIZE)
+                || (opt.process == IP_TRUNCATE && trunc_mean)
+            {
+                crate::imod::libiimod::mrcslice::slice_mmm(&mut slice);
+                min = match opt.process {
+                    IP_BRIGHTNESS => slice.min as f64,
+                    IP_SHADOW => slice.max as f64,
+                    _ => slice.mean as f64,
+                };
+            }
+            // `processing.cpp:246-347` is an if/else chain: only these
+            // operations walk the pixels at all.  Brightness, contrast and
+            // shadow fall through to the final `mrc_slice_lie` arm and get
+            // no per-pixel pass of their own.
+            if opt.process == IP_THRESHOLD {
+                for j in 0..opt.iy {
+                    for i in 0..opt.ix {
+                        let mut val = [0_f32; 4];
+                        slice_get_val(&slice, i, j, &mut val);
+                        for (l, item) in val.iter_mut().take(slice.csize as usize).enumerate() {
+                            // The <= makes the result the same as in 3dmod
+                            *item = if *item <= opt.thresh {
+                                threshold_low
+                            } else {
+                                if l == 0
+                                    && let Some(fp) = point_fp.as_mut()
+                                {
+                                    let _ = fp.write_all(
+                                        c_format(
+                                            "%6d %6d %4d  %g\n",
+                                            &[
+                                                CArg::Int(i as i64),
+                                                CArg::Int(j as i64),
+                                                CArg::Int(opt.secs[k as usize] as i64),
+                                                CArg::Dbl(*item as f64),
+                                            ],
+                                        )
+                                        .as_bytes(),
+                                    );
+                                }
+                                threshold_high
+                            };
+                        }
+                        slice_put_val(&mut slice, i, j, val);
+                    }
+                }
+            } else if opt.process == IP_TRUNCATE {
+                for j in 0..opt.iy {
+                    for i in 0..opt.ix {
+                        let mut val = [0_f32; 4];
+                        slice_get_val(&slice, i, j, &mut val);
+                        for item in val.iter_mut().take(slice.csize as usize) {
+                            if trunc_low && *item < opt.low {
+                                *item = if trunc_mean { min as f32 } else { opt.low };
+                            }
+                            if trunc_high && *item > opt.high {
+                                *item = if trunc_mean { min as f32 } else { opt.high };
+                            }
+                        }
+                        slice_put_val(&mut slice, i, j, val);
+                    }
+                }
+            } else if opt.process == IP_UNWRAP {
+                // Unwrap: add a value and wrap values around
+                let high = if input_mode == 6 { 65535. } else { 32767. };
+                let low = high - 65535.;
+                for j in 0..opt.iy {
+                    for i in 0..opt.ix {
+                        let mut val = [0_f32; 4];
+                        slice_get_val(&slice, i, j, &mut val);
+                        val[0] += opt.val;
+                        if val[0] > high {
+                            val[0] -= 65536.;
+                        } else if val[0] < low {
+                            val[0] += 65536.;
+                        }
+                        slice_put_val(&mut slice, i, j, val);
+                    }
+                }
+            } else if opt.process == IP_LOGARITHM {
+                for j in 0..opt.iy {
+                    for i in 0..opt.ix {
+                        let mut val = [0_f32; 4];
+                        slice_get_val(&slice, i, j, &mut val);
+                        for item in val.iter_mut().take(slice.csize as usize) {
+                            *item = min_for_log.max(*item + base).log10();
+                        }
+                        slice_put_val(&mut slice, i, j, val);
+                    }
+                }
+            } else if opt.process == IP_SQROOT {
+                for j in 0..opt.iy {
+                    for i in 0..opt.ix {
+                        let mut val = [0_f32; 4];
+                        slice_get_val(&slice, i, j, &mut val);
+                        for item in val.iter_mut().take(slice.csize as usize) {
+                            *item = 0_f32.max(*item + base).sqrt();
+                        }
+                        slice_put_val(&mut slice, i, j, val);
+                    }
+                }
+            } else if opt.process == IP_INTEGRAL {
+                // `processing.cpp:317-318` floats a second view of the same
+                // data with `sliceFloatEx(&flSlice, 0)` for `beadIntegral`.
+                let mut integral_data = Vec::new();
+                let length = usize::try_from(slice.xsize).ok().and_then(|xsize| {
+                    usize::try_from(slice.ysize)
+                        .ok()
+                        .and_then(|ysize| xsize.checked_mul(ysize))
+                });
+                if length.is_none_or(|length| integral_data.try_reserve_exact(length).is_err()) {
+                    crate::imod::clip::clip::show_error(
+                        "clip: Error getting memory to convert slice to float.",
+                    );
+                    return -1;
+                }
+                for j in 0..slice.ysize {
+                    for i in 0..slice.xsize {
+                        let mut value = [0.; 4];
+                        slice_get_val(&slice, i, j, &mut value);
+                        if matches!(slice.mode, MRC_MODE_COMPLEX_SHORT | MRC_MODE_COMPLEX_FLOAT) {
+                            value[0] = (value[0] * value[0] + value[1] * value[1]).sqrt();
+                        } else if slice.mode == MRC_MODE_RGB {
+                            value[0] = value[0] * 0.3 + value[1] * 0.59 + value[2] * 0.11;
+                        }
+                        integral_data.push(value[0]);
+                    }
+                }
+                for j in 0..opt.iy {
+                    for i in 0..opt.ix {
+                        let mut val = [0_f32; 4];
+                        slice_get_val(&slice, i, j, &mut val);
+                        if i < border
+                            || i >= opt.ix - border
+                            || j < border
+                            // processing.cpp deliberately uses ix for this lower
+                            // Y boundary too.  Preserve that non-square behavior.
+                            || j >= opt.ix - border
+                            || (opt.low != IP_DEFAULT as f32 && val[0] > opt.low)
+                            || (opt.high != IP_DEFAULT as f32 && val[0] > opt.high)
+                        {
+                            val[0] = 0.;
+                        } else {
+                            let mut center_mean = 0.;
+                            let mut annulus_mean = 0.;
+                            val[0] = (polarity
+                                * crate::imod::libcfshr::beadutil::bead_integral(
+                                    &integral_data,
+                                    slice.xsize,
+                                    slice.xsize,
+                                    slice.ysize,
+                                    radius_center,
+                                    radius_inner,
+                                    radius_outer,
+                                    i as f32 + 0.5,
+                                    j as f32 + 0.5,
+                                    &mut center_mean,
+                                    &mut annulus_mean,
+                                    None,
+                                    0.,
+                                    Some(&mut base),
+                                ) as f32)
+                                .max(0.);
+                        }
+                        slice_put_val(&mut slice, i, j, val);
+                    }
+                }
+            } else if opt.process == IP_BOXSD {
                 if crate::imod::libiimod::mrcslice::slice_float(&mut slice) < 0 {
                     crate::imod::clip::clip::show_error(
                         "clip: Error getting memory to convert slice to float.",
@@ -327,159 +494,7 @@ pub fn clip_scaling(hin: &mut MrcHeader, hout: &mut MrcHeader, opt: &mut ClipOpt
                 {
                     bytes.copy_from_slice(&value.to_ne_bytes());
                 }
-            };
-            if (opt.dim == 2 && opt.process != IP_RESIZE)
-                || (opt.process == IP_TRUNCATE && trunc_mean)
-            {
-                crate::imod::libiimod::mrcslice::slice_mmm(&mut slice);
-                min = match opt.process {
-                    IP_BRIGHTNESS => slice.min as f64,
-                    IP_SHADOW => slice.max as f64,
-                    _ => slice.mean as f64,
-                };
-            }
-            let mut integral_data = Vec::new();
-            if opt.process == IP_INTEGRAL {
-                let length = usize::try_from(slice.xsize).ok().and_then(|xsize| {
-                    usize::try_from(slice.ysize)
-                        .ok()
-                        .and_then(|ysize| xsize.checked_mul(ysize))
-                });
-                if length.is_none_or(|length| integral_data.try_reserve_exact(length).is_err()) {
-                    crate::imod::clip::clip::show_error(
-                        "clip: Error getting memory to convert slice to float.",
-                    );
-                    return -1;
-                }
-                for j in 0..slice.ysize {
-                    for i in 0..slice.xsize {
-                        let mut value = [0.; 4];
-                        slice_get_val(&slice, i, j, &mut value);
-                        if matches!(slice.mode, MRC_MODE_COMPLEX_SHORT | MRC_MODE_COMPLEX_FLOAT) {
-                            value[0] = (value[0] * value[0] + value[1] * value[1]).sqrt();
-                        } else if slice.mode == MRC_MODE_RGB {
-                            value[0] = value[0] * 0.3 + value[1] * 0.59 + value[2] * 0.11;
-                        }
-                        integral_data.push(value[0]);
-                    }
-                }
-            }
-            if opt.process != IP_BOXSD && opt.process != IP_RESIZE {
-                for j in 0..opt.iy {
-                    for i in 0..opt.ix {
-                        let mut val = [0_f32; 4];
-                        slice_get_val(&slice, i, j, &mut val);
-                        match opt.process {
-                            IP_THRESHOLD => {
-                                for (l, item) in
-                                    val.iter_mut().take(slice.csize as usize).enumerate()
-                                {
-                                    *item = if *item <= opt.thresh {
-                                        threshold_low
-                                    } else {
-                                        if l == 0
-                                            && let Some(fp) = point_fp.as_mut()
-                                        {
-                                            let _ = fp.write_all(
-                                                c_format(
-                                                    "%6d %6d %4d  %g\n",
-                                                    &[
-                                                        CArg::Int(i as i64),
-                                                        CArg::Int(j as i64),
-                                                        CArg::Int(opt.secs[k as usize] as i64),
-                                                        CArg::Dbl(*item as f64),
-                                                    ],
-                                                )
-                                                .as_bytes(),
-                                            );
-                                        }
-                                        threshold_high
-                                    };
-                                }
-                            }
-                            IP_TRUNCATE => {
-                                for item in val.iter_mut().take(slice.csize as usize) {
-                                    if trunc_low && *item < opt.low {
-                                        *item = if trunc_mean { min as f32 } else { opt.low };
-                                    }
-                                    if trunc_high && *item > opt.high {
-                                        *item = if trunc_mean { min as f32 } else { opt.high };
-                                    }
-                                }
-                            }
-                            IP_UNWRAP => {
-                                val[0] += opt.val;
-                                let high = if input_mode == 6 { 65535. } else { 32767. };
-                                let low = high - 65535.;
-                                if val[0] > high {
-                                    val[0] -= 65536.;
-                                } else if val[0] < low {
-                                    val[0] += 65536.;
-                                }
-                            }
-                            IP_LOGARITHM => {
-                                for item in val.iter_mut().take(slice.csize as usize) {
-                                    *item = min_for_log.max(*item + base).log10();
-                                }
-                            }
-                            IP_SQROOT => {
-                                for item in val.iter_mut().take(slice.csize as usize) {
-                                    *item = 0_f32.max(*item + base).sqrt();
-                                }
-                            }
-                            IP_INTEGRAL => {
-                                if i < border
-                                        || i >= opt.ix - border
-                                        || j < border
-                                        // processing.cpp deliberately uses ix for this lower
-                                        // Y boundary too.  Preserve that non-square behavior.
-                                        || j >= opt.ix - border
-                                        || (opt.low != IP_DEFAULT as f32 && val[0] > opt.low)
-                                        || (opt.high != IP_DEFAULT as f32
-                                            && val[0] > opt.high)
-                                {
-                                    val[0] = 0.;
-                                } else {
-                                    let mut center_mean = 0.;
-                                    let mut annulus_mean = 0.;
-                                    val[0] = (polarity
-                                        * crate::imod::libcfshr::beadutil::bead_integral(
-                                            &integral_data,
-                                            slice.xsize,
-                                            slice.xsize,
-                                            slice.ysize,
-                                            radius_center,
-                                            radius_inner,
-                                            radius_outer,
-                                            i as f32 + 0.5,
-                                            j as f32 + 0.5,
-                                            &mut center_mean,
-                                            &mut annulus_mean,
-                                            None,
-                                            0.,
-                                            Some(&mut base),
-                                        ) as f32)
-                                        .max(0.);
-                                }
-                            }
-                            IP_RESIZE | IP_BOXSD => {}
-                            _ => {}
-                        }
-                        slice_put_val(&mut slice, i, j, val);
-                    }
-                }
-            }
-            if !matches!(
-                opt.process,
-                IP_THRESHOLD
-                    | IP_TRUNCATE
-                    | IP_UNWRAP
-                    | IP_LOGARITHM
-                    | IP_SQROOT
-                    | IP_INTEGRAL
-                    | IP_BOXSD
-                    | IP_RESIZE
-            ) {
+            } else if opt.process != IP_RESIZE {
                 crate::imod::libiimod::mrcslice::mrc_slice_lie(&mut slice, min, alpha);
             }
             if opt.read_defects != 0
@@ -4448,29 +4463,81 @@ pub fn clip_stat(hin: &mut MrcHeader, opt: &mut ClipOptions) -> i32 {
             }
             prelim_mean = tsum / 64.;
         }
-        for y in 0..s.ysize {
-            // `processing.cpp:3587-3624` accumulates a row at a time, so
-            // the summation order is per row, not over the whole slice.
-            let mut tsum = 0_f64;
-            let mut tsumsq = 0_f64;
-            for x in 0..s.xsize {
-                // `float m` -- the subtraction rounds back to single
-                // precision and `m * m` is a single-precision product that
-                // only then widens for the accumulation.
-                let mut m = slice_get_pixel_magnitude(s.as_ref(), x, y);
+        // `double tsum, tsumsq` are function-scope in the source and reset
+        // at the head of every row.
+        let mut tsum;
+        let mut tsumsq;
+        // `processing.cpp:3459-3472`'s `PROCESS_PIXEL` macro, which each of
+        // the four loops below expands.  `float m` means the subtraction
+        // rounds back to single precision and `m * m` is a single-precision
+        // product that only then widens for the accumulation.
+        macro_rules! process_pixel {
+            ($value:expr, $i:expr, $j:expr) => {{
+                let mut m: f32 = $value;
                 if m > max {
                     max = m;
-                    xmax = x;
-                    ymax = y;
+                    xmax = $i;
+                    ymax = $j;
                 }
                 if m < min {
                     min = m;
-                    xmin = x;
-                    ymin = y;
+                    xmin = $i;
+                    ymin = $j;
                 }
                 m = (m as f64 - prelim_mean) as f32;
                 tsum += m as f64;
                 tsumsq += (m * m) as f64;
+            }};
+        }
+        for y in 0..s.ysize {
+            // `processing.cpp:3587-3624` accumulates a row at a time, so
+            // the summation order is per row, not over the whole slice.
+            tsum = 0_f64;
+            tsumsq = 0_f64;
+            match s.mode {
+                // `processing.cpp:3591`: "5/19/17: It now is about twice as
+                // fast to do it directly, added USHORT/FLOAT".  All three of
+                // these modes have `csize == 1`, so the datum read straight
+                // out of the row is exactly what `sliceGetPixelMagnitude`
+                // returns for them.
+                crate::imod::libcfshr::reduce_by_binning::SLICE_MODE_SHORT => {
+                    let start = 2 * s.xsize as usize * y as usize;
+                    let row = &s.data[start..start + 2 * s.xsize as usize];
+                    for (x, bytes) in row.chunks_exact(2).enumerate() {
+                        process_pixel!(
+                            i16::from_ne_bytes([bytes[0], bytes[1]]) as f32,
+                            x as i32,
+                            y
+                        );
+                    }
+                }
+                crate::imod::libcfshr::reduce_by_binning::SLICE_MODE_USHORT => {
+                    let start = 2 * s.xsize as usize * y as usize;
+                    let row = &s.data[start..start + 2 * s.xsize as usize];
+                    for (x, bytes) in row.chunks_exact(2).enumerate() {
+                        process_pixel!(
+                            u16::from_ne_bytes([bytes[0], bytes[1]]) as f32,
+                            x as i32,
+                            y
+                        );
+                    }
+                }
+                crate::imod::libcfshr::reduce_by_binning::SLICE_MODE_FLOAT => {
+                    let start = 4 * s.xsize as usize * y as usize;
+                    let row = &s.data[start..start + 4 * s.xsize as usize];
+                    for (x, bytes) in row.chunks_exact(4).enumerate() {
+                        process_pixel!(
+                            f32::from_ne_bytes([bytes[0], bytes[1], bytes[2], bytes[3]]),
+                            x as i32,
+                            y
+                        );
+                    }
+                }
+                _ => {
+                    for x in 0..s.xsize {
+                        process_pixel!(slice_get_pixel_magnitude(s.as_ref(), x, y), x, y);
+                    }
+                }
             }
             sum += tsum;
             square += tsumsq;

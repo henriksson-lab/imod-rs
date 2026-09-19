@@ -419,8 +419,19 @@ pub fn clip_write_slice(
             return -1;
         };
         slice_mmm(resized.as_mut());
-        output.amin = output.amin.min(resized.min);
-        output.amax = output.amax.max(resized.max);
+        // `file_io.cpp:406-407`: `B3DMIN(hout->amin, s->min)` /
+        // `B3DMAX(hout->amax, s->max)` — `a < b ? a : b` keeps the
+        // *second* operand when either is NaN, unlike `f32::min`/`max`.
+        output.amin = if output.amin < resized.min {
+            output.amin
+        } else {
+            resized.min
+        };
+        output.amax = if output.amax > resized.max {
+            output.amax
+        } else {
+            resized.max
+        };
         if options.add2file != IP_APPEND_OVERWRITE && options.add2file != IP_APPEND_TRUNCATE {
             output.amean += (resized.mean + (blank_before + blank_after) as f32 * options.pad)
                 / output.nz as f32;
@@ -437,8 +448,19 @@ pub fn clip_write_slice(
         }
     } else {
         slice_mmm(slice);
-        output.amin = output.amin.min(slice.min);
-        output.amax = output.amax.max(slice.max);
+        // `file_io.cpp:406-407`: `B3DMIN(hout->amin, s->min)` /
+        // `B3DMAX(hout->amax, s->max)` — `a < b ? a : b` keeps the
+        // *second* operand when either is NaN, unlike `f32::min`/`max`.
+        output.amin = if output.amin < slice.min {
+            output.amin
+        } else {
+            slice.min
+        };
+        output.amax = if output.amax > slice.max {
+            output.amax
+        } else {
+            slice.max
+        };
         if options.add2file != IP_APPEND_OVERWRITE && options.add2file != IP_APPEND_TRUNCATE {
             output.amean +=
                 (slice.mean + (blank_before + blank_after) as f32 * options.pad) / output.nz as f32;
@@ -602,8 +624,9 @@ pub fn grap_volume_write(
     let mut max = volume.slices[0].max;
     let mut mean = volume.slices[0].mean;
     for slice in &volume.slices[1..] {
-        min = min.min(slice.min);
-        max = max.max(slice.max);
+        // `file_io.cpp:541-542`: `B3DMIN(min, v->vol[k]->min)`.
+        min = if min < slice.min { min } else { slice.min };
+        max = if max > slice.max { max } else { slice.max };
         mean += slice.mean;
     }
     mean /= volume.slices.len() as f32;
@@ -624,8 +647,9 @@ pub fn grap_volume_write(
                     .write_all(b"overwriting requires data modes to be the same.\n");
                 return -1;
             }
-            output.amin = output.amin.min(min);
-            output.amax = output.amax.max(max);
+            // `file_io.cpp:566-567` / `:582-583`: `B3DMIN(min, hout->amin)`.
+            output.amin = if min < output.amin { min } else { output.amin };
+            output.amax = if max > output.amax { max } else { output.amax };
             let zscale = output.zlen / output.mz as f32;
             output.mz = output.nz;
             output.zlen = output.mz as f32 * zscale;
@@ -640,8 +664,9 @@ pub fn grap_volume_write(
                     ImodFile::Stderr.write_all(b"inserting requires data modes to be the same.\n");
                 return -1;
             }
-            output.amin = output.amin.min(min);
-            output.amax = output.amax.max(max);
+            // `file_io.cpp:566-567` / `:582-583`: `B3DMIN(min, hout->amin)`.
+            output.amin = if min < output.amin { min } else { output.amin };
+            output.amax = if max > output.amax { max } else { output.amax };
             output.amean = (output.amean * ks as f32 + mean * options.oz as f32) / output.nz as f32;
             let zscale = output.zlen / output.mz as f32;
             output.mz = output.nz;

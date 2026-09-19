@@ -761,6 +761,12 @@ pub unsafe fn ii_process_read_line(
     let mut fbufp = bufp.cast::<f32>();
     let map = d.map.as_ptr();
     let usmap = map.cast::<u16>();
+    // `mrcsec.c:614-618` hoists these out of the switch; `outmin`/`outmax` are
+    // declared `int` there and promote to float at each `B3DMAX`/`B3DMIN`.
+    let slope = l.slope;
+    let offset = l.offset;
+    let outmin = l.outmin;
+    let outmax = l.outmax;
     let n = d.xsize as usize;
     unsafe {
         if d.convert != 0
@@ -897,20 +903,71 @@ pub unsafe fn ii_process_read_line(
                                 core::slice::from_raw_parts_mut(fbufp, n),
                                 n as i32,
                             );
-                        } else {
-                            for i in 0..n {
-                                let mut v = f32::from_bits(imnp_halfbits_to_floatbits(*src.add(i)));
-                                if l.ramp == MRC_RAMP_LOG {
-                                    v = v.ln();
-                                } else if l.ramp == MRC_RAMP_EXP {
-                                    v = v.exp();
+                        } else if d.byte != 0 {
+                            // Half Float to byte (`mrcsec.c:818-838`).
+                            // Do unused ramps separately to speed up the regular load
+                            if l.ramp == MRC_RAMP_LOG || l.ramp == MRC_RAMP_EXP {
+                                for i in 0..n {
+                                    let conv =
+                                        f32::from_bits(imnp_halfbits_to_floatbits(*src.add(i)));
+                                    let mut fpixel = if l.ramp == MRC_RAMP_LOG {
+                                        conv.ln() * slope + offset
+                                    } else {
+                                        conv.exp() * slope + offset
+                                    };
+                                    if outmin as f32 > fpixel {
+                                        fpixel = outmin as f32;
+                                    }
+                                    if (outmax as f32) < fpixel {
+                                        fpixel = outmax as f32;
+                                    }
+                                    *bufp.add(i) = (fpixel + 0.5) as u8;
                                 }
-                                v = (v * l.slope + l.offset)
-                                    .clamp(l.outmin as f32, l.outmax as f32);
-                                if d.byte != 0 {
-                                    *bufp.add(i) = (v + 0.5) as u8;
-                                } else {
-                                    *usbufp.add(i) = (v + 0.5) as u16;
+                            } else {
+                                for i in 0..n {
+                                    let conv =
+                                        f32::from_bits(imnp_halfbits_to_floatbits(*src.add(i)));
+                                    let mut fpixel = conv * slope + offset;
+                                    if outmin as f32 > fpixel {
+                                        fpixel = outmin as f32;
+                                    }
+                                    if (outmax as f32) < fpixel {
+                                        fpixel = outmax as f32;
+                                    }
+                                    *bufp.add(i) = (fpixel + 0.5) as u8;
+                                }
+                            }
+                        } else {
+                            // Half Float to ushort (`mrcsec.c:841-860`).
+                            if l.ramp == MRC_RAMP_LOG || l.ramp == MRC_RAMP_EXP {
+                                for i in 0..n {
+                                    let conv =
+                                        f32::from_bits(imnp_halfbits_to_floatbits(*src.add(i)));
+                                    let mut fpixel = if l.ramp == MRC_RAMP_LOG {
+                                        conv.ln() * slope + offset
+                                    } else {
+                                        conv.exp() * slope + offset
+                                    };
+                                    if outmin as f32 > fpixel {
+                                        fpixel = outmin as f32;
+                                    }
+                                    if (outmax as f32) < fpixel {
+                                        fpixel = outmax as f32;
+                                    }
+                                    *usbufp.add(i) = (fpixel + 0.5) as u16;
+                                }
+                            } else {
+                                for i in 0..n {
+                                    let conv =
+                                        f32::from_bits(imnp_halfbits_to_floatbits(*src.add(i)));
+                                    let mut fpixel = conv * slope + offset;
+                                    if outmin as f32 > fpixel {
+                                        fpixel = outmin as f32;
+                                    }
+                                    if (outmax as f32) < fpixel {
+                                        fpixel = outmax as f32;
+                                    }
+                                    *usbufp.add(i) = (fpixel + 0.5) as u16;
                                 }
                             }
                         }
@@ -920,19 +977,66 @@ pub unsafe fn ii_process_read_line(
                             mrc_swap_floats(core::slice::from_raw_parts_mut(src, n), n);
                         }
                         if d.type_ != MRSA_FLOAT {
-                            for i in 0..n {
-                                let mut v = *src.add(i);
-                                if l.ramp == MRC_RAMP_LOG {
-                                    v = v.ln();
-                                } else if l.ramp == MRC_RAMP_EXP {
-                                    v = v.exp();
-                                }
-                                v = (v * l.slope + l.offset)
-                                    .clamp(l.outmin as f32, l.outmax as f32);
-                                if d.byte != 0 {
-                                    *bufp.add(i) = (v + 0.5) as u8
+                            if d.byte != 0 {
+                                // Float to byte (`mrcsec.c:842-861`).
+                                // Do unused ramps separately to speed up the regular load
+                                if l.ramp == MRC_RAMP_LOG || l.ramp == MRC_RAMP_EXP {
+                                    for i in 0..n {
+                                        // `mrcsec.c:846` is `(float)log((double)fdata[i])`:
+                                        // the double routine, rounded to float.
+                                        let mut fpixel = if l.ramp == MRC_RAMP_LOG {
+                                            (*src.add(i) as f64).ln() as f32 * slope + offset
+                                        } else {
+                                            (*src.add(i) as f64).exp() as f32 * slope + offset
+                                        };
+                                        if outmin as f32 > fpixel {
+                                            fpixel = outmin as f32;
+                                        }
+                                        if (outmax as f32) < fpixel {
+                                            fpixel = outmax as f32;
+                                        }
+                                        *bufp.add(i) = (fpixel + 0.5) as u8;
+                                    }
                                 } else {
-                                    *usbufp.add(i) = (v + 0.5) as u16
+                                    for i in 0..n {
+                                        let mut fpixel = *src.add(i) * slope + offset;
+                                        if outmin as f32 > fpixel {
+                                            fpixel = outmin as f32;
+                                        }
+                                        if (outmax as f32) < fpixel {
+                                            fpixel = outmax as f32;
+                                        }
+                                        *bufp.add(i) = (fpixel + 0.5) as u8;
+                                    }
+                                }
+                            } else {
+                                // Float to ushort (`mrcsec.c:864-883`).
+                                if l.ramp == MRC_RAMP_LOG || l.ramp == MRC_RAMP_EXP {
+                                    for i in 0..n {
+                                        let mut fpixel = if l.ramp == MRC_RAMP_LOG {
+                                            (*src.add(i) as f64).ln() as f32 * slope + offset
+                                        } else {
+                                            (*src.add(i) as f64).exp() as f32 * slope + offset
+                                        };
+                                        if outmin as f32 > fpixel {
+                                            fpixel = outmin as f32;
+                                        }
+                                        if (outmax as f32) < fpixel {
+                                            fpixel = outmax as f32;
+                                        }
+                                        *usbufp.add(i) = (fpixel + 0.5) as u16;
+                                    }
+                                } else {
+                                    for i in 0..n {
+                                        let mut fpixel = *src.add(i) * slope + offset;
+                                        if outmin as f32 > fpixel {
+                                            fpixel = outmin as f32;
+                                        }
+                                        if (outmax as f32) < fpixel {
+                                            fpixel = outmax as f32;
+                                        }
+                                        *usbufp.add(i) = (fpixel + 0.5) as u16;
+                                    }
                                 }
                             }
                         }

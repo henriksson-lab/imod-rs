@@ -1732,6 +1732,17 @@ pub fn newstack() {
             let (mut scan_nx, mut scan_ny) = (0_i32, 0_i32);
             let (mut scan_bin_nx, mut scan_bin_ny) = (0_i32, 0_i32);
             let (mut scan_rx_offset, mut scan_ry_offset) = (0.0_f32, 0.0_f32);
+            //
+            // `newstack.f90:1357-1368` calls `reallocateIfNeeded` and then
+            // hands `scanSection` the *existing* `array` and `array(idimInOut
+            // + 1)`; it does not allocate per section.  These are that one
+            // allocation.  Their lengths stay exactly what the size
+            // expressions below give, because `scanSection` splits the section
+            // into `array.len() / nx` line loads and the buffer size therefore
+            // decides how the partial sums are grouped.
+            //
+            let mut scan_array = Vec::<f32>::new();
+            let mut scan_temp = Vec::<f32>::new();
             for &(input_index, section) in &routes {
                 if scan_input != input_index {
                     if scan_input != usize::MAX {
@@ -1846,20 +1857,19 @@ pub fn newstack() {
                         scan_bin_nx as usize * scan_bin_ny as usize
                     }
                 };
-                let mut scan_array = vec![
-                    0.0_f32;
+                scan_array.resize(
                     scan_idim_in_out
                         .min(scan_bin_nx as usize * scan_bin_ny as usize)
-                        .max(scan_bin_nx as usize)
-                ];
+                        .max(scan_bin_nx as usize),
+                    0.0_f32,
+                );
                 // Same `needTemp` rule as `reallocateIfNeeded`
                 // (`newstack.f90:2823-2831`), which sizes the temporary the
                 // reader needs for this file.
-                let mut scan_temp = vec![
-                    0.0_f32;
-                    // `reallocateIfNeeded` (`newstack.f90:2818-2842`) recomputes `lenTemp`
-                    // for every limit except an entered `-test` pair, which keeps the size
-                    // that was entered.
+                // `reallocateIfNeeded` (`newstack.f90:2818-2842`) recomputes `lenTemp`
+                // for every limit except an entered `-test` pair, which keeps the size
+                // that was entered.
+                scan_temp.resize(
                     if lim_entered == 1 {
                         len_temp.max(1) as usize
                     } else {
@@ -1878,8 +1888,9 @@ pub fn newstack() {
                             need_temp = scan_nx as i64 * bin_factor as i64;
                         }
                         need_temp.max(1) as usize
-                    }
-                ];
+                    },
+                    0.0_f32,
+                );
                 // `newstack.f90:1367`.
                 if i_verbose > 0 {
                     print!(" scanning for mean/sd {:>11}\n", section);
@@ -2723,6 +2734,21 @@ pub fn newstack() {
         // single-chunk route computes its own `dmeanSec` per section.
         let mut dmean_sec = fill_value.unwrap_or(header.amean);
         let mut array = vec![0.0_f32; header.nx as usize * header.ny as usize];
+        //
+        // The source has exactly one `allocate(array(limToAlloc))`
+        // (`newstack.f90:296`, and `reallocateArray` when a later file needs
+        // more) and slices it for the input load, the output space and the
+        // reader's scratch.  This translation keeps the *layout* in separate
+        // buffers, but they are the source's one allocation all the same:
+        // hoist them out of the section loop and grow them in place, never
+        // reallocating and never re-zeroing, which is what the `allocate`
+        // does.  Nothing reads a region before the load or the chunk loop has
+        // written it, and none of their lengths is observable -- the two
+        // places where a buffer length decides a load grouping
+        // (`scanSection`'s `idimInOut`) get their own exactly sized slices.
+        //
+        let mut input = Vec::<f32>::new();
+        let mut load_temp = Vec::<f32>::new();
         // `newstack.f90:1517`: the preliminary pass above ran with unit
         // printing off (`newstack.f90:302`); the processing loop turns it back
         // on so `imopen` and `irdhdr` report each file that is used.
@@ -4743,7 +4769,10 @@ pub fn newstack() {
                     //
                     let nx_load = bin_nx;
                     let max_in = layout.iter().map(|entry| entry.3).max().unwrap_or(0);
-                    let mut input = vec![0.0_f32; nx_load.max(1) as usize * max_in.max(1) as usize];
+                    let input_need = nx_load.max(1) as usize * max_in.max(1) as usize;
+                    if input.len() < input_need {
+                        input.resize(input_need, 0.0);
+                    }
                     //
                     // The source keeps one load window across the chunk loop
                     // (`newstack.f90:2340-2382`): it only reads when the
@@ -5039,14 +5068,16 @@ pub fn newstack() {
                             }
                             // `newstack.f90:2822-2830` sizes the scratch buffer for
                             // `irdReduced`; 6 is the biggest support width of any filter.
-                            let mut temp = vec![
-                                0.0_f32;
-                                // `lenTemp` as `reallocateIfNeeded` left it
-                                // (`newstack.f90:2818-2842`); see the note at the
-                                // scan above -- `needTemp` is one unless the
-                                // reader shrinks or bins.
-                                effective_len_temp.max(1) as usize
-                            ];
+                            // `lenTemp` as `reallocateIfNeeded` left it
+                            // (`newstack.f90:2818-2842`); see the note at the
+                            // scan above -- `needTemp` is one unless the
+                            // reader shrinks or bins.  The source passes
+                            // `array(idimInOut + 1)` here, a slice of its one
+                            // allocation, so this is the hoisted buffer.
+                            if load_temp.len() < effective_len_temp.max(1) as usize {
+                                load_temp.resize(effective_len_temp.max(1) as usize, 0.0);
+                            }
+                            let mut temp = &mut load_temp;
                             // `newstack.f90:2376-2379`: the start is the reduced
                             // offset plus the reduction times the load offset.
                             if read_binned_or_reduced(
@@ -5711,10 +5742,11 @@ pub fn newstack() {
                         section_intentionally_truncated: true,
                     };
                     let factors = find_scale_factors(&scaling_values, tmp_min, tmp_max);
-                    array = vec![
-                        tmp_min * factors.scale_factor + factors.const_add;
-                        output_nx as usize * output_ny as usize
-                    ];
+                    let blank_need = output_nx as usize * output_ny as usize;
+                    if array.len() < blank_need {
+                        array.resize(blank_need, 0.0);
+                    }
+                    array[..blank_need].fill(tmp_min * factors.scale_factor + factors.const_add);
                 } else {
                     if active_input_file.is_null() {
                         exit_error("End of image while reading");
@@ -6251,12 +6283,13 @@ pub fn newstack() {
                     // needs is real, and reserving it here is what keeps the
                     // source's own overrun from being one here.
                     //
-                    let mut input = vec![
-                        0.0_f32;
-                        (nx_load.max(1) as usize * max_in.max(1) as usize).max(
-                            header.nx.max(1) as usize * header.ny.max(1) as usize
-                        )
-                    ];
+                    // Only the load the source actually asks for is reserved
+                    // here; the degenerate read's room is taken at the read
+                    // itself, below, where the line count says it is coming.
+                    let input_need = nx_load.max(1) as usize * max_in.max(1) as usize;
+                    if input.len() < input_need {
+                        input.resize(input_need, 0.0);
+                    }
                     //
                     // `newstack.f90:2300-2302` initialises the load window
                     // here, *before* the scan for the fill mean, because that
@@ -6381,7 +6414,10 @@ pub fn newstack() {
                     // chunk never reads outside its own lines, so one
                     // whole-section buffer stands in for both.
                     //
-                    array = vec![0.0_f32; output_nx as usize * output_ny as usize];
+                    let array_need = output_nx as usize * output_ny as usize;
+                    if array.len() < array_need {
+                        array.resize(array_need, 0.0);
+                    }
                     // `newstack.f90:1759, 2738-2739`: with `-replace` the output
                     // section is the next entry of the replacement list, not the
                     // running output index.
@@ -6554,20 +6590,44 @@ pub fn newstack() {
                                     );
                                 }
                             }
-                            let mut temp = vec![
-                                0.0_f32;
-                                // `lenTemp` as `reallocateIfNeeded` left it
-                                // (`newstack.f90:2818-2842`).  `needTemp` starts
-                                // at **one** (`newstack.f90:2822`) and only
-                                // `readShrunk` and `iBinning > 1` raise it, so
-                                // reproducing it as `nx * readReduction` gave
-                                // `nx` where the source has 1 -- and for an
-                                // entered `-memory` that is
-                                // `idimInOut = limToAlloc - lenTemp`, so the
-                                // scan's load grouping and the fill mean moved
-                                // with it.
-                                effective_len_temp.max(1) as usize
-                            ];
+                            // `lenTemp` as `reallocateIfNeeded` left it
+                            // (`newstack.f90:2818-2842`).  `needTemp` starts
+                            // at **one** (`newstack.f90:2822`) and only
+                            // `readShrunk` and `iBinning > 1` raise it, so
+                            // reproducing it as `nx * readReduction` gave
+                            // `nx` where the source has 1 -- and for an
+                            // entered `-memory` that is
+                            // `idimInOut = limToAlloc - lenTemp`, so the
+                            // scan's load grouping and the fill mean moved
+                            // with it.  The source passes `array(idimInOut + 1)`
+                            // here (`newstack.f90:2376-2379`), a slice of its
+                            // one allocation, so this is the hoisted buffer.
+                            if load_temp.len() < effective_len_temp.max(1) as usize {
+                                load_temp.resize(effective_len_temp.max(1) as usize, 0.0);
+                            }
+                            //
+                            // With no transform `linesNeededForOutput` clamps
+                            // both ends to the input (`newstack.f90:3322-3323`),
+                            // so an output chunk lying entirely in the padding
+                            // comes back with `iy2 < iy1` and a *negative* line
+                            // count.  `iiMRCsetLoadInfo` then replaces the
+                            // negative `ury` with `ny - 1` (`iimrc.c:169-172`),
+                            // so the read that asked for no lines fetches the
+                            // whole section -- past the end of the source's own
+                            // `array`.  The repack still sees `my <= 0` and
+                            // fills the chunk, so the data is never used; only
+                            // the room is real, and it is reserved here, where
+                            // the line count says the degenerate read is coming,
+                            // rather than on every section.
+                            //
+                            if num_lines_load <= 0 {
+                                let degenerate_need = load_base_ind
+                                    + header.nx.max(1) as usize * header.ny.max(1) as usize;
+                                if input.len() < degenerate_need {
+                                    input.resize(degenerate_need, 0.0);
+                                }
+                            }
+                            let mut temp = &mut load_temp;
                             // `newstack.f90:2376-2379`: the start is the reduced
                             // offset plus the reduction times the load offset.
                             if read_binned_or_reduced(
@@ -7610,18 +7670,35 @@ pub fn irepak2(
     ny2: i32,
     dmean: f32,
 ) {
+    //
+    // `newstack.f90:3379-3395` tests the row bound *outside* the `ix` loop and
+    // gives the out-of-range rows a loop of their own that fills with `dmean`;
+    // only the column bound is tested per pixel.  Keep that two-branch shape:
+    // folding the `iy` test into the pixel predicate is the same answer and
+    // 2.3x the work.  The caller sizes `brray` from the same extent this
+    // walks (`nxOut * numYchunk`), so no per-pixel length guard is needed
+    // either -- the source has none.
+    //
+    // `nx1..nx2 + 1` rather than `nx1..=nx2` is the same sequence; an
+    // inclusive range carries an extra exhausted flag that stops the loop
+    // vectorising, which is not something the Fortran's `do` has.
     let mut ind = 0usize;
-    for iy in ny1..=ny2 {
-        for ix in nx1..=nx2 {
-            if ind == brray.len() {
-                return;
+    for iy in ny1..ny2 + 1 {
+        if iy >= 0 && iy < my {
+            let row = iy as usize * mx as usize;
+            for ix in nx1..nx2 + 1 {
+                brray[ind] = if ix >= 0 && ix < mx {
+                    array[row + ix as usize]
+                } else {
+                    dmean
+                };
+                ind += 1;
             }
-            brray[ind] = if ix >= 0 && ix < mx && iy >= 0 && iy < my {
-                array[iy as usize * mx as usize + ix as usize]
-            } else {
-                dmean
-            };
-            ind += 1;
+        } else {
+            for _ix in nx1..nx2 + 1 {
+                brray[ind] = dmean;
+                ind += 1;
+            }
         }
     }
 }

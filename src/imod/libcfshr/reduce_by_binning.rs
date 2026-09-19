@@ -1,6 +1,11 @@
 //! Translation of `IMOD/libcfshr/reduce_by_binning.c`.
 #![allow(dead_code)]
 
+use crate::imod::libcfshr::b3dutil::num_omp_threads;
+use rayon::ThreadPoolBuilder;
+use rayon::iter::{IndexedParallelIterator, ParallelIterator};
+use rayon::slice::ParallelSliceMut;
+
 pub const SLICE_MODE_BYTE: i32 = 0;
 pub const SLICE_MODE_SHORT: i32 = 1;
 pub const SLICE_MODE_FLOAT: i32 = 2;
@@ -810,46 +815,86 @@ pub fn bin_into_slice(
             }
         }
     } else {
-        // The `numOMPthreads(8)` call and the OpenMP `parallel for` over
-        // `iyBin` are not reproduced; the rows are disjoint in the output so
-        // the accumulation order within a row is what matters.
-        for iy_bin in 0..ny_bin {
-            for iy in iy_bin * bin_y..(iy_bin + 1) * bin_y {
-                let ix_base = nx_dim * iy;
-                let ind_base = nx_bin * iy_bin;
-                if bin_x == 1 {
-                    for ix_bin in 0..nx_bin {
-                        bray[(ix_bin + ind_base) as usize] +=
-                            array[(ix_bin + ix_base) as usize] * factor;
-                    }
-                } else if bin_x == 2 {
-                    for ix_bin in 0..nx_bin {
-                        let ind = (2 * ix_bin + ix_base) as usize;
-                        bray[(ix_bin + ind_base) as usize] +=
-                            (array[ind] + array[ind + 1]) * factor;
-                    }
-                } else if bin_x == 3 {
-                    for ix_bin in 0..nx_bin {
-                        let ind = (3 * ix_bin + ix_base) as usize;
-                        bray[(ix_bin + ind_base) as usize] +=
-                            (array[ind] + array[ind + 1] + array[ind + 2]) * factor;
-                    }
-                } else if bin_x == 4 {
-                    for ix_bin in 0..nx_bin {
-                        let ind = (4 * ix_bin + ix_base) as usize;
-                        bray[(ix_bin + ind_base) as usize] +=
-                            (array[ind] + array[ind + 1] + array[ind + 2] + array[ind + 3])
-                                * factor;
-                    }
-                } else {
-                    for ix_bin in 0..nx_bin {
-                        let ind = (ix_bin + ind_base) as usize;
-                        for ix in ix_bin * bin_x..(ix_bin + 1) * bin_x {
-                            bray[ind] += array[(ix + ix_base) as usize] * factor;
+        // `reduce_by_binning.c:599-600`: `numOMPthreads(8)` and an OpenMP
+        // `parallel for` over `iyBin`.  The rows are disjoint in the output —
+        // `indBase` is `nxBin * iyBin` and every write is `ixBin + indBase` —
+        // and the `+=` accumulates over `iy` within one iteration,
+        // sequentially, so neither the schedule nor the thread count changes a
+        // single sum.  The partition holds its own slice of `brray`, so
+        // `indBase` is the row's offset within that slice rather than within
+        // the whole output.
+        let num_threads = num_omp_threads(8);
+        let rows_per_group = if num_threads > 1 {
+            (ny_bin as usize).div_ceil(num_threads as usize).max(1)
+        } else {
+            (ny_bin as usize).max(1)
+        };
+        let run_group = |(g, brows): (usize, &mut [f32])| {
+            let iy_bin0 = (g * rows_per_group) as i32;
+            let iy_bin1 = ((g + 1) * rows_per_group).min(ny_bin as usize) as i32;
+            for iy_bin in iy_bin0..iy_bin1 {
+                for iy in iy_bin * bin_y..(iy_bin + 1) * bin_y {
+                    let ix_base = nx_dim * iy;
+                    let ind_base = nx_bin * (iy_bin - iy_bin0);
+                    if bin_x == 1 {
+                        for ix_bin in 0..nx_bin {
+                            brows[(ix_bin + ind_base) as usize] +=
+                                array[(ix_bin + ix_base) as usize] * factor;
+                        }
+                    } else if bin_x == 2 {
+                        for ix_bin in 0..nx_bin {
+                            let ind = (2 * ix_bin + ix_base) as usize;
+                            brows[(ix_bin + ind_base) as usize] +=
+                                (array[ind] + array[ind + 1]) * factor;
+                        }
+                    } else if bin_x == 3 {
+                        for ix_bin in 0..nx_bin {
+                            let ind = (3 * ix_bin + ix_base) as usize;
+                            brows[(ix_bin + ind_base) as usize] +=
+                                (array[ind] + array[ind + 1] + array[ind + 2]) * factor;
+                        }
+                    } else if bin_x == 4 {
+                        for ix_bin in 0..nx_bin {
+                            let ind = (4 * ix_bin + ix_base) as usize;
+                            brows[(ix_bin + ind_base) as usize] +=
+                                (array[ind] + array[ind + 1] + array[ind + 2] + array[ind + 3])
+                                    * factor;
+                        }
+                    } else {
+                        for ix_bin in 0..nx_bin {
+                            let ind = (ix_bin + ind_base) as usize;
+                            for ix in ix_bin * bin_x..(ix_bin + 1) * bin_x {
+                                brows[ind] += array[(ix + ix_base) as usize] * factor;
+                            }
                         }
                     }
                 }
             }
+        };
+        // One task per group of rows, so at most `numThreads` run at once and
+        // `OMP_NUM_THREADS` / `IMOD_FORCE_OMP_THREADS` are honoured through
+        // `numOMPthreads` exactly as in the source.
+        if num_threads > 1 {
+            // Native's OpenMP runtime creates at most `omp_get_num_procs()` workers
+            // and `numOMPthreads` never asks for more than the physical-core count
+            // (or whatever `OMP_NUM_THREADS` / `IMOD_FORCE_OMP_THREADS` allow).
+            // rayon's default global pool is sized from `available_parallelism()`,
+            // which counts *logical* processors, so it is bounded to the same count
+            // here.  `build_global` succeeds for whichever translated unit reaches
+            // it first and returns an error afterwards, which is the intended
+            // no-op: every unit asks for the same size.
+            let _ = rayon::ThreadPoolBuilder::new()
+                .num_threads(num_omp_threads(i32::MAX) as usize)
+                .build_global();
+            bray[..(ny_bin * nx_bin) as usize]
+                .par_chunks_mut(rows_per_group * nx_bin as usize)
+                .enumerate()
+                .for_each(run_group);
+        } else {
+            bray[..(ny_bin * nx_bin) as usize]
+                .chunks_mut(rows_per_group * nx_bin as usize)
+                .enumerate()
+                .for_each(run_group);
         }
     }
 }

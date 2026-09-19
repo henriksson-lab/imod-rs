@@ -596,6 +596,19 @@ pub fn mrc2tif() {
             "Writing %s images. ",
             &[CArg::Str(type_name)],
         ));
+        // `mrc2tif.cpp:494-497`: "Allocate memory first time or every time".
+        // The read buffer is `malloc`ed **once** for the whole run and only
+        // reallocated on the `convert && slmode > 0` arm, where `sliceNewMode`
+        // replaces it and `:616` frees it.  `sliceInit` at `:511` then makes
+        // `slice.data.b == buf`, so the slice *aliases* the read buffer and
+        // `sliceMMM`, the conversion loop and the write all work on the same
+        // memory.  Both live here so the chunk loop below neither allocates
+        // nor copies per section; the slice is given its real size, mode and
+        // buffer by the `sliceInit` in that loop.
+        let mut buffer: Vec<u8> = Vec::new();
+        let Some(mut slice) = slice_create(1, 1, hdata.mode) else {
+            exit_error(b"Failed to allocate memory for slice");
+        };
         for z in zmin..=zmax {
             let mut slice_min = 1.0e30_f32;
             let mut slice_max = -1.0e30_f32;
@@ -707,9 +720,17 @@ pub fn mrc2tif() {
                 else {
                     exit_error(b"Failed to allocate memory for slice");
                 };
-                let mut buffer = Vec::new();
-                if buffer.try_reserve_exact(buffer_len).is_err() {
-                    // `mrc2tif.cpp:497`.
+                // `mrc2tif.cpp:495-497`.  The C's `allocSize` is the *full*
+                // chunk size even for a short final chunk (`:487`), so the
+                // capacity taken on the first chunk covers every later one and
+                // nothing is reallocated after it; a short chunk only trims
+                // the length, and the next chunk grows it back inside that
+                // capacity.  The zero fill is dead either way -- `mrcReadZ`
+                // writes every byte it is given -- and the C `malloc`s without
+                // clearing.
+                if buffer.capacity() < buffer_len
+                    && buffer.try_reserve_exact(buffer_len - buffer.len()).is_err()
+                {
                     exit_error(b"Failed to allocate memory for slice");
                 }
                 buffer.resize(buffer_len, 0);
@@ -738,10 +759,22 @@ pub fn mrc2tif() {
                         &[CArg::Int(z as i64)],
                     ));
                 }
-                let Some(mut slice) = slice_create(hdata.nx, nlines, hdata.mode) else {
-                    break;
-                };
-                slice.data.copy_from_slice(&buffer);
+                // `mrc2tif.cpp:511`: `sliceInit(&slice, xsize, lines,
+                // hdata.mode, buf)` -- the slice takes over the read buffer
+                // rather than copying it.  The translated `sliceInit` takes
+                // the buffer by value and can only fail on a mode the switch
+                // above already rejected or on the length this call just
+                // computed itself; the source's `sliceInit` returns void.
+                if slice_init(
+                    slice.as_mut(),
+                    hdata.nx,
+                    nlines,
+                    hdata.mode,
+                    std::mem::take(&mut buffer),
+                ) != 0
+                {
+                    exit_error(b"Failed to allocate memory for slice");
+                }
                 if auto_contrast {
                     let sample =
                         (hdata.nx * hdata.ny).min(100_000) as f32 / (hdata.nx * hdata.ny) as f32;
@@ -749,7 +782,7 @@ pub fn mrc2tif() {
                     let mut image_sd = 0.0;
                     // `makeLinePointers` becomes the line byte views the
                     // translated `sampleMeanSD` takes.
-                    let bytes = buffer.as_slice();
+                    let bytes = slice.data.as_slice();
                     let lines: Vec<&[u8]> = (0..nlines as usize)
                         .map(|index| &bytes[(hdata.nx as usize * index * psize)..])
                         .collect();
@@ -816,10 +849,30 @@ pub fn mrc2tif() {
                 }
                 if !make_qimage {
                     slice_mmm(slice.as_mut());
-                    slice_min = slice_min.min(slice.min);
-                    slice_max = slice_max.max(slice.max);
-                    all_min = all_min.min(slice.min);
-                    all_max = all_max.max(slice.max);
+                    // `mrc2tif.cpp:557-560`.  `B3DMIN`/`B3DMAX` are
+                    // `a < b ? a : b` / `a > b ? a : b`, so they return the
+                    // **second** operand when either side is NaN;
+                    // `f32::min`/`max` return the non-NaN one instead.
+                    slice_min = if slice_min < slice.min {
+                        slice_min
+                    } else {
+                        slice.min
+                    };
+                    slice_max = if slice_max > slice.max {
+                        slice_max
+                    } else {
+                        slice.max
+                    };
+                    all_min = if all_min < slice.min {
+                        all_min
+                    } else {
+                        slice.min
+                    };
+                    all_max = if all_max > slice.max {
+                        all_max
+                    } else {
+                        slice.max
+                    };
                     if !do_chunks {
                         (*iifile).amin = slice_min;
                         (*iifile).amax = slice_max;
@@ -941,6 +994,16 @@ pub fn mrc2tif() {
                             }),
                         ],
                     ));
+                }
+                if convert && real_mode > 0 {
+                    // `mrc2tif.cpp:615-616`: the buffer `sliceNewMode` made is
+                    // freed here, which is why the allocation at `:495`
+                    // reruns on every chunk in this case.
+                    slice.data = Vec::new();
+                } else {
+                    // Otherwise the C keeps using the same `buf` for the next
+                    // chunk and section; take it back out of the slice.
+                    buffer = std::mem::take(&mut slice.data);
                 }
             }
             (*iifile).amin = slice_min;

@@ -12,7 +12,10 @@
 use core::sync::atomic::{AtomicI32, AtomicU32, Ordering};
 use std::io::Write;
 
-use crate::imod::libcfshr::b3dutil::{CArg, ImodFile, c_format};
+use crate::imod::libcfshr::b3dutil::{CArg, ImodFile, c_format, num_omp_threads};
+use rayon::ThreadPoolBuilder;
+use rayon::iter::{IndexedParallelIterator, ParallelIterator};
+use rayon::slice::ParallelSliceMut;
 
 use super::robuststat::{rs_set_sort_index_offset, rs_sort_indexed_floats};
 
@@ -502,18 +505,61 @@ pub fn apply_kernel_filter(
     k: i32,
 ) {
     let below = k / 2;
-    for oy in 0..ny {
-        for ox in 0..nx {
-            let mut sum = 0.;
-            for iy in 0..k {
-                for ix in 0..k {
-                    let x = (ox + ix - below).clamp(0, nx - 1);
-                    let y = (oy + iy - below).clamp(0, ny - 1);
-                    sum += mat[(ix + iy * k) as usize] * a[(x + y * d) as usize];
+
+    // `filtxcorr.c:1782-1784`: the same size-dependent thread count as
+    // `cubinterp`, then `numOMPthreads`, then `#pragma omp parallel for` over
+    // `iyo`.  Iteration `iyo` reads `array` and `mat` and writes only
+    // `brray[ixo + nxdim * iyo]`, so the output rows are disjoint, there is no
+    // reduction, and each output pixel's sum is accumulated by the same
+    // sequential `iy`/`ix` loops as before: the result does not depend on the
+    // schedule or on the thread count.
+    let mut num_threads = (0.04 * (nx as f64 * ny as f64).sqrt() + 0.5).floor() as i32;
+    num_threads = num_omp_threads(num_threads);
+
+    // One task per group of rows, so at most `numThreads` run at once and the
+    // crate honours `OMP_NUM_THREADS` / `IMOD_FORCE_OMP_THREADS` the way
+    // `numOMPthreads` does.
+    let rows_per_group = if num_threads > 1 {
+        (ny as usize).div_ceil(num_threads as usize).max(1)
+    } else {
+        (ny as usize).max(1)
+    };
+    let run_group = |(g, brows): (usize, &mut [f32])| {
+        let oy0 = (g * rows_per_group) as i32;
+        let oy1 = ((g + 1) * rows_per_group).min(ny as usize) as i32;
+        for oy in oy0..oy1 {
+            for ox in 0..nx {
+                let mut sum = 0.;
+                for iy in 0..k {
+                    for ix in 0..k {
+                        let x = (ox + ix - below).clamp(0, nx - 1);
+                        let y = (oy + iy - below).clamp(0, ny - 1);
+                        sum += mat[(ix + iy * k) as usize] * a[(x + y * d) as usize];
+                    }
                 }
+                brows[(ox + (oy - oy0) * d) as usize] = sum;
             }
-            b[(ox + oy * d) as usize] = sum;
         }
+    };
+    if num_threads > 1 {
+        // Native's OpenMP runtime creates at most `omp_get_num_procs()` workers
+        // and `numOMPthreads` never asks for more than the physical-core count
+        // (or whatever `OMP_NUM_THREADS` / `IMOD_FORCE_OMP_THREADS` allow).
+        // rayon's default global pool is sized from `available_parallelism()`,
+        // which counts *logical* processors, so it is bounded to the same count
+        // here.  `build_global` succeeds for whichever translated unit reaches
+        // it first and returns an error afterwards, which is the intended
+        // no-op: every unit asks for the same size.
+        let _ = rayon::ThreadPoolBuilder::new()
+            .num_threads(num_omp_threads(i32::MAX) as usize)
+            .build_global();
+        b.par_chunks_mut(rows_per_group * d as usize)
+            .enumerate()
+            .for_each(run_group);
+    } else {
+        b.chunks_mut(rows_per_group * d as usize)
+            .enumerate()
+            .for_each(run_group);
     }
 }
 

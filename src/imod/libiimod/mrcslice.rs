@@ -263,8 +263,15 @@ pub fn slice_mmm(s: &mut Islice) -> i32 {
             if s.mode == MRC_MODE_COMPLEX_FLOAT {
                 val[0] = (val[0] * val[0] + val[1] * val[1]).sqrt();
             }
-            s.min = s.min.min(val[0]);
-            s.max = s.max.max(val[0]);
+            // `mrcslice.c:369-372` compares with `>` / `<`, which are false
+            // for a NaN operand: once `s.min` is NaN (pixel 0,0) it stays NaN.
+            // `f32::min`/`max` would silently recover the non-NaN operand.
+            if s.min > val[0] {
+                s.min = val[0];
+            }
+            if s.max < val[0] {
+                s.max = val[0];
+            }
             tsum += val[0] as f64;
         }
         sum += tsum;
@@ -449,17 +456,42 @@ pub fn mrc_slice_lie(sin: &mut Islice, fixed: f64, alpha: f64) -> i32 {
         MRC_MODE_USHORT => (0., 65535.),
         _ => (0., 0.),
     };
-    for j in 0..sin.ysize {
-        for i in 0..sin.xsize {
-            let mut v = [0.; 4];
-            slice_get_val(sin, i, j, &mut v);
-            for q in 0..sin.csize.min(3) as usize {
-                v[q] = offset + scale * v[q];
+    // `mrcslice.c:631-658` declares `Ival val` once (`:609`) and splits the
+    // pixel loop on `csize == 1`, hoisting the channel test out of the body.
+    let mut v = [0.; 4];
+    if sin.csize == 1 {
+        for j in 0..sin.ysize {
+            for i in 0..sin.xsize {
+                slice_get_val(sin, i, j, &mut v);
+                v[0] = offset + scale * v[0];
                 if max != 0. {
-                    v[q] = v[q].clamp(min, max);
+                    if v[0] > max {
+                        v[0] = max;
+                    }
+                    if v[0] < min {
+                        v[0] = min;
+                    }
                 }
+                slice_put_val(sin, i, j, v);
             }
-            slice_put_val(sin, i, j, v);
+        }
+    } else {
+        for j in 0..sin.ysize {
+            for i in 0..sin.xsize {
+                slice_get_val(sin, i, j, &mut v);
+                for q in 0..sin.csize.min(3) as usize {
+                    v[q] = offset + scale * v[q];
+                    if max != 0. {
+                        if v[q] > max {
+                            v[q] = max;
+                        }
+                        if v[q] < min {
+                            v[q] = min;
+                        }
+                    }
+                }
+                slice_put_val(sin, i, j, v);
+            }
         }
     }
     0
