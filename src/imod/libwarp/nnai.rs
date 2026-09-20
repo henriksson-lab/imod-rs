@@ -4,10 +4,7 @@ use crate::imod::libcfshr::b3dutil::{CArg, c_format};
 use crate::imod::libwarp::delaunay::Delaunay;
 use crate::imod::libwarp::nn::Point;
 use crate::imod::libwarp::nncommon::nn_quit;
-use crate::imod::libwarp::nnpi::{
-    nnpi_calculate_weights, nnpi_create, nnpi_destroy, nnpi_get_nvertices, nnpi_get_vertices,
-    nnpi_get_weights,
-};
+use crate::imod::libwarp::nnpi::{nnpi_calculate_weights, nnpi_create, nnpi_destroy};
 
 /// C `NaN` (`nan.h:26`); see the note in `nnpi.rs`.
 const NAN: f64 = f64::NAN;
@@ -82,10 +79,10 @@ pub fn nnai_build(d: Delaunay, n: i32, x: &[f64], y: &[f64]) -> Option<Nnai> {
         // `int* vertices` and `double* weights` are declared at the top of the
         // source function; they are borrows of the interpolator's own arrays,
         // so they are taken inside the loop here where the borrow ends.
-        let vertices = nnpi_get_vertices(&point_interpolator);
-        let weights = nnpi_get_weights(&point_interpolator);
+        let vertices = point_interpolator.nnpi_get_vertices();
+        let weights = point_interpolator.nnpi_get_weights();
 
-        let nvertices = nnpi_get_nvertices(&point_interpolator);
+        let nvertices = point_interpolator.nnpi_get_nvertices();
 
         /* DNM: do not allocate or copy if no vertices */
         if nvertices != 0 {

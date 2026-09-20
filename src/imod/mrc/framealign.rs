@@ -4120,8 +4120,8 @@ impl FrameAlign {
                 // For GPU alignment, it extracts the wrapped image with origin
                 // in center which is ready for filtering the subarea
                 let mut temp_sub = std::mem::take(&mut self.m_temp_sub_filt);
-                let rc = fgpu_cross_correlate(ali_ind, ref_ind, &mut temp_sub, sub_xoffset,
-                                              sub_yoffset);
+                let rc =
+                    fgpu_cross_correlate(ali_ind, ref_ind, &mut temp_sub, sub_xoffset, sub_yoffset);
                 self.m_temp_sub_filt = temp_sub;
                 if rc != 0 {
                     if self.recover_gpu_align_ffts(
@@ -4526,8 +4526,7 @@ impl FrameAlign {
                 self.put_full(full_arr, full_owned);
                 if rc {
                     let mut passed = full_arr;
-                    if self.recover_from_summing_failure(Some(&mut passed), frame_num, sum_ind)
-                        != 0
+                    if self.recover_from_summing_failure(Some(&mut passed), frame_num, sum_ind) != 0
                     {
                         return 3;
                     }
@@ -4752,12 +4751,14 @@ impl FrameAlign {
         }
         let mut ind = self.m_saved_bin_pad.len() as i32;
         while ind < num_bin_pads {
-            self.m_saved_bin_pad.push(vec![0.; self.m_align_pix as usize]);
+            self.m_saved_bin_pad
+                .push(vec![0.; self.m_align_pix as usize]);
             ind += 1;
         }
         let mut ind = self.m_saved_groups.len() as i32;
         while ind < num_groups {
-            self.m_saved_groups.push(vec![0.; self.m_align_pix as usize]);
+            self.m_saved_groups
+                .push(vec![0.; self.m_align_pix as usize]);
             ind += 1;
         }
         0
@@ -4857,16 +4858,18 @@ impl FrameAlign {
         let num_saved_start = self.m_num_full_saved;
         let mut frame_num: i32;
         let mut source_type: i32;
-        let need_preprocess = (self.m_gain_ref.is_some()
-            || self.m_trunc_limit > 0.
-            || self.m_cam_size_x > 0)
-            && (self.m_gpu_flags & GPU_DO_PREPROCESS) != 0;
+        let need_preprocess =
+            (self.m_gain_ref.is_some() || self.m_trunc_limit > 0. || self.m_cam_size_x > 0)
+                && (self.m_gpu_flags & GPU_DO_PREPROCESS) != 0;
 
         let total = num_saved_start + self.m_num_stacked_on_gpu + if stacking { 1 } else { 0 };
         for ind in 0..total {
             let mut alloced: Option<Vec<f32>> = None;
             if self.m_stack_type != MRC_MODE_FLOAT || ind >= self.m_saved_full_size.len() as i32 {
-                alloced = Some(vec![0.; ((self.m_full_xpad + 2) * self.m_full_ypad) as usize]);
+                alloced = Some(vec![
+                    0.;
+                    ((self.m_full_xpad + 2) * self.m_full_ypad) as usize
+                ]);
             }
 
             // Set source as stack if on CPU and save frame number
@@ -4970,8 +4973,7 @@ impl FrameAlign {
             self.m_nx,
             self.m_ny,
             0,
-            (if self.m_debug != 0 { 1 } else { 0 })
-                + (if self.m_report_times { 10 } else { 0 }),
+            (if self.m_debug != 0 { 1 } else { 0 }) + (if self.m_report_times { 10 } else { 0 }),
         );
     }
 
@@ -5450,7 +5452,11 @@ impl FrameAlign {
                     ref_xshift.push(shift_x);
                     ref_yshift.push(shift_y);
                     error = (shift_x * shift_x + shift_y * shift_y).sqrt();
-                    max_refine = if max_refine > error { max_refine } else { error };
+                    max_refine = if max_refine > error {
+                        max_refine
+                    } else {
+                        error
+                    };
                 }
 
                 if group_refine != 0 {

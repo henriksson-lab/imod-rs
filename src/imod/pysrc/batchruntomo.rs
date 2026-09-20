@@ -5510,7 +5510,10 @@ impl Brt {
             None,
         );
         if patch_size_arr.is_none() || min_fids_arr.is_none() {
-            self.abort_set(&format!("Problem finding some options in align{}", self.com_ext));
+            self.abort_set(&format!(
+                "Problem finding some options in align{}",
+                self.com_ext
+            ));
         }
         let (nxpatch, nypatch) = match &patch_size_arr {
             Some(OptionValue::Integers(values)) if values.len() >= 2 => {
@@ -5565,7 +5568,11 @@ impl Brt {
             0,
             INT_VALUE,
         );
-        let cross_val = if cross_val.is_none() { 1 } else { cross_val.int() };
+        let cross_val = if cross_val.is_none() {
+            1
+        } else {
+            cross_val.int()
+        };
 
         if self.patch_track {
             enable_stretch = false;
@@ -5575,7 +5582,8 @@ impl Brt {
 
         // If skipping align, get a few more values from com file, analyze log
         if self.skip_tiltalign != 0 {
-            let glb_stretch = option_value(&lines, "XStretchOption", INT_VALUE, false, 1, None, None);
+            let glb_stretch =
+                option_value(&lines, "XStretchOption", INT_VALUE, false, 1, None, None);
             let glb_skew = option_value(&lines, "SkewOption", INT_VALUE, false, 1, None, None);
             let stretch_positive = match &glb_stretch {
                 Some(OptionValue::Integers(values)) if !values.is_empty() => values[0] > 0,
@@ -5652,7 +5660,10 @@ impl Brt {
                 // Look for robust failure: this shouldn't happen with cross-validation
                 let mut found = false;
                 for line in self.latest_messages.clone() {
-                    if line.to_uppercase().contains("TOO FEW DATA POINTS TO DO ROBUST") {
+                    if line
+                        .to_uppercase()
+                        .contains("TOO FEW DATA POINTS TO DO ROBUST")
+                    {
                         self.prn_log("Trying again without robust fitting", "\n", false);
                         do_robust = 0;
                         found = true;
@@ -5749,8 +5760,7 @@ impl Brt {
                     self.made_zfactors = true;
                     numruns = 2;
                     if self.did_local_align != 0 && self.num_surfaces > 1 {
-                        let mindens =
-                            min_on_surf as f64 / (self.raw_xsize * self.raw_ysize) as f64;
+                        let mindens = min_on_surf as f64 / (self.raw_xsize * self.raw_ysize) as f64;
                         let min_in_area = mindens * nxpatch as f64 * nypatch as f64;
                         if min_in_area > min_surf_local_stretch {
                             loc_stretch = 3;
@@ -5791,7 +5801,11 @@ impl Brt {
                         }
                     }
                 } else {
-                    self.prn_log("Too few fiducials to enable skew-only solution", "\n", false);
+                    self.prn_log(
+                        "Too few fiducials to enable skew-only solution",
+                        "\n",
+                        false,
+                    );
                 }
             }
         }
@@ -5871,7 +5885,11 @@ impl Brt {
                 if !reloaded {
                     sedcom.push(sed_modify("XStretchOption", &glb_stretch.to_string(), '/'));
                     sedcom.push(sed_modify("SkewOption", &glb_skew.to_string(), '/'));
-                    sedcom.push(sed_modify("LocalStretchOption", &loc_stretch.to_string(), '/'));
+                    sedcom.push(sed_modify(
+                        "LocalStretchOption",
+                        &loc_stretch.to_string(),
+                        '/',
+                    ));
                     sedcom.push(sed_modify("LocalSkewOption", &loc_skew.to_string(), '/'));
                     sedcom.push(sed_modify(
                         "MinFidsTotalAndEachSurface",
@@ -5913,7 +5931,10 @@ impl Brt {
                     self.suppress_abort = false;
                     let mut found = false;
                     for line in self.latest_messages.clone() {
-                        if line.to_uppercase().contains("TOO FEW DATA POINTS TO DO ROBUST") {
+                        if line
+                            .to_uppercase()
+                            .contains("TOO FEW DATA POINTS TO DO ROBUST")
+                        {
                             self.prn_log("Trying again without robust fitting", "\n", false);
                             do_robust = 0;
                             found = true;
@@ -6029,7 +6050,9 @@ impl Brt {
             mess = "Making final aligned stack".to_owned();
         }
 
-        let linear = self.lookup_directive(&alipre, "linearInterpolation", 0, BOOL_VALUE).int();
+        let linear = self
+            .lookup_directive(&alipre, "linearInterpolation", 0, BOOL_VALUE)
+            .int();
         self.ali_xunbinned = self.raw_xsize;
         self.ali_yunbinned = self.raw_ysize;
         if self.ali_binning == 0 {
@@ -6387,8 +6410,12 @@ impl Brt {
             && self.erase_gold.int() > 1
             && self.need_step(DETECT_3D_STEP_NUM)
         {
-            let binning_directive =
-                self.lookup_directive(&format!("{RUNTIME_PREFIX}GoldErasing"), "binning", 0, INT_VALUE);
+            let binning_directive = self.lookup_directive(
+                &format!("{RUNTIME_PREFIX}GoldErasing"),
+                "binning",
+                0,
+                INT_VALUE,
+            );
             let mut binning = binning_directive.int();
             if !binning_directive.truthy() {
                 // desired reduction is expFac * fidSize / optimal
@@ -6437,8 +6464,12 @@ impl Brt {
             }
 
             // Set up to get the reconstruction; get a thickness if any entered
-            let thickness_directive =
-                self.lookup_directive(&format!("{RUNTIME_PREFIX}GoldErasing"), "thickness", 0, INT_VALUE);
+            let thickness_directive = self.lookup_directive(
+                &format!("{RUNTIME_PREFIX}GoldErasing"),
+                "thickness",
+                0,
+                INT_VALUE,
+            );
             let thickness;
 
             // use fid alignment if two surfaces, otherwise there needs to be a directive
@@ -6446,9 +6477,9 @@ impl Brt {
                 if self.num_surfaces > 1 {
                     let use_size = f64::max(15., self.fid_size_nm.unwrap_or(0.))
                         / (self.pixel_size / self.expand_factor);
-                    thickness = 2 * (((1.1 * self.fid_thickness + 6. * use_size).round() as i64
-                        + 1)
-                    .div_euclid(2));
+                    thickness = 2
+                        * (((1.1 * self.fid_thickness + 6. * use_size).round() as i64 + 1)
+                            .div_euclid(2));
                 } else {
                     self.abort_set(
                         "A GoldErasing.thickness directive must be supplied for 3D gold finding",
@@ -6465,7 +6496,10 @@ impl Brt {
                 format!("InputFile tilt{}", self.axis_com),
                 format!("OutputFile {comfile}"),
                 format!("NamingStyle\t{}", self.name_style),
-                format!("StackExtension\t{}", &self.stack_extension[1.min(self.stack_extension.len())..]),
+                format!(
+                    "StackExtension\t{}",
+                    &self.stack_extension[1.min(self.stack_extension.len())..]
+                ),
                 format!("BinningOfImages {binning}"),
                 format!("RootNameOfDataFiles {}", self.data_name),
                 format!("ThicknessToMake {thickness}"),
@@ -6476,7 +6510,15 @@ impl Brt {
             }
             comlines.extend(self.later_com_directives(0));
 
-            if run_cmd("makecomfile -StandardInput", Some(&comlines), None, None, &[]).is_err() {
+            if run_cmd(
+                "makecomfile -StandardInput",
+                Some(&comlines),
+                None,
+                None,
+                &[],
+            )
+            .is_err()
+            {
                 self.report_imod_error(Some(&format!("Error making {comfile}")));
                 return 1;
             }
@@ -6575,7 +6617,12 @@ impl Brt {
 
         // Extend the model
         if self
-            .lookup_directive(&format!("{RUNTIME_PREFIX}GoldErasing"), "extendModel", 0, BOOL_VALUE)
+            .lookup_directive(
+                &format!("{RUNTIME_PREFIX}GoldErasing"),
+                "extendModel",
+                0,
+                BOOL_VALUE,
+            )
             .truthy()
         {
             let mut comlines = vec![format!("RootNameOfDataFiles {}", self.data_name)];
@@ -6613,7 +6660,11 @@ impl Brt {
             0,
             FLOAT_VALUE,
         );
-        let extra_diam = if extra_diam.truthy() { extra_diam.float() } else { 0. };
+        let extra_diam = if extra_diam.truthy() {
+            extra_diam.float()
+        } else {
+            0.
+        };
         let mut comlines = vec![
             format!("RootNameOfDataFiles {}", self.data_name),
             format!(
@@ -6757,7 +6808,9 @@ impl Brt {
             }
 
             if thickness_directive.truthy() && binned_thick.truthy() {
-                self.abort_set("Both tilt.THICKNESS and Reconstruction.binnedThickness were entered");
+                self.abort_set(
+                    "Both tilt.THICKNESS and Reconstruction.binnedThickness were entered",
+                );
                 return 1;
             }
             if thickness_directive.truthy() && fallback_thick.truthy() {
@@ -6944,7 +6997,11 @@ impl Brt {
             if values[1] > 3. {
                 sedcom.push(sed_modify(
                     "SCALE",
-                    &format!("{} {:.3}", py_str_float(values[0] as f64), values[1] / 5000.),
+                    &format!(
+                        "{} {:.3}",
+                        py_str_float(values[0] as f64),
+                        values[1] / 5000.
+                    ),
                     '/',
                 ));
             }
@@ -7182,8 +7239,7 @@ impl Brt {
         };
 
         let prefix = format!("{}.tomogramSize.", self.axis_upper_let);
-        let mut sedcom =
-            self.edf_del_and_add(&format!("{prefix}Columns"), &recx.to_string(), '/');
+        let mut sedcom = self.edf_del_and_add(&format!("{prefix}Columns"), &recx.to_string(), '/');
         sedcom.extend(self.edf_del_and_add(&format!("{prefix}Rows"), &recy.to_string(), '/'));
         sedcom.extend(self.edf_del_and_add(&format!("{prefix}Sections"), &recz.to_string(), '/'));
         if self.modify_edf_lines(&sedcom) != 0 {
@@ -7253,8 +7309,12 @@ impl Brt {
         }
 
         // Get thickness
-        let thickness_directive =
-            self.lookup_directive(&format!("{RUNTIME_PREFIX}Positioning"), "thickness", 0, INT_VALUE);
+        let thickness_directive = self.lookup_directive(
+            &format!("{RUNTIME_PREFIX}Positioning"),
+            "thickness",
+            0,
+            INT_VALUE,
+        );
         if self.test_directive_value(&thickness_directive, "Positioning.thickness", "integer") != 0
         {
             return 1;

@@ -70,6 +70,28 @@ pub struct Nnpi {
     pub bad: Option<Hashtable<[i32; 2], [f64; 8]>>,
 }
 
+impl Nnpi {
+    /// Original `nnpi_get_nvertices` (`nnpi.c:756`).
+    pub fn nnpi_get_nvertices(&self) -> i32 {
+        self.vertices.len() as i32
+    }
+
+    /// Original `nnpi_get_vertices` (`nnpi.c:766`).
+    pub fn nnpi_get_vertices(&self) -> &[i32] {
+        &self.vertices
+    }
+
+    /// Original `nnpi_get_weights` (`nnpi.c:775`).
+    pub fn nnpi_get_weights(&self) -> &[f64] {
+        &self.weights
+    }
+
+    /// Original `nnpi_setwmin` (`nnpi.c:746`).
+    pub fn nnpi_setwmin(&mut self, wmin: f64) {
+        self.wmin = if wmin == 0. { -EPS_WMIN } else { wmin };
+    }
+}
+
 /// C `NSTART` (`nnpi.c:101`).
 const NSTART: i32 = 10;
 /// C `EPS_SHIFT` (`nnpi.c:103`).
@@ -931,7 +953,7 @@ pub fn nnpi_interpolate_points(nin: i32, pin: &[Point], wmin: f64, nout: i32, po
     let seed = 0;
     let mut i;
 
-    nnpi_setwmin(&mut nn, wmin);
+    nn.nnpi_setwmin(wmin);
 
     if NN_VERBOSE.get() != 0 {
         let mut f = ImodFile::Stderr;
@@ -986,26 +1008,6 @@ pub fn nnpi_interpolate_points(nin: i32, pin: &[Point], wmin: f64, nout: i32, po
 
     let d = nnpi_destroy(nn);
     delaunay_destroy(Some(d));
-}
-
-/// Original `nnpi_setwmin` (`nnpi.c:746`).
-pub fn nnpi_setwmin(nn: &mut Nnpi, wmin: f64) {
-    nn.wmin = if wmin == 0. { -EPS_WMIN } else { wmin };
-}
-
-/// Original `nnpi_get_nvertices` (`nnpi.c:756`).
-pub fn nnpi_get_nvertices(nn: &Nnpi) -> i32 {
-    nn.vertices.len() as i32
-}
-
-/// Original `nnpi_get_vertices` (`nnpi.c:766`).
-pub fn nnpi_get_vertices(nn: &Nnpi) -> &[i32] {
-    &nn.vertices
-}
-
-/// Original `nnpi_get_weights` (`nnpi.c:775`).
-pub fn nnpi_get_weights(nn: &Nnpi) -> &[f64] {
-    &nn.weights
 }
 
 /*
