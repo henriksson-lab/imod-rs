@@ -1702,7 +1702,7 @@ pub fn imod_delete_contour(mod_: &mut Imod, index: i32) -> i32 {
         cont.sizes.clear();
         cont.store.clear();
         /* DNM: need to delete labels if any (`imodel.c:1155`) */
-        crate::imod::libimod::ilabel::imod_label_delete(cont.label.take());
+        ::core::mem::drop(cont.label.take());
     }
     istore_delete_cont_surf(&mut mod_.obj[ob as usize].store, index, 0);
 

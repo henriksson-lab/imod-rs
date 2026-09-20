@@ -43,15 +43,6 @@ pub fn imod_label_new() -> Ilabel {
     label
 }
 
-/// Original: `imodLabelDelete` (`ilabel.c:31`).
-///
-/// Every allocation the C frees is owned by the `Ilabel` value here, so
-/// dropping it does the same work; the entry point is kept so callers can be
-/// translated one-for-one.
-pub fn imod_label_delete(label: Option<Ilabel>) {
-    drop(label);
-}
-
 /// Original: `imodLabelDup` (`ilabel.c:51`).
 pub fn imod_label_dup(label: Option<&Ilabel>) -> Option<Ilabel> {
     let label = label?;

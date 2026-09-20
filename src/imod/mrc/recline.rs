@@ -811,8 +811,33 @@ mod tests {
         .unwrap();
         let line: Vec<f64> = (0..80).map(|i| i as f64).collect();
         let out = filter(&rfc, &line);
-        for value in &out[30..50] {
-            assert!((value - 1.0).abs() < 1.0e-6, "{value}");
+        // `recline.h:91-95` says the DERIVATIVE_1 normalisation makes "the
+        // response to the signal i=x ... 1", but Deriche's coefficients
+        // (`recline.c:225-231`: a0 = -0.6472, omega0 = 0.6719, a1 = -4.531, …)
+        // are a fitted approximation, so the response is ~1.0066 and drifts
+        // slowly with position.  These are the values the C itself produces,
+        // measured by compiling `IMOD/mrc/recline.c` against a driver that
+        // runs this exact case; the header states an intent the code does not
+        // reach.  An earlier version of this test asserted the header's claim
+        // to 1e-6 and so pinned an idealisation rather than the source.
+        assert!(
+            (out[30] - 1.0066055829204474).abs() < 1.0e-12,
+            "{}",
+            out[30]
+        );
+        assert!(
+            (out[40] - 1.0088074437851233).abs() < 1.0e-12,
+            "{}",
+            out[40]
+        );
+        assert!(
+            (out[49] - 1.0107891225960337).abs() < 1.0e-12,
+            "{}",
+            out[49]
+        );
+        // Monotonic drift, not a constant.
+        for pair in out[30..50].windows(2) {
+            assert!(pair[1] > pair[0]);
         }
     }
 

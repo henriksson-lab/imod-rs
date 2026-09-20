@@ -290,7 +290,7 @@ pub fn imod_object_delete(object: &mut Iobj) -> i32 {
     object.cont.clear();
     object.mesh.clear();
     object.store.clear();
-    crate::imod::libimod::ilabel::imod_label_delete(object.label.take());
+    ::core::mem::drop(object.label.take());
     0
 }
 
@@ -1995,7 +1995,7 @@ pub fn imod_object_new_label(
     obj: Option<&mut crate::imod::libimod::imodel::Iobj>,
 ) -> Option<&mut crate::imod::libimod::ilabel::Ilabel> {
     let obj = obj?;
-    crate::imod::libimod::ilabel::imod_label_delete(obj.label.take());
+    ::core::mem::drop(obj.label.take());
     obj.label = Some(crate::imod::libimod::ilabel::imod_label_new());
     obj.label.as_mut()
 }

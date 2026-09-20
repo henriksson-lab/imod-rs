@@ -166,7 +166,7 @@ pub fn imod_contour_clear(cont: &mut Icont) -> i32 {
     cont.flags = 0;
     cont.time = 0;
     /* `icont.c:157-159`: delete the label and set it to NULL. */
-    crate::imod::libimod::ilabel::imod_label_delete(cont.label.take());
+    ::core::mem::drop(cont.label.take());
     cont.store.clear();
     0
 }
@@ -5214,7 +5214,7 @@ pub fn imod_contour_set_label(
         (Some(contour), Some(label)) => (contour, label),
         _ => return,
     };
-    crate::imod::libimod::ilabel::imod_label_delete(contour.label.take());
+    ::core::mem::drop(contour.label.take());
     contour.label = Some(label);
 }
 
