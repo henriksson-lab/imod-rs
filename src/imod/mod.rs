@@ -1,5 +1,6 @@
 pub mod backends;
 pub mod clip;
+pub mod ctfplotter;
 pub mod etomo;
 pub mod flib;
 pub mod imodutil;

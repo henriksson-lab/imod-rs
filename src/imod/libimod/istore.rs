@@ -44,6 +44,26 @@ pub const GEN_STORE_MINMAX5: i16 = 19;
 pub const GEN_STORE_VALUE6: i16 = 20;
 pub const GEN_STORE_MINMAX6: i16 = 21;
 pub const GEN_STORE_NO_CAP: i16 = 24;
+/// Original: `CHANGED_COLOR` (`istore.h:64`).
+pub const CHANGED_COLOR: i32 = 1 << 0;
+/// Original: `CHANGED_FCOLOR` (`istore.h:65`).
+pub const CHANGED_FCOLOR: i32 = 1 << 1;
+/// Original: `CHANGED_TRANS` (`istore.h:66`).
+pub const CHANGED_TRANS: i32 = 1 << 2;
+/// Original: `CHANGED_GAP` (`istore.h:67`).
+pub const CHANGED_GAP: i32 = 1 << 3;
+/// Original: `CHANGED_CONNECT` (`istore.h:68`).
+pub const CHANGED_CONNECT: i32 = 1 << 4;
+/// Original: `CHANGED_3DWIDTH` (`istore.h:69`).
+pub const CHANGED_3DWIDTH: i32 = 1 << 5;
+/// Original: `CHANGED_2DWIDTH` (`istore.h:70`).
+pub const CHANGED_2DWIDTH: i32 = 1 << 6;
+/// Original: `CHANGED_SYMTYPE` (`istore.h:71`).
+pub const CHANGED_SYMTYPE: i32 = 1 << 7;
+/// Original: `CHANGED_SYMSIZE` (`istore.h:72`).
+pub const CHANGED_SYMSIZE: i32 = 1 << 8;
+/// Original: `CHANGED_VALUE1` (`istore.h:73`).
+pub const CHANGED_VALUE1: i32 = 1 << 9;
 /// Original: `StoreUnion` / `union store_type` (`istore.h:90`).
 ///
 /// A genuine C type-punning union: `istore.c` writes one member and reads

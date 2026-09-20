@@ -36,6 +36,7 @@ const COMMANDS: &[&str] = &[
     "header",
     "imodinfo",
     "imodjoin",
+    "imodmesh",
     "imodqtassist",
     "imodsendevent",
     "midas",
@@ -43,6 +44,7 @@ const COMMANDS: &[&str] = &[
     "mrc2tif",
     "mrcbyte",
     "mrcinfo",
+    "raw2mrc",
     "modifymdoc",
     "mrclog",
     "mrctaper",
@@ -122,6 +124,7 @@ fn dispatch(name: &str) -> bool {
         "header" => imod_rs::imod::flib::image::header::header(),
         "imodinfo" => imod_rs::imod::imodutil::imodinfo::imodinfo(),
         "imodjoin" => imod_rs::imod::imodutil::imodjoin::imodjoin(),
+        "imodmesh" => imod_rs::imod::imodutil::imodmesh::imodmesh(),
         "imodqtassist" => {
             let arguments = std::env::args().collect::<Vec<_>>();
             std::process::exit(
@@ -152,6 +155,10 @@ fn dispatch(name: &str) -> bool {
         "mrcbyte" => {
             let arguments = std::env::args().collect::<Vec<_>>();
             std::process::exit(imod_rs::imod::mrc::mrcbyte::mrcbyte(&arguments))
+        }
+        "raw2mrc" => {
+            let arguments = std::env::args().collect::<Vec<_>>();
+            std::process::exit(imod_rs::imod::mrc::raw2mrc::raw2mrc(&arguments))
         }
         "mrcinfo" => {
             let arguments = std::env::args().collect::<Vec<_>>();

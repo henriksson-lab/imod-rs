@@ -4,7 +4,8 @@
 //! unfinished frame I/O/framealign layers.  This module intentionally contains
 //! only source methods whose inputs are already owned Rust values.
 
-use super::framealign::FrameAlign;
+#[path = "alignframes_cpu.rs"]
+mod cpu;
 use crate::imod::libcfshr::autodoc::adoc_open_image_metadata;
 use crate::imod::libcfshr::b3dutil::ImodFile;
 use crate::imod::libcfshr::rotateflip::{RotateFlipData, rotate_flip_image};
@@ -239,7 +240,7 @@ impl AliFrame {
         };
         let mut used = 0.;
         if !input.test_mode && input.sum_memory_need <= usable {
-            result.flags |= GPU_FOR_SUMMING;
+            result.flags |= GPU_FOR_SUMMING as u32;
             used = input.sum_memory_need
                 + if input.multiple_outputs {
                     input.sum_pad_size
@@ -248,9 +249,9 @@ impl AliFrame {
                 };
         }
         if input.alignment_memory_need + used <= usable {
-            result.flags |= GPU_FOR_ALIGNING;
+            result.flags |= GPU_FOR_ALIGNING as u32;
         }
-        if result.flags & GPU_FOR_SUMMING != 0 && result.getting_frc {
+        if result.flags & (GPU_FOR_SUMMING as u32) != 0 && result.getting_frc {
             if used + input.sum_pad_size <= usable {
                 result.flags |= GPU_DO_EVEN_ODD;
             } else {
@@ -1446,7 +1447,7 @@ impl AliFrame {
 
     /// Owned CPU segment of `AliFrame::main`: preprocess every fetched frame,
     /// derive the selected all-vs-all trajectory, then make weighted and
-    /// unweighted sums through active `FrameAlign` APIs.
+    /// unweighted sums through the owned CPU alignment helper.
     pub fn align_image_stack(
         &self,
         stack: &OwnedImageStack,
@@ -1461,31 +1462,26 @@ impl AliFrame {
         if stack.frames.is_empty() {
             return Err("no input frames to align".into());
         }
-        let mut aligner = FrameAlign::default();
-        aligner.initialize(bin_sum, bin_align, 0.02, 0.1, stack.nx, stack.ny, max_shift)?;
-        for frame in &stack.frames {
-            aligner.next_frame(frame, stack.mode, dark, gain, self.trunc_limit)?;
+        if bin_sum == 0 || bin_align == 0 || stack.nx == 0 || stack.ny == 0 {
+            return Err("invalid frame alignment dimensions or binning".into());
         }
-        if self.group_size > 1 {
-            aligner.find_all_vs_all_alignment()?;
-        }
-        let unweighted_sum = aligner.get_unweighted_sum()?;
-        let weights = dose_per_frame.map(|dose| aligner.setup_dose_weighting(dose, critical_dose));
-        let weighted_sum = aligner.finish_align_and_sum(weights.as_deref())?;
-        let (x_shifts, y_shifts) = aligner.get_all_frame_shifts()?;
-        Ok(AliFrameResult {
-            weighted_sum,
-            unweighted_sum,
-            x_shifts,
-            y_shifts,
-        })
+        cpu::align_image_stack(
+            stack,
+            max_shift,
+            self.group_size,
+            gain,
+            dark,
+            self.trunc_limit,
+            dose_per_frame,
+            critical_dose,
+        )
     }
 
     /// File-input portion of `AliFrame::main` for ordinary MRC movie stacks.
     ///
     /// `OwnedImageStack` reads and owns every source section before alignment,
     /// so this active route never opens an `ImodImageFile` or transfers a raw
-    /// caller-owned pixel pointer into `FrameAlign`.
+    /// caller-owned pixel pointer into the native-style `FrameAlign`.
     pub fn align_mrc_file(
         &self,
         path: impl AsRef<std::path::Path>,

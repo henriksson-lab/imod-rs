@@ -1,237 +1,442 @@
-//! Translation of `IMOD/librgctf/functions.{h,cpp}`.
+//! Translation of `IMOD/librgctf/functions.{h,cpp}` — the IMOD version of
+//! cisTEM's `functions.cpp`, which carries renamed copies of three `b3dutil.c`
+//! routines so that `libctffind` does not depend on `libcfshr`.
 
 use std::cmp::Ordering;
 use std::io::Read;
-use std::sync::{OnceLock, RwLock};
+use std::sync::Mutex;
 
-const PI: f32 = 3.141_592_653_59;
+use crate::imod::libcfshr::b3dutil::{CArg, c_format};
 
-/// C++ inline `IsEven`.
+use super::defines::PI;
+
+/// C++ inline `IsEven` (`functions.h:7`).
 pub fn is_even(number_to_check: i32) -> bool {
     number_to_check % 2 == 0
 }
 
-/// C++ inline `deg_2_rad`.
+/// C++ inline `deg_2_rad` (`functions.h:13`).
+///
+/// `PI` is a `double` macro, so the multiply and the divide happen in double
+/// and only the return narrows to `float`.
 pub fn deg_2_rad(degrees: f32) -> f32 {
-    degrees * PI / 180.0
+    (f64::from(degrees) * PI / 180.) as f32
 }
 
-/// Rust trait replacing the two C++ `myroundint` overloads.
-pub trait RoundInput {
-    fn my_round_int(self) -> i32;
-}
-
-impl RoundInput for f32 {
-    /// C++ `myroundint(float)`.
-    fn my_round_int(self) -> i32 {
-        if self > 0.0 {
-            (self + 0.5) as i32
-        } else {
-            (self - 0.5) as i32
-        }
+/// C++ inline `myroundint(double)` (`functions.h:18`).
+pub fn myroundint(a: f64) -> i32 {
+    if a > 0.0 {
+        (a + 0.5) as i32
+    } else {
+        (a - 0.5) as i32
     }
 }
 
-impl RoundInput for f64 {
-    /// C++ `myroundint(double)`.
-    fn my_round_int(self) -> i32 {
-        if self > 0.0 {
-            (self + 0.5) as i32
-        } else {
-            (self - 0.5) as i32
-        }
+/// C++ inline `myroundint(float)` (`functions.h:23`).
+pub fn myroundint_float(a: f32) -> i32 {
+    if a > 0.0 {
+        (a + 0.5) as i32
+    } else {
+        (a - 0.5) as i32
     }
 }
 
-/// C++ `rankSort`.
-pub fn rank_sort(values: &[f32]) -> Vec<usize> {
-    let mut sorted: Vec<(f32, usize)> = values
-        .iter()
-        .copied()
-        .enumerate()
-        .map(|(i, value)| (value, i))
-        .collect();
-    sorted.sort_by(|left, right| left.0.partial_cmp(&right.0).unwrap_or(Ordering::Equal));
-    let mut rank = 0;
-    let mut previous = None;
-    let mut result = vec![0; values.len()];
-    for (position, (value, original_index)) in sorted.into_iter().enumerate() {
-        if previous != Some(value) {
-            rank = position;
-            previous = Some(value);
+/// C++ `rankSort` (`functions.cpp:24`).
+///
+/// `std::sort` over `std::pair<float,size_t>` orders by the value and then by
+/// the original index, so the comparison is total and the result does not
+/// depend on the sort's stability.
+pub fn rank_sort(v_temp: &[f32]) -> Vec<usize> {
+    let mut v_sort: Vec<(f32, usize)> = vec![(0.0, 0); v_temp.len()];
+
+    for i in 0..v_sort.len() {
+        v_sort[i] = (v_temp[i], i);
+    }
+
+    v_sort.sort_by(|a, b| match a.0.partial_cmp(&b.0) {
+        Some(Ordering::Equal) | None => a.1.cmp(&b.1),
+        Some(order) => order,
+    });
+
+    // The source declares `std::pair<double, size_t> rank;`, whose default
+    // constructor value-initialises both members to zero — so the first
+    // element only starts a new rank when its value differs from 0.0.
+    let mut rank: (f64, usize) = (0.0, 0);
+    let mut result: Vec<usize> = vec![0; v_temp.len()];
+
+    for i in 0..v_sort.len() {
+        if f64::from(v_sort[i].0) != rank.0 {
+            rank = (f64::from(v_sort[i].0), i);
         }
-        result[original_index] = rank;
+        result[v_sort[i].1] = rank.1;
     }
     result
 }
 
-/// The Rust string callback corresponding to source `CharArgType`.
-pub type PrintFunction = fn(&str);
+/// The Rust form of C++ `CharArgType` (`functions.h:29`).
+pub type CharArgType = fn(&str);
 
-static PRINT_FUNCTION: OnceLock<RwLock<Option<PrintFunction>>> = OnceLock::new();
+/// C++ `static CharArgType sPrintFunc` (`functions.cpp:46`).
+static S_PRINT_FUNC: Mutex<Option<CharArgType>> = Mutex::new(None);
 
-/// C++ `internalSetPrintFunc`.
-pub fn internal_set_print_func(function: Option<PrintFunction>) {
-    *PRINT_FUNCTION
-        .get_or_init(|| RwLock::new(None))
-        .write()
-        .expect("print callback lock poisoned") = function;
+/// C++ `internalSetPrintFunc` (`functions.cpp:48`).
+pub fn internal_set_print_func(func: Option<CharArgType>) {
+    *S_PRINT_FUNC.lock().expect("print callback lock poisoned") = func;
 }
 
-/// C++ `ctfNumOMPthreads` in this crate's non-OpenMP configuration.
-pub fn ctf_num_omp_threads(_optimal_threads: i32) -> i32 {
-    1
-}
-
-/// C++ `ctfWallTime`.
-pub fn ctf_wall_time() -> f64 {
-    std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .expect("system time before Unix epoch")
-        .as_secs_f64()
-}
-
-/// C `fgetline` local to `functions.cpp`.
+/// C++ `wxPrintf` (`functions.cpp:54`).
 ///
-/// This copy deliberately preserves its unusual EOF convention: EOF after
-/// `length` bytes is reported as `-(length + 2)`.
-pub fn fgetline(input: &mut dyn Read, output: &mut [u8], limit: i32) -> i32 {
-    if limit < 3 || output.len() < limit as usize {
+/// The source formats with `vsprintf` into a 512-byte buffer and then either
+/// hands the text to the registered callback or writes it with
+/// `printf("%s", …)`.  The variadic half of that signature is the call site's;
+/// callers here format with [`wx_printf_fmt`] or pass an already-built string.
+pub fn wx_printf(error_mess: &str) {
+    let func = *S_PRINT_FUNC.lock().expect("print callback lock poisoned");
+    if let Some(func) = func {
+        func(error_mess);
+    } else {
+        print!("{error_mess}");
+    }
+}
+
+/// C++ `wxPrintf`'s variadic call form, with the C library's own conversions.
+///
+/// Rust's `{}` is not C's `%f`/`%g`, so the format string and its arguments go
+/// through the tree's C-format writer before reaching [`wx_printf`].
+pub fn wx_printf_fmt(format: &str, args: &[CArg]) {
+    wx_printf(&c_format(format, args));
+}
+
+/// C++ `#define CPUINFO_LINE 80` (`functions.cpp:72`).
+const CPUINFO_LINE: i32 = 80;
+/// C++ `#define MAX_CPU_SOCKETS 64` (`functions.cpp:73`).
+const MAX_CPU_SOCKETS: usize = 64;
+
+/// C++ `static int fgetline(FILE *, char [], int)` (`functions.cpp:74`), the
+/// renamed copy of `b3dutil.c`'s `fgetline`.
+///
+/// The unusual EOF convention is the source's: EOF after `length` bytes is
+/// reported as `-(length + 2)`.
+pub fn fgetline(fp: Option<&mut dyn Read>, s: &mut [u8], limit: i32) -> i32 {
+    let Some(fp) = fp else {
+        return -1;
+    };
+
+    if limit < 3 {
         return -1;
     }
-    let mut length = 0usize;
-    let mut eof = false;
+
+    let mut c: Option<u8> = None;
+    let mut i = 0usize;
     loop {
-        let mut byte = [0_u8; 1];
-        match input.read(&mut byte) {
-            Ok(0) => {
-                eof = true;
-                break;
-            }
-            Ok(_) => {}
-            Err(_) => {
-                eof = true;
+        let mut byte = [0u8; 1];
+        match fp.read(&mut byte) {
+            Ok(1) => c = Some(byte[0]),
+            _ => {
+                c = None;
                 break;
             }
         }
-        if length >= limit as usize - 1 || byte[0] == b'\n' {
+        if !(i < (limit as usize - 1)) || c == Some(b'\n') {
             break;
         }
-        output[length] = byte[0];
-        length += 1;
+        s[i] = byte[0];
+        i += 1;
     }
-    if length > 0 && output[length - 1] == b'\r' {
-        length -= 1;
+
+    /* 1/25/12: Take off a return too! */
+    if i > 0 && s[i - 1] == b'\r' {
+        i -= 1;
     }
-    output[length] = 0;
-    if eof {
-        -(length as i32 + 2)
+
+    s[i] = 0;
+    let length = i as i32;
+
+    if c.is_none() {
+        -1 * (length + 2)
     } else {
-        length as i32
+        length
     }
 }
 
-/// C `numCoresAndLogicalProcs` Linux `/proc/cpuinfo` implementation.
-///
-/// The physical count is the sum of `cpu cores` once per physical socket;
-/// logical is the number of successfully paired socket/core records.
+/// C++ `static int numCoresAndLogicalProcs(int *, int *)` (`functions.cpp:112`),
+/// the Linux `/proc/cpuinfo` branch of the renamed `b3dutil.c` copy.
 pub fn num_cores_and_logical_procs(physical: &mut i32, logical: &mut i32) -> i32 {
-    const MAX_CPU_SOCKETS: usize = 64;
-    let mut processor_cores = 0_i32;
-    let mut logical_processors = 0_i32;
-    if let Ok(mut input) = std::fs::File::open("/proc/cpuinfo") {
-        let mut socket_seen = [false; MAX_CPU_SOCKETS];
-        let mut line = [0_u8; 80];
-        let mut current_id = -1_i32;
-        let mut current_cores = -1_i32;
-        let mut error = false;
+    let mut processor_core_count = 0i32;
+    let mut logical_processor_count = 0i32;
+
+    let mut socket_flags = [0u8; MAX_CPU_SOCKETS];
+    let mut linebuf = [0u8; CPUINFO_LINE as usize];
+    let mut err;
+    let (mut len, mut cur_id, mut cur_cores): (i32, i32, i32);
+
+    /* Linux: look at /proc/cpuinfo */
+    if let Ok(file) = std::fs::File::open("/proc/cpuinfo") {
+        let mut fp = std::io::BufReader::new(file);
+        cur_id = -1;
+        cur_cores = -1;
+        socket_flags.fill(0);
         loop {
-            let length = fgetline(&mut input, &mut line, 80);
-            if length == 0 {
+            err = 0;
+            len = fgetline(Some(&mut fp), &mut linebuf, CPUINFO_LINE);
+            if len == 0 {
                 continue;
             }
-            if length == -2 {
+            if len == -2 {
                 break;
             }
-            if length == -1 {
-                error = true;
+            err = 1;
+            if len == -1 {
                 break;
             }
-            let text = String::from_utf8_lossy(&line[..length.unsigned_abs() as usize]);
+
+            let text = String::from_utf8_lossy(
+                &linebuf[..linebuf.iter().position(|&b| b == 0).unwrap_or(0)],
+            )
+            .into_owned();
+
+            /* Look for a "physical id :" and a "cpu cores :" in either order */
             if text.contains("physical id") {
-                if current_id >= 0 {
-                    error = true;
+                /* Error if already got a physical id without cpu cores */
+                if cur_id >= 0 {
                     break;
                 }
-                current_id = text
-                    .split_once(':')
-                    .and_then(|(_, value)| value.trim().parse().ok())
-                    .unwrap_or(-1);
-                if current_id < 0 || current_id as usize >= MAX_CPU_SOCKETS {
-                    error = true;
+                let colon = text.find(':');
+                if let Some(colon) = colon {
+                    cur_id = atoi(&text[colon + 1..]);
+                }
+
+                /* Error if no colon or ID out of range */
+                if colon.is_none() || cur_id < 0 || cur_id as usize >= MAX_CPU_SOCKETS {
                     break;
                 }
             }
             if text.contains("cpu cores") {
-                if current_cores >= 0 {
-                    error = true;
+                /* Error if already got a cpu cores without physical id  */
+                if cur_cores >= 0 {
                     break;
                 }
-                current_cores = text
-                    .split_once(':')
-                    .and_then(|(_, value)| value.trim().parse().ok())
-                    .unwrap_or(-1);
-                if current_cores <= 0 {
-                    error = true;
+                let colon = text.find(':');
+                if let Some(colon) = colon {
+                    cur_cores = atoi(&text[colon + 1..]);
+                }
+
+                /* Error if no colon or core count illegal */
+                if colon.is_none() || cur_cores <= 0 {
                     break;
                 }
             }
-            if current_id >= 0 && current_cores > 0 {
-                logical_processors += 1;
-                let socket = current_id as usize;
-                if !socket_seen[socket] {
-                    processor_cores += current_cores;
-                    socket_seen[socket] = true;
+
+            if cur_id >= 0 && cur_cores > 0 {
+                logical_processor_count += 1;
+                if socket_flags[cur_id as usize] == 0 {
+                    processor_core_count += cur_cores;
                 }
-                current_id = -1;
-                current_cores = -1;
+                socket_flags[cur_id as usize] = 1;
+                cur_id = -1;
+                cur_cores = -1;
             }
-            if length < 0 {
+            err = 0;
+            if len < 0 {
                 break;
             }
         }
-        if error {
-            processor_cores = -processor_cores;
+        if err != 0 {
+            processor_core_count *= -1;
         }
     }
-    *physical = processor_cores;
-    *logical = logical_processors;
-    i32::from(processor_cores <= 0 || logical_processors < 0)
+    *physical = processor_core_count;
+    *logical = logical_processor_count;
+    i32::from(processor_core_count <= 0 || logical_processor_count < 0)
+}
+
+/// C `atoi` over the tail of a `/proc/cpuinfo` field: leading blanks, an
+/// optional sign, then as many digits as there are.
+fn atoi(text: &str) -> i32 {
+    let bytes = text.as_bytes();
+    let mut i = 0usize;
+    while i < bytes.len() && (bytes[i] as char).is_whitespace() {
+        i += 1;
+    }
+    let mut sign = 1i64;
+    if i < bytes.len() && (bytes[i] == b'+' || bytes[i] == b'-') {
+        if bytes[i] == b'-' {
+            sign = -1;
+        }
+        i += 1;
+    }
+    let mut value: i64 = 0;
+    while i < bytes.len() && bytes[i].is_ascii_digit() {
+        value = value * 10 + i64::from(bytes[i] - b'0');
+        if value > i64::from(i32::MAX) + 1 {
+            value = i64::from(i32::MAX) + 1;
+        }
+        i += 1;
+    }
+    (sign * value) as i32
+}
+
+/// The three function-level `static` variables of `ctfNumOMPthreads`
+/// (`functions.cpp:260-263`), which are initialised once and then reused.
+struct OmpThreadState {
+    lim_threads: i32,
+    num_procs: i32,
+    force_threads: i32,
+    omp_num_procs: i32,
+}
+
+static OMP_THREAD_STATE: Mutex<OmpThreadState> = Mutex::new(OmpThreadState {
+    lim_threads: -1,
+    num_procs: -1,
+    force_threads: -1,
+    omp_num_procs: -1,
+});
+
+/// C++ `ctfNumOMPthreads` (`functions.cpp:253`).
+///
+/// `functions.cpp` is compiled with `$(OPENMP)`, so this is the `_OPENMP`
+/// branch.  `omp_get_num_procs()` is the count of processors available to the
+/// process, which is what `std::thread::available_parallelism` reports here.
+pub fn ctf_num_omp_threads(optimal_threads: i32) -> i32 {
+    let mut num_threads = optimal_threads;
+    let mut physical_procs = 0i32;
+    let mut logical_processor_count = 0i32;
+    let mut processor_core_count = 0i32;
+    let mut state = OMP_THREAD_STATE.lock().expect("thread state lock poisoned");
+
+    /* One-time determination of number of physical and logical cores */
+    if state.num_procs < 0 {
+        state.num_procs = std::thread::available_parallelism().map_or(1, |n| n.get() as i32);
+        state.omp_num_procs = state.num_procs;
+
+        /* if there are legal numbers and the logical count is the OMP
+        number, set the physical processor count */
+        if num_cores_and_logical_procs(&mut processor_core_count, &mut logical_processor_count) == 0
+            && processor_core_count > 0
+            && logical_processor_count == state.num_procs
+        {
+            physical_procs = processor_core_count;
+        }
+        if std::env::var_os("IMOD_REPORT_CORES").is_some() {
+            print!(
+                "{}",
+                c_format(
+                    "core count = %d  logical processors = %d  OMP num = %d => physical \
+processors = %d\n",
+                    &[
+                        CArg::Int(i64::from(processor_core_count)),
+                        CArg::Int(i64::from(logical_processor_count)),
+                        CArg::Int(i64::from(state.num_procs)),
+                        CArg::Int(i64::from(physical_procs)),
+                    ],
+                )
+            );
+        }
+        use std::io::Write;
+        let _ = std::io::stdout().flush();
+
+        if physical_procs > 0 {
+            state.num_procs = state.num_procs.min(physical_procs);
+        }
+    }
+
+    /* Limit by number of real cores */
+    num_threads = 1.max(state.num_procs.min(num_threads));
+
+    /* One-time determination of the limit set by OMP_NUM_THREADS */
+    if state.lim_threads < 0 {
+        if let Some(omp_num) = std::env::var_os("OMP_NUM_THREADS") {
+            state.lim_threads = atoi(&omp_num.to_string_lossy());
+        }
+        state.lim_threads = 0.max(state.lim_threads);
+    }
+
+    /* Limit to number set by OMP_NUM_THREADS and to number of real cores */
+    if state.lim_threads > 0 {
+        num_threads = state.lim_threads.min(num_threads);
+    }
+
+    /* One-time determination of whether user wants to force a number of threads */
+    if state.force_threads < 0 {
+        state.force_threads = 0;
+        if let Some(omp_num) = std::env::var_os("IMOD_FORCE_OMP_THREADS") {
+            let omp_num = omp_num.to_string_lossy().into_owned();
+            if omp_num == "ALL_CORES" {
+                if state.num_procs > 0 {
+                    state.force_threads = state.num_procs;
+                }
+            } else if omp_num == "ALL_HYPER" {
+                if state.omp_num_procs > 0 {
+                    state.force_threads = state.omp_num_procs;
+                }
+            } else {
+                state.force_threads = atoi(&omp_num);
+                state.force_threads = 0.max(state.force_threads);
+            }
+        }
+    }
+
+    /* Force the number if set */
+    if state.force_threads > 0 {
+        num_threads = state.force_threads;
+    }
+
+    if std::env::var_os("IMOD_REPORT_CORES").is_some() {
+        print!(
+            "{}",
+            c_format(
+                "numProcs %d  limThreads %d  numThreads %d\n",
+                &[
+                    CArg::Int(i64::from(state.num_procs)),
+                    CArg::Int(i64::from(state.lim_threads)),
+                    CArg::Int(i64::from(num_threads)),
+                ],
+            )
+        );
+    }
+    use std::io::Write;
+    let _ = std::io::stdout().flush();
+    num_threads
+}
+
+/// C++ `ctfOMPthreadNum` (`functions.cpp:333`).
+///
+/// This translation runs the library's parallel loops sequentially, so the
+/// caller is always the source's thread 0.
+pub fn ctf_omp_thread_num() -> i32 {
+    0
+}
+
+/// C++ `ctfWallTime` (`functions.cpp:346`), the `gettimeofday` branch.
+pub fn ctf_wall_time() -> f64 {
+    let now = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .expect("system time before Unix epoch");
+    now.as_secs() as f64 + f64::from(now.subsec_micros()) / 1000000.
 }
 
 #[cfg(test)]
 mod tests {
-    use super::{RoundInput, ctf_num_omp_threads, deg_2_rad, fgetline, is_even, rank_sort};
+    use super::{deg_2_rad, fgetline, is_even, myroundint, myroundint_float, rank_sort};
     use std::io::Cursor;
 
     #[test]
     fn scalar_and_rank_helpers_match_source_rules() {
         assert!(is_even(-4));
         assert!(!is_even(3));
-        assert!((deg_2_rad(180.0) - std::f32::consts::PI).abs() < 0.000_001);
-        assert_eq!(1.5_f32.my_round_int(), 2);
-        assert_eq!((-1.5_f64).my_round_int(), -2);
+        assert_eq!(deg_2_rad(180.0), (super::PI) as f32);
+        assert_eq!(myroundint_float(1.5), 2);
+        assert_eq!(myroundint(-1.5), -2);
         assert_eq!(rank_sort(&[3.0, 1.0, 1.0, 2.0]), vec![3, 0, 0, 2]);
-        assert_eq!(ctf_num_omp_threads(64), 1);
     }
 
     #[test]
     fn local_fgetline_preserves_crlf_and_eof_status() {
         let mut input = Cursor::new(b"one\r\ntwo".to_vec());
-        let mut line = [0_u8; 8];
-        assert_eq!(fgetline(&mut input, &mut line, 8), 3);
+        let mut line = [0u8; 8];
+        assert_eq!(fgetline(Some(&mut input), &mut line, 8), 3);
         assert_eq!(&line[..4], b"one\0");
-        assert_eq!(fgetline(&mut input, &mut line, 8), -5);
+        assert_eq!(fgetline(Some(&mut input), &mut line, 8), -5);
         assert_eq!(&line[..4], b"two\0");
     }
 }

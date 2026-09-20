@@ -39,74 +39,24 @@ const WORLD_QUALITY_SHIFT: u32 = 8;
 const WORLD_QUALITY_BITS: u32 = 7 << WORLD_QUALITY_SHIFT;
 
 fn mesh_object_synchronously(object: &mut Iobj, scale: &Ipoint, low_resolution: bool) -> i32 {
-    let mut params = object.mesh_param.clone().unwrap_or_default();
-    // `meshObject` marks only its temporary duplicate as a copy/no-warning
-    // object before entering libmesh.  Keep those transient bits out of the
-    // persisted parameters on the live model object.
-    params.flags |= crate::imod::libimod::imesh::IMESH_MK_IS_COPY
-        | crate::imod::libimod::imesh::IMESH_MK_NO_WARN;
-    crate::imod::libmesh::imesh_set_min_max(
-        Ipoint {
-            x: params.xmin,
-            y: params.ymin,
-            z: -1.0e30,
-        },
-        Ipoint {
-            x: params.xmax,
-            y: params.ymax,
-            z: 1.0e30,
-        },
-    );
-    let flags = params.flags;
-    let tube_diameter = params.tube_diameter as f64;
-    let result = if object.flags & IMOD_OBJFLAG_OPEN != 0 {
-        if flags & IMESH_MK_TUBE != 0 {
-            crate::imod::libmesh::mesh_open_tube_object(object, scale, flags, tube_diameter)
-        } else {
-            crate::imod::libmesh::mesh_open_object_in_range(
-                object,
-                scale,
-                (if low_resolution {
-                    params.incz_low_res
-                } else {
-                    params.incz_high_res
-                })
-                .max(1),
-                flags,
-                params.passes.max(1),
-                params.minz,
-                params.maxz,
-            )
-        }
-    } else {
-        crate::imod::libmesh::imesh_set_skin_flags(
-            flags as i32,
-            if flags & crate::imod::libimod::imesh::IMESH_MK_FAST != 0 {
-                0
-            } else {
-                1
-            },
-        );
-        let cap_skip = params
-            .cap_skip_zlist
-            .as_deref()
-            .map(|list| &list[..(params.cap_skip_nz.max(0) as usize).min(list.len())]);
-        crate::imod::libmesh::skin_unconnected_contour_stack_in_range_with_caps_and_skip(
-            object,
-            scale,
-            flags,
-            params.minz,
-            params.maxz,
-            params.cap,
-            cap_skip,
-        )
-    };
-    if result == 0 && low_resolution {
-        for mesh in &mut object.mesh {
-            mesh.flag |= 1 << crate::imod::libimod::imesh::IMESH_FLAG_RES_SHIFT;
-        }
+    // `meshObject` (`mv_objed.cpp:2714`) sets the transient copy/no-warning
+    // bits on the duplicate's own parameters, calls `analyzePrepSkinObj`, and
+    // then stamps the resolution flag on every mesh it produced.
+    if object.mesh_param.is_none() {
+        object.mesh_param = Some(Default::default());
     }
-    result
+    if let Some(params) = object.mesh_param.as_mut() {
+        params.flags |= crate::imod::libimod::imesh::IMESH_MK_IS_COPY
+            | crate::imod::libimod::imesh::IMESH_MK_NO_WARN;
+    }
+    let resol = i32::from(low_resolution);
+    if crate::imod::libmesh::objprep::analyze_prep_skin_obj(object, resol, scale, None) != 0 {
+        return 1;
+    }
+    for mesh in &mut object.mesh {
+        mesh.flag |= (resol as u32) << crate::imod::libimod::imesh::IMESH_FLAG_RES_SHIFT;
+    }
+    0
 }
 
 /// Synchronous equivalent of native `meshOneObject` plus `finishMesh`:
@@ -118,7 +68,8 @@ fn mesh_object_replacing_resolution(
     scale: &Ipoint,
     low_resolution: bool,
 ) -> i32 {
-    let Some(mut duplicate) = crate::imod::libmesh::imesh_dup_marked_conts(object, 0) else {
+    let Some(mut duplicate) = crate::imod::libmesh::objprep::imesh_dup_marked_conts(object, 0)
+    else {
         return -1;
     };
     duplicate.mesh_param = object
@@ -130,7 +81,12 @@ fn mesh_object_replacing_resolution(
         return result;
     }
     let resolution = i32::from(low_resolution);
-    let _ = crate::imod::libmesh::imod_meshes_delete_res(&mut object.mesh, resolution);
+    let mut meshsize = object.mesh.len() as i32;
+    let _ = crate::imod::libmesh::objprep::imod_meshes_delete_res(
+        &mut object.mesh,
+        &mut meshsize,
+        resolution,
+    );
     object.mesh.extend(duplicate.mesh);
     0
 }
@@ -2138,7 +2094,7 @@ mod tests {
                 .iter()
                 .all(|mesh| mesh.list.iter().all(|&index| index < 0))
         );
-        crate::imod::libmesh::imesh_set_min_max(
+        crate::imod::libmesh::mkmesh::imesh_set_min_max(
             Ipoint {
                 x: -1.0e30,
                 y: -1.0e30,

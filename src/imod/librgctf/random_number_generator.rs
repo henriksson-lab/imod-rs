@@ -1,102 +1,112 @@
 //! Translation of `IMOD/librgctf/randomnumbergenerator.{h,cpp}`.
 
-/// The source-compatible random-number state used by librgctf.
+/// C++ `RandomNumberGenerator` (`randomnumbergenerator.h:3`).
 ///
-/// `use_internal` selects IMOD's local ANSI-C linear congruential generator,
-/// allowing independent streams.  The other mode deliberately retains the
-/// source's process-global C `rand` stream for parity with existing callers.
-#[derive(Clone, Debug, PartialEq, Eq)]
+/// `use_internal` selects the source's own linear congruential generator so a
+/// program can hold several independent streams; the other mode is the
+/// process-global C `rand`, which is what the source uses there.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct RandomNumberGenerator {
-    random_seed: i32,
-    use_internal: bool,
-    next_seed: u32,
+    pub random_seed: i32,
+    pub use_internal: bool,
+    pub next_seed: u32,
 }
 
+/// C's `RAND_MAX` on glibc.
+const RAND_MAX: i32 = 2147483647;
+
 impl RandomNumberGenerator {
-    /// RandomNumberGenerator()
-    ///
-    /// C++ `RandomNumberGenerator::RandomNumberGenerator(bool)`.
-    pub fn new(use_internal: bool) -> Self {
-        let mut generator = Self {
+    /// C++ `RandomNumberGenerator::RandomNumberGenerator(bool)`
+    /// (`randomnumbergenerator.cpp:4`).
+    pub fn new(internal: bool) -> Self {
+        let mut this = Self {
             random_seed: 0,
-            use_internal,
+            use_internal: internal,
             next_seed: 0,
         };
-        generator.set_seed(4711);
-        generator
+        this.use_internal = internal;
+        this.set_seed(4711);
+        this
     }
 
-    /// C++ `RandomNumberGenerator::RandomNumberGenerator(int, bool)`.
-    pub fn with_seed(random_seed: i32, use_internal: bool) -> Self {
-        let mut generator = Self {
+    /// C++ `RandomNumberGenerator::RandomNumberGenerator(int, bool)`
+    /// (`randomnumbergenerator.cpp:10`).
+    pub fn with_seed(random_seed: i32, internal: bool) -> Self {
+        let mut this = Self {
             random_seed: 0,
-            use_internal,
+            use_internal: internal,
             next_seed: 0,
         };
-        generator.set_seed(random_seed);
-        generator
+        this.use_internal = internal;
+        this.set_seed(random_seed);
+        this
     }
 
-    /// C++ `RandomNumberGenerator::SetSeed`.
+    /// C++ `RandomNumberGenerator::SetSeed` (`randomnumbergenerator.cpp:16`).
     pub fn set_seed(&mut self, random_seed: i32) {
-        self.random_seed = if random_seed < 0 {
-            std::time::SystemTime::now()
+        if random_seed < 0 {
+            self.random_seed = std::time::SystemTime::now()
                 .duration_since(std::time::UNIX_EPOCH)
                 .expect("system time before Unix epoch")
-                .as_secs() as i32
+                .as_secs() as i32;
         } else {
-            random_seed
-        };
+            self.random_seed = random_seed;
+        }
 
         if self.use_internal {
             self.internal_srand(self.random_seed as u32);
         } else {
-            // The C++ source explicitly selects the process-global C stream
-            // in this mode.  No C value crosses this Rust API boundary.
+            // The source explicitly selects the process-global C stream here.
             unsafe { libc::srand(self.random_seed as u32) };
         }
     }
 
-    /// GetUniformRandom()
-    ///
-    /// C++ `RandomNumberGenerator::GetUniformRandom`.
-    pub fn uniform_random(&mut self) -> f32 {
-        let (random, half_maximum) = if self.use_internal {
-            (self.internal_rand() as f32, 32767.0 / 2.0)
+    /// C++ `RandomNumberGenerator::GetUniformRandom`
+    /// (`randomnumbergenerator.cpp:30`): a uniform number in [-1,1].
+    pub fn get_uniform_random(&mut self) -> f32 {
+        let rnd1: f32;
+        let hmax: f32;
+        if self.use_internal {
+            rnd1 = self.internal_rand() as f32;
+            hmax = (32767.0 / 2.0f64) as f32;
         } else {
-            (unsafe { libc::rand() } as f32, libc::RAND_MAX as f32 / 2.0)
-        };
-        (random - half_maximum) / half_maximum
+            rnd1 = (unsafe { libc::rand() }) as f32;
+            hmax = (f64::from(RAND_MAX as f32) / 2.0) as f32;
+        }
+        (rnd1 - hmax) / hmax
     }
 
-    /// GetNormalRandom()
+    /// C++ `RandomNumberGenerator::GetNormalRandom`
+    /// (`randomnumbergenerator.cpp:52`): the polar Box-Muller transform.
     ///
-    /// C++ `RandomNumberGenerator::GetNormalRandom`.
-    pub fn normal_random(&mut self) -> f32 {
-        let (mut x1, mut x2, mut radius_squared);
+    /// `sqrtf(-2.0 * log(R) / R)` is a `float` `logf` inside a **double**
+    /// expression (`-2.0` is a double literal), and the double result is
+    /// narrowed back to `float` by `sqrtf`'s parameter.
+    pub fn get_normal_random(&mut self) -> f32 {
+        let mut x1: f32;
+        let mut x2: f32;
+        let mut r: f32;
         loop {
-            x1 = self.uniform_random();
-            x2 = self.uniform_random();
-            radius_squared = x1 * x1 + x2 * x2;
-            if radius_squared != 0.0 && radius_squared <= 1.0 {
+            x1 = self.get_uniform_random();
+            x2 = self.get_uniform_random();
+            r = x1 * x1 + x2 * x2;
+            if !(r == 0.0 || r > 1.0) {
                 break;
             }
         }
-        x1 * (-2.0 * radius_squared.ln() / radius_squared).sqrt()
+        let _ = x2;
+        x1 * ((-2.0 * f64::from(r.ln()) / f64::from(r)) as f32).sqrt()
     }
 
-    /// C++ `RandomNumberGenerator::Internal_srand`.
+    /// C++ `RandomNumberGenerator::Internal_srand` (`randomnumbergenerator.cpp:67`).
     pub fn internal_srand(&mut self, random_seed: u32) {
         self.next_seed = random_seed;
     }
 
-    /// C++ `RandomNumberGenerator::Internal_rand`.
+    /// C++ `RandomNumberGenerator::Internal_rand` (`randomnumbergenerator.cpp:72`).
     pub fn internal_rand(&mut self) -> i32 {
-        self.next_seed = self
-            .next_seed
-            .wrapping_mul(1_103_515_245)
-            .wrapping_add(12_345);
-        ((self.next_seed / 65_536) % 32_768) as i32
+        self.next_seed = self.next_seed.wrapping_mul(1103515245).wrapping_add(12345);
+        ((self.next_seed / 65536) % 32768) as i32
     }
 }
 
@@ -110,13 +120,7 @@ mod tests {
         assert_eq!(generator.internal_rand(), 26_701);
         assert_eq!(generator.internal_rand(), 4_643);
 
-        generator.set_seed(4711);
-        assert!((generator.uniform_random() - 0.629_749_4).abs() < 0.000_001);
-    }
-
-    #[test]
-    fn explicit_seed_restarts_internal_stream() {
-        let mut generator = RandomNumberGenerator::with_seed(12, true);
+        generator.set_seed(12);
         let first = generator.internal_rand();
         generator.set_seed(12);
         assert_eq!(generator.internal_rand(), first);

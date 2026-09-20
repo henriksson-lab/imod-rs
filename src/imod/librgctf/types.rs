@@ -1,11 +1,8 @@
 //! Value types from `IMOD/librgctf/core_headers.h`.
 
-use rustfft::num_complex::Complex32;
+use std::ops::{Add, Mul, MulAssign, Sub};
 
-/// C++ header constant `I`; named for Rust's conventional constant style.
-pub const IMAGINARY_UNIT: Complex32 = Complex32::new(0.0, 1.0);
-
-/// C++ `Peak`.
+/// C++ `Peak` (`core_headers.h:1`).
 #[derive(Clone, Copy, Debug, Default, PartialEq)]
 pub struct Peak {
     pub x: f32,
@@ -15,14 +12,14 @@ pub struct Peak {
     pub physical_address_within_image: i64,
 }
 
-/// C++ `Kernel2D`.
+/// C++ `Kernel2D` (`core_headers.h:9`).
 #[derive(Clone, Copy, Debug, Default, PartialEq)]
 pub struct Kernel2d {
     pub pixel_index: [i32; 4],
     pub pixel_weight: [f32; 4],
 }
 
-/// C++ `CurvePoint`.
+/// C++ `CurvePoint` (`core_headers.h:14`).
 #[derive(Clone, Copy, Debug, Default, PartialEq)]
 pub struct CurvePoint {
     pub index_m: i32,
@@ -31,18 +28,70 @@ pub struct CurvePoint {
     pub value_n: f32,
 }
 
-#[cfg(test)]
-mod tests {
-    use super::{CurvePoint, IMAGINARY_UNIT, Kernel2d, Peak};
+/// `std::complex<float>`, as the library uses it.
+///
+/// The `Image` class aliases its complex array onto the same allocation as its
+/// real array, so this type must be exactly two consecutive `float`s.
+#[derive(Clone, Copy, Debug, Default, PartialEq)]
+#[repr(C)]
+pub struct Complex {
+    pub re: f32,
+    pub im: f32,
+}
 
-    #[test]
-    fn core_header_value_types_have_owned_zero_defaults() {
-        assert_eq!(Peak::default().physical_address_within_image, 0);
-        assert_eq!(Kernel2d::default().pixel_index, [0; 4]);
-        assert_eq!(CurvePoint::default().value_m, 0.0);
-        assert_eq!(
-            IMAGINARY_UNIT,
-            rustfft::num_complex::Complex32::new(0.0, 1.0)
-        );
+impl Complex {
+    pub fn new(re: f32, im: f32) -> Self {
+        Self { re, im }
+    }
+
+    /// `std::abs(std::complex<float>)`, the modulus.
+    pub fn abs(self) -> f32 {
+        f32::hypot(self.re, self.im)
+    }
+}
+
+/// C++ `const std::complex<float> I(0.0,1.0)` (`core_headers.h:31`).
+pub const I: Complex = Complex { re: 0.0, im: 1.0 };
+
+impl Add for Complex {
+    type Output = Self;
+    fn add(self, other: Self) -> Self {
+        Self::new(self.re + other.re, self.im + other.im)
+    }
+}
+
+impl Sub for Complex {
+    type Output = Self;
+    fn sub(self, other: Self) -> Self {
+        Self::new(self.re - other.re, self.im - other.im)
+    }
+}
+
+impl Mul for Complex {
+    type Output = Self;
+    fn mul(self, other: Self) -> Self {
+        Self::new(
+            self.re * other.re - self.im * other.im,
+            self.re * other.im + self.im * other.re,
+        )
+    }
+}
+
+impl Mul<f32> for Complex {
+    type Output = Self;
+    fn mul(self, other: f32) -> Self {
+        Self::new(self.re * other, self.im * other)
+    }
+}
+
+impl MulAssign for Complex {
+    fn mul_assign(&mut self, other: Self) {
+        *self = *self * other;
+    }
+}
+
+impl MulAssign<f32> for Complex {
+    fn mul_assign(&mut self, other: f32) {
+        *self = *self * other;
     }
 }

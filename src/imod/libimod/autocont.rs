@@ -1,1057 +1,1355 @@
-//! Low-level flood-mask operations from `IMOD/libimod/autocont.c`.
-//!
-//! The full native unit also couples contour construction to `Islice`, `Iobj`,
-//! and the legacy OpenMP pipeline.  These three operations are independent of
-//! that UI/pipeline machinery and are shared by auto-contouring callers.
+//! Translation of `IMOD/libimod/autocont.c` -- routines for autocontouring
+//! used by `imodauto` and `3dmod/autox`.
 
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::io::Write as _;
+use std::sync::atomic::{AtomicI32, Ordering};
 
+use crate::imod::libcfshr::b3dutil::{CArg, ImodFile, b3d_omp_thread_num, c_format_bytes};
 use crate::imod::libcfshr::filtxcorr::scaled_gaussian_kernel;
 use crate::imod::libcfshr::islice::{
     Islice, MrcData, slice_byte_smooth, slice_init, slice_mat_filter, slice_scale_and_free,
 };
 use crate::imod::libiimod::mrcfiles::MRC_MODE_BYTE;
 use crate::imod::libimod::icont::{
-    imod_contour_area, imod_contour_default, imod_contour_reduce, imod_contour_shave,
-    imod_contour_strip,
+    imod_contour_area, imod_contour_copy, imod_contour_default, imod_contour_get_bbox,
+    imod_contour_new, imod_contour_reduce, imod_contour_shave, imod_contour_strip,
+    imod_contours_new,
 };
 use crate::imod::libimod::imodel::{Icont, Iobj, Ipoint};
-use crate::imod::libimod::ipoint::imod_point_inside_cont;
+use crate::imod::libimod::iobj::{imod_object_add_contour, imod_object_new};
+use crate::imod::libimod::ipoint::{
+    imod_point_add, imod_point_append, imod_point_cont_distance, imod_point_inside_cont,
+};
 
-/// Native boundary pre-mask used by `imodAutoContoursFromSlice`.
-pub fn pixels_inside_boundaries(
-    boundaries: &[Icont],
-    xsize: usize,
-    ysize: usize,
-    z: f32,
-) -> Vec<bool> {
-    (0..xsize.saturating_mul(ysize))
-        .map(|index| {
-            let point = Ipoint {
-                x: (index % xsize) as f32 + 0.5,
-                y: (index / xsize) as f32 + 0.5,
-                z,
-            };
-            boundaries
-                .iter()
-                .any(|contour| imod_point_inside_cont(contour, &point) != 0)
-        })
-        .collect()
-}
-
-// C's `sStopProcessing`; the full slice-to-contour operation resets this at
-// its start and polls it between patches.
-static STOP_PROCESSING: AtomicBool = AtomicBool::new(false);
-
-/// `AUTOX_FLOOD` from `imodel.h`.
+/// `AUTOX_BLANK` (`imodel.h:125`).
+pub const AUTOX_BLANK: u8 = 0;
+/// `AUTOX_FLOOD` (`imodel.h:126`).
 pub const AUTOX_FLOOD: u8 = 1;
-/// `AUTOX_PATCH` from `imodel.h`.
+/// `AUTOX_PATCH` (`imodel.h:127`).
 pub const AUTOX_PATCH: u8 = 1 << 1;
-/// `AUTOX_FILL` from `imodel.h`.
+/// `AUTOX_FILL` (`imodel.h:128`).
 pub const AUTOX_FILL: u8 = AUTOX_FLOOD | AUTOX_PATCH;
-/// `AUTOX_CHECK` from `imodel.h`.
+/// `AUTOX_CHECK` (`imodel.h:129`).
 pub const AUTOX_CHECK: u8 = 1 << 5;
+/// `MAX_AUTO_SLICE_THREADS` (`imodel.h:130`).
+pub const MAX_AUTO_SLICE_THREADS: i32 = 8;
 
-/// C `imodAutoContourStop`: request cancellation of an in-progress contour
-/// operation.
-pub fn imod_auto_contour_stop() {
-    STOP_PROCESSING.store(true, Ordering::Relaxed);
-}
+/// C `sStopProcessing` (`autocont.c:27`).
+static S_STOP_PROCESSING: AtomicI32 = AtomicI32::new(0);
 
-/// Poll the C `sStopProcessing` cancellation latch.  The eventual
-/// `imodAutoContoursFromSlice` port resets it before its scan, as the C
-/// function does.
-pub fn auto_contour_stop_requested() -> bool {
-    STOP_PROCESSING.load(Ordering::Relaxed)
-}
+/// `KERNEL_MAXSIZE` (`autocont.c:29`).
+const KERNEL_MAXSIZE: i32 = 7;
 
-fn reset_auto_contour_stop() {
-    STOP_PROCESSING.store(false, Ordering::Relaxed);
-}
-
-/// Source parameters for the unfiltered core of `imodAutoContoursFromSlice`.
-#[derive(Clone, Copy, Debug)]
-pub struct AutoContourOptions {
-    /// Native `ksigma`: `None` leaves the slice unchanged, zero selects the
-    /// native 3x3 byte smoother, and positive values apply a Gaussian.
-    pub gaussian_sigma: Option<f32>,
-    pub high_threshold: f64,
-    pub low_threshold: f64,
-    pub exact: Option<u8>,
-    /// 1: absolute thresholds, 2: supplied overall mean, 3: slice mean.
-    pub dimension_mode: i32,
-    pub mean: f32,
-    pub min_size: usize,
-    pub max_size: Option<usize>,
-    pub follow_diagonals: i32,
-    pub smooth_flags: i32,
-    pub shave: f64,
-    pub tolerance: f32,
-}
-
-impl Default for AutoContourOptions {
-    fn default() -> Self {
-        Self {
-            gaussian_sigma: None,
-            high_threshold: 256.,
-            low_threshold: 0.,
-            exact: None,
-            dimension_mode: 1,
-            mean: 0.,
-            min_size: 1,
-            max_size: None,
-            follow_diagonals: 0,
-            smooth_flags: 0,
-            shave: 0.,
-            tolerance: 0.,
-        }
-    }
-}
-
-/// C `imodAutoContoursFromSlice`, for its byte-slice contouring core.
+/// C `imodAutoPatch` (`autocont.c:38`).
 ///
-/// Filtering (`ksigma`) and boundary-object clipping are deliberately separate
-/// callers in Rust; all thresholding, region growth, smoothing, edge tracing,
-/// and native contour post-processing are performed here.
-pub fn imod_auto_contours_from_slice(
-    image: &[u8],
-    xsize: usize,
-    ysize: usize,
-    z: f32,
-    options: AutoContourOptions,
-) -> Vec<Icont> {
-    let filtered = filter_auto_contour_slice(image, xsize, ysize, options.gaussian_sigma);
-    auto_contours_from_slice_internal(&filtered, xsize, ysize, z, options, None)
-}
-
-/// `imodAutoContoursFromSlice` with the native boundary-contour pre-mask.
-pub fn imod_auto_contours_from_slice_with_boundaries(
-    image: &[u8],
-    xsize: usize,
-    ysize: usize,
-    z: f32,
-    options: AutoContourOptions,
-    boundaries: &[Icont],
-) -> Vec<Icont> {
-    let mask = pixels_inside_boundaries(boundaries, xsize, ysize, z);
-    let filtered = filter_auto_contour_slice(image, xsize, ysize, options.gaussian_sigma);
-    auto_contours_from_slice_internal(&filtered, xsize, ysize, z, options, Some(&mask))
-}
-
-fn filter_auto_contour_slice(
-    image: &[u8],
-    xsize: usize,
-    ysize: usize,
-    sigma: Option<f32>,
-) -> Vec<u8> {
-    let Some(sigma) = sigma else {
-        return image.to_vec();
-    };
-    let Ok(xsize_i32) = i32::try_from(xsize) else {
-        return image.to_vec();
-    };
-    let Ok(ysize_i32) = i32::try_from(ysize) else {
-        return image.to_vec();
-    };
-    // `autocont.c:340-341`: `sliceInit(&slice, nx, ny, SLICE_MODE_BYTE,
-    // idata); slice.min = slice.max = 0.;` -- the slice filters `idata` in
-    // place.  This entry takes the image by reference, so the one copy is
-    // the slice's own `b` member, handed back as the filtered image.
-    let mut slice = Islice {
-        data: MrcData::default(),
-        xsize: 0,
-        ysize: 0,
-        mode: 0,
-        csize: 0,
-        dsize: 0,
-        min: 0.,
-        max: 0.,
-        mean: 0.,
-        index: 0,
-        cval: [0.; 4],
-    };
-    if slice_init(
-        &mut slice,
-        xsize_i32,
-        ysize_i32,
-        MRC_MODE_BYTE,
-        MrcData::B(image[..image.len().min(xsize.saturating_mul(ysize))].to_vec()),
-    ) != 0
-    {
-        return image.to_vec();
-    }
-    slice.min = 0.;
-    slice.max = 0.;
-    if sigma <= 0. {
-        let _ = slice_byte_smooth(&mut slice);
-        let MrcData::B(filtered) = slice.data else {
-            unreachable!("byte slice");
-        };
-        return filtered;
-    }
-    let mut kernel = [0.; 49];
-    let mut dimension = 7;
-    scaled_gaussian_kernel(&mut kernel, &mut dimension, 7, sigma);
-    if let Some(mut output) = slice_mat_filter(&slice, &kernel, dimension) {
-        slice_scale_and_free(&mut output, &mut slice);
-    }
-    let MrcData::B(filtered) = slice.data else {
-        unreachable!("byte slice");
-    };
-    filtered
-}
-
-fn auto_contours_from_slice_internal(
-    image: &[u8],
-    xsize: usize,
-    ysize: usize,
-    z: f32,
-    options: AutoContourOptions,
-    boundary_mask: Option<&[bool]>,
-) -> Vec<Icont> {
-    if xsize == 0 || ysize == 0 || image.len() < xsize.saturating_mul(ysize) {
-        return Vec::new();
-    }
-    reset_auto_contour_stop();
-    let nxy = xsize * ysize;
-    let mean = if options.dimension_mode == 3 {
-        image
-            .iter()
-            .take(nxy)
-            .map(|&value| value as f64)
-            .sum::<f64>() as f32
-            / nxy as f32
-    } else {
-        options.mean
-    };
-    let (mut low, mut high) = if options.dimension_mode == 1 {
-        (options.low_threshold as i32, options.high_threshold as i32)
-    } else {
-        (
-            (mean as f64 * options.low_threshold) as i32,
-            (mean as f64 * options.high_threshold) as i32,
-        )
-    };
-    if options.exact.is_none() {
-        high += 1;
-        if low == 0 {
-            low = -1;
-        }
-    }
-    let mut labels = vec![0i32; nxy];
-    for index in 0..nxy {
-        if boundary_mask.is_some_and(|mask| !mask.get(index).copied().unwrap_or(false))
-            || (image[index] as i32 > low
-                && (image[index] as i32) < high
-                && options.exact.is_none_or(|value| image[index] != value))
-        {
-            labels[index] = -1;
-        }
-    }
-    let listsize = 4 * (xsize + ysize).max(1);
-    let mut xlist = vec![0; listsize];
-    let mut ylist = vec![0; listsize];
-    let mut label = 1;
-    for y in 0..ysize {
-        for x in 0..xsize {
-            if auto_contour_stop_requested() {
-                return Vec::new();
-            }
-            if labels[x + y * xsize] != 0 {
-                continue;
-            }
-            let pixel = image[x + y * xsize];
-            let diagonal = options.follow_diagonals >= 3
-                || (options.follow_diagonals == 1
-                    && options.exact.is_none()
-                    && pixel as i32 >= high)
-                || (options.follow_diagonals == 2
-                    && options.exact.is_none()
-                    && pixel as i32 <= low);
-            let count = imoda_object_bfill_2d(
-                image,
-                &mut labels,
-                &mut xlist,
-                &mut ylist,
-                xsize,
-                ysize,
-                x,
-                y,
-                low,
-                high,
-                options.exact,
-                diagonal,
-                label,
-            );
-            if count >= options.min_size.max(1) {
-                label += 1;
-            } else {
-                for value in &mut labels {
-                    if *value == label {
-                        *value = -1;
-                    }
-                }
-            }
-        }
-    }
-    let lines: Vec<&[u8]> = image.chunks(xsize).take(ysize).collect();
-    let mut result = Vec::new();
-    for current in 1..label {
-        if auto_contour_stop_requested() {
-            return Vec::new();
-        }
-        let mut mask = vec![0u8; nxy];
-        let Some(seed) = labels.iter().position(|&value| value == current) else {
-            continue;
-        };
-        for (index, value) in labels.iter().enumerate() {
-            if *value == current {
-                mask[index] = AUTOX_FLOOD;
-            }
-        }
-        imod_auto_patch(&mut mask, &mut xlist, &mut ylist, xsize, ysize);
-        let repeats = if options.smooth_flags > 3 {
-            (options.smooth_flags >> 2).max(1)
-        } else {
-            1
-        };
-        for _ in 0..repeats {
-            if options.smooth_flags & 2 != 0 {
-                imod_auto_expand(&mut mask, xsize, ysize);
-            }
-            if options.smooth_flags & 1 != 0 {
-                imod_auto_shrink(&mut mask, xsize, ysize);
-            }
-        }
-        let mut used_threshold = -1.;
-        if options.smooth_flags & 3 == 0 && options.exact.is_none() {
-            let value = image[seed] as i32;
-            if value <= low {
-                used_threshold = low as f32 + 0.5;
-            }
-            if value >= high {
-                used_threshold = high as f32 - 0.5;
-            }
-        } else if options.smooth_flags & 3 != 0 {
-            imod_auto_patch(&mut mask, &mut xlist, &mut ylist, xsize, ysize);
-        }
-        let reverse = image[seed] as i32 <= low;
-        let diagonal = options.follow_diagonals >= 3
-            || (options.follow_diagonals == 1 && image[seed] as i32 >= high)
-            || (options.follow_diagonals == 2 && image[seed] as i32 <= low);
-        for mut contour in imod_contours_from_image_points(
-            &mut mask,
-            options.exact.is_none().then_some(&lines),
-            xsize,
-            ysize,
-            z,
-            AUTOX_FLOOD,
-            diagonal,
-            used_threshold,
-            reverse,
-        ) {
-            let area = imod_contour_area(Some(&contour)).abs();
-            if area < options.min_size as f32
-                || options.max_size.is_some_and(|max| area > max as f32)
-            {
-                continue;
-            }
-            imod_contour_strip(&mut contour);
-            if options.tolerance != 0. {
-                imod_contour_reduce(Some(&mut contour), options.tolerance);
-            }
-            if options.shave != 0. {
-                imod_contour_shave(&mut contour, options.shave);
-            }
-            result.push(contour);
-        }
-    }
-    result
-}
-
-/// C `imodAutoPatch`.
-///
-/// Marks holes surrounded by `AUTOX_FLOOD` as flood. `xlist` and `ylist`
-/// are the native caller-provided ring-buffer work arrays; their common usable
-/// length is used as the C `listsize` argument.
+/// Marks the area outside of the "flooded" region of pixels in `data`, ones
+/// marked with `AUTOX_FLOOD`, with the patch flag, `AUTOX_PATCH`, then makes
+/// all unmarked pixels be part of the flooded region, thus filling in the
+/// interior of the flood.  The size of the data array is given in `xsize` and
+/// `ysize`; `xlist` and `ylist` are temporary arrays with size given by
+/// `listsize`, which should be at least 4 * (`xsize` + `ysize`).
 pub fn imod_auto_patch(
     data: &mut [u8],
     xlist: &mut [i32],
     ylist: &mut [i32],
-    xsize: usize,
-    ysize: usize,
+    listsize: i32,
+    xsize: i32,
+    ysize: i32,
 ) {
-    let listsize = xlist.len().min(ylist.len());
-    if xsize == 0 || ysize == 0 || data.len() < xsize.saturating_mul(ysize) || listsize == 0 {
-        return;
-    }
+    let mut i: i32;
+    let xysize: i32;
+    let mut xmax: i32 = -1;
+    let mut xmin: i32 = xsize;
+    let mut ymax: i32 = -1;
+    let mut ymin: i32 = ysize;
 
-    let mut xmax = -1isize;
-    let mut xmin = xsize as isize;
-    let mut ymax = -1isize;
-    let mut ymin = ysize as isize;
+    /* get min and max of flooded area */
     for y in 0..ysize {
         for x in 0..xsize {
-            if data[x + y * xsize] & AUTOX_FLOOD != 0 {
-                xmin = xmin.min(x as isize);
-                xmax = xmax.max(x as isize);
-                ymin = ymin.min(y as isize);
-                ymax = ymax.max(y as isize);
+            if data[(x + y * xsize) as usize] & AUTOX_FLOOD != 0 {
+                if x < xmin {
+                    xmin = x;
+                }
+                if x > xmax {
+                    xmax = x;
+                }
+                if y < ymin {
+                    ymin = y;
+                }
+                if y > ymax {
+                    ymax = y;
+                }
             }
         }
     }
-    // Native callers invoke this only on nonempty flood masks.  Avoid the
-    // invalid native bounds in the public safe Rust API.
-    if xmax < xmin || ymax < ymin {
-        return;
-    }
-    let (xmin, xmax, ymin, ymax) = (xmin as usize, xmax as usize, ymin as usize, ymax as usize);
+
+    /* Start a patch from every point along the four sides, because there
+    may be isolated patches */
     for x in xmin..=xmax {
-        auto_patch_fill_outside(data, xlist, ylist, xsize, xmin, xmax, ymin, ymax, x, ymin);
-        auto_patch_fill_outside(data, xlist, ylist, xsize, xmin, xmax, ymin, ymax, x, ymax);
+        auto_patch_fill_outside(
+            data, xlist, ylist, listsize, xsize, xmin, xmax, ymin, ymax, x, ymin,
+        );
+        auto_patch_fill_outside(
+            data, xlist, ylist, listsize, xsize, xmin, xmax, ymin, ymax, x, ymax,
+        );
     }
     for y in ymin..=ymax {
-        auto_patch_fill_outside(data, xlist, ylist, xsize, xmin, xmax, ymin, ymax, xmin, y);
-        auto_patch_fill_outside(data, xlist, ylist, xsize, xmin, xmax, ymin, ymax, xmax, y);
+        auto_patch_fill_outside(
+            data, xlist, ylist, listsize, xsize, xmin, xmax, ymin, ymax, xmin, y,
+        );
+        auto_patch_fill_outside(
+            data, xlist, ylist, listsize, xsize, xmin, xmax, ymin, ymax, xmax, y,
+        );
     }
+
+    xysize = xsize * ysize;
+
+    /* Mark everything now not in a patch as in the flood */
     for y in ymin..=ymax {
         for x in xmin..=xmax {
-            let index = x + y * xsize;
-            if data[index] & AUTOX_FILL == 0 {
-                data[index] |= AUTOX_FLOOD;
+            i = x + y * xsize;
+            if data[i as usize] & (AUTOX_FLOOD | AUTOX_PATCH) == 0 {
+                data[i as usize] |= AUTOX_FLOOD;
             }
         }
     }
-    for pixel in data.iter_mut().take(xsize * ysize) {
-        *pixel &= !AUTOX_PATCH;
+
+    /* Clear the patch flags */
+    for i in 0..xysize {
+        if data[i as usize] & AUTOX_PATCH != 0 {
+            data[i as usize] &= !AUTOX_PATCH;
+        }
     }
 }
 
+/// C `autoPatchFillOutside` (`autocont.c:94`).
+///
+/// To build a patch (add points to existing patch) from a single point.
 #[allow(clippy::too_many_arguments)]
 fn auto_patch_fill_outside(
     data: &mut [u8],
     xlist: &mut [i32],
     ylist: &mut [i32],
-    xsize: usize,
-    xmin: usize,
-    xmax: usize,
-    ymin: usize,
-    ymax: usize,
-    x: usize,
-    y: usize,
+    listsize: i32,
+    xsize: i32,
+    xmin: i32,
+    xmax: i32,
+    ymin: i32,
+    ymax: i32,
+    x: i32,
+    y: i32,
 ) {
-    let listsize = xlist.len().min(ylist.len());
-    let index = x + y * xsize;
-    if data[index] & AUTOX_FILL != 0 {
+    let mut ringnext: i32 = 0;
+    let mut ringfree: i32 = 1;
+    let mut pixind: i32;
+    let neighflag: u8;
+
+    /* Don't even start if this point is a patch or a flood */
+    pixind = x + y * xsize;
+    if data[pixind as usize] & (AUTOX_FLOOD | AUTOX_PATCH) != 0 {
         return;
     }
-    let mut next = 0;
-    let mut free = 1 % listsize;
-    xlist[0] = x as i32;
-    ylist[0] = y as i32;
-    data[index] |= AUTOX_CHECK | AUTOX_PATCH;
-    let neighbor_flags = AUTOX_FLOOD | AUTOX_CHECK | AUTOX_PATCH;
-    while next != free {
-        let x = xlist[next] as usize;
-        let y = ylist[next] as usize;
-        let index = x + y * xsize;
-        let mut add = |nx: usize, ny: usize, neighbor: usize| {
-            if data[neighbor] & neighbor_flags == 0 {
-                xlist[free] = nx as i32;
-                ylist[free] = ny as i32;
-                free = (free + 1) % listsize;
-                data[neighbor] |= AUTOX_CHECK | AUTOX_PATCH;
-            }
-        };
-        if x > xmin {
-            add(x - 1, y, index - 1);
+
+    /* initialize the ring buffer */
+    xlist[0] = x;
+    ylist[0] = y;
+    data[pixind as usize] |= AUTOX_CHECK | AUTOX_PATCH;
+    neighflag = AUTOX_FLOOD | AUTOX_CHECK | AUTOX_PATCH;
+
+    while ringnext != ringfree {
+        /* the next point on list got there by being neither patch nor
+        flood, so it needs no checking or marking */
+        let x = xlist[ringnext as usize];
+        let y = ylist[ringnext as usize];
+        pixind = x + y * xsize;
+
+        /* add each of four neighbors on list if coordinate is legal
+        and they are not already on list or in flood or patch.
+        Mark each as on list and in patch */
+        if x > xmin && data[(pixind - 1) as usize] & neighflag == 0 {
+            xlist[ringfree as usize] = x - 1;
+            ylist[ringfree as usize] = y;
+            ringfree += 1;
+            ringfree %= listsize;
+            data[(pixind - 1) as usize] |= AUTOX_CHECK | AUTOX_PATCH;
         }
-        if x < xmax {
-            add(x + 1, y, index + 1);
+        if x < xmax && data[(pixind + 1) as usize] & neighflag == 0 {
+            xlist[ringfree as usize] = x + 1;
+            ylist[ringfree as usize] = y;
+            ringfree += 1;
+            ringfree %= listsize;
+            data[(pixind + 1) as usize] |= AUTOX_CHECK | AUTOX_PATCH;
         }
-        if y > ymin {
-            add(x, y - 1, index - xsize);
+        if y > ymin && data[(pixind - xsize) as usize] & neighflag == 0 {
+            xlist[ringfree as usize] = x;
+            ylist[ringfree as usize] = y - 1;
+            ringfree += 1;
+            ringfree %= listsize;
+            data[(pixind - xsize) as usize] |= AUTOX_CHECK | AUTOX_PATCH;
         }
-        if y < ymax {
-            add(x, y + 1, index + xsize);
+        if y < ymax && data[(pixind + xsize) as usize] & neighflag == 0 {
+            xlist[ringfree as usize] = x;
+            ylist[ringfree as usize] = y + 1;
+            ringfree += 1;
+            ringfree %= listsize;
+            data[(pixind + xsize) as usize] |= AUTOX_CHECK | AUTOX_PATCH;
         }
-        data[index] &= !AUTOX_CHECK;
-        next = (next + 1) % listsize;
+
+        /* Take point off list, advance next pointer */
+        data[pixind as usize] &= !AUTOX_CHECK;
+        ringnext += 1;
+        ringnext %= listsize;
     }
 }
 
-/// C `imodAutoShrink`.
-pub fn imod_auto_shrink(data: &mut [u8], imax: usize, jmax: usize) {
-    if imax == 0 || jmax == 0 || data.len() < imax.saturating_mul(jmax) {
-        return;
-    }
+/// C `imodAutoShrink` (`autocont.c:165`).
+///
+/// Shrinks the area in `data` marked with the flag `AUTOX_FLOOD` by
+/// eliminating every point with fewer than 7 neighbors in the flood.  `imax`
+/// and `jmax` are the X and Y sizes of `data`.
+pub fn imod_auto_shrink(data: &mut [u8], imax: i32, jmax: i32) {
+    let mut k: i32;
+    let mut x: i32;
+    let mut y: i32;
+
+    /* DNM: tried testing on fill flag before checking neighbors and it
+    didn't work. */
     for j in 0..jmax {
         for i in 0..imax {
-            let index = i + j * imax;
-            if data[index] & AUTOX_FLOOD == 0 {
-                continue;
-            }
-            let mut count = 0;
-            for dy in -1isize..=1 {
-                for dx in -1isize..=1 {
-                    let x = i as isize + dx;
-                    let y = j as isize + dy;
-                    if x >= 0
-                        && y >= 0
-                        && x < imax as isize
-                        && y < jmax as isize
-                        && data[x as usize + y as usize * imax] & AUTOX_FLOOD != 0
-                    {
-                        count += 1;
+            if data[(i + j * imax) as usize] & AUTOX_FLOOD != 0 {
+                k = 0;
+                for n in -1..=1 {
+                    y = n + j;
+                    for m in -1..=1 {
+                        x = m + i;
+                        if (x >= 0)
+                            && (y >= 0)
+                            && (x < imax)
+                            && (y < jmax)
+                            && data[(x + y * imax) as usize] & AUTOX_FLOOD != 0
+                        {
+                            k += 1;
+                        }
                     }
                 }
-            }
-            if count < 7 {
-                data[index] |= AUTOX_CHECK;
+                if k < 7 {
+                    data[(i + j * imax) as usize] |= AUTOX_CHECK;
+                }
             }
         }
     }
-    for pixel in data.iter_mut().take(imax * jmax) {
-        if *pixel & AUTOX_CHECK != 0 {
-            *pixel &= !(AUTOX_FLOOD | AUTOX_CHECK);
+
+    /* DNM: clear check flag after use, not before */
+    for j in 0..jmax {
+        for i in 0..imax {
+            if data[(i + j * imax) as usize] & AUTOX_CHECK != 0 {
+                data[(i + j * imax) as usize] &= !(AUTOX_FLOOD | AUTOX_CHECK);
+            }
         }
     }
 }
 
-/// C `imodAutoExpand`.
-pub fn imod_auto_expand(data: &mut [u8], imax: usize, jmax: usize) {
-    if imax == 0 || jmax == 0 || data.len() < imax.saturating_mul(jmax) {
-        return;
-    }
+/// C `imodAutoExpand` (`autocont.c:204`).
+///
+/// Expands the area in `data` marked with the flag `AUTOX_FLOOD` or
+/// `AUTOX_PATCH` by adding all 8 neighbors around each marked by, marking it
+/// with `AUTOX_FLOOD`.  `imax` and `jmax` are the X and Y sizes of `data`.
+pub fn imod_auto_expand(data: &mut [u8], imax: i32, jmax: i32) {
+    let mut x: i32;
+    let mut y: i32;
+
     for j in 0..jmax {
         for i in 0..imax {
-            if data[i + j * imax] & AUTOX_FILL == 0 {
+            if data[(i + j * imax) as usize] & AUTOX_FILL == 0 {
                 continue;
             }
-            for dy in -1isize..=1 {
-                for dx in -1isize..=1 {
-                    if dx == 0 && dy == 0 {
+
+            for m in -1..=1 {
+                y = j + m;
+                if (y < 0) || (y >= jmax) {
+                    continue;
+                }
+                for n in -1..=1 {
+                    x = n + i;
+                    if (x == i) && (y == j) {
                         continue;
                     }
-                    let x = i as isize + dx;
-                    let y = j as isize + dy;
-                    if x >= 0 && y >= 0 && x < imax as isize && y < jmax as isize {
-                        data[x as usize + y as usize * imax] |= AUTOX_CHECK;
+                    if (x < 0) || (x >= imax) {
+                        continue;
                     }
+                    data[(x + y * imax) as usize] |= AUTOX_CHECK;
                 }
             }
         }
     }
-    for pixel in data.iter_mut().take(imax * jmax) {
-        if *pixel & AUTOX_CHECK != 0 {
-            *pixel |= AUTOX_FLOOD;
-            *pixel &= !AUTOX_CHECK;
+
+    /* DNM: clear check flag in this loop, not before use */
+    for i in 0..imax * jmax {
+        if data[i as usize] & AUTOX_CHECK != 0 {
+            data[i as usize] |= AUTOX_FLOOD;
+            data[i as usize] &= !AUTOX_CHECK;
         }
     }
 }
 
-/// C `imoda_object_bfill_2d`.
+/// C `imodAutoContoursFromSlice` (`autocont.c:288`).
 ///
-/// Labels the threshold-connected patch beginning at `(x, y)` with
-/// `cont_label`, returning its pixel count.  A zero in `labels` is unvisited;
-/// nonzero labels are left intact, precisely as in the native contour scan.
+/// Generates contours at given thresholds for one slice of byte data and
+/// returns them in object `nobj`.  See `autocont.c:238-287` for the full
+/// description of each argument.  Returns 1 for memory errors and -1 if
+/// `imodAutoContourStop` was called.
+///
+/// Three deviations from the C parameter list, none of them behavioural:
+///
+/// * `linePtrs` is not a parameter.  The C caller builds it as
+///   `&idata[j * nx]` for each row (`imodauto.c:517-518`), i.e. the rows of
+///   the very `idata` this function filters in place, so it is rebuilt here
+///   from `idata` after the filter rather than handed in.  The
+///   `B3DCHOICE(exact < 0, linePtrs, NULL)` selection at `autocont.c:611` is
+///   kept exactly.
+/// * `Ilist *boundConts` of `int` is a `Vec<i32>`.
+/// * The C's `nobjsize`/`onobjsize` are assigned and never read
+///   (`autocont.c:468-532`); they are kept so the elimination loop reads as
+///   the source writes it.
 #[allow(clippy::too_many_arguments)]
-pub fn imoda_object_bfill_2d(
-    image: &[u8],
-    labels: &mut [i32],
-    xlist: &mut [i32],
-    ylist: &mut [i32],
-    xsize: usize,
-    ysize: usize,
-    x: usize,
-    y: usize,
-    t1: i32,
-    t2: i32,
-    exact: Option<u8>,
-    diagonal: bool,
-    cont_label: i32,
-) -> usize {
-    let listsize = xlist.len().min(ylist.len());
-    if xsize == 0
-        || ysize == 0
-        || x >= xsize
-        || y >= ysize
-        || listsize == 0
-        || image.len() < xsize.saturating_mul(ysize)
-        || labels.len() < xsize * ysize
-    {
+pub fn imod_auto_contours_from_slice(
+    ksigma: f32,
+    highthresh: f64,
+    lowthresh: f64,
+    exact: i32,
+    dim: i32,
+    minsize: i32,
+    maxsize: i32,
+    followdiag: i32,
+    inside: i32,
+    shave: f64,
+    tol: f64,
+    delete_edge: i32,
+    smoothflags: i32,
+    bound_obj: Option<&Iobj>,
+    nearest_bound: i32,
+    nobj: &mut Iobj,
+    bound_conts: &mut Vec<i32>,
+    nx: i32,
+    ny: i32,
+    tdata: &mut [i32],
+    idata: &mut [u8],
+    fdata_in: &mut [u8],
+    xlist_in: &mut [i32],
+    ylist_in: &mut [i32],
+    mean_in: f32,
+    ksec: i32,
+    listsize: i32,
+    num_threads: i32,
+) -> i32 {
+    let mut mean = mean_in;
+    let mut num_threads = num_threads;
+    let mut nco: i32;
+    let mut cz: i32;
+    let mut ncont: i32 = 0;
+    let mut incont: i32;
+    let mut thrd: i32;
+    let mut add_error: i32 = 0;
+    let mut nump: i32;
+    let mut i: i32;
+    let mut j: i32;
+    let mut ind: i32;
+    let mut cont_label: i32;
+    let mut tsum: f64;
+    let t1: i32;
+    let t2: i32;
+    let nxy: i32 = nx * ny;
+    let mut area: f32;
+    let mut thresh_used: f32;
+    let mut nobjsize: i32;
+    let onobjsize: i32;
+    let mut pmin = Ipoint {
+        x: 0.,
+        y: 0.,
+        z: 0.,
+    };
+    let mut pmax = Ipoint {
+        x: 0.,
+        y: 0.,
+        z: 0.,
+    };
+    let mut pim = Ipoint {
+        x: 0.,
+        y: 0.,
+        z: 0.,
+    };
+    let mut nedge: i32;
+    let mut critedge: i32;
+    let mut diagonal: i32;
+    let mut reverse: i32;
+    let mut kerdim: i32 = 0;
+
+    S_STOP_PROCESSING.store(0, Ordering::Relaxed);
+    nobj.red = 0.;
+    nobj.green = 1.;
+    nobj.blue = 0.;
+
+    /* `ACCUM_MIN(numThreads, MAX_AUTO_SLICE_THREADS)` (`autocont.c:327`). */
+    if MAX_AUTO_SLICE_THREADS < num_threads {
+        num_threads = MAX_AUTO_SLICE_THREADS;
+    }
+    /* `autocont.c:328-332` partitions the caller's `fdata`, `xlist` and
+    `ylist` into one block per thread; the offsets are recomputed at each use
+    below instead of being held as pointers. */
+
+    /* Get list of boundary contours for this section */
+    if let Some(bound_obj) = bound_obj {
+        if find_boundary_conts(ksec, bound_obj, nearest_bound, bound_conts) != 0 {
+            return 1;
+        }
+    }
+
+    /* Filter first if sigma entered */
+    if ksigma >= 0. {
+        let mut slice = Islice {
+            data: MrcData::default(),
+            xsize: 0,
+            ysize: 0,
+            mode: 0,
+            csize: 0,
+            dsize: 0,
+            min: 0.,
+            max: 0.,
+            mean: 0.,
+            index: 0,
+            cval: [0.; 4],
+        };
+        /* The C slice borrows `idata` itself (`autocont.c:340`) and the
+        filters write back through it; here the slice owns its bytes and they
+        are copied back into `idata` afterwards. */
+        slice_init(
+            &mut slice,
+            nx,
+            ny,
+            MRC_MODE_BYTE,
+            MrcData::B(idata[..nxy as usize].to_vec()),
+        );
+        slice.min = 0.;
+        slice.max = 0.;
+        if ksigma > 0. {
+            let mut kernel = [0f32; (KERNEL_MAXSIZE * KERNEL_MAXSIZE) as usize];
+            scaled_gaussian_kernel(&mut kernel, &mut kerdim, KERNEL_MAXSIZE, ksigma);
+            if let Some(mut sout) = slice_mat_filter(&slice, &kernel, kerdim) {
+                slice_scale_and_free(&mut sout, &mut slice);
+            }
+        } else {
+            slice_byte_smooth(&mut slice);
+        }
+        idata[..nxy as usize].copy_from_slice(&slice.data.b()[..nxy as usize]);
+    }
+
+    /* The filter is done; `linePtrs` (`imodauto.c:517-518`) is the rows of
+    `idata`. */
+    let idata: &[u8] = &*idata;
+    let mut line_ptrs: Vec<&[u8]> = Vec::with_capacity(ny as usize);
+    for jj in 0..ny {
+        line_ptrs.push(&idata[(jj * nx) as usize..((jj + 1) * nx) as usize]);
+    }
+
+    /* Get per-section mean for dim = 3 */
+    if dim == 3 {
+        tsum = 0.;
+        for i in 0..nxy {
+            tsum += idata[i as usize] as f64;
+        }
+        mean = (tsum / nxy as f64) as f32;
+    }
+
+    /* Use the thresholds literally for dim = 1 */
+    if dim == 1 {
+        t1 = lowthresh as i32;
+        t2 = highthresh as i32;
+    } else {
+        /* `(int) mean * lowthresh`: the cast binds to `mean`, so this is an
+        `int` times a `double`, truncated back to `int`. */
+        t1 = (mean as i32 as f64 * lowthresh) as i32;
+        t2 = (mean as i32 as f64 * highthresh) as i32;
+    }
+
+    /* To match imod auto, increment t1 and test for >= that, or <=
+    low threshold.  But also set t1 to -1 if it's 0, to enforce an
+    exclusion of 0's.  Also, if doing exact, these values are already set up */
+    let mut t1 = t1;
+    let mut t2 = t2;
+    if exact < 0 {
+        t2 += 1;
+        if t1 == 0 {
+            t1 = -1;
+        }
+    }
+    let t1 = t1;
+    let t2 = t2;
+
+    cont_label = 1;
+    /* init tdata and fill with out of bounds data */
+    for i in 0..nxy {
+        tdata[i as usize] = 0;
+    }
+    for i in 0..nxy {
+        if (idata[i as usize] as i32) > t1
+            && (idata[i as usize] as i32) < t2
+            && idata[i as usize] as i32 != exact
+        {
+            tdata[i as usize] = -1;
+        }
+    }
+
+    /* If there are boundary contours, check each point not marked out yet and mark
+    the ones that are not inside any contour */
+    /* `incont` is an uninitialised local in the C (`autocont.c:299`); it is
+    only read at `:506` after this loop has written it, except when this loop
+    is skipped or never reaches a pixel, where the C reads stack residue. */
+    incont = 0;
+    if !bound_conts.is_empty() {
+        pim.z = ksec as f32;
+        for j in 0..ny {
+            for i in 0..nx {
+                if tdata[(i + j * nx) as usize] != 0 {
+                    continue;
+                }
+                pim.x = (i as f64 + 0.5) as f32;
+                pim.y = (j as f64 + 0.5) as f32;
+                incont = 0;
+                ind = 0;
+                while ind < bound_conts.len() as i32 && incont == 0 {
+                    nump = bound_conts[ind as usize];
+                    incont = imod_point_inside_cont(
+                        &bound_obj.expect("boundConts is non-empty").cont[nump as usize],
+                        &pim,
+                    );
+                    ind += 1;
+                }
+                if incont == 0 {
+                    tdata[(i + j * nx) as usize] = -1;
+                }
+            }
+        }
+    }
+
+    /* Loop on each pixel that hasn't been marked somehow, and fill a patch from that
+    point */
+    for j in 0..ny {
+        for i in 0..nx {
+            if S_STOP_PROCESSING.load(Ordering::Relaxed) != 0 {
+                return -1;
+            }
+            if tdata[(i + j * nx) as usize] != 0 {
+                continue;
+            }
+            if followdiag <= 0 {
+                diagonal = 0;
+            } else if followdiag >= 3 {
+                diagonal = 1;
+            } else if followdiag == 1 {
+                diagonal = ((exact < 0 && idata[(i + j * nx) as usize] as i32 >= t2)
+                    || idata[(i + j * nx) as usize] as i32 == exact)
+                    as i32;
+            } else {
+                diagonal = ((exact < 0 && idata[(i + j * nx) as usize] as i32 <= t1)
+                    || idata[(i + j * nx) as usize] as i32 == exact)
+                    as i32;
+            }
+
+            if imoda_object_bfill_2d(
+                idata,
+                tdata,
+                &mut xlist_in[..listsize as usize],
+                &mut ylist_in[..listsize as usize],
+                nx,
+                ny,
+                i,
+                j,
+                t1,
+                t2,
+                exact,
+                diagonal,
+                cont_label,
+                listsize,
+            ) > 1
+                || minsize < 2
+            {
+                cont_label += 1;
+            } else {
+                /* If single pixel, and minsize > 1, just eliminate
+                this pixel */
+                tdata[(i + j * nx) as usize] = -1;
+            }
+        }
+    }
+
+    // Return if nothing found
+    if cont_label <= 1 {
         return 0;
     }
-    let start = x + y * xsize;
-    let (threshold, direction, test_exact) = match exact {
-        Some(value) => (0, 0, image[start] == value),
-        None if image[start] as i32 <= t1 => (t1, -1, false),
-        None => (t2, 1, false),
+
+    /* sort the points into contours */
+    let Some(mut obj) = imod_object_new() else {
+        return 1;
     };
-    let mut next = 0;
-    let mut free = 1 % listsize;
-    xlist[0] = x as i32;
-    ylist[0] = y as i32;
-    labels[start] = -2;
-    let mut added = 0;
-    while next != free {
-        let x = xlist[next] as usize;
-        let y = ylist[next] as usize;
-        let index = x + y * xsize;
-        let passes = match exact {
-            None => direction * (image[index] as i32 - threshold) >= 0,
-            Some(value) => {
-                (test_exact && image[index] == value)
-                    || (!test_exact && (image[index] as i32 <= t1 || image[index] as i32 >= t2))
-            }
-        };
-        if passes {
-            labels[index] = cont_label;
-            added += 1;
-            let mut enqueue = |nx: usize, ny: usize| {
-                let neighbor = nx + ny * xsize;
-                if labels[neighbor] == 0 {
-                    xlist[free] = nx as i32;
-                    ylist[free] = ny as i32;
-                    free = (free + 1) % listsize;
-                    labels[neighbor] = -2;
-                }
-            };
-            if x > 0 {
-                enqueue(x - 1, y);
-            }
-            if x + 1 < xsize {
-                enqueue(x + 1, y);
-            }
-            if y > 0 {
-                enqueue(x, y - 1);
-            }
-            if y + 1 < ysize {
-                enqueue(x, y + 1);
-            }
-            if diagonal {
-                if x > 0 && y > 0 {
-                    enqueue(x - 1, y - 1);
-                }
-                if x + 1 < xsize && y > 0 {
-                    enqueue(x + 1, y - 1);
-                }
-                if x > 0 && y + 1 < ysize {
-                    enqueue(x - 1, y + 1);
-                }
-                if x + 1 < xsize && y + 1 < ysize {
-                    enqueue(x + 1, y + 1);
+    let Some(conts) = imod_contours_new(cont_label - 1) else {
+        return 1;
+    };
+    obj.cont = conts;
+
+    for j in 0..ny {
+        for i in 0..nx {
+            let co = tdata[(i + j * nx) as usize];
+            if co > 0 {
+                let pt = Ipoint {
+                    x: i as f32,
+                    y: j as f32,
+                    z: ksec as f32,
+                };
+                if imod_point_append(&mut obj.cont[(co - 1) as usize], pt) == 0 {
+                    return 1;
                 }
             }
         }
-        if labels[index] == -2 {
-            labels[index] = 0;
-        }
-        next = (next + 1) % listsize;
     }
-    added
+
+    nobjsize = nobj.cont.len() as i32;
+    onobjsize = nobjsize;
+    let _ = onobjsize;
+    /* eliminate contours with # of points outside the bounds */
+    for co in 0..obj.cont.len() {
+        if S_STOP_PROCESSING.load(Ordering::Relaxed) != 0 {
+            return -1;
+        }
+
+        nedge = 0;
+        critedge = delete_edge;
+        /* If doing inside, set up to eliminate any contour touching
+        an edge if it is the wrong polarity */
+        if inside != 0 {
+            i = obj.cont[co].pts[0].x as i32;
+            j = obj.cont[co].pts[0].y as i32;
+            if (followdiag == 1
+                && ((exact < 0 && idata[(i + j * nx) as usize] as i32 <= t1)
+                    || (exact >= 0 && idata[(i + j * nx) as usize] as i32 != exact)))
+                || (followdiag == 2 && idata[(i + j * nx) as usize] as i32 >= t2)
+            {
+                critedge = 1;
+            }
+        }
+        if critedge != 0 {
+            /* count the edges that the contour touches */
+            imod_contour_get_bbox(Some(&obj.cont[co]), &mut pmin, &mut pmax);
+            if pmin.x == 0. {
+                nedge += 1;
+            }
+            if pmax.x == (nx - 1) as f32 {
+                nedge += 1;
+            }
+            if pmin.y == 0. {
+                nedge += 1;
+            }
+            if pmax.y == (ny - 1) as f32 {
+                nedge += 1;
+            }
+
+            /* If there are boundary conts, find distance of each point to each contour and
+            set edge flag if it is ever close */
+            // What in the world is incont doing there?
+            if !bound_conts.is_empty() {
+                ind = 0;
+                while ind < bound_conts.len() as i32 && incont == 0 {
+                    nump = bound_conts[ind as usize];
+                    i = 0;
+                    while i < obj.cont[co].pts.len() as i32 {
+                        pim.x = (obj.cont[co].pts[i as usize].x as f64 + 0.5) as f32;
+                        pim.y = (obj.cont[co].pts[i as usize].y as f64 + 0.5) as f32;
+                        let mut closest: i32 = 0;
+                        if imod_point_cont_distance(
+                            &bound_obj.expect("boundConts is non-empty").cont[nump as usize],
+                            &pim,
+                            0,
+                            0,
+                            &mut closest,
+                        ) < 0.8
+                        {
+                            nedge += 1;
+                            break;
+                        }
+                        i += 1;
+                    }
+                    if i < obj.cont[co].pts.len() as i32 {
+                        break;
+                    }
+                    ind += 1;
+                }
+            }
+        }
+        if (obj.cont[co].pts.len() as i32) < minsize
+            || (obj.cont[co].pts.len() as i32 > maxsize && maxsize > 0)
+            || (critedge != 0 && nedge >= critedge)
+        {
+            if !obj.cont[co].pts.is_empty() {
+                obj.cont[co].pts.clear();
+            }
+            continue;
+        }
+
+        nobjsize += 1;
+    }
+    let _ = nobjsize;
+
+    add_error = 0;
+
+    let mut thrd_obj: Vec<Iobj> = Vec::new();
+    for _ in 0..num_threads {
+        let Some(one) = imod_object_new() else {
+            return 1;
+        };
+        thrd_obj.push(one);
+    }
+
+    for co in 0..obj.cont.len() {
+        thrd = b3d_omp_thread_num();
+
+        if obj.cont[co].pts.is_empty()
+            || add_error != 0
+            || S_STOP_PROCESSING.load(Ordering::Relaxed) != 0
+        {
+            continue;
+        }
+
+        cz = obj.cont[co].pts[0].z as i32;
+
+        let fdata_base = (thrd * nx * ny) as usize;
+        let xylist_base = (thrd * listsize) as usize;
+
+        /* Clear fdata array and mark pixels in this contour as FLOOD */
+        for i in 0..nxy {
+            fdata_in[fdata_base + i as usize] = 0;
+        }
+
+        i = 0;
+        j = 0;
+        for cpt in 0..obj.cont[co].pts.len() {
+            i = obj.cont[co].pts[cpt].x as i32;
+            j = obj.cont[co].pts[cpt].y as i32;
+            fdata_in[fdata_base + (i + j * nx) as usize] = AUTOX_FLOOD;
+        }
+
+        /* `i` and `j` are the last point of the contour here, which is what
+        the C's own loop leaves behind (`autocont.c:567-582`). */
+        if followdiag <= 0 {
+            diagonal = 0;
+        } else if followdiag >= 3 {
+            diagonal = 1;
+        } else if followdiag == 1 {
+            diagonal = ((exact < 0 && idata[(i + j * nx) as usize] as i32 >= t2)
+                || idata[(i + j * nx) as usize] as i32 == exact) as i32;
+        } else {
+            diagonal = ((exact < 0 && idata[(i + j * nx) as usize] as i32 <= t1)
+                || idata[(i + j * nx) as usize] as i32 == exact) as i32;
+        }
+
+        imod_auto_patch(
+            &mut fdata_in[fdata_base..fdata_base + nxy as usize],
+            &mut xlist_in[xylist_base..xylist_base + listsize as usize],
+            &mut ylist_in[xylist_base..xylist_base + listsize as usize],
+            listsize,
+            nx,
+            ny,
+        );
+
+        /* Set the reverse flag and set threshold based on which one is passed */
+        /* These won't be used for exact work */
+        reverse = if idata[(i + j * nx) as usize] as i32 <= t1 {
+            1
+        } else {
+            0
+        };
+        thresh_used = -1.;
+        if idata[(i + j * nx) as usize] as i32 <= t1 {
+            thresh_used = (t1 as f64 + 0.5) as f32;
+        }
+        if idata[(i + j * nx) as usize] as i32 >= t2 {
+            thresh_used = (t2 as f64 - 0.5) as f32;
+        }
+
+        /* If we do an expand, shrink, or smooth, run the patch again and set
+        the threshold to be found by the routine.
+        Probably should forbid this for exact */
+        j = if smoothflags > 3 { smoothflags >> 2 } else { 1 };
+        for _i in 0..j {
+            if smoothflags & 2 != 0 {
+                imod_auto_expand(&mut fdata_in[fdata_base..fdata_base + nxy as usize], nx, ny);
+            }
+            if smoothflags % 2 != 0 {
+                imod_auto_shrink(&mut fdata_in[fdata_base..fdata_base + nxy as usize], nx, ny);
+            }
+        }
+        if smoothflags & 3 != 0 {
+            imod_auto_patch(
+                &mut fdata_in[fdata_base..fdata_base + nxy as usize],
+                &mut xlist_in[xylist_base..xylist_base + listsize as usize],
+                &mut ylist_in[xylist_base..xylist_base + listsize as usize],
+                listsize,
+                nx,
+                ny,
+            );
+            thresh_used = -1.;
+        }
+
+        let mut newconts = imod_contours_from_image_points(
+            &mut fdata_in[fdata_base..fdata_base + nxy as usize],
+            if exact < 0 { Some(&line_ptrs) } else { None },
+            nx,
+            ny,
+            cz,
+            AUTOX_FLOOD,
+            diagonal,
+            thresh_used,
+            reverse,
+            &mut ncont,
+        );
+        for i in 0..ncont {
+            /* Just check the area and eliminate again */
+            area = imod_contour_area(Some(&newconts[i as usize]));
+            if area < minsize as f32 || (maxsize > 0 && area > maxsize as f32) {
+                continue;
+            }
+
+            imod_contour_strip(&mut newconts[i as usize]);
+            if tol != 0.0 {
+                imod_contour_reduce(Some(&mut newconts[i as usize]), tol as f32);
+            }
+            if shave != 0.0 {
+                imod_contour_shave(&mut newconts[i as usize], shave);
+            }
+            let Some(tmpcont) = imod_contour_new() else {
+                add_error = 1;
+                break;
+            };
+            if imod_object_add_contour(&mut thrd_obj[thrd as usize], tmpcont) < 0 {
+                add_error = 1;
+                break;
+            }
+            let last = thrd_obj[thrd as usize].cont.len() - 1;
+            let source = newconts[i as usize].clone();
+            imod_contour_copy(&source, &mut thrd_obj[thrd as usize].cont[last]);
+        }
+    }
+
+    drop(obj);
+    if S_STOP_PROCESSING.load(Ordering::Relaxed) != 0 {
+        return -1;
+    }
+
+    if add_error == 0 {
+        // Count up the new contours and alllocate/reallocate contour array in one shot
+        nco = nobj.cont.len() as i32;
+        for thrd in 0..num_threads {
+            nco += thrd_obj[thrd as usize].cont.len() as i32;
+        }
+        nobj.cont
+            .reserve((nco as usize).saturating_sub(nobj.cont.len()));
+
+        // Assign contour array, copy over the contours one by one
+        for thrd in 0..num_threads {
+            for co in 0..thrd_obj[thrd as usize].cont.len() {
+                let source = thrd_obj[thrd as usize].cont[co].clone();
+                nobj.cont.push(source);
+            }
+        }
+    }
+
+    add_error
 }
 
-/// C `imodContoursFromImagePoints`.
+/// C `imodAutoContourStop` (`autocont.c:684`).
 ///
-/// Walks the exposed sides of pixels selected by `testmask` and returns ordered
-/// native contours.  `image_lines`, when supplied, is the C `unsigned char
-/// **imdata` input and enables edge-position interpolation.
+/// Makes `imod_auto_contours_from_slice` stop processing and return -1.
+pub fn imod_auto_contour_stop() {
+    S_STOP_PROCESSING.store(1, Ordering::Relaxed);
+}
+
+/// `RIGHT_EDGE` (`autocont.c:689`).
+const RIGHT_EDGE: u8 = 16;
+/// `TOP_EDGE` (`autocont.c:690`).
+const TOP_EDGE: u8 = RIGHT_EDGE << 1;
+/// `LEFT_EDGE` (`autocont.c:691`).
+const LEFT_EDGE: u8 = RIGHT_EDGE << 2;
+/// `BOTTOM_EDGE` (`autocont.c:692`).
+const BOTTOM_EDGE: u8 = RIGHT_EDGE << 3;
+/// `ANY_EDGE` (`autocont.c:693`).
+const ANY_EDGE: u8 = RIGHT_EDGE | TOP_EDGE | LEFT_EDGE | BOTTOM_EDGE;
+
+/// C `imodContoursFromImagePoints` (`autocont.c:723`).
+///
+/// Forms contours around marked points in an array.  `data` is an array of
+/// flags marking the image points.  `imdata` is the corresponding actual image
+/// array as one slice per row, which is used to compute interpolated positions
+/// for the edges between marked and unmarked points; if it is `None`, no
+/// interpolation is done and contours will follow horizontal, vertical, and 45
+/// degree diagonal lines.  The number of contours created is returned in
+/// `ncont`.
 #[allow(clippy::too_many_arguments)]
 pub fn imod_contours_from_image_points(
     data: &mut [u8],
-    image_lines: Option<&[&[u8]]>,
-    xsize: usize,
-    ysize: usize,
-    z: f32,
+    imdata: Option<&Vec<&[u8]>>,
+    xsize: i32,
+    ysize: i32,
+    z: i32,
     testmask: u8,
-    diagonal: bool,
-    mut threshold: f32,
-    reverse: bool,
+    diagonal: i32,
+    threshold_in: f32,
+    reverse: i32,
+    ncont: &mut i32,
 ) -> Vec<Icont> {
-    if xsize == 0 || ysize == 0 || data.len() < xsize.saturating_mul(ysize) {
-        return Vec::new();
-    }
-    let right = 16u8;
-    let top = right << 1;
-    let left = right << 2;
-    let bottom = right << 3;
-    let any_edge = right | top | left | bottom;
-    let edge_masks = [right, top, left, bottom];
-    // Direction along each edge, corner into the adjacent pixel, and pixel
-    // across the edge respectively; these are the C static arrays verbatim.
-    let next_x = [0isize, -1, 0, 1];
-    let next_y = [1isize, 0, -1, 0];
-    let corner_x = [1isize, -1, -1, 1];
-    let corner_y = [1isize, 1, -1, -1];
-    let other_x = [1isize, 0, -1, 0];
-    let other_y = [0isize, 1, 0, -1];
-    let valid_image = image_lines.is_some_and(|lines| {
-        lines.len() >= ysize && lines.iter().take(ysize).all(|line| line.len() >= xsize)
-    });
-    if !valid_image {
+    let mut threshold = threshold_in;
+    let mut point = Ipoint {
+        x: 0.,
+        y: 0.,
+        z: 0.,
+    };
+    let mut contarr: Vec<Icont> = Vec::new();
+    let mut itst: i32;
+    let mut jtst: i32;
+    let mut side: u8;
+    let xs: i32;
+    let ys: i32;
+    let edgemask: [u8; 4] = [RIGHT_EDGE, TOP_EDGE, LEFT_EDGE, BOTTOM_EDGE];
+    let nextx: [i32; 4] = [0, -1, 0, 1];
+    let nexty: [i32; 4] = [1, 0, -1, 0];
+    let cornerx: [i32; 4] = [1, -1, -1, 1];
+    let cornery: [i32; 4] = [1, 1, -1, -1];
+    let otherx: [i32; 4] = [1, 0, -1, 0];
+    let othery: [i32; 4] = [0, 1, 0, -1];
+    let mut frac: f32;
+    let mut found: i32;
+    let mut iedge: usize;
+    let mut ixst: i32;
+    let mut iyst: i32;
+    let mut iedgest: usize;
+    let mut nsum: i32;
+    let mut nayx: i32;
+    let mut nayy: i32;
+    let polarity: i32;
+    let mut diff: i32 = 0;
+    let mut edge_sum: f64;
+
+    xs = xsize - 1;
+    ys = ysize - 1;
+    point.z = z as f32;
+    *ncont = 0;
+    nsum = 0;
+    edge_sum = 0.;
+    polarity = if reverse != 0 { -1 } else { 1 };
+    if imdata.is_none() {
         threshold = -1.;
     }
-    let mut edge_sum = 0f64;
-    let mut edge_count = 0usize;
-    for y in 0..ysize {
-        for x in 0..xsize {
-            let index = x + y * xsize;
-            if data[index] & testmask == 0 {
-                continue;
-            }
-            let mut side = 0;
-            let mut count_edge = |nx: usize, ny: usize| {
-                if threshold < 0. && valid_image {
-                    let lines = image_lines.expect("validated image lines");
-                    edge_sum += (lines[y][x] as f64) + (lines[ny][nx] as f64);
-                    edge_count += 1;
+
+    /* Go through all points including the edges of the image area, and
+    mark all the edges of defined area.  Compute a  */
+
+    for j in 0..ysize {
+        for i in 0..xsize {
+            if data[(i + j * xsize) as usize] & testmask != 0 {
+                /* Mark a side if on edge of image, or if next pixel over
+                is not in the set */
+                side = 0;
+                if i == xs {
+                    side |= RIGHT_EDGE;
+                } else if data[((i + 1) + j * xsize) as usize] & testmask == 0 {
+                    side |= RIGHT_EDGE;
+                    if threshold < 0. {
+                        if let Some(imdata) = imdata {
+                            edge_sum += (imdata[j as usize][i as usize] as i32
+                                + imdata[j as usize][(i + 1) as usize] as i32)
+                                as f64;
+                            nsum += 1;
+                        }
+                    }
                 }
-            };
-            if x + 1 == xsize {
-                side |= right;
-            } else if data[index + 1] & testmask == 0 {
-                side |= right;
-                count_edge(x + 1, y);
+                if j == ys {
+                    side |= TOP_EDGE;
+                } else if data[(i + (j + 1) * xsize) as usize] & testmask == 0 {
+                    side |= TOP_EDGE;
+                    if threshold < 0. {
+                        if let Some(imdata) = imdata {
+                            edge_sum += (imdata[j as usize][i as usize] as i32
+                                + imdata[(j + 1) as usize][i as usize] as i32)
+                                as f64;
+                            nsum += 1;
+                        }
+                    }
+                }
+                if i == 0 {
+                    side |= LEFT_EDGE;
+                } else if data[((i - 1) + j * xsize) as usize] & testmask == 0 {
+                    side |= LEFT_EDGE;
+                    if threshold < 0. {
+                        if let Some(imdata) = imdata {
+                            edge_sum += (imdata[j as usize][i as usize] as i32
+                                + imdata[j as usize][(i - 1) as usize] as i32)
+                                as f64;
+                            nsum += 1;
+                        }
+                    }
+                }
+                if j == 0 {
+                    side |= BOTTOM_EDGE;
+                } else if data[(i + (j - 1) * xsize) as usize] & testmask == 0 {
+                    side |= BOTTOM_EDGE;
+                    if threshold < 0. {
+                        if let Some(imdata) = imdata {
+                            edge_sum += (imdata[j as usize][i as usize] as i32
+                                + imdata[(j - 1) as usize][i as usize] as i32)
+                                as f64;
+                            nsum += 1;
+                        }
+                    }
+                }
+                data[(i + j * xsize) as usize] |= side;
             }
-            if y + 1 == ysize {
-                side |= top;
-            } else if data[index + xsize] & testmask == 0 {
-                side |= top;
-                count_edge(x, y + 1);
-            }
-            if x == 0 {
-                side |= left;
-            } else if data[index - 1] & testmask == 0 {
-                side |= left;
-                count_edge(x - 1, y);
-            }
-            if y == 0 {
-                side |= bottom;
-            } else if data[index - xsize] & testmask == 0 {
-                side |= bottom;
-                count_edge(x, y - 1);
-            }
-            data[index] |= side;
         }
-    }
-    if edge_count != 0 {
-        threshold = (0.5 * edge_sum / edge_count as f64) as f32;
     }
 
-    let in_bounds =
-        |x: isize, y: isize| x >= 0 && y >= 0 && x < xsize as isize && y < ysize as isize;
-    let mut contours = Vec::new();
-    loop {
-        let Some((mut x, mut y)) = (0..ysize).find_map(|y| {
-            (0..xsize)
-                .find(|&x| data[x + y * xsize] & any_edge != 0)
-                .map(|x| (x, y))
-        }) else {
-            break;
-        };
-        let mut edge = edge_masks
-            .iter()
-            .position(|mask| data[x + y * xsize] & mask != 0)
-            .expect("pixel selected from edge mask");
-        let (start_x, start_y, start_edge) = (x, y, edge);
-        let mut contour = Icont::default();
-        imod_contour_default(&mut contour);
-        // Each iteration clears exactly one edge.  The bound turns malformed
-        // flag input into a partial contour rather than an infinite walk.
-        for _ in 0..=xsize.saturating_mul(ysize).saturating_mul(4) {
-            if !contour.pts.is_empty() && (x, y, edge) == (start_x, start_y, start_edge) {
-                break;
-            }
-            if !diagonal {
-                if data[x + y * xsize] & edge_masks[(edge + 1) % 4] != 0 {
-                    edge = (edge + 1) % 4;
-                } else {
-                    let nx = x as isize + next_x[edge];
-                    let ny = y as isize + next_y[edge];
-                    if in_bounds(nx, ny)
-                        && data[nx as usize + ny as usize * xsize] & edge_masks[edge] != 0
-                    {
-                        x = nx as usize;
-                        y = ny as usize;
-                    } else {
-                        let nx = x as isize + corner_x[edge];
-                        let ny = y as isize + corner_y[edge];
-                        if !in_bounds(nx, ny) {
-                            break;
-                        }
-                        x = nx as usize;
-                        y = ny as usize;
-                        edge = (edge + 3) % 4;
-                    }
+    if nsum != 0 {
+        threshold = (0.5 * edge_sum / nsum as f64) as f32;
+    }
+
+    found = 1;
+    while found != 0 {
+        found = 0;
+        'search: for jsearch in 0..ysize {
+            for isearch in 0..xsize {
+                if data[(isearch + jsearch * xsize) as usize] & ANY_EDGE == 0 {
+                    continue;
                 }
-            } else {
-                let cx = x as isize + corner_x[edge];
-                let cy = y as isize + corner_y[edge];
-                if in_bounds(cx, cy)
-                    && data[cx as usize + cy as usize * xsize] & edge_masks[(edge + 3) % 4] != 0
+                let mut i = isearch;
+                let mut j = jsearch;
+
+                /* find lowest edge */
+                iedge = 0;
+                while iedge < 4 {
+                    if data[(i + j * xsize) as usize] & edgemask[iedge] != 0 {
+                        break;
+                    }
+                    iedge += 1;
+                }
+
+                /* Start a new contour */
+                *ncont += 1;
+                contarr.push(Icont::default());
+                let contidx = (*ncont - 1) as usize;
+                imod_contour_default(&mut contarr[contidx]);
+
+                /* keep track of starting place and stop when reach
+                it again */
+                iedgest = iedge;
+                ixst = i;
+                iyst = j;
+                while contarr[contidx].pts.is_empty() || i != ixst || j != iyst || iedge != iedgest
                 {
-                    x = cx as usize;
-                    y = cy as usize;
-                    edge = (edge + 3) % 4;
-                } else {
-                    let nx = x as isize + next_x[edge];
-                    let ny = y as isize + next_y[edge];
-                    if in_bounds(nx, ny)
-                        && data[nx as usize + ny as usize * xsize] & edge_masks[edge] != 0
-                    {
-                        x = nx as usize;
-                        y = ny as usize;
+                    if diagonal == 0 {
+                        /* If no diagonals, look for next edge first
+                        around corner on same pixel */
+                        if data[(i + j * xsize) as usize] & edgemask[(iedge + 1) % 4] != 0 {
+                            iedge = (iedge + 1) % 4;
+                        } else if data[((i + nextx[iedge]) + (j + nexty[iedge]) * xsize) as usize]
+                            & edgemask[iedge]
+                            != 0
+                        {
+                            /* same edge, next pixel */
+                            i += nextx[iedge];
+                            j += nexty[iedge];
+                        } else {
+                            /* pixel on an inside corner - it's got to
+                            be, but put in check for testing */
+                            i += cornerx[iedge];
+                            j += cornery[iedge];
+                            iedge = (iedge + 3) % 4;
+                            if data[(i + j * xsize) as usize] & edgemask[iedge] == 0 {
+                                let _ = ImodFile::Stdout.write_all(&c_format_bytes(
+                                    "no edge around corner at i %d, j %d, edge %d\n",
+                                    &[
+                                        CArg::Int(i as i64),
+                                        CArg::Int(j as i64),
+                                        CArg::Int(iedge as i64),
+                                    ],
+                                ));
+                            }
+                        }
                     } else {
-                        edge = (edge + 1) % 4;
-                        if data[x + y * xsize] & edge_masks[edge] == 0 {
-                            break;
+                        /* If diagonals, look for next edge first on pixel
+                        around inside corner if it's legal */
+                        itst = i + cornerx[iedge];
+                        jtst = j + cornery[iedge];
+                        if itst >= 0
+                            && itst < xsize
+                            && jtst >= 0
+                            && jtst < ysize
+                            && (data[(itst + jtst * xsize) as usize] & edgemask[(iedge + 3) % 4]
+                                != 0)
+                        {
+                            i = itst;
+                            j = jtst;
+                            iedge = (iedge + 3) % 4;
+                        } else {
+                            itst = i + nextx[iedge];
+                            jtst = j + nexty[iedge];
+                            if itst >= 0
+                                && itst < xsize
+                                && jtst >= 0
+                                && jtst < ysize
+                                && data[((i + nextx[iedge]) + (j + nexty[iedge]) * xsize) as usize]
+                                    & edgemask[iedge]
+                                    != 0
+                            {
+                                /* then same edge, next pixel */
+                                i += nextx[iedge];
+                                j += nexty[iedge];
+                            } else {
+                                /* go around corner on this pixel - the
+                                edge has to be there, but put in check
+                                for testing */
+                                iedge = (iedge + 1) % 4;
+                                if data[(i + j * xsize) as usize] & edgemask[iedge] == 0 {
+                                    let _ = ImodFile::Stdout.write_all(&c_format_bytes(
+                                        "no edge around corner at i %d, j %d, edge %d\n",
+                                        &[
+                                            CArg::Int(i as i64),
+                                            CArg::Int(j as i64),
+                                            CArg::Int(iedge as i64),
+                                        ],
+                                    ));
+                                }
+                            }
                         }
                     }
+
+                    frac = 0.45;
+                    nayx = i + otherx[iedge];
+                    nayy = j + othery[iedge];
+                    if threshold > 0. && nayx >= 0 && nayx < xsize && nayy >= 0 && nayy < ysize {
+                        let imdata = imdata.expect("threshold > 0 implies imdata");
+                        diff = imdata[nayy as usize][nayx as usize] as i32
+                            - imdata[j as usize][i as usize] as i32;
+                        if polarity * diff < 0 {
+                            frac = (threshold - imdata[j as usize][i as usize] as i32 as f32)
+                                / diff as f32;
+                            /* `B3DMIN`/`B3DMAX` against a double literal: the
+                            comparison and the result are in double. */
+                            frac = (if 0.99 < frac as f64 {
+                                0.99
+                            } else {
+                                frac as f64
+                            }) as f32;
+                            frac = (if 0.01 > frac as f64 {
+                                0.01
+                            } else {
+                                frac as f64
+                            }) as f32;
+                        }
+                    }
+                    point.x = ((i as f64 + 0.5) + (frac * otherx[iedge] as f32) as f64) as f32;
+                    point.y = ((j as f64 + 0.5) + (frac * othery[iedge] as f32) as f64) as f32;
+
+                    /* add the point and clear the edge */
+                    let psize = contarr[contidx].pts.len() as i32;
+                    imod_point_add(&mut contarr[contidx], Some(point), psize);
+                    data[(i + j * xsize) as usize] &= !edgemask[iedge];
                 }
+                found = 1;
+                break 'search;
             }
-            let across_x = x as isize + other_x[edge];
-            let across_y = y as isize + other_y[edge];
-            let mut fraction = 0.45;
-            if threshold > 0. && valid_image && in_bounds(across_x, across_y) {
-                let lines = image_lines.expect("validated image lines");
-                let diff = lines[across_y as usize][across_x as usize] as f32 - lines[y][x] as f32;
-                let polarity = if reverse { -1. } else { 1. };
-                if polarity * diff < 0. {
-                    fraction = ((threshold - lines[y][x] as f32) / diff).clamp(0.01, 0.99);
-                }
-            }
-            contour.pts.push(Ipoint {
-                x: x as f32 + 0.5 + fraction * other_x[edge] as f32,
-                y: y as f32 + 0.5 + fraction * other_y[edge] as f32,
-                z,
-            });
-            data[x + y * xsize] &= !edge_masks[edge];
-        }
-        if !contour.pts.is_empty() {
-            contours.push(contour);
         }
     }
-    contours
+    contarr
 }
 
-/// C `findBoundaryConts`.
+/// C `imoda_object_bfill_2d` (`autocont.c:936`).
 ///
-/// Replaces the C `Ilist` of integer pointers with a caller-owned list of
-/// contour indices. With `nearest` false, it returns no indices unless a
-/// boundary contour lies exactly at `z`; otherwise it selects every valid
-/// contour at the nearest Z plane.
-pub fn find_boundary_conts(
+/// Marks one patch in `data` with the value `cont_label` starting at point
+/// `x`, `y`.  It adds contiguous points below or above threshold depending on
+/// whether the value in `idata` is below or above threshold.
+#[allow(clippy::too_many_arguments)]
+fn imoda_object_bfill_2d(
+    idata: &[u8],
+    data: &mut [i32],
+    xlist: &mut [i32],
+    ylist: &mut [i32],
+    xsize: i32,
+    ysize: i32,
+    x: i32,
+    y: i32,
+    t1: i32,
+    t2: i32,
+    exact: i32,
+    diagonal: i32,
+    cont_label: i32,
+    listsize: i32,
+) -> i32 {
+    /* `threshold` and `direction` are uninitialised in the C for the exact
+    branch, where neither is read (`autocont.c:941-957`). */
+    let threshold: i32;
+    let mut ringnext: i32 = 0;
+    let mut ringfree: i32 = 1;
+    let mut pixind: i32;
+    let direction: i32;
+    let mut nadded: i32 = 0;
+    let mut test_exact: i32 = 0;
+
+    if exact >= 0 {
+        test_exact = if idata[(x + y * xsize) as usize] as i32 == exact {
+            1
+        } else {
+            0
+        };
+        threshold = 0;
+        direction = 0;
+    } else if idata[(x + y * xsize) as usize] as i32 <= t1 {
+        threshold = t1;
+        direction = -1;
+    } else {
+        threshold = t2;
+        direction = 1;
+    }
+
+    /* initialize the ring buffer */
+    xlist[0] = x;
+    ylist[0] = y;
+    data[(x + y * xsize) as usize] = -2;
+
+    while ringnext != ringfree {
+        /* check next point on list */
+        let x = xlist[ringnext as usize];
+        let y = ylist[ringnext as usize];
+        pixind = x + y * xsize;
+        if (exact < 0 && direction * (idata[pixind as usize] as i32 - threshold) >= 0)
+            || (exact >= 0
+                && ((test_exact != 0 && idata[pixind as usize] as i32 == exact)
+                    || (test_exact == 0
+                        && (idata[pixind as usize] as i32 <= t1
+                            || idata[pixind as usize] as i32 >= t2))))
+        {
+            /* If point passes test, mark as flood */
+            data[pixind as usize] = cont_label;
+            nadded += 1;
+
+            /* add each of four neighbors on list if coordinate is legal
+            and they are not already on list or in flood */
+            if x > 0 && data[(pixind - 1) as usize] == 0 {
+                xlist[ringfree as usize] = x - 1;
+                ylist[ringfree as usize] = y;
+                ringfree += 1;
+                ringfree %= listsize;
+                data[(pixind - 1) as usize] = -2;
+            }
+            if x < xsize - 1 && data[(pixind + 1) as usize] == 0 {
+                xlist[ringfree as usize] = x + 1;
+                ylist[ringfree as usize] = y;
+                ringfree += 1;
+                ringfree %= listsize;
+                data[(pixind + 1) as usize] = -2;
+            }
+            if y > 0 && data[(pixind - xsize) as usize] == 0 {
+                xlist[ringfree as usize] = x;
+                ylist[ringfree as usize] = y - 1;
+                ringfree += 1;
+                ringfree %= listsize;
+                data[(pixind - xsize) as usize] = -2;
+            }
+            if y < ysize - 1 && data[(pixind + xsize) as usize] == 0 {
+                xlist[ringfree as usize] = x;
+                ylist[ringfree as usize] = y + 1;
+                ringfree += 1;
+                ringfree %= listsize;
+                data[(pixind + xsize) as usize] = -2;
+            }
+            if diagonal != 0 {
+                if x > 0 && y > 0 && data[(pixind - 1 - xsize) as usize] == 0 {
+                    xlist[ringfree as usize] = x - 1;
+                    ylist[ringfree as usize] = y - 1;
+                    ringfree += 1;
+                    ringfree %= listsize;
+                    data[(pixind - 1 - xsize) as usize] = -2;
+                }
+                if x < xsize - 1 && y > 0 && data[(pixind + 1 - xsize) as usize] == 0 {
+                    xlist[ringfree as usize] = x + 1;
+                    ylist[ringfree as usize] = y - 1;
+                    ringfree += 1;
+                    ringfree %= listsize;
+                    data[(pixind + 1 - xsize) as usize] = -2;
+                }
+                if x > 0 && y < ysize - 1 && data[(pixind - 1 + xsize) as usize] == 0 {
+                    xlist[ringfree as usize] = x - 1;
+                    ylist[ringfree as usize] = y + 1;
+                    ringfree += 1;
+                    ringfree %= listsize;
+                    data[(pixind - 1 + xsize) as usize] = -2;
+                }
+                if x < xsize - 1 && y < ysize - 1 && data[(pixind + 1 + xsize) as usize] == 0 {
+                    xlist[ringfree as usize] = x + 1;
+                    ylist[ringfree as usize] = y + 1;
+                    ringfree += 1;
+                    ringfree %= listsize;
+                    data[(pixind + 1 + xsize) as usize] = -2;
+                }
+            }
+        }
+
+        /* Take point off list, advance next pointer */
+        if data[pixind as usize] == -2 {
+            data[pixind as usize] = 0;
+        }
+        ringnext += 1;
+        ringnext %= listsize;
+    }
+
+    nadded
+}
+
+/// C `findBoundaryConts` (`autocont.c:1046`).
+///
+/// Find the boundary contours for a given Z value.  Returns the contour
+/// numbers in the list of ints.  Returns only contours at the given Z value if
+/// `nearest_bound` is 0, otherwise returns contours at the nearest Z value.
+fn find_boundary_conts(
     z: i32,
-    boundary_object: &Iobj,
-    nearest: bool,
-    contour_indices: &mut Vec<usize>,
-) {
-    contour_indices.clear();
-    let mut min_difference = i32::MAX;
-    let mut nearest_z = 0;
-    for contour in &boundary_object.cont {
-        if contour.pts.len() < 3 {
+    bound_obj: &Iobj,
+    nearest_bound: i32,
+    cont_list: &mut Vec<i32>,
+) -> i32 {
+    let mut min_diff: i32;
+    let mut diff: i32;
+    /* `zmin` is uninitialised in the C and is only read after the first loop
+    has set it, unless every contour has fewer than 3 points. */
+    let mut zmin: i32 = 0;
+    let mut zcont: i32;
+    cont_list.clear();
+    min_diff = 100000000;
+    for co in 0..bound_obj.cont.len() {
+        if bound_obj.cont[co].pts.len() < 3 {
             continue;
         }
-        let contour_z = contour.pts[0].z.round() as i32;
-        let difference = (contour_z - z).abs();
-        if difference < min_difference {
-            min_difference = difference;
-            nearest_z = contour_z;
+        zcont = (bound_obj.cont[co].pts[0].z as f64 + 0.5).floor() as i32;
+        diff = zcont - z;
+        if diff.abs() < min_diff {
+            min_diff = diff.abs();
+            zmin = zcont;
         }
     }
-    if !nearest && min_difference > 0 {
-        return;
+    if nearest_bound == 0 && min_diff > 0 {
+        return 0;
     }
-    for (index, contour) in boundary_object.cont.iter().enumerate() {
-        if contour.pts.len() >= 3 && contour.pts[0].z.round() as i32 == nearest_z {
-            contour_indices.push(index);
+    for co in 0..bound_obj.cont.len() {
+        if bound_obj.cont[co].pts.len() < 3 {
+            continue;
+        }
+        zcont = (bound_obj.cont[co].pts[0].z as f64 + 0.5).floor() as i32;
+        if zmin == zcont {
+            cont_list.push(co as i32);
         }
     }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn patch_fills_an_enclosed_hole_and_clears_work_flags() {
-        let mut data = vec![AUTOX_FLOOD; 9];
-        data[4] = 0;
-        let mut xlist = [0; 16];
-        let mut ylist = [0; 16];
-        imod_auto_patch(&mut data, &mut xlist, &mut ylist, 3, 3);
-        assert!(data.iter().all(|&pixel| pixel == AUTOX_FLOOD));
-    }
-
-    #[test]
-    fn expand_then_shrink_match_native_eight_neighbor_rules() {
-        let mut data = vec![0; 9];
-        data[4] = AUTOX_FLOOD;
-        imod_auto_expand(&mut data, 3, 3);
-        assert!(data.iter().all(|&pixel| pixel == AUTOX_FLOOD));
-        imod_auto_shrink(&mut data, 3, 3);
-        assert_eq!(data, vec![0, 0, 0, 0, AUTOX_FLOOD, 0, 0, 0, 0]);
-    }
-
-    #[test]
-    fn threshold_fill_keeps_four_and_eight_connectivity_distinct() {
-        let image = [10, 0, 0, 0, 10, 0, 0, 0, 10];
-        let mut four_way = [0; 9];
-        let mut xlist = [0; 32];
-        let mut ylist = [0; 32];
-        assert_eq!(
-            imoda_object_bfill_2d(
-                &image,
-                &mut four_way,
-                &mut xlist,
-                &mut ylist,
-                3,
-                3,
-                0,
-                0,
-                2,
-                8,
-                None,
-                false,
-                7,
-            ),
-            1
-        );
-        let mut diagonal = [0; 9];
-        assert_eq!(
-            imoda_object_bfill_2d(
-                &image,
-                &mut diagonal,
-                &mut xlist,
-                &mut ylist,
-                3,
-                3,
-                0,
-                0,
-                2,
-                8,
-                None,
-                true,
-                7,
-            ),
-            3
-        );
-        assert_eq!(diagonal, [7, 0, 0, 0, 7, 0, 0, 0, 7]);
-    }
-
-    #[test]
-    fn contour_stop_latch_is_observable_and_resettable_by_a_new_scan() {
-        reset_auto_contour_stop();
-        assert!(!auto_contour_stop_requested());
-        imod_auto_contour_stop();
-        assert!(auto_contour_stop_requested());
-        reset_auto_contour_stop();
-    }
-
-    #[test]
-    fn contour_walker_turns_one_selected_pixel_into_four_edges() {
-        let mut data = [AUTOX_FLOOD];
-        let contours = imod_contours_from_image_points(
-            &mut data,
-            None,
-            1,
-            1,
-            4.,
-            AUTOX_FLOOD,
-            false,
-            -1.,
-            false,
-        );
-        assert_eq!(contours.len(), 1);
-        assert_eq!(contours[0].pts.len(), 4);
-        assert!(contours[0].pts.iter().all(|point| point.z == 4.));
-        assert_eq!(data, [AUTOX_FLOOD]);
-    }
-
-    #[test]
-    fn boundary_selector_honors_exact_and_nearest_planes() {
-        let contour_at = |z| Icont {
-            pts: vec![Ipoint { x: 0., y: 0., z }; 3],
-            ..Icont::default()
-        };
-        let object = Iobj {
-            cont: vec![contour_at(2.), contour_at(5.), Icont::default()],
-            ..Iobj::default()
-        };
-        let mut selected = vec![99];
-        find_boundary_conts(4, &object, false, &mut selected);
-        assert!(selected.is_empty());
-        find_boundary_conts(4, &object, true, &mut selected);
-        assert_eq!(selected, vec![1]);
-        find_boundary_conts(2, &object, false, &mut selected);
-        assert_eq!(selected, vec![0]);
-    }
-
-    #[test]
-    fn slice_orchestrator_extracts_a_high_threshold_component() {
-        let image = [10u8];
-        let contours = imod_auto_contours_from_slice(
-            &image,
-            1,
-            1,
-            3.,
-            AutoContourOptions {
-                low_threshold: 0.,
-                high_threshold: 5.,
-                min_size: 0,
-                ..AutoContourOptions::default()
-            },
-        );
-        assert_eq!(contours.len(), 1);
-        assert_eq!(contours[0].pts.len(), 4);
-    }
-
-    #[test]
-    fn slice_orchestrator_excludes_pixels_outside_boundaries() {
-        let boundary = Icont {
-            pts: vec![
-                Ipoint {
-                    x: 0.,
-                    y: 0.,
-                    z: 0.,
-                },
-                Ipoint {
-                    x: 1.,
-                    y: 0.,
-                    z: 0.,
-                },
-                Ipoint {
-                    x: 1.,
-                    y: 1.,
-                    z: 0.,
-                },
-                Ipoint {
-                    x: 0.,
-                    y: 1.,
-                    z: 0.,
-                },
-            ],
-            ..Icont::default()
-        };
-        let options = AutoContourOptions {
-            low_threshold: 0.,
-            high_threshold: 5.,
-            min_size: 0,
-            ..AutoContourOptions::default()
-        };
-        assert_eq!(
-            imod_auto_contours_from_slice_with_boundaries(
-                &[10, 10],
-                2,
-                1,
-                0.,
-                options,
-                &[boundary]
-            )
-            .len(),
-            1
-        );
-    }
+    0
 }

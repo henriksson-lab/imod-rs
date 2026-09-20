@@ -8,9 +8,8 @@
 
 use super::processchunks::Processchunks;
 use super::processhandler::ProcessHandler;
+use crate::imod::libcfshr::b3dutil::b3d_milli_sleep;
 use std::process::{Child, Command, Stdio};
-use std::thread;
-use std::time::Duration;
 
 /// Qt `QProcess::ExitStatus`.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -19,14 +18,16 @@ pub enum ProcessExitStatus {
     CrashExit,
 }
 
-/// Qt `QProcess::ProcessError`.
+/// Qt `QProcess::ProcessError`, in the header's declaration order so that a
+/// cast to `int` gives the value `*mOutStream << processError` prints.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
+#[repr(i32)]
 pub enum ProcessError {
     FailedToStart,
     Crashed,
     Timedout,
-    WriteError,
     ReadError,
+    WriteError,
     UnknownError,
 }
 
@@ -119,6 +120,51 @@ impl MachineHandler {
             );
             self.process_handler_array.push(process_handler);
         }
+    }
+
+    /// Qt's event loop, not a source function: `mKillProcess` emits `finished`
+    /// to `handleFinished` as soon as the loop spins after `imodkillgroup`
+    /// exits.  A `std::process::Child` has no signal dispatcher, so the exit is
+    /// picked up here at the state checks where the slot would already have run.
+    fn deliver_kill_process_signals(&mut self) {
+        if self.kill_finished_signal_received {
+            return;
+        }
+        let mut delivered = None;
+        if let Some(kill_process) = &mut self.kill_process {
+            if let Ok(Some(status)) = kill_process.try_wait() {
+                delivered = Some((
+                    status.code().unwrap_or(0),
+                    if status.code().is_some() {
+                        ProcessExitStatus::NormalExit
+                    } else {
+                        ProcessExitStatus::CrashExit
+                    },
+                ));
+            }
+        }
+        if let Some((exit_code, exit_status)) = delivered {
+            self.handle_finished(exit_code, exit_status);
+        }
+    }
+
+    /// C++ inline `MachineHandler::nameToLong`.
+    pub fn name_to_long(&self, ok: &mut bool) -> i64 {
+        match self.name.parse::<i64>() {
+            Ok(value) => {
+                *ok = true;
+                value
+            }
+            Err(_) => {
+                *ok = false;
+                0
+            }
+        }
+    }
+
+    /// C++ inline `MachineHandler::incrementNumCpus`.
+    pub fn increment_num_cpus(&mut self) {
+        self.num_cpus += 1;
     }
 
     /// C++ `MachineHandler::setValues`.
@@ -280,6 +326,7 @@ impl MachineHandler {
 
     /// C++ `MachineHandler::killSignal`.
     pub fn kill_signal(&mut self) {
+        self.deliver_kill_process_signals();
         if self.ignore_kill || self.kill_finished_signal_received {
             return;
         }
@@ -360,9 +407,7 @@ impl MachineHandler {
                                     Ok(process) => self.kill_process = Some(process),
                                     Err(_) => self.handle_error(ProcessError::FailedToStart),
                                 }
-                                thread::sleep(Duration::from_millis(
-                                    (*self.processchunks).get_millisec_sleep() as u64,
-                                ));
+                                b3d_milli_sleep((*self.processchunks).get_millisec_sleep());
                             } else {
                                 self.kill_warning = true;
                                 (*self.processchunks).write_out(&format!(
@@ -430,6 +475,7 @@ impl MachineHandler {
 
     /// C++ `MachineHandler::isKillFinished`.
     pub fn is_kill_finished(&mut self) -> bool {
+        self.deliver_kill_process_signals();
         if self.ignore_kill {
             return true;
         }
@@ -510,4 +556,10 @@ impl MachineHandler {
     pub fn set_internal_dropped(&mut self) {
         self.internal_dropped = true;
     }
+
+    // `machinehandler.h` also declares `init`, `setup()`, `isTimedOut`,
+    // `msgKillProcessTimeout`, `isKillNeeded` and `isKillSignal`, none of which
+    // has a definition anywhere in the vendored source and none of which is
+    // called.  There is no body to translate, so they are recorded here rather
+    // than invented.
 }

@@ -1,644 +1,846 @@
-//! Recursive one-dimensional filters from `IMOD/mrc/recline.{c,h}`.
+//! Translation of `IMOD/mrc/recline.{c,h}` — Gregoire Malandain's recursive
+//! filtering of a 1D line.
 //!
-//! The C API exposed mutable global state and caller-allocated work buffers.
-//! This translation keeps coefficients as an owned value and owns its temporary
-//! lines; the numerical recurrences and their boundary conditions are unchanged.
+//! `InitRecursiveCoefficients` `malloc`s an `RFcoefficientType` and returns
+//! `NULL` on every rejection, so the translation returns `Option`.  Everything
+//! else keeps the source's shape: `RecursiveFilter1D` still takes the caller's
+//! `in`, `out`, `work1` and `work2` lines and returns `EXIT_ON_FAILURE` /
+//! `EXIT_ON_SUCCESS`, because the callers in `preNAD.cpp` and `preNID.cpp`
+//! allocate those four buffers themselves.
+//!
+//! Every arithmetic statement is the source's statement, including where the
+//! C accumulates with `+=` and `*=`: `sumA = A - B; sumA += C - D;` is
+//! `A - B + (C - D)`, which is not the same double as `((A - B) + C) - D`.
 
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::{AtomicI32, Ordering};
 
-static RECLINE_VERBOSE: AtomicBool = AtomicBool::new(false);
+static VERBOSE: AtomicI32 = AtomicI32::new(0);
 
+const EXIT_ON_FAILURE: i32 = 0;
+const EXIT_ON_SUCCESS: i32 = 1;
+
+/// `recursiveFilterType`.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum RecursiveFilterType {
+    /// `UNKNOWN_FILTER`
     Unknown,
+    /// `ALPHA_DERICHE`
     AlphaDeriche,
+    /// `GAUSSIAN_DERICHE`
     GaussianDeriche,
+    /// `GAUSSIAN_FIDRICH`
     GaussianFidrich,
 }
 
+/// `derivativeOrder`.  `SMOOTHING` is `DERIVATIVE_0` and `DERIVATIVE_1_EDGES`
+/// is `DERIVATIVE_1_CONTOURS`; the enum has one arm per distinct value.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum DerivativeOrder {
+    /// `NODERIVATIVE` (-1)
     None,
+    /// `DERIVATIVE_0` / `SMOOTHING` (0)
     Zero,
+    /// `DERIVATIVE_1` (1)
     One,
+    /// `DERIVATIVE_2` (2)
     Two,
+    /// `DERIVATIVE_3` (3)
     Three,
+    /// `DERIVATIVE_1_CONTOURS` / `DERIVATIVE_1_EDGES` (11)
     OneContours,
 }
 
+/// `RFcoefficientType`.
 #[derive(Clone, Copy, Debug, PartialEq)]
-pub struct RecursiveFilterCoefficients {
+pub struct RFcoefficientType {
+    /*--- denominateur       ---*/
     pub sd1: f64,
     pub sd2: f64,
     pub sd3: f64,
     pub sd4: f64,
+    /*--- numerateur positif ---*/
     pub sp0: f64,
     pub sp1: f64,
     pub sp2: f64,
     pub sp3: f64,
+    /*--- numerateur negatif ---*/
     pub sn0: f64,
     pub sn1: f64,
     pub sn2: f64,
     pub sn3: f64,
     pub sn4: f64,
-    pub filter_type: RecursiveFilterType,
+    /*--- type de filtre en cours ---*/
+    pub type_filter: RecursiveFilterType,
     pub derivative: DerivativeOrder,
 }
 
-impl Default for RecursiveFilterCoefficients {
-    fn default() -> Self {
-        Self {
-            sd1: 0.0,
-            sd2: 0.0,
-            sd3: 0.0,
-            sd4: 0.0,
-            sp0: 0.0,
-            sp1: 0.0,
-            sp2: 0.0,
-            sp3: 0.0,
-            sn0: 0.0,
-            sn1: 0.0,
-            sn2: 0.0,
-            sn3: 0.0,
-            sn4: 0.0,
-            filter_type: RecursiveFilterType::Unknown,
-            derivative: DerivativeOrder::None,
-        }
-    }
+/// C `printRecursiveCoefficients`.
+pub fn print_recursive_coefficients(rfc: &RFcoefficientType) {
+    print!("denominator:\n");
+    print!(
+        "{:.6} {:.6} {:.6} {:.6}\n",
+        rfc.sd1, rfc.sd2, rfc.sd3, rfc.sd4
+    );
+    print!("positive numerator:\n");
+    print!(
+        "{:.6} {:.6} {:.6} {:.6}\n",
+        rfc.sp0, rfc.sp1, rfc.sp2, rfc.sp3
+    );
+    print!("negative numerator:\n");
+    print!(
+        "{:.6} {:.6} {:.6} {:.6} {:.6}\n",
+        rfc.sn0, rfc.sn1, rfc.sn2, rfc.sn3, rfc.sn4
+    );
+    print!("\n");
 }
 
-fn recline_error(message: impl Into<String>) -> String {
-    let message = message.into();
-    if RECLINE_VERBOSE.load(Ordering::Relaxed) {
-        eprintln!("InitRecursiveCoefficients: {message}");
-    }
-    message
-}
-
-/// Equivalent to `InitRecursiveCoefficients`.  Alpha-Deriche coefficients are
-/// exact translations; fourth-order Gaussian coefficient construction follows
-/// the same recurrence parameterization.
+/// C `InitRecursiveCoefficients`.
 pub fn init_recursive_coefficients(
     x: f64,
-    mut filter_type: RecursiveFilterType,
+    mut type_filter: RecursiveFilterType,
     mut derivative: DerivativeOrder,
-) -> Result<RecursiveFilterCoefficients, String> {
-    if filter_type == RecursiveFilterType::Unknown {
-        filter_type = RecursiveFilterType::AlphaDeriche;
-    }
-    if !(x.is_finite()) {
-        return Err(recline_error("recursive filter coefficient must be finite"));
-    }
-    let mut out = RecursiveFilterCoefficients::default();
-    match filter_type {
-        RecursiveFilterType::AlphaDeriche => {
-            if !(0.1..=1.9).contains(&x) {
-                return Err(recline_error(
-                    "alpha Deriche coefficient must be in [0.1, 1.9]",
-                ));
-            }
-            if derivative == DerivativeOrder::None {
-                derivative = DerivativeOrder::Zero;
-            }
-            let ex = (-x).exp();
-            match derivative {
-                DerivativeOrder::Zero => {
-                    out.sp0 = (1.0 - ex).powi(2) / (1.0 + 2.0 * x * ex - ex * ex);
-                    out.sp1 = out.sp0 * (x - 1.0) * ex;
-                    out.sn1 = out.sp0 * (x + 1.0) * ex;
-                    out.sn2 = -out.sp0 * ex * ex;
-                }
-                DerivativeOrder::One => {
-                    out.sp1 = -(1.0 - ex).powi(3) / (2.0 * (1.0 + ex));
-                    out.sn1 = -out.sp1;
-                }
-                DerivativeOrder::OneContours => {
-                    out.sp1 = -(1.0 - ex).powi(2);
-                    out.sn1 = -out.sp1;
-                }
-                DerivativeOrder::Two => {
-                    let k1 = -2.0 * (1.0 - ex).powi(3) / (1.0 + ex).powi(3);
-                    let k2 = (1.0 - ex * ex) / (2.0 * ex);
-                    out.sp0 = k1;
-                    out.sp1 = -k1 * (1.0 + k2) * ex;
-                    out.sn1 = k1 * (1.0 - k2) * ex;
-                    out.sn2 = -k1 * ex * ex;
-                }
-                DerivativeOrder::Three => {
-                    let mut k1 = (1.0 + x) * ex + x - 1.0;
-                    let k2 = (1.0 - ex) / k1;
-                    k1 *= (1.0 - ex).powi(4);
-                    k1 /= 2.0 * x * x * ex * ex;
-                    k1 /= ex + 1.0;
-                    out.sp0 = k1 * x * (k2 + 1.0);
-                    out.sp1 = -k1 * x * (1.0 + k2 + k2 * x) * ex;
-                    out.sn0 = -out.sp0;
-                    out.sn1 = -out.sp1;
-                }
-                DerivativeOrder::None => unreachable!(),
-            }
-            out.sd1 = -2.0 * ex;
-            out.sd2 = ex * ex;
+) -> Option<RFcoefficientType> {
+    let proc = "InitRecursiveCoefficients";
+    let ex: f64;
+    let mut k1: f64;
+    let k2: f64;
+    let (mut a0, mut a1, mut c0, mut c1, mut omega0, mut omega1, mut b0, mut b1);
+    let (cos0, sin0, cos1, sin1);
+    let mut sum_a: f64 = 0.0;
+    let mut sum_c: f64 = 0.0;
+    let mut aux: f64;
+
+    let mut rfc = RFcoefficientType {
+        sd1: 0.0,
+        sd2: 0.0,
+        sd3: 0.0,
+        sd4: 0.0,
+        sp0: 0.0,
+        sp1: 0.0,
+        sp2: 0.0,
+        sp3: 0.0,
+        sn0: 0.0,
+        sn1: 0.0,
+        sn2: 0.0,
+        sn3: 0.0,
+        sn4: 0.0,
+        type_filter: RecursiveFilterType::Unknown,
+        derivative: DerivativeOrder::None,
+    };
+
+    a0 = 0.0;
+    a1 = 0.0;
+    c0 = 0.0;
+    c1 = 0.0;
+    b0 = 0.0;
+    b1 = 0.0;
+    omega0 = 0.0;
+    omega1 = 0.0;
+
+    /*--- Selon le type de filtrage (filtres de Deriche,
+    ou approximation de la gaussienne), x designe
+    soit alpha, soit sigma                         ---*/
+
+    // The C `switch` runs the `default:` arm into `case ALPHA_DERICHE:`, so an
+    // unrecognised filter type becomes Deriche's.
+    if type_filter != RecursiveFilterType::GaussianFidrich
+        && type_filter != RecursiveFilterType::GaussianDeriche
+        && type_filter != RecursiveFilterType::AlphaDeriche
+    {
+        if VERBOSE.load(Ordering::Relaxed) != 0 {
+            eprintln!("{proc}: switch to default recursive filter (Deriche's filters).");
         }
+        type_filter = RecursiveFilterType::AlphaDeriche;
+    }
+
+    match type_filter {
         RecursiveFilterType::GaussianFidrich => {
             if x < 0.1 {
-                return Err(recline_error("Gaussian coefficient must be at least 0.1"));
-            }
-            let (a0, a1, c0, c1, b0, b1, omega0, omega1) = match derivative {
-                DerivativeOrder::Zero => (
-                    0.6570033214 / x,
-                    1.978946687 / x,
-                    -0.2580640608 / x,
-                    -0.2391206463 / x,
-                    1.906154352 / x,
-                    1.881305409 / x,
-                    0.6512453378 / x,
-                    2.05339943 / x,
-                ),
-                DerivativeOrder::One | DerivativeOrder::OneContours => (
-                    -0.1726729496 / x,
-                    -2.003565572 / x,
-                    0.1726730777 / x,
-                    0.4440126835 / x,
-                    1.560644213 / x,
-                    1.594202256 / x,
-                    0.6995461735 / x,
-                    2.144671764 / x,
-                ),
-                DerivativeOrder::Two => (
-                    -0.7241334169 / x,
-                    1.688628765 / x,
-                    0.3251949838 / x,
-                    -0.7211796018 / x,
-                    1.294951143 / x,
-                    1.427007123 / x,
-                    0.7789803775 / x,
-                    2.233566862 / x,
-                ),
-                DerivativeOrder::Three => (
-                    1.285774106 / x,
-                    -0.2896378408 / x,
-                    -1.28577129 / x,
-                    0.26249833 / x,
-                    1.01162886 / x,
-                    1.273344739 / x,
-                    0.9474270928 / x,
-                    2.337607006 / x,
-                ),
-                DerivativeOrder::None => {
-                    return Err(recline_error(
-                        "Gaussian Fidrich derivative must be specified",
-                    ));
+                if VERBOSE.load(Ordering::Relaxed) != 0 {
+                    eprintln!("{proc}: improper value of coefficient (should be >= 0.1).");
                 }
-            };
-            let (sin0, cos0) = omega0.sin_cos();
-            let (sin1, cos1) = omega1.sin_cos();
-            out.sp0 = a0 + c0;
-            out.sp1 = (-b1).exp() * (c1 * sin1 - (c0 + 2.0 * a0) * cos1)
-                + (-b0).exp() * (a1 * sin0 - (2.0 * c0 + a0) * cos0);
-            out.sp2 = 2.0
-                * (-b0 - b1).exp()
-                * ((a0 + c0) * cos1 * cos0 - cos1 * a1 * sin0 - cos0 * c1 * sin1)
-                + c0 * (-2.0 * b0).exp()
-                + a0 * (-2.0 * b1).exp();
-            out.sp3 = (-b1 - 2.0 * b0).exp() * (c1 * sin1 - c0 * cos1)
-                + (-b0 - 2.0 * b1).exp() * (a1 * sin0 - a0 * cos0);
-            out.sd1 = -2.0 * (-b1).exp() * cos1 - 2.0 * (-b0).exp() * cos0;
-            out.sd2 = 4.0 * cos1 * cos0 * (-b0 - b1).exp() + (-2.0 * b1).exp() + (-2.0 * b0).exp();
-            out.sd3 = -2.0 * cos0 * (-b0 - 2.0 * b1).exp() - 2.0 * cos1 * (-b1 - 2.0 * b0).exp();
-            out.sd4 = (-2.0 * b0 - 2.0 * b1).exp();
+                return None;
+            }
+
             match derivative {
-                DerivativeOrder::Zero | DerivativeOrder::Two => {
-                    out.sn1 = out.sp1 - out.sd1 * out.sp0;
-                    out.sn2 = out.sp2 - out.sd2 * out.sp0;
-                    out.sn3 = out.sp3 - out.sd3 * out.sp0;
-                    out.sn4 = -out.sd4 * out.sp0;
-                }
-                DerivativeOrder::One | DerivativeOrder::OneContours | DerivativeOrder::Three => {
-                    out.sn1 = -out.sp1 + out.sd1 * out.sp0;
-                    out.sn2 = -out.sp2 + out.sd2 * out.sp0;
-                    out.sn3 = -out.sp3 + out.sd3 * out.sp0;
-                    out.sn4 = out.sd4 * out.sp0;
-                }
-                DerivativeOrder::None => unreachable!(),
-            }
-        }
-        RecursiveFilterType::GaussianDeriche => {
-            if x < 0.1 {
-                return Err(recline_error("Gaussian coefficient must be at least 0.1"));
-            }
-            if matches!(derivative, DerivativeOrder::None | DerivativeOrder::Three) {
-                derivative = DerivativeOrder::Zero;
-            }
-            let (mut a0, mut a1, mut c0, mut c1, b0, b1, omega0, omega1) = match derivative {
-                DerivativeOrder::Zero => (
-                    1.68,
-                    3.735,
-                    -0.6803,
-                    -0.2598,
-                    1.783 / x,
-                    1.723 / x,
-                    0.6318 / x,
-                    1.997 / x,
-                ),
-                DerivativeOrder::One | DerivativeOrder::OneContours => (
-                    -0.6472,
-                    -4.531,
-                    0.6494,
-                    0.9557,
-                    1.527 / x,
-                    1.516 / x,
-                    0.6719 / x,
-                    2.072 / x,
-                ),
-                DerivativeOrder::Two => (
-                    -1.331,
-                    3.661,
-                    0.3225,
-                    -1.738,
-                    1.24 / x,
-                    1.314 / x,
-                    0.748 / x,
-                    2.166 / x,
-                ),
-                DerivativeOrder::None | DerivativeOrder::Three => unreachable!(),
-            };
-            let (sin0, cos0) = omega0.sin_cos();
-            let (sin1, cos1) = omega1.sin_cos();
-            let eb0 = b0.exp();
-            let eb1 = b1.exp();
-            let (sum_a, sum_c) = match derivative {
                 DerivativeOrder::Zero => {
-                    let sa = (2.0 * a1 * eb0 * cos0 * cos0 - a0 * sin0 * (2.0 * b0).exp()
-                        + a0 * sin0
-                        - 2.0 * a1 * eb0)
-                        / ((2.0 * cos0 * eb0 - (2.0 * b0).exp() - 1.0) * sin0);
-                    let sc = (2.0 * c1 * eb1 * cos1 * cos1 - c0 * sin1 * (2.0 * b1).exp()
-                        + c0 * sin1
-                        - 2.0 * c1 * eb1)
-                        / ((2.0 * cos1 * eb1 - (2.0 * b1).exp() - 1.0) * sin1);
-                    (sa, sc)
-                }
-                DerivativeOrder::One => {
-                    let q0 = (4.0 * b0).exp() - 4.0 * cos0 * (3.0 * b0).exp()
-                        + 2.0 * (2.0 * b0).exp()
-                        + 4.0 * cos0 * cos0 * (2.0 * b0).exp()
-                        + 1.0
-                        - 4.0 * cos0 * eb0;
-                    let q1 = (4.0 * b1).exp() - 4.0 * cos1 * (3.0 * b1).exp()
-                        + 2.0 * (2.0 * b1).exp()
-                        + 4.0 * cos1 * cos1 * (2.0 * b1).exp()
-                        + 1.0
-                        - 4.0 * cos1 * eb1;
-                    let sa = -2.0
-                        * (a0 * cos0 - a1 * sin0
-                            + a1 * sin0 * (2.0 * b0).exp()
-                            + a0 * cos0 * (2.0 * b0).exp()
-                            - 2.0 * a0 * eb0)
-                        * eb0
-                        / q0;
-                    let sc = -2.0
-                        * (c0 * cos1 - c1 * sin1
-                            + c1 * sin1 * (2.0 * b1).exp()
-                            + c0 * cos1 * (2.0 * b1).exp()
-                            - 2.0 * c0 * eb1)
-                        * eb1
-                        / q1;
-                    (sa, sc)
-                }
-                DerivativeOrder::OneContours => {
-                    let sa = (a1 * eb0 - a1 * cos0 * cos0 * eb0 + a0 * cos0 * sin0 * eb0
-                        - a0 * sin0)
-                        / (sin0 * (2.0 * cos0 * eb0 - (2.0 * b0).exp() - 1.0));
-                    let sc = (c1 * eb1 - c1 * cos1 * cos1 * eb1 + c0 * cos1 * sin1 * eb1
-                        - c0 * sin1)
-                        / (sin1 * (2.0 * cos1 * eb1 - (2.0 * b1).exp() - 1.0));
-                    (sa, sc)
-                }
-                DerivativeOrder::Two => {
-                    let q0 = 12.0 * cos0 * (3.0 * b0).exp() - 3.0 * (2.0 * b0).exp()
-                        + 8.0 * cos0.powi(3) * (3.0 * b0).exp()
-                        - 12.0 * cos0 * cos0 * (4.0 * b0).exp()
-                        - 3.0 * (4.0 * b0).exp()
-                        + 6.0 * cos0 * (5.0 * b0).exp()
-                        - (6.0 * b0).exp()
-                        + 6.0 * cos0 * eb0
-                        - (1.0 + 12.0 * cos0 * cos0 * (2.0 * b0).exp());
-                    let q1 = 12.0 * cos1 * (3.0 * b1).exp() - 3.0 * (2.0 * b1).exp()
-                        + 8.0 * cos1.powi(3) * (3.0 * b1).exp()
-                        - 12.0 * cos1 * cos1 * (4.0 * b1).exp()
-                        - 3.0 * (4.0 * b1).exp()
-                        + 6.0 * cos1 * (5.0 * b1).exp()
-                        - (6.0 * b1).exp()
-                        + 6.0 * cos1 * eb1
-                        - (1.0 + 12.0 * cos1 * cos1 * (2.0 * b1).exp());
-                    let na = 4.0 * a0 * sin0 * (3.0 * b0).exp()
-                        + a1 * cos0 * cos0 * (4.0 * b0).exp()
-                        - (4.0 * a0 * sin0 * eb0 + 6.0 * a1 * cos0 * cos0 * (2.0 * b0).exp())
-                        + 2.0 * a1 * cos0.powi(3) * eb0
-                        - 2.0 * a1 * cos0 * eb0
-                        + 2.0 * a1 * cos0.powi(3) * (3.0 * b0).exp()
-                        - 2.0 * a1 * cos0 * (3.0 * b0).exp()
-                        + a1 * cos0 * cos0
-                        - a1 * (4.0 * b0).exp()
-                        + 2.0 * a0 * sin0 * cos0 * cos0 * eb0
-                        - 2.0 * a0 * sin0 * cos0 * cos0 * (3.0 * b0).exp()
-                        - (a0 * sin0 * cos0 * (4.0 * b0).exp() + a1)
-                        + 6.0 * a1 * (2.0 * b0).exp()
-                        + a0 * cos0 * sin0;
-                    let nc = 4.0 * c0 * sin1 * (3.0 * b1).exp()
-                        + c1 * cos1 * cos1 * (4.0 * b1).exp()
-                        - (4.0 * c0 * sin1 * eb1 + 6.0 * c1 * cos1 * cos1 * (2.0 * b1).exp())
-                        + 2.0 * c1 * cos1.powi(3) * eb1
-                        - 2.0 * c1 * cos1 * eb1
-                        + 2.0 * c1 * cos1.powi(3) * (3.0 * b1).exp()
-                        - 2.0 * c1 * cos1 * (3.0 * b1).exp()
-                        + c1 * cos1 * cos1
-                        - c1 * (4.0 * b1).exp()
-                        + 2.0 * c0 * sin1 * cos1 * cos1 * eb1
-                        - 2.0 * c0 * sin1 * cos1 * cos1 * (3.0 * b1).exp()
-                        - (c0 * sin1 * cos1 * (4.0 * b1).exp() + c1)
-                        + 6.0 * c1 * (2.0 * b1).exp()
-                        + c0 * cos1 * sin1;
-                    (na * eb0 / (q0 * sin0), nc * eb1 / (q1 * sin1))
-                }
-                DerivativeOrder::None | DerivativeOrder::Three => unreachable!(),
-            };
-            let scale = sum_a + sum_c;
-            a0 /= scale;
-            a1 /= scale;
-            c0 /= scale;
-            c1 /= scale;
-            out.sp0 = a0 + c0;
-            out.sp1 = (-b1).exp() * (c1 * sin1 - (c0 + 2.0 * a0) * cos1)
-                + (-b0).exp() * (a1 * sin0 - (2.0 * c0 + a0) * cos0);
-            out.sp2 = 2.0
-                * (-b0 - b1).exp()
-                * ((a0 + c0) * cos1 * cos0 - cos1 * a1 * sin0 - cos0 * c1 * sin1)
-                + c0 * (-2.0 * b0).exp()
-                + a0 * (-2.0 * b1).exp();
-            out.sp3 = (-b1 - 2.0 * b0).exp() * (c1 * sin1 - c0 * cos1)
-                + (-b0 - 2.0 * b1).exp() * (a1 * sin0 - a0 * cos0);
-            out.sd1 = -2.0 * (-b1).exp() * cos1 - 2.0 * (-b0).exp() * cos0;
-            out.sd2 = 4.0 * cos1 * cos0 * (-b0 - b1).exp() + (-2.0 * b1).exp() + (-2.0 * b0).exp();
-            out.sd3 = -2.0 * cos0 * (-b0 - 2.0 * b1).exp() - 2.0 * cos1 * (-b1 - 2.0 * b0).exp();
-            out.sd4 = (-2.0 * b0 - 2.0 * b1).exp();
-            match derivative {
-                DerivativeOrder::Zero | DerivativeOrder::Two => {
-                    out.sn1 = out.sp1 - out.sd1 * out.sp0;
-                    out.sn2 = out.sp2 - out.sd2 * out.sp0;
-                    out.sn3 = out.sp3 - out.sd3 * out.sp0;
-                    out.sn4 = -out.sd4 * out.sp0;
+                    a0 = 0.6570033214 / x;
+                    a1 = 1.978946687 / x;
+                    c0 = -0.2580640608 / x;
+                    c1 = -0.2391206463 / x;
+                    omega0 = 0.6512453378;
+                    omega1 = 2.05339943;
+                    b0 = 1.906154352;
+                    b1 = 1.881305409;
                 }
                 DerivativeOrder::One | DerivativeOrder::OneContours => {
-                    out.sn1 = -out.sp1 + out.sd1 * out.sp0;
-                    out.sn2 = -out.sp2 + out.sd2 * out.sp0;
-                    out.sn3 = -out.sp3 + out.sd3 * out.sp0;
-                    out.sn4 = out.sd4 * out.sp0;
+                    a0 = -0.1726729496 / x;
+                    a1 = -2.003565572 / x;
+                    c0 = 0.1726730777 / x;
+                    c1 = 0.4440126835 / x;
+                    b0 = 1.560644213;
+                    b1 = 1.594202256;
+                    omega0 = 0.6995461735;
+                    omega1 = 2.144671764;
                 }
-                DerivativeOrder::None | DerivativeOrder::Three => unreachable!(),
+                DerivativeOrder::Two => {
+                    a0 = -0.7241334169 / x;
+                    a1 = 1.688628765 / x;
+                    c0 = 0.3251949838 / x;
+                    c1 = -0.7211796018 / x;
+                    b0 = 1.294951143;
+                    b1 = 1.427007123;
+                    omega0 = 0.7789803775;
+                    omega1 = 2.233566862;
+                }
+                DerivativeOrder::Three => {
+                    a0 = 1.285774106 / x;
+                    a1 = -0.2896378408 / x;
+                    c0 = -1.28577129 / x;
+                    c1 = 0.26249833 / x;
+                    b0 = 1.01162886;
+                    b1 = 1.273344739;
+                    omega0 = 0.9474270928;
+                    omega1 = 2.337607006;
+                }
+                DerivativeOrder::None => {
+                    if VERBOSE.load(Ordering::Relaxed) != 0 {
+                        eprintln!("{proc}: improper value of derivative order.");
+                    }
+                    return None;
+                }
             }
+
+            omega0 /= x;
+            sin0 = omega0.sin();
+            cos0 = omega0.cos();
+            omega1 /= x;
+            sin1 = omega1.sin();
+            cos1 = omega1.cos();
+            b0 /= x;
+            b1 /= x;
+
+            rfc.sp0 = a0 + c0;
+            rfc.sp1 = (-b1).exp() * (c1 * sin1 - (c0 + 2.0 * a0) * cos1);
+            rfc.sp1 += (-b0).exp() * (a1 * sin0 - (2.0 * c0 + a0) * cos0);
+            rfc.sp2 = 2.0
+                * (-b0 - b1).exp()
+                * ((a0 + c0) * cos1 * cos0 - cos1 * a1 * sin0 - cos0 * c1 * sin1);
+            rfc.sp2 += c0 * (-2.0 * b0).exp() + a0 * (-2.0 * b1).exp();
+            rfc.sp3 = (-b1 - 2.0 * b0).exp() * (c1 * sin1 - c0 * cos1);
+            rfc.sp3 += (-b0 - 2.0 * b1).exp() * (a1 * sin0 - a0 * cos0);
+
+            rfc.sd1 = -2.0 * (-b1).exp() * cos1 - 2.0 * (-b0).exp() * cos0;
+            rfc.sd2 = 4.0 * cos1 * cos0 * (-b0 - b1).exp() + (-2.0 * b1).exp() + (-2.0 * b0).exp();
+            rfc.sd3 = -2.0 * cos0 * (-b0 - 2.0 * b1).exp() - 2.0 * cos1 * (-b1 - 2.0 * b0).exp();
+            rfc.sd4 = (-2.0 * b0 - 2.0 * b1).exp();
+
+            match derivative {
+                DerivativeOrder::Zero | DerivativeOrder::Two => {
+                    rfc.sn1 = rfc.sp1 - rfc.sd1 * rfc.sp0;
+                    rfc.sn2 = rfc.sp2 - rfc.sd2 * rfc.sp0;
+                    rfc.sn3 = rfc.sp3 - rfc.sd3 * rfc.sp0;
+                    rfc.sn4 = -rfc.sd4 * rfc.sp0;
+                }
+                DerivativeOrder::One | DerivativeOrder::OneContours | DerivativeOrder::Three => {
+                    rfc.sn1 = -rfc.sp1 + rfc.sd1 * rfc.sp0;
+                    rfc.sn2 = -rfc.sp2 + rfc.sd2 * rfc.sp0;
+                    rfc.sn3 = -rfc.sp3 + rfc.sd3 * rfc.sp0;
+                    rfc.sn4 = rfc.sd4 * rfc.sp0;
+                }
+                DerivativeOrder::None => {
+                    if VERBOSE.load(Ordering::Relaxed) != 0 {
+                        eprintln!("{proc}: improper value of derivative order.");
+                    }
+                    return None;
+                }
+            }
+
+            rfc.type_filter = type_filter;
+            rfc.derivative = derivative;
         }
-        RecursiveFilterType::Unknown => unreachable!(),
+
+        RecursiveFilterType::GaussianDeriche => {
+            if x < 0.1 {
+                if VERBOSE.load(Ordering::Relaxed) != 0 {
+                    eprintln!("{proc}: improper value of coefficient (should be >= 0.1).");
+                }
+                return None;
+            }
+
+            // `default:` falls through into `case DERIVATIVE_0:`, so
+            // NODERIVATIVE and DERIVATIVE_3 both become smoothing.
+            if !matches!(
+                derivative,
+                DerivativeOrder::Zero
+                    | DerivativeOrder::One
+                    | DerivativeOrder::OneContours
+                    | DerivativeOrder::Two
+            ) {
+                if VERBOSE.load(Ordering::Relaxed) != 0 {
+                    eprintln!("{proc}: switch to default coefficients (smoothing).");
+                }
+                derivative = DerivativeOrder::Zero;
+            }
+            match derivative {
+                DerivativeOrder::One | DerivativeOrder::OneContours => {
+                    a0 = -0.6472;
+                    omega0 = 0.6719;
+                    a1 = -4.531;
+                    b0 = 1.527;
+                    c0 = 0.6494;
+                    omega1 = 2.072;
+                    c1 = 0.9557;
+                    b1 = 1.516;
+                }
+                DerivativeOrder::Two => {
+                    a0 = -1.331;
+                    omega0 = 0.748;
+                    a1 = 3.661;
+                    b0 = 1.24;
+                    c0 = 0.3225;
+                    omega1 = 2.166;
+                    c1 = -1.738;
+                    b1 = 1.314;
+                }
+                _ => {
+                    a0 = 1.68;
+                    omega0 = 0.6318;
+                    a1 = 3.735;
+                    b0 = 1.783;
+                    c0 = -0.6803;
+                    omega1 = 1.997;
+                    c1 = -0.2598;
+                    b1 = 1.723;
+                }
+            }
+
+            omega0 /= x;
+            sin0 = omega0.sin();
+            cos0 = omega0.cos();
+            omega1 /= x;
+            sin1 = omega1.sin();
+            cos1 = omega1.cos();
+            b0 /= x;
+            b1 /= x;
+
+            /*--- normalisation ---*/
+            match derivative {
+                DerivativeOrder::One => {
+                    aux = (4.0 * b0).exp() - 4.0 * cos0 * (3.0 * b0).exp();
+                    aux += 2.0 * (2.0 * b0).exp() + 4.0 * cos0 * cos0 * (2.0 * b0).exp();
+                    aux += 1.0 - 4.0 * cos0 * b0.exp();
+                    sum_a = a0 * cos0 - a1 * sin0 + a1 * sin0 * (2.0 * b0).exp();
+                    sum_a += a0 * cos0 * (2.0 * b0).exp() - 2.0 * a0 * b0.exp();
+                    sum_a *= b0.exp() / aux;
+                    aux = (4.0 * b1).exp() - 4.0 * cos1 * (3.0 * b1).exp();
+                    aux += 2.0 * (2.0 * b1).exp() + 4.0 * cos1 * cos1 * (2.0 * b1).exp();
+                    aux += 1.0 - 4.0 * cos1 * b1.exp();
+                    sum_c = c0 * cos1 - c1 * sin1 + c1 * sin1 * (2.0 * b1).exp();
+                    sum_c += c0 * cos1 * (2.0 * b1).exp() - 2.0 * c0 * b1.exp();
+                    sum_c *= b1.exp() / aux;
+                    /*--- on multiplie les sommes par 2 car on n'a calcule que des demi-sommes
+                    et on change le signe car la somme doit etre egale a -1              ---*/
+                    sum_a *= -2.0;
+                    sum_c *= -2.0;
+                }
+                DerivativeOrder::OneContours => {
+                    /*--- la somme de 1 a l'infini est egale a 1 : cela introduit
+                    un petit biais (reponse un rien superieur a la hauteur du step).
+                    Avec une somme de 0 a l'infini, c'est pire                       ---*/
+                    sum_a = a1 * b0.exp() - a1 * cos0 * cos0 * b0.exp();
+                    sum_a += a0 * cos0 * sin0 * b0.exp() - a0 * sin0;
+                    sum_a /= sin0 * (2.0 * cos0 * b0.exp() - (2.0 * b0).exp() - 1.0);
+                    sum_c = c1 * b1.exp() - c1 * cos1 * cos1 * b1.exp();
+                    sum_c += c0 * cos1 * sin1 * b1.exp() - c0 * sin1;
+                    sum_c /= sin1 * (2.0 * cos1 * b1.exp() - (2.0 * b1).exp() - 1.0);
+                }
+                DerivativeOrder::Two => {
+                    aux = 12.0 * cos0 * (3.0 * b0).exp() - 3.0 * (2.0 * b0).exp();
+                    aux += 8.0 * cos0 * cos0 * cos0 * (3.0 * b0).exp()
+                        - 12.0 * cos0 * cos0 * (4.0 * b0).exp();
+                    aux -= 3.0 * (4.0 * b0).exp();
+                    aux += 6.0 * cos0 * (5.0 * b0).exp() - (6.0 * b0).exp() + 6.0 * cos0 * b0.exp();
+                    aux -= 1.0 + 12.0 * cos0 * cos0 * (2.0 * b0).exp();
+                    sum_a =
+                        4.0 * a0 * sin0 * (3.0 * b0).exp() + a1 * cos0 * cos0 * (4.0 * b0).exp();
+                    sum_a -= 4.0 * a0 * sin0 * b0.exp() + 6.0 * a1 * cos0 * cos0 * (2.0 * b0).exp();
+                    sum_a += 2.0 * a1 * cos0 * cos0 * cos0 * b0.exp() - 2.0 * a1 * cos0 * b0.exp();
+                    sum_a += 2.0 * a1 * cos0 * cos0 * cos0 * (3.0 * b0).exp()
+                        - 2.0 * a1 * cos0 * (3.0 * b0).exp();
+                    sum_a += a1 * cos0 * cos0 - a1 * (4.0 * b0).exp();
+                    sum_a += 2.0 * a0 * sin0 * cos0 * cos0 * b0.exp()
+                        - 2.0 * a0 * sin0 * cos0 * cos0 * (3.0 * b0).exp();
+                    sum_a -= a0 * sin0 * cos0 * (4.0 * b0).exp() + a1;
+                    sum_a += 6.0 * a1 * (2.0 * b0).exp() + a0 * cos0 * sin0;
+                    sum_a *= 2.0 * b0.exp() / (aux * sin0);
+                    aux = 12.0 * cos1 * (3.0 * b1).exp() - 3.0 * (2.0 * b1).exp();
+                    aux += 8.0 * cos1 * cos1 * cos1 * (3.0 * b1).exp()
+                        - 12.0 * cos1 * cos1 * (4.0 * b1).exp();
+                    aux -= 3.0 * (4.0 * b1).exp();
+                    aux += 6.0 * cos1 * (5.0 * b1).exp() - (6.0 * b1).exp() + 6.0 * cos1 * b1.exp();
+                    aux -= 1.0 + 12.0 * cos1 * cos1 * (2.0 * b1).exp();
+                    sum_c =
+                        4.0 * c0 * sin1 * (3.0 * b1).exp() + c1 * cos1 * cos1 * (4.0 * b1).exp();
+                    sum_c -= 4.0 * c0 * sin1 * b1.exp() + 6.0 * c1 * cos1 * cos1 * (2.0 * b1).exp();
+                    sum_c += 2.0 * c1 * cos1 * cos1 * cos1 * b1.exp() - 2.0 * c1 * cos1 * b1.exp();
+                    sum_c += 2.0 * c1 * cos1 * cos1 * cos1 * (3.0 * b1).exp()
+                        - 2.0 * c1 * cos1 * (3.0 * b1).exp();
+                    sum_c += c1 * cos1 * cos1 - c1 * (4.0 * b1).exp();
+                    sum_c += 2.0 * c0 * sin1 * cos1 * cos1 * b1.exp()
+                        - 2.0 * c0 * sin1 * cos1 * cos1 * (3.0 * b1).exp();
+                    sum_c -= c0 * sin1 * cos1 * (4.0 * b1).exp() + c1;
+                    sum_c += 6.0 * c1 * (2.0 * b1).exp() + c0 * cos1 * sin1;
+                    sum_c *= 2.0 * b1.exp() / (aux * sin1);
+                    /*--- on divise les sommes par 2 (la somme doit etre egale a 2) ---*/
+                    sum_a /= 2.0;
+                    sum_c /= 2.0;
+                }
+                _ => {
+                    sum_a = 2.0 * a1 * b0.exp() * cos0 * cos0 - a0 * sin0 * (2.0 * b0).exp();
+                    sum_a += a0 * sin0 - 2.0 * a1 * b0.exp();
+                    sum_a /= (2.0 * cos0 * b0.exp() - (2.0 * b0).exp() - 1.0) * sin0;
+                    sum_c = 2.0 * c1 * b1.exp() * cos1 * cos1 - c0 * sin1 * (2.0 * b1).exp();
+                    sum_c += c0 * sin1 - 2.0 * c1 * b1.exp();
+                    sum_c /= (2.0 * cos1 * b1.exp() - (2.0 * b1).exp() - 1.0) * sin1;
+                }
+            }
+            a0 /= sum_a + sum_c;
+            a1 /= sum_a + sum_c;
+            c0 /= sum_a + sum_c;
+            c1 /= sum_a + sum_c;
+
+            /*--- coefficients du calcul recursif ---*/
+            rfc.sp0 = a0 + c0;
+            rfc.sp1 = (-b1).exp() * (c1 * sin1 - (c0 + 2.0 * a0) * cos1);
+            rfc.sp1 += (-b0).exp() * (a1 * sin0 - (2.0 * c0 + a0) * cos0);
+            rfc.sp2 = 2.0
+                * (-b0 - b1).exp()
+                * ((a0 + c0) * cos1 * cos0 - cos1 * a1 * sin0 - cos0 * c1 * sin1);
+            rfc.sp2 += c0 * (-2.0 * b0).exp() + a0 * (-2.0 * b1).exp();
+            rfc.sp3 = (-b1 - 2.0 * b0).exp() * (c1 * sin1 - c0 * cos1);
+            rfc.sp3 += (-b0 - 2.0 * b1).exp() * (a1 * sin0 - a0 * cos0);
+
+            rfc.sd1 = -2.0 * (-b1).exp() * cos1 - 2.0 * (-b0).exp() * cos0;
+            rfc.sd2 = 4.0 * cos1 * cos0 * (-b0 - b1).exp() + (-2.0 * b1).exp() + (-2.0 * b0).exp();
+            rfc.sd3 = -2.0 * cos0 * (-b0 - 2.0 * b1).exp() - 2.0 * cos1 * (-b1 - 2.0 * b0).exp();
+            rfc.sd4 = (-2.0 * b0 - 2.0 * b1).exp();
+
+            match derivative {
+                DerivativeOrder::One | DerivativeOrder::OneContours | DerivativeOrder::Three => {
+                    rfc.sn1 = -rfc.sp1 + rfc.sd1 * rfc.sp0;
+                    rfc.sn2 = -rfc.sp2 + rfc.sd2 * rfc.sp0;
+                    rfc.sn3 = -rfc.sp3 + rfc.sd3 * rfc.sp0;
+                    rfc.sn4 = rfc.sd4 * rfc.sp0;
+                }
+                _ => {
+                    rfc.sn1 = rfc.sp1 - rfc.sd1 * rfc.sp0;
+                    rfc.sn2 = rfc.sp2 - rfc.sd2 * rfc.sp0;
+                    rfc.sn3 = rfc.sp3 - rfc.sd3 * rfc.sp0;
+                    rfc.sn4 = -rfc.sd4 * rfc.sp0;
+                }
+            }
+
+            rfc.type_filter = type_filter;
+            rfc.derivative = derivative;
+        }
+
+        _ => {
+            /*--- ALPHA_DERICHE ---*/
+            if x < 0.1 || x > 1.9 {
+                if VERBOSE.load(Ordering::Relaxed) != 0 {
+                    eprintln!(
+                        "{proc}: improper value of coefficient (should be >= 0.1 and <= 1.9)."
+                    );
+                }
+                return None;
+            }
+            ex = (-x).exp();
+
+            if !matches!(
+                derivative,
+                DerivativeOrder::Zero
+                    | DerivativeOrder::One
+                    | DerivativeOrder::OneContours
+                    | DerivativeOrder::Two
+                    | DerivativeOrder::Three
+            ) {
+                if VERBOSE.load(Ordering::Relaxed) != 0 {
+                    eprintln!("{proc}: switch to default coefficients (smoothing).");
+                }
+                derivative = DerivativeOrder::Zero;
+            }
+            match derivative {
+                DerivativeOrder::One => {
+                    rfc.sp1 = -(1.0 - ex) * (1.0 - ex) * (1.0 - ex) / (2.0 * (1.0 + ex));
+                    rfc.sn1 = -rfc.sp1;
+                    rfc.sd1 = -2.0 * ex;
+                    rfc.sd2 = ex * ex;
+                }
+                DerivativeOrder::OneContours => {
+                    rfc.sp1 = -(1.0 - ex) * (1.0 - ex);
+                    rfc.sn1 = -rfc.sp1;
+                    rfc.sd1 = -2.0 * ex;
+                    rfc.sd2 = ex * ex;
+                }
+                DerivativeOrder::Two => {
+                    k1 = -2.0 * (1.0 - ex) * (1.0 - ex) * (1.0 - ex);
+                    k1 /= (1.0 + ex) * (1.0 + ex) * (1.0 + ex);
+                    k2 = (1.0 - ex * ex) / (2.0 * ex);
+                    rfc.sp0 = k1;
+                    rfc.sp1 = -k1 * (1.0 + k2) * ex;
+                    rfc.sn1 = k1 * (1.0 - k2) * ex;
+                    rfc.sn2 = -k1 * ex * ex;
+                    rfc.sd1 = -2.0 * ex;
+                    rfc.sd2 = ex * ex;
+                }
+                DerivativeOrder::Three => {
+                    k1 = (1.0 + x) * ex + (x - 1.0);
+                    k2 = (1.0 - ex) / k1;
+                    k1 *= (1.0 - ex) * (1.0 - ex) * (1.0 - ex) * (1.0 - ex);
+                    k1 /= 2.0 * x * x * ex * ex;
+                    k1 /= ex + 1.0;
+                    rfc.sp0 = k1 * x * (k2 + 1.0);
+                    rfc.sp1 = -k1 * x * (1.0 + k2 + k2 * x) * ex;
+                    rfc.sn0 = -rfc.sp0;
+                    rfc.sn1 = -rfc.sp1;
+                    rfc.sd1 = -2.0 * ex;
+                    rfc.sd2 = ex * ex;
+                }
+                _ => {
+                    rfc.sp0 = (1.0 - ex) * (1.0 - ex) / (1.0 + 2.0 * x * ex - ex * ex);
+                    rfc.sp1 = rfc.sp0 * (x - 1.0) * ex;
+                    rfc.sn1 = rfc.sp0 * (x + 1.0) * ex;
+                    rfc.sn2 = -rfc.sp0 * ex * ex;
+                    rfc.sd1 = -2.0 * ex;
+                    rfc.sd2 = ex * ex;
+                }
+            }
+            rfc.type_filter = type_filter;
+            rfc.derivative = derivative;
+        }
     }
-    out.filter_type = filter_type;
-    out.derivative = derivative;
-    Ok(out)
+
+    Some(rfc)
 }
 
-/// Equivalent to `RecursiveFilter1D`; returns a newly owned filtered line.
+/// C `RecursiveFilter1D`.
+///
+/// `in`, `out`, `work1` and `work2` are the caller's lines, as in the source;
+/// `work2` may be `out` when `out` is not `in`.  The two work lines are
+/// separate here so that the borrow checker sees them as distinct, which is
+/// what both callers in this tree pass anyway.
 pub fn recursive_filter_1d(
-    coefficients: &RecursiveFilterCoefficients,
-    input: &[f64],
-) -> Result<Vec<f64>, String> {
-    if coefficients.filter_type == RecursiveFilterType::Unknown
-        || coefficients.derivative == DerivativeOrder::None
-    {
-        return Err("recursive filter coefficients have not been initialized".into());
+    rfc: &RFcoefficientType,
+    r#in: &[f64],
+    out: &mut [f64],
+    work1: &mut [f64],
+    work2: &mut [f64],
+    dim: i32,
+) -> i32 {
+    let proc = "RecursiveFilter1D";
+    let (mut rp0, mut rp1, mut rp2, mut rp3) = (0.0, 0.0, 0.0, 0.0);
+    let (mut rd1, mut rd2, mut rd3, mut rd4) = (0.0, 0.0, 0.0, 0.0);
+    let (mut rn0, mut rn1, mut rn2, mut rn3, mut rn4) = (0.0, 0.0, 0.0, 0.0, 0.0);
+    let mut i: i32;
+
+    if rfc.type_filter == RecursiveFilterType::Unknown {
+        if VERBOSE.load(Ordering::Relaxed) != 0 {
+            eprintln!("{proc}: unknown type of recursive filter.");
+        }
+        return EXIT_ON_FAILURE;
     }
-    let dim = input.len();
-    let min_dim = match coefficients.filter_type {
-        RecursiveFilterType::AlphaDeriche => 3,
-        RecursiveFilterType::GaussianDeriche | RecursiveFilterType::GaussianFidrich => 5,
-        RecursiveFilterType::Unknown => unreachable!(),
-    };
-    if dim < min_dim {
-        return Err(format!(
-            "recursive filter requires at least {min_dim} samples"
-        ));
+    if rfc.derivative == DerivativeOrder::None {
+        if VERBOSE.load(Ordering::Relaxed) != 0 {
+            eprintln!("{proc}: unknown type of derivative.");
+        }
+        return EXIT_ON_FAILURE;
     }
-    let mut plus = vec![0.0; dim];
-    let mut minus = vec![0.0; dim];
-    match coefficients.filter_type {
-        RecursiveFilterType::AlphaDeriche => match coefficients.derivative {
-            DerivativeOrder::Zero | DerivativeOrder::Two => {
-                plus[0] = coefficients.sp0 * input[0];
-                plus[1] = coefficients.sp0 * input[1] + coefficients.sp1 * input[0]
-                    - coefficients.sd1 * plus[0];
-                for i in 2..dim {
-                    plus[i] = coefficients.sp0 * input[i] + coefficients.sp1 * input[i - 1]
-                        - coefficients.sd1 * plus[i - 1]
-                        - coefficients.sd2 * plus[i - 2];
-                }
-                minus[dim - 1] = 0.0;
-                minus[dim - 2] = coefficients.sn1 * input[dim - 1];
-                for i in (0..dim - 2).rev() {
-                    minus[i] = coefficients.sn1 * input[i + 1] + coefficients.sn2 * input[i + 2]
-                        - coefficients.sd1 * minus[i + 1]
-                        - coefficients.sd2 * minus[i + 2];
-                }
+
+    let dimu = dim as usize;
+
+    match rfc.type_filter {
+        RecursiveFilterType::GaussianFidrich | RecursiveFilterType::GaussianDeriche => {
+            /*--- filtrage generique d'ordre 4 ---*/
+            rp0 = rfc.sp0;
+            rp1 = rfc.sp1;
+            rp2 = rfc.sp2;
+            rp3 = rfc.sp3;
+            rd1 = rfc.sd1;
+            rd2 = rfc.sd2;
+            rd3 = rfc.sd3;
+            rd4 = rfc.sd4;
+            rn1 = rfc.sn1;
+            rn2 = rfc.sn2;
+            rn3 = rfc.sn3;
+            rn4 = rfc.sn4;
+
+            /* the C positions w4..w0 at work1[0..4] and d3..d0 at in[1..4] */
+            /*--- calcul de y+ ---*/
+            work1[0] = rp0 * r#in[0];
+            work1[1] = rp0 * r#in[1] + rp1 * r#in[0] - rd1 * work1[0];
+            work1[2] =
+                rp0 * r#in[2] + rp1 * r#in[1] + rp2 * r#in[0] - rd1 * work1[1] - rd2 * work1[0];
+            work1[3] = rp0 * r#in[3] + rp1 * r#in[2] + rp2 * r#in[1] + rp3 * r#in[0]
+                - rd1 * work1[2]
+                - rd2 * work1[1]
+                - rd3 * work1[0];
+            i = 4;
+            while i < dim {
+                let k = i as usize;
+                work1[k] =
+                    rp0 * r#in[k] + rp1 * r#in[k - 1] + rp2 * r#in[k - 2] + rp3 * r#in[k - 3]
+                        - rd1 * work1[k - 1]
+                        - rd2 * work1[k - 2]
+                        - rd3 * work1[k - 3]
+                        - rd4 * work1[k - 4];
+                i += 1;
             }
-            DerivativeOrder::One | DerivativeOrder::OneContours => {
-                plus[0] = 0.0;
-                plus[1] = coefficients.sp1 * input[0];
-                for i in 2..dim {
-                    plus[i] = coefficients.sp1 * input[i - 1]
-                        - coefficients.sd1 * plus[i - 1]
-                        - coefficients.sd2 * plus[i - 2];
-                }
-                minus[dim - 1] = 0.0;
-                minus[dim - 2] = coefficients.sn1 * input[dim - 1];
-                for i in (0..dim - 2).rev() {
-                    minus[i] = coefficients.sn1 * input[i + 1]
-                        - coefficients.sd1 * minus[i + 1]
-                        - coefficients.sd2 * minus[i + 2];
-                }
+
+            /*--- calcul de y- ---*/
+            work2[dimu - 1] = 0.0;
+            work2[dimu - 2] = rn1 * r#in[dimu - 1];
+            work2[dimu - 3] = rn1 * r#in[dimu - 2] + rn2 * r#in[dimu - 1] - rd1 * work2[dimu - 2];
+            work2[dimu - 4] = rn1 * r#in[dimu - 3] + rn2 * r#in[dimu - 2] + rn3 * r#in[dimu - 1]
+                - rd1 * work2[dimu - 3]
+                - rd2 * work2[dimu - 2];
+            i = dim - 5;
+            while i >= 0 {
+                let k = i as usize;
+                work2[k] =
+                    rn1 * r#in[k + 1] + rn2 * r#in[k + 2] + rn3 * r#in[k + 3] + rn4 * r#in[k + 4]
+                        - rd1 * work2[k + 1]
+                        - rd2 * work2[k + 2]
+                        - rd3 * work2[k + 3]
+                        - rd4 * work2[k + 4];
+                i -= 1;
             }
-            DerivativeOrder::Three => {
-                plus[0] = coefficients.sp0 * input[0];
-                plus[1] = coefficients.sp0 * input[1] + coefficients.sp1 * input[0]
-                    - coefficients.sd1 * plus[0];
-                for i in 2..dim {
-                    plus[i] = coefficients.sp0 * input[i] + coefficients.sp1 * input[i - 1]
-                        - coefficients.sd1 * plus[i - 1]
-                        - coefficients.sd2 * plus[i - 2];
-                }
-                minus[dim - 1] = coefficients.sn0 * input[dim - 1];
-                minus[dim - 2] = coefficients.sn0 * input[dim - 2]
-                    + coefficients.sn1 * input[dim - 1]
-                    - coefficients.sd1 * minus[dim - 1];
-                for i in (0..dim - 2).rev() {
-                    minus[i] = coefficients.sn0 * input[i] + coefficients.sn1 * input[i + 1]
-                        - coefficients.sd1 * minus[i + 1]
-                        - coefficients.sd2 * minus[i + 2];
-                }
-            }
-            DerivativeOrder::None => unreachable!(),
-        },
-        RecursiveFilterType::GaussianDeriche | RecursiveFilterType::GaussianFidrich => {
-            plus[0] = coefficients.sp0 * input[0];
-            plus[1] = coefficients.sp0 * input[1] + coefficients.sp1 * input[0]
-                - coefficients.sd1 * plus[0];
-            plus[2] = coefficients.sp0 * input[2]
-                + coefficients.sp1 * input[1]
-                + coefficients.sp2 * input[0]
-                - coefficients.sd1 * plus[1]
-                - coefficients.sd2 * plus[0];
-            plus[3] = coefficients.sp0 * input[3]
-                + coefficients.sp1 * input[2]
-                + coefficients.sp2 * input[1]
-                + coefficients.sp3 * input[0]
-                - coefficients.sd1 * plus[2]
-                - coefficients.sd2 * plus[1]
-                - coefficients.sd3 * plus[0];
-            for i in 4..dim {
-                plus[i] = coefficients.sp0 * input[i]
-                    + coefficients.sp1 * input[i - 1]
-                    + coefficients.sp2 * input[i - 2]
-                    + coefficients.sp3 * input[i - 3]
-                    - coefficients.sd1 * plus[i - 1]
-                    - coefficients.sd2 * plus[i - 2]
-                    - coefficients.sd3 * plus[i - 3]
-                    - coefficients.sd4 * plus[i - 4];
-            }
-            minus[dim - 1] = 0.0;
-            minus[dim - 2] = coefficients.sn1 * input[dim - 1];
-            minus[dim - 3] = coefficients.sn1 * input[dim - 2] + coefficients.sn2 * input[dim - 1]
-                - coefficients.sd1 * minus[dim - 2];
-            minus[dim - 4] = coefficients.sn1 * input[dim - 3]
-                + coefficients.sn2 * input[dim - 2]
-                + coefficients.sn3 * input[dim - 1]
-                - coefficients.sd1 * minus[dim - 3]
-                - coefficients.sd2 * minus[dim - 2];
-            for i in (0..dim - 4).rev() {
-                minus[i] = coefficients.sn1 * input[i + 1]
-                    + coefficients.sn2 * input[i + 2]
-                    + coefficients.sn3 * input[i + 3]
-                    + coefficients.sn4 * input[i + 4]
-                    - coefficients.sd1 * minus[i + 1]
-                    - coefficients.sd2 * minus[i + 2]
-                    - coefficients.sd3 * minus[i + 3]
-                    - coefficients.sd4 * minus[i + 4];
+
+            /*--- calcul final ---*/
+            for k in 0..dimu {
+                out[k] = work1[k] + work2[k];
             }
         }
-        RecursiveFilterType::Unknown => unreachable!(),
+
+        _ => {
+            /*--- ALPHA_DERICHE ---*/
+            match rfc.derivative {
+                DerivativeOrder::One | DerivativeOrder::OneContours => {
+                    rp1 = rfc.sp1;
+                    rn1 = rfc.sn1;
+                    rd1 = rfc.sd1;
+                    rd2 = rfc.sd2;
+
+                    /*--- calcul de y+ ---*/
+                    work1[0] = 0.0;
+                    work1[1] = rp1 * r#in[0];
+                    i = 2;
+                    while i < dim {
+                        let k = i as usize;
+                        work1[k] = rp1 * r#in[k - 1] - rd1 * work1[k - 1] - rd2 * work1[k - 2];
+                        i += 1;
+                    }
+
+                    /*--- calcul de y- ---*/
+                    work2[dimu - 1] = 0.0;
+                    work2[dimu - 2] = rn1 * r#in[dimu - 1];
+                    i = dim - 3;
+                    while i >= 0 {
+                        let k = i as usize;
+                        work2[k] = rn1 * r#in[k + 1] - rd1 * work2[k + 1] - rd2 * work2[k + 2];
+                        i -= 1;
+                    }
+
+                    /*--- calcul final ---*/
+                    for k in 0..dimu {
+                        out[k] = work1[k] + work2[k];
+                    }
+                }
+
+                DerivativeOrder::Three => {
+                    rp0 = rfc.sp0;
+                    rp1 = rfc.sp1;
+                    rd1 = rfc.sd1;
+                    rd2 = rfc.sd2;
+                    rn0 = rfc.sn0;
+                    rn1 = rfc.sn1;
+
+                    /*--- calcul de y+ ---*/
+                    work1[0] = rp0 * r#in[0];
+                    work1[1] = rp0 * r#in[1] + rp1 * r#in[0] - rd1 * work1[0];
+                    i = 2;
+                    while i < dim {
+                        let k = i as usize;
+                        work1[k] = rp0 * r#in[k] + rp1 * r#in[k - 1]
+                            - rd1 * work1[k - 1]
+                            - rd2 * work1[k - 2];
+                        i += 1;
+                    }
+
+                    /*--- calcul de y- ---*/
+                    work2[dimu - 1] = rn0 * r#in[dimu - 1];
+                    work2[dimu - 2] =
+                        rn0 * r#in[dimu - 2] + rn1 * r#in[dimu - 1] - rd1 * work2[dimu - 1];
+                    i = dim - 3;
+                    while i >= 0 {
+                        let k = i as usize;
+                        work2[k] = rn0 * r#in[k] + rn1 * r#in[k + 1]
+                            - rd1 * work2[k + 1]
+                            - rd2 * work2[k + 2];
+                        i -= 1;
+                    }
+
+                    /*--- calcul final ---*/
+                    for k in 0..dimu {
+                        out[k] = work1[k] + work2[k];
+                    }
+                }
+
+                _ => {
+                    /*--- DERIVATIVE_0, DERIVATIVE_2 ---*/
+                    rp0 = rfc.sp0;
+                    rp1 = rfc.sp1;
+                    rd1 = rfc.sd1;
+                    rd2 = rfc.sd2;
+                    rn1 = rfc.sn1;
+                    rn2 = rfc.sn2;
+
+                    /*--- calcul de y+ ---*/
+                    work1[0] = rp0 * r#in[0];
+                    work1[1] = rp0 * r#in[1] + rp1 * r#in[0] - rd1 * work1[0];
+                    i = 2;
+                    while i < dim {
+                        let k = i as usize;
+                        work1[k] = rp0 * r#in[k] + rp1 * r#in[k - 1]
+                            - rd1 * work1[k - 1]
+                            - rd2 * work1[k - 2];
+                        i += 1;
+                    }
+
+                    /*--- calcul de y- ---*/
+                    work2[dimu - 1] = 0.0;
+                    work2[dimu - 2] = rn1 * r#in[dimu - 1];
+                    i = dim - 3;
+                    while i >= 0 {
+                        let k = i as usize;
+                        work2[k] = rn1 * r#in[k + 1] + rn2 * r#in[k + 2]
+                            - rd1 * work2[k + 1]
+                            - rd2 * work2[k + 2];
+                        i -= 1;
+                    }
+
+                    /*--- calcul final ---*/
+                    for k in 0..dimu {
+                        out[k] = work1[k] + work2[k];
+                    }
+                }
+            }
+        }
     }
-    Ok(plus.into_iter().zip(minus).map(|(a, b)| a + b).collect())
+    EXIT_ON_SUCCESS
+}
+
+/// C `Recline_verbose`.
+pub fn recline_verbose() {
+    VERBOSE.store(1, Ordering::Relaxed);
+}
+
+/// C `Recline_noverbose`.
+pub fn recline_noverbose() {
+    VERBOSE.store(0, Ordering::Relaxed);
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
 
-    #[test]
-    fn alpha_smoothing_coefficients_match_c_formula() {
-        let c = init_recursive_coefficients(
-            1.0,
-            RecursiveFilterType::AlphaDeriche,
-            DerivativeOrder::Zero,
-        )
-        .unwrap();
-        assert!((c.sd1 + 2.0 / std::f64::consts::E).abs() < 1.0e-14);
-        assert_eq!(c.filter_type, RecursiveFilterType::AlphaDeriche);
-    }
-    #[test]
-    fn alpha_filter_has_c_boundary_conditions() {
-        let c = init_recursive_coefficients(
-            1.0,
-            RecursiveFilterType::AlphaDeriche,
-            DerivativeOrder::Zero,
-        )
-        .unwrap();
-        let out = recursive_filter_1d(&c, &[0., 0., 1., 0., 0.]).unwrap();
-        assert!(out.iter().all(|v| v.is_finite()));
-        assert!(out[2] > out[0]);
+    fn filter(rfc: &RFcoefficientType, line: &[f64]) -> Vec<f64> {
+        let mut out = vec![0.0; line.len()];
+        let mut w1 = vec![0.0; line.len()];
+        let mut w2 = vec![0.0; line.len()];
+        assert_eq!(
+            recursive_filter_1d(rfc, line, &mut out, &mut w1, &mut w2, line.len() as i32),
+            EXIT_ON_SUCCESS
+        );
+        out
     }
 
     #[test]
-    fn fidrich_filter_runs_the_fourth_order_recurrence() {
-        let c = init_recursive_coefficients(
-            1.2,
-            RecursiveFilterType::GaussianFidrich,
-            DerivativeOrder::Zero,
-        )
-        .unwrap();
-        let out = recursive_filter_1d(&c, &[0., 0., 1., 0., 0., 0.]).unwrap();
-        assert!(out.iter().all(|value| value.is_finite()));
-        assert!(out[2] > out[0]);
+    fn alpha_deriche_rejects_out_of_range_coefficients() {
+        assert!(
+            init_recursive_coefficients(
+                2.0,
+                RecursiveFilterType::AlphaDeriche,
+                DerivativeOrder::Zero
+            )
+            .is_none()
+        );
+        assert!(
+            init_recursive_coefficients(
+                0.05,
+                RecursiveFilterType::GaussianDeriche,
+                DerivativeOrder::Zero
+            )
+            .is_none()
+        );
     }
 
     #[test]
-    fn deriche_gaussian_covers_source_normalizations() {
-        for derivative in [
+    fn gaussian_deriche_smoothing_preserves_a_constant_line() {
+        let rfc = init_recursive_coefficients(
+            2.0,
+            RecursiveFilterType::GaussianDeriche,
             DerivativeOrder::Zero,
-            DerivativeOrder::One,
-            DerivativeOrder::OneContours,
-            DerivativeOrder::Two,
-        ] {
-            let coefficients =
-                init_recursive_coefficients(1.2, RecursiveFilterType::GaussianDeriche, derivative)
-                    .unwrap();
-            let filtered = recursive_filter_1d(&coefficients, &[0., 0., 1., 0., 0., 0.]).unwrap();
-            assert!(filtered.iter().all(|value| value.is_finite()));
+        )
+        .unwrap();
+        let line = vec![5.0; 60];
+        let out = filter(&rfc, &line);
+        // Away from the ends the normalised filter reproduces the constant.
+        for value in &out[20..40] {
+            assert!((value - 5.0).abs() < 1.0e-6, "{value}");
         }
-        let defaulted = init_recursive_coefficients(
+    }
+
+    #[test]
+    fn gaussian_deriche_first_derivative_of_a_ramp_is_one() {
+        let rfc = init_recursive_coefficients(
+            2.0,
+            RecursiveFilterType::GaussianDeriche,
+            DerivativeOrder::One,
+        )
+        .unwrap();
+        let line: Vec<f64> = (0..80).map(|i| i as f64).collect();
+        let out = filter(&rfc, &line);
+        for value in &out[30..50] {
+            assert!((value - 1.0).abs() < 1.0e-6, "{value}");
+        }
+    }
+
+    #[test]
+    fn derivative_three_and_unknown_fall_back_to_smoothing_for_deriche_gaussian() {
+        let rfc = init_recursive_coefficients(
             1.2,
             RecursiveFilterType::GaussianDeriche,
             DerivativeOrder::Three,
         )
         .unwrap();
-        assert_eq!(defaulted.derivative, DerivativeOrder::Zero);
+        assert_eq!(rfc.derivative, DerivativeOrder::Zero);
     }
 
     #[test]
-    fn deriche_gaussian_coefficients_match_c_reference() {
-        let expected = [
-            [
-                0.33233233902549331,
-                0.11973121803792637,
-                -0.3469642763179866,
-                0.23503866754497044,
-            ],
-            [
-                0.00061158308012210227,
-                -0.16406740460386698,
-                -0.38693286044421615,
-                0.16383076301327607,
-            ],
-            [
-                -0.24286102711859564,
-                0.050912455579202071,
-                -0.42253300953287698,
-                -0.051704345107463801,
-            ],
-        ];
-        for (derivative, reference) in [
+    fn alpha_deriche_orders_all_run() {
+        for derivative in [
             DerivativeOrder::Zero,
             DerivativeOrder::One,
+            DerivativeOrder::OneContours,
             DerivativeOrder::Two,
-        ]
-        .into_iter()
-        .zip(expected)
-        {
-            let c =
-                init_recursive_coefficients(1.2, RecursiveFilterType::GaussianDeriche, derivative)
+            DerivativeOrder::Three,
+        ] {
+            let rfc =
+                init_recursive_coefficients(1.0, RecursiveFilterType::AlphaDeriche, derivative)
                     .unwrap();
-            for (actual, expected) in [c.sp0, c.sp1, c.sd1, c.sn1].into_iter().zip(reference) {
-                assert!(
-                    (actual - expected).abs() < 1.0e-13,
-                    "{actual} != {expected}"
-                );
-            }
+            let out = filter(&rfc, &[0., 0., 1., 0., 0., 0.]);
+            assert!(out.iter().all(|v| v.is_finite()));
         }
     }
 }

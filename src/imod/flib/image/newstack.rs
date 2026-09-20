@@ -62,6 +62,10 @@ use crate::imod::libiimod::unit_fileio::{
     iiu_trans_adoc_sections, iiu_volume_open, iiu_write_global_adoc, iiu_write_lines,
 };
 use crate::imod::libiimod::unit_header::{
+    iiu_alt_cell, iiu_alt_mode, iiu_alt_origin, iiu_alt_sample, iiu_alt_size, iiu_ret_cell,
+    iiu_ret_delta, iiu_ret_origin, iiu_ret_size, iiu_trans_header,
+};
+use crate::imod::libiimod::unit_header::{
     iiu_alt_extended_data, iiu_alt_extended_type, iiu_alt_num_extended, iiu_create_header,
     iiu_ret_extended_data, iiu_ret_extended_type, iiu_ret_num_extended, iiu_trans_extended_data,
     iiu_write_header,
@@ -3411,87 +3415,55 @@ pub fn newstack() {
                 }
                 // `unit_fileio.c:256-269`: the output unit's own `MrcHeader`,
                 // which for a non-MRC output is not the external backend handle.
-                let chunk_header = iiu_mrc_header(2, "iiuTransHeader", iiu_get_exit_on_error(), 2);
-                // `iiuTransHeader` (`unit_header.c:381-385`) saves and restores
-                // the destination `fp` around the whole-header copy, so the
-                // output header keeps its own stream and not the input's.
-                let fp_save = (*chunk_header).fp.take();
-                *chunk_header = header.clone();
-                (*chunk_header).fp = fp_save;
-                // `iiuTransHeader` runs `mrcInitOutputHeader`
-                // (`unit_header.c:387`) over the copied header, never
-                // `mrc_head_new`.  The two are not interchangeable:
-                // `mrc_head_new` (`mrcfiles.c:689-766`) additionally resets
-                // `amin` to `FLT_MAX`, `amax` to `-FLT_MAX`, `amean`, `ispg`,
-                // `creatid`, `sub`, `zfac`, `min2`-`max3`, `idtype`, `lens`,
-                // `nd1`-`vd2`, `blank`, `tiltangles` and `iiuFlags`, every one
-                // of which the source's whole-header copy keeps from the
-                // input.  Size and mode are what `iiuAltMode`
-                // (`unit_header.c:245-263`) and `iiuAltSize`
-                // (`unit_header.c:307-317`) set next
-                // (`newstack.f90:1813-1821`).
-                mrc_init_output_header(&mut *chunk_header);
-                // `iiuTransHeader` ends in `iiuTransExtendedData`
-                // (`unit_header.c:395`), after `mrcInitOutputHeader` has
-                // cleared `next`, `nint`, `nreal`, `nversion` and `extType`
-                // (`mrcfiles.c:797-801`).  That call restores `nint`, `nreal`
-                // and a valid `extType` from the input and writes the input's
-                // extended data to the output; the extra-header sizing below
-                // then overrides `next` and `headerSize`.  The source reaches
-                // `newstack.f90:1813` on every route, chunked or not, so this
-                // call belongs here as much as on the whole-section route.
-                iiu_trans_extended_data(2, 1);
-                (*chunk_header).nx = output_nx;
-                (*chunk_header).ny = output_ny;
-                (*chunk_header).nz = num_output_sections[output_index];
-                (*chunk_header).mode = output_mode;
-                (*chunk_header).nxstart = header.nxstart;
-                (*chunk_header).nystart = header.nystart;
-                (*chunk_header).nzstart = header.nzstart;
-                (*chunk_header).mapc = header.mapc;
-                (*chunk_header).mapr = header.mapr;
-                (*chunk_header).maps = header.maps;
-                // `newstack.f90:1839-1840`: `iiuAltCell` writes `cell2(4:6)`,
-                // which the source sets to 90 for every output file.
-                (*chunk_header).alpha = 90.0;
-                (*chunk_header).beta = 90.0;
-                (*chunk_header).gamma = 90.0;
-                (*chunk_header).xorg = header.xorg;
-                (*chunk_header).yorg = header.yorg;
-                (*chunk_header).zorg = header.zorg;
-                if header.mx == header.nx && header.my == header.ny && header.mz == header.nz {
-                    (*chunk_header).mx = output_nx;
-                    (*chunk_header).my = output_ny;
-                    (*chunk_header).mz = num_output_sections[output_index];
+                // `newstack.f90:1813-1853`: the output header is made through the
+                // unit layer -- `iiuTransHeader`, `iiuAltMode`, `iiuAltSize`,
+                // `iiuAltSample`, `iiuAltCell` -- exactly as the source calls it.
+                iiu_trans_header(2, 1);
+                iiu_alt_mode(2, output_mode);
+                // `newstack.f90:1528-1529`: the input's sizes and cell from unit 1.
+                let mut nxyz_in1 = [0_i32; 3];
+                let mut mxyz1 = [0_i32; 3];
+                let mut nxyzst1 = [0_i32; 3];
+                iiu_ret_size(1, &mut nxyz_in1, &mut mxyz1, &mut nxyzst1);
+                let mut cell1 = [0_f32; 6];
+                iiu_ret_cell(1, &mut cell1);
+                //
+                // set new size, keep old nxyzst
+                //
+                let nxyz2 = [output_nx, output_ny, num_output_sections[output_index]];
+                iiu_alt_size(2, &nxyz2, &nxyzst1);
+                //
+                // if mxyz=nxyz, keep this relationship
+                //
+                let mxyz2 = if mxyz1 == nxyz_in1 {
+                    iiu_alt_sample(2, &nxyz2);
+                    nxyz2
                 } else {
-                    (*chunk_header).mx = header.mx;
-                    (*chunk_header).my = header.my;
-                    (*chunk_header).mz = header.mz;
+                    mxyz1
+                };
+                //
+                // keep delta the same by scaling cell size from change in mxyz
+                //
+                let mut cell2 = [0_f32; 6];
+                for i in 0..3 {
+                    cell2[i] = mxyz2[i] as f32 * (cell1[i] / mxyz1[i] as f32) * read_reduction
+                        / expand_factor;
+                    cell2[i + 3] = 90.;
                 }
-                // `newstack.f90:1838-1843`: the X and Y cell sizes carry the
-                // read reduction and expansion, and the Z size is then reset
-                // without them.
-                (*chunk_header).xlen =
-                    (*chunk_header).mx as f32 * (header.xlen / header.mx as f32) * read_reduction
-                        / expand_factor;
-                (*chunk_header).ylen =
-                    (*chunk_header).my as f32 * (header.ylen / header.my as f32) * read_reduction
-                        / expand_factor;
-                (*chunk_header).zlen = (*chunk_header).mz as f32 * (header.zlen / header.mz as f32);
+                cell2[2] = mxyz2[2] as f32 * (cell1[2] / mxyz1[2] as f32);
+                //
+                // Set pixel size from mdoc file if indicated and possible
+                // (`newstack.f90:1845-1852`; the value was read from the mdoc up front)
                 if pixel_from_mdoc {
                     let (input_index, input_section) = routes[route_index];
                     if let Some(spacing) = mdoc_pixel_spacing[input_index][input_section as usize] {
-                        // `newstack.f90:1848-1849`: the mdoc spacing is
-                        // scaled by `readReduction` just as the header
-                        // spacing above it is, so `-pixel` with `-bin` or
-                        // `-shrink` keeps the reduced pixel size.
-                        (*chunk_header).xlen =
-                            (*chunk_header).mx as f32 * spacing * read_reduction / expand_factor;
-                        (*chunk_header).ylen =
-                            (*chunk_header).my as f32 * spacing * read_reduction / expand_factor;
-                        (*chunk_header).zlen = (*chunk_header).mz as f32 * spacing;
+                        cell2[0] = mxyz2[0] as f32 * spacing * read_reduction / expand_factor;
+                        cell2[1] = mxyz2[1] as f32 * spacing * read_reduction / expand_factor;
+                        cell2[2] = mxyz2[2] as f32 * spacing;
                     }
                 }
+                iiu_alt_cell(2, &cell2);
+                let chunk_header = iiu_mrc_header(2, "iiuTransHeader", iiu_get_exit_on_error(), 2);
                 //
                 // adjust extra header information if currently open file has it
                 // (`newstack.f90:1904-1935`)
@@ -3506,10 +3478,7 @@ pub fn newstack() {
                     if n_byte_sym_in == 0 {
                         n_byte_extra_out = 4;
                         serial_em_type = false;
-                        // `iiuAltExtendedType(2, 0, 1)` (`unit_header.c:1099`)
-                        // sets `nint` and `nreal` on unit 2's header.
-                        (*chunk_header).nint = 0;
-                        (*chunk_header).nreal = 1;
+                        iiu_alt_extended_type(2, &[0, 1]);
                     } else {
                         get_extra_header_max_sec_size(
                             &extra_in,
@@ -3531,31 +3500,24 @@ pub fn newstack() {
                         max_extra_out = n_byte_sym_out + 1024;
                         extra_out = vec![0_u8; max_extra_out as usize];
                     }
-                    // `iiuAltNumExtended(2, nByteSymOut)` (`unit_header.c:1078`).
-                    (*chunk_header).next = n_byte_sym_out;
-                    (*chunk_header).header_size = 1024 + n_byte_sym_out;
+                    iiu_alt_num_extended(2, n_byte_sym_out);
                     iiu_set_position(2, 0, 0);
                     ind_extra_out = 0;
                 } else {
                     // `iiuAltNumExtended(2, 0)`.  `iiuTransExtendedData` has
                     // already copied `nint`, `nreal` and `extType` from the
                     // input, so with `-strip` those survive with no data.
-                    (*chunk_header).next = 0;
-                    (*chunk_header).header_size = 1024;
+                    iiu_alt_num_extended(2, 0);
                 }
-                // `newstack.f90:1855-1889`.  The origin shifts by the
-                // fractional-pixel offset whenever the read reduced the image,
-                // and `-origin` then re-centres with the *reduced* size and a
-                // delta scaled by the reduction over the expansion.
+                // `newstack.f90:1855-1889`: shift the origin by the fractional
+                // pixel offset when binning or reducing with read, then adjust
+                // it if requested; both through the unit layer.
                 {
-                    let mut delta = [
-                        header.xlen / header.mx as f32,
-                        header.ylen / header.my as f32,
-                        header.zlen / header.mz as f32,
-                    ];
-                    let mut x_origin = (*chunk_header).xorg;
-                    let mut y_origin = (*chunk_header).yorg;
-                    let mut z_origin = (*chunk_header).zorg;
+                    let mut delta = [0_f32; 3];
+                    iiu_ret_delta(1, &mut delta);
+                    let mut origin = [0_f32; 3];
+                    iiu_ret_origin(1, &mut origin);
+                    let [mut x_origin, mut y_origin, mut z_origin] = origin;
                     if read_reduction > 1. {
                         x_origin -= delta[0] * rx_offset;
                         y_origin -= delta[1] * ry_offset;
@@ -3591,9 +3553,7 @@ pub fn newstack() {
                         }
                     }
                     if adjust_origin || read_reduction > 1. {
-                        (*chunk_header).xorg = x_origin;
-                        (*chunk_header).yorg = y_origin;
-                        (*chunk_header).zorg = z_origin;
+                        iiu_alt_origin(2, &[x_origin, y_origin, z_origin]);
                     }
                 }
                 // `iiuTransHeader` retains the source titles, as the
@@ -3725,114 +3685,55 @@ pub fn newstack() {
                 // header anywhere else leaves `u->header->ny` at zero for a
                 // TIFF output and `setupCurrentLines` (`unit_fileio.c:744-750`)
                 // then refuses every write with `ny 0`.
-                let out_header = iiu_mrc_header(2, "iiuTransHeader", iiu_get_exit_on_error(), 2);
-                // `iiuTransHeader` (`unit_header.c:381-385`) saves and restores
-                // the destination `fp` around the whole-header copy.
-                let fp_save = (*out_header).fp.take();
-                *out_header = header.clone();
-                (*out_header).fp = fp_save;
-                // `iiuTransHeader` ends in `iiuTransExtendedData`
-                // (`unit_header.c:395`), whose first act -- for every output
-                // type but TIFF and shared memory -- is
-                // `iiuTransAdocSections(intoUnit, iunit)`
-                // (`unit_header.c:1191`).  That carries the input's global
-                // (PreData) autodoc section to the output's
-                // (`iimage.c:1047-1051`), which is what re-emits the input's
-                // unconsumed attributes with the `IMOD.` prefix at
-                // `iihdf.c:1364`.  This is the HDF->HDF transfer that
-                // `newstack.f90:1939-1940` says "itrhdr takes care of".  The
-                // source calls `iiuTransHeader` as a subroutine, so a failure
-                // here is discarded exactly as it is there.
-                // `iiuTransHeader` runs `mrcInitOutputHeader`
-                // (`unit_header.c:387`) over the copied header, never
-                // `mrc_head_new`.  The two are not interchangeable:
-                // `mrc_head_new` (`mrcfiles.c:689-766`) additionally resets
-                // `amin` to `FLT_MAX`, `amax` to `-FLT_MAX`, `amean`, `ispg`,
-                // `creatid`, `sub`, `zfac`, `min2`-`max3`, `idtype`, `lens`,
-                // `nd1`-`vd2`, `blank`, `tiltangles` and `iiuFlags`, every one
-                // of which the source's whole-header copy keeps from the
-                // input.  Two of those are visible in the output: the
-                // `tiltangles` an MRC output carries over, and the `amin` and
-                // `amax` a TIFF output puts in `SMinSampleValue` and
-                // `SMaxSampleValue` on the first directory
-                // (`iitif.c:2591-2593`, `iitif.c:3165-3166`) -- the sentinels
-                // fail that `amax > amin` test and the tags go missing.
-                // Size and mode are what `iiuAltMode`
-                // (`unit_header.c:245-263`) and `iiuAltSize`
-                // (`unit_header.c:307-317`) set next
-                // (`newstack.f90:1813-1821`).
-                mrc_init_output_header(&mut *out_header);
-                // `iiuTransHeader` ends in `iiuTransExtendedData`
-                // (`unit_header.c:395`), after `mrcInitOutputHeader` has
-                // cleared `next`, `nint`, `nreal`, `nversion` and `extType`
-                // (`mrcfiles.c:797-801`).  That call restores `nint`, `nreal`
-                // and a valid `extType` from the input and writes the input's
-                // extended data to the output; the extra-header sizing below
-                // then overrides `next` and `headerSize`.  The source calls
-                // `iiuTransHeader` as a subroutine, so a failure here is
-                // discarded exactly as it is there.
-                iiu_trans_extended_data(2, 1);
-                (*out_header).nx = output_nx;
-                (*out_header).ny = output_ny;
-                (*out_header).nz = num_output_sections[output_index];
-                (*out_header).mode = output_mode;
-                // `iiuTransHeader`, `iiuAltSize`, `iiuAltSample`, and
-                // `iiuAltCell` in newstack.f90:1814-1852 retain the input
-                // geometry while changing the output sampling; the whole-header
-                // copy above already carries it, and these repeat what
-                // `iiuAltSize`'s `nxyzst` argument sets from the input.
-                (*out_header).nxstart = header.nxstart;
-                (*out_header).nystart = header.nystart;
-                (*out_header).nzstart = header.nzstart;
-                (*out_header).mapc = header.mapc;
-                (*out_header).mapr = header.mapr;
-                (*out_header).maps = header.maps;
-                (*out_header).imod_stamp = header.imod_stamp;
-                // `imodFlags` is deliberately not carried over: `iiuTransHeader`
-                // (`unit_header.c:387`) runs `mrcInitOutputHeader` over the
-                // copied header, which resets it to `MRC_FLAGS_BAD_RMS_NEG`
-                // (`mrcfiles.c:790`).
-                // `newstack.f90:1839-1840`: `iiuAltCell` writes `cell2(4:6)`,
-                // which the source sets to 90 for every output file.
-                (*out_header).alpha = 90.0;
-                (*out_header).beta = 90.0;
-                (*out_header).gamma = 90.0;
-                (*out_header).xorg = header.xorg;
-                (*out_header).yorg = header.yorg;
-                (*out_header).zorg = header.zorg;
-                if header.mx == header.nx && header.my == header.ny && header.mz == header.nz {
-                    (*out_header).mx = output_nx;
-                    (*out_header).my = output_ny;
-                    (*out_header).mz = num_output_sections[output_index];
+                // `newstack.f90:1813-1853`: the output header is made through the
+                // unit layer -- `iiuTransHeader`, `iiuAltMode`, `iiuAltSize`,
+                // `iiuAltSample`, `iiuAltCell` -- exactly as the source calls it.
+                iiu_trans_header(2, 1);
+                iiu_alt_mode(2, output_mode);
+                // `newstack.f90:1528-1529`: the input's sizes and cell from unit 1.
+                let mut nxyz_in1 = [0_i32; 3];
+                let mut mxyz1 = [0_i32; 3];
+                let mut nxyzst1 = [0_i32; 3];
+                iiu_ret_size(1, &mut nxyz_in1, &mut mxyz1, &mut nxyzst1);
+                let mut cell1 = [0_f32; 6];
+                iiu_ret_cell(1, &mut cell1);
+                //
+                // set new size, keep old nxyzst
+                //
+                let nxyz2 = [output_nx, output_ny, num_output_sections[output_index]];
+                iiu_alt_size(2, &nxyz2, &nxyzst1);
+                //
+                // if mxyz=nxyz, keep this relationship
+                //
+                let mxyz2 = if mxyz1 == nxyz_in1 {
+                    iiu_alt_sample(2, &nxyz2);
+                    nxyz2
                 } else {
-                    (*out_header).mx = header.mx;
-                    (*out_header).my = header.my;
-                    (*out_header).mz = header.mz;
+                    mxyz1
+                };
+                //
+                // keep delta the same by scaling cell size from change in mxyz
+                //
+                let mut cell2 = [0_f32; 6];
+                for i in 0..3 {
+                    cell2[i] = mxyz2[i] as f32 * (cell1[i] / mxyz1[i] as f32) * read_reduction
+                        / expand_factor;
+                    cell2[i + 3] = 90.;
                 }
-                // `newstack.f90:1838-1843`: the X and Y cell sizes carry the
-                // read reduction and expansion, and the Z size is then reset
-                // without them.
-                (*out_header).xlen =
-                    (*out_header).mx as f32 * (header.xlen / header.mx as f32) * read_reduction
-                        / expand_factor;
-                (*out_header).ylen =
-                    (*out_header).my as f32 * (header.ylen / header.my as f32) * read_reduction
-                        / expand_factor;
-                (*out_header).zlen = (*out_header).mz as f32 * (header.zlen / header.mz as f32);
+                cell2[2] = mxyz2[2] as f32 * (cell1[2] / mxyz1[2] as f32);
+                //
+                // Set pixel size from mdoc file if indicated and possible
+                // (`newstack.f90:1845-1852`; the value was read from the mdoc up front)
                 if pixel_from_mdoc {
                     let (input_index, input_section) = routes[route_index];
                     if let Some(spacing) = mdoc_pixel_spacing[input_index][input_section as usize] {
-                        // `newstack.f90:1848-1849`: the mdoc spacing is
-                        // scaled by `readReduction` just as the header
-                        // spacing above it is, so `-pixel` with `-bin` or
-                        // `-shrink` keeps the reduced pixel size.
-                        (*out_header).xlen =
-                            (*out_header).mx as f32 * spacing * read_reduction / expand_factor;
-                        (*out_header).ylen =
-                            (*out_header).my as f32 * spacing * read_reduction / expand_factor;
-                        (*out_header).zlen = (*out_header).mz as f32 * spacing;
+                        cell2[0] = mxyz2[0] as f32 * spacing * read_reduction / expand_factor;
+                        cell2[1] = mxyz2[1] as f32 * spacing * read_reduction / expand_factor;
+                        cell2[2] = mxyz2[2] as f32 * spacing;
                     }
                 }
+                iiu_alt_cell(2, &cell2);
+                let out_header = iiu_mrc_header(2, "iiuTransHeader", iiu_get_exit_on_error(), 2);
                 //
                 // adjust extra header information if currently open file has it
                 // (`newstack.f90:1904-1935`)
@@ -3845,10 +3746,7 @@ pub fn newstack() {
                     if n_byte_sym_in == 0 {
                         n_byte_extra_out = 4;
                         serial_em_type = false;
-                        // `iiuAltExtendedType(2, 0, 1)` (`unit_header.c:1099`)
-                        // sets `nint` and `nreal` on unit 2's header.
-                        (*out_header).nint = 0;
-                        (*out_header).nreal = 1;
+                        iiu_alt_extended_type(2, &[0, 1]);
                     } else {
                         get_extra_header_max_sec_size(
                             &extra_in,
@@ -3870,31 +3768,24 @@ pub fn newstack() {
                         max_extra_out = n_byte_sym_out + 1024;
                         extra_out = vec![0_u8; max_extra_out as usize];
                     }
-                    // `iiuAltNumExtended(2, nByteSymOut)` (`unit_header.c:1078`).
-                    (*out_header).next = n_byte_sym_out;
-                    (*out_header).header_size = 1024 + n_byte_sym_out;
+                    iiu_alt_num_extended(2, n_byte_sym_out);
                     iiu_set_position(2, 0, 0);
                     ind_extra_out = 0;
                 } else {
                     // `iiuAltNumExtended(2, 0)`.  `iiuTransExtendedData` has
                     // already copied `nint`, `nreal` and `extType` from the
                     // input, so with `-strip` those survive with no data.
-                    (*out_header).next = 0;
-                    (*out_header).header_size = 1024;
+                    iiu_alt_num_extended(2, 0);
                 }
-                // `newstack.f90:1855-1889`.  The origin shifts by the
-                // fractional-pixel offset whenever the read reduced the image,
-                // and `-origin` then re-centres with the *reduced* size and a
-                // delta scaled by the reduction over the expansion.
+                // `newstack.f90:1855-1889`: shift the origin by the fractional
+                // pixel offset when binning or reducing with read, then adjust
+                // it if requested; both through the unit layer.
                 {
-                    let mut delta = [
-                        header.xlen / header.mx as f32,
-                        header.ylen / header.my as f32,
-                        header.zlen / header.mz as f32,
-                    ];
-                    let mut x_origin = (*out_header).xorg;
-                    let mut y_origin = (*out_header).yorg;
-                    let mut z_origin = (*out_header).zorg;
+                    let mut delta = [0_f32; 3];
+                    iiu_ret_delta(1, &mut delta);
+                    let mut origin = [0_f32; 3];
+                    iiu_ret_origin(1, &mut origin);
+                    let [mut x_origin, mut y_origin, mut z_origin] = origin;
                     if read_reduction > 1. {
                         x_origin -= delta[0] * rx_offset;
                         y_origin -= delta[1] * ry_offset;
@@ -3930,9 +3821,7 @@ pub fn newstack() {
                         }
                     }
                     if adjust_origin || read_reduction > 1. {
-                        (*out_header).xorg = x_origin;
-                        (*out_header).yorg = y_origin;
-                        (*out_header).zorg = z_origin;
+                        iiu_alt_origin(2, &[x_origin, y_origin, z_origin]);
                     }
                 }
                 // `iiuTransHeader` retains source titles, as the whole-header

@@ -38,30 +38,27 @@ impl ComFileJobs {
         let num_jobs = com_file_array.len() as i32;
         let mut job_array = Vec::with_capacity(com_file_array.len());
         for com_file_name in com_file_array {
+            //Save the root (file name without the extension) because it is used more
+            //the the file name.  Currently chunk file names always end in ".com".
             let root = match com_file_name.rfind('.') {
                 Some(ext_index) => com_file_name[..ext_index].to_owned(),
                 None => com_file_name,
             };
-            let flag = if single_file
-                || root.ends_with("-start")
-                || root.ends_with("-finish")
-                || root.ends_with("-sync")
-            {
-                CHUNK_SYNC
-            } else {
-                CHUNK_NOT_DONE
-            };
             job_array.push(Job {
                 root,
                 num_chunk_err: 0,
-                flag,
+                flag: CHUNK_NOT_DONE,
             });
         }
-        Self {
+        let mut jobs = Self {
             num_jobs,
             job_array,
             com_extension,
+        };
+        for index in 0..jobs.job_array.len() {
+            jobs.set_flag_not_done(index, single_file);
         }
+        jobs
     }
 
     /// C++ declaration `ComFileJobs::setup`.
