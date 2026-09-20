@@ -6,7 +6,7 @@ use crate::imod::libcfshr::b3dutil::fgetline;
 use crate::imod::libcfshr::b3dutil::{
     CArg, b3d_set_store_error, c_format_bytes, imod_backup_file, imod_copyright, imod_prog_name,
 };
-use crate::imod::libcfshr::islice::{Islice, slice_init};
+use crate::imod::libcfshr::islice::{Islice, MrcData, slice_init};
 use crate::imod::libcfshr::parse_params::{exit_error, set_standard_exit_prefix};
 use crate::imod::libiimod::iimage::ii_fopen;
 use crate::imod::libiimod::mrcfiles::get_loadinfo;
@@ -278,8 +278,11 @@ pub fn mrcbyte(arguments: &[String]) -> i32 {
     if !data_only && mrc_head_write(&mut output, &mut output_header) != 0 {
         exit_error(b"Writing header to output file");
     }
+    // `mrcbyte.c:221`: one buffer for the whole run; `sliceInit` aliases it
+    // and `mrc_write_slice` writes it, so it is lent to the slice and taken
+    // back after each section.
+    let mut buf = MrcData::B(vec![0; area]);
     for section in 0..output_header.nz {
-        let mut bytes = vec![0; area];
         let input_section = section + li.zmin;
         // `mrcbyte.c:229-230`: a carriage return, not a newline, and an
         // explicit flush -- so the 30 reports overwrite one line on a terminal
@@ -289,14 +292,14 @@ pub fn mrcbyte(arguments: &[String]) -> i32 {
             &[CArg::Int(input_section as i64)],
         ));
         let _ = ImodFile::Stdout.flush();
-        if mrc_read_z_byte(&mut header, &mut li, &mut bytes, input_section) != 0 {
+        if mrc_read_z_byte(&mut header, &mut li, buf.b_mut(), input_section) != 0 {
             exit_error(&c_format_bytes(
                 "Reading section %d from file",
                 &[CArg::Int(input_section as i64)],
             ));
         }
         if reverse {
-            for byte in &mut bytes {
+            for byte in buf.b_mut() {
                 *byte = 255 - *byte;
             }
         }
@@ -307,7 +310,7 @@ pub fn mrcbyte(arguments: &[String]) -> i32 {
         // flat f64 sum over the whole section instead put `amean` one float
         // away from native (24.324752807617188 vs 24.32476806640625).
         let mut slice = Islice {
-            data: Vec::new(),
+            data: MrcData::default(),
             xsize: 0,
             ysize: 0,
             mode: 0,
@@ -324,7 +327,7 @@ pub fn mrcbyte(arguments: &[String]) -> i32 {
             output_header.nx,
             output_header.ny,
             MRC_MODE_BYTE,
-            bytes,
+            std::mem::take(&mut buf),
         );
         slice_mmm(&mut slice);
         if section == 0 {
@@ -344,12 +347,20 @@ pub fn mrcbyte(arguments: &[String]) -> i32 {
             };
         }
         sum += slice.mean as f64;
-        if mrc_write_slice(&slice.data, &mut output, &mut output_header, section, b'Z') != 0 {
+        if mrc_write_slice(
+            slice.data.bytes(),
+            &mut output,
+            &mut output_header,
+            section,
+            b'Z',
+        ) != 0
+        {
             exit_error(&c_format_bytes(
                 "Writing section %d to file",
                 &[CArg::Int(section as i64)],
             ));
         }
+        buf = std::mem::take(&mut slice.data);
     }
     output_header.amean = (sum / output_header.nz as f64) as f32;
     if !data_only && mrc_head_write(&mut output, &mut output_header) != 0 {

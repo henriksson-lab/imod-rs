@@ -8,7 +8,6 @@
 //! translation never allocates), so the `mesh[sh].vertBuf = NULL` of
 //! `imodMeshesNew` and the `newMesh->vertBuf = NULL` of `imodMeshDup` have no
 //! counterpart here.
-#![allow(dead_code)]
 
 use super::imodel::{Icont, Imesh, Ipoint};
 use super::ipoint::{imod_point_append, imod_point_cross, imod_point_normalize};

@@ -1,5 +1,4 @@
 //! Translation of `IMOD/libcfshr/winversion.c`.
-#![allow(dead_code)]
 
 #[cfg(windows)]
 const VER_MINORVERSION: u32 = 0x0000_0001;
@@ -41,56 +40,6 @@ unsafe extern "system" {
         condition_mask: u64,
     ) -> i32;
     fn VerSetConditionMask(condition_mask: u64, type_mask: u32, condition: u8) -> u64;
-}
-
-/// Original `isWindows2000` (`winversion.c:10`).
-pub fn is_windows_2000() -> i32 {
-    #[cfg(windows)]
-    {
-        return is_windows_version(5, VER_EQUAL as i32, 0, VER_EQUAL as i32);
-    }
-    #[cfg(not(windows))]
-    -1
-}
-
-/// Original `isWindowsXP` (`winversion.c:19`).
-pub fn is_windows_xp() -> i32 {
-    #[cfg(windows)]
-    {
-        return is_windows_version(5, VER_EQUAL as i32, 1, VER_GREATER_EQUAL as i32);
-    }
-    #[cfg(not(windows))]
-    -1
-}
-
-/// Original `isWindowsVista` (`winversion.c:28`).
-pub fn is_windows_vista() -> i32 {
-    #[cfg(windows)]
-    {
-        return is_windows_version(6, VER_EQUAL as i32, 0, VER_EQUAL as i32);
-    }
-    #[cfg(not(windows))]
-    -1
-}
-
-/// Original `isWindows7` (`winversion.c:37`).
-pub fn is_windows_7() -> i32 {
-    #[cfg(windows)]
-    {
-        return is_windows_version(6, VER_EQUAL as i32, 1, VER_EQUAL as i32);
-    }
-    #[cfg(not(windows))]
-    -1
-}
-
-/// Original `isWindows8` (`winversion.c:47`).
-pub fn is_windows_8() -> i32 {
-    #[cfg(windows)]
-    {
-        return is_windows_version(6, VER_EQUAL as i32, 2, VER_GREATER_EQUAL as i32);
-    }
-    #[cfg(not(windows))]
-    -1
 }
 
 /// Original `isWindows10` (`winversion.c:56`).
@@ -146,11 +95,6 @@ mod tests {
     #[cfg(not(windows))]
     #[test]
     fn source_non_windows_results_are_minus_one() {
-        assert_eq!(is_windows_2000(), -1);
-        assert_eq!(is_windows_xp(), -1);
-        assert_eq!(is_windows_vista(), -1);
-        assert_eq!(is_windows_7(), -1);
-        assert_eq!(is_windows_8(), -1);
         assert_eq!(is_windows_10(), -1);
         assert_eq!(is_windows_version(10, 1, 0, 3), -1);
     }

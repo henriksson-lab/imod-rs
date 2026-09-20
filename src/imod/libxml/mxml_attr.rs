@@ -1,43 +1,6 @@
 //! Translation of `IMOD/libxml/mxml-attr.c`.
-#![allow(dead_code)]
 
 use super::*;
-
-/// Matches C `mxmlElementDeleteAttr` (`mxml-attr.c:38`).
-pub fn mxml_element_delete_attr(arena: &mut MxmlArena, node: Option<usize>, name: Option<&[u8]>) {
-    /*
-     * Range check input...
-     */
-
-    let Some(node) = node else {
-        return;
-    };
-    if arena.node(node).type_ != MXML_ELEMENT {
-        return;
-    }
-    let Some(name) = name else {
-        return;
-    };
-    let MxmlValue::Element(element) = &mut arena.node_mut(node).value else {
-        return;
-    };
-
-    /*
-     * Look for the attribute...
-     */
-
-    if let Some(attr) = element.attrs.iter().position(|attr| attr.name == name) {
-        /*
-         * Delete this attribute...  (the C frees the name and value and
-         * then memmoves the tail of the array down over the slot.)
-         */
-
-        element.attrs.remove(attr);
-
-        /* The C frees the whole array when the last attribute goes. */
-        return;
-    }
-}
 
 /// Matches C `mxmlElementGetAttr` (`mxml-attr.c:96`).
 pub fn mxml_element_get_attr<'a>(

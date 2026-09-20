@@ -7,7 +7,6 @@
 //! (`:321`).  The `DEBS(-1)`, `DEBS(-2)`, `DEBS(0)` and `DEBS(-7)` blocks —
 //! including both `check_perps` calls inside `get_normal_sede` — are compiled
 //! out, and are noted where they sit rather than translated into dead code.
-#![allow(dead_code)]
 
 use std::cell::Cell;
 use std::io::Write;
@@ -211,13 +210,6 @@ fn ax_plus_y_test(a: Coord, x: &[Coord], y: &mut [Coord]) {
     }
 }
 
-/// Original static `Vec_scale` (`hull-ch.c:116`).
-fn vec_scale(n: i32, a: Coord, x: &mut [Coord]) {
-    for i in 0..n as usize {
-        x[i] *= a;
-    }
-}
-
 /// Original static `Vec_scale_test` (`hull-ch.c:123`).
 fn vec_scale_test(n: i32, a: Coord, x: &mut [Coord]) {
     /* check_overshoot(a) (`hull-ch.c:128`) */
@@ -337,80 +329,6 @@ fn sc(st: &mut HullStorage, v: usize, s: usize, k: i32, j: i32) -> f64 {
             2f64.powi(x)
         }
     }
-}
-
-/// Original static `lower_terms` (`hull-ch.c:227`).  Nothing calls it; the
-/// source's own call in `reduce_inner` is commented out.
-fn lower_terms(st: &mut HullStorage, v: usize) -> f64 {
-    let facs = [2i32, 3, 5, 7, 11, 13];
-    let mut out = 1.0f64;
-    let rdim = RDIM.get();
-
-    /* DEBTR(-10) is live (DEBUG -7 > -10); `print_basis` and the `printf`
-    that follow it on `hull-ch.c:234` sit outside the macro's braces and run
-    unconditionally. */
-    let mut d = ImodFile::Stderr;
-    let _ = d.write_all(c_format("hull-ch.c line %d \n", &[CArg::Int(234)]).as_bytes());
-    let _ = d.flush();
-    print_basis(st, &mut d, v);
-    let mut out_stream = ImodFile::Stdout;
-    let _ = out_stream.write_all(b"\n");
-    /* DEBTR(0) -- DEBUG (-7) > 0 is false. */
-
-    for j in 0..6 {
-        loop {
-            let mut i = 0;
-            while i < 2 * rdim
-                && facs[j] as f64 * (st.basis[v].vecs[i as usize] / facs[j] as f64).floor()
-                    == st.basis[v].vecs[i as usize]
-            {
-                i += 1;
-            }
-            /* DNM: add suggested parens */
-            let h = i == 2 * rdim;
-            if h {
-                out *= facs[j] as f64;
-                for i in 0..2 * rdim {
-                    st.basis[v].vecs[i as usize] /= facs[j] as f64;
-                }
-            }
-            if !h {
-                break;
-            }
-        }
-    }
-    /* if (hh) {DEBTR(-10)  print_basis(DFILE, v);} */
-    out
-}
-
-/// Original static `lower_terms_point` (`hull-ch.c:250`).
-fn lower_terms_point(vp: &mut [Coord]) -> f64 {
-    let facs = [2i32, 3, 5, 7, 11, 13];
-    let mut out = 1.0f64;
-    let rdim = RDIM.get();
-
-    for j in 0..6 {
-        loop {
-            let mut i = 0;
-            while i < 2 * rdim
-                && facs[j] as f64 * (vp[i as usize] / facs[j] as f64).floor() == vp[i as usize]
-            {
-                i += 1;
-            }
-            /* DNM: add suggested parens */
-            let h = i == 2 * rdim;
-            if h {
-                out *= facs[j] as f64;
-                for i in 0..2 * rdim {
-                    vp[i as usize] /= facs[j] as f64;
-                }
-            }
-            if !h {
-                break;
-            }
-        }
-    }
-    out
 }
 
 /// Original static `reduce_inner` (`hull-ch.c:269`).
@@ -855,13 +773,6 @@ fn zero_marks(st: &mut HullStorage, s: usize) -> usize {
 /// Original static `one_marks` (`hull-ch.c:550`).
 fn one_marks(st: &mut HullStorage, s: usize) -> usize {
     st.simplex[s].mark = 1;
-    0
-}
-
-/// Original static `show_marks` (`hull-ch.c:552`).
-fn show_marks(st: &mut HullStorage, s: usize) -> usize {
-    let mut out = ImodFile::Stdout;
-    let _ = out.write_all(c_format("%d", &[CArg::Int(st.simplex[s].mark as i64)]).as_bytes());
     0
 }
 

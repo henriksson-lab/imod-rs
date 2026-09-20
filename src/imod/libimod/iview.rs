@@ -1,9 +1,7 @@
 //! View or camera handling functions, from `IMOD/libimod/iview.c` and
 //! `IMOD/include/iview.h`.
-#![allow(dead_code)]
 
 use crate::imod::libcfshr::b3dutil::ImodFile;
-use std::fs::File;
 use std::io::{Read, Seek, SeekFrom};
 
 use super::imodel::{
@@ -50,11 +48,6 @@ pub fn imod_view_new(size: i32) -> Option<Vec<Iview>> {
         view.push(Iview::default());
     }
     Some(view)
-}
-
-/// Original: `imodViewDelete` (`iview.c:32`).
-pub fn imod_view_delete(vw: Option<Vec<Iview>>) {
-    drop(vw);
 }
 
 /// Original: `imodViewDefault` (`iview.c:42`).

@@ -19,7 +19,6 @@
 //! WIMP-to-model path in this crate is `IMOD/imodutil/wmod2imod.c`, translated
 //! in `src/imod/imodutil/wmod2imod.rs`, which contains its own copy of the same
 //! parsing loop and is the code the shipped `wmod2imod` command actually runs.
-#![allow(dead_code)]
 
 /// Original: `MAXLINE` (`imodel_from.c:16`).
 pub const MAXLINE: usize = 128;

@@ -4,7 +4,6 @@
 //! represented by [`submfg`].  `vmstopy`, `vmstocsh`, `tcsh`, and the generated
 //! Python command file are intentionally retained as process boundaries: they are
 //! separate IMOD command units, not alternate Rust implementations.
-#![allow(dead_code)]
 
 use std::ffi::OsString;
 use std::fs;
@@ -13,7 +12,7 @@ use std::path::Path;
 use std::process::Command;
 use std::time::Instant;
 
-use super::imodpy::add_imod_bin_ignore_sighup;
+use super::imodpy::{add_imod_bin_ignore_sighup, pass_on_key_interrupt};
 use super::pip::expand_arg_list;
 
 /// Original Python top-level program (`IMOD/pysrc/submfg:1`).
@@ -117,6 +116,10 @@ pub fn submfg(arguments: &[OsString]) -> i32 {
         );
         return 1;
     }
+
+    pass_on_key_interrupt(true);
+
+    // Loop over the command files
     let new_args = expanded_arguments
         .iter()
         .map(|argument| argument.to_string_lossy().into_owned())

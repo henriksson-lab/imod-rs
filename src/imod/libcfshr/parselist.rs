@@ -1,5 +1,4 @@
 //! Translation of `IMOD/libcfshr/parselist.c`.
-#![allow(dead_code)]
 
 use super::parse_params::strtol;
 pub const PARSELIST_SOURCE_FUNCTIONS: &[&str] = &["parselist", "parselistfw"];

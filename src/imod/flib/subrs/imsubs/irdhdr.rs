@@ -1,5 +1,5 @@
 //! Translation of `IMOD/flib/subrs/imsubs/irdhdr.f90`.
-#![allow(dead_code, unused_variables)]
+#![allow(unused_variables)]
 
 use crate::imod::libiimod::unit_fileio::{iiu_file_info, iiu_ret_brief, iiu_ret_print};
 use crate::imod::libiimod::unit_header::{
@@ -77,6 +77,21 @@ pub unsafe fn irdhdr(
         // fraction digits followed by four blanks, and anything else falls back
         // to E editing.  `{:w.d}` is plain F editing and matches neither.
         let g_edit = |value: f32, w: usize, d: i32| -> String {
+            // `libgfortran/io/write.c` `write_infnan`: a NaN prints as `NaN`
+            // and an infinity as `Infinity` (`Inf` when the field is narrower
+            // than 8, with a leading `-` for negative), right-justified in `w`.
+            if value.is_nan() {
+                return format!("{:>w$}", "NaN");
+            }
+            if value.is_infinite() {
+                let text = match (value < 0.0, w) {
+                    (false, 8..) => "Infinity",
+                    (false, _) => "Inf",
+                    (true, 9..) => "-Infinity",
+                    (true, _) => "-Inf",
+                };
+                return format!("{text:>w$}");
+            }
             let magnitude = value.abs();
             let mut digits = String::new();
             let mut exponent = 1_i32;
@@ -286,9 +301,23 @@ pub unsafe fn irdhdr(
                 " tilt angles (original,current) ........{:6.1}{:6.1}{:6.1}{:6.1}{:6.1}{:6.1}",
                 tilt_orig[0], tilt_orig[1], tilt_orig[2], tilt[0], tilt[1], tilt[2]
             );
+            // FORMAT `4I9`: an integer wider than the field prints as nine
+            // asterisks (`libgfortran/io/write.c`, `write_integer`), which a
+            // `{:9}` would instead widen.
+            let i9 = |v: i32| -> String {
+                let text = v.to_string();
+                if text.len() > 9 {
+                    "*".repeat(9)
+                } else {
+                    format!("{text:>9}")
+                }
+            };
             println!(
-                " Space group,# extra bytes,idtype,lens .{:9}{:9}{:9}{:9}\n",
-                ispg, num_extra, idtype, lensnum
+                " Space group,# extra bytes,idtype,lens .{}{}{}{}\n",
+                i9(ispg),
+                i9(num_extra),
+                i9(idtype),
+                i9(lensnum)
             );
             // FORMAT 1020: `1x,i5,' Titles :' / 10(19a4,a3/)`.
             println!(" {:5} Titles :", num_labels);

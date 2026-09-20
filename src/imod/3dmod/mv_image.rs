@@ -1314,7 +1314,7 @@ mod tests {
             ..Default::default()
         });
         let mut section = slice_create(2, 1, mode).expect("test section");
-        section.data = bytes;
+        section.data.bytes_mut().copy_from_slice(&bytes);
         let view = ImodView {
             fp: Some(ImodFile::Token(1)),
             li: &mut *load_info,

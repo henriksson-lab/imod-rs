@@ -3,11 +3,14 @@
 use super::cmplft;
 
 /// C `realft`.
-pub fn realft(data: &mut [f32], n: i32, dim: &mut [i32; 6]) {
+/// The C takes `even`/`x` and `odd`/`y` pointers; `odd` is the bias of the
+/// second stream into `data` -- 1 for interleaved storage, `ny` for
+/// `todfft`'s transposed layout.
+pub fn realft(data: &mut [f32], odd: usize, n: i32, dim: &mut [i32; 6]) {
     assert!(data.len() >= dim[1] as usize);
     let twopi = 6.2831853_f32;
     let two_n = (2 * n) as f32;
-    cmplft(data, n, dim);
+    cmplft(data, odd, n, dim);
     let total = dim[1];
     let along = dim[2];
     let limit = dim[3];
@@ -29,14 +32,14 @@ pub fn realft(data: &mut [f32], n: i32, dim: &mut [i32; 6]) {
                     let paired = point + delta;
                     let a = (data[paired as usize] + data[point as usize]) / 2.0;
                     let c = (data[paired as usize] - data[point as usize]) / 2.0;
-                    let b = (data[paired as usize + 1] + data[point as usize + 1]) / 2.0;
-                    let d = (data[paired as usize + 1] - data[point as usize + 1]) / 2.0;
+                    let b = (data[paired as usize + odd] + data[point as usize + odd]) / 2.0;
+                    let d = (data[paired as usize + odd] - data[point as usize + odd]) / 2.0;
                     let e = c * si + b * co;
                     let f = c * co - b * si;
                     data[point as usize] = a + e;
                     data[paired as usize] = a - e;
-                    data[point as usize + 1] = f - d;
-                    data[paired as usize + 1] = f + d;
+                    data[point as usize + odd] = f - d;
+                    data[paired as usize + odd] = f + d;
                     point += between;
                 }
                 row += limit;
@@ -53,10 +56,10 @@ pub fn realft(data: &mut [f32], n: i32, dim: &mut [i32; 6]) {
         let mut point = row - 1;
         while point < row_end {
             let paired = point + delta;
-            data[paired as usize] = data[point as usize] - data[point as usize + 1];
-            data[paired as usize + 1] = 0.0;
-            data[point as usize] += data[point as usize + 1];
-            data[point as usize + 1] = 0.0;
+            data[paired as usize] = data[point as usize] - data[point as usize + odd];
+            data[paired as usize + odd] = 0.0;
+            data[point as usize] += data[point as usize + odd];
+            data[point as usize + odd] = 0.0;
             point += between;
         }
         row += limit;

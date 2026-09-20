@@ -1,5 +1,4 @@
 //! Translation scaffolding for `IMOD/libwarp/nn.h`.
-#![allow(dead_code)]
 
 use std::cell::Cell;
 

@@ -24,19 +24,6 @@ pub fn normalize(array: &mut [f32], scale: f32, data_size: usize) -> Result<(), 
     Ok(())
 }
 
-/// Original static `goodSize` (`libfft/fftw_wrap.c`).
-pub fn good_size(mut nx: i32) -> bool {
-    if nx < 1 {
-        return false;
-    }
-    for factor in 2..=13 {
-        while nx % factor == 0 {
-            nx /= factor;
-        }
-    }
-    nx == 1
-}
-
 /// Native `cleanupFFTplans`.  RustFFT plans are scoped to their execution,
 /// so no process-global FFTW plan ring remains to destroy.
 pub fn cleanup_fft_plans() {}
@@ -441,8 +428,6 @@ mod tests {
     fn native_fft_capability_and_factor_rules_are_retained() {
         assert_eq!(using_fftw(), 1);
         assert_eq!(nice_fft_limit(), 13);
-        assert!(good_size(2 * 3 * 5 * 7 * 11 * 13));
-        assert!(!good_size(17));
         let mut values = [2., 4., 9.];
         normalize(&mut values, 0.5, 2).unwrap();
         assert_eq!(values, [1., 2., 9.]);

@@ -8,7 +8,7 @@
 //! translated `imodel_files` unit does not carry as separate functions; as in
 //! `imodel_read_header` there, the byte and float reads are done in place with
 //! `read_exact`/`imod_get_float`.
-#![allow(dead_code, unused_variables)]
+#![allow(unused_variables)]
 
 use crate::imod::libcfshr::b3dutil::ImodFile;
 use crate::imod::libimod::imat::{
@@ -19,7 +19,6 @@ use crate::imod::libimod::imodel::{
 };
 use crate::imod::libimod::imodel_files::imod_get_float;
 use crate::imod::libimod::ipoint::imod_point_normalize;
-use std::fs::File;
 use std::io::Read;
 
 /// Original: `imodPlanesNew` (`iplane.c:20`).

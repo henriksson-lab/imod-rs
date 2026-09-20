@@ -1,6 +1,6 @@
 //! Translation of `IMOD/libimod/iobj.c` and its paired header
 //! `IMOD/include/iobj.h`.
-#![allow(dead_code, unused_variables)]
+#![allow(unused_variables)]
 
 use crate::imod::libcfshr::b3dutil::set_or_clear_flags;
 
@@ -9,7 +9,7 @@ use super::icont::{
 };
 use super::imodel::{
     IMOD_MESH_BGNPOLYNORM, IMOD_MESH_BGNPOLYNORM2, IMOD_MESH_ENDPOLY, IMOD_OBJFLAG_OFF,
-    IMOD_OBJFLAG_OPEN, IMOD_OBJFLAG_SCAT, IOBJ_STRSIZE, Iclip_planes, Icont, Imesh, Iobj, Ipoint,
+    IMOD_OBJFLAG_OPEN, IMOD_OBJFLAG_SCAT, IOBJ_STRSIZE, Icont, Imesh, Iobj, Ipoint,
 };
 use super::istore::{istore_delete_cont_surf, istore_shift_index, istore_sort};
 

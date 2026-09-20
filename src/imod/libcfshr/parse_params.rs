@@ -28,7 +28,6 @@
 //! a translation of `printf`: `str::parse` rejects the partial parses that
 //! `PipGetLineOfValues` depends on, and the position where the scan stops is
 //! the value the source compares against `endPtr`.
-#![allow(dead_code)]
 
 use crate::imod::libcfshr::b3dutil::{CArg, ImodFile, c_format, c_format_bytes};
 use std::cell::{Cell, RefCell};
@@ -641,7 +640,7 @@ pub fn pip_next_arg(arg_string: &[u8]) -> i32 {
                 <std::ffi::OsStr as std::os::unix::ffi::OsStrExt>::from_bytes(&arg_copy),
             ))
             .ok()
-            .map(|f| ImodFile::File(std::rc::Rc::new(f)))
+            .map(ImodFile::from_std)
             {
                 Some(mut param_file) => {
                     err = read_param_file(&mut param_file);
@@ -1654,7 +1653,7 @@ pub fn pip_read_option_file(prog_name: &[u8], help_level: i32, local_dir: i32) -
                 <std::ffi::OsStr as std::os::unix::ffi::OsStrExt>::from_bytes(&big_str),
             ))
             .ok()
-            .map(|f| ImodFile::File(std::rc::Rc::new(f)));
+            .map(ImodFile::from_std);
         }
 
         if opt_file.is_none() {
@@ -1680,7 +1679,7 @@ pub fn pip_read_option_file(prog_name: &[u8], help_level: i32, local_dir: i32) -
                     <std::ffi::OsStr as std::os::unix::ffi::OsStrExt>::from_bytes(&big_str),
                 ))
                 .ok()
-                .map(|f| ImodFile::File(std::rc::Rc::new(f)));
+                .map(ImodFile::from_std);
             }
         }
     }
@@ -1704,7 +1703,7 @@ pub fn pip_read_option_file(prog_name: &[u8], help_level: i32, local_dir: i32) -
             <std::ffi::OsStr as std::os::unix::ffi::OsStrExt>::from_bytes(&big_str),
         ))
         .ok()
-        .map(|f| ImodFile::File(std::rc::Rc::new(f)));
+        .map(ImodFile::from_std);
     }
 
     /* If there is still no file, look in current directory */
@@ -1717,7 +1716,7 @@ pub fn pip_read_option_file(prog_name: &[u8], help_level: i32, local_dir: i32) -
             <std::ffi::OsStr as std::os::unix::ffi::OsStrExt>::from_bytes(&big_str),
         ))
         .ok()
-        .map(|f| ImodFile::File(std::rc::Rc::new(f)));
+        .map(ImodFile::from_std);
 
         if opt_file.is_none() {
             /* sprintf(bigStr, "Autodoc file %s.%s was not found ...") */
@@ -3017,26 +3016,6 @@ fn pip_sub_str_dup(s1: &[u8], i1: i32, i2: i32) -> Vec<u8> {
         i += 1;
     }
     s2
-}
-
-/// Original C `PipMemoryError` (`parse_params.c:2145`).
-///
-/// Test for whether the pointer is valid and give memory error if not.  The
-/// source's `void *ptr` is the result of an allocation; Rust allocation does
-/// not return null, so callers inside this unit pass `true`.
-pub fn pip_memory_error(ptr_non_null: bool, routine: &[u8]) -> i32 {
-    if ptr_non_null {
-        return 0;
-    }
-    /* sprintf(sTempStr, "Failed to get memory for string in %s", routine); */
-    let temp = S_TEMP_STR.with_borrow_mut(|t| {
-        t.clear();
-        t.extend_from_slice(b"Failed to get memory for string in ");
-        t.extend_from_slice(routine);
-        t.clone()
-    });
-    pip_set_error(&temp);
-    -1
 }
 
 /// Original C `AppendToErrorString` (`parse_params.c:2164`).

@@ -43,25 +43,10 @@ pub fn vector(nl: isize, nh: isize) -> NrVector<f32> {
 pub fn ivector(nl: isize, nh: isize) -> NrVector<i32> {
     NrVector::new(nl, nh)
 }
-pub fn cvector(nl: isize, nh: isize) -> NrVector<u8> {
-    NrVector::new(nl, nh)
-}
-pub fn lvector(nl: isize, nh: isize) -> NrVector<u64> {
-    NrVector::new(nl, nh)
-}
-pub fn dvector(nl: isize, nh: isize) -> NrVector<f64> {
-    NrVector::new(nl, nh)
-}
 /// `free_vector`; dropping the owned value releases the source allocation.
 pub fn free_vector(_v: NrVector<f32>, _nl: isize, _nh: isize) {}
 /// `free_ivector`; dropping the owned value releases the source allocation.
 pub fn free_ivector(_v: NrVector<i32>, _nl: isize, _nh: isize) {}
-/// `free_cvector`; dropping the owned value releases the source allocation.
-pub fn free_cvector(_v: NrVector<u8>, _nl: isize, _nh: isize) {}
-/// `free_lvector`; dropping the owned value releases the source allocation.
-pub fn free_lvector(_v: NrVector<u64>, _nl: isize, _nh: isize) {}
-/// `free_dvector`; dropping the owned value releases the source allocation.
-pub fn free_dvector(_v: NrVector<f64>, _nl: isize, _nh: isize) {}
 #[derive(Clone, Debug, PartialEq)]
 pub struct NrMatrix<T> {
     pub row_lower: isize,
@@ -98,18 +83,8 @@ impl<T> NrMatrix<T> {
 pub fn matrix(a: isize, b: isize, c: isize, d: isize) -> NrMatrix<f32> {
     NrMatrix::new(a, b, c, d)
 }
-pub fn dmatrix(a: isize, b: isize, c: isize, d: isize) -> NrMatrix<f64> {
-    NrMatrix::new(a, b, c, d)
-}
-pub fn imatrix(a: isize, b: isize, c: isize, d: isize) -> NrMatrix<i32> {
-    NrMatrix::new(a, b, c, d)
-}
 /// `free_matrix`; dropping the owned value releases the source allocation.
 pub fn free_matrix(_m: NrMatrix<f32>, _nrl: isize, _nrh: isize, _ncl: isize, _nch: isize) {}
-/// `free_dmatrix`; dropping the owned value releases the source allocation.
-pub fn free_dmatrix(_m: NrMatrix<f64>, _nrl: isize, _nrh: isize, _ncl: isize, _nch: isize) {}
-/// `free_imatrix`; dropping the owned value releases the source allocation.
-pub fn free_imatrix(_m: NrMatrix<i32>, _nrl: isize, _nrh: isize, _ncl: isize, _nch: isize) {}
 pub fn submatrix(
     a: &NrMatrix<f32>,
     oldrl: isize,
@@ -127,16 +102,8 @@ pub fn submatrix(
     }
     out
 }
-pub fn convert_matrix(a: &[f32], nrl: isize, nrh: isize, ncl: isize, nch: isize) -> NrMatrix<f32> {
-    let mut out = NrMatrix::new(nrl, nrh, ncl, nch);
-    assert_eq!(a.len(), out.values.len());
-    out.values.copy_from_slice(a);
-    out
-}
 /// `free_submatrix`; `submatrix` owns its copied row layout in Rust.
 pub fn free_submatrix(_m: NrMatrix<f32>, _nrl: isize, _nrh: isize, _ncl: isize, _nch: isize) {}
-/// `free_convert_matrix`; only the Rust row metadata is owned by the wrapper.
-pub fn free_convert_matrix(_m: NrMatrix<f32>, _nrl: isize, _nrh: isize, _ncl: isize, _nch: isize) {}
 #[derive(Clone, Debug, PartialEq)]
 pub struct NrTensor3 {
     pub row_lower: isize,
@@ -189,9 +156,6 @@ pub fn free_f3tensor(
     _ndh: isize,
 ) {
 }
-pub fn sqr(value: f32) -> f32 {
-    value * value
-}
 pub fn dsqr(value: f64) -> f64 {
     value * value
 }
@@ -219,7 +183,8 @@ mod tests {
     }
     #[test]
     fn converts_and_copies_submatrix() {
-        let a = convert_matrix(&[1., 2., 3., 4.], 1, 2, 1, 2);
+        let mut a = matrix(1, 2, 1, 2);
+        a.values.copy_from_slice(&[1., 2., 3., 4.]);
         let b = submatrix(&a, 1, 2, 1, 2, 4, 5);
         assert_eq!(*b.get(5, 6), 4.);
     }

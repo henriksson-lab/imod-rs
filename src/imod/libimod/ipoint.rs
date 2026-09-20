@@ -1,11 +1,11 @@
 //! Translation of `IMOD/libimod/ipoint.c` -- "Point editing functions for IMOD
 //! models".
 //!
-#![allow(dead_code, unused_variables)]
+#![allow(unused_variables)]
 
 use std::io::Write;
 
-use crate::imod::libcfshr::b3dutil::{CArg, ImodFile, c_format};
+use crate::imod::libcfshr::b3dutil::ImodFile;
 use crate::imod::libimod::icont::imodel_contour_check_wild;
 use crate::imod::libimod::imodel::{ICONT_WILD, Icont, Iobj, Iplane, Ipoint};
 use crate::imod::libimod::iplane::imod_planes_clip;

@@ -7,7 +7,6 @@
 //! `None`, so no autodoc key, value, section name or comment is a
 //! NUL-terminated string any more.  Autodoc keys and values are bytes read out
 //! of a file, never guaranteed text, so they are `Vec<u8>` and not `String`.
-#![allow(dead_code)]
 
 use crate::imod::libcfshr::b3dutil::ImodFile;
 use crate::imod::libcfshr::b3dutil::{
@@ -524,11 +523,6 @@ pub fn adoc_new() -> i32 {
     err
 }
 
-/// Matches C `AdocGetCurrentIndex` (`autodoc.c:448`).
-pub fn adoc_get_current_index() -> i32 {
-    S_CUR_ADOC_IND.get()
-}
-
 /// Matches C `AdocSetCurrent` (`autodoc.c:457`).
 pub fn adoc_set_current(index: i32) -> i32 {
     if index < 0 || index >= S_AUTODOCS.with_borrow(|adocs| adocs.len() as i32) {
@@ -604,11 +598,6 @@ pub fn adoc_write(filename: &[u8]) -> i32 {
     if retval != 0 { retval } else { backerr }
 }
 
-/// Matches C `AdocRetryWriteOpens` (`autodoc.c:522`).
-pub fn adoc_retry_write_opens(num: i32) {
-    S_OPEN_RETRIES.set(num);
-}
-
 /// Matches C `AdocSetWriteAsXML` (`autodoc.c:530`).
 pub fn adoc_set_write_as_xml(as_xml: i32) {
     let cur = S_CUR_ADOC_IND.get();
@@ -654,44 +643,6 @@ pub fn adoc_set_xml_root_element(element: &[u8]) -> i32 {
     }
     S_AUTODOCS.with_borrow_mut(|adocs| adocs[cur as usize].root_element = Some(element.to_vec()));
     0
-}
-
-/// Matches C `AdocAppendSection` (`autodoc.c:582`).
-pub fn adoc_append_section(filename: &[u8]) -> i32 {
-    let cur = S_CUR_ADOC_IND.get();
-    if cur < 0 {
-        return -1;
-    }
-    if S_AUTODOCS.with_borrow(|adocs| adocs[cur as usize].write_as_xml) != 0 {
-        return write_xml_file(filename);
-    }
-    let Some(afile) = open_for_write(filename, "a") else {
-        return -1;
-    };
-    S_AUTODOCS.with_borrow(|adocs| write_file(&adocs[cur as usize], Some(afile), None, 0, 0))
-}
-
-/// Matches C `AdocPrintToString` (`autodoc.c:601`).
-///
-/// The C writes into the caller's `char *` with `snprintf` and refuses to
-/// overrun `stringSize`; the bytes land in the caller's `Vec` instead, with the
-/// same size limit and the same -1 when it is reached.
-pub fn adoc_print_to_string(string: &mut Vec<u8>, string_size: i32, write_all: i32) -> i32 {
-    let cur = S_CUR_ADOC_IND.get();
-    if cur < 0 {
-        /* `writeFile` dereferences `sCurAdoc` with no NULL check
-        (`autodoc.c:627`); reproducing that would be a null dereference. */
-        return -1;
-    }
-    S_AUTODOCS.with_borrow(|adocs| {
-        write_file(
-            &adocs[cur as usize],
-            None,
-            Some(string),
-            string_size,
-            write_all,
-        )
-    })
 }
 
 /// Matches C `AdocOrderWriteByValue` (`autodoc.c:611`).
@@ -1080,60 +1031,6 @@ pub fn adoc_insert_section(type_name: &[u8], sect_ind: i32, name: &[u8]) -> i32 
             i -= 1;
         }
 
-        0
-    })
-}
-
-/// Matches C `AdocDeleteSection` (`autodoc.c:900`).
-pub fn adoc_delete_section(type_name: &[u8], sect_ind: i32) -> i32 {
-    let cur = S_CUR_ADOC_IND.get();
-    if cur < 0 {
-        return -1;
-    }
-    let coll_ind =
-        S_AUTODOCS.with_borrow(|adocs| lookup_collection(&adocs[cur as usize], type_name));
-    if coll_ind < 0 {
-        return -1;
-    }
-    if sect_ind < 0
-        || sect_ind
-            >= S_AUTODOCS.with_borrow(|adocs| {
-                adocs[cur as usize].collections[coll_ind as usize].num_sections
-            })
-    {
-        return -1;
-    }
-
-    /* Find the index of this section in the master list */
-    let master_ind = find_section_in_adoc_list(coll_ind, sect_ind);
-    if master_ind < 0 {
-        return -1;
-    }
-    S_AUTODOCS.with_borrow_mut(|adocs| {
-        let adoc = &mut adocs[cur as usize];
-        let mut i: i32;
-        delete_section(&mut adoc.collections[coll_ind as usize].sections[sect_ind as usize]);
-
-        /* Repack the sections */
-        let coll = &mut adoc.collections[coll_ind as usize];
-        i = sect_ind + 1;
-        while i < coll.num_sections {
-            coll.sections[(i - 1) as usize] = coll.sections[i as usize].clone();
-            i += 1;
-        }
-        coll.num_sections -= 1;
-
-        /* Repack the master list and decrement any other indices in this collection */
-        i = master_ind + 1;
-        while i < adoc.num_sections {
-            if adoc.coll_list[i as usize] == coll_ind && adoc.sect_list[i as usize] > sect_ind {
-                adoc.sect_list[i as usize] -= 1;
-            }
-            adoc.coll_list[(i - 1) as usize] = adoc.coll_list[i as usize];
-            adoc.sect_list[(i - 1) as usize] = adoc.sect_list[i as usize];
-            i += 1;
-        }
-        adoc.num_sections -= 1;
         0
     })
 }
@@ -1932,225 +1829,6 @@ pub fn adoc_get_float_array(
         num_to_get,
         array_size,
     )
-}
-
-/// Matches C `AdocGetDoubleArray` (`autodoc.c:1615`).
-pub fn adoc_get_double_array(
-    type_name: &[u8],
-    sect_ind: i32,
-    key: &[u8],
-    array: &mut [f64],
-    num_to_get: &mut i32,
-    array_size: i32,
-) -> i32 {
-    let mut string: Vec<u8> = Vec::new();
-    let err = adoc_get_string(type_name, sect_ind, key, &mut string);
-    if err != 0 {
-        return err;
-    }
-    pip_get_line_of_values(
-        &string,
-        &string,
-        crate::imod::libcfshr::parse_params::PipValueArray::Double(array),
-        PIP_DOUBLE,
-        num_to_get,
-        array_size,
-    )
-}
-
-/// Matches C `AdocWriteInteger` (`autodoc.c:1638`).
-pub fn adoc_write_integer(fp: &mut ImodFile, key: &[u8], ival: i32) -> i32 {
-    let mut line = key.to_vec();
-    line.extend_from_slice(format!(" = {ival}\n").as_bytes());
-    if fp.write_all(&line).is_err() {
-        return 1;
-    }
-    0
-}
-
-/// Matches C `AdocWriteTwoIntegers` (`autodoc.c:1649`).
-pub fn adoc_write_two_integers(fp: &mut ImodFile, key: &[u8], ival1: i32, ival2: i32) -> i32 {
-    let mut line = key.to_vec();
-    line.extend_from_slice(format!(" = {ival1} {ival2}\n").as_bytes());
-    if fp.write_all(&line).is_err() {
-        return 1;
-    }
-    0
-}
-
-/// Matches C `AdocWriteThreeIntegers` (`autodoc.c:1660`).
-pub fn adoc_write_three_integers(
-    fp: &mut ImodFile,
-    key: &[u8],
-    ival1: i32,
-    ival2: i32,
-    ival3: i32,
-) -> i32 {
-    let mut line = key.to_vec();
-    line.extend_from_slice(format!(" = {ival1} {ival2} {ival3}\n").as_bytes());
-    if fp.write_all(&line).is_err() {
-        return 1;
-    }
-    0
-}
-
-/// Matches C `AdocWriteIntegerArray` (`autodoc.c:1671`).
-pub fn adoc_write_integer_array(
-    fp: &mut ImodFile,
-    key: &[u8],
-    ivals: &[i32],
-    num_vals: i32,
-) -> i32 {
-    let mut ind: i32;
-    if fp
-        .write_all(key)
-        .and_then(|()| fp.write_all(b" ="))
-        .is_err()
-    {
-        return 1;
-    }
-    ind = 0;
-    while ind < num_vals {
-        if fp
-            .write_all(format!(" {}", ivals[ind as usize]).as_bytes())
-            .is_err()
-        {
-            return 1;
-        }
-        ind += 1;
-    }
-    if fp.write_all(b"\n").is_err() {
-        return 1;
-    }
-    0
-}
-
-/// Matches C `AdocWriteFloat` (`autodoc.c:1685`).
-pub fn adoc_write_float(fp: &mut ImodFile, key: &[u8], val: f32) -> i32 {
-    if fp
-        .write_all(&c_format_bytes(
-            "%s = %g\n",
-            &[CArg::Bytes(key), CArg::Dbl(val as f64)],
-        ))
-        .is_err()
-    {
-        return 1;
-    }
-    0
-}
-
-/// Matches C `AdocWriteTwoFloats` (`autodoc.c:1695`).
-pub fn adoc_write_two_floats(fp: &mut ImodFile, key: &[u8], val1: f32, val2: f32) -> i32 {
-    if fp
-        .write_all(&c_format_bytes(
-            "%s = %g %g\n",
-            &[
-                CArg::Bytes(key),
-                CArg::Dbl(val1 as f64),
-                CArg::Dbl(val2 as f64),
-            ],
-        ))
-        .is_err()
-    {
-        return 1;
-    }
-    0
-}
-
-/// Matches C `AdocWriteThreeFloats` (`autodoc.c:1706`).
-pub fn adoc_write_three_floats(
-    fp: &mut ImodFile,
-    key: &[u8],
-    val1: f32,
-    val2: f32,
-    val3: f32,
-) -> i32 {
-    if fp
-        .write_all(&c_format_bytes(
-            "%s = %g %g %g\n",
-            &[
-                CArg::Bytes(key),
-                CArg::Dbl(val1 as f64),
-                CArg::Dbl(val2 as f64),
-                CArg::Dbl(val3 as f64),
-            ],
-        ))
-        .is_err()
-    {
-        return 1;
-    }
-    0
-}
-
-/// Matches C `AdocWriteFloatArray` (`autodoc.c:1717`).
-pub fn adoc_write_float_array(fp: &mut ImodFile, key: &[u8], vals: &[f32], num_vals: i32) -> i32 {
-    let mut ind: i32;
-    if fp
-        .write_all(key)
-        .and_then(|()| fp.write_all(b" ="))
-        .is_err()
-    {
-        return 1;
-    }
-    ind = 0;
-    while ind < num_vals {
-        if fp
-            .write_all(&c_format_bytes(
-                " %g",
-                &[CArg::Dbl(vals[ind as usize] as f64)],
-            ))
-            .is_err()
-        {
-            return 1;
-        }
-        ind += 1;
-    }
-    if fp.write_all(b"\n").is_err() {
-        return 1;
-    }
-    0
-}
-
-/// Matches C `AdocWriteDouble` (`autodoc.c:1731`).
-pub fn adoc_write_double(fp: &mut ImodFile, key: &[u8], val: f64) -> i32 {
-    if fp
-        .write_all(&c_format_bytes(
-            "%s = %g\n",
-            &[CArg::Bytes(key), CArg::Dbl(val)],
-        ))
-        .is_err()
-    {
-        return 1;
-    }
-    0
-}
-
-/// Matches C `AdocWriteKeyValue` (`autodoc.c:1741`).
-pub fn adoc_write_key_value(fp: &mut ImodFile, key: &[u8], value: &[u8]) -> i32 {
-    if fp
-        .write_all(&c_format_bytes(
-            "%s = %s\n",
-            &[CArg::Bytes(key), CArg::Bytes(value)],
-        ))
-        .is_err()
-    {
-        return 1;
-    }
-    0
-}
-
-/// Matches C `AdocWriteSectionStart` (`autodoc.c:1752`).
-pub fn adoc_write_section_start(fp: &mut ImodFile, key: &[u8], value: Option<&[u8]>) -> i32 {
-    if fp
-        .write_all(&c_format_bytes(
-            "[%s = %s]\n",
-            &[CArg::Bytes(key), CArg::Bytes(value.unwrap_or(b""))],
-        ))
-        .is_err()
-    {
-        return 1;
-    }
-    0
 }
 
 /// Matches C static `readXmlFile` (`autodoc.c:1765`).
@@ -3046,28 +2724,6 @@ pub(crate) mod tests {
     }
 
     /// `writeFile` through `AdocPrintToString`, exercising `fsPrintf`'s string path.
-    #[test]
-    fn print_to_string_reproduces_the_written_layout() {
-        let _lock = TEST_LOCK.lock().unwrap();
-        adoc_done();
-        assert!(adoc_new() >= 0);
-        assert_eq!(
-            adoc_set_key_value(ADOC_GLOBAL_NAME, 0, b"ImageFile", Some(b"a.mrc")),
-            0
-        );
-        assert_eq!(adoc_add_section(ADOC_ZVALUE_NAME, b"0"), 0);
-        assert_eq!(
-            adoc_set_two_integers(ADOC_ZVALUE_NAME, 0, b"PieceCoordinates", 3, 4),
-            0
-        );
-        let mut buf = Vec::new();
-        assert_eq!(adoc_print_to_string(&mut buf, 512, 1), 0);
-        assert_eq!(
-            buf,
-            b"ImageFile = a.mrc\n\n[ZValue = 0]\nPieceCoordinates = 3 4\n"
-        );
-        adoc_done();
-    }
 
     /// Round-trip a real vendored autodoc through the reader and the writer.
     #[test]
@@ -3098,10 +2754,12 @@ pub(crate) mod tests {
         let name = std::env::temp_dir().join("imod-rs-autodoc-comments.adoc");
         std::fs::write(&name, text).unwrap();
         assert!(adoc_read(name.to_string_lossy().as_bytes()) >= 0);
-        let mut buf = Vec::new();
-        assert_eq!(adoc_print_to_string(&mut buf, 1024, 1), 0);
+        let out = std::env::temp_dir().join("imod-rs-autodoc-comments-out.adoc");
+        assert_eq!(adoc_write(out.to_string_lossy().as_bytes()), 0);
         adoc_done();
+        let buf = std::fs::read(&out).unwrap();
         let _ = std::fs::remove_file(&name);
+        let _ = std::fs::remove_file(&out);
         assert_eq!(
             String::from_utf8_lossy(&buf),
             "# leading comment\nVersion = 1\n\n[Field = A]\n# about B\nB = 2\n"
@@ -3329,12 +2987,8 @@ pub(crate) mod tests {
             let base = line.rsplit('/').next().unwrap();
             let ind = adoc_read(line.as_bytes());
             rep.extend_from_slice(&c_format_bytes(
-                "FILE %s read=%d cur=%d\n",
-                &[
-                    CArg::Str(base),
-                    CArg::Int(ind as i64),
-                    CArg::Int(adoc_get_current_index() as i64),
-                ],
+                "FILE %s read=%d\n",
+                &[CArg::Str(base), CArg::Int(ind as i64)],
             ));
             if ind < 0 {
                 continue;
@@ -3440,8 +3094,6 @@ pub(crate) mod tests {
                 &mut rep,
             );
             dump_all(&mut rep, "M");
-            line_of("delSect", adoc_delete_section(b"Probe", 0), &mut rep);
-            dump_all(&mut rep, "D");
 
             let second = adoc_new();
             line_of("new", second, &mut rep);
@@ -3456,42 +3108,12 @@ pub(crate) mod tests {
             adoc_set_current(ind);
             adoc_clear(second);
 
-            let mut sz = 40;
-            while sz <= 160000 {
-                let mut buf: Vec<u8> = Vec::new();
-                let err = adoc_print_to_string(&mut buf, sz, 1);
-                rep.extend_from_slice(&c_format_bytes(
-                    "print(%d)=%d [%s]\n",
-                    &[
-                        CArg::Int(sz as i64),
-                        CArg::Int(err as i64),
-                        CArg::Bytes(&buf),
-                    ],
-                ));
-                let mut buf: Vec<u8> = Vec::new();
-                let err = adoc_print_to_string(&mut buf, sz, 0);
-                rep.extend_from_slice(&c_format_bytes(
-                    "printLast(%d)=%d [%s]\n",
-                    &[
-                        CArg::Int(sz as i64),
-                        CArg::Int(err as i64),
-                        CArg::Bytes(&buf),
-                    ],
-                ));
-                sz *= 20;
-            }
             line_of("orderNull", adoc_order_write_by_value(None), &mut rep);
             line_of(
                 "orderZ",
                 adoc_order_write_by_value(Some(b"ZValue")),
                 &mut rep,
             );
-            let mut buf: Vec<u8> = Vec::new();
-            let err = adoc_print_to_string(&mut buf, 160000, 1);
-            rep.extend_from_slice(&c_format_bytes(
-                "printOrdered=%d [%s]\n",
-                &[CArg::Int(err as i64), CArg::Bytes(&buf)],
-            ));
             adoc_order_write_by_value(None);
             line_of("setRoot", adoc_set_xml_root_element(b"myroot"), &mut rep);
             let mut root: Option<Vec<u8>> = None;

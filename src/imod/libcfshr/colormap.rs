@@ -1,5 +1,4 @@
 //! Translation of `IMOD/libcfshr/colormap.c`.
-#![allow(dead_code)]
 
 use std::io::BufRead;
 
@@ -18,20 +17,10 @@ static STANDARD_RAMP_DATA: [i32; 57] = [
     -361, 90, 255, 60, -305, 191, 255, 0, -259, 239, 255, 0, -240, 255, 255, 0, -229, 255, 175, 0,
     -172, 255, 105, 0, -122, 255, 45, 55, -60, 255, 0, 90, -40, 255, 0, 192, 10,
 ];
-static INVERTED_RAMP_DATA: [i32; 57] = [
-    14, 255, 0, 192, -10, 255, 0, 90, 40, 255, 45, 55, 60, 255, 105, 0, 122, 255, 175, 0, 172, 255,
-    255, 0, 229, 239, 255, 0, 240, 191, 255, 0, 259, 90, 255, 60, 305, 0, 207, 78, 361, 0, 191,
-    143, 383, 0, 175, 177, 400, 60, 96, 255, 469, 100, 75, 200, 530,
-];
 
 /// Original `cmapStandardRamp` (`colormap.c:58`).
 pub fn cmap_standard_ramp() -> &'static [i32; 57] {
     &STANDARD_RAMP_DATA
-}
-
-/// Original `cmapInvertedRamp` (`colormap.c:66`).
-pub fn cmap_inverted_ramp() -> &'static [i32; 57] {
-    &INVERTED_RAMP_DATA
 }
 
 /// Original `cmapConvertRamp` (`colormap.c:77`).
@@ -180,15 +169,11 @@ mod tests {
     use super::*;
 
     #[test]
-    fn source_standard_and_inverted_ramps_convert() {
+    fn source_standard_ramp_converts() {
         let mut standard = [[0; 256]; 3];
-        let mut inverted = [[0; 256]; 3];
         assert_eq!(cmap_convert_ramp(cmap_standard_ramp(), &mut standard), 0);
-        assert_eq!(cmap_convert_ramp(cmap_inverted_ramp(), &mut inverted), 0);
         assert_eq!(standard[0][0], 100);
         assert_eq!(standard[2][255], 192);
-        assert_eq!(inverted[0][0], 255);
-        assert_eq!(inverted[2][255], 200);
     }
 
     #[test]

@@ -1,5 +1,4 @@
 //! Translation of `IMOD/libcfshr/convexbound.c`.
-#![allow(dead_code)]
 
 /// Matches static `cenorder` (`IMOD/libcfshr/convexbound.c:207`).
 fn cenorder(

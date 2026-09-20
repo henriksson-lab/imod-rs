@@ -2,6 +2,7 @@
 
 use super::{cmplft, hermft, realft};
 use crate::imod::libcfshr::b3dutil::{CArg, ImodFile, c_format_bytes};
+use crate::imod::libcfshr::rotateflip::{RotateFlipData, rotate_flip_image};
 use std::io::Write as _;
 
 /// C `todfft` over IMOD's `(nx + 2) * ny` packed-real storage.
@@ -48,17 +49,54 @@ pub fn todfft(array: &mut [f32], nx: i32, ny: i32, idir: i32) {
     let total = stride * ny;
     let scale = (1.0 / (nx * ny) as f64).sqrt() as f32;
     let mut dim = [0_i32; 6];
+    // `todfft.c:84-93`: the X pass strides through the whole array on every
+    // element, which is very unfavourable for a large array, so the source
+    // transposes before and after it (`OLD_FFT_TIMES` is not defined, so the
+    // `malloc` is unconditional) and runs `realft`/`hermft` with unit stride
+    // on the transposed copy, real and imaginary parts `ny` apart.
+    let mut transpose = vec![0.0_f32; total as usize];
+    let (mut nx_out, mut ny_out) = (stride, ny);
     if idir == 0 {
         dim[1] = total;
-        dim[2] = 2;
         dim[3] = total;
-        dim[4] = total;
-        dim[5] = stride;
-        realft(array, nxo2, &mut dim);
+        dim[2] = 2 * ny;
+        dim[4] = ny;
+        dim[5] = 1;
+        rotate_flip_image(
+            RotateFlipData::Float {
+                array: &array[..total as usize],
+                brray: &mut transpose,
+            },
+            stride,
+            ny,
+            7,
+            0,
+            0,
+            0,
+            &mut nx_out,
+            &mut ny_out,
+            0,
+        );
+        realft(&mut transpose, ny as usize, nxo2, &mut dim);
+        rotate_flip_image(
+            RotateFlipData::Float {
+                array: &transpose,
+                brray: &mut array[..total as usize],
+            },
+            ny,
+            stride,
+            7,
+            0,
+            0,
+            0,
+            &mut nx_out,
+            &mut ny_out,
+            0,
+        );
         dim[2] = stride;
         dim[4] = stride;
         dim[5] = 2;
-        cmplft(array, ny, &mut dim);
+        cmplft(array, 1, ny, &mut dim);
         for index in (0..total - 1).step_by(2) {
             array[index as usize] *= scale;
             array[(index + 1) as usize] *= scale;
@@ -74,16 +112,46 @@ pub fn todfft(array: &mut [f32], nx: i32, ny: i32, idir: i32) {
         array[index as usize] *= scale;
         array[(index + 1) as usize] = -array[(index + 1) as usize] * scale;
     }
-    cmplft(array, ny, &mut dim);
+    cmplft(array, 1, ny, &mut dim);
     let mut index = 1;
     for _ in 0..ny {
         array[index as usize] = array[(nx - 1 + index) as usize];
         index += stride;
     }
-    dim[2] = 2;
-    dim[4] = total;
-    dim[5] = stride;
-    hermft(array, nxo2, &mut dim);
+    rotate_flip_image(
+        RotateFlipData::Float {
+            array: &array[..total as usize],
+            brray: &mut transpose,
+        },
+        stride,
+        ny,
+        7,
+        0,
+        0,
+        0,
+        &mut nx_out,
+        &mut ny_out,
+        0,
+    );
+    dim[2] = 2 * ny;
+    dim[4] = ny;
+    dim[5] = 1;
+    hermft(&mut transpose, ny as usize, nxo2, &mut dim);
+    rotate_flip_image(
+        RotateFlipData::Float {
+            array: &transpose,
+            brray: &mut array[..total as usize],
+        },
+        ny,
+        stride,
+        7,
+        0,
+        0,
+        0,
+        &mut nx_out,
+        &mut ny_out,
+        0,
+    );
 }
 
 /// C `todfftc`.

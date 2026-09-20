@@ -21,11 +21,9 @@ pub mod mxml_attr;
 pub mod mxml_entity;
 pub mod mxml_file;
 pub mod mxml_get;
-pub mod mxml_index;
 pub mod mxml_node;
 pub mod mxml_private;
 pub mod mxml_search;
-pub mod mxml_set;
 pub mod mxml_string;
 
 use core::any::Any;
@@ -207,18 +205,7 @@ impl MxmlArena {
     }
 }
 
-/// Matches C `struct mxml_index_s` (`mxml.h:148`); C field order `attr`,
-/// The index owns its matching node handles and tracks the next result to
-/// enumerate.  Rust's `Vec` owns both the allocation and its length, so there
-/// are no C-style count/allocation fields to keep in sync.
-pub struct MxmlIndex {
-    pub attr: Option<Vec<u8>>,
-    pub cur_node: usize,
-    pub nodes: Vec<usize>,
-}
-
 pub type mxml_node_t = MxmlNode;
-pub type mxml_index_t = MxmlIndex;
 pub type mxml_type_t = MxmlType;
 pub type mxml_save_cb_t = MxmlSaveCb;
 
@@ -226,9 +213,7 @@ pub use mxml_attr::*;
 pub use mxml_entity::*;
 pub use mxml_file::*;
 pub use mxml_get::*;
-pub use mxml_index::*;
 pub use mxml_node::*;
 pub use mxml_private::*;
 pub use mxml_search::*;
-pub use mxml_set::*;
 pub use mxml_string::*;

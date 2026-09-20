@@ -4,7 +4,7 @@
 //! serial/parallel TIFF writing.  Each function below deliberately corresponds to
 //! one function in that C source; libtiff calls are filled in as its ABI is brought
 //! into the crate.
-#![allow(dead_code, unused_variables)]
+#![allow(unused_variables)]
 
 use crate::imod::libcfshr::b3dutil::{
     CArg, ImodFile, b3d_fread, b3d_rewind, c_format, c_format_bytes,
@@ -1477,11 +1477,6 @@ pub fn tiff_suppress_errors() {
 pub fn tiff_restore_errors() {
     let _ = unsafe { TIFFSetErrorHandler(S_OLD_ERR_HANDLER.load(Ordering::SeqCst)) };
 }
-/// C `tiffSuppressWarnings` (`iitif.c:856`).
-pub fn tiff_suppress_warnings() {
-    let _ = unsafe { TIFFSetWarningHandler(core::ptr::null_mut()) };
-    S_WARNINGS_SUPPRESSED.store(1, Ordering::SeqCst);
-}
 /// C `warningHandler` (`iitif.c:862`).
 unsafe extern "C" fn warning_handler(
     module: *const c_char,
@@ -1582,10 +1577,6 @@ pub fn tiff_set_eer_read_properties(super_res: i32, autogroup: i32, flags: i32) 
         Ordering::SeqCst,
     );
     S_GAIN_REFERENCE.store(core::ptr::null_mut(), Ordering::SeqCst);
-}
-/// C `tiffGainReferenceForEER` (`iitif.c:922`).
-pub fn tiff_gain_reference_for_eer(reference: *mut f32) {
-    S_GAIN_REFERENCE.store(reference, Ordering::SeqCst);
 }
 
 /// Register the float-valued gain-reference storage used while EER frames are
@@ -4776,8 +4767,8 @@ mod tests {
 
     #[test]
     fn eer_configuration_clamps_and_resets_gain_reference() {
-        let mut gain = [1.0_f32];
-        tiff_gain_reference_for_eer(gain.as_mut_ptr());
+        let mut gain = 1.0_f32.to_ne_bytes();
+        assert!(tiff_gain_reference_for_eer_bytes(&mut gain));
         tiff_set_eer_read_properties(99, 7, IIFLAG_ANTIALIAS_EER | IIFLAG_EER_USE_LANCZOS);
         assert_eq!(S_READ_EER_AS_SUPER_RES.load(Ordering::SeqCst), 2);
         assert_eq!(S_AUTOGROUP_EER.load(Ordering::SeqCst), 7);

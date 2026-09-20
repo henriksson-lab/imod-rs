@@ -9,7 +9,6 @@
 //! only bites on 32-bit x87. Nothing in the translation can express it, and
 //! nothing needs to — but the expression *order* below is load-bearing and
 //! must not be regrouped.
-#![allow(dead_code)]
 
 use crate::imod::libwarp::delaunay::Circle;
 use crate::imod::libwarp::nn::Point;

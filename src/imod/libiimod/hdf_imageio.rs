@@ -4,7 +4,7 @@
 //! defined by HDF5 dataspaces, hyperslabs, native datatypes, and property-list
 //! semantics, so replacing these calls with a Rust HDF wrapper would not be a
 //! faithful translation.
-#![allow(dead_code, unused_variables)]
+#![allow(unused_variables)]
 
 use crate::imod::libcfshr::autodoc::adoc_new;
 use crate::imod::libcfshr::b3dutil::ImodFile;
@@ -80,8 +80,6 @@ unsafe extern "C" {
     fn H5Pset_chunk(id: HidT, rank: c_int, dims: *const HsizeT) -> c_int;
     fn H5Pget_chunk_cache(id: HidT, slots: *mut usize, bytes: *mut usize, w0: *mut f64) -> c_int;
     fn H5Pset_chunk_cache(id: HidT, slots: usize, bytes: usize, w0: f64) -> c_int;
-    fn H5Dget_create_plist(dataset: HidT) -> HidT;
-    fn H5Pget_chunk(id: HidT, max_ndims: c_int, dims: *mut HsizeT) -> c_int;
     fn H5Tcopy(id: HidT) -> HidT;
     fn H5Tclose(id: HidT) -> c_int;
     fn H5Tget_precision(id: HidT) -> usize;
@@ -902,6 +900,8 @@ mod tests {
 
     #[link(name = "hdf5_serial")]
     unsafe extern "C" {
+        fn H5Dget_create_plist(dataset: HidT) -> HidT;
+        fn H5Pget_chunk(id: HidT, max_ndims: c_int, dims: *mut HsizeT) -> c_int;
         fn H5Fcreate(filename: *const c_char, flags: u32, create: HidT, access: HidT) -> HidT;
         fn H5Fclose(file: HidT) -> c_int;
         fn H5Dclose(dataset: HidT) -> c_int;

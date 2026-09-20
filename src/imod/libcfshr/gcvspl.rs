@@ -12,7 +12,7 @@
 //! and `el` in `gcvspl_` are genuine Fortran SAVEs (they carry a DATA
 //! initialiser and an `md < 0` call compares against them); the rest are
 //! assigned before use on every call and are plain locals here.
-#![allow(dead_code, unused_mut, unused_assignments, clippy::too_many_arguments)]
+#![allow(unused_mut, unused_assignments, clippy::too_many_arguments)]
 
 use core::sync::atomic::{AtomicI32, AtomicU64, Ordering};
 

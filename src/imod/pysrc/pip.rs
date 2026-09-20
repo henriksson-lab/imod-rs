@@ -3,7 +3,6 @@
 //! `parse_params.rs` contains the native translation of its corresponding C
 //! parser.  This module preserves the Python-command-facing functions and
 //! Python module state for Python source units such as `submfg`.
-#![allow(dead_code)]
 
 use std::ffi::OsString;
 use std::fs::File;

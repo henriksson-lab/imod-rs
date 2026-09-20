@@ -1,6 +1,4 @@
 //! Translation of `IMOD/flib/subrs/imsubs/wrap_iiunit.f90`.
-#![allow(dead_code)]
-
 use crate::imod::libcfshr::b3dutil::extra_is_nbytes_and_flags;
 use crate::imod::libiimod::unit_fileio::{
     iiu_alt_convert, iiu_alt_print, iiu_file_info, iiu_open, iiu_read_lines, iiu_read_sec_part,

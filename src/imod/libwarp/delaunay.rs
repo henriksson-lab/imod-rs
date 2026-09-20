@@ -22,7 +22,8 @@ use crate::imod::libwarp::nncommon_vulnerable::circle_build1;
 const N_SEARCH_TURNON: i32 = 20;
 /// C `N_FLAGS_TURNON` (`delaunay.c:54`); declared by the source and unused.
 const N_FLAGS_TURNON: i32 = 1000;
-/// C `N_FLAGS_INC` (`delaunay.c:55`).
+/// C `N_FLAGS_INC` (`delaunay.c:55`); the increment `delaunay_addflag` grew
+/// `flagids` by, which is the `Vec`'s own growth now and not observable.
 const N_FLAGS_INC: i32 = 100;
 
 /// C `triangle` (`delaunay.h:29`).
@@ -56,26 +57,31 @@ pub struct Circle {
 /// Here the triangulation owns its copy. Only `nnai_interpolate` and
 /// `nnhpi_modify_data` write through that alias, and nothing in this tree
 /// reads the caller's array back afterwards.
+///
+/// The source's counts are the lengths of the arrays they counted, so they
+/// are not fields: `npoints` is `points.len()`, `ntriangles` is
+/// `triangles.len()` (`circles`, `neighbours` and `flags` are the same
+/// length), `n_point_triangles[i]` is `point_triangles[i].len()`, `nedges` is
+/// `edges.len() / 2` — always 0 for the Clarkson hull — and `nflags` is
+/// `flagids.len()`, with `nflagsallocated` being the `Vec`'s own capacity.
 pub struct Delaunay {
-    pub npoints: i32,
+    /// `[npoints]`
     pub points: Vec<Point>,
     pub xmin: f64,
     pub xmax: f64,
     pub ymin: f64,
     pub ymax: f64,
 
-    pub ntriangles: i32,
+    /// `[ntriangles]`
     pub triangles: Vec<Triangle>,
+    /// `[ntriangles]`
     pub circles: Vec<Circle>,
-    /// for `delaunay_xytoi()`
+    /// for `delaunay_xytoi()`; `[ntriangles]`
     pub neighbours: Vec<TriangleNeighbours>,
 
-    /// `n_point_triangles[i]` is number of triangles i-th point belongs to
-    pub n_point_triangles: Vec<i32>,
     /// `point_triangles[i][j]` is index of j-th triangle i-th point belongs to
     pub point_triangles: Vec<Vec<i32>>,
 
-    pub nedges: i32,
     /// n-th edge is formed by `points[edges[n*2]]` and `points[edges[n*2+1]]`
     pub edges: Vec<i32>,
 
@@ -84,6 +90,7 @@ pub struct Delaunay {
      * reasons. Should be moved to the procedure if parallelizable code
      * needed.
      */
+    /// `[ntriangles]`
     pub flags: Vec<i32>,
     /// last search result, used in start up of a new search
     pub first_id: i32,
@@ -93,34 +100,26 @@ pub struct Delaunay {
     /*
      * to keep track of flags set to 1 in the case of very large data sets
      */
-    pub nflags: i32,
-    pub nflagsallocated: i32,
     pub flagids: Vec<i32>,
 }
 
 /// Original static `delaunay_create` (`delaunay.c:127`).
 fn delaunay_create() -> Delaunay {
     let d = Delaunay {
-        npoints: 0,
         points: Vec::new(),
         xmin: f64::MAX,
         xmax: -f64::MAX,
         ymin: f64::MAX,
         ymax: -f64::MAX,
-        ntriangles: 0,
         triangles: Vec::new(),
         circles: Vec::new(),
         neighbours: Vec::new(),
-        n_point_triangles: Vec::new(),
         point_triangles: Vec::new(),
-        nedges: 0,
         edges: Vec::new(),
         flags: Vec::new(),
         first_id: -1,
         t_in: None,
         t_out: None,
-        nflags: 0,
-        nflagsallocated: 0,
         flagids: Vec::new(),
     };
 
@@ -143,8 +142,8 @@ fn tio_destroy(tio: &mut HullIo) {
 /// edge-list copy at the end belong to the `triangle` backend and are not in
 /// the built library.
 fn tio2delaunay(tio_out: &mut HullIo, d: &mut Delaunay) {
-    for i in 0..d.npoints {
-        let p = &d.points[i as usize];
+    for i in 0..d.points.len() {
+        let p = &d.points[i];
 
         if p.x < d.xmin {
             d.xmin = p.x;
@@ -162,8 +161,8 @@ fn tio2delaunay(tio_out: &mut HullIo, d: &mut Delaunay) {
     if NN_VERBOSE.get() != 0 {
         let mut err = ImodFile::Stderr;
         let _ = err.write_all(b"input:\n");
-        for i in 0..d.npoints {
-            let p = &d.points[i as usize];
+        for i in 0..d.points.len() {
+            let p = &d.points[i];
 
             let _ = err.write_all(
                 c_format(
@@ -180,20 +179,21 @@ fn tio2delaunay(tio_out: &mut HullIo, d: &mut Delaunay) {
         }
     }
 
-    d.ntriangles = tio_out.numberoftriangles;
-    if d.ntriangles > 0 {
-        d.triangles = vec![Triangle::default(); d.ntriangles as usize];
-        d.neighbours = vec![TriangleNeighbours::default(); d.ntriangles as usize];
-        d.circles = vec![Circle::default(); d.ntriangles as usize];
-        d.n_point_triangles = vec![0i32; d.npoints as usize];
-        d.point_triangles = vec![Vec::new(); d.npoints as usize];
-        d.flags = vec![0i32; d.ntriangles as usize];
+    /* d->ntriangles = tio_out->numberoftriangles: three vertex indices per
+    triangle in the hull's list. */
+    let ntriangles = (tio_out.trianglelist.len() / 3) as i32;
+    if ntriangles > 0 {
+        d.triangles = vec![Triangle::default(); ntriangles as usize];
+        d.neighbours = vec![TriangleNeighbours::default(); ntriangles as usize];
+        d.circles = vec![Circle::default(); ntriangles as usize];
+        d.point_triangles = vec![Vec::new(); d.points.len()];
+        d.flags = vec![0i32; ntriangles as usize];
     }
 
     if NN_VERBOSE.get() != 0 {
         let _ = ImodFile::Stderr.write_all(b"triangles:\n");
     }
-    for i in 0..d.ntriangles {
+    for i in 0..ntriangles {
         let offset = i * 3;
         let mut t = Triangle::default();
         let mut nb = TriangleNeighbours::default();
@@ -237,33 +237,17 @@ fn tio2delaunay(tio_out: &mut HullIo, d: &mut Delaunay) {
         }
     }
 
-    for i in 0..d.ntriangles {
-        let t = d.triangles[i as usize];
-
-        for j in 0..3 {
-            d.n_point_triangles[t.vids[j] as usize] += 1;
-        }
-    }
-    if d.ntriangles > 0 {
-        for i in 0..d.npoints {
-            if d.n_point_triangles[i as usize] > 0 {
-                d.point_triangles[i as usize] =
-                    vec![0i32; d.n_point_triangles[i as usize] as usize];
-            } else {
-                d.point_triangles[i as usize] = Vec::new();
-            }
-            d.n_point_triangles[i as usize] = 0;
-        }
-    }
-    for i in 0..d.ntriangles {
+    /* The source counts each point's triangles into n_point_triangles,
+    allocates point_triangles[i] to that count, zeroes the counts and fills
+    the arrays in a third pass over the triangles.  The fill order is the
+    same here, and the count is the array's length. */
+    for i in 0..ntriangles {
         let t = d.triangles[i as usize];
 
         for j in 0..3 {
             let vid = t.vids[j];
 
-            let slot = d.n_point_triangles[vid as usize];
-            d.point_triangles[vid as usize][slot as usize] = i;
-            d.n_point_triangles[vid as usize] += 1;
+            d.point_triangles[vid as usize].push(i);
         }
     }
 }
@@ -285,10 +269,8 @@ pub fn delaunay_build(
     let mut d = delaunay_create();
     let mut tio_in = HullIo {
         pointlist: Vec::new(),
-        numberofpoints: 0,
         trianglelist: Vec::new(),
         neighborlist: Vec::new(),
-        numberoftriangles: 0,
         height_base_crit: 0.,
         area_fraction_crit: 0.,
         min_num_for_pruning: 0,
@@ -302,7 +284,7 @@ pub fn delaunay_build(
     }
 
     tio_in.pointlist = vec![0.0f64; (np * 2) as usize];
-    tio_in.numberofpoints = np;
+    /* tio_in.numberofpoints = np: the pair count of `pointlist`. */
     let mut j = 0usize;
     for i in 0..np {
         tio_in.pointlist[j] = points[i as usize].x;
@@ -334,8 +316,10 @@ pub fn delaunay_build(
         let _ = ImodFile::Stderr.flush();
     }
 
-    d.npoints = np;
-    d.points = points.to_vec();
+    /* d->npoints = np; d->points = points: the source aliases the caller's
+    array and bounds every read by `np`, so the copy is exactly the first `np`
+    points and `d.points.len()` is `npoints`. */
+    d.points = points[..np as usize].to_vec();
 
     tio2delaunay(&mut tio_in, &mut d);
     tio_destroy(&mut tio_in);
@@ -383,7 +367,7 @@ pub fn delaunay_xytoi(d: &Delaunay, p: &Point, id: i32) -> i32 {
         return -1;
     }
 
-    if id < 0 || id > d.ntriangles {
+    if id < 0 || id > d.triangles.len() as i32 {
         id = 0;
     }
     t = d.triangles[id as usize];
@@ -417,21 +401,19 @@ pub fn delaunay_xytoi(d: &Delaunay, p: &Point, id: i32) -> i32 {
 
 /// Original static `delaunay_addflag` (`delaunay.c:445`).
 fn delaunay_addflag(d: &mut Delaunay, i: i32) {
-    if d.nflags == d.nflagsallocated {
-        d.nflagsallocated += N_FLAGS_INC;
-        d.flagids.resize(d.nflagsallocated as usize, 0);
-    }
-    d.flagids[d.nflags as usize] = i;
-    d.nflags += 1;
+    /* The source grows `flagids` by N_FLAGS_INC when nflags reaches
+    nflagsallocated, then stores at [nflags++]. */
+    d.flagids.push(i);
 }
 
 /// Original static `delaunay_resetflags` (`delaunay.c:455`).
 fn delaunay_resetflags(d: &mut Delaunay) {
-    for i in 0..d.nflags {
-        let id = d.flagids[i as usize];
+    for i in 0..d.flagids.len() {
+        let id = d.flagids[i];
         d.flags[id as usize] = 0;
     }
-    d.nflags = 0;
+    /* d->nflags = 0 */
+    d.flagids.clear();
 }
 
 /// Original `delaunay_circles_find` (`delaunay.c:483`).
@@ -462,10 +444,10 @@ pub fn delaunay_circles_find(d: &mut Delaunay, p: &Point, n: &mut i32, out: &mut
     /*
      * if there are only a few data points, do linear search
      */
-    if d.ntriangles <= N_SEARCH_TURNON {
+    if d.triangles.len() as i32 <= N_SEARCH_TURNON {
         istack_reset(d.t_out.as_mut().unwrap());
 
-        for i in 0..d.ntriangles {
+        for i in 0..d.triangles.len() as i32 {
             let c = d.circles[i as usize];
             if circle_contains(&c, p) != 0 {
                 istack_push(d.t_out.as_mut().unwrap(), i);
@@ -473,9 +455,9 @@ pub fn delaunay_circles_find(d: &mut Delaunay, p: &Point, n: &mut i32, out: &mut
         }
 
         let t_out = d.t_out.as_ref().unwrap();
-        *n = t_out.n;
+        *n = t_out.v.len() as i32;
         out.clear();
-        out.extend_from_slice(&t_out.v[..t_out.n as usize]);
+        out.extend_from_slice(&t_out.v);
 
         return;
     }
@@ -502,7 +484,7 @@ pub fn delaunay_circles_find(d: &mut Delaunay, p: &Point, n: &mut i32, out: &mut
          * inside some of circumcircles
          */
         if d.first_id < 0 {
-            let nn = d.t_out.as_ref().unwrap().n;
+            let nn = d.t_out.as_ref().unwrap().v.len() as i32;
             let mut tid = -1;
 
             /*
@@ -520,7 +502,7 @@ pub fn delaunay_circles_find(d: &mut Delaunay, p: &Point, n: &mut i32, out: &mut
              * if unsuccessful, search through all circles
              */
             if tid < 0 || i == nn {
-                let nt = d.ntriangles as f64;
+                let nt = d.triangles.len() as f64;
 
                 tid = 0;
                 while (tid as f64) < nt {
@@ -551,7 +533,7 @@ pub fn delaunay_circles_find(d: &mut Delaunay, p: &Point, n: &mut i32, out: &mut
     /*
      * main cycle
      */
-    while d.t_in.as_ref().unwrap().n > 0 {
+    while d.t_in.as_ref().unwrap().v.len() > 0 {
         let tid = istack_pop(d.t_in.as_mut().unwrap());
         let t = d.triangles[tid as usize];
 
@@ -559,10 +541,10 @@ pub fn delaunay_circles_find(d: &mut Delaunay, p: &Point, n: &mut i32, out: &mut
             istack_push(d.t_out.as_mut().unwrap(), tid);
             for i in 0..3 {
                 let vid = t.vids[i as usize];
-                let nt = d.n_point_triangles[vid as usize];
+                let nt = d.point_triangles[vid as usize].len();
 
                 for j in 0..nt {
-                    let ntid = d.point_triangles[vid as usize][j as usize];
+                    let ntid = d.point_triangles[vid as usize][j];
 
                     if d.flags[ntid as usize] == 0 {
                         istack_push(d.t_in.as_mut().unwrap(), ntid);
@@ -577,9 +559,9 @@ pub fn delaunay_circles_find(d: &mut Delaunay, p: &Point, n: &mut i32, out: &mut
 
     {
         let t_out = d.t_out.as_ref().unwrap();
-        *n = t_out.n;
+        *n = t_out.v.len() as i32;
         out.clear();
-        out.extend_from_slice(&t_out.v[..t_out.n as usize]);
+        out.extend_from_slice(&t_out.v);
     }
     delaunay_resetflags(d);
 }
@@ -603,7 +585,7 @@ mod tests {
             },
         ];
         let d = delaunay_build(2, &points, 0, None, 0, None).unwrap();
-        assert_eq!(d.ntriangles, 0);
+        assert_eq!(d.triangles.len(), 0);
         assert_eq!(d.xmin, -2.);
         assert_eq!(d.xmax, 3.);
         assert_eq!(d.ymin, -1.);
@@ -631,7 +613,7 @@ mod tests {
             },
         ];
         let mut d = delaunay_build(3, &points, 0, None, 0, None).unwrap();
-        assert_eq!(d.ntriangles, 1);
+        assert_eq!(d.triangles.len(), 1);
         let inside = Point {
             x: 0.25,
             y: 0.25,

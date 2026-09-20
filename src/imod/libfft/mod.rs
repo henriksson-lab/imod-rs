@@ -2,7 +2,7 @@
 //!
 //! The public routines retain the original in-place float layouts.  Names are
 //! systematically mapped from C camel case to Rust snake case.
-#![allow(clippy::missing_safety_doc, dead_code)]
+#![allow(clippy::missing_safety_doc)]
 
 pub mod cmplft;
 pub mod diprp;

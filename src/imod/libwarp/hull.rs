@@ -33,7 +33,6 @@
 //! an address inside the driver's point array.  Here it is a `usize` index
 //! into [`HullStorage::sites`], so the pointer arithmetic
 //! `(psite - sPointArray) / 2` in `hullwrap.c:103` stays index arithmetic.
-#![allow(dead_code)]
 
 use std::cell::{Cell, RefCell};
 

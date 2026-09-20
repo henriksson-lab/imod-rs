@@ -259,36 +259,6 @@ pub struct CtfPhaseFlipOptions {
     pub invert_angles: bool,
 }
 
-/// Source `main`'s three execution branches, made explicit instead of hiding
-/// a GPU/HDF side effect behind the CPU correction interface.
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub enum CtfExecution {
-    Cpu,
-    Gpu(i32),
-    ParallelMrc,
-    ParallelHdf,
-}
-pub fn ctf_execution(
-    requested_gpu: i32,
-    gpu_available: bool,
-    parallel: bool,
-    hdf_output: bool,
-) -> Result<CtfExecution, String> {
-    if requested_gpu >= 0 {
-        if gpu_available {
-            return Ok(CtfExecution::Gpu(requested_gpu));
-        }
-        return Ok(CtfExecution::Cpu);
-    }
-    if parallel {
-        return Ok(if hdf_output {
-            CtfExecution::ParallelHdf
-        } else {
-            CtfExecution::ParallelMrc
-        });
-    }
-    Ok(CtfExecution::Cpu)
-}
 /// Source `main` option validation in an owned command representation.
 pub fn ctfphaseflip_options(arguments: &[String]) -> Result<CtfPhaseFlipOptions, String> {
     let mut values = std::collections::BTreeMap::<String, String>::new();

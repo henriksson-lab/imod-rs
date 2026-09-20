@@ -1,13 +1,11 @@
 //! Translation of `IMOD/clip/fft.cpp`.
-#![allow(dead_code)]
-
 use crate::imod::clip::clip::{ClipOptions, IP_DEFAULT};
 use crate::imod::clip::file_io::{
     clip_write_slice, grap_volume_free, grap_volume_read, grap_volume_write, set_input_options,
     set_output_options,
 };
 use crate::imod::libcfshr::b3dutil::{CArg, ImodFile, c_format};
-use crate::imod::libcfshr::islice::{Islice, Istack, slice_create};
+use crate::imod::libcfshr::islice::{Islice, Istack, MrcData, slice_create, slice_init};
 use crate::imod::libiimod::mrcfiles::{
     MRC_MODE_COMPLEX_FLOAT, MRC_MODE_COMPLEX_SHORT, MRC_MODE_FLOAT, MrcHeader, mrc_coord_cp,
     mrc_head_label, mrc_head_label_cp, mrc_head_new, mrc_head_write,
@@ -126,7 +124,9 @@ pub fn clip_fft(input: &mut MrcHeader, output: &mut MrcHeader, options: &mut Cli
 /// IMOD's translated `cfft` layer; this preserves its input/output layout.
 pub fn slice_fft(slice: &mut Islice) -> i32 {
     let nx2 = slice.xsize + 2;
-    let ncs = slice.xsize as usize * core::mem::size_of::<f32>();
+    // `fft.cpp:119` sizes `ncs` in bytes for `memcpy`; the typed copy below
+    // takes it in floats.
+    let ncs = slice.xsize as usize;
     let idir = if slice.mode == MRC_MODE_COMPLEX_FLOAT || slice.mode == MRC_MODE_COMPLEX_SHORT {
         -1
     } else {
@@ -134,88 +134,50 @@ pub fn slice_fft(slice: &mut Islice) -> i32 {
     };
     if idir == 1 {
         slice_float(slice);
-        let width = slice.xsize as usize;
-        let height = slice.ysize as usize;
-        // `fft.cpp:130-136`: one `malloc`, the rows copied into it from the
-        // slice's own data, the old data freed, and the buffer handed to
-        // `sliceInit` as the slice's data.  Allocating it as bytes lets it
-        // become `slice.data` with no copy back.
-        let buffer_len = nx2 as usize * height * core::mem::size_of::<f32>();
-        if slice.data.len() != width * height * core::mem::size_of::<f32>() {
+        // `fft.cpp:133-138`: one `malloc` of `nx2 * ysize` floats, each row
+        // `memcpy`ed into it from `slice->data.f`, the old data freed, and
+        // the buffer handed to `sliceInit` as the slice's data.  The `ncs`
+        // byte count of the `memcpy` is `xsize` floats.
+        let mut tbuf = Vec::new();
+        if tbuf
+            .try_reserve_exact(nx2 as usize * slice.ysize as usize)
+            .is_err()
+        {
             return -1;
         }
-        let mut buffer = Vec::new();
-        if buffer.try_reserve_exact(buffer_len).is_err() {
-            return -1;
+        tbuf.resize(nx2 as usize * slice.ysize as usize, 0_f32);
+        for i in 0..slice.ysize as usize {
+            tbuf[i * nx2 as usize..i * nx2 as usize + ncs].copy_from_slice(
+                &slice.data.f()[i * slice.xsize as usize..i * slice.xsize as usize + ncs],
+            );
         }
-        buffer.resize(buffer_len, 0_u8);
-        for row in 0..height {
-            let source_start = row * ncs;
-            let buffer_start = row * nx2 as usize * core::mem::size_of::<f32>();
-            buffer[buffer_start..buffer_start + ncs]
-                .copy_from_slice(&slice.data[source_start..source_start + ncs]);
-        }
-        slice.data = buffer;
-        let nx = slice.xsize;
-        let ny = slice.ysize;
-        let (head, floats, tail) = unsafe { slice.data.align_to_mut::<f32>() };
-        if head.is_empty() && tail.is_empty() {
-            mrc_to_dfft(floats, nx, ny, 0);
-        } else {
-            // A whole `Vec<u8>` allocation from the global allocator is always
-            // sufficiently aligned; transcode rather than read unaligned if
-            // that ever fails to hold.
-            let mut float_data = slice
-                .data
-                .chunks_exact(4)
-                .map(|bytes| f32::from_ne_bytes(bytes.try_into().unwrap()))
-                .collect::<Vec<_>>();
-            mrc_to_dfft(&mut float_data, nx, ny, 0);
-            slice.data = float_data.into_iter().flat_map(f32::to_ne_bytes).collect();
-        }
-        slice.xsize = slice.xsize / 2 + 1;
-        slice.mode = MRC_MODE_COMPLEX_FLOAT;
-        slice.csize = 2;
-        slice.dsize = core::mem::size_of::<f32>() as i32;
+        mrc_to_dfft(&mut tbuf, slice.xsize, slice.ysize, 0);
+        slice_init(
+            slice,
+            slice.xsize / 2 + 1,
+            slice.ysize,
+            MRC_MODE_COMPLEX_FLOAT,
+            MrcData::F(tbuf),
+        );
         slice_wrap_fft_lines(slice, 0);
     } else {
         slice_complex_float(slice);
         slice_wrap_fft_lines(slice, 1);
         let new_xsize = 2 * (slice.xsize - 1);
-        let width = new_xsize as usize;
-        let height = slice.ysize as usize;
-        let packed_width = width + 2;
-        if slice.data.len() != packed_width * height * core::mem::size_of::<f32>() {
-            return -1;
+        mrc_to_dfft(slice.data.f_mut(), new_xsize, slice.ysize, 1);
+        // `fft.cpp:169-172`: repack the rows within the same buffer.
+        let f = slice.data.f_mut();
+        for j in 0..slice.ysize as usize {
+            for i in 0..new_xsize as usize {
+                f[i + j * new_xsize as usize] = f[i + j * (new_xsize as usize + 2)];
+            }
         }
-        // `fft.cpp:161-170` transforms `slice->data.f` in place and then
-        // repacks the rows within that same buffer; reinterpret the byte
-        // buffer instead of transcoding the slice in both directions.
-        let ny = slice.ysize;
-        let (head, floats, tail) = unsafe { slice.data.align_to_mut::<f32>() };
-        if head.is_empty() && tail.is_empty() {
-            mrc_to_dfft(floats, new_xsize, ny, 1);
-        } else {
-            // See the forward branch: unreachable with the global allocator.
-            let mut packed = slice
-                .data
-                .chunks_exact(core::mem::size_of::<f32>())
-                .map(|bytes| f32::from_ne_bytes(bytes.try_into().unwrap()))
-                .collect::<Vec<_>>();
-            mrc_to_dfft(&mut packed, new_xsize, ny, 1);
-            slice.data = packed.into_iter().flat_map(f32::to_ne_bytes).collect();
+        // The C leaves the two padding floats per row allocated past the
+        // repacked image and never reads them; drop them so the storage
+        // length is the image size, as `sliceCreate` would have made it.
+        if let MrcData::F(v) = &mut slice.data {
+            v.truncate(new_xsize as usize * slice.ysize as usize);
         }
-        for row in 0..height {
-            let source_start = row * packed_width * core::mem::size_of::<f32>();
-            let dest_start = row * width * core::mem::size_of::<f32>();
-            slice.data.copy_within(
-                source_start..source_start + width * core::mem::size_of::<f32>(),
-                dest_start,
-            );
-        }
-        slice
-            .data
-            .truncate(width * height * core::mem::size_of::<f32>());
         slice.xsize = new_xsize;
         slice.mode = MRC_MODE_FLOAT;
         slice.csize = 1;
@@ -296,35 +258,18 @@ pub fn clip_fftvol(volume: &mut Istack) -> i32 {
         return -1;
     }
     let first = volume.slices.first().unwrap();
-    let ncs = first.xsize as usize * core::mem::size_of::<f32>();
+    // `fft.cpp:255` sizes `ncs` in bytes for `memcpy`; the typed copy below
+    // takes it in floats.
+    let ncs = first.xsize as usize;
+    let nx2 = first.xsize + 2;
     if first.mode == MRC_MODE_COMPLEX_FLOAT {
         clip_wrapvol(volume, 1);
         clip_fftvol3(volume, -2);
         for slice in &mut volume.slices {
-            // `fft.cpp:265` transforms `v->vol[z]->data.f` in place.  The
-            // translated `Islice` keeps its pixels as bytes, so reinterpret
-            // that buffer as `f32` for the call rather than transcoding the
-            // whole slice into a second array and back.
+            // `fft.cpp:265` transforms `v->vol[z]->data.f` in place.
             let nx = (slice.xsize - 1) * 2;
             let ny = slice.ysize;
-            let (head, floats, tail) = unsafe { slice.data.align_to_mut::<f32>() };
-            if head.is_empty() && tail.is_empty() {
-                mrc_to_dfft(floats, nx, ny, -1);
-            } else {
-                // A whole `Vec<u8>` allocation from the global allocator is
-                // always sufficiently aligned; transcode rather than read
-                // unaligned if that ever fails to hold.
-                let mut float_data = slice
-                    .data
-                    .chunks_exact(4)
-                    .map(|bytes| f32::from_ne_bytes(bytes.try_into().unwrap()))
-                    .collect::<Vec<_>>();
-                if float_data.len() * 4 != slice.data.len() {
-                    return -1;
-                }
-                mrc_to_dfft(&mut float_data, nx, ny, -1);
-                slice.data = float_data.into_iter().flat_map(f32::to_ne_bytes).collect();
-            }
+            mrc_to_dfft(slice.data.f_mut(), nx, ny, -1);
             slice.mode = MRC_MODE_FLOAT;
             slice.csize = 1;
             slice.xsize *= 2;
@@ -333,45 +278,29 @@ pub fn clip_fftvol(volume: &mut Istack) -> i32 {
             slice_box_in(slice, 0, 0, xsize - 2, ysize);
         }
     } else {
-        let nx2 = first.xsize + 2;
         for slice in &mut volume.slices {
             slice_float(slice);
             // `fft.cpp:278-284`: one `malloc` per slice, filled row by row from
             // the slice's own data, which is then freed and *replaced* by that
-            // buffer.  Allocating it as bytes lets it become `slice.data`
-            // without a copy back.
-            let buffer_len = (nx2 * slice.ysize) as usize * core::mem::size_of::<f32>();
-            let mut buffer = Vec::new();
-            if buffer.try_reserve_exact(buffer_len).is_err() {
+            // buffer.
+            let mut tbuf = Vec::new();
+            if tbuf
+                .try_reserve_exact(nx2 as usize * slice.ysize as usize)
+                .is_err()
+            {
                 return -1;
             }
-            buffer.resize(buffer_len, 0_u8);
-            if slice.data.len() % 4 != 0 {
-                return -1;
+            tbuf.resize(nx2 as usize * slice.ysize as usize, 0_f32);
+            for i in 0..slice.ysize as usize {
+                tbuf[i * nx2 as usize..i * nx2 as usize + ncs].copy_from_slice(
+                    &slice.data.f()[i * slice.xsize as usize..i * slice.xsize as usize + ncs],
+                );
             }
-            for row in 0..slice.ysize as usize {
-                let source_start = row * slice.xsize as usize * core::mem::size_of::<f32>();
-                let dest_start = row * nx2 as usize * core::mem::size_of::<f32>();
-                buffer[dest_start..dest_start + ncs]
-                    .copy_from_slice(&slice.data[source_start..source_start + ncs]);
-            }
-            slice.data = buffer;
+            slice.data = MrcData::F(tbuf);
             slice.xsize += 2;
             let nx = slice.xsize - 2;
             let ny = slice.ysize;
-            let (head, floats, tail) = unsafe { slice.data.align_to_mut::<f32>() };
-            if head.is_empty() && tail.is_empty() {
-                mrc_to_dfft(floats, nx, ny, 0);
-            } else {
-                // See the inverse branch: unreachable with the global allocator.
-                let mut float_data = slice
-                    .data
-                    .chunks_exact(4)
-                    .map(|bytes| f32::from_ne_bytes(bytes.try_into().unwrap()))
-                    .collect::<Vec<_>>();
-                mrc_to_dfft(&mut float_data, nx, ny, 0);
-                slice.data = float_data.into_iter().flat_map(f32::to_ne_bytes).collect();
-            }
+            mrc_to_dfft(slice.data.f_mut(), nx, ny, 0);
             slice.xsize /= 2;
             slice.mode = MRC_MODE_COMPLEX_FLOAT;
             slice.csize = 2;
@@ -386,37 +315,31 @@ pub fn clip_fftvol3(volume: &mut Istack, idir: i32) -> i32 {
     if volume.slices.is_empty() {
         return -1;
     }
-    let first_xsize = volume.slices[0].xsize as usize;
-    let first_ysize = volume.slices[0].ysize as usize;
-    let depth = volume.slices.len();
-    for slice in &volume.slices {
-        if slice.data.len() != 2 * first_xsize * first_ysize * core::mem::size_of::<f32>() {
-            return -1;
-        }
-    }
-    // `fft.cpp:310` allocates one `zsize` by `vxsize` complex slice and moves
-    // values through `v->vol[z]->data.f` in place, so that transposed line is
-    // the routine's only allocation.  The translated `Islice` keeps its pixels
-    // as bytes; read and write them where they lie rather than staging a
-    // second copy of the whole volume.
-    let mut work = vec![0_f32; 2 * depth * first_xsize];
-    for y in 0..first_ysize {
-        for (z, slice) in volume.slices.iter().enumerate() {
-            let inp = &slice.data[8 * y * first_xsize..][..8 * first_xsize];
-            for x in 0..first_xsize {
-                work[2 * (x * depth + z)] =
-                    f32::from_ne_bytes(inp[8 * x..8 * x + 4].try_into().unwrap());
-                work[2 * (x * depth + z) + 1] =
-                    f32::from_ne_bytes(inp[8 * x + 4..8 * x + 8].try_into().unwrap());
+    let vxsize = volume.slices[0].xsize;
+    let vysize = volume.slices[0].ysize;
+    // `fft.cpp:310`: one `zsize` by `vxsize` complex slice, the transposed
+    // line the values move through in place.
+    let Some(mut slice) = slice_create(volume.slices.len() as i32, vxsize, MRC_MODE_COMPLEX_FLOAT)
+    else {
+        return -1;
+    };
+    let sxsize = slice.xsize as usize;
+    for y in 0..vysize as usize {
+        for z in 0..sxsize {
+            let inp = &volume.slices[z].data.f()[2 * y * vxsize as usize..];
+            let outp = &mut slice.data.f_mut()[2 * z..];
+            for x in 0..slice.ysize as usize {
+                outp[2 * x * sxsize] = inp[2 * x];
+                outp[2 * x * sxsize + 1] = inp[2 * x + 1];
             }
         }
-        mrc_odfft(&mut work, depth as i32, first_xsize as i32, idir);
-        for (z, slice) in volume.slices.iter_mut().enumerate() {
-            let outp = &mut slice.data[8 * y * first_xsize..][..8 * first_xsize];
-            for x in 0..first_xsize {
-                outp[8 * x..8 * x + 4].copy_from_slice(&work[2 * (x * depth + z)].to_ne_bytes());
-                outp[8 * x + 4..8 * x + 8]
-                    .copy_from_slice(&work[2 * (x * depth + z) + 1].to_ne_bytes());
+        mrc_odfft(slice.data.f_mut(), slice.xsize, slice.ysize, idir);
+        for z in 0..sxsize {
+            let outp = &mut volume.slices[z].data.f_mut()[2 * y * vxsize as usize..];
+            let inp = &slice.data.f()[2 * z..];
+            for x in 0..slice.ysize as usize {
+                outp[2 * x] = inp[2 * x * sxsize];
+                outp[2 * x + 1] = inp[2 * x * sxsize + 1];
             }
         }
     }
@@ -440,46 +363,15 @@ pub fn clip_wrapvol(volume: &mut Istack, direction: i32) -> i32 {
         return 1;
     }
     temporary.resize(temporary_len, 0.);
-    let wrapped = (2 * first_xsize * first_ysize) as usize;
     for slice in &mut volume.slices {
-        if slice.data.len() % core::mem::size_of::<f32>() != 0
-            || slice.data.len() / core::mem::size_of::<f32>() < wrapped
-        {
-            return -1;
-        }
-        // `fft.cpp:358` wraps `v->vol[k]->data.f` in place; reinterpret the
-        // byte buffer rather than transcoding the slice in both directions.
-        let (head, floats, _) = unsafe { slice.data.align_to_mut::<f32>() };
-        if head.is_empty() {
-            crate::imod::libcfshr::filtxcorr::wrap_fft_slice(
-                &mut floats[..wrapped],
-                temporary.as_mut_slice(),
-                first_xsize,
-                first_ysize,
-                direction,
-            );
-        } else {
-            // Unreachable with the global allocator; see `clip_fftvol`.
-            let mut data: Vec<f32> = slice
-                .data
-                .chunks_exact(core::mem::size_of::<f32>())
-                .map(|bytes| f32::from_ne_bytes(bytes.try_into().unwrap()))
-                .collect();
-            crate::imod::libcfshr::filtxcorr::wrap_fft_slice(
-                &mut data[..wrapped],
-                temporary.as_mut_slice(),
-                first_xsize,
-                first_ysize,
-                direction,
-            );
-            for (bytes, value) in slice
-                .data
-                .chunks_exact_mut(core::mem::size_of::<f32>())
-                .zip(data)
-            {
-                bytes.copy_from_slice(&value.to_ne_bytes());
-            }
-        }
+        // `fft.cpp:358` wraps `v->vol[k]->data.f` in place.
+        crate::imod::libcfshr::filtxcorr::wrap_fft_slice(
+            slice.data.f_mut(),
+            temporary.as_mut_slice(),
+            first_xsize,
+            first_ysize,
+            direction,
+        );
     }
     let mut output = 0;
     let mut low = 0;
@@ -593,25 +485,18 @@ mod tests {
     }
 
     #[test]
-    fn slice_fft_round_trip_uses_owned_byte_storage() {
+    fn slice_fft_round_trip_uses_owned_float_storage() {
         let mut slice = slice_create(4, 4, MRC_MODE_FLOAT).unwrap();
         let expected: Vec<f32> = (0..16).map(|value| value as f32 - 5.0).collect();
-        slice.data = expected
-            .iter()
-            .flat_map(|value| value.to_ne_bytes())
-            .collect();
+        slice.data.f_mut().copy_from_slice(&expected);
         assert_eq!(slice_fft(&mut slice), 0);
         assert_eq!(slice_fft(&mut slice), 0);
         assert_eq!(
             (slice.xsize, slice.ysize, slice.mode),
             (4, 4, MRC_MODE_FLOAT)
         );
-        let restored: Vec<f32> = slice
-            .data
-            .chunks_exact(core::mem::size_of::<f32>())
-            .map(|bytes| f32::from_ne_bytes(bytes.try_into().unwrap()))
-            .collect();
-        for (actual, original) in restored.iter().zip(expected) {
+        assert_eq!(slice.data.f().len(), 16);
+        for (actual, original) in slice.data.f().iter().zip(expected) {
             assert!((actual - original).abs() < 1.0e-4);
         }
     }

@@ -1,5 +1,4 @@
 //! Translation of `IMOD/libcfshr/spectrumscaled.c`.
-#![allow(dead_code)]
 
 /// Image samples accepted by `spectrum_scaled`.
 pub enum SpectrumInput<'a> {

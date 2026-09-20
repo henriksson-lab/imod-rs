@@ -101,7 +101,6 @@ impl AssistantThread {
 
 /// The copied C++ `ImodAssistant` class (`IMOD/3dmod/imod_assistant.cpp`).
 pub struct ImodAssistant {
-    path: String,
     qhc: String,
     imod_dir: String,
     prefix: String,
@@ -145,7 +144,6 @@ impl ImodAssistant {
             };
         }
         Self {
-            path,
             qhc,
             imod_dir,
             prefix: page_prefix,

@@ -1,5 +1,4 @@
 //! Translation of `IMOD/libcfshr/pctstretch.c`.
-#![allow(dead_code)]
 
 pub const SLICE_MODE_BYTE: i32 = 0;
 pub const SLICE_MODE_SHORT: i32 = 1;

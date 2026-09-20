@@ -280,15 +280,6 @@ unsafe extern "C" {
         attribute_name: *const c_char,
         access: HidT,
     ) -> HerrT;
-    fn H5Aget_num_attrs(object: HidT) -> i32;
-    fn H5Adelete_by_idx(
-        object: HidT,
-        object_name: *const c_char,
-        index: i32,
-        order: i32,
-        n: HsizeT,
-        access: HidT,
-    ) -> HerrT;
     fn H5Acreate2(
         object: HidT,
         name: *const c_char,
@@ -1537,40 +1528,6 @@ pub fn ii_reorder_hdf_stack(in_file: &mut ImodImageFile, sect_order: &[i32]) -> 
         0
     }
 }
-/// C `freeReorderArrays` (`iihdf.c:1221`).  The Rust reordering path owns its
-/// temporary vectors, so normal scope exit already invokes this cleanup.  It
-/// remains a named helper for callers that need to abandon partially built
-/// reorder state before returning.
-fn free_reorder_arrays(
-    new_map: &mut Vec<i32>,
-    adoc_secs: &mut Vec<i32>,
-    temp_name: &mut String,
-    new_name: &mut String,
-) {
-    *new_map = Vec::new();
-    *adoc_secs = Vec::new();
-    *temp_name = String::new();
-    *new_name = String::new();
-}
-/// C `removeAttributes` (`iihdf.c:1232`).
-unsafe fn remove_attributes(group_id: HidT) -> i32 {
-    let mut err = 0;
-    let num = H5Aget_num_attrs(group_id);
-    for ind in (0..num).rev() {
-        if H5Adelete_by_idx(
-            group_id,
-            c".".as_ptr(),
-            H5_INDEX_NAME,
-            H5_ITER_INC,
-            ind as HsizeT,
-            0,
-        ) < 0
-        {
-            err += 1;
-        }
-    }
-    err
-}
 /// C `hdfWriteHeader` (`iihdf.c:1246`).
 unsafe fn hdf_write_header(in_file: *mut ImodImageFile) -> i32 {
     if (*in_file).stack_set_list.is_none()
@@ -2665,17 +2622,6 @@ mod tests {
             ..ImodImageFile::default()
         };
         assert_eq!(ii_reorder_hdf_stack(&mut image, &[0]), 1);
-    }
-
-    #[test]
-    fn reorder_cleanup_drops_each_owned_temporary() {
-        let mut map = vec![1, 2];
-        let mut sections = vec![3];
-        let mut temporary = String::from("/MDF/images/Reordered1");
-        let mut destination = String::from("/MDF/images/1");
-        free_reorder_arrays(&mut map, &mut sections, &mut temporary, &mut destination);
-        assert!(map.is_empty() && sections.is_empty());
-        assert!(temporary.is_empty() && destination.is_empty());
     }
 
     #[test]

@@ -9,7 +9,7 @@ use std::sync::atomic::{AtomicI32, Ordering};
 use std::sync::{LazyLock, Mutex};
 
 use crate::imod::libcfshr::b3dutil::{b3drand, b3dsrand};
-use crate::imod::libcfshr::islice::slice_create;
+use crate::imod::libcfshr::islice::{Islice, MrcData, slice_init};
 use crate::imod::libcfshr::samplemeansd::sample_mean_sd;
 use crate::imod::libiimod::iilikemrc::{
     RAW_MODE_BYTE, RAW_MODE_FLOAT, RAW_MODE_SBYTE, RAW_MODE_SHORT, RAW_MODE_USHORT,
@@ -265,13 +265,34 @@ pub fn ii_raw_scan(in_file: &mut ImodImageFile) -> i32 {
         li.ymin = yborder;
         li.xmin = 0;
         li.xmax = hdr.nx - 1;
-        let mut buffer = vec![
-            0_u8;
+        // `Islice slice;` — the C's stack slice that `sliceInit` points at
+        // `buffer` each pass; here it takes the buffer over and hands it back.
+        let mut slice = Islice {
+            data: MrcData::default(),
+            xsize: 0,
+            ysize: 0,
+            mode: 0,
+            csize: 0,
+            dsize: 0,
+            min: 0.,
+            max: 0.,
+            mean: 0.,
+            index: 0,
+            cval: [0.; 4],
+        };
+        let Some(mut buffer) = MrcData::try_zeroed(
+            hdr.mode,
             (hdr.nx as usize)
                 .saturating_mul(dsize as usize)
                 .saturating_mul(csize as usize)
-                .saturating_mul(lines_to_scan as usize)
-        ];
+                .saturating_mul(lines_to_scan as usize),
+        ) else {
+            crate::imod::libcfshr::b3dutil::b3d_error(
+                Some(&mut crate::imod::libcfshr::b3dutil::ImodFile::Stderr),
+                format_args!("ERROR allocating buffer for scanning\n"),
+            );
+            return IIERR_IO_ERROR;
+        };
         let mode_is_real = matches!(hdr.mode, MRC_MODE_SHORT | MRC_MODE_USHORT | MRC_MODE_FLOAT);
         do_mean_sd = mode_is_real && config.scale_scan_type > 1;
         if config.scale_scan_type != 0 && config.load_int_if_estimate {
@@ -286,39 +307,54 @@ pub fn ii_raw_scan(in_file: &mut ImodImageFile) -> i32 {
         let mut tot_sum_sq = 0_f64;
         while z < hdr.nz {
             li.ymax = li.ymin + lines_to_scan - 1;
-            if mrc_read_z(&mut *hdr, &mut li, &mut buffer, z) != 0 {
+            if mrc_read_z(&mut *hdr, &mut li, buffer.bytes_mut(), z) != 0 {
                 return IIERR_IO_ERROR;
             }
             if mode_is_real && !do_mean_sd {
                 for iy in 0..lines_to_scan {
                     match hdr.mode {
+                        // `sdata = buffer + iy * nx + xborder` and then
+                        // `sdata[ind]` for `ind` from `xborder`: the C offsets
+                        // by the border twice, so it scans `[2*xborder, nx)`
+                        // of each line (`iirawimage.cpp:296-322`).
                         MRC_MODE_SHORT => {
+                            let sdata = &buffer.s()[(iy * hdr.nx + xborder) as usize..];
                             for ind in xborder..hdr.nx - xborder {
-                                let offset = ((iy * hdr.nx + ind) * 2) as usize;
-                                let value =
-                                    i16::from_ne_bytes(buffer[offset..][..2].try_into().unwrap())
-                                        as f32;
-                                amin = amin.min(value);
-                                amax = amax.max(value);
+                                let sval = sdata[ind as usize];
+                                amin = if amin < sval as f32 {
+                                    amin
+                                } else {
+                                    sval as f32
+                                };
+                                amax = if amax > sval as f32 {
+                                    amax
+                                } else {
+                                    sval as f32
+                                };
                             }
                         }
                         MRC_MODE_USHORT => {
+                            let usdata = &buffer.us()[(iy * hdr.nx + xborder) as usize..];
                             for ind in xborder..hdr.nx - xborder {
-                                let offset = ((iy * hdr.nx + ind) * 2) as usize;
-                                let value =
-                                    u16::from_ne_bytes(buffer[offset..][..2].try_into().unwrap())
-                                        as f32;
-                                amin = amin.min(value);
-                                amax = amax.max(value);
+                                let usval = usdata[ind as usize];
+                                amin = if amin < usval as f32 {
+                                    amin
+                                } else {
+                                    usval as f32
+                                };
+                                amax = if amax > usval as f32 {
+                                    amax
+                                } else {
+                                    usval as f32
+                                };
                             }
                         }
                         MRC_MODE_FLOAT => {
+                            let fdata = &buffer.f()[(iy * hdr.nx + xborder) as usize..];
                             for ind in xborder..hdr.nx - xborder {
-                                let offset = ((iy * hdr.nx + ind) * 4) as usize;
-                                let value =
-                                    f32::from_ne_bytes(buffer[offset..][..4].try_into().unwrap());
-                                amin = amin.min(value);
-                                amax = amax.max(value);
+                                let fval = fdata[ind as usize];
+                                amin = if amin < fval { amin } else { fval };
+                                amax = if amax > fval { amax } else { fval };
                             }
                         }
                         _ => {}
@@ -341,7 +377,7 @@ pub fn ii_raw_scan(in_file: &mut ImodImageFile) -> i32 {
                 // because `buffer` is refilled between calls.
                 let line_stride = hdr.nx as usize * (dsize * csize) as usize;
                 let lines: Vec<&[u8]> = (0..lines_to_scan as usize)
-                    .map(|index| &buffer[(line_stride * index)..])
+                    .map(|index| &buffer.bytes()[(line_stride * index)..])
                     .collect();
                 sample_mean_sd(
                     Some(&lines),
@@ -362,13 +398,17 @@ pub fn ii_raw_scan(in_file: &mut ImodImageFile) -> i32 {
                 tot_sum_sq += sample_sd as f64 * sample_sd as f64 * (buf_pixels as f64 - 1.)
                     + sample_mean as f64 * sample_mean as f64 * buf_pixels as f64;
             } else {
-                let Some(mut slice) = slice_create(hdr.nx, lines_to_scan, hdr.mode) else {
-                    return IIERR_IO_ERROR;
-                };
-                slice.data.copy_from_slice(&buffer);
-                slice_mmm(slice.as_mut());
-                amin = amin.min(slice.min);
-                amax = amax.max(slice.max);
+                slice_init(
+                    &mut slice,
+                    hdr.nx,
+                    lines_to_scan,
+                    hdr.mode,
+                    std::mem::take(&mut buffer),
+                );
+                slice_mmm(&mut slice);
+                amin = if amin < slice.min { amin } else { slice.min };
+                amax = if amax > slice.max { amax } else { slice.max };
+                buffer = std::mem::take(&mut slice.data);
             }
             let mut full_skip = lines_to_scan;
             if config.scale_scan_type != 0 {

@@ -1,5 +1,4 @@
 //! Translation of `IMOD/libcfshr/dsyevq3.c`.
-#![allow(dead_code)]
 
 use crate::imod::libcfshr::dsytrd3::dsytrd3;
 

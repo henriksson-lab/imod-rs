@@ -1,5 +1,4 @@
 //! Translation of `IMOD/libwarp/pointops.c` and `points.h`.
-#![allow(dead_code)]
 
 use std::io::Write;
 

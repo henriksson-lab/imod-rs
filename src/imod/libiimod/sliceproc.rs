@@ -1,5 +1,5 @@
 //! Translation of `IMOD/libiimod/sliceproc.c` and `include/sliceproc.h`.
-#![allow(dead_code, unused_variables)]
+#![allow(unused_variables)]
 
 use crate::imod::libcfshr::islice::{Islice, slice_create, slice_put_val, slice_scale_and_free};
 use crate::imod::libcfshr::percentile::{percentile_float, percentile_int};
@@ -15,29 +15,16 @@ const SLICE_MODE_SHORT: i32 = 1;
 const SLICE_MODE_FLOAT: i32 = 2;
 const SLICE_MODE_USHORT: i32 = 6;
 
-pub fn slice_byte_add(sin: &mut Islice, in_val: i32) -> i32 {
-    let imax = sin.xsize * sin.ysize;
-    for pixel in &mut sin.data[..imax as usize] {
-        let mut aval = *pixel as i32 + in_val;
-        if aval > 255 {
-            aval = 255;
-        }
-        if aval < 0 {
-            aval = 0;
-        }
-        *pixel = aval as u8;
-    }
-    0
-}
-
 pub fn slice_byte_edge_two(sin: &mut Islice, center: i32) -> i32 {
     let mut sout = slice_create(sin.xsize, sin.ysize, SLICE_MODE_FLOAT)
         .expect("dimensions were validated by the input slice");
     let imax = sin.xsize - 1;
     let jmax = sin.ysize - 1;
+    let src = sin.data.b();
+    let out = sout.data.f_mut();
     for i in 1..imax {
         for j in 1..jmax {
-            let get = |x: i32, y: i32| sin.data[(x + y * sin.xsize) as usize] as f32;
+            let get = |x: i32, y: i32| src[(x + y * sin.xsize) as usize] as f32;
             let mut sr = get(i - 1, j - 1) + center as f32 * get(i, j - 1) + get(i + 1, j - 1)
                 - get(i - 1, j + 1)
                 - center as f32 * get(i, j + 1)
@@ -48,33 +35,20 @@ pub fn slice_byte_edge_two(sin: &mut Islice, center: i32) -> i32 {
                 - get(i - 1, j - 1);
             sr *= sr;
             sc *= sc;
-            let offset = (i + j * sout.xsize) as usize * 4;
-            sout.data[offset..offset + 4].copy_from_slice(&(sr + sc).sqrt().to_ne_bytes());
+            out[(i + j * sin.xsize) as usize] = (sr + sc).sqrt();
         }
     }
     for j in 1..jmax {
-        let left = (j * sout.xsize) as usize * 4;
-        let left_source = left + 4;
-        let right = (imax + j * sout.xsize) as usize * 4;
-        let right_source = right - 4;
-        let left_value: [u8; 4] = sout.data[left_source..left_source + 4].try_into().unwrap();
-        let right_value: [u8; 4] = sout.data[right_source..right_source + 4]
-            .try_into()
-            .unwrap();
-        sout.data[left..left + 4].copy_from_slice(&left_value);
-        sout.data[right..right + 4].copy_from_slice(&right_value);
+        let left = (j * sin.xsize) as usize;
+        let right = (imax + j * sin.xsize) as usize;
+        out[left] = out[left + 1];
+        out[right] = out[right - 1];
     }
     for i in 0..=imax {
-        let top = i as usize * 4;
-        let top_source = top + sin.xsize as usize * 4;
-        let bottom = (i + jmax * sout.xsize) as usize * 4;
-        let bottom_source = bottom - sin.xsize as usize * 4;
-        let top_value: [u8; 4] = sout.data[top_source..top_source + 4].try_into().unwrap();
-        let bottom_value: [u8; 4] = sout.data[bottom_source..bottom_source + 4]
-            .try_into()
-            .unwrap();
-        sout.data[top..top + 4].copy_from_slice(&top_value);
-        sout.data[bottom..bottom + 4].copy_from_slice(&bottom_value);
+        let top = i as usize;
+        let bottom = (i + jmax * sin.xsize) as usize;
+        out[top] = out[top + sin.xsize as usize];
+        out[bottom] = out[bottom - sin.xsize as usize];
     }
     slice_scale_and_free(sout.as_mut(), sin);
     0
@@ -88,7 +62,8 @@ pub fn slice_byte_edge_prewitt(sin: &mut Islice) -> i32 {
 }
 
 fn nay8(sin: &Islice, i: i32, j: i32, val: i32) -> i32 {
-    if sin.data[(i + j * sin.xsize) as usize] as i32 != val {
+    let d = sin.data.b();
+    if d[(i + j * sin.xsize) as usize] as i32 != val {
         return 0;
     }
     let mut k = 0;
@@ -100,7 +75,7 @@ fn nay8(sin: &Islice, i: i32, j: i32, val: i32) -> i32 {
                 && y > 0
                 && x < sin.xsize
                 && y < sin.ysize
-                && sin.data[(x + y * sin.xsize) as usize] as i32 == val
+                && d[(x + y * sin.xsize) as usize] as i32 == val
             {
                 k += 1;
             }
@@ -109,46 +84,34 @@ fn nay8(sin: &Islice, i: i32, j: i32, val: i32) -> i32 {
     k - 1
 }
 
-pub fn slice_byte_threshold(sin: &mut Islice, val: i32) -> i32 {
-    let pmin = sin.min as i32;
-    let pmax = sin.max as i32;
-    let thresh = pmin + val;
-    for pixel in &mut sin.data {
-        *pixel = if (*pixel as i32) < thresh {
-            pmax as u8
-        } else {
-            pmin as u8
-        };
-    }
-    0
-}
-
 pub fn slice_byte_grow(sin: &mut Islice, val: i32) -> i32 {
-    for j in 0..sin.ysize {
-        for i in 0..sin.xsize {
-            if sin.data[(i + j * sin.xsize) as usize] as i32 != val {
+    let (xsize, ysize, min, max) = (sin.xsize, sin.ysize, sin.min, sin.max);
+    let d = sin.data.b_mut();
+    for j in 0..ysize {
+        for i in 0..xsize {
+            if d[(i + j * xsize) as usize] as i32 != val {
                 continue;
             }
             for m in -1..=1 {
                 let y = j + m;
-                if y < 0 || y >= sin.ysize {
+                if y < 0 || y >= ysize {
                     continue;
                 }
                 for n in -1..=1 {
                     let x = i + n;
-                    if x == i && y == j || x < 0 || x >= sin.xsize {
+                    if x == i && y == j || x < 0 || x >= xsize {
                         continue;
                     }
-                    let at = (x + y * sin.xsize) as usize;
-                    if sin.data[at] as f32 == sin.min {
-                        sin.data[at] = (sin.max - 1.) as u8;
+                    let at = (x + y * xsize) as usize;
+                    if d[at] as f32 == min {
+                        d[at] = (max - 1.) as u8;
                     }
                 }
             }
         }
     }
-    for pixel in &mut sin.data {
-        if *pixel as f32 == sin.max - 1. {
+    for pixel in d.iter_mut() {
+        if *pixel as f32 == max - 1. {
             *pixel = val as u8;
         }
     }
@@ -163,14 +126,14 @@ pub fn slice_byte_shrink(sin: &mut Islice, _val: i32) -> i32 {
     for j in 0..sin.ysize {
         for i in 0..sin.xsize {
             if nay8(sin, i, j, pmax) < 7 {
-                sout.data[(i + j * sout.xsize) as usize] = 1;
+                sout.data.b_mut()[(i + j * sout.xsize) as usize] = 1;
             }
         }
     }
     for j in 0..sin.ysize {
         for i in 0..sin.xsize {
-            if sout.data[(i + j * sout.xsize) as usize] != 0 {
-                sin.data[(i + j * sin.xsize) as usize] = pmin;
+            if sout.data.b()[(i + j * sout.xsize) as usize] != 0 {
+                sin.data.b_mut()[(i + j * sin.xsize) as usize] = pmin;
             }
         }
     }
@@ -185,9 +148,11 @@ pub fn slice_byte_graham(sin: &mut Islice) -> i32 {
     let ld = 1. / 6.;
     let hd = 1. / 3.;
     let delta = 5.;
+    let src = sin.data.b();
+    let out = sout.data.f_mut();
     for i in 1..imax {
         for j in 1..jmax {
-            let g = |x: i32, y: i32| sin.data[(x + y * sin.xsize) as usize] as f32;
+            let g = |x: i32, y: i32| src[(x + y * sin.xsize) as usize] as f32;
             let ixx =
                 g(i + 1, j + 1) * ld - g(i, j + 1) * hd + g(i - 1, j + 1) * ld + g(i + 1, j) * ld
                     - g(i, j) * hd
@@ -202,7 +167,7 @@ pub fn slice_byte_graham(sin: &mut Islice) -> i32 {
                 + g(i + 1, j - 1) * ld
                 + g(i, j - 1) * ld
                 + g(i - 1, j - 1) * ld;
-            let out = if ixx < delta {
+            let value = if ixx < delta {
                 if iyy < delta {
                     (g(i + 1, j + 1)
                         + g(i, j + 1)
@@ -222,33 +187,20 @@ pub fn slice_byte_graham(sin: &mut Islice) -> i32 {
             } else {
                 g(i, j)
             };
-            let offset = (i + j * sout.xsize) as usize * 4;
-            sout.data[offset..offset + 4].copy_from_slice(&out.to_ne_bytes());
+            out[(i + j * sin.xsize) as usize] = value;
         }
     }
     for j in 1..jmax {
-        let left = (j * sout.xsize) as usize * 4;
-        let left_source = left + 4;
-        let right = (imax + j * sout.xsize) as usize * 4;
-        let right_source = right - 4;
-        let left_value: [u8; 4] = sout.data[left_source..left_source + 4].try_into().unwrap();
-        let right_value: [u8; 4] = sout.data[right_source..right_source + 4]
-            .try_into()
-            .unwrap();
-        sout.data[left..left + 4].copy_from_slice(&left_value);
-        sout.data[right..right + 4].copy_from_slice(&right_value);
+        let left = (j * sin.xsize) as usize;
+        let right = (imax + j * sin.xsize) as usize;
+        out[left] = out[left + 1];
+        out[right] = out[right - 1];
     }
     for i in 0..=imax {
-        let top = i as usize * 4;
-        let top_source = top + sin.xsize as usize * 4;
-        let bottom = (i + jmax * sout.xsize) as usize * 4;
-        let bottom_source = bottom - sin.xsize as usize * 4;
-        let top_value: [u8; 4] = sout.data[top_source..top_source + 4].try_into().unwrap();
-        let bottom_value: [u8; 4] = sout.data[bottom_source..bottom_source + 4]
-            .try_into()
-            .unwrap();
-        sout.data[top..top + 4].copy_from_slice(&top_value);
-        sout.data[bottom..bottom + 4].copy_from_slice(&bottom_value);
+        let top = i as usize;
+        let bottom = (i + jmax * sin.xsize) as usize;
+        out[top] = out[top + sin.xsize as usize];
+        out[bottom] = out[bottom - sin.xsize as usize];
     }
     slice_scale_and_free(sout.as_mut(), sin);
     0
@@ -348,11 +300,10 @@ pub fn slice_median_filter(sl_out: &mut Islice, stack: &[Islice], size: i32) -> 
                 let line1 = if oy == 0 { 0 } else { oy - 1 };
                 let line2 = oy;
                 let line3 = (ny - 1).min(oy + 1);
+                let src = sl_in.data.f();
                 for ox in 0..in_nx {
                     for (slot, row) in [line1, line2, line3].into_iter().enumerate() {
-                        let at = (ox + row * in_nx) * 4;
-                        line_vals[3 * ox + slot] =
-                            f32::from_ne_bytes(sl_in.data[at..at + 4].try_into().unwrap());
+                        line_vals[3 * ox + slot] = src[ox + row * in_nx];
                     }
                 }
                 offset = 0;
@@ -360,30 +311,27 @@ pub fn slice_median_filter(sl_out: &mut Islice, stack: &[Islice], size: i32) -> 
             } else {
                 /* Thereafter just copy the third line into the free slot */
                 let line3 = (ny - 1).min(oy + 1);
+                let src = sl_in.data.f();
                 for ox in 0..in_nx {
-                    let at = (ox + line3 * in_nx) * 4;
-                    line_vals[3 * ox + offset] =
-                        f32::from_ne_bytes(sl_in.data[at..at + 4].try_into().unwrap());
+                    line_vals[3 * ox + offset] = src[ox + line3 * in_nx];
                 }
                 offset = (offset + 1) % 3;
             }
 
             /* Step across, copying the chunk of values as needed and taking the
             median */
+            let out = sl_out.data.f_mut();
             for ox in 1..in_nx - 1 {
                 f_vals.copy_from_slice(&line_vals[3 * (ox - 1)..3 * (ox - 1) + 9]);
-                let at = (ox + oy * out_nx) * 4;
-                sl_out.data[at..at + 4].copy_from_slice(&opt_med9(&mut f_vals).to_ne_bytes());
+                out[ox + oy * out_nx] = opt_med9(&mut f_vals);
             }
 
             /* Handle the endpoints.  Note the source indexes the far end with
             the *input* width and the row with the output width. */
             f_vals.copy_from_slice(&line_vals[..9]);
-            let at = (oy * out_nx) * 4;
-            sl_out.data[at..at + 4].copy_from_slice(&opt_med9(&mut f_vals).to_ne_bytes());
+            out[oy * out_nx] = opt_med9(&mut f_vals);
             f_vals.copy_from_slice(&line_vals[3 * (in_nx - 3)..3 * (in_nx - 3) + 9]);
-            let at = (in_nx + oy * out_nx - 1) * 4;
-            sl_out.data[at..at + 4].copy_from_slice(&opt_med9(&mut f_vals).to_ne_bytes());
+            out[in_nx + oy * out_nx - 1] = opt_med9(&mut f_vals);
         }
         return 0;
     }
@@ -401,39 +349,20 @@ pub fn slice_median_filter(sl_out: &mut Islice, stack: &[Islice], size: i32) -> 
             let x_end = (ox + del_plus).min(sl_in.xsize);
             let num_vals = stack.len() * (x_end - x_start) as usize * (y_end - y_start) as usize;
             let select = (num_vals as i32 + 1) / 2;
-            for (oz, slice) in stack.iter().enumerate() {
-                for iy in y_start..y_end {
-                    for ix in x_start..x_end {
-                        let local = (ix - x_start + (iy - y_start) * (x_end - x_start)) as usize;
-                        let index =
-                            local + oz * (x_end - x_start) as usize * (y_end - y_start) as usize;
-                        let pixel = (ix + iy * sl_in.xsize) as usize;
-                        match sl_in.mode {
-                            SLICE_MODE_FLOAT => {
-                                let offset = pixel * 4;
-                                f_vals[index] = f32::from_ne_bytes(
-                                    slice.data[offset..offset + 4].try_into().unwrap(),
-                                );
-                            }
-                            SLICE_MODE_SHORT => {
-                                let offset = pixel * 2;
-                                i_vals[index] = i16::from_ne_bytes(
-                                    slice.data[offset..offset + 2].try_into().unwrap(),
-                                ) as i32;
-                            }
-                            SLICE_MODE_USHORT => {
-                                let offset = pixel * 2;
-                                i_vals[index] = u16::from_ne_bytes(
-                                    slice.data[offset..offset + 2].try_into().unwrap(),
-                                ) as i32;
-                            }
-                            SLICE_MODE_BYTE => i_vals[index] = slice.data[pixel] as i32,
-                            _ => unreachable!(),
-                        }
+            /* Loop on slices and subareas to load arrays: `sliceproc.c:446-470`
+            and the `FILTER_INTS` macro walk each row's span with a running
+            output pointer. */
+            let row_len = (x_end - x_start) as usize;
+            let mut out = 0;
+            let value = if sl_in.mode == SLICE_MODE_FLOAT {
+                for slice in stack {
+                    let d = slice.data.f();
+                    for iy in y_start..y_end {
+                        let start = (x_start + iy * sl_in.xsize) as usize;
+                        f_vals[out..out + row_len].copy_from_slice(&d[start..start + row_len]);
+                        out += row_len;
                     }
                 }
-            }
-            let value = if sl_in.mode == SLICE_MODE_FLOAT {
                 let low = percentile_float(select, &mut f_vals[..num_vals], num_vals as i32);
                 if num_vals % 2 == 0 {
                     0.5 * (low
@@ -442,6 +371,44 @@ pub fn slice_median_filter(sl_out: &mut Islice, stack: &[Islice], size: i32) -> 
                     low
                 }
             } else {
+                match sl_in.mode {
+                    SLICE_MODE_SHORT => {
+                        for slice in stack {
+                            let d = slice.data.s();
+                            for iy in y_start..y_end {
+                                let start = (x_start + iy * sl_in.xsize) as usize;
+                                for &v in &d[start..start + row_len] {
+                                    i_vals[out] = v as i32;
+                                    out += 1;
+                                }
+                            }
+                        }
+                    }
+                    SLICE_MODE_USHORT => {
+                        for slice in stack {
+                            let d = slice.data.us();
+                            for iy in y_start..y_end {
+                                let start = (x_start + iy * sl_in.xsize) as usize;
+                                for &v in &d[start..start + row_len] {
+                                    i_vals[out] = v as i32;
+                                    out += 1;
+                                }
+                            }
+                        }
+                    }
+                    _ => {
+                        for slice in stack {
+                            let d = slice.data.b();
+                            for iy in y_start..y_end {
+                                let start = (x_start + iy * sl_in.xsize) as usize;
+                                for &v in &d[start..start + row_len] {
+                                    i_vals[out] = v as i32;
+                                    out += 1;
+                                }
+                            }
+                        }
+                    }
+                }
                 let low = percentile_int(select, &mut i_vals[..num_vals], num_vals as i32) as f32;
                 if num_vals % 2 == 0 {
                     0.5 * (low
@@ -481,10 +448,6 @@ impl FloatMatrix2D {
     pub fn row(&self, row: usize) -> Option<&[f32]> {
         let start = row.checked_mul(self.columns)?;
         self.data.get(start..start.checked_add(self.columns)?)
-    }
-    pub fn row_mut(&mut self, row: usize) -> Option<&mut [f32]> {
-        let start = row.checked_mul(self.columns)?;
-        self.data.get_mut(start..start.checked_add(self.columns)?)
     }
     pub fn into_data(self) -> Vec<f32> {
         self.data
@@ -546,11 +509,11 @@ pub fn slice_aniso_diff(
         };
         state.image = image.into_data();
         state.image2 = image2.into_data();
+        let src = sl.data.f();
         for j in 0..m {
             for i in 0..n {
-                let offset = (i + j * sl.xsize) as usize * 4;
                 state.image[(j + 1) as usize * stride + (i + 1) as usize] =
-                    f32::from_ne_bytes(sl.data[offset..offset + 4].try_into().unwrap());
+                    src[(i + j * sl.xsize) as usize];
             }
         }
     }
@@ -571,8 +534,7 @@ pub fn slice_aniso_diff(
             } else {
                 state.image2[(j + 1) as usize * (n + 2) as usize + (i + 1) as usize]
             };
-            let offset = (i + j * sl.xsize) as usize * 4;
-            sl.data[offset..offset + 4].copy_from_slice(&value.to_ne_bytes());
+            sl.data.f_mut()[(i + j * sl.xsize) as usize] = value;
         }
     }
     if clear_flag == ANISO_CLEAR_AT_END {
@@ -606,7 +568,7 @@ pub fn slice_byte_aniso_diff(
         for j in 0..m {
             for i in 0..n {
                 image[(j + 1) as usize * stride + (i + 1) as usize] =
-                    sl.data[(i + j * sl.xsize) as usize] as f32;
+                    sl.data.b()[(i + j * sl.xsize) as usize] as f32;
             }
         }
     }
@@ -628,7 +590,7 @@ pub fn slice_byte_aniso_diff(
             } else {
                 image[(j + 1) as usize * stride + (i + 1) as usize]
             } as i32;
-            sl.data[(i + j * sl.xsize) as usize] = v.clamp(0, 255) as u8;
+            sl.data.b_mut()[(i + j * sl.xsize) as usize] = v.clamp(0, 255) as u8;
         }
     }
 }
@@ -642,22 +604,13 @@ mod tests {
         let mut input = slice_create(3, 3, SLICE_MODE_FLOAT).unwrap();
         let mut output = slice_create(3, 3, SLICE_MODE_FLOAT).unwrap();
         for (index, value) in (1..=9).enumerate() {
-            input.data[index * 4..index * 4 + 4].copy_from_slice(&(value as f32).to_ne_bytes());
+            input.data.f_mut()[index] = value as f32;
         }
         let stack = vec![input];
         assert_eq!(slice_median_filter(&mut output, &stack, 3), 0);
-        assert_eq!(
-            f32::from_ne_bytes(output.data[16..20].try_into().unwrap()),
-            5.0
-        );
-        assert_eq!(
-            f32::from_ne_bytes(output.data[..4].try_into().unwrap()),
-            3.0
-        );
-        assert_eq!(
-            f32::from_ne_bytes(output.data[32..36].try_into().unwrap()),
-            7.0
-        );
+        assert_eq!(output.data.f()[4], 5.0);
+        assert_eq!(output.data.f()[0], 3.0);
+        assert_eq!(output.data.f()[8], 7.0);
     }
 
     #[test]
@@ -666,17 +619,14 @@ mod tests {
         let mut second = slice_create(3, 3, SLICE_MODE_BYTE).unwrap();
         let mut output = slice_create(3, 3, SLICE_MODE_FLOAT).unwrap();
         for index in 0..9 {
-            first.data[index] = index as u8;
-            second.data[index] = (index + 10) as u8;
+            first.data.b_mut()[index] = index as u8;
+            second.data.b_mut()[index] = (index + 10) as u8;
         }
         let stack = vec![first, second];
         assert_eq!(slice_median_filter(&mut output, &stack, 3), 0);
         // At the center there are 18 values; source selection averages
         // the ninth and tenth one-indexed percentile values.
-        assert_eq!(
-            f32::from_ne_bytes(output.data[16..20].try_into().unwrap()),
-            9.0
-        );
+        assert_eq!(output.data.f()[4], 9.0);
     }
 
     #[test]
@@ -688,13 +638,11 @@ mod tests {
     }
 
     #[test]
-    fn byte_threshold_and_diffusion_use_owned_slice_storage() {
+    fn byte_diffusion_uses_owned_slice_storage() {
         let mut slice = slice_create(2, 2, SLICE_MODE_BYTE).unwrap();
-        slice.data.copy_from_slice(&[1, 4, 6, 9]);
+        slice.data.b_mut().copy_from_slice(&[9, 9, 1, 1]);
         slice.min = 1.;
         slice.max = 9.;
-        assert_eq!(slice_byte_threshold(&mut slice, 5), 0);
-        assert_eq!(slice.data, [9, 9, 1, 1]);
 
         let mut image = vec![0.; 16];
         let mut image2 = vec![0.; 16];
@@ -709,30 +657,17 @@ mod tests {
             0,
             &mut iter_done,
         );
-        assert_eq!(slice.data, [9, 9, 1, 1]);
+        assert_eq!(slice.data.b(), [9, 9, 1, 1]);
         assert_eq!(image[1 * 4 + 1], 9.);
         assert_eq!(image[2 * 4 + 2], 1.);
     }
 
     #[test]
-    fn byte_add_has_the_source_saturating_range() {
-        let mut slice = slice_create(3, 1, SLICE_MODE_BYTE).unwrap();
-        slice.data.copy_from_slice(&[0, 20, 250]);
-        assert_eq!(slice_byte_add(&mut slice, 10), 0);
-        assert_eq!(slice.data, [10, 30, 255]);
-        assert_eq!(slice_byte_add(&mut slice, -40), 0);
-        assert_eq!(slice.data, [0, 0, 215]);
-    }
-
-    #[test]
     fn float_matrix_keeps_contiguous_source_row_layout() {
-        let mut matrix = allocate_2d_float(3, 4).unwrap();
-        matrix.row_mut(1).unwrap()[2] = 9.;
-        assert_eq!(matrix.row(1).unwrap(), [0., 0., 9., 0.]);
-        assert_eq!(
-            matrix.into_data(),
-            [0., 0., 0., 0., 0., 0., 9., 0., 0., 0., 0., 0.]
-        );
+        let matrix = allocate_2d_float(3, 4).unwrap();
+        assert_eq!(matrix.row(1).unwrap(), [0., 0., 0., 0.]);
+        assert!(matrix.row(3).is_none());
+        assert_eq!(matrix.into_data().len(), 12);
         assert!(allocate_2d_float(-1, 2).is_none());
     }
 }

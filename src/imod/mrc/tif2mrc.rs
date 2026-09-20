@@ -3,7 +3,7 @@
 //! The old `b3dtiff.h` reader remains the default C-ABI path.  A deliberately
 //! opt-in Rust decoder may be selected for its currently supported TIFF cases;
 //! palette and TVIPS behavior continue to require the parity reader.
-#![allow(dead_code, unused_variables, unused_assignments, unused_mut)]
+#![allow(unused_variables, unused_assignments, unused_mut)]
 
 use crate::imod::clip::clip::{ScanArg, atof, sscanf};
 use crate::imod::libcfshr::b3dutil::{
@@ -718,7 +718,10 @@ pub fn tif2mrc(arguments: &[String]) -> i32 {
                     section
                 };
 
-                tifdata = match tiff_read_section(&mut tiffp, &mut tiff, in_section) {
+                // `tif2mrc.c:293` and `:316`: the buffer is `malloc`ed by
+                // `tiff_read_section` and freed at the end of the loop body,
+                // so only one section buffer is alive at a time.
+                let mut tifdata = match tiff_read_section(&mut tiffp, &mut tiff, in_section) {
                     Some(data) => data,
                     None => exit_error(&c_format_bytes(
                         "Failed to get image data for section %d",

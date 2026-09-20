@@ -1,5 +1,5 @@
 //! Translation of `IMOD/pysrc/comchanger.py`.
-use super::pysed::pysed;
+use super::pysed::{PysedSrc, pysed};
 use std::path::{Path, PathBuf};
 
 /// Matches the Python change-list representation.
@@ -11,6 +11,7 @@ pub fn modify_for_change_list(
     com_root: &str,
     axis_let: &str,
     changes: &[Change],
+    return_on_err: bool,
 ) -> Result<Vec<String>, String> {
     let mut starts = comlines
         .iter()
@@ -74,7 +75,15 @@ pub fn modify_for_change_list(
         if sed.is_empty() {
             output.extend_from_slice(lines);
         } else {
-            output.extend(pysed(&sed, lines, false, '|')?);
+            let tmplines = pysed(
+                &sed,
+                PysedSrc::Lines(lines),
+                None,
+                false,
+                '|',
+                return_on_err,
+            )?;
+            output.extend(tmplines.unwrap_or_default());
         }
     }
     Ok(output)

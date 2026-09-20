@@ -5,7 +5,7 @@
 //! unit in the ordered port.  Calls to that source unit retain its C ABI here;
 //! this file contains the complete header manipulation logic rather than a
 //! second, incompatible header table.
-#![allow(dead_code, unused_variables)]
+#![allow(unused_variables)]
 
 use crate::imod::libcfshr::b3dutil::{
     CArg, ImodFile, c_format_bytes, set_or_clear_flags, write_16_bit_mode_for_floats,
@@ -53,17 +53,6 @@ pub unsafe fn iiu_ret_basic_head(
         *dmean = (*hdr).amean;
     }
 }
-pub unsafe fn iiuretbasichead(
-    iunit: *mut i32,
-    nxyz: *mut i32,
-    mxyz: *mut i32,
-    mode: *mut i32,
-    dmin: *mut f32,
-    dmax: *mut f32,
-    dmean: *mut f32,
-) {
-    unsafe { iiu_ret_basic_head(*iunit, nxyz, mxyz, mode, dmin, dmax, dmean) }
-}
 
 /// Matches C `iiuCreateHeader` (`unit_header.c`).
 pub fn iiu_create_header(
@@ -102,44 +91,6 @@ pub fn iiu_create_header(
     iiu_alt_labels(iunit, labels, num_labels);
     unsafe { iiu_sync_with_mrc_header(iunit) };
 }
-pub unsafe fn iiucreateheader(
-    iunit: *mut i32,
-    nxyz: *mut i32,
-    mxyz: *mut i32,
-    mode: *mut i32,
-    labels: *mut i32,
-    num_labels: *mut i32,
-) {
-    unsafe {
-        iiu_create_header(
-            *iunit,
-            &*nxyz.cast::<[i32; 3]>(),
-            &*mxyz.cast::<[i32; 3]>(),
-            *mode,
-            &*labels.cast::<[[u8; MRC_LABEL_SIZE]; MRC_NLABELS]>(),
-            *num_labels,
-        )
-    }
-}
-pub unsafe fn icrhdr(
-    iunit: *mut i32,
-    nxyz: *mut i32,
-    mxyz: *mut i32,
-    mode: *mut i32,
-    labels: *mut i32,
-    num_labels: *mut i32,
-) {
-    unsafe {
-        iiu_create_header(
-            *iunit,
-            &*nxyz.cast::<[i32; 3]>(),
-            &*mxyz.cast::<[i32; 3]>(),
-            *mode,
-            &*labels.cast::<[[u8; MRC_LABEL_SIZE]; MRC_NLABELS]>(),
-            *num_labels,
-        )
-    }
-}
 
 pub fn iiu_write_header(
     iunit: i32,
@@ -176,21 +127,6 @@ pub fn iiu_write_header(
         } else {
             0
         }
-    }
-}
-pub unsafe fn iiuwriteheader(
-    i: *mut i32,
-    l: *mut i32,
-    f: *mut i32,
-    a: *mut f32,
-    b: *mut f32,
-    c: *mut f32,
-) -> i32 {
-    unsafe { iiu_write_header(*i, &*l.cast::<[u8; MRC_LABEL_SIZE]>(), *f, *a, *b, *c) }
-}
-pub unsafe fn iwrhdr(i: *mut i32, l: *mut i32, f: *mut i32, a: *mut f32, b: *mut f32, c: *mut f32) {
-    unsafe {
-        iiu_write_header(*i, &*l.cast::<[u8; MRC_LABEL_SIZE]>(), *f, *a, *b, *c);
     }
 }
 pub fn iiu_write_header_str(i: i32, label: &str, f: i32, a: f32, b: f32, c: f32) -> i32 {
@@ -306,14 +242,6 @@ pub unsafe fn iiu_trans_header(into_unit: i32, iunit: i32) -> i32 {
         }
         iiu_sync_with_mrc_header(into_unit);
         iiu_trans_extended_data(into_unit, iunit)
-    }
-}
-pub unsafe fn iiutransheader(i: *mut i32, j: *mut i32) -> i32 {
-    unsafe { iiu_trans_header(*i, *j) }
-}
-pub unsafe fn itrhdr(i: *mut i32, j: *mut i32) {
-    unsafe {
-        iiu_trans_header(*i, *j);
     }
 }
 
@@ -809,301 +737,6 @@ pub unsafe fn iiu_trans_valid_ext_type(into: i32, i: i32) {
 
 // The remaining names are the source's Fortran ABI entry points.  Keeping every
 // entry point is important: existing Fortran callers bind these names directly.
-pub unsafe fn iiuretcell(i: *mut i32, c: *mut f32) {
-    unsafe { iiu_ret_cell(*i, &mut *c.cast::<[f32; 6]>()) }
-}
-pub unsafe fn irtcel(i: *mut i32, c: *mut f32) {
-    unsafe { iiu_ret_cell(*i, &mut *c.cast::<[f32; 6]>()) }
-}
-pub unsafe fn iiualtcell(i: *mut i32, c: *mut f32) {
-    unsafe { iiu_alt_cell(*i, &*c.cast::<[f32; 6]>()) }
-}
-pub unsafe fn ialcel(i: *mut i32, c: *mut f32) {
-    unsafe { iiu_alt_cell(*i, &*c.cast::<[f32; 6]>()) }
-}
-pub unsafe fn iiuretdatatype(
-    i: *mut i32,
-    t: *mut i32,
-    l: *mut i32,
-    n1: *mut i32,
-    n2: *mut i32,
-    v1: *mut f32,
-    v2: *mut f32,
-) {
-    unsafe { iiu_ret_data_type(*i, &mut *t, &mut *l, &mut *n1, &mut *n2, &mut *v1, &mut *v2) }
-}
-pub unsafe fn irtdat(
-    i: *mut i32,
-    t: *mut i32,
-    l: *mut i32,
-    n1: *mut i32,
-    n2: *mut i32,
-    v1: *mut f32,
-    v2: *mut f32,
-) {
-    unsafe { iiu_ret_data_type(*i, &mut *t, &mut *l, &mut *n1, &mut *n2, &mut *v1, &mut *v2) }
-}
-pub unsafe fn iiualtdatatype(
-    i: *mut i32,
-    t: *mut i32,
-    l: *mut i32,
-    n1: *mut i32,
-    n2: *mut i32,
-    v1: *mut f32,
-    v2: *mut f32,
-) {
-    unsafe { iiu_alt_data_type(*i, *t, *l, *n1, *n2, *v1, *v2) }
-}
-pub unsafe fn ialdat(
-    i: *mut i32,
-    t: *mut i32,
-    l: *mut i32,
-    n1: *mut i32,
-    n2: *mut i32,
-    v1: *mut f32,
-    v2: *mut f32,
-) {
-    unsafe { iiu_alt_data_type(*i, *t, *l, *n1, *n2, *v1, *v2) }
-}
-pub unsafe fn iiuretsize(i: *mut i32, n: *mut i32, m: *mut i32, s: *mut i32) {
-    unsafe { iiu_ret_size(*i, &mut *n.cast(), &mut *m.cast(), &mut *s.cast()) }
-}
-pub unsafe fn irtsiz(i: *mut i32, n: *mut i32, m: *mut i32, s: *mut i32) {
-    unsafe { iiu_ret_size(*i, &mut *n.cast(), &mut *m.cast(), &mut *s.cast()) }
-}
-pub unsafe fn iiualtsize(i: *mut i32, n: *mut i32, s: *mut i32) {
-    unsafe { iiu_alt_size(*i, &*n.cast(), &*s.cast()) }
-}
-pub unsafe fn ialsiz(i: *mut i32, n: *mut i32, s: *mut i32) {
-    unsafe { iiu_alt_size(*i, &*n.cast(), &*s.cast()) }
-}
-pub unsafe fn iiuretsample(i: *mut i32, m: *mut i32) {
-    unsafe { iiu_ret_sample(*i, &mut *m.cast()) }
-}
-pub unsafe fn irtsam(i: *mut i32, m: *mut i32) {
-    unsafe { iiu_ret_sample(*i, &mut *m.cast()) }
-}
-pub unsafe fn iiualtsample(i: *mut i32, m: *mut i32) {
-    unsafe { iiu_alt_sample(*i, &*m.cast()) }
-}
-pub unsafe fn ialsam(i: *mut i32, m: *mut i32) {
-    unsafe { iiu_alt_sample(*i, &*m.cast()) }
-}
-pub unsafe fn iiualtsizesampcell(i: *mut i32, x: *mut i32, y: *mut i32, z: *mut i32) {
-    unsafe { iiu_alt_size_samp_cell(*i, *x, *y, *z) }
-}
-pub unsafe fn ialsiz_sam_cel(i: *mut i32, x: *mut i32, y: *mut i32, z: *mut i32) {
-    unsafe { iiu_alt_size_samp_cell(*i, *x, *y, *z) }
-}
-pub unsafe fn iiuretaxismap(i: *mut i32, p: *mut i32) {
-    unsafe { iiu_ret_axis_map(*i, &mut *p.cast::<[i32; 3]>()) }
-}
-pub unsafe fn irtmap(i: *mut i32, p: *mut i32) {
-    unsafe { iiu_ret_axis_map(*i, &mut *p.cast::<[i32; 3]>()) }
-}
-pub unsafe fn iiualtaxismap(i: *mut i32, p: *mut i32) {
-    unsafe { iiu_alt_axis_map(*i, &*p.cast::<[i32; 3]>()) }
-}
-pub unsafe fn ialmap(i: *mut i32, p: *mut i32) {
-    unsafe { iiu_alt_axis_map(*i, &*p.cast::<[i32; 3]>()) }
-}
-pub unsafe fn iiuretimodflags(i: *mut i32, a: *mut i32, b: *mut i32) {
-    unsafe { iiu_ret_imod_flags(*i, &mut *a, &mut *b) }
-}
-pub unsafe fn irtimodflags(i: *mut i32, a: *mut i32, b: *mut i32) {
-    unsafe { iiu_ret_imod_flags(*i, &mut *a, &mut *b) }
-}
-pub unsafe fn iiualtimodflags(i: *mut i32, a: *mut i32) {
-    unsafe { iiu_alt_imod_flags(*i, *a) }
-}
-pub unsafe fn ialimodflags(i: *mut i32, a: *mut i32) {
-    unsafe { iiu_alt_imod_flags(*i, *a) }
-}
-pub unsafe fn iiualtsigned(i: *mut i32, a: *mut i32) {
-    unsafe { iiu_alt_signed(*i, *a) }
-}
-pub unsafe fn ialsigned(i: *mut i32, a: *mut i32) {
-    unsafe { iiu_alt_signed(*i, *a) }
-}
-pub unsafe fn iiuretmrcversion(i: *mut i32, v: *mut i32) {
-    unsafe { iiu_ret_mrc_version(*i, &mut *v) }
-}
-pub unsafe fn iiualtmrcversion(i: *mut i32, v: *mut i32) {
-    unsafe { iiu_alt_mrc_version(*i, *v) }
-}
-pub unsafe fn iiuretorigin(i: *mut i32, x: *mut f32, y: *mut f32, z: *mut f32) {
-    unsafe {
-        let mut origin = [0.; 3];
-        iiu_ret_origin(*i, &mut origin);
-        (*x, *y, *z) = (origin[0], origin[1], origin[2]);
-    }
-}
-pub unsafe fn irtorg(i: *mut i32, x: *mut f32, y: *mut f32, z: *mut f32) {
-    unsafe {
-        let mut origin = [0.; 3];
-        iiu_ret_origin(*i, &mut origin);
-        (*x, *y, *z) = (origin[0], origin[1], origin[2]);
-    }
-}
-pub unsafe fn iiualtorigin(i: *mut i32, x: *mut f32, y: *mut f32, z: *mut f32) {
-    unsafe { iiu_alt_origin(*i, &[*x, *y, *z]) }
-}
-pub unsafe fn ialorg(i: *mut i32, x: *mut f32, y: *mut f32, z: *mut f32) {
-    unsafe { iiu_alt_origin(*i, &[*x, *y, *z]) }
-}
-pub unsafe fn ialmod(i: *mut i32, m: *mut i32) {
-    unsafe { iiu_alt_mode(*i, *m) }
-}
-pub unsafe fn iiualtmode(i: *mut i32, m: *mut i32) {
-    unsafe { iiu_alt_mode(*i, *m) }
-}
-pub unsafe fn iiuretrms(i: *mut i32, v: *mut f32) {
-    unsafe { iiu_ret_rms(*i, &mut *v) }
-}
-pub unsafe fn irtrms(i: *mut i32, v: *mut f32) {
-    unsafe { iiu_ret_rms(*i, &mut *v) }
-}
-pub unsafe fn iiualtrms(i: *mut i32, v: *mut f32) {
-    unsafe { iiu_alt_rms(*i, *v) }
-}
-pub unsafe fn ialrms(i: *mut i32, v: *mut f32) {
-    unsafe { iiu_alt_rms(*i, *v) }
-}
-pub unsafe fn iiurettilt(i: *mut i32, p: *mut f32) {
-    unsafe { iiu_ret_tilt(*i, &mut *p.cast::<[f32; 3]>()) }
-}
-pub unsafe fn irttlt(i: *mut i32, p: *mut f32) {
-    unsafe { iiu_ret_tilt(*i, &mut *p.cast::<[f32; 3]>()) }
-}
-pub unsafe fn iiualttilt(i: *mut i32, p: *mut f32) {
-    unsafe { iiu_alt_tilt(*i, &*p.cast::<[f32; 3]>()) }
-}
-pub unsafe fn ialtlt(i: *mut i32, p: *mut f32) {
-    unsafe { iiu_alt_tilt(*i, &*p.cast::<[f32; 3]>()) }
-}
-pub unsafe fn iiurettiltorig(i: *mut i32, p: *mut f32) {
-    unsafe { iiu_ret_tilt_orig(*i, &mut *p.cast::<[f32; 3]>()) }
-}
-pub unsafe fn irttlt_orig(i: *mut i32, p: *mut f32) {
-    unsafe { iiu_ret_tilt_orig(*i, &mut *p.cast::<[f32; 3]>()) }
-}
-pub unsafe fn iiualttiltorig(i: *mut i32, p: *mut f32) {
-    unsafe { iiu_alt_tilt_orig(*i, &*p.cast::<[f32; 3]>()) }
-}
-pub unsafe fn ialtlt_orig(i: *mut i32, p: *mut f32) {
-    unsafe { iiu_alt_tilt_orig(*i, &*p.cast::<[f32; 3]>()) }
-}
-pub unsafe fn iiualttiltrot(i: *mut i32, p: *mut f32) {
-    unsafe { iiu_alt_tilt_rot(*i, &*p.cast::<[f32; 3]>()) }
-}
-pub unsafe fn ialtlt_rot(i: *mut i32, p: *mut f32) {
-    unsafe { iiu_alt_tilt_rot(*i, &*p.cast::<[f32; 3]>()) }
-}
-pub unsafe fn iiuretdelta(i: *mut i32, p: *mut f32) {
-    unsafe { iiu_ret_delta(*i, &mut *p.cast::<[f32; 3]>()) }
-}
-pub unsafe fn irtdel(i: *mut i32, p: *mut f32) {
-    unsafe { iiu_ret_delta(*i, &mut *p.cast::<[f32; 3]>()) }
-}
-pub unsafe fn iiualtdelta(i: *mut i32, p: *mut f32) {
-    unsafe { iiu_alt_delta(*i, &*p.cast::<[f32; 3]>()) }
-}
-pub unsafe fn ialdel(i: *mut i32, p: *mut f32) {
-    unsafe { iiu_alt_delta(*i, &*p.cast::<[f32; 3]>()) }
-}
-pub unsafe fn iiuretspacegroup(i: *mut i32, p: *mut i32) {
-    unsafe { iiu_ret_space_group(*i, &mut *p) }
-}
-pub unsafe fn iiualtspacegroup(i: *mut i32, p: *mut i32) {
-    iiu_alt_space_group(*i, *p)
-}
-pub unsafe fn iiuretlabels(i: *mut i32, p: *mut i32, n: *mut i32) {
-    unsafe {
-        iiu_ret_labels(
-            *i,
-            &mut *p.cast::<[[u8; MRC_LABEL_SIZE]; MRC_NLABELS]>(),
-            &mut *n,
-        )
-    }
-}
-pub unsafe fn irtlab(i: *mut i32, p: *mut i32, n: *mut i32) {
-    unsafe {
-        iiu_ret_labels(
-            *i,
-            &mut *p.cast::<[[u8; MRC_LABEL_SIZE]; MRC_NLABELS]>(),
-            &mut *n,
-        )
-    }
-}
-pub unsafe fn iiualtlabels(i: *mut i32, p: *mut i32, n: *mut i32) {
-    unsafe { iiu_alt_labels(*i, &*p.cast::<[[u8; MRC_LABEL_SIZE]; MRC_NLABELS]>(), *n) }
-}
-pub unsafe fn iallab(i: *mut i32, p: *mut i32, n: *mut i32) {
-    unsafe { iiu_alt_labels(*i, &*p.cast::<[[u8; MRC_LABEL_SIZE]; MRC_NLABELS]>(), *n) }
-}
-pub unsafe fn iiutranslabels(i: *mut i32, j: *mut i32) {
-    unsafe { iiu_trans_labels(*i, *j) }
-}
-pub unsafe fn itrlab(i: *mut i32, j: *mut i32) {
-    unsafe { iiu_trans_labels(*i, *j) }
-}
-pub unsafe fn iiuretnumextended(i: *mut i32, n: *mut i32) {
-    unsafe { iiu_ret_num_extended(*i, &mut *n) }
-}
-pub unsafe fn irtnbsym(i: *mut i32, n: *mut i32) {
-    unsafe { iiu_ret_num_extended(*i, &mut *n) }
-}
-pub unsafe fn iiualtnumextended(i: *mut i32, n: *mut i32) {
-    iiu_alt_num_extended(*i, *n)
-}
-pub unsafe fn ialnbsym(i: *mut i32, n: *mut i32) {
-    unsafe { iiu_alt_num_extended(*i, *n) }
-}
-pub unsafe fn iiuretextendedtype(i: *mut i32, a: *mut i32, b: *mut i32) {
-    unsafe { iiu_ret_extended_type(*i, &mut *a.cast::<[i32; 2]>()) }
-}
-pub unsafe fn irtsymtyp(i: *mut i32, a: *mut i32, b: *mut i32) {
-    unsafe { iiu_ret_extended_type(*i, &mut *a.cast::<[i32; 2]>()) }
-}
-pub unsafe fn iiualtextendedtype(i: *mut i32, a: *mut i32, b: *mut i32) {
-    unsafe { iiu_alt_extended_type(*i, &*a.cast::<[i32; 2]>()) }
-}
-pub unsafe fn ialsymtyp(i: *mut i32, a: *mut i32, b: *mut i32) {
-    unsafe { iiu_alt_extended_type(*i, &*a.cast::<[i32; 2]>()) }
-}
-pub unsafe fn iiuretheaderexttype(i: *mut i32, a: *mut i32, b: *mut i32) {
-    unsafe { iiu_ret_header_ext_type(*i, &mut *a.cast::<[i32; 2]>()) }
-}
-pub unsafe fn irtsym(i: *mut i32, n: *mut i32, e: *mut i32) {
-    unsafe {
-        let mut data = Vec::new();
-        let result = iiu_ret_extended_data(*i, &mut data);
-        if result == 0 {
-            *n = data.len() as i32;
-            if !data.is_empty() && !e.is_null() {
-                core::ptr::copy_nonoverlapping(data.as_ptr(), e.cast::<u8>(), data.len());
-            }
-        }
-    }
-}
-pub unsafe fn ialsym(i: *mut i32, n: *mut i32, e: *mut i32) {
-    unsafe {
-        let data = if *n > 0 && !e.is_null() {
-            core::slice::from_raw_parts(e.cast::<u8>(), *n as usize)
-        } else {
-            &[]
-        };
-        let _ = iiu_alt_extended_data(*i, data);
-    }
-}
-pub unsafe fn itrextra(i: *mut i32, j: *mut i32) {
-    unsafe {
-        let _ = iiu_trans_extended_data(*i, *j);
-    }
-}
-pub unsafe fn iiutransvalidexttype(i: *mut i32, j: *mut i32) {
-    unsafe { iiu_trans_valid_ext_type(*i, *j) }
-}
 
 #[cfg(test)]
 mod tests {

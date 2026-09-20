@@ -4,7 +4,6 @@
 //! module is where the [`MxmlArena`] node slots are taken and released.  Every
 //! function that the C hands a `mxml_node_t *` takes the arena plus the slot
 //! index of that node.
-#![allow(dead_code)]
 
 use super::*;
 use core::any::Any;
@@ -191,49 +190,6 @@ pub fn mxml_delete(arena: &mut MxmlArena, node: Option<usize>) {
     mxml_free(arena, node);
 }
 
-/// Matches C `mxmlGetRefCount` (`mxml-node.c:230`).
-pub fn mxml_get_ref_count(arena: &MxmlArena, node: Option<usize>) -> i32 {
-    /*
-     * Range check input...
-     */
-
-    let Some(node) = node else {
-        return 0;
-    };
-
-    /*
-     * Return the reference count...
-     */
-
-    arena.node(node).ref_count
-}
-
-/// Matches C `mxmlNewCDATA` (`mxml-node.c:259`).
-pub fn mxml_new_cdata(
-    arena: &mut MxmlArena,
-    parent: Option<usize>,
-    data: Option<&[u8]>,
-) -> Option<usize> {
-    /*
-     * Range check input...
-     */
-
-    let data = data?;
-
-    /*
-     * Create the node and set the name value...
-     */
-
-    let node = mxml_new(arena, parent, MXML_ELEMENT);
-    if let Some(node) = node
-        && let MxmlValue::Element(element) = &mut arena.node_mut(node).value
-    {
-        element.name = Some(_mxml_strdupf(b"![CDATA[%s]]", data));
-    }
-
-    node
-}
-
 /// Matches C `mxmlNewCustom` (`mxml-node.c:299`).
 pub fn mxml_new_custom(
     arena: &mut MxmlArena,
@@ -366,40 +322,6 @@ pub fn mxml_new_text(
     node
 }
 
-/// Matches C `mxmlNewTextf` (`mxml-node.c:521`).
-///
-/// The C function is `mxmlNewTextf(parent, whitespace, format, ...)`.  Stable
-/// Rust cannot define a C-variadic function, so the `va_list` that the C body
-/// starts is taken as the single explicit argument `_mxml_vstrdupf` accepts.
-pub fn mxml_new_textf(
-    arena: &mut MxmlArena,
-    parent: Option<usize>,
-    whitespace: i32,
-    format: Option<&[u8]>,
-    arg: &[u8],
-) -> Option<usize> {
-    /*
-     * Range check input...
-     */
-
-    let format = format?;
-
-    /*
-     * Create the node and set the text value...
-     */
-
-    let node = mxml_new(arena, parent, MXML_TEXT);
-    if let Some(node) = node {
-        let string = _mxml_vstrdupf(format, arg);
-        if let MxmlValue::Text(text) = &mut arena.node_mut(node).value {
-            text.whitespace = whitespace;
-            text.string = Some(string);
-        }
-    }
-
-    node
-}
-
 /// Matches C `mxmlRemove` (`mxml-node.c:565`).
 pub fn mxml_remove(arena: &mut MxmlArena, node: Option<usize>) {
     /*
@@ -460,16 +382,6 @@ pub fn mxml_release(arena: &mut MxmlArena, node: Option<usize>) -> i32 {
         } else {
             arena.node(node).ref_count
         }
-    } else {
-        -1
-    }
-}
-
-/// Matches C `mxmlRetain` (`mxml-node.c:675`).
-pub fn mxml_retain(arena: &mut MxmlArena, node: Option<usize>) -> i32 {
-    if let Some(node) = node {
-        arena.node_mut(node).ref_count += 1;
-        arena.node(node).ref_count
     } else {
         -1
     }

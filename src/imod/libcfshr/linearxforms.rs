@@ -1,8 +1,7 @@
 //! Translation of `IMOD/libcfshr/linearxforms.c`.
-#![allow(dead_code)]
 use crate::imod::libcfshr::b3dutil::{CArg, c_format};
 use std::cell::Cell;
-use std::io::{BufRead, Write};
+use std::io::Write;
 
 /// Matches `xfUnit`.
 pub fn xf_unit(matrix: &mut [f32], value: f32, rows: usize) {
@@ -238,65 +237,4 @@ pub fn invert_matrix(matrix: &[f32; 9], inverse: &mut [f32; 9]) {
 /// Matches `inv_matrix`.
 pub fn inv_matrix(matrix: &[f32; 9], inverse: &mut [f32; 9]) {
     invert_matrix(matrix, inverse)
-}
-/// Matches `readOneXform`.
-pub fn read_one_xform<R: BufRead>(reader: &mut R, xf: &mut [f32; 6]) -> i32 {
-    let mut line = String::new();
-    match reader.read_line(&mut line) {
-        Err(_) => 2,
-        Ok(0) => 1,
-        Ok(_) => {
-            let v = line
-                .split_whitespace()
-                .map(str::parse::<f32>)
-                .collect::<Result<Vec<_>, _>>();
-            match v {
-                Ok(v) if v.len() >= 6 => {
-                    xf.copy_from_slice(&[v[0], v[2], v[1], v[3], v[4], v[5]]);
-                    0
-                }
-                _ => 3,
-            }
-        }
-    }
-}
-/// Matches `readAllXforms`.
-pub fn read_all_xforms<R: BufRead>(
-    reader: &mut R,
-    xforms: &mut [[f32; 6]],
-    number_read: &mut usize,
-) -> i32 {
-    for index in 0..xforms.len() {
-        let ret = read_one_xform(reader, &mut xforms[index]);
-        if ret < 2 {
-            *number_read = index + 1;
-        }
-        if ret != 0 {
-            return if ret == 1 { 0 } else { ret };
-        }
-    }
-    0
-}
-/// Matches `exitFromXFReadError`.
-pub fn exit_from_xf_read_error(error: i32, description: &str) -> Result<(), String> {
-    if error == 0 {
-        Ok(())
-    } else if error == 3 {
-        Err(format!(
-            "Reading {description} transform file: fewer than 6 values on a line"
-        ))
-    } else {
-        Err(format!("Reading {description} transform file"))
-    }
-}
-/// Matches `writeXform`.
-pub fn write_xform<W: Write>(writer: &mut W, xf: &[f32; 6]) -> i32 {
-    match writeln!(
-        writer,
-        " {:11.7} {:11.7} {:11.7} {:11.7} {:11.3} {:11.3}",
-        xf[0], xf[2], xf[1], xf[3], xf[4], xf[5]
-    ) {
-        Ok(_) => 0,
-        Err(_) => 1,
-    }
 }

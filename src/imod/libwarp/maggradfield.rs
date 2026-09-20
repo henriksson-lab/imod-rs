@@ -5,7 +5,6 @@
 //! `DTOR`, `2.`, `10000.`, `0.01` and `1.` are all **double** literals in the
 //! source, so each of those expressions is evaluated in double and rounds once
 //! on the store into a `float`.
-#![allow(dead_code)]
 
 use crate::imod::libwarp::warputils::interpolate_grid;
 

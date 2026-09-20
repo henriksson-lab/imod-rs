@@ -6,8 +6,6 @@
 //! layers over `libcfshr` through `pip_fwrap.c`.  The Fortran `character*(*)`
 //! dummy arguments are represented by `&str`, `logical` by `bool`, and the
 //! `common / exitprefix /` block by the module-level [`EXIT_PREFIX`] storage.
-#![allow(dead_code)]
-
 use crate::imod::libcfshr::autodoc::adoc_set_current;
 use crate::imod::libcfshr::b3dutil::{CArg, ImodFile, c_format_bytes};
 use crate::imod::libcfshr::parse_params::{
@@ -320,13 +318,6 @@ pub fn set_exit_prefix(message: &str) {
 pub fn memory_error(ierr: i32, message: &str) {
     if ierr != 0 {
         exit_error(&format!("Failure to allocate {}", message));
-    }
-}
-
-/// Original Fortran `memoryErrorUC` (`parse_input_params.f90:264`).
-pub fn memory_error_uc(ierr: i32, message: &str) {
-    if ierr != 0 {
-        exit_error(&format!("FAILURE TO ALLOCATE {}", message));
     }
 }
 

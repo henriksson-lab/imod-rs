@@ -8,12 +8,10 @@
 //! takes it from the file) and keeps the NULL/non-NULL distinction of `name` as
 //! an `Option`, while following the crate convention of representing the
 //! malloc'd `label` array plus its `nl` count as a `Vec`.
-#![allow(dead_code)]
 
 use std::io::Write;
 
-use crate::imod::libcfshr::b3dutil::{CArg, ImodFile, c_format, c_format_bytes};
-use std::fs::File;
+use crate::imod::libcfshr::b3dutil::{CArg, ImodFile, c_format_bytes};
 
 use super::imodel::{IMOD_ERROR_MEMORY, IMOD_ERROR_WRITE};
 use super::imodel_files::{imod_get_bytes, imod_get_int, imod_put_bytes, imod_put_int};

@@ -365,15 +365,6 @@ pub fn usage(progname: &str, ht: f32, pmax: usize, sigma: f32, lambda: f32) -> S
         "{progname} by A. Frangakis and R. Hegerl (adapted for IMOD)\nUsage: {progname} [options] <input file> <output file>\n-k {lambda:.1} -n {pmax} -s {sigma:.1} -t {ht:.2}"
     )
 }
-pub fn test_numeric_entry(value: &str, option: &str) -> Result<(), String> {
-    if value.is_empty() {
-        Err(format!(
-            "Option {option} must be followed by a number, not by {value}"
-        ))
-    } else {
-        Ok(())
-    }
-}
 /// Source `main` option phase, retained independently of the MRC I/O boundary.
 pub fn nad_eed_3d_options(arguments: &[String]) -> Result<NadEedOptions, String> {
     let mut o = NadEedOptions {

@@ -1,5 +1,4 @@
 //! Translation of `IMOD/libcfshr/percentile.c`.
-#![allow(dead_code)]
 
 /// Original `percentileFloat` (`percentile.c:34`).
 pub fn percentile_float(mut selected: i32, values: &mut [f32], count: i32) -> f32 {

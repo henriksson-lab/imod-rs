@@ -1,7 +1,7 @@
 //! Translation of `IMOD/libiimod/iishrmem.c`.
 //!
 //! This module retains the operating-system shared-memory ABI.
-#![allow(dead_code, unused_variables)]
+#![allow(unused_variables)]
 
 use crate::imod::libcfshr::b3dutil::{ImodFile, b3d_error};
 use crate::imod::libcfshr::islice::slice_mode_if_real;

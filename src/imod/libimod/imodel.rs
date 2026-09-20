@@ -19,7 +19,7 @@ use crate::imod::libimod::imesh::MeshParams;
 use crate::imod::libimod::iobj::{
     IMOD_OBJFLAG_WILD, imod_object_checksum, imod_object_clean_surf, imod_objects_delete,
 };
-use crate::imod::libimod::iplane::{imod_clips_initialize, imod_clips_trans};
+use crate::imod::libimod::iplane::imod_clips_trans;
 use crate::imod::libimod::ipoint::imod_point_normalize;
 use crate::imod::libimod::istore::{istore_checksum, istore_delete_cont_surf};
 use crate::imod::libimod::objgroup::{obj_group_list_checksum, obj_group_list_delete};
@@ -2547,6 +2547,7 @@ fn invert_clips(zconst: f32, clips: &mut Iclip_planes) {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::imod::libimod::iplane::imod_clips_initialize;
 
     #[test]
     fn index_accessors_preserve_source_hierarchical_clamping() {
@@ -2722,6 +2723,7 @@ mod source_driver_model {
     use super::*;
     use crate::imod::libimod::icont::imod_contour_new;
     use crate::imod::libimod::iobj::imod_object_add_contour;
+    use crate::imod::libimod::iplane::imod_clips_initialize;
     use crate::imod::libimod::ipoint::imod_point_append;
 
     fn g9(v: f64) -> String {

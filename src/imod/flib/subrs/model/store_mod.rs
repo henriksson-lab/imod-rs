@@ -1,6 +1,4 @@
 //! ASCII WIMP model writer from `IMOD/flib/subrs/model/store_mod.f`.
-#![allow(dead_code)]
-
 use std::io::Write;
 
 use crate::imod::flib::subrs::model::fortmodel::FortModel;

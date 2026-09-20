@@ -3,7 +3,10 @@
 use super::cmplft;
 
 /// C `hermft` over IMOD's interleaved real/imaginary float storage.
-pub fn hermft(data: &mut [f32], n: i32, dim: &mut [i32; 6]) {
+/// The C takes `even`/`x` and `odd`/`y` pointers; `odd` is the bias of the
+/// second stream into `data` -- 1 for interleaved storage, `ny` for
+/// `todfft`'s transposed layout.
+pub fn hermft(data: &mut [f32], odd: usize, n: i32, dim: &mut [i32; 6]) {
     assert!(data.len() >= dim[1] as usize);
 
     let twopi = 6.2831853_f32;
@@ -19,9 +22,9 @@ pub fn hermft(data: &mut [f32], n: i32, dim: &mut [i32; 6]) {
         let mut index = first - 1;
         while index < end {
             let a = data[index as usize];
-            let b = data[index as usize + 1];
+            let b = data[index as usize + odd];
             data[index as usize] = a + b;
-            data[index as usize + 1] = a - b;
+            data[index as usize + odd] = a - b;
             index += between;
         }
         first += limit;
@@ -43,20 +46,20 @@ pub fn hermft(data: &mut [f32], n: i32, dim: &mut [i32; 6]) {
                 let paired = index + delta;
                 let a = data[index as usize] + data[paired as usize];
                 let b = data[index as usize] - data[paired as usize];
-                let c = data[index as usize + 1] + data[paired as usize + 1];
-                let d = data[index as usize + 1] - data[paired as usize + 1];
+                let c = data[index as usize + odd] + data[paired as usize + odd];
+                let d = data[index as usize + odd] - data[paired as usize + odd];
                 let e = b * co + c * si;
                 let f = b * si - c * co;
                 data[index as usize] = a + f;
                 data[paired as usize] = a - f;
-                data[index as usize + 1] = e + d;
-                data[paired as usize + 1] = e - d;
+                data[index as usize + odd] = e + d;
+                data[paired as usize + odd] = e - d;
                 index += between;
             }
             row += limit;
         }
     }
-    cmplft(data, n, dim);
+    cmplft(data, odd, n, dim);
 }
 
 #[cfg(test)]
@@ -68,7 +71,7 @@ mod tests {
         let mut values = [3.5_f32, -1.25];
         let mut dimensions = [0_i32, 2, 1, 2, 1, 2];
 
-        hermft(&mut values, 1, &mut dimensions);
+        hermft(&mut values, 1, 1, &mut dimensions);
 
         assert_eq!(values, [2.25, 4.75]);
     }

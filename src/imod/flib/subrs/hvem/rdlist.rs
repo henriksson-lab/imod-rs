@@ -1,6 +1,4 @@
 //! Translation of `IMOD/flib/subrs/hvem/rdlist.f90`.
-#![allow(dead_code)]
-
 use crate::imod::libcfshr::parselist::{ParseListError, parselist as parse_list};
 use std::io::BufRead;
 

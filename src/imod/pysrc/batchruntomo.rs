@@ -1075,7 +1075,15 @@ pub fn modify_edf_lines(
     sed_commands: &[String],
 ) -> Result<(), String> {
     read_edf_file_if_needed(edf_lines, set_name, bypass_etomo)?;
-    *edf_lines = super::pysed::pysed(sed_commands, edf_lines, false, '/')?;
+    *edf_lines = super::pysed::pysed(
+        sed_commands,
+        super::pysed::PysedSrc::Lines(edf_lines),
+        None,
+        false,
+        '/',
+        true,
+    )?
+    .unwrap_or_default();
     *edf_changed = true;
     Ok(())
 }
@@ -1249,9 +1257,14 @@ pub fn modify_write_and_run_com(
             .map(str::to_owned)
             .collect(),
     };
-    let changed = super::pysed::pysed(sed_commands, &source, false, '/')?;
-    fs::write(comfile, changed.join("\n") + "\n")
-        .map_err(|error| format!("Writing {comfile}: {error}"))?;
+    super::pysed::pysed(
+        sed_commands,
+        super::pysed::PysedSrc::Lines(&source),
+        Some(comfile),
+        false,
+        '/',
+        true,
+    )?;
     if skip_run {
         Ok(0)
     } else {
@@ -2024,7 +2037,15 @@ pub fn run_final_tiltalign(
         unsafe { std::env::remove_var("TILTALIGN_SKIP_CROSS_VAL") };
     }
     result?;
-    *align_lines = super::pysed::pysed(sed_commands, align_lines, false, '/')?;
+    *align_lines = super::pysed::pysed(
+        sed_commands,
+        super::pysed::PysedSrc::Lines(align_lines),
+        None,
+        false,
+        '/',
+        true,
+    )?
+    .unwrap_or_default();
     Ok(())
 }
 
@@ -3569,12 +3590,23 @@ pub fn modify_restrict_and_run_align(
     align_lines: &mut Vec<String>,
     options: &ProcessRunOptions,
 ) -> Result<(i32, i32), String> {
-    fs::write(
-        comfile,
-        super::pysed::pysed(sed_commands, align_lines, false, '/')?.join("\n") + "\n",
-    )
-    .map_err(|error| format!("Writing {comfile}: {error}"))?;
-    *align_lines = super::pysed::pysed(sed_commands, align_lines, false, '/')?;
+    super::pysed::pysed(
+        sed_commands,
+        super::pysed::PysedSrc::Lines(align_lines),
+        Some(comfile),
+        false,
+        '/',
+        true,
+    )?;
+    *align_lines = super::pysed::pysed(
+        sed_commands,
+        super::pysed::PysedSrc::Lines(align_lines),
+        None,
+        false,
+        '/',
+        true,
+    )?
+    .unwrap_or_default();
     let mut result = 0;
     let mut no_robust = 0;
     if !skip_restrict {

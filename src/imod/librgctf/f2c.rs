@@ -105,16 +105,6 @@ pub struct NameList {
     pub variables: Vec<VariableDescriptor>,
 }
 
-pub fn bit_test(value: u32, bit: u32) -> bool {
-    value.checked_shr(bit).is_some_and(|value| value & 1 != 0)
-}
-pub fn bit_set(value: u32, bit: u32) -> u32 {
-    value | 1_u32.checked_shl(bit).unwrap_or(0)
-}
-pub fn bit_clear(value: u32, bit: u32) -> u32 {
-    value & !1_u32.checked_shl(bit).unwrap_or(0)
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -130,8 +120,6 @@ mod tests {
             }],
         };
         assert_eq!(list.variables[0].dimensions, [2, 3]);
-        assert!(bit_test(bit_set(0, 3), 3));
-        assert_eq!(bit_clear(0b111, 1), 0b101);
         assert_eq!(FortranComplex::default().imaginary, 0.);
     }
 }

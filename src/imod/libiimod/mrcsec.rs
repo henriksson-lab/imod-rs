@@ -2,7 +2,7 @@
 //!
 //! This unit is the next bottom-up dependency of `iimrc.c`.  Each entry below
 //! is one source function rendered in systematic Rust snake case.
-#![allow(dead_code, unused_variables)]
+#![allow(unused_variables)]
 
 use crate::imod::libcfshr::b3dutil::ImodFile;
 use crate::imod::libcfshr::b3dutil::{

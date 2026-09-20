@@ -10,10 +10,7 @@ use std::sync::{LazyLock, Mutex};
 use rustfft::{FftPlanner, num_complex::Complex32};
 
 use crate::imod::libcfshr::b3dutil::ImodFile;
-use crate::imod::libiimod::mrcfiles::{
-    MRC_MODE_FLOAT, MrcHeader, mrc_head_new, mrc_head_read, mrc_head_write, mrc_read_float_slice,
-    mrc_write_slice,
-};
+use crate::imod::libiimod::mrcfiles::{MrcHeader, mrc_head_read, mrc_read_float_slice};
 
 use super::ctf::Ctf;
 use super::curve::Curve;
@@ -21,7 +18,8 @@ use super::globals::GLOBAL_RANDOM_NUMBER_GENERATOR;
 
 /// `WriteSliceType` (`image_trim.cpp`): the IMOD bridge owns output format
 /// selection, while this image unit supplies a compact unpadded real slice.
-pub type WriteSliceCallback = fn(&str, &[f32], i32, i32);
+/// `WriteSliceType` (`functions.h:32`): `int (*)(const char *, float *, int, int)`.
+pub type WriteSliceCallback = fn(&str, &[f32], i32, i32) -> i32;
 
 /// `sSliceWriteFunc`.  The native source deliberately treats an absent bridge
 /// as a no-op, which allows CTF code to run without an IMOD image writer.
@@ -70,40 +68,6 @@ pub struct Image {
     pub ft_normalization_factor: f32,
     pub real_values: Vec<f32>,
     pub complex_values: Vec<Complex32>,
-}
-
-/// A mutable two-dimensional view of one real-space `Image` plane.
-///
-/// This is the safe Rust equivalent of the source's `Image` object whose
-/// storage pointer aliases one 3D slice.
-pub struct ImageSliceMut<'a> {
-    values: &'a mut [f32],
-    logical_x_dimension: i32,
-    logical_y_dimension: i32,
-    padding_jump_value: i32,
-}
-
-impl ImageSliceMut<'_> {
-    pub fn get(&self, x: i32, y: i32) -> Option<f32> {
-        if x < 0 || y < 0 || x >= self.logical_x_dimension || y >= self.logical_y_dimension {
-            return None;
-        }
-        self.values
-            .get(
-                y as usize * (self.logical_x_dimension + self.padding_jump_value) as usize
-                    + x as usize,
-            )
-            .copied()
-    }
-    pub fn set(&mut self, x: i32, y: i32, value: f32) -> bool {
-        if x < 0 || y < 0 || x >= self.logical_x_dimension || y >= self.logical_y_dimension {
-            return false;
-        }
-        let address =
-            y as usize * (self.logical_x_dimension + self.padding_jump_value) as usize + x as usize;
-        self.values[address] = value;
-        true
-    }
 }
 
 impl Default for Image {
@@ -192,48 +156,11 @@ impl Image {
     pub fn allocate_2d(&mut self, x: i32, y: i32, real_space: bool) -> Result<(), String> {
         self.allocate(x, y, 1, real_space)
     }
-    /// Safe equivalent of `AllocateAsPointingToSliceIn3D`.
-    pub fn slice_2d_mut(&mut self, slice: usize) -> Option<ImageSliceMut<'_>> {
-        if !self.is_in_real_space || slice >= self.logical_z_dimension as usize {
-            return None;
-        }
-        let length = (self.logical_x_dimension + self.padding_jump_value) as usize
-            * self.logical_y_dimension as usize;
-        let start = slice.checked_mul(length)?;
-        let values = self.real_values.get_mut(start..start + length)?;
-        Some(ImageSliceMut {
-            values,
-            logical_x_dimension: self.logical_x_dimension,
-            logical_y_dimension: self.logical_y_dimension,
-            padding_jump_value: self.padding_jump_value,
-        })
-    }
 
     pub fn deallocate(&mut self) {
         self.real_values.clear();
         self.complex_values.clear();
         self.real_memory_allocated = 0;
-    }
-    pub fn return_smallest_logical_dimension(&self) -> i32 {
-        if self.logical_z_dimension == 1 {
-            self.logical_x_dimension.min(self.logical_y_dimension)
-        } else {
-            self.logical_x_dimension
-                .min(self.logical_y_dimension)
-                .min(self.logical_z_dimension)
-        }
-    }
-    pub fn return_volume_in_real_space(&self) -> usize {
-        self.number_of_real_space_pixels
-    }
-    pub fn return_largest_logical_dimension(&self) -> i32 {
-        if self.logical_z_dimension == 1 {
-            self.logical_x_dimension.max(self.logical_y_dimension)
-        } else {
-            self.logical_x_dimension
-                .max(self.logical_y_dimension)
-                .max(self.logical_z_dimension)
-        }
     }
     pub fn return_real_1d_address_from_physical_coord(
         &self,
@@ -341,14 +268,6 @@ impl Image {
             .and_then(|address| self.complex_values.get(address).copied())
             .unwrap_or(outside)
     }
-    pub fn return_fourier_logical_coord_given_physical_coord_x(&self, index: i32) -> i32 {
-        assert!((0..=self.physical_upper_bound_complex_x).contains(&index));
-        if index > self.physical_address_of_box_center_x {
-            index - self.logical_x_dimension
-        } else {
-            index
-        }
-    }
     pub fn return_fourier_logical_coord_given_physical_coord_y(&self, index: i32) -> i32 {
         assert!((0..=self.physical_upper_bound_complex_y).contains(&index));
         if index >= self.physical_index_of_first_negative_frequency_y {
@@ -364,16 +283,6 @@ impl Image {
         } else {
             index
         }
-    }
-    pub fn fourier_component_has_explicit_hermitian_mate(&self, x: i32, y: i32, z: i32) -> bool {
-        let mut explicit = x == 0 && !(y == 0 && z == 0);
-        if self.logical_y_dimension % 2 == 0 {
-            explicit &= y != self.physical_index_of_first_negative_frequency_y - 1;
-        }
-        if self.logical_z_dimension > 1 && self.logical_z_dimension % 2 == 0 {
-            explicit &= z != self.physical_index_of_first_negative_frequency_z - 1;
-        }
-        explicit
     }
     pub fn fourier_component_is_explicit_hermitian_mate(&self, x: i32, y: i32, z: i32) -> bool {
         x == 0
@@ -580,65 +489,10 @@ impl Image {
     pub fn divide_by_constant(&mut self, value: f32) {
         self.multiply_by_constant(1. / value);
     }
-    pub fn multiply_add_constant(&mut self, multiply: f32, add: f32) {
-        for value in &mut self.real_values {
-            *value = *value * multiply + add;
-        }
-    }
-    pub fn add_multiply_constant(&mut self, add: f32, multiply: f32) {
-        for value in &mut self.real_values {
-            *value = (*value + add) * multiply;
-        }
-    }
-    pub fn add_multiply_add_constant(&mut self, first_add: f32, multiply: f32, second_add: f32) {
-        for value in &mut self.real_values {
-            *value = (*value + first_add) * multiply + second_add;
-        }
-    }
-    pub fn take_reciprocal_real_values(&mut self, zero_value: f32) {
-        assert!(self.is_in_real_space);
-        for value in &mut self.real_values {
-            *value = if *value == 0. {
-                zero_value
-            } else {
-                1. / *value
-            };
-        }
-    }
-    pub fn invert_real_values(&mut self) {
-        assert!(self.is_in_real_space);
-        for value in &mut self.real_values {
-            *value = -*value;
-        }
-    }
-    pub fn square_real_values(&mut self) {
-        assert!(self.is_in_real_space);
-        for value in &mut self.real_values {
-            *value *= *value;
-        }
-    }
-    pub fn exponentiate_real_values(&mut self) {
-        assert!(self.is_in_real_space);
-        for value in &mut self.real_values {
-            *value = value.exp();
-        }
-    }
-    pub fn square_root_real_values(&mut self) {
-        assert!(self.is_in_real_space && !self.has_negative_real_value());
-        for value in &mut self.real_values {
-            *value = value.sqrt();
-        }
-    }
     pub fn is_constant(&self) -> bool {
         self.real_values
             .first()
             .is_none_or(|first| self.real_values.iter().all(|value| value == first))
-    }
-    pub fn is_binary(&self) -> bool {
-        self.is_in_real_space && self.real_pixels().all(|value| value == 0. || value == 1.)
-    }
-    pub fn has_nan(&self) -> bool {
-        self.real_pixels().any(f32::is_nan)
     }
     pub fn has_negative_real_value(&self) -> bool {
         self.real_pixels().any(|value| value < 0.)
@@ -703,17 +557,6 @@ impl Image {
             self.logical_y_dimension,
         );
     }
-    /// `QuickAndDirtyReadSlice` (`image_trim.cpp:1271`, in the pre-IMOD CTF
-    /// source).  MRC sections are one-based at this Image boundary; the MRC
-    /// reader is zero-based.  Data is first read into the source's compact
-    /// layout, then expanded in-place into this image's FFTW-padded rows.
-    pub fn quick_and_dirty_read_slice(
-        &mut self,
-        filename: &str,
-        slice_to_read: i64,
-    ) -> Result<(), String> {
-        self.read_mrc_slices(filename, slice_to_read, slice_to_read)
-    }
     /// MRC specialization of `Image::ReadSlices`. Both bounds are one-based
     /// and inclusive, matching the source Image API rather than the low-level
     /// MRC reader's zero-based section numbering.
@@ -768,396 +611,14 @@ impl Image {
         self.object_is_centred_in_box = true;
         Ok(())
     }
-    /// Source `QuickAndDirtyWriteSlices` backed by the translated MRC writer.
-    /// The requested destination interval is one-based and inclusive; this
-    /// image must contain exactly that many Z sections.  Unlike the callback
-    /// bridge, this emits a complete float MRC stack.
-    pub fn quick_and_dirty_write_mrc_slices(
-        &self,
-        filename: &str,
-        first_slice_to_write: i64,
-        last_slice_to_write: i64,
-    ) -> Result<(), String> {
-        if first_slice_to_write <= 0 {
-            return Err("Slice is less than 1, first slice is 1".into());
-        }
-        if first_slice_to_write > last_slice_to_write {
-            return Err("Start slice larger than end slice".into());
-        }
-        // `WriteSlices` transforms a temporary copy when the source image is
-        // Fourier-space, preserving the caller's representation and padding.
-        let transformed = if self.is_in_real_space {
-            None
-        } else {
-            let mut copy = self.clone();
-            copy.backward_fft();
-            Some(copy)
-        };
-        let image = transformed.as_ref().unwrap_or(self);
-        let output_depth =
-            i32::try_from(last_slice_to_write).map_err(|_| "MRC output depth is too large")?;
-        let selected_depth = i32::try_from(last_slice_to_write - first_slice_to_write + 1)
-            .map_err(|_| "MRC output range is too large")?;
-        if selected_depth != image.logical_z_dimension {
-            return Err(format!(
-                "image has {} slices but output range has {selected_depth}",
-                image.logical_z_dimension
-            ));
-        }
-        let mut file = ImodFile::open(filename, "wb")
-            .ok_or_else(|| format!("unable to create MRC file {filename}"))?;
-        let mut header = MrcHeader::default();
-        if mrc_head_new(
-            &mut header,
-            image.logical_x_dimension,
-            image.logical_y_dimension,
-            output_depth,
-            MRC_MODE_FLOAT,
-        ) != 0
-            || mrc_head_write(&mut file, &mut header) != 0
-        {
-            return Err(format!("unable to create MRC header in {filename}"));
-        }
-        let width = image.logical_x_dimension as usize;
-        let height = image.logical_y_dimension as usize;
-        let mut compact = vec![0.; width * height];
-        for source_z in 0..image.logical_z_dimension {
-            for y in 0..image.logical_y_dimension {
-                for x in 0..image.logical_x_dimension {
-                    compact[y as usize * width + x as usize] = image
-                        .return_real_pixel_from_physical_coord(x, y, source_z)
-                        .ok_or_else(|| "image has no real-space pixel data".to_owned())?;
-                }
-            }
-            let bytes = compact
-                .iter()
-                .flat_map(|value| value.to_ne_bytes())
-                .collect::<Vec<_>>();
-            if mrc_write_slice(
-                &bytes,
-                &mut file,
-                &mut header,
-                first_slice_to_write as i32 - 1 + source_z,
-                b'Z',
-            ) != 0
-            {
-                return Err(format!(
-                    "unable to write MRC slice {} to {filename}",
-                    first_slice_to_write + i64::from(source_z)
-                ));
-            }
-        }
-        Ok(())
-    }
-    /// MRC-backed `Image::WriteSlices` for an already-openable stack.  Slice
-    /// bounds are one-based and inclusive, as in the C++ API.  A stack may be
-    /// extended, but changing either in-plane dimension would relocate the
-    /// existing sections, so this adapter rejects that unsafe case.
-    pub fn write_mrc_slices(
-        &self,
-        filename: &str,
-        start_slice: i64,
-        end_slice: i64,
-    ) -> Result<(), String> {
-        if start_slice > end_slice {
-            return Err("Start slice larger than end slice".into());
-        }
-        if start_slice <= 0 {
-            return Err("Slice is less than 1, first slice is 1".into());
-        }
-        let selected_depth = i32::try_from(end_slice - start_slice + 1)
-            .map_err(|_| "MRC output range is too large")?;
-        if selected_depth != self.logical_z_dimension {
-            return Err(format!(
-                "image has {} slices but output range has {selected_depth}",
-                self.logical_z_dimension
-            ));
-        }
-        let transformed = if self.is_in_real_space {
-            None
-        } else {
-            let mut copy = self.clone();
-            copy.backward_fft();
-            Some(copy)
-        };
-        let image = transformed.as_ref().unwrap_or(self);
-        let mut file = ImodFile::open(filename, "r+b")
-            .ok_or_else(|| format!("unable to open MRC file {filename} for update"))?;
-        let mut header = MrcHeader::default();
-        if mrc_head_read(&mut file, &mut header) != 0 {
-            return Err(format!("unable to read MRC header from {filename}"));
-        }
-        if header.nx != image.logical_x_dimension || header.ny != image.logical_y_dimension {
-            return Err(format!(
-                "image dimensions ({}, {}) and file dimensions ({}, {}) differ",
-                image.logical_x_dimension, image.logical_y_dimension, header.nx, header.ny
-            ));
-        }
-        let requested_depth =
-            i32::try_from(end_slice).map_err(|_| "MRC output depth is too large")?;
-        if requested_depth > header.nz {
-            header.nz = requested_depth;
-            if header.mz < requested_depth {
-                header.mz = requested_depth;
-            }
-            if mrc_head_write(&mut file, &mut header) != 0 {
-                return Err(format!("unable to update MRC header in {filename}"));
-            }
-        }
-        let width = image.logical_x_dimension as usize;
-        let height = image.logical_y_dimension as usize;
-        let mut compact = vec![0.; width * height];
-        for source_z in 0..image.logical_z_dimension {
-            for y in 0..image.logical_y_dimension {
-                for x in 0..image.logical_x_dimension {
-                    compact[y as usize * width + x as usize] = image
-                        .return_real_pixel_from_physical_coord(x, y, source_z)
-                        .ok_or_else(|| "image has no real-space pixel data".to_owned())?;
-                }
-            }
-            let bytes = compact
-                .iter()
-                .flat_map(|value| value.to_ne_bytes())
-                .collect::<Vec<_>>();
-            if mrc_write_slice(
-                &bytes,
-                &mut file,
-                &mut header,
-                start_slice as i32 - 1 + source_z,
-                b'Z',
-            ) != 0
-            {
-                return Err(format!(
-                    "unable to write MRC slice {} to {filename}",
-                    start_slice + i64::from(source_z)
-                ));
-            }
-        }
-        Ok(())
-    }
-    /// `DilateBinarizedMask` (`image_trim.cpp:3528`).  This deliberately
-    /// preserves the native routine's periodic linear-buffer addressing and
-    /// odd-step neighbourhood: callers relying on its historical mask shape
-    /// therefore get the same edge wrapping behaviour.
-    pub fn dilate_binarized_mask(&mut self, dilation_radius: f32) {
-        assert!(self.real_memory_allocated != 0, "Memory not allocated");
-        assert!(self.is_in_real_space, "Not in real space");
-
-        let width = self.logical_x_dimension as isize;
-        let height = self.logical_y_dimension as isize;
-        let depth = self.logical_z_dimension as isize;
-        let count = self.number_of_real_space_pixels as isize;
-        let source = self.real_pixels().collect::<Vec<_>>();
-        let radius_squared = dilation_radius.powi(2);
-        let mut limit = dilation_radius.round() as isize;
-        if limit % 2 == 0 {
-            limit += 1;
-        }
-        let depth_limit = if depth == 1 { 0 } else { limit };
-
-        for z_offset in (-depth_limit..=depth_limit).step_by(2) {
-            let z_squared = z_offset * z_offset;
-            for y_offset in (-limit..=limit).step_by(2) {
-                let y_squared = y_offset * y_offset;
-                for x_offset in (-limit..=limit).step_by(2) {
-                    if (x_offset * x_offset + y_squared + z_squared) as f32 > radius_squared {
-                        continue;
-                    }
-                    let shift = (-x_offset - width * (y_offset + height * z_offset))
-                        .rem_euclid(count) as usize;
-                    for (index, value) in source
-                        .iter()
-                        .cycle()
-                        .skip(shift)
-                        .take(source.len())
-                        .enumerate()
-                    {
-                        let x = index as isize % width;
-                        let y = (index as isize / width) % height;
-                        let z = index as isize / (width * height);
-                        let destination = self
-                            .return_real_1d_address_from_physical_coord(
-                                x as i32, y as i32, z as i32,
-                            )
-                            .expect("source index is within image");
-                        self.real_values[destination] += value;
-                    }
-                }
-            }
-        }
-        for index in self.real_pixel_indices().collect::<Vec<_>>() {
-            self.real_values[index] = if self.real_values[index] != 0. {
-                1.
-            } else {
-                0.
-            };
-        }
-    }
-    /// `TaperEdges` (`image_trim.cpp:2814`).  This is the source's
-    /// taperedgek-derived pass: for each active axis it subtracts smoothed
-    /// edge averages over the outer one-thirtieth of the image.  Logical
-    /// coordinates deliberately go through the physical-address helper so
-    /// FFTW row padding never participates in the calculation.
-    pub fn taper_edges(&mut self) {
-        assert!(self.real_memory_allocated != 0, "Image not in memory");
-        assert!(self.is_in_real_space, "Image not in real space");
-        let dimensions = [
-            self.logical_x_dimension as usize,
-            self.logical_y_dimension as usize,
-            self.logical_z_dimension as usize,
-        ];
-        let number_of_dimensions = if dimensions[2] > 1 { 3 } else { 2 };
-        // The C++ routine divides its averaging/taper strips by 30.  It was
-        // only called for sufficiently sized reconstruction volumes; reject
-        // the source's otherwise undefined zero-width division explicitly.
-        assert!(
-            dimensions[..number_of_dimensions]
-                .iter()
-                .all(|dimension| *dimension >= 30),
-            "input image dimensions are too small for tapering"
-        );
-        for axis in 0..number_of_dimensions {
-            let (second_axis, third_axis) = match axis {
-                0 => (1, 2),
-                1 => (0, 2),
-                2 => (0, 1),
-                _ => unreachable!(),
-            };
-            let current_dimension = dimensions[axis];
-            let second_dimension = dimensions[second_axis];
-            let third_dimension = dimensions[third_axis];
-            let averaging_strip_width = current_dimension / 30;
-            let tapering_strip_width = current_dimension / 30;
-            let mut average_start = vec![0.; second_dimension * third_dimension];
-            let mut average_finish = vec![0.; second_dimension * third_dimension];
-            let mut smooth_start = vec![0.; second_dimension * third_dimension];
-            let mut smooth_finish = vec![0.; second_dimension * third_dimension];
-
-            for third in 0..third_dimension {
-                for second in 0..second_dimension {
-                    let index = second + third * second_dimension;
-                    for offset in 0..averaging_strip_width {
-                        let (start, finish) = match axis {
-                            0 => (
-                                (offset, second, third),
-                                (current_dimension - 1 - offset, second, third),
-                            ),
-                            1 => (
-                                (second, offset, third),
-                                (second, current_dimension - 1 - offset, third),
-                            ),
-                            2 => (
-                                (second, third, offset),
-                                (second, third, current_dimension - 1 - offset),
-                            ),
-                            _ => unreachable!(),
-                        };
-                        average_start[index] += self.real_values[self
-                            .return_real_1d_address_from_physical_coord(
-                                start.0 as i32,
-                                start.1 as i32,
-                                start.2 as i32,
-                            )
-                            .expect("source edge coordinate is in range")];
-                        average_finish[index] += self.real_values[self
-                            .return_real_1d_address_from_physical_coord(
-                                finish.0 as i32,
-                                finish.1 as i32,
-                                finish.2 as i32,
-                            )
-                            .expect("source edge coordinate is in range")];
-                    }
-                    average_start[index] /= averaging_strip_width as f32;
-                    average_finish[index] /= averaging_strip_width as f32;
-                    let average = 0.5 * (average_start[index] + average_finish[index]);
-                    average_start[index] -= average;
-                    average_finish[index] -= average;
-                }
-            }
-            // `smoothing_half_width_{second,third}` is one for every source
-            // axis.  Clip the 3x3 neighbourhood at the image boundary.
-            for third in 0..third_dimension {
-                for second in 0..second_dimension {
-                    let index = second + third * second_dimension;
-                    let second_min = second.saturating_sub(1);
-                    let third_min = third.saturating_sub(1);
-                    let second_max = (second + 1).min(second_dimension - 1);
-                    let third_max = (third + 1).min(third_dimension - 1);
-                    let mut count = 0usize;
-                    for nearby_third in third_min..=third_max {
-                        for nearby_second in second_min..=second_max {
-                            let nearby = nearby_second + nearby_third * second_dimension;
-                            smooth_start[index] += average_start[nearby];
-                            smooth_finish[index] += average_finish[nearby];
-                            count += 1;
-                        }
-                    }
-                    smooth_start[index] /= count as f32;
-                    smooth_finish[index] /= count as f32;
-                }
-            }
-            for current in 0..current_dimension {
-                let (edge, factor) = if current < tapering_strip_width {
-                    (
-                        &smooth_start,
-                        (tapering_strip_width - current) as f32 / tapering_strip_width as f32,
-                    )
-                } else if current >= current_dimension - tapering_strip_width {
-                    (
-                        &smooth_finish,
-                        (tapering_strip_width + current + 1 - current_dimension) as f32
-                            / tapering_strip_width as f32,
-                    )
-                } else {
-                    continue;
-                };
-                for third in 0..third_dimension {
-                    for second in 0..second_dimension {
-                        let coordinate = match axis {
-                            0 => (current, second, third),
-                            1 => (second, current, third),
-                            2 => (second, third, current),
-                            _ => unreachable!(),
-                        };
-                        let address = self
-                            .return_real_1d_address_from_physical_coord(
-                                coordinate.0 as i32,
-                                coordinate.1 as i32,
-                                coordinate.2 as i32,
-                            )
-                            .expect("source taper coordinate is in range");
-                        self.real_values[address] -=
-                            edge[second + third * second_dimension] * factor;
-                    }
-                }
-            }
-        }
-    }
     pub fn set_maximum_value(&mut self, maximum: f32) {
         for index in self.real_pixel_indices().collect::<Vec<_>>() {
             self.real_values[index] = self.real_values[index].min(maximum);
         }
     }
-    pub fn set_minimum_value(&mut self, minimum: f32) {
-        for index in self.real_pixel_indices().collect::<Vec<_>>() {
-            self.real_values[index] = self.real_values[index].max(minimum);
-        }
-    }
     pub fn set_minimum_and_maximum_values(&mut self, minimum: f32, maximum: f32) {
         for index in self.real_pixel_indices().collect::<Vec<_>>() {
             self.real_values[index] = self.real_values[index].clamp(minimum, maximum);
-        }
-    }
-    pub fn normalize_ft(&mut self) {
-        self.multiply_by_constant(self.ft_normalization_factor);
-    }
-    pub fn normalize_ft_and_invert_real_values(&mut self) {
-        self.multiply_by_constant(-self.ft_normalization_factor);
-    }
-    pub fn binarise(&mut self, threshold: f32) {
-        assert!(self.is_in_real_space);
-        for value in &mut self.real_values {
-            *value = if *value >= threshold { 1. } else { 0. };
         }
     }
     pub fn return_maximum_diagonal_radius(&self) -> f32 {
@@ -1172,33 +633,6 @@ impl Image {
                 + (self.logical_lower_bound_complex_z as f32 * self.fourier_voxel_size_z).powi(2))
             .sqrt()
         }
-    }
-    pub fn get_min_max(&self) -> Option<(f32, f32)> {
-        let mut values = self.real_pixels();
-        let first = values.next()?;
-        Some(values.fold((first, first), |(minimum, maximum), value| {
-            (minimum.min(value), maximum.max(value))
-        }))
-    }
-    pub fn return_average_of_real_values(&self, radius: f32, invert_mask: bool) -> f32 {
-        let mut sum = 0.;
-        let mut count = 0;
-        for z in 0..self.logical_z_dimension {
-            for y in 0..self.logical_y_dimension {
-                for x in 0..self.logical_x_dimension {
-                    let dx = x - self.physical_address_of_box_center_x;
-                    let dy = y - self.physical_address_of_box_center_y;
-                    let dz = z - self.physical_address_of_box_center_z;
-                    let include = radius <= 0.
-                        || ((dx * dx + dy * dy + dz * dz) as f32 <= radius * radius) != invert_mask;
-                    if include {
-                        sum += self.return_real_pixel_from_physical_coord(x, y, z).unwrap();
-                        count += 1;
-                    }
-                }
-            }
-        }
-        if count == 0 { 0. } else { sum / count as f32 }
     }
     pub fn return_average_of_real_values_at_radius(&self, radius: f32) -> f32 {
         let mut sum = 0.;
@@ -1260,56 +694,6 @@ impl Image {
         }
         result
     }
-    pub fn return_minimum_value(
-        &self,
-        minimum_distance_from_center: f32,
-        minimum_distance_from_edge: f32,
-    ) -> f32 {
-        assert!(self.is_in_real_space);
-        let last_x = self.logical_x_dimension as f32 - minimum_distance_from_edge - 1.;
-        let last_y = self.logical_y_dimension as f32 - minimum_distance_from_edge - 1.;
-        let last_z = self.logical_z_dimension as f32 - minimum_distance_from_edge - 1.;
-        let mut result = f32::MAX;
-        for z in 0..self.logical_z_dimension {
-            if self.logical_z_dimension > 1
-                && (((z - self.physical_address_of_box_center_z).unsigned_abs() as f32)
-                    < minimum_distance_from_center
-                    || (z as f32) < minimum_distance_from_edge
-                    || (z as f32) > last_z)
-            {
-                continue;
-            }
-            for y in 0..self.logical_y_dimension {
-                if ((y - self.physical_address_of_box_center_y).unsigned_abs() as f32)
-                    < minimum_distance_from_center
-                    || (y as f32) < minimum_distance_from_edge
-                    || (y as f32) > last_y
-                {
-                    continue;
-                }
-                for x in 0..self.logical_x_dimension {
-                    if ((x - self.physical_address_of_box_center_x).unsigned_abs() as f32)
-                        >= minimum_distance_from_center
-                        && (x as f32) >= minimum_distance_from_edge
-                        && (x as f32) <= last_x
-                    {
-                        result = result
-                            .min(self.return_real_pixel_from_physical_coord(x, y, z).unwrap());
-                    }
-                }
-            }
-        }
-        result
-    }
-    pub fn return_median_of_real_values(&self) -> Option<f32> {
-        let mut values = self.real_pixels().collect::<Vec<_>>();
-        if values.is_empty() {
-            return None;
-        }
-        let middle = values.len() / 2;
-        values.select_nth_unstable_by(middle, f32::total_cmp);
-        Some(values[middle])
-    }
     pub fn return_average_of_real_values_on_edges(&self) -> f32 {
         let mut sum = 0.;
         let mut count = 0;
@@ -1351,25 +735,6 @@ impl Image {
         assert!(self.is_in_real_space && self.object_is_centred_in_box);
         let mask_value = self.return_average_of_real_values_at_radius(radius);
         self.circle_mask_with_value(radius, mask_value, invert);
-    }
-    pub fn square_mask_with_value(&mut self, dimension: f32, mask_value: f32, invert: bool) {
-        assert!(self.is_in_real_space);
-        let half = dimension / 2.;
-        for z in 0..self.logical_z_dimension {
-            for y in 0..self.logical_y_dimension {
-                for x in 0..self.logical_x_dimension {
-                    let inside = (x - self.physical_address_of_box_center_x).unsigned_abs() as f32
-                        <= half
-                        && (y - self.physical_address_of_box_center_y).unsigned_abs() as f32
-                            <= half
-                        && (z - self.physical_address_of_box_center_z).unsigned_abs() as f32
-                            <= half;
-                    if inside == invert {
-                        self.set_real_pixel_from_physical_coord(x, y, z, mask_value);
-                    }
-                }
-            }
-        }
     }
     pub fn cosine_mask(
         &mut self,
@@ -1764,80 +1129,6 @@ impl Image {
             }
         }
     }
-    pub fn compute_1d_power_spectrum_curve(
-        &self,
-        average_power: &mut Curve,
-        number_of_values: &mut Curve,
-    ) {
-        assert!(!self.is_in_real_space && average_power.number_of_points > 0);
-        assert!(average_power.data_x[0] == 0. && *average_power.data_x.last().unwrap() >= 0.5);
-        assert_eq!(
-            average_power.number_of_points,
-            number_of_values.number_of_points
-        );
-        assert_eq!(
-            average_power.data_x.first(),
-            number_of_values.data_x.first()
-        );
-        assert_eq!(average_power.data_x.last(), number_of_values.data_x.last());
-        average_power.zero_y_data();
-        number_of_values.zero_y_data();
-        for z in 0..=self.physical_upper_bound_complex_z {
-            let z_squared = (self.return_fourier_logical_coord_given_physical_coord_z(z) as f32
-                * self.fourier_voxel_size_z)
-                .powi(2);
-            for y in 0..=self.physical_upper_bound_complex_y {
-                let y_squared = (self.return_fourier_logical_coord_given_physical_coord_y(y)
-                    as f32
-                    * self.fourier_voxel_size_y)
-                    .powi(2);
-                for x in 0..=self.physical_upper_bound_complex_x {
-                    if self.fourier_component_is_explicit_hermitian_mate(x, y, z) {
-                        continue;
-                    }
-                    let frequency =
-                        ((x as f32 * self.fourier_voxel_size_x).powi(2) + y_squared + z_squared)
-                            .sqrt();
-                    let value = self.complex_values[self
-                        .return_fourier_1d_address_from_physical_coord(x, y, z)
-                        .unwrap()]
-                    .norm_sqr();
-                    average_power.add_value_at_x_using_linear_interpolation(frequency, value, true);
-                    number_of_values.add_value_at_x_using_linear_interpolation(frequency, 1., true);
-                }
-            }
-        }
-        for (sum, count) in average_power
-            .data_y
-            .iter_mut()
-            .zip(&number_of_values.data_y)
-        {
-            *sum = if *count > 0. { *sum / *count } else { 0. };
-        }
-    }
-    pub fn compute_amplitude_spectrum_full_2d(&self, amplitude: &mut Self) {
-        assert!(!self.is_in_real_space && self.has_same_dimensions_as(amplitude));
-        assert_eq!(self.logical_z_dimension, 1);
-        for y in 0..amplitude.logical_y_dimension {
-            for x in 0..amplitude.logical_x_dimension {
-                let source = self
-                    .return_fourier_1d_address_from_logical_coord(
-                        x - amplitude.physical_address_of_box_center_x,
-                        y - amplitude.physical_address_of_box_center_y,
-                        0,
-                    )
-                    .unwrap();
-                amplitude.set_real_pixel_from_physical_coord(
-                    x,
-                    y,
-                    0,
-                    self.complex_values[source].norm(),
-                );
-            }
-        }
-        amplitude.is_in_real_space = true;
-        amplitude.object_is_centred_in_box = true;
-    }
     pub fn spectrum_box_convolution(&self, output: &mut Self, box_size: i32, minimum_radius: f32) {
         assert!(box_size > 0 && box_size % 2 == 1);
         assert_eq!(self.logical_z_dimension, 1);
@@ -1922,54 +1213,6 @@ impl Image {
                     }
                 };
                 output.set_real_pixel_from_physical_coord(x, y, 0, value);
-            }
-        }
-    }
-    /// Copy this centered two-dimensional real-space image into the center of
-    /// a larger real-space image, filling its surrounding pixels with
-    /// `padding`.  This is the direct owned-buffer counterpart of
-    /// `Image::ClipIntoLargerRealSpace2D`.
-    pub fn clip_into_larger_real_space_2d(&self, other: &mut Self, padding: f32) {
-        assert!(
-            !self.real_values.is_empty() && !other.real_values.is_empty(),
-            "image memory not allocated"
-        );
-        assert!(
-            self.is_in_real_space && self.object_is_centred_in_box && self.logical_z_dimension == 1,
-            "source must be a centered 2D real-space image"
-        );
-        assert!(
-            self.logical_x_dimension <= other.logical_x_dimension
-                && self.logical_y_dimension <= other.logical_y_dimension,
-            "source must not exceed destination dimensions"
-        );
-
-        other.is_in_real_space = self.is_in_real_space;
-        other.object_is_centred_in_box = self.object_is_centred_in_box;
-        let lower_x =
-            other.physical_address_of_box_center_x - self.physical_address_of_box_center_x;
-        let lower_y =
-            other.physical_address_of_box_center_y - self.physical_address_of_box_center_y;
-        let upper_x = lower_x + self.logical_x_dimension - 1;
-        let upper_y = lower_y + self.logical_y_dimension - 1;
-
-        for destination_y in 0..other.logical_y_dimension {
-            for destination_x in 0..other.logical_x_dimension {
-                let value = if destination_x < lower_x
-                    || destination_x > upper_x
-                    || destination_y < lower_y
-                    || destination_y > upper_y
-                {
-                    padding
-                } else {
-                    self.return_real_pixel_from_physical_coord(
-                        destination_x - lower_x,
-                        destination_y - lower_y,
-                        0,
-                    )
-                    .unwrap()
-                };
-                other.set_real_pixel_from_physical_coord(destination_x, destination_y, 0, value);
             }
         }
     }
@@ -2169,32 +1412,6 @@ impl Image {
             }
         }
     }
-    /// Resize a real-space image by centered clipping/padding.
-    pub fn resize_real_space(
-        &mut self,
-        x: i32,
-        y: i32,
-        z: i32,
-        padding: f32,
-    ) -> Result<(), String> {
-        assert!(
-            self.is_in_real_space,
-            "Fourier resize is not this operation"
-        );
-        if (
-            self.logical_x_dimension,
-            self.logical_y_dimension,
-            self.logical_z_dimension,
-        ) == (x, y, z)
-        {
-            return Ok(());
-        }
-        let mut resized = Self::default();
-        resized.allocate(x, y, z, true)?;
-        self.clip_into_real_space(&mut resized, padding, 0, 0, 0);
-        *self = resized;
-        Ok(())
-    }
     pub fn copy_from(&mut self, other: &Self) {
         *self = other.clone();
     }
@@ -2293,71 +1510,6 @@ impl Image {
         }
         sum
     }
-    /// Resample a two-dimensional real-space image after anisotropic
-    /// magnification along a rotated axis.
-    pub fn correct_magnification_distortion(
-        &mut self,
-        angle_degrees: f32,
-        major_axis: f32,
-        minor_axis: f32,
-    ) {
-        assert!(
-            self.is_in_real_space && self.logical_z_dimension == 1,
-            "only 2D real-space images are supported"
-        );
-        assert!(major_axis != 0. && minor_axis != 0.);
-        let angle = angle_degrees.to_radians();
-        let sin_minus = (-angle).sin();
-        let cos_minus = (-angle).cos();
-        let sin = angle.sin();
-        let cos = angle.cos();
-        let edge_value = self.return_average_of_real_values_on_edges();
-        let mut corrected = Self::default();
-        corrected
-            .allocate(
-                self.logical_x_dimension,
-                self.logical_y_dimension,
-                self.logical_z_dimension,
-                true,
-            )
-            .unwrap();
-        for y in 0..self.logical_y_dimension {
-            for x in 0..self.logical_x_dimension {
-                let mut transformed_x = (y - self.physical_address_of_box_center_y) as f32
-                    * sin_minus
-                    + (x - self.physical_address_of_box_center_x) as f32 * cos_minus;
-                let mut transformed_y = (y - self.physical_address_of_box_center_y) as f32
-                    * cos_minus
-                    - (x - self.physical_address_of_box_center_x) as f32 * sin_minus;
-                transformed_x /= major_axis;
-                transformed_y /= minor_axis;
-                transformed_x += self.physical_address_of_box_center_x as f32;
-                transformed_y += self.physical_address_of_box_center_y as f32;
-                let final_x = (transformed_y - self.physical_address_of_box_center_y as f32) * sin
-                    + (transformed_x - self.physical_address_of_box_center_x as f32) * cos
-                    + self.physical_address_of_box_center_x as f32;
-                let final_y = (transformed_y - self.physical_address_of_box_center_y as f32) * cos
-                    - (transformed_x - self.physical_address_of_box_center_x as f32) * sin
-                    + self.physical_address_of_box_center_y as f32;
-                let value = self.return_linear_interpolated_2d(final_x, final_y);
-                corrected.set_real_pixel_from_physical_coord(
-                    x,
-                    y,
-                    0,
-                    if final_x < 0.
-                        || final_x > (self.logical_x_dimension - 1) as f32
-                        || final_y < 0.
-                        || final_y > (self.logical_y_dimension - 1) as f32
-                    {
-                        edge_value
-                    } else {
-                        value
-                    },
-                );
-            }
-        }
-        *self = corrected;
-    }
     pub fn has_same_dimensions_as(&self, other: &Self) -> bool {
         (
             self.logical_x_dimension,
@@ -2368,20 +1520,6 @@ impl Image {
             other.logical_y_dimension,
             other.logical_z_dimension,
         )
-    }
-    pub fn multiply_pixel_wise(&mut self, other: &Self) {
-        assert!(
-            self.has_same_dimensions_as(other) && self.is_in_real_space == other.is_in_real_space
-        );
-        if self.is_in_real_space {
-            for (left, right) in self.real_values.iter_mut().zip(&other.real_values) {
-                *left *= right;
-            }
-        } else {
-            for (left, right) in self.complex_values.iter_mut().zip(&other.complex_values) {
-                *left *= right;
-            }
-        }
     }
     pub fn apply_mirror_along_y(&mut self) {
         assert!(self.is_in_real_space && self.logical_z_dimension == 1);
@@ -2405,22 +1543,10 @@ impl Image {
             self.set_real_pixel_from_physical_coord(x, 0, 0, average);
         }
     }
-    pub fn add_image(&mut self, other: &Self) {
-        assert_eq!(self.real_values.len(), other.real_values.len());
-        for (left, right) in self.real_values.iter_mut().zip(&other.real_values) {
-            *left += right;
-        }
-    }
     pub fn subtract_image(&mut self, other: &Self) {
         assert!(self.has_same_dimensions_as(other));
         for (left, right) in self.real_values.iter_mut().zip(&other.real_values) {
             *left -= right;
-        }
-    }
-    pub fn subtract_squared_image(&mut self, other: &Self) {
-        assert_eq!(self.real_values.len(), other.real_values.len());
-        for (left, right) in self.real_values.iter_mut().zip(&other.real_values) {
-            *left -= right.powi(2);
         }
     }
     pub fn update_looping_and_addressing(&mut self) {
@@ -2502,8 +1628,9 @@ mod tests {
 
     static WRITTEN_SLICE: Mutex<Option<(String, Vec<f32>, i32, i32)>> = Mutex::new(None);
 
-    fn capture_slice(filename: &str, values: &[f32], width: i32, height: i32) {
+    fn capture_slice(filename: &str, values: &[f32], width: i32, height: i32) -> i32 {
         *WRITTEN_SLICE.lock().unwrap() = Some((filename.into(), values.into(), width, height));
+        0
     }
 
     #[test]
@@ -2527,46 +1654,6 @@ mod tests {
                 2,
             ))
         );
-    }
-
-    #[test]
-    fn quick_reader_loads_one_based_mrc_slice_into_padded_rows() {
-        let path = std::env::temp_dir().join(format!(
-            "imod-rs-image-quick-read-{}-{}.mrc",
-            std::process::id(),
-            std::thread::current().name().unwrap_or("unnamed")
-        ));
-        assert_eq!(
-            crate::imod::librgctf::testctffind::write_slice(
-                path.to_str().unwrap(),
-                &[1., 2., 3., 4.],
-                2,
-                2,
-            ),
-            0
-        );
-        let mut image = Image::default();
-        image
-            .quick_and_dirty_read_slice(path.to_str().unwrap(), 1)
-            .unwrap();
-        assert_eq!(
-            (image.logical_x_dimension, image.logical_y_dimension),
-            (2, 2)
-        );
-        assert_eq!(
-            image.return_real_pixel_from_physical_coord(0, 0, 0),
-            Some(1.)
-        );
-        assert_eq!(
-            image.return_real_pixel_from_physical_coord(1, 1, 0),
-            Some(4.)
-        );
-        assert!(
-            image
-                .quick_and_dirty_read_slice(path.to_str().unwrap(), 2)
-                .is_err()
-        );
-        let _ = std::fs::remove_file(path);
     }
 
     #[test]
@@ -2618,109 +1705,6 @@ mod tests {
     }
 
     #[test]
-    fn quick_mrc_writer_places_one_based_selected_stack_sections() {
-        let path = std::env::temp_dir().join(format!(
-            "imod-rs-image-write-slices-{}-{}.mrc",
-            std::process::id(),
-            std::thread::current().name().unwrap_or("unnamed")
-        ));
-        let mut source = Image::default();
-        source.allocate(2, 2, 2, true).unwrap();
-        for z in 0..2 {
-            for y in 0..2 {
-                for x in 0..2 {
-                    source.set_real_pixel_from_physical_coord(x, y, z, (z * 10 + y * 2 + x) as f32);
-                }
-            }
-        }
-        source
-            .quick_and_dirty_write_mrc_slices(path.to_str().unwrap(), 2, 3)
-            .unwrap();
-        let mut restored = Image::default();
-        restored
-            .read_mrc_slices(path.to_str().unwrap(), 2, 3)
-            .unwrap();
-        assert_eq!(
-            restored.return_real_pixel_from_physical_coord(1, 1, 0),
-            Some(3.)
-        );
-        assert_eq!(
-            restored.return_real_pixel_from_physical_coord(1, 1, 1),
-            Some(13.)
-        );
-        let _ = std::fs::remove_file(path);
-    }
-
-    #[test]
-    fn mrc_slice_writer_replaces_existing_sections_and_grows_the_header() {
-        let path = std::env::temp_dir().join(format!(
-            "imod-rs-image-update-slices-{}-{}.mrc",
-            std::process::id(),
-            std::thread::current().name().unwrap_or("unnamed")
-        ));
-        let mut initial = Image::default();
-        initial.allocate(2, 2, 1, true).unwrap();
-        initial.set_to_constant(1.);
-        initial
-            .quick_and_dirty_write_mrc_slices(path.to_str().unwrap(), 1, 1)
-            .unwrap();
-
-        let mut replacement = Image::default();
-        replacement.allocate(2, 2, 2, true).unwrap();
-        replacement.set_to_constant(4.);
-        replacement.set_real_pixel_from_physical_coord(1, 1, 1, 9.);
-        replacement
-            .write_mrc_slices(path.to_str().unwrap(), 2, 3)
-            .unwrap();
-
-        let mut restored = Image::default();
-        restored
-            .read_mrc_slices(path.to_str().unwrap(), 1, 3)
-            .unwrap();
-        assert_eq!(
-            restored.return_real_pixel_from_physical_coord(0, 0, 0),
-            Some(1.)
-        );
-        assert_eq!(
-            restored.return_real_pixel_from_physical_coord(0, 0, 1),
-            Some(4.)
-        );
-        assert_eq!(
-            restored.return_real_pixel_from_physical_coord(1, 1, 2),
-            Some(9.)
-        );
-        let _ = std::fs::remove_file(path);
-    }
-
-    #[test]
-    fn dilate_binarized_mask_preserves_native_odd_step_periodic_neighbourhood() {
-        let mut image = Image::default();
-        image.allocate(5, 5, 1, true).unwrap();
-        image.set_real_pixel_from_physical_coord(0, 0, 0, 1.);
-        // Padding is not a pixel and must not participate in the operation.
-        image.real_values[5] = 19.;
-
-        image.dilate_binarized_mask(1.5);
-
-        // The C++ code wraps one flattened volume index rather than each
-        // coordinate independently, so crossing a row boundary carries into
-        // the preceding/following row.
-        for (x, y) in [(4, 3), (1, 4), (4, 0), (1, 1)] {
-            assert_eq!(
-                image.return_real_pixel_from_physical_coord(x, y, 0),
-                Some(1.),
-                "source offset result at ({x}, {y})"
-            );
-        }
-        assert_eq!(
-            image.return_real_pixel_from_physical_coord(0, 0, 0),
-            Some(1.),
-            "the source adds neighbours to the pre-existing binary mask"
-        );
-        assert_eq!(image.real_values[5], 19.);
-    }
-
-    #[test]
     fn allocation_uses_owned_padded_rows_and_source_bounds() {
         let mut image = Image::default();
         image.allocate(4, 3, 1, true).unwrap();
@@ -2765,28 +1749,10 @@ mod tests {
             image.return_real_pixel_from_physical_coord(1, 1, 0),
             Some(9.)
         );
-        assert_eq!(image.return_volume_in_real_space(), 6);
         image.deallocate();
         assert!(image.real_values.is_empty());
         assert!(image.complex_values.is_empty());
         image.allocate_2d(2, 2, true).unwrap();
-        assert_eq!(image.return_volume_in_real_space(), 4);
-    }
-
-    #[test]
-    fn mutable_2d_slice_view_replaces_source_pointer_aliasing() {
-        let mut volume = Image::default();
-        volume.allocate(3, 2, 2, true).unwrap();
-        let mut plane = volume.slice_2d_mut(1).unwrap();
-        assert!(plane.set(2, 1, 8.));
-        assert_eq!(plane.get(2, 1), Some(8.));
-        assert!(!plane.set(3, 1, 0.));
-        drop(plane);
-        assert_eq!(
-            volume.return_real_pixel_from_physical_coord(2, 1, 1),
-            Some(8.)
-        );
-        assert!(volume.slice_2d_mut(2).is_none());
     }
 
     #[test]
@@ -2799,9 +1765,6 @@ mod tests {
             }
         }
         image.real_values[4] = 1_000.;
-        assert_eq!(image.get_min_max(), Some((0., 11.)));
-        assert_eq!(image.return_average_of_real_values(0., false), 5.5);
-        assert_eq!(image.return_median_of_real_values(), Some(6.));
         assert_eq!(image.return_average_of_real_values_on_edges(), 5.5);
     }
 
@@ -2821,45 +1784,7 @@ mod tests {
     }
 
     #[test]
-    fn clip_into_larger_real_space_2d_centers_and_preserves_destination_padding() {
-        let mut source = Image::default();
-        source.allocate(2, 2, 1, true).unwrap();
-        source.set_real_pixel_from_physical_coord(0, 0, 0, 1.);
-        source.set_real_pixel_from_physical_coord(1, 0, 0, 2.);
-        source.set_real_pixel_from_physical_coord(0, 1, 0, 3.);
-        source.set_real_pixel_from_physical_coord(1, 1, 0, 4.);
-        let mut destination = Image::default();
-        destination.allocate(5, 5, 1, true).unwrap();
-        source.clip_into_larger_real_space_2d(&mut destination, -1.);
-        assert_eq!(
-            destination.return_real_pixel_from_physical_coord(0, 0, 0),
-            Some(-1.)
-        );
-        assert_eq!(
-            destination.return_real_pixel_from_physical_coord(1, 1, 0),
-            Some(1.)
-        );
-        assert_eq!(
-            destination.return_real_pixel_from_physical_coord(2, 1, 0),
-            Some(2.)
-        );
-        assert_eq!(
-            destination.return_real_pixel_from_physical_coord(1, 2, 0),
-            Some(3.)
-        );
-        assert_eq!(
-            destination.return_real_pixel_from_physical_coord(2, 2, 0),
-            Some(4.)
-        );
-        assert_eq!(
-            destination.return_real_pixel_from_physical_coord(4, 4, 0),
-            Some(-1.)
-        );
-        assert_eq!(destination.real_values[5], 0.);
-    }
-
-    #[test]
-    fn clip_resize_consume_and_bounded_interpolation_use_owned_pixels() {
+    fn clip_and_consume_use_owned_pixels() {
         let mut source = Image::default();
         source.allocate(3, 2, 1, true).unwrap();
         for y in 0..2 {
@@ -2878,31 +1803,10 @@ mod tests {
             destination.return_real_pixel_from_physical_coord(0, 0, 0),
             Some(1.)
         );
-        source.resize_real_space(5, 4, 1, -2.).unwrap();
-        assert_eq!(
-            source.return_real_pixel_from_physical_coord(0, 0, 0),
-            Some(-2.)
-        );
-        assert_eq!(source.return_linear_interpolated_2d(2.5, 1.0), 1.5);
-        assert_eq!(source.return_linear_interpolated_2d(-0.1, 1.0), 0.);
         let mut moved = Image::default();
         moved.consume(&mut source);
         assert_eq!(source.real_memory_allocated, 0);
-        assert_eq!(moved.logical_x_dimension, 5);
-    }
-
-    #[test]
-    fn identity_magnification_distortion_preserves_image() {
-        let mut image = Image::default();
-        image.allocate(4, 4, 1, true).unwrap();
-        for y in 0..4 {
-            for x in 0..4 {
-                image.set_real_pixel_from_physical_coord(x, y, 0, (y * 4 + x) as f32);
-            }
-        }
-        let before = image.real_values.clone();
-        image.correct_magnification_distortion(0., 1., 1.);
-        assert_eq!(image.real_values, before);
+        assert_eq!(moved.logical_x_dimension, 3);
     }
 
     #[test]
@@ -2954,7 +1858,6 @@ mod tests {
                 .compute_average_and_sigma_of_values_in_spectrum(1., 4., 0)
                 .is_some()
         );
-        assert!(image.fourier_component_has_explicit_hermitian_mate(0, 1, 0));
         assert!(image.fourier_component_is_explicit_hermitian_mate(0, 3, 0));
     }
 
@@ -2979,26 +1882,6 @@ mod tests {
         assert_eq!(
             smoothed.return_real_pixel_from_physical_coord(2, 2, 0),
             Some(12.)
-        );
-
-        let mut fourier = Image::default();
-        fourier.allocate(4, 4, 1, false).unwrap();
-        let dc = fourier
-            .return_fourier_1d_address_from_physical_coord(0, 0, 0)
-            .unwrap();
-        fourier.complex_values[dc] = Complex32::new(3., 4.);
-        let mut power = Curve::new();
-        let mut power_counts = Curve::new();
-        power.setup_x_axis(0., 1., 5);
-        power_counts.setup_x_axis(0., 1., 5);
-        fourier.compute_1d_power_spectrum_curve(&mut power, &mut power_counts);
-        assert_eq!(power.data_y[0], 25.);
-        let mut amplitude = Image::default();
-        amplitude.allocate(4, 4, 1, true).unwrap();
-        fourier.compute_amplitude_spectrum_full_2d(&mut amplitude);
-        assert_eq!(
-            amplitude.return_real_pixel_from_physical_coord(2, 2, 0),
-            Some(5.)
         );
     }
 
@@ -3036,20 +1919,6 @@ mod tests {
         }
         image.set_real_pixel_from_physical_coord(2, 2, 0, 100.);
         assert_eq!(image.return_maximum_value(1., 0.), 24.);
-        assert_eq!(image.return_minimum_value(1., 0.), 0.);
-        let mut normalized = Image::default();
-        normalized.allocate(2, 2, 1, true).unwrap();
-        normalized.set_to_constant(2.);
-        normalized.normalize_ft();
-        assert_eq!(
-            normalized.return_real_pixel_from_physical_coord(0, 0, 0),
-            Some(1.)
-        );
-        normalized.normalize_ft_and_invert_real_values();
-        assert_eq!(
-            normalized.return_real_pixel_from_physical_coord(0, 0, 0),
-            Some(-0.5)
-        );
     }
 
     #[test]
@@ -3106,64 +1975,6 @@ mod tests {
                 }
             }
         }
-    }
-
-    #[test]
-    fn taper_edges_uses_smoothed_one_thirtieth_edge_strips_without_touching_padding() {
-        let mut image = Image::default();
-        image.allocate(30, 30, 1, true).unwrap();
-        for y in 0..30 {
-            for x in 0..30 {
-                image.set_real_pixel_from_physical_coord(x, y, 0, x as f32);
-            }
-        }
-        let padding = image
-            .return_real_1d_address_from_physical_coord(0, 1, 0)
-            .unwrap()
-            - 1;
-        image.real_values[padding] = 1234.;
-        image.taper_edges();
-        // With one-pixel strips, the source's X-axis edge average is 14.5;
-        // the Y pass is zero for an X-only gradient.
-        assert_eq!(
-            image.return_real_pixel_from_physical_coord(0, 9, 0),
-            Some(14.5)
-        );
-        assert_eq!(
-            image.return_real_pixel_from_physical_coord(29, 9, 0),
-            Some(14.5)
-        );
-        assert_eq!(
-            image.return_real_pixel_from_physical_coord(14, 9, 0),
-            Some(14.)
-        );
-        assert_eq!(image.real_values[padding], 1234.);
-    }
-
-    #[test]
-    fn taper_edges_applies_the_same_strip_rule_to_the_z_axis() {
-        let mut image = Image::default();
-        image.allocate(30, 30, 30, true).unwrap();
-        for z in 0..30 {
-            for y in 0..30 {
-                for x in 0..30 {
-                    image.set_real_pixel_from_physical_coord(x, y, z, z as f32);
-                }
-            }
-        }
-        image.taper_edges();
-        assert_eq!(
-            image.return_real_pixel_from_physical_coord(9, 9, 0),
-            Some(14.5)
-        );
-        assert_eq!(
-            image.return_real_pixel_from_physical_coord(9, 9, 29),
-            Some(14.5)
-        );
-        assert_eq!(
-            image.return_real_pixel_from_physical_coord(9, 9, 14),
-            Some(14.)
-        );
     }
 
     #[test]

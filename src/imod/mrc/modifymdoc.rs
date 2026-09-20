@@ -1,10 +1,20 @@
 //! Translation of `IMOD/mrc/modifymdoc.cpp`.
 
 use crate::imod::libcfshr::autodoc::*;
+use crate::imod::libcfshr::b3dutil::{ImodFile, imod_prog_name, imod_usage_header};
 use crate::imod::libcfshr::extraheader::{get_metadata_items, get_metadata_weighting_doses};
 use crate::imod::libcfshr::parse_params::{
     pip_done, pip_get_float, pip_get_in_out_file, pip_get_integer, pip_read_or_parse_options,
 };
+use std::io::Write;
+
+/// The `imodUsageHeader` callback in the shape `PipReadOrParseOptions` takes.
+fn imod_usage_header_for_pip(prog_name: &[u8]) {
+    imod_usage_header(Some(&String::from_utf8_lossy(prog_name)));
+    // `PipPrintHelp` writes through Rust's stdout; the banner is on the C
+    // stream, so hand it over before the help body follows it.
+    let _ = ImodFile::Stdout.flush();
+}
 
 /// C `main` in `modifymdoc.cpp`.
 pub fn modifymdoc(arguments: &[String]) -> i32 {
@@ -22,6 +32,8 @@ pub fn modifymdoc(arguments: &[String]) -> i32 {
         .iter()
         .map(|arg| arg.as_bytes().to_vec())
         .collect::<Vec<_>>();
+    // `char *progName = imodProgName(argv[0]);`
+    let prog_name = imod_prog_name(arguments.first().map_or("", String::as_str));
     let mut opt_args = 0;
     let mut non_opt_args = 0;
     pip_read_or_parse_options(
@@ -29,13 +41,13 @@ pub fn modifymdoc(arguments: &[String]) -> i32 {
         &argv,
         &options,
         8,
-        argv.first().map_or(b"modifymdoc", Vec::as_slice),
+        prog_name.as_bytes(),
         3,
         1,
         1,
         &mut opt_args,
         &mut non_opt_args,
-        None,
+        Some(imod_usage_header_for_pip),
     );
     let mut input = Vec::new();
     let mut output = Vec::new();

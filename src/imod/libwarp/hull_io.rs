@@ -19,7 +19,6 @@
 //! `cpr_out`, `facets_print`, `ridges_print` and `afacets_print` take theirs
 //! directly.  `print_simplex_f`'s latch survives, because it holds a plain
 //! function pointer that `print_triang` really does install for later calls.
-#![allow(dead_code)]
 
 use std::cell::{Cell, RefCell};
 use std::io::Write;
@@ -269,15 +268,6 @@ pub fn print_triang(st: &mut HullStorage, root: usize, f: &mut dyn Write, pnf: P
     /* print_simplex(0, F) only latched the writer, which is now passed. */
     print_simplex_f(st, 0, f, Some(pnf));
     visit_triang(st, root, &mut |st, s| print_simplex(st, s, f));
-}
-
-/// Original static `p_peak_test` (`hull-io.c:161`).  Nothing calls it.
-fn p_peak_test(st: &mut HullStorage, s: usize) -> usize {
-    if st.simplex[s].peak.vert == P.get() {
-        s
-    } else {
-        0
-    }
 }
 
 /// Original `check_simplex` (`hull-io.c:164`).

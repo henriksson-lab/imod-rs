@@ -67,35 +67,6 @@ impl Default for RecursiveFilterCoefficients {
     }
 }
 
-/// C `printRecursiveCoefficients`.
-pub fn print_recursive_coefficients(coefficients: &RecursiveFilterCoefficients) {
-    println!("denominator:");
-    println!(
-        "{} {} {} {}",
-        coefficients.sd1, coefficients.sd2, coefficients.sd3, coefficients.sd4
-    );
-    println!("positive numerator:");
-    println!(
-        "{} {} {} {}",
-        coefficients.sp0, coefficients.sp1, coefficients.sp2, coefficients.sp3
-    );
-    println!("negative numerator:");
-    println!(
-        "{} {} {} {} {}\n",
-        coefficients.sn0, coefficients.sn1, coefficients.sn2, coefficients.sn3, coefficients.sn4
-    );
-}
-
-/// C `Recline_verbose`.
-pub fn recline_verbose() {
-    RECLINE_VERBOSE.store(true, Ordering::Relaxed);
-}
-
-/// C `Recline_noverbose`.
-pub fn recline_noverbose() {
-    RECLINE_VERBOSE.store(false, Ordering::Relaxed);
-}
-
 fn recline_error(message: impl Into<String>) -> String {
     let message = message.into();
     if RECLINE_VERBOSE.load(Ordering::Relaxed) {
@@ -568,15 +539,6 @@ pub fn recursive_filter_1d(
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    #[test]
-    fn source_verbose_switches_control_recursive_diagnostics() {
-        recline_noverbose();
-        assert!(!RECLINE_VERBOSE.load(Ordering::Relaxed));
-        recline_verbose();
-        assert!(RECLINE_VERBOSE.load(Ordering::Relaxed));
-        recline_noverbose();
-    }
 
     #[test]
     fn alpha_smoothing_coefficients_match_c_formula() {

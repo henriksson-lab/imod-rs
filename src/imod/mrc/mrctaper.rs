@@ -160,7 +160,7 @@ pub fn mrctaper(arguments: &[String]) -> i32 {
         print!("\rDoing section #{section:4}");
         let _ = std::io::stdout().flush();
         if mrc_read_slice(
-            &mut slice.data,
+            slice.data.bytes_mut(),
             &mut input,
             &mut input_header,
             section,
@@ -175,7 +175,7 @@ pub fn mrctaper(arguments: &[String]) -> i32 {
             return 1;
         }
         if mrc_write_slice(
-            &slice.data,
+            slice.data.bytes(),
             &mut output,
             &mut output_header,
             section - section_offset,

@@ -8,7 +8,6 @@
 //! The source's `FILE *FG_OUT` global is replaced by a writer captured in the
 //! visitor closure, since `visit_fg` takes a function pointer that has no
 //! other way to reach it.
-#![allow(dead_code)]
 
 use std::cell::{Cell, RefCell};
 use std::io::Write;

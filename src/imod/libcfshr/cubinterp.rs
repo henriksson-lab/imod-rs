@@ -1,5 +1,4 @@
 //! Translation of `IMOD/libcfshr/cubinterp.c`.
-#![allow(dead_code)]
 
 use crate::imod::libcfshr::b3dutil::num_omp_threads;
 

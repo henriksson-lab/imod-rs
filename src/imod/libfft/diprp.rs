@@ -1,7 +1,18 @@
 //! Translation of `IMOD/libfft/diprp.c`.
 #![allow(non_snake_case, unused_mut)]
 
-pub fn diprp(pts: i32, sym: &[i32], psym: i32, unsym: &[i32], dim: &[i32; 6], data: &mut [f32]) {
+/// C `diprp(pts, sym, psym, unsym, dim, x, y)`: `x` is `data`, and `y` is
+/// `data` biased by `odd` -- 1 for interleaved storage, `ny` when `todfft`
+/// has transposed the real and imaginary parts into separate rows.
+pub fn diprp(
+    pts: i32,
+    sym: &[i32],
+    psym: i32,
+    unsym: &[i32],
+    dim: &[i32; 6],
+    data: &mut [f32],
+    odd: usize,
+) {
     let mut onemod = 0;
     let mut modulo = [0; 15];
     let mut dk = 0;
@@ -109,8 +120,8 @@ pub fn diprp(pts: i32, sym: &[i32], psym: i32, unsym: &[i32], dim: &[i32; 6], da
                                                                                 p5 as usize,
                                                                             );
                                                                             data.swap(
-                                                                                p as usize + 1,
-                                                                                p5 as usize + 1,
+                                                                                p as usize + odd,
+                                                                                p5 as usize + odd,
                                                                             );
                                                                             p += p4;
                                                                         }
@@ -212,7 +223,7 @@ pub fn diprp(pts: i32, sym: &[i32], psym: i32, unsym: &[i32], dim: &[i32; 6], da
                         while jj < p3 {
                             kk = jj + delta;
                             data.swap(jj as usize, kk as usize);
-                            data.swap(jj as usize + 1, kk as usize + 1);
+                            data.swap(jj as usize + odd, kk as usize + odd);
                             jj += p4;
                         }
                         p0 += p2;

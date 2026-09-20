@@ -1,5 +1,4 @@
 //! Direct Rust translation of the process/error portion of `IMOD/pysrc/imodpy.py`.
-#![allow(dead_code)]
 
 use std::ffi::OsString;
 use std::fmt::{Display, Formatter};
@@ -77,6 +76,10 @@ pub fn run_cmd(
     in_stderr: Option<&str>,
     ignore_status: &[i32],
 ) -> Result<Option<Vec<String>>, ImodpyError> {
+    let command = avoid_local_com_file(command);
+    let command = command.as_str();
+
+    // Set up flags for whether to collect output or send to stderr
     *ERR_STATUS.lock().expect("imodpy status mutex") = 0;
     let mut process = Command::new("sh");
     process.arg("-c").arg(command);
@@ -1283,12 +1286,18 @@ pub fn imod_is_abs_path(path: &str) -> bool {
     Path::new(path).is_absolute()
 }
 
-/// Matches `imodAbsPath` (`IMOD/pysrc/imodpy.py:1443`) outside Windows/Cygwin conversion.
+/// Matches `imodAbsPath` (`IMOD/pysrc/imodpy.py:1443`).
 pub fn imod_abs_path(path: &str) -> String {
-    std::path::absolute(path)
-        .unwrap_or_else(|_| Path::new(path).to_path_buf())
+    // Cygwin will not work with a windows path, so convert it
+    let cygwin = cygwin_path(path);
+    let mut absp = std::path::absolute(&cygwin)
+        .unwrap_or_else(|_| Path::new(&cygwin).to_path_buf())
         .to_string_lossy()
-        .into_owned()
+        .into_owned();
+    if cfg!(windows) || cfg!(target_os = "cygwin") {
+        absp = get_cygpath(true, &absp, "-m");
+    }
+    absp
 }
 
 /// Matches `newPsutilAPI` (`IMOD/pysrc/imodpy.py:1453`).
@@ -1300,18 +1309,33 @@ pub fn new_psutil_api(version: &str) -> bool {
         .is_some_and(|major| major > 1)
 }
 
-/// Matches `imodTempDir` (`IMOD/pysrc/imodpy.py:1486`) outside Windows path conversion.
+/// Matches `imodTempDir` (`IMOD/pysrc/imodpy.py:1486`).
+///
+/// `os.access(path, os.W_OK)` is read here as "some write permission bit is
+/// set", which is what `std` exposes without a `libc::access` call.
 pub fn imod_temp_dir() -> String {
-    if let Some(path) = std::env::var_os("IMOD_TMPDIR") {
-        let path = Path::new(&path);
-        if path.is_dir() {
-            return path.to_string_lossy().into_owned();
+    let windows = cfg!(windows) || cfg!(target_os = "cygwin");
+    if let Some(imodtemp) = std::env::var_os("IMOD_TMPDIR") {
+        let imodtemp = get_cygpath(windows, &imodtemp.to_string_lossy(), "-m");
+        let path = Path::new(&imodtemp);
+        if path.exists()
+            && path.is_dir()
+            && fs::metadata(path).is_ok_and(|metadata| !metadata.permissions().readonly())
+        {
+            return imodtemp;
         }
     }
-    for path in ["/usr/tmp", "/tmp"] {
-        if Path::new(path).is_dir() {
-            return path.to_owned();
-        }
+    let imodtemp = get_cygpath(windows, "/usr/tmp", "-m");
+    let path = Path::new(&imodtemp);
+    if path.exists() && fs::metadata(path).is_ok_and(|metadata| !metadata.permissions().readonly())
+    {
+        return imodtemp;
+    }
+    let imodtemp = get_cygpath(windows, "/tmp", "-m");
+    let path = Path::new(&imodtemp);
+    if path.exists() && fs::metadata(path).is_ok_and(|metadata| !metadata.permissions().readonly())
+    {
+        return imodtemp;
     }
     ".".to_owned()
 }

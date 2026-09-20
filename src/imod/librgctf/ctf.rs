@@ -271,23 +271,6 @@ impl Ctf {
         }
     }
 
-    /// C++ `CTF::IsAlmostEqualTo`.
-    pub fn is_almost_equal_to(&self, wanted_ctf: &Self, delta_defocus: f32) -> bool {
-        if (self.spherical_aberration - wanted_ctf.spherical_aberration).abs() > 0.01
-            || (self.wavelength - wanted_ctf.wavelength).abs() > 0.0001
-            || (self.amplitude_contrast - wanted_ctf.amplitude_contrast).abs() > 0.0001
-            || (self.defocus_1 - wanted_ctf.defocus_1).abs() > delta_defocus
-            || (self.defocus_2 - wanted_ctf.defocus_2).abs() > delta_defocus
-        {
-            return false;
-        }
-        let phase_delta =
-            (self.additional_phase_shift - wanted_ctf.additional_phase_shift).abs() % (2.0 * PI);
-        let astigmatism_delta =
-            (self.astigmatism_azimuth - wanted_ctf.astigmatism_azimuth).abs() % PI;
-        phase_delta <= 0.0277 && astigmatism_delta <= 0.0277
-    }
-
     /// C++ `CTF::EnforceConvention`.
     pub fn enforce_convention(&mut self) {
         if self.defocus_1 < self.defocus_2 {
@@ -354,17 +337,5 @@ mod tests {
         let mut ctf = Ctf::with_parameters(300.0, 2.7, 0.07, 10_000.0, 10_000.0, 0.0, 1.0, 0.0);
         ctf.set_additional_phase_shift(super::PI * 3.5);
         assert!((ctf.additional_phase_shift() - super::PI * 0.5).abs() < 0.000_001);
-        let near = Ctf::with_parameters(
-            300.0,
-            2.7,
-            0.07,
-            10_050.0,
-            10_050.0,
-            0.0,
-            1.0,
-            super::PI * 0.5,
-        );
-        assert!(ctf.is_almost_equal_to(&near, 100.0));
-        assert!(!ctf.is_almost_equal_to(&near, 10.0));
     }
 }

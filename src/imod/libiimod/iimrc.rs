@@ -1,7 +1,7 @@
 //! Translation of `IMOD/libiimod/iimrc.c`.
 //!
 //! Function names are a systematic snake-case rendering of the C names.
-#![allow(dead_code, unused_variables)]
+#![allow(unused_variables)]
 
 use crate::imod::libcfshr::b3dutil::ImodFile;
 use crate::imod::libcfshr::b3dutil::{

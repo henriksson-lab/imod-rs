@@ -4,7 +4,6 @@
     non_snake_case,
     non_camel_case_types,
     non_upper_case_globals,
-    dead_code,
     unused_variables
 )]
 use crate::imod::libcfshr::zoomdown::{select_zoom_filter, zoom_with_filter};
@@ -248,90 +247,6 @@ pub fn iiu_read_binned(
         iyStart += nyLoad;
         loadYoffset = 0 as i32;
     }
-}
-pub unsafe extern "C" fn iiureadbinned_(
-    mut imUnit: *mut i32,
-    mut iz: *mut i32,
-    mut array: *mut f32,
-    mut ixDim: *mut i32,
-    mut iyDim: *mut i32,
-    mut ixUBstart: *mut i32,
-    mut iyUBstart: *mut i32,
-    mut nbin: *mut i32,
-    mut nxBin: *mut i32,
-    mut nyBin: *mut i32,
-    mut temp: *mut f32,
-    mut lenTemp: *mut i32,
-    mut ierr: *mut i32,
-) {
-    let Some(array_len) = (*ixDim)
-        .checked_mul(*iyDim)
-        .and_then(|length| usize::try_from(length).ok())
-    else {
-        *ierr = 1;
-        return;
-    };
-    let Some(temp_len) = usize::try_from(*lenTemp).ok() else {
-        *ierr = 1;
-        return;
-    };
-    iiu_read_binned(
-        *imUnit,
-        *iz,
-        core::slice::from_raw_parts_mut(array, array_len),
-        *ixDim,
-        *iyDim,
-        *ixUBstart,
-        *iyUBstart,
-        *nbin,
-        *nxBin,
-        *nyBin,
-        core::slice::from_raw_parts_mut(temp, temp_len),
-        *lenTemp,
-        &mut *ierr,
-    );
-}
-pub unsafe extern "C" fn irdbinned_(
-    mut imUnit: *mut i32,
-    mut iz: *mut i32,
-    mut array: *mut f32,
-    mut ixDim: *mut i32,
-    mut iyDim: *mut i32,
-    mut ixUBstart: *mut i32,
-    mut iyUBstart: *mut i32,
-    mut nbin: *mut i32,
-    mut nxBin: *mut i32,
-    mut nyBin: *mut i32,
-    mut temp: *mut f32,
-    mut lenTemp: *mut i32,
-    mut ierr: *mut i32,
-) {
-    let Some(array_len) = (*ixDim)
-        .checked_mul(*iyDim)
-        .and_then(|length| usize::try_from(length).ok())
-    else {
-        *ierr = 1;
-        return;
-    };
-    let Some(temp_len) = usize::try_from(*lenTemp).ok() else {
-        *ierr = 1;
-        return;
-    };
-    iiu_read_binned(
-        *imUnit,
-        *iz,
-        core::slice::from_raw_parts_mut(array, array_len),
-        *ixDim,
-        *iyDim,
-        *ixUBstart,
-        *iyUBstart,
-        *nbin,
-        *nxBin,
-        *nyBin,
-        core::slice::from_raw_parts_mut(temp, temp_len),
-        *lenTemp,
-        &mut *ierr,
-    );
 }
 pub fn iiu_read_reduced(
     imUnit: i32,
@@ -667,90 +582,6 @@ pub fn iiu_read_reduced(
         }
     }
     *ierr = 0 as i32;
-}
-pub unsafe extern "C" fn irdreduced_(
-    mut imUnit: *mut i32,
-    mut iz: *mut i32,
-    mut array: *mut f32,
-    mut nxDim: *mut i32,
-    mut xUBstart: *mut f32,
-    mut yUBstart: *mut f32,
-    mut redFac: *mut f32,
-    mut nxRed: *mut i32,
-    mut nyRed: *mut i32,
-    mut ifiltType: *mut i32,
-    mut temp: *mut f32,
-    mut lenTemp: *mut i32,
-    mut ierr: *mut i32,
-) {
-    let Some(array_len) = (*nxDim)
-        .checked_mul(*nyRed)
-        .and_then(|length| usize::try_from(length).ok())
-    else {
-        *ierr = 1;
-        return;
-    };
-    let Some(temp_len) = usize::try_from(*lenTemp).ok() else {
-        *ierr = 1;
-        return;
-    };
-    iiu_read_reduced(
-        *imUnit,
-        *iz,
-        core::slice::from_raw_parts_mut(array, array_len),
-        *nxDim,
-        *xUBstart,
-        *yUBstart,
-        *redFac,
-        *nxRed,
-        *nyRed,
-        *ifiltType,
-        core::slice::from_raw_parts_mut(temp, temp_len),
-        *lenTemp,
-        &mut *ierr,
-    );
-}
-pub unsafe extern "C" fn iiureadreduced_(
-    mut imUnit: *mut i32,
-    mut iz: *mut i32,
-    mut array: *mut f32,
-    mut nxDim: *mut i32,
-    mut xUBstart: *mut f32,
-    mut yUBstart: *mut f32,
-    mut redFac: *mut f32,
-    mut nxRed: *mut i32,
-    mut nyRed: *mut i32,
-    mut ifiltType: *mut i32,
-    mut temp: *mut f32,
-    mut lenTemp: *mut i32,
-    mut ierr: *mut i32,
-) {
-    let Some(array_len) = (*nxDim)
-        .checked_mul(*nyRed)
-        .and_then(|length| usize::try_from(length).ok())
-    else {
-        *ierr = 1;
-        return;
-    };
-    let Some(temp_len) = usize::try_from(*lenTemp).ok() else {
-        *ierr = 1;
-        return;
-    };
-    iiu_read_reduced(
-        *imUnit,
-        *iz,
-        core::slice::from_raw_parts_mut(array, array_len),
-        *nxDim,
-        *xUBstart,
-        *yUBstart,
-        *redFac,
-        *nxRed,
-        *nyRed,
-        *ifiltType,
-        core::slice::from_raw_parts_mut(temp, temp_len),
-        *lenTemp,
-        &mut *ierr,
-    );
 }
 fn ird_red_sizes_for_load(
     x_ub_start: f32,

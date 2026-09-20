@@ -4,8 +4,9 @@ use super::{diprp, mdftkd, srfp};
 use crate::imod::libcfshr::b3dutil::{CArg, ImodFile, c_format_bytes};
 use std::io::Write as _;
 
-/// C `cmplft`.
-pub fn cmplft(data: &mut [f32], n: i32, dim: &mut [i32; 6]) {
+/// C `cmplft(x, y, n, d)`: `x` is `data` and `y` is `data` biased by `odd`
+/// (1 for interleaved storage, `ny` for `todfft`'s transposed layout).
+pub fn cmplft(data: &mut [f32], odd: usize, n: i32, dim: &mut [i32; 6]) {
     assert!(data.len() >= dim[1] as usize);
     let mut error = 0_i32;
     let mut psym = 0_i32;
@@ -39,10 +40,8 @@ pub fn cmplft(data: &mut [f32], n: i32, dim: &mut [i32; 6]) {
     }
     // IMOD stores complex values as interleaved real/imaginary floats.
     // `mdftkd` receives the owned storage and the fixed odd-value bias.
-    mdftkd(n, &factor, dim, data, 0, 1);
-    // `diprp` operates on the interleaved real/imaginary values directly;
-    // its former adjacent raw streams were just two cursors into this slice.
-    diprp(n, &sym, psym, &unsym, dim, data);
+    mdftkd(n, &factor, dim, data, 0, odd);
+    diprp(n, &sym, psym, &unsym, dim, data, odd);
 }
 
 #[cfg(test)]
@@ -53,7 +52,7 @@ mod tests {
     fn mixed_radix_kernel_transforms_a_four_point_complex_sequence() {
         let mut values = [1.0_f32, 0.0, 2.0, 0.0, 3.0, 0.0, 4.0, 0.0];
         let mut dimensions = [0_i32, 8, 2, 8, 2, 2];
-        cmplft(&mut values, 4, &mut dimensions);
+        cmplft(&mut values, 1, 4, &mut dimensions);
         let expected = [10.0_f32, 0.0, -2.0, 2.0, -2.0, 0.0, -2.0, -2.0];
         for index in 0..8 {
             assert!((values[index] - expected[index]).abs() < 1.0e-4);
@@ -66,7 +65,7 @@ mod tests {
             let mut values = vec![0.0_f32; (2 * size) as usize];
             values[0] = 1.0;
             let mut dimensions = [0_i32, 2 * size, 2, 2 * size, 2, 2];
-            cmplft(&mut values, size, &mut dimensions);
+            cmplft(&mut values, 1, size, &mut dimensions);
             for frequency in 0..size as usize {
                 assert!((values[2 * frequency] - 1.0).abs() < 1.0e-4, "size {size}");
                 assert!(values[2 * frequency + 1].abs() < 1.0e-4, "size {size}");

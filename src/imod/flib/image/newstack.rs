@@ -259,6 +259,19 @@ pub fn newstack() {
     // (`integer(kind = 8)`), logicals in 1, and every item is preceded by a
     // one-blank separator, with the record itself starting with a blank.
     let list_real = |value: f32| -> String {
+        // `libgfortran/io/write.c` `write_infnan`: a NaN prints as `NaN`
+        // and an infinity as `Infinity` (`Inf` when the field is narrower
+        // than 8, with a leading `-` for negative), right-justified in the 16-column list-directed field.
+        if value.is_nan() {
+            return format!("{:>16}", "NaN");
+        }
+        if value.is_infinite() {
+            let text = match (value < 0.0, 16) {
+                (false, _) => "Infinity",
+                (true, _) => "-Infinity",
+            };
+            return format!("{text:>16}");
+        }
         let magnitude = value.abs();
         let mut exponent = 1_i32;
         if magnitude != 0.0 {
@@ -2748,6 +2761,15 @@ pub fn newstack() {
         // (`scanSection`'s `idimInOut`) get their own exactly sized slices.
         //
         let mut input = Vec::<f32>::new();
+        //
+        // `processInPlace` (`newstack.f90:2173`): the section is loaded at
+        // `array(1)` and `irepak2(array(1), array(1), ...)` repacks the output
+        // over the front of the same allocation (`:2389, :2499`), so only
+        // one section buffer exists.  Here the loaded buffer is `input`
+        // while it is being loaded and `array` from the repack on, and the
+        // two names are swapped -- never copied -- at those two points;
+        // `buffer_in_array` says which name holds it.
+        let mut buffer_in_array = false;
         let mut load_temp = Vec::<f32>::new();
         // `newstack.f90:1517`: the preliminary pass above ran with unit
         // printing off (`newstack.f90:302`); the processing loop turns it back
@@ -4313,6 +4335,13 @@ pub fn newstack() {
                 // the working array to this file's binned input plus the
                 // output section, so a later input file that is larger than
                 // the first still has room to be read.
+                // The loaded buffer goes back under its load-time name
+                // before anything sizes `array` for this section, or the
+                // grow below would zero-fill the wrong buffer.
+                if buffer_in_array {
+                    std::mem::swap(&mut input, &mut array);
+                    buffer_in_array = false;
+                }
                 let need_dim = (bin_nx as usize * bin_ny as usize)
                     .max(output_nx as usize * output_ny as usize);
                 if array.len() < need_dim {
@@ -6286,7 +6315,20 @@ pub fn newstack() {
                     // Only the load the source actually asks for is reserved
                     // here; the degenerate read's room is taken at the read
                     // itself, below, where the line count says it is coming.
-                    let input_need = nx_load.max(1) as usize * max_in.max(1) as usize;
+                    if buffer_in_array {
+                        std::mem::swap(&mut input, &mut array);
+                        buffer_in_array = false;
+                    }
+                    // In place the output is repacked over the front of this
+                    // same buffer (`newstack.f90:2389, 2499`), and a Fourier
+                    // expansion's output can be larger than the loaded input
+                    // while still fitting the source's `nxDimNeed * nyDimNeed`
+                    // (`:2173`); the pages past the load stay untouched
+                    // unless the repack writes them, as in the source.
+                    let mut input_need = nx_load.max(1) as usize * max_in.max(1) as usize;
+                    if process_in_place {
+                        input_need = input_need.max(output_nx as usize * output_ny as usize);
+                    }
                     if input.len() < input_need {
                         input.resize(input_need, 0.0);
                     }
@@ -6414,8 +6456,11 @@ pub fn newstack() {
                     // chunk never reads outside its own lines, so one
                     // whole-section buffer stands in for both.
                     //
+                    // In place, the output lives in the loaded buffer
+                    // (`newstack.f90:2856`: `needDim + 2 * nxBin`, no output
+                    // space), so `array` is not grown for it.
                     let array_need = output_nx as usize * output_ny as usize;
-                    if array.len() < array_need {
+                    if !process_in_place && array.len() < array_need {
                         array.resize(array_need, 0.0);
                     }
                     // `newstack.f90:1759, 2738-2739`: with `-replace` the output
@@ -6513,8 +6558,18 @@ pub fn newstack() {
                     for (chunk_index, &(line_out_st, num_lines_out, line_in_st, num_lines_in)) in
                         layout.iter().enumerate()
                     {
-                        let base = line_out_st as usize * output_nx as usize;
-                        let end = base + num_lines_out as usize * output_nx as usize;
+                        // `newstack.f90:2386-2389`: `iChunkBase` is the chunk's
+                        // place in the output space, or `1` in place.
+                        let (base, end) = if process_in_place {
+                            (0, num_lines_out as usize * output_nx as usize)
+                        } else {
+                            let base = line_out_st as usize * output_nx as usize;
+                            (base, base + num_lines_out as usize * output_nx as usize)
+                        };
+                        if buffer_in_array {
+                            std::mem::swap(&mut input, &mut array);
+                            buffer_in_array = false;
+                        }
                         // `newstack.f90:2335-2336`.
                         let need_y_start = line_in_st;
                         let need_y_end = need_y_start + num_lines_in - 1;
@@ -6945,13 +7000,24 @@ pub fn newstack() {
                                         - load_y_start,
                                 )
                             };
-                            irepak2(
-                                &mut array[base..end],
-                                if fourier_out.is_empty() {
-                                    &input[..]
+                            // `newstack.f90:2499`: `irepak2(array(iChunkBase),
+                            // array(ioutBase), ...)`.  In place both are the
+                            // loaded buffer, which from here on is `array`.
+                            if process_in_place {
+                                std::mem::swap(&mut input, &mut array);
+                                buffer_in_array = true;
+                            }
+                            let (brray, source): (&mut [f32], Option<&[f32]>) =
+                                if !fourier_out.is_empty() {
+                                    (&mut array[base..end], Some(&fourier_out[..]))
+                                } else if process_in_place {
+                                    (&mut array[..], None)
                                 } else {
-                                    &fourier_out[..]
-                                },
+                                    (&mut array[base..end], Some(&input[..]))
+                                };
+                            irepak2(
+                                brray,
+                                source,
                                 repack_nx_dim,
                                 repack_ny_dim,
                                 ix1,
@@ -7224,8 +7290,13 @@ pub fn newstack() {
                         for (chunk_index, &(line_out_st, num_lines_out, _, _)) in
                             layout.iter().enumerate().rev()
                         {
-                            let base = line_out_st as usize * output_nx as usize;
-                            let end = base + num_lines_out as usize * output_nx as usize;
+                            // `newstack.f90:2602-2605`: `iChunkBase`, `1` in place.
+                            let (base, end) = if process_in_place {
+                                (0, num_lines_out as usize * output_nx as usize)
+                            } else {
+                                let base = line_out_st as usize * output_nx as usize;
+                                (base, base + num_lines_out as usize * output_nx as usize)
+                            };
                             // `newstack.f90:2605-2610`.
                             if chunk_index + 1 != num_out_chunks && if_out_chunk > 0 {
                                 // `newstack.f90:2607`.
@@ -7659,9 +7730,13 @@ pub fn newstack() {
 }
 
 /// Original `irepak2` (`newstack.f90:3372`).
+/// `array` is `None` when the source is `brray` itself -- the source's
+/// `irepak2(array(1), array(1), ...)` in-place call, which is a forward
+/// copy with every destination index at or below its source index
+/// (`newstack.f90:2933`, `inPlace`).
 pub fn irepak2(
     brray: &mut [f32],
-    array: &[f32],
+    array: Option<&[f32]>,
     mx: i32,
     my: i32,
     nx1: i32,
@@ -7688,7 +7763,10 @@ pub fn irepak2(
             let row = iy as usize * mx as usize;
             for ix in nx1..nx2 + 1 {
                 brray[ind] = if ix >= 0 && ix < mx {
-                    array[row + ix as usize]
+                    match array {
+                        Some(array) => array[row + ix as usize],
+                        None => brray[row + ix as usize],
+                    }
                 } else {
                     dmean
                 };
@@ -8182,13 +8260,22 @@ pub fn find_scale_factors(
             scale_factor = values.scale_fac;
             const_add = values.scale_const;
         } else if values.if_mean_sd_entered != 0 {
-            let count = (values.nx_out * values.ny_out) as f64;
-            let average = values.dsum / count;
-            let sd = ((values.dsum_sq - count * average * average) / (count - 1.).max(1.))
-                .max(0.)
-                .sqrt() as f32;
-            scale_factor = values.entered_sd / if sd == 0. { 1. } else { sd };
-            const_add = values.entered_mean - scale_factor * average as f32;
+            // `newstack.f90`: `call sums_to_avgsd8(dsum, dsumSq, nxOut, nyOut,
+            // avgSec, sdSec)` -- the Fortran wrapper of `sumsToAvgSDdbl`.
+            let (mut avg_sec, mut sd_sec) = (0.0_f32, 0.0_f32);
+            crate::imod::libcfshr::simplestat::sums_to_avg_sd_dbl(
+                values.dsum,
+                values.dsum_sq,
+                values.nx_out,
+                values.ny_out,
+                &mut avg_sec,
+                &mut sd_sec,
+            );
+            if sd_sec == 0. {
+                sd_sec = 1.;
+            }
+            scale_factor = values.entered_sd / sd_sec;
+            const_add = values.entered_mean - scale_factor * avg_sec;
         } else {
             if dmax_out != dmin_out && tmp_max != tmp_min {
                 scale_factor = (dmax_out - dmin_out) / (tmp_max - tmp_min);
@@ -8427,6 +8514,19 @@ pub fn reallocate_if_needed(values: &mut ReallocateIfNeeded) -> (usize, usize) {
     // Same list-directed `G16.9E2` real editing as the program unit
     // (`libgfortran/io/write.c`, `write_real` with a scale factor of 1).
     let list_real = |value: f32| -> String {
+        // `libgfortran/io/write.c` `write_infnan`: a NaN prints as `NaN`
+        // and an infinity as `Infinity` (`Inf` when the field is narrower
+        // than 8, with a leading `-` for negative), right-justified in the 16-column list-directed field.
+        if value.is_nan() {
+            return format!("{:>16}", "NaN");
+        }
+        if value.is_infinite() {
+            let text = match (value < 0.0, 16) {
+                (false, _) => "Infinity",
+                (true, _) => "-Infinity",
+            };
+            return format!("{text:>16}");
+        }
         let magnitude = value.abs();
         let mut exponent = 1_i32;
         if magnitude != 0.0 {
@@ -8707,8 +8807,18 @@ where
             }
             *density = scaled;
             sum += f64::from(scaled);
-            values.dmin2 = values.dmin2.min(scaled);
-            values.dmax2 = values.dmax2.max(scaled);
+            // `newstack.f90:3250-3251` `min(dmin2, dens)` / `max(dmax2, dens)`:
+            // gfortran expands MIN(a1, a2) as `if (a2 < m || isnan(m)) m = a2`
+            // (trans-intrinsic.c, gfc_conv_intrinsic_minmax), which keeps the
+            // first operand on a tie and drops a NaN running value.  Written
+            // out so the compiler emits the compare rather than `minss`'s
+            // unordered blend.
+            if scaled < values.dmin2 || values.dmin2.is_nan() {
+                values.dmin2 = scaled;
+            }
+            if scaled > values.dmax2 || values.dmax2.is_nan() {
+                values.dmax2 = scaled;
+            }
         }
         values.dmean2 = (f64::from(values.dmean2) + sum) as f32;
     }
@@ -8840,7 +8950,17 @@ mod tests {
     #[test]
     fn repacking_and_list_syntax_match_source() {
         let mut packed = [0.; 9];
-        irepak2(&mut packed, &[1., 2., 3., 4.], 2, 2, -1, 1, -1, 1, -1.);
+        irepak2(
+            &mut packed,
+            Some(&[1., 2., 3., 4.]),
+            2,
+            2,
+            -1,
+            1,
+            -1,
+            1,
+            -1.,
+        );
         assert_eq!(packed, [-1., -1., -1., -1., 1., 2., -1., 3., 4.]);
         // `getItemsToUse` reads its own option through PIP
         // (`newstack.f90:3333-3344`), so the entry has to be in PIP's table

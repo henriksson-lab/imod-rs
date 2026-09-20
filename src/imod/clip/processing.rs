@@ -1,12 +1,10 @@
 //! Translation of `IMOD/clip/processing.cpp`.
-#![allow(dead_code)]
-
 use crate::imod::libcfshr::b3dutil::{CArg, ImodFile, c_format};
 use std::io::Write as _;
 
 use crate::imod::clip::clip::ClipOptions;
 use crate::imod::libcfshr::islice::{
-    Islice, Istack, slice_free, slice_get_pixel_magnitude, slice_get_val, slice_put_val,
+    Islice, Istack, MrcData, slice_free, slice_get_pixel_magnitude, slice_get_val, slice_put_val,
 };
 use crate::imod::libiimod::mrcfiles::{
     MRC_MODE_COMPLEX_FLOAT, MRC_MODE_COMPLEX_SHORT, MRC_MODE_RGB, MrcHeader,
@@ -383,30 +381,37 @@ pub fn clip_scaling(hin: &mut MrcHeader, hout: &mut MrcHeader, opt: &mut ClipOpt
                     }
                 }
             } else if opt.process == IP_INTEGRAL {
-                // `processing.cpp:317-318` floats a second view of the same
-                // data with `sliceFloatEx(&flSlice, 0)` for `beadIntegral`.
+                // `processing.cpp:317-318`: `sliceInit(&flSlice, ..., slice->data.f)`
+                // then `sliceFloatEx(&flSlice, 0)`.  For a float slice that
+                // conversion is a no-op (`mrcslice.c:259`), so `beadIntegral`
+                // reads the *same* storage `slicePutVal` is writing below;
+                // every other mode gets a converted copy.
                 let mut integral_data = Vec::new();
-                let length = usize::try_from(slice.xsize).ok().and_then(|xsize| {
-                    usize::try_from(slice.ysize)
-                        .ok()
-                        .and_then(|ysize| xsize.checked_mul(ysize))
-                });
-                if length.is_none_or(|length| integral_data.try_reserve_exact(length).is_err()) {
-                    crate::imod::clip::clip::show_error(
-                        "clip: Error getting memory to convert slice to float.",
-                    );
-                    return -1;
-                }
-                for j in 0..slice.ysize {
-                    for i in 0..slice.xsize {
-                        let mut value = [0.; 4];
-                        slice_get_val(&slice, i, j, &mut value);
-                        if matches!(slice.mode, MRC_MODE_COMPLEX_SHORT | MRC_MODE_COMPLEX_FLOAT) {
-                            value[0] = (value[0] * value[0] + value[1] * value[1]).sqrt();
-                        } else if slice.mode == MRC_MODE_RGB {
-                            value[0] = value[0] * 0.3 + value[1] * 0.59 + value[2] * 0.11;
+                if slice.mode != crate::imod::libcfshr::reduce_by_binning::SLICE_MODE_FLOAT {
+                    let length = usize::try_from(slice.xsize).ok().and_then(|xsize| {
+                        usize::try_from(slice.ysize)
+                            .ok()
+                            .and_then(|ysize| xsize.checked_mul(ysize))
+                    });
+                    if length.is_none_or(|length| integral_data.try_reserve_exact(length).is_err())
+                    {
+                        crate::imod::clip::clip::show_error(
+                            "clip: Error getting memory to convert slice to float.",
+                        );
+                        return -1;
+                    }
+                    for j in 0..slice.ysize {
+                        for i in 0..slice.xsize {
+                            let mut value = [0.; 4];
+                            slice_get_val(&slice, i, j, &mut value);
+                            if matches!(slice.mode, MRC_MODE_COMPLEX_SHORT | MRC_MODE_COMPLEX_FLOAT)
+                            {
+                                value[0] = (value[0] * value[0] + value[1] * value[1]).sqrt();
+                            } else if slice.mode == MRC_MODE_RGB {
+                                value[0] = value[0] * 0.3 + value[1] * 0.59 + value[2] * 0.11;
+                            }
+                            integral_data.push(value[0]);
                         }
-                        integral_data.push(value[0]);
                     }
                 }
                 for j in 0..opt.iy {
@@ -428,7 +433,13 @@ pub fn clip_scaling(hin: &mut MrcHeader, hout: &mut MrcHeader, opt: &mut ClipOpt
                             let mut annulus_mean = 0.;
                             val[0] = (polarity
                                 * crate::imod::libcfshr::beadutil::bead_integral(
-                                    &integral_data,
+                                    if slice.mode
+                                        == crate::imod::libcfshr::reduce_by_binning::SLICE_MODE_FLOAT
+                                    {
+                                        slice.data.f()
+                                    } else {
+                                        &integral_data
+                                    },
                                     slice.xsize,
                                     slice.xsize,
                                     slice.ysize,
@@ -462,17 +473,8 @@ pub fn clip_scaling(hin: &mut MrcHeader, hout: &mut MrcHeader, opt: &mut ClipOpt
                 }
                 let size = (nx_bin * ny_bin) as usize;
                 let (mut x_offset, mut y_offset) = (0_i32, 0_i32);
-                let values = slice
-                    .data
-                    .chunks_exact(4)
-                    .take((opt.ix * opt.iy) as usize)
-                    .map(|value| f32::from_ne_bytes(value.try_into().unwrap()))
-                    .collect::<Vec<_>>();
-                if values.len() != (opt.ix * opt.iy) as usize {
-                    return -1;
-                }
                 crate::imod::libcfshr::multibinstat::make_standard_dev_map(
-                    &values,
+                    slice.data.f(),
                     opt.ix,
                     0,
                     (opt.ix - 1) * if opt.sano != 0 { -1 } else { 1 },
@@ -488,12 +490,8 @@ pub fn clip_scaling(hin: &mut MrcHeader, hout: &mut MrcHeader, opt: &mut ClipOpt
                 );
                 slice.xsize = nx_bin;
                 slice.ysize = ny_bin;
-                for (value, bytes) in sd_arr[..size]
-                    .iter()
-                    .zip(slice.data.chunks_exact_mut(4).take(size))
-                {
-                    bytes.copy_from_slice(&value.to_ne_bytes());
-                }
+                // `processing.cpp:344`: `memcpy(slice->data.f, sdArr, binSize * sizeof(float))`.
+                slice.data.f_mut()[..size].copy_from_slice(&sd_arr[..size]);
             } else if opt.process != IP_RESIZE {
                 crate::imod::libiimod::mrcslice::mrc_slice_lie(&mut slice, min, alpha);
             }
@@ -813,6 +811,10 @@ pub fn clip_median(
     let mut output: Option<Islice> = None;
     for k in 0..opt.nofsecs {
         if k == 0 || !kernel.is_empty() {
+            // `clipWriteSlice` freed the previous slice at the end of the
+            // last iteration (`file_io.cpp:358`), so the new one is the only
+            // output slice alive.
+            output = None;
             output = crate::imod::libcfshr::islice::slice_create(
                 opt.ix,
                 opt.iy,
@@ -886,21 +888,16 @@ pub fn clip_median(
         if !kernel.is_empty() {
             let output = output.as_mut().unwrap();
             let pixel_count = (opt.ix * opt.iy) as usize;
-            for value in output.data.chunks_exact_mut(4).take(pixel_count) {
-                value.copy_from_slice(&0_f32.to_ne_bytes());
-            }
+            // `processing.cpp:695`: `memset(slice->data.f, 0, opt->ix * opt->iy * 4)`.
+            output.data.f_mut()[..pixel_count].fill(0.);
             for n in 0..size {
                 let ind = (n + k - size / 2 - first).clamp(0, size - 1);
-                for (output_value, input_value) in output
-                    .data
-                    .chunks_exact_mut(4)
-                    .zip(stack.slices[ind as usize].data.chunks_exact(4))
-                    .take(pixel_count)
-                {
-                    let value = f32::from_ne_bytes(output_value.try_into().unwrap())
-                        + z_kernel[n as usize]
-                            * f32::from_ne_bytes(input_value.try_into().unwrap());
-                    output_value.copy_from_slice(&value.to_ne_bytes());
+                // `processing.cpp:699-701`: `dataPtr = v.vol[j]->data.f;
+                // slice->data.f[j] += zKernel[i] * dataPtr[j]`.
+                let data_ptr = stack.slices[ind as usize].data.f();
+                let out = output.data.f_mut();
+                for j in 0..pixel_count {
+                    out[j] += z_kernel[n as usize] * data_ptr[j];
                 }
             }
         } else if crate::imod::libiimod::sliceproc::slice_median_filter(
@@ -1077,7 +1074,7 @@ pub fn clip_flip(hin: &mut MrcHeader, hout: &mut MrcHeader, opt: &mut ClipOption
             };
             let input = if axis == b'z' { hin.nz - k - 1 } else { k };
             if crate::imod::libiimod::mrcfiles::mrc_read_slice(
-                &mut sl.data,
+                sl.data.bytes_mut(),
                 &mut hin.fp.clone().unwrap(),
                 hin,
                 input,
@@ -1095,7 +1092,7 @@ pub fn clip_flip(hin: &mut MrcHeader, hout: &mut MrcHeader, opt: &mut ClipOption
                 crate::imod::libiimod::mrcslice::slice_mirror(sl.as_mut(), axis);
             }
             if crate::imod::libiimod::mrcfiles::mrc_write_slice(
-                &sl.data,
+                sl.data.bytes(),
                 &mut hout.fp.clone().unwrap(),
                 hout,
                 k,
@@ -1143,7 +1140,7 @@ pub fn clip_flip(hin: &mut MrcHeader, hout: &mut MrcHeader, opt: &mut ClipOption
                 return -1;
             };
             if crate::imod::libiimod::mrcfiles::mrc_read_slice(
-                &mut sl.data,
+                sl.data.bytes_mut(),
                 &mut hin.fp.clone().unwrap(),
                 hin,
                 x,
@@ -1161,7 +1158,7 @@ pub fn clip_flip(hin: &mut MrcHeader, hout: &mut MrcHeader, opt: &mut ClipOption
                 crate::imod::libiimod::mrcslice::slice_mirror(sl.as_mut(), b'y');
             }
             if crate::imod::libiimod::mrcfiles::mrc_write_slice(
-                &sl.data,
+                sl.data.bytes(),
                 &mut hout.fp.clone().unwrap(),
                 hout,
                 x,
@@ -1212,7 +1209,7 @@ pub fn clip_flip(hin: &mut MrcHeader, hout: &mut MrcHeader, opt: &mut ClipOption
         };
         for x in 0..hin.nx {
             if crate::imod::libiimod::mrcfiles::mrc_read_slice(
-                &mut source.data,
+                source.data.bytes_mut(),
                 &mut hin.fp.clone().unwrap(),
                 hin,
                 x,
@@ -1229,7 +1226,7 @@ pub fn clip_flip(hin: &mut MrcHeader, hout: &mut MrcHeader, opt: &mut ClipOption
                 }
             }
             if crate::imod::libiimod::mrcfiles::mrc_write_slice(
-                &transposed.data,
+                transposed.data.bytes(),
                 &mut hout.fp.clone().unwrap(),
                 hout,
                 x,
@@ -1306,7 +1303,7 @@ pub fn clip_flip(hin: &mut MrcHeader, hout: &mut MrcHeader, opt: &mut ClipOption
             let y = if rotate { hin.ny - k - 1 } else { k };
             for z in 0..hin.nz {
                 if crate::imod::libiimod::mrcfiles::mrc_read_slice(
-                    &mut input_slice.data,
+                    input_slice.data.bytes_mut(),
                     &mut hin.fp.clone().unwrap(),
                     hin,
                     z,
@@ -1322,7 +1319,7 @@ pub fn clip_flip(hin: &mut MrcHeader, hout: &mut MrcHeader, opt: &mut ClipOption
                 }
             }
             if crate::imod::libiimod::mrcfiles::mrc_write_slice(
-                &output_slice.data,
+                output_slice.data.bytes(),
                 &mut hout.fp.clone().unwrap(),
                 hout,
                 k,
@@ -1580,7 +1577,7 @@ pub fn clip_quadrant(hin: &mut MrcHeader, hout: &mut MrcHeader, opt: &mut ClipOp
             hout.amax = hout.amax.max(s.max);
             hout.amean += s.mean / nz as f32;
             if crate::imod::libiimod::mrcfiles::mrc_write_slice(
-                &s.data,
+                s.data.bytes(),
                 &mut hout.fp.clone().unwrap(),
                 hout,
                 iz,
@@ -1719,7 +1716,7 @@ pub fn fill_drift_corrected_edges(
             .as_bytes(),
         );
         if crate::imod::clip::correct_defects::cor_def_find_drift_corr_edges(
-            &slice.data,
+            slice.data.bytes(),
             hin.mode,
             opt.ix,
             opt.iy,
@@ -1741,7 +1738,7 @@ pub fn fill_drift_corrected_edges(
         }
         crate::imod::clip::correct_defects::cor_def_correct_defects(
             &defects,
-            &mut slice.data,
+            slice.data.bytes_mut(),
             hin.mode,
             1,
             0,
@@ -2178,7 +2175,7 @@ pub fn clip_joinrgb(
         let _ = ImodFile::Stdout.flush();
         for n in 0..3 {
             if crate::imod::libiimod::mrcfiles::mrc_read_slice(
-                &mut component[n].data,
+                component[n].data.bytes_mut(),
                 &mut headers[n].fp.clone().unwrap(),
                 &mut headers[n],
                 k,
@@ -2200,7 +2197,7 @@ pub fn clip_joinrgb(
             }
         }
         if crate::imod::libiimod::mrcfiles::mrc_write_slice(
-            &rgb.data,
+            rgb.data.bytes(),
             &mut hout.fp.clone().unwrap(),
             hout,
             k + start,
@@ -2313,7 +2310,7 @@ pub fn clip_splitrgb(h1: &mut MrcHeader, opt: &mut ClipOptions) -> i32 {
             }
             let _ = ImodFile::Stdout.flush();
             if crate::imod::libiimod::mrcfiles::mrc_read_slice(
-                &mut rgb.data,
+                rgb.data.bytes_mut(),
                 &mut input.fp.clone().unwrap(),
                 &mut input,
                 opt.secs[(k) as usize],
@@ -2333,7 +2330,7 @@ pub fn clip_splitrgb(h1: &mut MrcHeader, opt: &mut ClipOptions) -> i32 {
             }
             for n in 0..3 {
                 if crate::imod::libiimod::mrcfiles::mrc_write_slice(
-                    &planes[n].data,
+                    planes[n].data.bytes(),
                     &mut headers[n].fp.clone().unwrap(),
                     &mut headers[n],
                     file * opt.nofsecs + k,
@@ -2741,7 +2738,7 @@ pub fn clip2d_average(hin: &mut MrcHeader, hout: &mut MrcHeader, opt: &mut ClipO
     let (sx, sy, sz) = crate::imod::libiimod::mrcfiles::mrc_get_scale(&*hin);
     crate::imod::libiimod::mrcfiles::mrc_set_scale(&mut *hout, sx as f64, sy as f64, sz as f64);
     if crate::imod::libiimod::mrcfiles::mrc_write_slice(
-        &avgs.data,
+        avgs.data.bytes(),
         &mut hout.fp.clone().unwrap(),
         hout,
         z,
@@ -2992,7 +2989,10 @@ pub fn clip_planar_fit(hin: &mut MrcHeader, hout: &mut MrcHeader, opt: &mut Clip
         }
     }
     let n = (opt.ix * opt.iy) as usize;
-    let mut sum = vec![0_f32; n];
+    // `processing.cpp:2575`: `sumBuf = B3DMALLOC(float, numPix)`, which
+    // `fullArrayMinMaxMean` and `mrc_write_slice` later take as a slice's
+    // float storage.
+    let mut sum = MrcData::F(vec![0_f32; n]);
     let base = if opt.low == IP_DEFAULT as f32 {
         0.
     } else {
@@ -3071,11 +3071,49 @@ pub fn clip_planar_fit(hin: &mut MrcHeader, hout: &mut MrcHeader, opt: &mut Clip
                     .as_bytes(),
                 );
             };
-            for y in 0..opt.iy {
-                for x in 0..opt.ix {
-                    sum[(x + y * opt.ix) as usize] +=
-                        slice_get_pixel_magnitude(s.as_ref(), x, y) - base;
+            // `processing.cpp:2608-2632`: any mode other than float, short,
+            // ushort or byte is floated first, then each mode is summed
+            // straight from its own union member.
+            let mut mode = input_header.mode;
+            if mode != crate::imod::libiimod::mrcfiles::MRC_MODE_FLOAT
+                && mode != crate::imod::libiimod::mrcfiles::MRC_MODE_SHORT
+                && mode != crate::imod::libiimod::mrcfiles::MRC_MODE_USHORT
+                && mode != crate::imod::libiimod::mrcfiles::MRC_MODE_BYTE
+            {
+                if crate::imod::libiimod::mrcslice::slice_float(&mut s) != 0 {
+                    crate::imod::libcfshr::parse_params::exit_error(
+                        c_format("\n%s converting slice to float", &[CArg::Str(prefix)]).as_bytes(),
+                    );
                 }
+                mode = crate::imod::libiimod::mrcfiles::MRC_MODE_FLOAT;
+            }
+            let sum_buf = sum.f_mut();
+            match mode {
+                crate::imod::libiimod::mrcfiles::MRC_MODE_FLOAT => {
+                    let data = s.data.f();
+                    for ix in 0..n {
+                        sum_buf[ix] += data[ix] - base;
+                    }
+                }
+                crate::imod::libiimod::mrcfiles::MRC_MODE_SHORT => {
+                    let data = s.data.s();
+                    for ix in 0..n {
+                        sum_buf[ix] += data[ix] as f32 - base;
+                    }
+                }
+                crate::imod::libiimod::mrcfiles::MRC_MODE_USHORT => {
+                    let data = s.data.us();
+                    for ix in 0..n {
+                        sum_buf[ix] += data[ix] as f32 - base;
+                    }
+                }
+                crate::imod::libiimod::mrcfiles::MRC_MODE_BYTE => {
+                    let data = s.data.b();
+                    for ix in 0..n {
+                        sum_buf[ix] += data[ix] as f32 - base;
+                    }
+                }
+                _ => {}
             }
             count += 1;
         }
@@ -3105,7 +3143,7 @@ pub fn clip_planar_fit(hin: &mut MrcHeader, hout: &mut MrcHeader, opt: &mut Clip
         let num_bin = (nx_bin * ny_bin) as usize;
         let mut bin_sum = vec![0_f32; num_bin];
         crate::imod::libcfshr::reduce_by_binning::bin_into_slice(
-            &sum[(ny_trim * opt.ix + nx_trim) as usize..],
+            &sum.f()[(ny_trim * opt.ix + nx_trim) as usize..],
             opt.ix,
             &mut bin_sum,
             nx_bin,
@@ -3210,7 +3248,7 @@ pub fn clip_planar_fit(hin: &mut MrcHeader, hout: &mut MrcHeader, opt: &mut Clip
         // accumulated; a plain unscaled sum rounds differently.
         let mut bin_sum = vec![0_f32; (nx_bin * ny_bin) as usize];
         crate::imod::libcfshr::reduce_by_binning::bin_into_slice(
-            &sum[(ny_trim * opt.ix + nx_trim) as usize..],
+            &sum.f()[(ny_trim * opt.ix + nx_trim) as usize..],
             opt.ix,
             &mut bin_sum,
             nx_bin,
@@ -3338,6 +3376,7 @@ pub fn clip_planar_fit(hin: &mut MrcHeader, hout: &mut MrcHeader, opt: &mut Clip
             )
             .as_bytes(),
         );
+        let sum_buf = sum.f_mut();
         for iy in 0..hin.ny {
             for ix in 0..hin.nx {
                 let mut residual = 1. + cons;
@@ -3352,7 +3391,7 @@ pub fn clip_planar_fit(hin: &mut MrcHeader, hout: &mut MrcHeader, opt: &mut Clip
                         col += 1;
                     }
                 }
-                sum[(ix + hin.nx * iy) as usize] = 1. / residual;
+                sum_buf[(ix + hin.nx * iy) as usize] = 1. / residual;
             }
         }
     } else {
@@ -3360,9 +3399,8 @@ pub fn clip_planar_fit(hin: &mut MrcHeader, hout: &mut MrcHeader, opt: &mut Clip
         // `fullArrayMinMaxMean`, so `dmean` is rounded to float before it is
         // used; `0.05 * dmean` then promotes the comparison and the divide
         // to double, and the quotient is rounded to float exactly once.
-        let sum_bytes: Vec<u8> = sum.iter().flat_map(|value| value.to_ne_bytes()).collect();
         let (dmin, dmax, dmean) = crate::imod::libiimod::mrcslice::full_array_min_max_mean(
-            &sum_bytes,
+            &mut sum,
             crate::imod::libcfshr::reduce_by_binning::SLICE_MODE_FLOAT,
             opt.ix,
             opt.iy,
@@ -3384,7 +3422,7 @@ pub fn clip_planar_fit(hin: &mut MrcHeader, hout: &mut MrcHeader, opt: &mut Clip
                 "Some summed values are negative; you must set a base value to subtract with the -l option",
             );
         }
-        for value in &mut sum {
+        for value in sum.f_mut() {
             *value = (dmean as f64 / (0.05 * dmean as f64).max(*value as f64)) as f32;
         }
     }
@@ -3394,10 +3432,9 @@ pub fn clip_planar_fit(hin: &mut MrcHeader, hout: &mut MrcHeader, opt: &mut Clip
         // intermediate slice that used to stand in here was filled by
         // `sliceMinMax`, which never sets `mean`, so the output header
         // carried a stale value rather than the flatfield mean.
-        let sum_bytes: Vec<u8> = sum.iter().flat_map(|value| value.to_ne_bytes()).collect();
         (hout.amin, hout.amax, hout.amean) =
             crate::imod::libiimod::mrcslice::full_array_min_max_mean(
-                &sum_bytes,
+                &mut sum,
                 crate::imod::libcfshr::reduce_by_binning::SLICE_MODE_FLOAT,
                 opt.ix,
                 opt.iy,
@@ -3409,7 +3446,7 @@ pub fn clip_planar_fit(hin: &mut MrcHeader, hout: &mut MrcHeader, opt: &mut Clip
             crate::imod::libcfshr::parse_params::exit_error(message.as_bytes());
         }
         if crate::imod::libiimod::mrcfiles::mrc_write_slice(
-            &sum_bytes,
+            sum.bytes(),
             &mut hout.fp.clone().unwrap(),
             hout,
             0,
@@ -3512,7 +3549,7 @@ pub fn clip_unpack(
         }
         if opt.rotation_flip > 0
             && rotate_flip_gain_reference(
-                &mut reference.as_mut().unwrap().data,
+                reference.as_mut().unwrap().data.f_mut(),
                 &mut nx,
                 &mut ny,
                 opt.rotation_flip,
@@ -3557,29 +3594,15 @@ pub fn clip_unpack(
                 // `processing.cpp:2896-2898`: the reference file's own
                 // dimensions are expanded, and nxGain/nyGain are multiplied
                 // by useFac rather than reset from the input file size.
-                let reference_values = reference
-                    .as_ref()
-                    .unwrap()
-                    .data
-                    .chunks_exact(core::mem::size_of::<f32>())
-                    .map(|bytes| f32::from_ne_bytes(bytes.try_into().unwrap()))
-                    .collect::<Vec<_>>();
-                let mut expanded_values =
-                    vec![0_f32; expanded.data.len() / core::mem::size_of::<f32>()];
+                // `processing.cpp:2897-2901`: `CorDefExpandGainReference(slRef->data.f,
+                // ..., refTemp)` and then `slRef->data.f = refTemp`.
                 crate::imod::clip::correct_defects::cor_def_expand_gain_reference(
-                    &reference_values,
+                    reference.as_ref().unwrap().data.f(),
                     hin2.nx,
                     hin2.ny,
                     use_fac,
-                    &mut expanded_values,
+                    expanded.data.f_mut(),
                 );
-                for (bytes, value) in expanded
-                    .data
-                    .chunks_exact_mut(core::mem::size_of::<f32>())
-                    .zip(expanded_values)
-                {
-                    bytes.copy_from_slice(&value.to_ne_bytes());
-                }
                 reference = Some(expanded);
                 nx *= use_fac;
                 ny *= use_fac;
@@ -3609,15 +3632,10 @@ pub fn clip_unpack(
                             .as_bytes(),
                         );
                     }
-                    let mut reference_values = reference
-                        .as_ref()
-                        .unwrap()
-                        .data
-                        .chunks_exact(core::mem::size_of::<f32>())
-                        .map(|bytes| f32::from_ne_bytes(bytes.try_into().unwrap()))
-                        .collect::<Vec<_>>();
+                    // `processing.cpp:2911`: `CorDefRefineSuperResRef(refTemp, ...)`
+                    // works on the reference in place.
                     crate::imod::clip::correct_defects::cor_def_refine_super_res_ref(
-                        &mut reference_values,
+                        reference.as_mut().unwrap().data.f_mut(),
                         nx,
                         ny,
                         use_fac,
@@ -3629,15 +3647,6 @@ pub fn clip_unpack(
                         y_start,
                         y_interval,
                     );
-                    for (bytes, value) in reference
-                        .as_mut()
-                        .unwrap()
-                        .data
-                        .chunks_exact_mut(core::mem::size_of::<f32>())
-                        .zip(reference_values)
-                    {
-                        bytes.copy_from_slice(&value.to_ne_bytes());
-                    }
                 }
             }
         }
@@ -3672,15 +3681,10 @@ pub fn clip_unpack(
                 );
                 return -1;
             }
+            // `processing.cpp:2944-2945`: `slRef->data.f[i] *= scale`.
+            let data = reference.as_mut().unwrap().data.f_mut();
             for ind in 0..opt.ix * opt.iy {
-                let data = &mut reference.as_mut().unwrap().data;
-                let mut value = f32::from_ne_bytes(
-                    data[ind as usize * 4..ind as usize * 4 + 4]
-                        .try_into()
-                        .unwrap(),
-                );
-                value *= scale;
-                data[ind as usize * 4..ind as usize * 4 + 4].copy_from_slice(&value.to_ne_bytes());
+                data[ind as usize] *= scale;
             }
         }
     }
@@ -3711,7 +3715,7 @@ pub fn clip_unpack(
     if antialias_eer {
         if do_ref {
             if !crate::imod::libiimod::iitif::tiff_gain_reference_for_eer_bytes(
-                &mut reference.as_mut().unwrap().data,
+                reference.as_mut().unwrap().data.bytes_mut(),
             ) {
                 return -1;
             }
@@ -3747,13 +3751,9 @@ pub fn clip_unpack(
             for x in 0..opt.ix {
                 let mut v = [0.; 4];
                 slice_get_val(input.as_mut(), x, y, &mut v);
+                // `processing.cpp:3024`: `slRef->data.f[i + base]`.
                 let gain = if do_ref {
-                    f32::from_ne_bytes(
-                        reference.as_ref().unwrap().data
-                            [(x + y * opt.ix) as usize * 4..(x + y * opt.ix) as usize * 4 + 4]
-                            .try_into()
-                            .unwrap(),
-                    )
+                    reference.as_ref().unwrap().data.f()[(x + y * opt.ix) as usize]
                 } else {
                     scale
                 };
@@ -3761,7 +3761,7 @@ pub fn clip_unpack(
                 if v[0] > trunc_thresh {
                     v[0] = if opt.low == IP_DEFAULT as f32 {
                         crate::imod::clip::correct_defects::cor_def_surrounding_mean(
-                            &input.data,
+                            input.data.bytes(),
                             input.mode,
                             input.xsize,
                             input.ysize,
@@ -3792,7 +3792,7 @@ pub fn clip_unpack(
 }
 /// Matches C++ `rotateFlipGainReference`.
 fn rotate_flip_gain_reference(
-    reference: &mut [u8],
+    reference: &mut [f32],
     nx_gain: &mut i32,
     ny_gain: &mut i32,
     rotation_flip: i32,
@@ -3805,19 +3805,12 @@ fn rotate_flip_gain_reference(
     else {
         return 1;
     };
-    if reference.len() != value_count * core::mem::size_of::<f32>() {
-        return 1;
-    }
-    let input = reference
-        .chunks_exact(core::mem::size_of::<f32>())
-        .map(|bytes| f32::from_ne_bytes(bytes.try_into().unwrap()))
-        .collect::<Vec<_>>();
-    // `processing.cpp:2952` B3DMALLOCs the rotated copy and returns 1 on
+    // `processing.cpp:3064` B3DMALLOCs the rotated copy and returns 1 on
     // failure; a `Vec` cannot fail here.
     let mut summed = vec![0_f32; value_count];
     let error = crate::imod::libcfshr::rotateflip::rotate_flip_image(
         crate::imod::libcfshr::rotateflip::RotateFlipData::Float {
-            array: &input,
+            array: reference,
             brray: &mut summed,
         },
         nx_in,
@@ -3831,12 +3824,8 @@ fn rotate_flip_gain_reference(
         0,
     );
     if error == 0 {
-        for (bytes, value) in reference
-            .chunks_exact_mut(core::mem::size_of::<f32>())
-            .zip(summed)
-        {
-            bytes.copy_from_slice(&value.to_ne_bytes());
-        }
+        // `processing.cpp:3071`: `memcpy(ref, summed, nxGain * nyGain * sizeof(float))`.
+        reference[..summed.len()].copy_from_slice(&summed);
     }
     error
 }
@@ -4501,36 +4490,24 @@ pub fn clip_stat(hin: &mut MrcHeader, opt: &mut ClipOptions) -> i32 {
                 // out of the row is exactly what `sliceGetPixelMagnitude`
                 // returns for them.
                 crate::imod::libcfshr::reduce_by_binning::SLICE_MODE_SHORT => {
-                    let start = 2 * s.xsize as usize * y as usize;
-                    let row = &s.data[start..start + 2 * s.xsize as usize];
-                    for (x, bytes) in row.chunks_exact(2).enumerate() {
-                        process_pixel!(
-                            i16::from_ne_bytes([bytes[0], bytes[1]]) as f32,
-                            x as i32,
-                            y
-                        );
+                    // `processing.cpp:3594`: `sdata = &slice->data.s[slice->xsize * j]`.
+                    let row = &s.data.s()[(s.xsize * y) as usize..][..s.xsize as usize];
+                    for (x, &m) in row.iter().enumerate() {
+                        process_pixel!(m as f32, x as i32, y);
                     }
                 }
                 crate::imod::libcfshr::reduce_by_binning::SLICE_MODE_USHORT => {
-                    let start = 2 * s.xsize as usize * y as usize;
-                    let row = &s.data[start..start + 2 * s.xsize as usize];
-                    for (x, bytes) in row.chunks_exact(2).enumerate() {
-                        process_pixel!(
-                            u16::from_ne_bytes([bytes[0], bytes[1]]) as f32,
-                            x as i32,
-                            y
-                        );
+                    // `processing.cpp:3602`: `usdata = &slice->data.us[slice->xsize * j]`.
+                    let row = &s.data.us()[(s.xsize * y) as usize..][..s.xsize as usize];
+                    for (x, &m) in row.iter().enumerate() {
+                        process_pixel!(m as f32, x as i32, y);
                     }
                 }
                 crate::imod::libcfshr::reduce_by_binning::SLICE_MODE_FLOAT => {
-                    let start = 4 * s.xsize as usize * y as usize;
-                    let row = &s.data[start..start + 4 * s.xsize as usize];
-                    for (x, bytes) in row.chunks_exact(4).enumerate() {
-                        process_pixel!(
-                            f32::from_ne_bytes([bytes[0], bytes[1], bytes[2], bytes[3]]),
-                            x as i32,
-                            y
-                        );
+                    // `processing.cpp:3610`: `fdata = &slice->data.f[slice->xsize * j]`.
+                    let row = &s.data.f()[(s.xsize * y) as usize..][..s.xsize as usize];
+                    for (x, &m) in row.iter().enumerate() {
+                        process_pixel!(m, x as i32, y);
                     }
                 }
                 _ => {
@@ -5518,7 +5495,7 @@ pub fn correct_defects(
     }
     crate::imod::clip::correct_defects::cor_def_correct_defects(
         &opt.defects,
-        &mut slice.data,
+        slice.data.bytes_mut(),
         slice.mode,
         binning,
         top,
@@ -5533,7 +5510,7 @@ pub fn write_vol(vol: &mut [Islice], hout: &mut MrcHeader) -> i32 {
     for k in 0..hout.nz {
         let slice = vol[k as usize].as_mut();
         if crate::imod::libiimod::mrcfiles::mrc_write_slice(
-            &slice.data,
+            slice.data.bytes(),
             &mut hout.fp.clone().unwrap(),
             hout,
             k,
@@ -5587,11 +5564,8 @@ mod tests {
     }
 
     #[test]
-    fn rotate_flip_gain_reference_rotates_owned_float_bytes() {
-        let mut reference = [1_f32, 2., 3., 4., 5., 6.]
-            .into_iter()
-            .flat_map(f32::to_ne_bytes)
-            .collect::<Vec<_>>();
+    fn rotate_flip_gain_reference_rotates_owned_floats() {
+        let mut reference = vec![1_f32, 2., 3., 4., 5., 6.];
         let (mut nx, mut ny) = (3, 2);
 
         assert_eq!(
@@ -5599,11 +5573,7 @@ mod tests {
             0
         );
         assert_eq!((nx, ny), (2, 3));
-        let values = reference
-            .chunks_exact(core::mem::size_of::<f32>())
-            .map(|bytes| f32::from_ne_bytes(bytes.try_into().unwrap()))
-            .collect::<Vec<_>>();
-        assert_eq!(values, [4., 1., 5., 2., 6., 3.]);
+        assert_eq!(reference, [4., 1., 5., 2., 6., 3.]);
     }
 
     #[test]

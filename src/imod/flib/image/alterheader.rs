@@ -3,7 +3,7 @@
 //! All header access goes through the source program's iiunit interface; no
 //! copied `MrcHeader` adapter is used.  The Fortran computed `GO TO` becomes a
 //! single dispatch loop over the same label numbers.
-#![allow(dead_code, unused_variables)]
+#![allow(unused_variables)]
 
 use crate::imod::flib::subrs::hvem::getinout::getinout;
 use crate::imod::flib::subrs::hvem::parse_input_params::{exit_error, pip_read_or_parse_options};

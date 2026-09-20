@@ -2,7 +2,6 @@
 //!
 //! Its background process is deliberately an OS process boundary, as in
 //! `imodpy.bkgdProcess` in the source.
-#![allow(dead_code)]
 
 use super::imodpy::{add_imod_bin_ignore_sighup, bkgd_process};
 use std::ffi::OsString;

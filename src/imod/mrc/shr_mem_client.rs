@@ -151,12 +151,6 @@ impl<B: FrameAlignBackend> ShrMemClient<B> {
         Ok(params.ret_val)
     }
 
-    /// Source `getFrameBuffer`; a caller can write directly into owned frame
-    /// storage, then call `next_frame` with an empty frame vector.
-    pub fn get_frame_buffer(&mut self) -> &mut Vec<u8> {
-        &mut self.frame_buffer
-    }
-
     /// Source `finishAlignAndSum`.
     pub fn finish_align_and_sum(
         &mut self,

@@ -1,6 +1,5 @@
 //! Translation of `IMOD/libcfshr/multibinstat.c`: measure local mean/SD in an
 //! array of boxes at multiple binnings.
-#![allow(dead_code)]
 
 use crate::imod::libcfshr::b3dutil::{CArg, ImodFile, c_format};
 use crate::imod::libcfshr::reduce_by_binning::bin_into_slice;

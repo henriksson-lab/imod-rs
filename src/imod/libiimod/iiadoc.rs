@@ -1,5 +1,4 @@
 //! Translation of `IMOD/libiimod/iiadoc.c`.
-#![allow(dead_code)]
 
 use crate::imod::libcfshr::autodoc::{
     ADOC_GLOBAL_NAME, adoc_clear, adoc_get_float, adoc_get_integer, adoc_get_number_of_sections,

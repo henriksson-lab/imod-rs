@@ -1,11 +1,10 @@
 //! Translation of `IMOD/libcfshr/extraheader.c`.
-#![allow(dead_code)]
 
 use std::sync::Mutex;
 
 use super::autodoc::{
     ADOC_ZVALUE_NAME, adoc_get_float, adoc_get_integer, adoc_get_string, adoc_get_three_floats,
-    adoc_get_three_integers, adoc_get_two_floats, adoc_lookup_by_name_value, adoc_set_current,
+    adoc_get_two_floats, adoc_lookup_by_name_value, adoc_set_current,
 };
 use super::b3dutil::{
     b3d_error, b3d_get_store_error, b3d_set_store_error, extra_is_nbytes_and_flags,
@@ -78,14 +77,6 @@ pub fn extra_header_sizes(
         return 0;
     }
     1
-}
-
-/// C static `freeValStrings` (`extraheader.c:821`).
-///
-/// Rust owns the strings, so clearing their containing vector drops every
-/// value and needs neither a count nor a separate deallocation pass.
-pub fn free_val_strings(val_strings: &mut Vec<Option<String>>) {
-    val_strings.clear();
 }
 
 /// C `getExtraHeaderTilts` (`extraheader.c:74`).
@@ -539,117 +530,6 @@ pub fn get_metadata_by_key(
     0
 }
 
-/// C `getExtraHeaderPieces` (`extraheader.c:472`).
-pub fn get_extra_header_pieces(
-    array: &[u8],
-    num_extra_bytes: i32,
-    nbytes: i32,
-    iflags: i32,
-    nz: i32,
-    ix_piece: &mut [i32],
-    iy_piece: &mut [i32],
-    iz_piece: &mut [i32],
-    num_pieces: &mut i32,
-    max_piece: i32,
-) -> i32 {
-    *num_pieces = 0;
-    if num_extra_bytes == 0 {
-        return 0;
-    }
-    let Ok(nz) = usize::try_from(nz) else {
-        return 1;
-    };
-    if nz > max_piece.max(0) as usize
-        || ix_piece.len() < nz
-        || iy_piece.len() < nz
-        || iz_piece.len() < nz
-    {
-        b3d_error(
-            None,
-            format_args!("getExtraHeaderPieces - arrays not large enough for piece lists"),
-        );
-        return 1;
-    }
-    if nbytes == 0 || extra_is_nbytes_and_flags(nbytes, iflags) == 0 || ((iflags / 2) & 1) == 0 {
-        return 0;
-    }
-    let Ok(extra_bytes) = usize::try_from(num_extra_bytes) else {
-        return 0;
-    };
-    let Some(array) = array.get(..extra_bytes) else {
-        return 0;
-    };
-    let mut ind = if iflags & 1 != 0 { 2_usize } else { 0 };
-    for i in 0..nz {
-        let Some(values) = array.get(ind..ind + 6) else {
-            return 0;
-        };
-        ix_piece[i] = u16::from_ne_bytes(values[0..2].try_into().unwrap()) as i32;
-        iy_piece[i] = u16::from_ne_bytes(values[2..4].try_into().unwrap()) as i32;
-        iz_piece[i] = u16::from_ne_bytes(values[4..6].try_into().unwrap()) as i32;
-        ind += nbytes as usize;
-        *num_pieces = i as i32 + 1;
-    }
-    0
-}
-
-/// C `getMetadataPieces` (`extraheader.c:537`).
-pub fn get_metadata_pieces(
-    ind_adoc: i32,
-    adoc_type: i32,
-    nz: i32,
-    ix_piece: &mut [i32],
-    iy_piece: &mut [i32],
-    iz_piece: &mut [i32],
-    max_piece: i32,
-    num_found: &mut i32,
-) -> i32 {
-    let names: [&[u8]; 3] = [ADOC_ZVALUE_NAME, b"Image", ADOC_ZVALUE_NAME];
-    *num_found = 0;
-    let Ok(nz) = usize::try_from(nz) else {
-        return 1;
-    };
-    if nz > max_piece.max(0) as usize
-        || ix_piece.len() < nz
-        || iy_piece.len() < nz
-        || iz_piece.len() < nz
-    {
-        b3d_error(
-            None,
-            format_args!("getMetadataPieces - Arrays not large enough for piece lists"),
-        );
-        return 1;
-    }
-    if adoc_set_current(ind_adoc) != 0 {
-        b3d_error(
-            None,
-            format_args!("get_metadata_pieces - Failed to set autodoc index"),
-        );
-        return 1;
-    }
-    for i in 0..nz {
-        let mut section = i as i32;
-        if adoc_type == 3 {
-            section = adoc_lookup_by_name_value(names[2], i as i32);
-            if section < 0 {
-                continue;
-            }
-        }
-        if adoc_get_three_integers(
-            names[(adoc_type - 1) as usize],
-            section,
-            b"PieceCoordinates",
-            &mut ix_piece[i],
-            &mut iy_piece[i],
-            &mut iz_piece[i],
-        ) == 0
-        {
-            *num_found += 1;
-        }
-    }
-    0
-}
-
 /// C `getMetadataWeightingDoses` (`extraheader.c:614`).
 pub fn get_metadata_weighting_doses(
     ind_adoc: i32,
@@ -1043,13 +923,6 @@ pub fn get_fei_ext_head_angle_scale(ext_head: &[u8]) -> f64 {
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    #[test]
-    fn metadata_strings_are_owned_rust_text() {
-        let mut strings = vec![Some(String::from("first")), Some(String::from("second"))];
-        free_val_strings(&mut strings);
-        assert!(strings.is_empty());
-    }
 
     #[test]
     fn sem_short_and_prior_doses_match_source() {

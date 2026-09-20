@@ -10,7 +10,6 @@
 //! `2 * nvar` floats of `work` is read back by a caller — those are the
 //! per-edge mean weights the documentation describes, and they are written to
 //! `work` exactly as the source writes them.
-#![allow(dead_code)]
 
 use super::robuststat::{rs_madn, rs_median, rs_trimmed_mean};
 

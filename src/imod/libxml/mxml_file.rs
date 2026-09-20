@@ -2,11 +2,12 @@
 //!
 //! The C hands its `getc`/`putc` callbacks a `void *` that is a
 //! `_mxml_fdbuf_t *`, a `FILE *` or a `const char **` depending on which entry
-//! point was called.  Those three are [`MxmlSource`] and [`MxmlSink`] here: the
-//! callback set is unchanged, and each callback matches the one arm its own
-//! entry point built, exactly as the C casts the `void *` it knows it was
-//! given.
-#![allow(dead_code)]
+//! point was called.  The ones IMOD reaches are [`MxmlSource`] and [`MxmlSink`]
+//! here: the callback set is unchanged, and each callback matches the one arm
+//! its own entry point built, exactly as the C casts the `void *` it knows it
+//! was given.  The `_mxml_fdbuf_t` (`mxmlLoadFd`/`mxmlSaveFd`/`mxmlSAXLoadFd`)
+//! and `mxmlSaveString`/`mxmlSaveAllocString` paths have no caller in IMOD and
+//! are not translated (see `DEAD_CODE.md`).
 
 use super::*;
 use crate::imod::libcfshr::b3dutil::{CArg, ImodFile, c_format, c_format_bytes};
@@ -23,25 +24,8 @@ pub const ENCODE_UTF16LE: i32 = 2;
 /// C `EOF` from `<stdio.h>`.
 const EOF: i32 = -1;
 
-/// Matches C `_mxml_fdbuf_t` (`mxml-file.c:47`).
-///
-/// The C keeps the raw descriptor and calls `read`/`write` on it; the caller of
-/// `mxmlLoadFd`/`mxmlSaveFd` still owns that descriptor, so it is duplicated
-/// into an owned `File` here — a dup shares the file offset with the original,
-/// which is the behaviour the C's plain `read`/`write` on the caller's
-/// descriptor has.  `current` and `end` are offsets into `buffer` rather than
-/// pointers into it.
-pub struct MxmlFdbuf {
-    pub fd: std::fs::File,
-    pub current: usize,
-    pub end: usize,
-    pub buffer: [u8; 8192],
-}
-
 /// The `void *p` the C hands to a `_mxml_getc_cb_t` (`mxml-file.c:44`).
 pub enum MxmlSource<'a> {
-    /// `mxmlLoadFd`/`mxmlSAXLoadFd`: a `_mxml_fdbuf_t *`.
-    Fd(MxmlFdbuf),
     /// `mxmlLoadFile`/`mxmlSAXLoadFile`: a `FILE *`.
     File(&'a mut ImodFile),
     /// `mxmlLoadString`/`mxmlSAXLoadString`: a `const char **` walking a
@@ -52,18 +36,8 @@ pub enum MxmlSource<'a> {
 
 /// The `void *p` the C hands to a `_mxml_putc_cb_t` (`mxml-file.c:45`).
 pub enum MxmlSink<'a> {
-    /// `mxmlSaveFd`: a `_mxml_fdbuf_t *`.
-    Fd(MxmlFdbuf),
     /// `mxmlSaveFile`: a `FILE *`.
     File(&'a mut dyn Write),
-    /// `mxmlSaveString`: the C's two-element `char *ptr[2]`, a write cursor and
-    /// the end of the buffer.  `ptr` counts past `end` without writing, which
-    /// is how `mxmlSaveString` reports the length a short buffer needed.
-    String {
-        buffer: &'a mut [u8],
-        ptr: usize,
-        end: usize,
-    },
 }
 
 /// Matches C `_mxml_getc_cb_t` (`mxml-file.c:44`).
@@ -74,39 +48,6 @@ pub type MxmlPutcCb = Option<fn(i32, &mut MxmlSink) -> i32>;
 /// Matches C `MXML_NO_CALLBACK` where a SAX callback is expected
 /// (`mxml-file.c:97`).
 const MXML_NO_CALLBACK_SAX: MxmlSaxCb = None;
-
-/// Matches C `mxmlLoadFd` (`mxml-file.c:80`).
-pub fn mxml_load_fd(
-    arena: &mut MxmlArena,
-    top: Option<usize>,
-    fd: std::os::fd::BorrowedFd,
-    cb: MxmlLoadCb,
-) -> Option<usize> {
-    /*
-     * Initialize the file descriptor buffer...
-     */
-
-    let mut buf: MxmlSource = MxmlSource::Fd(MxmlFdbuf {
-        fd: std::fs::File::from(fd.try_clone_to_owned().ok()?),
-        current: 0,
-        end: 0,
-        buffer: [0; 8192],
-    });
-
-    /*
-     * Read the XML data...
-     */
-
-    mxml_load_data(
-        arena,
-        top,
-        &mut buf,
-        cb,
-        Some(mxml_fd_getc),
-        MXML_NO_CALLBACK_SAX,
-        &mut (),
-    )
-}
 
 /// Matches C `mxmlLoadFile` (`mxml-file.c:117`).
 pub fn mxml_load_file(
@@ -156,101 +97,6 @@ pub fn mxml_load_string(
     )
 }
 
-/// Matches C `mxmlSaveAllocString` (`mxml-file.c:170`).
-pub fn mxml_save_alloc_string(
-    arena: &MxmlArena,
-    node: Option<usize>,
-    cb: MxmlSaveCb,
-) -> Option<Vec<u8>> {
-    let bytes: i32;
-    let mut buffer: [u8; 8192] = [0; 8192];
-    let mut s: Vec<u8>;
-
-    /*
-     * Write the node to the temporary buffer...
-     */
-
-    bytes = mxml_save_string(arena, node, &mut buffer, 8192, cb);
-
-    if bytes <= 0 {
-        return None;
-    }
-
-    if bytes < (8192 - 1) as i32 {
-        /*
-         * Node fit inside the buffer, so just duplicate that string and
-         * return...
-         */
-
-        return Some(buffer[..bytes as usize].to_vec());
-    }
-
-    /*
-     * Allocate a buffer of the required size and save the node to the
-     * new buffer...
-     */
-
-    s = vec![0u8; (bytes + 1) as usize];
-
-    mxml_save_string(arena, node, &mut s, bytes + 1, cb);
-
-    /*
-     * Return the allocated string...  The C returns a NUL-terminated buffer of
-     * `bytes + 1` characters; the owned Vec carries the string itself.
-     */
-
-    s.truncate(bytes as usize);
-    Some(s)
-}
-
-/// Matches C `mxmlSaveFd` (`mxml-file.c:218`).
-pub fn mxml_save_fd(
-    arena: &MxmlArena,
-    node: Option<usize>,
-    fd: std::os::fd::BorrowedFd,
-    cb: MxmlSaveCb,
-) -> i32 {
-    let col: i32;
-
-    /*
-     * Initialize the file descriptor buffer...
-     */
-
-    let Ok(owned) = fd.try_clone_to_owned() else {
-        return -1;
-    };
-    let mut buf: MxmlSink = MxmlSink::Fd(MxmlFdbuf {
-        fd: std::fs::File::from(owned),
-        current: 0,
-        end: 8192,
-        buffer: [0; 8192],
-    });
-
-    /*
-     * Write the node...
-     */
-
-    col = mxml_global().with_borrow(|global| {
-        mxml_write_node(arena, node, &mut buf, cb, 0, Some(mxml_fd_putc), global)
-    });
-    if col < 0 {
-        return -1;
-    }
-
-    if col > 0 && mxml_fd_putc(b'\n' as i32, &mut buf) < 0 {
-        return -1;
-    }
-
-    /*
-     * Flush and return...
-     */
-
-    let MxmlSink::Fd(fdbuf) = &mut buf else {
-        return -1;
-    };
-    mxml_fd_write(fdbuf)
-}
-
 /// Matches C `mxmlSaveFile` (`mxml-file.c:262`).
 pub fn mxml_save_file(
     arena: &MxmlArena,
@@ -283,166 +129,6 @@ pub fn mxml_save_file(
      */
 
     0
-}
-
-/// Matches C `mxmlSaveString` (`mxml-file.c:299`).
-pub fn mxml_save_string(
-    arena: &MxmlArena,
-    node: Option<usize>,
-    buffer: &mut [u8],
-    bufsize: i32,
-    cb: MxmlSaveCb,
-) -> i32 {
-    let col: i32;
-
-    /*
-     * Write the node...  ptr[0] is the write cursor and ptr[1] the end of the
-     * buffer.
-     */
-
-    let mut ptr: MxmlSink = MxmlSink::String {
-        buffer,
-        ptr: 0,
-        end: bufsize as usize,
-    };
-
-    col = mxml_global().with_borrow(|global| {
-        mxml_write_node(arena, node, &mut ptr, cb, 0, Some(mxml_string_putc), global)
-    });
-    if col < 0 {
-        return -1;
-    }
-
-    if col > 0 {
-        mxml_string_putc(b'\n' as i32, &mut ptr);
-    }
-
-    /*
-     * Nul-terminate the buffer...
-     */
-
-    let MxmlSink::String {
-        buffer,
-        ptr,
-        end: _,
-    } = &mut ptr
-    else {
-        return -1;
-    };
-
-    if *ptr >= bufsize as usize {
-        buffer[(bufsize - 1) as usize] = 0;
-    } else {
-        buffer[*ptr] = 0;
-    }
-
-    /*
-     * Return the number of characters...
-     */
-
-    *ptr as i32
-}
-
-/// Matches C `mxmlSAXLoadFd` (`mxml-file.c:349`).
-pub fn mxml_sax_load_fd(
-    arena: &mut MxmlArena,
-    top: Option<usize>,
-    fd: std::os::fd::BorrowedFd,
-    cb: MxmlLoadCb,
-    sax_cb: MxmlSaxCb,
-    sax_data: &mut dyn Any,
-) -> Option<usize> {
-    /*
-     * Initialize the file descriptor buffer...
-     */
-
-    let mut buf: MxmlSource = MxmlSource::Fd(MxmlFdbuf {
-        fd: std::fs::File::from(fd.try_clone_to_owned().ok()?),
-        current: 0,
-        end: 0,
-        buffer: [0; 8192],
-    });
-
-    /*
-     * Read the XML data...
-     */
-
-    mxml_load_data(
-        arena,
-        top,
-        &mut buf,
-        cb,
-        Some(mxml_fd_getc),
-        sax_cb,
-        sax_data,
-    )
-}
-
-/// Matches C `mxmlSAXLoadFile` (`mxml-file.c:391`).
-pub fn mxml_sax_load_file(
-    arena: &mut MxmlArena,
-    top: Option<usize>,
-    fp: &mut ImodFile,
-    cb: MxmlLoadCb,
-    sax_cb: MxmlSaxCb,
-    sax_data: &mut dyn Any,
-) -> Option<usize> {
-    /*
-     * Read the XML data...
-     */
-
-    let mut p: MxmlSource = MxmlSource::File(fp);
-
-    mxml_load_data(
-        arena,
-        top,
-        &mut p,
-        cb,
-        Some(mxml_file_getc),
-        sax_cb,
-        sax_data,
-    )
-}
-
-/// Matches C `mxmlSAXLoadString` (`mxml-file.c:429`).
-pub fn mxml_sax_load_string(
-    arena: &mut MxmlArena,
-    top: Option<usize>,
-    s: &[u8],
-    cb: MxmlLoadCb,
-    sax_cb: MxmlSaxCb,
-    sax_data: &mut dyn Any,
-) -> Option<usize> {
-    let mut sp: MxmlSource = MxmlSource::String { s, pos: 0 };
-
-    /*
-     * Read the XML data...
-     */
-
-    mxml_load_data(
-        arena,
-        top,
-        &mut sp,
-        cb,
-        Some(mxml_string_getc),
-        sax_cb,
-        sax_data,
-    )
-}
-
-/// Matches C `mxmlSetCustomHandlers` (`mxml-file.c:453`).
-pub fn mxml_set_custom_handlers(load: MxmlCustomLoadCb, save: MxmlCustomSaveCb) {
-    mxml_global().with_borrow_mut(|global| {
-        global.custom_load_cb = load;
-        global.custom_save_cb = save;
-    });
-}
-
-/// Matches C `mxmlSetErrorCallback` (`mxml-file.c:469`).
-pub fn mxml_set_error_callback(cb: MxmlErrorCb) {
-    mxml_global().with_borrow_mut(|global| {
-        global.error_cb = cb;
-    });
 }
 
 /// Matches C `mxmlSetWrapMargin` (`mxml-file.c:484`).
@@ -493,441 +179,6 @@ pub fn mxml_add_char(ch: i32, bufptr: &mut Vec<u8>) -> i32 {
         bufptr.push((0x80 | ((ch >> 6) & 0x3f)) as u8);
         bufptr.push((0x80 | (ch & 0x3f)) as u8);
     }
-
-    0
-}
-
-/// Matches C static `mxml_fd_getc` (`mxml-file.c:568`).
-pub fn mxml_fd_getc(p: &mut MxmlSource, encoding: &mut i32) -> i32 {
-    let mut ch: i32;
-    let mut temp: i32;
-
-    /*
-     * Get the next character...
-     */
-
-    let MxmlSource::Fd(buf) = p else {
-        return EOF;
-    };
-    if buf.current >= buf.end && mxml_fd_read(buf) < 0 {
-        return EOF;
-    }
-
-    ch = buf.buffer[buf.current] as i32;
-    buf.current += 1;
-
-    match *encoding {
-        ENCODE_UTF8 => {
-            /*
-             * Got a UTF-8 character; convert UTF-8 to Unicode and return...
-             */
-
-            if (ch & 0x80) == 0 {
-                /*
-                 * ASCII
-                 */
-
-                if ch < b' ' as i32
-                    && ch != b'\n' as i32
-                    && ch != b'\r' as i32
-                    && ch != b'\t' as i32
-                {
-                    mxml_error(
-                        c_format(
-                            "Bad control character 0x%02x not allowed by XML standard!",
-                            &[CArg::Uint(ch as u32 as u64)],
-                        )
-                        .as_bytes(),
-                    );
-                    return EOF;
-                }
-
-                return ch;
-            } else if ch == 0xfe {
-                /*
-                 * UTF-16 big-endian BOM?
-                 */
-
-                if buf.current >= buf.end && mxml_fd_read(buf) < 0 {
-                    return EOF;
-                }
-
-                ch = buf.buffer[buf.current] as i32;
-                buf.current += 1;
-
-                if ch != 0xff {
-                    return EOF;
-                }
-
-                *encoding = ENCODE_UTF16BE;
-
-                return mxml_fd_getc(p, encoding);
-            } else if ch == 0xff {
-                /*
-                 * UTF-16 little-endian BOM?
-                 */
-
-                if buf.current >= buf.end && mxml_fd_read(buf) < 0 {
-                    return EOF;
-                }
-
-                ch = buf.buffer[buf.current] as i32;
-                buf.current += 1;
-
-                if ch != 0xfe {
-                    return EOF;
-                }
-
-                *encoding = ENCODE_UTF16LE;
-
-                return mxml_fd_getc(p, encoding);
-            } else if (ch & 0xe0) == 0xc0 {
-                /*
-                 * Two-byte value...
-                 */
-
-                if buf.current >= buf.end && mxml_fd_read(buf) < 0 {
-                    return EOF;
-                }
-
-                temp = buf.buffer[buf.current] as i32;
-                buf.current += 1;
-
-                if (temp & 0xc0) != 0x80 {
-                    return EOF;
-                }
-
-                ch = ((ch & 0x1f) << 6) | (temp & 0x3f);
-
-                if ch < 0x80 {
-                    mxml_error(
-                        c_format(
-                            "Invalid UTF-8 sequence for character 0x%04x!",
-                            &[CArg::Uint(ch as u32 as u64)],
-                        )
-                        .as_bytes(),
-                    );
-                    return EOF;
-                }
-            } else if (ch & 0xf0) == 0xe0 {
-                /*
-                 * Three-byte value...
-                 */
-
-                if buf.current >= buf.end && mxml_fd_read(buf) < 0 {
-                    return EOF;
-                }
-
-                temp = buf.buffer[buf.current] as i32;
-                buf.current += 1;
-
-                if (temp & 0xc0) != 0x80 {
-                    return EOF;
-                }
-
-                ch = ((ch & 0x0f) << 6) | (temp & 0x3f);
-
-                if buf.current >= buf.end && mxml_fd_read(buf) < 0 {
-                    return EOF;
-                }
-
-                temp = buf.buffer[buf.current] as i32;
-                buf.current += 1;
-
-                if (temp & 0xc0) != 0x80 {
-                    return EOF;
-                }
-
-                ch = (ch << 6) | (temp & 0x3f);
-
-                if ch < 0x800 {
-                    mxml_error(
-                        c_format(
-                            "Invalid UTF-8 sequence for character 0x%04x!",
-                            &[CArg::Uint(ch as u32 as u64)],
-                        )
-                        .as_bytes(),
-                    );
-                    return EOF;
-                }
-
-                /*
-                 * Ignore (strip) Byte Order Mark (BOM)...
-                 */
-
-                if ch == 0xfeff {
-                    return mxml_fd_getc(p, encoding);
-                }
-            } else if (ch & 0xf8) == 0xf0 {
-                /*
-                 * Four-byte value...
-                 */
-
-                if buf.current >= buf.end && mxml_fd_read(buf) < 0 {
-                    return EOF;
-                }
-
-                temp = buf.buffer[buf.current] as i32;
-                buf.current += 1;
-
-                if (temp & 0xc0) != 0x80 {
-                    return EOF;
-                }
-
-                ch = ((ch & 0x07) << 6) | (temp & 0x3f);
-
-                if buf.current >= buf.end && mxml_fd_read(buf) < 0 {
-                    return EOF;
-                }
-
-                temp = buf.buffer[buf.current] as i32;
-                buf.current += 1;
-
-                if (temp & 0xc0) != 0x80 {
-                    return EOF;
-                }
-
-                ch = (ch << 6) | (temp & 0x3f);
-
-                if buf.current >= buf.end && mxml_fd_read(buf) < 0 {
-                    return EOF;
-                }
-
-                temp = buf.buffer[buf.current] as i32;
-                buf.current += 1;
-
-                if (temp & 0xc0) != 0x80 {
-                    return EOF;
-                }
-
-                ch = (ch << 6) | (temp & 0x3f);
-
-                if ch < 0x10000 {
-                    mxml_error(
-                        c_format(
-                            "Invalid UTF-8 sequence for character 0x%04x!",
-                            &[CArg::Uint(ch as u32 as u64)],
-                        )
-                        .as_bytes(),
-                    );
-                    return EOF;
-                }
-            } else {
-                return EOF;
-            }
-        }
-
-        ENCODE_UTF16BE => {
-            /*
-             * Read UTF-16 big-endian char...
-             */
-
-            if buf.current >= buf.end && mxml_fd_read(buf) < 0 {
-                return EOF;
-            }
-
-            temp = buf.buffer[buf.current] as i32;
-            buf.current += 1;
-
-            ch = (ch << 8) | temp;
-
-            if ch < b' ' as i32 && ch != b'\n' as i32 && ch != b'\r' as i32 && ch != b'\t' as i32 {
-                mxml_error(
-                    c_format(
-                        "Bad control character 0x%02x not allowed by XML standard!",
-                        &[CArg::Uint(ch as u32 as u64)],
-                    )
-                    .as_bytes(),
-                );
-                return EOF;
-            } else if ch >= 0xd800 && ch <= 0xdbff {
-                /*
-                 * Multi-word UTF-16 char...
-                 */
-
-                let mut lch: i32;
-
-                if buf.current >= buf.end && mxml_fd_read(buf) < 0 {
-                    return EOF;
-                }
-
-                lch = buf.buffer[buf.current] as i32;
-                buf.current += 1;
-
-                if buf.current >= buf.end && mxml_fd_read(buf) < 0 {
-                    return EOF;
-                }
-
-                temp = buf.buffer[buf.current] as i32;
-                buf.current += 1;
-
-                lch = (lch << 8) | temp;
-
-                if !(0xdc00..0xdfff).contains(&lch) {
-                    return EOF;
-                }
-
-                ch = (((ch & 0x3ff) << 10) | (lch & 0x3ff)) + 0x10000;
-            }
-        }
-
-        ENCODE_UTF16LE => {
-            /*
-             * Read UTF-16 little-endian char...
-             */
-
-            if buf.current >= buf.end && mxml_fd_read(buf) < 0 {
-                return EOF;
-            }
-
-            temp = buf.buffer[buf.current] as i32;
-            buf.current += 1;
-
-            ch |= temp << 8;
-
-            if ch < b' ' as i32 && ch != b'\n' as i32 && ch != b'\r' as i32 && ch != b'\t' as i32 {
-                mxml_error(
-                    c_format(
-                        "Bad control character 0x%02x not allowed by XML standard!",
-                        &[CArg::Uint(ch as u32 as u64)],
-                    )
-                    .as_bytes(),
-                );
-                return EOF;
-            } else if ch >= 0xd800 && ch <= 0xdbff {
-                /*
-                 * Multi-word UTF-16 char...
-                 */
-
-                let mut lch: i32;
-
-                if buf.current >= buf.end && mxml_fd_read(buf) < 0 {
-                    return EOF;
-                }
-
-                lch = buf.buffer[buf.current] as i32;
-                buf.current += 1;
-
-                if buf.current >= buf.end && mxml_fd_read(buf) < 0 {
-                    return EOF;
-                }
-
-                temp = buf.buffer[buf.current] as i32;
-                buf.current += 1;
-
-                lch |= temp << 8;
-
-                if !(0xdc00..0xdfff).contains(&lch) {
-                    return EOF;
-                }
-
-                ch = (((ch & 0x3ff) << 10) | (lch & 0x3ff)) + 0x10000;
-            }
-        }
-
-        _ => {}
-    }
-
-    ch
-}
-
-/// Matches C static `mxml_fd_putc` (`mxml-file.c:807`).
-pub fn mxml_fd_putc(ch: i32, p: &mut MxmlSink) -> i32 {
-    /*
-     * Flush the write buffer as needed - note above that "end" still indicates
-     * the end of the buffer...
-     */
-
-    let MxmlSink::Fd(buf) = p else {
-        return -1;
-    };
-    if buf.current >= buf.end && mxml_fd_write(buf) < 0 {
-        return -1;
-    }
-
-    buf.buffer[buf.current] = ch as u8;
-    buf.current += 1;
-
-    /*
-     * Return successfully...
-     */
-
-    0
-}
-
-/// Matches C static `mxml_fd_read` (`mxml-file.c:838`).
-///
-/// The C loops over `EAGAIN`/`EINTR`; `std::io::Read` reports the latter as
-/// `ErrorKind::Interrupted` and the former as `WouldBlock`, and the loop is
-/// the same.
-pub fn mxml_fd_read(buf: &mut MxmlFdbuf) -> i32 {
-    let bytes: usize;
-
-    /*
-     * Read from the file descriptor...
-     */
-
-    loop {
-        match buf.fd.read(&mut buf.buffer) {
-            Ok(n) => {
-                bytes = n;
-                break;
-            }
-            Err(e) => {
-                if e.kind() != std::io::ErrorKind::WouldBlock
-                    && e.kind() != std::io::ErrorKind::Interrupted
-                {
-                    return -1;
-                }
-            }
-        }
-    }
-
-    if bytes == 0 {
-        return -1;
-    }
-
-    /*
-     * Update the pointers and return success...
-     */
-
-    buf.current = 0;
-    buf.end = bytes;
-
-    0
-}
-
-/// Matches C static `mxml_fd_write` (`mxml-file.c:879`).
-pub fn mxml_fd_write(buf: &mut MxmlFdbuf) -> i32 {
-    let mut bytes: usize;
-    let mut ptr: usize;
-
-    /*
-     * Return 0 if there is nothing to write...
-     */
-
-    if buf.current == 0 {
-        return 0;
-    }
-
-    /*
-     * Loop until we have written everything...
-     */
-
-    ptr = 0;
-    while ptr < buf.current {
-        match buf.fd.write(&buf.buffer[ptr..buf.current]) {
-            Ok(n) => bytes = n,
-            Err(_) => return -1,
-        }
-        ptr += bytes;
-    }
-
-    /*
-     * All done, reset pointers and return success...
-     */
-
-    buf.current = 0;
 
     0
 }
@@ -2974,21 +2225,6 @@ pub fn mxml_string_getc(p: &mut MxmlSource, encoding: &mut i32) -> i32 {
     EOF
 }
 
-/// Matches C static `mxml_string_putc` (`mxml-file.c:2258`).
-pub fn mxml_string_putc(ch: i32, p: &mut MxmlSink) -> i32 {
-    let MxmlSink::String { buffer, ptr, end } = p else {
-        return -1;
-    };
-
-    if *ptr < *end {
-        buffer[*ptr] = ch as u8;
-    }
-
-    *ptr += 1;
-
-    0
-}
-
 /// Matches C static `mxml_write_name` (`mxml-file.c:2280`).
 ///
 /// The C indexes a `char` array, so `mxmlEntityGetName` is given the *signed*
@@ -3501,7 +2737,6 @@ mod tests {
         tree: Option<usize>,
         tag: &str,
     ) -> Vec<usize> {
-        let mut ws: i32 = 0;
         let mut nodes: Vec<usize> = Vec::new();
         let mut n = tree;
         while let Some(cur) = n {
@@ -3516,7 +2751,7 @@ mod tests {
             let n = nodes[i as usize];
             let _ = out.write_all(
                 c_format(
-                    "  [%d] type=%d parent=%d child=%d last=%d prev=%d next=%d ref=%d",
+                    "  [%d] type=%d parent=%d child=%d last=%d prev=%d next=%d",
                     &[
                         CArg::Int(i as i64),
                         CArg::Int(mxml_get_type(arena, Some(n)) as i64),
@@ -3525,7 +2760,6 @@ mod tests {
                         CArg::Int(node_index(&nodes, arena.node(n).last_child) as i64),
                         CArg::Int(node_index(&nodes, arena.node(n).prev) as i64),
                         CArg::Int(node_index(&nodes, arena.node(n).next) as i64),
-                        CArg::Int(mxml_get_ref_count(arena, Some(n)) as i64),
                     ],
                 )
                 .as_bytes(),
@@ -3548,9 +2782,6 @@ mod tests {
                                 CArg::Bytes(a.value.as_deref().unwrap_or(b"(nil)")),
                             ],
                         ));
-                    }
-                    if let Some(s) = mxml_get_cdata(arena, Some(n)) {
-                        let _ = out.write_all(&c_format_bytes(" cdata=<%s>", &[CArg::Bytes(s)]));
                     }
                 }
                 MxmlValue::Opaque(opaque) => {
@@ -3579,14 +2810,10 @@ mod tests {
                 _ => {}
             }
             let _ = out.write_all(&c_format_bytes(
-                " getElem=%s getOpaque=%s getInt=%d getReal=%f getText=%s",
-                &[
-                    CArg::Bytes(mxml_get_element(arena, Some(n)).unwrap_or(b"(nil)")),
-                    CArg::Bytes(mxml_get_opaque(arena, Some(n)).unwrap_or(b"(nil)")),
-                    CArg::Int(mxml_get_integer(arena, Some(n)) as i64),
-                    CArg::Dbl(mxml_get_real(arena, Some(n))),
-                    CArg::Bytes(mxml_get_text(arena, Some(n), Some(&mut ws)).unwrap_or(b"(nil)")),
-                ],
+                " getElem=%s",
+                &[CArg::Bytes(
+                    mxml_get_element(arena, Some(n)).unwrap_or(b"(nil)"),
+                )],
             ));
             let _ = out.write_all(b"\n");
         }
@@ -3601,45 +2828,13 @@ mod tests {
         cb: MxmlSaveCb,
         wrap: i32,
     ) {
-        let mut buf: Vec<u8> = vec![0; 400000];
+        let mut buf: Vec<u8> = Vec::new();
         mxml_set_wrap_margin(wrap);
         S_LAST_LEVEL.set(-1);
-        let n = mxml_save_string(arena, tree, &mut buf, 400000, cb);
-        let end = buf.iter().position(|c| *c == 0).unwrap_or(buf.len());
+        let n = mxml_save_file(arena, tree, &mut buf, cb);
         let _ = out.write_all(&c_format_bytes(
-            "%s saveString=%d\n[%s]\n",
-            &[
-                CArg::Str(tag),
-                CArg::Int(n as i64),
-                CArg::Bytes(&buf[..end]),
-            ],
-        ));
-        S_LAST_LEVEL.set(-1);
-        let alloc = mxml_save_alloc_string(arena, tree, cb);
-        let _ = out.write_all(
-            c_format(
-                "%s saveAlloc=%s\n",
-                &[
-                    CArg::Str(tag),
-                    CArg::Str(if alloc.is_some() { "ok" } else { "(nil)" }),
-                ],
-            )
-            .as_bytes(),
-        );
-        if let Some(alloc) = alloc {
-            let _ = out.write_all(&c_format_bytes("[%s]\n", &[CArg::Bytes(&alloc)]));
-        }
-        S_LAST_LEVEL.set(-1);
-        let mut small: [u8; 40] = [0; 40];
-        let m = mxml_save_string(arena, tree, &mut small, 40, cb);
-        let end = small.iter().position(|c| *c == 0).unwrap_or(small.len());
-        let _ = out.write_all(&c_format_bytes(
-            "%s saveSmall=%d [%s]\n",
-            &[
-                CArg::Str(tag),
-                CArg::Int(m as i64),
-                CArg::Bytes(&small[..end]),
-            ],
+            "%s saveFile=%d\n[%s]\n",
+            &[CArg::Str(tag), CArg::Int(n as i64), CArg::Bytes(&buf)],
         ));
         mxml_set_wrap_margin(72);
     }
@@ -3683,127 +2878,11 @@ mod tests {
         }
         let _ = out.write_all(
             c_format(
-                "  lastNode=%d walkPrev=%d walkPrevNoDesc=%d\n",
-                &[
-                    CArg::Int(node_index(&nodes, n) as i64),
-                    CArg::Int(
-                        node_index(&nodes, mxml_walk_prev(arena, n, tree, MXML_DESCEND)) as i64,
-                    ),
-                    CArg::Int(
-                        node_index(&nodes, mxml_walk_prev(arena, n, tree, MXML_NO_DESCEND)) as i64,
-                    ),
-                ],
+                "  lastNode=%d\n",
+                &[CArg::Int(node_index(&nodes, n) as i64)],
             )
             .as_bytes(),
         );
-
-        let mut count: i32 = 0;
-        let mut n = mxml_find_element(arena, tree, tree, Some(b"Field"), None, None, MXML_DESCEND);
-        while n.is_some() {
-            if count < 5 {
-                let a = mxml_element_get_attr(arena, n, Some(b"name"));
-                let _ = out.write_all(&c_format_bytes(
-                    "  findField[%d]=%d attr=%s\n",
-                    &[
-                        CArg::Int(count as i64),
-                        CArg::Int(node_index(&nodes, n) as i64),
-                        CArg::Bytes(a.unwrap_or(b"(nil)")),
-                    ],
-                ));
-            }
-            count += 1;
-            n = mxml_find_element(arena, n, tree, Some(b"Field"), None, None, MXML_DESCEND);
-        }
-        let _ =
-            out.write_all(c_format("  findFieldCount=%d\n", &[CArg::Int(count as i64)]).as_bytes());
-
-        for (label, path) in [
-            (
-                "  findPath(autodoc/PreData/Version)=%d\n",
-                b"autodoc/PreData/Version".as_slice(),
-            ),
-            ("  findPath(*/short)=%d\n", b"*/short".as_slice()),
-            ("  findPath(nosuch)=%d\n", b"nosuch".as_slice()),
-        ] {
-            let _ = out.write_all(
-                c_format(
-                    label,
-                    &[CArg::Int(
-                        node_index(&nodes, mxml_find_path(arena, tree, path)) as i64,
-                    )],
-                )
-                .as_bytes(),
-            );
-        }
-
-        let ind = mxml_index_new(arena, tree, Some(b"Field"), Some(b"name"));
-        if ind.is_none() {
-            let _ = out.write_all(b"  index NULL\n");
-        } else {
-            let mut ind = ind.unwrap();
-            let _ = out.write_all(
-                c_format(
-                    "  indexCount=%d alloc=%d\n",
-                    &[
-                        CArg::Int(mxml_index_get_count(Some(&ind)) as i64),
-                        CArg::Int(ind.nodes.capacity() as i64),
-                    ],
-                )
-                .as_bytes(),
-            );
-            let mut count: i32 = 0;
-            let mut n = mxml_index_reset(Some(&mut ind));
-            while n.is_some() {
-                if count < 8 {
-                    let a = mxml_element_get_attr(arena, n, Some(b"name"));
-                    let _ = out.write_all(&c_format_bytes(
-                        "  indexEnum[%d]=%d %s\n",
-                        &[
-                            CArg::Int(count as i64),
-                            CArg::Int(node_index(&nodes, n) as i64),
-                            CArg::Bytes(a.unwrap_or(b"(nil)")),
-                        ],
-                    ));
-                }
-                count += 1;
-                n = mxml_index_enum(Some(&mut ind));
-            }
-            let _ = out.write_all(
-                c_format("  indexEnumCount=%d\n", &[CArg::Int(count as i64)]).as_bytes(),
-            );
-            mxml_index_reset(Some(&mut ind));
-            let n = mxml_index_find(arena, Some(&mut ind), Some(b"Field"), Some(b"InputFile"));
-            let _ = out.write_all(
-                c_format(
-                    "  indexFind(Field,InputFile)=%d\n",
-                    &[CArg::Int(node_index(&nodes, n) as i64)],
-                )
-                .as_bytes(),
-            );
-            mxml_index_reset(Some(&mut ind));
-            let n = mxml_index_find(arena, Some(&mut ind), Some(b"Field"), Some(b"zzz-none"));
-            let _ = out.write_all(
-                c_format(
-                    "  indexFind(Field,zzz-none)=%d\n",
-                    &[CArg::Int(node_index(&nodes, n) as i64)],
-                )
-                .as_bytes(),
-            );
-            mxml_index_delete(Some(ind));
-        }
-
-        let ind = mxml_index_new(arena, tree, None, None);
-        let _ = out.write_all(
-            c_format(
-                "  indexAllCount=%d\n",
-                &[CArg::Int(match &ind {
-                    Some(ind) => mxml_index_get_count(Some(ind)) as i64,
-                    None => -1,
-                })],
-            )
-            .as_bytes(),
-        );
-        mxml_index_delete(ind);
 
         save_report(out, arena, tree, "  SAVE-nocb", None, 72);
         save_report(out, arena, tree, "  SAVE-ws", Some(ws_cb), 0);
@@ -3848,7 +2927,6 @@ mod tests {
     ];
 
     fn probe_strings(out: &mut dyn Write) {
-        let mut buf: [u8; 8192] = [0; 8192];
         for (i, case) in CASES.iter().enumerate() {
             let _ = out.write_all(&c_format_bytes(
                 "=== STRING %d [%s]\n",
@@ -3863,11 +2941,11 @@ mod tests {
             }
             dump_tree(out, arena, tree, "  TREE");
             S_LAST_LEVEL.set(-1);
-            let n = mxml_save_string(arena, tree, &mut buf, 8192, None);
-            let end = buf.iter().position(|c| *c == 0).unwrap_or(buf.len());
+            let mut buf: Vec<u8> = Vec::new();
+            let n = mxml_save_file(arena, tree, &mut buf, None);
             let _ = out.write_all(&c_format_bytes(
                 "  save=%d [%s]\n",
-                &[CArg::Int(n as i64), CArg::Bytes(&buf[..end])],
+                &[CArg::Int(n as i64), CArg::Bytes(&buf)],
             ));
             mxml_delete(arena, tree);
         }
@@ -3893,8 +2971,6 @@ mod tests {
     }
 
     fn probe_build(out: &mut dyn Write) {
-        let mut buf: [u8; 8192] = [0; 8192];
-        let mut i: i32 = 0;
         let arena = &mut MxmlArena::new();
 
         let _ = out.write_all(b"=== BUILD\n");
@@ -3912,7 +2988,6 @@ mod tests {
         mxml_new_integer(arena, top, 17);
         mxml_new_real(arena, top, 3.5);
         mxml_new_opaque(arena, top, Some(b"opaque \"text\""));
-        mxml_new_cdata(arena, top, Some(b"cdata & stuff"));
         dump_tree(out, arena, xml, "  BUILT");
         let _ = out.write_all(&c_format_bytes(
             "  getAttr(one)=%s\n",
@@ -3938,160 +3013,19 @@ mod tests {
                 .as_bytes(),
             );
         }
-        mxml_element_delete_attr(arena, elem, Some(b"two"));
-        mxml_element_delete_attr(arena, elem, Some(b"zzz"));
-        dump_tree(out, arena, xml, "  AFTERDEL");
         save_report(out, arena, xml, "  BUILDSAVE", None, 72);
         save_report(out, arena, xml, "  BUILDSAVEWS", Some(ws_cb), 0);
 
         let t = mxml_new_element(arena, MXML_NO_PARENT, Some(b"orphan"));
-        let r1 = mxml_retain(arena, t);
-        let r2 = mxml_retain(arena, t);
-        let r3 = mxml_release(arena, t);
-        let r4 = mxml_release(arena, t);
         let r5 = mxml_release(arena, t);
+        let _ = out.write_all(c_format("  releaseFinal=%d\n", &[CArg::Int(r5 as i64)]).as_bytes());
         let _ = out.write_all(
             c_format(
-                "  retain=%d retain=%d release=%d release=%d releaseFinal=%d\n",
-                &[
-                    CArg::Int(r1 as i64),
-                    CArg::Int(r2 as i64),
-                    CArg::Int(r3 as i64),
-                    CArg::Int(r4 as i64),
-                    CArg::Int(r5 as i64),
-                ],
+                "  releaseNull=%d\n",
+                &[CArg::Int(mxml_release(arena, None) as i64)],
             )
             .as_bytes(),
         );
-        let _ = out.write_all(
-            c_format(
-                "  retainNull=%d releaseNull=%d\n",
-                &[
-                    CArg::Int(mxml_retain(arena, None) as i64),
-                    CArg::Int(mxml_release(arena, None) as i64),
-                ],
-            )
-            .as_bytes(),
-        );
-
-        let t = mxml_new_element(arena, MXML_NO_PARENT, Some(b"setme"));
-        let _ = out.write_all(
-            c_format(
-                "  setElement=%d\n",
-                &[CArg::Int(
-                    mxml_set_element(arena, t, Some(b"renamed")) as i64
-                )],
-            )
-            .as_bytes(),
-        );
-        let _ = out.write_all(&c_format_bytes(
-            "  name=%s\n",
-            &[CArg::Bytes(mxml_get_element(arena, t).unwrap_or(b"(null)"))],
-        ));
-        let _ = out.write_all(
-            c_format(
-                "  setCDATAbad=%d\n",
-                &[CArg::Int(mxml_set_cdata(arena, t, Some(b"x")) as i64)],
-            )
-            .as_bytes(),
-        );
-        let _ = out.write_all(
-            c_format(
-                "  setUserData=%d\n",
-                &[CArg::Int(
-                    mxml_set_user_data(arena, t, Some(Box::new(1usize))) as i64,
-                )],
-            )
-            .as_bytes(),
-        );
-        /* The C prints the pointer with %p; there is no address to print. */
-        let _ = out.write_all(
-            c_format(
-                "  getUserData=%s\n",
-                &[CArg::Str(if mxml_get_user_data(arena, t).is_some() {
-                    "(set)"
-                } else {
-                    "(nil)"
-                })],
-            )
-            .as_bytes(),
-        );
-        mxml_delete(arena, t);
-
-        let t = mxml_new_integer(arena, MXML_NO_PARENT, 5);
-        let a = mxml_set_integer(arena, t, 9);
-        let _ = out.write_all(
-            c_format(
-                "  setInteger=%d %d\n",
-                &[
-                    CArg::Int(a as i64),
-                    CArg::Int(mxml_get_integer(arena, t) as i64),
-                ],
-            )
-            .as_bytes(),
-        );
-        let _ = out.write_all(
-            c_format(
-                "  setReal=%d\n",
-                &[CArg::Int(mxml_set_real(arena, t, 1.0) as i64)],
-            )
-            .as_bytes(),
-        );
-        mxml_delete(arena, t);
-        let t = mxml_new_real(arena, MXML_NO_PARENT, 5.0);
-        let a = mxml_set_real(arena, t, 9.5);
-        let _ = out.write_all(
-            c_format(
-                "  setReal=%d %f\n",
-                &[CArg::Int(a as i64), CArg::Dbl(mxml_get_real(arena, t))],
-            )
-            .as_bytes(),
-        );
-        mxml_delete(arena, t);
-        let t = mxml_new_text(arena, MXML_NO_PARENT, 0, Some(b"a"));
-        let _ = out.write_all(
-            c_format(
-                "  setText=%d\n",
-                &[CArg::Int(mxml_set_text(arena, t, 1, Some(b"bcd")) as i64)],
-            )
-            .as_bytes(),
-        );
-        let _ = out.write_all(&c_format_bytes(
-            "  getText=%s\n",
-            &[CArg::Bytes(
-                mxml_get_text(arena, t, Some(&mut i)).unwrap_or(b"(null)"),
-            )],
-        ));
-        mxml_delete(arena, t);
-        let t = mxml_new_opaque(arena, MXML_NO_PARENT, Some(b"a"));
-        let a = mxml_set_opaque(arena, t, Some(b"xyz"));
-        let _ = out.write_all(&c_format_bytes(
-            "  setOpaque=%d %s\n",
-            &[
-                CArg::Int(a as i64),
-                CArg::Bytes(mxml_get_opaque(arena, t).unwrap_or(b"(null)")),
-            ],
-        ));
-        mxml_delete(arena, t);
-        let t = mxml_new_cdata(arena, MXML_NO_PARENT, Some(b"abc"));
-        let c0 = mxml_get_cdata(arena, t).unwrap_or(b"(null)").to_vec();
-        let sc = mxml_set_cdata(arena, t, Some(b"def"));
-        let _ = out.write_all(&c_format_bytes(
-            "  cdata=%s setCDATA=%d then=%s\n",
-            &[
-                CArg::Bytes(&c0),
-                CArg::Int(sc as i64),
-                CArg::Bytes(mxml_get_cdata(arena, t).unwrap_or(b"(null)")),
-            ],
-        ));
-        S_LAST_LEVEL.set(-1);
-        let n = mxml_save_string(arena, t, &mut buf, 8192, None);
-        let end = buf.iter().position(|c| *c == 0).unwrap_or(buf.len());
-        let _ = out.write_all(&c_format_bytes(
-            "  cdataSave=%d [%s]\n",
-            &[CArg::Int(n as i64), CArg::Bytes(&buf[..end])],
-        ));
-        mxml_delete(arena, t);
 
         mxml_delete(arena, xml);
     }
@@ -4160,8 +3094,7 @@ mod tests {
     /// whitespace callback.  Byte strings and return values below come from the
     /// reference `libimxml.so`.
     #[test]
-    fn save_string_and_save_file_match_native_bytes() {
-        let mut buf: [u8; 8192] = [0; 8192];
+    fn save_file_matches_native_bytes() {
         let arena = &mut MxmlArena::new();
         let tree = mxml_load_string(
             arena,
@@ -4171,22 +3104,15 @@ mod tests {
         );
         assert!(tree.is_some());
 
-        let n = mxml_save_string(arena, tree, &mut buf, 8192, None);
-        assert_eq!(n, 59);
+        let mut buf: Vec<u8> = Vec::new();
+        assert_eq!(mxml_save_file(arena, tree, &mut buf, None), 0);
         assert_eq!(
-            &buf[..n as usize],
+            buf,
             b"<root><child x=\"1\" /><child x=\"2\" /><child x=\"3\" /></root>\n"
         );
 
         /* With the indenting callback and no wrap margin. */
         mxml_set_wrap_margin(0);
-        S_LAST_LEVEL.set(-1);
-        let n = mxml_save_string(arena, tree, &mut buf, 8192, Some(ws_cb));
-        assert_eq!(n, 62);
-        assert_eq!(
-            &buf[..n as usize],
-            b"<root>\n<child x=\"1\" />\n<child x=\"2\" />\n<child x=\"3\" /></root>\n"
-        );
 
         /* mxmlSaveFile writes the same bytes through a file. */
         let path =
@@ -4214,21 +3140,15 @@ mod tests {
         );
         assert!(xml.is_some());
         S_LAST_LEVEL.set(-1);
-        let n = mxml_save_string(arena, xml, &mut buf, 8192, Some(ws_cb));
-        assert_eq!(n, 55);
+        let mut buf: Vec<u8> = Vec::new();
+        assert_eq!(mxml_save_file(arena, xml, &mut buf, Some(ws_cb)), 0);
         assert_eq!(
-            &buf[..n as usize],
+            buf,
             b"<?xml version=\"1.0\"?>\n<root>\n  <child x=\"1\" />\n</root>\n"
         );
         mxml_delete(arena, xml);
 
         mxml_set_wrap_margin(72);
-
-        /* A short buffer truncates but still returns the full length. */
-        let m = mxml_save_string(arena, tree, &mut buf, 20, None);
-        assert_eq!(m, 59);
-        assert_eq!(&buf[..19], b"<root><child x=\"1\" ");
-        assert_eq!(buf[19], 0);
 
         mxml_delete(arena, tree);
     }
@@ -4238,7 +3158,6 @@ mod tests {
     /// `mxmlSetWrapMargin` call.  Native bytes below.
     #[test]
     fn default_wrap_margin_is_72_columns() {
-        let mut buf: [u8; 8192] = [0; 8192];
         let arena = &mut MxmlArena::new();
         let xml = mxml_new_xml(arena, Some(b"1.0"));
         let top = mxml_new_element(arena, xml, Some(b"root"));
@@ -4246,10 +3165,10 @@ mod tests {
         mxml_element_set_attr(arena, e, Some(b"aaaaaaaaaa"), Some(b"1111111111"));
         mxml_element_set_attr(arena, e, Some(b"bbbbbbbbbb"), Some(b"2222222222"));
         mxml_element_set_attr(arena, e, Some(b"cccccccccc"), Some(b"3333333333"));
-        let n = mxml_save_string(arena, xml, &mut buf, 8192, None);
-        assert_eq!(n, 129);
+        let mut buf: Vec<u8> = Vec::new();
+        assert_eq!(mxml_save_file(arena, xml, &mut buf, None), 0);
         assert_eq!(
-            &buf[..n as usize],
+            buf,
             b"<?xml version=\"1.0\" encoding=\"utf-8\"?><root><e aaaaaaaaaa=\"1111111111\"\nbbbbbbbbbb=\"2222222222\" cccccccccc=\"3333333333\" /></root>\n".as_slice()
         );
         mxml_delete(arena, xml);
@@ -4268,7 +3187,13 @@ mod tests {
             Some(mxml_opaque_cb),
         );
         assert!(tree.is_some());
-        let o = mxml_get_opaque(arena, tree);
+        /* `mxmlGetOpaque(tree)` reads the element's first child when that
+         * child is the opaque node (`mxml-get.c:248-252`). */
+        let child = arena.node(tree.unwrap()).child.unwrap();
+        let o = match &arena.node(child).value {
+            MxmlValue::Opaque(opaque) => opaque.as_deref(),
+            _ => None,
+        };
         assert_eq!(o, Some([0xc3u8, 0x86, 0x41, 0xc2, 0xa0].as_slice()));
         mxml_delete(arena, tree);
     }

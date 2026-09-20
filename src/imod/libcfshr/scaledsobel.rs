@@ -1,5 +1,4 @@
 //! Translation of `IMOD/libcfshr/scaledsobel.c`.
-#![allow(dead_code)]
 
 /// Complete function inventory for `scaledsobel.c`.
 pub const SCALED_SOBEL_SOURCE_FUNCTIONS: &[&str] = &["scaledSobel", "scaledsobel"];

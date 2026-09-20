@@ -1,5 +1,4 @@
 //! Translation of `IMOD/libcfshr/minimize1D.c`.
-#![allow(dead_code)]
 pub const MINIMIZE1D_SOURCE_FUNCTIONS: &[&str] = &["minimize1D", "minimize1d"];
 
 /// Original `minimize1D` (`minimize1D.c:53`).
@@ -108,27 +107,6 @@ pub fn minimize1d(
     *next_position = positions[1] + direction as f32 * step;
     values[6] = direction as f32;
     0
-}
-
-/// Original Fortran wrapper `minimize1d` (`minimize1D.c:174`).
-pub fn minimize1d_f(
-    cur_position: &f32,
-    cur_value: &f32,
-    initial_step: &f32,
-    scan_steps: &i32,
-    cuts_done: &mut i32,
-    brackets: &mut [f32],
-    next_position: &mut f32,
-) -> i32 {
-    minimize1d(
-        *cur_position,
-        *cur_value,
-        *initial_step,
-        *scan_steps,
-        cuts_done,
-        brackets,
-        next_position,
-    )
 }
 
 #[cfg(test)]

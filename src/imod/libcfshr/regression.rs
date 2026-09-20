@@ -1,5 +1,4 @@
 //! Translation of `IMOD/libcfshr/regression.c`.
-#![allow(dead_code)]
 
 use crate::imod::libcfshr::b3dutil::{CArg, ImodFile, c_format};
 use std::io::Write;

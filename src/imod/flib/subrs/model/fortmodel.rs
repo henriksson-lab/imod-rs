@@ -6,8 +6,6 @@
 //! The crate has no `src/imod/include` directory yet, so the module lives
 //! beside its only users in `flib/subrs/model`; move it to a mirrored
 //! `src/imod/include/fortmodel.rs` when that directory is created.
-#![allow(dead_code)]
-
 /// Original: `max_clabel` (`fortmodel.f90:9`) — max # of text labels.
 pub const MAX_CLABEL: usize = 200;
 /// Original: `maxTypes` (`fortmodel.f90:10`).

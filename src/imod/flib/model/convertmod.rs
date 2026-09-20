@@ -1,6 +1,4 @@
 //! Translation of `IMOD/flib/model/convertmod.f`.
-#![allow(dead_code)]
-
 use std::fs::OpenOptions;
 
 use crate::imod::flib::subrs::hvem::getinout::getinout;

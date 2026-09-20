@@ -1,5 +1,4 @@
 //! Translation of `IMOD/libcfshr/writelist.c`.
-#![allow(dead_code)]
 
 use std::io::Write;
 

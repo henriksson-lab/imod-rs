@@ -1,22 +1,20 @@
 //! Translation of `IMOD/clip/correlation.cpp`.
-#![allow(dead_code)]
-
 use crate::imod::clip::clip::{ClipOptions, show_error, show_status};
 use crate::imod::clip::fft::mrc_to_dfft;
-use crate::imod::libcfshr::b3dutil::{CArg, ImodFile, c_format, data_size_for_mode};
+use crate::imod::libcfshr::b3dutil::{CArg, ImodFile, c_format};
 use crate::imod::libcfshr::islice::{
-    Islice, Istack, slice_create, slice_get_pixel_magnitude, slice_get_val, slice_put_val,
+    Islice, Istack, MrcData, slice_create, slice_get_pixel_magnitude, slice_get_val, slice_init,
+    slice_put_val,
 };
 use crate::imod::libiimod::mrcfiles::{
     MRC_MODE_COMPLEX_FLOAT, MRC_MODE_FLOAT, MrcHeader, mrc_head_label, mrc_head_new,
-    mrc_head_write, mrc_read_slice, mrc_write_slice,
+    mrc_head_write, mrc_mread_slice, mrc_read_slice, mrc_write_slice,
 };
 use crate::imod::libiimod::mrcslice::{
     corr_conj, slice_add_const, slice_box, slice_box_in, slice_float, slice_mmm,
     slice_reduce_mirrored_fft, slice_resize_in,
 };
 use std::io::Write as _;
-use std::mem::size_of;
 
 /// Matches C++ `corr_getmax`.
 pub fn corr_getmax(islice: &mut Islice, sa: i32, xm: i32, ym: i32, x: &mut f32, y: &mut f32) {
@@ -84,117 +82,40 @@ pub fn clip_slice_corr(slice1: &mut Islice, slice2: Option<&mut Islice>) -> Opti
         }
         slice_mmm(slice1);
         slice_add_const(slice1, [-slice1.mean, 0., 0., 0.]);
-        let mut float_data: Vec<f32> = slice1
-            .data
-            .chunks_exact(size_of::<f32>())
-            .map(|bytes| f32::from_ne_bytes(bytes.try_into().unwrap()))
-            .collect();
-        if float_data.len() * size_of::<f32>() != slice1.data.len() {
-            return None;
-        }
-        mrc_to_dfft(&mut float_data, slice1.xsize - 2, slice1.ysize, 0);
-        for (bytes, value) in slice1
-            .data
-            .chunks_exact_mut(size_of::<f32>())
-            .zip(float_data)
-        {
-            bytes.copy_from_slice(&value.to_ne_bytes());
-        }
+        mrc_to_dfft(slice1.data.f_mut(), slice1.xsize - 2, slice1.ysize, 0);
         slice1.xsize /= 2;
     } else if slice1.xsize % 2 == 0 {
         slice_reduce_mirrored_fft(slice1);
     }
-    if let Some(slice2) = slice2 {
+    let mut slice2 = slice2;
+    if let Some(slice2) = slice2.as_deref_mut() {
         if slice2.mode != MRC_MODE_COMPLEX_FLOAT {
             if slice_float(slice2) < 0 {
                 return None;
             }
-            let mut float_data: Vec<f32> = slice2
-                .data
-                .chunks_exact(size_of::<f32>())
-                .map(|bytes| f32::from_ne_bytes(bytes.try_into().unwrap()))
-                .collect();
-            if float_data.len() * size_of::<f32>() != slice2.data.len() {
-                return None;
-            }
-            mrc_to_dfft(&mut float_data, slice2.xsize - 2, slice2.ysize, 0);
-            for (bytes, value) in slice2
-                .data
-                .chunks_exact_mut(size_of::<f32>())
-                .zip(float_data)
-            {
-                bytes.copy_from_slice(&value.to_ne_bytes());
-            }
+            mrc_to_dfft(slice2.data.f_mut(), slice2.xsize - 2, slice2.ysize, 0);
             slice2.xsize /= 2;
         } else if slice2.xsize % 2 == 0 {
             slice_reduce_mirrored_fft(slice2);
         }
+        // `correlation.cpp:162` compares `s1` with `s2`, which is `s1` itself
+        // for an autocorrelation.
         if slice1.xsize != slice2.xsize || slice1.ysize != slice2.ysize {
             show_error("corr: slices must be same size.\n");
             return None;
-        }
-        let values = (slice1.xsize * slice1.ysize * 2) as usize;
-        let byte_count = values.checked_mul(size_of::<f32>())?;
-        let mut first_data: Vec<f32> = slice1
-            .data
-            .get(..byte_count)?
-            .chunks_exact(size_of::<f32>())
-            .map(|bytes| f32::from_ne_bytes(bytes.try_into().unwrap()))
-            .collect();
-        let second_data: Vec<f32> = slice2
-            .data
-            .get(..byte_count)?
-            .chunks_exact(size_of::<f32>())
-            .map(|bytes| f32::from_ne_bytes(bytes.try_into().unwrap()))
-            .collect();
-        if corr_conj(&mut first_data, &second_data) != 0 {
-            return None;
-        }
-        for (bytes, value) in slice1.data[..byte_count]
-            .chunks_exact_mut(size_of::<f32>())
-            .zip(first_data)
-        {
-            bytes.copy_from_slice(&value.to_ne_bytes());
-        }
-    } else {
-        let values = (slice1.xsize * slice1.ysize * 2) as usize;
-        let byte_count = values.checked_mul(size_of::<f32>())?;
-        let mut first_data: Vec<f32> = slice1
-            .data
-            .get(..byte_count)?
-            .chunks_exact(size_of::<f32>())
-            .map(|bytes| f32::from_ne_bytes(bytes.try_into().unwrap()))
-            .collect();
-        let second_data = first_data.clone();
-        if corr_conj(&mut first_data, &second_data) != 0 {
-            return None;
-        }
-        for (bytes, value) in slice1.data[..byte_count]
-            .chunks_exact_mut(size_of::<f32>())
-            .zip(first_data)
-        {
-            bytes.copy_from_slice(&value.to_ne_bytes());
         }
     }
     let Some(mut output) = slice_create(2 * slice1.xsize, slice1.ysize, MRC_MODE_FLOAT) else {
         return None;
     };
-    let mut float_data: Vec<f32> = slice1
-        .data
-        .chunks_exact(size_of::<f32>())
-        .map(|bytes| f32::from_ne_bytes(bytes.try_into().unwrap()))
-        .collect();
-    if float_data.len() * size_of::<f32>() != slice1.data.len() {
-        return None;
-    }
-    mrc_to_dfft(&mut float_data, 2 * slice1.xsize - 2, slice1.ysize, 1);
-    for (bytes, value) in slice1
-        .data
-        .chunks_exact_mut(size_of::<f32>())
-        .zip(float_data)
-    {
-        bytes.copy_from_slice(&value.to_ne_bytes());
-    }
+    // `correlation.cpp:176`: `s1->xsize * s1->ysize` complex values.  For an
+    // autocorrelation the C passes `s1->data.f` as both operands.
+    let size = (slice1.xsize * slice1.ysize) as usize;
+    match slice2.as_deref() {
+        Some(slice2) => corr_conj(slice1.data.f_mut(), Some(slice2.data.f()), size as i32),
+        None => corr_conj(slice1.data.f_mut(), None, size as i32),
+    };
+    mrc_to_dfft(slice1.data.f_mut(), 2 * slice1.xsize - 2, slice1.ysize, 1);
     slice1.xsize *= 2;
     let xm = output.xsize / 2;
     let ym = output.ysize / 2;
@@ -338,50 +259,18 @@ pub fn clip_corr3d(
             return -1;
         }
     }
-    let Some(values) = first.slices[0]
-        .xsize
-        .checked_mul(first.slices[0].ysize)
-        .and_then(|values| values.checked_mul(2))
-        .and_then(|values| usize::try_from(values).ok())
-    else {
-        return -1;
-    };
-    let Some(byte_count) = values.checked_mul(size_of::<f32>()) else {
-        return -1;
-    };
-    for z in 0..first.slices.len() {
-        let Some(first_bytes) = first.slices[z].data.get(..byte_count) else {
-            return -1;
-        };
-        let mut first_data: Vec<f32> = first_bytes
-            .chunks_exact(size_of::<f32>())
-            .map(|bytes| f32::from_ne_bytes(bytes.try_into().unwrap()))
-            .collect();
+    // `correlation.cpp:281-283`: `size` complex values per slice; `v2` is
+    // `v1` itself for an autocorrelation.
+    let size = (first.slices[0].xsize * first.slices[0].ysize) as usize;
+    for k in 0..first.slices.len() {
         if autocorrelation {
-            let second_data = first_data.to_vec();
-            if corr_conj(&mut first_data, &second_data) != 0 {
-                return -1;
-            }
+            corr_conj(first.slices[k].data.f_mut(), None, size as i32);
         } else {
-            let Some(second_bytes) = second
-                .as_ref()
-                .and_then(|volume| volume.slices.get(z)?.data.get(..byte_count))
-            else {
-                return -1;
-            };
-            let second_data: Vec<f32> = second_bytes
-                .chunks_exact(size_of::<f32>())
-                .map(|bytes| f32::from_ne_bytes(bytes.try_into().unwrap()))
-                .collect();
-            if corr_conj(&mut first_data, &second_data) != 0 {
-                return -1;
-            }
-        }
-        for (bytes, value) in first.slices[z].data[..byte_count]
-            .chunks_exact_mut(size_of::<f32>())
-            .zip(first_data)
-        {
-            bytes.copy_from_slice(&value.to_ne_bytes());
+            corr_conj(
+                first.slices[k].data.f_mut(),
+                Some(second.as_ref().unwrap().slices[k].data.f()),
+                size as i32,
+            );
         }
     }
     let _ = ImodFile::Stdout.write_all(b"\rCalculating inverse fft");
@@ -494,17 +383,7 @@ pub fn grap_3dcorr(
             b"clip: Cross correlation."
         },
     );
-    let Some(values) = input1
-        .nx
-        .checked_mul(input1.ny)
-        .and_then(|values| values.checked_mul(2))
-        .and_then(|values| usize::try_from(values).ok())
-    else {
-        return -1;
-    };
-    let Some(byte_count) = values.checked_mul(size_of::<f32>()) else {
-        return -1;
-    };
+    let size = (input1.nx * input1.ny) as usize;
     let Some(mut slice1) = slice_create(input1.nx, input1.ny, MRC_MODE_COMPLEX_FLOAT) else {
         return -1;
     };
@@ -518,7 +397,7 @@ pub fn grap_3dcorr(
     };
     for z in 0..input1.nz {
         if mrc_read_slice(
-            &mut slice1.data,
+            slice1.data.bytes_mut(),
             &mut input1.fp.clone().unwrap(),
             input1,
             z,
@@ -529,7 +408,7 @@ pub fn grap_3dcorr(
         }
         if let Some(slice2) = slice2.as_mut() {
             if mrc_read_slice(
-                &mut slice2.data,
+                slice2.data.bytes_mut(),
                 &mut input2.fp.clone().unwrap(),
                 input2,
                 z,
@@ -539,38 +418,14 @@ pub fn grap_3dcorr(
                 return -1;
             }
         }
-        let Some(first_bytes) = slice1.data.get(..byte_count) else {
-            return -1;
+        // `correlation.cpp:376`: `sin2` is `sin1` itself for an
+        // autocorrelation.
+        match slice2.as_ref() {
+            Some(slice2) => corr_conj(slice1.data.f_mut(), Some(slice2.data.f()), size as i32),
+            None => corr_conj(slice1.data.f_mut(), None, size as i32),
         };
-        let mut first_data: Vec<f32> = first_bytes
-            .chunks_exact(size_of::<f32>())
-            .map(|bytes| f32::from_ne_bytes(bytes.try_into().unwrap()))
-            .collect();
-        if let Some(slice2) = slice2.as_ref() {
-            let Some(second_bytes) = slice2.data.get(..byte_count) else {
-                return -1;
-            };
-            let second_data: Vec<f32> = second_bytes
-                .chunks_exact(size_of::<f32>())
-                .map(|bytes| f32::from_ne_bytes(bytes.try_into().unwrap()))
-                .collect();
-            if corr_conj(&mut first_data, &second_data) != 0 {
-                return -1;
-            }
-        } else {
-            let second_data = first_data.to_vec();
-            if corr_conj(&mut first_data, &second_data) != 0 {
-                return -1;
-            }
-        }
-        for (bytes, value) in slice1.data[..byte_count]
-            .chunks_exact_mut(size_of::<f32>())
-            .zip(first_data)
-        {
-            bytes.copy_from_slice(&value.to_ne_bytes());
-        }
         if mrc_write_slice(
-            &slice1.data,
+            slice1.data.bytes(),
             &mut output.fp.clone().unwrap(),
             output,
             z,
@@ -622,79 +477,35 @@ pub fn grap_corr(
     } else {
         mrc_head_new(&mut *output, input1.nx, input1.ny, 1, MRC_MODE_FLOAT);
     }
-    let mut data_size = 0;
-    let mut channels = 0;
-    if data_size_for_mode(input1.mode, &mut data_size, &mut channels) != 0 {
-        show_error("corr, error getting slice 1.\n");
-        return -1;
-    }
-    let Some(first_bytes_len) = (input1.nx as usize)
-        .checked_mul(input1.ny as usize)
-        .and_then(|pixels| pixels.checked_mul(data_size as usize))
-        .and_then(|bytes| bytes.checked_mul(channels as usize))
-    else {
+    let Some(buf1) = mrc_mread_slice(&mut input1.fp.clone().unwrap(), input1, z1, b'z') else {
         show_error("corr, error getting slice 1.\n");
         return -1;
     };
-    let mut first_bytes = Vec::new();
-    if first_bytes.try_reserve_exact(first_bytes_len).is_err() {
-        show_error("corr, error getting slice 1.\n");
-        return -1;
-    }
-    first_bytes.resize(first_bytes_len, 0);
-    if mrc_read_slice(
-        &mut first_bytes,
-        &mut input1.fp.clone().unwrap(),
-        input1,
-        z1,
-        b'z',
-    ) != 0
-    {
-        show_error("corr, error getting slice 1.\n");
-        return -1;
-    }
-    let mut fp2 = if autocorrelation {
-        input1.fp.clone().unwrap()
-    } else {
-        input2.fp.clone().unwrap()
-    };
-    let (second_nx, second_ny, second_mode) = if autocorrelation {
-        (input1.nx, input1.ny, input1.mode)
-    } else {
-        (input2.nx, input2.ny, input2.mode)
-    };
-    if data_size_for_mode(second_mode, &mut data_size, &mut channels) != 0 {
-        show_error("corr, error getting slice 2.\n");
-        return -1;
-    }
-    let Some(second_bytes_len) = (second_nx as usize)
-        .checked_mul(second_ny as usize)
-        .and_then(|pixels| pixels.checked_mul(data_size as usize))
-        .and_then(|bytes| bytes.checked_mul(channels as usize))
-    else {
-        show_error("corr, error getting slice 2.\n");
-        return -1;
-    };
-    let mut second_bytes = Vec::new();
-    if second_bytes.try_reserve_exact(second_bytes_len).is_err() {
-        show_error("corr, error getting slice 2.\n");
-        return -1;
-    }
-    second_bytes.resize(second_bytes_len, 0);
-    let second_read = if autocorrelation {
-        mrc_read_slice(&mut second_bytes, &mut fp2, input1, z1, b'z')
-    } else {
-        mrc_read_slice(&mut second_bytes, &mut fp2, input2, z2, b'z')
-    };
-    if second_read != 0 {
-        show_error("corr, error getting slice 2.\n");
-        return -1;
-    }
-    if !autocorrelation {
+    // `correlation.cpp:448-461`: with two input files the second slice comes
+    // from `hin2`; with sections given on one file it comes from `hin1` at
+    // `z2`; an autocorrelation re-reads `z1` from `hin1`.
+    let buf2 = if !autocorrelation {
+        let buf2 = if options.infiles == 2 {
+            mrc_mread_slice(&mut input2.fp.clone().unwrap(), input2, z2, b'z')
+        } else {
+            mrc_mread_slice(&mut input1.fp.clone().unwrap(), input1, z2, b'z')
+        };
+        let Some(buf2) = buf2 else {
+            show_error("corr, error getting slice 2.\n");
+            return -1;
+        };
         show_status("Clip: Doing 2D correlation...\n");
+        buf2
     } else {
+        let buf2 = mrc_mread_slice(&mut input1.fp.clone().unwrap(), input1, z1, b'z');
         show_status("Clip: Doing 2D auto-correlation...\n");
-    }
+        // `correlation.cpp:459` does not test this read; `sliceInit` below
+        // would then take a NULL buffer.
+        let Some(buf2) = buf2 else {
+            return -1;
+        };
+        buf2
+    };
     if options.ix == IP_DEFAULT {
         options.ix = input1.nx;
     }
@@ -712,17 +523,47 @@ pub fn grap_corr(
         options.cy as i32 - options.iy / 2,
     );
     let (urx, ury) = (llx + options.ix, lly + options.iy);
-    let Some(mut first) = slice_create(input1.nx, input1.ny, input1.mode) else {
-        return -1;
+    // `correlation.cpp:393` declares `Islice sin1, sin2` on the stack and
+    // `sliceInit` fills them; the fields `sliceInit` leaves alone are the
+    // C's uninitialised stack and nothing below reads them.
+    let mut first = Islice {
+        data: MrcData::default(),
+        xsize: 0,
+        ysize: 0,
+        mode: 0,
+        csize: 0,
+        dsize: 0,
+        min: 0.,
+        max: 0.,
+        mean: 0.,
+        index: 0,
+        cval: [0.; 4],
     };
-    first.data.copy_from_slice(&first_bytes);
-    let Some(mut second) = slice_create(second_nx, second_ny, second_mode) else {
-        return -1;
+    let mut second = Islice {
+        data: MrcData::default(),
+        xsize: 0,
+        ysize: 0,
+        mode: 0,
+        csize: 0,
+        dsize: 0,
+        min: 0.,
+        max: 0.,
+        mean: 0.,
+        index: 0,
+        cval: [0.; 4],
     };
-    second.data.copy_from_slice(&second_bytes);
+    slice_init(&mut first, input1.nx, input1.ny, input1.mode, buf1);
     slice_mmm(first.as_mut());
     slice_box_in(first.as_mut(), llx, lly, urx, ury);
     slice_mmm(first.as_mut());
+    if options.infiles == 2 {
+        slice_init(&mut second, input2.nx, input2.ny, input2.mode, buf2);
+    } else {
+        // `correlation.cpp:491` sizes this from `hin2`, which `clip.cpp:188`
+        // never initialises when only one file is given; the buffer was read
+        // from `hin1`, so its sizes are what the data actually has.
+        slice_init(&mut second, input1.nx, input1.ny, input1.mode, buf2);
+    }
     slice_mmm(second.as_mut());
     slice_box_in(second.as_mut(), llx, lly, urx, ury);
     slice_mmm(second.as_mut());
@@ -778,7 +619,7 @@ pub fn grap_corr(
         slice_resize_in(correlation.as_mut(), output.nx, output.ny);
         output.nz += 1;
         if mrc_write_slice(
-            &correlation.data,
+            correlation.data.bytes(),
             &mut output.fp.clone().unwrap(),
             output,
             output.nz - 1,
@@ -797,7 +638,7 @@ pub fn grap_corr(
     } else if options.add2file == IP_APPEND_OVERWRITE {
         slice_resize_in(correlation.as_mut(), output.nx, output.ny);
         if mrc_write_slice(
-            &correlation.data,
+            correlation.data.bytes(),
             &mut output.fp.clone().unwrap(),
             output,
             output.nz - 1,
@@ -828,7 +669,7 @@ pub fn grap_corr(
         mrc_head_label(&mut *output, b"clip: 2d correlation calculated.");
         if mrc_head_write(&mut output.fp.clone().unwrap(), output) != 0
             || mrc_write_slice(
-                &correlation.data,
+                correlation.data.bytes(),
                 &mut output.fp.clone().unwrap(),
                 output,
                 0,
@@ -902,6 +743,7 @@ pub fn padfloat_volume(volume: &mut Istack, pad: f32) -> i32 {
     let first = volume.slices.first().unwrap();
     let xsize = first.xsize * 2;
     let ysize = first.ysize * 2;
+    let xysize = (xsize * ysize) as usize;
     let Ok(new_len) = usize::try_from(zsize) else {
         return -1;
     };
@@ -924,8 +766,8 @@ pub fn padfloat_volume(volume: &mut Istack, pad: f32) -> i32 {
         let Some(mut slice) = slice_create(xsize, ysize, MRC_MODE_FLOAT) else {
             return -1;
         };
-        for bytes in slice.data.chunks_exact_mut(core::mem::size_of::<f32>()) {
-            bytes.copy_from_slice(&pad.to_ne_bytes());
+        for i in 0..xysize {
+            slice.data.f_mut()[i] = pad;
         }
         low_padding.push(slice);
     }
@@ -933,8 +775,8 @@ pub fn padfloat_volume(volume: &mut Istack, pad: f32) -> i32 {
         let Some(mut slice) = slice_create(xsize, ysize, MRC_MODE_FLOAT) else {
             return -1;
         };
-        for bytes in slice.data.chunks_exact_mut(core::mem::size_of::<f32>()) {
-            bytes.copy_from_slice(&pad.to_ne_bytes());
+        for i in 0..xysize {
+            slice.data.f_mut()[i] = pad;
         }
         high_padding.push(slice);
     }
@@ -959,12 +801,8 @@ pub fn clip_cor_scalevol(volume: &mut Istack) -> i32 {
     let zsize = volume.slices.len() as i32;
     let scale = (xysize * zsize) as f32;
     for slice in &mut volume.slices {
-        if slice.data.len() != xysize as usize * core::mem::size_of::<f32>() {
-            return -1;
-        }
-        for pixel in slice.data.chunks_exact_mut(core::mem::size_of::<f32>()) {
-            let value = f32::from_ne_bytes(pixel.try_into().unwrap()) / scale;
-            pixel.copy_from_slice(&value.to_ne_bytes());
+        for i in 0..xysize as usize {
+            slice.data.f_mut()[i] /= scale;
         }
     }
     0
@@ -1019,9 +857,9 @@ pub fn parabolic_fit(out_x: &mut f64, out_y: &mut f64, input: &[[f64; 3]; 3]) ->
 
 #[cfg(test)]
 mod tests {
-    use super::{clip_cor_scalevol, clip_padcorr, clip_slice_corr, parabolic_fit};
+    use super::{clip_cor_scalevol, clip_padcorr, parabolic_fit};
     use crate::imod::libcfshr::islice::{Istack, slice_create, slice_get_val, slice_put_val};
-    use crate::imod::libiimod::mrcfiles::{MRC_MODE_COMPLEX_FLOAT, MRC_MODE_FLOAT};
+    use crate::imod::libiimod::mrcfiles::MRC_MODE_FLOAT;
 
     #[test]
     fn parabolic_fit_preserves_center_peak() {
@@ -1046,7 +884,7 @@ mod tests {
         // 2 by 2 image becomes 6 by 4.  The original pixels are offset by
         // one in both directions and out-of-bounds pixels get the slice mean.
         assert_eq!((slice.xsize, slice.ysize), (6, 4));
-        assert_eq!(slice.data.len(), 6 * 4 * size_of::<f32>());
+        assert_eq!(slice.data.f().len(), 6 * 4);
         let mut value = [0.; 4];
         slice_get_val(&slice, 0, 0, &mut value);
         assert_eq!(value[0], -3.5);
@@ -1057,7 +895,7 @@ mod tests {
     }
 
     #[test]
-    fn volume_scaling_decodes_owned_float_bytes() {
+    fn volume_scaling_divides_owned_floats_in_place() {
         let mut slice = slice_create(2, 1, MRC_MODE_FLOAT).unwrap();
         slice_put_val(&mut slice, 0, 0, [2., 0., 0., 0.]);
         slice_put_val(&mut slice, 1, 0, [4., 0., 0., 0.]);
@@ -1070,13 +908,5 @@ mod tests {
         assert_eq!(value[0], 1.);
         slice_get_val(&mut volume.slices[0], 1, 0, &mut value);
         assert_eq!(value[0], 2.);
-    }
-
-    #[test]
-    fn slice_correlation_rejects_truncated_complex_float_bytes() {
-        let mut slice = slice_create(1, 1, MRC_MODE_COMPLEX_FLOAT).unwrap();
-        slice.data.pop();
-
-        assert!(clip_slice_corr(&mut slice, None).is_none());
     }
 }

@@ -1,7 +1,6 @@
 //! `IMOD/libimod/objgroup.c` and `IMOD/include/objgroup.h`.
 
 use crate::imod::libcfshr::b3dutil::ImodFile;
-use std::fs::File;
 use std::io::{Read, Write};
 
 use super::imodel::Iobj_group;
@@ -10,18 +9,10 @@ use super::imodel::Iobj_group;
 pub fn obj_group_new() -> Iobj_group {
     Iobj_group::default()
 }
-/// Original: `objGroupDelete` (`objgroup.c:29`).
-pub fn obj_group_delete(group: &mut Iobj_group) {
-    obj_group_clear(group);
-}
 /// Original: `objGroupClear` (`objgroup.c:37`).
 pub fn obj_group_clear(group: &mut Iobj_group) {
     group.obj_list.clear();
     group.name = [0; 32];
-}
-/// Original: `objGroupDup` (`objgroup.c:47`).
-pub fn obj_group_dup(old_group: &Iobj_group) -> Iobj_group {
-    old_group.clone()
 }
 /// Original: `objGroupAppend` (`objgroup.c:61`).
 pub fn obj_group_append(group: &mut Iobj_group, ob: i32) -> i32 {

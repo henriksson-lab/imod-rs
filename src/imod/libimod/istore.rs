@@ -1,11 +1,11 @@
 //! Scaffold for the complete `IMOD/libimod/istore.c` source unit.
-#![allow(dead_code, unused_variables)]
+#![allow(unused_variables)]
 use crate::imod::libcfshr::b3dutil::{CArg, ImodFile, c_format};
 use crate::imod::libimod::imodel::{IMOD_ERROR_READ, Icont, Iobj};
 use crate::imod::libimod::imodel_files::{
     imod_get_float, imod_get_int, imod_get_short, imod_put_float, imod_put_int, imod_put_short,
 };
-use std::io::{Read, Seek, SeekFrom, Write};
+use std::io::{Read, Write};
 
 /// Original `GEN_STORE_*` scalar encodings (`include/istore.h:23-26`).
 pub const GEN_STORE_INT: u16 = 0;
@@ -735,6 +735,7 @@ pub fn istore_get_min_max(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::io::{Seek, SeekFrom};
 
     /// `imodReadStore` divides the chunk length by SIZE_STOR before the
     /// `nread <= 0` test (`istore.c:80-86`), so a chunk shorter than one

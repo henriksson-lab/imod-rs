@@ -1,6 +1,4 @@
 //! Translation of `IMOD/flib/subrs/hvem/temp_filename.f`.
-#![allow(dead_code)]
-
 /// Original Fortran `temp_filename` (`temp_filename.f:8`).
 ///
 /// Composes a filename from an optional temporary directory `tempdir`, a

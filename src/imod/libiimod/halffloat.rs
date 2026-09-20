@@ -1,5 +1,4 @@
 //! Translation of `IMOD/libiimod/halffloat.c`.
-#![allow(dead_code)]
 
 pub fn imnp_halfbuf_to_floats(half_buf: &[u16], float_buf: &mut [f32], num_vals: i32) {
     for ind in 0..num_vals as usize {

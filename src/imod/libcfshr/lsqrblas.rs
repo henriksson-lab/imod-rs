@@ -4,7 +4,6 @@
 //! `((incX) > 0 ? 0 : ((N) - 1) * (-(incX)))`; it is a macro, so it is written
 //! out at each of the five places the source expands it rather than becoming a
 //! function this unit does not have.
-#![allow(dead_code)]
 
 /// Original `cblas_daxpy` (`lsqrblas.c:48`).
 pub fn cblas_daxpy(n: i32, alpha: f64, x: &[f64], inc_x: i32, y: &mut [f64], inc_y: i32) {

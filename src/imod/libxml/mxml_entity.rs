@@ -1,32 +1,6 @@
 //! Translation of `IMOD/libxml/mxml-entity.c`.
-#![allow(dead_code)]
 
 use super::*;
-
-/// Matches C `mxmlEntityAddCallback` (`mxml-entity.c:26`).
-pub fn mxml_entity_add_callback(cb: MxmlEntityCb) -> i32 {
-    let added = mxml_global().with_borrow_mut(|global| {
-        if global.entity_cbs.len() < 100 {
-            global.entity_cbs.push(cb);
-            true
-        } else {
-            false
-        }
-    });
-
-    /*
-     * The C reports the failure while still holding the global; the borrow is
-     * released first here because `mxml_error` reads the same block.
-     */
-
-    if added {
-        0
-    } else {
-        mxml_error(b"Unable to add entity callback!");
-
-        -1
-    }
-}
 
 /// Matches C `mxmlEntityGetName` (`mxml-entity.c:52`).
 pub fn mxml_entity_get_name(val: i32) -> Option<&'static [u8]> {
@@ -56,19 +30,6 @@ pub fn mxml_entity_get_value(name: &[u8]) -> i32 {
     }
 
     -1
-}
-
-/// Matches C `mxmlEntityRemoveCallback` (`mxml-entity.c:102`).
-pub fn mxml_entity_remove_callback(cb: MxmlEntityCb) {
-    mxml_global().with_borrow_mut(|global| {
-        if let Some(index) = global
-            .entity_cbs
-            .iter()
-            .position(|registered| cb.map(|f| f as usize) == registered.map(|f| f as usize))
-        {
-            global.entity_cbs.remove(index);
-        }
-    });
 }
 
 /// The static `entities[]` table inside C `_mxml_entity_cb`

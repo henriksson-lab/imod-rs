@@ -1,5 +1,4 @@
 //! Translation of `IMOD/libwarp/nnai.c`.
-#![allow(dead_code)]
 
 use crate::imod::libcfshr::b3dutil::{CArg, c_format};
 use crate::imod::libwarp::delaunay::Delaunay;
@@ -13,12 +12,11 @@ use crate::imod::libwarp::nnpi::{
 /// C `NaN` (`nan.h:26`); see the note in `nnpi.rs`.
 const NAN: f64 = f64::NAN;
 
-/// C `nn_weights` (`nnai.c:38`).
+/// C `nn_weights` (`nnai.c:38`); `nvertices` is `vertices.len()`.
 ///
 /// `nnpi.c:791` declares an identical private type; both are translated in
 /// their own module, as the source declares them.
 pub struct NnWeights {
-    pub nvertices: i32,
     /// vertex indices [nvertices]
     pub vertices: Vec<i32>,
     /// vertex weights [nvertices]
@@ -26,15 +24,17 @@ pub struct NnWeights {
 }
 
 /// C `struct nnai` (`nnai.c:43`).
+///
+/// The source's `n` — the number of output points, which it really does
+/// declare `double` — is `x.len()` (`y` and `weights` are the same length).
 pub struct Nnai {
     pub d: Delaunay,
     pub wmin: f64,
-    /// number of output points — the source really does declare this `double`
-    pub n: f64,
     /// [n]
     pub x: Vec<f64>,
     /// [n]
     pub y: Vec<f64>,
+    /// [n]
     pub weights: Vec<NnWeights>,
 }
 
@@ -69,7 +69,6 @@ pub fn nnai_build(d: Delaunay, n: i32, x: &[f64], y: &[f64]) -> Option<Nnai> {
     i = 0;
     while i < n {
         let mut w = NnWeights {
-            nvertices: 0,
             vertices: Vec::new(),
             weights: Vec::new(),
         };
@@ -86,15 +85,12 @@ pub fn nnai_build(d: Delaunay, n: i32, x: &[f64], y: &[f64]) -> Option<Nnai> {
         let vertices = nnpi_get_vertices(&point_interpolator);
         let weights = nnpi_get_weights(&point_interpolator);
 
-        w.nvertices = nnpi_get_nvertices(&point_interpolator);
+        let nvertices = nnpi_get_nvertices(&point_interpolator);
 
         /* DNM: do not allocate or copy if no vertices */
-        if w.nvertices != 0 {
-            w.vertices = vec![0; w.nvertices as usize];
-            w.vertices[..(w.nvertices as usize)]
-                .copy_from_slice(&vertices[..(w.nvertices as usize)]);
-            w.weights = vec![0.; w.nvertices as usize];
-            w.weights[..(w.nvertices as usize)].copy_from_slice(&weights[..(w.nvertices as usize)]);
+        if nvertices != 0 {
+            w.vertices = vertices[..(nvertices as usize)].to_vec();
+            w.weights = weights[..(nvertices as usize)].to_vec();
         }
 
         nn_weights.push(w);
@@ -106,7 +102,6 @@ pub fn nnai_build(d: Delaunay, n: i32, x: &[f64], y: &[f64]) -> Option<Nnai> {
     Some(Nnai {
         d,
         wmin: -f64::MAX,
-        n: n as f64,
         x: nn_x,
         y: nn_y,
         weights: nn_weights,
@@ -130,17 +125,18 @@ pub fn nnai_interpolate(nn: &mut Nnai, zin: &[f64], zout: &mut [f64]) {
     let mut i;
 
     i = 0;
-    while (i as f64) < nn.n {
+    /* `i < nn->n` compares the int against the double `n`. */
+    while (i as f64) < nn.x.len() as f64 {
         let w = &nn.weights[i as usize];
         let mut z = 0.0;
         let mut j;
 
         /* DNM: Set to NaN explicitly if no vertices */
-        if w.nvertices == 0 {
+        if w.vertices.len() == 0 {
             z = NAN;
         }
         j = 0;
-        while j < w.nvertices {
+        while j < w.vertices.len() as i32 {
             let weight = w.weights[j as usize];
 
             if weight < nn.wmin {

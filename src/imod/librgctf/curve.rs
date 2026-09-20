@@ -1,6 +1,5 @@
 //! Translation of `IMOD/librgctf/curve.{h,cpp}`.
 
-use crate::imod::librgctf::ctf::Ctf;
 use crate::imod::librgctf::types::CurvePoint;
 
 /// A sampled one-dimensional curve and its optional polynomial fits.
@@ -67,57 +66,6 @@ impl Curve {
         self.data_y.fill(0.0);
     }
 
-    /// C++ `Curve::AddWith`.
-    pub fn add_with(&mut self, other_curve: &Self) {
-        assert!(!self.data_y.is_empty(), "No points to interpolate");
-        assert_eq!(
-            self.number_of_points, other_curve.number_of_points,
-            "Different number of points"
-        );
-        for (value, other) in self.data_y.iter_mut().zip(&other_curve.data_y) {
-            *value += other;
-        }
-    }
-
-    /// C++ `Curve::ReturnAverageValue`.
-    pub fn return_average_value(&self) -> f32 {
-        assert!(!self.data_y.is_empty(), "No points to average");
-        self.data_y.iter().sum::<f32>() / self.number_of_points as f32
-    }
-
-    /// C++ `Curve::ZeroAfterIndex`.
-    pub fn zero_after_index(&mut self, index: usize) {
-        assert!(!self.data_y.is_empty(), "No points in curve");
-        if index + 1 <= self.number_of_points {
-            self.data_y[index + 1..].fill(0.0);
-        }
-    }
-
-    /// C++ `Curve::FlattenBeforeIndex`.
-    pub fn flatten_before_index(&mut self, index: usize) {
-        assert!(!self.data_y.is_empty(), "No points in curve");
-        let index = index.min(self.number_of_points - 1);
-        let value = self.data_y[index];
-        self.data_y[..index].fill(value);
-    }
-
-    /// C++ `Curve::ResampleCurve`.
-    pub fn resample_curve(&mut self, input_curve: &Self, wanted_number_of_points: usize) {
-        assert!(!input_curve.data_y.is_empty(), "Input curve is empty");
-        assert!(
-            wanted_number_of_points > 1,
-            "wanted_number_of_points is smaller than 2"
-        );
-        let mut temporary = Self::new();
-        for index in 0..wanted_number_of_points {
-            let i_x = index as f32 * input_curve.number_of_points as f32
-                / wanted_number_of_points as f32
-                * (1.0 - 1.0 / (wanted_number_of_points - 1) as f32);
-            temporary.add_point(i_x, input_curve.return_linear_interpolation_from_i(i_x));
-        }
-        self.copy_from(&temporary);
-    }
-
     /// C++ `Curve::ReturnLinearInterpolationFromI`.
     pub fn return_linear_interpolation_from_i(&self, wanted_i: f32) -> f32 {
         assert!(!self.data_y.is_empty(), "No points to interpolate");
@@ -139,24 +87,6 @@ impl Curve {
             + (1.0 - distance_below) * self.data_y[index]
     }
 
-    /// C++ `Curve::ReturnLinearInterpolationFromX`.
-    pub fn return_linear_interpolation_from_x(&self, wanted_x: f32) -> f32 {
-        assert!(!self.data_x.is_empty(), "No points in curve");
-        let extent = self.data_x[self.number_of_points - 1] - self.data_x[0];
-        assert!(
-            wanted_x >= self.data_x[0] - extent * 0.01
-                && wanted_x <= self.data_x[self.number_of_points - 1] + extent * 0.01,
-            "Wanted X falls outside curve range"
-        );
-        let index = self.return_index_of_nearest_previous_bin(wanted_x);
-        if index == self.number_of_points - 1 {
-            return self.data_y[index];
-        }
-        let distance =
-            (wanted_x - self.data_x[index]) / (self.data_x[index + 1] - self.data_x[index]);
-        self.data_y[index] * (1.0 - distance) + self.data_y[index + 1] * distance
-    }
-
     /// C++ `Curve::ComputeMaximumValueAndMode`.
     pub fn compute_maximum_value_and_mode(&self) -> (f32, f32) {
         assert!(!self.data_y.is_empty(), "No points in curve");
@@ -171,44 +101,8 @@ impl Curve {
         (maximum_value, mode)
     }
 
-    /// C++ `Curve::ReturnFullWidthAtGivenValue`.
-    pub fn return_full_width_at_given_value(&self, wanted_value: f32) -> f32 {
-        assert!(!self.data_y.is_empty(), "No points in curve");
-        let first = self
-            .data_y
-            .iter()
-            .position(|&value| value > wanted_value)
-            .expect("Could not find first bin above value");
-        let last = self
-            .data_y
-            .iter()
-            .enumerate()
-            .skip(first + 1)
-            .find_map(|(index, &value)| (value < wanted_value).then_some(index - 1))
-            .expect("Could not find last bin above value");
-        self.data_x[last + 1] - self.data_x[first]
-    }
-
     pub fn return_maximum_value(&self) -> f32 {
         self.compute_maximum_value_and_mode().0
-    }
-    pub fn return_mode(&self) -> f32 {
-        self.compute_maximum_value_and_mode().1
-    }
-
-    /// C++ `Curve::NormalizeMaximumValue`.
-    pub fn normalize_maximum_value(&mut self) {
-        let maximum = self.return_maximum_value();
-        if maximum > 0.0 {
-            self.multiply_by_constant(1.0 / maximum);
-        }
-    }
-
-    /// C++ `Curve::SquareRoot`.
-    pub fn square_root(&mut self) {
-        for value in &mut self.data_y {
-            *value = value.sqrt();
-        }
     }
 
     /// C++ `Curve::ReturnValueAtXUsingLinearInterpolation`.
@@ -264,53 +158,9 @@ impl Curve {
         self.data_y[point.index_n as usize] += point.value_n;
     }
 
-    /// C++ `Curve::AddValueAtXUsingNearestNeighborInterpolation`.
-    pub fn add_value_at_x_using_nearest_neighbor_interpolation(
-        &mut self,
-        wanted_x: f32,
-        value_to_add: f32,
-    ) {
-        assert!(!self.data_x.is_empty(), "No points in curve");
-        let extent = self.data_x[self.number_of_points - 1] - self.data_x[0];
-        assert!(
-            wanted_x >= self.data_x[0] - extent * 0.01
-                && wanted_x <= self.data_x[self.number_of_points - 1] + extent * 0.01,
-            "Wanted X falls outside curve range"
-        );
-        let index = self.return_index_of_nearest_point_from_x(wanted_x);
-        self.data_y[index] += value_to_add;
-    }
-
     /// C++ `Curve::CopyFrom`.
     pub fn copy_from(&mut self, other_curve: &Self) {
         self.clone_from(other_curve);
-    }
-
-    /// C++ `Curve::PrintToStandardOut`.
-    pub fn print_to_standard_out(&self) {
-        for (&x, &y) in self.data_x.iter().zip(&self.data_y) {
-            println!("{x:.6} {y:.6}");
-        }
-    }
-
-    /// C++ `Curve::GetXMinMax`.
-    pub fn get_x_min_max(&self) -> (f32, f32) {
-        self.data_x
-            .iter()
-            .copied()
-            .fold((f32::MAX, -f32::MAX), |(min, max), value| {
-                (min.min(value), max.max(value))
-            })
-    }
-
-    /// C++ `Curve::GetYMinMax`.
-    pub fn get_y_min_max(&self) -> (f32, f32) {
-        self.data_y
-            .iter()
-            .copied()
-            .fold((f32::MAX, -f32::MAX), |(min, max), value| {
-                (min.min(value), max.max(value))
-            })
     }
 
     /// C++ `Curve::CheckMemory`; `Vec` grows safely, while retaining the
@@ -357,13 +207,6 @@ impl Curve {
     pub fn multiply_by_constant(&mut self, constant: f32) {
         for value in &mut self.data_y {
             *value *= constant;
-        }
-    }
-
-    /// C++ `Curve::ApplyCTF`.
-    pub fn apply_ctf(&mut self, ctf_to_apply: &Ctf, azimuth_in_radians: f32) {
-        for (x, y) in self.data_x.iter().zip(&mut self.data_y) {
-            *y *= ctf_to_apply.evaluate(x.powi(2), azimuth_in_radians);
         }
     }
 
@@ -496,22 +339,6 @@ impl Curve {
             .copy_from_slice(&fitted[half + 1..]);
     }
 
-    /// C++ `Curve::FitPolynomialToData`.
-    pub fn fit_polynomial_to_data(&mut self, wanted_polynomial_order: usize) {
-        assert!(!self.data_x.is_empty(), "No points in curve");
-        self.polynomial_order = wanted_polynomial_order;
-        self.polynomial_fit = vec![0.0; self.number_of_points];
-        self.polynomial_coefficients = vec![0.0; wanted_polynomial_order + 1];
-        ls_poly(
-            &self.data_x,
-            &self.data_y,
-            wanted_polynomial_order,
-            &mut self.polynomial_fit,
-            &mut self.polynomial_coefficients,
-        );
-        self.have_polynomial = true;
-    }
-
     pub fn reciprocal(&mut self) {
         for value in &mut self.data_y {
             if *value != 0.0 {
@@ -519,15 +346,7 @@ impl Curve {
             }
         }
     }
-    pub fn multiply_x_by_constant(&mut self, constant: f32) {
-        for value in &mut self.data_x {
-            *value *= constant;
-        }
-    }
 
-    pub fn delete_savitzky_golay_coefficients(&mut self) {
-        self.savitzky_golay_coefficients.clear();
-    }
     pub fn allocate_savitzky_golay_coefficients(&mut self) {
         assert!(
             self.savitzky_golay_polynomial_order > 0,
@@ -692,26 +511,11 @@ mod tests {
     use super::Curve;
 
     #[test]
-    fn linear_interpolation_and_weighted_addition_match_bins() {
+    fn weighted_addition_matches_bins() {
         let mut curve = Curve::new();
         curve.setup_x_axis(0.0, 2.0, 3);
         curve.data_y.copy_from_slice(&[0.0, 2.0, 4.0]);
-        assert_eq!(curve.return_linear_interpolation_from_x(0.5), 1.0);
         curve.add_value_at_x_using_linear_interpolation(0.5, 2.0, true);
         assert_eq!(curve.data_y, [1.0, 3.0, 4.0]);
-    }
-
-    #[test]
-    fn polynomial_fit_preserves_a_linear_curve() {
-        let mut curve = Curve::new();
-        for value in 0..6 {
-            curve.add_point(value as f32, 3.0 + 2.0 * value as f32);
-        }
-        curve.fit_polynomial_to_data(1);
-        for (fit, value) in curve.polynomial_fit.iter().zip(&curve.data_y) {
-            assert!((fit - value).abs() < 1.0e-4);
-        }
-        assert!((curve.polynomial_coefficients[0] - 3.0).abs() < 1.0e-4);
-        assert!((curve.polynomial_coefficients[1] - 2.0).abs() < 1.0e-4);
     }
 }

@@ -1,5 +1,4 @@
 //! Translation of `IMOD/libcfshr/insidecontour.c`.
-#![allow(dead_code)]
 
 /// Original `InsideContour` (`insidecontour.c:31`).
 pub fn inside_contour(pt_x: &[f32], pt_y: &[f32], np: i32, x: f32, y: f32) -> i32 {

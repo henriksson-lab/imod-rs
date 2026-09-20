@@ -1215,7 +1215,7 @@ pub fn ivw_scale_depth8(vi: &ImodView, temp_slice: &mut IvwSlice) {
     else {
         return;
     };
-    for pixel in temp_slice.sec.data.iter_mut().take(pixel_count) {
+    for pixel in temp_slice.sec.data.b_mut().iter_mut().take(pixel_count) {
         *pixel = (*pixel as f32 * scale + rbase as f32) as u8;
     }
 }
@@ -1329,7 +1329,7 @@ pub fn ivw_get_z_section(vi: &mut ImodView, mut section: i32) -> *mut *mut u8 {
                 let Some(cached) = vi.vm_cache.get_mut(slice as usize) else {
                     return ptr::null_mut();
                 };
-                let Some(data) = cached.sec.data.get_mut(section_offset..) else {
+                let Some(data) = cached.sec.data.bytes_mut().get_mut(section_offset..) else {
                     return ptr::null_mut();
                 };
                 *line = NonNull::new(data.as_mut_ptr());
@@ -1403,7 +1403,7 @@ pub fn ivw_get_z_section(vi: &mut ImodView, mut section: i32) -> *mut *mut u8 {
         }
 
         /* Load in image */
-        let data = vi.vm_cache[slmin].sec.data.as_mut_ptr();
+        let data = vi.vm_cache[slmin].sec.data.bytes_mut().as_mut_ptr();
         unsafe { ivw_read_z(vi, data, section) };
         let mut temp_slice = vi.vm_cache.remove(slmin);
         ivw_scale_depth8(vi, &mut temp_slice);
@@ -1423,7 +1423,7 @@ pub fn ivw_get_z_section(vi: &mut ImodView, mut section: i32) -> *mut *mut u8 {
     ivw_make_line_pointers(
         &mut vi.line_ptrs,
         &mut vi.line_ptr_max,
-        &mut temp_slice.sec.data,
+        temp_slice.sec.data.bytes_mut(),
         temp_slice.sec.xsize,
         temp_slice.sec.ysize,
         vi.raw_image_store as i32,
@@ -2257,19 +2257,9 @@ fn cache_ivw_get_value(vi: &ImodView, x: i32, mut y: i32, mut z: i32) -> i32 {
 
     /* DNM: calling routine is responsible for limit checks */
     if vi.ushort_store != 0 {
-        let Some(offset) = index.checked_mul(std::mem::size_of::<u16>()) else {
-            return 0;
-        };
-        let Some(bytes) = temp_slice
-            .sec
-            .data
-            .get(offset..offset + std::mem::size_of::<u16>())
-        else {
-            return 0;
-        };
-        return u16::from_ne_bytes([bytes[0], bytes[1]]) as i32;
+        return temp_slice.sec.data.us().get(index).copied().unwrap_or(0) as i32;
     }
-    temp_slice.sec.data.get(index).copied().unwrap_or(0) as i32
+    temp_slice.sec.data.b().get(index).copied().unwrap_or(0) as i32
 }
 
 /// `fake_ivwGetValue` (`imodview.cpp:1000`).
@@ -2758,7 +2748,11 @@ pub unsafe fn ivw_setup_fast_access(
                             imdata[iz as usize] = None;
                         } else {
                             imdata[iz as usize] = NonNull::new(
-                                (&mut (*vi).vm_cache)[i as usize].sec.data.as_mut_ptr(),
+                                (&mut (*vi).vm_cache)[i as usize]
+                                    .sec
+                                    .data
+                                    .bytes_mut()
+                                    .as_mut_ptr(),
                             );
                             vmdataxsize[iz as usize] = (&(*vi).vm_cache)[i as usize].sec.xsize;
                             *cache_sum += iz;
@@ -7041,7 +7035,7 @@ mod tests {
             ..Default::default()
         };
         let mut byte_slice = slice_create(2, 2, MRC_MODE_BYTE).unwrap();
-        byte_slice.data = vec![1, 2, 3, 4];
+        byte_slice.data = crate::imod::libcfshr::islice::MrcData::B(vec![1, 2, 3, 4]);
         let view = ImodView {
             li: &mut load_info,
             vm_tdim: 1,
@@ -7064,7 +7058,7 @@ mod tests {
             ..Default::default()
         };
         let mut ushort_slice = slice_create(1, 1, MRC_MODE_USHORT).unwrap();
-        ushort_slice.data = 500u16.to_ne_bytes().to_vec();
+        ushort_slice.data = crate::imod::libcfshr::islice::MrcData::Us(vec![500]);
         let ushort_view = ImodView {
             li: &mut ushort_load_info,
             vm_tdim: 1,
@@ -7088,7 +7082,7 @@ mod tests {
             ..Default::default()
         };
         let mut section = slice_create(2, 2, MRC_MODE_BYTE).unwrap();
-        section.data = vec![10, 11, 12, 13];
+        section.data = crate::imod::libcfshr::islice::MrcData::B(vec![10, 11, 12, 13]);
         let mut view = ImodView {
             fp: Some(ImodFile::Token(1)),
             li: &mut load_info,
@@ -7111,8 +7105,14 @@ mod tests {
         assert!(!lines.is_null());
         assert_eq!(view.vm_cache[0].used, 1);
         unsafe {
-            assert_eq!(*lines.add(0), view.vm_cache[0].sec.data.as_mut_ptr());
-            assert_eq!(*lines.add(1), view.vm_cache[0].sec.data.as_mut_ptr().add(2));
+            assert_eq!(
+                *lines.add(0),
+                view.vm_cache[0].sec.data.bytes_mut().as_mut_ptr()
+            );
+            assert_eq!(
+                *lines.add(1),
+                view.vm_cache[0].sec.data.bytes_mut().as_mut_ptr().add(2)
+            );
         }
     }
 
@@ -7606,7 +7606,11 @@ mod tests {
         assert_eq!(view.vm_cache.len(), 2);
         assert_eq!(view.cache_index, vec![-1; 4]);
         assert_eq!(view.blank_line.len(), 4);
-        assert!(view.vm_cache.iter().all(|slice| slice.sec.data.len() == 12));
+        assert!(
+            view.vm_cache
+                .iter()
+                .all(|slice| slice.sec.data.byte_len() == 12)
+        );
     }
 
     #[test]

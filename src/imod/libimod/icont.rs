@@ -3,14 +3,13 @@
 //!
 //! Coverage note: every function of `icont.c` is translated here except the
 //! removed/uncompiled `imodContourTracer`.
-#![allow(dead_code, unused_variables)]
+#![allow(unused_variables)]
 
 use std::io::Write;
 
 use crate::imod::libcfshr::b3dutil::{CArg, ImodFile, c_format};
 use crate::imod::libimod::imat::{
     B3D_X, B3D_Z, imod_mat_delete, imod_mat_new, imod_mat_rot, imod_mat_transform,
-    imod_mat_transform2d,
 };
 use crate::imod::libimod::imodel::{ICONT_OPEN, ICONT_WILD, Icont, Iobj, Ipoint};
 use crate::imod::libimod::ipoint::{
@@ -20,8 +19,8 @@ use crate::imod::libimod::ipoint::{
 };
 use crate::imod::libimod::istore::{
     Istore, StoreUnion, istore_add_one_index_item, istore_break_contour, istore_clean_ends,
-    istore_copy_non_index, istore_delete_point, istore_extract_changes, istore_invert,
-    istore_point_is_gap, istore_retain_point,
+    istore_copy_non_index, istore_extract_changes, istore_invert, istore_point_is_gap,
+    istore_retain_point,
 };
 use std::borrow::Cow;
 
@@ -96,11 +95,6 @@ pub fn imod_contour_bad(c: Option<&Icont>, p: i32) -> i32 {
         }
         None => 1,
     }
-}
-
-/// Original: `imodContourIsOpen` (`icont.h:46`, macro).
-pub fn imod_contour_is_open(c: &Icont) -> u32 {
-    c.flags & ICONT_OPEN
 }
 
 /// Original: `imodContourNew` (`icont.c:26`).
@@ -2170,34 +2164,6 @@ pub fn imodel_contour_double(cont: &Icont) -> Option<Icont> {
     Some(fcont)
 }
 
-/// Original: `imodContourScale` (`icont.c:2188`).
-pub fn imod_contour_scale(cont: &mut Icont, spoint: &Ipoint) {
-    for pt in 0..cont.pts.len() {
-        cont.pts[pt].x *= spoint.x;
-        cont.pts[pt].y *= spoint.y;
-        cont.pts[pt].z *= spoint.z;
-    }
-}
-
-/// Original: `imodContourRotateZ` (`icont.c:2207`).
-///
-/// Rotates contour `cont` in the X/Y plane about the origin by `rot`.  Note
-/// that `imodMatRot` treats its angle as degrees, as in the source.
-pub fn imod_contour_rotate_z(cont: &mut Icont, rot: f64) {
-    let Some(mut mat) = imod_mat_new(2) else {
-        return;
-    };
-    let mut rpt = Ipoint::default();
-
-    imod_mat_rot(&mut mat, rot, B3D_Z);
-    for pt in 0..cont.pts.len() {
-        imod_mat_transform2d(&mat, &cont.pts[pt], &mut rpt);
-        cont.pts[pt] = rpt;
-    }
-
-    imod_mat_delete(&mut mat);
-}
-
 /// Original: `imodel_contour_swapxy` (`icont.c:2224`).
 pub fn imodel_contour_swapxy(cont: &mut Icont) {
     for pt in 0..cont.pts.len() {
@@ -3274,21 +3240,6 @@ pub fn imod_contour_get_point(in_contour: Option<&Icont>, in_index: i32) -> Opti
         return None;
     }
     Some(&c.pts[in_index as usize])
-}
-
-/// Original: `imodContourGetTimeIndex` (`icont.c:3372`).
-pub fn imod_contour_get_time_index(in_contour: Option<&Icont>) -> i32 {
-    match in_contour {
-        None => 0,
-        Some(c) => c.time,
-    }
-}
-
-/// Original: `imodContourSetTimeIndex` (`icont.c:3379`).
-pub fn imod_contour_set_time_index(in_contour: Option<&mut Icont>, in_time: i32) {
-    if let Some(c) = in_contour {
-        c.time = in_time;
-    }
 }
 
 /// Original: `imodContourGetSurface` (`icont.c:3386`).

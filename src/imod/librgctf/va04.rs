@@ -5,31 +5,6 @@
 //! labelled jumps.  This version retains its control flow and arithmetic but
 //! exposes ordinary slices and a Rust objective callback.
 
-/// Original `calcfx_`.
-///
-/// The C++ source has deliberately replaced the historical CTF evaluation
-/// with this constant result; retain that behavior for callers which still
-/// select this entry point.
-pub fn calcfx(
-    _nx: i32,
-    _xpar: &[f32],
-    rf: &mut f32,
-    _ain: &[f32],
-    _cs: f32,
-    _wl: f32,
-    _wgh1: f32,
-    _wgh2: f32,
-    _thetatr: f32,
-    _rmin2: f32,
-    _rmax2: f32,
-    _nxyz: &[i32],
-    _hw: f32,
-    _dast: f32,
-) -> i32 {
-    *rf = -1.0;
-    0
-}
-
 /// Original `va04a_`.
 ///
 /// `e` and `x` must each contain `n` values.  The callback is invoked with
@@ -549,31 +524,6 @@ where
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    #[test]
-    fn calcfx_keeps_the_source_constant_objective() {
-        let mut value = 4.0;
-        assert_eq!(
-            calcfx(
-                0,
-                &[],
-                &mut value,
-                &[],
-                0.,
-                0.,
-                0.,
-                0.,
-                0.,
-                0.,
-                0.,
-                &[],
-                0.,
-                0.
-            ),
-            0
-        );
-        assert_eq!(value, -1.0);
-    }
 
     #[test]
     fn va04a_minimizes_a_two_parameter_quadratic() {

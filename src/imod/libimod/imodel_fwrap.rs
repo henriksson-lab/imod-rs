@@ -19,7 +19,6 @@
 //!   `Vec<Icont>`, because `imodContourCheckNesting` is translated in
 //!   `icont.rs` against `&mut [Icont]`.  The source never writes a scan contour
 //!   back into the object either, so the observable result is the same.
-#![allow(dead_code)]
 #![allow(unsafe_op_in_unsafe_fn)]
 
 use std::cell::RefCell;
@@ -37,8 +36,8 @@ use super::imesh::{
 };
 use super::imodel::{
     IMOD_OBJFLAG_OPEN, IMOD_OBJFLAG_SCAT, IMOD_STRSIZE, IMOD_UNIT_PIXEL, IMODF_FLIPYZ,
-    IMODF_OTRANS_ORIGIN, IMODF_TILTOK, IMODF_Z_FROM_MINUSPT5, IOBJ_STRSIZE, Icont, Imod, Iobj,
-    Ipoint, Iref_image, imod_delete, imod_delete_contour, imod_delete_list_of_conts, imod_flip_yz,
+    IMODF_OTRANS_ORIGIN, IMODF_TILTOK, IMODF_Z_FROM_MINUSPT5, IOBJ_STRSIZE, Icont, Imod, Ipoint,
+    Iref_image, imod_delete, imod_delete_contour, imod_delete_list_of_conts, imod_flip_yz,
     imod_new, imod_new_object, imod_set_index, imod_transform,
 };
 use super::imodel_files::{imod_from_vms_floats, imod_read_file, imod_write_file};

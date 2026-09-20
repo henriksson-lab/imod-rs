@@ -1,5 +1,5 @@
 //! Translation of `IMOD/include/iimage.h` and `IMOD/libiimod/iimage.c`.
-#![allow(dead_code, unused_variables)]
+#![allow(unused_variables)]
 
 use crate::imod::libcfshr::autodoc::{
     ADOC_GLOBAL_NAME, ADOC_ZVALUE_NAME, adoc_get_collection_name, adoc_get_image_meta_info,
@@ -591,12 +591,6 @@ pub fn ii_insert_check_function(func: IiFileCheckFunction, index: i32) {
         checks.push(func);
     }
 }
-pub fn ii_delete_check_list() {
-    S_CHECK_LIST
-        .lock()
-        .unwrap_or_else(|poisoned| poisoned.into_inner())
-        .clear();
-}
 /// Matches C `iiRegisterQuitCheck(int (*)(int))` (`iimage.c:121`).
 pub fn ii_register_quit_check(func: Option<unsafe fn(i32) -> i32>) {
     *S_QUIT_CHECK_FUNC.lock().unwrap() = func;
@@ -691,29 +685,6 @@ pub fn ii_new() -> *mut ImodImageFile {
     Box::into_raw(ii_new_box())
 }
 
-/// Matches C `iiInit(ImodImageFile *, int, int, int, int, int, int)` (`iimage.c:215`).
-pub unsafe fn ii_init(
-    image_file: *mut ImodImageFile,
-    x_size: i32,
-    y_size: i32,
-    z_size: i32,
-    file: i32,
-    format: i32,
-    type_: i32,
-) -> i32 {
-    if image_file.is_null() {
-        return -1;
-    }
-    unsafe {
-        (*image_file).nx = x_size;
-        (*image_file).ny = y_size;
-        (*image_file).nz = z_size;
-        (*image_file).file = file;
-        (*image_file).format = format;
-        (*image_file).type_ = type_;
-    }
-    0
-}
 /// C `iiOpen`.  Format probing is deliberately kept in the format units; this
 /// common-unit portion owns the file and registers the returned descriptor.
 pub unsafe fn ii_open(filename: &[u8], mode: &str) -> *mut ImodImageFile {
@@ -1738,33 +1709,6 @@ pub unsafe fn ii_read_section_byte_callback(
     }
 }
 
-pub fn ii_read_section_ushort(image: &mut ImodImageFile, buf: &mut [u16], in_section: i32) -> i32 {
-    let width = (image.urx - image.llx + 1 + image.pad_left.max(0) + image.pad_right.max(0)).max(0)
-        as usize;
-    let rows = (if image.axis == 2 {
-        image.urz - image.llz + 1
-    } else {
-        image.ury - image.lly + 1
-    })
-    .max(0) as usize;
-    let Some(length) = width.checked_mul(rows) else {
-        return IIERR_BAD_CALL;
-    };
-    if buf.len() < length {
-        return IIERR_BAD_CALL;
-    }
-    let bytes = unsafe {
-        core::slice::from_raw_parts_mut(buf.as_mut_ptr().cast::<u8>(), length * size_of::<u16>())
-    };
-    read_write_section(
-        image,
-        bytes,
-        in_section,
-        image.read_section_ushort,
-        "reading and converting to shorts for",
-    )
-}
-
 /// Raw callback retained solely for the legacy MRC callback table.
 pub unsafe fn ii_read_section_ushort_callback(
     in_file: *mut ImodImageFile,
@@ -2376,16 +2320,6 @@ pub fn iilimitedtilesize(
 ) {
     ii_limited_tile_size(im_size, tile_size, num_tiles, multiple_of, limit);
 }
-/// The Fortran bridge (NATIVE.md 7): `f2cString` carries the hidden string
-/// length, so this entry point keeps the C calling convention until both sides
-/// of that bridge move together.
-pub unsafe fn iitestifhdf(filename: *const c_char, name_len: i32) -> i32 {
-    let cstr = crate::imod::libcfshr::b3dutil::fortran_string(filename, name_len);
-    native_ii_test_if_hdf(cstr.as_bytes())
-}
-pub fn tiffseteerreadproperties(super_res: i32, auto_group: i32, flags: i32) {
-    tiff_set_eer_read_properties(super_res, auto_group, flags);
-}
 pub fn get_dflt_eersumming_from_env(super_res: &mut i32, z_summing: &mut i32) {
     // `iimage.c:1509-1519`.  `atoi` on a string with no leading number is 0,
     // which is what `str::parse` failing stands in for here.
@@ -2399,9 +2333,6 @@ pub fn get_dflt_eersumming_from_env(super_res: &mut i32, z_summing: &mut i32) {
         }
     }
 }
-pub fn tiffgetmaxeersuperres() -> i32 {
-    tiff_get_max_eer_super_res()
-}
 unsafe fn hdf_check_callback(in_file: *mut ImodImageFile) -> i32 {
     in_file.as_mut().map_or(IIERR_IO_ERROR, native_ii_hdf_check)
 }
@@ -2411,11 +2342,6 @@ unsafe fn hdf_check_callback(in_file: *mut ImodImageFile) -> i32 {
 pub unsafe fn ii_hdf_check(in_file: *mut ImodImageFile) -> i32 {
     in_file.as_mut().map_or(IIERR_IO_ERROR, native_ii_hdf_check)
 }
-pub unsafe fn ii_hdfopen_new(in_file: *mut ImodImageFile, mode: &str) -> i32 {
-    in_file
-        .as_mut()
-        .map_or(1, |file| ii_hdf_open_new(file, mode))
-}
 pub unsafe fn hdf_write_global_adoc(in_file: *mut ImodImageFile) -> i32 {
     in_file.as_mut().map_or(1, native_hdf_write_global_adoc)
 }
@@ -2424,18 +2350,6 @@ pub unsafe fn hdf_write_dummy_section(in_file: *mut ImodImageFile, buf: *mut u8,
 }
 pub unsafe fn ii_test_if_hdf(filename: &[u8]) -> i32 {
     native_ii_test_if_hdf(filename)
-}
-pub unsafe fn ii_reorder_hdfstack(in_file: *mut ImodImageFile, sect_order: *mut i32) -> i32 {
-    let Some(file) = in_file.as_mut() else {
-        return 1;
-    };
-    if sect_order.is_null() || file.nz < 0 {
-        return 1;
-    }
-    ii_reorder_hdf_stack(
-        file,
-        core::slice::from_raw_parts(sect_order, file.nz as usize),
-    )
 }
 pub unsafe fn hdf_read_section_any(
     in_file: *mut ImodImageFile,
@@ -2452,9 +2366,6 @@ pub unsafe fn hdf_write_section_any(
     from_float: i32,
 ) -> i32 {
     native_hdf_write_section_any(in_file, buf, cz, from_float)
-}
-pub unsafe fn init_new_hdffile(in_file: *mut ImodImageFile) -> i32 {
-    native_init_new_hdf_file(&mut *in_file)
 }
 #[cfg(test)]
 mod tests {
@@ -2838,20 +2749,6 @@ mod tests {
                 ),
                 (-1, -1, -1)
             );
-            assert_eq!(ii_init(image_file, 4, 5, 6, IIFILE_HDF, 3, IITYPE_FLOAT), 0);
-            assert_eq!(
-                ((*image_file).nx, (*image_file).ny, (*image_file).nz),
-                (4, 5, 6)
-            );
-            assert_eq!(
-                (
-                    (*image_file).file,
-                    (*image_file).format,
-                    (*image_file).type_
-                ),
-                (IIFILE_HDF, 3, IITYPE_FLOAT)
-            );
-            assert_eq!(ii_init(core::ptr::null_mut(), 0, 0, 0, 0, 0, 0), -1);
         }
     }
 
@@ -3042,7 +2939,6 @@ mod tests {
             );
             drop(fp);
 
-            ii_delete_check_list();
             let image = ii_open(path.as_os_str().as_encoded_bytes(), "rb");
             assert!(!image.is_null());
             assert_eq!(
@@ -3055,7 +2951,6 @@ mod tests {
             assert_eq!(ii_read_point(&mut *image, 1, 1, 0), 132.);
             assert_eq!(ii_read_point(&mut *image, -1, 1, 0), (*image).amin);
             ii_delete(image);
-            ii_delete_check_list();
             std::fs::remove_file(path).unwrap();
         }
     }

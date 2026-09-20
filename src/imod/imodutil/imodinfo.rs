@@ -4,8 +4,6 @@
 //! source unit.  The calculations below deliberately consume the source-shaped
 //! `Imod`, `Iobj`, `Icont`, and `Imesh` declarations instead of inventing a
 //! separate command-only model representation.
-#![allow(dead_code)]
-
 use std::cell::RefCell;
 use std::env;
 use std::io::Write;
@@ -451,7 +449,7 @@ pub fn imodinfo() {
                 let Ok(owned) = borrowed.try_clone_to_owned() else {
                     exit_error(b"Could not duplicate output file descriptor");
                 };
-                let mut out = ImodFile::File(std::rc::Rc::new(std::fs::File::from(owned)));
+                let mut out = ImodFile::from_std(std::fs::File::from(owned));
                 imod_write_ascii(&model, &mut out);
                 let _ = out.flush();
             }

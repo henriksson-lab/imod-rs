@@ -3,7 +3,6 @@
 //!
 //! Each C definition is retained as one systematic snake-case Rust function,
 //! with the original C identifier named in its doc comment.
-#![allow(dead_code)]
 
 use crate::imod::libcfshr::b3dutil::{
     CArg, ImodFile, SEEK_END, SEEK_SET, b3d_error, b3d_fread, b3d_fseek, b3d_i_min, b3d_rewind,
@@ -102,20 +101,6 @@ pub fn ii_add_raw_check_function(func: IiRawCheckFunction, name: &[u8]) {
         if let Some(list) = list.as_mut() {
             list.insert(0, item);
         }
-    });
-}
-
-/// Original `iiDeleteRawCheckList` (`iilikemrc.c:79`).
-///
-/// Frees the checking list and all its data to avoid memory leaks.
-pub fn ii_delete_raw_check_list() {
-    CHECK_LIST.with_borrow_mut(|list| {
-        if list.is_none() {
-            return;
-        }
-        // The source's loop over the items `free`ing each `name`, then
-        // `ilistDelete`: dropping the vector releases both.
-        *list = None;
     });
 }
 
@@ -1570,7 +1555,6 @@ mod tests {
 
     #[test]
     fn fei_raw_dispatch_constructs_native_mrc_access_state() {
-        ii_delete_raw_check_list();
         let mut fp = crate::imod::libcfshr::b3dutil::ImodFile::tmpfile().unwrap();
         let mut bytes = b"FEI RawImage\0".to_vec();
         for value in [0_i32, 4, 3, 0, 16, 1, 100, 0, 0] {
@@ -1596,7 +1580,6 @@ mod tests {
         ii_like_mrc_delete(&mut image);
         assert!(image.mrc_header.is_none());
         drop(fp);
-        ii_delete_raw_check_list();
     }
 
     #[test]

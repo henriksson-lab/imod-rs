@@ -20,7 +20,6 @@
 //! (`char*`, `double`, `double[2]`, `int`, `int[2]`) instantiates `K`
 //! concretely, so `strcp`/`d1cp`/`d2cp`/`i1cp`/`i2cp` and their `eq`/`hash`
 //! partners translate one-for-one with no `void*` left.
-#![allow(dead_code)]
 
 /// C `INT_PER_DOUBLE` (`hash.c:33`).
 const INT_PER_DOUBLE: usize = 2;

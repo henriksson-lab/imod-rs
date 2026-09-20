@@ -18,7 +18,6 @@
 //!   [`crate::imod::libwarp::hash::ht_find`] hands back a copy of the data, so
 //!   the table stores an index into [`Nnhpi::weights_store`], which owns the
 //!   blocks the source mallocs.
-#![allow(dead_code)]
 
 use std::cell::Cell;
 use std::io::Write;
@@ -44,6 +43,10 @@ use crate::imod::libwarp::nncommon_vulnerable::circle_build2;
 const NAN: f64 = f64::NAN;
 
 /// C `struct nnpi` (`nnpi.c:84`).
+///
+/// The source's `nvertices` is `vertices.len()` (`weights` is kept the same
+/// length), and `nallocated` — grown by `NINC` whenever `nvertices` reached
+/// it — is the two `Vec`s' own capacity; neither number is observable.
 pub struct Nnpi {
     pub d: Delaunay,
     pub wmin: f64,
@@ -53,10 +56,9 @@ pub struct Nnpi {
      * work variables
      */
     pub ncircles: i32,
-    pub nvertices: i32,
-    pub nallocated: i32,
-    /// vertex indices
+    /// vertex indices `[nvertices]`
     pub vertices: Vec<i32>,
+    /// `[nvertices]`
     pub weights: Vec<f64>,
     /// vertex perturbation
     pub dx: f64,
@@ -70,8 +72,6 @@ pub struct Nnpi {
 
 /// C `NSTART` (`nnpi.c:101`).
 const NSTART: i32 = 10;
-/// C `NINC` (`nnpi.c:102`).
-const NINC: i32 = 10;
 /// C `EPS_SHIFT` (`nnpi.c:103`).
 const EPS_SHIFT: f64 = 1.0e-5;
 /// C `BIGNUMBER` (`nnpi.c:104`).
@@ -113,8 +113,6 @@ pub fn nnpi_create(d: Delaunay) -> Nnpi {
         wmin: 0.,
         n: 0,
         ncircles: 0,
-        nvertices: 0,
-        nallocated: 0,
         vertices: Vec::new(),
         weights: Vec::new(),
         // `malloc` leaves these two uninitialised; `nnpi_calculate_weights`
@@ -127,10 +125,10 @@ pub fn nnpi_create(d: Delaunay) -> Nnpi {
     nn.wmin = -f64::MAX;
     nn.n = 0;
     nn.ncircles = 0;
-    nn.vertices = vec![0; NSTART as usize];
-    nn.weights = vec![0.; NSTART as usize];
-    nn.nvertices = 0;
-    nn.nallocated = NSTART;
+    /* nn->vertices = malloc(NSTART * sizeof(int)); nn->weights likewise;
+    nn->nvertices = 0; nn->nallocated = NSTART; */
+    nn.vertices = Vec::with_capacity(NSTART as usize);
+    nn.weights = Vec::with_capacity(NSTART as usize);
     nn.bad = None;
 
     nn
@@ -147,7 +145,9 @@ pub fn nnpi_destroy(nn: Nnpi) -> Delaunay {
 
 /// Original `nnpi_reset` (`nnpi.c:142`).
 pub fn nnpi_reset(nn: &mut Nnpi) {
-    nn.nvertices = 0;
+    /* nn->nvertices = 0 */
+    nn.vertices.clear();
+    nn.weights.clear();
     nn.ncircles = 0;
     drop(nn.bad.take());
 }
@@ -166,30 +166,25 @@ fn nnpi_add_weight(nn: &mut Nnpi, vertex: i32, w: f64) {
      * linear search is not a major issue.
      */
     i = 0;
-    while i < nn.nvertices {
+    while i < nn.vertices.len() as i32 {
         if nn.vertices[i as usize] == vertex {
             break;
         }
         i += 1;
     }
 
-    if i == nn.nvertices {
+    if i == nn.vertices.len() as i32 {
         /* not in the list */
         /*
-         * get more memory if necessary
+         * get more memory if necessary: the source reallocs both arrays by
+         * NINC when nvertices reaches nallocated
          */
-        if nn.nvertices == nn.nallocated {
-            nn.vertices.resize((nn.nallocated + NINC) as usize, 0);
-            nn.weights.resize((nn.nallocated + NINC) as usize, 0.);
-            nn.nallocated += NINC;
-        }
 
         /*
          * add the vertex to the list
          */
-        nn.vertices[i as usize] = vertex;
-        nn.weights[i as usize] = w;
-        nn.nvertices += 1;
+        nn.vertices.push(vertex);
+        nn.weights.push(w);
     } else {
         /* in the list */
         nn.weights[i as usize] += w;
@@ -436,18 +431,18 @@ fn nnpi_getneighbours(
         istack_push(&mut neighbours, t.vids[2]);
         i += 1;
     }
-    // `qsort(neighbours->v, neighbours->n, sizeof(int), compare_int)` sorts
-    // only the used prefix of the stack, not its allocation.
-    let used = neighbours.n as usize;
-    neighbours.v[0..used].sort_unstable_by(|a, b| compare_int(a, b).cmp(&0));
+    // `qsort(neighbours->v, neighbours->n, sizeof(int), compare_int)`.
+    neighbours
+        .v
+        .sort_unstable_by(|a, b| compare_int(a, b).cmp(&0));
 
-    let mut v: Vec<IndexedPoint> = vec![IndexedPoint::default(); neighbours.n as usize];
+    let mut v: Vec<IndexedPoint> = vec![IndexedPoint::default(); neighbours.v.len()];
 
     v[0].p = d.points[neighbours.v[0] as usize];
     v[0].i = neighbours.v[0];
     *n = 1;
     i = 1;
-    while i < neighbours.n {
+    while i < neighbours.v.len() as i32 {
         if neighbours.v[i as usize] == neighbours.v[(i - 1) as usize] {
             i += 1;
             continue;
@@ -630,7 +625,7 @@ fn _nnpi_calculate_weights(nn: &mut Nnpi, p: &Point) -> i32 {
 
 /// Original static `nnpi_normalize_weights` (`nnpi.c:527`).
 fn nnpi_normalize_weights(nn: &mut Nnpi) {
-    let n = nn.nvertices;
+    let n = nn.vertices.len() as i32;
     let mut sum = 0.0;
     let mut i;
 
@@ -710,7 +705,6 @@ pub fn nnpi_calculate_weights(nn: &mut Nnpi, p: &Point) {
     };
 
     let mut pp = Point::default();
-    let mut nvertices = 0;
     let mut vertices: Vec<i32> = Vec::new();
     let mut weights: Vec<f64> = Vec::new();
     let mut i;
@@ -737,12 +731,11 @@ pub fn nnpi_calculate_weights(nn: &mut Nnpi, p: &Point) {
     }
     nnpi_normalize_weights(nn);
 
-    nvertices = nn.nvertices;
-    if nvertices > 0 {
-        vertices = vec![0; nvertices as usize];
-        vertices[..(nvertices as usize)].copy_from_slice(&nn.vertices[..(nvertices as usize)]);
-        weights = vec![0.; nvertices as usize];
-        weights[..(nvertices as usize)].copy_from_slice(&nn.weights[..(nvertices as usize)]);
+    /* nvertices = nn->nvertices, then malloc and memcpy both arrays when
+    it is positive; `vertices.len()` carries the count below. */
+    if nn.vertices.len() > 0 {
+        vertices = nn.vertices.clone();
+        weights = nn.weights.clone();
     }
 
     nnpi_reset(nn);
@@ -750,23 +743,23 @@ pub fn nnpi_calculate_weights(nn: &mut Nnpi, p: &Point) {
     pp.x = 2.0 * p.x - pp.x;
     pp.y = 2.0 * p.y - pp.y;
 
-    while _nnpi_calculate_weights(nn, &pp) == 0 || nn.nvertices == 0 {
+    while _nnpi_calculate_weights(nn, &pp) == 0 || nn.vertices.len() == 0 {
         nnpi_reset(nn);
         pp.x = p.x + nn.dx * next_rand() as f64 / (RAND_MAX as f64 + 1.0);
         pp.y = p.y + nn.dy * next_rand() as f64 / (RAND_MAX as f64 + 1.0);
     }
     nnpi_normalize_weights(nn);
 
-    if nvertices > 0 {
+    if vertices.len() > 0 {
         i = 0;
-        while i < nn.nvertices {
+        while i < nn.vertices.len() as i32 {
             nn.weights[i as usize] /= 2.0;
             i += 1;
         }
     }
 
     i = 0;
-    while i < nvertices {
+    while i < vertices.len() as i32 {
         nnpi_add_weight(nn, vertices[i as usize], weights[i as usize] / 2.0);
         i += 1;
     }
@@ -808,11 +801,11 @@ pub fn nnpi_interpolate_point(nn: &mut Nnpi, p: &mut Point) {
         if NN_TEST_VERTICE.get() == -1 {
             let mut ivs: Vec<IndexedValue> = Vec::new();
 
-            if nn.nvertices > 0 {
-                ivs = vec![IndexedValue::default(); nn.nvertices as usize];
+            if nn.vertices.len() > 0 {
+                ivs = vec![IndexedValue::default(); nn.vertices.len()];
 
                 i = 0;
-                while i < nn.nvertices {
+                while i < nn.vertices.len() as i32 {
                     ivs[i as usize].i = nn.vertices[i as usize];
                     ivs[i as usize].v = nn.weights[i as usize];
                     i += 1;
@@ -823,7 +816,7 @@ pub fn nnpi_interpolate_point(nn: &mut Nnpi, p: &mut Point) {
                 // sort wherever the comparator is a weak order, and cannot
                 // panic on the NaN weights a degenerate case can produce,
                 // where Rust's `sort_by` may reject the comparator.
-                let hi = nn.nvertices as usize;
+                let hi = nn.vertices.len();
                 let mut k = 1_usize;
                 while k < hi {
                     let cur = ivs[k];
@@ -861,7 +854,7 @@ pub fn nnpi_interpolate_point(nn: &mut Nnpi, p: &mut Point) {
                 .as_bytes(),
             );
             i = 0;
-            while i < nn.nvertices {
+            while i < nn.vertices.len() as i32 {
                 let ii = ivs[i as usize].i;
                 let pp = nn.d.points[ii as usize];
 
@@ -893,7 +886,7 @@ pub fn nnpi_interpolate_point(nn: &mut Nnpi, p: &mut Point) {
                 );
             }
             i = 0;
-            while i < nn.nvertices {
+            while i < nn.vertices.len() as i32 {
                 if nn.vertices[i as usize] == NN_TEST_VERTICE.get() {
                     w = nn.weights[i as usize];
                     break;
@@ -912,14 +905,14 @@ pub fn nnpi_interpolate_point(nn: &mut Nnpi, p: &mut Point) {
 
     nn.n += 1;
 
-    if nn.nvertices == 0 {
+    if nn.vertices.len() == 0 {
         p.z = NAN;
         return;
     }
 
     p.z = 0.0;
     i = 0;
-    while i < nn.nvertices {
+    while i < nn.vertices.len() as i32 {
         let weight = nn.weights[i as usize];
 
         if weight < nn.wmin {
@@ -1002,7 +995,7 @@ pub fn nnpi_setwmin(nn: &mut Nnpi, wmin: f64) {
 
 /// Original `nnpi_get_nvertices` (`nnpi.c:756`).
 pub fn nnpi_get_nvertices(nn: &Nnpi) -> i32 {
-    nn.nvertices
+    nn.vertices.len() as i32
 }
 
 /// Original `nnpi_get_vertices` (`nnpi.c:766`).
@@ -1035,12 +1028,11 @@ pub struct Nnhpi {
     pub n: i32,
 }
 
-/// C `nn_weights` (`nnpi.c:791`).
+/// C `nn_weights` (`nnpi.c:791`); `nvertices` is `vertices.len()`.
 ///
 /// `nnai.c:38` declares an identical private type; both are translated in
 /// their own module, as the source declares them.
 pub struct NnWeights {
-    pub nvertices: i32,
     /// vertex indices [nvertices]
     pub vertices: Vec<i32>,
     /// vertex weights [nvertices]
@@ -1053,7 +1045,6 @@ pub struct NnWeights {
 pub fn free_nn_weights(weights: &mut NnWeights) {
     weights.vertices.clear();
     weights.weights.clear();
-    weights.nvertices = 0;
 }
 
 /// Original `nnhpi_create` (`nnpi.c:803`).
@@ -1061,7 +1052,7 @@ pub fn free_nn_weights(weights: &mut NnWeights) {
 /// As with [`nnpi_create`], the triangulation is owned here and handed back by
 /// [`nnhpi_destroy`], because the source's `nnhpi_destroy` does not free it.
 pub fn nnhpi_create(d: Delaunay, size: i32) -> Nnhpi {
-    let npoints = d.npoints;
+    let npoints = d.points.len() as i32;
     let mut nn = Nnhpi {
         nnpi: nnpi_create(d),
         ht_data: None,
@@ -1115,20 +1106,12 @@ pub fn nnhpi_interpolate(nnhpi: &mut Nnhpi, p: &mut Point) {
     } else {
         nnpi_calculate_weights(&mut nnhpi.nnpi, p);
 
-        let mut w = NnWeights {
-            nvertices: 0,
-            vertices: vec![0; nnhpi.nnpi.nvertices as usize],
-            weights: vec![0.; nnhpi.nnpi.nvertices as usize],
+        /* Two mallocs of nnpi->nvertices entries, then an element-by-element
+        copy of both arrays. */
+        let w = NnWeights {
+            vertices: nnhpi.nnpi.vertices.clone(),
+            weights: nnhpi.nnpi.weights.clone(),
         };
-
-        w.nvertices = nnhpi.nnpi.nvertices;
-
-        i = 0;
-        while i < nnhpi.nnpi.nvertices {
-            w.vertices[i as usize] = nnhpi.nnpi.vertices[i as usize];
-            w.weights[i as usize] = nnhpi.nnpi.weights[i as usize];
-            i += 1;
-        }
 
         nnhpi.weights_store.push(w);
         weights = nnhpi.weights_store.len() - 1;
@@ -1145,7 +1128,7 @@ pub fn nnhpi_interpolate(nnhpi: &mut Nnhpi, p: &mut Point) {
                     f.write_all(c_format("  %d: {", &[CArg::Int(nnhpi.nnpi.n as i64)]).as_bytes());
 
                 i = 0;
-                while i < nnhpi.nnpi.nvertices {
+                while i < nnhpi.nnpi.vertices.len() as i32 {
                     let _ = f.write_all(
                         c_format(
                             "(%d,%.5g)",
@@ -1157,7 +1140,7 @@ pub fn nnhpi_interpolate(nnhpi: &mut Nnhpi, p: &mut Point) {
                         .as_bytes(),
                     );
 
-                    if i < nnhpi.nnpi.nvertices - 1 {
+                    if i < nnhpi.nnpi.vertices.len() as i32 - 1 {
                         let _ = f.write_all(b", ");
                     }
                     i += 1;
@@ -1176,7 +1159,7 @@ pub fn nnhpi_interpolate(nnhpi: &mut Nnhpi, p: &mut Point) {
                     );
                 }
                 i = 0;
-                while i < nnhpi.nnpi.nvertices {
+                while i < nnhpi.nnpi.vertices.len() as i32 {
                     if nnhpi.nnpi.vertices[i as usize] == NN_TEST_VERTICE.get() {
                         w = nnhpi.nnpi.weights[i as usize];
 
@@ -1199,14 +1182,14 @@ pub fn nnhpi_interpolate(nnhpi: &mut Nnhpi, p: &mut Point) {
 
     nnhpi.n += 1;
 
-    if nnhpi.weights_store[weights].nvertices == 0 {
+    if nnhpi.weights_store[weights].vertices.len() == 0 {
         p.z = NAN;
         return;
     }
 
     p.z = 0.0;
     i = 0;
-    while i < nnhpi.weights_store[weights].nvertices {
+    while i < nnhpi.weights_store[weights].vertices.len() as i32 {
         if nnhpi.weights_store[weights].weights[i as usize] < nnhpi.nnpi.wmin {
             p.z = NAN;
             return;

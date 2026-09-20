@@ -1,5 +1,4 @@
 //! Translation of `IMOD/libcfshr/sdsearch.c`.
-#![allow(dead_code)]
 
 /// Matches `montSdCalc` (`IMOD/libcfshr/sdsearch.c:228`).
 pub fn mont_sd_calc(

@@ -2,7 +2,7 @@
 //!
 //! The Fortran main program maps to [`binvol`] and its one contained procedure
 //! maps to [`slice_weighting`]; no non-source algorithm helpers are introduced.
-#![allow(dead_code, unused_variables)]
+#![allow(unused_variables)]
 
 use crate::imod::flib::subrs::hvem::b3ddate::b3d_date;
 use crate::imod::flib::subrs::hvem::parse_input_params::{
@@ -60,6 +60,19 @@ pub fn binvol() {
         // these two closures rather than with Rust's own `{}` formatting.
         let list_int = |value: i32| -> String { format!(" {value:>11}") };
         let list_real = |value: f32| -> String {
+            // `libgfortran/io/write.c` `write_infnan`: a NaN prints as `NaN`
+            // and an infinity as `Infinity` (`Inf` when the field is narrower
+            // than 8, with a leading `-` for negative), right-justified in the 16-column list-directed field.
+            if value.is_nan() {
+                return format!("{:>16}", "NaN");
+            }
+            if value.is_infinite() {
+                let text = match (value < 0.0, 16) {
+                    (false, _) => "Infinity",
+                    (true, _) => "-Infinity",
+                };
+                return format!("{text:>16}");
+            }
             let magnitude = value.abs();
             let mut exponent = 1_i32;
             if magnitude != 0.0 {

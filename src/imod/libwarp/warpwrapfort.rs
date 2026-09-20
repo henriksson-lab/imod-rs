@@ -15,9 +15,6 @@ pub fn setcurrentwarpfile(index: i32) -> i32 {
 pub fn clearwarpfile(index: i32) -> i32 {
     warpfiles::clear_warp_file(index)
 }
-pub fn warpfilesdone() {
-    warpfiles::warp_files_done()
-}
 pub fn setlineartransform(iz: i32, xform: &[f32]) -> i32 {
     warpfiles::set_linear_transform(iz - 1, xform, 2)
 }
@@ -60,18 +57,6 @@ pub fn getwarpgridsize(iz: i32, nx: &mut i32, ny: &mut i32, prod: &mut i32) -> i
 #[allow(clippy::too_many_arguments)]
 pub fn setgridsizetomake(iz: i32, nx: i32, ny: i32, xs: f32, ys: f32, xi: f32, yi: f32) -> i32 {
     warpfiles::set_grid_size_to_make(iz - 1, nx, ny, xs, ys, xi, yi)
-}
-pub fn controlpointrange(
-    iz: i32,
-    xmin: &mut f32,
-    xmax: &mut f32,
-    ymin: &mut f32,
-    ymax: &mut f32,
-) -> i32 {
-    warpfiles::control_point_range(iz - 1, xmin, xmax, ymin, ymax)
-}
-pub fn controlpointspacing(iz: i32, percentile: f32, spacing: &mut f32) -> i32 {
-    warpfiles::control_point_spacing(iz - 1, percentile, spacing)
 }
 pub fn gridsizefromspacing(iz: i32, percentile: f32, factor: f32, full_extent: i32) -> i32 {
     warpfiles::grid_size_from_spacing(iz - 1, percentile, factor, full_extent)
@@ -532,14 +517,14 @@ mod tests {
     use super::*;
     #[test]
     fn wrappers_preserve_one_based_section_and_fortran_padding() {
-        warpfilesdone();
+        warpfiles::warp_files_done();
         assert_eq!(newwarpfile(10, 10, 1, 1., 0), 0);
         assert_eq!(setlineartransform(1, &[1., 0., 0., 1., 3., 4.]), 0);
         let mut xf = [0.; 6];
         assert_eq!(getlineartransform(1, &mut xf), 0);
         assert_eq!(xf, [1., 0., 0., 1., 3., 4.]);
         assert_eq!(fortran_filename(b"name.warp   \0ignored"), "name.warp");
-        warpfilesdone();
+        warpfiles::warp_files_done();
     }
     #[test]
     fn inversion_wrapper_uses_source_two_row_transform_layout() {
@@ -575,7 +560,7 @@ mod tests {
     }
     #[test]
     fn write_wrapper_trims_fortran_filename_padding() {
-        warpfilesdone();
+        warpfiles::warp_files_done();
         assert_eq!(newwarpfile(4, 5, 1, 1., 0), 0);
         let path =
             std::env::temp_dir().join(format!("imod-rs-warpwrapfort-{}.xf", std::process::id()));
@@ -584,11 +569,11 @@ mod tests {
         assert_eq!(writewarpfile(&padded, 1), 0);
         assert!(path.exists());
         std::fs::remove_file(path).unwrap();
-        warpfilesdone();
+        warpfiles::warp_files_done();
     }
     #[test]
     fn read_check_error_is_padded_for_a_fortran_character_buffer() {
-        warpfilesdone();
+        warpfiles::warp_files_done();
         let (mut nx, mut ny, mut nz, mut binning, mut flags) = (0, 0, 0, 0, 0);
         let mut pixel_size = 0.;
         let mut error = [0_u8; 64];

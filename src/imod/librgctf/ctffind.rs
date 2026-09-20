@@ -2,14 +2,9 @@
 
 use super::empirical_distribution::EmpiricalDistribution;
 use super::functions::rank_sort;
-use super::functions::{PrintFunction, internal_set_print_func};
+use super::image::{WriteSliceCallback, internal_set_write_slice_func};
 use super::{brute_force_search::BruteForceSearch, conjugate_gradient::ConjugateGradient};
 use super::{ctf::Ctf, curve::Curve, image::Image};
-use std::sync::{OnceLock, RwLock};
-
-/// Rust form of `WriteSliceType`; ownership of pixels stays with the caller.
-pub type SliceWriteFunction = fn(&str, &[f32], i32, i32) -> i32;
-static SLICE_WRITE_FUNCTION: OnceLock<RwLock<Option<SliceWriteFunction>>> = OnceLock::new();
 
 /// Parameters declared by `IMOD/include/ctffind.h`.
 #[derive(Clone, Debug, Default, PartialEq)]
@@ -359,36 +354,6 @@ pub struct ImageCtfComparison {
     image_mean: f64,
 }
 
-/// `ImageCTFComparison()`: construct the owned image/CTF comparison state.
-#[allow(clippy::too_many_arguments)]
-pub fn image_ctf_comparison(
-    number_of_images: usize,
-    ctf: Ctf,
-    pixel_size: f32,
-    find_phase_shift: bool,
-    astigmatism_is_known: bool,
-    known_astigmatism: f32,
-    known_astigmatism_angle: f32,
-    fit_defocus_sweep: bool,
-) -> ImageCtfComparison {
-    ImageCtfComparison::new(
-        number_of_images,
-        ctf,
-        pixel_size,
-        find_phase_shift,
-        astigmatism_is_known,
-        known_astigmatism,
-        known_astigmatism_angle,
-        fit_defocus_sweep,
-    )
-}
-
-/// `~ImageCTFComparison()`: all copied images and correlation vectors are
-/// owned and therefore released together.
-pub fn free_image_ctf_comparison(comparison: ImageCtfComparison) {
-    drop(comparison);
-}
-
 impl ImageCtfComparison {
     #[allow(clippy::too_many_arguments)]
     pub fn new(
@@ -426,24 +391,13 @@ impl ImageCtfComparison {
     pub fn ctf(&self) -> &Ctf {
         &self.ctf
     }
-    /// `ImageCTFComparison::ReturnCTF` returns an owned C++ value; cloning
-    /// makes that transfer explicit in Rust.
-    pub fn return_ctf(&self) -> Ctf {
-        self.ctf.clone()
-    }
     pub fn astigmatism_is_known(&self) -> bool {
         self.astigmatism_is_known
     }
     pub fn known_astigmatism(&self) -> f32 {
         self.known_astigmatism
     }
-    pub fn return_known_astigmatism(&self) -> f32 {
-        self.known_astigmatism
-    }
     pub fn known_astigmatism_angle(&self) -> f32 {
-        self.known_astigmatism_angle
-    }
-    pub fn return_known_astigmatism_angle(&self) -> f32 {
         self.known_astigmatism_angle
     }
     pub fn find_phase_shift(&self) -> bool {
@@ -460,28 +414,11 @@ impl ImageCtfComparison {
     }
 }
 
-/// Exported `ctffindSetPrintFunc`, forwarding to the shared CTF print
-/// boundary used by the rest of the Rust library.
-pub fn ctffind_set_print_func(function: Option<PrintFunction>) {
-    internal_set_print_func(function);
-}
-
-/// Exported `ctffindSetSliceWriteFunc`.  The registered function is retained
-/// for CTF image-output paths as they are translated, without a global raw
-/// function pointer or mutable pixel buffer.
-pub fn ctffind_set_slice_write_func(function: Option<SliceWriteFunction>) {
-    *SLICE_WRITE_FUNCTION
-        .get_or_init(|| RwLock::new(None))
-        .write()
-        .expect("slice callback lock poisoned") = function;
-}
-
-pub fn ctffind_write_slice(filename: &str, pixels: &[f32], width: i32, height: i32) -> Option<i32> {
-    (*SLICE_WRITE_FUNCTION
-        .get_or_init(|| RwLock::new(None))
-        .read()
-        .expect("slice callback lock poisoned"))
-    .map(|function| function(filename, pixels, width, height))
+/// `ctffindSetSliceWriteFunc` (`ctffind.cpp:232-235`): the source stores the
+/// pointer in its own static and forwards it to `internalSetWriteSliceFunc`;
+/// only the forwarded copy is ever read, so the Rust keeps just that one.
+pub fn ctffind_set_slice_write_func(function: Option<WriteSliceCallback>) {
+    internal_set_write_slice_func(function);
 }
 
 /// Source `CurveCTFComparison`, represented with an owned curve sample vector.
@@ -669,37 +606,6 @@ pub fn compute_frc_between_1d_spectrum_and_fit(
         sigma[bin] = 2. / count.sqrt();
     }
     (frc, sigma)
-}
-
-/// `OverlayCTF`, including the source's lower-left theoretical overlay.
-pub fn overlay_ctf(spectrum: &mut Image, ctf: &Ctf) {
-    assert!(spectrum.is_in_real_space && spectrum.logical_z_dimension == 1);
-    let lowest = ctf.lowest_frequency_for_fitting().powi(2);
-    let highest = ctf.highest_frequency_for_fitting().powi(2);
-    for y in 0..spectrum.logical_y_dimension {
-        let fy =
-            (y - spectrum.physical_address_of_box_center_y) as f32 * spectrum.fourier_voxel_size_y;
-        for x in 0..spectrum.logical_x_dimension {
-            let fx = (x - spectrum.physical_address_of_box_center_x) as f32
-                * spectrum.fourier_voxel_size_x;
-            let frequency_squared = fx.powi(2) + fy.powi(2);
-            if frequency_squared > lowest
-                && frequency_squared <= highest
-                && y < spectrum.physical_address_of_box_center_y
-                && x < spectrum.physical_address_of_box_center_x
-            {
-                spectrum.set_real_pixel_from_physical_coord(
-                    x,
-                    y,
-                    0,
-                    ctf.evaluate(frequency_squared, fy.atan2(fx)).abs(),
-                );
-            }
-            if frequency_squared <= lowest {
-                spectrum.set_real_pixel_from_physical_coord(x, y, 0, 0.);
-            }
-        }
-    }
 }
 
 /// Live one-dimensional branch of `RescaleSpectrumAndRotationalAverage`.
@@ -1038,12 +944,6 @@ pub fn find_rotational_alignment_between_two_stacks_of_images(
 #[cfg(test)]
 mod tests {
     use super::*;
-    #[test]
-    fn image_comparison_constructor_facades_own_image_storage() {
-        let comparison = image_ctf_comparison(2, Ctf::default(), 1., false, false, 0., 0., false);
-        assert_eq!(comparison.images.len(), 2);
-        free_image_ctf_comparison(comparison);
-    }
 
     #[test]
     fn curve_objective_and_owned_parameter_state_follow_source() {
@@ -1070,25 +970,6 @@ mod tests {
         assert_eq!(frc[0], 1.);
         assert!(frc[3] > 0.99);
         assert!(sigma[3].is_finite());
-    }
-
-    #[test]
-    fn ctf_overlay_zeros_low_frequency_and_writes_theoretical_quadrant() {
-        let ctf = Ctf::with_fitting_parameters(
-            300., 2.7, 0.07, 15_000., 15_000., 0., 0.1, 0.45, -10., 1., 0.,
-        );
-        let mut spectrum = Image::default();
-        spectrum.allocate(32, 32, 1, true).unwrap();
-        spectrum.set_to_constant(2.);
-        overlay_ctf(&mut spectrum, &ctf);
-        assert_eq!(
-            spectrum.return_real_pixel_from_physical_coord(16, 16, 0),
-            Some(0.)
-        );
-        assert_ne!(
-            spectrum.return_real_pixel_from_physical_coord(6, 6, 0),
-            Some(2.)
-        );
     }
 
     #[test]

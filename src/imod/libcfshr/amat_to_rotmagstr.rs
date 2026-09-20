@@ -1,5 +1,4 @@
 //! Translation of `IMOD/libcfshr/amat_to_rotmagstr.c`.
-#![allow(dead_code)]
 
 // `amatToRotmagstr` and `rotmagstrToAmat` declare this local double.
 const ATOR: f64 = 0.0174532925;
@@ -21,11 +20,6 @@ pub fn rotmagstr_to_amat(theta: f32, smag: f32, str_: f32, phi: f32, amat: &mut 
     amat[2] = f2 * costh - f3 * sinth;
     amat[1] = f1 * sinth + f2 * costh;
     amat[3] = f2 * sinth + f3 * costh;
-}
-
-/// `rotmagstr_to_amat`, the Fortran wrapper equivalent.
-pub fn rotmagstr_to_amat_f(theta: f32, smag: f32, str_: f32, phi: f32, amat: &mut [f32; 4]) {
-    rotmagstr_to_amat(theta, smag, str_, phi, amat);
 }
 
 /// `amatToRotMag`.
@@ -53,11 +47,6 @@ pub fn amat_to_rotmag(a11: f32, a12: f32, a21: f32, a22: f32) -> (f32, f32, f32,
     (theta, ydtheta, smag, ydmag)
 }
 
-/// `amat_to_rotmag`, the Fortran wrapper equivalent.
-pub fn amat_to_rotmag_f(amat: &[f32; 4]) -> (f32, f32, f32, f32) {
-    amat_to_rotmag(amat[0], amat[2], amat[1], amat[3])
-}
-
 /// `rotMagToAmat`, returned in Fortran `(2, *)` order.
 pub fn rotmag_to_amat(theta: f32, ydtheta: f32, smag: f32, ydmag: f32) -> [f32; 4] {
     let xmag = (smag as f64 - ydmag as f64 / 2.0) as f32;
@@ -70,11 +59,6 @@ pub fn rotmag_to_amat(theta: f32, ydtheta: f32, smag: f32, ydmag: f32) -> [f32; 
         (-(ymag as f64) * (ytheta as f64 * RADIANS_PER_DEGREE).sin()) as f32,
         (ymag as f64 * (ytheta as f64 * RADIANS_PER_DEGREE).cos()) as f32,
     ]
-}
-
-/// `rotmag_to_amat`, the Fortran wrapper equivalent.
-pub fn rotmag_to_amat_f(theta: f32, ydtheta: f32, smag: f32, ydmag: f32, amat: &mut [f32; 4]) {
-    *amat = rotmag_to_amat(theta, ydtheta, smag, ydmag);
 }
 
 /// `amatToRotmagstr`.
@@ -164,9 +148,4 @@ pub fn amat_to_rotmagstr(a11: f32, mut a12: f32, a21: f32, mut a22: f32) -> (f32
         }
     }
     (theta, smag, str_, phi)
-}
-
-/// `amat_to_rotmagstr`, the Fortran wrapper equivalent.
-pub fn amat_to_rotmagstr_f(amat: &[f32; 4]) -> (f32, f32, f32, f32) {
-    amat_to_rotmagstr(amat[0], amat[2], amat[1], amat[3])
 }

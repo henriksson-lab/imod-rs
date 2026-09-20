@@ -6,8 +6,6 @@
 //! raw pointer below is the direct translation of the non-owning
 //! `Processchunks *mProcesschunks` member.
 
-#![allow(dead_code)]
-
 use super::processchunks::Processchunks;
 use super::processhandler::ProcessHandler;
 use std::process::{Child, Command, Stdio};
@@ -41,7 +39,6 @@ pub struct MachineHandler {
     failure_count: i32,
     slowest_time: i32,
     slow_time_count: i32,
-    kill: bool,
     chunk_erred: bool,
     dropped: bool,
     internal_dropped: bool,
@@ -69,12 +66,11 @@ impl MachineHandler {
         MachineHandler {
             process_handler_array: Vec::new(),
             name: String::new(),
-            decorated_class_name: "MachineHandler".to_owned(),
+            decorated_class_name: "14MachineHandler".to_owned(),
             num_cpus: 0,
             failure_count: 0,
             slowest_time: -1,
             slow_time_count: 0,
-            kill: false,
             chunk_erred: false,
             dropped: false,
             internal_dropped: false,
@@ -93,19 +89,6 @@ impl MachineHandler {
             one_pid_to_kill: String::new(),
             kill_process: None,
         }
-    }
-
-    /// C++ private `MachineHandler::init`.  It is declared in the header but
-    /// has no IMOD definition.
-    fn init(&mut self) {
-        panic!("MachineHandler::init has no definition in IMOD source")
-    }
-
-    /// C++ private no-argument `MachineHandler::setup`.  Rust has no overloads;
-    /// the suffix records its otherwise identical source name.  It is declared
-    /// in the header but has no IMOD definition.
-    fn setup_without_arguments(&mut self) {
-        panic!("MachineHandler::setup() has no definition in IMOD source")
     }
 
     /// C++ `MachineHandler::setup(Processchunks &, const QString &, const int,
@@ -142,25 +125,6 @@ impl MachineHandler {
     pub fn set_values(&mut self, machine_name: &str, num_cpus: i32) {
         self.name = machine_name.to_owned();
         self.num_cpus = num_cpus;
-    }
-
-    /// C++ inline `MachineHandler::nameToLong`.
-    pub fn name_to_long(&self, ok: &mut bool) -> i64 {
-        match self.name.parse::<i64>() {
-            Ok(value) => {
-                *ok = true;
-                value
-            }
-            Err(_) => {
-                *ok = false;
-                0
-            }
-        }
-    }
-
-    /// C++ inline `MachineHandler::incrementNumCpus`.
-    pub fn increment_num_cpus(&mut self) {
-        self.num_cpus += 1;
     }
 
     /// C++ inline `MachineHandler::getName`.
@@ -220,21 +184,9 @@ impl MachineHandler {
         self.chunk_erred = chunk_erred;
     }
 
-    /// C++ declaration `MachineHandler::isTimedOut`.  The IMOD source declares
-    /// this member but provides no definition, so no behavior is invented here.
-    pub fn is_timed_out(&self, _index: usize, _timeout_millisec: i32) -> bool {
-        panic!("MachineHandler::isTimedOut has no definition in IMOD source")
-    }
-
     /// C++ inline `MachineHandler::incrementFailureCount`.
     pub fn increment_failure_count(&mut self) {
         self.failure_count += 1;
-    }
-
-    /// C++ declaration `MachineHandler::msgKillProcessTimeout`.  The IMOD
-    /// source declares this member but provides no definition.
-    pub fn msg_kill_process_timeout(&mut self) {
-        panic!("MachineHandler::msgKillProcessTimeout has no definition in IMOD source")
     }
 
     /// C++ inline `MachineHandler::isJobValid`.
@@ -258,18 +210,6 @@ impl MachineHandler {
         }
         *job_machine_list = self.job_machine_lists[cpu_index].clone();
         self.job_thread_limits[cpu_index]
-    }
-
-    /// C++ declaration `MachineHandler::isKillNeeded`.  The IMOD source
-    /// declares this member but provides no definition.
-    pub fn is_kill_needed(&self) -> bool {
-        panic!("MachineHandler::isKillNeeded has no definition in IMOD source")
-    }
-
-    /// C++ declaration `MachineHandler::isKillSignal`.  The IMOD source
-    /// declares this member but provides no definition.
-    pub fn is_kill_signal(&self) -> bool {
-        panic!("MachineHandler::isKillSignal has no definition in IMOD source")
     }
 
     /// C++ `MachineHandler::resetKill`.

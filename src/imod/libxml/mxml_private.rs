@@ -11,7 +11,6 @@
 //! `_mxml_destructor` therefore become the declaration of [`MXML_GLOBAL`] and
 //! its `Drop`, and `_mxml_global` hands out the key rather than a pointer, so
 //! a caller reaches the block with `mxml_global().with_borrow_mut(...)`.
-#![allow(dead_code)]
 
 use super::*;
 use core::cell::RefCell;

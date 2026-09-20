@@ -1,5 +1,4 @@
 //! Translation of `IMOD/libcfshr/samplemeansd.c`.
-#![allow(dead_code)]
 
 /// C `sampleMinMaxMeanSD` (`samplemeansd.c:76`).
 ///
@@ -275,27 +274,6 @@ pub fn sample_mean_sd(
     )
 }
 
-/// C `sampleMinMaxMean` (`samplemeansd.c:294`).
-pub fn sample_min_max_mean(
-    image: Option<&[&[u8]]>,
-    data_type: i32,
-    nx: i32,
-    ny: i32,
-    sample: f32,
-    ix_start: i32,
-    iy_start: i32,
-    nx_use: i32,
-    ny_use: i32,
-    mean: Option<&mut f32>,
-    amin: Option<&mut f32>,
-    amax: Option<&mut f32>,
-) -> i32 {
-    sample_min_max_mean_sd(
-        image, data_type, nx, ny, sample, ix_start, iy_start, nx_use, ny_use, mean, None, amin,
-        amax,
-    )
-}
-
 /// C Fortran wrapper `sampleminmaxmeansd` (`samplemeansd.c:307`).
 ///
 /// `image` is the byte view of the Fortran real*4 array; the wrapper's own
@@ -387,26 +365,6 @@ pub fn sample_min_max_mean_sd_fortran(
     }
 }
 
-/// C Fortran wrapper `samplemeansd` (`samplemeansd.c:337`).
-pub fn sample_mean_sd_fortran(
-    image: &[u8],
-    nx: &i32,
-    ny: &i32,
-    sample: &f32,
-    ix_start: &i32,
-    iy_start: &i32,
-    nx_use: &i32,
-    ny_use: &i32,
-    mean: &mut f32,
-    sd: &mut f32,
-    dmin: &mut f32,
-    dmax: &mut f32,
-) -> i32 {
-    sample_min_max_mean_sd_fortran(
-        image, nx, ny, sample, ix_start, iy_start, nx_use, ny_use, 2, mean, sd, dmin, dmax,
-    )
-}
-
 /// C `typeForSampleMean` (`samplemeansd.c:350`).
 pub fn type_for_sample_mean(mrc_mode: i32) -> i32 {
     match mrc_mode {
@@ -417,11 +375,6 @@ pub fn type_for_sample_mean(mrc_mode: i32) -> i32 {
         16 => 8,
         _ => -1,
     }
-}
-
-/// C Fortran wrapper `typeforsamplemean` (`samplemeansd.c:369`).
-pub fn type_for_sample_mean_fortran(mrc_mode: &i32) -> i32 {
-    type_for_sample_mean(*mrc_mode)
 }
 
 /// C `getSampleOfArray` (`samplemeansd.c:387`).

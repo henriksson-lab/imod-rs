@@ -1,5 +1,4 @@
 //! Translation of `IMOD/libcfshr/beadutil.c`.
-#![allow(dead_code)]
 
 use crate::imod::libcfshr::percentile::percentile_float;
 

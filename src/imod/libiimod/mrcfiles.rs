@@ -1,6 +1,5 @@
 //! Type scaffold for `IMOD/include/mrcfiles.h` and implementation counterpart
 //! `IMOD/libiimod/mrcfiles.c`.
-#![allow(dead_code)]
 
 use crate::imod::libcfshr::b3dutil::ImodFile;
 use crate::imod::libcfshr::b3dutil::{
@@ -9,6 +8,7 @@ use crate::imod::libcfshr::b3dutil::{
     invert_mrc_origin_on_output, mrc_huge_seek, read_bytes_signed, set_or_clear_flags,
     write_4_bit_mode_for_bytes, write_16_bit_mode_for_floats, write_bytes_signed,
 };
+use crate::imod::libcfshr::islice::MrcData;
 use crate::imod::libiimod::iimage::{
     IIFILE_MRC, IIFILE_RAW, ii_fill_mrc_header, ii_lookup_file_from_fp, ii_sync_from_mrc_header,
     ii_write_header,
@@ -1317,18 +1317,6 @@ pub fn mrc_get_data_memory(
     Some(idata)
 }
 
-/// `mrcFreeDataMemory` (`mrcfiles.c:1613`).
-///
-/// `mrc_get_data_memory` returns owned section vectors, so consuming this
-/// value performs the same allocation release as the source loop and final
-/// `free(idata)`.  `contig` and `zsize` remain part of the entry point because
-/// callers retain the C allocation contract; nested Rust storage has no
-/// separate contiguous backing allocation to special-case.
-pub fn mrc_free_data_memory(idata: Vec<Vec<u8>>, contig: i32, zsize: i32) {
-    let _source_sections = if contig != 0 { 1 } else { zsize.max(0) };
-    drop(idata);
-}
-
 /// Matches C `mrcCopyValidExtendedType(MrcHeader *, MrcHeader *)` (`mrcfiles.c:676`).
 pub fn mrc_copy_valid_extended_type(hin: &MrcHeader, hout: &mut MrcHeader) {
     let mut version = 0;
@@ -1762,7 +1750,7 @@ pub fn mrc_mread_slice(
     hdata: &mut MrcHeader,
     slice: i32,
     axis: u8,
-) -> Option<Vec<u8>> {
+) -> Option<MrcData> {
     let bsize = match axis as u8 {
         b'x' | b'X' => hdata.ny * hdata.nz,
         b'y' | b'Y' => hdata.nx * hdata.nz,
@@ -1784,22 +1772,22 @@ pub fn mrc_mread_slice(
         );
         return None;
     }
-    let mut buf = Vec::new();
     let bytes = (dsize as usize)
         .checked_mul(csize as usize)
         .and_then(|size| size.checked_mul(bsize as usize));
     let Some(bytes) = bytes else {
         return None;
     };
-    if buf.try_reserve_exact(bytes).is_err() {
+    // Typed by the mode so that `sliceReadMRC` can adopt the buffer as the
+    // slice's `union MRCdata` without a copy.
+    let Some(mut buf) = MrcData::try_zeroed(hdata.mode, bytes) else {
         b3d_error(
             Some(&mut ImodFile::Stderr),
             format_args!("ERROR: mrc_mread_slice - couldn't get memory.\n"),
         );
         return None;
-    }
-    buf.resize(bytes, 0);
-    if mrc_read_slice(&mut buf, fin, hdata, slice, axis) == 0 {
+    };
+    if mrc_read_slice(buf.bytes_mut(), fin, hdata, slice, axis) == 0 {
         return Some(buf);
     }
     None
@@ -2156,86 +2144,6 @@ pub fn mrc_write_slice(
         _ => unreachable!(),
     }
     0
-}
-
-/// Matches C `mrcWriteFFT(const char *, float *, int, int, int)` (`mrcfiles.c:1502`).
-pub fn mrc_write_fft(
-    filename: &[u8],
-    fft: &mut [f32],
-    nx_real: i32,
-    ny_real: i32,
-    if_scale: i32,
-) -> i32 {
-    let mut retval = 1;
-    let scale_fac = (1.0_f64 / ((nx_real as f64) * (ny_real as f64)).sqrt()) as f32;
-    let mut shift_temp = Vec::<f32>::new();
-    if shift_temp
-        .try_reserve_exact((2 * nx_real + 4) as usize)
-        .is_err()
-    {
-        return 1;
-    }
-    shift_temp.resize((2 * nx_real + 4) as usize, 0.);
-    crate::imod::libcfshr::filtxcorr::wrap_fft_slice(
-        fft,
-        &mut shift_temp,
-        (nx_real + 2) / 2,
-        ny_real,
-        0,
-    );
-    if if_scale != 0 {
-        for ind in 0..(nx_real + 2) * ny_real {
-            fft[ind as usize] *= scale_fac;
-        }
-    }
-    let mut hdr = MrcHeader::default();
-    mrc_head_new(
-        &mut hdr,
-        (nx_real + 2) / 2,
-        ny_real,
-        1,
-        MRC_MODE_COMPLEX_FLOAT,
-    );
-    imod_backup_file(&String::from_utf8_lossy(filename));
-    let fp = ImodFile::open(&*String::from_utf8_lossy(filename), "wb");
-    if let Some(mut fp) = fp {
-        retval = 0;
-        hdr.amax = -1.0e37_f32;
-        hdr.amin = 1.0e37_f32;
-        let mut asum = 0.0_f64;
-        for ind in (0..(nx_real + 2) * ny_real).step_by(2) {
-            let ampl = (fft[ind as usize] * fft[ind as usize]
-                + fft[(ind + 1) as usize] * fft[(ind + 1) as usize])
-                .sqrt();
-            asum += ampl as f64;
-            hdr.amin = hdr.amin.min(ampl);
-            hdr.amax = hdr.amax.max(ampl);
-        }
-        hdr.amean = (asum / (0.5 * (nx_real + 2) as f64 * ny_real as f64)) as f32;
-        let mut bytes = Vec::with_capacity(fft.len() * core::mem::size_of::<f32>());
-        for value in fft.iter() {
-            bytes.extend_from_slice(&value.to_ne_bytes());
-        }
-        if mrc_head_write(&mut fp, &mut hdr) != 0
-            || mrc_write_slice(&bytes, &mut fp, &mut hdr, 0, b'Z') != 0
-        {
-            retval = 1;
-        }
-        drop(fp);
-    }
-    if if_scale != 0 {
-        for ind in 0..(nx_real + 2) * ny_real {
-            fft[ind as usize] /= scale_fac;
-        }
-    }
-    crate::imod::libcfshr::filtxcorr::wrap_fft_slice(
-        fft,
-        &mut shift_temp,
-        (nx_real + 2) / 2,
-        ny_real,
-        1,
-    );
-    retval
 }
 
 /// Matches C `get_byte_map(float, float, int, int, int)` (`mrcfiles.c:1634`).
@@ -2682,8 +2590,6 @@ mod tests {
             assert_eq!(contiguous.contig, 0);
             assert_eq!(contiguous_data.len(), 3);
             assert!(contiguous_data.iter().all(|plane| plane.len() == 10));
-            mrc_free_data_memory(separate_data, 0, 3);
-            mrc_free_data_memory(contiguous_data, 1, 3);
         }
     }
 

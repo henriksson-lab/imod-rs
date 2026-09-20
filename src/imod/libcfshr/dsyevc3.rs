@@ -1,5 +1,4 @@
 //! Translation of `IMOD/libcfshr/dsyevc3.c`.
-#![allow(dead_code)]
 
 /// Complete function inventory for `dsyevc3.c`.
 pub const DSYEVC3_SOURCE_FUNCTIONS: &[&str] = &["dsyevc3"];

@@ -3,7 +3,6 @@
 //! Converted to idiomatic Rust per `NATIVE.md`: `float *` becomes a slice and
 //! the walking `float *buf` becomes an index.  None of the arithmetic moved —
 //! see the note on the literals below.
-#![allow(dead_code)]
 
 use crate::imod::libcfshr::b3dutil::num_omp_threads;
 use crate::imod::libwarp::warputils::interpolate_grid;

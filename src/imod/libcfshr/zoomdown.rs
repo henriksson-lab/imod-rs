@@ -12,11 +12,9 @@
 //! (`zoomdown.c:79`) becomes an offset into a [`WeightBuf`], `accumBuf`
 //! (`zoomdown.c:566`) becomes an [`AccumBuf`], and `filtBuf`
 //! (`zoomdown.c:314`) becomes a [`FiltBuf`].
-#![allow(dead_code)]
 
 use crate::imod::libcfshr::b3dutil::num_omp_threads;
 use core::cell::Cell;
-use rayon::ThreadPoolBuilder;
 use rayon::iter::{IntoParallelIterator, ParallelIterator};
 
 /// Complete non-preprocessor function inventory for `zoomdown.c`.
@@ -333,28 +331,6 @@ pub fn select_zoom_filter_xy(
         S_X_WIDTH.with(|c| c.set(width));
     }
     0
-}
-
-/// Original `selectzoomfilterXY` (`zoomdown.c:203`).
-pub fn selectzoomfilter_xy(
-    type_0: &i32,
-    xzoom: &f32,
-    yzoom: &f32,
-    out_width_x: &mut i32,
-    out_width_y: &mut i32,
-) -> i32 {
-    select_zoom_filter_xy(
-        *type_0,
-        *xzoom as f64,
-        *yzoom as f64,
-        out_width_x,
-        out_width_y,
-    )
-}
-
-/// Original `setZoomValueScaling` (`zoomdown.c:214`).
-pub fn set_zoom_value_scaling(factor: f32) {
-    S_VALUE_SCALING.with(|c| c.set(factor));
 }
 
 /// Original `zoomWithFilter` (`zoomdown.c:246`).
@@ -1142,10 +1118,16 @@ fn scanline_filter(
                 (lineb, wgt, &mut *obufb)
             {
                 for b in 0..b_xsize as usize {
+                    // `zoomdown.c:681-686`: `wfp`/`afp` walk the tap window
+                    // once; the two windows are taken as slices so the loop
+                    // carries no per-tap bounds check.  The sum stays
+                    // sequential.
                     let mut rsum: f32 = 0.;
-                    let base = wtab[b].i0 as usize;
-                    for af in 0..(wtab[b].i1 - wtab[b].i0) as usize {
-                        rsum += wb[wtab[b].weight + af] * linef[base + af];
+                    let n = (wtab[b].i1 - wtab[b].i0) as usize;
+                    let wfp = &wb[wtab[b].weight..wtab[b].weight + n];
+                    let afp = &linef[wtab[b].i0 as usize..wtab[b].i0 as usize + n];
+                    for (w, a) in wfp.iter().zip(afp) {
+                        rsum += w * a;
                     }
                     obuff[b] = rsum;
                 }
@@ -1158,9 +1140,11 @@ fn scanline_filter(
             {
                 for b in 0..b_xsize as usize {
                     let mut rsum: f32 = 0.5;
-                    let base = wtab[b].i0 as usize;
-                    for af in 0..(wtab[b].i1 - wtab[b].i0) as usize {
-                        rsum += wb[wtab[b].weight + af] * linef[base + af];
+                    let n = (wtab[b].i1 - wtab[b].i0) as usize;
+                    let wfp = &wb[wtab[b].weight..wtab[b].weight + n];
+                    let afp = &linef[wtab[b].i0 as usize..wtab[b].i0 as usize + n];
+                    for (w, a) in wfp.iter().zip(afp) {
+                        rsum += w * a;
                     }
                     // `B3DMIN(32767., B3DMAX(-32767., rsum))` -- both limits are
                     // double literals, so the clamp is evaluated in double.
@@ -1180,9 +1164,11 @@ fn scanline_filter(
             {
                 for b in 0..b_xsize as usize {
                     let mut rsum: f32 = 0.5;
-                    let base = wtab[b].i0 as usize;
-                    for af in 0..(wtab[b].i1 - wtab[b].i0) as usize {
-                        rsum += wb[wtab[b].weight + af] * linef[base + af];
+                    let n = (wtab[b].i1 - wtab[b].i0) as usize;
+                    let wfp = &wb[wtab[b].weight..wtab[b].weight + n];
+                    let afp = &linef[wtab[b].i0 as usize..wtab[b].i0 as usize + n];
+                    for (w, a) in wfp.iter().zip(afp) {
+                        rsum += w * a;
                     }
                     let lo = if 0.0f64 > rsum as f64 {
                         0.0f64

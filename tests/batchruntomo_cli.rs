@@ -176,6 +176,6 @@ fn changes_a_real_imod_command_file_block() {
         "THICKNESS".to_owned(),
         "250".to_owned(),
     ]];
-    let changed = modify_for_change_list(&lines, "tilt", "", &changes).unwrap();
+    let changed = modify_for_change_list(&lines, "tilt", "", &changes, false).unwrap();
     assert!(changed.iter().any(|line| line == "THICKNESS\t250"));
 }

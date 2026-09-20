@@ -1,5 +1,4 @@
 //! Translation of `IMOD/libwarp/lpi.c`.
-#![allow(dead_code)]
 
 use std::io::Write;
 
@@ -32,10 +31,10 @@ pub fn lpi_build(d: Delaunay) -> Lpi {
         weights: Vec::new(),
     };
 
-    l.weights = vec![Lweights::default(); l.d.ntriangles as usize];
+    l.weights = vec![Lweights::default(); l.d.triangles.len()];
 
-    for i in 0..l.d.ntriangles {
-        let t = l.d.triangles[i as usize];
+    for i in 0..l.d.triangles.len() {
+        let t = l.d.triangles[i];
         let x0 = l.d.points[t.vids[0] as usize].x;
         let y0 = l.d.points[t.vids[0] as usize].y;
         let z0 = l.d.points[t.vids[0] as usize].z;
@@ -51,7 +50,7 @@ pub fn lpi_build(d: Delaunay) -> Lpi {
         let x12 = x1 - x2;
         let y12 = y1 - y2;
         let z12 = z1 - z2;
-        let lw = &mut l.weights[i as usize];
+        let lw = &mut l.weights[i];
 
         if y12 != 0.0 {
             let y0212 = y02 / y12;
@@ -174,7 +173,8 @@ mod tests {
         ];
         let direct = delaunay_build(3, &input, 0, None, 0, None).unwrap();
         assert_eq!(
-            direct.ntriangles, 1,
+            direct.triangles.len(),
+            1,
             "native hull did not retain one source triangle"
         );
         delaunay_destroy(Some(direct));

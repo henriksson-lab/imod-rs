@@ -1,5 +1,4 @@
 //! Translation of `IMOD/libcfshr/amoeba.c`.
-#![allow(dead_code)]
 
 const NMAX: usize = 20;
 const MAX_DUAL_AMOEBA_VAR: usize = 20;
@@ -388,29 +387,5 @@ pub fn amoebainitfwrap<Function: FnMut(&[f32]) -> f32>(
         delta,
         function,
         point_tolerance,
-    )
-}
-/// Matches Fortran wrapper `dualamoe ba` (`IMOD/libcfshr/amoeba.c:269`).
-pub fn dualamoeba<Function: FnMut(&[f32]) -> f32>(
-    values: &mut [f32],
-    dimensions: usize,
-    delta_factor: f32,
-    tolerance_factors: &[f32; 2],
-    function_tolerances: &[f32; 2],
-    initial: &mut [f32],
-    delta: &[f32],
-    function: &mut Function,
-    iterations: &mut i32,
-) {
-    dual_amoeba(
-        values,
-        dimensions,
-        delta_factor,
-        tolerance_factors,
-        function_tolerances,
-        initial,
-        delta,
-        function,
-        iterations,
     )
 }

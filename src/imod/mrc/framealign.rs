@@ -386,89 +386,6 @@ impl FrameAlign {
         Ok(())
     }
 
-    /// Multi-filter counterpart to source `findAllVsAllAlignment`.  Candidate
-    /// correlation sets are fitted independently; for four or more equations
-    /// their score is leave-one-out residual prediction, otherwise it is the
-    /// direct residual.  Robust candidates discard measurements beyond three
-    /// median residuals before the final regression.
-    pub fn find_all_vs_all_alignment_filters(
-        &mut self,
-        candidates: &[Vec<(usize, usize, f32, f32)>],
-        robust: bool,
-    ) -> Result<usize, String> {
-        if candidates.is_empty() {
-            return Err("no correlation filter candidates were supplied".into());
-        }
-        let frame_count = self.frames.len();
-        if frame_count == 0 {
-            self.x_shifts.clear();
-            self.y_shifts.clear();
-            return Ok(0);
-        }
-        let mut best_index = 0;
-        let mut best_score = f32::INFINITY;
-        let mut best_fit = (Vec::new(), Vec::new());
-        for (candidate_index, measurements) in candidates.iter().enumerate() {
-            let mut fit = Self::regress_all_vs_all(frame_count, measurements)?;
-            if robust && measurements.len() >= frame_count.saturating_mul(2) {
-                let mut residuals: Vec<f32> = measurements
-                    .iter()
-                    .map(|&(from, to, x, y)| {
-                        (fit.0[to] - fit.0[from] - x).hypot(fit.1[to] - fit.1[from] - y)
-                    })
-                    .collect();
-                let mut ordered = residuals.clone();
-                ordered.sort_by(f32::total_cmp);
-                let limit = 3. * ordered[ordered.len() / 2].max(f32::EPSILON);
-                let accepted: Vec<_> = measurements
-                    .iter()
-                    .copied()
-                    .zip(residuals.drain(..))
-                    .filter_map(|(measurement, residual)| {
-                        (residual <= limit).then_some(measurement)
-                    })
-                    .collect();
-                if accepted.len() >= frame_count.saturating_sub(1) {
-                    fit = Self::regress_all_vs_all(frame_count, &accepted)?;
-                }
-            }
-            let mut score = 0.;
-            let mut count = 0;
-            if measurements.len() >= 4 {
-                for omitted in 0..measurements.len() {
-                    let held_out = measurements[omitted];
-                    let remaining: Vec<_> = measurements
-                        .iter()
-                        .enumerate()
-                        .filter_map(|(index, &measurement)| {
-                            (index != omitted).then_some(measurement)
-                        })
-                        .collect();
-                    if let Ok(predicted) = Self::regress_all_vs_all(frame_count, &remaining) {
-                        score += (predicted.0[held_out.1] - predicted.0[held_out.0] - held_out.2)
-                            .hypot(predicted.1[held_out.1] - predicted.1[held_out.0] - held_out.3);
-                        count += 1;
-                    }
-                }
-            }
-            if count == 0 {
-                for &(from, to, x, y) in measurements {
-                    score += (fit.0[to] - fit.0[from] - x).hypot(fit.1[to] - fit.1[from] - y);
-                    count += 1;
-                }
-            }
-            score /= count.max(1) as f32;
-            if score < best_score {
-                best_score = score;
-                best_index = candidate_index;
-                best_fit = fit;
-            }
-        }
-        self.x_shifts = best_fit.0;
-        self.y_shifts = best_fit.1;
-        Ok(best_index)
-    }
-
     /// Source `doRegression`, fitting one independently measured coordinate
     /// with a least-squares line over frame number.
     pub fn do_regression(values: &[f32]) -> Option<(f32, f32)> {
@@ -661,85 +578,6 @@ impl FrameAlign {
         let even_sum = even.finish_align_and_sum(even_weights.as_deref())?;
         let odd_sum = odd.finish_align_and_sum(odd_weights.as_deref())?;
         Ok((sum, even_sum, odd_sum))
-    }
-
-    /// Fourier branch of source `finishAlignAndSum`: accumulate shifted packed
-    /// real FFTs, optionally apply the per-frame CTF/dose radial filter, then
-    /// inverse transform and extract the unpadded image for total/even/odd
-    /// sums.  The transform buffers are ordinary owned vectors.
-    pub fn finish_align_and_sum_fourier(
-        &self,
-        frame_ffts: &[Vec<f32>],
-        fft_nx: usize,
-        fft_ny: usize,
-        radial_filters: Option<&[Vec<f32>]>,
-        delta: f32,
-    ) -> Result<(Vec<f32>, Vec<f32>, Vec<f32>), String> {
-        if fft_nx == 0
-            || fft_ny == 0
-            || fft_nx % 2 != 0
-            || frame_ffts.len() != self.frames.len()
-            || self.x_shifts.len() != frame_ffts.len()
-            || self.y_shifts.len() != frame_ffts.len()
-        {
-            return Err("Fourier sum dimensions, frame count, or shifts are inconsistent".into());
-        }
-        if radial_filters.is_some_and(|filters| filters.len() != frame_ffts.len()) {
-            return Err("Fourier dose/CTF filter count differs from frame count".into());
-        }
-        let packed = (fft_nx + 2) * fft_ny;
-        if frame_ffts.iter().any(|frame| frame.len() < packed) {
-            return Err("packed frame FFT is shorter than dimensions".into());
-        }
-        let mut total = vec![0.; packed];
-        let mut even = vec![0.; packed];
-        let mut odd = vec![0.; packed];
-        for (index, frame) in frame_ffts.iter().enumerate() {
-            let filter = radial_filters.map(|filters| (filters[index].as_slice(), delta));
-            add_to_sums(
-                frame,
-                &mut total,
-                fft_nx,
-                fft_ny,
-                self.x_shifts[index],
-                self.y_shifts[index],
-                filter,
-            )?;
-            if index % 2 == 0 {
-                add_to_sums(
-                    frame,
-                    &mut even,
-                    fft_nx,
-                    fft_ny,
-                    self.x_shifts[index],
-                    self.y_shifts[index],
-                    filter,
-                )?;
-            } else {
-                add_to_sums(
-                    frame,
-                    &mut odd,
-                    fft_nx,
-                    fft_ny,
-                    self.x_shifts[index],
-                    self.y_shifts[index],
-                    filter,
-                )?;
-            }
-        }
-        for packed_sum in [&mut total, &mut even, &mut odd] {
-            crate::imod::libfft::todfft::todfft(packed_sum, fft_nx as i32, fft_ny as i32, 1);
-        }
-        let extract = |packed_sum: &[f32]| {
-            (0..fft_ny)
-                .flat_map(|y| {
-                    packed_sum[y * (fft_nx + 2)..y * (fft_nx + 2) + fft_nx]
-                        .iter()
-                        .copied()
-                })
-                .collect()
-        };
-        Ok((extract(&total), extract(&even), extract(&odd)))
     }
 
     /// Source `getUnweightedSum`.
@@ -1741,25 +1579,6 @@ pub fn set_truncation_limit(values: &[f32], fraction_to_truncate: f32) -> Option
         .floor()
         .min((ordered.len() - 1) as f32) as usize;
     ordered.get(index).copied()
-}
-
-/// Negative source truncation limits mean a number of standard deviations
-/// above the sampled mean.  Positive values are already explicit limits.
-pub fn truncation_limit_from_sigma(values: &[f32], requested_limit: f32) -> Option<f32> {
-    if requested_limit >= 0. {
-        return Some(requested_limit);
-    }
-    if values.is_empty() {
-        return None;
-    }
-    let mean = values.iter().sum::<f32>() / values.len() as f32;
-    let deviation = (values
-        .iter()
-        .map(|value| (value - mean).powi(2))
-        .sum::<f32>()
-        / values.len() as f32)
-        .sqrt();
-    Some(mean - requested_limit * deviation)
 }
 
 /// Source `FrameAlign::leastCommonMultiple`.

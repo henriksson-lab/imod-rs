@@ -27,14 +27,20 @@ use crate::imod::libwarp::hull::{
 use crate::imod::libwarp::hull_ch::{build_convex_hull, free_hull_storage};
 
 /// C `struct hullio` (`hullwrap.h:12`).
+///
+/// The source's `int numberofpoints` and `int numberoftriangles` are not
+/// fields here: every writer sized the array from the count and every reader
+/// used the count to walk the array, so each is the array's length over its
+/// stride — `pointlist.len() / 2` (x, y per point) and
+/// `trianglelist.len() / 3` (three vertex indices per triangle, and
+/// `neighborlist` is the same length).
 pub struct HullIo {
+    /// `double *pointlist`, two coordinates per point.
     pub pointlist: Vec<f64>,
-    pub numberofpoints: i32,
     /// The source's `int *trianglelist`; `NULL` is an empty `Vec` here.
     pub trianglelist: Vec<i32>,
     /// The source's `int *neighborlist`.
     pub neighborlist: Vec<i32>,
-    pub numberoftriangles: i32,
     pub height_base_crit: f64,
     pub area_fraction_crit: f64,
     pub min_num_for_pruning: i32,
@@ -85,7 +91,11 @@ pub fn hull_triangulate(hio: &mut HullIo) -> i32 {
     STORAGE.with_borrow_mut(|st| {
         /* DFILE = stderr: every write in this cluster names ImodFile::Stderr
         directly, so there is nothing to assign. */
-        S_NUM_POINTS.set(hio.numberofpoints);
+        /* sNumPoints = hio->numberofpoints: the point count is the pair
+        count of the coordinate array.  A `pointlist` of odd length has no C
+        counterpart; the division floors, and the dangling coordinate is never
+        handed out as a site. */
+        S_NUM_POINTS.set((hio.pointlist.len() / 2) as i32);
         S_NEXT_POINT.set(0);
         S_VERBOSE.set(hio.verbose);
         S_HEIGHT_BASE_CRIT.set(hio.height_base_crit);
@@ -144,8 +154,9 @@ pub fn hull_triangulate(hio: &mut HullIo) -> i32 {
             );
         }
 
-        /* Allocate output arrays */
-        hio.numberoftriangles = S_NUM_TRI.get();
+        /* Allocate output arrays.  `hio->numberoftriangles = sNumTri` is
+        carried by the length of `trianglelist`, which is built with exactly
+        `3 * sNumTri` entries below — or left empty when there are none. */
         hio.trianglelist = Vec::new();
         hio.neighborlist = Vec::new();
         if S_NUM_TRI.get() == 0 {

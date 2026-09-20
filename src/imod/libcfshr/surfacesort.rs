@@ -1,6 +1,5 @@
 //! Translation of `IMOD/libcfshr/surfacesort.c`: sorting points onto two
 //! surfaces.
-#![allow(dead_code)]
 
 use crate::imod::libcfshr::b3dutil::{CArg, ImodFile, c_format};
 use core::cell::Cell;

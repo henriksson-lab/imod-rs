@@ -1,12 +1,9 @@
 //! Translation of `IMOD/clip/threshminsize.cpp`.
-#![allow(dead_code)]
-
 use crate::imod::clip::clip::{ClipOptions, PlaneConnectedPoints, ZConnectedSets};
 use crate::imod::libcfshr::b3dutil::{CArg, ImodFile, c_format};
 use crate::imod::libcfshr::islice::{Islice, slice_create, slice_put_val};
 use crate::imod::libiimod::mrcfiles::MrcHeader;
 use std::io::Write as _;
-use std::mem::size_of;
 
 /// C++ `thresholdWithMinSize`.
 pub fn threshold_with_min_size(
@@ -122,21 +119,13 @@ pub fn threshold_with_min_size(
                 continue;
             }
         }
-        let data = &input.as_ref().expect("input slice set above").data;
+        // `threshminsize.cpp:153`: `fdata = inSlice->data.f`.
+        let fdata = input.as_ref().expect("input slice set above").data.f();
         grouped.fill(0);
         for ly in 0..ny {
             for lx in 0..nx {
                 let li = lx + nx * ly;
-                if grouped[li as usize] != 0
-                    || direction
-                        * (f32::from_ne_bytes(
-                            data[li as usize * size_of::<f32>()
-                                ..(li as usize + 1) * size_of::<f32>()]
-                                .try_into()
-                                .expect("floating-point slice has four bytes per pixel"),
-                        ) - thresh)
-                        < 0.
-                {
+                if grouped[li as usize] != 0 || direction * (fdata[li as usize] - thresh) < 0. {
                     continue;
                 }
                 let mut checks = vec![((lx as u32) << shift) | ly as u32];
@@ -161,14 +150,7 @@ pub fn threshold_with_min_size(
                     ] {
                         let ind = cx + nx * cy;
                         if grouped[ind as usize] == 0
-                            && direction
-                                * (f32::from_ne_bytes(
-                                    data[ind as usize * size_of::<f32>()
-                                        ..(ind as usize + 1) * size_of::<f32>()]
-                                        .try_into()
-                                        .expect("floating-point slice has four bytes per pixel"),
-                                ) - thresh)
-                                >= 0.
+                            && direction * (fdata[ind as usize] - thresh) >= 0.
                         {
                             let xy = ((cx as u32) << shift) | cy as u32;
                             checks.push(xy);
@@ -183,20 +165,10 @@ pub fn threshold_with_min_size(
                     ci += 1;
                 }
                 let lone = if ci == 1 && last.is_some() && next.is_some() {
-                    let last_data = &last.as_ref().unwrap().data;
-                    let last_value = f32::from_ne_bytes(
-                        last_data
-                            [li as usize * size_of::<f32>()..(li as usize + 1) * size_of::<f32>()]
-                            .try_into()
-                            .expect("floating-point slice has four bytes per pixel"),
-                    );
-                    let next_data = &next.as_ref().unwrap().data;
-                    let next_value = f32::from_ne_bytes(
-                        next_data
-                            [li as usize * size_of::<f32>()..(li as usize + 1) * size_of::<f32>()]
-                            .try_into()
-                            .expect("floating-point slice has four bytes per pixel"),
-                    );
+                    // `threshminsize.cpp:190-191`: `lastSlice->data.f[lookInd]`,
+                    // `nextSlice->data.f[lookInd]`.
+                    let last_value = last.as_ref().unwrap().data.f()[li as usize];
+                    let next_value = next.as_ref().unwrap().data.f()[li as usize];
                     direction * (last_value - thresh) < 0. && direction * (next_value - thresh) < 0.
                 } else {
                     false

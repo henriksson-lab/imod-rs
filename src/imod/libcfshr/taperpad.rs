@@ -1,5 +1,4 @@
 //! Translation of `IMOD/libcfshr/taperpad.c`.
-#![allow(dead_code)]
 use crate::imod::libcfshr::b3dutil::{
     b3d_i_max, b3d_i_min, balanced_group_limits, num_omp_threads,
 };
@@ -1121,56 +1120,6 @@ pub fn slice_edge_mean(a: &[f32], nxdim: i32, xl: i32, xh: i32, yl: i32, yh: i32
 /// C `sliceedgemean` (`taperpad.c:923`).
 pub fn sliceedgemean(a: &[f32], n: &i32, xl: &i32, xh: &i32, yl: &i32, yh: &i32) -> f64 {
     slice_edge_mean(a, *n, *xl - 1, *xh - 1, *yl - 1, *yh - 1)
-}
-
-/// C `imageEdgeMean` (`taperpad.c:939`).
-pub fn image_edge_mean(a: PadIn, typ: i32, n: i32, xl: i32, xh: i32, yl: i32, yh: i32) -> f32 {
-    let mut sum = 0.0f64;
-    match (typ, a) {
-        // The byte arm is the one the source writes as two separate `sum +=`
-        // statements; the others add the pair first, in the element's own
-        // type, and only then widen.
-        (BYTE, PadIn::Byte(bdata)) => {
-            for x in xl..=xh {
-                sum += bdata[(x + yl * n) as usize] as f64;
-                sum += bdata[(x + yh * n) as usize] as f64;
-            }
-            for y in yl + 1..yh {
-                sum += bdata[(xl + y * n) as usize] as f64;
-                sum += bdata[(xh + y * n) as usize] as f64;
-            }
-        }
-        (SHORT, PadIn::Short(sdata)) => {
-            for x in xl..=xh {
-                sum += (sdata[(x + yl * n) as usize] as i32 + sdata[(x + yh * n) as usize] as i32)
-                    as f64;
-            }
-            for y in yl + 1..yh {
-                sum += (sdata[(xl + y * n) as usize] as i32 + sdata[(xh + y * n) as usize] as i32)
-                    as f64;
-            }
-        }
-        (USHORT, PadIn::UShort(usdata)) => {
-            for x in xl..=xh {
-                sum += (usdata[(x + yl * n) as usize] as i32 + usdata[(x + yh * n) as usize] as i32)
-                    as f64;
-            }
-            for y in yl + 1..yh {
-                sum += (usdata[(xl + y * n) as usize] as i32 + usdata[(xh + y * n) as usize] as i32)
-                    as f64;
-            }
-        }
-        (FLOAT, PadIn::Float(fdata)) => {
-            for x in xl..=xh {
-                sum += (fdata[(x + yl * n) as usize] + fdata[(x + yh * n) as usize]) as f64;
-            }
-            for y in yl + 1..yh {
-                sum += (fdata[(xl + y * n) as usize] + fdata[(xh + y * n) as usize]) as f64;
-            }
-        }
-        _ => {}
-    }
-    (sum / (2 * (xh - xl + yh - yl)) as f64) as f32
 }
 
 /// `sliceEdgeMedian` (`taperpad.c:1002`).

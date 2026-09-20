@@ -12,7 +12,6 @@
 //! * every `fprintf` goes through [`c_format`] with the source's literal
 //!   format string.  `%f` is six decimals and `{}` is not `%f`, so the warp
 //!   file this writes is byte-identical to the C's only through that path.
-#![allow(dead_code)]
 
 use std::cell::{Cell, RefCell};
 use std::io::Write;

@@ -1,6 +1,4 @@
 //! Translation of `IMOD/flib/subrs/hvem/dopen.f`.
-#![allow(dead_code)]
-
 use crate::imod::libcfshr::b3dutil::imod_backup_file;
 use std::fs::File;
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -75,9 +73,4 @@ pub fn dopen(iunit: i32, fname: &str, itype: &str, iform: &str) -> File {
     // FORMAT(/,1x,A,2X,A,'  file opened: ',A)
     println!("\n {format}  {itype}  file opened: {fullnam}");
     file
-}
-
-/// Original `dopenHush` (`dopen.f:78`).
-pub fn dopen_hush(value: bool) {
-    S_HUSH.store(value, Ordering::Relaxed);
 }

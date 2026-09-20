@@ -1,8 +1,6 @@
 //! Translation of `IMOD/libcfshr/reduce_by_binning.c`.
-#![allow(dead_code)]
 
 use crate::imod::libcfshr::b3dutil::num_omp_threads;
-use rayon::ThreadPoolBuilder;
 use rayon::iter::{IndexedParallelIterator, ParallelIterator};
 use rayon::slice::ParallelSliceMut;
 
@@ -777,19 +775,6 @@ pub fn reduce_by_binning(
         nxr,
         nyr,
     )
-}
-
-/// C Fortran wrapper `reduce_by_binning` (`reduce_by_binning.c:494`).
-pub fn reduce_by_binning_f(
-    array: &[u8],
-    nx: &i32,
-    ny: &i32,
-    nbin: &i32,
-    bray: &mut [u8],
-    nxr: &mut i32,
-    nyr: &mut i32,
-) {
-    reduce_by_binning(array, SLICE_MODE_FLOAT, *nx, *ny, *nbin, bray, 0, nxr, nyr);
 }
 
 /// `binIntoSlice` (`reduce_by_binning.c:507`).

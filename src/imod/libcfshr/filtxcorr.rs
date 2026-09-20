@@ -7,13 +7,12 @@
 //! `int *` partway along and allows to be the same array as `ringCorrs`
 //! (`filtxcorr.c:2287`, `:2296-2299`) -- that one is a local allocation here,
 //! documented at the point of deviation.
-#![allow(dead_code, unused_variables)]
+#![allow(unused_variables)]
 
 use core::sync::atomic::{AtomicI32, AtomicU32, Ordering};
 use std::io::Write;
 
 use crate::imod::libcfshr::b3dutil::{CArg, ImodFile, c_format, num_omp_threads};
-use rayon::ThreadPoolBuilder;
 use rayon::iter::{IndexedParallelIterator, ParallelIterator};
 use rayon::slice::ParallelSliceMut;
 
@@ -47,9 +46,6 @@ pub fn nice_frame(num: i32, idnum: i32, limit: i32) -> i32 {
         }
         numin += idnum;
     }
-}
-pub fn niceframe(num: &i32, idnum: &i32, limit: &i32) -> i32 {
-    nice_frame(*num, *idnum, *limit)
 }
 
 /// `XCorrSetCTFnoScl` (`filtxcorr.c:159`).
@@ -193,31 +189,6 @@ pub fn xcorr_set_ctf(
         ctf[j as usize] *= (nsize - 1) as f32 / sum;
     }
 }
-pub fn setctfwsr(
-    s1: &f32,
-    s2: &f32,
-    r1: &f32,
-    r2: &f32,
-    ctf: &mut [f32],
-    nx: &i32,
-    ny: &i32,
-    delta: &mut f32,
-) {
-    xcorr_set_ctf(*s1, *s2, *r1, *r2, ctf, *nx, *ny, delta)
-}
-pub fn setctfnoscl(
-    s1: &f32,
-    s2: &f32,
-    r1: &f32,
-    r2: &f32,
-    ctf: &mut [f32],
-    nx: &i32,
-    ny: &i32,
-    delta: &mut f32,
-    nsize: &mut i32,
-) {
-    xcorr_set_ctf_no_scl(*s1, *s2, *r1, *r2, ctf, *nx, *ny, delta, nsize)
-}
 
 pub fn dose_filter_value(
     _start: f32,
@@ -277,23 +248,6 @@ pub fn dose_weight_filter(
         );
     }
 }
-pub fn doseweightfilter(
-    start: &f32,
-    end: &f32,
-    pixel: &f32,
-    a: &f32,
-    b: &f32,
-    c: &f32,
-    scale: &f32,
-    ctf: &mut [f32],
-    n: &i32,
-    max: &f32,
-    delta: &mut f32,
-) {
-    dose_weight_filter(
-        *start, *end, *pixel, *a, *b, *c, *scale, ctf, *n, *max, delta,
-    )
-}
 
 /// `XCorrMeanZero` (`filtxcorr.c:415`).
 pub fn xcorr_mean_zero(array: &mut [f32], nxdim: i32, nx: i32, ny: i32) {
@@ -317,9 +271,6 @@ pub fn xcorr_mean_zero(array: &mut [f32], nxdim: i32, nx: i32, ny: i32) {
         }
     }
 }
-pub fn meanzero(a: &mut [f32], d: &i32, x: &i32, y: &i32) {
-    xcorr_mean_zero(a, *d, *x, *y)
-}
 
 pub fn parabolic_fit_position(y1: f32, y2: f32, y3: f32) -> f64 {
     let denom = (2.0 * (y1 + y3 - 2. * y2)) as f64;
@@ -331,9 +282,6 @@ pub fn parabolic_fit_position(y1: f32, y2: f32, y3: f32) -> f64 {
     cx = cx.clamp(-0.5, 0.5);
     cx
 }
-pub fn parabolicfitposition(a: &f32, b: &f32, c: &f32) -> f64 {
-    parabolic_fit_position(*a, *b, *c)
-}
 pub fn conjugate_product(a: &mut [f32], b: &[f32], nx: i32, ny: i32) {
     for j in (0..ny * (nx + 2)).step_by(2) {
         let ar = a[j as usize];
@@ -343,9 +291,6 @@ pub fn conjugate_product(a: &mut [f32], b: &[f32], nx: i32, ny: i32) {
         a[j as usize] = ar * br + ai * bi;
         a[(j + 1) as usize] = ai * br - ar * bi;
     }
-}
-pub fn conjugateproduct(a: &mut [f32], b: &[f32], nx: &i32, ny: &i32) {
-    conjugate_product(a, b, *nx, *ny)
 }
 
 pub fn subarea_cc_coefficient(
@@ -524,20 +469,47 @@ pub fn apply_kernel_filter(
     } else {
         (ny as usize).max(1)
     };
+    let above = k - 1 - k / 2;
     let run_group = |(g, brows): (usize, &mut [f32])| {
         let oy0 = (g * rows_per_group) as i32;
         let oy1 = ((g + 1) * rows_per_group).min(ny as usize) as i32;
-        for oy in oy0..oy1 {
-            for ox in 0..nx {
-                let mut sum = 0.;
-                for iy in 0..k {
-                    for ix in 0..k {
-                        let x = (ox + ix - below).clamp(0, nx - 1);
-                        let y = (oy + iy - below).clamp(0, ny - 1);
-                        sum += mat[(ix + iy * k) as usize] * a[(x + y * d) as usize];
+        for iyo in oy0..oy1 {
+            // `filtxcorr.c:1788-1822`: the interior columns of an interior
+            // row take no clamps; the border rows, and the `below`/`above`
+            // columns of every other row, clamp each tap with `B3DCLAMP`.
+            let mut xstr = 0;
+            let mut xend = below;
+            let mut nregion = 2;
+            if iyo < below || iyo >= ny - above {
+                nregion = 1;
+                xend = nx;
+            } else {
+                for ixo in below..nx - above {
+                    let mut sum = 0.;
+                    for iy in 0..k {
+                        let aiy = iy + iyo - below;
+                        for ix in 0..k {
+                            let aix = ix + ixo - below;
+                            sum += mat[(ix + iy * k) as usize] * a[(aix + aiy * d) as usize];
+                        }
                     }
+                    brows[(ixo + (iyo - oy0) * d) as usize] = sum;
                 }
-                brows[(ox + (oy - oy0) * d) as usize] = sum;
+            }
+            for _ireg in 0..nregion {
+                for ixo in xstr..xend {
+                    let mut sum = 0.;
+                    for iy in 0..k {
+                        let aiy = (iy + iyo - below).min(ny - 1).max(0);
+                        for ix in 0..k {
+                            let aix = (ix + ixo - below).min(nx - 1).max(0);
+                            sum += mat[(ix + iy * k) as usize] * a[(aix + aiy * d) as usize];
+                        }
+                    }
+                    brows[(ixo + (iyo - oy0) * d) as usize] = sum;
+                }
+                xstr = nx - above;
+                xend = nx;
             }
         }
     };
@@ -627,9 +599,6 @@ pub fn wrap_fft_slice(array: &mut [f32], tmp: &mut [f32], nx: i32, ny: i32, dire
             high += 1;
         }
     }
-}
-pub fn wrapfftslice(a: &mut [f32], t: &mut [f32], nx: &i32, ny: &i32, dir: &i32) {
-    wrap_fft_slice(a, t, *nx, *ny, *dir)
 }
 
 /// `fourierShiftImage` (`filtxcorr.c:1906`).
@@ -1733,268 +1702,6 @@ fn sort_and_repack(
     }
 }
 
-pub fn find_spaced_xcorr_peaks(
-    array: &[f32],
-    nxdim: i32,
-    ix_min: i32,
-    ix_max: i32,
-    iy_min: i32,
-    iy_max: i32,
-    xpeak: &mut [f32],
-    ypeak: &mut [f32],
-    peak: &mut [f32],
-    max_peaks: i32,
-    min_spacing: f32,
-    num_peaks: &mut i32,
-    min_strength: f32,
-) -> i32 {
-    let block_size = (min_spacing as f64 / 2.0f64.sqrt()) as i32;
-    let nblocks_x = ((ix_max - (ix_min + 1)) + block_size - 1) / block_size;
-    let nblocks_y = ((iy_max - (iy_min + 1)) + block_size - 1) / block_size;
-    let tot_blocks = nblocks_x * nblocks_y;
-
-    // Tested up to 12 threads, ~80% efficient at 8 on somewhat less than 2K images
-    let mut num_threads = {
-        let v = (0.005 * ((ix_max - ix_min) as f64 * (iy_max - iy_min) as f64).sqrt()) as i32;
-        if MAX_SPCP_THREADS < v {
-            MAX_SPCP_THREADS
-        } else {
-            v
-        }
-    };
-    num_threads = crate::imod::libcfshr::b3dutil::num_omp_threads(num_threads);
-    // The `#pragma omp parallel for` over `iyBlock` is run serially here, so
-    // every block lands in thread 0's slice; the repack below then walks the
-    // blocks in `iyBlock`, `ixBlock` order exactly as one thread would.
-    let lanes = if num_threads > 1 { num_threads } else { 1 };
-    let ind_alloc = (tot_blocks * lanes) as usize;
-    // The five `B3DMALLOC`s cannot fail here, so the source's -1 return is
-    // unreachable.
-    let mut ix_all = vec![0i16; ind_alloc];
-    let mut iy_all = vec![0i16; ind_alloc];
-    let mut peak_all = vec![0.0f32; ind_alloc];
-    let mut indexes = vec![0i32; ind_alloc];
-    let mut box_ind_all = vec![-1i32; ind_alloc];
-
-    let mut num_pk_thread = vec![0i32; lanes as usize];
-    let mut ix_thread = vec![0i16; ind_alloc];
-    let mut iy_thread = vec![0i16; ind_alloc];
-    let mut peak_thread = vec![0.0f32; ind_alloc];
-    let mut box_ind_thread = vec![-1i32; ind_alloc];
-
-    for iy_block in 0..nblocks_y {
-        let thrd = crate::imod::libcfshr::b3dutil::b3d_omp_thread_num();
-
-        // Block start and end in Y
-        let iy_start = iy_min + 1 + iy_block * block_size;
-        let iy_end = if iy_start + block_size < iy_max {
-            iy_start + block_size
-        } else {
-            iy_max
-        };
-
-        for ix_block in 0..nblocks_x {
-            // Block start and end in X
-            let ix_start = ix_min + 1 + ix_block * block_size;
-            let ix_end = if ix_start + block_size < ix_max {
-                ix_start + block_size
-            } else {
-                ix_max
-            };
-
-            let mut max_val = -1.0e30f32;
-            let mut ix_peak = -1;
-            let mut iy_peak = 0;
-            for iy in iy_start..iy_end {
-                let ybase = nxdim * iy;
-                for ix in ix_start..ix_end {
-                    let xbase = ybase + ix;
-                    let val = array[xbase as usize];
-                    if val < max_val {
-                        continue;
-                    }
-
-                    /* Test for actual peak value */
-                    if val > array[(xbase - nxdim) as usize]
-                        && val >= array[(xbase + nxdim) as usize]
-                        && val > array[(xbase - 1) as usize]
-                        && val >= array[(xbase + 1) as usize]
-                        && val > array[(xbase + nxdim - 1) as usize]
-                        && val >= array[(xbase + 1 - nxdim) as usize]
-                        && val > array[(xbase + nxdim + 1) as usize]
-                        && val >= array[(xbase - 1 - nxdim) as usize]
-                    {
-                        /* Found a peak above the current max: save it */
-                        ix_peak = ix;
-                        iy_peak = iy;
-                        max_val = val;
-                    }
-                }
-            }
-
-            // Found a peak in the block, add it to arrays
-            if ix_peak > 0 {
-                let base = (thrd * tot_blocks) as usize;
-                let ind = num_pk_thread[thrd as usize];
-                num_pk_thread[thrd as usize] += 1;
-                ix_thread[base + ind as usize] = ix_peak as i16;
-                iy_thread[base + ind as usize] = iy_peak as i16;
-                peak_thread[base + ind as usize] = max_val;
-                box_ind_thread[base + (ix_block + iy_block * nblocks_x) as usize] = ind;
-            }
-        }
-    }
-
-    // Repack to be contiguous for sorting and invert peak for sorting too
-    let mut num_found = 0usize;
-    for thrd in 0..lanes {
-        let base = (thrd * tot_blocks) as usize;
-        let xbase = num_found as i32;
-        for ind in 0..num_pk_thread[thrd as usize] as usize {
-            indexes[num_found] = num_found as i32;
-            ix_all[num_found] = ix_thread[base + ind];
-            iy_all[num_found] = iy_thread[base + ind];
-            peak_all[num_found] = -peak_thread[base + ind];
-            num_found += 1;
-        }
-        for ind in 0..tot_blocks as usize {
-            if box_ind_thread[base + ind] >= 0 {
-                box_ind_all[ind] = box_ind_thread[base + ind] + xbase;
-            }
-        }
-    }
-    rs_sort_indexed_floats(&peak_all, &mut indexes, num_found as i32);
-
-    /* Eliminate any lesser peaks too close to stronger one */
-    let space_crit = min_spacing * min_spacing;
-    for sind in 0..num_found.saturating_sub(1) {
-        let ind = indexes[sind] as usize;
-        if peak_all[ind] > 1.0e29 {
-            continue;
-        }
-
-        /* Need to loop up to 2 blocks away except for corner blocks but it costs more to
-        test if in corner */
-        let ix_block = (ix_all[ind] as i32 - (ix_min + 1)) / block_size;
-        let iy_block = (iy_all[ind] as i32 - (iy_min + 1)) / block_size;
-        let ix_start = if 0 > ix_block - 2 { 0 } else { ix_block - 2 };
-        let ix_end = if nblocks_x < ix_block + 3 {
-            nblocks_x
-        } else {
-            ix_block + 3
-        };
-        let iy_start = if 0 > iy_block - 2 { 0 } else { iy_block - 2 };
-        let iy_end = if nblocks_y < iy_block + 3 {
-            nblocks_y
-        } else {
-            iy_block + 3
-        };
-        for iy in iy_start..iy_end {
-            for ix in ix_start..ix_end {
-                if ix == ix_block && iy == iy_block {
-                    continue;
-                }
-                let jnd = box_ind_all[(ix + iy * nblocks_x) as usize];
-                if jnd >= 0
-                    && peak_all[jnd as usize] < 1.0e29
-                    && peak_all[jnd as usize] >= peak_all[ind]
-                {
-                    let dx = (ix_all[ind] as i32 - ix_all[jnd as usize] as i32) as f32;
-                    let dy = (iy_all[ind] as i32 - iy_all[jnd as usize] as i32) as f32;
-                    if dx * dx + dy * dy < space_crit {
-                        peak_all[jnd as usize] = 1.0e30;
-                    }
-                }
-            }
-        }
-    }
-
-    /* Get interpolated position for each and return into arrays */
-    let mut ind_out = 0usize;
-    for sind in 0..num_found {
-        if ind_out >= max_peaks as usize {
-            break;
-        }
-        let ind = indexes[sind] as usize;
-        if peak_all[ind] > 1.0e29 {
-            continue;
-        }
-        if ind_out != 0 && min_strength > 0. && -peak_all[ind] < min_strength * peak[0] {
-            break;
-        }
-        peak[ind_out] = -peak_all[ind];
-        let ix = ix_all[ind] as i32;
-        let iy = iy_all[ind] as i32;
-        let xbase = ix + iy * nxdim;
-        let cx = parabolic_fit_position(
-            array[(xbase - 1) as usize],
-            array[xbase as usize],
-            array[(xbase + 1) as usize],
-        ) as f32;
-        let cy = parabolic_fit_position(
-            array[(xbase - nxdim) as usize],
-            array[xbase as usize],
-            array[(xbase + nxdim) as usize],
-        ) as f32;
-        xpeak[ind_out] = ix as f32 + cx;
-        ypeak[ind_out] = iy as f32 + cy;
-        ind_out += 1;
-    }
-    *num_peaks = ind_out as i32;
-    0
-}
-pub fn weighted_cc_coefficient(
-    a: &[f32],
-    b: &[f32],
-    nx_dim: i32,
-    ix0: i32,
-    ix1: i32,
-    iy0: i32,
-    iy1: i32,
-    dx: i32,
-    dy: i32,
-    aw: &[f32],
-    bw: &[f32],
-    nx_weight: i32,
-    bin: i32,
-    xoffset: i32,
-    yoffset: i32,
-) -> f64 {
-    let (mut wsum, mut asum, mut bsum, mut asq, mut bsq, mut ab) =
-        (0f64, 0f64, 0f64, 0f64, 0f64, 0f64);
-    for iy in iy0..=iy1 {
-        let abase = iy * nx_dim;
-        let bbase = (iy - dy) * nx_dim - dx;
-        let awbase = (iy / bin + yoffset) * nx_weight + xoffset;
-        let bwbase = ((iy - dy) / bin + yoffset) * nx_weight + xoffset;
-        // The source accumulates each row into its own double and adds the row
-        // totals into the grand sums; one flat accumulation is a different
-        // order.  Every product inside the row is single precision -- `aval`,
-        // `bval` and `wgt` are all `float` -- and widens only for the `+=`.
-        let (mut wgt_tmp, mut aw_tmp, mut bw_tmp) = (0f64, 0f64, 0f64);
-        let (mut aw_tmp_sq, mut bw_tmp_sq, mut abw_tmp) = (0f64, 0f64, 0f64);
-        for ix in ix0..=ix1 {
-            let aval = a[(ix + abase) as usize];
-            let bval = b[(ix + bbase) as usize];
-            let awgt = aw[(ix / bin + awbase) as usize];
-            let bwgt = bw[((ix - dx) / bin + bwbase) as usize];
-            let wgt = awgt * bwgt;
-            wgt_tmp += wgt as f64;
-            aw_tmp += (aval * wgt) as f64;
-            bw_tmp += (bval * wgt) as f64;
-            aw_tmp_sq += (aval * aval * wgt) as f64;
-            bw_tmp_sq += (bval * bval * wgt) as f64;
-            abw_tmp += (aval * bval * wgt) as f64;
-        }
-        wsum += wgt_tmp;
-        asum += aw_tmp;
-        bsum += bw_tmp;
-        asq += aw_tmp_sq;
-        bsq += bw_tmp_sq;
-        ab += abw_tmp;
-    }
-    weighted_corr_from_sums(asum, asq, bsum, bsq, ab, wsum, None, "")
-}
 /// `fourierShiftVolume` (`filtxcorr.c:2070`).
 pub fn fourier_shift_volume(
     fft: &mut [f32],
@@ -2238,234 +1945,12 @@ pub fn fourier_ring_corr(
 // Fortran entry points in the same source unit.  The build system historically
 // selects their trailing underscore spelling; Rust keeps the source function names
 // snake-cased while preserving pointer/value calling conventions.
-pub fn filterpart(a: FilterIn, b: &mut [f32], nx: &i32, ny: &i32, ctf: &[f32], delta: &f32) {
-    xcorr_filter_part(a, b, *nx, *ny, ctf, *delta)
-}
-pub fn xcorrpeakfindwidth(
-    array: &[f32],
-    nxdim: &i32,
-    ny: &i32,
-    xpeak: &mut [f32],
-    ypeak: &mut [f32],
-    peak: &mut [f32],
-    width: Option<&mut [f32]>,
-    width_min: Option<&mut [f32]>,
-    max_peaks: &i32,
-    min_strength: &f32,
-) {
-    xcorr_peak_find_width(
-        array,
-        *nxdim,
-        *ny,
-        xpeak,
-        ypeak,
-        peak,
-        width,
-        width_min,
-        *max_peaks,
-        *min_strength,
-    )
-}
-pub fn getpeakfindtestlimits(
-    nx: &i32,
-    ny: &i32,
-    xlo: &mut i32,
-    xhi: &mut i32,
-    ylo: &mut i32,
-    yhi: &mut i32,
-) {
-    get_peak_find_test_limits(*nx, *ny, xlo, xhi, ylo, yhi)
-}
-pub fn xcorrpeakfind(
-    array: &[f32],
-    nxdim: &i32,
-    ny: &i32,
-    xpeak: &mut [f32],
-    ypeak: &mut [f32],
-    peak: &mut [f32],
-    max_peaks: &i32,
-) {
-    xcorr_peak_find(array, *nxdim, *ny, xpeak, ypeak, peak, *max_peaks)
-}
-pub fn storepeakfinderror(value: &i32) {
-    store_peak_find_error(*value)
-}
-pub fn getpeakfinderror() -> i32 {
-    get_peak_find_error()
-}
-pub fn setpeakfindlimits(xlo: &i32, xhi: &i32, ylo: &i32, yhi: &i32, ellipse: &i32) {
-    set_peak_find_limits(*xlo, *xhi, *ylo, *yhi, *ellipse)
-}
-pub fn setpeakfindangle(angle: &f32) {
-    set_peak_find_angle(*angle)
-}
-pub fn cccoefficienttwopads(
-    a: &[f32],
-    b: &[f32],
-    nxdim: &i32,
-    nx: &i32,
-    ny: &i32,
-    xpeak: &f32,
-    ypeak: &f32,
-    nx_pad_a: &i32,
-    ny_pad_a: &i32,
-    nx_pad_b: &i32,
-    ny_pad_b: &i32,
-    min_pixels: &i32,
-    nsum: &mut i32,
-) -> f64 {
-    cc_coefficient_two_pads(
-        a,
-        b,
-        *nxdim,
-        *nx,
-        *ny,
-        *xpeak,
-        *ypeak,
-        *nx_pad_a,
-        *ny_pad_a,
-        *nx_pad_b,
-        *ny_pad_b,
-        *min_pixels,
-        nsum,
-    )
-}
-pub fn cccoefficient(
-    a: &[f32],
-    b: &[f32],
-    nxdim: &i32,
-    nx: &i32,
-    ny: &i32,
-    xpeak: &f32,
-    ypeak: &f32,
-    nx_pad: &i32,
-    ny_pad: &i32,
-    nsum: &mut i32,
-) -> f64 {
-    xcorr_cc_coefficient(
-        a, b, *nxdim, *nx, *ny, *xpeak, *ypeak, *nx_pad, *ny_pad, nsum,
-    )
-}
-pub fn slicegaussiankernel(mat: &mut [f32], dim: &i32, sigma: &f32) {
-    slice_gaussian_kernel(mat, *dim, *sigma)
-}
-pub fn scaledgaussiankernel(mat: &mut [f32], dim: &mut i32, limit: &i32, sigma: &f32) {
-    scaled_gaussian_kernel(mat, dim, *limit, *sigma)
-}
-pub fn applykernelfilter(
-    a: &[f32],
-    b: &mut [f32],
-    d: &i32,
-    x: &i32,
-    y: &i32,
-    mat: &[f32],
-    k: &i32,
-) {
-    apply_kernel_filter(a, b, *d, *x, *y, mat, *k)
-}
-pub fn fouriershiftimage(a: &mut [f32], x: &i32, y: &i32, dx: &f32, dy: &f32, t: &mut [f32]) {
-    fourier_shift_image(a, *x, *y, *dx, *dy, t)
-}
-pub fn fourierreduceimage(
-    a: &[f32],
-    xi: &i32,
-    yi: &i32,
-    b: &mut [f32],
-    xo: &i32,
-    yo: &i32,
-    dx: &f32,
-    dy: &f32,
-    t: Option<&mut [f32]>,
-) {
-    fourier_reduce_image(a, *xi, *yi, b, *xo, *yo, *dx, *dy, t)
-}
-pub fn fourierexpandimage(
-    a: &mut [f32],
-    xi: &i32,
-    yi: &i32,
-    b: &mut [f32],
-    xo: &i32,
-    yo: &i32,
-    dx: &f32,
-    dy: &f32,
-    t: Option<&mut [f32]>,
-) {
-    fourier_expand_image(a, *xi, *yi, b, *xo, *yo, *dx, *dy, t)
-}
-pub fn fouriershiftvolume(
-    a: &mut [f32],
-    x: &i32,
-    y: &i32,
-    z: &i32,
-    dx: &f32,
-    dy: &f32,
-    dz: &f32,
-    t: &mut [f32],
-) {
-    fourier_shift_volume(a, *x, *y, *z, *dx, *dy, *dz, t)
-}
-pub fn fourierreducevolume(
-    a: &[f32],
-    xi: &i32,
-    yi: &i32,
-    zi: &i32,
-    b: &mut [f32],
-    xo: &i32,
-    yo: &i32,
-    zo: &i32,
-    dx: &f32,
-    dy: &f32,
-    dz: &f32,
-    t: Option<&mut [f32]>,
-) {
-    fourier_reduce_volume(a, *xi, *yi, *zi, b, *xo, *yo, *zo, *dx, *dy, *dz, t)
-}
-pub fn fourierexpandvolume(
-    a: &mut [f32],
-    xi: &i32,
-    yi: &i32,
-    zi: &i32,
-    b: &mut [f32],
-    xo: &i32,
-    yo: &i32,
-    zo: &i32,
-    dx: &f32,
-    dy: &f32,
-    dz: &f32,
-    t: Option<&mut [f32]>,
-) {
-    fourier_expand_volume(a, *xi, *yi, *zi, b, *xo, *yo, *zo, *dx, *dy, *dz, t)
-}
-pub fn fourierringcorr(
-    a: &[f32],
-    b: &[f32],
-    x: &i32,
-    y: &i32,
-    c: &mut [f32],
-    max: &i32,
-    d: &f32,
-    t: &mut [f32],
-) {
-    fourier_ring_corr(a, b, *x, *y, c, *max, *d, t)
-}
-pub fn fouriercropsizes(
-    s: &i32,
-    f: &f32,
-    p: &f32,
-    min: &i32,
-    l: &i32,
-    full: &mut i32,
-    crop: &mut i32,
-    actual: &mut f32,
-) -> i32 {
-    fourier_crop_sizes(*s, *f, *p, *min, *l, full, crop, actual)
-}
 
 #[cfg(test)]
 mod tests {
     use super::{
-        find_many_xcorr_peaks, find_spaced_xcorr_peaks, fourier_crop_sizes, fourier_expand_volume,
-        fourier_reduce_volume, fourier_shift_volume, wrap_fft_slice, xcorr_peak_find_width,
+        find_many_xcorr_peaks, fourier_crop_sizes, fourier_expand_volume, fourier_reduce_volume,
+        fourier_shift_volume, wrap_fft_slice, xcorr_peak_find_width,
     };
 
     #[test]
@@ -2764,7 +2249,7 @@ mod tests {
     }
 
     #[test]
-    fn many_and_spaced_peak_selection_returns_interpolated_local_maxima() {
+    fn many_peak_selection_returns_interpolated_local_maxima() {
         let mut array = vec![0_f32; 10 * 8];
         array[3 + 3 * 10] = 9.;
         array[6 + 5 * 10] = 7.;
@@ -2772,14 +2257,6 @@ mod tests {
         assert_eq!(
             find_many_xcorr_peaks(
                 &array, 10, 8, 0, 0, &mut xp, &mut yp, &mut peaks, 2, 3, &mut count
-            ),
-            0
-        );
-        assert_eq!(count, 2);
-        assert_eq!(peaks, [9., 7.]);
-        assert_eq!(
-            find_spaced_xcorr_peaks(
-                &array, 10, 0, 8, 0, 7, &mut xp, &mut yp, &mut peaks, 2, 2., &mut count, 0.
             ),
             0
         );

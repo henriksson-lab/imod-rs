@@ -2,7 +2,6 @@
 //!
 //! This launcher intentionally retains `java … etomo.EtomoDirector` as the
 //! JVM/UI boundary.  It does not replace Java eTomo with a different Rust UI.
-#![allow(dead_code)]
 
 use super::imodpy::{
     bkgd_process, cygwin_path, get_err_strings, imod_nice, make_backup_file, prnstr, run_cmd,

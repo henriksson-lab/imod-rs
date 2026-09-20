@@ -1,5 +1,4 @@
 //! Translation of `IMOD/libcfshr/simplestat.c`.
-#![allow(dead_code)]
 
 /// C `avgSD`.
 pub fn avg_sd(x: &[f32], n: i32, avg: &mut f32, sd: &mut f32, sem: &mut f32) {
@@ -24,11 +23,6 @@ pub fn avg_sd(x: &[f32], n: i32, avg: &mut f32, sd: &mut f32, sem: &mut f32) {
     }
 }
 
-/// C Fortran wrapper `avgsd`.
-pub fn avg_sd_fortran(x: &[f32], n: &i32, avg: &mut f32, sd: &mut f32, sem: &mut f32) {
-    avg_sd(x, *n, avg, sd, sem)
-}
-
 /// C `sumsToAvgSD`.
 pub fn sums_to_avg_sd(sx: f32, sxsq: f32, n: i32, avg: &mut f32, sd: &mut f32) {
     *avg = 0.0;
@@ -45,11 +39,6 @@ pub fn sums_to_avg_sd(sx: f32, sxsq: f32, n: i32, avg: &mut f32, sd: &mut f32) {
     }
 }
 
-/// C Fortran wrapper `sums_to_avgsd`.
-pub fn sums_to_avg_sd_fortran(sx: &f32, sxsq: &f32, n: &i32, avg: &mut f32, sd: &mut f32) {
-    sums_to_avg_sd(*sx, *sxsq, *n, avg, sd)
-}
-
 /// C `sumsToAvgSDdbl`.
 pub fn sums_to_avg_sd_dbl(sx8: f64, sxsq8: f64, n1: i32, n2: i32, avg: &mut f32, sd: &mut f32) {
     let mut avg8 = 0.0;
@@ -57,18 +46,6 @@ pub fn sums_to_avg_sd_dbl(sx8: f64, sxsq8: f64, n1: i32, n2: i32, avg: &mut f32,
     sums_to_avg_sd_all_dbl(sx8, sxsq8, n1, n2, &mut avg8, &mut sd8);
     *avg = avg8 as f32;
     *sd = sd8 as f32;
-}
-
-/// C Fortran wrapper `sums_to_avgsd8`.
-pub fn sums_to_avg_sd_dbl_fortran(
-    sx8: &f64,
-    sxsq8: &f64,
-    n1: &i32,
-    n2: &i32,
-    avg: &mut f32,
-    sd: &mut f32,
-) {
-    sums_to_avg_sd_dbl(*sx8, *sxsq8, *n1, *n2, avg, sd)
 }
 
 /// C `sumsToAvgSDallDbl`.
@@ -87,18 +64,6 @@ pub fn sums_to_avg_sd_all_dbl(sx8: f64, sxsq8: f64, n1: i32, n2: i32, avg: &mut 
             *sd = den.sqrt();
         }
     }
-}
-
-/// C Fortran wrapper `sumstoavgsdalldbl`.
-pub fn sums_to_avg_sd_all_dbl_fortran(
-    sx8: &f64,
-    sxsq8: &f64,
-    n1: &i32,
-    n2: &i32,
-    avg: &mut f64,
-    sd: &mut f64,
-) {
-    sums_to_avg_sd_all_dbl(*sx8, *sxsq8, *n1, *n2, avg, sd)
 }
 
 /// C `arrayMinMaxMean`.
@@ -131,42 +96,6 @@ pub fn array_min_max_mean(
         sum_dbl += sum_tmp as f64;
     }
     *dmean = (sum_dbl / ((ix1 + 1 - ix0) as f64 * (iy1 + 1 - iy0) as f64)) as f32;
-}
-
-/// C `imageSubareaMean`.
-///
-/// The source's `void *array` is the raw byte view of the image; `type` alone
-/// says how to read an element from it, exactly as in the C.
-pub fn image_subarea_mean(
-    array: &[u8],
-    data_type: i32,
-    nx_dim: i32,
-    ix0: i32,
-    ix1: i32,
-    iy0: i32,
-    iy1: i32,
-) -> f32 {
-    let mut sum_dbl = 0.0_f64;
-    for iy in iy0..=iy1 {
-        let mut sum_tmp = 0.0_f32;
-        for ix in ix0..=ix1 {
-            let ind = (iy * nx_dim + ix) as usize;
-            sum_tmp += match data_type {
-                0 => array[ind] as f32,
-                1 => i16::from_ne_bytes([array[2 * ind], array[2 * ind + 1]]) as f32,
-                6 => u16::from_ne_bytes([array[2 * ind], array[2 * ind + 1]]) as f32,
-                2 => f32::from_ne_bytes([
-                    array[4 * ind],
-                    array[4 * ind + 1],
-                    array[4 * ind + 2],
-                    array[4 * ind + 3],
-                ]),
-                _ => return 0.0,
-            };
-        }
-        sum_dbl += sum_tmp as f64;
-    }
-    (sum_dbl / ((ix1 + 1 - ix0) as f64 * (iy1 + 1 - iy0) as f64)) as f32
 }
 
 /// C Fortran wrapper `iclden`.
@@ -347,34 +276,6 @@ pub fn scale_array_for_mode(
     *dmin = 0.0;
 }
 
-/// C Fortran wrapper `isetdn`.
-pub fn scale_array_for_mode_fortran(
-    array: &mut [f32],
-    nx_dim: &i32,
-    _ny_dim: &i32,
-    mode: &i32,
-    nx1: &i32,
-    nx2: &i32,
-    ny1: &i32,
-    ny2: &i32,
-    dmin: &mut f32,
-    dmax: &mut f32,
-    dmean: &mut f32,
-) {
-    scale_array_for_mode(
-        array,
-        *nx_dim,
-        *mode,
-        *nx1 - 1,
-        *nx2 - 1,
-        *ny1 - 1,
-        *ny2 - 1,
-        dmin,
-        dmax,
-        dmean,
-    )
-}
-
 /// C `lsFit`.
 pub fn ls_fit(x: &[f32], y: &[f32], num: i32, slope: &mut f32, intcp: &mut f32, ro: &mut f32) {
     let mut sa = 0.;
@@ -396,17 +297,6 @@ pub fn ls_fit(x: &[f32], y: &[f32], num: i32, slope: &mut f32, intcp: &mut f32, 
         &mut ypred,
         &mut prederr,
     );
-}
-/// C Fortran wrapper `lsfit`.
-pub fn ls_fit_fortran(
-    x: &[f32],
-    y: &[f32],
-    num: &i32,
-    slope: &mut f32,
-    intcp: &mut f32,
-    ro: &mut f32,
-) {
-    ls_fit(x, y, *num, slope, intcp, ro)
 }
 
 /// C `lsFitPred`.
@@ -473,54 +363,6 @@ pub fn ls_fit_pred(
         * (1. + 1. / n as f64 + n as f64 * (xpred as f64 - xbar) * (xpred as f64 - xbar) / d)
             .sqrt()) as f32;
 }
-/// C Fortran wrapper `lsfitpred`.
-pub fn ls_fit_pred_fortran(
-    x: &[f32],
-    y: &[f32],
-    n: &i32,
-    slope: &mut f32,
-    bint: &mut f32,
-    ro: &mut f32,
-    sa: &mut f32,
-    sb: &mut f32,
-    se: &mut f32,
-    xpred: &f32,
-    ypred: &mut f32,
-    prederr: &mut f32,
-) {
-    ls_fit_pred(
-        x, y, *n, slope, bint, ro, sa, sb, se, *xpred, ypred, prederr,
-    )
-}
-/// C Fortran wrapper `lsfits`.
-pub fn ls_fit_standard_errors_fortran(
-    x: &[f32],
-    y: &[f32],
-    n: &i32,
-    slope: &mut f32,
-    bint: &mut f32,
-    ro: &mut f32,
-    sa: &mut f32,
-    sb: &mut f32,
-    se: &mut f32,
-) {
-    let xpred = x[1];
-    let (mut ypred, mut prederr) = (0., 0.);
-    ls_fit_pred(
-        x,
-        y,
-        *n,
-        slope,
-        bint,
-        ro,
-        sa,
-        sb,
-        se,
-        xpred,
-        &mut ypred,
-        &mut prederr,
-    )
-}
 
 /// C `lsFit2`.
 pub fn ls_fit2(
@@ -534,29 +376,6 @@ pub fn ls_fit2(
 ) {
     let (mut ypred, mut prederr) = (0., 0.);
     ls_fit2_pred(x1, x2, y, n, a, b, c, 0., 0., &mut ypred, &mut prederr)
-}
-/// C Fortran wrapper `lsfit2`.
-pub fn ls_fit2_fortran(
-    x1: &[f32],
-    x2: &[f32],
-    y: &[f32],
-    n: &i32,
-    a: &mut f32,
-    b: &mut f32,
-    c: &mut f32,
-) {
-    ls_fit2(x1, x2, y, *n, a, b, Some(c))
-}
-/// C Fortran wrapper `lsfit2noc`.
-pub fn ls_fit2_no_constant_fortran(
-    x1: &[f32],
-    x2: &[f32],
-    y: &[f32],
-    n: &i32,
-    a: &mut f32,
-    b: &mut f32,
-) {
-    ls_fit2(x1, x2, y, *n, a, b, None)
 }
 
 /// C `lsFit2Pred`.
@@ -644,22 +463,6 @@ pub fn ls_fit2_pred(
     }
     *prederr = ((devss / (n as f64 - 3.)) * predsq).sqrt() as f32;
 }
-/// C Fortran wrapper `lsfit2pred`.
-pub fn ls_fit2_pred_fortran(
-    x1: &[f32],
-    x2: &[f32],
-    y: &[f32],
-    n: &i32,
-    a: &mut f32,
-    b: &mut f32,
-    c: Option<&mut f32>,
-    x1pred: &f32,
-    x2pred: &f32,
-    ypred: &mut f32,
-    prederr: &mut f32,
-) {
-    ls_fit2_pred(x1, x2, y, *n, a, b, c, *x1pred, *x2pred, ypred, prederr)
-}
 
 /// C `lsFit3`.
 pub fn ls_fit3(
@@ -733,20 +536,6 @@ pub fn ls_fit3(
     *a3 = (num3 / den) as f32;
     *c = ym - *a1 * x1m - *a2 * x2m - *a3 * x3m;
 }
-/// C Fortran wrapper `lsfit3`.
-pub fn ls_fit3_fortran(
-    x1: &[f32],
-    x2: &[f32],
-    x3: &[f32],
-    y: &[f32],
-    n: &i32,
-    a1: &mut f32,
-    a2: &mut f32,
-    a3: &mut f32,
-    c: &mut f32,
-) {
-    ls_fit3(x1, x2, x3, y, *n, a1, a2, a3, c)
-}
 
 /// C `eigenSort`.
 pub fn eigen_sort(
@@ -781,7 +570,7 @@ pub fn eigen_sort(
 mod tests {
     use super::*;
     #[test]
-    fn summaries_and_subareas_follow_source() {
+    fn summaries_follow_source() {
         let a = [1_f32, 2., 3., 4.];
         let (mut av, mut sd, mut sem) = (0., 0., 0.);
         avg_sd(&a, 4, &mut av, &mut sd, &mut sem);
@@ -790,8 +579,6 @@ mod tests {
         let (mut lo, mut hi, mut mean) = (0., 0., 0.);
         array_min_max_mean(&a, 2, 2, 0, 1, 0, 1, &mut lo, &mut hi, &mut mean);
         assert_eq!((lo, hi, mean), (1., 4., 2.5));
-        let bytes: Vec<u8> = a.iter().flat_map(|value| value.to_ne_bytes()).collect();
-        assert_eq!(image_subarea_mean(&bytes, 2, 2, 0, 1, 0, 1), 2.5);
     }
     #[test]
     fn regressions_and_eigensort_follow_source() {

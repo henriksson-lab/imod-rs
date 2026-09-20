@@ -1,5 +1,4 @@
 //! Translation of `IMOD/libcfshr/gaussj.c`.
-#![allow(dead_code)]
 
 /// C `MSIZ` (`gaussj.c:26`).
 const MSIZ: i32 = 2000;

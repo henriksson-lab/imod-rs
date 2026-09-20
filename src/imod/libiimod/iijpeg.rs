@@ -1,5 +1,4 @@
 //! Safe, owned JPEG backend for `IMOD/libiimod/iijpeg.c`.
-#![allow(dead_code)]
 use crate::imod::libcfshr::b3dutil::ImodFile;
 use crate::imod::libiimod::iimage::{
     IIERR_BAD_CALL, IIERR_IO_ERROR, IIERR_NOT_FORMAT, IIFILE_JPEG, IIFORMAT_LUMINANCE,
@@ -300,28 +299,6 @@ unsafe fn jpeg_delete_callback(p: *mut ImodImageFile) {
         jpeg_delete(f)
     }
 }
-unsafe fn read_cb(p: *mut ImodImageFile, b: *mut u8, z: i32, k: i32) -> i32 {
-    let Some(f) = (unsafe { file(p) }) else {
-        return IIERR_BAD_CALL;
-    };
-    let Some(n) = count(f) else {
-        return IIERR_BAD_CALL;
-    };
-    let c = if k == NOPROC && f.native_image_rgb {
-        3
-    } else {
-        1
-    };
-    let sz = match k {
-        FLOAT => 4,
-        USHORT => 2,
-        _ => 1,
-    };
-    let Some(o) = (unsafe { slice(b, n * c * sz) }) else {
-        return IIERR_BAD_CALL;
-    };
-    jpeg_read_section_any(f, o, z, k)
-}
 unsafe fn read_callback(p: *mut ImodImageFile, b: *mut u8, z: i32) -> i32 {
     let Some(f) = (unsafe { file(p) }) else {
         return IIERR_BAD_CALL;
@@ -370,19 +347,6 @@ unsafe fn read_float_callback(p: *mut ImodImageFile, b: *mut u8, z: i32) -> i32 
         return IIERR_BAD_CALL;
     };
     jpeg_read_section_float(f, out, z)
-}
-unsafe fn write_cb(p: *mut ImodImageFile, b: *mut u8, z: i32, fl: bool) -> i32 {
-    let Some(f) = (unsafe { file(p) }) else {
-        return IIERR_BAD_CALL;
-    };
-    let Some(n) = count(f) else {
-        return IIERR_BAD_CALL;
-    };
-    let c = if f.mode == MRC_MODE_RGB { 3 } else { 1 };
-    let Some(i) = (unsafe { slice(b, n * c * if fl { 4 } else { 1 }) }) else {
-        return IIERR_BAD_CALL;
-    };
-    ii_jpeg_write_section_any(f, i, z, fl)
 }
 unsafe fn write_callback(p: *mut ImodImageFile, b: *mut u8, z: i32) -> i32 {
     let Some(f) = (unsafe { file(p) }) else {

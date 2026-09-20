@@ -2,15 +2,14 @@
 //!
 //! IMOD binary chunks are big-endian irrespective of the host byte order.
 
-use std::io::{self, BufRead, BufReader, Read, Seek, SeekFrom, Write};
+use std::io::{self, Read, Seek, SeekFrom, Write};
 use std::path::Path;
 
 use super::imodel::{
-    IMOD_CLIPSIZE, IMOD_ERROR_CORRUPT, IMOD_ERROR_FORMAT, IMOD_ERROR_MEMORY, IMOD_ERROR_READ,
-    IMOD_ERROR_WRITE, IMOD_OBJFLAG_OFF, IMOD_OBJFLAG_OPEN, IMOD_OBJFLAG_OUT, IMOD_OBJFLAG_SCAT,
-    IMOD_STRSIZE, IMOD_UNIT_MM, IMOD_UNIT_NM, IMOD_UNIT_UM, IMODF_FLIPYZ, IMODF_OTRANS_ORIGIN,
-    IMODF_TILTOK, IOBJ_STRSIZE, Iclip_planes, Icont, Imesh, Imod, Iobj, Iobjview, Ipoint,
-    Iref_image, Iview, Slicer_angles, imod_clean_surf,
+    IMOD_ERROR_CORRUPT, IMOD_ERROR_FORMAT, IMOD_ERROR_MEMORY, IMOD_ERROR_READ, IMOD_ERROR_WRITE,
+    IMOD_OBJFLAG_OFF, IMOD_OBJFLAG_OPEN, IMOD_OBJFLAG_OUT, IMOD_OBJFLAG_SCAT, IMOD_STRSIZE,
+    IMOD_UNIT_MM, IMOD_UNIT_NM, IMOD_UNIT_UM, IMODF_FLIPYZ, IMODF_OTRANS_ORIGIN, IMODF_TILTOK,
+    IOBJ_STRSIZE, Iclip_planes, Icont, Imesh, Imod, Iobj, Ipoint, Slicer_angles, imod_clean_surf,
 };
 
 /// Original: `IMODF_HAS_MESH_THICK` (`imodel.h:122`).
@@ -2790,6 +2789,25 @@ pub fn imodel_write(imod: &Imod, file: &mut ImodFile, skip_mesh: i32) -> Result<
     }
     super::iview::imod_view_model_write(imod, file)?;
     super::iview::imod_imnx_write(imod, file)?;
+    // `imodel_files.c:317-330`: write slicer angles.  The C's
+    // `imodPutFloats(fout, &slan->angles[0], 6)` runs from `angles[3]` on
+    // into the adjacent `Ipoint center`, so the six floats are the three
+    // angles followed by the centre's x, y, z.
+    for slan in &imod.slicer_ang {
+        imod_put_int(file, ID_SLAN as i32).map_err(|_| IMOD_ERROR_WRITE)?;
+        imod_put_int(file, SIZE_SLAN).map_err(|_| IMOD_ERROR_WRITE)?;
+        imod_put_int(file, slan.time).map_err(|_| IMOD_ERROR_WRITE)?;
+        let angles = [
+            slan.angles[0],
+            slan.angles[1],
+            slan.angles[2],
+            slan.center.x,
+            slan.center.y,
+            slan.center.z,
+        ];
+        imod_put_floats(file, &angles, 6).map_err(|_| IMOD_ERROR_WRITE)?;
+        imod_put_bytes(file, &slan.label, ANGLE_STRSIZE as i32).map_err(|_| IMOD_ERROR_WRITE)?;
+    }
     obj_group_list_write(&imod.group_list, file)?;
     if imod_write_store(&imod.store, ID_MOST as i32, file) != 0 {
         return Err(IMOD_ERROR_WRITE);
@@ -2827,11 +2845,6 @@ pub fn imod_file_write(imod: &Imod, path: impl AsRef<Path>) -> Result<(), i32> {
     let mut file =
         ImodFile::open(path.as_ref().to_str().unwrap_or(""), "wb").ok_or(IMOD_ERROR_WRITE)?;
     imod_write(imod, &mut file)
-}
-
-/// Original: `imodFileRead` (`imodel_files.c:68`).
-pub fn imod_file_read(filename: impl AsRef<Path>) -> Result<Imod, i32> {
-    imod_read(filename)
 }
 
 /// Original: `imodOpenFile` (`imodel_files.c:93`).
@@ -2896,6 +2909,7 @@ pub fn imod_test_if_model_file(filename: impl AsRef<Path>) -> i32 {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::imod::libimod::imodel::{Iref_image, Iview};
 
     /// Test-only: builds a fixed-size NUL-padded model/object name array.
     fn name_array<const N: usize>(text: &str) -> [u8; N] {

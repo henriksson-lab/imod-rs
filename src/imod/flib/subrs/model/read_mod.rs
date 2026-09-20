@@ -1,6 +1,4 @@
 //! ASCII WIMP model reader from `IMOD/flib/subrs/model/read_mod.f`.
-#![allow(dead_code)]
-
 use std::io::BufRead;
 
 use crate::imod::flib::subrs::model::fortmodel::{FortModel, MAX_CLABEL};

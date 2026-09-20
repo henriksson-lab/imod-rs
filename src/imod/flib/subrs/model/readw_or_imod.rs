@@ -1,6 +1,4 @@
 //! Model-format dispatcher from `IMOD/flib/subrs/model/readw_or_imod.f`.
-#![allow(dead_code)]
-
 use std::fs::File;
 use std::io::BufReader;
 use std::path::Path;

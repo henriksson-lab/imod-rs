@@ -15,7 +15,6 @@
 //! through the shared C-format writer first; reproducing `vsnprintf`'s
 //! specifier set here would duplicate that writer, which NATIVE.md keeps in
 //! `b3dutil` as one verified boundary translation.
-#![allow(dead_code)]
 
 /// Matches C `_mxml_strdupf` (`mxml-string.c:89`).
 pub fn _mxml_strdupf(format: &[u8], arg: &[u8]) -> Vec<u8> {

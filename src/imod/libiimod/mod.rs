@@ -15,7 +15,6 @@ pub mod mrcslice;
 pub mod parallelwrite;
 pub mod plist;
 pub mod sliceproc;
-pub mod tiffstub;
 pub mod unit_fileio;
 pub mod unit_header;
 pub mod unit_reduced;

@@ -1,5 +1,4 @@
 //! Translation of `IMOD/libiimod/plist.c` and its `mrcfiles.h` declarations.
-#![allow(dead_code)]
 
 use crate::imod::libcfshr::autodoc::{
     adoc_clear, adoc_get_three_integers, adoc_lookup_by_name_value, adoc_open_image_metadata,

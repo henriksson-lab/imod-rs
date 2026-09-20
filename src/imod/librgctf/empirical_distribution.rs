@@ -20,12 +20,6 @@ pub fn empirical_distribution() -> EmpiricalDistribution {
     EmpiricalDistribution::new()
 }
 
-/// `~EmpiricalDistribution()`: the Rust value owns no separate sample heap,
-/// so dropping it is the complete native cleanup operation.
-pub fn free_empirical_distribution(distribution: EmpiricalDistribution) {
-    drop(distribution);
-}
-
 impl Default for EmpiricalDistribution {
     fn default() -> Self {
         Self::new()
@@ -79,16 +73,6 @@ impl EmpiricalDistribution {
         self.is_constant
     }
 
-    /// C++ `EmpiricalDistribution::GetSampleSumOfSquares`.
-    pub fn get_sample_sum_of_squares(&self) -> f32 {
-        self.sum_of_squared_samples as f32
-    }
-
-    /// C++ `EmpiricalDistribution::GetNumberOfSamples`.
-    pub fn get_number_of_samples(&self) -> f32 {
-        self.number_of_samples as f32
-    }
-
     /// C++ `EmpiricalDistribution::GetSampleSum`.
     pub fn get_sample_sum(&self) -> f32 {
         self.sum_of_samples as f32
@@ -113,16 +97,6 @@ impl EmpiricalDistribution {
         }
     }
 
-    /// C++ `EmpiricalDistribution::GetUnbiasedEstimateOfPopulationVariance`.
-    pub fn get_unbiased_estimate_of_population_variance(&self) -> f32 {
-        if self.number_of_samples > 0 {
-            self.get_sample_variance() * self.number_of_samples as f32
-                / (self.number_of_samples - 1) as f32
-        } else {
-            0.0
-        }
-    }
-
     /// C++ inline `EmpiricalDistribution::GetMinimum`.
     pub fn get_minimum(&self) -> f32 {
         self.minimum
@@ -136,13 +110,12 @@ impl EmpiricalDistribution {
 
 #[cfg(test)]
 mod tests {
-    use super::{EmpiricalDistribution, empirical_distribution, free_empirical_distribution};
+    use super::{EmpiricalDistribution, empirical_distribution};
 
     #[test]
-    fn constructor_and_destructor_facades_manage_empty_distribution() {
+    fn constructor_facade_makes_an_empty_distribution() {
         let distribution = empirical_distribution();
         assert!(distribution.is_constant());
-        free_empirical_distribution(distribution);
     }
 
     #[test]
@@ -155,21 +128,14 @@ mod tests {
         distribution.add_sample_value(2.0);
         distribution.add_sample_value(4.0);
         distribution.add_sample_value(6.0);
-        assert_eq!(distribution.get_number_of_samples(), 3.0);
         assert_eq!(distribution.get_sample_sum(), 12.0);
-        assert_eq!(distribution.get_sample_sum_of_squares(), 56.0);
         assert_eq!(distribution.get_sample_mean(), 4.0);
         assert_eq!(distribution.get_sample_variance(), 8.0 / 3.0);
-        assert_eq!(
-            distribution.get_unbiased_estimate_of_population_variance(),
-            4.0
-        );
         assert_eq!(distribution.get_minimum(), 2.0);
         assert_eq!(distribution.get_maximum(), 6.0);
         assert!(!distribution.is_constant());
 
         distribution.reset();
-        assert_eq!(distribution.get_number_of_samples(), 0.0);
         assert!(distribution.is_constant());
     }
 }

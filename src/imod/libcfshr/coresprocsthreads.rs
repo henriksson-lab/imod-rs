@@ -1,5 +1,4 @@
 //! Translation of `IMOD/libcfshr/coresprocsthreads.c`.
-#![allow(dead_code)]
 
 use core::sync::atomic::{AtomicI32, Ordering};
 

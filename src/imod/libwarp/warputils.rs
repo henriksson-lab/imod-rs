@@ -5,15 +5,14 @@
 //! `&mut String`, and its three `static int *` neighbour tables are
 //! thread-local `Vec`s.  Nothing here prints, so no `c_format` boundary is
 //! needed.
-#![allow(dead_code)]
 
 use std::cell::{Cell, RefCell};
 
 use crate::imod::libcfshr::linearxforms::{xf_apply, xf_copy, xf_invert};
 use crate::imod::libcfshr::simplestat::ls_fit2;
 use crate::imod::libwarp::warpfiles::{
-    WARP_CONTROL_PTS, WARP_INVERSE, get_grid_parameters, get_num_warp_points, get_warp_file_size,
-    get_warp_grid, grid_size_from_spacing, read_warp_file, set_grid_size_to_make,
+    get_grid_parameters, get_num_warp_points, get_warp_file_size, get_warp_grid,
+    grid_size_from_spacing, read_warp_file, set_grid_size_to_make,
 };
 
 /// C `MAX_THREADS` (`warputils.c:281`).
@@ -1302,6 +1301,7 @@ pub fn adjust_size_and_start(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::imod::libwarp::warpfiles::{WARP_CONTROL_PTS, WARP_INVERSE};
     use crate::imod::libwarp::warpfiles::{
         new_warp_file, set_warp_grid, warp_files_done, write_warp_file,
     };

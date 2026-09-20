@@ -1,8 +1,6 @@
 //! Translation of `IMOD/libcfshr/taperatfill.c`.
-#![allow(dead_code)]
 
-use crate::imod::libcfshr::islice::{Islice, slice_get_val, slice_put_val};
-use std::mem::size_of;
+use crate::imod::libcfshr::islice::{Islice, MrcData, slice_get_val, slice_init, slice_put_val};
 use std::sync::Mutex;
 
 const MAX_TAPER: i32 = 256;
@@ -283,23 +281,27 @@ pub fn taper_at_fill(array: &mut [f32], nx: i32, ny: i32, ntaper: i32, inside: b
     if array.len() != pixel_count {
         return -1;
     }
-    let Some(mut slice) = crate::imod::libcfshr::islice::slice_create(nx, ny, 2) else {
-        return -1;
+    // `taperatfill.c:385`: `sliceInit(&slice, nx, ny, type, array)` aliases
+    // the caller's array.  The slice owns its `f` member here, so the array
+    // is moved through it by one copy each way.
+    let mut slice = Islice {
+        data: MrcData::default(),
+        xsize: 0,
+        ysize: 0,
+        mode: 0,
+        csize: 0,
+        dsize: 0,
+        min: 0.,
+        max: 0.,
+        mean: 0.,
+        index: 0,
+        cval: [0.; 4],
     };
-    for (bytes, value) in slice
-        .data
-        .chunks_exact_mut(size_of::<f32>())
-        .zip(array.iter())
-    {
-        bytes.copy_from_slice(&value.to_ne_bytes());
+    if slice_init(&mut slice, nx, ny, 2, MrcData::F(array.to_vec())) != 0 {
+        return -1;
     }
     let result = slice_taper_at_fill(slice.as_mut(), ntaper, inside);
-    for (value, bytes) in array
-        .iter_mut()
-        .zip(slice.data.chunks_exact(size_of::<f32>()))
-    {
-        *value = f32::from_ne_bytes(bytes.try_into().unwrap());
-    }
+    array.copy_from_slice(slice.data.f());
     result
 }
 /// Source Fortran wrapper `taperatfill`.
@@ -373,160 +375,6 @@ pub fn slice_find_fill_value(sl: &Islice) -> (f32, i32, i32, i32, i32) {
     (fillval, longest, longix, longiy, direction)
 }
 
-/// Replace the detected edge fill with a neighbouring mean or median.
-pub fn slice_replace_fill(
-    sl: &mut Islice,
-    median: bool,
-    have_fill: bool,
-    old_fill: &mut f32,
-    new_fill: &mut f32,
-) -> i32 {
-    let (xsize, ysize) = (sl.xsize, sl.ysize);
-    let mut fillval;
-    if have_fill {
-        fillval = *old_fill;
-    } else {
-        let (found_fill, longest, _, _, _) = slice_find_fill_value(sl);
-        fillval = found_fill;
-        if longest < 10 {
-            return 1;
-        }
-        *old_fill = fillval;
-    }
-    let mut top = vec![ysize - 1; xsize as usize];
-    let mut bot = vec![0; xsize as usize];
-    let mut edge_vals = Vec::new();
-    let mut sum = 0_f64;
-    let mut nsum = 0usize;
-    for (edge_x, scan_dir) in [(0, 1), (0, -1), (xsize - 1, 1), (xsize - 1, -1)] {
-        let (mut y, stop) = if scan_dir > 0 {
-            (0, ysize / 2)
-        } else {
-            (ysize - 1, ysize / 2 + 1)
-        };
-        while (stop - y) * scan_dir >= 0 {
-            let mut step = 0;
-            while step < xsize {
-                let xx = edge_x + if edge_x == 0 { step } else { -step };
-                let ind = (xx + xsize * y) as usize;
-                let mut val = [0.; 4];
-                slice_get_val(sl, xx, y, &mut val);
-                if val[0] != fillval {
-                    if median {
-                        edge_vals.push(val[0]);
-                    } else {
-                        sum += val[0] as f64;
-                    }
-                    nsum += 1;
-                    break;
-                } else {
-                    let starts = if scan_dir > 0 { &mut bot } else { &mut top };
-                    if starts[xx as usize] == y - scan_dir {
-                        starts[xx as usize] = y;
-                    }
-                }
-                step += 1;
-            }
-            y += scan_dir;
-        }
-    }
-    for (edge_y, scan_dir) in [(0, 1), (ysize - 1, -1)] {
-        for x in 0..xsize {
-            let start = if scan_dir > 0 {
-                bot[x as usize]
-            } else {
-                ysize - 1 - top[x as usize]
-            };
-            for step in start..ysize {
-                let yy = edge_y + scan_dir * step;
-                if yy < 0 || yy >= ysize {
-                    break;
-                }
-                let mut val = [0.; 4];
-                slice_get_val(sl, x, yy, &mut val);
-                if val[0] != fillval {
-                    if median {
-                        edge_vals.push(val[0]);
-                    } else {
-                        sum += val[0] as f64;
-                    }
-                    nsum += 1;
-                    break;
-                }
-            }
-        }
-    }
-    if nsum < 10 {
-        return 2;
-    }
-    if median {
-        if edge_vals.len() > 15000 {
-            let skip = edge_vals.len() / 15000;
-            let remain = edge_vals.len() % 15000;
-            let mut reduced = Vec::with_capacity(15000);
-            let mut at = 0;
-            for _ in 0..remain {
-                reduced.push(edge_vals[at]);
-                at += skip + 1;
-            }
-            while reduced.len() < 15000 {
-                reduced.push(edge_vals[at]);
-                at += skip;
-            }
-            edge_vals = reduced;
-        }
-        let n = edge_vals.len() as i32;
-        crate::imod::libcfshr::robuststat::rs_fast_median_in_place(&mut edge_vals, n, new_fill);
-    } else {
-        *new_fill = (sum / nsum as f64) as f32;
-    }
-    for pass in 0..4 {
-        if pass < 2 {
-            let edge_y = if pass == 0 { 0 } else { ysize - 1 };
-            let dir = if pass == 0 { 1 } else { -1 };
-            for x in 0..xsize {
-                let start = if dir > 0 {
-                    bot[x as usize]
-                } else {
-                    ysize - 1 - top[x as usize]
-                };
-                for step in start..ysize {
-                    let y = edge_y + dir * step;
-                    if y < 0 || y >= ysize {
-                        break;
-                    }
-                    let mut v = [0.; 4];
-                    slice_get_val(sl, x, y, &mut v);
-                    if v[0] != fillval && v[0] != *new_fill {
-                        break;
-                    }
-                    v[0] = *new_fill;
-                    slice_put_val(sl, x, y, v);
-                }
-            }
-        } else {
-            let edge_x = if pass == 2 { 0 } else { xsize - 1 };
-            let dir = if pass == 2 { 1 } else { -1 };
-            for y in 0..ysize {
-                for step in 0..xsize {
-                    let x = edge_x + dir * step;
-                    if x < 0 || x >= xsize {
-                        break;
-                    }
-                    let mut v = [0.; 4];
-                    slice_get_val(sl, x, y, &mut v);
-                    if v[0] != fillval && v[0] != *new_fill {
-                        break;
-                    }
-                    v[0] = *new_fill;
-                    slice_put_val(sl, x, y, v);
-                }
-            }
-        }
-    }
-    0
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -539,9 +387,7 @@ mod tests {
             }
         }
         let mut sl = crate::imod::libcfshr::islice::slice_create(12, 12, 2).unwrap();
-        for (bytes, value) in sl.data.chunks_exact_mut(size_of::<f32>()).zip(image) {
-            bytes.copy_from_slice(&value.to_ne_bytes());
-        }
+        sl.data.f_mut().copy_from_slice(&image);
         let (fill, length, _, _, _) = slice_find_fill_value(sl.as_mut());
         assert_eq!(fill, 0.);
         assert!(length >= 10);
@@ -567,29 +413,6 @@ mod tests {
         assert_eq!(taper_at_fill(&mut image[..143], 12, 12, 2, false), -1);
     }
 
-    #[test]
-    fn replaces_fill_with_adjacent_mean() {
-        let mut image = vec![0_f32; 12 * 12];
-        for y in 1..11 {
-            for x in 1..11 {
-                image[y * 12 + x] = 10.;
-            }
-        }
-        let mut sl = crate::imod::libcfshr::islice::slice_create(12, 12, 2).unwrap();
-        for (bytes, value) in sl.data.chunks_exact_mut(size_of::<f32>()).zip(image) {
-            bytes.copy_from_slice(&value.to_ne_bytes());
-        }
-        let mut old = 0.;
-        let mut new = 0.;
-        assert_eq!(
-            slice_replace_fill(sl.as_mut(), false, false, &mut old, &mut new),
-            0
-        );
-        assert_eq!((old, new), (0., 10.));
-        for bytes in sl.data.chunks_exact(size_of::<f32>()) {
-            assert_eq!(f32::from_ne_bytes(bytes.try_into().unwrap()), 10.);
-        }
-    }
     #[test]
     fn fortran_fill_value_wrapper_matches_owned_entry() {
         let mut first = 0.;

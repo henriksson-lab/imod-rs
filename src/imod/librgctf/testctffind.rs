@@ -6,15 +6,15 @@
 //! callback writer: source defaults, box sizing, section validation, and the
 //! precise result reports.
 
-use crate::imod::libcfshr::islice::{Islice, slice_init};
+use crate::imod::libcfshr::islice::{Islice, MrcData, slice_init};
 use crate::imod::libiimod::mrcfiles::MRC_MODE_FLOAT;
 use crate::imod::libiimod::mrcslice::slice_write_mrcfile;
 
 /// `writeSlice` (`testctffind.cpp:7`).
 ///
 /// `sliceInit` borrows the C caller's float pointer.  The Rust `Islice` owns
-/// its bytes, so this is the same float layout copied into the temporary slice
-/// before `sliceWriteMRCfile` writes its one-section MRC file.
+/// its floats, so the caller's array is copied into the temporary slice's `f`
+/// member before `sliceWriteMRCfile` writes its one-section MRC file.
 pub fn write_slice(filename: &str, data: &[f32], xsize: i32, ysize: i32) -> i32 {
     let Some(pixels) = usize::try_from(xsize)
         .ok()
@@ -25,12 +25,8 @@ pub fn write_slice(filename: &str, data: &[f32], xsize: i32, ysize: i32) -> i32 
     if data.len() != pixels {
         return -1;
     }
-    let mut bytes = Vec::with_capacity(pixels * std::mem::size_of::<f32>());
-    for value in data {
-        bytes.extend_from_slice(&value.to_ne_bytes());
-    }
     let mut slice = Islice {
-        data: Vec::new(),
+        data: MrcData::default(),
         xsize: 0,
         ysize: 0,
         mode: 0,
@@ -42,7 +38,14 @@ pub fn write_slice(filename: &str, data: &[f32], xsize: i32, ysize: i32) -> i32 
         index: 0,
         cval: [0.; 4],
     };
-    if slice_init(&mut slice, xsize, ysize, MRC_MODE_FLOAT, bytes) != 0 {
+    if slice_init(
+        &mut slice,
+        xsize,
+        ysize,
+        MRC_MODE_FLOAT,
+        MrcData::F(data.to_vec()),
+    ) != 0
+    {
         return -1;
     }
     slice_write_mrcfile(filename, &mut slice)
@@ -99,79 +102,9 @@ impl Default for TestCtffindParameters {
     }
 }
 
-pub fn even_box_size(box_size: i32) -> i32 {
-    2 * ((box_size + 1) / 2)
-}
-
-/// Source `useBox` calculation.  `nice_frame` is supplied by the existing
-/// numerical module before this point, so this preserves the later source
-/// resampling branch exactly.
-pub fn resampled_box_size(box_size: i32, resolution: f32, pixel_size: f32) -> i32 {
-    if resolution > pixel_size * 2. {
-        2 * ((1. + 0.5 * box_size as f32 * resolution / pixel_size).round() as i32 / 2)
-    } else {
-        box_size
-    }
-}
-
-pub fn validate_section_range(start: i32, end: i32, depth: i32) -> Result<(), String> {
-    if start < 0 || end >= depth || start > end {
-        Err("Section range is out of range or out of order".into())
-    } else {
-        Ok(())
-    }
-}
-
-pub fn format_ctffind_results(
-    results: [f32; 7],
-    multiple_sections: bool,
-    find_phase: bool,
-    extra_stats: bool,
-) -> String {
-    if multiple_sections {
-        return format!(
-            "{:.0}  {:.1}  {:.2}  {:.4}  {:.4}  {:.1}  {:.1}\n",
-            results[0], results[1], results[2], results[3], results[4], results[5], results[6]
-        );
-    }
-    let mut report = format!(
-        "Defocus 1 {:.1}  2 {:.1}  (astig. {:.1}) angle {:.2}",
-        results[0],
-        results[1],
-        results[0] - results[1],
-        results[2]
-    );
-    if find_phase {
-        report.push_str(&format!(
-            "    Phase shift {:.4} rad ({:.2} deg)",
-            results[3],
-            results[3] / (std::f32::consts::PI / 180.)
-        ));
-    }
-    report.push_str(&format!("\nScore {:.4}\n", results[4]));
-    if extra_stats {
-        report.push_str(&format!("Thon rings well fit to {:.1}\n", results[5]));
-        if results[6] != 0. {
-            report.push_str(&format!("CTF aliasing detected at {:.1}\n", results[6]));
-        }
-    }
-    report
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
-    #[test]
-    fn source_parameter_and_report_workflow_is_deterministic() {
-        assert_eq!(even_box_size(255), 256);
-        assert_eq!(resampled_box_size(256, 2.8, 1.), 358);
-        assert!(validate_section_range(0, 1, 2).is_ok());
-        assert!(validate_section_range(1, 0, 2).is_err());
-        assert_eq!(
-            format_ctffind_results([10_000., 9_000., 45., 0.5, 0.8, 4., 0.], false, true, true),
-            "Defocus 1 10000.0  2 9000.0  (astig. 1000.0) angle 45.00    Phase shift 0.5000 rad (28.65 deg)\nScore 0.8000\nThon rings well fit to 4.0\n"
-        );
-    }
 
     #[test]
     fn write_slice_emits_a_one_section_float_mrc_file() {

@@ -1,5 +1,4 @@
 //! Translation of `IMOD/libcfshr/rotateflip.c`.
-#![allow(dead_code)]
 
 /// The image buffers of `rotateFlipImage`.  The C signature pairs an untyped
 /// `void *array` / `void *brray` with an MRC `mode` tag; Rust spells that pair
@@ -106,31 +105,256 @@ pub fn rotate_flip_image(
             dmax = dmax.max(value);
         }
     }
-    for iy in 0..ny {
-        for ix in 0..nx {
-            let target = xstart + *nxout * ystart + iy * dinter + ix * dalong;
-            match &mut data {
-                RotateFlipData::Byte { array, brray } => {
-                    brray[target as usize] = array[(iy * nx + ix) as usize]
+    /* Do the copy: `rotateflip.c:155-406`, eight input lines per strip with
+    eight running output cursors, then the remaining lines one at a time.
+    The cursors are signed because `dalong`/`dinter` run backwards for the
+    flipped and rotated operations. */
+    match &mut data {
+        RotateFlipData::Float { array, brray } => {
+            let (dalong, dinter) = (dalong as isize, dinter as isize);
+            let nx_out = *nxout as isize;
+            let nxu = nx as usize;
+            let num_strips = ny / 8;
+            for strip in 0..num_strips as usize {
+                let bstart =
+                    xstart as isize + nx_out * ystart as isize + 8 * strip as isize * dinter;
+                let astart = 8 * strip * nxu;
+                let mut b = [0_isize; 8];
+                for line in 0..8 {
+                    b[line] = bstart + line as isize * dinter;
                 }
-                RotateFlipData::Float { array, brray } => {
-                    brray[target as usize] = array[(iy * nx + ix) as usize]
+                let mut a = [0_usize; 8];
+                for line in 0..8 {
+                    a[line] = astart + line * nxu;
                 }
-                RotateFlipData::Short { array, brray } => {
-                    let value = array[(iy * nx + ix) as usize] as i32;
-                    brray[target as usize] = if invert_con != 0 {
-                        (dmax + dmin - value) as i16
-                    } else {
-                        value as i16
-                    };
+                for _ix in 0..nxu {
+                    for line in 0..8 {
+                        let v = array[a[line]];
+                        a[line] += 1;
+                        brray[b[line] as usize] = v;
+                        b[line] += dalong;
+                    }
                 }
-                RotateFlipData::UShort { array, brray } => {
-                    let value = array[(iy * nx + ix) as usize] as i32;
-                    brray[target as usize] = if invert_con != 0 {
-                        (dmax + dmin - value) as u16
-                    } else {
-                        value as u16
-                    };
+            }
+            /* Finish up last rows */
+            let mut bstart =
+                xstart as isize + nx_out * ystart as isize + 8 * num_strips as isize * dinter;
+            let mut astart = 8 * num_strips as usize * nxu;
+            for _iy in 8 * num_strips..ny {
+                let mut bp = bstart;
+                for _ix in 0..nxu {
+                    let v = array[astart];
+                    astart += 1;
+                    brray[bp as usize] = v;
+                    bp += dalong;
+                }
+                bstart += dinter;
+            }
+        }
+        RotateFlipData::Byte { array, brray } => {
+            let (dalong, dinter) = (dalong as isize, dinter as isize);
+            let nx_out = *nxout as isize;
+            let nxu = nx as usize;
+            let num_strips = ny / 8;
+            for strip in 0..num_strips as usize {
+                let bstart =
+                    xstart as isize + nx_out * ystart as isize + 8 * strip as isize * dinter;
+                let astart = 8 * strip * nxu;
+                let mut b = [0_isize; 8];
+                for line in 0..8 {
+                    b[line] = bstart + line as isize * dinter;
+                }
+                let mut a = [0_usize; 8];
+                for line in 0..8 {
+                    a[line] = astart + line * nxu;
+                }
+                for _ix in 0..nxu {
+                    for line in 0..8 {
+                        let v = array[a[line]];
+                        a[line] += 1;
+                        brray[b[line] as usize] = v;
+                        b[line] += dalong;
+                    }
+                }
+            }
+            /* Finish up last rows */
+            let mut bstart =
+                xstart as isize + nx_out * ystart as isize + 8 * num_strips as isize * dinter;
+            let mut astart = 8 * num_strips as usize * nxu;
+            for _iy in 8 * num_strips..ny {
+                let mut bp = bstart;
+                for _ix in 0..nxu {
+                    let v = array[astart];
+                    astart += 1;
+                    brray[bp as usize] = v;
+                    bp += dalong;
+                }
+                bstart += dinter;
+            }
+        }
+        RotateFlipData::Short { array, brray } => {
+            if invert_con != 0 {
+                let (dalong, dinter) = (dalong as isize, dinter as isize);
+                let nx_out = *nxout as isize;
+                let nxu = nx as usize;
+                let num_strips = ny / 8;
+                for strip in 0..num_strips as usize {
+                    let bstart =
+                        xstart as isize + nx_out * ystart as isize + 8 * strip as isize * dinter;
+                    let astart = 8 * strip * nxu;
+                    let mut b = [0_isize; 8];
+                    for line in 0..8 {
+                        b[line] = bstart + line as isize * dinter;
+                    }
+                    let mut a = [0_usize; 8];
+                    for line in 0..8 {
+                        a[line] = astart + line * nxu;
+                    }
+                    for _ix in 0..nxu {
+                        for line in 0..8 {
+                            let v = array[a[line]];
+                            a[line] += 1;
+                            brray[b[line] as usize] = (dmax + dmin - v as i32) as i16;
+                            b[line] += dalong;
+                        }
+                    }
+                }
+                /* Finish up last rows */
+                let mut bstart =
+                    xstart as isize + nx_out * ystart as isize + 8 * num_strips as isize * dinter;
+                let mut astart = 8 * num_strips as usize * nxu;
+                for _iy in 8 * num_strips..ny {
+                    let mut bp = bstart;
+                    for _ix in 0..nxu {
+                        let v = array[astart];
+                        astart += 1;
+                        brray[bp as usize] = (dmax + dmin - v as i32) as i16;
+                        bp += dalong;
+                    }
+                    bstart += dinter;
+                }
+            } else {
+                let (dalong, dinter) = (dalong as isize, dinter as isize);
+                let nx_out = *nxout as isize;
+                let nxu = nx as usize;
+                let num_strips = ny / 8;
+                for strip in 0..num_strips as usize {
+                    let bstart =
+                        xstart as isize + nx_out * ystart as isize + 8 * strip as isize * dinter;
+                    let astart = 8 * strip * nxu;
+                    let mut b = [0_isize; 8];
+                    for line in 0..8 {
+                        b[line] = bstart + line as isize * dinter;
+                    }
+                    let mut a = [0_usize; 8];
+                    for line in 0..8 {
+                        a[line] = astart + line * nxu;
+                    }
+                    for _ix in 0..nxu {
+                        for line in 0..8 {
+                            let v = array[a[line]];
+                            a[line] += 1;
+                            brray[b[line] as usize] = v;
+                            b[line] += dalong;
+                        }
+                    }
+                }
+                /* Finish up last rows */
+                let mut bstart =
+                    xstart as isize + nx_out * ystart as isize + 8 * num_strips as isize * dinter;
+                let mut astart = 8 * num_strips as usize * nxu;
+                for _iy in 8 * num_strips..ny {
+                    let mut bp = bstart;
+                    for _ix in 0..nxu {
+                        let v = array[astart];
+                        astart += 1;
+                        brray[bp as usize] = v;
+                        bp += dalong;
+                    }
+                    bstart += dinter;
+                }
+            }
+        }
+        RotateFlipData::UShort { array, brray } => {
+            if invert_con != 0 {
+                let (dalong, dinter) = (dalong as isize, dinter as isize);
+                let nx_out = *nxout as isize;
+                let nxu = nx as usize;
+                let num_strips = ny / 8;
+                for strip in 0..num_strips as usize {
+                    let bstart =
+                        xstart as isize + nx_out * ystart as isize + 8 * strip as isize * dinter;
+                    let astart = 8 * strip * nxu;
+                    let mut b = [0_isize; 8];
+                    for line in 0..8 {
+                        b[line] = bstart + line as isize * dinter;
+                    }
+                    let mut a = [0_usize; 8];
+                    for line in 0..8 {
+                        a[line] = astart + line * nxu;
+                    }
+                    for _ix in 0..nxu {
+                        for line in 0..8 {
+                            let v = array[a[line]];
+                            a[line] += 1;
+                            brray[b[line] as usize] = (dmax + dmin - v as i32) as u16;
+                            b[line] += dalong;
+                        }
+                    }
+                }
+                /* Finish up last rows */
+                let mut bstart =
+                    xstart as isize + nx_out * ystart as isize + 8 * num_strips as isize * dinter;
+                let mut astart = 8 * num_strips as usize * nxu;
+                for _iy in 8 * num_strips..ny {
+                    let mut bp = bstart;
+                    for _ix in 0..nxu {
+                        let v = array[astart];
+                        astart += 1;
+                        brray[bp as usize] = (dmax + dmin - v as i32) as u16;
+                        bp += dalong;
+                    }
+                    bstart += dinter;
+                }
+            } else {
+                let (dalong, dinter) = (dalong as isize, dinter as isize);
+                let nx_out = *nxout as isize;
+                let nxu = nx as usize;
+                let num_strips = ny / 8;
+                for strip in 0..num_strips as usize {
+                    let bstart =
+                        xstart as isize + nx_out * ystart as isize + 8 * strip as isize * dinter;
+                    let astart = 8 * strip * nxu;
+                    let mut b = [0_isize; 8];
+                    for line in 0..8 {
+                        b[line] = bstart + line as isize * dinter;
+                    }
+                    let mut a = [0_usize; 8];
+                    for line in 0..8 {
+                        a[line] = astart + line * nxu;
+                    }
+                    for _ix in 0..nxu {
+                        for line in 0..8 {
+                            let v = array[a[line]];
+                            a[line] += 1;
+                            brray[b[line] as usize] = v;
+                            b[line] += dalong;
+                        }
+                    }
+                }
+                /* Finish up last rows */
+                let mut bstart =
+                    xstart as isize + nx_out * ystart as isize + 8 * num_strips as isize * dinter;
+                let mut astart = 8 * num_strips as usize * nxu;
+                for _iy in 8 * num_strips..ny {
+                    let mut bp = bstart;
+                    for _ix in 0..nxu {
+                        let v = array[astart];
+                        astart += 1;
+                        brray[bp as usize] = v;
+                        bp += dalong;
+                    }
+                    bstart += dinter;
                 }
             }
         }
@@ -138,34 +362,9 @@ pub fn rotate_flip_image(
     0
 }
 
-/// C Fortran wrapper `rotateflipimage` (`rotateflip.c:421`).
-pub fn rotate_flip_image_fortran(
-    array: &[f32],
-    nx: &i32,
-    ny: &i32,
-    operation: &i32,
-    brray: &mut [f32],
-    nxout: &mut i32,
-    nyout: &mut i32,
-    num_threads: &i32,
-) -> i32 {
-    rotate_flip_image(
-        RotateFlipData::Float { array, brray },
-        *nx,
-        *ny,
-        *operation,
-        0,
-        0,
-        0,
-        nxout,
-        nyout,
-        *num_threads,
-    )
-}
-
 #[cfg(test)]
 mod tests {
-    use super::{RotateFlipData, rotate_flip_image, rotate_flip_image_fortran};
+    use super::{RotateFlipData, rotate_flip_image};
     #[test]
     fn rotates_float_with_source_right_handed_operation_map() {
         let input = [1_f32, 2., 3., 4., 5., 6.];
@@ -241,7 +440,7 @@ mod tests {
     }
 
     #[test]
-    fn contrast_inversion_and_fortran_wrapper_follow_source_contract() {
+    fn contrast_inversion_follows_source_contract() {
         let short_input = [-3_i16, 7, 2, -1];
         let mut short_output = [0_i16; 4];
         let (mut nxout, mut nyout) = (0, 0);
@@ -287,24 +486,6 @@ mod tests {
         assert_eq!(ushort_output, [10, 4, 7, 6]);
         let floats = [1_f32, 2., 3., 4.];
         let mut float_out = [0_f32; 4];
-        let nx = 2;
-        let ny = 2;
-        let operation = 0;
-        let threads = 0;
-        assert_eq!(
-            rotate_flip_image_fortran(
-                &floats,
-                &nx,
-                &ny,
-                &operation,
-                &mut float_out,
-                &mut nxout,
-                &mut nyout,
-                &threads,
-            ),
-            0
-        );
-        assert_eq!(float_out, floats);
         assert_eq!(
             rotate_flip_image(
                 RotateFlipData::Float {

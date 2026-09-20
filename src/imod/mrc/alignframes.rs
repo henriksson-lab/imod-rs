@@ -889,20 +889,6 @@ impl AliFrame {
         }))
     }
 
-    /// Source transform-name construction from the main output block.
-    pub fn transform_output_name(
-        input: impl AsRef<std::path::Path>,
-        extension: &str,
-    ) -> std::path::PathBuf {
-        let text = input.as_ref().to_string_lossy();
-        let end = text
-            .rfind('.')
-            .filter(|dot| *dot > 1 && *dot >= text.len().saturating_sub(5))
-            .map(|dot| dot + 1)
-            .unwrap_or(text.len());
-        std::path::PathBuf::from(format!("{}{}", &text[..end], extension))
-    }
-
     /// Source `checkInputFile`, performed on an owned stack before alignment
     /// creates any work buffers.
     pub fn check_input_file(
@@ -1428,15 +1414,6 @@ impl AliFrame {
         }
         Some(result)
     }
-    pub fn min_max_set_size(basic_size: usize, frames: usize) -> Result<(usize, usize), String> {
-        if basic_size == 0 || frames < basic_size {
-            return Err("invalid frame set size".into());
-        }
-        let sets = frames / basic_size;
-        let remainder = frames % basic_size;
-        let minimum = basic_size + remainder / sets;
-        Ok((minimum, minimum + usize::from(remainder % sets > 0)))
-    }
     pub fn expand_frame_doses_numbers(
         line: &str,
         maximum_frames: usize,
@@ -1465,28 +1442,6 @@ impl AliFrame {
             doses.extend(std::iter::repeat_n(pair[0], count as usize));
         }
         Ok((doses, total))
-    }
-    pub fn frame_group_limits(
-        num_fetch: usize,
-        nz_align: usize,
-        group: usize,
-        z_start: isize,
-        z_direction: isize,
-    ) -> Result<(usize, usize, isize, isize), String> {
-        if nz_align == 0 || group >= nz_align || num_fetch < nz_align {
-            return Err("invalid frame group limits".into());
-        }
-        let reverse_group = nz_align - 1 - group;
-        let first = reverse_group * num_fetch / nz_align;
-        let last = (reverse_group + 1) * num_fetch / nz_align - 1;
-        let group_start = num_fetch - 1 - last;
-        let group_end = num_fetch - 1 - first;
-        Ok((
-            group_start,
-            group_end,
-            z_start + z_direction * group_start as isize,
-            z_start + z_direction * group_end as isize,
-        ))
     }
 
     /// Owned CPU segment of `AliFrame::main`: preprocess every fetched frame,
@@ -1848,124 +1803,6 @@ impl AliFrame {
             results.push(result);
         }
         header.amean = (total / (stack.nx * stack.ny * sets.starts.len()) as f64) as f32;
-        if mrc_head_write(&mut file, &mut header) != 0 {
-            return Err("cannot finalize MRC output header".into());
-        }
-        Ok(results)
-    }
-
-    /// Source `combineFiles` branch for frame sets: every input is required to
-    /// contain one frame, consecutive selected filenames form a set, and every
-    /// aligned set becomes one float output section.
-    pub fn align_mrc_file_groups_to(
-        &self,
-        inputs: &[std::path::PathBuf],
-        output: impl AsRef<std::path::Path>,
-        groups: &SavedFrameSets,
-        bin_sum: usize,
-        bin_align: usize,
-        max_shift: usize,
-        gain: Option<&[f32]>,
-        dark: Option<&[u8]>,
-        dose_per_frame: Option<f32>,
-        critical_dose: f32,
-    ) -> Result<Vec<AliFrameResult>, String> {
-        if groups.starts.len() != groups.counts.len() || groups.starts.is_empty() {
-            return Err("input-file group starts and counts are invalid".into());
-        }
-        let first_path = inputs
-            .first()
-            .ok_or_else(|| "no input MRC files to combine".to_owned())?;
-        let first = OwnedImageStack::open_mrc(first_path)?;
-        Self::check_input_file(first_path, &first, None, true)?;
-        let mut header = MrcHeader::default();
-        if mrc_head_new(
-            &mut header,
-            i32::try_from(first.nx).map_err(|_| "output width exceeds MRC range")?,
-            i32::try_from(first.ny).map_err(|_| "output height exceeds MRC range")?,
-            i32::try_from(groups.starts.len())
-                .map_err(|_| "output section count exceeds MRC range")?,
-            MRC_MODE_FLOAT,
-        ) != 0
-        {
-            return Err("cannot initialize MRC output header".into());
-        }
-        let mut file = ImodFile::open(output.as_ref(), "wb")
-            .ok_or_else(|| format!("cannot open output MRC file {}", output.as_ref().display()))?;
-        if mrc_head_write(&mut file, &mut header) != 0 {
-            return Err("cannot write MRC output header".into());
-        }
-        let mut results = Vec::with_capacity(groups.starts.len());
-        let mut total = 0f64;
-        for (section, (&start, &count)) in groups.starts.iter().zip(&groups.counts).enumerate() {
-            let paths = inputs
-                .get(
-                    start
-                        ..start
-                            .checked_add(count)
-                            .ok_or_else(|| "input-file group range overflows".to_owned())?,
-                )
-                .ok_or_else(|| format!("input-file group {section} is outside selected files"))?;
-            let mut frames = Vec::with_capacity(paths.len());
-            for path in paths {
-                let image = OwnedImageStack::open_mrc(path)?;
-                Self::check_input_file(path, &image, Some((first.nx, first.ny)), true)?;
-                frames.push(
-                    image
-                        .frames
-                        .into_iter()
-                        .next()
-                        .expect("validated single section"),
-                );
-            }
-            let group = OwnedImageStack::from_raw_frames(first.nx, first.ny, first.mode, frames)?;
-            let result = self.align_image_stack(
-                &group,
-                bin_sum,
-                bin_align,
-                max_shift,
-                gain,
-                dark,
-                dose_per_frame,
-                critical_dose,
-            )?;
-            let bytes: Vec<u8> = result
-                .weighted_sum
-                .iter()
-                .flat_map(|value| value.to_ne_bytes())
-                .collect();
-            if mrc_write_slice(&bytes, &mut file, &mut header, section as i32, b'z') != 0 {
-                return Err(format!(
-                    "cannot write aligned combined-file section {section}"
-                ));
-            }
-            let (&first_value, _) = result
-                .weighted_sum
-                .split_first()
-                .ok_or_else(|| "alignment produced an empty summed section".to_owned())?;
-            let (minimum, maximum) = result.weighted_sum[1..]
-                .iter()
-                .fold((first_value, first_value), |(minimum, maximum), &value| {
-                    (minimum.min(value), maximum.max(value))
-                });
-            header.amin = if section == 0 {
-                minimum
-            } else {
-                header.amin.min(minimum)
-            };
-            header.amax = if section == 0 {
-                maximum
-            } else {
-                header.amax.max(maximum)
-            };
-            total += result
-                .weighted_sum
-                .iter()
-                .map(|&value| value as f64)
-                .sum::<f64>();
-            results.push(result);
-        }
-        header.amean = (total / (first.nx * first.ny * groups.starts.len()) as f64) as f32;
         if mrc_head_write(&mut file, &mut header) != 0 {
             return Err("cannot finalize MRC output header".into());
         }

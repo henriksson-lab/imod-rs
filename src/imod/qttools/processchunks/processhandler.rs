@@ -1,14 +1,15 @@
 //! `IMOD/qttools/processchunks/processhandler.h` and
 //! `IMOD/qttools/processchunks/processhandler.cpp`.
 
-#![allow(dead_code)]
-
 use super::machinehandler::{MachineHandler, ProcessError, ProcessExitStatus};
 use super::processchunks::Processchunks;
 use super::{CHUNK_DONE, CHUNK_NOT_DONE, CHUNK_TO_SKIP};
+use crate::imod::libcfshr::b3dutil::{ImodFile, b3d_milli_sleep};
 use std::fs;
+use std::io::Write;
 use std::path::PathBuf;
 use std::process::{Child, Command, Stdio};
+use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant, SystemTime};
 
 /// C++ `ProcessHandler`.
@@ -55,6 +56,10 @@ pub struct ProcessHandler {
     process_error: Option<ProcessError>,
     exit_code: i32,
     exit_status: ProcessExitStatus,
+    /// When `QProcess::finished` would have been emitted: a waiter thread
+    /// blocks in `waitid(..., WEXITED | WNOWAIT)` (the child stays reapable
+    /// for `try_wait`) and records the instant it returned.
+    finish_stamp: Option<Arc<Mutex<Option<Instant>>>>,
 }
 
 impl ProcessHandler {
@@ -76,7 +81,7 @@ impl ProcessHandler {
             stderr: Vec::new(),
             pid: String::new(),
             escaped_remote_dir_path: String::new(),
-            decorated_class_name: "ProcessHandler".to_owned(),
+            decorated_class_name: "14ProcessHandler".to_owned(),
             command: String::new(),
             param_list: Vec::new(),
             processchunks: std::ptr::null_mut(),
@@ -107,6 +112,7 @@ impl ProcessHandler {
             process_error: None,
             exit_code: -1,
             exit_status: ProcessExitStatus::CrashExit,
+            finish_stamp: None,
         };
         process_handler.reset_fields();
         process_handler
@@ -310,14 +316,6 @@ impl ProcessHandler {
         self.read_all_log_file().is_empty()
     }
 
-    /// C++ declaration `ProcessHandler::isJobFileEmpty`.
-    ///
-    /// The vendored header declares this method, but neither its implementation
-    /// nor a call site exists in the IMOD processchunks sources.
-    pub fn is_job_file_empty(&self) -> bool {
-        unimplemented!("ProcessHandler::isJobFileEmpty has no definition in IMOD source")
-    }
-
     /// C++ `ProcessHandler::isLogFileOlderThan`.
     pub fn is_log_file_older_than(&mut self, timeout_sec: i32) -> bool {
         if timeout_sec <= 0 {
@@ -337,13 +335,23 @@ impl ProcessHandler {
             self.size_changed_time = now;
         }
         self.log_last_modified = metadata.modified().unwrap_or(now);
-        self.log_last_modified
-            .elapsed()
-            .map_or(false, |age| age >= Duration::from_secs(timeout_sec as u64))
-            && self
-                .size_changed_time
-                .elapsed()
-                .map_or(false, |age| age >= Duration::from_secs(timeout_sec as u64))
+        // `secsTo(now)` for the two stamps.
+        let modified_secs = now
+            .duration_since(self.log_last_modified)
+            .map_or(0, |age| age.as_secs() as i64);
+        let size_secs = now
+            .duration_since(self.size_changed_time)
+            .map_or(0, |age| age.as_secs() as i64);
+        unsafe {
+            if (*self.processchunks).is_verbose(&self.decorated_class_name, "isLogFileOlderThan", 1)
+            {
+                (*self.processchunks).write_out(&format!(
+                    "{}:isLogFileOlderThan: new mod {modified_secs}  size time {size_secs}\n",
+                    self.decorated_class_name
+                ));
+            }
+        }
+        modified_secs >= timeout_sec as i64 && size_secs >= timeout_sec as i64
     }
 
     /// C++ private `ProcessHandler::readAllStandardError`.
@@ -353,7 +361,21 @@ impl ProcessHandler {
             if let Some(stderr) = &mut process.stderr {
                 let mut err = Vec::new();
                 let _ = stderr.read_to_end(&mut err);
-                self.stderr.extend(err);
+                if !err.is_empty() {
+                    self.stderr.extend(&err);
+                    unsafe {
+                        if (*self.processchunks).is_verbose(
+                            &self.decorated_class_name,
+                            "readAllStandardError",
+                            1,
+                        ) {
+                            // `printf("%s\n", err.data())`
+                            let end = err.iter().position(|&b| b == 0).unwrap_or(err.len());
+                            let _ = ImodFile::Stdout.write_all(&err[..end]);
+                            let _ = ImodFile::Stdout.write_all(b"\n");
+                        }
+                    }
+                }
             }
         }
     }
@@ -394,22 +416,36 @@ impl ProcessHandler {
         if self.com_file_job_index < 0 {
             return false;
         }
-        // Qt updates the two signal fields from its event loop.  Rust's child
-        // handle has no signal dispatcher, so perform the equivalent poll at
-        // the same state-check boundary.
+        // Qt delivers `QProcess::finished` to the `handleFinished` slot from
+        // its event loop.  Rust's child handle has no signal dispatcher, so
+        // poll at the same state-check boundary and deliver to the same slot,
+        // with the elapsed time taken at the instant the waiter thread saw the
+        // exit rather than at this poll.
         if !self.finished_signal_received {
+            let mut delivered = None;
             if let Some(process) = &mut self.process {
                 if let Ok(Some(status)) = process.try_wait() {
-                    self.finished_signal_received = true;
-                    self.starting_process = false;
-                    self.exit_code = status.code().unwrap_or(1);
-                    self.exit_status = if status.success() {
+                    // `QProcess::exitCode()` is 0 after a crash; `exitStatus()`
+                    // is CrashExit only when the process was killed by a signal.
+                    let exit_code = status.code().unwrap_or(0);
+                    let exit_status = if status.code().is_some() {
                         ProcessExitStatus::NormalExit
                     } else {
                         ProcessExitStatus::CrashExit
                     };
-                    self.elapsed_time = self.start_time.elapsed().as_millis() as i32;
+                    delivered = Some((exit_code, exit_status));
                 }
+            }
+            if let Some((exit_code, exit_status)) = delivered {
+                if self.elapsed_time < 0 {
+                    if let Some(stamp) = self.finish_stamp.as_ref() {
+                        if let Some(finish) = stamp.lock().map(|s| *s).unwrap_or(None) {
+                            self.elapsed_time =
+                                finish.duration_since(self.start_time).as_millis() as i32;
+                        }
+                    }
+                }
+                self.handle_finished(exit_code, exit_status);
             }
         }
         if unsafe { (*self.processchunks).is_queue() } {
@@ -509,6 +545,21 @@ impl ProcessHandler {
                 "ERROR: {} has given processing error {num_err} times - giving up\n",
                 self.get_com_file_name()
             ));
+            if (*self.processchunks).is_verbose(
+                &self.decorated_class_name,
+                "printTooManyErrorsMessage",
+                1,
+            ) {
+                (*self.processchunks).write_out(&format!(
+                    "{}:printTooManyErrorsMessage:mExitCode:{},mExitStatus:{}\n",
+                    self.decorated_class_name,
+                    self.exit_code,
+                    match self.exit_status {
+                        ProcessExitStatus::NormalExit => 0,
+                        ProcessExitStatus::CrashExit => 1,
+                    }
+                ));
+            }
         }
     }
 
@@ -743,6 +794,41 @@ impl ProcessHandler {
         command.stderr(Stdio::piped());
         self.reset_signal_values();
         self.process = command.spawn().ok();
+        self.finish_stamp = None;
+        if let Some(process) = &self.process {
+            // The waiter thread stands in for Qt's SIGCHLD notifier: it wakes
+            // when the child exits, without reaping it.
+            let pid = process.id();
+            let stamp = Arc::new(Mutex::new(None));
+            let writer = Arc::clone(&stamp);
+            std::thread::spawn(move || {
+                unsafe {
+                    let mut info: libc::siginfo_t = std::mem::zeroed();
+                    libc::waitid(
+                        libc::P_PID,
+                        pid as libc::id_t,
+                        &mut info,
+                        libc::WEXITED | libc::WNOWAIT,
+                    );
+                }
+                if let Ok(mut slot) = writer.lock() {
+                    *slot = Some(Instant::now());
+                }
+            });
+            self.finish_stamp = Some(stamp);
+        }
+        // `mProcess->closeWriteChannel(); b3dMilliSleep(mMillisecSleep);` and,
+        // for a queue, `mProcess->waitForFinished(60000)`.
+        b3d_milli_sleep(unsafe { (*self.processchunks).get_millisec_sleep() });
+        if queue {
+            if let Some(process) = &mut self.process {
+                let deadline = Instant::now() + Duration::from_millis(60000);
+                while !matches!(process.try_wait(), Ok(Some(_))) && Instant::now() < deadline {
+                    std::thread::sleep(Duration::from_millis(10));
+                }
+            }
+        }
+        //Turn on running process boolean and record start time
         self.starting_process = true;
         self.start_time = Instant::now();
     }
@@ -849,34 +935,141 @@ impl ProcessHandler {
     }
     /// C++ `ProcessHandler::handleFinished`.
     pub fn handle_finished(&mut self, exit_code: i32, exit_status: ProcessExitStatus) {
+        let status_int = match exit_status {
+            ProcessExitStatus::NormalExit => 0,
+            ProcessExitStatus::CrashExit => 1,
+        };
+        unsafe {
+            if (*self.processchunks).is_verbose(&self.decorated_class_name, "handleFinished", 1) {
+                let _ = ImodFile::Stdout.write_all(
+                    format!(
+                        "{}:handleFinished:{exit_code},exitStatus:{status_int}\n",
+                        self.decorated_class_name
+                    )
+                    .as_bytes(),
+                );
+            }
+        }
         if self.com_file_job_index < 0 {
+            let _ = ImodFile::Stdout.write_all(b"Processchunks warning: Job index not set\n");
             return;
         }
         self.finished_signal_received = true;
+        unsafe {
+            if (*self.processchunks).is_verbose(&self.decorated_class_name, "handleFinished", 1) {
+                let _ = ImodFile::Stdout.write_all(
+                    format!(
+                        "{}:handleFinished:{}\n",
+                        self.decorated_class_name,
+                        (*self.processchunks)
+                            .get_com_file_jobs()
+                            .get_com_file_name(self.com_file_job_index as usize)
+                    )
+                    .as_bytes(),
+                );
+                self.read_all_standard_error();
+            }
+        }
         self.starting_process = false;
         self.exit_code = exit_code;
         self.exit_status = exit_status;
+
+        // record the actual elapsed time when the process ends
         if self.elapsed_time < 0 {
             self.elapsed_time = self.start_time.elapsed().as_millis() as i32;
         }
+        //The queue request just submits the chunk to the queue, or submits a request
+        //to kill the chunk to the queue.  Don't use it to figure out the state of the
+        //chunk.
         if !unsafe { (*self.processchunks).is_queue() } {
             let _ = fs::remove_file(self.get_py_file());
             let _ = fs::remove_file(format!("{}.stdout", self.get_py_file()));
             if !self.kill {
                 self.machine = std::ptr::null_mut();
             }
+        } else if self.exit_code != 0 || status_int != 0 {
+            // Get error messages out when queue submission fails
+            let mut byte_array = Vec::new();
+            let mut out_array = Vec::new();
+            if let Some(process) = &mut self.process {
+                use std::io::Read;
+                if let Some(stderr) = &mut process.stderr {
+                    let _ = stderr.read_to_end(&mut byte_array);
+                }
+                if let Some(stdout) = &mut process.stdout {
+                    let _ = stdout.read_to_end(&mut out_array);
+                }
+            }
+            unsafe {
+                if !byte_array.is_empty() {
+                    (*self.processchunks)
+                        .write_out(&format!("{}\n", String::from_utf8_lossy(&byte_array)));
+                }
+                if !out_array.is_empty() {
+                    let com_split: Vec<&str> = self.command.split(' ').collect();
+                    if !com_split.is_empty() {
+                        (*self.processchunks).write_out(&format!("{} ", com_split[0]));
+                    }
+                    (*self.processchunks)
+                        .write_out(&format!("{}\n", String::from_utf8_lossy(&out_array)));
+                }
+            }
         }
     }
     /// C++ `ProcessHandler::handleKillFinished`.
-    pub fn handle_kill_finished(&mut self, _exit_code: i32, _exit_status: ProcessExitStatus) {
+    pub fn handle_kill_finished(&mut self, exit_code: i32, exit_status: ProcessExitStatus) {
         if self.com_file_job_index < 0 {
+            unsafe {
+                (*self.processchunks).write_out("Processchunks warning: Job index not set\n");
+            }
             return;
+        }
+        unsafe {
+            if (*self.processchunks).is_verbose(&self.decorated_class_name, "handleKillFinished", 1)
+            {
+                (*self.processchunks).write_out(&format!(
+                    "{}:handleKillFinished:{},exitCode:{exit_code},exitStatus:{}\n",
+                    self.decorated_class_name,
+                    (*self.processchunks)
+                        .get_com_file_jobs()
+                        .get_com_file_name(self.com_file_job_index as usize),
+                    match exit_status {
+                        ProcessExitStatus::NormalExit => 0,
+                        ProcessExitStatus::CrashExit => 1,
+                    }
+                ));
+            }
         }
         if !self.kill_finished_signal_received {
             unsafe {
                 (*self.processchunks).decrement_kills();
             }
             self.kill_finished_signal_received = true;
+        }
+        if unsafe { (*self.processchunks).is_queue() } {
+            //The queue kill request is syncronous with the job.
+            //exitCode == 0:  Kill is completed
+            //exitCode == 100:  Process finished before it could be killed
+            //exitCode == 101:  Unable to pause because the process had already started.
+            if exit_code != 0 && exit_code != 100 && exit_code != 101 {
+                unsafe {
+                    (*self.processchunks)
+                        .write_out(&format!("kill process exitCode:{exit_code}\n"));
+                }
+                let mut byte_array = Vec::new();
+                if let Some(kill_process) = &mut self.kill_process {
+                    use std::io::Read;
+                    if let Some(stderr) = &mut kill_process.stderr {
+                        let _ = stderr.read_to_end(&mut byte_array);
+                    }
+                }
+                if !byte_array.is_empty() {
+                    unsafe {
+                        (*self.processchunks)
+                            .write_out(&format!("{}\n", String::from_utf8_lossy(&byte_array)));
+                    }
+                }
+            }
         }
     }
     /// C++ `ProcessHandler::handleError`.

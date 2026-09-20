@@ -1,6 +1,8 @@
 //! Translation of `IMOD/mrc/fakevolume.cpp`.
 
-use crate::imod::libcfshr::b3dutil::{ImodFile, set_float_output_for_entered_mode};
+use crate::imod::libcfshr::b3dutil::{
+    ImodFile, imod_prog_name, imod_usage_header, set_float_output_for_entered_mode,
+};
 use crate::imod::libcfshr::islice::{slice_create, slice_mode_if_real, slice_put_val};
 use crate::imod::libcfshr::parse_params::{
     pip_done, pip_get_float, pip_get_in_out_file, pip_get_integer, pip_get_three_floats,
@@ -9,6 +11,7 @@ use crate::imod::libcfshr::parse_params::{
 use crate::imod::libiimod::mrcfiles::{
     MrcHeader, mrc_head_label, mrc_head_new, mrc_head_write, mrc_write_slice,
 };
+use std::io::Write;
 
 const LIMOBJ: usize = 200;
 
@@ -27,6 +30,14 @@ struct Cylinder {
     truncated: bool,
     radius: [f32; 2],
     density: [f32; 2],
+}
+
+/// The `imodUsageHeader` callback in the shape `PipReadOrParseOptions` takes.
+fn imod_usage_header_for_pip(prog_name: &[u8]) {
+    imod_usage_header(Some(&String::from_utf8_lossy(prog_name)));
+    // `PipPrintHelp` writes through Rust's stdout; the banner is on the C
+    // stream, so hand it over before the help body follows it.
+    let _ = ImodFile::Stdout.flush();
 }
 
 /// `point_to_line` in `fakevolume.cpp`.
@@ -77,7 +88,9 @@ pub fn fakevolume(arguments: &[String]) -> i32 {
         .iter()
         .map(|value| value.as_bytes().to_vec())
         .collect::<Vec<_>>();
-    let program = argv.first().map_or(b"fakevolume".as_slice(), Vec::as_slice);
+    // `char *progname = imodProgName(argv[0]);`
+    let progname = imod_prog_name(arguments.first().map_or("", String::as_str));
+    let program = progname.as_bytes();
     let (mut optional, mut positional) = (0, 0);
     pip_read_or_parse_options(
         argv.len() as i32,
@@ -90,7 +103,7 @@ pub fn fakevolume(arguments: &[String]) -> i32 {
         1,
         &mut optional,
         &mut positional,
-        None,
+        Some(imod_usage_header_for_pip),
     );
     let mut output = Vec::new();
     if pip_get_in_out_file(b"OutputFile", 0, &mut output) != 0 {
@@ -431,7 +444,7 @@ pub fn fakevolume(arguments: &[String]) -> i32 {
                 total += value as f64;
             }
         }
-        if mrc_write_slice(&slice.data, &mut file, &mut header, z, b'Z') != 0 {
+        if mrc_write_slice(slice.data.bytes(), &mut file, &mut header, z, b'Z') != 0 {
             return 1;
         }
     }

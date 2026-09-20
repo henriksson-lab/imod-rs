@@ -1,5 +1,4 @@
 //! Translation of `IMOD/libcfshr/readlinevalues.c`.
-#![allow(dead_code)]
 
 use std::io::BufRead;
 

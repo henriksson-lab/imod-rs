@@ -4,7 +4,7 @@
 //! unit maps directly to [`header`].  The lower-level Fortran `iiunit` calls
 //! used by the original are represented by the already-translated native image
 //! interface; no second unit-file registry is introduced here.
-#![allow(dead_code, unused_variables)]
+#![allow(unused_variables)]
 
 use crate::imod::flib::subrs::hvem::parse_input_params::{
     exit_error, memory_error, pip_get_logical, pip_read_or_parse_options,
@@ -183,6 +183,21 @@ pub fn header() {
     // digits within [0.1, 10**d) is written as `F(w-4).(d-k)` followed by four
     // blanks; anything else is written as `Ew.d` with the default scale factor.
     let g_edit = |value: f32, w: usize, d: i32| -> String {
+        // `libgfortran/io/write.c` `write_infnan`: a NaN prints as `NaN`
+        // and an infinity as `Infinity` (`Inf` when the field is narrower
+        // than 8, with a leading `-` for negative), right-justified in `w`.
+        if value.is_nan() {
+            return format!("{:>w$}", "NaN");
+        }
+        if value.is_infinite() {
+            let text = match (value < 0.0, w) {
+                (false, 8..) => "Infinity",
+                (false, _) => "Inf",
+                (true, 9..) => "-Infinity",
+                (true, _) => "-Inf",
+            };
+            return format!("{text:>w$}");
+        }
         let magnitude = value.abs();
         let mut digits = String::new();
         let mut exponent = 1_i32;

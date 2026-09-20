@@ -1,6 +1,4 @@
 //! Translation of `IMOD/clip/file_io.cpp`.
-#![allow(dead_code)]
-
 use crate::imod::clip::clip::{
     ClipOptions, IP_APPEND_ADD, IP_APPEND_FALSE, IP_APPEND_OVERWRITE, IP_APPEND_TRUNCATE, IP_BOXSD,
     IP_DEFAULT, show_warning,
@@ -398,7 +396,7 @@ pub fn clip_write_slice(
     }
     for _ in 0..blank_before {
         if mrc_write_slice(
-            &blank.as_mut().unwrap().data,
+            blank.as_mut().unwrap().data.bytes(),
             &mut output.fp.clone().unwrap(),
             output,
             *z_write,
@@ -437,7 +435,7 @@ pub fn clip_write_slice(
                 / output.nz as f32;
         }
         if mrc_write_slice(
-            &resized.data,
+            resized.data.bytes(),
             &mut output.fp.clone().unwrap(),
             output,
             *z_write,
@@ -466,7 +464,7 @@ pub fn clip_write_slice(
                 (slice.mean + (blank_before + blank_after) as f32 * options.pad) / output.nz as f32;
         }
         if mrc_write_slice(
-            &slice.data,
+            slice.data.bytes(),
             &mut output.fp.clone().unwrap(),
             output,
             *z_write,
@@ -479,7 +477,7 @@ pub fn clip_write_slice(
     *z_write += 1;
     for _ in 0..blank_after {
         if mrc_write_slice(
-            &blank.as_mut().unwrap().data,
+            blank.as_mut().unwrap().data.bytes(),
             &mut output.fp.clone().unwrap(),
             output,
             *z_write,
@@ -562,7 +560,7 @@ pub fn grap_volume_read(input: &mut MrcHeader, options: &mut ClipOptions) -> Opt
             continue;
         }
         if mrc_read_slice(
-            &mut source.data,
+            source.data.bytes_mut(),
             &mut input.fp.clone().unwrap(),
             input,
             file_z,
@@ -699,7 +697,7 @@ pub fn grap_volume_write(
                 return -1;
             };
             if mrc_write_slice(
-                &blank.data,
+                blank.data.bytes(),
                 &mut output.fp.clone().unwrap(),
                 output,
                 out_z,
@@ -718,7 +716,7 @@ pub fn grap_volume_write(
             };
             let write_slice = resized.as_ref().unwrap_or(source);
             if mrc_write_slice(
-                &write_slice.data,
+                write_slice.data.bytes(),
                 &mut output.fp.clone().unwrap(),
                 output,
                 out_z,

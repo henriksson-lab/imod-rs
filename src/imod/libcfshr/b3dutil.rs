@@ -1,5 +1,4 @@
 //! Selected bottom-up functions from `IMOD/libcfshr/b3dutil.c`.
-#![allow(dead_code)]
 
 use core::cell::{Cell, RefCell};
 use core::ffi::c_char;
@@ -132,7 +131,10 @@ thread_local! {
 /// confined to this file.
 #[derive(Clone)]
 pub enum ImodFile {
-    File(std::rc::Rc<std::fs::File>),
+    /// A `FILE *` on a regular file: the descriptor plus the stream buffer
+    /// glibc keeps beside it.  Clones share one `Rc`, hence one file offset
+    /// and one buffer, exactly as two copies of a C `FILE *` do.
+    File(std::rc::Rc<std::cell::RefCell<CFile>>),
     Stdin,
     Stdout,
     Stderr,
@@ -148,7 +150,163 @@ pub enum ImodFile {
     Token(usize),
 }
 
+/// The stream behind an `ImodFile::File`: a `std::fs::File` and the
+/// `BUFSIZ`-style buffer C stdio gives every `FILE *`.  glibc buffers a
+/// stream in one direction at a time, and the source always `fseek`s between
+/// a read and a write (C requires it), so the stream is either idle, reading
+/// through a `BufReader`, or writing through a `BufWriter`, and switches by
+/// flushing or by discarding the read-ahead and repositioning the descriptor
+/// at the logical position.  A read or write of at least the buffer size on
+/// an empty buffer bypasses it, as glibc's does, so a section read or write
+/// is still one system call straight into the caller's array; the difference
+/// is the model files, which the source reads and writes four bytes at a time
+/// (`imodGetInt`, `imodPutInt`) and where an unbuffered handle cost one
+/// system call per field.
+pub struct CFile {
+    /// `None` only for the instant a direction change moves the file out.
+    state: Option<CState>,
+}
+
+enum CState {
+    Idle(std::fs::File),
+    Reading(std::io::BufReader<std::fs::File>),
+    Writing(std::io::BufWriter<std::fs::File>),
+}
+
+impl CFile {
+    /// glibc sizes the buffer from `st_blksize`, 4096 on this filesystem.
+    const BUFSIZ: usize = 4096;
+
+    fn new(f: std::fs::File) -> CFile {
+        CFile {
+            state: Some(CState::Idle(f)),
+        }
+    }
+
+    fn file(&self) -> &std::fs::File {
+        match self.state.as_ref().unwrap() {
+            CState::Idle(f) => f,
+            CState::Reading(r) => r.get_ref(),
+            CState::Writing(w) => w.get_ref(),
+        }
+    }
+
+    /// The stream in its reading state: a pending write buffer is flushed
+    /// first, as `fflush` does before the direction changes.
+    fn reader(&mut self) -> std::io::Result<&mut std::io::BufReader<std::fs::File>> {
+        if !matches!(self.state, Some(CState::Reading(_))) {
+            let f = match self.state.take().unwrap() {
+                CState::Idle(f) => f,
+                CState::Writing(w) => match w.into_inner() {
+                    Ok(f) => f,
+                    Err(e) => {
+                        // The file comes back inside the error; keep it.
+                        let (error, w) = e.into_parts();
+                        self.state = Some(CState::Writing(w));
+                        return Err(error);
+                    }
+                },
+                CState::Reading(_) => unreachable!(),
+            };
+            self.state = Some(CState::Reading(std::io::BufReader::with_capacity(
+                Self::BUFSIZ,
+                f,
+            )));
+        }
+        match self.state.as_mut().unwrap() {
+            CState::Reading(r) => Ok(r),
+            _ => unreachable!(),
+        }
+    }
+
+    /// The stream in its writing state: read-ahead is discarded and the
+    /// descriptor moved back to the logical position first.
+    fn writer(&mut self) -> std::io::Result<&mut std::io::BufWriter<std::fs::File>> {
+        if !matches!(self.state, Some(CState::Writing(_))) {
+            let f = match self.state.take().unwrap() {
+                CState::Idle(f) => f,
+                CState::Reading(mut r) => {
+                    let position = r.stream_position()?;
+                    let mut f = r.into_inner();
+                    f.seek(SeekFrom::Start(position))?;
+                    f
+                }
+                CState::Writing(_) => unreachable!(),
+            };
+            self.state = Some(CState::Writing(std::io::BufWriter::with_capacity(
+                Self::BUFSIZ,
+                f,
+            )));
+        }
+        match self.state.as_mut().unwrap() {
+            CState::Writing(w) => Ok(w),
+            _ => unreachable!(),
+        }
+    }
+
+    /// `fflush`: pending writes reach the descriptor; a read buffer is kept.
+    fn flush(&mut self) -> std::io::Result<()> {
+        match self.state.as_mut().unwrap() {
+            CState::Writing(w) => w.flush(),
+            _ => Ok(()),
+        }
+    }
+
+    /// `fseek`/`ftell`: `BufReader::seek` drops its read-ahead (and moves
+    /// within it for a relative seek); `BufWriter::seek` flushes first.  Both
+    /// report the logical position.
+    fn seek(&mut self, pos: SeekFrom) -> std::io::Result<u64> {
+        match self.state.as_mut().unwrap() {
+            CState::Idle(f) => f.seek(pos),
+            CState::Reading(r) => r.seek(pos),
+            CState::Writing(w) => w.seek(pos),
+        }
+    }
+}
+
+/// glibc keeps every open stream on `_IO_list_all` and `exit()` flushes them
+/// all; the translated programs end with `exit(0)` or `exitError` while
+/// output files are still open, exactly as the C does, and `std::process::exit`
+/// runs no destructor.  This is that list: a weak reference per open stream,
+/// flushed from an `atexit` handler.
+struct OpenStream(std::rc::Weak<std::cell::RefCell<CFile>>);
+// SAFETY: a stream is only ever used from the thread that opened it -- file
+// I/O in this crate is single-threaded, rayon is used only for pixel loops --
+// and the exit handler runs on the thread that called `exit`, so no stream is
+// touched from two threads.  `Send` is needed only to keep the list in a
+// `static`, which is what lets it outlive thread-local destructors at exit.
+unsafe impl Send for OpenStream {}
+static OPEN_STREAMS: std::sync::Mutex<Vec<OpenStream>> = std::sync::Mutex::new(Vec::new());
+
+extern "C" fn flush_open_streams() {
+    if let Ok(list) = OPEN_STREAMS.lock() {
+        for entry in list.iter() {
+            if let Some(stream) = entry.0.upgrade() {
+                if let Ok(mut c) = stream.try_borrow_mut() {
+                    let _ = c.flush();
+                }
+            }
+        }
+    }
+}
+
 impl ImodFile {
+    /// `fdopen`-style wrapper of an already open `std::fs::File`.
+    pub fn from_std(f: std::fs::File) -> ImodFile {
+        static REGISTER: std::sync::Once = std::sync::Once::new();
+        REGISTER.call_once(|| {
+            // The libc exit boundary: `std::process::exit` calls `exit`,
+            // which runs this after the C streams' own flush.
+            unsafe { libc::atexit(flush_open_streams) };
+        });
+        let stream = std::rc::Rc::new(std::cell::RefCell::new(CFile::new(f)));
+        if let Ok(mut list) = OPEN_STREAMS.lock() {
+            list.retain(|entry| entry.0.strong_count() > 0);
+            list.push(OpenStream(std::rc::Rc::downgrade(&stream)));
+        }
+        ImodFile::File(stream)
+    }
+
     /// `fopen(path, mode)`, with the C mode string the source passes around.
     ///
     /// The source carries mode strings in variables and builds them
@@ -169,9 +327,7 @@ impl ImodFile {
             "a+" => o.read(true).append(true).create(true),
             _ => return None,
         };
-        o.open(path)
-            .ok()
-            .map(|f| ImodFile::File(std::rc::Rc::new(f)))
+        o.open(path).ok().map(ImodFile::from_std)
     }
 
     /// `tmpfile()`: a file with no name that goes away when it is dropped.
@@ -191,7 +347,7 @@ impl ImodFile {
             .open(&path)
             .ok()?;
         let _ = std::fs::remove_file(&path);
-        Some(ImodFile::File(std::rc::Rc::new(f)))
+        Some(ImodFile::from_std(f))
     }
 
     /// `fp == stdin`, the test `b3dFseek` (`b3dutil.c:903`) makes before it
@@ -246,7 +402,13 @@ impl ImodFile {
     pub fn fileno(&self) -> i32 {
         use std::os::fd::AsRawFd;
         match self {
-            ImodFile::File(f) => f.as_raw_fd(),
+            // Whoever takes the descriptor sees the file as the stream has
+            // written it so far, so pending output goes out first.
+            ImodFile::File(f) => {
+                let mut c = f.borrow_mut();
+                let _ = c.flush();
+                c.file().as_raw_fd()
+            }
             ImodFile::Stdin => 0,
             ImodFile::Stdout => 1,
             ImodFile::Stderr => 2,
@@ -255,10 +417,25 @@ impl ImodFile {
     }
 }
 
+/// `fclose` flushes the stream whatever other copies of the `FILE *` exist,
+/// and the translation's clones are those copies: dropping any one of them
+/// -- the one the C closed, or a temporary made to pass the handle along --
+/// pushes pending output to the descriptor.  The bytes are the same either
+/// way; only the system-call boundaries move.
+impl Drop for ImodFile {
+    fn drop(&mut self) {
+        if let ImodFile::File(f) = self {
+            if let Ok(mut c) = f.try_borrow_mut() {
+                let _ = c.flush();
+            }
+        }
+    }
+}
+
 impl Read for ImodFile {
     fn read(&mut self, buf: &mut [u8]) -> std::io::Result<usize> {
         match self {
-            ImodFile::File(f) => (&**f).read(buf),
+            ImodFile::File(f) => f.borrow_mut().reader()?.read(buf),
             // The C stream, not `std::io::stdin()` — see the extern block.
             ImodFile::Stdin => {
                 let n = unsafe { libc::fread(buf.as_mut_ptr().cast(), 1, buf.len(), stdin) };
@@ -272,7 +449,7 @@ impl Read for ImodFile {
 impl Write for ImodFile {
     fn write(&mut self, buf: &[u8]) -> std::io::Result<usize> {
         match self {
-            ImodFile::File(f) => (&**f).write(buf),
+            ImodFile::File(f) => f.borrow_mut().writer()?.write(buf),
             // The C streams, not `std::io::stdout()` — see the extern block.
             ImodFile::Stdout => {
                 Ok(unsafe { libc::fwrite(buf.as_ptr().cast(), 1, buf.len(), stdout) })
@@ -285,7 +462,7 @@ impl Write for ImodFile {
     }
     fn flush(&mut self) -> std::io::Result<()> {
         match self {
-            ImodFile::File(f) => (&**f).flush(),
+            ImodFile::File(f) => f.borrow_mut().flush(),
             ImodFile::Stdout => {
                 unsafe { libc::fflush(stdout) };
                 Ok(())
@@ -302,7 +479,7 @@ impl Write for ImodFile {
 impl Seek for ImodFile {
     fn seek(&mut self, pos: SeekFrom) -> std::io::Result<u64> {
         match self {
-            ImodFile::File(f) => (&**f).seek(pos),
+            ImodFile::File(f) => f.borrow_mut().seek(pos),
             // The standard streams **are** seekable when the shell has
             // redirected them to a regular file, and C's `fseek`/`rewind` do
             // seek in that case.  This mattered: `imodWriteAscii`
@@ -1179,53 +1356,6 @@ pub fn imod_backup_file(filename: &str) -> i32 {
         Err(_) => -1,
     }
 }
-/// Matches C `b3dOpenFile` (`b3dutil.c:302`).
-///
-/// The C never returns NULL — it calls `exitError` — so this returns an
-/// [`ImodFile`] rather than an `Option`.  Both `printf` lines and the
-/// `exitError` were missing from the previous translation and are restored
-/// here; nothing in the tree calls this routine, so there is no differential to
-/// run and the restoration is source-verified only.
-pub fn b3d_open_file(name: &str, mode: &str) -> ImodFile {
-    let stock_modes = ["r", "r+", "w+"];
-    let descrip = ["OLD file", "NEW file", "file for appending"];
-    let mut mode = mode;
-    let mut desc_ind = 0usize;
-    if mode == "ro" || mode == "RO" {
-        mode = stock_modes[0];
-    } else if mode == "old" || mode == "OLD" {
-        mode = stock_modes[1];
-    } else if mode == "new" || mode == "NEW" {
-        mode = stock_modes[2];
-    }
-    if mode.starts_with('w') {
-        if imod_backup_file(name) != 0 {
-            let _ = ImodFile::Stdout.write_all(
-                format!("WARNING: b3dOpenFile - Renaming existing file {name}\n").as_bytes(),
-            );
-        }
-        desc_ind = 1;
-    } else if mode.starts_with('a') {
-        desc_ind = 2;
-    }
-
-    let fp = ImodFile::open(name, mode);
-    let Some(fp) = fp else {
-        let mut message = format!("Opening {}, {}: ", descrip[desc_ind], name).into_bytes();
-        let error = std::io::Error::last_os_error().to_string();
-        message.extend_from_slice(
-            error
-                .split(" (os error ")
-                .next()
-                .unwrap_or(&error)
-                .as_bytes(),
-        );
-        crate::imod::libcfshr::parse_params::exit_error(&message);
-    };
-    let _ =
-        ImodFile::Stdout.write_all(format!("\nOpened {}: {name}\n", descrip[desc_ind]).as_bytes());
-    fp
-}
 /// Matches C `pidToStderr` (`b3dutil.c:359`).
 pub fn pid_to_stderr() {
     let mut stream = ImodFile::Stderr;
@@ -1374,57 +1504,6 @@ pub unsafe fn c2f_string(
     0
 }
 
-/// `imodgetenv` (`b3dutil.c:333`), the fixed-width Fortran environment bridge.
-///
-/// The source receives blank-padded character arrays and writes a blank-padded
-/// result.  Its status values are retained: `1` for an undefined variable,
-/// `0` for success, and `-1` when the value does not fit in the output field.
-///
-/// # Safety
-/// `var` and `value` must address `var_size` and `value_size` bytes,
-/// respectively, just as the Fortran-callable C entry point requires.
-pub unsafe fn imod_getenv(
-    var: *const c_char,
-    value: *mut c_char,
-    var_size: i32,
-    value_size: i32,
-) -> i32 {
-    if value.is_null() || value_size < 0 {
-        return -1;
-    }
-    let variable = unsafe { fortran_string(var, var_size) };
-    let Ok(found) = std::env::var(variable) else {
-        return 1;
-    };
-    let c_value = std::ffi::CString::new(found).expect("environment values cannot contain NUL");
-    unsafe { c2f_string(c_value.as_ptr(), value, value_size) }
-}
-
-/// `makeLinePointers` (`b3dutil.c:1269`).
-///
-/// The C helper allocates only a table of row pointers; it never owns the
-/// image.  A vector of disjoint mutable row borrows is the direct Rust
-/// equivalent and prevents the pointer table from outliving `array`.
-pub fn make_line_pointers(
-    array: &mut [u8],
-    xsize: i32,
-    ysize: i32,
-    dsize: i32,
-) -> Option<Vec<&mut [u8]>> {
-    let row_bytes = usize::try_from(xsize)
-        .ok()?
-        .checked_mul(usize::try_from(dsize).ok()?)?;
-    let rows = usize::try_from(ysize).ok()?;
-    if row_bytes == 0 && rows != 0 || array.len() < row_bytes.checked_mul(rows)? {
-        return None;
-    }
-    let mut chunks = array.chunks_exact_mut(row_bytes);
-    let mut pointers = Vec::with_capacity(rows);
-    for _ in 0..rows {
-        pointers.push(chunks.next()?);
-    }
-    Some(pointers)
-}
 /// Matches C `b3dFseek` (`b3dutil.c:899`).
 ///
 /// The Unix arm of the source is `fseek(fp, offset, flag)` after the explicit
@@ -1681,20 +1760,6 @@ pub fn cputime() -> f64 {
 pub fn b3d_milli_sleep(milliseconds: i32) -> i32 {
     std::thread::sleep(std::time::Duration::from_millis(milliseconds.max(0) as u64));
     0
-}
-/// Matches C `totalCudaCores` (`b3dutil.c:1435`).
-pub fn total_cuda_cores(major: i32, minor: i32, multiprocessors: i32) -> i32 {
-    let capability = (major << 4) + minor;
-    let limits = [0x10, 0x20, 0x21, 0x30, 0x50, -1];
-    let cores = [8, 32, 48, 192, 128, -1];
-    let mut index = 0;
-    while limits[index] > 0 {
-        if capability < limits[index + 1] || limits[index + 1] < 0 {
-            break;
-        }
-        index += 1;
-    }
-    cores[index] * multiprocessors
 }
 /// Matches C `b3dPhysicalMemory` (`b3dutil.c:1454`).
 pub fn b3d_physical_memory() -> f64 {
@@ -2221,40 +2286,6 @@ pub fn b3daddressablememory() -> f64 {
 pub fn standardmemorylimitmb(half_point: &i32) -> f64 {
     standard_memory_limit_mb(*half_point)
 }
-/// Matches C `addToArgVector` (`b3dutil.c:1542`), a file-static helper.
-///
-/// Its only call sites are inside `expandArgList`'s `#ifdef _WIN32` branch, so
-/// nothing reaches it on this platform; it is translated because the
-/// definition itself is not conditionally compiled.  The C's growable
-/// `char ***argVec` is a `Vec<Vec<u8>>`, and `vecSize` is kept because the
-/// source's quantum growth decides when it reallocates.
-fn add_to_arg_vector(
-    arg: &[u8],
-    arg_vec: &mut Vec<Vec<u8>>,
-    vec_size: &mut i32,
-    num_in_vec: &mut i32,
-    pattern: Option<&[u8]>,
-    num_prefix: i32,
-) -> i32 {
-    let quantum = 8;
-    if *num_in_vec >= *vec_size {
-        *vec_size += quantum;
-    }
-    arg_vec.resize(*vec_size as usize, Vec::new());
-    let slot = &mut arg_vec[*num_in_vec as usize];
-    if pattern.is_some() && num_prefix != 0 {
-        /* `strncpy(slot, pattern, numPrefix); strcpy(slot + numPrefix, arg);` */
-        let pattern = pattern.unwrap();
-        slot.clear();
-        slot.extend_from_slice(&pattern[..(num_prefix as usize).min(pattern.len())]);
-        slot.resize(num_prefix as usize, 0);
-        slot.extend_from_slice(arg);
-    } else {
-        *slot = arg.to_vec();
-    }
-    *num_in_vec += 1;
-    0
-}
 /// Matches C `expandArgList` (`b3dutil.c:1579`).
 ///
 /// The whole body is inside `#ifdef _WIN32` / `#else`.  This is the `#else`
@@ -2752,35 +2783,7 @@ mod tests {
         let mut end = 0;
         balanced_group_limits(10, 3, 1, &mut start, &mut end);
         assert_eq!((start, end), (4, 6));
-        assert_eq!(total_cuda_cores(3, 5, 2), 384);
         assert_eq!(angle_within_limits(-10., 0., 360.), 350.);
-    }
-
-    #[test]
-    fn fortran_environment_and_line_pointer_helpers_preserve_source_layout() {
-        let mut value = vec![0 as c_char; 4096];
-        let variable = b"PATH   ";
-        assert_eq!(
-            unsafe {
-                imod_getenv(
-                    variable.as_ptr().cast(),
-                    value.as_mut_ptr(),
-                    variable.len() as i32,
-                    value.len() as i32,
-                )
-            },
-            0
-        );
-        assert_ne!(value[0], 0);
-        assert_eq!(value.last().copied(), Some(b' ' as c_char));
-
-        let mut pixels = [0u8; 12];
-        let mut rows = make_line_pointers(&mut pixels, 2, 3, 2).unwrap();
-        rows[0].copy_from_slice(&[1, 2, 3, 4]);
-        rows[2].copy_from_slice(&[9, 10, 11, 12]);
-        drop(rows);
-        assert_eq!(pixels, [1, 2, 3, 4, 0, 0, 0, 0, 9, 10, 11, 12]);
-        assert!(make_line_pointers(&mut pixels, 2, 4, 2).is_none());
     }
 
     #[test]

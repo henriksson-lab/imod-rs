@@ -6,8 +6,6 @@
 //! `mrc2tif -o` and preserves its deliberately uncompressed classic-TIFF
 //! layout.  Its default reader is source-compatible; the optional Rust reader
 //! is selected only through `IMOD_RS_TIFF_BACKEND=rust`.
-#![allow(dead_code)]
-
 use std::cell::Cell;
 
 use crate::imod::libcfshr::b3dutil::{

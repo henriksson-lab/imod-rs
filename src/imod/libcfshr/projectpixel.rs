@@ -1,5 +1,4 @@
 //! Translation of `IMOD/libcfshr/projectpixel.c`.
-#![allow(dead_code)]
 
 const RADIANS_PER_DEGREE: f32 = core::f32::consts::PI / 180.;
 

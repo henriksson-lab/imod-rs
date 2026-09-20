@@ -8,7 +8,7 @@ use std::sync::atomic::{AtomicBool, Ordering};
 
 use crate::imod::libcfshr::filtxcorr::scaled_gaussian_kernel;
 use crate::imod::libcfshr::islice::{
-    slice_byte_smooth, slice_create, slice_mat_filter, slice_scale_and_free,
+    Islice, MrcData, slice_byte_smooth, slice_init, slice_mat_filter, slice_scale_and_free,
 };
 use crate::imod::libiimod::mrcfiles::MRC_MODE_BYTE;
 use crate::imod::libimod::icont::{
@@ -153,13 +153,41 @@ fn filter_auto_contour_slice(
     let Ok(ysize_i32) = i32::try_from(ysize) else {
         return image.to_vec();
     };
-    let Some(mut slice) = slice_create(xsize_i32, ysize_i32, MRC_MODE_BYTE) else {
-        return image.to_vec();
+    // `autocont.c:340-341`: `sliceInit(&slice, nx, ny, SLICE_MODE_BYTE,
+    // idata); slice.min = slice.max = 0.;` -- the slice filters `idata` in
+    // place.  This entry takes the image by reference, so the one copy is
+    // the slice's own `b` member, handed back as the filtered image.
+    let mut slice = Islice {
+        data: MrcData::default(),
+        xsize: 0,
+        ysize: 0,
+        mode: 0,
+        csize: 0,
+        dsize: 0,
+        min: 0.,
+        max: 0.,
+        mean: 0.,
+        index: 0,
+        cval: [0.; 4],
     };
-    slice.data = image[..image.len().min(xsize.saturating_mul(ysize))].to_vec();
+    if slice_init(
+        &mut slice,
+        xsize_i32,
+        ysize_i32,
+        MRC_MODE_BYTE,
+        MrcData::B(image[..image.len().min(xsize.saturating_mul(ysize))].to_vec()),
+    ) != 0
+    {
+        return image.to_vec();
+    }
+    slice.min = 0.;
+    slice.max = 0.;
     if sigma <= 0. {
         let _ = slice_byte_smooth(&mut slice);
-        return slice.data;
+        let MrcData::B(filtered) = slice.data else {
+            unreachable!("byte slice");
+        };
+        return filtered;
     }
     let mut kernel = [0.; 49];
     let mut dimension = 7;
@@ -167,7 +195,10 @@ fn filter_auto_contour_slice(
     if let Some(mut output) = slice_mat_filter(&slice, &kernel, dimension) {
         slice_scale_and_free(&mut output, &mut slice);
     }
-    slice.data
+    let MrcData::B(filtered) = slice.data else {
+        unreachable!("byte slice");
+    };
+    filtered
 }
 
 fn auto_contours_from_slice_internal(

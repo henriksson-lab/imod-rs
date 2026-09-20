@@ -5,8 +5,6 @@
 //! the Python program's single top-level routine to [`trimvol`], rather than
 //! inventing a Rust command framework.  Its MRC/newstack/clip path is native;
 //! the two explicitly spawned analysis programs remain process boundaries.
-#![allow(dead_code)]
-
 use crate::imod::flib::subrs::hvem::b3ddate::b3d_date;
 use crate::imod::libiimod::iimage::{
     IIFILE_DEFAULT, IIFILE_MRC, ii_close, ii_fill_mrc_header, ii_open, ii_open_new,

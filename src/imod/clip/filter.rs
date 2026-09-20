@@ -1,6 +1,4 @@
 //! Translation of `IMOD/clip/filter.cpp`.
-#![allow(dead_code)]
-
 use crate::imod::clip::clip::{ClipOptions, IP_DEFAULT, show_error, show_status};
 use crate::imod::clip::fft::{clip_nicesize, slice_fft};
 use crate::imod::clip::file_io::{clip_write_slice, set_options};

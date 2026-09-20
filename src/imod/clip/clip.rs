@@ -13,8 +13,6 @@
 //! that may be a comma or an `x`.  [`sscanf`], [`strtod`] and [`strtol`] below
 //! are translations of those C library routines, for the same reason
 //! `c_format` is a translation of `printf`.
-#![allow(dead_code)]
-
 use crate::imod::libcfshr::b3dutil::{CArg, ImodFile, c_format, imod_prog_name};
 use crate::imod::libcfshr::parse_params::exit_error;
 use crate::imod::libcfshr::parse_params::setExitPrefix;

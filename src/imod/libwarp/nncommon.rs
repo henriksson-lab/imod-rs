@@ -3,7 +3,6 @@
 //! The source's three globals (`nn_verbose`, `nn_test_vertice`, `nn_rule`) are
 //! declared by `nn.h` and live in [`crate::imod::libwarp::nn`], where they are
 //! thread-local cells; this module reads them with `.get()`.
-#![allow(dead_code)]
 
 use std::io::Write;
 

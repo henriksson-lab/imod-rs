@@ -3,7 +3,7 @@
 //!
 //! Author of the original: David Mastronarde.  One Rust function per C function, with the
 //! original identifier named in each doc comment.
-#![allow(non_snake_case, dead_code, unused_variables, unused_assignments)]
+#![allow(non_snake_case, unused_variables, unused_assignments)]
 
 use crate::imod::libcfshr::b3dutil::{CArg, ImodFile, c_format};
 use std::io::Write;
@@ -1501,21 +1501,6 @@ fn setup_local_sequence(
 pub fn montxcorrgetmaxes(maxPeak: &mut i32, maxLines: &mut i32) {
     *maxPeak = MONTXC_MAX_PEAKS;
     *maxLines = MONTXC_MAX_DEBUG_LINE;
-}
-
-/// C `montXCSetDistWeightHalfFall`.
-///
-/// Sets the distance in pixels at which weighting by distance from expected shift falls by
-/// half to `inVal` (callable from Fortran or C).
-pub fn mont_xc_set_dist_weight_half_fall(inVal: &f32) {
-    S_DIST_WEIGHT_HALF_FALL.store(inVal.to_bits(), Ordering::Relaxed);
-}
-
-/// C `montXCGetLastTrimmedMaxSD`.
-///
-/// Returns the 95th percentile value of the SD map used for weighted cross-correlation.
-pub fn mont_xc_get_last_trimmed_max_sd() -> f64 {
-    f32::from_bits(S_LAST_TRIMMED_MAX_SD.load(Ordering::Relaxed)) as f64
 }
 
 /// C `montXCGetLastRunnersUp`.

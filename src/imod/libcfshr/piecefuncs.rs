@@ -1,5 +1,4 @@
 //! Translation of `IMOD/libcfshr/piecefuncs.c`.
-#![allow(dead_code)]
 
 use super::readlinevalues::{RLFV_SEPARATE_LINES, ReadValueArray, read_lines_for_values};
 use std::fs::File;

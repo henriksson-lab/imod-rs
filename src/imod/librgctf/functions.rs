@@ -78,27 +78,9 @@ pub fn internal_set_print_func(function: Option<PrintFunction>) {
         .expect("print callback lock poisoned") = function;
 }
 
-/// Safe Rust replacement for C++ variadic `wxPrintf`.
-pub fn print_message(message: &str) {
-    if let Some(function) = *PRINT_FUNCTION
-        .get_or_init(|| RwLock::new(None))
-        .read()
-        .expect("print callback lock poisoned")
-    {
-        function(message);
-    } else {
-        print!("{message}");
-    }
-}
-
 /// C++ `ctfNumOMPthreads` in this crate's non-OpenMP configuration.
 pub fn ctf_num_omp_threads(_optimal_threads: i32) -> i32 {
     1
-}
-
-/// C++ `ctfOMPthreadNum` in this crate's non-OpenMP configuration.
-pub fn ctf_omp_thread_num() -> i32 {
-    0
 }
 
 /// C++ `ctfWallTime`.

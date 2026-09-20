@@ -3,7 +3,7 @@
 //! TIFF writing defaults to IMOD's libtiff boundary. JPEG/PNG output uses the
 //! Rust generic-raster encoder because Qt is no longer linked; source-visible
 //! image preparation and command behavior stay here.
-#![allow(dead_code, unused_variables)]
+#![allow(unused_variables)]
 
 use std::cell::Cell;
 
@@ -18,7 +18,7 @@ use crate::imod::libcfshr::b3dutil::{CArg, ImodFile, c_format_bytes, imod_prog_n
 // hazard 2: `str::parse` is not `sscanf` -- it rejects the partial parse the
 // `%f%*c%f` pairs depend on), so it is used rather than written again here.
 use crate::imod::clip::clip::{ScanArg, sscanf};
-use crate::imod::libcfshr::islice::{slice_create, slice_get_val, slice_init, slice_put_val};
+use crate::imod::libcfshr::islice::{Islice, MrcData, slice_get_val, slice_init, slice_put_val};
 use crate::imod::libcfshr::parse_params::{exit_error, setExitPrefix};
 use crate::imod::libcfshr::samplemeansd::{sample_mean_sd, type_for_sample_mean};
 use crate::imod::libiimod::iimage::{
@@ -35,7 +35,7 @@ use crate::imod::libiimod::mrcfiles::{
     MrcHeader, mrc_contrast_scaling, mrc_get_scale, mrc_head_read, mrc_init_li,
 };
 use crate::imod::libiimod::mrcsec::mrc_read_z;
-use crate::imod::libiimod::mrcslice::slice_mmm;
+use crate::imod::libiimod::mrcslice::{slice_mmm, slice_new_mode};
 use crate::imod::mrc::tiff::tiff_write_image;
 use std::io::Write;
 
@@ -596,18 +596,29 @@ pub fn mrc2tif() {
             "Writing %s images. ",
             &[CArg::Str(type_name)],
         ));
-        // `mrc2tif.cpp:494-497`: "Allocate memory first time or every time".
-        // The read buffer is `malloc`ed **once** for the whole run and only
-        // reallocated on the `convert && slmode > 0` arm, where `sliceNewMode`
-        // replaces it and `:616` frees it.  `sliceInit` at `:511` then makes
-        // `slice.data.b == buf`, so the slice *aliases* the read buffer and
-        // `sliceMMM`, the conversion loop and the write all work on the same
-        // memory.  Both live here so the chunk loop below neither allocates
-        // nor copies per section; the slice is given its real size, mode and
-        // buffer by the `sliceInit` in that loop.
-        let mut buffer: Vec<u8> = Vec::new();
-        let Some(mut slice) = slice_create(1, 1, hdata.mode) else {
-            exit_error(b"Failed to allocate memory for slice");
+        // `mrc2tif.cpp:363` and `:415-416`: `allocSize` is one whole section,
+        // or for QImage output the aligned-stride image when that is larger;
+        // the chunk loop resets it to one chunk (`:487`).
+        let mut alloc_size = hdata.nx as usize * hdata.ny as usize * psize;
+        if make_qimage && alloc_size < line_bytes * hdata.ny as usize {
+            alloc_size = line_bytes * hdata.ny as usize;
+        }
+        // `Islice slice;` (`mrc2tif.cpp:81`).  `sliceInit` at `:511` makes
+        // `slice.data.b == buf`: the read buffer *is* the slice's storage, so
+        // the slice owns it here -- `malloc`ed where `:495` mallocs it, read
+        // into directly, freed where `:616` frees it, and never copied.
+        let mut slice = Islice {
+            data: MrcData::default(),
+            xsize: 0,
+            ysize: 0,
+            mode: 0,
+            csize: 0,
+            dsize: 0,
+            min: 0.,
+            max: 0.,
+            mean: 0.,
+            index: 0,
+            cval: [0.; 4],
         };
         for z in zmin..=zmax {
             let mut slice_min = 1.0e30_f32;
@@ -706,40 +717,35 @@ pub fn mrc2tif() {
                     // `mrc2tif.cpp:486`.
                     exit_error(b"Entered tile size was too large");
                 }
+                // `mrc2tif.cpp:487`.
+                alloc_size = hdata.nx as usize * lines_per_chunk as usize * psize;
             }
             let mut lines_done = 0;
             for chunk in 0..num_chunks {
+                // `mrc2tif.cpp:494-497`: "Allocate memory first time or every
+                // time".  `buf` is `malloc`ed once for the whole run and only
+                // again on the `convert && slmode > 0` arm, where
+                // `sliceNewMode` replaced it and `:616` freed it.  The
+                // allocation is the *full* `allocSize` even for a short final
+                // chunk; the zero fill is dead, since `mrcReadZ` writes every
+                // byte it is asked for, and the C `malloc`s without clearing.
+                if (chunk == 0 && z == zmin) || (convert && real_mode > 0) {
+                    let Some(buf) = MrcData::try_zeroed(hdata.mode, alloc_size) else {
+                        exit_error(b"Failed to allocate memory for slice");
+                    };
+                    slice.data = buf;
+                }
                 let nlines = if do_chunks {
                     lines_per_chunk.min(hdata.ny - lines_done)
                 } else {
                     hdata.ny
                 };
-                let Some(buffer_len) = (hdata.nx as usize)
-                    .checked_mul(nlines as usize)
-                    .and_then(|pixels| pixels.checked_mul(psize))
-                else {
-                    exit_error(b"Failed to allocate memory for slice");
-                };
-                // `mrc2tif.cpp:495-497`.  The C's `allocSize` is the *full*
-                // chunk size even for a short final chunk (`:487`), so the
-                // capacity taken on the first chunk covers every later one and
-                // nothing is reallocated after it; a short chunk only trims
-                // the length, and the next chunk grows it back inside that
-                // capacity.  The zero fill is dead either way -- `mrcReadZ`
-                // writes every byte it is given -- and the C `malloc`s without
-                // clearing.
-                if buffer.capacity() < buffer_len
-                    && buffer.try_reserve_exact(buffer_len - buffer.len()).is_err()
-                {
-                    exit_error(b"Failed to allocate memory for slice");
-                }
-                buffer.resize(buffer_len, 0);
                 if do_chunks {
                     li.ymin = hdata.ny - (lines_done + nlines);
                     li.ymax = li.ymin + nlines - 1;
                     lines_done += nlines;
                 }
-                if mrc_read_z(&mut hdata, &mut li, &mut buffer, z) != 0 {
+                if mrc_read_z(&mut hdata, &mut li, slice.data.bytes_mut(), z) != 0 {
                     // `mrc2tif.cpp:508-509`: `perror("mrc2tif ")` then
                     // `exitError`.  `exitError` exits, so the source frees
                     // nothing here.
@@ -760,19 +766,12 @@ pub fn mrc2tif() {
                     ));
                 }
                 // `mrc2tif.cpp:511`: `sliceInit(&slice, xsize, lines,
-                // hdata.mode, buf)` -- the slice takes over the read buffer
-                // rather than copying it.  The translated `sliceInit` takes
-                // the buffer by value and can only fail on a mode the switch
-                // above already rejected or on the length this call just
-                // computed itself; the source's `sliceInit` returns void.
-                if slice_init(
-                    slice.as_mut(),
-                    hdata.nx,
-                    nlines,
-                    hdata.mode,
-                    std::mem::take(&mut buffer),
-                ) != 0
-                {
+                // hdata.mode, buf)` -- the same buffer, now with this chunk's
+                // line count.  The translated `sliceInit` takes the storage
+                // by value and can only fail on a mode the switch above
+                // already rejected; the source's `sliceInit` returns void.
+                let buf = std::mem::take(&mut slice.data);
+                if slice_init(&mut slice, hdata.nx, nlines, hdata.mode, buf) != 0 {
                     exit_error(b"Failed to allocate memory for slice");
                 }
                 if auto_contrast {
@@ -782,7 +781,7 @@ pub fn mrc2tif() {
                     let mut image_sd = 0.0;
                     // `makeLinePointers` becomes the line byte views the
                     // translated `sampleMeanSD` takes.
-                    let bytes = slice.data.as_slice();
+                    let bytes = slice.data.bytes();
                     let lines: Vec<&[u8]> = (0..nlines as usize)
                         .map(|index| &bytes[(hdata.nx as usize * index * psize)..])
                         .collect();
@@ -820,31 +819,15 @@ pub fn mrc2tif() {
                             slice_put_val(slice.as_mut(), x, y, value);
                         }
                     }
-                    if real_mode > 0 {
-                        let mut converted = Vec::new();
-                        if converted.try_reserve_exact(buffer_len).is_err() {
-                            exit_error(&c_format_bytes(
-                                "Converting slice %d to bytes",
-                                &[CArg::Int(z as i64)],
-                            ));
-                        }
-                        converted.resize(buffer_len / psize, 0);
-                        for y in 0..nlines {
-                            for x in 0..hdata.nx {
-                                let mut value = [0.; 4];
-                                slice_get_val(slice.as_mut(), x, y, &mut value);
-                                converted[x as usize + y as usize * hdata.nx as usize] =
-                                    value[0] as i32 as u8;
-                            }
-                        }
-                        if slice_init(slice.as_mut(), hdata.nx, nlines, MRC_MODE_BYTE, converted)
-                            != 0
-                        {
-                            exit_error(&c_format_bytes(
-                                "Converting slice %d to bytes",
-                                &[CArg::Int(z as i64)],
-                            ));
-                        }
+                    // `mrc2tif.cpp:542-545`: `sliceNewMode` returns the new
+                    // mode (`SLICE_MODE_BYTE` is 0) or -1, so the test is on
+                    // non-zero.  It allocates the byte buffer and frees the
+                    // read buffer; `buf = slice.data.b` then follows it.
+                    if real_mode > 0 && slice_new_mode(&mut slice, MRC_MODE_BYTE) != 0 {
+                        exit_error(&c_format_bytes(
+                            "Converting slice %d to bytes",
+                            &[CArg::Int(z as i64)],
+                        ));
                     }
                 }
                 if !make_qimage {
@@ -879,7 +862,7 @@ pub fn mrc2tif() {
                     }
                 }
                 let mut rust_encoder_error = None;
-                let write_buffer = slice.data.as_mut_slice();
+                let write_buffer = slice.data.bytes_mut();
                 let write_error = if make_qimage {
                     let out_pixel_size = if psize == 3 { 3 } else { 1 };
                     let mut qbuf = vec![0u8; line_bytes * hdata.ny as usize];
@@ -998,12 +981,9 @@ pub fn mrc2tif() {
                 if convert && real_mode > 0 {
                     // `mrc2tif.cpp:615-616`: the buffer `sliceNewMode` made is
                     // freed here, which is why the allocation at `:495`
-                    // reruns on every chunk in this case.
-                    slice.data = Vec::new();
-                } else {
-                    // Otherwise the C keeps using the same `buf` for the next
-                    // chunk and section; take it back out of the slice.
-                    buffer = std::mem::take(&mut slice.data);
+                    // reruns on every chunk in this case.  Otherwise the same
+                    // `buf` stays in the slice for the next chunk and section.
+                    slice.data = MrcData::default();
                 }
             }
             (*iifile).amin = slice_min;

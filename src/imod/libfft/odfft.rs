@@ -56,7 +56,7 @@ pub fn odfft(array: &mut [f32], nx: i32, ny: i32, idir: i32) {
                     array[(i + 1) as usize] = -array[(i + 1) as usize] * scale;
                 }
             }
-            cmplft(array, nx, &mut dim);
+            cmplft(array, 1, nx, &mut dim);
             if idir == -2 {
                 for i in (0..total - 1).step_by(2) {
                     array[(i + 1) as usize] = -array[(i + 1) as usize];
@@ -75,7 +75,7 @@ pub fn odfft(array: &mut [f32], nx: i32, ny: i32, idir: i32) {
             dim[3] = total;
             dim[4] = total;
             dim[5] = stride;
-            realft(array, nx / 2, &mut dim);
+            realft(array, 1, nx / 2, &mut dim);
             for i in 0..total {
                 array[i as usize] *= scale;
             }
@@ -97,7 +97,7 @@ pub fn odfft(array: &mut [f32], nx: i32, ny: i32, idir: i32) {
                 array[index as usize] = array[(nx - 1 + index) as usize];
                 index += stride;
             }
-            hermft(array, nx / 2, &mut dim);
+            hermft(array, 1, nx / 2, &mut dim);
         }
         // `odfft.c:185-187`: the `default:` arm of the source's switch.
         _ => {
