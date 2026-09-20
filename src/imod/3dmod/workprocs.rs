@@ -9,10 +9,7 @@ use std::time::Instant;
 
 use crate::imod::three_dmod::control::{IMOD_DIALOG, IMODV_DIALOG};
 use crate::imod::three_dmod::imodview::{IMOD_DRAW_IMAGE, IMOD_DRAW_XYZ, ImodView, ivw_set_time};
-use crate::imod::three_dmod::moviecon::{
-    MovieConState, imc_get_increment, imc_get_interval, imc_get_loop_mode, imc_get_start_end,
-    imc_read_timer, imc_start_timer,
-};
+use crate::imod::three_dmod::moviecon::MovieConState;
 use crate::imod::three_dmod::preferences::ImodPreferences;
 
 /// `MININTERVAL` in `workprocs.cpp` when `NO_ZERO_INTERVAL` is not defined.
@@ -222,14 +219,14 @@ impl ImodWorkproc {
     ) {
         if *movie != 0 {
             *show = 1;
-            *mouse += *movie as f32 * imc_get_increment(&mut self.movie_con, view, axis) as f32;
-            let (mut start, mut end) = imc_get_start_end(&mut self.movie_con, view, axis);
+            *mouse += *movie as f32 * (&mut self.movie_con).imc_get_increment(view, axis) as f32;
+            let (mut start, mut end) = (&mut self.movie_con).imc_get_start_end(view, axis);
             if axis == 3 {
                 start += 1;
                 end += 1;
             }
             if *mouse < start as f32 {
-                if imc_get_loop_mode(&mut self.movie_con, view) != 0 {
+                if (&mut self.movie_con).imc_get_loop_mode(view) != 0 {
                     *mouse = end as f32;
                 } else {
                     *mouse = start as f32;
@@ -237,7 +234,7 @@ impl ImodWorkproc {
                 }
             }
             if *mouse > end as f32 {
-                if imc_get_loop_mode(&mut self.movie_con, view) != 0 {
+                if (&mut self.movie_con).imc_get_loop_mode(view) != 0 {
                     *mouse = start as f32;
                 } else {
                     *mouse = end as f32;
@@ -276,7 +273,7 @@ impl ImodWorkproc {
     pub fn movie_proc(&mut self, view: &mut ImodView, native: &mut dyn WorkprocsNativeBoundary) {
         self.m_display_busy = 1;
         self.m_timer_fired = 0;
-        let interval = (imc_get_interval(&self.movie_con) - 0.5) as i32;
+        let interval = ((&self.movie_con).imc_get_interval() - 0.5) as i32;
         view.movie_running = -1;
         self.m_movie_timer.start(interval);
         let mut show = 0;
@@ -305,9 +302,9 @@ impl ImodWorkproc {
             draw_flag |= IMOD_DRAW_IMAGE;
         }
         if self.first_frame != 0 {
-            imc_start_timer(&mut self.movie_con);
+            (&mut self.movie_con).imc_start_timer();
         } else {
-            let _ = imc_read_timer(&mut self.movie_con);
+            let _ = (&mut self.movie_con).imc_read_timer();
         }
         self.first_frame = 0;
         if show == 0 {
@@ -371,7 +368,7 @@ pub fn imod_movie_xyzt(
         work.m_movie_timer.stop();
         view.movie_running = 0;
     }
-    let interval = (imc_get_interval(&work.movie_con) + 0.5) as i32;
+    let interval = ((&work.movie_con).imc_get_interval() + 0.5) as i32;
     if view.xmovie != 0 || view.ymovie != 0 || view.zmovie != 0 || view.tmovie != 0 {
         work.first_frame = 1;
     }

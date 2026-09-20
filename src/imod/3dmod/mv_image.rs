@@ -275,6 +275,798 @@ pub struct MvImageState {
     pub wall_draw: f64,
     pub wall_fill: f64,
 }
+
+impl MvImageState {
+    /// `mvImageAnyDrawing`.
+    pub fn mv_image_any_drawing(&self) -> bool {
+        (self.flags & IMODV_DRAW_CXYZ) != 0
+    }
+    /// `mvImageAnyClipping`.
+    pub fn mv_image_any_clipping(&self) -> bool {
+        ((self.flags & IMODV_DRAW_CX) != 0 && (self.flags & IMODV_CLIP_CX) != 0)
+            || ((self.flags & IMODV_DRAW_CY) != 0 && (self.flags & IMODV_CLIP_CY) != 0)
+            || ((self.flags & IMODV_DRAW_CZ) != 0 && (self.flags & IMODV_CLIP_CZ) != 0)
+    }
+    /// `mvImageDrawingZplanes`.
+    pub fn mv_image_drawing_zplanes(&self, a: &ImodvApp, closed: bool) -> bool {
+        !closed && a.tex_map != 0 && (self.flags & IMODV_DRAW_CZ) != 0
+    }
+    /// `mvImageGetFlags`.
+    pub fn mv_image_get_flags(&self) -> i32 {
+        self.flags
+    }
+    /// `mvImageGetClipPlanes`.
+    pub fn mv_image_get_clip_planes(&mut self) -> &mut Iclip_planes {
+        &mut self.clip_planes
+    }
+    /// `mvImageSetAntialias`.
+    pub fn mv_image_set_antialias(&mut self, value: i32) {
+        self.use_zoom_down = value
+    }
+    /// `mvImageGetAntialias`.
+    pub fn mv_image_get_antialias(&self) -> i32 {
+        self.use_zoom_down
+    }
+    /// `mvImageGetThickness`.
+    pub fn mv_image_get_thickness(&self) -> i32 {
+        self.num_slices
+    }
+    /// `mvImageGetTransparency`.
+    pub fn mv_image_get_transparency(&self) -> i32 {
+        self.image_trans
+    }
+
+    /// `makeColorMap`; false color follows IMOD's BGR output ordering.
+    pub fn make_color_map(&mut self, colormap_image: bool) {
+        let (mut black, mut white) = if colormap_image {
+            (0, 255)
+        } else {
+            (self.black_level, self.white_level)
+        };
+        let reverse = black > white;
+        if reverse {
+            std::mem::swap(&mut black, &mut white);
+        }
+        let ramp = (white - black).max(1) as f32;
+        for i in 0usize..256 {
+            let level = i as i32;
+            let mut v = if level < black {
+                0
+            } else if level >= white {
+                255
+            } else {
+                ((level - black) as f32 * 256. / ramp) as u8
+            };
+            if reverse && !colormap_image {
+                v = 255 - v;
+            }
+            if self.falsecolor != 0 || colormap_image {
+                let (r, g, b) = xcramp_mapfalsecolor(v);
+                self.cmap[0][i] = b;
+                self.cmap[1][i] = g;
+                self.cmap[2][i] = r;
+            } else {
+                self.cmap[0][i] = v;
+                self.cmap[1][i] = v;
+                self.cmap[2][i] = v;
+            }
+        }
+        self.cmap_init = 1;
+    }
+    /// `setSliceLimits`.
+    pub fn set_slice_limits(
+        &self,
+        ciz: i32,
+        zsize: i32,
+        invert_z: bool,
+        draw_trans: i32,
+    ) -> (i32, i32, i32) {
+        let mut st = (ciz - self.num_slices / 2).max(0);
+        let mut nd = (st + self.num_slices - 1).min(zsize - 1);
+        if ((nd > st || self.image_trans != 0) && draw_trans == 0)
+            || (st == nd && self.image_trans == 0 && draw_trans != 0)
+        {
+            nd = st - 1
+        }
+        if invert_z { (nd, st, -1) } else { (st, nd, 1) }
+    }
+    /// `setAlpha`.
+    pub fn set_alpha(&self, iz: i32, zst: i32, znd: i32, izdir: i32, gl: &mut dyn MvImageGl) {
+        let n = (znd - zst) / izdir + 1;
+        let m = (iz - zst) / izdir + 1;
+        let b = 0.01 * (100 - self.image_trans) as f32 / n as f32;
+        gl.set_alpha_blend(
+            b / (1.0 - (n - m) as f32 * b),
+            self.image_trans != 0 || n > 1,
+        );
+    }
+    /// `mvImageSetThickTrans`.
+    pub fn mv_image_set_thick_trans(&mut self, zsize: i32, slices: i32, trans: i32) {
+        self.num_slices = slices.clamp(1, zsize.min(MAX_SLICES));
+        self.image_trans = trans.clamp(0, 100)
+    }
+    /// `mvImageSetPlaneFlag`.
+    pub fn mv_image_set_plane_flag(&mut self, a: &mut ImodvApp, on: bool, flag: i32) {
+        if on {
+            self.flags |= flag
+        } else {
+            self.flags &= !flag
+        };
+        a.tex_map = self.mv_image_any_drawing() as i32
+    }
+    /// `mvImageUpdate`.
+    pub fn mv_image_update(&mut self, a: &mut ImodvApp) {
+        if a.tex_map != 0 && !self.mv_image_any_drawing() {
+            self.flags |= IMODV_DRAW_CZ
+        } else if a.tex_map == 0 && self.mv_image_any_drawing() {
+            self.flags &= !IMODV_DRAW_CXYZ
+        }
+    }
+    /// `mvImageSubsetLimits`.
+    pub fn mv_image_subset_limits(
+        &self,
+        a: &ImodvApp,
+        source: &dyn MvImageSource,
+        closed: bool,
+    ) -> Option<(f64, f32, f32, i32, i32, i32, i32)> {
+        if closed || a.tex_map == 0 || !self.mv_image_any_drawing() || self.xdraw_size <= 0 {
+            return None;
+        }
+        let (x, y, _) = source.location();
+        let (xs, ys, _) = source.dimensions();
+        let (xb, xe) = set_coord_limits(x, xs, self.xdraw_size);
+        let (yb, ye) = set_coord_limits(y, ys, self.ydraw_size);
+        let zoom = 0.5 * (a.winx.min(a.winy) as f64)
+            / unsafe { a.imod.as_ref() }?.view.first()?.rad as f64;
+        Some((
+            zoom,
+            self.pyr_zoom_up_limit,
+            self.pyr_zoom_down_limit,
+            xb,
+            yb,
+            xe + 1 - xb,
+            ye + 1 - yb,
+        ))
+    }
+    /// `mvImageGetMovieState`.
+    pub fn mv_image_get_movie_state(&self, a: &ImodvApp, segment: &mut MovieSegment) {
+        segment.img_axis_flags = if a.tex_map == 0 { 0 } else { self.flags };
+        if a.tex_map != 0 {
+            segment.img_white_level = self.white_level;
+            segment.img_black_level = self.black_level;
+            segment.img_false_color = self.falsecolor;
+            segment.img_clip_offset = self.clip_offset;
+            segment.img_xsize = self.xdraw_size;
+            segment.img_ysize = self.ydraw_size;
+            segment.img_zsize = self.zdraw_size
+        }
+    }
+    /// `imodvDrawTImage`.
+    pub fn imodv_draw_timage(
+        &mut self,
+        points: [Ipoint; 4],
+        clamp: Ipoint,
+        data: &[u8],
+        width: i32,
+        height: i32,
+        gl: &mut dyn MvImageGl,
+    ) {
+        let mut upload = data.to_vec();
+        let mut upload_width = width;
+        let mut upload_height = height;
+        let mut upload_clamp = (clamp.x, clamp.y);
+        // The `sZoomBuffer` / `zoomWithFilter` path.  `zoomdown.rs` is the direct
+        // translation of b3dgfx's filtering implementation, so preserve its
+        // source-selected filter instead of replacing it with a Rust resampler.
+        if !self.zoom_buffer.is_empty() && self.zoom_scale < 1.0 {
+            let nx =
+                ((width as f64 * self.zoom_scale).floor() as i32).clamp(1, self.tex_image_size);
+            let ny =
+                ((height as f64 * self.zoom_scale).floor() as i32).clamp(1, self.tex_image_size);
+            let lines: Vec<&[u8]> = (0..height)
+                .map(|row| &upload[(row * width * 4) as usize..])
+                .collect();
+            let mut reduced = vec![0u8; (nx * ny * 4) as usize];
+            let dtype = -(SLICE_MODE_RGB + if self.falsecolor != 0 { 2 } else { 3 });
+            let err = zoom_with_filter(
+                ZoomLines::Byte(&lines),
+                width,
+                height,
+                0.,
+                0.,
+                nx,
+                ny,
+                nx,
+                0,
+                dtype,
+                &mut ZoomOut::Byte(&mut reduced),
+                None,
+                None,
+            );
+            if err == 0 {
+                upload = reduced;
+                upload_width = nx;
+                upload_height = ny;
+                upload_clamp = (
+                    (nx - 1) as f32 / self.tex_image_size as f32,
+                    (ny - 1) as f32 / self.tex_image_size as f32,
+                );
+            }
+        }
+        gl.upload_bgra(upload_width, upload_height, &upload);
+        gl.draw_textured_quad(points, upload_clamp, 1. / self.tex_image_size as f32);
+        gl.flush()
+    }
+    /// `initTexMapping`.
+    pub fn init_tex_mapping(&mut self, a: &ImodvApp, gl: &mut dyn MvImageGl) -> i32 {
+        let mut step = if a.gl_ext_flags != 0 { 528 } else { 512 };
+        let mut usable = 0;
+        while step >= 64 {
+            usable = gl.texture_capacity(step);
+            if usable > 0 {
+                break;
+            }
+            step /= 2
+        }
+        if usable <= 0 {
+            return 1;
+        }
+        self.tdata = vec![0; (4 * step * step) as usize];
+        self.tex_image_size = step;
+        self.tex_name = gl.create_texture_bgra(step, step, &self.tdata);
+        gl.texture_parameters();
+        0
+    }
+    /// `mvImageCleanup`.
+    pub fn mv_image_cleanup(&mut self, gl: &mut dyn MvImageGl) {
+        self.tdata.clear();
+        if self.tex_image_size != 0 {
+            gl.delete_texture(self.tex_name)
+        }
+        self.tex_image_size = 0;
+        self.tex_name = 0
+    }
+    /// Clipping section in `imodvDrawImage`.  The resulting `IclipPlanes` is
+    /// consumed unchanged by `mv_ogl::clip_obj` when it draws model primitives.
+    pub fn setup_clip_planes(&mut self, a: &ImodvApp, source: &dyn MvImageSource, draw_trans: i32) {
+        self.clip_planes.count = 0;
+        if draw_trans != 0 || !self.mv_image_any_clipping() {
+            return;
+        }
+        let Some(model) = (unsafe { a.imod.as_ref() }) else {
+            return;
+        };
+        let Some(view) = model.view.first() else {
+            return;
+        };
+        let Some(mut mat) = imod_mat_new(3) else {
+            return;
+        };
+        imod_mat_rot(&mut mat, view.rot.z as f64, B3D_Z);
+        imod_mat_rot(&mut mat, view.rot.y as f64, B3D_Y);
+        imod_mat_rot(&mut mat, view.rot.x as f64, B3D_X);
+        let (ix, iy, iz) = source.location();
+        let (xs, ys, zs) = source.dimensions();
+        let mut count = 0usize;
+        for axis in 0..3usize {
+            if self.flags & (1 << axis) == 0 || self.flags & (1 << (axis + 3)) == 0 {
+                continue;
+            }
+            let normal = Ipoint {
+                x: (axis == 2) as i32 as f32,
+                y: (axis == 1) as i32 as f32,
+                z: (axis == 0) as i32 as f32,
+            };
+            let mut transformed = Ipoint::default();
+            imod_mat_transform(&mat, &normal, &mut transformed);
+            let flip = (self.clip_offset < 0 && transformed.z < 0.)
+                || (self.clip_offset >= 0 && transformed.z > 0.);
+            let n = if flip {
+                Ipoint {
+                    x: -normal.x,
+                    y: -normal.y,
+                    z: -normal.z,
+                }
+            } else {
+                normal
+            };
+            self.clip_planes.normal[count] = n;
+            let gap = self.clip_offset.max(0) as f32 + 0.5;
+            self.clip_planes.point[count] = Ipoint {
+                x: if axis == 2 {
+                    -(ix as f32)
+                } else {
+                    -(xs as f32) / 2.
+                } + n.x * gap,
+                y: if axis == 1 {
+                    -(iy as f32)
+                } else {
+                    -(ys as f32) / 2.
+                } + n.y * gap,
+                z: if axis == 0 {
+                    -(iz as f32)
+                } else {
+                    -(zs as f32) / 2.
+                } + n.z * gap,
+            };
+            count += 1;
+        }
+        if self.clip_offset >= 0 {
+            for index in 0..count {
+                if count + index >= self.clip_planes.normal.len() {
+                    break;
+                }
+                let n = self.clip_planes.normal[index];
+                let p = self.clip_planes.point[index];
+                self.clip_planes.normal[count + index] = Ipoint {
+                    x: -n.x,
+                    y: -n.y,
+                    z: -n.z,
+                };
+                self.clip_planes.point[count + index] = Ipoint {
+                    x: p.x - n.x * (self.clip_offset + 1) as f32,
+                    y: p.y - n.y * (self.clip_offset + 1) as f32,
+                    z: p.z - n.z * (self.clip_offset + 1) as f32,
+                };
+            }
+            count *= 2;
+        }
+        self.clip_planes.count = count.min(self.clip_planes.normal.len()) as u8;
+    }
+    /// Source `FILLDATA` macro.
+    pub fn fill_pixel(&mut self, width: i32, x: i32, y: i32, value: u8) {
+        let p = (4 * (width * y + x)) as usize;
+        if p + 3 >= self.tdata.len() {
+            return;
+        }
+        self.tdata[p] = self.cmap[0][value as usize];
+        self.tdata[p + 1] = self.cmap[1][value as usize];
+        self.tdata[p + 2] = self.cmap[2][value as usize];
+        self.tdata[p + 3] = 255
+    }
+
+    /// `mvImageTogglePlane`.
+    pub fn mv_image_toggle_plane(&mut self, a: &mut ImodvApp, flag: i32) {
+        self.mv_image_set_plane_flag(a, self.flags & flag == 0, flag)
+    }
+    /// `mvImageEditDialog`; native dialog construction remains `mv_window`/Qt boundary.
+    pub fn mv_image_edit_dialog(
+        &mut self,
+        a: &mut ImodvApp,
+        dialog: &mut Option<ImodvImage>,
+        open: bool,
+    ) {
+        if !open {
+            *dialog = None;
+            return;
+        }
+        if dialog.is_none() {
+            *dialog = Some(ImodvImage::default());
+            self.make_color_map(false)
+        }
+        self.mv_image_update(a)
+    }
+    /// `mvImageSetMovieDrawState`.
+    pub fn mv_image_set_movie_draw_state(
+        &mut self,
+        a: &mut ImodvApp,
+        segment: &MovieSegment,
+        source: &dyn MvImageSource,
+    ) -> i32 {
+        if segment.img_axis_flags & IMODV_DRAW_CXYZ == 0 {
+            a.tex_map = 0;
+            if self.mv_image_any_drawing() {
+                self.mv_image_update(a)
+            };
+            return 1;
+        }
+        self.flags = segment.img_axis_flags;
+        a.tex_map = 1;
+        self.white_level = segment.img_white_level;
+        self.black_level = segment.img_black_level;
+        self.falsecolor = segment.img_false_color;
+        self.clip_offset = segment.img_clip_offset;
+        let (x, y, z) = source.dimensions();
+        self.xdraw_size = segment.img_xsize.min(x);
+        self.ydraw_size = segment.img_ysize.min(y);
+        self.zdraw_size = segment.img_zsize.min(z);
+        self.make_color_map(false);
+        0
+    }
+    /// `fillPatchFromTiles`.
+    pub fn fill_patch_from_tiles(
+        &mut self,
+        segments: &[FastSegment],
+        starts: &[i32],
+        ushort: bool,
+        bmap: Option<&[u8]>,
+        fill_x: i32,
+        istart: i32,
+        iend: i32,
+        jstart: i32,
+        jend: i32,
+    ) {
+        for j in jstart.max(0)..jend.min(starts.len().saturating_sub(1) as i32) {
+            let mut next = istart;
+            for si in starts[j as usize]..starts[j as usize + 1] {
+                let s = segments[si as usize];
+                if s.xor_y >= iend {
+                    break;
+                }
+                if s.xor_y + s.length <= istart {
+                    continue;
+                }
+                for i in next..s.xor_y.min(iend) {
+                    self.fill_pixel(fill_x, i - istart, j - jstart, 0)
+                }
+                let ss = s.xor_y.max(istart);
+                let se = (s.xor_y + s.length).min(iend);
+                for i in ss..se {
+                    let off = ((i - s.xor_y) * s.stride * (if ushort { 2 } else { 1 })) as usize;
+                    let raw = unsafe { *s.line.add(off) };
+                    let value = if ushort {
+                        bmap.and_then(|m| {
+                            m.get(unsafe { *(s.line.add(off) as *const u16) } as usize)
+                        })
+                        .copied()
+                        .unwrap_or(0)
+                    } else {
+                        raw
+                    };
+                    self.fill_pixel(fill_x, i - istart, j - jstart, value)
+                }
+                next = se
+            }
+            for i in next..iend {
+                self.fill_pixel(fill_x, i - istart, j - jstart, 0)
+            }
+        }
+    }
+    /// `endTexMapping`.
+    pub fn end_tex_mapping(&mut self, a: &mut ImodvApp, gl: &mut dyn MvImageGl) {
+        self.flags &= !IMODV_DRAW_CXYZ;
+        a.tex_map = 0;
+        self.mv_image_cleanup(gl)
+    }
+    /// Source `FILLRGB` macro and `ivwUShortInRangeToByteMap` indexing.
+    pub fn fill_image_pixel(
+        &mut self,
+        width: i32,
+        x: i32,
+        y: i32,
+        pixel: Option<ImagePixel>,
+        ushort_map: Option<&[u8]>,
+    ) {
+        match pixel {
+            Some(ImagePixel::Byte(value)) => self.fill_pixel(width, x, y, value),
+            Some(ImagePixel::UShort(value)) => self.fill_pixel(
+                width,
+                x,
+                y,
+                ushort_map
+                    .and_then(|map| map.get(value as usize))
+                    .copied()
+                    .unwrap_or(0),
+            ),
+            Some(ImagePixel::Rgb([blue, green, red])) => {
+                let p = (4 * (width * y + x)) as usize;
+                if p + 3 < self.tdata.len() {
+                    self.tdata[p] = self.cmap[0][red as usize];
+                    self.tdata[p + 1] = self.cmap[1][green as usize];
+                    self.tdata[p + 2] = self.cmap[2][blue as usize];
+                    self.tdata[p + 3] = 255;
+                }
+            }
+            None => self.fill_pixel(width, x, y, 0),
+        }
+    }
+
+    /// `mvImageSetMovieEndState`.
+    pub fn mv_image_set_movie_end_state(
+        &mut self,
+        a: &mut ImodvApp,
+        source: &mut dyn MvImageSource,
+        start_end: i32,
+        segment: &MovieSegment,
+    ) {
+        if self.mv_image_set_movie_draw_state(a, segment, source) != 0 {
+            return;
+        }
+        let term = if start_end == IMODV_MOVIE_END_STATE {
+            &segment.end
+        } else {
+            &segment.start
+        };
+        self.image_trans = term.img_transparency;
+        source.set_location(
+            term.img_xcenter - 1,
+            term.img_ycenter - 1,
+            term.img_zcenter - 1,
+        );
+        self.num_slices = term.img_slices.min(source.dimensions().2.min(MAX_SLICES));
+    }
+    /// `imodvDrawImage`: Z, X, and Y texture-plane loops.  Image/cache storage is
+    /// read only through the direct `iview`/`PyramidCache` boundary above.
+    pub fn imodv_draw_image(
+        &mut self,
+        a: &mut ImodvApp,
+        source: &mut dyn MvImageSource,
+        draw_trans: i32,
+        gl: &mut dyn MvImageGl,
+    ) {
+        if !self.mv_image_any_drawing() {
+            self.mv_image_cleanup(gl);
+            return;
+        }
+        let (xs, ys, zs) = source.dimensions();
+        if self.xdraw_size < 0 {
+            self.xdraw_size = xs;
+            self.ydraw_size = ys;
+            self.zdraw_size = zs
+        }
+        if self.tex_image_size == 0 && self.init_tex_mapping(a, gl) != 0 {
+            return;
+        }
+        // `pickBestCache` and the source antialiased-reduction selection.  A
+        // selected cache remains responsible for its scaled sample coordinates
+        // through the `MvImageSource` implementation.
+        let rad = unsafe { a.imod.as_ref() }
+            .and_then(|model| model.view.first())
+            .map(|view| view.rad as f64)
+            .unwrap_or(1.0)
+            .max(f64::MIN_POSITIVE);
+        let zoom = 0.5 * a.winx.min(a.winy) as f64 / rad;
+        let cache_selection =
+            source.pick_best_cache(zoom, self.pyr_zoom_up_limit, self.pyr_zoom_down_limit);
+        let cache_scale = cache_selection.map(|(_, scale)| scale).unwrap_or(1).max(1);
+        self.zoom_scale = zoom * cache_scale as f64;
+        let max_size = self.xdraw_size.max(self.ydraw_size).max(self.zdraw_size) / cache_scale;
+        self.zoom_buffer.clear();
+        if self.use_zoom_down != 0
+            && self.zoom_scale < 0.75
+            && max_size as f64 * self.zoom_scale > 20.0
+        {
+            self.zoom_buf_size =
+                (((self.tex_image_size as f64 / self.zoom_scale) as i32) / 2 * 2).min(max_size);
+            if self.zoom_buf_size > 0 {
+                let filters = [5, 4, 1, 0];
+                let mut width = 0;
+                for filter in filters {
+                    if unsafe { select_zoom_filter(filter, self.zoom_scale, &mut width) } == 0 {
+                        self.zoom_filter = filter;
+                        break;
+                    }
+                }
+                self.zoom_buffer
+                    .resize((4 * self.zoom_buf_size * self.zoom_buf_size) as usize, 0);
+            }
+        }
+        self.make_color_map(false);
+        let (cx, cy, cz) = source.location();
+        let mut xlimits = set_coord_limits(cx, xs, self.xdraw_size);
+        let mut ylimits = set_coord_limits(cy, ys, self.ydraw_size);
+        let (zfirst, zlast, zdir) = self.set_slice_limits(cz, zs, a.invert_z != 0, draw_trans);
+        let mut zlimits = (zfirst, zlast);
+        let (_tile_x_offset, _tile_y_offset, tile_z_offset, tile_z_scale) = adjust_limits_for_tiles(
+            source,
+            cache_selection.map(|(cache, _)| cache),
+            zdir,
+            &mut xlimits,
+            &mut ylimits,
+            &mut zlimits,
+        );
+        let (xst, xnd) = xlimits;
+        let (yst, ynd) = ylimits;
+        let (zst, znd) = zlimits;
+        self.setup_clip_planes(a, source, draw_trans);
+        gl.enable_texture(true);
+        let mut z = zst;
+        while zdir * (znd - z) >= 0 {
+            self.set_alpha(z, zst, znd, zdir, gl);
+            let width = xnd - xst + 2;
+            let height = ynd - yst + 2;
+            let needed = (4 * width * height) as usize;
+            if self.tdata.len() < needed {
+                self.tdata.resize(needed, 0)
+            }
+            for yy in 0..height {
+                for xx in 0..width {
+                    let ix = (xst - 1 + xx).clamp(0, xs - 1);
+                    let iy = (yst - 1 + yy).clamp(0, ys - 1);
+                    let pixel = source.pixel(ix, iy, z);
+                    let map = source.ushort_to_byte_map();
+                    self.fill_image_pixel(width, xx, yy, pixel, map)
+                }
+            }
+            let p = [
+                Ipoint {
+                    x: xst as f32,
+                    y: yst as f32,
+                    z: z as f32 * tile_z_scale as f32 + tile_z_offset,
+                },
+                Ipoint {
+                    x: xnd as f32,
+                    y: yst as f32,
+                    z: z as f32 * tile_z_scale as f32 + tile_z_offset,
+                },
+                Ipoint {
+                    x: xnd as f32,
+                    y: ynd as f32,
+                    z: z as f32 * tile_z_scale as f32 + tile_z_offset,
+                },
+                Ipoint {
+                    x: xst as f32,
+                    y: ynd as f32,
+                    z: z as f32 * tile_z_scale as f32 + tile_z_offset,
+                },
+            ];
+            let data = self.tdata[..needed].to_vec();
+            self.imodv_draw_timage(
+                p,
+                Ipoint {
+                    x: (width - 1) as f32 / width as f32,
+                    y: (height - 1) as f32 / height as f32,
+                    z: 0.,
+                },
+                &data,
+                width,
+                height,
+                gl,
+            );
+            z += zdir;
+        }
+        // Draw Current X image.  This is the `IMODV_DRAW_CX` loop in the source:
+        // texture U is Y and texture V is Z.
+        if self.flags & IMODV_DRAW_CX != 0 && !(a.stereo != 0 && a.image_stereo != 0) {
+            let (xfirst, xlast, xdir) = self.set_slice_limits(cx, xs, a.invert_z != 0, draw_trans);
+            let (yfirst, ylast) = set_coord_limits(cy, ys, self.ydraw_size);
+            let (zfirst, zlast) = set_coord_limits(cz, zs, self.zdraw_size);
+            let mut xplane = xfirst;
+            while xdir * (xlast - xplane) >= 0 {
+                self.set_alpha(xplane, xfirst, xlast, xdir, gl);
+                let mut zpatch = zfirst;
+                while zpatch < zlast {
+                    let zend = (zpatch + self.tex_image_size - 2).min(zlast);
+                    let mut ypatch = yfirst;
+                    while ypatch < ylast {
+                        let yend = (ypatch + self.tex_image_size - 2).min(ylast);
+                        let width = yend - ypatch + 2;
+                        let height = zend - zpatch + 2;
+                        let needed = (4 * width * height) as usize;
+                        if self.tdata.len() < needed {
+                            self.tdata.resize(needed, 0);
+                        }
+                        for vz in 0..height {
+                            for uy in 0..width {
+                                let pixel = source.pixel(
+                                    (xplane).clamp(0, xs - 1),
+                                    (ypatch - 1 + uy).clamp(0, ys - 1),
+                                    (zpatch - 1 + vz).clamp(0, zs - 1),
+                                );
+                                let map = source.ushort_to_byte_map();
+                                self.fill_image_pixel(width, uy, vz, pixel, map);
+                            }
+                        }
+                        let data = self.tdata[..needed].to_vec();
+                        self.imodv_draw_timage(
+                            [
+                                Ipoint {
+                                    x: xplane as f32,
+                                    y: ypatch as f32,
+                                    z: zpatch as f32,
+                                },
+                                Ipoint {
+                                    x: xplane as f32,
+                                    y: yend as f32,
+                                    z: zpatch as f32,
+                                },
+                                Ipoint {
+                                    x: xplane as f32,
+                                    y: yend as f32,
+                                    z: zend as f32,
+                                },
+                                Ipoint {
+                                    x: xplane as f32,
+                                    y: ypatch as f32,
+                                    z: zend as f32,
+                                },
+                            ],
+                            Ipoint {
+                                x: (width - 1) as f32 / width as f32,
+                                y: (height - 1) as f32 / height as f32,
+                                z: 0.,
+                            },
+                            &data,
+                            width,
+                            height,
+                            gl,
+                        );
+                        ypatch += self.tex_image_size - 2;
+                    }
+                    zpatch += self.tex_image_size - 2;
+                }
+                xplane += xdir;
+            }
+        }
+
+        // Draw Current Y image.  This is the source `IMODV_DRAW_CY` loop: U is X
+        // and V is Z, with fast-access storage represented by `MvImageSource`.
+        if self.flags & IMODV_DRAW_CY != 0 && !(a.stereo != 0 && a.image_stereo != 0) {
+            let (yfirst, ylast, ydir) = self.set_slice_limits(cy, ys, a.invert_z != 0, draw_trans);
+            let (xfirst, xlast) = set_coord_limits(cx, xs, self.xdraw_size);
+            let (zfirst, zlast) = set_coord_limits(cz, zs, self.zdraw_size);
+            let mut yplane = yfirst;
+            while ydir * (ylast - yplane) >= 0 {
+                self.set_alpha(yplane, yfirst, ylast, ydir, gl);
+                let mut zpatch = zfirst;
+                while zpatch < zlast {
+                    let zend = (zpatch + self.tex_image_size - 2).min(zlast);
+                    let mut xpatch = xfirst;
+                    while xpatch < xlast {
+                        let xend = (xpatch + self.tex_image_size - 2).min(xlast);
+                        let width = xend - xpatch + 2;
+                        let height = zend - zpatch + 2;
+                        let needed = (4 * width * height) as usize;
+                        if self.tdata.len() < needed {
+                            self.tdata.resize(needed, 0);
+                        }
+                        for vz in 0..height {
+                            for ux in 0..width {
+                                let pixel = source.pixel(
+                                    (xpatch - 1 + ux).clamp(0, xs - 1),
+                                    yplane.clamp(0, ys - 1),
+                                    (zpatch - 1 + vz).clamp(0, zs - 1),
+                                );
+                                let map = source.ushort_to_byte_map();
+                                self.fill_image_pixel(width, ux, vz, pixel, map);
+                            }
+                        }
+                        let data = self.tdata[..needed].to_vec();
+                        self.imodv_draw_timage(
+                            [
+                                Ipoint {
+                                    x: xpatch as f32,
+                                    y: yplane as f32,
+                                    z: zpatch as f32,
+                                },
+                                Ipoint {
+                                    x: xend as f32,
+                                    y: yplane as f32,
+                                    z: zpatch as f32,
+                                },
+                                Ipoint {
+                                    x: xend as f32,
+                                    y: yplane as f32,
+                                    z: zend as f32,
+                                },
+                                Ipoint {
+                                    x: xpatch as f32,
+                                    y: yplane as f32,
+                                    z: zend as f32,
+                                },
+                            ],
+                            Ipoint {
+                                x: (width - 1) as f32 / width as f32,
+                                y: (height - 1) as f32 / height as f32,
+                                z: 0.,
+                            },
+                            &data,
+                            width,
+                            height,
+                            gl,
+                        );
+                        xpatch += self.tex_image_size - 2;
+                    }
+                    zpatch += self.tex_image_size - 2;
+                }
+                yplane += ydir;
+            }
+        }
+        gl.set_alpha_blend(1., false);
+        gl.enable_texture(false)
+    }
+}
+
 impl Default for MvImageState {
     fn default() -> Self {
         Self {
@@ -328,43 +1120,6 @@ pub struct ImodvImage {
     pub apply_clip: bool,
 }
 
-/// `makeColorMap`; false color follows IMOD's BGR output ordering.
-pub fn make_color_map(state: &mut MvImageState, colormap_image: bool) {
-    let (mut black, mut white) = if colormap_image {
-        (0, 255)
-    } else {
-        (state.black_level, state.white_level)
-    };
-    let reverse = black > white;
-    if reverse {
-        std::mem::swap(&mut black, &mut white);
-    }
-    let ramp = (white - black).max(1) as f32;
-    for i in 0usize..256 {
-        let level = i as i32;
-        let mut v = if level < black {
-            0
-        } else if level >= white {
-            255
-        } else {
-            ((level - black) as f32 * 256. / ramp) as u8
-        };
-        if reverse && !colormap_image {
-            v = 255 - v;
-        }
-        if state.falsecolor != 0 || colormap_image {
-            let (r, g, b) = xcramp_mapfalsecolor(v);
-            state.cmap[0][i] = b;
-            state.cmap[1][i] = g;
-            state.cmap[2][i] = r;
-        } else {
-            state.cmap[0][i] = v;
-            state.cmap[1][i] = v;
-            state.cmap[2][i] = v;
-        }
-    }
-    state.cmap_init = 1;
-}
 /// `xcramp_mapfalsecolor` source boundary equation (rainbow ramp).
 pub fn xcramp_mapfalsecolor(value: u8) -> (u8, u8, u8) {
     let x = value as f32 / 255.;
@@ -373,23 +1128,7 @@ pub fn xcramp_mapfalsecolor(value: u8) -> (u8, u8, u8) {
     let b = (1.5 - (4. * x - 1.).abs()).clamp(0., 1.);
     ((r * 255.) as u8, (g * 255.) as u8, (b * 255.) as u8)
 }
-/// `setSliceLimits`.
-pub fn set_slice_limits(
-    state: &MvImageState,
-    ciz: i32,
-    zsize: i32,
-    invert_z: bool,
-    draw_trans: i32,
-) -> (i32, i32, i32) {
-    let mut st = (ciz - state.num_slices / 2).max(0);
-    let mut nd = (st + state.num_slices - 1).min(zsize - 1);
-    if ((nd > st || state.image_trans != 0) && draw_trans == 0)
-        || (st == nd && state.image_trans == 0 && draw_trans != 0)
-    {
-        nd = st - 1
-    }
-    if invert_z { (nd, st, -1) } else { (st, nd, 1) }
-}
+
 /// `setCoordLimits`.
 pub fn set_coord_limits(cur: i32, max_size: i32, draw_size: i32) -> (i32, i32) {
     let mut st = (cur - draw_size / 2).max(1);
@@ -397,422 +1136,7 @@ pub fn set_coord_limits(cur: i32, max_size: i32, draw_size: i32) -> (i32, i32) {
     st = st.max(1).max(end - draw_size);
     (st, end)
 }
-/// `setAlpha`.
-pub fn set_alpha(
-    state: &MvImageState,
-    iz: i32,
-    zst: i32,
-    znd: i32,
-    izdir: i32,
-    gl: &mut dyn MvImageGl,
-) {
-    let n = (znd - zst) / izdir + 1;
-    let m = (iz - zst) / izdir + 1;
-    let b = 0.01 * (100 - state.image_trans) as f32 / n as f32;
-    gl.set_alpha_blend(
-        b / (1.0 - (n - m) as f32 * b),
-        state.image_trans != 0 || n > 1,
-    );
-}
-/// `mvImageAnyDrawing`.
-pub fn mv_image_any_drawing(state: &MvImageState) -> bool {
-    (state.flags & IMODV_DRAW_CXYZ) != 0
-}
-/// `mvImageAnyClipping`.
-pub fn mv_image_any_clipping(state: &MvImageState) -> bool {
-    ((state.flags & IMODV_DRAW_CX) != 0 && (state.flags & IMODV_CLIP_CX) != 0)
-        || ((state.flags & IMODV_DRAW_CY) != 0 && (state.flags & IMODV_CLIP_CY) != 0)
-        || ((state.flags & IMODV_DRAW_CZ) != 0 && (state.flags & IMODV_CLIP_CZ) != 0)
-}
-/// `mvImageDrawingZplanes`.
-pub fn mv_image_drawing_zplanes(state: &MvImageState, a: &ImodvApp, closed: bool) -> bool {
-    !closed && a.tex_map != 0 && (state.flags & IMODV_DRAW_CZ) != 0
-}
-/// `mvImageGetFlags`.
-pub fn mv_image_get_flags(state: &MvImageState) -> i32 {
-    state.flags
-}
-/// `mvImageGetClipPlanes`.
-pub fn mv_image_get_clip_planes(state: &mut MvImageState) -> &mut Iclip_planes {
-    &mut state.clip_planes
-}
-/// `mvImageSetAntialias`.
-pub fn mv_image_set_antialias(state: &mut MvImageState, value: i32) {
-    state.use_zoom_down = value
-}
-/// `mvImageGetAntialias`.
-pub fn mv_image_get_antialias(state: &MvImageState) -> i32 {
-    state.use_zoom_down
-}
-/// `mvImageGetThickness`.
-pub fn mv_image_get_thickness(state: &MvImageState) -> i32 {
-    state.num_slices
-}
-/// `mvImageGetTransparency`.
-pub fn mv_image_get_transparency(state: &MvImageState) -> i32 {
-    state.image_trans
-}
-/// `mvImageSetThickTrans`.
-pub fn mv_image_set_thick_trans(state: &mut MvImageState, zsize: i32, slices: i32, trans: i32) {
-    state.num_slices = slices.clamp(1, zsize.min(MAX_SLICES));
-    state.image_trans = trans.clamp(0, 100)
-}
-/// `mvImageSetPlaneFlag`.
-pub fn mv_image_set_plane_flag(state: &mut MvImageState, a: &mut ImodvApp, on: bool, flag: i32) {
-    if on {
-        state.flags |= flag
-    } else {
-        state.flags &= !flag
-    };
-    a.tex_map = mv_image_any_drawing(state) as i32
-}
-/// `mvImageTogglePlane`.
-pub fn mv_image_toggle_plane(state: &mut MvImageState, a: &mut ImodvApp, flag: i32) {
-    mv_image_set_plane_flag(state, a, state.flags & flag == 0, flag)
-}
-/// `mvImageUpdate`.
-pub fn mv_image_update(state: &mut MvImageState, a: &mut ImodvApp) {
-    if a.tex_map != 0 && !mv_image_any_drawing(state) {
-        state.flags |= IMODV_DRAW_CZ
-    } else if a.tex_map == 0 && mv_image_any_drawing(state) {
-        state.flags &= !IMODV_DRAW_CXYZ
-    }
-}
-/// `mvImageEditDialog`; native dialog construction remains `mv_window`/Qt boundary.
-pub fn mv_image_edit_dialog(
-    state: &mut MvImageState,
-    a: &mut ImodvApp,
-    dialog: &mut Option<ImodvImage>,
-    open: bool,
-) {
-    if !open {
-        *dialog = None;
-        return;
-    }
-    if dialog.is_none() {
-        *dialog = Some(ImodvImage::default());
-        make_color_map(state, false)
-    }
-    mv_image_update(state, a)
-}
-/// `mvImageSubsetLimits`.
-pub fn mv_image_subset_limits(
-    state: &MvImageState,
-    a: &ImodvApp,
-    source: &dyn MvImageSource,
-    closed: bool,
-) -> Option<(f64, f32, f32, i32, i32, i32, i32)> {
-    if closed || a.tex_map == 0 || !mv_image_any_drawing(state) || state.xdraw_size <= 0 {
-        return None;
-    }
-    let (x, y, _) = source.location();
-    let (xs, ys, _) = source.dimensions();
-    let (xb, xe) = set_coord_limits(x, xs, state.xdraw_size);
-    let (yb, ye) = set_coord_limits(y, ys, state.ydraw_size);
-    let zoom =
-        0.5 * (a.winx.min(a.winy) as f64) / unsafe { a.imod.as_ref() }?.view.first()?.rad as f64;
-    Some((
-        zoom,
-        state.pyr_zoom_up_limit,
-        state.pyr_zoom_down_limit,
-        xb,
-        yb,
-        xe + 1 - xb,
-        ye + 1 - yb,
-    ))
-}
-/// `mvImageGetMovieState`.
-pub fn mv_image_get_movie_state(state: &MvImageState, a: &ImodvApp, segment: &mut MovieSegment) {
-    segment.img_axis_flags = if a.tex_map == 0 { 0 } else { state.flags };
-    if a.tex_map != 0 {
-        segment.img_white_level = state.white_level;
-        segment.img_black_level = state.black_level;
-        segment.img_false_color = state.falsecolor;
-        segment.img_clip_offset = state.clip_offset;
-        segment.img_xsize = state.xdraw_size;
-        segment.img_ysize = state.ydraw_size;
-        segment.img_zsize = state.zdraw_size
-    }
-}
-/// `mvImageSetMovieDrawState`.
-pub fn mv_image_set_movie_draw_state(
-    state: &mut MvImageState,
-    a: &mut ImodvApp,
-    segment: &MovieSegment,
-    source: &dyn MvImageSource,
-) -> i32 {
-    if segment.img_axis_flags & IMODV_DRAW_CXYZ == 0 {
-        a.tex_map = 0;
-        if mv_image_any_drawing(state) {
-            mv_image_update(state, a)
-        };
-        return 1;
-    }
-    state.flags = segment.img_axis_flags;
-    a.tex_map = 1;
-    state.white_level = segment.img_white_level;
-    state.black_level = segment.img_black_level;
-    state.falsecolor = segment.img_false_color;
-    state.clip_offset = segment.img_clip_offset;
-    let (x, y, z) = source.dimensions();
-    state.xdraw_size = segment.img_xsize.min(x);
-    state.ydraw_size = segment.img_ysize.min(y);
-    state.zdraw_size = segment.img_zsize.min(z);
-    make_color_map(state, false);
-    0
-}
-/// `mvImageSetMovieEndState`.
-pub fn mv_image_set_movie_end_state(
-    state: &mut MvImageState,
-    a: &mut ImodvApp,
-    source: &mut dyn MvImageSource,
-    start_end: i32,
-    segment: &MovieSegment,
-) {
-    if mv_image_set_movie_draw_state(state, a, segment, source) != 0 {
-        return;
-    }
-    let term = if start_end == IMODV_MOVIE_END_STATE {
-        &segment.end
-    } else {
-        &segment.start
-    };
-    state.image_trans = term.img_transparency;
-    source.set_location(
-        term.img_xcenter - 1,
-        term.img_ycenter - 1,
-        term.img_zcenter - 1,
-    );
-    state.num_slices = term.img_slices.min(source.dimensions().2.min(MAX_SLICES));
-}
-/// `fillPatchFromTiles`.
-pub fn fill_patch_from_tiles(
-    state: &mut MvImageState,
-    segments: &[FastSegment],
-    starts: &[i32],
-    ushort: bool,
-    bmap: Option<&[u8]>,
-    fill_x: i32,
-    istart: i32,
-    iend: i32,
-    jstart: i32,
-    jend: i32,
-) {
-    for j in jstart.max(0)..jend.min(starts.len().saturating_sub(1) as i32) {
-        let mut next = istart;
-        for si in starts[j as usize]..starts[j as usize + 1] {
-            let s = segments[si as usize];
-            if s.xor_y >= iend {
-                break;
-            }
-            if s.xor_y + s.length <= istart {
-                continue;
-            }
-            for i in next..s.xor_y.min(iend) {
-                fill_pixel(state, fill_x, i - istart, j - jstart, 0)
-            }
-            let ss = s.xor_y.max(istart);
-            let se = (s.xor_y + s.length).min(iend);
-            for i in ss..se {
-                let off = ((i - s.xor_y) * s.stride * (if ushort { 2 } else { 1 })) as usize;
-                let raw = unsafe { *s.line.add(off) };
-                let value = if ushort {
-                    bmap.and_then(|m| m.get(unsafe { *(s.line.add(off) as *const u16) } as usize))
-                        .copied()
-                        .unwrap_or(0)
-                } else {
-                    raw
-                };
-                fill_pixel(state, fill_x, i - istart, j - jstart, value)
-            }
-            next = se
-        }
-        for i in next..iend {
-            fill_pixel(state, fill_x, i - istart, j - jstart, 0)
-        }
-    }
-}
-/// `imodvDrawTImage`.
-pub fn imodv_draw_timage(
-    state: &mut MvImageState,
-    points: [Ipoint; 4],
-    clamp: Ipoint,
-    data: &[u8],
-    width: i32,
-    height: i32,
-    gl: &mut dyn MvImageGl,
-) {
-    let mut upload = data.to_vec();
-    let mut upload_width = width;
-    let mut upload_height = height;
-    let mut upload_clamp = (clamp.x, clamp.y);
-    // The `sZoomBuffer` / `zoomWithFilter` path.  `zoomdown.rs` is the direct
-    // translation of b3dgfx's filtering implementation, so preserve its
-    // source-selected filter instead of replacing it with a Rust resampler.
-    if !state.zoom_buffer.is_empty() && state.zoom_scale < 1.0 {
-        let nx = ((width as f64 * state.zoom_scale).floor() as i32).clamp(1, state.tex_image_size);
-        let ny = ((height as f64 * state.zoom_scale).floor() as i32).clamp(1, state.tex_image_size);
-        let lines: Vec<&[u8]> = (0..height)
-            .map(|row| &upload[(row * width * 4) as usize..])
-            .collect();
-        let mut reduced = vec![0u8; (nx * ny * 4) as usize];
-        let dtype = -(SLICE_MODE_RGB + if state.falsecolor != 0 { 2 } else { 3 });
-        let err = zoom_with_filter(
-            ZoomLines::Byte(&lines),
-            width,
-            height,
-            0.,
-            0.,
-            nx,
-            ny,
-            nx,
-            0,
-            dtype,
-            &mut ZoomOut::Byte(&mut reduced),
-            None,
-            None,
-        );
-        if err == 0 {
-            upload = reduced;
-            upload_width = nx;
-            upload_height = ny;
-            upload_clamp = (
-                (nx - 1) as f32 / state.tex_image_size as f32,
-                (ny - 1) as f32 / state.tex_image_size as f32,
-            );
-        }
-    }
-    gl.upload_bgra(upload_width, upload_height, &upload);
-    gl.draw_textured_quad(points, upload_clamp, 1. / state.tex_image_size as f32);
-    gl.flush()
-}
-/// `initTexMapping`.
-pub fn init_tex_mapping(state: &mut MvImageState, a: &ImodvApp, gl: &mut dyn MvImageGl) -> i32 {
-    let mut step = if a.gl_ext_flags != 0 { 528 } else { 512 };
-    let mut usable = 0;
-    while step >= 64 {
-        usable = gl.texture_capacity(step);
-        if usable > 0 {
-            break;
-        }
-        step /= 2
-    }
-    if usable <= 0 {
-        return 1;
-    }
-    state.tdata = vec![0; (4 * step * step) as usize];
-    state.tex_image_size = step;
-    state.tex_name = gl.create_texture_bgra(step, step, &state.tdata);
-    gl.texture_parameters();
-    0
-}
-/// `endTexMapping`.
-pub fn end_tex_mapping(state: &mut MvImageState, a: &mut ImodvApp, gl: &mut dyn MvImageGl) {
-    state.flags &= !IMODV_DRAW_CXYZ;
-    a.tex_map = 0;
-    mv_image_cleanup(state, gl)
-}
-/// `mvImageCleanup`.
-pub fn mv_image_cleanup(state: &mut MvImageState, gl: &mut dyn MvImageGl) {
-    state.tdata.clear();
-    if state.tex_image_size != 0 {
-        gl.delete_texture(state.tex_name)
-    }
-    state.tex_image_size = 0;
-    state.tex_name = 0
-}
-/// Clipping section in `imodvDrawImage`.  The resulting `IclipPlanes` is
-/// consumed unchanged by `mv_ogl::clip_obj` when it draws model primitives.
-pub fn setup_clip_planes(
-    state: &mut MvImageState,
-    a: &ImodvApp,
-    source: &dyn MvImageSource,
-    draw_trans: i32,
-) {
-    state.clip_planes.count = 0;
-    if draw_trans != 0 || !mv_image_any_clipping(state) {
-        return;
-    }
-    let Some(model) = (unsafe { a.imod.as_ref() }) else {
-        return;
-    };
-    let Some(view) = model.view.first() else {
-        return;
-    };
-    let Some(mut mat) = imod_mat_new(3) else {
-        return;
-    };
-    imod_mat_rot(&mut mat, view.rot.z as f64, B3D_Z);
-    imod_mat_rot(&mut mat, view.rot.y as f64, B3D_Y);
-    imod_mat_rot(&mut mat, view.rot.x as f64, B3D_X);
-    let (ix, iy, iz) = source.location();
-    let (xs, ys, zs) = source.dimensions();
-    let mut count = 0usize;
-    for axis in 0..3usize {
-        if state.flags & (1 << axis) == 0 || state.flags & (1 << (axis + 3)) == 0 {
-            continue;
-        }
-        let normal = Ipoint {
-            x: (axis == 2) as i32 as f32,
-            y: (axis == 1) as i32 as f32,
-            z: (axis == 0) as i32 as f32,
-        };
-        let mut transformed = Ipoint::default();
-        imod_mat_transform(&mat, &normal, &mut transformed);
-        let flip = (state.clip_offset < 0 && transformed.z < 0.)
-            || (state.clip_offset >= 0 && transformed.z > 0.);
-        let n = if flip {
-            Ipoint {
-                x: -normal.x,
-                y: -normal.y,
-                z: -normal.z,
-            }
-        } else {
-            normal
-        };
-        state.clip_planes.normal[count] = n;
-        let gap = state.clip_offset.max(0) as f32 + 0.5;
-        state.clip_planes.point[count] = Ipoint {
-            x: if axis == 2 {
-                -(ix as f32)
-            } else {
-                -(xs as f32) / 2.
-            } + n.x * gap,
-            y: if axis == 1 {
-                -(iy as f32)
-            } else {
-                -(ys as f32) / 2.
-            } + n.y * gap,
-            z: if axis == 0 {
-                -(iz as f32)
-            } else {
-                -(zs as f32) / 2.
-            } + n.z * gap,
-        };
-        count += 1;
-    }
-    if state.clip_offset >= 0 {
-        for index in 0..count {
-            if count + index >= state.clip_planes.normal.len() {
-                break;
-            }
-            let n = state.clip_planes.normal[index];
-            let p = state.clip_planes.point[index];
-            state.clip_planes.normal[count + index] = Ipoint {
-                x: -n.x,
-                y: -n.y,
-                z: -n.z,
-            };
-            state.clip_planes.point[count + index] = Ipoint {
-                x: p.x - n.x * (state.clip_offset + 1) as f32,
-                y: p.y - n.y * (state.clip_offset + 1) as f32,
-                z: p.z - n.z * (state.clip_offset + 1) as f32,
-            };
-        }
-        count *= 2;
-    }
-    state.clip_planes.count = count.min(state.clip_planes.normal.len()) as u8;
-}
+
 /// `adjustLimitsForTiles`.  The cache unit owns the coordinate conversion;
 /// this source unit preserves its call point and returned display offsets.
 pub fn adjust_limits_for_tiles(
@@ -830,334 +1154,7 @@ pub fn adjust_limits_for_tiles(
     }
     (0., 0., 0., 1)
 }
-/// `imodvDrawImage`: Z, X, and Y texture-plane loops.  Image/cache storage is
-/// read only through the direct `iview`/`PyramidCache` boundary above.
-pub fn imodv_draw_image(
-    state: &mut MvImageState,
-    a: &mut ImodvApp,
-    source: &mut dyn MvImageSource,
-    draw_trans: i32,
-    gl: &mut dyn MvImageGl,
-) {
-    if !mv_image_any_drawing(state) {
-        mv_image_cleanup(state, gl);
-        return;
-    }
-    let (xs, ys, zs) = source.dimensions();
-    if state.xdraw_size < 0 {
-        state.xdraw_size = xs;
-        state.ydraw_size = ys;
-        state.zdraw_size = zs
-    }
-    if state.tex_image_size == 0 && init_tex_mapping(state, a, gl) != 0 {
-        return;
-    }
-    // `pickBestCache` and the source antialiased-reduction selection.  A
-    // selected cache remains responsible for its scaled sample coordinates
-    // through the `MvImageSource` implementation.
-    let rad = unsafe { a.imod.as_ref() }
-        .and_then(|model| model.view.first())
-        .map(|view| view.rad as f64)
-        .unwrap_or(1.0)
-        .max(f64::MIN_POSITIVE);
-    let zoom = 0.5 * a.winx.min(a.winy) as f64 / rad;
-    let cache_selection =
-        source.pick_best_cache(zoom, state.pyr_zoom_up_limit, state.pyr_zoom_down_limit);
-    let cache_scale = cache_selection.map(|(_, scale)| scale).unwrap_or(1).max(1);
-    state.zoom_scale = zoom * cache_scale as f64;
-    let max_size = state.xdraw_size.max(state.ydraw_size).max(state.zdraw_size) / cache_scale;
-    state.zoom_buffer.clear();
-    if state.use_zoom_down != 0
-        && state.zoom_scale < 0.75
-        && max_size as f64 * state.zoom_scale > 20.0
-    {
-        state.zoom_buf_size =
-            (((state.tex_image_size as f64 / state.zoom_scale) as i32) / 2 * 2).min(max_size);
-        if state.zoom_buf_size > 0 {
-            let filters = [5, 4, 1, 0];
-            let mut width = 0;
-            for filter in filters {
-                if unsafe { select_zoom_filter(filter, state.zoom_scale, &mut width) } == 0 {
-                    state.zoom_filter = filter;
-                    break;
-                }
-            }
-            state
-                .zoom_buffer
-                .resize((4 * state.zoom_buf_size * state.zoom_buf_size) as usize, 0);
-        }
-    }
-    make_color_map(state, false);
-    let (cx, cy, cz) = source.location();
-    let mut xlimits = set_coord_limits(cx, xs, state.xdraw_size);
-    let mut ylimits = set_coord_limits(cy, ys, state.ydraw_size);
-    let (zfirst, zlast, zdir) = set_slice_limits(state, cz, zs, a.invert_z != 0, draw_trans);
-    let mut zlimits = (zfirst, zlast);
-    let (_tile_x_offset, _tile_y_offset, tile_z_offset, tile_z_scale) = adjust_limits_for_tiles(
-        source,
-        cache_selection.map(|(cache, _)| cache),
-        zdir,
-        &mut xlimits,
-        &mut ylimits,
-        &mut zlimits,
-    );
-    let (xst, xnd) = xlimits;
-    let (yst, ynd) = ylimits;
-    let (zst, znd) = zlimits;
-    setup_clip_planes(state, a, source, draw_trans);
-    gl.enable_texture(true);
-    let mut z = zst;
-    while zdir * (znd - z) >= 0 {
-        set_alpha(state, z, zst, znd, zdir, gl);
-        let width = xnd - xst + 2;
-        let height = ynd - yst + 2;
-        let needed = (4 * width * height) as usize;
-        if state.tdata.len() < needed {
-            state.tdata.resize(needed, 0)
-        }
-        for yy in 0..height {
-            for xx in 0..width {
-                let ix = (xst - 1 + xx).clamp(0, xs - 1);
-                let iy = (yst - 1 + yy).clamp(0, ys - 1);
-                let pixel = source.pixel(ix, iy, z);
-                let map = source.ushort_to_byte_map();
-                fill_image_pixel(state, width, xx, yy, pixel, map)
-            }
-        }
-        let p = [
-            Ipoint {
-                x: xst as f32,
-                y: yst as f32,
-                z: z as f32 * tile_z_scale as f32 + tile_z_offset,
-            },
-            Ipoint {
-                x: xnd as f32,
-                y: yst as f32,
-                z: z as f32 * tile_z_scale as f32 + tile_z_offset,
-            },
-            Ipoint {
-                x: xnd as f32,
-                y: ynd as f32,
-                z: z as f32 * tile_z_scale as f32 + tile_z_offset,
-            },
-            Ipoint {
-                x: xst as f32,
-                y: ynd as f32,
-                z: z as f32 * tile_z_scale as f32 + tile_z_offset,
-            },
-        ];
-        let data = state.tdata[..needed].to_vec();
-        imodv_draw_timage(
-            state,
-            p,
-            Ipoint {
-                x: (width - 1) as f32 / width as f32,
-                y: (height - 1) as f32 / height as f32,
-                z: 0.,
-            },
-            &data,
-            width,
-            height,
-            gl,
-        );
-        z += zdir;
-    }
-    // Draw Current X image.  This is the `IMODV_DRAW_CX` loop in the source:
-    // texture U is Y and texture V is Z.
-    if state.flags & IMODV_DRAW_CX != 0 && !(a.stereo != 0 && a.image_stereo != 0) {
-        let (xfirst, xlast, xdir) = set_slice_limits(state, cx, xs, a.invert_z != 0, draw_trans);
-        let (yfirst, ylast) = set_coord_limits(cy, ys, state.ydraw_size);
-        let (zfirst, zlast) = set_coord_limits(cz, zs, state.zdraw_size);
-        let mut xplane = xfirst;
-        while xdir * (xlast - xplane) >= 0 {
-            set_alpha(state, xplane, xfirst, xlast, xdir, gl);
-            let mut zpatch = zfirst;
-            while zpatch < zlast {
-                let zend = (zpatch + state.tex_image_size - 2).min(zlast);
-                let mut ypatch = yfirst;
-                while ypatch < ylast {
-                    let yend = (ypatch + state.tex_image_size - 2).min(ylast);
-                    let width = yend - ypatch + 2;
-                    let height = zend - zpatch + 2;
-                    let needed = (4 * width * height) as usize;
-                    if state.tdata.len() < needed {
-                        state.tdata.resize(needed, 0);
-                    }
-                    for vz in 0..height {
-                        for uy in 0..width {
-                            let pixel = source.pixel(
-                                (xplane).clamp(0, xs - 1),
-                                (ypatch - 1 + uy).clamp(0, ys - 1),
-                                (zpatch - 1 + vz).clamp(0, zs - 1),
-                            );
-                            let map = source.ushort_to_byte_map();
-                            fill_image_pixel(state, width, uy, vz, pixel, map);
-                        }
-                    }
-                    let data = state.tdata[..needed].to_vec();
-                    imodv_draw_timage(
-                        state,
-                        [
-                            Ipoint {
-                                x: xplane as f32,
-                                y: ypatch as f32,
-                                z: zpatch as f32,
-                            },
-                            Ipoint {
-                                x: xplane as f32,
-                                y: yend as f32,
-                                z: zpatch as f32,
-                            },
-                            Ipoint {
-                                x: xplane as f32,
-                                y: yend as f32,
-                                z: zend as f32,
-                            },
-                            Ipoint {
-                                x: xplane as f32,
-                                y: ypatch as f32,
-                                z: zend as f32,
-                            },
-                        ],
-                        Ipoint {
-                            x: (width - 1) as f32 / width as f32,
-                            y: (height - 1) as f32 / height as f32,
-                            z: 0.,
-                        },
-                        &data,
-                        width,
-                        height,
-                        gl,
-                    );
-                    ypatch += state.tex_image_size - 2;
-                }
-                zpatch += state.tex_image_size - 2;
-            }
-            xplane += xdir;
-        }
-    }
 
-    // Draw Current Y image.  This is the source `IMODV_DRAW_CY` loop: U is X
-    // and V is Z, with fast-access storage represented by `MvImageSource`.
-    if state.flags & IMODV_DRAW_CY != 0 && !(a.stereo != 0 && a.image_stereo != 0) {
-        let (yfirst, ylast, ydir) = set_slice_limits(state, cy, ys, a.invert_z != 0, draw_trans);
-        let (xfirst, xlast) = set_coord_limits(cx, xs, state.xdraw_size);
-        let (zfirst, zlast) = set_coord_limits(cz, zs, state.zdraw_size);
-        let mut yplane = yfirst;
-        while ydir * (ylast - yplane) >= 0 {
-            set_alpha(state, yplane, yfirst, ylast, ydir, gl);
-            let mut zpatch = zfirst;
-            while zpatch < zlast {
-                let zend = (zpatch + state.tex_image_size - 2).min(zlast);
-                let mut xpatch = xfirst;
-                while xpatch < xlast {
-                    let xend = (xpatch + state.tex_image_size - 2).min(xlast);
-                    let width = xend - xpatch + 2;
-                    let height = zend - zpatch + 2;
-                    let needed = (4 * width * height) as usize;
-                    if state.tdata.len() < needed {
-                        state.tdata.resize(needed, 0);
-                    }
-                    for vz in 0..height {
-                        for ux in 0..width {
-                            let pixel = source.pixel(
-                                (xpatch - 1 + ux).clamp(0, xs - 1),
-                                yplane.clamp(0, ys - 1),
-                                (zpatch - 1 + vz).clamp(0, zs - 1),
-                            );
-                            let map = source.ushort_to_byte_map();
-                            fill_image_pixel(state, width, ux, vz, pixel, map);
-                        }
-                    }
-                    let data = state.tdata[..needed].to_vec();
-                    imodv_draw_timage(
-                        state,
-                        [
-                            Ipoint {
-                                x: xpatch as f32,
-                                y: yplane as f32,
-                                z: zpatch as f32,
-                            },
-                            Ipoint {
-                                x: xend as f32,
-                                y: yplane as f32,
-                                z: zpatch as f32,
-                            },
-                            Ipoint {
-                                x: xend as f32,
-                                y: yplane as f32,
-                                z: zend as f32,
-                            },
-                            Ipoint {
-                                x: xpatch as f32,
-                                y: yplane as f32,
-                                z: zend as f32,
-                            },
-                        ],
-                        Ipoint {
-                            x: (width - 1) as f32 / width as f32,
-                            y: (height - 1) as f32 / height as f32,
-                            z: 0.,
-                        },
-                        &data,
-                        width,
-                        height,
-                        gl,
-                    );
-                    xpatch += state.tex_image_size - 2;
-                }
-                zpatch += state.tex_image_size - 2;
-            }
-            yplane += ydir;
-        }
-    }
-    gl.set_alpha_blend(1., false);
-    gl.enable_texture(false)
-}
-/// Source `FILLDATA` macro.
-pub fn fill_pixel(state: &mut MvImageState, width: i32, x: i32, y: i32, value: u8) {
-    let p = (4 * (width * y + x)) as usize;
-    if p + 3 >= state.tdata.len() {
-        return;
-    }
-    state.tdata[p] = state.cmap[0][value as usize];
-    state.tdata[p + 1] = state.cmap[1][value as usize];
-    state.tdata[p + 2] = state.cmap[2][value as usize];
-    state.tdata[p + 3] = 255
-}
-/// Source `FILLRGB` macro and `ivwUShortInRangeToByteMap` indexing.
-pub fn fill_image_pixel(
-    state: &mut MvImageState,
-    width: i32,
-    x: i32,
-    y: i32,
-    pixel: Option<ImagePixel>,
-    ushort_map: Option<&[u8]>,
-) {
-    match pixel {
-        Some(ImagePixel::Byte(value)) => fill_pixel(state, width, x, y, value),
-        Some(ImagePixel::UShort(value)) => fill_pixel(
-            state,
-            width,
-            x,
-            y,
-            ushort_map
-                .and_then(|map| map.get(value as usize))
-                .copied()
-                .unwrap_or(0),
-        ),
-        Some(ImagePixel::Rgb([blue, green, red])) => {
-            let p = (4 * (width * y + x)) as usize;
-            if p + 3 < state.tdata.len() {
-                state.tdata[p] = state.cmap[0][red as usize];
-                state.tdata[p + 1] = state.cmap[1][green as usize];
-                state.tdata[p + 2] = state.cmap[2][blue as usize];
-                state.tdata[p + 3] = 255;
-            }
-        }
-        None => fill_pixel(state, width, x, y, 0),
-    }
-}
 impl ImodvImage {
     /// `ImodvImage()` source constructor.
     pub fn new() -> Self {
@@ -1186,29 +1183,29 @@ impl ImodvImage {
         self.manage_clip_enables(state)
     }
     pub fn view_x_toggled(&mut self, s: &mut MvImageState, a: &mut ImodvApp, on: bool) {
-        mv_image_set_plane_flag(s, a, on, IMODV_DRAW_CX)
+        s.mv_image_set_plane_flag(a, on, IMODV_DRAW_CX)
     }
     pub fn view_y_toggled(&mut self, s: &mut MvImageState, a: &mut ImodvApp, on: bool) {
-        mv_image_set_plane_flag(s, a, on, IMODV_DRAW_CY)
+        s.mv_image_set_plane_flag(a, on, IMODV_DRAW_CY)
     }
     pub fn view_z_toggled(&mut self, s: &mut MvImageState, a: &mut ImodvApp, on: bool) {
-        mv_image_set_plane_flag(s, a, on, IMODV_DRAW_CZ)
+        s.mv_image_set_plane_flag(a, on, IMODV_DRAW_CZ)
     }
     pub fn clip_x_toggled(&mut self, s: &mut MvImageState, a: &mut ImodvApp, on: bool) {
-        mv_image_set_plane_flag(s, a, on, IMODV_CLIP_CX)
+        s.mv_image_set_plane_flag(a, on, IMODV_CLIP_CX)
     }
     pub fn clip_y_toggled(&mut self, s: &mut MvImageState, a: &mut ImodvApp, on: bool) {
-        mv_image_set_plane_flag(s, a, on, IMODV_CLIP_CY)
+        s.mv_image_set_plane_flag(a, on, IMODV_CLIP_CY)
     }
     pub fn clip_z_toggled(&mut self, s: &mut MvImageState, a: &mut ImodvApp, on: bool) {
-        mv_image_set_plane_flag(s, a, on, IMODV_CLIP_CZ)
+        s.mv_image_set_plane_flag(a, on, IMODV_CLIP_CZ)
     }
     pub fn clip_offset_changed(&mut self, s: &mut MvImageState, value: i32) {
         s.clip_offset = value
     }
     pub fn false_toggled(&mut self, s: &mut MvImageState, on: bool) {
         s.falsecolor = on as i32;
-        make_color_map(s, false)
+        s.make_color_map(false)
     }
     pub fn use_zoom_toggled(&mut self, s: &mut MvImageState, on: bool) {
         s.use_zoom_down = on as i32
@@ -1225,11 +1222,11 @@ impl ImodvImage {
             7 => s.image_trans = value,
             8 => {
                 s.black_level = value;
-                make_color_map(s, false)
+                s.make_color_map(false)
             }
             9 => {
                 s.white_level = value;
-                make_color_map(s, false)
+                s.make_color_map(false)
             }
             _ => {}
         }
@@ -1237,7 +1234,7 @@ impl ImodvImage {
     pub fn copy_bw_clicked(&mut self, s: &mut MvImageState, black: i32, white: i32) {
         s.black_level = black;
         s.white_level = white;
-        make_color_map(s, false)
+        s.make_color_map(false)
     }
     /// `ImodvImage::buttonPressed`.
     pub fn button_pressed(&mut self, native: &mut dyn MvImageNativeBoundary) {
@@ -1392,7 +1389,7 @@ mod tests {
     fn limits_match_source() {
         assert_eq!(set_coord_limits(0, 100, 20), (1, 21));
         let s = MvImageState::default();
-        assert_eq!(set_slice_limits(&s, 0, 10, false, 0), (0, 0, 1));
+        assert_eq!(s.set_slice_limits(0, 10, false, 0), (0, 0, 1));
     }
     #[test]
     fn texture_path_uploads() {
@@ -1407,7 +1404,7 @@ mod tests {
             quads: 0,
             texel: 0.,
         };
-        imodv_draw_image(&mut s, &mut a, &mut src, 0, &mut gl);
+        s.imodv_draw_image(&mut a, &mut src, 0, &mut gl);
         assert_ne!(s.tex_name, 0);
         assert_eq!(gl.texel, 1. / s.tex_image_size as f32);
     }
@@ -1424,32 +1421,18 @@ mod tests {
             quads: 0,
             texel: 0.,
         };
-        imodv_draw_image(&mut s, &mut a, &mut src, 0, &mut gl);
+        s.imodv_draw_image(&mut a, &mut src, 0, &mut gl);
         assert!(gl.quads >= 3, "drawn quads: {}", gl.quads);
     }
     #[test]
     fn ushort_and_rgb_fill_follow_source_bgr_order() {
         let mut state = MvImageState::default();
-        make_color_map(&mut state, false);
+        state.make_color_map(false);
         state.tdata.resize(4, 0);
         let map = vec![0u8; 256];
-        fill_image_pixel(
-            &mut state,
-            1,
-            0,
-            0,
-            Some(ImagePixel::Rgb([11, 22, 33])),
-            Some(&map),
-        );
+        state.fill_image_pixel(1, 0, 0, Some(ImagePixel::Rgb([11, 22, 33])), Some(&map));
         assert_eq!(&state.tdata, &[33, 22, 11, 255]);
-        fill_image_pixel(
-            &mut state,
-            1,
-            0,
-            0,
-            Some(ImagePixel::UShort(10)),
-            Some(&vec![9; 11]),
-        );
+        state.fill_image_pixel(1, 0, 0, Some(ImagePixel::UShort(10)), Some(&vec![9; 11]));
         assert_eq!(state.tdata[3], 255);
     }
     #[test]

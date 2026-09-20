@@ -108,6 +108,297 @@ pub struct FgData {
     pub cont_props: DrawProps,
     pub store: Istore,
 }
+
+impl FgData {
+    /// `fineGrainUpdate`.  The upstream model lookup is represented by its named
+    /// controller boundary; retained state and enable calculation are identical.
+    pub fn fine_grain_update(&mut self, boundary: &mut dyn FinegrainControllerBoundary) {
+        if !self.dialog_open {
+            return;
+        }
+        let enabled = if self.pt_cont_surf == 2 && self.surf_loaded >= 0 {
+            1
+        } else if (self.pt_cont_surf == 0 && self.pt_loaded >= 0)
+            || (self.pt_cont_surf != 0 && self.cont_loaded >= 0)
+        {
+            2
+        } else {
+            0
+        };
+        boundary.update_dialog(
+            self.pt_cont_surf,
+            enabled,
+            &self.cont_props,
+            self.state_flags,
+            false,
+            false,
+        );
+    }
+    /// `fineGrainApplyLast`.
+    pub fn fine_grain_apply_last(&self, boundary: &mut dyn FinegrainControllerBoundary) -> i32 {
+        if !self.dialog_open {
+            0
+        } else {
+            boundary.apply_last_change(self.last_change_type)
+        }
+    }
+    /// `ifgShowConnections`.
+    pub fn ifg_show_connections(&self) -> i32 {
+        self.show_connects
+    }
+    /// `ifgStippleGaps`.
+    pub fn ifg_stipple_gaps(&self) -> i32 {
+        self.stipple_gaps
+    }
+    /// `ifgGetChangeAll`.
+    pub fn ifg_get_change_all(&self) -> i32 {
+        self.change_all
+    }
+    /// `ifgChangeAllToggled`.
+    pub fn ifg_change_all_toggled(&mut self, state: bool) {
+        self.change_all = state as i32;
+    }
+    /// `ifgGotoNextChange`.
+    pub fn ifg_goto_next_change(
+        &self,
+        previous: bool,
+        boundary: &mut dyn FinegrainControllerBoundary,
+    ) {
+        boundary.goto_next_change(previous, self.pt_cont_surf);
+        boundary.set_xyz_mouse();
+    }
+    /// `ifgShowConnectChanged`.
+    pub fn ifg_show_connect_changed(
+        &mut self,
+        state: bool,
+        boundary: &mut dyn FinegrainControllerBoundary,
+    ) {
+        self.show_connects = state as i32;
+        boundary.redraw();
+    }
+    /// `ifgStippleGapsChanged`.
+    pub fn ifg_stipple_gaps_changed(
+        &mut self,
+        state: bool,
+        boundary: &mut dyn FinegrainControllerBoundary,
+    ) {
+        self.stipple_gaps = state as i32;
+        boundary.redraw();
+    }
+    /// `ifgDump`.
+    pub fn ifg_dump(&self, boundary: &mut dyn FinegrainControllerBoundary) {
+        boundary.dump_store(self.pt_cont_surf);
+    }
+    /// `ifgClosing`.
+    pub fn ifg_closing(&mut self, boundary: &mut dyn FinegrainControllerBoundary) {
+        if self.dialog_open {
+            boundary.close_dialog();
+        }
+        self.dialog_open = false;
+    }
+    /// Static `getLoadedObjCont`.  Rubber-band selection and undo notifications
+    /// belong to the editor boundary; this is the source's model-index validity
+    /// portion, including the range sentinel reset.
+    pub fn get_loaded_obj_cont(&mut self, objects: &[Iobj], _add_type: i16) -> i32 {
+        self.range_end = -1;
+        let Some(object) = objects.get(self.obj_loaded.max(0) as usize) else {
+            return 1;
+        };
+        if self.obj_loaded < 0 || self.cont_loaded >= object.cont.len() as i32 {
+            return 1;
+        }
+        if self.pt_cont_surf == 2 {
+            return 0;
+        }
+        let Some(contour) = object.cont.get(self.cont_loaded.max(0) as usize) else {
+            return 1;
+        };
+        if self.cont_loaded < 0
+            || (self.pt_cont_surf == 0 && self.pt_loaded >= contour.pts.len() as i32)
+        {
+            return 1;
+        }
+        0
+    }
+
+    /// `fineGrainOpen`.
+    pub fn fine_grain_open(&mut self, boundary: &mut dyn FinegrainControllerBoundary) {
+        if self.dialog_open {
+            boundary.raise_dialog();
+            return;
+        }
+        self.dialog_open = true;
+        boundary.open_dialog();
+        self.fine_grain_update(boundary);
+    }
+    /// `ifgPtContSurfSelected`.
+    pub fn ifg_pt_cont_surf_selected(
+        &mut self,
+        which: i32,
+        boundary: &mut dyn FinegrainControllerBoundary,
+    ) {
+        self.pt_cont_surf = which;
+        self.fine_grain_update(boundary);
+    }
+    /// Static `insertAndUpdate`.
+    pub fn insert_and_update(
+        &mut self,
+        type_: i16,
+        boundary: &mut dyn FinegrainControllerBoundary,
+    ) {
+        self.store.type_ = type_;
+        if self.pt_cont_surf == 2 {
+            self.store.flags |= GEN_STORE_SURFACE;
+        }
+        boundary.mutate_store(self.pt_cont_surf, type_, &self.store, false);
+        boundary.set_xyz_mouse();
+        self.fine_grain_update(boundary);
+    }
+    /// `ifgEndChange`.
+    pub fn ifg_end_change(&mut self, type_: i16, boundary: &mut dyn FinegrainControllerBoundary) {
+        boundary.mutate_store(self.pt_cont_surf, type_, &self.store, false);
+        boundary.set_xyz_mouse();
+        self.fine_grain_update(boundary);
+    }
+    /// `ifgClearChange`.
+    pub fn ifg_clear_change(&mut self, type_: i16, boundary: &mut dyn FinegrainControllerBoundary) {
+        boundary.mutate_store(self.pt_cont_surf, type_, &self.store, true);
+        boundary.redraw();
+        self.fine_grain_update(boundary);
+    }
+
+    /// `ifgColorChanged`.
+    pub fn ifg_color_changed(
+        &mut self,
+        type_: i16,
+        red: i32,
+        green: i32,
+        blue: i32,
+        boundary: &mut dyn FinegrainControllerBoundary,
+    ) {
+        self.store.value = StoreUnion::from_b([red as u8, green as u8, blue as u8, 0]);
+        self.store.flags = 3 << 2;
+        self.insert_and_update(type_, boundary);
+    }
+    /// `ifgIntChanged`.
+    pub fn ifg_int_changed(
+        &mut self,
+        type_: i16,
+        value: i32,
+        boundary: &mut dyn FinegrainControllerBoundary,
+    ) {
+        self.store.value = StoreUnion::from_i(value);
+        self.store.flags = 0;
+        self.insert_and_update(type_, boundary);
+    }
+    /// `ifgSymtypeChanged`.
+    pub fn ifg_symtype_changed(
+        &mut self,
+        mut symtype: i32,
+        filled: bool,
+        boundary: &mut dyn FinegrainControllerBoundary,
+    ) {
+        if filled {
+            symtype = -1 - symtype;
+        }
+        self.store.value = StoreUnion::from_i(symtype);
+        self.store.flags = 0;
+        self.last_change_type = 6;
+        self.insert_and_update(GEN_STORE_SYMTYPE, boundary);
+    }
+
+    /// `ifgLineColorChanged`.
+    pub fn ifg_line_color_changed(
+        &mut self,
+        red: i32,
+        green: i32,
+        blue: i32,
+        boundary: &mut dyn FinegrainControllerBoundary,
+    ) {
+        self.last_change_type = 0;
+        self.ifg_color_changed(GEN_STORE_COLOR, red, green, blue, boundary);
+    }
+    /// `ifgFillColorChanged`.
+    pub fn ifg_fill_color_changed(
+        &mut self,
+        red: i32,
+        green: i32,
+        blue: i32,
+        boundary: &mut dyn FinegrainControllerBoundary,
+    ) {
+        self.last_change_type = 1;
+        self.ifg_color_changed(GEN_STORE_FCOLOR, red, green, blue, boundary);
+    }
+    /// `ifgTransChanged`.
+    pub fn ifg_trans_changed(
+        &mut self,
+        value: i32,
+        boundary: &mut dyn FinegrainControllerBoundary,
+    ) {
+        self.last_change_type = 2;
+        self.ifg_int_changed(GEN_STORE_TRANS, value, boundary);
+    }
+    /// `ifgWidth2DChanged`.
+    pub fn ifg_width_2d_changed(
+        &mut self,
+        value: i32,
+        boundary: &mut dyn FinegrainControllerBoundary,
+    ) {
+        self.last_change_type = 3;
+        self.ifg_int_changed(GEN_STORE_2DWIDTH, value, boundary);
+    }
+    /// `ifgWidth3DChanged`.
+    pub fn ifg_width_3d_changed(
+        &mut self,
+        value: i32,
+        boundary: &mut dyn FinegrainControllerBoundary,
+    ) {
+        self.last_change_type = 4;
+        self.ifg_int_changed(GEN_STORE_3DWIDTH, value, boundary);
+    }
+    /// `ifgSymsizeChanged`.
+    pub fn ifg_symsize_changed(
+        &mut self,
+        value: i32,
+        boundary: &mut dyn FinegrainControllerBoundary,
+    ) {
+        self.last_change_type = 5;
+        self.ifg_int_changed(GEN_STORE_SYMSIZE, value, boundary);
+    }
+    /// `ifgGapChanged`.
+    pub fn ifg_gap_changed(&mut self, state: bool, boundary: &mut dyn FinegrainControllerBoundary) {
+        if state {
+            self.ifg_int_changed(GEN_STORE_GAP, 1, boundary);
+        } else {
+            self.ifg_clear_change(GEN_STORE_GAP, boundary);
+        }
+    }
+    /// `ifgNoCapChanged`.
+    pub fn ifg_no_cap_changed(
+        &mut self,
+        state: bool,
+        boundary: &mut dyn FinegrainControllerBoundary,
+    ) {
+        if state {
+            self.ifg_int_changed(GEN_STORE_NO_CAP, 1, boundary);
+        } else {
+            self.ifg_clear_change(GEN_STORE_NO_CAP, boundary);
+        }
+    }
+    /// `ifgConnectChanged`.
+    pub fn ifg_connect_changed(
+        &mut self,
+        value: i32,
+        boundary: &mut dyn FinegrainControllerBoundary,
+    ) {
+        if value != 0 {
+            self.ifg_int_changed(GEN_STORE_CONNECT, value, boundary);
+        } else {
+            self.ifg_clear_change(GEN_STORE_CONNECT, boundary);
+        }
+    }
+}
+
 impl Default for FgData {
     fn default() -> Self {
         Self {
@@ -151,304 +442,6 @@ pub trait FinegrainControllerBoundary {
     fn redraw(&mut self);
     fn set_xyz_mouse(&mut self);
     fn dump_store(&mut self, mode: i32);
-}
-
-/// `fineGrainOpen`.
-pub fn fine_grain_open(data: &mut FgData, boundary: &mut dyn FinegrainControllerBoundary) {
-    if data.dialog_open {
-        boundary.raise_dialog();
-        return;
-    }
-    data.dialog_open = true;
-    boundary.open_dialog();
-    fine_grain_update(data, boundary);
-}
-/// `fineGrainUpdate`.  The upstream model lookup is represented by its named
-/// controller boundary; retained state and enable calculation are identical.
-pub fn fine_grain_update(data: &mut FgData, boundary: &mut dyn FinegrainControllerBoundary) {
-    if !data.dialog_open {
-        return;
-    }
-    let enabled = if data.pt_cont_surf == 2 && data.surf_loaded >= 0 {
-        1
-    } else if (data.pt_cont_surf == 0 && data.pt_loaded >= 0)
-        || (data.pt_cont_surf != 0 && data.cont_loaded >= 0)
-    {
-        2
-    } else {
-        0
-    };
-    boundary.update_dialog(
-        data.pt_cont_surf,
-        enabled,
-        &data.cont_props,
-        data.state_flags,
-        false,
-        false,
-    );
-}
-/// `fineGrainApplyLast`.
-pub fn fine_grain_apply_last(data: &FgData, boundary: &mut dyn FinegrainControllerBoundary) -> i32 {
-    if !data.dialog_open {
-        0
-    } else {
-        boundary.apply_last_change(data.last_change_type)
-    }
-}
-/// `ifgShowConnections`.
-pub fn ifg_show_connections(data: &FgData) -> i32 {
-    data.show_connects
-}
-/// `ifgStippleGaps`.
-pub fn ifg_stipple_gaps(data: &FgData) -> i32 {
-    data.stipple_gaps
-}
-/// `ifgGetChangeAll`.
-pub fn ifg_get_change_all(data: &FgData) -> i32 {
-    data.change_all
-}
-/// `ifgPtContSurfSelected`.
-pub fn ifg_pt_cont_surf_selected(
-    data: &mut FgData,
-    which: i32,
-    boundary: &mut dyn FinegrainControllerBoundary,
-) {
-    data.pt_cont_surf = which;
-    fine_grain_update(data, boundary);
-}
-/// `ifgChangeAllToggled`.
-pub fn ifg_change_all_toggled(data: &mut FgData, state: bool) {
-    data.change_all = state as i32;
-}
-/// `ifgGotoNextChange`.
-pub fn ifg_goto_next_change(
-    data: &FgData,
-    previous: bool,
-    boundary: &mut dyn FinegrainControllerBoundary,
-) {
-    boundary.goto_next_change(previous, data.pt_cont_surf);
-    boundary.set_xyz_mouse();
-}
-/// Static `insertAndUpdate`.
-pub fn insert_and_update(
-    data: &mut FgData,
-    type_: i16,
-    boundary: &mut dyn FinegrainControllerBoundary,
-) {
-    data.store.type_ = type_;
-    if data.pt_cont_surf == 2 {
-        data.store.flags |= GEN_STORE_SURFACE;
-    }
-    boundary.mutate_store(data.pt_cont_surf, type_, &data.store, false);
-    boundary.set_xyz_mouse();
-    fine_grain_update(data, boundary);
-}
-/// `ifgColorChanged`.
-pub fn ifg_color_changed(
-    data: &mut FgData,
-    type_: i16,
-    red: i32,
-    green: i32,
-    blue: i32,
-    boundary: &mut dyn FinegrainControllerBoundary,
-) {
-    data.store.value = StoreUnion::from_b([red as u8, green as u8, blue as u8, 0]);
-    data.store.flags = 3 << 2;
-    insert_and_update(data, type_, boundary);
-}
-/// `ifgLineColorChanged`.
-pub fn ifg_line_color_changed(
-    data: &mut FgData,
-    red: i32,
-    green: i32,
-    blue: i32,
-    boundary: &mut dyn FinegrainControllerBoundary,
-) {
-    data.last_change_type = 0;
-    ifg_color_changed(data, GEN_STORE_COLOR, red, green, blue, boundary);
-}
-/// `ifgFillColorChanged`.
-pub fn ifg_fill_color_changed(
-    data: &mut FgData,
-    red: i32,
-    green: i32,
-    blue: i32,
-    boundary: &mut dyn FinegrainControllerBoundary,
-) {
-    data.last_change_type = 1;
-    ifg_color_changed(data, GEN_STORE_FCOLOR, red, green, blue, boundary);
-}
-/// `ifgIntChanged`.
-pub fn ifg_int_changed(
-    data: &mut FgData,
-    type_: i16,
-    value: i32,
-    boundary: &mut dyn FinegrainControllerBoundary,
-) {
-    data.store.value = StoreUnion::from_i(value);
-    data.store.flags = 0;
-    insert_and_update(data, type_, boundary);
-}
-/// `ifgTransChanged`.
-pub fn ifg_trans_changed(
-    data: &mut FgData,
-    value: i32,
-    boundary: &mut dyn FinegrainControllerBoundary,
-) {
-    data.last_change_type = 2;
-    ifg_int_changed(data, GEN_STORE_TRANS, value, boundary);
-}
-/// `ifgWidth2DChanged`.
-pub fn ifg_width_2d_changed(
-    data: &mut FgData,
-    value: i32,
-    boundary: &mut dyn FinegrainControllerBoundary,
-) {
-    data.last_change_type = 3;
-    ifg_int_changed(data, GEN_STORE_2DWIDTH, value, boundary);
-}
-/// `ifgWidth3DChanged`.
-pub fn ifg_width_3d_changed(
-    data: &mut FgData,
-    value: i32,
-    boundary: &mut dyn FinegrainControllerBoundary,
-) {
-    data.last_change_type = 4;
-    ifg_int_changed(data, GEN_STORE_3DWIDTH, value, boundary);
-}
-/// `ifgSymsizeChanged`.
-pub fn ifg_symsize_changed(
-    data: &mut FgData,
-    value: i32,
-    boundary: &mut dyn FinegrainControllerBoundary,
-) {
-    data.last_change_type = 5;
-    ifg_int_changed(data, GEN_STORE_SYMSIZE, value, boundary);
-}
-/// `ifgSymtypeChanged`.
-pub fn ifg_symtype_changed(
-    data: &mut FgData,
-    mut symtype: i32,
-    filled: bool,
-    boundary: &mut dyn FinegrainControllerBoundary,
-) {
-    if filled {
-        symtype = -1 - symtype;
-    }
-    data.store.value = StoreUnion::from_i(symtype);
-    data.store.flags = 0;
-    data.last_change_type = 6;
-    insert_and_update(data, GEN_STORE_SYMTYPE, boundary);
-}
-/// `ifgEndChange`.
-pub fn ifg_end_change(
-    data: &mut FgData,
-    type_: i16,
-    boundary: &mut dyn FinegrainControllerBoundary,
-) {
-    boundary.mutate_store(data.pt_cont_surf, type_, &data.store, false);
-    boundary.set_xyz_mouse();
-    fine_grain_update(data, boundary);
-}
-/// `ifgClearChange`.
-pub fn ifg_clear_change(
-    data: &mut FgData,
-    type_: i16,
-    boundary: &mut dyn FinegrainControllerBoundary,
-) {
-    boundary.mutate_store(data.pt_cont_surf, type_, &data.store, true);
-    boundary.redraw();
-    fine_grain_update(data, boundary);
-}
-/// `ifgGapChanged`.
-pub fn ifg_gap_changed(
-    data: &mut FgData,
-    state: bool,
-    boundary: &mut dyn FinegrainControllerBoundary,
-) {
-    if state {
-        ifg_int_changed(data, GEN_STORE_GAP, 1, boundary);
-    } else {
-        ifg_clear_change(data, GEN_STORE_GAP, boundary);
-    }
-}
-/// `ifgNoCapChanged`.
-pub fn ifg_no_cap_changed(
-    data: &mut FgData,
-    state: bool,
-    boundary: &mut dyn FinegrainControllerBoundary,
-) {
-    if state {
-        ifg_int_changed(data, GEN_STORE_NO_CAP, 1, boundary);
-    } else {
-        ifg_clear_change(data, GEN_STORE_NO_CAP, boundary);
-    }
-}
-/// `ifgConnectChanged`.
-pub fn ifg_connect_changed(
-    data: &mut FgData,
-    value: i32,
-    boundary: &mut dyn FinegrainControllerBoundary,
-) {
-    if value != 0 {
-        ifg_int_changed(data, GEN_STORE_CONNECT, value, boundary);
-    } else {
-        ifg_clear_change(data, GEN_STORE_CONNECT, boundary);
-    }
-}
-/// `ifgShowConnectChanged`.
-pub fn ifg_show_connect_changed(
-    data: &mut FgData,
-    state: bool,
-    boundary: &mut dyn FinegrainControllerBoundary,
-) {
-    data.show_connects = state as i32;
-    boundary.redraw();
-}
-/// `ifgStippleGapsChanged`.
-pub fn ifg_stipple_gaps_changed(
-    data: &mut FgData,
-    state: bool,
-    boundary: &mut dyn FinegrainControllerBoundary,
-) {
-    data.stipple_gaps = state as i32;
-    boundary.redraw();
-}
-/// `ifgDump`.
-pub fn ifg_dump(data: &FgData, boundary: &mut dyn FinegrainControllerBoundary) {
-    boundary.dump_store(data.pt_cont_surf);
-}
-/// `ifgClosing`.
-pub fn ifg_closing(data: &mut FgData, boundary: &mut dyn FinegrainControllerBoundary) {
-    if data.dialog_open {
-        boundary.close_dialog();
-    }
-    data.dialog_open = false;
-}
-
-/// Static `getLoadedObjCont`.  Rubber-band selection and undo notifications
-/// belong to the editor boundary; this is the source's model-index validity
-/// portion, including the range sentinel reset.
-pub fn get_loaded_obj_cont(data: &mut FgData, objects: &[Iobj], _add_type: i16) -> i32 {
-    data.range_end = -1;
-    let Some(object) = objects.get(data.obj_loaded.max(0) as usize) else {
-        return 1;
-    };
-    if data.obj_loaded < 0 || data.cont_loaded >= object.cont.len() as i32 {
-        return 1;
-    }
-    if data.pt_cont_surf == 2 {
-        return 0;
-    }
-    let Some(contour) = object.cont.get(data.cont_loaded.max(0) as usize) else {
-        return 1;
-    };
-    if data.cont_loaded < 0
-        || (data.pt_cont_surf == 0 && data.pt_loaded >= contour.pts.len() as i32)
-    {
-        return 1;
-    }
-    0
 }
 
 /// `ifgSelectedLineWidth`.

@@ -65,6 +65,669 @@ pub struct ContourEditState {
     pub move_first: bool,
 }
 
+impl ContourEditState {
+    /// `imodContEditBreakOpen`.
+    pub fn imod_cont_edit_break_open(&mut self, current: Iindex) {
+        self.break_dialog_open = true;
+        self.break_i1 = current;
+        self.break_i2 = NULL_INDEX;
+    }
+    /// `set1Pressed()` source method.
+    /// `ContourBreak::set1Pressed`.
+    pub fn contour_break_set_1(&mut self, current: Iindex) {
+        self.break_i1 = current;
+        if index_good(self.break_i2)
+            && (self.break_i1.object != self.break_i2.object
+                || self.break_i1.contour != self.break_i2.contour)
+        {
+            self.break_i2 = NULL_INDEX;
+        }
+    }
+    /// `set2Pressed()` source method.
+    /// `ContourBreak::set2Pressed`.
+    pub fn contour_break_set_2(&mut self, current: Iindex) {
+        self.break_i2 = current;
+        if index_good(self.break_i1)
+            && (self.break_i1.object != self.break_i2.object
+                || self.break_i1.contour != self.break_i2.contour)
+        {
+            self.break_i1 = NULL_INDEX;
+        }
+    }
+    /// `ContourBreak::unsetPressed`.
+    pub fn contour_break_unset(&mut self) {
+        self.break_i2 = NULL_INDEX;
+    }
+    /// `ContourBreak::currentToggled`.
+    pub fn contour_break_current_toggled(&mut self, value: bool) {
+        self.use_current = value;
+    }
+    /// `ContourBreak::breakCont` and `imodContEditBreak`.
+    pub fn imod_cont_edit_break(
+        &mut self,
+        imod: &mut Imod,
+        current: Iindex,
+        n: &mut dyn ContourEditNativeBoundary,
+    ) -> Result<(), String> {
+        let i1 = if self.use_current {
+            current
+        } else {
+            self.break_i1
+        };
+        let i2 = self.break_i2;
+        if !index_good(i1) {
+            return Err("Contour Break Error:\n\tFirst break point not set.".into());
+        }
+        if index_good(i2) && (i1.object != i2.object || i1.contour != i2.contour) {
+            return Err(
+                "Contour Break Error:\n\tBoth break points must be on the same contour.".into(),
+            );
+        }
+        let obj = imod
+            .obj
+            .get_mut(i1.object as usize)
+            .ok_or("Contour Break Error:\n\tObject number no longer valid.")?;
+        let contour_count = obj.cont.len() as i32;
+        let cont = obj
+            .cont
+            .get_mut(i1.contour as usize)
+            .ok_or("Contour Break Error:\n\tContour number is no longer valid.")?;
+        let (p1, p2) = if index_good(i2) {
+            (i1.point.min(i2.point), i1.point.max(i2.point))
+        } else {
+            (i1.point, -1)
+        };
+        if cont.pts.is_empty() {
+            return Err("Contour Break Error:\n\tSelected contour has no points.".into());
+        }
+        if p1 < 0 || p1 as usize >= cont.pts.len() || (p2 >= 0 && p2 as usize >= cont.pts.len()) {
+            return Err("Contour Break Error:\n\tInvalid break points set.".into());
+        }
+        n.contour_data_changed(i1.object, i1.contour);
+        n.contour_addition(i1.object, contour_count);
+        let mut new_cont =
+            imod_contour_break(cont, p1, p2).ok_or("Memory or other error breaking contour.")?;
+        imodel_contour_check_wild(Some(cont));
+        imodel_contour_check_wild(Some(&mut new_cont));
+        imod_object_add_contour(obj, new_cont);
+        n.finish_undo_unit();
+        n.draw_model();
+        Ok(())
+    }
+    /// `imodContEditJoinOpen`.
+    pub fn imod_cont_edit_join_open(&mut self, current: Iindex) {
+        self.join_dialog_open = true;
+        self.join_i1 = current;
+        self.join_i2 = NULL_INDEX;
+    }
+    /// `ContourJoin::set1Pressed`.
+    pub fn contour_join_set_1(&mut self, current: Iindex) {
+        self.join_i1 = current;
+        if self.join_i2.object >= 0 && self.join_i2.object != current.object {
+            self.join_i2 = NULL_INDEX;
+        }
+    }
+    /// `ContourJoin::set2Pressed`.
+    pub fn contour_join_set_2(&mut self, current: Iindex) {
+        self.join_i2 = current;
+        if self.join_i1.object >= 0 && self.join_i1.object != current.object {
+            self.join_i1 = NULL_INDEX;
+        }
+    }
+    /// `openTypeSelected()` source method.
+    /// `ContourJoin::openTypeSelected`.
+    pub fn contour_join_open_type_selected(&mut self, which: i32) {
+        self.open_type = which;
+    }
+    /// `closedTypeSelected()` source method.
+    /// `ContourJoin::closedTypeSelected`.
+    pub fn contour_join_closed_type_selected(&mut self, which: i32) {
+        self.closed_type = which;
+    }
+    /// `surfToggled()` source method.
+    pub fn contour_move_surf_toggled(&mut self, value: bool) {
+        self.whole_surf = i32::from(value);
+    }
+    /// `toSurfToggled()` source method.
+    pub fn contour_move_to_surf_toggled(&mut self, value: bool) {
+        self.move_to_surf = i32::from(value);
+    }
+    /// `replaceToggled()` source method.
+    pub fn contour_move_replace_toggled(&mut self, value: bool) {
+        self.replace = i32::from(value);
+    }
+    /// `expandToggled()` source method.
+    pub fn contour_move_expand_toggled(&mut self, value: bool) {
+        self.expand = i32::from(value);
+    }
+    /// `convertAllToggled()` source method.
+    pub fn contour_move_convert_all_toggled(&mut self, value: bool) {
+        self.convert_all_pt = i32::from(value);
+    }
+    /// `keepSizeToggled()` source method.
+    pub fn contour_move_keep_size_toggled(&mut self, value: bool) {
+        self.keep_size = i32::from(value);
+    }
+    /// `manageCheckBoxes()` source method.
+    pub fn contour_move_manage_check_boxes(
+        &self,
+        current_scattered: bool,
+        destination_scattered: bool,
+    ) -> ContourMoveCheckBoxes {
+        let replaceable = destination_scattered
+            && self.move_to_surf == 0
+            && !current_scattered
+            && self.move_up_down == 0;
+        let replace_on = self.replace != 0 && replaceable;
+        let expandable = !destination_scattered
+            && self.move_to_surf == 0
+            && current_scattered
+            && self.move_up_down == 0;
+        let expand_on = self.expand != 0 && expandable;
+        let up_down_able = !replace_on && !expand_on && self.move_to_surf == 0;
+        ContourMoveCheckBoxes {
+            replace_enabled: replaceable,
+            expand_enabled: expandable,
+            convert_all_enabled: expand_on,
+            move_all_enabled: !replace_on && !expand_on,
+            to_surface_enabled: !replace_on && !expand_on && self.move_up_down == 0,
+            move_up_down_enabled: up_down_able,
+            keep_size_enabled: current_scattered
+                && self.move_to_surf == 0
+                && self.move_up_down == 0
+                && !expand_on,
+        }
+    }
+    /// `objSelected()` source method.  Returns whether the object-destination
+    /// controls need their checkbox sensitivity refreshed.
+    pub fn contour_move_obj_selected(&mut self, obj_move_to: &mut i32, value: i32) -> bool {
+        if self.move_to_surf != 0 {
+            self.surf_move_to = value;
+            false
+        } else {
+            *obj_move_to = value;
+            true
+        }
+    }
+    /// `moveUpDownToggled()` source method.
+    pub fn contour_move_up_down_toggled(&mut self, value: bool) {
+        self.move_up_down = i32::from(value);
+    }
+    /// `upDownSelected()` source method.
+    pub fn contour_move_up_down_selected(&mut self, which: i32) {
+        self.up_or_down = which;
+    }
+    /// `topCloseEvent()` source slot for the break dialog.
+    pub fn contour_break_top_close_event(&mut self) {
+        self.break_dialog_open = false;
+    }
+    /// `topCloseEvent()` source slot for the join dialog.
+    pub fn contour_join_top_close_event(&mut self) {
+        self.join_dialog_open = false;
+        self.join_i1 = NULL_INDEX;
+        self.join_i2 = NULL_INDEX;
+    }
+    /// `topCloseEvent()` source slot for the move dialog.
+    pub fn contour_move_top_close_event(&mut self) {
+        self.move_dialog_open = false;
+    }
+    /// `imodContEditMoveDialog` first-open initialization.
+    pub fn imod_cont_edit_move_dialog(&mut self, move_surf: i32) {
+        self.move_dialog_open = true;
+        if self.move_first {
+            self.whole_surf = move_surf;
+            self.move_first = false;
+        } else {
+            self.whole_surf = move_surf;
+        }
+    }
+    /// `imodContEditMoveDialogUpdate`.
+    pub fn imod_cont_edit_move_dialog_update(
+        &mut self,
+        imod: &Imod,
+        current_object: i32,
+        obj_move_to: &mut i32,
+    ) -> (i32, i32, i32) {
+        let (min, mut max, mut value) = if self.move_to_surf != 0 {
+            let max = imod
+                .obj
+                .get(current_object as usize)
+                .map_or(0, |o| o.surfsize + 1);
+            self.surf_move_to = self.surf_move_to.min(max);
+            (0, max, self.surf_move_to)
+        } else {
+            *obj_move_to = (*obj_move_to).min(imod.obj.len() as i32);
+            (1, imod.obj.len() as i32, *obj_move_to)
+        };
+        if max <= min {
+            value = min;
+            max = min + 1;
+            self.enabled = 0;
+        } else {
+            self.enabled = 1;
+        };
+        (min, max, value)
+    }
+    /// `imodContEditSurf`.
+    pub fn imod_cont_edit_surf(&mut self) {
+        self.surf_dialog_open = true;
+    }
+    /// `iceSetWheelForSize`.
+    pub fn ice_set_wheel_for_size(&mut self, state: i32) {
+        self.wheel_for_size = state
+    }
+    /// `iceGetWheelForSize`.
+    pub fn ice_get_wheel_for_size(&self) -> i32 {
+        self.wheel_for_size
+    }
+    /// `iceClosing`.
+    pub fn ice_closing(&mut self) {
+        self.surf_dialog_open = false;
+    }
+
+    /// `setLabels()` source method.
+    pub fn contour_break_set_labels(&self) -> ContourBreakLabels {
+        let first = if index_good(self.break_i1) && !self.use_current {
+            format!("Point {}", self.break_i1.point + 1)
+        } else {
+            "Pt None ".into()
+        };
+        let second = if index_good(self.break_i2) {
+            format!("Point {}", self.break_i2.point + 1)
+        } else {
+            "Pt None ".into()
+        };
+        let index = if index_good(self.break_i2) {
+            self.break_i2
+        } else if index_good(self.break_i1) && !self.use_current {
+            self.break_i1
+        } else {
+            NULL_INDEX
+        };
+        let object_contour = if index.object < 0 || index.contour < 0 {
+            "Obj None, Cont None".into()
+        } else {
+            format!("Object {}, Contour {}", index.object + 1, index.contour + 1)
+        };
+        ContourBreakLabels {
+            set_1: first,
+            set_2: second,
+            object_contour,
+            set_1_enabled: !self.use_current,
+        }
+    }
+    /// `imodContEditJoin`, including pair-wise selection-list joining.  The
+    /// source selection-list ownership is supplied as `indices`.
+    pub fn imod_cont_edit_join(
+        &mut self,
+        imod: &mut Imod,
+        current: Iindex,
+        indices: &[Iindex],
+        n: &mut dyn ContourEditNativeBoundary,
+    ) -> Result<(), String> {
+        let mut selected = if indices.len() >= 2 {
+            indices.to_vec()
+        } else if index_good(self.join_i1) && index_good(self.join_i2) {
+            vec![self.join_i1, self.join_i2]
+        } else if index_good(self.join_i1) && self.join_i1.contour != current.contour {
+            vec![self.join_i1, current]
+        } else if index_good(self.join_i2) && self.join_i2.contour != current.contour {
+            vec![current, self.join_i2]
+        } else {
+            return Err("Contour Join Error:  Two contours not selected.".into());
+        };
+        let object_no = selected[0].object;
+        let obj = imod
+            .obj
+            .get_mut(object_no as usize)
+            .ok_or("Contour Join Error:  Object number no longer valid.")?;
+        let set_points = (iobj_open(obj.flags) != 0 && self.open_type == OPEN_TYPE_SPLICE)
+            || (iobj_open(obj.flags) == 0 && self.closed_type == CLOSED_TYPE_SETPOINT);
+        if set_points && selected.len() > 2 {
+            return Err(
+                "Contour Join Error:  Cannot join more than two contours by set points.".into(),
+            );
+        }
+        for ind in &selected {
+            if ind.object != object_no
+                || ind.contour < 0
+                || ind.contour as usize >= obj.cont.len()
+                || (set_points
+                    && (ind.point < 0
+                        || ind.point as usize >= obj.cont[ind.contour as usize].pts.len()))
+            {
+                return Err("Contour Join Error:  Invalid join index.".into());
+            }
+        }
+        while selected.len() > 1 {
+            let first = selected.remove(0);
+            let second = selected.remove(0);
+            if first.contour == second.contour {
+                return Err(
+                    "Contour Join Error:  Set points must be in different contours.".into(),
+                );
+            }
+            let a = first.contour as usize;
+            let b = second.contour as usize;
+            let (lo, hi) = if a < b { (a, b) } else { (b, a) };
+            let (left, right) = obj.cont.split_at_mut(hi);
+            let (c1, c2) = if a < b {
+                (&mut left[lo], &mut right[0])
+            } else {
+                (&mut right[0], &mut left[lo])
+            };
+            let (p1, p2) = if set_points {
+                (first.point, second.point)
+            } else {
+                (-1, -1)
+            };
+            n.contour_data_changed(object_no, first.contour);
+            n.contour_data_changed(object_no, second.contour);
+            let joined = if iobj_open(obj.flags) != 0 || self.closed_type == CLOSED_TYPE_CONCAT {
+                imod_contour_splice(
+                    Some(c1),
+                    Some(c2),
+                    if p1 < 0 { c1.pts.len() as i32 - 1 } else { p1 },
+                    if p2 < 0 { 0 } else { p2 },
+                )
+            } else {
+                imod_contour_join(Some(c1), Some(c2), p1, p2, 0, 0)
+            }
+            .ok_or("Contour Join Error:  Failed to get memory for joined contour")?;
+            obj.cont[a] = joined;
+            let removed = b as i32;
+            imod_object_remove_contour(obj, removed);
+            for ind in &mut selected {
+                if ind.contour > removed {
+                    ind.contour -= 1;
+                }
+            }
+            selected.insert(
+                0,
+                Iindex {
+                    object: object_no,
+                    contour: if a > b { a as i32 - 1 } else { a as i32 },
+                    point: 0,
+                },
+            );
+        }
+        n.finish_undo_unit();
+        n.draw_model();
+        Ok(())
+    }
+    /// `imodContEditMove`, with all contour/surface/object transformations and
+    /// explicit undo/display calls.  `current` is `imod->cindex`.
+    pub fn imod_cont_edit_move(
+        &mut self,
+        imod: &mut Imod,
+        current: &mut Iindex,
+        obj_move_to: &mut i32,
+        xybin: f32,
+        n: &mut dyn ContourEditNativeBoundary,
+    ) -> Result<(), String> {
+        if self.move_first {
+            return Err("Error: Select Edit->Contour->Move to setup move.".into());
+        }
+        if self.enabled == 0 && self.move_up_down == 0 {
+            return Err(
+                "Error: Must have more than one object or surface to be able to move contours."
+                    .into(),
+            );
+        }
+        let ob = current.object;
+        let co = current.contour;
+        let pt = current.point;
+        if ob < 0
+            || co < 0
+            || ob as usize >= imod.obj.len()
+            || co as usize >= imod.obj[ob as usize].cont.len()
+        {
+            return Ok(());
+        }
+        *obj_move_to = (*obj_move_to).clamp(1, imod.obj.len() as i32);
+        let dest = *obj_move_to - 1;
+        /* REPLACE CONTOUR BY POINT IS FIRST (`cont_edit.cpp:1067`). */
+        if dest != ob
+            && self.replace != 0
+            && self.move_to_surf == 0
+            && self.move_up_down == 0
+            && iobj_scat(imod.obj[dest as usize].flags) != 0
+            && iobj_scat(imod.obj[ob as usize].flags) == 0
+        {
+            let source_obj = &imod.obj[ob as usize];
+            let source = &source_obj.cont[co as usize];
+            if source.pts.len() < 3 {
+                return Err("Error: Contour must have at least 3 points.".into());
+            }
+            let first_z = source.pts[0].z;
+            if source.pts.iter().any(|point| point.z != first_z) {
+                return Err("Error: Contour not all in one plane.".into());
+            }
+            let mut center = Ipoint::default();
+            for point in &source.pts {
+                center.x += point.x;
+                center.y += point.y;
+            }
+            center.x /= source.pts.len() as f32;
+            center.y /= source.pts.len() as f32;
+            center.z = first_z;
+            let size = (imod_contour_area(Some(source)) / std::f32::consts::PI).sqrt() * xybin;
+            let (src, dst) = if ob < dest {
+                let (left, right) = imod.obj.split_at_mut(dest as usize);
+                (&mut left[ob as usize], &mut right[0])
+            } else {
+                let (left, right) = imod.obj.split_at_mut(ob as usize);
+                (&mut right[0], &mut left[dest as usize])
+            };
+            if dst.cont.is_empty() {
+                n.contour_addition(dest, 0);
+                imod_object_add_contour(dst, Icont::default());
+            }
+            let point_index = dst.cont.last().unwrap().pts.len() as i32;
+            n.point_addition(dest, dst.cont.len() as i32 - 1, point_index);
+            dst.cont.last_mut().unwrap().pts.push(center);
+            let last = dst.cont.len() - 1;
+            imod_point_set_size(&mut dst.cont[last], point_index, size);
+            n.contour_removal(ob, co);
+            imod_object_remove_contour(src, co);
+            current.contour = (co - 1).max(-1);
+            current.point = -1;
+            n.finish_undo_unit();
+            n.clear_selection();
+            n.draw_model();
+            return Ok(());
+        }
+        /* EXPAND A SCATTERED POINT INTO CONTOURS (`cont_edit.cpp:1111`). */
+        if dest != ob
+            && self.expand != 0
+            && self.move_to_surf == 0
+            && self.move_up_down == 0
+            && iobj_scat(imod.obj[dest as usize].flags) == 0
+            && iobj_scat(imod.obj[ob as usize].flags) != 0
+        {
+            let source_obj = &imod.obj[ob as usize];
+            let source = &source_obj.cont[co as usize];
+            if pt < 0 && self.convert_all_pt == 0 {
+                return Ok(());
+            }
+            let point_indices: Vec<usize> = if self.convert_all_pt != 0 {
+                (0..source.pts.len()).collect()
+            } else {
+                vec![pt as usize]
+            };
+            let values: Vec<(usize, Ipoint, f32)> = point_indices
+                .into_iter()
+                .filter_map(|pi| {
+                    source.pts.get(pi).copied().map(|point| {
+                        (
+                            pi,
+                            point,
+                            imod_point_get_size(source_obj, source, pi as i32) / xybin,
+                        )
+                    })
+                })
+                .collect();
+            let zscale =
+                (imod.zscale.max(1.) / xybin.max(f32::MIN_POSITIVE)).max(f32::MIN_POSITIVE);
+            let resolution = imod.res.max(1) as f32;
+            let (src, dst) = if ob < dest {
+                let (left, right) = imod.obj.split_at_mut(dest as usize);
+                (&mut left[ob as usize], &mut right[0])
+            } else {
+                let (left, right) = imod.obj.split_at_mut(ob as usize);
+                (&mut right[0], &mut left[dest as usize])
+            };
+            let new_surface = imodel_unused_surface(Some(dst));
+            let mut remove = Vec::new();
+            for (pi, center, radius) in values {
+                if radius < 1.45 {
+                    n.warning("Point radius must be at least 1.45");
+                    continue;
+                }
+                let dz_lim = (radius / zscale + 1.) as i32;
+                for iz in (center.z.round() as i32 - dz_lim)..=(center.z.round() as i32 + dz_lim) {
+                    let dz = (iz as f32 - center.z) * zscale;
+                    if dz.abs() >= radius {
+                        continue;
+                    }
+                    let circle_radius = (radius * radius - dz * dz).sqrt();
+                    if circle_radius < 1. {
+                        continue;
+                    }
+                    let npts = ((2. * std::f32::consts::PI * circle_radius * xybin) / resolution)
+                        .ceil()
+                        .max(6.) as usize;
+                    let mut contour = Icont::default();
+                    contour.surf = new_surface;
+                    for p in 0..npts {
+                        let angle = 2. * std::f32::consts::PI * p as f32 / npts as f32;
+                        contour.pts.push(Ipoint {
+                            x: center.x + circle_radius * angle.cos(),
+                            y: center.y + circle_radius * angle.sin(),
+                            z: iz as f32,
+                        });
+                    }
+                    n.contour_addition(dest, dst.cont.len() as i32);
+                    imod_object_add_contour(dst, contour);
+                }
+                remove.push(pi);
+            }
+            for pi in remove.into_iter().rev() {
+                n.point_removal(ob, co, pi as i32);
+                imod_point_delete(&mut src.cont[co as usize], pi as i32);
+            }
+            if self.convert_all_pt != 0 && src.cont[co as usize].pts.is_empty() {
+                n.contour_removal(ob, co);
+                imod_object_remove_contour(src, co);
+                current.contour = (co - 1).max(-1);
+            }
+            current.point = -1;
+            n.finish_undo_unit();
+            n.draw_model();
+            return Ok(());
+        }
+        if self.move_up_down != 0 {
+            let delta = if self.up_or_down != 0 { -1. } else { 1. };
+            let surf = imod.obj[ob as usize].cont[co as usize].surf;
+            for (oi, obj) in imod.obj.iter_mut().enumerate() {
+                for (ci, cont) in obj.cont.iter_mut().enumerate() {
+                    if (oi == ob as usize
+                        && (ci == co as usize || (self.whole_surf != 0 && cont.surf == surf)))
+                        || (self.whole_surf == 0 && n.selection_contains(oi as i32, ci as i32))
+                    {
+                        n.contour_data_changed(oi as i32, ci as i32);
+                        for p in &mut cont.pts {
+                            p.z += delta;
+                        }
+                    }
+                }
+            }
+            if self.up_or_down != 0 {
+                n.prev_z();
+            } else {
+                n.next_z();
+            };
+            n.finish_undo_unit();
+            return Ok(());
+        }
+        if self.move_to_surf != 0 {
+            let obj = &mut imod.obj[ob as usize];
+            let surf = obj.cont[co as usize].surf;
+            for (ci, cont) in obj.cont.iter_mut().enumerate() {
+                if (self.whole_surf != 0 && cont.surf == surf)
+                    || (self.whole_surf == 0
+                        && (ci == co as usize || n.selection_contains(ob, ci as i32)))
+                {
+                    n.contour_property_changed(ob, ci as i32);
+                    cont.surf = self.surf_move_to;
+                }
+            }
+            obj.surfsize = obj.surfsize.max(self.surf_move_to);
+            imod_object_clean_surf(obj);
+            n.finish_undo_unit();
+            n.draw_model();
+            return Ok(());
+        }
+        if dest == ob {
+            return Err("Error: Trying to move contour to object it is already in.".into());
+        }
+        let (src, dst) = if ob < dest {
+            let (left, right) = imod.obj.split_at_mut(dest as usize);
+            (&mut left[ob as usize], &mut right[0])
+        } else {
+            let (left, right) = imod.obj.split_at_mut(ob as usize);
+            (&mut right[0], &mut left[dest as usize])
+        };
+        let source_surf = src.cont[co as usize].surf;
+        let destination_surf = if self.whole_surf != 0 {
+            imodel_unused_surface(Some(dst))
+        } else {
+            -1
+        };
+        let mut indices: Vec<usize> = src
+            .cont
+            .iter()
+            .enumerate()
+            .filter_map(|(ci, c)| {
+                if (self.whole_surf != 0 && c.surf == source_surf)
+                    || (self.whole_surf == 0
+                        && (ci == co as usize || n.selection_contains(ob, ci as i32)))
+                {
+                    Some(ci)
+                } else {
+                    None
+                }
+            })
+            .collect();
+        for ci in indices.drain(..).rev() {
+            let mut cont = src.cont.remove(ci);
+            if destination_surf >= 0 {
+                cont.surf = destination_surf;
+            }
+            if self.keep_size != 0 && iobj_scat(src.flags) != 0 {
+                for pi in 0..cont.pts.len() {
+                    let size = imod_point_get_size(src, &cont, pi as i32);
+                    imod_point_set_size(&mut cont, pi as i32, size);
+                }
+            }
+            n.contour_move(ob, ci as i32, dest, dst.cont.len() as i32);
+            imod_object_add_contour(dst, cont);
+        }
+        imod_object_clean_surf(src);
+        imod_object_clean_surf(dst);
+        current.contour = if src.cont.is_empty() {
+            -1
+        } else {
+            (co - 1).max(0)
+        };
+        current.point = -1;
+        n.finish_undo_unit();
+        n.clear_selection();
+        n.draw_model();
+        Ok(())
+    }
+}
+
 impl Default for ContourEditState {
     fn default() -> Self {
         Self {
@@ -177,44 +840,6 @@ pub fn set_label(ind: Iindex) -> String {
     }
 }
 
-/// `imodContEditBreakOpen`.
-pub fn imod_cont_edit_break_open(state: &mut ContourEditState, current: Iindex) {
-    state.break_dialog_open = true;
-    state.break_i1 = current;
-    state.break_i2 = NULL_INDEX;
-}
-
-/// `set1Pressed()` source method.
-/// `ContourBreak::set1Pressed`.
-pub fn contour_break_set_1(state: &mut ContourEditState, current: Iindex) {
-    state.break_i1 = current;
-    if index_good(state.break_i2)
-        && (state.break_i1.object != state.break_i2.object
-            || state.break_i1.contour != state.break_i2.contour)
-    {
-        state.break_i2 = NULL_INDEX;
-    }
-}
-/// `set2Pressed()` source method.
-/// `ContourBreak::set2Pressed`.
-pub fn contour_break_set_2(state: &mut ContourEditState, current: Iindex) {
-    state.break_i2 = current;
-    if index_good(state.break_i1)
-        && (state.break_i1.object != state.break_i2.object
-            || state.break_i1.contour != state.break_i2.contour)
-    {
-        state.break_i1 = NULL_INDEX;
-    }
-}
-/// `ContourBreak::unsetPressed`.
-pub fn contour_break_unset(state: &mut ContourEditState) {
-    state.break_i2 = NULL_INDEX;
-}
-/// `ContourBreak::currentToggled`.
-pub fn contour_break_current_toggled(state: &mut ContourEditState, value: bool) {
-    state.use_current = value;
-}
-
 /// Values painted by `ContourBreak::setLabels`.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct ContourBreakLabels {
@@ -224,150 +849,10 @@ pub struct ContourBreakLabels {
     pub set_1_enabled: bool,
 }
 
-/// `setLabels()` source method.
-pub fn contour_break_set_labels(state: &ContourEditState) -> ContourBreakLabels {
-    let first = if index_good(state.break_i1) && !state.use_current {
-        format!("Point {}", state.break_i1.point + 1)
-    } else {
-        "Pt None ".into()
-    };
-    let second = if index_good(state.break_i2) {
-        format!("Point {}", state.break_i2.point + 1)
-    } else {
-        "Pt None ".into()
-    };
-    let index = if index_good(state.break_i2) {
-        state.break_i2
-    } else if index_good(state.break_i1) && !state.use_current {
-        state.break_i1
-    } else {
-        NULL_INDEX
-    };
-    let object_contour = if index.object < 0 || index.contour < 0 {
-        "Obj None, Cont None".into()
-    } else {
-        format!("Object {}, Contour {}", index.object + 1, index.contour + 1)
-    };
-    ContourBreakLabels {
-        set_1: first,
-        set_2: second,
-        object_contour,
-        set_1_enabled: !state.use_current,
-    }
-}
-
 /// `joinError()` source helper.  Rust ownership releases the index vector
 /// automatically; callers retain the native diagnostic text.
 pub fn contour_join_error(message: &str) -> String {
     format!("Contour Join Error:  {message}")
-}
-
-/// `ContourBreak::breakCont` and `imodContEditBreak`.
-pub fn imod_cont_edit_break(
-    state: &mut ContourEditState,
-    imod: &mut Imod,
-    current: Iindex,
-    n: &mut dyn ContourEditNativeBoundary,
-) -> Result<(), String> {
-    let i1 = if state.use_current {
-        current
-    } else {
-        state.break_i1
-    };
-    let i2 = state.break_i2;
-    if !index_good(i1) {
-        return Err("Contour Break Error:\n\tFirst break point not set.".into());
-    }
-    if index_good(i2) && (i1.object != i2.object || i1.contour != i2.contour) {
-        return Err(
-            "Contour Break Error:\n\tBoth break points must be on the same contour.".into(),
-        );
-    }
-    let obj = imod
-        .obj
-        .get_mut(i1.object as usize)
-        .ok_or("Contour Break Error:\n\tObject number no longer valid.")?;
-    let contour_count = obj.cont.len() as i32;
-    let cont = obj
-        .cont
-        .get_mut(i1.contour as usize)
-        .ok_or("Contour Break Error:\n\tContour number is no longer valid.")?;
-    let (p1, p2) = if index_good(i2) {
-        (i1.point.min(i2.point), i1.point.max(i2.point))
-    } else {
-        (i1.point, -1)
-    };
-    if cont.pts.is_empty() {
-        return Err("Contour Break Error:\n\tSelected contour has no points.".into());
-    }
-    if p1 < 0 || p1 as usize >= cont.pts.len() || (p2 >= 0 && p2 as usize >= cont.pts.len()) {
-        return Err("Contour Break Error:\n\tInvalid break points set.".into());
-    }
-    n.contour_data_changed(i1.object, i1.contour);
-    n.contour_addition(i1.object, contour_count);
-    let mut new_cont =
-        imod_contour_break(cont, p1, p2).ok_or("Memory or other error breaking contour.")?;
-    imodel_contour_check_wild(Some(cont));
-    imodel_contour_check_wild(Some(&mut new_cont));
-    imod_object_add_contour(obj, new_cont);
-    n.finish_undo_unit();
-    n.draw_model();
-    Ok(())
-}
-
-/// `imodContEditJoinOpen`.
-pub fn imod_cont_edit_join_open(state: &mut ContourEditState, current: Iindex) {
-    state.join_dialog_open = true;
-    state.join_i1 = current;
-    state.join_i2 = NULL_INDEX;
-}
-/// `ContourJoin::set1Pressed`.
-pub fn contour_join_set_1(state: &mut ContourEditState, current: Iindex) {
-    state.join_i1 = current;
-    if state.join_i2.object >= 0 && state.join_i2.object != current.object {
-        state.join_i2 = NULL_INDEX;
-    }
-}
-/// `ContourJoin::set2Pressed`.
-pub fn contour_join_set_2(state: &mut ContourEditState, current: Iindex) {
-    state.join_i2 = current;
-    if state.join_i1.object >= 0 && state.join_i1.object != current.object {
-        state.join_i1 = NULL_INDEX;
-    }
-}
-/// `openTypeSelected()` source method.
-/// `ContourJoin::openTypeSelected`.
-pub fn contour_join_open_type_selected(state: &mut ContourEditState, which: i32) {
-    state.open_type = which;
-}
-/// `closedTypeSelected()` source method.
-/// `ContourJoin::closedTypeSelected`.
-pub fn contour_join_closed_type_selected(state: &mut ContourEditState, which: i32) {
-    state.closed_type = which;
-}
-/// `surfToggled()` source method.
-pub fn contour_move_surf_toggled(state: &mut ContourEditState, value: bool) {
-    state.whole_surf = i32::from(value);
-}
-/// `toSurfToggled()` source method.
-pub fn contour_move_to_surf_toggled(state: &mut ContourEditState, value: bool) {
-    state.move_to_surf = i32::from(value);
-}
-/// `replaceToggled()` source method.
-pub fn contour_move_replace_toggled(state: &mut ContourEditState, value: bool) {
-    state.replace = i32::from(value);
-}
-/// `expandToggled()` source method.
-pub fn contour_move_expand_toggled(state: &mut ContourEditState, value: bool) {
-    state.expand = i32::from(value);
-}
-/// `convertAllToggled()` source method.
-pub fn contour_move_convert_all_toggled(state: &mut ContourEditState, value: bool) {
-    state.convert_all_pt = i32::from(value);
-}
-/// `keepSizeToggled()` source method.
-pub fn contour_move_keep_size_toggled(state: &mut ContourEditState, value: bool) {
-    state.keep_size = i32::from(value);
 }
 
 /// Widget sensitivity computed by `ContourMove::manageCheckBoxes`.  The Rust
@@ -381,63 +866,6 @@ pub struct ContourMoveCheckBoxes {
     pub to_surface_enabled: bool,
     pub move_up_down_enabled: bool,
     pub keep_size_enabled: bool,
-}
-
-/// `manageCheckBoxes()` source method.
-pub fn contour_move_manage_check_boxes(
-    state: &ContourEditState,
-    current_scattered: bool,
-    destination_scattered: bool,
-) -> ContourMoveCheckBoxes {
-    let replaceable = destination_scattered
-        && state.move_to_surf == 0
-        && !current_scattered
-        && state.move_up_down == 0;
-    let replace_on = state.replace != 0 && replaceable;
-    let expandable = !destination_scattered
-        && state.move_to_surf == 0
-        && current_scattered
-        && state.move_up_down == 0;
-    let expand_on = state.expand != 0 && expandable;
-    let up_down_able = !replace_on && !expand_on && state.move_to_surf == 0;
-    ContourMoveCheckBoxes {
-        replace_enabled: replaceable,
-        expand_enabled: expandable,
-        convert_all_enabled: expand_on,
-        move_all_enabled: !replace_on && !expand_on,
-        to_surface_enabled: !replace_on && !expand_on && state.move_up_down == 0,
-        move_up_down_enabled: up_down_able,
-        keep_size_enabled: current_scattered
-            && state.move_to_surf == 0
-            && state.move_up_down == 0
-            && !expand_on,
-    }
-}
-
-/// `objSelected()` source method.  Returns whether the object-destination
-/// controls need their checkbox sensitivity refreshed.
-pub fn contour_move_obj_selected(
-    state: &mut ContourEditState,
-    obj_move_to: &mut i32,
-    value: i32,
-) -> bool {
-    if state.move_to_surf != 0 {
-        state.surf_move_to = value;
-        false
-    } else {
-        *obj_move_to = value;
-        true
-    }
-}
-
-/// `moveUpDownToggled()` source method.
-pub fn contour_move_up_down_toggled(state: &mut ContourEditState, value: bool) {
-    state.move_up_down = i32::from(value);
-}
-
-/// `upDownSelected()` source method.
-pub fn contour_move_up_down_selected(state: &mut ContourEditState, which: i32) {
-    state.up_or_down = which;
 }
 
 /// `shiftContClicked()` source method.  The caller dispatches this request to
@@ -461,429 +889,6 @@ pub fn contour_top_change_event(font_changed: bool) -> bool {
 /// the measured width of the source Set-1 button, as in Qt.
 pub fn contour_set_font_dependent_widths(set_1_width: i32) -> i32 {
     set_1_width
-}
-
-/// `topCloseEvent()` source slot for the break dialog.
-pub fn contour_break_top_close_event(state: &mut ContourEditState) {
-    state.break_dialog_open = false;
-}
-
-/// `topCloseEvent()` source slot for the join dialog.
-pub fn contour_join_top_close_event(state: &mut ContourEditState) {
-    state.join_dialog_open = false;
-    state.join_i1 = NULL_INDEX;
-    state.join_i2 = NULL_INDEX;
-}
-
-/// `topCloseEvent()` source slot for the move dialog.
-pub fn contour_move_top_close_event(state: &mut ContourEditState) {
-    state.move_dialog_open = false;
-}
-
-/// `imodContEditJoin`, including pair-wise selection-list joining.  The
-/// source selection-list ownership is supplied as `indices`.
-pub fn imod_cont_edit_join(
-    state: &mut ContourEditState,
-    imod: &mut Imod,
-    current: Iindex,
-    indices: &[Iindex],
-    n: &mut dyn ContourEditNativeBoundary,
-) -> Result<(), String> {
-    let mut selected = if indices.len() >= 2 {
-        indices.to_vec()
-    } else if index_good(state.join_i1) && index_good(state.join_i2) {
-        vec![state.join_i1, state.join_i2]
-    } else if index_good(state.join_i1) && state.join_i1.contour != current.contour {
-        vec![state.join_i1, current]
-    } else if index_good(state.join_i2) && state.join_i2.contour != current.contour {
-        vec![current, state.join_i2]
-    } else {
-        return Err("Contour Join Error:  Two contours not selected.".into());
-    };
-    let object_no = selected[0].object;
-    let obj = imod
-        .obj
-        .get_mut(object_no as usize)
-        .ok_or("Contour Join Error:  Object number no longer valid.")?;
-    let set_points = (iobj_open(obj.flags) != 0 && state.open_type == OPEN_TYPE_SPLICE)
-        || (iobj_open(obj.flags) == 0 && state.closed_type == CLOSED_TYPE_SETPOINT);
-    if set_points && selected.len() > 2 {
-        return Err(
-            "Contour Join Error:  Cannot join more than two contours by set points.".into(),
-        );
-    }
-    for ind in &selected {
-        if ind.object != object_no
-            || ind.contour < 0
-            || ind.contour as usize >= obj.cont.len()
-            || (set_points
-                && (ind.point < 0
-                    || ind.point as usize >= obj.cont[ind.contour as usize].pts.len()))
-        {
-            return Err("Contour Join Error:  Invalid join index.".into());
-        }
-    }
-    while selected.len() > 1 {
-        let first = selected.remove(0);
-        let second = selected.remove(0);
-        if first.contour == second.contour {
-            return Err("Contour Join Error:  Set points must be in different contours.".into());
-        }
-        let a = first.contour as usize;
-        let b = second.contour as usize;
-        let (lo, hi) = if a < b { (a, b) } else { (b, a) };
-        let (left, right) = obj.cont.split_at_mut(hi);
-        let (c1, c2) = if a < b {
-            (&mut left[lo], &mut right[0])
-        } else {
-            (&mut right[0], &mut left[lo])
-        };
-        let (p1, p2) = if set_points {
-            (first.point, second.point)
-        } else {
-            (-1, -1)
-        };
-        n.contour_data_changed(object_no, first.contour);
-        n.contour_data_changed(object_no, second.contour);
-        let joined = if iobj_open(obj.flags) != 0 || state.closed_type == CLOSED_TYPE_CONCAT {
-            imod_contour_splice(
-                Some(c1),
-                Some(c2),
-                if p1 < 0 { c1.pts.len() as i32 - 1 } else { p1 },
-                if p2 < 0 { 0 } else { p2 },
-            )
-        } else {
-            imod_contour_join(Some(c1), Some(c2), p1, p2, 0, 0)
-        }
-        .ok_or("Contour Join Error:  Failed to get memory for joined contour")?;
-        obj.cont[a] = joined;
-        let removed = b as i32;
-        imod_object_remove_contour(obj, removed);
-        for ind in &mut selected {
-            if ind.contour > removed {
-                ind.contour -= 1;
-            }
-        }
-        selected.insert(
-            0,
-            Iindex {
-                object: object_no,
-                contour: if a > b { a as i32 - 1 } else { a as i32 },
-                point: 0,
-            },
-        );
-    }
-    n.finish_undo_unit();
-    n.draw_model();
-    Ok(())
-}
-
-/// `imodContEditMoveDialog` first-open initialization.
-pub fn imod_cont_edit_move_dialog(state: &mut ContourEditState, move_surf: i32) {
-    state.move_dialog_open = true;
-    if state.move_first {
-        state.whole_surf = move_surf;
-        state.move_first = false;
-    } else {
-        state.whole_surf = move_surf;
-    }
-}
-/// `imodContEditMoveDialogUpdate`.
-pub fn imod_cont_edit_move_dialog_update(
-    state: &mut ContourEditState,
-    imod: &Imod,
-    current_object: i32,
-    obj_move_to: &mut i32,
-) -> (i32, i32, i32) {
-    let (min, mut max, mut value) = if state.move_to_surf != 0 {
-        let max = imod
-            .obj
-            .get(current_object as usize)
-            .map_or(0, |o| o.surfsize + 1);
-        state.surf_move_to = state.surf_move_to.min(max);
-        (0, max, state.surf_move_to)
-    } else {
-        *obj_move_to = (*obj_move_to).min(imod.obj.len() as i32);
-        (1, imod.obj.len() as i32, *obj_move_to)
-    };
-    if max <= min {
-        value = min;
-        max = min + 1;
-        state.enabled = 0;
-    } else {
-        state.enabled = 1;
-    };
-    (min, max, value)
-}
-
-/// `imodContEditMove`, with all contour/surface/object transformations and
-/// explicit undo/display calls.  `current` is `imod->cindex`.
-pub fn imod_cont_edit_move(
-    state: &mut ContourEditState,
-    imod: &mut Imod,
-    current: &mut Iindex,
-    obj_move_to: &mut i32,
-    xybin: f32,
-    n: &mut dyn ContourEditNativeBoundary,
-) -> Result<(), String> {
-    if state.move_first {
-        return Err("Error: Select Edit->Contour->Move to setup move.".into());
-    }
-    if state.enabled == 0 && state.move_up_down == 0 {
-        return Err(
-            "Error: Must have more than one object or surface to be able to move contours.".into(),
-        );
-    }
-    let ob = current.object;
-    let co = current.contour;
-    let pt = current.point;
-    if ob < 0
-        || co < 0
-        || ob as usize >= imod.obj.len()
-        || co as usize >= imod.obj[ob as usize].cont.len()
-    {
-        return Ok(());
-    }
-    *obj_move_to = (*obj_move_to).clamp(1, imod.obj.len() as i32);
-    let dest = *obj_move_to - 1;
-    /* REPLACE CONTOUR BY POINT IS FIRST (`cont_edit.cpp:1067`). */
-    if dest != ob
-        && state.replace != 0
-        && state.move_to_surf == 0
-        && state.move_up_down == 0
-        && iobj_scat(imod.obj[dest as usize].flags) != 0
-        && iobj_scat(imod.obj[ob as usize].flags) == 0
-    {
-        let source_obj = &imod.obj[ob as usize];
-        let source = &source_obj.cont[co as usize];
-        if source.pts.len() < 3 {
-            return Err("Error: Contour must have at least 3 points.".into());
-        }
-        let first_z = source.pts[0].z;
-        if source.pts.iter().any(|point| point.z != first_z) {
-            return Err("Error: Contour not all in one plane.".into());
-        }
-        let mut center = Ipoint::default();
-        for point in &source.pts {
-            center.x += point.x;
-            center.y += point.y;
-        }
-        center.x /= source.pts.len() as f32;
-        center.y /= source.pts.len() as f32;
-        center.z = first_z;
-        let size = (imod_contour_area(Some(source)) / std::f32::consts::PI).sqrt() * xybin;
-        let (src, dst) = if ob < dest {
-            let (left, right) = imod.obj.split_at_mut(dest as usize);
-            (&mut left[ob as usize], &mut right[0])
-        } else {
-            let (left, right) = imod.obj.split_at_mut(ob as usize);
-            (&mut right[0], &mut left[dest as usize])
-        };
-        if dst.cont.is_empty() {
-            n.contour_addition(dest, 0);
-            imod_object_add_contour(dst, Icont::default());
-        }
-        let point_index = dst.cont.last().unwrap().pts.len() as i32;
-        n.point_addition(dest, dst.cont.len() as i32 - 1, point_index);
-        dst.cont.last_mut().unwrap().pts.push(center);
-        let last = dst.cont.len() - 1;
-        imod_point_set_size(&mut dst.cont[last], point_index, size);
-        n.contour_removal(ob, co);
-        imod_object_remove_contour(src, co);
-        current.contour = (co - 1).max(-1);
-        current.point = -1;
-        n.finish_undo_unit();
-        n.clear_selection();
-        n.draw_model();
-        return Ok(());
-    }
-    /* EXPAND A SCATTERED POINT INTO CONTOURS (`cont_edit.cpp:1111`). */
-    if dest != ob
-        && state.expand != 0
-        && state.move_to_surf == 0
-        && state.move_up_down == 0
-        && iobj_scat(imod.obj[dest as usize].flags) == 0
-        && iobj_scat(imod.obj[ob as usize].flags) != 0
-    {
-        let source_obj = &imod.obj[ob as usize];
-        let source = &source_obj.cont[co as usize];
-        if pt < 0 && state.convert_all_pt == 0 {
-            return Ok(());
-        }
-        let point_indices: Vec<usize> = if state.convert_all_pt != 0 {
-            (0..source.pts.len()).collect()
-        } else {
-            vec![pt as usize]
-        };
-        let values: Vec<(usize, Ipoint, f32)> = point_indices
-            .into_iter()
-            .filter_map(|pi| {
-                source.pts.get(pi).copied().map(|point| {
-                    (
-                        pi,
-                        point,
-                        imod_point_get_size(source_obj, source, pi as i32) / xybin,
-                    )
-                })
-            })
-            .collect();
-        let zscale = (imod.zscale.max(1.) / xybin.max(f32::MIN_POSITIVE)).max(f32::MIN_POSITIVE);
-        let resolution = imod.res.max(1) as f32;
-        let (src, dst) = if ob < dest {
-            let (left, right) = imod.obj.split_at_mut(dest as usize);
-            (&mut left[ob as usize], &mut right[0])
-        } else {
-            let (left, right) = imod.obj.split_at_mut(ob as usize);
-            (&mut right[0], &mut left[dest as usize])
-        };
-        let new_surface = imodel_unused_surface(Some(dst));
-        let mut remove = Vec::new();
-        for (pi, center, radius) in values {
-            if radius < 1.45 {
-                n.warning("Point radius must be at least 1.45");
-                continue;
-            }
-            let dz_lim = (radius / zscale + 1.) as i32;
-            for iz in (center.z.round() as i32 - dz_lim)..=(center.z.round() as i32 + dz_lim) {
-                let dz = (iz as f32 - center.z) * zscale;
-                if dz.abs() >= radius {
-                    continue;
-                }
-                let circle_radius = (radius * radius - dz * dz).sqrt();
-                if circle_radius < 1. {
-                    continue;
-                }
-                let npts = ((2. * std::f32::consts::PI * circle_radius * xybin) / resolution)
-                    .ceil()
-                    .max(6.) as usize;
-                let mut contour = Icont::default();
-                contour.surf = new_surface;
-                for p in 0..npts {
-                    let angle = 2. * std::f32::consts::PI * p as f32 / npts as f32;
-                    contour.pts.push(Ipoint {
-                        x: center.x + circle_radius * angle.cos(),
-                        y: center.y + circle_radius * angle.sin(),
-                        z: iz as f32,
-                    });
-                }
-                n.contour_addition(dest, dst.cont.len() as i32);
-                imod_object_add_contour(dst, contour);
-            }
-            remove.push(pi);
-        }
-        for pi in remove.into_iter().rev() {
-            n.point_removal(ob, co, pi as i32);
-            imod_point_delete(&mut src.cont[co as usize], pi as i32);
-        }
-        if state.convert_all_pt != 0 && src.cont[co as usize].pts.is_empty() {
-            n.contour_removal(ob, co);
-            imod_object_remove_contour(src, co);
-            current.contour = (co - 1).max(-1);
-        }
-        current.point = -1;
-        n.finish_undo_unit();
-        n.draw_model();
-        return Ok(());
-    }
-    if state.move_up_down != 0 {
-        let delta = if state.up_or_down != 0 { -1. } else { 1. };
-        let surf = imod.obj[ob as usize].cont[co as usize].surf;
-        for (oi, obj) in imod.obj.iter_mut().enumerate() {
-            for (ci, cont) in obj.cont.iter_mut().enumerate() {
-                if (oi == ob as usize
-                    && (ci == co as usize || (state.whole_surf != 0 && cont.surf == surf)))
-                    || (state.whole_surf == 0 && n.selection_contains(oi as i32, ci as i32))
-                {
-                    n.contour_data_changed(oi as i32, ci as i32);
-                    for p in &mut cont.pts {
-                        p.z += delta;
-                    }
-                }
-            }
-        }
-        if state.up_or_down != 0 {
-            n.prev_z();
-        } else {
-            n.next_z();
-        };
-        n.finish_undo_unit();
-        return Ok(());
-    }
-    if state.move_to_surf != 0 {
-        let obj = &mut imod.obj[ob as usize];
-        let surf = obj.cont[co as usize].surf;
-        for (ci, cont) in obj.cont.iter_mut().enumerate() {
-            if (state.whole_surf != 0 && cont.surf == surf)
-                || (state.whole_surf == 0
-                    && (ci == co as usize || n.selection_contains(ob, ci as i32)))
-            {
-                n.contour_property_changed(ob, ci as i32);
-                cont.surf = state.surf_move_to;
-            }
-        }
-        obj.surfsize = obj.surfsize.max(state.surf_move_to);
-        imod_object_clean_surf(obj);
-        n.finish_undo_unit();
-        n.draw_model();
-        return Ok(());
-    }
-    if dest == ob {
-        return Err("Error: Trying to move contour to object it is already in.".into());
-    }
-    let (src, dst) = if ob < dest {
-        let (left, right) = imod.obj.split_at_mut(dest as usize);
-        (&mut left[ob as usize], &mut right[0])
-    } else {
-        let (left, right) = imod.obj.split_at_mut(ob as usize);
-        (&mut right[0], &mut left[dest as usize])
-    };
-    let source_surf = src.cont[co as usize].surf;
-    let destination_surf = if state.whole_surf != 0 {
-        imodel_unused_surface(Some(dst))
-    } else {
-        -1
-    };
-    let mut indices: Vec<usize> = src
-        .cont
-        .iter()
-        .enumerate()
-        .filter_map(|(ci, c)| {
-            if (state.whole_surf != 0 && c.surf == source_surf)
-                || (state.whole_surf == 0
-                    && (ci == co as usize || n.selection_contains(ob, ci as i32)))
-            {
-                Some(ci)
-            } else {
-                None
-            }
-        })
-        .collect();
-    for ci in indices.drain(..).rev() {
-        let mut cont = src.cont.remove(ci);
-        if destination_surf >= 0 {
-            cont.surf = destination_surf;
-        }
-        if state.keep_size != 0 && iobj_scat(src.flags) != 0 {
-            for pi in 0..cont.pts.len() {
-                let size = imod_point_get_size(src, &cont, pi as i32);
-                imod_point_set_size(&mut cont, pi as i32, size);
-            }
-        }
-        n.contour_move(ob, ci as i32, dest, dst.cont.len() as i32);
-        imod_object_add_contour(dst, cont);
-    }
-    imod_object_clean_surf(src);
-    imod_object_clean_surf(dst);
-    current.contour = if src.cont.is_empty() {
-        -1
-    } else {
-        (co - 1).max(0)
-    };
-    current.point = -1;
-    n.finish_undo_unit();
-    n.clear_selection();
-    n.draw_model();
-    Ok(())
 }
 
 /// `iceClosedOpen` for the current contour plus source selection semantics.
@@ -926,11 +931,6 @@ pub fn ice_closed_open(
     }
     n.finish_undo_unit();
     n.draw_model();
-}
-
-/// `imodContEditSurf`.
-pub fn imod_cont_edit_surf(state: &mut ContourEditState) {
-    state.surf_dialog_open = true;
 }
 
 /// `imodContEditSurfShow`.  Form labels are maintained by `form_cont_edit.rs`;
@@ -1140,14 +1140,7 @@ pub fn ice_point_size(
         }
     }
 }
-/// `iceSetWheelForSize`.
-pub fn ice_set_wheel_for_size(edit: &mut ContourEditState, state: i32) {
-    edit.wheel_for_size = state
-}
-/// `iceGetWheelForSize`.
-pub fn ice_get_wheel_for_size(edit: &ContourEditState) -> i32 {
-    edit.wheel_for_size
-}
+
 /// `iceGhostInterval`.
 pub fn ice_ghost_interval(ghost_dist: &mut i32, value: i32, n: &mut dyn ContourEditNativeBoundary) {
     *ghost_dist = value;
@@ -1170,10 +1163,6 @@ pub fn ice_ghost_toggled(
         *ghost_last = *ghost_mode
     };
     n.draw_model()
-}
-/// `iceClosing`.
-pub fn ice_closing(state: &mut ContourEditState) {
-    state.surf_dialog_open = false;
 }
 
 /// Source state representation of `ContourFrame`, `ContourMove`,
@@ -1293,15 +1282,13 @@ mod tests {
         let mut s = ContourEditState::default();
         let mut m = model();
         let mut n = N::default();
-        imod_cont_edit_break_open(
-            &mut s,
-            Iindex {
-                object: 0,
-                contour: 0,
-                point: 1,
-            },
-        );
-        imod_cont_edit_break(&mut s, &mut m, Iindex::default(), &mut n).unwrap();
+        s.imod_cont_edit_break_open(Iindex {
+            object: 0,
+            contour: 0,
+            point: 1,
+        });
+        s.imod_cont_edit_break(&mut m, Iindex::default(), &mut n)
+            .unwrap();
         assert_eq!(m.obj[0].cont.len(), 2);
         assert_eq!(n.calls.last(), Some(&"draw"));
     }

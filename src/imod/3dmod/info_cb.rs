@@ -112,6 +112,549 @@ pub struct InfoCbState {
     pub start_dump: i32,
     pub update_info_only: i32,
 }
+
+impl InfoCbState {
+    /// `imodInfoSubset`.
+    pub fn imod_info_subset(&mut self, value: i32) {
+        self.float_subsets = value;
+    }
+    /// `imodInfoTRamps`.
+    pub fn imod_info_t_ramps(&mut self, value: i32) {
+        self.t_ramps_on = value;
+    }
+    /// `imodInfoCtrlPress`.
+    pub fn imod_info_ctrl_press(&mut self, pressed: i32) {
+        self.ctrl_pressed = pressed;
+    }
+    /// `imod_info_setocp`.
+    pub fn imod_info_setocp(&mut self, model: &Imod, b: &mut dyn InfoCbBoundary) {
+        let oi = model.cindex.object;
+        let obj = model.obj.get(oi.max(0) as usize);
+        let cont = obj.and_then(|o| o.cont.get(model.cindex.contour.max(0) as usize));
+        let max = [
+            model.obj.len() as i32,
+            obj.map_or(-1, |o| o.cont.len() as i32),
+            cont.map_or(-1, |c| c.pts.len() as i32),
+        ];
+        let val = [
+            if obj.is_some() { oi + 1 } else { 0 },
+            if cont.is_some() {
+                model.cindex.contour + 1
+            } else {
+                -1
+            },
+            if cont.map_or(false, |c| !c.pts.is_empty()) {
+                model.cindex.point + 1
+            } else {
+                if cont.is_some() { 0 } else { -1 }
+            },
+        ];
+        b.update_ocp(val, max);
+        if self.imod_obj_cnum != oi && oi >= 0 {
+            self.imod_obj_cnum = oi;
+            imod_info_setobjcolor(model, b)
+        }
+        if self.update_info_only == 0 {
+            b.object_changed();
+        }
+    }
+    /// `imodInfoUpdateOnly`.
+    pub fn imod_info_update_only(&mut self, value: i32) {
+        self.update_info_only = value;
+    }
+    /// `imod_info_setbw`.
+    pub fn imod_info_setbw(
+        &mut self,
+        vi: &mut ImodView,
+        black: i32,
+        white: i32,
+        b: &mut dyn InfoCbBoundary,
+    ) {
+        let changed = vi.black != black || vi.white != white;
+        vi.black = black;
+        vi.white = white;
+        if vi.ushort_store != 0 {
+            if black < vi.range_low {
+                vi.range_low = black
+            }
+            if white > vi.range_high {
+                vi.range_high = white
+            }
+            vi.black_in_range = info_level_to_slider(vi, black);
+            vi.white_in_range = info_level_to_slider(vi, white);
+            b.set_lh_sliders(vi.range_low, vi.range_high)
+        }
+        b.set_bw_sliders(vi.black_in_range, vi.white_in_range);
+        if self.doing_float == 0 {
+            self.ref_black = black as f32;
+            self.ref_white = white as f32
+        }
+        if changed {
+            b.draw(if false { IMOD_DRAW_ALL } else { IMOD_DRAW_MOD });
+        }
+    }
+    /// `getSampleLimits`.
+    pub fn get_sample_limits(&self, vi: &ImodView) -> (i32, i32, i32, i32, f32) {
+        let ix = (self.float_matt * vi.xsize as f32) as i32;
+        let iy = (self.float_matt * vi.ysize as f32) as i32;
+        let nx = vi.xsize - 2 * ix;
+        let ny = vi.ysize - 2 * iy;
+        let sample = (10000. / (nx.max(1) * ny.max(1)) as f32).min(1.);
+        (ix, iy, nx, ny, sample)
+    }
+    /// `setTimeRampDataFromGlobal`.
+    pub fn set_time_ramp_data_from_global(
+        &self,
+        vi: &ImodView,
+        cramp: &Cramp,
+        trd: &mut TimeRampData,
+    ) {
+        if vi.ushort_store != 0 {
+            trd.range_low = vi.range_low;
+            trd.range_high = vi.range_high
+        }
+        trd.last_section = self.last_section;
+        trd.subsets = self.float_subsets;
+        trd.float_on = self.float_on;
+        trd.reverse = cramp.reverse;
+        trd.false_color = cramp.falsecolor;
+    }
+    /// `imodInfoSaveNextClear`.
+    pub fn imod_info_save_next_clear(&mut self) {
+        self.save_next_clear = 1;
+    }
+    /// `imod_info_float_clear`.
+    pub fn imod_info_float_clear(&mut self, section: i32, time: i32) {
+        self.single_cleared = 0;
+        if section < 0 && time < 0 {
+            self.sec_data.clear();
+            self.table_size = 0;
+            self.last_section = -1;
+            return;
+        }
+        if section < 0 {
+            for i in 0..-section {
+                if let Some(d) = self.sec_data.get_mut((i * self.tdim + time) as usize) {
+                    d.mean = -1.;
+                    d.sd = -1.
+                }
+            }
+            return;
+        }
+        let index = section * self.tdim + time;
+        if let Some(d) = self.sec_data.get_mut(index as usize) {
+            if self.save_next_clear != 0 {
+                self.cleared_section = section;
+                self.cleared_time = time;
+                self.cleared_mean = d.mean;
+                self.cleared_sd = d.sd;
+                self.save_next_clear = 0
+            }
+            d.mean = -1.;
+            d.sd = -1.;
+            self.single_cleared = i32::from(self.cleared_sd >= 0.)
+        }
+    }
+    /// `imodInfoTimeRampIndex`.
+    pub fn imod_info_time_ramp_index(
+        &mut self,
+        vi: &ImodView,
+        time: i32,
+        allow_no_last_sec: bool,
+    ) -> i32 {
+        if self.t_ramps_on == 0 || time < 1 || time == vi.cur_time {
+            return -1;
+        }
+        if time as usize >= self.t_ramp_data.len() {
+            return -1;
+        }
+        let ramp_count = self
+            .t_ramp_data
+            .iter()
+            .filter(|data| data.cramp_ind >= 0)
+            .count() as i32;
+        let trd = &mut self.t_ramp_data[time as usize];
+        if trd.last_section < 0 && !allow_no_last_sec {
+            return -1;
+        }
+        if trd.cramp_ind < 0 {
+            trd.cramp_ind = ramp_count
+        }
+        trd.cramp_ind
+    }
+    /// `imodInfoSyncToTimeRamp`.
+    pub fn imod_info_sync_to_time_ramp(&mut self, vi: &ImodView, cramp: &Cramp, time: i32) {
+        if self.t_ramps_on == 0 || time < 1 {
+            return;
+        }
+        if let Some(trd) = self.t_ramp_data.get_mut(time as usize) {
+            if trd.cramp_ind < 0 || trd.last_section < 0 {
+                return;
+            }
+            if time == vi.cur_time {
+                trd.false_color = cramp.falsecolor;
+                trd.reverse = cramp.reverse;
+                trd.black_in_range = vi.black_in_range;
+                trd.white_in_range = vi.white_in_range;
+            }
+        }
+    }
+    /// `imodInfoSyncRampToTimeData`.
+    pub fn imod_info_sync_ramp_to_time_data(&mut self, ramp: &Cramp, time: i32) {
+        if self.t_ramps_on == 0 || time < 1 {
+            return;
+        }
+        if let Some(trd) = self.t_ramp_data.get_mut(time as usize) {
+            if trd.cramp_ind >= 0 && trd.last_section >= 0 {
+                trd.false_color = ramp.falsecolor;
+                trd.reverse = ramp.reverse;
+                trd.ref_black = ramp.blacklevel as f32;
+                trd.ref_white = ramp.whitelevel as f32;
+                trd.black_in_range = ramp.blacklevel;
+                trd.white_in_range = ramp.whitelevel;
+            }
+        }
+    }
+    /// `imodInfoGetLowHighRange`.
+    pub fn imod_info_get_low_high_range(&self, vi: &ImodView, time: i32) -> (i32, i32) {
+        if self.t_ramps_on == 0 || time < 1 || time == vi.cur_time {
+            (vi.range_low, vi.range_high)
+        } else {
+            self.t_ramp_data
+                .get(time as usize)
+                .map(|d| (d.range_low, d.range_high))
+                .unwrap_or((vi.range_low, vi.range_high))
+        }
+    }
+    /// `makeListOfTimesToFloat`; window enumeration remains at the Zap/Slicer/Xyz boundary.
+    pub fn make_list_of_times_to_float(
+        &self,
+        vi: &ImodView,
+        section: i32,
+        windows: &[TimeLockedImageWindow],
+    ) -> Vec<i32> {
+        let mut times = Vec::new();
+        for window in windows {
+            if window.section_locked || window.time_lock == 0 || window.time_lock == vi.cur_time {
+                continue;
+            }
+            let Some(time_data) = self.t_ramp_data.get(window.time_lock as usize) else {
+                continue;
+            };
+            // `info_cb.cpp:1244-1247`: a saved floating time is reconsidered on
+            // a new section; otherwise global float initializes only the current
+            // top image window for an unvisited time.
+            let should_float = (time_data.float_on != 0
+                && time_data.last_section >= 0
+                && section != self.last_section)
+                || (self.float_on != 0 && time_data.last_section < 0 && window.is_top_window);
+            if should_float && !times.contains(&window.time_lock) {
+                times.push(window.time_lock);
+            }
+        }
+        times
+    }
+    /// `imodInfoSetFloatFlags`.
+    pub fn imod_info_set_float_flags(&mut self, float_on: i32, subset: i32, ramps: i32) {
+        self.float_on = float_on;
+        self.float_subsets = subset;
+        self.t_ramps_on = ramps;
+    }
+    /// `imodInfoGetFloatFlags`.
+    pub fn imod_info_get_float_flags(&self) -> (i32, i32, i32) {
+        (self.float_on, self.float_subsets, self.t_ramps_on)
+    }
+    /// `imod_info_forbid`.
+    pub fn imod_info_forbid(&mut self) {
+        self.forbid_level += 1;
+    }
+    /// `imod_info_enable`.
+    pub fn imod_info_enable(&mut self) {
+        self.forbid_level = (self.forbid_level - 1).max(0);
+    }
+    /// `imodStartAutoDumpCache`.
+    pub fn imod_start_auto_dump_cache(&mut self) {
+        self.dump_cache = 1;
+        self.start_dump = 2;
+    }
+
+    /// `imodInfoNewOCP`.  The C source obtains `Imod` from `App->cvi`; Rust
+    /// receives the owner explicitly so object/contour/point selection is real
+    /// state mutation instead of an opaque UI notification.
+    pub fn imod_info_new_ocp(
+        &mut self,
+        model: &mut Imod,
+        which: i32,
+        value: i32,
+        no_show: i32,
+        b: &mut dyn InfoCbBoundary,
+    ) {
+        b.set_focus();
+        let value = value - 1;
+        if value < 0 {
+            self.imod_info_setocp(model, b);
+            return;
+        }
+        let old = model.cindex;
+        match which {
+            // Object: with Show disabled detach contour and point; otherwise the
+            // shared input controller preserves same-time contour attachment.
+            0 if no_show != 0 => {
+                model.cindex.object = value;
+                model.cindex.contour = -1;
+                model.cindex.point = -1;
+            }
+            0 => {
+                imod_set_index(model, value, old.contour, old.point);
+                b.keep_contour_at_same_time();
+            }
+            1 => {
+                imod_set_index(model, old.object, value, old.point);
+                b.restore_point_index(old);
+            }
+            2 => imod_set_index(model, old.object, old.contour, value),
+            _ => return,
+        }
+        if no_show != 0 && model.cindex.point > 0 {
+            // `IMOD_DRAW_NOSYNC` suppresses the controller sync that the normal
+            // branch performs below; the boundary's draw flag is the direct host
+            // equivalent for the rewritten GUI.
+            b.draw(IMOD_DRAW_ALL | IMOD_DRAW_NOSYNC);
+            return;
+        }
+        b.sync_model_index_to_mouse();
+    }
+    /// `imodInfoNewBW`.
+    pub fn imod_info_new_bw(
+        &mut self,
+        vi: &mut ImodView,
+        cramp: &mut Cramp,
+        which: i32,
+        value: i32,
+        dragging: i32,
+        b: &mut dyn InfoCbBoundary,
+    ) {
+        if self.forbid_level != 0 {
+            b.set_bw_sliders(vi.black_in_range, vi.white_in_range);
+            return;
+        }
+        let mut black = vi.black;
+        let mut white = vi.white;
+        if which != 0 {
+            vi.white_in_range = value;
+            white = imod_info_slider_to_level(vi, value);
+            if black > white || vi.black_in_range > vi.white_in_range {
+                black = white;
+                vi.black_in_range = vi.white_in_range;
+                b.set_bw_sliders(vi.black_in_range, vi.white_in_range);
+            }
+        } else {
+            vi.black_in_range = value;
+            black = imod_info_slider_to_level(vi, value);
+            if black > white || vi.black_in_range > vi.white_in_range {
+                white = black;
+                vi.white_in_range = vi.black_in_range;
+                b.set_bw_sliders(vi.black_in_range, vi.white_in_range);
+            }
+        }
+        cramp.blacklevel = black;
+        cramp.whitelevel = white;
+        vi.black = black;
+        vi.white = white;
+        let save = self.float_on;
+        self.float_on = 0;
+        self.imod_info_setbw(vi, black, white, b);
+        self.float_on = save;
+    }
+    /// `imodInfoNewLH`.
+    pub fn imod_info_new_lh(
+        &mut self,
+        vi: &mut ImodView,
+        cramp: &mut Cramp,
+        which: i32,
+        value: i32,
+        dragging: i32,
+        b: &mut dyn InfoCbBoundary,
+    ) {
+        let (mut low, mut high) = (vi.range_low, vi.range_high);
+        if which != 0 {
+            high = value;
+            if high <= low {
+                low = high - 1;
+                b.set_lh_sliders(low, high)
+            }
+        } else {
+            low = value;
+            if high <= low {
+                high = low + 1;
+                b.set_lh_sliders(low, high)
+            }
+        }
+        vi.range_low = low;
+        vi.range_high = high;
+        vi.black = imod_info_slider_to_level(vi, vi.black_in_range);
+        vi.white = imod_info_slider_to_level(vi, vi.white_in_range);
+        cramp.blacklevel = vi.black;
+        cramp.whitelevel = vi.white;
+        let save = self.float_on;
+        self.float_on = 0;
+        self.imod_info_setbw(vi, vi.black, vi.white, b);
+        self.float_on = save;
+    }
+    /// `imod_info_bwfloat`; image/pyramid sampling is supplied by the source boundary.
+    pub fn imod_info_bwfloat(
+        &mut self,
+        vi: &mut ImodView,
+        section: i32,
+        time: i32,
+        b: &mut dyn InfoCbBoundary,
+    ) -> i32 {
+        let limits = self.get_sample_limits(vi);
+        let Some((mean, sd)) =
+            b.mean_sd(vi, section, time, (limits.0, limits.1, limits.2, limits.3))
+        else {
+            self.last_section = section;
+            self.last_time = time;
+            return 0;
+        };
+        let sd = sd.max(0.1);
+        let (ref_mean, ref_sd) = if self.last_section >= 0 {
+            b.mean_sd(
+                vi,
+                self.last_section,
+                self.last_time,
+                (limits.0, limits.1, limits.2, limits.3),
+            )
+            .unwrap_or((mean, sd))
+        } else {
+            (mean, sd)
+        };
+        let slope = sd / ref_sd.max(0.1);
+        let mut black = (mean - (ref_mean - self.ref_black) * slope).round() as i32;
+        let mut white = (black as f32 + slope * (self.ref_white - self.ref_black)).round() as i32;
+        let max = if vi.ushort_store != 0 { 65535 } else { 255 };
+        black = black.clamp(0, max);
+        white = white.clamp(black, max);
+        if white < black + 2 {
+            black = (black - 1).max(0);
+            white = (white + 1).min(max)
+        }
+        let changed = black != vi.black || white != vi.white;
+        vi.black = black;
+        vi.white = white;
+        self.ref_black = black as f32;
+        self.ref_white = white as f32;
+        self.last_section = section;
+        self.last_time = time;
+        if changed {
+            self.doing_float = 1;
+            self.imod_info_setbw(vi, black, white, b);
+            self.doing_float = 0;
+            1
+        } else {
+            0
+        }
+    }
+    /// `imodInfoCurrentMeanSD`.
+    pub fn imod_info_current_mean_sd(
+        &self,
+        vi: &ImodView,
+        b: &mut dyn InfoCbBoundary,
+    ) -> Option<(f32, f32, f32, f32)> {
+        let l = self.get_sample_limits(vi);
+        let (mean, sd) = b.mean_sd(
+            vi,
+            (vi.zmouse + 0.5) as i32,
+            vi.cur_time,
+            (l.0, l.1, l.2, l.3),
+        )?;
+        let (mut lo, mut hi) = (mean - 3. * sd, mean + 3. * sd);
+        if vi.ushort_store != 0 {
+            lo = lo.clamp(0., 65535.);
+            hi = hi.clamp(0., 65535.);
+            if lo as i32 >= hi as i32 - 1 {
+                lo = (0.5 * (lo + hi) - 1.).clamp(0., 65533.);
+                hi = lo + 2.
+            }
+        }
+        Some((mean, sd, lo, hi))
+    }
+    /// `imod_draw_window`.
+    pub fn imod_draw_window(
+        &mut self,
+        model: Option<&Imod>,
+        vi: Option<&mut ImodView>,
+        b: &mut dyn InfoCbBoundary,
+    ) {
+        if let Some(m) = model {
+            self.imod_info_setocp(m, b)
+        }
+        if let Some(v) = vi {
+            imod_info_setxyz(v, b)
+        }
+    }
+
+    /// `imodInfoFloat`.
+    pub fn imod_info_float(
+        &mut self,
+        vi: &mut ImodView,
+        b: &mut dyn InfoCbBoundary,
+        state_in: i32,
+    ) {
+        self.float_on = state_in;
+        if state_in != 0 {
+            let section = (vi.zmouse + 0.5) as i32;
+            let _ = self.imod_info_bwfloat(vi, section, vi.cur_time, b);
+            self.imod_info_setbw(vi, vi.black, vi.white, b);
+        }
+    }
+    /// `imodInfoAutoContrast`.
+    pub fn imod_info_auto_contrast(
+        &mut self,
+        vi: &mut ImodView,
+        cramp: &mut Cramp,
+        target_mean: i32,
+        target_sd: i32,
+        b: &mut dyn InfoCbBoundary,
+    ) {
+        let Some((mean, sd, lo, hi)) = self.imod_info_current_mean_sd(vi, b) else {
+            return;
+        };
+        let max = if vi.ushort_store != 0 { 65535 } else { 255 };
+        let (mut black, mut white) = if cramp.reverse != 0 {
+            (
+                (mean - sd * (255 - target_mean) as f32 / target_sd as f32).round() as i32,
+                (mean + sd * target_mean as f32 / target_sd as f32).round() as i32,
+            )
+        } else {
+            (
+                (mean - sd * target_mean as f32 / target_sd as f32).round() as i32,
+                (mean + sd * (255 - target_mean) as f32 / target_sd as f32).round() as i32,
+            )
+        };
+        black = black.clamp(0, max);
+        white = white.clamp(0, max);
+        if white - black < 4 {
+            let mid = (white + black) / 2;
+            black = (mid - 2).max(0);
+            white = (mid + 2).min(max)
+        }
+        if vi.ushort_store != 0 {
+            vi.range_low = lo as i32;
+            vi.range_high = hi as i32
+        }
+        vi.black = black;
+        vi.white = white;
+        cramp.blacklevel = black;
+        cramp.whitelevel = white;
+        let save = self.float_on;
+        self.float_on = 0;
+        self.imod_info_setbw(vi, black, white, b);
+        self.float_on = save;
+        let _ = imod_info_input(b);
+    }
+}
+
 impl Default for InfoCbState {
     fn default() -> Self {
         Self {
@@ -211,52 +754,6 @@ pub fn info_level_to_slider(vi: &ImodView, level: i32) -> i32 {
     }
 }
 
-/// `imodInfoNewOCP`.  The C source obtains `Imod` from `App->cvi`; Rust
-/// receives the owner explicitly so object/contour/point selection is real
-/// state mutation instead of an opaque UI notification.
-pub fn imod_info_new_ocp(
-    state: &mut InfoCbState,
-    model: &mut Imod,
-    which: i32,
-    value: i32,
-    no_show: i32,
-    b: &mut dyn InfoCbBoundary,
-) {
-    b.set_focus();
-    let value = value - 1;
-    if value < 0 {
-        imod_info_setocp(state, model, b);
-        return;
-    }
-    let old = model.cindex;
-    match which {
-        // Object: with Show disabled detach contour and point; otherwise the
-        // shared input controller preserves same-time contour attachment.
-        0 if no_show != 0 => {
-            model.cindex.object = value;
-            model.cindex.contour = -1;
-            model.cindex.point = -1;
-        }
-        0 => {
-            imod_set_index(model, value, old.contour, old.point);
-            b.keep_contour_at_same_time();
-        }
-        1 => {
-            imod_set_index(model, old.object, value, old.point);
-            b.restore_point_index(old);
-        }
-        2 => imod_set_index(model, old.object, old.contour, value),
-        _ => return,
-    }
-    if no_show != 0 && model.cindex.point > 0 {
-        // `IMOD_DRAW_NOSYNC` suppresses the controller sync that the normal
-        // branch performs below; the boundary's draw flag is the direct host
-        // equivalent for the rewritten GUI.
-        b.draw(IMOD_DRAW_ALL | IMOD_DRAW_NOSYNC);
-        return;
-    }
-    b.sync_model_index_to_mouse();
-}
 /// `imodInfoNewXYZ`.
 pub fn imod_info_new_xyz(vi: &mut ImodView, values: [i32; 3], b: &mut dyn InfoCbBoundary) {
     b.set_focus();
@@ -265,114 +762,13 @@ pub fn imod_info_new_xyz(vi: &mut ImodView, values: [i32; 3], b: &mut dyn InfoCb
     vi.zmouse = (values[2] - 1) as f32;
     b.draw(IMOD_DRAW_XYZ);
 }
-/// `imodInfoNewBW`.
-pub fn imod_info_new_bw(
-    state: &mut InfoCbState,
-    vi: &mut ImodView,
-    cramp: &mut Cramp,
-    which: i32,
-    value: i32,
-    dragging: i32,
-    b: &mut dyn InfoCbBoundary,
-) {
-    if state.forbid_level != 0 {
-        b.set_bw_sliders(vi.black_in_range, vi.white_in_range);
-        return;
-    }
-    let mut black = vi.black;
-    let mut white = vi.white;
-    if which != 0 {
-        vi.white_in_range = value;
-        white = imod_info_slider_to_level(vi, value);
-        if black > white || vi.black_in_range > vi.white_in_range {
-            black = white;
-            vi.black_in_range = vi.white_in_range;
-            b.set_bw_sliders(vi.black_in_range, vi.white_in_range);
-        }
-    } else {
-        vi.black_in_range = value;
-        black = imod_info_slider_to_level(vi, value);
-        if black > white || vi.black_in_range > vi.white_in_range {
-            white = black;
-            vi.white_in_range = vi.black_in_range;
-            b.set_bw_sliders(vi.black_in_range, vi.white_in_range);
-        }
-    }
-    cramp.blacklevel = black;
-    cramp.whitelevel = white;
-    vi.black = black;
-    vi.white = white;
-    let save = state.float_on;
-    state.float_on = 0;
-    imod_info_setbw(state, vi, black, white, b);
-    state.float_on = save;
-}
-/// `imodInfoNewLH`.
-pub fn imod_info_new_lh(
-    state: &mut InfoCbState,
-    vi: &mut ImodView,
-    cramp: &mut Cramp,
-    which: i32,
-    value: i32,
-    dragging: i32,
-    b: &mut dyn InfoCbBoundary,
-) {
-    let (mut low, mut high) = (vi.range_low, vi.range_high);
-    if which != 0 {
-        high = value;
-        if high <= low {
-            low = high - 1;
-            b.set_lh_sliders(low, high)
-        }
-    } else {
-        low = value;
-        if high <= low {
-            high = low + 1;
-            b.set_lh_sliders(low, high)
-        }
-    }
-    vi.range_low = low;
-    vi.range_high = high;
-    vi.black = imod_info_slider_to_level(vi, vi.black_in_range);
-    vi.white = imod_info_slider_to_level(vi, vi.white_in_range);
-    cramp.blacklevel = vi.black;
-    cramp.whitelevel = vi.white;
-    let save = state.float_on;
-    state.float_on = 0;
-    imod_info_setbw(state, vi, vi.black, vi.white, b);
-    state.float_on = save;
-}
-/// `imodInfoFloat`.
-pub fn imod_info_float(
-    state: &mut InfoCbState,
-    vi: &mut ImodView,
-    b: &mut dyn InfoCbBoundary,
-    state_in: i32,
-) {
-    state.float_on = state_in;
-    if state_in != 0 {
-        let section = (vi.zmouse + 0.5) as i32;
-        let _ = imod_info_bwfloat(state, vi, section, vi.cur_time, b);
-        imod_info_setbw(state, vi, vi.black, vi.white, b);
-    }
-}
-/// `imodInfoSubset`.
-pub fn imod_info_subset(state: &mut InfoCbState, value: i32) {
-    state.float_subsets = value;
-}
-/// `imodInfoTRamps`.
-pub fn imod_info_t_ramps(state: &mut InfoCbState, value: i32) {
-    state.t_ramps_on = value;
-}
+
 /// `imodInfoMMSelected`.
 pub fn imod_info_mm_selected(model: &mut Imod, mode: i32, b: &mut dyn InfoCbBoundary) {
     imod_set_mmode(model, mode, b);
     b.draw(IMOD_DRAW_MOD);
 }
-/// `imodInfoCtrlPress`.
-pub fn imod_info_ctrl_press(state: &mut InfoCbState, pressed: i32) {
-    state.ctrl_pressed = pressed;
-}
+
 /// `imodInfoQuit`.
 pub fn imod_info_quit(b: &mut dyn InfoCbBoundary) {
     b.quit();
@@ -409,38 +805,7 @@ pub fn imod_info_setobjcolor(model: &Imod, b: &mut dyn InfoCbBoundary) {
         (red as u32) << 16 | (green as u32) << 8 | blue as u32,
     );
 }
-/// `imod_info_setocp`.
-pub fn imod_info_setocp(state: &mut InfoCbState, model: &Imod, b: &mut dyn InfoCbBoundary) {
-    let oi = model.cindex.object;
-    let obj = model.obj.get(oi.max(0) as usize);
-    let cont = obj.and_then(|o| o.cont.get(model.cindex.contour.max(0) as usize));
-    let max = [
-        model.obj.len() as i32,
-        obj.map_or(-1, |o| o.cont.len() as i32),
-        cont.map_or(-1, |c| c.pts.len() as i32),
-    ];
-    let val = [
-        if obj.is_some() { oi + 1 } else { 0 },
-        if cont.is_some() {
-            model.cindex.contour + 1
-        } else {
-            -1
-        },
-        if cont.map_or(false, |c| !c.pts.is_empty()) {
-            model.cindex.point + 1
-        } else {
-            if cont.is_some() { 0 } else { -1 }
-        },
-    ];
-    b.update_ocp(val, max);
-    if state.imod_obj_cnum != oi && oi >= 0 {
-        state.imod_obj_cnum = oi;
-        imod_info_setobjcolor(model, b)
-    }
-    if state.update_info_only == 0 {
-        b.object_changed();
-    }
-}
+
 /// `imod_info_setxyz`.
 pub fn imod_info_setxyz(vi: &mut ImodView, b: &mut dyn InfoCbBoundary) {
     ivw_bind_mouse(vi);
@@ -454,51 +819,7 @@ pub fn imod_info_setxyz(vi: &mut ImodView, b: &mut dyn InfoCbBoundary) {
     );
     b.xyz_changed();
 }
-/// `imodInfoUpdateOnly`.
-pub fn imod_info_update_only(state: &mut InfoCbState, value: i32) {
-    state.update_info_only = value;
-}
-/// `imod_info_setbw`.
-pub fn imod_info_setbw(
-    state: &mut InfoCbState,
-    vi: &mut ImodView,
-    black: i32,
-    white: i32,
-    b: &mut dyn InfoCbBoundary,
-) {
-    let changed = vi.black != black || vi.white != white;
-    vi.black = black;
-    vi.white = white;
-    if vi.ushort_store != 0 {
-        if black < vi.range_low {
-            vi.range_low = black
-        }
-        if white > vi.range_high {
-            vi.range_high = white
-        }
-        vi.black_in_range = info_level_to_slider(vi, black);
-        vi.white_in_range = info_level_to_slider(vi, white);
-        b.set_lh_sliders(vi.range_low, vi.range_high)
-    }
-    b.set_bw_sliders(vi.black_in_range, vi.white_in_range);
-    if state.doing_float == 0 {
-        state.ref_black = black as f32;
-        state.ref_white = white as f32
-    }
-    if changed {
-        b.draw(if false { IMOD_DRAW_ALL } else { IMOD_DRAW_MOD });
-    }
-}
 
-/// `getSampleLimits`.
-pub fn get_sample_limits(state: &InfoCbState, vi: &ImodView) -> (i32, i32, i32, i32, f32) {
-    let ix = (state.float_matt * vi.xsize as f32) as i32;
-    let iy = (state.float_matt * vi.ysize as f32) as i32;
-    let nx = vi.xsize - 2 * ix;
-    let ny = vi.ysize - 2 * iy;
-    let sample = (10000. / (nx.max(1) * ny.max(1)) as f32).min(1.);
-    (ix, iy, nx, ny, sample)
-}
 /// `imodInfoLimitSubarea`.
 pub fn imod_info_limit_subarea(
     left_xpad: i32,
@@ -521,112 +842,7 @@ pub fn imod_info_limit_subarea(
         *ny_use = end - *iy_start
     }
 }
-/// `imod_info_bwfloat`; image/pyramid sampling is supplied by the source boundary.
-pub fn imod_info_bwfloat(
-    state: &mut InfoCbState,
-    vi: &mut ImodView,
-    section: i32,
-    time: i32,
-    b: &mut dyn InfoCbBoundary,
-) -> i32 {
-    let limits = get_sample_limits(state, vi);
-    let Some((mean, sd)) = b.mean_sd(vi, section, time, (limits.0, limits.1, limits.2, limits.3))
-    else {
-        state.last_section = section;
-        state.last_time = time;
-        return 0;
-    };
-    let sd = sd.max(0.1);
-    let (ref_mean, ref_sd) = if state.last_section >= 0 {
-        b.mean_sd(
-            vi,
-            state.last_section,
-            state.last_time,
-            (limits.0, limits.1, limits.2, limits.3),
-        )
-        .unwrap_or((mean, sd))
-    } else {
-        (mean, sd)
-    };
-    let slope = sd / ref_sd.max(0.1);
-    let mut black = (mean - (ref_mean - state.ref_black) * slope).round() as i32;
-    let mut white = (black as f32 + slope * (state.ref_white - state.ref_black)).round() as i32;
-    let max = if vi.ushort_store != 0 { 65535 } else { 255 };
-    black = black.clamp(0, max);
-    white = white.clamp(black, max);
-    if white < black + 2 {
-        black = (black - 1).max(0);
-        white = (white + 1).min(max)
-    }
-    let changed = black != vi.black || white != vi.white;
-    vi.black = black;
-    vi.white = white;
-    state.ref_black = black as f32;
-    state.ref_white = white as f32;
-    state.last_section = section;
-    state.last_time = time;
-    if changed {
-        state.doing_float = 1;
-        imod_info_setbw(state, vi, black, white, b);
-        state.doing_float = 0;
-        1
-    } else {
-        0
-    }
-}
-/// `setTimeRampDataFromGlobal`.
-pub fn set_time_ramp_data_from_global(
-    state: &InfoCbState,
-    vi: &ImodView,
-    cramp: &Cramp,
-    trd: &mut TimeRampData,
-) {
-    if vi.ushort_store != 0 {
-        trd.range_low = vi.range_low;
-        trd.range_high = vi.range_high
-    }
-    trd.last_section = state.last_section;
-    trd.subsets = state.float_subsets;
-    trd.float_on = state.float_on;
-    trd.reverse = cramp.reverse;
-    trd.false_color = cramp.falsecolor;
-}
-/// `imodInfoSaveNextClear`.
-pub fn imod_info_save_next_clear(state: &mut InfoCbState) {
-    state.save_next_clear = 1;
-}
-/// `imod_info_float_clear`.
-pub fn imod_info_float_clear(state: &mut InfoCbState, section: i32, time: i32) {
-    state.single_cleared = 0;
-    if section < 0 && time < 0 {
-        state.sec_data.clear();
-        state.table_size = 0;
-        state.last_section = -1;
-        return;
-    }
-    if section < 0 {
-        for i in 0..-section {
-            if let Some(d) = state.sec_data.get_mut((i * state.tdim + time) as usize) {
-                d.mean = -1.;
-                d.sd = -1.
-            }
-        }
-        return;
-    }
-    let index = section * state.tdim + time;
-    if let Some(d) = state.sec_data.get_mut(index as usize) {
-        if state.save_next_clear != 0 {
-            state.cleared_section = section;
-            state.cleared_time = time;
-            state.cleared_mean = d.mean;
-            state.cleared_sd = d.sd;
-            state.save_next_clear = 0
-        }
-        d.mean = -1.;
-        d.sd = -1.;
-        state.single_cleared = i32::from(state.cleared_sd >= 0.)
-    }
-}
+
 /// `setRampFromTimeData`.
 pub fn set_ramp_from_time_data(vi: &ImodView, trd: &TimeRampData, ramp: &mut Cramp) {
     ramp.falsecolor = trd.false_color;
@@ -642,190 +858,7 @@ pub fn set_ramp_from_time_data(vi: &ImodView, trd: &TimeRampData, ramp: &mut Cra
         trd.white_in_range
     };
 }
-/// `imodInfoTimeRampIndex`.
-pub fn imod_info_time_ramp_index(
-    state: &mut InfoCbState,
-    vi: &ImodView,
-    time: i32,
-    allow_no_last_sec: bool,
-) -> i32 {
-    if state.t_ramps_on == 0 || time < 1 || time == vi.cur_time {
-        return -1;
-    }
-    if time as usize >= state.t_ramp_data.len() {
-        return -1;
-    }
-    let ramp_count = state
-        .t_ramp_data
-        .iter()
-        .filter(|data| data.cramp_ind >= 0)
-        .count() as i32;
-    let trd = &mut state.t_ramp_data[time as usize];
-    if trd.last_section < 0 && !allow_no_last_sec {
-        return -1;
-    }
-    if trd.cramp_ind < 0 {
-        trd.cramp_ind = ramp_count
-    }
-    trd.cramp_ind
-}
-/// `imodInfoSyncToTimeRamp`.
-pub fn imod_info_sync_to_time_ramp(
-    state: &mut InfoCbState,
-    vi: &ImodView,
-    cramp: &Cramp,
-    time: i32,
-) {
-    if state.t_ramps_on == 0 || time < 1 {
-        return;
-    }
-    if let Some(trd) = state.t_ramp_data.get_mut(time as usize) {
-        if trd.cramp_ind < 0 || trd.last_section < 0 {
-            return;
-        }
-        if time == vi.cur_time {
-            trd.false_color = cramp.falsecolor;
-            trd.reverse = cramp.reverse;
-            trd.black_in_range = vi.black_in_range;
-            trd.white_in_range = vi.white_in_range;
-        }
-    }
-}
-/// `imodInfoSyncRampToTimeData`.
-pub fn imod_info_sync_ramp_to_time_data(state: &mut InfoCbState, ramp: &Cramp, time: i32) {
-    if state.t_ramps_on == 0 || time < 1 {
-        return;
-    }
-    if let Some(trd) = state.t_ramp_data.get_mut(time as usize) {
-        if trd.cramp_ind >= 0 && trd.last_section >= 0 {
-            trd.false_color = ramp.falsecolor;
-            trd.reverse = ramp.reverse;
-            trd.ref_black = ramp.blacklevel as f32;
-            trd.ref_white = ramp.whitelevel as f32;
-            trd.black_in_range = ramp.blacklevel;
-            trd.white_in_range = ramp.whitelevel;
-        }
-    }
-}
-/// `imodInfoGetLowHighRange`.
-pub fn imod_info_get_low_high_range(state: &InfoCbState, vi: &ImodView, time: i32) -> (i32, i32) {
-    if state.t_ramps_on == 0 || time < 1 || time == vi.cur_time {
-        (vi.range_low, vi.range_high)
-    } else {
-        state
-            .t_ramp_data
-            .get(time as usize)
-            .map(|d| (d.range_low, d.range_high))
-            .unwrap_or((vi.range_low, vi.range_high))
-    }
-}
-/// `makeListOfTimesToFloat`; window enumeration remains at the Zap/Slicer/Xyz boundary.
-pub fn make_list_of_times_to_float(
-    state: &InfoCbState,
-    vi: &ImodView,
-    section: i32,
-    windows: &[TimeLockedImageWindow],
-) -> Vec<i32> {
-    let mut times = Vec::new();
-    for window in windows {
-        if window.section_locked || window.time_lock == 0 || window.time_lock == vi.cur_time {
-            continue;
-        }
-        let Some(time_data) = state.t_ramp_data.get(window.time_lock as usize) else {
-            continue;
-        };
-        // `info_cb.cpp:1244-1247`: a saved floating time is reconsidered on
-        // a new section; otherwise global float initializes only the current
-        // top image window for an unvisited time.
-        let should_float = (time_data.float_on != 0
-            && time_data.last_section >= 0
-            && section != state.last_section)
-            || (state.float_on != 0 && time_data.last_section < 0 && window.is_top_window);
-        if should_float && !times.contains(&window.time_lock) {
-            times.push(window.time_lock);
-        }
-    }
-    times
-}
-/// `imodInfoCurrentMeanSD`.
-pub fn imod_info_current_mean_sd(
-    state: &InfoCbState,
-    vi: &ImodView,
-    b: &mut dyn InfoCbBoundary,
-) -> Option<(f32, f32, f32, f32)> {
-    let l = get_sample_limits(state, vi);
-    let (mean, sd) = b.mean_sd(
-        vi,
-        (vi.zmouse + 0.5) as i32,
-        vi.cur_time,
-        (l.0, l.1, l.2, l.3),
-    )?;
-    let (mut lo, mut hi) = (mean - 3. * sd, mean + 3. * sd);
-    if vi.ushort_store != 0 {
-        lo = lo.clamp(0., 65535.);
-        hi = hi.clamp(0., 65535.);
-        if lo as i32 >= hi as i32 - 1 {
-            lo = (0.5 * (lo + hi) - 1.).clamp(0., 65533.);
-            hi = lo + 2.
-        }
-    }
-    Some((mean, sd, lo, hi))
-}
-/// `imodInfoAutoContrast`.
-pub fn imod_info_auto_contrast(
-    state: &mut InfoCbState,
-    vi: &mut ImodView,
-    cramp: &mut Cramp,
-    target_mean: i32,
-    target_sd: i32,
-    b: &mut dyn InfoCbBoundary,
-) {
-    let Some((mean, sd, lo, hi)) = imod_info_current_mean_sd(state, vi, b) else {
-        return;
-    };
-    let max = if vi.ushort_store != 0 { 65535 } else { 255 };
-    let (mut black, mut white) = if cramp.reverse != 0 {
-        (
-            (mean - sd * (255 - target_mean) as f32 / target_sd as f32).round() as i32,
-            (mean + sd * target_mean as f32 / target_sd as f32).round() as i32,
-        )
-    } else {
-        (
-            (mean - sd * target_mean as f32 / target_sd as f32).round() as i32,
-            (mean + sd * (255 - target_mean) as f32 / target_sd as f32).round() as i32,
-        )
-    };
-    black = black.clamp(0, max);
-    white = white.clamp(0, max);
-    if white - black < 4 {
-        let mid = (white + black) / 2;
-        black = (mid - 2).max(0);
-        white = (mid + 2).min(max)
-    }
-    if vi.ushort_store != 0 {
-        vi.range_low = lo as i32;
-        vi.range_high = hi as i32
-    }
-    vi.black = black;
-    vi.white = white;
-    cramp.blacklevel = black;
-    cramp.whitelevel = white;
-    let save = state.float_on;
-    state.float_on = 0;
-    imod_info_setbw(state, vi, black, white, b);
-    state.float_on = save;
-    let _ = imod_info_input(b);
-}
-/// `imodInfoSetFloatFlags`.
-pub fn imod_info_set_float_flags(state: &mut InfoCbState, float_on: i32, subset: i32, ramps: i32) {
-    state.float_on = float_on;
-    state.float_subsets = subset;
-    state.t_ramps_on = ramps;
-}
-/// `imodInfoGetFloatFlags`.
-pub fn imod_info_get_float_flags(state: &InfoCbState) -> (i32, i32, i32) {
-    (state.float_on, state.float_subsets, state.t_ramps_on)
-}
+
 /// `imod_info_input`.
 pub fn imod_info_input(b: &mut dyn InfoCbBoundary) -> i32 {
     b.process_events();
@@ -857,14 +890,7 @@ pub fn imod_info_msg(top: Option<&str>, bot: Option<&str>, b: &mut dyn InfoCbBou
         b.message(s)
     }
 }
-/// `imod_info_forbid`.
-pub fn imod_info_forbid(state: &mut InfoCbState) {
-    state.forbid_level += 1;
-}
-/// `imod_info_enable`.
-pub fn imod_info_enable(state: &mut InfoCbState) {
-    state.forbid_level = (state.forbid_level - 1).max(0);
-}
+
 /// `imod_set_mmode`.
 pub fn imod_set_mmode(model: &mut Imod, mut mode: i32, b: &mut dyn InfoCbBoundary) {
     if mode == IMOD_MM_TOGGLE {
@@ -878,25 +904,7 @@ pub fn imod_set_mmode(model: &mut Imod, mut mode: i32, b: &mut dyn InfoCbBoundar
     b.set_movie_model(if mode == IMOD_MMOVIE { 0 } else { 1 });
     b.draw(IMOD_DRAW_MOD);
 }
-/// `imod_draw_window`.
-pub fn imod_draw_window(
-    state: &mut InfoCbState,
-    model: Option<&Imod>,
-    vi: Option<&mut ImodView>,
-    b: &mut dyn InfoCbBoundary,
-) {
-    if let Some(m) = model {
-        imod_info_setocp(state, m, b)
-    }
-    if let Some(v) = vi {
-        imod_info_setxyz(v, b)
-    }
-}
-/// `imodStartAutoDumpCache`.
-pub fn imod_start_auto_dump_cache(state: &mut InfoCbState) {
-    state.dump_cache = 1;
-    state.start_dump = 2;
-}
+
 /// `imodQuitCheck`.
 pub fn imod_quit_check(b: &mut dyn InfoCbBoundary) -> i32 {
     imod_imgcnt(None, b);
@@ -965,10 +973,10 @@ mod tests {
             means: Some((100., 10.)),
             ..Default::default()
         };
-        imod_info_auto_contrast(&mut s, &mut v, &mut r, 128, 32, &mut b);
+        s.imod_info_auto_contrast(&mut v, &mut r, 128, 32, &mut b);
         assert!(v.white > v.black);
         s.float_on = 1;
-        assert_eq!(imod_info_bwfloat(&mut s, &mut v, 0, 0, &mut b), 0);
+        assert_eq!(s.imod_info_bwfloat(&mut v, 0, 0, &mut b), 0);
     }
     #[test]
     fn ocp_selection_mutates_model_and_uses_native_sync_routes() {
@@ -995,7 +1003,7 @@ mod tests {
         let mut state = InfoCbState::default();
         let mut boundary = B::default();
 
-        imod_info_new_ocp(&mut state, &mut model, 0, 2, 1, &mut boundary);
+        state.imod_info_new_ocp(&mut model, 0, 2, 1, &mut boundary);
         assert_eq!(
             model.cindex,
             Iindex {
@@ -1011,7 +1019,7 @@ mod tests {
             contour: 0,
             point: 1,
         };
-        imod_info_new_ocp(&mut state, &mut model, 1, 2, 0, &mut boundary);
+        state.imod_info_new_ocp(&mut model, 1, 2, 0, &mut boundary);
         assert_eq!(model.cindex.contour, 1);
         assert_eq!(
             boundary.restored,
@@ -1022,7 +1030,7 @@ mod tests {
             }]
         );
 
-        imod_info_new_ocp(&mut state, &mut model, 2, 2, 1, &mut boundary);
+        state.imod_info_new_ocp(&mut model, 2, 2, 1, &mut boundary);
         assert_eq!(model.cindex.point, 1);
         assert_eq!(boundary.draws, vec![IMOD_DRAW_ALL | IMOD_DRAW_NOSYNC]);
     }
@@ -1043,8 +1051,7 @@ mod tests {
             cur_time: 1,
             ..Default::default()
         };
-        let times = make_list_of_times_to_float(
-            &state,
+        let times = state.make_list_of_times_to_float(
             &vi,
             3,
             &[

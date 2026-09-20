@@ -277,7 +277,6 @@ pub fn slice_init(s: &mut Islice, xsize: i32, ysize: i32, mode: i32, data: MrcDa
     }
     0
 }
-pub fn slice_free(_s: Islice) {}
 pub fn slice_mode(mst: &[u8]) -> i32 {
     {
         let value = mst;
@@ -695,10 +694,6 @@ mod tests {
             (4, 5, 1, 2, 1)
         );
         assert_eq!(slice_init(s.as_mut(), 1, 1, 12, MrcData::default()), -1);
-    }
-    #[test]
-    fn free_consumes_owned_slice() {
-        slice_free(slice_create(2, 2, MRC_MODE_BYTE).unwrap());
     }
     #[test]
     fn create_uses_owned_allocation_and_mode_checks() {

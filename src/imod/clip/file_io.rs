@@ -4,7 +4,7 @@ use crate::imod::clip::clip::{
     IP_DEFAULT, show_warning,
 };
 use crate::imod::libcfshr::b3dutil::{CArg, ImodFile, c_format, c_format_bytes};
-use crate::imod::libcfshr::islice::{Islice, Istack, slice_create, slice_free, slice_put_val};
+use crate::imod::libcfshr::islice::{Islice, Istack, slice_create, slice_put_val};
 use crate::imod::libcfshr::parse_params::exit_error;
 use crate::imod::libiimod::iimage::{
     ii_fclose, ii_fopen, ii_limited_tile_size, ii_lookup_file_from_fp, ii_set_chunk_sizes_for_fp,

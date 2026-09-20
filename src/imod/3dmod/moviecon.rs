@@ -43,6 +43,245 @@ pub struct MovieConState {
     pub slicer_montage: bool,
     pub timer: Option<Instant>,
 }
+
+impl MovieConState {
+    pub fn imc_set_snap_montage(&mut self, v: bool) {
+        self.snap_montage = v
+    }
+    pub fn imc_set_snap_whole_mont(&mut self, v: i32) {
+        self.whole_mont = v
+    }
+    pub fn imc_set_montage_factor(&mut self, v: i32) {
+        self.montage_fac = v.max(2)
+    }
+    pub fn imc_set_scale_sizes(&mut self, v: bool) {
+        self.scale_sizes = v
+    }
+    pub fn imc_set_size_scaling(&mut self, v: i32) {
+        self.size_scaling = v
+    }
+    pub fn imc_set_slicer_montage(&mut self, v: bool) {
+        self.slicer_montage = v
+    }
+    pub fn imc_set_slicer_mont_factor(&mut self, v: i32) {
+        self.slicer_mont_fac = v.max(2)
+    }
+    pub fn imc_set_scale_thicks(&mut self, v: bool) {
+        self.scale_thicks = v
+    }
+    pub fn imc_set_thick_scaling(&mut self, v: i32) {
+        self.thick_scaling = v
+    }
+    pub fn imc_set_special_limits(&mut self, axis: i32, start: i32, end: i32) {
+        self.special_axis = axis;
+        self.start[4] = start;
+        self.endsec[4] = end
+    }
+    pub fn imc_start_timer(&mut self) {
+        self.movie_count = 0;
+        self.timer = Some(Instant::now());
+        self.movie_start = 0;
+        self.movie_current = 0
+    }
+
+    pub fn set_sliders(&self) -> (i32, i32, i32, i32, i32, i32, i32) {
+        let mut max = self.maxend[self.axiscon];
+        let on = (max >= 2) as i32;
+        if on == 0 {
+            max = 2
+        }
+        let (mut min, mut end) = (2, self.maxend[self.axiscon] + 1);
+        if on == 0 {
+            min = end;
+            end += 1
+        }
+        (
+            self.start[self.axiscon] + 1,
+            max,
+            self.endsec[self.axiscon] + 1,
+            min,
+            end,
+            self.increment[self.axiscon],
+            on,
+        )
+    }
+    pub fn imc_reset_all(&mut self, v: &ImodView) {
+        self.start = [0; 5];
+        self.increment = [1; 4];
+        self.endsec = [
+            (v.xsize - 1).max(0),
+            (v.ysize - 1).max(0),
+            (v.zsize - 1).max(0),
+            (v.num_times - 1).max(0),
+            0,
+        ];
+        self.maxend.copy_from_slice(&self.endsec[..4]);
+        self.looponeway = 0;
+        self.autosnap = 0;
+        self.firsttime = false;
+    }
+    pub fn imc_update_dialog(&self, n: &mut dyn MovieConNativeBoundary) {
+        if self.dialog_open {
+            n.set_non_tif_label();
+        }
+    }
+    pub fn imc_start_snap_here(&self, _: &ImodView) -> i32 {
+        self.start_here
+    }
+    pub fn imc_get_starter_id(&self) -> i32 {
+        self.starter_ctrl_id
+    }
+    pub fn imc_set_starter_id(&mut self, v: i32) {
+        self.starter_ctrl_id = v;
+        self.special_axis = -1
+    }
+    pub fn imc_get_interval(&self) -> f32 {
+        self.realint
+    }
+    pub fn imc_get_snap_montage(&self, doing: bool) -> bool {
+        self.snap_montage && (!doing || self.dialog_open)
+    }
+    pub fn imc_get_snap_whole_mont(&self) -> i32 {
+        self.whole_mont
+    }
+    pub fn imc_get_montage_factor(&self) -> i32 {
+        self.montage_fac
+    }
+    pub fn imc_get_scale_sizes(&self) -> bool {
+        self.scale_sizes
+    }
+    pub fn imc_get_size_scaling(&self) -> i32 {
+        self.size_scaling
+    }
+    pub fn imc_get_slicer_montage(&self, doing: bool) -> bool {
+        self.slicer_montage && (!doing || self.dialog_open)
+    }
+    pub fn imc_get_slicer_mont_factor(&self) -> i32 {
+        self.slicer_mont_fac
+    }
+    pub fn imc_get_scale_thicks(&self) -> bool {
+        self.scale_thicks
+    }
+    pub fn imc_get_thick_scaling(&self) -> i32 {
+        self.thick_scaling
+    }
+    pub fn imc_set_movierate(&mut self, v: &mut ImodView, mut rate: i32) {
+        loop {
+            v.movierate = rate;
+            self.realint = BASEINT * RATEFAC.powi(rate);
+            self.realrate = 1000. / self.realint;
+            if self.realrate > MAXRATE {
+                rate += 1
+            } else if self.realrate < MINRATE {
+                rate -= 1
+            } else {
+                break;
+            }
+        }
+    }
+    pub fn imc_slider_changed(&mut self, which: i32, value: i32) {
+        let a = self.axiscon;
+        match which {
+            0 => {
+                self.start[a] = value - 1;
+                if self.start[a] >= self.endsec[a] && self.start[a] + 1 <= self.maxend[a] {
+                    self.endsec[a] = self.start[a] + 1
+                }
+            }
+            1 => {
+                self.endsec[a] = value - 1;
+                if self.endsec[a] <= self.start[a] {
+                    self.start[a] = self.endsec[a] - 1
+                }
+            }
+            2 => self.increment[a] = value,
+            _ => {}
+        }
+    }
+    pub fn imc_axis_selected(&mut self, v: i32) {
+        self.axiscon = v.clamp(0, 3) as usize
+    }
+    pub fn imc_extent_selected(&mut self, v: i32) {
+        self.looponeway = v
+    }
+    pub fn imc_snap_selected(&mut self, v: i32) {
+        self.autosnap = v
+    }
+    pub fn imc_start_here_selected(&mut self, v: i32) {
+        self.start_here = v
+    }
+
+    pub fn imc_get_increment(&mut self, v: &ImodView, axis: i32) -> i32 {
+        if self.firsttime {
+            self.imc_reset_all(v)
+        }
+        self.increment[axis as usize]
+    }
+    pub fn imc_get_loop_mode(&mut self, v: &ImodView) -> i32 {
+        if self.firsttime {
+            self.imc_reset_all(v)
+        }
+        self.looponeway
+    }
+    pub fn imc_get_snapshot(&mut self, v: &ImodView) -> i32 {
+        if self.firsttime {
+            self.imc_reset_all(v)
+        }
+        self.autosnap
+    }
+    pub fn imc_get_start_end(&mut self, v: &ImodView, axis: i32) -> (i32, i32) {
+        if self.firsttime {
+            self.imc_reset_all(v)
+        }
+        let i = axis as usize;
+        if axis == self.special_axis {
+            (
+                self.start[i].max(self.start[4]),
+                self.endsec[i].min(self.endsec[4]),
+            )
+        } else {
+            (self.start[i], self.endsec[i])
+        }
+    }
+    pub fn imod_movie_con_dialog(&mut self, v: &ImodView) {
+        self.dialog_open = true;
+        self.imc_reset_all(v);
+        self.axiscon = 2
+    }
+    pub fn imc_closing(&mut self, v: &ImodView) {
+        self.dialog_open = false;
+        self.imc_reset_all(v)
+    }
+    pub fn imc_reset_pressed(&mut self, v: &ImodView) {
+        self.imc_reset_all(v)
+    }
+    pub fn imc_rate_entered(&mut self, v: &mut ImodView, mut rate: f32) {
+        if rate <= 0. {
+            self.imc_set_movierate(v, 0);
+            return;
+        }
+        rate = rate.clamp(MINRATE, MAXRATE);
+        self.realrate = rate;
+        self.realint = 1000. / rate;
+        v.movierate = ((self.realint / BASEINT).ln() / RATEFAC.ln() + 0.5) as i32
+    }
+    pub fn imc_increment_rate(&mut self, v: &mut ImodView, dir: i32) {
+        self.imc_set_movierate(v, v.movierate + dir)
+    }
+
+    pub fn imc_read_timer(&mut self) -> Option<String> {
+        self.movie_count += 1;
+        let elapsed = self.timer?.elapsed().as_secs_f32();
+        if elapsed == 0. {
+            return None;
+        }
+        Some(format!(
+            "Actual FPS: {:5.2} (avg)",
+            self.movie_count as f32 / elapsed
+        ))
+    }
+}
+
 impl Default for MovieConState {
     fn default() -> Self {
         Self {
@@ -77,235 +316,7 @@ impl Default for MovieConState {
         }
     }
 }
-pub fn set_sliders(state: &MovieConState) -> (i32, i32, i32, i32, i32, i32, i32) {
-    let mut max = state.maxend[state.axiscon];
-    let on = (max >= 2) as i32;
-    if on == 0 {
-        max = 2
-    }
-    let (mut min, mut end) = (2, state.maxend[state.axiscon] + 1);
-    if on == 0 {
-        min = end;
-        end += 1
-    }
-    (
-        state.start[state.axiscon] + 1,
-        max,
-        state.endsec[state.axiscon] + 1,
-        min,
-        end,
-        state.increment[state.axiscon],
-        on,
-    )
-}
-pub fn imc_reset_all(s: &mut MovieConState, v: &ImodView) {
-    s.start = [0; 5];
-    s.increment = [1; 4];
-    s.endsec = [
-        (v.xsize - 1).max(0),
-        (v.ysize - 1).max(0),
-        (v.zsize - 1).max(0),
-        (v.num_times - 1).max(0),
-        0,
-    ];
-    s.maxend.copy_from_slice(&s.endsec[..4]);
-    s.looponeway = 0;
-    s.autosnap = 0;
-    s.firsttime = false;
-}
-pub fn imc_update_dialog(s: &MovieConState, n: &mut dyn MovieConNativeBoundary) {
-    if s.dialog_open {
-        n.set_non_tif_label();
-    }
-}
-pub fn imc_get_increment(s: &mut MovieConState, v: &ImodView, axis: i32) -> i32 {
-    if s.firsttime {
-        imc_reset_all(s, v)
-    }
-    s.increment[axis as usize]
-}
-pub fn imc_get_loop_mode(s: &mut MovieConState, v: &ImodView) -> i32 {
-    if s.firsttime {
-        imc_reset_all(s, v)
-    }
-    s.looponeway
-}
-pub fn imc_start_snap_here(s: &MovieConState, _: &ImodView) -> i32 {
-    s.start_here
-}
-pub fn imc_get_snapshot(s: &mut MovieConState, v: &ImodView) -> i32 {
-    if s.firsttime {
-        imc_reset_all(s, v)
-    }
-    s.autosnap
-}
-pub fn imc_get_starter_id(s: &MovieConState) -> i32 {
-    s.starter_ctrl_id
-}
-pub fn imc_set_starter_id(s: &mut MovieConState, v: i32) {
-    s.starter_ctrl_id = v;
-    s.special_axis = -1
-}
-pub fn imc_get_start_end(s: &mut MovieConState, v: &ImodView, axis: i32) -> (i32, i32) {
-    if s.firsttime {
-        imc_reset_all(s, v)
-    }
-    let i = axis as usize;
-    if axis == s.special_axis {
-        (s.start[i].max(s.start[4]), s.endsec[i].min(s.endsec[4]))
-    } else {
-        (s.start[i], s.endsec[i])
-    }
-}
-pub fn imc_get_interval(s: &MovieConState) -> f32 {
-    s.realint
-}
-pub fn imc_get_snap_montage(s: &MovieConState, doing: bool) -> bool {
-    s.snap_montage && (!doing || s.dialog_open)
-}
-pub fn imc_set_snap_montage(s: &mut MovieConState, v: bool) {
-    s.snap_montage = v
-}
-pub fn imc_get_snap_whole_mont(s: &MovieConState) -> i32 {
-    s.whole_mont
-}
-pub fn imc_set_snap_whole_mont(s: &mut MovieConState, v: i32) {
-    s.whole_mont = v
-}
-pub fn imc_get_montage_factor(s: &MovieConState) -> i32 {
-    s.montage_fac
-}
-pub fn imc_set_montage_factor(s: &mut MovieConState, v: i32) {
-    s.montage_fac = v.max(2)
-}
-pub fn imc_get_scale_sizes(s: &MovieConState) -> bool {
-    s.scale_sizes
-}
-pub fn imc_set_scale_sizes(s: &mut MovieConState, v: bool) {
-    s.scale_sizes = v
-}
-pub fn imc_get_size_scaling(s: &MovieConState) -> i32 {
-    s.size_scaling
-}
-pub fn imc_set_size_scaling(s: &mut MovieConState, v: i32) {
-    s.size_scaling = v
-}
-pub fn imc_get_slicer_montage(s: &MovieConState, doing: bool) -> bool {
-    s.slicer_montage && (!doing || s.dialog_open)
-}
-pub fn imc_set_slicer_montage(s: &mut MovieConState, v: bool) {
-    s.slicer_montage = v
-}
-pub fn imc_get_slicer_mont_factor(s: &MovieConState) -> i32 {
-    s.slicer_mont_fac
-}
-pub fn imc_set_slicer_mont_factor(s: &mut MovieConState, v: i32) {
-    s.slicer_mont_fac = v.max(2)
-}
-pub fn imc_get_scale_thicks(s: &MovieConState) -> bool {
-    s.scale_thicks
-}
-pub fn imc_set_scale_thicks(s: &mut MovieConState, v: bool) {
-    s.scale_thicks = v
-}
-pub fn imc_get_thick_scaling(s: &MovieConState) -> i32 {
-    s.thick_scaling
-}
-pub fn imc_set_thick_scaling(s: &mut MovieConState, v: i32) {
-    s.thick_scaling = v
-}
-pub fn imc_set_special_limits(s: &mut MovieConState, axis: i32, start: i32, end: i32) {
-    s.special_axis = axis;
-    s.start[4] = start;
-    s.endsec[4] = end
-}
-pub fn imc_set_movierate(s: &mut MovieConState, v: &mut ImodView, mut rate: i32) {
-    loop {
-        v.movierate = rate;
-        s.realint = BASEINT * RATEFAC.powi(rate);
-        s.realrate = 1000. / s.realint;
-        if s.realrate > MAXRATE {
-            rate += 1
-        } else if s.realrate < MINRATE {
-            rate -= 1
-        } else {
-            break;
-        }
-    }
-}
-pub fn imc_start_timer(s: &mut MovieConState) {
-    s.movie_count = 0;
-    s.timer = Some(Instant::now());
-    s.movie_start = 0;
-    s.movie_current = 0
-}
-pub fn imc_read_timer(s: &mut MovieConState) -> Option<String> {
-    s.movie_count += 1;
-    let elapsed = s.timer?.elapsed().as_secs_f32();
-    if elapsed == 0. {
-        return None;
-    }
-    Some(format!(
-        "Actual FPS: {:5.2} (avg)",
-        s.movie_count as f32 / elapsed
-    ))
-}
-pub fn imod_movie_con_dialog(s: &mut MovieConState, v: &ImodView) {
-    s.dialog_open = true;
-    imc_reset_all(s, v);
-    s.axiscon = 2
-}
-pub fn imc_closing(s: &mut MovieConState, v: &ImodView) {
-    s.dialog_open = false;
-    imc_reset_all(s, v)
-}
-pub fn imc_reset_pressed(s: &mut MovieConState, v: &ImodView) {
-    imc_reset_all(s, v)
-}
-pub fn imc_slider_changed(s: &mut MovieConState, which: i32, value: i32) {
-    let a = s.axiscon;
-    match which {
-        0 => {
-            s.start[a] = value - 1;
-            if s.start[a] >= s.endsec[a] && s.start[a] + 1 <= s.maxend[a] {
-                s.endsec[a] = s.start[a] + 1
-            }
-        }
-        1 => {
-            s.endsec[a] = value - 1;
-            if s.endsec[a] <= s.start[a] {
-                s.start[a] = s.endsec[a] - 1
-            }
-        }
-        2 => s.increment[a] = value,
-        _ => {}
-    }
-}
-pub fn imc_axis_selected(s: &mut MovieConState, v: i32) {
-    s.axiscon = v.clamp(0, 3) as usize
-}
-pub fn imc_extent_selected(s: &mut MovieConState, v: i32) {
-    s.looponeway = v
-}
-pub fn imc_snap_selected(s: &mut MovieConState, v: i32) {
-    s.autosnap = v
-}
-pub fn imc_start_here_selected(s: &mut MovieConState, v: i32) {
-    s.start_here = v
-}
-pub fn imc_rate_entered(s: &mut MovieConState, v: &mut ImodView, mut rate: f32) {
-    if rate <= 0. {
-        imc_set_movierate(s, v, 0);
-        return;
-    }
-    rate = rate.clamp(MINRATE, MAXRATE);
-    s.realrate = rate;
-    s.realint = 1000. / rate;
-    v.movierate = ((s.realint / BASEINT).ln() / RATEFAC.ln() + 0.5) as i32
-}
-pub fn imc_increment_rate(s: &mut MovieConState, v: &mut ImodView, dir: i32) {
-    imc_set_movierate(s, v, v.movierate + dir)
-}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -326,25 +337,23 @@ mod tests {
             ..Default::default()
         };
         let mut s = MovieConState::default();
-        imc_reset_all(&mut s, &v);
-        assert_eq!(imc_get_start_end(&mut s, &v, 2), (0, 29));
-        imc_set_special_limits(&mut s, 2, 4, 8);
-        assert_eq!(imc_get_start_end(&mut s, &v, 2), (4, 8));
+        s.imc_reset_all(&v);
+        assert_eq!(s.imc_get_start_end(&v, 2), (0, 29));
+        s.imc_set_special_limits(2, 4, 8);
+        assert_eq!(s.imc_get_start_end(&v, 2), (4, 8));
         let mut v = v;
-        imc_set_movierate(&mut s, &mut v, 0);
+        s.imc_set_movierate(&mut v, 0);
         assert!((MINRATE..=MAXRATE).contains(&s.realrate));
     }
     #[test]
     fn open_controller_refreshes_the_source_non_tif_label() {
         let mut n = Native::default();
-        imc_update_dialog(&MovieConState::default(), &mut n);
-        imc_update_dialog(
-            &MovieConState {
-                dialog_open: true,
-                ..Default::default()
-            },
-            &mut n,
-        );
+        (&MovieConState::default()).imc_update_dialog(&mut n);
+        (&MovieConState {
+            dialog_open: true,
+            ..Default::default()
+        })
+            .imc_update_dialog(&mut n);
         assert_eq!(n.0, 1);
     }
 }

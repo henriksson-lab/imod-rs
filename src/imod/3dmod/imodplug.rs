@@ -152,6 +152,342 @@ pub struct ImodPlugState {
     pub internal_modules: Vec<Box<dyn SpecialModule>>,
 }
 
+impl ImodPlugState {
+    /// `ipAddInternalModules`.
+    pub fn ip_add_internal_modules(&mut self, native: &mut dyn ImodPlugNativeBoundary) -> usize {
+        for mut module in self.internal_modules.drain(..) {
+            let (name, type_) = module.imod_plug_info();
+            native.debug(&format!("Added {name} module to Special menu\n"));
+            self.plug_list.push(PlugData {
+                name: name.into(),
+                library: None,
+                module,
+                type_,
+            });
+        }
+        self.plug_list.len()
+    }
+    /// `imodPlugLoad`.
+    pub fn imod_plug_load(
+        &mut self,
+        native: &mut dyn ImodPlugNativeBoundary,
+        path: PathBuf,
+    ) -> i32 {
+        let Ok(mut module) = native.load_plugin(&path) else {
+            native.debug(&format!(
+                "Warning: {} cannot be loaded as a 3dmod plugin\n",
+                path.display()
+            ));
+            return 2;
+        };
+        let (name, type_) = module.imod_plug_info();
+        if self
+            .plug_list
+            .iter()
+            .any(|plug| plug.type_ == type_ && plug.name == name)
+        {
+            return 3;
+        }
+        if type_ & IMOD_PLUG_CHOOSER != 0 {
+            self.chooser_plugin = true;
+        }
+        native.debug(&format!("loaded plugin : {} {name}\n", path.display()));
+        self.plug_list.push(PlugData {
+            name: name.into(),
+            library: Some(path),
+            module,
+            type_,
+        });
+        0
+    }
+    /// `imodPlugOpen`.
+    pub fn imod_plug_open(&mut self, view: &mut ImodView, item: usize) -> bool {
+        let Some(plug) = self.plug_list.get_mut(item) else {
+            return false;
+        };
+        // A NULL `mExecute` in C is represented by `has_execute`; dynamic ABI
+        // adapters expose it when they resolve that optional symbol.
+        if plug.module.has_imod_plug_execute() {
+            plug.module.imod_plug_execute(view);
+            return true;
+        }
+        if !plug.module.has_imod_plug_execute_type() {
+            return false;
+        }
+        plug.module
+            .imod_plug_execute_type(view, IMOD_PLUG_MENU, IMOD_REASON_EXECUTE);
+        true
+    }
+    /// `imodPlugLoaded`.
+    pub fn imod_plug_loaded(&self, type_: i32) -> usize {
+        self.plug_list
+            .iter()
+            .filter(|plug| plug.type_ & type_ != 0)
+            .count()
+    }
+    /// `imodPlugMenu`.
+    pub fn imod_plug_menu(&self) -> Vec<PlugMenuAction> {
+        self.plug_list
+            .iter()
+            .enumerate()
+            .filter(|(_, plug)| plug.type_ & IMOD_PLUG_MENU != 0)
+            .map(|(item, plug)| PlugMenuAction {
+                text: plug.name.clone(),
+                item,
+            })
+            .collect()
+    }
+    /// `imodPlugCall`.
+    pub fn imod_plug_call(&mut self, view: &mut ImodView, type_: i32, reason: i32) -> usize {
+        let mut called = 0;
+        for plug in &mut self.plug_list {
+            if plug.module.has_imod_plug_execute_type() {
+                plug.module.imod_plug_execute_type(view, type_, reason);
+                called += 1;
+            }
+        }
+        called
+    }
+    /// `imodPlugHandleKey`.
+    pub fn imod_plug_handle_key(
+        &mut self,
+        view: &mut ImodView,
+        event: &KeyEvent,
+        source: i32,
+    ) -> i32 {
+        for plug in &mut self.plug_list {
+            if plug.type_ & IMOD_PLUG_KEYS != 0 {
+                self.event_source = source;
+                let handled = plug.module.imod_plug_keys(view, event);
+                self.event_source = -1;
+                if handled != 0 {
+                    return 1;
+                }
+            }
+        }
+        0
+    }
+    /// `imodPlugHandleMouse`.
+    pub fn imod_plug_handle_mouse(
+        &mut self,
+        view: &mut ImodView,
+        event: &MouseEvent,
+        imx: f32,
+        imy: f32,
+        but1: i32,
+        but2: i32,
+        but3: i32,
+        source: i32,
+    ) -> i32 {
+        let mut need_draw = 0;
+        for plug in &mut self.plug_list {
+            if plug.type_ & IMOD_PLUG_MOUSE != 0 {
+                self.event_source = source;
+                let handled = plug
+                    .module
+                    .imod_plug_mouse(view, event, imx, imy, but1, but2, but3);
+                self.event_source = -1;
+                if handled & 1 != 0 {
+                    return handled;
+                }
+                need_draw |= handled;
+            }
+        }
+        need_draw
+    }
+    /// `imodPlugHandleEvent`.
+    pub fn imod_plug_handle_event(
+        &mut self,
+        view: &mut ImodView,
+        event: &PlugEvent,
+        imx: f32,
+        imy: f32,
+        source: i32,
+    ) -> i32 {
+        let mut need_draw = 0;
+        for plug in &mut self.plug_list {
+            if plug.type_ & IMOD_PLUG_EVENT != 0 {
+                self.event_source = source;
+                let handled = plug.module.imod_plug_event(view, event, imx, imy);
+                self.event_source = -1;
+                if handled & 1 != 0 {
+                    return handled;
+                }
+                need_draw |= handled;
+            }
+        }
+        need_draw
+    }
+    /// `imodPlugMessage`.
+    pub fn imod_plug_message(
+        &mut self,
+        view: &mut ImodView,
+        strings: &[String],
+        arg: &mut usize,
+    ) -> i32 {
+        for plug in &mut self.plug_list {
+            if plug.type_ & IMOD_PLUG_MESSAGE != 0 {
+                let words: Vec<_> = plug.name.split_whitespace().collect();
+                if strings.get(*arg..).is_some_and(|message| {
+                    message.len() >= words.len()
+                        && words
+                            .iter()
+                            .zip(message)
+                            .all(|(word, message_word)| *word == message_word)
+                }) {
+                    *arg += words.len();
+                    return plug.module.imod_plug_execute_message(view, strings, arg);
+                }
+            }
+        }
+        1
+    }
+    /// `imodPlugGetOpenName`.
+    pub fn imod_plug_get_open_name(
+        &mut self,
+        native: &mut dyn ImodPlugNativeBoundary,
+        caption: &str,
+        dir: &str,
+        filter: &str,
+    ) -> String {
+        if self.chooser_plugin {
+            for plug in &mut self.plug_list {
+                if plug.type_ & IMOD_PLUG_CHOOSER != 0 {
+                    if let Some(name) = plug.module.imod_plug_open_file_name(caption, dir, filter) {
+                        return name;
+                    }
+                }
+            }
+        }
+        let use_dir = if dir.is_empty() {
+            native.current_dir()
+        } else {
+            dir.into()
+        };
+        native.open_file_name(caption, &use_dir, filter)
+    }
+    /// `imodPlugGetOpenNames`.
+    pub fn imod_plug_get_open_names(
+        &mut self,
+        native: &mut dyn ImodPlugNativeBoundary,
+        caption: &str,
+        dir: &str,
+        filter: &str,
+    ) -> Vec<String> {
+        if self.chooser_plugin {
+            for plug in &mut self.plug_list {
+                if plug.type_ & IMOD_PLUG_CHOOSER != 0 {
+                    if let Some(names) = plug.module.imod_plug_open_file_names(caption, dir, filter)
+                    {
+                        return names;
+                    }
+                }
+            }
+        }
+        let use_dir = if dir.is_empty() {
+            native.current_dir()
+        } else {
+            dir.into()
+        };
+        native.open_file_names(caption, &use_dir, filter)
+    }
+    /// `imodPlugGetSaveName`.
+    pub fn imod_plug_get_save_name(
+        &mut self,
+        native: &mut dyn ImodPlugNativeBoundary,
+        caption: &str,
+    ) -> String {
+        if self.chooser_plugin {
+            for plug in &mut self.plug_list {
+                if plug.type_ & IMOD_PLUG_CHOOSER != 0 {
+                    if let Some(name) = plug.module.imod_plug_save_file_name(caption) {
+                        return name;
+                    }
+                }
+            }
+        }
+        let directory = if self.browser_dir.is_empty() {
+            native.current_dir()
+        } else {
+            self.browser_dir.clone()
+        };
+        let name = native.save_file_name(caption, &directory);
+        native.manage_browser_dir(&name);
+        name
+    }
+    /// `ivwGetPlugEventSource`.
+    pub fn ivw_get_plug_event_source(&self) -> i32 {
+        self.event_source
+    }
+
+    /// `imodPlugLoadDir`.
+    pub fn imod_plug_load_dir(
+        &mut self,
+        native: &mut dyn ImodPlugNativeBoundary,
+        directory: &Path,
+    ) -> usize {
+        let extension = if cfg!(target_os = "windows") {
+            "dll"
+        } else if cfg!(target_os = "macos") {
+            "dylib"
+        } else {
+            "so"
+        };
+        let mut loaded = 0;
+        if let Ok(entries) = fs::read_dir(directory) {
+            for entry in entries.flatten() {
+                let path = entry.path();
+                if path.extension().is_some_and(|suffix| suffix == extension)
+                    && self.imod_plug_load(native, path) == 0
+                {
+                    loaded += 1;
+                }
+            }
+        }
+        loaded
+    }
+    /// `imodPlugOpenByName`.
+    pub fn imod_plug_open_by_name(&mut self, view: &mut ImodView, name: &str) {
+        for item in 0..self.plug_list.len() {
+            if self.plug_list[item].name == name {
+                let _ = self.imod_plug_open(view, item);
+            }
+        }
+    }
+    /// `imodPlugOpenAllExternal`.
+    pub fn imod_plug_open_all_external(&mut self, view: &mut ImodView) {
+        for item in self.num_internal..self.plug_list.len() {
+            let _ = self.imod_plug_open(view, item);
+        }
+    }
+
+    /// `imodPlugInit`.
+    pub fn imod_plug_init(&mut self, native: &mut dyn ImodPlugNativeBoundary) -> usize {
+        self.plug_list.clear();
+        self.ip_add_internal_modules(native);
+        self.num_internal = self.plug_list.len();
+        if let Some(directory) = env::var_os("IMOD_PLUGIN_DIR") {
+            self.imod_plug_load_dir(native, Path::new(&directory));
+        } else {
+            let imod_dir = env::var("IMOD_DIR").unwrap_or_else(|_| "/usr/local/IMOD".into());
+            self.imod_plug_load_dir(native, &Path::new(&imod_dir).join("lib/imodplug"));
+        }
+        if let Some(directory) = env::var_os("IMOD_CALIB_DIR") {
+            self.imod_plug_load_dir(native, &Path::new(&directory).join("plugins"));
+        }
+        let imod_dir = env::var("IMOD_DIR").unwrap_or_else(|_| "/usr/local/IMOD".into());
+        self.imod_plug_load_dir(native, &Path::new(&imod_dir).join("Plugins"));
+        self.imod_plug_load_dir(native, Path::new("/usr/local/IMOD/plugins"));
+        #[cfg(target_os = "windows")]
+        {
+            self.imod_plug_load_dir(native, Path::new("C:/Program Files/IMOD/lib/imodplug"));
+            self.imod_plug_load_dir(native, Path::new("C:/Program Files/3dmod/lib/imodplug"));
+        }
+        self.imod_plug_load_dir(native, Path::new("usr/freeware/lib/imodplugs"));
+        self.plug_list.len()
+    }
+}
+
 impl Default for ImodPlugState {
     fn default() -> Self {
         Self {
@@ -182,373 +518,6 @@ pub trait ImodPlugNativeBoundary {
 pub struct PlugMenuAction {
     pub text: String,
     pub item: usize,
-}
-
-/// `imodPlugInit`.
-pub fn imod_plug_init(state: &mut ImodPlugState, native: &mut dyn ImodPlugNativeBoundary) -> usize {
-    state.plug_list.clear();
-    ip_add_internal_modules(state, native);
-    state.num_internal = state.plug_list.len();
-    if let Some(directory) = env::var_os("IMOD_PLUGIN_DIR") {
-        imod_plug_load_dir(state, native, Path::new(&directory));
-    } else {
-        let imod_dir = env::var("IMOD_DIR").unwrap_or_else(|_| "/usr/local/IMOD".into());
-        imod_plug_load_dir(state, native, &Path::new(&imod_dir).join("lib/imodplug"));
-    }
-    if let Some(directory) = env::var_os("IMOD_CALIB_DIR") {
-        imod_plug_load_dir(state, native, &Path::new(&directory).join("plugins"));
-    }
-    let imod_dir = env::var("IMOD_DIR").unwrap_or_else(|_| "/usr/local/IMOD".into());
-    imod_plug_load_dir(state, native, &Path::new(&imod_dir).join("Plugins"));
-    imod_plug_load_dir(state, native, Path::new("/usr/local/IMOD/plugins"));
-    #[cfg(target_os = "windows")]
-    {
-        imod_plug_load_dir(
-            state,
-            native,
-            Path::new("C:/Program Files/IMOD/lib/imodplug"),
-        );
-        imod_plug_load_dir(
-            state,
-            native,
-            Path::new("C:/Program Files/3dmod/lib/imodplug"),
-        );
-    }
-    #[cfg(not(target_os = "windows"))]
-    imod_plug_load_dir(state, native, Path::new("usr/freeware/lib/imodplugs"));
-    state.plug_list.len()
-}
-
-/// `ipAddInternalModules`.
-pub fn ip_add_internal_modules(
-    state: &mut ImodPlugState,
-    native: &mut dyn ImodPlugNativeBoundary,
-) -> usize {
-    for mut module in state.internal_modules.drain(..) {
-        let (name, type_) = module.imod_plug_info();
-        native.debug(&format!("Added {name} module to Special menu\n"));
-        state.plug_list.push(PlugData {
-            name: name.into(),
-            library: None,
-            module,
-            type_,
-        });
-    }
-    state.plug_list.len()
-}
-
-/// `imodPlugLoadDir`.
-pub fn imod_plug_load_dir(
-    state: &mut ImodPlugState,
-    native: &mut dyn ImodPlugNativeBoundary,
-    directory: &Path,
-) -> usize {
-    let extension = if cfg!(target_os = "windows") {
-        "dll"
-    } else if cfg!(target_os = "macos") {
-        "dylib"
-    } else {
-        "so"
-    };
-    let mut loaded = 0;
-    if let Ok(entries) = fs::read_dir(directory) {
-        for entry in entries.flatten() {
-            let path = entry.path();
-            if path.extension().is_some_and(|suffix| suffix == extension)
-                && imod_plug_load(state, native, path) == 0
-            {
-                loaded += 1;
-            }
-        }
-    }
-    loaded
-}
-
-/// `imodPlugLoad`.
-pub fn imod_plug_load(
-    state: &mut ImodPlugState,
-    native: &mut dyn ImodPlugNativeBoundary,
-    path: PathBuf,
-) -> i32 {
-    let Ok(mut module) = native.load_plugin(&path) else {
-        native.debug(&format!(
-            "Warning: {} cannot be loaded as a 3dmod plugin\n",
-            path.display()
-        ));
-        return 2;
-    };
-    let (name, type_) = module.imod_plug_info();
-    if state
-        .plug_list
-        .iter()
-        .any(|plug| plug.type_ == type_ && plug.name == name)
-    {
-        return 3;
-    }
-    if type_ & IMOD_PLUG_CHOOSER != 0 {
-        state.chooser_plugin = true;
-    }
-    native.debug(&format!("loaded plugin : {} {name}\n", path.display()));
-    state.plug_list.push(PlugData {
-        name: name.into(),
-        library: Some(path),
-        module,
-        type_,
-    });
-    0
-}
-
-/// `imodPlugOpen`.
-pub fn imod_plug_open(state: &mut ImodPlugState, view: &mut ImodView, item: usize) -> bool {
-    let Some(plug) = state.plug_list.get_mut(item) else {
-        return false;
-    };
-    // A NULL `mExecute` in C is represented by `has_execute`; dynamic ABI
-    // adapters expose it when they resolve that optional symbol.
-    if plug.module.has_imod_plug_execute() {
-        plug.module.imod_plug_execute(view);
-        return true;
-    }
-    if !plug.module.has_imod_plug_execute_type() {
-        return false;
-    }
-    plug.module
-        .imod_plug_execute_type(view, IMOD_PLUG_MENU, IMOD_REASON_EXECUTE);
-    true
-}
-
-/// `imodPlugOpenByName`.
-pub fn imod_plug_open_by_name(state: &mut ImodPlugState, view: &mut ImodView, name: &str) {
-    for item in 0..state.plug_list.len() {
-        if state.plug_list[item].name == name {
-            let _ = imod_plug_open(state, view, item);
-        }
-    }
-}
-
-/// `imodPlugOpenAllExternal`.
-pub fn imod_plug_open_all_external(state: &mut ImodPlugState, view: &mut ImodView) {
-    for item in state.num_internal..state.plug_list.len() {
-        let _ = imod_plug_open(state, view, item);
-    }
-}
-
-/// `imodPlugLoaded`.
-pub fn imod_plug_loaded(state: &ImodPlugState, type_: i32) -> usize {
-    state
-        .plug_list
-        .iter()
-        .filter(|plug| plug.type_ & type_ != 0)
-        .count()
-}
-
-/// `imodPlugMenu`.
-pub fn imod_plug_menu(state: &ImodPlugState) -> Vec<PlugMenuAction> {
-    state
-        .plug_list
-        .iter()
-        .enumerate()
-        .filter(|(_, plug)| plug.type_ & IMOD_PLUG_MENU != 0)
-        .map(|(item, plug)| PlugMenuAction {
-            text: plug.name.clone(),
-            item,
-        })
-        .collect()
-}
-
-/// `imodPlugCall`.
-pub fn imod_plug_call(
-    state: &mut ImodPlugState,
-    view: &mut ImodView,
-    type_: i32,
-    reason: i32,
-) -> usize {
-    let mut called = 0;
-    for plug in &mut state.plug_list {
-        if plug.module.has_imod_plug_execute_type() {
-            plug.module.imod_plug_execute_type(view, type_, reason);
-            called += 1;
-        }
-    }
-    called
-}
-
-/// `imodPlugHandleKey`.
-pub fn imod_plug_handle_key(
-    state: &mut ImodPlugState,
-    view: &mut ImodView,
-    event: &KeyEvent,
-    source: i32,
-) -> i32 {
-    for plug in &mut state.plug_list {
-        if plug.type_ & IMOD_PLUG_KEYS != 0 {
-            state.event_source = source;
-            let handled = plug.module.imod_plug_keys(view, event);
-            state.event_source = -1;
-            if handled != 0 {
-                return 1;
-            }
-        }
-    }
-    0
-}
-
-/// `imodPlugHandleMouse`.
-pub fn imod_plug_handle_mouse(
-    state: &mut ImodPlugState,
-    view: &mut ImodView,
-    event: &MouseEvent,
-    imx: f32,
-    imy: f32,
-    but1: i32,
-    but2: i32,
-    but3: i32,
-    source: i32,
-) -> i32 {
-    let mut need_draw = 0;
-    for plug in &mut state.plug_list {
-        if plug.type_ & IMOD_PLUG_MOUSE != 0 {
-            state.event_source = source;
-            let handled = plug
-                .module
-                .imod_plug_mouse(view, event, imx, imy, but1, but2, but3);
-            state.event_source = -1;
-            if handled & 1 != 0 {
-                return handled;
-            }
-            need_draw |= handled;
-        }
-    }
-    need_draw
-}
-
-/// `imodPlugHandleEvent`.
-pub fn imod_plug_handle_event(
-    state: &mut ImodPlugState,
-    view: &mut ImodView,
-    event: &PlugEvent,
-    imx: f32,
-    imy: f32,
-    source: i32,
-) -> i32 {
-    let mut need_draw = 0;
-    for plug in &mut state.plug_list {
-        if plug.type_ & IMOD_PLUG_EVENT != 0 {
-            state.event_source = source;
-            let handled = plug.module.imod_plug_event(view, event, imx, imy);
-            state.event_source = -1;
-            if handled & 1 != 0 {
-                return handled;
-            }
-            need_draw |= handled;
-        }
-    }
-    need_draw
-}
-
-/// `imodPlugMessage`.
-pub fn imod_plug_message(
-    state: &mut ImodPlugState,
-    view: &mut ImodView,
-    strings: &[String],
-    arg: &mut usize,
-) -> i32 {
-    for plug in &mut state.plug_list {
-        if plug.type_ & IMOD_PLUG_MESSAGE != 0 {
-            let words: Vec<_> = plug.name.split_whitespace().collect();
-            if strings.get(*arg..).is_some_and(|message| {
-                message.len() >= words.len()
-                    && words
-                        .iter()
-                        .zip(message)
-                        .all(|(word, message_word)| *word == message_word)
-            }) {
-                *arg += words.len();
-                return plug.module.imod_plug_execute_message(view, strings, arg);
-            }
-        }
-    }
-    1
-}
-
-/// `imodPlugGetOpenName`.
-pub fn imod_plug_get_open_name(
-    state: &mut ImodPlugState,
-    native: &mut dyn ImodPlugNativeBoundary,
-    caption: &str,
-    dir: &str,
-    filter: &str,
-) -> String {
-    if state.chooser_plugin {
-        for plug in &mut state.plug_list {
-            if plug.type_ & IMOD_PLUG_CHOOSER != 0 {
-                if let Some(name) = plug.module.imod_plug_open_file_name(caption, dir, filter) {
-                    return name;
-                }
-            }
-        }
-    }
-    let use_dir = if dir.is_empty() {
-        native.current_dir()
-    } else {
-        dir.into()
-    };
-    native.open_file_name(caption, &use_dir, filter)
-}
-
-/// `imodPlugGetOpenNames`.
-pub fn imod_plug_get_open_names(
-    state: &mut ImodPlugState,
-    native: &mut dyn ImodPlugNativeBoundary,
-    caption: &str,
-    dir: &str,
-    filter: &str,
-) -> Vec<String> {
-    if state.chooser_plugin {
-        for plug in &mut state.plug_list {
-            if plug.type_ & IMOD_PLUG_CHOOSER != 0 {
-                if let Some(names) = plug.module.imod_plug_open_file_names(caption, dir, filter) {
-                    return names;
-                }
-            }
-        }
-    }
-    let use_dir = if dir.is_empty() {
-        native.current_dir()
-    } else {
-        dir.into()
-    };
-    native.open_file_names(caption, &use_dir, filter)
-}
-
-/// `imodPlugGetSaveName`.
-pub fn imod_plug_get_save_name(
-    state: &mut ImodPlugState,
-    native: &mut dyn ImodPlugNativeBoundary,
-    caption: &str,
-) -> String {
-    if state.chooser_plugin {
-        for plug in &mut state.plug_list {
-            if plug.type_ & IMOD_PLUG_CHOOSER != 0 {
-                if let Some(name) = plug.module.imod_plug_save_file_name(caption) {
-                    return name;
-                }
-            }
-        }
-    }
-    let directory = if state.browser_dir.is_empty() {
-        native.current_dir()
-    } else {
-        state.browser_dir.clone()
-    };
-    let name = native.save_file_name(caption, &directory);
-    native.manage_browser_dir(&name);
-    name
-}
-
-/// `ivwGetPlugEventSource`.
-pub fn ivw_get_plug_event_source(state: &ImodPlugState) -> i32 {
-    state.event_source
 }
 
 /// `ipGetFunction`.  In Rust dynamic symbols are installed as trait methods,
@@ -633,15 +602,15 @@ mod tests {
             ..Default::default()
         };
         let mut native = Native;
-        ip_add_internal_modules(&mut state, &mut native);
+        state.ip_add_internal_modules(&mut native);
         assert_eq!(
-            imod_plug_menu(&state),
+            state.imod_plug_menu(),
             vec![PlugMenuAction {
                 text: "One".into(),
                 item: 0
             }]
         );
-        assert_eq!(imod_plug_loaded(&state, IMOD_PLUG_KEYS), 1);
+        assert_eq!(state.imod_plug_loaded(IMOD_PLUG_KEYS), 1);
     }
     #[test]
     fn mouse_combines_draw_and_stops_on_handled() {
@@ -671,8 +640,7 @@ mod tests {
             ..Default::default()
         };
         assert_eq!(
-            imod_plug_handle_mouse(
-                &mut state,
+            state.imod_plug_handle_mouse(
                 &mut ImodView::default(),
                 &MouseEvent::default(),
                 0.,
@@ -684,7 +652,7 @@ mod tests {
             ),
             1
         );
-        assert_eq!(ivw_get_plug_event_source(&state), -1);
+        assert_eq!(state.ivw_get_plug_event_source(), -1);
     }
     #[test]
     fn message_advances_past_multiword_plugin_name() {
@@ -703,8 +671,7 @@ mod tests {
         };
         let mut arg = 0;
         assert_eq!(
-            imod_plug_message(
-                &mut state,
+            state.imod_plug_message(
                 &mut ImodView::default(),
                 &["Bead".into(), "Fixer".into(), "go".into()],
                 &mut arg

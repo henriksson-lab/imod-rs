@@ -685,7 +685,7 @@ pub fn run_native_image_host(
 ) -> Result<(), String> {
     use crate::imod::three_dmod::control::ZAP_WINDOW_TYPE;
     use crate::imod::three_dmod::info_cb::InfoCbState;
-    use crate::imod::three_dmod::slicer::{SlicerRegistry, SlicerView, slicer_open};
+    use crate::imod::three_dmod::slicer::{SlicerRegistry, SlicerView};
     use crate::imod::three_dmod::xyz::{XyzViewState, XyzWindow};
     use crate::imod::three_dmod::xzap::ZapFuncs;
     use glutin::config::ConfigTemplateBuilder;
@@ -777,8 +777,7 @@ pub fn run_native_image_host(
             }
             InitialToolWindow::Slicer => {
                 let axis = unsafe { host.view.li.as_ref().map_or(3, |li| li.axis) };
-                slicer_open(
-                    &mut slicers,
+                slicers.slicer_open(
                     SlicerView {
                         xsize: host.view.xsize,
                         ysize: host.view.ysize,
@@ -1000,8 +999,7 @@ pub fn run_native_image_host(
                         }
                         "Slicer" => {
                             let axis = unsafe { host.view.li.as_ref().map_or(3, |li| li.axis) };
-                            slicer_open(
-                                &mut slicers,
+                            slicers.slicer_open(
                                 SlicerView {
                                     xsize: host.view.xsize,
                                     ysize: host.view.ysize,
@@ -1271,7 +1269,7 @@ mod tests {
     };
     use crate::imod::three_dmod::imod_input::{INPUT_CTRL, INPUT_SHIFT, KEY_PAGE_UP, KEY_UP};
     use crate::imod::three_dmod::imodview::ImodView;
-    use crate::imod::three_dmod::slicer::{SlicerRegistry, SlicerView, slicer_open};
+    use crate::imod::three_dmod::slicer::{SlicerRegistry, SlicerView};
     use winit::dpi::{PhysicalPosition, PhysicalSize};
     use winit::keyboard::{Key, NamedKey};
 
@@ -1331,7 +1329,7 @@ mod tests {
             ..Default::default()
         };
         slicer_view.xmouse = 2.;
-        slicer_open(&mut registry, slicer_view, 0);
+        registry.slicer_open(slicer_view, 0);
 
         let mut view = ImodView::default();
         view.xmouse = 41.5;

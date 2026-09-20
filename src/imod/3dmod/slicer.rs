@@ -552,6 +552,346 @@ pub struct SlicerRegistry {
     pub shift_pressed: bool,
 }
 
+impl SlicerRegistry {
+    /// `slicerOpen`.  Construction is intentionally separate from native window
+    /// creation: the registry owns the same `SlicerFuncs` lifetime that Qt's
+    /// `SlicerWindow` owned in the source.
+    pub fn slicer_open(&mut self, view: SlicerView, auto_link: i32) -> i32 {
+        let mut slicer = SlicerFuncs::new(view, auto_link);
+        slicer.view_axis_index = self.view_axis_index;
+        self.slicers.push(Box::new(slicer));
+        0
+    }
+    /// `ivwGetTopSlicerMouse`.  `SlicerWindow::mapFromGlobal` and the device
+    /// pixel conversion are native-window responsibilities; this function owns
+    /// the source's subsequent slicer-to-image coordinate conversion.  `Err(1)`
+    /// is the C routine's no-slicer return value.
+    pub fn ivw_get_top_slicer_mouse(
+        &mut self,
+        device_x: i32,
+        device_y: i32,
+    ) -> Result<Ipoint, i32> {
+        let slicer = self.slicers.first_mut().ok_or(1)?;
+        let (x, y, z, _) = slicer.getxyz(device_x as f32, device_y as f32, true);
+        Ok(Ipoint { x, y, z })
+    }
+    /// `SlicerFuncs::keyRelease`'s hot-slider/Shift portion.  Both keys share the
+    /// keyboard grab; releasing either one must leave the grab held while the other
+    /// remains down (`slicer.cpp`, `SlicerFuncs::keyRelease`).
+    pub fn slicer_key_release(
+        &mut self,
+        event: SlicerEvent,
+        hot_slider_key: i32,
+        shift_key: i32,
+        native: &mut dyn SlicerNativeBoundary,
+    ) {
+        if event.key == hot_slider_key {
+            self.hot_control_pressed = false;
+        }
+        if event.key == shift_key {
+            self.shift_pressed = false;
+        }
+        if !self.hot_control_pressed && !self.shift_pressed {
+            native.release_keyboard();
+        }
+    }
+    /// `SlicerFuncs::synchronizeSlicers`.  The Qt dialog manager in the source is
+    /// represented by the Rust-owned registry; widget repainting remains at the
+    /// `SlicerNativeBoundary` owned by the winit host.
+    pub fn synchronize_slicers(
+        &mut self,
+        source_index: usize,
+        draw: bool,
+        native: &mut dyn SlicerNativeBoundary,
+    ) -> i32 {
+        let Some(source) = self.slicers.get(source_index) else {
+            return 0;
+        };
+        if !source.linked {
+            return 0;
+        }
+        let state = (
+            source.tang,
+            source.cx,
+            source.cy,
+            source.cz,
+            source.locked,
+            source.nslice,
+            source.depth,
+            source.zoom,
+            source.hq,
+            source.classic,
+            source.fft_mode,
+            source.scalez,
+        );
+        let mut changed = 0;
+        for (index, target) in self.slicers.iter_mut().enumerate() {
+            if index == source_index || !target.linked {
+                continue;
+            }
+            let mut need_draw = false;
+            if target.tang != state.0 {
+                target.tang = state.0;
+                native.set_angles(target.tang);
+                need_draw = true;
+            }
+            if state.4 == 0
+                && target.locked == 0
+                && (target.cx != state.1 || target.cy != state.2 || target.cz != state.3)
+            {
+                (target.cx, target.cy, target.cz) = (state.1, state.2, state.3);
+                need_draw = true;
+            }
+            if target.nslice != state.5 || target.depth != state.6 {
+                (target.nslice, target.depth) = (state.5, state.6);
+                target.draw_thick_controls(native);
+                need_draw = true;
+            }
+            if target.zoom != state.7 {
+                target.zoom = state.7;
+                target.manage_buffers();
+                native.set_zoom_text(target.zoom);
+                need_draw = true;
+            }
+            if target.hq != state.8 {
+                target.hq = state.8;
+                target.manage_buffers();
+                native.set_toggle_state(SLICER_TOGGLE_HIGHRES, target.hq);
+                need_draw = true;
+            }
+            if target.classic != state.9 {
+                target.classic = state.9;
+                target.pending = 0;
+                native.set_toggle_state(SLICER_TOGGLE_CENTER, target.classic);
+                need_draw = true;
+            }
+            if target.fft_mode != state.10 {
+                target.fft_mode = state.10;
+                native.set_toggle_state(SLICER_TOGGLE_FFT, target.fft_mode);
+                need_draw = true;
+            }
+            if target.scalez != state.11 {
+                target.scalez = state.11;
+                native.set_toggle_state(SLICER_TOGGLE_ZSCALE, target.scalez);
+                need_draw = true;
+            }
+            if need_draw {
+                target.need_draw = true;
+                if draw {
+                    target.draw(native);
+                    target.already_drew = true;
+                }
+                changed += 1;
+            }
+        }
+        changed
+    }
+    /// Private `notifySlicersOfAngDia`.
+    pub fn notify_slicers_of_ang_dia(&mut self, open: bool, native: &mut dyn SlicerNativeBoundary) {
+        for slicer in &mut self.slicers {
+            set_angle_toolbar_state(slicer, open, native);
+        }
+    }
+    /// `slicerSetMouseTracking`.
+    pub fn slicer_set_mouse_tracking(&mut self, native: &mut dyn SlicerNativeBoundary) {
+        let pixel_view_open = self.pixel_view_open;
+        for slicer in &mut self.slicers {
+            slicer.set_mouse_tracking(pixel_view_open, native);
+        }
+    }
+    /// `slicerReportAngles`.  The native host emits the returned source values
+    /// with `imodPrintStderr`; an absent top slicer is its source error path.
+    pub fn slicer_report_angles(&self) -> Result<[f32; 3], &'static str> {
+        self.slicers
+            .first()
+            .map(|slicer| slicer.tang)
+            .ok_or("ERROR: No slicer windows open\n")
+    }
+    /// `setTopSlicerAngles`.
+    pub fn set_top_slicer_angles(
+        &mut self,
+        angles: [f32; 3],
+        center: Ipoint,
+        draw: bool,
+        native: &mut dyn SlicerNativeBoundary,
+    ) -> i32 {
+        let Some(slicer) = self.slicers.first_mut() else {
+            return 1;
+        };
+        for axis in 0..3 {
+            slicer.tang[axis] = angles[axis].clamp(-S_MAX_ANGLE[axis], S_MAX_ANGLE[axis]);
+        }
+        slicer.cx = center.x.clamp(0., (slicer.view.xsize - 1) as f32);
+        slicer.cy = center.y.clamp(0., (slicer.view.ysize - 1) as f32);
+        slicer.cz = center.z.clamp(0., (slicer.view.zsize - 1) as f32);
+        native.set_angles(slicer.tang);
+        if slicer.locked == 0 {
+            slicer.view.xmouse = slicer.cx;
+            slicer.view.ymouse = slicer.cy;
+            slicer.view.zmouse = slicer.cz;
+            if draw {
+                // `IMOD_DRAW_XYZ | IMOD_DRAW_SLICE`; model-view coupling belongs
+                // to the native host that owns the linked model window.
+                native.draw((1 << 1) | (1 << 3));
+            }
+        } else if draw {
+            slicer.draw(native);
+            slicer.already_drew = true;
+            slicer.show_slice(native);
+        }
+        0
+    }
+    /// `setTopSlicerZoom`.
+    pub fn set_top_slicer_zoom(
+        &mut self,
+        zoom: f32,
+        draw: bool,
+        native: &mut dyn SlicerNativeBoundary,
+    ) -> i32 {
+        let Some(slicer) = self.slicers.first_mut() else {
+            return 1;
+        };
+        if !(0.005..=200.).contains(&zoom) {
+            return 1;
+        }
+        slicer.set_initial_zoom(zoom);
+        if draw {
+            slicer.draw(native);
+        }
+        0
+    }
+    /// `setTopSlicerFromModelView`.
+    pub fn set_top_slicer_from_model_view(
+        &mut self,
+        rotation: Ipoint,
+        native: &mut dyn SlicerNativeBoundary,
+    ) -> i32 {
+        let Some(slicer) = self.slicers.first_mut() else {
+            return 1;
+        };
+        slicer.set_forward_matrix();
+        slicer.tang = [rotation.x, rotation.y, rotation.z];
+        native.change_center_if_linked(slicer);
+        native.set_angles(slicer.tang);
+        slicer.draw(native);
+        slicer.already_drew = true;
+        // `IMOD_DRAW_XYZ | IMOD_DRAW_SLICE | IMOD_DRAW_SKIPMODV`.
+        native.draw((1 << 1) | (1 << 3) | (1 << 5));
+        0
+    }
+    /// `getTopSlicerAngles`.
+    pub fn get_top_slicer_angles(&self) -> Option<([f32; 3], Ipoint, i32)> {
+        self.slicers.first().map(|slicer| {
+            (
+                slicer.tang,
+                Ipoint {
+                    x: slicer.cx,
+                    y: slicer.cy,
+                    z: slicer.cz,
+                },
+                if slicer.time_lock != 0 {
+                    slicer.time_lock
+                } else {
+                    slicer.view.cur_time
+                },
+            )
+        })
+    }
+    /// `getTopSlicerTime`.
+    pub fn get_top_slicer_time(&self) -> Option<(i32, bool)> {
+        self.slicers.first().map(|slicer| {
+            (
+                if slicer.time_lock != 0 {
+                    slicer.time_lock
+                } else {
+                    slicer.view.cur_time
+                },
+                slicer.continuous,
+            )
+        })
+    }
+    /// `slicerViewAxisStepChange`.
+    pub fn slicer_view_axis_step_change(&mut self, delta: i32) -> bool {
+        let old_index = self.view_axis_index;
+        if delta > 0 && self.view_axis_index + 1 < S_VIEW_AXIS_STEPS.len() - 1 {
+            self.view_axis_index += 1;
+        } else if delta < 0 {
+            self.view_axis_index = self.view_axis_index.saturating_sub(1);
+        }
+        if old_index == self.view_axis_index {
+            return false;
+        }
+        for slicer in &mut self.slicers {
+            slicer.view_axis_index = self.view_axis_index;
+        }
+        true
+    }
+    /// `slicerNewTime`.
+    pub fn slicer_new_time(
+        &self,
+        refresh: bool,
+        model_view_linked: bool,
+        model_view_draws_slicer_plane: bool,
+        native: &mut dyn SlicerNativeBoundary,
+    ) {
+        if self.angles_open {
+            native.slicer_new_time(refresh);
+        }
+        if model_view_linked || model_view_draws_slicer_plane {
+            native.model_view_slicer_update();
+        }
+    }
+    /// `getSlicerThicknessScaling`.
+    pub fn get_slicer_thickness_scaling(&self) -> i32 {
+        self.scale_thick
+    }
+
+    /// `setupLinkedSlicers`, excluding Qt monitor/toolbar placement.  The native
+    /// winit host lays out the locked windows after this source lifecycle creates
+    /// them.
+    pub fn setup_linked_slicers(&mut self, view: SlicerView, max_linked: i32) -> i32 {
+        for slicer in &mut self.slicers {
+            slicer.linked = false;
+        }
+        let num_linked = 3_i32.min(view.num_times).min(max_linked).max(0);
+        if num_linked == 0 {
+            self.link_was_limited = false;
+            return 0;
+        }
+        self.link_was_limited = num_linked < view.num_times;
+        let time_offset = if self.link_was_limited {
+            (view.cur_time - 1).min(view.num_times - num_linked).max(0)
+        } else {
+            0
+        };
+        for index in 1..=num_linked {
+            if self.slicer_open(view.clone(), index + time_offset) != 0 {
+                return -1;
+            }
+        }
+        0
+    }
+    /// `slicerAnglesOpen`.
+    pub fn slicer_angles_open(&mut self, native: &mut dyn SlicerNativeBoundary) -> i32 {
+        if self.angles_open {
+            return 0;
+        }
+        self.angles_open = true;
+        self.notify_slicers_of_ang_dia(true, native);
+        0
+    }
+    /// `slicerAnglesClosing`.
+    pub fn slicer_angles_closing(&mut self, native: &mut dyn SlicerNativeBoundary) {
+        self.angles_open = false;
+        self.notify_slicers_of_ang_dia(false, native);
+    }
+    /// `slicerPixelViewState`.
+    pub fn slicer_pixel_view_state(&mut self, state: bool, native: &mut dyn SlicerNativeBoundary) {
+        self.pixel_view_open = state;
+        self.slicer_set_mouse_tracking(native);
+    }
+}
+
 impl Default for SlicerRegistry {
     fn default() -> Self {
         Self {
@@ -2297,30 +2637,6 @@ impl SlicerFuncs {
     pub fn general_event(&mut self, _event: SlicerEvent) {}
 }
 
-/// `slicerOpen`.  Construction is intentionally separate from native window
-/// creation: the registry owns the same `SlicerFuncs` lifetime that Qt's
-/// `SlicerWindow` owned in the source.
-pub fn slicer_open(registry: &mut SlicerRegistry, view: SlicerView, auto_link: i32) -> i32 {
-    let mut slicer = SlicerFuncs::new(view, auto_link);
-    slicer.view_axis_index = registry.view_axis_index;
-    registry.slicers.push(Box::new(slicer));
-    0
-}
-
-/// `ivwGetTopSlicerMouse`.  `SlicerWindow::mapFromGlobal` and the device
-/// pixel conversion are native-window responsibilities; this function owns
-/// the source's subsequent slicer-to-image coordinate conversion.  `Err(1)`
-/// is the C routine's no-slicer return value.
-pub fn ivw_get_top_slicer_mouse(
-    registry: &mut SlicerRegistry,
-    device_x: i32,
-    device_y: i32,
-) -> Result<Ipoint, i32> {
-    let slicer = registry.slicers.first_mut().ok_or(1)?;
-    let (x, y, z, _) = slicer.getxyz(device_x as f32, device_y as f32, true);
-    Ok(Ipoint { x, y, z })
-}
-
 /// `slicerKey_cb`.  Winit performs key decoding, then passes the stable
 /// source-equivalent event and configured hot-slider key through this callback.
 pub fn slicer_key_cb(
@@ -2337,27 +2653,6 @@ pub fn slicer_key_cb(
         slicer.key_release(event);
     } else {
         slicer.key_input(event, native);
-    }
-}
-
-/// `SlicerFuncs::keyRelease`'s hot-slider/Shift portion.  Both keys share the
-/// keyboard grab; releasing either one must leave the grab held while the other
-/// remains down (`slicer.cpp`, `SlicerFuncs::keyRelease`).
-pub fn slicer_key_release(
-    registry: &mut SlicerRegistry,
-    event: SlicerEvent,
-    hot_slider_key: i32,
-    shift_key: i32,
-    native: &mut dyn SlicerNativeBoundary,
-) {
-    if event.key == hot_slider_key {
-        registry.hot_control_pressed = false;
-    }
-    if event.key == shift_key {
-        registry.shift_pressed = false;
-    }
-    if !registry.hot_control_pressed && !registry.shift_pressed {
-        native.release_keyboard();
     }
 }
 
@@ -2411,158 +2706,6 @@ pub fn set_angles_from_row(
     form.set_angles_from_row(time, native);
 }
 
-/// `setupLinkedSlicers`, excluding Qt monitor/toolbar placement.  The native
-/// winit host lays out the locked windows after this source lifecycle creates
-/// them.
-pub fn setup_linked_slicers(
-    registry: &mut SlicerRegistry,
-    view: SlicerView,
-    max_linked: i32,
-) -> i32 {
-    for slicer in &mut registry.slicers {
-        slicer.linked = false;
-    }
-    let num_linked = 3_i32.min(view.num_times).min(max_linked).max(0);
-    if num_linked == 0 {
-        registry.link_was_limited = false;
-        return 0;
-    }
-    registry.link_was_limited = num_linked < view.num_times;
-    let time_offset = if registry.link_was_limited {
-        (view.cur_time - 1).min(view.num_times - num_linked).max(0)
-    } else {
-        0
-    };
-    for index in 1..=num_linked {
-        if slicer_open(registry, view.clone(), index + time_offset) != 0 {
-            return -1;
-        }
-    }
-    0
-}
-
-/// `SlicerFuncs::synchronizeSlicers`.  The Qt dialog manager in the source is
-/// represented by the Rust-owned registry; widget repainting remains at the
-/// `SlicerNativeBoundary` owned by the winit host.
-pub fn synchronize_slicers(
-    registry: &mut SlicerRegistry,
-    source_index: usize,
-    draw: bool,
-    native: &mut dyn SlicerNativeBoundary,
-) -> i32 {
-    let Some(source) = registry.slicers.get(source_index) else {
-        return 0;
-    };
-    if !source.linked {
-        return 0;
-    }
-    let state = (
-        source.tang,
-        source.cx,
-        source.cy,
-        source.cz,
-        source.locked,
-        source.nslice,
-        source.depth,
-        source.zoom,
-        source.hq,
-        source.classic,
-        source.fft_mode,
-        source.scalez,
-    );
-    let mut changed = 0;
-    for (index, target) in registry.slicers.iter_mut().enumerate() {
-        if index == source_index || !target.linked {
-            continue;
-        }
-        let mut need_draw = false;
-        if target.tang != state.0 {
-            target.tang = state.0;
-            native.set_angles(target.tang);
-            need_draw = true;
-        }
-        if state.4 == 0
-            && target.locked == 0
-            && (target.cx != state.1 || target.cy != state.2 || target.cz != state.3)
-        {
-            (target.cx, target.cy, target.cz) = (state.1, state.2, state.3);
-            need_draw = true;
-        }
-        if target.nslice != state.5 || target.depth != state.6 {
-            (target.nslice, target.depth) = (state.5, state.6);
-            target.draw_thick_controls(native);
-            need_draw = true;
-        }
-        if target.zoom != state.7 {
-            target.zoom = state.7;
-            target.manage_buffers();
-            native.set_zoom_text(target.zoom);
-            need_draw = true;
-        }
-        if target.hq != state.8 {
-            target.hq = state.8;
-            target.manage_buffers();
-            native.set_toggle_state(SLICER_TOGGLE_HIGHRES, target.hq);
-            need_draw = true;
-        }
-        if target.classic != state.9 {
-            target.classic = state.9;
-            target.pending = 0;
-            native.set_toggle_state(SLICER_TOGGLE_CENTER, target.classic);
-            need_draw = true;
-        }
-        if target.fft_mode != state.10 {
-            target.fft_mode = state.10;
-            native.set_toggle_state(SLICER_TOGGLE_FFT, target.fft_mode);
-            need_draw = true;
-        }
-        if target.scalez != state.11 {
-            target.scalez = state.11;
-            native.set_toggle_state(SLICER_TOGGLE_ZSCALE, target.scalez);
-            need_draw = true;
-        }
-        if need_draw {
-            target.need_draw = true;
-            if draw {
-                target.draw(native);
-                target.already_drew = true;
-            }
-            changed += 1;
-        }
-    }
-    changed
-}
-
-/// `slicerAnglesOpen`.
-pub fn slicer_angles_open(
-    registry: &mut SlicerRegistry,
-    native: &mut dyn SlicerNativeBoundary,
-) -> i32 {
-    if registry.angles_open {
-        return 0;
-    }
-    registry.angles_open = true;
-    notify_slicers_of_ang_dia(registry, true, native);
-    0
-}
-
-/// `slicerAnglesClosing`.
-pub fn slicer_angles_closing(registry: &mut SlicerRegistry, native: &mut dyn SlicerNativeBoundary) {
-    registry.angles_open = false;
-    notify_slicers_of_ang_dia(registry, false, native);
-}
-
-/// Private `notifySlicersOfAngDia`.
-pub fn notify_slicers_of_ang_dia(
-    registry: &mut SlicerRegistry,
-    open: bool,
-    native: &mut dyn SlicerNativeBoundary,
-) {
-    for slicer in &mut registry.slicers {
-        set_angle_toolbar_state(slicer, open, native);
-    }
-}
-
 /// Private `setAngleToolbarState`.
 pub fn set_angle_toolbar_state(
     slicer: &mut SlicerFuncs,
@@ -2573,183 +2716,6 @@ pub fn set_angle_toolbar_state(
         slicer.continuous = false;
     }
     native.set_angle_toolbar_state(open);
-}
-
-/// `slicerPixelViewState`.
-pub fn slicer_pixel_view_state(
-    registry: &mut SlicerRegistry,
-    state: bool,
-    native: &mut dyn SlicerNativeBoundary,
-) {
-    registry.pixel_view_open = state;
-    slicer_set_mouse_tracking(registry, native);
-}
-
-/// `slicerSetMouseTracking`.
-pub fn slicer_set_mouse_tracking(
-    registry: &mut SlicerRegistry,
-    native: &mut dyn SlicerNativeBoundary,
-) {
-    let pixel_view_open = registry.pixel_view_open;
-    for slicer in &mut registry.slicers {
-        slicer.set_mouse_tracking(pixel_view_open, native);
-    }
-}
-
-/// `slicerReportAngles`.  The native host emits the returned source values
-/// with `imodPrintStderr`; an absent top slicer is its source error path.
-pub fn slicer_report_angles(registry: &SlicerRegistry) -> Result<[f32; 3], &'static str> {
-    registry
-        .slicers
-        .first()
-        .map(|slicer| slicer.tang)
-        .ok_or("ERROR: No slicer windows open\n")
-}
-
-/// `setTopSlicerAngles`.
-pub fn set_top_slicer_angles(
-    registry: &mut SlicerRegistry,
-    angles: [f32; 3],
-    center: Ipoint,
-    draw: bool,
-    native: &mut dyn SlicerNativeBoundary,
-) -> i32 {
-    let Some(slicer) = registry.slicers.first_mut() else {
-        return 1;
-    };
-    for axis in 0..3 {
-        slicer.tang[axis] = angles[axis].clamp(-S_MAX_ANGLE[axis], S_MAX_ANGLE[axis]);
-    }
-    slicer.cx = center.x.clamp(0., (slicer.view.xsize - 1) as f32);
-    slicer.cy = center.y.clamp(0., (slicer.view.ysize - 1) as f32);
-    slicer.cz = center.z.clamp(0., (slicer.view.zsize - 1) as f32);
-    native.set_angles(slicer.tang);
-    if slicer.locked == 0 {
-        slicer.view.xmouse = slicer.cx;
-        slicer.view.ymouse = slicer.cy;
-        slicer.view.zmouse = slicer.cz;
-        if draw {
-            // `IMOD_DRAW_XYZ | IMOD_DRAW_SLICE`; model-view coupling belongs
-            // to the native host that owns the linked model window.
-            native.draw((1 << 1) | (1 << 3));
-        }
-    } else if draw {
-        slicer.draw(native);
-        slicer.already_drew = true;
-        slicer.show_slice(native);
-    }
-    0
-}
-
-/// `setTopSlicerZoom`.
-pub fn set_top_slicer_zoom(
-    registry: &mut SlicerRegistry,
-    zoom: f32,
-    draw: bool,
-    native: &mut dyn SlicerNativeBoundary,
-) -> i32 {
-    let Some(slicer) = registry.slicers.first_mut() else {
-        return 1;
-    };
-    if !(0.005..=200.).contains(&zoom) {
-        return 1;
-    }
-    slicer.set_initial_zoom(zoom);
-    if draw {
-        slicer.draw(native);
-    }
-    0
-}
-
-/// `setTopSlicerFromModelView`.
-pub fn set_top_slicer_from_model_view(
-    registry: &mut SlicerRegistry,
-    rotation: Ipoint,
-    native: &mut dyn SlicerNativeBoundary,
-) -> i32 {
-    let Some(slicer) = registry.slicers.first_mut() else {
-        return 1;
-    };
-    slicer.set_forward_matrix();
-    slicer.tang = [rotation.x, rotation.y, rotation.z];
-    native.change_center_if_linked(slicer);
-    native.set_angles(slicer.tang);
-    slicer.draw(native);
-    slicer.already_drew = true;
-    // `IMOD_DRAW_XYZ | IMOD_DRAW_SLICE | IMOD_DRAW_SKIPMODV`.
-    native.draw((1 << 1) | (1 << 3) | (1 << 5));
-    0
-}
-
-/// `getTopSlicerAngles`.
-pub fn get_top_slicer_angles(registry: &SlicerRegistry) -> Option<([f32; 3], Ipoint, i32)> {
-    registry.slicers.first().map(|slicer| {
-        (
-            slicer.tang,
-            Ipoint {
-                x: slicer.cx,
-                y: slicer.cy,
-                z: slicer.cz,
-            },
-            if slicer.time_lock != 0 {
-                slicer.time_lock
-            } else {
-                slicer.view.cur_time
-            },
-        )
-    })
-}
-
-/// `getTopSlicerTime`.
-pub fn get_top_slicer_time(registry: &SlicerRegistry) -> Option<(i32, bool)> {
-    registry.slicers.first().map(|slicer| {
-        (
-            if slicer.time_lock != 0 {
-                slicer.time_lock
-            } else {
-                slicer.view.cur_time
-            },
-            slicer.continuous,
-        )
-    })
-}
-
-/// `slicerViewAxisStepChange`.
-pub fn slicer_view_axis_step_change(registry: &mut SlicerRegistry, delta: i32) -> bool {
-    let old_index = registry.view_axis_index;
-    if delta > 0 && registry.view_axis_index + 1 < S_VIEW_AXIS_STEPS.len() - 1 {
-        registry.view_axis_index += 1;
-    } else if delta < 0 {
-        registry.view_axis_index = registry.view_axis_index.saturating_sub(1);
-    }
-    if old_index == registry.view_axis_index {
-        return false;
-    }
-    for slicer in &mut registry.slicers {
-        slicer.view_axis_index = registry.view_axis_index;
-    }
-    true
-}
-
-/// `slicerNewTime`.
-pub fn slicer_new_time(
-    registry: &SlicerRegistry,
-    refresh: bool,
-    model_view_linked: bool,
-    model_view_draws_slicer_plane: bool,
-    native: &mut dyn SlicerNativeBoundary,
-) {
-    if registry.angles_open {
-        native.slicer_new_time(refresh);
-    }
-    if model_view_linked || model_view_draws_slicer_plane {
-        native.model_view_slicer_update();
-    }
-}
-
-/// `getSlicerThicknessScaling`.
-pub fn get_slicer_thickness_scaling(registry: &SlicerRegistry) -> i32 {
-    registry.scale_thick
 }
 
 /// `slicerCubicFillin`.  `int_data` chooses the source's `int *` path; in
@@ -2953,13 +2919,12 @@ mod tests {
             }
         }
         let mut registry = SlicerRegistry::default();
-        assert_eq!(slicer_open(&mut registry, SlicerView::default(), 0), 0);
+        assert_eq!(registry.slicer_open(SlicerView::default(), 0), 0);
         let mut native = Tracking(Vec::new());
-        slicer_pixel_view_state(&mut registry, true, &mut native);
+        registry.slicer_pixel_view_state(true, &mut native);
         assert_eq!(native.0, vec![true]);
         assert_eq!(
-            set_top_slicer_angles(
-                &mut registry,
+            registry.set_top_slicer_angles(
                 [120., -200., 20.],
                 Ipoint {
                     x: -2.,
@@ -2967,21 +2932,18 @@ mod tests {
                     z: 9.
                 },
                 false,
-                &mut native,
+                &mut native
             ),
             0
         );
-        assert_eq!(slicer_report_angles(&registry), Ok([90., -180., 20.]));
+        assert_eq!(registry.slicer_report_angles(), Ok([90., -180., 20.]));
         assert_eq!(registry.slicers[0].cx, 0.);
         assert_eq!(registry.slicers[0].cy, 0.);
         assert_eq!(registry.slicers[0].cz, 0.);
-        assert_eq!(
-            set_top_slicer_zoom(&mut registry, 2., false, &mut native),
-            0
-        );
+        assert_eq!(registry.set_top_slicer_zoom(2., false, &mut native), 0);
         assert_eq!(registry.slicers[0].zoom, 2.);
-        assert_eq!(get_top_slicer_time(&registry), Some((1, false)));
-        assert_eq!(slicer_view_axis_step_change(&mut registry, 1), true);
+        assert_eq!(registry.get_top_slicer_time(), Some((1, false)));
+        assert_eq!(registry.slicer_view_axis_step_change(1), true);
         assert_eq!(registry.slicers[0].view_axis_step_size(), 3.);
     }
     #[test]
@@ -2993,14 +2955,14 @@ mod tests {
             }
         }
         let mut registry = SlicerRegistry::default();
-        slicer_open(&mut registry, SlicerView::default(), 0);
-        slicer_open(&mut registry, SlicerView::default(), 0);
+        registry.slicer_open(SlicerView::default(), 0);
+        registry.slicer_open(SlicerView::default(), 0);
         registry.slicers[0].continuous = true;
         registry.slicers[1].continuous = true;
         let mut native = Toolbar(Vec::new());
-        assert_eq!(slicer_angles_open(&mut registry, &mut native), 0);
+        assert_eq!(registry.slicer_angles_open(&mut native), 0);
         assert!(registry.angles_open);
-        slicer_angles_closing(&mut registry, &mut native);
+        registry.slicer_angles_closing(&mut native);
         assert!(!registry.angles_open);
         assert!(!registry.slicers[0].continuous);
         assert!(!registry.slicers[1].continuous);
@@ -3019,24 +2981,24 @@ mod tests {
         }
         let mut registry = SlicerRegistry::default();
         let mut native = Time(Vec::new());
-        slicer_new_time(&registry, true, true, false, &mut native);
+        registry.slicer_new_time(true, true, false, &mut native);
         assert_eq!(native.0, vec!["model-view"]);
         registry.angles_open = true;
-        slicer_new_time(&registry, false, false, true, &mut native);
+        registry.slicer_new_time(false, false, true, &mut native);
         assert_eq!(native.0, vec!["model-view", "angles", "model-view"]);
-        assert_eq!(get_slicer_thickness_scaling(&registry), 1);
+        assert_eq!(registry.get_slicer_thickness_scaling(), 1);
     }
     #[test]
     fn linked_slicers_follow_source_time_limit_and_current_time_offset() {
         let mut registry = SlicerRegistry::default();
-        slicer_open(&mut registry, SlicerView::default(), 0);
+        registry.slicer_open(SlicerView::default(), 0);
         registry.slicers[0].linked = true;
         let view = SlicerView {
             num_times: 8,
             cur_time: 7,
             ..Default::default()
         };
-        assert_eq!(setup_linked_slicers(&mut registry, view, 2), 0);
+        assert_eq!(registry.setup_linked_slicers(view, 2), 0);
         assert!(registry.link_was_limited);
         assert!(!registry.slicers[0].linked);
         assert_eq!(registry.slicers.len(), 3);
@@ -3047,8 +3009,8 @@ mod tests {
     #[test]
     fn linked_slicer_synchronization_copies_unlocked_source_state() {
         let mut registry = SlicerRegistry::default();
-        slicer_open(&mut registry, SlicerView::default(), 1);
-        slicer_open(&mut registry, SlicerView::default(), 2);
+        registry.slicer_open(SlicerView::default(), 1);
+        registry.slicer_open(SlicerView::default(), 2);
         let source = &mut registry.slicers[0];
         source.tang = [15., -20., 30.];
         (source.cx, source.cy, source.cz) = (4., 5., 6.);
@@ -3060,7 +3022,7 @@ mod tests {
         source.fft_mode = 1;
         source.scalez = 1;
         let mut native = N;
-        assert_eq!(synchronize_slicers(&mut registry, 0, false, &mut native), 1);
+        assert_eq!(registry.synchronize_slicers(0, false, &mut native), 1);
         let target = &registry.slicers[1];
         assert_eq!(target.tang, [15., -20., 30.]);
         assert_eq!((target.cx, target.cy, target.cz), (4., 5., 6.));
@@ -3096,7 +3058,7 @@ mod tests {
     #[test]
     fn top_slicer_mouse_uses_the_slicer_coordinate_transform() {
         let mut registry = SlicerRegistry::default();
-        assert_eq!(ivw_get_top_slicer_mouse(&mut registry, 1, 1), Err(1));
+        assert_eq!(registry.ivw_get_top_slicer_mouse(1, 1), Err(1));
         let view = SlicerView {
             xsize: 100,
             ysize: 100,
@@ -3106,9 +3068,9 @@ mod tests {
             zmouse: 25.,
             ..Default::default()
         };
-        slicer_open(&mut registry, view, 0);
+        registry.slicer_open(view, 0);
         registry.slicers[0].resize(200, 100);
-        let point = ivw_get_top_slicer_mouse(&mut registry, 100, 49).unwrap();
+        let point = registry.ivw_get_top_slicer_mouse(100, 49).unwrap();
         assert!((point.x - 50.).abs() < 1.);
         assert!((point.y - 50.).abs() < 1.);
         assert!((point.z - 25.).abs() < 1.);
@@ -3334,8 +3296,7 @@ mod tests {
             ..Default::default()
         };
         let mut native = Keys::default();
-        slicer_key_release(
-            &mut registry,
+        registry.slicer_key_release(
             SlicerEvent {
                 key: 7,
                 ..Default::default()
@@ -3346,8 +3307,7 @@ mod tests {
         );
         assert!(!registry.hot_control_pressed);
         assert_eq!(native.0, 0);
-        slicer_key_release(
-            &mut registry,
+        registry.slicer_key_release(
             SlicerEvent {
                 key: 8,
                 ..Default::default()

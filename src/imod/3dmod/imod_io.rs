@@ -46,6 +46,259 @@ pub struct ImodIoState {
     pub last_error: i32,
 }
 
+impl ImodIoState {
+    /// Private `imod_make_backup`.
+    pub fn imod_make_backup(&mut self, filename: &Path) {
+        if filename.as_os_str().is_empty() || self.saved_filename == filename.to_string_lossy() {
+            return;
+        }
+        let one = PathBuf::from(format!("{}~", filename.display()));
+        let two = PathBuf::from(format!("{}~~", filename.display()));
+        let _ = remove_file(&two);
+        let _ = rename(&one, &two);
+        let _ = rename(filename, &one);
+        self.saved_filename = filename.to_string_lossy().into_owned();
+    }
+    /// Private `imod_undo_backup`.
+    pub fn imod_undo_backup(&mut self) {
+        if self.saved_filename.is_empty() {
+            return;
+        }
+        let name = PathBuf::from(&self.saved_filename);
+        let one = PathBuf::from(format!("{}~", name.display()));
+        let two = PathBuf::from(format!("{}~~", name.display()));
+        let _ = remove_file(&name);
+        let _ = rename(&one, &name);
+        let _ = rename(&two, &one);
+        self.saved_filename.clear();
+    }
+    /// Private `imod_finish_backup`.
+    pub fn imod_finish_backup(&self) {
+        if !self.saved_filename.is_empty() {
+            let _ = remove_file(format!("{}~~", self.saved_filename));
+        }
+    }
+    /// `imod_cleanup_autosave`.
+    pub fn imod_cleanup_autosave(&mut self) {
+        self.last_error = IMOD_IO_SUCCESS;
+        if !self.autosave_filename.is_empty() {
+            let _ = remove_file(&self.autosave_filename);
+        }
+        self.last_checksum = -1;
+    }
+    /// `setImod_filename`.
+    pub fn set_imod_filename(&mut self, name: &str) {
+        self.imod_filename = name.chars().take(IMOD_FILENAME_SIZE - 1).collect();
+    }
+    /// `imodIOGetError`.
+    pub fn imod_io_get_error(&self) -> i32 {
+        self.last_error
+    }
+    /// `imodIOGetErrorString`.
+    pub fn imod_io_get_error_string(&self) -> &'static str {
+        match self.last_error {
+            IMOD_IO_SAVE_ERROR => "Unable to save existing model",
+            IMOD_IO_DOES_NOT_EXIST => "File does not exist",
+            IMOD_IO_NO_ACCESS_ERROR => "Unable to access path or file, check permissions",
+            IMOD_IO_NO_FILE_SELECTED => "File not selected",
+            IMOD_IO_NOMEM => "Insufficient memory, try closing other programs",
+            _ => "Unknown error",
+        }
+    }
+
+    /// Private `writeModel`.
+    pub fn write_model(
+        &mut self,
+        model: &mut Imod,
+        view: ImodIoViewState,
+        mut file: ImodFile,
+        name: &Path,
+        native: &mut dyn ImodIoBoundary,
+    ) -> i32 {
+        native.save_view(model);
+        set_saved_model_state(model, view, native);
+        let result = imod_write(model, &mut file);
+        restore_saved_model_state(model, view, native);
+        if result.is_err() {
+            self.last_error = IMOD_IO_SAVE_ERROR;
+            native.print("Error saving model.");
+            return self.last_error;
+        }
+        native.print(&format!(
+            "Done saving model {}\n{}\n",
+            datetime(),
+            name.display()
+        ));
+        self.imod_finish_backup();
+        model.csum = imod_checksum(model);
+        self.imod_cleanup_autosave();
+        IMOD_IO_SUCCESS
+    }
+    /// Private `LoadModelFile`, after the source picker boundary.
+    pub fn load_model_file(
+        &mut self,
+        filename: Option<&Path>,
+        native: &mut dyn ImodIoBoundary,
+    ) -> Option<Imod> {
+        self.last_error = IMOD_IO_SUCCESS;
+        let path = filename
+            .map(PathBuf::from)
+            .or_else(|| native.choose_load_name())?;
+        let Some(mut file) = ImodFile::open(&path, "r") else {
+            self.last_error = map_errno(io::Error::last_os_error());
+            return None;
+        };
+        native.print("Loading... ");
+        let model = load_model(&mut file);
+        if model.is_some() {
+            self.set_imod_filename(&path.to_string_lossy());
+        } else {
+            self.last_error = IMOD_IO_READ_ERROR;
+        }
+        model
+    }
+
+    /// `SaveasModel`.
+    pub fn saveas_model(
+        &mut self,
+        model: &mut Imod,
+        view: ImodIoViewState,
+        filename: Option<PathBuf>,
+        native: &mut dyn ImodIoBoundary,
+    ) -> i32 {
+        self.last_error = IMOD_IO_SUCCESS;
+        let Some(name) = filename else {
+            self.last_error = IMOD_IO_SAVE_CANCEL;
+            return self.last_error;
+        };
+        self.imod_make_backup(&name);
+        let Some(file) = ImodFile::open(&name, "w") else {
+            self.imod_undo_backup();
+            self.last_error = map_errno(io::Error::last_os_error());
+            return self.last_error;
+        };
+        let ret = self.write_model(model, view, file, &name, native);
+        if ret == 0 {
+            self.set_imod_filename(&name.to_string_lossy());
+            native.maintain_model_name(model);
+        }
+        ret
+    }
+
+    /// `SaveModel`.
+    pub fn save_model(
+        &mut self,
+        model: &mut Imod,
+        view: ImodIoViewState,
+        native: &mut dyn ImodIoBoundary,
+    ) -> i32 {
+        self.last_error = IMOD_IO_SUCCESS;
+        if self.imod_filename.is_empty() {
+            let filename = native.choose_save_name();
+            return self.saveas_model(model, view, filename, native);
+        }
+        let name = PathBuf::from(&self.imod_filename);
+        self.imod_make_backup(&name);
+        // `imod_io.cpp:269` is `fopen(..., "wb+")`.
+        let Some(file) = ImodFile::open(&name, "wb+") else {
+            self.imod_undo_backup();
+            let filename = native.choose_save_name();
+            return self.saveas_model(model, view, filename, native);
+        };
+        self.write_model(model, view, file, &name, native)
+    }
+
+    /// `openModel`.
+    pub fn open_model(
+        &mut self,
+        current: &mut Imod,
+        view: &mut ImodIoViewState,
+        filename: Option<&Path>,
+        keep_bw: bool,
+        save_as: bool,
+        native: &mut dyn ImodIoBoundary,
+    ) -> i32 {
+        if imod_model_changed(Some(current)) != 0 {
+            match native.ask_save_current(save_as) {
+                SaveChoice::Yes => {
+                    let err = if save_as {
+                        let filename = native.choose_save_name();
+                        self.saveas_model(current, *view, filename, native)
+                    } else {
+                        self.save_model(current, *view, native)
+                    };
+                    if err != 0 {
+                        return err;
+                    }
+                }
+                SaveChoice::Cancel => return IMOD_IO_SAVE_CANCEL,
+                SaveChoice::No => {}
+            }
+        }
+        self.imod_cleanup_autosave();
+        let Some(mut loaded) = self.load_model_file(filename, native) else {
+            return self.last_error;
+        };
+        init_read_in_model_data(&mut loaded, view, keep_bw, native);
+        *current = loaded;
+        if view.doing_initial_load {
+            view.did_model_init_in_load = true;
+        }
+        IMOD_IO_SUCCESS
+    }
+    /// `createNewModel`.
+    pub fn create_new_model(
+        &mut self,
+        current: &mut Imod,
+        view: &mut ImodIoViewState,
+        filename: Option<&Path>,
+        native: &mut dyn ImodIoBoundary,
+    ) -> i32 {
+        self.last_error = IMOD_IO_SUCCESS;
+        if !view.doing_initial_load && imod_model_changed(Some(current)) != 0 {
+            match native.ask_save_current(false) {
+                SaveChoice::Yes => {
+                    let err = self.save_model(current, *view, native);
+                    if err != 0 {
+                        return err;
+                    }
+                }
+                SaveChoice::Cancel => return IMOD_IO_SAVE_CANCEL,
+                SaveChoice::No => {}
+            }
+            self.imod_cleanup_autosave();
+        }
+        let mode = if view.doing_initial_load {
+            IMOD_MMOVIE
+        } else {
+            current.mousemode
+        };
+        let Some(mut model) = imod_new() else {
+            self.last_error = IMOD_IO_NOMEM;
+            return self.last_error;
+        };
+        if let Some(path) = filename.filter(|p| !p.as_os_str().is_empty()) {
+            self.set_imod_filename(&path.to_string_lossy());
+        } else {
+            self.imod_filename.clear();
+        }
+        init_new_model(&mut model, view, ImodIoImageScale::default());
+        view.reloadable = false;
+        native.maintain_model_name(&mut model);
+        model.mousemode = mode;
+        native.set_colormap(&model);
+        native.model_edit_new_model();
+        native.model_new(Some(&model));
+        native.new_time(true);
+        if !view.doing_initial_load {
+            native.plug_new_model();
+        }
+        model.csum = imod_checksum(&model);
+        *current = model;
+        IMOD_IO_SUCCESS
+    }
+}
+
 /// Source `ViewInfo` fields used by this unit.
 #[derive(Clone, Copy, Debug, Default, PartialEq)]
 pub struct ImodIoViewState {
@@ -133,49 +386,6 @@ pub fn imod_model_changed(imodel: Option<&Imod>) -> i32 {
     imodel.is_some_and(|model| imod_checksum(model) != model.csum) as i32
 }
 
-/// Private `imod_make_backup`.
-pub fn imod_make_backup(state: &mut ImodIoState, filename: &Path) {
-    if filename.as_os_str().is_empty() || state.saved_filename == filename.to_string_lossy() {
-        return;
-    }
-    let one = PathBuf::from(format!("{}~", filename.display()));
-    let two = PathBuf::from(format!("{}~~", filename.display()));
-    let _ = remove_file(&two);
-    let _ = rename(&one, &two);
-    let _ = rename(filename, &one);
-    state.saved_filename = filename.to_string_lossy().into_owned();
-}
-
-/// Private `imod_undo_backup`.
-pub fn imod_undo_backup(state: &mut ImodIoState) {
-    if state.saved_filename.is_empty() {
-        return;
-    }
-    let name = PathBuf::from(&state.saved_filename);
-    let one = PathBuf::from(format!("{}~", name.display()));
-    let two = PathBuf::from(format!("{}~~", name.display()));
-    let _ = remove_file(&name);
-    let _ = rename(&one, &name);
-    let _ = rename(&two, &one);
-    state.saved_filename.clear();
-}
-
-/// Private `imod_finish_backup`.
-pub fn imod_finish_backup(state: &ImodIoState) {
-    if !state.saved_filename.is_empty() {
-        let _ = remove_file(format!("{}~~", state.saved_filename));
-    }
-}
-
-/// `imod_cleanup_autosave`.
-pub fn imod_cleanup_autosave(state: &mut ImodIoState) {
-    state.last_error = IMOD_IO_SUCCESS;
-    if !state.autosave_filename.is_empty() {
-        let _ = remove_file(&state.autosave_filename);
-    }
-    state.last_checksum = -1;
-}
-
 /// `imod_autosave`.
 pub fn imod_autosave(
     state: &mut ImodIoState,
@@ -192,7 +402,7 @@ pub fn imod_autosave(
     if checksum == model.csum || checksum == state.last_checksum {
         return IMOD_IO_SUCCESS;
     }
-    imod_cleanup_autosave(state);
+    state.imod_cleanup_autosave();
     let base = Path::new(&state.imod_filename)
         .file_name()
         .unwrap_or_default();
@@ -201,7 +411,7 @@ pub fn imod_autosave(
         |d| d.join(format!("{}#autosave#", base.to_string_lossy())),
     );
     state.autosave_filename = path.to_string_lossy().into_owned();
-    imod_cleanup_autosave(state);
+    state.imod_cleanup_autosave();
     state.autosave_filename = path.to_string_lossy().into_owned();
     let Some(mut file) = ImodFile::open(&path, "w") else {
         state.autosave_filename.clear();
@@ -242,85 +452,6 @@ pub fn current_saved_model_file<'a>(
         .then_some(state.autosave_filename.as_str())
 }
 
-/// `SaveModel`.
-pub fn save_model(
-    state: &mut ImodIoState,
-    model: &mut Imod,
-    view: ImodIoViewState,
-    native: &mut dyn ImodIoBoundary,
-) -> i32 {
-    state.last_error = IMOD_IO_SUCCESS;
-    if state.imod_filename.is_empty() {
-        let filename = native.choose_save_name();
-        return saveas_model(state, model, view, filename, native);
-    }
-    let name = PathBuf::from(&state.imod_filename);
-    imod_make_backup(state, &name);
-    // `imod_io.cpp:269` is `fopen(..., "wb+")`.
-    let Some(file) = ImodFile::open(&name, "wb+") else {
-        imod_undo_backup(state);
-        let filename = native.choose_save_name();
-        return saveas_model(state, model, view, filename, native);
-    };
-    write_model(state, model, view, file, &name, native)
-}
-
-/// `SaveasModel`.
-pub fn saveas_model(
-    state: &mut ImodIoState,
-    model: &mut Imod,
-    view: ImodIoViewState,
-    filename: Option<PathBuf>,
-    native: &mut dyn ImodIoBoundary,
-) -> i32 {
-    state.last_error = IMOD_IO_SUCCESS;
-    let Some(name) = filename else {
-        state.last_error = IMOD_IO_SAVE_CANCEL;
-        return state.last_error;
-    };
-    imod_make_backup(state, &name);
-    let Some(file) = ImodFile::open(&name, "w") else {
-        imod_undo_backup(state);
-        state.last_error = map_errno(io::Error::last_os_error());
-        return state.last_error;
-    };
-    let ret = write_model(state, model, view, file, &name, native);
-    if ret == 0 {
-        set_imod_filename(state, &name.to_string_lossy());
-        native.maintain_model_name(model);
-    }
-    ret
-}
-
-/// Private `writeModel`.
-pub fn write_model(
-    state: &mut ImodIoState,
-    model: &mut Imod,
-    view: ImodIoViewState,
-    mut file: ImodFile,
-    name: &Path,
-    native: &mut dyn ImodIoBoundary,
-) -> i32 {
-    native.save_view(model);
-    set_saved_model_state(model, view, native);
-    let result = imod_write(model, &mut file);
-    restore_saved_model_state(model, view, native);
-    if result.is_err() {
-        state.last_error = IMOD_IO_SAVE_ERROR;
-        native.print("Error saving model.");
-        return state.last_error;
-    }
-    native.print(&format!(
-        "Done saving model {}\n{}\n",
-        datetime(),
-        name.display()
-    ));
-    imod_finish_backup(state);
-    model.csum = imod_checksum(model);
-    imod_cleanup_autosave(state);
-    IMOD_IO_SUCCESS
-}
-
 /// Private `setSavedModelState`.
 pub fn set_saved_model_state(
     model: &mut Imod,
@@ -355,69 +486,6 @@ pub fn load_model(file: &mut ImodFile) -> Option<Imod> {
     Some(model)
 }
 
-/// Private `LoadModelFile`, after the source picker boundary.
-pub fn load_model_file(
-    state: &mut ImodIoState,
-    filename: Option<&Path>,
-    native: &mut dyn ImodIoBoundary,
-) -> Option<Imod> {
-    state.last_error = IMOD_IO_SUCCESS;
-    let path = filename
-        .map(PathBuf::from)
-        .or_else(|| native.choose_load_name())?;
-    let Some(mut file) = ImodFile::open(&path, "r") else {
-        state.last_error = map_errno(io::Error::last_os_error());
-        return None;
-    };
-    native.print("Loading... ");
-    let model = load_model(&mut file);
-    if model.is_some() {
-        set_imod_filename(state, &path.to_string_lossy());
-    } else {
-        state.last_error = IMOD_IO_READ_ERROR;
-    }
-    model
-}
-
-/// `openModel`.
-pub fn open_model(
-    state: &mut ImodIoState,
-    current: &mut Imod,
-    view: &mut ImodIoViewState,
-    filename: Option<&Path>,
-    keep_bw: bool,
-    save_as: bool,
-    native: &mut dyn ImodIoBoundary,
-) -> i32 {
-    if imod_model_changed(Some(current)) != 0 {
-        match native.ask_save_current(save_as) {
-            SaveChoice::Yes => {
-                let err = if save_as {
-                    let filename = native.choose_save_name();
-                    saveas_model(state, current, *view, filename, native)
-                } else {
-                    save_model(state, current, *view, native)
-                };
-                if err != 0 {
-                    return err;
-                }
-            }
-            SaveChoice::Cancel => return IMOD_IO_SAVE_CANCEL,
-            SaveChoice::No => {}
-        }
-    }
-    imod_cleanup_autosave(state);
-    let Some(mut loaded) = load_model_file(state, filename, native) else {
-        return state.last_error;
-    };
-    init_read_in_model_data(&mut loaded, view, keep_bw, native);
-    *current = loaded;
-    if view.doing_initial_load {
-        view.did_model_init_in_load = true;
-    }
-    IMOD_IO_SUCCESS
-}
-
 /// `initReadInModelData`.
 pub fn init_read_in_model_data(
     model: &mut Imod,
@@ -443,58 +511,6 @@ pub fn init_read_in_model_data(
     if !view.doing_initial_load {
         native.plug_new_model();
     }
-}
-
-/// `createNewModel`.
-pub fn create_new_model(
-    state: &mut ImodIoState,
-    current: &mut Imod,
-    view: &mut ImodIoViewState,
-    filename: Option<&Path>,
-    native: &mut dyn ImodIoBoundary,
-) -> i32 {
-    state.last_error = IMOD_IO_SUCCESS;
-    if !view.doing_initial_load && imod_model_changed(Some(current)) != 0 {
-        match native.ask_save_current(false) {
-            SaveChoice::Yes => {
-                let err = save_model(state, current, *view, native);
-                if err != 0 {
-                    return err;
-                }
-            }
-            SaveChoice::Cancel => return IMOD_IO_SAVE_CANCEL,
-            SaveChoice::No => {}
-        }
-        imod_cleanup_autosave(state);
-    }
-    let mode = if view.doing_initial_load {
-        IMOD_MMOVIE
-    } else {
-        current.mousemode
-    };
-    let Some(mut model) = imod_new() else {
-        state.last_error = IMOD_IO_NOMEM;
-        return state.last_error;
-    };
-    if let Some(path) = filename.filter(|p| !p.as_os_str().is_empty()) {
-        set_imod_filename(state, &path.to_string_lossy());
-    } else {
-        state.imod_filename.clear();
-    }
-    init_new_model(&mut model, view, ImodIoImageScale::default());
-    view.reloadable = false;
-    native.maintain_model_name(&mut model);
-    model.mousemode = mode;
-    native.set_colormap(&model);
-    native.model_edit_new_model();
-    native.model_new(Some(&model));
-    native.new_time(true);
-    if !view.doing_initial_load {
-        native.plug_new_model();
-    }
-    model.csum = imod_checksum(&model);
-    *current = model;
-    IMOD_IO_SUCCESS
 }
 
 /// `initNewModel`.
@@ -596,25 +612,6 @@ pub unsafe fn imod_io_image_load(vi: *mut ImodView) -> *mut *mut u8 {
     }
 }
 
-/// `setImod_filename`.
-pub fn set_imod_filename(state: &mut ImodIoState, name: &str) {
-    state.imod_filename = name.chars().take(IMOD_FILENAME_SIZE - 1).collect();
-}
-/// `imodIOGetError`.
-pub fn imod_io_get_error(state: &ImodIoState) -> i32 {
-    state.last_error
-}
-/// `imodIOGetErrorString`.
-pub fn imod_io_get_error_string(state: &ImodIoState) -> &'static str {
-    match state.last_error {
-        IMOD_IO_SAVE_ERROR => "Unable to save existing model",
-        IMOD_IO_DOES_NOT_EXIST => "File does not exist",
-        IMOD_IO_NO_ACCESS_ERROR => "Unable to access path or file, check permissions",
-        IMOD_IO_NO_FILE_SELECTED => "File not selected",
-        IMOD_IO_NOMEM => "Insufficient memory, try closing other programs",
-        _ => "Unknown error",
-    }
-}
 /// Private `mapErrno`.
 pub fn map_errno(error: io::Error) -> i32 {
     match error.kind() {
@@ -643,7 +640,7 @@ mod tests {
             last_checksum: -1,
             ..Default::default()
         };
-        set_imod_filename(&mut s, &"x".repeat(IMOD_FILENAME_SIZE + 4));
+        s.set_imod_filename(&"x".repeat(IMOD_FILENAME_SIZE + 4));
         assert_eq!(s.imod_filename.len(), IMOD_FILENAME_SIZE - 1);
     }
     #[test]
@@ -705,15 +702,15 @@ mod tests {
             last_checksum: -1,
             ..Default::default()
         };
-        set_imod_filename(&mut state, &path.to_string_lossy());
+        state.set_imod_filename(&path.to_string_lossy());
         let mut m = imod_new().unwrap();
         imod_new_object(&mut m);
         let mut n = Native::default();
         assert_eq!(
-            save_model(&mut state, &mut m, ImodIoViewState::default(), &mut n),
+            state.save_model(&mut m, ImodIoViewState::default(), &mut n),
             0
         );
-        assert!(load_model_file(&mut state, Some(&path), &mut n).is_some());
+        assert!(state.load_model_file(Some(&path), &mut n).is_some());
         let _ = remove_file(path);
     }
 

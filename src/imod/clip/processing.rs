@@ -4,7 +4,7 @@ use std::io::Write as _;
 
 use crate::imod::clip::clip::ClipOptions;
 use crate::imod::libcfshr::islice::{
-    Islice, Istack, MrcData, slice_free, slice_get_pixel_magnitude, slice_get_val, slice_put_val,
+    Islice, Istack, MrcData, slice_get_pixel_magnitude, slice_get_val, slice_put_val,
 };
 use crate::imod::libiimod::mrcfiles::{
     MRC_MODE_COMPLEX_FLOAT, MRC_MODE_COMPLEX_SHORT, MRC_MODE_RGB, MrcHeader,
@@ -5549,7 +5549,7 @@ pub fn free_vol(vol: &mut Vec<Islice>, z: i32) -> i32 {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::imod::libcfshr::islice::{slice_create, slice_free, slice_put_val};
+    use crate::imod::libcfshr::islice::{slice_create, slice_put_val};
     use crate::imod::libiimod::mrcfiles::{
         MRC_MODE_FLOAT, MrcHeader, mrc_head_new, mrc_head_read, mrc_head_write, mrc_read_slice,
     };

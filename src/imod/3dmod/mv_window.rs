@@ -1392,7 +1392,7 @@ impl crate::imod::three_dmod::mv_gfx::ImodvGfxGl for ImodvNativeGl {
     /// answer in `a->glExtFlags`, which is what the caller stores.
     fn initialize_gl_extensions(&mut self) -> i32 {
         let mut state = crate::imod::three_dmod::b3dgfx::B3dGfxState::default();
-        crate::imod::three_dmod::b3dgfx::b3d_initialize_gl(&mut state, self)
+        state.b3d_initialize_gl(self)
     }
     /// `a->mainWin->mCurGLw->makeCurrent()`.  Qt's `makeCurrent` has no error
     /// return, so a failure here is reported once and drawing proceeds as the
@@ -1492,7 +1492,7 @@ impl crate::imod::three_dmod::mv_gfx::ImodvGfxGl for ImodvNativeGl {
         // The static drawing state is moved out for the call because the
         // translated entry point takes it beside the boundary it drives.
         let mut state = std::mem::take(&mut self.state);
-        crate::imod::three_dmod::mv_ogl::imodv_draw_models(&mut state, app, self);
+        state.imodv_draw_models(app, self);
         self.state = state;
     }
     /// `a->vbManager->clearTempArrays()`.
@@ -1631,13 +1631,13 @@ impl crate::imod::three_dmod::finegrain::FinegrainRenderBoundary for ImodvNative
     fn line_width(&mut self, width: i32, object: &crate::imod::libimod::imodel::Iobj) {
         let scale = object.flags & crate::imod::libimod::iobj::IMOD_OBJFLAG_SCALE_WDTH != 0;
         let state = crate::imod::three_dmod::b3dgfx::B3dGfxState::default();
-        crate::imod::three_dmod::b3dgfx::b3d_line_width(&state, self, width, scale);
+        state.b3d_line_width(self, width, scale);
     }
     /// `b3dPointSize(size, obj)`.
     fn point_size(&mut self, size: i32, object: &crate::imod::libimod::imodel::Iobj) {
         let scale = object.flags & crate::imod::libimod::iobj::IMOD_OBJFLAG_SCALE_WDTH != 0;
         let state = crate::imod::three_dmod::b3dgfx::B3dGfxState::default();
-        crate::imod::three_dmod::b3dgfx::b3d_point_size(&state, self, size, scale);
+        state.b3d_point_size(self, size, scale);
     }
     /// `light_adjust(obj, red, green, blue, trans)` (`mv_light.cpp:225`).
     fn light_adjust(
@@ -2142,7 +2142,7 @@ impl crate::imod::three_dmod::mv_ogl::MvOglBoundary for ImodvNativeGl {
     }
     /// `mvImageAnyClipping()` (`mv_image.cpp:328`).
     fn image_any_clipping(&mut self) -> bool {
-        crate::imod::three_dmod::mv_image::mv_image_any_clipping(&self.image_state)
+        (&self.image_state).mv_image_any_clipping()
     }
     /// `mvImageGetClipPlanes()` (`mv_image.cpp:342`).
     fn image_clip_planes(&mut self) -> Option<crate::imod::libimod::imodel::Iclip_planes> {
@@ -2213,8 +2213,8 @@ impl crate::imod::three_dmod::mv_ogl::MvOglBoundary for ImodvNativeGl {
         // the native event-loop lifetime, as established by `initstruct`.
         let (model, view) = unsafe { (&*app.imod, &mut *app.vi) };
         let mut ogl_state = std::mem::take(&mut self.state);
-        crate::imod::three_dmod::mv_ogl::imodv_set_viewby_model(&mut ogl_state, app, model, self);
-        crate::imod::three_dmod::mv_ogl::imodv_set_model_trans(&ogl_state, app, model, self);
+        ogl_state.imodv_set_viewby_model(app, model, self);
+        ogl_state.imodv_set_model_trans(app, model, self);
         crate::imod::three_dmod::mv_ogl::set_stereo_projection(app, 0, self);
         let clip_image = model.view.first().is_some_and(|view| {
             view.world & crate::imod::libimod::iview::VIEW_WORLD_CLIP_IMAGE != 0
@@ -2224,13 +2224,7 @@ impl crate::imod::three_dmod::mv_ogl::MvOglBoundary for ImodvNativeGl {
         }
         let mut image_state = std::mem::take(&mut self.image_state);
         let mut source = crate::imod::three_dmod::mv_image::ImodViewImageSource::new(view);
-        crate::imod::three_dmod::mv_image::imodv_draw_image(
-            &mut image_state,
-            app,
-            &mut source,
-            transparent as i32,
-            self,
-        );
+        image_state.imodv_draw_image(app, &mut source, transparent as i32, self);
         self.image_state = image_state;
         if clip_image {
             crate::imod::three_dmod::mv_ogl::clip_obj(model, None, 0, self);
@@ -3674,11 +3668,7 @@ impl crate::imod::three_dmod::mv_input::MvInputNativeBoundary for ImodvNativeSin
         let gl = std::rc::Rc::clone(&self.gl);
         let mut gl = gl.borrow_mut();
         let mut state = std::mem::take(&mut gl.state);
-        unsafe {
-            crate::imod::three_dmod::mv_ogl::imodv_select_visible_conts(
-                &mut state, a, picked_ob, picked_co, &mut *gl,
-            )
-        };
+        unsafe { state.imodv_select_visible_conts(a, picked_ob, picked_co, &mut *gl) };
         gl.state = state;
     }
     /// `imodvModelDrawRange(a, mstart, mend)` then
@@ -3704,9 +3694,7 @@ impl crate::imod::three_dmod::mv_input::MvInputNativeBoundary for ImodvNativeSin
         let gl = std::rc::Rc::clone(&self.gl);
         let mut gl = gl.borrow_mut();
         let mut state = std::mem::take(&mut gl.state);
-        crate::imod::three_dmod::mv_ogl::find_clicked_drawn_element(
-            &mut state, a, cur_obj, mo_num, ob_num, co_num, pt_num,
-        );
+        state.find_clicked_drawn_element(a, cur_obj, mo_num, ob_num, co_num, pt_num);
         gl.state = state;
     }
     /// `a->mainWin->mTimer->start(interval)` then `timerId()`.

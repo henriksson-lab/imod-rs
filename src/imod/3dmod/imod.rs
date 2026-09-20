@@ -18,7 +18,7 @@ use crate::imod::three_dmod::imodview::{
     IMODVIEW_NATIVE_BOUNDARY, ImodView, ImodviewNativeBoundary, ivw_init, ivw_load_image,
     ivw_multiple_files,
 };
-use crate::imod::three_dmod::slicer::{SlicerRegistry, SlicerView, slicer_open};
+use crate::imod::three_dmod::slicer::{SlicerRegistry, SlicerView};
 
 /// Direct calls from `imod.cpp` into translated viewer subsystems that retain
 /// Qt/OpenGL-owned view state at the native host boundary.
@@ -780,8 +780,7 @@ impl ImodNativeBoundary for ImodNativeHost {
         }
         #[cfg(not(feature = "three-dmod-gl"))]
         if launch.slicer_open {
-            if slicer_open(
-                &mut self.slicers,
+            if (&mut self.slicers).slicer_open(
                 SlicerView {
                     xsize: view.xsize,
                     ysize: view.ysize,
