@@ -43,60 +43,6 @@ pub fn imod_label_new() -> Ilabel {
     label
 }
 
-/// Original: `imodLabelDup` (`ilabel.c:51`).
-pub fn imod_label_dup(label: Option<&Ilabel>) -> Option<Ilabel> {
-    let label = label?;
-
-    let mut new_label = imod_label_new();
-
-    if let Some(name) = &label.name {
-        /* `strlen(label->name)`, the string length, not the buffer size. */
-        let len = name.iter().position(|&b| b == 0).unwrap_or(name.len());
-
-        if label.len != 0 {
-            let mut copy = vec![0_u8; len + 1];
-            copy[..len + 1].copy_from_slice(&name[..len + 1]);
-            new_label.name = Some(copy);
-            new_label.len = len as i32;
-        }
-    }
-
-    for i in 0..label.label.len() {
-        let name = label.label[i].name.clone();
-        imod_label_item_add(&mut new_label, name.as_deref(), label.label[i].index);
-    }
-    Some(new_label)
-}
-
-/// Original: `imodLabelName` (`ilabel.c:87`).
-///
-/// `val` is the C `const char *`, taken here as the NUL-terminated bytes
-/// without the terminator.
-pub fn imod_label_name(label: Option<&mut Ilabel>, val: Option<&[u8]>) -> i32 {
-    let label = match label {
-        Some(label) => label,
-        None => return 1,
-    };
-    let val = match val {
-        Some(val) => val,
-        None => return 1,
-    };
-    let len = val.iter().position(|&b| b == 0).unwrap_or(val.len());
-
-    if label.name.is_none() {
-        label.name = Some(vec![0_u8; len + 1]);
-        label.len = len as i32 + 1;
-    } else if label.len < (len as i32 + 1) {
-        /* B3DFREE then malloc: the old buffer's contents are discarded. */
-        label.name = Some(vec![0_u8; len + 1]);
-        label.len = len as i32 + 1;
-    }
-    let name = label.name.as_mut().unwrap();
-    name[..len].copy_from_slice(&val[..len]);
-    name[len] = 0;
-    0
-}
-
 /// Original: `imodLabelItemAdd` (`ilabel.c:120`).
 pub fn imod_label_item_add(label: &mut Ilabel, val: Option<&[u8]>, index: i32) {
     let val = match val {
@@ -136,130 +82,7 @@ pub fn imod_label_item_add(label: &mut Ilabel, val: Option<&[u8]>, index: i32) {
     });
 }
 
-/// Original: `imodLabelItemMove` (`ilabel.c:169`).
-pub fn imod_label_item_move(label: Option<&mut Ilabel>, to_index: i32, from_index: i32) {
-    let label = match label {
-        Some(label) => label,
-        None => return,
-    };
-
-    for i in 0..label.label.len() {
-        if from_index == label.label[i].index {
-            label.label[i].index = to_index;
-            break;
-        }
-    }
-}
-
-/// Original: `imodLabelItemDelete` (`ilabel.c:185`).
-pub fn imod_label_item_delete(label: Option<&mut Ilabel>, index: i32) {
-    let label = match label {
-        Some(label) => label,
-        None => return,
-    };
-
-    let mut deli: i32 = -1;
-    for i in 0..label.label.len() {
-        if index == label.label[i].index {
-            deli = i as i32;
-            break;
-        }
-    }
-    if deli < 0 {
-        return;
-    }
-    label.label.remove(deli as usize);
-}
-
-/// Original: `imodLabelNameGet` (`ilabel.c:210`).
-pub fn imod_label_name_get(label: Option<&Ilabel>) -> Option<&[u8]> {
-    let label = label?;
-    label.name.as_deref()
-}
-
-/// Original: `imodLabelItemGet` (`ilabel.c:222`).
-pub fn imod_label_item_get(label: Option<&Ilabel>, index: i32) -> Option<&[u8]> {
-    let label = label?;
-    if label.label.is_empty() {
-        return None;
-    }
-    for i in 0..label.label.len() {
-        if index == label.label[i].index {
-            return label.label[i].name.as_deref();
-        }
-    }
-    None
-}
-
-/// Original: `imodLabelPrint` (`ilabel.c:237`).
-pub fn imod_label_print(lab: Option<&Ilabel>, fout: &mut dyn Write) {
-    let lab = match lab {
-        Some(lab) => lab,
-        None => return,
-    };
-    if let Some(name) = &lab.name {
-        let end = name
-            .iter()
-            .position(|&byte| byte == 0)
-            .unwrap_or(name.len());
-        let _ = fout.write_all(&c_format_bytes(
-            "contour label : \"%s\"\n",
-            &[CArg::Bytes(&name[..end])],
-        ));
-    }
-    if !lab.label.is_empty() {
-        for i in 0..lab.label.len() {
-            // glibc prints `(null)` for a NULL `%s`; `IlabelItem::name` is the
-            // C `b3dByte *name`, which `imodLabelRead` can leave NULL.
-            let text: &[u8] = match &lab.label[i].name {
-                Some(name) => {
-                    &name[..name
-                        .iter()
-                        .position(|&byte| byte == 0)
-                        .unwrap_or(name.len())]
-                }
-                None => b"(null)",
-            };
-            let _ = fout.write_all(&c_format_bytes(
-                "\t%3d : \"%s\"\n",
-                &[CArg::Int(lab.label[i].index as i64), CArg::Bytes(text)],
-            ));
-        }
-    }
-}
-
 /* MATCHING STUFF, UNUSED 8/21/07 */
-/// Original: `imodLabelMatch` (`ilabel.c:255`).
-pub fn imod_label_match(label: Option<&Ilabel>, tstr: Option<&[u8]>) -> i32 {
-    let (label, tstr) = match (label, tstr) {
-        (Some(label), Some(tstr)) => (label, tstr),
-        _ => return 0,
-    };
-
-    ilabel_match_reg(
-        tstr,
-        match &label.name {
-            Some(name) => name,
-            None => &[],
-        },
-    )
-}
-
-/// Original: `imodLabelItemMatch` (`ilabel.c:264`).
-pub fn imod_label_item_match(label: Option<&Ilabel>, tstr: Option<&[u8]>, index: i32) -> i32 {
-    let (label, tstr) = match (label, tstr) {
-        (Some(label), Some(tstr)) => (label, tstr),
-        _ => return 0,
-    };
-
-    let lstr = imod_label_item_get(Some(label), index);
-    let lstr = match lstr {
-        Some(lstr) => lstr,
-        None => return 0,
-    };
-
-    ilabel_match_reg(tstr, lstr)
-}
 
 /// Original: `ilabelMatchReg` (`ilabel.c:277`).
 ///
@@ -369,92 +192,6 @@ fn getpadlen(string: Option<&[u8]>) -> i32 {
     len
 }
 
-/// Original: `imodLabelWrite` (`ilabel.c:384`).
-pub fn imod_label_write(lab: Option<&Ilabel>, tag: u32, fout: &mut ImodFile) -> i32 {
-    let mut id: u32;
-    let mut len: i32;
-    let mut pad: i32;
-    let mut lpad: i32;
-
-    let lab = match lab {
-        Some(lab) => lab,
-        None => return -1,
-    };
-
-    /* `bgnpos = ftell(fout)` is dead in the source; the value is never used. */
-
-    if imod_put_int(fout, tag as i32).is_err() {
-        return IMOD_ERROR_WRITE;
-    }
-
-    /* Calculate lenth of data to be written. Put out 4 nulls for an empty name */
-    id = 8;
-    len = getpadlen(lab.name.as_deref());
-    if len == 0 {
-        len = 4;
-    }
-    id = id.wrapping_add(len as u32);
-    for l in 0..lab.label.len() {
-        id = id.wrapping_add(8);
-        id = id.wrapping_add(getpadlen(lab.label[l].name.as_deref()) as u32);
-    }
-    if imod_put_int(fout, id as i32).is_err() {
-        return IMOD_ERROR_WRITE;
-    }
-
-    /* write the number of labels. */
-    if imod_put_int(fout, lab.label.len() as i32).is_err() {
-        return IMOD_ERROR_WRITE;
-    }
-    lpad = getpadlen(lab.name.as_deref());
-    if lpad == 0 {
-        lpad = 4;
-    }
-    if imod_put_int(fout, lpad).is_err() {
-        return IMOD_ERROR_WRITE;
-    }
-
-    pad = lpad;
-    if let Some(name) = &lab.name {
-        len = name.iter().position(|&b| b == 0).unwrap_or(name.len()) as i32;
-        if imod_put_bytes(fout, name, len).is_err() {
-            return IMOD_ERROR_WRITE;
-        }
-        pad = lpad - len;
-    }
-    if pad > 0 {
-        let zeros = [0_u8; 4];
-        if imod_put_bytes(fout, &zeros, pad).is_err() {
-            return IMOD_ERROR_WRITE;
-        }
-    }
-
-    for l in 0..lab.label.len() {
-        if imod_put_int(fout, lab.label[l].index).is_err() {
-            return IMOD_ERROR_WRITE;
-        }
-        lpad = getpadlen(lab.label[l].name.as_deref());
-        let name = lab.label[l].name.as_deref().unwrap_or(&[]);
-        len = name.iter().position(|&b| b == 0).unwrap_or(name.len()) as i32;
-        pad = lpad - len;
-
-        if imod_put_int(fout, lpad).is_err() {
-            return IMOD_ERROR_WRITE;
-        }
-        if imod_put_bytes(fout, name, len).is_err() {
-            return IMOD_ERROR_WRITE;
-        }
-        if pad > 0 {
-            let zeros = [0_u8; 4];
-            if imod_put_bytes(fout, &zeros, pad).is_err() {
-                return IMOD_ERROR_WRITE;
-            }
-        }
-    }
-
-    0
-}
-
 /// Original: `imodLabelRead` (`ilabel.c:449`).
 pub fn imod_label_read(fin: &mut ImodFile, err: &mut i32) -> Option<Ilabel> {
     let retcode = 0;
@@ -489,4 +226,255 @@ pub fn imod_label_read(fin: &mut ImodFile, err: &mut i32) -> Option<Ilabel> {
 
     *err = retcode;
     Some(lab)
+}
+
+/// The C takes `Ilabel *` and opens each of these with a defensive null
+/// check; that guard is the caller's business, so it lives at the call sites
+/// now and these take `self` (user, 2026-09-20).  Names are unchanged so the
+/// coverage audit still pairs them with the C identifiers.
+impl Ilabel {
+    /// Original: `imodLabelDup` (`ilabel.c:51`).
+    pub fn imod_label_dup(&self) -> Ilabel {
+        let label = self;
+
+        let mut new_label = imod_label_new();
+
+        if let Some(name) = &label.name {
+            /* `strlen(label->name)`, the string length, not the buffer size. */
+            let len = name.iter().position(|&b| b == 0).unwrap_or(name.len());
+
+            if label.len != 0 {
+                let mut copy = vec![0_u8; len + 1];
+                copy[..len + 1].copy_from_slice(&name[..len + 1]);
+                new_label.name = Some(copy);
+                new_label.len = len as i32;
+            }
+        }
+
+        for i in 0..label.label.len() {
+            let name = label.label[i].name.clone();
+            imod_label_item_add(&mut new_label, name.as_deref(), label.label[i].index);
+        }
+        new_label
+    }
+
+    /// Original: `imodLabelName` (`ilabel.c:87`).
+    ///
+    /// `val` is the C `const char *`, taken here as the NUL-terminated bytes
+    /// without the terminator.
+    pub fn imod_label_name(&mut self, val: Option<&[u8]>) -> i32 {
+        let label = self;
+        let val = match val {
+            Some(val) => val,
+            None => return 1,
+        };
+        let len = val.iter().position(|&b| b == 0).unwrap_or(val.len());
+
+        if label.name.is_none() {
+            label.name = Some(vec![0_u8; len + 1]);
+            label.len = len as i32 + 1;
+        } else if label.len < (len as i32 + 1) {
+            /* B3DFREE then malloc: the old buffer's contents are discarded. */
+            label.name = Some(vec![0_u8; len + 1]);
+            label.len = len as i32 + 1;
+        }
+        let name = label.name.as_mut().unwrap();
+        name[..len].copy_from_slice(&val[..len]);
+        name[len] = 0;
+        0
+    }
+
+    /// Original: `imodLabelItemMove` (`ilabel.c:169`).
+    pub fn imod_label_item_move(&mut self, to_index: i32, from_index: i32) {
+        let label = self;
+
+        for i in 0..label.label.len() {
+            if from_index == label.label[i].index {
+                label.label[i].index = to_index;
+                break;
+            }
+        }
+    }
+
+    /// Original: `imodLabelItemDelete` (`ilabel.c:185`).
+    pub fn imod_label_item_delete(&mut self, index: i32) {
+        let label = self;
+
+        let mut deli: i32 = -1;
+        for i in 0..label.label.len() {
+            if index == label.label[i].index {
+                deli = i as i32;
+                break;
+            }
+        }
+        if deli < 0 {
+            return;
+        }
+        label.label.remove(deli as usize);
+    }
+
+    /// Original: `imodLabelNameGet` (`ilabel.c:210`).
+    pub fn imod_label_name_get(&self) -> Option<&[u8]> {
+        let label = self;
+        label.name.as_deref()
+    }
+
+    /// Original: `imodLabelItemGet` (`ilabel.c:222`).
+    pub fn imod_label_item_get(&self, index: i32) -> Option<&[u8]> {
+        let label = self;
+        if label.label.is_empty() {
+            return None;
+        }
+        for i in 0..label.label.len() {
+            if index == label.label[i].index {
+                return label.label[i].name.as_deref();
+            }
+        }
+        None
+    }
+
+    /// Original: `imodLabelPrint` (`ilabel.c:237`).
+    pub fn imod_label_print(&self, fout: &mut dyn Write) {
+        let lab = self;
+        if let Some(name) = &lab.name {
+            let end = name
+                .iter()
+                .position(|&byte| byte == 0)
+                .unwrap_or(name.len());
+            let _ = fout.write_all(&c_format_bytes(
+                "contour label : \"%s\"\n",
+                &[CArg::Bytes(&name[..end])],
+            ));
+        }
+        if !lab.label.is_empty() {
+            for i in 0..lab.label.len() {
+                // glibc prints `(null)` for a NULL `%s`; `IlabelItem::name` is the
+                // C `b3dByte *name`, which `imodLabelRead` can leave NULL.
+                let text: &[u8] = match &lab.label[i].name {
+                    Some(name) => {
+                        &name[..name
+                            .iter()
+                            .position(|&byte| byte == 0)
+                            .unwrap_or(name.len())]
+                    }
+                    None => b"(null)",
+                };
+                let _ = fout.write_all(&c_format_bytes(
+                    "\t%3d : \"%s\"\n",
+                    &[CArg::Int(lab.label[i].index as i64), CArg::Bytes(text)],
+                ));
+            }
+        }
+    }
+
+    /// Original: `imodLabelMatch` (`ilabel.c:255`).
+    pub fn imod_label_match(&self, tstr: Option<&[u8]>) -> i32 {
+        let label = self;
+        let Some(tstr) = tstr else { return 0 };
+
+        ilabel_match_reg(
+            tstr,
+            match &label.name {
+                Some(name) => name,
+                None => &[],
+            },
+        )
+    }
+
+    /// Original: `imodLabelItemMatch` (`ilabel.c:264`).
+    pub fn imod_label_item_match(&self, tstr: Option<&[u8]>, index: i32) -> i32 {
+        let label = self;
+        let Some(tstr) = tstr else { return 0 };
+
+        let lstr = label.imod_label_item_get(index);
+        let lstr = match lstr {
+            Some(lstr) => lstr,
+            None => return 0,
+        };
+
+        ilabel_match_reg(tstr, lstr)
+    }
+
+    /// Original: `imodLabelWrite` (`ilabel.c:384`).
+    pub fn imod_label_write(&self, tag: u32, fout: &mut ImodFile) -> i32 {
+        let mut id: u32;
+        let mut len: i32;
+        let mut pad: i32;
+        let mut lpad: i32;
+
+        let lab = self;
+
+        /* `bgnpos = ftell(fout)` is dead in the source; the value is never used. */
+
+        if imod_put_int(fout, tag as i32).is_err() {
+            return IMOD_ERROR_WRITE;
+        }
+
+        /* Calculate lenth of data to be written. Put out 4 nulls for an empty name */
+        id = 8;
+        len = getpadlen(lab.name.as_deref());
+        if len == 0 {
+            len = 4;
+        }
+        id = id.wrapping_add(len as u32);
+        for l in 0..lab.label.len() {
+            id = id.wrapping_add(8);
+            id = id.wrapping_add(getpadlen(lab.label[l].name.as_deref()) as u32);
+        }
+        if imod_put_int(fout, id as i32).is_err() {
+            return IMOD_ERROR_WRITE;
+        }
+
+        /* write the number of labels. */
+        if imod_put_int(fout, lab.label.len() as i32).is_err() {
+            return IMOD_ERROR_WRITE;
+        }
+        lpad = getpadlen(lab.name.as_deref());
+        if lpad == 0 {
+            lpad = 4;
+        }
+        if imod_put_int(fout, lpad).is_err() {
+            return IMOD_ERROR_WRITE;
+        }
+
+        pad = lpad;
+        if let Some(name) = &lab.name {
+            len = name.iter().position(|&b| b == 0).unwrap_or(name.len()) as i32;
+            if imod_put_bytes(fout, name, len).is_err() {
+                return IMOD_ERROR_WRITE;
+            }
+            pad = lpad - len;
+        }
+        if pad > 0 {
+            let zeros = [0_u8; 4];
+            if imod_put_bytes(fout, &zeros, pad).is_err() {
+                return IMOD_ERROR_WRITE;
+            }
+        }
+
+        for l in 0..lab.label.len() {
+            if imod_put_int(fout, lab.label[l].index).is_err() {
+                return IMOD_ERROR_WRITE;
+            }
+            lpad = getpadlen(lab.label[l].name.as_deref());
+            let name = lab.label[l].name.as_deref().unwrap_or(&[]);
+            len = name.iter().position(|&b| b == 0).unwrap_or(name.len()) as i32;
+            pad = lpad - len;
+
+            if imod_put_int(fout, lpad).is_err() {
+                return IMOD_ERROR_WRITE;
+            }
+            if imod_put_bytes(fout, name, len).is_err() {
+                return IMOD_ERROR_WRITE;
+            }
+            if pad > 0 {
+                let zeros = [0_u8; 4];
+                if imod_put_bytes(fout, &zeros, pad).is_err() {
+                    return IMOD_ERROR_WRITE;
+                }
+            }
+        }
+
+        0
+    }
 }

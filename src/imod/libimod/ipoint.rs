@@ -48,11 +48,9 @@ pub fn imod_point_add(cont: &mut Icont, point: Option<Ipoint>, mut index: i32) -
     /* `ipoint.c:90-93` shifts every point above `index` up by one and moves
     the label item with it. */
     for i in ((index as usize + 1)..cont.pts.len()).rev() {
-        crate::imod::libimod::ilabel::imod_label_item_move(
-            cont.label.as_mut(),
-            i as i32,
-            i as i32 - 1,
-        );
+        if let Some(label) = cont.label.as_mut() {
+            label.imod_label_item_move(i as i32, i as i32 - 1);
+        }
     }
     if !cont.sizes.is_empty() {
         cont.sizes.insert(index as usize, -1.0);
@@ -73,17 +71,17 @@ pub fn imod_point_delete(cont: &mut Icont, index: i32) -> i32 {
         return -1;
     }
 
-    crate::imod::libimod::ilabel::imod_label_item_delete(cont.label.as_mut(), index);
+    if let Some(label) = cont.label.as_mut() {
+        label.imod_label_item_delete(index);
+    }
     let index = index as usize;
     for i in index..cont.pts.len() - 1 {
         cont.pts[i].x = cont.pts[i + 1].x;
         cont.pts[i].y = cont.pts[i + 1].y;
         cont.pts[i].z = cont.pts[i + 1].z;
-        crate::imod::libimod::ilabel::imod_label_item_move(
-            cont.label.as_mut(),
-            i as i32,
-            i as i32 + 1,
-        );
+        if let Some(label) = cont.label.as_mut() {
+            label.imod_label_item_move(i as i32, i as i32 + 1);
+        }
     }
     if !cont.sizes.is_empty() {
         for i in index..cont.pts.len() - 1 {

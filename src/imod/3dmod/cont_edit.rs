@@ -9,9 +9,7 @@ use crate::imod::libimod::icont::{
     imod_contour_area, imod_contour_break, imod_contour_join, imod_contour_splice,
     imodel_contour_check_wild, imodel_unused_surface,
 };
-use crate::imod::libimod::ilabel::{
-    imod_label_item_add, imod_label_item_get, imod_label_name, imod_label_name_get, imod_label_new,
-};
+use crate::imod::libimod::ilabel::{imod_label_item_add, imod_label_new};
 use crate::imod::libimod::imodel::{
     ICONT_OPEN, Icont, Iindex, Imesh, Imod, Iobj, Ipoint, imod_get_cur_mesh_surf,
 };
@@ -981,12 +979,22 @@ pub fn imod_cont_edit_surf_show(
         surface_max: obj.surfsize,
         // `cont_edit.cpp:1738-1741, 1780-1795`: labels are associated with
         // the selected surface, contour name, and selected point respectively.
-        surface_label: cont
-            .and_then(|c| label_text(imod_label_item_get(obj.label.as_ref(), c.surf))),
-        contour_label: cont.and_then(|c| label_text(imod_label_name_get(c.label.as_ref()))),
+        surface_label: cont.and_then(|c| {
+            label_text(
+                obj.label
+                    .as_ref()
+                    .and_then(|l| l.imod_label_item_get(c.surf)),
+            )
+        }),
+        contour_label: cont
+            .and_then(|c| label_text(c.label.as_ref().and_then(|l| l.imod_label_name_get()))),
         point_label: cont.and_then(|c| {
             (current.point >= 0)
-                .then(|| imod_label_item_get(c.label.as_ref(), current.point))
+                .then(|| {
+                    c.label
+                        .as_ref()
+                        .and_then(|l| l.imod_label_item_get(current.point))
+                })
                 .flatten()
                 .and_then(|text| label_text(Some(text)))
         }),
@@ -1067,7 +1075,9 @@ pub fn ice_label_changed(
         if cont_point != 0 {
             imod_label_item_add(cont.label.as_mut().unwrap(), Some(bytes), current.point)
         } else {
-            imod_label_name(cont.label.as_mut(), Some(bytes));
+            if let Some(label) = cont.label.as_mut() {
+                label.imod_label_name(Some(bytes));
+            }
         }
     };
     n.finish_undo_unit();

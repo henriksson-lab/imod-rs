@@ -671,7 +671,9 @@ pub fn imod_object_clean_surf(obj: &mut Iobj) {
             }
         }
         if found == 0 {
-            crate::imod::libimod::ilabel::imod_label_item_delete(obj.label.as_mut(), index);
+            if let Some(label) = obj.label.as_mut() {
+                label.imod_label_item_delete(index);
+            }
         }
         i -= 1;
     }

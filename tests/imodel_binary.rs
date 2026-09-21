@@ -2,9 +2,7 @@
 
 use imod_rs::imod::libcfshr::b3dutil::ImodFile;
 use imod_rs::imod::libimod::ilabel::{
-    Ilabel, imod_label_dup, imod_label_item_add, imod_label_item_delete, imod_label_item_get,
-    imod_label_item_match, imod_label_item_move, imod_label_match, imod_label_name,
-    imod_label_name_get, imod_label_new, imod_label_print, imod_label_read, imod_label_write,
+    Ilabel, imod_label_item_add, imod_label_new, imod_label_read,
 };
 use imod_rs::imod::libimod::imesh::{
     IMESH_FLAG_RES_SHIFT, IMOD_MESH_BGNPOLY, IMOD_MESH_BGNPOLYNORM, IMOD_MESH_BGNPOLYNORM2,
@@ -1415,18 +1413,13 @@ fn ilabel_matches_native_libimod_driver() {
             out,
             "name({}) ret={}",
             label_string(Some(test)),
-            imod_label_name(Some(&mut lab), Some(test))
+            lab.imod_label_name(Some(test))
         )
         .unwrap();
         out.push_str(&show_label("afterName", Some(&lab)));
     }
     /* shrink back */
-    writeln!(
-        out,
-        "name(xy) ret={}",
-        imod_label_name(Some(&mut lab), Some(b"xy"))
-    )
-    .unwrap();
+    writeln!(out, "name(xy) ret={}", lab.imod_label_name(Some(b"xy"))).unwrap();
     out.push_str(&show_label("afterShrink", Some(&lab)));
 
     /* item add */
@@ -1442,34 +1435,29 @@ fn ilabel_matches_native_libimod_driver() {
     writeln!(
         out,
         "itemGet(0)={}",
-        label_string(imod_label_item_get(Some(&lab), 0))
+        label_string(lab.imod_label_item_get(0))
     )
     .unwrap();
     writeln!(
         out,
         "itemGet(1)={}",
-        label_string(imod_label_item_get(Some(&lab), 1))
+        label_string(lab.imod_label_item_get(1))
     )
     .unwrap();
     writeln!(
         out,
         "itemGet(9)={}",
-        label_string(imod_label_item_get(Some(&lab), 9))
+        label_string(lab.imod_label_item_get(9))
     )
     .unwrap();
-    writeln!(
-        out,
-        "nameGet={}",
-        label_string(imod_label_name_get(Some(&lab)))
-    )
-    .unwrap();
+    writeln!(out, "nameGet={}", label_string(lab.imod_label_name_get())).unwrap();
 
-    imod_label_item_move(Some(&mut lab), 7, 1);
+    lab.imod_label_item_move(7, 1);
     out.push_str(&show_label("afterMove", Some(&lab)));
-    imod_label_item_move(Some(&mut lab), 8, 99);
+    lab.imod_label_item_move(8, 99);
     out.push_str(&show_label("afterMoveMiss", Some(&lab)));
 
-    let dup = imod_label_dup(Some(&lab));
+    let dup = Some(lab.imod_label_dup());
     out.push_str(&show_label("dup", dup.as_ref()));
 
     /* `imodLabelPrint` takes the C `FILE *fout`; the translation takes any
@@ -1477,7 +1465,7 @@ fn ilabel_matches_native_libimod_driver() {
     out.push_str("print:\n");
     {
         let mut captured: Vec<u8> = Vec::new();
-        imod_label_print(Some(&lab), &mut captured);
+        lab.imod_label_print(&mut captured);
         out.push_str(std::str::from_utf8(&captured).unwrap());
     }
 
@@ -1491,9 +1479,9 @@ fn ilabel_matches_native_libimod_driver() {
             out,
             "match({})={} itemMatch({},0)={}",
             label_string(Some(exp)),
-            imod_label_match(Some(&lab), Some(&expz)),
+            lab.imod_label_match(Some(&expz)),
             label_string(Some(exp)),
-            imod_label_item_match(Some(&lab), Some(&expz), 0)
+            lab.imod_label_item_match(Some(&expz), 0)
         )
         .unwrap();
     }
@@ -1503,12 +1491,7 @@ fn ilabel_matches_native_libimod_driver() {
     let mut f = ImodFile::open(p1.to_str().unwrap(), "wb")
         .ok_or(())
         .unwrap();
-    writeln!(
-        out,
-        "write={}",
-        imod_label_write(Some(&lab), ID_LABL, &mut f)
-    )
-    .unwrap();
+    writeln!(out, "write={}", lab.imod_label_write(ID_LABL, &mut f)).unwrap();
     drop(f);
     out.push_str(&dump_label_file(&p1, "write"));
 
@@ -1531,7 +1514,8 @@ fn ilabel_matches_native_libimod_driver() {
     writeln!(
         out,
         "write2={}",
-        imod_label_write(rd.as_ref(), ID_LABL, &mut f)
+        rd.as_ref()
+            .map_or(-1, |l| l.imod_label_write(ID_LABL, &mut f))
     )
     .unwrap();
     drop(f);
@@ -1543,12 +1527,7 @@ fn ilabel_matches_native_libimod_driver() {
     let mut f = ImodFile::open(p3.to_str().unwrap(), "wb")
         .ok_or(())
         .unwrap();
-    writeln!(
-        out,
-        "write3={}",
-        imod_label_write(Some(&e), ID_LABL, &mut f)
-    )
-    .unwrap();
+    writeln!(out, "write3={}", e.imod_label_write(ID_LABL, &mut f)).unwrap();
     drop(f);
     out.push_str(&dump_label_file(&p3, "write3"));
     let mut f = ImodFile::open(p3.to_str().unwrap(), "rb")
@@ -1561,11 +1540,14 @@ fn ilabel_matches_native_libimod_driver() {
     out.push_str(&show_label("read3", rd3.as_ref()));
     writeln!(out, "readErr3={}", err3).unwrap();
     out.push_str("dupEmpty:\n");
-    out.push_str(&show_label("dupEmpty", imod_label_dup(Some(&e)).as_ref()));
+    out.push_str(&show_label("dupEmpty", Some(&e.imod_label_dup())));
     writeln!(
         out,
         "dupNull={}",
-        match imod_label_dup(None) {
+        // The C's `if (!label) return NULL` guard now lives here, at the
+        // caller, which is the point of the `&self` conversion: `dup` cannot
+        // be handed a null, so there is nothing for it to check.
+        match None::<&Ilabel>.map(Ilabel::imod_label_dup) {
             None => "(nil)",
             Some(_) => "(some)",
         }
@@ -1573,29 +1555,26 @@ fn ilabel_matches_native_libimod_driver() {
     .unwrap();
 
     /* item delete */
-    imod_label_item_delete(Some(&mut lab), 0);
+    lab.imod_label_item_delete(0);
     out.push_str(&show_label("afterDel0", Some(&lab)));
-    imod_label_item_delete(Some(&mut lab), 42);
+    lab.imod_label_item_delete(42);
     out.push_str(&show_label("afterDelMiss", Some(&lab)));
     /* delete an item that is not first in the array */
     imod_label_item_add(&mut lab, Some(b"third"), 3);
     imod_label_item_add(&mut lab, Some(b"fourth"), 4);
     out.push_str(&show_label("beforeDelMid", Some(&lab)));
-    imod_label_item_delete(Some(&mut lab), 2);
+    lab.imod_label_item_delete(2);
     out.push_str(&show_label("afterDelMid", Some(&lab)));
-    imod_label_item_delete(None, 0);
+    // (The old `imod_label_item_delete(None, 0)` case is gone: the null
+    // guard moved to the caller, so there is no callee behaviour to test.
+    // It produced no output, so the golden text is unchanged.)
 
     /* write after delete */
     let p4 = dir.join("ilab4.bin");
     let mut f = ImodFile::open(p4.to_str().unwrap(), "wb")
         .ok_or(())
         .unwrap();
-    writeln!(
-        out,
-        "write4={}",
-        imod_label_write(Some(&lab), ID_LABL, &mut f)
-    )
-    .unwrap();
+    writeln!(out, "write4={}", lab.imod_label_write(ID_LABL, &mut f)).unwrap();
     drop(f);
     out.push_str(&dump_label_file(&p4, "write4"));
 
@@ -1605,12 +1584,16 @@ fn ilabel_matches_native_libimod_driver() {
     writeln!(
         out,
         "writeNull={}",
-        imod_label_write(None, ID_LABL, &mut sink)
+        None::<&Ilabel>.map_or(-1, |l| l.imod_label_write(ID_LABL, &mut sink))
     )
     .unwrap();
-    imod_label_print(None, &mut Vec::new());
-    writeln!(out, "nameNullLabel={}", imod_label_name(None, Some(b"a\0"))).unwrap();
-    writeln!(out, "nameNullVal={}", imod_label_name(Some(&mut lab), None)).unwrap();
+    writeln!(
+        out,
+        "nameNullLabel={}",
+        None::<&mut Ilabel>.map_or(1, |l: &mut Ilabel| l.imod_label_name(Some(b"a\0")))
+    )
+    .unwrap();
+    writeln!(out, "nameNullVal={}", lab.imod_label_name(None)).unwrap();
 
     std::fs::remove_dir_all(&dir).ok();
     assert_eq!(out, NATIVE_ILABEL.trim_start_matches('\n'));

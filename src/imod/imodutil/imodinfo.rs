@@ -24,7 +24,6 @@ use crate::imod::libimod::icont::{
     imod_contour_get_bbox, imod_contour_long_axis, imod_contour_make_z_tables,
     imod_contour_nest_levels, imodel_contour_centroid, imodel_contour_scan,
 };
-use crate::imod::libimod::ilabel::imod_label_print;
 use crate::imod::libimod::imodel::{
     ICONT_OPEN, IMOD_CLIPSIZE, IMOD_MESH_BGNPOLYNORM, IMOD_MESH_BGNPOLYNORM2, IMOD_MESH_END,
     IMOD_MESH_ENDPOLY, IMOD_OBJFLAG_OFF, IMOD_OBJFLAG_OPEN, IMOD_OBJFLAG_OUT, IMOD_OBJFLAG_SCAT,
@@ -642,7 +641,9 @@ pub fn imodinfo_print_model(
                 // `imodinfo.cpp:540` prints the label to `stdout`, not to
                 // `fout`.  `ImodFile::Stdout` is that same C stream, so the
                 // two stay in order.
-                imod_label_print(cont.label.as_ref(), &mut ImodFile::Stdout);
+                if let Some(label) = cont.label.as_ref() {
+                    label.imod_label_print(&mut ImodFile::Stdout);
+                }
             }
             if cont.pts.is_empty() {
                 if verbose >= 0 {

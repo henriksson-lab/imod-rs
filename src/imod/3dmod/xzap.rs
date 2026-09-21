@@ -9806,10 +9806,8 @@ impl ZapFuncs {
                 if !(pt_props.gap != 0 && pt_props.valskip != 0)
                     && self.point_visable(unsafe { &(&(*cont).pts)[pt as usize] }) != 0
                 {
-                    let pt_label = crate::imod::libimod::ilabel::imod_label_item_get(
-                        unsafe { (*cont).label.as_ref() },
-                        pt,
-                    );
+                    let pt_label =
+                        unsafe { (*cont).label.as_ref() }.and_then(|l| l.imod_label_item_get(pt));
                     if let Some(pt_label) = pt_label {
                         drawsize = ((self.zoom
                             * crate::imod::three_dmod::model_draw::imod_point_get_size(

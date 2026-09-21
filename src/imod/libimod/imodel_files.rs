@@ -2533,7 +2533,9 @@ pub fn imodel_write_contour(cont: &Icont, file: &mut ImodFile) -> Result<(), i32
         imod_put_float(file, point.z).map_err(|_| IMOD_ERROR_WRITE)?;
     }
     if cont.label.is_some() {
-        crate::imod::libimod::ilabel::imod_label_write(cont.label.as_ref(), ID_LABL, file);
+        if let Some(label) = cont.label.as_ref() {
+            label.imod_label_write(ID_LABL, file);
+        }
     }
     if !cont.sizes.is_empty() {
         imod_put_int(file, ID_SIZE as i32).map_err(|_| IMOD_ERROR_WRITE)?;
@@ -2620,7 +2622,9 @@ pub fn imodel_write_object(
     imod_put_int(file, num_real).map_err(|_| IMOD_ERROR_WRITE)?;
     imod_put_int(file, object.surfsize).map_err(|_| IMOD_ERROR_WRITE)?;
     if object.label.is_some() {
-        crate::imod::libimod::ilabel::imod_label_write(object.label.as_ref(), ID_OLBL, file);
+        if let Some(label) = object.label.as_ref() {
+            label.imod_label_write(ID_OLBL, file);
+        }
     }
     for contour in &object.cont {
         imodel_write_contour(contour, file)?;
