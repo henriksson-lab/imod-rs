@@ -7,12 +7,28 @@
 use crate::imod::libcfshr::linearxforms::matrix_to_angles;
 use crate::imod::libimod::imodel::Ipoint;
 
-/// Original: `b3dX` (`include/hvemtypes.h:21`).
-pub const B3D_X: i32 = 0;
-/// Original: `b3dY` (`include/hvemtypes.h:22`).
-pub const B3D_Y: i32 = 1;
-/// Original: `b3dZ` (`include/hvemtypes.h:23`).
-pub const B3D_Z: i32 = 2;
+#[repr(i32)]
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum Axis3 {
+    X = 0,
+    Y = 1,
+    Z = 2,
+}
+
+impl Axis3 {
+    pub const fn from_raw(value: i32) -> Option<Self> {
+        match value {
+            0 => Some(Self::X),
+            1 => Some(Self::Y),
+            2 => Some(Self::Z),
+            _ => None,
+        }
+    }
+
+    pub const fn to_raw(self) -> i32 {
+        self as i32
+    }
+}
 
 /// Original: `Imat` / `struct imodel_matrix` (`include/imat.h:11`).
 #[derive(Clone, Debug, PartialEq)]
@@ -199,20 +215,20 @@ pub fn imod_mat_rot(mat: &mut Imat, mut angle: f64, axis: i32) -> i32 {
         rmat.data[3] = (-sina) as f32;
         rmat.data[4] = cosa as f32;
     } else {
-        match axis {
-            B3D_X => {
+        match Axis3::from_raw(axis) {
+            Some(Axis3::X) => {
                 rmat.data[5] = cosa as f32;
                 rmat.data[6] = sina as f32;
                 rmat.data[9] = (-sina) as f32;
                 rmat.data[10] = cosa as f32;
             }
-            B3D_Y => {
+            Some(Axis3::Y) => {
                 rmat.data[0] = cosa as f32;
                 rmat.data[2] = (-sina) as f32;
                 rmat.data[8] = sina as f32;
                 rmat.data[10] = cosa as f32;
             }
-            B3D_Z => {
+            Some(Axis3::Z) => {
                 rmat.data[0] = cosa as f32;
                 rmat.data[1] = sina as f32;
                 rmat.data[4] = (-sina) as f32;
@@ -575,7 +591,7 @@ mod tests {
     fn rot_about_each_axis_matches_hand_rotation() {
         for (axis, expected) in [
             (
-                B3D_X,
+                Axis3::X.to_raw(),
                 Ipoint {
                     x: 1.,
                     y: -3.,
@@ -583,7 +599,7 @@ mod tests {
                 },
             ),
             (
-                B3D_Y,
+                Axis3::Y.to_raw(),
                 Ipoint {
                     x: 3.,
                     y: 2.,
@@ -591,7 +607,7 @@ mod tests {
                 },
             ),
             (
-                B3D_Z,
+                Axis3::Z.to_raw(),
                 Ipoint {
                     x: -2.,
                     y: 1.,
@@ -642,7 +658,7 @@ mod tests {
                 z: 4.,
             },
         );
-        imod_mat_rot(&mut mat, 30., B3D_Z);
+        imod_mat_rot(&mut mat, 30., Axis3::Z.to_raw());
         let inv = imod_mat_inverse(&mat).unwrap();
         let pt = Ipoint {
             x: 11.,
@@ -679,7 +695,7 @@ mod tests {
     #[test]
     fn find_vector_recovers_z_rotation() {
         let mut mat = imod_mat_new(3).unwrap();
-        imod_mat_rot(&mut mat, 37., B3D_Z);
+        imod_mat_rot(&mut mat, 37., Axis3::Z.to_raw());
         let mut angle = 0.0f64;
         let mut v = Ipoint::default();
         assert_eq!(imod_mat_find_vector(&mat, &mut angle, &mut v), 0);
@@ -695,7 +711,7 @@ mod tests {
     #[test]
     fn rotate_vector_about_z_matches_axis_rotation() {
         let mut a = imod_mat_new(3).unwrap();
-        imod_mat_rot(&mut a, 25., B3D_Z);
+        imod_mat_rot(&mut a, 25., Axis3::Z.to_raw());
         let mut b = imod_mat_new(3).unwrap();
         assert_eq!(
             imod_mat_rotate_vector(

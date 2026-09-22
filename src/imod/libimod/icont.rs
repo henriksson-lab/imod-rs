@@ -9,7 +9,7 @@ use std::io::Write;
 
 use crate::imod::libcfshr::b3dutil::{CArg, ImodFile, c_format};
 use crate::imod::libimod::imat::{
-    B3D_X, B3D_Z, imod_mat_delete, imod_mat_new, imod_mat_rot, imod_mat_transform,
+    Axis3, imod_mat_delete, imod_mat_new, imod_mat_rot, imod_mat_transform,
 };
 use crate::imod::libimod::imodel::{ICONT_OPEN, ICONT_WILD, Icont, Iobj, Ipoint};
 use crate::imod::libimod::ipoint::{
@@ -56,14 +56,30 @@ pub const IMOD_CONTOUR_CLOCKWISE: i32 = -1;
 /// Original: `IMOD_CONTOUR_COUNTER_CLOCKWISE` (`icont.h:39`).
 pub const IMOD_CONTOUR_COUNTER_CLOCKWISE: i32 = 1;
 
-/// Original: `ICONT_FIND_NOSORT` (`icont.h:41`).
-pub const ICONT_FIND_NOSORT: i32 = 0;
-/// Original: `ICONT_FIND_SORTX` (`icont.h:42`).
-pub const ICONT_FIND_SORTX: i32 = 1;
-/// Original: `ICONT_FIND_SORTY` (`icont.h:43`).
-pub const ICONT_FIND_SORTY: i32 = 2;
-/// Original: `ICONT_FIND_SORTXY` (`icont.h:44`).
-pub const ICONT_FIND_SORTXY: i32 = 3;
+#[repr(i32)]
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum ContourFindMode {
+    Nosort = 0,
+    Sortx = 1,
+    Sorty = 2,
+    Sortxy = 3,
+}
+
+impl ContourFindMode {
+    pub const fn from_raw(value: i32) -> Option<Self> {
+        match value {
+            0 => Some(Self::Nosort),
+            1 => Some(Self::Sortx),
+            2 => Some(Self::Sorty),
+            3 => Some(Self::Sortxy),
+            _ => None,
+        }
+    }
+
+    pub const fn to_raw(self) -> i32 {
+        self as i32
+    }
+}
 
 /// Original: `Nesting` / `struct Nest_struct` (`icont.h:49`).
 ///
@@ -979,8 +995,8 @@ pub fn imod_contour_fit_plane(
     let Some(mut mat) = imod_mat_new(3) else {
         return 2;
     };
-    if imod_mat_rot(&mut mat, -alfa / 0.01745329252, B3D_X) != 0
-        || imod_mat_rot(&mut mat, -gamma / 0.01745329252, B3D_Z) != 0
+    if imod_mat_rot(&mut mat, -alfa / 0.01745329252, Axis3::X.to_raw()) != 0
+        || imod_mat_rot(&mut mat, -gamma / 0.01745329252, Axis3::Z.to_raw()) != 0
     {
         imod_mat_delete(&mut mat);
         return 2;
@@ -2817,8 +2833,8 @@ pub fn imod_contour_find_point(cont: Option<&Icont>, point: Option<&Ipoint>, fla
     };
     let size = cont.pts.len() as i32;
 
-    match flag {
-        ICONT_FIND_NOSORT => {
+    match ContourFindMode::from_raw(flag) {
+        Some(ContourFindMode::Nosort) => {
             for pt in 0..size {
                 if (point.x == cont.pts[pt as usize].x)
                     && (point.y == cont.pts[pt as usize].y)
@@ -2829,7 +2845,7 @@ pub fn imod_contour_find_point(cont: Option<&Icont>, point: Option<&Ipoint>, fla
             }
         }
 
-        ICONT_FIND_SORTX => {
+        Some(ContourFindMode::Sortx) => {
             let mut low = 0i32;
             let mut high = size - 1;
             while low <= high {
@@ -2872,9 +2888,9 @@ pub fn imod_contour_find_point(cont: Option<&Icont>, point: Option<&Ipoint>, fla
             }
         }
 
-        ICONT_FIND_SORTY => {}
+        Some(ContourFindMode::Sorty) => {}
 
-        ICONT_FIND_SORTXY => {}
+        Some(ContourFindMode::Sortxy) => {}
 
         _ => return -1,
     }
@@ -3213,6 +3229,12 @@ pub fn imod_contour_get_max_point(in_contour: Option<&Icont>) -> i32 {
 /// Original: `imodContourGetPoints` (`icont.c:3345`).
 pub fn imod_contour_get_points(in_contour: Option<&Icont>) -> Option<&[Ipoint]> {
     let c = in_contour?;
+    // `icont.c:3348` is a *second*, independent guard: `if (!inContour->psize)
+    // return(NULL)`.  It is the function's own behaviour, not a caller's null
+    // check, and was missing -- which made this `Option` return vestigial.
+    if c.pts.is_empty() {
+        return None;
+    }
     Some(&c.pts)
 }
 
@@ -4427,12 +4449,12 @@ mod source_driver_group2 {
             };
             out.push_str(&format!(
                 "fp {}\n",
-                imod_contour_find_point(Some(&c), Some(&p), ICONT_FIND_NOSORT)
+                imod_contour_find_point(Some(&c), Some(&p), ContourFindMode::Nosort.to_raw())
             ));
             p.x = 99.;
             out.push_str(&format!(
                 "fp {}\n",
-                imod_contour_find_point(Some(&c), Some(&p), ICONT_FIND_NOSORT)
+                imod_contour_find_point(Some(&c), Some(&p), ContourFindMode::Nosort.to_raw())
             ));
             let last = c.pts.len() as i32 - 1;
             imodel_contour_sortx(&mut c, 0, last);
@@ -4440,12 +4462,12 @@ mod source_driver_group2 {
             p.y = 10.;
             out.push_str(&format!(
                 "fp {}\n",
-                imod_contour_find_point(Some(&c), Some(&p), ICONT_FIND_SORTX)
+                imod_contour_find_point(Some(&c), Some(&p), ContourFindMode::Sortx.to_raw())
             ));
             p.y = 77.;
             out.push_str(&format!(
                 "fp {}\n",
-                imod_contour_find_point(Some(&c), Some(&p), ICONT_FIND_SORTX)
+                imod_contour_find_point(Some(&c), Some(&p), ContourFindMode::Sortx.to_raw())
             ));
             out.push_str(&format!(
                 "fp {}\n",

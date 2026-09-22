@@ -934,9 +934,11 @@ pub fn ii_set_mm(
     0
 }
 pub unsafe fn ii_close(in_file: *mut ImodImageFile) {
-    if in_file.is_null() {
-        return;
-    }
+    // `iiClose` (`iimage.c:494`) dereferences `inFile` with no null check --
+    // unlike `iiDelete` and `iiFillMrcHeader` just below it, which really do
+    // test it.  Reproducing a null dereference would be UB in Rust, so this
+    // fails loudly rather than inventing an early return the C does not have.
+    assert!(!in_file.is_null(), "iiClose: null inFile");
     unsafe {
         if let Some(close) = (*in_file).close {
             close(in_file);

@@ -101,9 +101,10 @@ pub unsafe fn hdf_read_section_any(
     cz: i32,
     typ: i32,
 ) -> i32 {
-    if in_file.is_null() {
-        return 1;
-    }
+    // `hdfReadSectionAny` (`hdf_imageio.c:30`) dereferences `inFile` with no null
+    // check.  Reproducing a null dereference would be UB in Rust, so this
+    // fails loudly rather than inventing an error return the C does not have.
+    assert!(!in_file.is_null(), "hdfReadSectionAny: null inFile");
     let mut li = LoadInfo::default();
     ii_mrc_set_load_info(&*in_file, &mut li);
     let Some(hdata) = (*in_file).mrc_header.as_mut() else {
@@ -358,9 +359,10 @@ pub unsafe fn hdf_write_section_any(
     cz: i32,
     from_float: i32,
 ) -> i32 {
-    if in_file.is_null() {
-        return 1;
-    }
+    // `hdfWriteSectionAny` (`hdf_imageio.c:254`) dereferences `inFile` with no null
+    // check.  Reproducing a null dereference would be UB in Rust, so this
+    // fails loudly rather than inventing an error return the C does not have.
+    assert!(!in_file.is_null(), "hdfWriteSectionAny: null inFile");
     let Some(h) = (*in_file).mrc_header.as_mut() else {
         return 1;
     };

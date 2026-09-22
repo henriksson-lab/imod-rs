@@ -9,7 +9,7 @@ use crate::imod::libimod::icont::{
     imod_contour_z_value,
 };
 use crate::imod::libimod::imat::{
-    B3D_X, B3D_Y, Imat, imod_mat_id, imod_mat_inverse, imod_mat_new, imod_mat_rot, imod_mat_scale,
+    Axis3, Imat, imod_mat_id, imod_mat_inverse, imod_mat_new, imod_mat_rot, imod_mat_scale,
     imod_mat_trans, imod_mat_transform,
 };
 use crate::imod::libimod::imesh::{
@@ -337,8 +337,8 @@ pub fn analyze_prep_skin_obj(
 
         imod_mat_id(&mut mat_v);
         imod_mat_scale(&mut mat_v, scale);
-        imod_mat_rot(&mut mat_v, beta / dtor, B3D_Y);
-        imod_mat_rot(&mut mat_v, alpha / dtor, B3D_X);
+        imod_mat_rot(&mut mat_v, beta / dtor, Axis3::Y.to_raw());
+        imod_mat_rot(&mut mat_v, alpha / dtor, Axis3::X.to_raw());
         imod_mat_scale(&mut mat_v, &sclinv);
         imod_mat_transform(&mat_v, &cnorm, &mut ref_norm);
 
@@ -356,8 +356,8 @@ pub fn analyze_prep_skin_obj(
         imod_mat_id(&mut mat_v);
         imod_mat_trans(&mut mat_v, &ceninv);
         imod_mat_scale(&mut mat_v, scale);
-        imod_mat_rot(&mut mat_v, beta / dtor, B3D_Y);
-        imod_mat_rot(&mut mat_v, alpha / dtor, B3D_X);
+        imod_mat_rot(&mut mat_v, beta / dtor, Axis3::Y.to_raw());
+        imod_mat_rot(&mut mat_v, alpha / dtor, Axis3::X.to_raw());
         imod_mat_scale(&mut mat_v, &sclinv);
         imod_mat_trans(&mut mat_v, &cen);
 
@@ -488,8 +488,8 @@ pub fn analyze_prep_skin_obj(
         /* Need a normal transform as well as the point transform */
         inv = imod_mat_inverse(&mat_v);
         imod_mat_id(&mut mat_v);
-        imod_mat_rot(&mut mat_v, -alpha / dtor, B3D_X);
-        imod_mat_rot(&mut mat_v, -beta / dtor, B3D_Y);
+        imod_mat_rot(&mut mat_v, -alpha / dtor, Axis3::X.to_raw());
+        imod_mat_rot(&mut mat_v, -beta / dtor, Axis3::Y.to_raw());
 
         /* Transform the mesh points and the normals, then add to object */
         for m in 0..use_obj.mesh.len() {

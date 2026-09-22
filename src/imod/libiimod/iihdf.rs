@@ -1769,7 +1769,12 @@ pub fn hdf_write_global_adoc(in_file: &mut ImodImageFile) -> i32 {
 }
 /// C `hdfSyncFromMrcHeader` (`iihdf.c:1484`).
 unsafe fn hdf_sync_from_mrc_header(in_file: *mut ImodImageFile, hdata: *mut MrcHeader) -> i32 {
-    if !in_file.is_null() && !hdata.is_null() {
+    // `hdfSyncFromMrcHeader` (`iihdf.c:1484`) dereferences `inFile` with no null
+    // check.  Reproducing a null dereference would be UB in Rust, so this
+    // fails loudly rather than inventing an error return the C does not have.
+    assert!(!in_file.is_null(), "hdfSyncFromMrcHeader: null inFile");
+    assert!(!hdata.is_null(), "hdfSyncFromMrcHeader: null hdata");
+    {
         if let Some(header) = (*in_file).mrc_header.as_mut() {
             if !core::ptr::eq(header, hdata) {
                 *header = (*hdata).clone();
@@ -1961,9 +1966,10 @@ unsafe fn set_io_funcs_plus(
     writable: i32,
     file_id: HidT,
 ) {
-    if in_file.is_null() {
-        return;
-    }
+    // `setIOFuncsPlus` (`iihdf.c:1649`) dereferences `inFile` with no null
+    // check.  Reproducing a null dereference would be UB in Rust, so this
+    // fails loudly rather than inventing an error return the C does not have.
+    assert!(!in_file.is_null(), "setIOFuncsPlus: null inFile");
     let f = &mut *in_file;
     f.hdf_source = hdf_source;
     f.hdf_file_id = file_id;

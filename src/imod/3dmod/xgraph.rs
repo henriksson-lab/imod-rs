@@ -6,11 +6,33 @@
 #![allow(dead_code)]
 
 pub const MAX_GRAPH_TOGGLES: usize = 2;
-pub const GRAPH_XAXIS: i32 = 0;
-pub const GRAPH_YAXIS: i32 = 1;
-pub const GRAPH_ZAXIS: i32 = 2;
-pub const GRAPH_CONTOUR: i32 = 3;
-pub const GRAPH_HISTOGRAM: i32 = 4;
+#[repr(i32)]
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum GraphMode {
+    Xaxis = 0,
+    Yaxis = 1,
+    Zaxis = 2,
+    Contour = 3,
+    Histogram = 4,
+}
+
+impl GraphMode {
+    pub const fn from_raw(value: i32) -> Option<Self> {
+        match value {
+            0 => Some(Self::Xaxis),
+            1 => Some(Self::Yaxis),
+            2 => Some(Self::Zaxis),
+            3 => Some(Self::Contour),
+            4 => Some(Self::Histogram),
+            _ => None,
+        }
+    }
+
+    pub const fn to_raw(self) -> i32 {
+        self as i32
+    }
+}
+
 pub const IMOD_DRAW_COLORMAP: i32 = 1;
 pub const IMOD_DRAW_XYZ: i32 = 2;
 pub const IMOD_DRAW_ACTIVE: i32 = 4;
@@ -89,7 +111,7 @@ pub struct GraphWindow {
     pub m_height: i32,
     pub m_data: Vec<f32>,
     pub m_zoom: f32,
-    pub m_axis: i32,
+    pub m_axis: GraphMode,
     pub m_locked: i32,
     pub m_ctrl: i32,
     pub m_start: i32,
@@ -130,7 +152,7 @@ impl GraphWindow {
             m_height: 160,
             m_data: vec![],
             m_zoom: if dpr > 0. { dpr } else { 1. },
-            m_axis: 0,
+            m_axis: GraphMode::Xaxis,
             m_locked: 0,
             m_ctrl: 0,
             m_start: 0,
@@ -186,9 +208,9 @@ impl GraphWindow {
         }
     }
     /// `GraphWindow::axisSelected`.
-    pub fn axis_selected(&mut self, item: i32) {
+    pub fn axis_selected(&mut self, item: GraphMode) {
         self.m_axis = item;
-        self.width_box_enabled = item != GRAPH_ZAXIS && item != GRAPH_HISTOGRAM;
+        self.width_box_enabled = item != GraphMode::Zaxis && item != GraphMode::Histogram;
     }
     /// `GraphWindow::setToggleState`.
     pub fn set_toggle_state(&mut self, index: usize, state: i32) {
@@ -294,7 +316,7 @@ impl GraphWindow {
         self.m_ycur = s.ymouse;
         self.m_zcur = s.zmouse;
         let high = self.m_high_res != 0 && !s.file_is_jpeg;
-        if self.m_axis != GRAPH_HISTOGRAM
+        if self.m_axis != GraphMode::Histogram
             && !high
             && s.cache_base_index < 0
             && n.setup_fast_access()
@@ -302,7 +324,7 @@ impl GraphWindow {
             return;
         }
         match self.m_axis {
-            GRAPH_XAXIS => {
+            GraphMode::Xaxis => {
                 self.m_sub_start = ix;
                 if self.alloc_data_array(nx) != 0
                     || cz < 0
@@ -353,7 +375,7 @@ impl GraphWindow {
                     }
                 }
             }
-            GRAPH_YAXIS => {
+            GraphMode::Yaxis => {
                 self.m_sub_start = iy;
                 if self.alloc_data_array(ny) != 0
                     || cx < 0
@@ -404,7 +426,7 @@ impl GraphWindow {
                     }
                 }
             }
-            GRAPH_ZAXIS => {
+            GraphMode::Zaxis => {
                 self.m_sub_start = 0;
                 self.m_center_pt = cz;
                 if self.alloc_data_array(s.zsize) != 0
@@ -427,11 +449,11 @@ impl GraphWindow {
                     }
                 }
             }
-            GRAPH_CONTOUR => self.fill_contour_data(n, s, ix, iy, nx, ny, high),
-            GRAPH_HISTOGRAM => self.fill_histogram_data(n, s, ix, iy, nx, ny, cx, cy, high),
+            GraphMode::Contour => self.fill_contour_data(n, s, ix, iy, nx, ny, high),
+            GraphMode::Histogram => self.fill_histogram_data(n, s, ix, iy, nx, ny, cx, cy, high),
             _ => return,
         }
-        if self.m_axis != GRAPH_HISTOGRAM && self.m_data_size > 0 {
+        if self.m_axis != GraphMode::Histogram && self.m_data_size > 0 {
             self.m_mean = self.m_data.iter().sum::<f32>() / self.m_data_size as f32
         }
     }
@@ -641,7 +663,7 @@ impl GraphWindow {
         let mut zoom = self.m_zoom;
         let mut st = self.m_center_pt - (self.m_width as f32 / 2. / zoom) as i32;
         let mut en = self.m_center_pt + (self.m_width as f32 / 2. / zoom) as i32;
-        if self.m_axis == GRAPH_HISTOGRAM {
+        if self.m_axis == GraphMode::Histogram {
             st = st.max(0);
             en = en.min(256);
             if en > st {
@@ -788,9 +810,9 @@ impl GraphGl {
         let ni = (mx as f32 / g.m_zoom) as i32 + g.m_start;
         let (mut x, mut y, mut z) = n.location();
         match g.m_axis {
-            GRAPH_XAXIS => x = ni,
-            GRAPH_YAXIS => y = ni,
-            GRAPH_ZAXIS => z = ni,
+            GraphMode::Xaxis => x = ni,
+            GraphMode::Yaxis => y = ni,
+            GraphMode::Zaxis => z = ni,
             _ => return,
         }
         n.set_location(x, y, z);
@@ -825,7 +847,7 @@ pub fn graph_draw_cb(g: &mut GraphWindow, flags: i32, n: &mut dyn XGraphNativeBo
         return;
     }
     if flags & (IMOD_DRAW_ACTIVE | IMOD_DRAW_IMAGE) != 0
-        || (flags & IMOD_DRAW_MOD != 0 && g.m_axis == GRAPH_CONTOUR)
+        || (flags & IMOD_DRAW_MOD != 0 && g.m_axis == GraphMode::Contour)
     {
         g.draw(n)
     }

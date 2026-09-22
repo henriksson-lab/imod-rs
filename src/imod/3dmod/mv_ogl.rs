@@ -8,7 +8,7 @@
 use std::sync::{LazyLock, Mutex};
 
 use crate::imod::libimod::icont::{ICONT_STIPPLED, imod_contour_get_points};
-use crate::imod::libimod::imat::{B3D_X, B3D_Y, imod_mat_rot, imod_mat_transform3d};
+use crate::imod::libimod::imat::{Axis3, imod_mat_rot, imod_mat_transform3d};
 use crate::imod::libimod::imesh::{
     IMESH_FLAG_NMAG, IMOD_MESH_BGNBIGPOLY, IMOD_MESH_BGNPOLY, IMOD_MESH_BGNPOLYNORM,
     IMOD_MESH_BGNPOLYNORM2, IMOD_MESH_BGNTRI, IMOD_MESH_END, IMOD_MESH_ENDPOLY, IMOD_MESH_ENDTRI,
@@ -931,12 +931,12 @@ impl MvOglState {
             imod_mat_rot(
                 &mut mat,
                 -((alpha / RADIANS_PER_DEGREE) as f32) as f64,
-                B3D_X,
+                Axis3::X.to_raw(),
             );
             imod_mat_rot(
                 &mut mat,
                 -((beta / RADIANS_PER_DEGREE) as f32) as f64,
-                B3D_Y,
+                Axis3::Y.to_raw(),
             );
 
             // Compute and draw 4 corner points.

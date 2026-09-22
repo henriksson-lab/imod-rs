@@ -1603,9 +1603,10 @@ pub fn tiff_set_string_tag_to_print(tag: i32) {
 }
 /// C `openWithoutBMode` (`iitif.c:944`).
 unsafe fn open_without_b_mode(in_file: *mut ImodImageFile) -> *mut Tiff {
-    if in_file.is_null() {
-        return core::ptr::null_mut();
-    }
+    // `openWithoutBMode` (`iitif.c:944`) dereferences `inFile` with no null
+    // check.  Reproducing a null dereference would be UB in Rust, so this
+    // fails loudly rather than inventing an error return the C does not have.
+    assert!(!in_file.is_null(), "openWithoutBMode: null inFile");
     let Some(filename) = (&(*in_file).filename).as_deref() else {
         return core::ptr::null_mut();
     };
@@ -1639,7 +1640,11 @@ unsafe fn open_without_b_mode(in_file: *mut ImodImageFile) -> *mut Tiff {
 }
 /// C `setMatchingDirectory` (`iitif.c:984`).
 unsafe fn set_matching_directory(in_file: *mut ImodImageFile, dirnum: i32) -> i32 {
-    if in_file.is_null() || (*in_file).backend_handle.is_null() || dirnum < 0 {
+    // `setMatchingDirectory` (`iitif.c:984`) dereferences `inFile` with no null
+    // check.  Reproducing a null dereference would be UB in Rust, so this
+    // fails loudly rather than inventing an error return the C does not have.
+    assert!(!in_file.is_null(), "setMatchingDirectory: null inFile");
+    if dirnum < 0 {
         return 1;
     }
     let Some(directory_list) = (*in_file).directory_nums.as_ref() else {
@@ -3542,9 +3547,10 @@ unsafe extern "C" fn buf_size_proc(fd: *mut c_void) -> u64 {
 }
 /// C `tiffOpenNew` (`iitif.c:2406`).
 pub unsafe fn tiff_open_new(in_file: *mut ImodImageFile) -> i32 {
-    if in_file.is_null() {
-        return IIERR_BAD_CALL;
-    }
+    // `tiffOpenNew` (`iitif.c:2406`) dereferences `inFile` with no null
+    // check.  Reproducing a null dereference would be UB in Rust, so this
+    // fails loudly rather than inventing an error return the C does not have.
+    assert!(!in_file.is_null(), "tiffOpenNew: null inFile");
     let Some(filename) = (&(*in_file).filename).as_deref() else {
         return IIERR_BAD_CALL;
     };
@@ -3685,10 +3691,11 @@ pub unsafe fn tiff_write_setup(
     out_num: *mut i32,
     tile_size_x: *mut i32,
 ) -> i32 {
+    // `tiffWriteSetup` (`iitif.c:2490`) dereferences `inFile` with no null
+    // check.  Reproducing a null dereference would be UB in Rust, so this
+    // fails loudly rather than inventing an error return the C does not have.
+    assert!(!in_file.is_null(), "tiffWriteSetup: null inFile");
     let mut tmp_buf = S_TMP_BUF.lock().unwrap();
-    if in_file.is_null() || (*in_file).backend_handle.is_null() {
-        return IIERR_BAD_CALL;
-    }
     if (*in_file).format != IIFORMAT_RGB
         && ((*in_file).format != IIFORMAT_LUMINANCE
             || !matches!(
@@ -3870,10 +3877,11 @@ pub unsafe fn tiff_write_setup(
 }
 /// C `tiffWriteStrip` (`iitif.c:2660`).
 pub unsafe fn tiff_write_strip(in_file: *mut ImodImageFile, strip: i32, buf: *mut c_void) -> i32 {
+    // `tiffWriteStrip` (`iitif.c:2660`) dereferences `inFile` with no null
+    // check.  Reproducing a null dereference would be UB in Rust, so this
+    // fails loudly rather than inventing an error return the C does not have.
+    assert!(!in_file.is_null(), "tiffWriteStrip: null inFile");
     let mut tmp_buf = S_TMP_BUF.lock().unwrap();
-    if in_file.is_null() || (*in_file).backend_handle.is_null() || buf.is_null() {
-        return IIERR_BAD_CALL;
-    }
     let state = *S_STRIP_TILE_STATE.lock().unwrap();
     let lines = state.rows_per_strip.min((*in_file).ny - state.lines_done);
     b3d_shift_bytes(
@@ -3977,9 +3985,10 @@ pub unsafe fn tiff_write_strip(in_file: *mut ImodImageFile, strip: i32, buf: *mu
 }
 /// C `tiffWriteFinish` (`iitif.c:2714`).
 pub unsafe fn tiff_write_finish(in_file: *mut ImodImageFile) {
-    if in_file.is_null() {
-        return;
-    }
+    // `tiffWriteFinish` (`iitif.c:2714`) dereferences `inFile` with no null
+    // check.  Reproducing a null dereference would be UB in Rust, so this
+    // fails loudly rather than inventing an error return the C does not have.
+    assert!(!in_file.is_null(), "tiffWriteFinish: null inFile");
     (*in_file).state = IISTATE_BUSY;
     let mut tmp_buf = S_TMP_BUF.lock().unwrap();
     let already_inverted = S_STRIP_TILE_STATE.lock().unwrap().already_inverted;
@@ -3993,9 +4002,10 @@ pub unsafe fn ii_tiff_write_section(
     buf: *mut u8,
     in_section: i32,
 ) -> i32 {
-    if in_file.is_null() || buf.is_null() {
-        return IIERR_BAD_CALL;
-    }
+    // `tiffWriteSectionAny` (`iitif.c:2739`) dereferences `inFile` with no null
+    // check.  Reproducing a null dereference would be UB in Rust, so this
+    // fails loudly rather than inventing an error return the C does not have.
+    assert!(!in_file.is_null(), "tiffWriteSectionAny: null inFile");
     let file = &mut *in_file;
     let pixel_bytes = if file.format == IIFORMAT_RGB {
         3
@@ -4032,9 +4042,10 @@ pub unsafe fn ii_tiff_write_section_float(
     buf: *mut u8,
     in_section: i32,
 ) -> i32 {
-    if in_file.is_null() || buf.is_null() {
-        return IIERR_BAD_CALL;
-    }
+    // `tiffWriteSectionAny` (`iitif.c:2739`) dereferences `inFile` with no null
+    // check.  Reproducing a null dereference would be UB in Rust, so this
+    // fails loudly rather than inventing an error return the C does not have.
+    assert!(!in_file.is_null(), "tiffWriteSectionAny: null inFile");
     let file = &mut *in_file;
     let pixel_bytes = if file.format == IIFORMAT_RGB {
         3
@@ -4329,9 +4340,10 @@ pub unsafe fn tiff_parallel_write(
     quality: i32,
     did_parallel: *mut i32,
 ) -> i32 {
-    if in_file.is_null() || buf.is_null() || did_parallel.is_null() {
-        return IIERR_BAD_CALL;
-    }
+    // `tiffParallelWrite` (`iitif.c:2899`) dereferences `inFile` with no null
+    // check.  Reproducing a null dereference would be UB in Rust, so this
+    // fails loudly rather than inventing an error return the C does not have.
+    assert!(!in_file.is_null(), "tiffParallelWrite: null inFile");
     *did_parallel = 0;
     let mut pixel_size = 1;
     if (*in_file).type_ == IITYPE_SHORT || (*in_file).type_ == IITYPE_USHORT {
@@ -4696,9 +4708,10 @@ pub unsafe fn tiff_parallel_write(
 }
 /// C `constrainAndStoreMinMax` (`iitif.c:3134`).
 unsafe fn constrain_and_store_min_max(in_file: *mut ImodImageFile) {
-    if in_file.is_null() {
-        return;
-    }
+    // `constrainAndStoreMinMax` (`iitif.c:3134`) dereferences `inFile` with no null
+    // check.  Reproducing a null dereference would be UB in Rust, so this
+    // fails loudly rather than inventing an error return the C does not have.
+    assert!(!in_file.is_null(), "constrainAndStoreMinMax: null inFile");
     let mut minimum = (*in_file).amin as f64;
     let mut maximum = (*in_file).amax as f64;
     if (*in_file).format == IIFORMAT_RGB {

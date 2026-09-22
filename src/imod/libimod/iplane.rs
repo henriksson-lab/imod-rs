@@ -319,7 +319,7 @@ pub fn imod_clips_trans(clips: &mut Iclip_planes, mat: &Imat, mat2: &Imat) {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::imod::libimod::imat::{B3D_X, B3D_Y, B3D_Z, imod_mat_rot, imod_mat_scale};
+    use crate::imod::libimod::imat::{Axis3, imod_mat_rot, imod_mat_scale};
 
     /// `%.9g` through the C library, so the driver's formatting is part of the
     /// comparison.
@@ -395,7 +395,7 @@ mod tests {
             g9(pl[1].c as f64),
             g9(pl[1].d as f64)
         ));
-        imod_plane_axis_rotate(&mut pl[2], 22.5, B3D_Y);
+        imod_plane_axis_rotate(&mut pl[2], 22.5, Axis3::Y.to_raw());
         out.push_str(&format!(
             "parot {} {} {} {}\n",
             g9(pl[2].a as f64),
@@ -492,8 +492,8 @@ mod tests {
         }
 
         let mut mat = imod_mat_new(3).unwrap();
-        imod_mat_rot(&mut mat, 30., B3D_Z);
-        imod_mat_rot(&mut mat, -17., B3D_X);
+        imod_mat_rot(&mut mat, 30., Axis3::Z.to_raw());
+        imod_mat_rot(&mut mat, -17., Axis3::X.to_raw());
         let s = Ipoint {
             x: 1.5,
             y: 0.75,
@@ -501,7 +501,7 @@ mod tests {
         };
         imod_mat_scale(&mut mat, &s);
         let mut mat2 = imod_mat_new(3).unwrap();
-        imod_mat_rot(&mut mat2, 30., B3D_Z);
+        imod_mat_rot(&mut mat2, 30., Axis3::Z.to_raw());
         imod_clips_trans(&mut clips, &mat, &mat2);
         out.push_str("ctrans\n");
         for i in 0..IMOD_CLIPSIZE {
@@ -540,7 +540,7 @@ mod tests {
             assert_eq!(got, want, "line {} differs from iplane.c driver", line + 1);
         }
         assert_eq!(out.lines().count(), want.lines().count());
-        let _ = B3D_X;
+        let _ = Axis3::X.to_raw();
     }
 
     /// Verbatim stdout of the driver linked against `IMOD/libimod/iplane.c`.

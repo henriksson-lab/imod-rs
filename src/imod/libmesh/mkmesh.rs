@@ -9,8 +9,7 @@ use crate::imod::libimod::icont::{
     imod_contour_get_bbox, imod_contour_nearest,
 };
 use crate::imod::libimod::imat::{
-    B3D_Y, B3D_Z, Imat, imod_mat_delete, imod_mat_new, imod_mat_rot, imod_mat_scale,
-    imod_mat_transform,
+    Axis3, Imat, imod_mat_delete, imod_mat_new, imod_mat_rot, imod_mat_scale, imod_mat_transform,
 };
 use crate::imod::libimod::imesh::{
     IMESH_MK_SURF, IMOD_MESH_BGNPOLY, IMOD_MESH_END, IMOD_MESH_ENDPOLY, imod_mesh_add_index,
@@ -2014,10 +2013,10 @@ pub fn make_tube_cont(
     /* DNM: modify method of getting rotation matrix to end up in correct
     quadrant, using atan2 */
 
-    imod_mat_rot(&mut mat, b, B3D_Y);
+    imod_mat_rot(&mut mat, b, Axis3::Y.to_raw());
     a = (n.y as f64).atan2(n.x as f64);
     a *= 57.29578;
-    imod_mat_rot(&mut mat, a, B3D_Z);
+    imod_mat_rot(&mut mat, a, Axis3::Z.to_raw());
 
     spt.x = 0.0f32;
     spt.y = tube_diameter * 0.5f32;
@@ -2025,7 +2024,7 @@ pub fn make_tube_cont(
 
     imod_mat_scale(&mut mat, &rscale); /* DNM: Move this outside the loop */
     for _sl in 0..slices {
-        imod_mat_rot(&mut rmat, astep, B3D_Z);
+        imod_mat_rot(&mut rmat, astep, Axis3::Z.to_raw());
         imod_mat_transform(&rmat, &spt, &mut tpt);
         imod_mat_transform(&mat, &tpt, &mut cpt);
 
@@ -2100,8 +2099,8 @@ pub fn join_tube_cont(
     b *= 57.29578;
     let mut a = (norm.y as f64).atan2(norm.x as f64);
     a *= 57.29578;
-    imod_mat_rot(&mut mat, -a, B3D_Z);
-    imod_mat_rot(&mut mat, -b, B3D_Y);
+    imod_mat_rot(&mut mat, -a, Axis3::Z.to_raw());
+    imod_mat_rot(&mut mat, -b, Axis3::Y.to_raw());
 
     /* Start at top point of each back-transformed circle */
 

@@ -1511,7 +1511,7 @@ impl crate::imod::three_dmod::mv_gfx::ImodvGfxGl for ImodvNativeGl {
         app: &crate::imod::three_dmod::imodv::ImodvApp,
         light: crate::imod::libimod::imodel::Ipoint,
     ) {
-        use crate::imod::libimod::imat::{B3D_X, B3D_Y, imod_mat_rot, imod_mat_transform3d};
+        use crate::imod::libimod::imat::{Axis3, imod_mat_rot, imod_mat_transform3d};
         use crate::imod::libimod::imodel::Ipoint;
         use crate::imod::libimod::ipoint::imod_point_normalize;
         let winhalf = 0.5 * app.winx.min(app.winy) as f32;
@@ -1550,8 +1550,8 @@ impl crate::imod::three_dmod::mv_gfx::ImodvGfxGl for ImodvNativeGl {
         let mut val = an.y as f64;
         val = pnt.z as f64 * val.cos() - pnt.x as f64 * val.sin();
         an.x = (90. * rpd - val.atan2(pnt.y as f64)) as f32;
-        imod_mat_rot(&mut mat, -(an.x as f64) / rpd, B3D_X);
-        imod_mat_rot(&mut mat, -(an.y as f64) / rpd, B3D_Y);
+        imod_mat_rot(&mut mat, -(an.x as f64) / rpd, Axis3::X.to_raw());
+        imod_mat_rot(&mut mat, -(an.y as f64) / rpd, Axis3::Y.to_raw());
         let mut ar = Ipoint::default();
         an.z = 0.;
         an.x = del;

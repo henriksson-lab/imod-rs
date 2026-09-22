@@ -8,9 +8,7 @@
 use crate::imod::libcfshr::zoomdown::{
     SLICE_MODE_RGB, ZoomLines, ZoomOut, select_zoom_filter, zoom_with_filter,
 };
-use crate::imod::libimod::imat::{
-    B3D_X, B3D_Y, B3D_Z, imod_mat_new, imod_mat_rot, imod_mat_transform,
-};
+use crate::imod::libimod::imat::{Axis3, imod_mat_new, imod_mat_rot, imod_mat_transform};
 use crate::imod::libimod::imodel::{Iclip_planes, Ipoint};
 use crate::imod::three_dmod::imodv::ImodvApp;
 use crate::imod::three_dmod::imodview::{
@@ -542,9 +540,9 @@ impl MvImageState {
         let Some(mut mat) = imod_mat_new(3) else {
             return;
         };
-        imod_mat_rot(&mut mat, view.rot.z as f64, B3D_Z);
-        imod_mat_rot(&mut mat, view.rot.y as f64, B3D_Y);
-        imod_mat_rot(&mut mat, view.rot.x as f64, B3D_X);
+        imod_mat_rot(&mut mat, view.rot.z as f64, Axis3::Z.to_raw());
+        imod_mat_rot(&mut mat, view.rot.y as f64, Axis3::Y.to_raw());
+        imod_mat_rot(&mut mat, view.rot.x as f64, Axis3::X.to_raw());
         let (ix, iy, iz) = source.location();
         let (xs, ys, zs) = source.dimensions();
         let mut count = 0usize;
