@@ -541,7 +541,7 @@ pub fn util_manage_paired_meshes(obj: &mut Iobj) -> i32 {
 
 /// The non-Rust services called by this source unit.
 pub trait UtilitiesBoundary {
-    fn draw_symbol(&mut self, x: i32, y: i32, symbol: i32, size: i32, filled: bool);
+    fn draw_symbol(&mut self, x: i32, y: i32, symbol: ObjectSymbol, size: i32, filled: bool);
     fn set_stipple(&mut self, enabled: bool);
     fn clear_window(&mut self, color_index: i32);
     fn redraw_model(&mut self);
@@ -558,21 +558,16 @@ pub fn util_draw_symbol(
     boundary: &mut dyn UtilitiesBoundary,
     mx: i32,
     my: i32,
-    sym: i32,
+    sym: ObjectSymbol,
     size: i32,
     flags: u32,
 ) {
-    match crate::imod::libimod::iobj::ObjectSymbol::from_raw(sym) {
-        Some(crate::imod::libimod::iobj::ObjectSymbol::Circle)
-        | Some(crate::imod::libimod::iobj::ObjectSymbol::Square)
-        | Some(crate::imod::libimod::iobj::ObjectSymbol::Triangle) => {
+    match sym {
+        ObjectSymbol::Circle | ObjectSymbol::Square | ObjectSymbol::Triangle => {
             boundary.draw_symbol(mx, my, sym, size, flags & IOBJ_SYMF_FILL != 0)
         }
-        Some(crate::imod::libimod::iobj::ObjectSymbol::Star) => {}
-        Some(crate::imod::libimod::iobj::ObjectSymbol::None) => {
-            boundary.draw_symbol(mx, my, sym, 1, true)
-        }
-        _ => {}
+        ObjectSymbol::Star => {}
+        ObjectSymbol::None => boundary.draw_symbol(mx, my, sym, 1, true),
     }
 }
 

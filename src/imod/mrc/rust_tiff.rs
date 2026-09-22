@@ -20,54 +20,56 @@ mod implementation {
     use tiff::decoder::{Decoder, DecodingResult};
     use tiff::tags::Tag;
 
-    fn bytes(result: DecodingResult) -> (Vec<u8>, i32, i32, i32) {
+    fn bytes(result: DecodingResult) -> (Vec<u8>, i32, ImageDataType, i32) {
         match result {
             DecodingResult::U8(values) => (
                 values,
                 8,
-                ImageDataType::UnsignedByte.to_raw(),
+                ImageDataType::UnsignedByte,
                 MRC_MODE_BYTE,
             ),
             DecodingResult::I8(values) => (
                 values.into_iter().map(|value| value as u8).collect(),
                 8,
-                ImageDataType::Byte.to_raw(),
+                ImageDataType::Byte,
                 MRC_MODE_BYTE,
             ),
             DecodingResult::U16(values) => (
                 values.into_iter().flat_map(u16::to_ne_bytes).collect(),
                 16,
-                ImageDataType::UnsignedShort.to_raw(),
+                ImageDataType::UnsignedShort,
                 MRC_MODE_USHORT,
             ),
             DecodingResult::I16(values) => (
                 values.into_iter().flat_map(i16::to_ne_bytes).collect(),
                 16,
-                ImageDataType::Short.to_raw(),
+                ImageDataType::Short,
                 MRC_MODE_SHORT,
             ),
             DecodingResult::U32(values) => (
                 values.into_iter().flat_map(u32::to_ne_bytes).collect(),
                 32,
-                ImageDataType::UnsignedInt.to_raw(),
+                ImageDataType::UnsignedInt,
                 MRC_MODE_FLOAT,
             ),
             DecodingResult::I32(values) => (
                 values.into_iter().flat_map(i32::to_ne_bytes).collect(),
                 32,
-                ImageDataType::Int.to_raw(),
+                ImageDataType::Int,
                 MRC_MODE_FLOAT,
             ),
             DecodingResult::F32(values) => (
                 values.into_iter().flat_map(f32::to_ne_bytes).collect(),
                 32,
-                ImageDataType::Float.to_raw(),
+                ImageDataType::Float,
                 MRC_MODE_FLOAT,
             ),
             DecodingResult::F16(_)
             | DecodingResult::F64(_)
             | DecodingResult::U64(_)
-            | DecodingResult::I64(_) => (Vec::new(), 0, 0, 0),
+            // Unsupported sample formats: the caller rejects these on the
+            // empty buffer, so the reported type is never read.
+            | DecodingResult::I64(_) => (Vec::new(), 0, ImageDataType::UnsignedByte, 0),
         }
     }
 
@@ -598,12 +600,14 @@ mod implementation {
         )
     }
 
-    fn mode_for(type_: i32) -> i32 {
+    fn mode_for(type_: ImageDataType) -> i32 {
         match type_ {
-            2 => MRC_MODE_SHORT,
-            3 => MRC_MODE_USHORT,
-            6 | 4 | 5 => MRC_MODE_FLOAT,
-            _ => MRC_MODE_BYTE,
+            ImageDataType::Short => MRC_MODE_SHORT,
+            ImageDataType::UnsignedShort => MRC_MODE_USHORT,
+            ImageDataType::Float | ImageDataType::Int | ImageDataType::UnsignedInt => {
+                MRC_MODE_FLOAT
+            }
+            ImageDataType::UnsignedByte | ImageDataType::Byte => MRC_MODE_BYTE,
         }
     }
 

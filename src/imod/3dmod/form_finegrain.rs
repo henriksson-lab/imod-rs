@@ -115,7 +115,7 @@ pub struct FineGrainForm {
     pub m_change_flags: [i32; 7],
     pub m_pt_cont_surf: i32,
     pub m_ctrl_pressed: bool,
-    pub m_sym_table: [i32; 4],
+    pub m_sym_table: [ObjectSymbol; 4],
     pub m_line_selector: bool,
     pub m_fill_selector: bool,
     pub m_dslabels: [bool; 7],
@@ -152,10 +152,10 @@ impl Default for FineGrainForm {
             m_pt_cont_surf: 0,
             m_ctrl_pressed: false,
             m_sym_table: [
-                ObjectSymbol::None.to_raw(),
-                ObjectSymbol::Circle.to_raw(),
-                ObjectSymbol::Square.to_raw(),
-                ObjectSymbol::Triangle.to_raw(),
+                ObjectSymbol::None,
+                ObjectSymbol::Circle,
+                ObjectSymbol::Square,
+                ObjectSymbol::Triangle,
             ],
             m_line_selector: false,
             m_fill_selector: false,
@@ -265,7 +265,11 @@ impl FineGrainForm {
         n.enabled(63, enabled > 1);
         n.spin(WIDTH_3D, p.linewidth);
         n.enabled(64, enabled > 0);
-        if let Some(i) = self.m_sym_table.iter().position(|&x| x == p.symtype) {
+        if let Some(i) = self
+            .m_sym_table
+            .iter()
+            .position(|&x| x.to_raw() == p.symtype)
+        {
             n.symbol(i as i32)
         }
         n.enabled(65, enabled > 1);
@@ -465,9 +469,9 @@ impl FineGrainForm {
     /// `FineGrainForm::symtypeSelected`.
     pub fn symtype_selected(&mut self, i: i32, fill: bool, n: &mut dyn FineGrainNativeBoundary) {
         if let Some(&v) = self.m_sym_table.get(i as usize) {
-            self.m_last_sym_type = v;
+            self.m_last_sym_type = v.to_raw();
             self.m_last_sym_fill = fill;
-            n.symtype(v, fill)
+            n.symtype(self.m_last_sym_type, fill)
         }
     }
     /// `FineGrainForm::fillToggled`.

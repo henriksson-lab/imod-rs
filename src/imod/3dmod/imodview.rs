@@ -3400,7 +3400,7 @@ pub fn ivw_set_time(vi: &mut ImodView, time: i32) {
                     vi.range_high,
                     image.smin,
                     image.smax,
-                    image.type_ == ImageDataType::Float.to_raw(),
+                    image.type_ == ImageDataType::Float,
                 ));
 
                 // ivwSetScale(vi);
@@ -4888,8 +4888,8 @@ unsafe fn ivw_process_image_list(vi: *mut ImodView) -> i32 {
                 (*vi).switch_to_ushort = 1;
             }
 
-            if ((*image).type_ != ImageDataType::UnsignedByte.to_raw()
-                && (*image).type_ != ImageDataType::Byte.to_raw())
+            if ((*image).type_ != ImageDataType::UnsignedByte
+                && (*image).type_ != ImageDataType::Byte)
                 || (*image).format != IIFORMAT_LUMINANCE
             {
                 all_byte = 0;
@@ -4906,7 +4906,7 @@ unsafe fn ivw_process_image_list(vi: *mut ImodView) -> i32 {
                 || (*image).file == IIFILE_SHR_MEM
                 || (*image).file == IIFILE_HDF)
                 && (*image).format == IIFORMAT_COMPLEX
-                && (*image).type_ == ImageDataType::Float.to_raw()
+                && (*image).type_ == ImageDataType::Float
                 && (*(*vi).li).mirror_fft >= 0
             {
                 (*image).mirror_fft = 1;
@@ -5371,7 +5371,7 @@ unsafe fn ivw_process_image_list(vi: *mut ImodView) -> i32 {
         if (*vi).ushort_store != 0 {
             let (low, high) = ((*vi).range_low, (*vi).range_high);
             let (smn, smx) = ((*(*vi).image).smin, (*(*vi).image).smax);
-            let is_float = (*(*vi).image).type_ == ImageDataType::Float.to_raw();
+            let is_float = (*(*vi).image).type_ == ImageDataType::Float;
             with_boundary(|n| n.info_widget_set_lh_sliders(low, high, smn, smx, is_float));
         }
 
@@ -5444,12 +5444,12 @@ unsafe fn get_valid_scale(
             let mut min_lim = 0.0f32;
             let mut max_lim = 0.0f32;
             let mut dummy = 0.0f32;
-            if (*image).type_ != ImageDataType::Float.to_raw()
+            if (*image).type_ != ImageDataType::Float
                 && ii_default_min_max_mean(
-                    if (*image).type_ == ImageDataType::Byte.to_raw() {
+                    if (*image).type_ == ImageDataType::Byte {
                         ImageDataType::UnsignedByte.to_raw()
                     } else {
-                        (*image).type_
+                        (*image).type_.to_raw()
                     },
                     &mut min_lim,
                     &mut max_lim,
@@ -7756,7 +7756,7 @@ mod tests {
         //   return min/max 0.017216  199.971176
         let mut image = ImodImageFile::default();
         image.file = IIFILE_MRC;
-        image.type_ = ImageDataType::Float.to_raw();
+        image.type_ = ImageDataType::Float;
         image.amin = 0.017216;
         image.amax = 199.971176;
         image.amean = 100.451;
@@ -7784,7 +7784,7 @@ mod tests {
         header.imod_flags = 0;
         let mut image = ImodImageFile::default();
         image.file = IIFILE_MRC;
-        image.type_ = ImageDataType::Float.to_raw();
+        image.type_ = ImageDataType::Float;
         image.amin = 0.;
         image.amax = 10.;
         image.amean = 5.;

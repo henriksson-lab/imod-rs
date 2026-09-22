@@ -65,7 +65,7 @@ pub fn set_input_options(
     input: &crate::imod::libiimod::mrcfiles::MrcHeader,
 ) {
     {
-        if options.nofsecs == crate::imod::clip::clip::ClipOperation::Default.to_raw() {
+        if options.nofsecs == crate::imod::clip::clip::IP_DEFAULT {
             options.nofsecs = input.nz;
             options.secs = vec![0; input.nz.max(0) as usize];
             for i in 0..input.nz {
@@ -73,18 +73,18 @@ pub fn set_input_options(
             }
         }
         if options.dim == 3 {
-            if options.iz == crate::imod::clip::clip::ClipOperation::Default.to_raw() {
+            if options.iz == crate::imod::clip::clip::IP_DEFAULT {
                 options.iz = input.nz;
             }
-            if options.cz == crate::imod::clip::clip::ClipOperation::Default.to_raw() as f32 {
+            if options.cz == crate::imod::clip::clip::IP_DEFAULT as f32 {
                 options.cz = input.nz as f32 * 0.5;
             }
-            if options.oz == crate::imod::clip::clip::ClipOperation::Default.to_raw() {
+            if options.oz == crate::imod::clip::clip::IP_DEFAULT {
                 options.oz = options.iz;
             } else if options.iz > options.oz {
                 options.iz = options.oz;
             }
-            if options.nofsecs != crate::imod::clip::clip::ClipOperation::Default.to_raw() {
+            if options.nofsecs != crate::imod::clip::clip::IP_DEFAULT {
                 options.secs.clear();
             }
             let mut zst = (options.cz as f64 - options.iz as f64 / 2.).floor() as i32;
@@ -100,9 +100,7 @@ pub fn set_input_options(
             for i in zst..=znd {
                 options.secs[(i - zst) as usize] = i;
             }
-            if options.oz != crate::imod::clip::clip::ClipOperation::Default.to_raw()
-                && options.oz > options.nofsecs
-            {
+            if options.oz != crate::imod::clip::clip::IP_DEFAULT && options.oz > options.nofsecs {
                 let ozst = (options.cz as f64 - options.oz as f64 / 2.).floor() as i32;
                 options.out_before = (zst - ozst).max(0);
                 options.out_after = options.oz - options.nofsecs - options.out_before;
@@ -111,61 +109,59 @@ pub fn set_input_options(
                     options.out_after = 0;
                 }
             }
-        } else if options.oz == crate::imod::clip::clip::ClipOperation::Default.to_raw() {
+        } else if options.oz == crate::imod::clip::clip::IP_DEFAULT {
             options.oz = options.nofsecs;
         }
-        if options.x != crate::imod::clip::clip::ClipOperation::Default.to_raw() {
+        if options.x != crate::imod::clip::clip::IP_DEFAULT {
             options.x2 = options.x.max(options.x2);
             options.cx = (options.x + options.x2 + 1) as f32 / 2.;
             options.ix = options.x2 + 1 - options.x;
         }
-        if options.ix == crate::imod::clip::clip::ClipOperation::Default.to_raw() {
+        if options.ix == crate::imod::clip::clip::IP_DEFAULT {
             options.ix = input.nx;
         }
-        if options.cx as i32 == crate::imod::clip::clip::ClipOperation::Default.to_raw() {
+        if options.cx as i32 == crate::imod::clip::clip::IP_DEFAULT {
             options.cx = input.nx as f32 * 0.5;
         }
-        if options.y != crate::imod::clip::clip::ClipOperation::Default.to_raw() {
+        if options.y != crate::imod::clip::clip::IP_DEFAULT {
             options.y2 = options.y.max(options.y2);
             options.cy = (options.y + options.y2 + 1) as f32 / 2.;
             options.iy = options.y2 + 1 - options.y;
         }
-        if options.iy == crate::imod::clip::clip::ClipOperation::Default.to_raw() {
+        if options.iy == crate::imod::clip::clip::IP_DEFAULT {
             options.iy = input.ny;
         }
-        if options.cy as i32 == crate::imod::clip::clip::ClipOperation::Default.to_raw() {
+        if options.cy as i32 == crate::imod::clip::clip::IP_DEFAULT {
             options.cy = input.ny as f32 * 0.5;
         }
-        if crate::imod::clip::clip::ClipOperation::from_raw(options.process)
-            == Some(crate::imod::clip::clip::ClipOperation::BoxStandardDeviation)
-        {
+        if options.process == crate::imod::clip::clip::ClipOperation::BoxStandardDeviation {
             let divisor = options.val.abs().round() as i32;
-            if options.ox == crate::imod::clip::clip::ClipOperation::Default.to_raw() {
+            if options.ox == crate::imod::clip::clip::IP_DEFAULT {
                 options.ox = options.ix / divisor;
             }
-            if options.oy == crate::imod::clip::clip::ClipOperation::Default.to_raw() {
+            if options.oy == crate::imod::clip::clip::IP_DEFAULT {
                 options.oy = options.iy / divisor;
             }
-            if options.mode == crate::imod::clip::clip::ClipOperation::Default.to_raw() {
+            if options.mode == crate::imod::clip::clip::IP_DEFAULT {
                 options.mode = 2;
             }
         }
-        if options.ox == crate::imod::clip::clip::ClipOperation::Default.to_raw() {
+        if options.ox == crate::imod::clip::clip::IP_DEFAULT {
             options.ox = options.ix;
         } else if options.ocanresize == 0 {
             show_warning("clip - Process can't change output size.");
             options.ox = options.ix;
         }
-        if options.oy == crate::imod::clip::clip::ClipOperation::Default.to_raw() {
+        if options.oy == crate::imod::clip::clip::IP_DEFAULT {
             options.oy = options.iy;
         } else if options.ocanresize == 0 {
             show_warning("clip - Process can't change output size.");
             options.oy = options.iy;
         }
-        if options.pad == crate::imod::clip::clip::ClipOperation::Default.to_raw() as f32 {
+        if options.pad == crate::imod::clip::clip::IP_DEFAULT as f32 {
             options.pad = input.amean;
         }
-        if options.mode == crate::imod::clip::clip::ClipOperation::Default.to_raw() {
+        if options.mode == crate::imod::clip::clip::IP_DEFAULT {
             options.mode = input.mode;
         }
     }
@@ -256,8 +252,8 @@ pub fn set_multifile_input_options(options: &mut ClipOptions, input: &mut MrcHea
     }
     set_input_options(options, input);
     if options.infiles > 1 {
-        if options.out_before != crate::imod::clip::clip::ClipOperation::Default.to_raw()
-            || options.out_after != crate::imod::clip::clip::ClipOperation::Default.to_raw()
+        if options.out_before != crate::imod::clip::clip::IP_DEFAULT
+            || options.out_after != crate::imod::clip::clip::IP_DEFAULT
         {
             exit_error(b"Blank slices cannot be output with multiple input files");
         }
@@ -278,7 +274,7 @@ pub fn set_chunk_output(
     tile_sizes[1] = options.chunk_y;
     tile_sizes[2] = options.chunk_z;
     for ind in 0..3usize {
-        if tile_sizes[ind] == crate::imod::clip::clip::ClipOperation::Default.to_raw()
+        if tile_sizes[ind] == crate::imod::clip::clip::IP_DEFAULT
             || tile_sizes[ind] >= out_sizes[ind]
         {
             num_tiles[ind] = 1;
@@ -326,8 +322,7 @@ pub fn set_chunk_output(
         tile_sizes[2] = 1;
         num_tiles[2] = output.nz;
     } else if tile_sizes[2] > max_z
-        || (options.chunk_z == crate::imod::clip::clip::ClipOperation::Default.to_raw()
-            && out_sizes[2] > max_z)
+        || (options.chunk_z == crate::imod::clip::clip::IP_DEFAULT && out_sizes[2] > max_z)
     {
         tile_sizes[2] = max_z;
         // `file_io.cpp:330` passes `outSizes[ind]`, and `ind` is 3 here --
@@ -341,7 +336,7 @@ pub fn set_chunk_output(
             2,
             max_z,
         );
-    } else if options.chunk_z == crate::imod::clip::clip::ClipOperation::Default.to_raw() {
+    } else if options.chunk_z == crate::imod::clip::clip::IP_DEFAULT {
         tile_sizes[2] = out_sizes[2];
     }
     if ii_set_chunk_sizes_for_fp(
@@ -385,20 +380,18 @@ pub fn clip_write_slice(
     let mut blank: Option<Islice> = None;
     if options.oz > options.nofsecs && options.out_before != -1 {
         if ksec == 0 {
-            blank_before =
-                if options.out_before == crate::imod::clip::clip::ClipOperation::Default.to_raw() {
-                    (options.oz - options.nofsecs) / 2
-                } else {
-                    options.out_before
-                };
+            blank_before = if options.out_before == crate::imod::clip::clip::IP_DEFAULT {
+                (options.oz - options.nofsecs) / 2
+            } else {
+                options.out_before
+            };
         }
         if ksec == options.nofsecs - 1 {
-            blank_after =
-                if options.out_after == crate::imod::clip::clip::ClipOperation::Default.to_raw() {
-                    options.oz - options.nofsecs - (options.oz - options.nofsecs) / 2
-                } else {
-                    options.out_after
-                };
+            blank_after = if options.out_after == crate::imod::clip::clip::IP_DEFAULT {
+                options.oz - options.nofsecs - (options.oz - options.nofsecs) / 2
+            } else {
+                options.out_after
+            };
         }
         if blank_before != 0 || blank_after != 0 {
             blank = clip_blank_slice(output, options);
@@ -506,10 +499,10 @@ pub fn clip_write_slice(
 /// C++ `grap_volume_read` (`file_io.cpp:421`).
 pub fn grap_volume_read(input: &mut MrcHeader, options: &mut ClipOptions) -> Option<Istack> {
     if options.dim == 2 {
-        if options.iz == crate::imod::clip::clip::ClipOperation::Default.to_raw() {
+        if options.iz == crate::imod::clip::clip::IP_DEFAULT {
             options.iz = 0;
         }
-        if options.iz2 == crate::imod::clip::clip::ClipOperation::Default.to_raw() {
+        if options.iz2 == crate::imod::clip::clip::IP_DEFAULT {
             options.iz2 = input.nz - 1;
         }
         if options.iz2 == 0 || options.iz2 < options.iz {
@@ -518,25 +511,25 @@ pub fn grap_volume_read(input: &mut MrcHeader, options: &mut ClipOptions) -> Opt
         options.cz = (options.iz2 + options.iz) as f32 / 2.;
         options.iz = options.iz2 - options.iz + 1;
     }
-    if options.ix == crate::imod::clip::clip::ClipOperation::Default.to_raw() {
+    if options.ix == crate::imod::clip::clip::IP_DEFAULT {
         options.ix = input.nx;
     }
-    if options.iy == crate::imod::clip::clip::ClipOperation::Default.to_raw() {
+    if options.iy == crate::imod::clip::clip::IP_DEFAULT {
         options.iy = input.ny;
     }
-    if options.iz == crate::imod::clip::clip::ClipOperation::Default.to_raw() {
+    if options.iz == crate::imod::clip::clip::IP_DEFAULT {
         options.iz = input.nz;
     }
-    if options.cx == crate::imod::clip::clip::ClipOperation::Default.to_raw() as f32 {
+    if options.cx == crate::imod::clip::clip::IP_DEFAULT as f32 {
         options.cx = input.nx as f32 / 2.;
     }
-    if options.cy == crate::imod::clip::clip::ClipOperation::Default.to_raw() as f32 {
+    if options.cy == crate::imod::clip::clip::IP_DEFAULT as f32 {
         options.cy = input.ny as f32 / 2.;
     }
-    if options.cz == crate::imod::clip::clip::ClipOperation::Default.to_raw() as f32 {
+    if options.cz == crate::imod::clip::clip::IP_DEFAULT as f32 {
         options.cz = input.nz as f32 / 2.;
     }
-    let pad = if options.pad == crate::imod::clip::clip::ClipOperation::Default.to_raw() as f32 {
+    let pad = if options.pad == crate::imod::clip::clip::IP_DEFAULT as f32 {
         input.amean
     } else {
         options.pad
@@ -611,16 +604,16 @@ pub fn grap_volume_write(
     let Some(first) = volume.slices.first() else {
         return -1;
     };
-    if options.mode == crate::imod::clip::clip::ClipOperation::Default.to_raw() {
+    if options.mode == crate::imod::clip::clip::IP_DEFAULT {
         options.mode = first.mode;
     }
-    if options.ox == crate::imod::clip::clip::ClipOperation::Default.to_raw() {
+    if options.ox == crate::imod::clip::clip::IP_DEFAULT {
         options.ox = first.xsize;
     }
-    if options.oy == crate::imod::clip::clip::ClipOperation::Default.to_raw() {
+    if options.oy == crate::imod::clip::clip::IP_DEFAULT {
         options.oy = first.ysize;
     }
-    if options.oz == crate::imod::clip::clip::ClipOperation::Default.to_raw() {
+    if options.oz == crate::imod::clip::clip::IP_DEFAULT {
         options.oz = volume.slices.len() as i32;
     }
     if first.mode != options.mode {
@@ -693,7 +686,7 @@ pub fn grap_volume_write(
             ks = 0;
         }
     }
-    if options.pad == crate::imod::clip::clip::ClipOperation::Default.to_raw() as f32 {
+    if options.pad == crate::imod::clip::clip::IP_DEFAULT as f32 {
         options.pad = output.amean;
     }
     if mrc_head_write(&mut output.fp.clone().unwrap(), output) != 0 {

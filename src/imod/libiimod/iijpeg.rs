@@ -53,7 +53,7 @@ pub fn ii_jpeg_check(f: &mut ImodImageFile) -> i32 {
     f.nx = nx;
     f.ny = ny;
     f.nz = 1;
-    f.type_ = ImageDataType::UnsignedByte.to_raw();
+    f.type_ = ImageDataType::UnsignedByte;
     f.format = if gray {
         IIFORMAT_LUMINANCE
     } else {

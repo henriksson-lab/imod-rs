@@ -25,8 +25,6 @@ use std::io::Write;
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum ClipOperation {
     None = 0,
-    Default = -99_999,
-    BoxStandardDeviation = 54,
     Add = 1,
     Average = 2,
     Variance = 3,
@@ -78,14 +76,13 @@ pub enum ClipOperation {
     Flatfield = 49,
     Blankfile = 50,
     Integral = 51,
+    BoxStandardDeviation = 52,
 }
 
 impl ClipOperation {
     pub const fn from_raw(value: i32) -> Option<Self> {
         match value {
             0 => Some(Self::None),
-            -99_999 => Some(Self::Default),
-            54 => Some(Self::BoxStandardDeviation),
             1 => Some(Self::Add),
             2 => Some(Self::Average),
             3 => Some(Self::Variance),
@@ -137,6 +134,7 @@ impl ClipOperation {
             49 => Some(Self::Flatfield),
             50 => Some(Self::Blankfile),
             51 => Some(Self::Integral),
+            52 => Some(Self::BoxStandardDeviation),
             _ => None,
         }
     }
@@ -145,6 +143,11 @@ impl ClipOperation {
         self as i32
     }
 }
+
+/// C `IP_DEFAULT` (`clip.h:32`).  A separate `#define`, not a member of the
+/// process enum: it is the "option not entered" sentinel for the numeric
+/// fields of `ClipOptions` (`x`, `ix`, `mode`, `val`, ...), never a process.
+pub const IP_DEFAULT: i32 = -99_999;
 
 pub const IP_APPEND_FALSE: i32 = 0;
 pub const IP_APPEND_OVERWRITE: i32 = 1;
@@ -163,7 +166,7 @@ pub struct ClipOptions {
     // already holds `&mut` to.  Rust cannot express that, and only one routine
     // reads them (`set_mrc_coords`, `file_io.cpp:37-38`), so that routine takes
     // the two headers as arguments instead and the fields are gone.
-    pub process: i32,
+    pub process: ClipOperation,
     pub x: i32,
     pub y: i32,
     pub z: i32,
@@ -233,7 +236,7 @@ impl Default for ClipOptions {
         let mut options = Self {
             pname: String::new(),
             command: String::new(),
-            process: 0,
+            process: ClipOperation::None,
             x: 0,
             y: 0,
             z: 0,
@@ -465,45 +468,45 @@ pub fn show_status(info: &str) {
 pub fn default_options(options: &mut ClipOptions) {
     // `clip.cpp:146` clears `hin`, `hin2` and `hout`; those fields are gone,
     // see the note on the struct.
-    options.x = crate::imod::clip::clip::ClipOperation::Default.to_raw();
-    options.x2 = crate::imod::clip::clip::ClipOperation::Default.to_raw();
-    options.y = crate::imod::clip::clip::ClipOperation::Default.to_raw();
-    options.y2 = crate::imod::clip::clip::ClipOperation::Default.to_raw();
-    options.z = crate::imod::clip::clip::ClipOperation::Default.to_raw();
-    options.z2 = crate::imod::clip::clip::ClipOperation::Default.to_raw();
-    options.ix = crate::imod::clip::clip::ClipOperation::Default.to_raw();
-    options.iy = crate::imod::clip::clip::ClipOperation::Default.to_raw();
-    options.iz = crate::imod::clip::clip::ClipOperation::Default.to_raw();
-    options.iz2 = crate::imod::clip::clip::ClipOperation::Default.to_raw();
-    options.ox = crate::imod::clip::clip::ClipOperation::Default.to_raw();
-    options.oy = crate::imod::clip::clip::ClipOperation::Default.to_raw();
-    options.oz = crate::imod::clip::clip::ClipOperation::Default.to_raw();
-    options.cx = crate::imod::clip::clip::ClipOperation::Default.to_raw() as f32;
-    options.cy = crate::imod::clip::clip::ClipOperation::Default.to_raw() as f32;
-    options.cz = crate::imod::clip::clip::ClipOperation::Default.to_raw() as f32;
-    options.chunk_x = crate::imod::clip::clip::ClipOperation::Default.to_raw();
-    options.chunk_y = crate::imod::clip::clip::ClipOperation::Default.to_raw();
-    options.chunk_z = crate::imod::clip::clip::ClipOperation::Default.to_raw();
-    options.out_before = crate::imod::clip::clip::ClipOperation::Default.to_raw();
-    options.out_after = crate::imod::clip::clip::ClipOperation::Default.to_raw();
-    options.red = crate::imod::clip::clip::ClipOperation::Default.to_raw() as f32;
-    options.green = crate::imod::clip::clip::ClipOperation::Default.to_raw() as f32;
-    options.blue = crate::imod::clip::clip::ClipOperation::Default.to_raw() as f32;
-    options.high = crate::imod::clip::clip::ClipOperation::Default.to_raw() as f32;
-    options.low = crate::imod::clip::clip::ClipOperation::Default.to_raw() as f32;
-    options.thresh = crate::imod::clip::clip::ClipOperation::Default.to_raw() as f32;
-    options.pctl_frac = crate::imod::clip::clip::ClipOperation::Default.to_raw() as f32;
-    options.falloff_frac = crate::imod::clip::clip::ClipOperation::Default.to_raw() as f32;
-    options.weight = crate::imod::clip::clip::ClipOperation::Default.to_raw() as f32;
-    options.pad = crate::imod::clip::clip::ClipOperation::Default.to_raw() as f32;
-    options.min_size = crate::imod::clip::clip::ClipOperation::Default.to_raw();
-    options.process = crate::imod::clip::clip::ClipOperation::None.to_raw();
+    options.x = crate::imod::clip::clip::IP_DEFAULT;
+    options.x2 = crate::imod::clip::clip::IP_DEFAULT;
+    options.y = crate::imod::clip::clip::IP_DEFAULT;
+    options.y2 = crate::imod::clip::clip::IP_DEFAULT;
+    options.z = crate::imod::clip::clip::IP_DEFAULT;
+    options.z2 = crate::imod::clip::clip::IP_DEFAULT;
+    options.ix = crate::imod::clip::clip::IP_DEFAULT;
+    options.iy = crate::imod::clip::clip::IP_DEFAULT;
+    options.iz = crate::imod::clip::clip::IP_DEFAULT;
+    options.iz2 = crate::imod::clip::clip::IP_DEFAULT;
+    options.ox = crate::imod::clip::clip::IP_DEFAULT;
+    options.oy = crate::imod::clip::clip::IP_DEFAULT;
+    options.oz = crate::imod::clip::clip::IP_DEFAULT;
+    options.cx = crate::imod::clip::clip::IP_DEFAULT as f32;
+    options.cy = crate::imod::clip::clip::IP_DEFAULT as f32;
+    options.cz = crate::imod::clip::clip::IP_DEFAULT as f32;
+    options.chunk_x = crate::imod::clip::clip::IP_DEFAULT;
+    options.chunk_y = crate::imod::clip::clip::IP_DEFAULT;
+    options.chunk_z = crate::imod::clip::clip::IP_DEFAULT;
+    options.out_before = crate::imod::clip::clip::IP_DEFAULT;
+    options.out_after = crate::imod::clip::clip::IP_DEFAULT;
+    options.red = crate::imod::clip::clip::IP_DEFAULT as f32;
+    options.green = crate::imod::clip::clip::IP_DEFAULT as f32;
+    options.blue = crate::imod::clip::clip::IP_DEFAULT as f32;
+    options.high = crate::imod::clip::clip::IP_DEFAULT as f32;
+    options.low = crate::imod::clip::clip::IP_DEFAULT as f32;
+    options.thresh = crate::imod::clip::clip::IP_DEFAULT as f32;
+    options.pctl_frac = crate::imod::clip::clip::IP_DEFAULT as f32;
+    options.falloff_frac = crate::imod::clip::clip::IP_DEFAULT as f32;
+    options.weight = crate::imod::clip::clip::IP_DEFAULT as f32;
+    options.pad = crate::imod::clip::clip::IP_DEFAULT as f32;
+    options.min_size = crate::imod::clip::clip::IP_DEFAULT;
+    options.process = crate::imod::clip::clip::ClipOperation::None;
     options.dim = 3;
     options.add2file = IP_APPEND_FALSE;
     options.sano = 0;
-    options.val = crate::imod::clip::clip::ClipOperation::Default.to_raw() as f32;
-    options.mode = crate::imod::clip::clip::ClipOperation::Default.to_raw();
-    options.nofsecs = crate::imod::clip::clip::ClipOperation::Default.to_raw();
+    options.val = crate::imod::clip::clip::IP_DEFAULT as f32;
+    options.mode = crate::imod::clip::clip::IP_DEFAULT;
+    options.nofsecs = crate::imod::clip::clip::IP_DEFAULT;
     options.secs = Vec::new();
     options.ocanresize = 1;
     options.ocanchmode = 1;
@@ -512,11 +515,11 @@ pub fn default_options(options: &mut ClipOptions) {
     options.plname = None;
     options.super_gain_name = None;
     options.point_out_name = None;
-    options.new_xoverlap = crate::imod::clip::clip::ClipOperation::Default.to_raw();
-    options.new_yoverlap = crate::imod::clip::clip::ClipOperation::Default.to_raw();
+    options.new_xoverlap = crate::imod::clip::clip::IP_DEFAULT;
+    options.new_yoverlap = crate::imod::clip::clip::IP_DEFAULT;
     options.read_defects = 0;
     options.rotation_flip = 0;
-    options.binning = crate::imod::clip::clip::ClipOperation::Default.to_raw() as f32;
+    options.binning = crate::imod::clip::clip::IP_DEFAULT as f32;
     options.scale_defects = 0;
 }
 /// Original: `main` (`clip.cpp:189`).
@@ -535,12 +538,12 @@ pub fn clip() {
     let command = raw[1].clone();
     // `clip.cpp:224-362` tests the command with a run of independent
     // `strncmp`s, so a later match overrides an earlier one.
-    let mut process = crate::imod::clip::clip::ClipOperation::None.to_raw();
+    let mut process = crate::imod::clip::clip::ClipOperation::None;
     let mut procout = true;
     let mut need_two = false;
     let mut dim_from_command = 3;
     let mut ocanresize_from_command = 1;
-    let mut mode_from_command = crate::imod::clip::clip::ClipOperation::Default.to_raw();
+    let mut mode_from_command = crate::imod::clip::clip::IP_DEFAULT;
     {
         let c = command.as_bytes();
         // `strncmp(argv[1], lit, n)`: compares at most `n` bytes and stops at
@@ -561,164 +564,162 @@ pub fn clip() {
             true
         };
         if strncmp_eq("add", 3) {
-            process = crate::imod::clip::clip::ClipOperation::Add.to_raw();
+            process = crate::imod::clip::clip::ClipOperation::Add;
             need_two = true;
         }
         if strncmp_eq("avg", 3) || strncmp_eq("average", 3) {
-            process = crate::imod::clip::clip::ClipOperation::Average.to_raw();
+            process = crate::imod::clip::clip::ClipOperation::Average;
         }
         if strncmp_eq("standev", 4) {
-            process = crate::imod::clip::clip::ClipOperation::StandardDeviation.to_raw();
+            process = crate::imod::clip::clip::ClipOperation::StandardDeviation;
         }
         if strncmp_eq("variance", 3) {
-            process = crate::imod::clip::clip::ClipOperation::Variance.to_raw();
+            process = crate::imod::clip::clip::ClipOperation::Variance;
         }
         if strncmp_eq("multiply", 3) {
-            process = crate::imod::clip::clip::ClipOperation::Multiply.to_raw();
+            process = crate::imod::clip::clip::ClipOperation::Multiply;
             need_two = true;
         }
         if strncmp_eq("subtract", 3) {
-            process = crate::imod::clip::clip::ClipOperation::Subtract.to_raw();
+            process = crate::imod::clip::clip::ClipOperation::Subtract;
             need_two = true;
         }
         if strncmp_eq("divide", 3) {
-            process = crate::imod::clip::clip::ClipOperation::Divide.to_raw();
+            process = crate::imod::clip::clip::ClipOperation::Divide;
             need_two = true;
         }
         if strncmp_eq("brightness", 3) {
-            process = crate::imod::clip::clip::ClipOperation::Brightness.to_raw();
+            process = crate::imod::clip::clip::ClipOperation::Brightness;
         }
         if strncmp_eq("color", 3) {
-            process = crate::imod::clip::clip::ClipOperation::Color.to_raw();
+            process = crate::imod::clip::clip::ClipOperation::Color;
         }
         if strncmp_eq("contrast", 3) {
-            process = crate::imod::clip::clip::ClipOperation::Contrast.to_raw();
+            process = crate::imod::clip::clip::ClipOperation::Contrast;
         }
         if strncmp_eq("correlation", 3) {
-            process = crate::imod::clip::clip::ClipOperation::Correlate.to_raw();
+            process = crate::imod::clip::clip::ClipOperation::Correlate;
         }
         if strncmp_eq("diffusion", 3) {
-            process = crate::imod::clip::clip::ClipOperation::Diffusion.to_raw();
+            process = crate::imod::clip::clip::ClipOperation::Diffusion;
         }
         if strncmp_eq("info", 3) {
-            process = crate::imod::clip::clip::ClipOperation::Info.to_raw();
+            process = crate::imod::clip::clip::ClipOperation::Info;
             procout = false;
         }
         if strncmp_eq("fft", 3) {
-            process = crate::imod::clip::clip::ClipOperation::Fft.to_raw();
+            process = crate::imod::clip::clip::ClipOperation::Fft;
         }
         if strncmp_eq("filter", 3) {
-            process = crate::imod::clip::clip::ClipOperation::Filter.to_raw();
+            process = crate::imod::clip::clip::ClipOperation::Filter;
         }
         if strncmp_eq("flatfield", 3) {
-            process = crate::imod::clip::clip::ClipOperation::Flatfield.to_raw();
+            process = crate::imod::clip::clip::ClipOperation::Flatfield;
             ocanresize_from_command = 0;
             mode_from_command = mrcfiles::MRC_MODE_FLOAT;
         }
         if strncmp_eq("flip", 4) {
-            process = crate::imod::clip::clip::ClipOperation::Flip.to_raw();
+            process = crate::imod::clip::clip::ClipOperation::Flip;
         }
         if strncmp_eq("rotx", 4) {
-            process = crate::imod::clip::clip::ClipOperation::Flip.to_raw();
+            process = crate::imod::clip::clip::ClipOperation::Flip;
         }
         if strncmp_eq("gradient", 4) {
-            process = crate::imod::clip::clip::ClipOperation::Gradient.to_raw();
+            process = crate::imod::clip::clip::ClipOperation::Gradient;
         }
         if strncmp_eq("graham", 4) {
-            process = crate::imod::clip::clip::ClipOperation::Graham.to_raw();
+            process = crate::imod::clip::clip::ClipOperation::Graham;
         }
         if strncmp_eq("histogram", 2) {
-            process = crate::imod::clip::clip::ClipOperation::Histogram.to_raw();
+            process = crate::imod::clip::clip::ClipOperation::Histogram;
             procout = false;
         }
         if strncmp_eq("laplacian", 2) {
-            process = crate::imod::clip::clip::ClipOperation::Laplacian.to_raw();
+            process = crate::imod::clip::clip::ClipOperation::Laplacian;
         }
         if strncmp_eq("median", 2) {
-            process = crate::imod::clip::clip::ClipOperation::Median.to_raw();
+            process = crate::imod::clip::clip::ClipOperation::Median;
         }
         if strncmp_eq("planefit", 2) {
-            process = crate::imod::clip::clip::ClipOperation::Planarfit.to_raw();
+            process = crate::imod::clip::clip::ClipOperation::Planarfit;
         }
         if strncmp_eq("prewitt", 2) {
-            process = crate::imod::clip::clip::ClipOperation::Prewitt.to_raw();
+            process = crate::imod::clip::clip::ClipOperation::Prewitt;
         }
         if strncmp_eq("resize", 3) {
-            process = crate::imod::clip::clip::ClipOperation::Resize.to_raw();
+            process = crate::imod::clip::clip::ClipOperation::Resize;
         }
         if strncmp_eq("shadow", 4) {
-            process = crate::imod::clip::clip::ClipOperation::Shadow.to_raw();
+            process = crate::imod::clip::clip::ClipOperation::Shadow;
         }
         if strncmp_eq("sharpen", 4) {
-            process = crate::imod::clip::clip::ClipOperation::Sharpen.to_raw();
+            process = crate::imod::clip::clip::ClipOperation::Sharpen;
         }
         if strncmp_eq("smooth", 2) {
-            process = crate::imod::clip::clip::ClipOperation::Smooth.to_raw();
+            process = crate::imod::clip::clip::ClipOperation::Smooth;
         }
         if strncmp_eq("sobel", 2) {
-            process = crate::imod::clip::clip::ClipOperation::Sobel.to_raw();
+            process = crate::imod::clip::clip::ClipOperation::Sobel;
         }
         if strncmp_eq("spectrum", 2) {
-            process = crate::imod::clip::clip::ClipOperation::Spectrum.to_raw();
+            process = crate::imod::clip::clip::ClipOperation::Spectrum;
         }
         if strncmp_eq("stat", 4) {
-            process = crate::imod::clip::clip::ClipOperation::Stat.to_raw();
+            process = crate::imod::clip::clip::ClipOperation::Stat;
             procout = false;
         }
         if strncmp_eq("threshold", 3) {
-            process = crate::imod::clip::clip::ClipOperation::Threshold.to_raw();
+            process = crate::imod::clip::clip::ClipOperation::Threshold;
         }
         if strncmp_eq("truncate", 3) {
-            process = crate::imod::clip::clip::ClipOperation::Truncate.to_raw();
+            process = crate::imod::clip::clip::ClipOperation::Truncate;
         }
         if strncmp_eq("unwrap", 3) {
-            process = crate::imod::clip::clip::ClipOperation::Unwrap.to_raw();
+            process = crate::imod::clip::clip::ClipOperation::Unwrap;
         }
         if strncmp_eq("sqroot", 3) {
-            process = crate::imod::clip::clip::ClipOperation::Sqroot.to_raw();
+            process = crate::imod::clip::clip::ClipOperation::Sqroot;
         }
         if strncmp_eq("logarithm", 3) {
-            process = crate::imod::clip::clip::ClipOperation::Logarithm.to_raw();
+            process = crate::imod::clip::clip::ClipOperation::Logarithm;
         }
         if strncmp_eq("quadrant", 2) {
-            process = crate::imod::clip::clip::ClipOperation::Quadrant.to_raw();
+            process = crate::imod::clip::clip::ClipOperation::Quadrant;
             dim_from_command = 2;
         }
         if strncmp_eq("edgefill", 2) {
-            process = crate::imod::clip::clip::ClipOperation::Filledge.to_raw();
+            process = crate::imod::clip::clip::ClipOperation::Filledge;
             dim_from_command = 2;
         }
         if strncmp_eq("unpack", 3) {
-            process = crate::imod::clip::clip::ClipOperation::Unpack.to_raw();
+            process = crate::imod::clip::clip::ClipOperation::Unpack;
         }
         if strncmp_eq("normalize", 3) {
-            process = crate::imod::clip::clip::ClipOperation::Normalize.to_raw();
+            process = crate::imod::clip::clip::ClipOperation::Normalize;
         }
         if strncmp_eq("defectmap", 3) {
-            process = crate::imod::clip::clip::ClipOperation::Defectmap.to_raw();
+            process = crate::imod::clip::clip::ClipOperation::Defectmap;
         }
         if strncmp_eq("supergain", 3) {
-            process = crate::imod::clip::clip::ClipOperation::Supergain.to_raw();
+            process = crate::imod::clip::clip::ClipOperation::Supergain;
         }
         if strncmp_eq("integral", 3) {
-            process = crate::imod::clip::clip::ClipOperation::Integral.to_raw();
+            process = crate::imod::clip::clip::ClipOperation::Integral;
         }
         if strncmp_eq("boxsd", 3) {
-            process = crate::imod::clip::clip::ClipOperation::BoxStandardDeviation.to_raw();
+            process = crate::imod::clip::clip::ClipOperation::BoxStandardDeviation;
         }
         if strncmp_eq("blankfile", 3) {
-            process = crate::imod::clip::clip::ClipOperation::Blankfile.to_raw();
+            process = crate::imod::clip::clip::ClipOperation::Blankfile;
         }
         if strncmp_eq("splitrgb", 3) {
-            process = crate::imod::clip::clip::ClipOperation::SplitRgb.to_raw();
+            process = crate::imod::clip::clip::ClipOperation::SplitRgb;
         }
         if strncmp_eq("joinrgb", 3) {
-            process = crate::imod::clip::clip::ClipOperation::JoinRgb.to_raw();
+            process = crate::imod::clip::clip::ClipOperation::JoinRgb;
         }
     }
-    if crate::imod::clip::clip::ClipOperation::from_raw(process)
-        == Some(crate::imod::clip::clip::ClipOperation::None)
-    {
+    if process == crate::imod::clip::clip::ClipOperation::None {
         usage();
         std::process::exit(1);
     }
@@ -726,48 +727,48 @@ pub fn clip() {
         pname: String::new(),
         command: command.clone(),
         process,
-        x: crate::imod::clip::clip::ClipOperation::Default.to_raw(),
-        y: crate::imod::clip::clip::ClipOperation::Default.to_raw(),
-        z: crate::imod::clip::clip::ClipOperation::Default.to_raw(),
-        x2: crate::imod::clip::clip::ClipOperation::Default.to_raw(),
-        y2: crate::imod::clip::clip::ClipOperation::Default.to_raw(),
-        z2: crate::imod::clip::clip::ClipOperation::Default.to_raw(),
-        ix: crate::imod::clip::clip::ClipOperation::Default.to_raw(),
-        iy: crate::imod::clip::clip::ClipOperation::Default.to_raw(),
-        iz: crate::imod::clip::clip::ClipOperation::Default.to_raw(),
-        iz2: crate::imod::clip::clip::ClipOperation::Default.to_raw(),
-        ox: crate::imod::clip::clip::ClipOperation::Default.to_raw(),
-        oy: crate::imod::clip::clip::ClipOperation::Default.to_raw(),
-        oz: crate::imod::clip::clip::ClipOperation::Default.to_raw(),
-        chunk_x: crate::imod::clip::clip::ClipOperation::Default.to_raw(),
-        chunk_y: crate::imod::clip::clip::ClipOperation::Default.to_raw(),
-        chunk_z: crate::imod::clip::clip::ClipOperation::Default.to_raw(),
-        cx: crate::imod::clip::clip::ClipOperation::Default.to_raw() as f32,
-        cy: crate::imod::clip::clip::ClipOperation::Default.to_raw() as f32,
-        cz: crate::imod::clip::clip::ClipOperation::Default.to_raw() as f32,
-        high: crate::imod::clip::clip::ClipOperation::Default.to_raw() as f32,
-        low: crate::imod::clip::clip::ClipOperation::Default.to_raw() as f32,
-        red: crate::imod::clip::clip::ClipOperation::Default.to_raw() as f32,
-        green: crate::imod::clip::clip::ClipOperation::Default.to_raw() as f32,
-        blue: crate::imod::clip::clip::ClipOperation::Default.to_raw() as f32,
-        thresh: crate::imod::clip::clip::ClipOperation::Default.to_raw() as f32,
-        weight: crate::imod::clip::clip::ClipOperation::Default.to_raw() as f32,
-        pctl_frac: crate::imod::clip::clip::ClipOperation::Default.to_raw() as f32,
-        falloff_frac: crate::imod::clip::clip::ClipOperation::Default.to_raw() as f32,
-        min_size: crate::imod::clip::clip::ClipOperation::Default.to_raw(),
-        pad: crate::imod::clip::clip::ClipOperation::Default.to_raw() as f32,
-        mode: crate::imod::clip::clip::ClipOperation::Default.to_raw(),
+        x: crate::imod::clip::clip::IP_DEFAULT,
+        y: crate::imod::clip::clip::IP_DEFAULT,
+        z: crate::imod::clip::clip::IP_DEFAULT,
+        x2: crate::imod::clip::clip::IP_DEFAULT,
+        y2: crate::imod::clip::clip::IP_DEFAULT,
+        z2: crate::imod::clip::clip::IP_DEFAULT,
+        ix: crate::imod::clip::clip::IP_DEFAULT,
+        iy: crate::imod::clip::clip::IP_DEFAULT,
+        iz: crate::imod::clip::clip::IP_DEFAULT,
+        iz2: crate::imod::clip::clip::IP_DEFAULT,
+        ox: crate::imod::clip::clip::IP_DEFAULT,
+        oy: crate::imod::clip::clip::IP_DEFAULT,
+        oz: crate::imod::clip::clip::IP_DEFAULT,
+        chunk_x: crate::imod::clip::clip::IP_DEFAULT,
+        chunk_y: crate::imod::clip::clip::IP_DEFAULT,
+        chunk_z: crate::imod::clip::clip::IP_DEFAULT,
+        cx: crate::imod::clip::clip::IP_DEFAULT as f32,
+        cy: crate::imod::clip::clip::IP_DEFAULT as f32,
+        cz: crate::imod::clip::clip::IP_DEFAULT as f32,
+        high: crate::imod::clip::clip::IP_DEFAULT as f32,
+        low: crate::imod::clip::clip::IP_DEFAULT as f32,
+        red: crate::imod::clip::clip::IP_DEFAULT as f32,
+        green: crate::imod::clip::clip::IP_DEFAULT as f32,
+        blue: crate::imod::clip::clip::IP_DEFAULT as f32,
+        thresh: crate::imod::clip::clip::IP_DEFAULT as f32,
+        weight: crate::imod::clip::clip::IP_DEFAULT as f32,
+        pctl_frac: crate::imod::clip::clip::IP_DEFAULT as f32,
+        falloff_frac: crate::imod::clip::clip::IP_DEFAULT as f32,
+        min_size: crate::imod::clip::clip::IP_DEFAULT,
+        pad: crate::imod::clip::clip::IP_DEFAULT as f32,
+        mode: crate::imod::clip::clip::IP_DEFAULT,
         dim: 3,
         infiles: 0,
         fnames: Vec::new(),
         sano: 0,
         add2file: IP_APPEND_FALSE,
         isec: 0,
-        val: crate::imod::clip::clip::ClipOperation::Default.to_raw() as f32,
-        nofsecs: crate::imod::clip::clip::ClipOperation::Default.to_raw(),
+        val: crate::imod::clip::clip::IP_DEFAULT as f32,
+        nofsecs: crate::imod::clip::clip::IP_DEFAULT,
         secs: Vec::new(),
-        out_before: crate::imod::clip::clip::ClipOperation::Default.to_raw(),
-        out_after: crate::imod::clip::clip::ClipOperation::Default.to_raw(),
+        out_before: crate::imod::clip::clip::IP_DEFAULT,
+        out_after: crate::imod::clip::clip::IP_DEFAULT,
         ocanresize: 1,
         ocanchmode: 1,
         from_one: 0,
@@ -775,14 +776,14 @@ pub fn clip() {
         plname: None,
         super_gain_name: None,
         point_out_name: None,
-        new_xoverlap: crate::imod::clip::clip::ClipOperation::Default.to_raw(),
-        new_yoverlap: crate::imod::clip::clip::ClipOperation::Default.to_raw(),
+        new_xoverlap: crate::imod::clip::clip::IP_DEFAULT,
+        new_yoverlap: crate::imod::clip::clip::IP_DEFAULT,
         rotation_flip: 0,
         read_defects: 0,
         defects: CameraDefects::new(),
         cam_size_x: 0,
         cam_size_y: 0,
-        binning: crate::imod::clip::clip::ClipOperation::Default.to_raw() as f32,
+        binning: crate::imod::clip::clip::IP_DEFAULT as f32,
         scale_defects: 0,
     };
     // `clip.cpp:220-221`: `opt.command` is set before `default_options`, which
@@ -791,7 +792,7 @@ pub fn clip() {
     default_options(&mut options);
     options.dim = dim_from_command;
     options.ocanresize = ocanresize_from_command;
-    if mode_from_command != crate::imod::clip::clip::ClipOperation::Default.to_raw() {
+    if mode_from_command != crate::imod::clip::clip::IP_DEFAULT {
         options.mode = mode_from_command;
     }
     let mut eer_super = 2_i32;
@@ -810,9 +811,7 @@ pub fn clip() {
     iimage::get_dflt_eersumming_from_env(&mut eer_super, &mut eer_group);
     options.process = process;
     options.pname = progname.clone();
-    if crate::imod::clip::clip::ClipOperation::from_raw(process)
-        == Some(crate::imod::clip::clip::ClipOperation::Supergain)
-    {
+    if process == crate::imod::clip::clip::ClipOperation::Supergain {
         eer_group = 250;
         eer_super = 2;
         options.val = 4.;
@@ -832,9 +831,7 @@ pub fn clip() {
         match *bytes.get(1).unwrap_or(&0) {
             b'a' => options.add2file = IP_APPEND_ADD,
             b'3' => {
-                if crate::imod::clip::clip::ClipOperation::from_raw(process)
-                    != Some(crate::imod::clip::clip::ClipOperation::Quadrant)
-                {
+                if process != crate::imod::clip::clip::ClipOperation::Quadrant {
                     options.dim = 3;
                 }
             }
@@ -881,8 +878,7 @@ pub fn clip() {
                     );
                     options.mode = 0;
                 }
-                if crate::imod::clip::clip::ClipOperation::from_raw(options.process)
-                    == Some(crate::imod::clip::clip::ClipOperation::Flatfield)
+                if options.process == crate::imod::clip::clip::ClipOperation::Flatfield
                     && options.mode != mrcfiles::MRC_MODE_FLOAT
                 {
                     show_warning("Output mode for a flatfield image must be floating point");
@@ -1238,9 +1234,7 @@ pub fn clip() {
                 options.rotation_flip = atoi(raw.get(iarg).map_or("", |v| v.as_str()));
             }
             b'e' => {
-                if crate::imod::clip::clip::ClipOperation::from_raw(process)
-                    == Some(crate::imod::clip::clip::ClipOperation::Supergain)
-                {
+                if process == crate::imod::clip::clip::ClipOperation::Supergain {
                     exit_error(
                         b"The -es, -ez, and other EER options cannot be entered with the supergain operation",
                     );
@@ -1328,10 +1322,7 @@ pub fn clip() {
         fei_def_pad = if eer_super < -2 { 40 } else { 20 };
     }
     crate::imod::libiimod::iitif::tiff_set_eer_read_properties(eer_super, eer_group, eer_flags);
-    if !procout
-        || crate::imod::clip::clip::ClipOperation::from_raw(process)
-            == Some(crate::imod::clip::clip::ClipOperation::Blankfile)
-    {
+    if !procout || process == crate::imod::clip::clip::ClipOperation::Blankfile {
         if raw.len() - 1 < iarg {
             usage();
             std::process::exit(3);
@@ -1344,9 +1335,9 @@ pub fn clip() {
         }
         options.infiles = (raw.len() - iarg - 1) as i32;
     }
-    if options.chunk_x != crate::imod::clip::clip::ClipOperation::Default.to_raw()
-        || options.chunk_y != crate::imod::clip::clip::ClipOperation::Default.to_raw()
-        || options.chunk_z != crate::imod::clip::clip::ClipOperation::Default.to_raw()
+    if options.chunk_x != crate::imod::clip::clip::IP_DEFAULT
+        || options.chunk_y != crate::imod::clip::clip::IP_DEFAULT
+        || options.chunk_z != crate::imod::clip::clip::IP_DEFAULT
     {
         // `b3dutil.h:60` OUTPUT_TYPE_HDF is 5, the same value as IIFILE_HDF.
         if format_set >= 0 && format_set != iimage::IIFILE_HDF {
@@ -1373,54 +1364,48 @@ pub fn clip() {
             0,
         );
     }
-    if crate::imod::clip::clip::ClipOperation::from_raw(process)
-        == Some(crate::imod::clip::clip::ClipOperation::Defectmap)
+    if process == crate::imod::clip::clip::ClipOperation::Defectmap
         && crate::imod::libcfshr::b3dutil::b3d_output_file_type() == iimage::IIFILE_TIFF
     {
         crate::imod::libcfshr::b3dutil::set_tiff_compression_type(3, 0);
     }
-    if options.x != crate::imod::clip::clip::ClipOperation::Default.to_raw()
-        && (options.cx != crate::imod::clip::clip::ClipOperation::Default.to_raw() as f32
-            || options.ix != crate::imod::clip::clip::ClipOperation::Default.to_raw())
+    if options.x != crate::imod::clip::clip::IP_DEFAULT
+        && (options.cx != crate::imod::clip::clip::IP_DEFAULT as f32
+            || options.ix != crate::imod::clip::clip::IP_DEFAULT)
     {
         exit_error(b"You cannot use -x together with -cx or -ix");
     }
-    if options.y != crate::imod::clip::clip::ClipOperation::Default.to_raw()
-        && (options.cy != crate::imod::clip::clip::ClipOperation::Default.to_raw() as f32
-            || options.iy != crate::imod::clip::clip::ClipOperation::Default.to_raw())
+    if options.y != crate::imod::clip::clip::IP_DEFAULT
+        && (options.cy != crate::imod::clip::clip::IP_DEFAULT as f32
+            || options.iy != crate::imod::clip::clip::IP_DEFAULT)
     {
         exit_error(b"You cannot use -y together with -cy or -iy");
     }
-    if crate::imod::clip::clip::ClipOperation::from_raw(process)
-        == Some(crate::imod::clip::clip::ClipOperation::Flatfield)
-        && (options.x != crate::imod::clip::clip::ClipOperation::Default.to_raw()
-            || options.cx != crate::imod::clip::clip::ClipOperation::Default.to_raw() as f32
-            || options.ix != crate::imod::clip::clip::ClipOperation::Default.to_raw()
-            || options.y != crate::imod::clip::clip::ClipOperation::Default.to_raw()
-            || options.cy != crate::imod::clip::clip::ClipOperation::Default.to_raw() as f32
-            || options.iy != crate::imod::clip::clip::ClipOperation::Default.to_raw())
+    if process == crate::imod::clip::clip::ClipOperation::Flatfield
+        && (options.x != crate::imod::clip::clip::IP_DEFAULT
+            || options.cx != crate::imod::clip::clip::IP_DEFAULT as f32
+            || options.ix != crate::imod::clip::clip::IP_DEFAULT
+            || options.y != crate::imod::clip::clip::IP_DEFAULT
+            || options.cy != crate::imod::clip::clip::IP_DEFAULT as f32
+            || options.iy != crate::imod::clip::clip::IP_DEFAULT)
     {
         exit_error(b"You cannot change the input size for flatfield process");
     }
-    if crate::imod::clip::clip::ClipOperation::from_raw(process)
-        == Some(crate::imod::clip::clip::ClipOperation::Integral)
-        && options.val == crate::imod::clip::clip::ClipOperation::Default.to_raw() as f32
-        && ((options.low != crate::imod::clip::clip::ClipOperation::Default.to_raw() as f32) as i32
-            + (options.high != crate::imod::clip::clip::ClipOperation::Default.to_raw() as f32)
-                as i32
+    if process == crate::imod::clip::clip::ClipOperation::Integral
+        && options.val == crate::imod::clip::clip::IP_DEFAULT as f32
+        && ((options.low != crate::imod::clip::clip::IP_DEFAULT as f32) as i32
+            + (options.high != crate::imod::clip::clip::IP_DEFAULT as f32) as i32
             != 1)
     {
         exit_error(b"You must enter -n and either -l OR -h for integral process");
     }
-    if crate::imod::clip::clip::ClipOperation::from_raw(process)
-        == Some(crate::imod::clip::clip::ClipOperation::BoxStandardDeviation)
-    {
-        if options.val == crate::imod::clip::clip::ClipOperation::Default.to_raw() as f32 {
+    if process == crate::imod::clip::clip::ClipOperation::BoxStandardDeviation {
+        if options.val == crate::imod::clip::clip::IP_DEFAULT as f32 {
             options.val = -2.;
         } else if options.val.abs() < 0.9 {
             exit_error(b"Reduction factor (-n) must be at least 1 for boxsd process");
         }
-        if options.low == crate::imod::clip::clip::ClipOperation::Default.to_raw() as f32 {
+        if options.low == crate::imod::clip::clip::IP_DEFAULT as f32 {
             // B3DNINT is floor(x + 0.5).
             options.low = 6. * (options.val.abs() + 0.5).floor();
         } else if options.low / options.val.abs() < 4. {
@@ -1434,14 +1419,12 @@ pub fn clip() {
     let mut output;
     // `clip.cpp` advances iarg past each opened input file; a later
     // diagnostic reports argv[iarg].
-    if crate::imod::clip::clip::ClipOperation::from_raw(process)
-        == Some(crate::imod::clip::clip::ClipOperation::Blankfile)
-    {
-        if options.ox == crate::imod::clip::clip::ClipOperation::Default.to_raw()
-            || options.oy == crate::imod::clip::clip::ClipOperation::Default.to_raw()
-            || options.oz == crate::imod::clip::clip::ClipOperation::Default.to_raw()
-            || options.pad == crate::imod::clip::clip::ClipOperation::Default.to_raw() as f32
-            || options.mode == crate::imod::clip::clip::ClipOperation::Default.to_raw()
+    if process == crate::imod::clip::clip::ClipOperation::Blankfile {
+        if options.ox == crate::imod::clip::clip::IP_DEFAULT
+            || options.oy == crate::imod::clip::clip::IP_DEFAULT
+            || options.oz == crate::imod::clip::clip::IP_DEFAULT
+            || options.pad == crate::imod::clip::clip::IP_DEFAULT as f32
+            || options.mode == crate::imod::clip::clip::IP_DEFAULT
         {
             exit_error(b"You must enter -ox, -oy, -oz, -m, and -p for blankfile process");
         }
@@ -1477,9 +1460,7 @@ pub fn clip() {
         }
         let mut fp = second.fp.clone().unwrap();
         if mrcfiles::mrc_head_read(&mut fp, &mut second) != 0 {
-            if crate::imod::clip::clip::ClipOperation::from_raw(process)
-                == Some(crate::imod::clip::clip::ClipOperation::Info)
-            {
+            if process == crate::imod::clip::clip::ClipOperation::Info {
                 crate::imod::clip::file_io::mrc_head_print(&input);
                 let _ = ImodFile::Stdout.write_all(
                     b"**********************************************\n\
@@ -1491,7 +1472,14 @@ WARNING: This file is not a readable MRC file.\n\
         }
         iarg += 1;
     }
-    if matches!(process, 30 | 28 | 46) && options.infiles == 2 && options.read_defects == 0 {
+    if matches!(
+        process,
+        crate::imod::clip::clip::ClipOperation::Normalize
+            | crate::imod::clip::clip::ClipOperation::Unpack
+            | crate::imod::clip::clip::ClipOperation::Defectmap
+    ) && options.infiles == 2
+        && options.read_defects == 0
+    {
         let second_fp = second.fp.as_ref().unwrap();
         if iimage::ii_tiff_has_tag(second_fp, 65_100) {
             let super_fac;
@@ -1565,7 +1553,11 @@ WARNING: This file is not a readable MRC file.\n\
     if procout && (!need_two || options.infiles > 1) {
         let last = raw[raw.len() - 1].clone();
         options.ofname = Some(last.clone());
-        if matches!(process, 47 | 48) {
+        if matches!(
+            process,
+            crate::imod::clip::clip::ClipOperation::Supergain
+                | crate::imod::clip::clip::ClipOperation::Planarfit
+        ) {
             crate::imod::libcfshr::b3dutil::imod_backup_file(&last);
             output.fp = ImodFile::open(&last, "w");
         } else if options.add2file != IP_APPEND_FALSE {
@@ -1585,14 +1577,11 @@ WARNING: This file is not a readable MRC file.\n\
                     .as_bytes(),
                 );
             }
-        } else if crate::imod::clip::clip::ClipOperation::from_raw(process)
-            != Some(crate::imod::clip::clip::ClipOperation::SplitRgb)
-        {
+        } else if process != crate::imod::clip::clip::ClipOperation::SplitRgb {
             if std::env::var_os("IMOD_NO_IMAGE_BACKUP").is_none() {
                 crate::imod::libcfshr::b3dutil::imod_backup_file(&last);
             }
-            if crate::imod::clip::clip::ClipOperation::from_raw(process)
-                == Some(crate::imod::clip::clip::ClipOperation::Fft)
+            if process == crate::imod::clip::clip::ClipOperation::Fft
                 && input.mode != mrcfiles::MRC_MODE_COMPLEX_FLOAT
                 && matches!(
                     crate::imod::libcfshr::b3dutil::b3d_output_file_type(),
@@ -1614,127 +1603,130 @@ WARNING: This file is not a readable MRC file.\n\
         if matches!(options.add2file, IP_APPEND_OVERWRITE | IP_APPEND_TRUNCATE) {
             options.isec -= 1;
         }
-        if options.nofsecs != crate::imod::clip::clip::ClipOperation::Default.to_raw() {
+        if options.nofsecs != crate::imod::clip::clip::IP_DEFAULT {
             for section in 0..options.nofsecs as usize {
                 options.secs[section] -= 1;
             }
         }
-        if options.cz != crate::imod::clip::clip::ClipOperation::Default.to_raw() as f32 {
+        if options.cz != crate::imod::clip::clip::IP_DEFAULT as f32 {
             options.cz -= 1.;
         }
         if options.dim == 2 {
-            if options.iz != crate::imod::clip::clip::ClipOperation::Default.to_raw() {
+            if options.iz != crate::imod::clip::clip::IP_DEFAULT {
                 options.iz -= 1;
             }
-            if options.iz2 != crate::imod::clip::clip::ClipOperation::Default.to_raw() {
+            if options.iz2 != crate::imod::clip::clip::IP_DEFAULT {
                 options.iz2 -= 1;
             }
         }
     }
-    if matches!(process, 17 | 49)
-        && options.mode == crate::imod::clip::clip::ClipOperation::Default.to_raw()
+    if matches!(
+        process,
+        crate::imod::clip::clip::ClipOperation::Logarithm
+            | crate::imod::clip::clip::ClipOperation::Flatfield
+    ) && options.mode == crate::imod::clip::clip::IP_DEFAULT
     {
         options.mode = mrcfiles::MRC_MODE_FLOAT;
     }
-    let retval = match crate::imod::clip::clip::ClipOperation::from_raw(process) {
-        Some(crate::imod::clip::clip::ClipOperation::Add)
-        | Some(crate::imod::clip::clip::ClipOperation::Average)
-        | Some(crate::imod::clip::clip::ClipOperation::Variance)
-        | Some(crate::imod::clip::clip::ClipOperation::StandardDeviation)
-        | Some(crate::imod::clip::clip::ClipOperation::Subtract) => {
+    let retval = match process {
+        crate::imod::clip::clip::ClipOperation::Add
+        | crate::imod::clip::clip::ClipOperation::Average
+        | crate::imod::clip::clip::ClipOperation::Variance
+        | crate::imod::clip::clip::ClipOperation::StandardDeviation
+        | crate::imod::clip::clip::ClipOperation::Subtract => {
             processing::clip_average(&mut input, &mut second, &mut output, &mut options)
         }
-        Some(crate::imod::clip::clip::ClipOperation::Multiply)
-        | Some(crate::imod::clip::clip::ClipOperation::Divide) => {
+        crate::imod::clip::clip::ClipOperation::Multiply
+        | crate::imod::clip::clip::ClipOperation::Divide => {
             processing::clip_multdiv(&mut input, &mut second, &mut output, &mut options)
         }
-        Some(crate::imod::clip::clip::ClipOperation::Unpack)
-        | Some(crate::imod::clip::clip::ClipOperation::Normalize) => {
+        crate::imod::clip::clip::ClipOperation::Unpack
+        | crate::imod::clip::clip::ClipOperation::Normalize => {
             processing::clip_unpack(&mut input, &mut second, &mut output, &mut options)
         }
-        Some(crate::imod::clip::clip::ClipOperation::Defectmap) => {
+        crate::imod::clip::clip::ClipOperation::Defectmap => {
             processing::clip_defect_map(&mut input, &mut output, &mut options)
         }
-        Some(crate::imod::clip::clip::ClipOperation::Supergain) => {
+        crate::imod::clip::clip::ClipOperation::Supergain => {
             // `clip.cpp:880` passes `hout.fp` by value; the `Rc` clone shares
             // the same open file, as the C's copied `FILE *` does.
             let mut fp = output.fp.clone().unwrap();
             processing::clip_super_gain(&mut input, &mut fp, &mut options)
         }
-        Some(crate::imod::clip::clip::ClipOperation::Blankfile) => {
+        crate::imod::clip::clip::ClipOperation::Blankfile => {
             processing::clip_blank_file(&mut output, &mut options)
         }
-        Some(crate::imod::clip::clip::ClipOperation::Brightness)
-        | Some(crate::imod::clip::clip::ClipOperation::Contrast)
-        | Some(crate::imod::clip::clip::ClipOperation::Shadow)
-        | Some(crate::imod::clip::clip::ClipOperation::Resize)
-        | Some(crate::imod::clip::clip::ClipOperation::Threshold)
-        | Some(crate::imod::clip::clip::ClipOperation::Truncate)
-        | Some(crate::imod::clip::clip::ClipOperation::Unwrap)
-        | Some(crate::imod::clip::clip::ClipOperation::Logarithm)
-        | Some(crate::imod::clip::clip::ClipOperation::Sqroot)
-        | Some(crate::imod::clip::clip::ClipOperation::Integral)
-        | Some(crate::imod::clip::clip::ClipOperation::BoxStandardDeviation) => {
+        crate::imod::clip::clip::ClipOperation::Brightness
+        | crate::imod::clip::clip::ClipOperation::Contrast
+        | crate::imod::clip::clip::ClipOperation::Shadow
+        | crate::imod::clip::clip::ClipOperation::Resize
+        | crate::imod::clip::clip::ClipOperation::Threshold
+        | crate::imod::clip::clip::ClipOperation::Truncate
+        | crate::imod::clip::clip::ClipOperation::Unwrap
+        | crate::imod::clip::clip::ClipOperation::Logarithm
+        | crate::imod::clip::clip::ClipOperation::Sqroot
+        | crate::imod::clip::clip::ClipOperation::Integral
+        | crate::imod::clip::clip::ClipOperation::BoxStandardDeviation => {
             processing::clip_scaling(&mut input, &mut output, &mut options)
         }
-        Some(crate::imod::clip::clip::ClipOperation::Color) => {
+        crate::imod::clip::clip::ClipOperation::Color => {
             processing::clip_color(&mut input, &mut output, &mut options)
         }
-        Some(crate::imod::clip::clip::ClipOperation::Quadrant) => {
+        crate::imod::clip::clip::ClipOperation::Quadrant => {
             processing::clip_quadrant(&mut input, &mut output, &mut options)
         }
-        Some(crate::imod::clip::clip::ClipOperation::Planarfit)
-        | Some(crate::imod::clip::clip::ClipOperation::Flatfield) => {
+        crate::imod::clip::clip::ClipOperation::Planarfit
+        | crate::imod::clip::clip::ClipOperation::Flatfield => {
             processing::clip_planar_fit(&mut input, &mut output, &mut options)
         }
-        Some(crate::imod::clip::clip::ClipOperation::Spectrum) => {
+        crate::imod::clip::clip::ClipOperation::Spectrum => {
             processing::clip_spectrum(&mut input, &mut output, &mut options)
         }
-        Some(crate::imod::clip::clip::ClipOperation::Filledge) => {
+        crate::imod::clip::clip::ClipOperation::Filledge => {
             processing::fill_drift_corrected_edges(&mut input, &mut output, &mut options)
         }
-        Some(crate::imod::clip::clip::ClipOperation::Correlate) => {
+        crate::imod::clip::clip::ClipOperation::Correlate => {
             correlation::grap_corr(&mut input, &mut second, &mut output, &mut options)
         }
-        Some(crate::imod::clip::clip::ClipOperation::Diffusion) => {
+        crate::imod::clip::clip::ClipOperation::Diffusion => {
             processing::clip_diffusion(&mut input, &mut output, &mut options)
         }
-        Some(crate::imod::clip::clip::ClipOperation::Gradient)
-        | Some(crate::imod::clip::clip::ClipOperation::Graham)
-        | Some(crate::imod::clip::clip::ClipOperation::Prewitt)
-        | Some(crate::imod::clip::clip::ClipOperation::Sobel) => {
+        crate::imod::clip::clip::ClipOperation::Gradient
+        | crate::imod::clip::clip::ClipOperation::Graham
+        | crate::imod::clip::clip::ClipOperation::Prewitt
+        | crate::imod::clip::clip::ClipOperation::Sobel => {
             processing::clip_edge(&mut input, &mut output, &mut options)
         }
-        Some(crate::imod::clip::clip::ClipOperation::Info) => {
+        crate::imod::clip::clip::ClipOperation::Info => {
             crate::imod::clip::file_io::mrc_head_print(&input)
         }
-        Some(crate::imod::clip::clip::ClipOperation::Fft) => {
+        crate::imod::clip::clip::ClipOperation::Fft => {
             fft::clip_fft(&mut input, &mut output, &mut options)
         }
-        Some(crate::imod::clip::clip::ClipOperation::Filter) => {
+        crate::imod::clip::clip::ClipOperation::Filter => {
             filter::clip_bandpass_filter(&mut input, &mut output, &mut options)
         }
-        Some(crate::imod::clip::clip::ClipOperation::Flip) => {
+        crate::imod::clip::clip::ClipOperation::Flip => {
             processing::clip_flip(&mut input, &mut output, &mut options)
         }
-        Some(crate::imod::clip::clip::ClipOperation::Histogram) => {
+        crate::imod::clip::clip::ClipOperation::Histogram => {
             processing::clip_histogram(&mut input, &mut options)
         }
-        Some(crate::imod::clip::clip::ClipOperation::JoinRgb) => {
+        crate::imod::clip::clip::ClipOperation::JoinRgb => {
             processing::clip_joinrgb(&mut input, &mut second, &mut output, &mut options)
         }
-        Some(crate::imod::clip::clip::ClipOperation::Laplacian)
-        | Some(crate::imod::clip::clip::ClipOperation::Smooth)
-        | Some(crate::imod::clip::clip::ClipOperation::Sharpen) => {
+        crate::imod::clip::clip::ClipOperation::Laplacian
+        | crate::imod::clip::clip::ClipOperation::Smooth
+        | crate::imod::clip::clip::ClipOperation::Sharpen => {
             processing::clip_convolve(&mut input, &mut output, &mut options)
         }
-        Some(crate::imod::clip::clip::ClipOperation::Median) => {
+        crate::imod::clip::clip::ClipOperation::Median => {
             processing::clip_median(&mut input, &mut output, &mut options, &[], 0, 0)
         }
-        Some(crate::imod::clip::clip::ClipOperation::SplitRgb) => {
+        crate::imod::clip::clip::ClipOperation::SplitRgb => {
             processing::clip_splitrgb(&mut input, &mut options)
         }
-        Some(crate::imod::clip::clip::ClipOperation::Stat) => {
+        crate::imod::clip::clip::ClipOperation::Stat => {
             processing::clip_stat(&mut input, &mut options)
         }
         _ => {
@@ -1744,18 +1736,15 @@ WARNING: This file is not a readable MRC file.\n\
     if retval != 0 {
         std::process::exit(retval);
     }
-    if crate::imod::clip::clip::ClipOperation::from_raw(process)
-        != Some(crate::imod::clip::clip::ClipOperation::Blankfile)
+    if process != crate::imod::clip::clip::ClipOperation::Blankfile
         && let Some(fp) = input.fp.as_mut()
     {
         iimage::ii_close_tiff_copies_for_fp(fp);
         iimage::ii_fclose(fp);
     }
     if procout
-        && crate::imod::clip::clip::ClipOperation::from_raw(process)
-            != Some(crate::imod::clip::clip::ClipOperation::SplitRgb)
-        && crate::imod::clip::clip::ClipOperation::from_raw(process)
-            != Some(crate::imod::clip::clip::ClipOperation::Supergain)
+        && process != crate::imod::clip::clip::ClipOperation::SplitRgb
+        && process != crate::imod::clip::clip::ClipOperation::Supergain
         && let Some(fp) = output.fp.as_mut()
     {
         iimage::ii_fclose(fp);

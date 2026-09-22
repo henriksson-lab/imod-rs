@@ -11,6 +11,7 @@ use crate::imod::libcfshr::b3dutil::{
     mrc_big_seek, override_write_bytes, replace_file_arg_vec,
 };
 use crate::imod::libcfshr::parse_params::{exit_error, setExitPrefix};
+use crate::imod::libiimod::iimage::ImageDataType;
 use crate::imod::libiimod::iimage::ImodImageFile;
 use crate::imod::libiimod::iitif::{tiff_filter_warnings, tiff_set_mapping};
 use crate::imod::libiimod::mrcfiles::{
@@ -28,9 +29,6 @@ const WIDTHINDEX: usize = 1;
 /// `b3dtiff.h:69`.
 const LENGTHINDEX: usize = 2;
 
-const IITYPE_INT: i32 = 4;
-const IITYPE_UINT: i32 = 5;
-const IITYPE_USHORT: i32 = 3;
 const IIFLAG_TVIPS_DATA: u32 = 2;
 const IIFLAG_BYTES_SWAPPED: u32 = 4;
 
@@ -100,7 +98,7 @@ fn manage_mode(
                 && tiff
                     .iifile
                     .as_ref()
-                    .is_some_and(|file| file.type_ == IITYPE_USHORT)))
+                    .is_some_and(|file| file.type_ == ImageDataType::UnsignedShort)))
     {
         *mode = MRC_MODE_USHORT;
     }
@@ -186,7 +184,7 @@ fn convert_long_to_float(tifdata: &mut [u8], iifile: Option<&ImodImageFile>) {
     let Some(iifile) = iifile else {
         return;
     };
-    if iifile.type_ != IITYPE_UINT && iifile.type_ != IITYPE_INT {
+    if iifile.type_ != ImageDataType::UnsignedInt && iifile.type_ != ImageDataType::Int {
         return;
     }
     let mut size = iifile.nx as usize * iifile.ny as usize;
@@ -195,7 +193,7 @@ fn convert_long_to_float(tifdata: &mut [u8], iifile: Option<&ImodImageFile>) {
     }
     for i in 0..size {
         let offset = 4 * i;
-        let value = if iifile.type_ == IITYPE_UINT {
+        let value = if iifile.type_ == ImageDataType::UnsignedInt {
             u32::from_ne_bytes(tifdata[offset..offset + 4].try_into().unwrap()) as f32
         } else {
             i32::from_ne_bytes(tifdata[offset..offset + 4].try_into().unwrap()) as f32
@@ -1302,7 +1300,7 @@ mod tests {
     #[test]
     fn unsigned_16_bit_tiff_selects_unsigned_short_mode() {
         let mut image = ImodImageFile::default();
-        image.type_ = IITYPE_USHORT;
+        image.type_ = ImageDataType::UnsignedShort;
         let mut tiff = TfInfo::default();
         tiff.bits_per_sample = 16;
         tiff.iifile = Some(image);

@@ -435,19 +435,11 @@ pub fn mrc2tif() {
         }
         let mut filenum = if initial_num < 0 { zmin } else { initial_num };
         let (psize, type_, format) = match hdata.mode {
-            MRC_MODE_BYTE => (
-                1usize,
-                ImageDataType::UnsignedByte.to_raw(),
-                IIFORMAT_LUMINANCE,
-            ),
-            MRC_MODE_SHORT => (2usize, ImageDataType::Short.to_raw(), IIFORMAT_LUMINANCE),
-            MRC_MODE_USHORT => (
-                2usize,
-                ImageDataType::UnsignedShort.to_raw(),
-                IIFORMAT_LUMINANCE,
-            ),
-            MRC_MODE_FLOAT => (4usize, ImageDataType::Float.to_raw(), IIFORMAT_LUMINANCE),
-            MRC_MODE_RGB => (3usize, ImageDataType::UnsignedByte.to_raw(), IIFORMAT_RGB),
+            MRC_MODE_BYTE => (1usize, ImageDataType::UnsignedByte, IIFORMAT_LUMINANCE),
+            MRC_MODE_SHORT => (2usize, ImageDataType::Short, IIFORMAT_LUMINANCE),
+            MRC_MODE_USHORT => (2usize, ImageDataType::UnsignedShort, IIFORMAT_LUMINANCE),
+            MRC_MODE_FLOAT => (4usize, ImageDataType::Float, IIFORMAT_LUMINANCE),
+            MRC_MODE_RGB => (3usize, ImageDataType::UnsignedByte, IIFORMAT_RGB),
             _ => exit_error(&c_format_bytes(
                 "Data mode %d not supported.",
                 &[CArg::Int(hdata.mode as i64)],
@@ -494,7 +486,7 @@ pub fn mrc2tif() {
             // setup chooses samples/bits from this field, not from the input
             // header.
             if real_mode > 0 {
-                (*iifile).type_ = ImageDataType::UnsignedByte.to_raw();
+                (*iifile).type_ = ImageDataType::UnsignedByte;
                 out_psize = 1;
             }
         }

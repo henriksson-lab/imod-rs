@@ -230,7 +230,7 @@ pub trait SlicerCore {
     fn entered_zoom(&mut self, zoom: f32);
     fn show_slice(&mut self);
     fn fill_cache(&mut self);
-    fn state_toggled(&mut self, index: usize, state: i32);
+    fn state_toggled(&mut self, index: SlicerToggle, state: i32);
     fn angle_changed(&mut self, axis: i32, value: i32, dragging: bool);
     fn image_thickness(&mut self, depth: i32);
     fn model_thickness(&mut self, depth: f32);
@@ -284,7 +284,7 @@ pub trait SlicerNativeBoundary {
     fn set_slider_min_max_value(&mut self, which: i32, min: i32, max: i32, value: i32);
     fn set_model_thickness(&mut self, value: f32);
     fn set_image_thickness(&mut self, value: i32);
-    fn set_toggle_checked(&mut self, index: usize, checked: bool);
+    fn set_toggle_checked(&mut self, index: SlicerToggle, checked: bool);
     fn set_rotation_center_state(&mut self, checked: bool);
     fn set_zoom_text(&mut self, text: &str);
     fn zoom_text(&self) -> String;
@@ -450,7 +450,7 @@ impl SlicerWindow {
     }
     /// `SlicerWindow::shiftToggled`.
     pub fn shift_toggled(&mut self, state: bool, core: &mut dyn SlicerCore) {
-        core.state_toggled(SlicerToggle::ShiftLock.to_raw(), i32::from(state))
+        core.state_toggled(SlicerToggle::ShiftLock, i32::from(state))
     }
     /// `SlicerWindow::imageThicknessChanged`.
     pub fn image_thickness_changed(
@@ -487,9 +487,9 @@ impl SlicerWindow {
         core.angle_changed(which, value, dragging)
     }
     /// `SlicerWindow::toggleClicked`.
-    pub fn toggle_clicked(&mut self, index: usize, state: bool, core: &mut dyn SlicerCore) {
-        self.m_toggle_states[index] = i32::from(state);
-        core.state_toggled(index, self.m_toggle_states[index])
+    pub fn toggle_clicked(&mut self, index: SlicerToggle, state: bool, core: &mut dyn SlicerCore) {
+        self.m_toggle_states[index as usize] = i32::from(state);
+        core.state_toggled(index, self.m_toggle_states[index as usize])
     }
     /// `SlicerWindow::showslicePressed`.
     pub fn showslice_pressed(&mut self, core: &mut dyn SlicerCore) {
@@ -554,11 +554,14 @@ impl SlicerWindow {
         n.set_image_thickness(depth)
     }
     /// `SlicerWindow::setToggleState`.
-    pub fn set_toggle_state(&mut self, index: usize, state: i32, n: &mut dyn SlicerNativeBoundary) {
-        self.m_toggle_states[index] = i32::from(state != 0);
-        if crate::imod::three_dmod::slicer_classes::SlicerToggle::from_raw(index)
-            == Some(crate::imod::three_dmod::slicer_classes::SlicerToggle::ShiftLock)
-        {
+    pub fn set_toggle_state(
+        &mut self,
+        index: SlicerToggle,
+        state: i32,
+        n: &mut dyn SlicerNativeBoundary,
+    ) {
+        self.m_toggle_states[index as usize] = i32::from(state != 0);
+        if index == SlicerToggle::ShiftLock {
             n.set_rotation_center_state(state != 0)
         } else {
             n.set_toggle_checked(index, state != 0)
@@ -896,7 +899,8 @@ mod tests {
         fn entered_zoom(&mut self, _: f32) {}
         fn show_slice(&mut self) {}
         fn fill_cache(&mut self) {}
-        fn state_toggled(&mut self, i: usize, s: i32) {
+        fn state_toggled(&mut self, i: SlicerToggle, s: i32) {
+            let i = i as usize;
             self.calls.push(format!("t{i}:{s}"))
         }
         fn angle_changed(&mut self, _: i32, _: i32, _: bool) {}
@@ -968,7 +972,7 @@ mod tests {
         fn set_slider_min_max_value(&mut self, _: i32, _: i32, _: i32, _: i32) {}
         fn set_model_thickness(&mut self, _: f32) {}
         fn set_image_thickness(&mut self, _: i32) {}
-        fn set_toggle_checked(&mut self, _: usize, _: bool) {}
+        fn set_toggle_checked(&mut self, _: SlicerToggle, _: bool) {}
         fn set_rotation_center_state(&mut self, _: bool) {}
         fn set_zoom_text(&mut self, _: &str) {}
         fn zoom_text(&self) -> String {
@@ -1015,7 +1019,7 @@ mod tests {
         let mut c = C::default();
         let mut n = N::default();
         let mut w = SlicerWindow::new(&c, [90.; 3], "", false, false, false, &mut n);
-        w.toggle_clicked(SlicerToggle::Fft.to_raw(), true, &mut c);
+        w.toggle_clicked(SlicerToggle::Fft, true, &mut c);
         w.set_angles([1.05, -2., 3.], &mut n);
         w.contour_pressed(&mut c);
         assert_eq!(c.calls, ["t5:1", "limits"]);

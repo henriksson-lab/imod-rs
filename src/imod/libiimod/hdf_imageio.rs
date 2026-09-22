@@ -820,12 +820,14 @@ fn get_file_xscale(format: i32) -> i32 {
 /// C static `lookupNativeDatatype` (`hdf_imageio.c:624`).
 unsafe fn lookup_native_datatype(in_file: &ImodImageFile) -> HidT {
     match in_file.type_ {
-        1 => H5T_NATIVE_SCHAR_g,
-        0 => H5T_NATIVE_UCHAR_g,
-        2 => H5T_NATIVE_SHORT_g,
-        3 => H5T_NATIVE_USHORT_g,
-        6 => H5T_NATIVE_FLOAT_g,
-        _ => H5T_NATIVE_SCHAR_g,
+        ImageDataType::Byte => H5T_NATIVE_SCHAR_g,
+        ImageDataType::UnsignedByte => H5T_NATIVE_UCHAR_g,
+        ImageDataType::Short => H5T_NATIVE_SHORT_g,
+        ImageDataType::UnsignedShort => H5T_NATIVE_USHORT_g,
+        ImageDataType::Float => H5T_NATIVE_FLOAT_g,
+        // C `default:` (`hdf_imageio.c:624`): IITYPE_INT and IITYPE_UINT are
+        // the only remaining values and fall to the signed-char type.
+        ImageDataType::Int | ImageDataType::UnsignedInt => H5T_NATIVE_SCHAR_g,
     }
 }
 /// C static `getDatasetForZ` (`hdf_imageio.c:646`).
@@ -953,7 +955,7 @@ mod tests {
             image.hdf_file_id = file;
             image.z_chunk_size = 1;
             image.hdf_compression = 0;
-            image.type_ = ImageDataType::Float.to_raw();
+            image.type_ = ImageDataType::Float;
             image.global_adoc_index = -1;
             assert_eq!(init_new_hdf_file(&mut image), 0);
             assert!(image.dataset_id >= 0);
@@ -1075,7 +1077,7 @@ mod tests {
             image.ury = -1;
             image.urz = -1;
             image.hdf_file_id = file;
-            image.type_ = ImageDataType::Float.to_raw();
+            image.type_ = ImageDataType::Float;
             image.global_adoc_index = -1;
             assert_eq!(init_new_hdf_file(&mut image), 0);
             assert!(image.stack_set_list.is_some());

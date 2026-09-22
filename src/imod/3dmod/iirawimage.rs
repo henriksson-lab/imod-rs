@@ -234,7 +234,7 @@ pub fn ii_raw_scan(in_file: &mut ImodImageFile) -> i32 {
     if (hdr.mode == MRC_MODE_SHORT || hdr.mode == MRC_MODE_USHORT) && config.load_int_if_estimate {
         config.switch_to_ushort = true;
         let mut mean = 0.;
-        ii_default_min_max_mean(in_file.type_, &mut amin, &mut amax, &mut mean);
+        ii_default_min_max_mean(in_file.type_.to_raw(), &mut amin, &mut amax, &mut mean);
         do_scan = false;
     }
 

@@ -23,7 +23,7 @@ pub unsafe fn ii_q_image_check(in_file: *mut ImodImageFile) -> i32 {
         let file = &mut *in_file;
         file.nz = 1;
         file.file = IIFILE_QIMAGE;
-        file.type_ = ImageDataType::UnsignedByte.to_raw();
+        file.type_ = ImageDataType::UnsignedByte;
         file.amean = 128.0;
         file.amax = 255.0;
         file.smax = 255.0;

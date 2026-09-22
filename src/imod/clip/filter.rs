@@ -30,16 +30,16 @@ pub fn clip_bandpass_filter(
 ) -> i32 {
     let complex = input.mode == MRC_MODE_COMPLEX_FLOAT || input.mode == MRC_MODE_COMPLEX_SHORT;
     if !complex {
-        if options.mode == crate::imod::clip::clip::ClipOperation::Default.to_raw() {
+        if options.mode == crate::imod::clip::clip::IP_DEFAULT {
             options.mode = MRC_MODE_FLOAT;
         }
     } else {
         options.ocanchmode = 0;
         options.mode = MRC_MODE_COMPLEX_FLOAT;
-        options.ix = crate::imod::clip::clip::ClipOperation::Default.to_raw();
-        options.iy = crate::imod::clip::clip::ClipOperation::Default.to_raw();
-        options.cx = crate::imod::clip::clip::ClipOperation::Default.to_raw() as f32;
-        options.cy = crate::imod::clip::clip::ClipOperation::Default.to_raw() as f32;
+        options.ix = crate::imod::clip::clip::IP_DEFAULT;
+        options.iy = crate::imod::clip::clip::IP_DEFAULT;
+        options.cx = crate::imod::clip::clip::IP_DEFAULT as f32;
+        options.cy = crate::imod::clip::clip::IP_DEFAULT as f32;
         options.ocanresize = 0;
         if options.add2file != 0
             && (output.mode != options.mode || output.nx != input.nx || output.ny != input.ny)
@@ -68,10 +68,10 @@ pub fn clip_bandpass_filter(
         }
         return -1;
     }
-    if options.low == crate::imod::clip::clip::ClipOperation::Default.to_raw() as f32 {
+    if options.low == crate::imod::clip::clip::IP_DEFAULT as f32 {
         options.low = 1.;
     }
-    if options.high == crate::imod::clip::clip::ClipOperation::Default.to_raw() as f32 {
+    if options.high == crate::imod::clip::clip::IP_DEFAULT as f32 {
         options.high = 0.;
     }
     mrc_head_label(output, b"clip: fourier filter");

@@ -488,7 +488,7 @@ pub trait MvInputNativeBoundary: InputNativeBoundary {
         });
     }
     /// `imodvViewMenu(which)` (`mv_menu.cpp`).
-    fn imodv_view_menu(&mut self, a: &mut ImodvApp, which: i32) {
+    fn imodv_view_menu(&mut self, a: &mut ImodvApp, which: ViewMenuAction) {
         static REPORTED: std::sync::Once = std::sync::Once::new();
         REPORTED.call_once(|| {
             eprintln!(
@@ -564,7 +564,7 @@ pub trait MvInputNativeBoundary: InputNativeBoundary {
         });
     }
     /// `a->mainWin->setEnabledMenuItem(id, state)` (`mv_window.cpp`).
-    fn set_enabled_menu_item(&mut self, a: &mut ImodvApp, id: usize, state: bool) {
+    fn set_enabled_menu_item(&mut self, a: &mut ImodvApp, id: ViewMenuAction, state: bool) {
         static REPORTED: std::sync::Once = std::sync::Once::new();
         REPORTED.call_once(|| {
             eprintln!(
@@ -1326,11 +1326,7 @@ pub fn imodv_key_press(a: &mut ImodvApp, event: InputEvent, n: &mut dyn MvInputN
 
         KEY_R => {
             if ctrl != 0 {
-                n.imodv_view_menu(
-                    a,
-                    crate::imod::three_dmod::mv_window::ViewMenuAction::LowResolution.to_raw()
-                        as i32,
-                );
+                n.imodv_view_menu(a, ViewMenuAction::LowResolution);
                 let lowres = a.lowres;
                 n.imodv_menu_lowres(a, lowres);
             } else if shifted != 0 {
@@ -1344,11 +1340,7 @@ pub fn imodv_key_press(a: &mut ImodvApp, event: InputEvent, n: &mut dyn MvInputN
             if ctrl != 0 && shifted != 0 {
                 imodv_objed_change_object(a, 1);
             } else if a.standalone == 0 {
-                n.imodv_view_menu(
-                    a,
-                    crate::imod::three_dmod::mv_window::ViewMenuAction::CurrentPoint.to_raw()
-                        as i32,
-                );
+                n.imodv_view_menu(a, ViewMenuAction::CurrentPoint);
             }
         }
 
@@ -1417,12 +1409,7 @@ pub fn imodv_key_press(a: &mut ImodvApp, event: InputEvent, n: &mut dyn MvInputN
                 let enabled = a.dbl_buf != 0
                     && a.trans_bkgd == 0
                     && (a.enable_depth_dbal >= 0 || a.enable_depth_dbst_al >= 0);
-                n.set_enabled_menu_item(
-                    a,
-                    crate::imod::three_dmod::mv_window::ViewMenuAction::TransparentBackground
-                        .to_raw(),
-                    enabled,
-                );
+                n.set_enabled_menu_item(a, ViewMenuAction::TransparentBackground, enabled);
                 unsafe { imodv_draw() };
             }
         }

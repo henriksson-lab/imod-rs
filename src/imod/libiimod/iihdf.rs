@@ -145,7 +145,10 @@ struct GroupData {
 struct DatasetData {
     dset_id: HidT,
     name: Option<String>,
-    data_type: i16,
+    /// C `short dataType` (`iihdf.cpp`), an `IITYPE_*` value.  The scan only
+    /// records a dataset whose HDF5 class and precision map onto one of them,
+    /// so the unsupported `-1` sentinel never reaches this field.
+    data_type: ImageDataType,
     swapped: i16,
     nx: i32,
     ny: i32,
@@ -403,7 +406,7 @@ pub fn ii_hdf_check(in_file: &mut ImodImageFile) -> i32 {
             (*in_file).nx = nx_stack;
             (*in_file).ny = ny_stack;
             (*in_file).nz = state.datasets.len() as i32;
-            (*in_file).type_ = stack_type as i32;
+            (*in_file).type_ = stack_type;
             (*in_file).stack_set_list = Some(Vec::with_capacity((*in_file).nz as usize));
             for set in 0..(*in_file).nz {
                 let dataset = state.datasets.as_mut_ptr().add(set as usize);
@@ -426,7 +429,7 @@ pub fn ii_hdf_check(in_file: &mut ImodImageFile) -> i32 {
                 (*volume).nx = (*dataset).nx;
                 (*volume).ny = (*dataset).ny;
                 (*volume).nz = (*dataset).nz;
-                (*volume).type_ = (*dataset).data_type as i32;
+                (*volume).type_ = (*dataset).data_type;
                 (*volume).dataset_name = (*dataset).name.take();
                 (*volume).dataset_id = (*dataset).dset_id;
                 (*volume).dataset_is_open = 1;
@@ -745,10 +748,10 @@ pub fn ii_hdf_check(in_file: &mut ImodImageFile) -> i32 {
                 .as_ptr();
             (*volume).ii_volumes = (*in_file).ii_volumes.clone();
             (*volume).format = IIFORMAT_LUMINANCE;
-            let mode = if (*volume).type_ == ImageDataType::Byte.to_raw()
-                || (*volume).type_ == ImageDataType::UnsignedByte.to_raw()
+            let mode = if (*volume).type_ == ImageDataType::Byte
+                || (*volume).type_ == ImageDataType::UnsignedByte
             {
-                if (*volume).type_ == ImageDataType::UnsignedByte.to_raw() {
+                if (*volume).type_ == ImageDataType::UnsignedByte {
                     let mut rgb = 0;
                     if hdf_source == IIHDF_IMOD
                         && get_prefixed_integer(b"is_rgb", &mut rgb, &mut retval) == 0
@@ -763,9 +766,9 @@ pub fn ii_hdf_check(in_file: &mut ImodImageFile) -> i32 {
                 } else {
                     MRC_MODE_BYTE
                 }
-            } else if (*volume).type_ == ImageDataType::Short.to_raw() {
+            } else if (*volume).type_ == ImageDataType::Short {
                 MRC_MODE_SHORT
-            } else if (*volume).type_ == ImageDataType::UnsignedShort.to_raw() {
+            } else if (*volume).type_ == ImageDataType::UnsignedShort {
                 MRC_MODE_USHORT
             } else {
                 let mut complex = 0;
@@ -786,7 +789,7 @@ pub fn ii_hdf_check(in_file: &mut ImodImageFile) -> i32 {
                 .as_mut()
                 .expect("HDF header is present");
             mrc_head_new(hdata, (*volume).nx, (*volume).ny, (*volume).nz, mode);
-            hdata.bytes_signed = if (*volume).type_ == ImageDataType::Byte.to_raw() {
+            hdata.bytes_signed = if (*volume).type_ == ImageDataType::Byte {
                 1
             } else {
                 0
@@ -796,7 +799,7 @@ pub fn ii_hdf_check(in_file: &mut ImodImageFile) -> i32 {
             hdata.packed4bits = 0;
             hdata.half_floats = 0;
             ii_default_min_max_mean(
-                (*volume).type_,
+                (*volume).type_.to_raw(),
                 &mut hdata.amin,
                 &mut hdata.amax,
                 &mut hdata.amean,
@@ -1251,26 +1254,28 @@ unsafe fn scan_group(
             let bytes = (H5Tget_precision(type_id) / 8) as i32;
             let class = H5Tget_class(type_id);
             let signed = H5Tget_sign(type_id) == H5T_SGN_2;
+            // The HDF5 class/precision boundary: `None` is the source's `-1`
+            // for a datatype that has no `IITYPE_*` equivalent.
             let data_type = if class == H5T_INTEGER && bytes == 1 {
                 if signed {
-                    ImageDataType::Byte.to_raw()
+                    Some(ImageDataType::Byte)
                 } else {
-                    ImageDataType::UnsignedByte.to_raw()
+                    Some(ImageDataType::UnsignedByte)
                 }
             } else if class == H5T_INTEGER && bytes == 2 {
                 if signed {
-                    ImageDataType::Short.to_raw()
+                    Some(ImageDataType::Short)
                 } else {
-                    ImageDataType::UnsignedShort.to_raw()
+                    Some(ImageDataType::UnsignedShort)
                 }
             } else if class == H5T_FLOAT && bytes == 4 {
-                ImageDataType::Float.to_raw()
+                Some(ImageDataType::Float)
             } else {
-                -1
+                None
             };
             let space_id = H5Dget_space(dataset_id);
             let rank = H5Sget_simple_extent_ndims(space_id);
-            if data_type >= 0 && (rank == 2 || rank == 3) {
+            if data_type.is_some() && (rank == 2 || rank == 3) {
                 let mut current = [0; 3];
                 let mut maximum = [0; 3];
                 H5Sget_simple_extent_dims(space_id, current.as_mut_ptr(), maximum.as_mut_ptr());
@@ -1283,7 +1288,7 @@ unsafe fn scan_group(
                 let mut data = DatasetData {
                     dset_id: dataset_id,
                     name: Some(object_name),
-                    data_type: data_type as i16,
+                    data_type: data_type.expect("dataset datatype is a supported IITYPE"),
                     swapped: if H5Tget_order(type_id) != H5Tget_order(H5T_NATIVE_INT_g) {
                         1
                     } else {

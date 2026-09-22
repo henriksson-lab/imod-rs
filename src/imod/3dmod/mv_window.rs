@@ -525,46 +525,41 @@ impl ImodvWindow {
         window.actions[FileMenuAction::Load.to_raw()].enabled = app.standalone != 0;
         window.actions[FileMenuAction::Save.to_raw()].enabled = app.standalone != 0;
         window.actions[FileMenuAction::SaveAs.to_raw()].enabled = app.standalone != 0;
-        window.actions
-            [crate::imod::three_dmod::mv_window::ViewMenuAction::LowResolution.to_raw()] = Action {
+        window.actions[ViewMenuAction::LowResolution.to_raw()] = Action {
             checkable: true,
             checked: app.lowres != 0,
             enabled: true,
             text: "Low Resolution".into(),
             shortcut: Some(Key::Character('R')),
         };
-        window.actions[crate::imod::three_dmod::mv_window::ViewMenuAction::Labels.to_raw()] =
-            Action {
-                checkable: true,
-                checked: app.draw_labels != 0,
-                enabled: true,
-                text: "Point Labels".into(),
-                shortcut: None,
-            };
-        window.actions[crate::imod::three_dmod::mv_window::ViewMenuAction::InvertZ.to_raw()] =
-            Action {
-                checkable: true,
-                checked: app.invert_z != 0,
-                enabled: true,
-                text: "Invert Z".into(),
-                shortcut: None,
-            };
-        window.actions[crate::imod::three_dmod::mv_window::ViewMenuAction::Lighting.to_raw()] =
-            Action {
-                checkable: true,
-                checked: app.lighting != 0,
-                enabled: true,
-                text: "Lighting".into(),
-                shortcut: None,
-            };
-        window.actions[crate::imod::three_dmod::mv_window::ViewMenuAction::Wireframe.to_raw()] =
-            Action {
-                checkable: true,
-                checked: app.wireframe != 0,
-                enabled: true,
-                text: "Wireframe".into(),
-                shortcut: None,
-            };
+        window.actions[ViewMenuAction::Labels.to_raw()] = Action {
+            checkable: true,
+            checked: app.draw_labels != 0,
+            enabled: true,
+            text: "Point Labels".into(),
+            shortcut: None,
+        };
+        window.actions[ViewMenuAction::InvertZ.to_raw()] = Action {
+            checkable: true,
+            checked: app.invert_z != 0,
+            enabled: true,
+            text: "Invert Z".into(),
+            shortcut: None,
+        };
+        window.actions[ViewMenuAction::Lighting.to_raw()] = Action {
+            checkable: true,
+            checked: app.lighting != 0,
+            enabled: true,
+            text: "Lighting".into(),
+            shortcut: None,
+        };
+        window.actions[ViewMenuAction::Wireframe.to_raw()] = Action {
+            checkable: true,
+            checked: app.wireframe != 0,
+            enabled: true,
+            text: "Wireframe".into(),
+            shortcut: None,
+        };
         // `numWidg` and `newOpenGLset` of the source constructor: the first
         // widget added is the current one, and on the `NEW_QTOPENGL` build the
         // single maximal request is the only widget made.
@@ -635,21 +630,14 @@ impl ImodvWindow {
                 app.trans_bkgd = 0;
             }
         }
-        window.actions[crate::imod::three_dmod::mv_window::ViewMenuAction::DrawBox.to_raw()]
-            .checked = app.dbl_buf > 0;
-        window.actions[crate::imod::three_dmod::mv_window::ViewMenuAction::DrawBox.to_raw()]
-            .checkable = true;
-        window.actions[crate::imod::three_dmod::mv_window::ViewMenuAction::DrawBox.to_raw()]
-            .enabled = app.dbl_buf > 0 && app.enable_depth_sb >= 0 && app.trans_bkgd == 0;
-        window.actions
-            [crate::imod::three_dmod::mv_window::ViewMenuAction::TransparentBackground.to_raw()]
-        .checked = app.trans_bkgd > 0;
-        window.actions
-            [crate::imod::three_dmod::mv_window::ViewMenuAction::TransparentBackground.to_raw()]
-        .checkable = true;
-        window.actions
-            [crate::imod::three_dmod::mv_window::ViewMenuAction::TransparentBackground.to_raw()]
-        .enabled = app.dbl_buf > 0 && (app.enable_depth_dbal >= 0 || app.enable_depth_dbst_al >= 0);
+        window.actions[ViewMenuAction::DrawBox.to_raw()].checked = app.dbl_buf > 0;
+        window.actions[ViewMenuAction::DrawBox.to_raw()].checkable = true;
+        window.actions[ViewMenuAction::DrawBox.to_raw()].enabled =
+            app.dbl_buf > 0 && app.enable_depth_sb >= 0 && app.trans_bkgd == 0;
+        window.actions[ViewMenuAction::TransparentBackground.to_raw()].checked = app.trans_bkgd > 0;
+        window.actions[ViewMenuAction::TransparentBackground.to_raw()].checkable = true;
+        window.actions[ViewMenuAction::TransparentBackground.to_raw()].enabled =
+            app.dbl_buf > 0 && (app.enable_depth_dbal >= 0 || app.enable_depth_dbst_al >= 0);
         window
     }
     pub fn app(&self) -> &ImodvApp {
@@ -757,16 +745,12 @@ impl ImodvWindow {
                 app.enable_depth_dbst_al,
             )
         };
-        self.actions[crate::imod::three_dmod::mv_window::ViewMenuAction::DrawBox.to_raw()]
-            .checked = true;
-        self.actions[crate::imod::three_dmod::mv_window::ViewMenuAction::DrawBox.to_raw()]
-            .enabled = enable_depth_sb >= 0 && trans_bkgd == 0;
-        self.actions
-            [crate::imod::three_dmod::mv_window::ViewMenuAction::TransparentBackground.to_raw()]
-        .checked = trans_bkgd > 0;
-        self.actions
-            [crate::imod::three_dmod::mv_window::ViewMenuAction::TransparentBackground.to_raw()]
-        .enabled = enable_depth_dbal >= 0 || enable_depth_dbst_al >= 0;
+        self.actions[ViewMenuAction::DrawBox.to_raw()].checked = true;
+        self.actions[ViewMenuAction::DrawBox.to_raw()].enabled =
+            enable_depth_sb >= 0 && trans_bkgd == 0;
+        self.actions[ViewMenuAction::TransparentBackground.to_raw()].checked = trans_bkgd > 0;
+        self.actions[ViewMenuAction::TransparentBackground.to_raw()].enabled =
+            enable_depth_dbal >= 0 || enable_depth_dbst_al >= 0;
     }
 
     /// `ImodvWindow::fileMenuSlot`.
@@ -785,12 +769,17 @@ impl ImodvWindow {
     pub fn help_menu_slot(&mut self, which: i32, sink: &mut dyn ImodvWindowSink) {
         sink.imodv_help_menu(which);
     }
-    pub fn set_checkable_item(&mut self, id: usize, state: bool) {
+    pub fn set_checkable_item(&mut self, id: ViewMenuAction, state: bool) {
+        // `mv_window.cpp:572-576`.  Every caller in the source passes a
+        // `VVIEW_MENU_*` id, so the guard stays as written and the raw value
+        // is only the array index.
+        let id = id.to_raw();
         if id > 0 && id < LAST_VMENU_ID {
             self.actions[id].checked = state;
         }
     }
-    pub fn set_enabled_menu_item(&mut self, id: usize, state: bool) {
+    pub fn set_enabled_menu_item(&mut self, id: ViewMenuAction, state: bool) {
+        let id = id.to_raw();
         if id > 0 && id < LAST_VMENU_ID {
             self.actions[id].enabled = state;
         }
@@ -3317,7 +3306,10 @@ impl ImodvNativeSink {
 impl ImodvWindowSink for ImodvNativeSink {
     /// `imodvFileMenu(which)`.
     fn imodv_file_menu(&mut self, which: i32) {
-        let action = crate::imod::three_dmod::mv_menu::imodv_file_menu(which as usize);
+        let Some(item) = FileMenuAction::from_raw(which as usize) else {
+            return;
+        };
+        let action = crate::imod::three_dmod::mv_menu::imodv_file_menu(item);
         match action {
             Some("imodv_reset_snap") => {
                 let app = self.app();
@@ -3334,14 +3326,16 @@ impl ImodvWindowSink for ImodvNativeSink {
     }
     /// `imodvEditMenu(which)`.
     fn imodv_edit_menu(&mut self, which: i32) {
+        let Some(item) = EditMenuAction::from_raw(which as usize) else {
+            return;
+        };
         let rgb = [
             self.rbgcolor[0] as i32,
             self.rbgcolor[1] as i32,
             self.rbgcolor[2] as i32,
         ];
         let mut color = std::mem::take(&mut self.bkg_color);
-        let action =
-            crate::imod::three_dmod::mv_menu::imodv_edit_menu(which as usize, &mut color, rgb);
+        let action = crate::imod::three_dmod::mv_menu::imodv_edit_menu(item, &mut color, rgb);
         self.bkg_color = color;
         if let Some(name) = action {
             eprintln!(
@@ -3353,7 +3347,9 @@ impl ImodvWindowSink for ImodvNativeSink {
     }
     /// `imodvViewMenu(which)`.
     fn imodv_view_menu(&mut self, which: i32) {
-        let item = which as usize;
+        let Some(item) = ViewMenuAction::from_raw(which as usize) else {
+            return;
+        };
         let app = self.app();
         let window = unsafe { app.main_win.as_mut() };
         let action = crate::imod::three_dmod::mv_menu::imodv_view_menu(app, item, window);
@@ -3364,14 +3360,11 @@ impl ImodvWindowSink for ImodvNativeSink {
                 // (`mv_menu.cpp:389,396`).  The translated `imodvViewMenu`
                 // applies the flag before returning, so the value passed here
                 // is the one the source's expression produces.
-                let (db, stereo, alpha) =
-                    if crate::imod::three_dmod::mv_window::ViewMenuAction::from_raw(item)
-                        == Some(crate::imod::three_dmod::mv_window::ViewMenuAction::DrawBox)
-                    {
-                        (self.app().dbl_buf, -1, -1)
-                    } else {
-                        (-1, -1, (self.app().trans_bkgd != 0) as i32)
-                    };
+                let (db, stereo, alpha) = if item == ViewMenuAction::DrawBox {
+                    (self.app().dbl_buf, -1, -1)
+                } else {
+                    (-1, -1, (self.app().trans_bkgd != 0) as i32)
+                };
                 let rgb = self.rbgcolor;
                 let window = unsafe { (*self.app).main_win };
                 let mut set_widget = |db: bool, stereo: bool, alpha: bool| -> i32 {
@@ -3401,7 +3394,10 @@ impl ImodvWindowSink for ImodvNativeSink {
     }
     /// `imodvHelpMenu(which)`.
     fn imodv_help_menu(&mut self, which: i32) {
-        match crate::imod::three_dmod::mv_menu::imodv_help_menu(which as usize) {
+        let Some(item) = HelpMenuAction::from_raw(which as usize) else {
+            return;
+        };
+        match crate::imod::three_dmod::mv_menu::imodv_help_menu(item) {
             Some("3dmodv Version") => {
                 // `dia_vasmsg` (`mv_menu.cpp`), a modal message box.
                 crate::imod::three_dmod::imod::imod_print_info(
@@ -3716,8 +3712,14 @@ impl crate::imod::three_dmod::mv_input::MvInputNativeBoundary for ImodvNativeSin
         }
     }
     /// `imodvViewMenu(which)`.
-    fn imodv_view_menu(&mut self, a: &mut crate::imod::three_dmod::imodv::ImodvApp, which: i32) {
-        ImodvWindowSink::imodv_view_menu(self, which);
+    fn imodv_view_menu(
+        &mut self,
+        a: &mut crate::imod::three_dmod::imodv::ImodvApp,
+        which: ViewMenuAction,
+    ) {
+        // `ImodvWindow::viewMenuSlot(int)` is the Qt signal boundary, so the
+        // raw menu id is rebuilt here.
+        ImodvWindowSink::imodv_view_menu(self, which.to_raw() as i32);
     }
     /// `imodvMenuLowres(value)`.
     fn imodv_menu_lowres(&mut self, a: &mut crate::imod::three_dmod::imodv::ImodvApp, value: i32) {
@@ -3729,7 +3731,7 @@ impl crate::imod::three_dmod::mv_input::MvInputNativeBoundary for ImodvNativeSin
     fn set_enabled_menu_item(
         &mut self,
         a: &mut crate::imod::three_dmod::imodv::ImodvApp,
-        id: usize,
+        id: ViewMenuAction,
         state: bool,
     ) {
         if let Some(window) = unsafe { a.main_win.as_mut() } {
@@ -4283,10 +4285,7 @@ mod tests {
         };
         let win = ImodvWindow::new(&mut app);
         assert_eq!(win.cur_glw, Some(0));
-        assert!(
-            win.actions[crate::imod::three_dmod::mv_window::ViewMenuAction::DrawBox.to_raw()]
-                .checked
-        );
+        assert!(win.actions[ViewMenuAction::DrawBox.to_raw()].checked);
     }
     #[test]
     fn source_widget_selection_falls_back_to_single_buffer() {
@@ -4471,10 +4470,7 @@ mod tests {
         let mut sink = RecordingImodvWindowSink::default();
         window.file_menu_slot(FileMenuAction::Quit.to_raw() as i32, &mut sink);
         window.edit_menu_slot(EditMenuAction::Objects.to_raw() as i32, &mut sink);
-        window.view_menu_slot(
-            crate::imod::three_dmod::mv_window::ViewMenuAction::DrawBox.to_raw() as i32,
-            &mut sink,
-        );
+        window.view_menu_slot(ViewMenuAction::DrawBox.to_raw() as i32, &mut sink);
         window.help_menu_slot(HelpMenuAction::Menus.to_raw() as i32, &mut sink);
         let press = KeyEvent {
             key: Key::Character('R'),

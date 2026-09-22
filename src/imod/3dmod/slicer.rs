@@ -105,7 +105,7 @@ pub trait SlicerNativeBoundary {
     fn cube_resize_viewport(&mut self, _width: i32, _height: i32) {}
     fn set_angles(&mut self, _angles: [f32; 3]) {}
     fn set_zoom_text(&mut self, _zoom: f32) {}
-    fn set_toggle_state(&mut self, _index: usize, _state: i32) {}
+    fn set_toggle_state(&mut self, _index: SlicerToggle, _state: i32) {}
     fn set_thicknesses(&mut self, _image: i32, _model: f32) {}
     fn set_view_axis_position(&mut self, _min: i32, _max: i32, _current: i32) {}
     fn set_low_high_validity(&mut self, _which: usize, _state: i32) {}
@@ -654,23 +654,23 @@ impl SlicerRegistry {
             if target.hq != state.8 {
                 target.hq = state.8;
                 target.manage_buffers();
-                native.set_toggle_state(SlicerToggle::HighResolution.to_raw(), target.hq);
+                native.set_toggle_state(SlicerToggle::HighResolution, target.hq);
                 need_draw = true;
             }
             if target.classic != state.9 {
                 target.classic = state.9;
                 target.pending = 0;
-                native.set_toggle_state(SlicerToggle::Center.to_raw(), target.classic);
+                native.set_toggle_state(SlicerToggle::Center, target.classic);
                 need_draw = true;
             }
             if target.fft_mode != state.10 {
                 target.fft_mode = state.10;
-                native.set_toggle_state(SlicerToggle::Fft.to_raw(), target.fft_mode);
+                native.set_toggle_state(SlicerToggle::Fft, target.fft_mode);
                 need_draw = true;
             }
             if target.scalez != state.11 {
                 target.scalez = state.11;
-                native.set_toggle_state(SlicerToggle::ZScale.to_raw(), target.scalez);
+                native.set_toggle_state(SlicerToggle::ZScale, target.scalez);
                 need_draw = true;
             }
             if need_draw {
@@ -1082,9 +1082,14 @@ impl SlicerFuncs {
         n.fill_cache()
     }
     /// `SlicerFuncs::stateToggled`.
-    pub fn state_toggled(&mut self, index: usize, state: i32, n: &mut dyn SlicerNativeBoundary) {
-        match crate::imod::three_dmod::slicer_classes::SlicerToggle::from_raw(index) {
-            Some(crate::imod::three_dmod::slicer_classes::SlicerToggle::Lock) => {
+    pub fn state_toggled(
+        &mut self,
+        index: SlicerToggle,
+        state: i32,
+        n: &mut dyn SlicerNativeBoundary,
+    ) {
+        match index {
+            SlicerToggle::Lock => {
                 self.locked = state;
                 if state == 0 {
                     self.cx = self.view.xmouse;
@@ -1094,46 +1099,37 @@ impl SlicerFuncs {
                     self.draw(n);
                 }
             }
-            Some(crate::imod::three_dmod::slicer_classes::SlicerToggle::HighResolution) => {
+            SlicerToggle::HighResolution => {
                 self.hq = state;
                 self.manage_buffers();
                 self.draw_self_and_linked(n);
             }
-            Some(crate::imod::three_dmod::slicer_classes::SlicerToggle::Center) => {
-                self.set_classic_mode(state, false, n)
-            }
-            Some(crate::imod::three_dmod::slicer_classes::SlicerToggle::ShiftLock) => {
-                self.shift_lock = state
-            }
-            Some(crate::imod::three_dmod::slicer_classes::SlicerToggle::Band) => {
-                self.toggle_rubberband(true, n)
-            }
-            Some(crate::imod::three_dmod::slicer_classes::SlicerToggle::Arrow) => {
-                self.toggle_arrow(true, n)
-            }
-            Some(crate::imod::three_dmod::slicer_classes::SlicerToggle::Fft) => {
+            SlicerToggle::Center => self.set_classic_mode(state, false, n),
+            SlicerToggle::ShiftLock => self.shift_lock = state,
+            SlicerToggle::Band => self.toggle_rubberband(true, n),
+            SlicerToggle::Arrow => self.toggle_arrow(true, n),
+            SlicerToggle::Fft => {
                 self.fft_mode = state;
                 self.draw_self_and_linked(n);
             }
-            Some(crate::imod::three_dmod::slicer_classes::SlicerToggle::ZScale) => {
+            SlicerToggle::ZScale => {
                 self.scalez = state;
                 self.draw_self_and_linked(n);
                 n.draw_slicer_plane();
             }
-            Some(crate::imod::three_dmod::slicer_classes::SlicerToggle::TimeLock) => {
+            SlicerToggle::TimeLock => {
                 self.time_lock = if state != 0 { self.view.cur_time } else { 0 };
                 if state == 0 {
                     self.draw(n);
                 }
             }
-            _ => {}
         }
     }
     /// `SlicerFuncs::toggleArrow`.
     pub fn toggle_arrow(&mut self, draw_win: bool, n: &mut dyn SlicerNativeBoundary) {
         self.arrow_on = !self.arrow_on;
         self.drawing_arrow = self.arrow_on;
-        n.set_toggle_state(SlicerToggle::Arrow.to_raw(), self.arrow_on as i32);
+        n.set_toggle_state(SlicerToggle::Arrow, self.arrow_on as i32);
         if self.arrow_on {
             self.arrow_head.push(Ipoint::default());
             self.arrow_tail.push(Ipoint::default());
@@ -2031,7 +2027,7 @@ impl SlicerFuncs {
             self.band_low_high_limits = [2. * self.limit_no_value as f32; 2];
         }
         let on = self.rubberband + self.starting_band;
-        n.set_toggle_state(SlicerToggle::Band.to_raw(), on);
+        n.set_toggle_state(SlicerToggle::Band, on);
         n.enable_low_high_buttons(on != 0);
         n.set_cursor(self.mousemode, true);
         if draw_win {

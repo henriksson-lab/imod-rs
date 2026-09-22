@@ -13,11 +13,11 @@ use crate::imod::three_dmod::imodv::{
 pub const MIN_LABEL_SIZE: i32 = 6;
 pub const MAX_SYMBOLS: usize = 4;
 pub const MAX_COLOR_SELECTORS: usize = 20;
-pub const SYM_TABLE: [i32; MAX_SYMBOLS] = [
-    ObjectSymbol::None.to_raw(),
-    ObjectSymbol::Circle.to_raw(),
-    ObjectSymbol::Square.to_raw(),
-    ObjectSymbol::Triangle.to_raw(),
+pub const SYM_TABLE: [ObjectSymbol; MAX_SYMBOLS] = [
+    ObjectSymbol::None,
+    ObjectSymbol::Circle,
+    ObjectSymbol::Square,
+    ObjectSymbol::Triangle,
 ];
 
 /// Viewer keyboard forwarding used by `ImodObjColor`'s selector slots.
@@ -161,7 +161,7 @@ pub fn ioew_nametext(model: &mut Imod, edit: &mut ObjectEdit, name: &str) {
 pub fn ioew_symbol(model: &mut Imod, edit: &mut ObjectEdit, value: i32) {
     if let Some(o) = get_object_or_close(model, edit) {
         if let Some(&symbol) = SYM_TABLE.get(value.max(0) as usize) {
-            o.symbol = symbol as u8;
+            o.symbol = symbol.to_raw() as u8;
         }
         imodv_finish_chg_unit();
     }

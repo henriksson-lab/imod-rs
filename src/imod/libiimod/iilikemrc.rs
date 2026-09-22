@@ -1572,7 +1572,7 @@ mod tests {
         assert_eq!(ii_like_mrc_check(&mut image), 0);
         assert_eq!(
             (image.file, image.type_),
-            (IIFILE_RAW, ImageDataType::Short.to_raw())
+            (IIFILE_RAW, ImageDataType::Short)
         );
         let header = image
             .mrc_header

@@ -61,34 +61,34 @@ pub fn ii_mrc_mode_to_format_type(image: &mut ImodImageFile, mode: i32, bytes_si
         MRC_MODE_BYTE => {
             image.format = IIFORMAT_LUMINANCE;
             image.type_ = if bytes_signed != 0 {
-                ImageDataType::Byte.to_raw()
+                ImageDataType::Byte
             } else {
-                ImageDataType::UnsignedByte.to_raw()
+                ImageDataType::UnsignedByte
             };
         }
         MRC_MODE_SHORT => {
             image.format = IIFORMAT_LUMINANCE;
-            image.type_ = ImageDataType::Short.to_raw();
+            image.type_ = ImageDataType::Short;
         }
         MRC_MODE_USHORT => {
             image.format = IIFORMAT_LUMINANCE;
-            image.type_ = ImageDataType::UnsignedShort.to_raw();
+            image.type_ = ImageDataType::UnsignedShort;
         }
         MRC_MODE_FLOAT => {
             image.format = IIFORMAT_LUMINANCE;
-            image.type_ = ImageDataType::Float.to_raw();
+            image.type_ = ImageDataType::Float;
         }
         MRC_MODE_COMPLEX_SHORT => {
             image.format = IIFORMAT_COMPLEX;
-            image.type_ = ImageDataType::Short.to_raw();
+            image.type_ = ImageDataType::Short;
         }
         MRC_MODE_COMPLEX_FLOAT => {
             image.format = IIFORMAT_COMPLEX;
-            image.type_ = ImageDataType::Float.to_raw();
+            image.type_ = ImageDataType::Float;
         }
         MRC_MODE_RGB => {
             image.format = IIFORMAT_RGB;
-            image.type_ = ImageDataType::UnsignedByte.to_raw();
+            image.type_ = ImageDataType::UnsignedByte;
         }
         _ => {}
     }
@@ -704,44 +704,47 @@ mod tests {
             ii_mrc_mode_to_format_type(&mut *image, MRC_MODE_BYTE, 1);
             assert_eq!(
                 ((*image).format, (*image).type_),
-                (IIFORMAT_LUMINANCE, ImageDataType::Byte.to_raw())
+                (IIFORMAT_LUMINANCE, ImageDataType::Byte)
             );
             ii_mrc_mode_to_format_type(&mut *image, MRC_MODE_SHORT, 0);
             assert_eq!(
                 ((*image).format, (*image).type_),
-                (IIFORMAT_LUMINANCE, ImageDataType::Short.to_raw())
+                (IIFORMAT_LUMINANCE, ImageDataType::Short)
             );
             ii_mrc_mode_to_format_type(&mut *image, MRC_MODE_USHORT, 0);
             assert_eq!(
                 ((*image).format, (*image).type_),
-                (IIFORMAT_LUMINANCE, IITYPE_USHORT)
+                (IIFORMAT_LUMINANCE, ImageDataType::UnsignedShort)
             );
             ii_mrc_mode_to_format_type(&mut *image, MRC_MODE_FLOAT, 0);
             assert_eq!(
                 ((*image).format, (*image).type_),
-                (IIFORMAT_LUMINANCE, ImageDataType::Float.to_raw())
+                (IIFORMAT_LUMINANCE, ImageDataType::Float)
             );
             ii_mrc_mode_to_format_type(&mut *image, MRC_MODE_COMPLEX_SHORT, 0);
             assert_eq!(
                 ((*image).format, (*image).type_),
-                (IIFORMAT_COMPLEX, ImageDataType::Short.to_raw())
+                (IIFORMAT_COMPLEX, ImageDataType::Short)
             );
             ii_mrc_mode_to_format_type(&mut *image, MRC_MODE_COMPLEX_FLOAT, 0);
             assert_eq!(
                 ((*image).format, (*image).type_),
-                (IIFORMAT_COMPLEX, ImageDataType::Float.to_raw())
+                (IIFORMAT_COMPLEX, ImageDataType::Float)
             );
             ii_mrc_mode_to_format_type(&mut *image, MRC_MODE_RGB, 0);
             assert_eq!(
                 ((*image).format, (*image).type_),
-                (IIFORMAT_RGB, ImageDataType::UnsignedByte.to_raw())
+                (IIFORMAT_RGB, ImageDataType::UnsignedByte)
             );
+            // The source's `default:` arm leaves `format` and `type` alone
+            // and only stores the mode (`iimrc.c:108`).  IITYPE_UINT stands in
+            // for the out-of-range sentinel the raw-int version used.
             (*image).format = 87;
-            (*image).type_ = 99;
+            (*image).type_ = ImageDataType::UnsignedInt;
             ii_mrc_mode_to_format_type(&mut *image, 123, 0);
             assert_eq!(
                 ((*image).format, (*image).type_, (*image).mode),
-                (87, 99, 123)
+                (87, ImageDataType::UnsignedInt, 123)
             );
         }
     }
@@ -918,7 +921,7 @@ mod tests {
                     (*image).nz,
                     (*image).type_
                 ),
-                (IIFILE_MRC, 2, 2, 1, ImageDataType::Byte.to_raw())
+                (IIFILE_MRC, 2, 2, 1, ImageDataType::Byte)
             );
             let mut safe_read = [0_u8; 4];
             assert_eq!(read_section_unscaled(&mut *image, &mut safe_read, 0, 0), 0);

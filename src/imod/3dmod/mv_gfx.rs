@@ -152,7 +152,7 @@ pub fn imodv_setbuffer(
     a.dbl_buf = use_db as i32;
     a.alpha_visual = use_alpha as i32;
     // `setCheckableItem(VVIEW_MENU_DB, useDb)` is the paired window call.
-    let _ = crate::imod::three_dmod::mv_window::ViewMenuAction::DrawBox.to_raw();
+    let _ = ViewMenuAction::DrawBox;
     gl.viewport(a.winx, a.winy);
     gl.flush();
     gl.finish();

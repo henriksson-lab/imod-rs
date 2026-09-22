@@ -275,7 +275,11 @@ pub struct ImodImageFile {
     pub nz: i32,
     pub file: i32,
     pub format: i32,
-    pub type_: i32,
+    /// C `int type`, one of the `IITYPE_*` values (`iimage.h:41-47`).  The
+    /// structure is crate-owned (see the type doc above): no foreign library
+    /// receives it by value or reads its field offsets, so the field carries
+    /// the enum rather than the raw integer.
+    pub type_: ImageDataType,
     pub mode: i32,
     pub new_file: i32,
     pub amin: f32,
@@ -411,7 +415,7 @@ impl Default for ImodImageFile {
             nz: 0,
             file: 0,
             format: 0,
-            type_: 0,
+            type_: ImageDataType::UnsignedByte,
             mode: 0,
             new_file: 0,
             amin: 0.,
@@ -1199,21 +1203,26 @@ pub fn ii_sync_from_mrc_header(in_file: &mut ImodImageFile, hdata: &mut MrcHeade
     }
 }
 /// Matches C `iiDefaultMinMaxMean(int, float *, float *, float *)` (`iimage.c:741`).
+/// The parameter stays `i32` on purpose.  `iiDefaultMinMaxMean`'s contract
+/// includes rejecting values outside `IITYPE_*` via `default: return 1`
+/// (`iimage.c:761`), and that path is **live**: `iiadoc.c:78` passes
+/// `inFile->mode`, an MRC mode, into this `int type` parameter, so 3, 4, 12, 16
+/// and 101 all reach the default.  Typing it would delete that path.
 pub fn ii_default_min_max_mean(type_: i32, amin: &mut f32, amax: &mut f32, amean: &mut f32) -> i32 {
     match type_ {
-        0 | 6 => {
+        x if x == ImageDataType::UnsignedByte.to_raw() || x == ImageDataType::Float.to_raw() => {
             *amin = 0.0;
             *amax = 255.0;
         }
-        1 => {
+        x if x == ImageDataType::Byte.to_raw() => {
             *amin = -128.0;
             *amax = 127.0;
         }
-        2 => {
+        x if x == ImageDataType::Short.to_raw() => {
             *amin = -32767.0;
             *amax = 32767.0;
         }
-        3 => {
+        x if x == ImageDataType::UnsignedShort.to_raw() => {
             *amin = 0.0;
             *amax = 65535.0;
         }
@@ -1603,7 +1612,7 @@ pub fn ii_read_section(image: &mut ImodImageFile, buf: &mut [u8], in_section: i3
         // `iiTIFFCheck` deliberately records those as mode -1, while its
         // section callback still transfers their native four-byte samples.
         // Keep that representation usable through the bounded Rust API.
-        if matches!(image.type_, 4 | 5) {
+        if matches!(image.type_, ImageDataType::Int | ImageDataType::UnsignedInt) {
             bytes = 4;
             channels = 1;
         } else {
@@ -1969,7 +1978,10 @@ pub fn read_write_section(
                     // See `ii_read_section`: the TIFF reader represents
                     // 32-bit integer pixels with mode -1 because MRC has no
                     // corresponding storage mode.
-                    if matches!(in_file.type_, 4 | 5) {
+                    if matches!(
+                        in_file.type_,
+                        ImageDataType::Int | ImageDataType::UnsignedInt
+                    ) {
                         bytes = 4;
                         channels = 1;
                     } else {
@@ -2142,10 +2154,7 @@ pub fn ii_make_buffer_convert_if_float(
     inverted: &mut bool,
     routine: &str,
 ) -> Result<Option<Vec<u8>>, ()> {
-    if float_buffer.is_none()
-        || crate::imod::libiimod::iimage::ImageDataType::from_raw(in_file.type_)
-            == Some(crate::imod::libiimod::iimage::ImageDataType::Float)
-    {
+    if float_buffer.is_none() || in_file.type_ == ImageDataType::Float {
         return Ok(None);
     }
 
@@ -2463,12 +2472,22 @@ mod tests {
         );
         assert_eq!((amin, amax, amean), (-128.0, 127.0, -0.5));
         assert_eq!(
-            ii_default_min_max_mean(IITYPE_USHORT, &mut amin, &mut amax, &mut amean),
+            ii_default_min_max_mean(
+                ImageDataType::UnsignedShort.to_raw(),
+                &mut amin,
+                &mut amax,
+                &mut amean
+            ),
             0
         );
         assert_eq!((amin, amax, amean), (0.0, 65535.0, 32767.5));
         assert_eq!(
-            ii_default_min_max_mean(99, &mut amin, &mut amax, &mut amean),
+            ii_default_min_max_mean(
+                ImageDataType::Int.to_raw(),
+                &mut amin,
+                &mut amax,
+                &mut amean
+            ),
             1
         );
     }
@@ -2542,7 +2561,7 @@ mod tests {
         in_file.nx = 2;
         in_file.ny = 2;
         in_file.mode = MRC_MODE_BYTE;
-        in_file.type_ = ImageDataType::UnsignedByte.to_raw();
+        in_file.type_ = ImageDataType::UnsignedByte;
         let floats = [1f32, 2., 3., 4.];
         let mut inverted = false;
         let converted =
@@ -2552,7 +2571,7 @@ mod tests {
         assert!(inverted);
         assert_eq!(converted, [3, 4, 1, 2]);
 
-        in_file.type_ = ImageDataType::Float.to_raw();
+        in_file.type_ = ImageDataType::Float;
         inverted = false;
         assert!(
             ii_make_buffer_convert_if_float(&in_file, Some(&floats), &mut inverted, "test",)
@@ -2633,7 +2652,7 @@ mod tests {
             );
             assert_eq!(
                 ((*image_file).format, (*image_file).type_),
-                (IIFORMAT_LUMINANCE, ImageDataType::Byte.to_raw())
+                (IIFORMAT_LUMINANCE, ImageDataType::Byte)
             );
             assert_eq!(
                 (

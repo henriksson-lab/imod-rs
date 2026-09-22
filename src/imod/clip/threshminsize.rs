@@ -335,7 +335,7 @@ mod tests {
         let mut opt = ClipOptions {
             pname: String::new(),
             command: String::new(),
-            process: 44,
+            process: crate::imod::clip::clip::ClipOperation::Threshold,
             x: 0,
             y: 0,
             z: 0,

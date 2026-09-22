@@ -6,6 +6,7 @@
 //! synthetic replacement UI is introduced.
 #![allow(dead_code, unused_variables)]
 
+use crate::imod::libimod::iobj::ObjectSymbol;
 use std::fs::{remove_file, rename};
 
 use crate::imod::libcfshr::b3dutil::ImodFile;
@@ -47,7 +48,7 @@ use crate::imod::three_dmod::utilities::{
 struct ModelTransformBoundary;
 
 impl UtilitiesBoundary for ModelTransformBoundary {
-    fn draw_symbol(&mut self, _: i32, _: i32, _: i32, _: i32, _: bool) {}
+    fn draw_symbol(&mut self, _: i32, _: i32, _: ObjectSymbol, _: i32, _: bool) {}
     fn set_stipple(&mut self, _: bool) {}
     fn clear_window(&mut self, _: i32) {}
     fn redraw_model(&mut self) {}
@@ -129,59 +130,35 @@ pub fn imodv_menu_bgcolor(state: i32, color: &mut ImodvBkgColor, rgb: [i32; 3]) 
 /// `imodvEditMenu`.  Dialog/dock construction is an explicit Qt boundary;
 /// the returned action names are the source calls that must be performed.
 pub fn imodv_edit_menu(
-    item: usize,
+    item: EditMenuAction,
     color: &mut ImodvBkgColor,
     rgb: [i32; 3],
 ) -> Option<&'static str> {
-    match crate::imod::three_dmod::mv_window::EditMenuAction::from_raw(item) {
-        Some(crate::imod::three_dmod::mv_window::EditMenuAction::Objects) => Some("objed"),
-        Some(crate::imod::three_dmod::mv_window::EditMenuAction::Controls) => Some("imodv_control"),
-        Some(crate::imod::three_dmod::mv_window::EditMenuAction::Rotation) => {
-            Some("open_rotation_tool")
-        }
-        Some(crate::imod::three_dmod::mv_window::EditMenuAction::ObjectList) => {
-            Some("imodv_object_list_dialog")
-        }
-        Some(crate::imod::three_dmod::mv_window::EditMenuAction::Background) => {
+    match item {
+        EditMenuAction::Objects => Some("objed"),
+        EditMenuAction::Controls => Some("imodv_control"),
+        EditMenuAction::Rotation => Some("open_rotation_tool"),
+        EditMenuAction::ObjectList => Some("imodv_object_list_dialog"),
+        EditMenuAction::Background => {
             imodv_menu_bgcolor(1, color, rgb);
             None
         }
-        Some(crate::imod::three_dmod::mv_window::EditMenuAction::Models) => {
-            Some("imodv_model_edit_dialog")
-        }
-        Some(crate::imod::three_dmod::mv_window::EditMenuAction::Views) => {
-            Some("imodv_view_edit_dialog")
-        }
-        Some(crate::imod::three_dmod::mv_window::EditMenuAction::Image) => {
-            Some("mv_image_edit_dialog")
-        }
-        Some(crate::imod::three_dmod::mv_window::EditMenuAction::IsoSurface) => {
-            Some("imodv_isosurface_edit_dialog")
-        }
-        Some(crate::imod::three_dmod::mv_window::EditMenuAction::SaveDock) => {
-            Some("save_stack_state_to_settings")
-        }
-        Some(crate::imod::three_dmod::mv_window::EditMenuAction::ReopenDock) => {
-            Some("restore_stack_from_settings")
-        }
-        _ => None,
+        EditMenuAction::Models => Some("imodv_model_edit_dialog"),
+        EditMenuAction::Views => Some("imodv_view_edit_dialog"),
+        EditMenuAction::Image => Some("mv_image_edit_dialog"),
+        EditMenuAction::IsoSurface => Some("imodv_isosurface_edit_dialog"),
+        EditMenuAction::SaveDock => Some("save_stack_state_to_settings"),
+        EditMenuAction::ReopenDock => Some("restore_stack_from_settings"),
     }
 }
 
 /// `imodvHelpMenu`; browser/message-box work remains the native Qt boundary.
-pub fn imodv_help_menu(item: usize) -> Option<&'static str> {
-    match crate::imod::three_dmod::mv_window::HelpMenuAction::from_raw(item) {
-        Some(crate::imod::three_dmod::mv_window::HelpMenuAction::Menus) => {
-            Some("modvMenus.html#TOP")
-        }
-        Some(crate::imod::three_dmod::mv_window::HelpMenuAction::Keyboard) => {
-            Some("modvKeyboard.html#TOP")
-        }
-        Some(crate::imod::three_dmod::mv_window::HelpMenuAction::Mouse) => {
-            Some("modvMouse.html#TOP")
-        }
-        Some(crate::imod::three_dmod::mv_window::HelpMenuAction::About) => Some("3dmodv Version"),
-        _ => None,
+pub fn imodv_help_menu(item: HelpMenuAction) -> Option<&'static str> {
+    match item {
+        HelpMenuAction::Menus => Some("modvMenus.html#TOP"),
+        HelpMenuAction::Keyboard => Some("modvKeyboard.html#TOP"),
+        HelpMenuAction::Mouse => Some("modvMouse.html#TOP"),
+        HelpMenuAction::About => Some("3dmodv Version"),
     }
 }
 
@@ -299,31 +276,18 @@ pub fn imodv_save_model_as(a: &mut ImodvApp, filename: Option<&Path>) -> i32 {
 
 /// `imodvFileMenu`.  File picker, snapshot encoding, directory chooser, movie
 /// and close window calls are direct UI/backend boundaries represented by the returned action.
-pub fn imodv_file_menu(item: usize) -> Option<&'static str> {
-    match crate::imod::three_dmod::mv_window::FileMenuAction::from_raw(item) {
-        Some(crate::imod::three_dmod::mv_window::FileMenuAction::Load) => Some("imodv_load_model"),
-        Some(crate::imod::three_dmod::mv_window::FileMenuAction::Save) => Some("imodv_file_save"),
-        Some(crate::imod::three_dmod::mv_window::FileMenuAction::SaveAs) => {
-            Some("imodv_save_model_as")
-        }
-        Some(crate::imod::three_dmod::mv_window::FileMenuAction::SnapshotRgb) => {
-            Some("snapshot_rgb")
-        }
-        Some(crate::imod::three_dmod::mv_window::FileMenuAction::SnapshotTiff) => {
-            Some("snapshot_tiff")
-        }
-        Some(crate::imod::three_dmod::mv_window::FileMenuAction::ZeroSnapshotCounter) => {
-            Some("imodv_reset_snap")
-        }
-        Some(crate::imod::three_dmod::mv_window::FileMenuAction::SnapshotDirectory) => {
-            Some("b3d_set_snap_directory")
-        }
-        Some(crate::imod::three_dmod::mv_window::FileMenuAction::Movie) => Some("mv_movie_dialog"),
-        Some(crate::imod::three_dmod::mv_window::FileMenuAction::Sequence) => {
-            Some("mv_movie_sequence_dialog")
-        }
-        Some(crate::imod::three_dmod::mv_window::FileMenuAction::Quit) => Some("close"),
-        _ => None,
+pub fn imodv_file_menu(item: FileMenuAction) -> Option<&'static str> {
+    match item {
+        FileMenuAction::Load => Some("imodv_load_model"),
+        FileMenuAction::Save => Some("imodv_file_save"),
+        FileMenuAction::SaveAs => Some("imodv_save_model_as"),
+        FileMenuAction::SnapshotRgb => Some("snapshot_rgb"),
+        FileMenuAction::SnapshotTiff => Some("snapshot_tiff"),
+        FileMenuAction::ZeroSnapshotCounter => Some("imodv_reset_snap"),
+        FileMenuAction::SnapshotDirectory => Some("b3d_set_snap_directory"),
+        FileMenuAction::Movie => Some("mv_movie_dialog"),
+        FileMenuAction::Sequence => Some("mv_movie_sequence_dialog"),
+        FileMenuAction::Quit => Some("close"),
     }
 }
 
@@ -331,92 +295,77 @@ pub fn imodv_file_menu(item: usize) -> Option<&'static str> {
 /// native boundaries; flag mutations and extra-object ownership are preserved here.
 pub fn imodv_view_menu(
     a: &mut ImodvApp,
-    item: usize,
+    item: ViewMenuAction,
     window: Option<&mut ImodvWindow>,
 ) -> Option<&'static str> {
-    match crate::imod::three_dmod::mv_window::ViewMenuAction::from_raw(item) {
-        Some(crate::imod::three_dmod::mv_window::ViewMenuAction::DrawBox) => {
+    match item {
+        ViewMenuAction::DrawBox => {
             a.dbl_buf = 1 - a.dbl_buf;
             if let Some(w) = window {
                 w.set_enabled_menu_item(
-                    crate::imod::three_dmod::mv_window::ViewMenuAction::TransparentBackground
-                        .to_raw(),
+                    ViewMenuAction::TransparentBackground,
                     a.dbl_buf != 0 && (a.enable_depth_dbal >= 0 || a.enable_depth_dbst_al >= 0),
                 );
             }
             Some("imodv_setbuffer")
         }
-        Some(crate::imod::three_dmod::mv_window::ViewMenuAction::TransparentBackground) => {
+        ViewMenuAction::TransparentBackground => {
             a.trans_bkgd = if a.trans_bkgd != 0 { 0 } else { a.alpha_visual };
             if let Some(w) = window {
-                w.set_checkable_item(
-                    crate::imod::three_dmod::mv_window::ViewMenuAction::TransparentBackground
-                        .to_raw(),
-                    a.trans_bkgd != 0,
-                );
+                w.set_checkable_item(ViewMenuAction::TransparentBackground, a.trans_bkgd != 0);
                 w.set_enabled_menu_item(
-                    crate::imod::three_dmod::mv_window::ViewMenuAction::DrawBox.to_raw(),
+                    ViewMenuAction::DrawBox,
                     a.db_possible != 0 && a.enable_depth_sb >= 0 && a.trans_bkgd == 0,
                 );
             }
             Some("imodv_setbuffer")
         }
-        Some(crate::imod::three_dmod::mv_window::ViewMenuAction::InvertZ) => {
+        ViewMenuAction::InvertZ => {
             toggle_world_flag(
                 a,
                 &mut window.map(|w| w),
                 VIEW_WORLD_INVERT_Z,
-                crate::imod::three_dmod::mv_window::ViewMenuAction::InvertZ.to_raw(),
+                ViewMenuAction::InvertZ,
                 0,
             );
             None
         }
-        Some(crate::imod::three_dmod::mv_window::ViewMenuAction::Lighting) => {
+        ViewMenuAction::Lighting => {
             toggle_world_flag(
                 a,
                 &mut window.map(|w| w),
                 VIEW_WORLD_LIGHT,
-                crate::imod::three_dmod::mv_window::ViewMenuAction::Lighting.to_raw(),
+                ViewMenuAction::Lighting,
                 1,
             );
             None
         }
-        Some(crate::imod::three_dmod::mv_window::ViewMenuAction::Wireframe) => {
+        ViewMenuAction::Wireframe => {
             toggle_world_flag(
                 a,
                 &mut window.map(|w| w),
                 VIEW_WORLD_WIREFRAME,
-                crate::imod::three_dmod::mv_window::ViewMenuAction::Wireframe.to_raw(),
+                ViewMenuAction::Wireframe,
                 2,
             );
             None
         }
-        Some(crate::imod::three_dmod::mv_window::ViewMenuAction::LowResolution) => {
+        ViewMenuAction::LowResolution => {
             toggle_world_flag(
                 a,
                 &mut window.map(|w| w),
                 VIEW_WORLD_LOWRES,
-                crate::imod::three_dmod::mv_window::ViewMenuAction::LowResolution.to_raw(),
+                ViewMenuAction::LowResolution,
                 3,
             );
             None
         }
-        Some(crate::imod::three_dmod::mv_window::ViewMenuAction::Stereo) => {
-            Some("imodv_stereo_edit_dialog")
-        }
-        Some(crate::imod::three_dmod::mv_window::ViewMenuAction::Depth) => {
-            Some("imodv_depth_cue_edit_dialog")
-        }
-        Some(crate::imod::three_dmod::mv_window::ViewMenuAction::ScaleBar) => {
-            Some("scale_bar_open")
-        }
-        Some(crate::imod::three_dmod::mv_window::ViewMenuAction::Resize) => {
-            Some("open_resize_tool")
-        }
-        Some(crate::imod::three_dmod::mv_window::ViewMenuAction::BoundingBox)
-        | Some(crate::imod::three_dmod::mv_window::ViewMenuAction::ObjectBounds) => {
-            let bound_for_object =
-                item == crate::imod::three_dmod::mv_window::ViewMenuAction::ObjectBounds.to_raw();
+        ViewMenuAction::Stereo => Some("imodv_stereo_edit_dialog"),
+        ViewMenuAction::Depth => Some("imodv_depth_cue_edit_dialog"),
+        ViewMenuAction::ScaleBar => Some("scale_bar_open"),
+        ViewMenuAction::Resize => Some("open_resize_tool"),
+        ViewMenuAction::BoundingBox | ViewMenuAction::ObjectBounds => {
+            let bound_for_object = item == ViewMenuAction::ObjectBounds;
             let object = if bound_for_object { a.obj_num } else { -1 };
             if bound_for_object && a.obj_num < 0 {
                 return None;
@@ -482,17 +431,17 @@ pub fn imodv_view_menu(
             unsafe { imodv_draw() };
             None
         }
-        Some(crate::imod::three_dmod::mv_window::ViewMenuAction::Labels) => {
+        ViewMenuAction::Labels => {
             toggle_world_flag(
                 a,
                 &mut window.map(|w| w),
                 VIEW_WORLD_LABELS,
-                crate::imod::three_dmod::mv_window::ViewMenuAction::Labels.to_raw(),
+                ViewMenuAction::Labels,
                 4,
             );
             None
         }
-        Some(crate::imod::three_dmod::mv_window::ViewMenuAction::CurrentPoint) => {
+        ViewMenuAction::CurrentPoint => {
             let mut free_extra_object = true;
             if a.cur_point_extra_obj <= 0 && !a.vi.is_null() {
                 let vi = unsafe { &mut *(a.vi as *mut ImodView) };
@@ -548,16 +497,12 @@ pub fn imodv_view_menu(
                 a.cur_point_extra_obj = 0;
             }
             if let Some(w) = window {
-                w.set_checkable_item(
-                    crate::imod::three_dmod::mv_window::ViewMenuAction::CurrentPoint.to_raw(),
-                    !free_extra_object,
-                );
+                w.set_checkable_item(ViewMenuAction::CurrentPoint, !free_extra_object);
             }
             imodv_objed_new_view(a);
             unsafe { imodv_draw() };
             None
         }
-        _ => None,
     }
 }
 
@@ -566,7 +511,7 @@ pub fn toggle_world_flag(
     a: &mut ImodvApp,
     window: &mut Option<&mut ImodvWindow>,
     mask: u32,
-    menu_id: usize,
+    menu_id: ViewMenuAction,
     field: usize,
 ) {
     imodv_register_model_chg();
@@ -606,38 +551,23 @@ pub fn toggle_world_flag(
 
 /// `imodvMenuLight`.
 pub fn imodv_menu_light(window: &mut ImodvWindow, value: i32) {
-    window.set_checkable_item(
-        crate::imod::three_dmod::mv_window::ViewMenuAction::Lighting.to_raw(),
-        value != 0,
-    );
+    window.set_checkable_item(ViewMenuAction::Lighting, value != 0);
 }
 /// `imodvMenuLabels`.
 pub fn imodv_menu_labels(window: &mut ImodvWindow, value: i32) {
-    window.set_checkable_item(
-        crate::imod::three_dmod::mv_window::ViewMenuAction::Labels.to_raw(),
-        value != 0,
-    );
+    window.set_checkable_item(ViewMenuAction::Labels, value != 0);
 }
 /// `imodvMenuWireframe`.
 pub fn imodv_menu_wireframe(window: &mut ImodvWindow, value: i32) {
-    window.set_checkable_item(
-        crate::imod::three_dmod::mv_window::ViewMenuAction::Wireframe.to_raw(),
-        value != 0,
-    );
+    window.set_checkable_item(ViewMenuAction::Wireframe, value != 0);
 }
 /// `imodvMenuLowres`.
 pub fn imodv_menu_lowres(window: &mut ImodvWindow, value: i32) {
-    window.set_checkable_item(
-        crate::imod::three_dmod::mv_window::ViewMenuAction::LowResolution.to_raw(),
-        value != 0,
-    );
+    window.set_checkable_item(ViewMenuAction::LowResolution, value != 0);
 }
 /// `imodvMenuInvertZ`.
 pub fn imodv_menu_invert_z(window: &mut ImodvWindow, value: i32) {
-    window.set_checkable_item(
-        crate::imod::three_dmod::mv_window::ViewMenuAction::InvertZ.to_raw(),
-        value != 0,
-    );
+    window.set_checkable_item(ViewMenuAction::InvertZ, value != 0);
 }
 
 /// `imodvAddBoundingBox`.

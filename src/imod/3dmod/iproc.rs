@@ -21,6 +21,8 @@ pub enum IprocButtonAction {
     Reset = 5,
     Save = 6,
     List = 7,
+    Done = 8,
+    Help = 9,
 }
 
 impl IprocButtonAction {
@@ -34,6 +36,8 @@ impl IprocButtonAction {
             5 => Some(Self::Reset),
             6 => Some(Self::Save),
             7 => Some(Self::List),
+            8 => Some(Self::Done),
+            9 => Some(Self::Help),
             _ => None,
         }
     }
@@ -759,61 +763,52 @@ impl IprocWindow {
     }
     pub fn button_clicked(
         &mut self,
-        which: usize,
+        which: IprocButtonAction,
         proc: &mut ImodIproc,
         param: &mut IprocParam,
         boundary: &mut dyn IprocBoundary,
     ) {
-        match crate::imod::three_dmod::iproc::IprocButtonAction::from_raw(which) {
-            Some(crate::imod::three_dmod::iproc::IprocButtonAction::Apply) => {
+        match which {
+            IprocButtonAction::Apply => {
                 proc.save_proc_num = -1;
                 self.apply(proc, param, boundary, false);
             }
-            Some(crate::imod::three_dmod::iproc::IprocButtonAction::More) => {
+            IprocButtonAction::More => {
                 self.param_stack.push(param.clone());
                 self.start_process(proc, param, boundary);
             }
-            Some(crate::imod::three_dmod::iproc::IprocButtonAction::Less)
-                if self.param_stack.len() > 1 =>
-            {
+            IprocButtonAction::Less if self.param_stack.len() > 1 => {
                 self.param_stack.pop();
                 self.command_list.pop();
                 self.data_modes.pop();
                 self.apply(proc, param, boundary, true);
             }
-            Some(crate::imod::three_dmod::iproc::IprocButtonAction::DoSame)
-                if !self.param_stack.is_empty() =>
-            {
+            IprocButtonAction::DoSame if !self.param_stack.is_empty() => {
                 self.apply(proc, param, boundary, true)
             }
-            Some(crate::imod::three_dmod::iproc::IprocButtonAction::Toggle) => {
+            IprocButtonAction::Toggle => {
                 proc.toggling = false;
                 copy_and_display(proc, boundary);
             }
-            Some(crate::imod::three_dmod::iproc::IprocButtonAction::Reset) => {
+            IprocButtonAction::Reset => {
                 clearsec(proc, boundary);
                 boundary.redraw_image();
             }
-            Some(crate::imod::three_dmod::iproc::IprocButtonAction::Save) => {
+            IprocButtonAction::Save => {
                 proc.modified = false;
                 proc.idata_sec = -1;
             }
-            Some(crate::imod::three_dmod::iproc::IprocButtonAction::List) => {
-                boundary.dialog_message(&self.command_list.join("\n"))
-            }
+            IprocButtonAction::List => boundary.dialog_message(&self.command_list.join("\n")),
             _ => {}
         }
     }
     pub fn button_pressed(
         &mut self,
-        which: usize,
+        which: IprocButtonAction,
         proc: &mut ImodIproc,
         boundary: &mut dyn IprocBoundary,
     ) {
-        if crate::imod::three_dmod::iproc::IprocButtonAction::from_raw(which)
-            == Some(crate::imod::three_dmod::iproc::IprocButtonAction::Toggle)
-            && proc.modified
-        {
+        if which == IprocButtonAction::Toggle && proc.modified {
             saved_to_image(proc, boundary);
             proc.toggling = true;
             boundary.redraw_image();
@@ -849,7 +844,7 @@ impl IprocWindow {
         if key == 'A' && !self.running_proc {
             self.apply(proc, param, boundary, false);
         } else if key == 'B' && !self.running_proc {
-            self.button_clicked(IprocButtonAction::More.to_raw(), proc, param, boundary);
+            self.button_clicked(IprocButtonAction::More, proc, param, boundary);
         }
     }
     /// `IProcWindow::keyReleaseEvent`.

@@ -500,7 +500,7 @@ impl InfoWindow {
                 b.call("imod_info_enable", &[]);
             }
             FileMenuAction::SnapGray => {
-                let a = &mut self.m_actions[FileMenuAction::SnapGray.to_raw() as usize];
+                let a = &mut self.m_actions[FileMenuAction::SnapGray as usize];
                 a.checked = !a.checked;
                 b.call("convertSnap", &[a.checked as i32]);
             }
