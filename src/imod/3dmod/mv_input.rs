@@ -1978,9 +1978,9 @@ pub fn imodv_compute_rotation(
 
             /* Compute current rotation matrix */
             imod_mat_id(&mut mato);
-            imod_mat_rot(&mut mato, model.view[0].rot.z as f64, Axis3::Z.to_raw());
-            imod_mat_rot(&mut mato, model.view[0].rot.y as f64, Axis3::Y.to_raw());
-            imod_mat_rot(&mut mato, model.view[0].rot.x as f64, Axis3::X.to_raw());
+            imod_mat_rot(&mut mato, model.view[0].rot.z as f64, Axis3::Z);
+            imod_mat_rot(&mut mato, model.view[0].rot.y as f64, Axis3::Y);
+            imod_mat_rot(&mut mato, model.view[0].rot.x as f64, Axis3::X);
 
             /* Multiply by the new rotation, then get back to 3 angles */
             imod_mat_mult(&mato, mat, &mut matp);
@@ -2035,9 +2035,9 @@ pub fn imodv_compute_rotation(
                     /* get current rotation transform into viewing space */
                     let rot = model.view[0].rot;
                     imod_mat_id(&mut mato);
-                    imod_mat_rot(&mut mato, rot.z as f64, Axis3::Z.to_raw());
-                    imod_mat_rot(&mut mato, rot.y as f64, Axis3::Y.to_raw());
-                    imod_mat_rot(&mut mato, rot.x as f64, Axis3::X.to_raw());
+                    imod_mat_rot(&mut mato, rot.z as f64, Axis3::Z);
+                    imod_mat_rot(&mut mato, rot.y as f64, Axis3::Y);
+                    imod_mat_rot(&mut mato, rot.x as f64, Axis3::X);
 
                     /* Get product of that with screen-oriented rotation */
                     imod_mat_mult(&mato, mat, &mut matp);
@@ -2046,9 +2046,9 @@ pub fn imodv_compute_rotation(
                     /* Back-transform normal by inverse of current transform */
 
                     imod_mat_id(&mut mato);
-                    imod_mat_rot(&mut mato, -(rot.x as f64), Axis3::X.to_raw());
-                    imod_mat_rot(&mut mato, -(rot.y as f64), Axis3::Y.to_raw());
-                    imod_mat_rot(&mut mato, -(rot.z as f64), Axis3::Z.to_raw());
+                    imod_mat_rot(&mut mato, -(rot.x as f64), Axis3::X);
+                    imod_mat_rot(&mut mato, -(rot.y as f64), Axis3::Y);
+                    imod_mat_rot(&mut mato, -(rot.z as f64), Axis3::Z);
                     imod_mat_transform(&mato, &normal, &mut scale_point);
 
                     /* Rescale components to get back to unscaled model normal */
@@ -2086,9 +2086,9 @@ pub fn imodv_resolve_rotation(mat: &mut Imat, x: f32, y: f32, z: f32) {
     let alpha = x as f64 * (-gamrad).cos() - y as f64 * (-gamrad).sin();
 
     imod_mat_id(mat);
-    imod_mat_rot(mat, -gamma, Axis3::Z.to_raw());
-    imod_mat_rot(mat, alpha, Axis3::X.to_raw());
-    imod_mat_rot(mat, gamma + z as f64, Axis3::Z.to_raw());
+    imod_mat_rot(mat, -gamma, Axis3::Z);
+    imod_mat_rot(mat, alpha, Axis3::X);
+    imod_mat_rot(mat, gamma + z as f64, Axis3::Z);
 }
 
 /// Original: `imodvRotScaleMatrix` (`mv_input.cpp:1504`).
@@ -2100,9 +2100,9 @@ pub fn imodv_rot_scale_matrix(a: &ImodvApp, mat: &mut Imat, imod: &Imod) {
     let mut spt = Ipoint::default();
     let view = &imod.view[0];
     imod_mat_id(mat);
-    imod_mat_rot(mat, -(view.rot.x as f64), Axis3::X.to_raw());
-    imod_mat_rot(mat, -(view.rot.y as f64), Axis3::Y.to_raw());
-    imod_mat_rot(mat, -(view.rot.z as f64), Axis3::Z.to_raw());
+    imod_mat_rot(mat, -(view.rot.x as f64), Axis3::X);
+    imod_mat_rot(mat, -(view.rot.y as f64), Axis3::Y);
+    imod_mat_rot(mat, -(view.rot.z as f64), Axis3::Z);
 
     scrnscale = (0.5 * a.winx.min(a.winy) as f64 / view.rad as f64) as f32;
 

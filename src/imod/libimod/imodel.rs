@@ -493,6 +493,8 @@ pub const IMODF_NEW_TO_3DMOD: u32 = 1 << 11;
 pub const IMODF_Z_FROM_MINUSPT5: u32 = 1 << 10;
 pub const IMODF_ROT90X: u32 = 1 << 17;
 
+/// Original: `IMOD_MMODEL` (`imodel.h:26`).
+pub const IMOD_MMODEL: i32 = 1;
 /// Original: `IMOD_MMOVIE` (`imodel.h:27`).
 pub const IMOD_MMOVIE: i32 = 2;
 
@@ -1296,24 +1298,24 @@ pub fn imod_trans_from_ref_image(imod: &mut Imod, iref: &Iref_image, bin_scale: 
     if imod.flags & IMODF_TILTOK != 0
         && (iref.crot.x != iref.orot.x || iref.crot.y != iref.orot.y || iref.crot.z != iref.orot.z)
     {
-        imod_mat_rot(&mut mat, -iref.orot.x as f64, Axis3::X.to_raw());
-        imod_mat_rot(&mut mat, -iref.orot.y as f64, Axis3::Y.to_raw());
-        imod_mat_rot(&mut mat, -iref.orot.z as f64, Axis3::Z.to_raw());
+        imod_mat_rot(&mut mat, -iref.orot.x as f64, Axis3::X);
+        imod_mat_rot(&mut mat, -iref.orot.y as f64, Axis3::Y);
+        imod_mat_rot(&mut mat, -iref.orot.z as f64, Axis3::Z);
 
-        imod_mat_rot(&mut mat_clip, -iref.orot.x as f64, Axis3::X.to_raw());
-        imod_mat_rot(&mut mat_clip, -iref.orot.y as f64, Axis3::Y.to_raw());
-        imod_mat_rot(&mut mat_clip, -iref.orot.z as f64, Axis3::Z.to_raw());
+        imod_mat_rot(&mut mat_clip, -iref.orot.x as f64, Axis3::X);
+        imod_mat_rot(&mut mat_clip, -iref.orot.y as f64, Axis3::Y);
+        imod_mat_rot(&mut mat_clip, -iref.orot.z as f64, Axis3::Z);
 
         /* Next transform from these "absolute" coords to new reference
         image coords */
 
-        imod_mat_rot(&mut mat, iref.crot.z as f64, Axis3::Z.to_raw());
-        imod_mat_rot(&mut mat, iref.crot.y as f64, Axis3::Y.to_raw());
-        imod_mat_rot(&mut mat, iref.crot.x as f64, Axis3::X.to_raw());
+        imod_mat_rot(&mut mat, iref.crot.z as f64, Axis3::Z);
+        imod_mat_rot(&mut mat, iref.crot.y as f64, Axis3::Y);
+        imod_mat_rot(&mut mat, iref.crot.x as f64, Axis3::X);
 
-        imod_mat_rot(&mut mat_clip, iref.crot.z as f64, Axis3::Z.to_raw());
-        imod_mat_rot(&mut mat_clip, iref.crot.y as f64, Axis3::Y.to_raw());
-        imod_mat_rot(&mut mat_clip, iref.crot.x as f64, Axis3::X.to_raw());
+        imod_mat_rot(&mut mat_clip, iref.crot.z as f64, Axis3::Z);
+        imod_mat_rot(&mut mat_clip, iref.crot.y as f64, Axis3::Y);
+        imod_mat_rot(&mut mat_clip, iref.crot.x as f64, Axis3::X);
     }
 
     imod_mat_trans(&mut mat, &iref.ctrans);
@@ -3109,7 +3111,7 @@ mod source_driver_model {
         out.push_str("--- transform ---\n");
         {
             let mut mat = imod_mat_new(3).unwrap();
-            imod_mat_rot(&mut mat, 20., Axis3::Z.to_raw());
+            imod_mat_rot(&mut mat, 20., Axis3::Z);
             let t = Ipoint {
                 x: 3.,
                 y: -2.,
@@ -3239,7 +3241,7 @@ mod source_driver_model {
             setclips(&mut cl, 1);
             m3.obj[0].clips = cl;
             let mut tm = imod_mat_new(3).unwrap();
-            imod_mat_rot(&mut tm, 15., Axis3::Z.to_raw());
+            imod_mat_rot(&mut tm, 15., Axis3::Z);
             let cen = Ipoint {
                 x: 50.,
                 y: 40.,
@@ -3249,7 +3251,7 @@ mod source_driver_model {
             dumpmodel(&mut out, "t3", &m3);
             imod_mat_delete(&mut tm);
             let mut tm = imod_mat_new(3).unwrap();
-            imod_mat_rot(&mut tm, 15., Axis3::Y.to_raw());
+            imod_mat_rot(&mut tm, 15., Axis3::Y);
             imod_trans_model3d(&mut m3, &mut tm, None, cen, 1., 1);
             dumpmodel(&mut out, "t3f", &m3);
         }

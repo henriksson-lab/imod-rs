@@ -1,14 +1,11 @@
 //! Translation of `IMOD/libcfshr/reduce_by_binning.c`.
 
 use crate::imod::libcfshr::b3dutil::num_omp_threads;
+pub use crate::imod::libiimod::mrcslice::{
+    SLICE_MODE_BYTE, SLICE_MODE_FLOAT, SLICE_MODE_RGB, SLICE_MODE_SHORT, SLICE_MODE_USHORT,
+};
 use rayon::iter::{IndexedParallelIterator, ParallelIterator};
 use rayon::slice::ParallelSliceMut;
-
-pub const SLICE_MODE_BYTE: i32 = 0;
-pub const SLICE_MODE_SHORT: i32 = 1;
-pub const SLICE_MODE_FLOAT: i32 = 2;
-pub const SLICE_MODE_USHORT: i32 = 6;
-pub const SLICE_MODE_RGB: i32 = 16;
 
 /// `extractAndBinIntoArray` (`reduce_by_binning.c:53`).
 ///

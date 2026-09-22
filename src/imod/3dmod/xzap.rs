@@ -71,10 +71,21 @@ use crate::imod::three_dmod::zap_classes::{
     ZAP_TOGGLE_RESOL, ZAP_TOGGLE_RUBBER, ZAP_TOGGLE_TIMELOCK, ZAP_TOGGLE_ZLOCK,
 };
 
-/// `IMOD_MMOVIE` / `IMOD_MMODEL` (`imodel.h`).
-pub const IMOD_MMOVIE: i32 = 0;
-/// See [`IMOD_MMOVIE`].
-pub const IMOD_MMODEL: i32 = 1;
+// These shadowed the canonical declarations with WRONG values -- `IMOD_MMOVIE`
+// was 0 where `imodel.h:27` says 2, `IOBJ_SYM_NONE`/`_CIRCLE` were swapped
+// against `iobj.h:76-77`, `IOBJ_SYMF_ARROW` was 16 where `iobj.h:85` is
+// `1 << 2`, and all five `IMOD_MESH_*` list codes were small positives where
+// `imesh.h:31-42` gives negatives.  Import the canonical ones instead.
+use crate::imod::libimod::imesh::{
+    IMOD_MESH_BGNBIGPOLY, IMOD_MESH_BGNPOLY, IMOD_MESH_BGNPOLYNORM, IMOD_MESH_BGNPOLYNORM2,
+    IMOD_MESH_ENDPOLY,
+};
+use crate::imod::libimod::imodel::{IMOD_MMODEL, IMOD_MMOVIE};
+use crate::imod::libimod::iobj::{
+    IOBJ_EXFLAG_MESH_ON_IMG, IOBJ_EXFLAG_SLICER_ONLY, IOBJ_SYM_CIRCLE, IOBJ_SYM_NONE,
+    IOBJ_SYM_TRIANGLE, IOBJ_SYMF_ARROW, IOBJ_SYMF_ENDS,
+};
+
 /// `IMOD_DRAW_*` (`imod.h:36-72`).
 pub const IMOD_DRAW_IMAGE: i32 = 1;
 /// See [`IMOD_DRAW_IMAGE`].
@@ -140,16 +151,6 @@ pub const IMOD_GHOST_LIGHTER: i32 = 16;
 pub const IMOD_GHOST_ALLSCAT: i32 = 32;
 /// See [`IMOD_GHOST_SECTION`].
 pub const IMOD_GHOST_2SHADES: i32 = 128;
-/// `IOBJ_SYM_*` (`iobj.h`).
-pub const IOBJ_SYM_NONE: i32 = 0;
-/// See [`IOBJ_SYM_NONE`].
-pub const IOBJ_SYM_CIRCLE: i32 = 1;
-/// See [`IOBJ_SYM_NONE`].
-pub const IOBJ_SYM_TRIANGLE: i32 = 3;
-/// `IOBJ_SYMF_ENDS` / `IOBJ_SYMF_ARROW` (`iobj.h`).
-pub const IOBJ_SYMF_ENDS: u8 = 2;
-/// See [`IOBJ_SYMF_ENDS`].
-pub const IOBJ_SYMF_ARROW: u8 = 16;
 /// `IOBJ_EX_PNT_LIMIT` / `IOBJ_EX_LABEL_SIZE` / `IOBJ_EX_FLAGS` /
 /// `IOBJ_EX_LASSO_ID` (`iobj.h:119-123`); `IOBJ_EXSIZE` is 16.
 pub const IOBJ_EX_PNT_LIMIT: usize = 0;
@@ -159,20 +160,6 @@ pub const IOBJ_EX_LABEL_SIZE: usize = 2;
 pub const IOBJ_EX_FLAGS: usize = 3;
 /// See [`IOBJ_EX_PNT_LIMIT`].
 pub const IOBJ_EX_LASSO_ID: usize = 15;
-/// `IOBJ_EXFLAG_SLICER_ONLY` / `IOBJ_EXFLAG_MESH_ON_IMG` (`iobj.h:127-128`).
-pub const IOBJ_EXFLAG_SLICER_ONLY: u32 = 1 << 1;
-/// See [`IOBJ_EXFLAG_SLICER_ONLY`].
-pub const IOBJ_EXFLAG_MESH_ON_IMG: u32 = 1 << 2;
-/// `IMOD_MESH_*` list codes (`imesh.h`).
-pub const IMOD_MESH_BGNPOLY: i32 = 1;
-/// See [`IMOD_MESH_BGNPOLY`].
-pub const IMOD_MESH_ENDPOLY: i32 = 2;
-/// See [`IMOD_MESH_BGNPOLY`].
-pub const IMOD_MESH_BGNBIGPOLY: i32 = 13;
-/// See [`IMOD_MESH_BGNPOLY`].
-pub const IMOD_MESH_BGNPOLYNORM: i32 = 9;
-/// See [`IMOD_MESH_BGNPOLY`].
-pub const IMOD_MESH_BGNPOLYNORM2: i32 = 11;
 /// `MRC_MODE_RGB` (`mrcfiles.h`).
 pub const MRC_MODE_RGB: i32 = 16;
 
@@ -9846,10 +9833,10 @@ impl ZapFuncs {
         }
 
         // Draw end markers with assigned colors or arrowhead with object color
-        if unsafe { (*obj).symflags } & (IOBJ_SYMF_ENDS | IOBJ_SYMF_ARROW) != 0 {
+        if unsafe { (*obj).symflags } as u32 & (IOBJ_SYMF_ENDS | IOBJ_SYMF_ARROW) != 0 {
             let psize = unsafe { (&(*cont).pts).len() };
             if psize > 1 && self.point_visable(unsafe { &(&(*cont).pts)[psize - 1] }) != 0 {
-                if unsafe { (*obj).symflags } & IOBJ_SYMF_ARROW != 0 {
+                if unsafe { (*obj).symflags } as u32 & IOBJ_SYMF_ARROW != 0 {
                     let (tx, ty, hx, hy) = (
                         self.xpos(unsafe { (&(*cont).pts)[psize - 2].x }),
                         self.ypos(unsafe { (&(*cont).pts)[psize - 2].y }),
@@ -9874,7 +9861,7 @@ impl ZapFuncs {
                 }
             }
             if ob >= 0
-                && unsafe { (*obj).symflags } & IOBJ_SYMF_ENDS != 0
+                && unsafe { (*obj).symflags } as u32 & IOBJ_SYMF_ENDS != 0
                 && self.point_visable(unsafe { &(&(*cont).pts)[0] }) != 0
             {
                 let bgnpoint = APP.lock().unwrap().as_ref().map_or(0, |a| a.bgnpoint);

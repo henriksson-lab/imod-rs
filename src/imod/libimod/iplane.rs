@@ -12,7 +12,8 @@
 
 use crate::imod::libcfshr::b3dutil::ImodFile;
 use crate::imod::libimod::imat::{
-    Imat, imod_mat_delete, imod_mat_new, imod_mat_rot, imod_mat_rotate_vector, imod_mat_transform,
+    Axis3, Imat, imod_mat_delete, imod_mat_new, imod_mat_rot, imod_mat_rotate_vector,
+    imod_mat_transform,
 };
 use crate::imod::libimod::imodel::{
     IMOD_CLIPSIZE, IMODF_MULTIPLE_CLIP, Iclip_planes, Iplane, Ipoint, SIZE_CLIP,
@@ -58,7 +59,7 @@ pub fn imod_plane_init(plane: &mut Iplane) {
 /// Original: `imodPlaneAxisRotate` (`iplane.c:52`).
 ///
 /// Unused, does not maintain a fixed point.
-pub fn imod_plane_axis_rotate(plane: &mut Iplane, angle: f64, axis: i32) {
+pub fn imod_plane_axis_rotate(plane: &mut Iplane, angle: f64, axis: Axis3) {
     let mut rpt = Ipoint::default();
     let Some(mut mat) = imod_mat_new(3) else {
         return;
@@ -395,7 +396,7 @@ mod tests {
             g9(pl[1].c as f64),
             g9(pl[1].d as f64)
         ));
-        imod_plane_axis_rotate(&mut pl[2], 22.5, Axis3::Y.to_raw());
+        imod_plane_axis_rotate(&mut pl[2], 22.5, Axis3::Y);
         out.push_str(&format!(
             "parot {} {} {} {}\n",
             g9(pl[2].a as f64),
@@ -492,8 +493,8 @@ mod tests {
         }
 
         let mut mat = imod_mat_new(3).unwrap();
-        imod_mat_rot(&mut mat, 30., Axis3::Z.to_raw());
-        imod_mat_rot(&mut mat, -17., Axis3::X.to_raw());
+        imod_mat_rot(&mut mat, 30., Axis3::Z);
+        imod_mat_rot(&mut mat, -17., Axis3::X);
         let s = Ipoint {
             x: 1.5,
             y: 0.75,
@@ -501,7 +502,7 @@ mod tests {
         };
         imod_mat_scale(&mut mat, &s);
         let mut mat2 = imod_mat_new(3).unwrap();
-        imod_mat_rot(&mut mat2, 30., Axis3::Z.to_raw());
+        imod_mat_rot(&mut mat2, 30., Axis3::Z);
         imod_clips_trans(&mut clips, &mat, &mat2);
         out.push_str("ctrans\n");
         for i in 0..IMOD_CLIPSIZE {
@@ -540,7 +541,7 @@ mod tests {
             assert_eq!(got, want, "line {} differs from iplane.c driver", line + 1);
         }
         assert_eq!(out.lines().count(), want.lines().count());
-        let _ = Axis3::X.to_raw();
+        let _ = Axis3::X;
     }
 
     /// Verbatim stdout of the driver linked against `IMOD/libimod/iplane.c`.

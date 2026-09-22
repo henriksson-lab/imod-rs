@@ -543,28 +543,16 @@ impl MvMovieState {
             delangle *= -1.;
         }
         if self.fullaxis == IMODV_MOVIE_FULLAXIS_X {
-            imod_mat_rot(&mut mati, delangle, Axis3::X.to_raw());
+            imod_mat_rot(&mut mati, delangle, Axis3::X);
         } else if self.fullaxis == IMODV_MOVIE_FULLAXIS_Y {
-            imod_mat_rot(&mut mati, delangle, Axis3::Y.to_raw());
+            imod_mat_rot(&mut mati, delangle, Axis3::Y);
         } else {
-            imod_mat_rot(&mut mat, -p[0].0 as f64, Axis3::X.to_raw());
-            imod_mat_rot(&mut mat, -p[1].0 as f64, Axis3::Y.to_raw());
-            imod_mat_rot(&mut mat, -p[2].0 as f64, Axis3::Z.to_raw());
-            imod_mat_rot(
-                &mut mat,
-                (p[2].0 + steps as f32 * p[2].1) as f64,
-                Axis3::Z.to_raw(),
-            );
-            imod_mat_rot(
-                &mut mat,
-                (p[1].0 + steps as f32 * p[1].1) as f64,
-                Axis3::Y.to_raw(),
-            );
-            imod_mat_rot(
-                &mut mat,
-                (p[0].0 + steps as f32 * p[0].1) as f64,
-                Axis3::X.to_raw(),
-            );
+            imod_mat_rot(&mut mat, -p[0].0 as f64, Axis3::X);
+            imod_mat_rot(&mut mat, -p[1].0 as f64, Axis3::Y);
+            imod_mat_rot(&mut mat, -p[2].0 as f64, Axis3::Z);
+            imod_mat_rot(&mut mat, (p[2].0 + steps as f32 * p[2].1) as f64, Axis3::Z);
+            imod_mat_rot(&mut mat, (p[1].0 + steps as f32 * p[1].1) as f64, Axis3::Y);
+            imod_mat_rot(&mut mat, (p[0].0 + steps as f32 * p[0].1) as f64, Axis3::X);
             let mut axis = Ipoint::default();
             let mut angle = 0.;
             imod_mat_find_vector(&mat, &mut angle, &mut axis);
@@ -593,9 +581,9 @@ impl MvMovieState {
                     let v = n.model_view();
                     v.rad *= ((p[6].0 + p[6].1 * steps as f32) / p[6].0).powf(1. / steps as f32);
                     imod_mat_id(&mut mat);
-                    imod_mat_rot(&mut mat, v.rot.z as f64, Axis3::Z.to_raw());
-                    imod_mat_rot(&mut mat, v.rot.y as f64, Axis3::Y.to_raw());
-                    imod_mat_rot(&mut mat, v.rot.x as f64, Axis3::X.to_raw());
+                    imod_mat_rot(&mut mat, v.rot.z as f64, Axis3::Z);
+                    imod_mat_rot(&mut mat, v.rot.y as f64, Axis3::Y);
+                    imod_mat_rot(&mut mat, v.rot.x as f64, Axis3::X);
                     imod_mat_mult(&mati, &mat, &mut matp);
                     let (mut alpha, mut beta, mut gamma) = (0., 0., 0.);
                     imod_mat_get_nat_angles(&matp, &mut alpha, &mut beta, &mut gamma);

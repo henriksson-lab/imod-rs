@@ -1,9 +1,8 @@
 //! Translation of `IMOD/libcfshr/pctstretch.c`.
 
-pub const SLICE_MODE_BYTE: i32 = 0;
-pub const SLICE_MODE_SHORT: i32 = 1;
-pub const SLICE_MODE_FLOAT: i32 = 2;
-pub const SLICE_MODE_USHORT: i32 = 6;
+pub use crate::imod::libiimod::mrcslice::{
+    SLICE_MODE_BYTE, SLICE_MODE_FLOAT, SLICE_MODE_SHORT, SLICE_MODE_USHORT,
+};
 
 /// Original `percentileStretch` (`pctstretch.c:35`).  The source's
 /// `unsigned char **image` line-pointer array is a slice of line slices here;

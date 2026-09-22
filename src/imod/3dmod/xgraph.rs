@@ -9,9 +9,9 @@ pub const MAX_GRAPH_TOGGLES: usize = 2;
 #[repr(i32)]
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum GraphMode {
-    Xaxis = 0,
-    Yaxis = 1,
-    Zaxis = 2,
+    XAxis = 0,
+    YAxis = 1,
+    ZAxis = 2,
     Contour = 3,
     Histogram = 4,
 }
@@ -19,9 +19,9 @@ pub enum GraphMode {
 impl GraphMode {
     pub const fn from_raw(value: i32) -> Option<Self> {
         match value {
-            0 => Some(Self::Xaxis),
-            1 => Some(Self::Yaxis),
-            2 => Some(Self::Zaxis),
+            0 => Some(Self::XAxis),
+            1 => Some(Self::YAxis),
+            2 => Some(Self::ZAxis),
             3 => Some(Self::Contour),
             4 => Some(Self::Histogram),
             _ => None,
@@ -152,7 +152,7 @@ impl GraphWindow {
             m_height: 160,
             m_data: vec![],
             m_zoom: if dpr > 0. { dpr } else { 1. },
-            m_axis: GraphMode::Xaxis,
+            m_axis: GraphMode::XAxis,
             m_locked: 0,
             m_ctrl: 0,
             m_start: 0,
@@ -210,7 +210,7 @@ impl GraphWindow {
     /// `GraphWindow::axisSelected`.
     pub fn axis_selected(&mut self, item: GraphMode) {
         self.m_axis = item;
-        self.width_box_enabled = item != GraphMode::Zaxis && item != GraphMode::Histogram;
+        self.width_box_enabled = item != GraphMode::ZAxis && item != GraphMode::Histogram;
     }
     /// `GraphWindow::setToggleState`.
     pub fn set_toggle_state(&mut self, index: usize, state: i32) {
@@ -324,7 +324,7 @@ impl GraphWindow {
             return;
         }
         match self.m_axis {
-            GraphMode::Xaxis => {
+            GraphMode::XAxis => {
                 self.m_sub_start = ix;
                 if self.alloc_data_array(nx) != 0
                     || cz < 0
@@ -375,7 +375,7 @@ impl GraphWindow {
                     }
                 }
             }
-            GraphMode::Yaxis => {
+            GraphMode::YAxis => {
                 self.m_sub_start = iy;
                 if self.alloc_data_array(ny) != 0
                     || cx < 0
@@ -426,7 +426,7 @@ impl GraphWindow {
                     }
                 }
             }
-            GraphMode::Zaxis => {
+            GraphMode::ZAxis => {
                 self.m_sub_start = 0;
                 self.m_center_pt = cz;
                 if self.alloc_data_array(s.zsize) != 0
@@ -810,9 +810,9 @@ impl GraphGl {
         let ni = (mx as f32 / g.m_zoom) as i32 + g.m_start;
         let (mut x, mut y, mut z) = n.location();
         match g.m_axis {
-            GraphMode::Xaxis => x = ni,
-            GraphMode::Yaxis => y = ni,
-            GraphMode::Zaxis => z = ni,
+            GraphMode::XAxis => x = ni,
+            GraphMode::YAxis => y = ni,
+            GraphMode::ZAxis => z = ni,
             _ => return,
         }
         n.set_location(x, y, z);

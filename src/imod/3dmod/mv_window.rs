@@ -1550,8 +1550,8 @@ impl crate::imod::three_dmod::mv_gfx::ImodvGfxGl for ImodvNativeGl {
         let mut val = an.y as f64;
         val = pnt.z as f64 * val.cos() - pnt.x as f64 * val.sin();
         an.x = (90. * rpd - val.atan2(pnt.y as f64)) as f32;
-        imod_mat_rot(&mut mat, -(an.x as f64) / rpd, Axis3::X.to_raw());
-        imod_mat_rot(&mut mat, -(an.y as f64) / rpd, Axis3::Y.to_raw());
+        imod_mat_rot(&mut mat, -(an.x as f64) / rpd, Axis3::X);
+        imod_mat_rot(&mut mat, -(an.y as f64) / rpd, Axis3::Y);
         let mut ar = Ipoint::default();
         an.z = 0.;
         an.x = del;

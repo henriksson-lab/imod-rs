@@ -10,6 +10,82 @@
 use crate::imod::libimod::icont::imod_contour_break;
 use crate::imod::libimod::imodel::{Icont, Iobj, Ipoint};
 
+/// `ECONTOUR_MENU_*` members of the menu-id enum (`info_setup.h:33-61`).
+#[repr(i32)]
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum ContourMenuAction {
+    New = 45,
+    Delete = 46,
+    Move = 47,
+    Sort = 48,
+    Auto = 49,
+    Type = 50,
+    Info = 51,
+    Break = 52,
+    Join = 53,
+    FixZ = 54,
+    Invert = 55,
+    Copy = 56,
+    LoopBack = 57,
+    FillIn = 58,
+}
+
+impl ContourMenuAction {
+    pub const fn from_raw(value: i32) -> Option<Self> {
+        match value {
+            45 => Some(Self::New),
+            46 => Some(Self::Delete),
+            47 => Some(Self::Move),
+            48 => Some(Self::Sort),
+            49 => Some(Self::Auto),
+            50 => Some(Self::Type),
+            51 => Some(Self::Info),
+            52 => Some(Self::Break),
+            53 => Some(Self::Join),
+            54 => Some(Self::FixZ),
+            55 => Some(Self::Invert),
+            56 => Some(Self::Copy),
+            57 => Some(Self::LoopBack),
+            58 => Some(Self::FillIn),
+            _ => None,
+        }
+    }
+
+    pub const fn to_raw(self) -> i32 {
+        self as i32
+    }
+}
+
+/// `EPOINT_MENU_*` members of the menu-id enum (`info_setup.h:33-61`).
+#[repr(i32)]
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum PointMenuAction {
+    Delete = 59,
+    SortZ = 60,
+    SortDist = 61,
+    Dist = 62,
+    Value = 63,
+    Size = 64,
+}
+
+impl PointMenuAction {
+    pub const fn from_raw(value: i32) -> Option<Self> {
+        match value {
+            59 => Some(Self::Delete),
+            60 => Some(Self::SortZ),
+            61 => Some(Self::SortDist),
+            62 => Some(Self::Dist),
+            63 => Some(Self::Value),
+            64 => Some(Self::Size),
+            _ => None,
+        }
+    }
+
+    pub const fn to_raw(self) -> i32 {
+        self as i32
+    }
+}
+
 #[repr(i32)]
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum FileMenuAction {
@@ -17,14 +93,14 @@ pub enum FileMenuAction {
     Open = 1,
     Reload = 2,
     Save = 3,
-    Saveas = 4,
-    Snapdir = 5,
-    Snapgray = 6,
-    Moviemont = 7,
+    SaveAs = 4,
+    SnapDir = 5,
+    SnapGray = 6,
+    MovieMont = 7,
     Tiff = 8,
     Extract = 9,
     Process = 10,
-    Saveinfo = 11,
+    SaveInfo = 11,
     Quit = 12,
 }
 
@@ -35,14 +111,14 @@ impl FileMenuAction {
             1 => Some(Self::Open),
             2 => Some(Self::Reload),
             3 => Some(Self::Save),
-            4 => Some(Self::Saveas),
-            5 => Some(Self::Snapdir),
-            6 => Some(Self::Snapgray),
-            7 => Some(Self::Moviemont),
+            4 => Some(Self::SaveAs),
+            5 => Some(Self::SnapDir),
+            6 => Some(Self::SnapGray),
+            7 => Some(Self::MovieMont),
             8 => Some(Self::Tiff),
             9 => Some(Self::Extract),
             10 => Some(Self::Process),
-            11 => Some(Self::Saveinfo),
+            11 => Some(Self::SaveInfo),
             12 => Some(Self::Quit),
             _ => None,
         }
@@ -83,7 +159,7 @@ impl WriteMenuAction {
 pub enum EditMenuAction {
     Grain = 17,
     Angles = 18,
-    Scalebar = 19,
+    ScaleBar = 19,
     SaveDock = 20,
     ReopenDock = 21,
     Prefs = 22,
@@ -94,7 +170,7 @@ impl EditMenuAction {
         match value {
             17 => Some(Self::Grain),
             18 => Some(Self::Angles),
-            19 => Some(Self::Scalebar),
+            19 => Some(Self::ScaleBar),
             20 => Some(Self::SaveDock),
             21 => Some(Self::ReopenDock),
             22 => Some(Self::Prefs),
@@ -141,9 +217,9 @@ pub enum ObjectMenuAction {
     Move = 31,
     Clean = 32,
     Fixz = 33,
-    Fillin = 34,
+    FillIn = 34,
     Flatten = 35,
-    Sortdist = 36,
+    SortDist = 36,
     Renumber = 37,
     Combine = 38,
     ListToSel = 39,
@@ -160,9 +236,9 @@ impl ObjectMenuAction {
             31 => Some(Self::Move),
             32 => Some(Self::Clean),
             33 => Some(Self::Fixz),
-            34 => Some(Self::Fillin),
+            34 => Some(Self::FillIn),
             35 => Some(Self::Flatten),
-            36 => Some(Self::Sortdist),
+            36 => Some(Self::SortDist),
             37 => Some(Self::Renumber),
             38 => Some(Self::Combine),
             39 => Some(Self::ListToSel),
@@ -202,26 +278,6 @@ impl SurfaceMenuAction {
     }
 }
 
-pub const ECONTOUR_MENU_NEW: i32 = 45;
-pub const ECONTOUR_MENU_DELETE: i32 = 46;
-pub const ECONTOUR_MENU_MOVE: i32 = 47;
-pub const ECONTOUR_MENU_SORT: i32 = 48;
-pub const ECONTOUR_MENU_AUTO: i32 = 49;
-pub const ECONTOUR_MENU_TYPE: i32 = 50;
-pub const ECONTOUR_MENU_INFO: i32 = 51;
-pub const ECONTOUR_MENU_BREAK: i32 = 52;
-pub const ECONTOUR_MENU_JOIN: i32 = 53;
-pub const ECONTOUR_MENU_FIXZ: i32 = 54;
-pub const ECONTOUR_MENU_INVERT: i32 = 55;
-pub const ECONTOUR_MENU_COPY: i32 = 56;
-pub const ECONTOUR_MENU_LOOPBACK: i32 = 57;
-pub const ECONTOUR_MENU_FILLIN: i32 = 58;
-pub const EPOINT_MENU_DELETE: i32 = 59;
-pub const EPOINT_MENU_SORTZ: i32 = 60;
-pub const EPOINT_MENU_SORTDIST: i32 = 61;
-pub const EPOINT_MENU_DIST: i32 = 62;
-pub const EPOINT_MENU_VALUE: i32 = 63;
-pub const EPOINT_MENU_SIZE: i32 = 64;
 #[repr(i32)]
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum EditImageMenuAction {
@@ -229,7 +285,7 @@ pub enum EditImageMenuAction {
     Colormap = 66,
     Reload = 67,
     Flip = 68,
-    Fillcache = 69,
+    FillCache = 69,
     Filler = 70,
 }
 
@@ -240,7 +296,7 @@ impl EditImageMenuAction {
             66 => Some(Self::Colormap),
             67 => Some(Self::Reload),
             68 => Some(Self::Flip),
-            69 => Some(Self::Fillcache),
+            69 => Some(Self::FillCache),
             70 => Some(Self::Filler),
             _ => None,
         }
@@ -256,14 +312,14 @@ impl EditImageMenuAction {
 pub enum ImageMenuAction {
     Graph = 71,
     Slicer = 72,
-    Linkslice = 73,
+    LinkSlice = 73,
     Tumbler = 74,
     Modv = 75,
     Zap = 76,
     Xyz = 77,
     Pixel = 78,
     Locator = 79,
-    Multiz = 80,
+    MultiZ = 80,
     Isosurface = 81,
 }
 
@@ -272,14 +328,14 @@ impl ImageMenuAction {
         match value {
             71 => Some(Self::Graph),
             72 => Some(Self::Slicer),
-            73 => Some(Self::Linkslice),
+            73 => Some(Self::LinkSlice),
             74 => Some(Self::Tumbler),
             75 => Some(Self::Modv),
             76 => Some(Self::Zap),
             77 => Some(Self::Xyz),
             78 => Some(Self::Pixel),
             79 => Some(Self::Locator),
-            80 => Some(Self::Multiz),
+            80 => Some(Self::MultiZ),
             81 => Some(Self::Isosurface),
             _ => None,
         }
@@ -296,7 +352,7 @@ pub enum HelpMenuAction {
     Controls = 82,
     Man = 83,
     Menus = 84,
-    Hotkey = 85,
+    HotKey = 85,
     About = 86,
 }
 
@@ -306,7 +362,7 @@ impl HelpMenuAction {
             82 => Some(Self::Controls),
             83 => Some(Self::Man),
             84 => Some(Self::Menus),
-            85 => Some(Self::Hotkey),
+            85 => Some(Self::HotKey),
             86 => Some(Self::About),
             _ => None,
         }
@@ -426,7 +482,7 @@ impl InfoWindow {
                     b.call("imod_info_enable", &[]);
                 }
             }
-            FileMenuAction::Saveas => {
+            FileMenuAction::SaveAs => {
                 if !s.doing_initial_load {
                     b.call("imod_info_forbid", &[]);
                     b.call("imod_info_input", &[]);
@@ -435,16 +491,16 @@ impl InfoWindow {
                     b.call("imod_info_enable", &[]);
                 }
             }
-            FileMenuAction::Moviemont => b.call("imodMovieConDialog", &[]),
-            FileMenuAction::Snapdir => {
+            FileMenuAction::MovieMont => b.call("imodMovieConDialog", &[]),
+            FileMenuAction::SnapDir => {
                 b.call("imod_info_forbid", &[]);
                 b.call("imod_info_input", &[]);
                 b.call("releaseKeyboard", &[]);
                 b.call("b3dSetSnapDirectory", &[]);
                 b.call("imod_info_enable", &[]);
             }
-            FileMenuAction::Snapgray => {
-                let a = &mut self.m_actions[FileMenuAction::Snapgray.to_raw() as usize];
+            FileMenuAction::SnapGray => {
+                let a = &mut self.m_actions[FileMenuAction::SnapGray.to_raw() as usize];
                 a.checked = !a.checked;
                 b.call("convertSnap", &[a.checked as i32]);
             }
@@ -473,7 +529,7 @@ impl InfoWindow {
                 );
                 b.call("imod_info_enable", &[]);
             }
-            FileMenuAction::Saveinfo => b.call("wprintWriteFile", &[]),
+            FileMenuAction::SaveInfo => b.call("wprintWriteFile", &[]),
             FileMenuAction::Quit => b.call("imod_quit", &[]),
             _ => {}
         }
@@ -499,7 +555,7 @@ impl InfoWindow {
         match item {
             EditMenuAction::Grain => b.call("fineGrainOpen", &[]),
             EditMenuAction::Angles => b.call("slicerAnglesOpen", &[]),
-            EditMenuAction::Scalebar => b.call("scaleBarOpen", &[]),
+            EditMenuAction::ScaleBar => b.call("scaleBarOpen", &[]),
             EditMenuAction::SaveDock => b.call("imodDialogManager.saveStackStateToSettings", &[]),
             EditMenuAction::ReopenDock => b.call("imodDialogManager.restoreStackFromSettings", &[]),
             EditMenuAction::Prefs => b.call("ImodPrefs.editPrefs", &[]),
@@ -639,7 +695,7 @@ impl InfoWindow {
                     b.call("imodDraw.mod", &[]);
                 }
             }
-            ObjectMenuAction::Fillin => {
+            ObjectMenuAction::FillIn => {
                 if self.last_fillin < 2 {
                     self.last_fillin = b.ask_forever("Fill in Z in all contours?");
                 }
@@ -649,7 +705,7 @@ impl InfoWindow {
                     b.call("imodDraw.mod", &[]);
                 }
             }
-            ObjectMenuAction::Sortdist => {
+            ObjectMenuAction::SortDist => {
                 if self.last_sortdist < 2 {
                     self.last_sortdist = b.ask_forever("Sort points by distance?");
                 }
@@ -697,43 +753,49 @@ impl InfoWindow {
         }
     }
     /// `InfoWindow::editContourSlot`.
-    pub fn edit_contour_slot(&mut self, item: i32, b: &mut dyn InfoMenuBoundary) {
+    pub fn edit_contour_slot(&mut self, item: ContourMenuAction, b: &mut dyn InfoMenuBoundary) {
         if b.state().forbid_level != 0 {
             return;
         }
         match item {
-            ECONTOUR_MENU_NEW => b.call("inputNewContour", &[]),
-            ECONTOUR_MENU_DELETE => b.call("inputDeleteContour", &[]),
-            ECONTOUR_MENU_MOVE => b.call("imodContEditMoveDialog.contour", &[]),
-            ECONTOUR_MENU_SORT => self.sort_contours(b, 0),
-            ECONTOUR_MENU_AUTO => {
+            ContourMenuAction::New => b.call("inputNewContour", &[]),
+            ContourMenuAction::Delete => b.call("inputDeleteContour", &[]),
+            ContourMenuAction::Move => b.call("imodContEditMoveDialog.contour", &[]),
+            ContourMenuAction::Sort => self.sort_contours(b, 0),
+            ContourMenuAction::Auto => {
                 b.call("autox_open", &[]);
                 b.call("imod_info_setocp", &[]);
             }
-            ECONTOUR_MENU_TYPE | EPOINT_MENU_SIZE => b.call("imodContEditSurf", &[]),
-            ECONTOUR_MENU_INFO => b.call("contourStatistics", &[]),
-            ECONTOUR_MENU_BREAK => b.call("imodContEditBreakOpen", &[]),
-            ECONTOUR_MENU_FIXZ => {
+            // The C handles `ECONTOUR_MENU_TYPE` in the *contour* switch
+            // (info_menu.cpp:958) and `EPOINT_MENU_SIZE` in the *point* switch
+            // (:1192).  They call the same function but live in different
+            // switches, and the contour switch sends id 64 to `default: break`.
+            // This arm had merged them, so the contour slot answered a point-menu
+            // id the C ignores.  `edit_point_slot` already handles `Size`.
+            ContourMenuAction::Type => b.call("imodContEditSurf", &[]),
+            ContourMenuAction::Info => b.call("contourStatistics", &[]),
+            ContourMenuAction::Break => b.call("imodContEditBreakOpen", &[]),
+            ContourMenuAction::FixZ => {
                 b.call("imodContourBreakByZ.current", &[]);
                 b.call("undo.finishUnit", &[]);
                 b.call("imodSelectionListClear", &[]);
                 b.call("imodDraw.mod", &[]);
             }
-            ECONTOUR_MENU_JOIN => b.call("imodContEditJoinOpen", &[]),
-            ECONTOUR_MENU_INVERT => {
+            ContourMenuAction::Join => b.call("imodContEditJoinOpen", &[]),
+            ContourMenuAction::Invert => {
                 b.call("undo.contourDataChg", &[]);
                 b.call("imodel_contour_invert", &[]);
                 b.call("undo.finishUnit", &[]);
                 b.call("imodDraw.mod", &[]);
             }
-            ECONTOUR_MENU_COPY => b.call("openContourCopyDialog", &[]),
-            ECONTOUR_MENU_LOOPBACK => {
+            ContourMenuAction::Copy => b.call("openContourCopyDialog", &[]),
+            ContourMenuAction::LoopBack => {
                 b.call("undo.contourDataChg", &[]);
                 b.call("imodPointAppend.loopback", &[]);
                 b.call("undo.finishUnit", &[]);
                 b.call("imodDraw.mod", &[]);
             }
-            ECONTOUR_MENU_FILLIN => {
+            ContourMenuAction::FillIn => {
                 b.call("imodFillInContourZ", &[]);
                 b.call("undo.finishUnit", &[]);
                 b.call("imodDraw.mod", &[]);
@@ -742,13 +804,13 @@ impl InfoWindow {
         }
     }
     /// `InfoWindow::editPointSlot`.
-    pub fn edit_point_slot(&mut self, item: i32, b: &mut dyn InfoMenuBoundary) {
+    pub fn edit_point_slot(&mut self, item: PointMenuAction, b: &mut dyn InfoMenuBoundary) {
         if b.state().forbid_level != 0 {
             return;
         }
         match item {
-            EPOINT_MENU_DELETE => b.call("inputDeletePoint", &[]),
-            EPOINT_MENU_SORTDIST => {
+            PointMenuAction::Delete => b.call("inputDeletePoint", &[]),
+            PointMenuAction::SortDist => {
                 if b.state().mouse_model {
                     b.call("undo.contourDataChg", &[]);
                     b.call("imodContourSort3D", &[]);
@@ -756,7 +818,7 @@ impl InfoWindow {
                     b.call("imodDraw.mod", &[]);
                 }
             }
-            EPOINT_MENU_SORTZ => {
+            PointMenuAction::SortZ => {
                 if b.state().mouse_model {
                     b.call("undo.contourDataChg", &[]);
                     b.call("imodel_contour_sortz", &[]);
@@ -764,9 +826,9 @@ impl InfoWindow {
                     b.call("imodDraw.mod", &[]);
                 }
             }
-            EPOINT_MENU_DIST => b.call("pointDistanceReport", &[]),
-            EPOINT_MENU_VALUE => b.call("ivwGetFileValue.report", &[]),
-            EPOINT_MENU_SIZE => b.call("imodContEditSurf", &[]),
+            PointMenuAction::Dist => b.call("pointDistanceReport", &[]),
+            PointMenuAction::Value => b.call("ivwGetFileValue.report", &[]),
+            PointMenuAction::Size => b.call("imodContEditSurf", &[]),
             _ => {}
         }
     }
@@ -786,7 +848,7 @@ impl InfoWindow {
                 b.call("ivwCheckWildFlag", &[]);
                 b.call("imodDraw.image_xyz_mod", &[]);
             }
-            EditImageMenuAction::Fillcache => {
+            EditImageMenuAction::FillCache => {
                 if b.state().vm_size != 0 {
                     b.call("imodCacheFill", &[])
                 } else {
@@ -816,7 +878,7 @@ impl InfoWindow {
                 }
             }
             ImageMenuAction::Slicer => b.call("slicerOpen", &[0]),
-            ImageMenuAction::Linkslice => b.call("setupLinkedSlicers", &[]),
+            ImageMenuAction::LinkSlice => b.call("setupLinkedSlicers", &[]),
             ImageMenuAction::Tumbler => {
                 if !s.rgb_store {
                     b.call("xtumOpen", &[])
@@ -828,7 +890,7 @@ impl InfoWindow {
                 b.call("imodv_open", &[]);
             }
             ImageMenuAction::Zap => b.call("imod_zap_open", &[0]),
-            ImageMenuAction::Multiz => b.call("imod_zap_open", &[1]),
+            ImageMenuAction::MultiZ => b.call("imod_zap_open", &[1]),
             ImageMenuAction::Xyz => b.call("xxyz_open", &[]),
             ImageMenuAction::Pixel => {
                 if !s.fake_image {
@@ -850,7 +912,7 @@ impl InfoWindow {
             HelpMenuAction::Man => b.call("imodShowHelpPage.3dmod", &[]),
             HelpMenuAction::Menus => b.call("imodShowHelpPage.menus", &[]),
             HelpMenuAction::Controls => b.call("imodShowHelpPage.infowin", &[]),
-            HelpMenuAction::Hotkey => b.call("imodShowHelpPage.keyboard", &[]),
+            HelpMenuAction::HotKey => b.call("imodShowHelpPage.keyboard", &[]),
             HelpMenuAction::About => {
                 b.call("imod_info_forbid", &[]);
                 b.call("imod_info_input", &[]);

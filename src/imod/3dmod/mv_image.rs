@@ -540,9 +540,9 @@ impl MvImageState {
         let Some(mut mat) = imod_mat_new(3) else {
             return;
         };
-        imod_mat_rot(&mut mat, view.rot.z as f64, Axis3::Z.to_raw());
-        imod_mat_rot(&mut mat, view.rot.y as f64, Axis3::Y.to_raw());
-        imod_mat_rot(&mut mat, view.rot.x as f64, Axis3::X.to_raw());
+        imod_mat_rot(&mut mat, view.rot.z as f64, Axis3::Z);
+        imod_mat_rot(&mut mat, view.rot.y as f64, Axis3::Y);
+        imod_mat_rot(&mut mat, view.rot.x as f64, Axis3::X);
         let (ix, iy, iz) = source.location();
         let (xs, ys, zs) = source.dimensions();
         let mut count = 0usize;

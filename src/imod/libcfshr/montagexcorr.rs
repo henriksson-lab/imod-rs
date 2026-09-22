@@ -6,6 +6,7 @@
 #![allow(non_snake_case, unused_variables, unused_assignments)]
 
 use crate::imod::libcfshr::b3dutil::{CArg, ImodFile, c_format};
+pub use crate::imod::libiimod::mrcslice::SLICE_MODE_FLOAT;
 use std::io::Write;
 use std::sync::atomic::{AtomicI32, AtomicU32, Ordering};
 
@@ -23,7 +24,6 @@ use std::sync::atomic::{AtomicI32, AtomicU32, Ordering};
 pub const MONTXC_MAX_PEAKS: i32 = 100;
 pub const MONTXC_MAX_DEBUG_LINE: i32 = 90;
 pub const MAX_RUNNERS_UP: i32 = 2;
-pub const SLICE_MODE_FLOAT: i32 = 2;
 
 /// C `static float sDistWeightHalfFall`, held as raw bits so the file-scope global keeps the
 /// process-wide sharing the C has without needing a lock.

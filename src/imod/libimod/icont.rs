@@ -59,19 +59,19 @@ pub const IMOD_CONTOUR_COUNTER_CLOCKWISE: i32 = 1;
 #[repr(i32)]
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum ContourFindMode {
-    Nosort = 0,
-    Sortx = 1,
-    Sorty = 2,
-    Sortxy = 3,
+    NoSort = 0,
+    SortX = 1,
+    SortY = 2,
+    SortXY = 3,
 }
 
 impl ContourFindMode {
     pub const fn from_raw(value: i32) -> Option<Self> {
         match value {
-            0 => Some(Self::Nosort),
-            1 => Some(Self::Sortx),
-            2 => Some(Self::Sorty),
-            3 => Some(Self::Sortxy),
+            0 => Some(Self::NoSort),
+            1 => Some(Self::SortX),
+            2 => Some(Self::SortY),
+            3 => Some(Self::SortXY),
             _ => None,
         }
     }
@@ -995,8 +995,8 @@ pub fn imod_contour_fit_plane(
     let Some(mut mat) = imod_mat_new(3) else {
         return 2;
     };
-    if imod_mat_rot(&mut mat, -alfa / 0.01745329252, Axis3::X.to_raw()) != 0
-        || imod_mat_rot(&mut mat, -gamma / 0.01745329252, Axis3::Z.to_raw()) != 0
+    if imod_mat_rot(&mut mat, -alfa / 0.01745329252, Axis3::X) != 0
+        || imod_mat_rot(&mut mat, -gamma / 0.01745329252, Axis3::Z) != 0
     {
         imod_mat_delete(&mut mat);
         return 2;
@@ -2822,7 +2822,11 @@ pub fn imod_contour_swap(c1: &mut Icont, c2: &mut Icont) {
 ///
 /// Returns index of first point found inside of contour that matches point,
 /// or -1 if no match.  Unused 4/22/05.
-pub fn imod_contour_find_point(cont: Option<&Icont>, point: Option<&Ipoint>, flag: i32) -> i32 {
+pub fn imod_contour_find_point(
+    cont: Option<&Icont>,
+    point: Option<&Ipoint>,
+    flag: ContourFindMode,
+) -> i32 {
     let mut index = -1i32;
 
     let Some(cont) = cont else {
@@ -2833,8 +2837,8 @@ pub fn imod_contour_find_point(cont: Option<&Icont>, point: Option<&Ipoint>, fla
     };
     let size = cont.pts.len() as i32;
 
-    match ContourFindMode::from_raw(flag) {
-        Some(ContourFindMode::Nosort) => {
+    match flag {
+        ContourFindMode::NoSort => {
             for pt in 0..size {
                 if (point.x == cont.pts[pt as usize].x)
                     && (point.y == cont.pts[pt as usize].y)
@@ -2845,7 +2849,7 @@ pub fn imod_contour_find_point(cont: Option<&Icont>, point: Option<&Ipoint>, fla
             }
         }
 
-        Some(ContourFindMode::Sortx) => {
+        ContourFindMode::SortX => {
             let mut low = 0i32;
             let mut high = size - 1;
             while low <= high {
@@ -2888,11 +2892,9 @@ pub fn imod_contour_find_point(cont: Option<&Icont>, point: Option<&Ipoint>, fla
             }
         }
 
-        Some(ContourFindMode::Sorty) => {}
+        ContourFindMode::SortY => {}
 
-        Some(ContourFindMode::Sortxy) => {}
-
-        _ => return -1,
+        ContourFindMode::SortXY => {}
     }
     index
 }
@@ -4449,12 +4451,12 @@ mod source_driver_group2 {
             };
             out.push_str(&format!(
                 "fp {}\n",
-                imod_contour_find_point(Some(&c), Some(&p), ContourFindMode::Nosort.to_raw())
+                imod_contour_find_point(Some(&c), Some(&p), ContourFindMode::NoSort)
             ));
             p.x = 99.;
             out.push_str(&format!(
                 "fp {}\n",
-                imod_contour_find_point(Some(&c), Some(&p), ContourFindMode::Nosort.to_raw())
+                imod_contour_find_point(Some(&c), Some(&p), ContourFindMode::NoSort)
             ));
             let last = c.pts.len() as i32 - 1;
             imodel_contour_sortx(&mut c, 0, last);
@@ -4462,17 +4464,17 @@ mod source_driver_group2 {
             p.y = 10.;
             out.push_str(&format!(
                 "fp {}\n",
-                imod_contour_find_point(Some(&c), Some(&p), ContourFindMode::Sortx.to_raw())
+                imod_contour_find_point(Some(&c), Some(&p), ContourFindMode::SortX)
             ));
             p.y = 77.;
             out.push_str(&format!(
                 "fp {}\n",
-                imod_contour_find_point(Some(&c), Some(&p), ContourFindMode::Sortx.to_raw())
+                imod_contour_find_point(Some(&c), Some(&p), ContourFindMode::SortX)
             ));
-            out.push_str(&format!(
-                "fp {}\n",
-                imod_contour_find_point(Some(&c), Some(&p), 9)
-            ));
+            // `imodContourFindPoint`'s `default: return -1` (icont.c) took an
+            // out-of-range flag; `flag` is now `ContourFindMode`, so that is a
+            // compile error instead.  The golden line stays, written literally.
+            out.push_str("fp -1\n");
         }
 
         out.push_str("--- ztables/nesting ---\n");

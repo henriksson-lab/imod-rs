@@ -16,14 +16,13 @@
 use crate::imod::libcfshr::b3dutil::{CArg, ImodFile, c_format, imod_prog_name};
 use crate::imod::libcfshr::parse_params::exit_error;
 use crate::imod::libcfshr::parse_params::setExitPrefix;
+pub use crate::imod::libiimod::mrcslice::{
+    SLICE_MODE_SBYTE, SLICE_MODE_UBYTE, SLICE_MODE_UNDEFINED,
+};
 use std::io::Write;
 
 pub const IP_NONE: i32 = 0;
 pub const IP_DEFAULT: i32 = -99_999;
-/// `mrcslice.h:29-31`.
-pub const SLICE_MODE_UNDEFINED: i32 = -1;
-pub const SLICE_MODE_SBYTE: i32 = -2;
-pub const SLICE_MODE_UBYTE: i32 = -3;
 pub const IP_APPEND_FALSE: i32 = 0;
 pub const IP_APPEND_OVERWRITE: i32 = 1;
 pub const IP_APPEND_ADD: i32 = 2;

@@ -7,7 +7,7 @@
     unused_variables
 )]
 use crate::imod::libcfshr::zoomdown::{select_zoom_filter, zoom_with_filter};
-pub const SLICE_MODE_FLOAT: i32 = 2 as i32;
+pub use crate::imod::libiimod::mrcslice::SLICE_MODE_FLOAT;
 pub fn iiu_read_binned(
     imUnit: i32,
     iz: i32,

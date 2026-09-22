@@ -931,12 +931,12 @@ impl MvOglState {
             imod_mat_rot(
                 &mut mat,
                 -((alpha / RADIANS_PER_DEGREE) as f32) as f64,
-                Axis3::X.to_raw(),
+                Axis3::X,
             );
             imod_mat_rot(
                 &mut mat,
                 -((beta / RADIANS_PER_DEGREE) as f32) as f64,
-                Axis3::Y.to_raw(),
+                Axis3::Y,
             );
 
             // Compute and draw 4 corner points.

@@ -192,10 +192,13 @@ pub fn imod_mat_scale(mat: &mut Imat, pt: &Ipoint) -> i32 {
 /// Original: `imodMatRot` (`imat.c:199`).
 ///
 /// Applies rotation by `angle` in degrees around one axis to the
-/// transformation in `mat`.  For a 3D matrix, `axis` must be one of `B3D_X`,
-/// `B3D_Y`, or `B3D_Z`; for a 2D matrix `axis` is ignored.  Returns 1 for
-/// memory error.
-pub fn imod_mat_rot(mat: &mut Imat, mut angle: f64, axis: i32) -> i32 {
+/// transformation in `mat`.  For a 3D matrix, `axis` is one of `b3dX`, `b3dY`
+/// or `b3dZ`; for a 2D matrix `axis` is ignored.  Returns 1 for memory error.
+///
+/// The C's `default: return(-1)` for an out-of-range axis (`imat.c:253`) is
+/// unreachable here: `Axis3` makes a bad axis a compile error rather than a
+/// run-time -1.  That is the point of the type, and no caller tested for it.
+pub fn imod_mat_rot(mat: &mut Imat, mut angle: f64, axis: Axis3) -> i32 {
     angle *= 0.017453293;
 
     let cosa = angle.cos();
@@ -215,29 +218,24 @@ pub fn imod_mat_rot(mat: &mut Imat, mut angle: f64, axis: i32) -> i32 {
         rmat.data[3] = (-sina) as f32;
         rmat.data[4] = cosa as f32;
     } else {
-        match Axis3::from_raw(axis) {
-            Some(Axis3::X) => {
+        match axis {
+            Axis3::X => {
                 rmat.data[5] = cosa as f32;
                 rmat.data[6] = sina as f32;
                 rmat.data[9] = (-sina) as f32;
                 rmat.data[10] = cosa as f32;
             }
-            Some(Axis3::Y) => {
+            Axis3::Y => {
                 rmat.data[0] = cosa as f32;
                 rmat.data[2] = (-sina) as f32;
                 rmat.data[8] = sina as f32;
                 rmat.data[10] = cosa as f32;
             }
-            Some(Axis3::Z) => {
+            Axis3::Z => {
                 rmat.data[0] = cosa as f32;
                 rmat.data[1] = sina as f32;
                 rmat.data[4] = (-sina) as f32;
                 rmat.data[5] = cosa as f32;
-            }
-            _ => {
-                imod_mat_delete(&mut omat);
-                imod_mat_delete(&mut rmat);
-                return -1;
             }
         }
     }
@@ -591,7 +589,7 @@ mod tests {
     fn rot_about_each_axis_matches_hand_rotation() {
         for (axis, expected) in [
             (
-                Axis3::X.to_raw(),
+                Axis3::X,
                 Ipoint {
                     x: 1.,
                     y: -3.,
@@ -599,7 +597,7 @@ mod tests {
                 },
             ),
             (
-                Axis3::Y.to_raw(),
+                Axis3::Y,
                 Ipoint {
                     x: 3.,
                     y: 2.,
@@ -607,7 +605,7 @@ mod tests {
                 },
             ),
             (
-                Axis3::Z.to_raw(),
+                Axis3::Z,
                 Ipoint {
                     x: -2.,
                     y: 1.,
@@ -631,11 +629,12 @@ mod tests {
                 (out.x - expected.x).abs() < 1e-5
                     && (out.y - expected.y).abs() < 1e-5
                     && (out.z - expected.z).abs() < 1e-5,
-                "axis {axis}: got {out:?} want {expected:?}"
+                "axis {axis:?}: got {out:?} want {expected:?}"
             );
         }
-        let mut mat = imod_mat_new(3).unwrap();
-        assert_eq!(imod_mat_rot(&mut mat, 90., 3), -1);
+        // (The `imod_mat_rot(.., 3) == -1` assertion is gone: `axis` is now
+        // `Axis3`, so the C's `default: return(-1)` at imat.c:253 is a compile
+        // error rather than a run-time value, and cannot be asserted on.)
     }
 
     /// `imodMatInverse` (`imat.c:453-513`) must undo a compound transform.
@@ -658,7 +657,7 @@ mod tests {
                 z: 4.,
             },
         );
-        imod_mat_rot(&mut mat, 30., Axis3::Z.to_raw());
+        imod_mat_rot(&mut mat, 30., Axis3::Z);
         let inv = imod_mat_inverse(&mat).unwrap();
         let pt = Ipoint {
             x: 11.,
@@ -695,7 +694,7 @@ mod tests {
     #[test]
     fn find_vector_recovers_z_rotation() {
         let mut mat = imod_mat_new(3).unwrap();
-        imod_mat_rot(&mut mat, 37., Axis3::Z.to_raw());
+        imod_mat_rot(&mut mat, 37., Axis3::Z);
         let mut angle = 0.0f64;
         let mut v = Ipoint::default();
         assert_eq!(imod_mat_find_vector(&mat, &mut angle, &mut v), 0);
@@ -711,7 +710,7 @@ mod tests {
     #[test]
     fn rotate_vector_about_z_matches_axis_rotation() {
         let mut a = imod_mat_new(3).unwrap();
-        imod_mat_rot(&mut a, 25., Axis3::Z.to_raw());
+        imod_mat_rot(&mut a, 25., Axis3::Z);
         let mut b = imod_mat_new(3).unwrap();
         assert_eq!(
             imod_mat_rotate_vector(

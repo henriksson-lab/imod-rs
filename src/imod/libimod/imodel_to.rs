@@ -4,7 +4,7 @@ use std::io::Write;
 
 use crate::imod::libcfshr::b3dutil::{CArg, ImodFile, c_format, c_format_bytes};
 
-use super::imat::{imod_mat_delete, imod_mat_new, imod_mat_rot, imod_mat_transform};
+use super::imat::{Axis3, imod_mat_delete, imod_mat_new, imod_mat_rot, imod_mat_transform};
 use super::imodel::{
     IMOD_MESH_BGNPOLYNORM, IMOD_MESH_BGNPOLYNORM2, IMOD_MESH_END, IMOD_MESH_ENDPOLY,
     IMOD_OBJFLAG_OPEN, Imesh, Imod, Iobj, Ipoint,
@@ -1242,7 +1242,7 @@ pub fn prib_tube(
     let astep = (360 / slices) as f64;
 
     for _sl in 0..slices {
-        imod_mat_rot(&mut mat, astep, 0);
+        imod_mat_rot(&mut mat, astep, Axis3::X);
         let mut rotated = Ipoint::default();
         imod_mat_transform(&mat, &norm, &mut rotated);
         offset[1] = rotated;

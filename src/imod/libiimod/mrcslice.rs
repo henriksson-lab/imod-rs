@@ -10,6 +10,30 @@ use crate::imod::libiimod::mrcfiles::{
     mrc_mread_slice, mrc_write_slice,
 };
 
+/// `SLICE_MODE_*` (`mrcslice.h:19-31`).  Canonical home: the C declares these in
+/// `mrcslice.h`, and five modules had been carrying private copies.
+pub const SLICE_MODE_BYTE: i32 = 0;
+/// See [`SLICE_MODE_BYTE`].
+pub const SLICE_MODE_SHORT: i32 = 1;
+/// See [`SLICE_MODE_BYTE`].
+pub const SLICE_MODE_FLOAT: i32 = 2;
+/// See [`SLICE_MODE_BYTE`].
+pub const SLICE_MODE_COMPLEX_SHORT: i32 = 3;
+/// See [`SLICE_MODE_BYTE`].
+pub const SLICE_MODE_COMPLEX_FLOAT: i32 = 4;
+/// See [`SLICE_MODE_BYTE`].
+pub const SLICE_MODE_USHORT: i32 = 6;
+/// See [`SLICE_MODE_BYTE`].
+pub const SLICE_MODE_RGB: i32 = 16;
+/// See [`SLICE_MODE_BYTE`].
+pub const SLICE_MODE_MAX: i32 = 99;
+/// See [`SLICE_MODE_BYTE`].
+pub const SLICE_MODE_UNDEFINED: i32 = -1;
+/// See [`SLICE_MODE_BYTE`].
+pub const SLICE_MODE_SBYTE: i32 = -2;
+/// See [`SLICE_MODE_BYTE`].
+pub const SLICE_MODE_UBYTE: i32 = -3;
+
 /// `sliceReadMRC` from `mrcslice.c:945`.
 ///
 /// Returns a slice holding one plane of `hin` at coordinate `sno` along

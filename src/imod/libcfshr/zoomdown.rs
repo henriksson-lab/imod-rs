@@ -14,6 +14,9 @@
 //! (`zoomdown.c:314`) becomes a [`FiltBuf`].
 
 use crate::imod::libcfshr::b3dutil::num_omp_threads;
+pub use crate::imod::libiimod::mrcslice::{
+    SLICE_MODE_BYTE, SLICE_MODE_FLOAT, SLICE_MODE_RGB, SLICE_MODE_SHORT, SLICE_MODE_USHORT,
+};
 use core::cell::Cell;
 use rayon::iter::{IntoParallelIterator, ParallelIterator};
 
@@ -125,12 +128,6 @@ pub enum ZoomOut<'a> {
     Float(&'a mut [f32]),
     Index(&'a mut [u32]),
 }
-
-pub const SLICE_MODE_BYTE: i32 = 0;
-pub const SLICE_MODE_SHORT: i32 = 1;
-pub const SLICE_MODE_FLOAT: i32 = 2;
-pub const SLICE_MODE_USHORT: i32 = 6;
-pub const SLICE_MODE_RGB: i32 = 16;
 
 /// Original `PI` (`zoomdown.c:86`).  The literal the source wrote, not
 /// `f64::consts::PI`.
