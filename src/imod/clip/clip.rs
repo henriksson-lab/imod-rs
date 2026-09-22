@@ -1645,13 +1645,19 @@ WARNING: This file is not a readable MRC file.\n\
             processing::clip_unpack(&mut input, &mut second, &mut output, &mut options)
         }
         crate::imod::clip::clip::ClipOperation::Defectmap => {
-            processing::clip_defect_map(&mut input, &mut output, &mut options)
+            match processing::clip_defect_map(&mut input, &mut output, &mut options) {
+                Ok(()) => 0,
+                status => status.unwrap_err(),
+            }
         }
         crate::imod::clip::clip::ClipOperation::Supergain => {
             // `clip.cpp:880` passes `hout.fp` by value; the `Rc` clone shares
             // the same open file, as the C's copied `FILE *` does.
             let mut fp = output.fp.clone().unwrap();
-            processing::clip_super_gain(&mut input, &mut fp, &mut options)
+            match processing::clip_super_gain(&mut input, &mut fp, &mut options) {
+                Ok(()) => 0,
+                status => status.unwrap_err(),
+            }
         }
         crate::imod::clip::clip::ClipOperation::Blankfile => {
             processing::clip_blank_file(&mut output, &mut options)
@@ -1670,10 +1676,16 @@ WARNING: This file is not a readable MRC file.\n\
             processing::clip_scaling(&mut input, &mut output, &mut options)
         }
         crate::imod::clip::clip::ClipOperation::Color => {
-            processing::clip_color(&mut input, &mut output, &mut options)
+            match processing::clip_color(&mut input, &mut output, &mut options) {
+                Ok(()) => 0,
+                status => status.unwrap_err(),
+            }
         }
         crate::imod::clip::clip::ClipOperation::Quadrant => {
-            processing::clip_quadrant(&mut input, &mut output, &mut options)
+            match processing::clip_quadrant(&mut input, &mut output, &mut options) {
+                Ok(()) => 0,
+                status => status.unwrap_err(),
+            }
         }
         crate::imod::clip::clip::ClipOperation::Planarfit
         | crate::imod::clip::clip::ClipOperation::Flatfield => {
@@ -1686,7 +1698,10 @@ WARNING: This file is not a readable MRC file.\n\
             processing::fill_drift_corrected_edges(&mut input, &mut output, &mut options)
         }
         crate::imod::clip::clip::ClipOperation::Correlate => {
-            correlation::grap_corr(&mut input, &mut second, &mut output, &mut options)
+            match correlation::grap_corr(&mut input, &mut second, &mut output, &mut options) {
+                Ok(()) => 0,
+                status => status.unwrap_err(),
+            }
         }
         crate::imod::clip::clip::ClipOperation::Diffusion => {
             processing::clip_diffusion(&mut input, &mut output, &mut options)
@@ -1707,13 +1722,19 @@ WARNING: This file is not a readable MRC file.\n\
             filter::clip_bandpass_filter(&mut input, &mut output, &mut options)
         }
         crate::imod::clip::clip::ClipOperation::Flip => {
-            processing::clip_flip(&mut input, &mut output, &mut options)
+            match processing::clip_flip(&mut input, &mut output, &mut options) {
+                Ok(()) => 0,
+                status => status.unwrap_err(),
+            }
         }
         crate::imod::clip::clip::ClipOperation::Histogram => {
             processing::clip_histogram(&mut input, &mut options)
         }
         crate::imod::clip::clip::ClipOperation::JoinRgb => {
-            processing::clip_joinrgb(&mut input, &mut second, &mut output, &mut options)
+            match processing::clip_joinrgb(&mut input, &mut second, &mut output, &mut options) {
+                Ok(()) => 0,
+                status => status.unwrap_err(),
+            }
         }
         crate::imod::clip::clip::ClipOperation::Laplacian
         | crate::imod::clip::clip::ClipOperation::Smooth
@@ -1724,10 +1745,16 @@ WARNING: This file is not a readable MRC file.\n\
             processing::clip_median(&mut input, &mut output, &mut options, &[], 0, 0)
         }
         crate::imod::clip::clip::ClipOperation::SplitRgb => {
-            processing::clip_splitrgb(&mut input, &mut options)
+            match processing::clip_splitrgb(&mut input, &mut options) {
+                Ok(()) => 0,
+                status => status.unwrap_err(),
+            }
         }
         crate::imod::clip::clip::ClipOperation::Stat => {
-            processing::clip_stat(&mut input, &mut options)
+            match processing::clip_stat(&mut input, &mut options) {
+                Ok(()) => 0,
+                status => status.unwrap_err(),
+            }
         }
         _ => {
             exit_error(b"No process selected.");

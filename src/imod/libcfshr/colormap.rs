@@ -4,14 +4,6 @@ use std::io::BufRead;
 
 use crate::imod::libcfshr::b3dutil::{ImodFile, b3d_error};
 
-/// Complete function inventory for `colormap.c`.
-pub const COLORMAP_SOURCE_FUNCTIONS: &[&str] = &[
-    "cmapStandardRamp",
-    "cmapInvertedRamp",
-    "cmapConvertRamp",
-    "cmapReadConvert",
-];
-
 static STANDARD_RAMP_DATA: [i32; 57] = [
     14, 100, 75, 200, -530, 60, 96, 255, -469, 0, 175, 177, -400, 0, 191, 143, -383, 0, 207, 78,
     -361, 90, 255, 60, -305, 191, 255, 0, -259, 239, 255, 0, -240, 255, 255, 0, -229, 255, 175, 0,
@@ -197,6 +189,5 @@ mod tests {
         let mut table = [[0; 256]; 3];
         assert_eq!(cmap_convert_ramp(&[], &mut table), 1);
         assert_eq!(cmap_convert_ramp(&[1, 1, 2, 3, 4], &mut table), 1);
-        assert_eq!(COLORMAP_SOURCE_FUNCTIONS.len(), 4);
     }
 }

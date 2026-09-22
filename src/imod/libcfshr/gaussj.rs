@@ -2,7 +2,6 @@
 
 /// C `MSIZ` (`gaussj.c:26`).
 const MSIZ: i32 = 2000;
-pub const GAUSSJ_SOURCE_FUNCTIONS: &[&str] = &["gaussj", "gaussjDet", "gaussjfw", "gaussjdet"];
 
 /// Original `gaussj` (`gaussj.c:40`).
 ///
@@ -178,6 +177,5 @@ mod tests {
         assert_eq!(determinant, 9.0);
         assert_eq!(gaussj(&mut [], 2001, 0, &mut [], 0, 0), -1);
         assert_eq!(gaussj(&mut [], 2, 2, &mut [], 1, 1), 1);
-        assert_eq!(GAUSSJ_SOURCE_FUNCTIONS.len(), 4);
     }
 }

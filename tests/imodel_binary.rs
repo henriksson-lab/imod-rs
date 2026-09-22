@@ -25,9 +25,8 @@ use imod_rs::imod::libimod::imodel::{
 use imod_rs::imod::libimod::imodel::{IMOD_CLIPSIZE, Iobjview, Iview, imod_new, imod_new_object};
 use imod_rs::imod::libimod::imodel_files::{
     byteswap, imod_close_file, imod_fgetline, imod_file_write, imod_from_vms_floats,
-    imod_get_bytes, imod_get_floats, imod_get_ints, imod_open_file, imod_put_bytes,
-    imod_put_floats, imod_put_ints, imod_put_scaled_points, imod_read, imod_read_file,
-    imod_test_if_model_file, imod_write_file, imod_write_skip_mesh, swap_longs, tovmsfloat,
+    imod_open_file, imod_put_scaled_points, imod_read, imod_read_file, imod_test_if_model_file,
+    imod_write_file, imod_write_skip_mesh, swap_longs, tovmsfloat,
 };
 use imod_rs::imod::libimod::iobj::{
     imod_object_checksum, imod_object_copy, imod_object_copy_clear, imod_object_default,
@@ -1174,9 +1173,9 @@ fn low_level_get_and_put_helpers_round_trip_big_endian_arrays() {
         let mut file = ImodFile::open(path.to_str().unwrap(), "wb")
             .ok_or(())
             .unwrap();
-        imod_put_ints(&mut file, &ints, 4).unwrap();
-        imod_put_floats(&mut file, &floats, 4).unwrap();
-        imod_put_bytes(&mut file, &bytes, 4).unwrap();
+        (&mut file).imod_put_ints(&ints, 4).unwrap();
+        (&mut file).imod_put_floats(&floats, 4).unwrap();
+        (&mut file).imod_put_bytes(&bytes, 4).unwrap();
         imod_put_scaled_points(&mut file, &points, 2, &scale).unwrap();
     }
     let raw = std::fs::read(&path).unwrap();
@@ -1187,16 +1186,16 @@ fn low_level_get_and_put_helpers_round_trip_big_endian_arrays() {
         .ok_or(())
         .unwrap();
     let mut back_ints = [0_i32; 4];
-    imod_get_ints(&mut file, &mut back_ints, 4).unwrap();
+    (&mut file).imod_get_ints(&mut back_ints, 4).unwrap();
     assert_eq!(back_ints, ints);
     let mut back_floats = [0_f32; 4];
-    imod_get_floats(&mut file, &mut back_floats, 4).unwrap();
+    (&mut file).imod_get_floats(&mut back_floats, 4).unwrap();
     assert_eq!(back_floats, floats);
     let mut back_bytes = [0_u8; 4];
-    imod_get_bytes(&mut file, &mut back_bytes, 4).unwrap();
+    (&mut file).imod_get_bytes(&mut back_bytes, 4).unwrap();
     assert_eq!(back_bytes, bytes);
     let mut back_points = [0_f32; 6];
-    imod_get_floats(&mut file, &mut back_points, 6).unwrap();
+    (&mut file).imod_get_floats(&mut back_points, 6).unwrap();
     assert_eq!(back_points, [2., 1., -3., -8., 2.5, 6.]);
     let _ = std::fs::remove_file(&path);
 }
@@ -3555,22 +3554,25 @@ deleteimodAgain=-5
 objsizeEnd=-1
 "#;
 
-/// Test-only: builds a blank-padded Fortran string like the C driver's `fstr()`.
-fn fstr(text: &str, n: usize) -> Vec<std::ffi::c_char> {
-    let bytes = text.as_bytes();
-    (0..n)
-        .map(|i| if i < bytes.len() { bytes[i] } else { b' ' } as std::ffi::c_char)
-        .collect()
-}
-
-/// Test-only: the C driver's `showstr()`.
-fn show_str(tag: &str, buf: &[std::ffi::c_char]) -> String {
+/// Test-only: the C driver's `showstr()` over a blank-padded fixed-width field.
+fn show_str(tag: &str, buf: &[u8]) -> String {
     let mut out = format!("{} [", tag);
     for c in buf {
-        out.push(*c as u8 as char);
+        out.push(*c as char);
     }
     out.push_str("]\n");
     out
+}
+
+/// Test-only: what the C driver saw after `imodopenerror` filled its
+/// fixed-width `CHARACTER` argument — the message, truncated and blank-padded
+/// to the declared width.  `imodopenerror` returns the message now, so the
+/// padding is the caller's.
+fn pad_to(text: &str, n: usize) -> Vec<u8> {
+    let bytes = text.as_bytes();
+    (0..n)
+        .map(|i| if i < bytes.len() { bytes[i] } else { b' ' })
+        .collect()
 }
 
 /// Reproduces the `imodel_fwrap.c` differential driver line for line.
@@ -3604,7 +3606,7 @@ fn imodel_fwrap_matches_native_libimod_driver() {
     let mut color = vec![[0i32; 2]; MAXC];
 
     let mut out = String::new();
-    unsafe {
+    {
         imodarraylimits(MAXP as i32, MAXC as i32);
 
         /* Error paths before any model */
@@ -3628,34 +3630,26 @@ fn imodel_fwrap_matches_native_libimod_driver() {
         .unwrap();
 
         /* Nonexistent file */
-        let name = fstr("no-such-file.mod", 256);
-        writeln!(out, "openMissing={}", openimoddata(name.as_ptr(), 256)).unwrap();
-        let mut sbuf = vec![0 as std::ffi::c_char; 40];
-        imodopenerror(sbuf.as_mut_ptr(), 40);
-        out.push_str(&show_str("errMissing", &sbuf));
+        writeln!(out, "openMissing={}", openimoddata("no-such-file.mod")).unwrap();
+        out.push_str(&show_str("errMissing", &pad_to(&imodopenerror(), 40)));
 
         /* Not a model: see the doc comment, the reference line is excluded */
-        let name = fstr(not_model.to_str().unwrap(), 256);
-        let _ = openimoddata(name.as_ptr(), 256);
+        let _ = openimoddata(not_model.to_str().unwrap());
 
         /* The real fixture through getimod */
-        let name = fstr(fixture.to_str().unwrap(), 256);
         let mut npoint = 0;
         let mut nobject = 0;
         let err = getimod(
-            ibase.as_mut_ptr(),
-            npt.as_mut_ptr(),
-            coord.as_mut_ptr(),
-            color.as_mut_ptr(),
+            &mut ibase,
+            &mut npt,
+            &mut coord,
+            &mut color,
             &mut npoint,
             &mut nobject,
-            name.as_ptr(),
-            256,
+            fixture.to_str().unwrap(),
         );
         writeln!(out, "getimod={} npoint={} nobject={}", err, npoint, nobject).unwrap();
-        let mut sbuf = vec![0 as std::ffi::c_char; 40];
-        imodopenerror(sbuf.as_mut_ptr(), 40);
-        out.push_str(&show_str("errOk", &sbuf));
+        out.push_str(&show_str("errOk", &pad_to(&imodopenerror(), 40)));
         for i in 0..(nobject as usize).min(12) {
             writeln!(
                 out,
@@ -3734,18 +3728,18 @@ fn imodel_fwrap_matches_native_libimod_driver() {
         .unwrap();
 
         let mut flags = vec![0i32; 64];
-        let err = getimodflags(flags.as_mut_ptr(), 64);
+        let err = getimodflags(&mut flags);
         write!(out, "flags={}:", err).unwrap();
         for i in 0..getimodobjsize() as usize {
             write!(out, " {}", flags[i]).unwrap();
         }
         out.push('\n');
-        let mut sbuf = vec![0 as std::ffi::c_char; 40];
-        getmodelname(sbuf.as_mut_ptr(), 40);
+        let mut sbuf = vec![0u8; 40];
+        getmodelname(&mut sbuf);
         out.push_str(&show_str("modelname", &sbuf));
         for i in 1..=getimodobjsize() {
-            let mut nbuf = vec![0 as std::ffi::c_char; 24];
-            getimodobjname(i, nbuf.as_mut_ptr(), 24);
+            let mut nbuf = vec![0u8; 24];
+            getimodobjname(i, &mut nbuf);
             out.push_str(&show_str("objname", &nbuf));
         }
 
@@ -3758,14 +3752,14 @@ fn imodel_fwrap_matches_native_libimod_driver() {
             let err = getscatsize(i, &mut s);
             writeln!(out, "scatsize {} = {} {}", i, err, s).unwrap();
             let mut clip = vec![0f32; 512];
-            let err = getimodclip(i, clip.as_mut_ptr());
+            let err = getimodclip(i, &mut clip);
             writeln!(out, "clip {} = {}", i, err).unwrap();
             for j in 0..(err * 4).max(0) as usize {
                 writeln!(out, "clipv {} {} {}", i, j, g9(clip[j] as f64)).unwrap();
             }
             let mut sizes = vec![0f32; 4096];
             let mut nsz = 0;
-            let err = getimodsizes(i, sizes.as_mut_ptr(), 4096, &mut nsz);
+            let err = getimodsizes(i, &mut sizes, 4096, &mut nsz);
             write!(out, "sizes {} = {} n={}", i, err, nsz).unwrap();
             for j in 0..(nsz as usize).min(8) {
                 write!(out, " {}", g9(sizes[j] as f64)).unwrap();
@@ -3783,7 +3777,7 @@ fn imodel_fwrap_matches_native_libimod_driver() {
             .unwrap();
             writeln!(out, "skiplow {} = {}", i, getobjskiplowvalues(i)).unwrap();
             let mut surfs = vec![0i32; 4096];
-            let err = getobjsurfaces(i, 0, surfs.as_mut_ptr());
+            let err = getobjsurfaces(i, 0, &mut surfs);
             write!(out, "surfs {} = {}:", i, err).unwrap();
             for j in 0..8 {
                 write!(out, " {}", surfs[j]).unwrap();
@@ -3791,14 +3785,14 @@ fn imodel_fwrap_matches_native_libimod_driver() {
             out.push('\n');
         }
         let mut times = vec![0i32; MAXC];
-        let err = getimodtimes(times.as_mut_ptr());
+        let err = getimodtimes(&mut times);
         write!(out, "times={}:", err).unwrap();
         for i in 0..8 {
             write!(out, " {}", times[i]).unwrap();
         }
         out.push('\n');
         let mut surfs = vec![0i32; MAXC];
-        let err = getimodsurfaces(surfs.as_mut_ptr());
+        let err = getimodsurfaces(&mut surfs);
         write!(out, "surfaces={}:", err).unwrap();
         for i in 0..8 {
             write!(out, " {}", surfs[i]).unwrap();
@@ -3808,7 +3802,7 @@ fn imodel_fwrap_matches_native_libimod_driver() {
         /* contour point sizes and values */
         let mut sizes = vec![0f32; 4096];
         let mut nsz = 0;
-        let err = getcontpointsizes(1, 1, sizes.as_mut_ptr(), 4096, &mut nsz);
+        let err = getcontpointsizes(1, 1, &mut sizes, 4096, &mut nsz);
         writeln!(out, "contsizes={} n={}", err, nsz).unwrap();
         let err = getcontvalue(1, 1, &mut v);
         writeln!(out, "contvalue={}", err).unwrap();
@@ -3822,35 +3816,35 @@ fn imodel_fwrap_matches_native_libimod_driver() {
         /* object list / range */
         let list = [1i32, 1, 1];
         let err = getimodobjlist(
-            list.as_ptr(),
+            &list,
             1,
-            ibase.as_mut_ptr(),
-            npt.as_mut_ptr(),
-            coord.as_mut_ptr(),
-            color.as_mut_ptr(),
+            &mut ibase,
+            &mut npt,
+            &mut coord,
+            &mut color,
             &mut npoint,
             &mut nobject,
         );
         writeln!(out, "objlist={} npoint={} nobject={}", err, npoint, nobject).unwrap();
         let err = getimodobjlist(
-            list.as_ptr(),
+            &list,
             0,
-            ibase.as_mut_ptr(),
-            npt.as_mut_ptr(),
-            coord.as_mut_ptr(),
-            color.as_mut_ptr(),
+            &mut ibase,
+            &mut npt,
+            &mut coord,
+            &mut color,
             &mut npoint,
             &mut nobject,
         );
         writeln!(out, "objlistEmpty={}", err).unwrap();
         let bad = [99i32];
         let err = getimodobjlist(
-            bad.as_ptr(),
+            &bad,
             1,
-            ibase.as_mut_ptr(),
-            npt.as_mut_ptr(),
-            coord.as_mut_ptr(),
-            color.as_mut_ptr(),
+            &mut ibase,
+            &mut npt,
+            &mut coord,
+            &mut color,
             &mut npoint,
             &mut nobject,
         );
@@ -3858,10 +3852,10 @@ fn imodel_fwrap_matches_native_libimod_driver() {
         let err = getimodobjrange(
             1,
             1,
-            ibase.as_mut_ptr(),
-            npt.as_mut_ptr(),
-            coord.as_mut_ptr(),
-            color.as_mut_ptr(),
+            &mut ibase,
+            &mut npt,
+            &mut coord,
+            &mut color,
             &mut npoint,
             &mut nobject,
         );
@@ -3874,10 +3868,10 @@ fn imodel_fwrap_matches_native_libimod_driver() {
         let err = getimodobjrange(
             2,
             1,
-            ibase.as_mut_ptr(),
-            npt.as_mut_ptr(),
-            coord.as_mut_ptr(),
-            color.as_mut_ptr(),
+            &mut ibase,
+            &mut npt,
+            &mut coord,
+            &mut color,
             &mut npoint,
             &mut nobject,
         );
@@ -3886,10 +3880,10 @@ fn imodel_fwrap_matches_native_libimod_driver() {
         /* partial mode */
         imodpartialmode(1);
         let err = getopenedimod(
-            ibase.as_mut_ptr(),
-            npt.as_mut_ptr(),
-            coord.as_mut_ptr(),
-            color.as_mut_ptr(),
+            &mut ibase,
+            &mut npt,
+            &mut coord,
+            &mut color,
             &mut npoint,
             &mut nobject,
         );
@@ -3901,10 +3895,10 @@ fn imodel_fwrap_matches_native_libimod_driver() {
         .unwrap();
         imodpartialmode(0);
         let err = getopenedimod(
-            ibase.as_mut_ptr(),
-            npt.as_mut_ptr(),
-            coord.as_mut_ptr(),
-            color.as_mut_ptr(),
+            &mut ibase,
+            &mut npt,
+            &mut coord,
+            &mut color,
             &mut npoint,
             &mut nobject,
         );
@@ -3932,17 +3926,14 @@ fn imodel_fwrap_matches_native_libimod_driver() {
         putimodrotation(um, v, zo);
         writeln!(out, "putcontvalue={}", putcontvalue(1, 1, 3.5)).unwrap();
         writeln!(out, "putpointvalue={}", putpointvalue(1, 1, 2, 4.5)).unwrap();
-        let name = fstr("renamed model", 40);
-        writeln!(out, "putmodelname={}", putmodelname(name.as_ptr(), 40)).unwrap();
-        let oname = fstr("obj one", 24);
-        putimodobjname(1, oname.as_ptr(), 24);
+        writeln!(out, "putmodelname={}", putmodelname("renamed model")).unwrap();
+        putimodobjname(1, "obj one");
 
         let outpath = std::path::PathBuf::from(
             std::env::var("IMOD_RS_FWRAP_OUT")
                 .unwrap_or_else(|_| dir.join("fwrap_out.mod").to_string_lossy().into_owned()),
         );
-        let oname = fstr(outpath.to_str().unwrap(), 256);
-        writeln!(out, "writeimod={}", writeimod(oname.as_ptr(), 256)).unwrap();
+        writeln!(out, "writeimod={}", writeimod(outpath.to_str().unwrap())).unwrap();
         let written = std::fs::read(&outpath).unwrap();
         let mut sum: u32 = 0;
         for byte in &written {
@@ -3951,16 +3942,14 @@ fn imodel_fwrap_matches_native_libimod_driver() {
         writeln!(out, "outfile bytes={} hash={}", written.len(), sum).unwrap();
 
         /* Re-open the written model and report it */
-        let name = fstr(outpath.to_str().unwrap(), 256);
         let err = getimod(
-            ibase.as_mut_ptr(),
-            npt.as_mut_ptr(),
-            coord.as_mut_ptr(),
-            color.as_mut_ptr(),
+            &mut ibase,
+            &mut npt,
+            &mut coord,
+            &mut color,
             &mut npoint,
             &mut nobject,
-            name.as_ptr(),
-            256,
+            outpath.to_str().unwrap(),
         );
         writeln!(
             out,
@@ -3971,11 +3960,11 @@ fn imodel_fwrap_matches_native_libimod_driver() {
             getimodobjsize()
         )
         .unwrap();
-        let mut sbuf = vec![0 as std::ffi::c_char; 40];
-        getmodelname(sbuf.as_mut_ptr(), 40);
+        let mut sbuf = vec![0u8; 40];
+        getmodelname(&mut sbuf);
         out.push_str(&show_str("reModelName", &sbuf));
-        let mut nbuf = vec![0 as std::ffi::c_char; 24];
-        getimodobjname(1, nbuf.as_mut_ptr(), 24);
+        let mut nbuf = vec![0u8; 24];
+        getimodobjname(1, &mut nbuf);
         out.push_str(&show_str("reObjName", &nbuf));
         let err = getimodmaxes(&mut x, &mut y, &mut z);
         writeln!(out, "reMaxes={} {} {} {}", err, x, y, z).unwrap();
@@ -4009,7 +3998,7 @@ fn imodel_fwrap_matches_native_libimod_driver() {
             g9(if err != 0 { 0. } else { v as f64 })
         )
         .unwrap();
-        let err = getimodflags(flags.as_mut_ptr(), 64);
+        let err = getimodflags(&mut flags);
         write!(out, "reFlags={}:", err).unwrap();
         for i in 0..getimodobjsize() as usize {
             write!(out, " {}", flags[i]).unwrap();
@@ -4032,9 +4021,14 @@ fn imodel_fwrap_matches_native_libimod_driver() {
         .unwrap();
         let mut s0 = -1;
         writeln!(out, "scatOb0={} {}", getscatsize(0, &mut s0), s0).unwrap();
-        let mut nbuf0 = vec![0 as std::ffi::c_char; 24];
-        writeln!(out, "nameOb0={}", getimodobjname(0, nbuf0.as_mut_ptr(), 24)).unwrap();
-        writeln!(out, "surfOb0={}", getobjsurfaces(0, 0, &mut s0)).unwrap();
+        let mut nbuf0 = vec![0u8; 24];
+        writeln!(out, "nameOb0={}", getimodobjname(0, &mut nbuf0)).unwrap();
+        writeln!(
+            out,
+            "surfOb0={}",
+            getobjsurfaces(0, 0, std::slice::from_mut(&mut s0))
+        )
+        .unwrap();
         writeln!(out, "contvalueOb0={}", getcontvalue(0, 1, &mut v)).unwrap();
         writeln!(out, "contvalueCo0={}", getcontvalue(1, 0, &mut v)).unwrap();
 
@@ -4098,7 +4092,7 @@ fn imodel_fwrap_matches_native_libimod_driver() {
         writeln!(
             out,
             "putcontpointsizes={}",
-            putcontpointsizes(1, 1, put_sizes.as_ptr(), 4)
+            putcontpointsizes(1, 1, &put_sizes)
         )
         .unwrap();
 
@@ -4106,10 +4100,10 @@ fn imodel_fwrap_matches_native_libimod_driver() {
         let err = getimodobjrange(
             1,
             1,
-            ibase.as_mut_ptr(),
-            npt.as_mut_ptr(),
-            coord.as_mut_ptr(),
-            color.as_mut_ptr(),
+            &mut ibase,
+            &mut npt,
+            &mut coord,
+            &mut color,
             &mut npoint,
             &mut nobject,
         );
@@ -4135,29 +4129,26 @@ fn imodel_fwrap_matches_native_libimod_driver() {
             std::env::var("IMOD_RS_FWRAP_OUT2")
                 .unwrap_or_else(|_| dir.join("fwrap_out2.mod").to_string_lossy().into_owned()),
         );
-        let oname2 = fstr(outpath2.to_str().unwrap(), 256);
-        writeln!(out, "writeimod2={}", writeimod(oname2.as_ptr(), 256)).unwrap();
+        writeln!(out, "writeimod2={}", writeimod(outpath2.to_str().unwrap())).unwrap();
         let written2 = std::fs::read(&outpath2).unwrap();
         let mut sum2: u32 = 0;
         for byte in &written2 {
             sum2 = sum2.wrapping_mul(31).wrapping_add(*byte as u32);
         }
         writeln!(out, "outfile2 bytes={} hash={}", written2.len(), sum2).unwrap();
-        let name2 = fstr(outpath2.to_str().unwrap(), 256);
         let err = getimod(
-            ibase.as_mut_ptr(),
-            npt.as_mut_ptr(),
-            coord.as_mut_ptr(),
-            color.as_mut_ptr(),
+            &mut ibase,
+            &mut npt,
+            &mut coord,
+            &mut color,
             &mut npoint,
             &mut nobject,
-            name2.as_ptr(),
-            256,
+            outpath2.to_str().unwrap(),
         );
         writeln!(out, "reopen2={} npoint={} nobject={}", err, npoint, nobject).unwrap();
         let mut resizes = vec![0f32; 4096];
         let mut n2 = 0;
-        let err = getcontpointsizes(1, 1, resizes.as_mut_ptr(), 4096, &mut n2);
+        let err = getcontpointsizes(1, 1, &mut resizes, 4096, &mut n2);
         write!(out, "reSizes={} n={}", err, n2).unwrap();
         for i in 0..(n2 as usize).min(6) {
             write!(out, " {}", g9(resizes[i] as f64)).unwrap();
@@ -4201,26 +4192,17 @@ fn imodel_fwrap_matches_native_libimod_driver() {
                 np += 1;
             }
         }
-        let pname = fstr("put obj", 24);
-        putimodobjname(2, pname.as_ptr(), 24);
+        putimodobjname(2, "put obj");
         writeln!(
             out,
             "putimod={}",
-            putimod(
-                ibase.as_ptr(),
-                npt.as_ptr(),
-                coord.as_ptr(),
-                cindex.as_ptr(),
-                color.as_ptr(),
-                np as i32,
-                nc,
-            )
+            putimod(&ibase, &npt, &coord, &cindex, &color, np as i32, nc)
         )
         .unwrap();
         writeln!(out, "putObjsize={}", getimodobjsize()).unwrap();
         for i in 1..=getimodobjsize() {
-            let mut nb = vec![0 as std::ffi::c_char; 24];
-            getimodobjname(i, nb.as_mut_ptr(), 24);
+            let mut nb = vec![0u8; 24];
+            getimodobjname(i, &mut nb);
             out.push_str(&show_str("putObjName", &nb));
             let (mut r, mut g, mut bl) = (0, 0, 0);
             let err = getobjcolor(i, &mut r, &mut g, &mut bl);
@@ -4234,10 +4216,10 @@ fn imodel_fwrap_matches_native_libimod_driver() {
         )
         .unwrap();
         let err = getopenedimod(
-            ibase.as_mut_ptr(),
-            npt.as_mut_ptr(),
-            coord.as_mut_ptr(),
-            color.as_mut_ptr(),
+            &mut ibase,
+            &mut npt,
+            &mut coord,
+            &mut color,
             &mut npoint,
             &mut nobject,
         );
@@ -4265,8 +4247,7 @@ fn imodel_fwrap_matches_native_libimod_driver() {
             std::env::var("IMOD_RS_FWRAP_OUT3")
                 .unwrap_or_else(|_| dir.join("fwrap_out3.mod").to_string_lossy().into_owned()),
         );
-        let oname3 = fstr(outpath3.to_str().unwrap(), 256);
-        writeln!(out, "writeimod3={}", writeimod(oname3.as_ptr(), 256)).unwrap();
+        writeln!(out, "writeimod3={}", writeimod(outpath3.to_str().unwrap())).unwrap();
         let written3 = std::fs::read(&outpath3).unwrap();
         let mut sum3: u32 = 0;
         for byte in &written3 {

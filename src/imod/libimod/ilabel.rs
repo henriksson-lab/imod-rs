@@ -14,7 +14,6 @@ use std::io::Write;
 use crate::imod::libcfshr::b3dutil::{CArg, ImodFile, c_format_bytes};
 
 use super::imodel::{IMOD_ERROR_MEMORY, IMOD_ERROR_WRITE};
-use super::imodel_files::{imod_get_bytes, imod_get_int, imod_put_bytes, imod_put_int};
 
 /// Original: `IlabelItem` (`imodel.h:317`).
 ///
@@ -200,23 +199,23 @@ pub fn imod_label_read(fin: &mut ImodFile, err: &mut i32) -> Option<Ilabel> {
     *err = IMOD_ERROR_MEMORY;
 
     /* size of data chunk. */
-    let _ml = imod_get_int(fin).ok()?;
+    let _ml = fin.imod_get_int().ok()?;
 
     /* number of labels. */
-    ml = imod_get_int(fin).ok()?;
+    ml = fin.imod_get_int().ok()?;
 
     /* The name of the label list. */
-    lab.len = imod_get_int(fin).ok()?;
+    lab.len = fin.imod_get_int().ok()?;
     let mut name = vec![0_u8; lab.len.max(0) as usize];
-    imod_get_bytes(fin, &mut name, lab.len).ok()?;
+    fin.imod_get_bytes(&mut name, lab.len).ok()?;
     lab.name = Some(name);
 
     /* The label list. */
     for _l in 0..ml {
-        let index = imod_get_int(fin).ok()?;
-        let len = imod_get_int(fin).ok()?;
+        let index = fin.imod_get_int().ok()?;
+        let len = fin.imod_get_int().ok()?;
         let mut name = vec![0_u8; len.max(0) as usize];
-        imod_get_bytes(fin, &mut name, len).ok()?;
+        fin.imod_get_bytes(&mut name, len).ok()?;
         lab.label.push(IlabelItem {
             name: Some(name),
             len,
@@ -406,7 +405,7 @@ impl Ilabel {
 
         /* `bgnpos = ftell(fout)` is dead in the source; the value is never used. */
 
-        if imod_put_int(fout, tag as i32).is_err() {
+        if fout.imod_put_int(tag as i32).is_err() {
             return IMOD_ERROR_WRITE;
         }
 
@@ -421,39 +420,39 @@ impl Ilabel {
             id = id.wrapping_add(8);
             id = id.wrapping_add(getpadlen(lab.label[l].name.as_deref()) as u32);
         }
-        if imod_put_int(fout, id as i32).is_err() {
+        if fout.imod_put_int(id as i32).is_err() {
             return IMOD_ERROR_WRITE;
         }
 
         /* write the number of labels. */
-        if imod_put_int(fout, lab.label.len() as i32).is_err() {
+        if fout.imod_put_int(lab.label.len() as i32).is_err() {
             return IMOD_ERROR_WRITE;
         }
         lpad = getpadlen(lab.name.as_deref());
         if lpad == 0 {
             lpad = 4;
         }
-        if imod_put_int(fout, lpad).is_err() {
+        if fout.imod_put_int(lpad).is_err() {
             return IMOD_ERROR_WRITE;
         }
 
         pad = lpad;
         if let Some(name) = &lab.name {
             len = name.iter().position(|&b| b == 0).unwrap_or(name.len()) as i32;
-            if imod_put_bytes(fout, name, len).is_err() {
+            if fout.imod_put_bytes(name, len).is_err() {
                 return IMOD_ERROR_WRITE;
             }
             pad = lpad - len;
         }
         if pad > 0 {
             let zeros = [0_u8; 4];
-            if imod_put_bytes(fout, &zeros, pad).is_err() {
+            if fout.imod_put_bytes(&zeros, pad).is_err() {
                 return IMOD_ERROR_WRITE;
             }
         }
 
         for l in 0..lab.label.len() {
-            if imod_put_int(fout, lab.label[l].index).is_err() {
+            if fout.imod_put_int(lab.label[l].index).is_err() {
                 return IMOD_ERROR_WRITE;
             }
             lpad = getpadlen(lab.label[l].name.as_deref());
@@ -461,15 +460,15 @@ impl Ilabel {
             len = name.iter().position(|&b| b == 0).unwrap_or(name.len()) as i32;
             pad = lpad - len;
 
-            if imod_put_int(fout, lpad).is_err() {
+            if fout.imod_put_int(lpad).is_err() {
                 return IMOD_ERROR_WRITE;
             }
-            if imod_put_bytes(fout, name, len).is_err() {
+            if fout.imod_put_bytes(name, len).is_err() {
                 return IMOD_ERROR_WRITE;
             }
             if pad > 0 {
                 let zeros = [0_u8; 4];
-                if imod_put_bytes(fout, &zeros, pad).is_err() {
+                if fout.imod_put_bytes(&zeros, pad).is_err() {
                     return IMOD_ERROR_WRITE;
                 }
             }

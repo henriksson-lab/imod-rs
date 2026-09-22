@@ -1,8 +1,5 @@
 //! Translation of `IMOD/libcfshr/dsyevc3.c`.
 
-/// Complete function inventory for `dsyevc3.c`.
-pub const DSYEVC3_SOURCE_FUNCTIONS: &[&str] = &["dsyevc3"];
-
 /// Original `dsyevc3` (`dsyevc3.c:35`).
 pub fn dsyevc3(matrix: &[[f64; 3]; 3], eigenvalues: &mut [f64; 3]) -> i32 {
     let diagonal_product = matrix[0][1] * matrix[1][2];
@@ -58,6 +55,5 @@ mod tests {
             - matrix[0][1] * (matrix[0][1] * matrix[2][2] - matrix[1][2] * matrix[0][2])
             + matrix[0][2] * (matrix[0][1] * matrix[1][2] - matrix[1][1] * matrix[0][2]);
         assert!((values.iter().product::<f64>() - determinant).abs() < 1.0e-10);
-        assert_eq!(DSYEVC3_SOURCE_FUNCTIONS, ["dsyevc3"]);
     }
 }

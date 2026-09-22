@@ -8,14 +8,6 @@ use std::io::Write;
 use super::robuststat::{rs_mad_median_outliers, rs_median, rs_sort_indexed_floats};
 use super::simplestat::{ls_fit2, ls_fit3, sums_to_avg_sd};
 
-/// Complete function inventory for `surfacesort.c`.
-pub const SURFACE_SORT_SOURCE_FUNCTIONS: &[&str] = &[
-    "setSurfSortParam",
-    "setsurfsortparam",
-    "surfaceSort",
-    "surfacesort",
-];
-
 /// Original `DTOR` (`surfacesort.c:21`).
 pub const DTOR: f64 = 0.017453293;
 
@@ -983,6 +975,5 @@ mod tests {
         assert_eq!(surface_sort(&[], 0, 0, &mut empty), 0);
         assert_eq!(surface_sort(&[], 1, 0, &mut empty), 1);
         assert_eq!(surface_sort(&[0.0; 3], -1, 0, &mut [0]), 1);
-        assert_eq!(SURFACE_SORT_SOURCE_FUNCTIONS.len(), 4);
     }
 }

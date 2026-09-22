@@ -174,7 +174,7 @@ pub fn set_output_options(options: &mut ClipOptions, output: &mut MrcHeader) -> 
     let mut num_tiles = [0i32; 3];
     if options.add2file == IP_APPEND_FALSE {
         mrc_head_new(output, options.ox, options.oy, options.oz, options.mode);
-        if set_chunk_output(options, output, &limits, &mut num_tiles, &mut tile_sizes) != 0
+        if set_chunk_output(options, output, &limits, &mut num_tiles, &mut tile_sizes).is_err()
             || mrc_head_write(&mut output.fp.clone().unwrap(), output) != 0
         {
             return -1;
@@ -268,7 +268,7 @@ pub fn set_chunk_output(
     limits: &[i32; 3],
     num_tiles: &mut [i32; 3],
     tile_sizes: &mut [i32; 3],
-) -> i32 {
+) -> Result<(), i32> {
     let out_sizes = [output.nx, output.ny, output.nz];
     tile_sizes[0] = options.chunk_x;
     tile_sizes[1] = options.chunk_y;
@@ -290,11 +290,11 @@ pub fn set_chunk_output(
         }
     }
     if num_tiles[0] * num_tiles[1] * num_tiles[2] == 1 {
-        return 0;
+        return Ok(());
     }
     if ii_lookup_file_from_fp(&output.fp.clone().unwrap()).is_none() {
         let _ = ImodFile::Stderr.write_all(b"iiLookupFileFromFP cannot find iiFile from fp\n");
-        return -1;
+        return Err(-1);
     }
     let mut dsize = 0;
     let mut csize = 0;
@@ -316,7 +316,7 @@ pub fn set_chunk_output(
         let _ = ImodFile::Stderr.write_all(
                 b"Output tile or image size in X and Y too large to fit in one chunk; enter smaller chunk sizes\n",
             );
-        return -1;
+        return Err(-1);
     }
     if max_z == 1 {
         tile_sizes[2] = 1;
@@ -346,7 +346,7 @@ pub fn set_chunk_output(
         tile_sizes[2],
     ) != 0
     {
-        return -1;
+        return Err(-1);
     }
     let _ = ImodFile::Stdout.write_all(
         c_format(
@@ -359,7 +359,7 @@ pub fn set_chunk_output(
         )
         .as_bytes(),
     );
-    0
+    Ok(())
 }
 /// C++ `clipWriteSlice` (`file_io.cpp:344`).
 pub fn clip_write_slice(
@@ -369,11 +369,11 @@ pub fn clip_write_slice(
     ksec: i32,
     z_write: &mut i32,
     _free_slice: i32,
-) -> i32 {
+) -> Result<(), i32> {
     if ksec < (options.nofsecs - options.oz) / 2
         || ksec >= (options.nofsecs - options.oz) / 2 + options.oz
     {
-        return 0;
+        return Ok(());
     }
     let mut blank_before = 0;
     let mut blank_after = 0;
@@ -396,7 +396,7 @@ pub fn clip_write_slice(
         if blank_before != 0 || blank_after != 0 {
             blank = clip_blank_slice(output, options);
             if blank.is_none() {
-                return -1;
+                return Err(-1);
             }
         }
     }
@@ -409,18 +409,18 @@ pub fn clip_write_slice(
             b'z',
         ) != 0
         {
-            return -1;
+            return Err(-1);
         }
         *z_write += 1;
     }
     if slice.mode != options.mode && slice_new_mode(slice, options.mode) < 0 {
-        return -1;
+        return Err(-1);
     }
     if options.ox != slice.xsize || options.oy != slice.ysize {
         slice.mean = options.pad;
         let Some(mut resized) = mrc_slice_resize(slice, options.ox, options.oy) else {
             let _ = ImodFile::Stderr.write_all(b"clipWriteSlice: error resizing slice.\n");
-            return -1;
+            return Err(-1);
         };
         slice_mmm(resized.as_mut());
         // `file_io.cpp:406-407`: `B3DMIN(hout->amin, s->min)` /
@@ -448,7 +448,7 @@ pub fn clip_write_slice(
             b'z',
         ) != 0
         {
-            return -1;
+            return Err(-1);
         }
     } else {
         slice_mmm(slice);
@@ -477,7 +477,7 @@ pub fn clip_write_slice(
             b'z',
         ) != 0
         {
-            return -1;
+            return Err(-1);
         }
     }
     *z_write += 1;
@@ -490,11 +490,11 @@ pub fn clip_write_slice(
             b'z',
         ) != 0
         {
-            return -1;
+            return Err(-1);
         }
         *z_write += 1;
     }
-    0
+    Ok(())
 }
 /// C++ `grap_volume_read` (`file_io.cpp:421`).
 pub fn grap_volume_read(input: &mut MrcHeader, options: &mut ClipOptions) -> Option<Istack> {
@@ -600,9 +600,9 @@ pub fn grap_volume_write(
     volume: &mut Istack,
     output: &mut MrcHeader,
     options: &mut ClipOptions,
-) -> i32 {
+) -> Result<(), i32> {
     let Some(first) = volume.slices.first() else {
-        return -1;
+        return Err(-1);
     };
     if options.mode == crate::imod::clip::clip::IP_DEFAULT {
         options.mode = first.mode;
@@ -649,7 +649,7 @@ pub fn grap_volume_write(
             if output.mode != first_mode {
                 let _ = ImodFile::Stderr
                     .write_all(b"overwriting requires data modes to be the same.\n");
-                return -1;
+                return Err(-1);
             }
             // `file_io.cpp:566-567` / `:582-583`: `B3DMIN(min, hout->amin)`.
             output.amin = if min < output.amin { min } else { output.amin };
@@ -666,7 +666,7 @@ pub fn grap_volume_write(
             if output.mode != first_mode {
                 let _ =
                     ImodFile::Stderr.write_all(b"inserting requires data modes to be the same.\n");
-                return -1;
+                return Err(-1);
             }
             // `file_io.cpp:566-567` / `:582-583`: `B3DMIN(min, hout->amin)`.
             output.amin = if min < output.amin { min } else { output.amin };
@@ -690,7 +690,7 @@ pub fn grap_volume_write(
         options.pad = output.amean;
     }
     if mrc_head_write(&mut output.fp.clone().unwrap(), output) != 0 {
-        return -1;
+        return Err(-1);
     }
     let zs = (volume.slices.len() as i32 - options.oz) / 2;
     let mut blank: Option<Islice> = None;
@@ -700,7 +700,7 @@ pub fn grap_volume_write(
                 blank = clip_blank_slice(output, options);
             }
             let Some(blank) = blank.as_mut() else {
-                return -1;
+                return Err(-1);
             };
             if mrc_write_slice(
                 blank.data.bytes(),
@@ -710,7 +710,7 @@ pub fn grap_volume_write(
                 b'z',
             ) != 0
             {
-                return -1;
+                return Err(-1);
             }
         } else {
             let source = &mut volume.slices[source_z as usize];
@@ -729,11 +729,11 @@ pub fn grap_volume_write(
                 b'z',
             ) != 0
             {
-                return -1;
+                return Err(-1);
             }
         }
     }
-    0
+    Ok(())
 }
 /// C++ static `clipBlankSlice` (`file_io.cpp:626`).
 pub fn clip_blank_slice(output: &mut MrcHeader, options: &mut ClipOptions) -> Option<Islice> {

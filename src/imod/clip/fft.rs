@@ -52,7 +52,10 @@ pub fn clip_fft(input: &mut MrcHeader, output: &mut MrcHeader, options: &mut Cli
         options.ocanresize = 0;
     }
     if options.dim == 3 {
-        return clip_3dfft(input, output, options);
+        return match clip_3dfft(input, output, options) {
+            Ok(()) => 0,
+            status => status.unwrap_err(),
+        };
     }
     if complex && options.ox == crate::imod::clip::clip::IP_DEFAULT {
         options.ox = 2 * (input.nx - 1);
@@ -108,8 +111,8 @@ pub fn clip_fft(input: &mut MrcHeader, output: &mut MrcHeader, options: &mut Cli
             crate::imod::clip::clip::show_error("fft: Error reading slice.");
             return -1;
         };
-        slice_fft(&mut slice);
-        if clip_write_slice(&mut slice, output, options, k, &mut z, 1) != 0 {
+        let _ = slice_fft(&mut slice);
+        if clip_write_slice(&mut slice, output, options, k, &mut z, 1).is_err() {
             return -1;
         }
     }
@@ -122,7 +125,7 @@ pub fn clip_fft(input: &mut MrcHeader, output: &mut MrcHeader, options: &mut Cli
 }
 /// C++ `slice_fft` (`fft.cpp:111`).  The numerical backend is supplied by
 /// IMOD's translated `cfft` layer; this preserves its input/output layout.
-pub fn slice_fft(slice: &mut Islice) -> i32 {
+pub fn slice_fft(slice: &mut Islice) -> Result<(), i32> {
     let nx2 = slice.xsize + 2;
     // `fft.cpp:119` sizes `ncs` in bytes for `memcpy`; the typed copy below
     // takes it in floats.
@@ -143,7 +146,7 @@ pub fn slice_fft(slice: &mut Islice) -> i32 {
             .try_reserve_exact(nx2 as usize * slice.ysize as usize)
             .is_err()
         {
-            return -1;
+            return Err(-1);
         }
         tbuf.resize(nx2 as usize * slice.ysize as usize, 0_f32);
         for i in 0..slice.ysize as usize {
@@ -182,10 +185,14 @@ pub fn slice_fft(slice: &mut Islice) -> i32 {
         slice.mode = MRC_MODE_FLOAT;
         slice.csize = 1;
     }
-    0
+    Ok(())
 }
 /// C++ `clip_3dfft` (`fft.cpp:191`).
-pub fn clip_3dfft(input: &mut MrcHeader, output: &mut MrcHeader, options: &mut ClipOptions) -> i32 {
+pub fn clip_3dfft(
+    input: &mut MrcHeader,
+    output: &mut MrcHeader,
+    options: &mut ClipOptions,
+) -> Result<(), i32> {
     if input.mode != MRC_MODE_COMPLEX_FLOAT {
         if options.ix == crate::imod::clip::clip::IP_DEFAULT {
             options.ix = input.nx;
@@ -202,11 +209,11 @@ pub fn clip_3dfft(input: &mut MrcHeader, output: &mut MrcHeader, options: &mut C
             || options.ix % 2 != 0
         {
             let _ = ImodFile::Stdout.write_all(c_format("ERROR: clip - fft input size %dx%dx%d is odd and/or has factors greater than 19.\n", &[CArg::Int((options.ix) as i64), CArg::Int((options.iy) as i64), CArg::Int((options.iz) as i64)]).as_bytes());
-            return -1;
+            return Err(-1);
         }
     }
     let Some(mut volume) = grap_volume_read(input, options) else {
-        return -1;
+        return Err(-1);
     };
     if input.mode != MRC_MODE_COMPLEX_FLOAT {
         for slice in &mut volume.slices {
@@ -218,9 +225,9 @@ pub fn clip_3dfft(input: &mut MrcHeader, output: &mut MrcHeader, options: &mut C
         }
     }
     crate::imod::clip::clip::show_status("Doing 3d fast fourier transform in core...\n");
-    clip_fftvol(&mut volume);
+    let _ = clip_fftvol(&mut volume);
     let Some(first) = volume.slices.first() else {
-        return -1;
+        return Err(-1);
     };
     mrc_head_new(
         output,
@@ -238,8 +245,8 @@ pub fn clip_3dfft(input: &mut MrcHeader, output: &mut MrcHeader, options: &mut C
             b"Clip: Inverse 3D FFT"
         },
     );
-    if grap_volume_write(&mut volume, output, options) != 0 {
-        return -1;
+    if grap_volume_write(&mut volume, output, options).is_err() {
+        return Err(-1);
     }
     mrc_coord_cp(output, input);
     if input.nx == input.mx && input.ny == input.my && input.nz == input.mz {
@@ -247,15 +254,15 @@ pub fn clip_3dfft(input: &mut MrcHeader, output: &mut MrcHeader, options: &mut C
     }
     let mut fp = output.fp.clone().unwrap();
     if mrc_head_write(&mut fp, output) != 0 {
-        return -1;
+        return Err(-1);
     }
-    0
+    Ok(())
 }
 /// C++ `clip_fftvol` (`fft.cpp:258`).
-pub fn clip_fftvol(volume: &mut Istack) -> i32 {
+pub fn clip_fftvol(volume: &mut Istack) -> Result<(), i32> {
     // `fft.cpp:258` guards on `!v`; a reference is never null.
     if volume.slices.is_empty() {
-        return -1;
+        return Err(-1);
     }
     let first = volume.slices.first().unwrap();
     // `fft.cpp:255` sizes `ncs` in bytes for `memcpy`; the typed copy below
@@ -263,8 +270,8 @@ pub fn clip_fftvol(volume: &mut Istack) -> i32 {
     let ncs = first.xsize as usize;
     let nx2 = first.xsize + 2;
     if first.mode == MRC_MODE_COMPLEX_FLOAT {
-        clip_wrapvol(volume, 1);
-        clip_fftvol3(volume, -2);
+        let _ = clip_wrapvol(volume, 1);
+        let _ = clip_fftvol3(volume, -2);
         for slice in &mut volume.slices {
             // `fft.cpp:265` transforms `v->vol[z]->data.f` in place.
             let nx = (slice.xsize - 1) * 2;
@@ -288,7 +295,7 @@ pub fn clip_fftvol(volume: &mut Istack) -> i32 {
                 .try_reserve_exact(nx2 as usize * slice.ysize as usize)
                 .is_err()
             {
-                return -1;
+                return Err(-1);
             }
             tbuf.resize(nx2 as usize * slice.ysize as usize, 0_f32);
             for i in 0..slice.ysize as usize {
@@ -305,15 +312,15 @@ pub fn clip_fftvol(volume: &mut Istack) -> i32 {
             slice.mode = MRC_MODE_COMPLEX_FLOAT;
             slice.csize = 2;
         }
-        clip_fftvol3(volume, -1);
-        clip_wrapvol(volume, 0);
+        let _ = clip_fftvol3(volume, -1);
+        let _ = clip_wrapvol(volume, 0);
     }
-    0
+    Ok(())
 }
 /// C++ `clip_fftvol3` (`fft.cpp:309`).
-pub fn clip_fftvol3(volume: &mut Istack, idir: i32) -> i32 {
+pub fn clip_fftvol3(volume: &mut Istack, idir: i32) -> Result<(), i32> {
     if volume.slices.is_empty() {
-        return -1;
+        return Err(-1);
     }
     let vxsize = volume.slices[0].xsize;
     let vysize = volume.slices[0].ysize;
@@ -321,7 +328,7 @@ pub fn clip_fftvol3(volume: &mut Istack, idir: i32) -> i32 {
     // line the values move through in place.
     let Some(mut slice) = slice_create(volume.slices.len() as i32, vxsize, MRC_MODE_COMPLEX_FLOAT)
     else {
-        return -1;
+        return Err(-1);
     };
     let sxsize = slice.xsize as usize;
     for y in 0..vysize as usize {
@@ -343,13 +350,13 @@ pub fn clip_fftvol3(volume: &mut Istack, idir: i32) -> i32 {
             }
         }
     }
-    0
+    Ok(())
 }
 /// C++ `clip_wrapvol` (`fft.cpp:350`).
-pub fn clip_wrapvol(volume: &mut Istack, direction: i32) -> i32 {
+pub fn clip_wrapvol(volume: &mut Istack, direction: i32) -> Result<(), i32> {
     // `fft.cpp:326` guards on `!v`; a reference is never null.
     let Some(first) = volume.slices.first() else {
-        return -1;
+        return Err(-1);
     };
     let first_xsize = first.xsize;
     let first_ysize = first.ysize;
@@ -360,7 +367,7 @@ pub fn clip_wrapvol(volume: &mut Istack, direction: i32) -> i32 {
         crate::imod::clip::clip::show_error(
             "fft: Memory error getting array for temporary line of data\n",
         );
-        return 1;
+        return Err(1);
     }
     temporary.resize(temporary_len, 0.);
     for slice in &mut volume.slices {
@@ -398,7 +405,7 @@ pub fn clip_wrapvol(volume: &mut Istack, direction: i32) -> i32 {
             low += 1;
         }
     }
-    0
+    Ok(())
 }
 /// C++ `mrcToDFFT` (`fft.cpp:391`).
 ///
@@ -489,8 +496,8 @@ mod tests {
         let mut slice = slice_create(4, 4, MRC_MODE_FLOAT).unwrap();
         let expected: Vec<f32> = (0..16).map(|value| value as f32 - 5.0).collect();
         slice.data.f_mut().copy_from_slice(&expected);
-        assert_eq!(slice_fft(&mut slice), 0);
-        assert_eq!(slice_fft(&mut slice), 0);
+        assert_eq!(slice_fft(&mut slice), Ok(()));
+        assert_eq!(slice_fft(&mut slice), Ok(()));
         assert_eq!(
             (slice.xsize, slice.ysize, slice.mode),
             (4, 4, MRC_MODE_FLOAT)

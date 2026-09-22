@@ -20,35 +20,6 @@ pub use crate::imod::libiimod::mrcslice::{
 use core::cell::Cell;
 use rayon::iter::{IntoParallelIterator, ParallelIterator};
 
-/// Complete non-preprocessor function inventory for `zoomdown.c`.
-pub const ZOOMDOWN_SOURCE_FUNCTIONS: &[&str] = &[
-    "selectZoomFilter",
-    "setFilterStatics",
-    "selectzoomfilter",
-    "selectZoomFilterXY",
-    "selectzoomfilterXY",
-    "setZoomValueScaling",
-    "zoomWithFilter",
-    "zoomwithfilter",
-    "zoomFiltInterp",
-    "zoomfiltinterp",
-    "zoomFiltValue",
-    "zoomfiltvalue",
-    "zoomRawFiltValue",
-    "interpLimits",
-    "scanline_accum",
-    "scanline_filter",
-    "scanline_remap",
-    "make_weighttab",
-    "filt_binning",
-    "mitchell_init",
-    "filt_mitchell",
-    "filt_blackman",
-    "filt_triangle",
-    "filt_lanczos2",
-    "filt_lanczos3",
-];
-
 /// Original `fn_proc` (`zoomdown.c:70`).
 pub type FnProc = fn(f64) -> f64;
 
@@ -1668,6 +1639,5 @@ mod tests {
             zoomwithfilter(&[1.0; 4], &2, &2, &0.0, &0.0, &2, &2, &2, &0, &mut output),
             4
         );
-        assert_eq!(ZOOMDOWN_SOURCE_FUNCTIONS.len(), 25);
     }
 }

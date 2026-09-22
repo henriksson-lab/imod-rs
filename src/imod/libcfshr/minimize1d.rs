@@ -1,5 +1,4 @@
 //! Translation of `IMOD/libcfshr/minimize1D.c`.
-pub const MINIMIZE1D_SOURCE_FUNCTIONS: &[&str] = &["minimize1D", "minimize1d"];
 
 /// Original `minimize1D` (`minimize1D.c:53`).
 pub fn minimize1d(
@@ -144,6 +143,5 @@ mod tests {
             minimize1d(0., 0., 1., 0, &mut cuts, &mut [0.; 13], &mut next),
             1
         );
-        assert_eq!(MINIMIZE1D_SOURCE_FUNCTIONS.len(), 2);
     }
 }

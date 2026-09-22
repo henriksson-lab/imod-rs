@@ -1,7 +1,6 @@
 //! Translation of `IMOD/libcfshr/parselist.c`.
 
 use super::parse_params::strtol;
-pub const PARSELIST_SOURCE_FUNCTIONS: &[&str] = &["parselist", "parselistfw"];
 
 /// Parsing failures from [`parselist`].
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -152,7 +151,7 @@ pub fn parselistfw(line: &str, list: &mut [i32], nlist: &mut i32, limlist: &mut 
 
 #[cfg(test)]
 mod tests {
-    use super::{PARSELIST_SOURCE_FUNCTIONS, ParseListError, parselist, parselistfw};
+    use super::{ParseListError, parselist, parselistfw};
 
     #[test]
     fn source_ranges_errors_and_fortran_copy_limit() {
@@ -174,6 +173,5 @@ mod tests {
         assert_eq!(parselistfw("/", &mut values, &mut count, &mut limit), 0);
         assert_eq!(count, before);
         assert_eq!(parselistfw("1x", &mut values, &mut count, &mut limit), 2);
-        assert_eq!(PARSELIST_SOURCE_FUNCTIONS.len(), 2);
     }
 }

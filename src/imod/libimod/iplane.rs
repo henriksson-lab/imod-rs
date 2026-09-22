@@ -18,7 +18,6 @@ use crate::imod::libimod::imat::{
 use crate::imod::libimod::imodel::{
     IMOD_CLIPSIZE, IMODF_MULTIPLE_CLIP, Iclip_planes, Iplane, Ipoint, SIZE_CLIP,
 };
-use crate::imod::libimod::imodel_files::imod_get_float;
 use crate::imod::libimod::ipoint::imod_point_normalize;
 use std::io::Read;
 
@@ -201,7 +200,7 @@ pub fn imod_clips_read(clips: &mut Iclip_planes, fin: &mut ImodFile) -> i32 {
     /* imodGetFloats(fin, (float *)&clips->normal[0], 3 * nread) */
     for i in 0..nread {
         for c in 0..3 {
-            let Ok(v) = imod_get_float(fin) else {
+            let Ok(v) = fin.imod_get_float() else {
                 return 1;
             };
             if (i as usize) < clips.normal.len() {
@@ -216,7 +215,7 @@ pub fn imod_clips_read(clips: &mut Iclip_planes, fin: &mut ImodFile) -> i32 {
     /* imodGetFloats(fin, (float *)&clips->point[0], 3 * nread) */
     for i in 0..nread {
         for c in 0..3 {
-            let Ok(v) = imod_get_float(fin) else {
+            let Ok(v) = fin.imod_get_float() else {
                 return 1;
             };
             if (i as usize) < clips.point.len() {

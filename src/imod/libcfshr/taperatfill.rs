@@ -5,15 +5,6 @@ use std::sync::Mutex;
 
 const MAX_TAPER: i32 = 256;
 const MAX_AVG_OUT: usize = 16;
-pub const TAPERATFILL_SOURCE_FUNCTIONS: &[&str] = &[
-    "sliceTaperAtFill",
-    "taperAtFill",
-    "taperatfill",
-    "getLastTaperFillValue",
-    "getlasttaperfillvalue",
-    "sliceFindFillValue",
-    "sliceReplaceFill",
-];
 
 /// Most recently detected fill value, shared by the taper operation and its
 /// legacy query entry point.
@@ -421,6 +412,5 @@ mod tests {
             getlasttaperfillvalue(&mut first),
             get_last_taper_fill_value(&mut second)
         );
-        assert_eq!(TAPERATFILL_SOURCE_FUNCTIONS.len(), 7);
     }
 }

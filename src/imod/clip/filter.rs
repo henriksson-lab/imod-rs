@@ -89,14 +89,14 @@ pub fn clip_bandpass_filter(
             return -1;
         };
         if !complex {
-            slice_fft(slice.as_mut());
+            let _ = slice_fft(slice.as_mut());
             mrc_bandpass_filter(slice.as_mut(), options.high as f64, options.low as f64);
-            slice_fft(slice.as_mut());
+            let _ = slice_fft(slice.as_mut());
         } else {
             slice_complex_float(slice.as_mut());
             mrc_bandpass_filter(slice.as_mut(), options.high as f64, options.low as f64);
         }
-        if clip_write_slice(slice.as_mut(), output, options, k, &mut z, 1) != 0 {
+        if clip_write_slice(slice.as_mut(), output, options, k, &mut z, 1).is_err() {
             return -1;
         }
     }

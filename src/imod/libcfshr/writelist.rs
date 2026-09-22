@@ -2,14 +2,6 @@
 
 use std::io::Write;
 
-pub const WRITELIST_SOURCE_FUNCTIONS: &[&str] = &[
-    "writeList",
-    "writelist",
-    "wrlist",
-    "listToString",
-    "addRangeToLine",
-];
-
 /// Original `writeList` (`writelist.c:23`).
 pub fn write_list(list: &[i32], number_of_values: i32, line_length: i32) -> i32 {
     let Some(line_string) = list_to_string(list, number_of_values) else {
@@ -110,6 +102,5 @@ mod tests {
     fn empty_or_out_of_bounds_owned_inputs_do_not_index_like_c() {
         assert_eq!(list_to_string(&[], 0), None);
         assert_eq!(list_to_string(&[1], 2), None);
-        assert_eq!(WRITELIST_SOURCE_FUNCTIONS.len(), 5);
     }
 }

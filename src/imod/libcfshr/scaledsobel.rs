@@ -1,8 +1,5 @@
 //! Translation of `IMOD/libcfshr/scaledsobel.c`.
 
-/// Complete function inventory for `scaledsobel.c`.
-pub const SCALED_SOBEL_SOURCE_FUNCTIONS: &[&str] = &["scaledSobel", "scaledsobel"];
-
 /// `scaledSobel` (`scaledsobel.c:49`).
 pub fn scaled_sobel(
     in_image: Option<&[f32]>,
@@ -339,6 +336,5 @@ mod tests {
             ),
             1
         );
-        assert_eq!(SCALED_SOBEL_SOURCE_FUNCTIONS.len(), 2);
     }
 }

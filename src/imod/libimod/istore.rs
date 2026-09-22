@@ -2,9 +2,6 @@
 #![allow(unused_variables)]
 use crate::imod::libcfshr::b3dutil::{CArg, ImodFile, c_format};
 use crate::imod::libimod::imodel::{IMOD_ERROR_READ, Icont, Iobj};
-use crate::imod::libimod::imodel_files::{
-    imod_get_float, imod_get_int, imod_get_short, imod_put_float, imod_put_int, imod_put_short,
-};
 use std::io::{Read, Write};
 
 /// Original `GEN_STORE_*` scalar encodings (`include/istore.h:23-26`).
@@ -204,12 +201,12 @@ pub fn imod_write_store(list: &[Istore], id: i32, file: &mut ImodFile) -> i32 {
     if list.is_empty() {
         return 0;
     }
-    let _ = imod_put_int(file, id);
+    let _ = file.imod_put_int(id);
     let i = list.len() as i32 * 12;
-    let _ = imod_put_int(file, i);
+    let _ = file.imod_put_int(i);
     for store in list {
-        let _ = imod_put_short(file, store.type_);
-        let _ = imod_put_short(file, store.flags as i16);
+        let _ = file.imod_put_short(store.type_);
+        let _ = file.imod_put_short(store.flags as i16);
         // Set up to write index
         let mut dtype = store.flags & 3;
         for item in [store.index, store.value] {
@@ -217,15 +214,15 @@ pub fn imod_write_store(list: &[Istore], id: i32, file: &mut ImodFile) -> i32 {
             // the int/float/short writes drop their `ferror` return.
             match dtype {
                 0 => {
-                    let _ = imod_put_int(file, (item.i()));
+                    let _ = file.imod_put_int((item.i()));
                 }
                 1 => {
-                    let _ = imod_put_float(file, (item.f()));
+                    let _ = file.imod_put_float((item.f()));
                 }
                 2 => {
                     let shorts = (item.s());
-                    let _ = imod_put_short(file, shorts[0]);
-                    let _ = imod_put_short(file, shorts[1]);
+                    let _ = file.imod_put_short(shorts[0]);
+                    let _ = file.imod_put_short(shorts[1]);
                 }
                 _ => {
                     if file.write_all(&(item.b())).is_err() {
@@ -241,7 +238,7 @@ pub fn imod_write_store(list: &[Istore], id: i32, file: &mut ImodFile) -> i32 {
 }
 /// Original: `imodReadStore` (`istore.c`).
 pub fn imod_read_store(file: &mut ImodFile, error: &mut i32) -> Option<Vec<Istore>> {
-    let nread = match imod_get_int(file) {
+    let nread = match file.imod_get_int() {
         Ok(bytes) => bytes / 12,
         Err(_) => {
             *error = IMOD_ERROR_READ;
@@ -257,14 +254,14 @@ pub fn imod_read_store(file: &mut ImodFile, error: &mut i32) -> Option<Vec<Istor
     let mut need_sort = false;
     let mut last_index = 0;
     for entry in 0..nread {
-        let type_ = match imod_get_short(file) {
+        let type_ = match file.imod_get_short() {
             Ok(value) => value,
             Err(_) => {
                 *error = IMOD_ERROR_READ;
                 return None;
             }
         };
-        let flags = match imod_get_short(file) {
+        let flags = match file.imod_get_short() {
             Ok(value) => value as u16,
             Err(_) => {
                 *error = IMOD_ERROR_READ;
@@ -275,21 +272,21 @@ pub fn imod_read_store(file: &mut ImodFile, error: &mut i32) -> Option<Vec<Istor
         let mut dtype = flags & 3;
         for item in &mut items {
             *item = match dtype {
-                0 => match imod_get_int(file) {
+                0 => match file.imod_get_int() {
                     Ok(value) => StoreUnion::from_i(value),
                     Err(_) => {
                         *error = IMOD_ERROR_READ;
                         return None;
                     }
                 },
-                1 => match imod_get_float(file) {
+                1 => match file.imod_get_float() {
                     Ok(value) => StoreUnion::from_f(value),
                     Err(_) => {
                         *error = IMOD_ERROR_READ;
                         return None;
                     }
                 },
-                2 => match (imod_get_short(file), imod_get_short(file)) {
+                2 => match (file.imod_get_short(), file.imod_get_short()) {
                     (Ok(first), Ok(second)) => StoreUnion::from_s([first, second]),
                     _ => {
                         *error = IMOD_ERROR_READ;

@@ -13,14 +13,14 @@ pub fn threshold_with_min_size(
     thresh_lo: f32,
     thresh_hi: f32,
     mut z_write: i32,
-) -> i32 {
+) -> Result<(), i32> {
     crate::imod::libiimod::mrcfiles::mrc_head_label(
         hout,
         b"clip: thresholded with minimum size constraint",
     );
     if opt.min_size == 0 {
         crate::imod::clip::clip::show_error("CLIP - The minimum size entry must be non-zero");
-        return -1;
+        return Err(-1);
     }
     let mut min_size = opt.min_size;
     let mut direction = 1.;
@@ -47,7 +47,7 @@ pub fn threshold_with_min_size(
             crate::imod::clip::clip::show_error(
                 "CLIP - Images are too large in X and Y for the thresholding procedure",
             );
-            return -1;
+            return Err(-1);
         }
     }
     let mut out = match slice_create(nx, ny, opt.mode) {
@@ -56,7 +56,7 @@ pub fn threshold_with_min_size(
             // `threshminsize.cpp:126-129`.  Note the doubled space in the
             // source's text.
             let _ = ImodFile::Stdout.write_all(b"ERROR: CLIP - Allocating  memory\n");
-            return -1;
+            return Err(-1);
         }
     };
     // The source's two `catch` blocks (`threshminsize.cpp:358-365`,
@@ -110,7 +110,7 @@ pub fn threshold_with_min_size(
                     )
                     .as_bytes(),
                 );
-                return -1;
+                return Err(-1);
             }
             if offset == 0 || kin == -1 {
                 input = next.take()
@@ -282,16 +282,20 @@ pub fn threshold_with_min_size(
                 kout,
                 &mut z_write,
                 0,
-            ) != 0
+            )
+            .is_err()
             {
-                return -1;
+                return Err(-1);
             }
             planes[kout as usize].clear();
             kout += 1
         }
         sets.retain(|z| !((z.num_points < min_size && z.zmax < active) || z.zmax < kout));
     }
-    crate::imod::clip::file_io::set_mrc_coords(hin, hout, opt)
+    match crate::imod::clip::file_io::set_mrc_coords(hin, hout, opt) {
+        0 => Ok(()),
+        status => Err(status),
+    }
 }
 
 #[cfg(test)]
@@ -397,7 +401,7 @@ mod tests {
         };
         assert_eq!(
             threshold_with_min_size(&mut hin, &mut hout, &mut opt, 0., 1., 0),
-            -1
+            Err(-1)
         );
     }
 }

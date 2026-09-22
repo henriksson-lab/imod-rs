@@ -2486,7 +2486,7 @@ fn grap_volume_read_pads_and_crops_real_mrc_with_source_coordinates() {
                 output_header,
                 &mut options
             ),
-            0
+            Ok(())
         );
         ii_close(output_file);
         let append_file = ii_open(output_name.to_bytes(), "rb+");
@@ -2503,7 +2503,7 @@ fn grap_volume_read_pads_and_crops_real_mrc_with_source_coordinates() {
                 append_header,
                 &mut options
             ),
-            0
+            Ok(())
         );
         ii_close(append_file);
         let truncate_file = ii_open(output_name.to_bytes(), "rb+");
@@ -2524,7 +2524,7 @@ fn grap_volume_read_pads_and_crops_real_mrc_with_source_coordinates() {
                 truncate_header,
                 &mut options
             ),
-            0
+            Ok(())
         );
         ii_close(truncate_file);
         let overwrite_file = ii_open(output_name.to_bytes(), "rb+");
@@ -2545,7 +2545,7 @@ fn grap_volume_read_pads_and_crops_real_mrc_with_source_coordinates() {
                 overwrite_header,
                 &mut options
             ),
-            0
+            Ok(())
         );
         ii_close(overwrite_file);
         let mismatch_name = CString::new(mode_mismatch.to_string_lossy().as_bytes()).unwrap();
@@ -2569,7 +2569,7 @@ fn grap_volume_read_pads_and_crops_real_mrc_with_source_coordinates() {
                 mismatch_header,
                 &mut options
             ),
-            -1
+            Err(-1)
         );
         ii_close(mismatch_file);
         assert_eq!(grap_volume_free(volume), 0);

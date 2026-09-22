@@ -8,30 +8,6 @@ use crate::imod::libiimod::mrcfiles::{MRC_MODE_COMPLEX_FLOAT, MRC_MODE_RGB};
 const SMOOTH_KERNEL: [[i32; 3]; 3] = [[1, 2, 1], [2, 4, 2], [1, 2, 1]];
 const SHARPEN_KERNEL: [[i32; 3]; 3] = [[-1, -1, -1], [-1, 9, -1], [-1, -1, -1]];
 const LAPLACIAN_KERNEL: [[i32; 3]; 3] = [[1, 1, 1], [1, -4, 1], [1, 1, 1]];
-/// Complete function inventory for `islice.c`.
-pub const ISLICE_SOURCE_FUNCTIONS: &[&str] = &[
-    "sliceCreate",
-    "sliceInit",
-    "sliceFree",
-    "sliceClear",
-    "sliceMode",
-    "sliceModeIfReal",
-    "sliceGetXSize",
-    "sliceGetYSize",
-    "sliceGetVal",
-    "slicePutVal",
-    "sliceGetPixelMagnitude",
-    "sliceGetValMagnitude",
-    "sliceMinMax",
-    "sliceScaleAndFree",
-    "sliceByteEdgeLaplacian",
-    "sliceByteSharpen",
-    "sliceByteSmooth",
-    "sliceByteConvolve",
-    "slice_mat_filter",
-    "mrc_slice_mat_getimat",
-    "mrc_slice_mat_mult",
-];
 /// C `union MRCdata` (`mrcslice.h:45-51`): the pixel storage of an
 /// `Islice`, typed by the union member the C reads it through.  `b` also
 /// carries RGB (three bytes per pixel), `s` complex short (two per pixel) and
@@ -841,6 +817,5 @@ mod tests {
             slices: vec![slice],
         };
         assert_eq!(stack.slices[0].data.byte_len(), 4);
-        assert_eq!(ISLICE_SOURCE_FUNCTIONS.len(), 21);
     }
 }

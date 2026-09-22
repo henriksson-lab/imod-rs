@@ -11,15 +11,6 @@ use std::io::Write;
 
 pub const MAX_MBS_SCALES: usize = 20;
 
-/// Complete function inventory for `multibinstat.c`.
-pub const MULTI_BIN_STAT_SOURCE_FUNCTIONS: &[&str] = &[
-    "multiBinSetup",
-    "multibinsetup",
-    "multiBinStats",
-    "multibinstats",
-    "makeStandardDevMap",
-];
-
 /// Original `multiBinSetup` (`multibinstat.c:50`).
 #[allow(clippy::too_many_arguments)]
 pub fn multi_bin_setup(
@@ -790,6 +781,5 @@ mod tests {
             ),
             3
         );
-        assert_eq!(MULTI_BIN_STAT_SOURCE_FUNCTIONS.len(), 5);
     }
 }

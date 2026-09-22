@@ -6,8 +6,6 @@
 //! packed.  Keeping one owned Rust record avoids the C version's mutable
 //! process-global pointers without changing the one-based array convention.
 
-use std::ffi::{CString, c_char};
-
 pub use crate::imod::flib::subrs::model::fortmodel::FortModel;
 use crate::imod::libcfshr::b3dutil::imod_backup_file;
 use crate::imod::libiimod::unit_header::{iiu_ret_delta, iiu_ret_origin, iiu_ret_tilt};
@@ -170,9 +168,8 @@ pub fn fort_object_packer(fm: &mut FortModel) {
 
 /// Original: `readFortModel` (`fortmodel.c:170`).
 pub fn read_fort_model(filename: &str, fm: &mut FortModel) -> Result<(), i32> {
-    let filename = CString::new(filename).map_err(|_| -1)?;
-    unsafe {
-        let error = openimoddata(filename.as_ptr(), filename.as_bytes().len() as i32);
+    {
+        let error = openimoddata(filename);
         if error != 0 {
             return Err(error);
         }
@@ -201,14 +198,13 @@ pub fn read_fort_model(filename: &str, fm: &mut FortModel) -> Result<(), i32> {
         }
         allocate_fort_model(fm);
         let error = getimod(
-            fm.ibase_obj.as_mut_ptr(),
-            fm.npt_in_obj.as_mut_ptr(),
-            fm.p_coord.as_mut_ptr(),
-            fm.obj_color.as_mut_ptr(),
+            &mut fm.ibase_obj,
+            &mut fm.npt_in_obj,
+            &mut fm.p_coord,
+            &mut fm.obj_color,
             &mut fm.n_point,
             &mut fm.n_object,
-            filename.as_ptr(),
-            filename.as_bytes().len() as i32,
+            filename,
         );
         if error != 0 {
             return Err(error);
@@ -223,17 +219,15 @@ pub fn put_fort_mod_objects(fm: &mut FortModel) -> Result<(), i32> {
     if fm.n_point < 0 {
         return Ok(());
     }
-    let error = unsafe {
-        putimod(
-            fm.ibase_obj.as_ptr(),
-            fm.npt_in_obj.as_ptr(),
-            fm.p_coord.as_ptr(),
-            fm.object.as_ptr(),
-            fm.obj_color.as_ptr(),
-            fm.n_point,
-            fm.max_mod_obj,
-        )
-    };
+    let error = putimod(
+        &fm.ibase_obj,
+        &fm.npt_in_obj,
+        &fm.p_coord,
+        &fm.object,
+        &fm.obj_color,
+        fm.n_point,
+        fm.max_mod_obj,
+    );
     if error == 0 { Ok(()) } else { Err(error) }
 }
 
@@ -241,43 +235,36 @@ pub fn put_fort_mod_objects(fm: &mut FortModel) -> Result<(), i32> {
 pub fn write_fort_model(filename: &str, fm: &mut FortModel) -> Result<(), i32> {
     let _ = imod_backup_file(filename);
     put_fort_mod_objects(fm)?;
-    let name = CString::new(filename).map_err(|_| -1)?;
-    let error = unsafe { writeimod(name.as_ptr(), name.as_bytes().len() as i32) };
+    let error = writeimod(filename);
     if error == 0 { Ok(()) } else { Err(error) }
 }
 
 /// Original: `fortModOpenError` (`fortmodel.c:201`).
+/// The source fills a 320-byte blank-padded Fortran buffer and then trims it;
+/// `imodopenerror` returns the message directly now, so the trim is the
+/// identity.
 pub fn fort_mod_open_error() -> String {
-    let mut bytes = [b' ' as c_char; 320];
-    unsafe { imodopenerror(bytes.as_mut_ptr(), bytes.len() as i32) };
-    bytes
-        .iter()
-        .map(|&byte| byte as u8 as char)
-        .collect::<String>()
-        .trim_end()
-        .to_owned()
+    imodopenerror()
 }
 
 /// Original: `scaleFortModel` (`fortmodel.c:452`).
 pub fn scale_fort_model(fm: &mut FortModel, idir: i32) -> Result<(), i32> {
     let (mut xy, mut zscale, mut xoff, mut yoff, mut zoff, mut flip) = (0., 0., 0., 0., 0., 0);
     let (mut xs, mut ys, mut zs) = (0., 0., 0.);
-    unsafe {
-        let err = getimodhead(
-            &mut xy,
-            &mut zscale,
-            &mut xoff,
-            &mut yoff,
-            &mut zoff,
-            &mut flip,
-        );
-        if err != 0 {
-            return Err(err);
-        }
-        let err = getimodscales(&mut xs, &mut ys, &mut zs);
-        if err != 0 {
-            return Err(err);
-        }
+    let err = getimodhead(
+        &mut xy,
+        &mut zscale,
+        &mut xoff,
+        &mut yoff,
+        &mut zoff,
+        &mut flip,
+    );
+    if err != 0 {
+        return Err(err);
+    }
+    let err = getimodscales(&mut xs, &mut ys, &mut zs);
+    if err != 0 {
+        return Err(err);
     }
     for point in fm.p_coord.iter_mut().take(fm.n_point.max(0) as usize) {
         if idir == 0 {
@@ -299,11 +286,11 @@ pub fn scale_fort_mod_to_image(fm: &mut FortModel, unit: i32, idir: i32) -> Resu
     iiu_ret_origin(unit, &mut origin);
     iiu_ret_delta(unit, &mut delta);
     iiu_ret_tilt(unit, &mut tilt);
-    if idir == 0 && unsafe { imodhasimageref() } <= 0 {
+    if idir == 0 && imodhasimageref() <= 0 {
         return Ok(());
     }
     if idir != 0 {
-        let error = unsafe { putimageref(delta.as_ptr(), origin.as_ptr(), tilt.as_ptr()) };
+        let error = putimageref(&delta, &origin, &tilt);
         if error != 0 {
             return Err(error);
         }
