@@ -10,14 +10,39 @@ use crate::imod::three_dmod::utilities::{PopupEntry, util_lookup_popup_hit};
 
 pub const NUM_TOOLBUTTONS: usize = 8;
 pub const NUM_TIMEBUTTONS: usize = 1;
-pub const ZAP_TOGGLE_RESOL: usize = 0;
-pub const ZAP_TOGGLE_ZLOCK: usize = 1;
-pub const ZAP_TOGGLE_CENTER: usize = 2;
-pub const ZAP_TOGGLE_INSERT: usize = 3;
-pub const ZAP_TOGGLE_RUBBER: usize = 4;
-pub const ZAP_TOGGLE_LASSO: usize = 5;
-pub const ZAP_TOGGLE_ARROW: usize = 6;
-pub const ZAP_TOGGLE_TIMELOCK: usize = 7;
+#[repr(usize)]
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum ZapToggle {
+    Resolution = 0,
+    ZLock = 1,
+    Center = 2,
+    Insert = 3,
+    Rubber = 4,
+    Lasso = 5,
+    Arrow = 6,
+    TimeLock = 7,
+}
+
+impl ZapToggle {
+    pub const fn from_raw(value: usize) -> Option<Self> {
+        match value {
+            0 => Some(Self::Resolution),
+            1 => Some(Self::ZLock),
+            2 => Some(Self::Center),
+            3 => Some(Self::Insert),
+            4 => Some(Self::Rubber),
+            5 => Some(Self::Lasso),
+            6 => Some(Self::Arrow),
+            7 => Some(Self::TimeLock),
+            _ => None,
+        }
+    }
+
+    pub const fn to_raw(self) -> usize {
+        self as usize
+    }
+}
+
 pub const MULTIZ_MAX_PANELS: i32 = 20;
 pub const MIN_SLIDER_WIDTH: i32 = 20;
 pub const MAX_SLIDER_WIDTH: i32 = 100;

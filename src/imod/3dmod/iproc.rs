@@ -10,14 +10,39 @@ pub const PROC_BACKGROUND: u8 = 0;
 pub const PROC_FOREGROUND: u8 = 255;
 pub const NO_KERNEL_SIGMA: f32 = 0.4;
 pub const KERNEL_MAXSIZE: usize = 7;
-pub const APPLY_BUT: usize = 0;
-pub const MORE_BUT: usize = 1;
-pub const LESS_BUT: usize = 2;
-pub const DO_SAME_BUT: usize = 3;
-pub const TOGGLE_BUT: usize = 4;
-pub const RESET_BUT: usize = 5;
-pub const SAVE_BUT: usize = 6;
-pub const LIST_BUT: usize = 7;
+#[repr(usize)]
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum IprocButtonAction {
+    Apply = 0,
+    More = 1,
+    Less = 2,
+    DoSame = 3,
+    Toggle = 4,
+    Reset = 5,
+    Save = 6,
+    List = 7,
+}
+
+impl IprocButtonAction {
+    pub const fn from_raw(value: usize) -> Option<Self> {
+        match value {
+            0 => Some(Self::Apply),
+            1 => Some(Self::More),
+            2 => Some(Self::Less),
+            3 => Some(Self::DoSame),
+            4 => Some(Self::Toggle),
+            5 => Some(Self::Reset),
+            6 => Some(Self::Save),
+            7 => Some(Self::List),
+            _ => None,
+        }
+    }
+
+    pub const fn to_raw(self) -> usize {
+        self as usize
+    }
+}
+
 /// The source's final two actions are Done and Help.  `timerEvent` enables
 /// every action except Help, so retain their count even though Done has no
 /// standalone Rust action handler yet.
@@ -739,35 +764,43 @@ impl IprocWindow {
         param: &mut IprocParam,
         boundary: &mut dyn IprocBoundary,
     ) {
-        match which {
-            APPLY_BUT => {
+        match crate::imod::three_dmod::iproc::IprocButtonAction::from_raw(which) {
+            Some(crate::imod::three_dmod::iproc::IprocButtonAction::Apply) => {
                 proc.save_proc_num = -1;
                 self.apply(proc, param, boundary, false);
             }
-            MORE_BUT => {
+            Some(crate::imod::three_dmod::iproc::IprocButtonAction::More) => {
                 self.param_stack.push(param.clone());
                 self.start_process(proc, param, boundary);
             }
-            LESS_BUT if self.param_stack.len() > 1 => {
+            Some(crate::imod::three_dmod::iproc::IprocButtonAction::Less)
+                if self.param_stack.len() > 1 =>
+            {
                 self.param_stack.pop();
                 self.command_list.pop();
                 self.data_modes.pop();
                 self.apply(proc, param, boundary, true);
             }
-            DO_SAME_BUT if !self.param_stack.is_empty() => self.apply(proc, param, boundary, true),
-            TOGGLE_BUT => {
+            Some(crate::imod::three_dmod::iproc::IprocButtonAction::DoSame)
+                if !self.param_stack.is_empty() =>
+            {
+                self.apply(proc, param, boundary, true)
+            }
+            Some(crate::imod::three_dmod::iproc::IprocButtonAction::Toggle) => {
                 proc.toggling = false;
                 copy_and_display(proc, boundary);
             }
-            RESET_BUT => {
+            Some(crate::imod::three_dmod::iproc::IprocButtonAction::Reset) => {
                 clearsec(proc, boundary);
                 boundary.redraw_image();
             }
-            SAVE_BUT => {
+            Some(crate::imod::three_dmod::iproc::IprocButtonAction::Save) => {
                 proc.modified = false;
                 proc.idata_sec = -1;
             }
-            LIST_BUT => boundary.dialog_message(&self.command_list.join("\n")),
+            Some(crate::imod::three_dmod::iproc::IprocButtonAction::List) => {
+                boundary.dialog_message(&self.command_list.join("\n"))
+            }
             _ => {}
         }
     }
@@ -777,7 +810,10 @@ impl IprocWindow {
         proc: &mut ImodIproc,
         boundary: &mut dyn IprocBoundary,
     ) {
-        if which == TOGGLE_BUT && proc.modified {
+        if crate::imod::three_dmod::iproc::IprocButtonAction::from_raw(which)
+            == Some(crate::imod::three_dmod::iproc::IprocButtonAction::Toggle)
+            && proc.modified
+        {
             saved_to_image(proc, boundary);
             proc.toggling = true;
             boundary.redraw_image();
@@ -813,7 +849,7 @@ impl IprocWindow {
         if key == 'A' && !self.running_proc {
             self.apply(proc, param, boundary, false);
         } else if key == 'B' && !self.running_proc {
-            self.button_clicked(MORE_BUT, proc, param, boundary);
+            self.button_clicked(IprocButtonAction::More.to_raw(), proc, param, boundary);
         }
     }
     /// `IProcWindow::keyReleaseEvent`.

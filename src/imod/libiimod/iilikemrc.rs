@@ -1497,7 +1497,7 @@ fn check_em(fp: &mut ImodFile, _filename: &[u8], info: &mut RawImageInfo) -> i32
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::imod::libiimod::iimage::{IITYPE_SHORT, ii_new_box};
+    use crate::imod::libiimod::iimage::{ImageDataType, ii_new_box};
 
     fn empty_info() -> RawImageInfo {
         RawImageInfo {
@@ -1570,7 +1570,10 @@ mod tests {
         image.fp = Some(fp.clone());
         image.filename = Some("synthetic-fei.raw".into());
         assert_eq!(ii_like_mrc_check(&mut image), 0);
-        assert_eq!((image.file, image.type_), (IIFILE_RAW, IITYPE_SHORT));
+        assert_eq!(
+            (image.file, image.type_),
+            (IIFILE_RAW, ImageDataType::Short.to_raw())
+        );
         let header = image
             .mrc_header
             .as_mut()

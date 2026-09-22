@@ -2,7 +2,7 @@
 use crate::imod::libcfshr::b3dutil::ImodFile;
 use crate::imod::libiimod::iimage::{
     IIERR_BAD_CALL, IIERR_IO_ERROR, IIERR_NOT_FORMAT, IIFILE_JPEG, IIFORMAT_LUMINANCE,
-    IIFORMAT_RGB, IISTATE_READY, IITYPE_UBYTE, ImodImageFile, ii_simple_fill_mrc_header_callback,
+    IIFORMAT_RGB, IISTATE_READY, ImageDataType, ImodImageFile, ii_simple_fill_mrc_header_callback,
 };
 use crate::imod::libiimod::mrcfiles::{MRC_MODE_BYTE, MRC_MODE_RGB};
 use image::codecs::jpeg::JpegEncoder;
@@ -53,7 +53,7 @@ pub fn ii_jpeg_check(f: &mut ImodImageFile) -> i32 {
     f.nx = nx;
     f.ny = ny;
     f.nz = 1;
-    f.type_ = IITYPE_UBYTE;
+    f.type_ = ImageDataType::UnsignedByte.to_raw();
     f.format = if gray {
         IIFORMAT_LUMINANCE
     } else {

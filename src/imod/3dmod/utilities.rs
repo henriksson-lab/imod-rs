@@ -9,10 +9,7 @@
 use crate::imod::libimod::icont::ICONT_STIPPLED;
 use crate::imod::libimod::imesh::{imod_mesh_make_pairs, imod_mesh_remove_pairs};
 use crate::imod::libimod::imodel::{IMODF_FLIPYZ, IMODF_ROT90X, Icont, Imod, Iobj};
-use crate::imod::libimod::iobj::{
-    IOBJ_SYM_CIRCLE, IOBJ_SYM_NONE, IOBJ_SYM_SQUARE, IOBJ_SYM_STAR, IOBJ_SYM_TRIANGLE,
-    IOBJ_SYMF_FILL, iobj_scat,
-};
+use crate::imod::libimod::iobj::{IOBJ_SYMF_FILL, ObjectSymbol, iobj_scat};
 use crate::imod::three_dmod::imodview::ImodView;
 use crate::imod::three_dmod::scalebar::ScaleBar;
 
@@ -565,12 +562,16 @@ pub fn util_draw_symbol(
     size: i32,
     flags: u32,
 ) {
-    match sym {
-        IOBJ_SYM_CIRCLE | IOBJ_SYM_SQUARE | IOBJ_SYM_TRIANGLE => {
+    match crate::imod::libimod::iobj::ObjectSymbol::from_raw(sym) {
+        Some(crate::imod::libimod::iobj::ObjectSymbol::Circle)
+        | Some(crate::imod::libimod::iobj::ObjectSymbol::Square)
+        | Some(crate::imod::libimod::iobj::ObjectSymbol::Triangle) => {
             boundary.draw_symbol(mx, my, sym, size, flags & IOBJ_SYMF_FILL != 0)
         }
-        IOBJ_SYM_STAR => {}
-        IOBJ_SYM_NONE => boundary.draw_symbol(mx, my, sym, 1, true),
+        Some(crate::imod::libimod::iobj::ObjectSymbol::Star) => {}
+        Some(crate::imod::libimod::iobj::ObjectSymbol::None) => {
+            boundary.draw_symbol(mx, my, sym, 1, true)
+        }
         _ => {}
     }
 }
@@ -628,7 +629,10 @@ pub fn util_current_point_size(
     let Some(obj) = obj else {
         return (mod_size, backup_size, im_size);
     };
-    let mut sym_size = if obj.symbol as i32 != IOBJ_SYM_NONE && obj.symsize > 0 {
+    let mut sym_size = if crate::imod::libimod::iobj::ObjectSymbol::from_raw(obj.symbol as i32)
+        != Some(crate::imod::libimod::iobj::ObjectSymbol::None)
+        && obj.symsize > 0
+    {
         obj.symsize as i32
     } else {
         0

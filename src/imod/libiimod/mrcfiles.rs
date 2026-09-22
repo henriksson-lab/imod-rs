@@ -26,15 +26,50 @@ pub const MRC_SCALE_LINEAR: i32 = 1;
 pub const MRC_SCALE_POWER: i32 = 2;
 pub const MRC_SCALE_LOG: i32 = 3;
 pub const MRC_SCALE_BKG: i32 = 4;
-pub const MRC_MODE_BYTE: i32 = 0;
-pub const MRC_MODE_SHORT: i32 = 1;
-pub const MRC_MODE_FLOAT: i32 = 2;
-pub const MRC_MODE_COMPLEX_SHORT: i32 = 3;
-pub const MRC_MODE_COMPLEX_FLOAT: i32 = 4;
-pub const MRC_MODE_USHORT: i32 = 6;
-pub const MRC_MODE_HALF_FLOAT: i32 = 12;
-pub const MRC_MODE_RGB: i32 = 16;
-pub const MRC_MODE_4BIT: i32 = 101;
+#[repr(i32)]
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum MrcMode {
+    Byte = 0,
+    Short = 1,
+    Float = 2,
+    ComplexShort = 3,
+    ComplexFloat = 4,
+    UnsignedShort = 6,
+    HalfFloat = 12,
+    Rgb = 16,
+    FourBit = 101,
+}
+
+impl MrcMode {
+    pub const fn from_raw(value: i32) -> Option<Self> {
+        match value {
+            0 => Some(Self::Byte),
+            1 => Some(Self::Short),
+            2 => Some(Self::Float),
+            3 => Some(Self::ComplexShort),
+            4 => Some(Self::ComplexFloat),
+            6 => Some(Self::UnsignedShort),
+            12 => Some(Self::HalfFloat),
+            16 => Some(Self::Rgb),
+            101 => Some(Self::FourBit),
+            _ => None,
+        }
+    }
+
+    pub const fn to_raw(self) -> i32 {
+        self as i32
+    }
+}
+
+pub const MRC_MODE_BYTE: i32 = MrcMode::Byte.to_raw();
+pub const MRC_MODE_SHORT: i32 = MrcMode::Short.to_raw();
+pub const MRC_MODE_FLOAT: i32 = MrcMode::Float.to_raw();
+pub const MRC_MODE_COMPLEX_SHORT: i32 = MrcMode::ComplexShort.to_raw();
+pub const MRC_MODE_COMPLEX_FLOAT: i32 = MrcMode::ComplexFloat.to_raw();
+pub const MRC_MODE_USHORT: i32 = MrcMode::UnsignedShort.to_raw();
+pub const MRC_MODE_HALF_FLOAT: i32 = MrcMode::HalfFloat.to_raw();
+pub const MRC_MODE_RGB: i32 = MrcMode::Rgb.to_raw();
+pub const MRC_MODE_4BIT: i32 = MrcMode::FourBit.to_raw();
 pub const MRC_RAMP_LIN: i32 = 1;
 pub const MRC_RAMP_EXP: i32 = 2;
 pub const MRC_RAMP_LOG: i32 = 3;
@@ -690,14 +725,21 @@ pub fn mrc_head_read(fin: &mut ImodFile, hdata: &mut MrcHeader) -> i32 {
     }
 
     let mut datasize = hdata.nx.wrapping_mul(hdata.ny).wrapping_mul(hdata.nz);
-    match hdata.mode {
-        MRC_MODE_BYTE => {}
-        MRC_MODE_SHORT | MRC_MODE_USHORT | MRC_MODE_HALF_FLOAT => {
+    match crate::imod::libiimod::mrcfiles::MrcMode::from_raw(hdata.mode) {
+        Some(crate::imod::libiimod::mrcfiles::MrcMode::Byte) => {}
+        Some(crate::imod::libiimod::mrcfiles::MrcMode::Short)
+        | Some(crate::imod::libiimod::mrcfiles::MrcMode::UnsignedShort)
+        | Some(crate::imod::libiimod::mrcfiles::MrcMode::HalfFloat) => {
             datasize = datasize.wrapping_mul(2)
         }
-        MRC_MODE_FLOAT | MRC_MODE_COMPLEX_SHORT => datasize = datasize.wrapping_mul(4),
-        MRC_MODE_COMPLEX_FLOAT => datasize = datasize.wrapping_mul(8),
-        MRC_MODE_RGB => datasize = datasize.wrapping_mul(3),
+        Some(crate::imod::libiimod::mrcfiles::MrcMode::Float)
+        | Some(crate::imod::libiimod::mrcfiles::MrcMode::ComplexShort) => {
+            datasize = datasize.wrapping_mul(4)
+        }
+        Some(crate::imod::libiimod::mrcfiles::MrcMode::ComplexFloat) => {
+            datasize = datasize.wrapping_mul(8)
+        }
+        Some(crate::imod::libiimod::mrcfiles::MrcMode::Rgb) => datasize = datasize.wrapping_mul(3),
         _ => {
             b3d_error(
                 Some(&mut ImodFile::Stderr),
@@ -1884,9 +1926,12 @@ pub fn mrc_read_slice(
         }
     }
     if hdata.swapped != 0 {
-        let word_size = match hdata.mode {
-            MRC_MODE_SHORT | MRC_MODE_USHORT | MRC_MODE_COMPLEX_SHORT => 2,
-            MRC_MODE_FLOAT | MRC_MODE_COMPLEX_FLOAT => 4,
+        let word_size = match crate::imod::libiimod::mrcfiles::MrcMode::from_raw(hdata.mode) {
+            Some(crate::imod::libiimod::mrcfiles::MrcMode::Short)
+            | Some(crate::imod::libiimod::mrcfiles::MrcMode::UnsignedShort)
+            | Some(crate::imod::libiimod::mrcfiles::MrcMode::ComplexShort) => 2,
+            Some(crate::imod::libiimod::mrcfiles::MrcMode::Float)
+            | Some(crate::imod::libiimod::mrcfiles::MrcMode::ComplexFloat) => 4,
             _ => 0,
         };
         if word_size != 0 {

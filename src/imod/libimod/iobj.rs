@@ -137,16 +137,33 @@ pub const MATFLAGS2_SKIP_HIGH: u32 = 1 << 1;
 /// Original: `MATFLAGS2_CONSTANT` (`iobj.h:72`).
 pub const MATFLAGS2_CONSTANT: u32 = 1 << 2;
 
-/// Original: `IOBJ_SYM_CIRCLE` (`iobj.h:76`).
-pub const IOBJ_SYM_CIRCLE: i32 = 0;
-/// Original: `IOBJ_SYM_NONE` (`iobj.h:77`).
-pub const IOBJ_SYM_NONE: i32 = 1;
-/// Original: `IOBJ_SYM_SQUARE` (`iobj.h:78`).
-pub const IOBJ_SYM_SQUARE: i32 = 2;
-/// Original: `IOBJ_SYM_TRIANGLE` (`iobj.h:79`).
-pub const IOBJ_SYM_TRIANGLE: i32 = 3;
-/// Original: `IOBJ_SYM_STAR` (`iobj.h:80`).
-pub const IOBJ_SYM_STAR: i32 = 4;
+#[repr(i32)]
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum ObjectSymbol {
+    Circle = 0,
+    None = 1,
+    Square = 2,
+    Triangle = 3,
+    Star = 4,
+}
+
+impl ObjectSymbol {
+    pub const fn from_raw(value: i32) -> Option<Self> {
+        match value {
+            0 => Some(Self::Circle),
+            1 => Some(Self::None),
+            2 => Some(Self::Square),
+            3 => Some(Self::Triangle),
+            4 => Some(Self::Star),
+            _ => None,
+        }
+    }
+
+    pub const fn to_raw(self) -> i32 {
+        self as i32
+    }
+}
+
 /// Original: `IOBJ_SYM_LAST` (`iobj.h:81`).
 pub const IOBJ_SYM_LAST: i32 = 5;
 

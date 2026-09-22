@@ -9,46 +9,152 @@
 
 use crate::imod::three_dmod::imodv::ImodvApp;
 
-/// `enum {... LAST_VMENU_ID}` in `mv_window.h`.
-pub const VFILE_MENU_LOAD: usize = 0;
-pub const VFILE_MENU_SAVE: usize = 1;
-pub const VFILE_MENU_SAVEAS: usize = 2;
-pub const VFILE_MENU_SNAPRGB: usize = 3;
-pub const VFILE_MENU_SNAPTIFF: usize = 4;
-pub const VFILE_MENU_ZEROSNAP: usize = 5;
-pub const VFILE_MENU_SNAPDIR: usize = 6;
-pub const VFILE_MENU_MOVIE: usize = 7;
-pub const VFILE_MENU_SEQUENCE: usize = 8;
-pub const VFILE_MENU_QUIT: usize = 9;
-pub const VEDIT_MENU_OBJECTS: usize = 10;
-pub const VEDIT_MENU_CONTROLS: usize = 11;
-pub const VEDIT_MENU_ROTATION: usize = 12;
-pub const VEDIT_MENU_OBJLIST: usize = 13;
-pub const VEDIT_MENU_BKG: usize = 14;
-pub const VEDIT_MENU_MODELS: usize = 15;
-pub const VEDIT_MENU_VIEWS: usize = 16;
-pub const VEDIT_MENU_IMAGE: usize = 17;
-pub const VEDIT_MENU_ISOSURFACE: usize = 18;
-pub const VEDIT_MENU_SAVE_DOCK: usize = 19;
-pub const VEDIT_MENU_REOPEN_DOCK: usize = 20;
-pub const VVIEW_MENU_DB: usize = 21;
-pub const VVIEW_MENU_BOUNDBOX: usize = 22;
-pub const VVIEW_MENU_OBJBOUND: usize = 23;
-pub const VVIEW_MENU_CURPNT: usize = 24;
-pub const VVIEW_MENU_INVERTZ: usize = 25;
-pub const VVIEW_MENU_TRANSBKGD: usize = 26;
-pub const VVIEW_MENU_LIGHTING: usize = 27;
-pub const VVIEW_MENU_WIREFRAME: usize = 28;
-pub const VVIEW_MENU_LOWRES: usize = 29;
-pub const VVIEW_MENU_STEREO: usize = 30;
-pub const VVIEW_MENU_DEPTH: usize = 31;
-pub const VVIEW_MENU_SCALEBAR: usize = 32;
-pub const VVIEW_MENU_RESIZE: usize = 33;
-pub const VVIEW_MENU_LABELS: usize = 34;
-pub const VHELP_MENU_MENUS: usize = 35;
-pub const VHELP_MENU_KEYBOARD: usize = 36;
-pub const VHELP_MENU_MOUSE: usize = 37;
-pub const VHELP_MENU_ABOUT: usize = 38;
+#[repr(usize)]
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum FileMenuAction {
+    Load = 0,
+    Save = 1,
+    SaveAs = 2,
+    SnapshotRgb = 3,
+    SnapshotTiff = 4,
+    ZeroSnapshotCounter = 5,
+    SnapshotDirectory = 6,
+    Movie = 7,
+    Sequence = 8,
+    Quit = 9,
+}
+
+impl FileMenuAction {
+    pub const fn from_raw(value: usize) -> Option<Self> {
+        match value {
+            0 => Some(Self::Load),
+            1 => Some(Self::Save),
+            2 => Some(Self::SaveAs),
+            3 => Some(Self::SnapshotRgb),
+            4 => Some(Self::SnapshotTiff),
+            5 => Some(Self::ZeroSnapshotCounter),
+            6 => Some(Self::SnapshotDirectory),
+            7 => Some(Self::Movie),
+            8 => Some(Self::Sequence),
+            9 => Some(Self::Quit),
+            _ => None,
+        }
+    }
+
+    pub const fn to_raw(self) -> usize {
+        self as usize
+    }
+}
+
+#[repr(usize)]
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum EditMenuAction {
+    Objects = 10,
+    Controls = 11,
+    Rotation = 12,
+    ObjectList = 13,
+    Background = 14,
+    Models = 15,
+    Views = 16,
+    Image = 17,
+    IsoSurface = 18,
+    SaveDock = 19,
+    ReopenDock = 20,
+}
+
+impl EditMenuAction {
+    pub const fn from_raw(value: usize) -> Option<Self> {
+        match value {
+            10 => Some(Self::Objects),
+            11 => Some(Self::Controls),
+            12 => Some(Self::Rotation),
+            13 => Some(Self::ObjectList),
+            14 => Some(Self::Background),
+            15 => Some(Self::Models),
+            16 => Some(Self::Views),
+            17 => Some(Self::Image),
+            18 => Some(Self::IsoSurface),
+            19 => Some(Self::SaveDock),
+            20 => Some(Self::ReopenDock),
+            _ => None,
+        }
+    }
+
+    pub const fn to_raw(self) -> usize {
+        self as usize
+    }
+}
+
+#[repr(usize)]
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum ViewMenuAction {
+    DrawBox = 21,
+    BoundingBox = 22,
+    ObjectBounds = 23,
+    CurrentPoint = 24,
+    InvertZ = 25,
+    TransparentBackground = 26,
+    Lighting = 27,
+    Wireframe = 28,
+    LowResolution = 29,
+    Stereo = 30,
+    Depth = 31,
+    ScaleBar = 32,
+    Resize = 33,
+    Labels = 34,
+}
+
+impl ViewMenuAction {
+    pub const fn from_raw(value: usize) -> Option<Self> {
+        match value {
+            21 => Some(Self::DrawBox),
+            22 => Some(Self::BoundingBox),
+            23 => Some(Self::ObjectBounds),
+            24 => Some(Self::CurrentPoint),
+            25 => Some(Self::InvertZ),
+            26 => Some(Self::TransparentBackground),
+            27 => Some(Self::Lighting),
+            28 => Some(Self::Wireframe),
+            29 => Some(Self::LowResolution),
+            30 => Some(Self::Stereo),
+            31 => Some(Self::Depth),
+            32 => Some(Self::ScaleBar),
+            33 => Some(Self::Resize),
+            34 => Some(Self::Labels),
+            _ => None,
+        }
+    }
+
+    pub const fn to_raw(self) -> usize {
+        self as usize
+    }
+}
+
+#[repr(usize)]
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum HelpMenuAction {
+    Menus = 35,
+    Keyboard = 36,
+    Mouse = 37,
+    About = 38,
+}
+
+impl HelpMenuAction {
+    pub const fn from_raw(value: usize) -> Option<Self> {
+        match value {
+            35 => Some(Self::Menus),
+            36 => Some(Self::Keyboard),
+            37 => Some(Self::Mouse),
+            38 => Some(Self::About),
+            _ => None,
+        }
+    }
+
+    pub const fn to_raw(self) -> usize {
+        self as usize
+    }
+}
+
 pub const LAST_VMENU_ID: usize = 39;
 
 /// `QAction` state retained by `ImodvWindow::mActions`.
@@ -416,44 +522,49 @@ impl ImodvWindow {
             resize_tool_open: false,
             num_key_entries: 0,
         };
-        window.actions[VFILE_MENU_LOAD].enabled = app.standalone != 0;
-        window.actions[VFILE_MENU_SAVE].enabled = app.standalone != 0;
-        window.actions[VFILE_MENU_SAVEAS].enabled = app.standalone != 0;
-        window.actions[VVIEW_MENU_LOWRES] = Action {
+        window.actions[FileMenuAction::Load.to_raw()].enabled = app.standalone != 0;
+        window.actions[FileMenuAction::Save.to_raw()].enabled = app.standalone != 0;
+        window.actions[FileMenuAction::SaveAs.to_raw()].enabled = app.standalone != 0;
+        window.actions
+            [crate::imod::three_dmod::mv_window::ViewMenuAction::LowResolution.to_raw()] = Action {
             checkable: true,
             checked: app.lowres != 0,
             enabled: true,
             text: "Low Resolution".into(),
             shortcut: Some(Key::Character('R')),
         };
-        window.actions[VVIEW_MENU_LABELS] = Action {
-            checkable: true,
-            checked: app.draw_labels != 0,
-            enabled: true,
-            text: "Point Labels".into(),
-            shortcut: None,
-        };
-        window.actions[VVIEW_MENU_INVERTZ] = Action {
-            checkable: true,
-            checked: app.invert_z != 0,
-            enabled: true,
-            text: "Invert Z".into(),
-            shortcut: None,
-        };
-        window.actions[VVIEW_MENU_LIGHTING] = Action {
-            checkable: true,
-            checked: app.lighting != 0,
-            enabled: true,
-            text: "Lighting".into(),
-            shortcut: None,
-        };
-        window.actions[VVIEW_MENU_WIREFRAME] = Action {
-            checkable: true,
-            checked: app.wireframe != 0,
-            enabled: true,
-            text: "Wireframe".into(),
-            shortcut: None,
-        };
+        window.actions[crate::imod::three_dmod::mv_window::ViewMenuAction::Labels.to_raw()] =
+            Action {
+                checkable: true,
+                checked: app.draw_labels != 0,
+                enabled: true,
+                text: "Point Labels".into(),
+                shortcut: None,
+            };
+        window.actions[crate::imod::three_dmod::mv_window::ViewMenuAction::InvertZ.to_raw()] =
+            Action {
+                checkable: true,
+                checked: app.invert_z != 0,
+                enabled: true,
+                text: "Invert Z".into(),
+                shortcut: None,
+            };
+        window.actions[crate::imod::three_dmod::mv_window::ViewMenuAction::Lighting.to_raw()] =
+            Action {
+                checkable: true,
+                checked: app.lighting != 0,
+                enabled: true,
+                text: "Lighting".into(),
+                shortcut: None,
+            };
+        window.actions[crate::imod::three_dmod::mv_window::ViewMenuAction::Wireframe.to_raw()] =
+            Action {
+                checkable: true,
+                checked: app.wireframe != 0,
+                enabled: true,
+                text: "Wireframe".into(),
+                shortcut: None,
+            };
         // `numWidg` and `newOpenGLset` of the source constructor: the first
         // widget added is the current one, and on the `NEW_QTOPENGL` build the
         // single maximal request is the only widget made.
@@ -524,14 +635,21 @@ impl ImodvWindow {
                 app.trans_bkgd = 0;
             }
         }
-        window.actions[VVIEW_MENU_DB].checked = app.dbl_buf > 0;
-        window.actions[VVIEW_MENU_DB].checkable = true;
-        window.actions[VVIEW_MENU_DB].enabled =
-            app.dbl_buf > 0 && app.enable_depth_sb >= 0 && app.trans_bkgd == 0;
-        window.actions[VVIEW_MENU_TRANSBKGD].checked = app.trans_bkgd > 0;
-        window.actions[VVIEW_MENU_TRANSBKGD].checkable = true;
-        window.actions[VVIEW_MENU_TRANSBKGD].enabled =
-            app.dbl_buf > 0 && (app.enable_depth_dbal >= 0 || app.enable_depth_dbst_al >= 0);
+        window.actions[crate::imod::three_dmod::mv_window::ViewMenuAction::DrawBox.to_raw()]
+            .checked = app.dbl_buf > 0;
+        window.actions[crate::imod::three_dmod::mv_window::ViewMenuAction::DrawBox.to_raw()]
+            .checkable = true;
+        window.actions[crate::imod::three_dmod::mv_window::ViewMenuAction::DrawBox.to_raw()]
+            .enabled = app.dbl_buf > 0 && app.enable_depth_sb >= 0 && app.trans_bkgd == 0;
+        window.actions
+            [crate::imod::three_dmod::mv_window::ViewMenuAction::TransparentBackground.to_raw()]
+        .checked = app.trans_bkgd > 0;
+        window.actions
+            [crate::imod::three_dmod::mv_window::ViewMenuAction::TransparentBackground.to_raw()]
+        .checkable = true;
+        window.actions
+            [crate::imod::three_dmod::mv_window::ViewMenuAction::TransparentBackground.to_raw()]
+        .enabled = app.dbl_buf > 0 && (app.enable_depth_dbal >= 0 || app.enable_depth_dbst_al >= 0);
         window
     }
     pub fn app(&self) -> &ImodvApp {
@@ -639,11 +757,16 @@ impl ImodvWindow {
                 app.enable_depth_dbst_al,
             )
         };
-        self.actions[VVIEW_MENU_DB].checked = true;
-        self.actions[VVIEW_MENU_DB].enabled = enable_depth_sb >= 0 && trans_bkgd == 0;
-        self.actions[VVIEW_MENU_TRANSBKGD].checked = trans_bkgd > 0;
-        self.actions[VVIEW_MENU_TRANSBKGD].enabled =
-            enable_depth_dbal >= 0 || enable_depth_dbst_al >= 0;
+        self.actions[crate::imod::three_dmod::mv_window::ViewMenuAction::DrawBox.to_raw()]
+            .checked = true;
+        self.actions[crate::imod::three_dmod::mv_window::ViewMenuAction::DrawBox.to_raw()]
+            .enabled = enable_depth_sb >= 0 && trans_bkgd == 0;
+        self.actions
+            [crate::imod::three_dmod::mv_window::ViewMenuAction::TransparentBackground.to_raw()]
+        .checked = trans_bkgd > 0;
+        self.actions
+            [crate::imod::three_dmod::mv_window::ViewMenuAction::TransparentBackground.to_raw()]
+        .enabled = enable_depth_dbal >= 0 || enable_depth_dbst_al >= 0;
     }
 
     /// `ImodvWindow::fileMenuSlot`.
@@ -3241,11 +3364,14 @@ impl ImodvWindowSink for ImodvNativeSink {
                 // (`mv_menu.cpp:389,396`).  The translated `imodvViewMenu`
                 // applies the flag before returning, so the value passed here
                 // is the one the source's expression produces.
-                let (db, stereo, alpha) = if item == VVIEW_MENU_DB {
-                    (self.app().dbl_buf, -1, -1)
-                } else {
-                    (-1, -1, (self.app().trans_bkgd != 0) as i32)
-                };
+                let (db, stereo, alpha) =
+                    if crate::imod::three_dmod::mv_window::ViewMenuAction::from_raw(item)
+                        == Some(crate::imod::three_dmod::mv_window::ViewMenuAction::DrawBox)
+                    {
+                        (self.app().dbl_buf, -1, -1)
+                    } else {
+                        (-1, -1, (self.app().trans_bkgd != 0) as i32)
+                    };
                 let rgb = self.rbgcolor;
                 let window = unsafe { (*self.app).main_win };
                 let mut set_widget = |db: bool, stereo: bool, alpha: bool| -> i32 {
@@ -4157,7 +4283,10 @@ mod tests {
         };
         let win = ImodvWindow::new(&mut app);
         assert_eq!(win.cur_glw, Some(0));
-        assert!(win.actions[VVIEW_MENU_DB].checked);
+        assert!(
+            win.actions[crate::imod::three_dmod::mv_window::ViewMenuAction::DrawBox.to_raw()]
+                .checked
+        );
     }
     #[test]
     fn source_widget_selection_falls_back_to_single_buffer() {
@@ -4340,10 +4469,13 @@ mod tests {
         };
         let mut window = ImodvWindow::new(&mut app);
         let mut sink = RecordingImodvWindowSink::default();
-        window.file_menu_slot(VFILE_MENU_QUIT as i32, &mut sink);
-        window.edit_menu_slot(VEDIT_MENU_OBJECTS as i32, &mut sink);
-        window.view_menu_slot(VVIEW_MENU_DB as i32, &mut sink);
-        window.help_menu_slot(VHELP_MENU_MENUS as i32, &mut sink);
+        window.file_menu_slot(FileMenuAction::Quit.to_raw() as i32, &mut sink);
+        window.edit_menu_slot(EditMenuAction::Objects.to_raw() as i32, &mut sink);
+        window.view_menu_slot(
+            crate::imod::three_dmod::mv_window::ViewMenuAction::DrawBox.to_raw() as i32,
+            &mut sink,
+        );
+        window.help_menu_slot(HelpMenuAction::Menus.to_raw() as i32, &mut sink);
         let press = KeyEvent {
             key: Key::Character('R'),
             x: 11,

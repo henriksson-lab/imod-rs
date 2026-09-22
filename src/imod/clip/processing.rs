@@ -19,14 +19,17 @@ pub fn clip_scaling(hin: &mut MrcHeader, hout: &mut MrcHeader, opt: &mut ClipOpt
     use crate::imod::clip::clip::*;
     // This condition is intentionally evaluated before set_multifile_input_options,
     // which turns the default section list into the full input list.
-    let copy_extra = opt.process == IP_UNWRAP && opt.nofsecs == IP_DEFAULT && opt.oz == IP_DEFAULT;
+    let copy_extra = crate::imod::clip::clip::ClipOperation::from_raw(opt.process)
+        == Some(crate::imod::clip::clip::ClipOperation::Unwrap)
+        && opt.nofsecs == crate::imod::clip::clip::ClipOperation::Default.to_raw()
+        && opt.oz == crate::imod::clip::clip::ClipOperation::Default.to_raw();
     crate::imod::clip::file_io::set_multifile_input_options(opt, hin);
     let mut z = crate::imod::clip::file_io::set_output_options(opt, hout);
     if z < 0 {
         return z;
     }
     crate::imod::libiimod::mrcfiles::mrc_head_label_cp(&*hin, &mut *hout);
-    let mut base = if opt.val != IP_DEFAULT as f32 {
+    let mut base = if opt.val != crate::imod::clip::clip::ClipOperation::Default.to_raw() as f32 {
         opt.val
     } else {
         0.
@@ -44,44 +47,44 @@ pub fn clip_scaling(hin: &mut MrcHeader, hout: &mut MrcHeader, opt: &mut ClipOpt
     let mut sum_arr: Vec<f32> = Vec::new();
     let mut sqr_arr: Vec<f32> = Vec::new();
     let mut point_fp: Option<ImodFile> = None;
-    match opt.process {
-        IP_BRIGHTNESS => {
+    match crate::imod::clip::clip::ClipOperation::from_raw(opt.process) {
+        Some(crate::imod::clip::clip::ClipOperation::Brightness) => {
             crate::imod::clip::clip::show_status("Brightness...\n");
             crate::imod::libiimod::mrcfiles::mrc_head_label(&mut *hout, b"clip: brightness");
             min = hin.amin as f64;
         }
-        IP_SHADOW => {
+        Some(crate::imod::clip::clip::ClipOperation::Shadow) => {
             crate::imod::clip::clip::show_status("Shadow...\n");
             crate::imod::libiimod::mrcfiles::mrc_head_label(&mut *hout, b"clip: shadow");
             min = hin.amax as f64;
         }
-        IP_CONTRAST => {
+        Some(crate::imod::clip::clip::ClipOperation::Contrast) => {
             crate::imod::clip::clip::show_status("Contrast...\n");
             crate::imod::libiimod::mrcfiles::mrc_head_label(&mut *hout, b"clip: contrast");
             min = hin.amean as f64;
         }
-        IP_RESIZE => {
+        Some(crate::imod::clip::clip::ClipOperation::Resize) => {
             crate::imod::libiimod::mrcfiles::mrc_head_label(&mut *hout, b"clip: resized image");
         }
-        IP_THRESHOLD => {
+        Some(crate::imod::clip::clip::ClipOperation::Threshold) => {
             crate::imod::clip::clip::show_status("Threshold...\n");
             if opt.sano != 0 {
                 threshold_low = hin.amin;
                 threshold_high = hin.amax;
             }
-            if opt.low != IP_DEFAULT as f32 {
+            if opt.low != crate::imod::clip::clip::ClipOperation::Default.to_raw() as f32 {
                 threshold_low = opt.low;
             }
-            if opt.high != IP_DEFAULT as f32 {
+            if opt.high != crate::imod::clip::clip::ClipOperation::Default.to_raw() as f32 {
                 threshold_high = opt.high;
             }
-            if opt.thresh == IP_DEFAULT as f32 {
+            if opt.thresh == crate::imod::clip::clip::ClipOperation::Default.to_raw() as f32 {
                 crate::imod::clip::clip::show_error(
                     "clip threshold: You must enter a threshold value",
                 );
                 return -1;
             }
-            if opt.min_size != IP_DEFAULT {
+            if opt.min_size != crate::imod::clip::clip::ClipOperation::Default.to_raw() {
                 return crate::imod::clip::threshminsize::threshold_with_min_size(
                     hin,
                     hout,
@@ -104,10 +107,11 @@ pub fn clip_scaling(hin: &mut MrcHeader, hout: &mut MrcHeader, opt: &mut ClipOpt
                 }
             }
         }
-        IP_TRUNCATE => {
+        Some(crate::imod::clip::clip::ClipOperation::Truncate) => {
             crate::imod::clip::clip::show_status("Truncate...\n");
-            trunc_low = opt.low != IP_DEFAULT as f32;
-            trunc_high = opt.high != IP_DEFAULT as f32;
+            trunc_low = opt.low != crate::imod::clip::clip::ClipOperation::Default.to_raw() as f32;
+            trunc_high =
+                opt.high != crate::imod::clip::clip::ClipOperation::Default.to_raw() as f32;
             trunc_mean = opt.sano != 0;
             if !trunc_low && !trunc_high {
                 crate::imod::clip::clip::show_error(
@@ -117,7 +121,7 @@ pub fn clip_scaling(hin: &mut MrcHeader, hout: &mut MrcHeader, opt: &mut ClipOpt
             }
             crate::imod::libiimod::mrcfiles::mrc_head_label(&mut *hout, b"clip: truncated");
         }
-        IP_UNWRAP => {
+        Some(crate::imod::clip::clip::ClipOperation::Unwrap) => {
             crate::imod::clip::clip::show_status("Unwrap...\n");
             if !matches!(hin.mode, 1 | 6) {
                 crate::imod::clip::clip::show_error(
@@ -125,13 +129,15 @@ pub fn clip_scaling(hin: &mut MrcHeader, hout: &mut MrcHeader, opt: &mut ClipOpt
                 );
                 return -1;
             }
-            if hin.mode == 6 && opt.val == IP_DEFAULT as f32 {
+            if hin.mode == 6
+                && opt.val == crate::imod::clip::clip::ClipOperation::Default.to_raw() as f32
+            {
                 crate::imod::clip::clip::show_error(
                     "clip truncate: You must enter a value to add with -n for mode 6 input",
                 );
                 return -1;
             }
-            if opt.val == IP_DEFAULT as f32 {
+            if opt.val == crate::imod::clip::clip::ClipOperation::Default.to_raw() as f32 {
                 opt.val = 32768.;
             }
             crate::imod::libiimod::mrcfiles::mrc_head_label(
@@ -147,7 +153,7 @@ pub fn clip_scaling(hin: &mut MrcHeader, hout: &mut MrcHeader, opt: &mut ClipOpt
                 );
             }
         }
-        IP_LOGARITHM => {
+        Some(crate::imod::clip::clip::ClipOperation::Logarithm) => {
             crate::imod::clip::clip::show_status("Logarithm...\n");
             let title = c_format(
                 "clip: logarithm after adding %g",
@@ -155,7 +161,7 @@ pub fn clip_scaling(hin: &mut MrcHeader, hout: &mut MrcHeader, opt: &mut ClipOpt
             );
             crate::imod::libiimod::mrcfiles::mrc_head_label(&mut *hout, title.as_bytes());
         }
-        IP_SQROOT => {
+        Some(crate::imod::clip::clip::ClipOperation::Sqroot) => {
             crate::imod::clip::clip::show_status("Square root...\n");
             let title = c_format(
                 "clip: square root after adding %g",
@@ -163,13 +169,14 @@ pub fn clip_scaling(hin: &mut MrcHeader, hout: &mut MrcHeader, opt: &mut ClipOpt
             );
             crate::imod::libiimod::mrcfiles::mrc_head_label(&mut *hout, title.as_bytes());
         }
-        IP_INTEGRAL => {
-            polarity = if opt.low == IP_DEFAULT as f32 {
+        Some(crate::imod::clip::clip::ClipOperation::Integral) => {
+            polarity = if opt.low == crate::imod::clip::clip::ClipOperation::Default.to_raw() as f32
+            {
                 1.
             } else {
                 -1.
             };
-            base = if opt.low == IP_DEFAULT as f32 {
+            base = if opt.low == crate::imod::clip::clip::ClipOperation::Default.to_raw() as f32 {
                 opt.high
             } else {
                 opt.low
@@ -177,10 +184,10 @@ pub fn clip_scaling(hin: &mut MrcHeader, hout: &mut MrcHeader, opt: &mut ClipOpt
             radius_center = opt.val;
             radius_inner = radius_center + 1.;
             radius_outer = radius_inner + 1_f32.max(0.5 * radius_center);
-            if opt.new_xoverlap != IP_DEFAULT {
+            if opt.new_xoverlap != crate::imod::clip::clip::ClipOperation::Default.to_raw() {
                 radius_inner = opt.new_xoverlap as f32;
             }
-            if opt.new_yoverlap != IP_DEFAULT {
+            if opt.new_yoverlap != crate::imod::clip::clip::ClipOperation::Default.to_raw() {
                 radius_outer = opt.new_yoverlap as f32;
             }
             crate::imod::clip::clip::show_status("Local integral...\n");
@@ -194,7 +201,7 @@ pub fn clip_scaling(hin: &mut MrcHeader, hout: &mut MrcHeader, opt: &mut ClipOpt
             );
             crate::imod::libiimod::mrcfiles::mrc_head_label(&mut *hout, title.as_bytes());
         }
-        IP_BOXSD => {
+        Some(crate::imod::clip::clip::ClipOperation::BoxStandardDeviation) => {
             sd_binning = opt.val.abs().round() as i32;
             let bin_x = opt.ix / sd_binning;
             let bin_y = opt.iy / sd_binning;
@@ -215,7 +222,7 @@ pub fn clip_scaling(hin: &mut MrcHeader, hout: &mut MrcHeader, opt: &mut ClipOpt
         }
         _ => return -1,
     }
-    if opt.val == IP_DEFAULT as f32 {
+    if opt.val == crate::imod::clip::clip::ClipOperation::Default.to_raw() as f32 {
         opt.val = 1.;
     }
     let alpha = opt.val as f64;
@@ -270,7 +277,10 @@ pub fn clip_scaling(hin: &mut MrcHeader, hout: &mut MrcHeader, opt: &mut ClipOpt
                 crate::imod::clip::clip::show_error("clip: Error reading slice.");
                 return -1;
             };
-            if (opt.process == IP_LOGARITHM || opt.process == IP_SQROOT)
+            if (crate::imod::clip::clip::ClipOperation::from_raw(opt.process)
+                == Some(crate::imod::clip::clip::ClipOperation::Logarithm)
+                || crate::imod::clip::clip::ClipOperation::from_raw(opt.process)
+                    == Some(crate::imod::clip::clip::ClipOperation::Sqroot))
                 && hout.mode == 2
                 && crate::imod::libiimod::mrcslice::slice_float(&mut slice) < 0
             {
@@ -279,13 +289,17 @@ pub fn clip_scaling(hin: &mut MrcHeader, hout: &mut MrcHeader, opt: &mut ClipOpt
                 );
                 return -1;
             };
-            if (opt.dim == 2 && opt.process != IP_RESIZE)
-                || (opt.process == IP_TRUNCATE && trunc_mean)
+            if (opt.dim == 2
+                && crate::imod::clip::clip::ClipOperation::from_raw(opt.process)
+                    != Some(crate::imod::clip::clip::ClipOperation::Resize))
+                || (crate::imod::clip::clip::ClipOperation::from_raw(opt.process)
+                    == Some(crate::imod::clip::clip::ClipOperation::Truncate)
+                    && trunc_mean)
             {
                 crate::imod::libiimod::mrcslice::slice_mmm(&mut slice);
-                min = match opt.process {
-                    IP_BRIGHTNESS => slice.min as f64,
-                    IP_SHADOW => slice.max as f64,
+                min = match crate::imod::clip::clip::ClipOperation::from_raw(opt.process) {
+                    Some(crate::imod::clip::clip::ClipOperation::Brightness) => slice.min as f64,
+                    Some(crate::imod::clip::clip::ClipOperation::Shadow) => slice.max as f64,
                     _ => slice.mean as f64,
                 };
             }
@@ -293,7 +307,9 @@ pub fn clip_scaling(hin: &mut MrcHeader, hout: &mut MrcHeader, opt: &mut ClipOpt
             // operations walk the pixels at all.  Brightness, contrast and
             // shadow fall through to the final `mrc_slice_lie` arm and get
             // no per-pixel pass of their own.
-            if opt.process == IP_THRESHOLD {
+            if crate::imod::clip::clip::ClipOperation::from_raw(opt.process)
+                == Some(crate::imod::clip::clip::ClipOperation::Threshold)
+            {
                 for j in 0..opt.iy {
                     for i in 0..opt.ix {
                         let mut val = [0_f32; 4];
@@ -325,7 +341,9 @@ pub fn clip_scaling(hin: &mut MrcHeader, hout: &mut MrcHeader, opt: &mut ClipOpt
                         slice_put_val(&mut slice, i, j, val);
                     }
                 }
-            } else if opt.process == IP_TRUNCATE {
+            } else if crate::imod::clip::clip::ClipOperation::from_raw(opt.process)
+                == Some(crate::imod::clip::clip::ClipOperation::Truncate)
+            {
                 for j in 0..opt.iy {
                     for i in 0..opt.ix {
                         let mut val = [0_f32; 4];
@@ -341,7 +359,9 @@ pub fn clip_scaling(hin: &mut MrcHeader, hout: &mut MrcHeader, opt: &mut ClipOpt
                         slice_put_val(&mut slice, i, j, val);
                     }
                 }
-            } else if opt.process == IP_UNWRAP {
+            } else if crate::imod::clip::clip::ClipOperation::from_raw(opt.process)
+                == Some(crate::imod::clip::clip::ClipOperation::Unwrap)
+            {
                 // Unwrap: add a value and wrap values around
                 let high = if input_mode == 6 { 65535. } else { 32767. };
                 let low = high - 65535.;
@@ -358,7 +378,9 @@ pub fn clip_scaling(hin: &mut MrcHeader, hout: &mut MrcHeader, opt: &mut ClipOpt
                         slice_put_val(&mut slice, i, j, val);
                     }
                 }
-            } else if opt.process == IP_LOGARITHM {
+            } else if crate::imod::clip::clip::ClipOperation::from_raw(opt.process)
+                == Some(crate::imod::clip::clip::ClipOperation::Logarithm)
+            {
                 for j in 0..opt.iy {
                     for i in 0..opt.ix {
                         let mut val = [0_f32; 4];
@@ -369,7 +391,9 @@ pub fn clip_scaling(hin: &mut MrcHeader, hout: &mut MrcHeader, opt: &mut ClipOpt
                         slice_put_val(&mut slice, i, j, val);
                     }
                 }
-            } else if opt.process == IP_SQROOT {
+            } else if crate::imod::clip::clip::ClipOperation::from_raw(opt.process)
+                == Some(crate::imod::clip::clip::ClipOperation::Sqroot)
+            {
                 for j in 0..opt.iy {
                     for i in 0..opt.ix {
                         let mut val = [0_f32; 4];
@@ -380,7 +404,9 @@ pub fn clip_scaling(hin: &mut MrcHeader, hout: &mut MrcHeader, opt: &mut ClipOpt
                         slice_put_val(&mut slice, i, j, val);
                     }
                 }
-            } else if opt.process == IP_INTEGRAL {
+            } else if crate::imod::clip::clip::ClipOperation::from_raw(opt.process)
+                == Some(crate::imod::clip::clip::ClipOperation::Integral)
+            {
                 // `processing.cpp:317-318`: `sliceInit(&flSlice, ..., slice->data.f)`
                 // then `sliceFloatEx(&flSlice, 0)`.  For a float slice that
                 // conversion is a no-op (`mrcslice.c:259`), so `beadIntegral`
@@ -424,8 +450,8 @@ pub fn clip_scaling(hin: &mut MrcHeader, hout: &mut MrcHeader, opt: &mut ClipOpt
                             // processing.cpp deliberately uses ix for this lower
                             // Y boundary too.  Preserve that non-square behavior.
                             || j >= opt.ix - border
-                            || (opt.low != IP_DEFAULT as f32 && val[0] > opt.low)
-                            || (opt.high != IP_DEFAULT as f32 && val[0] > opt.high)
+                            || (opt.low != crate::imod::clip::clip::ClipOperation::Default.to_raw() as f32 && val[0] > opt.low)
+                            || (opt.high != crate::imod::clip::clip::ClipOperation::Default.to_raw() as f32 && val[0] > opt.high)
                         {
                             val[0] = 0.;
                         } else {
@@ -459,7 +485,9 @@ pub fn clip_scaling(hin: &mut MrcHeader, hout: &mut MrcHeader, opt: &mut ClipOpt
                         slice_put_val(&mut slice, i, j, val);
                     }
                 }
-            } else if opt.process == IP_BOXSD {
+            } else if crate::imod::clip::clip::ClipOperation::from_raw(opt.process)
+                == Some(crate::imod::clip::clip::ClipOperation::BoxStandardDeviation)
+            {
                 if crate::imod::libiimod::mrcslice::slice_float(&mut slice) < 0 {
                     crate::imod::clip::clip::show_error(
                         "clip: Error getting memory to convert slice to float.",
@@ -492,7 +520,9 @@ pub fn clip_scaling(hin: &mut MrcHeader, hout: &mut MrcHeader, opt: &mut ClipOpt
                 slice.ysize = ny_bin;
                 // `processing.cpp:344`: `memcpy(slice->data.f, sdArr, binSize * sizeof(float))`.
                 slice.data.f_mut()[..size].copy_from_slice(&sd_arr[..size]);
-            } else if opt.process != IP_RESIZE {
+            } else if crate::imod::clip::clip::ClipOperation::from_raw(opt.process)
+                != Some(crate::imod::clip::clip::ClipOperation::Resize)
+            {
                 crate::imod::libiimod::mrcslice::mrc_slice_lie(&mut slice, min, alpha);
             }
             if opt.read_defects != 0
@@ -523,15 +553,21 @@ pub fn clip_scaling(hin: &mut MrcHeader, hout: &mut MrcHeader, opt: &mut ClipOpt
 }
 /// Matches C++ `clipEdge`.
 pub fn clip_edge(hin: &mut MrcHeader, hout: &mut MrcHeader, opt: &mut ClipOptions) -> i32 {
-    use crate::imod::clip::clip::{IP_DEFAULT, IP_GRADIENT, IP_GRAHAM, IP_PREWITT, IP_SOBEL};
-    if opt.mode == IP_DEFAULT {
-        opt.mode = if opt.process == IP_GRADIENT {
+    use crate::imod::clip::clip::ClipOperation;
+    if opt.mode == crate::imod::clip::clip::ClipOperation::Default.to_raw() {
+        opt.mode = if crate::imod::clip::clip::ClipOperation::from_raw(opt.process)
+            == Some(crate::imod::clip::clip::ClipOperation::Gradient)
+        {
             hin.mode
         } else {
             0
         };
     }
-    if !matches!(hin.mode, 0 | 1 | 6 | 2) && !(hin.mode == 4 && opt.process != IP_GRADIENT) {
+    if !matches!(hin.mode, 0 | 1 | 6 | 2)
+        && !(hin.mode == 4
+            && crate::imod::clip::clip::ClipOperation::from_raw(opt.process)
+                != Some(crate::imod::clip::clip::ClipOperation::Gradient))
+    {
         crate::imod::clip::clip::show_error(
             "clip edge: only byte, integer and float modes can be used",
         );
@@ -541,13 +577,22 @@ pub fn clip_edge(hin: &mut MrcHeader, hout: &mut MrcHeader, opt: &mut ClipOption
     if z < 0 {
         return z;
     }
-    let (message, title): (&str, &[u8]) = match opt.process {
-        IP_GRADIENT => ("Taking gradient of", b"clip: gradient"),
-        IP_PREWITT => ("Applying Prewitt filter to", b"clip: Prewitt filter"),
-        IP_GRAHAM => ("Applying Graham filter to", b"clip: Graham filter"),
-        IP_SOBEL => ("Applying Sobel filter to", b"clip: Sobel filter"),
-        _ => return -1,
-    };
+    let (message, title): (&str, &[u8]) =
+        match crate::imod::clip::clip::ClipOperation::from_raw(opt.process) {
+            Some(crate::imod::clip::clip::ClipOperation::Gradient) => {
+                ("Taking gradient of", b"clip: gradient")
+            }
+            Some(crate::imod::clip::clip::ClipOperation::Prewitt) => {
+                ("Applying Prewitt filter to", b"clip: Prewitt filter")
+            }
+            Some(crate::imod::clip::clip::ClipOperation::Graham) => {
+                ("Applying Graham filter to", b"clip: Graham filter")
+            }
+            Some(crate::imod::clip::clip::ClipOperation::Sobel) => {
+                ("Applying Sobel filter to", b"clip: Sobel filter")
+            }
+            _ => return -1,
+        };
     crate::imod::libiimod::mrcfiles::mrc_head_label(hout, title);
     let _ = ImodFile::Stdout.write_all(
         c_format(
@@ -569,7 +614,9 @@ pub fn clip_edge(hin: &mut MrcHeader, hout: &mut MrcHeader, opt: &mut ClipOption
             crate::imod::clip::clip::show_error("clip: Error reading slice.");
             return -1;
         };
-        let mut out = if opt.process == IP_GRADIENT {
+        let mut out = if crate::imod::clip::clip::ClipOperation::from_raw(opt.process)
+            == Some(crate::imod::clip::clip::ClipOperation::Gradient)
+        {
             let Some(result) = crate::imod::libiimod::mrcslice::slice_gradient(&mut source) else {
                 return -1;
             };
@@ -589,9 +636,13 @@ pub fn clip_edge(hin: &mut MrcHeader, hout: &mut MrcHeader, opt: &mut ClipOption
                 crate::imod::libiimod::mrcslice::slice_new_mode(&mut source, 0);
             }
             crate::imod::libcfshr::islice::slice_min_max(&mut source);
-            if opt.process == IP_GRAHAM {
+            if crate::imod::clip::clip::ClipOperation::from_raw(opt.process)
+                == Some(crate::imod::clip::clip::ClipOperation::Graham)
+            {
                 crate::imod::libiimod::sliceproc::slice_byte_graham(&mut source);
-            } else if opt.process == IP_SOBEL {
+            } else if crate::imod::clip::clip::ClipOperation::from_raw(opt.process)
+                == Some(crate::imod::clip::clip::ClipOperation::Sobel)
+            {
                 crate::imod::libiimod::sliceproc::slice_byte_edge_sobel(&mut source);
             } else {
                 crate::imod::libiimod::sliceproc::slice_byte_edge_prewitt(&mut source);
@@ -622,8 +673,10 @@ pub fn clip_convolve(hin: &mut MrcHeader, hout: &mut MrcHeader, opt: &mut ClipOp
     let mut title = String::new();
     let message: &str;
     let blur: &mut [f32];
-    if opt.mode == IP_DEFAULT {
-        opt.mode = if opt.process == IP_SMOOTH {
+    if opt.mode == crate::imod::clip::clip::ClipOperation::Default.to_raw() {
+        opt.mode = if crate::imod::clip::clip::ClipOperation::from_raw(opt.process)
+            == Some(crate::imod::clip::clip::ClipOperation::Smooth)
+        {
             hin.mode
         } else {
             crate::imod::libiimod::mrcfiles::MRC_MODE_FLOAT
@@ -633,8 +686,8 @@ pub fn clip_convolve(hin: &mut MrcHeader, hout: &mut MrcHeader, opt: &mut ClipOp
     if z < 0 {
         return z;
     }
-    match opt.process {
-        IP_SMOOTH => {
+    match crate::imod::clip::clip::ClipOperation::from_raw(opt.process) {
+        Some(crate::imod::clip::clip::ClipOperation::Smooth) => {
             if opt.val < 0. {
                 smooth_3d = true;
                 if opt.dim == 2 {
@@ -643,7 +696,7 @@ pub fn clip_convolve(hin: &mut MrcHeader, hout: &mut MrcHeader, opt: &mut ClipOp
                     );
                     return -1;
                 }
-                if opt.low == IP_DEFAULT as f32 {
+                if opt.low == crate::imod::clip::clip::ClipOperation::Default.to_raw() as f32 {
                     opt.low = 0.85;
                 }
             }
@@ -693,19 +746,21 @@ pub fn clip_convolve(hin: &mut MrcHeader, hout: &mut MrcHeader, opt: &mut ClipOp
                 blur = &mut smooth_kernel;
             }
         }
-        IP_SHARPEN => {
+        Some(crate::imod::clip::clip::ClipOperation::Sharpen) => {
             message = "Sharpening";
             crate::imod::libiimod::mrcfiles::mrc_head_label(hout, b"clip: sharpen");
             blur = &mut sharpen_kernel;
         }
-        IP_LAPLACIAN => {
+        Some(crate::imod::clip::clip::ClipOperation::Laplacian) => {
             message = "Applying Laplacian to";
             crate::imod::libiimod::mrcfiles::mrc_head_label(hout, b"clip: Laplacian");
             blur = &mut laplacian_kernel;
         }
         _ => return -1,
     }
-    if opt.process == IP_SMOOTH {
+    if crate::imod::clip::clip::ClipOperation::from_raw(opt.process)
+        == Some(crate::imod::clip::clip::ClipOperation::Smooth)
+    {
         title.truncate(99.min(title.len()));
         crate::imod::libiimod::mrcfiles::mrc_head_label(hout, title.as_bytes());
     }
@@ -734,7 +789,9 @@ pub fn clip_convolve(hin: &mut MrcHeader, hout: &mut MrcHeader, opt: &mut ClipOp
         };
         for _ in 0..niter {
             s.mean = hin.amean;
-            if opt.process == IP_SMOOTH {
+            if crate::imod::clip::clip::ClipOperation::from_raw(opt.process)
+                == Some(crate::imod::clip::clip::ClipOperation::Smooth)
+            {
                 crate::imod::libiimod::mrcslice::slice_mmm(s.as_mut());
             }
             let Some(slice) =
@@ -774,7 +831,7 @@ pub fn clip_median(
         if z < 0 {
             return z;
         }
-        if opt.val as i32 == crate::imod::clip::clip::IP_DEFAULT {
+        if opt.val as i32 == crate::imod::clip::clip::ClipOperation::Default.to_raw() {
             opt.val = 3.;
         }
         if opt.mode != 0 && opt.mode != 1 && hin.mode != 6 && opt.mode != 2 {
@@ -975,19 +1032,19 @@ pub fn clip_diffusion(hin: &mut MrcHeader, hout: &mut MrcHeader, opt: &mut ClipO
     if z < 0 {
         return z;
     }
-    if opt.val == crate::imod::clip::clip::IP_DEFAULT as f32 {
+    if opt.val == crate::imod::clip::clip::ClipOperation::Default.to_raw() as f32 {
         opt.val = 5.;
     }
     let iterations = 1.max(opt.val as i32);
-    if opt.thresh == crate::imod::clip::clip::IP_DEFAULT as f32 {
+    if opt.thresh == crate::imod::clip::clip::ClipOperation::Default.to_raw() as f32 {
         opt.thresh = 2.;
     }
     let cc = 1.max(3.min(opt.thresh as i32));
-    if opt.weight == crate::imod::clip::clip::IP_DEFAULT as f32 {
+    if opt.weight == crate::imod::clip::clip::ClipOperation::Default.to_raw() as f32 {
         opt.weight = 2.;
     }
     let kk = 0_f64.max(opt.weight as f64);
-    if opt.low == crate::imod::clip::clip::IP_DEFAULT as f32 {
+    if opt.low == crate::imod::clip::clip::ClipOperation::Default.to_raw() as f32 {
         opt.low = 0.2;
     }
     let lambda = 0.001_f64.max(opt.low as f64);
@@ -1035,7 +1092,7 @@ pub fn clip_flip(hin: &mut MrcHeader, hout: &mut MrcHeader, opt: &mut ClipOption
     // `processing.cpp:844` uses `opt->command` directly; `main` always sets
     // it from `argv[1]`, and the field is a `String` now.
     let command = opt.command.clone().into_bytes();
-    hout.mode = if opt.mode == crate::imod::clip::clip::IP_DEFAULT {
+    hout.mode = if opt.mode == crate::imod::clip::clip::ClipOperation::Default.to_raw() {
         hin.mode
     } else {
         opt.mode
@@ -1342,15 +1399,15 @@ pub fn clip_quadrant(hin: &mut MrcHeader, hout: &mut MrcHeader, opt: &mut ClipOp
     let mut group_size = 1;
     let mut user_base = 0_f64;
     let mut num_todo = nz;
-    if opt.ix != crate::imod::clip::clip::IP_DEFAULT
-        || opt.iy != crate::imod::clip::clip::IP_DEFAULT
-        || opt.ox != crate::imod::clip::clip::IP_DEFAULT
-        || opt.oy != crate::imod::clip::clip::IP_DEFAULT
-        || opt.oz != crate::imod::clip::clip::IP_DEFAULT
+    if opt.ix != crate::imod::clip::clip::ClipOperation::Default.to_raw()
+        || opt.iy != crate::imod::clip::clip::ClipOperation::Default.to_raw()
+        || opt.ox != crate::imod::clip::clip::ClipOperation::Default.to_raw()
+        || opt.oy != crate::imod::clip::clip::ClipOperation::Default.to_raw()
+        || opt.oz != crate::imod::clip::clip::ClipOperation::Default.to_raw()
     {
         crate::imod::clip::clip::show_warning("clip quadrant - input and output sizes ignored.");
     }
-    if opt.nofsecs != crate::imod::clip::clip::IP_DEFAULT {
+    if opt.nofsecs != crate::imod::clip::clip::ClipOperation::Default.to_raw() {
         num_todo = opt.nofsecs;
         for iz in 0..num_todo - 1 {
             for jz in iz + 1..num_todo {
@@ -1371,13 +1428,13 @@ pub fn clip_quadrant(hin: &mut MrcHeader, hout: &mut MrcHeader, opt: &mut ClipOp
         crate::imod::clip::file_io::set_input_options(opt, hin);
     }
     opt.nofsecs = nz;
-    if opt.val != crate::imod::clip::clip::IP_DEFAULT as f32 {
+    if opt.val != crate::imod::clip::clip::ClipOperation::Default.to_raw() as f32 {
         group_size = opt.val.round() as i32;
     }
-    if opt.high != crate::imod::clip::clip::IP_DEFAULT as f32 {
+    if opt.high != crate::imod::clip::clip::ClipOperation::Default.to_raw() as f32 {
         width = opt.high.round() as i32;
     }
-    if opt.low != crate::imod::clip::clip::IP_DEFAULT as f32 {
+    if opt.low != crate::imod::clip::clip::ClipOperation::Default.to_raw() as f32 {
         user_base = opt.low as f64;
     }
     if width < 2 || width > nx / 4 || width > ny / 4 {
@@ -1388,7 +1445,8 @@ pub fn clip_quadrant(hin: &mut MrcHeader, hout: &mut MrcHeader, opt: &mut ClipOp
     let num_groups = 1.max(num_todo / group_size);
     hout.mode = hin.mode;
     let mut new_mode = -1;
-    if opt.mode != crate::imod::clip::clip::IP_DEFAULT && opt.mode != hin.mode {
+    if opt.mode != crate::imod::clip::clip::ClipOperation::Default.to_raw() && opt.mode != hin.mode
+    {
         new_mode = crate::imod::libcfshr::islice::slice_mode_if_real(opt.mode);
         if new_mode < 0 {
             crate::imod::clip::clip::show_error("clip: Inappropriate new mode entry.");
@@ -1647,13 +1705,13 @@ pub fn fill_drift_corrected_edges(
     let mut width = if hin.nx < 3000 { 30 } else { 60 };
     let mut length = 1024.max(hin.nx / 4);
     let mut crit = 9.;
-    if opt.low != crate::imod::clip::clip::IP_DEFAULT as f32 {
+    if opt.low != crate::imod::clip::clip::ClipOperation::Default.to_raw() as f32 {
         length = opt.low.round() as i32;
     }
-    if opt.high != crate::imod::clip::clip::IP_DEFAULT as f32 {
+    if opt.high != crate::imod::clip::clip::ClipOperation::Default.to_raw() as f32 {
         crit = opt.high;
     }
-    if opt.val != crate::imod::clip::clip::IP_DEFAULT as f32 {
+    if opt.val != crate::imod::clip::clip::ClipOperation::Default.to_raw() as f32 {
         width = opt.val.round() as i32;
     }
     if !matches!(hin.mode, 1 | 6) {
@@ -1756,7 +1814,7 @@ pub fn fill_drift_corrected_edges(
 pub fn clip_spectrum(hin: &mut MrcHeader, hout: &mut MrcHeader, opt: &mut ClipOptions) -> i32 {
     let mut bkgd = 48_i32;
     let mut trunc = 0.02_f32;
-    if opt.low != crate::imod::clip::clip::IP_DEFAULT as f32 {
+    if opt.low != crate::imod::clip::clip::ClipOperation::Default.to_raw() as f32 {
         bkgd = if opt.low > 0. && opt.low < 1. {
             (255. * opt.low) as i32
         } else {
@@ -1766,17 +1824,17 @@ pub fn clip_spectrum(hin: &mut MrcHeader, hout: &mut MrcHeader, opt: &mut ClipOp
             return 1;
         }
     }
-    if opt.high != crate::imod::clip::clip::IP_DEFAULT as f32 {
+    if opt.high != crate::imod::clip::clip::ClipOperation::Default.to_raw() as f32 {
         trunc = opt.high;
         if trunc < 0. || trunc >= 0.75 {
             return 1;
         }
     }
-    if opt.ox != crate::imod::clip::clip::IP_DEFAULT
-        || opt.oy != crate::imod::clip::clip::IP_DEFAULT
+    if opt.ox != crate::imod::clip::clip::ClipOperation::Default.to_raw()
+        || opt.oy != crate::imod::clip::clip::ClipOperation::Default.to_raw()
     {
-        if opt.ox != crate::imod::clip::clip::IP_DEFAULT
-            && opt.oy != crate::imod::clip::clip::IP_DEFAULT
+        if opt.ox != crate::imod::clip::clip::ClipOperation::Default.to_raw()
+            && opt.oy != crate::imod::clip::clip::ClipOperation::Default.to_raw()
             && opt.ox != opt.oy
         {
             crate::imod::clip::clip::show_error(
@@ -1784,7 +1842,7 @@ pub fn clip_spectrum(hin: &mut MrcHeader, hout: &mut MrcHeader, opt: &mut ClipOp
             );
             return 1;
         }
-        if opt.ox != crate::imod::clip::clip::IP_DEFAULT {
+        if opt.ox != crate::imod::clip::clip::ClipOperation::Default.to_raw() {
             opt.oy = opt.ox
         } else {
             opt.ox = opt.oy
@@ -1793,12 +1851,12 @@ pub fn clip_spectrum(hin: &mut MrcHeader, hout: &mut MrcHeader, opt: &mut ClipOp
         opt.ox = 1024;
         opt.oy = 1024
     }
-    if opt.oz != crate::imod::clip::clip::IP_DEFAULT {
+    if opt.oz != crate::imod::clip::clip::ClipOperation::Default.to_raw() {
         crate::imod::clip::clip::show_error("clip spectrum: -oz is not allowed");
         return 1;
     }
     let mode = if bkgd > 0 { 0 } else { 1 };
-    if opt.mode == crate::imod::clip::clip::IP_DEFAULT {
+    if opt.mode == crate::imod::clip::clip::ClipOperation::Default.to_raw() {
         opt.mode = mode
     }
     if opt.add2file != 0 {
@@ -1938,7 +1996,7 @@ pub fn clip_spectrum(hin: &mut MrcHeader, hout: &mut MrcHeader, opt: &mut ClipOp
 }
 /// Matches C++ `clip_color`.
 pub fn clip_color(hin: &mut MrcHeader, hout: &mut MrcHeader, opt: &mut ClipOptions) -> i32 {
-    const DEFAULT: f32 = crate::imod::clip::clip::IP_DEFAULT as f32;
+    const DEFAULT: f32 = crate::imod::clip::clip::ClipOperation::Default.to_raw() as f32;
     if opt.red == DEFAULT {
         opt.red = 1.;
     }
@@ -1953,7 +2011,7 @@ pub fn clip_color(hin: &mut MrcHeader, hout: &mut MrcHeader, opt: &mut ClipOptio
     }
     if [opt.ix, opt.iy, opt.iz, opt.ox, opt.oy, opt.oz]
         .iter()
-        .any(|&v| v != crate::imod::clip::clip::IP_DEFAULT)
+        .any(|&v| v != crate::imod::clip::clip::ClipOperation::Default.to_raw())
     {
         crate::imod::clip::clip::show_warning("clip 3d color - input and output sizes ignored.");
     }
@@ -2014,7 +2072,7 @@ fn write_byte_pixel(mut pixel: f32, hout: &mut MrcHeader) {
 }
 /// Matches C++ `clip2d_color`.
 pub fn clip2d_color(hin: &mut MrcHeader, hout: &mut MrcHeader, opt: &mut ClipOptions) -> i32 {
-    if opt.mode != 16 && opt.mode != crate::imod::clip::clip::IP_DEFAULT {
+    if opt.mode != 16 && opt.mode != crate::imod::clip::clip::ClipOperation::Default.to_raw() {
         crate::imod::clip::clip::show_warning("clip - color output mode must be rgb.");
     }
     opt.mode = 16;
@@ -2066,14 +2124,14 @@ pub fn clip_joinrgb(
     hout: &mut MrcHeader,
     opt: &mut ClipOptions,
 ) -> i32 {
-    use crate::imod::clip::clip::{IP_APPEND_OVERWRITE, IP_DEFAULT};
-    if opt.red == IP_DEFAULT as f32 {
+    use crate::imod::clip::clip::IP_APPEND_OVERWRITE;
+    if opt.red == crate::imod::clip::clip::ClipOperation::Default.to_raw() as f32 {
         opt.red = 1.;
     }
-    if opt.green == IP_DEFAULT as f32 {
+    if opt.green == crate::imod::clip::clip::ClipOperation::Default.to_raw() as f32 {
         opt.green = 1.;
     }
-    if opt.blue == IP_DEFAULT as f32 {
+    if opt.blue == crate::imod::clip::clip::ClipOperation::Default.to_raw() as f32 {
         opt.blue = 1.;
     }
     if opt.infiles != 3 {
@@ -2370,10 +2428,7 @@ pub fn clip_average(
     hout: &mut MrcHeader,
     opt: &mut ClipOptions,
 ) -> i32 {
-    use crate::imod::clip::clip::{
-        IP_ADD, IP_AVERAGE, IP_DEFAULT, IP_STANDEV, IP_SUBTRACT, IP_VARIANCE,
-    };
-    if opt.infiles == 1 && matches!(opt.process, IP_AVERAGE | IP_VARIANCE | IP_STANDEV) {
+    if opt.infiles == 1 && matches!(opt.process, 2 | 3 | 4) {
         return clip2d_average(h1, hout, opt);
     }
     if opt.add2file != 0 {
@@ -2382,12 +2437,20 @@ pub fn clip_average(
         );
         return -1;
     }
-    if opt.infiles < 2 || (opt.process == IP_SUBTRACT && opt.infiles != 2) {
-        crate::imod::clip::clip::show_error(if opt.process == IP_SUBTRACT {
-            "clip subtract: needs exactly two input files."
-        } else {
-            "clip add: needs at least two input files."
-        });
+    if opt.infiles < 2
+        || (crate::imod::clip::clip::ClipOperation::from_raw(opt.process)
+            == Some(crate::imod::clip::clip::ClipOperation::Subtract)
+            && opt.infiles != 2)
+    {
+        crate::imod::clip::clip::show_error(
+            if crate::imod::clip::clip::ClipOperation::from_raw(opt.process)
+                == Some(crate::imod::clip::clip::ClipOperation::Subtract)
+            {
+                "clip subtract: needs exactly two input files."
+            } else {
+                "clip add: needs at least two input files."
+            },
+        );
         return -1;
     }
     let mut z = crate::imod::clip::file_io::set_options(opt, h1, hout);
@@ -2397,27 +2460,27 @@ pub fn clip_average(
     // `processing.cpp:2017`: both scales are double and start at 1.
     let mut valscale = 1.0_f64;
     let mut varscale = 1.0_f64;
-    if opt.low != IP_DEFAULT as f32 {
+    if opt.low != crate::imod::clip::clip::ClipOperation::Default.to_raw() as f32 {
         valscale = opt.low as f64;
         varscale = (opt.low * opt.low) as f64;
     }
     let mut variance = 0;
     // `processing.cpp:2043-2073`: the process switch also sets valscale, and
     // IP_SUBTRACT resets it to 1, discarding any -l entry.
-    match opt.process {
-        IP_AVERAGE => {
+    match crate::imod::clip::clip::ClipOperation::from_raw(opt.process) {
+        Some(crate::imod::clip::clip::ClipOperation::Average) => {
             valscale /= opt.infiles as f64;
             crate::imod::libiimod::mrcfiles::mrc_head_label(&mut *hout, b"clip: 3D Averaged");
         }
-        IP_ADD => {
+        Some(crate::imod::clip::clip::ClipOperation::Add) => {
             crate::imod::libiimod::mrcfiles::mrc_head_label(&mut *hout, b"clip: Summed");
         }
-        IP_VARIANCE => {
+        Some(crate::imod::clip::clip::ClipOperation::Variance) => {
             variance = 1;
             valscale /= opt.infiles as f64;
             crate::imod::libiimod::mrcfiles::mrc_head_label(&mut *hout, b"clip: 3D Variance");
         }
-        IP_STANDEV => {
+        Some(crate::imod::clip::clip::ClipOperation::StandardDeviation) => {
             variance = 2;
             valscale /= opt.infiles as f64;
             crate::imod::libiimod::mrcfiles::mrc_head_label(
@@ -2425,7 +2488,7 @@ pub fn clip_average(
                 b"clip: 3D Standard Deviation",
             );
         }
-        IP_SUBTRACT => {
+        Some(crate::imod::clip::clip::ClipOperation::Subtract) => {
             valscale = 1.;
             crate::imod::libiimod::mrcfiles::mrc_head_label(&mut *hout, b"clip: Subtract");
         }
@@ -2484,11 +2547,13 @@ pub fn clip_average(
             c_format(
                 "\rclip: %s slice %d of %d\n",
                 &[
-                    CArg::Str(match opt.process {
-                        IP_ADD => "Adding",
-                        IP_SUBTRACT => "Subtracting",
-                        _ => "Averaging",
-                    }),
+                    CArg::Str(
+                        match crate::imod::clip::clip::ClipOperation::from_raw(opt.process) {
+                            Some(crate::imod::clip::clip::ClipOperation::Add) => "Adding",
+                            Some(crate::imod::clip::clip::ClipOperation::Subtract) => "Subtracting",
+                            _ => "Averaging",
+                        },
+                    ),
                     CArg::Int((k + 1) as i64),
                     CArg::Int((opt.nofsecs) as i64),
                 ],
@@ -2541,7 +2606,9 @@ pub fn clip_average(
                     }
                 }
             }
-            if opt.process == IP_SUBTRACT {
+            if crate::imod::clip::clip::ClipOperation::from_raw(opt.process)
+                == Some(crate::imod::clip::clip::ClipOperation::Subtract)
+            {
                 factor = -1.;
             }
         }
@@ -2588,13 +2655,15 @@ pub fn clip_average(
 }
 /// Matches C++ `clip2d_average`.
 pub fn clip2d_average(hin: &mut MrcHeader, hout: &mut MrcHeader, opt: &mut ClipOptions) -> i32 {
-    use crate::imod::clip::clip::{IP_AVERAGE, IP_DEFAULT, IP_STANDEV, IP_VARIANCE};
-    if opt.ox != IP_DEFAULT || opt.oy != IP_DEFAULT || opt.oz != IP_DEFAULT {
+    if opt.ox != crate::imod::clip::clip::ClipOperation::Default.to_raw()
+        || opt.oy != crate::imod::clip::clip::ClipOperation::Default.to_raw()
+        || opt.oz != crate::imod::clip::clip::ClipOperation::Default.to_raw()
+    {
         crate::imod::clip::clip::show_warning("clip - ox, oy, oz have no effect for 2d average.");
     }
-    opt.ox = IP_DEFAULT;
-    opt.oy = IP_DEFAULT;
-    opt.oz = IP_DEFAULT;
+    opt.ox = crate::imod::clip::clip::ClipOperation::Default.to_raw();
+    opt.oy = crate::imod::clip::clip::ClipOperation::Default.to_raw();
+    opt.oz = crate::imod::clip::clip::ClipOperation::Default.to_raw();
     crate::imod::clip::file_io::set_input_options(opt, hin);
     opt.oz = 1;
     let z = crate::imod::clip::file_io::set_output_options(opt, hout);
@@ -2602,10 +2671,10 @@ pub fn clip2d_average(hin: &mut MrcHeader, hout: &mut MrcHeader, opt: &mut ClipO
         return z;
     }
     crate::imod::libiimod::mrcfiles::mrc_head_label_cp(&*hin, &mut *hout);
-    let variance = match opt.process {
-        IP_AVERAGE => 0,
-        IP_VARIANCE => 1,
-        IP_STANDEV => 2,
+    let variance = match crate::imod::clip::clip::ClipOperation::from_raw(opt.process) {
+        Some(crate::imod::clip::clip::ClipOperation::Average) => 0,
+        Some(crate::imod::clip::clip::ClipOperation::Variance) => 1,
+        Some(crate::imod::clip::clip::ClipOperation::StandardDeviation) => 2,
         _ => return -1,
     };
     crate::imod::libiimod::mrcfiles::mrc_head_label(
@@ -2660,7 +2729,7 @@ pub fn clip2d_average(hin: &mut MrcHeader, hout: &mut MrcHeader, opt: &mut ClipO
         };
         for y in 0..opt.iy {
             for x in 0..opt.ix {
-                if opt.val != IP_DEFAULT as f32
+                if opt.val != crate::imod::clip::clip::ClipOperation::Default.to_raw() as f32
                     && slice_get_pixel_magnitude(s.as_ref(), x, y) <= opt.val
                 {
                     continue;
@@ -2684,7 +2753,7 @@ pub fn clip2d_average(hin: &mut MrcHeader, hout: &mut MrcHeader, opt: &mut ClipO
             }
         }
     }
-    let scale = if opt.low == IP_DEFAULT as f32 {
+    let scale = if opt.low == crate::imod::clip::clip::ClipOperation::Default.to_raw() as f32 {
         1.
     } else {
         opt.low
@@ -2757,7 +2826,7 @@ pub fn clip_multdiv(
     hout: &mut MrcHeader,
     opt: &mut ClipOptions,
 ) -> i32 {
-    use crate::imod::clip::clip::{IP_APPEND_FALSE, IP_DEFAULT, IP_DIVIDE, IP_MULTIPLY};
+    use crate::imod::clip::clip::IP_APPEND_FALSE;
     use crate::imod::libiimod::mrcfiles::{MRC_MODE_COMPLEX_FLOAT, MRC_MODE_FLOAT, mrc_getdcsize};
     if opt.infiles != 2 {
         crate::imod::clip::clip::show_error("clip multiply/divide: Need exactly two input files.");
@@ -2795,17 +2864,18 @@ pub fn clip_multdiv(
         );
         return -1;
     }
-    let scale = if opt.val == IP_DEFAULT as f32 {
+    let scale = if opt.val == crate::imod::clip::clip::ClipOperation::Default.to_raw() as f32 {
         1.
     } else {
         opt.val
     };
-    let (message, title_proc) = match opt.process {
-        IP_MULTIPLY => ("Multiplying", "Multiply"),
-        IP_DIVIDE => ("Dividing", "Divide"),
+    let (message, title_proc) = match crate::imod::clip::clip::ClipOperation::from_raw(opt.process)
+    {
+        Some(crate::imod::clip::clip::ClipOperation::Multiply) => ("Multiplying", "Multiply"),
+        Some(crate::imod::clip::clip::ClipOperation::Divide) => ("Dividing", "Divide"),
         _ => return -1,
     };
-    let title = if opt.val != IP_DEFAULT as f32 {
+    let title = if opt.val != crate::imod::clip::clip::ClipOperation::Default.to_raw() as f32 {
         c_format(
             "clip: %s, scaled by %.2f",
             &[CArg::Str(title_proc), CArg::Dbl(scale as f64)],
@@ -2816,7 +2886,10 @@ pub fn clip_multdiv(
     crate::imod::libiimod::mrcfiles::mrc_head_label(&mut *hout, title.as_bytes());
     let do_round = csize1 * csize2 == 1
         && hout.mode != MRC_MODE_FLOAT
-        && (h1.mode == MRC_MODE_FLOAT || h2.mode == MRC_MODE_FLOAT || opt.process == IP_DIVIDE);
+        && (h1.mode == MRC_MODE_FLOAT
+            || h2.mode == MRC_MODE_FLOAT
+            || crate::imod::clip::clip::ClipOperation::from_raw(opt.process)
+                == Some(crate::imod::clip::clip::ClipOperation::Divide));
     let mut read_once = if h2.nz == 1 && h1.nz > 1 { 1 } else { 0 };
     let mut s: Option<Islice> = None;
     let mut div_by_zero = 0;
@@ -2887,7 +2960,9 @@ pub fn clip_multdiv(
                 slice_get_val(s.as_mut().unwrap(), x, y, &mut b);
                 if do_round {
                     // `processing.cpp:2454`: B3DNINT is (int)floor(x + 0.5).
-                    if opt.process == IP_MULTIPLY {
+                    if crate::imod::clip::clip::ClipOperation::from_raw(opt.process)
+                        == Some(crate::imod::clip::clip::ClipOperation::Multiply)
+                    {
                         a[0] = ((a[0] * b[0] * scale) as f64 + 0.5).floor() as i32 as f32;
                     } else if b[0] != 0. {
                         a[0] = ((a[0] * (scale / b[0])) as f64 + 0.5).floor() as i32 as f32;
@@ -2896,7 +2971,9 @@ pub fn clip_multdiv(
                         a[0] = 0.;
                     }
                 } else if csize2 == 1 || hout.mode == MRC_MODE_FLOAT {
-                    if opt.process == IP_MULTIPLY {
+                    if crate::imod::clip::clip::ClipOperation::from_raw(opt.process)
+                        == Some(crate::imod::clip::clip::ClipOperation::Multiply)
+                    {
                         let scaled_val = b[0] * scale;
                         a[0] *= scaled_val;
                         a[1] *= scaled_val;
@@ -2913,7 +2990,9 @@ pub fn clip_multdiv(
                         a[2] = 0.;
                     }
                 } else {
-                    if opt.process == IP_MULTIPLY {
+                    if crate::imod::clip::clip::ClipOperation::from_raw(opt.process)
+                        == Some(crate::imod::clip::clip::ClipOperation::Multiply)
+                    {
                         let re = (a[0] * b[0] - a[1] * b[1]) * scale;
                         a[1] = (a[0] * b[1] + b[0] * a[1]) * scale;
                         a[0] = re;
@@ -2962,11 +3041,14 @@ pub fn clip_multdiv(
 }
 /// Matches C++ `clipPlanarFit`.
 pub fn clip_planar_fit(hin: &mut MrcHeader, hout: &mut MrcHeader, opt: &mut ClipOptions) -> i32 {
-    use crate::imod::clip::clip::{IP_DEFAULT, IP_FLATFIELD, IP_PLANARFIT};
     crate::imod::clip::file_io::set_input_options(opt, hin);
-    let fitting = opt.process == IP_PLANARFIT || opt.val != IP_DEFAULT as f32;
+    let fitting = crate::imod::clip::clip::ClipOperation::from_raw(opt.process)
+        == Some(crate::imod::clip::clip::ClipOperation::Planarfit)
+        || opt.val != crate::imod::clip::clip::ClipOperation::Default.to_raw() as f32;
     let mut order = 0_i32;
-    if opt.process == IP_FLATFIELD {
+    if crate::imod::clip::clip::ClipOperation::from_raw(opt.process)
+        == Some(crate::imod::clip::clip::ClipOperation::Flatfield)
+    {
         if fitting {
             order = (opt.val as i32).clamp(1, 4);
         }
@@ -2993,7 +3075,7 @@ pub fn clip_planar_fit(hin: &mut MrcHeader, hout: &mut MrcHeader, opt: &mut Clip
     // `fullArrayMinMaxMean` and `mrc_write_slice` later take as a slice's
     // float storage.
     let mut sum = MrcData::F(vec![0_f32; n]);
-    let base = if opt.low == IP_DEFAULT as f32 {
+    let base = if opt.low == crate::imod::clip::clip::ClipOperation::Default.to_raw() as f32 {
         0.
     } else {
         opt.low
@@ -3129,7 +3211,9 @@ pub fn clip_planar_fit(hin: &mut MrcHeader, hout: &mut MrcHeader, opt: &mut Clip
     // bin, build the xx/yy coordinate arrays and fit a plane with no
     // constant term.  aa and bb are floats in the source and lsFit2 is its
     // own routine, not an inline normal-equation solve.
-    if opt.process == IP_PLANARFIT {
+    if crate::imod::clip::clip::ClipOperation::from_raw(opt.process)
+        == Some(crate::imod::clip::clip::ClipOperation::Planarfit)
+    {
         let mut nx_trim = (0.005 * hin.nx as f32) as i32;
         let nx_in = (hin.nx - 2 * nx_trim).min(opt.ix);
         nx_trim = 0.max((hin.nx - nx_in) / 2);
@@ -3225,7 +3309,10 @@ pub fn clip_planar_fit(hin: &mut MrcHeader, hout: &mut MrcHeader, opt: &mut Clip
         );
         return 0;
     }
-    if fitting && opt.process == IP_FLATFIELD {
+    if fitting
+        && crate::imod::clip::clip::ClipOperation::from_raw(opt.process)
+            == Some(crate::imod::clip::clip::ClipOperation::Flatfield)
+    {
         // C fills the same column-major `xMat[col][row]` used by
         // multRegress, then evaluates its polynomial inverse over the
         // full output.  Rebuild the binned normalized image here because
@@ -3426,7 +3513,9 @@ pub fn clip_planar_fit(hin: &mut MrcHeader, hout: &mut MrcHeader, opt: &mut Clip
             *value = (dmean as f64 / (0.05 * dmean as f64).max(*value as f64)) as f32;
         }
     }
-    if opt.process == IP_FLATFIELD {
+    if crate::imod::clip::clip::ClipOperation::from_raw(opt.process)
+        == Some(crate::imod::clip::clip::ClipOperation::Flatfield)
+    {
         // `processing.cpp:2779-2785` takes min/max/mean straight from
         // sumBuf with `fullArrayMinMaxMean` and writes sumBuf itself.  The
         // intermediate slice that used to stand in here was filled by
@@ -3466,7 +3555,7 @@ pub fn clip_unpack(
     hout: &mut MrcHeader,
     opt: &mut ClipOptions,
 ) -> i32 {
-    use crate::imod::clip::clip::{IP_APPEND_FALSE, IP_DEFAULT, IP_UNPACK};
+    use crate::imod::clip::clip::IP_APPEND_FALSE;
     use crate::imod::libiimod::mrcfiles::{MRC_MODE_FLOAT, mrc_head_label};
     let mut do_ref = opt.infiles == 2;
     if opt.add2file != IP_APPEND_FALSE {
@@ -3508,7 +3597,7 @@ pub fn clip_unpack(
     if antialias_eer {
         scale = 100.;
     }
-    if opt.val != IP_DEFAULT as f32 {
+    if opt.val != crate::imod::clip::clip::ClipOperation::Default.to_raw() as f32 {
         scale = opt.val;
     }
     let mut reference: Option<Islice> = None;
@@ -3696,7 +3785,9 @@ pub fn clip_unpack(
     mrc_head_label(
         &mut *hout,
         c_format(
-            if opt.process == IP_UNPACK {
+            if crate::imod::clip::clip::ClipOperation::from_raw(opt.process)
+                == Some(crate::imod::clip::clip::ClipOperation::Unpack)
+            {
                 "clip: Unpack 4-bit values, scaled by %.2f"
             } else {
                 "clip: Normalize, scaled by %.2f"
@@ -3709,7 +3800,7 @@ pub fn clip_unpack(
     // -- the *unscaled* threshold is what `CorDefSurroundingMean` is given,
     // and `truncThresh` is it times the scale.
     let mut unscaled_thresh = 1.0e30_f32;
-    if opt.high != IP_DEFAULT as f32 {
+    if opt.high != crate::imod::clip::clip::ClipOperation::Default.to_raw() as f32 {
         unscaled_thresh = opt.high;
     }
     if antialias_eer {
@@ -3759,7 +3850,9 @@ pub fn clip_unpack(
                 };
                 v[0] = v[0] * gain + offset;
                 if v[0] > trunc_thresh {
-                    v[0] = if opt.low == IP_DEFAULT as f32 {
+                    v[0] = if opt.low
+                        == crate::imod::clip::clip::ClipOperation::Default.to_raw() as f32
+                    {
                         crate::imod::clip::correct_defects::cor_def_surrounding_mean(
                             input.data.bytes(),
                             input.mode,
@@ -4300,8 +4393,8 @@ pub fn clip_get_stat3d(
 }
 /// Matches C++ `clip_stat`.
 pub fn clip_stat(hin: &mut MrcHeader, opt: &mut ClipOptions) -> i32 {
-    use crate::imod::clip::clip::IP_DEFAULT;
-    let outliers = opt.val != IP_DEFAULT as f32 || opt.low != IP_DEFAULT as f32;
+    let outliers = opt.val != crate::imod::clip::clip::ClipOperation::Default.to_raw() as f32
+        || opt.low != crate::imod::clip::clip::ClipOperation::Default.to_raw() as f32;
     let mut li = crate::imod::libiimod::mrcfiles::LoadInfo::default();
     crate::imod::libiimod::mrcfiles::mrc_init_li(Some(&mut li), None);
     let mut pcoords = Vec::new();
@@ -4346,10 +4439,10 @@ pub fn clip_stat(hin: &mut MrcHeader, opt: &mut ClipOptions) -> i32 {
             crate::imod::clip::clip::show_error("stat: piece coordinates are not regularly spaced");
             return -1;
         }
-        if opt.new_xoverlap == IP_DEFAULT {
+        if opt.new_xoverlap == crate::imod::clip::clip::ClipOperation::Default.to_raw() {
             opt.new_xoverlap = 0;
         }
-        if opt.new_yoverlap == IP_DEFAULT {
+        if opt.new_yoverlap == crate::imod::clip::clip::ClipOperation::Default.to_raw() {
             opt.new_yoverlap = 0;
         }
         if num_x > 1 {
@@ -4613,12 +4706,12 @@ pub fn clip_stat(hin: &mut MrcHeader, opt: &mut ClipOptions) -> i32 {
     let mut flagged: Vec<bool> = Vec::new();
     if outliers {
         let mut length = opt.nofsecs;
-        if opt.low != IP_DEFAULT as f32 {
+        if opt.low != crate::imod::clip::clip::ClipOperation::Default.to_raw() as f32 {
             length = opt.low.round() as i32;
         }
         // `processing.cpp:3548`: B3DMIN(nofsecs, B3DMAX(5, length)).
         length = opt.nofsecs.min(5.max(length));
-        let kcrit = if opt.val != IP_DEFAULT as f32 {
+        let kcrit = if opt.val != crate::imod::clip::clip::ClipOperation::Default.to_raw() as f32 {
             opt.val
         } else {
             2.24
@@ -4755,18 +4848,27 @@ pub fn clip_stat(hin: &mut MrcHeader, opt: &mut ClipOptions) -> i32 {
                     } else {
                         "Pieces"
                     }),
-                    CArg::Str(if opt.low != IP_DEFAULT as f32 {
-                        "locally "
-                    } else {
-                        ""
-                    }),
+                    CArg::Str(
+                        if opt.low
+                            != crate::imod::clip::clip::ClipOperation::Default.to_raw() as f32
+                        {
+                            "locally "
+                        } else {
+                            ""
+                        },
+                    ),
                 ],
             )
             .as_bytes(),
         );
         let mut number = 0;
         // `processing.cpp:3766-3775`.
-        let mut line_length = 28 + if opt.low != IP_DEFAULT as f32 { 8 } else { 0 };
+        let mut line_length = 28
+            + if opt.low != crate::imod::clip::clip::ClipOperation::Default.to_raw() as f32 {
+                8
+            } else {
+                0
+            };
         for (index, row) in stat_rows.iter().enumerate() {
             if flagged[index] {
                 let _ = ImodFile::Stdout
@@ -4788,19 +4890,18 @@ pub fn clip_stat(hin: &mut MrcHeader, opt: &mut ClipOptions) -> i32 {
 }
 /// Matches C++ `clipHistogram`.
 pub fn clip_histogram(hin: &mut MrcHeader, opt: &mut ClipOptions) -> i32 {
-    use crate::imod::clip::clip::IP_DEFAULT;
     crate::imod::clip::file_io::set_input_options(opt, hin);
     if opt.sano != 0 {
         return histogram_peaks_and_dip(hin, opt);
     }
     let floating = matches!(hin.mode, 2 | 4);
     let (hist_min, hist_max, delta, bins_len, offset) = if floating {
-        let lo = if opt.low == IP_DEFAULT as f32 {
+        let lo = if opt.low == crate::imod::clip::clip::ClipOperation::Default.to_raw() as f32 {
             hin.amin
         } else {
             opt.low
         };
-        let hi = if opt.high == IP_DEFAULT as f32 {
+        let hi = if opt.high == crate::imod::clip::clip::ClipOperation::Default.to_raw() as f32 {
             hin.amax
         } else {
             opt.high
@@ -4815,7 +4916,7 @@ pub fn clip_histogram(hin: &mut MrcHeader, opt: &mut ClipOptions) -> i32 {
             );
             return -1;
         }
-        let d = if opt.val == IP_DEFAULT as f32 {
+        let d = if opt.val == crate::imod::clip::clip::ClipOperation::Default.to_raw() as f32 {
             (hi - lo) / 256.
         } else {
             opt.val
@@ -4885,7 +4986,7 @@ pub fn clip_histogram(hin: &mut MrcHeader, opt: &mut ClipOptions) -> i32 {
     // only agrees when the combining factor is 1.
     let mut threshold_value = 0_f32;
     let mut got_threshold = false;
-    if opt.thresh != IP_DEFAULT as f32 {
+    if opt.thresh != crate::imod::clip::clip::ClipOperation::Default.to_raw() as f32 {
         let thresh_counts = ((opt.thresh * opt.nofsecs as f32) as f64 * nx as f64) * ny as f64;
         let mut cumul_counts = 0_f64;
         for ind in 0..bins.len() {
@@ -4906,7 +5007,10 @@ pub fn clip_histogram(hin: &mut MrcHeader, opt: &mut ClipOptions) -> i32 {
     let last = bins.iter().rposition(|&n| n != 0);
     if let (Some(mut a), Some(mut b)) = (first, last) {
         if !floating {
-            if opt.low != IP_DEFAULT as f32 && opt.high != IP_DEFAULT as f32 && opt.low > opt.high {
+            if opt.low != crate::imod::clip::clip::ClipOperation::Default.to_raw() as f32
+                && opt.high != crate::imod::clip::clip::ClipOperation::Default.to_raw() as f32
+                && opt.low > opt.high
+            {
                 let _ = ImodFile::Stdout.write_all(
                     c_format(
                         "ERROR: clip histogram - minimum (%f) must be less than maximum (%f)\n",
@@ -4919,10 +5023,10 @@ pub fn clip_histogram(hin: &mut MrcHeader, opt: &mut ClipOptions) -> i32 {
                 );
                 return -1;
             }
-            if opt.low != IP_DEFAULT as f32 {
+            if opt.low != crate::imod::clip::clip::ClipOperation::Default.to_raw() as f32 {
                 a = a.max((opt.low + offset as f32).round() as usize);
             }
-            if opt.high != IP_DEFAULT as f32 {
+            if opt.high != crate::imod::clip::clip::ClipOperation::Default.to_raw() as f32 {
                 b = b.min((opt.high + offset as f32).round() as usize);
             }
             if a > b {
@@ -4931,7 +5035,7 @@ pub fn clip_histogram(hin: &mut MrcHeader, opt: &mut ClipOptions) -> i32 {
         }
         let combine = if floating {
             1
-        } else if opt.val == IP_DEFAULT as f32 {
+        } else if opt.val == crate::imod::clip::clip::ClipOperation::Default.to_raw() as f32 {
             // `processing.cpp:3949` is B3DNINT((maxBin - minBin) / 256.),
             // i.e. floor(x + 0.5) on a double quotient.  Integer division
             // truncates instead and picks the bin width one too small
@@ -5025,7 +5129,7 @@ pub fn clip_histogram(hin: &mut MrcHeader, opt: &mut ClipOptions) -> i32 {
         // percentile is never reached, C's `thresh` is still uninitialised
         // stack storage.  Zero is used here for that indeterminate value.
         let _ = got_threshold;
-        if opt.thresh != IP_DEFAULT as f32 {
+        if opt.thresh != crate::imod::clip::clip::ClipOperation::Default.to_raw() as f32 {
             let _ = ImodFile::Stdout.write_all(
                 c_format(
                     "Threshold value for reaching %g of counts = %g\n",
@@ -5063,7 +5167,7 @@ pub fn clip_histogram(hin: &mut MrcHeader, opt: &mut ClipOptions) -> i32 {
             }
         }
         let peak_ind = peak_ind.max(0);
-        if opt.falloff_frac != IP_DEFAULT as f32 {
+        if opt.falloff_frac != crate::imod::clip::clip::ClipOperation::Default.to_raw() as f32 {
             let (dir, mut ind) = if opt.falloff_frac > 0. {
                 (1_i32, 1_i32)
             } else {
@@ -5147,7 +5251,7 @@ pub fn clip_histogram(hin: &mut MrcHeader, opt: &mut ClipOptions) -> i32 {
                 .as_bytes(),
             );
         }
-        if opt.pctl_frac == IP_DEFAULT as f32 {
+        if opt.pctl_frac == crate::imod::clip::clip::ClipOperation::Default.to_raw() as f32 {
             return 0;
         }
         if peak_ind as f32 > 0.8 * num_bins as f32 || (peak_ind as f32) < 0.2 * num_bins as f32 {
@@ -5305,8 +5409,9 @@ pub fn clip_histogram(hin: &mut MrcHeader, opt: &mut ClipOptions) -> i32 {
 }
 /// Matches C++ `histogramPeaksAndDip`.
 pub fn histogram_peaks_and_dip(hin: &mut MrcHeader, opt: &mut ClipOptions) -> i32 {
-    use crate::imod::clip::clip::IP_DEFAULT;
-    if opt.low != IP_DEFAULT as f32 || opt.high != IP_DEFAULT as f32 || opt.val != IP_DEFAULT as f32
+    if opt.low != crate::imod::clip::clip::ClipOperation::Default.to_raw() as f32
+        || opt.high != crate::imod::clip::clip::ClipOperation::Default.to_raw() as f32
+        || opt.val != crate::imod::clip::clip::ClipOperation::Default.to_raw() as f32
     {
         let _ = ImodFile::Stdout.write_all(b"ERROR: CLIP - The -n, -l, and -h options have no effect when doing a histogram with -s\n");
         return -1;

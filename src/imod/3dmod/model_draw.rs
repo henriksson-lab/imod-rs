@@ -14,8 +14,8 @@ use crate::imod::libimod::imesh::{
 use crate::imod::libimod::imodel::{ICONT_OPEN, Icont, Imod, Iobj, Ipoint};
 use crate::imod::libimod::iobj::{
     IMOD_OBJFLAG_EXTRA_EDIT, IMOD_OBJFLAG_MODV_ONLY, IOBJ_EX_FLAGS, IOBJ_EXFLAG_MESH_ON_IMG,
-    IOBJ_EXFLAG_SLICER_ONLY, IOBJ_SYM_CIRCLE, IOBJ_SYM_NONE, IOBJ_SYM_SQUARE, IOBJ_SYM_STAR,
-    IOBJ_SYM_TRIANGLE, IOBJ_SYMF_ENDS, IOBJ_SYMF_FILL, iobj_off, iobj_open, iobj_scat,
+    IOBJ_EXFLAG_SLICER_ONLY, IOBJ_SYMF_ENDS, IOBJ_SYMF_FILL, ObjectSymbol, iobj_off, iobj_open,
+    iobj_scat,
 };
 use crate::imod::libimod::istore::DrawProps;
 use crate::imod::three_dmod::finegrain::{
@@ -186,7 +186,7 @@ pub fn imod_draw_model(
             render.color_index(state.bgnpoint);
             imod_draw_symbol(
                 &cont.pts[0],
-                IOBJ_SYM_CIRCLE,
+                ObjectSymbol::Circle.to_raw(),
                 mod_size,
                 0,
                 obj.linewidth2 as i32,
@@ -195,7 +195,7 @@ pub fn imod_draw_model(
             render.color_index(state.endpoint);
             imod_draw_symbol(
                 cont.pts.last().unwrap(),
-                IOBJ_SYM_CIRCLE,
+                ObjectSymbol::Circle.to_raw(),
                 mod_size,
                 0,
                 obj.linewidth2 as i32,
@@ -207,7 +207,7 @@ pub fn imod_draw_model(
             let at_end = cont.pts.len() > 1 && (curpt == 0 || curpt as usize == cont.pts.len() - 1);
             imod_draw_symbol(
                 point,
-                IOBJ_SYM_CIRCLE,
+                ObjectSymbol::Circle.to_raw(),
                 if at_end { backup_size } else { mod_size },
                 0,
                 obj.linewidth2 as i32,
@@ -423,7 +423,10 @@ pub fn imod_draw_object_symbols(
                     render,
                 );
             }
-            if pp.symtype != IOBJ_SYM_NONE && !(pp.gap != 0 && pp.valskip != 0) {
+            if crate::imod::libimod::iobj::ObjectSymbol::from_raw(pp.symtype)
+                != Some(crate::imod::libimod::iobj::ObjectSymbol::None)
+                && !(pp.gap != 0 && pp.valskip != 0)
+            {
                 imod_draw_symbol(
                     point,
                     pp.symtype,
@@ -673,8 +676,8 @@ pub fn imod_draw_symbol(
     linewidth: i32,
     render: &mut dyn ModelDrawBoundary,
 ) {
-    match sym {
-        IOBJ_SYM_CIRCLE => {
+    match crate::imod::libimod::iobj::ObjectSymbol::from_raw(sym) {
+        Some(crate::imod::libimod::iobj::ObjectSymbol::Circle) => {
             let outer = size as f64;
             let inner = if flags as u32 & IOBJ_SYMF_FILL != 0 {
                 0.
@@ -686,7 +689,7 @@ pub fn imod_draw_symbol(
             render.disk(inner, outer, size + 4, 1);
             render.pop_matrix();
         }
-        IOBJ_SYM_SQUARE => {
+        Some(crate::imod::libimod::iobj::ObjectSymbol::Square) => {
             let mut v = *point;
             v.x -= size as f32 / 2.;
             v.y -= size as f32 / 2.;
@@ -704,7 +707,7 @@ pub fn imod_draw_symbol(
             render.vertex3(v);
             render.end();
         }
-        IOBJ_SYM_TRIANGLE => {
+        Some(crate::imod::libimod::iobj::ObjectSymbol::Triangle) => {
             let mut v = *point;
             v.y += size as f32;
             render.begin(if flags as u32 & IOBJ_SYMF_FILL != 0 {
@@ -720,12 +723,12 @@ pub fn imod_draw_symbol(
             render.vertex3(v);
             render.end();
         }
-        IOBJ_SYM_NONE => {
+        Some(crate::imod::libimod::iobj::ObjectSymbol::None) => {
             render.begin(GL_POINTS);
             render.vertex3(*point);
             render.end();
         }
-        IOBJ_SYM_STAR => {}
+        Some(crate::imod::libimod::iobj::ObjectSymbol::Star) => {}
         _ => {}
     }
 }

@@ -11,9 +11,8 @@ use crate::imod::libcfshr::b3dutil::ImodFile;
 use crate::imod::libcfshr::b3dutil::{CArg, b3d_error, b3d_shift_bytes, c_format};
 use crate::imod::libcfshr::islice::slice_mode_if_real;
 use crate::imod::libiimod::iimage::{
-    IIFORMAT_COMPLEX, IIFORMAT_RGB, IITYPE_BYTE, IITYPE_FLOAT, IITYPE_SHORT, IITYPE_UBYTE,
-    IITYPE_USHORT, ImodImageFile, LineProcData, MRSA_BYTE, MRSA_FLOAT, MRSA_USHORT, StackSetData,
-    ii_convert_line_of_floats,
+    IIFORMAT_COMPLEX, IIFORMAT_RGB, ImageDataType, ImodImageFile, LineProcData, MRSA_BYTE,
+    MRSA_FLOAT, MRSA_USHORT, StackSetData, ii_convert_line_of_floats,
 };
 use crate::imod::libiimod::iimrc::ii_mrc_set_load_info;
 use crate::imod::libiimod::mrcfiles::{
@@ -821,11 +820,11 @@ fn get_file_xscale(format: i32) -> i32 {
 /// C static `lookupNativeDatatype` (`hdf_imageio.c:624`).
 unsafe fn lookup_native_datatype(in_file: &ImodImageFile) -> HidT {
     match in_file.type_ {
-        IITYPE_BYTE => H5T_NATIVE_SCHAR_g,
-        IITYPE_UBYTE => H5T_NATIVE_UCHAR_g,
-        IITYPE_SHORT => H5T_NATIVE_SHORT_g,
-        IITYPE_USHORT => H5T_NATIVE_USHORT_g,
-        IITYPE_FLOAT => H5T_NATIVE_FLOAT_g,
+        1 => H5T_NATIVE_SCHAR_g,
+        0 => H5T_NATIVE_UCHAR_g,
+        2 => H5T_NATIVE_SHORT_g,
+        3 => H5T_NATIVE_USHORT_g,
+        6 => H5T_NATIVE_FLOAT_g,
         _ => H5T_NATIVE_SCHAR_g,
     }
 }
@@ -954,7 +953,7 @@ mod tests {
             image.hdf_file_id = file;
             image.z_chunk_size = 1;
             image.hdf_compression = 0;
-            image.type_ = IITYPE_FLOAT;
+            image.type_ = ImageDataType::Float.to_raw();
             image.global_adoc_index = -1;
             assert_eq!(init_new_hdf_file(&mut image), 0);
             assert!(image.dataset_id >= 0);
@@ -1076,7 +1075,7 @@ mod tests {
             image.ury = -1;
             image.urz = -1;
             image.hdf_file_id = file;
-            image.type_ = IITYPE_FLOAT;
+            image.type_ = ImageDataType::Float.to_raw();
             image.global_adoc_index = -1;
             assert_eq!(init_new_hdf_file(&mut image), 0);
             assert!(image.stack_set_list.is_some());

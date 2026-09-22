@@ -66,10 +66,7 @@ use crate::imod::three_dmod::utilities::{
     util_get_longest_time_string, util_is_band_committed, util_next_sec_with_cont,
     util_set_zoom_on_screen_change, util_test_band_move, util_unit_zoom_for_device_scaling,
 };
-use crate::imod::three_dmod::zap_classes::{
-    MULTIZ_MAX_PANELS, ZAP_TOGGLE_ARROW, ZAP_TOGGLE_CENTER, ZAP_TOGGLE_INSERT, ZAP_TOGGLE_LASSO,
-    ZAP_TOGGLE_RESOL, ZAP_TOGGLE_RUBBER, ZAP_TOGGLE_TIMELOCK, ZAP_TOGGLE_ZLOCK,
-};
+use crate::imod::three_dmod::zap_classes::{MULTIZ_MAX_PANELS, ZapToggle};
 
 // These shadowed the canonical declarations with WRONG values -- `IMOD_MMOVIE`
 // was 0 where `imodel.h:27` says 2, `IOBJ_SYM_NONE`/`_CIRCLE` were swapped
@@ -82,8 +79,7 @@ use crate::imod::libimod::imesh::{
 };
 use crate::imod::libimod::imodel::{IMOD_MMODEL, IMOD_MMOVIE};
 use crate::imod::libimod::iobj::{
-    IOBJ_EXFLAG_MESH_ON_IMG, IOBJ_EXFLAG_SLICER_ONLY, IOBJ_SYM_CIRCLE, IOBJ_SYM_NONE,
-    IOBJ_SYM_TRIANGLE, IOBJ_SYMF_ARROW, IOBJ_SYMF_ENDS,
+    IOBJ_EXFLAG_MESH_ON_IMG, IOBJ_EXFLAG_SLICER_ONLY, IOBJ_SYMF_ARROW, IOBJ_SYMF_ENDS, ObjectSymbol,
 };
 
 /// `IMOD_DRAW_*` (`imod.h:36-72`).
@@ -2882,7 +2878,7 @@ impl ZapFuncs {
             imod_puts("Got a zap window");
         }
         let hqgfx = zap.hqgfx;
-        with_boundary(|n| n.zap_window_set_toggle_state(ZAP_TOGGLE_RESOL, hqgfx));
+        with_boundary(|n| n.zap_window_set_toggle_state(ZapToggle::Resolution.to_raw(), hqgfx));
 
         if APP.lock().unwrap().as_ref().is_some_and(|a| a.rgba == 0) {
             with_boundary(|n| n.gfx_set_colormap());
@@ -3974,12 +3970,12 @@ impl ZapFuncs {
     pub fn state_toggled(&mut self, index: usize, state: i32) {
         let mut time = 0;
         self.set_control_and_limits();
-        match index {
-            ZAP_TOGGLE_RESOL => {
+        match crate::imod::three_dmod::zap_classes::ZapToggle::from_raw(index) {
+            Some(crate::imod::three_dmod::zap_classes::ZapToggle::Resolution) => {
                 self.hqgfx = state;
                 self.draw();
             }
-            ZAP_TOGGLE_ZLOCK => {
+            Some(crate::imod::three_dmod::zap_classes::ZapToggle::ZLock) => {
                 self.lock = if state != 0 { 2 } else { 0 };
                 if self.lock == 0 {
                     self.flush_image();
@@ -3987,7 +3983,7 @@ impl ZapFuncs {
                     self.draw();
                 }
             }
-            ZAP_TOGGLE_CENTER => {
+            Some(crate::imod::three_dmod::zap_classes::ZapToggle::Center) => {
                 self.keepcentered = state;
                 if state != 0 {
                     self.flush_image();
@@ -3995,15 +3991,17 @@ impl ZapFuncs {
                     self.draw();
                 }
             }
-            ZAP_TOGGLE_INSERT => {
+            Some(crate::imod::three_dmod::zap_classes::ZapToggle::Insert) => {
                 self.insertmode = state as i16;
                 unsafe { (*self.vi).insertmode = self.insertmode as i32 };
                 self.register_drag_additions();
             }
-            ZAP_TOGGLE_RUBBER => self.toggle_rubberband(true),
-            ZAP_TOGGLE_LASSO => self.toggle_lasso(true),
-            ZAP_TOGGLE_ARROW => self.toggle_arrow(true),
-            ZAP_TOGGLE_TIMELOCK => {
+            Some(crate::imod::three_dmod::zap_classes::ZapToggle::Rubber) => {
+                self.toggle_rubberband(true)
+            }
+            Some(crate::imod::three_dmod::zap_classes::ZapToggle::Lasso) => self.toggle_lasso(true),
+            Some(crate::imod::three_dmod::zap_classes::ZapToggle::Arrow) => self.toggle_arrow(true),
+            Some(crate::imod::three_dmod::zap_classes::ZapToggle::TimeLock) => {
                 crate::imod::three_dmod::imodview::ivw_get_time(
                     unsafe { &*self.vi },
                     Some(&mut time),
@@ -4696,9 +4694,11 @@ impl ZapFuncs {
                     if shifted != 0 {
                         self.print_info(true);
                     } else {
-                        self.state_toggled(ZAP_TOGGLE_INSERT, 1 - self.insertmode as i32);
+                        self.state_toggled(ZapToggle::Insert.to_raw(), 1 - self.insertmode as i32);
                         let mode = self.insertmode as i32;
-                        with_boundary(|n| n.zap_window_set_toggle_state(ZAP_TOGGLE_INSERT, mode));
+                        with_boundary(|n| {
+                            n.zap_window_set_toggle_state(ZapToggle::Insert.to_raw(), mode)
+                        });
                         wprint("\u{7}Toggled modeling direction\n");
                     }
                     handled = 1;
@@ -4707,9 +4707,11 @@ impl ZapFuncs {
 
             KEY_K => {
                 if shifted == 0 && ctrl == 0 {
-                    self.state_toggled(ZAP_TOGGLE_CENTER, 1 - self.keepcentered);
+                    self.state_toggled(ZapToggle::Center.to_raw(), 1 - self.keepcentered);
                     let kc = self.keepcentered;
-                    with_boundary(|n| n.zap_window_set_toggle_state(ZAP_TOGGLE_CENTER, kc));
+                    with_boundary(|n| {
+                        n.zap_window_set_toggle_state(ZapToggle::Center.to_raw(), kc)
+                    });
                     handled = 1;
                 }
             }
@@ -7838,7 +7840,7 @@ impl ZapFuncs {
         with_boundary(|n| n.zap_window_set_low_high_section_state(state));
 
         // 3/6/05: synchronize the toolbar button
-        with_boundary(|n| n.zap_window_set_toggle_state(ZAP_TOGGLE_RUBBER, state));
+        with_boundary(|n| n.zap_window_set_toggle_state(ZapToggle::Rubber.to_raw(), state));
         let set_anyway = with_boundary(|n| n.util_need_to_set_cursor());
         self.set_cursor(self.mousemode, set_anyway);
         if draw_win {
@@ -7889,7 +7891,7 @@ impl ZapFuncs {
         self.drawing_lasso = self.lasso_on;
         self.set_mouse_tracking();
         let state = i32::from(self.lasso_on);
-        with_boundary(|n| n.zap_window_set_toggle_state(ZAP_TOGGLE_LASSO, state));
+        with_boundary(|n| n.zap_window_set_toggle_state(ZapToggle::Lasso.to_raw(), state));
 
         // Set it to a modeling cursor
         self.set_cursor(self.mousemode, true);
@@ -7927,7 +7929,7 @@ impl ZapFuncs {
         self.arrow_on = !self.arrow_on;
         self.drawing_arrow = self.arrow_on;
         let state = i32::from(self.arrow_on);
-        with_boundary(|n| n.zap_window_set_toggle_state(ZAP_TOGGLE_ARROW, state));
+        with_boundary(|n| n.zap_window_set_toggle_state(ZapToggle::Arrow.to_raw(), state));
 
         self.set_cursor(self.mousemode, true);
         if draw_win {
@@ -9611,7 +9613,9 @@ impl ZapFuncs {
             });
         }
         if (iobj_scat(unsafe { (*obj).flags }) != 0 || check_symbol != 0)
-            && (cont_props.symtype != IOBJ_SYM_NONE || next_change >= 0)
+            && (crate::imod::libimod::iobj::ObjectSymbol::from_raw(cont_props.symtype)
+                != Some(crate::imod::libimod::iobj::ObjectSymbol::None)
+                || next_change >= 0)
         {
             for pt in 0..unsafe { (&(*cont).pts).len() as i32 } {
                 pt_props.gap = 0;
@@ -9632,7 +9636,8 @@ impl ZapFuncs {
                     });
                 }
 
-                if pt_props.symtype != IOBJ_SYM_NONE
+                if crate::imod::libimod::iobj::ObjectSymbol::from_raw(pt_props.symtype)
+                    != Some(crate::imod::libimod::iobj::ObjectSymbol::None)
                     && !(pt_props.gap != 0 && pt_props.valskip != 0)
                     && self.point_visable(unsafe { &(&(*cont).pts)[pt as usize] }) != 0
                 {
@@ -9929,7 +9934,7 @@ impl ZapFuncs {
         let pnt =
             imod_point_get(unsafe { &mut *(*vi).imod }).map_or(ptr::null(), |p| p as *const Ipoint);
         let (mut x, mut y);
-        let mut symbol = IOBJ_SYM_CIRCLE;
+        let mut symbol = ObjectSymbol::Circle.to_raw();
         let flags = 0;
         let mut open_add = 0;
 
@@ -9993,7 +9998,7 @@ impl ZapFuncs {
             if iobj_close(unsafe { (*obj).flags }) != 0
                 && unsafe { (*cont).flags } & ICONT_OPEN != 0
             {
-                symbol = IOBJ_SYM_TRIANGLE;
+                symbol = ObjectSymbol::Triangle.to_raw();
                 open_add = 1;
             }
             let width = scale * unsafe { (*obj).linewidth2 } as i32;

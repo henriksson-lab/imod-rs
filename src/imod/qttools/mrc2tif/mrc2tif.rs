@@ -22,9 +22,8 @@ use crate::imod::libcfshr::islice::{Islice, MrcData, slice_get_val, slice_init, 
 use crate::imod::libcfshr::parse_params::{exit_error, setExitPrefix};
 use crate::imod::libcfshr::samplemeansd::{sample_mean_sd, type_for_sample_mean};
 use crate::imod::libiimod::iimage::{
-    IIFILE_ADOC, IIFILE_TIFF, IIFORMAT_LUMINANCE, IIFORMAT_RGB, IITYPE_FLOAT, IITYPE_SHORT,
-    IITYPE_UBYTE, IITYPE_USHORT, ImodImageFile, ii_close, ii_delete, ii_fclose, ii_fopen,
-    ii_lookup_file_from_fp, ii_new,
+    IIFILE_ADOC, IIFILE_TIFF, IIFORMAT_LUMINANCE, IIFORMAT_RGB, ImageDataType, ImodImageFile,
+    ii_close, ii_delete, ii_fclose, ii_fopen, ii_lookup_file_from_fp, ii_new,
 };
 use crate::imod::libiimod::iitif::{
     tiff_open_new, tiff_parallel_write, tiff_version, tiff_write_finish, tiff_write_section,
@@ -436,11 +435,19 @@ pub fn mrc2tif() {
         }
         let mut filenum = if initial_num < 0 { zmin } else { initial_num };
         let (psize, type_, format) = match hdata.mode {
-            MRC_MODE_BYTE => (1usize, IITYPE_UBYTE, IIFORMAT_LUMINANCE),
-            MRC_MODE_SHORT => (2usize, IITYPE_SHORT, IIFORMAT_LUMINANCE),
-            MRC_MODE_USHORT => (2usize, IITYPE_USHORT, IIFORMAT_LUMINANCE),
-            MRC_MODE_FLOAT => (4usize, IITYPE_FLOAT, IIFORMAT_LUMINANCE),
-            MRC_MODE_RGB => (3usize, IITYPE_UBYTE, IIFORMAT_RGB),
+            MRC_MODE_BYTE => (
+                1usize,
+                ImageDataType::UnsignedByte.to_raw(),
+                IIFORMAT_LUMINANCE,
+            ),
+            MRC_MODE_SHORT => (2usize, ImageDataType::Short.to_raw(), IIFORMAT_LUMINANCE),
+            MRC_MODE_USHORT => (
+                2usize,
+                ImageDataType::UnsignedShort.to_raw(),
+                IIFORMAT_LUMINANCE,
+            ),
+            MRC_MODE_FLOAT => (4usize, ImageDataType::Float.to_raw(), IIFORMAT_LUMINANCE),
+            MRC_MODE_RGB => (3usize, ImageDataType::UnsignedByte.to_raw(), IIFORMAT_RGB),
             _ => exit_error(&c_format_bytes(
                 "Data mode %d not supported.",
                 &[CArg::Int(hdata.mode as i64)],
@@ -487,7 +494,7 @@ pub fn mrc2tif() {
             // setup chooses samples/bits from this field, not from the input
             // header.
             if real_mode > 0 {
-                (*iifile).type_ = IITYPE_UBYTE;
+                (*iifile).type_ = ImageDataType::UnsignedByte.to_raw();
                 out_psize = 1;
             }
         }

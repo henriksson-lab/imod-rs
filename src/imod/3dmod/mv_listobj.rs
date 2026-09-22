@@ -11,15 +11,41 @@ pub const OBJLIST_NUMBUTTONS: usize = 9;
 pub const MAX_OOLIST_BUTTONS: usize = 5000;
 pub const MAX_LIST_IN_COL: usize = 36;
 pub const MAX_LIST_NAME: usize = 40;
-pub const OBJGRP_NEW: i32 = 0;
-pub const OBJGRP_DELETE: i32 = 1;
-pub const OBJGRP_CLEAR: i32 = 2;
-pub const OBJGRP_ADDALL: i32 = 3;
-pub const OBJGRP_SWAP: i32 = 4;
-pub const OBJGRP_TURNON: i32 = 5;
-pub const OBJGRP_TURNOFF: i32 = 6;
-pub const OBJGRP_OTHERSON: i32 = 7;
-pub const OBJGRP_OTHERSOFF: i32 = 8;
+#[repr(i32)]
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum ObjectGroupAction {
+    New = 0,
+    Delete = 1,
+    Clear = 2,
+    AddAll = 3,
+    Swap = 4,
+    TurnOn = 5,
+    TurnOff = 6,
+    OthersOn = 7,
+    OthersOff = 8,
+}
+
+impl ObjectGroupAction {
+    pub const fn from_raw(value: i32) -> Option<Self> {
+        match value {
+            0 => Some(Self::New),
+            1 => Some(Self::Delete),
+            2 => Some(Self::Clear),
+            3 => Some(Self::AddAll),
+            4 => Some(Self::Swap),
+            5 => Some(Self::TurnOn),
+            6 => Some(Self::TurnOff),
+            7 => Some(Self::OthersOn),
+            8 => Some(Self::OthersOff),
+            _ => None,
+        }
+    }
+
+    pub const fn to_raw(self) -> i32 {
+        self as i32
+    }
+}
+
 pub const OBJLIST_BUTTON_LABELS: [&str; OBJLIST_NUMBUTTONS] = [
     "New", "Delete", "Clear", "Add All", "Swap", "ON", "OFF", "On", "Off",
 ];
@@ -241,8 +267,8 @@ impl ImodvOlist {
     /// Original `ImodvOlist::actionButtonClicked`.
     pub fn action_button_clicked(&mut self, model: &mut Imod, which: i32) {
         self.last_but_toggled = -1;
-        match which {
-            OBJGRP_NEW => {
+        match crate::imod::three_dmod::mv_listobj::ObjectGroupAction::from_raw(which) {
+            Some(crate::imod::three_dmod::mv_listobj::ObjectGroupAction::New) => {
                 imodv_register_model_chg();
                 let mut group = Iobj_group::default();
                 if let Some(old) = model.group_list.get(model.cur_obj_group.max(0) as usize) {
@@ -251,7 +277,7 @@ impl ImodvOlist {
                 model.group_list.push(group);
                 model.cur_obj_group = model.group_list.len() as i32 - 1;
             }
-            OBJGRP_DELETE => {
+            Some(crate::imod::three_dmod::mv_listobj::ObjectGroupAction::Delete) => {
                 if model.cur_obj_group >= 0
                     && (model.cur_obj_group as usize) < model.group_list.len()
                 {
@@ -262,7 +288,7 @@ impl ImodvOlist {
                         .min(model.group_list.len() as i32 - 1);
                 }
             }
-            OBJGRP_CLEAR => {
+            Some(crate::imod::three_dmod::mv_listobj::ObjectGroupAction::Clear) => {
                 if let Some(g) = model
                     .group_list
                     .get_mut(model.cur_obj_group.max(0) as usize)
@@ -271,7 +297,7 @@ impl ImodvOlist {
                     g.obj_list.clear();
                 }
             }
-            OBJGRP_ADDALL => {
+            Some(crate::imod::three_dmod::mv_listobj::ObjectGroupAction::AddAll) => {
                 if let Some(g) = model
                     .group_list
                     .get_mut(model.cur_obj_group.max(0) as usize)
@@ -280,7 +306,7 @@ impl ImodvOlist {
                     g.obj_list = (0..model.obj.len() as i32).collect();
                 }
             }
-            OBJGRP_SWAP => {
+            Some(crate::imod::three_dmod::mv_listobj::ObjectGroupAction::Swap) => {
                 if let Some(g) = model
                     .group_list
                     .get_mut(model.cur_obj_group.max(0) as usize)
@@ -292,7 +318,10 @@ impl ImodvOlist {
                         .collect();
                 }
             }
-            OBJGRP_TURNON | OBJGRP_TURNOFF | OBJGRP_OTHERSON | OBJGRP_OTHERSOFF => {
+            Some(crate::imod::three_dmod::mv_listobj::ObjectGroupAction::TurnOn)
+            | Some(crate::imod::three_dmod::mv_listobj::ObjectGroupAction::TurnOff)
+            | Some(crate::imod::three_dmod::mv_listobj::ObjectGroupAction::OthersOn)
+            | Some(crate::imod::three_dmod::mv_listobj::ObjectGroupAction::OthersOff) => {
                 let members = model
                     .group_list
                     .get(model.cur_obj_group.max(0) as usize)
@@ -300,10 +329,10 @@ impl ImodvOlist {
                     .unwrap_or_default();
                 for (ob, obj) in model.obj.iter_mut().enumerate() {
                     let member = members.contains(&(ob as i32));
-                    let on =
-                        (member && which == OBJGRP_TURNON) || (!member && which == OBJGRP_OTHERSON);
-                    let off = (member && which == OBJGRP_TURNOFF)
-                        || (!member && which == OBJGRP_OTHERSOFF);
+                    let on = (member && which == ObjectGroupAction::TurnOn.to_raw())
+                        || (!member && which == ObjectGroupAction::OthersOn.to_raw());
+                    let off = (member && which == ObjectGroupAction::TurnOff.to_raw())
+                        || (!member && which == ObjectGroupAction::OthersOff.to_raw());
                     if on {
                         obj.flags &= !IMOD_OBJFLAG_OFF;
                         imodv_register_object_chg(ob as i32)
@@ -467,11 +496,11 @@ mod tests {
         m.obj = vec![Iobj::default(), Iobj::default()];
         let mut l = ImodvOlist::default();
         imodv_object_list_dialog(&m, 1, &mut l);
-        l.action_button_clicked(&mut m, OBJGRP_NEW);
+        l.action_button_clicked(&mut m, ObjectGroupAction::New.to_raw());
         assert_eq!(m.cur_obj_group, 0);
-        l.action_button_clicked(&mut m, OBJGRP_ADDALL);
+        l.action_button_clicked(&mut m, ObjectGroupAction::AddAll.to_raw());
         assert_eq!(m.group_list[0].obj_list, vec![0, 1]);
-        l.action_button_clicked(&mut m, OBJGRP_TURNOFF);
+        l.action_button_clicked(&mut m, ObjectGroupAction::TurnOff.to_raw());
         assert!(m.obj.iter().all(|o| o.flags & IMOD_OBJFLAG_OFF != 0));
     }
 

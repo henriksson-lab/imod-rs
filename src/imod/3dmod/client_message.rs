@@ -7,32 +7,74 @@
 //! name and its source arguments.
 #![allow(dead_code, unused_variables)]
 
-pub const MESSAGE_NO_ACTION: i32 = 0;
-pub const MESSAGE_OPEN_MODEL: i32 = 1;
-pub const MESSAGE_SAVE_MODEL: i32 = 2;
-pub const MESSAGE_VIEW_MODEL: i32 = 3;
-pub const MESSAGE_QUIT: i32 = 4;
-pub const MESSAGE_RAISE_WINDOWS: i32 = 5;
-pub const MESSAGE_MODEL_MODE: i32 = 6;
-pub const MESSAGE_OPEN_KEEP_BW: i32 = 7;
-pub const MESSAGE_OPEN_BEADFIXER: i32 = 8;
-pub const MESSAGE_ONE_ZAP_OPEN: i32 = 9;
-pub const MESSAGE_RUBBERBAND: i32 = 10;
-pub const MESSAGE_OBJ_PROPERTIES: i32 = 11;
-pub const MESSAGE_NEWOBJ_PROPERTIES: i32 = 12;
-pub const MESSAGE_SLICER_ANGLES: i32 = 13;
-pub const MESSAGE_PLUGIN_EXECUTE: i32 = 14;
-pub const MESSAGE_OBJ_PROPS_2: i32 = 15;
-pub const MESSAGE_NEWOBJ_PROPS_2: i32 = 16;
-pub const MESSAGE_GHOST_MODE: i32 = 17;
-pub const MESSAGE_ZAP_HQ_MODE: i32 = 18;
-pub const MESSAGE_OPEN_DIALOGS: i32 = 19;
-pub const MESSAGE_MODEL_CHANGED: i32 = 20;
-pub const MESSAGE_OBJ_PROPS_3: i32 = 21;
-pub const MESSAGE_NEWOBJ_PROPS_3: i32 = 22;
-pub const MESSAGE_EDGE_FOR_MIDAS: i32 = 23;
-pub const MESSAGE_MIDAS_SET_EDGE: i32 = 24;
-pub const MESSAGE_MULTIZ_PANELS: i32 = 25;
+#[repr(i32)]
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum ClientMessage {
+    NoAction = 0,
+    OpenModel = 1,
+    SaveModel = 2,
+    ViewModel = 3,
+    Quit = 4,
+    RaiseWindows = 5,
+    ModelMode = 6,
+    OpenKeepBw = 7,
+    OpenBeadfixer = 8,
+    OneZapOpen = 9,
+    Rubberband = 10,
+    ObjectProperties = 11,
+    NewObjectProperties = 12,
+    SlicerAngles = 13,
+    PluginExecute = 14,
+    ObjectProperties2 = 15,
+    NewObjectProperties2 = 16,
+    GhostMode = 17,
+    ZapHqMode = 18,
+    OpenDialogs = 19,
+    ModelChanged = 20,
+    ObjectProperties3 = 21,
+    NewObjectProperties3 = 22,
+    EdgeForMidas = 23,
+    MidasSetEdge = 24,
+    MultiZPanels = 25,
+}
+
+impl ClientMessage {
+    pub const fn from_raw(value: i32) -> Option<Self> {
+        match value {
+            0 => Some(Self::NoAction),
+            1 => Some(Self::OpenModel),
+            2 => Some(Self::SaveModel),
+            3 => Some(Self::ViewModel),
+            4 => Some(Self::Quit),
+            5 => Some(Self::RaiseWindows),
+            6 => Some(Self::ModelMode),
+            7 => Some(Self::OpenKeepBw),
+            8 => Some(Self::OpenBeadfixer),
+            9 => Some(Self::OneZapOpen),
+            10 => Some(Self::Rubberband),
+            11 => Some(Self::ObjectProperties),
+            12 => Some(Self::NewObjectProperties),
+            13 => Some(Self::SlicerAngles),
+            14 => Some(Self::PluginExecute),
+            15 => Some(Self::ObjectProperties2),
+            16 => Some(Self::NewObjectProperties2),
+            17 => Some(Self::GhostMode),
+            18 => Some(Self::ZapHqMode),
+            19 => Some(Self::OpenDialogs),
+            20 => Some(Self::ModelChanged),
+            21 => Some(Self::ObjectProperties3),
+            22 => Some(Self::NewObjectProperties3),
+            23 => Some(Self::EdgeForMidas),
+            24 => Some(Self::MidasSetEdge),
+            25 => Some(Self::MultiZPanels),
+            _ => None,
+        }
+    }
+
+    pub const fn to_raw(self) -> i32 {
+        self as i32
+    }
+}
 
 pub const MESSAGE_BEADFIX_OPENFILE: i32 = 1;
 pub const MESSAGE_BEADFIX_REREAD: i32 = 2;
@@ -157,7 +199,7 @@ impl ImodClipboard {
             m_disconnected: false,
             m_deferred_handling: 0,
             m_saved_clipboard: saved,
-            message_action: MESSAGE_NO_ACTION,
+            message_action: ClientMessage::NoAction.to_raw(),
             message_strings: Vec::new(),
             message_stamp: -1,
             initial_load: will_load_images,
@@ -342,10 +384,17 @@ impl ImodClipboard {
                 if action >= 0 && (action as usize) < REQUIRED_ARGS.len() {
                     arg += REQUIRED_ARGS[action as usize];
                 }
-                if arg < num_args - 1 && action == MESSAGE_MODEL_MODE {
+                if arg < num_args - 1
+                    && crate::imod::three_dmod::client_message::ClientMessage::from_raw(action)
+                        == Some(crate::imod::three_dmod::client_message::ClientMessage::ModelMode)
+                {
                     arg += 1;
                 }
-                if action == MESSAGE_PLUGIN_EXECUTE || action == MESSAGE_QUIT {
+                if crate::imod::three_dmod::client_message::ClientMessage::from_raw(action)
+                    == Some(crate::imod::three_dmod::client_message::ClientMessage::PluginExecute)
+                    || crate::imod::three_dmod::client_message::ClientMessage::from_raw(action)
+                        == Some(crate::imod::three_dmod::client_message::ClientMessage::Quit)
+                {
                     arg = num_args;
                 }
                 arg += 1;
@@ -353,14 +402,14 @@ impl ImodClipboard {
             }
             let s = b.state();
             if s.imodv_closed || !s.imodv_standalone {
-                match action {
-                    MESSAGE_OPEN_MODEL | MESSAGE_OPEN_KEEP_BW => {
+                match crate::imod::three_dmod::client_message::ClientMessage::from_raw(action) {
+                    Some(crate::imod::three_dmod::client_message::ClientMessage::OpenModel) | Some(crate::imod::three_dmod::client_message::ClientMessage::OpenKeepBw) => {
                         let name = self.message_strings[arg + 1].clone();
                         succeeded = -1;
                         self.send_response(1, b);
                         b.call("inputRaiseWindows", &[]);
                         b.call(
-                            if action == MESSAGE_OPEN_KEEP_BW {
+                            if action == ClientMessage::OpenKeepBw.to_raw() {
                                 "openModel.keepBW"
                             } else {
                                 "openModel"
@@ -369,23 +418,23 @@ impl ImodClipboard {
                         );
                         arg += 1;
                     }
-                    MESSAGE_SAVE_MODEL => {
+                    Some(crate::imod::three_dmod::client_message::ClientMessage::SaveModel) => {
                         succeeded = -1;
                         self.send_response(1, b);
                         b.call("SaveModel", &[]);
                     }
-                    MESSAGE_VIEW_MODEL => {
+                    Some(crate::imod::three_dmod::client_message::ClientMessage::ViewModel) => {
                         b.call("imod_autosave", &[]);
                         b.call("inputRaiseWindows", &[]);
                         b.call("imodv_open", &[]);
                     }
-                    MESSAGE_QUIT => {
+                    Some(crate::imod::three_dmod::client_message::ClientMessage::Quit) => {
                         arg = num_args;
                     }
-                    MESSAGE_RAISE_WINDOWS => {
+                    Some(crate::imod::three_dmod::client_message::ClientMessage::RaiseWindows) => {
                         b.call("inputRaiseWindows", &[]);
                     }
-                    MESSAGE_MODEL_MODE => {
+                    Some(crate::imod::three_dmod::client_message::ClientMessage::ModelMode) => {
                         let value = if arg < num_args - 1 {
                             arg += 1;
                             self.message_strings[arg].clone()
@@ -410,26 +459,26 @@ impl ImodClipboard {
                             );
                         }
                     }
-                    MESSAGE_OPEN_BEADFIXER => {
+                    Some(crate::imod::three_dmod::client_message::ClientMessage::OpenBeadfixer) => {
                         b.call("imodPlugOpenByName", &["Bead Fixer".into()]);
                         b.call("clientMessage.findClosestBeadfixSection", &[]);
                     }
-                    MESSAGE_ONE_ZAP_OPEN => {
+                    Some(crate::imod::three_dmod::client_message::ClientMessage::OneZapOpen) => {
                         b.call("inputRaiseWindows", &[]);
                         b.call("imod_zap_open_if_none", &[]);
                     }
-                    MESSAGE_RUBBERBAND => {
+                    Some(crate::imod::three_dmod::client_message::ClientMessage::Rubberband) => {
                         b.call("zapReportRubberband", &[]);
                     }
-                    MESSAGE_SLICER_ANGLES => {
+                    Some(crate::imod::three_dmod::client_message::ClientMessage::SlicerAngles) => {
                         b.call("slicerReportAngles", &[]);
                     }
-                    MESSAGE_OBJ_PROPERTIES
-                    | MESSAGE_NEWOBJ_PROPERTIES
-                    | MESSAGE_OBJ_PROPS_2
-                    | MESSAGE_NEWOBJ_PROPS_2
-                    | MESSAGE_OBJ_PROPS_3
-                    | MESSAGE_NEWOBJ_PROPS_3 => {
+                    Some(crate::imod::three_dmod::client_message::ClientMessage::ObjectProperties)
+                    | Some(crate::imod::three_dmod::client_message::ClientMessage::NewObjectProperties)
+                    | Some(crate::imod::three_dmod::client_message::ClientMessage::ObjectProperties2)
+                    | Some(crate::imod::three_dmod::client_message::ClientMessage::NewObjectProperties2)
+                    | Some(crate::imod::three_dmod::client_message::ClientMessage::ObjectProperties3)
+                    | Some(crate::imod::three_dmod::client_message::ClientMessage::NewObjectProperties3) => {
                         let n = REQUIRED_ARGS[action as usize];
                         b.call(
                             "clientMessage.objectProperties",
@@ -437,21 +486,21 @@ impl ImodClipboard {
                         );
                         arg += n;
                     }
-                    MESSAGE_GHOST_MODE => {
+                    Some(crate::imod::three_dmod::client_message::ClientMessage::GhostMode) => {
                         b.call(
                             "clientMessage.ghostMode",
                             &self.message_strings[arg + 1..=arg + 3],
                         );
                         arg += 3;
                     }
-                    MESSAGE_ZAP_HQ_MODE => {
+                    Some(crate::imod::three_dmod::client_message::ClientMessage::ZapHqMode) => {
                         b.call(
                             "clientMessage.zapHighQuality",
                             &self.message_strings[arg + 1..=arg + 1],
                         );
                         arg += 1;
                     }
-                    MESSAGE_OPEN_DIALOGS => {
+                    Some(crate::imod::three_dmod::client_message::ClientMessage::OpenDialogs) => {
                         b.call(
                             "imodvOpenSelectedWindows",
                             &self.message_strings[arg + 1..=arg + 1],
@@ -462,27 +511,27 @@ impl ImodClipboard {
                         );
                         arg += 1;
                     }
-                    MESSAGE_MODEL_CHANGED => {
+                    Some(crate::imod::three_dmod::client_message::ClientMessage::ModelChanged) => {
                         b.call("imod_model_changed.print", &[]);
                     }
-                    MESSAGE_PLUGIN_EXECUTE => {
+                    Some(crate::imod::three_dmod::client_message::ClientMessage::PluginExecute) => {
                         arg += 1;
                         if b.imod_plug_message(&self.message_strings, &mut arg) != 0 {
                             succeeded = 0;
                             arg = num_args;
                         }
                     }
-                    MESSAGE_EDGE_FOR_MIDAS => {
+                    Some(crate::imod::three_dmod::client_message::ClientMessage::EdgeForMidas) => {
                         b.call("inputFindEdgeForMidas", &[]);
                     }
-                    MESSAGE_MIDAS_SET_EDGE => {
+                    Some(crate::imod::three_dmod::client_message::ClientMessage::MidasSetEdge) => {
                         b.call(
                             "clientMessage.midasSetEdge",
                             &self.message_strings[arg + 1..=arg + 4],
                         );
                         arg += 4;
                     }
-                    MESSAGE_MULTIZ_PANELS => {
+                    Some(crate::imod::three_dmod::client_message::ClientMessage::MultiZPanels) => {
                         b.call(
                             "clientMessage.multiZPanels",
                             &self.message_strings[arg + 1..=arg + 4],
@@ -498,12 +547,14 @@ impl ImodClipboard {
                     }
                 }
             } else {
-                match action {
-                    MESSAGE_QUIT => arg = num_args,
-                    MESSAGE_RAISE_WINDOWS => {
+                match crate::imod::three_dmod::client_message::ClientMessage::from_raw(action) {
+                    Some(crate::imod::three_dmod::client_message::ClientMessage::Quit) => {
+                        arg = num_args
+                    }
+                    Some(crate::imod::three_dmod::client_message::ClientMessage::RaiseWindows) => {
                         b.call("imodvInputRaise", &[]);
                     }
-                    MESSAGE_OPEN_DIALOGS => {
+                    Some(crate::imod::three_dmod::client_message::ClientMessage::OpenDialogs) => {
                         arg += 1;
                         b.call("imodvOpenSelectedWindows", &self.message_strings[arg..=arg]);
                     }
@@ -524,7 +575,8 @@ impl ImodClipboard {
         if self.m_deferred_handling > 0 {
             self.m_deferred_handling = 0;
         }
-        self.message_action == MESSAGE_QUIT
+        crate::imod::three_dmod::client_message::ClientMessage::from_raw(self.message_action)
+            == Some(crate::imod::three_dmod::client_message::ClientMessage::Quit)
     }
 
     /// `ImodClipboard::sendResponse`.
@@ -655,7 +707,7 @@ mod tests {
         b.state.imodv_closed = false;
         b.state.imodv_standalone = true;
         let mut c = ImodClipboard::new(false, false, &mut b);
-        c.message_strings = vec![MESSAGE_RAISE_WINDOWS.to_string()];
+        c.message_strings = vec![ClientMessage::RaiseWindows.to_raw().to_string()];
         c.execute_message(&mut b);
         assert_eq!(b.calls[0].0, "imodvInputRaise");
         assert_eq!(b.clipboard, "8 OK");

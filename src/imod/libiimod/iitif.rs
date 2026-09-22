@@ -21,10 +21,9 @@ use crate::imod::libiimod::iilikemrc::{
 };
 use crate::imod::libiimod::iimage::{
     IIFILE_TIFF, IIFORMAT_COLORMAP, IIFORMAT_COMPLEX, IIFORMAT_LUMINANCE, IIFORMAT_RGB,
-    IISTATE_BUSY, IISTATE_READY, IITYPE_BYTE, IITYPE_FLOAT, IITYPE_INT, IITYPE_SHORT, IITYPE_UBYTE,
-    IITYPE_UINT, IITYPE_USHORT, ImodImageFile, MRSA_BYTE, MRSA_FLOAT, MRSA_NOPROC, MRSA_USHORT,
-    RawImageInfo, ii_best_tile_size, ii_close, ii_delete, ii_make_buffer_convert_if_float, ii_new,
-    ii_reopen,
+    IISTATE_BUSY, IISTATE_READY, ImageDataType, ImodImageFile, MRSA_BYTE, MRSA_FLOAT, MRSA_NOPROC,
+    MRSA_USHORT, RawImageInfo, ii_best_tile_size, ii_close, ii_delete,
+    ii_make_buffer_convert_if_float, ii_new, ii_reopen,
 };
 use crate::imod::libiimod::mrcfiles::{
     IIUNIT_4BIT_MODE, IIUNIT_HALF_XSIZE, MRC_LABEL_SIZE, MRC_MODE_BYTE, MRC_MODE_FLOAT,
@@ -987,9 +986,9 @@ pub unsafe fn ii_tiff_check(in_file: *mut ImodImageFile) -> i32 {
     /* Set up file mode and default properties; fill in mode for raw info at same time */
     if bits == 8 || eer_file != 0 {
         (*in_file).type_ = if eer_file != 0 && S_ANTIALIAS_EER.load(Ordering::SeqCst) != 0 {
-            IITYPE_SHORT
+            ImageDataType::Short.to_raw()
         } else {
-            IITYPE_UBYTE
+            ImageDataType::UnsignedByte.to_raw()
         };
         (*in_file).amin = 0.;
         (*in_file).amean = if eer_file != 0 {
@@ -1064,7 +1063,7 @@ pub unsafe fn ii_tiff_check(in_file: *mut ImodImageFile) -> i32 {
             }
             TIFFSetDirectory(tif, 0);
         } else if format_defined != 0 && sampleformat as i32 == SAMPLEFORMAT_INT {
-            (*in_file).type_ = IITYPE_BYTE;
+            (*in_file).type_ = ImageDataType::Byte.to_raw();
             info.type_ = RAW_MODE_SBYTE;
         }
     } else {
@@ -1072,14 +1071,14 @@ pub unsafe fn ii_tiff_check(in_file: *mut ImodImageFile) -> i32 {
         otherwise set up for unsigned */
         if bits == 16 {
             if format_defined != 0 && sampleformat as i32 == SAMPLEFORMAT_INT {
-                (*in_file).type_ = IITYPE_SHORT;
+                (*in_file).type_ = ImageDataType::Short.to_raw();
                 (*in_file).amean = 0.;
                 (*in_file).amin = -32767.;
                 (*in_file).amax = 32767.;
                 (*in_file).mode = MRC_MODE_SHORT;
                 info.type_ = RAW_MODE_SHORT;
             } else {
-                (*in_file).type_ = IITYPE_USHORT;
+                (*in_file).type_ = ImageDataType::UnsignedShort.to_raw();
                 (*in_file).amean = 32767.;
                 (*in_file).amin = 0.;
                 (*in_file).amax = 65535.;
@@ -1089,19 +1088,19 @@ pub unsafe fn ii_tiff_check(in_file: *mut ImodImageFile) -> i32 {
         } else {
             /* Set up for integer data: until there is an MRC mode, set to -1 */
             if format_defined != 0 && sampleformat as i32 == SAMPLEFORMAT_INT {
-                (*in_file).type_ = IITYPE_INT;
+                (*in_file).type_ = ImageDataType::Int.to_raw();
                 (*in_file).amean = 0.;
                 (*in_file).amin = -65536.;
                 (*in_file).amax = 65536.;
                 (*in_file).mode = -1;
             } else if format_defined != 0 && sampleformat as i32 == SAMPLEFORMAT_UINT {
-                (*in_file).type_ = IITYPE_UINT;
+                (*in_file).type_ = ImageDataType::UnsignedInt.to_raw();
                 (*in_file).amean = 65536.;
                 (*in_file).amin = 0.;
                 (*in_file).amax = 130000.;
                 (*in_file).mode = -1;
             } else if format_defined != 0 && sampleformat as i32 == SAMPLEFORMAT_IEEEFP {
-                (*in_file).type_ = IITYPE_FLOAT;
+                (*in_file).type_ = ImageDataType::Float.to_raw();
                 (*in_file).amean = 128.;
                 (*in_file).amin = 0.;
                 (*in_file).amax = 255.;
@@ -1133,13 +1132,13 @@ pub unsafe fn ii_tiff_check(in_file: *mut ImodImageFile) -> i32 {
 
     /* Use min and max from file if defined (better be there for float/int) */
     if got_min != 0 {
-        if (*in_file).type_ == IITYPE_BYTE {
+        if (*in_file).type_ == ImageDataType::Byte.to_raw() {
             last_min += 128.;
         }
         (*in_file).amin = last_min as f32;
     }
     if got_max != 0 {
-        if (*in_file).type_ == IITYPE_BYTE {
+        if (*in_file).type_ == ImageDataType::Byte.to_raw() {
             last_max += 128.;
         }
         (*in_file).amax = last_max as f32;
@@ -1273,7 +1272,11 @@ unsafe fn tiff_delete_callback(in_file: *mut ImodImageFile) {
 /// C `tiffFillMrcHeader` (`iitif.c:715`).
 pub fn tiff_fill_mrc_header(in_file: &ImodImageFile, hdata: &mut MrcHeader) -> i32 {
     mrc_head_new(hdata, in_file.nx, in_file.ny, in_file.nz, in_file.mode);
-    hdata.bytes_signed = if in_file.type_ == IITYPE_BYTE { 1 } else { 0 };
+    hdata.bytes_signed = if in_file.type_ == ImageDataType::Byte.to_raw() {
+        1
+    } else {
+        0
+    };
     hdata.amin = in_file.amin;
     hdata.amean = in_file.amean;
     hdata.amax = in_file.amax;
@@ -1719,7 +1722,7 @@ unsafe fn read_section(
     let byte = if convert == MRSA_BYTE { 1 } else { 0 };
     let to_short = if convert == MRSA_USHORT { 1 } else { 0 };
     let to_float = if convert == MRSA_FLOAT { 1 } else { 0 };
-    let signed_bytes = if (*in_file).type_ == IITYPE_BYTE {
+    let signed_bytes = if (*in_file).type_ == ImageDataType::Byte.to_raw() {
         1
     } else {
         0
@@ -1910,19 +1913,19 @@ unsafe fn read_section(
     /* Set up pixsize which is the number of bytes in the input data, and
     moveSize which is number of bytes of output.  Also get scale maps */
     if (convert != 0 && to_float == 0) || signed_bytes != 0 {
-        if (*in_file).type_ == IITYPE_SHORT {
+        if (*in_file).type_ == ImageDataType::Short.to_raw() {
             pixsize = 2;
             map_data = get_short_map(slope, offset, outmin, outmax, MRC_RAMP_LIN, 0, 1);
             map = map_data.as_mut_ptr();
-        } else if (*in_file).type_ == IITYPE_USHORT {
+        } else if (*in_file).type_ == ImageDataType::UnsignedShort.to_raw() {
             pixsize = 2;
             if byte != 0 || doscale != 0 {
                 map_data = get_short_map(slope, offset, outmin, outmax, MRC_RAMP_LIN, 0, 0);
                 map = map_data.as_mut_ptr();
             }
-        } else if (*in_file).type_ == IITYPE_FLOAT
-            || (*in_file).type_ == IITYPE_INT
-            || (*in_file).type_ == IITYPE_UINT
+        } else if (*in_file).type_ == ImageDataType::Float.to_raw()
+            || (*in_file).type_ == ImageDataType::Int.to_raw()
+            || (*in_file).type_ == ImageDataType::UnsignedInt.to_raw()
         {
             pixsize = 4;
         } else if ((to_short != 0 || doscale != 0) && colormap.is_null()) || signed_bytes != 0 {
@@ -1946,11 +1949,13 @@ unsafe fn read_section(
     } else {
         if (*in_file).format == IIFORMAT_RGB {
             pixsize = (*in_file).rgb_samples;
-        } else if (*in_file).type_ == IITYPE_SHORT || (*in_file).type_ == IITYPE_USHORT {
+        } else if (*in_file).type_ == ImageDataType::Short.to_raw()
+            || (*in_file).type_ == ImageDataType::UnsignedShort.to_raw()
+        {
             pixsize = 2;
-        } else if (*in_file).type_ == IITYPE_FLOAT
-            || (*in_file).type_ == IITYPE_INT
-            || (*in_file).type_ == IITYPE_UINT
+        } else if (*in_file).type_ == ImageDataType::Float.to_raw()
+            || (*in_file).type_ == ImageDataType::Int.to_raw()
+            || (*in_file).type_ == ImageDataType::UnsignedInt.to_raw()
         {
             pixsize = 4;
         }
@@ -2903,7 +2908,11 @@ unsafe fn copy_line(
     let to_short = if convert == MRSA_USHORT { 1 } else { 0 };
     let to_float = if convert == MRSA_FLOAT { 1 } else { 0 };
     let outmax = if to_short != 0 { 65535 } else { 255 };
-    let signed_bytes = if type_ == IITYPE_BYTE { 1 } else { 0 };
+    let signed_bytes = if type_ == ImageDataType::Byte.to_raw() {
+        1
+    } else {
+        0
+    };
     let mut i: i32;
     let mut j: i32;
     let mut ival: i32;
@@ -3146,7 +3155,7 @@ unsafe fn copy_line(
                         usdata = usdata.add(1);
                         i += 1;
                     }
-                } else if to_float != 0 && type_ == IITYPE_SHORT {
+                } else if to_float != 0 && type_ == ImageDataType::Short.to_raw() {
                     i = 0;
                     while i < xout {
                         *fobuf = *sdata as f32;
@@ -3190,7 +3199,7 @@ unsafe fn copy_line(
                         usdata = usdata.add(samples as usize);
                         i += 1;
                     }
-                } else if to_float != 0 && type_ == IITYPE_SHORT {
+                } else if to_float != 0 && type_ == ImageDataType::Short.to_raw() {
                     i = 0;
                     while i < xout {
                         *fobuf = *sdata as f32;
@@ -3224,7 +3233,7 @@ unsafe fn copy_line(
                     }
                 }
             }
-        } else if type_ == IITYPE_INT {
+        } else if type_ == ImageDataType::Int.to_raw() {
             /* Long ints */
             ldata = bdata.cast::<i32>();
             if to_float != 0 {
@@ -3250,7 +3259,7 @@ unsafe fn copy_line(
                     i += 1;
                 }
             }
-        } else if type_ == IITYPE_UINT {
+        } else if type_ == ImageDataType::UnsignedInt.to_raw() {
             /* Unsigned Long ints */
             uldata = bdata.cast::<u32>();
             if to_float != 0 {
@@ -3557,10 +3566,10 @@ pub unsafe fn tiff_open_new(in_file: *mut ImodImageFile) -> i32 {
     augment_libtiff_with_custom_tags();
     let (version, _) = tiff_version();
     let mut pixel_size = 1;
-    if matches!((*in_file).type_, IITYPE_SHORT | IITYPE_USHORT) {
+    if matches!((*in_file).type_, 2 | 3) {
         pixel_size = 2;
     }
-    if matches!((*in_file).type_, IITYPE_INT | IITYPE_UINT | IITYPE_FLOAT) {
+    if matches!((*in_file).type_, 4 | 5 | 6) {
         pixel_size = 4;
     }
     if (*in_file).format == IIFORMAT_RGB {
@@ -3622,9 +3631,9 @@ pub fn tiff_write_section(
     let pixel_bytes = match in_file.format {
         IIFORMAT_RGB => 3usize,
         _ => match in_file.type_ {
-            IITYPE_UBYTE | IITYPE_BYTE => 1,
-            IITYPE_USHORT | IITYPE_SHORT => 2,
-            IITYPE_UINT | IITYPE_INT | IITYPE_FLOAT => 4,
+            0 | 1 => 1,
+            3 | 2 => 2,
+            5 | 4 | 6 => 4,
             _ => return IIERR_NO_SUPPORT,
         },
     };
@@ -3698,10 +3707,7 @@ pub unsafe fn tiff_write_setup(
     let mut tmp_buf = S_TMP_BUF.lock().unwrap();
     if (*in_file).format != IIFORMAT_RGB
         && ((*in_file).format != IIFORMAT_LUMINANCE
-            || !matches!(
-                (*in_file).type_,
-                IITYPE_UBYTE | IITYPE_BYTE | IITYPE_USHORT | IITYPE_SHORT | IITYPE_FLOAT
-            ))
+            || !matches!((*in_file).type_, 0 | 1 | 3 | 2 | 6))
     {
         return IIERR_NO_SUPPORT;
     }
@@ -3772,11 +3778,11 @@ pub unsafe fn tiff_write_setup(
         (3, 8, PHOTOMETRIC_RGB, SAMPLEFORMAT_UINT)
     } else {
         match (*in_file).type_ {
-            IITYPE_BYTE => (1, 8, PHOTOMETRIC_MINISBLACK, SAMPLEFORMAT_INT),
-            IITYPE_UBYTE => (1, 8, PHOTOMETRIC_MINISBLACK, SAMPLEFORMAT_UINT),
-            IITYPE_SHORT => (1, 16, PHOTOMETRIC_MINISBLACK, SAMPLEFORMAT_INT),
-            IITYPE_USHORT => (1, 16, PHOTOMETRIC_MINISBLACK, SAMPLEFORMAT_UINT),
-            IITYPE_FLOAT => (1, 32, PHOTOMETRIC_MINISBLACK, SAMPLEFORMAT_IEEEFP),
+            1 => (1, 8, PHOTOMETRIC_MINISBLACK, SAMPLEFORMAT_INT),
+            0 => (1, 8, PHOTOMETRIC_MINISBLACK, SAMPLEFORMAT_UINT),
+            2 => (1, 16, PHOTOMETRIC_MINISBLACK, SAMPLEFORMAT_INT),
+            3 => (1, 16, PHOTOMETRIC_MINISBLACK, SAMPLEFORMAT_UINT),
+            6 => (1, 32, PHOTOMETRIC_MINISBLACK, SAMPLEFORMAT_IEEEFP),
             _ => return IIERR_NO_SUPPORT,
         }
     };
@@ -3889,7 +3895,7 @@ pub unsafe fn tiff_write_strip(in_file: *mut ImodImageFile, strip: i32, buf: *mu
         state.line_bytes,
         lines,
         1,
-        if (*in_file).type_ == IITYPE_BYTE {
+        if (*in_file).type_ == ImageDataType::Byte.to_raw() {
             1
         } else {
             0
@@ -3933,7 +3939,7 @@ pub unsafe fn tiff_write_strip(in_file: *mut ImodImageFile, strip: i32, buf: *mu
             state.line_bytes,
             lines,
             -1,
-            if (*in_file).type_ == IITYPE_BYTE {
+            if (*in_file).type_ == ImageDataType::Byte.to_raw() {
                 1
             } else {
                 0
@@ -3974,7 +3980,7 @@ pub unsafe fn tiff_write_strip(in_file: *mut ImodImageFile, strip: i32, buf: *mu
         state.line_bytes,
         lines,
         -1,
-        if (*in_file).type_ == IITYPE_BYTE {
+        if (*in_file).type_ == ImageDataType::Byte.to_raw() {
             1
         } else {
             0
@@ -4009,9 +4015,9 @@ pub unsafe fn ii_tiff_write_section(
     let file = &mut *in_file;
     let pixel_bytes = if file.format == IIFORMAT_RGB {
         3
-    } else if matches!(file.type_, IITYPE_UBYTE | IITYPE_BYTE) {
+    } else if matches!(file.type_, 0 | 1) {
         1
-    } else if matches!(file.type_, IITYPE_USHORT | IITYPE_SHORT) {
+    } else if matches!(file.type_, 3 | 2) {
         2
     } else {
         4
@@ -4049,9 +4055,9 @@ pub unsafe fn ii_tiff_write_section_float(
     let file = &mut *in_file;
     let pixel_bytes = if file.format == IIFORMAT_RGB {
         3
-    } else if matches!(file.type_, IITYPE_UBYTE | IITYPE_BYTE) {
+    } else if matches!(file.type_, 0 | 1) {
         1
-    } else if matches!(file.type_, IITYPE_USHORT | IITYPE_SHORT) {
+    } else if matches!(file.type_, 3 | 2) {
         2
     } else {
         4
@@ -4346,10 +4352,12 @@ pub unsafe fn tiff_parallel_write(
     assert!(!in_file.is_null(), "tiffParallelWrite: null inFile");
     *did_parallel = 0;
     let mut pixel_size = 1;
-    if (*in_file).type_ == IITYPE_SHORT || (*in_file).type_ == IITYPE_USHORT {
+    if (*in_file).type_ == ImageDataType::Short.to_raw()
+        || (*in_file).type_ == ImageDataType::UnsignedShort.to_raw()
+    {
         pixel_size = 2;
     }
-    if matches!((*in_file).type_, IITYPE_INT | IITYPE_UINT | IITYPE_FLOAT) {
+    if matches!((*in_file).type_, 4 | 5 | 6) {
         pixel_size = 4;
     }
     if (*in_file).format == IIFORMAT_RGB {
@@ -4398,9 +4406,9 @@ pub unsafe fn tiff_parallel_write(
     {
         let pixel_bytes = if (*in_file).format == IIFORMAT_RGB {
             3
-        } else if matches!((*in_file).type_, IITYPE_UBYTE | IITYPE_BYTE) {
+        } else if matches!((*in_file).type_, 0 | 1) {
             1
-        } else if matches!((*in_file).type_, IITYPE_USHORT | IITYPE_SHORT) {
+        } else if matches!((*in_file).type_, 3 | 2) {
             2
         } else {
             4
@@ -4576,7 +4584,7 @@ pub unsafe fn tiff_parallel_write(
                     line_bytes,
                     number_lines,
                     1,
-                    if (*in_file).type_ == IITYPE_BYTE {
+                    if (*in_file).type_ == ImageDataType::Byte.to_raw() {
                         1
                     } else {
                         0
@@ -4607,7 +4615,7 @@ pub unsafe fn tiff_parallel_write(
                     line_bytes,
                     number_lines,
                     -1,
-                    if (*in_file).type_ == IITYPE_BYTE {
+                    if (*in_file).type_ == ImageDataType::Byte.to_raw() {
                         1
                     } else {
                         0
@@ -4719,19 +4727,19 @@ unsafe fn constrain_and_store_min_max(in_file: *mut ImodImageFile) {
         maximum = 255.0;
     } else {
         match (*in_file).type_ {
-            IITYPE_BYTE => {
+            1 => {
                 minimum = minimum.clamp(0., 255.) - 128.;
                 maximum = maximum.clamp(0., 255.) - 128.;
             }
-            IITYPE_UBYTE => {
+            0 => {
                 minimum = minimum.clamp(0., 255.);
                 maximum = maximum.clamp(0., 255.);
             }
-            IITYPE_SHORT => {
+            2 => {
                 minimum = minimum.clamp(-32768., 32767.);
                 maximum = maximum.clamp(-32768., 32767.);
             }
-            IITYPE_USHORT => {
+            3 => {
                 minimum = minimum.clamp(0., 65535.);
                 maximum = maximum.clamp(0., 65535.);
             }
@@ -5242,7 +5250,7 @@ mod tests {
             assert_eq!((*reader).tiff_compression, IICOMPRESSION_EER_7BIT);
             assert_eq!((*reader).num_frames_in_eerfile, 1);
             assert_eq!((*reader).read_eer_as_super_res, 2);
-            assert_eq!((*reader).type_, IITYPE_UBYTE);
+            assert_eq!((*reader).type_, ImageDataType::UnsignedByte.to_raw());
 
             (*reader).llx = 0;
             (*reader).lly = 0;
@@ -5283,7 +5291,7 @@ mod tests {
             (*writer).ny = 2;
             (*writer).nz = 1;
             (*writer).format = IIFORMAT_LUMINANCE;
-            (*writer).type_ = IITYPE_USHORT;
+            (*writer).type_ = ImageDataType::UnsignedShort.to_raw();
             (*writer).amin = 0.;
             (*writer).amax = 1000.;
             assert_eq!(tiff_open_new(writer), 0);
@@ -5375,7 +5383,7 @@ mod tests {
             (*writer).ny = 2;
             (*writer).nz = 1;
             (*writer).format = IIFORMAT_LUMINANCE;
-            (*writer).type_ = IITYPE_UBYTE;
+            (*writer).type_ = ImageDataType::UnsignedByte.to_raw();
             (*writer).amin = 0.;
             (*writer).amax = 3.;
             assert_eq!(tiff_open_new(writer), 0);
@@ -5411,7 +5419,7 @@ mod tests {
                 2,
                 MRSA_NOPROC,
                 3,
-                IITYPE_UBYTE,
+                ImageDataType::UnsignedByte.to_raw(),
                 IIFORMAT_RGB,
                 1,
                 1.,
@@ -5431,7 +5439,7 @@ mod tests {
                 2,
                 MRSA_FLOAT,
                 3,
-                IITYPE_UBYTE,
+                ImageDataType::UnsignedByte.to_raw(),
                 IIFORMAT_RGB,
                 1,
                 1.,
@@ -5464,7 +5472,7 @@ mod tests {
                 2,
                 MRSA_NOPROC,
                 1,
-                IITYPE_UBYTE,
+                ImageDataType::UnsignedByte.to_raw(),
                 IIFORMAT_COLORMAP,
                 1,
                 1.,
@@ -5484,7 +5492,7 @@ mod tests {
                 2,
                 MRSA_BYTE,
                 1,
-                IITYPE_UBYTE,
+                ImageDataType::UnsignedByte.to_raw(),
                 IIFORMAT_COLORMAP,
                 1,
                 1.,
@@ -5511,7 +5519,7 @@ mod tests {
                 2,
                 MRSA_FLOAT,
                 2,
-                IITYPE_SHORT,
+                ImageDataType::Short.to_raw(),
                 IIFORMAT_LUMINANCE,
                 1,
                 1.,
@@ -5532,7 +5540,7 @@ mod tests {
                 2,
                 MRSA_BYTE,
                 4,
-                IITYPE_FLOAT,
+                ImageDataType::Float.to_raw(),
                 IIFORMAT_LUMINANCE,
                 1,
                 2.,
@@ -5559,7 +5567,7 @@ mod tests {
                 3,
                 MRSA_BYTE,
                 1,
-                IITYPE_UBYTE,
+                ImageDataType::UnsignedByte.to_raw(),
                 IIFORMAT_LUMINANCE,
                 1,
                 1.,
@@ -5589,7 +5597,7 @@ mod tests {
                 2,
                 MRSA_BYTE,
                 1,
-                IITYPE_BYTE,
+                ImageDataType::Byte.to_raw(),
                 IIFORMAT_LUMINANCE,
                 1,
                 1.,
@@ -5610,7 +5618,7 @@ mod tests {
                 2,
                 MRSA_BYTE,
                 4,
-                IITYPE_INT,
+                ImageDataType::Int.to_raw(),
                 IIFORMAT_LUMINANCE,
                 1,
                 2.,
@@ -5631,7 +5639,7 @@ mod tests {
                 2,
                 MRSA_USHORT,
                 4,
-                IITYPE_UINT,
+                ImageDataType::UnsignedInt.to_raw(),
                 IIFORMAT_LUMINANCE,
                 1,
                 2.,
@@ -5750,7 +5758,7 @@ mod tests {
             (*writer).ny = 2;
             (*writer).nz = 1;
             (*writer).format = IIFORMAT_LUMINANCE;
-            (*writer).type_ = IITYPE_UBYTE;
+            (*writer).type_ = ImageDataType::UnsignedByte.to_raw();
             (*writer).amin = 2.;
             (*writer).amax = 5.;
             assert_eq!(tiff_open_new(writer), 0);
@@ -5912,7 +5920,7 @@ mod tests {
             (*writer).ny = 1;
             (*writer).nz = 2;
             (*writer).format = IIFORMAT_LUMINANCE;
-            (*writer).type_ = IITYPE_UBYTE;
+            (*writer).type_ = ImageDataType::UnsignedByte.to_raw();
             assert_eq!(tiff_open_new(writer), 0);
             let mut thumbnail = [17_u8];
             assert_eq!(
@@ -5967,7 +5975,7 @@ mod tests {
             (*writer).nz = 1;
             (*writer).last_written_z = -1;
             (*writer).format = IIFORMAT_COMPLEX;
-            (*writer).type_ = IITYPE_FLOAT;
+            (*writer).type_ = ImageDataType::Float.to_raw();
             assert_eq!(tiff_open_new(writer), 0);
             let mut pixel = [1_f32, 2.];
             assert_eq!(
@@ -6003,7 +6011,7 @@ mod tests {
             (*writer).nz = 1;
             (*writer).last_written_z = -1;
             (*writer).format = IIFORMAT_LUMINANCE;
-            (*writer).type_ = IITYPE_UBYTE;
+            (*writer).type_ = ImageDataType::UnsignedByte.to_raw();
             assert_eq!(tiff_open_new(writer), 0);
             let mut pixel = [1_u8];
             assert_eq!(
@@ -6040,7 +6048,7 @@ mod tests {
             (*writer).nz = 1;
             (*writer).new_file = 1;
             (*writer).format = IIFORMAT_LUMINANCE;
-            (*writer).type_ = IITYPE_UBYTE;
+            (*writer).type_ = ImageDataType::UnsignedByte.to_raw();
             assert_eq!(tiff_open_new(writer), 0);
             let mut pixels = [1_u8, 2, 3, 4];
             assert_eq!(
@@ -6101,7 +6109,7 @@ mod tests {
             (*writer).ny = 2;
             (*writer).nz = 1;
             (*writer).format = IIFORMAT_LUMINANCE;
-            (*writer).type_ = IITYPE_UBYTE;
+            (*writer).type_ = ImageDataType::UnsignedByte.to_raw();
             assert_eq!(tiff_open_new(writer), 0);
             let mut rows = 2;
             let mut tiles = 0;
@@ -6153,7 +6161,7 @@ mod tests {
             (*writer).ny = 1;
             (*writer).nz = 1;
             (*writer).format = IIFORMAT_LUMINANCE;
-            (*writer).type_ = IITYPE_UBYTE;
+            (*writer).type_ = ImageDataType::UnsignedByte.to_raw();
             assert_eq!(tiff_open_new(writer), 0);
             let mut rows = 0;
             let mut strips = 0;
@@ -6207,7 +6215,7 @@ mod tests {
             (*writer).ny = 1024;
             (*writer).nz = 1;
             (*writer).format = IIFORMAT_LUMINANCE;
-            (*writer).type_ = IITYPE_UBYTE;
+            (*writer).type_ = ImageDataType::UnsignedByte.to_raw();
             assert_eq!(tiff_open_new(writer), 0);
             let pixels = (0..1024 * 1024)
                 .map(|index| (index % 251) as u8)
@@ -6260,7 +6268,7 @@ mod tests {
             (*writer).ny = 1;
             (*writer).nz = 1;
             (*writer).format = IIFORMAT_LUMINANCE;
-            (*writer).type_ = IITYPE_UBYTE;
+            (*writer).type_ = ImageDataType::UnsignedByte.to_raw();
             assert_eq!(tiff_open_new(writer), 0);
             let tif = (*writer).backend_handle.cast::<Tiff>();
             // The source deliberately declines to globally extend libtiff before

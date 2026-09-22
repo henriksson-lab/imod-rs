@@ -24,9 +24,9 @@ use crate::imod::libiimod::hdf_imageio::{
 };
 use crate::imod::libiimod::iimage::{
     IIERR_IO_ERROR, IIERR_NOT_FORMAT, IIFILE_HDF, IIFORMAT_COMPLEX, IIFORMAT_LUMINANCE,
-    IIFORMAT_RGB, IISTATE_NOTINIT, IISTATE_UNUSED, IITYPE_BYTE, IITYPE_FLOAT, IITYPE_SHORT,
-    IITYPE_UBYTE, IITYPE_USHORT, ImodImageFile, MRSA_BYTE, MRSA_FLOAT, MRSA_USHORT, StackSetData,
-    ii_close, ii_default_min_max_mean, ii_new_box, ii_sync_from_mrc_header,
+    IIFORMAT_RGB, IISTATE_NOTINIT, IISTATE_UNUSED, ImageDataType, ImodImageFile, MRSA_BYTE,
+    MRSA_FLOAT, MRSA_USHORT, StackSetData, ii_close, ii_default_min_max_mean, ii_new_box,
+    ii_sync_from_mrc_header,
 };
 use crate::imod::libiimod::iimrc::ii_mrc_fill_header;
 use crate::imod::libiimod::mrcfiles::{
@@ -745,8 +745,10 @@ pub fn ii_hdf_check(in_file: &mut ImodImageFile) -> i32 {
                 .as_ptr();
             (*volume).ii_volumes = (*in_file).ii_volumes.clone();
             (*volume).format = IIFORMAT_LUMINANCE;
-            let mode = if (*volume).type_ == IITYPE_BYTE || (*volume).type_ == IITYPE_UBYTE {
-                if (*volume).type_ == IITYPE_UBYTE {
+            let mode = if (*volume).type_ == ImageDataType::Byte.to_raw()
+                || (*volume).type_ == ImageDataType::UnsignedByte.to_raw()
+            {
+                if (*volume).type_ == ImageDataType::UnsignedByte.to_raw() {
                     let mut rgb = 0;
                     if hdf_source == IIHDF_IMOD
                         && get_prefixed_integer(b"is_rgb", &mut rgb, &mut retval) == 0
@@ -761,9 +763,9 @@ pub fn ii_hdf_check(in_file: &mut ImodImageFile) -> i32 {
                 } else {
                     MRC_MODE_BYTE
                 }
-            } else if (*volume).type_ == IITYPE_SHORT {
+            } else if (*volume).type_ == ImageDataType::Short.to_raw() {
                 MRC_MODE_SHORT
-            } else if (*volume).type_ == IITYPE_USHORT {
+            } else if (*volume).type_ == ImageDataType::UnsignedShort.to_raw() {
                 MRC_MODE_USHORT
             } else {
                 let mut complex = 0;
@@ -784,7 +786,11 @@ pub fn ii_hdf_check(in_file: &mut ImodImageFile) -> i32 {
                 .as_mut()
                 .expect("HDF header is present");
             mrc_head_new(hdata, (*volume).nx, (*volume).ny, (*volume).nz, mode);
-            hdata.bytes_signed = if (*volume).type_ == IITYPE_BYTE { 1 } else { 0 };
+            hdata.bytes_signed = if (*volume).type_ == ImageDataType::Byte.to_raw() {
+                1
+            } else {
+                0
+            };
             let dataset = state.datasets.as_mut_ptr().add(vol_ind as usize);
             hdata.swapped = (*dataset).swapped as i32;
             hdata.packed4bits = 0;
@@ -1246,11 +1252,19 @@ unsafe fn scan_group(
             let class = H5Tget_class(type_id);
             let signed = H5Tget_sign(type_id) == H5T_SGN_2;
             let data_type = if class == H5T_INTEGER && bytes == 1 {
-                if signed { IITYPE_BYTE } else { IITYPE_UBYTE }
+                if signed {
+                    ImageDataType::Byte.to_raw()
+                } else {
+                    ImageDataType::UnsignedByte.to_raw()
+                }
             } else if class == H5T_INTEGER && bytes == 2 {
-                if signed { IITYPE_SHORT } else { IITYPE_USHORT }
+                if signed {
+                    ImageDataType::Short.to_raw()
+                } else {
+                    ImageDataType::UnsignedShort.to_raw()
+                }
             } else if class == H5T_FLOAT && bytes == 4 {
-                IITYPE_FLOAT
+                ImageDataType::Float.to_raw()
             } else {
                 -1
             };

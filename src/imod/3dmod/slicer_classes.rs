@@ -6,15 +6,41 @@
 #![allow(dead_code)]
 
 pub const MAX_SLICER_TOGGLES: usize = 9;
-pub const SLICER_TOGGLE_HIGHRES: usize = 0;
-pub const SLICER_TOGGLE_LOCK: usize = 1;
-pub const SLICER_TOGGLE_CENTER: usize = 2;
-pub const SLICER_TOGGLE_BAND: usize = 3;
-pub const SLICER_TOGGLE_ARROW: usize = 4;
-pub const SLICER_TOGGLE_FFT: usize = 5;
-pub const SLICER_TOGGLE_ZSCALE: usize = 6;
-pub const SLICER_TOGGLE_TIMELOCK: usize = 7;
-pub const SLICER_TOGGLE_SHIFTLOCK: usize = 8;
+#[repr(usize)]
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum SlicerToggle {
+    HighResolution = 0,
+    Lock = 1,
+    Center = 2,
+    Band = 3,
+    Arrow = 4,
+    Fft = 5,
+    ZScale = 6,
+    TimeLock = 7,
+    ShiftLock = 8,
+}
+
+impl SlicerToggle {
+    pub const fn from_raw(value: usize) -> Option<Self> {
+        match value {
+            0 => Some(Self::HighResolution),
+            1 => Some(Self::Lock),
+            2 => Some(Self::Center),
+            3 => Some(Self::Band),
+            4 => Some(Self::Arrow),
+            5 => Some(Self::Fft),
+            6 => Some(Self::ZScale),
+            7 => Some(Self::TimeLock),
+            8 => Some(Self::ShiftLock),
+            _ => None,
+        }
+    }
+
+    pub const fn to_raw(self) -> usize {
+        self as usize
+    }
+}
+
 pub const SLICER_LIMIT_INVALID: i32 = 0;
 pub const SLICER_LIMIT_TRUNCATE: i32 = 1;
 pub const SLICER_LIMIT_VALID: i32 = 2;
@@ -424,7 +450,7 @@ impl SlicerWindow {
     }
     /// `SlicerWindow::shiftToggled`.
     pub fn shift_toggled(&mut self, state: bool, core: &mut dyn SlicerCore) {
-        core.state_toggled(SLICER_TOGGLE_SHIFTLOCK, i32::from(state))
+        core.state_toggled(SlicerToggle::ShiftLock.to_raw(), i32::from(state))
     }
     /// `SlicerWindow::imageThicknessChanged`.
     pub fn image_thickness_changed(
@@ -530,7 +556,9 @@ impl SlicerWindow {
     /// `SlicerWindow::setToggleState`.
     pub fn set_toggle_state(&mut self, index: usize, state: i32, n: &mut dyn SlicerNativeBoundary) {
         self.m_toggle_states[index] = i32::from(state != 0);
-        if index == SLICER_TOGGLE_SHIFTLOCK {
+        if crate::imod::three_dmod::slicer_classes::SlicerToggle::from_raw(index)
+            == Some(crate::imod::three_dmod::slicer_classes::SlicerToggle::ShiftLock)
+        {
             n.set_rotation_center_state(state != 0)
         } else {
             n.set_toggle_checked(index, state != 0)
@@ -987,7 +1015,7 @@ mod tests {
         let mut c = C::default();
         let mut n = N::default();
         let mut w = SlicerWindow::new(&c, [90.; 3], "", false, false, false, &mut n);
-        w.toggle_clicked(SLICER_TOGGLE_FFT, true, &mut c);
+        w.toggle_clicked(SlicerToggle::Fft.to_raw(), true, &mut c);
         w.set_angles([1.05, -2., 3.], &mut n);
         w.contour_pressed(&mut c);
         assert_eq!(c.calls, ["t5:1", "limits"]);

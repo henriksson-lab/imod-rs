@@ -1,5 +1,5 @@
 //! Translation of `IMOD/clip/fft.cpp`.
-use crate::imod::clip::clip::{ClipOptions, IP_DEFAULT};
+use crate::imod::clip::clip::{ClipOperation, ClipOptions};
 use crate::imod::clip::file_io::{
     clip_write_slice, grap_volume_free, grap_volume_read, grap_volume_write, set_input_options,
     set_output_options,
@@ -19,42 +19,42 @@ use std::io::Write as _;
 pub fn clip_fft(input: &mut MrcHeader, output: &mut MrcHeader, options: &mut ClipOptions) -> i32 {
     let complex = input.mode == MRC_MODE_COMPLEX_FLOAT || input.mode == MRC_MODE_COMPLEX_SHORT;
     if complex {
-        if options.ix != IP_DEFAULT
-            || options.iy != IP_DEFAULT
-            || options.cx != IP_DEFAULT as f32
-            || options.cy != IP_DEFAULT as f32
+        if options.ix != crate::imod::clip::clip::ClipOperation::Default.to_raw()
+            || options.iy != crate::imod::clip::clip::ClipOperation::Default.to_raw()
+            || options.cx != crate::imod::clip::clip::ClipOperation::Default.to_raw() as f32
+            || options.cy != crate::imod::clip::clip::ClipOperation::Default.to_raw() as f32
         {
             crate::imod::clip::clip::show_warning(
                 "clip inverse fft - input sizes or centers are ignored",
             );
         }
-        options.ix = IP_DEFAULT;
-        options.iy = IP_DEFAULT;
-        options.cx = IP_DEFAULT as f32;
-        options.cy = IP_DEFAULT as f32;
-        if options.mode == IP_DEFAULT {
+        options.ix = crate::imod::clip::clip::ClipOperation::Default.to_raw();
+        options.iy = crate::imod::clip::clip::ClipOperation::Default.to_raw();
+        options.cx = crate::imod::clip::clip::ClipOperation::Default.to_raw() as f32;
+        options.cy = crate::imod::clip::clip::ClipOperation::Default.to_raw() as f32;
+        if options.mode == crate::imod::clip::clip::ClipOperation::Default.to_raw() {
             options.mode = MRC_MODE_FLOAT;
         }
     } else {
-        if options.ox != IP_DEFAULT
-            || options.oy != IP_DEFAULT
-            || options.oz != IP_DEFAULT
-            || options.mode != IP_DEFAULT
+        if options.ox != crate::imod::clip::clip::ClipOperation::Default.to_raw()
+            || options.oy != crate::imod::clip::clip::ClipOperation::Default.to_raw()
+            || options.oz != crate::imod::clip::clip::ClipOperation::Default.to_raw()
+            || options.mode != crate::imod::clip::clip::ClipOperation::Default.to_raw()
         {
             crate::imod::clip::clip::show_warning(
                 "clip forward fft - output sizes or mode are ignored",
             );
         }
-        options.ox = IP_DEFAULT;
-        options.oy = IP_DEFAULT;
-        options.oz = IP_DEFAULT;
+        options.ox = crate::imod::clip::clip::ClipOperation::Default.to_raw();
+        options.oy = crate::imod::clip::clip::ClipOperation::Default.to_raw();
+        options.oz = crate::imod::clip::clip::ClipOperation::Default.to_raw();
         options.mode = MRC_MODE_COMPLEX_FLOAT;
         options.ocanresize = 0;
     }
     if options.dim == 3 {
         return clip_3dfft(input, output, options);
     }
-    if complex && options.ox == IP_DEFAULT {
+    if complex && options.ox == crate::imod::clip::clip::ClipOperation::Default.to_raw() {
         options.ox = 2 * (input.nx - 1);
     }
     set_input_options(options, input);
@@ -187,13 +187,13 @@ pub fn slice_fft(slice: &mut Islice) -> i32 {
 /// C++ `clip_3dfft` (`fft.cpp:191`).
 pub fn clip_3dfft(input: &mut MrcHeader, output: &mut MrcHeader, options: &mut ClipOptions) -> i32 {
     if input.mode != MRC_MODE_COMPLEX_FLOAT {
-        if options.ix == IP_DEFAULT {
+        if options.ix == crate::imod::clip::clip::ClipOperation::Default.to_raw() {
             options.ix = input.nx;
         }
-        if options.iy == IP_DEFAULT {
+        if options.iy == crate::imod::clip::clip::ClipOperation::Default.to_raw() {
             options.iy = input.ny;
         }
-        if options.iz == IP_DEFAULT {
+        if options.iz == crate::imod::clip::clip::ClipOperation::Default.to_raw() {
             options.iz = input.nz;
         }
         if clip_nicesize(options.ix) == 0

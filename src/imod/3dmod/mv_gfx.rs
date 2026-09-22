@@ -11,7 +11,7 @@ use std::sync::Mutex;
 
 use crate::imod::libimod::imodel::Ipoint;
 use crate::imod::three_dmod::imodv::{IMODV_STEREO_OFF, ImodvApp};
-use crate::imod::three_dmod::mv_window::VVIEW_MENU_DB;
+use crate::imod::three_dmod::mv_window::ViewMenuAction;
 
 pub const IMODV_STEREO_RL: i32 = 1;
 pub const IMODV_STEREO_TB: i32 = 2;
@@ -152,7 +152,7 @@ pub fn imodv_setbuffer(
     a.dbl_buf = use_db as i32;
     a.alpha_visual = use_alpha as i32;
     // `setCheckableItem(VVIEW_MENU_DB, useDb)` is the paired window call.
-    let _ = VVIEW_MENU_DB;
+    let _ = crate::imod::three_dmod::mv_window::ViewMenuAction::DrawBox.to_raw();
     gl.viewport(a.winx, a.winy);
     gl.flush();
     gl.finish();

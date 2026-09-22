@@ -9,10 +9,7 @@ use crate::imod::mrc::tiff::TfInfo;
 #[cfg(feature = "rust-tiff")]
 mod implementation {
     use super::TfInfo;
-    use crate::imod::libiimod::iimage::{
-        IIFILE_TIFF, IITYPE_BYTE, IITYPE_FLOAT, IITYPE_INT, IITYPE_SHORT, IITYPE_UBYTE,
-        IITYPE_UINT, IITYPE_USHORT, ImodImageFile,
-    };
+    use crate::imod::libiimod::iimage::{IIFILE_TIFF, ImageDataType, ImodImageFile};
     use crate::imod::libiimod::iitif::{IICOMPRESSION_LZW, IICOMPRESSION_NONE, IICOMPRESSION_ZIP};
     use crate::imod::libiimod::mrcfiles::{
         MRC_MODE_BYTE, MRC_MODE_FLOAT, MRC_MODE_RGB, MRC_MODE_SHORT, MRC_MODE_USHORT,
@@ -25,41 +22,46 @@ mod implementation {
 
     fn bytes(result: DecodingResult) -> (Vec<u8>, i32, i32, i32) {
         match result {
-            DecodingResult::U8(values) => (values, 8, IITYPE_UBYTE, MRC_MODE_BYTE),
+            DecodingResult::U8(values) => (
+                values,
+                8,
+                ImageDataType::UnsignedByte.to_raw(),
+                MRC_MODE_BYTE,
+            ),
             DecodingResult::I8(values) => (
                 values.into_iter().map(|value| value as u8).collect(),
                 8,
-                IITYPE_BYTE,
+                ImageDataType::Byte.to_raw(),
                 MRC_MODE_BYTE,
             ),
             DecodingResult::U16(values) => (
                 values.into_iter().flat_map(u16::to_ne_bytes).collect(),
                 16,
-                IITYPE_USHORT,
+                ImageDataType::UnsignedShort.to_raw(),
                 MRC_MODE_USHORT,
             ),
             DecodingResult::I16(values) => (
                 values.into_iter().flat_map(i16::to_ne_bytes).collect(),
                 16,
-                IITYPE_SHORT,
+                ImageDataType::Short.to_raw(),
                 MRC_MODE_SHORT,
             ),
             DecodingResult::U32(values) => (
                 values.into_iter().flat_map(u32::to_ne_bytes).collect(),
                 32,
-                IITYPE_UINT,
+                ImageDataType::UnsignedInt.to_raw(),
                 MRC_MODE_FLOAT,
             ),
             DecodingResult::I32(values) => (
                 values.into_iter().flat_map(i32::to_ne_bytes).collect(),
                 32,
-                IITYPE_INT,
+                ImageDataType::Int.to_raw(),
                 MRC_MODE_FLOAT,
             ),
             DecodingResult::F32(values) => (
                 values.into_iter().flat_map(f32::to_ne_bytes).collect(),
                 32,
-                IITYPE_FLOAT,
+                ImageDataType::Float.to_raw(),
                 MRC_MODE_FLOAT,
             ),
             DecodingResult::F16(_)
@@ -598,9 +600,9 @@ mod implementation {
 
     fn mode_for(type_: i32) -> i32 {
         match type_ {
-            IITYPE_SHORT => MRC_MODE_SHORT,
-            IITYPE_USHORT => MRC_MODE_USHORT,
-            IITYPE_FLOAT | IITYPE_INT | IITYPE_UINT => MRC_MODE_FLOAT,
+            2 => MRC_MODE_SHORT,
+            3 => MRC_MODE_USHORT,
+            6 | 4 | 5 => MRC_MODE_FLOAT,
             _ => MRC_MODE_BYTE,
         }
     }

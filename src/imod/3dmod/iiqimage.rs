@@ -7,7 +7,7 @@
 
 use crate::imod::libiimod::iimage::{
     IIERR_BAD_CALL, IIERR_NOT_FORMAT, IIFILE_QIMAGE, IIFORMAT_LUMINANCE, IIFORMAT_RGB,
-    IITYPE_UBYTE, ImodImageFile, ii_simple_fill_mrc_header_callback,
+    ImageDataType, ImodImageFile, ii_simple_fill_mrc_header_callback,
 };
 use crate::imod::libiimod::mrcfiles::{MRC_MODE_BYTE, MRC_MODE_RGB, get_byte_map};
 
@@ -23,7 +23,7 @@ pub unsafe fn ii_q_image_check(in_file: *mut ImodImageFile) -> i32 {
         let file = &mut *in_file;
         file.nz = 1;
         file.file = IIFILE_QIMAGE;
-        file.type_ = IITYPE_UBYTE;
+        file.type_ = ImageDataType::UnsignedByte.to_raw();
         file.amean = 128.0;
         file.amax = 255.0;
         file.smax = 255.0;

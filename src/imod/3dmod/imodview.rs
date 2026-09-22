@@ -29,11 +29,11 @@ use crate::imod::libcfshr::islice::{Islice, slice_create};
 use crate::imod::libcfshr::reduce_by_binning::reduce_by_binning;
 use crate::imod::libiimod::iimage::{
     IIFILE_ADOC, IIFILE_HDF, IIFILE_JPEG, IIFILE_MRC, IIFILE_QIMAGE, IIFILE_RAW, IIFILE_TIFF,
-    IIFORMAT_COLORMAP, IIFORMAT_COMPLEX, IIFORMAT_LUMINANCE, IIFORMAT_RGB, IITYPE_BYTE,
-    IITYPE_FLOAT, IITYPE_UBYTE, ImodImageFile, MRSA_BYTE, MRSA_NOPROC, MRSA_USHORT,
-    ii_add_to_opened_list, ii_allow_multi_volume, ii_close, ii_default_min_max_mean, ii_delete,
-    ii_file_change_address, ii_get_adoc_index, ii_new, ii_open, ii_open_copies_for_threads,
-    ii_read_point, ii_read_section_any, ii_reopen, ii_set_mm,
+    IIFORMAT_COLORMAP, IIFORMAT_COMPLEX, IIFORMAT_LUMINANCE, IIFORMAT_RGB, ImageDataType,
+    ImodImageFile, MRSA_BYTE, MRSA_NOPROC, MRSA_USHORT, ii_add_to_opened_list,
+    ii_allow_multi_volume, ii_close, ii_default_min_max_mean, ii_delete, ii_file_change_address,
+    ii_get_adoc_index, ii_new, ii_open, ii_open_copies_for_threads, ii_read_point,
+    ii_read_section_any, ii_reopen, ii_set_mm,
 };
 use crate::imod::libiimod::iishrmem::IIFILE_SHR_MEM;
 use crate::imod::libiimod::iitif::{
@@ -3400,7 +3400,7 @@ pub fn ivw_set_time(vi: &mut ImodView, time: i32) {
                     vi.range_high,
                     image.smin,
                     image.smax,
-                    image.type_ == IITYPE_FLOAT,
+                    image.type_ == ImageDataType::Float.to_raw(),
                 ));
 
                 // ivwSetScale(vi);
@@ -4888,7 +4888,8 @@ unsafe fn ivw_process_image_list(vi: *mut ImodView) -> i32 {
                 (*vi).switch_to_ushort = 1;
             }
 
-            if ((*image).type_ != IITYPE_UBYTE && (*image).type_ != IITYPE_BYTE)
+            if ((*image).type_ != ImageDataType::UnsignedByte.to_raw()
+                && (*image).type_ != ImageDataType::Byte.to_raw())
                 || (*image).format != IIFORMAT_LUMINANCE
             {
                 all_byte = 0;
@@ -4905,7 +4906,7 @@ unsafe fn ivw_process_image_list(vi: *mut ImodView) -> i32 {
                 || (*image).file == IIFILE_SHR_MEM
                 || (*image).file == IIFILE_HDF)
                 && (*image).format == IIFORMAT_COMPLEX
-                && (*image).type_ == IITYPE_FLOAT
+                && (*image).type_ == ImageDataType::Float.to_raw()
                 && (*(*vi).li).mirror_fft >= 0
             {
                 (*image).mirror_fft = 1;
@@ -5370,7 +5371,7 @@ unsafe fn ivw_process_image_list(vi: *mut ImodView) -> i32 {
         if (*vi).ushort_store != 0 {
             let (low, high) = ((*vi).range_low, (*vi).range_high);
             let (smn, smx) = ((*(*vi).image).smin, (*(*vi).image).smax);
-            let is_float = (*(*vi).image).type_ == IITYPE_FLOAT;
+            let is_float = (*(*vi).image).type_ == ImageDataType::Float.to_raw();
             with_boundary(|n| n.info_widget_set_lh_sliders(low, high, smn, smx, is_float));
         }
 
@@ -5443,10 +5444,10 @@ unsafe fn get_valid_scale(
             let mut min_lim = 0.0f32;
             let mut max_lim = 0.0f32;
             let mut dummy = 0.0f32;
-            if (*image).type_ != IITYPE_FLOAT
+            if (*image).type_ != ImageDataType::Float.to_raw()
                 && ii_default_min_max_mean(
-                    if (*image).type_ == IITYPE_BYTE {
-                        IITYPE_UBYTE
+                    if (*image).type_ == ImageDataType::Byte.to_raw() {
+                        ImageDataType::UnsignedByte.to_raw()
                     } else {
                         (*image).type_
                     },
@@ -7755,7 +7756,7 @@ mod tests {
         //   return min/max 0.017216  199.971176
         let mut image = ImodImageFile::default();
         image.file = IIFILE_MRC;
-        image.type_ = IITYPE_FLOAT;
+        image.type_ = ImageDataType::Float.to_raw();
         image.amin = 0.017216;
         image.amax = 199.971176;
         image.amean = 100.451;
@@ -7783,7 +7784,7 @@ mod tests {
         header.imod_flags = 0;
         let mut image = ImodImageFile::default();
         image.file = IIFILE_MRC;
-        image.type_ = IITYPE_FLOAT;
+        image.type_ = ImageDataType::Float.to_raw();
         image.amin = 0.;
         image.amax = 10.;
         image.amean = 5.;

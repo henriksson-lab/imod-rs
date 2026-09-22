@@ -14,10 +14,10 @@ pub const MIN_LABEL_SIZE: i32 = 6;
 pub const MAX_SYMBOLS: usize = 4;
 pub const MAX_COLOR_SELECTORS: usize = 20;
 pub const SYM_TABLE: [i32; MAX_SYMBOLS] = [
-    IOBJ_SYM_NONE,
-    IOBJ_SYM_CIRCLE,
-    IOBJ_SYM_SQUARE,
-    IOBJ_SYM_TRIANGLE,
+    ObjectSymbol::None.to_raw(),
+    ObjectSymbol::Circle.to_raw(),
+    ObjectSymbol::Square.to_raw(),
+    ObjectSymbol::Triangle.to_raw(),
 ];
 
 /// Viewer keyboard forwarding used by `ImodObjColor`'s selector slots.

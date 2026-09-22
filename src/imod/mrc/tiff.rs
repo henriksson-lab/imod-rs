@@ -652,8 +652,9 @@ pub fn tiff_open_file(filename: &[u8], mode: &str, tif: &mut TfInfo, any_tif_pix
                 tif.bits_per_sample = 16;
             }
             if iifile.mode == MRC_MODE_FLOAT
-                || iifile.type_ == crate::imod::libiimod::iimage::IITYPE_UINT
-                || iifile.type_ == crate::imod::libiimod::iimage::IITYPE_INT
+                || iifile.type_
+                    == crate::imod::libiimod::iimage::ImageDataType::UnsignedInt.to_raw()
+                || iifile.type_ == crate::imod::libiimod::iimage::ImageDataType::Int.to_raw()
             {
                 tif.bits_per_sample = 32;
             }

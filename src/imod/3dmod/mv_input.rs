@@ -45,9 +45,7 @@ use crate::imod::three_dmod::mv_objed::{
     imodv_objed_new_view, imodv_objed_set_draw_type_and_style, imodv_objed_toggle_clip,
     objed_object,
 };
-use crate::imod::three_dmod::mv_window::{
-    VVIEW_MENU_CURPNT, VVIEW_MENU_LOWRES, VVIEW_MENU_TRANSBKGD,
-};
+use crate::imod::three_dmod::mv_window::ViewMenuAction;
 use crate::imod::three_dmod::utilities::{
     util_close_key, util_mouse_zaxis_rotation, util_wheel_to_point_size_scaling,
 };
@@ -1328,7 +1326,11 @@ pub fn imodv_key_press(a: &mut ImodvApp, event: InputEvent, n: &mut dyn MvInputN
 
         KEY_R => {
             if ctrl != 0 {
-                n.imodv_view_menu(a, VVIEW_MENU_LOWRES as i32);
+                n.imodv_view_menu(
+                    a,
+                    crate::imod::three_dmod::mv_window::ViewMenuAction::LowResolution.to_raw()
+                        as i32,
+                );
                 let lowres = a.lowres;
                 n.imodv_menu_lowres(a, lowres);
             } else if shifted != 0 {
@@ -1342,7 +1344,11 @@ pub fn imodv_key_press(a: &mut ImodvApp, event: InputEvent, n: &mut dyn MvInputN
             if ctrl != 0 && shifted != 0 {
                 imodv_objed_change_object(a, 1);
             } else if a.standalone == 0 {
-                n.imodv_view_menu(a, VVIEW_MENU_CURPNT as i32);
+                n.imodv_view_menu(
+                    a,
+                    crate::imod::three_dmod::mv_window::ViewMenuAction::CurrentPoint.to_raw()
+                        as i32,
+                );
             }
         }
 
@@ -1411,7 +1417,12 @@ pub fn imodv_key_press(a: &mut ImodvApp, event: InputEvent, n: &mut dyn MvInputN
                 let enabled = a.dbl_buf != 0
                     && a.trans_bkgd == 0
                     && (a.enable_depth_dbal >= 0 || a.enable_depth_dbst_al >= 0);
-                n.set_enabled_menu_item(a, VVIEW_MENU_TRANSBKGD, enabled);
+                n.set_enabled_menu_item(
+                    a,
+                    crate::imod::three_dmod::mv_window::ViewMenuAction::TransparentBackground
+                        .to_raw(),
+                    enabled,
+                );
                 unsafe { imodv_draw() };
             }
         }

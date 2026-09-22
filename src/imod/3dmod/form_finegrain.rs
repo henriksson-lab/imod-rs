@@ -1,8 +1,6 @@
 #![allow(dead_code)]
 
-use crate::imod::libimod::iobj::{
-    IOBJ_SYM_CIRCLE, IOBJ_SYM_NONE, IOBJ_SYM_SQUARE, IOBJ_SYM_TRIANGLE, IOBJ_SYMF_FILL,
-};
+use crate::imod::libimod::iobj::{IOBJ_SYMF_FILL, ObjectSymbol};
 use crate::imod::libimod::istore::DrawProps;
 pub const GEN_STORE_COLOR: i32 = 1;
 pub const GEN_STORE_FCOLOR: i32 = 2;
@@ -154,10 +152,10 @@ impl Default for FineGrainForm {
             m_pt_cont_surf: 0,
             m_ctrl_pressed: false,
             m_sym_table: [
-                IOBJ_SYM_NONE,
-                IOBJ_SYM_CIRCLE,
-                IOBJ_SYM_SQUARE,
-                IOBJ_SYM_TRIANGLE,
+                ObjectSymbol::None.to_raw(),
+                ObjectSymbol::Circle.to_raw(),
+                ObjectSymbol::Square.to_raw(),
+                ObjectSymbol::Triangle.to_raw(),
             ],
             m_line_selector: false,
             m_fill_selector: false,
@@ -657,7 +655,7 @@ mod tests {
     fn last_and_symbol_mapping() {
         let mut n = N::default();
         let mut f = FineGrainForm::new(&mut n);
-        f.m_last_sym_type = IOBJ_SYM_SQUARE;
+        f.m_last_sym_type = ObjectSymbol::Square.to_raw();
         f.m_last_sym_fill = true;
         f.m_last_buts[5] = true;
         assert_eq!(f.apply_last_change(5, &mut n), 1);

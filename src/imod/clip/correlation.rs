@@ -190,7 +190,7 @@ pub fn clip_corr3d(
         )
         .as_bytes(),
     );
-    if options.val as i32 == crate::imod::clip::clip::IP_DEFAULT {
+    if options.val as i32 == crate::imod::clip::clip::ClipOperation::Default.to_raw() {
         options.val = 1.;
     }
     if options.val == 1. && padfloat_volume(&mut first, mean) != 0 {
@@ -444,7 +444,7 @@ pub fn grap_corr(
     output: &mut MrcHeader,
     options: &mut ClipOptions,
 ) -> i32 {
-    use crate::imod::clip::clip::{IP_APPEND_ADD, IP_APPEND_OVERWRITE, IP_DEFAULT};
+    use crate::imod::clip::clip::{ClipOperation, IP_APPEND_ADD, IP_APPEND_OVERWRITE};
     if options.dim == 3 {
         return clip_corr3d(input1, input2, output, options);
     }
@@ -462,7 +462,7 @@ pub fn grap_corr(
         autocorrelation = false;
         z2 = options.secs[(1) as usize];
     }
-    if options.val == IP_DEFAULT as f32 {
+    if options.val == crate::imod::clip::clip::ClipOperation::Default.to_raw() as f32 {
         options.val = 1.;
     }
     if input1.mode == MRC_MODE_COMPLEX_FLOAT || input1.mode == MRC_MODE_COMPLEX_FLOAT {
@@ -506,16 +506,16 @@ pub fn grap_corr(
         };
         buf2
     };
-    if options.ix == IP_DEFAULT {
+    if options.ix == crate::imod::clip::clip::ClipOperation::Default.to_raw() {
         options.ix = input1.nx;
     }
-    if options.iy == IP_DEFAULT {
+    if options.iy == crate::imod::clip::clip::ClipOperation::Default.to_raw() {
         options.iy = input1.ny;
     }
-    if options.cx == IP_DEFAULT as f32 {
+    if options.cx == crate::imod::clip::clip::ClipOperation::Default.to_raw() as f32 {
         options.cx = input1.nx as f32 / 2.;
     }
-    if options.cy == IP_DEFAULT as f32 {
+    if options.cy == crate::imod::clip::clip::ClipOperation::Default.to_raw() as f32 {
         options.cy = input1.ny as f32 / 2.;
     }
     let (llx, lly) = (
@@ -567,7 +567,7 @@ pub fn grap_corr(
     slice_mmm(second.as_mut());
     slice_box_in(second.as_mut(), llx, lly, urx, ury);
     slice_mmm(second.as_mut());
-    if options.pad != IP_DEFAULT as f32 {
+    if options.pad != crate::imod::clip::clip::ClipOperation::Default.to_raw() as f32 {
         first.mean = options.pad;
         second.mean = options.pad;
     }
@@ -652,11 +652,13 @@ pub fn grap_corr(
         output.amin = correlation.min;
         output.amax = correlation.max;
         output.amean = correlation.mean;
-        if options.ox != IP_DEFAULT || options.oy != IP_DEFAULT {
-            if options.ox != IP_DEFAULT {
+        if options.ox != crate::imod::clip::clip::ClipOperation::Default.to_raw()
+            || options.oy != crate::imod::clip::clip::ClipOperation::Default.to_raw()
+        {
+            if options.ox != crate::imod::clip::clip::ClipOperation::Default.to_raw() {
                 options.ox = correlation.xsize;
             }
-            if options.oy != IP_DEFAULT {
+            if options.oy != crate::imod::clip::clip::ClipOperation::Default.to_raw() {
                 options.oy = correlation.ysize;
             }
             slice_resize_in(correlation.as_mut(), options.ox, options.oy);
