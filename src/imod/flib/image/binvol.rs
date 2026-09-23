@@ -253,7 +253,7 @@ pub fn binvol() {
         iiu_alt_mode(3, mode);
         //
         let mut delta = [0.0_f32; 3];
-        iiu_ret_delta(1, &mut delta);
+        delta = iiu_ret_delta(1);
         let mut nxyz_bin = [0_i32; 3];
         let mut nfs_pad = [0_i32; 3];
         let mut ncrop_pad = [0_i32; 3];
@@ -344,7 +344,7 @@ pub fn binvol() {
 
                 // Add to the origin half the extra pixels
                 let mut origin = [0.; 3];
-                iiu_ret_origin(1, &mut origin);
+                origin = iiu_ret_origin(1);
                 origin[2] += delta[2] * extra_pix / 2.0;
                 iiu_alt_origin(3, &origin);
             }

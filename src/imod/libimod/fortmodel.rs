@@ -283,9 +283,9 @@ pub fn scale_fort_model(fm: &mut FortModel, idir: i32) -> Result<(), i32> {
 /// Original: `scaleFortModToImage` (`fortmodel.c:493`).
 pub fn scale_fort_mod_to_image(fm: &mut FortModel, unit: i32, idir: i32) -> Result<(), i32> {
     let (mut origin, mut delta, mut tilt) = ([0.; 3], [0.; 3], [0.; 3]);
-    iiu_ret_origin(unit, &mut origin);
-    iiu_ret_delta(unit, &mut delta);
-    iiu_ret_tilt(unit, &mut tilt);
+    origin = iiu_ret_origin(unit);
+    delta = iiu_ret_delta(unit);
+    tilt = iiu_ret_tilt(unit);
     if idir == 0 && imodhasimageref() <= 0 {
         return Ok(());
     }

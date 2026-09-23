@@ -205,18 +205,22 @@ pub fn imod_contours_delete(cont: &mut Vec<Icont>, size: i32) -> i32 {
 /// Original: `imodContoursDeleteToEnd` (`icont.c:203`).
 ///
 /// Deletes contours from object `obj`, retaining `keep`.
-pub fn imod_contours_delete_to_end(obj: &mut Iobj, keep: i32) -> i32 {
+///
+/// The source returns -1 for a NULL object, for `contsize < keep`, and for a
+/// failed `realloc`; only the second is reachable here, so `Err(())` means
+/// `keep` exceeds the number of contours.
+pub fn imod_contours_delete_to_end(obj: &mut Iobj, keep: i32) -> Result<(), ()> {
     if (obj.cont.len() as i32) < keep {
-        return -1;
+        return Err(());
     }
     if obj.cont.len() as i32 == keep {
-        return 0;
+        return Ok(());
     }
     for co in keep as usize..obj.cont.len() {
         imod_contour_clear(&mut obj.cont[co]);
     }
     obj.cont.truncate(keep as usize);
-    0
+    Ok(())
 }
 
 /// Original: `imodel_contour_newsurf` (`icont.c:238`).
@@ -224,15 +228,18 @@ pub fn imod_contours_delete_to_end(obj: &mut Iobj, keep: i32) -> i32 {
 /// Assigns a new surface number to the contour at index `co` in `obj` and
 /// adjusts the maximum surface number for `obj`.  The source takes the contour
 /// by pointer; it is addressed by index here because it lives inside `obj`.
-pub fn imodel_contour_newsurf(obj: &mut Iobj, co: usize) -> i32 {
+///
+/// The source returns -1 for a NULL object, a NULL contour and an object with
+/// no contours; only the last is reachable here.
+pub fn imodel_contour_newsurf(obj: &mut Iobj, co: usize) -> Result<(), ()> {
     if obj.cont.is_empty() {
-        return -1;
+        return Err(());
     }
     obj.cont[co].surf = imodel_unused_surface(Some(obj));
     if obj.surfsize < obj.cont[co].surf {
         obj.surfsize = obj.cont[co].surf;
     }
-    0
+    Ok(())
 }
 
 /// Original: `imodel_unused_surface` (`icont.c:256`).
@@ -1755,12 +1762,14 @@ pub fn imod_contour_break(cont: &mut Icont, p1: i32, mut p2: i32) -> Option<Icon
 /// Original: `imodel_contour_sortx` (`icont.c:1672`).
 ///
 /// Sorts points in contour `cont` from `bgnpt` through `endpt` by X.
-pub fn imodel_contour_sortx(cont: &mut Icont, bgnpt: i32, endpt: i32) -> i32 {
+///
+/// `Err(())` is the source's -1 for a point range outside the contour.
+pub fn imodel_contour_sortx(cont: &mut Icont, bgnpt: i32, endpt: i32) -> Result<(), ()> {
     if bgnpt < 0 {
-        return -1;
+        return Err(());
     }
     if endpt > cont.pts.len() as i32 - 1 {
-        return -1;
+        return Err(());
     }
 
     for i in bgnpt..=endpt - 1 {
@@ -1775,16 +1784,16 @@ pub fn imodel_contour_sortx(cont: &mut Icont, bgnpt: i32, endpt: i32) -> i32 {
             cont.sizes.swap(i as usize, sindex as usize);
         }
     }
-    0
+    Ok(())
 }
 
 /// Original: `imodel_contour_sorty` (`icont.c:1715`).
-pub fn imodel_contour_sorty(cont: &mut Icont, bgnpt: i32, endpt: i32) -> i32 {
+pub fn imodel_contour_sorty(cont: &mut Icont, bgnpt: i32, endpt: i32) -> Result<(), ()> {
     if bgnpt < 0 {
-        return -1;
+        return Err(());
     }
     if endpt > cont.pts.len() as i32 - 1 {
-        return -1;
+        return Err(());
     }
     for i in bgnpt..=endpt - 1 {
         let mut sindex = i;
@@ -1798,16 +1807,16 @@ pub fn imodel_contour_sorty(cont: &mut Icont, bgnpt: i32, endpt: i32) -> i32 {
             cont.sizes.swap(i as usize, sindex as usize);
         }
     }
-    0
+    Ok(())
 }
 
 /// Original: `imodel_contour_sortz` (`icont.c:1758`).
-pub fn imodel_contour_sortz(cont: &mut Icont, bgnpt: i32, endpt: i32) -> i32 {
+pub fn imodel_contour_sortz(cont: &mut Icont, bgnpt: i32, endpt: i32) -> Result<(), ()> {
     if bgnpt < 0 {
-        return -1;
+        return Err(());
     }
     if endpt > cont.pts.len() as i32 - 1 {
-        return -1;
+        return Err(());
     }
     for i in bgnpt..=endpt - 1 {
         let mut sindex = i;
@@ -1821,16 +1830,16 @@ pub fn imodel_contour_sortz(cont: &mut Icont, bgnpt: i32, endpt: i32) -> i32 {
             cont.sizes.swap(i as usize, sindex as usize);
         }
     }
-    0
+    Ok(())
 }
 
 /// Original: `imodContourSort3D` (`icont.c:1804`).
 ///
 /// Sorts points in contour `cont` by proximity in 3D with coordinates scaled
-/// by `scale`.  Returns -1 for error.
-pub fn imod_contour_sort3d(cont: Option<&mut Icont>, scale: &Ipoint) -> i32 {
+/// by `scale`.  `Err(())` is the source's -1 for a NULL contour.
+pub fn imod_contour_sort3d(cont: Option<&mut Icont>, scale: &Ipoint) -> Result<(), ()> {
     let Some(cont) = cont else {
-        return -1;
+        return Err(());
     };
 
     imod_contour_unique(cont);
@@ -1871,16 +1880,16 @@ pub fn imod_contour_sort3d(cont: Option<&mut Icont>, scale: &Ipoint) -> i32 {
         }
 
         /* Invert the contour after each pass */
-        imodel_contour_invert(cont);
+        let _ = imodel_contour_invert(cont);
     }
-    0
+    Ok(())
 }
 
 /// Original: `imodel_contour_sort` (`icont.c:1856`).
 ///
 /// Sorts points in contour `cont` by proximity in the X/Y plane, by calling
 /// `imodContourSort3D` with a scale of 1,1,0.
-pub fn imodel_contour_sort(cont: Option<&mut Icont>) -> i32 {
+pub fn imodel_contour_sort(cont: Option<&mut Icont>) -> Result<(), ()> {
     let scale = Ipoint {
         x: 1.,
         y: 1.,
@@ -1892,9 +1901,12 @@ pub fn imodel_contour_sort(cont: Option<&mut Icont>) -> i32 {
 /// Original: `imodel_contour_invert` (`icont.c:1866`).
 ///
 /// Inverts the order of points in contour `cont`.
-pub fn imodel_contour_invert(cont: &mut Icont) -> i32 {
+///
+/// `Err(())` is the source's -1 for a NULL or empty contour; only the empty
+/// case is reachable here.
+pub fn imodel_contour_invert(cont: &mut Icont) -> Result<(), ()> {
     if cont.pts.is_empty() {
-        return -1;
+        return Err(());
     }
 
     let pmo = cont.pts.len() - 1;
@@ -1908,7 +1920,7 @@ pub fn imodel_contour_invert(cont: &mut Icont) -> i32 {
     /* Invert the storage items */
     let psize = cont.pts.len() as i32;
     istore_invert(&mut cont.store, psize);
-    0
+    Ok(())
 }
 
 /// Original: `imodContourReduce` (`icont.c:1908`).
@@ -2042,10 +2054,11 @@ pub fn imod_contour_reduce(cont: Option<&mut Icont>, tol: f32) {
 /// Original: `imodContourShave` (`icont.c:2041`).
 ///
 /// Removes points from contour `cont` whose distance from both the previous
-/// and the next point is less than `dist`.  Returns -1 for error.
-pub fn imod_contour_shave(cont: &mut Icont, dist: f64) -> i32 {
+/// and the next point is less than `dist`.  `Err(())` is the source's -1 for a
+/// contour with fewer than three points, which it cannot shave.
+pub fn imod_contour_shave(cont: &mut Icont, dist: f64) -> Result<(), ()> {
     if cont.pts.len() < 3 {
-        return -1;
+        return Err(());
     }
 
     let mut i = 1i32;
@@ -2061,7 +2074,7 @@ pub fn imod_contour_shave(cont: &mut Icont, dist: f64) -> i32 {
         was farther than -dist from both points! */
         i += 1;
     }
-    0
+    Ok(())
 }
 
 /// Original: `imodContourUnique` (`icont.c:2068`).
@@ -2195,7 +2208,7 @@ pub fn imod_contour_make_direction(cont: &mut Icont, direction: i32) {
         return;
     }
     if direction != imod_cont_z_direction(Some(cont)) {
-        imodel_contour_invert(cont);
+        let _ = imodel_contour_invert(cont);
     }
 }
 
@@ -2287,7 +2300,7 @@ pub fn imodel_contour_scan(incont: Option<&Icont>) -> Option<Icont> {
     contour from starting and ending points */
     if ymin == ymax {
         let last = ocont.pts.len() as i32 - 1;
-        imodel_contour_sortx(&mut ocont, 0, last);
+        let _ = imodel_contour_sortx(&mut ocont, 0, last);
         let mut cont = imod_contour_new()?;
         let first = ocont.pts[0];
         let lastpt = ocont.pts[ocont.pts.len() - 1];
@@ -2435,7 +2448,7 @@ pub fn imodel_contour_scan(incont: Option<&Icont>) -> Option<Icont> {
             }
         }
         let last = aet.pts.len() as i32 - 1;
-        imodel_contour_sortx(&mut aet, 0, last);
+        let _ = imodel_contour_sortx(&mut aet, 0, last);
 
         /* Fill cont */
         let mut j: i32 = 0;
@@ -2759,10 +2772,11 @@ that it called */
 
 /// Original: `imodContourAutoSort` (`icont.c:2856`).
 ///
-/// Used to be used to sort points from auto contouring.
-pub fn imod_contour_auto_sort(cont: Option<&mut Icont>) -> i32 {
+/// Used to be used to sort points from auto contouring.  `Err(())` is the
+/// source's -1 for a NULL contour.
+pub fn imod_contour_auto_sort(cont: Option<&mut Icont>) -> Result<(), ()> {
     let Some(cont) = cont else {
-        return -1;
+        return Err(());
     };
 
     /* Loop through points in contour. */
@@ -2792,7 +2806,7 @@ pub fn imod_contour_auto_sort(cont: Option<&mut Icont>) -> i32 {
         }
         i += 1;
     }
-    0
+    Ok(())
 }
 
 /// Original: `imodContourSwap` (`icont.c:2902`).
@@ -3620,14 +3634,14 @@ mod tests {
             },
         ];
         cont.sizes = vec![30., 10., 20.];
-        assert_eq!(imodel_contour_sortx(&mut cont, 0, 2), 0);
+        assert_eq!(imodel_contour_sortx(&mut cont, 0, 2), Ok(()));
         assert_eq!(
             cont.pts.iter().map(|p| p.x).collect::<Vec<f32>>(),
             vec![1., 2., 3.]
         );
         assert_eq!(cont.sizes, vec![10., 20., 30.]);
-        assert_eq!(imodel_contour_sortx(&mut cont, -1, 2), -1);
-        assert_eq!(imodel_contour_sortx(&mut cont, 0, 3), -1);
+        assert_eq!(imodel_contour_sortx(&mut cont, -1, 2), Err(()));
+        assert_eq!(imodel_contour_sortx(&mut cont, 0, 3), Err(()));
     }
 
     /// `imodContZDirection` (`icont.c:1090`) reports the winding sense.
@@ -4087,6 +4101,15 @@ mod source_driver_group2 {
     use super::*;
     use crate::imod::libimod::iobj::imod_object_add_contour;
 
+    /// The C driver printed these routines' `int` status; they return
+    /// `Result` here, so map back to the status the golden records.
+    fn status(r: Result<(), ()>) -> i32 {
+        match r {
+            Ok(()) => 0,
+            Err(()) => -1,
+        }
+    }
+
     fn g9(v: f64) -> String {
         crate::imod::libcfshr::b3dutil::c_format(
             "%.9g",
@@ -4342,13 +4365,19 @@ mod source_driver_group2 {
                 y: 1.,
                 z: 1.,
             };
-            out.push_str(&format!("{}\n", imod_contour_sort3d(Some(&mut c), &scale)));
+            out.push_str(&format!(
+                "{}\n",
+                status(imod_contour_sort3d(Some(&mut c), &scale))
+            ));
             dump(&mut out, "sort3d", Some(&c));
             let mut c = mkcont(&scat, 1.);
-            out.push_str(&format!("{}\n", imodel_contour_sort(Some(&mut c))));
+            out.push_str(&format!("{}\n", status(imodel_contour_sort(Some(&mut c)))));
             dump(&mut out, "csort", Some(&c));
             let mut c = mkcont(&scat, 1.);
-            out.push_str(&format!("{}\n", imod_contour_auto_sort(Some(&mut c))));
+            out.push_str(&format!(
+                "{}\n",
+                status(imod_contour_auto_sort(Some(&mut c)))
+            ));
             dump(&mut out, "autosort", Some(&c));
         }
         {
@@ -4369,7 +4398,7 @@ mod source_driver_group2 {
                 0., 0., 0.4, 0.1, 0.8, 0.2, 10., 0., 10., 10., 9.6, 9.9, 0., 10.,
             ];
             let mut c = mkcont(&close, 2.);
-            out.push_str(&format!("{}\n", imod_contour_shave(&mut c, 1.0)));
+            out.push_str(&format!("{}\n", status(imod_contour_shave(&mut c, 1.0))));
             dump(&mut out, "shave", Some(&c));
         }
         {
@@ -4459,7 +4488,7 @@ mod source_driver_group2 {
                 imod_contour_find_point(Some(&c), Some(&p), ContourFindMode::NoSort)
             ));
             let last = c.pts.len() as i32 - 1;
-            imodel_contour_sortx(&mut c, 0, last);
+            let _ = imodel_contour_sortx(&mut c, 0, last);
             p.x = 10.;
             p.y = 10.;
             out.push_str(&format!(
@@ -4951,6 +4980,15 @@ mod source_driver_store {
     use super::*;
     use crate::imod::libimod::istore::istore_insert_change;
 
+    /// The C driver printed these routines' `int` status; they return
+    /// `Result` here, so map back to the status the golden records.
+    fn status(r: Result<(), ()>) -> i32 {
+        match r {
+            Ok(()) => 0,
+            Err(()) => -1,
+        }
+    }
+
     fn g9(v: f64) -> String {
         crate::imod::libcfshr::b3dutil::c_format(
             "%.9g",
@@ -5093,7 +5131,10 @@ mod source_driver_store {
             ];
             let mut c1 = mkcont(&close, 2.);
             addchange(&mut c1, 1, 1, 4);
-            out.push_str(&format!("sh {}\n", imod_contour_shave(&mut c1, 1.0)));
+            out.push_str(&format!(
+                "sh {}\n",
+                status(imod_contour_shave(&mut c1, 1.0))
+            ));
             dumps(&mut out, "sh", Some(&c1));
         }
 

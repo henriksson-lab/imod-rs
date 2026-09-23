@@ -403,7 +403,7 @@ pub fn imod_to_synu(mod_: &mut Imod) -> i32 {
     let viewdata = "Viewdata";
 
     for ob in 0..mod_.obj.len() {
-        imod_object_sort(&mut mod_.obj[ob]);
+        let _ = imod_object_sort(&mut mod_.obj[ob]);
     }
 
     for ob in 0..mod_.obj.len() {
@@ -560,7 +560,7 @@ pub fn imod_to_synu(mod_: &mut Imod) -> i32 {
 
         if !mod_.obj[ob].mesh.is_empty() {
             let zscale = mod_.zscale as f64;
-            imod_mesh_to_synu(&mod_.obj[ob], ob as i32, zscale);
+            let _ = imod_mesh_to_synu(&mod_.obj[ob], ob as i32, zscale);
         }
     }
 
@@ -615,14 +615,17 @@ pub fn imod_to_synu(mod_: &mut Imod) -> i32 {
 }
 
 /// Original: `imod_mesh_to_synu` (`imodel_to.c:381`).
-pub fn imod_mesh_to_synu(obj: &Iobj, no: i32, zscale: f64) -> i32 {
+///
+/// `Err(())` is the source's -1, returned when `type<no>.mesh` cannot be
+/// opened for writing.
+pub fn imod_mesh_to_synu(obj: &Iobj, no: i32, zscale: f64) -> Result<(), ()> {
     let filename = format!("type{}.mesh", no);
     // `imodel_to.c:394` opens this stream and **never closes it** -- the source
     // has no `fclose` on this path, so the C relies on `exit()` flushing every
     // open stream.  The translated handle closes when it goes out of scope,
     // which writes the same bytes and differs only in descriptor lifetime.
     let Some(mut fout) = ImodFile::open(&filename, "w") else {
-        return -1;
+        return Err(());
     };
     let fout = &mut fout;
 
@@ -797,7 +800,7 @@ pub fn imod_mesh_to_synu(obj: &Iobj, no: i32, zscale: f64) -> i32 {
             }
         }
     }
-    0
+    Ok(())
 }
 
 /* The Renderman (R) Interface Procedures and RIB Protocol are:
@@ -996,7 +999,7 @@ pub fn imod_to_rib(imod: &mut Imod, fout: &mut ImodFile) -> i32 {
 
         if iobj_close(obj.flags) != 0 {
             for m in 0..obj.mesh.len() {
-                p_rib_mesh(fout, &obj.mesh[m], imod.zscale as f64);
+                let _ = p_rib_mesh(fout, &obj.mesh[m], imod.zscale as f64);
             }
         }
         if iobj_scat(obj.flags) != 0 {
@@ -1019,15 +1022,16 @@ pub fn imod_to_rib(imod: &mut Imod, fout: &mut ImodFile) -> i32 {
 /// Original: `pRIB_mesh` (`imodel_to.c:640`).
 ///
 /// `imodMeshPolyNormFactors` (`imesh.c:312`) has no translated module yet, so
-/// its three index factors are computed in place.
-pub fn p_rib_mesh(fout: &mut ImodFile, mesh: &Imesh, zscale: f64) -> i32 {
+/// its three index factors are computed in place.  `Err(())` is the source's
+/// -1 for a NULL mesh or one with an empty list.
+pub fn p_rib_mesh(fout: &mut ImodFile, mesh: &Imesh, zscale: f64) -> Result<(), ()> {
     let mut cndat = Ipoint::default();
     let mut norm = [Ipoint::default(); 3];
     let mut vert = [Ipoint::default(); 3];
     let z = zscale as f32;
 
     if mesh.list.is_empty() {
-        return -1;
+        return Err(());
     }
     let lsize = mesh.list.len();
 
@@ -1153,7 +1157,7 @@ pub fn p_rib_mesh(fout: &mut ImodFile, mesh: &Imesh, zscale: f64) -> i32 {
         i += 1;
     }
 
-    0
+    Ok(())
 }
 
 /// Original: `pRIB_scat` (`imodel_to.c:731`).
@@ -1208,7 +1212,7 @@ pub fn p_rib_tubes(fout: &mut ImodFile, obj: &Iobj, z: f64) -> i32 {
         }
 
         for pt in 0..lpt as usize {
-            prib_tube(
+            let _ = prib_tube(
                 fout,
                 &cont.pts[pt],
                 &cont.pts[pt + 1],
@@ -1222,6 +1226,8 @@ pub fn p_rib_tubes(fout: &mut ImodFile, obj: &Iobj, z: f64) -> i32 {
 }
 
 /// Original: `prib_tube` (`imodel_to.c:771`).
+///
+/// `Err(())` is the source's -1 for a failed `imodMatNew`.
 pub fn prib_tube(
     fout: &mut ImodFile,
     p1: &Ipoint,
@@ -1229,11 +1235,11 @@ pub fn prib_tube(
     slices: i32,
     linewidth: i32,
     z: f64,
-) -> i32 {
+) -> Result<(), ()> {
     let mut norm = Ipoint::default();
     let mut offset = [Ipoint::default(); 2];
     let Some(mut mat) = imod_mat_new(2) else {
-        return -1;
+        return Err(());
     };
 
     norm.x = 0.0;
@@ -1273,7 +1279,7 @@ pub fn prib_tube(
         offset[0] = offset[1];
     }
     imod_mat_delete(&mut mat);
-    0
+    Ok(())
 }
 
 #[cfg(test)]

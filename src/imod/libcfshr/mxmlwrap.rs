@@ -17,7 +17,12 @@ thread_local! {
 }
 
 /// Matches C static `getOrAddFreeList`.
-pub fn get_or_add_free_list() -> i32 {
+///
+/// The C returns the index of the free node list, or `-1` for a memory error
+/// (`mxmlwrap.c:73`, where `processLoadedNodes` forwards that same `-1` as its
+/// own documented "memory error" code).  The index is the success value, so it
+/// is `Ok`; the single failure has no other code to carry.
+pub fn get_or_add_free_list() -> Result<i32, ()> {
     let xml_ind = S_NODE_LISTS.with_borrow_mut(|lists| {
         if let Some(index) = lists.iter().position(Option::is_none) {
             lists[index] = Some(Vec::new());
@@ -30,7 +35,7 @@ pub fn get_or_add_free_list() -> i32 {
         Some(lists.len() - 1)
     });
     let Some(xml_ind) = xml_ind else {
-        return -1;
+        return Err(());
     };
     let arenas_ready = S_ARENAS.with_borrow_mut(|arenas| {
         if arenas.len() <= xml_ind && arenas.try_reserve(xml_ind + 1 - arenas.len()).is_err() {
@@ -43,9 +48,9 @@ pub fn get_or_add_free_list() -> i32 {
     });
     if !arenas_ready {
         S_NODE_LISTS.with_borrow_mut(|lists| lists[xml_ind] = None);
-        return -1;
+        return Err(());
     }
-    xml_ind as i32
+    Ok(xml_ind as i32)
 }
 
 /// Matches C static `getNodeAtIndex`.
@@ -127,11 +132,11 @@ pub fn process_loaded_nodes(
     with_xml_decl: i32,
     root_element: &mut Option<Vec<u8>>,
 ) -> i32 {
-    let xml_ind = get_or_add_free_list();
-    if xml_ind < 0 {
+    let Ok(xml_ind) = get_or_add_free_list() else {
         mxml_delete(&mut arena, xml);
-        return xml_ind;
-    }
+        /* The C returns `xmlInd` itself, which is -1 on this path. */
+        return -1;
+    };
     S_NODE_LISTS.with_borrow_mut(|lists| {
         lists[xml_ind as usize]
             .as_mut()

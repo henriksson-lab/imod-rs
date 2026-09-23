@@ -3,6 +3,19 @@
 /// C `MSIZ` (`gaussj.c:26`).
 const MSIZ: i32 = 2000;
 
+/// The two failures `gaussj`/`gaussjDet` distinguish (`gaussj.c:36-38`):
+/// "The routine returns -1 if [n] exceeds this value and 1 if the A matrix is
+/// singular."  Both codes are load-bearing -- `bsubs.f90:2371-2375` keeps the
+/// status and prints a different message for each -- so the failure is named
+/// rather than collapsed, and the Fortran wrappers below map it back.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum GaussjError {
+    /// C's `-1`: [n] exceeds `MSIZ`.
+    TooManyVariables,
+    /// C's `1`: the A matrix is singular.
+    Singular,
+}
+
 /// Original `gaussj` (`gaussj.c:40`).
 ///
 /// Solves the linear matrix equation A X = B by Gauss-Jordan elimination.
@@ -10,9 +23,17 @@ const MSIZ: i32 = 2000;
 /// columns.  B is a matrix with one row per row of A and [m] columns in array
 /// [b], dimensioned to [mp] columns.  The columns of [b] are replaced by the
 /// [m] solution vectors while [a] is reduced to a unit matrix.  The matrices
-/// must be in row-major order.  The routine returns -1 if [n] exceeds 2000 and
-/// 1 if the A matrix is singular.
-pub fn gaussj(a: &mut [f32], n: i32, np: i32, b: &mut [f32], m: i32, mp: i32) -> i32 {
+/// must be in row-major order.  The routine fails with
+/// [`GaussjError::TooManyVariables`] if [n] exceeds 2000 and
+/// [`GaussjError::Singular`] if the A matrix is singular.
+pub fn gaussj(
+    a: &mut [f32],
+    n: i32,
+    np: i32,
+    b: &mut [f32],
+    m: i32,
+    mp: i32,
+) -> Result<(), GaussjError> {
     let mut determ = 0.0f32;
     gaussj_det(a, n, np, b, m, mp, &mut determ)
 }
@@ -28,12 +49,12 @@ pub fn gaussj_det(
     m: i32,
     mp: i32,
     determ: &mut f32,
-) -> i32 {
+) -> Result<(), GaussjError> {
     // The source checks the fixed work-array limit before it dereferences any
-    // matrix dimensions; callers rely on this returning -1 even with dummy
+    // matrix dimensions; callers rely on this failing even with dummy
     // buffers (the Fortran-facing contract).
     if n > MSIZ {
-        return -1;
+        return Err(GaussjError::TooManyVariables);
     }
     if n < 0
         || np < n
@@ -42,7 +63,7 @@ pub fn gaussj_det(
         || a.len() < n as usize * np as usize
         || b.len() < n as usize * mp as usize
     {
-        return 1;
+        return Err(GaussjError::Singular);
     }
     let mut index = [[0i16; 2]; MSIZ as usize];
     let mut pivot = [0f32; MSIZ as usize];
@@ -73,7 +94,7 @@ pub fn gaussj_det(
                         }
                     } else if ipivot[k as usize] > 1 {
                         /* write(*,*) 'Singular matrix' */
-                        return 1;
+                        return Err(GaussjError::Singular);
                     }
                 }
             }
@@ -133,12 +154,19 @@ pub fn gaussj_det(
             }
         }
     }
-    0
+    Ok(())
 }
 
 /// Original Fortran wrapper `gaussjfw` (`gaussj.c:137`).
+///
+/// Fortran callers test the integer status itself (`bsubs.f90:2371`), so the
+/// wrapper is where the named failure goes back to the source's codes.
 pub fn gaussjfw(a: &mut [f32], n: &i32, np: &i32, b: &mut [f32], m: &i32, mp: &i32) -> i32 {
-    gaussj(a, *n, *np, b, *m, *mp)
+    match gaussj(a, *n, *np, b, *m, *mp) {
+        Ok(()) => 0,
+        Err(GaussjError::TooManyVariables) => -1,
+        Err(GaussjError::Singular) => 1,
+    }
 }
 
 /// Original Fortran wrapper `gaussjdet` (`gaussj.c:142`).
@@ -151,7 +179,11 @@ pub fn gaussjdet(
     mp: &i32,
     determ: &mut f32,
 ) -> i32 {
-    gaussj_det(a, *n, *np, b, *m, *mp, determ)
+    match gaussj_det(a, *n, *np, b, *m, *mp, determ) {
+        Ok(()) => 0,
+        Err(GaussjError::TooManyVariables) => -1,
+        Err(GaussjError::Singular) => 1,
+    }
 }
 
 #[cfg(test)]
@@ -164,7 +196,7 @@ mod tests {
         let mut determinant = 0.0;
         assert_eq!(
             gaussj_det(&mut matrix, 2, 2, &mut right_hand, 1, 1, &mut determinant),
-            0
+            Ok(())
         );
         for (actual, expected) in matrix
             .iter()
@@ -175,7 +207,15 @@ mod tests {
         assert!((right_hand[0] - 64.0 / 9.0).abs() < 1.0e-5);
         assert!((right_hand[1] + 29.0 / 9.0).abs() < 1.0e-5);
         assert_eq!(determinant, 9.0);
-        assert_eq!(gaussj(&mut [], 2001, 0, &mut [], 0, 0), -1);
-        assert_eq!(gaussj(&mut [], 2, 2, &mut [], 1, 1), 1);
+        assert_eq!(
+            gaussj(&mut [], 2001, 0, &mut [], 0, 0),
+            Err(GaussjError::TooManyVariables)
+        );
+        assert_eq!(
+            gaussj(&mut [], 2, 2, &mut [], 1, 1),
+            Err(GaussjError::Singular)
+        );
+        assert_eq!(gaussjfw(&mut [], &2001, &0, &mut [], &0, &0), -1);
+        assert_eq!(gaussjfw(&mut [], &2, &2, &mut [], &1, &1), 1);
     }
 }

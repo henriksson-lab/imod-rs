@@ -438,7 +438,9 @@ pub fn imod_auto_contours_from_slice(
                 slice_scale_and_free(&mut sout, &mut slice);
             }
         } else {
-            slice_byte_smooth(&mut slice);
+            // `autocont.c:347` calls `sliceByteSmooth` as a statement and
+            // discards its status.
+            let _ = slice_byte_smooth(&mut slice);
         }
         idata[..nxy as usize].copy_from_slice(&slice.data.b()[..nxy as usize]);
     }
@@ -822,7 +824,7 @@ pub fn imod_auto_contours_from_slice(
                 imod_contour_reduce(Some(&mut newconts[i as usize]), tol as f32);
             }
             if shave != 0.0 {
-                imod_contour_shave(&mut newconts[i as usize], shave);
+                let _ = imod_contour_shave(&mut newconts[i as usize], shave);
             }
             let Some(tmpcont) = imod_contour_new() else {
                 add_error = 1;

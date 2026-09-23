@@ -490,7 +490,10 @@ pub fn diff_tensor(
                 if fast_eigen != 0 {
                     dsyevv3(&a, &mut q, &mut w);
                 } else {
-                    dsyevq3(&a, &mut q, &mut w);
+                    // `nad_eed_3d.c:586` calls `dsyevq3` as a statement and
+                    // discards its status, so the no-convergence case falls
+                    // through to `eigenSort` on whatever it produced.
+                    let _ = dsyevq3(&a, &mut q, &mut w);
                 }
                 eigen_sort(&mut w, q.as_flattened_mut(), 3, 3, 1, 0);
                 read_ei(

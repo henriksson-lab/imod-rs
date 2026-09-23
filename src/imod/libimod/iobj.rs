@@ -312,15 +312,17 @@ pub fn imod_object_delete(object: &mut Iobj) -> i32 {
 }
 
 /// Original: `imodObjectsDelete` (`iobj.c:119`).
-pub fn imod_objects_delete(objects: &mut Vec<Iobj>) -> i32 {
+///
+/// `Err(())` is the source's -1 for a NULL array or a size below 1.
+pub fn imod_objects_delete(objects: &mut Vec<Iobj>) -> Result<(), ()> {
     if objects.is_empty() {
-        return -1;
+        return Err(());
     }
     for object in objects.iter_mut() {
         imod_object_delete(object);
     }
     objects.clear();
-    0
+    Ok(())
 }
 
 /// Original: `imodObjectChecksum` (`iobj.c:145`).
@@ -448,12 +450,16 @@ pub fn imod_object_add_mesh(in_object: &mut Iobj, in_mesh: Imesh) -> i32 {
 }
 
 /// Original: `imodObjectSort` (`iobj.c:349`).
-pub fn imod_object_sort(obj: &mut Iobj) -> i32 {
+pub fn imod_object_sort(obj: &mut Iobj) -> Result<(), ()> {
     imod_object_sort_by_surf(obj, 0)
 }
 
 /// Original: `imodObjectSortBySurf` (`iobj.c:360`).
-pub fn imod_object_sort_by_surf(obj: &mut Iobj, if_by_surf: i32) -> i32 {
+///
+/// `Err(())` is the source's -1, returned for a NULL object, a scattered-point
+/// object, a NULL contour array and a failed `malloc` of the key array.  An
+/// object with fewer than two contours is `Ok(())`, as the source's 0 is.
+pub fn imod_object_sort_by_surf(obj: &mut Iobj, if_by_surf: i32) -> Result<(), ()> {
     let has_time = iobj_flag_time(obj);
 
     /*   Sept 1996. added time value as key to sort.
@@ -461,13 +467,13 @@ pub fn imod_object_sort_by_surf(obj: &mut Iobj, if_by_surf: i32) -> i32 {
      */
 
     if iobj_scat(obj.flags) != 0 {
-        return -1;
+        return Err(());
     }
     if obj.cont.is_empty() {
-        return -1;
+        return Err(());
     }
     if obj.cont.len() < 2 {
-        return 0;
+        return Ok(());
     }
 
     let mut keys = vec![0f64; obj.cont.len()];
@@ -557,7 +563,7 @@ pub fn imod_object_sort_by_surf(obj: &mut Iobj, if_by_surf: i32) -> i32 {
 
     /* Sort the storage list at the end */
     istore_sort(&mut obj.store);
-    0
+    Ok(())
 }
 
 /// Original: `imodObjectVolume` (`iobj.c:468`).
@@ -1033,6 +1039,16 @@ pub fn imod_object_set_value(in_object: &mut Iobj, in_value_type: i32, in_value:
 mod tests {
     use super::*;
     use crate::imod::libimod::icont::imod_contour_new;
+
+    /// The C driver printed `imodObjectSort`/`imodObjectSortBySurf`'s `int`
+    /// status; they return `Result` here, so map back to what the golden
+    /// records.
+    fn status(r: Result<(), ()>) -> i32 {
+        match r {
+            Ok(()) => 0,
+            Err(()) => -1,
+        }
+    }
     use crate::imod::libimod::ipoint::imod_point_append;
     use crate::imod::libimod::istore::{Istore, StoreUnion, istore_insert};
     use std::fmt::Write as _;
@@ -1531,14 +1547,14 @@ N set 0 []
             dumpconts(&mut out, tag, &o);
             dumpstore(&mut out, tag, &o);
 
-            writeln!(out, "{tag} sort {}", imod_object_sort(&mut o)).unwrap();
+            writeln!(out, "{tag} sort {}", status(imod_object_sort(&mut o))).unwrap();
             dumpconts(&mut out, tag, &o);
             dumpstore(&mut out, tag, &o);
 
             writeln!(
                 out,
                 "{tag} sortsurf {}",
-                imod_object_sort_by_surf(&mut o, 1)
+                status(imod_object_sort_by_surf(&mut o, 1))
             )
             .unwrap();
             dumpconts(&mut out, tag, &o);
@@ -1620,8 +1636,8 @@ N set 0 []
         writeln!(
             out,
             "E sort {} sortsurf {}",
-            imod_object_sort(&mut o),
-            imod_object_sort_by_surf(&mut o, 1)
+            status(imod_object_sort(&mut o)),
+            status(imod_object_sort_by_surf(&mut o, 1))
         )
         .unwrap();
         imod_object_clean_surf(&mut o);
@@ -1629,12 +1645,12 @@ N set 0 []
 
         let mut sd = 999u32;
         let mut o = build(&mut sd, 0, 1, 4, 0, 0);
-        writeln!(out, "S sort {}", imod_object_sort(&mut o)).unwrap();
+        writeln!(out, "S sort {}", status(imod_object_sort(&mut o))).unwrap();
         report(&mut out, "S", &mut o);
 
         let mut sd = 555u32;
         let mut o = build(&mut sd, 0, 3, 0, 0, 0);
-        writeln!(out, "Z sort {}", imod_object_sort(&mut o)).unwrap();
+        writeln!(out, "Z sort {}", status(imod_object_sort(&mut o))).unwrap();
         report(&mut out, "Z", &mut o);
         dumpconts(&mut out, "Z", &o);
 

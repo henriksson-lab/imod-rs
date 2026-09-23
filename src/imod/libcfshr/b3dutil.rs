@@ -1482,26 +1482,31 @@ pub unsafe fn fortran_string(string: *const c_char, string_size: i32) -> String 
 }
 /// Matches C `c2fString` (`b3dutil.c:835`). The other half of the Fortran
 /// bridge; see [`fortran_string`].
+///
+/// The source has one failure (`b3dutil.c:843`): the C string did not fit in
+/// the Fortran character variable, so a non-null character is left over.  That
+/// is `Err(())`; `Ok(())` is the blank-padded success the source returns 0 for.
 pub unsafe fn c2f_string(
     mut c_string: *const c_char,
     mut fortran_string: *mut c_char,
     mut size: i32,
-) -> i32 {
+) -> Result<(), ()> {
     while *c_string != 0 && size > 0 {
         *fortran_string = *c_string;
         fortran_string = fortran_string.add(1);
         c_string = c_string.add(1);
         size -= 1;
     }
+    /* Return error if there is still a non-null character */
     if *c_string != 0 {
-        return -1;
+        return Err(());
     }
     while size > 0 {
         *fortran_string = b' ' as c_char;
         fortran_string = fortran_string.add(1);
         size -= 1;
     }
-    0
+    Ok(())
 }
 
 /// Matches C `b3dFseek` (`b3dutil.c:899`).
@@ -2824,7 +2829,7 @@ mod tests {
         let mut output = [0_i8; 5];
         assert_eq!(
             unsafe { c2f_string(c"abc".as_ptr(), output.as_mut_ptr(), 5) },
-            0
+            Ok(())
         );
         assert_eq!(
             &output,

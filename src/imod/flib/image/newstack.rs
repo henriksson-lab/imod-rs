@@ -2945,7 +2945,7 @@ pub fn newstack() {
                     // autodoc block below is the source's `newstack.f90:1535-1565,1663-1665`;
                     // nothing here touches an autodoc, so the two are independent.
                     //
-                    iiu_ret_num_extended(1, &mut n_byte_sym_in);
+                    n_byte_sym_in = iiu_ret_num_extended(1);
                     let mut itype = 0_i32;
                     num_int_or_bytes_in = 0;
                     i_flag_extra_in = 0;
@@ -2973,7 +2973,7 @@ pub fn newstack() {
                         n_byte_sym_in = extended_data.len() as i32;
                         extra_in[..extended_data.len()].copy_from_slice(&extended_data);
                         let mut extended_type = [0; 2];
-                        iiu_ret_extended_type(1, &mut extended_type);
+                        extended_type = iiu_ret_extended_type(1);
                         [num_int_or_bytes_in, i_flag_extra_in] = extended_type;
                         //
                         // DNM 4/18/02: if these numbers do not represent bytes and
@@ -3424,9 +3424,9 @@ pub fn newstack() {
                 let mut nxyz_in1 = [0_i32; 3];
                 let mut mxyz1 = [0_i32; 3];
                 let mut nxyzst1 = [0_i32; 3];
-                iiu_ret_size(1, &mut nxyz_in1, &mut mxyz1, &mut nxyzst1);
+                (nxyz_in1, mxyz1, nxyzst1) = iiu_ret_size(1);
                 let mut cell1 = [0_f32; 6];
-                iiu_ret_cell(1, &mut cell1);
+                cell1 = iiu_ret_cell(1);
                 //
                 // set new size, keep old nxyzst
                 //
@@ -3514,9 +3514,9 @@ pub fn newstack() {
                 // it if requested; both through the unit layer.
                 {
                     let mut delta = [0_f32; 3];
-                    iiu_ret_delta(1, &mut delta);
+                    delta = iiu_ret_delta(1);
                     let mut origin = [0_f32; 3];
-                    iiu_ret_origin(1, &mut origin);
+                    origin = iiu_ret_origin(1);
                     let [mut x_origin, mut y_origin, mut z_origin] = origin;
                     if read_reduction > 1. {
                         x_origin -= delta[0] * rx_offset;
@@ -3694,9 +3694,9 @@ pub fn newstack() {
                 let mut nxyz_in1 = [0_i32; 3];
                 let mut mxyz1 = [0_i32; 3];
                 let mut nxyzst1 = [0_i32; 3];
-                iiu_ret_size(1, &mut nxyz_in1, &mut mxyz1, &mut nxyzst1);
+                (nxyz_in1, mxyz1, nxyzst1) = iiu_ret_size(1);
                 let mut cell1 = [0_f32; 6];
-                iiu_ret_cell(1, &mut cell1);
+                cell1 = iiu_ret_cell(1);
                 //
                 // set new size, keep old nxyzst
                 //
@@ -3782,9 +3782,9 @@ pub fn newstack() {
                 // it if requested; both through the unit layer.
                 {
                     let mut delta = [0_f32; 3];
-                    iiu_ret_delta(1, &mut delta);
+                    delta = iiu_ret_delta(1);
                     let mut origin = [0_f32; 3];
-                    iiu_ret_origin(1, &mut origin);
+                    origin = iiu_ret_origin(1);
                     let [mut x_origin, mut y_origin, mut z_origin] = origin;
                     if read_reduction > 1. {
                         x_origin -= delta[0] * rx_offset;
@@ -3978,7 +3978,7 @@ pub fn newstack() {
                         // autodoc block below is the source's `newstack.f90:1535-1565,1663-1665`;
                         // nothing here touches an autodoc, so the two are independent.
                         //
-                        iiu_ret_num_extended(1, &mut n_byte_sym_in);
+                        n_byte_sym_in = iiu_ret_num_extended(1);
                         let mut itype = 0_i32;
                         num_int_or_bytes_in = 0;
                         i_flag_extra_in = 0;
@@ -4006,7 +4006,7 @@ pub fn newstack() {
                             n_byte_sym_in = extended_data.len() as i32;
                             extra_in[..extended_data.len()].copy_from_slice(&extended_data);
                             let mut extended_type = [0; 2];
-                            iiu_ret_extended_type(1, &mut extended_type);
+                            extended_type = iiu_ret_extended_type(1);
                             [num_int_or_bytes_in, i_flag_extra_in] = extended_type;
                             //
                             // DNM 4/18/02: if these numbers do not represent bytes and

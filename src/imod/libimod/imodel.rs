@@ -1513,7 +1513,7 @@ pub fn imod_delete(imod: &mut Imod) {
     }
     /* imodViewDelete(imod->view) -- `iview.c:32` */
     imod.view.clear();
-    imod_objects_delete(&mut imod.obj);
+    let _ = imod_objects_delete(&mut imod.obj);
     imod.ref_image = None;
     imod.file_name = None;
     imod.store.clear();
@@ -1522,10 +1522,12 @@ pub fn imod_delete(imod: &mut Imod) {
 
 /// Original: `imodDeleteObject` (`imodel.c:484`).
 ///
-/// Deletes the object at `index` in model `mod_`.  Returns -1 for error.
-pub fn imod_delete_object(mod_: &mut Imod, index: i32) -> i32 {
+/// Deletes the object at `index` in model `mod_`.  `Err(())` is the source's
+/// -1, returned for an out-of-range index and for a failed `realloc` of the
+/// object array; only the first is reachable here.
+pub fn imod_delete_object(mod_: &mut Imod, index: i32) -> Result<(), ()> {
     if index < 0 || index >= mod_.obj.len() as i32 {
-        return -1;
+        return Err(());
     }
 
     mod_.cindex.object = index;
@@ -1573,7 +1575,7 @@ pub fn imod_delete_object(mod_: &mut Imod, index: i32) -> i32 {
         mod_.cindex.contour = -1;
         mod_.cindex.object = -1;
     }
-    0
+    Ok(())
 }
 
 /// Original: `imodMoveObject` (`imodel.c:546`).
@@ -1722,16 +1724,22 @@ pub fn imod_delete_contour(mod_: &mut Imod, index: i32) -> i32 {
 /// Original: `imodDeleteListOfConts` (`imodel.c:840`).
 ///
 /// Deletes the list of `num_conts` contours in `contours` in the current object
-/// of the model `mod_`.  Returns the size of the current object or -1 for
-/// error.
-pub fn imod_delete_list_of_conts(mod_: &mut Imod, contours: &[i32], mut num_conts: i32) -> i32 {
+/// of the model `mod_`.  `Ok` carries the size of the current object, as the
+/// source's positive return does; `Err(())` is its -1, returned for no current
+/// object, an empty list, an out-of-range contour index and a failed
+/// allocation.
+pub fn imod_delete_list_of_conts(
+    mod_: &mut Imod,
+    contours: &[i32],
+    mut num_conts: i32,
+) -> Result<i32, ()> {
     let ob = mod_.cindex.object;
     if ob < 0 || ob >= mod_.obj.len() as i32 || num_conts <= 0 {
-        return -1;
+        return Err(());
     }
     for i in 0..num_conts as usize {
         if contours[i] < 0 || contours[i] >= mod_.obj[ob as usize].cont.len() as i32 {
-            return -1;
+            return Err(());
         }
     }
 
@@ -1753,7 +1761,7 @@ pub fn imod_delete_list_of_conts(mod_: &mut Imod, contours: &[i32], mut num_cont
     if mod_.obj[ob as usize].cont.len() as i32 > num_conts {
         let Some(conts) = imod_contours_new(mod_.obj[ob as usize].cont.len() as i32 - num_conts)
         else {
-            return -1;
+            return Err(());
         };
         new_conts = conts;
     }
@@ -1794,7 +1802,7 @@ pub fn imod_delete_list_of_conts(mod_: &mut Imod, contours: &[i32], mut num_cont
     imod_object_clean_surf(&mut mod_.obj[ob as usize]);
     mod_.cindex.contour = -1;
     mod_.cindex.point = -1;
-    mod_.obj[ob as usize].cont.len() as i32
+    Ok(mod_.obj[ob as usize].cont.len() as i32)
 }
 
 /// Original: `imodPointGet` (`imodel.c:1177`).
@@ -1862,10 +1870,10 @@ pub fn imod_point_get_next(imod: Option<&mut Imod>) -> Option<&Ipoint> {
 /// Original: `imodTransform` (`imodel.c:1246`).
 ///
 /// Transforms all contour points in model `imod` with the 3D transform in
-/// `mat`.  Returns -1 if error.
-pub fn imod_transform(imod: Option<&mut Imod>, mat: Option<&Imat>) -> i32 {
+/// `mat`.  `Err(())` is the source's -1 for a NULL model or matrix.
+pub fn imod_transform(imod: Option<&mut Imod>, mat: Option<&Imat>) -> Result<(), ()> {
     let (Some(imod), Some(mat)) = (imod, mat) else {
-        return -1;
+        return Err(());
     };
     let mut pnt = Ipoint::default();
     for ob in 0..imod.obj.len() {
@@ -1876,7 +1884,7 @@ pub fn imod_transform(imod: Option<&mut Imod>, mat: Option<&Imat>) -> i32 {
             }
         }
     }
-    0
+    Ok(())
 }
 
 /// Original: `imodel_transform_slice` (`imodel.c:1274`).
@@ -1915,7 +1923,7 @@ pub fn imodel_model_clean(mod_: &mut Imod, keep_empty_objs: i32) -> i32 {
             && keep_empty_objs == 0
         {
             mod_.cindex.object = ob;
-            imod_delete_object(mod_, ob);
+            let _ = imod_delete_object(mod_, ob);
             ob -= 1;
             ob += 1;
             continue;
@@ -2337,20 +2345,36 @@ pub fn imod_trans_for_subset_load(imod: &mut Imod, hdata: &MrcHeader, li: Option
     }
 }
 
+/// The two distinct failure codes of `imodTransToMatchImage` (`imodel.c:1957`).
+///
+/// The source folds them into one `int`: its own -1 for a model with no
+/// `IrefImage`, and `imodTransFromRefImage`'s 1 (`imodel.c:1869`) for a
+/// memory error.  They are kept apart here so no caller loses which happened.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum TransToMatchImageError {
+    /// The source's -1: the model has no `IrefImage` structure.
+    NoRefImage,
+    /// The source's 1: `imodMatNew` failed inside `imodTransFromRefImage`.
+    Memory,
+}
+
 /// Original: `imodTransToMatchImage` (`imodel.c:1957`).
 ///
 /// Transforms the model in `imod` to match the image coordinates specified in
 /// the MRC header `hdata`, ignoring a change in tilt angles if
-/// `ignore_angles` is nonzero.  Returns -1 if the model has no `IrefImage`
-/// structure, or 1 for a memory error in `imodTransFromRefImage`.
-pub fn imod_trans_to_match_image(imod: &mut Imod, hdata: &MrcHeader, ignore_angles: i32) -> i32 {
+/// `ignore_angles` is nonzero.
+pub fn imod_trans_to_match_image(
+    imod: &mut Imod,
+    hdata: &MrcHeader,
+    ignore_angles: i32,
+) -> Result<(), TransToMatchImageError> {
     let unit_pt = Ipoint {
         x: 1.,
         y: 1.,
         z: 1.,
     };
     let Some(existing) = imod.ref_image else {
-        return -1;
+        return Err(TransToMatchImageError::NoRefImage);
     };
     let mut use_ref = Iref_image {
         oscale: Ipoint::default(),
@@ -2387,7 +2411,10 @@ pub fn imod_trans_to_match_image(imod: &mut Imod, hdata: &MrcHeader, ignore_angl
     use_ref.otrans = existing.ctrans;
     use_ref.orot = existing.crot;
     use_ref.oscale = existing.cscale;
-    imod_trans_from_ref_image(imod, &use_ref, unit_pt)
+    if imod_trans_from_ref_image(imod, &use_ref, unit_pt) != 0 {
+        return Err(TransToMatchImageError::Memory);
+    }
+    Ok(())
 }
 
 /// Original: `exchangef` (`imodel.c:2043`, static).
@@ -2724,6 +2751,15 @@ mod tests {
 mod source_driver_model {
     use super::*;
     use crate::imod::libimod::icont::imod_contour_new;
+
+    /// The C driver printed these routines' `int` status; they return
+    /// `Result` here, so map back to the status the golden records.
+    fn status(r: Result<(), ()>) -> i32 {
+        match r {
+            Ok(()) => 0,
+            Err(()) => -1,
+        }
+    }
     use crate::imod::libimod::iobj::imod_object_add_contour;
     use crate::imod::libimod::iplane::imod_clips_initialize;
     use crate::imod::libimod::ipoint::imod_point_append;
@@ -3120,7 +3156,7 @@ mod source_driver_model {
             imod_mat_trans(&mut mat, &t);
             out.push_str(&format!(
                 "tr {}\n",
-                imod_transform(Some(&mut m), Some(&mat))
+                status(imod_transform(Some(&mut m), Some(&mat)))
             ));
             dumpmodel(&mut out, "tr", &m);
             imod_mat_delete(&mut mat);
@@ -3150,15 +3186,18 @@ mod source_driver_model {
             imod_set_index(&mut m, 0, -1, -1);
             out.push_str(&format!(
                 "dlc {}\n",
-                imod_delete_list_of_conts(&mut m, &lst, 2)
+                match imod_delete_list_of_conts(&mut m, &lst, 2) {
+                    Ok(n) => n,
+                    Err(()) => -1,
+                }
             ));
         }
         dumpmodel(&mut out, "dlc", &m);
         out.push_str(&format!("mv {}\n", imod_move_object(&mut m, 0, 1)));
         dumpmodel(&mut out, "mv", &m);
-        out.push_str(&format!("do {}\n", imod_delete_object(&mut m, 0)));
+        out.push_str(&format!("do {}\n", status(imod_delete_object(&mut m, 0))));
         dumpmodel(&mut out, "do", &m);
-        out.push_str(&format!("do {}\n", imod_delete_object(&mut m, 0)));
+        out.push_str(&format!("do {}\n", status(imod_delete_object(&mut m, 0))));
         dumpmodel(&mut out, "do2", &m);
 
         out.push_str("--- refimage ---\n");
@@ -3219,12 +3258,20 @@ mod source_driver_model {
             h.xlen = 400.;
             out.push_str(&format!(
                 "ttmi {}\n",
-                imod_trans_to_match_image(&mut m2, &h, 0)
+                match imod_trans_to_match_image(&mut m2, &h, 0) {
+                    Ok(()) => 0,
+                    Err(TransToMatchImageError::NoRefImage) => -1,
+                    Err(TransToMatchImageError::Memory) => 1,
+                }
             ));
             dumpmodel(&mut out, "tm", &m2);
             out.push_str(&format!(
                 "ttmi {}\n",
-                imod_trans_to_match_image(&mut m2, &h, 1)
+                match imod_trans_to_match_image(&mut m2, &h, 1) {
+                    Ok(()) => 0,
+                    Err(TransToMatchImageError::NoRefImage) => -1,
+                    Err(TransToMatchImageError::Memory) => 1,
+                }
             ));
             dumpmodel(&mut out, "tm2", &m2);
         }

@@ -39,6 +39,15 @@ use imod_rs::imod::libimod::iview::{
     imod_view_store, imod_view_use, imod_view_write,
 };
 
+/// The C drivers printed these routines' `int` status; the translations
+/// return `Result`, so map back to the status the goldens record.
+fn status(r: Result<(), ()>) -> i32 {
+    match r {
+        Ok(()) => 0,
+        Err(()) => -1,
+    }
+}
+
 #[test]
 fn imod_get_bounding_box_uses_contours_or_meshes_per_binary_object() {
     let path =
@@ -577,9 +586,9 @@ fn iobj_copy_delete_and_dup_own_decoded_binary_object_data() {
     assert_eq!(imod_object_delete(&mut copied), 0);
     assert!(copied.cont.is_empty() && copied.mesh.is_empty());
     let mut objects = vec![source, copied];
-    assert_eq!(imod_objects_delete(&mut objects), 0);
+    assert_eq!(imod_objects_delete(&mut objects), Ok(()));
     assert!(objects.is_empty());
-    assert_eq!(imod_objects_delete(&mut objects), -1);
+    assert_eq!(imod_objects_delete(&mut objects), Err(()));
     std::fs::remove_file(path).unwrap();
 }
 
@@ -1035,13 +1044,13 @@ fn imod_open_file_and_close_file_round_trip_a_written_model() {
     let mut written = Imod::default();
     let mut out = imod_open_file(path.to_str().unwrap(), "wb", &mut written).unwrap();
     imod_write_file(&model, &mut out).unwrap();
-    assert_eq!(imod_close_file(Some(out)), 0);
+    assert_eq!(imod_close_file(Some(out)), Ok(()));
 
     let mut read_back = Imod::default();
     let mut input = imod_open_file(path.to_str().unwrap(), "rb", &mut read_back).unwrap();
     imod_read_file(&mut read_back, &mut input).unwrap();
-    assert_eq!(imod_close_file(Some(input)), 0);
-    assert_eq!(imod_close_file(None), -1);
+    assert_eq!(imod_close_file(Some(input)), Ok(()));
+    assert_eq!(imod_close_file(None), Err(()));
     assert_eq!(read_back.obj.len(), 1);
     assert_eq!(read_back.obj[0].cont.len(), 1);
     assert_eq!(read_back.obj[0].cont[0].pts.len(), 1);
@@ -2030,7 +2039,7 @@ fn report_mesh(tag: &str, m: &Imesh) -> String {
         g9(imesh_volume(Some(m), None, Some(&center)) as f64)
     )
     .unwrap();
-    let bb = imod_mesh_get_bbox(Some(m), &mut ll, &mut ur);
+    let bb = status(imod_mesh_get_bbox(Some(m), &mut ll, &mut ur));
     writeln!(
         out,
         "{} bbox={} ll={} {} {} ur={} {} {}",
@@ -2115,7 +2124,7 @@ fn imesh_matches_native_libimod_driver() {
         "volEmpty={} areaEmpty={} bboxEmpty={}",
         g9(imesh_volume(Some(&e), None, None) as f64),
         g9(imesh_surface_area(Some(&e), None) as f64),
-        imod_mesh_get_bbox(Some(&e), &mut ll, &mut ur)
+        status(imod_mesh_get_bbox(Some(&e), &mut ll, &mut ur))
     )
     .unwrap();
 
@@ -2192,8 +2201,8 @@ fn imesh_matches_native_libimod_driver() {
     writeln!(
         out,
         "copyNull={} {}",
-        imod_mesh_copy(None, Some(&mut dup)),
-        imod_mesh_copy(Some(&m), None)
+        status(imod_mesh_copy(None, Some(&mut dup))),
+        status(imod_mesh_copy(Some(&m), None))
     )
     .unwrap();
 
@@ -2233,7 +2242,7 @@ fn imesh_matches_native_libimod_driver() {
         y: 2.5,
         z: 3.5,
     };
-    imod_mesh_add_normal(Some(&mut dup), Some(&p));
+    let _ = imod_mesh_add_normal(Some(&mut dup), Some(&p));
     let lsize = dup.list.len();
     writeln!(
         out,
@@ -2247,8 +2256,8 @@ fn imesh_matches_native_libimod_driver() {
     writeln!(
         out,
         "addNormNull={} {}",
-        imod_mesh_add_normal(None, Some(&p)),
-        imod_mesh_add_normal(Some(&mut dup), None)
+        status(imod_mesh_add_normal(None, Some(&p))),
+        status(imod_mesh_add_normal(Some(&mut dup), None))
     )
     .unwrap();
 

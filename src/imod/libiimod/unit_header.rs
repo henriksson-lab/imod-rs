@@ -245,17 +245,17 @@ pub unsafe fn iiu_trans_header(into_unit: i32, iunit: i32) -> i32 {
     }
 }
 
-pub fn iiu_ret_cell(i: i32, c: &mut [f32; 6]) {
+pub fn iiu_ret_cell(i: i32) -> [f32; 6] {
     let h = unsafe { iiu_mrc_header(i, "iiuRetCell", 1, 0) };
     unsafe {
-        *c = [
+        [
             (*h).xlen,
             (*h).ylen,
             (*h).zlen,
             (*h).alpha,
             (*h).beta,
             (*h).gamma,
-        ];
+        ]
     }
 }
 pub fn iiu_alt_cell(i: i32, c: &[f32; 6]) {
@@ -271,23 +271,17 @@ pub fn iiu_alt_cell(i: i32, c: &[f32; 6]) {
         ) = (c[0], c[1], c[2], c[3], c[4], c[5]);
     }
 }
-pub fn iiu_ret_data_type(
-    i: i32,
-    t: &mut i32,
-    l: &mut i32,
-    n1: &mut i32,
-    n2: &mut i32,
-    v1: &mut f32,
-    v2: &mut f32,
-) {
+pub fn iiu_ret_data_type(i: i32) -> (i32, i32, i32, i32, f32, f32) {
     let h = unsafe { iiu_mrc_header(i, "iiuRetDataType", 1, 0) };
     unsafe {
-        *t = (*h).idtype as i32;
-        *l = (*h).lens as i32;
-        *n1 = (*h).nd1 as i32;
-        *n2 = (*h).nd2 as i32;
-        *v1 = 0.01 * (*h).vd1 as f32;
-        *v2 = 0.01 * (*h).vd2 as f32;
+        (
+            (*h).idtype as i32,
+            (*h).lens as i32,
+            (*h).nd1 as i32,
+            (*h).nd2 as i32,
+            0.01 * (*h).vd1 as f32,
+            0.01 * (*h).vd2 as f32,
+        )
     }
 }
 pub fn iiu_alt_data_type(i: i32, t: i32, l: i32, n1: i32, n2: i32, v1: f32, v2: f32) {
@@ -302,12 +296,14 @@ pub fn iiu_alt_data_type(i: i32, t: i32, l: i32, n1: i32, n2: i32, v1: f32, v2: 
     }
 }
 
-pub fn iiu_ret_size(i: i32, n: &mut [i32; 3], m: &mut [i32; 3], s: &mut [i32; 3]) {
+pub fn iiu_ret_size(i: i32) -> ([i32; 3], [i32; 3], [i32; 3]) {
     let h = unsafe { iiu_mrc_header(i, "iiuRetSize", 1, 0) };
     unsafe {
-        *n = [(*h).nx, (*h).ny, (*h).nz];
-        *m = [(*h).mx, (*h).my, (*h).mz];
-        *s = [(*h).nxstart, (*h).nystart, (*h).nzstart];
+        (
+            [(*h).nx, (*h).ny, (*h).nz],
+            [(*h).mx, (*h).my, (*h).mz],
+            [(*h).nxstart, (*h).nystart, (*h).nzstart],
+        )
     }
 }
 pub fn iiu_alt_size(i: i32, n: &[i32; 3], s: &[i32; 3]) {
@@ -318,11 +314,9 @@ pub fn iiu_alt_size(i: i32, n: &[i32; 3], s: &[i32; 3]) {
         iiu_sync_with_mrc_header(i);
     }
 }
-pub fn iiu_ret_sample(i: i32, m: &mut [i32; 3]) {
+pub fn iiu_ret_sample(i: i32) -> [i32; 3] {
     let h = unsafe { iiu_mrc_header(i, "iiuRetSample", 1, 0) };
-    unsafe {
-        *m = [(*h).mx, (*h).my, (*h).mz];
-    }
+    unsafe { [(*h).mx, (*h).my, (*h).mz] }
 }
 pub fn iiu_alt_sample(i: i32, m: &[i32; 3]) {
     let h = unsafe { iiu_mrc_header(i, "iiuAltSample", 1, 0) };
@@ -352,11 +346,9 @@ pub unsafe fn iiu_alt_size_samp_cell(i: i32, x: i32, y: i32, z: i32) {
     }
 }
 
-pub fn iiu_ret_axis_map(i: i32, p: &mut [i32; 3]) {
+pub fn iiu_ret_axis_map(i: i32) -> [i32; 3] {
     let h = unsafe { iiu_mrc_header(i, "iiuRetAxisMap", 1, 0) };
-    unsafe {
-        *p = [(*h).mapc, (*h).mapr, (*h).maps];
-    }
+    unsafe { [(*h).mapc, (*h).mapr, (*h).maps] }
 }
 pub fn iiu_alt_axis_map(i: i32, p: &[i32; 3]) {
     let h = unsafe { iiu_mrc_header(i, "iiuAltAxisMap", 1, 0) };
@@ -364,15 +356,17 @@ pub fn iiu_alt_axis_map(i: i32, p: &[i32; 3]) {
         ((*h).mapc, (*h).mapr, (*h).maps) = (p[0], p[1], p[2]);
     }
 }
-pub fn iiu_ret_imod_flags(i: i32, f: &mut i32, im: &mut i32) {
+pub fn iiu_ret_imod_flags(i: i32) -> (i32, i32) {
     let h = unsafe { iiu_mrc_header(i, "iiuRetImodFlags", 1, 0) };
     unsafe {
-        *f = (*h).imod_flags;
-        *im = if (*h).imod_stamp == IMOD_MRC_STAMP {
-            1
-        } else {
-            0
-        };
+        (
+            (*h).imod_flags,
+            if (*h).imod_stamp == IMOD_MRC_STAMP {
+                1
+            } else {
+                0
+            },
+        )
     }
 }
 pub fn iiu_alt_imod_flags(i: i32, f: i32) {
@@ -387,11 +381,9 @@ pub fn iiu_alt_signed(i: i32, f: i32) {
         (*h).bytes_signed = f;
     }
 }
-pub fn iiu_ret_mrc_version(i: i32, v: &mut i32) {
+pub fn iiu_ret_mrc_version(i: i32) -> i32 {
     let h = unsafe { iiu_mrc_header(i, "iiuRetMRCVersion", 1, 0) };
-    unsafe {
-        *v = mrc_get_standard_version(Some(&*h));
-    }
+    unsafe { mrc_get_standard_version(Some(&*h)) }
 }
 pub fn iiu_alt_mrc_version(i: i32, v: i32) {
     let h = unsafe { iiu_mrc_header(i, "iiuAltMRCVersion", 1, 0) };
@@ -399,11 +391,9 @@ pub fn iiu_alt_mrc_version(i: i32, v: i32) {
         (*h).nversion = v;
     }
 }
-pub fn iiu_ret_origin(i: i32, origin: &mut [f32; 3]) {
+pub fn iiu_ret_origin(i: i32) -> [f32; 3] {
     let h = unsafe { iiu_mrc_header(i, "iiuRetOrigin", 1, 0) };
-    unsafe {
-        *origin = [(*h).xorg, (*h).yorg, (*h).zorg];
-    }
+    unsafe { [(*h).xorg, (*h).yorg, (*h).zorg] }
 }
 pub fn iiu_alt_origin(i: i32, origin: &[f32; 3]) {
     let h = unsafe { iiu_mrc_header(i, "iiuAltOrigin", 1, 0) };
@@ -489,11 +479,9 @@ pub unsafe fn iiu_alt_4_bit_mode(i: i32, d: i32) -> i32 {
         -1
     }
 }
-pub fn iiu_ret_rms(i: i32, v: &mut f32) {
+pub fn iiu_ret_rms(i: i32) -> f32 {
     let h = unsafe { iiu_mrc_header(i, "iiuRetRMS", 1, 0) };
-    unsafe {
-        *v = (*h).rms;
-    }
+    unsafe { (*h).rms }
 }
 pub fn iiu_alt_rms(i: i32, v: f32) {
     let h = unsafe { iiu_mrc_header(i, "iiuAltRMS", 1, 0) };
@@ -501,9 +489,9 @@ pub fn iiu_alt_rms(i: i32, v: f32) {
         (*h).rms = v;
     }
 }
-pub fn iiu_ret_tilt(i: i32, p: &mut [f32; 3]) {
+pub fn iiu_ret_tilt(i: i32) -> [f32; 3] {
     let h = unsafe { &*iiu_mrc_header(i, "iiuRetTilt", 1, 0) };
-    *p = [h.tiltangles[3], h.tiltangles[4], h.tiltangles[5]];
+    [h.tiltangles[3], h.tiltangles[4], h.tiltangles[5]]
 }
 pub fn iiu_alt_tilt(i: i32, p: &[f32; 3]) {
     let h = unsafe { &mut *iiu_mrc_header(i, "iiuAltTilt", 1, 0) };
@@ -511,9 +499,9 @@ pub fn iiu_alt_tilt(i: i32, p: &[f32; 3]) {
     h.tiltangles[4] = p[1];
     h.tiltangles[5] = p[2];
 }
-pub fn iiu_ret_tilt_orig(i: i32, p: &mut [f32; 3]) {
+pub fn iiu_ret_tilt_orig(i: i32) -> [f32; 3] {
     let h = unsafe { &*iiu_mrc_header(i, "iiuRetTiltOrig", 1, 0) };
-    *p = [h.tiltangles[0], h.tiltangles[1], h.tiltangles[2]];
+    [h.tiltangles[0], h.tiltangles[1], h.tiltangles[2]]
 }
 pub fn iiu_alt_tilt_orig(i: i32, p: &[f32; 3]) {
     let h = unsafe { &mut *iiu_mrc_header(i, "iiuAltTiltOrig", 1, 0) };
@@ -549,11 +537,13 @@ pub fn iiu_alt_tilt_rot(iunit: i32, tilt: &[f32; 3]) {
     icalc_angles(&mut result, &amat3);
     hdr.tiltangles[3..6].copy_from_slice(&result);
 }
-pub fn iiu_ret_delta(i: i32, p: &mut [f32; 3]) {
+pub fn iiu_ret_delta(i: i32) -> [f32; 3] {
     let h = unsafe { &*iiu_mrc_header(i, "iiuRetDelta", 1, 0) };
-    p[0] = if h.mx > 0 { h.xlen / h.mx as f32 } else { 1. };
-    p[1] = if h.my > 0 { h.ylen / h.my as f32 } else { 1. };
-    p[2] = if h.mz > 0 { h.zlen / h.mz as f32 } else { 1. };
+    [
+        if h.mx > 0 { h.xlen / h.mx as f32 } else { 1. },
+        if h.my > 0 { h.ylen / h.my as f32 } else { 1. },
+        if h.mz > 0 { h.zlen / h.mz as f32 } else { 1. },
+    ]
 }
 pub fn iiu_alt_delta(i: i32, p: &[f32; 3]) {
     let h = unsafe { &mut *iiu_mrc_header(i, "iiuAltDelta", 1, 0) };
@@ -564,11 +554,9 @@ pub fn iiu_alt_delta(i: i32, p: &[f32; 3]) {
     h.mz = h.mz.max(1);
     h.zlen = p[2] * h.mz as f32;
 }
-pub fn iiu_ret_space_group(i: i32, p: &mut i32) {
+pub fn iiu_ret_space_group(i: i32) -> i32 {
     let h = unsafe { iiu_mrc_header(i, "iiuRetSpaceGroup", 1, 0) };
-    unsafe {
-        *p = (*h).ispg;
-    }
+    unsafe { (*h).ispg }
 }
 pub fn iiu_alt_space_group(i: i32, v: i32) {
     let h = unsafe { iiu_mrc_header(i, "iiuAltSpaceGroup", 1, 0) };
@@ -605,11 +593,9 @@ pub fn iiu_trans_labels(into: i32, i: i32) {
         mrc_head_label_cp(&*a, &mut *b);
     }
 }
-pub fn iiu_ret_num_extended(i: i32, p: &mut i32) {
+pub fn iiu_ret_num_extended(i: i32) -> i32 {
     let h = unsafe { iiu_mrc_header(i, "iiuRetNumExtended", 1, 0) };
-    unsafe {
-        *p = (*h).next;
-    }
+    unsafe { (*h).next }
 }
 pub fn iiu_alt_num_extended(i: i32, n: i32) {
     let h = unsafe { iiu_mrc_header(i, "iiuAltNumExtended", 1, 0) };
@@ -618,15 +604,15 @@ pub fn iiu_alt_num_extended(i: i32, n: i32) {
         (*h).header_size = 1024 + n;
     }
 }
-pub fn iiu_ret_extended_type(i: i32, values: &mut [i32; 2]) {
+pub fn iiu_ret_extended_type(i: i32) -> [i32; 2] {
     let h = unsafe { iiu_mrc_header(i, "iiRetExtendedType", 1, 0) };
     let mut v = 0;
     let t = unsafe { mrc_get_extended_type(&*h, &mut v) };
     unsafe {
         if t == MRC_EXT_TYPE_NONE || t == MRC_EXT_TYPE_SERI || t == MRC_EXT_TYPE_AGAR {
-            *values = [(*h).nint as i32, (*h).nreal as i32]
+            [(*h).nint as i32, (*h).nreal as i32]
         } else {
-            *values = [-t, v];
+            [-t, v]
         }
     }
 }
@@ -636,11 +622,13 @@ pub fn iiu_alt_extended_type(i: i32, values: &[i32; 2]) {
         ((*h).nint, (*h).nreal) = (values[0] as i16, values[1] as i16);
     }
 }
-pub fn iiu_ret_header_ext_type(i: i32, values: &mut [i32; 2]) {
+pub fn iiu_ret_header_ext_type(i: i32) -> [i32; 2] {
     let h = unsafe { iiu_mrc_header(i, "iiuRetHeaderExtType", 1, 0) };
+    let mut values = [0; 2];
     unsafe {
         values[0] = mrc_get_extended_type(&*h, &mut values[1]);
     }
+    values
 }
 pub fn iiu_ret_extended_data(i: i32, data: &mut Vec<u8>) -> i32 {
     let h = unsafe { iiu_mrc_header(i, "iiRetExtendedData", iiu_get_exit_on_error(), 1) };
@@ -768,10 +756,7 @@ mod tests {
                 &[[0; MRC_LABEL_SIZE]; MRC_NLABELS],
                 0,
             );
-            let mut out_n = [0; 3];
-            let mut out_m = [0; 3];
-            let mut out_start = [0; 3];
-            iiu_ret_size(991, &mut out_n, &mut out_m, &mut out_start);
+            let (mut out_n, mut out_m, mut out_start) = iiu_ret_size(991);
             assert_eq!(out_n, nxyz);
             assert_eq!(out_m, mxyz);
             assert_eq!(out_start, [0; 3]);
@@ -781,11 +766,11 @@ mod tests {
             let new_sample = [18, 12, 8];
             iiu_alt_size(991, &new_size, &new_start);
             iiu_alt_sample(991, &new_sample);
-            iiu_ret_size(991, &mut out_n, &mut out_m, &mut out_start);
+            (out_n, out_m, out_start) = iiu_ret_size(991);
             assert_eq!(out_n, new_size);
             assert_eq!(out_m, new_sample);
             assert_eq!(out_start, new_start);
-            iiu_ret_sample(991, &mut out_m);
+            out_m = iiu_ret_sample(991);
             assert_eq!(out_m, new_sample);
 
             let mut labels = [[0; MRC_LABEL_SIZE]; MRC_NLABELS];
@@ -809,18 +794,12 @@ mod tests {
             let original_tilt = [-4.5, 5.25, -6.0];
             iiu_alt_tilt(991, &current_tilt);
             iiu_alt_tilt_orig(991, &original_tilt);
-            let mut out_tilt = [0.0; 3];
-            let mut out_original_tilt = [0.0; 3];
-            iiu_ret_tilt(991, &mut out_tilt);
-            iiu_ret_tilt_orig(991, &mut out_original_tilt);
-            assert_eq!(out_tilt, current_tilt);
-            assert_eq!(out_original_tilt, original_tilt);
+            assert_eq!(iiu_ret_tilt(991), current_tilt);
+            assert_eq!(iiu_ret_tilt_orig(991), original_tilt);
 
             let delta = [1.5, 2.25, 3.75];
             iiu_alt_delta(991, &delta);
-            let mut out_delta = [0.0; 3];
-            iiu_ret_delta(991, &mut out_delta);
-            assert_eq!(out_delta, delta);
+            assert_eq!(iiu_ret_delta(991), delta);
 
             let extended_data = vec![0x31, 0x42, 0x53, 0x64, 0x75];
             assert_eq!(iiu_alt_extended_data(991, &extended_data), 0);

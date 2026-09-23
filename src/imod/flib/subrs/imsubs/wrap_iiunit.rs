@@ -21,7 +21,7 @@ pub unsafe fn iiu_open_print(iunit: i32, name: &str, attribute: &str) -> i32 {
     let (mut nxyz, mut mxyz, mut nxyzst) = ([0; 3], [0; 3], [0; 3]);
     let (mut nx_tile, mut ny_tile, mut nz_chunk) = (0, 0, 0);
     iiu_file_info(iunit, &mut num_kbytes, &mut itype, &mut iflags);
-    iiu_ret_size(iunit, &mut nxyz, &mut mxyz, &mut nxyzst);
+    (nxyz, mxyz, nxyzst) = iiu_ret_size(iunit);
     iiu_ret_chunk_sizes(iunit, &mut nx_tile, &mut ny_tile, &mut nz_chunk);
     if nx_tile > 0 || ny_tile > 0 {
         if itype == 5 && nx_tile == 0 {

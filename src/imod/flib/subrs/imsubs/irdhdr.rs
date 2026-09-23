@@ -30,10 +30,10 @@ pub unsafe fn irdhdr(
         let mut iflags = 0;
         let mut nversion = 0;
         let mut ispg = 0;
-        iiu_ret_imod_flags(iunit, &mut imod_flags, &mut is_imod);
+        (imod_flags, is_imod) = iiu_ret_imod_flags(iunit);
         iiu_file_info(iunit, &mut file_size, &mut file_type, &mut iflags);
-        iiu_ret_mrc_version(iunit, &mut nversion);
-        iiu_ret_space_group(iunit, &mut ispg);
+        nversion = iiu_ret_mrc_version(iunit);
+        ispg = iiu_ret_space_group(iunit);
         if do_extra && iflags & (1 << 2) != 0 {
             println!("\n                    This file has an old-style MRC header.");
         }
@@ -60,12 +60,7 @@ pub unsafe fn irdhdr(
             println!("\n         This MRC file is apparently inverted in Y");
         }
         let mut nxyzst = [0_i32; 3];
-        iiu_ret_size(
-            iunit,
-            &mut *nxyz.cast::<[i32; 3]>(),
-            &mut *mxyz.cast::<[i32; 3]>(),
-            &mut nxyzst,
-        );
+        (*nxyz.cast::<[i32; 3]>(), *mxyz.cast::<[i32; 3]>(), nxyzst) = iiu_ret_size(iunit);
         let mut idtype = 0;
         let mut lensnum = 0;
         let mut nd1 = 0;
@@ -136,26 +131,18 @@ pub unsafe fn irdhdr(
         let mut tilt_orig = [0.0_f32; 3];
         let mut num_extra = 0;
         let mut rms = 0.0;
-        iiu_ret_data_type(
-            iunit,
-            &mut idtype,
-            &mut lensnum,
-            &mut nd1,
-            &mut nd2,
-            &mut vd1,
-            &mut vd2,
-        );
-        iiu_ret_delta(iunit, &mut delta);
-        iiu_ret_cell(iunit, &mut cell);
-        iiu_ret_axis_map(iunit, &mut mapcrs);
+        (idtype, lensnum, nd1, nd2, vd1, vd2) = iiu_ret_data_type(iunit);
+        delta = iiu_ret_delta(iunit);
+        cell = iiu_ret_cell(iunit);
+        mapcrs = iiu_ret_axis_map(iunit);
         let mut origin = [0.; 3];
-        iiu_ret_origin(iunit, &mut origin);
+        origin = iiu_ret_origin(iunit);
         (xorig, yorig, zorig) = (origin[0], origin[1], origin[2]);
         iiu_ret_labels(iunit, &mut labels, &mut num_labels);
-        iiu_ret_tilt(iunit, &mut tilt);
-        iiu_ret_tilt_orig(iunit, &mut tilt_orig);
-        iiu_ret_num_extended(iunit, &mut num_extra);
-        iiu_ret_rms(iunit, &mut rms);
+        tilt = iiu_ret_tilt(iunit);
+        tilt_orig = iiu_ret_tilt_orig(iunit);
+        num_extra = iiu_ret_num_extended(iunit);
+        rms = iiu_ret_rms(iunit);
         if ispg == 401 && *nxyz.add(2) / *mxyz.add(2) > 1 {
             println!(
                 "\n  This file is an MRC volume stack with{:7} subvolumes of {:4} x{:4} x{:4}",

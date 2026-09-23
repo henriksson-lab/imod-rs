@@ -3,11 +3,15 @@
 use crate::imod::libcfshr::dsytrd3::dsytrd3;
 
 /// Original `dsyevq3` (`dsyevq3.c:32`).
+///
+/// The source documents exactly two return values (`dsyevq3.c:44-46`): `0` for
+/// success and `-1` for "Error (no convergence)", the QL iteration giving up
+/// after 30 sweeps.  That single failure is `Err(())` here.
 pub fn dsyevq3(
     matrix: &[[f64; 3]; 3],
     orthogonal: &mut [[f64; 3]; 3],
     eigenvalues: &mut [f64; 3],
-) -> i32 {
+) -> Result<(), ()> {
     let mut off_diagonal = [0.0; 3];
     let mut reduced_off_diagonal = [0.0; 2];
     dsytrd3(matrix, orthogonal, eigenvalues, &mut reduced_off_diagonal);
@@ -28,7 +32,7 @@ pub fn dsyevq3(
                 break;
             }
             if iterations >= 30 {
-                return -1;
+                return Err(());
             }
             iterations += 1;
             let mut g = (eigenvalues[lower + 1] - eigenvalues[lower])
@@ -76,7 +80,7 @@ pub fn dsyevq3(
             off_diagonal[middle] = 0.0;
         }
     }
-    0
+    Ok(())
 }
 
 #[cfg(test)]
@@ -88,11 +92,11 @@ mod tests {
         let diagonal = [[2.0, 0.0, 0.0], [0.0, 3.0, 0.0], [0.0, 0.0, 5.0]];
         let mut q = [[0.0; 3]; 3];
         let mut values = [0.0; 3];
-        assert_eq!(dsyevq3(&diagonal, &mut q, &mut values), 0);
+        assert_eq!(dsyevq3(&diagonal, &mut q, &mut values), Ok(()));
         assert_eq!(values, [2.0, 3.0, 5.0]);
         assert_eq!(q, [[1.0, 0.0, 0.0], [0.0, 1.0, 0.0], [0.0, 0.0, 1.0]]);
         let general = [[4.0, 1.0, 2.0], [1.0, 3.0, 5.0], [2.0, 5.0, 6.0]];
-        assert_eq!(dsyevq3(&general, &mut q, &mut values), 0);
+        assert_eq!(dsyevq3(&general, &mut q, &mut values), Ok(()));
         assert!(values.iter().all(|value| value.is_finite()));
     }
 }

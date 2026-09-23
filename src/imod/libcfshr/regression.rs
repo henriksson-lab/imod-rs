@@ -241,7 +241,7 @@ pub fn mult_regress(
     // `work` is the mp-by-mp matrix and `gaussj` addresses the
     // num_inp_col-by-num_inp_col leading block of it; `sol` is addressed as
     // num_inp_col rows of num_out_col columns.
-    if gaussj(work, num_inp_col, mp, sol, num_out_col, num_out_col) != 0 {
+    if gaussj(work, num_inp_col, mp, sol, num_out_col, num_out_col).is_err() {
         return 3;
     }
     work[..(num_inp_col * num_out_col) as usize]

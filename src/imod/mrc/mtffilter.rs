@@ -566,7 +566,7 @@ pub fn mtffilter(arguments: &[String]) -> i32 {
         }
     }
 
-    iiu_ret_delta(1, &mut pix_size_delta);
+    pix_size_delta = iiu_ret_delta(1);
     pixel_size = (pix_size_delta[0] as f64 / 10.) as f32;
     if pip_get_float(b"PixelSize", &mut pixel_size) == 0 {
         expand_factor = 1.;
@@ -1054,8 +1054,8 @@ pub fn mtffilter(arguments: &[String]) -> i32 {
         //
         if im_unit_out == 3 {
             iz_out_base = iz_start;
-            iiu_ret_cell(1, &mut cell);
-            iiu_ret_delta(1, &mut pixel);
+            cell = iiu_ret_cell(1);
+            pixel = iiu_ret_delta(1);
             //
             // change mxyz if it matches existing nz; set cell size to keep
             // pixel spacing the same

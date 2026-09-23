@@ -516,23 +516,27 @@ pub fn slice_scale_and_free(sout: &mut Islice, sin: &mut Islice) {
         _ => {}
     }
 }
-pub fn slice_byte_edge_laplacian(sin: &mut Islice) -> i32 {
+pub fn slice_byte_edge_laplacian(sin: &mut Islice) -> Result<(), ()> {
     slice_byte_convolve(sin, &LAPLACIAN_KERNEL)
 }
-pub fn slice_byte_sharpen(sin: &mut Islice) -> i32 {
+pub fn slice_byte_sharpen(sin: &mut Islice) -> Result<(), ()> {
     slice_byte_convolve(sin, &SHARPEN_KERNEL)
 }
-pub fn slice_byte_smooth(sin: &mut Islice) -> i32 {
+pub fn slice_byte_smooth(sin: &mut Islice) -> Result<(), ()> {
     slice_byte_convolve(sin, &SMOOTH_KERNEL)
 }
-pub fn slice_byte_convolve(sin: &mut Islice, mask: &[[i32; 3]; 3]) -> i32 {
+/// The source is documented "Returns 0." (`islice.c:498`) and has no failure
+/// path -- it does not test `sliceCreate` and would dereference NULL.  The two
+/// refusals below are this translation's stand-ins for that undefined
+/// behaviour, so `Err(())` means "the source would have crashed here".
+pub fn slice_byte_convolve(sin: &mut Islice, mask: &[[i32; 3]; 3]) -> Result<(), ()> {
     let Some(mut sout) = slice_create(sin.xsize, sin.ysize, 1) else {
-        return -1;
+        return Err(());
     };
     let imax = sin.xsize - 1;
     let jmax = sin.ysize - 1;
     if sin.xsize < 2 || sin.ysize < 2 {
-        return -1;
+        return Err(());
     }
     let xsize = sin.xsize;
     let index = |x: i32, y: i32| (x + y * xsize) as usize;
@@ -563,7 +567,7 @@ pub fn slice_byte_convolve(sin: &mut Islice, mask: &[[i32; 3]; 3]) -> i32 {
         }
     }
     slice_scale_and_free(sout.as_mut(), sin);
-    0
+    Ok(())
 }
 /// Matches C `slice_mat_filter(Islice *, float *, int)` (`islice.c:547`).
 ///
@@ -767,18 +771,18 @@ mod tests {
         sin.data.b_mut().fill(10);
         assert_eq!(
             slice_byte_convolve(sin.as_mut(), &[[0, 0, 0], [0, 1, 0], [0, 0, 0]]),
-            0
+            Ok(())
         );
         assert_eq!(sin.data.b(), [10; 9]);
 
         sin.data.b_mut().fill(10);
-        assert_eq!(slice_byte_edge_laplacian(sin.as_mut()), 0);
+        assert_eq!(slice_byte_edge_laplacian(sin.as_mut()), Ok(()));
         assert_eq!(sin.data.b(), [40; 9]);
         sin.data.b_mut().fill(10);
-        assert_eq!(slice_byte_sharpen(sin.as_mut()), 0);
+        assert_eq!(slice_byte_sharpen(sin.as_mut()), Ok(()));
         assert_eq!(sin.data.b(), [10; 9]);
         sin.data.b_mut().fill(10);
-        assert_eq!(slice_byte_smooth(sin.as_mut()), 0);
+        assert_eq!(slice_byte_smooth(sin.as_mut()), Ok(()));
         assert_eq!(sin.data.b(), [160; 9]);
     }
     #[test]

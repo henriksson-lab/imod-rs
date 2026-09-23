@@ -227,23 +227,25 @@ pub fn imod_mesh_get_verts(mesh: Option<&Imesh>) -> Option<&[Ipoint]> {
 /// which is observationally the same in every caller because the source
 /// mesh is either abandoned or freed with `free()` rather than
 /// `imodMeshFreeData` afterwards.
-pub fn imod_mesh_copy(from: Option<&Imesh>, to: Option<&mut Imesh>) -> i32 {
+///
+/// `Err(())` is the source's -1 for a NULL source or destination mesh.
+pub fn imod_mesh_copy(from: Option<&Imesh>, to: Option<&mut Imesh>) -> Result<(), ()> {
     let from = match from {
         Some(from) => from,
-        None => return -1,
+        None => return Err(()),
     };
     let to = match to {
         Some(to) => to,
-        None => return -1,
+        None => return Err(()),
     };
     *to = from.clone();
-    0
+    Ok(())
 }
 
 /// Original: `imodMeshDup` (`imesh.c:118`).
 pub fn imod_mesh_dup(mesh: Option<&Imesh>) -> Option<Imesh> {
     let mut new_mesh = imod_mesh_new()?.remove(0);
-    imod_mesh_copy(mesh, Some(&mut new_mesh));
+    let _ = imod_mesh_copy(mesh, Some(&mut new_mesh));
     let mesh = mesh?;
     new_mesh.vert = mesh.vert.clone();
     new_mesh.list = mesh.list.clone();
@@ -257,15 +259,17 @@ pub fn imod_mesh_delete(mesh: Option<Vec<Imesh>>) -> i32 {
 }
 
 /// Original: `imodMeshFreeData` (`imesh.c:149`).
-pub fn imod_mesh_free_data(mesh: Option<&mut Imesh>) -> i32 {
+///
+/// `Err(())` is the source's -1 for a NULL mesh.
+pub fn imod_mesh_free_data(mesh: Option<&mut Imesh>) -> Result<(), ()> {
     let mesh = match mesh {
         Some(mesh) => mesh,
-        None => return -1,
+        None => return Err(()),
     };
     mesh.vert = Vec::new();
     mesh.list = Vec::new();
     mesh.store = Vec::new();
-    0
+    Ok(())
 }
 
 /// Original: `imodMeshesDelete` (`imesh.c:163`).
@@ -277,7 +281,7 @@ pub fn imod_meshes_delete(mesh: Option<Vec<Imesh>>, size: i32) -> i32 {
     for ms in 0..size as usize {
         if ms < mesh.len() {
             let entry = &mut mesh[ms];
-            imod_mesh_free_data(Some(entry));
+            let _ = imod_mesh_free_data(Some(entry));
         }
     }
     drop(mesh);
@@ -320,20 +324,21 @@ pub fn imod_mesh_add_vert(mesh: &mut Imesh, vert: &Ipoint) -> i32 {
 
 /* Unused 7/4/05 */
 /// Original: `imodMeshAddNormal` (`imesh.c:238`).
-pub fn imod_mesh_add_normal(mesh: Option<&mut Imesh>, normal: Option<&Ipoint>) -> i32 {
+/// `Err(())` is the source's -1 for a NULL mesh or normal.
+pub fn imod_mesh_add_normal(mesh: Option<&mut Imesh>, normal: Option<&Ipoint>) -> Result<(), ()> {
     let mesh = match mesh {
         Some(mesh) => mesh,
-        None => return -1,
+        None => return Err(()),
     };
     let normal = match normal {
         Some(normal) => normal,
-        None => return -1,
+        None => return Err(()),
     };
     imod_mesh_add_vert(mesh, normal);
     imod_mesh_add_index(mesh, IMOD_MESH_NORMAL);
     let vsize = mesh.vert.len() as i32;
     imod_mesh_add_index(mesh, vsize - 1);
-    0
+    Ok(())
 }
 
 /* Unused 7/4/05 */
@@ -422,7 +427,7 @@ pub fn imodel_mesh_add(nmesh: Option<&Imesh>, mray: &mut Vec<Imesh>) -> i32 {
 
     mray.push(Imesh::default());
     let size = mray.len() - 1;
-    imod_mesh_copy(Some(nmesh), Some(&mut mray[size]));
+    let _ = imod_mesh_copy(Some(nmesh), Some(&mut mray[size]));
     0
 }
 
@@ -454,7 +459,7 @@ pub fn imod_mesh_remove_pairs(
             if let Some(cleanup) = cleanup_vbd {
                 cleanup(&mut meshes[me]);
             }
-            imod_mesh_free_data(Some(&mut meshes[me]));
+            let _ = imod_mesh_free_data(Some(&mut meshes[me]));
         }
     }
     meshes.truncate(new_size);
@@ -509,7 +514,7 @@ pub fn imod_mesh_make_pairs(
             };
             new_mesh.flag |= (thickness as u32) << IMESH_THICKNESS_SHIFT;
             meshes.push(Imesh::default());
-            imod_mesh_copy(Some(&new_mesh), Some(&mut meshes[new_size]));
+            let _ = imod_mesh_copy(Some(&new_mesh), Some(&mut meshes[new_size]));
             new_size += 1;
             dir += 2;
         }
@@ -1096,7 +1101,13 @@ pub fn imesh_surface_area(mesh: Option<&Imesh>, scale: Option<&Ipoint>) -> f32 {
 /// `IMOD_MESH_BGNPOLY` branch never advances `i` inside its `while`, so a mesh
 /// carrying either code makes the C spin forever.  No in-scope caller reaches
 /// it, and no substitute is invented here.
-pub fn imod_mesh_get_bbox(mesh: Option<&Imesh>, ll: &mut Ipoint, ur: &mut Ipoint) -> i32 {
+/// `Err(())` is the source's -1, returned for a NULL or empty mesh and for a
+/// mesh whose list holds no polygon, so that no bound was ever set.
+pub fn imod_mesh_get_bbox(
+    mesh: Option<&Imesh>,
+    ll: &mut Ipoint,
+    ur: &mut Ipoint,
+) -> Result<(), ()> {
     let mut pt: Ipoint;
     let mut list_inc: i32 = 0;
     let mut vert_base: i32 = 0;
@@ -1105,10 +1116,10 @@ pub fn imod_mesh_get_bbox(mesh: Option<&Imesh>, ll: &mut Ipoint, ur: &mut Ipoint
 
     let mesh = match mesh {
         Some(mesh) => mesh,
-        None => return -1,
+        None => return Err(()),
     };
     if mesh.list.is_empty() || mesh.vert.is_empty() {
-        return -1;
+        return Err(());
     }
     ll.x = 1.0e30;
     ll.y = 1.0e30;
@@ -1151,9 +1162,9 @@ pub fn imod_mesh_get_bbox(mesh: Option<&Imesh>, ll: &mut Ipoint, ur: &mut Ipoint
         i += 1;
     }
     if ll.x > 1.0e29 {
-        return -1;
+        return Err(());
     }
-    0
+    Ok(())
 }
 
 /*******************

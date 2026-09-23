@@ -278,13 +278,17 @@ pub fn adoc_read(filename: &[u8]) -> i32 {
                 /* If this is a section start, get name - value.  Here there must be
                 a value and it is an error if there is none. */
                 let line_end2 = close.unwrap();
-                err = parse_key_value(
+                err = match parse_key_value(
                     &big_str,
                     line + OPEN_DELIM.len(),
                     line_end2,
                     &mut key,
                     &mut value,
-                );
+                ) {
+                    Ok(()) => 0,
+                    Err(ParseKeyValueError::Malformed) => 1,
+                    Err(ParseKeyValueError::Memory) => -1,
+                };
                 if value.is_none() {
                     err = 1;
                 }
@@ -337,7 +341,11 @@ pub fn adoc_read(filename: &[u8]) -> i32 {
 
                 /* This should be a key-value pair now */
                 let line_end = line_len as usize;
-                err = parse_key_value(&big_str, line, line_end, &mut key, &mut value);
+                err = match parse_key_value(&big_str, line, line_end, &mut key, &mut value) {
+                    Ok(()) => 0,
+                    Err(ParseKeyValueError::Malformed) => 1,
+                    Err(ParseKeyValueError::Memory) => -1,
+                };
                 if err != 0 {
                     err = if err > 0 { bad_line } else { err };
                     break;
@@ -636,13 +644,18 @@ pub fn adoc_get_xml_root_element(string: &mut Option<Vec<u8>>) -> i32 {
 }
 
 /// Matches C `AdocSetXmlRootElement` (`autodoc.c:567`).
-pub fn adoc_set_xml_root_element(element: &[u8]) -> i32 {
+///
+/// The C documents two failures, "-1 for no current autodoc or 1 for memory
+/// error" (`autodoc.c:574`), but the second is `strdup` failing, and the copy
+/// is an infallible `Vec` here -- so only the first survives translation and
+/// there is no code left to carry.
+pub fn adoc_set_xml_root_element(element: &[u8]) -> Result<(), ()> {
     let cur = S_CUR_ADOC_IND.get();
     if cur < 0 {
-        return -1;
+        return Err(());
     }
     S_AUTODOCS.with_borrow_mut(|adocs| adocs[cur as usize].root_element = Some(element.to_vec()));
-    0
+    Ok(())
 }
 
 /// Matches C `AdocOrderWriteByValue` (`autodoc.c:611`).
@@ -1235,7 +1248,8 @@ pub fn adoc_transfer_to_new_type(
                 key.as_deref().unwrap(),
                 value.as_deref(),
                 *type_ as i32,
-            ) < 0
+            )
+            .is_err()
         {
             err = -4;
         }
@@ -1252,32 +1266,42 @@ pub fn adoc_set_key_value(
     key: &[u8],
     value: Option<&[u8]>,
 ) -> i32 {
-    set_key_value_type(type_name, sect_ind, key, value, ADOC_STRING)
+    /* The C returns setKeyValueType's status directly; -1 is its only
+    failure, so the `AdocSet*` boundary re-encodes it here and below. */
+    set_key_value_type(type_name, sect_ind, key, value, ADOC_STRING).map_or(-1, |()| 0)
 }
 
 /// Matches C static `setKeyValueType` (`autodoc.c:1117`).
+///
+/// Every failure the source can reach here is the single documented "-1 for
+/// error" of the `AdocSet*` family: no current autodoc, no such section, or a
+/// NULL key or value.  `sectSetKeyValueType`'s own non-zero is the same -1,
+/// forwarded, so it collapses into the same `Err(())`.
 pub fn set_key_value_type(
     type_name: &[u8],
     sect_ind: i32,
     key: &[u8],
     value: Option<&[u8]>,
     type_: i32,
-) -> i32 {
+) -> Result<(), ()> {
     let mut key_ind: i32 = 0;
     let cur = S_CUR_ADOC_IND.get();
     if cur < 0 {
-        return -1;
+        return Err(());
     }
     S_AUTODOCS.with_borrow_mut(|adocs| {
         let adoc = &mut adocs[cur as usize];
         let Some((ic, is)) = get_section(adoc, type_name, sect_ind) else {
-            return -1;
+            return Err(());
         };
         if value.is_none() {
-            return -1;
+            return Err(());
         }
         let sect = &mut adoc.collections[ic].sections[is];
-        sect_set_key_value_type(sect, key, value, type_, &mut key_ind)
+        if sect_set_key_value_type(sect, key, value, type_, &mut key_ind) != 0 {
+            return Err(());
+        }
+        Ok(())
     })
 }
 
@@ -1310,7 +1334,7 @@ pub fn sect_set_key_value_type(
 /// Matches C `AdocSetInteger` (`autodoc.c:1163`).
 pub fn adoc_set_integer(type_name: &[u8], sect_ind: i32, key: &[u8], ival: i32) -> i32 {
     let str = ival.to_string().into_bytes();
-    set_key_value_type(type_name, sect_ind, key, Some(&str), ADOC_ONE_INT)
+    set_key_value_type(type_name, sect_ind, key, Some(&str), ADOC_ONE_INT).map_or(-1, |()| 0)
 }
 
 /// Matches C `AdocSetTwoIntegers` (`autodoc.c:1174`).
@@ -1322,7 +1346,7 @@ pub fn adoc_set_two_integers(
     ival2: i32,
 ) -> i32 {
     let str = format!("{ival1} {ival2}").into_bytes();
-    set_key_value_type(type_name, sect_ind, key, Some(&str), ADOC_TWO_INTS)
+    set_key_value_type(type_name, sect_ind, key, Some(&str), ADOC_TWO_INTS).map_or(-1, |()| 0)
 }
 
 /// Matches C `AdocSetThreeIntegers` (`autodoc.c:1186`).
@@ -1335,7 +1359,7 @@ pub fn adoc_set_three_integers(
     ival3: i32,
 ) -> i32 {
     let str = format!("{ival1} {ival2} {ival3}").into_bytes();
-    set_key_value_type(type_name, sect_ind, key, Some(&str), ADOC_THREE_INTS)
+    set_key_value_type(type_name, sect_ind, key, Some(&str), ADOC_THREE_INTS).map_or(-1, |()| 0)
 }
 
 /// Matches C `AdocSetIntegerArray` (`autodoc.c:1198`).
@@ -1360,7 +1384,7 @@ pub fn adoc_set_integer_array(
 pub fn adoc_set_float(type_name: &[u8], sect_ind: i32, key: &[u8], val: f32) -> i32 {
     /* `val` is promoted to double by the C varargs call. */
     let str = c_format_bytes("%g", &[CArg::Dbl(val as f64)]);
-    set_key_value_type(type_name, sect_ind, key, Some(&str), ADOC_ONE_FLOAT)
+    set_key_value_type(type_name, sect_ind, key, Some(&str), ADOC_ONE_FLOAT).map_or(-1, |()| 0)
 }
 
 /// Matches C `AdocSetTwoFloats` (`autodoc.c:1221`).
@@ -1372,7 +1396,7 @@ pub fn adoc_set_two_floats(
     val2: f32,
 ) -> i32 {
     let str = c_format_bytes("%g %g", &[CArg::Dbl(val1 as f64), CArg::Dbl(val2 as f64)]);
-    set_key_value_type(type_name, sect_ind, key, Some(&str), ADOC_TWO_FLOATS)
+    set_key_value_type(type_name, sect_ind, key, Some(&str), ADOC_TWO_FLOATS).map_or(-1, |()| 0)
 }
 
 /// Matches C `AdocSetThreeFloats` (`autodoc.c:1233`).
@@ -1392,7 +1416,7 @@ pub fn adoc_set_three_floats(
             CArg::Dbl(val3 as f64),
         ],
     );
-    set_key_value_type(type_name, sect_ind, key, Some(&str), ADOC_THREE_FLOATS)
+    set_key_value_type(type_name, sect_ind, key, Some(&str), ADOC_THREE_FLOATS).map_or(-1, |()| 0)
 }
 
 /// Matches C `AdocSetFloatArray` (`autodoc.c:1245`).
@@ -1416,7 +1440,7 @@ pub fn adoc_set_float_array(
 /// Matches C `AdocSetDouble` (`autodoc.c:1252`).
 pub fn adoc_set_double(type_name: &[u8], sect_ind: i32, key: &[u8], val: f64) -> i32 {
     let str = c_format_bytes("%g", &[CArg::Dbl(val)]);
-    set_key_value_type(type_name, sect_ind, key, Some(&str), ADOC_ONE_DOUBLE)
+    set_key_value_type(type_name, sect_ind, key, Some(&str), ADOC_ONE_DOUBLE).map_or(-1, |()| 0)
 }
 
 /// The `void *vals` that `setArrayOfValues` (`autodoc.c:1263`) casts to either
@@ -1474,7 +1498,7 @@ pub fn set_array_of_values(
         full_str.extend_from_slice(&tmp);
         ind += 1;
     }
-    set_key_value_type(type_name, sect_ind, key, Some(&full_str), val_type)
+    set_key_value_type(type_name, sect_ind, key, Some(&full_str), val_type).map_or(-1, |()| 0)
 }
 
 /// Matches C `AdocDeleteKeyValue` (`autodoc.c:1305`).
@@ -2463,6 +2487,19 @@ pub fn delete_section(sect: &mut AdocSection) {
     sect.com_index = Vec::new();
 }
 
+/// The two failures `parseKeyValue` distinguishes by sign (`autodoc.c:2378`):
+/// "Returns 1 for other malformed lines, and -1 for other errors."  `AdocRead`
+/// reads the sign -- a positive status becomes its own `badLine` code and a
+/// negative one is passed through (`autodoc.c:209-213`) -- so the two cannot be
+/// collapsed.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ParseKeyValueError {
+    /// C's `1`: an empty line, a missing delimiter, or no text before it.
+    Malformed,
+    /// C's `-1`: an allocation failure, already reported by `adocMemoryError`.
+    Memory,
+}
+
 /// Matches C static `parseKeyValue` (`autodoc.c:2381`).
 ///
 /// The source takes two `char *` into one NUL-terminated line buffer; `line`
@@ -2474,7 +2511,7 @@ pub fn parse_key_value(
     end: usize,
     key: &mut Vec<u8>,
     value: &mut Option<Vec<u8>>,
-) -> i32 {
+) -> Result<(), ParseKeyValueError> {
     let mut line = line;
     let mut end = end;
     let mut val_start: usize;
@@ -2490,7 +2527,7 @@ pub fn parse_key_value(
         end -= 1;
     }
     if line == end {
-        return 1;
+        return Err(ParseKeyValueError::Malformed);
     }
 
     /* Find delimiter.  If it is not there or no text before it, error */
@@ -2504,11 +2541,11 @@ pub fn parse_key_value(
             .map(|p| line + p)
     };
     let Some(found) = found else {
-        return 1;
+        return Err(ParseKeyValueError::Malformed);
     };
     val_start = found;
     if val_start == line {
-        return 1;
+        return Err(ParseKeyValueError::Malformed);
     }
 
     /* Eat spaces after key */
@@ -2534,12 +2571,12 @@ pub fn parse_key_value(
             /* C computes `end - valStart` as a negative `int` and hands
             `valLen + 1` to `malloc`, which fails; `adocMemoryError` then
             returns -1 (`autodoc.c:2429`). */
-            adoc_memory_error(true, "parseKeyValue");
-            return -1;
+            let _ = adoc_memory_error(true, "parseKeyValue");
+            return Err(ParseKeyValueError::Memory);
         }
         *value = Some(buf[val_start..end].to_vec());
     }
-    0
+    Ok(())
 }
 
 /// Matches C static `lookupKey` (`autodoc.c:2429`).
@@ -2633,16 +2670,18 @@ pub fn find_section_in_adoc_list(coll_ind: i32, sect_ind: i32) -> i32 {
 ///
 /// The C tests the pointer it was handed for NULL; every allocation in this
 /// module is a `Vec` that aborts rather than returning null, so what is passed
-/// is the outcome of the test the caller already made.
-pub fn adoc_memory_error(failed: bool, routine: &str) -> i32 {
+/// is the outcome of the test the caller already made.  The C's `0`/`-1` is a
+/// "did the allocation fail" answer that every caller immediately turns into
+/// its own error return, so it is `Ok`/`Err` here.
+pub fn adoc_memory_error(failed: bool, routine: &str) -> Result<(), ()> {
     if !failed {
-        return 0;
+        return Ok(());
     }
     b3d_error(
         Some(&mut ImodFile::Stderr),
         format_args!("ERROR: {routine} - Allocating memory for string or autodoc component\n"),
     );
-    -1
+    Err(())
 }
 
 /// Matches C static `openForWrite` (`autodoc.c:2515`).
@@ -3115,7 +3154,16 @@ pub(crate) mod tests {
                 &mut rep,
             );
             adoc_order_write_by_value(None);
-            line_of("setRoot", adoc_set_xml_root_element(b"myroot"), &mut rep);
+            line_of(
+                "setRoot",
+                /* The report records the source's integer status. */
+                if adoc_set_xml_root_element(b"myroot").is_ok() {
+                    0
+                } else {
+                    -1
+                },
+                &mut rep,
+            );
             let mut root: Option<Vec<u8>> = None;
             adoc_get_xml_root_element(&mut root);
             rep.extend_from_slice(&c_format_bytes(

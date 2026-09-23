@@ -27,7 +27,7 @@ pub unsafe extern "C" fn pipgetnonoptionarg_(
     err = pip_get_non_option_arg(*argNo - 1 as i32, &mut argVec);
     argVec.push(0);
     let argPtr = argVec.as_ptr().cast::<::core::ffi::c_char>();
-    if err == 0 && c2f_string(argPtr, arg, stringSize as i32) != 0 {
+    if err == 0 && c2f_string(argPtr, arg, stringSize as i32).is_err() {
         pip_set_error(b"Non-option argument too long for character variable");
         err = -(1 as i32);
     }
@@ -46,7 +46,7 @@ pub unsafe extern "C" fn pipgetstring_(
     let mut err = pip_get_string(option.as_bytes(), &mut strVec);
     strVec.push(0);
     strPtr = strVec.as_ptr().cast::<::core::ffi::c_char>().cast_mut();
-    if err == 0 && c2f_string(strPtr, string, stringSize as i32) != 0 {
+    if err == 0 && c2f_string(strPtr, string, stringSize as i32).is_err() {
         pip_set_error(b"In pip_get_string, string is too long for character variable");
         err = -(1 as i32);
     }

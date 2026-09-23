@@ -331,7 +331,7 @@ pub fn header() {
                 }
                 if do_pixel {
                     let mut delta = [0.0_f32; 3];
-                    iiu_ret_delta(im_unit, &mut delta);
+                    delta = iiu_ret_delta(im_unit);
                     println!(
                         "{}{}{}",
                         g_edit(delta[0], 15, 5),
@@ -341,7 +341,7 @@ pub fn header() {
                 }
                 if do_origin {
                     let mut delta = [0.0_f32; 3];
-                    iiu_ret_origin(im_unit, &mut delta);
+                    delta = iiu_ret_origin(im_unit);
                     println!(
                         "{}{}{}",
                         g_edit(delta[0], 15, 5),
@@ -363,9 +363,9 @@ pub fn header() {
                     let mut if_imod = 0;
                     let mut j = 0;
                     let mut rms = 0.0_f32;
-                    iiu_ret_imod_flags(im_unit, &mut iflags, &mut if_imod);
-                    iiu_ret_mrc_version(im_unit, &mut j);
-                    iiu_ret_rms(im_unit, &mut rms);
+                    (iflags, if_imod) = iiu_ret_imod_flags(im_unit);
+                    j = iiu_ret_mrc_version(im_unit);
+                    rms = iiu_ret_rms(im_unit);
                     if rms > 0.0
                         || (rms == 0.0 && (j > 0 || (if_imod != 0 && iflags & (1 << 3) != 0)))
                     {
@@ -375,7 +375,7 @@ pub fn header() {
                 }
             } else {
                 let mut nbsym = 0;
-                iiu_ret_num_extended(im_unit, &mut nbsym);
+                nbsym = iiu_ret_num_extended(im_unit);
                 if nbsym > 0 {
                     // `allocate(array(nbsym / 4 + 10), stat=ierr)` followed by
                     // `call memoryError(ierr, 'array for extended header')`
@@ -392,7 +392,7 @@ pub fn header() {
                         .map(|bytes| f32::from_ne_bytes(bytes.try_into().unwrap()))
                         .collect();
                     let mut extended_type = [0; 2];
-                    iiu_ret_extended_type(im_unit, &mut extended_type);
+                    extended_type = iiu_ret_extended_type(im_unit);
                     let [mut num_int, mut num_real] = extended_type;
                     if extra_is_nbytes_and_flags(num_int, num_real) == 0 && num_real >= 12 {
                         //
@@ -433,8 +433,8 @@ pub fn header() {
                         let mut delta = [0.0_f32; 3];
                         let mut iflags = 0;
                         let mut if_imod = 0;
-                        iiu_ret_delta(im_unit, &mut delta);
-                        iiu_ret_imod_flags(im_unit, &mut iflags, &mut if_imod);
+                        delta = iiu_ret_delta(im_unit);
+                        (iflags, if_imod) = iiu_ret_imod_flags(im_unit);
                         if pixel > 0.005 && pixel < 10000.0 && iflags & 2 == 0 {
                             let mut i_binning = 0_i32;
                             for j in (0..3).rev() {
@@ -594,7 +594,7 @@ pub fn header() {
             // if no pixel in extended header,
             if !found_pixel {
                 let mut delta = [0.0_f32; 3];
-                iiu_ret_delta(1, &mut delta);
+                delta = iiu_ret_delta(1);
                 found_pixel = delta[0] != 1.0 || delta[1] != 1.0 || delta[2] != 1.0;
             }
 

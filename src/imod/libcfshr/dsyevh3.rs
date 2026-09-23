@@ -4,11 +4,14 @@ use crate::imod::libcfshr::dsyevc3::dsyevc3;
 use crate::imod::libcfshr::dsyevq3::dsyevq3;
 
 /// Original `dsyevh3` (`dsyevh3.c:35`).
+///
+/// The source's only non-zero return is the one it forwards from `dsyevq3`
+/// (`dsyevh3.c:105`, `:120`), so it carries the same `Result<(), ()>`.
 pub fn dsyevh3(
     matrix: &[[f64; 3]; 3],
     orthogonal: &mut [[f64; 3]; 3],
     eigenvalues: &mut [f64; 3],
-) -> i32 {
+) -> Result<(), ()> {
     dsyevc3(matrix, eigenvalues);
     let mut maximum = eigenvalues[0].abs();
     let mut temporary = eigenvalues[1].abs();
@@ -59,7 +62,7 @@ pub fn dsyevh3(
     orthogonal[0][2] = orthogonal[1][0] * orthogonal[2][1] - orthogonal[2][0] * orthogonal[1][1];
     orthogonal[1][2] = orthogonal[2][0] * orthogonal[0][1] - orthogonal[0][0] * orthogonal[2][1];
     orthogonal[2][2] = orthogonal[0][0] * orthogonal[1][1] - orthogonal[1][0] * orthogonal[0][1];
-    0
+    Ok(())
 }
 
 #[cfg(test)]
@@ -71,7 +74,7 @@ mod tests {
         let matrix = [[4.0, 1.0, 2.0], [1.0, 3.0, 5.0], [2.0, 5.0, 6.0]];
         let mut q = [[0.0; 3]; 3];
         let mut values = [0.0; 3];
-        assert_eq!(dsyevh3(&matrix, &mut q, &mut values), 0);
+        assert_eq!(dsyevh3(&matrix, &mut q, &mut values), Ok(()));
         for column in 0..3 {
             let norm = q[0][column] * q[0][column]
                 + q[1][column] * q[1][column]
@@ -79,7 +82,7 @@ mod tests {
             assert!((norm - 1.0).abs() < 1.0e-10);
         }
         let repeated = [[2.0, 0.0, 0.0], [0.0, 2.0, 0.0], [0.0, 0.0, 2.0]];
-        assert_eq!(dsyevh3(&repeated, &mut q, &mut values), 0);
+        assert_eq!(dsyevh3(&repeated, &mut q, &mut values), Ok(()));
         assert_eq!(values, [2.0, 2.0, 2.0]);
     }
 }

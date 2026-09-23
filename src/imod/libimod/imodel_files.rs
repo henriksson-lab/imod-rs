@@ -2806,13 +2806,14 @@ pub fn imod_open_file(filename: &str, mode: &str, imod: &mut Imod) -> Result<Imo
 /// Original: `imodCloseFile` (`imodel_files.c:115`).
 ///
 /// The source closes `imod->file`; that member has no counterpart here, so the
-/// handle opened by `imod_open_file` is passed back in.
-pub fn imod_close_file(file: Option<ImodFile>) -> i32 {
+/// handle opened by `imod_open_file` is passed back in.  `Err(())` is the
+/// source's -1 for a NULL model or a model with no open file.
+pub fn imod_close_file(file: Option<ImodFile>) -> Result<(), ()> {
     let Some(file) = file else {
-        return -1;
+        return Err(());
     };
     drop(file);
-    0
+    Ok(())
 }
 
 /// Original: `imodTestIfModelFile` (`imodel_files.c:212`).

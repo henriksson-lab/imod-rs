@@ -445,7 +445,7 @@ pub fn openimoddata(fname: &str) -> i32 {
             /* DNM 11/5/98: no fortran code expects or wants tilt angles to be
             applied, so leave this out */
 
-            imod_transform(Some(imod), Some(&mat));
+            let _ = imod_transform(Some(imod), Some(&mat));
             imod_mat_delete(&mut mat);
         }
 
@@ -1204,7 +1204,7 @@ pub fn deletelistofconts(ob: i32, contours: &mut [i32]) -> i32 {
         for ind in 0..num_cont as usize {
             contours[ind] += 1;
         }
-        if err < 0 {
+        if err.is_err() {
             return FWRAP_ERROR_FROM_CALL;
         }
         FWRAP_NOERROR
@@ -1523,7 +1523,7 @@ pub fn putimod(
          */
         let imod = state.imod.as_mut().unwrap();
         for ob in 0..imod.obj.len() {
-            if imod_contours_delete_to_end(&mut imod.obj[ob], nsaved[ob]) != 0 {
+            if imod_contours_delete_to_end(&mut imod.obj[ob], nsaved[ob]).is_err() {
                 return FWRAP_ERROR_MEMORY;
             }
         }
@@ -1567,7 +1567,7 @@ pub fn writeimod(fname: &str) -> i32 {
             };
             imod_mat_scale(&mut mat, &pnt);
 
-            imod_transform(Some(imod), Some(&mat));
+            let _ = imod_transform(Some(imod), Some(&mat));
             imod_mat_delete(&mut mat);
         }
 
@@ -1894,7 +1894,7 @@ pub fn deleteiobj() -> i32 {
             return FWRAP_ERROR_NO_MODEL;
         };
         imod_objviews_free(imod);
-        imod_objects_delete(&mut imod.obj);
+        let _ = imod_objects_delete(&mut imod.obj);
         imod.obj.clear();
         FWRAP_NOERROR
     })

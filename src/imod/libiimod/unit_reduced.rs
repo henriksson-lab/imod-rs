@@ -60,7 +60,7 @@ pub fn iiu_read_binned(
     let mut nsum: i32 = 0;
     let mut sum: f32 = 0.;
     let mut binsq: f32 = 0.;
-    crate::imod::libiimod::unit_header::iiu_ret_size(imUnit, &mut nxyz, &mut mxyz, &mut nxyzst);
+    (nxyz, mxyz, nxyzst) = crate::imod::libiimod::unit_header::iiu_ret_size(imUnit);
     nx = nxyz[0 as i32 as usize];
     ny = nxyz[1 as i32 as usize];
     *ierr = 1 as i32;
@@ -307,7 +307,7 @@ pub fn iiu_read_reduced(
     let mut ixEdgeOffset: i32 = 0;
     let mut fillXend: i32 = 0;
     let mut fillYend: i32 = 0;
-    crate::imod::libiimod::unit_header::iiu_ret_size(imUnit, &mut nxyz, &mut mxyz, &mut nxyzst);
+    (nxyz, mxyz, nxyzst) = crate::imod::libiimod::unit_header::iiu_ret_size(imUnit);
     nx = nxyz[0 as i32 as usize];
     ny = nxyz[1 as i32 as usize];
     zoomFac = (1.0 / redFac as f64) as f32;

@@ -275,8 +275,8 @@ pub fn alterheader() {
         //
         // Get starting state of inversion of origin and set it to output the same way
         let (mut iold, mut iflags, mut if_imod) = (0_i32, 0_i32, 0_i32);
-        iiu_ret_mrc_version(2, &mut iold);
-        iiu_ret_imod_flags(2, &mut iflags, &mut if_imod);
+        iold = iiu_ret_mrc_version(2);
+        (iflags, if_imod) = iiu_ret_imod_flags(2);
         let mut invert_origin = 0_i32;
         if iold > 0 || (if_imod > 0 && iflags & 4 != 0) {
             invert_origin = 1;
@@ -319,7 +319,7 @@ pub fn alterheader() {
                             }
                         }
                         2 => {
-                            iiu_ret_cell(2, &mut cell);
+                            cell = iiu_ret_cell(2);
                             if {
                                 let [cell_0, cell_1, cell_2, ..] = &mut cell;
                                 pip_get_three_floats(b"CellSize", cell_0, cell_1, cell_2)
@@ -567,7 +567,7 @@ pub fn alterheader() {
                 1 => {
                     if !pip_input {
                         let mut origin = [0.; 3];
-                        iiu_ret_origin(2, &mut origin);
+                        origin = iiu_ret_origin(2);
                         [origx, origy, origz] = origin;
                         println!(
                             " Alter origin.  The origin is the offset FROM the first point in the image"
@@ -595,7 +595,7 @@ pub fn alterheader() {
                 //
                 2 => {
                     if !pip_input {
-                        iiu_ret_cell(2, &mut cell);
+                        cell = iiu_ret_cell(2);
                         println!(" Alter cell.  Current size and angles:");
                         println!(
                             "{}{}{}{:9.3}{:9.3}{:9.3}",
@@ -624,7 +624,7 @@ pub fn alterheader() {
                 // data type etc
                 //
                 3 => {
-                    iiu_ret_data_type(2, &mut itype, &mut lens, &mut n1, &mut n2, &mut v1, &mut v2);
+                    (itype, lens, n1, n2, v1, v2) = iiu_ret_data_type(2);
                     println!(" Alter data type.  Current type, lens, n1, n2, v1, v2:");
                     println!("{itype:5}{lens:5}{n1:5}{n2:5}{v1:10.3}{v2:10.3}");
                     println!(
@@ -704,10 +704,10 @@ pub fn alterheader() {
                 // DELTA
                 //
                 4 => {
-                    iiu_ret_sample(2, &mut mxyz);
-                    iiu_ret_cell(2, &mut cell);
+                    mxyz = iiu_ret_sample(2);
+                    cell = iiu_ret_cell(2);
                     if !pip_input {
-                        iiu_ret_delta(2, &mut delt);
+                        delt = iiu_ret_delta(2);
                         println!(
                             " Alter delta - changes cell sizes to achieve desired pixel spacing"
                         );
@@ -739,7 +739,7 @@ pub fn alterheader() {
                 //
                 5 => {
                     if !pip_input {
-                        iiu_ret_axis_map(2, &mut mcrs);
+                        mcrs = iiu_ret_axis_map(2);
                         println!(
                             " Alter mapping.  Current mapping constants:{:3}{:3}{:3}",
                             mcrs[0], mcrs[1], mcrs[2]
@@ -779,7 +779,7 @@ pub fn alterheader() {
                 //
                 6 => {
                     if !pip_input {
-                        iiu_ret_sample(2, &mut mxyz);
+                        mxyz = iiu_ret_sample(2);
                         println!(
                             " Alter sampling (mxyz).  Current x, y, z:{:5}{:5}{:5}",
                             mxyz[0], mxyz[1], mxyz[2]
@@ -803,7 +803,7 @@ pub fn alterheader() {
                 //
                 7 => {
                     if !pip_input {
-                        iiu_ret_tilt(2, &mut tilt);
+                        tilt = iiu_ret_tilt(2);
                         println!(
                             " Alter current tilt angles.  Current angles:{:6.1}{:6.1}{:6.1}",
                             tilt[0], tilt[1], tilt[2]
@@ -821,7 +821,7 @@ pub fn alterheader() {
                 //
                 8 => {
                     if !pip_input {
-                        iiu_ret_tilt_orig(2, &mut tilt);
+                        tilt = iiu_ret_tilt_orig(2);
                         println!(
                             " Alter original tilt angles.  Current angles:{:6.1}{:6.1}{:6.1}",
                             tilt[0], tilt[1], tilt[2]
@@ -1000,7 +1000,7 @@ pub fn alterheader() {
                 // RMS - first inform of current RMS value
                 //
                 16 => {
-                    iiu_ret_rms(2, &mut rms);
+                    rms = iiu_ret_rms(2);
                     println!(" Current RMS value = {}", g_edit(rms, 13, 5));
                     goto_label = 11;
                 }
@@ -1009,7 +1009,7 @@ pub fn alterheader() {
                 12 => {
                     println!(" Changing sample and cell sizes to match image size, ");
                     println!(" which will make pixel spacing be 1.0 1.0 1.0.");
-                    iiu_ret_cell(2, &mut cell);
+                    cell = iiu_ret_cell(2);
                     cell[0] = nxyz[0] as f32;
                     cell[1] = nxyz[1] as f32;
                     cell[2] = nxyz[2] as f32;
@@ -1023,8 +1023,8 @@ pub fn alterheader() {
                     println!(
                         " Changing sample size to match image size while preserving pixel spacing"
                     );
-                    iiu_ret_cell(2, &mut cell);
-                    iiu_ret_sample(2, &mut mxyz);
+                    cell = iiu_ret_cell(2);
+                    mxyz = iiu_ret_sample(2);
                     for i in 0..3 {
                         cell[i] = (cell[i] / mxyz[i] as f32) * nxyz[i] as f32;
                     }
@@ -1039,7 +1039,7 @@ pub fn alterheader() {
                     println!(" Marking header as not containing any piece coordinates.");
                     println!(" This will make other extended header data inaccessible");
                     let mut extended_type = [0; 2];
-                    iiu_ret_extended_type(2, &mut extended_type);
+                    extended_type = iiu_ret_extended_type(2);
                     let [nbytex, mut iflag] = extended_type;
                     if (iflag / 2) % 2 > 0 {
                         iflag -= 2;
@@ -1101,7 +1101,7 @@ pub fn alterheader() {
                 // FEIPIXEL - use the pixel size in extra header to set pixel spacing
                 19 => {
                     let mut nbsym = 0_i32;
-                    iiu_ret_num_extended(2, &mut nbsym);
+                    nbsym = iiu_ret_num_extended(2);
                     if nbsym <= 0 {
                         println!(" No extended header information in this file");
                         goto_label = 30;
@@ -1119,7 +1119,7 @@ pub fn alterheader() {
                         continue;
                     }
                     let mut extended_type = [0; 2];
-                    iiu_ret_extended_type(2, &mut extended_type);
+                    extended_type = iiu_ret_extended_type(2);
                     let [num_int, num_real] = extended_type;
                     if num_int < 0 || extra_is_nbytes_and_flags(num_int, num_real) != 0 {
                         println!(" The extended header is not in Agard/FEI format");
@@ -1148,8 +1148,8 @@ pub fn alterheader() {
                         goto_label = 30;
                         continue;
                     }
-                    iiu_ret_delta(2, &mut delt);
-                    iiu_ret_imod_flags(2, &mut iflags, &mut if_imod);
+                    delt = iiu_ret_delta(2);
+                    (iflags, if_imod) = iiu_ret_imod_flags(2);
                     let mut no_binning = iflags & 2 != 0;
                     let mut i_binning = [1_i32; 3];
                     for i in 0..3 {
@@ -1226,8 +1226,8 @@ pub fn alterheader() {
 
                     iflags |= 2;
                     iiu_alt_imod_flags(2, iflags);
-                    iiu_ret_sample(2, &mut mxyz);
-                    iiu_ret_cell(2, &mut cell);
+                    mxyz = iiu_ret_sample(2);
+                    cell = iiu_ret_cell(2);
                     for i in 0..3 {
                         cell[i] = mxyz[i] as f32 * pixel * i_binning[i] as f32;
                     }
@@ -1238,7 +1238,7 @@ pub fn alterheader() {
                 // INVERTORG  - invert the sign of the origin
                 20 => {
                     let mut origin = [0.; 3];
-                    iiu_ret_origin(2, &mut origin);
+                    origin = iiu_ret_origin(2);
                     [origx, origy, origz] = origin;
                     origx = -origx;
                     origy = -origy;
@@ -1304,7 +1304,7 @@ pub fn alterheader() {
                 // ISPG
                 23 => {
                     if !pip_input {
-                        iiu_ret_space_group(2, &mut iflags);
+                        iflags = iiu_ret_space_group(2);
                         println!(" Alter space group.  Current space group:{iflags:3}");
                         print!("New space group: ");
                         let _ = std::io::stdout().flush();
@@ -1347,8 +1347,8 @@ pub fn alterheader() {
                         goto_label = 30;
                         continue;
                     }
-                    iiu_ret_sample(2, &mut mxyz);
-                    iiu_ret_cell(2, &mut cell);
+                    mxyz = iiu_ret_sample(2);
+                    cell = iiu_ret_cell(2);
 
                     // revert, restore MZ = NZ
                     if iflags == 0 {
@@ -1421,7 +1421,7 @@ pub fn alterheader() {
                 //
                 // START
                 27 => {
-                    iiu_ret_size(2, &mut nxyz, &mut mxyz, &mut nxyzst);
+                    (nxyz, mxyz, nxyzst) = iiu_ret_size(2);
                     println!(
                         "Current start coordinates in X, Y, Z are: {:7}{:7}{:7}",
                         nxyzst[0], nxyzst[1], nxyzst[2]
@@ -1452,8 +1452,8 @@ pub fn alterheader() {
                         exit_error("The image to copy from must be the same size in X and Y");
                     }
                     let mut cell2 = [0.0_f32; 6];
-                    iiu_ret_cell(3, &mut cell2);
-                    iiu_ret_cell(2, &mut cell);
+                    cell2 = iiu_ret_cell(3);
+                    cell = iiu_ret_cell(2);
                     cell[0] = cell2[0];
                     cell[1] = cell2[1];
                     mxyz[0] = mxyz2[0];
@@ -1464,12 +1464,12 @@ pub fn alterheader() {
                     cell[2] = mxyz[2] as f32 * delt[2];
                     iiu_alt_cell(2, &cell);
                     iiu_alt_sample(2, &mxyz);
-                    iiu_ret_size(3, &mut nxyz2, &mut mxyz2, &mut nxyzst);
+                    (nxyz2, mxyz2, nxyzst) = iiu_ret_size(3);
                     iiu_alt_size(2, &nxyz, &nxyzst);
                     let mut origin = [0.; 3];
-                    iiu_ret_origin(3, &mut origin);
+                    origin = iiu_ret_origin(3);
                     iiu_alt_origin(2, &origin);
-                    iiu_ret_tilt(3, &mut tilt);
+                    tilt = iiu_ret_tilt(3);
                     iiu_alt_tilt(2, &tilt);
                     iiu_close(3);
                     goto_label = 15;
