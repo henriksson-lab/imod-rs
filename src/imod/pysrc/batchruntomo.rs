@@ -1249,7 +1249,16 @@ fn ctime_now() -> String {
         .unwrap_or_default()
         .as_secs() as i64;
     let mut tm: libc::tm = unsafe { std::mem::zeroed() };
-    unsafe { libc::localtime_r(&seconds, &mut tm) };
+    // Python's `time.localtime()`; the reentrant C spelling differs per
+    // platform (`localtime_s` reverses the arguments).
+    #[cfg(unix)]
+    unsafe {
+        libc::localtime_r(&seconds, &mut tm)
+    };
+    #[cfg(windows)]
+    unsafe {
+        libc::localtime_s(&mut tm, &seconds)
+    };
     const DAYS: [&str; 7] = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"];
     const MONTHS: [&str; 12] = [
         "Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec",
@@ -1274,7 +1283,16 @@ fn hms_now() -> String {
         .unwrap_or_default()
         .as_secs() as i64;
     let mut tm: libc::tm = unsafe { std::mem::zeroed() };
-    unsafe { libc::localtime_r(&seconds, &mut tm) };
+    // Python's `time.localtime()`; the reentrant C spelling differs per
+    // platform (`localtime_s` reverses the arguments).
+    #[cfg(unix)]
+    unsafe {
+        libc::localtime_r(&seconds, &mut tm)
+    };
+    #[cfg(windows)]
+    unsafe {
+        libc::localtime_s(&mut tm, &seconds)
+    };
     format!("{:02}:{:02}:{:02}", tm.tm_hour, tm.tm_min, tm.tm_sec)
 }
 
@@ -10786,7 +10804,13 @@ pub fn batchruntomo(arguments: &[OsString]) -> i32 {
 /// `platform.node()` / `socket.gethostname()`.
 fn hostname_node() -> String {
     let mut buffer = [0u8; 256];
-    if unsafe { libc::gethostname(buffer.as_mut_ptr().cast(), buffer.len()) } != 0 {
+    // POSIX `gethostname`; Winsock spells it the same but lives in `ws2_32`
+    // and takes an `i32` length, so the call is named per platform.
+    #[cfg(unix)]
+    let failed = unsafe { libc::gethostname(buffer.as_mut_ptr().cast(), buffer.len()) } != 0;
+    #[cfg(windows)]
+    let failed = unsafe { libc::gethostname(buffer.as_mut_ptr().cast(), buffer.len() as i32) } != 0;
+    if failed {
         return String::new();
     }
     let end = buffer

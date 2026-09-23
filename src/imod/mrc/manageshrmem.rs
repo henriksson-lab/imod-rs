@@ -464,14 +464,32 @@ pub fn manageshrmem(arguments: &[String]) -> i32 {
             // and it returns the wait status.  Release the instance while the
             // command runs so a signal can clean the files up.
             drop(this);
-            use std::os::unix::process::CommandExt as _;
-            use std::os::unix::process::ExitStatusExt as _;
-            let mut shell = std::process::Command::new("/bin/sh");
-            shell.arg0("sh").arg("-c").arg(&processes[proc as usize]);
-            error = match shell.status() {
-                Ok(status) => status.into_raw(),
-                Err(_) => -1,
-            };
+            // `manageshrmem.cpp:290` is a plain `system()`; the shell it
+            // reaches differs per platform, so each is named here.
+            #[cfg(unix)]
+            {
+                use std::os::unix::process::CommandExt as _;
+                use std::os::unix::process::ExitStatusExt as _;
+                let mut shell = std::process::Command::new("/bin/sh");
+                shell.arg0("sh").arg("-c").arg(&processes[proc as usize]);
+                error = match shell.status() {
+                    Ok(status) => status.into_raw(),
+                    Err(_) => -1,
+                };
+            }
+            #[cfg(windows)]
+            {
+                // MSVCRT's `system()` runs `COMSPEC` (default `cmd.exe`) with
+                // `/C`, and returns the command's exit code directly rather
+                // than a wait status.
+                let comspec = std::env::var_os("COMSPEC").unwrap_or_else(|| "cmd.exe".into());
+                let mut shell = std::process::Command::new(comspec);
+                shell.arg("/C").arg(&processes[proc as usize]);
+                error = match shell.status() {
+                    Ok(status) => status.code().unwrap_or(-1),
+                    Err(_) => -1,
+                };
+            }
             this = S_MANAGE_SHR_MEM.lock().unwrap_or_else(|e| e.into_inner());
             if error != 0 {
                 break;

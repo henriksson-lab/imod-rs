@@ -1779,13 +1779,27 @@ WARNING: This file is not a readable MRC file.\n\
     if view {
         // `clip.cpp:989-990`: sprintf into viewcmd, then system().
         let view_command = c_format("3dmod %s", &[CArg::Str(&raw[raw.len() - 1])]);
-        // glibc's `system()` is `execl("/bin/sh", "sh", "-c", line, NULL)`:
-        // the program is `/bin/sh` but `argv[0]` is `sh`, which is what the
-        // shell puts in front of its own diagnostics.
-        use std::os::unix::process::CommandExt as _;
-        let mut shell = std::process::Command::new("/bin/sh");
-        shell.arg0("sh").arg("-c").arg(&view_command);
-        let _ = shell.status();
+        // `clip.cpp:990` is a plain `system()`, which is portable; the shell
+        // it reaches is not, so each platform's is named here.
+        #[cfg(unix)]
+        {
+            // glibc's `system()` is `execl("/bin/sh", "sh", "-c", line, NULL)`:
+            // the program is `/bin/sh` but `argv[0]` is `sh`, which is what the
+            // shell puts in front of its own diagnostics.
+            use std::os::unix::process::CommandExt as _;
+            let mut shell = std::process::Command::new("/bin/sh");
+            shell.arg0("sh").arg("-c").arg(&view_command);
+            let _ = shell.status();
+        }
+        #[cfg(windows)]
+        {
+            // MSVCRT's `system()` runs the interpreter named by `COMSPEC`,
+            // defaulting to `cmd.exe`, with `/C`.
+            let comspec = std::env::var_os("COMSPEC").unwrap_or_else(|| "cmd.exe".into());
+            let mut shell = std::process::Command::new(comspec);
+            shell.arg("/C").arg(&view_command);
+            let _ = shell.status();
+        }
     }
     std::process::exit(0);
 }

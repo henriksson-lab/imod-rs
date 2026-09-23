@@ -39,6 +39,42 @@ use core::sync::atomic::{AtomicI32, AtomicPtr, Ordering};
 use std::io::Write;
 use std::sync::Mutex;
 
+/// The platform's `errno` slot.
+///
+/// The libtiff buffer callbacks below set `errno` as part of their C ABI
+/// failure contract: `iitif.c:2333`, `:2347` and `:2385` are plain
+/// `errno = EINVAL`.  C can write that as an assignment because `errno` is a
+/// macro; Rust has to name the platform's accessor, and they differ.
+/// `__errno_location` is glibc-only -- **`IMOD/` itself never mentions it** --
+/// so calling it directly made this translation *less* portable than the
+/// source it translates.
+#[cfg(any(target_os = "linux", target_os = "android"))]
+#[inline]
+unsafe fn errno_location() -> *mut i32 {
+    unsafe { libc::__errno_location() }
+}
+
+/// See the Linux arm.
+#[cfg(any(
+    target_os = "macos",
+    target_os = "ios",
+    target_os = "freebsd",
+    target_os = "dragonfly",
+    target_os = "netbsd",
+    target_os = "openbsd"
+))]
+#[inline]
+unsafe fn errno_location() -> *mut i32 {
+    unsafe { libc::__error() }
+}
+
+/// See the Linux arm.  MSVCRT spells the accessor `_errno`.
+#[cfg(windows)]
+#[inline]
+unsafe fn errno_location() -> *mut i32 {
+    unsafe { libc::_errno() }
+}
+
 unsafe extern "C" {
     // `warningHandler` formats libtiff's own `va_list` message.  On this ABI a
     // `va_list` argument decays to a pointer, so the source call is direct.
@@ -3464,7 +3500,7 @@ unsafe extern "C" fn buf_read_proc(fd: *mut c_void, buf: *mut c_void, size: isiz
     {
         // This is a libtiff callback, so errno is part of its C ABI failure
         // contract rather than crate-owned error handling.
-        *libc::__errno_location() = libc::EINVAL;
+        *errno_location() = libc::EINVAL;
         return -1;
     }
     let start = buffers.cur_buf_ind[fd] as usize;
@@ -3474,7 +3510,7 @@ unsafe extern "C" fn buf_read_proc(fd: *mut c_void, buf: *mut c_void, size: isiz
         // `from_raw_parts_mut` requires a non-null pointer even for an empty
         // slice, while libtiff permits a null buffer for a zero-byte request.
     } else if buf.is_null() {
-        *libc::__errno_location() = libc::EINVAL;
+        *errno_location() = libc::EINVAL;
         return -1;
     } else {
         core::slice::from_raw_parts_mut(buf.cast::<u8>(), source.len()).copy_from_slice(source);
@@ -3492,7 +3528,7 @@ unsafe extern "C" fn buf_write_proc(fd: *mut c_void, buf: *mut c_void, size: isi
         || buffers.cur_buf_ind[fd].saturating_add(size as u64)
             >= S_FILE_BUF_SIZE.load(Ordering::SeqCst) as u64
     {
-        *libc::__errno_location() = libc::EINVAL;
+        *errno_location() = libc::EINVAL;
         return -1;
     }
     let start = buffers.cur_buf_ind[fd] as usize;
@@ -3502,7 +3538,7 @@ unsafe extern "C" fn buf_write_proc(fd: *mut c_void, buf: *mut c_void, size: isi
         // See `buf_read_proc`: a zero-byte libtiff request need not supply a
         // valid buffer pointer.
     } else if buf.is_null() {
-        *libc::__errno_location() = libc::EINVAL;
+        *errno_location() = libc::EINVAL;
         return -1;
     } else {
         destination.copy_from_slice(core::slice::from_raw_parts(
@@ -3518,7 +3554,7 @@ unsafe extern "C" fn buf_write_proc(fd: *mut c_void, buf: *mut c_void, size: isi
 unsafe extern "C" fn buf_seek_proc(fd: *mut c_void, off: u64, whence: i32) -> u64 {
     let fd = fd as usize;
     if fd >= MAX_TIFF_THREADS {
-        *libc::__errno_location() = libc::EINVAL;
+        *errno_location() = libc::EINVAL;
         return u64::MAX;
     }
     let mut buffers = S_PARALLEL_BUFFERS.lock().unwrap();
@@ -3530,12 +3566,12 @@ unsafe extern "C" fn buf_seek_proc(fd: *mut c_void, off: u64, whence: i32) -> u6
         }
         2 => buffers.max_buf_ind[fd],
         _ => {
-            *libc::__errno_location() = libc::EINVAL;
+            *errno_location() = libc::EINVAL;
             return u64::MAX;
         }
     };
     if new_pos >= S_FILE_BUF_SIZE.load(Ordering::SeqCst) as u64 {
-        *libc::__errno_location() = libc::EINVAL;
+        *errno_location() = libc::EINVAL;
         return u64::MAX;
     }
     buffers.cur_buf_ind[fd] = new_pos;
@@ -5710,15 +5746,15 @@ mod tests {
             S_FILE_BUF_SIZE.store(1, Ordering::SeqCst);
             S_PARALLEL_BUFFERS.lock().unwrap().cur_buf_ind[0] = 1;
             let mut byte = 0_u8;
-            *libc::__errno_location() = 0;
+            *errno_location() = 0;
             assert_eq!(
                 buf_write_proc(core::ptr::null_mut(), (&mut byte as *mut u8).cast(), 1),
                 -1
             );
-            assert_eq!(*libc::__errno_location(), libc::EINVAL);
-            *libc::__errno_location() = 0;
+            assert_eq!(*errno_location(), libc::EINVAL);
+            *errno_location() = 0;
             assert_eq!(buf_seek_proc(core::ptr::null_mut(), 1, 0), u64::MAX);
-            assert_eq!(*libc::__errno_location(), libc::EINVAL);
+            assert_eq!(*errno_location(), libc::EINVAL);
             S_FILE_BUF_SIZE.store(0, Ordering::SeqCst);
             S_PARALLEL_BUFFERS.lock().unwrap().cur_buf_ind[0] = 0;
         }

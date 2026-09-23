@@ -2197,7 +2197,7 @@ pub struct ZapFuncs {
 /// The C++ `new`/`delete` pair becomes a `Box` that is leaked into the dialog
 /// manager on success, which is where the source's ownership goes too.
 pub fn imod_zap_open(vi: *mut ImodView, wintype: i32) -> i32 {
-    let zap = ZapFuncs::new(vi, wintype);
+    let zap = unsafe { ZapFuncs::new(vi, wintype) };
     if zap.qt_window.is_null() {
         drop(zap);
         return -1;
@@ -2439,7 +2439,7 @@ pub fn get_top_zap_mouse(image_pt: &mut Ipoint) -> i32 {
 
 /// `zapSubsetLimits` (`xzap.cpp:338`); return the subset limits from the
 /// active window.
-pub fn zap_subset_limits(
+pub unsafe fn zap_subset_limits(
     vi: *mut ImodView,
     ix_start: &mut i32,
     iy_start: &mut i32,
@@ -2616,7 +2616,7 @@ impl ZapFuncs {
     /// `restrainSize`, `toolHeight`, `newWidth`, `newHeight`, `xleft`,
     /// `ytop` — are zeroed here; their C values are indeterminate and not
     /// reproducible (see CLAUDE.md on uninitialised memory).
-    pub fn new(vi: *mut ImodView, wintype: i32) -> Box<Self> {
+    pub unsafe fn new(vi: *mut ImodView, wintype: i32) -> Box<Self> {
         let mut zap = Box::new(Self {
             vi: ptr::null_mut(),
             qt_window: ptr::null_mut(),
@@ -5717,7 +5717,7 @@ impl ZapFuncs {
 
     /// `ZapFuncs::delUnderCursor` (`xzap.cpp:2773`); delete all points of
     /// current contour under the cursor.
-    pub fn del_under_cursor(&mut self, x: i32, y: i32, cont: *mut Icont) -> i32 {
+    pub unsafe fn del_under_cursor(&mut self, x: i32, y: i32, cont: *mut Icont) -> i32 {
         let (mut ix, mut iy) = (0., 0.);
         let crit = 8. / self.zoom;
         let mut iz = 0;
@@ -5809,7 +5809,7 @@ impl ZapFuncs {
 
             /* If the control key is down, delete points under the cursor */
             if control_down != 0 {
-                return self.del_under_cursor(x, y, cont);
+                return unsafe { self.del_under_cursor(x, y, cont) };
             }
 
             if self.point_visable(unsafe { &(&(*cont).pts)[pt as usize] }) == 0 {
@@ -6208,7 +6208,7 @@ impl ZapFuncs {
             } else {
                 cont = self.get_lasso_contour();
                 if !cont.is_null() {
-                    self.limit_contour_shift(cont, &mut idx, &mut idy);
+                    unsafe { self.limit_contour_shift(cont, &mut idx, &mut idy) };
                     for pt in 0..unsafe { (&(*cont).pts).len() } {
                         unsafe { (&mut (*cont).pts)[pt].x += idx };
                         unsafe { (&mut (*cont).pts)[pt].y += idy };
@@ -6439,7 +6439,7 @@ impl ZapFuncs {
         }
 
         if control_down != 0 {
-            return self.del_under_cursor(x, y, cont);
+            return unsafe { self.del_under_cursor(x, y, cont) };
         }
 
         if unsafe { (*(*vi).imod).cindex.point } == unsafe { (&(*cont).pts).len() as i32 } - 1 {
@@ -6830,7 +6830,7 @@ impl ZapFuncs {
             self.getixy(x, y, &mut ix, &mut iy, &mut iz);
             ix += S_CONT_SHIFT_BASE.get().x - unsafe { (&(*cont).pts)[pt as usize].x };
             iy += S_CONT_SHIFT_BASE.get().y - unsafe { (&(*cont).pts)[pt as usize].y };
-            self.limit_contour_shift(cont, &mut ix, &mut iy);
+            unsafe { self.limit_contour_shift(cont, &mut ix, &mut iy) };
         } else {
             // Get transformation matrix if 2nd or 3rd button
             err = button + if button == 3 && shift_down != 0 { 1 } else { 0 };
@@ -6841,7 +6841,7 @@ impl ZapFuncs {
 
         imod_get_index(unsafe { &*imod }, &mut curob, &mut curco, &mut pt);
         if curco < 0 && self.lasso_on && !self.drawing_lasso {
-            self.transform_contour(cont, &mat, ix, iy, button);
+            unsafe { self.transform_contour(cont, &mat, ix, iy, button) };
             let vi = self.vi;
             with_boundary(|n| n.imod_draw(vi, IMOD_DRAW_XYZ | IMOD_DRAW_MOD));
             return;
@@ -6879,7 +6879,7 @@ impl ZapFuncs {
                             co,
                         );
                     }
-                    self.transform_contour(cont, &mat, ix, iy, button);
+                    unsafe { self.transform_contour(cont, &mat, ix, iy, button) };
                 }
             }
         }
@@ -6891,7 +6891,7 @@ impl ZapFuncs {
 
     /// `ZapFuncs::limitContourShift` (`xzap.cpp:3651`); limit the shift to
     /// keep the contour intersecting with image.
-    pub fn limit_contour_shift(&self, cont: *mut Icont, ix: &mut f32, iy: &mut f32) {
+    pub unsafe fn limit_contour_shift(&self, cont: *mut Icont, ix: &mut f32, iy: &mut f32) {
         let mut pmin = Ipoint::default();
         let mut pmax = Ipoint::default();
         // C `imodContourGetBBox` (`xzap.cpp:3654`) discards the status, and
@@ -6915,7 +6915,7 @@ impl ZapFuncs {
 
     /// `ZapFuncs::transformContour` (`xzap.cpp:3669`); transform one contour
     /// with shift of matrix.
-    pub fn transform_contour(
+    pub unsafe fn transform_contour(
         &mut self,
         cont: *mut Icont,
         mat: &[[f32; 2]; 2],
@@ -8542,18 +8542,18 @@ impl ZapFuncs {
                     rgba = 3;
                     let (nx, ny) = (unsafe { (*vi).xsize }, unsafe { (*vi).ysize });
                     if unsafe { (*vi).which_green } != 0 {
-                        self.fill_overlay_rgb(image_data, nx, ny, 0, image.as_mut_ptr());
-                        self.fill_overlay_rgb(image_data, nx, ny, 2, image.as_mut_ptr());
+                        unsafe { self.fill_overlay_rgb(image_data, nx, ny, 0, image.as_mut_ptr()) };
+                        unsafe { self.fill_overlay_rgb(image_data, nx, ny, 2, image.as_mut_ptr()) };
                     } else {
-                        self.fill_overlay_rgb(image_data, nx, ny, 1, image.as_mut_ptr());
+                        unsafe { self.fill_overlay_rgb(image_data, nx, ny, 1, image.as_mut_ptr()) };
                     }
 
                     image_data = unsafe { ivw_get_z_section_time(&mut *vi, other_sec, time) };
                     if unsafe { (*vi).which_green } != 0 {
-                        self.fill_overlay_rgb(image_data, nx, ny, 1, image.as_mut_ptr());
+                        unsafe { self.fill_overlay_rgb(image_data, nx, ny, 1, image.as_mut_ptr()) };
                     } else {
-                        self.fill_overlay_rgb(image_data, nx, ny, 0, image.as_mut_ptr());
-                        self.fill_overlay_rgb(image_data, nx, ny, 2, image.as_mut_ptr());
+                        unsafe { self.fill_overlay_rgb(image_data, nx, ny, 0, image.as_mut_ptr()) };
+                        unsafe { self.fill_overlay_rgb(image_data, nx, ny, 2, image.as_mut_ptr()) };
                     }
                     image_data = unsafe {
                         ivw_make_line_pointers(
@@ -8689,7 +8689,7 @@ impl ZapFuncs {
     }
 
     /// `ZapFuncs::fillOverlayRGB` (`xzap.cpp:4960`).
-    pub fn fill_overlay_rgb(
+    pub unsafe fn fill_overlay_rgb(
         &mut self,
         lines: *mut *mut u8,
         nx: i32,
@@ -8781,7 +8781,7 @@ impl ZapFuncs {
             if unsafe { (*obj).extra[IOBJ_EX_FLAGS] } & IOBJ_EXFLAG_MESH_ON_IMG != 0
                 && unsafe { !(&(*obj).mesh).is_empty() }
             {
-                self.draw_mesh(obj, ob);
+                unsafe { self.draw_mesh(obj, ob) };
             }
 
             if ob >= objsize {
@@ -8978,7 +8978,7 @@ impl ZapFuncs {
 
     /// `ZapFuncs::drawMesh` (`xzap.cpp:5173`); draw mesh lines located on the
     /// current image.
-    pub fn draw_mesh(&mut self, obj: *mut Iobj, ob: i32) {
+    pub unsafe fn draw_mesh(&mut self, obj: *mut Iobj, ob: i32) {
         let mut def_props = DrawProps::default();
         let mut cur_props = DrawProps::default();
         let mut resol = 0;
@@ -10801,7 +10801,7 @@ mod tests {
         // `ZapWindow *` that nothing dereferences, because every
         // `mQtWindow->` call goes through the boundary.
         install();
-        let mut z = ZapFuncs::new(vi, 0);
+        let mut z = unsafe { ZapFuncs::new(vi, 0) };
         z.winx = 256;
         z.winy = 192;
         z.zoom = 1.;
@@ -11222,7 +11222,7 @@ mod tests {
         S_NUM_ZAP_WINDOWS.set(0);
         let (mut ix, mut iy, mut nx, mut ny) = (0, 0, 0, 0);
         assert_eq!(
-            zap_subset_limits(&mut *vi, &mut ix, &mut iy, &mut nx, &mut ny),
+            unsafe { zap_subset_limits(&mut *vi, &mut ix, &mut iy, &mut nx, &mut ny) },
             1
         );
         S_NUM_ZAP_WINDOWS.set(1);
@@ -11232,7 +11232,7 @@ mod tests {
         z.ypos_start = 0;
         z.set_area_limits();
         assert_eq!(
-            zap_subset_limits(&mut *vi, &mut ix, &mut iy, &mut nx, &mut ny),
+            unsafe { zap_subset_limits(&mut *vi, &mut ix, &mut iy, &mut nx, &mut ny) },
             0
         );
         assert!(nx > 0 && ny > 0);

@@ -2646,7 +2646,13 @@ impl Processchunks {
         let time_buf = unsafe {
             let cur_time = libc::time(std::ptr::null_mut());
             let mut tms: libc::tm = std::mem::zeroed();
+            // The C calls plain `localtime()`, which exists on both
+            // platforms; the translation uses the reentrant form, and the two
+            // spellings differ (`localtime_s` reverses the arguments).
+            #[cfg(unix)]
             libc::localtime_r(&cur_time, &mut tms);
+            #[cfg(windows)]
+            libc::localtime_s(&mut tms, &cur_time);
             c_format(
                 " at %02d:%02d:%02d ...",
                 &[
