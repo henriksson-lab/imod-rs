@@ -832,11 +832,11 @@ pub fn imesh_skin_object(
 
     for co_num in 0..obj.cont.len() {
         if !obj.cont[co_num].pts.is_empty() {
-            imod_contour_get_bbox(
-                Some(&obj.cont[co_num]),
-                &mut pt_min[co_num],
-                &mut pt_max[co_num],
-            );
+            // `skinobj.c:658` ignores the status.
+            if let Ok((ll, ur)) = imod_contour_get_bbox(Some(&obj.cont[co_num])) {
+                pt_min[co_num] = ll;
+                pt_max[co_num] = ur;
+            }
         }
     }
 
@@ -1288,11 +1288,11 @@ pub fn imesh_skin_object(
                             if !nest.inside.is_empty() {
                                 if let Some(inscan) = nest.inscan.as_ref() {
                                     top_cont = inscan.clone();
-                                    imod_contour_get_bbox(
-                                        Some(&top_cont),
-                                        &mut top_pt_min,
-                                        &mut top_pt_max,
-                                    );
+                                    // `skinobj.c:1032` ignores the status.
+                                    if let Ok((ll, ur)) = imod_contour_get_bbox(Some(&top_cont)) {
+                                        top_pt_min = ll;
+                                        top_pt_max = ur;
+                                    }
                                 }
                             }
                         }
@@ -1309,11 +1309,12 @@ pub fn imesh_skin_object(
                                 if !bot_nest.inside.is_empty() {
                                     if let Some(inscan) = bot_nest.inscan.as_ref() {
                                         bot_cont = inscan.clone();
-                                        imod_contour_get_bbox(
-                                            Some(&bot_cont),
-                                            &mut bot_pt_min,
-                                            &mut bot_pt_max,
-                                        );
+                                        // `skinobj.c:1046` ignores the status.
+                                        if let Ok((ll, ur)) = imod_contour_get_bbox(Some(&bot_cont))
+                                        {
+                                            bot_pt_min = ll;
+                                            bot_pt_max = ur;
+                                        }
                                     }
                                 }
                             }
@@ -2051,7 +2052,11 @@ pub fn imesh_skin_object(
                         // Do the joins here with a size-dependent backoff
                         let mut min_pt = Ipoint::default();
                         let mut max_pt = Ipoint::default();
-                        imod_contour_get_bbox(Some(&obj.cont[co_num]), &mut min_pt, &mut max_pt);
+                        // `skinobj.c:1579` ignores the status.
+                        if let Ok((ll, ur)) = imod_contour_get_bbox(Some(&obj.cont[co_num])) {
+                            min_pt = ll;
+                            max_pt = ur;
+                        }
                         let mut backoff =
                             11 + ((max_pt.x - min_pt.x).max(max_pt.y - min_pt.y) / 50.) as i32;
                         backoff = backoff.max(15);
@@ -2407,7 +2412,11 @@ pub fn connect_orphans(
     let mut outscan = imodel_contour_scan(Some(&cout))?;
     let mut pminout = Ipoint::default();
     let mut pmaxout = Ipoint::default();
-    imod_contour_get_bbox(Some(&cout), &mut pminout, &mut pmaxout);
+    // `skinobj.c:1784` ignores the status.
+    if let Ok((ll, ur)) = imod_contour_get_bbox(Some(&cout)) {
+        pminout = ll;
+        pmaxout = ur;
+    }
 
     /* go through and mark ones that will get capped first */
     for inl in 0..num_just_in as usize {
@@ -2725,7 +2734,11 @@ pub fn connect_orphans(
             let mut inscan = inscan;
             let mut pminin = Ipoint::default();
             let mut pmaxin = Ipoint::default();
-            imod_contour_get_bbox(Some(&cinmin), &mut pminin, &mut pmaxin);
+            // `skinobj.c:2034` ignores the status.
+            if let Ok((ll, ur)) = imod_contour_get_bbox(Some(&cinmin)) {
+                pminin = ll;
+                pmaxin = ur;
+            }
 
             /* build list of ones that overlap new inner contour */
             let mut ninlist = 0usize;
@@ -2907,7 +2920,11 @@ pub fn evaluate_break(
     };
     let mut pminin = Ipoint::default();
     let mut pmaxin = Ipoint::default();
-    imod_contour_get_bbox(Some(&cin_test), &mut pminin, &mut pmaxin);
+    // `skinobj.c:2188` ignores the status.
+    if let Ok((ll, ur)) = imod_contour_get_bbox(Some(&cin_test)) {
+        pminin = ll;
+        pmaxin = ur;
+    }
 
     /* sum the area of orphans overlapping this contour */
     let mut areasum = 0.0f32;
@@ -2952,7 +2969,11 @@ pub fn robust_center_of_mass(cont: &Icont, scan_cont: Option<&Icont>, cm: &mut I
     if imod_contour_center_of_mass(Some(&mut use_cont), cm) != 0 {
         let mut ll = Ipoint::default();
         let mut ur = Ipoint::default();
-        imod_contour_get_bbox(Some(cont), &mut ll, &mut ur);
+        // `skinobj.c:2217` ignores the status.
+        if let Ok((lower, upper)) = imod_contour_get_bbox(Some(cont)) {
+            ll = lower;
+            ur = upper;
+        }
         cm.x = (ll.x + ur.x) / 2.0f32;
         cm.y = (ll.y + ur.y) / 2.0f32;
         cm.z = (ll.z + ur.z) / 2.0f32;

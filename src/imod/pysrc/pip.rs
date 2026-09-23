@@ -137,7 +137,10 @@ pub fn pip_get_err_no() -> i32 {
 
 /// Matches `PipAddOption` (`IMOD/pysrc/pip.py:220`).
 pub fn pip_add_option(option_string: &str) -> i32 {
-    unsafe { crate::imod::libcfshr::parse_params::pip_add_option(option_string.as_bytes()) }
+    unsafe {
+        crate::imod::libcfshr::parse_params::pip_add_option(option_string.as_bytes())
+            .map_or(-1, |()| 0)
+    }
 }
 
 /// Matches `PipNextArg` (`IMOD/pysrc/pip.py:275`).
@@ -161,13 +164,14 @@ pub fn pip_number_of_args() -> (i32, i32) {
 /// Matches `PipGetNonOptionArg` (`IMOD/pysrc/pip.py:363`).
 pub fn pip_get_non_option_arg(argument_number: i32) -> Result<String, i32> {
     *PIP_ERRNO.lock().expect("PIP errno mutex") = 0;
-    let mut value: Vec<u8> = Vec::new();
-    let status =
-        crate::imod::libcfshr::parse_params::pip_get_non_option_arg(argument_number, &mut value);
-    if status != 0 {
-        *PIP_ERRNO.lock().expect("PIP errno mutex") = status;
-        return Err(status);
-    }
+    // `parse_params.c:604-613`: every failure path of PipGetNonOptionArg returns -1.
+    let value = match crate::imod::libcfshr::parse_params::pip_get_non_option_arg(argument_number) {
+        Ok(value) => value,
+        Err(()) => {
+            *PIP_ERRNO.lock().expect("PIP errno mutex") = -1;
+            return Err(-1);
+        }
+    };
     Ok(String::from_utf8_lossy(&value).into_owned())
 }
 

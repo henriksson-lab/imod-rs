@@ -74,7 +74,7 @@ pub fn slice_read_mrc(hin: &mut MrcHeader, sno: i32, axis: u8) -> Option<Islice>
         index: 0,
         cval: [0.; 4],
     };
-    if slice_init(&mut slice, nx, ny, hin.mode, buf) != 0 {
+    if slice_init(&mut slice, nx, ny, hin.mode, buf).is_err() {
         return None;
     }
     Some(slice)
@@ -155,7 +155,7 @@ pub fn slice_read_subm(
         index: 0,
         cval: [0.; 4],
     };
-    if slice_init(&mut slice, nx, ny, hin.mode, buffer) != 0 {
+    if slice_init(&mut slice, nx, ny, hin.mode, buffer).is_err() {
         return None;
     }
     if slice_box_in(&mut slice, llx, lly, urx, ury) != 0 {
@@ -351,7 +351,7 @@ pub fn full_array_min_max_mean(
         cval: [0.; 4],
     };
     let init = slice_init(&mut sl, nx, ny, typ, std::mem::take(array));
-    let result = if init == 0 {
+    let result = if init.is_ok() {
         slice_mmm(&mut sl);
         Some((sl.min, sl.max, sl.mean))
     } else {

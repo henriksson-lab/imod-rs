@@ -161,7 +161,11 @@ pub fn raw2mrc(arguments: &[String]) -> i32 {
                   non-option argument",
             );
         }
-        pip_get_non_option_arg(num_non_opt_args - 1, &mut out_file);
+        // `raw2mrc.c:122`: the status is ignored, and `parse_params.c:606-608`
+        // leaves the caller's pointer untouched on failure.
+        if let Ok(arg) = pip_get_non_option_arg(num_non_opt_args - 1) {
+            out_file = arg;
+        }
         num_non_opt_args -= 1;
     }
 
@@ -179,7 +183,10 @@ pub fn raw2mrc(arguments: &[String]) -> i32 {
         if ind < num_in_by_opt as usize {
             pip_get_string(b"InputFile", &mut name);
         } else {
-            pip_get_non_option_arg(ind as i32 - num_in_by_opt, &mut name);
+            // `raw2mrc.c:136`: the status is ignored, as above.
+            if let Ok(arg) = pip_get_non_option_arg(ind as i32 - num_in_by_opt) {
+                name = arg;
+            }
         }
         input_files.push(name);
         ind += 1;

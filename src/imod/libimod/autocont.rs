@@ -640,7 +640,12 @@ pub fn imod_auto_contours_from_slice(
         }
         if critedge != 0 {
             /* count the edges that the contour touches */
-            imod_contour_get_bbox(Some(&obj.cont[co]), &mut pmin, &mut pmax);
+            // `autocont.c:492` ignores the status; on failure the min and
+            // max points keep their prior values.
+            if let Ok((bbox_min, bbox_max)) = imod_contour_get_bbox(Some(&obj.cont[co])) {
+                pmin = bbox_min;
+                pmax = bbox_max;
+            }
             if pmin.x == 0. {
                 nedge += 1;
             }

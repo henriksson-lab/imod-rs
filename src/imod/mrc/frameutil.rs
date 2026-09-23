@@ -226,16 +226,15 @@ pub fn util_dump_image(
     frame: i32,
 ) {
     let mut hdr = MrcHeader::default();
-    let mut data_size = 0;
-    let mut csize = 0;
     let mut mode = MRC_MODE_FLOAT;
     check_dump_dir();
     if if_corr < 0 {
         mode = -if_corr - 1;
     }
-    if data_size_for_mode(mode, &mut data_size, &mut csize) < 0 {
-        return;
-    }
+    let (data_size, _csize) = match data_size_for_mode(mode) {
+        Ok(sizes) => sizes,
+        Err(()) => return,
+    };
     // C: `malloc(nxPad * nyPad * dataSize)`, with no `csize` factor.
     let mut temp = vec![0u8; (nx_pad * ny_pad * data_size) as usize];
     if if_corr > 0 {

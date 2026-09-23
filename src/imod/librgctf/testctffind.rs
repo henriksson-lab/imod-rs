@@ -47,7 +47,8 @@ pub fn write_slice(filename: &str, data: &[f32], xsize: i32, ysize: i32) -> i32 
         ysize,
         MRC_MODE_FLOAT,
         MrcData::F(data.to_vec()),
-    ) != 0
+    )
+    .is_err()
     {
         return -1;
     }
@@ -136,7 +137,11 @@ pub fn main(argv: &[Vec<u8>]) -> i32 {
     params.noisy_input_image = false;
 
     let mut filename: Vec<u8> = Vec::new();
-    pip_get_non_option_arg(0, &mut filename);
+    // `testctffind.cpp:63` ignores the status; on failure the name variable
+    // is left as it was.
+    if let Ok(arg_value) = pip_get_non_option_arg(0) {
+        filename = arg_value;
+    }
     pip_get_float(b"volt", &mut params.acceleration_voltage);
     pip_get_float(b"sph", &mut params.spherical_aberration);
     pip_get_integer(b"box", &mut params.box_size);

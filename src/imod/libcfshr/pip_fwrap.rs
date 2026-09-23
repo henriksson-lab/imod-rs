@@ -24,7 +24,10 @@ pub unsafe extern "C" fn pipgetnonoptionarg_(
 ) -> i32 {
     let mut argVec: Vec<u8> = Vec::new();
     let mut err: i32 = 0;
-    err = pip_get_non_option_arg(*argNo - 1 as i32, &mut argVec);
+    match pip_get_non_option_arg(*argNo - 1 as i32) {
+        Ok(value) => argVec = value,
+        Err(()) => err = -(1 as i32),
+    }
     argVec.push(0);
     let argPtr = argVec.as_ptr().cast::<::core::ffi::c_char>();
     if err == 0 && c2f_string(argPtr, arg, stringSize as i32).is_err() {

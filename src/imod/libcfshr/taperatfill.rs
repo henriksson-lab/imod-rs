@@ -288,7 +288,7 @@ pub fn taper_at_fill(array: &mut [f32], nx: i32, ny: i32, ntaper: i32, inside: b
         index: 0,
         cval: [0.; 4],
     };
-    if slice_init(&mut slice, nx, ny, 2, MrcData::F(array.to_vec())) != 0 {
+    if slice_init(&mut slice, nx, ny, 2, MrcData::F(array.to_vec())).is_err() {
         return -1;
     }
     let result = slice_taper_at_fill(slice.as_mut(), ntaper, inside);

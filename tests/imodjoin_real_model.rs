@@ -800,7 +800,7 @@ fn imod_next_and_prev_object_clamp_indices_from_a_decoded_binary_model() {
     decoded.cindex.object = -3;
     decoded.cindex.contour = 9;
     decoded.cindex.point = 9;
-    assert_eq!(imod_next_object(Some(&mut decoded)), 0);
+    assert_eq!(imod_next_object(Some(&mut decoded)), Ok(0));
     assert_eq!(
         (
             decoded.cindex.object,
@@ -809,7 +809,7 @@ fn imod_next_and_prev_object_clamp_indices_from_a_decoded_binary_model() {
         ),
         (0, 1, 0)
     );
-    assert_eq!(imod_next_object(Some(&mut decoded)), 1);
+    assert_eq!(imod_next_object(Some(&mut decoded)), Ok(1));
     assert_eq!(
         (
             decoded.cindex.object,
@@ -820,7 +820,7 @@ fn imod_next_and_prev_object_clamp_indices_from_a_decoded_binary_model() {
     );
     decoded.cindex.contour = 4;
     decoded.cindex.point = 4;
-    assert_eq!(imod_next_object(Some(&mut decoded)), 2);
+    assert_eq!(imod_next_object(Some(&mut decoded)), Ok(2));
     assert_eq!(
         (
             decoded.cindex.object,
@@ -831,7 +831,7 @@ fn imod_next_and_prev_object_clamp_indices_from_a_decoded_binary_model() {
     );
     decoded.cindex.contour = 7;
     decoded.cindex.point = 7;
-    assert_eq!(imod_next_object(Some(&mut decoded)), 2);
+    assert_eq!(imod_next_object(Some(&mut decoded)), Ok(2));
     assert_eq!(
         (
             decoded.cindex.object,
@@ -861,7 +861,7 @@ fn imod_next_and_prev_object_clamp_indices_from_a_decoded_binary_model() {
         ),
         (2, 0, 0)
     );
-    assert_eq!(imod_next_object(None), -1);
+    assert_eq!(imod_next_object(None), Err(()));
     assert_eq!(imod_prev_object(None), -1);
     let _ = std::fs::remove_file(path);
 }
@@ -898,45 +898,45 @@ fn imod_next_and_prev_contour_clamp_indices_from_a_decoded_binary_model() {
     decoded.cindex.object = 0;
     decoded.cindex.contour = -1;
     decoded.cindex.point = 7;
-    assert_eq!(imod_prev_contour(Some(&mut decoded)), 2);
+    assert_eq!(imod_prev_contour(Some(&mut decoded)), Ok(2));
     assert_eq!((decoded.cindex.contour, decoded.cindex.point), (2, 0));
-    assert_eq!(imod_prev_contour(Some(&mut decoded)), 1);
+    assert_eq!(imod_prev_contour(Some(&mut decoded)), Ok(1));
     assert_eq!((decoded.cindex.contour, decoded.cindex.point), (1, -1));
     decoded.cindex.point = 7;
-    assert_eq!(imod_prev_contour(Some(&mut decoded)), 0);
+    assert_eq!(imod_prev_contour(Some(&mut decoded)), Ok(0));
     assert_eq!((decoded.cindex.contour, decoded.cindex.point), (0, 1));
     decoded.cindex.point = 8;
-    assert_eq!(imod_prev_contour(Some(&mut decoded)), 0);
+    assert_eq!(imod_prev_contour(Some(&mut decoded)), Ok(0));
     assert_eq!((decoded.cindex.contour, decoded.cindex.point), (0, 8));
 
     decoded.cindex.contour = -1;
     decoded.cindex.point = 7;
-    assert_eq!(imod_next_contour(Some(&mut decoded)), 0);
+    assert_eq!(imod_next_contour(Some(&mut decoded)), Ok(0));
     assert_eq!((decoded.cindex.contour, decoded.cindex.point), (0, 1));
     decoded.cindex.point = 7;
-    assert_eq!(imod_next_contour(Some(&mut decoded)), 1);
+    assert_eq!(imod_next_contour(Some(&mut decoded)), Ok(1));
     assert_eq!((decoded.cindex.contour, decoded.cindex.point), (1, -1));
-    assert_eq!(imod_next_contour(Some(&mut decoded)), 2);
+    assert_eq!(imod_next_contour(Some(&mut decoded)), Ok(2));
     assert_eq!((decoded.cindex.contour, decoded.cindex.point), (2, -1));
     decoded.cindex.point = 4;
-    assert_eq!(imod_next_contour(Some(&mut decoded)), 2);
+    assert_eq!(imod_next_contour(Some(&mut decoded)), Ok(2));
     assert_eq!((decoded.cindex.contour, decoded.cindex.point), (2, 4));
 
     decoded.cindex.object = 1;
     decoded.cindex.contour = 5;
     decoded.cindex.point = 6;
-    assert_eq!(imod_prev_contour(Some(&mut decoded)), -1);
+    assert_eq!(imod_prev_contour(Some(&mut decoded)), Err(()));
     assert_eq!((decoded.cindex.contour, decoded.cindex.point), (5, 6));
-    assert_eq!(imod_next_contour(Some(&mut decoded)), -1);
+    assert_eq!(imod_next_contour(Some(&mut decoded)), Err(()));
     assert_eq!((decoded.cindex.contour, decoded.cindex.point), (5, 6));
     decoded.cindex.object = -1;
-    assert_eq!(imod_prev_contour(Some(&mut decoded)), -1);
+    assert_eq!(imod_prev_contour(Some(&mut decoded)), Err(()));
     assert_eq!(decoded.cindex.contour, -1);
     decoded.cindex.contour = 4;
-    assert_eq!(imod_next_contour(Some(&mut decoded)), -1);
+    assert_eq!(imod_next_contour(Some(&mut decoded)), Err(()));
     assert_eq!(decoded.cindex.contour, 4);
-    assert_eq!(imod_prev_contour(None), -1);
-    assert_eq!(imod_next_contour(None), -1);
+    assert_eq!(imod_prev_contour(None), Err(()));
+    assert_eq!(imod_next_contour(None), Err(()));
     let _ = std::fs::remove_file(path);
 }
 

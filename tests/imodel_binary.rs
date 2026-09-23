@@ -279,12 +279,12 @@ fn imod_new_contour_inherits_current_surface_and_open_state_after_binary_read() 
     let mut model = imod_read(&path).unwrap();
     model.cindex.object = 0;
     model.cindex.contour = 0;
-    assert_eq!(imod_new_contour(&mut model), 0);
+    assert_eq!(imod_new_contour(&mut model), Ok(()));
     assert_eq!((model.cindex.contour, model.cindex.point), (1, -1));
     assert_eq!(model.obj[0].cont[1].surf, 5);
     assert_eq!(model.obj[0].cont[1].flags, ICONT_OPEN);
     model.cindex.object = -1;
-    assert_eq!(imod_new_contour(&mut model), -1);
+    assert_eq!(imod_new_contour(&mut model), Err(()));
     std::fs::remove_file(path).unwrap();
 }
 
@@ -396,14 +396,14 @@ fn imod_delete_point_retains_source_empty_contour_removal_rules_after_binary_rea
     model.cindex.object = 0;
     model.cindex.contour = 0;
     model.cindex.point = 1;
-    assert_eq!(imod_delete_point(&mut model), 1);
+    assert_eq!(imod_delete_point(&mut model), Ok(1));
     assert_eq!(model.cindex.point, 0);
-    assert_eq!(imod_delete_point(&mut model), 0);
+    assert_eq!(imod_delete_point(&mut model), Ok(0));
     assert_eq!(model.cindex.point, -1);
     assert!(model.obj[0].cont[0].pts.is_empty());
-    assert_eq!(imod_delete_point(&mut model), 0);
+    assert_eq!(imod_delete_point(&mut model), Ok(0));
     assert!(model.obj[0].cont.is_empty());
-    assert_eq!(imod_delete_point(&mut model), -1);
+    assert_eq!(imod_delete_point(&mut model), Err(()));
     std::fs::remove_file(path).unwrap();
 }
 

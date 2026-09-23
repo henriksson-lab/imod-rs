@@ -577,7 +577,12 @@ pub fn skeletonize(
         }
     };
 
-    imod_contour_get_bbox(Some(scan_cont), &mut low_left, &mut up_right);
+    // `skeletonize.c:614` ignores the status; on failure the C leaves both
+    // points at their prior value.
+    if let Ok((ll, ur)) = imod_contour_get_bbox(Some(scan_cont)) {
+        low_left = ll;
+        up_right = ur;
+    }
 
     let fimin = low_left.x;
     let fimax = up_right.x;

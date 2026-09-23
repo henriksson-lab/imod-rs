@@ -204,7 +204,7 @@ pub fn adoc_read(filename: &[u8]) -> i32 {
         return -1;
     }
 
-    adoc_set_current(index);
+    let _ = adoc_set_current(index);
     cur_coll = 0;
     cur_sect = 0;
     last_ind = -1;
@@ -494,15 +494,17 @@ pub fn adoc_get_image_meta_info(montage: &mut i32, num_sect: &mut i32, sect_type
     *montage = 0;
     if adoc_get_string(ADOC_GLOBAL_NAME, 0, b"ImageFile", &mut usename) == 0 {
         *sect_type = 1;
-        *num_sect = adoc_get_number_of_sections(ADOC_ZVALUE_NAME);
+        /* The C stores the routine's status directly, so the -1 for no
+        current autodoc reaches *numSect. */
+        *num_sect = adoc_get_number_of_sections(ADOC_ZVALUE_NAME).unwrap_or(-1);
     } else if adoc_get_integer(ADOC_GLOBAL_NAME, 0, b"ImageSeries", &mut series) == 0 && series != 0
     {
         *sect_type = 2;
-        *num_sect = adoc_get_number_of_sections(b"Image");
+        *num_sect = adoc_get_number_of_sections(b"Image").unwrap_or(-1);
     } else {
-        *num_sect = adoc_get_number_of_sections(ADOC_ZVALUE_NAME);
+        *num_sect = adoc_get_number_of_sections(ADOC_ZVALUE_NAME).unwrap_or(-1);
         if *num_sect == 0 {
-            *num_sect = adoc_get_number_of_sections(ADOC_FRAMESET_NAME);
+            *num_sect = adoc_get_number_of_sections(ADOC_FRAMESET_NAME).unwrap_or(-1);
             if *num_sect == 1 {
                 *sect_type = 4;
                 return 1;
@@ -527,17 +529,20 @@ pub fn adoc_new() -> i32 {
     if err < 0 {
         return err;
     }
-    adoc_set_current(err);
+    let _ = adoc_set_current(err);
     err
 }
 
 /// Matches C `AdocSetCurrent` (`autodoc.c:457`).
-pub fn adoc_set_current(index: i32) -> i32 {
+///
+/// "Returns -1 for an index out of bounds" (`autodoc.c:460`); the success value
+/// is a bare 0, so it carries no data.
+pub fn adoc_set_current(index: i32) -> Result<(), ()> {
     if index < 0 || index >= S_AUTODOCS.with_borrow(|adocs| adocs.len() as i32) {
-        return -1;
+        return Err(());
     }
     S_CUR_ADOC_IND.set(index);
-    0
+    Ok(())
 }
 
 /// Matches C `AdocClear` (`autodoc.c:469`).
@@ -617,30 +622,39 @@ pub fn adoc_set_write_as_xml(as_xml: i32) {
 }
 
 /// Matches C `AdocGetWriteAsXML` (`autodoc.c:540`).
-pub fn adoc_get_write_as_xml() -> i32 {
+///
+/// "Returns 1 if current autodoc is to be written as XML, 0 if not, -1 for
+/// invalid current autodoc" (`autodoc.c:545-546`) -- a boolean query.
+pub fn adoc_get_write_as_xml() -> Result<bool, ()> {
     let cur = S_CUR_ADOC_IND.get();
     if cur < 0 {
-        return -1;
+        return Err(());
     }
-    S_AUTODOCS.with_borrow(|adocs| adocs[cur as usize].write_as_xml)
+    Ok(S_AUTODOCS.with_borrow(|adocs| adocs[cur as usize].write_as_xml) != 0)
 }
 
 /// Matches C `AdocGetXmlRootElement` (`autodoc.c:552`).
 ///
-/// The C `strdup`s into the caller's `char **`; the copy is the caller's `Vec`
+/// The C `strdup`s into the caller's `char **`; the copy is the returned `Vec`
 /// now, and the source's NULL when there is no root element is `None`.
-pub fn adoc_get_xml_root_element(string: &mut Option<Vec<u8>>) -> i32 {
+///
+/// The C documents two failures, "-1 for no current autodoc or 1 for memory
+/// error" (`autodoc.c:557-558`), but the second is `strdup` failing and the
+/// copy is an infallible `Vec` here -- so only the first survives translation
+/// and there is no second code left to carry (same as
+/// `adoc_set_xml_root_element`).
+pub fn adoc_get_xml_root_element() -> Result<Option<Vec<u8>>, ()> {
     let cur = S_CUR_ADOC_IND.get();
     if cur < 0 {
-        return -1;
+        return Err(());
     }
-    *string = None;
+    let mut string: Option<Vec<u8>> = None;
     S_AUTODOCS.with_borrow(|adocs| {
         if let Some(root) = &adocs[cur as usize].root_element {
-            *string = Some(root.clone());
+            string = Some(root.clone());
         }
     });
-    0
+    Ok(string)
 }
 
 /// Matches C `AdocSetXmlRootElement` (`autodoc.c:567`).
@@ -960,36 +974,42 @@ pub fn setup_section_order(adoc: &Autodoc) -> Option<Vec<i32>> {
 }
 
 /// Matches C `AdocAddSection` (`autodoc.c:820`).
-pub fn adoc_add_section(type_name: &[u8], name: &[u8]) -> i32 {
+///
+/// "Returns the index of the new section in the collection of sections of that
+/// type, or -1 for error" (`autodoc.c:821-822`) -- the success value is data.
+pub fn adoc_add_section(type_name: &[u8], name: &[u8]) -> Result<i32, ()> {
     let cur = S_CUR_ADOC_IND.get();
     if cur < 0 {
-        return -1;
+        return Err(());
     }
     S_AUTODOCS.with_borrow_mut(|adocs| {
         let adoc = &mut adocs[cur as usize];
         let mut coll_ind = lookup_collection(adoc, type_name);
         if coll_ind < 0 {
             if add_collection(adoc, type_name) != 0 {
-                return -1;
+                return Err(());
             }
             coll_ind = adoc.num_collections - 1;
         }
         if add_section(adoc, coll_ind, name) != 0 {
-            return -1;
+            return Err(());
         }
-        adoc.collections[coll_ind as usize].num_sections - 1
+        Ok(adoc.collections[coll_ind as usize].num_sections - 1)
     })
 }
 
 /// Matches C `AdocInsertSection` (`autodoc.c:844`).
-pub fn adoc_insert_section(type_name: &[u8], sect_ind: i32, name: &[u8]) -> i32 {
+///
+/// "Returns -1 for error" (`autodoc.c:847`); every success path returns a bare
+/// 0 (`autodoc.c:873`, `:894`), so there is no data in the success value.
+pub fn adoc_insert_section(type_name: &[u8], sect_ind: i32, name: &[u8]) -> Result<(), ()> {
     let mut i: i32 = 0;
     let mut coll_ind: i32;
     let mut master_ind: i32 = 0;
     let mut num_sect: i32 = 0;
     let cur = S_CUR_ADOC_IND.get();
     if cur < 0 {
-        return -1;
+        return Err(());
     }
     coll_ind = S_AUTODOCS.with_borrow(|adocs| lookup_collection(&adocs[cur as usize], type_name));
     if coll_ind >= 0 {
@@ -997,23 +1017,23 @@ pub fn adoc_insert_section(type_name: &[u8], sect_ind: i32, name: &[u8]) -> i32 
             .with_borrow(|adocs| adocs[cur as usize].collections[coll_ind as usize].num_sections);
     }
     if sect_ind < 0 || sect_ind > num_sect {
-        return -1;
+        return Err(());
     }
 
     /* Find the index of this section in the master list if it needs to be shuffled */
     if sect_ind < num_sect {
         master_ind = find_section_in_adoc_list(coll_ind, sect_ind);
         if master_ind < 0 {
-            return -1;
+            return Err(());
         }
     }
 
     /* Add section to end regardless, then return if that is all that is needed */
-    if adoc_add_section(type_name, name) < 0 {
-        return -1;
+    if adoc_add_section(type_name, name).is_err() {
+        return Err(());
     }
     if sect_ind == num_sect {
-        return 0;
+        return Ok(());
     }
 
     S_AUTODOCS.with_borrow_mut(|adocs| {
@@ -1044,28 +1064,35 @@ pub fn adoc_insert_section(type_name: &[u8], sect_ind: i32, name: &[u8]) -> i32 
             i -= 1;
         }
 
-        0
+        Ok(())
     })
 }
 
 /// Matches C `AdocChangeSectionName` (`autodoc.c:942`).
-pub fn adoc_change_section_name(type_name: &[u8], sect_ind: i32, new_name: &[u8]) -> i32 {
+///
+/// "Returns -1 for error" (`autodoc.c:938`); success is a bare 0
+/// (`autodoc.c:958`).
+pub fn adoc_change_section_name(
+    type_name: &[u8],
+    sect_ind: i32,
+    new_name: &[u8],
+) -> Result<(), ()> {
     let cur = S_CUR_ADOC_IND.get();
     if cur < 0 {
-        return -1;
+        return Err(());
     }
     S_AUTODOCS.with_borrow_mut(|adocs| {
         let adoc = &mut adocs[cur as usize];
         let coll_ind = lookup_collection(adoc, type_name);
         if coll_ind < 0 {
-            return -1;
+            return Err(());
         }
         let coll = &mut adoc.collections[coll_ind as usize];
         if sect_ind < 0 || sect_ind >= coll.num_sections {
-            return -1;
+            return Err(());
         }
         coll.sections[sect_ind as usize].name = Some(new_name.to_vec());
-        0
+        Ok(())
     })
 }
 
@@ -1101,16 +1128,22 @@ pub fn adoc_lookup_by_name_value(type_name: &[u8], name_value: i32) -> i32 {
 }
 
 /// Matches C `AdocFindInsertIndex` (`autodoc.c:1005`).
-pub fn adoc_find_insert_index(type_name: &[u8], name_value: i32) -> i32 {
+///
+/// "returns the index of the first section whose name is greater than
+/// [nameValue], the number of sections if there is no such section, or -1 for
+/// error (including if a section exists whose name converts to [nameValue])"
+/// (`autodoc.c:997-1000`) -- the success value is an index, and the equal-name
+/// case is documented as an error rather than a distinct code.
+pub fn adoc_find_insert_index(type_name: &[u8], name_value: i32) -> Result<i32, ()> {
     let cur = S_CUR_ADOC_IND.get();
     if cur < 0 {
-        return -1;
+        return Err(());
     }
     S_AUTODOCS.with_borrow(|adocs| {
         let adoc = &adocs[cur as usize];
         let coll_ind = lookup_collection(adoc, type_name);
         if coll_ind < 0 {
-            return 0;
+            return Ok(0);
         }
         let coll = &adoc.collections[coll_ind as usize];
         let mut sect_ind = 0;
@@ -1126,14 +1159,14 @@ pub fn adoc_find_insert_index(type_name: &[u8], name_value: i32) -> i32 {
                 10,
             ) as i32;
             if name_value == sect_value {
-                return -1;
+                return Err(());
             }
             if name_value < sect_value {
-                return sect_ind;
+                return Ok(sect_ind);
             }
             sect_ind += 1;
         }
-        coll.num_sections
+        Ok(coll.num_sections)
     })
 }
 
@@ -1198,7 +1231,7 @@ pub fn adoc_transfer_to_new_type(
     if to_adoc_ind < 0 || to_adoc_ind == cur_ind_save || to_adoc_ind >= num_autodocs {
         return -2;
     }
-    adoc_set_current(to_adoc_ind);
+    let _ = adoc_set_current(to_adoc_ind);
 
     /* Set index to 0 for global section or go on to look up and/or add section */
     if type_name == ADOC_GLOBAL_NAME {
@@ -1216,7 +1249,10 @@ pub fn adoc_transfer_to_new_type(
                 .with_borrow(|adocs| lookup_collection(&adocs[to_adoc_ind as usize], new_type));
             if coll_ind < 0 {
                 new_sect_ind = 0;
-                err = adoc_add_section(new_type, new_name);
+                /* The C assigns the returned section index to `err` and then
+                tests `err < 0`, so both the index and the failure code have to
+                survive the `Result`. */
+                err = adoc_add_section(new_type, new_name).unwrap_or(-1);
             } else {
                 new_sect_ind = S_AUTODOCS.with_borrow(|adocs| {
                     adocs[to_adoc_ind as usize].collections[coll_ind as usize].num_sections
@@ -1225,12 +1261,14 @@ pub fn adoc_transfer_to_new_type(
                     /* `atoi(newName)` */
                     let mut scanned = 0usize;
                     name_val = strtol(new_name, &mut scanned, 10) as i32;
-                    new_sect_ind = adoc_find_insert_index(new_type, name_val);
+                    /* The C does not test this; -1 flows on into
+                    AdocInsertSection, which then fails. */
+                    new_sect_ind = adoc_find_insert_index(new_type, name_val).unwrap_or(-1);
                 }
-                err = adoc_insert_section(new_type, new_sect_ind, new_name);
+                err = adoc_insert_section(new_type, new_sect_ind, new_name).map_or(-1, |()| 0);
             }
             if err < 0 {
-                adoc_set_current(cur_ind_save);
+                let _ = adoc_set_current(cur_ind_save);
                 return -3;
             }
         }
@@ -1255,7 +1293,7 @@ pub fn adoc_transfer_to_new_type(
         }
         ind += 1;
     }
-    adoc_set_current(cur_ind_save);
+    let _ = adoc_set_current(cur_ind_save);
     err
 }
 
@@ -1502,128 +1540,152 @@ pub fn set_array_of_values(
 }
 
 /// Matches C `AdocDeleteKeyValue` (`autodoc.c:1305`).
-pub fn adoc_delete_key_value(type_name: &[u8], sect_ind: i32, key: &[u8]) -> i32 {
+///
+/// "Returns -1 for error" (`autodoc.c:1300`); success is a bare 0
+/// (`autodoc.c:1315`).
+pub fn adoc_delete_key_value(type_name: &[u8], sect_ind: i32, key: &[u8]) -> Result<(), ()> {
     let cur = S_CUR_ADOC_IND.get();
     if cur < 0 {
-        return -1;
+        return Err(());
     }
     S_AUTODOCS.with_borrow_mut(|adocs| {
         let adoc = &mut adocs[cur as usize];
         let Some((ic, is)) = get_section(adoc, type_name, sect_ind) else {
-            return -1;
+            return Err(());
         };
         let sect = &mut adoc.collections[ic].sections[is];
         let key_ind = lookup_key(sect, key);
         if key_ind < 0 {
-            return -1;
+            return Err(());
         }
         sect.values[key_ind as usize] = None;
         sect.keys[key_ind as usize] = None;
         sect.types[key_ind as usize] = ADOC_NO_VALUE as u8;
-        0
+        Ok(())
     })
 }
 
 /// Matches C `AdocGetNumCollections` (`autodoc.c:1331`).
-pub fn adoc_get_num_collections() -> i32 {
+///
+/// "Returns the number of collections of sections, excluding the global data
+/// collection, or -1 if there is no current autodoc" (`autodoc.c:1327-1328`)
+/// -- the success value is a count.
+pub fn adoc_get_num_collections() -> Result<i32, ()> {
     let cur = S_CUR_ADOC_IND.get();
     if cur < 0 {
-        return -1;
+        return Err(());
     }
-    S_AUTODOCS.with_borrow(|adocs| adocs[cur as usize].num_collections - 1)
+    Ok(S_AUTODOCS.with_borrow(|adocs| adocs[cur as usize].num_collections - 1))
 }
 
 /// Matches C `AdocGetCollectionName` (`autodoc.c:1343`).
-pub fn adoc_get_collection_name(coll_ind: i32, string: &mut Vec<u8>) -> i32 {
+///
+/// "Returns the name of the collection with index [collInd] into [string] ...
+/// Returns -1 for errors" (`autodoc.c:1337-1339`); the out-parameter is folded
+/// into the `Ok` value, and the C's only other status, `adocMemoryError` on a
+/// failed `strdup`, cannot occur with an infallible `Vec`.
+pub fn adoc_get_collection_name(coll_ind: i32) -> Result<Vec<u8>, ()> {
     let cur = S_CUR_ADOC_IND.get();
     if cur < 0 {
-        return -1;
+        return Err(());
     }
     S_AUTODOCS.with_borrow(|adocs| {
         let adoc = &adocs[cur as usize];
         if coll_ind < 0 || coll_ind >= adoc.num_collections - 1 {
-            return -1;
+            return Err(());
         }
-        *string = adoc.collections[(coll_ind + 1) as usize]
+        Ok(adoc.collections[(coll_ind + 1) as usize]
             .name
             .clone()
-            .unwrap_or_default();
-        0
+            .unwrap_or_default())
     })
 }
 
 /// Matches C `AdocGetSectionName` (`autodoc.c:1356`).
-pub fn adoc_get_section_name(type_name: &[u8], sect_ind: i32, string: &mut Vec<u8>) -> i32 {
+///
+/// "Returns the name in [string] ... Returns -1 for errors"
+/// (`autodoc.c:1351-1353`); the out-parameter is folded into the `Ok` value.
+pub fn adoc_get_section_name(type_name: &[u8], sect_ind: i32) -> Result<Vec<u8>, ()> {
     let cur = S_CUR_ADOC_IND.get();
     if cur < 0 {
-        return -1;
+        return Err(());
     }
     S_AUTODOCS.with_borrow(|adocs| {
         let adoc = &adocs[cur as usize];
         let Some((ic, is)) = get_section(adoc, type_name, sect_ind) else {
-            return -1;
+            return Err(());
         };
-        *string = adoc.collections[ic].sections[is]
+        Ok(adoc.collections[ic].sections[is]
             .name
             .clone()
-            .unwrap_or_default();
-        0
+            .unwrap_or_default())
     })
 }
 
 /// Matches C `AdocGetNumberOfSections` (`autodoc.c:1370`).
-pub fn adoc_get_number_of_sections(type_name: &[u8]) -> i32 {
+///
+/// "Returns the number of sections of type [typeName].  Returns -1 for errors,
+/// and 0 if there are no sections of the given type" (`autodoc.c:1366-1367`)
+/// -- the success value is a count, and the no-such-collection case is a
+/// legitimate 0 rather than an error.
+pub fn adoc_get_number_of_sections(type_name: &[u8]) -> Result<i32, ()> {
     let cur = S_CUR_ADOC_IND.get();
     if cur < 0 {
-        return -1;
+        return Err(());
     }
     S_AUTODOCS.with_borrow(|adocs| {
         let adoc = &adocs[cur as usize];
         let coll_ind = lookup_collection(adoc, type_name);
         if coll_ind < 0 {
-            return 0;
+            return Ok(0);
         }
-        adoc.collections[coll_ind as usize].num_sections
+        Ok(adoc.collections[coll_ind as usize].num_sections)
     })
 }
 
 /// Matches C `AdocGetNumberOfKeys` (`autodoc.c:1385`).
-pub fn adoc_get_number_of_keys(type_name: &[u8], sect_ind: i32) -> i32 {
+///
+/// "Returns the number of key-value pairs ... Returns -1 for errors"
+/// (`autodoc.c:1381-1382`) -- the success value is a count.
+pub fn adoc_get_number_of_keys(type_name: &[u8], sect_ind: i32) -> Result<i32, ()> {
     let cur = S_CUR_ADOC_IND.get();
     if cur < 0 {
-        return -1;
+        return Err(());
     }
     S_AUTODOCS.with_borrow(|adocs| {
         let adoc = &adocs[cur as usize];
         let Some((ic, is)) = get_section(adoc, type_name, sect_ind) else {
-            return -1;
+            return Err(());
         };
-        adoc.collections[ic].sections[is].num_keys
+        Ok(adoc.collections[ic].sections[is].num_keys)
     })
 }
 
 /// Matches C `AdocGetKeyByIndex` (`autodoc.c:1399`).
+///
+/// "Returns a copy of the key in [key] ... or returns NULL if this key has been
+/// deleted.  Returns -1 for errors" (`autodoc.c:1393-1396`) -- the
+/// out-parameter is folded into the `Ok` value, and the source's NULL for a
+/// deleted key is `Ok(None)`, not an error.
 pub fn adoc_get_key_by_index(
     type_name: &[u8],
     sect_ind: i32,
     key_ind: i32,
-    key: &mut Option<Vec<u8>>,
-) -> i32 {
+) -> Result<Option<Vec<u8>>, ()> {
     let cur = S_CUR_ADOC_IND.get();
     if cur < 0 {
-        return -1;
+        return Err(());
     }
     S_AUTODOCS.with_borrow(|adocs| {
         let adoc = &adocs[cur as usize];
         let Some((ic, is)) = get_section(adoc, type_name, sect_ind) else {
-            return -1;
+            return Err(());
         };
         let sect = &adoc.collections[ic].sections[is];
         if key_ind < 0 || key_ind >= sect.num_keys {
-            return -1;
+            return Err(());
         }
-        *key = sect.keys[key_ind as usize].clone();
-        0
+        Ok(sect.keys[key_ind as usize].clone())
     })
 }
 
@@ -1725,6 +1787,7 @@ pub fn adoc_get_double(type_name: &[u8], sect_ind: i32, key: &[u8], val1: &mut f
         &mut num_to_get,
         1,
     )
+    .map_or(-1, |()| 0)
 }
 
 /// Matches C `AdocGetTwoIntegers` (`autodoc.c:1517`).
@@ -1829,6 +1892,7 @@ pub fn adoc_get_integer_array(
         num_to_get,
         array_size,
     )
+    .map_or(-1, |()| 0)
 }
 
 /// Matches C `AdocGetFloatArray` (`autodoc.c:1601`).
@@ -1853,6 +1917,7 @@ pub fn adoc_get_float_array(
         num_to_get,
         array_size,
     )
+    .map_or(-1, |()| 0)
 }
 
 /// Matches C static `readXmlFile` (`autodoc.c:1765`).
@@ -2722,9 +2787,8 @@ pub(crate) mod tests {
         adoc_done();
         let path = concat!(env!("CARGO_MANIFEST_DIR"), "/IMOD/autodoc/binvol.adoc");
         assert!(adoc_read(path.as_bytes()) >= 0);
-        assert!(adoc_get_number_of_sections(b"Field") >= 1);
-        let mut value = Vec::new();
-        assert_eq!(adoc_get_section_name(b"Field", 0, &mut value), 0);
+        assert!(adoc_get_number_of_sections(b"Field").unwrap() >= 1);
+        let value = adoc_get_section_name(b"Field", 0).unwrap();
         assert!(!value.is_empty());
         adoc_done();
     }
@@ -2754,10 +2818,9 @@ pub(crate) mod tests {
         let _lock = TEST_LOCK.lock().unwrap();
         adoc_done();
         assert!(adoc_new() >= 0);
-        assert_eq!(adoc_add_section(b"Field", b"one"), 0);
-        assert_eq!(adoc_get_num_collections(), 1);
-        let mut name = Vec::new();
-        assert_eq!(adoc_get_collection_name(0, &mut name), 0);
+        assert_eq!(adoc_add_section(b"Field", b"one"), Ok(0));
+        assert_eq!(adoc_get_num_collections(), Ok(1));
+        let name = adoc_get_collection_name(0).unwrap();
         assert_eq!(name, b"Field");
         adoc_done();
     }
@@ -2777,7 +2840,7 @@ pub(crate) mod tests {
         adoc_done();
         /* Re-read the written file and check it produces the same key count */
         assert!(adoc_read(out.to_string_lossy().as_bytes()) >= 0);
-        let n = adoc_get_number_of_sections(b"Field");
+        let n = adoc_get_number_of_sections(b"Field").unwrap();
         adoc_done();
         assert!(n >= 1);
         assert!(!written.is_empty());
@@ -2846,14 +2909,17 @@ pub(crate) mod tests {
 
         fn dump_all(rep: &mut Vec<u8>, tag: &str) {
             use crate::imod::libcfshr::b3dutil::{CArg, c_format_bytes};
-            let nc = adoc_get_num_collections();
+            /* The report records the source's integer status. */
+            let nc = adoc_get_num_collections().unwrap_or(-1);
             rep.extend_from_slice(&c_format_bytes(
                 "%s numColl=%d\n",
                 &[CArg::Str(tag), CArg::Int(nc as i64)],
             ));
             for ci in 0..nc {
-                let mut cname: Vec<u8> = Vec::new();
-                let err = adoc_get_collection_name(ci, &mut cname);
+                let (err, cname) = match adoc_get_collection_name(ci) {
+                    Ok(name) => (0, name),
+                    Err(()) => (-1, Vec::new()),
+                };
                 rep.extend_from_slice(&c_format_bytes(
                     "%s coll[%d] err=%d name=%s\n",
                     &[
@@ -2866,15 +2932,17 @@ pub(crate) mod tests {
                 if err != 0 {
                     continue;
                 }
-                let ns = adoc_get_number_of_sections(&cname);
+                let ns = adoc_get_number_of_sections(&cname).unwrap_or(-1);
                 rep.extend_from_slice(&c_format_bytes(
                     "%s   numSect=%d\n",
                     &[CArg::Str(tag), CArg::Int(ns as i64)],
                 ));
                 for si in 0..ns {
-                    let mut sname: Vec<u8> = Vec::new();
-                    let err = adoc_get_section_name(&cname, si, &mut sname);
-                    let nk = adoc_get_number_of_keys(&cname, si);
+                    let (err, sname) = match adoc_get_section_name(&cname, si) {
+                        Ok(name) => (0, name),
+                        Err(()) => (-1, Vec::new()),
+                    };
+                    let nk = adoc_get_number_of_keys(&cname, si).unwrap_or(-1);
                     rep.extend_from_slice(&c_format_bytes(
                         "%s   sect[%d] err=%d name=%s numKeys=%d lookup=%d\n",
                         &[
@@ -2887,8 +2955,10 @@ pub(crate) mod tests {
                         ],
                     ));
                     for ki in 0..nk {
-                        let mut key: Option<Vec<u8>> = None;
-                        let err = adoc_get_key_by_index(&cname, si, ki, &mut key);
+                        let (err, key) = match adoc_get_key_by_index(&cname, si, ki) {
+                            Ok(key) => (0, key),
+                            Err(()) => (-1, None),
+                        };
                         let Some(key) = key else {
                             rep.extend_from_slice(&c_format_bytes(
                                 "%s     key[%d] err=%d (nil)\n",
@@ -3063,7 +3133,7 @@ pub(crate) mod tests {
                 "lookupByName=%d findInsert=%d\n",
                 &[
                     CArg::Int(adoc_lookup_by_name_value(b"ZValue", 1) as i64),
-                    CArg::Int(adoc_find_insert_index(b"ZValue", 7) as i64),
+                    CArg::Int(adoc_find_insert_index(b"ZValue", 7).unwrap_or(-1) as i64),
                 ],
             ));
             let mut line_of = |name: &str, v: i32, rep: &mut Vec<u8>| {
@@ -3072,7 +3142,11 @@ pub(crate) mod tests {
                     &[CArg::Str(name), CArg::Int(v as i64)],
                 ));
             };
-            line_of("addSect", adoc_add_section(b"Probe", b"17"), &mut rep);
+            line_of(
+                "addSect",
+                adoc_add_section(b"Probe", b"17").unwrap_or(-1),
+                &mut rep,
+            );
             line_of(
                 "setKV",
                 adoc_set_key_value(b"Probe", 0, b"Str", Some(b"hello there")),
@@ -3121,30 +3195,34 @@ pub(crate) mod tests {
                 adoc_set_float_array(b"Probe", 0, b"FA", &fv, 4),
                 &mut rep,
             );
-            line_of("insSect", adoc_insert_section(b"Probe", 0, b"9"), &mut rep);
+            line_of(
+                "insSect",
+                adoc_insert_section(b"Probe", 0, b"9").map_or(-1, |()| 0),
+                &mut rep,
+            );
             line_of(
                 "changeName",
-                adoc_change_section_name(b"Probe", 1, b"18"),
+                adoc_change_section_name(b"Probe", 1, b"18").map_or(-1, |()| 0),
                 &mut rep,
             );
             line_of(
                 "delKV",
-                adoc_delete_key_value(b"Probe", 1, b"One"),
+                adoc_delete_key_value(b"Probe", 1, b"One").map_or(-1, |()| 0),
                 &mut rep,
             );
             dump_all(&mut rep, "M");
 
             let second = adoc_new();
             line_of("new", second, &mut rep);
-            adoc_set_current(ind);
+            let _ = adoc_set_current(ind);
             line_of(
                 "xfer",
                 adoc_transfer_section(b"Probe", 0, second, Some(b"77"), 1),
                 &mut rep,
             );
-            adoc_set_current(second);
+            let _ = adoc_set_current(second);
             dump_all(&mut rep, "T");
-            adoc_set_current(ind);
+            let _ = adoc_set_current(ind);
             adoc_clear(second);
 
             line_of("orderNull", adoc_order_write_by_value(None), &mut rep);
@@ -3164,8 +3242,7 @@ pub(crate) mod tests {
                 },
                 &mut rep,
             );
-            let mut root: Option<Vec<u8>> = None;
-            adoc_get_xml_root_element(&mut root);
+            let root: Option<Vec<u8>> = adoc_get_xml_root_element().unwrap_or(None);
             rep.extend_from_slice(&c_format_bytes(
                 "root=%s\n",
                 &[CArg::Bytes(root.as_deref().unwrap_or(b"(nil)"))],

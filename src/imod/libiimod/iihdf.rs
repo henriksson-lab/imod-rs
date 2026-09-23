@@ -499,7 +499,7 @@ pub fn ii_hdf_check(in_file: &mut ImodImageFile) -> i32 {
                 .expect("new HDF volume has a cursor")
                 .as_ptr();
             let adoc_index = (*volume).adoc_index;
-            adoc_set_current(adoc_index);
+            let _ = adoc_set_current(adoc_index);
             let dataset = state.datasets.as_mut_ptr().add(set as usize);
             // C `sprintf(sectText, "%d", ...)` into `char[32]`.
             let sect_text = format!(
@@ -534,7 +534,7 @@ pub fn ii_hdf_check(in_file: &mut ImodImageFile) -> i32 {
                 let path = std::ffi::CString::new(dataset_name.clone()).unwrap();
                 let dataset_id = H5Dopen2(file_id, path.as_ptr(), 0);
                 if single_image_stack {
-                    sect_ind = adoc_add_section(ADOC_ZVALUE_NAME, &sect_text);
+                    sect_ind = adoc_add_section(ADOC_ZVALUE_NAME, &sect_text).unwrap_or(-1);
                     if sect_ind < 0 {
                         retval = IIERR_MEMORY_ERR;
                     }
@@ -579,7 +579,7 @@ pub fn ii_hdf_check(in_file: &mut ImodImageFile) -> i32 {
                     if single_image_stack && ((*group).non_global_attrib != 0 || (*in_file).nz == 1)
                     {
                         if (*group).non_global_attrib == 0 {
-                            adoc_set_current(group_adoc_index);
+                            let _ = adoc_set_current(group_adoc_index);
                             retval = attributes_to_adoc(
                                 group_id,
                                 (*group).num_attributes,
@@ -588,8 +588,9 @@ pub fn ii_hdf_check(in_file: &mut ImodImageFile) -> i32 {
                             );
                         }
                         if added_sect_ind < 0 {
-                            adoc_set_current(group_adoc_index);
-                            added_sect_ind = adoc_add_section(ADOC_ZVALUE_NAME, &sect_text);
+                            let _ = adoc_set_current(group_adoc_index);
+                            added_sect_ind =
+                                adoc_add_section(ADOC_ZVALUE_NAME, &sect_text).unwrap_or(-1);
                             if added_sect_ind < 0 {
                                 retval = IIERR_MEMORY_ERR;
                             }
@@ -604,7 +605,7 @@ pub fn ii_hdf_check(in_file: &mut ImodImageFile) -> i32 {
                             group_adoc_index = (*in_file).global_adoc_index;
                         }
                     }
-                    adoc_set_current(group_adoc_index);
+                    let _ = adoc_set_current(group_adoc_index);
                     if retval == 0 {
                         retval = attributes_to_adoc(
                             group_id,
@@ -658,12 +659,12 @@ pub fn ii_hdf_check(in_file: &mut ImodImageFile) -> i32 {
                     .to_vec();
                 let sub_path = std::ffi::CString::new(sub_name).unwrap();
                 let group_id = H5Gopen2(file_id, sub_path.as_ptr(), 0);
-                adoc_set_current(if single_image_stack {
+                let _ = adoc_set_current(if single_image_stack {
                     (*in_file).adoc_index
                 } else {
                     (*in_file).global_adoc_index
                 });
-                let group_sect_ind = adoc_add_section(&collection, &section_name);
+                let group_sect_ind = adoc_add_section(&collection, &section_name).unwrap_or(-1);
                 if group_sect_ind < 0 {
                     retval = IIERR_MEMORY_ERR;
                 }
@@ -683,8 +684,8 @@ pub fn ii_hdf_check(in_file: &mut ImodImageFile) -> i32 {
             }
         }
         if hdf_source != IIHDF_CHIMERA {
-            adoc_set_current((*in_file).adoc_index);
-            let num_keys = adoc_get_number_of_keys(ADOC_GLOBAL_NAME, 0);
+            let _ = adoc_set_current((*in_file).adoc_index);
+            let num_keys = adoc_get_number_of_keys(ADOC_GLOBAL_NAME, 0).unwrap_or(-1);
             let mrc_tags: [&[u8]; 6] = [
                 b"MRC.mx",
                 b"MRC.my",
@@ -700,7 +701,13 @@ pub fn ii_hdf_check(in_file: &mut ImodImageFile) -> i32 {
                     break;
                 }
                 let mut key = None;
-                retval = adoc_get_key_by_index(ADOC_GLOBAL_NAME, 0, key_ind, &mut key);
+                retval = match adoc_get_key_by_index(ADOC_GLOBAL_NAME, 0, key_ind) {
+                    Ok(gotten) => {
+                        key = gotten;
+                        0
+                    }
+                    Err(()) => -1,
+                };
                 let key = key.unwrap_or_default();
                 if retval == 0 && starts_with(&key, b"EMAN.") == 0 {
                     for tag in mrc_tags {
@@ -805,7 +812,7 @@ pub fn ii_hdf_check(in_file: &mut ImodImageFile) -> i32 {
                 &mut hdata.amean,
             );
             if hdf_source == IIHDF_IMOD || hdf_source == IIHDF_OTHER_MRC {
-                adoc_set_current((*volume).adoc_index);
+                let _ = adoc_set_current((*volume).adoc_index);
                 get_del_prefixed_integer(b"MRC.nxstart", &mut (*hdata).nxstart, &mut retval);
                 get_del_prefixed_integer(b"MRC.nystart", &mut (*hdata).nystart, &mut retval);
                 get_del_prefixed_integer(b"MRC.nzstart", &mut (*hdata).nzstart, &mut retval);
@@ -1535,7 +1542,8 @@ pub fn ii_reorder_hdf_stack(in_file: &mut ImodImageFile, sect_order: &[i32]) -> 
                     ADOC_ZVALUE_NAME,
                     adoc_secs[ord_ind as usize],
                     &section_name,
-                ) != 0
+                )
+                .is_err()
                 {
                     return 1;
                 }
@@ -1561,7 +1569,7 @@ unsafe fn hdf_write_header(in_file: *mut ImodImageFile) -> i32 {
     if hdf_sync_from_mrc_header(in_file, hdata) != 0 {
         return 1;
     }
-    if adoc_set_current((*in_file).adoc_index) != 0 {
+    if adoc_set_current((*in_file).adoc_index).is_err() {
         return 1;
     }
     // C `free(sMrcPrefix); sMrcPrefix = strdup("IMOD.MRC.");` with a failure
@@ -1719,7 +1727,8 @@ pub fn hdf_write_global_adoc(in_file: &mut ImodImageFile) -> i32 {
             (*in_file).global_adoc_index
         } else {
             (*in_file).adoc_index
-        }) != 0
+        })
+        .is_err()
         {
             return 1;
         }
@@ -1731,18 +1740,17 @@ pub fn hdf_write_global_adoc(in_file: &mut ImodImageFile) -> i32 {
         if (*in_file).global_adoc_index >= 0 {
             err = adoc_to_attributes(group, ADOC_GLOBAL_NAME, 0, None);
         }
-        let num_collections = adoc_get_num_collections();
+        let num_collections = adoc_get_num_collections().unwrap_or(-1);
         for coll in 0..num_collections {
             if err != 0 {
                 break;
             }
-            let mut collection_name = Vec::new();
-            if adoc_get_collection_name(coll, &mut collection_name) != 0 {
+            let Ok(collection_name) = adoc_get_collection_name(coll) else {
                 err = 1;
                 continue;
-            }
+            };
             if collection_name != ADOC_ZVALUE_NAME && collection_name != b"T" {
-                let num_sections = adoc_get_number_of_sections(&collection_name);
+                let num_sections = adoc_get_number_of_sections(&collection_name).unwrap_or(-1);
                 // The collection is also an HDF5 group name.
                 let collection_path = std::ffi::CString::new(&collection_name[..]).unwrap();
                 let mut collection = H5Gopen2(group, collection_path.as_ptr(), 0);
@@ -1756,26 +1764,24 @@ pub fn hdf_write_global_adoc(in_file: &mut ImodImageFile) -> i32 {
                         if err != 0 {
                             break;
                         }
-                        let mut section_name = Vec::new();
-                        if adoc_get_section_name(&collection_name, section, &mut section_name) != 0
-                        {
+                        let Ok(section_name) = adoc_get_section_name(&collection_name, section)
+                        else {
+                            err = 1;
+                            continue;
+                        };
+                        let section_path = std::ffi::CString::new(&section_name[..]).unwrap();
+                        let mut section_id = H5Gopen2(collection, section_path.as_ptr(), 0);
+                        if section_id < 0 {
+                            section_id = H5Gcreate2(collection, section_path.as_ptr(), 0, 0, 0);
+                        }
+                        if section_id < 0 {
                             err = 1;
                         } else {
-                            let section_path = std::ffi::CString::new(&section_name[..]).unwrap();
-                            let mut section_id = H5Gopen2(collection, section_path.as_ptr(), 0);
-                            if section_id < 0 {
-                                section_id = H5Gcreate2(collection, section_path.as_ptr(), 0, 0, 0);
-                            }
-                            if section_id < 0 {
+                            if adoc_to_attributes(section_id, &collection_name, section, None) != 0
+                            {
                                 err = 1;
-                            } else {
-                                if adoc_to_attributes(section_id, &collection_name, section, None)
-                                    != 0
-                                {
-                                    err = 1;
-                                }
-                                H5Gclose(section_id);
                             }
+                            H5Gclose(section_id);
                         }
                     }
                     H5Gclose(collection);
@@ -2270,16 +2276,15 @@ unsafe fn adoc_to_attributes(
 ) -> i32 {
     let mut S_FLOAT_BUF = FLOAT_BUF.lock().unwrap();
     let mut S_INT_BUF = INT_BUF.lock().unwrap();
-    let num_keys = adoc_get_number_of_keys(type_name, sect_ind);
+    let num_keys = adoc_get_number_of_keys(type_name, sect_ind).unwrap_or(-1);
     if num_keys < 0 {
         return 1;
     }
     let mut retval = 0;
     for key_ind in 0..num_keys {
-        let mut key = None;
-        if adoc_get_key_by_index(type_name, sect_ind, key_ind, &mut key) < 0 {
+        let Ok(key) = adoc_get_key_by_index(type_name, sect_ind, key_ind) else {
             return 1;
-        }
+        };
         let Some(key) = key else {
             continue;
         };
@@ -2515,7 +2520,7 @@ unsafe fn delete_prefixed_key_value(key: &[u8]) -> i32 {
         MRC_PREFIX.lock().unwrap().as_deref().map(str::as_bytes),
         key,
     );
-    adoc_delete_key_value(ADOC_GLOBAL_NAME, 0, &full)
+    adoc_delete_key_value(ADOC_GLOBAL_NAME, 0, &full).map_or(-1, |()| 0)
 }
 /// C `startsWith` (`iihdf.c:2109`).
 fn starts_with(full: &[u8], sub: &[u8]) -> i32 {

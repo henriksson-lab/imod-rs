@@ -153,7 +153,12 @@ the ending frequency for fitting",
             &[CArg::Int(in_head.mode as i64)],
         ));
     }
-    data_size_for_mode(in_head.mode, &mut data_size, &mut ind);
+    // `measuredrift.cpp:91`: the status is ignored, and `b3dutil.c:1145-1146`
+    // leaves both outputs untouched on failure.
+    if let Ok((size, channels)) = data_size_for_mode(in_head.mode) {
+        data_size = size;
+        ind = channels;
+    }
     let mut array = vec![0u8; (data_size * in_head.nx * in_head.ny) as usize];
 
     ind = 0;

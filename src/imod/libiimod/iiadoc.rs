@@ -176,12 +176,11 @@ unsafe fn adoc_fill_mrc_header(in_file: *mut ImodImageFile, hdata: *mut MrcHeade
             (*in_file).yscale as f64,
             (*in_file).zscale as f64,
         );
-        (*hdata).nlabl = adoc_get_number_of_sections(b"T");
+        (*hdata).nlabl = adoc_get_number_of_sections(b"T").unwrap_or(-1);
         for ind in 0..(*hdata).nlabl {
-            let mut label = Vec::new();
-            if adoc_get_section_name(b"T", ind, &mut label) != 0 {
+            let Ok(label) = adoc_get_section_name(b"T", ind) else {
                 return 1;
-            }
+            };
             // `iiadoc.c:142` is `strncpy(hdata->labels[ind], label,
             // MRC_LABEL_SIZE)`: at most 80 bytes, NUL-padded to that length if
             // the name is shorter, and byte 80 left as it was.
@@ -204,14 +203,13 @@ fn read_section_file(
     section: i32,
     convert_to: i32,
 ) -> i32 {
-    let mut filename = Vec::new();
-    if adoc_get_section_name(IIADOC_IMAGE, section, &mut filename) != 0 {
+    let Ok(filename) = adoc_get_section_name(IIADOC_IMAGE, section) else {
         b3d_error(
             Some(&mut ImodFile::Stderr),
             format_args!("ERROR: iiadoc - Getting filename for section {}", section),
         );
         return 1;
-    }
+    };
     let own_name = in_file.filename.clone().unwrap_or_default();
     // `iiadoc.c:161-167`: the last '/' and the last '\', whichever is later.
     let mut slash_ind = -1_isize;

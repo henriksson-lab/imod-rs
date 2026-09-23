@@ -240,9 +240,11 @@ pub fn alterheader() {
             if num_non_opt_arg == 0 {
                 exit_error("Image filename must be entered");
             }
-            let mut name: Vec<u8> = Vec::new();
-            pip_get_non_option_arg(0, &mut name);
-            in_file = String::from_utf8_lossy(&name).into_owned();
+            // `alterheader.f90:69` assigns the status to `ierr` and never
+            // tests it; on failure the Fortran `inFile` is left untouched.
+            if let Ok(name) = pip_get_non_option_arg(0) {
+                in_file = String::from_utf8_lossy(&name).into_owned();
+            }
             ind_pip_opt = 0;
             let mut copy_name: Vec<u8> = Vec::new();
             copy_from = pip_get_string(b"CopyFromImage", &mut copy_name) == 0;

@@ -137,7 +137,12 @@ pub fn analyze_prep_skin_obj(
             let cont = &obj.cont[co];
             if !cont.pts.is_empty() {
                 maxsurf = maxsurf.max(cont.surf);
-                imod_contour_get_bbox(Some(cont), &mut bbmin_v[co], &mut bbmax_v[co]);
+                // `objprep.c:111` ignores the status; on failure the C leaves
+                // `bbmin[co]`/`bbmax[co]` as they were.
+                if let Ok((ll, ur)) = imod_contour_get_bbox(Some(cont)) {
+                    bbmin_v[co] = ll;
+                    bbmax_v[co] = ur;
+                }
                 max_zdiff = if max_zdiff < bbmax_v[co].z - bbmin_v[co].z {
                     bbmax_v[co].z - bbmin_v[co].z
                 } else {

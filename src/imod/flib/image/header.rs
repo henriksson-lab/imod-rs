@@ -626,10 +626,11 @@ pub fn header() {
 
                     if !found_axis_rot {
                         // Look in titles
-                        let num_labels = adoc_get_number_of_sections(b"T");
+                        // `header.f90:310`: the integer status is the loop
+                        // bound, and -1 makes the DO loop run zero times.
+                        let num_labels = adoc_get_number_of_sections(b"T").unwrap_or(-1);
                         for j in 0..num_labels {
-                            let mut name = Vec::<u8>::new();
-                            if adoc_get_section_name(b"T", j, &mut name) == 0 {
+                            if let Ok(name) = adoc_get_section_name(b"T", j) {
                                 let temp_label_str = String::from_utf8_lossy(&name);
                                 let fei_label = temp_label_str.contains("TiltAxisAngle");
                                 if fei_label || temp_label_str.contains("Tilt axis angle") {

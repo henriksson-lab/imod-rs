@@ -6894,7 +6894,12 @@ impl ZapFuncs {
     pub fn limit_contour_shift(&self, cont: *mut Icont, ix: &mut f32, iy: &mut f32) {
         let mut pmin = Ipoint::default();
         let mut pmax = Ipoint::default();
-        imod_contour_get_bbox(unsafe { cont.as_ref() }, &mut pmin, &mut pmax);
+        // C `imodContourGetBBox` (`xzap.cpp:3654`) discards the status, and
+        // leaves both corners untouched when it fails.
+        if let Ok((ll, ur)) = imod_contour_get_bbox(unsafe { cont.as_ref() }) {
+            pmin = ll;
+            pmax = ur;
+        }
 
         if pmin.x + *ix >= unsafe { (*self.vi).xsize } as f32 - 1. {
             *ix = unsafe { (*self.vi).xsize } as f32 - pmin.x - 1.;
@@ -8832,7 +8837,11 @@ impl ZapFuncs {
                     for zco in 0..num_conts as usize {
                         let co = self.conts_at_cur_z.as_ref().unwrap()[zco];
                         let zt_cont = unsafe { &(&(*obj).cont)[co as usize] };
-                        imod_contour_get_bbox(Some(zt_cont), &mut pmin[zco], &mut pmax[zco]);
+                        // C `xzap.cpp:5066` discards the status.
+                        if let Ok((ll, ur)) = imod_contour_get_bbox(Some(zt_cont)) {
+                            pmin[zco] = ll;
+                            pmax[zco] = ur;
+                        }
                         self.nest_cont_map[co as usize] = zco as i32;
                         self.nest_ind[zco] = -1;
                         scan_ok[zco] = false;

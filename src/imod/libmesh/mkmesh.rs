@@ -374,7 +374,12 @@ pub fn imesh_contours_cost(
 
             /* Try to have all mesh start at about the same place so it looks
             better with fake transparency. */
-            imod_contour_get_bbox(Some(bc), &mut minp, &mut maxp);
+            // `mkmesh.c:324`: the status is ignored, and a failed call leaves
+            // minp/maxp at their previous values.
+            if let Ok((ll, ur)) = imod_contour_get_bbox(Some(bc)) {
+                minp = ll;
+                maxp = ur;
+            }
             si[0] = imod_contour_nearest(Some(bc), &minp);
             bsi2 = imod_contour_nearest(Some(bc), &maxp);
             if direction[0] < 0 {
@@ -383,7 +388,12 @@ pub fn imesh_contours_cost(
 
             /* Now find a similar point in the top contour. */
 
-            imod_contour_get_bbox(Some(tc), &mut minp, &mut maxp);
+            // `mkmesh.c:332`: the status is ignored, and a failed call leaves
+            // minp/maxp at their previous values.
+            if let Ok((ll, ur)) = imod_contour_get_bbox(Some(tc)) {
+                minp = ll;
+                maxp = ur;
+            }
             si[1] = imod_contour_nearest(Some(tc), &minp);
             tsi2 = imod_contour_nearest(Some(tc), &maxp);
             if direction[1] < 0 {

@@ -45,7 +45,7 @@ pub fn pip_parse_input(
         }
         if separator == ' ' {
             for i in 1..=num_options {
-                result = pip_add_option(options[(i - 1) as usize].as_bytes());
+                result = pip_add_option(options[(i - 1) as usize].as_bytes()).map_or(-1, |()| 0);
                 if result != 0 {
                     return result;
                 }
@@ -76,7 +76,8 @@ pub fn pip_parse_input(
                     pip_set_error(b"Too few options in string");
                     return -1;
                 }
-                result = pip_add_option(&all[(ind_str - 1) as usize..ind_end as usize]);
+                result = pip_add_option(&all[(ind_str - 1) as usize..ind_end as usize])
+                    .map_or(-1, |()| 0);
                 if result != 0 {
                     return result;
                 }
@@ -236,11 +237,13 @@ pub fn pip_get_in_out_file(
                 if num_non_opt_arg < non_opt_arg_no {
                     return result;
                 }
-                value.clear();
-                result = pip_get_non_option_arg(non_opt_arg_no - 1, &mut value);
-                if result == 0 {
-                    *filename = String::from_utf8_lossy(&value).into_owned();
-                }
+                result = match pip_get_non_option_arg(non_opt_arg_no - 1) {
+                    Ok(value) => {
+                        *filename = String::from_utf8_lossy(&value).into_owned();
+                        0
+                    }
+                    Err(()) => -1,
+                };
             }
         } else {
             //
@@ -326,7 +329,7 @@ pub fn memory_error(ierr: i32, message: &str) {
 /// `adocsetcurrent` (`adoc_fwrap.c:159`) subtracts one before the C entry
 /// point, so this does the same.
 pub fn set_current_adoc_or_exit(ind_adoc: i32, message: &str) {
-    if unsafe { adoc_set_current(ind_adoc - 1) } != 0 {
+    if unsafe { adoc_set_current(ind_adoc - 1) }.is_err() {
         exit_error(&format!(
             "Selecting {} autodoc as current one",
             message.trim_end_matches(' ')

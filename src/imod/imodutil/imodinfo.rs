@@ -1819,7 +1819,11 @@ pub fn compute_object_area_vol(
                 ICONT_TEMPUSE,
                 (obj.flags & IMOD_OBJFLAG_OPEN) as i32,
             );
-            imodel_contour_centroid(Some(&scratch), &mut ccent, &mut weight);
+            // `imodinfo.cpp:1305` ignores the status.
+            if let Ok((rcp, rtw)) = imodel_contour_centroid(Some(&scratch)) {
+                ccent = rcp;
+                weight = rtw;
+            }
             set_or_clear_flags(&mut scratch.flags, ICONT_TEMPUSE, 0);
             tweight += weight;
             cent.x += ccent.x;
@@ -2018,7 +2022,11 @@ pub fn contour_stats(cont: Option<&mut Icont>, flags: u32, pixsize: f64, zscale:
 
     let mut ll = Ipoint::default();
     let mut ur = Ipoint::default();
-    imod_contour_get_bbox(Some(cont), &mut ll, &mut ur);
+    // `imodinfo.cpp:1513` ignores the status.
+    if let Ok((lower, upper)) = imod_contour_get_bbox(Some(cont)) {
+        ll = lower;
+        ur = upper;
+    }
     let _ = fout.write_all(&c_format_bytes(
         "\t\tBounding Box        = {(%g, %g), (%g, %g)}\n",
         &[
@@ -2631,7 +2639,11 @@ pub fn contour_subarea_by_scan(
     }
 
     /* Get limits and test in X and Y */
-    imod_contour_get_bbox(Some(cont), &mut tmpmin, &mut tmpmax);
+    // `imodinfo.cpp:2148` ignores the status.
+    if let Ok((lower, upper)) = imod_contour_get_bbox(Some(cont)) {
+        tmpmin = lower;
+        tmpmax = upper;
+    }
     if tmpmin.x > ptmax.x || tmpmax.x < ptmin.x || tmpmin.y > ptmax.y || tmpmax.y < ptmin.y {
         return None;
     }
@@ -2678,7 +2690,11 @@ pub fn contour_subarea_by_scan(
             imod_contour_delete(&mut scan);
             return None;
         }
-        imod_contour_get_bbox(Some(&scan), &mut tmpmin, &mut tmpmax);
+        // `imodinfo.cpp:2192` ignores the status.
+        if let Ok((lower, upper)) = imod_contour_get_bbox(Some(&scan)) {
+            tmpmin = lower;
+            tmpmax = upper;
+        }
 
         /* Adjust true area down by ratio of trimmed to original
         scan-contour area */

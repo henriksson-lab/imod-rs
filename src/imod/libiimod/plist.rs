@@ -264,7 +264,7 @@ pub fn ii_plist_from_autodoc(
     if adoc_index < 0 || nx < 1 || ny < 1 || nz < 1 {
         return -4;
     }
-    if montage == 0 || num_sect != nz || adoc_set_current(adoc_index) != 0 {
+    if montage == 0 || num_sect != nz || adoc_set_current(adoc_index).is_err() {
         if clear_on_done != 0 {
             adoc_clear(adoc_index);
         }

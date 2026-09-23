@@ -110,7 +110,7 @@ pub fn modifymdoc(arguments: &[String]) -> i32 {
             }
             let mut prior = 0.;
             if adoc_get_float(ADOC_ZVALUE_NAME, section, b"PriorRecordDose", &mut prior) == 0
-                && adoc_delete_key_value(ADOC_ZVALUE_NAME, section, b"PriorRecordDose") != 0
+                && adoc_delete_key_value(ADOC_ZVALUE_NAME, section, b"PriorRecordDose").is_err()
             {
                 adoc_done();
                 return 1;
@@ -202,7 +202,7 @@ pub fn modifymdoc(arguments: &[String]) -> i32 {
         }
         for (name, section) in order.iter().enumerate() {
             if adoc_change_section_name(ADOC_ZVALUE_NAME, *section, name.to_string().as_bytes())
-                != 0
+                .is_err()
             {
                 adoc_done();
                 return 1;

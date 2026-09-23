@@ -1266,15 +1266,27 @@ mod tests {
         dump(&mut o, "addOne", &list);
         o.push_str(&format!(
             "clearOne cont ret={}\n",
-            istore_clear_one_index_item(&mut list, 9, 4, 0)
+            match istore_clear_one_index_item(&mut list, 9, 4, 0) {
+                Ok(()) => 0,
+                Err(IstoreClearOneIndexError::EmptyList) => 1,
+                Err(IstoreClearOneIndexError::NoMatch) => -1,
+            }
         ));
         o.push_str(&format!(
             "clearOne surf ret={}\n",
-            istore_clear_one_index_item(&mut list, 9, 4, 1)
+            match istore_clear_one_index_item(&mut list, 9, 4, 1) {
+                Ok(()) => 0,
+                Err(IstoreClearOneIndexError::EmptyList) => 1,
+                Err(IstoreClearOneIndexError::NoMatch) => -1,
+            }
         ));
         o.push_str(&format!(
             "clearOne none ret={}\n",
-            istore_clear_one_index_item(&mut list, 9, 4, 0)
+            match istore_clear_one_index_item(&mut list, 9, 4, 0) {
+                Ok(()) => 0,
+                Err(IstoreClearOneIndexError::EmptyList) => 1,
+                Err(IstoreClearOneIndexError::NoMatch) => -1,
+            }
         ));
         dump(&mut o, "clearOne", &list);
 
@@ -2285,11 +2297,14 @@ mod tests {
         };
         assert_eq!(istore_add_one_index_item(&mut single, surface), 0);
         assert_eq!(single.len(), 2);
-        assert_eq!(istore_clear_one_index_item(&mut single, 9, 4, 0), 0);
+        assert_eq!(istore_clear_one_index_item(&mut single, 9, 4, 0), Ok(()));
         assert_eq!(single.len(), 1);
-        assert_eq!(istore_clear_one_index_item(&mut single, 9, 4, 1), 0);
+        assert_eq!(istore_clear_one_index_item(&mut single, 9, 4, 1), Ok(()));
         assert!(single.is_empty());
-        assert_eq!(istore_clear_one_index_item(&mut single, 9, 4, 0), 1);
+        assert_eq!(
+            istore_clear_one_index_item(&mut single, 9, 4, 0),
+            Err(IstoreClearOneIndexError::EmptyList)
+        );
     }
 
     #[test]
@@ -2900,28 +2915,45 @@ pub fn istore_add_one_index_item(list: &mut Vec<Istore>, store: Istore) -> i32 {
     }
     istore_insert(list, store)
 }
+/// The two distinct failures of `istoreClearOneIndexItem` (`istore.c:936`).
+///
+/// The source returns two different non-zero codes -- 1 for an empty list and
+/// -1 when no matching item is found (`istore.c:933-934`) -- so they are kept
+/// apart here rather than merged into one error.  Every C caller only tests the
+/// result for non-zero (`finegrain.cpp:402,411,483,514`).
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub enum IstoreClearOneIndexError {
+    /// The source's `return 1`: the list is empty.
+    EmptyList,
+    /// The source's `return -1`: no item of that type contains the index.
+    NoMatch,
+}
+
 /// Original: `istoreClearOneIndexItem` (`istore.c:936`).
+///
+/// `Ok(())` is the source's bare 0 status; its two non-zero codes are the
+/// variants of `IstoreClearOneIndexError`.
 pub fn istore_clear_one_index_item(
     list: &mut Vec<Istore>,
     type_: i16,
     index: i32,
     surf_flag: i32,
-) -> i32 {
+) -> Result<(), IstoreClearOneIndexError> {
     if list.is_empty() {
-        return 1;
+        return Err(IstoreClearOneIndexError::EmptyList);
     }
     let (lookup, after) = istore_lookup(list, index);
     let Some(lookup) = lookup else {
-        return -1;
+        return Err(IstoreClearOneIndexError::NoMatch);
     };
     let surf_flag = if surf_flag != 0 { 1 << 6 } else { 0 };
     for item in lookup..after {
         if list[item].type_ == type_ && (list[item].flags & (1 << 6)) == surf_flag {
             list.remove(item);
-            return 0;
+            return Ok(());
         }
     }
-    -1
+    Err(IstoreClearOneIndexError::NoMatch)
 }
 /// Original: `istoreGenerateItems` (`istore.c:963`).
 pub fn istore_generate_items(

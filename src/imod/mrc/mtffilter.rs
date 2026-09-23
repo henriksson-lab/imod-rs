@@ -783,7 +783,7 @@ pub fn mtffilter(arguments: &[String]) -> i32 {
                 if ind_adoc <= 0 {
                     exit_error(b"Getting index for accessing metadata in HDF file");
                 }
-                if adoc_set_current(ind_adoc) < 0 {
+                if adoc_set_current(ind_adoc).is_err() {
                     exit_error(b"Setting metadata in HDF file as current autodoc");
                 }
                 if adoc_get_image_meta_info(&mut montage, &mut num_sect, &mut i_type_adoc) < 0 {

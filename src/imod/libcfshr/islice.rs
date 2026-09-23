@@ -206,15 +206,13 @@ pub fn slice_create(xsize: i32, ysize: i32, mode: i32) -> Option<Islice> {
         );
         return None;
     }
-    let mut dsize = 0;
-    let mut csize = 0;
-    if crate::imod::libcfshr::b3dutil::data_size_for_mode(mode, &mut dsize, &mut csize) != 0 {
+    let Ok((dsize, csize)) = crate::imod::libcfshr::b3dutil::data_size_for_mode(mode) else {
         crate::imod::libcfshr::b3dutil::b3d_error(
             Some(&mut crate::imod::libcfshr::b3dutil::ImodFile::Stderr),
             format_args!("ERROR: sliceCreate - Unsupported data mode {}.\n", mode),
         );
         return None;
-    }
+    };
     let Some(data) = MrcData::try_zeroed(mode, xysize * dsize as usize * csize as usize) else {
         crate::imod::libcfshr::b3dutil::b3d_error(
             Some(&mut crate::imod::libcfshr::b3dutil::ImodFile::Stderr),
@@ -239,19 +237,33 @@ pub fn slice_create(xsize: i32, ysize: i32, mode: i32) -> Option<Islice> {
 /// C `sliceInit` (`islice.c:86`): the slice takes ownership of `data`, which
 /// the caller has already sized and typed for `mode`.  As in the C, the size
 /// fields and the data are stored before the mode is checked.
-pub fn slice_init(s: &mut Islice, xsize: i32, ysize: i32, mode: i32, data: MrcData) -> i32 {
+pub fn slice_init(
+    s: &mut Islice,
+    xsize: i32,
+    ysize: i32,
+    mode: i32,
+    data: MrcData,
+) -> Result<(), ()> {
     s.xsize = xsize;
     s.ysize = ysize;
     s.mode = mode;
     s.data = data;
-    if crate::imod::libcfshr::b3dutil::data_size_for_mode(mode, &mut s.dsize, &mut s.csize) != 0 {
-        crate::imod::libcfshr::b3dutil::b3d_error(
-            Some(&mut crate::imod::libcfshr::b3dutil::ImodFile::Stderr),
-            format_args!("ERROR: sliceInit - Unsupported data mode {}.\n", mode),
-        );
-        return -1;
+    /* dataSizeForMode(mode, &s->dsize, &s->csize) writes both members only when it
+    succeeds, so the failure path leaves them as they were. */
+    match crate::imod::libcfshr::b3dutil::data_size_for_mode(mode) {
+        Ok((dsize, csize)) => {
+            s.dsize = dsize;
+            s.csize = csize;
+        }
+        Err(()) => {
+            crate::imod::libcfshr::b3dutil::b3d_error(
+                Some(&mut crate::imod::libcfshr::b3dutil::ImodFile::Stderr),
+                format_args!("ERROR: sliceInit - Unsupported data mode {}.\n", mode),
+            );
+            return Err(());
+        }
     }
-    0
+    Ok(())
 }
 pub fn slice_mode(mst: &[u8]) -> i32 {
     {
@@ -668,12 +680,18 @@ mod tests {
     #[test]
     fn init_retains_source_fields_and_invalid_mode_result() {
         let mut s = slice_create(1, 1, 0).unwrap();
-        assert_eq!(slice_init(s.as_mut(), 4, 5, 1, MrcData::S(vec![0; 20])), 0);
+        assert_eq!(
+            slice_init(s.as_mut(), 4, 5, 1, MrcData::S(vec![0; 20])),
+            Ok(())
+        );
         assert_eq!(
             (s.xsize, s.ysize, s.mode, s.dsize, s.csize),
             (4, 5, 1, 2, 1)
         );
-        assert_eq!(slice_init(s.as_mut(), 1, 1, 12, MrcData::default()), -1);
+        assert_eq!(
+            slice_init(s.as_mut(), 1, 1, 12, MrcData::default()),
+            Err(())
+        );
     }
     #[test]
     fn create_uses_owned_allocation_and_mode_checks() {

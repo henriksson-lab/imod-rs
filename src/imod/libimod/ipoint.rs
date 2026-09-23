@@ -64,11 +64,13 @@ pub fn imod_point_add(cont: &mut Icont, point: Option<Ipoint>, mut index: i32) -
 
 /// Original: `imodPointDelete` (`ipoint.c:119`).
 ///
-/// Deletes the point at `index` from contour `cont`.  Returns the size of the
-/// contour or -1 for error.
-pub fn imod_point_delete(cont: &mut Icont, index: i32) -> i32 {
+/// Deletes the point at `index` from contour `cont`.  `Ok` carries the size of
+/// the contour after the deletion, which is data the callers use; `Err(())` is
+/// the source's -1 for a NULL contour or an out-of-range index
+/// (`ipoint.c:124`, `ipoint.c:127`).
+pub fn imod_point_delete(cont: &mut Icont, index: i32) -> Result<i32, ()> {
     if index < 0 || index > cont.pts.len() as i32 - 1 {
-        return -1;
+        return Err(());
     }
 
     if let Some(label) = cont.label.as_mut() {
@@ -99,14 +101,14 @@ pub fn imod_point_delete(cont: &mut Icont, index: i32) -> i32 {
 
     if cont.pts.is_empty() {
         cont.sizes.clear();
-        return 0;
+        return Ok(0);
     }
 
     /* DNM: if the wild flag is set, recheck contour */
     if cont.flags & ICONT_WILD != 0 {
         imodel_contour_check_wild(Some(cont));
     }
-    cont.pts.len() as i32
+    Ok(cont.pts.len() as i32)
 }
 
 /// Original: `imodPointSetSize` (`ipoint.c:167`).
@@ -887,7 +889,12 @@ mod tests {
                 p3!(cs.pts[i]);
                 p!(cs.sizes[i]);
             }
-            out.push_str(&format!("{}\n", imod_point_delete(&mut cs, 0)));
+            // The golden dump prints the C's int status: -1 for error, otherwise
+            // the contour size.
+            out.push_str(&format!(
+                "{}\n",
+                imod_point_delete(&mut cs, 0).unwrap_or(-1)
+            ));
             for i in 0..cs.pts.len() {
                 p3!(cs.pts[i]);
                 p!(cs.sizes[i]);

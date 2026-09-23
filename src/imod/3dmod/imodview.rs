@@ -4568,7 +4568,7 @@ pub unsafe fn ivw_multiple_files(
                 let adoc_ind = ii_get_adoc_index(&mut *image, 1, 0);
                 let mut vol_flag = 0;
                 if adoc_ind >= 0
-                    && adoc_set_current(adoc_ind) == 0
+                    && adoc_set_current(adoc_ind).is_ok()
                     && adoc_get_integer(ADOC_GLOBAL_NAME, 0, b"image_pyramid", &mut vol_flag) == 0
                     && vol_flag > 0
                 {
@@ -5022,14 +5022,17 @@ unsafe fn ivw_process_image_list(vi: *mut ImodView) -> i32 {
                 // In either case, get the properties, and set up to get MontSection for
                 // montage
                 if adoc_ind >= 0
-                    && adoc_set_current(adoc_ind) == 0
+                    && adoc_set_current(adoc_ind).is_ok()
                     && adoc_get_image_meta_info(&mut if_montage, &mut num_adoc_sect, &mut sect_type)
                         == 0
                 {
                     if if_montage > 0 {
                         sect_type = 4;
+                        // `imodview.cpp:2977` assigns the C return value,
+                        // which is -1 on error.
                         num_adoc_sect =
-                            adoc_get_number_of_sections(sect_names[(sect_type - 1) as usize]);
+                            adoc_get_number_of_sections(sect_names[(sect_type - 1) as usize])
+                                .unwrap_or(-1);
                     }
                     for iz in 0..(*image).nz.min(num_adoc_sect) {
                         let mut sect_ind = iz;
@@ -6497,7 +6500,7 @@ pub fn ivw_get_or_make_contour<'a>(
                 model,
                 contour_count as i32,
             );
-            if imod_new_contour(model) != 0 {
+            if imod_new_contour(model).is_err() {
                 view.undo
                     .as_deref_mut()
                     .expect("initialized view undo stack")

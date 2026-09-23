@@ -51,7 +51,13 @@ pub trait ImodEditUndo {
 pub fn imod_cont_in_select_area(obj: &Iobj, cont: &Icont, selmin: Ipoint, selmax: Ipoint) -> i32 {
     let mut pmin = Ipoint::default();
     let mut pmax = Ipoint::default();
-    crate::imod::libimod::icont::imod_contour_get_bbox(Some(cont), &mut pmin, &mut pmax);
+    // `imod_edit.cpp:39` ignores the status; on failure the min and max
+    // points keep their prior values.
+    if let Ok((bbox_min, bbox_max)) = crate::imod::libimod::icont::imod_contour_get_bbox(Some(cont))
+    {
+        pmin = bbox_min;
+        pmax = bbox_max;
+    }
     if pmin.x >= selmin.x
         && pmax.x <= selmax.x
         && pmin.y >= selmin.y

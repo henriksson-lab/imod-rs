@@ -388,7 +388,7 @@ pub fn get_metadata_by_key(
     iz_piece: &[i32],
 ) -> i32 {
     let names: [&[u8]; 3] = [ADOC_ZVALUE_NAME, b"Image", ADOC_ZVALUE_NAME];
-    if adoc_set_current(ind_adoc) != 0 {
+    if adoc_set_current(ind_adoc).is_err() {
         b3d_error(
             None,
             format_args!("getMetadataByKey - Failed to set autodoc index"),
@@ -1024,8 +1024,9 @@ mod tests {
     fn metadata_key_reads_owned_typed_output_slices() {
         let index = crate::imod::libcfshr::autodoc::adoc_new();
         assert!(index >= 0);
-        assert_eq!(crate::imod::libcfshr::autodoc::adoc_set_current(index), 0);
-        let section = crate::imod::libcfshr::autodoc::adoc_add_section(ADOC_ZVALUE_NAME, b"0");
+        assert!(crate::imod::libcfshr::autodoc::adoc_set_current(index).is_ok());
+        let section = crate::imod::libcfshr::autodoc::adoc_add_section(ADOC_ZVALUE_NAME, b"0")
+            .expect("adoc_add_section");
         assert_eq!(section, 0);
         assert_eq!(
             crate::imod::libcfshr::autodoc::adoc_set_float(

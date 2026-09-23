@@ -1098,12 +1098,14 @@ pub fn ifg_toggle_gap(contour: &mut Icont, point_index: i32, enabled: bool) -> i
         };
         crate::imod::libimod::istore::istore_add_one_index_item(&mut contour.store, item)
     } else {
+        // `finegrain.cpp:483`: any non-zero status is an error and makes retval 1.
         crate::imod::libimod::istore::istore_clear_one_index_item(
             &mut contour.store,
             GEN_STORE_GAP,
             point_index,
             0,
         )
+        .map_or(1, |()| 0)
     }
 }
 

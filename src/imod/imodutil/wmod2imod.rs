@@ -420,7 +420,7 @@ pub fn imod_from_wmod(fin: &mut ImodFile) -> Option<Imod> {
         }
         let object_index = model.cindex.object as usize;
         model.cindex.contour = model.obj.get(object_index)?.cont.len() as i32 - 1;
-        if imod_new_contour(&mut model) != 0 {
+        if imod_new_contour(&mut model).is_err() {
             return None;
         }
         let contour_index = model.cindex.contour as usize;

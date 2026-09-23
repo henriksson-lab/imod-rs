@@ -1028,7 +1028,11 @@ impl FrameAlign {
         if trunc_limit >= 0. {
             return 0;
         }
-        data_size_for_mode(use_mode, &mut data_size, &mut temp);
+        // `framealign.cpp:3477` ignores the status.
+        if let Ok((ds, tmp)) = data_size_for_mode(use_mode) {
+            data_size = ds;
+            temp = tmp;
+        }
         // C `makeLinePointers(array, nx, ny, dataSize)`: a row-pointer array,
         // which is a slice of row slices here.
         let row = (nx * data_size) as usize;
@@ -2786,7 +2790,11 @@ impl FrameAlign {
             self.m_stack_type = typ;
         }
         ix = 0;
-        data_size_for_mode(self.m_stack_type, &mut stack_byte_size, &mut ix);
+        // `framealign.cpp:1116` ignores the status.
+        if let Ok((ds, csize)) = data_size_for_mode(self.m_stack_type) {
+            stack_byte_size = ds;
+            ix = csize;
+        }
 
         // Substitute the save arrays for the working ones; create new and push
         // if needed
@@ -2898,7 +2906,11 @@ impl FrameAlign {
         if copy_to_stack_here && copy_raw_input {
             ix = 0;
             use_ind = 0;
-            data_size_for_mode(typ, &mut use_ind, &mut ix);
+            // `framealign.cpp:1291` ignores the status.
+            if let Ok((ds, csize)) = data_size_for_mode(typ) {
+                use_ind = ds;
+                ix = csize;
+            }
             let n = (use_ind * self.m_nx * self.m_ny) as usize;
             let mut dst = self.take_full(full_arr);
             float_bytes_mut(&mut dst)[..n].copy_from_slice(&frame.bytes()[..n]);
@@ -2933,7 +2945,11 @@ impl FrameAlign {
         if copy_to_stack_here && !copy_raw_input {
             ix = 0;
             use_ind = 0;
-            data_size_for_mode(use_type, &mut use_ind, &mut ix);
+            // `framealign.cpp:1313` ignores the status.
+            if let Ok((ds, csize)) = data_size_for_mode(use_type) {
+                use_ind = ds;
+                ix = csize;
+            }
             let n = (use_ind * self.m_nx * self.m_ny) as usize;
             if use_frame != full_arr {
                 let src: Vec<f32> = match use_frame {

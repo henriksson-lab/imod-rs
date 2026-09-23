@@ -1408,7 +1408,14 @@ pub fn mrc_getdcsize(mode: i32, dsize: &mut i32, csize: &mut i32) -> i32 {
     if mode == 99 {
         return -1;
     }
-    data_size_for_mode(mode, dsize, csize)
+    match data_size_for_mode(mode) {
+        Ok((data_size, channels)) => {
+            *dsize = data_size;
+            *csize = channels;
+            0
+        }
+        Err(()) => -1,
+    }
 }
 
 /// Matches C `mrcGetComplexScale(void)` (`mrcfiles.c:1720`).

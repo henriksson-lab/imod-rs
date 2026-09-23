@@ -133,7 +133,7 @@ pub fn input_delete_point(vi: &mut ImodView, n: &mut dyn InputNativeBoundary) {
         return;
     }
     n.undo_begin("pointRemoval");
-    if imod_delete_point(imod) < 0 {
+    if imod_delete_point(imod).is_err() {
         n.undo_flush();
     } else {
         n.undo_finish();
@@ -265,7 +265,7 @@ pub fn input_new_contour_or_surface(
         return;
     }
     n.undo_begin("contourAddition");
-    if imod_new_contour(imod) != 0 {
+    if imod_new_contour(imod).is_err() {
         return;
     }
     let oi = imod.cindex.object as usize;
@@ -301,7 +301,7 @@ pub fn input_contour_dup(vi: &mut ImodView, n: &mut dyn InputNativeBoundary) {
     let Some(cont) = imod_contour_get(Some(imod)).cloned() else {
         return;
     };
-    if imod_new_contour(imod) == 0 {
+    if imod_new_contour(imod).is_ok() {
         let oi = imod.cindex.object as usize;
         let ci = imod.cindex.contour as usize;
         imod.obj[oi].cont[ci] = cont;

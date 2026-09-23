@@ -3227,8 +3227,16 @@ mod tests {
                 let _ = rep.write_all(b"\n");
                 continue;
             }
+            // `autodoc.c:560-564`: -1 for no current autodoc, leaving the
+            // caller's pointer untouched; otherwise 0 with the name or NULL.
             let mut root: Option<Vec<u8>> = None;
-            let err = adoc_get_xml_root_element(&mut root);
+            let err = match adoc_get_xml_root_element() {
+                Ok(value) => {
+                    root = value;
+                    0
+                }
+                Err(()) => -1,
+            };
             let rootbytes: Vec<u8> = match &root {
                 None => b"(nil)".to_vec(),
                 Some(root) => root.clone(),
@@ -3238,7 +3246,12 @@ mod tests {
                 &[CArg::Int(err as i64), CArg::Bytes(&rootbytes)],
             ));
             let _ = rep.write_all(
-                c_format(" xmlRead=%d", &[CArg::Int(adoc_get_write_as_xml() as i64)]).as_bytes(),
+                c_format(
+                    " xmlRead=%d",
+                    // `autodoc.c:548-552`: -1 for no current autodoc.
+                    &[CArg::Int(adoc_get_write_as_xml().map_or(-1, i64::from))],
+                )
+                .as_bytes(),
             );
             adoc_set_write_as_xml(asxml);
             let out = format!("{}/{}.out", outdir, base);

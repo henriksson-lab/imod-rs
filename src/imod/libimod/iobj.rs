@@ -582,8 +582,6 @@ pub fn imod_object_volume(obj: &Iobj) -> f32 {
 
 /// Original: `imodel_object_centroid` (`iobj.c:492`).
 pub fn imodel_object_centroid(obj: &mut Iobj, rcp: &mut Ipoint) -> i32 {
-    let mut cpt = Ipoint::default();
-    let mut weight = 0f64;
     let mut tweight = 0f64;
 
     rcp.x = 0.0;
@@ -600,9 +598,9 @@ pub fn imodel_object_centroid(obj: &mut Iobj, rcp: &mut Ipoint) -> i32 {
             ICONT_TEMPUSE,
             (obj_flags & IMOD_OBJFLAG_OPEN) as i32,
         );
-        if imodel_contour_centroid(Some(&obj.cont[co]), &mut cpt, &mut weight) != 0 {
+        let Ok((cpt, weight)) = imodel_contour_centroid(Some(&obj.cont[co])) else {
             return 1;
-        }
+        };
         set_or_clear_flags(&mut obj.cont[co].flags, ICONT_TEMPUSE, 0);
         tweight += weight;
         rcp.x += cpt.x;
@@ -726,9 +724,9 @@ pub fn imod_object_get_bbox(obj: &Iobj, ll: &mut Ipoint, ur: &mut Ipoint) -> i32
     *ll = min;
     *ur = max;
     for co in 0..obj.cont.len() {
-        if imod_contour_get_bbox(Some(&obj.cont[co]), &mut min, &mut max) != 0 {
+        let Ok((min, max)) = imod_contour_get_bbox(Some(&obj.cont[co])) else {
             continue;
-        }
+        };
 
         if min.x < ll.x {
             ll.x = min.x;

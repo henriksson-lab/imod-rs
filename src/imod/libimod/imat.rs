@@ -164,13 +164,16 @@ pub fn imod_mat_trans(mat: &mut Imat, pt: &Ipoint) {
 /// Original: `imodMatScale` (`imat.c:169`).
 ///
 /// Applies scaling by the factors in `pt` to the transformation in `mat`.
-pub fn imod_mat_scale(mat: &mut Imat, pt: &Ipoint) -> i32 {
+///
+/// `Err(())` is the source's -1, which it returns only when `imodMatNew`
+/// fails to allocate (`imat.c:180`, `imat.c:183`).
+pub fn imod_mat_scale(mat: &mut Imat, pt: &Ipoint) -> Result<(), ()> {
     let Some(mut smat) = imod_mat_new(mat.dim) else {
-        return -1;
+        return Err(());
     };
     let Some(mut omat) = imod_mat_new(mat.dim) else {
         imod_mat_delete(&mut smat);
-        return -1;
+        return Err(());
     };
 
     if mat.dim == 2 {
@@ -186,7 +189,7 @@ pub fn imod_mat_scale(mat: &mut Imat, pt: &Ipoint) -> i32 {
     imod_mat_copy(&omat, mat);
     imod_mat_delete(&mut omat);
     imod_mat_delete(&mut smat);
-    0
+    Ok(())
 }
 
 /// Original: `imodMatRot` (`imat.c:199`).
@@ -198,18 +201,20 @@ pub fn imod_mat_scale(mat: &mut Imat, pt: &Ipoint) -> i32 {
 /// The C's `default: return(-1)` for an out-of-range axis (`imat.c:253`) is
 /// unreachable here: `Axis3` makes a bad axis a compile error rather than a
 /// run-time -1.  That is the point of the type, and no caller tested for it.
-pub fn imod_mat_rot(mat: &mut Imat, mut angle: f64, axis: Axis3) -> i32 {
+/// The only remaining -1 is the `imodMatNew` allocation failure
+/// (`imat.c:219`, `imat.c:222`), so `Err(())` carries no further detail.
+pub fn imod_mat_rot(mat: &mut Imat, mut angle: f64, axis: Axis3) -> Result<(), ()> {
     angle *= 0.017453293;
 
     let cosa = angle.cos();
     let sina = angle.sin();
 
     let Some(mut rmat) = imod_mat_new(mat.dim) else {
-        return -1;
+        return Err(());
     };
     let Some(mut omat) = imod_mat_new(mat.dim) else {
         imod_mat_delete(&mut rmat);
-        return -1;
+        return Err(());
     };
 
     if mat.dim == 2 {
@@ -243,20 +248,20 @@ pub fn imod_mat_rot(mat: &mut Imat, mut angle: f64, axis: Axis3) -> i32 {
     imod_mat_copy(&omat, mat);
     imod_mat_delete(&mut omat);
     imod_mat_delete(&mut rmat);
-    0
+    Ok(())
 }
 
 /// Original: `imodMatRotateVector` (`imat.c:259`).
 ///
 /// Applies a rotation by `angle` (in degrees) about the vector `v` to the
 /// matrix in `mat`.
-pub fn imod_mat_rotate_vector(mat: &mut Imat, mut angle: f64, v: &Ipoint) -> i32 {
+pub fn imod_mat_rotate_vector(mat: &mut Imat, mut angle: f64, v: &Ipoint) -> Result<(), ()> {
     if mat.dim == 2 {
-        return -1;
+        return Err(());
     }
 
     if v.x == 0.0 && v.y == 0.0 && v.z == 0.0 {
-        return -1;
+        return Err(());
     }
 
     angle *= 0.017453293;
@@ -265,12 +270,12 @@ pub fn imod_mat_rotate_vector(mat: &mut Imat, mut angle: f64, v: &Ipoint) -> i32
     let omca = 1.0 - cosa;
 
     if sina - sina != 0. {
-        return 0;
+        return Ok(());
     }
 
     let mut aval: f64 = ((v.x * v.x) + (v.y * v.y) + (v.z * v.z)) as f64;
     if aval == 0.0 {
-        return 0;
+        return Ok(());
     }
     aval = aval.sqrt();
     let x = v.x as f64 / aval;
@@ -278,11 +283,11 @@ pub fn imod_mat_rotate_vector(mat: &mut Imat, mut angle: f64, v: &Ipoint) -> i32
     let z = v.z as f64 / aval;
 
     let Some(mut rmat) = imod_mat_new(mat.dim) else {
-        return -1;
+        return Err(());
     };
     let Some(mut omat) = imod_mat_new(mat.dim) else {
         imod_mat_delete(&mut rmat);
-        return -1;
+        return Err(());
     };
 
     rmat.data[0] = (x * x * omca + cosa) as f32;
@@ -300,7 +305,7 @@ pub fn imod_mat_rotate_vector(mat: &mut Imat, mut angle: f64, v: &Ipoint) -> i32
     imod_mat_copy(&omat, mat);
     imod_mat_delete(&mut omat);
     imod_mat_delete(&mut rmat);
-    0
+    Ok(())
 }
 
 /// Original: `imodMatFindVector` (`imat.c:322`).
@@ -564,7 +569,7 @@ mod tests {
                     z: 8.
                 }
             ),
-            0
+            Ok(())
         );
         // Scaling is applied after the translation, so the translation scales too.
         assert_eq!((mat.data[0], mat.data[5], mat.data[10]), (2., 4., 8.));
@@ -614,7 +619,7 @@ mod tests {
             ),
         ] {
             let mut mat = imod_mat_new(3).unwrap();
-            assert_eq!(imod_mat_rot(&mut mat, 90., axis), 0);
+            assert_eq!(imod_mat_rot(&mut mat, 90., axis), Ok(()));
             let mut out = Ipoint::default();
             imod_mat_transform(
                 &mat,
@@ -649,7 +654,7 @@ mod tests {
                 z: 7.,
             },
         );
-        imod_mat_scale(
+        let _ = imod_mat_scale(
             &mut mat,
             &Ipoint {
                 x: 2.,
@@ -657,7 +662,7 @@ mod tests {
                 z: 4.,
             },
         );
-        imod_mat_rot(&mut mat, 30., Axis3::Z);
+        let _ = imod_mat_rot(&mut mat, 30., Axis3::Z);
         let inv = imod_mat_inverse(&mat).unwrap();
         let pt = Ipoint {
             x: 11.,
@@ -694,7 +699,7 @@ mod tests {
     #[test]
     fn find_vector_recovers_z_rotation() {
         let mut mat = imod_mat_new(3).unwrap();
-        imod_mat_rot(&mut mat, 37., Axis3::Z);
+        let _ = imod_mat_rot(&mut mat, 37., Axis3::Z);
         let mut angle = 0.0f64;
         let mut v = Ipoint::default();
         assert_eq!(imod_mat_find_vector(&mat, &mut angle, &mut v), 0);
@@ -710,7 +715,7 @@ mod tests {
     #[test]
     fn rotate_vector_about_z_matches_axis_rotation() {
         let mut a = imod_mat_new(3).unwrap();
-        imod_mat_rot(&mut a, 25., Axis3::Z);
+        let _ = imod_mat_rot(&mut a, 25., Axis3::Z);
         let mut b = imod_mat_new(3).unwrap();
         assert_eq!(
             imod_mat_rotate_vector(
@@ -722,11 +727,14 @@ mod tests {
                     z: 1.
                 }
             ),
-            0
+            Ok(())
         );
         for i in 0..16 {
             assert!((a.data[i] - b.data[i]).abs() < 1e-6, "slot {i}");
         }
-        assert_eq!(imod_mat_rotate_vector(&mut b, 25., &Ipoint::default()), -1);
+        assert_eq!(
+            imod_mat_rotate_vector(&mut b, 25., &Ipoint::default()),
+            Err(())
+        );
     }
 }

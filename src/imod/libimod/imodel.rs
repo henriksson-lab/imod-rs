@@ -580,9 +580,13 @@ pub fn imod_clean_surf(imod: &mut Imod) {
 }
 
 /// Original: `imodNewContour` (`imodel.c:715`).
-pub fn imod_new_contour(mod_: &mut Imod) -> i32 {
+///
+/// The source returns a bare 0/-1 status, so `Ok(())` is its 0 and `Err(())`
+/// its -1, returned when there is no current object or the contour array
+/// cannot be grown.
+pub fn imod_new_contour(mod_: &mut Imod) -> Result<(), ()> {
     if mod_.cindex.object < 0 || mod_.cindex.object as usize >= mod_.obj.len() {
-        return -1;
+        return Err(());
     }
     let object = mod_.cindex.object as usize;
     let previous = mod_.cindex.contour;
@@ -597,7 +601,7 @@ pub fn imod_new_contour(mod_: &mut Imod) -> i32 {
     mod_.obj[object].cont.push(cont);
     mod_.cindex.contour = mod_.obj[object].cont.len() as i32 - 1;
     mod_.cindex.point = -1;
-    0
+    Ok(())
 }
 
 /// Original: `imodNewPoint` (`imodel.c:1062`).
@@ -642,32 +646,38 @@ pub fn imod_insert_point(imod: Option<&mut Imod>, point: Option<Ipoint>, mut ind
 }
 
 /// Original: `imodDeletePoint` (`imodel.c:1098`).
-pub fn imod_delete_point(imod: &mut Imod) -> i32 {
+///
+/// `Ok` carries the size of the current contour, as the source's non-negative
+/// return does (0 when the empty contour was deleted instead, `imodel.c:1115`,
+/// otherwise `imodPointDelete`'s new point count); `Err(())` is its -1, for no
+/// current contour, a non-empty contour with no current point, and
+/// `imodPointDelete`'s own out-of-range index (`ipoint.c:126`).
+pub fn imod_delete_point(imod: &mut Imod) -> Result<i32, ()> {
     if imod.cindex.object < 0
         || imod.cindex.object as usize >= imod.obj.len()
         || imod.cindex.contour < 0
         || imod.cindex.contour as usize >= imod.obj[imod.cindex.object as usize].cont.len()
     {
-        return -1;
+        return Err(());
     }
     let object = imod.cindex.object as usize;
     let contour = imod.cindex.contour as usize;
     if !imod.obj[object].cont[contour].pts.is_empty() && imod.cindex.point < 0 {
-        return -1;
+        return Err(());
     }
     if imod.obj[object].cont[contour].pts.is_empty() {
         imod.obj[object].cont.remove(contour);
-        return 0;
+        return Ok(0);
     }
     let index = imod.cindex.point;
     if index < 0 || index as usize >= imod.obj[object].cont[contour].pts.len() {
-        return -1;
+        return Err(());
     }
     if index != 0 || imod.obj[object].cont[contour].pts.len() == 1 {
         imod.cindex.point = index - 1;
     }
     imod.obj[object].cont[contour].pts.remove(index as usize);
-    imod.obj[object].cont[contour].pts.len() as i32
+    Ok(imod.obj[object].cont[contour].pts.len() as i32)
 }
 
 /// Original: `imodPrevPoint` (`imodel.c:1129`).
@@ -921,15 +931,22 @@ pub fn imod_new_object(mod_: &mut Imod) -> i32 {
 }
 
 /// Original: `imodNextObject` (`imodel.c:585`).
-pub fn imod_next_object(imod: Option<&mut Imod>) -> i32 {
+///
+/// `Ok` carries the new object index, which every non-error return of the
+/// source supplies as a value; `Err(())` is its -1, returned only for no model,
+/// no objects, or an object index that `imodObjectGet` rejects.  Note the
+/// asymmetry with `imodPrevObject`: this function's early
+/// `return imod->cindex.object` (`imodel.c:593`) is reachable only with a
+/// non-negative index, so -1 here is unambiguously the error.
+pub fn imod_next_object(imod: Option<&mut Imod>) -> Result<i32, ()> {
     let Some(imod) = imod else {
-        return -1;
+        return Err(());
     };
     if imod.obj.is_empty() {
-        return -1;
+        return Err(());
     }
     if imod.cindex.object >= imod.obj.len() as i32 - 1 {
-        return imod.cindex.object;
+        return Ok(imod.cindex.object);
     }
 
     imod.cindex.object += 1;
@@ -937,7 +954,7 @@ pub fn imod_next_object(imod: Option<&mut Imod>) -> i32 {
         imod.cindex.object = 0;
     }
     if imod.obj.get(imod.cindex.object as usize).is_none() {
-        return -1;
+        return Err(());
     }
 
     if imod.cindex.contour >= imod.obj[imod.cindex.object as usize].cont.len() as i32 {
@@ -970,7 +987,7 @@ pub fn imod_next_object(imod: Option<&mut Imod>) -> i32 {
         imod.cindex.point = -1;
     }
 
-    imod.cindex.object
+    Ok(imod.cindex.object)
 }
 
 /// Original: `imodPrevObject` (`imodel.c:625`).
@@ -1027,19 +1044,24 @@ pub fn imod_prev_object(mod_: Option<&mut Imod>) -> i32 {
 }
 
 /// Original: `imodPrevContour` (`imodel.c:922`).
-pub fn imod_prev_contour(mod_: Option<&mut Imod>) -> i32 {
+///
+/// `Ok` carries the current contour index, which is always non-negative on the
+/// source's value-returning paths; `Err(())` is its -1, documented as "error"
+/// and returned for no model, no current object, and an object with no
+/// contours.
+pub fn imod_prev_contour(mod_: Option<&mut Imod>) -> Result<i32, ()> {
     let Some(mod_) = mod_ else {
-        return -1;
+        return Err(());
     };
     if mod_.obj.get(mod_.cindex.object as usize).is_none() {
         mod_.cindex.contour = -1;
-        return -1;
+        return Err(());
     }
     if mod_.obj[mod_.cindex.object as usize].cont.is_empty() {
-        return -1;
+        return Err(());
     }
     if mod_.cindex.contour == 0 {
-        return mod_.cindex.contour;
+        return Ok(mod_.cindex.contour);
     }
     if mod_.cindex.contour < 0 {
         mod_.cindex.contour = mod_.obj[mod_.cindex.object as usize].cont.len() as i32 - 1;
@@ -1057,22 +1079,27 @@ pub fn imod_prev_contour(mod_: Option<&mut Imod>) -> i32 {
             .len() as i32
             - 1;
     }
-    mod_.cindex.contour
+    Ok(mod_.cindex.contour)
 }
 
 /// Original: `imodNextContour` (`imodel.c:962`).
-pub fn imod_next_contour(imod: Option<&mut Imod>) -> i32 {
+///
+/// `Ok` carries the current contour index, which is always non-negative on the
+/// source's value-returning paths; `Err(())` is its -1, documented as "error"
+/// and returned for no model, no current object, and an object with no
+/// contours.
+pub fn imod_next_contour(imod: Option<&mut Imod>) -> Result<i32, ()> {
     let Some(imod) = imod else {
-        return -1;
+        return Err(());
     };
     if imod.obj.get(imod.cindex.object as usize).is_none() {
-        return -1;
+        return Err(());
     }
     if imod.obj[imod.cindex.object as usize].cont.is_empty() {
-        return -1;
+        return Err(());
     }
     if imod.cindex.contour == imod.obj[imod.cindex.object as usize].cont.len() as i32 - 1 {
-        return imod.cindex.contour;
+        return Ok(imod.cindex.contour);
     }
     if imod.cindex.contour < 0 {
         imod.cindex.contour = 0;
@@ -1089,7 +1116,7 @@ pub fn imod_next_contour(imod: Option<&mut Imod>) -> i32 {
             .len() as i32
             - 1;
     }
-    imod.cindex.contour
+    Ok(imod.cindex.contour)
 }
 
 /// Original: `imodContourGet` (`imodel.c:1001`).
@@ -1683,20 +1710,23 @@ pub fn imod_object_get_next(imod: Option<&mut Imod>) -> Option<&Iobj> {
 /// Deletes the current contour of the model `imod`.
 pub fn imod_del_current_contour(imod: &mut Imod) {
     let index = imod.cindex.contour;
-    imod_delete_contour(imod, index);
+    let _ = imod_delete_contour(imod, index);
 }
 
 /// Original: `imodDeleteContour` (`imodel.c:783`).
 ///
 /// Deletes the contour at `index` in the current object of the model `mod_`.
-/// Returns the size of the current object or -1 for error.
-pub fn imod_delete_contour(mod_: &mut Imod, index: i32) -> i32 {
+/// `Ok` carries the size of the current object -- a value, not a status, as the
+/// source's `return(obj->contsize)` shows (`imodel.c:830`, the same shape as
+/// `imodDeleteListOfConts` at `imodel.c:914`); `Err(())` is its -1, returned
+/// for no current object and an out-of-range contour index.
+pub fn imod_delete_contour(mod_: &mut Imod, index: i32) -> Result<i32, ()> {
     let ob = mod_.cindex.object;
     if ob < 0 || ob >= mod_.obj.len() as i32 {
-        return -1;
+        return Err(());
     }
     if index < 0 || index >= mod_.obj[ob as usize].cont.len() as i32 {
-        return -1;
+        return Err(());
     }
 
     /* If contour has any points, free them. */
@@ -1718,7 +1748,7 @@ pub fn imod_delete_contour(mod_: &mut Imod, index: i32) -> i32 {
 
     mod_.cindex.contour = -1;
     mod_.cindex.point = -1;
-    mod_.obj[ob as usize].cont.len() as i32
+    Ok(mod_.obj[ob as usize].cont.len() as i32)
 }
 
 /// Original: `imodDeleteListOfConts` (`imodel.c:840`).
@@ -1934,7 +1964,7 @@ pub fn imodel_model_clean(mod_: &mut Imod, keep_empty_objs: i32) -> i32 {
             if mod_.obj[ob as usize].cont[co as usize].pts.is_empty() {
                 mod_.cindex.object = ob;
                 mod_.cindex.contour = co;
-                imod_delete_contour(mod_, co);
+                let _ = imod_delete_contour(mod_, co);
                 co -= 1;
                 co += 1;
                 continue;
@@ -3179,7 +3209,13 @@ mod source_driver_model {
         out.push_str(&format!("clean {}\n", imodel_model_clean(&mut m, 0)));
         dumpmodel(&mut out, "cl", &m);
         imod_set_index(&mut m, 0, -1, -1);
-        out.push_str(&format!("dc {}\n", imod_delete_contour(&mut m, 0)));
+        out.push_str(&format!(
+            "dc {}\n",
+            match imod_delete_contour(&mut m, 0) {
+                Ok(n) => n,
+                Err(()) => -1,
+            }
+        ));
         dumpmodel(&mut out, "dc", &m);
         {
             let lst = [0i32, 0i32];

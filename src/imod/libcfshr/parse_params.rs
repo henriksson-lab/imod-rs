@@ -468,11 +468,11 @@ pub fn pip_set_special_flags(
 /// Original C `PipAddOption` (`parse_params.c:347`).
 ///
 /// Add an option, with short and long name, type, and help string.
-pub fn pip_add_option(option_string: &[u8]) -> i32 {
+pub fn pip_add_option(option_string: &[u8]) -> Result<(), ()> {
     let next_option = S_NEXT_OPTION.get();
     if next_option >= S_NUM_OPTIONS.get() {
         pip_set_error(b"Attempting to add more options than were originally specified");
-        return -1;
+        return Err(());
     }
 
     /* In the following, if there is ever not another :, skip to error */
@@ -600,12 +600,12 @@ pub fn pip_add_option(option_string: &[u8]) -> i32 {
                     t.clone()
                 });
                 pip_set_error(&temp);
-                return -1;
+                return Err(());
             }
         }
 
         S_NEXT_OPTION.set(next_option + 1);
-        return 0;
+        return Ok(());
     }
 
     /* sprintf(sTempStr, "Option does not have three colons in it:  "); */
@@ -614,7 +614,7 @@ pub fn pip_add_option(option_string: &[u8]) -> i32 {
         t.extend_from_slice(b"Option does not have three colons in it:  ");
     });
     append_to_error_string(option_string);
-    -1
+    Err(())
 }
 
 /// Original C `PipNextArg` (`parse_params.c:479`).
@@ -748,20 +748,22 @@ pub fn pip_number_of_args(num_opt_args: &mut i32, num_non_opt_args: &mut i32) {
 /// Original C `PipGetNonOptionArg` (`parse_params.c:595`).
 ///
 /// Get a non-option argument, index numbered from 0 here.
-pub fn pip_get_non_option_arg(arg_no: i32, arg: &mut Vec<u8>) -> i32 {
+pub fn pip_get_non_option_arg(arg_no: i32) -> Result<Vec<u8>, ()> {
     let non_opt_ind = S_NON_OPT_IND.get();
     let count = S_OPT_TABLE.with_borrow(|table| table[non_opt_ind as usize].count);
     if arg_no >= count {
         pip_set_error(b"Requested a non-option argument beyond the number available");
-        return -1;
+        return Err(());
     }
     /* ACCUM_MAX(sHighestNonOptGotten, argNo); */
     if arg_no > S_HIGHEST_NON_OPT_GOTTEN.get() {
         S_HIGHEST_NON_OPT_GOTTEN.set(arg_no);
     }
-    *arg = S_OPT_TABLE
+    /* *arg = strdup(...); return PipMemoryError(*arg, "PipGetNonOptionArg"); -- the
+    duplicate cannot fail here, so the source's memory-error status is always 0. */
+    let arg = S_OPT_TABLE
         .with_borrow(|table| table[non_opt_ind as usize].value_ptr[arg_no as usize].clone());
-    0
+    Ok(arg)
 }
 
 /// Original C `PipGetString` (`parse_params.c:610`).
@@ -1596,9 +1598,9 @@ pub fn pip_parse_input(
 
     /* add the options */
     for i in 0..num_opts {
-        let err = pip_add_option(options[i as usize]);
-        if err != 0 {
-            return err;
+        /* if ((err = PipAddOption(options[i]))) return err; -- the only failure is -1 */
+        if pip_add_option(options[i as usize]).is_err() {
+            return -1;
         }
     }
 
@@ -1884,9 +1886,9 @@ pub fn pip_read_option_file(prog_name: &[u8], help_level: i32, local_dir: i32) -
             opt_str.push(b':');
             opt_str.extend_from_slice(&help_str);
 
-            let err = pip_add_option(&opt_str);
-            if err != 0 {
-                return err;
+            /* if ((err = PipAddOption(optStr))) return err; -- the only failure is -1 */
+            if pip_add_option(&opt_str).is_err() {
+                return -1;
             }
 
             /* Assign format and default if got one */
@@ -2330,7 +2332,11 @@ pub fn pip_get_in_out_file(option: &[u8], non_opt_arg_no: i32, filename: &mut Ve
         if non_opt_arg_no >= count {
             return 1;
         }
-        pip_get_non_option_arg(non_opt_arg_no, filename);
+        /* PipGetNonOptionArg(nonOptArgNo, filename); -- the source discards the status,
+        and leaves *filename untouched when it fails */
+        if let Ok(arg) = pip_get_non_option_arg(non_opt_arg_no) {
+            *filename = arg;
+        }
     }
     0
 }
@@ -2642,7 +2648,11 @@ fn option_line_of_values(
     let val_err = get_next_value_string(option, &mut str_ptr);
     let mut err = 0i32;
     if val_err == 0 || val_err == 2 {
-        err = pip_get_line_of_values(option, &str_ptr, array, val_type, num_to_get, array_size);
+        if pip_get_line_of_values(option, &str_ptr, array, val_type, num_to_get, array_size)
+            .is_err()
+        {
+            err = -1;
+        }
     }
     if err != 0 {
         return err;
@@ -2664,7 +2674,7 @@ pub fn pip_get_line_of_values(
     val_type: i32,
     num_to_get: &mut i32,
     array_size: i32,
-) -> i32 {
+) -> Result<(), ()> {
     let mut num_got = 0i32;
     let mut got_comma = 1i32;
     /* char sepStr[] = ",\t /"; */
@@ -2697,7 +2707,7 @@ pub fn pip_get_line_of_values(
                         "Default entry with a / is not allowed in value entry:  %s  ",
                         &[CArg::Bytes(option)],
                     );
-                    return -1;
+                    return Err(());
                 }
 
                 /* special handling of commas to allow default values */
@@ -2715,7 +2725,7 @@ pub fn pip_get_line_of_values(
                                 "Default entries with commas are not allowed in value entry:  %s  ",
                                 &[CArg::Bytes(option)],
                             );
-                            return -1;
+                            return Err(());
                         }
                     }
                     got_comma = 1;
@@ -2736,7 +2746,7 @@ pub fn pip_get_line_of_values(
                 "Too many values for input array in value entry:  %s  ",
                 &[CArg::Bytes(option)],
             );
-            return -1;
+            return Err(());
         }
 
         /* convert number, get pointer to first invalid char */
@@ -2769,7 +2779,7 @@ pub fn pip_get_line_of_values(
                 "Illegal character in value entry:  %s  ",
                 &[CArg::Bytes(option)],
             );
-            return -1;
+            return Err(());
         }
 
         /* Mark that there is no comma after we have a number */
@@ -2809,10 +2819,10 @@ pub fn pip_get_line_of_values(
                 CArg::Bytes(option),
             ],
         );
-        return -1;
+        return Err(());
     }
 
-    0
+    Ok(())
 }
 
 /// Original C `LineOfValuesError` (`parse_params.c:1994`).

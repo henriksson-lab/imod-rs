@@ -550,12 +550,12 @@ impl Processchunks {
             self.skip_probe = true;
             pid_to_stderr();
         }
-        let mut cpu_list = Vec::new();
-        if pip_get_non_option_arg(0, &mut cpu_list) == 0 {
+        // `processchunks.cpp:328-333` ignores both statuses; on failure the
+        // C's pointer stays NULL and neither member is assigned.
+        if let Ok(cpu_list) = pip_get_non_option_arg(0) {
             self.cpu_list = String::from_utf8_lossy(&cpu_list).into_owned();
         }
-        let mut root_name = Vec::new();
-        if pip_get_non_option_arg(1, &mut root_name) == 0 {
+        if let Ok(root_name) = pip_get_non_option_arg(1) {
             self.root_name = Some(String::from_utf8_lossy(&root_name).into_owned());
         }
         //Error check
@@ -1645,8 +1645,11 @@ impl Processchunks {
         //For a single file or each multiple file, one element is added to comFileArray.
         if self.single_file != 0 || self.multiple_files != 0 {
             for i in 0..1.max(self.multiple_files) {
+                // `processchunks.cpp:1228` ignores the status.
                 let mut arg_name = Vec::new();
-                pip_get_non_option_arg(i + 1, &mut arg_name);
+                if let Ok(arg) = pip_get_non_option_arg(i + 1) {
+                    arg_name = arg;
+                }
                 let mut root_name = String::from_utf8_lossy(&arg_name).into_owned();
 
                 // If it already ends in .com or .pcm, check that it exists

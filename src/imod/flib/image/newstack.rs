@@ -331,8 +331,8 @@ pub fn newstack() {
         // (`newstack.f90:311, 558`): every non-option argument but the last is
         // an input, the last one is the output.
         for index in 0..num_non_opt_arg {
-            if pip_get_non_option_arg(index, &mut string_value) == 0 {
-                non_options.push(String::from_utf8_lossy(&string_value).into_owned());
+            if let Ok(arg_value) = pip_get_non_option_arg(index) {
+                non_options.push(String::from_utf8_lossy(&arg_value).into_owned());
             }
         }
         pip_number_of_entries(b"SectionsToRead", &mut section_list_entries);
@@ -936,7 +936,7 @@ pub fn newstack() {
                     &mut section_type,
                 );
                 if adoc_index >= 0 {
-                    adoc_set_current(adoc_index);
+                    let _ = adoc_set_current(adoc_index);
                     for section in 0..header.nz {
                         let mut spacing = 0.0_f32;
                         if adoc_get_float(ADOC_ZVALUE_NAME, section, b"PixelSpacing", &mut spacing)
@@ -3590,7 +3590,7 @@ pub fn newstack() {
                             ind_global_adoc += 1;
                         }
                         if ind_global_adoc >= 0 {
-                            if adoc_set_current(ind_global_adoc - 1) != 0 {
+                            if adoc_set_current(ind_global_adoc - 1).is_err() {
                                 ind_global_adoc = -1;
                             } else if adoc_set_integer(ADOC_GLOBAL_NAME, 0, b"image_pyramid", 1)
                                 != 0
@@ -7415,7 +7415,7 @@ pub fn newstack() {
                                 }
                                 let title_text = format!("Tilt axis angle = {value:8.1}");
                                 set_current_adoc_or_exit(ind_adoc_out, "output");
-                                if adoc_add_section(b"T", title_text.as_bytes()) <= 0 {
+                                if adoc_add_section(b"T", title_text.as_bytes()).is_err() {
                                     exit_error("Adding title section to autodoc");
                                 }
                                 set_current_adoc_or_exit(ind_adoc_in, "input");
@@ -7459,13 +7459,15 @@ pub fn newstack() {
                     let mut ind_sect_in =
                         adoc_lookup_by_name_value(ADOC_ZVALUE_NAME, out_section as i32);
                     if ind_sect_in < 0 {
-                        ind_sect_in = adoc_find_insert_index(ADOC_ZVALUE_NAME, out_section as i32);
+                        ind_sect_in = adoc_find_insert_index(ADOC_ZVALUE_NAME, out_section as i32)
+                            .unwrap_or(-1);
                         if ind_sect_in >= 0
                             && adoc_insert_section(
                                 ADOC_ZVALUE_NAME,
                                 ind_sect_in,
                                 list_string.as_bytes(),
-                            ) < 0
+                            )
+                            .is_err()
                         {
                             ind_sect_in = -2;
                         }
@@ -8751,21 +8753,19 @@ pub fn get_offset_entries(
 /// (`adoc_fwrap.c:481, 397, 493`) subtract one before the C entry points, so
 /// this does the same at each call.
 pub unsafe fn transfer_collections(zvalue_name: &[u8], ind_adoc_out: i32) -> Result<(), String> {
-    let count = adoc_get_num_collections();
+    let count = adoc_get_num_collections().unwrap_or(-1);
     for collection in 1..=count {
-        let mut name = Vec::<u8>::new();
-        if adoc_get_collection_name(collection - 1, &mut name) != 0 {
+        let Ok(name) = adoc_get_collection_name(collection - 1) else {
             return Err("Getting collection name for transferring other autodoc sections".into());
-        }
+        };
         if name != zvalue_name && name != b"T" {
-            let count = adoc_get_number_of_sections(&name);
+            let count = adoc_get_number_of_sections(&name).unwrap_or(-1);
             for section in 1..=count {
-                let mut section_name = Vec::<u8>::new();
-                if adoc_get_section_name(&name, section - 1, &mut section_name) != 0 {
+                let Ok(section_name) = adoc_get_section_name(&name, section - 1) else {
                     return Err(
                         "Getting section name for transferring other autodoc sections".into(),
                     );
-                }
+                };
                 if adoc_transfer_section(
                     &name,
                     section - 1,

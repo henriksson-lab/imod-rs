@@ -1554,7 +1554,7 @@ pub fn ii_transfer_adoc_sections(from_file: &ImodImageFile, to_file: &ImodImageF
     if from_file.adoc_index < 0 || to_file.adoc_index < 0 {
         return 1;
     }
-    if adoc_set_current(from_file.adoc_index) != 0
+    if adoc_set_current(from_file.adoc_index).is_err()
         || adoc_transfer_section(
             ADOC_GLOBAL_NAME,
             0,
@@ -1575,23 +1575,29 @@ pub fn ii_transfer_adoc_sections(from_file: &ImodImageFile, to_file: &ImodImageF
     } else {
         to_file.adoc_index
     };
-    if adoc_set_current(from_doc) != 0 {
+    if adoc_set_current(from_doc).is_err() {
         return 1;
     }
-    for coll in 0..adoc_get_num_collections() {
-        let mut coll_name = Vec::new();
-        if adoc_get_collection_name(coll, &mut coll_name) != 0 {
+    // `iimage.c:1060-1061`: a failed AdocGetNumCollections returns -1, which makes the
+    // loop body run zero times rather than signalling an error.
+    for coll in 0..adoc_get_num_collections().unwrap_or(-1) {
+        let Ok(coll_name) = adoc_get_collection_name(coll) else {
             return 1;
-        }
+        };
         let mut err = 0;
         if coll_name == ADOC_ZVALUE_NAME {
-            for section in 0..adoc_get_number_of_sections(&coll_name) {
-                let mut section_name = Vec::new();
-                if adoc_get_section_name(&coll_name, section, &mut section_name) != 0 {
-                    err = 1;
-                } else {
-                    err =
-                        adoc_transfer_section(&coll_name, section, to_doc, Some(&section_name), 0);
+            for section in 0..adoc_get_number_of_sections(&coll_name).unwrap_or(-1) {
+                match adoc_get_section_name(&coll_name, section) {
+                    Err(()) => err = 1,
+                    Ok(section_name) => {
+                        err = adoc_transfer_section(
+                            &coll_name,
+                            section,
+                            to_doc,
+                            Some(&section_name),
+                            0,
+                        );
+                    }
                 }
                 if err != 0 {
                     break;
@@ -2121,7 +2127,7 @@ pub fn ii_load_pcoord(
         let mut num_sect = 0;
         let mut sect_type = 0;
         if adoc_index >= 0
-            && adoc_set_current(adoc_index) == 0
+            && adoc_set_current(adoc_index).is_ok()
             && adoc_get_image_meta_info(&mut montage, &mut num_sect, &mut sect_type) == 0
         {
             crate::imod::libiimod::plist::ii_plist_from_autodoc(

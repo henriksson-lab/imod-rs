@@ -417,7 +417,7 @@ pub fn mrc2tif() {
                     )],
                 ));
             }
-            if adoc_set_current(adoc_ind) != 0
+            if adoc_set_current(adoc_ind).is_err()
                 || adoc_get_image_meta_info(&mut if_montage, &mut num_adoc_sect, &mut sect_type)
                     != 0
             {
@@ -770,7 +770,7 @@ pub fn mrc2tif() {
                 // by value and can only fail on a mode the switch above
                 // already rejected; the source's `sliceInit` returns void.
                 let buf = std::mem::take(&mut slice.data);
-                if slice_init(&mut slice, hdata.nx, nlines, hdata.mode, buf) != 0 {
+                if slice_init(&mut slice, hdata.nx, nlines, hdata.mode, buf).is_err() {
                     exit_error(b"Failed to allocate memory for slice");
                 }
                 if auto_contrast {

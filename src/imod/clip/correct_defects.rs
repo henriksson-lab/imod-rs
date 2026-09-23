@@ -2077,7 +2077,8 @@ pub fn cor_def_parse_defects(
             1,
             &mut number_to_get,
             value_len,
-        );
+        )
+        .map_or(-1, |()| 0);
         // `CorrectDefects.cpp:1704` keeps going after a PipGetLineOfValues
         // error; only a recognised tag turns it into a return of 2, so a line
         // whose tag is not known is skipped whatever its content.

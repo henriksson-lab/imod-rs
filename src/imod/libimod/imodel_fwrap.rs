@@ -1178,7 +1178,7 @@ pub fn deleteimodcont(ob: i32, co: i32) -> i32 {
         }
         let imod = state.imod.as_mut().unwrap();
         imod_set_index(imod, ob - 1, co - 1, -1);
-        if imod_delete_contour(imod, co - 1) < 0 {
+        if imod_delete_contour(imod, co - 1).is_err() {
             return FWRAP_ERROR_FROM_CALL;
         }
         FWRAP_NOERROR
@@ -1225,7 +1225,7 @@ pub fn deleteimodpoint(ob: i32, co: i32, pt: i32) -> i32 {
         if pt < 1 || pt > contour.pts.len() as i32 {
             return FWRAP_ERROR_BAD_OBJNUM;
         }
-        if crate::imod::libimod::ipoint::imod_point_delete(contour, pt - 1) < 0 {
+        if crate::imod::libimod::ipoint::imod_point_delete(contour, pt - 1).is_err() {
             return FWRAP_ERROR_FROM_CALL;
         }
         FWRAP_NOERROR
@@ -2443,11 +2443,14 @@ pub fn getimodnesting(
             level[co] = 0;
             nestind[co] = -1;
             if !imod.obj[obj_index].cont[co].pts.is_empty() {
-                imod_contour_get_bbox(
-                    Some(&imod.obj[obj_index].cont[co]),
-                    &mut pmin[co],
-                    &mut pmax[co],
-                );
+                // `imodel_fwrap.c:2384` ignores the status; on failure the
+                // caller's min and max points keep their prior values.
+                if let Ok((bbox_min, bbox_max)) =
+                    imod_contour_get_bbox(Some(&imod.obj[obj_index].cont[co]))
+                {
+                    pmin[co] = bbox_min;
+                    pmax[co] = bbox_max;
+                }
             }
         }
 

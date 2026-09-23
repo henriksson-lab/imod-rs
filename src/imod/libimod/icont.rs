@@ -490,8 +490,6 @@ pub fn imod_contour_moment(cont: Option<&Icont>, a: i32, b: i32) -> f64 {
 /// Computes the center of mass of contour `cont` and returns the result in
 /// `rpt`.
 pub fn imod_contour_center_of_mass(cont: Option<&mut Icont>, rpt: &mut Ipoint) -> i32 {
-    let mut weights = 0.0f64;
-
     rpt.x = 0.0;
     rpt.y = 0.0;
     rpt.z = 0.0;
@@ -506,11 +504,18 @@ pub fn imod_contour_center_of_mass(cont: Option<&mut Icont>, rpt: &mut Ipoint) -
     if cont.flags & ICONT_TEMPUSE != 0 {
         cont.flags |= !ICONT_TEMPUSE;
     }
-    let err = imodel_contour_centroid(Some(cont), rpt, &mut weights);
+    let err = imodel_contour_centroid(Some(cont));
     cont.flags = save_flags;
-    if err != 0 {
-        return err;
-    }
+    let (centroid, weights) = match err {
+        Ok(pair) => pair,
+        // The C returns the -1 here with `rpt` still holding whatever the
+        // centroid wrote before failing (`icont.c:600`: rcp->z is set from
+        // pts[0] just before makeOrReturnScanContour can fail).  The folded
+        // `Ok` value cannot carry that partial state, and the path is only
+        // reachable on an allocation failure, so `rpt` keeps its zeros.
+        Err(()) => return -1,
+    };
+    *rpt = centroid;
 
     if weights.abs() > 1.0e-20 {
         rpt.x = (rpt.x as f64 / weights) as f32;
@@ -522,9 +527,14 @@ pub fn imod_contour_center_of_mass(cont: Option<&mut Icont>, rpt: &mut Ipoint) -
 
 /// Original: `imodel_contour_centroid` (`icont.c:551`).
 ///
-/// Computes components of the centroid of contour `icont`, returning the sum of
-/// pixel locations in `rcp` and the pixel sum or length in `rtw`.
-pub fn imodel_contour_centroid(icont: Option<&Icont>, rcp: &mut Ipoint, rtw: &mut f64) -> i32 {
+/// Computes components of the centroid of contour `icont`.  The C's two
+/// out-parameters are folded into the `Ok` value: the sum of pixel locations
+/// (`rcp`) and the pixel sum or contour length (`rtw`).  `Err(())` is the
+/// source's -1 for a NULL or empty contour, or a failed scan contour
+/// (`icont.c:564`, `icont.c:567`, `icont.c:601`).
+pub fn imodel_contour_centroid(icont: Option<&Icont>) -> Result<(Ipoint, f64), ()> {
+    let mut rcp = Ipoint::default();
+    let mut rtw: f64 = 0.;
     let min_weight: f32 = 0.01;
     let scale = Ipoint {
         x: 1.,
@@ -533,23 +543,23 @@ pub fn imodel_contour_centroid(icont: Option<&Icont>, rcp: &mut Ipoint, rtw: &mu
     };
 
     let Some(icont) = icont else {
-        return -1;
+        return Err(());
     };
     if icont.pts.is_empty() {
-        return -1;
+        return Err(());
     }
 
     if icont.pts.len() == 1 {
         rcp.x = icont.pts[0].x;
         rcp.y = icont.pts[0].y;
         rcp.z = icont.pts[0].z;
-        *rtw = 1.;
-        return 0;
+        rtw = 1.;
+        return Ok((rcp, rtw));
     }
 
     rcp.x = 0.0;
     rcp.y = 0.0;
-    *rtw = 0.;
+    rtw = 0.;
 
     /* Handle contour in open contour object */
     if icont.flags & ICONT_TEMPUSE != 0 {
@@ -559,15 +569,15 @@ pub fn imodel_contour_centroid(icont: Option<&Icont>, rcp: &mut Ipoint, rtw: &mu
             rcp.x += weight * (icont.pts[i - 1].x + icont.pts[i].x) * 0.5f32;
             rcp.y += weight * (icont.pts[i - 1].y + icont.pts[i].y) * 0.5f32;
             rcp.z += weight * (icont.pts[i - 1].z + icont.pts[i].z) * 0.5f32;
-            *rtw += weight as f64;
+            rtw += weight as f64;
         }
-        return 0;
+        return Ok((rcp, rtw));
     }
 
     /* Use scan contour for closed contour object */
     rcp.z = icont.pts[0].z;
     let Some(cont) = make_or_return_scan_contour(Some(icont)) else {
-        return -1;
+        return Err(());
     };
 
     let mut pix: i32 = 0;
@@ -606,7 +616,7 @@ pub fn imodel_contour_centroid(icont: Option<&Icont>, rcp: &mut Ipoint, rtw: &mu
                 };
                 rcp.x += xval * weight;
                 rcp.y += yval * weight;
-                *rtw += weight as f64;
+                rtw += weight as f64;
 
                 if xmin >= cont.surf {
                     pix += xmax - xmin;
@@ -620,8 +630,8 @@ pub fn imodel_contour_centroid(icont: Option<&Icont>, rcp: &mut Ipoint, rtw: &mu
     }
     let _ = pix;
     cleanup_scan_contour(icont, cont);
-    rcp.z = (rcp.z as f64 * *rtw) as f32;
-    0
+    rcp.z = (rcp.z as f64 * rtw) as f32;
+    Ok((rcp, rtw))
 }
 
 /// Original: `imodContourCenterMoment` (`icont.c:642`).
@@ -1002,8 +1012,8 @@ pub fn imod_contour_fit_plane(
     let Some(mut mat) = imod_mat_new(3) else {
         return 2;
     };
-    if imod_mat_rot(&mut mat, -alfa / 0.01745329252, Axis3::X) != 0
-        || imod_mat_rot(&mut mat, -gamma / 0.01745329252, Axis3::Z) != 0
+    if imod_mat_rot(&mut mat, -alfa / 0.01745329252, Axis3::X).is_err()
+        || imod_mat_rot(&mut mat, -gamma / 0.01745329252, Axis3::Z).is_err()
     {
         imod_mat_delete(&mut mat);
         return 2;
@@ -1040,13 +1050,18 @@ pub fn imod_contour_fit_plane(
 
 /// Original: `imodContourGetBBox` (`icont.c:1024`).
 ///
-/// Calculates the full 3D bounding box of contour `cont`.
-pub fn imod_contour_get_bbox(cont: Option<&Icont>, ll: &mut Ipoint, ur: &mut Ipoint) -> i32 {
+/// Calculates the full 3D bounding box of contour `cont`.  The C's two
+/// out-parameters are folded into the `Ok` value as (lower left, upper right).
+/// `Err(())` is the source's -1 for a NULL or empty contour (`icont.c:1028`,
+/// `icont.c:1030`).
+pub fn imod_contour_get_bbox(cont: Option<&Icont>) -> Result<(Ipoint, Ipoint), ()> {
+    let mut ll = Ipoint::default();
+    let mut ur = Ipoint::default();
     let Some(cont) = cont else {
-        return -1;
+        return Err(());
     };
     if cont.pts.is_empty() {
-        return -1;
+        return Err(());
     }
 
     ll.x = cont.pts[0].x;
@@ -1076,7 +1091,7 @@ pub fn imod_contour_get_bbox(cont: Option<&Icont>, ll: &mut Ipoint, ur: &mut Ipo
             ur.z = cont.pts[pt].z;
         }
     }
-    0
+    Ok((ll, ur))
 }
 
 /// Original: `imodContourZValue` (`icont.c:1060`).
@@ -1506,7 +1521,7 @@ pub fn imod_contour_join(
             // Delete pt2 points
             lst3 = add_pt[lst2 as usize];
             for _pt in 0..pt2 {
-                imod_point_delete(&mut cont, lst3);
+                let _ = imod_point_delete(&mut cont, lst3);
                 lst3 = (lst3 + cont.pts.len() as i32 + dir1) % cont.pts.len() as i32;
             }
             lst2 -= 1;
@@ -2028,7 +2043,7 @@ pub fn imod_contour_reduce(cont: Option<&mut Icont>, tol: f32) {
                 /* Delete any points between current and next point */
                 let mut its = ipo + 1;
                 while its < nextpt[ipo as usize] {
-                    imod_point_delete(cont, npo);
+                    let _ = imod_point_delete(cont, npo);
                     its += 1;
                 }
                 ipo = nextpt[ipo as usize];
@@ -2066,7 +2081,7 @@ pub fn imod_contour_shave(cont: &mut Icont, dist: f64) -> Result<(), ()> {
         let pdist = imodel_point_dist(&cont.pts[(i - 1) as usize], &cont.pts[i as usize]);
         let ndist = imodel_point_dist(&cont.pts[(i + 1) as usize], &cont.pts[i as usize]);
         if (pdist < dist) && (ndist < dist) && istore_retain_point(&cont.store, i) == 0 {
-            imod_point_delete(cont, i);
+            let _ = imod_point_delete(cont, i);
             i -= 1;
         }
 
@@ -2088,7 +2103,7 @@ pub fn imod_contour_unique(cont: &mut Icont) -> i32 {
             && cont.pts[i].y == cont.pts[j].y
             && cont.pts[i].z == cont.pts[j].z
         {
-            imod_point_delete(cont, j as i32);
+            let _ = imod_point_delete(cont, j as i32);
         } else {
             i += 1;
         }
@@ -2114,7 +2129,7 @@ pub fn imod_contour_strip(cont: &mut Icont) -> i32 {
             nis = 1;
         }
         if is != 0 && nis != 0 {
-            imod_point_delete(cont, npt);
+            let _ = imod_point_delete(cont, npt);
             pt -= 1;
             pt += 1;
             continue;
@@ -2134,7 +2149,7 @@ pub fn imod_contour_strip(cont: &mut Icont) -> i32 {
             / (cont.pts[nnpt as usize].x - cont.pts[npt as usize].x)) as f64;
 
         if slope == nslope {
-            imod_point_delete(cont, npt);
+            let _ = imod_point_delete(cont, npt);
             pt -= 1;
         }
         pt += 1;
@@ -2292,7 +2307,11 @@ pub fn imodel_contour_scan(incont: Option<&Icont>) -> Option<Icont> {
     /* DNM: eliminate getting rid of lines parallel to y scan */
     let mut pmin = Ipoint::default();
     let mut pmax = Ipoint::default();
-    imod_contour_get_bbox(Some(&ocont), &mut pmin, &mut pmax);
+    // The C ignores the status and leaves pmin/pmax untouched on failure.
+    if let Ok((ll, ur)) = imod_contour_get_bbox(Some(&ocont)) {
+        pmin = ll;
+        pmax = ur;
+    }
     let ymin = pmin.y as i32;
     let ymax = pmax.y as i32;
 
@@ -2505,8 +2524,15 @@ pub fn imodel_contour_overlap(c1: &Icont, c2: &Icont) -> i32 {
     let mut pmin2 = Ipoint::default();
 
     /* first check and see if bounding box overlaps. */
-    imod_contour_get_bbox(Some(c1), &mut pmin1, &mut pmax1);
-    imod_contour_get_bbox(Some(c2), &mut pmin2, &mut pmax2);
+    // The C ignores both statuses and leaves the points untouched on failure.
+    if let Ok((ll, ur)) = imod_contour_get_bbox(Some(c1)) {
+        pmin1 = ll;
+        pmax1 = ur;
+    }
+    if let Ok((ll, ur)) = imod_contour_get_bbox(Some(c2)) {
+        pmin2 = ll;
+        pmax2 = ur;
+    }
 
     if pmax1.x < pmin2.x {
         return 0;
@@ -3368,16 +3394,14 @@ mod tests {
     fn bbox_covers_all_three_axes() {
         let mut cont = square(10.);
         cont.pts[2].z = -4.;
-        let mut ll = Ipoint::default();
-        let mut ur = Ipoint::default();
-        assert_eq!(imod_contour_get_bbox(Some(&cont), &mut ll, &mut ur), 0);
+        let (ll, ur) = imod_contour_get_bbox(Some(&cont)).unwrap();
         assert_eq!(
             (ll.x, ll.y, ll.z, ur.x, ur.y, ur.z),
             (0., 0., -4., 10., 10., 3.)
         );
-        assert_eq!(imod_contour_get_bbox(None, &mut ll, &mut ur), -1);
+        assert_eq!(imod_contour_get_bbox(None), Err(()));
         let empty = imod_contour_new().unwrap();
-        assert_eq!(imod_contour_get_bbox(Some(&empty), &mut ll, &mut ur), -1);
+        assert_eq!(imod_contour_get_bbox(Some(&empty)), Err(()));
     }
 
     /// `imodel_contour_scan` (`icont.c:2332`) emits point pairs ordered by Y,
@@ -3439,13 +3463,11 @@ mod tests {
             y: 5.,
             z: 6.,
         }];
-        let mut rcp = Ipoint::default();
-        let mut rtw = 0.;
-        assert_eq!(imodel_contour_centroid(Some(&cont), &mut rcp, &mut rtw), 0);
+        let (rcp, rtw) = imodel_contour_centroid(Some(&cont)).unwrap();
         assert_eq!((rcp.x, rcp.y, rcp.z, rtw), (4., 5., 6., 1.));
         assert_eq!(
-            imodel_contour_centroid(Some(&imod_contour_new().unwrap()), &mut rcp, &mut rtw),
-            -1
+            imodel_contour_centroid(Some(&imod_contour_new().unwrap())),
+            Err(())
         );
     }
 
@@ -3748,7 +3770,10 @@ mod tests {
             ));
             let mut ll = Ipoint::default();
             let mut ur = Ipoint::default();
-            imod_contour_get_bbox(Some(c), &mut ll, &mut ur);
+            if let Ok((a, b)) = imod_contour_get_bbox(Some(c)) {
+                ll = a;
+                ur = b;
+            }
             out.push_str(&format!(
                 "{tag} bbox {} {} {} {} {} {}
 ",
@@ -3793,7 +3818,10 @@ mod tests {
             ));
             let mut rcp = Ipoint::default();
             let mut rtw = 0.;
-            imodel_contour_centroid(Some(c), &mut rcp, &mut rtw);
+            if let Ok((p, w)) = imodel_contour_centroid(Some(c)) {
+                rcp = p;
+                rtw = w;
+            }
             out.push_str(&format!(
                 "{tag} centroid {} {} {} {}
 ",
@@ -4438,8 +4466,14 @@ mod source_driver_group2 {
             let mut mx1 = Ipoint::default();
             let mut mn2 = Ipoint::default();
             let mut mx2 = Ipoint::default();
-            imod_contour_get_bbox(Some(&s1), &mut mn1, &mut mx1);
-            imod_contour_get_bbox(Some(&s2), &mut mn2, &mut mx2);
+            if let Ok((a, b)) = imod_contour_get_bbox(Some(&s1)) {
+                mn1 = a;
+                mx1 = b;
+            }
+            if let Ok((a, b)) = imod_contour_get_bbox(Some(&s2)) {
+                mn2 = a;
+                mx2 = b;
+            }
             out.push_str(&format!(
                 "so {}\n",
                 imodel_scans_overlap(Some(&s1), mn1, mx1, Some(&s2), mn2, mx2)
@@ -4448,8 +4482,14 @@ mod source_driver_group2 {
             out.push_str(&format!("of {} {}\n", g9(frac1 as f64), g9(frac2 as f64)));
             let mut u1 = imod_contour_dup(&c1).unwrap();
             let mut u2 = imod_contour_dup(&cin).unwrap();
-            imod_contour_get_bbox(Some(&u1), &mut mn1, &mut mx1);
-            imod_contour_get_bbox(Some(&u2), &mut mn2, &mut mx2);
+            if let Ok((a, b)) = imod_contour_get_bbox(Some(&u1)) {
+                mn1 = a;
+                mx1 = b;
+            }
+            if let Ok((a, b)) = imod_contour_get_bbox(Some(&u2)) {
+                mn2 = a;
+                mx2 = b;
+            }
             out.push_str(&format!(
                 "of2 {}\n",
                 imodel_overlap_fractions(
@@ -4565,10 +4605,16 @@ mod source_driver_group2 {
             let mut pmin = [Ipoint::default(); 2];
             let mut pmax = [Ipoint::default(); 2];
             let (mut a, mut b) = (Ipoint::default(), Ipoint::default());
-            imod_contour_get_bbox(Some(&scans[0]), &mut a, &mut b);
+            if let Ok((lo, hi)) = imod_contour_get_bbox(Some(&scans[0])) {
+                a = lo;
+                b = hi;
+            }
             pmin[0] = a;
             pmax[0] = b;
-            imod_contour_get_bbox(Some(&scans[1]), &mut a, &mut b);
+            if let Ok((lo, hi)) = imod_contour_get_bbox(Some(&scans[1])) {
+                a = lo;
+                b = hi;
+            }
             pmin[1] = a;
             pmax[1] = b;
             let mut nests: Vec<Nesting> = Vec::new();

@@ -255,7 +255,12 @@ pub fn imod_mesh_dup(mesh: Option<&Imesh>) -> Option<Imesh> {
 
 /// Original: `imodMeshDelete` (`imesh.c:141`).
 pub fn imod_mesh_delete(mesh: Option<Vec<Imesh>>) -> i32 {
-    imod_meshes_delete(mesh, 1)
+    // `imesh.c:143` returns imodMeshesDelete's status unchanged; map the
+    // Result back to it, since this function keeps the C's int return.
+    match imod_meshes_delete(mesh, 1) {
+        Ok(()) => 0,
+        Err(()) => -1,
+    }
 }
 
 /// Original: `imodMeshFreeData` (`imesh.c:149`).
@@ -273,10 +278,12 @@ pub fn imod_mesh_free_data(mesh: Option<&mut Imesh>) -> Result<(), ()> {
 }
 
 /// Original: `imodMeshesDelete` (`imesh.c:163`).
-pub fn imod_meshes_delete(mesh: Option<Vec<Imesh>>, size: i32) -> i32 {
+///
+/// `Err(())` is the source's only -1, for a NULL `mesh` (`imesh.c:166`).
+pub fn imod_meshes_delete(mesh: Option<Vec<Imesh>>, size: i32) -> Result<(), ()> {
     let mut mesh = match mesh {
         Some(mesh) => mesh,
-        None => return -1,
+        None => return Err(()),
     };
     for ms in 0..size as usize {
         if ms < mesh.len() {
@@ -285,7 +292,7 @@ pub fn imod_meshes_delete(mesh: Option<Vec<Imesh>>, size: i32) -> i32 {
         }
     }
     drop(mesh);
-    0
+    Ok(())
 }
 
 /// Original: `imodMeshAddIndex` (`imesh.c:179`).

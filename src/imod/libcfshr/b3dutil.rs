@@ -719,39 +719,46 @@ pub fn extra_is_nbytes_and_flags(nint: i32, nreal: i32) -> i32 {
 }
 
 /// Matches C `dataSizeForMode(int, int *, int *)` (`b3dutil.c:1113`).
-pub fn data_size_for_mode(mode: i32, data_size: &mut i32, channels: &mut i32) -> i32 {
+///
+/// The source returns 0 or -1 and delivers its two results, the byte size of
+/// the basic data element and the number of channels, through the `dataSize`
+/// and `channels` pointers; both are folded into the `Ok` value here as
+/// `(data_size, channels)`.
+pub fn data_size_for_mode(mode: i32) -> Result<(i32, i32), ()> {
+    let data_size: i32;
+    let channels: i32;
     match mode {
         0 => {
-            *data_size = 1;
-            *channels = 1;
+            data_size = 1;
+            channels = 1;
         }
         1 | 6 => {
-            *data_size = 2;
-            *channels = 1;
+            data_size = 2;
+            channels = 1;
         }
         2 => {
-            *data_size = 4;
-            *channels = 1;
+            data_size = 4;
+            channels = 1;
         }
         3 => {
-            *data_size = 2;
-            *channels = 2;
+            data_size = 2;
+            channels = 2;
         }
         4 => {
-            *data_size = 4;
-            *channels = 2;
+            data_size = 4;
+            channels = 2;
         }
         16 => {
-            *data_size = 1;
-            *channels = 3;
+            data_size = 1;
+            channels = 3;
         }
         99 => {
-            *data_size = 4;
-            *channels = 3;
+            data_size = 4;
+            channels = 3;
         }
-        _ => return -1,
+        _ => return Err(()),
     }
-    0
+    Ok((data_size, channels))
 }
 
 /// Matches C `readBytesSigned(int, int, int, float, float)` (`b3dutil.c:425`).
@@ -1416,11 +1423,9 @@ pub fn make_all_big_tiff() -> i32 {
 }
 /// Matches C `setNextOutputSize` (`b3dutil.c:678`).
 pub fn set_next_output_size(nx: i32, ny: i32, nz: i32, mode: i32) {
-    let mut bytes = 0;
-    let mut channels = 0;
-    if data_size_for_mode(mode, &mut bytes, &mut channels) != 0 {
+    let Ok((bytes, channels)) = data_size_for_mode(mode) else {
         return;
-    }
+    };
     override_all_big_tiff(
         if (nx as f64 * ny as f64) * nz as f64 * channels as f64 * bytes as f64 > 4.0e9 {
             1
@@ -2754,13 +2759,9 @@ mod tests {
 
     #[test]
     fn data_size_for_mode_retains_source_mode_table() {
-        let mut data_size = 0;
-        let mut channels = 0;
-        assert_eq!(data_size_for_mode(4, &mut data_size, &mut channels), 0);
-        assert_eq!((data_size, channels), (4, 2));
-        assert_eq!(data_size_for_mode(99, &mut data_size, &mut channels), 0);
-        assert_eq!((data_size, channels), (4, 3));
-        assert_eq!(data_size_for_mode(12, &mut data_size, &mut channels), -1);
+        assert_eq!(data_size_for_mode(4), Ok((4, 2)));
+        assert_eq!(data_size_for_mode(99), Ok((4, 3)));
+        assert_eq!(data_size_for_mode(12), Err(()));
     }
 
     #[test]
