@@ -59,8 +59,8 @@ pub fn get_key_of_string(name: Option<&str>) -> Option<String> {
 
 impl Attribute {
     /// Java package-private `Attribute(WriteOnlyAttributeList, Token, int)`.
-    /// Construction still returns a pointer for the translated parser interface; the
-    /// receiving `AttributeList` immediately transfers it into its owned `Box` list.
+    /// Returns the box: the receiving `AttributeList` is the owner, and the map
+    /// and name/value pairs only borrow the address.
     ///
     /// # Safety
     /// `parent` must point to a live attribute-list owner and `name` to a live `Token`
@@ -70,8 +70,8 @@ impl Attribute {
         parent: *mut dyn WriteOnlyAttributeList,
         name: *mut Token,
         line_num: i32,
-    ) -> *mut Attribute {
-        Box::into_raw(Box::new(Attribute {
+    ) -> Box<Attribute> {
+        Box::new(Attribute {
             parent,
             name,
             key: unsafe { (*name).get_key() },
@@ -79,7 +79,7 @@ impl Attribute {
             occurrences: 1,
             name_value_pair_list: None,
             children: None,
-        }))
+        })
     }
 
     /// Java package-private `getKey()`.

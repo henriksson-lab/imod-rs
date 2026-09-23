@@ -205,6 +205,14 @@ thread_local! {
         RefCell::new(HashMap::new());
     /// Java private static `replacementDir`, initialised to null.
     static REPLACEMENT_DIR: RefCell<Option<String>> = const { RefCell::new(None) };
+    /// Owns every `Autodoc` this factory builds.  Java's owner is the collector:
+    /// a named instance is held by a `private static` field for the life of the
+    /// process, and an unmanaged one lives as long as its caller keeps it.  This
+    /// module is the sole producer, so one arena here gives every allocation an
+    /// owner -- without it the raw pointers these functions return are never
+    /// reclaimed by anyone.  A `Box` does not move its contents, so the pointers
+    /// stay valid as the `Vec` grows.
+    static OWNED_AUTODOCS: RefCell<Vec<Box<Autodoc>>> = const { RefCell::new(Vec::new()) };
 }
 
 /// Java `getInstance(BaseManager, String)`.
@@ -232,7 +240,11 @@ pub unsafe fn get_com_instance(name: Option<&str>) -> Result<*mut Autodoc, LogFi
     if !autodoc.is_null() {
         return Ok(autodoc);
     }
-    autodoc = unsafe { Autodoc::new(Some(name), std::ptr::null_mut()) };
+    autodoc = OWNED_AUTODOCS.with_borrow_mut(|owned| {
+        owned.push(unsafe { Autodoc::new(Some(name), std::ptr::null_mut()) });
+        let autodoc: *mut Autodoc = &mut **owned.last_mut().unwrap();
+        autodoc
+    });
     unsafe {
         Autodoc::initialize_generic_instance_env_var(
             autodoc,
@@ -261,7 +273,11 @@ pub unsafe fn get_unmanaged_autodoc_instance(
         None => panic!("java.lang.IllegalStateException: name is null"),
         Some(name) => name,
     };
-    let autodoc = unsafe { Autodoc::new(Some(name), std::ptr::null_mut()) };
+    let autodoc: *mut Autodoc = OWNED_AUTODOCS.with_borrow_mut(|owned| {
+        owned.push(unsafe { Autodoc::new(Some(name), std::ptr::null_mut()) });
+        let autodoc: *mut Autodoc = &mut **owned.last_mut().unwrap();
+        autodoc
+    });
     let mut autodoc_file: Option<std::path::PathBuf> = None;
     if let Some(file_type) = file_type {
         autodoc_file = file_type.get_file(manager, Some(axis_id));
@@ -296,7 +312,11 @@ pub unsafe fn get_instance(
     if !autodoc.is_null() {
         return Ok(autodoc);
     }
-    autodoc = unsafe { Autodoc::new(Some(name), std::ptr::null_mut()) };
+    autodoc = OWNED_AUTODOCS.with_borrow_mut(|owned| {
+        owned.push(unsafe { Autodoc::new(Some(name), std::ptr::null_mut()) });
+        let autodoc: *mut Autodoc = &mut **owned.last_mut().unwrap();
+        autodoc
+    });
     set_instance(name, autodoc);
     unsafe { (*autodoc).set_debug_to(debug) };
     if name == UITEST {
@@ -323,12 +343,16 @@ pub unsafe fn get_matlab_instance(
         None => panic!("java.lang.IllegalStateException: file is null"),
         Some(file) => file,
     };
-    let autodoc = unsafe {
-        Autodoc::new(
-            Some(&strip_file_extension_of_file(file)),
-            std::ptr::null_mut(),
-        )
-    };
+    let autodoc: *mut Autodoc = OWNED_AUTODOCS.with_borrow_mut(|owned| {
+        owned.push(unsafe {
+            Autodoc::new(
+                Some(&strip_file_extension_of_file(file)),
+                std::ptr::null_mut(),
+            )
+        });
+        let autodoc: *mut Autodoc = &mut **owned.last_mut().unwrap();
+        autodoc
+    });
     match unsafe { Autodoc::initialize_matlab_instance(autodoc, manager, file, writable) } {
         Ok(()) => Ok(autodoc),
         Err(LogFileError::Io(e)) => {
@@ -353,12 +377,16 @@ pub unsafe fn get_writable_instance(
         None => panic!("java.lang.IllegalStateException: file is null"),
         Some(file) => file,
     };
-    let autodoc = unsafe {
-        Autodoc::new(
-            Some(&strip_file_extension_of_file(file)),
-            std::ptr::null_mut(),
-        )
-    };
+    let autodoc: *mut Autodoc = OWNED_AUTODOCS.with_borrow_mut(|owned| {
+        owned.push(unsafe {
+            Autodoc::new(
+                Some(&strip_file_extension_of_file(file)),
+                std::ptr::null_mut(),
+            )
+        });
+        let autodoc: *mut Autodoc = &mut **owned.last_mut().unwrap();
+        autodoc
+    });
     match unsafe { Autodoc::initialize_writable_instance(autodoc, manager, file) } {
         Ok(()) => Ok(autodoc),
         // Java's `catch (FileNotFoundException)`.
@@ -379,12 +407,16 @@ pub unsafe fn get_empty_writable_instance(
         None => panic!("java.lang.IllegalStateException: file is null"),
         Some(file) => file,
     };
-    let autodoc = unsafe {
-        Autodoc::new(
-            Some(&strip_file_extension_of_file(file)),
-            std::ptr::null_mut(),
-        )
-    };
+    let autodoc: *mut Autodoc = OWNED_AUTODOCS.with_borrow_mut(|owned| {
+        owned.push(unsafe {
+            Autodoc::new(
+                Some(&strip_file_extension_of_file(file)),
+                std::ptr::null_mut(),
+            )
+        });
+        let autodoc: *mut Autodoc = &mut **owned.last_mut().unwrap();
+        autodoc
+    });
     unsafe { Autodoc::initialize_empty_writable_instance(autodoc, manager, file) };
     autodoc
 }
@@ -401,12 +433,16 @@ pub unsafe fn get_empty_matlab_instance(
         None => panic!("java.lang.IllegalStateException: file is null"),
         Some(file) => file,
     };
-    let autodoc = unsafe {
-        Autodoc::new(
-            Some(&strip_file_extension_of_file(file)),
-            std::ptr::null_mut(),
-        )
-    };
+    let autodoc: *mut Autodoc = OWNED_AUTODOCS.with_borrow_mut(|owned| {
+        owned.push(unsafe {
+            Autodoc::new(
+                Some(&strip_file_extension_of_file(file)),
+                std::ptr::null_mut(),
+            )
+        });
+        let autodoc: *mut Autodoc = &mut **owned.last_mut().unwrap();
+        autodoc
+    });
     unsafe { Autodoc::initialize_empty_matlap_instance(autodoc, manager, file) };
     autodoc
 }
@@ -424,12 +460,16 @@ pub unsafe fn get_instance_file(
         None => panic!("java.lang.IllegalStateException: file is null"),
         Some(file) => file,
     };
-    let autodoc = unsafe {
-        Autodoc::new(
-            Some(&strip_file_extension_of_file(file)),
-            std::ptr::null_mut(),
-        )
-    };
+    let autodoc: *mut Autodoc = OWNED_AUTODOCS.with_borrow_mut(|owned| {
+        owned.push(unsafe {
+            Autodoc::new(
+                Some(&strip_file_extension_of_file(file)),
+                std::ptr::null_mut(),
+            )
+        });
+        let autodoc: *mut Autodoc = &mut **owned.last_mut().unwrap();
+        autodoc
+    });
     match unsafe {
         Autodoc::initialize_generic_instance(
             autodoc,
@@ -467,12 +507,16 @@ pub unsafe fn get_unmanaged_instance(
         }
         Some(autodoc_file) => autodoc_file,
     };
-    let autodoc = unsafe {
-        Autodoc::new(
-            Some(&strip_file_extension_of_file(autodoc_file)),
-            std::ptr::null_mut(),
-        )
-    };
+    let autodoc: *mut Autodoc = OWNED_AUTODOCS.with_borrow_mut(|owned| {
+        owned.push(unsafe {
+            Autodoc::new(
+                Some(&strip_file_extension_of_file(autodoc_file)),
+                std::ptr::null_mut(),
+            )
+        });
+        let autodoc: *mut Autodoc = &mut **owned.last_mut().unwrap();
+        autodoc
+    });
     match unsafe {
         Autodoc::initialize_generic_instance(
             autodoc,
@@ -508,12 +552,16 @@ pub unsafe fn get_instance_file_autodoc_name(
         None => panic!("java.lang.IllegalStateException: file is null"),
         Some(file) => file,
     };
-    let autodoc = unsafe {
-        Autodoc::new(
-            Some(&strip_file_extension_of_file(file)),
-            std::ptr::null_mut(),
-        )
-    };
+    let autodoc: *mut Autodoc = OWNED_AUTODOCS.with_borrow_mut(|owned| {
+        owned.push(unsafe {
+            Autodoc::new(
+                Some(&strip_file_extension_of_file(file)),
+                std::ptr::null_mut(),
+            )
+        });
+        let autodoc: *mut Autodoc = &mut **owned.last_mut().unwrap();
+        autodoc
+    });
     match unsafe {
         Autodoc::initialize_generic_instance(
             autodoc,
@@ -573,12 +621,16 @@ pub unsafe fn get_test_instance(
     if !autodoc.is_null() {
         return Ok(autodoc);
     }
-    autodoc = unsafe {
-        Autodoc::new(
-            Some(&strip_file_extension(autodoc_file_name)),
-            std::ptr::null_mut(),
-        )
-    };
+    autodoc = OWNED_AUTODOCS.with_borrow_mut(|owned| {
+        owned.push(unsafe {
+            Autodoc::new(
+                Some(&strip_file_extension(autodoc_file_name)),
+                std::ptr::null_mut(),
+            )
+        });
+        let autodoc: *mut Autodoc = &mut **owned.last_mut().unwrap();
+        autodoc
+    });
     UITEST_AXIS_MAP.with(|map| map.borrow_mut().insert(autodoc_file.clone(), autodoc));
     unsafe {
         Autodoc::initialize_generic_instance(
@@ -627,14 +679,18 @@ pub unsafe fn get_instance_file_axis_id(
             utilities::java_io_file_get_absolute_path(&autodoc_file.to_string_lossy())
         );
     }
-    let autodoc = unsafe {
-        Autodoc::new(
-            Some(&strip_file_extension(&utilities::java_io_file_get_name(
-                &autodoc_file.to_string_lossy(),
-            ))),
-            std::ptr::null_mut(),
-        )
-    };
+    let autodoc: *mut Autodoc = OWNED_AUTODOCS.with_borrow_mut(|owned| {
+        owned.push(unsafe {
+            Autodoc::new(
+                Some(&strip_file_extension(&utilities::java_io_file_get_name(
+                    &autodoc_file.to_string_lossy(),
+                ))),
+                std::ptr::null_mut(),
+            )
+        });
+        let autodoc: *mut Autodoc = &mut **owned.last_mut().unwrap();
+        autodoc
+    });
     unsafe {
         Autodoc::initialize_generic_instance(
             autodoc,
@@ -660,14 +716,18 @@ pub unsafe fn get_writable_autodoc_instance(
         None => return Ok(std::ptr::null_mut()),
         Some(autodoc_file) => autodoc_file,
     };
-    let autodoc = unsafe {
-        Autodoc::new(
-            Some(&strip_file_extension(&utilities::java_io_file_get_name(
-                &autodoc_file.to_string_lossy(),
-            ))),
-            std::ptr::null_mut(),
-        )
-    };
+    let autodoc: *mut Autodoc = OWNED_AUTODOCS.with_borrow_mut(|owned| {
+        owned.push(unsafe {
+            Autodoc::new(
+                Some(&strip_file_extension(&utilities::java_io_file_get_name(
+                    &autodoc_file.to_string_lossy(),
+                ))),
+                std::ptr::null_mut(),
+            )
+        });
+        let autodoc: *mut Autodoc = &mut **owned.last_mut().unwrap();
+        autodoc
+    });
     unsafe {
         Autodoc::initialize_generic_instance(
             autodoc,
@@ -694,14 +754,18 @@ pub unsafe fn get_autodoc_instance_err_msg(
         None => return Ok(std::ptr::null_mut()),
         Some(autodoc_file) => autodoc_file,
     };
-    let autodoc = unsafe {
-        Autodoc::new(
-            Some(&strip_file_extension(&utilities::java_io_file_get_name(
-                &autodoc_file.to_string_lossy(),
-            ))),
-            err_msg,
-        )
-    };
+    let autodoc: *mut Autodoc = OWNED_AUTODOCS.with_borrow_mut(|owned| {
+        owned.push(unsafe {
+            Autodoc::new(
+                Some(&strip_file_extension(&utilities::java_io_file_get_name(
+                    &autodoc_file.to_string_lossy(),
+                ))),
+                err_msg,
+            )
+        });
+        let autodoc: *mut Autodoc = &mut **owned.last_mut().unwrap();
+        autodoc
+    });
     unsafe {
         Autodoc::initialize_generic_instance(
             autodoc,
@@ -727,14 +791,18 @@ pub unsafe fn get_autodoc_instance(
         None => return Ok(std::ptr::null_mut()),
         Some(autodoc_file) => autodoc_file,
     };
-    let autodoc = unsafe {
-        Autodoc::new(
-            Some(&strip_file_extension(&utilities::java_io_file_get_name(
-                &autodoc_file.to_string_lossy(),
-            ))),
-            std::ptr::null_mut(),
-        )
-    };
+    let autodoc: *mut Autodoc = OWNED_AUTODOCS.with_borrow_mut(|owned| {
+        owned.push(unsafe {
+            Autodoc::new(
+                Some(&strip_file_extension(&utilities::java_io_file_get_name(
+                    &autodoc_file.to_string_lossy(),
+                ))),
+                std::ptr::null_mut(),
+            )
+        });
+        let autodoc: *mut Autodoc = &mut **owned.last_mut().unwrap();
+        autodoc
+    });
     unsafe {
         Autodoc::initialize_generic_instance(
             autodoc,

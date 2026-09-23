@@ -84,6 +84,13 @@ pub struct BatchRunTomoManager {
     diagnostics: Mutex<bool>,
 }
 
+/// Owns every `BatchRunTomoManager` this module builds.  Java's owner is the collector, by
+/// way of `EtomoDirector.managerList`, which keeps each manager for the run;
+/// the translation hands out `&'static Self`, so without a root here the
+/// allocation is unreachable the moment the constructor returns.
+static INSTANCES: std::sync::Mutex<Vec<&'static BatchRunTomoManager>> =
+    std::sync::Mutex::new(Vec::new());
+
 impl BatchRunTomoManager {
     /// Java `BatchRunTomoManager()`.
     pub fn new() -> &'static Self {
@@ -114,6 +121,7 @@ impl BatchRunTomoManager {
             listeners: Mutex::new(None),
             diagnostics: Mutex::new(false),
         }));
+        INSTANCES.lock().unwrap().push(instance);
         instance.base_manager();
         instance.initialize_ui_parameters_from_name(param_file_name, Some(AXIS_ID));
         instance

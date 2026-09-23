@@ -501,10 +501,14 @@ fn jvm_verified_convert_label_to_name() {
 
 #[test]
 fn base_manager_base_class_members() {
-    // A leaked manager, which is what `EtomoDirector` does with every manager it builds.
-    let manager: &'static TestManager = Box::leak(Box::new(TestManager {
+    // `getEmergencyMonitor` hands the manager to a thread, so it needs `&'static`,
+    // exactly as `EtomoDirector`'s managers do.  A `OnceLock` gives that without
+    // `Box::leak`: the value stays owned by the static and so is reachable at exit
+    // rather than unreclaimable.
+    static MANAGER: std::sync::OnceLock<TestManager> = std::sync::OnceLock::new();
+    let manager: &'static TestManager = MANAGER.get_or_init(|| TestManager {
         base: BaseManagerBase::initial(),
-    }));
+    });
     // The base-class bodies that need nothing untranslated.
     assert!(manager.allow_process_watching());
     assert!(!manager.is_beadfixer_diameter_available());

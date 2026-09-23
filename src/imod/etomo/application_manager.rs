@@ -21,6 +21,13 @@ pub struct ApplicationManager {
     setup_raw_image_stack: Mutex<Option<String>>,
     raw_image_stack_extension: Mutex<Option<String>>,
 }
+/// Owns every `ApplicationManager` this module builds.  Java's owner is the collector, by
+/// way of `EtomoDirector.managerList`, which keeps each manager for the run;
+/// the translation hands out `&'static Self`, so without a root here the
+/// allocation is unreachable the moment the constructor returns.
+static INSTANCES: std::sync::Mutex<Vec<&'static ApplicationManager>> =
+    std::sync::Mutex::new(Vec::new());
+
 impl ApplicationManager {
     /// Java `ApplicationManager(String, AxisID)`: retain the dataset identity
     /// and run the shared manager construction before typed metadata/process
@@ -38,6 +45,7 @@ impl ApplicationManager {
             setup_raw_image_stack: Mutex::new(None),
             raw_image_stack_extension: Mutex::new(None),
         }));
+        INSTANCES.lock().unwrap().push(manager);
         manager.base_manager();
         manager.initialize_ui_parameters_from_name(param_file_name, Some(axis_id));
         manager.initialize_advanced(false);

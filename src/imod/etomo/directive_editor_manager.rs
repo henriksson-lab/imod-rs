@@ -58,6 +58,13 @@ unsafe impl Send for DirectiveEditorManager {}
 // See the `Send` explanation directly above.
 unsafe impl Sync for DirectiveEditorManager {}
 
+/// Owns every `DirectiveEditorManager` this module builds.  Java's owner is the collector, by
+/// way of `EtomoDirector.managerList`, which keeps each manager for the run;
+/// the translation hands out `&'static Self`, so without a root here the
+/// allocation is unreachable the moment the constructor returns.
+static INSTANCES: std::sync::Mutex<Vec<&'static DirectiveEditorManager>> =
+    std::sync::Mutex::new(Vec::new());
+
 impl DirectiveEditorManager {
     /// Java `DirectiveEditorManager(DirectiveFileType, BaseManager, String, StringBuffer)`.
     pub fn new(
@@ -82,6 +89,7 @@ impl DirectiveEditorManager {
             dialog_errmsg: Mutex::new(errmsg.map(str::to_string)),
             save_file: Mutex::new(None),
         }));
+        INSTANCES.lock().unwrap().push(instance);
         instance.base_manager();
         instance.create_state();
         let _ = instance.initialize_ui_parameters(None, Some(AXIS_ID), false);

@@ -75,7 +75,18 @@ pub struct AutodocTokenizer {
     /// Java field `primativeTokenizer`, initialised to null.
     primative_tokenizer: PrimativeTokenizer,
     /// Java field `primativeToken`, initialised to null.
-    primative_token: *mut Token,
+    ///
+    /// Owned solely by this field.  `PrimativeTokenizer::next` documents its
+    /// contract at `primative_tokenizer.rs:848-851`: passed null it returns a
+    /// pointer that **owns** a heap `Token` the caller must reclaim, "where
+    /// the source's owner is the GC"; passed a live token it copies into it
+    /// and hands the same pointer back.  So the first `next(null)` here
+    /// allocates once and every later call reuses it -- one token per
+    /// tokenizer, which had no owner and leaked.  See `Drop` below.
+    /// Java field `primativeToken`.  Owned: Java's collector takes it when the
+    /// tokenizer becomes unreachable, and an owning `Option<Box<Token>>` does the
+    /// same at the same point.  `PrimativeTokenizer::next` refills it in place.
+    primative_token: Option<Box<Token>>,
     /// Java field `token`, initialised to `new Token()`.
     token: Token,
     /// Java field `nextToken`, initialised to `new Token()`.
@@ -143,7 +154,7 @@ impl AutodocTokenizer {
             restricted_symbols,
             delimiter_string: DEFAULT_DELIMITER.to_string(),
             primative_tokenizer,
-            primative_token: std::ptr::null_mut(),
+            primative_token: None,
             token: Token::new(),
             next_token: Token::new(),
             use_next_token: false,
@@ -209,7 +220,7 @@ impl AutodocTokenizer {
             return Box::new(Token::new_from_token(&self.next_token));
         }
         if !self.look_ahead {
-            self.primative_token = unsafe { self.primative_tokenizer.next(self.primative_token) };
+            self.primative_tokenizer.next(&mut self.primative_token);
         }
         let found = unsafe { self.find_token() };
         Box::new(Token::new_from_token(unsafe { &*found }))
@@ -272,11 +283,15 @@ impl AutodocTokenizer {
                 }
                 return &mut self.token;
             }
-            if unsafe { (*self.primative_token).is(token::Type::Alphanum) } {
+            if self
+                .primative_token
+                .as_ref()
+                .unwrap()
+                .is(token::Type::Alphanum)
+            {
                 building_word = true;
                 self.build_word();
-                self.primative_token =
-                    unsafe { self.primative_tokenizer.next(self.primative_token) };
+                self.primative_tokenizer.next(&mut self.primative_token);
             } else {
                 if { self.find_delimiter() } {
                     if building_word {
@@ -308,43 +323,39 @@ impl AutodocTokenizer {
     /// Recognizes primative tokens that are also used by autodoc.
     /// Makes one-character tokens out of primative SYMBOL tokens.
     fn find_simple_token(&mut self) -> bool {
-        let primative_token: *const Token = self.primative_token;
-        if unsafe {
-            (*primative_token).is(token::Type::Eof)
-                || (*primative_token).is(token::Type::Eol)
-                || (*primative_token).is(token::Type::Whitespace)
+        let primative_token: &Token = self.primative_token.as_ref().unwrap();
+        if {
+            primative_token.is(token::Type::Eof)
+                || primative_token.is(token::Type::Eol)
+                || primative_token.is(token::Type::Whitespace)
         } {
-            self.token.copy(unsafe { &*primative_token });
-        } else if unsafe {
-            (*primative_token).equals_type_and_char(token::Type::Symbol, COMMENT_CHAR as u16)
-        } {
-            self.token
-                .set_type_and_char(token::Type::Comment, COMMENT_CHAR as u16);
-        } else if self.allow_alt_comment
-            && unsafe {
-                (*primative_token)
-                    .equals_type_and_char(token::Type::Symbol, ALT_COMMENT_CHAR as u16)
-            }
+            self.token.copy(primative_token);
+        } else if { primative_token.equals_type_and_char(token::Type::Symbol, COMMENT_CHAR as u16) }
         {
             self.token
+                .set_type_and_char(token::Type::Comment, COMMENT_CHAR as u16);
+        } else if self.allow_alt_comment && {
+            primative_token.equals_type_and_char(token::Type::Symbol, ALT_COMMENT_CHAR as u16)
+        } {
+            self.token
                 .set_type_and_char(token::Type::Comment, ALT_COMMENT_CHAR as u16);
-        } else if unsafe {
-            (*primative_token).equals_type_and_string(token::Type::Symbol, Some(SEPARATOR_CHAR))
+        } else if {
+            primative_token.equals_type_and_string(token::Type::Symbol, Some(SEPARATOR_CHAR))
         } {
             self.token
                 .set_type_and_string(token::Type::Separator, SEPARATOR_CHAR);
-        } else if unsafe {
-            (*primative_token)
+        } else if {
+            primative_token
                 .equals_type_and_string(token::Type::Symbol, Some(&self.delimiter_string))
         } {
             // Found a one character DELIMITER.
             let delimiter_string = self.delimiter_string.clone();
             self.token
                 .set_type_and_string(token::Type::Delimiter, &delimiter_string);
-        } else if unsafe {
-            (*primative_token).equals_type_and_char_list(token::Type::Symbol, Some(&QUOTE_LIST))
+        } else if {
+            primative_token.equals_type_and_char_list(token::Type::Symbol, Some(&QUOTE_LIST))
         } {
-            let character = unsafe { (*primative_token).get_char() };
+            let character = primative_token.get_char();
             self.token.set_type_and_char(token::Type::Quote, character);
         } else {
             return false;
@@ -357,8 +368,10 @@ impl AutodocTokenizer {
     /// # Safety
     /// See `next`.
     fn find_look_ahead_token(&mut self) -> bool {
-        if unsafe {
-            (*self.primative_token)
+        if {
+            self.primative_token
+                .as_ref()
+                .unwrap()
                 .equals_type_and_character(token::Type::Symbol, Some(OPEN_CHAR as u16))
         } {
             if { self.match_with_look_ahead(token::Type::Symbol, Some(OPEN_CHAR as u16)) } {
@@ -370,8 +383,10 @@ impl AutodocTokenizer {
                 self.token
                     .set_type_and_character(token::Type::Open, Some(OPEN_CHAR as u16));
             }
-        } else if unsafe {
-            (*self.primative_token)
+        } else if {
+            self.primative_token
+                .as_ref()
+                .unwrap()
                 .equals_type_and_character(token::Type::Symbol, Some(CLOSE_CHAR as u16))
         } {
             if { self.match_with_look_ahead(token::Type::Symbol, Some(CLOSE_CHAR as u16)) } {
@@ -397,8 +412,13 @@ impl AutodocTokenizer {
     /// # Safety
     /// See `next`.
     fn match_with_look_ahead(&mut self, match_type: token::Type, match_char: Option<u16>) -> bool {
-        self.primative_token = unsafe { self.primative_tokenizer.next(self.primative_token) };
-        if unsafe { (*self.primative_token).equals_type_and_character(match_type, match_char) } {
+        self.primative_tokenizer.next(&mut self.primative_token);
+        if self
+            .primative_token
+            .as_ref()
+            .unwrap()
+            .equals_type_and_character(match_type, match_char)
+        {
             return true;
         }
         self.look_ahead = true;
@@ -420,10 +440,14 @@ impl AutodocTokenizer {
         let mut index: i32 = 0;
         let mut delimiter_buffer: Option<String> = None;
         let mut success = false;
-        let mut symbol = unsafe { (*self.primative_token).get_char() };
+        let mut symbol = self.primative_token.as_ref().unwrap().get_char();
         // attempt to build a delimiter that matches delimiterString
         while !success
-            && unsafe { (*self.primative_token).is(token::Type::Symbol) }
+            && self
+                .primative_token
+                .as_ref()
+                .unwrap()
+                .is(token::Type::Symbol)
             && index < length
             && delimiter_units[index as usize] == symbol
         {
@@ -440,10 +464,9 @@ impl AutodocTokenizer {
             } else {
                 // haven't matched the entire delimiter string - get next primative token
                 index += 1;
-                self.primative_token =
-                    unsafe { self.primative_tokenizer.next(self.primative_token) };
+                self.primative_tokenizer.next(&mut self.primative_token);
             }
-            symbol = unsafe { (*self.primative_token).get_char() };
+            symbol = self.primative_token.as_ref().unwrap().get_char();
         }
         if success {
             let delimiter_buffer = delimiter_buffer.unwrap();
@@ -457,8 +480,7 @@ impl AutodocTokenizer {
                 // never went into delimiter string recongnition loop - build a word from
                 // the current primativeToken
                 self.build_word();
-                self.primative_token =
-                    unsafe { self.primative_tokenizer.next(self.primative_token) };
+                self.primative_tokenizer.next(&mut self.primative_token);
             }
             Some(delimiter_buffer) => self.build_word_from_buffer(&delimiter_buffer),
         }
@@ -467,8 +489,8 @@ impl AutodocTokenizer {
 
     /// Java private `buildWord()`.  Start or add to a word.
     fn build_word(&mut self) {
-        let value = unsafe {
-            match (*self.primative_token).get_value() {
+        let value = {
+            match self.primative_token.as_ref().unwrap().get_value() {
                 None => "null".to_string(),
                 Some(value) => value.to_string(),
             }

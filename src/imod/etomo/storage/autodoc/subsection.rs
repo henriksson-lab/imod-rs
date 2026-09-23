@@ -36,13 +36,14 @@ impl Subsection {
         parent: *mut dyn WriteOnlyStatementList,
         previous_statement: *mut dyn Statement,
         line_num: i32,
-    ) -> *mut Subsection {
-        let this = Box::into_raw(Box::new(Subsection {
+    ) -> Box<Subsection> {
+        let mut this = Box::new(Subsection {
             statement: StatementBase::initial(),
             parent,
             subsection,
-        }));
-        unsafe { StatementBase::statement(this, previous_statement, line_num) };
+        });
+        let this_ptr: *mut Subsection = &mut *this;
+        unsafe { StatementBase::statement(this_ptr, previous_statement, line_num) };
         this
     }
 }

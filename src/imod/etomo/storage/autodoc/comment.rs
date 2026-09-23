@@ -38,13 +38,14 @@ impl Comment {
         parent: *mut dyn WriteOnlyStatementList,
         previous_statement: *mut dyn Statement,
         line_num: i32,
-    ) -> *mut Comment {
-        let this = Box::into_raw(Box::new(Comment {
+    ) -> Box<Comment> {
+        let mut this = Box::new(Comment {
             statement: StatementBase::initial(),
             parent,
             comment,
-        }));
-        unsafe { StatementBase::statement(this, previous_statement, line_num) };
+        });
+        let this_ptr: *mut Comment = &mut *this;
+        unsafe { StatementBase::statement(this_ptr, previous_statement, line_num) };
         this
     }
 }

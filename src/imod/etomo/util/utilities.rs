@@ -2908,7 +2908,7 @@ pub fn convert_label_to_name(label: Option<&str>, unlimited_segments: bool) -> O
     let mut tokenizer = PrimativeTokenizer::get_numeric_string_instance(&name, is_debug());
     let mut buffer = String::new();
     let mut prev_token_type: Option<TokenType> = None;
-    let mut token: *mut Token = std::ptr::null_mut();
+    let mut token: Option<Box<Token>> = None;
     // `tokenizer.initialize(); token = tokenizer.next(token);` - the two calls the
     // source wraps in its `catch (LogFileException | IOException | LockException)` arms,
     // both of which return null for an empty label or the default delimiter and the
@@ -2924,63 +2924,98 @@ pub fn convert_label_to_name(label: Option<&str>, unlimited_segments: bool) -> O
         }
         Ok(()) => {}
     }
-    token = unsafe { tokenizer.next(token) };
+    tokenizer.next(&mut token);
     // Remove unnecessary symbols and strings from the label.
-    let mut peeked_token: *mut Token = std::ptr::null_mut();
+    let mut peeked_token: Option<Box<Token>> = None;
     let mut ignore_paren = false;
     let mut ignore_bracket = false;
     let mut ignore_symbol;
     let mut replace_with_space;
-    while !token.is_null()
-        && !unsafe { (*token).is(TokenType::Eof) }
-        && !unsafe { (*token).is(TokenType::Eol) }
+    while token.is_some()
+        && !token.as_ref().unwrap().is(TokenType::Eof)
+        && !token.as_ref().unwrap().is(TokenType::Eol)
     {
         ignore_symbol = false;
         replace_with_space = false;
-        if unsafe { (*token).equals_type_and_char(TokenType::Symbol, NAME_SEPARATOR as u16) } {
+        if token
+            .as_ref()
+            .unwrap()
+            .equals_type_and_char(TokenType::Symbol, NAME_SEPARATOR as u16)
+        {
             // Convert a dash to a space so that any mix of dashes and whitespace in the
             // original label gets converted to a single dash in the next loop, and the
             // number of elements in the name can be counted.  A dash that's probably part
             // of a number will be left in.  So "check-up" turns into "check up", then back
             // into "check-up".  And "equals -20%" stays the same, and then is changed to
             // "equals--20%".
-            peeked_token = unsafe { tokenizer.peek(peeked_token) };
-            if peeked_token.is_null() || unsafe { (*peeked_token).get_type() } != TokenType::Numeric
+            tokenizer.peek(&mut peeked_token);
+            if peeked_token.is_none()
+                || peeked_token.as_ref().unwrap().get_type() != TokenType::Numeric
             {
                 replace_with_space = true;
             }
-        } else if unsafe { (*token).equals_type_and_char(TokenType::Symbol, '.' as u16) } {
+        } else if token
+            .as_ref()
+            .unwrap()
+            .equals_type_and_char(TokenType::Symbol, '.' as u16)
+        {
             // "." cannot be used because a number that follows it may be mistaken for the
             // field index.  This solution turns "1.0" into "1-0", which seems somewhat
             // better than turning it into "10".
             replace_with_space = true;
-        } else if unsafe { (*token).equals_type_and_char(TokenType::Symbol, '\'' as u16) } {
+        } else if token
+            .as_ref()
+            .unwrap()
+            .equals_type_and_char(TokenType::Symbol, '\'' as u16)
+        {
             // Skip "'" when it's used for quoting.  Keep it when it's probably an
             // apostrophe.  If it's at the beginning or the end, or next to whitespace,
             // assume it's being used for quoting.
             if prev_token_type.is_none() || prev_token_type == Some(TokenType::Whitespace) {
                 ignore_symbol = true;
             } else {
-                peeked_token = unsafe { tokenizer.peek(peeked_token) };
-                if peeked_token.is_null() || !unsafe { (*peeked_token).is(TokenType::Alphabetic) } {
+                tokenizer.peek(&mut peeked_token);
+                if peeked_token.is_none()
+                    || !peeked_token.as_ref().unwrap().is(TokenType::Alphabetic)
+                {
                     ignore_symbol = true;
                 }
             }
-        } else if unsafe { (*token).equals_type_and_char(TokenType::Symbol, ',' as u16) }
-            || unsafe { (*token).equals_type_and_char(TokenType::Symbol, '"' as u16) }
+        } else if token
+            .as_ref()
+            .unwrap()
+            .equals_type_and_char(TokenType::Symbol, ',' as u16)
+            || token
+                .as_ref()
+                .unwrap()
+                .equals_type_and_char(TokenType::Symbol, '"' as u16)
         {
             // Skip some other types of punctuation.
             ignore_symbol = true;
-        } else if unsafe { (*token).equals_type_and_char(TokenType::Symbol, '(' as u16) } {
+        } else if token
+            .as_ref()
+            .unwrap()
+            .equals_type_and_char(TokenType::Symbol, '(' as u16)
+        {
             // ignore parenthesis and everything in them
             ignore_paren = true;
-        } else if unsafe { (*token).equals_type_and_char(TokenType::Symbol, '<' as u16) } {
+        } else if token
+            .as_ref()
+            .unwrap()
+            .equals_type_and_char(TokenType::Symbol, '<' as u16)
+        {
             // Replace html (angle brackets and contents) with a space.  The space is
             // necessary when a <br> is used.
             ignore_bracket = true;
             replace_with_space = true;
-        } else if unsafe { (*token).equals_type_and_char(TokenType::Symbol, ':' as u16) }
-            || unsafe { (*token).equals_type_and_char(TokenType::Symbol, ';' as u16) }
+        } else if token
+            .as_ref()
+            .unwrap()
+            .equals_type_and_char(TokenType::Symbol, ':' as u16)
+            || token
+                .as_ref()
+                .unwrap()
+                .equals_type_and_char(TokenType::Symbol, ';' as u16)
         {
             // ignore semicolons and everything after them
             break;
@@ -2989,15 +3024,23 @@ pub fn convert_label_to_name(label: Option<&str>, unlimited_segments: bool) -> O
             buffer.push(' ');
         }
         if !ignore_paren && !ignore_bracket && !ignore_symbol && !replace_with_space {
-            buffer.push_str(unsafe { (*token).get_value() }.unwrap_or("null"));
+            buffer.push_str(token.as_ref().unwrap().get_value().unwrap_or("null"));
         }
-        if unsafe { (*token).equals_type_and_char(TokenType::Symbol, ')' as u16) } {
+        if token
+            .as_ref()
+            .unwrap()
+            .equals_type_and_char(TokenType::Symbol, ')' as u16)
+        {
             ignore_paren = false;
-        } else if unsafe { (*token).equals_type_and_char(TokenType::Symbol, '>' as u16) } {
+        } else if token
+            .as_ref()
+            .unwrap()
+            .equals_type_and_char(TokenType::Symbol, '>' as u16)
+        {
             ignore_bracket = false;
         }
-        prev_token_type = Some(unsafe { (*token).get_type() });
-        token = unsafe { tokenizer.next(token) };
+        prev_token_type = Some(token.as_ref().unwrap().get_type());
+        tokenizer.next(&mut token);
     }
     // Load the processed string into the tokenizer
     name = java_lang_string_trim(&buffer).to_string();
@@ -3018,15 +3061,15 @@ pub fn convert_label_to_name(label: Option<&str>, unlimited_segments: bool) -> O
         }
         Ok(()) => {}
     }
-    token = unsafe { tokenizer.next(token) };
+    tokenizer.next(&mut token);
     // Convert interior whitespace to a single dash
     let mut segment_count = 0;
-    while !token.is_null()
-        && !unsafe { (*token).is(TokenType::Eof) }
-        && !unsafe { (*token).is(TokenType::Eol) }
+    while token.is_some()
+        && !token.as_ref().unwrap().is(TokenType::Eof)
+        && !token.as_ref().unwrap().is(TokenType::Eol)
         && (unlimited_segments || segment_count < LIMITED_SEGMENT_MAX)
     {
-        if unsafe { (*token).is(TokenType::Whitespace) } {
+        if token.as_ref().unwrap().is(TokenType::Whitespace) {
             buffer.push(NAME_SEPARATOR);
         } else {
             let mut new_segment = false;
@@ -3034,12 +3077,12 @@ pub fn convert_label_to_name(label: Option<&str>, unlimited_segments: bool) -> O
             if string.is_empty() || string.ends_with(NAME_SEPARATOR) {
                 new_segment = true;
             }
-            buffer.push_str(unsafe { (*token).get_value() }.unwrap_or("null"));
+            buffer.push_str(token.as_ref().unwrap().get_value().unwrap_or("null"));
             if new_segment {
                 segment_count += 1;
             }
         }
-        token = unsafe { tokenizer.next(token) };
+        tokenizer.next(&mut token);
     }
     let retval = buffer;
     if retval.is_empty() || retval == autodoc_tokenizer::DEFAULT_DELIMITER {
@@ -3068,8 +3111,8 @@ pub fn strip_html_tags(input: Option<&str>) -> Option<String> {
     let mut html_tag: Option<String> = None;
     // The `catch` blocks are unreachable for a string instance; see the doc comment.
     let _ = tokenizer.initialize();
-    let mut token: Option<Box<crate::imod::etomo::ui::swing::token::Token>> =
-        Some(unsafe { Box::from_raw(tokenizer.next(std::ptr::null_mut())) });
+    let mut token: Option<Box<crate::imod::etomo::ui::swing::token::Token>> = None;
+    tokenizer.next(&mut token);
     let mut prev_token: Option<Box<crate::imod::etomo::ui::swing::token::Token>> = None;
     while token.is_some()
         && !token
@@ -3136,8 +3179,10 @@ pub fn strip_html_tags(input: Option<&str>) -> Option<String> {
                 .push_str(current.get_value().unwrap_or("null"));
         }
         // Get next token. Make sure the two tokens don't point to the same thing.
+        // `take` leaves `token` None, so `next` allocates a fresh one rather than
+        // refilling the token `prev_token` now owns.
         prev_token = token.take();
-        token = Some(unsafe { Box::from_raw(tokenizer.next(std::ptr::null_mut())) });
+        tokenizer.next(&mut token);
     }
     // End of the input. If it failed to find the end of an HTML tag, treat it as regular
     // text.

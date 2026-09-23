@@ -90,8 +90,8 @@ impl Section {
         r#type: *mut Token,
         name: *mut Token,
         parent: *mut dyn WriteOnlyStatementList,
-    ) -> *mut Section {
-        let this = Box::into_raw(Box::new(Section {
+    ) -> Box<Section> {
+        let mut this = Box::new(Section {
             statement_list: Vec::new(),
             key: get_key_of_tokens(unsafe { r#type.as_ref() }, unsafe { name.as_ref() }),
             r#type,
@@ -102,8 +102,9 @@ impl Section {
             subsection: false,
             parent,
             debug: false,
-        }));
-        unsafe { (*this).attribute_list = Some(Box::new(AttributeList::new(this))) };
+        });
+        let this_ptr: *mut Section = &mut *this;
+        this.attribute_list = Some(Box::new(AttributeList::new(this_ptr)));
         this
     }
 
@@ -300,9 +301,11 @@ impl WriteOnlyStatementList for Section {
     /// Java `addNameValuePair(int)`.
     unsafe fn add_name_value_pair(&mut self, line_num: i32) -> *mut NameValuePair {
         let this: *mut Section = self;
-        let pair = unsafe { NameValuePair::new(this, self.get_most_recent_statement(), line_num) };
-        self.statement_list.push(unsafe { Box::from_raw(pair) });
-        pair
+        let mut pair =
+            unsafe { NameValuePair::new(this, self.get_most_recent_statement(), line_num) };
+        let pair_ptr: *mut NameValuePair = &mut *pair;
+        self.statement_list.push(pair);
+        pair_ptr
     }
 
     /// Java `addSection(Token, Token, int)`.  Adds a subsection to a section.
@@ -313,21 +316,27 @@ impl WriteOnlyStatementList for Section {
         line_num: i32,
     ) -> *mut Section {
         let this: *mut Section = self;
-        let section = unsafe { Section::new(r#type, name, this) };
-        unsafe { (*section).subsection = true };
-        let subsection =
-            unsafe { Subsection::new(section, this, self.get_most_recent_statement(), line_num) };
-        self.statement_list
-            .push(unsafe { Box::from_raw(subsection) });
-        self.section_list.push(unsafe { Box::from_raw(section) });
+        let mut section = unsafe { Section::new(r#type, name, this) };
+        section.subsection = true;
+        let section_ptr: *mut Section = &mut *section;
+        let subsection = unsafe {
+            Subsection::new(
+                section_ptr,
+                this,
+                self.get_most_recent_statement(),
+                line_num,
+            )
+        };
+        self.statement_list.push(subsection);
+        self.section_list.push(section);
         self.sub_section_map.insert(
-            match unsafe { (*section).get_key() } {
+            match unsafe { (*section_ptr).get_key() } {
                 None => panic!("java.lang.NullPointerException"),
                 Some(key) => key,
             },
-            std::ptr::NonNull::new(section).expect("new section is non-null"),
+            std::ptr::NonNull::new(section_ptr).expect("new section is non-null"),
         );
-        section
+        section_ptr
     }
 
     /// Java `addComment(Token, int)`.
@@ -335,16 +344,14 @@ impl WriteOnlyStatementList for Section {
         let this: *mut Section = self;
         let statement =
             unsafe { Comment::new(comment, this, self.get_most_recent_statement(), line_num) };
-        self.statement_list
-            .push(unsafe { Box::from_raw(statement) });
+        self.statement_list.push(statement);
     }
 
     /// Java `addEmptyLine(int)`.
     fn add_empty_line(&mut self, line_num: i32) {
         let this: *mut Section = self;
         let statement = unsafe { EmptyLine::new(this, self.get_most_recent_statement(), line_num) };
-        self.statement_list
-            .push(unsafe { Box::from_raw(statement) });
+        self.statement_list.push(statement);
     }
 
     /// Java `setCurrentDelimiter(Token)`.

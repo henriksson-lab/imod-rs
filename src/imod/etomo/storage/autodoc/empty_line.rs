@@ -32,12 +32,13 @@ impl EmptyLine {
         parent: *mut dyn WriteOnlyStatementList,
         previous_statement: *mut dyn Statement,
         line_num: i32,
-    ) -> *mut EmptyLine {
-        let this = Box::into_raw(Box::new(EmptyLine {
+    ) -> Box<EmptyLine> {
+        let mut this = Box::new(EmptyLine {
             statement: StatementBase::initial(),
             parent,
-        }));
-        unsafe { StatementBase::statement(this, previous_statement, line_num) };
+        });
+        let this_ptr: *mut EmptyLine = &mut *this;
+        unsafe { StatementBase::statement(this_ptr, previous_statement, line_num) };
         this
     }
 }

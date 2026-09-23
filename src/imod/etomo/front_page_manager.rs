@@ -29,6 +29,13 @@ pub struct FrontPageManager {
     process_manager: Option<Infallible>,
 }
 
+/// Owns every `FrontPageManager` this module builds.  Java's owner is the collector, by
+/// way of `EtomoDirector.managerList`, which keeps each manager for the run;
+/// the translation hands out `&'static Self`, so without a root here the
+/// allocation is unreachable the moment the constructor returns.
+static INSTANCES: std::sync::Mutex<Vec<&'static FrontPageManager>> =
+    std::sync::Mutex::new(Vec::new());
+
 impl FrontPageManager {
     /// Java `FrontPageManager()` and its image-style overload.  Image style is
     /// metadata input; it does not alter the no-file front-page lifecycle.
@@ -38,6 +45,7 @@ impl FrontPageManager {
             meta_data: FrontPageMetaData::new(None),
             process_manager: None,
         }));
+        INSTANCES.lock().unwrap().push(manager);
         manager.base_manager();
         manager.initialize_ui_parameters_from_name(Some(""), Some(AXIS_ID));
         manager.create_state();

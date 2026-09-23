@@ -139,7 +139,7 @@ pub fn nbytes_and_flags(nint: i32, nreal: i32) -> bool {
 mod tests {
     use super::*;
     use crate::imod::libiimod::iimage::{
-        IIFILE_DEFAULT, ii_close, ii_open_new, ii_sync_from_mrc_header, ii_write_section_float,
+        IIFILE_DEFAULT, ii_delete, ii_open_new, ii_sync_from_mrc_header, ii_write_section_float,
     };
     use crate::imod::libiimod::mrcfiles::{MrcHeader, mrc_head_new, mrc_head_write};
     use crate::imod::libiimod::unit_fileio::{iiu_close, iiu_set_position};
@@ -163,7 +163,7 @@ mod tests {
             let mut second = [5.0_f32, 6.0, 7.0, 8.0];
             assert_eq!(ii_write_section_float(&mut *file, &mut first, 0), 0);
             assert_eq!(ii_write_section_float(&mut *file, &mut second, 1), 0);
-            ii_close(file);
+            ii_delete(file);
 
             assert_eq!(iiu_open(97, &name, "RO"), 0);
             iiu_set_position(97, 1, 0);

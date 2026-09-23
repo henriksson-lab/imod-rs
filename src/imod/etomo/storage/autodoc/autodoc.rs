@@ -91,7 +91,13 @@ pub struct Autodoc {
     /// Java field `autodocName`: the autodoc file name, excluding the extension.
     autodoc_name: String,
     /// Java field `parser`, initialised to null.
-    parser: *mut AutodocParser,
+    ///
+    /// Owned: Java's `this.parser = new AutodocParser(...)` replaces the old
+    /// reference and the collector reclaims it, so a raw pointer leaked one
+    /// parser per re-initialisation.  Assigning an `Option<Box<_>>` drops the
+    /// previous value at exactly that point.  The parser's own back-pointer to
+    /// this `Autodoc` stays raw and non-owning, so there is no ownership cycle.
+    parser: Option<Box<AutodocParser>>,
     // data
     /// Java field `sectionList`.
     section_list: Vec<Box<Section>>,
@@ -110,6 +116,13 @@ pub struct Autodoc {
     writable: bool,
     /// Java field `errMsg`, a caller-owned `StringBuilder` that the parser appends to.
     err_msg: *mut String,
+    /// No Java counterpart.  `addNameValuePair`/`addComment`'s `String` overloads
+    /// construct tokens and hand them to a `NameValuePair`, an `Attribute` or a
+    /// `Comment`, all of which hold them as plain references; the collector frees
+    /// them when the autodoc becomes unreachable.  These boxes are that owner.  A
+    /// `Box` does not move its contents, so the addresses stay valid as the `Vec`
+    /// grows.
+    owned_tokens: Vec<Box<Token>>,
 }
 
 impl Autodoc {
@@ -117,15 +130,19 @@ impl Autodoc {
     /// `new AttributeList(this)` needs the object, which Rust cannot produce before the
     /// allocation, so the attribute list is assigned immediately after it.
     ///
+    /// Returns the box rather than a raw pointer: the source's owner is the
+    /// collector, and `AutodocFactory` is the only producer, so the factory's
+    /// registry can be the owner here.
+    ///
     /// # Safety
     /// `err_msg` must be null or point to a live `String`.
-    pub unsafe fn new(autodoc_name: Option<&str>, err_msg: *mut String) -> *mut Autodoc {
-        let this = Box::into_raw(Box::new(Autodoc {
+    pub unsafe fn new(autodoc_name: Option<&str>, err_msg: *mut String) -> Box<Autodoc> {
+        let mut this = Box::new(Autodoc {
             autodoc_name: match autodoc_name {
                 None => String::new(),
                 Some(autodoc_name) => autodoc_name.to_string(),
             },
-            parser: std::ptr::null_mut(),
+            parser: None,
             section_list: Vec::new(),
             section_map: HashMap::new(),
             statement_list: Vec::new(),
@@ -134,8 +151,10 @@ impl Autodoc {
             debug: false,
             writable: false,
             err_msg,
-        }));
-        unsafe { (*this).attribute_list = Some(Box::new(AttributeList::new(this))) };
+            owned_tokens: Vec::new(),
+        });
+        let this_ptr: *mut Autodoc = &mut *this;
+        this.attribute_list = Some(Box::new(AttributeList::new(this_ptr)));
         this
     }
 
@@ -150,7 +169,12 @@ impl Autodoc {
             eprintln!("java.lang.IllegalStateException: Not a writable autodoc.");
             return Ok(());
         }
-        let autodoc_file = unsafe { (*self.parser).get_log_file() }.unwrap();
+        let autodoc_file = self
+            .parser
+            .as_ref()
+            .expect("parser live")
+            .get_log_file()
+            .unwrap();
         let writer_id = autodoc_file.open_writer()?;
         for statement in self.statement_list.iter() {
             {
@@ -171,7 +195,7 @@ impl Autodoc {
     /// # Safety
     /// The parser must be live.
     pub fn get_log_file(&self) -> Option<std::sync::Arc<log_file::Handle>> {
-        unsafe { (*self.parser).get_log_file() }
+        self.parser.as_ref().expect("parser live").get_log_file()
     }
 
     /// Java private `getDir(BaseManager, String, String, AxisID)`.
@@ -207,7 +231,7 @@ impl Autodoc {
     ) -> Result<(), LogFileError> {
         let debug = unsafe { (*this).debug };
         unsafe {
-            (*this).parser = Box::into_raw(Box::new(AutodocParser::get_generic_instance_env_var(
+            (*this).parser = Some(Box::new(AutodocParser::get_generic_instance_env_var(
                 this,
                 false,
                 true,
@@ -223,8 +247,16 @@ impl Autodoc {
             )));
             // To test comment out initialize and parse and uncomment runInternalTest.
             // runInternalTest(InternalTestType.STREAM_TOKENIZER, true, false);
-            (*(*this).parser).initialize()?;
-            (*(*this).parser).parse();
+            // `take` for the duration: `parse()` re-enters this `Autodoc`
+            // through the parser's own back-pointer, so the field must not
+            // be reachable here as well.
+            let mut parser = (*this).parser.take().expect("parser just assigned");
+            let init = parser.initialize();
+            if init.is_ok() {
+                parser.parse();
+            }
+            (*this).parser = Some(parser);
+            init?;
         }
         Ok(())
     }
@@ -245,7 +277,7 @@ impl Autodoc {
         let debug = unsafe { (*this).debug };
         unsafe {
             (*this).writable = writable;
-            (*this).parser = Box::into_raw(Box::new(AutodocParser::get_generic_instance(
+            (*this).parser = Some(Box::new(AutodocParser::get_generic_instance(
                 this,
                 false,
                 false,
@@ -261,8 +293,16 @@ impl Autodoc {
             // To test comment out initialize and parse and uncomment runInternalTest.
             // runInternalTest(InternalTestType.STREAM_TOKENIZER, true, false);
             if autodoc_file.exists() {
-                (*(*this).parser).initialize()?;
-                (*(*this).parser).parse();
+                // `take` for the duration: `parse()` re-enters this `Autodoc`
+                // through the parser's own back-pointer, so the field must not
+                // be reachable here as well.
+                let mut parser = (*this).parser.take().expect("parser just assigned");
+                let init = parser.initialize();
+                if init.is_ok() {
+                    parser.parse();
+                }
+                (*this).parser = Some(parser);
+                init?;
             }
         }
         Ok(())
@@ -281,7 +321,7 @@ impl Autodoc {
         let debug = unsafe { (*this).debug };
         unsafe {
             (*this).writable = writable;
-            (*this).parser = Box::into_raw(Box::new(AutodocParser::get_generic_instance(
+            (*this).parser = Some(Box::new(AutodocParser::get_generic_instance(
                 this,
                 true,
                 false,
@@ -296,8 +336,16 @@ impl Autodoc {
             )));
             // To test comment out initialize and parse and uncomment runInternalTest.
             // runInternalTest(InternalTestType.STREAM_TOKENIZER, true, false);
-            (*(*this).parser).initialize()?;
-            (*(*this).parser).parse();
+            // `take` for the duration: `parse()` re-enters this `Autodoc`
+            // through the parser's own back-pointer, so the field must not
+            // be reachable here as well.
+            let mut parser = (*this).parser.take().expect("parser just assigned");
+            let init = parser.initialize();
+            if init.is_ok() {
+                parser.parse();
+            }
+            (*this).parser = Some(parser);
+            init?;
         }
         Ok(())
     }
@@ -314,7 +362,7 @@ impl Autodoc {
         let debug = unsafe { (*this).debug };
         unsafe {
             (*this).writable = true;
-            (*this).parser = Box::into_raw(Box::new(AutodocParser::get_generic_instance(
+            (*this).parser = Some(Box::new(AutodocParser::get_generic_instance(
                 this,
                 false,
                 false,
@@ -329,8 +377,16 @@ impl Autodoc {
             )));
             // To test comment out initialize and parse and uncomment runInternalTest.
             // runInternalTest(InternalTestType.STREAM_TOKENIZER, true, false);
-            (*(*this).parser).initialize()?;
-            (*(*this).parser).parse();
+            // `take` for the duration: `parse()` re-enters this `Autodoc`
+            // through the parser's own back-pointer, so the field must not
+            // be reachable here as well.
+            let mut parser = (*this).parser.take().expect("parser just assigned");
+            let init = parser.initialize();
+            if init.is_ok() {
+                parser.parse();
+            }
+            (*this).parser = Some(parser);
+            init?;
         }
         Ok(())
     }
@@ -347,7 +403,7 @@ impl Autodoc {
         let debug = unsafe { (*this).debug };
         unsafe {
             (*this).writable = true;
-            (*this).parser = Box::into_raw(Box::new(AutodocParser::get_generic_instance(
+            (*this).parser = Some(Box::new(AutodocParser::get_generic_instance(
                 this,
                 false,
                 false,
@@ -376,7 +432,7 @@ impl Autodoc {
         let debug = unsafe { (*this).debug };
         unsafe {
             (*this).writable = true;
-            (*this).parser = Box::into_raw(Box::new(AutodocParser::get_generic_instance(
+            (*this).parser = Some(Box::new(AutodocParser::get_generic_instance(
                 this,
                 true,
                 false,
@@ -404,13 +460,21 @@ impl Autodoc {
     ) -> Result<(), LogFileError> {
         let debug = unsafe { (*this).debug };
         unsafe {
-            (*this).parser = Box::into_raw(Box::new(AutodocParser::get_autodoc_instance(
+            (*this).parser = Some(Box::new(AutodocParser::get_autodoc_instance(
                 this, false, true, false, name, manager, axis_id, None, debug,
             )));
             // To test comment out initialize and parse and uncomment runInternalTest.
             // runInternalTest(InternalTestType.STREAM_TOKENIZER, true, false);
-            (*(*this).parser).initialize()?;
-            (*(*this).parser).parse();
+            // `take` for the duration: `parse()` re-enters this `Autodoc`
+            // through the parser's own back-pointer, so the field must not
+            // be reachable here as well.
+            let mut parser = (*this).parser.take().expect("parser just assigned");
+            let init = parser.initialize();
+            if init.is_ok() {
+                parser.parse();
+            }
+            (*this).parser = Some(parser);
+            init?;
         }
         Ok(())
     }
@@ -427,22 +491,29 @@ impl Autodoc {
         axis_id: AxisID,
     ) -> Result<(), LogFileError> {
         unsafe {
-            (*this).parser =
-                Box::into_raw(Box::new(AutodocParser::get_unmanaged_autodoc_instance(
-                    this,
-                    false,
-                    true,
-                    false,
-                    name,
-                    autodoc_file,
-                    manager,
-                    axis_id,
-                    None,
-                )));
+            (*this).parser = Some(Box::new(AutodocParser::get_unmanaged_autodoc_instance(
+                this,
+                false,
+                true,
+                false,
+                name,
+                autodoc_file,
+                manager,
+                axis_id,
+                None,
+            )));
             // To test comment out initialize and parse and uncomment runInternalTest.
             // runInternalTest(InternalTestType.STREAM_TOKENIZER, true, false);
-            (*(*this).parser).initialize()?;
-            (*(*this).parser).parse();
+            // `take` for the duration: `parse()` re-enters this `Autodoc`
+            // through the parser's own back-pointer, so the field must not
+            // be reachable here as well.
+            let mut parser = (*this).parser.take().expect("parser just assigned");
+            let init = parser.initialize();
+            if init.is_ok() {
+                parser.parse();
+            }
+            (*this).parser = Some(parser);
+            init?;
         }
         Ok(())
     }
@@ -459,7 +530,7 @@ impl Autodoc {
     ) -> Result<(), LogFileError> {
         let debug = unsafe { (*this).debug };
         unsafe {
-            (*this).parser = Box::into_raw(Box::new(AutodocParser::get_generic_instance_env_var(
+            (*this).parser = Some(Box::new(AutodocParser::get_generic_instance_env_var(
                 this,
                 false,
                 true,
@@ -475,8 +546,16 @@ impl Autodoc {
             )));
             // To test comment out initialize and parse and uncomment runInternalTest.
             // runInternalTest(InternalTestType.STREAM_TOKENIZER, true, false);
-            (*(*this).parser).initialize()?;
-            (*(*this).parser).parse();
+            // `take` for the duration: `parse()` re-enters this `Autodoc`
+            // through the parser's own back-pointer, so the field must not
+            // be reachable here as well.
+            let mut parser = (*this).parser.take().expect("parser just assigned");
+            let init = parser.initialize();
+            if init.is_ok() {
+                parser.parse();
+            }
+            (*this).parser = Some(parser);
+            init?;
         }
         Ok(())
     }
@@ -493,7 +572,7 @@ impl Autodoc {
     ) -> Result<(), LogFileError> {
         let debug = unsafe { (*this).debug };
         unsafe {
-            (*this).parser = Box::into_raw(Box::new(AutodocParser::get_generic_instance_env_var(
+            (*this).parser = Some(Box::new(AutodocParser::get_generic_instance_env_var(
                 this,
                 false,
                 true,
@@ -514,8 +593,16 @@ impl Autodoc {
             )));
             // To test comment out initialize and parse and uncomment runInternalTest.
             // runInternalTest(InternalTestType.STREAM_TOKENIZER, true, false);
-            (*(*this).parser).initialize()?;
-            (*(*this).parser).parse();
+            // `take` for the duration: `parse()` re-enters this `Autodoc`
+            // through the parser's own back-pointer, so the field must not
+            // be reachable here as well.
+            let mut parser = (*this).parser.take().expect("parser just assigned");
+            let init = parser.initialize();
+            if init.is_ok() {
+                parser.parse();
+            }
+            (*this).parser = Some(parser);
+            init?;
         }
         Ok(())
     }
@@ -576,10 +663,10 @@ impl Autodoc {
 
     /// Java `toString()`.
     pub fn to_string(&self) -> String {
-        if self.parser.is_null() {
+        let Some(parser) = self.parser.as_ref() else {
             return "".to_string();
-        }
-        unsafe { (*self.parser).get_absolute_path() }
+        };
+        parser.get_absolute_path()
     }
 }
 
@@ -625,17 +712,17 @@ impl WriteOnlyStatementList for Autodoc {
                 .map_or(std::ptr::null_mut(), |section| section.as_ptr()),
         };
         if existing_section.is_null() {
-            let new_section = unsafe { Section::new(r#type, name, this) };
-            self.section_list
-                .push(unsafe { Box::from_raw(new_section) });
+            let mut new_section = unsafe { Section::new(r#type, name, this) };
+            let new_section_ptr: *mut Section = &mut *new_section;
+            self.section_list.push(new_section);
             self.section_map.insert(
-                match unsafe { (*new_section).get_key() } {
+                match unsafe { (*new_section_ptr).get_key() } {
                     None => panic!("java.lang.NullPointerException"),
                     Some(key) => key,
                 },
-                std::ptr::NonNull::new(new_section).expect("new section is non-null"),
+                std::ptr::NonNull::new(new_section_ptr).expect("new section is non-null"),
             );
-            return new_section;
+            return new_section_ptr;
         }
         existing_section
     }
@@ -643,9 +730,11 @@ impl WriteOnlyStatementList for Autodoc {
     /// Java `addNameValuePair(int)`.
     unsafe fn add_name_value_pair(&mut self, line_num: i32) -> *mut NameValuePair {
         let this: *mut Autodoc = self;
-        let pair = unsafe { NameValuePair::new(this, self.get_most_recent_statement(), line_num) };
-        self.statement_list.push(unsafe { Box::from_raw(pair) });
-        pair
+        let mut pair =
+            unsafe { NameValuePair::new(this, self.get_most_recent_statement(), line_num) };
+        let pair_ptr: *mut NameValuePair = &mut *pair;
+        self.statement_list.push(pair);
+        pair_ptr
     }
 
     /// Java `addComment(Token, int)`.
@@ -653,16 +742,14 @@ impl WriteOnlyStatementList for Autodoc {
         let this: *mut Autodoc = self;
         let statement =
             unsafe { Comment::new(comment, this, self.get_most_recent_statement(), line_num) };
-        self.statement_list
-            .push(unsafe { Box::from_raw(statement) });
+        self.statement_list.push(statement);
     }
 
     /// Java `addEmptyLine(int)`.
     fn add_empty_line(&mut self, line_num: i32) {
         let this: *mut Autodoc = self;
         let statement = unsafe { EmptyLine::new(this, self.get_most_recent_statement(), line_num) };
-        self.statement_list
-            .push(unsafe { Box::from_raw(statement) });
+        self.statement_list.push(statement);
     }
 
     /// Java `setCurrentDelimiter(Token)`.
@@ -679,10 +766,10 @@ impl WriteOnlyStatementList for Autodoc {
 impl ReadOnlyStatementList for Autodoc {
     /// Java `getString()`.
     fn get_string(&self) -> String {
-        if self.parser.is_null() {
+        let Some(parser) = self.parser.as_ref() else {
             return "".to_string();
-        }
-        unsafe { (*self.parser).get_absolute_path() }
+        };
+        parser.get_absolute_path()
     }
 
     /// Java `getStatementLocation()`.  The source's `statementList == null` guard cannot
@@ -711,8 +798,8 @@ impl ReadOnlyStatementList for Autodoc {
 
     /// Java `getName()`.
     fn get_name(&self) -> Option<String> {
-        if !self.parser.is_null() {
-            return Some(unsafe { (*self.parser).get_file_name() });
+        if let Some(parser) = self.parser.as_ref() {
+            return Some(parser.get_file_name());
         }
         None
     }
@@ -842,10 +929,10 @@ impl ReadOnlyAutodoc for Autodoc {
 
     /// Java `isError()`.
     fn is_error(&self) -> bool {
-        if self.parser.is_null() {
+        let Some(parser) = self.parser.as_ref() else {
             return true;
-        }
-        unsafe { (*self.parser).is_error() }
+        };
+        parser.is_error()
     }
 
     /// Java `printStoredData()`.
@@ -893,15 +980,30 @@ impl ReadOnlyAutodoc for Autodoc {
     ) {
         println!("runInternalTest");
         if r#type == InternalTestType::StreamTokenizer {
-            unsafe { (*self.parser).test_stream_tokenizer(show_tokens, show_details) };
+            self.parser
+                .as_mut()
+                .expect("parser live")
+                .test_stream_tokenizer(show_tokens, show_details);
         } else if r#type == InternalTestType::PrimativeTokenizer {
-            unsafe { (*self.parser).test_primative_tokenizer(show_tokens) };
+            self.parser
+                .as_mut()
+                .expect("parser live")
+                .test_primative_tokenizer(show_tokens);
         } else if r#type == InternalTestType::AutodocTokenizer {
-            unsafe { (*self.parser).test_autodoc_tokenizer(show_tokens) };
+            self.parser
+                .as_mut()
+                .expect("parser live")
+                .test_autodoc_tokenizer(show_tokens);
         } else if r#type == InternalTestType::Preprocessor {
-            unsafe { (*self.parser).test_preprocessor(show_tokens) };
+            self.parser
+                .as_mut()
+                .expect("parser live")
+                .test_preprocessor(show_tokens);
         } else if r#type == InternalTestType::Parser {
-            unsafe { (*self.parser).test(show_tokens, show_details) };
+            self.parser
+                .as_mut()
+                .expect("parser live")
+                .test(show_tokens, show_details);
         }
     }
 
@@ -922,10 +1024,10 @@ impl ReadOnlyAutodoc for Autodoc {
 
     /// Java `exists()`.  Java throws a `NullPointerException` with a null parser.
     fn exists(&self) -> bool {
-        if self.parser.is_null() {
+        if self.parser.is_none() {
             panic!("java.lang.NullPointerException");
         }
-        unsafe { (*self.parser).exists() }
+        self.parser.as_ref().expect("parser live").exists()
     }
 
     /// Java `getChildren()`.
@@ -975,7 +1077,8 @@ impl WritableAutodoc for Autodoc {
         if !name.contains(autodoc_tokenizer::SEPARATOR_CHAR) {
             // Not dot separators - entire attribute is saved at this level.
             // add attribute
-            let name_token = Box::into_raw(Box::new(Token::new()));
+            self.owned_tokens.push(Box::new(Token::new()));
+            let name_token: *mut Token = &mut **self.owned_tokens.last_mut().unwrap();
             unsafe { (*name_token).set_type_and_string(token::Type::Anything, &name) };
             unsafe {
                 self.attribute_list
@@ -990,7 +1093,8 @@ impl WritableAutodoc for Autodoc {
                     .unwrap()
                     .get_attribute(Some(&name))
             };
-            let value_token = Box::into_raw(Box::new(Token::new()));
+            self.owned_tokens.push(Box::new(Token::new()));
+            let value_token: *mut Token = &mut **self.owned_tokens.last_mut().unwrap();
             unsafe {
                 (*value_token).set_type_and_string(
                     token::Type::Anything,
@@ -1047,7 +1151,8 @@ impl WritableAutodoc for Autodoc {
 
     /// Java `addComment(String, int)`.
     fn add_comment_string(&mut self, comment: Option<&str>, line_num: i32) {
-        let token = Box::into_raw(Box::new(Token::new()));
+        self.owned_tokens.push(Box::new(Token::new()));
+        let token: *mut Token = &mut **self.owned_tokens.last_mut().unwrap();
         unsafe {
             (*token).set_type_and_string(
                 token::Type::Anything,

@@ -27,7 +27,9 @@ mod tests {
     #[test]
     fn iterator_keeps_the_source_insertion_order() {
         unsafe {
-            let autodoc = Autodoc::new(Some("iter"), std::ptr::null_mut());
+            let mut autodoc = Autodoc::new(Some("iter"), std::ptr::null_mut());
+            // The box stays alive for the rest of the scope; the pointer only borrows it.
+            let autodoc: *mut Autodoc = &mut *autodoc;
             (*autodoc).add_name_value_pair_attribute(Some("first"), Some("1"));
             (*autodoc).add_name_value_pair_attribute(Some("second"), Some("2"));
             (*autodoc).add_name_value_pair_attribute(Some("first"), Some("3"));

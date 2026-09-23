@@ -8,5 +8,14 @@ pub const CHUNK_TO_SKIP: i32 = 3;
 
 pub mod comfilejobs;
 pub mod machinehandler;
+// `processchunks` is IMOD's distributed job scheduler: it drives chunks over
+// **ssh** to other machines and submits to batch queues (`processchunks.cpp`
+// carries 19 ssh and 32 queue references), and `processhandler` emulates Qt's
+// `QProcess::finished` with `waitid(WEXITED | WNOWAIT)` so a child stays
+// reapable.  Both are POSIX process/remote-execution services with no Windows
+// counterpart worth inventing (user, 2026-09-23: *"ssh etc is linux only. I
+// dont expect windows portability there, and we can feature gate it"*).
+#[cfg(unix)]
 pub mod processchunks;
+#[cfg(unix)]
 pub mod processhandler;

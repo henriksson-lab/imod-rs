@@ -238,7 +238,9 @@ mod tests {
     #[test]
     fn statement_link_list_is_built_and_unlinked_as_the_source_does() {
         unsafe {
-            let autodoc = Autodoc::new(Some("link"), std::ptr::null_mut());
+            let mut autodoc = Autodoc::new(Some("link"), std::ptr::null_mut());
+            // The box stays alive for the rest of the scope; the pointer only borrows it.
+            let autodoc: *mut Autodoc = &mut *autodoc;
             (*autodoc).add_name_value_pair_attribute(Some("one"), Some("1"));
             (*autodoc).add_name_value_pair_attribute(Some("two"), Some("2"));
             (*autodoc).add_name_value_pair_attribute(Some("three"), Some("3"));

@@ -35,24 +35,27 @@ mod tests {
     #[test]
     fn ownership_flags_follow_the_three_source_implementations() {
         unsafe {
-            let autodoc = Autodoc::new(Some("flags"), std::ptr::null_mut());
+            let mut autodoc = Autodoc::new(Some("flags"), std::ptr::null_mut());
             assert!((*autodoc).is_global());
             assert!(!(*autodoc).is_attribute());
-            let name = Box::into_raw(Box::new(Token::new()));
-            (*name).set_type_and_string(token::Type::Anything, "global");
-            let attribute = (*autodoc).add_attribute(name, 1);
+            // The tokens stay owned by these bindings for the whole test, the way
+            // the parser's token stream owns the ones it hands in; the autodoc and
+            // its sections only borrow them.
+            let mut name = Box::new(Token::new());
+            name.set_type_and_string(token::Type::Anything, "global");
+            let attribute = (*autodoc).add_attribute(&mut *name, 1);
             assert!((*attribute).is_global());
             assert!((*attribute).is_attribute());
-            let r#type = Box::into_raw(Box::new(Token::new()));
-            (*r#type).set_type_and_string(token::Type::Anything, "Field");
-            let section_name = Box::into_raw(Box::new(Token::new()));
-            (*section_name).set_type_and_string(token::Type::Anything, "One");
-            let section = (*autodoc).add_section(r#type, section_name, 2);
+            let mut r#type = Box::new(Token::new());
+            r#type.set_type_and_string(token::Type::Anything, "Field");
+            let mut section_name = Box::new(Token::new());
+            section_name.set_type_and_string(token::Type::Anything, "One");
+            let section = (*autodoc).add_section(&mut *r#type, &mut *section_name, 2);
             assert!(!(*section).is_global());
             assert!(!(*section).is_attribute());
-            let in_section = Box::into_raw(Box::new(Token::new()));
-            (*in_section).set_type_and_string(token::Type::Anything, "local");
-            let local = (*section).add_attribute(in_section, 2);
+            let mut in_section = Box::new(Token::new());
+            in_section.set_type_and_string(token::Type::Anything, "local");
+            let local = (*section).add_attribute(&mut *in_section, 2);
             assert!(!(*local).is_global());
             assert!((*local).is_attribute());
         }

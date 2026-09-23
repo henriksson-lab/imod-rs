@@ -845,21 +845,23 @@ impl PrimativeTokenizer {
     /// multiple times in a row.  Places a deep copy in the return token, and returns it.
     /// If it's null, constructs a deep copy and returns it.
     ///
-    /// # Safety
-    /// `return_token` must be null or point to a live `Token`.  When it is null the
-    /// returned pointer owns a heap `Token` the caller must reclaim with
-    /// `Box::from_raw`, where the source's owner is the GC.
-    pub unsafe fn peek(&mut self, return_token: *mut Token) -> *mut Token {
+    /// The source's "return token" is an in/out parameter that the caller reuses
+    /// across a loop: a `null` on the first call means "allocate one", and the
+    /// same object is refilled on every later call.  `&mut Option<Box<Token>>`
+    /// carries that contract with an owner, so the allocated token is reclaimed
+    /// when the caller's binding goes out of scope rather than leaked -- in Java
+    /// the collector owns it.
+    pub fn peek(&mut self, return_token: &mut Option<Box<Token>>) {
         if self.peeked_at_token {
             // The token has been peeked at before. Just keep returning it.
-            if return_token.is_null() {
-                return Box::into_raw(Box::new(Token::new_from_token(&self.token)));
+            match return_token {
+                None => *return_token = Some(Box::new(Token::new_from_token(&self.token))),
+                Some(return_token) => return_token.copy(&self.token),
             }
-            unsafe { (*return_token).copy(&self.token) };
-            return return_token;
+            return;
         }
         self.peeked_at_token = true;
-        unsafe { self.save_next_token(return_token) }
+        self.save_next_token(return_token);
     }
 
     /// Java `next`.
@@ -867,35 +869,33 @@ impl PrimativeTokenizer {
     /// Get the next token.  If the next token has been peeked at, it's already been
     /// saved.
     ///
-    /// # Safety
-    /// See `peek`.
-    pub unsafe fn next(&mut self, return_token: *mut Token) -> *mut Token {
+    /// See `peek` for the in/out parameter.
+    pub fn next(&mut self, return_token: &mut Option<Box<Token>>) {
         if self.peeked_at_token {
             // The token has already been saved.
             self.peeked_at_token = false;
-            if return_token.is_null() {
-                return Box::into_raw(Box::new(Token::new_from_token(&self.token)));
+            match return_token {
+                None => *return_token = Some(Box::new(Token::new_from_token(&self.token))),
+                Some(return_token) => return_token.copy(&self.token),
             }
-            unsafe { (*return_token).copy(&self.token) };
-            return return_token;
+            return;
         }
-        unsafe { self.save_next_token(return_token) }
+        self.save_next_token(return_token);
     }
 
     /// Java `saveNextToken`.
     ///
     /// Saves the next token.  Returns a deep copy of it.
     ///
-    /// # Safety
-    /// See `peek`.
-    unsafe fn save_next_token(&mut self, return_token: *mut Token) -> *mut Token {
+    /// See `peek` for the in/out parameter.
+    fn save_next_token(&mut self, return_token: &mut Option<Box<Token>>) {
         if self.value_being_broken_up.is_none() {
             if self.file_closed {
-                if return_token.is_null() {
-                    return Box::into_raw(Box::new(Token::new_from_token(&self.token)));
+                match return_token {
+                    None => *return_token = Some(Box::new(Token::new_from_token(&self.token))),
+                    Some(return_token) => return_token.copy(&self.token),
                 }
-                unsafe { (*return_token).copy(&self.token) };
-                return return_token;
+                return;
             }
             let mut found = false;
             self.token.reset();
@@ -1006,11 +1006,10 @@ impl PrimativeTokenizer {
             let token = std::mem::replace(&mut self.token, Token::new());
             self.token = self.separate_alphabetic_and_numeric(token);
         }
-        if return_token.is_null() {
-            return Box::into_raw(Box::new(Token::new_from_token(&self.token)));
+        match return_token {
+            None => *return_token = Some(Box::new(Token::new_from_token(&self.token))),
+            Some(return_token) => return_token.copy(&self.token),
         }
-        unsafe { (*return_token).copy(&self.token) };
-        return_token
     }
 
     /// Java `separateAlphabeticAndNumeric`.
@@ -1107,7 +1106,9 @@ impl PrimativeTokenizer {
     pub fn test(&mut self, tokens: bool) {
         self.initialize();
         loop {
-            let token = unsafe { Box::from_raw(self.next(std::ptr::null_mut())) };
+            let mut token: Option<Box<Token>> = None;
+            self.next(&mut token);
+            let token = token.expect("next allocates when the return token is None");
             if tokens {
                 println!("{}", token);
             } else if token.is(token::Type::Eol) {

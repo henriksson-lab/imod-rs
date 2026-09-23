@@ -3,7 +3,7 @@ mod common;
 use imod_rs::imod::libcfshr::cubinterp::cubinterp;
 use imod_rs::imod::libcfshr::linearxforms::xfmult;
 use imod_rs::imod::libiimod::iimage::{
-    IIFILE_DEFAULT, IIFILE_TIFF, ii_close, ii_fill_mrc_header, ii_open, ii_open_new,
+    IIFILE_DEFAULT, IIFILE_TIFF, ii_delete, ii_fill_mrc_header, ii_open, ii_open_new,
     ii_read_section_float, ii_sync_from_mrc_header, ii_write_section_float,
 };
 use imod_rs::imod::libiimod::mrcfiles::{
@@ -45,14 +45,14 @@ fn newstack_streams_real_mrc_sections() {
         let mut second = [5.0_f32, 6.0, 7.0, 8.0];
         assert_eq!(ii_write_section_float(&mut *file, &mut first, 0), 0);
         assert_eq!(ii_write_section_float(&mut *file, &mut second, 1), 0);
-        ii_close(file);
+        ii_delete(file);
     }
     unsafe {
         let file = ii_open(input_c.to_bytes(), "rb");
         let mut pixels = [0.0_f32; 4];
         assert_eq!(ii_read_section_float(&mut *file, &mut pixels, 1), 0);
         assert_eq!(pixels, [5., 6., 7., 8.]);
-        ii_close(file);
+        ii_delete(file);
     }
     assert!(
         common::imod_cmd("newstack")
@@ -81,7 +81,7 @@ fn newstack_streams_real_mrc_sections() {
         let mut pixels = [0.0_f32; 4];
         assert_eq!(ii_read_section_float(&mut *file, &mut pixels, 0), 0);
         assert_eq!(pixels, [5., 6., 7., 8.]);
-        ii_close(file);
+        ii_delete(file);
     }
     let _ = std::fs::remove_file(input);
     let _ = std::fs::remove_file(output);
@@ -120,7 +120,7 @@ fn newstack_reorders_real_tilt_stack_from_explicit_angle_file() {
                 0
             );
         }
-        ii_close(file);
+        ii_delete(file);
     }
     std::fs::write(&angles, "10\n-20\n0\n20\n").unwrap();
     assert!(
@@ -153,7 +153,7 @@ fn newstack_reorders_real_tilt_stack_from_explicit_angle_file() {
             );
             assert_eq!(pixel, [expected]);
         }
-        ii_close(file);
+        ii_delete(file);
     }
     assert_eq!(
         std::fs::read_to_string(&reordered).unwrap(),
@@ -195,7 +195,7 @@ fn newstack_inserts_tilts_as_generic_mrc_extended_header_reals() {
                 0
             );
         }
-        ii_close(file);
+        ii_delete(file);
     }
     std::fs::write(&angles, "-30.5\n12.25\n").unwrap();
     assert!(
@@ -219,7 +219,7 @@ fn newstack_inserts_tilts_as_generic_mrc_extended_header_reals() {
         let mut header = MrcHeader::default();
         assert_eq!(ii_fill_mrc_header(file, &mut header), 0);
         assert_eq!((header.next, header.nint, header.nreal), (8, 0, 1));
-        ii_close(file);
+        ii_delete(file);
     }
     let bytes = std::fs::read(&output).unwrap();
     assert_eq!(bytes.len(), 1024 + 8 + 8);
@@ -281,7 +281,7 @@ fn newstack_replaces_generic_extended_header_tilts_for_selected_sections() {
                 0
             );
         }
-        ii_close(file);
+        ii_delete(file);
     }
     std::fs::write(&angles, "-4.5\n18.25\n").unwrap();
     let native_output = base.with_extension("native-output.mrc");
@@ -401,7 +401,7 @@ fn newstack_replaces_selected_serialem_extended_header_tilts() {
                 0
             );
         }
-        ii_close(file);
+        ii_delete(file);
     }
     std::fs::write(&angles, "-4.505\n18.255\n").unwrap();
     let native_output = base.with_extension("native-output.mrc");
@@ -493,7 +493,7 @@ fn newstack_format_of_output_file_writes_native_tiff() {
         (*file).axis = 3;
         let mut pixel = [7_f32];
         assert_eq!(ii_write_section_float(&mut *file, &mut pixel, 0), 0);
-        ii_close(file);
+        ii_delete(file);
     }
     assert!(
         common::imod_cmd("newstack")
@@ -517,7 +517,7 @@ fn newstack_format_of_output_file_writes_native_tiff() {
         let mut pixel = [f32::NAN];
         assert_eq!(ii_read_section_float(&mut *file, &mut pixel, 0), 0);
         assert_eq!(pixel, [7.]);
-        ii_close(file);
+        ii_delete(file);
     }
     for path in [input, output] {
         let _ = std::fs::remove_file(path);
@@ -549,7 +549,7 @@ fn newstack_bytes_signed_output_option_controls_real_byte_mrc_header() {
         (*file).axis = 3;
         let mut pixels = [1.0_f32, 255.0];
         assert_eq!(ii_write_section_float(&mut *file, &mut pixels, 0), 0);
-        ii_close(file);
+        ii_delete(file);
     }
     assert!(
         common::imod_cmd("newstack")
@@ -575,7 +575,7 @@ fn newstack_bytes_signed_output_option_controls_real_byte_mrc_header() {
         let mut pixels = [0.0_f32; 2];
         assert_eq!(ii_read_section_float(&mut *file, &mut pixels, 0), 0);
         assert_eq!(pixels, [1.0, 255.0]);
-        ii_close(file);
+        ii_delete(file);
     }
     for path in [input, output] {
         let _ = std::fs::remove_file(path);
@@ -617,7 +617,7 @@ fn newstack_size_preserves_real_mrc_sampling_and_cell_geometry() {
         (*file).axis = 3;
         let mut pixels = [1.0_f32; 16];
         assert_eq!(ii_write_section_float(&mut *file, &mut pixels, 0), 0);
-        ii_close(file);
+        ii_delete(file);
     }
     assert!(
         common::imod_cmd("newstack")
@@ -648,7 +648,7 @@ fn newstack_size_preserves_real_mrc_sampling_and_cell_geometry() {
         assert_eq!(&header.labels[0][..23], b"NEWSTACK: Images copied");
         assert_eq!((header.labels[0][58], header.labels[0][62]), (b'-', b'-'));
         assert_eq!((header.labels[0][69], header.labels[0][72]), (b':', b':'));
-        ii_close(file);
+        ii_delete(file);
     }
     for path in [input, output] {
         let _ = std::fs::remove_file(path);
@@ -689,7 +689,7 @@ fn newstack_pixel_from_mdoc_uses_first_selected_zvalue_spacing() {
                 0
             );
         }
-        ii_close(file);
+        ii_delete(file);
     }
     std::fs::write(
         &mdoc,
@@ -742,7 +742,7 @@ fn newstack_pixel_from_mdoc_uses_first_selected_zvalue_spacing() {
         assert_eq!(ii_fill_mrc_header(file, &mut header), 0);
         assert_eq!((header.mx, header.my, header.mz), (1, 1, 1));
         assert_eq!((header.xlen, header.ylen, header.zlen), (4.0, 4.0, 4.0));
-        ii_close(file);
+        ii_delete(file);
     }
     if native_output.exists() {
         unsafe {
@@ -752,7 +752,7 @@ fn newstack_pixel_from_mdoc_uses_first_selected_zvalue_spacing() {
             assert_eq!(ii_fill_mrc_header(file, &mut header), 0);
             assert_eq!((header.mx, header.my, header.mz), (1, 1, 1));
             assert_eq!((header.xlen, header.ylen, header.zlen), (4.0, 4.0, 4.0));
-            ii_close(file);
+            ii_delete(file);
         }
     }
     for path in [input, output, native_output, mdoc] {
@@ -783,7 +783,7 @@ fn newstack_print_size_exits_after_real_mrc_header() {
         (*file).ury = (*file).ny - 1;
         (*file).urz = (*file).nz - 1;
         (*file).axis = 3;
-        ii_close(file);
+        ii_delete(file);
     }
     let result = common::imod_cmd("newstack")
         .env("AUTODOC_DIR", AUTODOC)
@@ -857,7 +857,7 @@ fn newstack_expand_derives_output_dimensions_from_real_mrc() {
         (*file).axis = 3;
         let mut pixels = [1.0_f32, 2.0, 3.0, 4.0];
         assert_eq!(ii_write_section_float(&mut *file, &mut pixels, 0), 0);
-        ii_close(file);
+        ii_delete(file);
     }
     assert!(
         common::imod_cmd("newstack")
@@ -880,7 +880,7 @@ fn newstack_expand_derives_output_dimensions_from_real_mrc() {
         let mut header = MrcHeader::default();
         assert_eq!(ii_fill_mrc_header(file, &mut header), 0);
         assert_eq!((header.nx, header.ny), (4, 4));
-        ii_close(file);
+        ii_delete(file);
     }
     for path in [input, output] {
         let _ = std::fs::remove_file(path);
@@ -912,7 +912,7 @@ fn newstack_rotate_transposes_default_real_mrc_dimensions() {
         (*file).axis = 3;
         let mut pixels = [1.0_f32, 2.0, 3.0, 4.0, 5.0, 6.0];
         assert_eq!(ii_write_section_float(&mut *file, &mut pixels, 0), 0);
-        ii_close(file);
+        ii_delete(file);
     }
     assert!(
         common::imod_cmd("newstack")
@@ -935,7 +935,7 @@ fn newstack_rotate_transposes_default_real_mrc_dimensions() {
         let mut header = MrcHeader::default();
         assert_eq!(ii_fill_mrc_header(file, &mut header), 0);
         assert_eq!((header.nx, header.ny), (3, 2));
-        ii_close(file);
+        ii_delete(file);
     }
     for path in [input, output] {
         let _ = std::fs::remove_file(path);
@@ -967,7 +967,7 @@ fn newstack_bin_averages_real_mrc_blocks() {
         (*file).axis = 3;
         let mut pixels: [f32; 16] = core::array::from_fn(|index| index as f32 + 1.0);
         assert_eq!(ii_write_section_float(&mut *file, &mut pixels, 0), 0);
-        ii_close(file);
+        ii_delete(file);
     }
     assert!(
         common::imod_cmd("newstack")
@@ -993,7 +993,7 @@ fn newstack_bin_averages_real_mrc_blocks() {
         let mut pixels = [0.0_f32; 4];
         assert_eq!(ii_read_section_float(&mut *file, &mut pixels, 0), 0);
         assert_eq!(pixels, [3.5, 5.5, 11.5, 13.5]);
-        ii_close(file);
+        ii_delete(file);
     }
     for path in [input, output] {
         let _ = std::fs::remove_file(path);
@@ -1025,7 +1025,7 @@ fn newstack_allow_odd_even_changes_binned_real_mrc_size() {
         (*file).axis = 3;
         let mut pixels = [1.0_f32; 81];
         assert_eq!(ii_write_section_float(&mut *file, &mut pixels, 0), 0);
-        ii_close(file);
+        ii_delete(file);
     }
     for (suffix, odd, expected) in [("normal", false, (3, 3)), ("odd", true, (2, 2))] {
         let output = base.with_extension(format!("{suffix}.mrc"));
@@ -1049,7 +1049,7 @@ fn newstack_allow_odd_even_changes_binned_real_mrc_size() {
             let mut header = MrcHeader::default();
             assert_eq!(ii_fill_mrc_header(file, &mut header), 0);
             assert_eq!((header.nx, header.ny), expected);
-            ii_close(file);
+            ii_delete(file);
         }
         let _ = std::fs::remove_file(output);
     }
@@ -1085,7 +1085,7 @@ fn newstack_affine_bin_interpolates_binned_real_mrc() {
         (*file).axis = 3;
         let mut pixels: [f32; 16] = core::array::from_fn(|index| index as f32 + 1.0);
         assert_eq!(ii_write_section_float(&mut *file, &mut pixels, 0), 0);
-        ii_close(file);
+        ii_delete(file);
     }
     std::fs::write(&xform, "1 0 0 1 0 0\n").unwrap();
     assert!(
@@ -1111,7 +1111,7 @@ fn newstack_affine_bin_interpolates_binned_real_mrc() {
         let mut pixels = [0.0_f32; 4];
         assert_eq!(ii_read_section_float(&mut *file, &mut pixels, 0), 0);
         assert_eq!(pixels, [3.5, 5.5, 11.5, 13.5]);
-        ii_close(file);
+        ii_delete(file);
     }
     for path in [input, output, xform] {
         let _ = std::fs::remove_file(path);
@@ -1158,7 +1158,7 @@ fn newstack_routes_repeated_input_files_to_repeated_outputs() {
                     0
                 );
             }
-            ii_close(file);
+            ii_delete(file);
         }
     }
     assert!(
@@ -1202,7 +1202,7 @@ fn newstack_routes_repeated_input_files_to_repeated_outputs() {
                 assert_eq!(ii_read_section_float(&mut *file, &mut actual, z as i32), 0);
                 assert_eq!(actual, expected);
             }
-            ii_close(file);
+            ii_delete(file);
         }
     }
     for path in [input_a, input_b, output_a, output_b] {
@@ -1243,7 +1243,7 @@ fn newstack_routes_source_shaped_input_and_output_list_files() {
             (*file).axis = 3;
             let mut pixels = pixels;
             assert_eq!(ii_write_section_float(&mut *file, &mut pixels, 0), 0);
-            ii_close(file);
+            ii_delete(file);
         }
     }
     std::fs::write(
@@ -1279,7 +1279,7 @@ fn newstack_routes_source_shaped_input_and_output_list_files() {
             let mut actual = [0.0_f32; 4];
             assert_eq!(ii_read_section_float(&mut *file, &mut actual, 0), 0);
             assert_eq!(actual, expected);
-            ii_close(file);
+            ii_delete(file);
         }
     }
     for path in [
@@ -1322,7 +1322,7 @@ fn newstack_applies_identity_transform_file_to_real_mrc() {
         assert_eq!(ii_write_section_float(&mut *file, &mut pixels, 0), 0);
         let mut second = (100..125).map(|value| value as f32).collect::<Vec<_>>();
         assert_eq!(ii_write_section_float(&mut *file, &mut second, 1), 0);
-        ii_close(file);
+        ii_delete(file);
     }
     std::fs::write(&xform, "1 0 0 1 0 0\n1 0 0 1 1 0\n").unwrap();
     assert!(
@@ -1350,7 +1350,7 @@ fn newstack_applies_identity_transform_file_to_real_mrc() {
         assert_eq!(pixels, core::array::from_fn(|value| value as f32));
         assert_eq!(ii_read_section_float(&mut *file, &mut pixels, 1), 0);
         assert_eq!(pixels, core::array::from_fn(|value| value as f32 + 100.));
-        ii_close(file);
+        ii_delete(file);
     }
     for path in [input, output, xform] {
         let _ = std::fs::remove_file(path);
@@ -1389,7 +1389,7 @@ fn newstack_applies_repeated_offsets_in_source_composition_order() {
         assert_eq!(ii_write_section_float(&mut *file, &mut section, 0), 0);
         let mut section = second.clone();
         assert_eq!(ii_write_section_float(&mut *file, &mut section, 1), 0);
-        ii_close(file);
+        ii_delete(file);
     }
     std::fs::write(&xform, "2 0 0 2 0 0\n2 0 0 2 0 0\n").unwrap();
     for (output, apply_first) in [(&output_last, false), (&output_first, true)] {
@@ -1421,7 +1421,7 @@ fn newstack_applies_repeated_offsets_in_source_composition_order() {
         for (index, section) in output.iter_mut().enumerate() {
             assert_eq!(ii_read_section_float(&mut *file, section, index as i32), 0);
         }
-        ii_close(file);
+        ii_delete(file);
         output
     };
     let actual_last = read_sections(&output_last);
@@ -1499,7 +1499,7 @@ fn newstack_memory_limit_chunks_ordinary_affine_mrc() {
         (*file).urz = (*file).nz - 1;
         (*file).axis = 3;
         assert_eq!(ii_write_section_float(&mut *file, &mut pixels, 0), 0);
-        ii_close(file);
+        ii_delete(file);
     }
     std::fs::write(&xform, "1 0 0 1 0 0\n").unwrap();
     // Note what this checks: that the chunked and unchunked routes agree.  It
@@ -1546,7 +1546,7 @@ fn newstack_memory_limit_chunks_ordinary_affine_mrc() {
         assert_eq!(&header.labels[0][23..36], b", transformed");
         let mut output = vec![0.0_f32; 200 * 150];
         assert_eq!(ii_read_section_float(&mut *file, &mut output, 0), 0);
-        ii_close(file);
+        ii_delete(file);
         output
     };
     let chunked = read_output(&output_chunks);
@@ -1592,7 +1592,7 @@ fn newstack_blank_accepts_out_of_range_sections_and_writes_zero_metadata() {
         (*file).axis = 3;
         let mut pixels = [3.0_f32; 6];
         assert_eq!(ii_write_section_float(&mut *file, &mut pixels, 0), 0);
-        ii_close(file);
+        ii_delete(file);
     }
     assert!(
         common::imod_cmd("newstack")
@@ -1623,7 +1623,7 @@ fn newstack_blank_accepts_out_of_range_sections_and_writes_zero_metadata() {
             assert_eq!(ii_read_section_float(&mut *file, &mut pixels, section), 0);
             assert_eq!(pixels, [0.0; 6]);
         }
-        ii_close(file);
+        ii_delete(file);
     }
     for path in [input, output] {
         let _ = std::fs::remove_file(path);
@@ -1656,7 +1656,7 @@ fn newstack_multadd_uses_pip_factor_and_constant_on_real_mrc() {
         (*file).axis = 3;
         let mut pixels = [1.0_f32, 2.0, 3.0, 4.0];
         assert_eq!(ii_write_section_float(&mut *file, &mut pixels, 0), 0);
-        ii_close(file);
+        ii_delete(file);
     }
     assert!(
         common::imod_cmd("newstack")
@@ -1679,7 +1679,7 @@ fn newstack_multadd_uses_pip_factor_and_constant_on_real_mrc() {
         let mut pixels = [0.0_f32; 4];
         assert_eq!(ii_read_section_float(&mut *file, &mut pixels, 0), 0);
         assert_eq!(pixels, [5.0, 7.0, 9.0, 11.0]);
-        ii_close(file);
+        ii_delete(file);
     }
     for path in [input, output] {
         let _ = std::fs::remove_file(path);
@@ -1711,7 +1711,7 @@ fn newstack_reports_source_truncations_for_scaled_byte_output() {
         (*file).axis = 3;
         let mut pixels = [1.0_f32, 2.0, 3.0, 4.0];
         assert_eq!(ii_write_section_float(&mut *file, &mut pixels, 0), 0);
-        ii_close(file);
+        ii_delete(file);
     }
     let result = common::imod_cmd("newstack")
         .env("AUTODOC_DIR", AUTODOC)
@@ -1781,7 +1781,7 @@ fn newstack_reports_source_truncations_for_scaled_byte_output() {
         let mut pixels = [0.0_f32; 4];
         assert_eq!(ii_read_section_float(&mut *file, &mut pixels, 0), 0);
         assert_eq!(pixels, [100.0, 200.0, 255.0, 255.0]);
-        ii_close(file);
+        ii_delete(file);
     }
     for path in [input, output, quiet_output] {
         let _ = std::fs::remove_file(path);
@@ -1816,7 +1816,7 @@ fn newstack_scale_maps_source_header_range_on_real_mrc() {
         (*file).axis = 3;
         let mut pixels = [1.0_f32, 2.0, 3.0, 4.0];
         assert_eq!(ii_write_section_float(&mut *file, &mut pixels, 0), 0);
-        ii_close(file);
+        ii_delete(file);
     }
     assert!(
         common::imod_cmd("newstack")
@@ -1845,7 +1845,7 @@ fn newstack_scale_maps_source_header_range_on_real_mrc() {
         assert_eq!(ii_read_section_float(&mut *file, &mut pixels, 0), 0);
         // Reference-binary values for this fixture (`-scale 10,20 -map 2,5`).
         assert_eq!(pixels, [6.666667, 10.0, 13.333333, 16.666666]);
-        ii_close(file);
+        ii_delete(file);
     }
     for path in [input, output] {
         let _ = std::fs::remove_file(path);
@@ -1880,7 +1880,7 @@ fn newstack_contrast_converts_black_white_to_source_scale_range() {
         (*file).axis = 3;
         let mut pixels = [1.0_f32, 4.0];
         assert_eq!(ii_write_section_float(&mut *file, &mut pixels, 0), 0);
-        ii_close(file);
+        ii_delete(file);
     }
     assert!(
         common::imod_cmd("newstack")
@@ -1906,7 +1906,7 @@ fn newstack_contrast_converts_black_white_to_source_scale_range() {
         let mut pixels = [0.0_f32; 2];
         assert_eq!(ii_read_section_float(&mut *file, &mut pixels, 0), 0);
         assert_eq!(pixels, [0.0, 255.0]);
-        ii_close(file);
+        ii_delete(file);
     }
     for path in [input, output] {
         let _ = std::fs::remove_file(path);
@@ -1940,7 +1940,7 @@ fn newstack_float_three_prescans_sections_then_shifts_to_shared_mean() {
         let mut second = [10.0_f32, 14.0];
         assert_eq!(ii_write_section_float(&mut *file, &mut first, 0), 0);
         assert_eq!(ii_write_section_float(&mut *file, &mut second, 1), 0);
-        ii_close(file);
+        ii_delete(file);
     }
     assert!(
         common::imod_cmd("newstack")
@@ -1965,7 +1965,7 @@ fn newstack_float_three_prescans_sections_then_shifts_to_shared_mean() {
         assert_eq!(pixels, [6.0, 8.0]);
         assert_eq!(ii_read_section_float(&mut *file, &mut pixels, 1), 0);
         assert_eq!(pixels, [5.0, 9.0]);
-        ii_close(file);
+        ii_delete(file);
     }
     for path in [input, output] {
         let _ = std::fs::remove_file(path);
@@ -1999,7 +1999,7 @@ fn newstack_float_four_prescans_and_scales_shifted_global_range() {
         let mut second = [10.0_f32, 14.0];
         assert_eq!(ii_write_section_float(&mut *file, &mut first, 0), 0);
         assert_eq!(ii_write_section_float(&mut *file, &mut second, 1), 0);
-        ii_close(file);
+        ii_delete(file);
     }
     assert!(
         common::imod_cmd("newstack")
@@ -2026,7 +2026,7 @@ fn newstack_float_four_prescans_and_scales_shifted_global_range() {
         assert_eq!(pixels, [12.5, 17.5]);
         assert_eq!(ii_read_section_float(&mut *file, &mut pixels, 1), 0);
         assert_eq!(pixels, [10.0, 20.0]);
-        ii_close(file);
+        ii_delete(file);
     }
     for path in [input, output] {
         let _ = std::fs::remove_file(path);
@@ -2064,7 +2064,7 @@ fn newstack_float_two_uses_mad_filtered_global_z_range() {
         let mut outlier = vec![0.0_f32; 100];
         outlier[99] = 100.0;
         assert_eq!(ii_write_section_float(&mut *file, &mut outlier, 8), 0);
-        ii_close(file);
+        ii_delete(file);
     }
     assert!(
         common::imod_cmd("newstack")
@@ -2097,7 +2097,7 @@ fn newstack_float_two_uses_mad_filtered_global_z_range() {
         // (`newstack.f90:3229-3231`), so it runs past the 255 range.
         assert_eq!(outlier[99], 812.4673);
         assert_eq!(outlier[0], 112.439835);
-        ii_close(file);
+        ii_delete(file);
     }
     for path in [input, output] {
         let _ = std::fs::remove_file(path);
@@ -2129,7 +2129,7 @@ fn newstack_meansd_uses_float_two_section_statistics() {
         (*file).axis = 3;
         let mut pixels = [1.0_f32, 3.0];
         assert_eq!(ii_write_section_float(&mut *file, &mut pixels, 0), 0);
-        ii_close(file);
+        ii_delete(file);
     }
     assert!(
         common::imod_cmd("newstack")
@@ -2156,7 +2156,7 @@ fn newstack_meansd_uses_float_two_section_statistics() {
         let sample_sd = ((pixels[0] - mean).powi(2) + (pixels[1] - mean).powi(2)).sqrt();
         assert!((mean - 10.0).abs() < 1.0e-5);
         assert!((sample_sd - 2.0).abs() < 1.0e-5);
-        ii_close(file);
+        ii_delete(file);
     }
     for path in [input, output] {
         let _ = std::fs::remove_file(path);
@@ -2190,7 +2190,7 @@ fn newstack_float_one_maps_header_range_to_float_range() {
         (*file).axis = 3;
         let mut pixels = [1.0_f32, 3.0];
         assert_eq!(ii_write_section_float(&mut *file, &mut pixels, 0), 0);
-        ii_close(file);
+        ii_delete(file);
     }
     assert!(
         common::imod_cmd("newstack")
@@ -2216,7 +2216,7 @@ fn newstack_float_one_maps_header_range_to_float_range() {
         // -float 1 maps the header range onto 0..255, as the reference binary
         // does for this fixture.
         assert_eq!(pixels, [0.0, 255.0]);
-        ii_close(file);
+        ii_delete(file);
     }
     for path in [input, output] {
         let _ = std::fs::remove_file(path);
@@ -2249,7 +2249,7 @@ fn newstack_fixrange_retains_source_legality_errors_on_real_mrc() {
         (*file).axis = 3;
         let mut values = [1.0_f32, 2.0, 3.0, 4.0];
         assert_eq!(ii_write_section_float(&mut *file, &mut values, 0), 0);
-        ii_close(file);
+        ii_delete(file);
     }
     let result = common::imod_cmd("newstack")
         .env("AUTODOC_DIR", AUTODOC)
@@ -2328,7 +2328,7 @@ fn newstack_fixrange_scans_interpolated_real_mrc_and_scales_low_sd_values() {
         (*file).axis = 3;
         let mut values = [1.0_f32, 2.0, 3.0, 4.0];
         assert_eq!(ii_write_section_float(&mut *file, &mut values, 0), 0);
-        ii_close(file);
+        ii_delete(file);
     }
     std::fs::write(&xform, "1 0 0 1 0 0\n").unwrap();
     let result = common::imod_cmd("newstack")
@@ -2375,7 +2375,7 @@ fn newstack_fixrange_scans_interpolated_real_mrc_and_scales_low_sd_values() {
         let mut values = [0.0_f32; 4];
         assert_eq!(ii_read_section_float(&mut *file, &mut values, 0), 0);
         assert_eq!(values, [2.0, 4.0, 6.0, 8.0]);
-        ii_close(file);
+        ii_delete(file);
     }
     for path in [input, output, xform] {
         let _ = std::fs::remove_file(path);
@@ -2414,7 +2414,7 @@ fn newstack_fixrange_uses_source_signed_mode_shift_after_low_sd_scan() {
         (*file).axis = 3;
         let mut values = [-30000.0_f32; 4];
         assert_eq!(ii_write_section_float(&mut *file, &mut values, 0), 0);
-        ii_close(file);
+        ii_delete(file);
     }
     std::fs::write(&xform, "1 0 0 1 0 0\n").unwrap();
     let result = common::imod_cmd("newstack")
@@ -2460,7 +2460,7 @@ fn newstack_fixrange_uses_source_signed_mode_shift_after_low_sd_scan() {
         let mut values = [0.0_f32; 4];
         assert_eq!(ii_read_section_float(&mut *file, &mut values, 0), 0);
         assert_eq!(values, [-27232.0; 4]);
-        ii_close(file);
+        ii_delete(file);
     }
     for path in [input, output, xform] {
         let _ = std::fs::remove_file(path);
@@ -2508,7 +2508,7 @@ fn newstack_size_to_output_centres_real_mrc_crop_and_edge_median_padding() {
             }
         });
         assert_eq!(ii_write_section_float(&mut *file, &mut values, 0), 0);
-        ii_close(file);
+        ii_delete(file);
     }
     for (output, size, side, expected) in [
         (
@@ -2556,7 +2556,7 @@ fn newstack_size_to_output_centres_real_mrc_crop_and_edge_median_padding() {
             assert_eq!((header.nx, header.ny), (side, side));
             assert_eq!(values, expected);
             assert!(values.iter().all(|value| *value != 999.0));
-            ii_close(file);
+            ii_delete(file);
         }
     }
     for path in [input, crop, pad] {
@@ -2603,7 +2603,7 @@ fn newstack_prints_source_unit_and_header_reports_for_stream_copy() {
         let mut second = [9.0_f32, 10.0, 11.0, 12.0, 13.0, 14.0, 15.0, 16.0];
         assert_eq!(ii_write_section_float(&mut *file, &mut first, 0), 0);
         assert_eq!(ii_write_section_float(&mut *file, &mut second, 1), 0);
-        ii_close(file);
+        ii_delete(file);
     }
     let result = common::imod_cmd("newstack")
         .env("AUTODOC_DIR", AUTODOC)
@@ -2702,7 +2702,7 @@ fn newstack_bin_streams_every_section_and_scales_cell_by_read_reduction() {
             }
             assert_eq!(ii_write_section_float(&mut *file, &mut pixels, section), 0);
         }
-        ii_close(file);
+        ii_delete(file);
     }
     let result = common::imod_cmd("newstack")
         .env("AUTODOC_DIR", AUTODOC)
@@ -2739,7 +2739,7 @@ fn newstack_bin_streams_every_section_and_scales_cell_by_read_reduction() {
                 "section {section}"
             );
         }
-        ii_close(file);
+        ii_delete(file);
     }
     for path in [input, output] {
         let _ = std::fs::remove_file(path);
@@ -2789,7 +2789,7 @@ fn newstack_drops_unsupported_extended_header_and_resets_imod_flags() {
         let mut second = [5.0_f32, 6.0, 7.0, 8.0];
         assert_eq!(ii_write_section_float(&mut *file, &mut first, 0), 0);
         assert_eq!(ii_write_section_float(&mut *file, &mut second, 1), 0);
-        ii_close(file);
+        ii_delete(file);
     }
     assert!(
         common::imod_cmd("newstack")
@@ -2820,7 +2820,7 @@ fn newstack_drops_unsupported_extended_header_and_resets_imod_flags() {
         let mut pixels = [0.0_f32; 4];
         assert_eq!(ii_read_section_float(&mut *file, &mut pixels, 1), 0);
         assert_eq!(pixels, [5., 6., 7., 8.]);
-        ii_close(file);
+        ii_delete(file);
     }
     // `iiuTransHeader` ends in `iiuTransExtendedData` (`unit_header.c:395`),
     // which writes the input's 64 extended bytes to the output before
@@ -2881,7 +2881,7 @@ fn newstack_pip_and_section_errors_exit_one_on_stdout() {
         for section in 0..2 {
             assert_eq!(ii_write_section_float(&mut *file, &mut pixels, section), 0);
         }
-        ii_close(file);
+        ii_delete(file);
     }
     // `write(*,'(/,a,i9,a,a)')` at `newstack.f90:525-526`.
     let result = common::imod_cmd("newstack")
@@ -2967,7 +2967,7 @@ fn newstack_blank_section_fills_with_input_mean_or_fill_value() {
         (*file).axis = 3;
         let mut pixels = [3.0_f32; 6];
         assert_eq!(ii_write_section_float(&mut *file, &mut pixels, 0), 0);
-        ii_close(file);
+        ii_delete(file);
     }
     assert!(
         common::imod_cmd("newstack")
@@ -2998,7 +2998,7 @@ fn newstack_blank_section_fills_with_input_mean_or_fill_value() {
             assert_eq!(ii_read_section_float(&mut *file, &mut pixels, section), 0);
             assert_eq!(pixels, [3.0; 6]);
         }
-        ii_close(file);
+        ii_delete(file);
     }
     // `if (ifUseFill .ne. 0) tmpMin = fillVal` (`newstack.f90:2027`).
     assert!(
@@ -3025,7 +3025,7 @@ fn newstack_blank_section_fills_with_input_mean_or_fill_value() {
         let mut pixels = [0.0_f32; 6];
         assert_eq!(ii_read_section_float(&mut *file, &mut pixels, 0), 0);
         assert_eq!(pixels, [42.5; 6]);
-        ii_close(file);
+        ii_delete(file);
     }
     for path in [input, output, filled] {
         let _ = std::fs::remove_file(path);
@@ -3064,7 +3064,7 @@ fn newstack_mode_change_rescales_input_mode_range_without_float() {
         (*file).axis = 3;
         let mut pixels = [4204.0_f32, 10000.0, 16000.0, 21899.0];
         assert_eq!(ii_write_section_float(&mut *file, &mut pixels, 0), 0);
-        ii_close(file);
+        ii_delete(file);
     }
     assert!(
         common::imod_cmd("newstack")
@@ -3093,7 +3093,7 @@ fn newstack_mode_change_rescales_input_mode_range_without_float() {
         // The 255-step output range is fully used, which the unscaled copy
         // this used to produce never was.
         assert!(pixels[3] < 255.0 && pixels[3] > 169.0, "{pixels:?}");
-        ii_close(file);
+        ii_delete(file);
     }
     for path in [input, output] {
         let _ = std::fs::remove_file(path);
@@ -3135,7 +3135,7 @@ fn newstack_float_two_reports_extreme_range_note() {
         let mut outlier = vec![0.0_f32; 100];
         outlier[99] = 100.0;
         assert_eq!(ii_write_section_float(&mut *file, &mut outlier, 8), 0);
-        ii_close(file);
+        ii_delete(file);
     }
     let result = common::imod_cmd("newstack")
         .env("AUTODOC_DIR", AUTODOC)
@@ -3197,7 +3197,7 @@ fn newstack_dopen_announces_opened_transform_file() {
         (*file).axis = 3;
         let mut pixels = [1.0_f32, 2.0, 3.0, 4.0];
         assert_eq!(ii_write_section_float(&mut *file, &mut pixels, 0), 0);
-        ii_close(file);
+        ii_delete(file);
     }
     std::fs::write(&xform, "1 0 0 1 0 0\n").unwrap();
     let result = common::imod_cmd("newstack")
@@ -3275,7 +3275,7 @@ fn newstack_accepts_bin_triplet_onexform_and_numout() {
             let mut pixels = (0..16).map(|value| value as f32).collect::<Vec<_>>();
             assert_eq!(ii_write_section_float(&mut *file, &mut pixels, section), 0);
         }
-        ii_close(file);
+        ii_delete(file);
     }
     for (tag, extra) in [
         ("bin", vec!["-bin", "2,2,1"]),
@@ -3307,7 +3307,7 @@ fn newstack_accepts_bin_triplet_onexform_and_numout() {
             let mut header = (*file).mrc_header.take().unwrap();
             assert_eq!(header.nz, 2, "{tag}");
             assert_eq!(header.nx, if tag == "bin" { 2 } else { 4 }, "{tag}");
-            ii_close(file);
+            ii_delete(file);
         }
         let _ = std::fs::remove_file(output);
     }
@@ -3346,7 +3346,7 @@ fn newstack_rotate_90_resamples_pixels_as_native_does() {
         let mut pixels: [f32; 48] =
             core::array::from_fn(|i| (10 * (i % 8) + 3 * (i / 8)) as f32 + 0.5);
         assert_eq!(ii_write_section_float(&mut *file, &mut pixels, 0), 0);
-        ii_close(file);
+        ii_delete(file);
     }
     assert!(
         common::imod_cmd("newstack")
@@ -3377,7 +3377,7 @@ fn newstack_rotate_90_resamples_pixels_as_native_does() {
         assert_eq!((header.nx, header.ny), (6, 8));
         let mut pixels = [0.0_f32; 48];
         assert_eq!(ii_read_section_float(&mut *file, &mut pixels, 0), 0);
-        ii_close(file);
+        ii_delete(file);
         assert_eq!(pixels, expected);
     }
     for path in [input, output] {
@@ -3414,7 +3414,7 @@ fn newstack_rotate_180_reverses_both_axes_as_native_does() {
         let mut pixels: [f32; 48] =
             core::array::from_fn(|i| (10 * (i % 8) + 3 * (i / 8)) as f32 + 0.5);
         assert_eq!(ii_write_section_float(&mut *file, &mut pixels, 0), 0);
-        ii_close(file);
+        ii_delete(file);
     }
     assert!(
         common::imod_cmd("newstack")
@@ -3445,7 +3445,7 @@ fn newstack_rotate_180_reverses_both_axes_as_native_does() {
         assert_eq!((header.nx, header.ny), (8, 6));
         let mut pixels = [0.0_f32; 48];
         assert_eq!(ii_read_section_float(&mut *file, &mut pixels, 0), 0);
-        ii_close(file);
+        ii_delete(file);
         assert_eq!(pixels, expected);
     }
     for path in [input, output] {
@@ -3487,7 +3487,7 @@ fn newstack_ftreduce_fourier_crops_as_native_does() {
             100.0 + 30.0 * (x / 3.0).sin() * (y / 2.0).cos() + x - y
         });
         assert_eq!(ii_write_section_float(&mut *file, &mut pixels, 0), 0);
-        ii_close(file);
+        ii_delete(file);
     }
     assert!(
         common::imod_cmd("newstack")
@@ -3562,7 +3562,7 @@ fn newstack_ftreduce_fourier_crops_as_native_does() {
         assert_eq!((header.nx, header.ny), (8, 6));
         let mut pixels = [0.0_f32; 48];
         assert_eq!(ii_read_section_float(&mut *file, &mut pixels, 0), 0);
-        ii_close(file);
+        ii_delete(file);
         assert_eq!(pixels, expected);
     }
     for path in [input, output] {
@@ -3599,7 +3599,7 @@ fn newstack_ftexpand_fourier_expands_as_native_does() {
         (*file).axis = 3;
         let mut pixels: [f32; 16] = core::array::from_fn(|i| (i * i % 13) as f32 + 1.0);
         assert_eq!(ii_write_section_float(&mut *file, &mut pixels, 0), 0);
-        ii_close(file);
+        ii_delete(file);
     }
     assert!(
         common::imod_cmd("newstack")
@@ -3690,7 +3690,7 @@ fn newstack_ftexpand_fourier_expands_as_native_does() {
         assert_eq!((header.nx, header.ny), (8, 8));
         let mut pixels = [0.0_f32; 64];
         assert_eq!(ii_read_section_float(&mut *file, &mut pixels, 0), 0);
-        ii_close(file);
+        ii_delete(file);
         assert_eq!(pixels, expected);
     }
     for path in [input, output] {
@@ -3737,7 +3737,7 @@ fn newstack_fill_outside_image_uses_edge_median_not_file_mean() {
             }
         });
         assert_eq!(ii_write_section_float(&mut *file, &mut pixels, 0), 0);
-        ii_close(file);
+        ii_delete(file);
     }
     assert!(
         common::imod_cmd("newstack")
@@ -3767,7 +3767,7 @@ fn newstack_fill_outside_image_uses_edge_median_not_file_mean() {
         assert_eq!((header.nx, header.ny), (6, 6));
         let mut pixels = [0.0_f32; 36];
         assert_eq!(ii_read_section_float(&mut *file, &mut pixels, 0), 0);
-        ii_close(file);
+        ii_delete(file);
         // The file mean is 32.5; every filled pixel must be the edge median 10.
         assert_eq!(pixels, expected);
         assert!(pixels.iter().all(|value| *value != 32.5));
@@ -3810,7 +3810,7 @@ fn newstack_phase_shifts_in_fourier_space_as_native_does() {
         let mut pixels: [f32; 48] =
             core::array::from_fn(|i| (10 * (i % 8) + 3 * (i / 8)) as f32 + 0.5);
         assert_eq!(ii_write_section_float(&mut *file, &mut pixels, 0), 0);
-        ii_close(file);
+        ii_delete(file);
     }
     assert!(
         common::imod_cmd("newstack")
@@ -3886,7 +3886,7 @@ fn newstack_phase_shifts_in_fourier_space_as_native_does() {
         assert_eq!((header.nx, header.ny), (8, 6));
         let mut pixels = [0.0_f32; 48];
         assert_eq!(ii_read_section_float(&mut *file, &mut pixels, 0), 0);
-        ii_close(file);
+        ii_delete(file);
         assert_eq!(pixels, expected);
     }
     for path in [input, output] {
@@ -3927,7 +3927,7 @@ fn newstack_output_section_counts_follow_source_three_way_branch() {
             let mut pixels = [section as f32, 1.0, 2.0, 3.0];
             assert_eq!(ii_write_section_float(&mut *file, &mut pixels, section), 0);
         }
-        ii_close(file);
+        ii_delete(file);
     }
     let out = |tag: &str| base.with_extension(format!("{tag}.mrc"));
     let run = |extra: &[&str], outputs: &[std::path::PathBuf]| {
@@ -3982,7 +3982,7 @@ fn newstack_output_section_counts_follow_source_three_way_branch() {
                 let file = ii_open(name.to_bytes(), "rb");
                 assert!(!file.is_null(), "{tag}");
                 assert_eq!((*file).mrc_header.as_ref().unwrap().nz, nz, "{tag}");
-                ii_close(file);
+                ii_delete(file);
             }
         }
     }
@@ -3998,7 +3998,7 @@ fn newstack_output_section_counts_follow_source_three_way_branch() {
     unsafe {
         let file = ii_open(name.to_bytes(), "rb");
         assert_eq!((*file).mrc_header.as_ref().unwrap().nz, 5);
-        ii_close(file);
+        ii_delete(file);
     }
     let five: Vec<std::path::PathBuf> = ["a", "b", "c", "d", "e"].iter().map(|t| out(t)).collect();
     let result = run(&["-numout", "2,3"], &five);
@@ -4012,7 +4012,7 @@ fn newstack_output_section_counts_follow_source_three_way_branch() {
         unsafe {
             let file = ii_open(name.to_bytes(), "rb");
             assert_eq!((*file).mrc_header.as_ref().unwrap().nz, 1);
-            ii_close(file);
+            ii_delete(file);
         }
         let _ = std::fs::remove_file(path);
     }
@@ -4337,7 +4337,7 @@ fn newstack_copies_serialem_typed_extended_header_for_selected_sections() {
             let mut pixels = [section as f32, 1.0, 2.0, 3.0];
             assert_eq!(ii_write_section_float(&mut *file, &mut pixels, section), 0);
         }
-        ii_close(file);
+        ii_delete(file);
     }
     assert!(
         common::imod_cmd("newstack")
@@ -4362,7 +4362,7 @@ fn newstack_copies_serialem_typed_extended_header_for_selected_sections() {
         assert_eq!(ii_fill_mrc_header(file, &mut header), 0);
         assert_eq!(header.next, 36);
         assert_eq!((header.nint, header.nreal), (12, 7));
-        ii_close(file);
+        ii_delete(file);
     }
     for (index, section) in [1_usize, 3, 5].iter().enumerate() {
         assert_eq!(
@@ -4411,7 +4411,7 @@ fn newstack_strip_keeps_serialem_type_fields_with_no_extended_data() {
             let mut pixels = [section as f32, 1.0, 2.0, 3.0];
             assert_eq!(ii_write_section_float(&mut *file, &mut pixels, section), 0);
         }
-        ii_close(file);
+        ii_delete(file);
     }
     assert!(
         common::imod_cmd("newstack")
@@ -4434,7 +4434,7 @@ fn newstack_strip_keeps_serialem_type_fields_with_no_extended_data() {
         assert_eq!(ii_fill_mrc_header(file, &mut header), 0);
         assert_eq!(header.next, 0);
         assert_eq!((header.nint, header.nreal), (12, 7));
-        ii_close(file);
+        ii_delete(file);
     }
     for path in [input, output] {
         let _ = std::fs::remove_file(path);
@@ -4486,7 +4486,7 @@ fn newstack_tilt_replaces_serialem_tilt_short_and_keeps_the_rest() {
             let mut pixels = [section as f32, 1.0, 2.0, 3.0];
             assert_eq!(ii_write_section_float(&mut *file, &mut pixels, section), 0);
         }
-        ii_close(file);
+        ii_delete(file);
     }
     std::fs::write(&angles, "-60.25\n12.5\n").unwrap();
     assert!(
@@ -4563,7 +4563,7 @@ fn newstack_reorder_uses_extended_header_tilt_angles() {
             let mut pixels = [section as f32, 1.0, 2.0, 3.0];
             assert_eq!(ii_write_section_float(&mut *file, &mut pixels, section), 0);
         }
-        ii_close(file);
+        ii_delete(file);
     }
     assert!(
         common::imod_cmd("newstack")
@@ -4595,7 +4595,7 @@ fn newstack_reorder_uses_extended_header_tilt_angles() {
         assert_eq!(pixels[0], 2.0);
         assert_eq!(ii_read_section_float(&mut *file, &mut pixels, 2), 0);
         assert_eq!(pixels[0], 0.0);
-        ii_close(file);
+        ii_delete(file);
     }
     for path in [input, output] {
         let _ = std::fs::remove_file(path);
@@ -4641,7 +4641,7 @@ fn newstack_refuses_saving_tilt_angles_into_an_fei1_extended_header() {
             let mut pixels = [section as f32, 1.0, 2.0, 3.0];
             assert_eq!(ii_write_section_float(&mut *file, &mut pixels, section), 0);
         }
-        ii_close(file);
+        ii_delete(file);
     }
     std::fs::write(&angles, "-60.0\n0.0\n").unwrap();
     let result = common::imod_cmd("newstack")
@@ -4708,7 +4708,7 @@ fn newstack_refuses_tilt_angles_for_a_serialem_header_without_the_tilt_flag() {
             let mut pixels = [section as f32, 1.0, 2.0, 3.0];
             assert_eq!(ii_write_section_float(&mut *file, &mut pixels, section), 0);
         }
-        ii_close(file);
+        ii_delete(file);
     }
     std::fs::write(&angles, "-60.0\n0.0\n").unwrap();
     let result = common::imod_cmd("newstack")
@@ -5383,7 +5383,7 @@ fn newstack_rustfft_fourier_options_match_the_parity_output() {
                 })
                 .collect::<Vec<f32>>();
             assert_eq!(ii_write_section_float(&mut *file, &mut pixels, 0), 0);
-            ii_close(file);
+            ii_delete(file);
         }
         let mut decoded = Vec::new();
         let mut sizes = Vec::new();
@@ -5409,7 +5409,7 @@ fn newstack_rustfft_fourier_options_match_the_parity_output() {
                 assert_eq!(ii_fill_mrc_header(file, &mut header), 0);
                 let mut pixels = vec![0.0_f32; (header.nx * header.ny) as usize];
                 assert_eq!(ii_read_section_float(&mut *file, &mut pixels, 0), 0);
-                ii_close(file);
+                ii_delete(file);
                 sizes.push((header.nx, header.ny, header.mode));
                 decoded.push(pixels);
             }

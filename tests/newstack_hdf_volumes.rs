@@ -8,7 +8,7 @@ mod common;
 
 use imod_rs::imod::libiimod::iihdf::ii_hdf_open_new;
 use imod_rs::imod::libiimod::iimage::{
-    IIFILE_DEFAULT, IIFILE_HDF, ii_allow_multi_volume, ii_close, ii_delete, ii_open, ii_open_new,
+    IIFILE_DEFAULT, IIFILE_HDF, ii_allow_multi_volume, ii_delete, ii_open, ii_open_new,
     ii_read_section_float, ii_sync_from_mrc_header, ii_write_header, ii_write_section_float,
 };
 use imod_rs::imod::libiimod::mrcfiles::{MRC_MODE_FLOAT, mrc_head_new, mrc_head_write};
@@ -38,7 +38,7 @@ fn write_input_mrc(tag: &str) -> std::path::PathBuf {
             let mut section: Vec<f32> = (0..48).map(|i| (z * 100 + i) as f32).collect();
             assert_eq!(ii_write_section_float(image, &mut section, z), 0);
         }
-        ii_close(file);
+        ii_delete(file);
     }
     path
 }
@@ -51,7 +51,7 @@ fn read_section(path: &std::path::Path, section: i32, count: usize) -> Vec<f32> 
         assert!(!file.is_null(), "opening {}", path.display());
         let mut pixels = vec![0.0_f32; count];
         assert_eq!(ii_read_section_float(&mut *file, &mut pixels, section), 0);
-        ii_close(file);
+        ii_delete(file);
         pixels
     }
 }
@@ -89,7 +89,7 @@ fn newstack_3d_one_writes_a_single_hdf_volume() {
         assert_eq!((*file).nz, 4);
         // A stack of 2-D datasets reports no Z chunking at all.
         assert!((*file).z_chunk_size > 0, "output is not a 3-D volume");
-        ii_close(file);
+        ii_delete(file);
     }
     assert_eq!(read_section(&output, 2, 48)[..3], [200., 201., 202.]);
     std::fs::remove_file(input).unwrap();
@@ -165,7 +165,7 @@ fn newstack_chunk_reports_the_actual_tile_size() {
             ),
             (4, 3, 2)
         );
-        ii_close(file);
+        ii_delete(file);
     }
     assert_eq!(read_section(&output, 3, 48)[..3], [300., 301., 302.]);
     std::fs::remove_file(input).unwrap();
@@ -412,7 +412,7 @@ fn newstack_3d_two_adds_a_volume_to_an_existing_file() {
         let file = ii_open(output_c.to_bytes(), "rb");
         ii_allow_multi_volume(0);
         assert_eq!((*file).num_volumes, 3);
-        ii_close(file);
+        ii_delete(file);
     }
     std::fs::remove_file(input).unwrap();
     std::fs::remove_file(output).unwrap();

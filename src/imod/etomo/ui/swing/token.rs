@@ -289,13 +289,13 @@ impl Token {
     /// `NullPointerException` before the `IndexOutOfBoundsException` is constructed.
     ///
     /// The source returns a reference to a heap `Token` that it also links into this
-    /// token's `previous`, so the new token is boxed and returned as `*mut Token`;
-    /// ownership passes to the caller, where the source's owner is the GC.
+    /// token's `previous`, so the new token is returned as a box; ownership passes to
+    /// the caller, where the source's owner is the GC.  The caller must keep it alive
+    /// at least as long as the link list it was spliced into.
     ///
     /// # Safety
-    /// `previous` and `next` must be null or point to live `Token`s.  The returned
-    /// pointer must eventually be reclaimed with `Box::from_raw`.
-    pub unsafe fn split(&mut self, r#type: Type, start_index: i32, size: i32) -> *mut Token {
+    /// `previous` and `next` must be null or point to live `Token`s.
+    pub unsafe fn split(&mut self, r#type: Type, start_index: i32, size: i32) -> Box<Token> {
         let value: Vec<u16> = match &self.value {
             None => panic!("java.lang.NullPointerException"),
             Some(value) => value.encode_utf16().collect(),
@@ -308,9 +308,10 @@ impl Token {
                 value.len()
             );
         }
-        let new_token = Box::into_raw(Box::new(Token::new()));
+        let mut new_token = Box::new(Token::new());
+        let new_token_ptr: *mut Token = &mut *new_token;
         unsafe {
-            (*new_token).set_type_and_string(
+            (*new_token_ptr).set_type_and_string(
                 r#type,
                 &String::from_utf16_lossy(
                     &value[start_index as usize..(start_index + size) as usize],
@@ -319,11 +320,11 @@ impl Token {
         };
         self.value = Some(String::from_utf16_lossy(&value[size as usize..]));
         if !self.next.is_null() || !self.previous.is_null() {
-            unsafe { (*new_token).next = self };
+            new_token.next = self;
             if !self.previous.is_null() {
-                unsafe { (*new_token).previous = self.previous };
+                new_token.previous = self.previous;
             }
-            self.previous = new_token;
+            self.previous = new_token_ptr;
         }
         new_token
     }

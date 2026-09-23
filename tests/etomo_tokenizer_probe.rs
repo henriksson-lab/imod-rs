@@ -47,7 +47,9 @@ fn render(text: &str, numeric: bool) -> String {
     let mut buffer = String::new();
     let mut guard = 0;
     loop {
-        let t = unsafe { Box::from_raw(tokenizer.next(std::ptr::null_mut())) };
+        let mut t: Option<Box<Token>> = None;
+        tokenizer.next(&mut t);
+        let t = t.expect("next allocates when the return token is None");
         buffer.push_str(&format!(" ({},{})", t.get_type(), esc(t.get_value())));
         guard += 1;
         if guard > 60 || t.is(token::Type::Eof) {
@@ -260,10 +262,18 @@ fn jvm_verified_primative_tokenizer_numeric_mode() {
 fn jvm_verified_primative_tokenizer_peek() {
     let mut tokenizer = PrimativeTokenizer::get_string_instance("ab cd", false);
     let _ = tokenizer.initialize();
-    let peek1 = unsafe { Box::from_raw(tokenizer.peek(std::ptr::null_mut())) };
-    let peek2 = unsafe { Box::from_raw(tokenizer.peek(std::ptr::null_mut())) };
-    let next1 = unsafe { Box::from_raw(tokenizer.next(std::ptr::null_mut())) };
-    let next2 = unsafe { Box::from_raw(tokenizer.next(std::ptr::null_mut())) };
+    let mut peek1: Option<Box<Token>> = None;
+    tokenizer.peek(&mut peek1);
+    let peek1 = peek1.expect("peek allocates when the return token is None");
+    let mut peek2: Option<Box<Token>> = None;
+    tokenizer.peek(&mut peek2);
+    let peek2 = peek2.expect("peek allocates when the return token is None");
+    let mut next1: Option<Box<Token>> = None;
+    tokenizer.next(&mut next1);
+    let next1 = next1.expect("next allocates when the return token is None");
+    let mut next2: Option<Box<Token>> = None;
+    tokenizer.next(&mut next2);
+    let next2 = next2.expect("next allocates when the return token is None");
     assert_eq!(peek1.get_string(), "(ALPHANUM,ab)");
     assert_eq!(peek2.get_string(), "(ALPHANUM,ab)");
     assert_eq!(next1.get_string(), "(ALPHANUM,ab)");
@@ -325,7 +335,7 @@ fn jvm_verified_token_api() {
 
     let mut s1 = Token::new();
     s1.set_type_and_string(token::Type::Alphanum, "abcdef");
-    let s2 = unsafe { Box::from_raw(s1.split(token::Type::Word, 1, 2)) };
+    let s2 = unsafe { s1.split(token::Type::Word, 1, 2) };
     assert_eq!(s2.get_string(), "(WORD,bc)");
     assert_eq!(s1.get_string(), "(ALPHANUM,cdef)");
 

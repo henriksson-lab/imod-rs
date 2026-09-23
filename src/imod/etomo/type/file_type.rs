@@ -93,8 +93,10 @@ pub enum PatternElement {
     Variable(Variable),
     /// An `ExtensionMarker` element.
     ExtensionMarker(ExtensionMarker),
-    /// An `Extension` element.
-    Extension(&'static Extension),
+    /// An `Extension` element.  Owned: Java holds a reference to the singleton, but
+    /// `NumberedFileType::get_instance` can also build one for an unrecognised
+    /// extension, and borrowing that meant `Box::leak`ing it once per call.
+    Extension(Extension),
     /// A `FileType` element.
     FileType(Arc<FileType>),
     /// A `null` element, which `joinPatterns` writes into the tail of its result.
@@ -886,7 +888,7 @@ pub static CLASS: LazyLock<ClassStatics> = LazyLock::new(|| {
         PatternElement::Str(".".to_string()),
         PatternElement::Str(extension::CLASS.ebt.to_string()),
         PatternElement::ExtensionMarker(ExtensionMarker::Generic),
-        PatternElement::Extension(&extension::CLASS.active),
+        PatternElement::Extension(extension::CLASS.active.clone()),
     ]));
     let batch_run_tomo_global_autodoc =
         FileType::construct_instance(true, false, Some(""), Some(".adoc"));
@@ -917,7 +919,7 @@ pub static CLASS: LazyLock<ClassStatics> = LazyLock::new(|| {
         Some(vec![
             PatternElement::Variable(Variable::dataset_and_axis()),
             PatternElement::ExtensionMarker(ExtensionMarker::Image),
-            PatternElement::Extension(&extension::CLASS.ali),
+            PatternElement::Extension(extension::CLASS.ali.clone()),
         ]),
         Some(imod_manager::FINE_ALIGNED_KEY),
         Some("the final aligned stack"),
@@ -934,7 +936,7 @@ pub static CLASS: LazyLock<ClassStatics> = LazyLock::new(|| {
             PatternElement::Variable(Variable::dataset_and_axis()),
             PatternElement::Str("_3dfind".to_string()),
             PatternElement::ExtensionMarker(ExtensionMarker::Image),
-            PatternElement::Extension(&extension::CLASS.ali),
+            PatternElement::Extension(extension::CLASS.ali.clone()),
         ]),
         Some(imod_manager::FINE_ALIGNED_3D_FIND_KEY),
     );
@@ -950,7 +952,7 @@ pub static CLASS: LazyLock<ClassStatics> = LazyLock::new(|| {
             PatternElement::Variable(Variable::dataset_and_axis()),
             PatternElement::Str("_ctfcorr".to_string()),
             PatternElement::ExtensionMarker(ExtensionMarker::Image),
-            PatternElement::Extension(&extension::CLASS.ali),
+            PatternElement::Extension(extension::CLASS.ali.clone()),
         ]),
         Some(imod_manager::CTF_CORRECTION_KEY),
     );
@@ -966,7 +968,7 @@ pub static CLASS: LazyLock<ClassStatics> = LazyLock::new(|| {
             PatternElement::Variable(Variable::dataset_and_axis()),
             PatternElement::Str("_erase".to_string()),
             PatternElement::ExtensionMarker(ExtensionMarker::Image),
-            PatternElement::Extension(&extension::CLASS.ali),
+            PatternElement::Extension(extension::CLASS.ali.clone()),
         ]),
         Some(imod_manager::ERASED_FIDUCIALS_KEY),
     );
@@ -982,7 +984,7 @@ pub static CLASS: LazyLock<ClassStatics> = LazyLock::new(|| {
             PatternElement::Variable(Variable::dataset_and_axis()),
             PatternElement::Str("_filt".to_string()),
             PatternElement::ExtensionMarker(ExtensionMarker::Image),
-            PatternElement::Extension(&extension::CLASS.ali),
+            PatternElement::Extension(extension::CLASS.ali.clone()),
         ]),
         Some(imod_manager::MTF_FILTER_KEY),
     );
@@ -998,7 +1000,7 @@ pub static CLASS: LazyLock<ClassStatics> = LazyLock::new(|| {
     let xcorr_blend_output = FileType::construct_instance_pattern(Some(vec![
         PatternElement::Variable(Variable::dataset_and_axis()),
         PatternElement::ExtensionMarker(ExtensionMarker::Image),
-        PatternElement::Extension(&extension::CLASS.bl),
+        PatternElement::Extension(extension::CLASS.bl.clone()),
     ]));
     let check_file = FileType::construct_instance(true, true, Some(""), Some(".cmds"));
     let series_watcher_check_file = FileType::construct_instance_pattern(Some(vec![
@@ -1009,7 +1011,7 @@ pub static CLASS: LazyLock<ClassStatics> = LazyLock::new(|| {
                 .to_string(),
         ),
         PatternElement::ExtensionMarker(ExtensionMarker::Generic),
-        PatternElement::Extension(&extension::CLASS.cmds),
+        PatternElement::Extension(extension::CLASS.cmds.clone()),
     ]));
     let align_comscript = FileType::construct_instance(false, true, Some("align"), Some(".com"));
     let autofidseed_comscript =
@@ -1060,7 +1062,7 @@ pub static CLASS: LazyLock<ClassStatics> = LazyLock::new(|| {
         PatternElement::Str("tilt_sample".to_string()),
         PatternElement::Variable(Variable::axis()),
         PatternElement::ExtensionMarker(ExtensionMarker::Generic),
-        PatternElement::Extension(&extension::CLASS.com),
+        PatternElement::Extension(extension::CLASS.com.clone()),
     ]));
     let track_comscript = FileType::construct_instance(false, true, Some("track"), Some(".com"));
     let track_adjusted_comscript = FileType::construct_instance_pattern(Some(vec![
@@ -1068,14 +1070,14 @@ pub static CLASS: LazyLock<ClassStatics> = LazyLock::new(|| {
         PatternElement::Variable(Variable::axis()),
         PatternElement::Str("_adjusted".to_string()),
         PatternElement::ExtensionMarker(ExtensionMarker::Generic),
-        PatternElement::Extension(&extension::CLASS.com),
+        PatternElement::Extension(extension::CLASS.com.clone()),
     ]));
     let track_orig_comscript = FileType::construct_instance_pattern(Some(vec![
         PatternElement::Str("track".to_string()),
         PatternElement::Variable(Variable::axis()),
         PatternElement::Str("_orig".to_string()),
         PatternElement::ExtensionMarker(ExtensionMarker::Generic),
-        PatternElement::Extension(&extension::CLASS.com),
+        PatternElement::Extension(extension::CLASS.com.clone()),
     ]));
     let cross_correlation_comscript =
         FileType::construct_instance(false, true, Some("xcorr"), Some(".com"));
@@ -1091,13 +1093,13 @@ pub static CLASS: LazyLock<ClassStatics> = LazyLock::new(|| {
     let join_warp_2_model_comscript = FileType::construct_instance_pattern(Some(vec![
         PatternElement::Str(ProcessName::JOIN_WARP_2_MODEL.to_string()),
         PatternElement::ExtensionMarker(ExtensionMarker::Generic),
-        PatternElement::Extension(&extension::CLASS.com),
+        PatternElement::Extension(extension::CLASS.com.clone()),
     ]));
     let align_frames_output_comscript = FileType::construct_instance_pattern(Some(vec![
         PatternElement::Variable(Variable::dataset()),
         PatternElement::Str("_af".to_string()),
         PatternElement::ExtensionMarker(ExtensionMarker::Generic),
-        PatternElement::Extension(&extension::CLASS.com),
+        PatternElement::Extension(extension::CLASS.com.clone()),
     ]));
     let subtomo_setup_comscript =
         FileType::construct_instance(false, true, Some("subtomosetup"), Some(".com"));
@@ -1115,21 +1117,21 @@ pub static CLASS: LazyLock<ClassStatics> = LazyLock::new(|| {
                 .to_string(),
         ),
         PatternElement::ExtensionMarker(ExtensionMarker::Generic),
-        PatternElement::Extension(&extension::CLASS.com),
+        PatternElement::Extension(extension::CLASS.com.clone()),
     ]));
     let distortion_corrected_stack_old =
         FileType::construct_image_file_instance(true, true, Some(""), Some(".dcst"));
     let distortion_corrected_stack = FileType::construct_instance_pattern(Some(vec![
         PatternElement::Variable(Variable::dataset_and_axis()),
         PatternElement::ExtensionMarker(ExtensionMarker::Image),
-        PatternElement::Extension(&extension::CLASS.dcst),
+        PatternElement::Extension(extension::CLASS.dcst.clone()),
     ]));
     let autofidseed_dir =
         FileType::construct_instance(false, true, Some("autofidseed"), Some(".dir"));
     let batch_run_tomo_project = FileType::construct_instance_pattern(Some(vec![
         PatternElement::Variable(Variable::dataset()),
         PatternElement::ExtensionMarker(ExtensionMarker::Generic),
-        PatternElement::Extension(&extension::CLASS.ebt),
+        PatternElement::Extension(extension::CLASS.ebt.clone()),
     ]));
     let piece_shifts = FileType::construct_instance(true, true, Some(""), Some(".ecd"));
     let manual_replacement_model =
@@ -1152,7 +1154,7 @@ pub static CLASS: LazyLock<ClassStatics> = LazyLock::new(|| {
         Some(vec![
             PatternElement::Variable(Variable::dataset()),
             PatternElement::ExtensionMarker(ExtensionMarker::Image),
-            PatternElement::Extension(&extension::CLASS.flat),
+            PatternElement::Extension(extension::CLASS.flat.clone()),
         ]),
         Some(imod_manager::FLATTEN_TOOL_OUTPUT_KEY),
     );
@@ -1171,7 +1173,7 @@ pub static CLASS: LazyLock<ClassStatics> = LazyLock::new(|| {
         Some(vec![
             PatternElement::Str("test".to_string()),
             PatternElement::ExtensionMarker(ExtensionMarker::Image),
-            PatternElement::Extension(&extension::CLASS.input),
+            PatternElement::Extension(extension::CLASS.input.clone()),
         ]),
         Some(imod_manager::TEST_VOLUME_KEY),
     );
@@ -1186,7 +1188,7 @@ pub static CLASS: LazyLock<ClassStatics> = LazyLock::new(|| {
         Some(vec![
             PatternElement::Variable(Variable::dataset()),
             PatternElement::ExtensionMarker(ExtensionMarker::Image),
-            PatternElement::Extension(&extension::CLASS.join),
+            PatternElement::Extension(extension::CLASS.join.clone()),
         ]),
         Some(imod_manager::JOIN_KEY),
     );
@@ -1202,7 +1204,7 @@ pub static CLASS: LazyLock<ClassStatics> = LazyLock::new(|| {
             PatternElement::Variable(Variable::dataset()),
             PatternElement::Str("_modeled".to_string()),
             PatternElement::ExtensionMarker(ExtensionMarker::Image),
-            PatternElement::Extension(&extension::CLASS.join),
+            PatternElement::Extension(extension::CLASS.join.clone()),
         ]),
         Some(imod_manager::MODELED_JOIN_KEY),
     );
@@ -1218,7 +1220,7 @@ pub static CLASS: LazyLock<ClassStatics> = LazyLock::new(|| {
             PatternElement::Variable(Variable::dataset()),
             PatternElement::Str("_trial".to_string()),
             PatternElement::ExtensionMarker(ExtensionMarker::Image),
-            PatternElement::Extension(&extension::CLASS.join),
+            PatternElement::Extension(extension::CLASS.join.clone()),
         ]),
         Some(imod_manager::TRIAL_JOIN_KEY),
     );
@@ -1226,20 +1228,20 @@ pub static CLASS: LazyLock<ClassStatics> = LazyLock::new(|| {
     let alt_tomo_setup_log = FileType::construct_instance_pattern(Some(vec![
         PatternElement::Str("alttomosetup".to_string()),
         PatternElement::ExtensionMarker(ExtensionMarker::Generic),
-        PatternElement::Extension(&extension::CLASS.log),
+        PatternElement::Extension(extension::CLASS.log.clone()),
     ]));
     let batch_run_tomo_dataset_log =
         FileType::construct_instance(false, false, Some("batchruntomo"), Some(".log"));
     let ctf_3d_finish_log = FileType::construct_instance_pattern(Some(vec![
         PatternElement::Str("ctf3d-finish".to_string()),
         PatternElement::ExtensionMarker(ExtensionMarker::Generic),
-        PatternElement::Extension(&extension::CLASS.log),
+        PatternElement::Extension(extension::CLASS.log.clone()),
     ]));
     let ctf_3d_setup_log = FileType::construct_instance_pattern(Some(vec![
         PatternElement::Str("ctf3dsetup".to_string()),
         PatternElement::Variable(Variable::axis()),
         PatternElement::ExtensionMarker(ExtensionMarker::Generic),
-        PatternElement::Extension(&extension::CLASS.log),
+        PatternElement::Extension(extension::CLASS.log.clone()),
     ]));
     let eraser_log = FileType::construct_instance(false, true, Some("eraser"), Some(".log"));
     let tilt_align_log = FileType::construct_instance(false, true, Some("align"), Some(".log"));
@@ -1249,7 +1251,7 @@ pub static CLASS: LazyLock<ClassStatics> = LazyLock::new(|| {
         PatternElement::Variable(Variable::dataset()),
         PatternElement::Str("_project".to_string()),
         PatternElement::ExtensionMarker(ExtensionMarker::Generic),
-        PatternElement::Extension(&extension::CLASS.log),
+        PatternElement::Extension(extension::CLASS.log.clone()),
     ]));
     let series_watcher_brt_row_log = FileType::construct_instance_pattern(Some(vec![
         PatternElement::Str("swbrt_".to_string()),
@@ -1257,7 +1259,7 @@ pub static CLASS: LazyLock<ClassStatics> = LazyLock::new(|| {
         PatternElement::Str(".".to_string()),
         PatternElement::Variable(Variable::any_integer()),
         PatternElement::ExtensionMarker(ExtensionMarker::Generic),
-        PatternElement::Extension(&extension::CLASS.log),
+        PatternElement::Extension(extension::CLASS.log.clone()),
     ]));
     let align_angles_log =
         FileType::construct_instance(false, true, Some("taAngles"), Some(".log"));
@@ -1272,18 +1274,18 @@ pub static CLASS: LazyLock<ClassStatics> = LazyLock::new(|| {
         PatternElement::Variable(Variable::dataset()),
         PatternElement::Str("_af".to_string()),
         PatternElement::ExtensionMarker(ExtensionMarker::Generic),
-        PatternElement::Extension(&extension::CLASS.log),
+        PatternElement::Extension(extension::CLASS.log.clone()),
     ]));
     let restrict_align_log = FileType::construct_instance_pattern(Some(vec![
         PatternElement::Str("restrictalign".to_string()),
         PatternElement::Variable(Variable::axis()),
         PatternElement::ExtensionMarker(ExtensionMarker::Generic),
-        PatternElement::Extension(&extension::CLASS.log),
+        PatternElement::Extension(extension::CLASS.log.clone()),
     ]));
     let subtomo_setup_log = FileType::construct_instance_pattern(Some(vec![
         PatternElement::Str("subtomosetup".to_string()),
         PatternElement::ExtensionMarker(ExtensionMarker::Generic),
-        PatternElement::Extension(&extension::CLASS.log),
+        PatternElement::Extension(extension::CLASS.log.clone()),
     ]));
     let ctf_correction_log =
         FileType::construct_instance(false, true, Some("ctfcorrection"), Some(".log"));
@@ -1293,7 +1295,7 @@ pub static CLASS: LazyLock<ClassStatics> = LazyLock::new(|| {
     let reduce_filt_vol_log = FileType::construct_instance_pattern(Some(vec![
         PatternElement::Str("reducefiltvol".to_string()),
         PatternElement::ExtensionMarker(ExtensionMarker::Generic),
-        PatternElement::Extension(&extension::CLASS.log),
+        PatternElement::Extension(extension::CLASS.log.clone()),
     ]));
     let series_watcher_log = FileType::construct_instance_pattern(Some(vec![
         PatternElement::Str(
@@ -1303,13 +1305,13 @@ pub static CLASS: LazyLock<ClassStatics> = LazyLock::new(|| {
                 .to_string(),
         ),
         PatternElement::ExtensionMarker(ExtensionMarker::Generic),
-        PatternElement::Extension(&extension::CLASS.log),
+        PatternElement::Extension(extension::CLASS.log.clone()),
     ]));
     let mtf_filter_mdoc = FileType::construct_instance_pattern(Some(vec![
         PatternElement::Variable(Variable::dataset_and_axis()),
         PatternElement::Variable(Variable::orig_raw_image_extension()),
         PatternElement::ExtensionMarker(ExtensionMarker::Generic),
-        PatternElement::Extension(&extension::CLASS.mdoc),
+        PatternElement::Extension(extension::CLASS.mdoc.clone()),
     ]));
     let find_beads_3d_output_model =
         FileType::construct_instance(true, true, Some("_3dfind"), Some(".mod"));
@@ -1366,7 +1368,7 @@ pub static CLASS: LazyLock<ClassStatics> = LazyLock::new(|| {
             PatternElement::Variable(Variable::dataset_and_axis()),
             PatternElement::Str("_ali".to_string()),
             PatternElement::ExtensionMarker(ExtensionMarker::Image),
-            PatternElement::Extension(&extension::CLASS.mrc),
+            PatternElement::Extension(extension::CLASS.mrc.clone()),
         ]),
         Some(imod_manager::ALIGNED_STACK_KEY),
     );
@@ -1382,7 +1384,7 @@ pub static CLASS: LazyLock<ClassStatics> = LazyLock::new(|| {
             PatternElement::Variable(Variable::dataset_and_axis()),
             PatternElement::Str("_preblend".to_string()),
             PatternElement::ExtensionMarker(ExtensionMarker::Image),
-            PatternElement::Extension(&extension::CLASS.mrc),
+            PatternElement::Extension(extension::CLASS.mrc.clone()),
         ]),
         Some(imod_manager::PREBLEND_KEY),
     );
@@ -1402,7 +1404,7 @@ pub static CLASS: LazyLock<ClassStatics> = LazyLock::new(|| {
                 PatternElement::Str("_efos".to_string()),
                 PatternElement::Variable(Variable::two_digit_integer()),
                 PatternElement::ExtensionMarker(ExtensionMarker::Image),
-                PatternElement::Extension(&extension::CLASS.mrc),
+                PatternElement::Extension(extension::CLASS.mrc.clone()),
             ]),
             None,
             Some("Exact Filter Trials"),
@@ -1425,7 +1427,7 @@ pub static CLASS: LazyLock<ClassStatics> = LazyLock::new(|| {
             PatternElement::Str("-f".to_string()),
             PatternElement::Variable(Variable::precision_three_float()),
             PatternElement::ExtensionMarker(ExtensionMarker::Image),
-            PatternElement::Extension(&extension::CLASS.mrc),
+            PatternElement::Extension(extension::CLASS.mrc.clone()),
         ]),
         None,
         Some("Standard Gaussian Filter Trials"),
@@ -1446,7 +1448,7 @@ pub static CLASS: LazyLock<ClassStatics> = LazyLock::new(|| {
                 PatternElement::Str("_hlfs".to_string()),
                 PatternElement::Variable(Variable::precision_three_fraction()),
                 PatternElement::ExtensionMarker(ExtensionMarker::Image),
-                PatternElement::Extension(&extension::CLASS.mrc),
+                PatternElement::Extension(extension::CLASS.mrc.clone()),
             ]),
             None,
             Some("Hamming-Like Filter Trials"),
@@ -1467,7 +1469,7 @@ pub static CLASS: LazyLock<ClassStatics> = LazyLock::new(|| {
                 PatternElement::Str("_slfi".to_string()),
                 PatternElement::Variable(Variable::two_digit_integer()),
                 PatternElement::ExtensionMarker(ExtensionMarker::Image),
-                PatternElement::Extension(&extension::CLASS.mrc),
+                PatternElement::Extension(extension::CLASS.mrc.clone()),
             ]),
             None,
             Some("SIRT-like Filter Trials"),
@@ -1479,7 +1481,7 @@ pub static CLASS: LazyLock<ClassStatics> = LazyLock::new(|| {
             PatternElement::Str("-".to_string()),
             PatternElement::Variable(Variable::three_digit_integer()),
             PatternElement::ExtensionMarker(ExtensionMarker::Image),
-            PatternElement::Extension(&extension::CLASS.mrc),
+            PatternElement::Extension(extension::CLASS.mrc.clone()),
         ]),
         Some(imod_manager::TRIMMED_VOLUME_KEY),
     );
@@ -1494,7 +1496,7 @@ pub static CLASS: LazyLock<ClassStatics> = LazyLock::new(|| {
         Some(vec![
             PatternElement::Variable(Variable::dataset()),
             PatternElement::ExtensionMarker(ExtensionMarker::Image),
-            PatternElement::Extension(&extension::CLASS.nad),
+            PatternElement::Extension(extension::CLASS.nad.clone()),
         ]),
         Some(imod_manager::ANISOTROPIC_DIFFUSION_VOLUME_KEY),
     );
@@ -1510,7 +1512,7 @@ pub static CLASS: LazyLock<ClassStatics> = LazyLock::new(|| {
         Some(vec![
             PatternElement::Variable(Variable::dataset_and_axis()),
             PatternElement::ExtensionMarker(ExtensionMarker::Image),
-            PatternElement::Extension(&extension::CLASS.preali),
+            PatternElement::Extension(extension::CLASS.preali.clone()),
         ]),
         Some(imod_manager::COARSE_ALIGNED_KEY),
     );
@@ -1530,7 +1532,7 @@ pub static CLASS: LazyLock<ClassStatics> = LazyLock::new(|| {
         Some(vec![
             PatternElement::Variable(Variable::dataset()),
             PatternElement::ExtensionMarker(ExtensionMarker::Image),
-            PatternElement::Extension(&extension::CLASS.rec),
+            PatternElement::Extension(extension::CLASS.rec.clone()),
         ]),
         Some(imod_manager::TRIMMED_VOLUME_KEY),
     );
@@ -1540,7 +1542,7 @@ pub static CLASS: LazyLock<ClassStatics> = LazyLock::new(|| {
             PatternElement::Str(CHUNK_NUMBER_DIVIDER.to_string()),
             PatternElement::Variable(Variable::three_digit_integer()),
             PatternElement::ExtensionMarker(ExtensionMarker::Image),
-            PatternElement::Extension(&extension::CLASS.rec),
+            PatternElement::Extension(extension::CLASS.rec.clone()),
         ]),
         Some(imod_manager::TRIMMED_VOLUME_KEY),
     );
@@ -1550,7 +1552,7 @@ pub static CLASS: LazyLock<ClassStatics> = LazyLock::new(|| {
             PatternElement::Str(CHUNK_NUMBER_DIVIDER.to_string()),
             PatternElement::Variable(Variable::one_digit_integer()),
             PatternElement::ExtensionMarker(ExtensionMarker::Image),
-            PatternElement::Extension(&extension::CLASS.mrc),
+            PatternElement::Extension(extension::CLASS.mrc.clone()),
         ]),
         Some(imod_manager::SUBTOMO_SETUP_KEY),
     );
@@ -1560,7 +1562,7 @@ pub static CLASS: LazyLock<ClassStatics> = LazyLock::new(|| {
             PatternElement::Str(CHUNK_NUMBER_DIVIDER_VOL.to_string()),
             PatternElement::Variable(Variable::one_digit_integer()),
             PatternElement::ExtensionMarker(ExtensionMarker::Image),
-            PatternElement::Extension(&extension::CLASS.mrc),
+            PatternElement::Extension(extension::CLASS.mrc.clone()),
         ]),
         Some(imod_manager::SUBTOMO_SETUP_KEY),
     );
@@ -1576,7 +1578,7 @@ pub static CLASS: LazyLock<ClassStatics> = LazyLock::new(|| {
             PatternElement::Variable(Variable::dataset_and_axis()),
             PatternElement::Str("_3dfind".to_string()),
             PatternElement::ExtensionMarker(ExtensionMarker::Image),
-            PatternElement::Extension(&extension::CLASS.rec),
+            PatternElement::Extension(extension::CLASS.rec.clone()),
         ]),
         Some(imod_manager::FULL_VOLUME_3D_FIND_KEY),
     );
@@ -1586,7 +1588,7 @@ pub static CLASS: LazyLock<ClassStatics> = LazyLock::new(|| {
         PatternElement::Str("bot".to_string()),
         PatternElement::Variable(Variable::axis()),
         PatternElement::ExtensionMarker(ExtensionMarker::Image),
-        PatternElement::Extension(&extension::CLASS.rec),
+        PatternElement::Extension(extension::CLASS.rec.clone()),
     ]));
     let cryo_position_output_old =
         FileType::construct_image_file_instance(true, true, Some("_cpos"), Some(".rec"));
@@ -1594,7 +1596,7 @@ pub static CLASS: LazyLock<ClassStatics> = LazyLock::new(|| {
         PatternElement::Variable(Variable::dataset_and_axis()),
         PatternElement::Str("_cpos".to_string()),
         PatternElement::ExtensionMarker(ExtensionMarker::Image),
-        PatternElement::Extension(&extension::CLASS.rec),
+        PatternElement::Extension(extension::CLASS.rec.clone()),
     ]));
     let tilt_output_dual_old =
         FileType::construct_image_file_instance(true, true, Some(""), Some(".rec"));
@@ -1604,12 +1606,12 @@ pub static CLASS: LazyLock<ClassStatics> = LazyLock::new(|| {
         PatternElement::Variable(Variable::dataset_and_axis()),
         PatternElement::Str("_full".to_string()),
         PatternElement::ExtensionMarker(ExtensionMarker::Image),
-        PatternElement::Extension(&extension::CLASS.rec),
+        PatternElement::Extension(extension::CLASS.rec.clone()),
     ]));
     let tilt_output_dual = FileType::construct_instance_pattern(Some(vec![
         PatternElement::Variable(Variable::dataset_and_axis()),
         PatternElement::ExtensionMarker(ExtensionMarker::Image),
-        PatternElement::Extension(&extension::CLASS.rec),
+        PatternElement::Extension(extension::CLASS.rec.clone()),
     ]));
     let tilt_output_old = FileType::construct_different_dual_single_image_file_instance(
         tilt_output_single_old.clone(),
@@ -1628,7 +1630,7 @@ pub static CLASS: LazyLock<ClassStatics> = LazyLock::new(|| {
             PatternElement::Variable(Variable::dataset_and_axis()),
             PatternElement::Str("_3dctf".to_string()),
             PatternElement::ExtensionMarker(ExtensionMarker::Image),
-            PatternElement::Extension(&extension::CLASS.rec),
+            PatternElement::Extension(extension::CLASS.rec.clone()),
         ]),
         Some(imod_manager::CTF_3D_KEY),
     );
@@ -1644,7 +1646,7 @@ pub static CLASS: LazyLock<ClassStatics> = LazyLock::new(|| {
             PatternElement::Variable(Variable::dataset()),
             PatternElement::Str("_flat".to_string()),
             PatternElement::ExtensionMarker(ExtensionMarker::Image),
-            PatternElement::Extension(&extension::CLASS.rec),
+            PatternElement::Extension(extension::CLASS.rec.clone()),
         ]),
         Some(imod_manager::FLAT_VOLUME_KEY),
     );
@@ -1654,7 +1656,7 @@ pub static CLASS: LazyLock<ClassStatics> = LazyLock::new(|| {
         PatternElement::Str("mid".to_string()),
         PatternElement::Variable(Variable::axis()),
         PatternElement::ExtensionMarker(ExtensionMarker::Image),
-        PatternElement::Extension(&extension::CLASS.rec),
+        PatternElement::Extension(extension::CLASS.rec.clone()),
     ]));
     let combined_volume_old = FileType::construct_imod_image_file_instance(
         false,
@@ -1667,7 +1669,7 @@ pub static CLASS: LazyLock<ClassStatics> = LazyLock::new(|| {
         Some(vec![
             PatternElement::Str("sum".to_string()),
             PatternElement::ExtensionMarker(ExtensionMarker::Image),
-            PatternElement::Extension(&extension::CLASS.rec),
+            PatternElement::Extension(extension::CLASS.rec.clone()),
         ]),
         Some(imod_manager::COMBINED_TOMOGRAM_KEY),
     );
@@ -1677,7 +1679,7 @@ pub static CLASS: LazyLock<ClassStatics> = LazyLock::new(|| {
         PatternElement::Str("top".to_string()),
         PatternElement::Variable(Variable::axis()),
         PatternElement::ExtensionMarker(ExtensionMarker::Image),
-        PatternElement::Extension(&extension::CLASS.rec),
+        PatternElement::Extension(extension::CLASS.rec.clone()),
     ]));
     let join_sample_averages_old = FileType::construct_imod_image_file_instance(
         true,
@@ -1690,7 +1692,7 @@ pub static CLASS: LazyLock<ClassStatics> = LazyLock::new(|| {
         Some(vec![
             PatternElement::Variable(Variable::dataset()),
             PatternElement::ExtensionMarker(ExtensionMarker::Image),
-            PatternElement::Extension(&extension::CLASS.sampavg),
+            PatternElement::Extension(extension::CLASS.sampavg.clone()),
         ]),
         Some(imod_manager::JOIN_SAMPLE_AVERAGES_KEY),
     );
@@ -1705,7 +1707,7 @@ pub static CLASS: LazyLock<ClassStatics> = LazyLock::new(|| {
         Some(vec![
             PatternElement::Variable(Variable::dataset()),
             PatternElement::ExtensionMarker(ExtensionMarker::Image),
-            PatternElement::Extension(&extension::CLASS.sample),
+            PatternElement::Extension(extension::CLASS.sample.clone()),
         ]),
         Some(imod_manager::JOIN_SAMPLES_KEY),
     );
@@ -1721,7 +1723,7 @@ pub static CLASS: LazyLock<ClassStatics> = LazyLock::new(|| {
         tilt_output.single_axis_file_name_pattern.clone(),
         Some(vec![
             PatternElement::ExtensionMarker(ExtensionMarker::Image),
-            PatternElement::Extension(&extension::CLASS.sint),
+            PatternElement::Extension(extension::CLASS.sint.clone()),
             PatternElement::Variable(Variable::two_digit_integer()),
         ]),
         Some(imod_manager::SIRT_KEY),
@@ -1737,7 +1739,7 @@ pub static CLASS: LazyLock<ClassStatics> = LazyLock::new(|| {
         PatternElement::Variable(Variable::dataset_and_axis()),
         PatternElement::Str("_sub".to_string()),
         PatternElement::ExtensionMarker(ExtensionMarker::Image),
-        PatternElement::Extension(&extension::CLASS.sint),
+        PatternElement::Extension(extension::CLASS.sint.clone()),
         PatternElement::Variable(Variable::two_digit_integer()),
     ]));
     let squeeze_vol_output_old = FileType::construct_imod_image_file_instance(
@@ -1751,7 +1753,7 @@ pub static CLASS: LazyLock<ClassStatics> = LazyLock::new(|| {
         Some(vec![
             PatternElement::Variable(Variable::dataset()),
             PatternElement::ExtensionMarker(ExtensionMarker::Image),
-            PatternElement::Extension(&extension::CLASS.sqz),
+            PatternElement::Extension(extension::CLASS.sqz.clone()),
         ]),
         Some(imod_manager::SQUEEZED_VOLUME_KEY),
     );
@@ -1766,7 +1768,7 @@ pub static CLASS: LazyLock<ClassStatics> = LazyLock::new(|| {
         tilt_output.single_axis_file_name_pattern.clone(),
         Some(vec![
             PatternElement::ExtensionMarker(ExtensionMarker::Image),
-            PatternElement::Extension(&extension::CLASS.srec),
+            PatternElement::Extension(extension::CLASS.srec.clone()),
             PatternElement::Variable(Variable::two_digit_integer()),
         ]),
         Some(imod_manager::SIRT_KEY),
@@ -1782,7 +1784,7 @@ pub static CLASS: LazyLock<ClassStatics> = LazyLock::new(|| {
         PatternElement::Variable(Variable::dataset_and_axis()),
         PatternElement::Str("_sub".to_string()),
         PatternElement::ExtensionMarker(ExtensionMarker::Image),
-        PatternElement::Extension(&extension::CLASS.srec),
+        PatternElement::Extension(extension::CLASS.srec.clone()),
         PatternElement::Variable(Variable::two_digit_integer()),
     ]));
     // TODO(unit): needs etomo/logic/DatasetTool.java - Java `RAW_STACK_OLD` is
@@ -1792,7 +1794,7 @@ pub static CLASS: LazyLock<ClassStatics> = LazyLock::new(|| {
         Some(vec![
             PatternElement::Variable(Variable::dataset_and_axis()),
             PatternElement::ExtensionMarker(ExtensionMarker::InputImage),
-            PatternElement::Extension(&extension::CLASS.st),
+            PatternElement::Extension(extension::CLASS.st.clone()),
         ]),
         Some(imod_manager::RAW_STACK_KEY),
         Some(imod_manager::PREVIEW_KEY),
@@ -1807,14 +1809,14 @@ pub static CLASS: LazyLock<ClassStatics> = LazyLock::new(|| {
         PatternElement::Str(CHUNK_NUMBER_DIVIDER.to_string()),
         PatternElement::Variable(Variable::three_digit_integer()),
         PatternElement::ExtensionMarker(ExtensionMarker::Generic),
-        PatternElement::Extension(&extension::CLASS.log),
+        PatternElement::Extension(extension::CLASS.log.clone()),
     ]));
     let stats_log = FileType::construct_instance_pattern_key(
         Some(vec![
             PatternElement::FileType(raw_stack.clone()),
             PatternElement::Str("_stats".to_string()),
             PatternElement::ExtensionMarker(ExtensionMarker::Generic),
-            PatternElement::Extension(&extension::CLASS.log),
+            PatternElement::Extension(extension::CLASS.log.clone()),
         ]),
         Some(imod_manager::JOIN_KEY),
     );
@@ -1823,7 +1825,7 @@ pub static CLASS: LazyLock<ClassStatics> = LazyLock::new(|| {
             PatternElement::Variable(Variable::dataset_and_axis()),
             PatternElement::Str("_fixed".to_string()),
             PatternElement::ExtensionMarker(ExtensionMarker::InputImage),
-            PatternElement::Extension(&extension::CLASS.st),
+            PatternElement::Extension(extension::CLASS.st.clone()),
         ]),
         Some(imod_manager::ERASED_STACK_KEY),
     );
@@ -1834,7 +1836,7 @@ pub static CLASS: LazyLock<ClassStatics> = LazyLock::new(|| {
             PatternElement::FileType(fixed_xrays_stack.clone()),
             PatternElement::Str("_stats".to_string()),
             PatternElement::ExtensionMarker(ExtensionMarker::Generic),
-            PatternElement::Extension(&extension::CLASS.log),
+            PatternElement::Extension(extension::CLASS.log.clone()),
         ]),
         Some(imod_manager::JOIN_KEY),
     );
@@ -1845,31 +1847,31 @@ pub static CLASS: LazyLock<ClassStatics> = LazyLock::new(|| {
         PatternElement::Variable(Variable::dataset_and_axis()),
         PatternElement::Str("_orig".to_string()),
         PatternElement::ExtensionMarker(ExtensionMarker::InputImage),
-        PatternElement::Extension(&extension::CLASS.st),
+        PatternElement::Extension(extension::CLASS.st.clone()),
     ]));
     let full_vsr = FileType::construct_instance_pattern(Some(vec![
         PatternElement::Variable(Variable::dataset_and_axis()),
         PatternElement::Str("_full".to_string()),
         PatternElement::ExtensionMarker(ExtensionMarker::Image),
-        PatternElement::Extension(&extension::CLASS.vsr),
+        PatternElement::Extension(extension::CLASS.vsr.clone()),
         PatternElement::Variable(Variable::two_digit_integer()),
     ]));
     let sub_vsr = FileType::construct_instance_pattern(Some(vec![
         PatternElement::Variable(Variable::dataset_and_axis()),
         PatternElement::Str("_sub".to_string()),
         PatternElement::ExtensionMarker(ExtensionMarker::Image),
-        PatternElement::Extension(&extension::CLASS.vsr),
+        PatternElement::Extension(extension::CLASS.vsr.clone()),
         PatternElement::Variable(Variable::two_digit_integer()),
     ]));
     let tilt_angles = FileType::construct_instance_pattern(Some(vec![
         PatternElement::Variable(Variable::dataset_and_axis()),
         PatternElement::ExtensionMarker(ExtensionMarker::Generic),
-        PatternElement::Extension(&extension::CLASS.tlt),
+        PatternElement::Extension(extension::CLASS.tlt.clone()),
     ]));
     let warp_xg = FileType::construct_instance_pattern(Some(vec![
         PatternElement::Variable(Variable::dataset()),
         PatternElement::ExtensionMarker(ExtensionMarker::Generic),
-        PatternElement::Extension(&extension::CLASS.warpxg),
+        PatternElement::Extension(extension::CLASS.warpxg.clone()),
     ]));
     let edge_functions_x = FileType::construct_instance(true, true, Some(""), Some(".xef"));
     let local_transformation_list =
@@ -1886,20 +1888,20 @@ pub static CLASS: LazyLock<ClassStatics> = LazyLock::new(|| {
         PatternElement::Variable(Variable::dataset()),
         PatternElement::Str("_even".to_string()),
         PatternElement::ExtensionMarker(ExtensionMarker::InputImage),
-        PatternElement::Extension(&extension::CLASS.st),
+        PatternElement::Extension(extension::CLASS.st.clone()),
     ]));
     let alt_stack_rootname_odd_file = FileType::construct_instance_pattern(Some(vec![
         PatternElement::Variable(Variable::dataset()),
         PatternElement::Str("_odd".to_string()),
         PatternElement::ExtensionMarker(ExtensionMarker::InputImage),
-        PatternElement::Extension(&extension::CLASS.st),
+        PatternElement::Extension(extension::CLASS.st.clone()),
     ]));
     let alt_stack_even_tomogram = FileType::construct_instance_pattern_key(
         Some(vec![
             PatternElement::Variable(Variable::dataset_and_axis()),
             PatternElement::Str("_even".to_string()),
             PatternElement::ExtensionMarker(ExtensionMarker::Image),
-            PatternElement::Extension(&extension::CLASS.rec),
+            PatternElement::Extension(extension::CLASS.rec.clone()),
         ]),
         Some(imod_manager::ALT_TOMO_SETUP_EVEN_ODD_TOMOGRAM_KEY),
     );
@@ -1908,7 +1910,7 @@ pub static CLASS: LazyLock<ClassStatics> = LazyLock::new(|| {
             PatternElement::Variable(Variable::dataset_and_axis()),
             PatternElement::Str("_odd".to_string()),
             PatternElement::ExtensionMarker(ExtensionMarker::Image),
-            PatternElement::Extension(&extension::CLASS.rec),
+            PatternElement::Extension(extension::CLASS.rec.clone()),
         ]),
         Some(imod_manager::ALT_TOMO_SETUP_EVEN_ODD_TOMOGRAM_KEY),
     );
@@ -1917,7 +1919,7 @@ pub static CLASS: LazyLock<ClassStatics> = LazyLock::new(|| {
             PatternElement::Variable(Variable::dataset_and_axis()),
             PatternElement::Str("_even_full".to_string()),
             PatternElement::ExtensionMarker(ExtensionMarker::Image),
-            PatternElement::Extension(&extension::CLASS.rec),
+            PatternElement::Extension(extension::CLASS.rec.clone()),
         ]),
         Some(imod_manager::ALT_TOMO_SETUP_EVEN_ODD_TOMOGRAM_KEY),
     );
@@ -1926,7 +1928,7 @@ pub static CLASS: LazyLock<ClassStatics> = LazyLock::new(|| {
             PatternElement::Variable(Variable::dataset_and_axis()),
             PatternElement::Str("_odd_full".to_string()),
             PatternElement::ExtensionMarker(ExtensionMarker::Image),
-            PatternElement::Extension(&extension::CLASS.rec),
+            PatternElement::Extension(extension::CLASS.rec.clone()),
         ]),
         Some(imod_manager::ALT_TOMO_SETUP_EVEN_ODD_TOMOGRAM_KEY),
     );
@@ -1934,7 +1936,7 @@ pub static CLASS: LazyLock<ClassStatics> = LazyLock::new(|| {
         Some(vec![
             PatternElement::Variable(Variable::dataset_and_axis()),
             PatternElement::ExtensionMarker(ExtensionMarker::Image),
-            PatternElement::Extension(&extension::CLASS.rec),
+            PatternElement::Extension(extension::CLASS.rec.clone()),
         ]),
         Some(imod_manager::ALT_TOMO_SETUP_TOMOGRAM_KEY),
     );
@@ -1945,7 +1947,7 @@ pub static CLASS: LazyLock<ClassStatics> = LazyLock::new(|| {
             PatternElement::Variable(Variable::precision_two_float()),
             PatternElement::Str("filt".to_string()),
             PatternElement::ExtensionMarker(ExtensionMarker::Image),
-            PatternElement::Extension(&extension::CLASS.mrc),
+            PatternElement::Extension(extension::CLASS.mrc.clone()),
         ]),
         Some(imod_manager::REDUCED_FILTERED_VOLUME_KEY),
         Some("Reducefiltvol output image file"),
@@ -1957,7 +1959,7 @@ pub static CLASS: LazyLock<ClassStatics> = LazyLock::new(|| {
             PatternElement::Variable(Variable::precision_two_float()),
             PatternElement::Str("filt".to_string()),
             PatternElement::ExtensionMarker(ExtensionMarker::Image),
-            PatternElement::Extension(&extension::CLASS.mrc),
+            PatternElement::Extension(extension::CLASS.mrc.clone()),
         ]),
         Some(imod_manager::FLATTEN_REDUCE_FILT_VOL_KEY),
         Some("Flatten input file for reducefiltvol"),

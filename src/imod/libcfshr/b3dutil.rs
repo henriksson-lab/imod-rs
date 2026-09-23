@@ -81,17 +81,29 @@ static B3D_RAND_STATE: Mutex<B3dRandState> = Mutex::new(B3dRandState {
     b3dran_last_seed: 0,
 });
 
+/// One entry of `b3dutil.c`'s lock table.
+///
+/// The C keeps three parallel arrays and indexes all three with the same
+/// subscript at every site: `sLockFiles[MAX_LOCK_FILES]` (`b3dutil.c:1848`),
+/// `sLocksUsed` (`:1850`) and `sLockTimeouts` (`:1851`).  "These three
+/// describe the same lock" was an invariant held only by that discipline;
+/// one record makes it structural.  C zero-initialises its statics, which is
+/// what `Default` reproduces here.
+#[derive(Default)]
+struct LockEntry {
+    /// `sLockFiles`.  Rust owns the file; `fcntl` receives its borrowed
+    /// descriptor.
+    file: Option<std::fs::File>,
+    /// `sLocksUsed`.
+    used: i32,
+    /// `sLockTimeouts`.
+    timeout: f32,
+}
+
 thread_local! {
-    /// `b3dutil.c:1848` `static int sLockFiles[MAX_LOCK_FILES]`.  Rust owns
-    /// the files; `fcntl` receives their borrowed descriptors.
-    static S_LOCK_FILES: RefCell<[Option<std::fs::File>; MAX_LOCK_FILES]> =
-        RefCell::new(std::array::from_fn(|_| None));
-    /// `b3dutil.c:1850` `static int sLocksUsed[MAX_LOCK_FILES]`.
-    static S_LOCKS_USED: RefCell<[i32; MAX_LOCK_FILES]> =
-        const { RefCell::new([0; MAX_LOCK_FILES]) };
-    /// `b3dutil.c:1851` `static float sLockTimeouts[MAX_LOCK_FILES]`.
-    static S_LOCK_TIMEOUTS: RefCell<[f32; MAX_LOCK_FILES]> =
-        const { RefCell::new([0.; MAX_LOCK_FILES]) };
+    /// `b3dutil.c:1848-1851`'s three parallel lock arrays, as one table.
+    static S_LOCK_TABLE: RefCell<[LockEntry; MAX_LOCK_FILES]> =
+        RefCell::new(std::array::from_fn(|_| LockEntry::default()));
     /// `b3dutil.c:1852` `static int sInitedLocks = 0`.
     static S_INITED_LOCKS: Cell<i32> = const { Cell::new(0) };
     /// `b3dutil.c:1853` `static float sDfltLockTimeout = 30.`.
@@ -1753,19 +1765,29 @@ pub fn b3d_i_max(values: &[i32]) -> i32 {
     }
     extreme
 }
+/// C89 `clock()`, which `b3dutil.c:1334` divides by `CLOCKS_PER_SEC`.
+///
+/// The `libc` crate exports neither, so both are named here.  `CLOCKS_PER_SEC`
+/// is genuinely platform-dependent: POSIX mandates 1 000 000, while MSVCRT
+/// defines it as 1 000, so the C macro's value differs per target and the
+/// division must follow it.
+unsafe extern "C" {
+    fn clock() -> libc::clock_t;
+}
+
+#[cfg(unix)]
+const CLOCKS_PER_SEC: libc::clock_t = 1_000_000;
+#[cfg(windows)]
+const CLOCKS_PER_SEC: libc::clock_t = 1_000;
+
 /// Matches C `cputime` (`b3dutil.c:1327`).
 pub fn cputime() -> f64 {
-    // `clock_gettime(CLOCK_PROCESS_CPUTIME_ID)` has no `std` expression:
-    // `std::time::Instant` is wall clock. This is an OS service, not C
-    // emulation.
-    let mut time = libc::timespec {
-        tv_sec: 0,
-        tv_nsec: 0,
-    };
-    unsafe {
-        libc::clock_gettime(libc::CLOCK_PROCESS_CPUTIME_ID, &mut time);
-    }
-    time.tv_sec as f64 + time.tv_nsec as f64 / 1.0e9
+    // `b3dutil.c:1329-1333`'s `clock_gettime(CLOCK_PROCESS_CPUTIME_ID)` arm is
+    // **commented out**; the live line is `:1334`,
+    // `return ((double)clock() / CLOCKS_PER_SEC);`.  This translation had
+    // implemented the commented-out branch, which is both unfaithful and
+    // glibc-only -- `clock()` is C89 and exists on Windows.
+    unsafe { clock() as f64 / CLOCKS_PER_SEC as f64 }
 }
 /// Matches C `b3dMilliSleep` (`b3dutil.c:1354`).
 ///
@@ -1924,16 +1946,16 @@ pub fn b3d_set_lock_timeout(timeout: f32) {
 /// gives way to `std::fs::File` but the lock itself does not.
 pub fn b3d_open_lock_file(filename: &str) -> i32 {
     if S_INITED_LOCKS.get() == 0 {
-        S_LOCKS_USED.with_borrow_mut(|used| {
+        S_LOCK_TABLE.with_borrow_mut(|table| {
             for index in 0..MAX_LOCK_FILES {
-                used[index] = -1;
+                table[index].used = -1;
             }
         });
     }
     S_INITED_LOCKS.set(1);
     let mut ind = 0;
-    S_LOCKS_USED.with_borrow(|used| {
-        while ind < MAX_LOCK_FILES && used[ind] >= 0 {
+    S_LOCK_TABLE.with_borrow(|table| {
+        while ind < MAX_LOCK_FILES && table[ind].used >= 0 {
             ind += 1;
         }
     });
@@ -1950,10 +1972,12 @@ pub fn b3d_open_lock_file(filename: &str) -> i32 {
     };
     // The file remains owned by the table until `b3d_close_lock_file`; `fcntl`
     // below borrows its descriptor without transferring ownership.
-    S_LOCK_FILES.with_borrow_mut(|files| files[ind] = Some(file));
-    S_LOCKS_USED.with_borrow_mut(|used| used[ind] = 0);
     let timeout = S_DFLT_LOCK_TIMEOUT.get();
-    S_LOCK_TIMEOUTS.with_borrow_mut(|timeouts| timeouts[ind] = timeout);
+    S_LOCK_TABLE.with_borrow_mut(|table| {
+        table[ind].file = Some(file);
+        table[ind].used = 0;
+        table[ind].timeout = timeout;
+    });
     ind as i32
 }
 /// Matches C `b3dLockFile` (`b3dutil.c:1922`).
@@ -1962,14 +1986,15 @@ pub fn b3d_lock_file(index: i32) -> i32 {
         return -1;
     }
     let index = index as usize;
-    let used = S_LOCKS_USED.with_borrow(|used| used[index]);
+    let used = S_LOCK_TABLE.with_borrow(|table| table[index].used);
     if used < 0 {
         return -2;
     }
     if used > 0 {
-        S_LOCKS_USED.with_borrow_mut(|used| used[index] += 1);
+        S_LOCK_TABLE.with_borrow_mut(|table| table[index].used += 1);
         return 0;
     }
+    #[cfg(unix)]
     let lock = libc::flock {
         l_type: libc::F_WRLCK as _,
         l_whence: SEEK_SET as _,
@@ -1977,14 +2002,38 @@ pub fn b3d_lock_file(index: i32) -> i32 {
         l_len: NUM_LOCK_BYTES as _,
         l_pid: 0,
     };
+    // One borrow now serves both, where the parallel arrays needed two.
+    #[cfg(unix)]
     use std::os::fd::AsRawFd;
-    let descriptor = S_LOCK_FILES
-        .with_borrow(|files| files[index].as_ref().map(AsRawFd::as_raw_fd).unwrap_or(-1));
-    let timeout = S_LOCK_TIMEOUTS.with_borrow(|timeouts| timeouts[index]);
+    let (descriptor, timeout) = S_LOCK_TABLE.with_borrow(|table| {
+        (
+            {
+                #[cfg(unix)]
+                {
+                    table[index]
+                        .file
+                        .as_ref()
+                        .map(AsRawFd::as_raw_fd)
+                        .unwrap_or(-1)
+                }
+            },
+            table[index].timeout,
+        )
+    });
     let started = std::time::Instant::now();
     loop {
-        if unsafe { libc::fcntl(descriptor, libc::F_SETLK, &lock) } >= 0 {
-            S_LOCKS_USED.with_borrow_mut(|used| used[index] += 1);
+        // `b3dutil.c:1943-1947`: `LockFile` on Windows, `fcntl(F_SETLK)` on POSIX.
+        #[cfg(unix)]
+        let acquired = unsafe { libc::fcntl(descriptor, libc::F_SETLK, &lock) } >= 0;
+        // `b3dutil.c:1944` calls `LockFile`.  `std::fs::File::try_lock` is the
+        // portable spelling of the same request (it reaches `LockFileEx`), so
+        // no kernel32 binding is needed here.
+        #[cfg(windows)]
+        let acquired = S_LOCK_TABLE
+            .with_borrow(|table| table[index].file.as_ref().map(|f| f.try_lock().is_ok()))
+            .unwrap_or(false);
+        if acquired {
+            S_LOCK_TABLE.with_borrow_mut(|table| table[index].used += 1);
             return 0;
         }
         if started.elapsed().as_secs_f64() >= timeout as f64 {
@@ -1999,7 +2048,7 @@ pub fn b3d_unlock_file(index: i32) -> i32 {
         return -1;
     }
     let index = index as usize;
-    let used = S_LOCKS_USED.with_borrow(|used| used[index]);
+    let used = S_LOCK_TABLE.with_borrow(|table| table[index].used);
     if used < 0 {
         return -2;
     }
@@ -2007,6 +2056,7 @@ pub fn b3d_unlock_file(index: i32) -> i32 {
         return -3;
     }
     if used == 1 {
+        #[cfg(unix)]
         let lock = libc::flock {
             l_type: libc::F_UNLCK as _,
             l_whence: SEEK_SET as _,
@@ -2014,14 +2064,31 @@ pub fn b3d_unlock_file(index: i32) -> i32 {
             l_len: NUM_LOCK_BYTES as _,
             l_pid: 0,
         };
+        #[cfg(unix)]
         use std::os::fd::AsRawFd;
-        let descriptor = S_LOCK_FILES
-            .with_borrow(|files| files[index].as_ref().map(AsRawFd::as_raw_fd).unwrap_or(-1));
-        if unsafe { libc::fcntl(descriptor, libc::F_SETLK, &lock) } < 0 {
+        let descriptor = S_LOCK_TABLE.with_borrow(|table| {
+            #[cfg(unix)]
+            {
+                table[index]
+                    .file
+                    .as_ref()
+                    .map(AsRawFd::as_raw_fd)
+                    .unwrap_or(-1)
+            }
+        });
+        // `b3dutil.c:1985-1989`: `UnlockFile` on Windows, `fcntl` on POSIX.
+        #[cfg(unix)]
+        let failed = unsafe { libc::fcntl(descriptor, libc::F_SETLK, &lock) } < 0;
+        // `b3dutil.c:1986`'s `UnlockFile`, via portable std.
+        #[cfg(windows)]
+        let failed = S_LOCK_TABLE
+            .with_borrow(|table| table[index].file.as_ref().map(|f| f.unlock().is_err()))
+            .unwrap_or(true);
+        if failed {
             return 1;
         }
     }
-    S_LOCKS_USED.with_borrow_mut(|used| used[index] -= 1);
+    S_LOCK_TABLE.with_borrow_mut(|table| table[index].used -= 1);
     0
 }
 /// Matches C `b3dCloseLockFile` (`b3dutil.c:2009`).
@@ -2030,16 +2097,16 @@ pub fn b3d_close_lock_file(index: i32) -> i32 {
         return -1;
     }
     let index = index as usize;
-    if S_LOCKS_USED.with_borrow(|used| used[index]) < 0 {
+    if S_LOCK_TABLE.with_borrow(|table| table[index].used) < 0 {
         return -2;
     }
-    if S_LOCK_FILES
-        .with_borrow_mut(|files| files[index].take())
+    if S_LOCK_TABLE
+        .with_borrow_mut(|table| table[index].file.take())
         .is_none()
     {
         return 1;
     }
-    S_LOCKS_USED.with_borrow_mut(|used| used[index] = -1);
+    S_LOCK_TABLE.with_borrow_mut(|table| table[index].used = -1);
     0
 }
 

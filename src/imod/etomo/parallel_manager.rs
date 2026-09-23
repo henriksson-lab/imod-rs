@@ -55,6 +55,13 @@ pub struct ParallelManager {
     main_panel: Option<Infallible>,
 }
 
+/// Owns every `ParallelManager` this module builds.  Java's owner is the collector, by
+/// way of `EtomoDirector.managerList`, which keeps each manager for the run;
+/// the translation hands out `&'static Self`, so without a root here the
+/// allocation is unreachable the moment the constructor returns.
+static INSTANCES: std::sync::Mutex<Vec<&'static ParallelManager>> =
+    std::sync::Mutex::new(Vec::new());
+
 impl ParallelManager {
     /// Java `ParallelManager()`.
     pub fn new() -> &'static ParallelManager {
@@ -94,6 +101,7 @@ impl ParallelManager {
             anisotropic_diffusion_dialog: Mutex::new(None),
             main_panel: None,
         }));
+        INSTANCES.lock().unwrap().push(instance);
         assert!(
             instance
                 .process_mgr

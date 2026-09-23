@@ -4,10 +4,14 @@ use super::percentile::percentile_float;
 use core::cell::Cell;
 use core::cmp::Ordering;
 
-thread_local! {
-    /// Original `indexOffset` (`robuststat.c:97`).
-    static INDEX_OFFSET: Cell<i32> = const { Cell::new(0) };
-}
+/// Original `indexOffset` (`robuststat.c:97`).
+///
+/// A C file-scope static is **process**-global, so an atomic reproduces it
+/// exactly; `thread_local!` did not.  Note the distinction that matters here:
+/// two concurrent sorts would interfere *logically* under either the C or
+/// this, but an atomic has no **data race** -- the undefined behaviour is
+/// gone while the C's observable behaviour is kept.
+static INDEX_OFFSET: std::sync::atomic::AtomicI32 = std::sync::atomic::AtomicI32::new(0);
 
 /// Original `intCompar` (`robuststat.c:42`).
 fn int_compar(val1: &i32, val2: &i32) -> i32 {
@@ -77,7 +81,7 @@ pub fn rssortfloats(x: &mut [f32], n: &i32) {
 /// is a captured argument here.  `indexOffset` genuinely persists between
 /// calls (`rsSetSortIndexOffset`) and stays a static.
 fn indexed_float_compar(val_array: &[f32], val1: &i32, val2: &i32) -> i32 {
-    let index_offset = INDEX_OFFSET.with(|c| c.get());
+    let index_offset = INDEX_OFFSET.load(std::sync::atomic::Ordering::Relaxed);
     let i1 = *val1 - index_offset;
     let i2 = *val2 - index_offset;
     if val_array[i1 as usize] < val_array[i2 as usize] {
@@ -100,16 +104,16 @@ pub fn rs_sort_indexed_floats(x: &[f32], index: &mut [i32], n: i32) {
             Ordering::Equal
         }
     });
-    INDEX_OFFSET.with(|c| c.set(0));
+    INDEX_OFFSET.store(0, std::sync::atomic::Ordering::Relaxed);
 }
 /// Original `rssortindexedfloats` (`robuststat.c:126`).
 pub fn rssortindexedfloats(x: &[f32], index: &mut [i32], n: &i32) {
-    INDEX_OFFSET.with(|c| c.set(1));
+    INDEX_OFFSET.store(1, std::sync::atomic::Ordering::Relaxed);
     rs_sort_indexed_floats(x, index, *n);
 }
 /// Original `rsSetSortIndexOffset` (`robuststat.c:137`).
 pub fn rs_set_sort_index_offset(offset: i32) {
-    INDEX_OFFSET.with(|c| c.set(offset));
+    INDEX_OFFSET.store(offset, std::sync::atomic::Ordering::Relaxed);
 }
 
 /// Original `rsMedianOfSorted` (`robuststat.c:146`).

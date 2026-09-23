@@ -79,6 +79,12 @@ pub struct JoinManager {
     com_script_mgr: Option<Infallible>,
 }
 
+/// Owns every `JoinManager` this module builds.  Java's owner is the collector, by
+/// way of `EtomoDirector.managerList`, which keeps each manager for the run;
+/// the translation hands out `&'static Self`, so without a root here the
+/// allocation is unreachable the moment the constructor returns.
+static INSTANCES: std::sync::Mutex<Vec<&'static JoinManager>> = std::sync::Mutex::new(Vec::new());
+
 impl JoinManager {
     /// Java package-private `JoinManager(String, AxisID)`.  Java's managers are created
     /// by `EtomoDirector` and live for the run, so the allocation is leaked; `super()`
@@ -99,6 +105,7 @@ impl JoinManager {
             debug: std::sync::Mutex::new(false),
             com_script_mgr: None,
         }));
+        INSTANCES.lock().unwrap().push(instance);
         // Java `super()`.
         instance.base_manager();
         // TODO(unit): needs etomo/type/JoinMetaData.java,

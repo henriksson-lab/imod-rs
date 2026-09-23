@@ -1790,7 +1790,7 @@ pub trait ZapNativeBoundary: UtilitiesBoundary {
         -1
     }
     /// `istoreFirstChangeIndex(mesh->store)`.
-    fn istore_first_change_index(&mut self, store: *const Vec<Istore>) -> i32 {
+    unsafe fn istore_first_change_index(&mut self, store: *const Vec<Istore>) -> i32 {
         crate::imod::libimod::istore::istore_first_change_index(unsafe { &*store })
     }
     /// `ImodvClosed` and `Imodv->lowres`, read by `drawMesh` when it picks a
@@ -2002,6 +2002,13 @@ pub struct ZapFuncs {
     pub movie_snap_count: i32,
     /// `mPopup`.
     pub popup: i32,
+    /// No C counterpart.  `ZapWindow::closeEvent` (`zap_classes.cpp:573-578`)
+    /// runs `mZap->closing()` and then `delete mZap`; `ZapWindow` here has no
+    /// `mZap` member, so that `delete` had nothing to act on and
+    /// `imod_zap_open` discarded the allocation outright.  `closing()` sets
+    /// this, and `S_OPEN_ZAPS` reclaims the entry -- the `delete`, deferred to
+    /// a point where no `&mut` to the controller is live.
+    closed: bool,
     /// `mRecordSubarea`.
     pub record_subarea: i32,
     /// `mShowslice`.
@@ -2196,13 +2203,31 @@ pub struct ZapFuncs {
 ///
 /// The C++ `new`/`delete` pair becomes a `Box` that is leaked into the dialog
 /// manager on success, which is where the source's ownership goes too.
-pub fn imod_zap_open(vi: *mut ImodView, wintype: i32) -> i32 {
+thread_local! {
+    /// Owns the zap controllers this process has opened.
+    ///
+    /// `xzap.cpp:104`'s `new ZapFuncs` is matched by `delete mZap` in
+    /// `ZapWindow::closeEvent` (`zap_classes.cpp:578`).  The translated
+    /// `ZapWindow` carries no `mZap` member, so there was no owner and
+    /// `imod_zap_open` dropped the pointer on the floor -- the allocation
+    /// became unreachable.  This table is the owner.  A controller is
+    /// reclaimed on the next open once `closing()` has marked it, rather than
+    /// inside `closing()` itself, because that method holds `&mut self`:
+    /// freeing there would be a use-after-free on return.
+    static S_OPEN_ZAPS: RefCell<Vec<Box<ZapFuncs>>> = const { RefCell::new(Vec::new()) };
+}
+
+pub unsafe fn imod_zap_open(vi: *mut ImodView, wintype: i32) -> i32 {
     let zap = unsafe { ZapFuncs::new(vi, wintype) };
     if zap.qt_window.is_null() {
         drop(zap);
         return -1;
     }
-    let _ = Box::into_raw(zap);
+    S_OPEN_ZAPS.with_borrow_mut(|open| {
+        // Reclaim controllers whose window has already closed.
+        open.retain(|controller| !controller.closed);
+        open.push(zap);
+    });
     0
 }
 
@@ -2644,6 +2669,7 @@ impl ZapFuncs {
             images: Vec::new(),
             movie_snap_count: 0,
             popup: 0,
+            closed: false,
             record_subarea: 0,
             showslice: 0,
             starting_band: 0,
@@ -3394,6 +3420,9 @@ impl ZapFuncs {
 
         // Do cleanup
         self.popup = 0;
+        // `zap_classes.cpp:578`'s `delete mZap` follows this call; mark the
+        // controller so `S_OPEN_ZAPS` can reclaim it.
+        self.closed = true;
         crate::imod::three_dmod::control::ivw_remove_control(unsafe { &mut *self.vi }, self.ctrl);
         let this = &raw mut *self;
         with_boundary(|n| n.imod_dialog_manager_remove(this));

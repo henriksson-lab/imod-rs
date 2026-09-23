@@ -144,12 +144,18 @@ impl Default for TfInfo {
     }
 }
 
-thread_local! {
-    /// Byte order belongs to the TIFF stream being traversed.  The C module
-    /// stored it in one process-global mutable integer; keeping it per thread
-    /// retains its call-based lifetime without making independent reads race.
-    static SWAP_DATA: Cell<bool> = const { Cell::new(false) };
-}
+/// `tiff.c:350` `static int swapData = 0;`, set from the TIFF header's byte
+/// order at `:366-368` and read throughout the traversal.
+///
+/// The C's file-scope static is **process**-global, so an atomic reproduces it
+/// exactly.  An earlier revision made it `thread_local!` reasoning that this
+/// avoided "making independent reads race" -- but that conflated logical
+/// interference with a data race.  An atomic has no undefined behaviour, and
+/// it keeps the C's actual semantics; per-thread storage silently did not.
+/// (Strictly this state belongs to the stream being read, so a field of the
+/// reader would be better still; that is a larger reshaping of `tiff.c`'s
+/// call chain and is noted in `REF2.md` rather than done here.)
+static SWAP_DATA: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
 
 /// C static `swap` (`tiff.c:35`).
 ///
@@ -199,23 +205,22 @@ pub fn tiff_first_ifd(fp: &mut ImodFile) -> u32 {
     if word != 0x4949 && word != 0x4d4d {
         return 0;
     }
-    SWAP_DATA.with(|swap_data| {
-        swap_data.set(
-            word != if cfg!(target_endian = "little") {
-                0x4949
-            } else {
-                0x4d4d
-            },
-        );
-    });
+    SWAP_DATA.store(
+        word != if cfg!(target_endian = "little") {
+            0x4949
+        } else {
+            0x4d4d
+        },
+        std::sync::atomic::Ordering::Relaxed,
+    );
     if b3d_fread(&mut short_raw, 2, 1, fp) < 1 {
         return 0;
     }
-    if SWAP_DATA.with(Cell::get) {
+    if SWAP_DATA.load(std::sync::atomic::Ordering::Relaxed) {
         swap(&mut short_raw);
     }
     b3d_fread(&mut long_raw, 4, 1, fp);
-    if SWAP_DATA.with(Cell::get) {
+    if SWAP_DATA.load(std::sync::atomic::Ordering::Relaxed) {
         swap(&mut long_raw);
     }
     u32::from_ne_bytes(long_raw)
@@ -266,7 +271,7 @@ pub fn tiff_ifd(fp: &mut ImodFile, section: i32) -> u32 {
         let mut entries_raw = [0u8; 2];
         b3d_fseek(fp, (ifd as i64) as i32, SEEK_SET);
         b3d_fread(&mut entries_raw, 2, 1, fp);
-        if SWAP_DATA.with(Cell::get) {
+        if SWAP_DATA.load(std::sync::atomic::Ordering::Relaxed) {
             swap(&mut entries_raw);
         }
         let entries = u16::from_ne_bytes(entries_raw);
@@ -277,7 +282,7 @@ pub fn tiff_ifd(fp: &mut ImodFile, section: i32) -> u32 {
         );
         let mut ifd_raw = [0u8; 4];
         b3d_fread(&mut ifd_raw, 4, 1, fp);
-        if SWAP_DATA.with(Cell::get) {
+        if SWAP_DATA.load(std::sync::atomic::Ordering::Relaxed) {
             swap(&mut ifd_raw);
         }
         ifd = u32::from_ne_bytes(ifd_raw);
@@ -293,7 +298,7 @@ pub fn tiff_ifd_number(fp: &mut ImodFile) -> i32 {
         let mut entries_raw = [0u8; 2];
         b3d_fseek(fp, (ifd as i64) as i32, SEEK_SET);
         b3d_fread(&mut entries_raw, 2, 1, fp);
-        if SWAP_DATA.with(Cell::get) {
+        if SWAP_DATA.load(std::sync::atomic::Ordering::Relaxed) {
             swap(&mut entries_raw);
         }
         let entries = u16::from_ne_bytes(entries_raw);
@@ -305,7 +310,7 @@ pub fn tiff_ifd_number(fp: &mut ImodFile) -> i32 {
         );
         let mut ifd_raw = [0u8; 4];
         b3d_fread(&mut ifd_raw, 4, 1, fp);
-        if SWAP_DATA.with(Cell::get) {
+        if SWAP_DATA.load(std::sync::atomic::Ordering::Relaxed) {
             swap(&mut ifd_raw);
         }
         ifd = u32::from_ne_bytes(ifd_raw);
@@ -319,7 +324,7 @@ pub fn read_tiffentries(fp: &mut ImodFile, tif: &mut TfInfo) -> i32 {
     b3d_fseek(fp, (tif.header.first_ifd_offset as i64) as i32, SEEK_SET);
     let mut numentries_raw = [0u8; 2];
     b3d_fread(&mut numentries_raw, 2, 1, fp);
-    if SWAP_DATA.with(Cell::get) {
+    if SWAP_DATA.load(std::sync::atomic::Ordering::Relaxed) {
         swap(&mut numentries_raw);
     }
     tif.numentries = i16::from_ne_bytes(numentries_raw);
@@ -335,7 +340,7 @@ pub fn read_tiffentries(fp: &mut ImodFile, tif: &mut TfInfo) -> i32 {
         {
             return 0;
         }
-        if SWAP_DATA.with(Cell::get) {
+        if SWAP_DATA.load(std::sync::atomic::Ordering::Relaxed) {
             swap(&mut tag_raw);
             swap(&mut typ_raw);
             swap(&mut len_raw);
@@ -368,7 +373,7 @@ pub fn read_tiffentries(fp: &mut ImodFile, tif: &mut TfInfo) -> i32 {
                     b3d_fseek(fp, (value as i64) as i32, SEEK_SET);
                     let mut bits_raw = [0u8; 2];
                     b3d_fread(&mut bits_raw, 2, 1, fp);
-                    if SWAP_DATA.with(Cell::get) {
+                    if SWAP_DATA.load(std::sync::atomic::Ordering::Relaxed) {
                         swap(&mut bits_raw);
                     }
                     tif.bits_per_sample = u16::from_ne_bytes(bits_raw) as i32;
@@ -417,7 +422,7 @@ pub fn read_tiffentries(fp: &mut ImodFile, tif: &mut TfInfo) -> i32 {
             *size = i32::from_ne_bytes(raw);
         }
         b3d_fseek(fp, (pos) as i32, SEEK_SET);
-        if SWAP_DATA.with(Cell::get) {
+        if SWAP_DATA.load(std::sync::atomic::Ordering::Relaxed) {
             for i in 0..nstrip {
                 tif.stripoff[i] = tif.stripoff[i].swap_bytes();
                 tif.stripsize[i] = tif.stripsize[i].swap_bytes();

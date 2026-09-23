@@ -38,6 +38,13 @@ pub struct AttributeList {
     /// Owns each attribute.  `map` and name/value pairs retain only borrowed stable
     /// addresses into these boxes.
     list: Vec<Box<Attribute>>,
+    /// No Java counterpart.  `addAttribute(int, String[], int, String, NameValuePair)`
+    /// constructs tokens and hands them to an `Attribute` or a `NameValuePair`, which
+    /// hold them as plain references; the collector frees them when this list becomes
+    /// unreachable.  These boxes are that owner, so the tokens go with the list rather
+    /// than leaking.  The addresses stay valid while the `Vec` grows because a `Box`
+    /// does not move its contents.
+    owned_tokens: Vec<Box<Token>>,
 }
 
 impl AttributeList {
@@ -47,6 +54,7 @@ impl AttributeList {
             parent,
             map: HashMap::new(),
             list: Vec::new(),
+            owned_tokens: Vec::new(),
         }
     }
 
@@ -63,7 +71,8 @@ impl AttributeList {
             Some(key) => *self.map.get(key).unwrap_or(&std::ptr::null_mut()),
         };
         if attribute.is_null() {
-            attribute = unsafe { Attribute::new(self.parent, name, line_num) };
+            let mut new_attribute = unsafe { Attribute::new(self.parent, name, line_num) };
+            attribute = &mut *new_attribute;
             self.map.insert(
                 match key {
                     // Java's `HashMap` accepts a null key; no source path reaches it,
@@ -73,10 +82,9 @@ impl AttributeList {
                 },
                 attribute,
             );
-            // `Attribute::new` is an old raw construction boundary.  Transfer the
-            // allocation into the list immediately; boxes keep pointee addresses
-            // stable while the map and parsed name/value pairs borrow them.
-            self.list.push(unsafe { Box::from_raw(attribute) });
+            // The list owns the attribute; boxes keep pointee addresses stable
+            // while the map and parsed name/value pairs borrow them.
+            self.list.push(new_attribute);
         } else {
             // add another occurrence of this attribute
             unsafe { (*attribute).add() };
@@ -132,7 +140,8 @@ impl AttributeList {
             return;
         }
         // Get or create the attribute
-        let name_token = Box::into_raw(Box::new(Token::new()));
+        self.owned_tokens.push(Box::new(Token::new()));
+        let name_token: *mut Token = &mut **self.owned_tokens.last_mut().unwrap();
         unsafe {
             (*name_token).set_type_and_string(
                 token::Type::Anything,
@@ -144,7 +153,8 @@ impl AttributeList {
         unsafe { (*name_value_pair).add_attribute(attribute) };
         if next_index == -1 {
             // Added the value when the last attribute is added
-            let value_token = Box::into_raw(Box::new(Token::new()));
+            self.owned_tokens.push(Box::new(Token::new()));
+            let value_token: *mut Token = &mut **self.owned_tokens.last_mut().unwrap();
             unsafe {
                 (*value_token).set_type_and_string(
                     token::Type::Anything,
@@ -277,7 +287,9 @@ mod tests {
     #[test]
     fn occurrences_gate_lookup_rather_than_deleting_the_attribute() {
         unsafe {
-            let autodoc = Autodoc::new(Some("occurrences"), std::ptr::null_mut());
+            let mut autodoc = Autodoc::new(Some("occurrences"), std::ptr::null_mut());
+            // The box stays alive for the rest of the scope; the pointer only borrows it.
+            let autodoc: *mut Autodoc = &mut *autodoc;
             (*autodoc).add_name_value_pair_attribute(Some("dup"), Some("1"));
             (*autodoc).add_name_value_pair_attribute(Some("dup"), Some("2"));
             assert!(!(*autodoc).get_attribute(Some("dup")).is_null());

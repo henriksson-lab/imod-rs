@@ -181,10 +181,19 @@ fn dispatch(name: &str) -> bool {
         }
         "newstack" => imod_rs::imod::flib::image::newstack::newstack(),
         "processchunks" => {
-            let arguments = std::env::args().collect::<Vec<_>>();
-            std::process::exit(
-                imod_rs::imod::qttools::processchunks::processchunks::processchunks(&arguments),
-            )
+            // Unix-only: the scheduler drives chunks over ssh and batch queues.
+            #[cfg(unix)]
+            {
+                let arguments = std::env::args().collect::<Vec<_>>();
+                std::process::exit(
+                    imod_rs::imod::qttools::processchunks::processchunks::processchunks(&arguments),
+                )
+            }
+            #[cfg(not(unix))]
+            {
+                eprintln!("ERROR: processchunks - not available on this platform");
+                std::process::exit(1)
+            }
         }
         "sourcedoc" => {
             let arguments = std::env::args().collect::<Vec<_>>();

@@ -227,8 +227,9 @@ impl ButtonActionListener {
 
 #[cfg(test)]
 mod tests {
-    use std::cell::{Cell, RefCell};
     use std::path::Path;
+    use std::sync::Mutex;
+    use std::sync::atomic::{AtomicUsize, Ordering};
 
     use super::*;
     use crate::imod::etomo::r#type::image_filename_style::ImageFilenameStyle;
@@ -236,10 +237,12 @@ mod tests {
     struct Manager {
         axis_type: AxisType,
         archive: [Option<String>; 3],
-        done: Cell<usize>,
-        archive_calls: Cell<usize>,
-        packed: Cell<Option<AxisID>>,
-        messages: RefCell<Vec<String>>,
+        // Atomics and `Mutex` rather than `Cell`/`RefCell`: `INSTANCES` below has to
+        // be a process-global root, and a `static` demands `Sync`.
+        done: AtomicUsize,
+        archive_calls: AtomicUsize,
+        packed: Mutex<Option<AxisID>>,
+        messages: Mutex<Vec<String>>,
     }
     impl ProcessDialogApplicationManager for Manager {
         fn is_advanced(&self, _: DialogType, _: AxisID) -> bool {
@@ -263,7 +266,7 @@ mod tests {
             "trim.mrc".into()
         }
         fn open_message_dialog(&mut self, message: String, _: &str, _: AxisID) {
-            self.messages.borrow_mut().push(message);
+            self.messages.lock().unwrap().push(message);
         }
     }
     impl CleanUpDialogApplicationManager for Manager {
@@ -271,23 +274,35 @@ mod tests {
             self.archive[axis_id as usize].clone()
         }
         fn done_clean_up(&mut self) {
-            self.done.set(self.done.get() + 1);
+            self.done.fetch_add(1, Ordering::Relaxed);
         }
         fn archive_original_stack(&mut self, _: Option<ProcessSeries>, _: DialogType) {
-            self.archive_calls.set(self.archive_calls.get() + 1);
+            self.archive_calls.fetch_add(1, Ordering::Relaxed);
         }
         fn pack(&mut self, axis_id: AxisID) {
-            self.packed.set(Some(axis_id));
+            *self.packed.lock().unwrap() = Some(axis_id);
         }
     }
+    /// Roots the leaked test managers so they stay reachable, the way
+    /// `EtomoDirector.managerList` roots the real ones.  A `thread_local!` will not
+    /// do: the test harness runs each test on its own thread and the TLS is
+    /// destroyed when that thread ends, which drops the root again.
+    static INSTANCES: std::sync::Mutex<Vec<&'static Manager>> = std::sync::Mutex::new(Vec::new());
+
+    fn leak_manager(manager: Manager) -> &'static Manager {
+        let manager: &'static Manager = Box::leak(Box::new(manager));
+        INSTANCES.lock().unwrap().push(manager);
+        manager
+    }
+
     fn manager(axis_type: AxisType) -> Manager {
         Manager {
             axis_type,
             archive: [None, Some("seta.st".into()), Some("setb.st".into())],
-            done: Cell::new(0),
-            archive_calls: Cell::new(0),
-            packed: Cell::new(None),
-            messages: RefCell::new(Vec::new()),
+            done: AtomicUsize::new(0),
+            archive_calls: AtomicUsize::new(0),
+            packed: Mutex::new(None),
+            messages: Mutex::new(Vec::new()),
         }
     }
 
@@ -338,7 +353,7 @@ mod tests {
     #[test]
     fn archive_action_done_and_context_popup_follow_source_dispatch() {
         let mut action_manager = manager(AxisType::SingleAxis);
-        let manager_ref: &'static Manager = Box::leak(Box::new(manager(AxisType::SingleAxis)));
+        let manager_ref: &'static Manager = leak_manager(manager(AxisType::SingleAxis));
         let mut dialog = CleanUpDialog::new(manager_ref);
         dialog.update_archive_display(false);
         assert!(!dialog.btn_archive_stack.as_ref().unwrap().is_enabled());
@@ -347,11 +362,11 @@ mod tests {
             &mut action_manager,
         );
         dialog.button_action(&ActionEvent::new("unrelated"), &mut action_manager);
-        assert_eq!(action_manager.archive_calls.get(), 1);
+        assert_eq!(action_manager.archive_calls.load(Ordering::Relaxed), 1);
         dialog.done(&mut action_manager);
-        assert_eq!(action_manager.done.get(), 1);
+        assert_eq!(action_manager.done.load(Ordering::Relaxed), 1);
         assert!(!dialog.process_dialog.is_displayed());
-        assert_eq!(action_manager.packed.get(), Some(AxisID::Only));
+        assert_eq!(*action_manager.packed.lock().unwrap(), Some(AxisID::Only));
         dialog.pop_up_context_menu(MouseEvent {
             x: 2,
             y: 3,
@@ -368,7 +383,7 @@ mod tests {
     #[test]
     fn button_action_listener_delegates_the_archive_button_action() {
         let mut action_manager = manager(AxisType::DualAxis);
-        let manager_ref: &'static Manager = Box::leak(Box::new(manager(AxisType::DualAxis)));
+        let manager_ref: &'static Manager = leak_manager(manager(AxisType::DualAxis));
         let mut dialog = CleanUpDialog::new(manager_ref);
 
         ButtonActionListener::new().action_performed(
@@ -377,12 +392,12 @@ mod tests {
             &mut action_manager,
         );
 
-        assert_eq!(action_manager.archive_calls.get(), 1);
+        assert_eq!(action_manager.archive_calls.load(Ordering::Relaxed), 1);
     }
 
     #[test]
     fn context_menu_interface_forwards_the_exact_mouse_event() {
-        let manager_ref: &'static Manager = Box::leak(Box::new(manager(AxisType::SingleAxis)));
+        let manager_ref: &'static Manager = leak_manager(manager(AxisType::SingleAxis));
         let mut dialog = CleanUpDialog::new(manager_ref);
         let event = MouseEvent {
             x: 13,

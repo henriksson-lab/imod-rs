@@ -416,9 +416,21 @@ mod tests {
         }
     }
 
+    /// Roots the leaked test managers so they stay reachable, the way
+    /// `EtomoDirector.managerList` roots the real ones.  A `thread_local!` will not
+    /// do: the test harness runs each test on its own thread and the TLS is
+    /// destroyed when that thread ends, which drops the root again.
+    static INSTANCES: std::sync::Mutex<Vec<&'static Manager>> = std::sync::Mutex::new(Vec::new());
+
+    fn leak_manager() -> &'static Manager {
+        let manager: &'static Manager = Box::leak(Box::new(Manager(BaseManagerBase::default())));
+        INSTANCES.lock().unwrap().push(manager);
+        manager
+    }
+
     #[test]
     fn get_instance_selects_source_factory_and_adds_tool_before_log() {
-        let manager: &'static Manager = Box::leak(Box::new(Manager(BaseManagerBase::default())));
+        let manager: &'static Manager = leak_manager();
         let mut factory = Factory;
         let dialog = ToolsDialog::get_instance(
             manager,
@@ -435,7 +447,7 @@ mod tests {
 
     #[test]
     fn gpu_parameter_delegation_preserves_validation_argument() {
-        let manager: &'static Manager = Box::leak(Box::new(Manager(BaseManagerBase::default())));
+        let manager: &'static Manager = leak_manager();
         let mut factory = Factory;
         let mut dialog = ToolsDialog::get_instance(
             manager,
@@ -450,7 +462,7 @@ mod tests {
 
     #[test]
     fn append_and_previous_line_end_follow_jtext_area_offsets() {
-        let manager: &'static Manager = Box::leak(Box::new(Manager(BaseManagerBase::default())));
+        let manager: &'static Manager = leak_manager();
         let mut factory = Factory;
         let mut dialog = ToolsDialog::get_instance(
             manager,

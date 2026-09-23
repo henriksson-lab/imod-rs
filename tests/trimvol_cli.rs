@@ -1,7 +1,7 @@
 mod common;
 
 use imod_rs::imod::libiimod::iimage::{
-    IIFILE_DEFAULT, MRSA_FLOAT, ii_close, ii_fill_mrc_header, ii_open, ii_open_new,
+    IIFILE_DEFAULT, MRSA_FLOAT, ii_delete, ii_fill_mrc_header, ii_open, ii_open_new,
     ii_read_section_any, ii_sync_from_mrc_header, ii_write_section_float,
 };
 use imod_rs::imod::libiimod::mrcfiles::{MrcHeader, mrc_head_new, mrc_head_write};
@@ -53,7 +53,7 @@ fn trimvol_rejects_mode_with_contrast_on_real_mrc_before_creating_output() {
         image.mrc_header = Some(header);
         let mut section = [1.0_f32, 2., 3., 4.];
         assert_eq!(ii_write_section_float(image, &mut section, 0), 0);
-        ii_close(file);
+        ii_delete(file);
     }
     let result = common::imod_cmd("trimvol")
         .env("IMOD_DIR", env!("CARGO_MANIFEST_DIR"))
@@ -94,7 +94,7 @@ fn trimvol_reports_source_specific_coordinate_size_conflicts_before_file_access(
         ii_sync_from_mrc_header(image, &mut header);
         assert_eq!(mrc_head_write(image.fp.as_mut().unwrap(), &mut header), 0);
         image.mrc_header = Some(header);
-        ii_close(file);
+        ii_delete(file);
     }
     for (limits, size, expected) in [
         ("-x", "-nx", "You cannot enter both -x and -nx options"),
@@ -164,7 +164,7 @@ fn trimvol_old_flipped_coordinates_use_source_yz_limit_exchange() {
             ];
             assert_eq!(ii_write_section_float(image, &mut section, z), 0);
         }
-        ii_close(file);
+        ii_delete(file);
     }
     let result = common::imod_cmd("trimvol")
         .env("IMOD_DIR", env!("CARGO_MANIFEST_DIR"))
@@ -205,7 +205,7 @@ fn trimvol_old_flipped_coordinates_use_source_yz_limit_exchange() {
             f32::from_ne_bytes(section_bytes[index * 4..index * 4 + 4].try_into().unwrap())
         });
         assert_eq!(section, [20., 21., 22., 23.]);
-        ii_close(file);
+        ii_delete(file);
     }
     let _ = std::fs::remove_file(input);
     let _ = std::fs::remove_file(output);
@@ -239,7 +239,7 @@ fn trimvol_even_old_flipped_coordinates_reverse_swapped_y_limits() {
             ];
             assert_eq!(ii_write_section_float(image, &mut section, z), 0);
         }
-        ii_close(file);
+        ii_delete(file);
     }
     let result = common::imod_cmd("trimvol")
         .env("IMOD_DIR", env!("CARGO_MANIFEST_DIR"))
@@ -280,7 +280,7 @@ fn trimvol_even_old_flipped_coordinates_reverse_swapped_y_limits() {
             f32::from_ne_bytes(section_bytes[index * 4..index * 4 + 4].try_into().unwrap())
         });
         assert_eq!(section, [22., 23., 24., 25.]);
-        ii_close(file);
+        ii_delete(file);
     }
     let _ = std::fs::remove_file(input);
     let _ = std::fs::remove_file(output);
@@ -302,7 +302,7 @@ fn trimvol_integer_min_max_maps_observed_real_mrc_range_to_requested_range() {
         image.mrc_header = Some(header);
         let mut section = [10.0_f32, 20., 30., 40.];
         assert_eq!(ii_write_section_float(image, &mut section, 0), 0);
-        ii_close(file);
+        ii_delete(file);
     }
     let result = common::imod_cmd("trimvol")
         .env("IMOD_DIR", env!("CARGO_MANIFEST_DIR"))
@@ -329,7 +329,7 @@ fn trimvol_integer_min_max_maps_observed_real_mrc_range_to_requested_range() {
         let section: [f32; 4] = core::array::from_fn(|index| {
             f32::from_ne_bytes(section_bytes[index * 4..index * 4 + 4].try_into().unwrap())
         });
-        ii_close(file);
+        ii_delete(file);
         for (actual, expected) in section.into_iter().zip([100., 133., 167., 200.]) {
             assert!((actual - expected).abs() <= 1., "{actual} != {expected}");
         }
@@ -358,7 +358,7 @@ fn trimvol_crops_real_mrc_volume_with_one_based_coordinates() {
         let mut second = [11.0_f32, 12., 13., 14., 15., 16., 17., 18., 19.];
         assert_eq!(ii_write_section_float(image, &mut first, 0), 0);
         assert_eq!(ii_write_section_float(image, &mut second, 1), 0);
-        ii_close(file);
+        ii_delete(file);
     }
     let result = common::imod_cmd("trimvol")
         .env("IMOD_DIR", env!("CARGO_MANIFEST_DIR"))
@@ -402,7 +402,7 @@ fn trimvol_crops_real_mrc_volume_with_one_based_coordinates() {
             f32::from_ne_bytes(pixel_bytes[index * 4..index * 4 + 4].try_into().unwrap())
         });
         assert_eq!(pixels, [12., 13., 15., 16.]);
-        ii_close(file);
+        ii_delete(file);
     }
     let bytes = std::fs::read(&output).unwrap();
     let pixels: Vec<f32> = bytes[1024..]
@@ -438,7 +438,7 @@ fn trimvol_flip_yz_preserves_clip_plane_order() {
         {
             assert_eq!(ii_write_section_float(image, &mut section, z as i32), 0);
         }
-        ii_close(file);
+        ii_delete(file);
     }
     assert!(
         common::imod_cmd("trimvol")
@@ -471,7 +471,7 @@ fn trimvol_flip_yz_preserves_clip_plane_order() {
             f32::from_ne_bytes(pixel_bytes[index * 4..index * 4 + 4].try_into().unwrap())
         });
         assert_eq!(pixels, [3., 4., 13., 14., 23., 24.]);
-        ii_close(file);
+        ii_delete(file);
     }
     let bytes = std::fs::read(&output).unwrap();
     let pixels: Vec<f32> = bytes[1024..]
@@ -515,7 +515,7 @@ fn trimvol_rotate_x_uses_source_clip_rotx_minus_ninety_plane_order() {
         ];
         assert_eq!(ii_write_section_float(image, &mut first, 0), 0);
         assert_eq!(ii_write_section_float(image, &mut second, 1), 0);
-        ii_close(file);
+        ii_delete(file);
     }
     assert!(
         common::imod_cmd("trimvol")
@@ -550,7 +550,7 @@ fn trimvol_rotate_x_uses_source_clip_rotx_minus_ninety_plane_order() {
             f32::from_ne_bytes(pixel_bytes[index * 4..index * 4 + 4].try_into().unwrap())
         });
         assert_eq!(pixels, [1., 2., 3., 4., 17., 18., 19., 20.]);
-        ii_close(file);
+        ii_delete(file);
     }
     let _ = std::fs::remove_file(input);
     let _ = std::fs::remove_file(output);

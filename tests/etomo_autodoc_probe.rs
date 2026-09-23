@@ -51,11 +51,22 @@ fn s(value: Option<String>) -> String {
     }
 }
 
+thread_local! {
+    /// Owns every token `tok` hands to the autodoc, standing in for the parser's
+    /// `tokens` vector -- the autodoc and its sections only borrow them, so without
+    /// an owner here each one would be unreachable for the rest of the run.
+    static TOKENS: std::cell::RefCell<Vec<Box<Token>>> =
+        const { std::cell::RefCell::new(Vec::new()) };
+}
+
 /// The harness's `tok`.
 fn tok(value: &str) -> *mut Token {
-    let t = Box::into_raw(Box::new(Token::new()));
-    unsafe { (*t).set_type_and_string(token::Type::Anything, value) };
-    t
+    TOKENS.with_borrow_mut(|tokens| {
+        tokens.push(Box::new(Token::new()));
+        let t: *mut Token = &mut **tokens.last_mut().unwrap();
+        unsafe { (*t).set_type_and_string(token::Type::Anything, value) };
+        t
+    })
 }
 
 /// The harness's `dumpStatements`.
@@ -265,7 +276,8 @@ fn jvm_verified_autodoc_package() {
             "isLoaded(tilt)={}\n",
             autodoc_factory::is_loaded(autodoc_factory::TILT)
         ));
-        let reg = Autodoc::new(Some("reg"), std::ptr::null_mut());
+        let mut reg = Autodoc::new(Some("reg"), std::ptr::null_mut());
+        let reg: *mut Autodoc = &mut *reg;
         out.push_str(&format!(
             "setInstance(tilt)={}\n",
             autodoc_factory::set_instance(autodoc_factory::TILT, reg)
@@ -309,7 +321,7 @@ fn jvm_verified_autodoc_package() {
         ));
 
         out.push_str("== build ==\n");
-        let a = Autodoc::new(Some("probe"), std::ptr::null_mut());
+        let mut a = Autodoc::new(Some("probe"), std::ptr::null_mut());
         out.push_str(&format!("autodocName={}\n", (*a).get_autodoc_name()));
         out.push_str(&format!(
             "getName={}\n",
@@ -510,7 +522,7 @@ fn jvm_verified_autodoc_package() {
         ));
 
         out.push_str("== debug flags ==\n");
-        let dbg = Autodoc::new(Some("dbg"), std::ptr::null_mut());
+        let mut dbg = Autodoc::new(Some("dbg"), std::ptr::null_mut());
         out.push_str(&format!("isDebug={}\n", (*dbg).is_debug()));
         (*dbg).set_debug_to(true);
         out.push_str(&format!("isDebug={}\n", (*dbg).is_debug()));
@@ -568,7 +580,7 @@ fn jvm_verified_autodoc_package() {
         ));
 
         out.push_str("== removal ==\n");
-        let b = Autodoc::new(Some("removal"), std::ptr::null_mut());
+        let mut b = Autodoc::new(Some("removal"), std::ptr::null_mut());
         (*b).add_name_value_pair_attribute_with_line_num(Some("one"), Some("1"), 1);
         (*b).add_name_value_pair_attribute_with_line_num(Some("two"), Some("2"), 2);
         (*b).add_name_value_pair_attribute_with_line_num(Some("three"), Some("3"), 3);
@@ -590,7 +602,7 @@ fn jvm_verified_autodoc_package() {
             "removeNameValuePair(nope)={}\n",
             (*b).remove_name_value_pair(Some("nope")).is_null()
         ));
-        let b2 = Autodoc::new(Some("removal2"), std::ptr::null_mut());
+        let mut b2 = Autodoc::new(Some("removal2"), std::ptr::null_mut());
         (*b2).add_name_value_pair_attribute(Some("one"), Some("1"));
         (*b2).add_name_value_pair_attribute(Some("two"), Some("2"));
         (*b2).add_comment_string(Some("tail"), 3);
@@ -609,7 +621,7 @@ fn jvm_verified_autodoc_package() {
         dump_statements(&mut out, &*b2, "  ");
 
         out.push_str("== odd names ==\n");
-        let n = Autodoc::new(Some("names"), std::ptr::null_mut());
+        let mut n = Autodoc::new(Some("names"), std::ptr::null_mut());
         (*n).add_name_value_pair_attribute_with_line_num(
             Some("\u{a0} pad \u{a0}"),
             Some("nbsp"),
@@ -624,7 +636,8 @@ fn jvm_verified_autodoc_package() {
         dump_attributes(&mut out, (*n).get_children(), "  ");
 
         out.push_str("== wrap ==\n");
-        let c = Autodoc::new(Some("wrap"), std::ptr::null_mut());
+        let mut c = Autodoc::new(Some("wrap"), std::ptr::null_mut());
+        let c: *mut Autodoc = &mut *c;
         (*c).add_name_value_pair_attribute_with_line_num(
             Some("w"),
             Some("aaaa bbbb cccc dddd eeee ffff gggg hhhh"),
@@ -669,14 +682,16 @@ fn jvm_verified_autodoc_print_members() {
         return;
     }
     unsafe {
-        let c = Autodoc::new(Some("wrap"), std::ptr::null_mut());
+        let mut c = Autodoc::new(Some("wrap"), std::ptr::null_mut());
+        let c: *mut Autodoc = &mut *c;
         (*c).add_name_value_pair_attribute_with_line_num(
             Some("w"),
             Some("aaaa bbbb cccc dddd eeee ffff gggg hhhh"),
             1,
         );
         (*c).wrap_attribute_values(Some("!"), Some("~"), Some("|"), Some(" "), 4, 10);
-        let d = Autodoc::new(Some("print"), std::ptr::null_mut());
+        let mut d = Autodoc::new(Some("print"), std::ptr::null_mut());
+        let d: *mut Autodoc = &mut *d;
         (*d).add_comment_string(Some("c"), 1);
         WritableAutodoc::add_empty_line(&mut *d, 2);
         (*d).add_name_value_pair_attribute_with_line_num(Some("only"), Some("value"), 3);

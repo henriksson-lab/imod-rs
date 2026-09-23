@@ -53,15 +53,16 @@ impl NameValuePair {
         parent: *mut dyn WriteOnlyStatementList,
         previous_statement: *mut dyn Statement,
         line_num: i32,
-    ) -> *mut NameValuePair {
-        let this = Box::into_raw(Box::new(NameValuePair {
+    ) -> Box<NameValuePair> {
+        let mut this = Box::new(NameValuePair {
             statement: StatementBase::initial(),
             name: Vec::new(),
             parent,
             value: None,
             new_delimiter: std::ptr::null_mut(),
-        }));
-        unsafe { StatementBase::statement(this, previous_statement, line_num) };
+        });
+        let this_ptr: *mut NameValuePair = &mut *this;
+        unsafe { StatementBase::statement(this_ptr, previous_statement, line_num) };
         this
     }
 

@@ -227,7 +227,13 @@ pub struct AutodocParser {
     /// Java field `peetVariant`.
     peet_variant: bool,
     /// Java field `tokenizer`, cleared to null by `parse()`.
-    tokenizer: *mut AutodocTokenizer,
+    ///
+    /// `Option`, not a raw pointer: in Java the `= null` at the end of
+    /// `parse()` drops the last reference and the collector reclaims the
+    /// tokenizer.  A `*mut` mirrors the assignment but not the reclamation,
+    /// so it leaked one tokenizer per parse.  `None` reproduces the Java
+    /// exactly -- the value is dropped at the same point.
+    tokenizer: Option<AutodocTokenizer>,
     /// Java field `logFile`, a `LogFile.Handle`.
     log_file: Option<std::sync::Arc<log_file::Handle>>,
     /// Java field `errMsg`, a caller-owned `StringBuilder`.
@@ -309,7 +315,7 @@ impl AutodocParser {
         if autodoc.is_null() {
             panic!("java.lang.IllegalArgumentException: autodoc is null.");
         }
-        let tokenizer = Box::into_raw(Box::new(AutodocTokenizer::new(
+        let mut tokenizer = AutodocTokenizer::new(
             allow_alt_comment,
             location,
             env_var,
@@ -321,13 +327,13 @@ impl AutodocParser {
             not_found_message,
             debug,
             writable,
-        )));
-        let log_file = unsafe { (*tokenizer).get_log_file() };
+        );
+        let log_file = tokenizer.get_log_file();
         AutodocParser {
             line: Vec::new(),
             tokens: Vec::new(),
             peet_variant,
-            tokenizer,
+            tokenizer: Some(tokenizer),
             log_file,
             err_msg,
             token_index: 0,
@@ -511,7 +517,10 @@ impl AutodocParser {
 
     /// Java package-private `initialize()`.
     pub fn initialize(&mut self) -> Result<(), LogFileError> {
-        unsafe { (*self.tokenizer).initialize() }
+        self.tokenizer
+            .as_mut()
+            .expect("tokenizer live")
+            .initialize()
     }
 
     /// Java package-private `isError()`.
@@ -559,7 +568,9 @@ impl AutodocParser {
         {
             self.autodoc_unit()
         };
-        self.tokenizer = std::ptr::null_mut();
+        // Java's `tokenizer = null` releases the last reference here and the
+        // collector reclaims it; dropping the `Option` is the same event.
+        self.tokenizer = None;
     }
 
     /// Java private `autodoc()`.
@@ -914,7 +925,11 @@ impl AutodocParser {
         if unsafe { self.match_token(token::Type::Delimiter) }.is_null() {
             // bad section header
             unsafe {
-                let delimiter = (*self.tokenizer).get_delimiter_string();
+                let delimiter = self
+                    .tokenizer
+                    .as_mut()
+                    .expect("tokenizer live")
+                    .get_delimiter_string();
                 self.report_error(Some(&format!(
                     "A section header must contain a delimiter - missing '{}'.",
                     delimiter
@@ -963,7 +978,11 @@ impl AutodocParser {
         }
         // did not find section type
         unsafe {
-            let delimiter = (*self.tokenizer).get_delimiter_string();
+            let delimiter = self
+                .tokenizer
+                .as_mut()
+                .expect("tokenizer live")
+                .get_delimiter_string();
             self.report_error(Some(&format!(
                 "Missing section type (right side of the '{}' missing).",
                 delimiter
@@ -998,7 +1017,11 @@ impl AutodocParser {
         if name_link_list.size() == 0 {
             // bad section name
             unsafe {
-                let delimiter = (*self.tokenizer).get_delimiter_string();
+                let delimiter = self
+                    .tokenizer
+                    .as_mut()
+                    .expect("tokenizer live")
+                    .get_delimiter_string();
                 self.report_error(Some(&format!(
                     "Missing section name (left side of the '{}' missing).",
                     delimiter
@@ -1026,7 +1049,11 @@ impl AutodocParser {
         {
             if required {
                 unsafe {
-                    let delimiter = (*self.tokenizer).get_delimiter_string();
+                    let delimiter = self
+                        .tokenizer
+                        .as_mut()
+                        .expect("tokenizer live")
+                        .get_delimiter_string();
                     self.report_error(Some(&format!(
                         "Unknown statement.  Expecting a name/value pair (name {} value).",
                         delimiter
@@ -1047,7 +1074,11 @@ impl AutodocParser {
         if unsafe { self.match_token(token::Type::Delimiter) }.is_null() {
             // bad pair
             unsafe {
-                let delimiter = (*self.tokenizer).get_delimiter_string();
+                let delimiter = self
+                    .tokenizer
+                    .as_mut()
+                    .expect("tokenizer live")
+                    .get_delimiter_string();
                 self.report_error(Some(&format!(
                     "Missing '{}'.  Invalid name/value pair (name {} value).",
                     delimiter, delimiter
@@ -1247,7 +1278,10 @@ impl AutodocParser {
         // mistaken for part of this value.
         if unsafe { self.is_delimiter_change(attribute) } {
             let values = unsafe { (*value_link_list.get_head()).get_values() };
-            unsafe { (*self.tokenizer).set_delimiter_string(Some(&values)) };
+            self.tokenizer
+                .as_mut()
+                .expect("tokenizer live")
+                .set_delimiter_string(Some(&values));
             unsafe { (*pair).set_delimiter_change(value_link_list.get_head()) };
         }
         // grab the EOL in case the value continues in the value line
@@ -1336,7 +1370,11 @@ impl AutodocParser {
             // really bad error - preprocessor is wrong
             // bad value line
             unsafe {
-                let delimiter = (*self.tokenizer).get_delimiter_string();
+                let delimiter = self
+                    .tokenizer
+                    .as_mut()
+                    .expect("tokenizer live")
+                    .get_delimiter_string();
                 self.report_error(Some(&format!(
                     "A value line cannot contain the delimiter string (\"{}\").",
                     delimiter
@@ -1540,7 +1578,10 @@ impl AutodocParser {
                 self.token_index,
                 unsafe { (*self.token).to_string() },
                 self.delimiter_in_line,
-                unsafe { (*self.tokenizer).get_delimiter_string() }
+                self.tokenizer
+                    .as_mut()
+                    .expect("tokenizer live")
+                    .get_delimiter_string()
             );
         }
     }
@@ -1561,7 +1602,7 @@ impl AutodocParser {
         self.line.clear();
         self.delimiter_in_line = false;
         loop {
-            let token = unsafe { (*self.tokenizer).next() };
+            let token = self.tokenizer.as_mut().expect("tokenizer live").next();
             if token.is(token::Type::Delimiter) {
                 self.delimiter_in_line = true;
             }
@@ -1621,17 +1662,26 @@ impl AutodocParser {
 
     /// Java package-private `testStreamTokenizer(boolean, boolean)`.
     pub fn test_stream_tokenizer(&mut self, tokens: bool, details: bool) {
-        unsafe { (*self.tokenizer).test_stream_tokenizer(tokens, details) };
+        self.tokenizer
+            .as_mut()
+            .expect("tokenizer live")
+            .test_stream_tokenizer(tokens, details);
     }
 
     /// Java package-private `testPrimativeTokenizer(boolean)`.
     pub fn test_primative_tokenizer(&mut self, tokens: bool) {
-        unsafe { (*self.tokenizer).test_primative_tokenizer(tokens) };
+        self.tokenizer
+            .as_mut()
+            .expect("tokenizer live")
+            .test_primative_tokenizer(tokens);
     }
 
     /// Java package-private `testAutodocTokenizer(boolean)`.
     pub fn test_autodoc_tokenizer(&mut self, tokens: bool) {
-        unsafe { (*self.tokenizer).test(tokens) };
+        self.tokenizer
+            .as_mut()
+            .expect("tokenizer live")
+            .test(tokens);
     }
 
     /// Java package-private `testPreprocessor(boolean)`.
@@ -1639,7 +1689,10 @@ impl AutodocParser {
         if tokens {
             eprintln!("(type,value):delimiterInLine");
         }
-        unsafe { (*self.tokenizer).initialize() };
+        self.tokenizer
+            .as_mut()
+            .expect("tokenizer live")
+            .initialize();
         loop {
             {
                 self.next_token()
@@ -1762,7 +1815,9 @@ mod tests {
         std::fs::write(&path, "Global = retained\n[Field = item]\nValue = 7\n").unwrap();
 
         unsafe {
-            let autodoc = Autodoc::new(Some("owned-tokens"), std::ptr::null_mut());
+            let mut autodoc = Autodoc::new(Some("owned-tokens"), std::ptr::null_mut());
+            // The box stays alive for the rest of the scope; the pointer only borrows it.
+            let autodoc: *mut Autodoc = &mut *autodoc;
             Autodoc::initialize_generic_instance(
                 autodoc,
                 None,

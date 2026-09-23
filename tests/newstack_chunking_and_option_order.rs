@@ -26,7 +26,7 @@
 mod common;
 
 use imod_rs::imod::libiimod::iimage::{
-    IIFILE_DEFAULT, ii_close, ii_fill_mrc_header, ii_open, ii_open_new, ii_sync_from_mrc_header,
+    IIFILE_DEFAULT, ii_delete, ii_fill_mrc_header, ii_open, ii_open_new, ii_sync_from_mrc_header,
     ii_write_section_float,
 };
 use imod_rs::imod::libiimod::mrcfiles::{
@@ -84,7 +84,7 @@ fn write_input(dir: &std::path::Path, extra: Option<&[u8]>) {
                 .collect::<Vec<f32>>();
             assert_eq!(ii_write_section_float(image, &mut pixels, section), 0);
         }
-        ii_close(file);
+        ii_delete(file);
     }
 }
 
@@ -111,7 +111,7 @@ fn extended_header(path: &std::path::Path) -> (i32, i16, i16, Vec<u8>) {
     unsafe {
         let file = ii_open(path_c.to_bytes(), "rb");
         assert_eq!(ii_fill_mrc_header(file, &mut header), 0);
-        ii_close(file);
+        ii_delete(file);
     }
     let bytes = std::fs::read(path).unwrap();
     let next = header.next;

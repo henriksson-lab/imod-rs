@@ -14,14 +14,13 @@ use crate::imod::libimod::istore::istore_copy_cont_surf_items;
 use crate::imod::libmesh::mkmesh::chunk_mesh_add_index;
 use crate::imod::libmesh::skinobj::skin_report_time;
 
-thread_local! {
-    /// Original static `newPolyNorm` (`remesh.c:21`).
-    static NEW_POLY_NORM: Cell<i32> = const { Cell::new(1) };
-}
+/// Original static `newPolyNorm` (`remesh.c:21`).  A C file-scope static is
+/// process-global; an atomic reproduces that without a data race.
+static NEW_POLY_NORM: std::sync::atomic::AtomicI32 = std::sync::atomic::AtomicI32::new(1);
 
 /// Original: `imeshSetNewPolyNorm` (`remesh.c:22`).
 pub fn imesh_set_new_poly_norm(value: i32) {
-    NEW_POLY_NORM.with(|c| c.set(value));
+    NEW_POLY_NORM.store(value, std::sync::atomic::Ordering::Relaxed);
 }
 
 /// Original: `XDIV` (`remesh.c:27`).
@@ -71,7 +70,7 @@ pub fn imesh_remesh_normal(
                 timesize = meshes[m].time as i32;
             }
             if !meshes[m].store.is_empty() {
-                NEW_POLY_NORM.with(|c| c.set(1));
+                NEW_POLY_NORM.store(1, std::sync::atomic::Ordering::Relaxed);
             }
         } else {
             /* otherwise, move the mesh to the output mesh */
@@ -83,7 +82,7 @@ pub fn imesh_remesh_normal(
     }
     surfsize += 1;
     timesize += 1;
-    let new_poly_norm = NEW_POLY_NORM.with(|c| c.get());
+    let new_poly_norm = NEW_POLY_NORM.load(std::sync::atomic::Ordering::Relaxed);
     let out_code = if new_poly_norm != 0 {
         IMOD_MESH_BGNPOLYNORM2
     } else {

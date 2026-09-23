@@ -381,7 +381,9 @@ mod tests {
 
     fn panel() -> DirectiveSectionPanel<TestDirectivePanel> {
         let manager: &'static dyn BaseManager = DirectiveEditorManager::new(None, None, None, None);
-        let tool = Box::leak(Box::new(DirectiveTool));
+        // `DirectiveTool` is zero-sized, so a reference to a constant is the whole
+        // value; static promotion gives the `'static` with no allocation to leak.
+        let tool: &'static DirectiveTool = &DirectiveTool;
         DirectiveSectionPanel::get_instance(
             manager,
             DirectiveDescrSection {

@@ -95,12 +95,10 @@ impl NumberedFileType {
         let integer_variable = integer_variable.unwrap();
         let max_integer = integer_variable.get_max_integer();
         if let Some(extension) = extension {
-            // The pattern holds the `Extension` instance itself; the pattern element type
-            // borrows the stored singletons, and `getLiteralInstance` can also return an
-            // instance it built for an unrecognised extension, so the built one is leaked
-            // to give it the 'static lifetime the pattern needs.  Java simply holds the
-            // reference; the object lives as long as the pattern does either way.
-            let extension: &'static Extension = Box::leak(Box::new(extension));
+            // The pattern element owns the `Extension`, because `getLiteralInstance`
+            // can return an instance it built for an unrecognised extension as well as
+            // one of the stored singletons.  Java simply holds the reference; the
+            // object lives as long as the pattern does either way.
             return Some(NumberedFileType::new(
                 Some(vec![
                     match &left_side {

@@ -75,6 +75,12 @@ pub struct ToolsManager {
     com_script_mgr: Option<Infallible>,
 }
 
+/// Owns every `ToolsManager` this module builds.  Java's owner is the collector, by
+/// way of `EtomoDirector.managerList`, which keeps each manager for the run;
+/// the translation hands out `&'static Self`, so without a root here the
+/// allocation is unreachable the moment the constructor returns.
+static INSTANCES: std::sync::Mutex<Vec<&'static ToolsManager>> = std::sync::Mutex::new(Vec::new());
+
 impl ToolsManager {
     /// Java `ToolsManager(ToolType)`.
     pub fn new(tool_type: ToolType) -> &'static Self {
@@ -91,6 +97,7 @@ impl ToolsManager {
             tools_dialog: Mutex::new(None),
             com_script_mgr: None,
         }));
+        INSTANCES.lock().unwrap().push(instance);
         instance.base_manager();
         instance.initialize_ui_parameters(None, Some(AXIS_ID), false);
         instance.create_state();

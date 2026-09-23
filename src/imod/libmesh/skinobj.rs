@@ -1,5 +1,11 @@
 //! Translation of `IMOD/libmesh/skinobj.c` -- skins an object with branching
 //! and nesting analysis.
+// `skinobj.c:24` defines `CONNECT_BOTH` as `(ICONT_CONNECT_TOP &
+// ICONT_CONNECT_BOTTOM)` -- a bitwise AND of two distinct flag bits, so the
+// constant is **zero**.  Every `flags |= CONNECT_BOTH` is therefore a no-op
+// and every `flags & CONNECT_BOTH` is always false; the author meant `|`.
+// Reproduced faithfully; see `BUGS.md`.
+#![allow(clippy::bad_bit_mask)]
 
 use std::cell::Cell;
 use std::io::Write;

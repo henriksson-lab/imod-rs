@@ -305,7 +305,7 @@ pub fn remove_formatting(value: Option<&str>) -> Option<String> {
     let mut tokenizer =
         PrimativeTokenizer::get_string_instance(value, DEBUG.load(Ordering::Relaxed));
     let mut tooltip = String::new();
-    let mut token: *mut Token = std::ptr::null_mut();
+    let mut token: Option<Box<Token>> = None;
     // Java's `catch (LogFileException)` prints the stack trace and returns `value`, and
     // its `catch (IOException | LockException)` returns `value`.
     if let Err(e) = tokenizer.initialize() {
@@ -325,11 +325,15 @@ pub fn remove_formatting(value: Option<&str>) -> Option<String> {
     let mut new_line = false;
     let mut format = false;
     loop {
-        token = unsafe { tokenizer.next(token) };
-        if unsafe { (*token).is(token::Type::Eof) } {
+        tokenizer.next(&mut token);
+        if token.as_ref().unwrap().is(token::Type::Eof) {
             break;
         }
-        let mut token_value = unsafe { (*token).get_value() }.map(|value| value.to_string());
+        let mut token_value = token
+            .as_ref()
+            .unwrap()
+            .get_value()
+            .map(|value| value.to_string());
         //
         // Process booleans from the previous iteration.
         //
@@ -337,7 +341,7 @@ pub fn remove_formatting(value: Option<&str>) -> Option<String> {
         if new_line {
             new_line = false;
             // Remove indent.
-            if unsafe { (*token).is(token::Type::Whitespace) } {
+            if token.as_ref().unwrap().is(token::Type::Whitespace) {
                 token_value = Some("".to_string());
             }
         }
@@ -345,7 +349,11 @@ pub fn remove_formatting(value: Option<&str>) -> Option<String> {
         if eol {
             eol = false;
             // Remove the formatting character ('^' at the beginning of the line).
-            if unsafe { (*token).equals_type_and_char(token::Type::Symbol, NEW_LINE_CHAR as u16) } {
+            if token
+                .as_ref()
+                .unwrap()
+                .equals_type_and_char(token::Type::Symbol, NEW_LINE_CHAR as u16)
+            {
                 new_line = true;
                 token_value = Some("".to_string());
             }
@@ -355,8 +363,12 @@ pub fn remove_formatting(value: Option<&str>) -> Option<String> {
             format = false;
             let mut found = false;
             // Look for formatting string
-            if unsafe { (*token).is(token::Type::Alphanum) } {
-                let string = unsafe { (*token).get_value() }.map(|value| value.to_string());
+            if token.as_ref().unwrap().is(token::Type::Alphanum) {
+                let string = token
+                    .as_ref()
+                    .unwrap()
+                    .get_value()
+                    .map(|value| value.to_string());
                 if let Some(string) = string {
                     for format_string in FORMAT_STRINGS.iter() {
                         // If specific formatting string is found, then omit it.
@@ -384,21 +396,22 @@ pub fn remove_formatting(value: Option<&str>) -> Option<String> {
         // Finished processing booleans from the previous iteration.
         //
         // Convert end of line to a space.
-        if unsafe { (*token).is(token::Type::Eol) } {
+        if token.as_ref().unwrap().is(token::Type::Eol) {
             eol = true;
             token_value = Some(" ".to_string());
         }
         // Remove formatting string
-        if unsafe { (*token).equals_type_and_char(token::Type::Symbol, FORMAT_CHAR as u16) } {
+        if token
+            .as_ref()
+            .unwrap()
+            .equals_type_and_char(token::Type::Symbol, FORMAT_CHAR as u16)
+        {
             format = true;
             // Omit "\", in case it is part of a specific formatting string.
             token_value = Some("".to_string());
         }
         // `StringBuilder.append(String)` renders a null argument as "null".
         tooltip.push_str(token_value.as_deref().unwrap_or("null"));
-    }
-    if !token.is_null() {
-        drop(unsafe { Box::from_raw(token) });
     }
     Some(tooltip)
 }
@@ -412,7 +425,7 @@ pub fn format(value: Option<&str>) -> Option<Vec<String>> {
     let mut buffer = String::new();
     let mut start_of_line = true;
     let mut first_token = true;
-    let mut token: *mut Token = std::ptr::null_mut();
+    let mut token: Option<Box<Token>> = None;
     // Java's `catch (LogFileException)` prints the stack trace and returns
     // `new String[] { value }`, and its `catch (IOException | LockException)` returns
     // the same.
@@ -423,16 +436,20 @@ pub fn format(value: Option<&str>) -> Option<Vec<String>> {
         }
         return Some(vec![value.to_string()]);
     }
-    token = unsafe { tokenizer.next(token) };
-    while !token.is_null() && !unsafe { (*token).is(token::Type::Eof) } {
+    tokenizer.next(&mut token);
+    while token.is_some() && !token.as_ref().unwrap().is(token::Type::Eof) {
         if start_of_line {
             start_of_line = false;
             // Handle new-line character ('^' at the start of the line).
-            if unsafe { (*token).equals_type_and_char(token::Type::Symbol, NEW_LINE_CHAR as u16) } {
+            if token
+                .as_ref()
+                .unwrap()
+                .equals_type_and_char(token::Type::Symbol, NEW_LINE_CHAR as u16)
+            {
                 list.push(buffer.clone());
                 buffer = String::new();
                 start_of_line = false;
-                token = unsafe { tokenizer.next(token) };
+                tokenizer.next(&mut token);
                 continue;
             } else if !first_token {
                 // wasn't really the end of the line so convert EOL to a space.
@@ -442,18 +459,15 @@ pub fn format(value: Option<&str>) -> Option<Vec<String>> {
             }
             // still need to process the current token
         }
-        if unsafe { (*token).is(token::Type::Eol) } {
+        if token.as_ref().unwrap().is(token::Type::Eol) {
             // Wait to convert end-of-line to a space. If the next token is '^', then this
             // really is the end of a line.
             start_of_line = true;
         } else {
-            buffer.push_str(unsafe { (*token).get_value() }.unwrap_or("null"));
+            buffer.push_str(token.as_ref().unwrap().get_value().unwrap_or("null"));
             start_of_line = false;
         }
-        token = unsafe { tokenizer.next(token) };
-    }
-    if !token.is_null() {
-        drop(unsafe { Box::from_raw(token) });
+        tokenizer.next(&mut token);
     }
     if !buffer.is_empty() {
         list.push(buffer);

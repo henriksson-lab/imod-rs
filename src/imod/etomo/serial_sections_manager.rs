@@ -59,6 +59,13 @@ pub struct SerialSectionsManager {
     com_script_mgr: Mutex<Option<Infallible>>,
 }
 
+/// Owns every `SerialSectionsManager` this module builds.  Java's owner is the collector, by
+/// way of `EtomoDirector.managerList`, which keeps each manager for the run;
+/// the translation hands out `&'static Self`, so without a root here the
+/// allocation is unreachable the moment the constructor returns.
+static INSTANCES: std::sync::Mutex<Vec<&'static SerialSectionsManager>> =
+    std::sync::Mutex::new(Vec::new());
+
 impl SerialSectionsManager {
     /// Java private `SerialSectionsManager()`.
     pub fn new() -> &'static SerialSectionsManager {
@@ -83,6 +90,7 @@ impl SerialSectionsManager {
             main_panel: Mutex::new(None),
             com_script_mgr: Mutex::new(None),
         }));
+        INSTANCES.lock().unwrap().push(instance);
         instance.base_manager();
         instance.initialize_ui_parameters_from_name(param_file_name, Some(AXIS_ID));
         instance

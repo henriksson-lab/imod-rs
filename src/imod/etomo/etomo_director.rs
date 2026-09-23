@@ -1133,11 +1133,19 @@ mod tests {
         }
     }
 
+    /// Roots the leaked test managers so they stay reachable, the way
+    /// `EtomoDirector.managerList` roots the real ones.  A `thread_local!` will not
+    /// do: the test harness runs each test on its own thread and the TLS is
+    /// destroyed when that thread ends, which drops the root again.
+    static INSTANCES: std::sync::Mutex<Vec<&'static Manager>> = std::sync::Mutex::new(Vec::new());
+
     fn manager(name: &str) -> &'static Manager {
-        Box::leak(Box::new(Manager {
+        let manager: &'static Manager = Box::leak(Box::new(Manager {
             base: BaseManagerBase::initial(),
             name: name.to_owned(),
-        }))
+        }));
+        INSTANCES.lock().unwrap().push(manager);
+        manager
     }
 
     #[test]

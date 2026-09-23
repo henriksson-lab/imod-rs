@@ -282,6 +282,13 @@ fn header_opens_source_hdf_multivolume_and_selects_requested_volume() {
         let second_volume = second_volume as *mut _;
         ii_close(second_volume);
         ii_delete(image);
+        // `hdfDelete` (`iihdf.c:1568-1575`) deletes the other volumes itself only
+        // when none of them is still in use; with this one merely closed it counts
+        // as live, so the C leaves it allocated for its owner to delete -- and the
+        // translation correspondingly hands the box back to the `iiDelete`
+        // boundary.  Delete it here, after the primary, or it is unreachable for
+        // the rest of the run.
+        ii_delete(second_volume);
         let result = common::imod_cmd("header")
             .env("AUTODOC_DIR", AUTODOC)
             .args(["-volume", "2", "-size"])

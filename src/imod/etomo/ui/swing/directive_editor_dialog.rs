@@ -117,7 +117,9 @@ impl<P: DirectivePanel, B: DirectiveEditorBuilder> DirectiveEditorDialog<P, B> {
         builder: B,
     ) -> Self {
         let file_type_exists = builder.get_file_type_exists();
-        let tool = Box::leak(Box::new(DirectiveTool));
+        // `DirectiveTool` is zero-sized, so a reference to a constant is the whole
+        // value; static promotion gives the `'static` with no allocation to leak.
+        let tool: &'static DirectiveTool = &DirectiveTool;
         Self {
             rcsid: "$Id:$",
             cb_include: std::array::from_fn(|_| CheckBox::new()),

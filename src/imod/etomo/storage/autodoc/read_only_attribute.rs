@@ -46,7 +46,9 @@ mod tests {
     #[test]
     fn attribute_views_follow_the_source_value_rules() {
         unsafe {
-            let autodoc = Autodoc::new(Some("views"), std::ptr::null_mut());
+            let mut autodoc = Autodoc::new(Some("views"), std::ptr::null_mut());
+            // The box stays alive for the rest of the scope; the pointer only borrows it.
+            let autodoc: *mut Autodoc = &mut *autodoc;
             (*autodoc).add_name_value_pair_attribute_with_line_num(Some("Version"), Some("1.2"), 3);
             (*autodoc).add_name_value_pair_attribute_with_line_num(Some("Version"), Some("1.3"), 8);
             (*autodoc).add_name_value_pair_attribute_with_line_num(Some("a.b"), Some("deep"), 9);
