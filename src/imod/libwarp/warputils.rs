@@ -910,7 +910,7 @@ pub fn expand_and_extrap_grid(
 
 /// Original static `newGridLimits` (`warputils.c:771`).
 #[allow(clippy::too_many_arguments)]
-pub fn new_grid_limits(
+fn new_grid_limits(
     nx_grid: &mut i32,
     x_start: &mut f32,
     x_interval: f32,
@@ -1266,7 +1266,7 @@ pub fn get_size_adjusted_grid(
 ///
 /// Every `/ 2.` and `/ 10.` here is a double literal, and `B3DNINT` is
 /// `(int)floor(a + 0.5)`, not `round()`.
-pub fn adjust_size_and_start(
+fn adjust_size_and_start(
     nxwarp: i32,
     ixgdim: i32,
     xmin: f32,

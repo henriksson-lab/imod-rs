@@ -51,7 +51,7 @@ pub fn imod_obj_color(obj_num: i32, top_ind: i32) -> ImodObjColor {
     }
 }
 /// Original static `getObjectOrClose`.
-pub fn get_object_or_close<'a>(model: &'a mut Imod, edit: &mut ObjectEdit) -> Option<&'a mut Iobj> {
+fn get_object_or_close<'a>(model: &'a mut Imod, edit: &mut ObjectEdit) -> Option<&'a mut Iobj> {
     let object = edit.current_object;
     if object < 0 || object as usize >= model.obj.len() {
         edit.dialog_open = false;
@@ -61,13 +61,7 @@ pub fn get_object_or_close<'a>(model: &'a mut Imod, edit: &mut ObjectEdit) -> Op
     }
 }
 /// Original static `setObjectFlag`.
-pub fn set_object_flag(
-    model: &mut Imod,
-    edit: &mut ObjectEdit,
-    state: bool,
-    symflag: u8,
-    flag: u32,
-) {
+fn set_object_flag(model: &mut Imod, edit: &mut ObjectEdit, state: bool, symflag: u8, flag: u32) {
     if let Some(obj) = get_object_or_close(model, edit) {
         if symflag != 0 {
             if state {
@@ -85,7 +79,7 @@ pub fn set_object_flag(
     }
 }
 /// Original static `setExtraItem`.
-pub fn set_extra_item(model: &mut Imod, edit: &mut ObjectEdit, index: usize, value: i32) {
+fn set_extra_item(model: &mut Imod, edit: &mut ObjectEdit, index: usize, value: i32) {
     if let Some(obj) = get_object_or_close(model, edit) {
         obj.extra[index] = value as u32;
         imodv_register_object_chg(edit.current_object);

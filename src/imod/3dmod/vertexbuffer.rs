@@ -176,17 +176,17 @@ pub struct VertBufManager {
 }
 
 /// Original static `vbDataNew`.
-pub fn vb_data_new() -> VertBufData {
+fn vb_data_new() -> VertBufData {
     let mut v = VertBufData::default();
     vb_data_init(&mut v);
     v
 }
 /// Original static `vbDataInit`.
-pub fn vb_data_init(v: &mut VertBufData) {
+fn vb_data_init(v: &mut VertBufData) {
     *v = VertBufData::default();
 }
 /// Original static `vbDataClear`.
-pub fn vb_data_clear(v: &mut VertBufData, gl: &mut dyn VertexBufferGl) {
+fn vb_data_clear(v: &mut VertBufData, gl: &mut dyn VertexBufferGl) {
     if v.vb_obj != 0 {
         gl.delete_buffer(v.vb_obj)
     }
@@ -196,7 +196,7 @@ pub fn vb_data_clear(v: &mut VertBufData, gl: &mut dyn VertexBufferGl) {
     vb_data_init(v);
 }
 /// Original static `vbDataDelete`.
-pub fn vb_data_delete(v: &mut VertBufData, gl: &mut dyn VertexBufferGl) {
+fn vb_data_delete(v: &mut VertBufData, gl: &mut dyn VertexBufferGl) {
     vb_data_clear(v, gl);
 }
 /// Original `vbCleanupVBD(Imesh *)`.

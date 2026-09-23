@@ -180,7 +180,9 @@ pub fn imodv_depthcue_start_end(
             }
         }
     }
-    unsafe { imodv_draw() };
+    {
+        imodv_draw()
+    };
 }
 
 /// `imodvDepthcueToggle`.
@@ -197,7 +199,9 @@ pub fn imodv_depthcue_toggle(a: &mut ImodvApp, state: i32) {
             }
         }
     }
-    unsafe { imodv_draw() };
+    {
+        imodv_draw()
+    };
 }
 
 #[cfg(test)]

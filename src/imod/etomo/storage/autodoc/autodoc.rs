@@ -143,7 +143,7 @@ impl Autodoc {
     ///
     /// # Safety
     /// The parser, every statement and every section must be live.
-    pub unsafe fn write(&self) -> Result<(), LogFileError> {
+    pub fn write(&self) -> Result<(), LogFileError> {
         if !self.writable {
             // `new IllegalStateException("Not a writable autodoc.").printStackTrace()`;
             // see etomo/util/stack_trace.rs.
@@ -153,10 +153,14 @@ impl Autodoc {
         let autodoc_file = unsafe { (*self.parser).get_log_file() }.unwrap();
         let writer_id = autodoc_file.open_writer()?;
         for statement in self.statement_list.iter() {
-            unsafe { statement.write(&autodoc_file, &writer_id)? };
+            {
+                statement.write(&autodoc_file, &writer_id)?
+            };
         }
         for section in self.section_list.iter() {
-            unsafe { section.write(&autodoc_file, &writer_id)? };
+            {
+                section.write(&autodoc_file, &writer_id)?
+            };
         }
         autodoc_file.close_id(Some(&writer_id));
         Ok(())
@@ -166,7 +170,7 @@ impl Autodoc {
     ///
     /// # Safety
     /// The parser must be live.
-    pub unsafe fn get_log_file(&self) -> Option<std::sync::Arc<log_file::Handle>> {
+    pub fn get_log_file(&self) -> Option<std::sync::Arc<log_file::Handle>> {
         unsafe { (*self.parser).get_log_file() }
     }
 
@@ -537,7 +541,7 @@ impl Autodoc {
     ///
     /// # Safety
     /// Every section and attribute in the autodoc must be live.
-    unsafe fn get_attribute_values_internal(
+    fn get_attribute_values_internal(
         &self,
         section_type: Option<&str>,
         attribute_name: Option<&str>,
@@ -548,7 +552,7 @@ impl Autodoc {
         }
         // Create attributeValues
         let mut attribute_values: HashMap<String, Option<String>> = HashMap::new();
-        let mut section_location = unsafe { self.get_section_location_by_type(section_type) };
+        let mut section_location = { self.get_section_location_by_type(section_type) };
         let mut section = unsafe { self.next_section(section_location.as_mut()) };
         while !section.is_null() {
             let section_name = unsafe { ReadOnlyStatementList::get_name(&*section) };
@@ -654,7 +658,7 @@ impl WriteOnlyStatementList for Autodoc {
     }
 
     /// Java `addEmptyLine(int)`.
-    unsafe fn add_empty_line(&mut self, line_num: i32) {
+    fn add_empty_line(&mut self, line_num: i32) {
         let this: *mut Autodoc = self;
         let statement = unsafe { EmptyLine::new(this, self.get_most_recent_statement(), line_num) };
         self.statement_list
@@ -759,7 +763,7 @@ impl ReadOnlySectionList for Autodoc {
     ///
     /// Sets a SectionLocation index to the first section with the type the same as
     /// the type parameter.  Returns the SectionLocation index.
-    unsafe fn get_section_location_by_type(&self, r#type: Option<&str>) -> Option<SectionLocation> {
+    fn get_section_location_by_type(&self, r#type: Option<&str>) -> Option<SectionLocation> {
         let mut section: *mut Section;
         for i in 0..self.section_list.len() {
             section = self.section_list[i].as_ref() as *const Section as *mut Section;
@@ -819,21 +823,21 @@ impl ReadOnlySectionList for Autodoc {
 
 impl ReadOnlyAutodoc for Autodoc {
     /// Java `getAttributeValues(String, String)`.
-    unsafe fn get_attribute_values(
+    fn get_attribute_values(
         &self,
         section_type: Option<&str>,
         attribute_name: Option<&str>,
     ) -> Option<HashMap<String, Option<String>>> {
-        unsafe { self.get_attribute_values_internal(section_type, attribute_name, false) }
+        self.get_attribute_values_internal(section_type, attribute_name, false)
     }
 
     /// Java `getAttributeMultiLineValues(String, String)`.
-    unsafe fn get_attribute_multi_line_values(
+    fn get_attribute_multi_line_values(
         &self,
         section_type: Option<&str>,
         attribute_name: Option<&str>,
     ) -> Option<HashMap<String, Option<String>>> {
-        unsafe { self.get_attribute_values_internal(section_type, attribute_name, true) }
+        self.get_attribute_values_internal(section_type, attribute_name, true)
     }
 
     /// Java `isError()`.
@@ -845,7 +849,7 @@ impl ReadOnlyAutodoc for Autodoc {
     }
 
     /// Java `printStoredData()`.
-    unsafe fn print_stored_data(&self) {
+    fn print_stored_data(&self) {
         println!("Printing stored data:");
         // name value pair list
         println!("LIST:");
@@ -858,7 +862,9 @@ impl ReadOnlyAutodoc for Autodoc {
         }
         // attribute map
         println!("Attributes:");
-        unsafe { self.attribute_list.as_deref().unwrap().print(0) };
+        {
+            self.attribute_list.as_deref().unwrap().print(0)
+        };
         // section list
         for i in 0..self.section_list.len() {
             let section = self.section_list[i].as_ref() as *const Section as *mut Section;
@@ -867,8 +873,8 @@ impl ReadOnlyAutodoc for Autodoc {
     }
 
     /// Java `sectionExists(String)`.
-    unsafe fn section_exists(&self, r#type: Option<&str>) -> bool {
-        unsafe { self.get_section_location_by_type(r#type) }.is_some()
+    fn section_exists(&self, r#type: Option<&str>) -> bool {
+        { self.get_section_location_by_type(r#type) }.is_some()
     }
 
     /// Java `getAttribute(String)`.
@@ -934,14 +940,16 @@ impl ReadOnlyAutodoc for Autodoc {
 
 impl WritableAutodoc for Autodoc {
     /// Java `addNameValuePairAttribute(String, String)`.
-    unsafe fn add_name_value_pair_attribute(&mut self, name: Option<&str>, value: Option<&str>) {
-        unsafe { self.add_name_value_pair_attribute_with_line_num(name, value, 0) };
+    fn add_name_value_pair_attribute(&mut self, name: Option<&str>, value: Option<&str>) {
+        {
+            self.add_name_value_pair_attribute_with_line_num(name, value, 0)
+        };
     }
 
     /// Java `addNameValuePairAttribute(String, String, int)`.
     ///
     /// add a name/value pair with a name containing one attribute
-    unsafe fn add_name_value_pair_attribute_with_line_num(
+    fn add_name_value_pair_attribute_with_line_num(
         &mut self,
         name: Option<&str>,
         value: Option<&str>,
@@ -1031,12 +1039,14 @@ impl WritableAutodoc for Autodoc {
 
     /// Java `addEmptyLine(int)`, the single body that also satisfies
     /// `WriteOnlyStatementList`.
-    unsafe fn add_empty_line(&mut self, line_num: i32) {
-        unsafe { WriteOnlyStatementList::add_empty_line(self, line_num) };
+    fn add_empty_line(&mut self, line_num: i32) {
+        {
+            WriteOnlyStatementList::add_empty_line(self, line_num)
+        };
     }
 
     /// Java `addComment(String, int)`.
-    unsafe fn add_comment_string(&mut self, comment: Option<&str>, line_num: i32) {
+    fn add_comment_string(&mut self, comment: Option<&str>, line_num: i32) {
         let token = Box::into_raw(Box::new(Token::new()));
         unsafe {
             (*token).set_type_and_string(
@@ -1113,7 +1123,7 @@ impl WritableAutodoc for Autodoc {
     /// with noWrapTag.  If a value starts with wrapTag, uses divider, otherwise uses
     /// defaultDivider.  Not wrapping non-global attributes as this is not currently
     /// required.
-    unsafe fn wrap_attribute_values(
+    fn wrap_attribute_values(
         &mut self,
         no_wrap_prefix: Option<&str>,
         wrap_prefix: Option<&str>,
@@ -1124,7 +1134,7 @@ impl WritableAutodoc for Autodoc {
     ) {
         let size = self.statement_list.len();
         for i in 0..size {
-            unsafe {
+            {
                 self.statement_list[i].wrap_value(
                     no_wrap_prefix,
                     wrap_prefix,

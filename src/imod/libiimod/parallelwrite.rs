@@ -280,7 +280,9 @@ pub fn par_wrt_close() {
         let state = state.borrow();
         for info in state.infos.iter().take(state.num_infos as usize) {
             if info.hdf_index >= 0 {
-                unsafe { crate::imod::libcfshr::b3dutil::b3d_close_lock_file(info.hdf_index) };
+                {
+                    crate::imod::libcfshr::b3dutil::b3d_close_lock_file(info.hdf_index)
+                };
             }
         }
     })
@@ -1196,7 +1198,7 @@ unsafe fn write_segments(ii_file: *mut ImodImageFile, _hdata: *mut MrcHeader, iu
         0
     })
 }
-unsafe fn clear_segments(info_ind: i32) {
+fn clear_segments(info_ind: i32) {
     S_PARALLEL_WRITE.with(|state| {
         let mut state = state.borrow_mut();
         state.buf_index[info_ind as usize] = 0;
@@ -1291,7 +1293,7 @@ unsafe fn iiu_prepare_write_hdf(iunit: i32) -> i32 {
     crate::imod::libiimod::unit_fileio::iiu_sync_with_mrc_header(iunit);
     0
 }
-unsafe fn advance_section() {
+fn advance_section() {
     S_PARALLEL_WRITE.with(|state| {
         let mut state = state.borrow_mut();
         let index = state.cur_info as usize;
@@ -1299,7 +1301,7 @@ unsafe fn advance_section() {
         state.iy_cur[index] = 0;
     });
 }
-unsafe fn advance_line() {
+fn advance_line() {
     S_PARALLEL_WRITE.with(|state| {
         let mut state = state.borrow_mut();
         let index = state.cur_info as usize;

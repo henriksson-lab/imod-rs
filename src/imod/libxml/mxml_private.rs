@@ -100,7 +100,7 @@ pub fn mxml_real_cb(_arena: &MxmlArena, _node: Option<usize>) -> MxmlType {
 /// per-thread block.  A `thread_local!` runs the block's `Drop` at the same
 /// point, so the function has nothing left to do; taking the block by value
 /// keeps the ownership transfer the `free` performed.
-pub fn _mxml_destructor(g: MxmlGlobal) {
+fn _mxml_destructor(g: MxmlGlobal) {
     drop(g);
 }
 
@@ -111,7 +111,7 @@ pub fn _mxml_destructor(g: MxmlGlobal) {
 /// portable equivalent and none is needed — the `thread_local!` block is
 /// dropped when the thread ends — so the body resets the block to the state a
 /// fresh `_mxml_global` would build, which is what a later call would see.
-pub fn _mxml_fini() {
+fn _mxml_fini() {
     mxml_global().with_borrow_mut(|global| {
         global.error_cb = None;
         global.entity_cbs = vec![Some(mxml_entity_cb)];
@@ -134,4 +134,4 @@ pub fn mxml_global() -> &'static LocalKey<RefCell<MxmlGlobal>> {
 ///
 /// The C body is the one-time `pthread_key_create`; `thread_local!` creates
 /// its key on first access, so there is nothing to do here.
-pub fn _mxml_init() {}
+fn _mxml_init() {}

@@ -91,7 +91,9 @@ pub fn imodv_bkg_color_new_color_slot(color: &mut ImodvBkgColor, red: i32, green
     color.red = red;
     color.green = green;
     color.blue = blue;
-    unsafe { imodv_draw() };
+    {
+        imodv_draw()
+    };
 }
 /// `doneSlot()` source method.
 /// `ImodvBkgColor::doneSlot`.
@@ -428,7 +430,9 @@ pub fn imodv_view_menu(
                 w.set_checkable_item(item, !free_extra_object);
             }
             imodv_objed_new_view(a);
-            unsafe { imodv_draw() };
+            {
+                imodv_draw()
+            };
             None
         }
         ViewMenuAction::Labels => {
@@ -500,7 +504,9 @@ pub fn imodv_view_menu(
                 w.set_checkable_item(ViewMenuAction::CurrentPoint, !free_extra_object);
             }
             imodv_objed_new_view(a);
-            unsafe { imodv_draw() };
+            {
+                imodv_draw()
+            };
             None
         }
     }
@@ -546,7 +552,9 @@ pub fn toggle_world_flag(
     if let Some(w) = window {
         w.set_checkable_item(menu_id, value != 0);
     }
-    unsafe { imodv_draw() };
+    {
+        imodv_draw()
+    };
 }
 
 /// `imodvMenuLight`.

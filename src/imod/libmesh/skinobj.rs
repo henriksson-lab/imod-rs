@@ -80,7 +80,7 @@ thread_local! {
 }
 
 /// Original static `imeshDefaultCallback` (`skinobj.c:102`).
-pub fn imesh_default_callback(in_status: i32) -> i32 {
+fn imesh_default_callback(in_status: i32) -> i32 {
     let _dummy = in_status;
     0
 }
@@ -100,7 +100,7 @@ pub fn skin_report_time(string: &str) {
 }
 
 /// Original static `getnextz` (`skinobj.c:126`).
-pub fn getnextz(zlist: &[i32], zlsize: i32, cz: i32) -> i32 {
+fn getnextz(zlist: &[i32], zlsize: i32, cz: i32) -> i32 {
     for z in 0..(zlsize - 1) as usize {
         if cz == zlist[z] {
             return zlist[z + 1];
@@ -118,7 +118,7 @@ pub fn getnextz(zlist: &[i32], zlsize: i32, cz: i32) -> i32 {
 /// Original static `dump_lists` (`skinobj.c:143`).
 ///
 /// Dead in the source as well (every call site is commented out).
-pub fn dump_lists(
+fn dump_lists(
     message: &str,
     blist: &[i32],
     nb: i32,
@@ -157,7 +157,7 @@ pub fn dump_lists(
 ///
 /// Connects open contours like a surface.
 #[allow(clippy::too_many_arguments)]
-pub fn mesh_open_obj(
+fn mesh_open_obj(
     obj: &mut Iobj,
     scale: &Ipoint,
     incz: i32,
@@ -331,7 +331,7 @@ pub fn mesh_open_obj(
 }
 
 /// Original static `segment_separation` (`skinobj.c:286`).
-pub fn segment_separation(l1: f32, u1: f32, l2: f32, u2: f32) -> f32 {
+fn segment_separation(l1: f32, u1: f32, l2: f32, u2: f32) -> f32 {
     let mut minlen = (u1 - l1) as i32;
     if ((u2 - l2) as i32) < minlen {
         minlen = (u2 - l2) as i32;
@@ -363,7 +363,7 @@ pub fn segment_separation(l1: f32, u1: f32, l2: f32, u2: f32) -> f32 {
 /// Original static `mesh_open_tube_obj` (`skinobj.c:313`).
 ///
 /// Meshes an open object as tubes.
-pub fn mesh_open_tube_obj(obj: &mut Iobj, scale: &Ipoint, flags: u32, mesh_diameter: f64) -> i32 {
+fn mesh_open_tube_obj(obj: &mut Iobj, scale: &Ipoint, flags: u32, mesh_diameter: f64) -> i32 {
     let mut def_props = DrawProps::default();
     let mut cont_props = DrawProps::default();
     let mut pt_props = DrawProps::default();
@@ -674,7 +674,7 @@ pub fn mesh_open_tube_obj(obj: &mut Iobj, scale: &Ipoint, flags: u32, mesh_diame
 ///
 /// Makes contours for a hemispherical cap and returns the terminal point also.
 #[allow(clippy::too_many_arguments)]
-pub fn make_dome_conts(
+fn make_dome_conts(
     last_cont: &Icont,
     last_pt: &Ipoint,
     nrot: &Ipoint,
@@ -723,7 +723,7 @@ pub fn make_dome_conts(
 /// Common operations when adding a new mesh to an object's mesh.  The C takes
 /// the contour and reads only its `surf` and `time`, which are passed directly
 /// here because the contour usually lives inside `obj`.
-pub fn add_mesh_to_object(
+fn add_mesh_to_object(
     obj: &mut Iobj,
     cont_surf: i32,
     cont_time: i32,
@@ -2317,7 +2317,7 @@ fn overlap_fractions_at(
 /// Makes a list of all contours in a nested set, starting with the nest at
 /// index `nind`, finding the outermost nest, and adding each contour in that
 /// nest to `tlist` if not in it already.
-pub fn add_whole_nest(
+fn add_whole_nest(
     mut nind: i32,
     obj: &mut Iobj,
     nests: &[Nesting],
@@ -2368,7 +2368,7 @@ const NSEARCH: usize = 13;
 ///
 /// Routine to connect orphan contours.
 #[allow(clippy::too_many_arguments)]
-pub fn connect_orphans(
+fn connect_orphans(
     obj: &Iobj,
     obj_mesh: &mut Vec<Imesh>,
     cout_in: Icont,
@@ -2808,7 +2808,7 @@ pub fn connect_orphans(
 /// Tests whether contour `cout` is crossed by the line segment between
 /// `x1s,y1s` and `x1e,y1e`.  It omits segments containing points `st1` and
 /// `st2`.
-pub fn cross_cont(cout: &Icont, x1s: f32, y1s: f32, x1e: f32, y1e: f32, st1: i32, st2: i32) -> i32 {
+fn cross_cont(cout: &Icont, x1s: f32, y1s: f32, x1e: f32, y1e: f32, st1: i32, st2: i32) -> i32 {
     let dx1 = x1e - x1s;
     let dy1 = y1e - y1s;
     for pt in 0..cout.pts.len() as i32 {
@@ -2843,7 +2843,7 @@ pub fn cross_cont(cout: &Icont, x1s: f32, y1s: f32, x1e: f32, y1e: f32, st1: i32
 /// Evaluates a potential break in the outer contour on one slice for
 /// `connect_orphans`.
 #[allow(clippy::too_many_arguments)]
-pub fn evaluate_break(
+fn evaluate_break(
     cout: &Icont,
     list: &[i32],
     used: &[i32],
@@ -2961,7 +2961,7 @@ pub fn evaluate_break(
 ///
 /// Gets the center of mass; if it fails, takes the midpoint of the bounding
 /// box.
-pub fn robust_center_of_mass(cont: &Icont, scan_cont: Option<&Icont>, cm: &mut Ipoint) -> i32 {
+fn robust_center_of_mass(cont: &Icont, scan_cont: Option<&Icont>, cm: &mut Ipoint) -> i32 {
     let mut use_cont = match scan_cont {
         Some(sc) => sc.clone(),
         None => cont.clone(),
@@ -2986,7 +2986,7 @@ pub fn robust_center_of_mass(cont: &Icont, scan_cont: Option<&Icont>, cm: &mut I
 ///
 /// Tests whether a polygon is convex, using a quick test valid only if it is
 /// non self-intersecting.
-pub fn is_cont_convex_if_simple(cont: &Icont) -> i32 {
+fn is_cont_convex_if_simple(cont: &Icont) -> i32 {
     let mut all_pos = 0;
     let pts = &cont.pts;
     for ind in 0..cont.pts.len() {
@@ -3007,7 +3007,7 @@ pub fn is_cont_convex_if_simple(cont: &Icont) -> i32 {
 /// Original static `concavityAreaFraction` (`skinobj.c:2210`).
 ///
 /// Finds by what fraction the area is smaller than its convex hull.
-pub fn concavity_area_fraction(cont: &Icont, hull_diff: &mut f32) -> f32 {
+fn concavity_area_fraction(cont: &Icont, hull_diff: &mut f32) -> f32 {
     let psize = cont.pts.len();
     *hull_diff = 0.;
     if psize < 4 {
@@ -3055,7 +3055,7 @@ pub fn concavity_area_fraction(cont: &Icont, hull_diff: &mut f32) -> f32 {
 /// Creates a cap mesh on a contour.  `side` has two values: 1 caps on top, -1
 /// caps on bottom.
 #[allow(clippy::too_many_arguments)]
-pub fn imesh_contour_cap(
+fn imesh_contour_cap(
     obj: &Iobj,
     cont: &mut Icont,
     scan_cont: Option<&Icont>,
@@ -3186,7 +3186,7 @@ pub fn imesh_contour_cap(
 ///
 /// Smooths out the jagged lines from following pixel boundaries and reduces
 /// points in the skeleton contour.
-pub fn smooth_reduce_skeleton(cont: &mut Icont) -> i32 {
+fn smooth_reduce_skeleton(cont: &mut Icont) -> i32 {
     let max_fit: i32 = 5;
     let mut xx = [0.0f32; 11];
     let mut xxsq = [0.0f32; 11];
@@ -3392,7 +3392,7 @@ pub fn smooth_reduce_skeleton(cont: &mut Icont) -> i32 {
 }
 
 /// Original static `interpolate_point` (`skinobj.c:2545`).
-pub fn interpolate_point(pt1: Ipoint, pt2: Ipoint, frac: f32, pt3: &mut Ipoint) {
+fn interpolate_point(pt1: Ipoint, pt2: Ipoint, frac: f32, pt3: &mut Ipoint) {
     pt3.x = frac * pt2.x + (1. - frac) * pt1.x;
     pt3.y = frac * pt2.y + (1. - frac) * pt1.y;
     pt3.z = frac * pt2.z + (1. - frac) * pt1.z;
@@ -3402,7 +3402,7 @@ pub fn interpolate_point(pt1: Ipoint, pt2: Ipoint, frac: f32, pt3: &mut Ipoint) 
 ///
 /// Removes points from `c1` that are inside `c2`, adding two new points that
 /// are just outside `c2` by 1/10 - 2/10 of the crossing segments.
-pub fn backoff_overlap(c1: &mut Icont, c2: &Icont) {
+fn backoff_overlap(c1: &mut Icont, c2: &Icont) {
     let mut pt3 = Ipoint::default();
     let mut ptbefore = Ipoint::default();
     let mut ptafter = Ipoint::default();
@@ -3525,7 +3525,7 @@ pub fn backoff_overlap(c1: &mut Icont, c2: &Icont) {
 ///
 /// Eliminates overlap between `c1` and `c2` by backing off `c1` from being
 /// inside `c2` then backing off `c2` from being inside `c1`, iterating twice.
-pub fn eliminate_overlap(c1: &mut Icont, c2: &mut Icont) -> i32 {
+fn eliminate_overlap(c1: &mut Icont, c2: &mut Icont) -> i32 {
     for i in 0..2 {
         if imodel_contour_overlap(c1, c2) == 0 {
             return i;
@@ -3553,7 +3553,7 @@ const INSIDE_MAX_FRACTION: f64 = 0.1;
 /// Checks whether it is valid to join contours `c1` and `c2` with a connector
 /// from `pt1` in `c1` to `pt2` in `c2`.
 #[allow(clippy::too_many_arguments)]
-pub fn check_legal_joiner(
+fn check_legal_joiner(
     pt1: Ipoint,
     pt2: Ipoint,
     c1: &Icont,
@@ -3645,7 +3645,7 @@ pub fn check_legal_joiner(
 ///
 /// Evaluates the min and max coordinates for points in contour `cont` from
 /// `ptst` to `ptnd`.
-pub fn segment_mm(
+fn segment_mm(
     cont: &Icont,
     ptst: i32,
     ptnd: i32,
@@ -3688,7 +3688,7 @@ const SEGSCAN_DIV: usize = 30;
 /// Finds the closest approach between a point in `c1` and a line segment in
 /// `c2`.
 #[allow(clippy::too_many_arguments)]
-pub fn scan_points_to_segments(
+fn scan_points_to_segments(
     c1: &Icont,
     c2: &Icont,
     legalmin: &mut f64,
@@ -3891,7 +3891,7 @@ pub fn scan_points_to_segments(
 ///
 /// Finds the closest contour and connecting point with a legal connector.
 #[allow(clippy::too_many_arguments)]
-pub fn find_closest_contour(
+fn find_closest_contour(
     tcont: &Icont,
     onecont: Option<&Icont>,
     obj: &Iobj,
@@ -4116,7 +4116,7 @@ pub fn find_closest_contour(
 /// Joins together all `ncont` contours in `list`, of which `num_same_level`
 /// are at the same level.
 #[allow(clippy::too_many_arguments)]
-pub fn join_all_contours(
+fn join_all_contours(
     obj: &Iobj,
     list: &[i32],
     ncont: i32,
@@ -4277,7 +4277,7 @@ pub fn join_all_contours(
 /// Original static `subtract_scan_contours` (`skinobj.c:3222`).
 ///
 /// Modifies scan contour `cs1` to exclude the area covered by `cs2`.
-pub fn subtract_scan_contours(cs1: &mut Icont, cs2: &Icont) {
+fn subtract_scan_contours(cs1: &mut Icont, cs2: &Icont) {
     let mut jstrt: i32 = 0;
     let mut i: i32 = 0;
     while i < cs1.pts.len() as i32 - 1 {
@@ -4323,7 +4323,7 @@ pub fn subtract_scan_contours(cs1: &mut Icont, cs2: &Icont) {
 ///
 /// Meshes `bcont` to `tcont` and adds it to the `objMesh` array.
 #[allow(clippy::too_many_arguments)]
-pub fn mesh_contours(
+fn mesh_contours(
     obj: &Iobj,
     obj_mesh: &mut Vec<Imesh>,
     bcont: Option<Icont>,
@@ -4372,7 +4372,7 @@ pub fn mesh_contours(
 /// Breaks a contour into two contours at `st1` and `st2`.
 /// `fill = 1` fills in the line dividing the contours up, `fill = -1` fills it
 /// down, `fill = 0` does not fill.
-pub fn break_contour_inout(
+fn break_contour_inout(
     cin: &Icont,
     st1_in: i32,
     st2_in: i32,

@@ -134,7 +134,7 @@ pub fn mdftkd(n: i32, factor: &[i32], dim: &[i32], data: &mut [f32], x: usize, y
                 // is unreachable in practice — `srfp` splits composites into
                 // primes and regroups only powers of two, so it never emits a
                 // factor of 6 — but the stream is part of the behaviour.
-                unsafe {
+                {
                     let _ = ImodFile::Stdout.write_all(&c_format_bytes(
                         "\ntransfer error detected in mdftkd\n\n",
                         &[],

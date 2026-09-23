@@ -33,7 +33,7 @@ fn alterheader_rejects_copy_combined_with_another_source_option_before_opening()
 
 #[test]
 fn alterheader_persists_iiunit_origin_map_sample_mode_space_group_and_labels() {
-    unsafe {
+    {
         let input = std::env::temp_dir().join(format!(
             "imod-rs-alterheader-cli-{}.mrc",
             std::process::id()
@@ -95,7 +95,7 @@ fn alterheader_persists_iiunit_origin_map_sample_mode_space_group_and_labels() {
 
 #[test]
 fn alterheader_inserts_title_at_source_one_based_position() {
-    unsafe {
+    {
         let input = std::env::temp_dir().join(format!(
             "imod-rs-alterheader-title-position-{}.mrc",
             std::process::id()
@@ -130,7 +130,7 @@ fn alterheader_inserts_title_at_source_one_based_position() {
 
 #[test]
 fn alterheader_modefix_reports_source_mode_conversion_and_range_warning() {
-    unsafe {
+    {
         let input = std::env::temp_dir().join(format!(
             "imod-rs-alterheader-modefix-{}.mrc",
             std::process::id()
@@ -171,7 +171,7 @@ fn alterheader_runs_the_interactive_option_loop_from_piped_input() {
     // `alterheader.f90:92-206`: with no PIP options the program prints the
     // option menu, prompts, and dispatches each typed keyword.  Every line
     // asserted here was taken from the native binary run on the same stack.
-    unsafe {
+    {
         let input = std::env::temp_dir().join(format!(
             "imod-rs-alterheader-interactive-{}.mrc",
             std::process::id()
@@ -244,7 +244,7 @@ fn alterheader_runs_the_interactive_option_loop_from_piped_input() {
 
 #[test]
 fn alterheader_interactive_rejects_an_unknown_keyword_and_reprompts() {
-    unsafe {
+    {
         let input = std::env::temp_dir().join(format!(
             "imod-rs-alterheader-bogus-{}.mrc",
             std::process::id()
@@ -290,7 +290,7 @@ fn alterheader_falls_back_to_the_program_option_table_without_an_autodoc() {
         "imod-rs-alterheader-fallback-{}.mrc",
         std::process::id()
     ));
-    unsafe {
+    {
         let mut file = imod_rs::imod::libcfshr::b3dutil::ImodFile::open(&input, "wb").unwrap();
         let mut header = MrcHeader::default();
         assert_eq!(mrc_head_new(&mut header, 2, 2, 1, MRC_MODE_FLOAT), 0);

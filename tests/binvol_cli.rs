@@ -57,7 +57,7 @@ fn binvol_reports_no_input_file_when_only_options_name_the_output() {
 
 #[test]
 fn binvol_bins_an_mrc_stack_and_preserves_transferred_metadata() {
-    unsafe {
+    {
         let stamp = format!("imod-rs-binvol-{}", std::process::id());
         let input = std::env::temp_dir().join(format!("{stamp}.mrc"));
         let output = std::env::temp_dir().join(format!("{stamp}-out.mrc"));
@@ -170,7 +170,7 @@ fn binvol_bins_an_mrc_stack_and_preserves_transferred_metadata() {
 
 #[test]
 fn binvol_spread_keeps_the_source_sampled_extent_and_origin_shift() {
-    unsafe {
+    {
         let stamp = format!("imod-rs-binvol-spread-{}", std::process::id());
         let input = std::env::temp_dir().join(format!("{stamp}.mrc"));
         let output = std::env::temp_dir().join(format!("{stamp}-out.mrc"));
@@ -241,7 +241,7 @@ fn binvol_spread_keeps_the_source_sampled_extent_and_origin_shift() {
 
 #[test]
 fn binvol_applies_source_xy_antialias_through_unit_reduced() {
-    unsafe {
+    {
         let stamp = format!("imod-rs-binvol-xy-filter-{}", std::process::id());
         let input = std::env::temp_dir().join(format!("{stamp}.mrc"));
         let output = std::env::temp_dir().join(format!("{stamp}-out.mrc"));
@@ -343,7 +343,7 @@ fn binvol_applies_source_xy_antialias_through_unit_reduced() {
 
 #[test]
 fn binvol_uses_source_strip_fallback_at_one_megabyte_limit() {
-    unsafe {
+    {
         let stamp = format!("imod-rs-binvol-strip-{}", std::process::id());
         let input = std::env::temp_dir().join(format!("{stamp}.mrc"));
         let output = std::env::temp_dir().join(format!("{stamp}-out.mrc"));
@@ -419,7 +419,7 @@ fn binvol_uses_source_strip_fallback_at_one_megabyte_limit() {
 
 #[test]
 fn binvol_runs_source_fourier_reduce_and_expand_on_real_mrc_volumes() {
-    unsafe {
+    {
         let stamp = format!("imod-rs-binvol-fourier-{}", std::process::id());
         let input = std::env::temp_dir().join(format!("{stamp}.mrc"));
         let reduced = std::env::temp_dir().join(format!("{stamp}-reduced.mrc"));
@@ -490,7 +490,7 @@ fn binvol_runs_source_fourier_reduce_and_expand_on_real_mrc_volumes() {
 #[cfg(feature = "rustfft-backend")]
 #[test]
 fn binvol_rustfft_fourier_reduction_matches_the_parity_mrc_volume() {
-    unsafe {
+    {
         let stamp = format!("imod-rs-binvol-rustfft-{}", std::process::id());
         let input = std::env::temp_dir().join(format!("{stamp}.mrc"));
         let parity_output = std::env::temp_dir().join(format!("{stamp}-parity.mrc"));
@@ -641,7 +641,7 @@ fn binvol_rustfft_fourier_reduction_matches_the_parity_mrc_volume() {
 
 #[test]
 fn binvol_accepts_source_permitted_noninteger_fourier_binning() {
-    unsafe {
+    {
         let stamp = format!("imod-rs-binvol-fourier-ratio-{}", std::process::id());
         let input = std::env::temp_dir().join(format!("{stamp}.mrc"));
         let output = std::env::temp_dir().join(format!("{stamp}-out.mrc"));
@@ -696,7 +696,7 @@ fn binvol_accepts_source_permitted_noninteger_fourier_binning() {
 
 #[test]
 fn binvol_rejects_simultaneous_fourier_directions_on_real_mrc() {
-    unsafe {
+    {
         let stamp = format!("imod-rs-binvol-fourier-conflict-{}", std::process::id());
         let input = std::env::temp_dir().join(format!("{stamp}.mrc"));
         let output = std::env::temp_dir().join(format!("{stamp}-out.mrc"));
@@ -738,7 +738,7 @@ fn binvol_rejects_simultaneous_fourier_directions_on_real_mrc() {
 
 #[test]
 fn binvol_rejects_spread_with_fourier_on_real_mrc() {
-    unsafe {
+    {
         let stamp = format!("imod-rs-binvol-spread-fourier-{}", std::process::id());
         let input = std::env::temp_dir().join(format!("{stamp}.mrc"));
         let output = std::env::temp_dir().join(format!("{stamp}-out.mrc"));
@@ -782,7 +782,7 @@ fn binvol_rejects_spread_with_fourier_on_real_mrc() {
 
 #[test]
 fn binvol_rejects_noninteger_real_mrc_reduction_without_filter() {
-    unsafe {
+    {
         let stamp = format!("imod-rs-binvol-noninteger-{}", std::process::id());
         let input = std::env::temp_dir().join(format!("{stamp}.mrc"));
         let output = std::env::temp_dir().join(format!("{stamp}-out.mrc"));
@@ -829,7 +829,7 @@ fn binvol_rejects_noninteger_real_mrc_reduction_without_filter() {
 
 #[test]
 fn binvol_rejects_unequal_noninteger_xy_real_mrc_reduction() {
-    unsafe {
+    {
         let stamp = format!("imod-rs-binvol-xy-{}", std::process::id());
         let input = std::env::temp_dir().join(format!("{stamp}.mrc"));
         let output = std::env::temp_dir().join(format!("{stamp}-out.mrc"));
@@ -875,7 +875,7 @@ fn binvol_rejects_unequal_noninteger_xy_real_mrc_reduction() {
 
 #[test]
 fn binvol_rejects_invalid_output_mode_on_real_mrc() {
-    unsafe {
+    {
         let stamp = format!("imod-rs-binvol-mode-{}", std::process::id());
         let input = std::env::temp_dir().join(format!("{stamp}.mrc"));
         let output = std::env::temp_dir().join(format!("{stamp}-out.mrc"));
@@ -918,7 +918,7 @@ fn binvol_rejects_invalid_output_mode_on_real_mrc() {
 
 #[test]
 fn binvol_rejects_source_invalid_antialias_filter_on_real_mrc() {
-    unsafe {
+    {
         let stamp = format!("imod-rs-binvol-antialias-{}", std::process::id());
         let input = std::env::temp_dir().join(format!("{stamp}.mrc"));
         let output = std::env::temp_dir().join(format!("{stamp}-out.mrc"));
@@ -961,7 +961,7 @@ fn binvol_rejects_source_invalid_antialias_filter_on_real_mrc() {
 /// Builds the 4x4x2 mode-2 stack used by the option-parsing regressions below.
 /// Native runs on this same stack supplied every expectation asserted here.
 fn write_tiny_float_stack(path: &std::path::Path) {
-    unsafe {
+    {
         let mut file = imod_rs::imod::libcfshr::b3dutil::ImodFile::open(path, "wb").unwrap();
         let mut header = MrcHeader::default();
         assert_eq!(mrc_head_new(&mut header, 4, 4, 2, MRC_MODE_FLOAT), 0);
@@ -992,7 +992,7 @@ fn binvol_takes_the_first_value_of_a_comma_separated_binning_entry() {
     // parses `2,2,1` as one float.  Native accepts `-bin 2,2,1` and produces
     // exactly the `-binning 2` result; the previous hand-rolled parser
     // rejected the abbreviated option outright.
-    unsafe {
+    {
         let stamp = format!("imod-rs-binvol-comma-{}", std::process::id());
         let input = std::env::temp_dir().join(format!("{stamp}.mrc"));
         let output = std::env::temp_dir().join(format!("{stamp}-out.mrc"));
@@ -1054,7 +1054,7 @@ fn binvol_takes_the_first_value_of_a_comma_separated_binning_entry() {
 fn binvol_opens_the_output_unit_before_the_antialias_notice() {
     // `imopen(3, outFile, 'NEW')` is `binvol.f90:145` and the antialias notice
     // is `binvol.f90:179`.  The previous module printed the notice first.
-    unsafe {
+    {
         let stamp = format!("imod-rs-binvol-order-{}", std::process::id());
         let input = std::env::temp_dir().join(format!("{stamp}.mrc"));
         let output = std::env::temp_dir().join(format!("{stamp}-out.mrc"));
@@ -1100,7 +1100,7 @@ fn binvol_reports_a_zero_reduction_factor_after_reading_the_header() {
     // `binvol.f90:152` is inside the per-axis loop that runs after `irdhdr`
     // and after `imopen(3, ..., 'NEW')`, so native has already printed the
     // input report and the new-unit line when it exits.
-    unsafe {
+    {
         let stamp = format!("imod-rs-binvol-zero-{}", std::process::id());
         let input = std::env::temp_dir().join(format!("{stamp}.mrc"));
         let output = std::env::temp_dir().join(format!("{stamp}-out.mrc"));
@@ -1228,7 +1228,7 @@ fn binvol_reports_the_backend_read_diagnostic_before_its_own() {
 #[cfg(feature = "rustfft-backend")]
 #[test]
 fn binvol_rustfft_fourier_expansion_matches_parity_at_mixed_radix_sizes() {
-    unsafe {
+    {
         let stamp = format!("imod-rs-binvol-rustfft-mixed-{}", std::process::id());
         let input = std::env::temp_dir().join(format!("{stamp}.mrc"));
         let mut file = imod_rs::imod::libcfshr::b3dutil::ImodFile::open(&input, "wb").unwrap();

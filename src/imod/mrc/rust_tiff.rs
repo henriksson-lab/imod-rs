@@ -376,7 +376,7 @@ mod implementation {
         iifile.type_ = type_;
         iifile.mode = if rgb { MRC_MODE_RGB } else { mode_for(type_) };
         iifile.any_tiff_pix_size = any_tif_pixel;
-        unsafe {
+        {
             (*tif).iifile = Some(iifile);
             // `tiff.c:262` always leaves `tiff->fp` an open stream, and
             // `tif2mrc.c:242` copies it out unconditionally, so this backend

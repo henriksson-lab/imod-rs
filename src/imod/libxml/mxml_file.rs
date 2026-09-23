@@ -143,7 +143,7 @@ pub fn mxml_set_wrap_margin(column: i32) {
 /// The C grows a `realloc`ed buffer and advances a cursor into it; the owned
 /// `Vec` is both, so the `bufptr`/`buffer`/`bufsize` triple collapses to one
 /// argument and the "unable to expand string buffer" arm cannot be reached.
-pub fn mxml_add_char(ch: i32, bufptr: &mut Vec<u8>) -> i32 {
+fn mxml_add_char(ch: i32, bufptr: &mut Vec<u8>) -> i32 {
     /*
      * Nul-terminate the buffer as needed...
      */
@@ -187,7 +187,7 @@ pub fn mxml_add_char(ch: i32, bufptr: &mut Vec<u8>) -> i32 {
 ///
 /// The C reads through `getc` on a buffered `FILE *`; `ImodFile` is unbuffered,
 /// so each character is one `read`.  The bytes are the same.
-pub fn mxml_file_getc(p: &mut MxmlSource, encoding: &mut i32) -> i32 {
+fn mxml_file_getc(p: &mut MxmlSource, encoding: &mut i32) -> i32 {
     let mut ch: i32;
     let mut temp: i32;
 
@@ -476,7 +476,7 @@ pub fn mxml_file_getc(p: &mut MxmlSource, encoding: &mut i32) -> i32 {
 }
 
 /// Matches C static `mxml_file_putc` (`mxml-file.c:1102`).
-pub fn mxml_file_putc(ch: i32, p: &mut MxmlSink) -> i32 {
+fn mxml_file_putc(ch: i32, p: &mut MxmlSink) -> i32 {
     let MxmlSink::File(fp) = p else {
         return -1;
     };
@@ -488,7 +488,7 @@ pub fn mxml_file_putc(ch: i32, p: &mut MxmlSink) -> i32 {
 }
 
 /// Matches C static `mxml_get_entity` (`mxml-file.c:1114`).
-pub fn mxml_get_entity(
+fn mxml_get_entity(
     arena: &MxmlArena,
     parent: Option<usize>,
     p: &mut MxmlSource,
@@ -601,12 +601,12 @@ pub fn mxml_get_entity(
 }
 
 /// Matches C static inline `mxml_isspace` (`mxml-file.c:60`).
-pub fn mxml_isspace(ch: i32) -> i32 {
+fn mxml_isspace(ch: i32) -> i32 {
     (ch == b' ' as i32 || ch == b'\t' as i32 || ch == b'\r' as i32 || ch == b'\n' as i32) as i32
 }
 
 /// Matches C static `mxml_load_data` (`mxml-file.c:1191`).
-pub fn mxml_load_data(
+fn mxml_load_data(
     arena: &mut MxmlArena,
     top: Option<usize>,
     p: &mut MxmlSource,
@@ -1631,7 +1631,7 @@ pub fn mxml_load_data(
 }
 
 /// Matches C static `mxml_parse_element` (`mxml-file.c:1758`).
-pub fn mxml_parse_element(
+fn mxml_parse_element(
     arena: &mut MxmlArena,
     node: usize,
     p: &mut MxmlSource,
@@ -1958,7 +1958,7 @@ pub fn mxml_parse_element(
 /// The C walks a NUL-terminated string; reading at or past the end of the byte
 /// slice is the C reading that terminating NUL, so every dereference below is
 /// `s.get(pos).unwrap_or(&0)`.
-pub fn mxml_string_getc(p: &mut MxmlSource, encoding: &mut i32) -> i32 {
+fn mxml_string_getc(p: &mut MxmlSource, encoding: &mut i32) -> i32 {
     let mut ch: i32;
 
     let MxmlSource::String { s, pos } = p else {
@@ -2230,7 +2230,7 @@ pub fn mxml_string_getc(p: &mut MxmlSource, encoding: &mut i32) -> i32 {
 /// The C indexes a `char` array, so `mxmlEntityGetName` is given the *signed*
 /// character value and never matches a byte with the high bit set; the cast
 /// through `i8` below keeps that.
-pub fn mxml_write_name(s: &[u8], p: &mut MxmlSink, putc_cb: MxmlPutcCb) -> i32 {
+fn mxml_write_name(s: &[u8], p: &mut MxmlSink, putc_cb: MxmlPutcCb) -> i32 {
     let quote: u8;
     let mut i: usize = 0;
 
@@ -2298,7 +2298,7 @@ pub fn mxml_write_name(s: &[u8], p: &mut MxmlSink, putc_cb: MxmlPutcCb) -> i32 {
 }
 
 /// Matches C static `mxml_write_string` (`mxml-file.c:2618`).
-pub fn mxml_write_string(s: &[u8], p: &mut MxmlSink, putc_cb: MxmlPutcCb) -> i32 {
+fn mxml_write_string(s: &[u8], p: &mut MxmlSink, putc_cb: MxmlPutcCb) -> i32 {
     let mut i: usize = 0;
 
     while i < s.len() {
@@ -2332,7 +2332,7 @@ pub fn mxml_write_string(s: &[u8], p: &mut MxmlSink, putc_cb: MxmlPutcCb) -> i32
 }
 
 /// Matches C static `mxml_write_ws` (`mxml-file.c:2660`).
-pub fn mxml_write_ws(
+fn mxml_write_ws(
     arena: &MxmlArena,
     node: usize,
     p: &mut MxmlSink,
@@ -2363,7 +2363,7 @@ pub fn mxml_write_ws(
 }
 
 /// Matches C static `mxml_write_node` (`mxml-file.c:2352`).
-pub fn mxml_write_node(
+fn mxml_write_node(
     arena: &MxmlArena,
     node: Option<usize>,
     p: &mut MxmlSink,

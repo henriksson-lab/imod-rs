@@ -841,7 +841,7 @@ mod tests {
 
     #[test]
     fn legacy_writer_preserves_classic_tiff_orientation_and_ifd_chain() {
-        unsafe {
+        {
             let mut file = crate::imod::libcfshr::b3dutil::ImodFile::tmpfile().unwrap();
             let mut ifd = 0;
             let mut data = 0;
@@ -913,7 +913,7 @@ mod tests {
 
     #[test]
     fn legacy_reader_roundtrips_uncompressed_byte_pixels() {
-        unsafe {
+        {
             let mut file = crate::imod::libcfshr::b3dutil::ImodFile::tmpfile().unwrap();
             let mut ifd = 0;
             let mut data = 0;
@@ -946,7 +946,7 @@ mod tests {
 
     #[test]
     fn legacy_reader_transfers_nothing_for_one_bit_strips() {
-        unsafe {
+        {
             let mut file = crate::imod::libcfshr::b3dutil::ImodFile::tmpfile().unwrap();
             // Little-endian classic TIFF: 8 by 1, a one-bit grayscale strip
             // at byte 126 holding 10110010, with BitsPerSample = 1.
@@ -1110,7 +1110,7 @@ mod tests {
 
     #[test]
     fn open_file_keeps_libtiff_image_handle_for_a_real_classic_tiff() {
-        unsafe {
+        {
             let path = std::env::temp_dir().join(format!(
                 "imod-rs-legacy-tiff-open-{}.tif",
                 std::process::id()
@@ -1150,7 +1150,7 @@ mod tests {
 
     #[test]
     fn open_file_keeps_libtiff_reader_for_a_multidirectory_classic_tiff_stack() {
-        unsafe {
+        {
             let path = std::env::temp_dir().join(format!(
                 "imod-rs-legacy-tiff-stack-{}.tif",
                 std::process::id()

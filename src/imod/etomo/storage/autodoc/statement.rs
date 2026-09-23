@@ -134,7 +134,7 @@ pub trait Statement: WritableStatement {
     ///
     /// # Safety
     /// Every token, attribute and section this statement points at must be live.
-    unsafe fn write(
+    fn write(
         &self,
         file: &std::sync::Arc<log_file::Handle>,
         writer_id: &log_file::WriterId,
@@ -144,13 +144,13 @@ pub trait Statement: WritableStatement {
     ///
     /// # Safety
     /// Every token, attribute and section this statement points at must be live.
-    unsafe fn print(&self, level: i32);
+    fn print(&self, level: i32);
 
     /// Java abstract `wrapValue(String, String, String, String, int, int)`.
     ///
     /// # Safety
     /// See `print`.
-    unsafe fn wrap_value(
+    fn wrap_value(
         &mut self,
         no_wrap_prefix: Option<&str>,
         wrap_prefix: Option<&str>,
@@ -201,7 +201,7 @@ impl Statement for EmptyStatement {
     fn statement(&self) -> &StatementBase {
         match *self {}
     }
-    unsafe fn write(
+    fn write(
         &self,
         _file: &std::sync::Arc<log_file::Handle>,
         _writer_id: &log_file::WriterId,
@@ -211,10 +211,10 @@ impl Statement for EmptyStatement {
     fn statement_mut(&mut self) -> &mut StatementBase {
         match *self {}
     }
-    unsafe fn print(&self, _level: i32) {
+    fn print(&self, _level: i32) {
         match *self {}
     }
-    unsafe fn wrap_value(
+    fn wrap_value(
         &mut self,
         _no_wrap_prefix: Option<&str>,
         _wrap_prefix: Option<&str>,

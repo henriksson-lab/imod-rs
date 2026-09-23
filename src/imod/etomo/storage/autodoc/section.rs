@@ -58,11 +58,9 @@ pub struct Section {
 pub fn get_key_of_tokens(r#type: Option<&Token>, name: Option<&Token>) -> Option<String> {
     match (r#type, name) {
         (None, None) => None,
-        (None, Some(name)) => Some(unsafe { name.get_key() }),
-        (Some(r#type), None) => Some(unsafe { r#type.get_key() }),
-        (Some(r#type), Some(name)) => {
-            Some(unsafe { r#type.get_key() } + &unsafe { name.get_key() })
-        }
+        (None, Some(name)) => Some({ name.get_key() }),
+        (Some(r#type), None) => Some({ r#type.get_key() }),
+        (Some(r#type), Some(name)) => Some({ r#type.get_key() } + &{ name.get_key() }),
     }
 }
 
@@ -113,7 +111,7 @@ impl Section {
     ///
     /// # Safety
     /// The type token, name token and attribute list must be live.
-    pub unsafe fn to_string(&self) -> String {
+    pub fn to_string(&self) -> String {
         format!(
             "etomo.storage.autodoc.Section[key={},type={},name={},\nattributeList={}]",
             match &self.key {
@@ -130,7 +128,7 @@ impl Section {
             } else {
                 unsafe { (*self.name).to_string() }
             },
-            unsafe { self.attribute_list.as_deref().unwrap().to_string() }
+            self.attribute_list.as_deref().unwrap().to_string()
         )
     }
 
@@ -138,7 +136,7 @@ impl Section {
     ///
     /// # Safety
     /// The type token must be live when `type` is non-null.
-    pub unsafe fn equals_type(&self, r#type: Option<&str>) -> bool {
+    pub fn equals_type(&self, r#type: Option<&str>) -> bool {
         if r#type.is_none() {
             // For a section location with a null type, all sections are returned.
             return true;
@@ -185,7 +183,7 @@ impl Section {
     ///
     /// # Safety
     /// Every token, statement and subsection this section points at must be live.
-    pub unsafe fn write(
+    pub fn write(
         &self,
         file: &std::sync::Arc<log_file::Handle>,
         writer_id: &log_file::WriterId,
@@ -209,7 +207,9 @@ impl Section {
         }
         file.new_line(writer_id)?;
         for statement in self.statement_list.iter() {
-            unsafe { statement.write(file, writer_id)? };
+            {
+                statement.write(file, writer_id)?
+            };
         }
         // if subsection, write subsection footer
         if self.subsection {
@@ -232,7 +232,7 @@ impl Section {
     ///
     /// # Safety
     /// Every token, statement and attribute in the section must be live.
-    pub unsafe fn print(&self, level: i32) {
+    pub fn print(&self, level: i32) {
         if level > 0 {
             autodoc::print_indent(level);
             print!("[");
@@ -259,7 +259,9 @@ impl Section {
         }
         autodoc::print_indent(level);
         println!("Attributes:");
-        unsafe { self.attribute_list.as_deref().unwrap().print(level) };
+        {
+            self.attribute_list.as_deref().unwrap().print(level)
+        };
     }
 
     /// Java private `getMostRecentStatement()`.
@@ -338,7 +340,7 @@ impl WriteOnlyStatementList for Section {
     }
 
     /// Java `addEmptyLine(int)`.
-    unsafe fn add_empty_line(&mut self, line_num: i32) {
+    fn add_empty_line(&mut self, line_num: i32) {
         let this: *mut Section = self;
         let statement = unsafe { EmptyLine::new(this, self.get_most_recent_statement(), line_num) };
         self.statement_list
@@ -429,7 +431,7 @@ impl ReadOnlySectionList for Section {
     ///
     /// Sets a SectionLocation index to the first section with the type the same as
     /// the type parameter.
-    unsafe fn get_section_location_by_type(&self, r#type: Option<&str>) -> Option<SectionLocation> {
+    fn get_section_location_by_type(&self, r#type: Option<&str>) -> Option<SectionLocation> {
         let mut section: *mut Section;
         for i in 0..self.section_list.len() {
             section = self.section_list[i].as_ref() as *const Section as *mut Section;

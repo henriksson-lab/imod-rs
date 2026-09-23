@@ -67,11 +67,7 @@ pub fn list_to_string(list: &[i32], number_of_values: i32) -> Option<String> {
 }
 
 /// Original static `addRangeToLine` (`writelist.c:78`).
-pub fn add_range_to_line(
-    number_start: i32,
-    number_end: i32,
-    line: Option<String>,
-) -> Option<String> {
+fn add_range_to_line(number_start: i32, number_end: i32, line: Option<String>) -> Option<String> {
     let mut range_string = number_start.to_string();
     if number_end > number_start {
         range_string.push_str("-");

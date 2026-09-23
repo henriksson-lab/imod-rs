@@ -107,7 +107,7 @@ fn run(dir: &std::path::Path, args: &[&str]) -> (i32, String, String) {
 /// Reads back an MRC output's extended-header size, type fields and bytes.
 fn extended_header(path: &std::path::Path) -> (i32, i16, i16, Vec<u8>) {
     let path_c = CString::new(path.to_string_lossy().as_bytes()).unwrap();
-    let mut header = unsafe { MrcHeader::default() };
+    let mut header = { MrcHeader::default() };
     unsafe {
         let file = ii_open(path_c.to_bytes(), "rb");
         assert_eq!(ii_fill_mrc_header(file, &mut header), 0);

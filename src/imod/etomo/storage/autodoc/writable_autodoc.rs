@@ -17,12 +17,12 @@ pub trait WritableAutodoc: ReadOnlyAutodoc {
     ///
     /// # Safety
     /// The autodoc's attribute and statement lists must be live.
-    unsafe fn add_name_value_pair_attribute(&mut self, name: Option<&str>, value: Option<&str>);
+    fn add_name_value_pair_attribute(&mut self, name: Option<&str>, value: Option<&str>);
     /// Java `addNameValuePairAttribute(String, String, int)`.
     ///
     /// # Safety
     /// See `add_name_value_pair_attribute`.
-    unsafe fn add_name_value_pair_attribute_with_line_num(
+    fn add_name_value_pair_attribute_with_line_num(
         &mut self,
         name: Option<&str>,
         value: Option<&str>,
@@ -42,12 +42,12 @@ pub trait WritableAutodoc: ReadOnlyAutodoc {
     ///
     /// # Safety
     /// See `add_name_value_pair_attribute`.
-    unsafe fn add_empty_line(&mut self, line_num: i32);
+    fn add_empty_line(&mut self, line_num: i32);
     /// Java `addComment(String, int)`.
     ///
     /// # Safety
     /// See `add_name_value_pair_attribute`.
-    unsafe fn add_comment_string(&mut self, comment: Option<&str>, line_num: i32);
+    fn add_comment_string(&mut self, comment: Option<&str>, line_num: i32);
     /// Java `removeNameValuePair(String)`.
     ///
     /// # Safety
@@ -68,7 +68,7 @@ pub trait WritableAutodoc: ReadOnlyAutodoc {
     ///
     /// # Safety
     /// See `add_name_value_pair_attribute`.
-    unsafe fn wrap_attribute_values(
+    fn wrap_attribute_values(
         &mut self,
         no_wrap_prefix: Option<&str>,
         wrap_prefix: Option<&str>,

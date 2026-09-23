@@ -134,7 +134,7 @@ impl LinkList {
     ///
     /// # Safety
     /// The list must be live.
-    unsafe fn is_first_element(&self, compare_type: token::Type) -> bool {
+    fn is_first_element(&self, compare_type: token::Type) -> bool {
         if self.head.is_null() {
             return false;
         }
@@ -145,7 +145,7 @@ impl LinkList {
     ///
     /// # Safety
     /// The list must be live.
-    unsafe fn is_last_element(&self, compare_type: token::Type) -> bool {
+    fn is_last_element(&self, compare_type: token::Type) -> bool {
         if self.tail.is_null() {
             return false;
         }
@@ -156,7 +156,7 @@ impl LinkList {
     ///
     /// # Safety
     /// The list must be live.
-    unsafe fn drop_first_element(&mut self) {
+    fn drop_first_element(&mut self) {
         if self.head.is_null() {
             return;
         }
@@ -188,7 +188,7 @@ impl LinkList {
     ///
     /// # Safety
     /// The list must be live.
-    unsafe fn drop_last_element(&mut self) {
+    fn drop_last_element(&mut self) {
         if self.tail.is_null() {
             return;
         }
@@ -210,7 +210,7 @@ impl LinkList {
     ///
     /// # Safety
     /// The list must be live.
-    unsafe fn to_string(&self) -> String {
+    fn to_string(&self) -> String {
         unsafe { (*self.get_head()).to_string() }
     }
 }
@@ -555,8 +555,10 @@ impl AutodocParser {
     ///
     /// # Safety
     /// The tokenizer and the autodoc must be live.
-    pub unsafe fn parse(&mut self) {
-        unsafe { self.autodoc_unit() };
+    pub fn parse(&mut self) {
+        {
+            self.autodoc_unit()
+        };
         self.tokenizer = std::ptr::null_mut();
     }
 
@@ -566,18 +568,20 @@ impl AutodocParser {
     ///
     /// # Safety
     /// See `parse`.
-    unsafe fn autodoc_unit(&mut self) {
+    fn autodoc_unit(&mut self) {
         if self.parsed {
             return;
         }
         self.parsed = true;
-        unsafe { self.next_token() };
+        {
+            self.next_token()
+        };
         let mut global_section = true;
         while !unsafe { (*self.token).is(token::Type::Eof) } {
             let autodoc = self.autodoc;
             if !unsafe { self.empty_line(autodoc) } && !unsafe { self.comment(autodoc) } {
                 if global_section {
-                    if unsafe { self.section(false) } {
+                    if { self.section(false) } {
                         global_section = false;
                     } else {
                         unsafe { self.pair(autodoc, true) };
@@ -586,7 +590,9 @@ impl AutodocParser {
                     // Sections can contain empty lines. They only end when another
                     // section starts.  Once the sections start there are no more
                     // autodoc-level pairs.
-                    unsafe { self.section(true) };
+                    {
+                        self.section(true)
+                    };
                 }
             }
         }
@@ -613,7 +619,9 @@ impl AutodocParser {
             self.test_start_function("emptyline");
             // found empty line
             unsafe { (*list).add_empty_line(self.line_num) };
-            unsafe { self.next_token() };
+            {
+                self.next_token()
+            };
             self.test_end_function("emptyline", true);
             return true;
         }
@@ -657,7 +665,9 @@ impl AutodocParser {
             && !unsafe { (*self.token).is(token::Type::Eof) }
         {
             unsafe { comment_link_list.as_mut().unwrap().append(self.token) };
-            unsafe { self.next_token() };
+            {
+                self.next_token()
+            };
         }
         // eat up the EOL
         unsafe { self.match_token(token::Type::Eol) };
@@ -672,11 +682,11 @@ impl AutodocParser {
     ///
     /// # Safety
     /// See `parse`.
-    unsafe fn section(&mut self, required: bool) -> bool {
+    fn section(&mut self, required: bool) -> bool {
         if unsafe { self.match_token(token::Type::Open) }.is_null() {
             // not a section
             if required {
-                unsafe {
+                {
                     self.report_error(Some(&format!(
                         "Unknown statement.  Expecting a section (missing '{}').",
                         token::Type::Open.get_descr()
@@ -698,7 +708,7 @@ impl AutodocParser {
         }
         if unsafe { self.match_token(token::Type::Close) }.is_null() {
             // bad section
-            unsafe {
+            {
                 self.report_error(Some(&format!(
                     "A section header must end with '{}'.",
                     token::Type::Close.get_descr()
@@ -712,7 +722,7 @@ impl AutodocParser {
             && unsafe { self.match_token(token::Type::Eof) }.is_null()
         {
             // bad section
-            unsafe {
+            {
                 self.report_error(Some(&format!(
                     "A section header must end with '{}'.",
                     token::Type::Close.get_descr()
@@ -753,7 +763,9 @@ impl AutodocParser {
         }
         self.test_start_function("subsection");
         // its a subsection so eat up SUBOPEN
-        unsafe { self.next_token() };
+        {
+            self.next_token()
+        };
         // save the new subsection in the section
         #[allow(unused_assignments)]
         let mut subsection: *mut Section = std::ptr::null_mut();
@@ -765,7 +777,7 @@ impl AutodocParser {
         }
         if unsafe { self.match_token(token::Type::Subclose) }.is_null() {
             // bad subsection
-            unsafe {
+            {
                 self.report_error(Some(&format!(
                     "A subsection header must end with '{}'.",
                     token::Type::Subclose.get_descr()
@@ -779,7 +791,7 @@ impl AutodocParser {
             && unsafe { self.match_token(token::Type::Eof) }.is_null()
         {
             // bad section
-            unsafe {
+            {
                 self.report_error(Some(&format!(
                     "A section header must end with '{}'.",
                     token::Type::Subclose.get_descr()
@@ -814,7 +826,7 @@ impl AutodocParser {
     unsafe fn subsection_close(&mut self, _subsection: *mut dyn WriteOnlyStatementList) -> bool {
         if !unsafe { (*self.token).is(token::Type::Subopen) } {
             // not a subsectionClose
-            unsafe {
+            {
                 self.report_error(Some(&format!(
                     "The subsection must be closed - missing '{}{}'.",
                     token::Type::Subopen.get_descr(),
@@ -825,12 +837,14 @@ impl AutodocParser {
         }
         self.test_start_function("subsectionClose");
         // its a subsectionClose so eat up SUBOPEN
-        unsafe { self.next_token() };
+        {
+            self.next_token()
+        };
         unsafe { self.match_token(token::Type::Whitespace) };
         // eat up SUBCLOSE
         if unsafe { self.match_token(token::Type::Subclose) }.is_null() {
             // bad subsection
-            unsafe {
+            {
                 self.report_error(Some(&format!(
                     "The subsection must be closed - '{}{}'.",
                     token::Type::Subopen.get_descr(),
@@ -845,7 +859,7 @@ impl AutodocParser {
             && unsafe { self.match_token(token::Type::Eof) }.is_null()
         {
             // bad subsection
-            unsafe {
+            {
                 self.report_error(Some(&format!(
                     "A subsection close must end with '{}'.",
                     token::Type::Subclose.get_descr()
@@ -868,7 +882,9 @@ impl AutodocParser {
     unsafe fn match_token(&mut self, token_type: token::Type) -> *mut Token {
         if unsafe { (*self.token).is(token_type) } {
             let matched_token = self.token;
-            unsafe { self.next_token() };
+            {
+                self.next_token()
+            };
             return matched_token;
         }
         std::ptr::null_mut()
@@ -909,7 +925,7 @@ impl AutodocParser {
         }
         unsafe { self.match_token(token::Type::Whitespace) };
         // get the section name
-        let name_link_list = unsafe { self.section_name() };
+        let name_link_list = { self.section_name() };
         // Java dereferences the returned link list unconditionally; `sectionName`
         // returns null on the same condition it tests here, so the source throws a
         // `NullPointerException` rather than reporting a bad section header.
@@ -963,7 +979,7 @@ impl AutodocParser {
     ///
     /// # Safety
     /// See `parse`.
-    unsafe fn section_name(&mut self) -> Option<LinkList> {
+    fn section_name(&mut self) -> Option<LinkList> {
         self.test_start_function("sectionName");
         // section name may contain multiple tokens
         let mut name_link_list = LinkList::new(self.token);
@@ -975,7 +991,9 @@ impl AutodocParser {
             && !unsafe { (*self.token).is(token::Type::Eof) }
         {
             unsafe { name_link_list.append(self.token) };
-            unsafe { self.next_token() };
+            {
+                self.next_token()
+            };
         }
         if name_link_list.size() == 0 {
             // bad section name
@@ -1095,7 +1113,9 @@ impl AutodocParser {
     ) -> *mut Attribute {
         let attribute = unsafe { self.build_attribute(attribute_list, pair, true) };
         if attribute.is_null() {
-            unsafe { self.report_error(Some("Missing attribute.")) };
+            {
+                self.report_error(Some("Missing attribute."))
+            };
         }
         attribute
     }
@@ -1114,7 +1134,7 @@ impl AutodocParser {
         let attribute = unsafe { self.build_attribute(attribute_list, pair, false) };
         if attribute.is_null() {
             // bad name
-            unsafe {
+            {
                 self.report_error(Some(&format!(
                     "Another attribute must follow the '{}' (attribute{}attribute{}attribute...).",
                     token::Type::Separator.get_descr(),
@@ -1157,14 +1177,18 @@ impl AutodocParser {
         }
         let mut value_link_list = LinkList::new(self.token);
         unsafe { value_link_list.append(self.token) };
-        unsafe { self.next_token() };
+        {
+            self.next_token()
+        };
         while unsafe { (*self.token).is(token::Type::Word) }
             || unsafe { (*self.token).is(token::Type::Keyword) }
             || unsafe { (*self.token).is(token::Type::Quote) }
             || unsafe { (*self.token).is(token::Type::Comment) }
         {
             unsafe { value_link_list.append(self.token) };
-            unsafe { self.next_token() };
+            {
+                self.next_token()
+            };
         }
         self.test_end_function(function, true);
         // add and return the new attribute
@@ -1212,7 +1236,9 @@ impl AutodocParser {
                     }
                 }
             }
-            unsafe { self.next_token() };
+            {
+                self.next_token()
+            };
         }
         // check for keywords
         unsafe { self.process_meta_data(attribute) };
@@ -1228,7 +1254,9 @@ impl AutodocParser {
         if unsafe { (*self.token).is(token::Type::Eol) } {
             unsafe { value_link_list.append(self.token) };
         }
-        unsafe { self.next_token() };
+        {
+            self.next_token()
+        };
         if !found_close_quote {
             if close_quote.is_null() {
                 while !self.error && unsafe { self.value_line(parent, &mut value_link_list) } {}
@@ -1241,22 +1269,28 @@ impl AutodocParser {
         }
         // Strip non-embedded EOL, EOF, and WHITESPACE at the start and end of the value
         while value_link_list.size() > 0
-            && (unsafe { value_link_list.is_first_element(token::Type::Whitespace) }
-                || unsafe { value_link_list.is_first_element(token::Type::Eol) }
-                || unsafe { value_link_list.is_first_element(token::Type::Eof) })
+            && ({ value_link_list.is_first_element(token::Type::Whitespace) }
+                || { value_link_list.is_first_element(token::Type::Eol) }
+                || { value_link_list.is_first_element(token::Type::Eof) })
         {
-            unsafe { value_link_list.drop_first_element() };
+            {
+                value_link_list.drop_first_element()
+            };
         }
         while value_link_list.size() > 0
-            && (unsafe { value_link_list.is_last_element(token::Type::Whitespace) }
-                || unsafe { value_link_list.is_last_element(token::Type::Eol) }
-                || unsafe { value_link_list.is_last_element(token::Type::Eof) })
+            && ({ value_link_list.is_last_element(token::Type::Whitespace) }
+                || { value_link_list.is_last_element(token::Type::Eol) }
+                || { value_link_list.is_last_element(token::Type::Eof) })
         {
-            unsafe { value_link_list.drop_last_element() };
+            {
+                value_link_list.drop_last_element()
+            };
         }
         // Remove the closing quote
         if !close_quote.is_null() && unsafe { value_link_list.last_element_equals(close_quote) } {
-            unsafe { value_link_list.drop_last_element() };
+            {
+                value_link_list.drop_last_element()
+            };
         }
         // Save the value to the name/value pair even if it doesn't exist. This is
         // how the name/value pair knows that its name is complete and can assign itself
@@ -1294,7 +1328,9 @@ impl AutodocParser {
         {
             // add the token to the value link list
             unsafe { value_link_list.append(self.token) };
-            unsafe { self.next_token() };
+            {
+                self.next_token()
+            };
         }
         if unsafe { (*self.token).is(token::Type::Delimiter) } {
             // really bad error - preprocessor is wrong
@@ -1313,7 +1349,9 @@ impl AutodocParser {
         if unsafe { (*self.token).is(token::Type::Eol) } {
             unsafe { value_link_list.append(self.token) };
         }
-        unsafe { self.next_token() };
+        {
+            self.next_token()
+        };
         self.test_end_function("valueLine", true);
         true
     }
@@ -1373,7 +1411,9 @@ impl AutodocParser {
                     }
                 }
             }
-            unsafe { self.next_token() };
+            {
+                self.next_token()
+            };
         }
         // grab the EOL in case another value line follows
         if unsafe { (*self.token).is(token::Type::Eol) } {
@@ -1391,7 +1431,9 @@ impl AutodocParser {
             self.test_end_function("valueLine", false);
             return false;
         }
-        unsafe { self.next_token() };
+        {
+            self.next_token()
+        };
         self.test_end_function("valueLine", true);
         true
     }
@@ -1400,7 +1442,7 @@ impl AutodocParser {
     ///
     /// # Safety
     /// See `parse`.
-    unsafe fn report_error(&mut self, message: Option<&str>) {
+    fn report_error(&mut self, message: Option<&str>) {
         let message = match message {
             None => "Unknown error.",
             Some(message) => message,
@@ -1464,7 +1506,9 @@ impl AutodocParser {
             panic!("java.lang.IllegalStateException");
         }
         self.token_index = self.line.len() as i32;
-        unsafe { self.next_token() };
+        {
+            self.next_token()
+        };
     }
 
     /// Java private `nextToken()`.
@@ -1473,7 +1517,7 @@ impl AutodocParser {
     ///
     /// # Safety
     /// See `parse`.
-    unsafe fn next_token(&mut self) {
+    fn next_token(&mut self) {
         if !self.token.is_null() && unsafe { (*self.token).is(token::Type::Eof) } {
             // It may try nextToken() a few times at the end of file before it figures
             // out that its done, but that's OK
@@ -1481,7 +1525,9 @@ impl AutodocParser {
         }
         // The source's `line == null` guard cannot fail; the field is final.
         if self.token_index == self.line.len() as i32 {
-            unsafe { self.preprocess() };
+            {
+                self.preprocess()
+            };
             self.token_index = 0;
         }
         self.prev_prev_token = self.prev_token;
@@ -1510,7 +1556,7 @@ impl AutodocParser {
     ///
     /// # Safety
     /// See `parse`.
-    unsafe fn preprocess(&mut self) {
+    fn preprocess(&mut self) {
         self.line_num += 1;
         self.line.clear();
         self.delimiter_in_line = false;
@@ -1540,7 +1586,7 @@ impl AutodocParser {
         }
         let name = unsafe { (*attribute).get_name_token() };
         if unsafe { (*attribute).is_global() } {
-            if unsafe {
+            if {
                 name.equals_type_and_string(
                     token::Type::Keyword,
                     Some(autodoc_tokenizer::VERSION_KEYWORD),
@@ -1549,7 +1595,7 @@ impl AutodocParser {
                 self.version_found = true;
                 return;
             }
-            if unsafe {
+            if {
                 name.equals_type_and_string(
                     token::Type::Keyword,
                     Some(autodoc_tokenizer::PIP_KEYWORD),
@@ -1595,7 +1641,9 @@ impl AutodocParser {
         }
         unsafe { (*self.tokenizer).initialize() };
         loop {
-            unsafe { self.next_token() };
+            {
+                self.next_token()
+            };
             if tokens {
                 eprintln!(
                     "{}:{}",
@@ -1627,7 +1675,9 @@ impl AutodocParser {
         self.test = true;
         self.test_with_tokens = tokens;
         self.initialize();
-        unsafe { self.parse() };
+        {
+            self.parse()
+        };
     }
 
     /// Java private `testStartFunction(String)`.
@@ -1657,7 +1707,7 @@ impl AutodocParser {
     ///
     /// # Safety
     /// See `parse`.
-    unsafe fn print_test_line(&mut self) {
+    fn print_test_line(&mut self) {
         if self.last_line_printed == self.line_num {
             return;
         }

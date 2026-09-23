@@ -32,7 +32,7 @@ fn mrc2tif_rejects_an_unknown_native_encoder_before_argument_parsing() {
 #[cfg(feature = "rust-image-encoder")]
 #[test]
 fn mrc2tif_rust_png_encoder_writes_a_decodable_image() {
-    unsafe {
+    {
         let stamp = format!("imod-rs-rust-png-{}", std::process::id());
         let input = std::env::temp_dir().join(format!("{stamp}.mrc"));
         let output = std::env::temp_dir().join(format!("{stamp}.png"));
@@ -86,7 +86,7 @@ fn mrc2tif_rust_png_encoder_writes_a_decodable_image() {
 #[cfg(feature = "rust-image-encoder")]
 #[test]
 fn mrc2tif_rust_png_encoder_matches_qimage_for_rgb_and_row_orientation() {
-    unsafe {
+    {
         let stamp = format!("imod-rs-rust-png-rgb-{}", std::process::id());
         let input = std::env::temp_dir().join(format!("{stamp}.mrc"));
         let parity_output = std::env::temp_dir().join(format!("{stamp}-parity.png"));
@@ -186,7 +186,7 @@ fn mrc2tif_rust_png_encoder_matches_qimage_for_rgb_and_row_orientation() {
 #[cfg(feature = "rust-image-encoder")]
 #[test]
 fn mrc2tif_rust_jpeg_and_png_preserve_qimage_resolution_units() {
-    unsafe {
+    {
         let stamp = format!("imod-rs-rust-image-resolution-{}", std::process::id());
         let input = std::env::temp_dir().join(format!("{stamp}.mrc"));
         let input_c = input.to_str().unwrap();
@@ -282,7 +282,7 @@ fn mrc2tif_rust_jpeg_and_png_preserve_qimage_resolution_units() {
 #[cfg(feature = "rust-image-encoder")]
 #[test]
 fn mrc2tif_rust_jpeg_encoder_matches_qimage_after_decoding_gray_and_rgb() {
-    unsafe {
+    {
         let stamp = format!("imod-rs-rust-jpeg-differential-{}", std::process::id());
         for (kind, mode, channels) in [
             ("gray", MRC_MODE_BYTE, 1_usize),
@@ -411,7 +411,7 @@ fn mrc2tif_rust_jpeg_encoder_matches_qimage_after_decoding_gray_and_rgb() {
 #[cfg(feature = "rust-tiff")]
 #[test]
 fn mrc2tif_rust_tiff_writer_roundtrips_a_basic_mrc_image() {
-    unsafe {
+    {
         let stamp = format!("imod-rs-rust-tiff-{}", std::process::id());
         let input = std::env::temp_dir().join(format!("{stamp}.mrc"));
         let tiff = std::env::temp_dir().join(format!("{stamp}.tif"));
@@ -501,7 +501,7 @@ fn mrc2tif_rust_tiff_writer_preserves_imod_resolution_units() {
     use tiff::decoder::Decoder;
     use tiff::tags::Tag;
 
-    unsafe {
+    {
         let stamp = format!("imod-rs-rust-tiff-resolution-{}", std::process::id());
         let input = std::env::temp_dir().join(format!("{stamp}.mrc"));
         let inches_tiff = std::env::temp_dir().join(format!("{stamp}-inches.tif"));
@@ -629,7 +629,7 @@ fn mrc2tif_rust_tiff_writer_preserves_imod_resolution_units() {
 #[cfg(feature = "rust-tiff")]
 #[test]
 fn mrc2tif_rust_tiff_writer_roundtrips_lzw_and_zip_images() {
-    unsafe {
+    {
         let stamp = format!("imod-rs-rust-tiff-compression-{}", std::process::id());
         let input = std::env::temp_dir().join(format!("{stamp}.mrc"));
         let input_c = input.to_str().unwrap();
@@ -716,7 +716,7 @@ fn mrc2tif_rust_tiff_writer_roundtrips_lzw_and_zip_images() {
 #[cfg(feature = "rust-tiff")]
 #[test]
 fn mrc2tif_rust_tiff_writer_roundtrips_a_two_page_stack() {
-    unsafe {
+    {
         let stamp = format!("imod-rs-rust-tiff-stack-{}", std::process::id());
         let input = std::env::temp_dir().join(format!("{stamp}.mrc"));
         let tiff = std::env::temp_dir().join(format!("{stamp}.tif"));
@@ -864,7 +864,7 @@ fn mrc2tif_malformed_option_and_qimage_request_reaches_source_input_opening() {
 
 #[test]
 fn mrc2tif_rejects_source_out_of_range_z_after_reading_header() {
-    unsafe {
+    {
         let input =
             std::env::temp_dir().join(format!("imod-rs-mrc2tif-z-{}.mrc", std::process::id()));
         let input_c = input.to_str().unwrap();
@@ -891,7 +891,7 @@ fn mrc2tif_rejects_source_out_of_range_z_after_reading_header() {
 
 #[test]
 fn mrc2tif_chunked_tiff_roundtrips_each_source_y_range() {
-    unsafe {
+    {
         let stamp = format!("imod-rs-mrc2tif-chunks-{}", std::process::id());
         let input = std::env::temp_dir().join(format!("{stamp}.mrc"));
         let output = std::env::temp_dir().join(format!("{stamp}.tif"));
@@ -988,7 +988,7 @@ fn mrc2tif_chunked_tiff_roundtrips_each_source_y_range() {
 
 #[test]
 fn mrc2tif_contrast_scales_a_real_short_mrc_before_tiff_writing() {
-    unsafe {
+    {
         let stamp = format!("imod-rs-mrc2tif-contrast-{}", std::process::id());
         let input = std::env::temp_dir().join(format!("{stamp}.mrc"));
         let tiff = std::env::temp_dir().join(format!("{stamp}.tif"));
@@ -1075,7 +1075,7 @@ fn mrc2tif_contrast_scales_a_real_short_mrc_before_tiff_writing() {
 
 #[test]
 fn mrc2tif_old_writer_converts_real_mrc_pixels_to_classic_tiff() {
-    unsafe {
+    {
         let stamp = format!("imod-rs-mrc2tif-{}", std::process::id());
         let input = std::env::temp_dir().join(format!("{stamp}.mrc"));
         let output = std::env::temp_dir().join(format!("{stamp}.tif"));
@@ -1124,7 +1124,7 @@ fn mrc2tif_old_writer_converts_real_mrc_pixels_to_classic_tiff() {
 
 #[test]
 fn mrc2tif_new_libtiff_writer_uses_local_datetime_tag() {
-    unsafe {
+    {
         let stamp = format!("imod-rs-mrc2tif-datetime-{}", std::process::id());
         let input = std::env::temp_dir().join(format!("{stamp}.mrc"));
         let output = std::env::temp_dir().join(format!("{stamp}.tif"));
@@ -1161,7 +1161,7 @@ fn mrc2tif_new_libtiff_writer_uses_local_datetime_tag() {
 
 #[test]
 fn mrc2tif_writes_explicit_and_header_pixel_spacing_as_real_tiff_resolution() {
-    unsafe {
+    {
         let stamp = format!("imod-rs-mrc2tif-resolution-{}", std::process::id());
         let input = std::env::temp_dir().join(format!("{stamp}.mrc"));
         let from_header = std::env::temp_dir().join(format!("{stamp}-header.tif"));
@@ -1272,7 +1272,7 @@ fn mrc2tif_writes_explicit_and_header_pixel_spacing_as_real_tiff_resolution() {
 
 #[test]
 fn mrc2tif_uses_each_mdoc_pixel_spacing_for_numbered_tiff_output() {
-    unsafe {
+    {
         let stamp = format!("imod-rs-mrc2tif-mdoc-{}", std::process::id());
         let input = std::env::temp_dir().join(format!("{stamp}.mrc"));
         let mdoc = std::path::PathBuf::from(format!("{}.mdoc", input.display()));
@@ -1370,7 +1370,7 @@ fn mrc2tif_zip_stack_quality_and_slice_scaling_use_source_libtiff_paths() {
         let pixels = [0_i16, 100, 200, 300, 300, 200, 100, 0];
         assert_eq!(
             imod_rs::imod::libcfshr::b3dutil::b3d_fwrite(
-                unsafe {
+                {
                     core::slice::from_raw_parts(
                         pixels.as_ptr().cast::<u8>(),
                         core::mem::size_of::<i16>() * pixels.len(),
@@ -1433,7 +1433,7 @@ fn mrc2tif_zip_stack_quality_and_slice_scaling_use_source_libtiff_paths() {
         let mut stack_pixels = [0_i16; 8];
         assert_eq!(
             imod_rs::imod::libcfshr::b3dutil::b3d_fread(
-                unsafe {
+                {
                     core::slice::from_raw_parts_mut(
                         stack_pixels.as_mut_ptr().cast::<u8>(),
                         core::mem::size_of::<i16>() * stack_pixels.len(),
@@ -1506,7 +1506,7 @@ fn mrc2tif_zip_stack_quality_and_slice_scaling_use_source_libtiff_paths() {
         let auto_input_pixels = [0_i16, 100, 200, 300, 400, 500];
         assert_eq!(
             imod_rs::imod::libcfshr::b3dutil::b3d_fwrite(
-                unsafe {
+                {
                     core::slice::from_raw_parts(
                         auto_input_pixels.as_ptr().cast::<u8>(),
                         core::mem::size_of::<i16>() * auto_input_pixels.len(),
@@ -1554,7 +1554,7 @@ fn mrc2tif_zip_stack_quality_and_slice_scaling_use_source_libtiff_paths() {
         let mut auto_pixels = [0_u8; 6];
         assert_eq!(
             imod_rs::imod::libcfshr::b3dutil::b3d_fread(
-                unsafe {
+                {
                     core::slice::from_raw_parts_mut(
                         auto_pixels.as_mut_ptr().cast::<u8>(),
                         1 * (auto_pixels.len()),
@@ -1611,7 +1611,7 @@ fn mrc2tif_zip_stack_quality_and_slice_scaling_use_source_libtiff_paths() {
         let mut numeric_pixels = [0_i16; 6];
         assert_eq!(
             imod_rs::imod::libcfshr::b3dutil::b3d_fread(
-                unsafe {
+                {
                     core::slice::from_raw_parts_mut(
                         numeric_pixels.as_mut_ptr().cast::<u8>(),
                         core::mem::size_of::<i16>() * numeric_pixels.len(),
@@ -1663,9 +1663,7 @@ fn mrc2tif_jpeg_compression_uses_the_installed_libtiff_codec() {
         ];
         assert_eq!(
             imod_rs::imod::libcfshr::b3dutil::b3d_fwrite(
-                unsafe {
-                    core::slice::from_raw_parts(pixels.as_ptr().cast::<u8>(), 1 * (pixels.len()))
-                },
+                core::slice::from_raw_parts(pixels.as_ptr().cast::<u8>(), 1 * (pixels.len())),
                 1,
                 pixels.len(),
                 &mut file,
@@ -1782,7 +1780,7 @@ fn tiff_page_description_and_min_max(
 /// an `ImageDescription`.
 #[test]
 fn mrc2tif_stack_writes_running_min_max_on_every_directory_and_no_description() {
-    unsafe {
+    {
         let stamp = format!("imod-rs-mrc2tif-pages-{}", std::process::id());
         let input = std::env::temp_dir().join(format!("{stamp}.mrc"));
         let output = std::env::temp_dir().join(format!("{stamp}.tif"));

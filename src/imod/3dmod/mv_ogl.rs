@@ -847,7 +847,7 @@ impl MvOglState {
     ///
     /// # Safety
     /// `app` must reference a live viewer with a live current model.
-    pub unsafe fn draw_current_clip_plane(
+    pub fn draw_current_clip_plane(
         &mut self,
         app: &mut ImodvApp,
         slicer_not_clip: i32,
@@ -1959,7 +1959,7 @@ impl MvOglState {
     ///
     /// # Safety
     /// `app` must reference a live viewer with a live current model.
-    pub unsafe fn imodv_select_visible_conts(
+    pub fn imodv_select_visible_conts(
         &mut self,
         app: &mut ImodvApp,
         picked_ob: &mut i32,

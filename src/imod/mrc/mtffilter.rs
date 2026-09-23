@@ -294,7 +294,7 @@ pub fn mtffilter(arguments: &[String]) -> i32 {
             &String::from_utf8_lossy(&in_file),
             if ierr != 0 { "OLD" } else { "RO" },
         );
-        iiu_print_header(1, std::ptr::null());
+        iiu_print_header(1, None);
         iiu_ret_basic_head(
             1,
             nxyz.as_mut_ptr(),

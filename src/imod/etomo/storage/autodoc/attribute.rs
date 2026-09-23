@@ -48,7 +48,7 @@ pub struct Attribute {
 /// Java static `getKey(Token name)`.
 ///
 pub fn get_key_of_token(name: Option<&Token>) -> Option<String> {
-    name.map(|name| unsafe { name.get_key() })
+    name.map(|name| name.get_key())
 }
 
 /// Java static `getKey(String name)`.
@@ -93,7 +93,7 @@ impl Attribute {
     ///
     /// # Safety
     /// `parent` must point to a live attribute-list owner.
-    pub unsafe fn is_base(&self) -> bool {
+    pub fn is_base(&self) -> bool {
         !unsafe { (*self.parent).is_attribute() }
     }
 
@@ -176,7 +176,7 @@ impl Attribute {
     ///
     /// # Safety
     /// The name token must be live.
-    pub unsafe fn write(
+    pub fn write(
         &self,
         file: &std::sync::Arc<log_file::Handle>,
         writer_id: &log_file::WriterId,
@@ -191,7 +191,7 @@ impl Attribute {
     ///
     /// # Safety
     /// The name token, the name/value pair list and the children must be live.
-    pub unsafe fn print(&self, mut level: i32) {
+    pub fn print(&self, mut level: i32) {
         if self.exists() {
             autodoc::print_indent(level);
             level += 1;
@@ -221,7 +221,9 @@ impl Attribute {
             }
         }
         if let Some(children) = self.children.as_deref() {
-            unsafe { children.print(level) };
+            {
+                children.print(level)
+            };
         }
     }
 
@@ -411,7 +413,7 @@ impl ReadOnlyAttribute for Attribute {
             if self.children.is_none() {
                 "null".to_string()
             } else {
-                unsafe { self.children.as_deref().unwrap().to_string() }
+                self.children.as_deref().unwrap().to_string()
             }
         )
     }

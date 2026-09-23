@@ -69,7 +69,9 @@ pub trait ImodvControlNativeBoundary {
 /// Original: `imodvControlZoom`.
 pub fn imodv_control_zoom(a: &mut ImodvApp, zoom: i32) {
     imodv_zoomd(a, if zoom > 0 { 1.05 } else { 0.95238095 });
-    unsafe { imodv_draw() };
+    {
+        imodv_draw()
+    };
 }
 
 /// Original: `imodvControlKickClips`.
@@ -103,7 +105,9 @@ pub fn imodv_control_kick_clips(
         }
     }
     imodv_finish_chg_unit();
-    unsafe { imodv_draw() };
+    {
+        imodv_draw()
+    };
 }
 
 /// Original: `imodvControlClip`.
@@ -170,7 +174,9 @@ pub fn imodv_control_clip(
             }
         }
     }
-    unsafe { imodv_draw() };
+    {
+        imodv_draw()
+    };
 }
 
 /// Original: `imodvControlZscale`.
@@ -193,7 +199,9 @@ pub fn imodv_control_zscale(
     {
         model.zscale = value as f32 / 100.;
     }
-    unsafe { imodv_draw() };
+    {
+        imodv_draw()
+    };
     imodv_draw_imod_images(0);
     n.model_edit_update();
 }
@@ -219,7 +227,9 @@ pub fn imodv_control_scale(a: &mut ImodvApp, scale: f32) {
             view.rad = rad;
         }
     }
-    unsafe { imodv_draw() };
+    {
+        imodv_draw()
+    };
 }
 
 /// Original: `imodvControlStart`.
@@ -228,7 +238,9 @@ pub fn imodv_control_start(a: &mut ImodvApp, n: &mut dyn ImodvControlNativeBound
     a.xrot_movie = 0.;
     a.yrot_movie = 0.;
     a.zrot_movie = 0.;
-    unsafe { imodv_draw() };
+    {
+        imodv_draw()
+    };
     n.rotation_center_state(a.movie == 1);
 }
 
@@ -248,7 +260,9 @@ pub fn imodv_control_axis_button(
         -3 => imodv_rotate_model(a, 0, 0, -d, input),
         _ => {}
     }
-    unsafe { imodv_draw() };
+    {
+        imodv_draw()
+    };
 }
 
 /// Original: `imodvControlAxisText`.
@@ -289,7 +303,9 @@ pub fn imodv_control_axis_text(
     if let Some(imod) = unsafe { a.imod.as_ref() }.and_then(|m| m.view.first()) {
         imodv_new_model_angles(&imod.rot);
     }
-    unsafe { imodv_draw() };
+    {
+        imodv_draw()
+    };
 }
 
 /// Original: `imodvControlRate`.

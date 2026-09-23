@@ -27,7 +27,7 @@ pub struct ImodvModeled {
 }
 
 /// Original static `updateWorkArea`.
-pub fn update_work_area(a: &ImodvApp, dialog: &mut ImodvModeled) {
+fn update_work_area(a: &ImodvApp, dialog: &mut ImodvModeled) {
     let Some(model) = (unsafe { a.imod.as_ref() }) else {
         return;
     };
@@ -98,7 +98,9 @@ pub fn imodv_select_model(a: &mut ImodvApp, ncm: i32) -> i32 {
     // presentation calls are routed by the Rust-native viewer host; the
     // source-owned bounding-box state belongs to this selection transition.
     crate::imod::three_dmod::mv_menu::imodv_add_bounding_box(a, -1);
-    unsafe { imodv_draw() };
+    {
+        imodv_draw()
+    };
     a.cur_mod
 }
 /// Original `imodvModeledNumber`.
@@ -113,7 +115,9 @@ pub fn imodv_modeled_move(a: &mut ImodvApp, item: i32) {
 /// Original `imodvModeledView`.
 pub fn imodv_modeled_view(a: &mut ImodvApp, item: i32) {
     a.drawall = item;
-    unsafe { imodv_draw() };
+    {
+        imodv_draw()
+    };
 }
 /// Original `imodvModeledEdit`.
 pub fn imodv_modeled_edit(a: &mut ImodvApp, item: i32) {
@@ -136,7 +140,9 @@ pub fn imodv_modeled_same_scale(a: &mut ImodvApp) {
             }
         }
     }
-    unsafe { imodv_draw() };
+    {
+        imodv_draw()
+    };
 }
 /// Original `imodvModeledName`.
 pub fn imodv_modeled_name(a: &mut ImodvApp, name: &str, dialog: &mut ImodvModeled) {

@@ -25,7 +25,7 @@ static S_ZERO_DOSE: Mutex<ZeroDoseSettings> = Mutex::new(ZeroDoseSettings {
 });
 
 /// C static `extraHeaderSizes` (`extraheader.c:915`).
-pub fn extra_header_sizes(
+fn extra_header_sizes(
     ext_head: &[u8],
     ext_size: i32,
     num_int: i32,

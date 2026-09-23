@@ -263,7 +263,7 @@ pub fn ht_process<K, T: Copy>(table: &Hashtable<K, T>, func: fn(T)) {
 /// document rather than reproduce. The bytes at and past the terminating NUL
 /// are taken as zero here. The word is assembled little-endian, which is what
 /// the cast reads on every platform this tree is built for.
-pub fn strhash(key: &String) -> u32 {
+fn strhash(key: &String) -> u32 {
     let str = key.as_bytes();
     let mut hashvalue: u32 = 0;
 
@@ -284,12 +284,12 @@ pub fn strhash(key: &String) -> u32 {
 }
 
 /// Original static `strcp` (`hash.c:311`).
-pub fn strcp(key: &String) -> String {
+fn strcp(key: &String) -> String {
     key.clone()
 }
 
 /// Original static `streq` (`hash.c:316`).
-pub fn streq(key1: &String, key2: &String) -> i32 {
+fn streq(key1: &String, key2: &String) -> i32 {
     (key1 == key2) as i32
 }
 
@@ -300,19 +300,19 @@ pub fn streq(key1: &String, key2: &String) -> i32 {
 /// `unsigned int* v = key; return v[0] + v[1]` reinterprets the double's eight
 /// bytes as two words; the sum is order-independent, so the split here matches
 /// on either endianness.
-pub fn d1hash(key: &f64) -> u32 {
+fn d1hash(key: &f64) -> u32 {
     let v = key.to_bits();
 
     (v as u32).wrapping_add((v >> 32) as u32)
 }
 
 /// Original static `d1cp` (`hash.c:335`).
-pub fn d1cp(key: &f64) -> f64 {
+fn d1cp(key: &f64) -> f64 {
     *key
 }
 
 /// Original static `d1eq` (`hash.c:344`).
-pub fn d1eq(key1: &f64, key2: &f64) -> i32 {
+fn d1eq(key1: &f64, key2: &f64) -> i32 {
     (*key1 == *key2) as i32
 }
 
@@ -325,7 +325,7 @@ pub fn d1eq(key1: &f64, key2: &f64) -> i32 {
 /// `v[0] + v[1] + v[2] * 3 + v[3] * 7` over the sixteen bytes of the two
 /// doubles read as four words; the multipliers make the word order matter, so
 /// the little-endian split is spelled out.
-pub fn d2hash(key: &[f64; 2]) -> u32 {
+fn d2hash(key: &[f64; 2]) -> u32 {
     let b0 = key[0].to_bits();
     let b1 = key[1].to_bits();
     let v = [b0 as u32, (b0 >> 32) as u32, b1 as u32, (b1 >> 32) as u32];
@@ -340,12 +340,12 @@ pub fn d2hash(key: &[f64; 2]) -> u32 {
 }
 
 /// Original static `d2cp` (`hash.c:370`).
-pub fn d2cp(key: &[f64; 2]) -> [f64; 2] {
+fn d2cp(key: &[f64; 2]) -> [f64; 2] {
     [key[0], key[1]]
 }
 
 /// Original static `d2eq` (`hash.c:381`).
-pub fn d2eq(key1: &[f64; 2], key2: &[f64; 2]) -> i32 {
+fn d2eq(key1: &[f64; 2], key2: &[f64; 2]) -> i32 {
     ((key1[0] == key2[0]) && (key1[1] == key2[1])) as i32
 }
 
@@ -354,17 +354,17 @@ pub fn d2eq(key1: &[f64; 2], key2: &[f64; 2]) -> i32 {
  */
 
 /// Original static `i1hash` (`hash.c:391`).
-pub fn i1hash(key: &i32) -> u32 {
+fn i1hash(key: &i32) -> u32 {
     *key as u32
 }
 
 /// Original static `i1cp` (`hash.c:396`).
-pub fn i1cp(key: &i32) -> i32 {
+fn i1cp(key: &i32) -> i32 {
     *key
 }
 
 /// Original static `i1eq` (`hash.c:405`).
-pub fn i1eq(key1: &i32, key2: &i32) -> i32 {
+fn i1eq(key1: &i32, key2: &i32) -> i32 {
     (*key1 == *key2) as i32
 }
 
@@ -373,19 +373,19 @@ pub fn i1eq(key1: &i32, key2: &i32) -> i32 {
  */
 
 /// Original static `i2hash` (`hash.c:415`).
-pub fn i2hash(key: &[i32; 2]) -> u32 {
+fn i2hash(key: &[i32; 2]) -> u32 {
     let v = [key[0] as u32, key[1] as u32];
 
     v[0].wrapping_add(v[1] << 16)
 }
 
 /// Original static `i2cp` (`hash.c:426`).
-pub fn i2cp(key: &[i32; 2]) -> [i32; 2] {
+fn i2cp(key: &[i32; 2]) -> [i32; 2] {
     [key[0], key[1]]
 }
 
 /// Original static `i2eq` (`hash.c:437`).
-pub fn i2eq(key1: &[i32; 2], key2: &[i32; 2]) -> i32 {
+fn i2eq(key1: &[i32; 2], key2: &[i32; 2]) -> i32 {
     ((key1[0] == key2[0]) && (key1[1] == key2[1])) as i32
 }
 

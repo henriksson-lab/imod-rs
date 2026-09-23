@@ -502,7 +502,7 @@ impl<'a> TemplatePanel<'a> {
             ("userTemplate", self.get_user_template_file()),
         ] {
             if let Some(file) = file {
-                unsafe {
+                {
                     autodoc.add_name_value_pair_attribute(Some(directive), file.to_str());
                 }
             }

@@ -20,7 +20,7 @@ pub trait ReadOnlyAutodoc: ReadOnlyStatementList + ReadOnlySectionList {
     ///
     /// # Safety
     /// Every section and attribute in the autodoc must be live.
-    unsafe fn get_attribute_values(
+    fn get_attribute_values(
         &self,
         section_type: Option<&str>,
         attribute_name: Option<&str>,
@@ -29,7 +29,7 @@ pub trait ReadOnlyAutodoc: ReadOnlyStatementList + ReadOnlySectionList {
     ///
     /// # Safety
     /// See `get_attribute_values`.
-    unsafe fn get_attribute_multi_line_values(
+    fn get_attribute_multi_line_values(
         &self,
         section_type: Option<&str>,
         attribute_name: Option<&str>,
@@ -40,12 +40,12 @@ pub trait ReadOnlyAutodoc: ReadOnlyStatementList + ReadOnlySectionList {
     ///
     /// # Safety
     /// See `get_attribute_values`.
-    unsafe fn print_stored_data(&self);
+    fn print_stored_data(&self);
     /// Java `sectionExists(String)`.
     ///
     /// # Safety
     /// See `get_attribute_values`.
-    unsafe fn section_exists(&self, r#type: Option<&str>) -> bool;
+    fn section_exists(&self, r#type: Option<&str>) -> bool;
     /// Java `getAttribute(String)`, declared as `ReadOnlyAttribute`.
     ///
     /// # Safety

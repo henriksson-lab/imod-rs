@@ -147,83 +147,59 @@ const TEST: &str = "test";
 /// Java private `UITEST_AXIS`.
 const UITEST_AXIS: &str = "uitest_axis";
 
+/// The 38 autodoc names that have a `private static` instance field in Java.
+///
+/// `AutodocFactory` declares one static per name and three 38-arm dispatch
+/// chains over them (`getExistingAutodoc`, `resetInstance`, `setInstance`).
+/// The field *set* is the data, so it is one table here keyed by the same
+/// constants; membership of this array is what reproduces Java's
+/// "Illegal autodoc name" behaviour, which a bare map could not distinguish
+/// from "known name, not yet loaded".
+static INSTANCE_NAMES: [&str; 38] = [
+    TILTXCORR,
+    TEST,
+    UITEST,
+    MTF_FILTER,
+    NEWSTACK,
+    CTF_PLOTTER,
+    CTF_PHASE_FLIP,
+    FLATTEN_WARP,
+    WARP_VOL,
+    FIND_BEADS_3D,
+    COMBINE_FFT,
+    TILTALIGN,
+    CCDERASER,
+    SOLVEMATCH,
+    BEADTRACK,
+    CPU,
+    DENS_MATCH,
+    CORR_SEARCH_3D,
+    XFJOINTOMO,
+    PEET_PRM,
+    TILT,
+    SIRTSETUP,
+    BLENDMONT,
+    XFTOXG,
+    XFALIGN,
+    AUTOFIDSEED,
+    ETOMO,
+    PROG_DEFAULTS,
+    IMODCHOPCONTS,
+    DUALVOLMATCH,
+    RESTRICT_ALIGN,
+    BATCH_RUN_TOMO,
+    MULTIFILT_SETUP,
+    ALIGN_FRAMES,
+    SUBTOMO_SETUP,
+    ALT_TOMO_SETUP,
+    REDUCE_FILTER_VOLUME,
+    SERIES_WATCHER,
+];
+
 thread_local! {
-    /// Java private static `TILTXCORR_INSTANCE`, initialised to null.
-    static TILTXCORR_INSTANCE: Cell<*mut Autodoc> = const { Cell::new(std::ptr::null_mut()) };
-    /// Java private static `TEST_INSTANCE`, initialised to null.
-    static TEST_INSTANCE: Cell<*mut Autodoc> = const { Cell::new(std::ptr::null_mut()) };
-    /// Java private static `UITEST_INSTANCE`, initialised to null.
-    static UITEST_INSTANCE: Cell<*mut Autodoc> = const { Cell::new(std::ptr::null_mut()) };
-    /// Java private static `MTF_FILTER_INSTANCE`, initialised to null.
-    static MTF_FILTER_INSTANCE: Cell<*mut Autodoc> = const { Cell::new(std::ptr::null_mut()) };
-    /// Java private static `COMBINE_FFT_INSTANCE`, initialised to null.
-    static COMBINE_FFT_INSTANCE: Cell<*mut Autodoc> = const { Cell::new(std::ptr::null_mut()) };
-    /// Java private static `TILTALIGN_INSTANCE`, initialised to null.
-    static TILTALIGN_INSTANCE: Cell<*mut Autodoc> = const { Cell::new(std::ptr::null_mut()) };
-    /// Java private static `CCDERASER_INSTANCE`, initialised to null.
-    static CCDERASER_INSTANCE: Cell<*mut Autodoc> = const { Cell::new(std::ptr::null_mut()) };
-    /// Java private static `SOLVEMATCH_INSTANCE`, initialised to null.
-    static SOLVEMATCH_INSTANCE: Cell<*mut Autodoc> = const { Cell::new(std::ptr::null_mut()) };
-    /// Java private static `BEADTRACK_INSTANCE`, initialised to null.
-    static BEADTRACK_INSTANCE: Cell<*mut Autodoc> = const { Cell::new(std::ptr::null_mut()) };
-    /// Java private static `CPU_INSTANCE`, initialised to null.
-    static CPU_INSTANCE: Cell<*mut Autodoc> = const { Cell::new(std::ptr::null_mut()) };
-    /// Java private static `DENS_MATCH_INSTANCE`, initialised to null.
-    static DENS_MATCH_INSTANCE: Cell<*mut Autodoc> = const { Cell::new(std::ptr::null_mut()) };
-    /// Java private static `CORR_SEARCH_3D_INSTANCE`, initialised to null.
-    static CORR_SEARCH_3D_INSTANCE: Cell<*mut Autodoc> = const { Cell::new(std::ptr::null_mut()) };
-    /// Java private static `XFJOINTOMO_INSTANCE`, initialised to null.
-    static XFJOINTOMO_INSTANCE: Cell<*mut Autodoc> = const { Cell::new(std::ptr::null_mut()) };
-    /// Java private static `PEET_PRM_INSTANCE`, initialised to null.
-    static PEET_PRM_INSTANCE: Cell<*mut Autodoc> = const { Cell::new(std::ptr::null_mut()) };
-    /// Java private static `NEWSTACK_INSTANCE`, initialised to null.
-    static NEWSTACK_INSTANCE: Cell<*mut Autodoc> = const { Cell::new(std::ptr::null_mut()) };
-    /// Java private static `CTF_PLOTTER_INSTANCE`, initialised to null.
-    static CTF_PLOTTER_INSTANCE: Cell<*mut Autodoc> = const { Cell::new(std::ptr::null_mut()) };
-    /// Java private static `CTF_PHASE_FLIP_INSTANCE`, initialised to null.
-    static CTF_PHASE_FLIP_INSTANCE: Cell<*mut Autodoc> = const { Cell::new(std::ptr::null_mut()) };
-    /// Java private static `FLATTEN_WARP_INSTANCE`, initialised to null.
-    static FLATTEN_WARP_INSTANCE: Cell<*mut Autodoc> = const { Cell::new(std::ptr::null_mut()) };
-    /// Java private static `WARP_VOL_INSTANCE`, initialised to null.
-    static WARP_VOL_INSTANCE: Cell<*mut Autodoc> = const { Cell::new(std::ptr::null_mut()) };
-    /// Java private static `FIND_BEADS_3D_INSTANCE`, initialised to null.
-    static FIND_BEADS_3D_INSTANCE: Cell<*mut Autodoc> = const { Cell::new(std::ptr::null_mut()) };
-    /// Java private static `TILT_INSTANCE`, initialised to null.
-    static TILT_INSTANCE: Cell<*mut Autodoc> = const { Cell::new(std::ptr::null_mut()) };
-    /// Java private static `SIRTSETUP_INSTANCE`, initialised to null.
-    static SIRTSETUP_INSTANCE: Cell<*mut Autodoc> = const { Cell::new(std::ptr::null_mut()) };
-    /// Java private static `BLENDMONT_INSTANCE`, initialised to null.
-    static BLENDMONT_INSTANCE: Cell<*mut Autodoc> = const { Cell::new(std::ptr::null_mut()) };
-    /// Java private static `XFTOXG_INSTANCE`, initialised to null.
-    static XFTOXG_INSTANCE: Cell<*mut Autodoc> = const { Cell::new(std::ptr::null_mut()) };
-    /// Java private static `XFALIGN_INSTANCE`, initialised to null.
-    static XFALIGN_INSTANCE: Cell<*mut Autodoc> = const { Cell::new(std::ptr::null_mut()) };
-    /// Java private static `AUTOFIDSEED_INSTANCE`, initialised to null.
-    static AUTOFIDSEED_INSTANCE: Cell<*mut Autodoc> = const { Cell::new(std::ptr::null_mut()) };
-    /// Java private static `ETOMO_INSTANCE`, initialised to null.
-    static ETOMO_INSTANCE: Cell<*mut Autodoc> = const { Cell::new(std::ptr::null_mut()) };
-    /// Java private static `PROG_DEFAULTS_INSTANCE`, initialised to null.
-    static PROG_DEFAULTS_INSTANCE: Cell<*mut Autodoc> = const { Cell::new(std::ptr::null_mut()) };
-    /// Java private static `IMODCHOPCONTS_INSTANCE`, initialised to null.
-    static IMODCHOPCONTS_INSTANCE: Cell<*mut Autodoc> = const { Cell::new(std::ptr::null_mut()) };
-    /// Java private static `DUALVOLMATCH_INSTANCE`, initialised to null.
-    static DUALVOLMATCH_INSTANCE: Cell<*mut Autodoc> = const { Cell::new(std::ptr::null_mut()) };
-    /// Java private static `RESTRICT_ALIGN_INSTANCE`, initialised to null.
-    static RESTRICT_ALIGN_INSTANCE: Cell<*mut Autodoc> = const { Cell::new(std::ptr::null_mut()) };
-    /// Java private static `BATCH_RUN_TOMO_INSTANCE`, initialised to null.
-    static BATCH_RUN_TOMO_INSTANCE: Cell<*mut Autodoc> = const { Cell::new(std::ptr::null_mut()) };
-    /// Java private static `MULTIFILT_SETUP_INSTANCE`, initialised to null.
-    static MULTIFILT_SETUP_INSTANCE: Cell<*mut Autodoc> = const { Cell::new(std::ptr::null_mut()) };
-    /// Java private static `ALIGN_FRAMES_INSTANCE`, initialised to null.
-    static ALIGN_FRAMES_INSTANCE: Cell<*mut Autodoc> = const { Cell::new(std::ptr::null_mut()) };
-    /// Java private static `SUBTOMO_SETUP_INSTANCE`, initialised to null.
-    static SUBTOMO_SETUP_INSTANCE: Cell<*mut Autodoc> = const { Cell::new(std::ptr::null_mut()) };
-    /// Java private static `ALT_TOMO_SETUP_INSTANCE`, initialised to null.
-    static ALT_TOMO_SETUP_INSTANCE: Cell<*mut Autodoc> = const { Cell::new(std::ptr::null_mut()) };
-    /// Java private static `REDUCE_FILTER_VOLUME_INSTANCE`, initialised to null.
-    static REDUCE_FILTER_VOLUME_INSTANCE: Cell<*mut Autodoc> = const { Cell::new(std::ptr::null_mut()) };
-    /// Java private static `SERIES_WATCHER_INSTANCE`, initialised to null.
-    static SERIES_WATCHER_INSTANCE: Cell<*mut Autodoc> = const { Cell::new(std::ptr::null_mut()) };
+    /// The Java `private static` instance fields, as one table.
+    static INSTANCES: RefCell<HashMap<&'static str, *mut Autodoc>> =
+        RefCell::new(HashMap::new());
     /// Java private static final `UITEST_AXIS_MAP`.
     static UITEST_AXIS_MAP: RefCell<HashMap<std::path::PathBuf, *mut Autodoc>> =
         RefCell::new(HashMap::new());
@@ -836,121 +812,7 @@ pub fn get_existing_autodoc_by_file_name(file_name: &str, name: &str) -> *mut Au
 
 /// Java private static `getExistingAutodoc(String)`.
 pub fn get_existing_autodoc(name: &str) -> *mut Autodoc {
-    if name == TILTXCORR {
-        return TILTXCORR_INSTANCE.with(Cell::get);
-    }
-    if name == TEST {
-        return TEST_INSTANCE.with(Cell::get);
-    }
-    if name == UITEST {
-        return UITEST_INSTANCE.with(Cell::get);
-    }
-    if name == MTF_FILTER {
-        return MTF_FILTER_INSTANCE.with(Cell::get);
-    }
-    if name == NEWSTACK {
-        return NEWSTACK_INSTANCE.with(Cell::get);
-    }
-    if name == CTF_PLOTTER {
-        return CTF_PLOTTER_INSTANCE.with(Cell::get);
-    }
-    if name == CTF_PHASE_FLIP {
-        return CTF_PHASE_FLIP_INSTANCE.with(Cell::get);
-    }
-    if name == FLATTEN_WARP {
-        return FLATTEN_WARP_INSTANCE.with(Cell::get);
-    }
-    if name == WARP_VOL {
-        return WARP_VOL_INSTANCE.with(Cell::get);
-    }
-    if name == FIND_BEADS_3D {
-        return FIND_BEADS_3D_INSTANCE.with(Cell::get);
-    }
-    if name == COMBINE_FFT {
-        return COMBINE_FFT_INSTANCE.with(Cell::get);
-    }
-    if name == TILTALIGN {
-        return TILTALIGN_INSTANCE.with(Cell::get);
-    }
-    if name == CCDERASER {
-        return CCDERASER_INSTANCE.with(Cell::get);
-    }
-    if name == SOLVEMATCH {
-        return SOLVEMATCH_INSTANCE.with(Cell::get);
-    }
-    if name == BEADTRACK {
-        return BEADTRACK_INSTANCE.with(Cell::get);
-    }
-    if name == CPU {
-        return CPU_INSTANCE.with(Cell::get);
-    }
-    if name == DENS_MATCH {
-        return DENS_MATCH_INSTANCE.with(Cell::get);
-    }
-    if name == CORR_SEARCH_3D {
-        return CORR_SEARCH_3D_INSTANCE.with(Cell::get);
-    }
-    if name == XFJOINTOMO {
-        return XFJOINTOMO_INSTANCE.with(Cell::get);
-    }
-    if name == PEET_PRM {
-        return PEET_PRM_INSTANCE.with(Cell::get);
-    }
-    if name == TILT {
-        return TILT_INSTANCE.with(Cell::get);
-    }
-    if name == SIRTSETUP {
-        return SIRTSETUP_INSTANCE.with(Cell::get);
-    }
-    if name == BLENDMONT {
-        return BLENDMONT_INSTANCE.with(Cell::get);
-    }
-    if name == XFTOXG {
-        return XFTOXG_INSTANCE.with(Cell::get);
-    }
-    if name == XFALIGN {
-        return XFALIGN_INSTANCE.with(Cell::get);
-    }
-    if name == AUTOFIDSEED {
-        return AUTOFIDSEED_INSTANCE.with(Cell::get);
-    }
-    if name == ETOMO {
-        return ETOMO_INSTANCE.with(Cell::get);
-    }
-    if name == PROG_DEFAULTS {
-        return PROG_DEFAULTS_INSTANCE.with(Cell::get);
-    }
-    if name == IMODCHOPCONTS {
-        return IMODCHOPCONTS_INSTANCE.with(Cell::get);
-    }
-    if name == DUALVOLMATCH {
-        return DUALVOLMATCH_INSTANCE.with(Cell::get);
-    }
-    if name == RESTRICT_ALIGN {
-        return RESTRICT_ALIGN_INSTANCE.with(Cell::get);
-    }
-    if name == BATCH_RUN_TOMO {
-        return BATCH_RUN_TOMO_INSTANCE.with(Cell::get);
-    }
-    if name == MULTIFILT_SETUP {
-        return MULTIFILT_SETUP_INSTANCE.with(Cell::get);
-    }
-    if name == ALIGN_FRAMES {
-        return ALIGN_FRAMES_INSTANCE.with(Cell::get);
-    }
-    if name == SUBTOMO_SETUP {
-        return SUBTOMO_SETUP_INSTANCE.with(Cell::get);
-    }
-    if name == ALT_TOMO_SETUP {
-        return ALT_TOMO_SETUP_INSTANCE.with(Cell::get);
-    }
-    if name == REDUCE_FILTER_VOLUME {
-        return REDUCE_FILTER_VOLUME_INSTANCE.with(Cell::get);
-    }
-    if name == SERIES_WATCHER {
-        return SERIES_WATCHER_INSTANCE.with(Cell::get);
-    }
-    std::ptr::null_mut()
+    INSTANCES.with_borrow(|instances| instances.get(name).copied().unwrap_or(std::ptr::null_mut()))
 }
 
 /// Java `isLoaded(String)`.
@@ -960,88 +822,13 @@ pub fn is_loaded(name: &str) -> bool {
 
 /// Java `resetInstance(String)`.  For testing.
 pub fn reset_instance(name: &str) {
-    if name == TILTXCORR {
-        TILTXCORR_INSTANCE.with(|instance| instance.set(std::ptr::null_mut()));
-    } else if name == TEST {
-        TEST_INSTANCE.with(|instance| instance.set(std::ptr::null_mut()));
-    } else if name == UITEST {
-        UITEST_INSTANCE.with(|instance| instance.set(std::ptr::null_mut()));
-    } else if name == MTF_FILTER {
-        MTF_FILTER_INSTANCE.with(|instance| instance.set(std::ptr::null_mut()));
-    } else if name == NEWSTACK {
-        NEWSTACK_INSTANCE.with(|instance| instance.set(std::ptr::null_mut()));
-    } else if name == CTF_PLOTTER {
-        CTF_PLOTTER_INSTANCE.with(|instance| instance.set(std::ptr::null_mut()));
-    } else if name == CTF_PHASE_FLIP {
-        CTF_PHASE_FLIP_INSTANCE.with(|instance| instance.set(std::ptr::null_mut()));
-    } else if name == FLATTEN_WARP {
-        FLATTEN_WARP_INSTANCE.with(|instance| instance.set(std::ptr::null_mut()));
-    } else if name == WARP_VOL {
-        WARP_VOL_INSTANCE.with(|instance| instance.set(std::ptr::null_mut()));
-    } else if name == FIND_BEADS_3D {
-        FIND_BEADS_3D_INSTANCE.with(|instance| instance.set(std::ptr::null_mut()));
-    } else if name == COMBINE_FFT {
-        COMBINE_FFT_INSTANCE.with(|instance| instance.set(std::ptr::null_mut()));
-    } else if name == TILTALIGN {
-        TILTALIGN_INSTANCE.with(|instance| instance.set(std::ptr::null_mut()));
-    } else if name == CCDERASER {
-        CCDERASER_INSTANCE.with(|instance| instance.set(std::ptr::null_mut()));
-    } else if name == SOLVEMATCH {
-        SOLVEMATCH_INSTANCE.with(|instance| instance.set(std::ptr::null_mut()));
-    } else if name == BEADTRACK {
-        BEADTRACK_INSTANCE.with(|instance| instance.set(std::ptr::null_mut()));
-    } else if name == CPU {
-        CPU_INSTANCE.with(|instance| instance.set(std::ptr::null_mut()));
-    } else if name == DENS_MATCH {
-        DENS_MATCH_INSTANCE.with(|instance| instance.set(std::ptr::null_mut()));
-    } else if name == CORR_SEARCH_3D {
-        CORR_SEARCH_3D_INSTANCE.with(|instance| instance.set(std::ptr::null_mut()));
-    } else if name == XFJOINTOMO {
-        XFJOINTOMO_INSTANCE.with(|instance| instance.set(std::ptr::null_mut()));
-    } else if name == PEET_PRM {
-        PEET_PRM_INSTANCE.with(|instance| instance.set(std::ptr::null_mut()));
-    } else if name == TILT {
-        TILT_INSTANCE.with(|instance| instance.set(std::ptr::null_mut()));
-    } else if name == SIRTSETUP {
-        SIRTSETUP_INSTANCE.with(|instance| instance.set(std::ptr::null_mut()));
-    } else if name == BLENDMONT {
-        BLENDMONT_INSTANCE.with(|instance| instance.set(std::ptr::null_mut()));
-    } else if name == XFTOXG {
-        XFTOXG_INSTANCE.with(|instance| instance.set(std::ptr::null_mut()));
-    } else if name == XFALIGN {
-        XFALIGN_INSTANCE.with(|instance| instance.set(std::ptr::null_mut()));
-    } else if name == AUTOFIDSEED {
-        AUTOFIDSEED_INSTANCE.with(|instance| instance.set(std::ptr::null_mut()));
-    } else if name == ETOMO {
-        ETOMO_INSTANCE.with(|instance| instance.set(std::ptr::null_mut()));
-    } else if name == PROG_DEFAULTS {
-        PROG_DEFAULTS_INSTANCE.with(|instance| instance.set(std::ptr::null_mut()));
-    } else if name == IMODCHOPCONTS {
-        IMODCHOPCONTS_INSTANCE.with(|instance| instance.set(std::ptr::null_mut()));
-    } else if name == DUALVOLMATCH {
-        DUALVOLMATCH_INSTANCE.with(|instance| instance.set(std::ptr::null_mut()));
-    } else if name == RESTRICT_ALIGN {
-        RESTRICT_ALIGN_INSTANCE.with(|instance| instance.set(std::ptr::null_mut()));
-    } else if name == BATCH_RUN_TOMO {
-        BATCH_RUN_TOMO_INSTANCE.with(|instance| instance.set(std::ptr::null_mut()));
-    } else if name == MULTIFILT_SETUP {
-        MULTIFILT_SETUP_INSTANCE.with(|instance| instance.set(std::ptr::null_mut()));
-    } else if name == ALIGN_FRAMES {
-        ALIGN_FRAMES_INSTANCE.with(|instance| instance.set(std::ptr::null_mut()));
-    } else if name == SUBTOMO_SETUP {
-        SUBTOMO_SETUP_INSTANCE.with(|instance| instance.set(std::ptr::null_mut()));
-    } else if name == ALT_TOMO_SETUP {
-        ALT_TOMO_SETUP_INSTANCE.with(|instance| instance.set(std::ptr::null_mut()));
-    } else if name == REDUCE_FILTER_VOLUME {
-        REDUCE_FILTER_VOLUME_INSTANCE.with(|instance| instance.set(std::ptr::null_mut()));
-    } else if name == SERIES_WATCHER {
-        SERIES_WATCHER_INSTANCE.with(|instance| instance.set(std::ptr::null_mut()));
-    } else {
+    let Some(name) = INSTANCE_NAMES.iter().copied().find(|known| *known == name) else {
         panic!(
             "java.lang.IllegalArgumentException: Illegal autodoc name: {}.",
             name
         );
-    }
+    };
+    INSTANCES.with_borrow_mut(|instances| instances.insert(name, std::ptr::null_mut()));
 }
 
 /// Java private static `setInstance(String, Autodoc)`.
@@ -1049,85 +836,10 @@ pub fn reset_instance(name: &str) {
 /// Override an old autodoc instance with a new one.
 ///
 pub fn set_instance(name: &str, autodoc: *mut Autodoc) -> bool {
-    if name == TILTXCORR {
-        TILTXCORR_INSTANCE.with(|instance| instance.set(autodoc));
-    } else if name == TEST {
-        TEST_INSTANCE.with(|instance| instance.set(autodoc));
-    } else if name == UITEST {
-        UITEST_INSTANCE.with(|instance| instance.set(autodoc));
-    } else if name == MTF_FILTER {
-        MTF_FILTER_INSTANCE.with(|instance| instance.set(autodoc));
-    } else if name == NEWSTACK {
-        NEWSTACK_INSTANCE.with(|instance| instance.set(autodoc));
-    } else if name == CTF_PLOTTER {
-        CTF_PLOTTER_INSTANCE.with(|instance| instance.set(autodoc));
-    } else if name == CTF_PHASE_FLIP {
-        CTF_PHASE_FLIP_INSTANCE.with(|instance| instance.set(autodoc));
-    } else if name == FLATTEN_WARP {
-        FLATTEN_WARP_INSTANCE.with(|instance| instance.set(autodoc));
-    } else if name == WARP_VOL {
-        WARP_VOL_INSTANCE.with(|instance| instance.set(autodoc));
-    } else if name == FIND_BEADS_3D {
-        FIND_BEADS_3D_INSTANCE.with(|instance| instance.set(autodoc));
-    } else if name == COMBINE_FFT {
-        COMBINE_FFT_INSTANCE.with(|instance| instance.set(autodoc));
-    } else if name == TILTALIGN {
-        TILTALIGN_INSTANCE.with(|instance| instance.set(autodoc));
-    } else if name == CCDERASER {
-        CCDERASER_INSTANCE.with(|instance| instance.set(autodoc));
-    } else if name == SOLVEMATCH {
-        SOLVEMATCH_INSTANCE.with(|instance| instance.set(autodoc));
-    } else if name == BEADTRACK {
-        BEADTRACK_INSTANCE.with(|instance| instance.set(autodoc));
-    } else if name == CPU {
-        CPU_INSTANCE.with(|instance| instance.set(autodoc));
-    } else if name == DENS_MATCH {
-        DENS_MATCH_INSTANCE.with(|instance| instance.set(autodoc));
-    } else if name == CORR_SEARCH_3D {
-        CORR_SEARCH_3D_INSTANCE.with(|instance| instance.set(autodoc));
-    } else if name == XFJOINTOMO {
-        XFJOINTOMO_INSTANCE.with(|instance| instance.set(autodoc));
-    } else if name == PEET_PRM {
-        PEET_PRM_INSTANCE.with(|instance| instance.set(autodoc));
-    } else if name == TILT {
-        TILT_INSTANCE.with(|instance| instance.set(autodoc));
-    } else if name == SIRTSETUP {
-        SIRTSETUP_INSTANCE.with(|instance| instance.set(autodoc));
-    } else if name == BLENDMONT {
-        BLENDMONT_INSTANCE.with(|instance| instance.set(autodoc));
-    } else if name == XFTOXG {
-        XFTOXG_INSTANCE.with(|instance| instance.set(autodoc));
-    } else if name == XFALIGN {
-        XFALIGN_INSTANCE.with(|instance| instance.set(autodoc));
-    } else if name == AUTOFIDSEED {
-        AUTOFIDSEED_INSTANCE.with(|instance| instance.set(autodoc));
-    } else if name == ETOMO {
-        ETOMO_INSTANCE.with(|instance| instance.set(autodoc));
-    } else if name == PROG_DEFAULTS {
-        PROG_DEFAULTS_INSTANCE.with(|instance| instance.set(autodoc));
-    } else if name == IMODCHOPCONTS {
-        IMODCHOPCONTS_INSTANCE.with(|instance| instance.set(autodoc));
-    } else if name == DUALVOLMATCH {
-        DUALVOLMATCH_INSTANCE.with(|instance| instance.set(autodoc));
-    } else if name == RESTRICT_ALIGN {
-        RESTRICT_ALIGN_INSTANCE.with(|instance| instance.set(autodoc));
-    } else if name == BATCH_RUN_TOMO {
-        BATCH_RUN_TOMO_INSTANCE.with(|instance| instance.set(autodoc));
-    } else if name == MULTIFILT_SETUP {
-        MULTIFILT_SETUP_INSTANCE.with(|instance| instance.set(autodoc));
-    } else if name == ALIGN_FRAMES {
-        ALIGN_FRAMES_INSTANCE.with(|instance| instance.set(autodoc));
-    } else if name == SUBTOMO_SETUP {
-        SUBTOMO_SETUP_INSTANCE.with(|instance| instance.set(autodoc));
-    } else if name == ALT_TOMO_SETUP {
-        ALT_TOMO_SETUP_INSTANCE.with(|instance| instance.set(autodoc));
-    } else if name == REDUCE_FILTER_VOLUME {
-        REDUCE_FILTER_VOLUME_INSTANCE.with(|instance| instance.set(autodoc));
-    } else if name == SERIES_WATCHER {
-        SERIES_WATCHER_INSTANCE.with(|instance| instance.set(autodoc));
-    } else {
+    let Some(name) = INSTANCE_NAMES.iter().copied().find(|known| *known == name) else {
         return false;
-    }
+    };
+    INSTANCES.with_borrow_mut(|instances| instances.insert(name, autodoc));
     true
 }
 

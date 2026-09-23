@@ -130,7 +130,7 @@ thread_local! {
 ///
 /// The source fills a caller-supplied struct; here it returns the value, which
 /// is the same thing for the two call sites (`addWarpingsIfNeeded` appends it).
-pub fn init_warping() -> Warping {
+fn init_warping() -> Warping {
     let mut xform = [0.0_f32; 6];
     xf_unit(&mut xform, 1.0, 2);
     Warping {
@@ -151,7 +151,7 @@ pub fn init_warping() -> Warping {
 }
 
 /// Original static `addWarpFile` (`warpfiles.c:101`).
-pub fn add_warp_file() -> i32 {
+fn add_warp_file() -> i32 {
     S_WARP_FILES.with_borrow_mut(|files| {
         let mut index: i32 = -1;
 
@@ -572,7 +572,7 @@ pub fn write_warp_file(filename: &str, skip_backup: i32) -> i32 {
 }
 
 /// Original static `addWarpingsIfNeeded` (`warpfiles.c:400`).
-pub fn add_warpings_if_needed(iz: i32) -> i32 {
+fn add_warpings_if_needed(iz: i32) -> i32 {
     let cur = S_CUR_FILE_IND.get();
     if cur < 0 || iz < 0 {
         return 1;
@@ -633,7 +633,7 @@ pub fn warp_files_done() {
 }
 
 /// Original static `deleteWarpFile` (`warpfiles.c:468`).
-pub fn delete_warp_file(warp_file: &mut WarpFile) {
+fn delete_warp_file(warp_file: &mut WarpFile) {
     warp_file.num_frames = 0;
     warp_file.in_use = 0;
     warp_file.warpings.clear();
@@ -1186,7 +1186,7 @@ pub fn grid_size_from_spacing(iz: i32, percentile: f32, factor: f32, full_extent
 }
 
 /// Original static `freeStaticArrays` (`warpfiles.c:960`).
-pub fn free_static_arrays() {
+fn free_static_arrays() {
     S_DPOINTS.with_borrow_mut(|v| *v = Vec::new());
     S_GRIDX.with_borrow_mut(|v| *v = Vec::new());
     S_GRIDY.with_borrow_mut(|v| *v = Vec::new());
@@ -1202,7 +1202,7 @@ pub fn free_static_arrays() {
 }
 
 /// Original static `pointsMatchStatArray` (`warpfiles.c:977`).
-pub fn points_match_stat_array(warp: &Warping) -> i32 {
+fn points_match_stat_array(warp: &Warping) -> i32 {
     S_DPOINTS.with_borrow(|dpoints| {
         if dpoints.is_empty() || S_LAST_NUM_CONT.get() != warp.n_control {
             return 0;
@@ -1661,7 +1661,7 @@ pub fn separate_linear_transform(iz: i32) -> i32 {
 /// must consume the whole token (`if (*endPtr != 0x00) return -4;`), so the
 /// scan is written out rather than replaced with `str::parse` on whitespace
 /// (`NATIVE.md` §2).
-pub fn read_line_of_values(
+fn read_line_of_values(
     fp: &mut ImodFile,
     line: &mut [u8],
     limit: i32,

@@ -13,7 +13,7 @@ const AUTODOC: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/IMOD/autodoc");
 
 #[test]
 fn header_reports_source_ordered_machine_readable_mrc_fields() {
-    unsafe {
+    {
         let input =
             std::env::temp_dir().join(format!("imod-rs-header-cli-{}.mrc", std::process::id()));
         let mut file = imod_rs::imod::libcfshr::b3dutil::ImodFile::open(&input, "wb").unwrap();
@@ -116,7 +116,7 @@ fn header_pip_option_without_an_input_file_exits_as_source_does() {
 
 #[test]
 fn header_reports_old_fei_and_mdoc_rotation_angle_source_branches() {
-    unsafe {
+    {
         let old_fei =
             std::env::temp_dir().join(format!("imod-rs-header-old-fei-{}.mrc", std::process::id()));
         let mut file = imod_rs::imod::libcfshr::b3dutil::ImodFile::open(&old_fei, "wb").unwrap();

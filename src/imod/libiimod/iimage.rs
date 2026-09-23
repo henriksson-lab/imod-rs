@@ -145,6 +145,25 @@ impl OwnedImageStack {
 /// no slice to build there.  It is `*mut u8` rather than `*mut c_char` because
 /// nothing about it is a C string.
 pub type IiSectionFunc = Option<unsafe fn(*mut ImodImageFile, *mut u8, i32) -> i32>;
+
+/// Which `ImodImageFile` section callback `read_write_section` was asked for.
+///
+/// `iimage.c:1182-1191` recovers this by comparing the function pointer it was
+/// handed against the callback fields.  That is well defined in C and **not**
+/// in Rust: function-pointer equality is unspecified, the compiler may merge or
+/// duplicate functions, and this crate builds at `codegen-units=16`.  A failed
+/// comparison would silently yield the wrong `element_bytes`, hence a wrong
+/// buffer-size check.  The caller names the slot instead; every call site
+/// already knew which one it was passing.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub enum SectionOp {
+    Read,
+    ReadByte,
+    ReadUshort,
+    ReadFloat,
+    Write,
+    WriteFloat,
+}
 pub type IiFileCheckFunction = Option<unsafe fn(*mut ImodImageFile) -> i32>;
 /// C `IIRawCheckFunction` (`iimage.h`).  The registry is crate-private Rust
 /// state, so probes receive their file and result through ordinary borrows.
@@ -1651,7 +1670,7 @@ pub fn ii_read_section(image: &mut ImodImageFile, buf: &mut [u8], in_section: i3
         image,
         &mut buf[..length],
         in_section,
-        image.read_section,
+        SectionOp::Read,
         "reading from",
     )
 }
@@ -1716,7 +1735,7 @@ pub fn ii_read_section_byte(image: &mut ImodImageFile, buf: &mut [u8], in_sectio
         image,
         &mut buf[..length],
         in_section,
-        image.read_section_byte,
+        SectionOp::ReadByte,
         "reading and converting to bytes for",
     )
 }
@@ -1778,7 +1797,7 @@ pub unsafe fn ii_read_section_ushort_callback(
             image,
             core::slice::from_raw_parts_mut(buf, length),
             in_section,
-            image.read_section_ushort,
+            SectionOp::ReadUshort,
             "reading and converting to shorts for",
         )
     }
@@ -1803,7 +1822,7 @@ pub fn ii_read_section_float(image: &mut ImodImageFile, buf: &mut [f32], in_sect
         image,
         bytes,
         in_section,
-        image.read_section_float,
+        SectionOp::ReadFloat,
         "reading and converting to floats for",
     )
 }
@@ -1843,32 +1862,28 @@ pub fn ii_read_section_any(
     convert_to: i32,
 ) -> i32 {
     match convert_to {
-        MRSA_NOPROC => read_write_section(
-            in_file,
-            buf,
-            in_section,
-            in_file.read_section,
-            "reading from",
-        ),
+        MRSA_NOPROC => {
+            read_write_section(in_file, buf, in_section, SectionOp::Read, "reading from")
+        }
         MRSA_BYTE => read_write_section(
             in_file,
             buf,
             in_section,
-            in_file.read_section_byte,
+            SectionOp::ReadByte,
             "reading and converting to bytes for",
         ),
         MRSA_USHORT => read_write_section(
             in_file,
             buf,
             in_section,
-            in_file.read_section_ushort,
+            SectionOp::ReadUshort,
             "reading and converting to shorts for",
         ),
         MRSA_FLOAT => read_write_section(
             in_file,
             buf,
             in_section,
-            in_file.read_section_float,
+            SectionOp::ReadFloat,
             "reading and converting to floats for",
         ),
         _ => {
@@ -1911,8 +1926,13 @@ pub fn ii_write_section(in_file: &mut ImodImageFile, buf: &mut [u8], in_section:
     if buf.len() < length {
         return IIERR_BAD_CALL;
     }
-    let func = in_file.write_section;
-    read_write_section(in_file, &mut buf[..length], in_section, func, "writing to")
+    read_write_section(
+        in_file,
+        &mut buf[..length],
+        in_section,
+        SectionOp::Write,
+        "writing to",
+    )
 }
 pub fn ii_write_section_float(
     in_file: &mut ImodImageFile,
@@ -1933,7 +1953,7 @@ pub fn ii_write_section_float(
     if buf.len() < pixels {
         return IIERR_BAD_CALL;
     }
-    let func = in_file.write_section_float;
+
     // `f32` is four contiguous bytes, so this is a bounded view of the
     // caller-owned native float storage until the legacy section callback is
     // itself converted to a typed API.
@@ -1942,7 +1962,7 @@ pub fn ii_write_section_float(
         in_file,
         bytes,
         in_section,
-        func,
+        SectionOp::WriteFloat,
         "converting floats to write to",
     )
 }
@@ -1950,9 +1970,19 @@ pub fn read_write_section(
     in_file: &mut ImodImageFile,
     buf: &mut [u8],
     in_section: i32,
-    func: IiSectionFunc,
+    op: SectionOp,
     mess: &str,
 ) -> i32 {
+    // `iimage.c` passes the callback itself; the slot is named here instead,
+    // so the dispatch below is a `match` rather than pointer equality.
+    let func = match op {
+        SectionOp::Read => in_file.read_section,
+        SectionOp::ReadByte => in_file.read_section_byte,
+        SectionOp::ReadUshort => in_file.read_section_ushort,
+        SectionOp::ReadFloat => in_file.read_section_float,
+        SectionOp::Write => in_file.write_section,
+        SectionOp::WriteFloat => in_file.write_section_float,
+    };
     let Some(func) = func else {
         b3d_error(
             Some(&mut ImodFile::Stderr),
@@ -1976,8 +2006,8 @@ pub fn read_write_section(
             in_file.ury - in_file.lly + 1
         })
         .max(0) as usize;
-        let element_bytes =
-            if Some(func) == in_file.read_section || Some(func) == in_file.write_section {
+        let element_bytes = match op {
+            SectionOp::Read | SectionOp::Write => {
                 let mut bytes = 0;
                 let mut channels = 0;
                 if mrc_getdcsize(in_file.mode, &mut bytes, &mut channels) != 0 {
@@ -1999,17 +2029,14 @@ pub fn read_write_section(
                 } else {
                     (bytes * channels) as usize
                 }
-            } else if Some(func) == in_file.read_section_byte {
-                1
-            } else if Some(func) == in_file.read_section_ushort {
-                2
-            } else if Some(func) == in_file.read_section_float
-                || Some(func) == in_file.write_section_float
-            {
-                4
-            } else {
-                return IIERR_BAD_CALL;
-            };
+            }
+            SectionOp::ReadByte => 1,
+            SectionOp::ReadUshort => 2,
+            // `iimage.c:1191`'s trailing `return IIERR_BAD_CALL` was the
+            // no-pointer-matched case.  The slot is named now, so the match is
+            // exhaustive and that arm is unreachable.
+            SectionOp::ReadFloat | SectionOp::WriteFloat => 4,
+        };
         let Some(required) = width
             .checked_mul(rows)
             .and_then(|pixels| pixels.checked_mul(element_bytes))
@@ -2036,18 +2063,25 @@ pub fn read_write_section(
             let mut dsize = 0;
             let mut csize = 0;
             if mrc_getdcsize(in_file.mode, &mut dsize, &mut csize) == 0 {
-                if Some(func) == in_file.read_section {
-                    data_size = dsize * csize;
-                    convert = MRSA_NOPROC;
-                } else if Some(func) == in_file.read_section_byte {
-                    data_size = 1;
-                    convert = MRSA_BYTE;
-                } else if Some(func) == in_file.read_section_ushort {
-                    data_size = 2;
-                    convert = MRSA_USHORT;
-                } else if Some(func) == in_file.read_section_float {
-                    data_size = 4;
-                    convert = MRSA_FLOAT;
+                match op {
+                    SectionOp::Read => {
+                        data_size = dsize * csize;
+                        convert = MRSA_NOPROC;
+                    }
+                    SectionOp::ReadByte => {
+                        data_size = 1;
+                        convert = MRSA_BYTE;
+                    }
+                    SectionOp::ReadUshort => {
+                        data_size = 2;
+                        convert = MRSA_USHORT;
+                    }
+                    SectionOp::ReadFloat => {
+                        data_size = 4;
+                        convert = MRSA_FLOAT;
+                    }
+                    // The C chain tests only the four read slots.
+                    SectionOp::Write | SectionOp::WriteFloat => {}
                 }
             }
         }
@@ -2392,7 +2426,7 @@ pub unsafe fn hdf_write_global_adoc(in_file: *mut ImodImageFile) -> i32 {
 pub unsafe fn hdf_write_dummy_section(in_file: *mut ImodImageFile, buf: *mut u8, cz: i32) -> i32 {
     native_hdf_write_dummy_section(in_file, buf, cz)
 }
-pub unsafe fn ii_test_if_hdf(filename: &[u8]) -> i32 {
+pub fn ii_test_if_hdf(filename: &[u8]) -> i32 {
     native_ii_test_if_hdf(filename)
 }
 pub unsafe fn hdf_read_section_any(
@@ -2600,7 +2634,7 @@ mod tests {
 
     #[test]
     fn simple_mrc_header_callback_copies_source_image_metadata() {
-        unsafe {
+        {
             let mut image_file = ImodImageFile::default();
             image_file.nx = 4;
             image_file.ny = 5;
@@ -2764,15 +2798,15 @@ mod tests {
             read_section: Some(read_two_bytes),
             ..ImodImageFile::default()
         };
-        let func = image.read_section;
+
         let mut short = [0_u8; 1];
         assert_eq!(
-            read_write_section(&mut image, &mut short, 0, func, "reading from"),
+            read_write_section(&mut image, &mut short, 0, SectionOp::Read, "reading from"),
             IIERR_BAD_CALL
         );
         let mut pixels = [0_u8; 2];
         assert_eq!(
-            read_write_section(&mut image, &mut pixels, 0, func, "reading from"),
+            read_write_section(&mut image, &mut pixels, 0, SectionOp::Read, "reading from"),
             0
         );
         assert_eq!(pixels, [17, 29]);
@@ -2967,10 +3001,10 @@ mod tests {
 
     #[test]
     fn quit_callback_returns_the_source_quitting_status() {
-        unsafe fn quit_on_seven(value: i32) -> i32 {
+        fn quit_on_seven(value: i32) -> i32 {
             (value == 7) as i32
         }
-        unsafe {
+        {
             ii_register_quit_check(None);
             assert_eq!(ii_check_for_quit(7), 0);
             ii_register_quit_check(Some(quit_on_seven));

@@ -660,7 +660,7 @@ pub fn mrc_head_read(fin: &mut ImodFile, hdata: &mut MrcHeader) -> i32 {
         }
         hdata.nx *= 2;
         if hdata.bytes_signed != 0 {
-            unsafe {
+            {
                 b3d_error(
                     Some(&mut ImodFile::Stderr),
                     format_args!(
@@ -673,7 +673,7 @@ pub fn mrc_head_read(fin: &mut ImodFile, hdata: &mut MrcHeader) -> i32 {
     }
 
     if hdata.mode > 31 || hdata.mode < 0 {
-        unsafe {
+        {
             b3d_error(
                 Some(&mut ImodFile::Stderr),
                 format_args!("ERROR: mrc_head_read - bad file mode {}.\n", hdata.mode),
@@ -682,7 +682,7 @@ pub fn mrc_head_read(fin: &mut ImodFile, hdata: &mut MrcHeader) -> i32 {
         return 1;
     }
     if hdata.nlabl > MRC_NLABELS as i32 {
-        unsafe {
+        {
             b3d_error(
                 Some(&mut ImodFile::Stderr),
                 format_args!(
@@ -806,7 +806,7 @@ pub fn mrc_head_write(fout: &mut ImodFile, hdata: &mut MrcHeader) -> i32 {
         hcopy.mode = MRC_MODE_4BIT;
     } else if hdata.packed4bits == PACKED_HALF_XSIZE {
         if hdata.nx % 2 != 0 {
-            unsafe {
+            {
                 b3d_error(
                     Some(&mut ImodFile::Stderr),
                     format_args!(
@@ -2582,7 +2582,7 @@ mod tests {
 
     #[test]
     fn read_extra_header_preserves_owned_io_and_swapping_contract() {
-        unsafe {
+        {
             let mut file = crate::imod::libcfshr::b3dutil::ImodFile::tmpfile().unwrap();
             let header_bytes = [0_u8; MRC_HEADER_SIZE];
             assert_eq!(
@@ -2622,7 +2622,7 @@ mod tests {
 
     #[test]
     fn data_memory_allocation_owns_section_vectors() {
-        unsafe {
+        {
             let mut separate = LoadInfo::default();
             let mut separate_data = mrc_get_data_memory(&mut separate, 5, 3, 2).unwrap();
             for index in 0..3 {
@@ -2715,7 +2715,7 @@ mod tests {
 
     #[test]
     fn mrc_header_disk_prefix_offsets_are_explicit_not_rust_layout() {
-        unsafe {
+        {
             crate::imod::libcfshr::b3dutil::override_invert_mrc_origin(0);
             let mut file = crate::imod::libcfshr::b3dutil::ImodFile::tmpfile().unwrap();
             let mut header = MrcHeader::default();
@@ -2790,7 +2790,7 @@ mod tests {
 
     #[test]
     fn mrc_write_slice_x_writes_the_source_strided_plane_layout() {
-        unsafe {
+        {
             let mut file = crate::imod::libcfshr::b3dutil::ImodFile::tmpfile().unwrap();
             let mut header = MrcHeader::default();
             assert_eq!(mrc_head_new(&mut header, 2, 2, 2, MRC_MODE_BYTE), 0);
@@ -2823,7 +2823,7 @@ mod tests {
 
     #[test]
     fn mrc_z_slice_round_trip_uses_the_real_file_dispatch_path() {
-        unsafe {
+        {
             let mut file = crate::imod::libcfshr::b3dutil::ImodFile::tmpfile().unwrap();
             let mut header = MrcHeader::default();
             assert_eq!(mrc_head_new(&mut header, 3, 2, 1, MRC_MODE_BYTE), 0);
@@ -2850,7 +2850,7 @@ mod tests {
     #[test]
     fn mrc_head_read_error_messages_use_source_text_and_a_real_newline() {
         use crate::imod::libcfshr::b3dutil::{b3d_get_error, b3d_set_store_error};
-        unsafe {
+        {
             let mut file = crate::imod::libcfshr::b3dutil::ImodFile::tmpfile().unwrap();
             let mut header = MrcHeader::default();
             assert_eq!(mrc_head_new(&mut header, 4, 4, 1, MRC_MODE_BYTE), 0);
@@ -2928,7 +2928,7 @@ mod tests {
     #[test]
     fn mrc_head_read_short_read_reports_the_source_word_count() {
         use crate::imod::libcfshr::b3dutil::{b3d_get_error, b3d_set_store_error};
-        unsafe {
+        {
             let mut file = crate::imod::libcfshr::b3dutil::ImodFile::tmpfile().unwrap();
             let partial = [0_u8; 100];
             assert_eq!(
@@ -2957,7 +2957,7 @@ mod tests {
     #[test]
     fn mrc_head_write_refuses_odd_x_for_half_size_4bit_output() {
         use crate::imod::libcfshr::b3dutil::{b3d_get_error, b3d_set_store_error};
-        unsafe {
+        {
             let mut file = crate::imod::libcfshr::b3dutil::ImodFile::tmpfile().unwrap();
             let mut header = MrcHeader::default();
             assert_eq!(mrc_head_new(&mut header, 7, 4, 1, MRC_MODE_BYTE), 0);
@@ -3008,7 +3008,7 @@ mod tests {
     /// are never updated.
     #[test]
     fn mrc_head_new_seeds_the_local_flt_max_sentinels_on_disk() {
-        unsafe {
+        {
             let mut file = crate::imod::libcfshr::b3dutil::ImodFile::tmpfile().unwrap();
             let mut header = MrcHeader::default();
             assert_eq!(mrc_head_new(&mut header, 4, 4, 1, MRC_MODE_FLOAT), 0);
@@ -3043,7 +3043,7 @@ mod tests {
     /// MRC_FLAGS_INV_ORIGIN bit and nversion 20140, while the caller's header is untouched.
     #[test]
     fn mrc_head_write_inverts_origin_and_stamps_nversion_on_disk() {
-        unsafe {
+        {
             crate::imod::libcfshr::b3dutil::override_invert_mrc_origin(1);
             let mut file = crate::imod::libcfshr::b3dutil::ImodFile::tmpfile().unwrap();
             let mut header = MrcHeader::default();
@@ -3141,7 +3141,7 @@ mod tests {
     /// the mode range, in the written copy only.
     #[test]
     fn mrc_head_write_clamps_mode_extremes_in_the_written_copy() {
-        unsafe {
+        {
             crate::imod::libcfshr::b3dutil::override_invert_mrc_origin(0);
             let mut file = crate::imod::libcfshr::b3dutil::ImodFile::tmpfile().unwrap();
             let mut header = MrcHeader::default();
@@ -3238,7 +3238,7 @@ mod tests {
     #[test]
     fn mrc_read_slice_reports_x_path_errors_in_source_order() {
         use crate::imod::libcfshr::b3dutil::{b3d_get_error, b3d_set_store_error};
-        unsafe {
+        {
             let mut file = crate::imod::libcfshr::b3dutil::ImodFile::tmpfile().unwrap();
             let mut header = MrcHeader::default();
             assert_eq!(mrc_head_new(&mut header, 2, 2, 1, MRC_MODE_BYTE), 0);
@@ -3329,7 +3329,7 @@ mod tests {
     /// and updates both `next` and `headerSize` in the output header.
     #[test]
     fn mrc_write_extra_header_updates_next_and_header_size_on_a_real_file() {
-        unsafe {
+        {
             let mut file = crate::imod::libcfshr::b3dutil::ImodFile::tmpfile().unwrap();
             let mut header = MrcHeader::default();
             assert_eq!(mrc_head_new(&mut header, 4, 4, 1, MRC_MODE_BYTE), 0);

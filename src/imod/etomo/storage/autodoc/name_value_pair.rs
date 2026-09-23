@@ -116,11 +116,11 @@ impl NameValuePair {
     ///
     /// # Safety
     /// `value` must be null or point to a live `Token` link list.
-    pub unsafe fn get_value(&self) -> Option<String> {
+    pub fn get_value(&self) -> Option<String> {
         match &self.value {
             None => None,
             Some(Value::Parsed(value)) => Some(unsafe { (**value).get_values() }),
-            Some(Value::Generated(value)) => Some(unsafe { value.get_values() }),
+            Some(Value::Generated(value)) => Some({ value.get_values() }),
         }
     }
 
@@ -137,7 +137,7 @@ impl NameValuePair {
     ///
     /// # Safety
     /// Every attribute in the name must be live.
-    pub unsafe fn to_string(&self) -> String {
+    pub fn to_string(&self) -> String {
         ReadOnlyStatement::get_string(self)
     }
 }
@@ -156,7 +156,7 @@ impl Statement for NameValuePair {
     /// `value.getMultiLineValues()` cannot return null, so the source's
     /// `valueString == null` guard is dead; a null `noWrapPrefix` would throw a
     /// `NullPointerException` in `startsWith`, which no caller produces.
-    unsafe fn wrap_value(
+    fn wrap_value(
         &mut self,
         no_wrap_prefix: Option<&str>,
         wrap_prefix: Option<&str>,
@@ -168,7 +168,7 @@ impl Statement for NameValuePair {
         let value_string = match &self.value {
             None => return,
             Some(Value::Parsed(value)) => unsafe { (**value).get_multi_line_values() },
-            Some(Value::Generated(value)) => unsafe { value.get_multi_line_values() },
+            Some(Value::Generated(value)) => value.get_multi_line_values(),
         };
         if value_string.starts_with(match no_wrap_prefix {
             None => panic!("java.lang.NullPointerException"),
@@ -208,7 +208,7 @@ impl Statement for NameValuePair {
     }
 
     /// Java `write(LogFile.Handle, LogFile.WriterId)`.
-    unsafe fn write(
+    fn write(
         &self,
         file: &std::sync::Arc<log_file::Handle>,
         writer_id: &log_file::WriterId,
@@ -228,7 +228,7 @@ impl Statement for NameValuePair {
         match &self.value {
             None => {}
             Some(Value::Parsed(value)) => unsafe { (**value).write(file, writer_id)? },
-            Some(Value::Generated(value)) => unsafe { value.write(file, writer_id)? },
+            Some(Value::Generated(value)) => value.write(file, writer_id)?,
         }
         file.new_line(writer_id)?;
         if !self.new_delimiter.is_null() {
@@ -238,7 +238,7 @@ impl Statement for NameValuePair {
     }
 
     /// Java `print(int)`.
-    unsafe fn print(&self, level: i32) {
+    fn print(&self, level: i32) {
         autodoc::print_indent(level);
         for i in 0..self.name.len() {
             print!("{}", unsafe {
@@ -255,7 +255,7 @@ impl Statement for NameValuePair {
         match &self.value {
             None => println!(),
             Some(Value::Parsed(value)) => println!("{}", unsafe { (**value).get_values() }),
-            Some(Value::Generated(value)) => println!("{}", unsafe { value.get_values() }),
+            Some(Value::Generated(value)) => println!("{}", { value.get_values() }),
         }
         if !self.new_delimiter.is_null() {
             unsafe { (*self.parent).set_current_delimiter(self.new_delimiter) };
@@ -328,7 +328,7 @@ impl ReadOnlyStatement for NameValuePair {
         match &self.value {
             None => None,
             Some(Value::Parsed(value)) => Some(unsafe { (**value).get_values() }),
-            Some(Value::Generated(value)) => Some(unsafe { value.get_values() }),
+            Some(Value::Generated(value)) => Some({ value.get_values() }),
         }
     }
 
@@ -354,7 +354,7 @@ impl ReadOnlyStatement for NameValuePair {
         match &self.value {
             None => {}
             Some(Value::Parsed(value)) => buffer.push_str(&unsafe { (**value).get_values() }),
-            Some(Value::Generated(value)) => buffer.push_str(&unsafe { value.get_values() }),
+            Some(Value::Generated(value)) => buffer.push_str(&{ value.get_values() }),
         }
         buffer
     }

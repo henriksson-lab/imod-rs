@@ -203,7 +203,7 @@ impl AutodocTokenizer {
     ///
     /// # Safety
     /// The primitive tokenizer's token graph must be live.
-    pub unsafe fn next(&mut self) -> Box<Token> {
+    pub fn next(&mut self) -> Box<Token> {
         if self.use_next_token {
             self.use_next_token = false;
             return Box::new(Token::new_from_token(&self.next_token));
@@ -219,10 +219,10 @@ impl AutodocTokenizer {
     ///
     /// # Safety
     /// See `next`.
-    pub unsafe fn test(&mut self, tokens: bool) {
+    pub fn test(&mut self, tokens: bool) {
         self.initialize();
         loop {
-            let token = unsafe { self.next() };
+            let token = { self.next() };
             if tokens {
                 println!("{}", token.to_string());
             } else if token.is(token::Type::Eol) {
@@ -261,7 +261,7 @@ impl AutodocTokenizer {
         let mut building_word = false;
         self.look_ahead = false;
         loop {
-            if unsafe { self.find_simple_token() } || unsafe { self.find_look_ahead_token() } {
+            if { self.find_simple_token() } || { self.find_look_ahead_token() } {
                 if building_word {
                     #[allow(unused_assignments)]
                     {
@@ -278,7 +278,7 @@ impl AutodocTokenizer {
                 self.primative_token =
                     unsafe { self.primative_tokenizer.next(self.primative_token) };
             } else {
-                if unsafe { self.find_delimiter() } {
+                if { self.find_delimiter() } {
                     if building_word {
                         #[allow(unused_assignments)]
                         {
@@ -307,7 +307,7 @@ impl AutodocTokenizer {
     ///
     /// Recognizes primative tokens that are also used by autodoc.
     /// Makes one-character tokens out of primative SYMBOL tokens.
-    unsafe fn find_simple_token(&mut self) -> bool {
+    fn find_simple_token(&mut self) -> bool {
         let primative_token: *const Token = self.primative_token;
         if unsafe {
             (*primative_token).is(token::Type::Eof)
@@ -356,12 +356,12 @@ impl AutodocTokenizer {
     ///
     /// # Safety
     /// See `next`.
-    unsafe fn find_look_ahead_token(&mut self) -> bool {
+    fn find_look_ahead_token(&mut self) -> bool {
         if unsafe {
             (*self.primative_token)
                 .equals_type_and_character(token::Type::Symbol, Some(OPEN_CHAR as u16))
         } {
-            if unsafe { self.match_with_look_ahead(token::Type::Symbol, Some(OPEN_CHAR as u16)) } {
+            if { self.match_with_look_ahead(token::Type::Symbol, Some(OPEN_CHAR as u16)) } {
                 self.token.set_type_and_string(
                     token::Type::Subopen,
                     &format!("{}{}", OPEN_CHAR, OPEN_CHAR),
@@ -374,7 +374,7 @@ impl AutodocTokenizer {
             (*self.primative_token)
                 .equals_type_and_character(token::Type::Symbol, Some(CLOSE_CHAR as u16))
         } {
-            if unsafe { self.match_with_look_ahead(token::Type::Symbol, Some(CLOSE_CHAR as u16)) } {
+            if { self.match_with_look_ahead(token::Type::Symbol, Some(CLOSE_CHAR as u16)) } {
                 self.token.set_type_and_string(
                     token::Type::Subclose,
                     &format!("{}{}", CLOSE_CHAR, CLOSE_CHAR),
@@ -396,11 +396,7 @@ impl AutodocTokenizer {
     ///
     /// # Safety
     /// See `next`.
-    unsafe fn match_with_look_ahead(
-        &mut self,
-        match_type: token::Type,
-        match_char: Option<u16>,
-    ) -> bool {
+    fn match_with_look_ahead(&mut self, match_type: token::Type, match_char: Option<u16>) -> bool {
         self.primative_token = unsafe { self.primative_tokenizer.next(self.primative_token) };
         if unsafe { (*self.primative_token).equals_type_and_character(match_type, match_char) } {
             return true;
@@ -418,7 +414,7 @@ impl AutodocTokenizer {
     ///
     /// # Safety
     /// See `next`.
-    unsafe fn find_delimiter(&mut self) -> bool {
+    fn find_delimiter(&mut self) -> bool {
         let delimiter_units: Vec<u16> = self.delimiter_string.encode_utf16().collect();
         let length = delimiter_units.len() as i32;
         let mut index: i32 = 0;

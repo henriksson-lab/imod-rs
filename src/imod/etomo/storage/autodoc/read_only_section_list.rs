@@ -16,7 +16,7 @@ pub trait ReadOnlySectionList {
     ///
     /// # Safety
     /// See `get_section`.
-    unsafe fn get_section_location_by_type(&self, r#type: Option<&str>) -> Option<SectionLocation>;
+    fn get_section_location_by_type(&self, r#type: Option<&str>) -> Option<SectionLocation>;
     /// Java `getSectionLocation()`.
     fn get_section_location(&self) -> Option<SectionLocation>;
     /// Java `nextSection(SectionLocation)`.  Java's parameter may be null.

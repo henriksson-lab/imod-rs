@@ -406,7 +406,7 @@ pub fn mrc_read_section_any(
     let seek_skip = if read_y != 0 { hdata.section_skip } else { 0 };
     let seek_error = if read_y != 0 {
         d.seek_end_y = ny - 1;
-        unsafe {
+        {
             mrc_huge_seek(
                 &mut fin,
                 hdata.header_size + hdata.section_skip * d.y_start,
@@ -421,7 +421,7 @@ pub fn mrc_read_section_any(
         }
     } else {
         d.seek_end_y = 0;
-        unsafe {
+        {
             mrc_huge_seek(
                 &mut fin,
                 hdata.header_size + hdata.section_skip * d.cz,
@@ -527,20 +527,19 @@ pub fn mrc_read_section_any(
             return IIERR_QUITTING;
         }
         // `mrcsec.c:384-386`: only seek when there is something to skip.
-        if (seek_end_x != 0 || d.seek_end_y != 0 || seek_skip != 0)
-            && unsafe {
-                mrc_huge_seek(
-                    &mut fin,
-                    seek_skip,
-                    seek_end_x,
-                    d.seek_end_y,
-                    0,
-                    nx_seek,
-                    ny,
-                    d.pix_size,
-                    SEEK_CUR,
-                )
-            } != 0
+        if (seek_end_x != 0 || d.seek_end_y != 0 || seek_skip != 0) && {
+            mrc_huge_seek(
+                &mut fin,
+                seek_skip,
+                seek_end_x,
+                d.seek_end_y,
+                0,
+                nx_seek,
+                ny,
+                d.pix_size,
+                SEEK_CUR,
+            )
+        } != 0
         {
             return 3;
         }
@@ -1227,7 +1226,7 @@ pub unsafe fn ii_process_read_line(
             bufp = bufp.offset((advance * d.pix_size) as isize);
         }
         if !passed {
-            d.bufp_offset = unsafe { bufp.offset_from(d.buf) };
+            d.bufp_offset = { bufp.offset_from(d.buf) };
             d.bytes_since_check += (d.xsize * d.pix_size + 100000).min(h.nx * d.pix_size);
             if d.bytes_since_check > 4000000 {
                 d.bytes_since_check = 0;
@@ -1391,7 +1390,7 @@ pub fn mrc_write_section_any(
     if need {
         temp.resize((bytes_line * chunk_lines) as usize, 0);
     }
-    if unsafe {
+    if {
         mrc_huge_seek(
             &mut fin,
             h.header_size + h.section_skip * cz,
@@ -1746,7 +1745,7 @@ mod tests {
 
     #[test]
     fn inverted_y_complex_section_from_real_mrc_starts_at_last_output_row() {
-        unsafe {
+        {
             let path = std::env::temp_dir().join(format!(
                 "imod-rs-mrcsec-inverted-complex-{}.mrc",
                 std::process::id()
@@ -1796,7 +1795,7 @@ mod tests {
 
     #[test]
     fn inverted_y_mirrored_fft_reports_the_source_error() {
-        unsafe {
+        {
             let path = std::env::temp_dir().join(format!(
                 "imod-rs-mrcsec-inverted-mirror-{}.mrc",
                 std::process::id()
@@ -1896,7 +1895,7 @@ mod tests {
             );
             assert_eq!(
                 crate::imod::libcfshr::b3dutil::b3d_fread(
-                    unsafe {
+                    {
                         core::slice::from_raw_parts_mut(
                             stored.as_mut_ptr().cast::<u8>(),
                             4 * (stored.len()),
@@ -1972,7 +1971,7 @@ mod tests {
             );
             assert_eq!(
                 crate::imod::libcfshr::b3dutil::b3d_fread(
-                    unsafe {
+                    {
                         core::slice::from_raw_parts_mut(
                             stored.as_mut_ptr().cast::<u8>(),
                             4 * (stored.len()),
@@ -2053,7 +2052,7 @@ mod tests {
             );
             assert_eq!(
                 crate::imod::libcfshr::b3dutil::b3d_fread(
-                    unsafe {
+                    {
                         core::slice::from_raw_parts_mut(
                             stored.as_mut_ptr().cast::<u8>(),
                             4 * (stored.len()),
@@ -2080,7 +2079,7 @@ mod tests {
 
     #[test]
     fn inverted_y_raw_read_fills_the_buffer_backwards_without_underrun() {
-        unsafe {
+        {
             // `mrcsec.c:230` fills pixSizeBuf[MRSA_NOPROC] with the file pixel
             // size; with a zero there the inverted-Y setup leaves `bufp` at the
             // start of the buffer and the first line lands in front of it.
@@ -2156,7 +2155,7 @@ mod tests {
 
     #[test]
     fn float_section_read_as_bytes_stays_inside_the_byte_buffer() {
-        unsafe {
+        {
             // The conversion cases of `mrcsec.c:701-996` step the output pointer
             // by `xDimension` bytes, not by the file's pixel size; multiplying by
             // `d->pixSize` here wrote four bytes per pixel of stride and ran off
@@ -2224,7 +2223,7 @@ mod tests {
 
     #[test]
     fn y_slice_read_steps_a_whole_section_between_lines() {
-        unsafe {
+        {
             // `mrcsec.c:321` sets seekEndY to ny - 1 when reading in Y, so the
             // per-line seek advances to the same row of the next section.
             let nx = 3_i32;

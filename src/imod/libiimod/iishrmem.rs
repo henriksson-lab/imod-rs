@@ -59,7 +59,7 @@ pub const SHR_MEM_DATA_OFFSET: usize = 2048;
 /// The mapping itself remains an OS resource, but the image record is an
 /// ordinary mutable Rust borrow rather than a caller-managed C cursor.
 pub fn ii_shr_mem_create(filename: &str, ii_file: &mut ImodImageFile) -> i32 {
-    unsafe {
+    {
         let mut map_file = 0;
         let address = open_and_get_address(filename, "iiShrMemCreate", &mut map_file);
         if address.is_null() {

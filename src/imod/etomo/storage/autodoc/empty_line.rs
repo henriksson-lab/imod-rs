@@ -52,7 +52,7 @@ impl Statement for EmptyLine {
     }
 
     /// Java `wrapValue(String, String, String, String, int, int)`, whose body is empty.
-    unsafe fn wrap_value(
+    fn wrap_value(
         &mut self,
         _no_wrap_prefix: Option<&str>,
         _wrap_prefix: Option<&str>,
@@ -64,7 +64,7 @@ impl Statement for EmptyLine {
     }
 
     /// Java `write(LogFile.Handle, LogFile.WriterId)`.
-    unsafe fn write(
+    fn write(
         &self,
         file: &std::sync::Arc<log_file::Handle>,
         writer_id: &log_file::WriterId,
@@ -73,7 +73,7 @@ impl Statement for EmptyLine {
     }
 
     /// Java `print(int)`.
-    unsafe fn print(&self, level: i32) {
+    fn print(&self, level: i32) {
         autodoc::print_indent(level);
         println!("<empty-line>");
     }

@@ -99,7 +99,7 @@ pub fn header() {
     //
     // Pip startup: set error, parse options, check help, set flag if used
     // But turn off the entry printing first!
-    unsafe {
+    {
         pip_enable_entry_output(0);
     }
     pip_read_or_parse_options(
@@ -116,7 +116,7 @@ pub fn header() {
     );
     let pip_input = num_opt_arg + num_non_opt_arg > 0;
     //
-    unsafe {
+    {
         if pip_input {
             pip_get_logical("Size", &mut do_size);
             pip_get_logical("Mode", &mut do_mode);
@@ -126,26 +126,10 @@ pub fn header() {
             pip_get_logical("RootMeanSquare", &mut do_rms);
             pip_get_logical("PixelSize", &mut do_pixel);
             pip_get_logical("Origin", &mut do_origin);
-            let mut option = *b"Brief";
-            pipgetinteger_(
-                option.as_mut_ptr().cast(),
-                &raw mut if_brief,
-                option.len() as i32,
-            );
+            pipgetinteger_(b"Brief", &mut if_brief);
             pip_get_logical("FullSizeOfEERFile", &mut do_full_eer);
-            let mut option = *b"VolumeNumber";
-            pipgetinteger_(
-                option.as_mut_ptr().cast(),
-                &raw mut i_volume,
-                option.len() as i32,
-            );
-            let mut option = *b"TiffStringTagToPrint";
-            if pipgetinteger_(
-                option.as_mut_ptr().cast(),
-                &raw mut tag_to_print,
-                option.len() as i32,
-            ) == 0
-            {
+            pipgetinteger_(b"VolumeNumber", &mut i_volume);
+            if pipgetinteger_(b"TiffStringTagToPrint", &mut tag_to_print) == 0 {
                 // `iiSetTiffTagToPrint` (`unit_fileio.c:941`) is declared
                 // `int` but falls off its end without returning, so the
                 // translated `iisettifftagtoprint_` traps on that source-level
@@ -153,12 +137,7 @@ pub fn header() {
                 // `tiffSetStringTagToPrint(*tag)`, is invoked directly.
                 tiff_set_string_tag_to_print(tag_to_print);
             }
-            let mut option = *b"InputFile";
-            pipnumberofentries_(
-                option.as_mut_ptr().cast(),
-                &raw mut num_input_files,
-                option.len() as i32,
-            );
+            pipnumberofentries_(b"InputFile", &mut num_input_files);
             num_file_in = num_input_files + num_non_opt_arg;
             if num_file_in == 0 {
                 exit_error("No input file specified");
@@ -243,23 +222,13 @@ pub fn header() {
         // `character*320 inFile` (`header.f90:19`), so the Fortran PIP wrappers
         // fill a fixed 320-character record and blank-pad it.
         let mut in_file_record = [b' '; 320];
-        unsafe {
+        {
             if pip_input {
                 if i <= num_input_files {
-                    let mut option = *b"InputFile";
-                    pipgetstring_(
-                        option.as_mut_ptr().cast(),
-                        in_file_record.as_mut_ptr().cast(),
-                        option.len() as i32,
-                        in_file_record.len() as i32,
-                    );
+                    pipgetstring_(b"InputFile", &mut in_file_record);
                 } else {
-                    let mut arg_number = i - num_input_files;
-                    pipgetnonoptionarg_(
-                        &raw mut arg_number,
-                        in_file_record.as_mut_ptr().cast(),
-                        in_file_record.len() as i32,
-                    );
+                    let arg_number = i - num_input_files;
+                    pipgetnonoptionarg_(arg_number, &mut in_file_record);
                 }
             } else {
                 print!(" {}", "Name of input file: ");

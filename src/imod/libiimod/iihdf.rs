@@ -2076,7 +2076,7 @@ unsafe fn cleanup_from_open(
     cleanup_malloc_bufs();
 }
 /// C `cleanupMallocBufs` (`iihdf.c:1764`).
-unsafe fn cleanup_malloc_bufs() {
+fn cleanup_malloc_bufs() {
     // C also frees `sStringBuf` and `sAttribName` here; both are now owned by
     // the routines that build them and go away with their scopes.
     FLOAT_BUF.lock().unwrap().clear();
@@ -2515,7 +2515,7 @@ unsafe fn get_del_prefixed_float(key: &[u8], value: *mut f32, err_sum: *mut i32)
     err
 }
 /// C `deletePrefixedKeyValue` (`iihdf.c:2103`).
-unsafe fn delete_prefixed_key_value(key: &[u8]) -> i32 {
+fn delete_prefixed_key_value(key: &[u8]) -> i32 {
     let full = prefixed_key(
         MRC_PREFIX.lock().unwrap().as_deref().map(str::as_bytes),
         key,

@@ -4133,8 +4133,8 @@ pub fn ivw_trans_model(vi: &mut ImodView) {
 /*****************************************************************************/
 
 /// `imodImageFileDesc` (`imodview.cpp:2338`); returns the type of image file.
-pub unsafe fn imod_image_file_desc(fin: &mut ImodFile) -> i32 {
-    unsafe {
+pub fn imod_image_file_desc(fin: &mut ImodFile) -> i32 {
+    {
         let mut isifd = 0;
         let mut buf = [0u8; 128];
 
@@ -6744,7 +6744,7 @@ mod tests {
     }
 
     fn zeroed_load_info() -> LoadInfo {
-        unsafe { LoadInfo::default() }
+        LoadInfo::default()
     }
 
     #[test]

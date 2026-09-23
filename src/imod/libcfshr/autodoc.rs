@@ -871,7 +871,7 @@ pub fn write_file(
 /// The source is variadic; the arguments are a `CArg` slice here, and the
 /// formatting goes through `b3dutil::c_format_bytes`, the tree's translation of
 /// the C library's own `printf`.
-pub fn fs_printf(format: &str, args: &[CArg]) -> i32 {
+fn fs_printf(format: &str, args: &[CArg]) -> i32 {
     let mut retval: i32 = 0;
     let num_written: i32;
     let text = c_format_bytes(format, args);
@@ -917,7 +917,7 @@ pub fn fs_printf(format: &str, args: &[CArg]) -> i32 {
 }
 
 /// Matches C static `setupSectionOrder` (`autodoc.c:768`).
-pub fn setup_section_order(adoc: &Autodoc) -> Option<Vec<i32>> {
+fn setup_section_order(adoc: &Autodoc) -> Option<Vec<i32>> {
     let mut i: i32;
     let mut j: i32 = 0;
     let mut ind: i32;
@@ -1315,7 +1315,7 @@ pub fn adoc_set_key_value(
 /// error" of the `AdocSet*` family: no current autodoc, no such section, or a
 /// NULL key or value.  `sectSetKeyValueType`'s own non-zero is the same -1,
 /// forwarded, so it collapses into the same `Err(())`.
-pub fn set_key_value_type(
+fn set_key_value_type(
     type_name: &[u8],
     sect_ind: i32,
     key: &[u8],
@@ -1344,7 +1344,7 @@ pub fn set_key_value_type(
 }
 
 /// Matches C static `sectSetKeyValueType` (`autodoc.c:1130`).
-pub fn sect_set_key_value_type(
+fn sect_set_key_value_type(
     sect: &mut AdocSection,
     key: &[u8],
     value: Option<&[u8]>,
@@ -1489,7 +1489,7 @@ pub enum ArrayOfValues<'a> {
 }
 
 /// Matches C static `setArrayOfValues` (`autodoc.c:1263`).
-pub fn set_array_of_values(
+fn set_array_of_values(
     type_name: &[u8],
     sect_ind: i32,
     key: &[u8],
@@ -1927,7 +1927,7 @@ pub fn adoc_get_float_array(
 /// element names and values it hands back are byte slices that go straight into
 /// the autodoc's own `Vec<u8>` storage.  The autodoc is passed in rather than
 /// read from `sCurAdoc`, because the caller already holds the list open.
-pub fn read_xml_file(adoc: &mut Autodoc, fp: &mut ImodFile) -> i32 {
+fn read_xml_file(adoc: &mut Autodoc, fp: &mut ImodFile) -> i32 {
     let xml: Option<usize>;
     let mut node: Option<usize>;
     let mut top: Option<usize>;
@@ -2187,7 +2187,7 @@ pub fn read_xml_file(adoc: &mut Autodoc, fp: &mut ImodFile) -> i32 {
 ///
 /// `commentList` is held at length `maxComments`, the size the C `realloc`s it
 /// to, so a slot the source assigns by index exists here too.
-pub fn add_to_comment_list(
+fn add_to_comment_list(
     comment_list: &mut Vec<Vec<u8>>,
     num_comments: &mut i32,
     max_comments: &mut i32,
@@ -2203,7 +2203,7 @@ pub fn add_to_comment_list(
 }
 
 /// Matches C static `testAndAddComment` (`autodoc.c:1992`).
-pub fn test_and_add_comment(
+fn test_and_add_comment(
     arena: &MxmlArena,
     node: usize,
     comment_list: &mut Vec<Vec<u8>>,
@@ -2241,7 +2241,7 @@ pub fn test_and_add_comment(
 /// reads past the single `char ***` for `i > 0`.  The intended
 /// `(*commentList)[i]` is used here instead; matching the source literally would
 /// mean shipping an out-of-bounds read (`autodoc.c:2025`).
-pub fn handle_final_comments(
+fn handle_final_comments(
     adoc: &mut Autodoc,
     err: i32,
     comment_list: &mut Vec<Vec<u8>>,
@@ -2262,7 +2262,7 @@ pub fn handle_final_comments(
 }
 
 /// Matches C static `writeXmlFile` (`autodoc.c:2044`).
-pub fn write_xml_file(filename: &[u8]) -> i32 {
+fn write_xml_file(filename: &[u8]) -> i32 {
     let xml: Option<usize>;
     let mut node: Option<usize> = None;
     let mut elem: Option<usize> = None;
@@ -2359,7 +2359,7 @@ pub fn write_xml_file(filename: &[u8]) -> i32 {
 }
 
 /// Matches C static `writeCommentToXML` (`autodoc.c:2124`).
-pub fn write_comment_to_xml(arena: &mut MxmlArena, parent: Option<usize>, comment: &[u8]) {
+fn write_comment_to_xml(arena: &mut MxmlArena, parent: Option<usize>, comment: &[u8]) {
     let len: i32;
 
     len = comment.len() as i32;
@@ -2448,7 +2448,7 @@ pub fn add_section(adoc: &mut Autodoc, coll_ind: i32, name: &[u8]) -> i32 {
 }
 
 /// Matches C static `addCollection` (`autodoc.c:2242`).
-pub fn add_collection(adoc: &mut Autodoc, name: &[u8]) -> i32 {
+fn add_collection(adoc: &mut Autodoc, name: &[u8]) -> i32 {
     /* Allocate just one at a time when needed */
     adoc.collections.resize(
         (adoc.num_collections + 1) as usize,
@@ -2464,7 +2464,7 @@ pub fn add_collection(adoc: &mut Autodoc, name: &[u8]) -> i32 {
 }
 
 /// Matches C static `addAutodoc` (`autodoc.c:2268`).
-pub fn add_autodoc() -> i32 {
+fn add_autodoc() -> i32 {
     let mut index: i32 = -1;
 
     S_AUTODOCS.with_borrow_mut(|adocs| {
@@ -2504,7 +2504,7 @@ pub fn add_autodoc() -> i32 {
 }
 
 /// Matches C static `deleteAdoc` (`autodoc.c:2317`).
-pub fn delete_adoc(adoc: &mut Autodoc) {
+fn delete_adoc(adoc: &mut Autodoc) {
     let mut i: i32;
     let mut j: i32;
     i = 0;
@@ -2570,7 +2570,7 @@ pub enum ParseKeyValueError {
 /// The source takes two `char *` into one NUL-terminated line buffer; `line`
 /// and `end` are indices into that buffer here, because `strstr(line, ...)`
 /// searches past `end` to the buffer's NUL and the two are not one slice.
-pub fn parse_key_value(
+fn parse_key_value(
     buf: &[u8],
     line: usize,
     end: usize,
@@ -2645,7 +2645,7 @@ pub fn parse_key_value(
 }
 
 /// Matches C static `lookupKey` (`autodoc.c:2429`).
-pub fn lookup_key(sect: &AdocSection, key: &[u8]) -> i32 {
+fn lookup_key(sect: &AdocSection, key: &[u8]) -> i32 {
     let mut i: i32;
     i = 0;
     while i < sect.num_keys {
@@ -2658,7 +2658,7 @@ pub fn lookup_key(sect: &AdocSection, key: &[u8]) -> i32 {
 }
 
 /// Matches C static `lookupCollection` (`autodoc.c:2442`).
-pub fn lookup_collection(adoc: &Autodoc, name: &[u8]) -> i32 {
+fn lookup_collection(adoc: &Autodoc, name: &[u8]) -> i32 {
     let mut i: i32;
     i = 0;
     while i < adoc.num_collections {
@@ -2713,7 +2713,7 @@ pub fn add_comments(
 }
 
 /// Matches C static `findSectionInAdocList` (`autodoc.c:2497`).
-pub fn find_section_in_adoc_list(coll_ind: i32, sect_ind: i32) -> i32 {
+fn find_section_in_adoc_list(coll_ind: i32, sect_ind: i32) -> i32 {
     let cur = S_CUR_ADOC_IND.get();
     if cur < 0 {
         return -1;
@@ -2738,7 +2738,7 @@ pub fn find_section_in_adoc_list(coll_ind: i32, sect_ind: i32) -> i32 {
 /// is the outcome of the test the caller already made.  The C's `0`/`-1` is a
 /// "did the allocation fail" answer that every caller immediately turns into
 /// its own error return, so it is `Ok`/`Err` here.
-pub fn adoc_memory_error(failed: bool, routine: &str) -> Result<(), ()> {
+fn adoc_memory_error(failed: bool, routine: &str) -> Result<(), ()> {
     if !failed {
         return Ok(());
     }
@@ -2750,7 +2750,7 @@ pub fn adoc_memory_error(failed: bool, routine: &str) -> Result<(), ()> {
 }
 
 /// Matches C static `openForWrite` (`autodoc.c:2515`).
-pub fn open_for_write(name: &[u8], mode: &str) -> Option<ImodFile> {
+fn open_for_write(name: &[u8], mode: &str) -> Option<ImodFile> {
     let mut fp: Option<ImodFile> = None;
     let mut ind: i32;
     let trials: i32 = if 0 > S_OPEN_RETRIES.get() {

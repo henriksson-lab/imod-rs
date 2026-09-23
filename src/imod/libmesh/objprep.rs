@@ -534,7 +534,7 @@ pub fn analyze_prep_skin_obj(
 /// Cleans up all possible arrays set up for flattening analysis.  The C
 /// `free`/`imodMatDelete`/`imodObjectDelete` calls become ownership transfers
 /// into this function, which drops them.
-pub fn clean_prep_arrays(
+fn clean_prep_arrays(
     bbmin: Option<Vec<Ipoint>>,
     bbmax: Option<Vec<Ipoint>>,
     volume: Option<Vec<f32>>,
@@ -553,7 +553,7 @@ pub fn clean_prep_arrays(
 }
 
 /// Original static `floatcmp` (`objprep.c:423`).
-pub fn floatcmp(f1: f32, f2: f32) -> i32 {
+fn floatcmp(f1: f32, f2: f32) -> i32 {
     if f1 < f2 {
         return -1;
     }
@@ -639,7 +639,7 @@ pub fn imesh_prep_contours(
 /// Original static `resecobj` (`objprep.c:501`).
 ///
 /// Removes contours that don't fall on a multiple of `incz`.
-pub fn resecobj(obj: &mut Iobj, minz: i32, maxz: i32, mut incz: i32) -> i32 {
+fn resecobj(obj: &mut Iobj, minz: i32, maxz: i32, mut incz: i32) -> i32 {
     let mut z = 0;
 
     if incz <= 0 {
@@ -693,7 +693,7 @@ pub fn resecobj(obj: &mut Iobj, minz: i32, maxz: i32, mut incz: i32) -> i32 {
 /// Original static `ReduceObj` (`objprep.c:548`).
 ///
 /// Reduces points by removing ones within `dist` of the remaining lines.
-pub fn reduce_obj(obj: &mut Iobj, dist: f32) -> i32 {
+fn reduce_obj(obj: &mut Iobj, dist: f32) -> i32 {
     if dist <= 0.0 {
         return 0;
     }
@@ -741,7 +741,7 @@ pub fn reduce_obj(obj: &mut Iobj, dist: f32) -> i32 {
 }
 
 /// Original static `extendOpenEnds` (`objprep.c:596`).
-pub fn extend_open_ends(obj: &mut Iobj) -> i32 {
+fn extend_open_ends(obj: &mut Iobj) -> i32 {
     let mut dzmin: i32 = 0;
     let mut retval = 0;
     let mut num_phant = 0usize;
@@ -861,7 +861,7 @@ pub fn extend_open_ends(obj: &mut Iobj) -> i32 {
 ///
 /// Avoids underflow exceptions.  As in the source, this copies each point into
 /// a local and modifies the local, so it has no effect on the object.
-pub fn cleanzero(obj: &mut Iobj) {
+fn cleanzero(obj: &mut Iobj) {
     for co in 0..obj.cont.len() {
         for pt in 0..obj.cont[co].pts.len() {
             let mut pnt = obj.cont[co].pts[pt];

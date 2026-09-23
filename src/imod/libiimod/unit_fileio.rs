@@ -107,8 +107,8 @@ impl UnitOptions {
 }
 /// Opens a unit through the crate-owned image I/O path.
 ///
-/// The native API owns ordinary Rust text. [`iiu_open_ffi`] is the sole C
-/// string adapter for callers which still use the legacy exported symbol.
+/// The native API owns ordinary Rust text; [`iiuopen`] is the source's own
+/// Fortran wrapper over it.
 pub unsafe fn iiu_open(iunit: i32, name: &str, attribute: &str) -> i32 {
     let mut u: *mut Unit = ::core::ptr::null_mut::<Unit>();
     let mut mode: i32 = 0;
@@ -266,31 +266,18 @@ pub unsafe fn iiu_open(iunit: i32, name: &str, attribute: &str) -> i32 {
     0
 }
 
-/// C ABI entry point for legacy callers.  C-string decoding is deliberately
-/// contained here; the implementation above has no C-string storage.
-#[unsafe(export_name = "iiu_open")]
-pub unsafe extern "C" fn iiu_open_ffi(
-    iunit: i32,
-    name: *const ::core::ffi::c_char,
-    attribute: *const ::core::ffi::c_char,
-) -> i32 {
-    let name = if name.is_null() {
-        String::new()
-    } else {
-        core::ffi::CStr::from_ptr(name)
-            .to_string_lossy()
-            .into_owned()
-    };
-    let attribute = if attribute.is_null() {
-        String::new()
-    } else {
-        core::ffi::CStr::from_ptr(attribute)
-            .to_string_lossy()
-            .into_owned()
-    };
-    iiu_open(iunit, &name, &attribute)
+/// Matches C `iiuopen` (`unit_fileio.c:284`).
+///
+/// `name` and `attribute` are the Fortran `character*(*)` fields, so their
+/// slice lengths are the source's `name_l` and `attr_l`; `f2cString`'s
+/// trailing-blank trim is `fortran_string`, and the two `free` calls are the
+/// temporaries' drops.  The `malloc` failure `iiuMemoryError` reports has no
+/// Rust counterpart.
+pub fn iiuopen(iunit: &i32, name: &[u8], attribute: &[u8]) -> i32 {
+    let cname = fortran_string(name);
+    let cattr = fortran_string(attribute);
+    unsafe { iiu_open(*iunit, &cname, &cattr) }
 }
-#[unsafe(no_mangle)]
 pub unsafe fn iiu_close(mut iunit: i32) {
     let mut u: *mut Unit = ::core::ptr::null_mut::<Unit>();
     let mut trial: i32 = 0;
@@ -325,12 +312,10 @@ pub unsafe fn iiu_close(mut iunit: i32) {
         }
     });
 }
-#[unsafe(no_mangle)]
 pub unsafe fn iiu_get_ii_file(mut iunit: i32) -> *mut ImodImageFile {
     let mut u: *mut Unit = lookup_unit(iunit, "iiu_get_ii_file", 1 as i32, 0 as i32);
     return (*u).ii_file;
 }
-#[unsafe(no_mangle)]
 pub unsafe fn iiu_ret_num_volumes(mut iunit: i32) -> i32 {
     let mut u: *mut Unit = lookup_unit(iunit, "iiu_ret_num_volumes", 1 as i32, 0 as i32);
     return if (*(*u).ii_file).dataset_id != 0 {
@@ -339,7 +324,6 @@ pub unsafe fn iiu_ret_num_volumes(mut iunit: i32) -> i32 {
         0 as i32
     };
 }
-#[unsafe(no_mangle)]
 pub unsafe fn iiu_volume_open(mut newUnit: i32, mut mainUnit: i32, mut volIndex: i32) -> i32 {
     let fp: Option<crate::imod::libcfshr::b3dutil::ImodFile>;
     let mut unew: *mut Unit = find_new_unit(newUnit);
@@ -380,12 +364,10 @@ pub unsafe fn iiu_volume_open(mut newUnit: i32, mut mainUnit: i32, mut volIndex:
     (*unew).header = UnitHeader::Header(header);
     return 0 as i32;
 }
-#[unsafe(no_mangle)]
 pub unsafe fn iiu_ret_adoc_index(mut iunit: i32, mut global: i32, mut openMdocOrNew: i32) -> i32 {
     let mut u: *mut Unit = lookup_unit(iunit, "iiu_ret_adoc_index", 1 as i32, 0 as i32);
     return iiGetAdocIndex(&mut *(*u).ii_file, global, openMdocOrNew);
 }
-#[unsafe(no_mangle)]
 pub unsafe fn iiu_trans_adoc_sections(mut toUnit: i32, mut fromUnit: i32) -> i32 {
     let mut uto: *mut Unit = lookup_unit(toUnit, "iiu_trans_adoc_sections", 1 as i32, 0 as i32);
     let mut ufrom: *mut Unit = lookup_unit(fromUnit, "iiu_trans_adoc_sections", 1 as i32, 0 as i32);
@@ -394,7 +376,6 @@ pub unsafe fn iiu_trans_adoc_sections(mut toUnit: i32, mut fromUnit: i32) -> i32
     }
     return 0 as i32;
 }
-#[unsafe(no_mangle)]
 pub unsafe fn iiu_write_global_adoc(mut iunit: i32) -> i32 {
     let mut u: *mut Unit = lookup_unit(iunit, "iiu_write_global_adoc", 1 as i32, 0 as i32);
     if hdfWriteGlobalAdoc(&mut *(*u).ii_file) != 0 {
@@ -406,7 +387,6 @@ pub unsafe fn iiu_write_global_adoc(mut iunit: i32) -> i32 {
     }
     return 0 as i32;
 }
-#[unsafe(no_mangle)]
 pub unsafe fn iiu_ret_chunk_sizes(
     mut iunit: i32,
     mut xSize: *mut i32,
@@ -418,7 +398,6 @@ pub unsafe fn iiu_ret_chunk_sizes(
     *ySize = (*(*u).ii_file).tile_size_y;
     *zSize = (*(*u).ii_file).z_chunk_size;
 }
-#[unsafe(no_mangle)]
 pub unsafe fn iiu_alt_chunk_sizes(
     mut iunit: i32,
     mut xSize: i32,
@@ -428,18 +407,15 @@ pub unsafe fn iiu_alt_chunk_sizes(
     let mut u: *mut Unit = lookup_unit(iunit, "iiuAltChunkSize", 1 as i32, 0 as i32);
     return iiSetChunkSizes(&mut *(*u).ii_file, xSize, ySize, zSize);
 }
-#[unsafe(no_mangle)]
 pub unsafe fn iiu_set_hdf_compression(mut iunit: i32, mut compression: i32) {
     let mut u: *mut Unit = lookup_unit(iunit, "iiu_set_hdf_compression", 1 as i32, 0 as i32);
     (*(*u).ii_file).hdf_compression = compression;
 }
-#[unsafe(no_mangle)]
 pub unsafe fn iiu_set_position(mut iunit: i32, mut section: i32, mut line: i32) {
     let mut u: *mut Unit = lookup_unit(iunit, "iiu_set_position", 1 as i32, 0 as i32);
     (*u).current_sec = section;
     (*u).current_line = line;
 }
-#[unsafe(no_mangle)]
 pub unsafe fn iiu_read_section(mut iunit: i32, mut array: *mut ::core::ffi::c_void) -> i32 {
     let mut u: *mut Unit = lookup_unit(iunit, "iiu_read_section", 0 as i32, 1 as i32);
     if u.is_null() {
@@ -455,7 +431,6 @@ pub unsafe fn iiu_read_section(mut iunit: i32, mut array: *mut ::core::ffi::c_vo
         (*(*u).ii_file).ny - 1 as i32,
     );
 }
-#[unsafe(no_mangle)]
 pub unsafe fn iiu_read_sec_part(
     mut iunit: i32,
     mut array: *mut ::core::ffi::c_void,
@@ -491,7 +466,6 @@ pub unsafe fn iiu_read_sec_part(
     }
     return err;
 }
-#[unsafe(no_mangle)]
 pub unsafe fn iiu_read_lines(
     mut iunit: i32,
     mut array: *mut ::core::ffi::c_void,
@@ -520,7 +494,6 @@ pub unsafe fn iiu_read_lines(
     }
     return err;
 }
-#[unsafe(no_mangle)]
 pub unsafe fn iiu_write_section(mut iunit: i32, mut array: *mut ::core::ffi::c_void) -> i32 {
     let mut u: *mut Unit = lookup_unit(
         iunit,
@@ -543,7 +516,6 @@ pub unsafe fn iiu_write_section(mut iunit: i32, mut array: *mut ::core::ffi::c_v
         (*(*u).ii_file).ny - 1 as i32,
     );
 }
-#[unsafe(no_mangle)]
 pub unsafe fn iiu_write_subarray(
     mut iunit: i32,
     mut array: *mut ::core::ffi::c_void,
@@ -574,7 +546,6 @@ pub unsafe fn iiu_write_subarray(
         iyEnd,
     );
 }
-#[unsafe(no_mangle)]
 pub unsafe fn iiu_write_sec_part(
     mut iunit: i32,
     mut array: *mut ::core::ffi::c_void,
@@ -706,7 +677,6 @@ pub unsafe fn iiu_write_sec_part(
     (*u).current_line = 0 as i32;
     return err;
 }
-#[unsafe(no_mangle)]
 pub unsafe fn iiu_write_lines(
     mut iunit: i32,
     mut array: *mut ::core::ffi::c_void,
@@ -808,7 +778,6 @@ unsafe fn setup_current_lines(mut u: *mut Unit, mut numLines: i32) -> i32 {
     }
     return 0 as i32;
 }
-#[unsafe(no_mangle)]
 pub unsafe fn iiu_file_info(
     mut iunit: i32,
     mut fileSize: *mut i32,
@@ -847,14 +816,12 @@ pub unsafe fn iiu_file_info(
             0
         };
 }
-#[unsafe(no_mangle)]
 pub fn iiu_exit_on_error(doExit: i32, storeError: i32) {
     UNIT_OPTIONS.with(|options| {
         options.exit_on_error.set(doExit);
         options.store_error.set(storeError);
     });
 }
-#[unsafe(no_mangle)]
 pub fn iiu_get_exit_on_error() -> i32 {
     UNIT_OPTIONS.with(|options| options.exit_on_error.get())
 }
@@ -882,8 +849,7 @@ pub fn iiu_alt_print(val: i32) {
 pub fn iiu_ret_print() -> i32 {
     UNIT_OPTIONS.with(|options| options.print_header.get())
 }
-#[unsafe(no_mangle)]
-pub unsafe fn iiu_alt_convert(mut iunit: i32, mut val: i32) {
+pub fn iiu_alt_convert(mut iunit: i32, mut val: i32) {
     UNIT_TABLE.with(|unit_table| {
         let mut table = unit_table.borrow_mut();
         remove_unit_from_list(&mut table.no_convert_units, iunit);
@@ -910,7 +876,6 @@ pub unsafe fn iiu_mrc_header(
         UnitHeader::None => ::core::ptr::null_mut(),
     };
 }
-#[unsafe(no_mangle)]
 pub unsafe fn iiu_sync_with_mrc_header(mut iunit: i32) {
     let mut u: *mut Unit = lookup_unit(iunit, "iiu_sync_with_mrc_header", 1 as i32, 0 as i32);
     let header = match &mut (*u).header {
@@ -923,7 +888,6 @@ pub unsafe fn iiu_sync_with_mrc_header(mut iunit: i32) {
         *image_header = (*header).clone();
     }
 }
-#[unsafe(no_mangle)]
 pub unsafe fn iiu_reassign_header_ptr(mut iunit: i32) {
     let mut u: *mut Unit = lookup_unit(iunit, "iiu_reassign_header_ptr", 1 as i32, 0 as i32);
     if (*(*u).ii_file).file != IIFILE_HDF {
@@ -943,12 +907,10 @@ pub unsafe fn iiu_reassign_header_ptr(mut iunit: i32) {
         .unwrap_or_default();
     (*u).header = UnitHeader::Header(header);
 }
-#[unsafe(no_mangle)]
 pub unsafe fn iiu_file_type(mut iunit: i32) -> i32 {
     let mut u: *mut Unit = lookup_unit(iunit, "iiu_file_type", 1 as i32, 0 as i32);
     return (*(*u).ii_file).file;
 }
-#[unsafe(no_mangle)]
 /// Fortran wrapper `iisettifftagtoprint` (`unit_fileio.c:941`).
 ///
 /// The source declares this `int` and then falls off the end without
@@ -961,7 +923,6 @@ pub unsafe extern "C" fn iisettifftagtoprint_(mut tag: *mut i32) -> i32 {
     unsafe { tiffSetStringTagToPrint(*tag) };
     0
 }
-#[unsafe(no_mangle)]
 pub unsafe fn iiu_buf_bytes_per_pixel(mut iunit: i32) -> i32 {
     let mut dsize: i32 = 0;
     let mut csize: i32 = 0;

@@ -214,7 +214,7 @@ pub fn objed_object(a: &mut ImodvApp) -> Option<&mut Iobj> {
     unsafe { object.as_mut() }
 }
 /// Original static `numEditableObjects`.
-pub fn num_editable_objects(a: &ImodvApp, model: i32) -> i32 {
+fn num_editable_objects(a: &ImodvApp, model: i32) -> i32 {
     if model < 0 {
         return 0;
     }
@@ -241,7 +241,7 @@ pub fn num_editable_objects(a: &ImodvApp, model: i32) -> i32 {
             .count() as i32
 }
 /// Original static `editableObject`.
-pub fn editable_object(a: &mut ImodvApp, model: i32, object: i32) -> Option<&mut Iobj> {
+fn editable_object(a: &mut ImodvApp, model: i32, object: i32) -> Option<&mut Iobj> {
     if model < 0 || object < 0 {
         return None;
     }
@@ -282,7 +282,7 @@ pub fn editable_object(a: &mut ImodvApp, model: i32, object: i32) -> Option<&mut
     ivw_get_an_extra_object(view, extra_index)
 }
 /// Original static `setStartEndModel`.
-pub fn set_start_end_model(a: &ImodvApp, multiple_ok: bool, mst: &mut i32, mnd: &mut i32) {
+fn set_start_end_model(a: &ImodvApp, multiple_ok: bool, mst: &mut i32, mnd: &mut i32) {
     *mst = a.cur_mod;
     *mnd = a.cur_mod;
     if multiple_ok && a.crosset != 0 {
@@ -291,7 +291,7 @@ pub fn set_start_end_model(a: &ImodvApp, multiple_ok: bool, mst: &mut i32, mnd: 
     }
 }
 /// Original static `changeModelObject`.
-pub fn change_model_object(a: &ImodvApp, model: i32, object: i32, multiple_ok: bool) -> bool {
+fn change_model_object(a: &ImodvApp, model: i32, object: i32, multiple_ok: bool) -> bool {
     (model == a.cur_mod || (multiple_ok && a.crosset != 0))
         && object >= 0
         && object < num_editable_objects(a, model)
@@ -337,7 +337,7 @@ pub fn set_obj_flag(
     }
 }
 /// Original static `setBitInMatFlags2`.
-pub fn set_bit_in_mat_flags_2(a: &mut ImodvApp, flag: u32, state: i32) {
+fn set_bit_in_mat_flags_2(a: &mut ImodvApp, flag: u32, state: i32) {
     if a.imod.is_null() || objed_object(a).is_none() {
         return;
     }
@@ -360,7 +360,7 @@ pub fn set_bit_in_mat_flags_2(a: &mut ImodvApp, flag: u32, state: i32) {
     }
 }
 /// Original static `optionSetFlags`.
-pub fn option_set_flags(
+fn option_set_flags(
     flag: &mut u32,
     on_test: u32,
     off_test: u32,
@@ -465,7 +465,9 @@ pub fn imodv_objed_select(a: &mut ImodvApp, which: i32) {
             .get_mut(a.obj_num.max(0) as usize)
             .map_or(std::ptr::null_mut(), |o| o);
     }
-    unsafe { imodv_draw() };
+    {
+        imodv_draw()
+    };
 }
 /// Original `imodvObjedChangeObject`.
 pub fn imodv_objed_change_object(a: &mut ImodvApp, dir: i32) {
@@ -486,7 +488,9 @@ pub fn imodv_objed_name(a: &mut ImodvApp, name: &str) {
         }
         imodv_register_object_chg(index);
         imodv_finish_chg_unit();
-        unsafe { imodv_draw() };
+        {
+            imodv_draw()
+        };
     }
 }
 /// Original `objedToggleObj`.
@@ -774,9 +778,11 @@ pub fn mk_mesh_draw_cb() -> [&'static str; 2] {
     ["Surface thickness", "Draw mesh on image"]
 }
 /// Original static `finishChangeAndDraw`.
-pub fn finish_change_and_draw(a: &mut ImodvApp, do_objset: bool, draw_images: bool) {
+fn finish_change_and_draw(a: &mut ImodvApp, do_objset: bool, draw_images: bool) {
     imodv_finish_chg_unit();
-    unsafe { imodv_draw() };
+    {
+        imodv_draw()
+    };
 }
 
 /// Source `setOrClearFlags` macro applied to a `MeshParams::flags` word.
@@ -1030,7 +1036,9 @@ impl ImodvObjed {
     /// Original `ImodvObjed::clipShowSlot`.
     pub fn clip_show_slot(&mut self, a: &mut ImodvApp, state: bool) {
         a.draw_clip = state as i32;
-        unsafe { imodv_draw() };
+        {
+            imodv_draw()
+        };
     }
     /// Original `ImodvObjed::clipGlobalSlot`.
     pub fn clip_global_slot(&mut self, a: &mut ImodvApp, value: i32) {
@@ -1063,7 +1071,9 @@ impl ImodvObjed {
             }
         }
         if a.draw_clip != 0 {
-            unsafe { imodv_draw() };
+            {
+                imodv_draw()
+            };
         }
     }
     /// Original `ImodvObjed::clipResetSlot`.
@@ -1270,7 +1280,9 @@ impl ImodvObjed {
         view.trans.x = -((max.x + min.x) * 0.5);
         view.trans.y = -((max.y + min.y) * 0.5);
         view.trans.z = -((max.z + min.z) * 0.5);
-        unsafe { imodv_draw() };
+        {
+            imodv_draw()
+        };
     }
     /// Original `ImodvObjed::moveAxisSlot`.
     pub fn move_axis_slot(&mut self, a: &mut ImodvApp, which: i32) {
@@ -1279,7 +1291,9 @@ impl ImodvObjed {
     /// Original `ImodvObjed::subsetSlot`.
     pub fn subset_slot(&mut self, a: &mut ImodvApp, which: i32) {
         a.current_subset = which;
-        unsafe { imodv_draw() };
+        {
+            imodv_draw()
+        };
     }
     /// Original `ImodvObjed::makePassSlot` through `makeSpinChanged`.
     pub fn make_pass_slot(&mut self, a: &mut ImodvApp, value: i32) {
@@ -1543,7 +1557,9 @@ impl ImodvObjed {
 /// Original `imodvObjedDrawClipPlane`.
 pub fn imodv_objed_draw_clip_plane(a: &mut ImodvApp, state: bool) {
     a.draw_clip = state as i32;
-    unsafe { imodv_draw() };
+    {
+        imodv_draw()
+    };
 }
 /// Original `imodvObjedToggleClip`.
 pub fn imodv_objed_toggle_clip(a: &mut ImodvApp, global: i32, plane: i32) {
@@ -1609,7 +1625,9 @@ pub fn imodv_objed_move_to_axis(a: &mut ImodvApp, which: i32) {
             }
         }
     }
-    unsafe { imodv_draw() };
+    {
+        imodv_draw()
+    };
 }
 /// Original `imodvObjedFreeingExtraObj`.
 pub fn imodv_objed_freeing_extra_obj(a: &mut ImodvApp, object: *mut Iobj) {

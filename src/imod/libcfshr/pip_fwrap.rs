@@ -2,76 +2,57 @@ use crate::imod::libcfshr::b3dutil::{c2f_string, fortran_string};
 use crate::imod::libcfshr::parse_params::*;
 pub type fortStrLen_t = i32;
 
-/// `pipf2cstr` (`pip_fwrap.c:435`).  `f2cString` allocated a temporary C
-/// string which every wrapper freed after its PIP call; an owned `String`
-/// expresses the same temporary lifetime.  A null/negative input is the
-/// Rust-visible counterpart of C allocation/conversion failure.
-unsafe fn pipf2cstr(
-    string: *const ::core::ffi::c_char,
-    string_size: fortStrLen_t,
-) -> Option<String> {
-    if string.is_null() || string_size < 0 {
-        pip_set_error(b"Memory error converting string from Fortran to C");
-        return None;
-    }
-    Some(unsafe { fortran_string(string, string_size) })
+/// `pipf2cstr` (`pip_fwrap.c:435`).  The Fortran `character*(*)` argument is
+/// the byte slice itself, so the source's hidden `strSize` is the slice
+/// length; the C string `f2cString` allocates is the owned `String` that
+/// comes back, and every wrapper's `free` is its drop.  The one branch that
+/// disappears is the `malloc` failure the source reports through
+/// `PipSetError`, which has no Rust counterpart.
+fn pipf2cstr(string: &[u8]) -> String {
+    fortran_string(string)
 }
-#[unsafe(no_mangle)]
-pub unsafe extern "C" fn pipgetnonoptionarg_(
-    mut argNo: *mut i32,
-    mut arg: *mut ::core::ffi::c_char,
-    mut stringSize: fortStrLen_t,
-) -> i32 {
+/// `pipgetnonoptionarg` (`pip_fwrap.c:190`).  `arg` is the caller's fixed-width
+/// `character*(*)` field and its length is the source's `stringSize`:
+/// `c2fString` fills it and blank-pads the remainder, so it stays a
+/// `&mut [u8]` of that width rather than becoming text.
+pub fn pipgetnonoptionarg_(argNo: i32, arg: &mut [u8]) -> i32 {
     let mut argVec: Vec<u8> = Vec::new();
     let mut err: i32 = 0;
-    match pip_get_non_option_arg(*argNo - 1 as i32) {
+    match pip_get_non_option_arg(argNo - 1 as i32) {
         Ok(value) => argVec = value,
         Err(()) => err = -(1 as i32),
     }
-    argVec.push(0);
-    let argPtr = argVec.as_ptr().cast::<::core::ffi::c_char>();
-    if err == 0 && c2f_string(argPtr, arg, stringSize as i32).is_err() {
+    if err == 0 && c2f_string(&argVec, arg).is_err() {
         pip_set_error(b"Non-option argument too long for character variable");
         err = -(1 as i32);
     }
     return err;
 }
-#[unsafe(no_mangle)]
-pub unsafe extern "C" fn pipgetstring_(
-    mut option: *mut ::core::ffi::c_char,
-    mut string: *mut ::core::ffi::c_char,
-    mut optionSize: fortStrLen_t,
-    mut stringSize: fortStrLen_t,
-) -> i32 {
-    let mut strPtr: *mut ::core::ffi::c_char = ::core::ptr::null_mut::<::core::ffi::c_char>();
-    let option = fortran_string(option, optionSize);
+/// `pipgetstring` (`pip_fwrap.c:206`).  `option` is the Fortran field whose
+/// trailing blanks `pipf2cstr` trims; `string` is the fixed-width destination
+/// `c2fString` blank-pads, and both slice lengths are the source's
+/// `optionSize` and `stringSize`.
+pub fn pipgetstring_(option: &[u8], string: &mut [u8]) -> i32 {
+    let cStr = pipf2cstr(option);
     let mut strVec: Vec<u8> = Vec::new();
-    let mut err = pip_get_string(option.as_bytes(), &mut strVec);
-    strVec.push(0);
-    strPtr = strVec.as_ptr().cast::<::core::ffi::c_char>().cast_mut();
-    if err == 0 && c2f_string(strPtr, string, stringSize as i32).is_err() {
-        pip_set_error(b"In pip_get_string, string is too long for character variable");
+    let mut err = pip_get_string(cStr.as_bytes(), &mut strVec);
+    if err == 0 && c2f_string(&strVec, string).is_err() {
+        pip_set_error(b"In PipGetString, string is too long for character variable");
         err = -(1 as i32);
     }
     err
 }
-#[unsafe(no_mangle)]
-pub unsafe extern "C" fn pipgetinteger_(
-    mut option: *mut ::core::ffi::c_char,
-    mut val: *mut i32,
-    mut optionSize: fortStrLen_t,
-) -> i32 {
-    let option = fortran_string(option, optionSize);
-    pip_get_integer(option.as_bytes(), &mut *val)
+/// `pipgetinteger` (`pip_fwrap.c:227`).  `option`'s slice length is the
+/// source's `optionSize`.
+pub fn pipgetinteger_(option: &[u8], val: &mut i32) -> i32 {
+    let cStr = pipf2cstr(option);
+    pip_get_integer(cStr.as_bytes(), val)
 }
-#[unsafe(no_mangle)]
-pub unsafe extern "C" fn pipnumberofentries_(
-    mut option: *mut ::core::ffi::c_char,
-    mut numEntries: *mut i32,
-    mut optionSize: fortStrLen_t,
-) -> i32 {
-    let option = fortran_string(option, optionSize);
-    pip_number_of_entries(option.as_bytes(), &mut *numEntries)
+/// `pipnumberofentries` (`pip_fwrap.c:418`).  `option`'s slice length is the
+/// source's `optionSize`.
+pub fn pipnumberofentries_(option: &[u8], numEntries: &mut i32) -> i32 {
+    let cStr = pipf2cstr(option);
+    pip_number_of_entries(cStr.as_bytes(), numEntries)
 }
 
 #[cfg(test)]
@@ -80,9 +61,8 @@ mod tests {
 
     #[test]
     fn pip_fortran_converter_trims_fortran_padding() {
-        let bytes = b"option   ";
-        let converted = unsafe { pipf2cstr(bytes.as_ptr().cast(), bytes.len() as i32) };
-        assert_eq!(converted.as_deref(), Some("option"));
-        assert!(unsafe { pipf2cstr(core::ptr::null(), 4) }.is_none());
+        assert_eq!(pipf2cstr(b"option   "), "option");
+        assert_eq!(pipf2cstr(b"   "), "");
+        assert_eq!(pipf2cstr(b""), "");
     }
 }

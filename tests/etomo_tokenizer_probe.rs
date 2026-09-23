@@ -280,7 +280,7 @@ fn jvm_verified_token_api() {
     t.set_type_and_string(token::Type::Alphanum, "MiXeD");
     assert_eq!(t.to_string(), "ALPHANUM MiXeD");
     assert_eq!(t.get_string(), "(ALPHANUM,MiXeD)");
-    assert_eq!(unsafe { t.get_key() }, "mixed");
+    assert_eq!({ t.get_key() }, "mixed");
     assert_eq!(t.length(), 5);
     assert_eq!(t.get_char(), 77);
     assert!(t.equals_string(Some("mixed")));
@@ -293,12 +293,12 @@ fn jvm_verified_token_api() {
     assert_eq!(e.get_string(), "(EOL)");
     assert_eq!(e.length(), 0);
     assert_eq!(e.get_char(), 32);
-    assert_eq!(unsafe { e.get_key() }, " ");
+    assert_eq!({ e.get_key() }, " ");
     // `set(String)` on an EOL token assigns its own parameter, not the field.
     e.set_string("hello");
     assert_eq!(e.get_value(), None);
     assert_eq!(e.get_string(), "(EOL)");
-    assert_eq!(unsafe { e.get_key() }, " ");
+    assert_eq!({ e.get_key() }, " ");
 
     let mut d = Token::new();
     d.set_type_and_double(token::Type::Alphanum, 1.0);

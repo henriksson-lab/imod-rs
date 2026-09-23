@@ -8,7 +8,8 @@
 #![allow(unused_variables)]
 
 use crate::imod::libcfshr::b3dutil::{
-    CArg, ImodFile, c_format_bytes, set_or_clear_flags, write_16_bit_mode_for_floats,
+    CArg, ImodFile, c_format_bytes, fortran_string, set_or_clear_flags,
+    write_16_bit_mode_for_floats,
 };
 use crate::imod::libcfshr::linearxforms::{angles_to_matrix, icalc_angles};
 use crate::imod::libiimod::iimage::{IIFILE_MRC, IIFILE_TIFF, ImodImageFile};
@@ -24,7 +25,6 @@ use crate::imod::libiimod::unit_fileio::{
     iiu_file_type, iiu_get_exit_on_error, iiu_get_ii_file, iiu_mrc_header,
     iiu_sync_with_mrc_header, iiu_trans_adoc_sections,
 };
-use core::ffi::c_char;
 use std::io::Write;
 
 const IIFILE_SHR_MEM: i32 = 8;
@@ -137,57 +137,47 @@ pub fn iiu_write_header_str(i: i32, label: &str, f: i32, a: f32, b: f32, c: f32)
     iiu_write_header(i, &out, f, a, b, c)
 }
 
-/// Matches C `iiuwriteheaderstr` (`unit_header.c`).
-pub unsafe fn iiuwriteheaderstr(
-    iunit: *mut i32,
-    label_str: *const c_char,
-    lab_flag: *mut i32,
-    dmin: *mut f32,
-    dmax: *mut f32,
-    dmean: *mut f32,
-    label_len: i32,
+/// Matches C `iiuwriteheaderstr` (`unit_header.c:332`).
+///
+/// The Fortran wrapper: every scalar arrives by reference and `labelStr` is a
+/// `character*(*)` field whose hidden `labelLen` is the slice length, so the
+/// caller hands over the whole blank-padded record and `fortran_string`
+/// (`f2cString`) performs the source's trailing-blank trim.  The `malloc`
+/// failure `iiuMemoryError` reports has no Rust counterpart.
+pub fn iiuwriteheaderstr(
+    iunit: &i32,
+    label_str: &[u8],
+    lab_flag: &i32,
+    dmin: &f32,
+    dmax: &f32,
+    dmean: &f32,
 ) -> i32 {
-    if label_len < 0 || label_str.is_null() {
-        return -1;
-    }
-    let source = unsafe { core::slice::from_raw_parts(label_str.cast::<u8>(), label_len as usize) };
-    let trimmed = source
-        .iter()
-        .rposition(|&byte| byte != b' ')
-        .map_or(&[][..], |last| &source[..=last]);
-    let label = String::from_utf8_lossy(trimmed);
-    unsafe { iiu_write_header_str(*iunit, &label, *lab_flag, *dmin, *dmax, *dmean) }
+    let label = fortran_string(label_str);
+    iiu_write_header_str(*iunit, &label, *lab_flag, *dmin, *dmax, *dmean)
 }
 
-/// Matches C `iwrhdrc` (`unit_header.c`).
-pub unsafe fn iwrhdrc(
-    iunit: *mut i32,
-    label_str: *const c_char,
-    lab_flag: *mut i32,
-    dmin: *mut f32,
-    dmax: *mut f32,
-    dmean: *mut f32,
-    label_len: i32,
-) {
-    unsafe {
-        iiuwriteheaderstr(iunit, label_str, lab_flag, dmin, dmax, dmean, label_len);
-    }
+/// Matches C `iwrhdrc` (`unit_header.c:343`).
+pub fn iwrhdrc(iunit: &i32, label_str: &[u8], lab_flag: &i32, dmin: &f32, dmax: &f32, dmean: &f32) {
+    iiuwriteheaderstr(iunit, label_str, lab_flag, dmin, dmax, dmean);
 }
 
-/// Matches C `iiuPrintHeader` (`unit_header.c`).
-pub unsafe fn iiu_print_header(iunit: i32, file_prefix: *const c_char) {
+/// Matches C `iiuPrintHeader` (`unit_header.c:351`).
+///
+/// `filePrefix` is an ordinary C string the caller owns and the source only
+/// tests against NULL, so it is `Option<&str>`: `None` is the NULL the source
+/// skips the line for.
+pub fn iiu_print_header(iunit: i32, file_prefix: Option<&str>) {
     let hdr = unsafe { iiu_mrc_header(iunit, "iiuPrintHeader", 1, 0) };
     unsafe {
-        if !file_prefix.is_null() {
+        if let Some(prefix) = file_prefix {
             let ii_file = iiu_get_ii_file(iunit).cast::<ImodImageFile>();
-            // The prefix is an ABI C string, while the filename is owned Rust
-            // text.  The centralized formatter preserves the source's `%s`
-            // behavior without a varargs call or a temporary C string.
-            let prefix = core::ffi::CStr::from_ptr(file_prefix).to_bytes();
+            // The filename may hold bytes no `String` can, so the source's two
+            // `%s` conversions go through the byte formatter rather than a
+            // varargs call.
             let name = (*ii_file).filename.as_deref().unwrap_or_default();
             let _ = ImodFile::Stdout.write_all(&c_format_bytes(
                 "%s: %s\n",
-                &[CArg::Bytes(prefix), CArg::Str(name)],
+                &[CArg::Str(prefix), CArg::Str(name)],
             ));
         }
         let (xscale, yscale, zscale) = mrc_get_scale(&*hdr);
@@ -218,7 +208,7 @@ pub unsafe fn iiu_print_header(iunit: i32, file_prefix: *const c_char) {
     }
 }
 
-pub unsafe fn iiu_trans_header(into_unit: i32, iunit: i32) -> i32 {
+pub fn iiu_trans_header(into_unit: i32, iunit: i32) -> i32 {
     let ih = unsafe { iiu_mrc_header(iunit, "iiuTransHeader", iiu_get_exit_on_error(), 0) };
     let jh = unsafe { iiu_mrc_header(into_unit, "iiuTransHeader", iiu_get_exit_on_error(), 2) };
     if ih.is_null() || jh.is_null() {
@@ -324,7 +314,7 @@ pub fn iiu_alt_sample(i: i32, m: &[i32; 3]) {
         ((*h).mx, (*h).my, (*h).mz) = (m[0], m[1], m[2]);
     }
 }
-pub unsafe fn iiu_alt_size_samp_cell(i: i32, x: i32, y: i32, z: i32) {
+pub fn iiu_alt_size_samp_cell(i: i32, x: i32, y: i32, z: i32) {
     let h = unsafe { iiu_mrc_header(i, "iiuAltSizeSampCell", 1, 0) };
     unsafe {
         (*h).nx = x;
@@ -429,7 +419,7 @@ pub fn iiu_alt_mode(i: i32, mut mode: i32) {
         iiu_sync_with_mrc_header(i);
     }
 }
-pub unsafe fn iiu_alt_4_bit_mode(i: i32, d: i32) -> i32 {
+pub fn iiu_alt_4_bit_mode(i: i32, d: i32) -> i32 {
     let h = unsafe { iiu_mrc_header(i, "iiuAltMode", 1, 0) };
     unsafe {
         if (*h).mode != MRC_MODE_BYTE {
@@ -648,7 +638,7 @@ pub fn iiu_ret_extended_data(i: i32, data: &mut Vec<u8>) -> i32 {
     }
 }
 pub fn iiu_alt_extended_data(i: i32, data: &[u8]) -> i32 {
-    let do_exit = unsafe { iiu_get_exit_on_error() };
+    let do_exit = { iiu_get_exit_on_error() };
     let h = unsafe { iiu_mrc_header(i, "iiAltExtendedData", do_exit, 2) };
     if h.is_null() {
         return -1;
@@ -713,7 +703,7 @@ pub fn iiu_trans_extended_data(into: i32, i: i32) -> i32 {
         ans
     }
 }
-pub unsafe fn iiu_trans_valid_ext_type(into: i32, i: i32) {
+pub fn iiu_trans_valid_ext_type(into: i32, i: i32) {
     unsafe {
         if iiu_file_type(into) == IIFILE_MRC && iiu_file_type(i) == IIFILE_MRC {
             let a = iiu_mrc_header(i, "iiuTransValidExtType", 1, 0);

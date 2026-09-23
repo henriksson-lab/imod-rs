@@ -35,7 +35,7 @@ pub fn pip_parse_input(
     num_opt_arg: &mut i32,
     num_non_opt_arg: &mut i32,
 ) -> i32 {
-    unsafe {
+    {
         //
         // initialize then pass the options one by one
         //
@@ -91,7 +91,7 @@ pub fn pip_parse_input(
 
 /// Original Fortran `PipParseEntries` (`parse_input_params.f90:68`).
 pub fn pip_parse_entries(num_opt_arg: &mut i32, num_non_opt_arg: &mut i32) -> i32 {
-    unsafe {
+    {
         //
         // pass the arguments in one by one
         //
@@ -144,7 +144,7 @@ pub fn pip_parse_entries(num_opt_arg: &mut i32, num_non_opt_arg: &mut i32) -> i3
 
 /// Original Fortran `PipGetLogical` (`parse_input_params.f90:114`).
 pub fn pip_get_logical(option: &str, value: &mut bool) -> i32 {
-    unsafe {
+    {
         let mut intval = 0_i32;
         let mut result = 0_i32;
         let ierr = pip_get_boolean(option.as_bytes(), &mut intval);
@@ -170,7 +170,7 @@ pub fn pip_read_or_parse_options(
     num_opt_arg: &mut i32,
     num_non_opt_arg: &mut i32,
 ) {
-    unsafe {
+    {
         //
         // First try to read autodoc file
         //
@@ -218,7 +218,7 @@ pub fn pip_get_in_out_file(
     prompt: &str,
     filename: &mut String,
 ) -> i32 {
-    unsafe {
+    {
         let mut result = 0_i32;
         let mut num_opt_arg = 0_i32;
         let mut num_non_opt_arg = 0_i32;
@@ -266,7 +266,7 @@ pub fn pip_get_in_out_file(
 /// trailing blank of a literal such as `'ERROR: HEADER - '`; `setExitPrefix`
 /// keeps the literal as written and trims it again inside `exitError`.
 pub fn pip_exit_on_error(if_use_stderr: i32, message: &str) {
-    unsafe {
+    {
         pip_exit_on_error_fw(if_use_stderr, message.trim_end_matches(' ').as_bytes());
     }
     set_exit_prefix(message);
@@ -329,7 +329,7 @@ pub fn memory_error(ierr: i32, message: &str) {
 /// `adocsetcurrent` (`adoc_fwrap.c:159`) subtracts one before the C entry
 /// point, so this does the same.
 pub fn set_current_adoc_or_exit(ind_adoc: i32, message: &str) {
-    if unsafe { adoc_set_current(ind_adoc - 1) }.is_err() {
+    if { adoc_set_current(ind_adoc - 1) }.is_err() {
         exit_error(&format!(
             "Selecting {} autodoc as current one",
             message.trim_end_matches(' ')

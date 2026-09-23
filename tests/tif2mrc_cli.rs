@@ -6,7 +6,7 @@ use imod_rs::imod::libiimod::mrcfiles::{
 
 #[test]
 fn tif2mrc_roundtrips_the_native_legacy_tiff_path() {
-    unsafe {
+    {
         let stamp = format!("imod-rs-tif2mrc-{}", std::process::id());
         let input = std::env::temp_dir().join(format!("{stamp}.mrc"));
         let tiff = std::env::temp_dir().join(format!("{stamp}.tif"));
@@ -97,7 +97,7 @@ fn tif2mrc_roundtrips_the_native_legacy_tiff_path() {
 
 #[test]
 fn tif2mrc_converts_real_rgb_tiff_to_source_average_grayscale() {
-    unsafe {
+    {
         let stamp = format!("imod-rs-tif2mrc-rgb-{}", std::process::id());
         let tiff = std::env::temp_dir().join(format!("{stamp}.tif"));
         let output = std::env::temp_dir().join(format!("{stamp}-out.mrc"));
@@ -228,7 +228,7 @@ fn tif2mrc_converts_signed_32_bit_tiff_through_the_source_float_path() {
         "{}",
         String::from_utf8_lossy(&conversion.stderr)
     );
-    unsafe {
+    {
         let output_c = output.to_str().unwrap();
         let mut file = imod_rs::imod::libcfshr::b3dutil::ImodFile::open(output_c, "rb").unwrap();
         let mut header = MrcHeader::default();
@@ -266,7 +266,7 @@ fn tif2mrc_converts_signed_32_bit_tiff_through_the_source_float_path() {
 
 #[test]
 fn tif2mrc_reads_every_directory_in_a_native_legacy_tiff_stack() {
-    unsafe {
+    {
         let stamp = format!("imod-rs-tif2mrc-stack-{}", std::process::id());
         let input = std::env::temp_dir().join(format!("{stamp}.mrc"));
         let tiff = std::env::temp_dir().join(format!("{stamp}.tif"));
@@ -372,7 +372,7 @@ fn tif2mrc_reads_every_directory_in_a_native_legacy_tiff_stack() {
 
 #[test]
 fn tif2mrc_applies_source_background_inversion_and_subtraction() {
-    unsafe {
+    {
         let stamp = format!("imod-rs-tif2mrc-bg-{}", std::process::id());
         let input = std::env::temp_dir().join(format!("{stamp}.mrc"));
         let background = std::env::temp_dir().join(format!("{stamp}-bg.mrc"));
@@ -494,7 +494,7 @@ fn tif2mrc_reports_source_specific_pixel_spacing_conflict() {
 
 #[test]
 fn tif2mrc_rejects_background_for_real_multi_directory_tiff() {
-    unsafe {
+    {
         let stamp = format!(
             "imod-rs-tif2mrc-multipage-background-{}",
             std::process::id()
@@ -545,7 +545,7 @@ fn tif2mrc_rejects_background_for_real_multi_directory_tiff() {
 
 #[test]
 fn tif2mrc_accepts_negative_chunk_criterion_for_real_legacy_tiff() {
-    unsafe {
+    {
         let stamp = format!("imod-rs-tif2mrc-negative-chunks-{}", std::process::id());
         let tiff = std::env::temp_dir().join(format!("{stamp}.tif"));
         let output = std::env::temp_dir().join(format!("{stamp}.mrc"));
@@ -700,7 +700,7 @@ fn convert_one_fixture_with_environment(
     );
     let stdout = String::from_utf8_lossy(&result.stdout).into_owned();
     let bytes = std::fs::read(&output).unwrap();
-    let header = unsafe {
+    let header = {
         let name = output.to_str().unwrap();
         let mut file = imod_rs::imod::libcfshr::b3dutil::ImodFile::open(name, "rb").unwrap();
         let mut header = MrcHeader::default();

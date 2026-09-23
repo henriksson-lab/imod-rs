@@ -1443,7 +1443,7 @@ pub unsafe fn tiff_get_field(in_file: *mut ImodImageFile, tag: i32, value: *mut 
 /// image-processing path never stores or exposes that borrowed C pointer.
 pub fn tiff_get_array(in_file: &mut ImodImageFile, tag: i32) -> Result<Vec<u8>, i32> {
     if in_file.backend_handle.is_null() {
-        let _ = unsafe { tiff_reopen(in_file) };
+        let _ = { tiff_reopen(in_file) };
     }
     let tif = in_file.backend_handle.cast::<Tiff>();
     if tif.is_null() {

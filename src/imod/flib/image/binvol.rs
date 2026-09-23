@@ -966,7 +966,7 @@ pub fn slice_weighting(
     //
     // Add 0.5 to get to middle of pixel because pixel indexes start at 0
     if iz_in > 0 && iz_in < nz - 1 {
-        return unsafe { zoom_filt_value(iz_in as f32 + 0.5 - z_cen) as f32 };
+        return { zoom_filt_value(iz_in as f32 + 0.5 - z_cen) as f32 };
     }
     let (jstart, jend) = if iz_in == 0 {
         (-lines_filt, 0)
@@ -978,8 +978,7 @@ pub fn slice_weighting(
         if jj as f32 - z_cen <= lines_filt as f32 && jj as f32 - z_cen >= -lines_filt as f32 {
             // `weight` is `real*4` and `zoomFiltValue` is `real*8`: the sum is
             // formed in double precision and rounded back on each assignment.
-            weight =
-                (f64::from(weight) + unsafe { zoom_filt_value(jj as f32 + 0.5 - z_cen) }) as f32;
+            weight = (f64::from(weight) + { zoom_filt_value(jj as f32 + 0.5 - z_cen) }) as f32;
         }
     }
     weight
@@ -996,7 +995,7 @@ mod tests {
     #[test]
     fn slice_weighting_sums_the_edge_filter_tail() {
         let mut lines = 0;
-        assert_eq!(unsafe { select_zoom_filter(1, 0.5, &mut lines) }, 0);
+        assert_eq!({ select_zoom_filter(1, 0.5, &mut lines) }, 0);
         assert!(slice_weighting(0, 2, 2, false, 5, 0.5, lines) > 0.0);
     }
 }

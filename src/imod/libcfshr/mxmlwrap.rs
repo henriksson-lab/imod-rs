@@ -22,7 +22,7 @@ thread_local! {
 /// (`mxmlwrap.c:73`, where `processLoadedNodes` forwards that same `-1` as its
 /// own documented "memory error" code).  The index is the success value, so it
 /// is `Ok`; the single failure has no other code to carry.
-pub fn get_or_add_free_list() -> Result<i32, ()> {
+fn get_or_add_free_list() -> Result<i32, ()> {
     let xml_ind = S_NODE_LISTS.with_borrow_mut(|lists| {
         if let Some(index) = lists.iter().position(Option::is_none) {
             lists[index] = Some(Vec::new());
@@ -57,7 +57,7 @@ pub fn get_or_add_free_list() -> Result<i32, ()> {
 ///
 /// The C returns the `mxml_node_t *` stored in the list; the list now holds
 /// arena slot indices, so this returns one of those.
-pub fn get_node_at_index(xml_ind: i32, node_ind: i32, error: &mut i32) -> Option<usize> {
+fn get_node_at_index(xml_ind: i32, node_ind: i32, error: &mut i32) -> Option<usize> {
     if xml_ind < 0 {
         *error = -2;
         return None;
@@ -92,7 +92,7 @@ pub fn get_node_at_index(xml_ind: i32, node_ind: i32, error: &mut i32) -> Option
 /// The C hands back a pointer into the node's opaque value; the bytes are
 /// copied into `string` with a terminating NUL instead, because the callers
 /// pass them on to `pipGetLineOfValues`, which is still C-shaped.
-pub fn get_element_string(xml_ind: i32, node_ind: i32, string: &mut Vec<u8>) -> i32 {
+fn get_element_string(xml_ind: i32, node_ind: i32, string: &mut Vec<u8>) -> i32 {
     let mut err = 0;
     let node = get_node_at_index(xml_ind, node_ind, &mut err);
     if node.is_none() {
@@ -126,7 +126,7 @@ pub fn get_element_string(xml_ind: i32, node_ind: i32, string: &mut Vec<u8>) -> 
 }
 
 /// Matches C static `processLoadedNodes`.
-pub fn process_loaded_nodes(
+fn process_loaded_nodes(
     mut arena: MxmlArena,
     xml: Option<usize>,
     with_xml_decl: i32,

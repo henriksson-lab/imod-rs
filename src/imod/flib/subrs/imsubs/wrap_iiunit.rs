@@ -7,8 +7,11 @@ use crate::imod::libiimod::unit_fileio::{
 use crate::imod::libiimod::unit_header::iiu_ret_size;
 
 /// Original `imopen` (`wrap_iiunit.f90:11`).
-pub unsafe fn imopen(iunit: i32, name: &str, attribute: &str) {
-    let _ = iiu_open_print(iunit, name, attribute);
+pub fn imopen(iunit: i32, name: &str, attribute: &str) {
+    // `iiu_open_print`'s `unsafe` is about the process-global unit table, not
+    // about anything the caller supplies -- every parameter here is a safe
+    // type -- so this wrapper upholds the contract and stays safe itself.
+    let _ = unsafe { iiu_open_print(iunit, name, attribute) };
 }
 
 /// Original `iiuOpenPrint` (`wrap_iiunit.f90:22`).
@@ -118,12 +121,12 @@ pub unsafe fn irdpas(
 }
 
 /// Original `ialcon` (`wrap_iiunit.f90:139`).
-pub unsafe fn ialcon(iunit: i32, convert: bool) {
+pub fn ialcon(iunit: i32, convert: bool) {
     iiu_alt_convert(iunit, i32::from(convert));
 }
 
 /// Original `ialprt` (`wrap_iiunit.f90:149`).
-pub unsafe fn ialprt(do_print: bool) {
+pub fn ialprt(do_print: bool) {
     iiu_alt_print(i32::from(do_print));
 }
 

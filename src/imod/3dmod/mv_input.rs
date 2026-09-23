@@ -986,18 +986,24 @@ pub fn imodv_key_press(a: &mut ImodvApp, event: InputEvent, n: &mut dyn MvInputN
             imodv_finish_chg_unit();
             imod_ref.view[0].world = (imod_ref.view[0].world & !WORLD_QUALITY_BITS)
                 | ((fastdraw as u32) << WORLD_QUALITY_SHIFT);
-            unsafe { imodv_draw() };
+            {
+                imodv_draw()
+            };
             imodv_objed_new_view(a);
         }
 
         KEY_MINUS => {
             imodv_zoomd(a, 0.95238095);
-            unsafe { imodv_draw() };
+            {
+                imodv_draw()
+            };
         }
 
         KEY_UNDERSCORE => {
             imodv_zoomd(a, 0.5);
-            unsafe { imodv_draw() };
+            {
+                imodv_draw()
+            };
         }
 
         KEY_EQUAL | KEY_PLUS => {
@@ -1006,7 +1012,9 @@ pub fn imodv_key_press(a: &mut ImodvApp, event: InputEvent, n: &mut dyn MvInputN
             } else {
                 imodv_zoomd(a, 2.0);
             }
-            unsafe { imodv_draw() };
+            {
+                imodv_draw()
+            };
         }
 
         KEY_S => {
@@ -1034,7 +1042,9 @@ pub fn imodv_key_press(a: &mut ImodvApp, event: InputEvent, n: &mut dyn MvInputN
             } else {
                 a.plax -= 0.5f32;
                 n.imodv_stereo_update(a);
-                unsafe { imodv_draw() };
+                {
+                    imodv_draw()
+                };
             }
         }
 
@@ -1046,7 +1056,9 @@ pub fn imodv_key_press(a: &mut ImodvApp, event: InputEvent, n: &mut dyn MvInputN
             } else {
                 a.plax += 0.5f32;
                 n.imodv_stereo_update(a);
-                unsafe { imodv_draw() };
+                {
+                    imodv_draw()
+                };
             }
         }
 
@@ -1098,7 +1110,9 @@ pub fn imodv_key_press(a: &mut ImodvApp, event: InputEvent, n: &mut dyn MvInputN
                         n.vb_cleanup_vbd(model.as_ptr());
                     }
                 }
-                unsafe { imodv_draw() };
+                {
+                    imodv_draw()
+                };
             } else if shifted != 0 {
                 n.imodv_view_edit_dialog(a, 1);
             } else if ctrl != 0 {
@@ -1111,7 +1125,9 @@ pub fn imodv_key_press(a: &mut ImodvApp, event: InputEvent, n: &mut dyn MvInputN
                 imodv_objed_toggle_clip(a, 0, 0);
             } else {
                 imodv_step_time(a, -1, n);
-                unsafe { imodv_draw() };
+                {
+                    imodv_draw()
+                };
             }
         }
 
@@ -1120,7 +1136,9 @@ pub fn imodv_key_press(a: &mut ImodvApp, event: InputEvent, n: &mut dyn MvInputN
                 imodv_objed_toggle_clip(a, 0, 1);
             } else {
                 imodv_step_time(a, 1, n);
-                unsafe { imodv_draw() };
+                {
+                    imodv_draw()
+                };
             }
         }
 
@@ -1131,7 +1149,9 @@ pub fn imodv_key_press(a: &mut ImodvApp, event: InputEvent, n: &mut dyn MvInputN
                 a.drawall = 3;
             }
             n.ime_set_view_data(a.drawall);
-            unsafe { imodv_draw() };
+            {
+                imodv_draw()
+            };
         }
 
         KEY_9 => {
@@ -1378,14 +1398,18 @@ pub fn imodv_key_press(a: &mut ImodvApp, event: InputEvent, n: &mut dyn MvInputN
                 n.imodv_select_visible_conts(a, &mut picked_ob, &mut picked_co);
                 S_PICKED_OBJECT.set(picked_ob);
                 S_PICKED_CONTOUR.set(picked_co);
-                unsafe { imodv_draw() };
+                {
+                    imodv_draw()
+                };
                 if a.standalone == 0 {
                     n.imod_setxyzmouse();
                 }
             } else if shifted == 0 && ctrl == 0 {
                 a.plax *= -1.0f32;
                 n.imodv_stereo_update(a);
-                unsafe { imodv_draw() };
+                {
+                    imodv_draw()
+                };
             }
         }
 
@@ -1410,7 +1434,9 @@ pub fn imodv_key_press(a: &mut ImodvApp, event: InputEvent, n: &mut dyn MvInputN
                     && a.trans_bkgd == 0
                     && (a.enable_depth_dbal >= 0 || a.enable_depth_dbst_al >= 0);
                 n.set_enabled_menu_item(a, ViewMenuAction::TransparentBackground, enabled);
-                unsafe { imodv_draw() };
+                {
+                    imodv_draw()
+                };
             }
         }
 
@@ -1436,7 +1462,9 @@ pub fn imodv_key_press(a: &mut ImodvApp, event: InputEvent, n: &mut dyn MvInputN
             S_SHIFT_DOWN.set(INPUT_SHIFT);
             if S_MID_DOWN.get() != 0 && a.draw_light == 0 {
                 a.draw_light = 1;
-                unsafe { imodv_draw() };
+                {
+                    imodv_draw()
+                };
             }
         }
 
@@ -1484,7 +1512,9 @@ pub fn imodv_key_release(a: &mut ImodvApp, event: InputEvent, n: &mut dyn MvInpu
         }
         if a.draw_light != 0 {
             a.draw_light = 0;
-            unsafe { imodv_draw() };
+            {
+                imodv_draw()
+            };
         }
     }
 }
@@ -1537,7 +1567,9 @@ pub fn imodv_mouse_press(a: &mut ImodvApp, event: InputEvent, n: &mut dyn MvInpu
         B2Y.set(ey);
         if event.button == n.actual_modv_button(2) && shift != 0 && ctrl == 0 {
             a.draw_light = 1;
-            unsafe { imodv_draw() };
+            {
+                imodv_draw()
+            };
         }
         if event.button == n.actual_modv_button(2) && shift != 0 && ctrl != 0 {
             imodv_select(a, ex, ey, false, true, false, n);
@@ -1576,7 +1608,9 @@ pub fn imodv_mouse_release(a: &mut ImodvApp, event: InputEvent, n: &mut dyn MvIn
     }
     if a.draw_light != 0 {
         a.draw_light = 0;
-        unsafe { imodv_draw() };
+        {
+            imodv_draw()
+        };
     }
 }
 
@@ -1703,10 +1737,14 @@ pub fn imodv_scroll_wheel(a: &mut ImodvApp, event: InputEvent, n: &mut dyn MvInp
         imod_point_set_size(&mut imod.obj[obj_index].cont[cont_index], point_index, size);
         imodv_finish_chg_unit();
         imodv_draw_imod_images(0);
-        unsafe { imodv_draw() };
+        {
+            imodv_draw()
+        };
     } else {
         imodv_zoomd(a, zoom);
-        unsafe { imodv_draw() };
+        {
+            imodv_draw()
+        };
     }
 }
 
@@ -1730,7 +1768,9 @@ pub fn imodv_light_move(a: &mut ImodvApp, mx: i32, my: i32, n: &mut dyn MvInputN
         let (dx, dy) = (mx - a.lastmx, my - a.lastmy);
         n.light_moveby(unsafe { &mut *a_ptr }, dx, dy);
     }
-    unsafe { imodv_draw() };
+    {
+        imodv_draw()
+    };
 }
 
 /// Original: `imodv_zoomd` (`mv_input.cpp:1247`).
@@ -1892,7 +1932,9 @@ pub fn imodv_translate_by_delta(
         }
     }
 
-    unsafe { imodv_draw() };
+    {
+        imodv_draw()
+    };
 }
 
 /// Original: `imodv_rotate_model` (`mv_input.cpp:1358`).
@@ -1913,7 +1955,9 @@ pub fn imodv_rotate_model(
         a.zrot_movie = z as f32;
     }
     imodv_compute_rotation(a, x as f32, y as f32, z as f32, n);
-    unsafe { imodv_draw() };
+    {
+        imodv_draw()
+    };
 }
 
 /// Original static: `imodv_compute_rotation` (`mv_input.cpp:1369`).
@@ -2321,7 +2365,9 @@ pub fn imodv_select(
             a.mod_picks.resize(a.num_mods as usize, Ipoint::default());
         }
         a.read_pix_for_pick = 1;
-        unsafe { imodv_draw() };
+        {
+            imodv_draw()
+        };
 
         // `App->newQtOpenGL` is set on this build; the host performs
         // `imodvModelDrawRange` plus `imodvUnprojectPickedPoint`.
@@ -2345,7 +2391,9 @@ pub fn imodv_select(
         a.h_pick = 10;
         a.do_pick = 1;
 
-        unsafe { imodv_draw() };
+        {
+            imodv_draw()
+        };
 
         a.do_pick = 0;
         hits = a.pick_hits;
@@ -2510,7 +2558,9 @@ pub fn process_selection(
         || ob_num >= unsafe { a.mod_[mo_num as usize].as_ref().obj.len() as i32 }
     {
         // `App->newQtOpenGL` is set on this build.
-        unsafe { imodv_draw() };
+        {
+            imodv_draw()
+        };
         return;
     }
 
@@ -2750,7 +2800,9 @@ pub fn process_selection(
     if a.standalone == 0 {
         n.imod_setxyzmouse();
     } else {
-        unsafe { imodv_draw() };
+        {
+            imodv_draw()
+        };
     }
     S_PICKED_CONTOUR.set(unsafe { (*a.imod).cindex.contour });
     S_PICKED_OBJECT.set(unsafe { (*a.imod).cindex.object });
@@ -2878,7 +2930,9 @@ pub fn imodv_movie_timeout(a: &mut ImodvApp, n: &mut dyn MvInputNativeBoundary) 
             scale * a.zrot_movie,
         );
         imodv_compute_rotation(a, x, y, z, n);
-        unsafe { imodv_draw() };
+        {
+            imodv_draw()
+        };
     } else {
         a.wpid = 0;
         n.movie_timer_stop();

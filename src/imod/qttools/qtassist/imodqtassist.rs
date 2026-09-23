@@ -124,7 +124,7 @@ impl ImodAssistant {
         pref_absolute: bool,
     ) -> Self {
         let mut assumed_imod = 0;
-        let imod_dir = unsafe { imod_dir_or_default(Some(&mut assumed_imod)) };
+        let imod_dir = { imod_dir_or_default(Some(&mut assumed_imod)) };
         let path = if absolute {
             path.to_owned()
         } else {

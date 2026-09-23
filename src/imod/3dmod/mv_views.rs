@@ -49,7 +49,7 @@ impl Default for ImodvViewed {
     }
 }
 /// Original static `imodvUpdateView`.
-pub fn imodv_update_view(a: &mut ImodvApp, n: &mut dyn ImodvViewsNativeBoundary) {
+fn imodv_update_view(a: &mut ImodvApp, n: &mut dyn ImodvViewsNativeBoundary) {
     let Some(model) = (unsafe { a.imod.as_ref() }) else {
         return;
     };
@@ -90,7 +90,7 @@ pub fn imodv_update_model(
     }
 }
 /// Original static `manage_world_flags`.
-pub fn manage_world_flags(a: &ImodvApp, view: &mut Iview) {
+fn manage_world_flags(a: &ImodvApp, view: &mut Iview) {
     for (flag, value) in [
         (VIEW_WORLD_INVERT_Z, a.invert_z),
         (VIEW_WORLD_LIGHT, a.lighting),
@@ -206,7 +206,7 @@ pub fn imodv_views_set_view(
     n.draw_imod_images(a.link_to_slicer);
     imodv_update_view(a, n);
     if draw {
-        unsafe { imodv_draw() }
+        imodv_draw()
     }
 }
 pub fn imodv_views_store(a: &mut ImodvApp, item: i32) {
@@ -317,7 +317,7 @@ pub fn imodv_views_initialize(model: &mut Imod, a: &mut ImodvApp) {
     a.lowres = (model.view[0].world & VIEW_WORLD_LOWRES != 0) as i32;
 }
 /// Original static `build_list`.
-pub fn build_list(a: &ImodvApp, form: &mut ImodvViewsForm) {
+fn build_list(a: &ImodvApp, form: &mut ImodvViewsForm) {
     let Some(model) = (unsafe { a.imod.as_ref() }) else {
         return;
     };

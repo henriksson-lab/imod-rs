@@ -54,7 +54,7 @@ const FREEMAN_DX: [i32; 8] = [1, 1, 0, -1, -1, -1, 0, 1];
 const FREEMAN_DY: [i32; 8] = [0, -1, -1, -1, 0, 1, 1, 1];
 
 /// Original static `Skeletonize` (`skeletonize.c:113`).
-pub fn skeletonize_pixels(size_x: i32, size_y: i32, pc_out: &mut [u8], border_size: i32) {
+fn skeletonize_pixels(size_x: i32, size_y: i32, pc_out: &mut [u8], border_size: i32) {
     let i_nb_pixels = size_x * size_y;
 
     let size_x_pred = size_x - 1;
@@ -128,7 +128,7 @@ pub fn skeletonize_pixels(size_x: i32, size_y: i32, pc_out: &mut [u8], border_si
 ///
 /// Copied from `avs_medialaxis.cpp` (see AVS module MEDIAL_AXIS for
 /// documentation).
-pub fn slice_medial_axis(
+fn slice_medial_axis(
     p_in: &[u8],
     pp_out: &mut Option<Vec<u8>>,
     i_size_x: i32,
@@ -187,7 +187,7 @@ pub fn slice_medial_axis(
 ///
 /// Dead in the source as well; translated because whole source units are
 /// translated.
-pub fn all_pixels_processed(use_count: &[i32], size: i32) -> i32 {
+fn all_pixels_processed(use_count: &[i32], size: i32) -> i32 {
     for i in 0..size as usize {
         if use_count[i] == 0 {
             return 0;
@@ -197,7 +197,7 @@ pub fn all_pixels_processed(use_count: &[i32], size: i32) -> i32 {
 }
 
 /// Original static `FindStartPoint` (`skeletonize.c:250`).
-pub fn find_start_point(
+fn find_start_point(
     height: i32,
     width: i32,
     axis_field: &[u8],
@@ -248,7 +248,7 @@ pub fn find_start_point(
 }
 
 /// Original static `EliminateLinearPart` (`skeletonize.c:287`).
-pub fn eliminate_linear_part(
+fn eliminate_linear_part(
     startpoint: i32,
     startpoint2: i32,
     points_x: &mut Vec<i32>,
@@ -353,7 +353,7 @@ pub fn eliminate_linear_part(
 }
 
 /// Original static `EliminateStraightSegments` (`skeletonize.c:376`).
-pub fn eliminate_straight_segments(
+fn eliminate_straight_segments(
     points_x: &mut Vec<i32>,
     points_y: &mut Vec<i32>,
     endpoints_x: &[i32],
@@ -391,14 +391,14 @@ pub fn eliminate_straight_segments(
 }
 
 /// Original static `TakeFreemanStep` (`skeletonize.c:404`).
-pub fn take_freeman_step(freeman: i32, i: &mut i32, j: &mut i32) {
+fn take_freeman_step(freeman: i32, i: &mut i32, j: &mut i32) {
     *i += FREEMAN_DX[freeman as usize];
     *j += FREEMAN_DY[freeman as usize];
 }
 
 /// Original static `SkeletonToContour` (`skeletonize.c:410`).
 #[allow(clippy::too_many_arguments)]
-pub fn skeleton_to_contour(
+fn skeleton_to_contour(
     axis_field: &mut [u8],
     width: i32,
     height: i32,

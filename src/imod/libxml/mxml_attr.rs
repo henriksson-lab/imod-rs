@@ -129,7 +129,7 @@ pub fn mxml_element_set_attrf(
 /// The C takes ownership of `value` on success and leaves it to the caller to
 /// free on failure; the owned `Option<Vec<u8>>` carries that transfer, and the
 /// two failure arms — `realloc` and `strdup` returning NULL — cannot occur.
-pub fn mxml_set_attr(
+fn mxml_set_attr(
     arena: &mut MxmlArena,
     node: usize,
     name: &[u8],

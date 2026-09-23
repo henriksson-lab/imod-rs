@@ -87,23 +87,23 @@ pub fn expand_arg_list(args: &[OsString]) -> (Vec<OsString>, isize) {
 
 /// Matches `PipInitialize` (`IMOD/pysrc/pip.py:101`).
 pub fn pip_initialize(number_options: i32) -> i32 {
-    unsafe { crate::imod::libcfshr::parse_params::pip_initialize(number_options) }
+    crate::imod::libcfshr::parse_params::pip_initialize(number_options)
 }
 
 /// Matches `PipWarnUnusedNonOptArgs` (`IMOD/pysrc/pip.py:123`).
 pub fn pip_warn_unused_non_opt_args() -> i32 {
-    unsafe { crate::imod::libcfshr::parse_params::pip_warn_unused_non_opt_args() }
+    crate::imod::libcfshr::parse_params::pip_warn_unused_non_opt_args()
 }
 
 /// Matches `PipDone` (`IMOD/pysrc/pip.py:136`).
 pub fn pip_done() {
-    unsafe { crate::imod::libcfshr::parse_params::pip_done() }
+    crate::imod::libcfshr::parse_params::pip_done()
 }
 
 /// Matches `PipExitOnError` (`IMOD/pysrc/pip.py:154`).
 pub fn pip_exit_on_error(use_standard_error: i32, prefix: &str) -> i32 {
     *S_EXIT_PREFIX.lock().expect("PIP exit prefix mutex") = Some(prefix.to_string());
-    unsafe {
+    {
         crate::imod::libcfshr::parse_params::pip_exit_on_error(
             use_standard_error,
             prefix.as_bytes(),
@@ -113,12 +113,12 @@ pub fn pip_exit_on_error(use_standard_error: i32, prefix: &str) -> i32 {
 
 /// Matches `PipEnableEntryOutput` (`IMOD/pysrc/pip.py:169`).
 pub fn pip_enable_entry_output(value: i32) {
-    unsafe { crate::imod::libcfshr::parse_params::pip_enable_entry_output(value) }
+    crate::imod::libcfshr::parse_params::pip_enable_entry_output(value)
 }
 
 /// Matches `PipSetLinkedOption` (`IMOD/pysrc/pip.py:175`).
 pub fn pip_set_linked_option(option: &str) {
-    unsafe {
+    {
         crate::imod::libcfshr::parse_params::pip_set_linked_option(option.as_bytes());
     }
 }
@@ -137,7 +137,7 @@ pub fn pip_get_err_no() -> i32 {
 
 /// Matches `PipAddOption` (`IMOD/pysrc/pip.py:220`).
 pub fn pip_add_option(option_string: &str) -> i32 {
-    unsafe {
+    {
         crate::imod::libcfshr::parse_params::pip_add_option(option_string.as_bytes())
             .map_or(-1, |()| 0)
     }
@@ -145,14 +145,14 @@ pub fn pip_add_option(option_string: &str) -> i32 {
 
 /// Matches `PipNextArg` (`IMOD/pysrc/pip.py:275`).
 pub fn pip_next_arg(argument_string: &str) -> i32 {
-    unsafe { crate::imod::libcfshr::parse_params::pip_next_arg(argument_string.as_bytes()) }
+    crate::imod::libcfshr::parse_params::pip_next_arg(argument_string.as_bytes())
 }
 
 /// Matches `PipNumberOfArgs` (`IMOD/pysrc/pip.py:356`).
 pub fn pip_number_of_args() -> (i32, i32) {
     let mut option_arguments = 0;
     let mut non_option_arguments = 0;
-    unsafe {
+    {
         crate::imod::libcfshr::parse_params::pip_number_of_args(
             &mut option_arguments,
             &mut non_option_arguments,
@@ -194,9 +194,8 @@ pub fn pip_get_string(option: &str, default_value: &str) -> Result<String, i32> 
 pub fn pip_get_boolean(option: &str, default_value: i32) -> Result<i32, i32> {
     *PIP_ERRNO.lock().expect("PIP errno mutex") = 0;
     let mut value = default_value;
-    let status = unsafe {
-        crate::imod::libcfshr::parse_params::pip_get_boolean(option.as_bytes(), &mut value)
-    };
+    let status =
+        { crate::imod::libcfshr::parse_params::pip_get_boolean(option.as_bytes(), &mut value) };
     *PIP_ERRNO.lock().expect("PIP errno mutex") = status;
     if status < 0 { Err(status) } else { Ok(value) }
 }
@@ -205,9 +204,8 @@ pub fn pip_get_boolean(option: &str, default_value: i32) -> Result<i32, i32> {
 pub fn pip_get_integer(option: &str, default_value: i32) -> Result<i32, i32> {
     *PIP_ERRNO.lock().expect("PIP errno mutex") = 0;
     let mut value = default_value;
-    let status = unsafe {
-        crate::imod::libcfshr::parse_params::pip_get_integer(option.as_bytes(), &mut value)
-    };
+    let status =
+        { crate::imod::libcfshr::parse_params::pip_get_integer(option.as_bytes(), &mut value) };
     *PIP_ERRNO.lock().expect("PIP errno mutex") = status;
     if status < 0 { Err(status) } else { Ok(value) }
 }
@@ -216,9 +214,8 @@ pub fn pip_get_integer(option: &str, default_value: i32) -> Result<i32, i32> {
 pub fn pip_get_float(option: &str, default_value: f32) -> Result<f32, i32> {
     *PIP_ERRNO.lock().expect("PIP errno mutex") = 0;
     let mut value = default_value;
-    let status = unsafe {
-        crate::imod::libcfshr::parse_params::pip_get_float(option.as_bytes(), &mut value)
-    };
+    let status =
+        { crate::imod::libcfshr::parse_params::pip_get_float(option.as_bytes(), &mut value) };
     *PIP_ERRNO.lock().expect("PIP errno mutex") = status;
     if status < 0 { Err(status) } else { Ok(value) }
 }
@@ -226,7 +223,7 @@ pub fn pip_get_float(option: &str, default_value: f32) -> Result<f32, i32> {
 /// Matches `PipGetTwoIntegers` (`IMOD/pysrc/pip.py:437`).
 pub fn pip_get_two_integers(option: &str, default_values: (i32, i32)) -> Result<(i32, i32), i32> {
     let (mut first, mut second) = default_values;
-    let status = unsafe {
+    let status = {
         crate::imod::libcfshr::parse_params::pip_get_two_integers(
             option.as_bytes(),
             &mut first,
@@ -244,7 +241,7 @@ pub fn pip_get_two_integers(option: &str, default_values: (i32, i32)) -> Result<
 /// Matches `PipGetTwoFloats` (`IMOD/pysrc/pip.py:447`).
 pub fn pip_get_two_floats(option: &str, default_values: (f32, f32)) -> Result<(f32, f32), i32> {
     let (mut first, mut second) = default_values;
-    let status = unsafe {
+    let status = {
         crate::imod::libcfshr::parse_params::pip_get_two_floats(
             option.as_bytes(),
             &mut first,
@@ -265,7 +262,7 @@ pub fn pip_get_three_integers(
     default_values: (i32, i32, i32),
 ) -> Result<(i32, i32, i32), i32> {
     let (mut first, mut second, mut third) = default_values;
-    let status = unsafe {
+    let status = {
         crate::imod::libcfshr::parse_params::pip_get_three_integers(
             option.as_bytes(),
             &mut first,
@@ -287,7 +284,7 @@ pub fn pip_get_three_floats(
     default_values: (f32, f32, f32),
 ) -> Result<(f32, f32, f32), i32> {
     let (mut first, mut second, mut third) = default_values;
-    let status = unsafe {
+    let status = {
         crate::imod::libcfshr::parse_params::pip_get_three_floats(
             option.as_bytes(),
             &mut first,
@@ -307,7 +304,7 @@ pub fn pip_get_three_floats(
 pub fn pip_get_integer_array(option: &str, values: &mut [i32]) -> Result<usize, i32> {
     let len = values.len() as i32;
     let mut number = len;
-    let status = unsafe {
+    let status = {
         crate::imod::libcfshr::parse_params::pip_get_integer_array(
             option.as_bytes(),
             values,
@@ -327,7 +324,7 @@ pub fn pip_get_integer_array(option: &str, values: &mut [i32]) -> Result<usize, 
 pub fn pip_get_float_array(option: &str, values: &mut [f32]) -> Result<usize, i32> {
     let len = values.len() as i32;
     let mut number = len;
-    let status = unsafe {
+    let status = {
         crate::imod::libcfshr::parse_params::pip_get_float_array(
             option.as_bytes(),
             values,
@@ -350,7 +347,7 @@ pub fn pip_print_help(
     input_files: i32,
     output_files: i32,
 ) -> i32 {
-    unsafe {
+    {
         crate::imod::libcfshr::parse_params::pip_print_help(
             program_name.as_bytes(),
             use_standard_error,
@@ -362,7 +359,7 @@ pub fn pip_print_help(
 
 /// Matches `PipPrintEntries` (`IMOD/pysrc/pip.py:608`).
 pub fn pip_print_entries() {
-    unsafe { crate::imod::libcfshr::parse_params::pip_print_entries() }
+    crate::imod::libcfshr::parse_params::pip_print_entries()
 }
 
 /// Matches `PipGetError` (`IMOD/pysrc/pip.py:645`).
@@ -377,13 +374,13 @@ pub fn pip_get_error() -> Result<String, i32> {
 
 /// Matches `PipSetError` (`IMOD/pysrc/pip.py:657`).
 pub fn pip_set_error(error_string: &str) -> i32 {
-    unsafe { crate::imod::libcfshr::parse_params::pip_set_error(error_string.as_bytes()) }
+    crate::imod::libcfshr::parse_params::pip_set_error(error_string.as_bytes())
 }
 
 /// Matches `PipNumberOfEntries` (`IMOD/pysrc/pip.py:685`).
 pub fn pip_number_of_entries(option: &str) -> Result<i32, i32> {
     let mut number = 0;
-    let status = unsafe {
+    let status = {
         crate::imod::libcfshr::parse_params::pip_number_of_entries(option.as_bytes(), &mut number)
     };
     if status < 0 { Err(status) } else { Ok(number) }
@@ -392,9 +389,8 @@ pub fn pip_number_of_entries(option: &str) -> Result<i32, i32> {
 /// Matches `PipLinkedIndex` (`IMOD/pysrc/pip.py:699`).
 pub fn pip_linked_index(option: &str) -> Result<i32, i32> {
     let mut index = 0;
-    let status = unsafe {
-        crate::imod::libcfshr::parse_params::pip_linked_index(option.as_bytes(), &mut index)
-    };
+    let status =
+        { crate::imod::libcfshr::parse_params::pip_linked_index(option.as_bytes(), &mut index) };
     if status < 0 { Err(status) } else { Ok(index) }
 }
 
@@ -426,7 +422,7 @@ pub fn pip_parse_input(arguments: &[String], options: &[String]) -> Result<(i32,
 
 /// Matches `PipReadOptionFile` (`IMOD/pysrc/pip.py:779`).
 pub fn pip_read_option_file(program_name: &str, help_level: i32, local_directory: i32) -> i32 {
-    unsafe {
+    {
         crate::imod::libcfshr::parse_params::pip_read_option_file(
             program_name.as_bytes(),
             help_level,
@@ -474,7 +470,7 @@ pub fn pip_starts_with(full_string: &str, substring: &str) -> bool {
     if full_string.is_empty() || substring.is_empty() {
         return false;
     }
-    unsafe {
+    {
         crate::imod::libcfshr::parse_params::pip_starts_with(
             full_string.as_bytes(),
             substring.as_bytes(),

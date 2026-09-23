@@ -59,7 +59,7 @@ impl Statement for Comment {
     }
 
     /// Java `wrapValue(String, String, String, String, int, int)`, whose body is empty.
-    unsafe fn wrap_value(
+    fn wrap_value(
         &mut self,
         _no_wrap_prefix: Option<&str>,
         _wrap_prefix: Option<&str>,
@@ -71,7 +71,7 @@ impl Statement for Comment {
     }
 
     /// Java `write(LogFile.Handle, LogFile.WriterId)`.
-    unsafe fn write(
+    fn write(
         &self,
         file: &std::sync::Arc<log_file::Handle>,
         writer_id: &log_file::WriterId,
@@ -84,7 +84,7 @@ impl Statement for Comment {
     }
 
     /// Java `print(int)`.  Note the source ignores `level` here.
-    unsafe fn print(&self, _level: i32) {
+    fn print(&self, _level: i32) {
         if !self.comment.is_null() {
             println!("<comment> {}", unsafe { (*self.comment).get_values() });
         }

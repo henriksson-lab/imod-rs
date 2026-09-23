@@ -120,7 +120,9 @@ pub fn newstack() {
     }
     // `newstack.f90:302` suppresses the iiunit open/header banner while it
     // probes each input; command-owned diagnostics remain enabled below.
-    unsafe { ialprt(false) };
+    {
+        ialprt(false)
+    };
     let mut input_entries = 0;
     let mut output_entries = 0;
     let mut section_list_entries = 0;
@@ -313,7 +315,7 @@ pub fn newstack() {
     // read out of the PIP entry table that `PipReadOrParseOptions` filled, so
     // option abbreviation, `-param` files, and illegal-option exits all behave
     // as they do natively.
-    unsafe {
+    {
         let mut string_value: Vec<u8> = Vec::new();
         let mut integer_value = 0_i32;
         let mut float_value = 0.0_f32;
@@ -665,7 +667,7 @@ pub fn newstack() {
     let mut need_close1 = 0_i32;
     let mut need_close2 = 0_i32;
     let if_chunk_in;
-    unsafe {
+    {
         let mut string_value: Vec<u8> = Vec::new();
         // `newstack.f90:386-390`.
         if pip_get_string(b"VolumesToRead", &mut string_value) == 0 {
@@ -724,7 +726,7 @@ pub fn newstack() {
     // (`newstack.f90:355`) or `There must be exactly two input files to use
     // -twodir` (`newstack.f90:409`).  Parsing them in the option block ahead of
     // both reported the wrong error for `-twodir 1 -secs ...` with no input.
-    unsafe {
+    {
         let mut string_value: Vec<u8> = Vec::new();
         for _ in 0..section_list_entries {
             if pip_get_string(b"SectionsToRead", &mut string_value) == 0 {
@@ -1503,7 +1505,7 @@ pub fn newstack() {
             let mut ierr = 1;
             let start_filter = ind_filter;
             while ierr == 1 {
-                ierr = unsafe {
+                ierr = {
                     crate::imod::libcfshr::zoomdown::select_zoom_filter(
                         ind_filter,
                         // `newstack.f90:1080` divides in real*4 and the
@@ -5051,7 +5053,7 @@ pub fn newstack() {
                             // `newstack.f90:2405-2412`: post-read shrinkage
                             // replaces the affine interpolation with the
                             // antialiasing filter's own resampler.
-                            let ierr = unsafe {
+                            let ierr = {
                                 crate::imod::libcfshr::zoomdown::zoom_filt_interp(
                                     &input,
                                     &mut output,
@@ -6643,7 +6645,7 @@ pub fn newstack() {
                                 - line_out_st as f32;
                             if lines_shrink > 0 {
                                 // `newstack.f90:2405-2412`.
-                                let ierr = unsafe {
+                                let ierr = {
                                     crate::imod::libcfshr::zoomdown::zoom_filt_interp(
                                         &input,
                                         &mut array[base..end],
@@ -7781,12 +7783,14 @@ pub fn get_items_to_use(
     // first, which then failed the caller's section-count check.
     //
     let mut num_xf_lines = 0_i32;
-    unsafe { pip_number_of_entries(option, &mut num_xf_lines) };
+    {
+        pip_number_of_entries(option, &mut num_xf_lines)
+    };
     if num_xf_lines > 0 {
         let mut parsed = Vec::<i32>::new();
         for _ in 0..num_xf_lines {
             let mut string_value: Vec<u8> = Vec::new();
-            let list = unsafe {
+            let list = {
                 if pip_get_string(option, &mut string_value) != 0 {
                     continue;
                 }
@@ -8303,7 +8307,7 @@ where
             let (mut tmin2, mut tmax2) = (0.0_f32, 0.0_f32);
             let (mut sum, mut tsum_sq) = (0.0_f64, 0.0_f64);
             let (mut avg_sec, mut sd_load) = (0.0_f32, 0.0_f32);
-            unsafe {
+            {
                 crate::imod::libcfshr::simplestat::array_min_max_mean_sd(
                     &values,
                     nx,
@@ -8752,7 +8756,7 @@ pub fn get_offset_entries(
 /// the loop indices are the source's 1-based ones; the Fortran wrappers
 /// (`adoc_fwrap.c:481, 397, 493`) subtract one before the C entry points, so
 /// this does the same at each call.
-pub unsafe fn transfer_collections(zvalue_name: &[u8], ind_adoc_out: i32) -> Result<(), String> {
+pub fn transfer_collections(zvalue_name: &[u8], ind_adoc_out: i32) -> Result<(), String> {
     let count = adoc_get_num_collections().unwrap_or(-1);
     for collection in 1..=count {
         let Ok(name) = adoc_get_collection_name(collection - 1) else {
@@ -8854,7 +8858,7 @@ mod tests {
         // `getItemsToUse` reads its own option through PIP
         // (`newstack.f90:3333-3344`), so the entry has to be in PIP's table
         // for this to exercise the parsed-list path.
-        unsafe {
+        {
             crate::imod::libcfshr::parse_params::pip_initialize(1);
             crate::imod::libcfshr::parse_params::pip_add_option(b"uselines:UseTransformLines:LIM:");
             crate::imod::libcfshr::parse_params::pip_next_arg(b"-uselines");
@@ -8872,7 +8876,9 @@ mod tests {
             ),
             [1, 2, 3, 0]
         );
-        unsafe { crate::imod::libcfshr::parse_params::pip_done() };
+        {
+            crate::imod::libcfshr::parse_params::pip_done()
+        };
     }
     #[test]
     fn lines_needed_keeps_source_centering_and_fill_test() {

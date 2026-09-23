@@ -848,7 +848,7 @@ pub fn imesh_contours_cost(
 /// end of open contours in closed objects and connects endpoints of gaps that
 /// match up.
 #[allow(clippy::too_many_arguments)]
-pub fn manage_gaps(
+fn manage_gaps(
     bc: &mut Icont,
     bc_store: &mut Option<Vec<Istore>>,
     new_bstore: &mut i32,
@@ -1084,7 +1084,7 @@ pub fn manage_gaps(
 /// Adds a pair of connectors at the ends of a shared gap if the user has not
 /// inserted any connectors.
 #[allow(clippy::too_many_arguments)]
-pub fn add_connector_if_none(
+fn add_connector_if_none(
     bc: &mut Icont,
     bc_store: &mut Option<Vec<Istore>>,
     new_bstore: &mut i32,
@@ -1135,7 +1135,7 @@ pub fn add_connector_if_none(
 /// Original static `endsOfWholeGap` (`mkmesh.c:905`).
 ///
 /// Finds the point at the ends of a gap, passing over gap points.
-pub fn ends_of_whole_gap(cont: &Icont, pt: i32, new_start: &mut i32) -> i32 {
+fn ends_of_whole_gap(cont: &Icont, pt: i32, new_start: &mut i32) -> i32 {
     let psize = cont.pts.len() as i32;
     let mut next = pt;
     let mut i = 0;
@@ -1162,7 +1162,7 @@ pub fn ends_of_whole_gap(cont: &Icont, pt: i32, new_start: &mut i32) -> i32 {
 ///
 /// Duplicates the contour store if it has not been done already, and keeps
 /// track of the old store and a flag of whether this was done.
-pub fn dup_store_if_needed(
+fn dup_store_if_needed(
     cont: &mut Icont,
     old_store: &mut Option<Vec<Istore>>,
     made_new: &mut i32,
@@ -1182,7 +1182,7 @@ pub fn dup_store_if_needed(
 /// vectors; the contour store restore is the part that is observable.  As in
 /// the source, `mesh` is a parameter this routine does not touch.
 #[allow(clippy::too_many_arguments)]
-pub fn cleanup_icc_arrays(
+fn cleanup_icc_arrays(
     _mesh: &mut Imesh,
     up: &mut Vec<f32>,
     down: &mut Vec<f32>,
@@ -1216,7 +1216,7 @@ pub fn cleanup_icc_arrays(
 
 /// Original static `build_area_matrices` (`mkmesh.c:966`).
 #[allow(clippy::too_many_arguments)]
-pub fn build_area_matrices(
+fn build_area_matrices(
     bc: &Icont,
     bdir: i32,
     tc: &Icont,
@@ -1334,7 +1334,7 @@ pub fn build_area_matrices(
 /// A quicker function for area that uses only the zscale, computes the cross
 /// product without a function call, uses `sqrtf`, and leaves off the factor of
 /// 0.5.
-pub fn point_area_quick(p1: &Ipoint, p2: &Ipoint, p3: &Ipoint, zscale: f32) -> f32 {
+fn point_area_quick(p1: &Ipoint, p2: &Ipoint, p3: &Ipoint, zscale: f32) -> f32 {
     let mut n = Ipoint::default();
     let mut n1 = Ipoint::default();
     let mut n2 = Ipoint::default();
@@ -1357,7 +1357,7 @@ pub fn point_area_quick(p1: &Ipoint, p2: &Ipoint, p3: &Ipoint, zscale: f32) -> f
 /// Computes the minimum area path to every possible connection, thus allowing
 /// one to follow a minimum area path from ending to starting connection.
 #[allow(clippy::too_many_arguments)]
-pub fn cost_from_area_matrices(
+fn cost_from_area_matrices(
     up: &[f32],
     down: &[f32],
     cost: &mut [f64],
@@ -1840,7 +1840,7 @@ pub fn make_connectors(
 /// If bottom direction is negative, this reverses the order of the connectors
 /// in the array and exchanges b1 and b2.  If top direction is negative, it
 /// exchanges t1 and t2.
-pub fn invert_connectors(connects: &mut [Connector], num_con: i32, direction: &[i32; 2]) {
+fn invert_connectors(connects: &mut [Connector], num_con: i32, direction: &[i32; 2]) {
     let num_con = num_con as usize;
     if direction[0] < 0 {
         /* Swap connectors for bottom inversion */
@@ -1887,7 +1887,7 @@ pub fn invert_connectors(connects: &mut [Connector], num_con: i32, direction: &[
 /// Original static `outsideMeshLimits` (`mkmesh.c:1503`).
 ///
 /// Tests for whether a triangle is entirely outside the limit.
-pub fn outside_mesh_limits(p1: &Ipoint, p2: &Ipoint, p3: &Ipoint) -> i32 {
+fn outside_mesh_limits(p1: &Ipoint, p2: &Ipoint, p3: &Ipoint) -> i32 {
     let mesh_min = MESH_MIN.with(|c| c.get());
     let mesh_max = MESH_MAX.with(|c| c.get());
     if (p1.x < mesh_min.x || p1.x > mesh_max.x || p1.y < mesh_min.y || p1.y > mesh_max.y)
@@ -1903,14 +1903,7 @@ pub fn outside_mesh_limits(p1: &Ipoint, p2: &Ipoint, p3: &Ipoint) -> i32 {
 ///
 /// Adds one triangle to the mesh, exchanging second and third points if
 /// `inside` is set.
-pub fn chunk_add_triangle(
-    mesh: &mut Imesh,
-    i1: i32,
-    i2: i32,
-    i3: i32,
-    maxsize: &mut i32,
-    inside: i32,
-) {
+fn chunk_add_triangle(mesh: &mut Imesh, i1: i32, i2: i32, i3: i32, maxsize: &mut i32, inside: i32) {
     let mut o2 = i2;
     let mut o3 = i3;
     if inside != 0 {
@@ -2052,7 +2045,7 @@ pub fn make_tube_cont(
 ///
 /// Finds the point at which the back-transformed circle reaches its top, and
 /// returns 0 for a ccw or 1 for a cw circle.
-pub fn circle_top_and_direction(cont: &Icont, mat: &Imat, ptop: &mut i32) -> i32 {
+fn circle_top_and_direction(cont: &Icont, mat: &Imat, ptop: &mut i32) -> i32 {
     let mut reverse = 0;
     let mut ytop = 0.0f32;
     let mut xtop = 0.0f32;

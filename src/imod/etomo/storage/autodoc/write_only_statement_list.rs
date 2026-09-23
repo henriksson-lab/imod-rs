@@ -28,7 +28,7 @@ pub trait WriteOnlyStatementList: WriteOnlyAttributeList {
     ///
     /// # Safety
     /// See `add_name_value_pair`.
-    unsafe fn add_empty_line(&mut self, line_num: i32);
+    fn add_empty_line(&mut self, line_num: i32);
     /// Java `addComment(Token, int)`.
     ///
     /// # Safety

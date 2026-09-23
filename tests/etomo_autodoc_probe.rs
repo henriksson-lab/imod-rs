@@ -134,7 +134,7 @@ unsafe fn dump_sections(
 ) {
     let mut location = match r#type {
         None => list.get_section_location(),
-        Some(r#type) => unsafe { list.get_section_location_by_type(Some(r#type)) },
+        Some(r#type) => list.get_section_location_by_type(Some(r#type)),
     };
     out.push_str(&format!(
         "{}sectionLocation({})={}\n",

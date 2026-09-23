@@ -143,7 +143,7 @@ impl Token {
     /// # Safety
     /// Every `next` pointer reachable from this token must be null or point to a live
     /// `Token`.
-    pub unsafe fn get_values(&self) -> String {
+    pub fn get_values(&self) -> String {
         let mut token: *const Token = self;
         let mut buffer = String::new();
         while !token.is_null() {
@@ -164,7 +164,7 @@ impl Token {
     ///
     /// # Safety
     /// See `get_values`.
-    pub unsafe fn get_multi_line_values(&self) -> String {
+    pub fn get_multi_line_values(&self) -> String {
         let mut token: *const Token = self;
         let mut buffer = String::new();
         while !token.is_null() {
@@ -190,7 +190,7 @@ impl Token {
     ///
     /// # Safety
     /// Every token in this token's `next` list must be live.
-    pub unsafe fn write(
+    pub fn write(
         &self,
         file: &std::sync::Arc<log_file::Handle>,
         writer_id: &log_file::WriterId,
@@ -221,7 +221,7 @@ impl Token {
     ///
     /// # Safety
     /// See `get_values`.
-    pub unsafe fn get_key(&self) -> String {
+    pub fn get_key(&self) -> String {
         let mut buffer = String::new();
         match &self.key {
             None => buffer.push(' '),
@@ -572,7 +572,7 @@ impl Token {
     ///
     /// # Safety
     /// `previous` and `next` must be null or point to live `Token`s.
-    pub unsafe fn remove_list_from_head(&mut self) {
+    pub fn remove_list_from_head(&mut self) {
         if !self.previous.is_null() {
             // error - not the head of the list
             panic!(

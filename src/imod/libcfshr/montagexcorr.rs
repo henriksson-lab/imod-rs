@@ -208,7 +208,7 @@ pub fn mont_xc_inds_and_ctf(
 
     /* Multiply high-frequency filtering parameters by the binning so they are equivalent
     to frequencies in unbinned images */
-    unsafe {
+    {
         crate::imod::libcfshr::filtxcorr::xcorr_set_ctf(
             sigma1,
             nbin as f32 * sigma2,
@@ -739,7 +739,7 @@ pub fn mont_xcorr_edge(
                 0.,
             );
         }
-        unsafe {
+        {
             crate::imod::libcfshr::filtxcorr::xcorr_mean_zero(arrayOut, nxPadDim, nxPad, nyPad);
         }
         if let Some(f) = &mut dumpEdge {
@@ -839,7 +839,7 @@ pub fn mont_xcorr_edge(
     }
 
     /* multiply lower by complex conjugate of upper, put back in lower */
-    unsafe {
+    {
         crate::imod::libcfshr::filtxcorr::conjugate_product(lowerPad, upperPad, nxPad, nyPad);
     }
     twoDfft(lowerPad, &mut nxPad, &mut nyPad, &mut one);
@@ -852,7 +852,7 @@ pub fn mont_xcorr_edge(
             1,
         );
     }
-    unsafe {
+    {
         crate::imod::libcfshr::filtxcorr::xcorr_peak_find(
             lowerPad,
             nxPadDim,
@@ -1015,7 +1015,7 @@ pub fn mont_xcorr_edge(
                 wgtPeaks[i as usize] = -gaussPeakProbs[i as usize] * peak[i as usize];
                 i += 1;
             }
-            unsafe {
+            {
                 crate::imod::libcfshr::robuststat::rs_sort_indexed_floats(
                     &wgtPeaks,
                     &mut wgtOrderInds,
@@ -1157,7 +1157,7 @@ pub fn mont_xcorr_edge(
                     }
 
                     wsum = grandSums[5] as f32;
-                    ccc = unsafe {
+                    ccc = {
                         crate::imod::libcfshr::filtxcorr::weighted_corr_from_sums(
                             grandSums[0],
                             grandSums[1],
@@ -1784,7 +1784,7 @@ pub fn row_of_three_corrs(
         iy += 1;
     }
 
-    *corr1 = unsafe {
+    *corr1 = {
         crate::imod::libcfshr::filtxcorr::weighted_corr_from_sums(
             aSum1,
             aSumSq1,
@@ -1796,7 +1796,7 @@ pub fn row_of_three_corrs(
             "",
         )
     } as f32;
-    *corr2 = unsafe {
+    *corr2 = {
         crate::imod::libcfshr::filtxcorr::weighted_corr_from_sums(
             aSum2,
             aSumSq2,
@@ -1808,7 +1808,7 @@ pub fn row_of_three_corrs(
             "",
         )
     } as f32;
-    *corr3 = unsafe {
+    *corr3 = {
         crate::imod::libcfshr::filtxcorr::weighted_corr_from_sums(
             aSum3,
             aSumSq3,
@@ -2142,7 +2142,7 @@ pub fn column_of_three_corrs(
         bSumSq3 += bTmpSq3;
     }
 
-    *corr1 = unsafe {
+    *corr1 = {
         crate::imod::libcfshr::filtxcorr::weighted_corr_from_sums(
             aSum1,
             aSumSq1,
@@ -2154,7 +2154,7 @@ pub fn column_of_three_corrs(
             "",
         )
     } as f32;
-    *corr2 = unsafe {
+    *corr2 = {
         crate::imod::libcfshr::filtxcorr::weighted_corr_from_sums(
             aSum2,
             aSumSq2,
@@ -2166,7 +2166,7 @@ pub fn column_of_three_corrs(
             "",
         )
     } as f32;
-    *corr3 = unsafe {
+    *corr3 = {
         crate::imod::libcfshr::filtxcorr::weighted_corr_from_sums(
             aSum3,
             aSumSq3,

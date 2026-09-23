@@ -1,7 +1,6 @@
 //! Selected bottom-up functions from `IMOD/libcfshr/b3dutil.c`.
 
 use core::cell::{Cell, RefCell};
-use core::ffi::c_char;
 use core::sync::atomic::{AtomicI32, Ordering};
 use std::io::{Read, Seek, SeekFrom, Write};
 use std::sync::Mutex;
@@ -1474,42 +1473,50 @@ pub fn set_float_output_for_entered_mode(mode: i32) -> i32 {
 }
 
 /// Matches C `f2cString` (`b3dutil.c:811`) with Rust ownership.
-pub unsafe fn fortran_string(string: *const c_char, string_size: i32) -> String {
-    if string.is_null() || string_size <= 0 {
-        return String::new();
-    }
-    let bytes = core::slice::from_raw_parts(string.cast::<u8>(), string_size as usize);
-    let end = bytes
+///
+/// `string` is the Fortran `character*(*)` argument itself, so the slice
+/// length is the source's `strSize` -- the hidden length argument is the
+/// data here, not redundancy, and a caller must hand over the whole
+/// blank-padded field rather than a trimmed view.  The source scans back to
+/// the last non-blank, copies that many bytes and appends the terminator;
+/// an owned `String` of the trimmed bytes is that C string without the NUL,
+/// which is encoding rather than data at this boundary.  The `malloc`
+/// failure the source returns NULL for has no Rust counterpart.
+pub fn fortran_string(string: &[u8]) -> String {
+    /* find last non-blank character */
+    let end = string
         .iter()
         .rposition(|byte| *byte != b' ')
         .map_or(0, |index| index + 1);
-    String::from_utf8_lossy(&bytes[..end]).into_owned()
+    String::from_utf8_lossy(&string[..end]).into_owned()
 }
 /// Matches C `c2fString` (`b3dutil.c:835`). The other half of the Fortran
 /// bridge; see [`fortran_string`].
 ///
+/// `c_string` holds the source's NUL-terminated bytes without the terminator,
+/// and `fortran_string` is the destination `character*(*)` field, whose slice
+/// length is the source's `fSize`.  The blank padding at `b3dutil.c:848` is
+/// part of the Fortran string's value, so the whole remainder of the
+/// destination is filled rather than left as residue.
+///
 /// The source has one failure (`b3dutil.c:843`): the C string did not fit in
 /// the Fortran character variable, so a non-null character is left over.  That
 /// is `Err(())`; `Ok(())` is the blank-padded success the source returns 0 for.
-pub unsafe fn c2f_string(
-    mut c_string: *const c_char,
-    mut fortran_string: *mut c_char,
-    mut size: i32,
-) -> Result<(), ()> {
-    while *c_string != 0 && size > 0 {
-        *fortran_string = *c_string;
-        fortran_string = fortran_string.add(1);
-        c_string = c_string.add(1);
-        size -= 1;
+pub fn c2f_string(c_string: &[u8], fortran_string: &mut [u8]) -> Result<(), ()> {
+    let f_size = fortran_string.len();
+    let mut index: usize = 0;
+    while index < c_string.len() && index < f_size {
+        fortran_string[index] = c_string[index];
+        index += 1;
     }
     /* Return error if there is still a non-null character */
-    if *c_string != 0 {
+    if index < c_string.len() {
         return Err(());
     }
-    while size > 0 {
-        *fortran_string = b' ' as c_char;
-        fortran_string = fortran_string.add(1);
-        size -= 1;
+    /* Blank-pad */
+    while index < f_size {
+        fortran_string[index] = b' ';
+        index += 1;
     }
     Ok(())
 }
@@ -2824,17 +2831,18 @@ mod tests {
 
     #[test]
     fn fortran_string_conversion_matches_blank_handling() {
-        let input = b"abc   ";
-        let converted = unsafe { fortran_string(input.as_ptr().cast(), input.len() as i32) };
-        assert_eq!(converted, "abc");
-        let mut output = [0_i8; 5];
-        assert_eq!(
-            unsafe { c2f_string(c"abc".as_ptr(), output.as_mut_ptr(), 5) },
-            Ok(())
-        );
-        assert_eq!(
-            &output,
-            &[b'a' as i8, b'b' as i8, b'c' as i8, b' ' as i8, b' ' as i8]
-        );
+        assert_eq!(fortran_string(b"abc   "), "abc");
+        assert_eq!(fortran_string(b"      "), "");
+        assert_eq!(fortran_string(b""), "");
+        let mut output = [0_u8; 5];
+        assert_eq!(c2f_string(b"abc", &mut output), Ok(()));
+        assert_eq!(&output, b"abc  ");
+        // The destination is exactly filled: no padding, no error.
+        let mut exact = [0_u8; 3];
+        assert_eq!(c2f_string(b"abc", &mut exact), Ok(()));
+        assert_eq!(&exact, b"abc");
+        // `b3dutil.c:843`: a leftover non-null character is the one failure.
+        let mut short = [0_u8; 2];
+        assert_eq!(c2f_string(b"abc", &mut short), Err(()));
     }
 }

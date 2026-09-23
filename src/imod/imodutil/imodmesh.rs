@@ -30,7 +30,7 @@ const DEFAULT_TOL: f32 = 0.25;
 const DEFAULT_FLAT: f32 = 1.5;
 
 /// Original static `imodmesh_usage` (`imodmesh.c:33`).
-pub fn imodmesh_usage(prog: &str, retcode: i32) -> i32 {
+fn imodmesh_usage(prog: &str, retcode: i32) -> i32 {
     let mut err = ImodFile::Stderr;
     let _ = err.write_all(format!("{prog} usage: {prog} [options] [input files...]\n").as_bytes());
     let _ = err.write_all(b"options:\n");
@@ -691,7 +691,7 @@ pub fn imodmesh() {
 }
 
 /// Original static `imodMeshesDeleteZRange` (`imodmesh.c:571`).
-pub fn imod_meshes_delete_z_range(
+fn imod_meshes_delete_z_range(
     meshp: &mut Vec<Imesh>,
     meshsize: &mut i32,
     minz: i32,
@@ -711,7 +711,7 @@ pub fn imod_meshes_delete_z_range(
 }
 
 /// Original static `deletez` (`imodmesh.c:587`).
-pub fn deletez(point: Ipoint, minz: i32, maxz: i32) -> i32 {
+fn deletez(point: Ipoint, minz: i32, maxz: i32) -> i32 {
     let mut rmpoint = 0;
     let mut rmlow = 0;
     let mut rmup = 0;
@@ -735,7 +735,7 @@ pub fn deletez(point: Ipoint, minz: i32, maxz: i32) -> i32 {
 ///
 /// Deletes geometries in the range of `minz` and `maxz`.  The vertex data is
 /// not changed, only the index array is changed.
-pub fn imod_mesh_delete_z_range(mesh: &mut Imesh, minz: i32, maxz: i32) {
+fn imod_mesh_delete_z_range(mesh: &mut Imesh, minz: i32, maxz: i32) {
     let mut pt = [Ipoint::default(); 6];
     let mut newsize = 0usize;
 
@@ -823,7 +823,7 @@ pub fn imod_mesh_delete_z_range(mesh: &mut Imesh, minz: i32, maxz: i32) {
 }
 
 /// Original static `imodMeshesRescaleNormal` (`imodmesh.c:706`).
-pub fn imod_meshes_rescale_normal(in_mesh: &mut [Imesh], meshsize: &mut i32, spnt: &Ipoint) {
+fn imod_meshes_rescale_normal(in_mesh: &mut [Imesh], meshsize: &mut i32, spnt: &Ipoint) {
     let mut list_inc: i32 = 0;
     let mut vert_base: i32 = 0;
     let mut norm_add: i32 = 0;
@@ -893,7 +893,7 @@ pub fn imod_meshes_rescale_normal(in_mesh: &mut [Imesh], meshsize: &mut i32, spn
 }
 
 /// Original static `ObjOnList` (`imodmesh.c:774`).
-pub fn obj_on_list(ob: i32, list: &[i32], nlist: i32) -> i32 {
+fn obj_on_list(ob: i32, list: &[i32], nlist: i32) -> i32 {
     if nlist == 0 {
         return 1;
     }

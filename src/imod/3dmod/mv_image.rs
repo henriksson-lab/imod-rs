@@ -830,7 +830,7 @@ impl MvImageState {
                 let filters = [5, 4, 1, 0];
                 let mut width = 0;
                 for filter in filters {
-                    if unsafe { select_zoom_filter(filter, self.zoom_scale, &mut width) } == 0 {
+                    if { select_zoom_filter(filter, self.zoom_scale, &mut width) } == 0 {
                         self.zoom_filter = filter;
                         break;
                     }

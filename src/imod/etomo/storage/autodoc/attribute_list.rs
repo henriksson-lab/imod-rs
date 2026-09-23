@@ -208,7 +208,7 @@ impl AttributeList {
     ///
     /// # Safety
     /// Every attribute in the map must be live.
-    pub unsafe fn print(&self, level: i32) {
+    pub fn print(&self, level: i32) {
         // The source's `map != null` guard cannot fail; the field is final.
         let mut attribute: *mut Attribute;
         let collection = self.map.values();
@@ -230,8 +230,8 @@ impl AttributeList {
     ///
     /// # Safety
     /// Every attribute in the map must be live.
-    pub unsafe fn to_string(&self) -> String {
-        format!("etomo.storage.autodoc.AttributeList[{}]", unsafe {
+    pub fn to_string(&self) -> String {
+        format!("etomo.storage.autodoc.AttributeList[{}]", {
             self.param_string()
         })
     }
@@ -241,7 +241,7 @@ impl AttributeList {
     ///
     /// # Safety
     /// Every attribute in the map must be live.
-    pub unsafe fn param_string(&self) -> String {
+    pub fn param_string(&self) -> String {
         let mut buffer = String::from("map={");
         let mut first = true;
         for (key, attribute) in &self.map {

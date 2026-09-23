@@ -475,7 +475,7 @@ pub fn imesh_normal(n: &mut Ipoint, p1: &Ipoint, p2: &Ipoint, p3: &Ipoint, sp: O
 }
 
 /// Original static `ptcompare` (`remesh.c:459`).
-pub fn ptcompare(pt1: &Ipoint, pt2: &Ipoint) -> i32 {
+fn ptcompare(pt1: &Ipoint, pt2: &Ipoint) -> i32 {
     if pt1.x < pt2.x {
         return -1;
     }
