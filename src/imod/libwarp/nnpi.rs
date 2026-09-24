@@ -68,6 +68,14 @@ pub struct Nnpi {
     /// The source's data is a `malloc(8 * sizeof(double))` block, so the table
     /// owns `[f64; 8]` here and the `free`s disappear into the drop.
     pub bad: Option<Hashtable<[i32; 2], [f64; 8]>>,
+    /// Not a field of the source's `nnpi`: the storage behind the `tids`
+    /// that `delaunay_circles_find` hands `_nnpi_calculate_weights`.  The
+    /// source returns a borrow of the triangulation's own persistent
+    /// `t_out` stack (`delaunay.c:516-517,611-612`), reset rather than freed
+    /// so that the per-point search allocates nothing; keeping the copy's
+    /// buffer here, cleared by the callee and reused across points, restores
+    /// that.  Its contents are rewritten by every call before being read.
+    pub tids: Vec<i32>,
 }
 
 impl Nnpi {
@@ -142,6 +150,7 @@ pub fn nnpi_create(d: Delaunay) -> Nnpi {
         dx: 0.,
         dy: 0.,
         bad: None,
+        tids: Vec::new(),
     };
 
     nn.wmin = -f64::MAX;
@@ -596,12 +605,15 @@ fn nnpi_neighbours_process(nn: &mut Nnpi, p: &Point, n: i32, nids: &[i32]) -> i3
 fn _nnpi_calculate_weights(nn: &mut Nnpi, p: &Point) -> i32 {
     // `int* tids = NULL;` — `delaunay_circles_find` handed back a borrow of
     // the triangulation's own stack in the source; the translated entry point
-    // fills a caller-owned vector instead (contract §3).
-    let mut tids: Vec<i32> = Vec::new();
+    // fills a caller-owned vector instead (contract §3).  That vector is
+    // `nn.tids`, lent out for the call and handed back on every return, so
+    // its buffer persists across points as the source's stack does.
+    let mut tids: Vec<i32> = std::mem::take(&mut nn.tids);
     let mut i;
 
     delaunay_circles_find(&mut nn.d, p, &mut nn.ncircles, &mut tids);
     if nn.ncircles == 0 {
+        nn.tids = tids;
         return 1;
     }
 
@@ -626,9 +638,11 @@ fn _nnpi_calculate_weights(nn: &mut Nnpi, p: &Point) -> i32 {
                 // `ht_process(nn->bad, free)` releases the eight-double blocks
                 // the loop above allocated; they are owned by the table here,
                 // so the caller's `nnpi_reset` releases them with the table.
+                nn.tids = tids;
                 return 0;
             }
         }
+        nn.tids = tids;
         1
     } else if NN_RULE.get() == NnRule::NonSibsonian {
         let mut nneigh = 0;
@@ -637,6 +651,7 @@ fn _nnpi_calculate_weights(nn: &mut Nnpi, p: &Point) -> i32 {
         let ncircles = nn.ncircles;
 
         nnpi_getneighbours(nn, p, ncircles, &tids, &mut nneigh, &mut nids);
+        nn.tids = tids;
         status = nnpi_neighbours_process(nn, p, nneigh, &nids);
 
         status

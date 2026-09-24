@@ -2317,6 +2317,26 @@ pub fn ii_convert_line_of_floats(
             // it on successive blocks gives the same bytes as one call, and it
             // costs no heap allocation on a path that runs once per output
             // line (`mrcsec.c:1245`'s write loop).
+            //
+            // When `output` is 2-byte aligned -- `mrcsec.rs`'s write loop and
+            // `ii_make_buffer_convert_if_float` both hand out even offsets into
+            // a heap `Vec<u8>` -- convert straight into it as the C does.  The
+            // element count is the one the block loop below ends up writing,
+            // `min(floats.len(), output.len() / 2)`: it converts
+            // `floats.len()` values but its `chunks_exact_mut(2)` zip stores
+            // only as many as whole pairs of `output` hold, and the routine is
+            // element-wise, so the same halves land in the same two bytes, in
+            // native byte order either way (`to_ne_bytes` vs a `u16` store).
+            let count = floats.len().min(output.len() / 2);
+            if output.as_ptr().align_offset(core::mem::align_of::<u16>()) == 0 {
+                // Sound: `u16` has no invalid bit patterns, the pointer is
+                // checked 2-aligned and the length `2 * count` is even, so the
+                // prefix and suffix are empty and the middle is all `count`
+                // elements.
+                let (_, halves, _) = unsafe { output[..2 * count].align_to_mut::<u16>() };
+                imnp_floatbuf_to_halfs(floats, halves, count as i32);
+                return;
+            }
             let mut halves = [0_u16; 512];
             let mut done = 0_usize;
             while done < floats.len() && 2 * done < output.len() {

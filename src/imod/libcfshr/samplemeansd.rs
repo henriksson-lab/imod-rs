@@ -65,6 +65,49 @@ pub fn sample_min_max_mean_sd(
     let mut nsum = 0_i32;
     let mut tmin = 1.0e37_f32;
     let mut tmax = -tmin;
+    // `samplemeansd.c:31-57` is the `ROW_SUM` macro: it tests `sd` and `amin`
+    // ONCE per row and runs one of four loops, so neither flag is re-tested per
+    // sampled pixel.  The translation had collapsed that into one loop testing
+    // both flags on every pixel.  This macro restores the source's shape.  Only
+    // the loop structure moves: each arm keeps its own load, its own sum, its
+    // own single-precision square and its own `ACCUM_MIN`/`ACCUM_MAX` exactly as
+    // before.  The source's fourth arm writes `ts += (cst)ptr[j][i]` without
+    // going through `tval`; for every type here that is the same value as
+    // `ts += tval` (short, ushort and int all round through `float` identically
+    // either way), so it reuses `$sum`.
+    macro_rules! row_sum {
+        ($i:ident, $val:ident = $load:expr, $sum:block, $sq:block, $mm:block) => {
+            if want_sd && want_min {
+                while $i < ix_start + nx_use {
+                    let $val = $load;
+                    $sum
+                    $sq
+                    $mm
+                    $i += dx_sample;
+                }
+            } else if want_sd {
+                while $i < ix_start + nx_use {
+                    let $val = $load;
+                    $sum
+                    $sq
+                    $i += dx_sample;
+                }
+            } else if want_min {
+                while $i < ix_start + nx_use {
+                    let $val = $load;
+                    $sum
+                    $mm
+                    $i += dx_sample;
+                }
+            } else {
+                while $i < ix_start + nx_use {
+                    let $val = $load;
+                    $sum
+                    $i += dx_sample;
+                }
+            }
+        };
+    }
     let mut j = iy_start;
     while j < iy_start + ny_use {
         let mut tsum = 0.0_f64;
@@ -79,18 +122,20 @@ pub fn sample_min_max_mean_sd(
         let line = image[j as usize];
         match data_type {
             0 => {
-                while i < ix_start + nx_use {
-                    let val = line[i as usize] as i32;
-                    itsum += val;
-                    if want_sd {
+                row_sum!(
+                    i,
+                    val = line[i as usize] as i32,
+                    {
+                        itsum += val;
+                    },
+                    {
                         itsumsq += val * val;
-                    }
-                    if want_min {
+                    },
+                    {
                         itmin = itmin.min(val);
                         itmax = itmax.max(val);
                     }
-                    i += dx_sample;
-                }
+                );
                 tmin = if tmin < itmin as f32 {
                     tmin
                 } else {
@@ -105,18 +150,20 @@ pub fn sample_min_max_mean_sd(
                 tsumsq = itsumsq as f64;
             }
             1 => {
-                while i < ix_start + nx_use {
-                    let val = line[i as usize] as i8 as i32;
-                    itsum += val;
-                    if want_sd {
+                row_sum!(
+                    i,
+                    val = line[i as usize] as i8 as i32,
+                    {
+                        itsum += val;
+                    },
+                    {
                         itsumsq += val * val;
-                    }
-                    if want_min {
+                    },
+                    {
                         itmin = itmin.min(val);
                         itmax = itmax.max(val);
                     }
-                    i += dx_sample;
-                }
+                );
                 tmin = if tmin < itmin as f32 {
                     tmin
                 } else {
@@ -131,81 +178,100 @@ pub fn sample_min_max_mean_sd(
                 tsumsq = itsumsq as f64;
             }
             2 => {
-                while i < ix_start + nx_use {
-                    let k = 2 * i as usize;
-                    let val = u16::from_ne_bytes([line[k], line[k + 1]]) as i32;
-                    tsum += val as f64;
-                    if want_sd {
+                row_sum!(
+                    i,
+                    val = {
+                        let k = 2 * i as usize;
+                        u16::from_ne_bytes([line[k], line[k + 1]]) as i32
+                    },
+                    {
+                        tsum += val as f64;
+                    },
+                    {
                         tsumsq += ((val as f32) * val as f32) as f64;
-                    }
-                    if want_min {
+                    },
+                    {
                         tmin = if tmin < val as f32 { tmin } else { val as f32 };
                         tmax = if tmax > val as f32 { tmax } else { val as f32 };
                     }
-                    i += dx_sample;
-                }
+                );
             }
             3 => {
-                while i < ix_start + nx_use {
-                    let k = 2 * i as usize;
-                    let val = i16::from_ne_bytes([line[k], line[k + 1]]) as i32;
-                    tsum += val as f64;
-                    if want_sd {
+                row_sum!(
+                    i,
+                    val = {
+                        let k = 2 * i as usize;
+                        i16::from_ne_bytes([line[k], line[k + 1]]) as i32
+                    },
+                    {
+                        tsum += val as f64;
+                    },
+                    {
                         tsumsq += ((val as f32) * val as f32) as f64;
-                    }
-                    if want_min {
+                    },
+                    {
                         tmin = if tmin < val as f32 { tmin } else { val as f32 };
                         tmax = if tmax > val as f32 { tmax } else { val as f32 };
                     }
-                    i += dx_sample;
-                }
+                );
             }
             6 => {
-                while i < ix_start + nx_use {
-                    let k = 4 * i as usize;
-                    let val = f32::from_ne_bytes([line[k], line[k + 1], line[k + 2], line[k + 3]]);
-                    tsum += val as f64;
-                    if want_sd {
+                row_sum!(
+                    i,
+                    val = {
+                        let k = 4 * i as usize;
+                        f32::from_ne_bytes([line[k], line[k + 1], line[k + 2], line[k + 3]])
+                    },
+                    {
+                        tsum += val as f64;
+                    },
+                    {
                         tsumsq += (val * val) as f64;
-                    }
-                    if want_min {
+                    },
+                    {
                         tmin = if tmin < val { tmin } else { val };
                         tmax = if tmax > val { tmax } else { val };
                     }
-                    i += dx_sample;
-                }
+                );
             }
             7 => {
-                while i < ix_start + nx_use {
-                    let k = 4 * i as usize;
-                    let val =
-                        i32::from_ne_bytes([line[k], line[k + 1], line[k + 2], line[k + 3]]) as f32;
-                    tsum += val as f64;
-                    if want_sd {
+                row_sum!(
+                    i,
+                    val = {
+                        let k = 4 * i as usize;
+                        i32::from_ne_bytes([line[k], line[k + 1], line[k + 2], line[k + 3]]) as f32
+                    },
+                    {
+                        tsum += val as f64;
+                    },
+                    {
                         tsumsq += (val * val) as f64;
-                    }
-                    if want_min {
+                    },
+                    {
                         tmin = if tmin < val { tmin } else { val };
                         tmax = if tmax > val { tmax } else { val };
                     }
-                    i += dx_sample;
-                }
+                );
             }
             8 | 9 => {
-                while i < ix_start + nx_use {
-                    let val = 0.3_f32 * line[(nchan * i) as usize] as f32
+                // RGB is written out long-hand in the source (`:185-213`), with
+                // the same four-way split as `ROW_SUM`.
+                row_sum!(
+                    i,
+                    val = 0.3_f32 * line[(nchan * i) as usize] as f32
                         + 0.59_f32 * line[(nchan * i + 1) as usize] as f32
-                        + 0.11_f32 * line[(nchan * i + 2) as usize] as f32;
-                    tsum += val as f64;
-                    if want_sd {
+                        + 0.11_f32 * line[(nchan * i + 2) as usize] as f32,
+                    {
+                        tsum += val as f64;
+                    },
+                    {
                         tsumsq += (val * val) as f64;
-                    }
-                    if want_min {
+                    },
+                    {
                         tmin = if tmin < val { tmin } else { val };
                         tmax = if tmax > val { tmax } else { val };
                     }
-                    i += dx_sample;
-                }
+                );
             }
             _ => unreachable!(),
         }

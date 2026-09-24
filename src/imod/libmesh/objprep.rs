@@ -4,9 +4,8 @@
 
 use crate::imod::libcfshr::b3dutil::{ImodFile, b3d_error};
 use crate::imod::libimod::icont::{
-    imod_contour_clear, imod_contour_copy, imod_contour_delete, imod_contour_dup,
-    imod_contour_fit_plane, imod_contour_get_bbox, imod_contour_length, imod_contour_reduce,
-    imod_contour_z_value,
+    imod_contour_clear, imod_contour_delete, imod_contour_dup, imod_contour_fit_plane,
+    imod_contour_get_bbox, imod_contour_length, imod_contour_reduce, imod_contour_z_value,
 };
 use crate::imod::libimod::imat::{
     Axis3, Imat, imod_mat_id, imod_mat_inverse, imod_mat_new, imod_mat_rot, imod_mat_scale,
@@ -732,7 +731,9 @@ fn reduce_obj(obj: &mut Iobj, dist: f32) -> i32 {
                     imod_contour_delete(&mut tc);
                 } else {
                     imod_contour_clear(&mut obj.cont[co]);
-                    imod_contour_copy(&tc, &mut obj.cont[co]);
+                    // `imodContourCopy(tc, cont); free(tc);` moves `tc`'s
+                    // contents into `cont`: a move, not a deep copy.
+                    obj.cont[co] = tc;
                     break;
                 }
             }
@@ -900,7 +901,22 @@ pub fn imesh_dup_marked_conts(obj: &mut Iobj, flag: u32) -> Option<Iobj> {
 
     /* Copy object structure but zero out the count of mesh and contours in case
     we have to free it */
+    // `imodObjectCopy` is a `memcpy` (`iobj.c:208`) whose container pointers
+    // are overwritten just below, so none of the containers is ever read
+    // through `newObj`.  Lend them out of `obj` for the copy and put them
+    // back, so the struct copy does not deep-clone every contour and mesh
+    // only to discard them.
+    let cont = std::mem::take(&mut obj.cont);
+    let store = std::mem::take(&mut obj.store);
+    let label = obj.label.take();
+    let mesh_param = obj.mesh_param.take();
+    let mesh = std::mem::take(&mut obj.mesh);
     imod_object_copy(obj, &mut new_obj);
+    obj.cont = cont;
+    obj.store = store;
+    obj.label = label;
+    obj.mesh_param = mesh_param;
+    obj.mesh = mesh;
     new_obj.cont = Vec::new();
     new_obj.store = Vec::new();
     new_obj.label = None;

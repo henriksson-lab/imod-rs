@@ -44,31 +44,60 @@ pub fn update_matrix(
         for j in 1..=n {
             let east = if j == n { n } else { j + 1 };
             let west = if j == 1 { 1 } else { j - 1 };
-            let at = |row: usize, col: usize| image_old[row * stride + col] as f64;
+            // `diffusion.c:43-46`: `imageOld` is `float **`, so each
+            // difference is a *single-precision* subtraction, widened to
+            // double only on assignment to `diffN` etc.  Widening the two
+            // operands first would skip the float rounding whenever the exact
+            // difference is not representable in `f32`.
+            let at = |row: usize, col: usize| image_old[row * stride + col];
             let center = at(i, j);
-            let differences = [
-                at(north, j) - center,
-                at(south, j) - center,
-                at(i, east) - center,
-                at(i, west) - center,
-            ];
-            let coefficient = |difference: f64| match conduction {
-                1 => (-difference * difference / ksq).exp(),
-                2 => 1. / (1. + difference * difference / ksq),
-                _ => {
-                    if difference.abs() > k {
-                        0.
-                    } else {
-                        0.5 * (1. - difference * difference / ksq).powi(2)
-                    }
-                }
-            };
-            image[i * stride + j] = (center
-                + lambda
-                    * (coefficient(differences[0]) * differences[0]
-                        + coefficient(differences[1]) * differences[1]
-                        + coefficient(differences[2]) * differences[2]
-                        + coefficient(differences[3]) * differences[3]))
+            let diff_n = (at(north, j) - center) as f64;
+            let diff_s = (at(south, j) - center) as f64;
+            let diff_e = (at(i, east) - center) as f64;
+            let diff_w = (at(i, west) - center) as f64;
+            let (grad_n, grad_s, grad_e, grad_w) = (diff_n, diff_s, diff_e, diff_w);
+            // `diffusion.c:59-88`: one branch on `CC` per pixel, all four
+            // coefficients inside the taken arm.
+            let c_n: f64;
+            let c_s: f64;
+            let c_e: f64;
+            let c_w: f64;
+            if conduction == 1 {
+                c_n = (-grad_n * grad_n / ksq).exp();
+                c_s = (-grad_s * grad_s / ksq).exp();
+                c_e = (-grad_e * grad_e / ksq).exp();
+                c_w = (-grad_w * grad_w / ksq).exp();
+            } else if conduction == 2 {
+                c_n = 1. / (1. + grad_n * grad_n / ksq);
+                c_s = 1. / (1. + grad_s * grad_s / ksq);
+                c_e = 1. / (1. + grad_e * grad_e / ksq);
+                c_w = 1. / (1. + grad_w * grad_w / ksq);
+            } else {
+                /* use Tukey Biweight.  C evaluates `0.5 * a * a` left to
+                right as `(0.5 * a) * a`. */
+                c_n = if diff_n.abs() > k {
+                    0.
+                } else {
+                    0.5 * (1. - grad_n * grad_n / ksq) * (1. - grad_n * grad_n / ksq)
+                };
+                c_s = if diff_s.abs() > k {
+                    0.
+                } else {
+                    0.5 * (1. - grad_s * grad_s / ksq) * (1. - grad_s * grad_s / ksq)
+                };
+                c_e = if diff_e.abs() > k {
+                    0.
+                } else {
+                    0.5 * (1. - grad_e * grad_e / ksq) * (1. - grad_e * grad_e / ksq)
+                };
+                c_w = if diff_w.abs() > k {
+                    0.
+                } else {
+                    0.5 * (1. - grad_w * grad_w / ksq) * (1. - grad_w * grad_w / ksq)
+                };
+            }
+            image[i * stride + j] = (center as f64
+                + lambda * (c_n * diff_n + c_s * diff_s + c_e * diff_e + c_w * diff_w))
                 as f32;
         }
     }

@@ -199,23 +199,65 @@ pub fn slice_taper_in_pad(
     let xhigh = xlow + nxbox;
     let ylow = ny / 2 - nybox / 2 - 1;
     let yhigh = ylow + nybox;
+    // `taperpad.c:236-270`: the `switch (type)` is per line, and each arm walks
+    // one typed input pointer and one output pointer backwards across the row.
+    // A `type` the switch does not name runs no inner loop and leaves the
+    // destination row untouched, so the catch-all writes nothing (the same
+    // correction `copy_to_center` carries).  Except for `InPlace`, input and
+    // output are distinct borrows, so the forward row copies below write the
+    // same values to the same elements as the source's backward walk.
+    let n = (ixend + 1 - ixstart).max(0) as usize;
     for y in (iystart..=iyend).rev() {
-        for x in (ixstart..=ixend).rev() {
-            let ind = (x + y * nxdimin) as usize;
-            let v = match (typ, input) {
-                (BYTE, PadIn::Byte(a)) => a[ind] as f32,
-                (SHORT, PadIn::Short(a)) => a[ind] as f32,
-                (USHORT, PadIn::UShort(a)) => a[ind] as f32,
-                (FLOAT, PadIn::Float(a)) => a[ind],
-                // The source reads `inArray + ixEnd + iy * nxDimIn`, i.e. at
-                // the *input* index, even when `inArray == outArray`.
-                (FLOAT, PadIn::InPlace) => out[ind],
-                (RGB, PadIn::Rgb(a)) => {
-                    a[ind * 3] as f32 + a[ind * 3 + 1] as f32 + a[ind * 3 + 2] as f32
+        // With `ixEnd < ixStart` every arm's loop runs zero times; skip before
+        // forming a (possibly out-of-range) empty row slice.
+        if n == 0 {
+            continue;
+        }
+        // `out = outArray + ixHigh + (iyLow + 1 + iy - iyStart) * nxDimOut`,
+        // less `ixEnd`, so that element `x` of the row lands at `obase + x`.
+        let obase = xhigh - ixend + (ylow + 1 + y - iystart) * nxdimout;
+        let src = (ixstart + y * nxdimin) as usize;
+        let dst = (obase + ixstart) as usize;
+        match (typ, input) {
+            (BYTE, PadIn::Byte(a)) => {
+                for (o, &v) in out[dst..dst + n].iter_mut().zip(&a[src..src + n]) {
+                    *o = v as f32;
                 }
-                _ => 0.,
-            };
-            out[(xhigh - (ixend - x) + (ylow + 1 + y - iystart) * nxdimout) as usize] = v;
+            }
+            (SHORT, PadIn::Short(a)) => {
+                for (o, &v) in out[dst..dst + n].iter_mut().zip(&a[src..src + n]) {
+                    *o = v as f32;
+                }
+            }
+            (USHORT, PadIn::UShort(a)) => {
+                for (o, &v) in out[dst..dst + n].iter_mut().zip(&a[src..src + n]) {
+                    *o = v as f32;
+                }
+            }
+            (FLOAT, PadIn::Float(a)) => {
+                out[dst..dst + n].copy_from_slice(&a[src..src + n]);
+            }
+            (FLOAT, PadIn::InPlace) => {
+                // The source reads `inArray + ixEnd + iy * nxDimIn`, i.e. at
+                // the *input* index, even when `inArray == outArray`.  Source
+                // and destination share the buffer and the destination can sit
+                // below the source, so this keeps the element-by-element
+                // backward walk rather than a `memmove`.
+                for x in (ixstart..=ixend).rev() {
+                    out[(obase + x) as usize] = out[(x + y * nxdimin) as usize];
+                }
+            }
+            (RGB, PadIn::Rgb(a)) => {
+                // `*out-- = byteIn[0] + byteIn[1] + byteIn[2]`: `int` sum of
+                // three bytes, exact in `f32` either way.
+                for (o, p) in out[dst..dst + n]
+                    .iter_mut()
+                    .zip(a[3 * src..3 * (src + n)].chunks_exact(3))
+                {
+                    *o = p[0] as f32 + p[1] as f32 + p[2] as f32;
+                }
+            }
+            _ => {}
         }
     }
     let mean = slice_edge_mean(out, nxdimout, xlow + 1, xhigh, ylow + 1, yhigh) as f32;

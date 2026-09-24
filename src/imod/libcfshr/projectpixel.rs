@@ -1,18 +1,28 @@
 //! Translation of `IMOD/libcfshr/projectpixel.c`.
 
-const RADIANS_PER_DEGREE: f32 = core::f32::consts::PI / 180.;
+/// `b3dutil.h:68`: `#define RADIANS_PER_DEGREE 0.01745329252` -- a **double**
+/// literal, so `angle * RADIANS_PER_DEGREE` promotes and `cos`/`sin` are the
+/// double libm routines; only their results narrow to the `float` locals.
+const RADIANS_PER_DEGREE: f64 = 0.01745329252;
+
+// Operand types throughout follow the C: every local is `float`, every bare
+// literal (`0.5`, `2.`, `0.`) is `double`, so a float-by-float product stays
+// float and only the addition of a literal widens.  `B3DMAX(a, b)` is
+// `a > b ? a : b`, `B3DMIN(a, b)` is `a < b ? a : b`, `ACCUM_MAX(m, v)` is
+// `m = m > v ? m : v` (`b3dutil.h:29-41`): each returns the **second** operand
+// when either is NaN, which `f32::max`/`min` do not.
 
 /// Original `maxCornerDistFromCen` (`projectpixel.c:25`).
 pub fn max_corner_dist_from_cen(angle: f32, dist: &mut f32) {
-    let cosine = (angle * RADIANS_PER_DEGREE).cos();
-    let sine = (angle * RADIANS_PER_DEGREE).sin();
-    let c1 = 0.5 * cosine + 0.5 * sine;
-    let c2 = 0.5 * cosine - 0.5 * sine;
-    let c3 = -0.5 * cosine + 0.5 * sine;
-    let c4 = -0.5 * cosine - 0.5 * sine;
-    *dist = c1.max(c2);
-    *dist = (*dist).max(c3);
-    *dist = (*dist).max(c4);
+    let cos_ang = (angle as f64 * RADIANS_PER_DEGREE).cos() as f32;
+    let sin_ang = (angle as f64 * RADIANS_PER_DEGREE).sin() as f32;
+    let c1 = (0.5 * cos_ang as f64 + 0.5 * sin_ang as f64) as f32;
+    let c2 = (0.5 * cos_ang as f64 - 0.5 * sin_ang as f64) as f32;
+    let c3 = (-0.5 * cos_ang as f64 + 0.5 * sin_ang as f64) as f32;
+    let c4 = (-0.5 * cos_ang as f64 - 0.5 * sin_ang as f64) as f32;
+    *dist = if c1 > c2 { c1 } else { c2 };
+    *dist = if *dist > c3 { *dist } else { c3 };
+    *dist = if *dist > c4 { *dist } else { c4 };
 }
 
 /// Original Fortran wrapper `maxcornerdistfromcen` (`projectpixel.c:39`).
@@ -21,16 +31,22 @@ pub fn maxcornerdistfromcen(angle: &f32, dist: &mut f32) {
 }
 
 /// Original `rayLengthAtDistFromCen` (`projectpixel.c:47`).
-pub fn ray_length_at_dist_from_cen(cosine: f32, sine: f32, dist: f32, length: &mut f32) {
-    let txp = (dist * cosine + 0.5) / sine;
-    let txm = (dist * cosine - 0.5) / sine;
-    let txmin = txp.min(txm);
-    let txmax = txp.max(txm);
-    let typ = (-dist * sine + 0.5) / cosine;
-    let tym = (-dist * sine - 0.5) / cosine;
-    let tymin = typ.min(tym);
-    let tymax = typ.max(tym);
-    *length = 0_f32.max(txmax.min(tymax) - txmin.max(tymin));
+pub fn ray_length_at_dist_from_cen(cos_ang: f32, sin_ang: f32, dist: f32, length: &mut f32) {
+    let txp = (((dist * cos_ang) as f64 + 0.5) / sin_ang as f64) as f32;
+    let txm = (((dist * cos_ang) as f64 - 0.5) / sin_ang as f64) as f32;
+    let txmin = if txp < txm { txp } else { txm };
+    let txmax = if txp > txm { txp } else { txm };
+    let typ = (((-dist * sin_ang) as f64 + 0.5) / cos_ang as f64) as f32;
+    let tym = (((-dist * sin_ang) as f64 - 0.5) / cos_ang as f64) as f32;
+    let tymin = if typ < tym { typ } else { tym };
+    let tymax = if typ > tym { typ } else { tym };
+    let tmin = if txmin > tymin { txmin } else { tymin };
+    let tmax = if txmax < tymax { txmax } else { tymax };
+    // `B3DMAX(0., tmax - tmin)`: a float difference compared against a double
+    // `0.`; widening a float is exact, so the comparison and the narrowed
+    // result are the float ones, with the ternary's NaN/-0 operand choice.
+    let diff = tmax - tmin;
+    *length = (if 0. > diff as f64 { 0. } else { diff as f64 }) as f32;
 }
 
 /// Original `rayPixelIntersectingArea` (`projectpixel.c:72`).
@@ -41,39 +57,47 @@ pub fn ray_pixel_intersecting_area(
     del_dist: f32,
     area: &mut f32,
 ) {
-    let cosine = (angle * RADIANS_PER_DEGREE).cos();
-    let sine = (angle * RADIANS_PER_DEGREE).sin();
-    let mut max_corner_dist = 0.;
-    max_corner_dist_from_cen(angle, &mut max_corner_dist);
-    let mut left_dist = cen_to_cen_dist - ray_width as f32 / 2.;
-    let mut right_dist = cen_to_cen_dist + ray_width as f32 / 2.;
+    let cos_ang = (angle as f64 * RADIANS_PER_DEGREE).cos() as f32;
+    let sin_ang = (angle as f64 * RADIANS_PER_DEGREE).sin() as f32;
+    let mut max_corn_dist = 0.;
+    max_corner_dist_from_cen(angle, &mut max_corn_dist);
+    let mut left_dist = (cen_to_cen_dist as f64 - ray_width as f64 / 2.) as f32;
+    let mut right_dist = (cen_to_cen_dist as f64 + ray_width as f64 / 2.) as f32;
     *area = 0.;
-    if right_dist <= -max_corner_dist || left_dist >= max_corner_dist {
+    if right_dist <= -max_corn_dist || left_dist >= max_corn_dist {
         return;
     }
-    if left_dist <= -max_corner_dist && right_dist >= max_corner_dist {
+    if left_dist <= -max_corn_dist && right_dist >= max_corn_dist {
         *area = 1.;
         return;
     }
-    left_dist = left_dist.max(-max_corner_dist);
-    right_dist = right_dist.min(max_corner_dist);
+    left_dist = if left_dist > -max_corn_dist {
+        left_dist
+    } else {
+        -max_corn_dist
+    };
+    right_dist = if right_dist < max_corn_dist {
+        right_dist
+    } else {
+        max_corn_dist
+    };
     let num_rays = ((right_dist - left_dist) / del_dist) as i32;
-    for index in 0..num_rays {
-        let dist = left_dist + (index as f32 + 0.5) * del_dist;
+    for ind in 0..num_rays {
+        let dist = (left_dist as f64 + (ind as f64 + 0.5) * del_dist as f64) as f32;
         let mut length = 1.;
-        if cosine != 0. && sine != 0. {
-            ray_length_at_dist_from_cen(cosine, sine, dist, &mut length);
+        if cos_ang != 0. && sin_ang != 0. {
+            ray_length_at_dist_from_cen(cos_ang, sin_ang, dist, &mut length);
         }
         *area += length;
     }
     *area *= del_dist;
-    let fraction = (right_dist - left_dist) - del_dist * num_rays as f32;
-    let dist = left_dist + num_rays as f32 * del_dist + 0.5 * fraction;
+    let frac = (right_dist - left_dist) - del_dist * num_rays as f32;
+    let dist = ((left_dist + num_rays as f32 * del_dist) as f64 + 0.5 * frac as f64) as f32;
     let mut length = 1.;
-    if cosine != 0. && sine != 0. {
-        ray_length_at_dist_from_cen(cosine, sine, dist, &mut length);
+    if cos_ang != 0. && sin_ang != 0. {
+        ray_length_at_dist_from_cen(cos_ang, sin_ang, dist, &mut length);
     }
-    *area += length * fraction;
+    *area += length * frac;
 }
 
 /// Original `makeRayAreaLookupTable` (`projectpixel.c:124`).
@@ -90,10 +114,10 @@ pub fn make_ray_area_lookup_table(
     let mut max_dist = 0.;
     max_corner_dist_from_cen(angle, &mut max_dist);
     for index in 0..num_dists as usize {
-        let dist = (index as f32 + 0.5) * del_table - 0.5 * ray_width as f32;
+        let dist = ((index as f64 + 0.5) * del_table as f64 - 0.5 * ray_width as f64) as f32;
         del_ray_ind[index] = 0;
         num_rays_hit[index] = 0;
-        if dist - ray_width as f32 / 2. > -max_dist {
+        if dist as f64 - ray_width as f64 / 2. > (-max_dist) as f64 {
             del_ray_ind[index] = -1;
             num_rays_hit[index] = 1;
             ray_pixel_intersecting_area(
@@ -107,7 +131,7 @@ pub fn make_ray_area_lookup_table(
         let area_index = 3 * index + num_rays_hit[index] as usize;
         ray_pixel_intersecting_area(angle, dist, ray_width, del_for_area, &mut areas[area_index]);
         num_rays_hit[index] += 1;
-        if dist + ray_width as f32 / 2. < max_dist {
+        if dist as f64 + ray_width as f64 / 2. < max_dist as f64 {
             let area_index = 3 * index + num_rays_hit[index] as usize;
             ray_pixel_intersecting_area(
                 angle,

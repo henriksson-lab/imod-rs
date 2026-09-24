@@ -756,10 +756,21 @@ pub fn fourier_crop_sizes(
 }
 
 /// The source's `XCorrFilterPart` input transform, whose documentation says
-/// `array` "can be the same as [fft]" (`filtxcorr.c:265-267`).  Both of this
-/// tree's callers do exactly that, and Rust cannot hold a `&` and a `&mut` to
-/// one buffer, so `InPlace` names the aliased case; the filter is applied
-/// element by element at matching indexes, which is why it works in place.
+/// `array` "can be the same as [fft]" (`filtxcorr.c:265-267`).  Rust cannot
+/// hold a `&` and a `&mut` to one buffer, so `InPlace` names the aliased case;
+/// the filter is applied element by element at matching indexes, which is why
+/// it works in place.
+///
+/// **`Fft` is dead here because it is dead in the original**, not because a
+/// caller was mistranslated -- checked 2026-09-24 across the whole vendored
+/// tree.  All fourteen C/C++ call sites pass one pointer twice
+/// (`tiltxcorr.cpp:2769,2773,2777,2928`, `imodfindbeads.cpp:501`,
+/// `xcorr.cpp:206`, `transforms.cpp:2405,2406`, `beadtrack.cpp:3175`,
+/// `mtffilter.cpp:784`, `framealign.cpp:414,427,2021`,
+/// `montagexcorr.c:515`), and so do all three Fortran callers of the
+/// `filterpart` wrapper (`xcorrstack.f:129`, `enhance.f:132`,
+/// `xfsimplex.f90:1006`).  The variant is kept because `XCorrFilterPart` is
+/// public API in `cfsemshare.h:110` and its signature admits two buffers.
 #[derive(Copy, Clone)]
 pub enum FilterIn<'a> {
     Fft(&'a [f32]),
@@ -814,20 +825,41 @@ pub fn xcorr_filter_part(
             // then widens, and `x` is *accumulated* by `delx` rather than
             // recomputed as `ix * delx`.
             let ysq = (fy * fy) as f64;
-            let mut x = 0.0f32;
-            for ix in 0..=nxmax {
-                let ind = 2 * (index + ix);
-                let indp1 = ind + 1;
-                let s = ((x * x) as f64 + ysq).sqrt() as f32;
-                let indf = (s / delta + 0.5f32) as i32;
-                let f = ctf[indf as usize];
-                let (a, b) = match fft {
-                    FilterIn::Fft(fft) => (fft[ind as usize], fft[indp1 as usize]),
-                    FilterIn::InPlace => (array[ind as usize], array[indp1 as usize]),
-                };
-                array[ind as usize] = a * f;
-                array[indp1 as usize] = b * f;
-                x += dx;
+            // The source reads `fft[]` and writes `array[]` with no test in the
+            // loop -- they are one pointer or two, decided by the caller
+            // (`filtxcorr.c:277-286`).  Discriminating `fft` per element instead
+            // put a branch in the hottest loop of this file, so the two cases
+            // are separate loops here.  Both bodies are the same statements in
+            // the same order, and neither touches a float the other does not.
+            match fft {
+                FilterIn::Fft(source) => {
+                    let mut x = 0.0f32;
+                    for ix in 0..=nxmax {
+                        let ind = 2 * (index + ix);
+                        let indp1 = ind + 1;
+                        let s = ((x * x) as f64 + ysq).sqrt() as f32;
+                        let indf = (s / delta + 0.5f32) as i32;
+                        let f = ctf[indf as usize];
+                        let (a, b) = (source[ind as usize], source[indp1 as usize]);
+                        array[ind as usize] = a * f;
+                        array[indp1 as usize] = b * f;
+                        x += dx;
+                    }
+                }
+                FilterIn::InPlace => {
+                    let mut x = 0.0f32;
+                    for ix in 0..=nxmax {
+                        let ind = 2 * (index + ix);
+                        let indp1 = ind + 1;
+                        let s = ((x * x) as f64 + ysq).sqrt() as f32;
+                        let indf = (s / delta + 0.5f32) as i32;
+                        let f = ctf[indf as usize];
+                        let (a, b) = (array[ind as usize], array[indp1 as usize]);
+                        array[ind as usize] = a * f;
+                        array[indp1 as usize] = b * f;
+                        x += dx;
+                    }
+                }
             }
             // C deliberately stops at nxDiv2 (exclusive), retaining the
             // Nyquist pair when it is not visited by either loop.

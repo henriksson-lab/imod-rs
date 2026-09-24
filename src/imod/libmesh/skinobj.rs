@@ -7,6 +7,7 @@
 // Reproduced faithfully; see `BUGS.md`.
 #![allow(clippy::bad_bit_mask)]
 
+use std::borrow::Cow;
 use std::cell::Cell;
 use std::io::Write;
 
@@ -903,6 +904,10 @@ pub fn imesh_skin_object(
      *  Build lists of inside and outside contours.
      */
 
+    // The static `numWarn` is read once and stored back after the pair loop
+    // (and before its error return): only `imod_contour_check_nesting`
+    // touches it in between, through the `&mut`.
+    let mut num_warn = NUM_WARN.with(|c| c.get());
     for ind_z in 0..(z_max + 1 - z_min) as usize {
         for jnd_at_z in 0..(num_cont_at_z[ind_z] - 1).max(0) as usize {
             let co_num = conts_at_z[ind_z][jnd_at_z] as usize;
@@ -926,7 +931,6 @@ pub fn imesh_skin_object(
                     continue;
                 }
 
-                let mut num_warn = NUM_WARN.with(|c| c.get());
                 let err = imod_contour_check_nesting(
                     co_num as i32,
                     other_co_num as i32,
@@ -938,13 +942,14 @@ pub fn imesh_skin_object(
                     &mut num_nests,
                     &mut num_warn,
                 );
-                NUM_WARN.with(|c| c.set(num_warn));
                 if err != 0 {
+                    NUM_WARN.with(|c| c.set(num_warn));
                     return -1;
                 }
             }
         }
     }
+    NUM_WARN.with(|c| c.set(num_warn));
 
     /* Analyze inside and outside contours to determine level */
     imod_contour_nest_levels(&mut nests, &cont_nest_ind, num_nests);
@@ -1092,17 +1097,36 @@ pub fn imesh_skin_object(
                                     /* contours must overlap by given fraction*/
                                     let mut frac1 = 0.0f32;
                                     let mut frac2 = 0.0f32;
-                                    overlap_fractions_at(
-                                        &mut scan_conts,
-                                        cont_ind,
+                                    let mut cs1 = Cow::Borrowed(&scan_conts[cont_ind]);
+                                    let mut cs2 = Cow::Borrowed(&scan_conts[top_co_num]);
+                                    imodel_overlap_fractions(
+                                        &mut cs1,
                                         pt_min[cont_ind],
                                         pt_max[cont_ind],
-                                        top_co_num,
+                                        &mut cs2,
                                         pt_min[top_co_num],
                                         pt_max[top_co_num],
                                         &mut frac1,
                                         &mut frac2,
                                     );
+                                    /* A replacement scan contour lands back in
+                                    `scanConts`, `*cs1p` stored before `*cs2p` */
+                                    let (cs1, cs2) = (
+                                        match cs1 {
+                                            Cow::Owned(c) => Some(c),
+                                            Cow::Borrowed(_) => None,
+                                        },
+                                        match cs2 {
+                                            Cow::Owned(c) => Some(c),
+                                            Cow::Borrowed(_) => None,
+                                        },
+                                    );
+                                    if let Some(c) = cs1 {
+                                        scan_conts[cont_ind] = c;
+                                    }
+                                    if let Some(c) = cs2 {
+                                        scan_conts[top_co_num] = c;
+                                    }
                                     if frac1 as f64 <= overlap && frac2 as f64 <= overlap {
                                         continue;
                                     }
@@ -1183,17 +1207,36 @@ pub fn imesh_skin_object(
                                 if force_connect == 0 && overlap != 0.0 {
                                     let mut frac1 = 0.0f32;
                                     let mut frac2 = 0.0f32;
-                                    overlap_fractions_at(
-                                        &mut scan_conts,
-                                        cont_ind,
+                                    let mut cs1 = Cow::Borrowed(&scan_conts[cont_ind]);
+                                    let mut cs2 = Cow::Borrowed(&scan_conts[top_co_num]);
+                                    imodel_overlap_fractions(
+                                        &mut cs1,
                                         pt_min[cont_ind],
                                         pt_max[cont_ind],
-                                        top_co_num,
+                                        &mut cs2,
                                         pt_min[top_co_num],
                                         pt_max[top_co_num],
                                         &mut frac1,
                                         &mut frac2,
                                     );
+                                    /* A replacement scan contour lands back in
+                                    `scanConts`, `*cs1p` stored before `*cs2p` */
+                                    let (cs1, cs2) = (
+                                        match cs1 {
+                                            Cow::Owned(c) => Some(c),
+                                            Cow::Borrowed(_) => None,
+                                        },
+                                        match cs2 {
+                                            Cow::Owned(c) => Some(c),
+                                            Cow::Borrowed(_) => None,
+                                        },
+                                    );
+                                    if let Some(c) = cs1 {
+                                        scan_conts[cont_ind] = c;
+                                    }
+                                    if let Some(c) = cs2 {
+                                        scan_conts[top_co_num] = c;
+                                    }
                                     if frac1 as f64 <= overlap && frac2 as f64 <= overlap {
                                         continue;
                                     }
@@ -1282,7 +1325,8 @@ pub fn imesh_skin_object(
                     for ind in 0..num_top {
                         top_used[ind] = 0;
                         top_levels[ind] = 1;
-                        let mut top_cont = scan_conts[top_list[thread][ind] as usize].clone();
+                        let mut top_cont: Cow<'_, Icont> =
+                            Cow::Borrowed(&scan_conts[top_list[thread][ind] as usize]);
                         let mut top_pt_min = pt_min[top_list[thread][ind] as usize];
                         let mut top_pt_max = pt_max[top_list[thread][ind] as usize];
                         if cont_nest_ind[top_list[thread][ind] as usize] >= 0 {
@@ -1292,9 +1336,9 @@ pub fn imesh_skin_object(
                             /* DNM 12/18/01: Need to include even levels also */
                             if !nest.inside.is_empty() {
                                 if let Some(inscan) = nest.inscan.as_ref() {
-                                    top_cont = inscan.clone();
+                                    top_cont = Cow::Borrowed(inscan);
                                     // `skinobj.c:1032` ignores the status.
-                                    if let Ok((ll, ur)) = imod_contour_get_bbox(Some(&top_cont)) {
+                                    if let Ok((ll, ur)) = imod_contour_get_bbox(Some(&*top_cont)) {
                                         top_pt_min = ll;
                                         top_pt_max = ur;
                                     }
@@ -1304,7 +1348,8 @@ pub fn imesh_skin_object(
                         for jnd in 0..num_bot {
                             bot_used[jnd] = 0;
                             bot_levels[jnd] = 1;
-                            let mut bot_cont = scan_conts[bot_list[thread][jnd] as usize].clone();
+                            let mut bot_cont: Cow<'_, Icont> =
+                                Cow::Borrowed(&scan_conts[bot_list[thread][jnd] as usize]);
                             let mut bot_pt_min = pt_min[bot_list[thread][jnd] as usize];
                             let mut bot_pt_max = pt_max[bot_list[thread][jnd] as usize];
                             if cont_nest_ind[bot_list[thread][jnd] as usize] >= 0 {
@@ -1313,9 +1358,10 @@ pub fn imesh_skin_object(
                                 bot_levels[jnd] = bot_nest.level;
                                 if !bot_nest.inside.is_empty() {
                                     if let Some(inscan) = bot_nest.inscan.as_ref() {
-                                        bot_cont = inscan.clone();
+                                        bot_cont = Cow::Borrowed(inscan);
                                         // `skinobj.c:1046` ignores the status.
-                                        if let Ok((ll, ur)) = imod_contour_get_bbox(Some(&bot_cont))
+                                        if let Ok((ll, ur)) =
+                                            imod_contour_get_bbox(Some(&*bot_cont))
                                         {
                                             bot_pt_min = ll;
                                             bot_pt_max = ur;
@@ -1325,6 +1371,10 @@ pub fn imesh_skin_object(
                             }
                             let mut frac1 = 0.0f32;
                             let mut frac2 = 0.0f32;
+                            /* `&botCont`, `&topCont` are locals here: a
+                            replacement scan contour lands in the `Cow` and is
+                            dropped with it (`topCont`'s survives the `jnd`
+                            loop), never in `scanConts` */
                             imodel_overlap_fractions(
                                 &mut bot_cont,
                                 bot_pt_min,
@@ -1762,7 +1812,7 @@ pub fn imesh_skin_object(
                             surf,
                             time,
                             scale,
-                            &scan_conts,
+                            &mut scan_conts,
                             &pt_min,
                             &pt_max,
                         );
@@ -1780,7 +1830,7 @@ pub fn imesh_skin_object(
                             surf,
                             time,
                             scale,
-                            &scan_conts,
+                            &mut scan_conts,
                             &pt_min,
                             &pt_max,
                         );
@@ -2020,7 +2070,8 @@ pub fn imesh_skin_object(
 
                     // Determine of inside contour
                     let mut num_inside = 0usize;
-                    let mut scan_use: Icont = scan_conts[co_num].clone();
+                    // `scanUse = scanConts[coNum]` is a pointer assignment.
+                    let mut scan_use: Cow<'_, Icont> = Cow::Borrowed(&scan_conts[co_num]);
                     let mut mesh_cont: Option<Icont> = None;
                     let mut top_cont: Option<Icont> = None;
                     if cont_nest_ind[co_num] >= 0
@@ -2067,7 +2118,6 @@ pub fn imesh_skin_object(
                         backoff = backoff.max(15);
 
                         // Join all the inside contours first
-                        let cont_clone = obj.cont[co_num].clone();
                         let bot_cont = join_all_contours(
                             obj,
                             &bot_list[0],
@@ -2077,7 +2127,7 @@ pub fn imesh_skin_object(
                             None,
                             0,
                             0,
-                            Some(&cont_clone),
+                            Some(&obj.cont[co_num]),
                         );
                         let Some(bot_cont) = bot_cont else {
                             continue;
@@ -2091,7 +2141,7 @@ pub fn imesh_skin_object(
                             None,
                             0,
                             0,
-                            Some(&cont_clone),
+                            Some(&obj.cont[co_num]),
                         );
                         let Some(inner_for_mesh) = inner_for_mesh else {
                             continue;
@@ -2131,7 +2181,7 @@ pub fn imesh_skin_object(
                         let Some(su) = imodel_contour_scan(Some(&tc)) else {
                             continue;
                         };
-                        scan_use = su;
+                        scan_use = Cow::Owned(su);
                         top_cont = Some(tc);
                     }
 
@@ -2146,7 +2196,7 @@ pub fn imesh_skin_object(
                             let new_mesh = imesh_contour_cap(
                                 obj,
                                 &mut cap_cont,
-                                Some(&scan_use),
+                                Some(&*scan_use),
                                 co_num as i32,
                                 -1,
                                 inside,
@@ -2161,7 +2211,7 @@ pub fn imesh_skin_object(
                             let new_mesh = imesh_contour_cap(
                                 obj,
                                 &mut cap_cont,
-                                Some(&scan_use),
+                                Some(&*scan_use),
                                 co_num as i32,
                                 1,
                                 inside,
@@ -2189,7 +2239,7 @@ pub fn imesh_skin_object(
                         let new_mesh = imesh_contour_cap(
                             obj,
                             &mut cap_cont,
-                            Some(&scan_use),
+                            Some(&*scan_use),
                             co_num as i32,
                             -1,
                             inside,
@@ -2205,7 +2255,7 @@ pub fn imesh_skin_object(
                         let new_mesh = imesh_contour_cap(
                             obj,
                             &mut cap_cont,
-                            Some(&scan_use),
+                            Some(&*scan_use),
                             co_num as i32,
                             1,
                             inside,
@@ -2260,61 +2310,6 @@ pub fn imesh_skin_object(
     drop(pt_min);
     drop(pt_max);
     0
-}
-
-/// `imodel_overlap_fractions` on two distinct elements of the same scan
-/// contour array, split so both can be borrowed mutably, as the C's two
-/// `Icont **` arguments into one array are.
-#[allow(clippy::too_many_arguments)]
-fn overlap_fractions_at(
-    scan_conts: &mut [Icont],
-    ind1: usize,
-    pmin1: Ipoint,
-    pmax1: Ipoint,
-    ind2: usize,
-    pmin2: Ipoint,
-    pmax2: Ipoint,
-    frac1: &mut f32,
-    frac2: &mut f32,
-) -> i32 {
-    if ind1 == ind2 {
-        let mut copy = scan_conts[ind1].clone();
-        return imodel_overlap_fractions(
-            &mut copy,
-            pmin1,
-            pmax1,
-            &mut scan_conts[ind2],
-            pmin2,
-            pmax2,
-            frac1,
-            frac2,
-        );
-    }
-    if ind1 < ind2 {
-        let (left, right) = scan_conts.split_at_mut(ind2);
-        imodel_overlap_fractions(
-            &mut left[ind1],
-            pmin1,
-            pmax1,
-            &mut right[0],
-            pmin2,
-            pmax2,
-            frac1,
-            frac2,
-        )
-    } else {
-        let (left, right) = scan_conts.split_at_mut(ind1);
-        imodel_overlap_fractions(
-            &mut right[0],
-            pmin1,
-            pmax1,
-            &mut left[ind2],
-            pmin2,
-            pmax2,
-            frac1,
-            frac2,
-        )
-    }
 }
 
 /// Original static `add_whole_nest` (`skinobj.c:1696`).
@@ -2387,7 +2382,7 @@ fn connect_orphans(
     surf: i32,
     time: i32,
     scale: &Ipoint,
-    scancont: &[Icont],
+    scancont: &mut [Icont],
     pmin: &[Ipoint],
     pmax: &[Ipoint],
 ) -> Option<Icont> {
@@ -2414,7 +2409,9 @@ fn connect_orphans(
         return Some(cout);
     }
 
-    let mut outscan = imodel_contour_scan(Some(&cout))?;
+    /* `outscan` is a local `Icont *`: a replacement made through `&outscan`
+    below stays in it until the delete, as in the C */
+    let mut outscan: Cow<'_, Icont> = Cow::Owned(imodel_contour_scan(Some(&cout))?);
     let mut pminout = Ipoint::default();
     let mut pmaxout = Ipoint::default();
     // `skinobj.c:1784` ignores the status.
@@ -2429,7 +2426,8 @@ fn connect_orphans(
             let co = list[just_in_list[inl] as usize] as usize;
             let mut frac1 = 0.0f32;
             let mut frac2 = 0.0f32;
-            let mut cs1 = scancont[co].clone();
+            /* `&scancont[co]`: a replacement lands back in the array slot */
+            let mut cs1 = Cow::Borrowed(&scancont[co]);
             imodel_overlap_fractions(
                 &mut cs1,
                 pmin[co],
@@ -2440,12 +2438,15 @@ fn connect_orphans(
                 &mut frac1,
                 &mut frac2,
             );
+            if let Cow::Owned(c) = cs1 {
+                scancont[co] = c;
+            }
             if frac1 > 0.8 {
                 used[just_in_list[inl] as usize] = -1;
             }
         }
     }
-    imod_contour_delete(&mut outscan);
+    imod_contour_delete(outscan.to_mut());
 
     for inl in 0..num_just_in as usize {
         if used[just_in_list[inl] as usize] != 0 {
@@ -2854,7 +2855,7 @@ fn evaluate_break(
     used: &[i32],
     just_in_list: &[i32],
     num_just_in: i32,
-    scancont: &[Icont],
+    scancont: &mut [Icont],
     pmin: &[Ipoint],
     pmax: &[Ipoint],
     st1: i32,
@@ -2920,9 +2921,12 @@ fn evaluate_break(
     }
 
     /* scan convert the inner one for testing overlaps */
-    let Some(mut inscan) = imodel_contour_scan(Some(&cin_test)) else {
+    /* `inscan` is a local `Icont *`: a replacement made through `&inscan`
+    below stays in it, as in the C */
+    let Some(inscan) = imodel_contour_scan(Some(&cin_test)) else {
         return 1.0e30f32;
     };
+    let mut inscan: Cow<'_, Icont> = Cow::Owned(inscan);
     let mut pminin = Ipoint::default();
     let mut pmaxin = Ipoint::default();
     // `skinobj.c:2188` ignores the status.
@@ -2940,7 +2944,8 @@ fn evaluate_break(
         let co = list[just_in_list[i] as usize] as usize;
         let mut frac1 = 0.0f32;
         let mut frac2 = 0.0f32;
-        let mut cs1 = scancont[co].clone();
+        /* `&scancont[co]`: a replacement lands back in the array slot */
+        let mut cs1 = Cow::Borrowed(&scancont[co]);
         imodel_overlap_fractions(
             &mut cs1,
             pmin[co],
@@ -2951,6 +2956,9 @@ fn evaluate_break(
             &mut frac1,
             &mut frac2,
         );
+        if let Cow::Owned(c) = cs1 {
+            scancont[co] = c;
+        }
         areasum += frac2 * inarea;
     }
 

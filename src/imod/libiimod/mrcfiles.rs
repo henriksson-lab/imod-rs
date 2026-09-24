@@ -2136,12 +2136,14 @@ pub fn mrc_write_slice(
             );
             return -1;
         }
-        owned_data.extend_from_slice(&buf[..bytes]);
         if hdata.mode == MRC_MODE_BYTE && hdata.bytes_signed != 0 {
-            for value in &mut owned_data {
-                *value = value.wrapping_sub(128);
-            }
+            // `mrcfiles.c:1437`: `b3dShiftBytes(buf, data, ...)` reads the
+            // source and stores the shifted byte in one pass.  The capacity
+            // reserved above is exactly `bytes`, and the iterator is exact-
+            // size, so this `extend` never reallocates.
+            owned_data.extend(buf[..bytes].iter().map(|value| value.wrapping_sub(128)));
         } else {
+            owned_data.extend_from_slice(&buf[..bytes]);
             // `mrcfiles.c:1441-1450` calls `mrc_swap_shorts`/`mrc_swap_floats`;
             // splitting on the width gives those a constant-size window instead
             // of the generic `[u8]::reverse` a runtime `word_size` compiles to.

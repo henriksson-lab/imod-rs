@@ -2676,14 +2676,21 @@ pub fn imodel_scans_overlap(
 /// `frac2`.  The bounding boxes of the contours must be provided.
 ///
 /// The source takes `Icont **` so that a contour that is not already a scan
-/// contour can be replaced by its scan conversion at the caller; here the
-/// contour is replaced in place through the `&mut` reference, which has the
-/// same effect for the caller.
+/// contour can be replaced by its scan conversion at the caller.  Each
+/// `Icont **` is a `&mut Cow<Icont>`: the caller hands in `Cow::Borrowed` of
+/// whatever `*csNp` points at (no copy, as the C does no copy), and
+/// `*csNp = csN` becomes `*csNp = Cow::Owned(csN)`.  Where the caller's
+/// pointer is an array slot (`skinobj.c:885,947,1793,2196`, `icont.c:3164`)
+/// the caller moves an `Owned` result back into the slot, in `cs1p`-then-`cs2p`
+/// order; where it is a local (`skinobj.c:1049`, the `outscan`/`inscan`
+/// temporaries) the replacement lives and dies in the caller's `Cow`, as it
+/// does in the C.  As in the C, both pointers are read on entry, so two `Cow`s
+/// borrowing the same slot are each scan-converted independently.
 pub fn imodel_overlap_fractions(
-    cs1p: &mut Icont,
+    cs1p: &mut Cow<'_, Icont>,
     pmin1: Ipoint,
     pmax1: Ipoint,
-    cs2p: &mut Icont,
+    cs2p: &mut Cow<'_, Icont>,
     pmin2: Ipoint,
     pmax2: Ipoint,
     frac1: &mut f32,
@@ -2714,17 +2721,17 @@ pub fn imodel_overlap_fractions(
 
     /* Make sure contours are scan contours now */
     if (cs1p.flags & ICONT_SCANLINE) == 0 {
-        let Some(scan) = imodel_contour_scan(Some(cs1p)) else {
+        let Some(scan) = imodel_contour_scan(Some(&**cs1p)) else {
             return 0;
         };
-        *cs1p = scan;
+        *cs1p = Cow::Owned(scan);
     }
 
     if (cs2p.flags & ICONT_SCANLINE) == 0 {
-        let Some(scan) = imodel_contour_scan(Some(cs2p)) else {
+        let Some(scan) = imodel_contour_scan(Some(&**cs2p)) else {
             return 0;
         };
-        *cs2p = scan;
+        *cs2p = Cow::Owned(scan);
     }
 
     let cs1: &Icont = cs1p;
@@ -3083,7 +3090,6 @@ pub fn imod_contour_free_z_tables(
 /// Original: `imodContourCheckNesting` (`icont.c:3155`).
 ///
 /// Checks for one contour inside another and maintains nesting structures.
-/// `co` and `eco` must be different indexes into `scancont`, as in the source.
 pub fn imod_contour_check_nesting(
     co: i32,
     eco: i32,
@@ -3099,23 +3105,36 @@ pub fn imod_contour_check_nesting(
     let mut frac2 = 0.0f32;
     let mut need_warn = 0;
 
-    let (sc1, sc2) = if co < eco {
-        let (left, right) = scancont.split_at_mut(eco as usize);
-        (&mut left[co as usize], &mut right[0])
-    } else {
-        let (left, right) = scancont.split_at_mut(co as usize);
-        (&mut right[0], &mut left[eco as usize])
-    };
+    /* `&scancont[co]`, `&scancont[eco]`: a replacement scan contour lands
+    back in the array slot, `scancont[co]` first, as `*cs1p` is stored first */
+    let mut sc1 = Cow::Borrowed(&scancont[co as usize]);
+    let mut sc2 = Cow::Borrowed(&scancont[eco as usize]);
     imodel_overlap_fractions(
-        sc1,
+        &mut sc1,
         pmin[co as usize],
         pmax[co as usize],
-        sc2,
+        &mut sc2,
         pmin[eco as usize],
         pmax[eco as usize],
         &mut frac1,
         &mut frac2,
     );
+    let (sc1, sc2) = (
+        match sc1 {
+            Cow::Owned(c) => Some(c),
+            Cow::Borrowed(_) => None,
+        },
+        match sc2 {
+            Cow::Owned(c) => Some(c),
+            Cow::Borrowed(_) => None,
+        },
+    );
+    if let Some(c) = sc1 {
+        scancont[co as usize] = c;
+    }
+    if let Some(c) = sc2 {
+        scancont[eco as usize] = c;
+    }
 
     /* Exact duplicates actually print as 0.999999 */
     if frac1 > 0.99998 && frac2 > 0.99998 {
@@ -4460,8 +4479,8 @@ mod source_driver_group2 {
                 imodel_contour_overlap(&c1, &cf),
                 imodel_contour_overlap(&c1, &cin)
             ));
-            let mut s1 = imodel_contour_scan(Some(&c1)).unwrap();
-            let mut s2 = imodel_contour_scan(Some(&c2)).unwrap();
+            let s1 = imodel_contour_scan(Some(&c1)).unwrap();
+            let s2 = imodel_contour_scan(Some(&c2)).unwrap();
             let mut mn1 = Ipoint::default();
             let mut mx1 = Ipoint::default();
             let mut mn2 = Ipoint::default();
@@ -4478,15 +4497,24 @@ mod source_driver_group2 {
                 "so {}\n",
                 imodel_scans_overlap(Some(&s1), mn1, mx1, Some(&s2), mn2, mx2)
             ));
-            imodel_overlap_fractions(&mut s1, mn1, mx1, &mut s2, mn2, mx2, &mut frac1, &mut frac2);
+            imodel_overlap_fractions(
+                &mut Cow::Borrowed(&s1),
+                mn1,
+                mx1,
+                &mut Cow::Borrowed(&s2),
+                mn2,
+                mx2,
+                &mut frac1,
+                &mut frac2,
+            );
             out.push_str(&format!("of {} {}\n", g9(frac1 as f64), g9(frac2 as f64)));
-            let mut u1 = imod_contour_dup(&c1).unwrap();
-            let mut u2 = imod_contour_dup(&cin).unwrap();
-            if let Ok((a, b)) = imod_contour_get_bbox(Some(&u1)) {
+            let mut u1 = Cow::Owned(imod_contour_dup(&c1).unwrap());
+            let mut u2 = Cow::Owned(imod_contour_dup(&cin).unwrap());
+            if let Ok((a, b)) = imod_contour_get_bbox(Some(&*u1)) {
                 mn1 = a;
                 mx1 = b;
             }
-            if let Ok((a, b)) = imod_contour_get_bbox(Some(&u2)) {
+            if let Ok((a, b)) = imod_contour_get_bbox(Some(&*u2)) {
                 mn2 = a;
                 mx2 = b;
             }

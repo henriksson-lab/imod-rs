@@ -447,12 +447,20 @@ pub fn visit_triang_gen(st: &mut HullStorage, s: usize, visit: VisitFunc, test: 
 
     VTG_VNUM.set(VTG_VNUM.get() - 1);
     let vnum = VTG_VNUM.get();
-    if S_VTGST.with_borrow(|v| v.is_empty()) {
+    // The file-static stack is lent out for the body and handed back on both
+    // returns, so each push/pop is a plain indexed store rather than a TLS
+    // lookup plus a `RefCell` borrow.  Nothing reachable from here touches
+    // `S_VTGST` meanwhile: the only other user is `hull_cleanup`, and none of
+    // the `visit`/`test` callbacks passed in this crate (`hullwrap.rs`,
+    // `hull_fg.rs`, `hull_ch.rs`, `hull_io.rs`) calls back into
+    // `visit_triang_gen`, so the source's shared-static semantics are kept.
+    let mut vtgst = S_VTGST.take();
+    if vtgst.is_empty() {
         let ss = VTG_SS.get();
-        S_VTGST.with_borrow_mut(|v| v.resize(ss as usize + MAXDIM + 1, 0));
+        vtgst.resize(ss as usize + MAXDIM + 1, 0);
     }
     if s != 0 {
-        S_VTGST.with_borrow_mut(|v| v[tms] = s);
+        vtgst[tms] = s;
         tms += 1;
     }
     while tms != 0 {
@@ -460,10 +468,10 @@ pub fn visit_triang_gen(st: &mut HullStorage, s: usize, visit: VisitFunc, test: 
             /* DEBEXP(-1, tms) -- DEBUG (-7) > -1 is false. */
             VTG_SS.set(VTG_SS.get() + VTG_SS.get());
             let ss = VTG_SS.get();
-            S_VTGST.with_borrow_mut(|v| v.resize(ss as usize + MAXDIM + 1, 0));
+            vtgst.resize(ss as usize + MAXDIM + 1, 0);
         }
         tms -= 1;
-        let t = S_VTGST.with_borrow(|v| v[tms]);
+        let t = vtgst[tms];
         if t == 0 || st.simplex[t].visit == vnum {
             continue;
         }
@@ -471,6 +479,7 @@ pub fn visit_triang_gen(st: &mut HullStorage, s: usize, visit: VisitFunc, test: 
         /* DNM: add suggested parens */
         let v = visit(st, t);
         if v != 0 {
+            S_VTGST.set(vtgst);
             return v;
         }
         let cdim = CDIM.get();
@@ -484,11 +493,12 @@ pub fn visit_triang_gen(st: &mut HullStorage, s: usize, visit: VisitFunc, test: 
             index 0 is a real slot here, and its `visit` is never written, so
             the read is defined and the second test still rejects it. */
             if st.simplex[sn.simp].visit != vnum && sn.simp != 0 && test(st, t, i) != 0 {
-                S_VTGST.with_borrow_mut(|v| v[tms] = sn.simp);
+                vtgst[tms] = sn.simp;
                 tms += 1;
             }
         }
     }
+    S_VTGST.set(vtgst);
     0
 }
 
@@ -813,12 +823,15 @@ fn extend_simplices(st: &mut HullStorage, s: usize) -> usize {
 fn search(st: &mut HullStorage, root: usize) -> usize {
     let mut tms = 0usize;
 
-    if S_SST.with_borrow(|v| v.is_empty()) {
+    // Lent out and handed back on both returns, as in `visit_triang_gen`;
+    // `sees` never reaches `search` or `hull_cleanup`, the only other users.
+    let mut sst = S_SST.take();
+    if sst.is_empty() {
         let ss = SEARCH_SS.get();
-        S_SST.with_borrow_mut(|v| v.resize(ss as usize + MAXDIM + 1, 0));
+        sst.resize(ss as usize + MAXDIM + 1, 0);
     }
     let peak = st.simplex[root].peak.simp;
-    S_SST.with_borrow_mut(|v| v[tms] = peak);
+    sst[tms] = peak;
     tms += 1;
     let pnum = PNUM.get();
     let p = P.get();
@@ -827,7 +840,7 @@ fn search(st: &mut HullStorage, root: usize) -> usize {
     if sees(st, p, root) == 0 {
         for i in 0..cdim {
             let sn = st.simplex[root].neigh[i as usize].simp;
-            S_SST.with_borrow_mut(|v| v[tms] = sn);
+            sst[tms] = sn;
             tms += 1;
         }
     }
@@ -835,10 +848,10 @@ fn search(st: &mut HullStorage, root: usize) -> usize {
         if tms > SEARCH_SS.get() as usize {
             SEARCH_SS.set(SEARCH_SS.get() + SEARCH_SS.get());
             let ss = SEARCH_SS.get();
-            S_SST.with_borrow_mut(|v| v.resize(ss as usize + MAXDIM + 1, 0));
+            sst.resize(ss as usize + MAXDIM + 1, 0);
         }
         tms -= 1;
-        let s = S_SST.with_borrow(|v| v[tms]);
+        let s = sst[tms];
         if st.simplex[s].visit == pnum {
             continue;
         }
@@ -847,14 +860,16 @@ fn search(st: &mut HullStorage, root: usize) -> usize {
             continue;
         }
         if st.simplex[s].peak.vert == 0 {
+            S_SST.set(sst);
             return s;
         }
         for i in 0..cdim {
             let sn = st.simplex[s].neigh[i as usize].simp;
-            S_SST.with_borrow_mut(|v| v[tms] = sn);
+            sst[tms] = sn;
             tms += 1;
         }
     }
+    S_SST.set(sst);
     0
 }
 

@@ -48,10 +48,15 @@ pub fn kernel_histogram(
             ind = ind.min(num_bins - 1);
             for bin in ist..=ind {
                 let delta = (val - first_val - bin as f32 * dxbin) / h;
+                // `histogram.c:91`/`:117`: `(float)pow(1. - delta * delta, 3.)`.
+                // `delta` is `float`, so `delta * delta` is a float product;
+                // `1.` and `3.` are double literals, so the subtract and libm's
+                // double `pow` are both double and only the result narrows.
                 if let Some(temporary) = temp_bins.as_mut() {
-                    temporary[bin as usize] += (1. - delta * delta).powi(3) as f64;
+                    temporary[bin as usize] +=
+                        (1.0_f64 - (delta * delta) as f64).powf(3.0) as f32 as f64;
                 } else {
-                    bins[bin as usize] += (1. - delta * delta).powi(3);
+                    bins[bin as usize] += (1.0_f64 - (delta * delta) as f64).powf(3.0) as f32;
                 }
             }
         } else {
@@ -69,7 +74,9 @@ pub fn kernel_histogram(
         }
     }
     if h != 0. {
-        let scale = 1. / (h * (1.2 - 2. / 7.));
+        // `histogram.c:44`: `float scale = 1. / (h * (1.2 - 2. / 7.))` -- the
+        // literals are double, so `h` promotes and only the quotient narrows.
+        let scale = (1.0_f64 / (h as f64 * (1.2_f64 - 2.0_f64 / 7.0_f64))) as f32;
         for bin in bins.iter_mut() {
             *bin *= scale;
         }
@@ -78,7 +85,7 @@ pub fn kernel_histogram(
         for (index, bin) in bins.iter().enumerate() {
             let _ = writeln!(
                 ImodFile::Stdout,
-                "bin: {:.4} {bin}",
+                "bin: {:.4} {bin:.6}",
                 first_val + index as f32 * dxbin
             );
         }

@@ -336,9 +336,24 @@ pub fn slice_median_filter(sl_out: &mut Islice, stack: &[Islice], size: i32) -> 
         return 0;
     }
 
+    /* Back to general case: get array for data (`sliceproc.c:441-452`).  The
+    source allocates only the array the mode reads through; its `return (-2)`
+    for an illegal mode is taken by the mode check at entry, which the 3x3
+    float path cannot pre-empt since it requires a legal (float) mode.  Each
+    array is indexed only in its own arm below, so the empty one is never
+    touched. */
     let block_size = stack.len() * size as usize * size as usize;
-    let mut f_vals = vec![0.0; block_size];
-    let mut i_vals = vec![0; block_size];
+    let is_float = sl_in.mode == SLICE_MODE_FLOAT;
+    let mut f_vals: Vec<f32> = if is_float {
+        vec![0.0; block_size]
+    } else {
+        Vec::new()
+    };
+    let mut i_vals: Vec<i32> = if is_float {
+        Vec::new()
+    } else {
+        vec![0; block_size]
+    };
     let del_minus = size / 2;
     let del_plus = (size + 1) / 2;
     for oy in 0..sl_in.ysize {
@@ -354,7 +369,7 @@ pub fn slice_median_filter(sl_out: &mut Islice, stack: &[Islice], size: i32) -> 
             output pointer. */
             let row_len = (x_end - x_start) as usize;
             let mut out = 0;
-            let value = if sl_in.mode == SLICE_MODE_FLOAT {
+            let value = if is_float {
                 for slice in stack {
                     let d = slice.data.f();
                     for iy in y_start..y_end {

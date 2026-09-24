@@ -450,7 +450,9 @@ pub fn clip_scaling(hin: &mut MrcHeader, hout: &mut MrcHeader, opt: &mut ClipOpt
                         } else {
                             let mut center_mean = 0.;
                             let mut annulus_mean = 0.;
-                            val[0] = (polarity
+                            // `processing.cpp:324`: `val[0] = B3DMAX(0., polarity * val[0])` --
+                            // `a > b ? a : b`, so a NaN integral stays NaN; `f32::max` would return 0.
+                            let integral = (polarity
                                 * crate::imod::libcfshr::beadutil::bead_integral(
                                     if slice.mode
                                         == crate::imod::libcfshr::reduce_by_binning::SLICE_MODE_FLOAT
@@ -472,8 +474,8 @@ pub fn clip_scaling(hin: &mut MrcHeader, hout: &mut MrcHeader, opt: &mut ClipOpt
                                     None,
                                     0.,
                                     Some(&mut base),
-                                ) as f32)
-                                .max(0.);
+                                ) as f32);
+                            val[0] = if 0. > integral { 0. } else { integral };
                         }
                         slice_put_val(&mut slice, i, j, val);
                     }
@@ -931,8 +933,13 @@ pub fn clip_median(
                 // slice->data.f[j] += zKernel[i] * dataPtr[j]`.
                 let data_ptr = stack.slices[ind as usize].data.f();
                 let out = output.data.f_mut();
-                for j in 0..pixel_count {
-                    out[j] += z_kernel[n as usize] * data_ptr[j];
+                // Same elements in the same order with the same `a += w * d`
+                // per element; only the per-element bounds checks go (a short
+                // slice now panics before the loop rather than inside it,
+                // with nothing written to any file in between).
+                let weight = z_kernel[n as usize];
+                for (o, &d) in out[..pixel_count].iter_mut().zip(&data_ptr[..pixel_count]) {
+                    *o += weight * d;
                 }
             }
         } else if crate::imod::libiimod::sliceproc::slice_median_filter(
@@ -1305,11 +1312,22 @@ pub fn clip_flip(
         let _ = ImodFile::Stdout.write_all(" Done!\n".as_bytes());
         return Ok(());
     }
+    // `processing.cpp:925-1139`, YZ and ROTX.
     if command.starts_with(b"flipyz")
         || command.starts_with(b"flipzy")
         || command.starts_with(b"rotx")
     {
-        let rotate = command.starts_with(b"rotx");
+        let rotx = command.starts_with(b"rotx");
+        crate::imod::libiimod::mrcfiles::mrc_head_label(
+            &mut *hout,
+            if rotx {
+                b"clip: rotx - rotation by -90 around X"
+            } else {
+                b"clip: flipyz"
+            },
+        );
+
+        // This one is not allowed to change mode
         hout.mode = hin.mode;
         hout.nx = hin.nx;
         hout.mx = hin.mx;
@@ -1320,35 +1338,102 @@ pub fn clip_flip(
         hout.nz = hin.ny;
         hout.mz = hin.my;
         hout.zlen = hin.ylen;
-        if rotate && hin.my != 0 && hin.ylen != 0. && hin.mz != 0 && hin.zlen != 0. {
+
+        // For rotation try to adjust the header as in rotatevol.  `:947-950`
+        // assign to `float ycen, zcen` from *double* expressions (`/ 2.`), and
+        // `yorg`/`zorg` are a subtract, multiply and divide all in double,
+        // rounded to float once at the store; only `yorg * my / ylen` is a
+        // float product.
+        if rotx && hin.my != 0 && hin.ylen != 0. && hin.mz != 0 && hin.zlen != 0. {
             for i in 0..3 {
                 hout.tiltangles[i] = hout.tiltangles[i + 3];
             }
             hout.tiltangles[3] -= 90.;
-            let ycen = hin.ny as f32 / 2. - hin.yorg * hin.my as f32 / hin.ylen;
-            let zcen = hin.nz as f32 / 2. - hin.zorg * hin.mz as f32 / hin.zlen;
-            hout.yorg = (hout.ny as f32 / 2. - zcen) * hout.ylen / hout.my as f32;
-            hout.zorg = (hout.nz as f32 / 2. + ycen) * hout.zlen / hout.mz as f32;
+            let ycen = (hin.ny as f64 / 2. - (hin.yorg * hin.my as f32 / hin.ylen) as f64) as f32;
+            let zcen = (hin.nz as f64 / 2. - (hin.zorg * hin.mz as f32 / hin.zlen) as f64) as f32;
+            hout.yorg =
+                ((hout.ny as f64 / 2. - zcen as f64) * hout.ylen as f64 / hout.my as f64) as f32;
+            hout.zorg =
+                ((hout.nz as f64 / 2. + ycen as f64) * hout.zlen as f64 / hout.mz as f64) as f32;
         }
-        crate::imod::libiimod::mrcfiles::mrc_head_label(
-            &mut *hout,
-            if rotate {
-                b"clip: rotx - rotation by -90 around X"
-            } else {
-                b"clip: flipyz"
-            },
-        );
+
+        // Get the memory limit
+        let memmin: f32 = 512000000.;
+        let mut memmax: f32 = 2900000000.;
+        let chunk_xy_crit: f32 = 1.0e6;
+        if core::mem::size_of::<usize>() > 4 {
+            memmax = (0.4 * crate::imod::libcfshr::b3dutil::b3d_physical_memory()) as f32;
+        }
+        let mut dsize = 0;
+        let mut csize = 0;
+        crate::imod::libiimod::mrcfiles::mrc_getdcsize(hout.mode, &mut dsize, &mut csize);
+        let mut memlim = ((dsize as f32 * hout.nx as f32) * hout.ny as f32) * hout.nz as f32;
+        // `B3DMAX(memmin, B3DMIN(memmax, memlim))`, spelled as the macros are.
+        let inner = if memmax < memlim { memmax } else { memlim };
+        memlim = if memmin > inner { memmin } else { inner };
+
+        // Get the maximum number of full output slices to load.  `memlim` is
+        // clamped to at most `dsize*nx*ny*nz` (or `memmin`), so the quotient
+        // is at most about `nz` and the float-to-int conversion is in range.
+        let dsize_nx = dsize.wrapping_mul(hout.nx);
+        let mut max_slices = ((memlim / dsize_nx as f32) / hout.ny as f32) as i32;
+        max_slices = max_slices.min(hout.nz).max(1);
+        let mut k = (hout.nz + max_slices - 1) / max_slices;
+        max_slices = (hout.nz + k - 1) / k;
+        let mut num_load_slices = hin.nz;
+        let mut ny_load_slice = max_slices;
+
+        // If output is HDF, and this is not full size of input in Y, see if
+        // chunks can be done and full slices loaded for that
+        let ii_file =
+            crate::imod::libiimod::iimage::ii_lookup_file_from_fp(&hout.fp.clone().unwrap());
         let limits = [0i32; 3];
         let mut num_tiles = [0i32; 3];
         let mut tile_sizes = [0i32; 3];
-        if crate::imod::clip::file_io::set_chunk_output(
-            opt,
-            hout,
-            &limits,
-            &mut num_tiles,
-            &mut tile_sizes,
-        )
-        .is_err()
+        tile_sizes[1] = 0;
+        // `b3dutil.h:60` OUTPUT_TYPE_HDF is 5, the same value as IIFILE_HDF.
+        if crate::imod::libcfshr::b3dutil::b3d_output_file_type()
+            == crate::imod::libiimod::iimage::IIFILE_HDF
+            && ii_file.is_some()
+            && max_slices < hout.nz
+        {
+            let mut max_load = ((memlim / dsize_nx as f32) / hout.nz as f32) as i32;
+            max_load = max_load.min(hout.ny).max(1);
+            k = (hout.ny + max_load - 1) / max_load;
+            max_load = (hout.ny + k - 1) / k;
+            if max_load < hout.ny
+                && max_load as f32 * (dsize as f32 * hout.nx as f32) > chunk_xy_crit
+            {
+                // Get a tile size that is no more than this
+                if opt.chunk_y == crate::imod::clip::clip::IP_DEFAULT {
+                    opt.chunk_y = max_load;
+                }
+                opt.chunk_y = opt.chunk_y.min(max_load);
+                let chunk_lims = [0, max_load, 0];
+                if crate::imod::clip::file_io::set_chunk_output(
+                    opt,
+                    hout,
+                    &chunk_lims,
+                    &mut num_tiles,
+                    &mut tile_sizes,
+                )
+                .is_err()
+                {
+                    return Err(-1);
+                }
+                num_load_slices = tile_sizes[1];
+                ny_load_slice = hin.ny;
+            }
+        }
+        if tile_sizes[1] == 0
+            && crate::imod::clip::file_io::set_chunk_output(
+                opt,
+                hout,
+                &limits,
+                &mut num_tiles,
+                &mut tile_sizes,
+            )
+            .is_err()
         {
             return Err(-1);
         }
@@ -1356,46 +1441,211 @@ pub fn clip_flip(
         {
             return Err(-1);
         }
-        let Some(mut input_slice) =
-            crate::imod::libcfshr::islice::slice_create(hin.nx, hin.ny, hin.mode)
+
+        // Get the slice storage
+        let Some(mut out_slice) =
+            crate::imod::libcfshr::islice::slice_create(hout.nx, num_load_slices, hout.mode)
         else {
+            let _ = ImodFile::Stdout
+                .write_all(b"ERROR: CLIP - getting memory for slice array or output slice\n");
             return Err(-1);
         };
-        let Some(mut output_slice) =
-            crate::imod::libcfshr::islice::slice_create(hout.nx, hout.ny, hout.mode)
-        else {
-            return Err(-1);
-        };
-        for k in 0..hout.nz {
-            let y = if rotate { hin.ny - k - 1 } else { k };
-            for z in 0..hin.nz {
-                if crate::imod::libiimod::mrcfiles::mrc_read_slice(
-                    input_slice.data.bytes_mut(),
-                    &mut hin.fp.clone().unwrap(),
-                    hin,
-                    z,
-                    b'z',
-                ) != 0
-                {
-                    return Err(-1);
-                }
-                for x in 0..hin.nx {
-                    let mut value = [0.; 4];
-                    slice_get_val(input_slice.as_mut(), x, y, &mut value);
-                    slice_put_val(output_slice.as_mut(), x, z, value);
-                }
-            }
-            if crate::imod::libiimod::mrcfiles::mrc_write_slice(
-                output_slice.data.bytes(),
-                &mut hout.fp.clone().unwrap(),
-                hout,
-                k,
-                b'z',
-            ) != 0
-            {
+        let mut yslice: Vec<Islice> = Vec::with_capacity(num_load_slices.max(0) as usize);
+        for _ in 0..num_load_slices {
+            let Some(sl) =
+                crate::imod::libcfshr::islice::slice_create(hout.nx, ny_load_slice, hout.mode)
+            else {
+                let _ = ImodFile::Stdout.write_all(b"ERROR: CLIP - getting memory for slices\n");
                 return Err(-1);
+            };
+            yslice.push(sl);
+        }
+
+        let mut li = crate::imod::libiimod::mrcfiles::LoadInfo::default();
+        crate::imod::libiimod::mrcfiles::mrc_init_li(Some(&mut li), None);
+        crate::imod::libiimod::mrcfiles::mrc_init_li(Some(&mut li), Some(&*hin));
+        let mut num_done = 0;
+        // `:1056`/`:1118` copy `dsize * hout->nx` bytes per row and step both
+        // offsets by the same amount, with `dsize` from `mrc_getdcsize` and
+        // `csize` never used.  For the multi-channel modes (complex, RGB) that
+        // is a fraction of a row, so native writes a scrambled volume; this is
+        // translated as written (an upstream defect, not ours to repair).
+        // Every access stays inside both slices, so no bound is exceeded.
+        // The part of `outSlice` never copied into is `malloc` residue in the
+        // C and zero here (`NATIVE.md`'s zero-filled `Vec` vs `malloc`).
+        let row = dsize_nx as usize;
+        if tile_sizes[1] != 0 {
+            // `tileSizes[1]` is non-zero only after `setChunkOutput` tiled the
+            // output, which fails when `iiLookupFileFromFP` finds no file
+            // (`file_io.cpp`), so `iiFile` is non-NULL here as in the C.
+            let Some(ii_file) = ii_file else {
+                return Err(-1);
+            };
+            // SAFETY: `ii_file` is the live entry in the image-file list for
+            // `hout->fp`, which stays open for the whole of this routine and
+            // is not otherwise borrowed while this reference is used.
+            let ii_file = unsafe { &mut *ii_file };
+            ii_file.llx = 0;
+            ii_file.urx = ii_file.nx - 1;
+            ii_file.pad_left = 0;
+            ii_file.pad_right = 0;
+            for _chunk in 0..num_tiles[1] {
+                let num_todo = tile_sizes[1].min(hin.nz - num_done);
+                // Where the fallback `setChunkOutput` produced the tiling,
+                // `nyLoadSlice` is `maxSlices` and can be less than `hin->ny`;
+                // the C's full-section `mrcReadZ` then overruns `yslice[k]`.
+                // `mrc_read_z` checks the buffer and returns an error instead.
+                for k in 0..num_todo {
+                    let err = crate::imod::libiimod::mrcsec::mrc_read_z(
+                        hin,
+                        &mut li,
+                        yslice[k as usize].data.bytes_mut(),
+                        k + num_done,
+                    );
+                    if err != 0 {
+                        let _ = ImodFile::Stdout.write_all(
+                            c_format(
+                                "ERROR: CLIP - Reading full section %d (error # %d)\n",
+                                &[CArg::Int(k as i64), CArg::Int(err as i64)],
+                            )
+                            .as_bytes(),
+                        );
+                        return Err(-1);
+                    }
+                }
+
+                // Set limits for output loop
+                let (ydir, yst, ynd) = if rotx {
+                    (-1, hin.ny - 1, 0)
+                } else {
+                    (1, 0, hin.ny - 1)
+                };
+
+                // Write current portion of Z slices in order after copying
+                // into output slice
+                let mut j = yst;
+                while j * ydir <= ynd * ydir {
+                    let line_ofs = row * j as usize;
+                    let mut slice_ofs = 0usize;
+                    let out = out_slice.data.bytes_mut();
+                    for k in 0..num_todo as usize {
+                        out[slice_ofs..slice_ofs + row]
+                            .copy_from_slice(&yslice[k].data.bytes()[line_ofs..line_ofs + row]);
+                        slice_ofs += row;
+                    }
+
+                    ii_file.lly = num_done;
+                    ii_file.ury = num_done + num_todo - 1;
+                    let k = ydir * (j - yst);
+                    if crate::imod::libiimod::iimage::ii_write_section(
+                        ii_file,
+                        out_slice.data.bytes_mut(),
+                        k,
+                    ) != 0
+                    {
+                        let _ = ImodFile::Stdout.write_all(
+                            c_format(
+                                "ERROR: CLIP - Writing y %d to %d of section %d\n",
+                                &[
+                                    CArg::Int(ii_file.lly as i64),
+                                    CArg::Int(ii_file.ury as i64),
+                                    CArg::Int(k as i64),
+                                ],
+                            )
+                            .as_bytes(),
+                        );
+                        return Err(-1);
+                    }
+                    j += ydir;
+                }
+                num_done += num_todo;
+            }
+        } else {
+            // Loop on chunks in Z of output
+            while num_done < hout.nz {
+                let num_todo = max_slices.min(hout.nz - num_done);
+
+                // Set up loading limits and limits for output loop
+                let ydir;
+                let yst;
+                let ynd;
+                if rotx {
+                    li.ymax = hout.nz - 1 - num_done;
+                    li.ymin = li.ymax - (num_todo - 1);
+                    ydir = -1;
+                    yst = num_todo - 1;
+                    ynd = 0;
+                } else {
+                    li.ymin = num_done;
+                    li.ymax = num_done + num_todo - 1;
+                    ydir = 1;
+                    ynd = num_todo - 1;
+                    yst = 0;
+                }
+
+                // Load the slices within the Y range
+                for k in 0..hin.nz {
+                    let err = crate::imod::libiimod::mrcsec::mrc_read_z(
+                        hin,
+                        &mut li,
+                        yslice[k as usize].data.bytes_mut(),
+                        k,
+                    );
+                    if err != 0 {
+                        let _ = ImodFile::Stdout.write_all(
+                            c_format(
+                                "ERROR: CLIP - Reading section %d, y %d to %d (error # %d)\n",
+                                &[
+                                    CArg::Int(k as i64),
+                                    CArg::Int(li.ymin as i64),
+                                    CArg::Int(li.ymax as i64),
+                                    CArg::Int(err as i64),
+                                ],
+                            )
+                            .as_bytes(),
+                        );
+                        return Err(-1);
+                    }
+                }
+
+                // Write Z slices in order after copying into output slice
+                let mut j = yst;
+                while j * ydir <= ynd * ydir {
+                    let line_ofs = row * j as usize;
+                    let mut slice_ofs = 0usize;
+                    let out = out_slice.data.bytes_mut();
+                    for sl in &yslice[..hin.nz as usize] {
+                        out[slice_ofs..slice_ofs + row]
+                            .copy_from_slice(&sl.data.bytes()[line_ofs..line_ofs + row]);
+                        slice_ofs += row;
+                    }
+
+                    if crate::imod::libiimod::mrcfiles::mrc_write_slice(
+                        out_slice.data.bytes(),
+                        &mut hout.fp.clone().unwrap(),
+                        hout,
+                        num_done,
+                        b'z',
+                    ) != 0
+                    {
+                        let _ = ImodFile::Stdout.write_all(
+                            c_format(
+                                "ERROR: CLIP - Writing section %d\n",
+                                &[CArg::Int(num_done as i64)],
+                            )
+                            .as_bytes(),
+                        );
+                        return Err(-1);
+                    }
+                    num_done += 1;
+                    j += ydir;
+                }
             }
         }
+
+        // Clean up
+        drop(yslice);
+        drop(out_slice);
         let _ = ImodFile::Stdout.write_all(" Done!\n".as_bytes());
         return Ok(());
     }
@@ -1548,7 +1798,8 @@ pub fn clip_quadrant(
                 "clip - intensities being adjusted to avoid taking log of small or negative values",
             );
         }
-        let base = base.max(0.) + user_base;
+        // `processing.cpp:1357`: `B3DMAX(0., base) + userBase` -- NaN-preserving.
+        let base = if 0. > base { 0. } else { base } + user_base;
         let t = d.map(|v| (v + base).log10());
         let c2 = t[0] - t[6] + 2. * t[1] - 2. * t[3] + t[4] - t[2];
         let c3 = t[0] - t[6] + t[1] - t[3] + t[2] - t[4] + t[7] - t[5];
@@ -1696,17 +1947,23 @@ fn correct_quadrant(
     gain: f64,
     base: f64,
 ) {
+    // `processing.cpp:1458-1471`: the mode test sits at row level, with a
+    // separate column loop for each arm.
     for iy in lly..ury {
-        for ix in llx..urx {
-            let mut val = [0.; 4];
-            slice_get_val(slice, ix, iy, &mut val);
-            let corrected = gain * (val[0] as f64 + base) - base;
-            val[0] = if slice.mode == 2 {
-                corrected as f32
-            } else {
-                (corrected + 0.5).floor() as f32
-            };
-            slice_put_val(slice, ix, iy, val);
+        if slice.mode == crate::imod::libiimod::mrcslice::SLICE_MODE_FLOAT {
+            for ix in llx..urx {
+                let mut val = [0.; 4];
+                slice_get_val(slice, ix, iy, &mut val);
+                val[0] = (gain * (val[0] as f64 + base) - base) as f32;
+                slice_put_val(slice, ix, iy, val);
+            }
+        } else {
+            for ix in llx..urx {
+                let mut val = [0.; 4];
+                slice_get_val(slice, ix, iy, &mut val);
+                val[0] = (gain * (val[0] as f64 + base) - base + 0.5).floor() as f32;
+                slice_put_val(slice, ix, iy, val);
+            }
         }
     }
 }
@@ -2610,6 +2867,10 @@ pub fn clip_average(
                         slice_get_val(sq.as_mut().unwrap(), x, y, &mut a);
                         a[0] += v[0] * v[0];
                         a[1] += v[1] * v[1];
+                        // DELIBERATE: `processing.cpp:2150` is `oval[1] += val[2] * val[2];`
+                        // -- index 1, not 2.  An upstream typo (BUGS.md): channel 2's
+                        // sum of squares is folded into channel 1 and channel 2's own is
+                        // never accumulated.  Reproduced for parity; do not "fix".
                         a[1] += v[2] * v[2];
                         slice_put_val(sq.as_mut().unwrap(), x, y, a);
                     }
@@ -2735,11 +2996,11 @@ pub fn clip2d_average(hin: &mut MrcHeader, hout: &mut MrcHeader, opt: &mut ClipO
             crate::imod::clip::clip::show_error("clip: Error reading slice.");
             return -1;
         };
+        // `processing.cpp:2232-2233`: `thresh` is decided once, not per pixel.
+        let thresh = opt.val != crate::imod::clip::clip::IP_DEFAULT as f32;
         for y in 0..opt.iy {
             for x in 0..opt.ix {
-                if opt.val != crate::imod::clip::clip::IP_DEFAULT as f32
-                    && slice_get_pixel_magnitude(s.as_ref(), x, y) <= opt.val
-                {
+                if thresh && slice_get_pixel_magnitude(s.as_ref(), x, y) <= opt.val {
                     continue;
                 }
                 let ind = (x + y * opt.ix) as usize;
@@ -2780,8 +3041,11 @@ pub fn clip2d_average(hin: &mut MrcHeader, hout: &mut MrcHeader, opt: &mut ClipO
                         let mut ss = [0.; 4];
                         slice_get_val(squares.as_mut().unwrap(), x, y, &mut ss);
                         for n in 0..3 {
-                            a[n] = ((ss[n] * scale * scale - count * a[n] * a[n]) / (count - 1.))
-                                .max(0.);
+                            // `processing.cpp:2168-2169`: the variance, then
+                            // `B3DMAX(0., oval[l])` -- NaN-preserving, not `f32::max`.
+                            let variance_n =
+                                (ss[n] * scale * scale - count * a[n] * a[n]) / (count - 1.);
+                            a[n] = if 0. > variance_n { 0. } else { variance_n };
                             if variance == 2 {
                                 a[n] = a[n].sqrt();
                             }
@@ -2806,8 +3070,20 @@ pub fn clip2d_average(hin: &mut MrcHeader, hout: &mut MrcHeader, opt: &mut ClipO
     // max.  sliceMinMax leaves `mean` at zero, so the output header's amean
     // was written as 0 instead of the averaged mean.
     crate::imod::libiimod::mrcslice::slice_mmm(avgs.as_mut());
-    hout.amin = hout.amin.min(avgs.min);
-    hout.amax = hout.amax.max(avgs.max);
+    // `processing.cpp:2332-2333`: `B3DMIN(avgs->min, hout->amin)` and the
+    // matching `B3DMAX` -- `a < b ? a : b` with the SECTION value first, so a NaN
+    // in either leaves `hout->amin` untouched.  `f32::min`/`max` would instead
+    // return whichever operand is not NaN.
+    hout.amin = if avgs.min < hout.amin {
+        avgs.min
+    } else {
+        hout.amin
+    };
+    hout.amax = if avgs.max > hout.amax {
+        avgs.max
+    } else {
+        hout.amax
+    };
     if opt.add2file != 1 {
         hout.amean += avgs.mean / hout.nz as f32;
     }
@@ -3171,26 +3447,26 @@ pub fn clip_planar_fit(hin: &mut MrcHeader, hout: &mut MrcHeader, opt: &mut Clip
             match mode {
                 crate::imod::libiimod::mrcfiles::MRC_MODE_FLOAT => {
                     let data = s.data.f();
-                    for ix in 0..n {
-                        sum_buf[ix] += data[ix] - base;
+                    for (dst, &src) in sum_buf[..n].iter_mut().zip(&data[..n]) {
+                        *dst += src - base;
                     }
                 }
                 crate::imod::libiimod::mrcfiles::MRC_MODE_SHORT => {
                     let data = s.data.s();
-                    for ix in 0..n {
-                        sum_buf[ix] += data[ix] as f32 - base;
+                    for (dst, &src) in sum_buf[..n].iter_mut().zip(&data[..n]) {
+                        *dst += src as f32 - base;
                     }
                 }
                 crate::imod::libiimod::mrcfiles::MRC_MODE_USHORT => {
                     let data = s.data.us();
-                    for ix in 0..n {
-                        sum_buf[ix] += data[ix] as f32 - base;
+                    for (dst, &src) in sum_buf[..n].iter_mut().zip(&data[..n]) {
+                        *dst += src as f32 - base;
                     }
                 }
                 crate::imod::libiimod::mrcfiles::MRC_MODE_BYTE => {
                     let data = s.data.b();
-                    for ix in 0..n {
-                        sum_buf[ix] += data[ix] as f32 - base;
+                    for (dst, &src) in sum_buf[..n].iter_mut().zip(&data[..n]) {
+                        *dst += src as f32 - base;
                     }
                 }
                 _ => {}
@@ -4656,9 +4932,12 @@ pub fn clip_stat(hin: &mut MrcHeader, opt: &mut ClipOptions) -> Result<(), i32> 
             square += tsumsq;
         }
         let mut mean = sum / ptnum_slice as f64;
-        let sd = ((square - ptnum_slice as f64 * mean * mean) / 1_f64.max(ptnum_slice as f64 - 1.))
-            .max(0.)
-            .sqrt();
+        // `processing.cpp:3632-3633`: `sqrt(B3DMAX(0., std))`.  `B3DMAX` is
+        // `a > b ? a : b`, so a NaN variance stays NaN and prints `nan`;
+        // `f64::max` would return 0 and print `0.0000`.  (The denominator's
+        // `B3DMAX(1., ptnum - 1.)` is left as `max`: `ptnum` is a count, never NaN.)
+        let var = (square - ptnum_slice as f64 * mean * mean) / 1_f64.max(ptnum_slice as f64 - 1.);
+        let sd = if 0. > var { 0. } else { var }.sqrt();
         mean += prelim_mean;
         // `processing.cpp:3636-3649`: refine the maximum with the same
         // source-mapped 3x3 parabolic fit before applying output coordinates.
@@ -4851,7 +5130,8 @@ pub fn clip_stat(hin: &mut MrcHeader, opt: &mut ClipOptions) -> Result<(), i32> 
     }
     ptnum *= opt.nofsecs as f32;
     let mut std = vsumsq / 1_f64.max(ptnum as f64 - 1.);
-    std = 0_f64.max(std).sqrt();
+    // `processing.cpp:3752`: `sqrt(B3DMAX(0., std))` -- NaN-preserving, as above.
+    std = if 0. > std { 0. } else { std }.sqrt();
     if !pcoords.is_empty() {
         let _ = ImodFile::Stdout.write_all(
             c_format(
@@ -4976,7 +5256,9 @@ pub fn clip_histogram(hin: &mut MrcHeader, opt: &mut ClipOptions) -> i32 {
             return -1;
         }
         let mut number = ((hi - lo) / d).ceil() as i32;
-        if (hi - lo) / d >= number as f32 - 0.01 {
+        // `processing.cpp:3844`: a float quotient compared against
+        // `numBins - 0.01`, which is a double.
+        if ((hi - lo) / d) as f64 >= number as f64 - 0.01 {
             number += 1;
         }
         (lo, hi, d, number.clamp(0, 65535) as usize, 0)
@@ -5009,16 +5291,33 @@ pub fn clip_histogram(hin: &mut MrcHeader, opt: &mut ClipOptions) -> i32 {
         };
         nx = s.xsize;
         ny = s.ysize;
+        // `processing.cpp:3862-3876`: `if (floatVals)` at row level, with a
+        // separate column loop for each arm.
         for y in 0..ny {
-            for x in 0..nx {
-                let v = slice_get_pixel_magnitude(s.as_ref(), x, y);
-                let ind = if floating {
-                    ((v - hist_min) / delta) as isize
-                } else {
-                    v.round() as isize + offset
-                };
-                if ind >= 0 && (ind as usize) < bins.len() {
-                    bins[ind as usize] += 1;
+            if floating {
+                for x in 0..nx {
+                    let v = slice_get_pixel_magnitude(s.as_ref(), x, y);
+                    // `ind = (val - histMin) / delta` converts a float to
+                    // `int`.  x86's `cvttss2si` gives INT_MIN for NaN (and for
+                    // out-of-range values), which the `ind >= 0` test then
+                    // skips; Rust's `as` maps NaN to 0, which would count a
+                    // NaN pixel in bin 0.  Out-of-range values saturate and
+                    // fail the range test either way.
+                    let q = (v - hist_min) / delta;
+                    let ind = if q.is_nan() { isize::MIN } else { q as isize };
+                    if ind >= 0 && (ind as usize) < bins.len() {
+                        bins[ind as usize] += 1;
+                    }
+                }
+            } else {
+                for x in 0..nx {
+                    let v = slice_get_pixel_magnitude(s.as_ref(), x, y);
+                    let ind = v.round() as isize + offset;
+                    // `:3873` has no range test; see the deliberate check
+                    // recorded in `TO_OPT.md` (the C's is a heap overflow).
+                    if ind >= 0 && (ind as usize) < bins.len() {
+                        bins[ind as usize] += 1;
+                    }
                 }
             }
         }

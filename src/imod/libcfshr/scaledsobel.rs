@@ -15,7 +15,10 @@ pub fn scaled_sobel(
     x_offset: &mut f32,
     y_offset: &mut f32,
 ) -> i32 {
-    if nxin <= 0 || nyin <= 0 || !scale_fac.is_finite() || scale_fac <= 0.0 {
+    // Not in the source: a non-positive or non-finite `scaleFac` makes
+    // `(int)(nxbin / interpScale)` below a float-to-int overflow, which is UB in
+    // C; refuse it rather than reproduce one compiler's conversion.
+    if !scale_fac.is_finite() || scale_fac <= 0.0 {
         return 1;
     }
     let mut interp_scale = scale_fac;
@@ -39,8 +42,10 @@ pub fn scaled_sobel(
     *y_offset = ((nyin % binning) / 2) as f32;
     let nxo = (nxbin as f32 / interp_scale) as i32;
     let nyo = (nybin as f32 / interp_scale) as i32;
-    *x_offset += (nxbin as f32 - interp_scale * nxo as f32) / 2.;
-    *y_offset += (nybin as f32 - interp_scale * nyo as f32) / 2.;
+    // `*xOffset += (nxbin - interpScale * nxo) / 2.;` -- a float difference
+    // divided by a double `2.`, added to the float in double, then narrowed.
+    *x_offset = (*x_offset as f64 + (nxbin as f32 - interp_scale * nxo as f32) as f64 / 2.) as f32;
+    *y_offset = (*y_offset as f64 + (nybin as f32 - interp_scale * nyo as f32) as f64 / 2.) as f32;
     *nxout = nxo;
     *nyout = nyo;
     let Some(in_image) = in_image else {
@@ -64,7 +69,17 @@ pub fn scaled_sobel(
     let Ok(output_size) = usize::try_from(output_pixels) else {
         return 1;
     };
-    if in_image.len() < input_size || out_image.len() < output_size || nxo < 2 || nyo < 2 {
+    // Not in the source: the C indexes past its buffers when they are short,
+    // and its edge copies (`scaledsobel.c:167-177`) read `outImage[j*nxo + 1]`
+    // and `outImage[i + nxo * (nyo - 2)]` out of bounds when a filtered output
+    // is under 1 by 2 pixels, and `sliceEdgeMean` reads an empty image.
+    // Refuse those rather than overrun.
+    if nxin <= 0
+        || nyin <= 0
+        || in_image.len() < input_size
+        || out_image.len() < output_size
+        || (center != 0. && (nxo < 1 || nyo < 2))
+    {
         return 1;
     }
     if linear < 0 {
@@ -94,24 +109,37 @@ pub fn scaled_sobel(
     }
     temporary.resize(size, 0.);
     let (source, destination) = if binning > 1 {
-        // `reduceByBinning(..., SLICE_MODE_FLOAT, ...)` in the source.  Keeping
-        // this f32 path here avoids turning two owned slices into byte slices.
-        let x_start = (nxin % binning / 2) as usize;
-        let y_start = (nyin % binning / 2) as usize;
-        for y in 0..nybin as usize {
-            for x in 0..nxbin as usize {
-                let mut sum = 0.0_f32;
-                for by in 0..binning as usize {
-                    for bx in 0..binning as usize {
-                        sum += in_image[(y_start + y * binning as usize + by) * nxin as usize
-                            + x_start
-                            + x * binning as usize
-                            + bx];
-                    }
-                }
-                temporary[y * nxbin as usize + x] = sum / (binning * binning) as f32;
-            }
-        }
+        // `scaledsobel.c:106`: `reduceByBinning(inImage, SLICE_MODE_FLOAT, nxin,
+        // nyin, binning, tmpImage, 0, &nxbin, &nybin)`, return value unused.
+        // The routine takes the C's `void *`, so it gets byte views of the two
+        // `float` buffers.
+        // SAFETY: `f32` has no padding and no invalid bit patterns, `u8` has
+        // alignment 1, and each view covers exactly its slice's storage, so
+        // reading and writing it as bytes is sound; the two borrows are
+        // distinct allocations, as `tmpImage` and `inImage` are in the C.
+        let in_bytes = unsafe {
+            core::slice::from_raw_parts(
+                in_image.as_ptr().cast::<u8>(),
+                core::mem::size_of_val(in_image),
+            )
+        };
+        let tmp_bytes = unsafe {
+            core::slice::from_raw_parts_mut(
+                temporary.as_mut_ptr().cast::<u8>(),
+                core::mem::size_of_val(temporary.as_slice()),
+            )
+        };
+        crate::imod::libcfshr::reduce_by_binning::reduce_by_binning(
+            in_bytes,
+            crate::imod::libcfshr::reduce_by_binning::SLICE_MODE_FLOAT,
+            nxin,
+            nyin,
+            binning,
+            tmp_bytes,
+            0,
+            &mut nxbin,
+            &mut nybin,
+        );
         (temporary.as_slice(), &mut *out_image)
     } else {
         (in_image, temporary.as_mut_slice())
@@ -119,13 +147,14 @@ pub fn scaled_sobel(
     let edge =
         crate::imod::libcfshr::taperpad::slice_edge_mean(source, nxbin, 0, nxbin - 1, 0, nybin - 1)
             as f32;
-    if interp_scale == 1. && nxbin == nxo && nybin == nyo {
-        // `cubinterp` is an identity transform here.  Preserve the source
-        // binned pixels directly; the generic Rust interpolator has no
-        // interior sample for a 2-by-2 identity grid.
-        destination[..output_size].copy_from_slice(&source[..output_size]);
-    } else if linear >= 0 || scale_fac <= 1. {
-        let matrix = [[1. / interp_scale, 0.], [0., 1. / interp_scale]];
+    // `amat[0][0] = amat[1][1] = 1. / interpScale;` -- a double quotient stored
+    // into `float amat[2][2]`; `nxbin / 2.` is likewise a double narrowed to
+    // cubinterp's `float` parameter.  There is no identity special case: the
+    // source always interpolates, and for `linear > 0` cubinterp fills the
+    // last row and column of an identity mapping with `edge`.
+    let recip = (1. / interp_scale as f64) as f32;
+    if linear >= 0 || scale_fac <= 1. {
+        let matrix = [[recip, 0.], [0., recip]];
         crate::imod::libcfshr::cubinterp::cubinterp(
             source,
             destination,
@@ -134,8 +163,8 @@ pub fn scaled_sobel(
             nxo,
             nyo,
             &matrix,
-            nxbin as f32 / 2.,
-            nybin as f32 / 2.,
+            (nxbin as f64 / 2.) as f32,
+            (nybin as f64 / 2.) as f32,
             0.,
             0.,
             1.,
@@ -150,8 +179,8 @@ pub fn scaled_sobel(
             nybin,
             nxo,
             nyo,
-            nxbin as f32 / 2.,
-            nybin as f32 / 2.,
+            (nxbin as f64 / 2.) as f32,
+            (nybin as f64 / 2.) as f32,
             0.,
             0.,
             edge,
@@ -170,19 +199,22 @@ pub fn scaled_sobel(
     for y in 1..nyo - 1 {
         for x in 1..nxo - 1 {
             let index = (x + y * nxo) as usize;
-            let row = (temporary[index - nxo as usize - 1]
+            // `double Sr, Sc` (`scaledsobel.c:57`): each side is a float
+            // expression, widened on assignment; `(float)sqrt(Sr*Sr + Sc*Sc)`
+            // is the double square root, narrowed on store.
+            let row = ((temporary[index - nxo as usize - 1]
                 + center * temporary[index - nxo as usize]
                 + temporary[index - nxo as usize + 1])
                 - (temporary[index + nxo as usize - 1]
                     + center * temporary[index + nxo as usize]
-                    + temporary[index + nxo as usize + 1]);
-            let col = (temporary[index + nxo as usize + 1]
+                    + temporary[index + nxo as usize + 1])) as f64;
+            let col = ((temporary[index + nxo as usize + 1]
                 + center * temporary[index + 1]
                 + temporary[index - nxo as usize + 1])
                 - (temporary[index + nxo as usize - 1]
                     + center * temporary[index - 1]
-                    + temporary[index - nxo as usize - 1]);
-            out_image[index] = (row * row + col * col).sqrt();
+                    + temporary[index - nxo as usize - 1])) as f64;
+            out_image[index] = (row * row + col * col).sqrt() as f32;
         }
         out_image[(y * nxo) as usize] = out_image[(y * nxo + 1) as usize];
         out_image[(y * nxo + nxo - 1) as usize] = out_image[(y * nxo + nxo - 2) as usize];
@@ -288,7 +320,7 @@ mod tests {
     }
 
     #[test]
-    fn typed_binning_keeps_source_centering_and_f32_accumulation_order() {
+    fn binning_then_linear_identity_interp_matches_native() {
         let image = [
             0.0_f32, 1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0, 9.0, 10.0, 11.0, 12.0, 13.0, 14.0,
             15.0,
@@ -313,7 +345,10 @@ mod tests {
             0
         );
         assert_eq!((nxout, nyout), (2, 2));
-        assert_eq!(output, [2.5, 4.5, 10.5, 12.5]);
+        // Native `scaledSobel` (reference libcfshr.so) gives `2.5 7.5 7.5 7.5`:
+        // linear `cubinterp` on a 2x2 identity grid fills the last row and
+        // column with the edge mean, (2.5 + 4.5 + 10.5 + 12.5) / 4.
+        assert_eq!(output, [2.5, 7.5, 7.5, 7.5]);
     }
 
     #[test]

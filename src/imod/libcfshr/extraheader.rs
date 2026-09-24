@@ -480,8 +480,12 @@ pub fn get_metadata_by_key(
             0 => {
                 let mut bytes = Vec::new();
                 if adoc_get_string(name, section, key.as_bytes(), &mut bytes) == 0 {
+                    // Take ownership of the valid-UTF-8 buffer (the C keeps
+                    // its one `strdup`); lossy conversion only on invalid bytes.
                     val_string.as_deref_mut().unwrap()[out] =
-                        Some(String::from_utf8_lossy(&bytes).into_owned());
+                        Some(String::from_utf8(bytes).unwrap_or_else(|e| {
+                            String::from_utf8_lossy(e.as_bytes()).into_owned()
+                        }));
                     val1[out] = 0.;
                     *num_found += 1;
                 }

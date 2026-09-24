@@ -95,14 +95,24 @@ pub fn rotate_flip_image(
     let mut dmin = 1_000_000_i32;
     let mut dmax = -1_000_000_i32;
     if invert_con != 0 {
-        for index in 0..nx * ny {
-            let value = match &data {
-                RotateFlipData::Short { array, .. } => array[index as usize] as i32,
-                RotateFlipData::UShort { array, .. } => array[index as usize] as i32,
-                _ => unreachable!(),
-            };
-            dmin = dmin.min(value);
-            dmax = dmax.max(value);
+        // `rotateflip.c:118-130` tests the mode once and runs one flat
+        // `nx * ny` loop per type.  Integer min/max, so `Ord::min`/`max` and
+        // `B3DMIN`/`B3DMAX` agree on every input.
+        let count = (nx * ny).max(0) as usize;
+        match &data {
+            RotateFlipData::Short { array, .. } => {
+                for &value in &array[..count] {
+                    dmax = (value as i32).max(dmax);
+                    dmin = (value as i32).min(dmin);
+                }
+            }
+            RotateFlipData::UShort { array, .. } => {
+                for &value in &array[..count] {
+                    dmax = (value as i32).max(dmax);
+                    dmin = (value as i32).min(dmin);
+                }
+            }
+            _ => unreachable!(),
         }
     }
     /* Do the copy: `rotateflip.c:155-406`, eight input lines per strip with

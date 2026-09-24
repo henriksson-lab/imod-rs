@@ -302,6 +302,55 @@ pub fn slice_mmm(s: &mut Islice) -> i32 {
         return -1;
     }
     let mut sum = 0_f64;
+    // Performance, not translation: for the four single-channel real modes
+    // the loop below re-derives, per pixel, things that cannot change inside
+    // it -- the in-range test `sliceGetVal` makes on (i, j) (always true
+    // here), its `switch (s->mode)`, and the `MrcData` member.  This path
+    // reads the same member `slice_get_val` reads for that mode, in the same
+    // row-major order, and applies the identical `>`/`<` tests and the
+    // identical per-row double `tsum`; nothing here is computed differently.
+    // Complex, RGB, unknown modes and a negative size keep the loop as
+    // written, so `val` carry-over and the complex magnitude are untouched.
+    if s.xsize > 0
+        && s.ysize > 0
+        && matches!(
+            s.mode,
+            MRC_MODE_BYTE | MRC_MODE_SHORT | MRC_MODE_USHORT | MRC_MODE_FLOAT
+        )
+    {
+        let nx = s.xsize as usize;
+        let n = nx * s.ysize as usize;
+        let mut min = s.min;
+        let mut max = s.max;
+        macro_rules! mmm_rows {
+            ($data:expr) => {
+                for row in $data[..n].chunks_exact(nx) {
+                    let mut tsum = 0_f64;
+                    for &pixel in row {
+                        let value = pixel as f32;
+                        if min > value {
+                            min = value;
+                        }
+                        if max < value {
+                            max = value;
+                        }
+                        tsum += value as f64;
+                    }
+                    sum += tsum;
+                }
+            };
+        }
+        match s.mode {
+            MRC_MODE_BYTE => mmm_rows!(s.data.b()),
+            MRC_MODE_SHORT => mmm_rows!(s.data.s()),
+            MRC_MODE_USHORT => mmm_rows!(s.data.us()),
+            _ => mmm_rows!(s.data.f()),
+        }
+        s.min = min;
+        s.max = max;
+        s.mean = (sum / f64::from((s.xsize * s.ysize) as f32)) as f32;
+        return 0;
+    }
     for j in 0..s.ysize {
         let mut tsum = 0_f64;
         for i in 0..s.xsize {

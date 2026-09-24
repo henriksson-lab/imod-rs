@@ -165,7 +165,8 @@ pub fn imodinfo() {
             'r' => mode = 9,
             'n' => mode = 3,
             'i' => scaninside = true,
-            'D' => {}
+            // `imodinfo.cpp:241-243`: `case 'D': Debug = TRUE;` -- was accepted and ignored.
+            'D' => DEBUG.store(true, std::sync::atomic::Ordering::Relaxed),
             'b' => {
                 iarg += 1;
                 bins = argv
@@ -2278,55 +2279,185 @@ pub fn info_contour_vol(cont: Option<&Icont>, _objflags: u32, pixsize: f64, zsca
     vol
 }
 /// Original: `contourVolumeFactor` (`imodinfo.cpp:1765`).
+/// C file-scope `static int Debug` (`imodinfo.cpp:114`), set by `-D` (`:242`).
+/// An atomic rather than a `thread_local!`: it is a process-global flag in C.
+static DEBUG: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+
+/// Original: `contourVolumeFactor` (`imodinfo.cpp:1765-1888`).
+///
+/// Retranslated 2026-09-24.  The previous body was a substituted algorithm:
+/// it added `diff / 2` for every matching **triangle**, where the source finds
+/// one matching triangle, then walks that triangle's whole **polygon** once and
+/// leaves it.  A strip vertex is shared by adjacent triangles of the same
+/// polygon, so it was counted twice -- `imodinfo` reported contour volume at
+/// exactly 2x native on a two-section model.  It also lacked the cap test
+/// (`diff / 3` for a fan), the `resol` filter, the asymmetric z range taken from
+/// the *matching* point, the four-way clip against `min`/`max`, and the source's
+/// stop after the first point that finds anything.
 pub fn contour_volume_factor(obj: &Iobj, cont: &Icont, min: Ipoint, max: Ipoint) -> f32 {
-    // Original: `contourVolumeFactor` (`imodinfo.cpp:1765`).
-    let mut volume_factor = 0.0_f32;
+    let debug = DEBUG.load(std::sync::atomic::Ordering::Relaxed);
+    let mut vol_fac = 0.0_f32;
+    let mut resol = 0;
+    let (mut list_inc, mut vert_base, mut norm_add) = (0, 0, 0);
+    crate::imod::libimod::imesh::imod_mesh_nearest_res(
+        &obj.mesh,
+        obj.mesh.len() as i32,
+        0,
+        &mut resol,
+    );
+
+    // Loop on points until one is found in a mesh
     let mut found = 0;
-    for point in &cont.pts {
+    let mut zz = 0.0_f32;
+    let mut pt = 0;
+    while pt < cont.pts.len() && found == 0 {
+        let xx = cont.pts[pt].x;
+        let yy = cont.pts[pt].y;
+        zz = cont.pts[pt].z;
+
         for mesh in &obj.mesh {
-            let mut i = 0;
-            while i < mesh.list.len() {
-                if mesh.list[i] != IMOD_MESH_BGNPOLYNORM && mesh.list[i] != IMOD_MESH_BGNPOLYNORM2 {
+            if mesh.list.is_empty() || crate::imod::libimod::imesh::imesh_resol(mesh.flag) != resol
+            {
+                continue;
+            }
+            let list = &mesh.list;
+            let vert = &mesh.vert;
+            let mut i: usize = 0;
+            while i < list.len() {
+                if crate::imod::libimod::imesh::imod_mesh_poly_norm_factors(
+                    list[i],
+                    &mut list_inc,
+                    &mut vert_base,
+                    &mut norm_add,
+                ) != 0
+                {
+                    let inc = list_inc as usize;
+                    let vb = vert_base as usize;
                     i += 1;
-                    continue;
-                }
-                let inc = if mesh.list[i] == IMOD_MESH_BGNPOLYNORM {
-                    2
-                } else {
-                    1
-                };
-                let base = if inc == 2 { 1 } else { 0 };
-                i += 1;
-                while i < mesh.list.len() && mesh.list[i] != IMOD_MESH_ENDPOLY {
-                    if i + 2 * inc + base >= mesh.list.len() {
-                        break;
-                    }
-                    let p1 = mesh.vert.get(mesh.list[i + base].max(0) as usize);
-                    let p2 = mesh.vert.get(mesh.list[i + inc + base].max(0) as usize);
-                    let p3 = mesh.vert.get(mesh.list[i + 2 * inc + base].max(0) as usize);
-                    if let (Some(p1), Some(p2), Some(p3)) = (p1, p2, p3) {
-                        if [p1, p2, p3]
-                            .iter()
-                            .any(|p| p.x == point.x && p.y == point.y && p.z == point.z)
+                    let ind_start = i;
+                    while list[i] != IMOD_MESH_ENDPOLY {
+                        let p1 = vert[list[i + vb] as usize];
+                        i += inc;
+                        let p2 = vert[list[i + vb] as usize];
+                        i += inc;
+                        let p3 = vert[list[i + vb] as usize];
+                        i += inc;
+
+                        // Find an exactly matching point
+                        if (xx == p1.x && yy == p1.y && zz == p1.z)
+                            || (xx == p2.x && yy == p2.y && zz == p2.z)
+                            || (xx == p3.x && yy == p3.y && zz == p3.z)
                         {
-                            let zmin = p1.z.min(p2.z).min(p3.z).max(min.z);
-                            let zmax = p1.z.max(p2.z).max(p3.z).min(max.z);
-                            if zmax > zmin {
-                                volume_factor += (zmax - zmin) / 2.0;
-                                found += 1;
-                                if found == 2 {
-                                    return volume_factor;
+                            // get the maximum difference between the points
+                            let (zmin, zmax);
+                            if p1.z < zz || p2.z < zz || p3.z < zz {
+                                zmax = zz;
+                                let mut z = p1.z;
+                                if z > p2.z {
+                                    z = p2.z;
+                                }
+                                if z > p3.z {
+                                    z = p3.z;
+                                }
+                                zmin = z;
+                            } else {
+                                zmin = zz;
+                                let mut z = p1.z;
+                                if z < p2.z {
+                                    z = p2.z;
+                                }
+                                if z < p3.z {
+                                    z = p3.z;
+                                }
+                                zmax = z;
+                            }
+                            let diff = if zmax >= max.z && min.z >= zmin {
+                                max.z - min.z
+                            } else if zmin < min.z {
+                                zmax - min.z
+                            } else if zmax > max.z {
+                                max.z - zmin
+                            } else {
+                                zmax - zmin
+                            };
+                            if debug {
+                                let _ = ImodFile::Stdout.write_all(&c_format_bytes(
+                                    "%f %f %f %f %f\n",
+                                    &[
+                                        CArg::Dbl(zz as f64),
+                                        CArg::Dbl(p1.z as f64),
+                                        CArg::Dbl(p2.z as f64),
+                                        CArg::Dbl(p3.z as f64),
+                                        CArg::Dbl(diff as f64),
+                                    ],
+                                ));
+                            }
+
+                            // Go through the whole polygon checking for cap
+                            i = ind_start;
+                            let ind1 = list[i + vb];
+                            let ind2 = list[i + inc + vb];
+                            let ind3 = list[i + 2 * inc + vb];
+                            let (mut num1, mut num2, mut num3, mut num_tri) = (0, 0, 0, 0);
+                            while list[i] != IMOD_MESH_ENDPOLY {
+                                if list[i + vb] == ind1 {
+                                    num1 += 1;
+                                }
+                                i += inc;
+                                if list[i + vb] == ind2 {
+                                    num2 += 1;
+                                }
+                                i += inc;
+                                if list[i + vb] == ind3 {
+                                    num3 += 1;
+                                }
+                                num_tri += 1;
+                                i += inc;
+                            }
+
+                            // If diff is still positive after clipping by Z, add half for
+                            // ordinary case or one-third for cap case
+                            if diff > 0. {
+                                if num1 == num_tri || num2 == num_tri || num3 == num_tri {
+                                    vol_fac += diff / 3.0_f32;
+                                } else {
+                                    vol_fac += diff / 2.0_f32;
                                 }
                             }
+
+                            // If found two meshes, done
+                            if found != 0 {
+                                if debug {
+                                    let _ = ImodFile::Stdout.write_all(&c_format_bytes(
+                                        "Found 2 polygons at z = %f, factor %f\n",
+                                        &[CArg::Dbl(zz as f64), CArg::Dbl(vol_fac as f64)],
+                                    ));
+                                }
+                                return vol_fac;
+                            }
+                            found += 1;
+                            // `break` leaves only this polygon's walk; the `for (i ...)`
+                            // below advances past its ENDPOLY and the search goes on.
+                            break;
                         }
                     }
-                    i += 3 * inc;
                 }
                 i += 1;
             }
         }
+        pt += 1;
     }
-    volume_factor
+    if debug {
+        let _ = ImodFile::Stdout.write_all(&c_format_bytes(
+            "Found %d polygons at z = %f, factor %f\n",
+            &[
+                CArg::Int(found as i64),
+                CArg::Dbl(zz as f64),
+                CArg::Dbl(vol_fac as f64),
+            ],
+        ));
+    }
+    vol_fac
 }
 /// Original: `imeshSurfaceSubarea` (`imodinfo.cpp:1903`).
 pub fn imesh_surface_subarea(
@@ -2554,6 +2685,17 @@ pub fn scanned_volume(
                 vol_facs[inbox] = contour_volume_factor(obj, &obj.cont[co], ptmin, ptmax);
                 nestind[inbox] = -1;
                 inbox += 1;
+                // `imodinfo.cpp:2068-2070`.
+                if DEBUG.load(std::sync::atomic::Ordering::Relaxed) {
+                    let _ = ImodFile::Stdout.write_all(&c_format_bytes(
+                        "contour %d  area %f  volume factor %f\n",
+                        &[
+                            CArg::Int(co as i64 + 1),
+                            CArg::Dbl(areas[inbox - 1] as f64),
+                            CArg::Dbl(vol_facs[inbox - 1] as f64),
+                        ],
+                    ));
+                }
             }
         }
 

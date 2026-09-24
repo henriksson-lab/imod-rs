@@ -1,8 +1,8 @@
 //! Experimental Rust `tiff`-crate reader for the legacy tif2mrc boundary.
 //!
 //! It decodes supported pages eagerly, then hands back the same owned section
-//! buffers that `tiff.c` returns to tif2mrc.  The default path never enters
-//! this module.
+//! buffers that `tiff.c` returns to tif2mrc.  Its writer takes one page at a
+//! time.  The default path never enters this module.
 
 use crate::imod::mrc::tiff::TfInfo;
 
@@ -35,31 +35,71 @@ mod implementation {
                 MRC_MODE_BYTE,
             ),
             DecodingResult::U16(values) => (
-                values.into_iter().flat_map(u16::to_ne_bytes).collect(),
+                {
+                    // Sized once up front; the same `to_ne_bytes` sequence
+                    // the former `flat_map(..).collect()` produced.
+                    let mut data = Vec::with_capacity(values.len() * 2);
+                    for value in values {
+                        data.extend_from_slice(&value.to_ne_bytes());
+                    }
+                    data
+                },
                 16,
                 ImageDataType::UnsignedShort,
                 MRC_MODE_USHORT,
             ),
             DecodingResult::I16(values) => (
-                values.into_iter().flat_map(i16::to_ne_bytes).collect(),
+                {
+                    // Sized once up front; the same `to_ne_bytes` sequence
+                    // the former `flat_map(..).collect()` produced.
+                    let mut data = Vec::with_capacity(values.len() * 2);
+                    for value in values {
+                        data.extend_from_slice(&value.to_ne_bytes());
+                    }
+                    data
+                },
                 16,
                 ImageDataType::Short,
                 MRC_MODE_SHORT,
             ),
             DecodingResult::U32(values) => (
-                values.into_iter().flat_map(u32::to_ne_bytes).collect(),
+                {
+                    // Sized once up front; the same `to_ne_bytes` sequence
+                    // the former `flat_map(..).collect()` produced.
+                    let mut data = Vec::with_capacity(values.len() * 4);
+                    for value in values {
+                        data.extend_from_slice(&value.to_ne_bytes());
+                    }
+                    data
+                },
                 32,
                 ImageDataType::UnsignedInt,
                 MRC_MODE_FLOAT,
             ),
             DecodingResult::I32(values) => (
-                values.into_iter().flat_map(i32::to_ne_bytes).collect(),
+                {
+                    // Sized once up front; the same `to_ne_bytes` sequence
+                    // the former `flat_map(..).collect()` produced.
+                    let mut data = Vec::with_capacity(values.len() * 4);
+                    for value in values {
+                        data.extend_from_slice(&value.to_ne_bytes());
+                    }
+                    data
+                },
                 32,
                 ImageDataType::Int,
                 MRC_MODE_FLOAT,
             ),
             DecodingResult::F32(values) => (
-                values.into_iter().flat_map(f32::to_ne_bytes).collect(),
+                {
+                    // Sized once up front; the same `to_ne_bytes` sequence
+                    // the former `flat_map(..).collect()` produced.
+                    let mut data = Vec::with_capacity(values.len() * 4);
+                    for value in values {
+                        data.extend_from_slice(&value.to_ne_bytes());
+                    }
+                    data
+                },
                 32,
                 ImageDataType::Float,
                 MRC_MODE_FLOAT,
@@ -307,10 +347,17 @@ mod implementation {
                 if bits != 8 || data.len() != width as usize * height as usize * source_samples {
                     return 1;
                 }
-                data = data
-                    .chunks_exact(source_samples)
-                    .flat_map(|pixel| pixel[..kept_samples].iter().copied())
-                    .collect();
+                // Compact in place: pixel `p`'s kept samples move from
+                // `p * source_samples` to `p * kept_samples`, never forward,
+                // so each source is read before anything overwrites it.  The
+                // result is the byte sequence the former `flat_map(..)
+                // .collect()` built in a second allocation.
+                let pixels = data.len() / source_samples;
+                for pixel in 0..pixels {
+                    let from = pixel * source_samples;
+                    data.copy_within(from..from + kept_samples, pixel * kept_samples);
+                }
+                data.truncate(pixels * kept_samples);
             }
             // The Rust TIFF decoder normalizes MINISWHITE samples, while
             // IMOD's existing libtiff path copies these samples unchanged.
@@ -403,183 +450,225 @@ mod implementation {
     }
 
     /// Writes non-tiled TIFF pages with none/LZW/ZIP compression and no
-    /// IMOD-specific tags. The caller retains command-level selection,
-    /// scaling, and file-lifetime behavior and uses the parity writer for all
-    /// other cases.
-    pub fn write_stack(
+    /// IMOD-specific tags, one page per [`StackWriter::write_page`] call, so
+    /// `mrc2tif -s` can hand over each section as it is produced
+    /// (`mrc2tif.cpp:598-607` writes each section to the open TIFF the same
+    /// way) instead of holding the whole volume until the end.  The caller
+    /// retains command-level selection, scaling, and file-lifetime behavior
+    /// and uses the parity writer for all other cases.
+    ///
+    /// Nothing is validated or created until the first page, so a run that
+    /// never delivers a page creates no file, and the first page runs the
+    /// same checks in the same order (size, mode, create, compression,
+    /// encoder header, buffer length) that the former whole-stack writer ran
+    /// before its first page.  The encoder receives the identical sequence
+    /// of `new_image`/`resolution`/`write_data` calls with identical
+    /// arguments either way; only *when* they happen relative to reading the
+    /// input moved, and `TiffEncoder` output is a function of that call
+    /// sequence alone.
+    pub struct StackWriter {
+        filename: String,
+        width: i32,
+        height: i32,
+        mode: i32,
+        compression: i32,
+        quality: i32,
+        row_bytes: usize,
+        encoder: Option<tiff::encoder::TiffEncoder<File>>,
+        pages: usize,
+        /// Top-down copy of the current page, reused across pages. One of
+        /// these is in use for a given writer, chosen by `mode`.
+        oriented_bytes: Vec<u8>,
+        oriented_i16: Vec<i16>,
+        oriented_u16: Vec<u16>,
+        oriented_f32: Vec<f32>,
+    }
+
+    /// Creates a [`StackWriter`]; no I/O happens until the first page.
+    pub fn stack_writer(
         filename: &str,
         width: i32,
         height: i32,
         mode: i32,
         compression: i32,
         quality: i32,
-        images: &[Vec<u8>],
-        resolutions: &[i32],
-    ) -> Result<(), String> {
-        use tiff::encoder::{Compression, DeflateLevel, Rational, TiffEncoder, colortype};
-        use tiff::tags::ResolutionUnit;
-
-        if width <= 0 || height <= 0 || images.is_empty() || images.len() != resolutions.len() {
-            return Err("Rust TIFF writer requires at least one non-empty image".into());
+    ) -> StackWriter {
+        StackWriter {
+            filename: filename.to_string(),
+            width,
+            height,
+            mode,
+            compression,
+            quality,
+            row_bytes: 0,
+            encoder: None,
+            pages: 0,
+            oriented_bytes: Vec::new(),
+            oriented_i16: Vec::new(),
+            oriented_u16: Vec::new(),
+            oriented_f32: Vec::new(),
         }
-        let row_bytes = match mode {
-            MRC_MODE_BYTE => width as usize,
-            MRC_MODE_SHORT | MRC_MODE_USHORT => 2 * width as usize,
-            MRC_MODE_FLOAT => 4 * width as usize,
-            MRC_MODE_RGB => 3 * width as usize,
-            _ => return Err(format!("Rust TIFF writer does not support MRC mode {mode}")),
-        };
-        let file = File::create(filename)
-            .map_err(|error| format!("Rust TIFF writer could not create {filename}: {error}"))?;
-        let compression = match compression {
-            IICOMPRESSION_NONE => Compression::Uncompressed,
-            IICOMPRESSION_LZW => Compression::Lzw,
-            IICOMPRESSION_ZIP => Compression::Deflate(if quality <= 3 {
-                DeflateLevel::Fast
-            } else if quality >= 8 {
-                DeflateLevel::Best
-            } else {
-                DeflateLevel::Balanced
-            }),
-            other => {
-                return Err(format!(
-                    "Rust TIFF writer does not support compression {other}"
-                ));
+    }
+
+    impl StackWriter {
+        /// Encodes one MRC-orientation (bottom-up) page.
+        pub fn write_page(&mut self, image: &[u8], resolution: i32) -> Result<(), String> {
+            use tiff::encoder::{Compression, DeflateLevel, Rational, TiffEncoder, colortype};
+            use tiff::tags::ResolutionUnit;
+
+            let (width, height, mode) = (self.width, self.height, self.mode);
+            if self.encoder.is_none() {
+                if width <= 0 || height <= 0 {
+                    return Err("Rust TIFF writer requires at least one non-empty image".into());
+                }
+                self.row_bytes = match mode {
+                    MRC_MODE_BYTE => width as usize,
+                    MRC_MODE_SHORT | MRC_MODE_USHORT => 2 * width as usize,
+                    MRC_MODE_FLOAT => 4 * width as usize,
+                    MRC_MODE_RGB => 3 * width as usize,
+                    _ => return Err(format!("Rust TIFF writer does not support MRC mode {mode}")),
+                };
+                let filename = &self.filename;
+                let file = File::create(filename).map_err(|error| {
+                    format!("Rust TIFF writer could not create {filename}: {error}")
+                })?;
+                let quality = self.quality;
+                let compression = match self.compression {
+                    IICOMPRESSION_NONE => Compression::Uncompressed,
+                    IICOMPRESSION_LZW => Compression::Lzw,
+                    IICOMPRESSION_ZIP => Compression::Deflate(if quality <= 3 {
+                        DeflateLevel::Fast
+                    } else if quality >= 8 {
+                        DeflateLevel::Best
+                    } else {
+                        DeflateLevel::Balanced
+                    }),
+                    other => {
+                        return Err(format!(
+                            "Rust TIFF writer does not support compression {other}"
+                        ));
+                    }
+                };
+                let encoder = TiffEncoder::new(file).map_err(|error| {
+                    format!("Rust TIFF writer could not initialize {filename}: {error}")
+                })?;
+                self.encoder = Some(encoder.with_compression(compression));
             }
-        };
-        let mut encoder = TiffEncoder::new(file).map_err(|error| {
-            format!("Rust TIFF writer could not initialize {filename}: {error}")
-        })?;
-        encoder = encoder.with_compression(compression);
-        for (image, &resolution) in images.iter().zip(resolutions) {
+            let row_bytes = self.row_bytes;
+            let encoder = self.encoder.as_mut().unwrap();
             if image.len() != row_bytes * height as usize {
                 return Err("Rust TIFF writer received an invalid image buffer".into());
             }
             // mrc2tif's source/libtiff boundary writes MRC's bottom-up rows
-            // as conventional top-down TIFF rows.
-            let mut oriented = image.clone();
-            flip_rows(
-                &mut oriented,
-                width as usize,
-                height as usize,
-                row_bytes / width as usize,
-            );
+            // as conventional top-down TIFF rows.  Row `y` of the page is
+            // input row `height - 1 - y`: exactly what cloning the image and
+            // exchanging rows `y` and `height - 1 - y` produced (the middle
+            // row of an odd height stays put either way), built here in one
+            // pass into a buffer kept across pages.  The typed arms decode
+            // each element with the same `from_ne_bytes` the former
+            // whole-page transcode used, in the same order.
+            let rows = image.chunks_exact(row_bytes).rev();
+            let unit = if resolution < 0 {
+                ResolutionUnit::Inch
+            } else {
+                ResolutionUnit::Centimeter
+            };
+            let rational = Rational {
+                n: resolution.unsigned_abs(),
+                d: 1,
+            };
             match mode {
                 MRC_MODE_BYTE => {
+                    self.oriented_bytes.clear();
+                    rows.for_each(|row| self.oriented_bytes.extend_from_slice(row));
                     let mut page = encoder
                         .new_image::<colortype::Gray8>(width as u32, height as u32)
                         .map_err(|error| format!("Rust TIFF writer failed: {error}"))?;
                     if resolution != 0 {
-                        page.resolution(
-                            if resolution < 0 {
-                                ResolutionUnit::Inch
-                            } else {
-                                ResolutionUnit::Centimeter
-                            },
-                            Rational {
-                                n: resolution.unsigned_abs(),
-                                d: 1,
-                            },
-                        );
+                        page.resolution(unit, rational);
                     }
-                    page.write_data(&oriented)
+                    page.write_data(&self.oriented_bytes)
                 }
                 MRC_MODE_SHORT => {
-                    let values = oriented
-                        .chunks_exact(2)
-                        .map(|value| i16::from_ne_bytes([value[0], value[1]]))
-                        .collect::<Vec<_>>();
+                    self.oriented_i16.clear();
+                    rows.for_each(|row| {
+                        self.oriented_i16.extend(
+                            row.chunks_exact(2)
+                                .map(|value| i16::from_ne_bytes([value[0], value[1]])),
+                        )
+                    });
                     let mut page = encoder
                         .new_image::<colortype::GrayI16>(width as u32, height as u32)
                         .map_err(|error| format!("Rust TIFF writer failed: {error}"))?;
                     if resolution != 0 {
-                        page.resolution(
-                            if resolution < 0 {
-                                ResolutionUnit::Inch
-                            } else {
-                                ResolutionUnit::Centimeter
-                            },
-                            Rational {
-                                n: resolution.unsigned_abs(),
-                                d: 1,
-                            },
-                        );
+                        page.resolution(unit, rational);
                     }
-                    page.write_data(&values)
+                    page.write_data(&self.oriented_i16)
                 }
                 MRC_MODE_USHORT => {
-                    let values = oriented
-                        .chunks_exact(2)
-                        .map(|value| u16::from_ne_bytes([value[0], value[1]]))
-                        .collect::<Vec<_>>();
+                    self.oriented_u16.clear();
+                    rows.for_each(|row| {
+                        self.oriented_u16.extend(
+                            row.chunks_exact(2)
+                                .map(|value| u16::from_ne_bytes([value[0], value[1]])),
+                        )
+                    });
                     let mut page = encoder
                         .new_image::<colortype::Gray16>(width as u32, height as u32)
                         .map_err(|error| format!("Rust TIFF writer failed: {error}"))?;
                     if resolution != 0 {
-                        page.resolution(
-                            if resolution < 0 {
-                                ResolutionUnit::Inch
-                            } else {
-                                ResolutionUnit::Centimeter
-                            },
-                            Rational {
-                                n: resolution.unsigned_abs(),
-                                d: 1,
-                            },
-                        );
+                        page.resolution(unit, rational);
                     }
-                    page.write_data(&values)
+                    page.write_data(&self.oriented_u16)
                 }
                 MRC_MODE_FLOAT => {
-                    let values = oriented
-                        .chunks_exact(4)
-                        .map(|value| f32::from_ne_bytes([value[0], value[1], value[2], value[3]]))
-                        .collect::<Vec<_>>();
+                    // `from_ne_bytes` is `from_bits`: a bit copy, no float
+                    // arithmetic, NaN payloads included.
+                    self.oriented_f32.clear();
+                    rows.for_each(|row| {
+                        self.oriented_f32.extend(row.chunks_exact(4).map(|value| {
+                            f32::from_ne_bytes([value[0], value[1], value[2], value[3]])
+                        }))
+                    });
                     let mut page = encoder
                         .new_image::<colortype::Gray32Float>(width as u32, height as u32)
                         .map_err(|error| format!("Rust TIFF writer failed: {error}"))?;
                     if resolution != 0 {
-                        page.resolution(
-                            if resolution < 0 {
-                                ResolutionUnit::Inch
-                            } else {
-                                ResolutionUnit::Centimeter
-                            },
-                            Rational {
-                                n: resolution.unsigned_abs(),
-                                d: 1,
-                            },
-                        );
+                        page.resolution(unit, rational);
                     }
-                    page.write_data(&values)
+                    page.write_data(&self.oriented_f32)
                 }
                 MRC_MODE_RGB => {
+                    self.oriented_bytes.clear();
+                    rows.for_each(|row| self.oriented_bytes.extend_from_slice(row));
                     let mut page = encoder
                         .new_image::<colortype::RGB8>(width as u32, height as u32)
                         .map_err(|error| format!("Rust TIFF writer failed: {error}"))?;
                     if resolution != 0 {
-                        page.resolution(
-                            if resolution < 0 {
-                                ResolutionUnit::Inch
-                            } else {
-                                ResolutionUnit::Centimeter
-                            },
-                            Rational {
-                                n: resolution.unsigned_abs(),
-                                d: 1,
-                            },
-                        );
+                        page.resolution(unit, rational);
                     }
-                    page.write_data(&oriented)
+                    page.write_data(&self.oriented_bytes)
                 }
                 _ => unreachable!(),
             }
             .map_err(|error| format!("Rust TIFF writer failed: {error}"))?;
+            self.pages += 1;
+            Ok(())
         }
-        Ok(())
+
+        /// Ends the stack.  A writer that received no page reports the same
+        /// error the whole-stack writer gave an empty stack, and has created
+        /// no file.  Dropping the encoder closes the file, as returning from
+        /// the whole-stack writer did.
+        pub fn finish(self) -> Result<(), String> {
+            if self.pages == 0 {
+                return Err("Rust TIFF writer requires at least one non-empty image".into());
+            }
+            Ok(())
+        }
     }
 
-    /// Single-page adapter over [`write_stack`] for one mrc2tif slice.
+    /// Single-page adapter over [`StackWriter`] for one mrc2tif slice.
     pub fn write_image(
         filename: &str,
         width: i32,
@@ -590,17 +679,9 @@ mod implementation {
         resolution: i32,
         data: &[u8],
     ) -> Result<(), String> {
-        let image = data.to_vec();
-        write_stack(
-            filename,
-            width,
-            height,
-            mode,
-            compression,
-            quality,
-            &[image],
-            &[resolution],
-        )
+        let mut writer = stack_writer(filename, width, height, mode, compression, quality);
+        writer.write_page(data, resolution)?;
+        writer.finish()
     }
 
     fn mode_for(type_: ImageDataType) -> i32 {
@@ -628,7 +709,7 @@ mod implementation {
 
     #[cfg(test)]
     mod tests {
-        use super::{IICOMPRESSION_NONE, write_image, write_stack};
+        use super::{IICOMPRESSION_NONE, stack_writer, write_image};
         use crate::imod::libiimod::mrcfiles::{MRC_MODE_BYTE, MRC_MODE_RGB, MRC_MODE_SHORT};
         use std::fs::File;
         use tiff::decoder::{Decoder, DecodingResult};
@@ -690,17 +771,17 @@ mod implementation {
                 "imod-rs-rust-tiff-stack-{}.tif",
                 std::process::id()
             ));
-            write_stack(
+            let mut writer = stack_writer(
                 path.to_str().unwrap(),
                 2,
                 2,
                 MRC_MODE_BYTE,
                 IICOMPRESSION_NONE,
                 -1,
-                &[vec![1, 2, 3, 4], vec![5, 6, 7, 8]],
-                &[-300, 20_000_000],
-            )
-            .unwrap();
+            );
+            writer.write_page(&[1, 2, 3, 4], -300).unwrap();
+            writer.write_page(&[5, 6, 7, 8], 20_000_000).unwrap();
+            writer.finish().unwrap();
             let mut decoder = Decoder::new(File::open(&path).unwrap()).unwrap();
             assert_eq!(
                 decoder
@@ -742,7 +823,7 @@ mod implementation {
 pub use implementation::{close_file, contains, open_file, read_section};
 
 #[cfg(feature = "rust-tiff")]
-pub use implementation::{write_image, write_stack};
+pub use implementation::{StackWriter, stack_writer, write_image};
 
 #[cfg(not(feature = "rust-tiff"))]
 pub fn open_file(_filename: &[u8], _tif: &mut TfInfo, _any_tif_pixel: i32) -> i32 {
@@ -778,16 +859,30 @@ pub fn write_image(
     Err("Rust TIFF backend requires Cargo feature rust-tiff".into())
 }
 
+/// Without the `rust-tiff` feature every page fails, as the whole-stack
+/// writer did.
 #[cfg(not(feature = "rust-tiff"))]
-pub fn write_stack(
+pub struct StackWriter;
+
+#[cfg(not(feature = "rust-tiff"))]
+pub fn stack_writer(
     _filename: &str,
     _width: i32,
     _height: i32,
     _mode: i32,
     _compression: i32,
     _quality: i32,
-    _images: &[Vec<u8>],
-    _resolutions: &[i32],
-) -> Result<(), String> {
-    Err("Rust TIFF backend requires Cargo feature rust-tiff".into())
+) -> StackWriter {
+    StackWriter
+}
+
+#[cfg(not(feature = "rust-tiff"))]
+impl StackWriter {
+    pub fn write_page(&mut self, _image: &[u8], _resolution: i32) -> Result<(), String> {
+        Err("Rust TIFF backend requires Cargo feature rust-tiff".into())
+    }
+
+    pub fn finish(self) -> Result<(), String> {
+        Err("Rust TIFF backend requires Cargo feature rust-tiff".into())
+    }
 }

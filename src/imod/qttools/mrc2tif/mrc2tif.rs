@@ -562,8 +562,22 @@ pub fn mrc2tif() {
         } else {
             4
         };
-        let mut rust_tiff_stack: Vec<Vec<u8>> = Vec::new();
-        let mut rust_tiff_resolutions: Vec<i32> = Vec::new();
+        // `mrc2tif.cpp:598-607` writes each stack section to the open TIFF
+        // as it is produced; the Rust-TIFF stack writer is fed the same way,
+        // one page per section, rather than holding the volume until the end.
+        // It creates nothing until its first page.
+        let mut rust_tiff_stack = if stack && native_tiff_writer {
+            Some(crate::imod::mrc::rust_tiff::stack_writer(
+                &output_root,
+                hdata.nx,
+                hdata.ny,
+                rust_output_mode,
+                compression,
+                quality,
+            ))
+        } else {
+            None
+        };
         if stack {
             // `mrc2tif.cpp:426-429`.
             (*iifile).nz = output_count;
@@ -909,9 +923,13 @@ pub fn mrc2tif() {
                 } else if native_tiff_writer {
                     let rust_bytes = hdata.nx as usize * nlines as usize * rust_output_pixel_size;
                     let image = &write_buffer[..rust_bytes];
-                    if stack {
-                        rust_tiff_stack.push(image.to_vec());
-                        rust_tiff_resolutions.push(use_resol);
+                    if let Some(writer) = rust_tiff_stack.as_mut() {
+                        if let Err(error) = writer.write_page(image, use_resol) {
+                            // The Rust TIFF writer's own failure has no source
+                            // counterpart; report it through the same
+                            // `exitError` path so the prefix and stream match.
+                            exit_error(error.as_bytes());
+                        }
                         0
                     } else {
                         match crate::imod::mrc::rust_tiff::write_image(
@@ -1013,17 +1031,8 @@ pub fn mrc2tif() {
         (*iifile).amin = all_min;
         (*iifile).amax = all_max;
         if stack {
-            if native_tiff_writer {
-                if let Err(error) = crate::imod::mrc::rust_tiff::write_stack(
-                    &output_root,
-                    hdata.nx,
-                    hdata.ny,
-                    rust_output_mode,
-                    compression,
-                    quality,
-                    &rust_tiff_stack,
-                    &rust_tiff_resolutions,
-                ) {
+            if let Some(writer) = rust_tiff_stack.take() {
+                if let Err(error) = writer.finish() {
                     // The Rust TIFF writer's own failure has no source
                     // counterpart; report it through the same `exitError`
                     // path so the prefix and stream match.

@@ -2,12 +2,14 @@
 use crate::imod::libcfshr::b3dutil::ImodFile;
 use crate::imod::libiimod::iimage::{
     IIERR_BAD_CALL, IIERR_IO_ERROR, IIERR_NOT_FORMAT, IIFILE_JPEG, IIFORMAT_LUMINANCE,
-    IIFORMAT_RGB, IISTATE_READY, ImageDataType, ImodImageFile, ii_simple_fill_mrc_header_callback,
+    IIFORMAT_RGB, IISTATE_READY, ImageDataType, ImodImageFile, ii_convert_line_of_floats,
+    ii_simple_fill_mrc_header_callback,
 };
 use crate::imod::libiimod::mrcfiles::{MRC_MODE_BYTE, MRC_MODE_RGB};
 use image::codecs::jpeg::JpegEncoder;
-use image::{ColorType, ImageFormat};
+use image::{ColorType, GenericImageView, ImageFormat, Luma, Pixel, Rgb};
 use std::io::{Read as _, Seek as _, SeekFrom};
+use std::marker::PhantomData;
 const NOPROC: i32 = 0;
 const BYTE: i32 = 1;
 const FLOAT: i32 = 2;
@@ -167,6 +169,36 @@ pub(crate) unsafe fn jpeg_open_new_callback(p: *mut ImodImageFile) -> i32 {
     };
     jpeg_open_new(file)
 }
+/// The caller's buffer seen through `iijpeg.c:502-506`'s scanline loop:
+/// output row `r` is buffer row `inverted ? r : ny - 1 - r`, read in place.
+/// The C hands libjpeg one row pointer at a time and copies nothing; the
+/// `image` encoder has no scanline entry point, but `JpegEncoder::encode` is
+/// itself only `ImageBuffer::from_raw` followed by `encode_image`, and
+/// `encode_image` reads pixels solely through `dimensions`/`get_pixel`.  So
+/// this view feeds it exactly the values a flipped top-down copy would, with
+/// the same pixel types `encode` picks (`Luma<u8>`, `Rgb<u8>`), and the
+/// encoded bytes are identical without an image-sized copy.
+struct ScanlineRows<'a, P> {
+    buf: &'a [u8],
+    nx: u32,
+    ny: u32,
+    inverted: bool,
+    pixel: PhantomData<P>,
+}
+
+impl<P: Pixel<Subpixel = u8>> GenericImageView for ScanlineRows<'_, P> {
+    type Pixel = P;
+    fn dimensions(&self) -> (u32, u32) {
+        (self.nx, self.ny)
+    }
+    fn get_pixel(&self, x: u32, y: u32) -> P {
+        let use_y = if self.inverted { y } else { self.ny - 1 - y };
+        let channels = P::CHANNEL_COUNT as usize;
+        let start = (use_y as usize * self.nx as usize + x as usize) * channels;
+        *P::from_slice(&self.buf[start..start + channels])
+    }
+}
+
 /// `jpegWriteSection` (`iijpeg.c:435`).  This is the direct one-section
 /// writer used after iimage has converted float data and selected quality.
 /// The `image` encoder used by the Rust backend does not expose JFIF density
@@ -194,17 +226,6 @@ pub fn jpeg_write_section(
     }
     // Native accepts 0 for no JFIF density and otherwise writes a u16 value.
     let _resolution = resolution.clamp(0, u16::MAX as i32);
-    let row = f.nx as usize * channels;
-    let mut top_down = vec![0; input.len()];
-    for output_y in 0..f.ny as usize {
-        let source_y = if inverted {
-            output_y
-        } else {
-            f.ny as usize - 1 - output_y
-        };
-        top_down[output_y * row..(output_y + 1) * row]
-            .copy_from_slice(&input[source_y * row..(source_y + 1) * row]);
-    }
     let Some(fp) = f.fp.as_mut() else {
         return IIERR_BAD_CALL;
     };
@@ -216,15 +237,26 @@ pub fn jpeg_write_section(
     } else {
         75
     } as u8;
-    let color = if channels == 1 {
-        ColorType::L8
+    let mut encoder = JpegEncoder::new_with_quality(fp, quality);
+    let (nx, ny) = (f.nx as u32, f.ny as u32);
+    let encoded = if channels == 1 {
+        encoder.encode_image(&ScanlineRows::<Luma<u8>> {
+            buf: input,
+            nx,
+            ny,
+            inverted,
+            pixel: PhantomData,
+        })
     } else {
-        ColorType::Rgb8
+        encoder.encode_image(&ScanlineRows::<Rgb<u8>> {
+            buf: input,
+            nx,
+            ny,
+            inverted,
+            pixel: PhantomData,
+        })
     };
-    if JpegEncoder::new_with_quality(fp, quality)
-        .encode(&top_down, f.nx as u32, f.ny as u32, color.into())
-        .is_err()
-    {
+    if encoded.is_err() {
         return IIERR_IO_ERROR;
     }
     f.last_written_z = 0;
@@ -257,12 +289,31 @@ fn ii_jpeg_write_section_any(f: &mut ImodImageFile, input: &[u8], z: i32, floats
     // `if (useBuf != buf)` (`iijpeg.c:424-425`).  The non-float path therefore
     // allocates and copies nothing, so pass the caller's buffer through
     // instead of duplicating a whole section.
+    //
+    // For floats, `iiMakeBufferConvertIfFloat` (`iimage.c:1295-1299`) converts
+    // each line with `iiConvertLineOfFloats(..., mode, 0, 0)`, whose unsigned
+    // byte arm is `(int)(fbufp[i] + 0.5f)` then `B3DCLAMP(ival, 0, 255)`.  That
+    // is not `f32::round`: `0.49999997f + 0.5f` rounds up to `1.0f` in single
+    // precision.  Call the translated routine rather than re-deriving it.  The
+    // C writes the converted rows bottom-up and passes `inverted = 1`; keeping
+    // the rows in order with `inverted = false` feeds `jpegWriteSection` the
+    // same scanlines (`iijpeg.c:502-506`).  Only byte mode reaches here with
+    // floats (the RGB format rejects them above).
     let converted: Option<Vec<u8>> = if floats {
+        let nx = f.nx as usize;
         let mut data = vec![0u8; n * c];
-        for (i, v) in data.iter_mut().zip(input.chunks_exact(4)) {
-            *i = f32::from_ne_bytes(v.try_into().unwrap())
-                .round()
-                .clamp(0., 255.) as u8
+        let mut line = vec![0f32; nx];
+        // `chunks_exact(0)` panics; an empty section has no lines to convert.
+        let lines = if nx == 0 { 0 } else { f.ny as usize };
+        for (out_line, in_line) in data
+            .chunks_exact_mut(nx.max(1))
+            .zip(input.chunks_exact(4 * nx.max(1)))
+            .take(lines)
+        {
+            for (value, bytes) in line.iter_mut().zip(in_line.chunks_exact(4)) {
+                *value = f32::from_ne_bytes(bytes.try_into().unwrap());
+            }
+            ii_convert_line_of_floats(&line, out_line, f.mode, false, false);
         }
         Some(data)
     } else {
