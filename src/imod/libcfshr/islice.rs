@@ -606,19 +606,44 @@ pub fn slice_mat_filter(sin: &Islice, mat: &[f32], dim: i32) -> Option<Islice> {
     } else {
         let mut num_threads = 1;
         if dim <= MAX_STATIC_KERNEL as usize {
+            // `islice.c:565-566`: `B3DNINT(0.04 * sqrt((double)xsize * ysize))`,
+            // `B3DNINT` being `(int)floor(x + 0.5)`.
             num_threads = crate::imod::libcfshr::b3dutil::num_omp_threads(
-                (0.04 * ((sin.xsize * sin.ysize) as f64).sqrt()).round() as i32,
+                (0.04 * (sin.xsize as f64 * sin.ysize as f64).sqrt() + 0.5).floor() as i32,
             );
         }
-        let out = sout.data.f_mut();
+        let nx = sin.xsize as usize;
+        let out = &mut sout.data.f_mut()[..nx * sin.ysize as usize];
         if num_threads > 1 {
-            for j in 0..sin.ysize {
-                for i in 0..sin.xsize {
-                    let mut smat = [0.0f32; (MAX_STATIC_KERNEL * MAX_STATIC_KERNEL) as usize];
-                    mrc_slice_mat_getimat(sin, i, j, dim as i32, &mut smat);
-                    out[(i + j * sin.xsize) as usize] = mrc_slice_mat_mult(mat, &smat, dim as i32);
+            // `islice.c:570-579`: an OpenMP `parallel for` over `j` with `smat`
+            // private.  (a) Row `j` writes only `sout` pixels `i + j * xsize`,
+            // so groups of whole rows own disjoint output; (b) each pixel is a
+            // dot product of the kernel with a private copy of its own
+            // neighbourhood, read from the unmodified input, with no
+            // accumulation across pixels.  The result is therefore the same for
+            // any thread count or partition.  `slicePutVal` into this float
+            // slice is the plain store `data.f[i + j * xsize] = val[0]`.
+            let rows_per_group = (sin.ysize as usize).div_ceil(num_threads as usize).max(1);
+            let run_group = |(g, orows): (usize, &mut [f32])| {
+                let mut smat = [0.0f32; (MAX_STATIC_KERNEL * MAX_STATIC_KERNEL) as usize];
+                let j0 = g * rows_per_group;
+                for (jr, orow) in orows.chunks_mut(nx).enumerate() {
+                    let j = (j0 + jr) as i32;
+                    for i in 0..sin.xsize {
+                        mrc_slice_mat_getimat(sin, i, j, dim as i32, &mut smat);
+                        orow[i as usize] = mrc_slice_mat_mult(mat, &smat, dim as i32);
+                    }
                 }
-            }
+            };
+            // Same pool sizing as `reduce_by_binning.rs`.
+            let _ = rayon::ThreadPoolBuilder::new()
+                .num_threads(crate::imod::libcfshr::b3dutil::num_omp_threads(i32::MAX) as usize)
+                .build_global();
+            use rayon::iter::{IndexedParallelIterator, ParallelIterator};
+            use rayon::slice::ParallelSliceMut;
+            out.par_chunks_mut(rows_per_group * nx)
+                .enumerate()
+                .for_each(run_group);
         } else {
             let mut imat = vec![0.0f32; matrix_elements];
             for j in 0..sin.ysize {
@@ -653,11 +678,16 @@ pub fn mrc_slice_mat_getimat(sin: &Islice, x: i32, y: i32, dim: i32, mat: &mut [
     }
 }
 pub fn mrc_slice_mat_mult(m1: &[f32], m2: &[f32], dim: i32) -> f32 {
-    m1.iter()
-        .zip(m2)
-        .take((dim * dim) as usize)
-        .map(|(first, second)| first * second)
-        .sum()
+    // `islice.c:636-646`: `float rval = 0; for (...) rval += m1[i] * m2[i];`.
+    // Not `Iterator::sum`, whose float fold starts from `-0.0` and so returns
+    // `-0.0` where the source returns `+0.0` when every product is `-0.0`
+    // (a zero region under a negative kernel weight, or `dim == 0`).
+    let mut rval = 0f32;
+    let elements = (dim * dim) as usize;
+    for i in 0..elements {
+        rval += m1[i] * m2[i];
+    }
+    rval
 }
 #[cfg(test)]
 mod tests {

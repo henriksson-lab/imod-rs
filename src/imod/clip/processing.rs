@@ -3732,22 +3732,58 @@ pub fn clip_planar_fit(hin: &mut MrcHeader, hout: &mut MrcHeader, opt: &mut Clip
             )
             .as_bytes(),
         );
-        let sum_buf = sum.f_mut();
-        for iy in 0..hin.ny {
-            for ix in 0..hin.nx {
-                let mut residual = 1. + cons;
-                let mut col = 0_usize;
-                for ind in 1..=order {
-                    for py in 0..=ind {
-                        residual = (residual as f64
-                            + sol[col] as f64
-                                * ((ix as f32 - x_center) as f64).powf((ind - py) as f64)
-                                * ((iy as f32 - y_center) as f64).powf(py as f64))
-                            as f32;
-                        col += 1;
+        // `processing.cpp:2746-2763`: `numOMPthreads(4)` and an OpenMP
+        // `parallel for` over `iy`.  (a) Row `iy` writes only
+        // `sumBuf[ix + nx * iy]`, so groups of whole rows own disjoint output;
+        // (b) each pixel is evaluated from `cons`, `sol` and its own
+        // coordinates alone, with `resid`, `col`, `ind`, `py` private and no
+        // accumulation across pixels.  The result is therefore the same for
+        // any thread count or partition.
+        let nx = hin.nx as usize;
+        let sum_buf = &mut sum.f_mut()[..nx * hin.ny as usize];
+        let num_threads = crate::imod::libcfshr::b3dutil::num_omp_threads(4);
+        let rows_per_group = if num_threads > 1 {
+            (hin.ny as usize).div_ceil(num_threads as usize).max(1)
+        } else {
+            (hin.ny as usize).max(1)
+        };
+        let run_group = |(g, rows): (usize, &mut [f32])| {
+            for (r, row) in rows.chunks_mut(nx).enumerate() {
+                let iy = (g * rows_per_group + r) as i32;
+                for ix in 0..hin.nx {
+                    let mut residual = 1. + cons;
+                    let mut col = 0_usize;
+                    for ind in 1..=order {
+                        for py in 0..=ind {
+                            residual = (residual as f64
+                                + sol[col] as f64
+                                    * ((ix as f32 - x_center) as f64).powf((ind - py) as f64)
+                                    * ((iy as f32 - y_center) as f64).powf(py as f64))
+                                as f32;
+                            col += 1;
+                        }
                     }
+                    row[ix as usize] = 1. / residual;
                 }
-                sum_buf[(ix + hin.nx * iy) as usize] = 1. / residual;
+            }
+        };
+        if nx > 0 {
+            if num_threads > 1 {
+                // Same pool sizing as `reduce_by_binning.rs`.
+                let _ = rayon::ThreadPoolBuilder::new()
+                    .num_threads(crate::imod::libcfshr::b3dutil::num_omp_threads(i32::MAX) as usize)
+                    .build_global();
+                use rayon::iter::{IndexedParallelIterator, ParallelIterator};
+                use rayon::slice::ParallelSliceMut;
+                sum_buf
+                    .par_chunks_mut(rows_per_group * nx)
+                    .enumerate()
+                    .for_each(run_group);
+            } else {
+                sum_buf
+                    .chunks_mut(rows_per_group * nx)
+                    .enumerate()
+                    .for_each(run_group);
             }
         }
     } else {
@@ -4091,7 +4127,7 @@ pub fn clip_unpack(
             .as_bytes(),
         );
         let _ = ImodFile::Stdout.flush();
-        let Some(mut input) = crate::imod::libiimod::mrcslice::slice_read_subm(
+        let Some(input) = crate::imod::libiimod::mrcslice::slice_read_subm(
             hin1,
             opt.secs[(k) as usize],
             b'z',
@@ -4103,77 +4139,196 @@ pub fn clip_unpack(
             crate::imod::clip::clip::show_error("clip: Error reading slice.");
             return -1;
         };
-        for y in 0..opt.iy {
-            // `processing.cpp:3000`: `base = j * opt->ix`.
-            let base = (y * opt.ix) as usize;
+        // `processing.cpp:2991-2992`: the thread count is recomputed for every
+        // section, from the float `scale` promoted to double; `B3DNINT` is
+        // `(int)floor(x + 0.5)`.
+        let num_threads = crate::imod::libcfshr::b3dutil::num_omp_threads(
+            (4. * scale as f64 * ((opt.ix as f64 * opt.iy as f64).sqrt() / 944.).ln() / 2f64.ln()
+                + 0.5)
+                .floor() as i32,
+        );
+        // `processing.cpp:2994-3039`: an OpenMP `parallel for` over `j`.
+        // (a) Row `j` writes only output pixels `(i, j)` through
+        // `slicePutVal`, so groups of whole rows own disjoint output; (b)
+        // every pixel is computed from the unmodified input section, the
+        // reference and scalars fixed for the section — `CorDefSurroundingMean`
+        // only reads the input frame — with `val`, `ival`, `scaleUse` private
+        // and nothing accumulated across pixels.  The result is therefore the
+        // same for any thread count or partition.
+        //
+        // `pixel` is the loop body up to the `slicePutVal`; the store itself
+        // is written per output member below, as `slicePutVal`
+        // (`islice.c:270-285`, `islice.rs::slice_put_val`) does it: the first
+        // `csize` components of `val`, cast through `int` to the member type
+        // for the integer modes.  Every `(i, j)` is inside the slice, so its
+        // bounds check never fails.
+        let input: &Islice = &input;
+        let ref_data: &[f32] = if do_ref {
+            reference.as_ref().unwrap().data.f()
+        } else {
+            &[]
+        };
+        let opt_low = opt.low;
+        let in_mode_is_byte = hin1.mode == crate::imod::libiimod::mrcfiles::MRC_MODE_BYTE;
+        let pixel = |x: i32, y: i32, base: usize| -> [f32; 4] {
             // `processing.cpp:3002-3021` has a byte fast path that reads
             // `slIn->data.b[i + base]` straight out of the row, and only
             // falls back to `sliceGetVal` for "other modes, a bit slower"
             // (`processing.cpp:3022`).  The guard is on the *file* mode, as
             // in the source, and `sliceReadSubm` always builds the slice
             // with `hin->mode`, so `data.b()` matches it.
-            if hin1.mode == crate::imod::libiimod::mrcfiles::MRC_MODE_BYTE {
-                for x in 0..opt.ix {
-                    let mut v = [0.; 4];
-                    // `processing.cpp:3004`: `bval = slIn->data.b[i + base]`
-                    // into an `int`, which then converts exactly to float for
-                    // the multiply below.
-                    let bval = input.data.b()[base + x as usize] as i32;
-                    // `processing.cpp:3005`: `slRef->data.f[i + base]`.
-                    let gain = if do_ref {
-                        reference.as_ref().unwrap().data.f()[base + x as usize]
+            let mut v = [0.; 4];
+            if in_mode_is_byte {
+                // `processing.cpp:3004`: `bval = slIn->data.b[i + base]`
+                // into an `int`, which then converts exactly to float for
+                // the multiply below.
+                let bval = input.data.b()[base + x as usize] as i32;
+                // `processing.cpp:3005`: `slRef->data.f[i + base]`.
+                let gain = if do_ref {
+                    ref_data[base + x as usize]
+                } else {
+                    scale
+                };
+                v[0] = bval as f32 * gain + offset;
+                if v[0] > trunc_thresh {
+                    v[0] = if opt_low == crate::imod::clip::clip::IP_DEFAULT as f32 {
+                        // `processing.cpp:3011`: the byte arm passes the
+                        // literal `MRC_MODE_BYTE`, not `slIn->mode`.
+                        crate::imod::clip::correct_defects::cor_def_surrounding_mean(
+                            input.data.bytes(),
+                            crate::imod::libiimod::mrcfiles::MRC_MODE_BYTE,
+                            input.xsize,
+                            input.ysize,
+                            unscaled_thresh,
+                            x,
+                            y,
+                        ) * gain
+                            + offset
                     } else {
-                        scale
+                        opt_low * gain + offset
                     };
-                    v[0] = bval as f32 * gain + offset;
-                    if v[0] > trunc_thresh {
-                        v[0] = if opt.low == crate::imod::clip::clip::IP_DEFAULT as f32 {
-                            // `processing.cpp:3011`: the byte arm passes the
-                            // literal `MRC_MODE_BYTE`, not `slIn->mode`.
-                            crate::imod::clip::correct_defects::cor_def_surrounding_mean(
-                                input.data.bytes(),
-                                crate::imod::libiimod::mrcfiles::MRC_MODE_BYTE,
-                                input.xsize,
-                                input.ysize,
-                                unscaled_thresh,
-                                x,
-                                y,
-                            ) * gain
-                                + offset
-                        } else {
-                            opt.low * gain + offset
-                        };
-                    }
-                    slice_put_val(out.as_mut(), x, y, v);
                 }
             } else {
-                for x in 0..opt.ix {
-                    let mut v = [0.; 4];
-                    slice_get_val(input.as_mut(), x, y, &mut v);
-                    // `processing.cpp:3024`: `slRef->data.f[i + base]`.
-                    let gain = if do_ref {
-                        reference.as_ref().unwrap().data.f()[base + x as usize]
+                slice_get_val(input, x, y, &mut v);
+                // `processing.cpp:3024`: `slRef->data.f[i + base]`.
+                let gain = if do_ref {
+                    ref_data[base + x as usize]
+                } else {
+                    scale
+                };
+                v[0] = v[0] * gain + offset;
+                if v[0] > trunc_thresh {
+                    v[0] = if opt_low == crate::imod::clip::clip::IP_DEFAULT as f32 {
+                        crate::imod::clip::correct_defects::cor_def_surrounding_mean(
+                            input.data.bytes(),
+                            input.mode,
+                            input.xsize,
+                            input.ysize,
+                            unscaled_thresh,
+                            x,
+                            y,
+                        ) * gain
+                            + offset
                     } else {
-                        scale
+                        opt_low * gain + offset
                     };
-                    v[0] = v[0] * gain + offset;
-                    if v[0] > trunc_thresh {
-                        v[0] = if opt.low == crate::imod::clip::clip::IP_DEFAULT as f32 {
-                            crate::imod::clip::correct_defects::cor_def_surrounding_mean(
-                                input.data.bytes(),
-                                input.mode,
-                                input.xsize,
-                                input.ysize,
-                                unscaled_thresh,
-                                x,
-                                y,
-                            ) * gain
-                                + offset
-                        } else {
-                            opt.low * gain + offset
-                        };
+                }
+            }
+            v
+        };
+        let ix = opt.ix as usize;
+        let iy = opt.iy as usize;
+        let csize = match out.mode {
+            0 | 1 | 2 | 6 => 1,
+            3 | 4 => 2,
+            16 | 99 => 3,
+            // `slicePutVal` stores nothing for any other mode, and `pixel`
+            // has no side effect, so there is nothing to run.
+            _ => 0,
+        };
+        let rows_per_group = if num_threads > 1 {
+            iy.div_ceil(num_threads as usize).max(1)
+        } else {
+            iy.max(1)
+        };
+        let group_len = rows_per_group * ix * csize;
+        let run_b = |(g, rows): (usize, &mut [u8])| {
+            for (r, row) in rows.chunks_mut(ix * csize).enumerate() {
+                let y = g * rows_per_group + r;
+                for x in 0..ix {
+                    let v = pixel(x as i32, y as i32, y * ix);
+                    for c in 0..csize {
+                        row[x * csize + c] = v[c] as i32 as u8;
                     }
-                    slice_put_val(out.as_mut(), x, y, v);
+                }
+            }
+        };
+        let run_s = |(g, rows): (usize, &mut [i16])| {
+            for (r, row) in rows.chunks_mut(ix * csize).enumerate() {
+                let y = g * rows_per_group + r;
+                for x in 0..ix {
+                    let v = pixel(x as i32, y as i32, y * ix);
+                    for c in 0..csize {
+                        row[x * csize + c] = v[c] as i32 as i16;
+                    }
+                }
+            }
+        };
+        let run_us = |(g, rows): (usize, &mut [u16])| {
+            for (r, row) in rows.chunks_mut(ix * csize).enumerate() {
+                let y = g * rows_per_group + r;
+                for x in 0..ix {
+                    let v = pixel(x as i32, y as i32, y * ix);
+                    for c in 0..csize {
+                        row[x * csize + c] = v[c] as i32 as u16;
+                    }
+                }
+            }
+        };
+        let run_f = |(g, rows): (usize, &mut [f32])| {
+            for (r, row) in rows.chunks_mut(ix * csize).enumerate() {
+                let y = g * rows_per_group + r;
+                for x in 0..ix {
+                    let v = pixel(x as i32, y as i32, y * ix);
+                    for c in 0..csize {
+                        row[x * csize + c] = v[c];
+                    }
+                }
+            }
+        };
+        if group_len > 0 {
+            use rayon::iter::{IndexedParallelIterator, ParallelIterator};
+            use rayon::slice::ParallelSliceMut;
+            let len = ix * iy * csize;
+            if num_threads > 1 {
+                // Same pool sizing as `reduce_by_binning.rs`.
+                let _ = rayon::ThreadPoolBuilder::new()
+                    .num_threads(crate::imod::libcfshr::b3dutil::num_omp_threads(i32::MAX) as usize)
+                    .build_global();
+                match &mut out.data {
+                    MrcData::B(d) => d[..len]
+                        .par_chunks_mut(group_len)
+                        .enumerate()
+                        .for_each(run_b),
+                    MrcData::S(d) => d[..len]
+                        .par_chunks_mut(group_len)
+                        .enumerate()
+                        .for_each(run_s),
+                    MrcData::Us(d) => d[..len]
+                        .par_chunks_mut(group_len)
+                        .enumerate()
+                        .for_each(run_us),
+                    MrcData::F(d) => d[..len]
+                        .par_chunks_mut(group_len)
+                        .enumerate()
+                        .for_each(run_f),
+                }
+            } else {
+                match &mut out.data {
+                    MrcData::B(d) => d[..len].chunks_mut(group_len).enumerate().for_each(run_b),
+                    MrcData::S(d) => d[..len].chunks_mut(group_len).enumerate().for_each(run_s),
+                    MrcData::Us(d) => d[..len].chunks_mut(group_len).enumerate().for_each(run_us),
+                    MrcData::F(d) => d[..len].chunks_mut(group_len).enumerate().for_each(run_f),
                 }
             }
         }

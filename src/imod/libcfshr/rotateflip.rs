@@ -1,5 +1,12 @@
 //! Translation of `IMOD/libcfshr/rotateflip.c`.
 
+use crate::imod::libcfshr::b3dutil::num_omp_threads;
+use rayon::iter::{IndexedParallelIterator, ParallelIterator};
+use rayon::slice::ParallelSliceMut;
+
+/// Guards the one attempt this unit makes to size rayon's global pool.
+static RAYON_POOL: std::sync::Once = std::sync::Once::new();
+
 /// The image buffers of `rotateFlipImage`.  The C signature pairs an untyped
 /// `void *array` / `void *brray` with an MRC `mode` tag; Rust spells that pair
 /// as one typed value.  The source's `return 1` for an unsupported mode has no
@@ -31,12 +38,13 @@ pub enum RotateFlipData<'a, 'b> {
 
 /// C `rotateFlipImage` (`rotateflip.c:36`).
 ///
-/// The C implementation copies eight input rows at a time for OpenMP
-/// throughput.  This direct source-coordinate implementation preserves its
-/// operation maps, element representations, contrast inversion, and output
-/// ordering without changing the result.
+/// The C implementation copies eight input rows at a time, OpenMP-parallel
+/// over those strips; this translation copies eight *output* rows at a time,
+/// parallel over groups of output rows (see the comment at the copy).  It
+/// preserves the operation maps, element representations and contrast
+/// inversion; the copy is pure data movement, so the result is unchanged.
 pub fn rotate_flip_image(
-    mut data: RotateFlipData<'_, '_>,
+    data: RotateFlipData<'_, '_>,
     nx: i32,
     ny: i32,
     mut operation: i32,
@@ -45,7 +53,7 @@ pub fn rotate_flip_image(
     invert_con: i32,
     nxout: &mut i32,
     nyout: &mut i32,
-    _num_threads: i32,
+    num_threads: i32,
 ) -> i32 {
     if invert_con != 0
         && !matches!(
@@ -115,257 +123,139 @@ pub fn rotate_flip_image(
             _ => unreachable!(),
         }
     }
-    /* Do the copy: `rotateflip.c:155-406`, eight input lines per strip with
-    eight running output cursors, then the remaining lines one at a time.
-    The cursors are signed because `dalong`/`dinter` run backwards for the
-    flipped and rotated operations. */
-    match &mut data {
-        RotateFlipData::Float { array, brray } => {
-            let (dalong, dinter) = (dalong as isize, dinter as isize);
-            let nx_out = *nxout as isize;
-            let nxu = nx as usize;
-            let num_strips = ny / 8;
-            for strip in 0..num_strips as usize {
-                let bstart =
-                    xstart as isize + nx_out * ystart as isize + 8 * strip as isize * dinter;
-                let astart = 8 * strip * nxu;
-                let mut b = [0_isize; 8];
-                for line in 0..8 {
-                    b[line] = bstart + line as isize * dinter;
-                }
-                let mut a = [0_usize; 8];
-                for line in 0..8 {
-                    a[line] = astart + line * nxu;
-                }
-                for _ix in 0..nxu {
+    /* Do the copy: `rotateflip.c:132-406`.  The thread count comes first,
+    exactly as the source chooses it (`rotateflip.c:140-148`). */
+    let mut num_threads = num_threads;
+    if num_threads <= 0 {
+        num_threads = if nx.wrapping_mul(ny) < 1500 * 1500 {
+            1
+        } else if nx.wrapping_mul(ny) < 3000 * 3000 || rotation % 2 == 0 {
+            2
+        } else {
+            3
+        };
+    }
+    let num_threads = num_omp_threads(num_threads);
+
+    /* The source's `#pragma omp parallel for` loops (`rotateflip.c:151,209,
+    296,358`) run over *input* strips of eight lines and scatter each strip
+    into the output with the cursors `xstart + nxOut * ystart + line * dinter
+    + ix * dalong`, so one strip's writes are strided across the whole output
+    and cannot be handed to a worker as a contiguous `&mut` slice.  This is
+    pure data movement — every output element receives exactly one input
+    element, unchanged, or `dmax + dmin - value` with `dmin`/`dmax` fixed
+    before the copy — so the value an element receives cannot depend on the
+    order in which elements are copied.  The copy is therefore partitioned by
+    *output* rows instead: each worker owns a contiguous group of output rows
+    and gathers into them through the inverse of the source's map.
+
+    The forward map sends input `(ix, iy)` to output
+    `xo = xstart + flip * (xalong * ix + xinter * iy)`,
+    `yo = ystart + yalong * ix + yinter * iy`, whose matrix is a signed
+    permutation, so its inverse is its transpose (and `1 / flip == flip`):
+    `ix = yalong * (yo - ystart) + flip * xalong * (xo - xstart)`,
+    `iy = yinter * (yo - ystart) + flip * xinter * (xo - xstart)`.
+    Hence the source index `ix + nx * iy` steps by `srcPerRow` per output row
+    and `srcPerCol` per output column from `srcOrigin` at output (0, 0).
+    The map is a bijection of the `nx * ny` input onto the `nxOut * nyOut`
+    output, so the gather writes every element the scatter writes, with the
+    same value, and nothing else.  Output rows are taken eight at a time, so
+    each step still reads eight neighbouring input elements and writes eight
+    sequential streams, the mirror image of the source's strips.  The same
+    closure runs on one thread and on many, and the groups are disjoint, so
+    neither the schedule nor the thread count can change a byte. */
+    let rot = rotation as usize;
+    let nx_out = *nxout;
+    let ny_out = *nyout;
+    let src_per_row = (yalong[rot] + nx * yinter[rot]) as isize;
+    let src_per_col = (flip * (xalong[rot] + nx * xinter[rot])) as isize;
+    let src_origin = -(src_per_row * ystart as isize) - src_per_col * xstart as isize;
+    let nxo = nx_out.max(0) as usize;
+    let count = nxo * ny_out.max(0) as usize;
+    if count == 0 || nx <= 0 || ny <= 0 {
+        return 0;
+    }
+    let rows_per_group = if num_threads > 1 {
+        (ny_out as usize).div_ceil(num_threads as usize).max(1)
+    } else {
+        ny_out as usize
+    };
+    if num_threads > 1 {
+        // Native's OpenMP runtime creates at most `omp_get_num_procs()`
+        // workers and `numOMPthreads` never asks for more than the
+        // physical-core count (or whatever `OMP_NUM_THREADS` /
+        // `IMOD_FORCE_OMP_THREADS` allow); rayon's default global pool is
+        // sized from logical processors, so it is bounded to the same count.
+        // `build_global` succeeds for whichever translated unit reaches it
+        // first and is a harmless `Err` afterwards: every unit asks for the
+        // same size.
+        // The `Once` makes that attempt happen once per process rather
+        // than on every call.
+        RAYON_POOL.call_once(|| {
+            let _ = rayon::ThreadPoolBuilder::new()
+                .num_threads(num_omp_threads(i32::MAX) as usize)
+                .build_global();
+        });
+    }
+    macro_rules! gather_output_rows {
+        ($t:ty, $array:expr, $brray:expr, |$v:ident| $conv:expr) => {{
+            let array = $array;
+            let run = |(g, brows): (usize, &mut [$t])| {
+                let row0 = g * rows_per_group;
+                let nrows = brows.len() / nxo;
+                let nstrips = nrows / 8;
+                for strip in 0..nstrips {
+                    let strip_rows = &mut brows[strip * 8 * nxo..(strip + 1) * 8 * nxo];
+                    let mut src = [0_isize; 8];
                     for line in 0..8 {
-                        let v = array[a[line]];
-                        a[line] += 1;
-                        brray[b[line] as usize] = v;
-                        b[line] += dalong;
+                        src[line] = src_origin + (row0 + 8 * strip + line) as isize * src_per_row;
+                    }
+                    for xo in 0..nxo {
+                        for line in 0..8 {
+                            let $v = array[src[line] as usize];
+                            strip_rows[line * nxo + xo] = $conv;
+                            src[line] += src_per_col;
+                        }
                     }
                 }
-            }
-            /* Finish up last rows */
-            let mut bstart =
-                xstart as isize + nx_out * ystart as isize + 8 * num_strips as isize * dinter;
-            let mut astart = 8 * num_strips as usize * nxu;
-            for _iy in 8 * num_strips..ny {
-                let mut bp = bstart;
-                for _ix in 0..nxu {
-                    let v = array[astart];
-                    astart += 1;
-                    brray[bp as usize] = v;
-                    bp += dalong;
-                }
-                bstart += dinter;
-            }
-        }
-        RotateFlipData::Byte { array, brray } => {
-            let (dalong, dinter) = (dalong as isize, dinter as isize);
-            let nx_out = *nxout as isize;
-            let nxu = nx as usize;
-            let num_strips = ny / 8;
-            for strip in 0..num_strips as usize {
-                let bstart =
-                    xstart as isize + nx_out * ystart as isize + 8 * strip as isize * dinter;
-                let astart = 8 * strip * nxu;
-                let mut b = [0_isize; 8];
-                for line in 0..8 {
-                    b[line] = bstart + line as isize * dinter;
-                }
-                let mut a = [0_usize; 8];
-                for line in 0..8 {
-                    a[line] = astart + line * nxu;
-                }
-                for _ix in 0..nxu {
-                    for line in 0..8 {
-                        let v = array[a[line]];
-                        a[line] += 1;
-                        brray[b[line] as usize] = v;
-                        b[line] += dalong;
+                /* Finish up last rows */
+                for iy in 8 * nstrips..nrows {
+                    let mut sp = src_origin + (row0 + iy) as isize * src_per_row;
+                    for b in brows[iy * nxo..(iy + 1) * nxo].iter_mut() {
+                        let $v = array[sp as usize];
+                        *b = $conv;
+                        sp += src_per_col;
                     }
                 }
+            };
+            if num_threads > 1 {
+                $brray[..count]
+                    .par_chunks_mut(rows_per_group * nxo)
+                    .enumerate()
+                    .for_each(run);
+            } else {
+                $brray[..count]
+                    .chunks_mut(rows_per_group * nxo)
+                    .enumerate()
+                    .for_each(run);
             }
-            /* Finish up last rows */
-            let mut bstart =
-                xstart as isize + nx_out * ystart as isize + 8 * num_strips as isize * dinter;
-            let mut astart = 8 * num_strips as usize * nxu;
-            for _iy in 8 * num_strips..ny {
-                let mut bp = bstart;
-                for _ix in 0..nxu {
-                    let v = array[astart];
-                    astart += 1;
-                    brray[bp as usize] = v;
-                    bp += dalong;
-                }
-                bstart += dinter;
-            }
-        }
+        }};
+    }
+    match data {
+        RotateFlipData::Float { array, brray } => gather_output_rows!(f32, array, brray, |v| v),
+        RotateFlipData::Byte { array, brray } => gather_output_rows!(u8, array, brray, |v| v),
         RotateFlipData::Short { array, brray } => {
             if invert_con != 0 {
-                let (dalong, dinter) = (dalong as isize, dinter as isize);
-                let nx_out = *nxout as isize;
-                let nxu = nx as usize;
-                let num_strips = ny / 8;
-                for strip in 0..num_strips as usize {
-                    let bstart =
-                        xstart as isize + nx_out * ystart as isize + 8 * strip as isize * dinter;
-                    let astart = 8 * strip * nxu;
-                    let mut b = [0_isize; 8];
-                    for line in 0..8 {
-                        b[line] = bstart + line as isize * dinter;
-                    }
-                    let mut a = [0_usize; 8];
-                    for line in 0..8 {
-                        a[line] = astart + line * nxu;
-                    }
-                    for _ix in 0..nxu {
-                        for line in 0..8 {
-                            let v = array[a[line]];
-                            a[line] += 1;
-                            brray[b[line] as usize] = (dmax + dmin - v as i32) as i16;
-                            b[line] += dalong;
-                        }
-                    }
-                }
-                /* Finish up last rows */
-                let mut bstart =
-                    xstart as isize + nx_out * ystart as isize + 8 * num_strips as isize * dinter;
-                let mut astart = 8 * num_strips as usize * nxu;
-                for _iy in 8 * num_strips..ny {
-                    let mut bp = bstart;
-                    for _ix in 0..nxu {
-                        let v = array[astart];
-                        astart += 1;
-                        brray[bp as usize] = (dmax + dmin - v as i32) as i16;
-                        bp += dalong;
-                    }
-                    bstart += dinter;
-                }
+                gather_output_rows!(i16, array, brray, |v| (dmax + dmin - v as i32) as i16)
             } else {
-                let (dalong, dinter) = (dalong as isize, dinter as isize);
-                let nx_out = *nxout as isize;
-                let nxu = nx as usize;
-                let num_strips = ny / 8;
-                for strip in 0..num_strips as usize {
-                    let bstart =
-                        xstart as isize + nx_out * ystart as isize + 8 * strip as isize * dinter;
-                    let astart = 8 * strip * nxu;
-                    let mut b = [0_isize; 8];
-                    for line in 0..8 {
-                        b[line] = bstart + line as isize * dinter;
-                    }
-                    let mut a = [0_usize; 8];
-                    for line in 0..8 {
-                        a[line] = astart + line * nxu;
-                    }
-                    for _ix in 0..nxu {
-                        for line in 0..8 {
-                            let v = array[a[line]];
-                            a[line] += 1;
-                            brray[b[line] as usize] = v;
-                            b[line] += dalong;
-                        }
-                    }
-                }
-                /* Finish up last rows */
-                let mut bstart =
-                    xstart as isize + nx_out * ystart as isize + 8 * num_strips as isize * dinter;
-                let mut astart = 8 * num_strips as usize * nxu;
-                for _iy in 8 * num_strips..ny {
-                    let mut bp = bstart;
-                    for _ix in 0..nxu {
-                        let v = array[astart];
-                        astart += 1;
-                        brray[bp as usize] = v;
-                        bp += dalong;
-                    }
-                    bstart += dinter;
-                }
+                gather_output_rows!(i16, array, brray, |v| v)
             }
         }
         RotateFlipData::UShort { array, brray } => {
             if invert_con != 0 {
-                let (dalong, dinter) = (dalong as isize, dinter as isize);
-                let nx_out = *nxout as isize;
-                let nxu = nx as usize;
-                let num_strips = ny / 8;
-                for strip in 0..num_strips as usize {
-                    let bstart =
-                        xstart as isize + nx_out * ystart as isize + 8 * strip as isize * dinter;
-                    let astart = 8 * strip * nxu;
-                    let mut b = [0_isize; 8];
-                    for line in 0..8 {
-                        b[line] = bstart + line as isize * dinter;
-                    }
-                    let mut a = [0_usize; 8];
-                    for line in 0..8 {
-                        a[line] = astart + line * nxu;
-                    }
-                    for _ix in 0..nxu {
-                        for line in 0..8 {
-                            let v = array[a[line]];
-                            a[line] += 1;
-                            brray[b[line] as usize] = (dmax + dmin - v as i32) as u16;
-                            b[line] += dalong;
-                        }
-                    }
-                }
-                /* Finish up last rows */
-                let mut bstart =
-                    xstart as isize + nx_out * ystart as isize + 8 * num_strips as isize * dinter;
-                let mut astart = 8 * num_strips as usize * nxu;
-                for _iy in 8 * num_strips..ny {
-                    let mut bp = bstart;
-                    for _ix in 0..nxu {
-                        let v = array[astart];
-                        astart += 1;
-                        brray[bp as usize] = (dmax + dmin - v as i32) as u16;
-                        bp += dalong;
-                    }
-                    bstart += dinter;
-                }
+                gather_output_rows!(u16, array, brray, |v| (dmax + dmin - v as i32) as u16)
             } else {
-                let (dalong, dinter) = (dalong as isize, dinter as isize);
-                let nx_out = *nxout as isize;
-                let nxu = nx as usize;
-                let num_strips = ny / 8;
-                for strip in 0..num_strips as usize {
-                    let bstart =
-                        xstart as isize + nx_out * ystart as isize + 8 * strip as isize * dinter;
-                    let astart = 8 * strip * nxu;
-                    let mut b = [0_isize; 8];
-                    for line in 0..8 {
-                        b[line] = bstart + line as isize * dinter;
-                    }
-                    let mut a = [0_usize; 8];
-                    for line in 0..8 {
-                        a[line] = astart + line * nxu;
-                    }
-                    for _ix in 0..nxu {
-                        for line in 0..8 {
-                            let v = array[a[line]];
-                            a[line] += 1;
-                            brray[b[line] as usize] = v;
-                            b[line] += dalong;
-                        }
-                    }
-                }
-                /* Finish up last rows */
-                let mut bstart =
-                    xstart as isize + nx_out * ystart as isize + 8 * num_strips as isize * dinter;
-                let mut astart = 8 * num_strips as usize * nxu;
-                for _iy in 8 * num_strips..ny {
-                    let mut bp = bstart;
-                    for _ix in 0..nxu {
-                        let v = array[astart];
-                        astart += 1;
-                        brray[bp as usize] = v;
-                        bp += dalong;
-                    }
-                    bstart += dinter;
-                }
+                gather_output_rows!(u16, array, brray, |v| v)
             }
         }
     }

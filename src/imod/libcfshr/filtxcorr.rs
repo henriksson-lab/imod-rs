@@ -16,6 +16,10 @@ use crate::imod::libcfshr::b3dutil::{CArg, ImodFile, c_format, num_omp_threads};
 use rayon::iter::{IndexedParallelIterator, ParallelIterator};
 use rayon::slice::ParallelSliceMut;
 
+/// Guards the one attempt this unit makes to size rayon's global pool; see
+/// `apply_kernel_filter`.
+static RAYON_POOL: std::sync::Once = std::sync::Once::new();
+
 use super::robuststat::{rs_set_sort_index_offset, rs_sort_indexed_floats};
 
 // C file-scope state for the peak-finder API (`filtxcorr.c:443-450`).
@@ -289,13 +293,55 @@ pub fn parabolic_fit_position(y1: f32, y2: f32, y3: f32) -> f64 {
     cx
 }
 pub fn conjugate_product(a: &mut [f32], b: &[f32], nx: i32, ny: i32) {
-    for j in (0..ny * (nx + 2)).step_by(2) {
-        let ar = a[j as usize];
-        let ai = a[(j + 1) as usize];
-        let br = b[j as usize];
-        let bi = b[(j + 1) as usize];
-        a[j as usize] = ar * br + ai * bi;
-        a[(j + 1) as usize] = ai * br - ar * bi;
+    // `filtxcorr.c:1481-1483`: `numOMPthreads(B3DMIN(4, B3DNINT(0.025 *
+    // sqrt(nx * ny))))` and an OpenMP `parallel for` over `jx`.  Iteration
+    // `jx` reads and writes only the pair `array[jx], array[jx + 1]` (and
+    // reads the same pair of `brray`), so the iterations are disjoint and
+    // nothing accumulates across them: neither the schedule nor the thread
+    // count can change a byte.  Each group holds a whole number of pairs, so
+    // `jx` is taken relative to the group's slice.  The slice covers exactly
+    // the elements the loop touches, capped at the array's length so an
+    // out-of-range pair still panics at the element the source would reach.
+    let mut num_threads = (0.025 * (nx as f64 * ny as f64).sqrt() + 0.5).floor() as i32;
+    num_threads = if 4 < num_threads { 4 } else { num_threads };
+    num_threads = num_omp_threads(num_threads);
+    let total = ny * (nx + 2);
+    if total <= 0 {
+        return;
+    }
+    let num_pairs = (total as usize).div_ceil(2);
+    let pairs_per_group = if num_threads > 1 {
+        num_pairs.div_ceil(num_threads as usize).max(1)
+    } else {
+        num_pairs
+    };
+    let span = (2 * num_pairs).min(a.len());
+    let run_group = |(g, agroup): (usize, &mut [f32])| {
+        let j0 = 2 * g * pairs_per_group;
+        for j in (0..agroup.len()).step_by(2) {
+            let ar = agroup[j];
+            let ai = agroup[j + 1];
+            let br = b[j0 + j];
+            let bi = b[j0 + j + 1];
+            agroup[j] = ar * br + ai * bi;
+            agroup[j + 1] = ai * br - ar * bi;
+        }
+    };
+    if num_threads > 1 {
+        RAYON_POOL.call_once(|| {
+            let _ = rayon::ThreadPoolBuilder::new()
+                .num_threads(num_omp_threads(i32::MAX) as usize)
+                .build_global();
+        });
+        a[..span]
+            .par_chunks_mut(2 * pairs_per_group)
+            .enumerate()
+            .for_each(run_group);
+    } else {
+        a[..span]
+            .chunks_mut(2 * pairs_per_group)
+            .enumerate()
+            .for_each(run_group);
     }
 }
 
@@ -527,10 +573,14 @@ pub fn apply_kernel_filter(
         // which counts *logical* processors, so it is bounded to the same count
         // here.  `build_global` succeeds for whichever translated unit reaches
         // it first and returns an error afterwards, which is the intended
-        // no-op: every unit asks for the same size.
-        let _ = rayon::ThreadPoolBuilder::new()
-            .num_threads(num_omp_threads(i32::MAX) as usize)
-            .build_global();
+        // no-op: every unit asks for the same size.  The `Once` makes that
+        // attempt — and the environment reads inside `numOMPthreads` — happen
+        // once per process rather than on every call.
+        RAYON_POOL.call_once(|| {
+            let _ = rayon::ThreadPoolBuilder::new()
+                .num_threads(num_omp_threads(i32::MAX) as usize)
+                .build_global();
+        });
         b.par_chunks_mut(rows_per_group * d as usize)
             .enumerate()
             .for_each(run_group);
@@ -624,23 +674,67 @@ pub fn fourier_shift_image(fft: &mut [f32], nx: i32, ny: i32, dx: f32, dy: f32, 
         temp[(2 * x) as usize] = arg.cos() as f32;
         temp[(2 * x + 1) as usize] = arg.sin() as f32;
     }
-    for y in 0..ny {
-        let mut fy = y as f32 / ny as f32;
-        if fy > 0.5 {
-            fy = (fy as f64 - 1.) as f32;
+    // `filtxcorr.c:1930-1935`: `numThreads = B3DNINT(0.012 * sqrt(nxPad *
+    // nyPad))`, clamped to `1..=maxThreads` (4), then `numOMPthreads`, and an
+    // OpenMP `parallel for` over `iy`.  Line `iy` reads the finished `temp`
+    // and writes only `fft[iy * nxDim ..][.. 2 * nxFFT]`, each element from
+    // its own old value, so the lines are disjoint and nothing accumulates
+    // across them: neither the schedule nor the thread count can change a
+    // byte.  Each group of lines owns its slice of `fft` (capped at the
+    // array's length, so a short array still panics where the source would
+    // reach), and the index is taken relative to that slice.
+    let mut num_threads = (0.012 * (nx as f64 * ny as f64).sqrt() + 0.5).floor() as i32;
+    num_threads = if 4 < num_threads { 4 } else { num_threads };
+    num_threads = if 1 > num_threads { 1 } else { num_threads };
+    num_threads = num_omp_threads(num_threads);
+    if ny <= 0 || ndim <= 0 {
+        return;
+    }
+    let line_len = ndim as usize;
+    let rows_per_group = if num_threads > 1 {
+        (ny as usize).div_ceil(num_threads as usize).max(1)
+    } else {
+        ny as usize
+    };
+    let span = (ny as usize * line_len).min(fft.len());
+    let temp: &[f32] = &*temp;
+    let run_group = |(g, fft): (usize, &mut [f32])| {
+        let y0 = (g * rows_per_group) as i32;
+        let y1 = y0 + fft.len().div_ceil(line_len) as i32;
+        for y in y0..y1 {
+            let mut fy = y as f32 / ny as f32;
+            if fy > 0.5 {
+                fy = (fy as f64 - 1.) as f32;
+            }
+            let arg = -2. * pi as f64 * fy as f64 * dy as f64;
+            let (c, s) = (arg.cos() as f32, arg.sin() as f32);
+            for x in 0..nxfft {
+                let q = 2 * x;
+                let pr = temp[q as usize] * c - temp[(q + 1) as usize] * s;
+                let pi = temp[(q + 1) as usize] * c + temp[q as usize] * s;
+                let p = (q + (y - y0) * ndim) as usize;
+                let re = fft[p];
+                let im = fft[p + 1];
+                fft[p] = pr * re - pi * im;
+                fft[p + 1] = pi * re + pr * im;
+            }
         }
-        let arg = -2. * pi as f64 * fy as f64 * dy as f64;
-        let (c, s) = (arg.cos() as f32, arg.sin() as f32);
-        for x in 0..nxfft {
-            let q = 2 * x;
-            let pr = temp[q as usize] * c - temp[(q + 1) as usize] * s;
-            let pi = temp[(q + 1) as usize] * c + temp[q as usize] * s;
-            let p = (q + y * ndim) as usize;
-            let re = fft[p];
-            let im = fft[p + 1];
-            fft[p] = pr * re - pi * im;
-            fft[p + 1] = pi * re + pr * im;
-        }
+    };
+    if num_threads > 1 {
+        RAYON_POOL.call_once(|| {
+            let _ = rayon::ThreadPoolBuilder::new()
+                .num_threads(num_omp_threads(i32::MAX) as usize)
+                .build_global();
+        });
+        fft[..span]
+            .par_chunks_mut(rows_per_group * line_len)
+            .enumerate()
+            .for_each(run_group);
+    } else {
+        fft[..span]
+            .chunks_mut(rows_per_group * line_len)
+            .enumerate()
+            .for_each(run_group);
     }
 }
 pub fn fourier_reduce_image(
@@ -807,68 +901,120 @@ pub fn xcorr_filter_part(
     nxmax = if nx2 < nxmax { nx2 } else { nxmax };
     nxmax = if 1 > nxmax { 1 } else { nxmax };
 
-    /*   apply filter function on fft, put result in array */
-    for iy in 0..=ny - 1 {
-        let mut fy = iy as f32 * dy;
-        let index = iy * nx2p1;
-        if fy > 0.5 {
-            fy = 1.0f32 - fy;
-        }
-        if fy > maxf {
-            for ix in 0..=nx2 {
-                let ind = 2 * (index + ix);
-                array[ind as usize] = 0.;
-                array[(ind + 1) as usize] = 0.;
+    // `filtxcorr.c:296-302`: `numThreads = B3DNINT(3.33 * (log10(nx * ny) -
+    // 3.75))`, clamped to `1..=maxThreads` (16), then `numOMPthreads`, and an
+    // OpenMP `parallel for` over `iy`.  Line `iy` writes only
+    // `array[2 * iy * nxDiv2p1 ..][.. 2 * nxDiv2p1]` (every store is
+    // `2 * (index + ix)` or one more, with `0 <= ix <= nxDiv2`) and reads only
+    // `ctf` and the same elements of `fft` — which, in place, are its own
+    // line.  The lines are disjoint and nothing accumulates across them (`x`
+    // restarts at 0 on every line), so neither the schedule nor the thread
+    // count can change a byte.  Each group of lines owns its slice of
+    // `array`, capped at the array's length so a short array still panics at
+    // the element the source would reach.
+    let mut num_threads = (3.33 * ((nx as f64 * ny as f64).log10() - 3.75) + 0.5).floor() as i32;
+    num_threads = if 16 < num_threads { 16 } else { num_threads };
+    num_threads = if 1 > num_threads { 1 } else { num_threads };
+    num_threads = num_omp_threads(num_threads);
+    if ny <= 0 || nx2p1 <= 0 {
+        return;
+    }
+    let line_len = 2 * nx2p1 as usize;
+    let rows_per_group = if num_threads > 1 {
+        (ny as usize).div_ceil(num_threads as usize).max(1)
+    } else {
+        ny as usize
+    };
+    let span = (ny as usize * line_len).min(array.len());
+    let run_group = |(g, array): (usize, &mut [f32])| {
+        let iy0 = (g * rows_per_group) as i32;
+        let iy1 = iy0 + array.len().div_ceil(line_len) as i32;
+        let base = 2 * iy0 * nx2p1;
+
+        /*   apply filter function on fft, put result in array */
+        for iy in iy0..iy1 {
+            let mut fy = iy as f32 * dy;
+            // `index` is the line's offset within this group's slice of `array`;
+            // `source` is the whole input, so it is read at `base` beyond that.
+            let index = (iy - iy0) * nx2p1;
+            if fy > 0.5 {
+                fy = 1.0f32 - fy;
             }
-        } else {
-            // `double ysq = y * y;` -- the product is single precision and
-            // then widens, and `x` is *accumulated* by `delx` rather than
-            // recomputed as `ix * delx`.
-            let ysq = (fy * fy) as f64;
-            // The source reads `fft[]` and writes `array[]` with no test in the
-            // loop -- they are one pointer or two, decided by the caller
-            // (`filtxcorr.c:277-286`).  Discriminating `fft` per element instead
-            // put a branch in the hottest loop of this file, so the two cases
-            // are separate loops here.  Both bodies are the same statements in
-            // the same order, and neither touches a float the other does not.
-            match fft {
-                FilterIn::Fft(source) => {
-                    let mut x = 0.0f32;
-                    for ix in 0..=nxmax {
-                        let ind = 2 * (index + ix);
-                        let indp1 = ind + 1;
-                        let s = ((x * x) as f64 + ysq).sqrt() as f32;
-                        let indf = (s / delta + 0.5f32) as i32;
-                        let f = ctf[indf as usize];
-                        let (a, b) = (source[ind as usize], source[indp1 as usize]);
-                        array[ind as usize] = a * f;
-                        array[indp1 as usize] = b * f;
-                        x += dx;
+            if fy > maxf {
+                for ix in 0..=nx2 {
+                    let ind = 2 * (index + ix);
+                    array[ind as usize] = 0.;
+                    array[(ind + 1) as usize] = 0.;
+                }
+            } else {
+                // `double ysq = y * y;` -- the product is single precision and
+                // then widens, and `x` is *accumulated* by `delx` rather than
+                // recomputed as `ix * delx`.
+                let ysq = (fy * fy) as f64;
+                // The source reads `fft[]` and writes `array[]` with no test in the
+                // loop -- they are one pointer or two, decided by the caller
+                // (`filtxcorr.c:277-286`).  Discriminating `fft` per element instead
+                // put a branch in the hottest loop of this file, so the two cases
+                // are separate loops here.  Both bodies are the same statements in
+                // the same order, and neither touches a float the other does not.
+                match &fft {
+                    FilterIn::Fft(source) => {
+                        let mut x = 0.0f32;
+                        for ix in 0..=nxmax {
+                            let ind = 2 * (index + ix);
+                            let indp1 = ind + 1;
+                            let s = ((x * x) as f64 + ysq).sqrt() as f32;
+                            let indf = (s / delta + 0.5f32) as i32;
+                            let f = ctf[indf as usize];
+                            let (a, b) = (
+                                source[(base + ind) as usize],
+                                source[(base + indp1) as usize],
+                            );
+                            array[ind as usize] = a * f;
+                            array[indp1 as usize] = b * f;
+                            x += dx;
+                        }
+                    }
+                    FilterIn::InPlace => {
+                        let mut x = 0.0f32;
+                        for ix in 0..=nxmax {
+                            let ind = 2 * (index + ix);
+                            let indp1 = ind + 1;
+                            let s = ((x * x) as f64 + ysq).sqrt() as f32;
+                            let indf = (s / delta + 0.5f32) as i32;
+                            let f = ctf[indf as usize];
+                            let (a, b) = (array[ind as usize], array[indp1 as usize]);
+                            array[ind as usize] = a * f;
+                            array[indp1 as usize] = b * f;
+                            x += dx;
+                        }
                     }
                 }
-                FilterIn::InPlace => {
-                    let mut x = 0.0f32;
-                    for ix in 0..=nxmax {
-                        let ind = 2 * (index + ix);
-                        let indp1 = ind + 1;
-                        let s = ((x * x) as f64 + ysq).sqrt() as f32;
-                        let indf = (s / delta + 0.5f32) as i32;
-                        let f = ctf[indf as usize];
-                        let (a, b) = (array[ind as usize], array[indp1 as usize]);
-                        array[ind as usize] = a * f;
-                        array[indp1 as usize] = b * f;
-                        x += dx;
-                    }
+                // C deliberately stops at nxDiv2 (exclusive), retaining the
+                // Nyquist pair when it is not visited by either loop.
+                for ix in nxmax + 1..nx2 {
+                    let ind = 2 * (index + ix);
+                    array[ind as usize] = 0.;
+                    array[(ind + 1) as usize] = 0.;
                 }
             }
-            // C deliberately stops at nxDiv2 (exclusive), retaining the
-            // Nyquist pair when it is not visited by either loop.
-            for ix in nxmax + 1..nx2 {
-                let ind = 2 * (index + ix);
-                array[ind as usize] = 0.;
-                array[(ind + 1) as usize] = 0.;
-            }
         }
+    };
+    if num_threads > 1 {
+        RAYON_POOL.call_once(|| {
+            let _ = rayon::ThreadPoolBuilder::new()
+                .num_threads(num_omp_threads(i32::MAX) as usize)
+                .build_global();
+        });
+        array[..span]
+            .par_chunks_mut(rows_per_group * line_len)
+            .enumerate()
+            .for_each(run_group);
+    } else {
+        array[..span]
+            .chunks_mut(rows_per_group * line_len)
+            .enumerate()
+            .for_each(run_group);
     }
 }
 
@@ -1766,34 +1912,78 @@ pub fn fourier_shift_volume(
         temp[(2 * ix) as usize] = arg.cos() as f32;
         temp[(2 * ix + 1) as usize] = arg.sin() as f32;
     }
-    for iz in 0..nz_pad {
-        let mut zfreq = iz as f32 / nz_pad as f32;
-        if zfreq > 0.5 {
-            zfreq = (zfreq as f64 - 1.0) as f32;
-        }
-        let zarg = -2.0 * pi as f64 * zfreq as f64 * dz as f64;
-        let (zcos, zsin) = (zarg.cos() as f32, zarg.sin() as f32);
-        for iy in 0..ny_pad {
-            let mut yfreq = iy as f32 / ny_pad as f32;
-            if yfreq > 0.5 {
-                yfreq = (yfreq as f64 - 1.0) as f32;
+    // `filtxcorr.c:2095-2100`: `numThreads = maxThreads` (16), clamped to
+    // `1..=maxThreads`, then `numOMPthreads`, and an OpenMP `parallel for`
+    // over `iz`.  Plane `iz` reads the finished `temp` and writes only
+    // `fft[iz * nxDim * nyPad ..][.. nxDim * nyPad]`, each element from its
+    // own old value, so the planes are disjoint and nothing accumulates across
+    // them: neither the schedule nor the thread count can change a byte.
+    // Each group of planes owns its slice of `fft` (capped at the array's
+    // length, so a short array still panics where the source would reach).
+    let mut num_threads = 16;
+    num_threads = if 16 < num_threads { 16 } else { num_threads };
+    num_threads = if 1 > num_threads { 1 } else { num_threads };
+    num_threads = num_omp_threads(num_threads);
+    if nz_pad <= 0 || ny_pad <= 0 || nx_dim <= 0 {
+        return;
+    }
+    let plane_len = nx_dim as usize * ny_pad as usize;
+    let planes_per_group = if num_threads > 1 {
+        (nz_pad as usize).div_ceil(num_threads as usize).max(1)
+    } else {
+        nz_pad as usize
+    };
+    let span = (nz_pad as usize * plane_len).min(fft.len());
+    let temp: &[f32] = &*temp;
+    let run_group = |(g, fft): (usize, &mut [f32])| {
+        let iz0 = (g * planes_per_group) as i32;
+        let iz1 = iz0 + fft.len().div_ceil(plane_len) as i32;
+        for iz in iz0..iz1 {
+            let mut zfreq = iz as f32 / nz_pad as f32;
+            if zfreq > 0.5 {
+                zfreq = (zfreq as f64 - 1.0) as f32;
             }
-            let yarg = -2.0 * pi as f64 * yfreq as f64 * dy as f64;
-            let (ycos, ysin) = (yarg.cos() as f32, yarg.sin() as f32);
-            let yzre = ycos * zcos - ysin * zsin;
-            let yzim = ycos * zsin + ysin * zcos;
-            let base = (iy * nx_dim + iz * nx_dim * ny_pad) as usize;
-            for ix in 0..nx_fft {
-                let xind = 2 * ix;
-                let pre = temp[xind as usize] * yzre - temp[(xind + 1) as usize] * yzim;
-                let pim = temp[(xind + 1) as usize] * yzre + temp[xind as usize] * yzim;
-                let ind = base + xind as usize;
-                let real = fft[ind];
-                let imag = fft[ind + 1];
-                fft[ind] = pre * real - pim * imag;
-                fft[ind + 1] = pim * real + pre * imag;
+            let zarg = -2.0 * pi as f64 * zfreq as f64 * dz as f64;
+            let (zcos, zsin) = (zarg.cos() as f32, zarg.sin() as f32);
+            for iy in 0..ny_pad {
+                let mut yfreq = iy as f32 / ny_pad as f32;
+                if yfreq > 0.5 {
+                    yfreq = (yfreq as f64 - 1.0) as f32;
+                }
+                let yarg = -2.0 * pi as f64 * yfreq as f64 * dy as f64;
+                let (ycos, ysin) = (yarg.cos() as f32, yarg.sin() as f32);
+                let yzre = ycos * zcos - ysin * zsin;
+                let yzim = ycos * zsin + ysin * zcos;
+                // Relative to this group's slice of `fft`.
+                let base = (iy * nx_dim + (iz - iz0) * nx_dim * ny_pad) as usize;
+                for ix in 0..nx_fft {
+                    let xind = 2 * ix;
+                    let pre = temp[xind as usize] * yzre - temp[(xind + 1) as usize] * yzim;
+                    let pim = temp[(xind + 1) as usize] * yzre + temp[xind as usize] * yzim;
+                    let ind = base + xind as usize;
+                    let real = fft[ind];
+                    let imag = fft[ind + 1];
+                    fft[ind] = pre * real - pim * imag;
+                    fft[ind + 1] = pim * real + pre * imag;
+                }
             }
         }
+    };
+    if num_threads > 1 {
+        RAYON_POOL.call_once(|| {
+            let _ = rayon::ThreadPoolBuilder::new()
+                .num_threads(num_omp_threads(i32::MAX) as usize)
+                .build_global();
+        });
+        fft[..span]
+            .par_chunks_mut(planes_per_group * plane_len)
+            .enumerate()
+            .for_each(run_group);
+    } else {
+        fft[..span]
+            .chunks_mut(planes_per_group * plane_len)
+            .enumerate()
+            .for_each(run_group);
     }
 }
 /// `fourierReduceVolume` (`filtxcorr.c:2158`).

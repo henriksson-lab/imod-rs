@@ -1,10 +1,13 @@
 //! Translation of `IMOD/libiimod/sliceproc.c` and `include/sliceproc.h`.
 #![allow(unused_variables)]
 
+use crate::imod::libcfshr::b3dutil::num_omp_threads;
 use crate::imod::libcfshr::islice::{Islice, slice_create, slice_put_val, slice_scale_and_free};
 use crate::imod::libcfshr::percentile::{percentile_float, percentile_int};
 use crate::imod::libiimod::diffusion::update_matrix;
 use crate::imod::libiimod::mrcslice::slice_new_mode;
+use rayon::iter::{IndexedParallelIterator, IntoParallelIterator, ParallelIterator};
+use rayon::slice::ParallelSliceMut;
 use std::sync::Mutex;
 
 pub const ANISO_CLEAR_AT_END: i32 = 0;
@@ -14,6 +17,8 @@ const SLICE_MODE_BYTE: i32 = 0;
 const SLICE_MODE_SHORT: i32 = 1;
 const SLICE_MODE_FLOAT: i32 = 2;
 const SLICE_MODE_USHORT: i32 = 6;
+/// `sliceproc.c:298`.
+const MEDIAN_MAX_THREADS: i32 = 6;
 
 pub fn slice_byte_edge_two(sin: &mut Islice, center: i32) -> i32 {
     let mut sout = slice_create(sin.xsize, sin.ysize, SLICE_MODE_FLOAT)
@@ -264,13 +269,31 @@ pub fn slice_median_filter(sl_out: &mut Islice, stack: &[Islice], size: i32) -> 
     -3 -n 3` on a 50x40 float image differed from native in 176 pixels across
     all 40 rows with this path missing.
 
-    The source parallelises the row loop with OpenMP, keeping the three
-    interleaved lines and the rotating `offset` private to each thread.  The
-    result does not depend on the thread count, so one sequential pass
-    reproduces it exactly: a thread's first row rebuilds the buffer from rows
-    `oy - 1`, `oy`, `oy + 1`, every later row overwrites one of the three in
-    rotation, and `opt_med9` sorts its copy — so each row always sees the same
-    *set* of nine values however they are ordered within the triple. */
+    The source parallelises the row loop with OpenMP (`sliceproc.c:388`),
+    keeping the three interleaved lines, the rotating `offset` and the
+    `initialLoaded` flag private to each thread.  That per-thread state is part
+    of the result, not just bookkeeping: a thread's *first* row builds the
+    buffer as rows `oy - 1, oy, oy + 1` in slots 0, 1, 2, and every later row
+    overwrites one slot in rotation, so the order of the nine values handed to
+    `opt_med9` depends on where the thread's block of rows began.  For ordinary
+    data that order is invisible — the network returns the same median *value*
+    for any permutation — but `opt_med9` swaps only on `>`, so when the nine
+    values contain `+0.0` and `-0.0` together, or a NaN, which of the tied bit
+    patterns lands in slot 4 depends on the permutation.  Native's output on
+    such data therefore depends on its thread count.  To match it at every
+    count the rows are partitioned exactly as the static schedule GCC emits for
+    a `parallel for` with no `schedule` clause does: with
+    `q = ny / numThreads` and `r = ny % numThreads`, thread `t` takes
+    `q + (t < r)` consecutive rows starting at `t * q + min(t, r)`, and each
+    group starts with its buffer unloaded.  With one thread this is the single
+    group the previous sequential code ran.
+
+    (a) Each group writes only output rows `row0 .. row1` — `ox + oy * outNx`
+    for `ox < inNx <= outNx` — so the groups' output slices are disjoint.
+    (b) There is no cross-row reduction: each output pixel is `opt_med9` of a
+    private copy of nine input values, and each group owns its own
+    `lineVals` (allocated once per group, as the source allocates one
+    `fThreadLine` per thread) and its own nine-value `fVals`. */
     if stack.len() == 1
         && size == 3
         && sl_in.mode == SLICE_MODE_FLOAT
@@ -289,49 +312,93 @@ pub fn slice_median_filter(sl_out: &mut Islice, stack: &[Islice], size: i32) -> 
         let in_nx = sl_in.xsize as usize;
         let ny = sl_in.ysize as usize;
         let out_nx = sl_out.xsize as usize;
-        let mut line_vals = vec![0f32; 3 * in_nx];
-        let mut f_vals = [0f32; 9];
-        let mut offset = 0usize;
-        let mut initial_loaded = false;
-        for oy in 0..ny {
-            if !initial_loaded {
-                /* Set up pointers and copy the three lines interleaved the
-                first time */
-                let line1 = if oy == 0 { 0 } else { oy - 1 };
-                let line2 = oy;
-                let line3 = (ny - 1).min(oy + 1);
-                let src = sl_in.data.f();
-                for ox in 0..in_nx {
-                    for (slot, row) in [line1, line2, line3].into_iter().enumerate() {
-                        line_vals[3 * ox + slot] = src[ox + row * in_nx];
+        // `sliceproc.c:371-373`: `B3DNINT` is `(int)floor(x + 0.5)`.
+        let mut num_threads = MEDIAN_MAX_THREADS
+            .min((0.002 * (sl_in.xsize as f64 * sl_in.ysize as f64).sqrt() + 0.5).floor() as i32);
+        num_threads = num_omp_threads(1.max(num_threads));
+        let src = sl_in.data.f();
+        // One group: `(row0, row1, output slice, row the slice starts at)`.
+        let run_group = |(row0, row1, out, out_row0): (usize, usize, &mut [f32], usize)| {
+            let mut line_vals = vec![0f32; 3 * in_nx];
+            let mut f_vals = [0f32; 9];
+            let mut offset = 0usize;
+            let mut initial_loaded = false;
+            for oy in row0..row1 {
+                if !initial_loaded {
+                    /* Set up pointers and copy the three lines interleaved the
+                    first time */
+                    let line1 = if oy == 0 { 0 } else { oy - 1 };
+                    let line2 = oy;
+                    let line3 = (ny - 1).min(oy + 1);
+                    for ox in 0..in_nx {
+                        for (slot, row) in [line1, line2, line3].into_iter().enumerate() {
+                            line_vals[3 * ox + slot] = src[ox + row * in_nx];
+                        }
                     }
+                    offset = 0;
+                    initial_loaded = true;
+                } else {
+                    /* Thereafter just copy the third line into the free slot */
+                    let line3 = (ny - 1).min(oy + 1);
+                    for ox in 0..in_nx {
+                        line_vals[3 * ox + offset] = src[ox + line3 * in_nx];
+                    }
+                    offset = (offset + 1) % 3;
                 }
-                offset = 0;
-                initial_loaded = true;
-            } else {
-                /* Thereafter just copy the third line into the free slot */
-                let line3 = (ny - 1).min(oy + 1);
-                let src = sl_in.data.f();
-                for ox in 0..in_nx {
-                    line_vals[3 * ox + offset] = src[ox + line3 * in_nx];
+
+                /* Step across, copying the chunk of values as needed and taking
+                the median */
+                let orow = (oy - out_row0) * out_nx;
+                for ox in 1..in_nx - 1 {
+                    f_vals.copy_from_slice(&line_vals[3 * (ox - 1)..3 * (ox - 1) + 9]);
+                    out[ox + orow] = opt_med9(&mut f_vals);
                 }
-                offset = (offset + 1) % 3;
-            }
 
-            /* Step across, copying the chunk of values as needed and taking the
-            median */
-            let out = sl_out.data.f_mut();
-            for ox in 1..in_nx - 1 {
-                f_vals.copy_from_slice(&line_vals[3 * (ox - 1)..3 * (ox - 1) + 9]);
-                out[ox + oy * out_nx] = opt_med9(&mut f_vals);
+                /* Handle the endpoints.  Note the source indexes the far end
+                with the *input* width and the row with the output width. */
+                f_vals.copy_from_slice(&line_vals[..9]);
+                out[orow] = opt_med9(&mut f_vals);
+                f_vals.copy_from_slice(&line_vals[3 * (in_nx - 3)..3 * (in_nx - 3) + 9]);
+                out[in_nx + orow - 1] = opt_med9(&mut f_vals);
             }
-
-            /* Handle the endpoints.  Note the source indexes the far end with
-            the *input* width and the row with the output width. */
-            f_vals.copy_from_slice(&line_vals[..9]);
-            out[oy * out_nx] = opt_med9(&mut f_vals);
-            f_vals.copy_from_slice(&line_vals[3 * (in_nx - 3)..3 * (in_nx - 3) + 9]);
-            out[in_nx + oy * out_nx - 1] = opt_med9(&mut f_vals);
+        };
+        let nthr = num_threads as usize;
+        let q = ny / nthr;
+        let r = ny % nthr;
+        let out = sl_out.data.f_mut();
+        if in_nx > out_nx {
+            // Not reachable from `clip`, whose output slice has the input's
+            // size: the far endpoint of row `oy` then lands in row `oy + 1`,
+            // so rows are not disjoint.  Run the same partition, in order, on
+            // the whole array — which is what a single native thread would do
+            // for each block in turn.
+            for t in 0..nthr {
+                let row0 = t * q + t.min(r);
+                let row1 = row0 + q + usize::from(t < r);
+                run_group((row0, row1, &mut out[..], 0));
+            }
+            return 0;
+        }
+        let mut groups = Vec::with_capacity(nthr);
+        let mut rest = &mut out[..ny * out_nx];
+        for t in 0..nthr {
+            let row0 = t * q + t.min(r);
+            let rows = q + usize::from(t < r);
+            let (head, tail) = std::mem::take(&mut rest).split_at_mut(rows * out_nx);
+            rest = tail;
+            if rows > 0 {
+                groups.push((row0, row0 + rows, head, row0));
+            }
+        }
+        if num_threads > 1 {
+            // Same pool sizing as `reduce_by_binning.rs`: bounded to the
+            // count `numOMPthreads` can ever return.
+            let _ = rayon::ThreadPoolBuilder::new()
+                .num_threads(num_omp_threads(i32::MAX) as usize)
+                .build_global();
+            groups.into_par_iter().for_each(run_group);
+        } else {
+            groups.into_iter().for_each(run_group);
         }
         return 0;
     }
@@ -341,100 +408,152 @@ pub fn slice_median_filter(sl_out: &mut Islice, stack: &[Islice], size: i32) -> 
     for an illegal mode is taken by the mode check at entry, which the 3x3
     float path cannot pre-empt since it requires a legal (float) mode.  Each
     array is indexed only in its own arm below, so the empty one is never
-    touched. */
+    touched.
+
+    **Deliberate deviation — parallelism the source does not have.** The source
+    runs this loop on one thread (`sliceproc.c:363-367`: "the standard
+    percentile routine does not run well in parallel").  The owner asked for
+    it to be parallelised (2026-09-24) on condition that output is unchanged,
+    and it cannot change: every pixel reloads its whole window into a scratch
+    array starting at index 0 before `percentileFloat`/`percentileInt` permute
+    it, so the value depends only on the input window, never on what the
+    scratch array held before or on which pixels ran first.  Each worker owns
+    its own scratch arrays (allocated once per worker, `block_size` long as in
+    the source), each output row of a band is written by exactly one worker,
+    and nothing is reduced across pixels.  The values then go into `slOut`
+    through the same `slicePutVal` call, in row-major order, one band at a
+    time, so the extra memory is one band of floats rather than a slice.  With
+    one thread the loop below is the source's loop. */
     let block_size = stack.len() * size as usize * size as usize;
     let is_float = sl_in.mode == SLICE_MODE_FLOAT;
-    let mut f_vals: Vec<f32> = if is_float {
-        vec![0.0; block_size]
-    } else {
-        Vec::new()
-    };
-    let mut i_vals: Vec<i32> = if is_float {
-        Vec::new()
-    } else {
-        vec![0; block_size]
+    let new_vals = || -> (Vec<f32>, Vec<i32>) {
+        if is_float {
+            (vec![0.0; block_size], Vec::new())
+        } else {
+            (Vec::new(), vec![0; block_size])
+        }
     };
     let del_minus = size / 2;
     let del_plus = (size + 1) / 2;
-    for oy in 0..sl_in.ysize {
+    let median_at = |ox: i32, oy: i32, f_vals: &mut [f32], i_vals: &mut [i32]| -> f32 {
         let y_start = (oy - del_minus).max(0);
         let y_end = (oy + del_plus).min(sl_in.ysize);
-        for ox in 0..sl_in.xsize {
-            let x_start = (ox - del_minus).max(0);
-            let x_end = (ox + del_plus).min(sl_in.xsize);
-            let num_vals = stack.len() * (x_end - x_start) as usize * (y_end - y_start) as usize;
-            let select = (num_vals as i32 + 1) / 2;
-            /* Loop on slices and subareas to load arrays: `sliceproc.c:446-470`
-            and the `FILTER_INTS` macro walk each row's span with a running
-            output pointer. */
-            let row_len = (x_end - x_start) as usize;
-            let mut out = 0;
-            let value = if is_float {
-                for slice in stack {
-                    let d = slice.data.f();
-                    for iy in y_start..y_end {
-                        let start = (x_start + iy * sl_in.xsize) as usize;
-                        f_vals[out..out + row_len].copy_from_slice(&d[start..start + row_len]);
-                        out += row_len;
-                    }
+        let x_start = (ox - del_minus).max(0);
+        let x_end = (ox + del_plus).min(sl_in.xsize);
+        let num_vals = stack.len() * (x_end - x_start) as usize * (y_end - y_start) as usize;
+        let select = (num_vals as i32 + 1) / 2;
+        /* Loop on slices and subareas to load arrays: `sliceproc.c:446-470`
+        and the `FILTER_INTS` macro walk each row's span with a running
+        output pointer. */
+        let row_len = (x_end - x_start) as usize;
+        let mut out = 0;
+        if is_float {
+            for slice in stack {
+                let d = slice.data.f();
+                for iy in y_start..y_end {
+                    let start = (x_start + iy * sl_in.xsize) as usize;
+                    f_vals[out..out + row_len].copy_from_slice(&d[start..start + row_len]);
+                    out += row_len;
                 }
-                let low = percentile_float(select, &mut f_vals[..num_vals], num_vals as i32);
-                if num_vals % 2 == 0 {
-                    0.5 * (low
-                        + percentile_float(select + 1, &mut f_vals[..num_vals], num_vals as i32))
-                } else {
-                    low
-                }
+            }
+            let low = percentile_float(select, &mut f_vals[..num_vals], num_vals as i32);
+            if num_vals % 2 == 0 {
+                0.5 * (low + percentile_float(select + 1, &mut f_vals[..num_vals], num_vals as i32))
             } else {
-                match sl_in.mode {
-                    SLICE_MODE_SHORT => {
-                        for slice in stack {
-                            let d = slice.data.s();
-                            for iy in y_start..y_end {
-                                let start = (x_start + iy * sl_in.xsize) as usize;
-                                for &v in &d[start..start + row_len] {
-                                    i_vals[out] = v as i32;
-                                    out += 1;
-                                }
-                            }
-                        }
-                    }
-                    SLICE_MODE_USHORT => {
-                        for slice in stack {
-                            let d = slice.data.us();
-                            for iy in y_start..y_end {
-                                let start = (x_start + iy * sl_in.xsize) as usize;
-                                for &v in &d[start..start + row_len] {
-                                    i_vals[out] = v as i32;
-                                    out += 1;
-                                }
-                            }
-                        }
-                    }
-                    _ => {
-                        for slice in stack {
-                            let d = slice.data.b();
-                            for iy in y_start..y_end {
-                                let start = (x_start + iy * sl_in.xsize) as usize;
-                                for &v in &d[start..start + row_len] {
-                                    i_vals[out] = v as i32;
-                                    out += 1;
-                                }
+                low
+            }
+        } else {
+            match sl_in.mode {
+                SLICE_MODE_SHORT => {
+                    for slice in stack {
+                        let d = slice.data.s();
+                        for iy in y_start..y_end {
+                            let start = (x_start + iy * sl_in.xsize) as usize;
+                            for &v in &d[start..start + row_len] {
+                                i_vals[out] = v as i32;
+                                out += 1;
                             }
                         }
                     }
                 }
-                let low = percentile_int(select, &mut i_vals[..num_vals], num_vals as i32) as f32;
-                if num_vals % 2 == 0 {
-                    0.5 * (low
-                        + percentile_int(select + 1, &mut i_vals[..num_vals], num_vals as i32)
-                            as f32)
-                } else {
-                    low
+                SLICE_MODE_USHORT => {
+                    for slice in stack {
+                        let d = slice.data.us();
+                        for iy in y_start..y_end {
+                            let start = (x_start + iy * sl_in.xsize) as usize;
+                            for &v in &d[start..start + row_len] {
+                                i_vals[out] = v as i32;
+                                out += 1;
+                            }
+                        }
+                    }
                 }
-            };
-            slice_put_val(sl_out, ox, oy, [value, 0., 0., 0.]);
+                _ => {
+                    for slice in stack {
+                        let d = slice.data.b();
+                        for iy in y_start..y_end {
+                            let start = (x_start + iy * sl_in.xsize) as usize;
+                            for &v in &d[start..start + row_len] {
+                                i_vals[out] = v as i32;
+                                out += 1;
+                            }
+                        }
+                    }
+                }
+            }
+            let low = percentile_int(select, &mut i_vals[..num_vals], num_vals as i32) as f32;
+            if num_vals % 2 == 0 {
+                0.5 * (low
+                    + percentile_int(select + 1, &mut i_vals[..num_vals], num_vals as i32) as f32)
+            } else {
+                low
+            }
         }
+    };
+    let nx = sl_in.xsize as usize;
+    let ny = sl_in.ysize;
+    let num_threads = num_omp_threads(ny.max(1));
+    // `par_chunks_mut(0)` would panic on a zero-width slice, which has no
+    // pixels to compute anyway.
+    if num_threads <= 1 || nx == 0 {
+        let (mut f_vals, mut i_vals) = new_vals();
+        for oy in 0..ny {
+            for ox in 0..sl_in.xsize {
+                let value = median_at(ox, oy, &mut f_vals, &mut i_vals);
+                slice_put_val(sl_out, ox, oy, [value, 0., 0., 0.]);
+            }
+        }
+        return 0;
+    }
+    // Same pool sizing as `reduce_by_binning.rs`.
+    let _ = rayon::ThreadPoolBuilder::new()
+        .num_threads(num_omp_threads(i32::MAX) as usize)
+        .build_global();
+    let band_rows = (8 * num_threads).min(ny) as usize;
+    let mut band = vec![0f32; band_rows * nx];
+    let mut row0 = 0;
+    while row0 < ny {
+        let rows = (band_rows as i32).min(ny - row0) as usize;
+        band[..rows * nx]
+            .par_chunks_mut(nx)
+            .enumerate()
+            .for_each_init(new_vals, |(f_vals, i_vals), (k, row)| {
+                let oy = row0 + k as i32;
+                for (ox, out) in row.iter_mut().enumerate() {
+                    *out = median_at(ox as i32, oy, f_vals, i_vals);
+                }
+            });
+        for k in 0..rows {
+            for ox in 0..nx {
+                slice_put_val(
+                    sl_out,
+                    ox as i32,
+                    row0 + k as i32,
+                    [band[ox + k * nx], 0., 0., 0.],
+                );
+            }
+        }
+        row0 += rows as i32;
     }
     0
 }

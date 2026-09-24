@@ -1,7 +1,13 @@
 //! Translation of `IMOD/libcfshr/taperatfill.c`.
 
+use crate::imod::libcfshr::b3dutil::num_omp_threads;
 use crate::imod::libcfshr::islice::{Islice, MrcData, slice_get_val, slice_init, slice_put_val};
+use rayon::iter::ParallelIterator;
+use rayon::slice::ParallelSlice;
 use std::sync::Mutex;
+
+/// Guards the one attempt this unit makes to size rayon's global pool.
+static RAYON_POOL: std::sync::Once = std::sync::Once::new();
 
 const MAX_TAPER: i32 = 256;
 const MAX_AVG_OUT: usize = 16;
@@ -194,72 +200,124 @@ pub fn slice_taper_at_fill(sl: &mut Islice, mut ntaper: i32, inside: bool) -> i3
         // only the store to `fillpart` rounds.
         fillpart[i as usize] = ((1. - fracs[i as usize] as f64) * fillval as f64) as f32;
     }
-    for (dx, dy, edgeind) in plist {
-        let mut distmin = [0_i32; MAX_AVG_OUT];
-        let mut minedge = [0_usize; MAX_AVG_OUT];
-        distmin[0] = dx as i32 * dx as i32 + dy as i32 * dy as i32;
-        minedge[0] = edgeind;
-        let mut num_mins = 1usize;
-        let distmax = (1.5 * (distmin[0].max(tapersq)) as f32) as i32;
-        let px = elist[edgeind].0 + dx as i32;
-        let py = elist[edgeind].1 + dy as i32;
-        for walkdir in [-1_i32, 1] {
-            let mut k = edgeind;
-            for _ in 0..elist.len() {
-                k = ((k as i32 + walkdir + elist.len() as i32) % elist.len() as i32) as usize;
-                let xx = px - elist[k].0;
-                let yy = py - elist[k].1;
-                let dist = xx * xx + yy * yy;
-                if dist < distmin[num_mins - 1] || (inside == 0 && num_mins < 15) {
-                    if inside != 0 {
-                        distmin[0] = dist;
-                        minedge[0] = k;
-                    } else {
-                        let mut newind = num_mins.min(14);
-                        while newind > 0 && dist < distmin[newind - 1] {
-                            newind -= 1;
-                        }
-                        let mut mm = 13.min(num_mins - 1);
-                        while mm >= newind {
-                            distmin[mm + 1] = distmin[mm];
-                            minedge[mm + 1] = minedge[mm];
-                            if mm == 0 {
-                                break;
+    /* Process the pixels on the list. This loop had good parallel efficiency */
+    // `taperatfill.c:286-290`: `numThreads = B3DNINT(sqrt(plsize) / 60.)`,
+    // clamped to `1..=maxThreads` (16), then `numOMPthreads`, and an OpenMP
+    // `parallel for` over the list.  The iterations are independent: each
+    // writes only its own pixel `(ix, iy)`, and `pixmap` put every pixel on
+    // the list at most once.  An inside taper reads only that same pixel; an
+    // outside taper reads only edge pixels, which the border walk takes only
+    // where the value is not the fill value, while an outside list pixel was
+    // taken only where it *is* the fill value — so no iteration reads a pixel
+    // another iteration writes, and nothing accumulates across iterations.
+    // The writes are scattered, so they cannot be handed out as contiguous
+    // `&mut` slices; instead each iteration's value is computed from a shared
+    // borrow of the slice (by the same closure on one thread or many), and
+    // the stores are made afterwards in list order.  Since no computation
+    // reads a stored pixel, the order of stores cannot change a value, and
+    // neither the schedule nor the thread count can change a byte.  With one
+    // thread each store follows its computation directly, as before.
+    let mut num_threads = ((plist.len() as f64).sqrt() / 60. + 0.5).floor() as i32;
+    num_threads = 1.max(16.min(num_threads));
+    let num_threads = num_omp_threads(num_threads);
+    let compute =
+        |sl: &Islice, &(dx, dy, edgeind): &(i16, i16, usize)| -> Option<(i32, i32, [f32; 4])> {
+            let mut distmin = [0_i32; MAX_AVG_OUT];
+            let mut minedge = [0_usize; MAX_AVG_OUT];
+            distmin[0] = dx as i32 * dx as i32 + dy as i32 * dy as i32;
+            minedge[0] = edgeind;
+            let mut num_mins = 1usize;
+            let distmax = (1.5 * (distmin[0].max(tapersq)) as f32) as i32;
+            let px = elist[edgeind].0 + dx as i32;
+            let py = elist[edgeind].1 + dy as i32;
+            for walkdir in [-1_i32, 1] {
+                let mut k = edgeind;
+                for _ in 0..elist.len() {
+                    k = ((k as i32 + walkdir + elist.len() as i32) % elist.len() as i32) as usize;
+                    let xx = px - elist[k].0;
+                    let yy = py - elist[k].1;
+                    let dist = xx * xx + yy * yy;
+                    if dist < distmin[num_mins - 1] || (inside == 0 && num_mins < 15) {
+                        if inside != 0 {
+                            distmin[0] = dist;
+                            minedge[0] = k;
+                        } else {
+                            let mut newind = num_mins.min(14);
+                            while newind > 0 && dist < distmin[newind - 1] {
+                                newind -= 1;
                             }
-                            mm -= 1;
+                            let mut mm = 13.min(num_mins - 1);
+                            while mm >= newind {
+                                distmin[mm + 1] = distmin[mm];
+                                minedge[mm + 1] = minedge[mm];
+                                if mm == 0 {
+                                    break;
+                                }
+                                mm -= 1;
+                            }
+                            num_mins = (num_mins + 1).min(15);
+                            distmin[newind] = dist;
+                            minedge[newind] = k;
                         }
-                        num_mins = (num_mins + 1).min(15);
-                        distmin[newind] = dist;
-                        minedge[newind] = k;
+                    }
+                    if dist > distmax {
+                        break;
                     }
                 }
-                if dist > distmax {
-                    break;
+            }
+            let find = (10.0 * ((distmin[0] as f64).sqrt() + inside as f64)) as i32;
+            if find > ntaper * 10 {
+                return None;
+            }
+            let mut val = [0.; 4];
+            if inside != 0 {
+                slice_get_val(sl, px, py, &mut val);
+            } else {
+                let (mut wsum, mut valsum) = (0., 0.);
+                for mm in 0..num_mins {
+                    // `taperatfill.c:319` is `weight = 1. / (4. + sqrt(distmin[mm]))`
+                    // with `weight` a float: the whole reciprocal is computed in
+                    // double and rounded once, not `(4 + sqrt)` rounded first.
+                    let weight = (1. / (4. + (distmin[mm] as f64).sqrt())) as f32;
+                    wsum += weight;
+                    slice_get_val(sl, elist[minedge[mm]].0, elist[minedge[mm]].1, &mut val);
+                    valsum += weight * val[0];
                 }
+                val[0] = valsum / wsum;
+            }
+            val[0] = fracs[find as usize] * val[0] + fillpart[find as usize];
+            Some((px, py, val))
+        };
+    if num_threads > 1 {
+        // Native's OpenMP runtime creates at most `omp_get_num_procs()`
+        // workers and `numOMPthreads` never asks for more than the
+        // physical-core count (or whatever `OMP_NUM_THREADS` /
+        // `IMOD_FORCE_OMP_THREADS` allow); rayon's default global pool is
+        // sized from logical processors, so it is bounded to the same count.
+        // `build_global` succeeds for whichever translated unit reaches it
+        // first and is a harmless `Err` afterwards.
+        // The `Once` makes that attempt happen once per process rather
+        // than on every call.
+        RAYON_POOL.call_once(|| {
+            let _ = rayon::ThreadPoolBuilder::new()
+                .num_threads(num_omp_threads(i32::MAX) as usize)
+                .build_global();
+        });
+        let per_group = plist.len().div_ceil(num_threads as usize).max(1);
+        let sl_shared: &Islice = &*sl;
+        let results: Vec<Option<(i32, i32, [f32; 4])>> = plist
+            .par_chunks(per_group)
+            .flat_map_iter(|group| group.iter().map(|entry| compute(sl_shared, entry)))
+            .collect();
+        for (px, py, val) in results.into_iter().flatten() {
+            slice_put_val(sl, px, py, val);
+        }
+    } else {
+        for entry in &plist {
+            if let Some((px, py, val)) = compute(sl, entry) {
+                slice_put_val(sl, px, py, val);
             }
         }
-        let find = (10.0 * ((distmin[0] as f64).sqrt() + inside as f64)) as i32;
-        if find > ntaper * 10 {
-            continue;
-        }
-        let mut val = [0.; 4];
-        if inside != 0 {
-            slice_get_val(sl, px, py, &mut val);
-        } else {
-            let (mut wsum, mut valsum) = (0., 0.);
-            for mm in 0..num_mins {
-                // `taperatfill.c:319` is `weight = 1. / (4. + sqrt(distmin[mm]))`
-                // with `weight` a float: the whole reciprocal is computed in
-                // double and rounded once, not `(4 + sqrt)` rounded first.
-                let weight = (1. / (4. + (distmin[mm] as f64).sqrt())) as f32;
-                wsum += weight;
-                slice_get_val(sl, elist[minedge[mm]].0, elist[minedge[mm]].1, &mut val);
-                valsum += weight * val[0];
-            }
-            val[0] = valsum / wsum;
-        }
-        val[0] = fracs[find as usize] * val[0] + fillpart[find as usize];
-        slice_put_val(sl, px, py, val);
     }
     0
 }

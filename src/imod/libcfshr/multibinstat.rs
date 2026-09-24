@@ -1,13 +1,18 @@
 //! Translation of `IMOD/libcfshr/multibinstat.c`: measure local mean/SD in an
 //! array of boxes at multiple binnings.
 
-use crate::imod::libcfshr::b3dutil::{CArg, ImodFile, c_format};
+use crate::imod::libcfshr::b3dutil::{CArg, ImodFile, c_format, num_omp_threads};
 use crate::imod::libcfshr::reduce_by_binning::bin_into_slice;
 use crate::imod::libcfshr::simplestat::sums_to_avg_sd;
 use crate::imod::libcfshr::zoomdown::{
     SLICE_MODE_FLOAT, ZoomLines, ZoomOut, select_zoom_filter, zoom_with_filter,
 };
+use rayon::iter::{IndexedParallelIterator, ParallelIterator};
+use rayon::slice::ParallelSliceMut;
 use std::io::Write;
+
+/// Guards the one attempt this unit makes to size rayon's global pool.
+static RAYON_POOL: std::sync::Once = std::sync::Once::new();
 
 pub const MAX_MBS_SCALES: usize = 20;
 
@@ -294,25 +299,81 @@ pub fn multi_bin_stats(
                 {
                     /* In each box, add in all the pixels in the box */
                     /* TODO: find out how effective this is! */
-                    // The `numOMPthreads(8)` `parallel for` over `iyBox` is
-                    // not reproduced; each box accumulates independently.
-                    for iy_box in 0..num_boxes[scl][1] {
-                        let iy_start = box_start[scl][1] + box_spacing[scl][1] * iy_box;
-                        for ix_box in 0..num_boxes[scl][0] {
-                            let ix_start = box_start[scl][0] + box_spacing[scl][0] * ix_box;
-                            let box_ind = stat_start_inds[scl]
-                                + (iz_box * num_boxes[scl][1] + iy_box) * num_boxes[scl][0]
-                                + ix_box;
-                            for iy in iy_start..iy_start + box_size[scl][1] {
-                                let buf_base = buffer_start_inds[scl] + nx_bin[scl] * iy;
-                                for ix in ix_start..ix_start + box_size[scl][0] {
-                                    let pixel =
-                                        bin_part[(buf_base + ix - buffer_start_inds[0]) as usize];
-                                    means[box_ind as usize] += pixel;
-                                    sds[box_ind as usize] += pixel * pixel;
+                    // `multibinstat.c:201-204`: `numOMPthreads(8)` and an
+                    // OpenMP `parallel for` over `iyBox`.  For the fixed
+                    // `scl` and `izBox`, iteration `iyBox` writes only
+                    // `means`/`SDs[statStartInds[scl] + (izBox * nyBox +
+                    // iyBox) * nxBox + ixBox]` for `0 <= ixBox < nxBox` — a
+                    // contiguous run of `nxBox` elements that no other
+                    // iteration touches — and each element's `+=` runs over
+                    // `iy` then `ix` inside that one iteration, sequentially.
+                    // The sum accumulated here is per *box*, not across
+                    // iterations, and `buffer` is only read, so neither the
+                    // schedule nor the thread count can change a byte.  Each
+                    // group of `iyBox` rows owns its own slices of `means`
+                    // and `SDs`, so `boxInd` is taken relative to the group.
+                    let num_threads = num_omp_threads(8);
+                    let nx_box = num_boxes[scl][0] as usize;
+                    let ny_box = num_boxes[scl][1] as usize;
+                    let plane = (stat_start_inds[scl]
+                        + iz_box * num_boxes[scl][1] * num_boxes[scl][0])
+                        as usize;
+                    let rows_per_group = if num_threads > 1 {
+                        ny_box.div_ceil(num_threads as usize).max(1)
+                    } else {
+                        ny_box
+                    };
+                    let bin_part: &[f32] = &*bin_part;
+                    let run_group = |(g, (mrows, srows)): (usize, (&mut [f32], &mut [f32]))| {
+                        let iy_box0 = (g * rows_per_group) as i32;
+                        let iy_box1 = iy_box0 + (mrows.len() / nx_box) as i32;
+                        for iy_box in iy_box0..iy_box1 {
+                            let iy_start = box_start[scl][1] + box_spacing[scl][1] * iy_box;
+                            for ix_box in 0..num_boxes[scl][0] {
+                                let ix_start = box_start[scl][0] + box_spacing[scl][0] * ix_box;
+                                let box_ind = (iy_box - iy_box0) * num_boxes[scl][0] + ix_box;
+                                for iy in iy_start..iy_start + box_size[scl][1] {
+                                    let buf_base = buffer_start_inds[scl] + nx_bin[scl] * iy;
+                                    for ix in ix_start..ix_start + box_size[scl][0] {
+                                        let pixel = bin_part
+                                            [(buf_base + ix - buffer_start_inds[0]) as usize];
+                                        mrows[box_ind as usize] += pixel;
+                                        srows[box_ind as usize] += pixel * pixel;
+                                    }
                                 }
                             }
                         }
+                    };
+                    let plane_means = &mut means[plane..plane + ny_box * nx_box];
+                    let plane_sds = &mut sds[plane..plane + ny_box * nx_box];
+                    if num_threads > 1 {
+                        // Native's OpenMP runtime creates at most
+                        // `omp_get_num_procs()` workers and `numOMPthreads`
+                        // never asks for more than the physical-core count
+                        // (or whatever `OMP_NUM_THREADS` /
+                        // `IMOD_FORCE_OMP_THREADS` allow); rayon's default
+                        // global pool is sized from logical processors, so it
+                        // is bounded to the same count.  `build_global`
+                        // succeeds for whichever translated unit reaches it
+                        // first and is a harmless `Err` afterwards.
+                        // The `Once` makes that attempt happen once per process rather
+                        // than on every call.
+                        RAYON_POOL.call_once(|| {
+                            let _ = rayon::ThreadPoolBuilder::new()
+                                .num_threads(num_omp_threads(i32::MAX) as usize)
+                                .build_global();
+                        });
+                        plane_means
+                            .par_chunks_mut(rows_per_group * nx_box)
+                            .zip(plane_sds.par_chunks_mut(rows_per_group * nx_box))
+                            .enumerate()
+                            .for_each(run_group);
+                    } else {
+                        plane_means
+                            .chunks_mut(rows_per_group * nx_box)
+                            .zip(plane_sds.chunks_mut(rows_per_group * nx_box))
+                            .enumerate()
+                            .for_each(run_group);
                     }
 
                     iz_box -= 1;
