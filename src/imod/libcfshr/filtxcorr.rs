@@ -522,9 +522,69 @@ pub fn apply_kernel_filter(
         (ny as usize).max(1)
     };
     let above = k - 1 - k / 2;
+    // Bounds checks in the unclamped interior loop.  There
+    // `iyo in below..ny - above` and `ixo in below..nx - above`, so every tap
+    // reads `aiy = iyo - below + iy` in `0..=iyo + above <= ny - 1` and
+    // `aix` in `0..=nx - 1`, i.e. `a[aix + aiy * d]` with the index at most
+    // `(nx - 1) + (ny - 1) * d`, and `mat[ix + iy * k]` below `k * k`.  So when
+    // that largest index is inside `a` (and inside `i32`, the type the index
+    // is formed in) and `mat` holds `k * k` weights, no read can be out of
+    // bounds; the store bound is checked per group below.  When any of it
+    // fails the checked loop runs.  Both paths are the same macro body: the
+    // same products, summed into the same `f32` in the same `iy`/`ix` order;
+    // `k == 3` (every fixed kernel `clip` uses) is instantiated with the
+    // literal so the compiler can unroll it, which changes no operation.
+    let interior_reads_ok =
+        k >= 1 && nx >= 1 && ny >= 1 && d >= 0 && mat.len() >= k as usize * k as usize && {
+            let last = (nx - 1) as i64 + (ny - 1) as i64 * d as i64;
+            last <= i32::MAX as i64 && (last as u64) < a.len() as u64
+        };
     let run_group = |(g, brows): (usize, &mut [f32])| {
         let oy0 = (g * rows_per_group) as i32;
         let oy1 = ((g + 1) * rows_per_group).min(ny as usize) as i32;
+        // Stores go to `brows[ixo + (iyo - oy0) * d]` with `ixo <= nx - 1` and
+        // `iyo <= oy1 - 1`.
+        let unchecked = interior_reads_ok
+            && oy1 > oy0
+            && ((nx - 1) as i64 + (oy1 - 1 - oy0) as i64 * d as i64) < brows.len() as i64;
+        macro_rules! checked_at {
+            ($v:expr, $i:expr) => {
+                $v[$i]
+            };
+        }
+        macro_rules! unchecked_at {
+            ($v:expr, $i:expr) => {
+                // SAFETY: `interior_reads_ok` above bounds every index.
+                unsafe { *$v.get_unchecked($i) }
+            };
+        }
+        macro_rules! interior {
+            ($kk:expr, $at:ident, $iyo:expr, $brows:expr, $store:ident) => {
+                for ixo in below..nx - above {
+                    let mut sum = 0.;
+                    for iy in 0..$kk {
+                        let aiy = iy + $iyo - below;
+                        for ix in 0..$kk {
+                            let aix = ix + ixo - below;
+                            sum += $at!(mat, (ix + iy * $kk) as usize)
+                                * $at!(a, (aix + aiy * d) as usize);
+                        }
+                    }
+                    $store!($brows, (ixo + ($iyo - oy0) * d) as usize, sum);
+                }
+            };
+        }
+        macro_rules! checked_store {
+            ($v:expr, $i:expr, $x:expr) => {
+                $v[$i] = $x
+            };
+        }
+        macro_rules! unchecked_store {
+            ($v:expr, $i:expr, $x:expr) => {
+                // SAFETY: `unchecked` above bounds every store index.
+                unsafe { *$v.get_unchecked_mut($i) = $x }
+            };
+        }
         for iyo in oy0..oy1 {
             // `filtxcorr.c:1788-1822`: the interior columns of an interior
             // row take no clamps; the border rows, and the `below`/`above`
@@ -535,18 +595,12 @@ pub fn apply_kernel_filter(
             if iyo < below || iyo >= ny - above {
                 nregion = 1;
                 xend = nx;
+            } else if unchecked && k == 3 {
+                interior!(3, unchecked_at, iyo, brows, unchecked_store);
+            } else if unchecked {
+                interior!(k, unchecked_at, iyo, brows, unchecked_store);
             } else {
-                for ixo in below..nx - above {
-                    let mut sum = 0.;
-                    for iy in 0..k {
-                        let aiy = iy + iyo - below;
-                        for ix in 0..k {
-                            let aix = ix + ixo - below;
-                            sum += mat[(ix + iy * k) as usize] * a[(aix + aiy * d) as usize];
-                        }
-                    }
-                    brows[(ixo + (iyo - oy0) * d) as usize] = sum;
-                }
+                interior!(k, checked_at, iyo, brows, checked_store);
             }
             for _ireg in 0..nregion {
                 for ixo in xstr..xend {

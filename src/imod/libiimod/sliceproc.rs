@@ -469,10 +469,13 @@ pub fn slice_median_filter(sl_out: &mut Islice, stack: &[Islice], size: i32) -> 
                         let d = slice.data.s();
                         for iy in y_start..y_end {
                             let start = (x_start + iy * sl_in.xsize) as usize;
-                            for &v in &d[start..start + row_len] {
-                                i_vals[out] = v as i32;
-                                out += 1;
+                            for (dst, &v) in i_vals[out..out + row_len]
+                                .iter_mut()
+                                .zip(&d[start..start + row_len])
+                            {
+                                *dst = v as i32;
                             }
+                            out += row_len;
                         }
                     }
                 }
@@ -481,10 +484,13 @@ pub fn slice_median_filter(sl_out: &mut Islice, stack: &[Islice], size: i32) -> 
                         let d = slice.data.us();
                         for iy in y_start..y_end {
                             let start = (x_start + iy * sl_in.xsize) as usize;
-                            for &v in &d[start..start + row_len] {
-                                i_vals[out] = v as i32;
-                                out += 1;
+                            for (dst, &v) in i_vals[out..out + row_len]
+                                .iter_mut()
+                                .zip(&d[start..start + row_len])
+                            {
+                                *dst = v as i32;
                             }
+                            out += row_len;
                         }
                     }
                 }
@@ -493,10 +499,13 @@ pub fn slice_median_filter(sl_out: &mut Islice, stack: &[Islice], size: i32) -> 
                         let d = slice.data.b();
                         for iy in y_start..y_end {
                             let start = (x_start + iy * sl_in.xsize) as usize;
-                            for &v in &d[start..start + row_len] {
-                                i_vals[out] = v as i32;
-                                out += 1;
+                            for (dst, &v) in i_vals[out..out + row_len]
+                                .iter_mut()
+                                .zip(&d[start..start + row_len])
+                            {
+                                *dst = v as i32;
                             }
+                            out += row_len;
                         }
                     }
                 }

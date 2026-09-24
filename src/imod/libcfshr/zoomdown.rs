@@ -18,7 +18,6 @@ pub use crate::imod::libiimod::mrcslice::{
     SLICE_MODE_BYTE, SLICE_MODE_FLOAT, SLICE_MODE_RGB, SLICE_MODE_SHORT, SLICE_MODE_USHORT,
 };
 use core::cell::Cell;
-use rayon::iter::{IntoParallelIterator, ParallelIterator};
 
 /// Original `fn_proc` (`zoomdown.c:70`).
 pub type FnProc = fn(f64) -> f64;
@@ -580,11 +579,13 @@ pub fn zoom_with_filter(
             );
 
             /* Zero the scanline accum buffer */
-            for i in 0..(a_xsize * psize_accum / 4) as usize {
-                match &mut *accum {
-                    AccumBuf::Int(v) => v[i] = 0,
-                    AccumBuf::Float(v) => v[i] = 0.,
-                }
+            // `zoomdown.c:382-383` stores the `int` 0 into each of the first
+            // `aXsize * psizeAccum / 4` words; for the float view that word is
+            // `+0.0`, which is what `0.` stores.  The buffer's variant is fixed
+            // for the call, so it is chosen once rather than per element.
+            match &mut *accum {
+                AccumBuf::Int(v) => v[..(a_xsize * psize_accum / 4) as usize].fill(0),
+                AccumBuf::Float(v) => v[..(a_xsize * psize_accum / 4) as usize].fill(0.),
             }
 
             /* loop over source scanlines that influence this dest scanline */
@@ -682,7 +683,22 @@ pub fn zoom_with_filter(
         let _ = rayon::ThreadPoolBuilder::new()
             .num_threads(num_omp_threads(i32::MAX) as usize)
             .build_global();
-        tasks.into_par_iter().for_each(&run_group);
+        // OpenMP's master thread is a member of the team: with `numThreads`
+        // threads it runs one partition itself and `numThreads - 1` workers run
+        // the rest.  `in_place_scope` does the same — the calling thread runs
+        // the first partition while the others go to the pool — so the caller
+        // is busy rather than blocked for the length of the region, exactly as
+        // the source's master is.  The partitions, and so the output, are the
+        // ones built above; only which thread runs partition 0 differs.
+        let run_group = &run_group;
+        let mut tasks = tasks.into_iter();
+        let first = tasks.next().unwrap();
+        rayon::in_place_scope(|s| {
+            for task in tasks {
+                s.spawn(move |_| run_group(task));
+            }
+            run_group(first);
+        });
     } else {
         tasks.into_iter().for_each(run_group);
     }
@@ -933,8 +949,12 @@ fn scanline_accum(
     match dtype {
         SLICE_MODE_BYTE => {
             if let (ZoomLine::Byte(lb), AccumBuf::Int(ab)) = (lineb, &mut *accum_buf) {
-                for i in 0..a_xsize as usize {
-                    ab[i] = ab[i].wrapping_add((sweight as i32).wrapping_mul(lb[i] as i32));
+                // Element-wise over the first `aXsize` of each buffer (bounds
+                // taken once as slices); each element gets the same single
+                // update as before, and no element depends on another.
+                let n = a_xsize as usize;
+                for (a, &l) in ab[..n].iter_mut().zip(&lb[..n]) {
+                    *a = a.wrapping_add((sweight as i32).wrapping_mul(l as i32));
                 }
             }
         }
@@ -953,8 +973,11 @@ fn scanline_accum(
         SLICE_MODE_FLOAT => {
             if let (ZoomLine::Float(linef), AccumBuf::Float(accum_fbuf)) = (lineb, &mut *accum_buf)
             {
-                for i in 0..a_xsize as usize {
-                    accum_fbuf[i] += fweight * linef[i];
+                // As for bytes: one `f32` multiply then one `f32` add per
+                // element, independent across elements.
+                let n = a_xsize as usize;
+                for (a, &l) in accum_fbuf[..n].iter_mut().zip(&linef[..n]) {
+                    *a += fweight * l;
                 }
             }
         }
@@ -962,8 +985,9 @@ fn scanline_accum(
         SLICE_MODE_SHORT => {
             if let (ZoomLine::Short(lines), AccumBuf::Float(accum_fbuf)) = (lineb, &mut *accum_buf)
             {
-                for i in 0..a_xsize as usize {
-                    accum_fbuf[i] += fweight * lines[i] as f32;
+                let n = a_xsize as usize;
+                for (a, &l) in accum_fbuf[..n].iter_mut().zip(&lines[..n]) {
+                    *a += fweight * l as f32;
                 }
             }
         }
@@ -972,8 +996,9 @@ fn scanline_accum(
             if let (ZoomLine::UShort(lineus), AccumBuf::Float(accum_fbuf)) =
                 (lineb, &mut *accum_buf)
             {
-                for i in 0..a_xsize as usize {
-                    accum_fbuf[i] += fweight * lineus[i] as f32;
+                let n = a_xsize as usize;
+                for (a, &l) in accum_fbuf[..n].iter_mut().zip(&lineus[..n]) {
+                    *a += fweight * l as f32;
                 }
             }
         }

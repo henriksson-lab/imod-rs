@@ -37,8 +37,6 @@ const MAX_IMOD_ERROR_STRING: usize = 512;
 const MAX_LOCK_FILES: usize = 8;
 /// `b3dutil.c:1844`.
 const NUM_LOCK_BYTES: i64 = 1024;
-/// `b3dutil.c:970`.
-const SEEK_LIMIT: i32 = 2_000_000_000;
 const WRITE_SBYTES_DEFAULT: i32 = 1;
 const WRITE_SBYTES_ENV_VAR: &str = "WRITE_MODE0_SIGNED";
 const WRITE_FLOATS_16BIT: &str = "IMOD_WRITE_FLOATS_16BIT";
@@ -176,6 +174,14 @@ pub enum ImodFile {
 pub struct CFile {
     /// `None` only for the instant a direction change moves the file out.
     state: Option<CState>,
+    /// The logical position while reading, once a seek has established it
+    /// (`None` otherwise).  It lets an absolute seek that lands inside the
+    /// unread part of the read buffer move within it, as glibc's `fseek` does
+    /// (`_IO_new_file_seekoff`, "if destination is within current buffer,
+    /// optimize"), instead of discarding the buffer and re-reading it.
+    /// Sequential chunk reads that each seek to the next chunk -- every
+    /// binned `newstack`/`binvol` read -- otherwise read each block twice.
+    read_pos: Option<u64>,
 }
 
 enum CState {
@@ -191,6 +197,7 @@ impl CFile {
     fn new(f: std::fs::File) -> CFile {
         CFile {
             state: Some(CState::Idle(f)),
+            read_pos: None,
         }
     }
 
@@ -233,6 +240,7 @@ impl CFile {
     /// The stream in its writing state: read-ahead is discarded and the
     /// descriptor moved back to the logical position first.
     fn writer(&mut self) -> std::io::Result<&mut std::io::BufWriter<std::fs::File>> {
+        self.read_pos = None;
         if !matches!(self.state, Some(CState::Writing(_))) {
             let f = match self.state.take().unwrap() {
                 CState::Idle(f) => f,
@@ -269,9 +277,29 @@ impl CFile {
     fn seek(&mut self, pos: SeekFrom) -> std::io::Result<u64> {
         match self.state.as_mut().unwrap() {
             CState::Idle(f) => f.seek(pos),
-            CState::Reading(r) => r.seek(pos),
+            CState::Reading(r) => {
+                if let (SeekFrom::Start(target), Some(current)) = (pos, self.read_pos) {
+                    if target >= current && target - current <= r.buffer().len() as u64 {
+                        r.seek_relative((target - current) as i64)?;
+                        self.read_pos = Some(target);
+                        return Ok(target);
+                    }
+                }
+                let result = r.seek(pos);
+                self.read_pos = result.as_ref().ok().copied();
+                result
+            }
             CState::Writing(w) => w.seek(pos),
         }
+    }
+
+    /// `fread` through the read buffer, keeping `read_pos` current.
+    fn read(&mut self, buf: &mut [u8]) -> std::io::Result<usize> {
+        let n = self.reader()?.read(buf)?;
+        if let Some(p) = self.read_pos.as_mut() {
+            *p += n as u64;
+        }
+        Ok(n)
     }
 }
 
@@ -446,7 +474,7 @@ impl Drop for ImodFile {
 impl Read for ImodFile {
     fn read(&mut self, buf: &mut [u8]) -> std::io::Result<usize> {
         match self {
-            ImodFile::File(f) => f.borrow_mut().reader()?.read(buf),
+            ImodFile::File(f) => f.borrow_mut().read(buf),
             // The C stream, not `std::io::stdin()` — see the extern block.
             ImodFile::Stdin => {
                 let n = unsafe { libc::fread(buf.as_mut_ptr().cast(), 1, buf.len(), stdin) };
@@ -1609,36 +1637,43 @@ pub fn b3d_rewind(file: &mut ImodFile) {
     b3d_fseek(file, 0, SEEK_SET);
 }
 /// Matches C `mrc_big_seek` (`b3dutil.c:976`).
-pub fn mrc_big_seek(file: &mut ImodFile, base: i32, size1: i32, size2: i32, mut flag: i32) -> i32 {
-    if base != 0 || ((size1 == 0 || size2 == 0) && flag == SEEK_SET) {
-        let err = b3d_fseek(file, base, flag);
-        if err != 0 {
-            return err;
-        }
-        flag = SEEK_CUR;
-    }
-    if size1 == 0 || size2 == 0 {
+///
+/// The live branch on this platform is the `USE_SYSTEM_FSEEK` one
+/// (`b3dutil.c:978-996`): the build's generated `imodconfig.h` defines
+/// `USE_SYSTEM_FSEEK` (`/tmp/imod-reference-build/include/imodconfig.h:12`,
+/// written by `IMOD/setup`), and neither `WIN32_BIGFILE` nor `MAC103_BIGFILE`
+/// is set, so the whole seek is one
+/// `fseek(fp, (long)size1 * (long)size2 + base, flag)`.  An earlier
+/// translation took the `#else` arm -- a base seek followed by stepped
+/// `SEEK_CUR` seeks under 2 GB each -- which lands in the same place but
+/// splits every seek in two.  The intermediate position fell outside the read
+/// buffer, so each chunk of a binned read discarded and re-read its block, and
+/// `newstack -bin 2` read its input twice.
+///
+/// The one kept difference is `stdin`: `fseek` on the C `stdin` stream
+/// would reposition that stream, while the other seek routines here return
+/// early for it (`b3dFseek`, `b3dutil.c:910`); an MRC is never read from a
+/// pipe, and this keeps the previous behaviour rather than seeking the
+/// descriptor underneath a C stream it does not own.
+pub fn mrc_big_seek(file: &mut ImodFile, base: i32, size1: i32, size2: i32, flag: i32) -> i32 {
+    if file.is_stdin() {
         return 0;
     }
-    let abs1 = size1.abs();
-    let abs2 = size2.abs();
-    let smaller = abs1.min(abs2);
-    let mut bigger = abs1.max(abs2);
-    let step_limit = SEEK_LIMIT / bigger;
-    let mut todo = smaller;
-    if (size1 < 0) != (size2 < 0) {
-        bigger = -bigger;
-    }
-    while todo > 0 {
-        let doing = todo.min(step_limit);
-        let err = b3d_fseek(file, doing * bigger, flag);
-        if err != 0 {
-            return err;
+    let offset = size1 as i64 * size2 as i64 + base as i64;
+    let position = if flag == SEEK_SET {
+        if offset < 0 {
+            return -1;
         }
-        todo -= doing;
-        flag = SEEK_CUR;
+        SeekFrom::Start(offset as u64)
+    } else if flag == SEEK_CUR {
+        SeekFrom::Current(offset)
+    } else {
+        SeekFrom::End(offset)
+    };
+    match file.seek(position) {
+        Ok(_) => 0,
+        Err(_) => -1,
     }
-    0
 }
 /// Matches C `mrcHugeSeek` (`b3dutil.c:1046`).
 pub fn mrc_huge_seek(

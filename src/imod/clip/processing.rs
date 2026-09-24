@@ -2327,11 +2327,16 @@ fn write_byte_pixel(mut pixel: f32, hout: &mut MrcHeader) {
     if hout.bytes_signed != 0 {
         byte = ((byte as i32 - 128) & 255) as u8;
     }
+    // Borrow the stream rather than cloning it: dropping an `ImodFile`
+    // clone flushes the shared buffer (`b3dutil.rs`, `Drop for ImodFile`), so
+    // a clone per call turned each byte into its own `write` syscall — `clip
+    // color` ran ~40x slower than native.  The C writes through its buffered
+    // `FILE *`.
     crate::imod::libcfshr::b3dutil::b3d_fwrite(
         core::slice::from_ref(&byte),
         1,
         1,
-        &mut hout.fp.clone().unwrap(),
+        hout.fp.as_mut().unwrap(),
     );
 }
 /// Matches C++ `clip2d_color`.
@@ -5077,6 +5082,16 @@ pub fn clip_stat(hin: &mut MrcHeader, opt: &mut ClipOptions) -> Result<(), i32> 
                         process_pixel!(m, x as i32, y);
                     }
                 }
+                // Byte takes the source's `default:` arm, whose
+                // `sliceGetPixelMagnitude` returns the byte widened to
+                // `float` for a one-component slice.  Reading the row directly
+                // hands `PROCESS_PIXEL` the identical value in the same order.
+                crate::imod::libiimod::mrcslice::SLICE_MODE_BYTE if s.csize == 1 => {
+                    let row = &s.data.b()[(s.xsize * y) as usize..][..s.xsize as usize];
+                    for (x, &m) in row.iter().enumerate() {
+                        process_pixel!(m as f32, x as i32, y);
+                    }
+                }
                 _ => {
                     for x in 0..s.xsize {
                         process_pixel!(slice_get_pixel_magnitude(s.as_ref(), x, y), x, y);
@@ -5449,9 +5464,15 @@ pub fn clip_histogram(hin: &mut MrcHeader, opt: &mut ClipOptions) -> i32 {
         // `processing.cpp:3862-3876`: `if (floatVals)` at row level, with a
         // separate column loop for each arm.
         for y in 0..ny {
+            // `sliceGetPixelMagnitude` is called per pixel in the source.
+            // For a one-component slice it returns the element widened to
+            // `float` and nothing else (`slice_get_val` + `csize == 1`), so
+            // for those modes the row is read directly, choosing the element
+            // type once per row: the same `float` reaches the same binning
+            // expression, in the same order.  Other modes keep the call.
+            let row = y as usize * nx as usize..(y as usize + 1) * nx as usize;
             if floating {
-                for x in 0..nx {
-                    let v = slice_get_pixel_magnitude(s.as_ref(), x, y);
+                let mut add = |v: f32| {
                     // `ind = (val - histMin) / delta` converts a float to
                     // `int`.  x86's `cvttss2si` gives INT_MIN for NaN (and for
                     // out-of-range values), which the `ind >= 0` test then
@@ -5463,15 +5484,40 @@ pub fn clip_histogram(hin: &mut MrcHeader, opt: &mut ClipOptions) -> i32 {
                     if ind >= 0 && (ind as usize) < bins.len() {
                         bins[ind as usize] += 1;
                     }
+                };
+                match (s.mode, s.csize) {
+                    (crate::imod::libiimod::mrcslice::SLICE_MODE_FLOAT, 1) => {
+                        s.data.f()[row].iter().for_each(|&v| add(v))
+                    }
+                    _ => {
+                        for x in 0..nx {
+                            add(slice_get_pixel_magnitude(s.as_ref(), x, y));
+                        }
+                    }
                 }
             } else {
-                for x in 0..nx {
-                    let v = slice_get_pixel_magnitude(s.as_ref(), x, y);
+                let mut add = |v: f32| {
                     let ind = v.round() as isize + offset;
                     // `:3873` has no range test; see the deliberate check
                     // recorded in `TO_OPT.md` (the C's is a heap overflow).
                     if ind >= 0 && (ind as usize) < bins.len() {
                         bins[ind as usize] += 1;
+                    }
+                };
+                match (s.mode, s.csize) {
+                    (crate::imod::libiimod::mrcslice::SLICE_MODE_BYTE, 1) => {
+                        s.data.b()[row].iter().for_each(|&v| add(v as f32))
+                    }
+                    (crate::imod::libiimod::mrcslice::SLICE_MODE_SHORT, 1) => {
+                        s.data.s()[row].iter().for_each(|&v| add(v as f32))
+                    }
+                    (crate::imod::libiimod::mrcslice::SLICE_MODE_USHORT, 1) => {
+                        s.data.us()[row].iter().for_each(|&v| add(v as f32))
+                    }
+                    _ => {
+                        for x in 0..nx {
+                            add(slice_get_pixel_magnitude(s.as_ref(), x, y));
+                        }
                     }
                 }
             }

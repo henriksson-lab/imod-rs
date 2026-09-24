@@ -331,49 +331,109 @@ pub fn cubinterp(
 
             if linear == 0 {
                 // Do cubic interpolation on the central region
-                for ix in ixst..=ixnd {
-                    xp = a11 * ix as f32 + xbase;
-                    yp = a21 * ix as f32 + ybase;
-                    ixp = xp as i32;
-                    iyp = yp as i32;
-                    dx = xp - ixp as f32;
-                    dy = yp - iyp as f32;
+                //
+                // Bounds checks: `ixst`/`ixnd` are solved (`:100-121`) so that
+                // every source index below lies inside `array`, but that
+                // derivation goes through float arithmetic, so it is not a
+                // proof by itself.  The proof is this hoisted check.  For a
+                // fixed row, `xp = a11 * ix + xbase` is a monotone function of
+                // `ix` (an exact product by a constant, then one correctly
+                // rounded add, each monotone), and truncation to `i32`
+                // (saturating) is monotone, so `ixp` over `ixst..=ixnd` lies
+                // between its values at the two ends; the same holds for `iyp`.
+                // The loop reads `array[(ixp - 2) + (iyp - 2) * nxa]` up to
+                // `array[(ixp + 1) + (iyp + 1) * nxa]` (0-based), so
+                // `2 <= ixp <= nxa - 2` and `2 <= iyp <= nya - 2` at both ends
+                // bound every index by `nxa * nya - 1 < array.len()` (asserted
+                // above).  The store `ixbase + ix - 1` is inside this group's
+                // slice when `1 <= ixst`, `ixnd <= nxb` and the row fits.  When
+                // the check fails -- including NaN coordinates, which
+                // saturate to 0 -- the checked loop runs instead, so the
+                // arithmetic, its order and every stored value are identical
+                // on both paths; only the index checks differ.
+                macro_rules! at_checked {
+                    ($i:expr) => {
+                        array[$i]
+                    };
+                }
+                macro_rules! at_unchecked {
+                    ($i:expr) => {
+                        // SAFETY: see the hoisted check above.
+                        unsafe { *array.get_unchecked($i) }
+                    };
+                }
+                macro_rules! cubic_span {
+                    ($at:ident, $store:expr) => {
+                        for ix in ixst..=ixnd {
+                            xp = a11 * ix as f32 + xbase;
+                            yp = a21 * ix as f32 + ybase;
+                            ixp = xp as i32;
+                            iyp = yp as i32;
+                            dx = xp - ixp as f32;
+                            dy = yp - iyp as f32;
 
-                    dxm1 = (dx as f64 - 1.) as f32;
-                    dxdxm1 = dx * dxm1;
-                    fx1 = -dxm1 * dxdxm1;
-                    fx4 = dx * dxdxm1;
-                    fx2 = (1. + (dx * dx) as f64 * (dx as f64 - 2.)) as f32;
-                    fx3 = (dx as f64 * (1. - dxdxm1 as f64)) as f32;
+                            dxm1 = (dx as f64 - 1.) as f32;
+                            dxdxm1 = dx * dxm1;
+                            fx1 = -dxm1 * dxdxm1;
+                            fx4 = dx * dxdxm1;
+                            fx2 = (1. + (dx * dx) as f64 * (dx as f64 - 2.)) as f32;
+                            fx3 = (dx as f64 * (1. - dxdxm1 as f64)) as f32;
 
-                    dym1 = (dy as f64 - 1.) as f32;
-                    dydym1 = dy * dym1;
-                    ind = ixp as usize - 1 + (iyp as usize - 1) * llnxa;
-                    indmnxa = ind - llnxa;
-                    indpnxa = ind + llnxa;
-                    indpnxa2 = ind + 2 * llnxa;
-                    v1 = fx1 * array[indmnxa - 1]
-                        + fx2 * array[indmnxa]
-                        + fx3 * array[indmnxa + 1]
-                        + fx4 * array[indmnxa + 2];
-                    v2 = fx1 * array[ind - 1]
-                        + fx2 * array[ind]
-                        + fx3 * array[ind + 1]
-                        + fx4 * array[ind + 2];
-                    v3 = fx1 * array[indpnxa - 1]
-                        + fx2 * array[indpnxa]
-                        + fx3 * array[indpnxa + 1]
-                        + fx4 * array[indpnxa + 2];
-                    v4 = fx1 * array[indpnxa2 - 1]
-                        + fx2 * array[indpnxa2]
-                        + fx3 * array[indpnxa2 + 1]
-                        + fx4 * array[indpnxa2 + 2];
+                            dym1 = (dy as f64 - 1.) as f32;
+                            dydym1 = dy * dym1;
+                            ind = ixp as usize - 1 + (iyp as usize - 1) * llnxa;
+                            indmnxa = ind - llnxa;
+                            indpnxa = ind + llnxa;
+                            indpnxa2 = ind + 2 * llnxa;
+                            v1 = fx1 * $at!(indmnxa - 1)
+                                + fx2 * $at!(indmnxa)
+                                + fx3 * $at!(indmnxa + 1)
+                                + fx4 * $at!(indmnxa + 2);
+                            v2 = fx1 * $at!(ind - 1)
+                                + fx2 * $at!(ind)
+                                + fx3 * $at!(ind + 1)
+                                + fx4 * $at!(ind + 2);
+                            v3 = fx1 * $at!(indpnxa - 1)
+                                + fx2 * $at!(indpnxa)
+                                + fx3 * $at!(indpnxa + 1)
+                                + fx4 * $at!(indpnxa + 2);
+                            v4 = fx1 * $at!(indpnxa2 - 1)
+                                + fx2 * $at!(indpnxa2)
+                                + fx3 * $at!(indpnxa2 + 1)
+                                + fx4 * $at!(indpnxa2 + 2);
 
-                    bray[ixbase + ix as usize - 1] = ((-dym1 * dydym1 * v1) as f64
-                        + (1. + (dy * dy) as f64 * (dy as f64 - 2.)) * v2 as f64
-                        + dy as f64 * (1. - dydym1 as f64) * v3 as f64
-                        + (dy * dydym1 * v4) as f64)
-                        as f32;
+                            let val = ((-dym1 * dydym1 * v1) as f64
+                                + (1. + (dy * dy) as f64 * (dy as f64 - 2.)) * v2 as f64
+                                + dy as f64 * (1. - dydym1 as f64) * v3 as f64
+                                + (dy * dydym1 * v4) as f64) as f32;
+                            $store(ixbase + ix as usize - 1, val);
+                        }
+                    };
+                }
+                let span_in_bounds = ixst <= ixnd && ixst >= 1 && ixnd <= nxb && {
+                    let (pa, qa) = (
+                        (a11 * ixst as f32 + xbase) as i32,
+                        (a21 * ixst as f32 + ybase) as i32,
+                    );
+                    let (pb, qb) = (
+                        (a11 * ixnd as f32 + xbase) as i32,
+                        (a21 * ixnd as f32 + ybase) as i32,
+                    );
+                    let (pmin, pmax) = if pa < pb { (pa, pb) } else { (pb, pa) };
+                    let (qmin, qmax) = if qa < qb { (qa, qb) } else { (qb, qa) };
+                    pmin >= 2
+                        && pmax <= nxa - 2
+                        && qmin >= 2
+                        && qmax <= nya - 2
+                        && ixbase + nxb as usize <= bray.len()
+                };
+                if span_in_bounds {
+                    cubic_span!(at_unchecked, |i: usize, v: f32| {
+                        // SAFETY: `i < ixbase + nxb <= bray.len()`, checked above.
+                        unsafe { *bray.get_unchecked_mut(i) = v }
+                    });
+                } else {
+                    cubic_span!(at_checked, |i: usize, v: f32| bray[i] = v);
                 }
             } else if linear > 0 {
                 // do linear interpolation

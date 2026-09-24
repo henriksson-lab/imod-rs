@@ -10,8 +10,8 @@ use crate::imod::libcfshr::b3dutil::{
     CArg, ImodFile, b3d_fread, b3d_rewind, c_format, c_format_bytes,
 };
 use crate::imod::libcfshr::b3dutil::{
-    b3d_error, b3d_shift_bytes, group_limits_remainder_at_end, imod_getpid, make_all_big_tiff,
-    num_omp_threads,
+    b3d_error, b3d_get_error, b3d_get_store_error, b3d_set_store_error, b3d_shift_bytes,
+    group_limits_remainder_at_end, imod_getpid, make_all_big_tiff, num_omp_threads,
 };
 use crate::imod::libcfshr::parse_params::{strtod, strtol};
 use crate::imod::libcfshr::zoomdown::{select_zoom_filter, zoom_raw_filt_value};
@@ -36,6 +36,8 @@ use chrono::Local;
 // `TIFFFieldInfo` libtiff itself reads, and the `va_list` message handler.
 use core::ffi::{c_char, c_void};
 use core::sync::atomic::{AtomicI32, AtomicPtr, Ordering};
+use rayon::iter::{IndexedParallelIterator, IntoParallelIterator, ParallelIterator};
+use rayon::slice::ParallelSliceMut;
 use std::io::Write;
 use std::sync::Mutex;
 
@@ -291,6 +293,16 @@ struct EerFilters {
     all: Vec<i32>,
     x_start: Vec<i32>,
     y_start: Vec<i32>,
+}
+/// One decoded strip or tile kept on an `ImodImageFile` by `read_section` (Rust-only;
+/// see the decoded-strip cache there).
+#[derive(Clone)]
+pub struct TiffDecodedBlock {
+    directory: i32,
+    tile: bool,
+    index: u32,
+    size: isize,
+    data: Vec<u8>,
 }
 static S_EER_FILTERS: Mutex<EerFilters> = Mutex::new(EerFilters {
     all: Vec::new(),
@@ -593,6 +605,7 @@ pub unsafe fn ii_tiff_check(in_file: *mut ImodImageFile) -> i32 {
     }
 
     (*in_file).backend_handle = tif.cast();
+    (*in_file).tiff_decoded = Vec::new();
     (*in_file).nx = 0;
     (*in_file).ny = 0;
     (*in_file).multiple_sizes = 0;
@@ -1255,6 +1268,7 @@ pub unsafe fn ii_tiff_check(in_file: *mut ImodImageFile) -> i32 {
 }
 /// C `tiffReopen` (`iitif.c:679`).
 pub fn tiff_reopen(in_file: &mut ImodImageFile) -> i32 {
+    in_file.tiff_decoded = Vec::new();
     let tif = unsafe { open_without_b_mode(in_file) };
     if tif.is_null() {
         return 1;
@@ -1285,6 +1299,7 @@ pub fn tiff_close(in_file: &mut ImodImageFile) {
     if !tif.is_null() {
         unsafe { TIFFClose(tif) };
     }
+    in_file.tiff_decoded = Vec::new();
     in_file.backend_handle = core::ptr::null_mut();
     in_file.fp = None;
 }
@@ -1936,6 +1951,7 @@ unsafe fn read_section(
     }
 
     row = in_section / ((*in_file).planes_per_image * samples);
+    let directory = row;
     if auto_group_eer == 0 && set_matching_directory(in_file, row) != 0 {
         b3d_error(
             Some(&mut ImodFile::Stderr),
@@ -2079,14 +2095,17 @@ unsafe fn read_section(
             /* Allocate arrays; make sure they are big enough */
             if raw_total_bytes + 10 > raw_arr_size {
                 raw_arr_size = (1.05 * raw_total_bytes as f64) as i32 + 10;
-                tmp_data.resize(raw_arr_size as usize, 0);
+                // The source frees and re-mallocs (`iitif.c:1246-1258`); a fresh
+                // allocation, rather than growing the old one, keeps the old contents
+                // from being copied and the new tail from being cleared page by page.
+                tmp_data = vec![0; raw_arr_size as usize];
                 tmp = tmp_data.as_mut_ptr();
             }
 
             if max_electrons + 10 > elec_arr_size {
                 elec_arr_size = (1.05 * max_electrons as f64) as i32 + 10;
-                positions_data.resize(elec_arr_size as usize, 0);
-                symbols_data.resize(elec_arr_size as usize, 0);
+                positions_data = vec![0; elec_arr_size as usize];
+                symbols_data = vec![0; elec_arr_size as usize];
                 positions = positions_data.as_mut_ptr();
                 symbols = symbols_data.as_mut_ptr();
             }
@@ -2244,10 +2263,26 @@ unsafe fn read_section(
         if tmp_data.try_reserve_exact(buffer_size).is_err() {
             return -1;
         }
-        tmp_data.resize(buffer_size, 0);
         tmp = tmp_data.as_mut_ptr();
 
         nstrip = TIFFNumberOfStrips(tif) as i32 / (*in_file).planes_per_image;
+
+        // Decoded-strip cache (not in the C).  `iitif.c:1361-1387` `_TIFFmalloc`s a
+        // strip buffer, decodes every strip the requested rows touch and frees it, so a
+        // caller reading a few rows per call (`iiuReadBinned` via `newstack -bin`)
+        // decodes each strip once per call -- 128 times per strip for `-bin 4` on a
+        // 512-row strip.  The last strips decoded for this `ImodImageFile` are kept in
+        // `tiff_decoded`, keyed on the directory, the strip index (which includes the
+        // plane), the requested size and strip-vs-tile; a hit hands `copyLine` the
+        // bytes the decode produced, which is pure data movement.  Only a decode libtiff
+        // reports as successful (`nread >= 0`) is kept, so a strip that fails is decoded
+        // again on every call, as in the source.  A miss decodes into this call's own
+        // buffer exactly as before, and that buffer is first given the bytes of the
+        // strip the previous iteration used, so even the contents a failed decode leaves
+        // behind are what the uncached loop would have had.  Each `iiCopyOpen` copy has
+        // its own (initially empty) cache, and the cache is dropped on close, reopen,
+        // a new open and any write through this file (`tiff_decoded.clear()` sites).
+        let mut last_hit: *const u8 = core::ptr::null();
 
         si = 0;
         while si < nstrip {
@@ -2266,13 +2301,47 @@ unsafe fn read_section(
             }
 
             /* Read the strip if necessary */
-            nread = TIFFReadEncodedStrip(
-                tif,
-                (si + plane * nstrip) as u32,
-                tmp.cast(),
-                stripsize as isize,
-            );
-            let _ = nread;
+            let strip_index = (si + plane * nstrip) as u32;
+            let strip_data: *mut u8;
+            if let Some(found) = (*in_file).tiff_decoded.iter().position(|block| {
+                !block.tile
+                    && block.directory == directory
+                    && block.index == strip_index
+                    && block.size == stripsize as isize
+            }) {
+                let block = (*in_file).tiff_decoded.remove(found);
+                (*in_file).tiff_decoded.push(block);
+                strip_data = (*in_file)
+                    .tiff_decoded
+                    .last_mut()
+                    .unwrap()
+                    .data
+                    .as_mut_ptr();
+                last_hit = strip_data;
+            } else {
+                if tmp_data.len() < buffer_size {
+                    tmp_data.resize(buffer_size, 0);
+                }
+                tmp = tmp_data.as_mut_ptr();
+                if !last_hit.is_null() {
+                    core::ptr::copy_nonoverlapping(last_hit, tmp, buffer_size);
+                    last_hit = core::ptr::null();
+                }
+                nread = TIFFReadEncodedStrip(tif, strip_index, tmp.cast(), stripsize as isize);
+                if nread >= 0 {
+                    if (*in_file).tiff_decoded.len() >= 2 {
+                        (*in_file).tiff_decoded.remove(0);
+                    }
+                    (*in_file).tiff_decoded.push(TiffDecodedBlock {
+                        directory,
+                        tile: false,
+                        index: strip_index,
+                        size: stripsize as isize,
+                        data: tmp_data[..buffer_size].to_vec(),
+                    });
+                }
+                strip_data = tmp;
+            }
             y = ystart;
             while y <= yend {
                 /* for each y, compute back to row, and get offsets into
@@ -2283,7 +2352,7 @@ unsafe fn read_section(
                 ofsout = (move_size as usize)
                     * ((y - ymin) as usize * x_dimension as usize + pad_left as usize);
                 obuf = buf.cast::<u8>().add(ofsout);
-                bdata = tmp.add(ofsin as usize);
+                bdata = strip_data.add(ofsin as usize);
                 copy_line(
                     bdata,
                     obuf,
@@ -2320,7 +2389,6 @@ unsafe fn read_section(
             if tmp_data.try_reserve_exact(buffer_size).is_err() {
                 return -1;
             }
-            tmp_data.resize(buffer_size, 0);
             tmp = tmp_data.as_mut_ptr();
         } else {
             tilesize = 0;
@@ -2332,6 +2400,12 @@ unsafe fn read_section(
         TIFFGetField(tif, TIFFTAG_TILELENGTH, &mut tilelength);
         xtiles = (xsize + tilewidth - 1) / tilewidth;
         ytiles = (ysize + tilelength - 1) / tilelength;
+
+        // Decoded-tile cache: the same scheme as the strip loop above, holding up to
+        // two rows of tiles so that a run of reads within one row of tiles decodes
+        // each tile once.
+        let buffer_size = tilesize.max(0) as usize;
+        let mut last_hit: *const u8 = core::ptr::null();
 
         yti = 0;
         while yti < ytiles {
@@ -2367,8 +2441,46 @@ unsafe fn read_section(
 
                 /* Read the tile if necessary */
                 si = xti + yti * xtiles + plane * xtiles * ytiles;
-                nread = TIFFReadEncodedTile(tif, si as u32, tmp.cast(), tilesize);
-                let _ = nread;
+                let tile_data: *mut u8;
+                if let Some(found) = (*in_file).tiff_decoded.iter().position(|block| {
+                    block.tile
+                        && block.directory == directory
+                        && block.index == si as u32
+                        && block.size == tilesize
+                }) {
+                    let block = (*in_file).tiff_decoded.remove(found);
+                    (*in_file).tiff_decoded.push(block);
+                    tile_data = (*in_file)
+                        .tiff_decoded
+                        .last_mut()
+                        .unwrap()
+                        .data
+                        .as_mut_ptr();
+                    last_hit = tile_data;
+                } else {
+                    if tmp_data.len() < buffer_size {
+                        tmp_data.resize(buffer_size, 0);
+                    }
+                    tmp = tmp_data.as_mut_ptr();
+                    if !last_hit.is_null() {
+                        core::ptr::copy_nonoverlapping(last_hit, tmp, buffer_size);
+                        last_hit = core::ptr::null();
+                    }
+                    nread = TIFFReadEncodedTile(tif, si as u32, tmp.cast(), tilesize);
+                    if nread >= 0 {
+                        if (*in_file).tiff_decoded.len() >= 2 * xtiles.max(1) as usize {
+                            (*in_file).tiff_decoded.remove(0);
+                        }
+                        (*in_file).tiff_decoded.push(TiffDecodedBlock {
+                            directory,
+                            tile: true,
+                            index: si as u32,
+                            size: tilesize,
+                            data: tmp_data[..buffer_size].to_vec(),
+                        });
+                    }
+                    tile_data = tmp;
+                }
                 xcopy = xend + 1 - xstart;
 
                 /* Set up bytes and offset appropriately for this tile */
@@ -2393,7 +2505,7 @@ unsafe fn read_section(
                             + pad_left as usize
                             + (xstart - xmin) as usize);
                     obuf = buf.cast::<u8>().add(ofsout);
-                    bdata = tmp.add(ofsin as usize);
+                    bdata = tile_data.add(ofsin as usize);
                     copy_line(
                         bdata,
                         obuf,
@@ -2430,6 +2542,7 @@ unsafe fn read_section(
 /// Uncompress the run-length encoded EER image.  The source is compiled with
 /// `NO_WASTED_BITS` defined (`iitif.c:100`), so the misalignment handling in the
 /// 8-bit branch is the selected variant.
+#[inline(never)]
 unsafe fn decode_eer_image(
     buf: *mut u8,
     positions: *mut i32,
@@ -2577,9 +2690,37 @@ unsafe fn decode_eer_image(
 /// C `convertEERpositions` (`iitif.c:1639`).
 ///
 /// Convert the list of electron positions into counts in an image buffer with optional
-/// gain normalization and antialiasing.  The source `#pragma omp parallel for`
-/// directives select thread counts through `numOMPthreads`; this crate's
-/// `num_omp_threads` reports a serial build, so the loops run in source order.
+/// gain normalization and antialiasing.
+///
+/// Parallelism.  Seven of the source's loops are `#pragma omp parallel for` over
+/// *electrons* (`iitif.c:1678,1702,1723,1758,1781,1794,1857`), every thread doing
+/// `buf[...]++` / `sbuf[...] +=` into the one shared image, so two electrons in different
+/// threads landing on the same pixel race and an increment can be lost.  The translation
+/// instead splits the **output** into `numThreads` disjoint bands of whole rows
+/// (`par_chunks_mut`), with the thread count from the same `numOMPthreads` call as each
+/// source loop, and each band deposits, in electron order, exactly the writes the serial
+/// loop makes into its rows.  Every pixel therefore receives the same set of integer
+/// additions as in the serial loop.  Those additions are wrapping `u8`/`i16` adds (C's
+/// `unsigned char ++` and `short += int`), which are associative and commutative modulo
+/// 2^8 / 2^16, and nothing is accumulated in floating point: each float product is formed
+/// and rounded to an integer per electron, before the add.  So the image is the serial
+/// image at every thread count.
+///
+/// Electron selection per band.  `decodeEERimage` stores `positions` strictly increasing
+/// (`n_pix` only grows), so the chip row `positions[ind] / chipXsize` is non-decreasing in
+/// `ind`, and every loop's output row is a non-increasing function of that chip row and
+/// the sub-pixel bits.  `row_span(c)` gives the lowest and highest output row that any
+/// electron in chip row `c` can write, and the electrons that can write into band
+/// `[r0, r1)` are then one contiguous index range, found with two `partition_point`s.  An
+/// electron outside it fails the source's own `y` bounds test for every row of the band,
+/// so skipping it changes no pixel; with one thread this is also what keeps a read of a
+/// few rows from testing every electron in the frame.
+///
+/// Left serial: the gain-normalized antialiased loop (`iitif.c:1893`).  Its `refVal` is
+/// `private` and assigned only in the interior branch, so the edge branch uses whatever
+/// the previous interior electron in the same thread left there; that depends on the
+/// partition, so the loop keeps the serial source order over all electrons.
+#[inline(never)]
 unsafe fn convert_eer_positions(
     in_file: *mut ImodImageFile,
     positions: *mut i32,
@@ -2597,6 +2738,7 @@ unsafe fn convert_eer_positions(
     let mut chip_xsize = (*in_file).nx;
     let mut chip_ysize = (*in_file).ny;
     let mut y_offset;
+    let mut num_threads: i32;
     if (*in_file).read_eer_as_super_res >= 0 {
         for _ind in 0..(*in_file).read_eer_as_super_res {
             chip_xsize /= 2;
@@ -2624,161 +2766,182 @@ unsafe fn convert_eer_positions(
     }
     y_offset = ((*in_file).ny - 1) - ymin;
 
+    let num_elec = num_electrons.max(0) as usize;
+    let (all_positions, all_symbols): (&[i32], &[u8]) = if num_elec == 0 {
+        (&[], &[])
+    } else {
+        (
+            core::slice::from_raw_parts(positions, num_elec),
+            core::slice::from_raw_parts(symbols, num_elec),
+        )
+    };
+    let num_pix = out_xsize.max(0) as usize * out_ysize.max(0) as usize;
+    let super_res = (*in_file).read_eer_as_super_res;
+
     if (*in_file).antialias_eerfilter == 0 {
         /* Returning full-super-resolution image */
+        num_threads = 6;
+        num_threads = num_omp_threads(num_threads);
 
-        /* The if test actually makes little difference,
-        but using bit shifts helps when the size is standard */
-        if (*in_file).read_eer_as_super_res == 2 {
-            if chip_xsize == 4096 {
-                for ind in 0..num_electrons as usize {
-                    let x = ((((*positions.add(ind) & 4095) << 2) | (*symbols.add(ind) as i32 & 3))
-                        - xmin) as i32;
-                    let y = y_offset
-                        - (((*positions.add(ind) >> 12) << 2)
-                            | ((*symbols.add(ind) as i32 & 12) >> 2));
-                    if x >= 0 && x < out_xsize && y >= 0 && y < out_ysize {
-                        let cell = buf.add((x + y * out_xsize) as usize);
-                        *cell = (*cell).wrapping_add(1);
-                    }
-                }
-            } else {
-                for ind in 0..num_electrons as usize {
-                    let x = (((*positions.add(ind) % chip_xsize) << 2)
-                        | (*symbols.add(ind) as i32 & 3))
-                        - xmin;
-                    let y = y_offset
-                        - (((*positions.add(ind) / chip_xsize) << 2)
-                            | ((*symbols.add(ind) as i32 & 12) >> 2));
-                    if x >= 0 && x < out_xsize && y >= 0 && y < out_ysize {
-                        let cell = buf.add((x + y * out_xsize) as usize);
-                        *cell = (*cell).wrapping_add(1);
-                    }
-                }
-            }
-        } else if (*in_file).read_eer_as_super_res == 1 {
-            /* Returning super-resolution 1 image */
-            if chip_xsize == 4096 {
-                for ind in 0..num_electrons as usize {
-                    let x = (((*positions.add(ind) & 4095) << 1)
-                        | ((*symbols.add(ind) as i32 & 2) >> 1))
-                        - xmin;
-                    let y = y_offset
-                        - (((*positions.add(ind) >> 12) << 1)
-                            | ((*symbols.add(ind) as i32 & 8) >> 3));
-                    if x >= 0 && x < out_xsize && y >= 0 && y < out_ysize {
-                        let cell = buf.add((x + y * out_xsize) as usize);
-                        *cell = (*cell).wrapping_add(1);
-                    }
-                }
-            } else {
-                for ind in 0..num_electrons as usize {
-                    let x = (((*positions.add(ind) % chip_xsize) << 1)
-                        | ((*symbols.add(ind) as i32 & 2) >> 1))
-                        - xmin;
-                    let y = y_offset
-                        - (((*positions.add(ind) / chip_xsize) << 1)
-                            | ((*symbols.add(ind) as i32 & 8) >> 3));
-                    if x >= 0 && x < out_xsize && y >= 0 && y < out_ysize {
-                        let cell = buf.add((x + y * out_xsize) as usize);
-                        *cell = (*cell).wrapping_add(1);
-                    }
-                }
-            }
+        // Only the `chipXsize == 4096` variants carry the `omp parallel for`.
+        if chip_xsize != 4096 {
+            num_threads = 1;
+        }
+        let fac_shift = if super_res == 2 {
+            2
+        } else if super_res == 1 {
+            1
         } else {
-            /* Returning image with no super-resolution */
-            if chip_xsize == 4096 {
-                for ind in 0..num_electrons as usize {
-                    let x = (*positions.add(ind) & 4095) - xmin;
-                    let y = y_offset - (*positions.add(ind) >> 12);
-                    if x >= 0 && x < out_xsize && y >= 0 && y < out_ysize {
-                        let cell = buf.add((x + y * out_xsize) as usize);
-                        *cell = (*cell).wrapping_add(1);
+            0
+        };
+        // Output rows of chip row `c`: `yOffset - ((c << shift) | sub)`, `sub < 1 << shift`.
+        let row_span = |c: i32| {
+            let hi = y_offset - (c << fac_shift);
+            (hi - ((1 << fac_shift) - 1), hi)
+        };
+        // The thread count cannot change the image (see above), so a read that only
+        // reaches a few electrons -- a chunk of a few rows -- stays on one thread, where
+        // waking the pool would cost more than the loop.
+        let window_electrons = all_positions
+            .partition_point(|&p| row_span(p / chip_xsize).1 >= 0)
+            .saturating_sub(
+                all_positions.partition_point(|&p| row_span(p / chip_xsize).0 >= out_ysize),
+            );
+        if window_electrons < 65536 {
+            num_threads = 1;
+        }
+        let rows_per_band = (out_ysize.max(1) as usize)
+            .div_ceil(num_threads as usize)
+            .max(1);
+        let run_band = |(band, rows): (usize, &mut [u8])| {
+            let r0 = (band * rows_per_band) as i32;
+            let r1 = r0 + (rows.len() / out_xsize as usize) as i32;
+            let i0 = all_positions.partition_point(|&p| row_span(p / chip_xsize).0 >= r1);
+            let i1 = all_positions
+                .partition_point(|&p| row_span(p / chip_xsize).1 >= r0)
+                .max(i0);
+            let electrons = all_positions[i0..i1].iter().zip(&all_symbols[i0..i1]);
+
+            /* The if test actually makes little difference,
+            but using bit shifts helps when the size is standard */
+            if super_res == 2 {
+                if chip_xsize == 4096 {
+                    for (&position, &symbol) in electrons {
+                        let x = (((position & 4095) << 2) | (symbol as i32 & 3)) - xmin;
+                        let y = y_offset - (((position >> 12) << 2) | ((symbol as i32 & 12) >> 2));
+                        if x >= 0 && x < out_xsize && y >= r0 && y < r1 {
+                            let cell = &mut rows[(x + (y - r0) * out_xsize) as usize];
+                            *cell = cell.wrapping_add(1);
+                        }
+                    }
+                } else {
+                    for (&position, &symbol) in electrons {
+                        let x = (((position % chip_xsize) << 2) | (symbol as i32 & 3)) - xmin;
+                        let y = y_offset
+                            - (((position / chip_xsize) << 2) | ((symbol as i32 & 12) >> 2));
+                        if x >= 0 && x < out_xsize && y >= r0 && y < r1 {
+                            let cell = &mut rows[(x + (y - r0) * out_xsize) as usize];
+                            *cell = cell.wrapping_add(1);
+                        }
+                    }
+                }
+            } else if super_res == 1 {
+                /* Returning super-resolution 1 image */
+                if chip_xsize == 4096 {
+                    for (&position, &symbol) in electrons {
+                        let x = (((position & 4095) << 1) | ((symbol as i32 & 2) >> 1)) - xmin;
+                        let y = y_offset - (((position >> 12) << 1) | ((symbol as i32 & 8) >> 3));
+                        if x >= 0 && x < out_xsize && y >= r0 && y < r1 {
+                            let cell = &mut rows[(x + (y - r0) * out_xsize) as usize];
+                            *cell = cell.wrapping_add(1);
+                        }
+                    }
+                } else {
+                    for (&position, &symbol) in electrons {
+                        let x =
+                            (((position % chip_xsize) << 1) | ((symbol as i32 & 2) >> 1)) - xmin;
+                        let y = y_offset
+                            - (((position / chip_xsize) << 1) | ((symbol as i32 & 8) >> 3));
+                        if x >= 0 && x < out_xsize && y >= r0 && y < r1 {
+                            let cell = &mut rows[(x + (y - r0) * out_xsize) as usize];
+                            *cell = cell.wrapping_add(1);
+                        }
                     }
                 }
             } else {
-                for ind in 0..num_electrons as usize {
-                    let x = (*positions.add(ind) % chip_xsize) - xmin;
-                    let y = y_offset - (*positions.add(ind) / chip_xsize);
-                    if x >= 0 && x < out_xsize && y >= 0 && y < out_ysize {
-                        let cell = buf.add((x + y * out_xsize) as usize);
-                        *cell = (*cell).wrapping_add(1);
+                /* Returning image with no super-resolution */
+                if chip_xsize == 4096 {
+                    for &position in &all_positions[i0..i1] {
+                        let x = (position & 4095) - xmin;
+                        let y = y_offset - (position >> 12);
+                        if x >= 0 && x < out_xsize && y >= r0 && y < r1 {
+                            let cell = &mut rows[(x + (y - r0) * out_xsize) as usize];
+                            *cell = cell.wrapping_add(1);
+                        }
+                    }
+                } else {
+                    for &position in &all_positions[i0..i1] {
+                        let x = (position % chip_xsize) - xmin;
+                        let y = y_offset - (position / chip_xsize);
+                        if x >= 0 && x < out_xsize && y >= r0 && y < r1 {
+                            let cell = &mut rows[(x + (y - r0) * out_xsize) as usize];
+                            *cell = cell.wrapping_add(1);
+                        }
                     }
                 }
             }
+        };
+        let bbuf: &mut [u8] = if num_pix == 0 {
+            &mut []
+        } else {
+            core::slice::from_raw_parts_mut(buf, num_pix)
+        };
+        if num_threads > 1 {
+            let _ = rayon::ThreadPoolBuilder::new()
+                .num_threads(num_omp_threads(i32::MAX) as usize)
+                .build_global();
+            bbuf.par_chunks_mut(rows_per_band * out_xsize.max(1) as usize)
+                .enumerate()
+                .for_each(run_band);
+        } else {
+            bbuf.chunks_mut(rows_per_band * out_xsize.max(1) as usize)
+                .enumerate()
+                .for_each(run_band);
         }
     } else {
         /* COMPOSING A SCALED SHORT IMAGE WITH POSSIBLE ANTIALIASING AND NORMALIZATION */
         let sbuf = buf.cast::<i16>();
         let gain_reference = S_GAIN_REFERENCE.load(Ordering::SeqCst);
+        let scale: f32;
+        let mut gain_scale = 0;
+        let mut nx_gain = 0;
+        let mut red_fac = 1;
+        let mut max_xout = 0;
+        let mut max_yout = 0;
 
         /* Returning full super-resolution image with or without gain normalization */
-        if (*in_file).read_eer_as_super_res == 2 {
+        if super_res == 2 {
             /* With gain normalization */
             if !gain_reference.is_null() {
                 y_offset = (*in_file).ny - 1;
-                let nx_gain = (*in_file).nx;
-                let scale = (*in_file).eerkernel_scale as f32;
-                for ind in 0..num_electrons as usize {
-                    let x_gain =
-                        ((*positions.add(ind) % chip_xsize) << 2) | (*symbols.add(ind) as i32 & 3);
-                    let x = x_gain - xmin;
-                    let y_gain = y_offset
-                        - (((*positions.add(ind) / chip_xsize) << 2)
-                            | ((*symbols.add(ind) as i32 & 12) >> 2));
-                    let y = y_gain - ymin;
-                    if x >= 0 && x < out_xsize && y >= 0 && y < out_ysize {
-                        let cell = sbuf.add((x + y * out_xsize) as usize);
-                        let value = ((scale
-                            * *gain_reference.add((x_gain + y_gain * nx_gain) as usize))
-                            as f64
-                            + 0.5)
-                            .floor() as i32;
-                        *cell = (*cell).wrapping_add(value as i16);
-                    }
-                }
+                nx_gain = (*in_file).nx;
+                scale = (*in_file).eerkernel_scale as f32;
+                num_threads = 4;
+                num_threads = num_omp_threads(num_threads);
             } else {
                 /* Without gain normalization */
-                let gain_scale = (*in_file).eerkernel_scale;
-
-                /* Variant for standard size, somewhat faster */
-                if chip_xsize == 4096 {
-                    for ind in 0..num_electrons as usize {
-                        let x = (((*positions.add(ind) & 4095) << 2)
-                            | (*symbols.add(ind) as i32 & 3))
-                            - xmin;
-                        let y = y_offset
-                            - (((*positions.add(ind) >> 12) << 2)
-                                | ((*symbols.add(ind) as i32 & 12) >> 2));
-                        if x >= 0 && x < out_xsize && y >= 0 && y < out_ysize {
-                            let cell = sbuf.add((x + y * out_xsize) as usize);
-                            *cell = (*cell).wrapping_add(gain_scale as i16);
-                        }
-                    }
-                } else {
-                    /* Or handle a different size */
-                    for ind in 0..num_electrons as usize {
-                        let x = (((*positions.add(ind) % chip_xsize) << 2)
-                            | (*symbols.add(ind) as i32 & 3))
-                            - xmin;
-                        let y = y_offset
-                            - (((*positions.add(ind) / chip_xsize) << 2)
-                                | ((*symbols.add(ind) as i32 & 12) >> 2));
-                        if x >= 0 && x < out_xsize && y >= 0 && y < out_ysize {
-                            let cell = sbuf.add((x + y * out_xsize) as usize);
-                            *cell = (*cell).wrapping_add(gain_scale as i16);
-                        }
-                    }
-                }
+                scale = 0.0;
+                gain_scale = (*in_file).eerkernel_scale;
+                num_threads = 3;
+                num_threads = num_omp_threads(num_threads);
             }
         } else {
             /* ANTIALIASED REDUCTION with or without gain reference */
             /* Set up filters */
-            let red_fac =
-                (2.0_f64.powf((2 - (*in_file).read_eer_as_super_res) as f64) + 0.5).floor() as i32;
-            let scale = (*in_file).eerkernel_scale as f32;
-            let max_xout = out_xsize - 2;
-            let max_yout = out_ysize - 2;
+            red_fac = (2.0_f64.powf((2 - super_res) as f64) + 0.5).floor() as i32;
+            scale = (*in_file).eerkernel_scale as f32;
+            max_xout = out_xsize - 2;
+            max_yout = out_ysize - 2;
             for ix in 0..red_fac {
                 for iy in 0..red_fac {
                     let k_ind = (ix + red_fac * iy) as usize;
@@ -2822,39 +2985,13 @@ unsafe fn convert_eer_positions(
             // Compose image with no gain reference
             if gain_reference.is_null() {
                 y_offset = (*in_file).ny * red_fac - 1;
-                let gain_scale = (*in_file).eerkernel_scale;
-                for ind in 0..num_electrons as usize {
-                    let xsr =
-                        ((*positions.add(ind) % chip_xsize) << 2) | (*symbols.add(ind) as i32 & 3);
-                    let ysr = y_offset
-                        - (((*positions.add(ind) / chip_xsize) << 2)
-                            | ((*symbols.add(ind) as i32 & 12) >> 2));
-                    let x = xsr / red_fac - xmin;
-                    let y = ysr / red_fac - ymin;
-
-                    /* Deposit packet within inner limits, or just add electron on edges */
-                    if x >= 2 && x < max_xout && y >= 2 && y < max_yout {
-                        let k_ind = ((xsr % red_fac) + red_fac * (ysr % red_fac)) as usize;
-                        for iy in 0..4 {
-                            let ybase = (y + iy + filters.y_start[k_ind]) * out_xsize;
-                            let mut ix = x + filters.x_start[k_ind];
-                            while ix < x + filters.x_start[k_ind] + 4 {
-                                let cell = sbuf.add((ix + ybase) as usize);
-                                let value = filters.all[k_ind * 16
-                                    + (ix - x - filters.x_start[k_ind]) as usize
-                                    + iy as usize * 4];
-                                *cell = (*cell).wrapping_add(value as i16);
-                                ix += 1;
-                            }
-                        }
-                    } else if x >= 0 && x < out_xsize && y >= 0 && y < out_ysize {
-                        let cell = sbuf.add((x + y * out_xsize) as usize);
-                        *cell = (*cell).wrapping_add(gain_scale as i16);
-                    }
-                }
+                gain_scale = (*in_file).eerkernel_scale;
+                num_threads = 12;
+                num_threads = num_omp_threads(num_threads);
             } else {
                 /* Compose gain normalized image: the most complex operation can use most
                 threads */
+                // Serial: see the function comment on `refVal`.
                 y_offset = (*in_file).ny * red_fac - 1;
                 let nx_gain = red_fac * (*in_file).nx;
                 // The source declares `refVal` outside the loop and assigns it only in
@@ -2894,7 +3031,151 @@ unsafe fn convert_eer_positions(
                         *cell = (*cell).wrapping_add(value as i16);
                     }
                 }
+                return;
             }
+        }
+
+        let has_gain = !gain_reference.is_null();
+        let gain: &[f32] = if has_gain {
+            core::slice::from_raw_parts(
+                gain_reference,
+                (*in_file).nx.max(0) as usize * (*in_file).ny.max(0) as usize,
+            )
+        } else {
+            &[]
+        };
+        let (filt_all, filt_x_start, filt_y_start) =
+            (&filters.all[..], &filters.x_start[..], &filters.y_start[..]);
+        // Output rows of chip row `c`.  Super-resolution 2: `yOffset - ((c << 2) | sub)`
+        // (`yOffset` there already has `ymin` taken off, or `yGain - ymin` with the gain,
+        // the same row).  Antialiased: `y = ysr / redFac - ymin` for
+        // `ysr = yOffset - ((c << 2) | sub)`, with the kernel reaching `y - 2 .. y + 2`.
+        let in_ny = (*in_file).ny;
+        let row_span = |c: i32| {
+            if super_res == 2 {
+                let hi = (in_ny - 1) - ymin - (c << 2);
+                (hi - 3, hi)
+            } else {
+                (
+                    (y_offset - (c << 2) - 3) / red_fac - ymin - 2,
+                    (y_offset - (c << 2)) / red_fac - ymin + 2,
+                )
+            }
+        };
+        // The thread count cannot change the image (see above), so a read that only
+        // reaches a few electrons -- a chunk of a few rows -- stays on one thread, where
+        // waking the pool would cost more than the loop.
+        let window_electrons = all_positions
+            .partition_point(|&p| row_span(p / chip_xsize).1 >= 0)
+            .saturating_sub(
+                all_positions.partition_point(|&p| row_span(p / chip_xsize).0 >= out_ysize),
+            );
+        if window_electrons < 65536 {
+            num_threads = 1;
+        }
+        let rows_per_band = (out_ysize.max(1) as usize)
+            .div_ceil(num_threads as usize)
+            .max(1);
+        let run_band = |(band, rows): (usize, &mut [i16])| {
+            let r0 = (band * rows_per_band) as i32;
+            let r1 = r0 + (rows.len() / out_xsize as usize) as i32;
+            let i0 = all_positions.partition_point(|&p| row_span(p / chip_xsize).0 >= r1);
+            let i1 = all_positions
+                .partition_point(|&p| row_span(p / chip_xsize).1 >= r0)
+                .max(i0);
+            let electrons = all_positions[i0..i1].iter().zip(&all_symbols[i0..i1]);
+            if super_res == 2 {
+                if has_gain {
+                    for (&position, &symbol) in electrons {
+                        let x_gain = ((position % chip_xsize) << 2) | (symbol as i32 & 3);
+                        let x = x_gain - xmin;
+                        let y_gain = y_offset
+                            - (((position / chip_xsize) << 2) | ((symbol as i32 & 12) >> 2));
+                        let y = y_gain - ymin;
+                        if x >= 0 && x < out_xsize && y >= r0 && y < r1 {
+                            let cell = &mut rows[(x + (y - r0) * out_xsize) as usize];
+                            let value =
+                                ((scale * gain[(x_gain + y_gain * nx_gain) as usize]) as f64 + 0.5)
+                                    .floor() as i32;
+                            *cell = cell.wrapping_add(value as i16);
+                        }
+                    }
+                } else if chip_xsize == 4096 {
+                    /* Variant for standard size, somewhat faster */
+                    for (&position, &symbol) in electrons {
+                        let x = (((position & 4095) << 2) | (symbol as i32 & 3)) - xmin;
+                        let y = y_offset - (((position >> 12) << 2) | ((symbol as i32 & 12) >> 2));
+                        if x >= 0 && x < out_xsize && y >= r0 && y < r1 {
+                            let cell = &mut rows[(x + (y - r0) * out_xsize) as usize];
+                            *cell = cell.wrapping_add(gain_scale as i16);
+                        }
+                    }
+                } else {
+                    /* Or handle a different size */
+                    for (&position, &symbol) in electrons {
+                        let x = (((position % chip_xsize) << 2) | (symbol as i32 & 3)) - xmin;
+                        let y = y_offset
+                            - (((position / chip_xsize) << 2) | ((symbol as i32 & 12) >> 2));
+                        if x >= 0 && x < out_xsize && y >= r0 && y < r1 {
+                            let cell = &mut rows[(x + (y - r0) * out_xsize) as usize];
+                            *cell = cell.wrapping_add(gain_scale as i16);
+                        }
+                    }
+                }
+            } else {
+                for (&position, &symbol) in electrons {
+                    let xsr = ((position % chip_xsize) << 2) | (symbol as i32 & 3);
+                    let ysr =
+                        y_offset - (((position / chip_xsize) << 2) | ((symbol as i32 & 12) >> 2));
+                    let x = xsr / red_fac - xmin;
+                    let y = ysr / red_fac - ymin;
+
+                    /* Deposit packet within inner limits, or just add electron on edges */
+                    if x >= 2 && x < max_xout && y >= 2 && y < max_yout {
+                        let k_ind = ((xsr % red_fac) + red_fac * (ysr % red_fac)) as usize;
+                        for iy in 0..4 {
+                            // Only the kernel rows inside this band are written here; the
+                            // other rows belong to (and are written by) the other bands.
+                            let row = y + iy + filt_y_start[k_ind];
+                            if row < r0 || row >= r1 {
+                                continue;
+                            }
+                            let ybase = (row - r0) * out_xsize;
+                            let mut ix = x + filt_x_start[k_ind];
+                            while ix < x + filt_x_start[k_ind] + 4 {
+                                let cell = &mut rows[(ix + ybase) as usize];
+                                let value = filt_all[k_ind * 16
+                                    + (ix - x - filt_x_start[k_ind]) as usize
+                                    + iy as usize * 4];
+                                *cell = cell.wrapping_add(value as i16);
+                                ix += 1;
+                            }
+                        }
+                    } else if x >= 0 && x < out_xsize && y >= r0 && y < r1 {
+                        let cell = &mut rows[(x + (y - r0) * out_xsize) as usize];
+                        *cell = cell.wrapping_add(gain_scale as i16);
+                    }
+                }
+            }
+        };
+        let s_all: &mut [i16] = if num_pix == 0 {
+            &mut []
+        } else {
+            core::slice::from_raw_parts_mut(sbuf, num_pix)
+        };
+        if num_threads > 1 {
+            let _ = rayon::ThreadPoolBuilder::new()
+                .num_threads(num_omp_threads(i32::MAX) as usize)
+                .build_global();
+            s_all
+                .par_chunks_mut(rows_per_band * out_xsize.max(1) as usize)
+                .enumerate()
+                .for_each(run_band);
+        } else {
+            s_all
+                .chunks_mut(rows_per_band * out_xsize.max(1) as usize)
+                .enumerate()
+                .for_each(run_band);
         }
     }
 }
@@ -3592,6 +3873,7 @@ pub unsafe fn tiff_open_new(in_file: *mut ImodImageFile) -> i32 {
     // check.  Reproducing a null dereference would be UB in Rust, so this
     // fails loudly rather than inventing an error return the C does not have.
     assert!(!in_file.is_null(), "tiffOpenNew: null inFile");
+    (*in_file).tiff_decoded = Vec::new();
     let Some(filename) = (&(*in_file).filename).as_deref() else {
         return IIERR_BAD_CALL;
     };
@@ -3743,6 +4025,7 @@ pub unsafe fn tiff_write_setup(
     // check.  Reproducing a null dereference would be UB in Rust, so this
     // fails loudly rather than inventing an error return the C does not have.
     assert!(!in_file.is_null(), "tiffWriteSetup: null inFile");
+    (*in_file).tiff_decoded = Vec::new();
     let mut tmp_buf = S_TMP_BUF.lock().unwrap();
     if (*in_file).format != IIFORMAT_RGB
         && ((*in_file).format != IIFORMAT_LUMINANCE
@@ -3934,6 +4217,7 @@ pub unsafe fn tiff_write_strip(in_file: *mut ImodImageFile, strip: i32, buf: *mu
     // check.  Reproducing a null dereference would be UB in Rust, so this
     // fails loudly rather than inventing an error return the C does not have.
     assert!(!in_file.is_null(), "tiffWriteStrip: null inFile");
+    (*in_file).tiff_decoded = Vec::new();
     let mut tmp_buf = S_TMP_BUF.lock().unwrap();
     let state = *S_STRIP_TILE_STATE.lock().unwrap();
     let lines = state.rows_per_strip.min((*in_file).ny - state.lines_done);
@@ -4042,6 +4326,7 @@ pub unsafe fn tiff_write_finish(in_file: *mut ImodImageFile) {
     // check.  Reproducing a null dereference would be UB in Rust, so this
     // fails loudly rather than inventing an error return the C does not have.
     assert!(!in_file.is_null(), "tiffWriteFinish: null inFile");
+    (*in_file).tiff_decoded = Vec::new();
     (*in_file).state = IISTATE_BUSY;
     let mut tmp_buf = S_TMP_BUF.lock().unwrap();
     let already_inverted = S_STRIP_TILE_STATE.lock().unwrap().already_inverted;
@@ -4375,18 +4660,75 @@ pub unsafe fn tiff_parallel_read(
     }
     let last = *file_copies.add((num_threads - 1) as usize);
     (*last).ury = ury;
-    let mut result = 0;
-    for ind in 0..num_threads {
-        let file = *file_copies.add(ind as usize);
-        let error = read_section(
-            file,
-            read_buf.add(((*file).lly - lly) as usize * nx as usize * data_size as usize),
-            iz_read,
-            convert,
-        );
-        if error != 0 {
-            result = error;
+    let mut result;
+    /* Read in parallel or not */
+    if num_threads > 1 {
+        result = 0;
+        // `iitif.c:2873`: `omp parallel for` over the copies.  Copy `ind` reads rows
+        // `[lly_ind, ury_ind]` through its own `TIFF *` into
+        // `readBuf + (lly_ind - lly) * nx * dataSize`.  The row ranges are consecutive and
+        // non-overlapping (`lly + ind * (ny / numThreads)` up to the next one's start, the
+        // last to `ury`), so the output is cut below into disjoint slices, one per copy,
+        // and each read only moves or converts its own strips: nothing is reduced.
+        // The copies are separate `ImodImageFile`s with separate libtiff handles (from
+        // `iiOpenCopiesForThreads`); they cross to the workers as addresses because the
+        // raw pointer type is not `Send`.
+        let row_bytes = nx as usize * data_size as usize;
+        let total = ny as usize * row_bytes;
+        let mut remaining: &mut [u8] = if total == 0 {
+            &mut []
+        } else {
+            core::slice::from_raw_parts_mut(read_buf, total)
+        };
+        let mut bands: Vec<(usize, &mut [u8])> = Vec::with_capacity(num_threads as usize);
+        for ind in 0..num_threads {
+            let file = *file_copies.add(ind as usize);
+            let band_len = if ind + 1 < num_threads {
+                ((*file).ury + 1 - (*file).lly) as usize * row_bytes
+            } else {
+                remaining.len()
+            };
+            let (band, rest) = core::mem::take(&mut remaining).split_at_mut(band_len);
+            bands.push((file as usize, band));
+            remaining = rest;
         }
+        // The source's `err = locErr` and `b3dError`'s message buffer are process
+        // globals, but here `b3dError`'s buffer and store flag are per thread.  Each
+        // worker therefore runs with the caller's store flag and hands its message back;
+        // the caller takes codes and messages in band order, the last failure winning,
+        // which is one of the outcomes of the source's race and the one its serial
+        // loop gives.
+        let store_error = b3d_get_store_error();
+        let _ = rayon::ThreadPoolBuilder::new()
+            .num_threads(num_omp_threads(i32::MAX) as usize)
+            .build_global();
+        let results: Vec<(i32, Option<String>)> = bands
+            .into_par_iter()
+            .map(|(file, band)| {
+                let saved_store = b3d_get_store_error();
+                b3d_set_store_error(store_error);
+                b3d_error(None, format_args!(""));
+                let loc_err = read_section(
+                    file as *mut ImodImageFile,
+                    band.as_mut_ptr(),
+                    iz_read,
+                    convert,
+                );
+                let message = b3d_get_error();
+                b3d_set_store_error(saved_store);
+                (loc_err, (!message.is_empty()).then_some(message))
+            })
+            .collect();
+        for (loc_err, message) in results {
+            if let Some(message) = message {
+                b3d_error(None, format_args!("{message}"));
+            }
+            if loc_err != 0 {
+                result = loc_err;
+            }
+        }
+    } else {
+        result = read_section(first, read_buf, iz_read, convert);
     }
     (*first).llx = saved.0;
     (*first).urx = saved.1;

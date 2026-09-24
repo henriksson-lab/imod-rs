@@ -228,7 +228,43 @@ fn minmaxmean(
     // arm below is that mode's own C loop, with the same operand types, the
     // same comparison order and the same accumulation order; `chunks_exact`
     // walks the identical sequence of elements and range-checks once.
-    if mode == MRC_MODE_BYTE {
+    // Integer reduction of the byte, short and ushort statistics loops
+    // (SUBSTITUTION, `TO_OPT.md`).  Every value the C adds to `tmean` is an
+    // integer of magnitude below 2^16, so while `size <= 2^37` every partial
+    // sum is an integer of magnitude at most 2^53 and every one of the
+    // C's `double` additions is exact: `tmean` ends as the exact integer sum,
+    // which is what an `i64` accumulation converted once also gives.  Likewise
+    // the C's running `if (pixel < *min) *min = pixel` over integers ends at
+    // the initial `*min` if no pixel is smaller (NaN included, since every
+    // comparison with NaN is false), else at the smallest pixel -- which is
+    // one comparison against the integer minimum.  An integer is never -0, so
+    // signed zero cannot distinguish the two either.  With no pixels the C
+    // touches neither bound and returns 0 / 0, and so does this.  Beyond
+    // 2^37 pixels the exactness argument fails and the C's loop runs as is.
+    let exact_integer_sum = size <= 1_usize << 37;
+    if mode == MRC_MODE_BYTE && exact_integer_sum {
+        let mut lo = u8::MAX;
+        let mut hi = u8::MIN;
+        let mut sum: u64 = 0;
+        for &byte in &tifdata[..size] {
+            if byte < lo {
+                lo = byte;
+            }
+            if byte > hi {
+                hi = byte;
+            }
+            sum += byte as u64;
+        }
+        if size > 0 {
+            if (lo as f32) < *min {
+                *min = lo as f32;
+            }
+            if (hi as f32) > *max {
+                *max = hi as f32;
+            }
+        }
+        mean = sum as f64;
+    } else if mode == MRC_MODE_BYTE {
         for &byte in &tifdata[..size] {
             let value = byte as f32;
             if value < *min {
@@ -256,27 +292,77 @@ fn minmaxmean(
                 }
             }
         }
-        for pixel in tifdata[..2 * size].chunks_exact(2) {
-            let value = i16::from_ne_bytes([pixel[0], pixel[1]]) as f32;
-            if value < *min {
-                *min = value;
+        if exact_integer_sum {
+            let mut lo = i16::MAX;
+            let mut hi = i16::MIN;
+            let mut sum: i64 = 0;
+            for pixel in tifdata[..2 * size].chunks_exact(2) {
+                let value = i16::from_ne_bytes([pixel[0], pixel[1]]);
+                if value < lo {
+                    lo = value;
+                }
+                if value > hi {
+                    hi = value;
+                }
+                sum += value as i64;
             }
-            if value > *max {
-                *max = value;
+            if size > 0 {
+                if (lo as f32) < *min {
+                    *min = lo as f32;
+                }
+                if (hi as f32) > *max {
+                    *max = hi as f32;
+                }
             }
-            mean += value as f64;
+            mean = sum as f64;
+        } else {
+            for pixel in tifdata[..2 * size].chunks_exact(2) {
+                let value = i16::from_ne_bytes([pixel[0], pixel[1]]) as f32;
+                if value < *min {
+                    *min = value;
+                }
+                if value > *max {
+                    *max = value;
+                }
+                mean += value as f64;
+            }
         }
     }
     if mode == MRC_MODE_USHORT {
-        for pixel in tifdata[..2 * size].chunks_exact(2) {
-            let value = u16::from_ne_bytes([pixel[0], pixel[1]]) as f32;
-            if value < *min {
-                *min = value;
+        if exact_integer_sum {
+            let mut lo = u16::MAX;
+            let mut hi = u16::MIN;
+            let mut sum: i64 = 0;
+            for pixel in tifdata[..2 * size].chunks_exact(2) {
+                let value = u16::from_ne_bytes([pixel[0], pixel[1]]);
+                if value < lo {
+                    lo = value;
+                }
+                if value > hi {
+                    hi = value;
+                }
+                sum += value as i64;
             }
-            if value > *max {
-                *max = value;
+            if size > 0 {
+                if (lo as f32) < *min {
+                    *min = lo as f32;
+                }
+                if (hi as f32) > *max {
+                    *max = hi as f32;
+                }
             }
-            mean += value as f64;
+            mean = sum as f64;
+        } else {
+            for pixel in tifdata[..2 * size].chunks_exact(2) {
+                let value = u16::from_ne_bytes([pixel[0], pixel[1]]) as f32;
+                if value < *min {
+                    *min = value;
+                }
+                if value > *max {
+                    *max = value;
+                }
+                mean += value as f64;
+            }
         }
     }
     if mode == MRC_MODE_FLOAT {

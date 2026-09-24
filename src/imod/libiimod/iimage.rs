@@ -415,6 +415,12 @@ pub struct ImodImageFile {
     /// Rust-owned MRC header storage used by the native MRC and like-MRC
     /// backends.
     pub mrc_header: Option<MrcHeader>,
+    /// Not in the C struct: the last TIFF strips or tiles decoded by
+    /// `tiffReadSection` for this file, so that a run of partial reads does not
+    /// decode the same strip once per call.  Owned and invalidated by `iitif.rs`
+    /// (see the strip loop in its `read_section`); a copy made by `iiCopyOpen`
+    /// starts empty.
+    pub tiff_decoded: Vec<crate::imod::libiimod::iitif::TiffDecodedBlock>,
 }
 
 impl Default for ImodImageFile {
@@ -523,6 +529,7 @@ impl Default for ImodImageFile {
             sync_from_mrc_header: None,
             write_header: None,
             mrc_header: None,
+            tiff_decoded: Vec::new(),
         }
     }
 }
@@ -1040,6 +1047,7 @@ pub fn ii_copy_open(in_file: &mut ImodImageFile) -> Option<Box<ImodImageFile>> {
     copy.native_image_pixels = None;
     copy.native_image_rgb = false;
     copy.mrc_header = None;
+    copy.tiff_decoded = Vec::new();
     copy.owned_hdf_volumes.clear();
     copy.filename = None;
     copy.description = None;
