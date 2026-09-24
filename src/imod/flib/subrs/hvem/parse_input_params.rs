@@ -54,7 +54,9 @@ pub fn pip_parse_input(
             //
             // if options are all in one string with a separator
             //
-            let all: Vec<u8> = options[0].as_bytes().to_vec();
+            // `options(1)` is indexed in place by the Fortran
+            // (`parse_input_params.f90:53,57`), which copies nothing.
+            let all: &[u8] = options[0].as_bytes();
             let mut ind_str = 1_i32;
             let mut len_all = all.len() as i32;
             while len_all > 0 && all[(len_all - 1) as usize] == b' ' {

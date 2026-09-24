@@ -59,8 +59,13 @@ pub fn percentile_stretch(
                 let line = image[(iy + iy_start) as usize];
                 let offset = (ix + ix_start) as usize * 4;
                 let value = f32::from_ne_bytes(line[offset..offset + 4].try_into().unwrap());
-                min = min.min(value);
-                max = max.max(value);
+                // `pctstretch.c:102-103` is `B3DMIN(minVal, fval)` /
+                // `B3DMAX(maxVal, fval)`, i.e. `a < b ? a : b`, which yields the
+                // *second* operand when either is NaN.  `f32::min`/`max` return
+                // the non-NaN one, so a NaN in a float image poisons native's
+                // running min/max and would be silently skipped here.
+                min = if min < value { min } else { value };
+                max = if max > value { max } else { value };
                 ix += dx_sample;
                 while ix >= nx_use {
                     ix -= nx_use;
@@ -82,43 +87,79 @@ pub fn percentile_stretch(
         return 3;
     }
     hist.resize(nbins, 0_i32);
-    let special_full_scan = dx_sample == 1 && ix_start == 0 && iy_start == 0;
-    let histogram_samples = if special_full_scan {
-        ny_use * (nx_use - 1)
+    if dx_sample == 1 && ix_start == 0 && iy_start == 0 {
+        /* `pctstretch.c:126-165` hoists the type switch *out* of the pixel loop
+        for this case, giving four mode-specialised row loops over
+        `j = 0 .. nyUse`, `i = 1 .. nxUse` with no sampling-index arithmetic at
+        all.  The same pixels in the same order, so the histogram and both
+        percentile scans are bit-identical to the unified loop this replaces;
+        what goes away is two `match data_type` dispatches and the
+        `while ix >= nxUse` index advance on every pixel. */
+        for j in 0..ny_use as usize {
+            let line = image[j];
+            match data_type {
+                SLICE_MODE_BYTE => {
+                    for i in 1..nx_use as usize {
+                        let value = line[i] as i32;
+                        hist[value as usize] += 1;
+                    }
+                }
+                SLICE_MODE_SHORT => {
+                    for i in 1..nx_use as usize {
+                        let value =
+                            i16::from_ne_bytes(line[i * 2..i * 2 + 2].try_into().unwrap()) as i32;
+                        hist[((value + 32768) >> 2) as usize] += 1;
+                    }
+                }
+                SLICE_MODE_USHORT => {
+                    for i in 1..nx_use as usize {
+                        let value =
+                            u16::from_ne_bytes(line[i * 2..i * 2 + 2].try_into().unwrap()) as i32;
+                        hist[(value >> 2) as usize] += 1;
+                    }
+                }
+                _ => {
+                    for i in 1..nx_use as usize {
+                        let fval = f32::from_ne_bytes(line[i * 4..i * 4 + 4].try_into().unwrap());
+                        let value = ((fval + f_base) * f_factor) as i32;
+                        hist[value as usize] += 1;
+                    }
+                }
+            }
+        }
     } else {
-        n_sample
-    };
-    let mut ix = if special_full_scan { 1 } else { 0 };
-    let mut iy = 0;
-    for _ in 0..histogram_samples {
-        let line = image[(iy + iy_start) as usize];
-        let index = (ix + ix_start) as usize;
-        let value = match data_type {
-            SLICE_MODE_BYTE => line[index] as i32,
-            SLICE_MODE_SHORT => {
-                i16::from_ne_bytes(line[index * 2..index * 2 + 2].try_into().unwrap()) as i32
-            }
-            SLICE_MODE_USHORT => {
-                u16::from_ne_bytes(line[index * 2..index * 2 + 2].try_into().unwrap()) as i32
-            }
-            _ => {
-                ((f32::from_ne_bytes(line[index * 4..index * 4 + 4].try_into().unwrap()) + f_base)
-                    * f_factor) as i32
-            }
-        };
-        let bin = match data_type {
-            SLICE_MODE_SHORT => (value + 32768) >> 2,
-            SLICE_MODE_USHORT => value >> 2,
-            SLICE_MODE_FLOAT => value,
-            _ => value,
-        };
-        hist[bin as usize] += 1;
-        ix += dx_sample;
-        while ix >= nx_use {
-            ix -= nx_use;
-            iy += 1;
-            if special_full_scan {
-                ix = 1;
+        let mut ix = 0;
+        let mut iy = 0;
+        for _ in 0..n_sample {
+            let line = image[(iy + iy_start) as usize];
+            let index = (ix + ix_start) as usize;
+            let value = match data_type {
+                SLICE_MODE_BYTE => line[index] as i32,
+                SLICE_MODE_SHORT => {
+                    i16::from_ne_bytes(line[index * 2..index * 2 + 2].try_into().unwrap()) as i32
+                }
+                SLICE_MODE_USHORT => {
+                    u16::from_ne_bytes(line[index * 2..index * 2 + 2].try_into().unwrap()) as i32
+                }
+                _ => {
+                    ((f32::from_ne_bytes(line[index * 4..index * 4 + 4].try_into().unwrap())
+                        + f_base)
+                        * f_factor) as i32
+                }
+            };
+            let bin = match data_type {
+                SLICE_MODE_SHORT => (value + 32768) >> 2,
+                SLICE_MODE_USHORT => value >> 2,
+                SLICE_MODE_FLOAT => value,
+                _ => value,
+            };
+            hist[bin as usize] += 1;
+
+            /* move indexes to next spot in use area */
+            ix += dx_sample;
+            while ix >= nx_use {
+                ix -= nx_use;
+                iy += 1;
             }
         }
     }

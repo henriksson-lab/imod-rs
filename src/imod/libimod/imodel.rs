@@ -10,7 +10,7 @@ use std::io::Write;
 use crate::imod::libcfshr::b3dutil::{CArg, ImodFile, c_format};
 use crate::imod::libcfshr::robuststat::rs_sort_ints;
 use crate::imod::libiimod::mrcfiles::{LoadInfo, MrcHeader};
-use crate::imod::libimod::icont::{imod_contour_copy, imod_contours_delete, imod_contours_new};
+use crate::imod::libimod::icont::{imod_contours_delete, imod_contours_new};
 use crate::imod::libimod::imat::{
     Axis3, Imat, imod_mat_copy, imod_mat_delete, imod_mat_inverse, imod_mat_mult, imod_mat_new,
     imod_mat_rot, imod_mat_scale, imod_mat_trans, imod_mat_transform,
@@ -1803,8 +1803,12 @@ pub fn imod_delete_list_of_conts(
 
         /* Copy any non-deleted conts over now */
         for i in (last_del + 1)..cur_del {
-            let src = mod_.obj[ob as usize].cont[i as usize].clone();
-            imod_contour_copy(&src, &mut new_conts[out_ind]);
+            // `imodel.c` copies down with `imodContourCopy`, which is a bare
+            // `memcpy` "including all pointers, without creating any new data"
+            // (`icont.c:79-89`); the old contour array is then discarded
+            // without freeing its point data.  Move the contour instead of
+            // deep-copying it twice.
+            new_conts[out_ind] = std::mem::take(&mut mod_.obj[ob as usize].cont[i as usize]);
             out_ind += 1;
         }
 
@@ -1821,8 +1825,8 @@ pub fn imod_delete_list_of_conts(
 
     /* Copy final contours if any */
     for i in (last_del + 1)..mod_.obj[ob as usize].cont.len() as i32 {
-        let src = mod_.obj[ob as usize].cont[i as usize].clone();
-        imod_contour_copy(&src, &mut new_conts[out_ind]);
+        // `imodContourCopy` is a shallow `memcpy` (`icont.c:79-89`); see above.
+        new_conts[out_ind] = std::mem::take(&mut mod_.obj[ob as usize].cont[i as usize]);
         out_ind += 1;
     }
 

@@ -180,8 +180,12 @@ pub fn slice_taper_at_fill(sl: &mut Islice, mut ntaper: i32, inside: bool) -> i3
             break;
         }
     }
-    let mut fracs = vec![0_f32; (ntaper * 10 + 1) as usize];
-    let mut fillpart = fracs.clone();
+    // `taperatfill.c:46`: `float fracs[MAX_TAPER * 10], fillpart[MAX_TAPER *
+    // 10];` — automatic arrays, not allocations.  One extra slot is carried
+    // because the source's loop runs `i <= ntaper * 10`, which writes one past
+    // its own declaration when `ntaper` reaches `MAX_TAPER`.
+    let mut fracs = [0_f32; MAX_TAPER as usize * 10 + 1];
+    let mut fillpart = [0_f32; MAX_TAPER as usize * 10 + 1];
     for i in 1..=ntaper * 10 {
         let dist = if inside != 0 { i } else { ntaper * 10 + 1 - i };
         fracs[i as usize] = dist as f32 / (ntaper * 10 + 1) as f32;

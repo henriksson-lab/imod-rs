@@ -19,8 +19,15 @@ pub fn iclcdn(
             let index = 2 * (((iy - 1) * mx + (ix - 1)) as usize);
             let val = (array[index] * array[index] + array[index + 1] * array[index + 1]).sqrt();
             dmean += val;
-            dmin = dmin.min(val);
-            dmax = dmax.max(val);
+            // `iclcdn.f:24-25` is `IF (VAL .LT. DMIN) DMIN = VAL`, a plain
+            // comparison, not `MIN`; `f32::min` would take the non-NaN operand
+            // where the source leaves the accumulator untouched.
+            if val < dmin {
+                dmin = val;
+            }
+            if val > dmax {
+                dmax = val;
+            }
         }
     }
     dmean /= ((nx2 - nx1 + 1) * (ny2 - ny1 + 1)) as f32;

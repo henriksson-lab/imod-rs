@@ -1934,9 +1934,19 @@ pub fn mrc_read_slice(
             Some(MrcMode::Float) | Some(MrcMode::ComplexFloat) => 4,
             _ => 0,
         };
-        if word_size != 0 {
-            for word in buf[..required].chunks_exact_mut(word_size) {
-                word.reverse();
+        // `mrcfiles.c:1116-1123` calls `mrc_swap_shorts`/`mrc_swap_floats`, which
+        // reverse a fixed 2 or 4 bytes.  A `chunks_exact_mut(word_size)` with a
+        // runtime width compiles to a generic `[u8]::reverse`; splitting on the
+        // width first gives the constant-size window the source has.  Same
+        // windows, same order, same bytes.
+        if word_size == 2 {
+            for word in buf[..required].chunks_exact_mut(2) {
+                word.swap(0, 1);
+            }
+        } else if word_size == 4 {
+            for word in buf[..required].chunks_exact_mut(4) {
+                word.swap(0, 3);
+                word.swap(1, 2);
             }
         }
     }
@@ -2132,9 +2142,18 @@ pub fn mrc_write_slice(
                 *value = value.wrapping_sub(128);
             }
         } else {
-            let word_size = if dsize == 2 { 2 } else { 4 };
-            for word in owned_data.chunks_exact_mut(word_size) {
-                word.reverse();
+            // `mrcfiles.c:1441-1450` calls `mrc_swap_shorts`/`mrc_swap_floats`;
+            // splitting on the width gives those a constant-size window instead
+            // of the generic `[u8]::reverse` a runtime `word_size` compiles to.
+            if dsize == 2 {
+                for word in owned_data.chunks_exact_mut(2) {
+                    word.swap(0, 1);
+                }
+            } else {
+                for word in owned_data.chunks_exact_mut(4) {
+                    word.swap(0, 3);
+                    word.swap(1, 2);
+                }
             }
         }
         &owned_data

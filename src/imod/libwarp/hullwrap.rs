@@ -107,7 +107,16 @@ pub fn hull_triangulate(hio: &mut HullIo) -> i32 {
         st.sites.extend_from_slice(&hio.pointlist);
         S_POINT_LIST.with_borrow_mut(|v| {
             v.clear();
-            v.extend_from_slice(&hio.pointlist);
+            /* `hullwrap.c:40` is `sPointArray = hio->pointlist;` -- an alias,
+            not a copy.  The translated site index cannot alias, so the
+            coordinates are duplicated here, but the duplicate is read at
+            exactly one place, `get_next_site` (`:229`), inside
+            `if (sVerbose > 1)`.  `sVerbose` was set from `hio->verbose` two
+            statements ago and nothing changes it during the build, so the
+            copy is made only when that branch can run. */
+            if hio.verbose > 1 {
+                v.extend_from_slice(&hio.pointlist);
+            }
         });
 
         let mut err = ImodFile::Stderr;
@@ -179,8 +188,13 @@ pub fn hull_triangulate(hio: &mut HullIo) -> i32 {
         S_LIST_IND.set(0);
         visit_hull(st, root, &mut |st, s| save_triangle(st, s));
 
-        hio.trianglelist = S_TRIANGLELIST.with_borrow(|v| v.clone());
-        hio.neighborlist = S_NEIGHBORLIST.with_borrow(|v| v.clone());
+        /* `hullwrap.c:222-224` has `saveTriangle` write straight into the
+        arrays `hullTriangulate` malloced for the caller, so the lists are
+        handed over, not copied.  Both thread-locals are `clear()`ed and
+        `resize()`d at the top of the next call and are read nowhere else, so
+        moving them out is the same handover. */
+        hio.trianglelist = S_TRIANGLELIST.take();
+        hio.neighborlist = S_NEIGHBORLIST.take();
 
         free_hull_storage(st);
         0

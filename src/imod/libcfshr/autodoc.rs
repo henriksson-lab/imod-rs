@@ -1043,15 +1043,17 @@ pub fn adoc_insert_section(type_name: &[u8], sect_ind: i32, name: &[u8]) -> Resu
             coll_ind = adoc.num_collections - 1;
         }
 
-        /* Save the new section then move existing sections up and copy new one into place */
+        /* Save the new section then move existing sections up and copy new one into place.
+        `autodoc.c:880-884` saves `sections[numSections - 1]`, runs
+        `for (i = numSections - 1; i > sectInd; i--) sections[i] = sections[i-1];`
+        and stores the saved one at `sectInd` -- a *shallow* struct copy per
+        step, since an `AdocSection` holds pointers.  The same permutation here
+        is `rotate_right(1)` over `sectInd ..= numSections - 1`, which moves the
+        owned key/value `Vec`s instead of deep-cloning every one of them at
+        every step; the resulting array is element-for-element identical. */
         let coll = &mut adoc.collections[coll_ind as usize];
-        let new_sect = coll.sections[(coll.num_sections - 1) as usize].clone();
-        i = coll.num_sections - 1;
-        while i > sect_ind {
-            coll.sections[i as usize] = coll.sections[(i - 1) as usize].clone();
-            i -= 1;
-        }
-        coll.sections[sect_ind as usize] = new_sect;
+        let last = coll.num_sections as usize;
+        coll.sections[sect_ind as usize..last].rotate_right(1);
 
         /* Move the master lists up and decrement any other indices in this collection */
         i = adoc.num_sections - 1;
@@ -2595,16 +2597,21 @@ fn parse_key_value(
         return Err(ParseKeyValueError::Malformed);
     }
 
-    /* Find delimiter.  If it is not there or no text before it, error */
-    let delim = S_VALUE_DELIM.with_borrow(|delim| delim.clone());
-    let found = if delim.is_empty() || delim.len() > buf.len() - line {
-        None
-    } else {
-        buf[line..]
-            .windows(delim.len())
-            .position(|w| w == &delim[..])
-            .map(|p| line + p)
-    };
+    /* Find delimiter.  If it is not there or no text before it, error.
+    `sValueDelim` is a static the source reads through (`autodoc.c:2350`); the
+    borrow is held over the search rather than copying it once per line of the
+    file. */
+    let (found, delim_len) = S_VALUE_DELIM.with_borrow(|delim| {
+        let found = if delim.is_empty() || delim.len() > buf.len() - line {
+            None
+        } else {
+            buf[line..]
+                .windows(delim.len())
+                .position(|w| w == &delim[..])
+                .map(|p| line + p)
+        };
+        (found, delim.len())
+    });
     let Some(found) = found else {
         return Err(ParseKeyValueError::Malformed);
     };
@@ -2620,7 +2627,7 @@ fn parse_key_value(
     }
 
     /* Eat spaces after the delimiter.  Allow an empty value */
-    val_start += delim.len();
+    val_start += delim_len;
     while val_start < end && (buf[val_start] == b' ' || buf[val_start] == b'\t') {
         val_start += 1;
     }

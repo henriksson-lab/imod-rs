@@ -561,29 +561,37 @@ pub fn pip_add_option(option_string: &[u8]) -> Result<(), ()> {
                 continue;
             }
 
-            let (old_short, old_long, old_slen, old_llen) = S_OPT_TABLE.with_borrow(|table| {
+            /* The source compares against `sOptTable[ind].shortName` and
+            `.longName` in place (`parse_params.c:449-460`); this check runs for
+            every already-added option on every `PipAddOption`, so the borrow is
+            held across the comparison rather than copying both names
+            O(numOptions^2) times.  `PipStartsWith` has no side effects. */
+            let ambiguous = S_OPT_TABLE.with_borrow(|table| {
                 let o = &table[ind as usize];
-                (
-                    o.short_name.clone(),
-                    o.long_name.clone(),
-                    o.len_short,
-                    o.len_long,
-                )
-            });
-            let os: &[u8] = old_short.as_deref().unwrap_or(b"");
-            let ol: &[u8] = old_long.as_deref().unwrap_or(b"");
+                let old_slen = o.len_short;
+                let old_llen = o.len_long;
+                let os: &[u8] = o.short_name.as_deref().unwrap_or(b"");
+                let ol: &[u8] = o.long_name.as_deref().unwrap_or(b"");
 
-            /* Allow ambiguous options if no abbrev */
-            if ((pip_starts_with(&new_short, os) != 0 || pip_starts_with(os, &new_short) != 0)
-                && ((new_slen > 1 && old_slen > 1) || (new_slen == 1 && old_slen == 1))
-                && (no_abbrevs == 0 || new_slen == old_slen))
-                || ((pip_starts_with(ol, &new_short) != 0 || pip_starts_with(&new_short, ol) != 0)
-                    && (no_abbrevs == 0 || new_slen == old_llen))
-                || ((pip_starts_with(os, &new_long) != 0 || pip_starts_with(&new_long, os) != 0)
-                    && (no_abbrevs == 0 || old_slen == new_llen))
-                || ((pip_starts_with(ol, &new_long) != 0 || pip_starts_with(&new_long, ol) != 0)
-                    && (no_abbrevs == 0 || old_llen == new_slen))
-            {
+                /* Allow ambiguous options if no abbrev */
+                ((pip_starts_with(&new_short, os) != 0 || pip_starts_with(os, &new_short) != 0)
+                    && ((new_slen > 1 && old_slen > 1) || (new_slen == 1 && old_slen == 1))
+                    && (no_abbrevs == 0 || new_slen == old_slen))
+                    || ((pip_starts_with(ol, &new_short) != 0
+                        || pip_starts_with(&new_short, ol) != 0)
+                        && (no_abbrevs == 0 || new_slen == old_llen))
+                    || ((pip_starts_with(os, &new_long) != 0
+                        || pip_starts_with(&new_long, os) != 0)
+                        && (no_abbrevs == 0 || old_slen == new_llen))
+                    || ((pip_starts_with(ol, &new_long) != 0
+                        || pip_starts_with(&new_long, ol) != 0)
+                        && (no_abbrevs == 0 || old_llen == new_slen))
+            });
+            if ambiguous {
+                let (old_short, old_long) = S_OPT_TABLE.with_borrow(|table| {
+                    let o = &table[ind as usize];
+                    (o.short_name.clone(), o.long_name.clone())
+                });
                 /* sprintf(sTempStr, "Option %s  %s is ambiguous with option %s  %s", ...)
                 -- glibc's %s prints "(null)" for a NULL pointer, and the two
                 trailing table entries have NULL names. */
@@ -2346,130 +2354,138 @@ pub fn pip_get_in_out_file(option: &[u8], non_opt_arg_no: i32, filename: &mut Ve
 /// Read successive lines from a parameter file or standard input, and store as
 /// options and values.
 fn read_param_file(p_file: &mut ImodFile) -> i32 {
-    loop {
-        /* If non-option lines are allowed, set flag that it is OK for LookupOption
-        to not find the option, but only for the given number of lines at the
-        start of the input */
-        let non_opt_count = S_OPT_TABLE.with_borrow(|t| t[S_NON_OPT_IND.get() as usize].count);
-        S_NOT_FOUND_OK.set(
-            if S_NUM_OPTION_ARGUMENTS.get() == 0 && non_opt_count < S_NON_OPT_LINES.get() {
-                1
-            } else {
-                0
-            },
-        );
-        let mut indst = 0i32;
-        let mut line: Vec<u8> = S_LINE_STR.with_borrow(|l| l.clone());
-        let line_len = pip_read_next_line(p_file, &mut line, LINE_STR_SIZE, b'#', 0, 1, &mut indst);
-        S_LINE_STR.with_borrow_mut(|l| *l = line.clone());
-        if line_len == -3 {
-            break;
-        }
-        if line_len == -2 {
-            pip_set_error(b"Error reading parameter file or StandardInput");
-            return -1;
-        }
-        if line_len == -1 {
-            pip_set_error(
-                b"Line too long for buffer while reading parameter file or StandardInput",
+    /* `sLineStr` is the one buffer the source reads every line into
+    (`parse_params.c:1679`), `malloc`ed once in `PipInitialize`
+    (`parse_params.c:164`).  The borrow is held for the whole routine so that
+    buffer — and its capacity — is reused line after line the way the C's is;
+    nothing reachable from this loop touches `S_LINE_STR`, so the borrow cannot
+    nest. */
+    S_LINE_STR.with_borrow_mut(|line| {
+        loop {
+            /* If non-option lines are allowed, set flag that it is OK for LookupOption
+            to not find the option, but only for the given number of lines at the
+            start of the input */
+            let non_opt_count = S_OPT_TABLE.with_borrow(|t| t[S_NON_OPT_IND.get() as usize].count);
+            S_NOT_FOUND_OK.set(
+                if S_NUM_OPTION_ARGUMENTS.get() == 0 && non_opt_count < S_NON_OPT_LINES.get() {
+                    1
+                } else {
+                    0
+                },
             );
-            return -1;
-        }
-
-        /* Find token and make a copy */
-        let sep = line[indst as usize..]
-            .iter()
-            .position(|&c| c == b'=' || c == b' ' || c == b'\t')
-            .map(|p| p + indst as usize);
-        let mut indnd = match sep {
-            Some(p) => p as i32 - 1,
-            None => line_len - 1,
-        };
-        if indnd >= line_len {
-            indnd = line_len - 1;
-        }
-
-        let token = pip_sub_str_dup(&line, indst, indnd);
-
-        /* Done if it matches end of input string */
-        if token == STANDARD_INPUT_END
-            || (S_DONE_ENDS.get() != 0 && token.len() == 4 && pip_starts_with(b"DONE", &token) != 0)
-        {
-            break;
-        }
-
-        /* Look up option and free the token string */
-        let opt_num = lookup_option(&token, S_NUM_OPTIONS.get());
-        if opt_num < 0 {
-            /* If no option, process special case if in-line non-options allowed,
-            or error out */
-            if S_NOT_FOUND_OK.get() != 0 {
-                let token = pip_sub_str_dup(&line, indst, line_len - 1);
-                let err = add_value_string(S_NON_OPT_IND.get(), &token);
-                if err != 0 {
-                    return err;
-                }
-                continue;
-            } else {
-                return opt_num;
-            }
-        }
-
-        if S_OPT_TABLE
-            .with_borrow(|t| t[opt_num as usize].type_0.as_deref() == Some(PARAM_FILE_STRING))
-        {
-            pip_set_error(
-                b"Trying to open a parameter file while reading a parameter file or StandardInput",
-            );
-            return -1;
-        }
-
-        /* Find first non-white space, passing over at most one equals sign */
-        let mut indst2 = indnd + 1;
-        let mut got_equals = 0i32;
-        while indst2 < line_len {
-            if line[indst2 as usize] == b'=' {
-                if got_equals != 0 {
-                    S_TEMP_STR.with_borrow_mut(|t| {
-                        t.clear();
-                        t.extend_from_slice(b"Two = signs in input line:  ");
-                    });
-                    append_to_error_string(&line);
-                    return -1;
-                }
-                got_equals = 1;
-            } else if line[indst2 as usize] != b' ' && line[indst2 as usize] != b'\t' {
+            let mut indst = 0i32;
+            let line_len = pip_read_next_line(p_file, line, LINE_STR_SIZE, b'#', 0, 1, &mut indst);
+            if line_len == -3 {
                 break;
             }
-            indst2 += 1;
-        }
+            if line_len == -2 {
+                pip_set_error(b"Error reading parameter file or StandardInput");
+                return -1;
+            }
+            if line_len == -1 {
+                pip_set_error(
+                    b"Line too long for buffer while reading parameter file or StandardInput",
+                );
+                return -1;
+            }
 
-        /* If there is a string, get one; if not, get a "1" for boolean, otherwise
-        it is an error */
-        let token: Vec<u8> = if indst2 < line_len {
-            pip_sub_str_dup(&line, indst2, line_len - 1)
-        } else if S_OPT_TABLE
-            .with_borrow(|t| t[opt_num as usize].type_0.as_deref() == Some(BOOLEAN_STRING))
-        {
-            b"1".to_vec()
-        } else {
-            S_TEMP_STR.with_borrow_mut(|t| {
-                t.clear();
-                t.extend_from_slice(b"Missing a value on the input line:  ");
-            });
-            append_to_error_string(&line);
-            return -1;
-        };
+            /* Find token and make a copy */
+            let sep = line[indst as usize..]
+                .iter()
+                .position(|&c| c == b'=' || c == b' ' || c == b'\t')
+                .map(|p| p + indst as usize);
+            let mut indnd = match sep {
+                Some(p) => p as i32 - 1,
+                None => line_len - 1,
+            };
+            if indnd >= line_len {
+                indnd = line_len - 1;
+            }
 
-        /* Add the token as a value string and increment argument number */
-        let err = add_value_string(opt_num, &token);
-        if err != 0 {
-            return err;
+            let token = pip_sub_str_dup(&line[..], indst, indnd);
+
+            /* Done if it matches end of input string */
+            if token == STANDARD_INPUT_END
+                || (S_DONE_ENDS.get() != 0
+                    && token.len() == 4
+                    && pip_starts_with(b"DONE", &token) != 0)
+            {
+                break;
+            }
+
+            /* Look up option and free the token string */
+            let opt_num = lookup_option(&token, S_NUM_OPTIONS.get());
+            if opt_num < 0 {
+                /* If no option, process special case if in-line non-options allowed,
+                or error out */
+                if S_NOT_FOUND_OK.get() != 0 {
+                    let token = pip_sub_str_dup(&line[..], indst, line_len - 1);
+                    let err = add_value_string(S_NON_OPT_IND.get(), &token);
+                    if err != 0 {
+                        return err;
+                    }
+                    continue;
+                } else {
+                    return opt_num;
+                }
+            }
+
+            if S_OPT_TABLE
+                .with_borrow(|t| t[opt_num as usize].type_0.as_deref() == Some(PARAM_FILE_STRING))
+            {
+                pip_set_error(
+                b"Trying to open a parameter file while reading a parameter file or StandardInput",
+            );
+                return -1;
+            }
+
+            /* Find first non-white space, passing over at most one equals sign */
+            let mut indst2 = indnd + 1;
+            let mut got_equals = 0i32;
+            while indst2 < line_len {
+                if line[indst2 as usize] == b'=' {
+                    if got_equals != 0 {
+                        S_TEMP_STR.with_borrow_mut(|t| {
+                            t.clear();
+                            t.extend_from_slice(b"Two = signs in input line:  ");
+                        });
+                        append_to_error_string(&line[..]);
+                        return -1;
+                    }
+                    got_equals = 1;
+                } else if line[indst2 as usize] != b' ' && line[indst2 as usize] != b'\t' {
+                    break;
+                }
+                indst2 += 1;
+            }
+
+            /* If there is a string, get one; if not, get a "1" for boolean, otherwise
+            it is an error */
+            let token: Vec<u8> = if indst2 < line_len {
+                pip_sub_str_dup(&line[..], indst2, line_len - 1)
+            } else if S_OPT_TABLE
+                .with_borrow(|t| t[opt_num as usize].type_0.as_deref() == Some(BOOLEAN_STRING))
+            {
+                b"1".to_vec()
+            } else {
+                S_TEMP_STR.with_borrow_mut(|t| {
+                    t.clear();
+                    t.extend_from_slice(b"Missing a value on the input line:  ");
+                });
+                append_to_error_string(&line[..]);
+                return -1;
+            };
+
+            /* Add the token as a value string and increment argument number */
+            let err = add_value_string(opt_num, &token);
+            if err != 0 {
+                return err;
+            }
+            S_NUM_OPTION_ARGUMENTS.set(S_NUM_OPTION_ARGUMENTS.get() + 1);
         }
-        S_NUM_OPTION_ARGUMENTS.set(S_NUM_OPTION_ARGUMENTS.get() + 1);
-    }
-    S_NOT_FOUND_OK.set(0);
-    0
+        S_NOT_FOUND_OK.set(0);
+        0
+    })
 }
 
 /// Original C `PipReadStdinIfSet` (`parse_params.c:1758`).
@@ -2511,26 +2527,39 @@ pub fn pip_read_next_line(
         after a newline.  A seekable file is read in one block and repositioned
         to just past the newline, which is what stdio's own buffering does; a
         stream that cannot be repositioned is read a byte at a time, and Rust's
-        standard input is itself buffered so that costs no extra system call. */
+        standard input is itself buffered so that costs no extra system call.
+
+        The bytes land directly in `line_str`, which stands for the caller's
+        `char *sLineStr`: `fgets` writes into that buffer and this function
+        allocates nothing, and `Vec` keeps its capacity across the truncation
+        below, so the buffer is reused call after call the way the C's one
+        `malloc`ed `sLineStr`/`bigStr` is (`parse_params.c:164`, `:1213`).  The
+        length is only ever grown, never cut back, so that on end of file
+        (`fgets` returning NULL, which leaves the buffer alone) the previous
+        line can be restored exactly: `PipReadOptionFile`'s second pass reads
+        `bigStr + indst` after a -3 (`parse_params.c:1349`). */
+        let saved_len = line_str.len();
         let cap = (str_size - 1).max(0) as usize;
-        let mut buf: Vec<u8> = vec![0; cap];
         let mut n = 0usize;
         let seekable = matches!(p_file, ImodFile::File(_));
         if seekable {
             while n < cap {
                 let want = (cap - n).min(512);
-                match p_file.read(&mut buf[n..n + want]) {
+                if line_str.len() < n + want {
+                    line_str.resize(n + want, 0);
+                }
+                match p_file.read(&mut line_str[n..n + want]) {
                     Ok(0) => break,
                     Ok(k) => {
                         n += k;
-                        if buf[..n].contains(&b'\n') {
+                        if line_str[..n].contains(&b'\n') {
                             break;
                         }
                     }
                     Err(_) => return -2,
                 }
             }
-            let stop = match buf[..n].iter().position(|&c| c == b'\n') {
+            let stop = match line_str[..n].iter().position(|&c| c == b'\n') {
                 Some(p) => p + 1,
                 None => n,
             };
@@ -2548,7 +2577,10 @@ pub fn pip_read_next_line(
                 match p_file.read(&mut one) {
                     Ok(0) => break,
                     Ok(_) => {
-                        buf[n] = one[0];
+                        if line_str.len() <= n {
+                            line_str.resize(n + 1, 0);
+                        }
+                        line_str[n] = one[0];
                         n += 1;
                         if one[0] == b'\n' {
                             break;
@@ -2561,17 +2593,17 @@ pub fn pip_read_next_line(
 
         /* If error, it's OK if it's an EOF, or an error otherwise */
         if n == 0 {
+            line_str.truncate(saved_len);
             return -3;
         }
 
         /* check for line too long */
         /* lineLen = strlen(sLineStr): an embedded NUL ends the string. */
-        line_len = match buf[..n].iter().position(|&c| c == 0) {
+        line_len = match line_str[..n].iter().position(|&c| c == 0) {
             Some(p) => p as i32,
             None => n as i32,
         };
-        line_str.clear();
-        line_str.extend_from_slice(&buf[..line_len as usize]);
+        line_str.truncate(line_len as usize);
         if line_len == str_size - 1 {
             return -1;
         }
@@ -2946,23 +2978,31 @@ pub fn lookup_option(option: &[u8], max_lookup: i32) -> i32 {
 
     /* Look at all of the options specified by maxLookup */
     for i in 0..max_lookup {
-        let (sname_opt, lname_opt, len_short) = S_OPT_TABLE.with_borrow(|t| {
+        /* The source reads `sOptTable[i].shortName` and `.longName` through the
+        table pointer (`parse_params.c:2097-2112`) and copies nothing, so the
+        borrow is held across the two tests rather than cloning both names for
+        every entry of every lookup.  `PipStartsWith` has no side effects, so
+        evaluating the second test before the single-letter break is not
+        observable. */
+        let (single_letter, matched) = S_OPT_TABLE.with_borrow(|t| {
             let o = &t[i as usize];
-            (o.short_name.clone(), o.long_name.clone(), o.len_short)
-        });
-        let sname: &[u8] = sname_opt.as_deref().unwrap_or(b"");
-        let lname: &[u8] = lname_opt.as_deref().unwrap_or(b"");
-        let starts = pip_starts_with(sname, option);
+            let sname: &[u8] = o.short_name.as_deref().unwrap_or(b"");
+            let lname: &[u8] = o.long_name.as_deref().unwrap_or(b"");
+            let len_short = o.len_short;
+            let starts = pip_starts_with(sname, option);
 
-        /* First test for single letter short name match - if passes, skip ambiguity test */
-        if lenopt == 1 && starts != 0 && len_short == 1 {
+            /* First test for single letter short name match - if passes, skip ambiguity test */
+            let single_letter = lenopt == 1 && starts != 0 && len_short == 1;
+            let matched = (starts != 0 && (no_abbrevs == 0 || lenopt == len_short))
+                || (pip_starts_with(lname, option) != 0
+                    && (no_abbrevs == 0 || lenopt == lname.len() as i32));
+            (single_letter, matched)
+        });
+        if single_letter {
             found = i;
             break;
         }
-        if (starts != 0 && (no_abbrevs == 0 || lenopt == len_short))
-            || (pip_starts_with(lname, option) != 0
-                && (no_abbrevs == 0 || lenopt == lname.len() as i32))
-        {
+        if matched {
             /* If it is found, it's an error if one has already been found */
             if found == LOOKUP_NOT_FOUND {
                 found = i;
@@ -2970,10 +3010,15 @@ pub fn lookup_option(option: &[u8], max_lookup: i32) -> i32 {
                 if S_TEST_ABBREV_FOR_USAGE.get() == 0 {
                     /* sprintf(sTempStr, "An option specified by \"%s\" is ambiguous between "
                     "option %s -  %s  and option %s -  %s", ...) */
-                    let (found_short, found_long) = S_OPT_TABLE.with_borrow(|t| {
-                        let o = &t[found as usize];
-                        (o.short_name.clone(), o.long_name.clone())
-                    });
+                    let (sname_opt, lname_opt, found_short, found_long) =
+                        S_OPT_TABLE.with_borrow(|t| {
+                            (
+                                t[i as usize].short_name.clone(),
+                                t[i as usize].long_name.clone(),
+                                t[found as usize].short_name.clone(),
+                                t[found as usize].long_name.clone(),
+                            )
+                        });
                     let temp = S_TEMP_STR.with_borrow_mut(|t| {
                         t.clear();
                         t.extend_from_slice(b"An option specified by \"");

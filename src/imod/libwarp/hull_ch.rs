@@ -97,7 +97,12 @@ thread_local! {
     /// bound here instead of reproducing an out-of-bounds write; nothing reads
     /// the tables, so the only difference is that `C` is no longer clobbered.
     pub static STAT_A: Cell<[i32; 100]> = const { Cell::new([0; 100]) };
-    pub static STAT_B: Cell<[i32; 250]> = const { Cell::new([0; 250]) };
+    /// `B` is the only one of the four that is written, and `reduce_inner`
+    /// writes it on its success return -- the innermost numerical routine of
+    /// the hull.  A `Cell<[i32; 250]>` would copy all 1000 bytes out and back
+    /// around that single increment, so this one is a `RefCell`.
+    pub static STAT_B: std::cell::RefCell<[i32; 250]> =
+        const { std::cell::RefCell::new([0; 250]) };
     pub static STAT_C: Cell<[i32; 100]> = const { Cell::new([0; 100]) };
     pub static STAT_D: Cell<[i32; 100]> = const { Cell::new([0; 100]) };
     /// C `int tot, totinf, bigt` (`hull-ch.c:169`).
@@ -364,11 +369,7 @@ fn reduce_inner(st: &mut HullStorage, v: usize, s: usize, k: i32) -> i32 {
         st.basis[v].sqa = sqa;
 
         if 2. * st.basis[v].sqb >= st.basis[v].sqa {
-            STAT_B.with(|b| {
-                let mut t = b.get();
-                t[j as usize] += 1;
-                b.set(t);
-            });
+            STAT_B.with_borrow_mut(|b| b[j as usize] += 1);
             return 1;
         }
 
@@ -721,13 +722,16 @@ pub fn sees(st: &mut HullStorage, p: Site, s: usize) -> i32 {
     }
     for _i in 0..3 {
         let normal = st.simplex[s].normal;
-        let nb = st.basis[normal];
-        let dd = vec_dot(&st.basis[sb].vecs[..], &nb.vecs[..]);
+        /* `hull-ch.c:502-505` reads `s->normal->vecs` and `s->normal->sqb`
+        through the pointer.  Two shared borrows of `st.basis` coexist, so
+        there is no need to copy the 160-byte `Basis` out of the arena to
+        read six doubles from it; the operands and their order are unchanged. */
+        let dd = vec_dot(&st.basis[sb].vecs[..], &st.basis[normal].vecs[..]);
         if dd == 0.0 {
             /* DEBS(-7) ... EDEBS -- DEBUG (-7) > -7 is false. */
             return 0;
         }
-        let dds = dd * dd / nb.sqb / norm2(&st.basis[sb].vecs[..]);
+        let dds = dd * dd / st.basis[normal].sqb / norm2(&st.basis[sb].vecs[..]);
         if dds > B_ERR_MIN_SQ.get() as f64 {
             return (dd < 0.) as i32;
         }

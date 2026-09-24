@@ -251,22 +251,29 @@ fn ii_jpeg_write_section_any(f: &mut ImodImageFile, input: &[u8], z: i32, floats
     if input.len() != n * c * if floats { 4 } else { 1 } {
         return IIERR_BAD_CALL;
     }
-    let mut data = vec![0; n * c];
-    if floats {
+    // `iijpeg.c:392-393` gets its buffer from `iiMakeBufferConvertIfFloat`,
+    // which returns `buf` itself when the data are not floats
+    // (`iimage.c:1281,1288`); `iiJpegWriteSectionAny` then frees it only
+    // `if (useBuf != buf)` (`iijpeg.c:424-425`).  The non-float path therefore
+    // allocates and copies nothing, so pass the caller's buffer through
+    // instead of duplicating a whole section.
+    let converted: Option<Vec<u8>> = if floats {
+        let mut data = vec![0u8; n * c];
         for (i, v) in data.iter_mut().zip(input.chunks_exact(4)) {
             *i = f32::from_ne_bytes(v.try_into().unwrap())
                 .round()
                 .clamp(0., 255.) as u8
         }
+        Some(data)
     } else {
-        data.copy_from_slice(input)
-    }
+        None
+    };
     let q = std::env::var("IMOD_JPEG_QUALITY")
         .ok()
         .and_then(|x| x.parse().ok())
         .unwrap_or(75)
         .clamp(1, 100) as u8;
-    jpeg_write_section(f, &data, false, 0, q as i32)
+    jpeg_write_section(f, converted.as_deref().unwrap_or(input), false, 0, q as i32)
 }
 
 /// C `iiJpegWriteSection`.

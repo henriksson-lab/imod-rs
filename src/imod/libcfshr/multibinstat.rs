@@ -495,23 +495,27 @@ pub fn make_standard_dev_map(
             for ix in 0..nx_bin {
                 let mut fsum = 0.0f32;
                 for j in 0..binning {
-                    for i in 0..binning {
-                        fsum += array[(ix_start
-                            + ixofs
-                            + binning * ix
-                            + i
-                            + nx_dim * (iy_start + iyofs + binning * iy + j))
-                            as usize];
+                    // `reduce_by_binning.c:404-407` walks `fline2[i]` off a row
+                    // cursor that advances by `nxDim` per `j`; the `i` terms are
+                    // the contiguous run starting at that cursor, added in the
+                    // same order.
+                    let base = ix_start
+                        + ixofs
+                        + binning * ix
+                        + nx_dim * (iy_start + iyofs + binning * iy + j);
+                    for &v in &array[base as usize..][..binning.max(0) as usize] {
+                        fsum += v;
                     }
                 }
                 sd_arr[(ix + iy * nx_bin) as usize] = fsum / (binning * binning) as f32;
             }
         }
     }
-    for ind in 0..(nx_bin * ny_bin) as usize {
-        sum_arr[ind] = 0.;
-        sqr_arr[ind] = 0.;
-    }
+    // `multibinstat.c:323-324` is two `memset`s of `nxBin * nyBin` floats, not
+    // one loop writing the two arrays alternately.
+    let n_bin = (nx_bin * ny_bin).max(0) as usize;
+    sum_arr[..n_bin].fill(0.);
+    sqr_arr[..n_bin].fill(0.);
     let box_left = box_size / 2;
     for iy in 0..ny_bin {
         let sum_ystart = if 0 > iy + 1 - box_size {
@@ -538,9 +542,17 @@ pub fn make_standard_dev_map(
                 };
                 let val = sd_arr[(ix + iy * nx_bin) as usize];
                 let val_sq = val * val;
-                for bx in sum_xstart..sum_xend {
-                    sum_arr[(bx + by * nx_bin) as usize] += val;
-                    sqr_arr[(bx + by * nx_bin) as usize] += val_sq;
+                // `by * nxBin` is invariant across the `bx` run
+                // (`multibinstat.c:335-338`), and the run is contiguous in both
+                // arrays; the `+=` order over `bx` is unchanged.
+                let n_run = (sum_xend - sum_xstart).max(0) as usize;
+                let row_base = (sum_xstart + by * nx_bin) as usize;
+                for (a, b) in sum_arr[row_base..row_base + n_run]
+                    .iter_mut()
+                    .zip(sqr_arr[row_base..row_base + n_run].iter_mut())
+                {
+                    *a += val;
+                    *b += val_sq;
                 }
             }
         }

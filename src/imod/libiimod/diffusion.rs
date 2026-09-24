@@ -27,10 +27,16 @@ pub fn update_matrix(
     if k == 0. {
         return Err("diffusion k must not be zero".into());
     }
-    // The padded source matrix remains the no-flux boundary.  Native callers
-    // carry that border forward between iterations; initialize it explicitly
-    // before replacing only the source loop's interior pixels.
-    image.copy_from_slice(image_old);
+    // `diffusion.c:34-90` writes only `image[1..=m][1..=n]` and reads
+    // `imageOld` only at those same clamped indices -- `ip1`/`im1` and
+    // `jp1`/`jm1` never leave `1..=m` / `1..=n`.  The padded border of both
+    // matrices is therefore never read and never written by the source, which
+    // allocates it with `malloc` in `allocate2D_float` (`sliceproc.c:646`) and
+    // leaves it uninitialised.  A whole-buffer `image.copy_from_slice(image_old)`
+    // here would be a full extra pass over `(m + 2) * (n + 2)` floats per
+    // iteration that the source does not make, and it can touch nothing the
+    // callers read back: both `sliceAnisoDiff` and `sliceByteAnisoDiff` copy
+    // out only rows `1..=m`, columns `1..=n`.
     let ksq = k * k;
     for i in 1..=m {
         let north = if i == 1 { 1 } else { i - 1 };
@@ -76,7 +82,13 @@ mod tests {
         let old = vec![5.; 25];
         let mut new = vec![0.; 25];
         update_matrix(&mut new, &old, 3, 3, 1, 1., 0.2).unwrap();
-        assert_eq!(new, old);
+        // Only the interior is defined: the source writes `image[1..=m][1..=n]`
+        // and leaves the padded border of its `malloc`ed matrix untouched.
+        for row in 1..=3 {
+            for column in 1..=3 {
+                assert_eq!(new[row * 5 + column], 5.);
+            }
+        }
         let mut old = vec![0.; 25];
         old[2 * 5 + 2] = 1.;
         update_matrix(&mut new, &old, 3, 3, 2, 1., 0.2).unwrap();

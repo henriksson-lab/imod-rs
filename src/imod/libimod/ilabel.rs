@@ -251,8 +251,14 @@ impl Ilabel {
         }
 
         for i in 0..label.label.len() {
-            let name = label.label[i].name.clone();
-            imod_label_item_add(&mut new_label, name.as_deref(), label.label[i].index);
+            // `ilabel.c:79` hands `label->label[i].name` to `imodLabelItemAdd`
+            // by pointer; the callee copies it (`ilabel.c:141`), so cloning the
+            // name here allocated it once more than the source does.
+            imod_label_item_add(
+                &mut new_label,
+                label.label[i].name.as_deref(),
+                label.label[i].index,
+            );
         }
         new_label
     }

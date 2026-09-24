@@ -3160,8 +3160,13 @@ pub fn istore_delete_point(list: &mut Vec<Istore>, index: i32, psize: i32) -> i3
         return 0;
     };
     if index < psize - 1 {
-        let current = list[lookup..after].to_vec();
-        for store in current {
+        // `istore.c:1201-1203` re-reads `istoreItem(list, lind)` each pass and
+        // copies it into a local `Istore store` (`:1207`).  The only mutations
+        // below are an `ilistRemove` at `i >= after` and an `istoreInsert` of
+        // an item whose index is `index + 1`, so positions `lookup..after` do
+        // not move; index the list in place rather than copying the range out.
+        for lind in lookup..after {
+            let store = list[lind];
             if store.flags & (1 << 7) != 0 {
                 continue;
             }

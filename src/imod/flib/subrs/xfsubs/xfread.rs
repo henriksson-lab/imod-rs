@@ -21,10 +21,15 @@ pub fn xfread<R: BufRead>(iunit: &mut R, f: &mut [f32; 6]) -> Result<(), XfReadE
         if count == 6 {
             break;
         }
-        values[count] = word
-            .replace(['d', 'D'], "E")
-            .parse()
-            .map_err(|_| XfReadError::Error)?;
+        // Fortran list-directed input accepts a `D` exponent; the rewrite to
+        // `E` is only needed when the field actually carries one, and
+        // `read(iunit,*)` allocates nothing, so the copy is taken only then.
+        values[count] = if word.bytes().any(|b| b == b'd' || b == b'D') {
+            word.replace(['d', 'D'], "E").parse()
+        } else {
+            word.parse()
+        }
+        .map_err(|_| XfReadError::Error)?;
         count += 1;
     }
     if count != 6 {

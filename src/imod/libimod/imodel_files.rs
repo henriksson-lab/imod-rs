@@ -1086,12 +1086,33 @@ pub fn imodel_read_contour(cont: &mut Icont, file: &mut ImodFile) -> Result<(), 
     if size < 0 {
         return Err(IMOD_ERROR_CORRUPT);
     }
-    for _ in 0..size {
-        cont.pts.push(Ipoint {
-            x: file.imod_get_float().map_err(|_| IMOD_ERROR_READ)?,
-            y: file.imod_get_float().map_err(|_| IMOD_ERROR_READ)?,
-            z: file.imod_get_float().map_err(|_| IMOD_ERROR_READ)?,
-        });
+    // `imodel_files.c:1001-1006` allocates the whole point array in one
+    // `malloc(cont->psize * sizeof(Ipoint))` and returns IMOD_ERROR_MEMORY
+    // when it fails; reserve exactly that rather than growing per point.
+    if size != 0 && cont.pts.try_reserve_exact(size as usize).is_err() {
+        return Err(IMOD_ERROR_MEMORY);
+    }
+    // `imodel_files.c:1008` is a single `imodGetFloats(fin, (float *)cont->pts,
+    // 3 * cont->psize)` -- one `fread` and one `swap_longs` pass for the whole
+    // contour.  Reading component by component consumes the identical bytes in
+    // the identical order and yields the identical values, but pays an
+    // `ImodFile` dispatch and a 4-byte `read_exact` three times per point.
+    // `imodel_read_contour_v01` (`:1034`) already spells it this way.
+    if size != 0 {
+        let mut xyz: Vec<f32> = Vec::new();
+        if xyz.try_reserve_exact(3 * size as usize).is_err() {
+            return Err(IMOD_ERROR_MEMORY);
+        }
+        xyz.resize(3 * size as usize, 0.0);
+        file.imod_get_floats(&mut xyz, size * 3)
+            .map_err(|_| IMOD_ERROR_READ)?;
+        for i in 0..size as usize {
+            cont.pts.push(Ipoint {
+                x: xyz[3 * i],
+                y: xyz[3 * i + 1],
+                z: xyz[3 * i + 2],
+            });
+        }
     }
     Ok(())
 }
@@ -1102,9 +1123,18 @@ pub fn imodel_read_ptsizes(cont: &mut Icont, file: &mut ImodFile) -> Result<(), 
     if byte_count != (cont.pts.len() * 4) as i32 {
         return Err(IMOD_ERROR_CORRUPT);
     }
-    for _ in 0..cont.pts.len() {
-        cont.sizes
-            .push(file.imod_get_float().map_err(|_| IMOD_ERROR_READ)?);
+    // `imodel_files.c:1035` is one `imodGetFloats(fin, cont->sizes,
+    // cont->psize)`; read the block rather than a float at a time.  The
+    // append position is kept so a second SIZE chunk behaves as before.
+    let count = cont.pts.len();
+    if count != 0 {
+        let start = cont.sizes.len();
+        if cont.sizes.try_reserve_exact(count).is_err() {
+            return Err(IMOD_ERROR_MEMORY);
+        }
+        cont.sizes.resize(start + count, 0.0);
+        file.imod_get_floats(&mut cont.sizes[start..], count as i32)
+            .map_err(|_| IMOD_ERROR_READ)?;
     }
     Ok(())
 }
@@ -1119,16 +1149,38 @@ pub fn imodel_read_mesh(mesh: &mut Imesh, file: &mut ImodFile) -> Result<(), i32
     if vertices < 0 || lists < 0 {
         return Err(IMOD_ERROR_CORRUPT);
     }
-    for _ in 0..vertices {
-        mesh.vert.push(Ipoint {
-            x: file.imod_get_float().map_err(|_| IMOD_ERROR_READ)?,
-            y: file.imod_get_float().map_err(|_| IMOD_ERROR_READ)?,
-            z: file.imod_get_float().map_err(|_| IMOD_ERROR_READ)?,
-        });
+    // `imodel_files.c:1071` and `:1087` read the vertices and the index list
+    // with one `imodGetFloats`/`imodGetInts` each -- two `fread`s for the whole
+    // mesh.  Same bytes, same order, same values as the per-element loop this
+    // replaces, but a mesh has 10^5-10^6 vertices and three times as many list
+    // entries, so the per-element `ImodFile` dispatch dominated the read.
+    if vertices != 0 {
+        if mesh.vert.try_reserve_exact(vertices as usize).is_err() {
+            return Err(IMOD_ERROR_MEMORY);
+        }
+        let mut xyz: Vec<f32> = Vec::new();
+        if xyz.try_reserve_exact(3 * vertices as usize).is_err() {
+            return Err(IMOD_ERROR_MEMORY);
+        }
+        xyz.resize(3 * vertices as usize, 0.0);
+        file.imod_get_floats(&mut xyz, vertices * 3)
+            .map_err(|_| IMOD_ERROR_READ)?;
+        for i in 0..vertices as usize {
+            mesh.vert.push(Ipoint {
+                x: xyz[3 * i],
+                y: xyz[3 * i + 1],
+                z: xyz[3 * i + 2],
+            });
+        }
     }
-    for _ in 0..lists {
-        mesh.list
-            .push(file.imod_get_int().map_err(|_| IMOD_ERROR_READ)?);
+    if lists != 0 {
+        let start = mesh.list.len();
+        if mesh.list.try_reserve_exact(lists as usize).is_err() {
+            return Err(IMOD_ERROR_MEMORY);
+        }
+        mesh.list.resize(start + lists as usize, 0);
+        file.imod_get_ints(&mut mesh.list[start..], lists)
+            .map_err(|_| IMOD_ERROR_READ)?;
     }
     Ok(())
 }

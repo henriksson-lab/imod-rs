@@ -23,6 +23,14 @@ const MAX_THREADS: i32 = 16;
 /// `B3DMIN`/`B3DMAX` are `(a) < (b) ? (a) : (b)`, not `f32::min`/`max`, and the
 /// `0.`/`1.` clamp literals are **double**, so `fx1` and `fy1` are formed in
 /// double and narrowed only on the store.
+///
+/// `#[inline]` only: `warpInterp` calls this once per **output pixel** in the
+/// undistort branch (`warpinterp.c:108,133,148`) and `magGradFieldInterp` once
+/// per pixel too, and with `codegen-units=16` / `lto=false` a cross-module
+/// `pub fn` is otherwise a real call per pixel.  Inlining cannot move a bit:
+/// Rust/LLVM never reassociates or contracts IEEE float ops, and x86-64 SSE
+/// has no excess precision to lose.
+#[inline]
 #[allow(clippy::too_many_arguments)]
 pub fn interpolate_grid(
     x: f32,

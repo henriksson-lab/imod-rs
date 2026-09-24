@@ -36,7 +36,7 @@
 use std::cell::RefCell;
 
 use super::icont::{
-    ICONT_SCANLINE, Nesting, imod_contour_check_nesting, imod_contour_clear, imod_contour_copy,
+    ICONT_SCANLINE, Nesting, imod_contour_check_nesting, imod_contour_clear,
     imod_contour_free_nests, imod_contour_free_z_tables, imod_contour_get_bbox,
     imod_contour_make_z_tables, imod_contour_nest_levels, imod_contours_delete_to_end,
 };
@@ -1046,12 +1046,20 @@ pub fn getobjsurfaces(ob: i32, sort_surfs: i32, surfs: &mut [i32]) -> i32 {
         let obj = &mut state.imod.as_mut().unwrap().obj[obj_index];
         if sort_surfs > 0 && !obj.cont.is_empty() {
             /* Duplicate the contour array so that surfaces can be assigned in it */
-            let mut cont_save: Vec<Icont> = Vec::with_capacity(obj.cont.len());
-            for co in 0..obj.cont.len() {
-                let mut copy = Icont::default();
-                imod_contour_copy(&obj.cont[co], &mut copy);
-                cont_save.push(copy);
-            }
+            // `imodel_fwrap.c:1043-1047` duplicates the contour *array* with
+            // `imodContourCopy`, which is a bare `memcpy` "including all
+            // pointers, without creating any new data" (`icont.c:79-89`), so
+            // `contSave[co]` **aliases** the same `pts`/`sizes`/`store`/`label`
+            // allocations and `free(sObj->cont)` at `:1059` frees only the
+            // array of structs -- the C copies `contsize * sizeof(Icont)`
+            // bytes, not one point.  `imodObjectSortSurf` writes exactly one
+            // field of a contour, `surf` (`iobj.c:837,846`, here
+            // `iobj.rs:1986` and `:2001`; the rest of its writes are to
+            // `obj->mesh` and `obj->surfsize`, which the source does not
+            // restore either).  So saving and restoring that one field is the
+            // same operation as the aliasing copy, without deep-cloning every
+            // contour's point array.
+            let cont_save: Vec<i32> = obj.cont.iter().map(|cont| cont.surf).collect();
 
             /* Sort the surfaces.  If no meshes, return all zeros; otherwise return surfaces */
             let co = imod_object_sort_surf(obj);
@@ -1066,7 +1074,9 @@ pub fn getobjsurfaces(ob: i32, sort_surfs: i32, surfs: &mut [i32]) -> i32 {
                     surfs[co] = obj.cont[co].surf;
                 }
             }
-            obj.cont = cont_save;
+            for co in 0..obj.cont.len() {
+                obj.cont[co].surf = cont_save[co];
+            }
         } else {
             /* If not sorting surfaces, return existing values */
             for co in 0..obj.cont.len() {

@@ -258,8 +258,26 @@ fn invert_3(matrix: [[f64; 3]; 3]) -> Option<[[f64; 3]; 3]> {
     let mut result = [[0.; 3]; 3];
     for row in 0..3 {
         for column in 0..3 {
-            let rows = (0..3).filter(|&value| value != column).collect::<Vec<_>>();
-            let columns = (0..3).filter(|&value| value != row).collect::<Vec<_>>();
+            // The two minor indices are the values of `0..3` other than the
+            // excluded one, in increasing order.  Written into fixed arrays
+            // rather than collected into `Vec`s: this runs 9 times per
+            // `invert_3` and `invert_3` runs once per dual-ascent iteration.
+            let mut rows = [0usize; 2];
+            let mut columns = [0usize; 2];
+            let mut taken = 0usize;
+            for value in 0..3 {
+                if value != column {
+                    rows[taken] = value;
+                    taken += 1;
+                }
+            }
+            taken = 0;
+            for value in 0..3 {
+                if value != row {
+                    columns[taken] = value;
+                    taken += 1;
+                }
+            }
             let minor = matrix[rows[0]][columns[0]] * matrix[rows[1]][columns[1]]
                 - matrix[rows[0]][columns[1]] * matrix[rows[1]][columns[0]];
             result[row][column] = if (row + column) % 2 == 0 {

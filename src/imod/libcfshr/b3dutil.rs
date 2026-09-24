@@ -1408,10 +1408,14 @@ pub fn b3d_shift_bytes(buf: &mut [u8], nx: i32, ny: i32, direction: i32, bytes_s
     if nxy > buf.len() {
         return;
     }
-    for value in &mut buf[..nxy] {
-        if direction >= 0 {
+    // `b3dutil.c:480-486` tests `direction` once and then runs one of two flat
+    // byte loops; the test is not inside the loop.
+    if direction >= 0 {
+        for value in &mut buf[..nxy] {
             *value = (*value as i32 - 128) as i8 as u8;
-        } else {
+        }
+    } else {
+        for value in &mut buf[..nxy] {
             *value = (*value as i8 as i32 + 128) as u8;
         }
     }

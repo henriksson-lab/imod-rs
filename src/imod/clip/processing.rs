@@ -370,7 +370,17 @@ pub fn clip_scaling(hin: &mut MrcHeader, hout: &mut MrcHeader, opt: &mut ClipOpt
                         let mut val = [0_f32; 4];
                         slice_get_val(&slice, i, j, &mut val);
                         for item in val.iter_mut().take(slice.csize as usize) {
-                            *item = min_for_log.max(*item + base).log10();
+                            // `processing.cpp:290` is `B3DMAX(minForLog, val[l] + base)`,
+                            // i.e. `a > b ? a : b`, which yields the *second* operand when
+                            // either is NaN.  `f32::max` returns the non-NaN one, so a NaN
+                            // pixel would come out as `minForLog` here and as NaN natively.
+                            let shifted = *item + base;
+                            *item = if min_for_log > shifted {
+                                min_for_log
+                            } else {
+                                shifted
+                            }
+                            .log10();
                         }
                         slice_put_val(&mut slice, i, j, val);
                     }
@@ -381,7 +391,10 @@ pub fn clip_scaling(hin: &mut MrcHeader, hout: &mut MrcHeader, opt: &mut ClipOpt
                         let mut val = [0_f32; 4];
                         slice_get_val(&slice, i, j, &mut val);
                         for item in val.iter_mut().take(slice.csize as usize) {
-                            *item = 0_f32.max(*item + base).sqrt();
+                            // `processing.cpp:301`: `B3DMAX(0., val[l] + base)` -- same
+                            // second-operand-on-NaN rule as the logarithm arm above.
+                            let shifted = *item + base;
+                            *item = if 0_f32 > shifted { 0_f32 } else { shifted }.sqrt();
                         }
                         slice_put_val(&mut slice, i, j, val);
                     }
@@ -862,14 +875,17 @@ pub fn clip_median(
             let last_need = (hin.nz - 1).min(sec + (size - 1) / 2);
             (first_need, last_need)
         };
-        let mut kept = Vec::with_capacity(stack.slices.len());
-        for (old, item) in stack.slices.drain(..).enumerate() {
-            let sec = first + old as i32;
-            if sec >= needed_first && sec <= needed_last {
-                kept.push(item);
-            }
-        }
-        stack.slices = kept;
+        // `processing.cpp:652-662` compacts `v.vol` in place: a slice outside
+        // the needed range is freed and the kept ones are copied down over it
+        // (`v.vol[j++] = v.vol[i]`).  No second array is allocated there, so
+        // this retains in place -- the closure sees the elements in their
+        // original order and drops the discarded ones as the C frees them.
+        let mut in_vol = first;
+        stack.slices.retain(|_| {
+            let sec = in_vol;
+            in_vol += 1;
+            sec >= needed_first && sec <= needed_last
+        });
         if !stack.slices.is_empty() {
             first = last + 1 - stack.slices.len() as i32;
         }
@@ -1094,10 +1110,23 @@ pub fn clip_flip(
         {
             return Err(-1);
         }
+        // `processing.cpp:834-835`: "For most variations, it gets and frees a
+        // slice inside the loop when the mode is changing, outside the loop
+        // otherwise".  `:1157-1158` and `:1188-1189` create the slice once
+        // ahead of the loop for `!newMode`; since `newMode` is
+        // `hout->mode != hin->mode`, the mode argument is the same either way.
+        let mut held: Option<Islice> = None;
+        if !changed_mode {
+            held = crate::imod::libcfshr::islice::slice_create(hin.nx, hin.ny, hin.mode);
+            if held.is_none() {
+                return Err(-1);
+            }
+        }
         for k in 0..hin.nz {
-            let Some(mut sl) =
-                crate::imod::libcfshr::islice::slice_create(hin.nx, hin.ny, hin.mode)
-            else {
+            if changed_mode {
+                held = crate::imod::libcfshr::islice::slice_create(hin.nx, hin.ny, hin.mode);
+            }
+            let Some(sl) = held.as_mut() else {
                 return Err(-1);
             };
             let input = if axis == b'z' { hin.nz - k - 1 } else { k };
@@ -1111,13 +1140,11 @@ pub fn clip_flip(
             {
                 return Err(-1);
             }
-            if changed_mode
-                && crate::imod::libiimod::mrcslice::slice_new_mode(sl.as_mut(), hout.mode) < 0
-            {
+            if changed_mode && crate::imod::libiimod::mrcslice::slice_new_mode(sl, hout.mode) < 0 {
                 return Err(-1);
             }
             if axis != b'z' {
-                crate::imod::libiimod::mrcslice::slice_mirror(sl.as_mut(), axis);
+                crate::imod::libiimod::mrcslice::slice_mirror(sl, axis);
             }
             if crate::imod::libiimod::mrcfiles::mrc_write_slice(
                 sl.data.bytes(),
@@ -1162,10 +1189,21 @@ pub fn clip_flip(
         {
             return Err(-1);
         }
+        // `processing.cpp:860-861` creates the slice once ahead of the loop
+        // when `newMode` is 0, and only inside it (`:863-864`) when the mode
+        // is changing; `hout->mode == hin->mode` in the hoisted case.
+        let mut held: Option<Islice> = None;
+        if !changed_mode {
+            held = crate::imod::libcfshr::islice::slice_create(hout.nx, hout.nz, hin.mode);
+            if held.is_none() {
+                return Err(-1);
+            }
+        }
         for x in 0..hin.nx {
-            let Some(mut sl) =
-                crate::imod::libcfshr::islice::slice_create(hout.nx, hout.nz, hin.mode)
-            else {
+            if changed_mode {
+                held = crate::imod::libcfshr::islice::slice_create(hout.nx, hout.nz, hin.mode);
+            }
+            let Some(sl) = held.as_mut() else {
                 return Err(-1);
             };
             if crate::imod::libiimod::mrcfiles::mrc_read_slice(
@@ -1178,13 +1216,11 @@ pub fn clip_flip(
             {
                 return Err(-1);
             }
-            if changed_mode
-                && crate::imod::libiimod::mrcslice::slice_new_mode(sl.as_mut(), hout.mode) < 0
-            {
+            if changed_mode && crate::imod::libiimod::mrcslice::slice_new_mode(sl, hout.mode) < 0 {
                 return Err(-1);
             }
             if opt.sano != 0 {
-                crate::imod::libiimod::mrcslice::slice_mirror(sl.as_mut(), b'y');
+                crate::imod::libiimod::mrcslice::slice_mirror(sl, b'y');
             }
             if crate::imod::libiimod::mrcfiles::mrc_write_slice(
                 sl.data.bytes(),
@@ -1900,52 +1936,36 @@ pub fn clip_spectrum(hin: &mut MrcHeader, hout: &mut MrcHeader, opt: &mut ClipOp
                 });
             }
         }
+        // `processing.cpp:1625` hands `spectrumScaled` the output slice's own
+        // storage (`slice->data.b`); it fills the buffer in place and nothing
+        // is copied afterwards.  `mode` here is byte when `bkgd > 0` and short
+        // otherwise, which is exactly the member each arm writes.
         let err = if bkgd > 0 {
-            let mut output = vec![0_u8; (opt.ox * opt.oy) as usize];
-            let err = crate::imod::libcfshr::spectrumscaled::spectrum_scaled(
+            crate::imod::libcfshr::spectrumscaled::spectrum_scaled(
                 crate::imod::libcfshr::spectrumscaled::SpectrumInput::Float(&input),
                 s.xsize,
                 s.ysize,
-                crate::imod::libcfshr::spectrumscaled::SpectrumOutput::Byte(&mut output),
+                crate::imod::libcfshr::spectrumscaled::SpectrumOutput::Byte(out.data.b_mut()),
                 pad,
                 opt.ox,
                 bkgd,
                 trunc,
                 3,
                 crate::imod::libfft::todfft,
-            );
-            for (index, value) in output.into_iter().enumerate() {
-                crate::imod::libcfshr::islice::slice_put_val(
-                    &mut out,
-                    (index as i32) % opt.ox,
-                    (index as i32) / opt.ox,
-                    [value as f32, 0., 0., 0.],
-                );
-            }
-            err
+            )
         } else {
-            let mut output = vec![0_i16; (opt.ox * opt.oy) as usize];
-            let err = crate::imod::libcfshr::spectrumscaled::spectrum_scaled(
+            crate::imod::libcfshr::spectrumscaled::spectrum_scaled(
                 crate::imod::libcfshr::spectrumscaled::SpectrumInput::Float(&input),
                 s.xsize,
                 s.ysize,
-                crate::imod::libcfshr::spectrumscaled::SpectrumOutput::Short(&mut output),
+                crate::imod::libcfshr::spectrumscaled::SpectrumOutput::Short(out.data.s_mut()),
                 pad,
                 opt.ox,
                 bkgd,
                 trunc,
                 3,
                 crate::imod::libfft::todfft,
-            );
-            for (index, value) in output.into_iter().enumerate() {
-                crate::imod::libcfshr::islice::slice_put_val(
-                    &mut out,
-                    (index as i32) % opt.ox,
-                    (index as i32) / opt.ox,
-                    [value as f32, 0., 0., 0.],
-                );
-            }
-            err
+            )
         };
         if err != 0 {
             let message = c_format(
@@ -3808,33 +3828,77 @@ pub fn clip_unpack(
             return -1;
         };
         for y in 0..opt.iy {
-            for x in 0..opt.ix {
-                let mut v = [0.; 4];
-                slice_get_val(input.as_mut(), x, y, &mut v);
-                // `processing.cpp:3024`: `slRef->data.f[i + base]`.
-                let gain = if do_ref {
-                    reference.as_ref().unwrap().data.f()[(x + y * opt.ix) as usize]
-                } else {
-                    scale
-                };
-                v[0] = v[0] * gain + offset;
-                if v[0] > trunc_thresh {
-                    v[0] = if opt.low == crate::imod::clip::clip::IP_DEFAULT as f32 {
-                        crate::imod::clip::correct_defects::cor_def_surrounding_mean(
-                            input.data.bytes(),
-                            input.mode,
-                            input.xsize,
-                            input.ysize,
-                            unscaled_thresh,
-                            x,
-                            y,
-                        ) * gain
-                            + offset
+            // `processing.cpp:3000`: `base = j * opt->ix`.
+            let base = (y * opt.ix) as usize;
+            // `processing.cpp:3002-3021` has a byte fast path that reads
+            // `slIn->data.b[i + base]` straight out of the row, and only
+            // falls back to `sliceGetVal` for "other modes, a bit slower"
+            // (`processing.cpp:3022`).  The guard is on the *file* mode, as
+            // in the source, and `sliceReadSubm` always builds the slice
+            // with `hin->mode`, so `data.b()` matches it.
+            if hin1.mode == crate::imod::libiimod::mrcfiles::MRC_MODE_BYTE {
+                for x in 0..opt.ix {
+                    let mut v = [0.; 4];
+                    // `processing.cpp:3004`: `bval = slIn->data.b[i + base]`
+                    // into an `int`, which then converts exactly to float for
+                    // the multiply below.
+                    let bval = input.data.b()[base + x as usize] as i32;
+                    // `processing.cpp:3005`: `slRef->data.f[i + base]`.
+                    let gain = if do_ref {
+                        reference.as_ref().unwrap().data.f()[base + x as usize]
                     } else {
-                        opt.low * gain + offset
+                        scale
                     };
+                    v[0] = bval as f32 * gain + offset;
+                    if v[0] > trunc_thresh {
+                        v[0] = if opt.low == crate::imod::clip::clip::IP_DEFAULT as f32 {
+                            // `processing.cpp:3011`: the byte arm passes the
+                            // literal `MRC_MODE_BYTE`, not `slIn->mode`.
+                            crate::imod::clip::correct_defects::cor_def_surrounding_mean(
+                                input.data.bytes(),
+                                crate::imod::libiimod::mrcfiles::MRC_MODE_BYTE,
+                                input.xsize,
+                                input.ysize,
+                                unscaled_thresh,
+                                x,
+                                y,
+                            ) * gain
+                                + offset
+                        } else {
+                            opt.low * gain + offset
+                        };
+                    }
+                    slice_put_val(out.as_mut(), x, y, v);
                 }
-                slice_put_val(out.as_mut(), x, y, v);
+            } else {
+                for x in 0..opt.ix {
+                    let mut v = [0.; 4];
+                    slice_get_val(input.as_mut(), x, y, &mut v);
+                    // `processing.cpp:3024`: `slRef->data.f[i + base]`.
+                    let gain = if do_ref {
+                        reference.as_ref().unwrap().data.f()[base + x as usize]
+                    } else {
+                        scale
+                    };
+                    v[0] = v[0] * gain + offset;
+                    if v[0] > trunc_thresh {
+                        v[0] = if opt.low == crate::imod::clip::clip::IP_DEFAULT as f32 {
+                            crate::imod::clip::correct_defects::cor_def_surrounding_mean(
+                                input.data.bytes(),
+                                input.mode,
+                                input.xsize,
+                                input.ysize,
+                                unscaled_thresh,
+                                x,
+                                y,
+                            ) * gain
+                                + offset
+                        } else {
+                            opt.low * gain + offset
+                        };
+                    }
+                    slice_put_val(out.as_mut(), x, y, v);
+                }
             }
         }
         if opt.read_defects != 0
@@ -4466,9 +4530,11 @@ pub fn clip_stat(hin: &mut MrcHeader, opt: &mut ClipOptions) -> Result<(), i32> 
     let mut zmin = 0_i32;
     let mut zmax = 0_i32;
     let add = if opt.from_one != 0 { 1 } else { 0 };
-    let mut allmins = Vec::new();
-    let mut allmaxes = Vec::new();
-    let mut stat_rows = Vec::new();
+    // `processing.cpp:3534-3537` mallocs `stats`, `allmins`, `allmaxes` and
+    // `ifdrop` at `opt->nofsecs` entries each, once, before the loop.
+    let mut allmins = Vec::with_capacity(opt.nofsecs.max(0) as usize);
+    let mut allmaxes = Vec::with_capacity(opt.nofsecs.max(0) as usize);
+    let mut stat_rows = Vec::with_capacity(opt.nofsecs.max(0) as usize);
     for k in 0..opt.nofsecs {
         let iz = opt.secs[(k) as usize];
         if iz < 0 || iz >= hin.nz {
@@ -4694,36 +4760,38 @@ pub fn clip_stat(hin: &mut MrcHeader, opt: &mut ClipOptions) -> Result<(), i32> 
             2.24
         };
         flagged = vec![false; stat_rows.len()];
+        // `processing.cpp:3537` mallocs `ifdrop` once at `nofsecs` entries,
+        // and `:3711`/`:3716` pass `rsMadMedianOutliers` the sub-ranges
+        // `&allmins[di]` / `&ifdrop[di]` in place: neither the input window
+        // nor the output window is copied per section.
+        let mut ifdrop = vec![0_f32; opt.nofsecs.max(0) as usize];
         for kk in 0..stat_rows.len() {
             let mut di = (kk as i32 - length / 2).max(0);
-            let mut dj = (di + length).min(opt.nofsecs);
+            let dj = (di + length).min(opt.nofsecs);
             di = (dj - length).max(0);
-            let mut min_drops = vec![0_f32; (dj - di) as usize];
-            let mut mins = allmins[di as usize..dj as usize].to_vec();
             crate::imod::libcfshr::robuststat::rs_mad_median_outliers(
-                &mins,
+                &allmins[di as usize..dj as usize],
                 length,
                 kcrit,
-                &mut min_drops,
+                &mut ifdrop[di as usize..dj as usize],
             );
-            let index = kk - di as usize;
-            if min_drops[index] < 0. {
+            // `processing.cpp:3712-3715` reads `ifdrop[kk]` for the minima
+            // before the maxima call overwrites the same array.
+            let starmin = if ifdrop[kk] < 0. { b'*' } else { b' ' };
+            if ifdrop[kk] < 0. {
                 flagged[kk] = true;
             }
-            let mut maxes = allmaxes[di as usize..dj as usize].to_vec();
-            let mut max_drops = vec![0_f32; (dj - di) as usize];
             crate::imod::libcfshr::robuststat::rs_mad_median_outliers(
-                &maxes,
+                &allmaxes[di as usize..dj as usize],
                 length,
                 kcrit,
-                &mut max_drops,
+                &mut ifdrop[di as usize..dj as usize],
             );
-            if max_drops[index] > 0. {
+            let starmax = if ifdrop[kk] > 0. { b'*' } else { b' ' };
+            if ifdrop[kk] > 0. {
                 flagged[kk] = true;
             }
             let (iz, xmin, ymin, peak_x, peak_y, mean, sd) = stat_rows[kk];
-            let starmin = if min_drops[index] < 0. { b'*' } else { b' ' };
-            let starmax = if max_drops[index] > 0. { b'*' } else { b' ' };
             if !pcoords.is_empty() {
                 // `processing.cpp:3723-3726` indexes the piece list with the
                 // loop counter kk for X and Y, but with secs[kk] for Z.

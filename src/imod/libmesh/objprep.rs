@@ -510,8 +510,9 @@ pub fn analyze_prep_skin_obj(
                 i += 2;
             }
 
-            let mesh: Imesh = use_obj.mesh[m].clone();
-            imodel_mesh_add(Some(&mesh), &mut obj.mesh);
+            // `objprep.c:387` passes `mesh`, which is `&useObj->mesh[m]`;
+            // `imodel_mesh_add` only reads it, so no copy is taken here either.
+            imodel_mesh_add(Some(&use_obj.mesh[m]), &mut obj.mesh);
         }
         inv = None;
 

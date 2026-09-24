@@ -84,8 +84,14 @@ pub fn array_min_max_mean(
     *dmax = -1.0e37;
     for iy in iy0..=iy1 {
         let mut sum_tmp = 0.0_f32;
-        for ix in ix0..=ix1 {
-            let den = array[(iy * nx + ix) as usize];
+        // `simplestat.c:190`: `arrTmp = array + (size_t)iy * nx + ix0` is taken
+        // once per line and then walked forward, so the row is a contiguous run
+        // of `ix1 + 1 - ix0` elements.  The source's row offset is a `size_t`
+        // product, which is what `usize` gives here; an `ix1` below `ix0` runs
+        // the loop zero times there and yields an empty run here.
+        let n_row = (ix1 + 1 - ix0).max(0) as usize;
+        let arr_tmp = &array[(iy as usize * nx as usize + ix0 as usize)..][..n_row];
+        for &den in arr_tmp {
             sum_tmp += den;
             // `B3DMIN`/`B3DMAX` are `a < b ? a : b`, which take the second
             // operand when the comparison is false; `f32::min`/`max` skip a
@@ -160,14 +166,18 @@ pub fn array_min_max_mean_sd(
         }
     }
     rough_mean /= nsum as f64;
+    // `simplestat.c:302`: `arrTmp = array + (size_t)iy * nx + ix0`, taken once
+    // per line and walked forward over `ix1 + 1 - ix0` contiguous elements.
+    let n_row = (ix1 + 1 - ix0).max(0) as usize;
     for iy in iy0..=iy1 {
         let mut sum_tmp = 0.0;
         let mut sum_tmp_sq = 0.0;
-        for ix in ix0..=ix1 {
+        let arr_tmp = &array[(iy as usize * nx as usize + ix0 as usize)..][..n_row];
+        for &val in arr_tmp {
             // `den` is a `float` in the source, so subtracting the double
             // `roughMean` rounds back to single before it is accumulated,
             // and `den * den` is a single-precision product.
-            let mut den = array[(iy * nx + ix) as usize];
+            let mut den = val;
             *dmin = if *dmin < den { *dmin } else { den };
             *dmax = if *dmax > den { *dmax } else { den };
             den = (den as f64 - rough_mean) as f32;
@@ -247,9 +257,13 @@ pub fn scale_array_for_mode(
     let mut dmin_in = 1.0e30_f32;
     let mut dmax_in = -1.0e30_f32;
     *dmean = 0.0;
+    // Both loops below run over `array[iy * nxDim + ix]` for `ix` in
+    // `nx1..=nx2` (`simplestat.c:358-366`, `:370-378`), which is one contiguous
+    // run per line starting at `iy * nxDim + nx1`.  The row index stays the
+    // source's `int` product; only the per-element recomputation goes away.
+    let n_row = (nx2 + 1 - nx1).max(0) as usize;
     for iy in ny1..=ny2 {
-        for ix in nx1..=nx2 {
-            let val = array[(iy * nx_dim + ix) as usize];
+        for &val in &array[(iy * nx_dim + nx1) as usize..][..n_row] {
             if val < dmin_in {
                 dmin_in = val;
             }
@@ -263,10 +277,10 @@ pub fn scale_array_for_mode(
     let sclfac = (0.99999 * *dmax as f64 / (dmax_in - dmin_in) as f64) as f32;
     for iy in ny1..=ny2 {
         let mut tsum = 0.0;
-        for ix in nx1..=nx2 {
-            let val = sclfac * (array[(iy * nx_dim + ix) as usize] - dmin_in);
+        for elem in &mut array[(iy * nx_dim + nx1) as usize..][..n_row] {
+            let val = sclfac * (*elem - dmin_in);
             tsum += val;
-            array[(iy * nx_dim + ix) as usize] = val;
+            *elem = val;
         }
         *dmean += tsum;
     }

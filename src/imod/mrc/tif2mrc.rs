@@ -221,44 +221,77 @@ fn minmaxmean(
     ) {
         return 0.0;
     }
-    if mode == MRC_MODE_SHORT && unsign != 0 {
-        for i in 0..size {
-            let offset = 2 * i;
-            let value = u16::from_ne_bytes(tifdata[offset..offset + 2].try_into().unwrap());
-            let converted = if divide != 0 {
-                (value / 2) as i16
-            } else {
-                (value as i32 - 32768) as i16
-            };
-            tifdata[offset..offset + 2].copy_from_slice(&converted.to_ne_bytes());
+    // `tif2mrc.c:749-816` is four separate mode-specialised loops, not one
+    // loop with the mode tested inside it.  The fused form costs a branch and
+    // a slice range check per pixel and cannot vectorise, because `size` comes
+    // from `xsize * ysize` and nothing relates it to `tifdata.len()`.  Each
+    // arm below is that mode's own C loop, with the same operand types, the
+    // same comparison order and the same accumulation order; `chunks_exact`
+    // walks the identical sequence of elements and range-checks once.
+    if mode == MRC_MODE_BYTE {
+        for &byte in &tifdata[..size] {
+            let value = byte as f32;
+            if value < *min {
+                *min = value;
+            }
+            if value > *max {
+                *max = value;
+            }
+            mean += value as f64;
         }
     }
-    for i in 0..size {
-        let value = match mode {
-            MRC_MODE_BYTE => tifdata[i] as f32,
-            MRC_MODE_SHORT => {
-                let offset = 2 * i;
-                i16::from_ne_bytes(tifdata[offset..offset + 2].try_into().unwrap()) as f32
+    if mode == MRC_MODE_SHORT {
+        // `tif2mrc.c:763-779`: the divide and subtract arms are two loops of
+        // their own, run before the statistics pass over the same buffer.
+        if unsign != 0 {
+            if divide != 0 {
+                for pixel in tifdata[..2 * size].chunks_exact_mut(2) {
+                    let value = u16::from_ne_bytes([pixel[0], pixel[1]]);
+                    pixel.copy_from_slice(&((value / 2) as i16).to_ne_bytes());
+                }
+            } else {
+                for pixel in tifdata[..2 * size].chunks_exact_mut(2) {
+                    let value = u16::from_ne_bytes([pixel[0], pixel[1]]);
+                    pixel.copy_from_slice(&((value as i32 - 32768) as i16).to_ne_bytes());
+                }
             }
-            MRC_MODE_USHORT => {
-                let offset = 2 * i;
-                u16::from_ne_bytes(tifdata[offset..offset + 2].try_into().unwrap()) as f32
-            }
-            // C assigns this float through its `int pixel` local before
-            // updating statistics, so preserve its truncating conversion.
-            MRC_MODE_FLOAT => {
-                let offset = 4 * i;
-                f32::from_ne_bytes(tifdata[offset..offset + 4].try_into().unwrap()) as i32 as f32
-            }
-            _ => unreachable!(),
-        };
-        if value < *min {
-            *min = value;
         }
-        if value > *max {
-            *max = value;
+        for pixel in tifdata[..2 * size].chunks_exact(2) {
+            let value = i16::from_ne_bytes([pixel[0], pixel[1]]) as f32;
+            if value < *min {
+                *min = value;
+            }
+            if value > *max {
+                *max = value;
+            }
+            mean += value as f64;
         }
-        mean += value as f64;
+    }
+    if mode == MRC_MODE_USHORT {
+        for pixel in tifdata[..2 * size].chunks_exact(2) {
+            let value = u16::from_ne_bytes([pixel[0], pixel[1]]) as f32;
+            if value < *min {
+                *min = value;
+            }
+            if value > *max {
+                *max = value;
+            }
+            mean += value as f64;
+        }
+    }
+    if mode == MRC_MODE_FLOAT {
+        // C assigns this float through its `int pixel` local before
+        // updating statistics, so preserve its truncating conversion.
+        for pixel in tifdata[..4 * size].chunks_exact(4) {
+            let value = f32::from_ne_bytes([pixel[0], pixel[1], pixel[2], pixel[3]]) as i32 as f32;
+            if value < *min {
+                *min = value;
+            }
+            if value > *max {
+                *max = value;
+            }
+            mean += value as f64;
+        }
     }
     (mean / size as f64) as f32
 }

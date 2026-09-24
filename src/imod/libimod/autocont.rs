@@ -11,9 +11,8 @@ use crate::imod::libcfshr::islice::{
 };
 use crate::imod::libiimod::mrcfiles::MRC_MODE_BYTE;
 use crate::imod::libimod::icont::{
-    imod_contour_area, imod_contour_copy, imod_contour_default, imod_contour_get_bbox,
-    imod_contour_new, imod_contour_reduce, imod_contour_shave, imod_contour_strip,
-    imod_contours_new,
+    imod_contour_area, imod_contour_default, imod_contour_get_bbox, imod_contour_new,
+    imod_contour_reduce, imod_contour_shave, imod_contour_strip, imod_contours_new,
 };
 use crate::imod::libimod::imodel::{Icont, Iobj, Ipoint};
 use crate::imod::libimod::iobj::{imod_object_add_contour, imod_object_new};
@@ -840,8 +839,11 @@ pub fn imod_auto_contours_from_slice(
                 break;
             }
             let last = thrd_obj[thrd as usize].cont.len() - 1;
-            let source = newconts[i as usize].clone();
-            imod_contour_copy(&source, &mut thrd_obj[thrd as usize].cont[last]);
+            // `autocont.c:632` copies with `imodContourCopy`, a bare `memcpy`
+            // "including all pointers, without creating any new data"
+            // (`icont.c:79-89`); `autocont.c:636` then frees only the
+            // `newconts` array, so the point data is moved, not duplicated.
+            thrd_obj[thrd as usize].cont[last] = std::mem::take(&mut newconts[i as usize]);
         }
     }
 
@@ -862,8 +864,11 @@ pub fn imod_auto_contours_from_slice(
         // Assign contour array, copy over the contours one by one
         for thrd in 0..num_threads {
             for co in 0..thrd_obj[thrd as usize].cont.len() {
-                let source = thrd_obj[thrd as usize].cont[co].clone();
-                nobj.cont.push(source);
+                // `autocont.c:665` is again the shallow `imodContourCopy`,
+                // and `autocont.c:673` frees only `thrdObj[thrd]->cont`, so
+                // the contour's data is handed to `nobj` rather than copied.
+                nobj.cont
+                    .push(std::mem::take(&mut thrd_obj[thrd as usize].cont[co]));
             }
         }
     }

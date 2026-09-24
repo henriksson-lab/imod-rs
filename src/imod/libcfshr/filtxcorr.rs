@@ -185,8 +185,14 @@ pub fn xcorr_set_ctf(
     for j in 1..nsize {
         sum += ctf[j as usize];
     }
+    // `filtxcorr.c:139-140`: `float scl = (nsize - 1) / sum;` is computed once,
+    // outside the loop, and the loop is `ctf[j] = ctf[j] * scl`.  The quotient
+    // is the same `float` on every iteration, but an `fdiv` cannot be hoisted
+    // out of the loop by the optimiser, so it has to be written where the
+    // source writes it.
+    let scl = (nsize - 1) as f32 / sum;
     for j in 1..nsize {
-        ctf[j as usize] *= (nsize - 1) as f32 / sum;
+        ctf[j as usize] *= scl;
     }
 }
 
@@ -1888,16 +1894,13 @@ pub fn fourier_ring_corr(
     // and `xx = ix * deltaX / 2.` multiplies by it rather than dividing again.
     let delta_x = (1.0 / nx as f64) as f32;
     let delta_y = (1.0 / ny as f64) as f32;
+    // `filtxcorr.c:2301-2304` zeroes the four windows because they come out of
+    // the caller's uninitialised `temp`; these are freshly allocated and
+    // already hold the same zeros, so the source's loop has nothing left to do.
     let mut prod = vec![0.0f32; max as usize];
     let mut asum = vec![0.0f32; max as usize];
     let mut bsum = vec![0.0f32; max as usize];
     let mut nsum = vec![0i32; max as usize];
-    for ring in 0..max as usize {
-        asum[ring] = 0.;
-        bsum[ring] = 0.;
-        prod[ring] = 0.;
-        nsum[ring] = 0;
-    }
 
     /* We are summing only over a half-plane of the full FFT, ignoring the symmetric part
     Summing over the whole plane would double the real component and the magnitude sums

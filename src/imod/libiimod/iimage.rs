@@ -2308,10 +2308,27 @@ pub fn ii_convert_line_of_floats(
             }
         }
         MRC_MODE_HALF_FLOAT => {
-            let mut halves = vec![0_u16; floats.len()];
-            imnp_floatbuf_to_halfs(floats, &mut halves, floats.len() as i32);
-            for (half, bytes) in halves.iter().zip(output.chunks_exact_mut(2)) {
-                bytes.copy_from_slice(&half.to_ne_bytes());
+            // `iimage.c:1370` is `imnp_floatbuf_to_halfs(fbufp, bdata, nx)` and
+            // that routine's second parameter is a `void *` (`halffloat.c:34`),
+            // so the C converts straight into the caller's byte buffer and
+            // allocates nothing.  `output` here is a byte slice with no
+            // guaranteed `u16` alignment, so the conversion goes through a
+            // fixed-size stack block: the routine is element-wise, so calling
+            // it on successive blocks gives the same bytes as one call, and it
+            // costs no heap allocation on a path that runs once per output
+            // line (`mrcsec.c:1245`'s write loop).
+            let mut halves = [0_u16; 512];
+            let mut done = 0_usize;
+            while done < floats.len() && 2 * done < output.len() {
+                let count = halves.len().min(floats.len() - done);
+                imnp_floatbuf_to_halfs(&floats[done..], &mut halves, count as i32);
+                for (half, bytes) in halves[..count]
+                    .iter()
+                    .zip(output[2 * done..].chunks_exact_mut(2))
+                {
+                    bytes.copy_from_slice(&half.to_ne_bytes());
+                }
+                done += count;
             }
         }
         _ => {}

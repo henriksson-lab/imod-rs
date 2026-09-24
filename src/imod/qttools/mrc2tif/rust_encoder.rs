@@ -22,6 +22,7 @@ pub fn save(
 ) -> Result<(), String> {
     use image::{ColorType, ImageEncoder};
     use std::fs::File;
+    use std::io::Write as _;
 
     if width <= 0 || height <= 0 {
         return Err("Rust encoder requires positive image dimensions".into());
@@ -31,12 +32,24 @@ pub fn save(
     if bytes_per_line < row_bytes as i32 || data.len() < bytes_per_line as usize * height as usize {
         return Err("Rust encoder received invalid QImage row layout".into());
     }
-    let mut pixels = vec![0_u8; row_bytes * height as usize];
-    for row in 0..height as usize {
-        let source =
-            &data[row * bytes_per_line as usize..row * bytes_per_line as usize + row_bytes];
-        pixels[row * row_bytes..(row + 1) * row_bytes].copy_from_slice(source);
-    }
+    // The caller's rows carry QImage's 32-bit stride padding, which the Rust
+    // encoders do not accept.  Strip it -- but only when there is any: an
+    // image whose rows are already a multiple of four bytes arrives tightly
+    // packed, and copying the whole image again to produce identical bytes is
+    // pure overhead once per section.
+    let unpadded;
+    let pixels: &[u8] = if bytes_per_line as usize == row_bytes {
+        &data[..row_bytes * height as usize]
+    } else {
+        let mut rows = vec![0_u8; row_bytes * height as usize];
+        for row in 0..height as usize {
+            let source =
+                &data[row * bytes_per_line as usize..row * bytes_per_line as usize + row_bytes];
+            rows[row * row_bytes..(row + 1) * row_bytes].copy_from_slice(source);
+        }
+        unpadded = rows;
+        &unpadded
+    };
     let color = if rgb { ColorType::Rgb8 } else { ColorType::L8 };
     let file = File::create(filename)
         .map_err(|error| format!("Rust encoder could not create {filename}: {error}"))?;
@@ -47,8 +60,18 @@ pub fn save(
             } else {
                 quality.clamp(1, 100) as u8
             };
+            // The `image` crate's entropy coder emits the scan one byte at a
+            // time -- `self.w.write_all(&[byte as u8])`
+            // (`image-0.25.10/src/codecs/jpeg/encoder.rs:211`, and `:214` for
+            // the stuffed zero) -- so an unbuffered `File` here costs one
+            // `write(2)` per output byte.  `BufWriter` batches the *identical*
+            // byte stream; nothing about the encoded file changes.  The flush
+            // below runs on the failure path too, so even a partly written
+            // file holds exactly the bytes the unbuffered form would have
+            // left there.
+            let mut file = std::io::BufWriter::new(file);
             let mut encoder =
-                image::codecs::jpeg::JpegEncoder::new_with_quality(file, jpeg_quality);
+                image::codecs::jpeg::JpegEncoder::new_with_quality(&mut file, jpeg_quality);
             if resolution != 0 {
                 let density = resolution.unsigned_abs();
                 let Ok(density) = u16::try_from(density) else {
@@ -70,9 +93,13 @@ pub fn save(
                     },
                 });
             }
-            encoder
-                .write_image(&pixels, width as u32, height as u32, color.into())
-                .map_err(|error| format!("Rust JPEG encoder failed: {error}"))
+            let encoded = encoder
+                .write_image(pixels, width as u32, height as u32, color.into())
+                .map_err(|error| format!("Rust JPEG encoder failed: {error}"));
+            let flushed = file
+                .flush()
+                .map_err(|error| format!("Rust JPEG encoder failed: {error}"));
+            encoded.and(flushed)
         }
         "PNG" => {
             let mut encoder = png::Encoder::new(file, width as u32, height as u32);
@@ -106,7 +133,7 @@ pub fn save(
             }
             encoder
                 .write_header()
-                .and_then(|mut writer| writer.write_image_data(&pixels))
+                .and_then(|mut writer| writer.write_image_data(pixels))
                 .map_err(|error| format!("Rust PNG encoder failed: {error}"))
         }
         _ => Err(format!("Rust encoder does not support {format}")),

@@ -547,12 +547,16 @@ pub fn tiff_read_section(fp: &mut ImodFile, tif: &mut TfInfo, section: i32) -> O
             nleft -= realsize;
         }
     }
+    // `tiff.c:224-236` exchanges whole rows with three `memcpy`s of `ncopy`
+    // bytes through a `malloc`ed `tmpline`.  Swapping the two row slices is
+    // the same exchange with no scratch buffer; `a` and `b` never name the
+    // same row, because the loop stops at `ysize / 2`.
+    let ncopy = x as usize * pixel as usize;
     for row in 0..y as usize / 2 {
-        let a = row * x as usize * pixel as usize;
-        let b = (y as usize - 1 - row) * x as usize * pixel as usize;
-        for j in 0..x as usize * pixel as usize {
-            data.swap(a + j, b + j);
-        }
+        let a = row * ncopy;
+        let b = (y as usize - 1 - row) * ncopy;
+        let (head, tail) = data.split_at_mut(b);
+        head[a..a + ncopy].swap_with_slice(&mut tail[..ncopy]);
     }
     Some(data)
 }

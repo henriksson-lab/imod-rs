@@ -470,20 +470,31 @@ pub fn binvol() {
             let iy_start = (ncrop_pad[1] - ny_bin) / 2;
             iz_start = -((ncrop_pad[2] - nz_bin) / 2);
             nx_dim = ncrop_pad[0] + 2;
+            // `binvol.f90:281` repacks in place: the source passes the same
+            // array as input and output, which `reduce_by_binning.c:542`
+            // documents as allowed.  Rust cannot hold a shared and a mutable
+            // borrow of one buffer, so the source region is copied out first;
+            // the repack only ever reads at an index >= the index it writes,
+            // so the bytes are the same either way.  `irepak` ->
+            // `repackFloatImage` -> `extractWithBinning`
+            // (`reduce_by_binning.c:445-460`) addresses `array` only as rows
+            // `yStart`..`yEnd` of an `nxDim`-wide plane, so the copy needs one
+            // plane, not the whole remaining volume -- and the scratch for it
+            // is taken once for the loop, where the Fortran allocates nothing
+            // here at all.
+            let repack_floats = nx_dim as usize * ncrop_pad[1] as usize;
+            let mut source = vec![0_u8; repack_floats * 4];
             for iz in 0..nz_bin {
                 iiu_set_position(3, iz, 0);
                 let ibase = (i64::from(nx_dim) * i64::from(ncrop_pad[1]) * i64::from(iz - iz_start))
                     as usize;
-                // `binvol.f90` repacks in place: the source passes the same
-                // array as input and output, which `reduce_by_binning.c`
-                // documents as allowed.  Rust cannot hold a shared and a
-                // mutable borrow of one buffer, so the source region is copied
-                // out first; the repack only ever reads at an index >= the
-                // index it writes, so the bytes are the same either way.
-                let source: Vec<u8> = fft_out[ibase..]
-                    .iter()
-                    .flat_map(|value| value.to_ne_bytes())
-                    .collect();
+                let repack_count = repack_floats.min(fft_out.len() - ibase);
+                for (bytes, value) in source
+                    .chunks_exact_mut(4)
+                    .zip(fft_out[ibase..ibase + repack_count].iter())
+                {
+                    bytes.copy_from_slice(&value.to_ne_bytes());
+                }
                 let region = &mut fft_out[ibase..];
                 let destination = core::slice::from_raw_parts_mut(
                     region.as_mut_ptr().cast::<u8>(),
@@ -491,7 +502,7 @@ pub fn binvol() {
                 );
                 irepak(
                     destination,
-                    &source,
+                    &source[..repack_count * 4],
                     &nx_dim,
                     &ncrop_pad[1],
                     &ix_start,

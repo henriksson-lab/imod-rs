@@ -824,12 +824,16 @@ pub unsafe fn ii_process_read_line(
                 }
                 MRC_MODE_BYTE => {
                     if d.type_ == MRSA_FLOAT {
-                        for i in 0..n {
-                            *fbufp.add(i) = if d.map_sbytes != 0 {
-                                *map.add(*bdata.add(i) as usize) as f32
-                            } else {
-                                *bdata.add(i) as f32
-                            };
+                        // `mrcsec.c:1004-1010` chooses between the mapped and the
+                        // direct loop *before* the loop, not per pixel.
+                        if d.map_sbytes != 0 {
+                            for i in 0..n {
+                                *fbufp.add(i) = *map.add(*bdata.add(i) as usize) as f32;
+                            }
+                        } else {
+                            for i in 0..n {
+                                *fbufp.add(i) = *bdata.add(i) as f32;
+                            }
                         }
                     } else if d.to_short != 0 {
                         for i in 0..n {
@@ -849,12 +853,16 @@ pub unsafe fn ii_process_read_line(
                         mrc_swap_shorts(core::slice::from_raw_parts_mut(src.cast::<i16>(), n), n);
                     }
                     if d.type_ == MRSA_FLOAT {
-                        for i in 0..n {
-                            *fbufp.add(i) = if h.mode == MRC_MODE_SHORT {
-                                *src.add(i) as i16 as f32
-                            } else {
-                                *src.add(i) as f32
-                            };
+                        // `mrcsec.c:1013-1022` is two `case` labels with their own
+                        // tight loops, so the signedness is decided once per line.
+                        if h.mode == MRC_MODE_SHORT {
+                            for i in 0..n {
+                                *fbufp.add(i) = *src.add(i) as i16 as f32;
+                            }
+                        } else {
+                            for i in 0..n {
+                                *fbufp.add(i) = *src.add(i) as f32;
+                            }
                         }
                     } else if d.byte != 0 {
                         for i in 0..n {
@@ -869,24 +877,46 @@ pub unsafe fn ii_process_read_line(
                     }
                 }
                 MRC_MODE_RGB => {
-                    for i in 0..n {
-                        let p = bdata.add(3 * i);
-                        let fpixel =
-                            0.3 * *p as f32 + 0.59 * *p.add(1) as f32 + 0.11 * *p.add(2) as f32;
-                        if d.type_ == MRSA_FLOAT {
-                            *fbufp.add(i) = fpixel;
-                        } else if d.byte != 0 {
-                            *bufp.add(i) = if d.do_scale != 0 {
-                                *map.add((fpixel + 0.499) as usize)
-                            } else {
-                                (fpixel + 0.5) as u8
-                            };
+                    // `mrcsec.c:740-782` and `:1027-1033` are five separate tight
+                    // loops selected by `byte`/`doScale`/`type` outside the loop;
+                    // the luminance expression is byte-for-byte the same in each.
+                    if d.type_ == MRSA_FLOAT {
+                        for i in 0..n {
+                            let p = bdata.add(3 * i);
+                            *fbufp.add(i) =
+                                0.3 * *p as f32 + 0.59 * *p.add(1) as f32 + 0.11 * *p.add(2) as f32;
+                        }
+                    } else if d.byte != 0 {
+                        if d.do_scale != 0 {
+                            for i in 0..n {
+                                let p = bdata.add(3 * i);
+                                let fpixel = 0.3 * *p as f32
+                                    + 0.59 * *p.add(1) as f32
+                                    + 0.11 * *p.add(2) as f32;
+                                *bufp.add(i) = *map.add((fpixel + 0.499) as usize);
+                            }
                         } else {
-                            *usbufp.add(i) = if d.do_scale != 0 {
-                                *usmap.add((fpixel + 0.499) as usize)
-                            } else {
-                                (255. * fpixel + 0.5) as u16
-                            };
+                            for i in 0..n {
+                                let p = bdata.add(3 * i);
+                                let fpixel = 0.3 * *p as f32
+                                    + 0.59 * *p.add(1) as f32
+                                    + 0.11 * *p.add(2) as f32;
+                                *bufp.add(i) = (fpixel + 0.5) as u8;
+                            }
+                        }
+                    } else if d.do_scale != 0 {
+                        for i in 0..n {
+                            let p = bdata.add(3 * i);
+                            let fpixel =
+                                0.3 * *p as f32 + 0.59 * *p.add(1) as f32 + 0.11 * *p.add(2) as f32;
+                            *usbufp.add(i) = *usmap.add((fpixel + 0.499) as usize);
+                        }
+                    } else {
+                        for i in 0..n {
+                            let p = bdata.add(3 * i);
+                            let fpixel =
+                                0.3 * *p as f32 + 0.59 * *p.add(1) as f32 + 0.11 * *p.add(2) as f32;
+                            *usbufp.add(i) = (255. * fpixel + 0.5) as u16;
                         }
                     }
                 }
@@ -1054,17 +1084,28 @@ pub unsafe fn ii_process_read_line(
                     };
                     let fft = if l.mirror_fft != 0 { bdata } else { d.buf };
                     let usfft = fft.cast::<u16>();
-                    for i in 0..n {
-                        let a = *src.add(2 * i);
-                        let b = *src.add(2 * i + 1);
-                        let v = ((1. + scale * (a * a + b * b).sqrt()).ln() * l.slope + l.offset)
-                            .clamp(l.outmin as f32, l.outmax as f32);
-                        if d.byte != 0 {
-                            *fft.add(pix_index) = v as u8
-                        } else {
-                            *usfft.add(pix_index) = v as u16
-                        };
-                        pix_index += 1;
+                    // `mrcsec.c:896-905` keeps `d->byte` out of the arithmetic and
+                    // reads the already-hoisted `slope`/`offset`/`outmin`/`outmax`
+                    // locals (`mrcsec.c:614-618`); `li` is borrowed immutably here,
+                    // so the locals hold exactly the same values.
+                    if d.byte != 0 {
+                        for i in 0..n {
+                            let a = *src.add(2 * i);
+                            let b = *src.add(2 * i + 1);
+                            let v = ((1. + scale * (a * a + b * b).sqrt()).ln() * slope + offset)
+                                .clamp(outmin as f32, outmax as f32);
+                            *fft.add(pix_index) = v as u8;
+                            pix_index += 1;
+                        }
+                    } else {
+                        for i in 0..n {
+                            let a = *src.add(2 * i);
+                            let b = *src.add(2 * i + 1);
+                            let v = ((1. + scale * (a * a + b * b).sqrt()).ln() * slope + offset)
+                                .clamp(outmin as f32, outmax as f32);
+                            *usfft.add(pix_index) = v as u16;
+                            pix_index += 1;
+                        }
                     }
                     if l.mirror_fft != 0 {
                         let cury = if d.read_y != 0 { d.cz } else { d.line };

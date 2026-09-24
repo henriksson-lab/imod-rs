@@ -246,10 +246,11 @@ pub fn imod_mesh_copy(from: Option<&Imesh>, to: Option<&mut Imesh>) -> Result<()
 pub fn imod_mesh_dup(mesh: Option<&Imesh>) -> Option<Imesh> {
     let mut new_mesh = imod_mesh_new()?.remove(0);
     let _ = imod_mesh_copy(mesh, Some(&mut new_mesh));
-    let mesh = mesh?;
-    new_mesh.vert = mesh.vert.clone();
-    new_mesh.list = mesh.list.clone();
-    new_mesh.store = mesh.store.clone();
+    // `imesh.c:124-132` mallocs and memcpys {vert} and {list} and duplicates
+    // {store} after the shallow `imodMeshCopy` at `:123`.  The translated
+    // `imodMeshCopy` already deep-copies all three, so cloning them again here
+    // allocated and copied the same data a second time.
+    mesh?;
     Some(new_mesh)
 }
 
@@ -455,8 +456,12 @@ pub fn imod_mesh_remove_pairs(
         thick = imesh_thickness(meshes[me].flag);
         if thick == 0 || thick == retain_thick {
             if new_size < me {
-                let copy = meshes[me].clone();
-                meshes[new_size] = copy;
+                // `imesh.c:379` copies down with `imodMeshCopy`, a bare
+                // `memcpy` (`imesh.c:113`) that hands the {vert}/{list}/{store}
+                // allocations to the lower slot and abandons the higher one;
+                // the slot at `new_size` was freed by `imodMeshFreeData` in an
+                // earlier pass.  Swap rather than deep-clone the mesh.
+                meshes.swap(new_size, me);
             }
             new_size += 1;
             if thick == retain_thick {
@@ -521,7 +526,10 @@ pub fn imod_mesh_make_pairs(
             };
             new_mesh.flag |= (thickness as u32) << IMESH_THICKNESS_SHIFT;
             meshes.push(Imesh::default());
-            let _ = imod_mesh_copy(Some(&new_mesh), Some(&mut meshes[new_size]));
+            // `imesh.c:441-442` is `imodMeshCopy(newMesh, &meshes[newSize]);
+            // free(newMesh);` -- a shallow copy followed by freeing only the
+            // structure, i.e. a move of the duplicate's data into the array.
+            meshes[new_size] = new_mesh;
             new_size += 1;
             dir += 2;
         }

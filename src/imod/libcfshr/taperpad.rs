@@ -56,18 +56,46 @@ fn copy_to_center(
     *ixhi = *ixlo + nxbox;
     *iylo = (ny - nybox) / 2;
     *iyhi = *iylo + nybox;
+    // `taperpad.c:156`: the `switch (type)` is per line, not per pixel, and
+    // each arm walks one typed input pointer and one output pointer backwards
+    // across the row.  A `type` the switch does not name -- `SLICE_MODE_RGB`,
+    // which only `sliceTaperInPad` handles -- runs no inner loop at all and
+    // leaves the destination row untouched, so the catch-all here writes
+    // nothing rather than zeroing the box.
+    let n = nxbox.max(0) as usize;
     for iy in (0..nybox).rev() {
-        for ix in (0..nxbox).rev() {
-            let ind = (ix + iy * nxbox) as usize;
-            let value = match (typ, array) {
-                (BYTE, PadIn::Byte(a)) => a[ind] as f32,
-                (SHORT, PadIn::Short(a)) => a[ind] as f32,
-                (USHORT, PadIn::UShort(a)) => a[ind] as f32,
-                (FLOAT, PadIn::Float(a)) => a[ind],
-                (FLOAT, PadIn::InPlace) => out[ind],
-                _ => 0.,
-            };
-            out[(*ixlo + ix + (*iylo + iy) * nxdim) as usize] = value;
+        let dst = (*ixlo + (*iylo + iy) * nxdim) as usize;
+        let src = (iy * nxbox) as usize;
+        match (typ, array) {
+            (BYTE, PadIn::Byte(a)) => {
+                for (o, &v) in out[dst..dst + n].iter_mut().zip(&a[src..src + n]) {
+                    *o = v as f32;
+                }
+            }
+            (SHORT, PadIn::Short(a)) => {
+                for (o, &v) in out[dst..dst + n].iter_mut().zip(&a[src..src + n]) {
+                    *o = v as f32;
+                }
+            }
+            (USHORT, PadIn::UShort(a)) => {
+                for (o, &v) in out[dst..dst + n].iter_mut().zip(&a[src..src + n]) {
+                    *o = v as f32;
+                }
+            }
+            (FLOAT, PadIn::Float(a)) => {
+                out[dst..dst + n].copy_from_slice(&a[src..src + n]);
+            }
+            (FLOAT, PadIn::InPlace) => {
+                // Source and destination are the same buffer here, and the
+                // source's backward walk is what makes an in-place expansion
+                // work, so this arm keeps the element-by-element backward copy
+                // rather than a `memmove`, which is not the same thing when the
+                // destination sits below the source.
+                for ix in (0..nxbox).rev() {
+                    out[dst + ix as usize] = out[src + ix as usize];
+                }
+            }
+            _ => {}
         }
     }
 }
@@ -1148,7 +1176,9 @@ pub fn slice_edge_median(
     mean_of_sides: i32,
 ) -> f64 {
     const MAX_MED_SAMPLE: i32 = 10000;
-    let mut samples = vec![0.0_f32; MAX_MED_SAMPLE as usize];
+    // `float samples[MAX_MED_SAMPLE]` (`taperpad.c:1005`) is a stack array, not
+    // an allocation; only the first `numSample` entries are ever read.
+    let mut samples = [0.0_f32; MAX_MED_SAMPLE as usize];
     let mut num_sample = 0_i32;
     let (mut median1, mut median2, mut median3, mut median4) = (0.0_f32, 0.0, 0.0, 0.0);
     let num_on_edge = 2 * ((ixhi - ixlo) + (iyhi + 1 - iylo));

@@ -602,6 +602,18 @@ pub fn mrc2tif() {
         if make_qimage && alloc_size < line_bytes * hdata.ny as usize {
             alloc_size = line_bytes * hdata.ny as usize;
         }
+        // `mrc2tif.cpp:417` takes the QImage line buffer once, before the
+        // section loop, and `:548` reuses `qbuf` across sections.  The
+        // spread/invert destination below has the one fixed shape
+        // `lineBytes * ysize`, so it is taken once here rather than per
+        // section.  Each section rewrites every row; only the alignment
+        // padding past `xsize * outPsize` is never written, and it stays
+        // zero for the whole run either way.
+        let mut qbuf = if make_qimage {
+            vec![0u8; line_bytes * hdata.ny as usize]
+        } else {
+            Vec::new()
+        };
         // `Islice slice;` (`mrc2tif.cpp:81`).  `sliceInit` at `:511` makes
         // `slice.data.b == buf`: the read buffer *is* the slice's storage, so
         // the slice owns it here -- `malloc`ed where `:495` mallocs it, read
@@ -864,7 +876,6 @@ pub fn mrc2tif() {
                 let write_buffer = slice.data.bytes_mut();
                 let write_error = if make_qimage {
                     let out_pixel_size = if psize == 3 { 3 } else { 1 };
-                    let mut qbuf = vec![0u8; line_bytes * hdata.ny as usize];
                     let row_bytes = hdata.nx as usize * out_pixel_size;
                     let source = &write_buffer[..row_bytes * hdata.ny as usize];
                     // `mrc2tif.cpp:570-583`: spread the rows to the aligned

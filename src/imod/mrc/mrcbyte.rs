@@ -17,7 +17,7 @@ use crate::imod::libiimod::mrcfiles::{
     mrc_write_slice,
 };
 use crate::imod::libiimod::mrcsec::mrc_read_z_byte;
-use crate::imod::libiimod::mrcslice::slice_mmm;
+use crate::imod::libiimod::mrcslice::{slice_mmm, slice_read_mrc};
 use std::io::Write as _;
 
 pub fn mrcbyte_help(name: &str) {
@@ -250,6 +250,47 @@ pub fn mrcbyte(arguments: &[String]) -> i32 {
     }
     li.ramp = ramp;
     mrc_init_li(Some(&mut li), Some(&header));
+    // `mrcbyte.c:184-198`.  When the input header carries no min/max the source
+    // scans the whole file for them, and those values feed `mrcContrastScaling`
+    // below -- so omitting this block changes the slope and offset, and with
+    // them every output pixel, for any input with `amin == amax == 0`.
+    if header.amin == 0. && header.amax == 0. {
+        unsafe {
+            libc::printf(c"Input file has no min and max; scanning file...".as_ptr());
+        }
+        header.amin = 1.0e37;
+        header.amax = -header.amin;
+        for k in 0..header.nz {
+            let Some(mut slicep) = slice_read_mrc(&mut header, k, b'z') else {
+                exit_error(&c_format_bytes(
+                    "Reading slice %d while scanning for min/max",
+                    &[CArg::Int(k as i64)],
+                ));
+            };
+            slice_mmm(&mut slicep);
+            // `B3DMIN`/`B3DMAX` are `a < b ? a : b`, which take the *second*
+            // operand when either is NaN -- not `f32::min`/`max`.
+            header.amin = if header.amin < slicep.min {
+                header.amin
+            } else {
+                slicep.min
+            };
+            header.amax = if header.amax > slicep.max {
+                header.amax
+            } else {
+                slicep.max
+            };
+            unsafe {
+                libc::printf(
+                    c" min %.5g max %.5g
+"
+                    .as_ptr(),
+                    header.amin as f64,
+                    header.amax as f64,
+                );
+            }
+        }
+    }
     let (slope, offset) =
         mrc_contrast_scaling(&header, li.smin, li.smax, li.black, li.white, li.ramp);
     li.slope = slope;

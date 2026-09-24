@@ -1,7 +1,10 @@
 //! Translation of `IMOD/libcfshr/amoeba.c`.
 
 const NMAX: usize = 20;
-const MAX_DUAL_AMOEBA_VAR: usize = 20;
+/// `IMOD/include/cfsemshare.h:35` — **16**, not `NMAX`.  It sizes
+/// `dualAmoeba`'s `pp`/`ptol` and, through `stride`, the row pitch it hands to
+/// `amoebaInit`/`amoeba`, so the two constants are not interchangeable.
+const MAX_DUAL_AMOEBA_VAR: usize = 16;
 
 /// Matches static `simpleSort` (`IMOD/libcfshr/amoeba.c:25`).
 fn simple_sort(values: &[f32], index: &mut [usize], points: usize) {
@@ -77,16 +80,26 @@ pub fn amoeba<Function: FnMut(&[f32]) -> f32>(
             && point_tolerance.len() >= dimensions
     );
     let points_count = dimensions + 1;
-    let mut index = (0..points_count).collect::<Vec<_>>();
-    simple_sort(values, &mut index, points_count);
-    let mut center = vec![0.; dimensions];
-    let mut reflection = vec![0.; dimensions];
-    let mut expansion = vec![0.; dimensions];
+    // `amoeba.c:104-105` declares `int index[NMAX]; float pcen[NMAX],
+    // pref[NMAX], pexp[NMAX];` — fixed-size automatic arrays, not allocations.
+    // `index` is written through `npts - 1 == dimensions`, so it needs one more
+    // slot than the source's own declaration provides.
+    let mut index = [0usize; NMAX + 1];
+    // `amoeba.c:111-112`.
+    for (point, slot) in index[..points_count].iter_mut().enumerate() {
+        *slot = point;
+    }
+    simple_sort(values, &mut index[..points_count], points_count);
+    let mut center = [0.0f32; NMAX];
+    let mut reflection = [0.0f32; NMAX];
+    let mut expansion = [0.0f32; NMAX];
     for iteration in 0..1000 {
         let low = index[0];
         let high = index[points_count - 1];
         let second = index[points_count - 2];
-        let near = index[1..].iter().all(|point| {
+        // `amoeba.c:124`: `for (ipt = 1; ipt < npts && near; ipt++)` — the
+        // fixed array is longer than `npts`, so the bound must be explicit.
+        let near = index[1..points_count].iter().all(|point| {
             (0..dimensions).all(|dimension| {
                 (points[*point + dimension * fastest_dimension]
                     - points[low + dimension * fastest_dimension])
@@ -118,7 +131,7 @@ pub fn amoeba<Function: FnMut(&[f32]) -> f32>(
                 - (RHO * points[high + dimension * fastest_dimension]) as f64)
                 as f32;
         }
-        let reflected_value = function(&reflection);
+        let reflected_value = function(&reflection[..dimensions]);
         if reflected_value >= values[low] && reflected_value < values[second] {
             accept_point(
                 points,
@@ -126,7 +139,7 @@ pub fn amoeba<Function: FnMut(&[f32]) -> f32>(
                 dimensions,
                 &mut index,
                 values,
-                &reflection,
+                &reflection[..dimensions],
                 reflected_value,
             );
         } else if reflected_value < values[low] {
@@ -138,7 +151,7 @@ pub fn amoeba<Function: FnMut(&[f32]) -> f32>(
                     + (CHI * reflection[dimension]) as f64)
                     as f32;
             }
-            let expansion_value = function(&expansion);
+            let expansion_value = function(&expansion[..dimensions]);
             if expansion_value < reflected_value {
                 accept_point(
                     points,
@@ -146,7 +159,7 @@ pub fn amoeba<Function: FnMut(&[f32]) -> f32>(
                     dimensions,
                     &mut index,
                     values,
-                    &expansion,
+                    &expansion[..dimensions],
                     expansion_value,
                 );
             } else {
@@ -156,7 +169,7 @@ pub fn amoeba<Function: FnMut(&[f32]) -> f32>(
                     dimensions,
                     &mut index,
                     values,
-                    &reflection,
+                    &reflection[..dimensions],
                     reflected_value,
                 );
             }
@@ -172,7 +185,7 @@ pub fn amoeba<Function: FnMut(&[f32]) -> f32>(
                         - (RHO * GAMMA * points[high + dimension * fastest_dimension]) as f64)
                         as f32;
                 }
-                let contraction = function(&expansion);
+                let contraction = function(&expansion[..dimensions]);
                 if contraction <= reflected_value {
                     accept_point(
                         points,
@@ -180,7 +193,7 @@ pub fn amoeba<Function: FnMut(&[f32]) -> f32>(
                         dimensions,
                         &mut index,
                         values,
-                        &expansion,
+                        &expansion[..dimensions],
                         contraction,
                     );
                 } else {
@@ -194,7 +207,7 @@ pub fn amoeba<Function: FnMut(&[f32]) -> f32>(
                         + (GAMMA * points[high + dimension * fastest_dimension]) as f64)
                         as f32;
                 }
-                let contraction = function(&expansion);
+                let contraction = function(&expansion[..dimensions]);
                 if contraction < values[high] {
                     accept_point(
                         points,
@@ -202,7 +215,7 @@ pub fn amoeba<Function: FnMut(&[f32]) -> f32>(
                         dimensions,
                         &mut index,
                         values,
-                        &expansion,
+                        &expansion[..dimensions],
                         contraction,
                     );
                 } else {
@@ -222,7 +235,7 @@ pub fn amoeba<Function: FnMut(&[f32]) -> f32>(
                             as f32;
                         points[point + dimension * fastest_dimension] = expansion[dimension];
                     }
-                    values[point] = function(&expansion);
+                    values[point] = function(&expansion[..dimensions]);
                     if values[point] < values[low] {
                         sort_from = 0;
                     }
@@ -248,8 +261,10 @@ pub fn amoeba_init<Function: FnMut(&[f32]) -> f32>(
     function: &mut Function,
     point_tolerance: &mut [f32],
 ) {
+    // `amoeba.c:231`: `float ptmp[NMAX];` — one automatic array declared
+    // outside the `j` loop, not an allocation per simplex point.
+    let mut temporary = [0.0f32; NMAX];
     for simplex in 0..=dimensions {
-        let mut temporary = vec![0.; dimensions];
         for dimension in 0..dimensions {
             points[simplex + dimension * fastest_dimension] = initial[dimension]
                 + if simplex != 0 && dimension == simplex - 1 {
@@ -260,7 +275,7 @@ pub fn amoeba_init<Function: FnMut(&[f32]) -> f32>(
             temporary[dimension] = points[simplex + dimension * fastest_dimension];
             point_tolerance[dimension] = delta[dimension] * tolerance_factor;
         }
-        values[simplex] = function(&temporary);
+        values[simplex] = function(&temporary[..dimensions]);
     }
 }
 
@@ -278,8 +293,10 @@ pub fn dual_amoeba<Function: FnMut(&[f32]) -> f32>(
 ) {
     assert!(dimensions <= MAX_DUAL_AMOEBA_VAR);
     let stride = MAX_DUAL_AMOEBA_VAR + 1;
-    let mut points = vec![0.; stride * stride];
-    let mut tolerance = vec![0.; MAX_DUAL_AMOEBA_VAR];
+    // `amoeba.c:236`: `float pp[MAX_DUAL_AMOEBA_VAR + 1][MAX_DUAL_AMOEBA_VAR
+    // + 1], ptol[MAX_DUAL_AMOEBA_VAR];` — automatic arrays, not allocations.
+    let mut points = [0.0f32; (MAX_DUAL_AMOEBA_VAR + 1) * (MAX_DUAL_AMOEBA_VAR + 1)];
+    let mut tolerance = [0.0f32; MAX_DUAL_AMOEBA_VAR];
     let mut low = 0;
     amoeba_init(
         &mut points,

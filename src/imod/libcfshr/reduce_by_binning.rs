@@ -82,13 +82,16 @@ pub fn extract_and_bin_into_array(
     bx_offset += by_offset * nx_bdim;
 
     if nbin == 1 && pix_size == out_pix_size {
-        // Binning 1: copy the data line by line
+        // Binning 1: copy the data line by line.  `reduce_by_binning.c:110-115`
+        // is `*bdata++ = *cline1++` over `nxout * pixSize` bytes: one forward
+        // copy of a contiguous run.  `array` and `bray` are distinct borrows
+        // here, so the run cannot overlap and the byte sequence written is the
+        // same.
+        let nbyte = nxout as usize * pix_size;
         for iy in 0..nyout as usize {
             let cline1 = abase + pix_size * iy * nx_dim as usize;
             let bdata = pix_size * (bx_offset as usize + iy * nx_bdim as usize);
-            for ix in 0..nxout as usize * pix_size {
-                bray[bdata + ix] = array[cline1 + ix];
-            }
+            bray[bdata..bdata + nbyte].copy_from_slice(&array[cline1..cline1 + nbyte]);
         }
     } else if nbin == 2 && bin234ok != 0 {
         // Binning by 2
@@ -791,9 +794,13 @@ pub fn bin_into_slice(
         // `nxDim`, not `nxBin`, and it is not the same as the general loop
         // whenever the two differ.
         for iy_bin in 0..ny_bin {
-            for ix_bin in 0..nx_bin {
-                let ind = (ix_bin + nx_dim * iy_bin) as usize;
-                bray[ind] += array[ind] * factor;
+            // The source walks `ind = ixBin + nxDim * iyBin` across the row, so
+            // the run is contiguous in both arrays and the row is taken once.
+            // The element order, the product and the `+=` are unchanged.
+            let base = (nx_dim * iy_bin) as usize;
+            let n = nx_bin as usize;
+            for (b, a) in bray[base..base + n].iter_mut().zip(&array[base..base + n]) {
+                *b += *a * factor;
             }
         }
     } else {
@@ -818,29 +825,37 @@ pub fn bin_into_slice(
                 for iy in iy_bin * bin_y..(iy_bin + 1) * bin_y {
                     let ix_base = nx_dim * iy;
                     let ind_base = nx_bin * (iy_bin - iy_bin0);
+                    // Each `binFacX` arm reads `binFacX` consecutive input
+                    // elements per output element and writes one output
+                    // element, both runs contiguous and both exactly the range
+                    // the source indexes.  Taking the two runs as slices once
+                    // per line removes the per-element index arithmetic and
+                    // bounds check; the operand order, the additions and the
+                    // multiplication by `factor` are written as the source
+                    // writes them.
                     if bin_x == 1 {
-                        for ix_bin in 0..nx_bin {
-                            brows[(ix_bin + ind_base) as usize] +=
-                                array[(ix_bin + ix_base) as usize] * factor;
+                        let brow = &mut brows[ind_base as usize..][..nx_bin as usize];
+                        let arow = &array[ix_base as usize..][..nx_bin as usize];
+                        for (b, a) in brow.iter_mut().zip(arow) {
+                            *b += *a * factor;
                         }
                     } else if bin_x == 2 {
-                        for ix_bin in 0..nx_bin {
-                            let ind = (2 * ix_bin + ix_base) as usize;
-                            brows[(ix_bin + ind_base) as usize] +=
-                                (array[ind] + array[ind + 1]) * factor;
+                        let brow = &mut brows[ind_base as usize..][..nx_bin as usize];
+                        let arow = &array[ix_base as usize..][..2 * nx_bin as usize];
+                        for (b, a) in brow.iter_mut().zip(arow.chunks_exact(2)) {
+                            *b += (a[0] + a[1]) * factor;
                         }
                     } else if bin_x == 3 {
-                        for ix_bin in 0..nx_bin {
-                            let ind = (3 * ix_bin + ix_base) as usize;
-                            brows[(ix_bin + ind_base) as usize] +=
-                                (array[ind] + array[ind + 1] + array[ind + 2]) * factor;
+                        let brow = &mut brows[ind_base as usize..][..nx_bin as usize];
+                        let arow = &array[ix_base as usize..][..3 * nx_bin as usize];
+                        for (b, a) in brow.iter_mut().zip(arow.chunks_exact(3)) {
+                            *b += (a[0] + a[1] + a[2]) * factor;
                         }
                     } else if bin_x == 4 {
-                        for ix_bin in 0..nx_bin {
-                            let ind = (4 * ix_bin + ix_base) as usize;
-                            brows[(ix_bin + ind_base) as usize] +=
-                                (array[ind] + array[ind + 1] + array[ind + 2] + array[ind + 3])
-                                    * factor;
+                        let brow = &mut brows[ind_base as usize..][..nx_bin as usize];
+                        let arow = &array[ix_base as usize..][..4 * nx_bin as usize];
+                        for (b, a) in brow.iter_mut().zip(arow.chunks_exact(4)) {
+                            *b += (a[0] + a[1] + a[2] + a[3]) * factor;
                         }
                     } else {
                         for ix_bin in 0..nx_bin {

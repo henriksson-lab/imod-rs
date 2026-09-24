@@ -77,9 +77,12 @@ mod implementation {
         let row = width * bytes_per_pixel;
         for y in 0..height / 2 {
             let other = height - y - 1;
-            for index in 0..row {
-                data.swap(y * row + index, other * row + index);
-            }
+            // Exchanging the two rows as slices is the same set of byte swaps
+            // the per-byte loop made -- `y < other` always, so the two never
+            // name the same row -- and it is the idiom the legacy reader
+            // already uses for this flip (`mrc/tiff.rs`, `tiff.c:224-236`).
+            let (head, tail) = data.split_at_mut(other * row);
+            head[y * row..y * row + row].swap_with_slice(&mut tail[..row]);
         }
     }
 

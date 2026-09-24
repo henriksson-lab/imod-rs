@@ -959,8 +959,7 @@ pub fn imesh_skin_object(
             if let Some(inscan_c) = inscan.as_mut() {
                 for ind in 0..nests[nest_ind].inside.len() {
                     let other = nests[nest_ind].inside[ind] as usize;
-                    let cs2 = scan_conts[other].clone();
-                    subtract_scan_contours(inscan_c, &cs2);
+                    subtract_scan_contours(inscan_c, &scan_conts[other]);
                 }
             }
             nests[nest_ind].inscan = inscan;
@@ -1224,22 +1223,22 @@ pub fn imesh_skin_object(
                 if num_top != 0 && found_inside == 0 {
                     let bot_cont = join_all_contours(
                         obj,
-                        &bot_list[thread].clone(),
+                        &bot_list[thread],
                         num_bot as i32,
                         num_bot as i32,
                         1,
-                        Some(&top_list[thread].clone()),
+                        Some(&top_list[thread]),
                         num_top as i32,
                         num_top as i32,
                         None,
                     );
                     let top_cont = join_all_contours(
                         obj,
-                        &top_list[thread].clone(),
+                        &top_list[thread],
                         num_top as i32,
                         num_top as i32,
                         -1,
-                        Some(&bot_list[thread].clone()),
+                        Some(&bot_list[thread]),
                         num_bot as i32,
                         num_bot as i32,
                         None,
@@ -1753,7 +1752,7 @@ pub fn imesh_skin_object(
                             obj,
                             &mut temp_meshes[thread],
                             bot_out_cont,
-                            &top_list[thread].clone(),
+                            &top_list[thread],
                             &mut top_used,
                             &top_just_in_list,
                             num_top_just_in as i32,
@@ -1771,7 +1770,7 @@ pub fn imesh_skin_object(
                             obj,
                             &mut temp_meshes[thread],
                             top_out_cont,
-                            &bot_list[thread].clone(),
+                            &bot_list[thread],
                             &mut bot_used,
                             &bot_just_in_list,
                             num_bot_just_in as i32,
@@ -2071,7 +2070,7 @@ pub fn imesh_skin_object(
                         let cont_clone = obj.cont[co_num].clone();
                         let bot_cont = join_all_contours(
                             obj,
-                            &bot_list[0].clone(),
+                            &bot_list[0],
                             num_inside as i32,
                             num_inside as i32,
                             backoff,
@@ -2085,7 +2084,7 @@ pub fn imesh_skin_object(
                         };
                         let inner_for_mesh = join_all_contours(
                             obj,
-                            &bot_list[0].clone(),
+                            &bot_list[0],
                             num_inside as i32,
                             num_inside as i32,
                             2,
@@ -2104,7 +2103,7 @@ pub fn imesh_skin_object(
                         // Again, join with backoff, and join again with the inner
                         let tc = join_all_contours(
                             obj,
-                            &top_list[0].clone(),
+                            &top_list[0],
                             2,
                             1,
                             backoff,
@@ -2115,7 +2114,7 @@ pub fn imesh_skin_object(
                         );
                         mesh_cont = join_all_contours(
                             obj,
-                            &top_list[0].clone(),
+                            &top_list[0],
                             2,
                             1,
                             2,
@@ -4230,7 +4229,7 @@ fn join_all_contours(
         if jmin < num_same_level && eliminate_overlap(&mut tcont, &mut jcont) != 0 {
             find_closest_contour(
                 &tcont,
-                Some(&jcont.clone()),
+                Some(&jcont),
                 obj,
                 list,
                 ncont,
