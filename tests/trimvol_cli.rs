@@ -26,6 +26,10 @@ fn trimvol_requires_imod_dir_before_parsing_options() {
 fn trimvol_removed_s_option_exits_as_the_python_command_does() {
     let output = common::imod_cmd("trimvol")
         .env("IMOD_DIR", env!("CARGO_MANIFEST_DIR"))
+        .env(
+            "AUTODOC_DIR",
+            concat!(env!("CARGO_MANIFEST_DIR"), "/IMOD/autodoc"),
+        )
         .arg("-s")
         .output()
         .expect("run trimvol removed option");
@@ -57,6 +61,10 @@ fn trimvol_rejects_mode_with_contrast_on_real_mrc_before_creating_output() {
     }
     let result = common::imod_cmd("trimvol")
         .env("IMOD_DIR", env!("CARGO_MANIFEST_DIR"))
+        .env(
+            "AUTODOC_DIR",
+            concat!(env!("CARGO_MANIFEST_DIR"), "/IMOD/autodoc"),
+        )
         .args([
             "-mode",
             "1",
@@ -103,6 +111,10 @@ fn trimvol_reports_source_specific_coordinate_size_conflicts_before_file_access(
     ] {
         let result = common::imod_cmd("trimvol")
             .env("IMOD_DIR", env!("CARGO_MANIFEST_DIR"))
+            .env(
+                "AUTODOC_DIR",
+                concat!(env!("CARGO_MANIFEST_DIR"), "/IMOD/autodoc"),
+            )
             .args([
                 limits,
                 "1,2",
@@ -128,6 +140,10 @@ fn trimvol_reports_source_specific_coordinate_size_conflicts_before_file_access(
 fn trimvol_checks_missing_input_before_option_conflicts_as_python_does() {
     let result = common::imod_cmd("trimvol")
         .env("IMOD_DIR", env!("CARGO_MANIFEST_DIR"))
+        .env(
+            "AUTODOC_DIR",
+            concat!(env!("CARGO_MANIFEST_DIR"), "/IMOD/autodoc"),
+        )
         .args(["-x", "1,2", "-nx", "2", "missing-input.mrc", "output.mrc"])
         .output()
         .expect("run trimvol missing input with conflict");
@@ -168,6 +184,10 @@ fn trimvol_old_flipped_coordinates_use_source_yz_limit_exchange() {
     }
     let result = common::imod_cmd("trimvol")
         .env("IMOD_DIR", env!("CARGO_MANIFEST_DIR"))
+        .env(
+            "AUTODOC_DIR",
+            concat!(env!("CARGO_MANIFEST_DIR"), "/IMOD/autodoc"),
+        )
         .args([
             "-f",
             "-old",
@@ -243,6 +263,10 @@ fn trimvol_even_old_flipped_coordinates_reverse_swapped_y_limits() {
     }
     let result = common::imod_cmd("trimvol")
         .env("IMOD_DIR", env!("CARGO_MANIFEST_DIR"))
+        .env(
+            "AUTODOC_DIR",
+            concat!(env!("CARGO_MANIFEST_DIR"), "/IMOD/autodoc"),
+        )
         .args([
             "-f",
             "-old",
@@ -297,6 +321,12 @@ fn trimvol_integer_min_max_maps_observed_real_mrc_range_to_requested_range() {
         let image = &mut *file;
         let mut header = image.mrc_header.take().expect("new MRC image header");
         assert_eq!(mrc_head_new(&mut header, 2, 2, 1, 2), 0);
+        // `newstack -sca` scales from the *header* min/max; left at
+        // `mrc_head_new`'s sentinels the scale is NaN and native writes
+        // -32768 everywhere, so state the true range.
+        header.amin = 10.;
+        header.amax = 40.;
+        header.amean = 25.;
         ii_sync_from_mrc_header(image, &mut header);
         assert_eq!(mrc_head_write(image.fp.as_mut().unwrap(), &mut header), 0);
         image.mrc_header = Some(header);
@@ -306,6 +336,10 @@ fn trimvol_integer_min_max_maps_observed_real_mrc_range_to_requested_range() {
     }
     let result = common::imod_cmd("trimvol")
         .env("IMOD_DIR", env!("CARGO_MANIFEST_DIR"))
+        .env(
+            "AUTODOC_DIR",
+            concat!(env!("CARGO_MANIFEST_DIR"), "/IMOD/autodoc"),
+        )
         .args([
             "-mm",
             "100,200",
@@ -362,6 +396,10 @@ fn trimvol_crops_real_mrc_volume_with_one_based_coordinates() {
     }
     let result = common::imod_cmd("trimvol")
         .env("IMOD_DIR", env!("CARGO_MANIFEST_DIR"))
+        .env(
+            "AUTODOC_DIR",
+            concat!(env!("CARGO_MANIFEST_DIR"), "/IMOD/autodoc"),
+        )
         .args([
             "-x",
             "2,3",
@@ -443,6 +481,10 @@ fn trimvol_flip_yz_preserves_clip_plane_order() {
     assert!(
         common::imod_cmd("trimvol")
             .env("IMOD_DIR", env!("CARGO_MANIFEST_DIR"))
+            .env(
+                "AUTODOC_DIR",
+                concat!(env!("CARGO_MANIFEST_DIR"), "/IMOD/autodoc")
+            )
             .args(["-yz", input.to_str().unwrap(), output.to_str().unwrap()])
             .status()
             .unwrap()
@@ -520,6 +562,10 @@ fn trimvol_rotate_x_uses_source_clip_rotx_minus_ninety_plane_order() {
     assert!(
         common::imod_cmd("trimvol")
             .env("IMOD_DIR", env!("CARGO_MANIFEST_DIR"))
+            .env(
+                "AUTODOC_DIR",
+                concat!(env!("CARGO_MANIFEST_DIR"), "/IMOD/autodoc")
+            )
             .args(["-rx", input.to_str().unwrap(), output.to_str().unwrap()])
             .status()
             .unwrap()
@@ -554,4 +600,135 @@ fn trimvol_rotate_x_uses_source_clip_rotx_minus_ninety_plane_order() {
     }
     let _ = std::fs::remove_file(input);
     let _ = std::fs::remove_file(output);
+}
+
+/// Native-golden coverage: every case in `fixtures/trimvol/cases.tsv` was run
+/// through the native Python `IMOD/pysrc/trimvol` driving the native
+/// `densmatch`, `findcontrast`, `newstack`, `clip` and `header` by
+/// `fixtures/make-trimvol-goldens.sh`, stdout captured through a pipe.  Output
+/// files are compared with their MRC labels (date/time stamps) blanked.
+/// Stdout is compared as a multiset of lines, with the `.tmp.<pid>` name of
+/// the flip/rotate intermediate normalised: native Python block-buffers its
+/// own `print`s into the pipe, so the called programs' output lands ahead of
+/// the script's lines there, and the interleaving is not an acceptance
+/// criterion.
+#[test]
+fn trimvol_cases_match_native_golden() {
+    let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR"));
+    let fixtures = root.join("fixtures/trimvol");
+    let inputs_dir = root.join("fixtures/densmatch");
+    let golden = fixtures.join("golden");
+    let table = std::fs::read_to_string(fixtures.join("cases.tsv")).unwrap();
+    let lines_of = |bytes: &[u8]| -> Vec<String> {
+        let text = String::from_utf8_lossy(bytes);
+        let mut lines: Vec<String> = text
+            .lines()
+            .map(|line| {
+                let line = line.trim();
+                match line.find(".tmp.") {
+                    Some(at) => {
+                        let rest = &line[at + 5..];
+                        let digits = rest.chars().take_while(char::is_ascii_digit).count();
+                        format!("{}.tmp.PID{}", &line[..at], &rest[digits..])
+                    }
+                    None => line.to_string(),
+                }
+            })
+            .filter(|line| !line.is_empty())
+            .collect();
+        lines.sort();
+        lines
+    };
+    let mask = |bytes: &[u8]| -> Vec<u8> {
+        let mut masked = bytes.to_vec();
+        if masked.len() > 1024 {
+            masked[224..1024].fill(0);
+        }
+        masked
+    };
+    let mut failures = Vec::new();
+    let mut count = 0;
+    for line in table
+        .lines()
+        .filter(|l| !l.starts_with('#') && !l.is_empty())
+    {
+        let (name, args) = line.split_once('\t').unwrap();
+        let rc: i32 = std::fs::read_to_string(golden.join(format!("{name}.rc")))
+            .unwrap()
+            .trim()
+            .parse()
+            .unwrap();
+        let expected_out = std::fs::read(golden.join(format!("{name}.out"))).unwrap();
+        let dir = std::env::temp_dir().join(format!(
+            "imod-rs-trimvol-golden-{}-{name}",
+            std::process::id()
+        ));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let mut inputs = Vec::new();
+        for entry in std::fs::read_dir(&inputs_dir).unwrap() {
+            let path = entry.unwrap().path();
+            if path.extension().is_some_and(|e| e == "mrc") {
+                let file = path.file_name().unwrap().to_owned();
+                std::fs::copy(&path, dir.join(&file)).unwrap();
+                inputs.push(file.to_string_lossy().into_owned());
+            }
+        }
+        let output = common::imod_cmd("trimvol")
+            .current_dir(&dir)
+            .env("IMOD_DIR", env!("CARGO_MANIFEST_DIR"))
+            .env(
+                "AUTODOC_DIR",
+                concat!(env!("CARGO_MANIFEST_DIR"), "/IMOD/autodoc"),
+            )
+            .env("OMP_NUM_THREADS", "1")
+            .args(args.split_whitespace())
+            .output()
+            .unwrap();
+        count += 1;
+        if output.status.code() != Some(rc) {
+            failures.push(format!(
+                "{name}: exit {:?}, native {rc}",
+                output.status.code()
+            ));
+        }
+        if lines_of(&output.stdout) != lines_of(&expected_out) {
+            failures.push(format!(
+                "{name}: stdout differs\n--- native\n{}\n--- ours\n{}",
+                String::from_utf8_lossy(&expected_out),
+                String::from_utf8_lossy(&output.stdout)
+            ));
+        }
+        let mut expected_files: Vec<String> = std::fs::read_dir(golden.join(name))
+            .map(|entries| {
+                entries
+                    .map(|e| e.unwrap().file_name().to_str().unwrap().to_string())
+                    .collect()
+            })
+            .unwrap_or_default();
+        expected_files.sort();
+        let mut produced: Vec<String> = std::fs::read_dir(&dir)
+            .unwrap()
+            .map(|e| e.unwrap().file_name().to_str().unwrap().to_string())
+            .filter(|f| !inputs.contains(f))
+            .collect();
+        produced.sort();
+        if produced != expected_files {
+            failures.push(format!(
+                "{name}: files {produced:?}, native {expected_files:?}"
+            ));
+        }
+        for file in &expected_files {
+            let Ok(ours) = std::fs::read(dir.join(file)) else {
+                continue;
+            };
+            let theirs = std::fs::read(golden.join(name).join(file)).unwrap();
+            if mask(&ours) != mask(&theirs) {
+                failures.push(format!("{name}: {file} differs from native"));
+            }
+        }
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+    assert!(count > 30, "only {count} cases ran");
+    assert!(failures.is_empty(), "{}", failures.join("\n"));
 }

@@ -9,6 +9,8 @@ use super::cmplft;
 pub fn hermft(data: &mut [f32], odd: usize, n: i32, dim: &mut [i32; 6]) {
     assert!(data.len() >= dim[1] as usize);
 
+    let len = data.len();
+    let dp = data.as_mut_ptr();
     let twopi = 6.2831853_f32;
     let two_n = (2 * n) as f32;
     let total = dim[1];
@@ -20,12 +22,24 @@ pub fn hermft(data: &mut [f32], odd: usize, n: i32, dim: &mut [i32; 6]) {
     while first <= total {
         let end = first + extent;
         let mut index = first - 1;
+        if index < end {
+            assert!(
+                index >= 0
+                    && index + 0_i32 >= 0
+                    && between > 0
+                    && ((index + (end - 1 - index) / between * between + 0_i32.max(0)) as usize)
+                        .checked_add(odd)
+                        .is_some_and(|last| last < len)
+            );
+        }
         while index < end {
-            let a = data[index as usize];
-            let b = data[index as usize + odd];
-            data[index as usize] = a + b;
-            data[index as usize + odd] = a - b;
-            index += between;
+            unsafe {
+                let a = *dp.add(index as usize);
+                let b = *dp.add(index as usize + odd);
+                *dp.add(index as usize) = a + b;
+                *dp.add(index as usize + odd) = a - b;
+                index += between;
+            }
         }
         first += limit;
     }
@@ -42,19 +56,61 @@ pub fn hermft(data: &mut [f32], odd: usize, n: i32, dim: &mut [i32; 6]) {
         while row <= total {
             let end = row + extent;
             let mut index = row - 1;
+            // Unchecked access (see `mdftkd.rs`'s module comment for the pattern):
+            // `index` runs from `row - 1` in steps of `between > 0` up to its last value below
+            // `end`, and every access is `index`, `index + delta` or either plus `odd`, so
+            // checking the first point (and its partner) is non-negative and the last
+            // point plus `max(delta, 0)` plus `odd` is below `len` bounds them all.
+            if index < end {
+                assert!(
+                    index >= 0
+                        && index + delta >= 0
+                        && between > 0
+                        && ((index + (end - 1 - index) / between * between + delta.max(0))
+                            as usize)
+                            .checked_add(odd)
+                            .is_some_and(|last| last < len)
+                );
+            }
+            if between == 1 && index < end {
+                // Unit stride (`todfft`'s transposed layout): the same
+                // element operations over a counted loop so LLVM can
+                // vectorize it, as gcc does the source's; see `realft.rs`.
+                unsafe {
+                    let x_k = dp.add(index as usize);
+                    let x_l = dp.add((index + delta) as usize);
+                    let y_k = x_k.add(odd);
+                    let y_l = x_l.add(odd);
+                    for i in 0..(end - index) as usize {
+                        let a = *x_k.add(i) + *x_l.add(i);
+                        let b = *x_k.add(i) - *x_l.add(i);
+                        let c = *y_k.add(i) + *y_l.add(i);
+                        let d = *y_k.add(i) - *y_l.add(i);
+                        let e = b * co + c * si;
+                        let f = b * si - c * co;
+                        *x_k.add(i) = a + f;
+                        *x_l.add(i) = a - f;
+                        *y_k.add(i) = e + d;
+                        *y_l.add(i) = e - d;
+                    }
+                }
+                index = end;
+            }
             while index < end {
-                let paired = index + delta;
-                let a = data[index as usize] + data[paired as usize];
-                let b = data[index as usize] - data[paired as usize];
-                let c = data[index as usize + odd] + data[paired as usize + odd];
-                let d = data[index as usize + odd] - data[paired as usize + odd];
-                let e = b * co + c * si;
-                let f = b * si - c * co;
-                data[index as usize] = a + f;
-                data[paired as usize] = a - f;
-                data[index as usize + odd] = e + d;
-                data[paired as usize + odd] = e - d;
-                index += between;
+                unsafe {
+                    let paired = index + delta;
+                    let a = *dp.add(index as usize) + *dp.add(paired as usize);
+                    let b = *dp.add(index as usize) - *dp.add(paired as usize);
+                    let c = *dp.add(index as usize + odd) + *dp.add(paired as usize + odd);
+                    let d = *dp.add(index as usize + odd) - *dp.add(paired as usize + odd);
+                    let e = b * co + c * si;
+                    let f = b * si - c * co;
+                    *dp.add(index as usize) = a + f;
+                    *dp.add(paired as usize) = a - f;
+                    *dp.add(index as usize + odd) = e + d;
+                    *dp.add(paired as usize + odd) = e - d;
+                    index += between;
+                }
             }
             row += limit;
         }

@@ -45,16 +45,21 @@ pub fn set_exit_prefix(prefix: String) {
 }
 
 /// Matches `exitError` (`IMOD/pysrc/pip.py:678`).
+///
+/// `PipSetError(errorMess)` then `sys.exit(1)`.  `PipSetError`
+/// (`pip.py:664-673`) writes `sExitPrefix + errorString` on `sys.stdout`
+/// (`sErrorDest` is 0 from `PipReadOrParseOptions`) and exits only when an
+/// exit prefix is set; with none, the message is merely stored and the
+/// `sys.exit(1)` ends the script silently.
 pub fn exit_error(error_message: &str) -> ! {
     if let Some(prefix) = S_EXIT_PREFIX
         .lock()
         .expect("PIP exit prefix mutex")
         .as_ref()
     {
-        eprintln!("{prefix}{error_message}");
-    } else {
-        eprintln!("{error_message}");
+        print!("{prefix}{error_message}\n");
     }
+    let _ = std::io::Write::flush(&mut std::io::stdout());
     std::process::exit(1)
 }
 
@@ -764,6 +769,11 @@ pub fn pip_read_or_parse_options(
         .map(|value| value.as_bytes())
         .collect::<Vec<_>>();
     let (mut option_count, mut non_option_count) = (0, 0);
+    // `PipExitOnError(0, "ERROR: " + progName + " - ")` (`pip.py:1052`): the C
+    // routine below sets the C parser's prefix, and this module's
+    // `exitError` reads its own.
+    *S_EXIT_PREFIX.lock().expect("PIP exit prefix mutex") =
+        Some(format!("ERROR: {program_name} - "));
     crate::imod::libcfshr::parse_params::pip_read_or_parse_options(
         argument_bytes.len() as i32,
         &argument_bytes,

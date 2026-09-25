@@ -25,18 +25,20 @@ pub const MONTXC_MAX_PEAKS: i32 = 100;
 pub const MONTXC_MAX_DEBUG_LINE: i32 = 90;
 pub const MAX_RUNNERS_UP: i32 = 2;
 
-/// C `static float sDistWeightHalfFall`, held as raw bits so the file-scope global keeps the
-/// process-wide sharing the C has without needing a lock.
-static S_DIST_WEIGHT_HALF_FALL: AtomicU32 = AtomicU32::new(0.0f32.to_bits());
-/// C `static float sLastTrimmedMaxSD`.
-static S_LAST_TRIMMED_MAX_SD: AtomicU32 = AtomicU32::new((-1.0f32).to_bits());
-/// C `static float sLastRunnersUp[MAX_RUNNERS_UP * 2]`.
-static S_LAST_RUNNERS_UP: [AtomicU32; 4] = [
-    AtomicU32::new(0.0f32.to_bits()),
-    AtomicU32::new(0.0f32.to_bits()),
-    AtomicU32::new(0.0f32.to_bits()),
-    AtomicU32::new(0.0f32.to_bits()),
-];
+thread_local! {
+    /// C `static float sDistWeightHalfFall`, held as raw bits.  Thread-local
+    /// rather than process-global: a program run in process by
+    /// `b3dutil::run_in_process` gets a fresh thread, and so the value a fresh
+    /// process would start with (0), instead of whatever an earlier run in
+    /// this process set (`blendmont -weight`).  No parallel region reads it.
+    static S_DIST_WEIGHT_HALF_FALL: AtomicU32 = const { AtomicU32::new(0) };
+    /// C `static float sLastTrimmedMaxSD` (thread-local for the same reason).
+    static S_LAST_TRIMMED_MAX_SD: AtomicU32 = const { AtomicU32::new(0xbf800000) };
+    /// C `static float sLastRunnersUp[MAX_RUNNERS_UP * 2]`.
+    static S_LAST_RUNNERS_UP: [AtomicU32; 4] = const {
+        [AtomicU32::new(0), AtomicU32::new(0), AtomicU32::new(0), AtomicU32::new(0)]
+    };
+}
 
 /// C `montXCBasicSizes`.
 ///
@@ -620,7 +622,8 @@ pub fn mont_xcorr_edge(
         longShiftToAdd[(1 - ixy) as usize] = (longDisplace as f64 + 0.5f64).floor() as i32;
 
         // Probability down to half at the overlap plus extra extent: has to be binned
-        let sDistWeightHalfFall = f32::from_bits(S_DIST_WEIGHT_HALF_FALL.load(Ordering::Relaxed));
+        let sDistWeightHalfFall =
+            f32::from_bits(S_DIST_WEIGHT_HALF_FALL.with(|slot| slot.load(Ordering::Relaxed)));
         sigma = 2.0f64
             * (if sDistWeightHalfFall as f64 > 0.0f64 {
                 sDistWeightHalfFall / nbin as f32
@@ -652,7 +655,8 @@ pub fn mont_xcorr_edge(
     // Clear out the 2nd and third peaks
     i = 0;
     while i < 4 {
-        S_LAST_RUNNERS_UP[i as usize].store((-1.0e30f64 as f32).to_bits(), Ordering::Relaxed);
+        S_LAST_RUNNERS_UP
+            .with(|slot| slot[i as usize].store((-1.0e30f64 as f32).to_bits(), Ordering::Relaxed));
         i += 1;
     }
 
@@ -683,7 +687,7 @@ pub fn mont_xcorr_edge(
     }
 
     // Loop on lower and upper piece, extracting etc.
-    S_LAST_TRIMMED_MAX_SD.store((-1.0f32).to_bits(), Ordering::Relaxed);
+    S_LAST_TRIMMED_MAX_SD.with(|slot| slot.store((-1.0f32).to_bits(), Ordering::Relaxed));
     ind = 0;
     while ind < 2 {
         // The C walks `arrayIn`/`arrayOut`/`weights` from lower to upper at the end of the
@@ -794,15 +798,16 @@ pub fn mont_xcorr_edge(
             }
             if numSamp > 0 {
                 if numSamp <= 20 {
-                    S_LAST_TRIMMED_MAX_SD
-                        .store(lc[(numSamp - 1) as usize].to_bits(), Ordering::Relaxed);
+                    S_LAST_TRIMMED_MAX_SD.with(|slot| {
+                        slot.store(lc[(numSamp - 1) as usize].to_bits(), Ordering::Relaxed)
+                    });
                 } else {
                     let v = crate::imod::libcfshr::percentile::percentile_float(
                         (0.95f64 * numSamp as f64) as i32,
                         lc,
                         numSamp,
                     );
-                    S_LAST_TRIMMED_MAX_SD.store(v.to_bits(), Ordering::Relaxed);
+                    S_LAST_TRIMMED_MAX_SD.with(|slot| slot.store(v.to_bits(), Ordering::Relaxed));
                 }
             }
             /*if (first) {
@@ -1263,36 +1268,44 @@ pub fn mont_xcorr_edge(
 
         // Save the runners up
         if indSecond >= 0 && cccSecond > runnerUpThreshFac as f64 * cccMax {
-            S_LAST_RUNNERS_UP[0].store(
-                (nbin as f32 * (xpeak[indSecond as usize] - numExtra[0] as f32)
-                    + longShiftToAdd[0] as f32
-                    - extraFromExpected[0] as f32)
-                    .to_bits(),
-                Ordering::Relaxed,
-            );
-            S_LAST_RUNNERS_UP[1].store(
-                (nbin as f32 * (ypeak[indSecond as usize] - inExtra[1] as f32)
-                    + longShiftToAdd[1] as f32
-                    - extraFromExpected[1] as f32)
-                    .to_bits(),
-                Ordering::Relaxed,
-            );
+            S_LAST_RUNNERS_UP.with(|slot| {
+                slot[0].store(
+                    (nbin as f32 * (xpeak[indSecond as usize] - numExtra[0] as f32)
+                        + longShiftToAdd[0] as f32
+                        - extraFromExpected[0] as f32)
+                        .to_bits(),
+                    Ordering::Relaxed,
+                )
+            });
+            S_LAST_RUNNERS_UP.with(|slot| {
+                slot[1].store(
+                    (nbin as f32 * (ypeak[indSecond as usize] - inExtra[1] as f32)
+                        + longShiftToAdd[1] as f32
+                        - extraFromExpected[1] as f32)
+                        .to_bits(),
+                    Ordering::Relaxed,
+                )
+            });
         }
         if indThird >= 0 && cccThird > runnerUpThreshFac as f64 * cccMax {
-            S_LAST_RUNNERS_UP[2].store(
-                (nbin as f32 * (xpeak[indThird as usize] - numExtra[0] as f32)
-                    + longShiftToAdd[0] as f32
-                    - extraFromExpected[0] as f32)
-                    .to_bits(),
-                Ordering::Relaxed,
-            );
-            S_LAST_RUNNERS_UP[3].store(
-                (nbin as f32 * (ypeak[indThird as usize] - inExtra[1] as f32)
-                    + longShiftToAdd[1] as f32
-                    - extraFromExpected[1] as f32)
-                    .to_bits(),
-                Ordering::Relaxed,
-            );
+            S_LAST_RUNNERS_UP.with(|slot| {
+                slot[2].store(
+                    (nbin as f32 * (xpeak[indThird as usize] - numExtra[0] as f32)
+                        + longShiftToAdd[0] as f32
+                        - extraFromExpected[0] as f32)
+                        .to_bits(),
+                    Ordering::Relaxed,
+                )
+            });
+            S_LAST_RUNNERS_UP.with(|slot| {
+                slot[3].store(
+                    (nbin as f32 * (ypeak[indThird as usize] - inExtra[1] as f32)
+                        + longShiftToAdd[1] as f32
+                        - extraFromExpected[1] as f32)
+                        .to_bits(),
+                    Ordering::Relaxed,
+                )
+            });
         }
     }
     if let Some(f) = &mut dumpEdge {
@@ -1503,6 +1516,21 @@ pub fn montxcorrgetmaxes(maxPeak: &mut i32, maxLines: &mut i32) {
     *maxLines = MONTXC_MAX_DEBUG_LINE;
 }
 
+/// C `montXCSetDistWeightHalfFall` (`montagexcorr.c:877`), exported under the
+/// Fortran name (`cfsemshare.h:25`) and so taking a pointer; the value is
+/// passed here.  Sets the distance at which weighting by distance from the
+/// expected shift falls by half.
+pub fn mont_xc_set_dist_weight_half_fall(in_val: f32) {
+    S_DIST_WEIGHT_HALF_FALL.with(|slot| slot.store(in_val.to_bits(), Ordering::Relaxed));
+}
+
+/// C `montXCGetLastTrimmedMaxSD` (`montagexcorr.c:886`): the 95th percentile
+/// of the SD map used for the last weighted cross-correlation, widened to
+/// `double` on return.
+pub fn mont_xc_get_last_trimmed_max_sd() -> f64 {
+    f32::from_bits(S_LAST_TRIMMED_MAX_SD.with(|slot| slot.load(Ordering::Relaxed))) as f64
+}
+
 /// C `montXCGetLastRunnersUp`.
 ///
 /// Returns up to `maxPairs` X,Y alternative displacements into `disps`.
@@ -1510,7 +1538,8 @@ pub fn mont_xc_get_last_runners_up(disps: &mut [f32], maxPairs: i32) {
     let mut i: i32;
     i = 0;
     while i < 2 * MAX_RUNNERS_UP.min(maxPairs) {
-        disps[i as usize] = f32::from_bits(S_LAST_RUNNERS_UP[i as usize].load(Ordering::Relaxed));
+        disps[i as usize] =
+            f32::from_bits(S_LAST_RUNNERS_UP.with(|slot| slot[i as usize].load(Ordering::Relaxed)));
         i += 1;
     }
     i = 2 * MAX_RUNNERS_UP;
@@ -1673,10 +1702,24 @@ pub fn row_of_three_corrs(
             // Do fast loop
             ix = ix0;
             while ix <= ix1 {
+                // `bWeights` is `nxWgt * nyWgt` floats; at the ends of the
+                // search the source's index for the neighbouring row or
+                // column can fall outside the allocation (`montagexcorr.c`
+                // `rowOfThreeCorrs`/`columnOfThreeCorrs`), which reads heap
+                // bytes past (or before) it.  Source-level UB: an element
+                // outside the array is read as 0 here, which is what native
+                // reads from freshly grown heap (`blendmont -very`).
+                let wgt_at = |w: &[f32], i: i32| -> f32 {
+                    usize::try_from(i)
+                        .ok()
+                        .and_then(|i| w.get(i))
+                        .copied()
+                        .unwrap_or(0.0)
+                };
                 awgt = aw[(ix / binning + aWgtBase) as usize];
-                wgt1 = awgt * bw[((ix + 1 - delX) / binning + bWgtBase) as usize];
-                wgt = awgt * bw[((ix - delX) / binning + bWgtBase) as usize];
-                wgt3 = awgt * bw[((ix - 1 - delX) / binning + bWgtBase) as usize];
+                wgt1 = awgt * wgt_at(bw, (ix + 1 - delX) / binning + bWgtBase);
+                wgt = awgt * wgt_at(bw, (ix - delX) / binning + bWgtBase);
+                wgt3 = awgt * wgt_at(bw, (ix - 1 - delX) / binning + bWgtBase);
                 wTmp1 += wgt1 as f64;
                 wTmp2 += wgt as f64;
                 wTmp3 += wgt3 as f64;
@@ -1974,11 +2017,25 @@ pub fn column_of_three_corrs(
 
             ix = ix0;
             while ix <= ix1 {
+                // `bWeights` is `nxWgt * nyWgt` floats; at the ends of the
+                // search the source's index for the neighbouring row or
+                // column can fall outside the allocation (`montagexcorr.c`
+                // `rowOfThreeCorrs`/`columnOfThreeCorrs`), which reads heap
+                // bytes past (or before) it.  Source-level UB: an element
+                // outside the array is read as 0 here, which is what native
+                // reads from freshly grown heap (`blendmont -very`).
+                let wgt_at = |w: &[f32], i: i32| -> f32 {
+                    usize::try_from(i)
+                        .ok()
+                        .and_then(|i| w.get(i))
+                        .copied()
+                        .unwrap_or(0.0)
+                };
                 awgt = aw[(ix / binning + aWgtBase) as usize];
                 wInd = (ix - delX) / binning;
-                wgt1 = awgt * bw[(wInd + bWgtBase1) as usize];
-                wgt = awgt * bw[(wInd + bWgtBase) as usize];
-                wgt3 = awgt * bw[(wInd + bWgtBase3) as usize];
+                wgt1 = awgt * wgt_at(bw, wInd + bWgtBase1);
+                wgt = awgt * wgt_at(bw, wInd + bWgtBase);
+                wgt3 = awgt * wgt_at(bw, wInd + bWgtBase3);
                 wTmp1 += wgt1 as f64;
                 wTmp2 += wgt as f64;
                 wTmp3 += wgt3 as f64;

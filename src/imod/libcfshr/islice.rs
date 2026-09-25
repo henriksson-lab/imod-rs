@@ -234,6 +234,72 @@ pub fn slice_create(xsize: i32, ysize: i32, mode: i32) -> Option<Islice> {
         cval: [0.; 4],
     })
 }
+/// `sliceCreate` for a caller that frees one slice and creates the next
+/// every section (`sliceFree(s); s = sliceCreate(...)` in a loop): `prev` is
+/// the slice the caller is done with, and when its storage is already the
+/// union member `mode` is read through, that allocation is resized and kept
+/// instead of being freed and a new one made.  Freeing a slice-sized block
+/// and allocating it again every section lets glibc's heap trimming hand the
+/// top of the heap back to the kernel and fault it in again, which is what
+/// made `clip laplacian` take ten times native's page faults.  Every header
+/// field is set exactly as `slice_create` sets it; the pixel contents are
+/// **stale**, not zero, so callers pass `prev` only where the source's fresh
+/// `malloc`ed slice is wholly written before it is read.  Anything else
+/// (no `prev`, another member, a size `slice_create` would refuse) is
+/// `slice_create` itself.
+pub fn slice_recreate(prev: Option<Islice>, xsize: i32, ysize: i32, mode: i32) -> Option<Islice> {
+    let Some(prev) = prev else {
+        return slice_create(xsize, ysize, mode);
+    };
+    let Ok((dsize, csize)) = crate::imod::libcfshr::b3dutil::data_size_for_mode(mode) else {
+        return slice_create(xsize, ysize, mode);
+    };
+    let Some(bytes) = usize::try_from(xsize)
+        .ok()
+        .zip(usize::try_from(ysize).ok())
+        .and_then(|(x, y)| x.checked_mul(y))
+        .and_then(|xy| xy.checked_mul(dsize as usize * csize as usize))
+        .filter(|&bytes| bytes > 0)
+    else {
+        return slice_create(xsize, ysize, mode);
+    };
+    // The member pairing is `MrcData::try_zeroed`'s.
+    let data = match (mode, prev.data) {
+        (1 | 3, MrcData::S(mut v)) => {
+            v.resize(bytes / 2, 0);
+            MrcData::S(v)
+        }
+        (6, MrcData::Us(mut v)) => {
+            v.resize(bytes / 2, 0);
+            MrcData::Us(v)
+        }
+        (2 | 4 | 99, MrcData::F(mut v)) => {
+            v.resize(bytes / 4, 0.);
+            MrcData::F(v)
+        }
+        (m, MrcData::B(mut v)) if !matches!(m, 1 | 3 | 6 | 2 | 4 | 99) => {
+            v.resize(bytes, 0);
+            MrcData::B(v)
+        }
+        (_, other) => {
+            drop(other);
+            return slice_create(xsize, ysize, mode);
+        }
+    };
+    Some(Islice {
+        data,
+        xsize,
+        ysize,
+        mode,
+        csize,
+        dsize,
+        min: 0.,
+        max: 0.,
+        mean: 0.,
+        index: -1,
+        cval: [0.; 4],
+    })
+}
 /// C `sliceInit` (`islice.c:86`): the slice takes ownership of `data`, which
 /// the caller has already sized and typed for `mode`.  As in the C, the size
 /// fields and the data are stored before the mode is checked.
@@ -343,7 +409,14 @@ pub fn slice_get_val(s: &Islice, x: i32, y: i32, val: &mut [f32; 4]) -> i32 {
             val[1] = d[index + 1];
             val[2] = d[index + 2];
         }
-        _ => return -1,
+        _ => {
+            // `islice.c:249-251`: the source reports the mode before failing.
+            crate::imod::libcfshr::b3dutil::b3d_error(
+                Some(&mut crate::imod::libcfshr::b3dutil::ImodFile::Stderr),
+                format_args!("sliceGetVal: unknown mode.\n"),
+            );
+            return -1;
+        }
     }
     0
 }
@@ -585,14 +658,23 @@ pub fn slice_byte_convolve(sin: &mut Islice, mask: &[[i32; 3]; 3]) -> Result<(),
 ///
 /// The float path deliberately delegates to the corresponding complete C-unit
 /// translation; non-float input retains the original get/multiply/put path.
-pub fn slice_mat_filter(sin: &Islice, mat: &[f32], dim: i32) -> Option<Islice> {
+///
+/// `reuse` is a slice the caller is done with, whose storage becomes the
+/// output (`slice_recreate`): every output pixel is written below, as the
+/// source's `malloc`ed `sliceCreate` requires.
+pub fn slice_mat_filter(
+    sin: &Islice,
+    mat: &[f32],
+    dim: i32,
+    reuse: Option<Islice>,
+) -> Option<Islice> {
     const MAX_STATIC_KERNEL: i32 = 9;
     let dim = usize::try_from(dim).ok()?;
     let matrix_elements = dim.checked_mul(dim)?;
     if mat.len() < matrix_elements {
         return None;
     }
-    let mut sout = slice_create(sin.xsize, sin.ysize, MRC_MODE_FLOAT)?;
+    let mut sout = slice_recreate(reuse, sin.xsize, sin.ysize, MRC_MODE_FLOAT)?;
     if sin.mode == MRC_MODE_FLOAT {
         crate::imod::libcfshr::filtxcorr::apply_kernel_filter(
             sin.data.f(),
@@ -852,14 +934,14 @@ mod tests {
     fn matrix_filter_uses_native_slice_and_kernel_references() {
         let mut byte_slice = slice_create(2, 2, MRC_MODE_BYTE).unwrap();
         byte_slice.data.b_mut().copy_from_slice(&[1, 2, 3, 4]);
-        let byte_output = slice_mat_filter(byte_slice.as_mut(), &[1.], 1).unwrap();
+        let byte_output = slice_mat_filter(byte_slice.as_mut(), &[1.], 1, None).unwrap();
         assert_eq!(byte_output.data.f(), [1., 2., 3., 4.]);
 
         let mut float_slice = slice_create(2, 2, MRC_MODE_FLOAT).unwrap();
         float_slice.data.f_mut().copy_from_slice(&[1., 2., 3., 4.]);
-        let float_output = slice_mat_filter(float_slice.as_mut(), &[1.], 1).unwrap();
+        let float_output = slice_mat_filter(float_slice.as_mut(), &[1.], 1, None).unwrap();
         assert_eq!(float_output.data, float_slice.data);
-        assert!(slice_mat_filter(float_slice.as_mut(), &[], 1).is_none());
+        assert!(slice_mat_filter(float_slice.as_mut(), &[], 1, None).is_none());
     }
 
     #[test]

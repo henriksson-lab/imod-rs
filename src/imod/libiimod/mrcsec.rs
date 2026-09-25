@@ -246,7 +246,9 @@ pub fn mrc_read_section_float(
     } else {
         li.ymax - li.ymin + 1
     };
-    if width < 0 || rows < 0 || buf.len() < width as usize * rows as usize {
+    // A negative extent is left to `iiInitReadSectionAny`, which reports it as
+    // the C does; only a short buffer for a valid extent is refused here.
+    if width >= 0 && rows >= 0 && buf.len() < width as usize * rows as usize {
         return -1;
     }
     call_ii_or_mrsa(

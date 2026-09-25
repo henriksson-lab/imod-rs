@@ -10,6 +10,25 @@
 //! bias the C applies with `&x[i * stepAlong]` is applied at the same place,
 //! in `mdftkd`, as `x + i * step_along`.  A kernel's `x0[k]` is therefore
 //! `data[x0 + k as usize]`, with the source's index arithmetic unchanged.
+//!
+//! **Unchecked access in the radix kernels** (`r2cftk`..`r8cftk`, and
+//! `rpcftk` with the offsets `m * stepAlong` added to the bound).  With a
+//! bounds check on each of the 8-32 loads and stores, the innermost loop ran
+//! ~1.5x the C's time.  The kernels therefore index through `dp`, the raw
+//! pointer of `data`, and prove the bound once per innermost loop instead of
+//! per access.  Soundness: every access in that loop is `base + k` with
+//! `base` one of the kernel's walkers (all `<= top`), and `k` runs from
+//! `l - 1` upward in steps of `sep_between` while `k < k1`, so it is at
+//! least `l - 1` and at most the last point of that progression below
+//! `k1`, `kLast = (l - 1) + (k1 - l) / sep_between * sep_between`.  The
+//! `assert!` ahead of a non-empty loop checks `l - 1 >= 0`,
+//! `sep_between > 0` and `top + kLast < len` (with a checked add), so every
+//! `base + k` lies in `0..len`.  An input
+//! the checked indexing would have rejected mid-loop now panics before the
+//! loop instead; any input that does not panic computes exactly the same
+//! operations in the same order, so no output byte can change.  Raw-pointer
+//! access leaves LLVM assuming the walkers alias, which is also what the C
+//! compiler must assume of the source's `float *` walkers.
 
 use crate::imod::libcfshr::b3dutil::{CArg, ImodFile, c_format_bytes};
 use std::io::Write as _;
@@ -164,6 +183,11 @@ pub fn r2cftk(
     y1: usize,
     dim: &[i32],
 ) {
+    // Unchecked-access bound: see the module comment.
+    let len = data.len();
+    let top = x0.max(y0).max(x1).max(y1);
+    let dp = data.as_mut_ptr();
+
     let n_red2: i32;
     let n_red_ov2p1: i32;
     let sep_between: i32;
@@ -209,21 +233,34 @@ pub fn r2cftk(
                 while l <= tot_floats {
                     let k1 = l + extent_between;
                     let mut k = l - 1;
+                    if k < k1 {
+                        assert!(
+                            k >= 0
+                                && sep_between > 0
+                                && top
+                                    .checked_add(
+                                        (k + (k1 - 1 - k) / sep_between * sep_between) as usize
+                                    )
+                                    .is_some_and(|last| last < len)
+                        );
+                    }
                     while k < k1 {
-                        let rs = data[x0 + k as usize] + data[x1 + k as usize];
-                        let is = data[y0 + k as usize] + data[y1 + k as usize];
-                        let ru = data[x0 + k as usize] - data[x1 + k as usize];
-                        let iu = data[y0 + k as usize] - data[y1 + k as usize];
-                        data[x0 + k as usize] = rs;
-                        data[y0 + k as usize] = is;
-                        if !zero {
-                            data[x1 + k as usize] = ru * c + iu * sep_along;
-                            data[y1 + k as usize] = iu * c - ru * sep_along;
-                        } else {
-                            data[x1 + k as usize] = ru;
-                            data[y1 + k as usize] = iu;
+                        unsafe {
+                            let rs = *dp.add(x0 + k as usize) + *dp.add(x1 + k as usize);
+                            let is = *dp.add(y0 + k as usize) + *dp.add(y1 + k as usize);
+                            let ru = *dp.add(x0 + k as usize) - *dp.add(x1 + k as usize);
+                            let iu = *dp.add(y0 + k as usize) - *dp.add(y1 + k as usize);
+                            *dp.add(x0 + k as usize) = rs;
+                            *dp.add(y0 + k as usize) = is;
+                            if !zero {
+                                *dp.add(x1 + k as usize) = ru * c + iu * sep_along;
+                                *dp.add(y1 + k as usize) = iu * c - ru * sep_along;
+                            } else {
+                                *dp.add(x1 + k as usize) = ru;
+                                *dp.add(y1 + k as usize) = iu;
+                            }
+                            k += sep_between;
                         }
-                        k += sep_between;
                     }
                     l += lim_along;
                 }
@@ -250,6 +287,11 @@ pub fn r3cftk(
     y2: usize,
     dim: &[i32],
 ) {
+    // Unchecked-access bound: see the module comment.
+    let len = data.len();
+    let top = x0.max(y0).max(x1).max(y1).max(x2).max(y2);
+    let dp = data.as_mut_ptr();
+
     let n_red3: i32;
     let n_red_ov2p1: i32;
     let sep_between: i32;
@@ -302,33 +344,46 @@ pub fn r3cftk(
                 while l <= tot_floats {
                     let k1 = l + extent_between;
                     let mut k = l - 1;
+                    if k < k1 {
+                        assert!(
+                            k >= 0
+                                && sep_between > 0
+                                && top
+                                    .checked_add(
+                                        (k + (k1 - 1 - k) / sep_between * sep_between) as usize
+                                    )
+                                    .is_some_and(|last| last < len)
+                        );
+                    }
                     while k < k1 {
-                        let r0 = data[x0 + k as usize];
-                        let i0 = data[y0 + k as usize];
-                        let rs = data[x1 + k as usize] + data[x2 + k as usize];
-                        let is = data[y1 + k as usize] + data[y2 + k as usize];
-                        data[x0 + k as usize] = r0 + rs;
-                        data[y0 + k as usize] = i0 + is;
-                        let ra = r0 + rs * a;
-                        let ia = i0 + is * a;
-                        let rb = (data[x1 + k as usize] - data[x2 + k as usize]) * b;
-                        let ib = (data[y1 + k as usize] - data[y2 + k as usize]) * b;
-                        if !zero {
-                            let r1 = ra + ib;
-                            let i1 = ia - rb;
-                            let r2 = ra - ib;
-                            let i2 = ia + rb;
-                            data[x1 + k as usize] = r1 * c1 + i1 * s1;
-                            data[y1 + k as usize] = i1 * c1 - r1 * s1;
-                            data[x2 + k as usize] = r2 * c2 + i2 * s2;
-                            data[y2 + k as usize] = i2 * c2 - r2 * s2;
-                        } else {
-                            data[x1 + k as usize] = ra + ib;
-                            data[y1 + k as usize] = ia - rb;
-                            data[x2 + k as usize] = ra - ib;
-                            data[y2 + k as usize] = ia + rb;
+                        unsafe {
+                            let r0 = *dp.add(x0 + k as usize);
+                            let i0 = *dp.add(y0 + k as usize);
+                            let rs = *dp.add(x1 + k as usize) + *dp.add(x2 + k as usize);
+                            let is = *dp.add(y1 + k as usize) + *dp.add(y2 + k as usize);
+                            *dp.add(x0 + k as usize) = r0 + rs;
+                            *dp.add(y0 + k as usize) = i0 + is;
+                            let ra = r0 + rs * a;
+                            let ia = i0 + is * a;
+                            let rb = (*dp.add(x1 + k as usize) - *dp.add(x2 + k as usize)) * b;
+                            let ib = (*dp.add(y1 + k as usize) - *dp.add(y2 + k as usize)) * b;
+                            if !zero {
+                                let r1 = ra + ib;
+                                let i1 = ia - rb;
+                                let r2 = ra - ib;
+                                let i2 = ia + rb;
+                                *dp.add(x1 + k as usize) = r1 * c1 + i1 * s1;
+                                *dp.add(y1 + k as usize) = i1 * c1 - r1 * s1;
+                                *dp.add(x2 + k as usize) = r2 * c2 + i2 * s2;
+                                *dp.add(y2 + k as usize) = i2 * c2 - r2 * s2;
+                            } else {
+                                *dp.add(x1 + k as usize) = ra + ib;
+                                *dp.add(y1 + k as usize) = ia - rb;
+                                *dp.add(x2 + k as usize) = ra - ib;
+                                *dp.add(y2 + k as usize) = ia + rb;
+                            }
+                            k += sep_between;
                         }
-                        k += sep_between;
                     }
                     l += lim_along;
                 }
@@ -362,6 +417,11 @@ pub fn r4cftk(
     y3: usize,
     dim: &[i32],
 ) {
+    // Unchecked-access bound: see the module comment.
+    let len = data.len();
+    let top = x0.max(y0).max(x1).max(y1).max(x2).max(y2).max(x3).max(y3);
+    let dp = data.as_mut_ptr();
+
     let n_red4: i32;
     let n_red_ov2p1: i32;
     let sep_between: i32;
@@ -416,39 +476,52 @@ pub fn r4cftk(
                 while l <= tot_floats {
                     let k1 = l + extent_between;
                     let mut k = l - 1;
+                    if k < k1 {
+                        assert!(
+                            k >= 0
+                                && sep_between > 0
+                                && top
+                                    .checked_add(
+                                        (k + (k1 - 1 - k) / sep_between * sep_between) as usize
+                                    )
+                                    .is_some_and(|last| last < len)
+                        );
+                    }
                     while k < k1 {
-                        let rs0 = data[x0 + k as usize] + data[x2 + k as usize];
-                        let is0 = data[y0 + k as usize] + data[y2 + k as usize];
-                        let ru0 = data[x0 + k as usize] - data[x2 + k as usize];
-                        let iu0 = data[y0 + k as usize] - data[y2 + k as usize];
-                        let rs1 = data[x1 + k as usize] + data[x3 + k as usize];
-                        let is1 = data[y1 + k as usize] + data[y3 + k as usize];
-                        let ru1 = data[x1 + k as usize] - data[x3 + k as usize];
-                        let iu1 = data[y1 + k as usize] - data[y3 + k as usize];
-                        data[x0 + k as usize] = rs0 + rs1;
-                        data[y0 + k as usize] = is0 + is1;
-                        if !zero {
-                            let r1 = ru0 + iu1;
-                            let i1 = iu0 - ru1;
-                            let r2 = rs0 - rs1;
-                            let i2 = is0 - is1;
-                            let r3 = ru0 - iu1;
-                            let i3 = iu0 + ru1;
-                            data[x2 + k as usize] = r1 * c1 + i1 * s1;
-                            data[y2 + k as usize] = i1 * c1 - r1 * s1;
-                            data[x1 + k as usize] = r2 * c2 + i2 * s2;
-                            data[y1 + k as usize] = i2 * c2 - r2 * s2;
-                            data[x3 + k as usize] = r3 * c3 + i3 * s3;
-                            data[y3 + k as usize] = i3 * c3 - r3 * s3;
-                        } else {
-                            data[x2 + k as usize] = ru0 + iu1;
-                            data[y2 + k as usize] = iu0 - ru1;
-                            data[x1 + k as usize] = rs0 - rs1;
-                            data[y1 + k as usize] = is0 - is1;
-                            data[x3 + k as usize] = ru0 - iu1;
-                            data[y3 + k as usize] = iu0 + ru1;
+                        unsafe {
+                            let rs0 = *dp.add(x0 + k as usize) + *dp.add(x2 + k as usize);
+                            let is0 = *dp.add(y0 + k as usize) + *dp.add(y2 + k as usize);
+                            let ru0 = *dp.add(x0 + k as usize) - *dp.add(x2 + k as usize);
+                            let iu0 = *dp.add(y0 + k as usize) - *dp.add(y2 + k as usize);
+                            let rs1 = *dp.add(x1 + k as usize) + *dp.add(x3 + k as usize);
+                            let is1 = *dp.add(y1 + k as usize) + *dp.add(y3 + k as usize);
+                            let ru1 = *dp.add(x1 + k as usize) - *dp.add(x3 + k as usize);
+                            let iu1 = *dp.add(y1 + k as usize) - *dp.add(y3 + k as usize);
+                            *dp.add(x0 + k as usize) = rs0 + rs1;
+                            *dp.add(y0 + k as usize) = is0 + is1;
+                            if !zero {
+                                let r1 = ru0 + iu1;
+                                let i1 = iu0 - ru1;
+                                let r2 = rs0 - rs1;
+                                let i2 = is0 - is1;
+                                let r3 = ru0 - iu1;
+                                let i3 = iu0 + ru1;
+                                *dp.add(x2 + k as usize) = r1 * c1 + i1 * s1;
+                                *dp.add(y2 + k as usize) = i1 * c1 - r1 * s1;
+                                *dp.add(x1 + k as usize) = r2 * c2 + i2 * s2;
+                                *dp.add(y1 + k as usize) = i2 * c2 - r2 * s2;
+                                *dp.add(x3 + k as usize) = r3 * c3 + i3 * s3;
+                                *dp.add(y3 + k as usize) = i3 * c3 - r3 * s3;
+                            } else {
+                                *dp.add(x2 + k as usize) = ru0 + iu1;
+                                *dp.add(y2 + k as usize) = iu0 - ru1;
+                                *dp.add(x1 + k as usize) = rs0 - rs1;
+                                *dp.add(y1 + k as usize) = is0 - is1;
+                                *dp.add(x3 + k as usize) = ru0 - iu1;
+                                *dp.add(y3 + k as usize) = iu0 + ru1;
+                            }
+                            k += sep_between;
                         }
-                        k += sep_between;
                     }
                     l += lim_along;
                 }
@@ -486,6 +559,20 @@ pub fn r5cftk(
     y4: usize,
     dim: &[i32],
 ) {
+    // Unchecked-access bound: see the module comment.
+    let len = data.len();
+    let top = x0
+        .max(y0)
+        .max(x1)
+        .max(y1)
+        .max(x2)
+        .max(y2)
+        .max(x3)
+        .max(y3)
+        .max(x4)
+        .max(y4);
+    let dp = data.as_mut_ptr();
+
     let n_red5: i32;
     let n_red_ov2p1: i32;
     let sep_between: i32;
@@ -548,55 +635,68 @@ pub fn r5cftk(
                 while l <= tot_floats {
                     let k1 = l + extent_between;
                     let mut k = l - 1;
+                    if k < k1 {
+                        assert!(
+                            k >= 0
+                                && sep_between > 0
+                                && top
+                                    .checked_add(
+                                        (k + (k1 - 1 - k) / sep_between * sep_between) as usize
+                                    )
+                                    .is_some_and(|last| last < len)
+                        );
+                    }
                     while k < k1 {
-                        let r0 = data[x0 + k as usize];
-                        let i0 = data[y0 + k as usize];
-                        let rs1 = data[x1 + k as usize] + data[x4 + k as usize];
-                        let is1 = data[y1 + k as usize] + data[y4 + k as usize];
-                        let ru1 = data[x1 + k as usize] - data[x4 + k as usize];
-                        let iu1 = data[y1 + k as usize] - data[y4 + k as usize];
-                        let rs2 = data[x2 + k as usize] + data[x3 + k as usize];
-                        let is2 = data[y2 + k as usize] + data[y3 + k as usize];
-                        let ru2 = data[x2 + k as usize] - data[x3 + k as usize];
-                        let iu2 = data[y2 + k as usize] - data[y3 + k as usize];
-                        data[x0 + k as usize] = r0 + rs1 + rs2;
-                        data[y0 + k as usize] = i0 + is1 + is2;
-                        let ra1 = r0 + rs1 * a1 + rs2 * a2;
-                        let ia1 = i0 + is1 * a1 + is2 * a2;
-                        let ra2 = r0 + rs1 * a2 + rs2 * a1;
-                        let ia2 = i0 + is1 * a2 + is2 * a1;
-                        let rb1 = ru1 * b1 + ru2 * b2;
-                        let ib1 = iu1 * b1 + iu2 * b2;
-                        let rb2 = ru1 * b2 - ru2 * b1;
-                        let ib2 = iu1 * b2 - iu2 * b1;
-                        if !zero {
-                            let r1 = ra1 + ib1;
-                            let i1 = ia1 - rb1;
-                            let r2 = ra2 + ib2;
-                            let i2 = ia2 - rb2;
-                            let r3 = ra2 - ib2;
-                            let i3 = ia2 + rb2;
-                            let r4 = ra1 - ib1;
-                            let i4 = ia1 + rb1;
-                            data[x1 + k as usize] = r1 * c1 + i1 * s1;
-                            data[y1 + k as usize] = i1 * c1 - r1 * s1;
-                            data[x2 + k as usize] = r2 * c2 + i2 * s2;
-                            data[y2 + k as usize] = i2 * c2 - r2 * s2;
-                            data[x3 + k as usize] = r3 * c3 + i3 * s3;
-                            data[y3 + k as usize] = i3 * c3 - r3 * s3;
-                            data[x4 + k as usize] = r4 * c4 + i4 * s4;
-                            data[y4 + k as usize] = i4 * c4 - r4 * s4;
-                        } else {
-                            data[x1 + k as usize] = ra1 + ib1;
-                            data[y1 + k as usize] = ia1 - rb1;
-                            data[x2 + k as usize] = ra2 + ib2;
-                            data[y2 + k as usize] = ia2 - rb2;
-                            data[x3 + k as usize] = ra2 - ib2;
-                            data[y3 + k as usize] = ia2 + rb2;
-                            data[x4 + k as usize] = ra1 - ib1;
-                            data[y4 + k as usize] = ia1 + rb1;
+                        unsafe {
+                            let r0 = *dp.add(x0 + k as usize);
+                            let i0 = *dp.add(y0 + k as usize);
+                            let rs1 = *dp.add(x1 + k as usize) + *dp.add(x4 + k as usize);
+                            let is1 = *dp.add(y1 + k as usize) + *dp.add(y4 + k as usize);
+                            let ru1 = *dp.add(x1 + k as usize) - *dp.add(x4 + k as usize);
+                            let iu1 = *dp.add(y1 + k as usize) - *dp.add(y4 + k as usize);
+                            let rs2 = *dp.add(x2 + k as usize) + *dp.add(x3 + k as usize);
+                            let is2 = *dp.add(y2 + k as usize) + *dp.add(y3 + k as usize);
+                            let ru2 = *dp.add(x2 + k as usize) - *dp.add(x3 + k as usize);
+                            let iu2 = *dp.add(y2 + k as usize) - *dp.add(y3 + k as usize);
+                            *dp.add(x0 + k as usize) = r0 + rs1 + rs2;
+                            *dp.add(y0 + k as usize) = i0 + is1 + is2;
+                            let ra1 = r0 + rs1 * a1 + rs2 * a2;
+                            let ia1 = i0 + is1 * a1 + is2 * a2;
+                            let ra2 = r0 + rs1 * a2 + rs2 * a1;
+                            let ia2 = i0 + is1 * a2 + is2 * a1;
+                            let rb1 = ru1 * b1 + ru2 * b2;
+                            let ib1 = iu1 * b1 + iu2 * b2;
+                            let rb2 = ru1 * b2 - ru2 * b1;
+                            let ib2 = iu1 * b2 - iu2 * b1;
+                            if !zero {
+                                let r1 = ra1 + ib1;
+                                let i1 = ia1 - rb1;
+                                let r2 = ra2 + ib2;
+                                let i2 = ia2 - rb2;
+                                let r3 = ra2 - ib2;
+                                let i3 = ia2 + rb2;
+                                let r4 = ra1 - ib1;
+                                let i4 = ia1 + rb1;
+                                *dp.add(x1 + k as usize) = r1 * c1 + i1 * s1;
+                                *dp.add(y1 + k as usize) = i1 * c1 - r1 * s1;
+                                *dp.add(x2 + k as usize) = r2 * c2 + i2 * s2;
+                                *dp.add(y2 + k as usize) = i2 * c2 - r2 * s2;
+                                *dp.add(x3 + k as usize) = r3 * c3 + i3 * s3;
+                                *dp.add(y3 + k as usize) = i3 * c3 - r3 * s3;
+                                *dp.add(x4 + k as usize) = r4 * c4 + i4 * s4;
+                                *dp.add(y4 + k as usize) = i4 * c4 - r4 * s4;
+                            } else {
+                                *dp.add(x1 + k as usize) = ra1 + ib1;
+                                *dp.add(y1 + k as usize) = ia1 - rb1;
+                                *dp.add(x2 + k as usize) = ra2 + ib2;
+                                *dp.add(y2 + k as usize) = ia2 - rb2;
+                                *dp.add(x3 + k as usize) = ra2 - ib2;
+                                *dp.add(y3 + k as usize) = ia2 + rb2;
+                                *dp.add(x4 + k as usize) = ra1 - ib1;
+                                *dp.add(y4 + k as usize) = ia1 + rb1;
+                            }
+                            k += sep_between;
                         }
-                        k += sep_between;
                     }
                     l += lim_along;
                 }
@@ -644,6 +744,26 @@ pub fn r8cftk(
     y7: usize,
     dim: &[i32],
 ) {
+    // Unchecked-access bound: see the module comment.
+    let len = data.len();
+    let top = x0
+        .max(y0)
+        .max(x1)
+        .max(y1)
+        .max(x2)
+        .max(y2)
+        .max(x3)
+        .max(y3)
+        .max(x4)
+        .max(y4)
+        .max(x5)
+        .max(y5)
+        .max(x6)
+        .max(y6)
+        .max(x7)
+        .max(y7);
+    let dp = data.as_mut_ptr();
+
     let n_red8: i32;
     let n_red_ov2p1: i32;
     let sep_between: i32;
@@ -715,93 +835,106 @@ pub fn r8cftk(
                 while l <= tot_floats {
                     let k1 = l + extent_between;
                     let mut k = l - 1;
+                    if k < k1 {
+                        assert!(
+                            k >= 0
+                                && sep_between > 0
+                                && top
+                                    .checked_add(
+                                        (k + (k1 - 1 - k) / sep_between * sep_between) as usize
+                                    )
+                                    .is_some_and(|last| last < len)
+                        );
+                    }
                     while k < k1 {
-                        let rs0 = data[x0 + k as usize] + data[x4 + k as usize];
-                        let is0 = data[y0 + k as usize] + data[y4 + k as usize];
-                        let ru0 = data[x0 + k as usize] - data[x4 + k as usize];
-                        let iu0 = data[y0 + k as usize] - data[y4 + k as usize];
-                        let rs1 = data[x1 + k as usize] + data[x5 + k as usize];
-                        let is1 = data[y1 + k as usize] + data[y5 + k as usize];
-                        let ru1 = data[x1 + k as usize] - data[x5 + k as usize];
-                        let iu1 = data[y1 + k as usize] - data[y5 + k as usize];
-                        let rs2 = data[x2 + k as usize] + data[x6 + k as usize];
-                        let is2 = data[y2 + k as usize] + data[y6 + k as usize];
-                        let ru2 = data[x2 + k as usize] - data[x6 + k as usize];
-                        let iu2 = data[y2 + k as usize] - data[y6 + k as usize];
-                        let rs3 = data[x3 + k as usize] + data[x7 + k as usize];
-                        let is3 = data[y3 + k as usize] + data[y7 + k as usize];
-                        let ru3 = data[x3 + k as usize] - data[x7 + k as usize];
-                        let iu3 = data[y3 + k as usize] - data[y7 + k as usize];
-                        let rss0 = rs0 + rs2;
-                        let iss0 = is0 + is2;
-                        let rsu0 = rs0 - rs2;
-                        let isu0 = is0 - is2;
-                        let rss1 = rs1 + rs3;
-                        let iss1 = is1 + is3;
-                        let rsu1 = rs1 - rs3;
-                        let isu1 = is1 - is3;
-                        let rus0 = ru0 - iu2;
-                        let ius0 = iu0 + ru2;
-                        let ruu0 = ru0 + iu2;
-                        let iuu0 = iu0 - ru2;
-                        let mut rus1 = ru1 - iu3;
-                        let mut ius1 = iu1 + ru3;
-                        let mut ruu1 = ru1 + iu3;
-                        let mut iuu1 = iu1 - ru3;
-                        t = (rus1 + ius1) * e;
-                        ius1 = (ius1 - rus1) * e;
-                        rus1 = t;
-                        t = (ruu1 + iuu1) * e;
-                        iuu1 = (iuu1 - ruu1) * e;
-                        ruu1 = t;
-                        data[x0 + k as usize] = rss0 + rss1;
-                        data[y0 + k as usize] = iss0 + iss1;
-                        if !zero {
-                            let r1 = ruu0 + ruu1;
-                            let i1 = iuu0 + iuu1;
-                            let r2 = rsu0 + isu1;
-                            let i2 = isu0 - rsu1;
-                            let r3 = rus0 + ius1;
-                            let i3 = ius0 - rus1;
-                            let r4 = rss0 - rss1;
-                            let i4 = iss0 - iss1;
-                            let r5 = ruu0 - ruu1;
-                            let i5 = iuu0 - iuu1;
-                            let r6 = rsu0 - isu1;
-                            let i6 = isu0 + rsu1;
-                            let r7 = rus0 - ius1;
-                            let i7 = ius0 + rus1;
-                            data[x4 + k as usize] = r1 * c1 + i1 * s1;
-                            data[y4 + k as usize] = i1 * c1 - r1 * s1;
-                            data[x2 + k as usize] = r2 * c2 + i2 * s2;
-                            data[y2 + k as usize] = i2 * c2 - r2 * s2;
-                            data[x6 + k as usize] = r3 * c3 + i3 * s3;
-                            data[y6 + k as usize] = i3 * c3 - r3 * s3;
-                            data[x1 + k as usize] = r4 * c4 + i4 * s4;
-                            data[y1 + k as usize] = i4 * c4 - r4 * s4;
-                            data[x5 + k as usize] = r5 * c5 + i5 * s5;
-                            data[y5 + k as usize] = i5 * c5 - r5 * s5;
-                            data[x3 + k as usize] = r6 * c6 + i6 * s6;
-                            data[y3 + k as usize] = i6 * c6 - r6 * s6;
-                            data[x7 + k as usize] = r7 * c7 + i7 * s7;
-                            data[y7 + k as usize] = i7 * c7 - r7 * s7;
-                        } else {
-                            data[x4 + k as usize] = ruu0 + ruu1;
-                            data[y4 + k as usize] = iuu0 + iuu1;
-                            data[x2 + k as usize] = rsu0 + isu1;
-                            data[y2 + k as usize] = isu0 - rsu1;
-                            data[x6 + k as usize] = rus0 + ius1;
-                            data[y6 + k as usize] = ius0 - rus1;
-                            data[x1 + k as usize] = rss0 - rss1;
-                            data[y1 + k as usize] = iss0 - iss1;
-                            data[x5 + k as usize] = ruu0 - ruu1;
-                            data[y5 + k as usize] = iuu0 - iuu1;
-                            data[x3 + k as usize] = rsu0 - isu1;
-                            data[y3 + k as usize] = isu0 + rsu1;
-                            data[x7 + k as usize] = rus0 - ius1;
-                            data[y7 + k as usize] = ius0 + rus1;
+                        unsafe {
+                            let rs0 = *dp.add(x0 + k as usize) + *dp.add(x4 + k as usize);
+                            let is0 = *dp.add(y0 + k as usize) + *dp.add(y4 + k as usize);
+                            let ru0 = *dp.add(x0 + k as usize) - *dp.add(x4 + k as usize);
+                            let iu0 = *dp.add(y0 + k as usize) - *dp.add(y4 + k as usize);
+                            let rs1 = *dp.add(x1 + k as usize) + *dp.add(x5 + k as usize);
+                            let is1 = *dp.add(y1 + k as usize) + *dp.add(y5 + k as usize);
+                            let ru1 = *dp.add(x1 + k as usize) - *dp.add(x5 + k as usize);
+                            let iu1 = *dp.add(y1 + k as usize) - *dp.add(y5 + k as usize);
+                            let rs2 = *dp.add(x2 + k as usize) + *dp.add(x6 + k as usize);
+                            let is2 = *dp.add(y2 + k as usize) + *dp.add(y6 + k as usize);
+                            let ru2 = *dp.add(x2 + k as usize) - *dp.add(x6 + k as usize);
+                            let iu2 = *dp.add(y2 + k as usize) - *dp.add(y6 + k as usize);
+                            let rs3 = *dp.add(x3 + k as usize) + *dp.add(x7 + k as usize);
+                            let is3 = *dp.add(y3 + k as usize) + *dp.add(y7 + k as usize);
+                            let ru3 = *dp.add(x3 + k as usize) - *dp.add(x7 + k as usize);
+                            let iu3 = *dp.add(y3 + k as usize) - *dp.add(y7 + k as usize);
+                            let rss0 = rs0 + rs2;
+                            let iss0 = is0 + is2;
+                            let rsu0 = rs0 - rs2;
+                            let isu0 = is0 - is2;
+                            let rss1 = rs1 + rs3;
+                            let iss1 = is1 + is3;
+                            let rsu1 = rs1 - rs3;
+                            let isu1 = is1 - is3;
+                            let rus0 = ru0 - iu2;
+                            let ius0 = iu0 + ru2;
+                            let ruu0 = ru0 + iu2;
+                            let iuu0 = iu0 - ru2;
+                            let mut rus1 = ru1 - iu3;
+                            let mut ius1 = iu1 + ru3;
+                            let mut ruu1 = ru1 + iu3;
+                            let mut iuu1 = iu1 - ru3;
+                            t = (rus1 + ius1) * e;
+                            ius1 = (ius1 - rus1) * e;
+                            rus1 = t;
+                            t = (ruu1 + iuu1) * e;
+                            iuu1 = (iuu1 - ruu1) * e;
+                            ruu1 = t;
+                            *dp.add(x0 + k as usize) = rss0 + rss1;
+                            *dp.add(y0 + k as usize) = iss0 + iss1;
+                            if !zero {
+                                let r1 = ruu0 + ruu1;
+                                let i1 = iuu0 + iuu1;
+                                let r2 = rsu0 + isu1;
+                                let i2 = isu0 - rsu1;
+                                let r3 = rus0 + ius1;
+                                let i3 = ius0 - rus1;
+                                let r4 = rss0 - rss1;
+                                let i4 = iss0 - iss1;
+                                let r5 = ruu0 - ruu1;
+                                let i5 = iuu0 - iuu1;
+                                let r6 = rsu0 - isu1;
+                                let i6 = isu0 + rsu1;
+                                let r7 = rus0 - ius1;
+                                let i7 = ius0 + rus1;
+                                *dp.add(x4 + k as usize) = r1 * c1 + i1 * s1;
+                                *dp.add(y4 + k as usize) = i1 * c1 - r1 * s1;
+                                *dp.add(x2 + k as usize) = r2 * c2 + i2 * s2;
+                                *dp.add(y2 + k as usize) = i2 * c2 - r2 * s2;
+                                *dp.add(x6 + k as usize) = r3 * c3 + i3 * s3;
+                                *dp.add(y6 + k as usize) = i3 * c3 - r3 * s3;
+                                *dp.add(x1 + k as usize) = r4 * c4 + i4 * s4;
+                                *dp.add(y1 + k as usize) = i4 * c4 - r4 * s4;
+                                *dp.add(x5 + k as usize) = r5 * c5 + i5 * s5;
+                                *dp.add(y5 + k as usize) = i5 * c5 - r5 * s5;
+                                *dp.add(x3 + k as usize) = r6 * c6 + i6 * s6;
+                                *dp.add(y3 + k as usize) = i6 * c6 - r6 * s6;
+                                *dp.add(x7 + k as usize) = r7 * c7 + i7 * s7;
+                                *dp.add(y7 + k as usize) = i7 * c7 - r7 * s7;
+                            } else {
+                                *dp.add(x4 + k as usize) = ruu0 + ruu1;
+                                *dp.add(y4 + k as usize) = iuu0 + iuu1;
+                                *dp.add(x2 + k as usize) = rsu0 + isu1;
+                                *dp.add(y2 + k as usize) = isu0 - rsu1;
+                                *dp.add(x6 + k as usize) = rus0 + ius1;
+                                *dp.add(y6 + k as usize) = ius0 - rus1;
+                                *dp.add(x1 + k as usize) = rss0 - rss1;
+                                *dp.add(y1 + k as usize) = iss0 - iss1;
+                                *dp.add(x5 + k as usize) = ruu0 - ruu1;
+                                *dp.add(y5 + k as usize) = iuu0 - iuu1;
+                                *dp.add(x3 + k as usize) = rsu0 - isu1;
+                                *dp.add(y3 + k as usize) = isu0 + rsu1;
+                                *dp.add(x7 + k as usize) = rus0 - ius1;
+                                *dp.add(y7 + k as usize) = ius0 + rus1;
+                            }
+                            k += sep_between;
                         }
-                        k += sep_between;
                     }
                     l += lim_along;
                 }
@@ -844,6 +977,12 @@ pub fn rpcftk(
     y: usize,
     dim: &[i32],
 ) {
+    // Unchecked-access bound: see the module comment; here every access
+    // is `x` or `y` plus `k + m * step_along` for `0 <= m <= pm`.
+    let len = data.len();
+    let top = x.max(y);
+    let dp = data.as_mut_ptr();
+
     let twopi: f32 = 6.2831853;
     let mut t: f32;
     let mut xt: f32;
@@ -874,10 +1013,18 @@ pub fn rpcftk(
     let mut b = [0.0_f32; 19];
     let mut c = [0.0_f32; 19];
     let mut sep_along = [0.0_f32; 19];
-    let mut ia = [0.0_f32; 10];
-    let mut ib = [0.0_f32; 10];
-    let mut ra = [0.0_f32; 10];
-    let mut rb = [0.0_f32; 10];
+    // `ra`/`ia`/`rb`/`ib` are kept as one four-lane group per `v`, and the
+    // coefficients each lane multiplies by as the matching group: lane `l`
+    // of `acc[v]` is `ra[v]`, `ia[v]`, `rb[v]`, `ib[v]` for `l = 0..3`, and
+    // `cf[u][v]` is `aa[v][u], aa[v][u], bb[v][u], bb[v][u]`.  Every lane
+    // performs exactly the scalar `float` operation the source writes on
+    // that array (`ra[v] + rs * aa[v][u]`, ...), in the same order; the
+    // grouping only lets the four independent lanes share one SSE
+    // multiply and add, as gcc's SLP vectoriser does with the source.
+    // Elementwise SSE `mulps`/`addps` are the IEEE single operations of
+    // `mulss`/`addss` lane by lane (no FMA: the target has none enabled).
+    let mut acc = [[0.0_f32; 4]; 10];
+    let mut cf = [[[0.0_f32; 4]; 10]; 10];
 
     tot_floats = dim[1];
     sep = dim[2];
@@ -891,9 +1038,17 @@ pub fn rpcftk(
     sep_n_redp = sep * n_redp;
     pp = p_fac / 2;
     pm = p_fac - 1;
+    // `aa`/`bb` are `[10][10]` and `a`/`b`/`c`/`sep_along` hold 19, so the
+    // setup loops below index out of range (and panic, before any data is
+    // touched) unless `pp <= 9`, i.e. `pm <= 18`.  Stating that bound up
+    // front lets the compiler drop the per-access checks on those small
+    // arrays in the innermost `v` loop; the loops also run over half-open
+    // ranges (`1..pp + 1`, the same values as `1..=pp`), which compile to a
+    // plain counted loop.
+    assert!(pp <= 9 && pm <= 18);
     fp = p_fac as f32;
     fu = 0.0;
-    for u in 1..=pp {
+    for u in 1..pp + 1 {
         fu = (fu as f64 + 1.0) as f32;
         let angle = (twopi * fu / fp) as f64;
         jj = p_fac - u;
@@ -902,11 +1057,17 @@ pub fn rpcftk(
         a[jj as usize] = a[u as usize];
         b[jj as usize] = -b[u as usize];
     }
-    for u in 1..=pp {
-        for v in 1..=pp {
+    for u in 1..pp + 1 {
+        for v in 1..pp + 1 {
             jj = u * v - u * v / p_fac * p_fac;
             aa[v as usize][u as usize] = a[jj as usize];
             bb[v as usize][u as usize] = b[jj as usize];
+        }
+    }
+    for u in 1..pp + 1 {
+        for v in 1..pp + 1 {
+            let (av, bv) = (aa[v as usize][u as usize], bb[v as usize][u as usize]);
+            cf[u as usize][v as usize] = [av, av, bv, bv];
         }
     }
 
@@ -920,7 +1081,7 @@ pub fn rpcftk(
         if !zero {
             c[1] = angle.cos() as f32;
             sep_along[1] = angle.sin() as f32;
-            for u in 2..=pm {
+            for u in 2..pm + 1 {
                 c[u as usize] =
                     c[(u - 1) as usize] * c[1] - sep_along[(u - 1) as usize] * sep_along[1];
                 sep_along[u as usize] =
@@ -935,75 +1096,93 @@ pub fn rpcftk(
                 while l <= tot_floats {
                     let k1 = l + extent_between;
                     let mut k = l - 1;
+                    if k < k1 {
+                        let last = (k + (k1 - 1 - k) / sep_between.max(1) * sep_between.max(1))
+                            as i64
+                            + pm as i64 * step_along as i64;
+                        assert!(
+                            k >= 0
+                                && sep_between > 0
+                                && step_along >= 0
+                                && pm >= 0
+                                && last <= i32::MAX as i64
+                                && top.checked_add(last as usize).is_some_and(|end| end < len)
+                        );
+                    }
                     while k < k1 {
-                        xt = data[x + k as usize];
-                        yt = data[y + k as usize];
-                        let mut rs = data[x + (k + step_along) as usize]
-                            + data[x + (k + step_along * pm) as usize];
-                        let mut is = data[y + (k + step_along) as usize]
-                            + data[y + (k + step_along * pm) as usize];
-                        let mut ru = data[x + (k + step_along) as usize]
-                            - data[x + (k + step_along * pm) as usize];
-                        let mut iu = data[y + (k + step_along) as usize]
-                            - data[y + (k + step_along * pm) as usize];
-                        for u in 1..=pp {
-                            ra[u as usize] = xt + rs * aa[u as usize][1];
-                            ia[u as usize] = yt + is * aa[u as usize][1];
-                            rb[u as usize] = ru * bb[u as usize][1];
-                            ib[u as usize] = iu * bb[u as usize][1];
-                        }
-                        xt = xt + rs;
-                        yt = yt + is;
-
-                        for u in 2..=pp {
-                            // u numbers from 1 not 0
-                            jj = p_fac - u;
-                            rs = data[x + (k + u * step_along) as usize]
-                                + data[x + (k + jj * step_along) as usize];
-                            is = data[y + (k + u * step_along) as usize]
-                                + data[y + (k + jj * step_along) as usize];
-                            ru = data[x + (k + u * step_along) as usize]
-                                - data[x + (k + jj * step_along) as usize];
-                            iu = data[y + (k + u * step_along) as usize]
-                                - data[y + (k + jj * step_along) as usize];
+                        unsafe {
+                            xt = *dp.add(x + k as usize);
+                            yt = *dp.add(y + k as usize);
+                            let mut rs = *dp.add(x + (k + step_along) as usize)
+                                + *dp.add(x + (k + step_along * pm) as usize);
+                            let mut is = *dp.add(y + (k + step_along) as usize)
+                                + *dp.add(y + (k + step_along * pm) as usize);
+                            let mut ru = *dp.add(x + (k + step_along) as usize)
+                                - *dp.add(x + (k + step_along * pm) as usize);
+                            let mut iu = *dp.add(y + (k + step_along) as usize)
+                                - *dp.add(y + (k + step_along * pm) as usize);
+                            for u in 1..pp + 1 {
+                                let c1 = cf[1][u as usize];
+                                acc[u as usize] =
+                                    [xt + rs * c1[0], yt + is * c1[1], ru * c1[2], iu * c1[3]];
+                            }
                             xt = xt + rs;
                             yt = yt + is;
-                            for v in 1..=pp {
-                                ra[v as usize] = ra[v as usize] + rs * aa[v as usize][u as usize];
-                                ia[v as usize] = ia[v as usize] + is * aa[v as usize][u as usize];
-                                rb[v as usize] = rb[v as usize] + ru * bb[v as usize][u as usize];
-                                ib[v as usize] = ib[v as usize] + iu * bb[v as usize][u as usize];
+
+                            for u in 2..pp + 1 {
+                                // u numbers from 1 not 0
+                                jj = p_fac - u;
+                                rs = *dp.add(x + (k + u * step_along) as usize)
+                                    + *dp.add(x + (k + jj * step_along) as usize);
+                                is = *dp.add(y + (k + u * step_along) as usize)
+                                    + *dp.add(y + (k + jj * step_along) as usize);
+                                ru = *dp.add(x + (k + u * step_along) as usize)
+                                    - *dp.add(x + (k + jj * step_along) as usize);
+                                iu = *dp.add(y + (k + u * step_along) as usize)
+                                    - *dp.add(y + (k + jj * step_along) as usize);
+                                xt = xt + rs;
+                                yt = yt + is;
+                                let m = [rs, is, ru, iu];
+                                let cu = &cf[u as usize];
+                                for v in 1..pp + 1 {
+                                    let c = cu[v as usize];
+                                    let g = &mut acc[v as usize];
+                                    g[0] = g[0] + m[0] * c[0];
+                                    g[1] = g[1] + m[1] * c[1];
+                                    g[2] = g[2] + m[2] * c[2];
+                                    g[3] = g[3] + m[3] * c[3];
+                                }
                             }
-                        }
-                        data[x + k as usize] = xt;
-                        data[y + k as usize] = yt;
-                        for u in 1..=pp {
-                            jj = p_fac - u;
-                            if !zero {
-                                xt = ra[u as usize] + ib[u as usize];
-                                yt = ia[u as usize] - rb[u as usize];
-                                data[x + (k + u * step_along) as usize] =
-                                    xt * c[u as usize] + yt * sep_along[u as usize];
-                                data[y + (k + u * step_along) as usize] =
-                                    yt * c[u as usize] - xt * sep_along[u as usize];
-                                xt = ra[u as usize] - ib[u as usize];
-                                yt = ia[u as usize] + rb[u as usize];
-                                data[x + (k + jj * step_along) as usize] =
-                                    xt * c[jj as usize] + yt * sep_along[jj as usize];
-                                data[y + (k + jj * step_along) as usize] =
-                                    yt * c[jj as usize] - xt * sep_along[jj as usize];
-                            } else {
-                                data[x + (k + u * step_along) as usize] =
-                                    ra[u as usize] + ib[u as usize];
-                                data[y + (k + u * step_along) as usize] =
-                                    ia[u as usize] - rb[u as usize];
-                                data[x + (k + jj * step_along) as usize] =
-                                    ra[u as usize] - ib[u as usize];
-                                data[y + (k + jj * step_along) as usize] =
-                                    ia[u as usize] + rb[u as usize];
+                            *dp.add(x + k as usize) = xt;
+                            *dp.add(y + k as usize) = yt;
+                            for u in 1..pp + 1 {
+                                jj = p_fac - u;
+                                if !zero {
+                                    xt = acc[u as usize][0] + acc[u as usize][3];
+                                    yt = acc[u as usize][1] - acc[u as usize][2];
+                                    *dp.add(x + (k + u * step_along) as usize) =
+                                        xt * c[u as usize] + yt * sep_along[u as usize];
+                                    *dp.add(y + (k + u * step_along) as usize) =
+                                        yt * c[u as usize] - xt * sep_along[u as usize];
+                                    xt = acc[u as usize][0] - acc[u as usize][3];
+                                    yt = acc[u as usize][1] + acc[u as usize][2];
+                                    *dp.add(x + (k + jj * step_along) as usize) =
+                                        xt * c[jj as usize] + yt * sep_along[jj as usize];
+                                    *dp.add(y + (k + jj * step_along) as usize) =
+                                        yt * c[jj as usize] - xt * sep_along[jj as usize];
+                                } else {
+                                    *dp.add(x + (k + u * step_along) as usize) =
+                                        acc[u as usize][0] + acc[u as usize][3];
+                                    *dp.add(y + (k + u * step_along) as usize) =
+                                        acc[u as usize][1] - acc[u as usize][2];
+                                    *dp.add(x + (k + jj * step_along) as usize) =
+                                        acc[u as usize][0] - acc[u as usize][3];
+                                    *dp.add(y + (k + jj * step_along) as usize) =
+                                        acc[u as usize][1] + acc[u as usize][2];
+                                }
                             }
+                            k += sep_between;
                         }
-                        k += sep_between;
                     }
                     l += lim_along;
                 }
@@ -1013,7 +1192,7 @@ pub fn rpcftk(
                 break;
             }
             k0 = (n_reduced + 1 - j) * sep + 1;
-            for u in 1..=pm {
+            for u in 1..pm + 1 {
                 t = c[u as usize] * a[u as usize] + sep_along[u as usize] * b[u as usize];
                 sep_along[u as usize] =
                     -sep_along[u as usize] * a[u as usize] + c[u as usize] * b[u as usize];

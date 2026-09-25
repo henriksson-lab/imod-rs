@@ -634,7 +634,7 @@ pub unsafe fn par_wrt_sec(iunit: i32, array: *mut ::core::ffi::c_void) -> i32 {
                 iz_cur, ierr
             ),
         );
-        std::process::exit(1);
+        crate::imod::libcfshr::b3dutil::exit(1);
     }
     if iz_cur == iz_bound[0] {
         crate::imod::libiimod::unit_fileio::iiu_set_position(iunit_bound, 0, 0);
@@ -741,7 +741,7 @@ pub unsafe fn par_wrt_lin(iunit: i32, array: *mut ::core::ffi::c_void) -> i32 {
                     iz_cur, iy_cur, ierr
                 ),
             );
-            std::process::exit(1);
+            crate::imod::libcfshr::b3dutil::exit(1);
         }
     }
     if if_all_sec != 0 {
@@ -873,7 +873,7 @@ pub unsafe fn iiu_par_wrt_reclose_hdf(iunit: i32, write_header: i32) -> i32 {
         },
     ) != 0
     {
-        std::process::exit(1);
+        crate::imod::libcfshr::b3dutil::exit(1);
     }
     1
 }
@@ -882,7 +882,7 @@ pub unsafe fn iiu_write_dummy_sec_to_hdf(iunit: i32) {
     crate::imod::libiimod::unit_fileio::iiu_sync_with_mrc_header(iunit);
     let ii_file = crate::imod::libiimod::unit_fileio::iiu_get_ii_file(iunit);
     if crate::imod::libiimod::iihdf::hdf_write_dummy_section(ii_file, buf.as_mut_ptr(), 0) != 0 {
-        std::process::exit(1);
+        crate::imod::libcfshr::b3dutil::exit(1);
     }
 }
 pub unsafe fn iiu_par_wrt_flush_buffers(iunit: i32) -> i32 {

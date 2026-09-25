@@ -16,7 +16,9 @@ pub fn make_model_bead(box_size: i32, bead_size: f32, array: &mut [f32]) {
 
     let icen = box_size / 2;
     let ndiv = 10_i32;
-    let fcen = (box_size as f32 - 1. / ndiv as f32) / 2.;
+    // `fcen = (boxSize - 1. / ndiv) / 2.;` is evaluated in double and narrowed
+    // on the store.
+    let fcen = ((box_size as f64 - 1. / ndiv as f64) / 2.) as f32;
     let radsq = bead_size * bead_size / 4.;
     for iy in 0..=icen {
         for ix in 0..=icen {

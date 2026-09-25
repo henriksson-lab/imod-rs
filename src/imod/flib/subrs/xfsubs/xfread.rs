@@ -1,5 +1,6 @@
 //! Translation of `IMOD/flib/subrs/xfsubs/xfread.f`.
 
+use crate::imod::flib::subrs::hvem::frefor::{ListItem, ListReadError, list_read};
 use std::io::BufRead;
 
 /// Original alternate returns from `xfread` (`xfread.f:1`).
@@ -10,34 +11,26 @@ pub enum XfReadError {
 }
 
 /// Original `xfread` (`xfread.f:1`).
+///
+/// `read(iunit,*,end=10,err=20)((f(i,j),j=1,2),i=1,2),f(1,3),f(2,3)` is a
+/// list-directed read, so it goes through [`list_read`]: blank records are
+/// skipped, the six values may span records, anything after the sixth on the
+/// last record is discarded, and running out of records part-way is `END=`.
 pub fn xfread<R: BufRead>(iunit: &mut R, f: &mut [f32; 6]) -> Result<(), XfReadError> {
-    let mut line = String::new();
-    if iunit.read_line(&mut line).map_err(|_| XfReadError::Error)? == 0 {
-        return Err(XfReadError::End);
-    }
-    let mut values = [0.0_f32; 6];
-    let mut count = 0;
-    for word in line.split_whitespace() {
-        if count == 6 {
-            break;
-        }
-        // Fortran list-directed input accepts a `D` exponent; the rewrite to
-        // `E` is only needed when the field actually carries one, and
-        // `read(iunit,*)` allocates nothing, so the copy is taken only then.
-        values[count] = if word.bytes().any(|b| b == b'd' || b == b'D') {
-            word.replace(['d', 'D'], "E").parse()
-        } else {
-            word.parse()
-        }
-        .map_err(|_| XfReadError::Error)?;
-        count += 1;
-    }
-    if count != 6 {
-        return Err(XfReadError::Error);
-    }
-    // `((f(i,j),j=1,2),i=1,2),f(1,3),f(2,3)` into column-major storage.
-    *f = [
-        values[0], values[2], values[1], values[3], values[4], values[5],
-    ];
-    Ok(())
+    let [a11, a21, a12, a22, dx, dy] = f;
+    list_read(
+        iunit,
+        &mut [
+            ListItem::Real(a11),
+            ListItem::Real(a12),
+            ListItem::Real(a21),
+            ListItem::Real(a22),
+            ListItem::Real(dx),
+            ListItem::Real(dy),
+        ],
+    )
+    .map_err(|err| match err {
+        ListReadError::End => XfReadError::End,
+        ListReadError::Error => XfReadError::Error,
+    })
 }

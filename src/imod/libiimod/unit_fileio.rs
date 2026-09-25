@@ -1,5 +1,6 @@
 pub type fortStrLen_t = i32;
 use crate::imod::libcfshr::b3dutil::ImodFile;
+use crate::imod::libcfshr::b3dutil::exit;
 use crate::imod::libcfshr::b3dutil::{
     b3d_error, b3d_get_error as b3dGetError, b3d_milli_sleep as b3dMilliSleep,
     b3d_set_store_error as b3dSetStoreError, fortran_string, imod_backup_file as imodBackupFile,
@@ -23,7 +24,6 @@ use crate::imod::libiimod::iitif::tiff_set_string_tag_to_print as tiffSetStringT
 use crate::imod::libiimod::mrcfiles::{MrcHeader, mrc_getdcsize};
 use std::cell::{Cell, RefCell};
 use std::io::Write as _;
-use std::process::exit;
 
 pub struct Unit {
     pub ii_file: *mut ImodImageFile,
@@ -310,6 +310,35 @@ pub unsafe fn iiu_close(mut iunit: i32) {
             }
             table.map[unit as usize] = None;
         }
+    });
+}
+/// Rust-only, not in `unit_fileio.c`: deletes the image file of every unit
+/// still open on this thread, as the end of a process releases them.
+///
+/// Used by `commands::run_in_process` when a command run in process ends, so
+/// the images a program leaves open (on an error exit, or a Fortran program
+/// that never calls `imclose`) do not outlive it.  It is `iiuClose`'s
+/// release -- `iiClose`, drop the header, `iiDelete` -- without the scratch
+/// file removal, which an exiting process does not do either.
+pub fn release_all_units() {
+    UNIT_TABLE.with(|unit_table| {
+        let Ok(mut table) = unit_table.try_borrow_mut() else {
+            return;
+        };
+        for index in 0..table.map.len() {
+            if let Some(slot) = table.map[index].take() {
+                let u = table.units[slot].as_mut();
+                if u.being_used {
+                    u.being_used = false;
+                    unsafe {
+                        iiClose(u.ii_file);
+                        u.header = UnitHeader::None;
+                        iiDelete(u.ii_file);
+                    }
+                }
+            }
+        }
+        table.no_convert_units.clear();
     });
 }
 pub unsafe fn iiu_get_ii_file(mut iunit: i32) -> *mut ImodImageFile {

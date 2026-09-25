@@ -71,7 +71,7 @@ fn usage(progname: &[u8]) -> ! {
     let _ = out.write_all(b"\t-t #    Set criterion in megabytes for reading files in chunks\n");
     let _ = out.write_all(b"\t-m      Turn off file-to-memory mapping in libtiff\n");
     let _ = out.flush();
-    std::process::exit(3)
+    crate::imod::libcfshr::b3dutil::exit(3)
 }
 
 /// Original `manageMode` (`tif2mrc.c:634`).
@@ -700,7 +700,7 @@ pub fn tif2mrc(arguments: &[String]) -> i32 {
         let failed = replace_file_arg_vec(&mut vector, &mut argc, &mut iarg, &mut replaced);
         if failed != 0 {
             let _ = out.flush();
-            std::process::exit(1);
+            crate::imod::libcfshr::b3dutil::exit(1);
         }
         argv = vector
             .iter()
@@ -926,7 +926,7 @@ pub fn tif2mrc(arguments: &[String]) -> i32 {
             /* cleanup */
             drop(mrcfp.take());
             let _ = out.flush();
-            std::process::exit(0);
+            crate::imod::libcfshr::b3dutil::exit(0);
         }
         tiff_close_file(&mut tiff);
     }
@@ -1379,7 +1379,7 @@ pub fn tif2mrc(arguments: &[String]) -> i32 {
         drop(tiltfp.take());
     }
     let _ = out.flush();
-    std::process::exit(0);
+    crate::imod::libcfshr::b3dutil::exit(0);
 }
 
 #[cfg(test)]

@@ -33,7 +33,7 @@ pub fn dopen(iunit: i32, fname: &str, itype: &str, iform: &str) -> File {
         let exist = std::path::Path::new(fname).exists();
         if !exist {
             println!("\nERROR: DOPEN - FILE {fname} DOES NOT EXIST");
-            std::process::exit(1);
+            crate::imod::libcfshr::b3dutil::exit(1);
         }
     }
     //
@@ -60,7 +60,7 @@ pub fn dopen(iunit: i32, fname: &str, itype: &str, iform: &str) -> File {
     };
     let Ok(file) = opened else {
         println!("\nERROR: DOPEN - CANNOT OPEN FILE {fname}");
-        std::process::exit(1);
+        crate::imod::libcfshr::b3dutil::exit(1);
     };
     //
     // NOW WRITE OUT FILE INFO

@@ -78,7 +78,11 @@ pub fn extract_and_bin_into_array(
     }
 
     // Advance array pointer to the beginning of the data and incorporate Y offset into X
-    let abase = (x_start as usize + y_start as usize * nx_dim as usize) * pix_size;
+    // `array + (xStart + yStart * nxDim) * pixSize`: a negative start is a
+    // pointer before the caller's element, which is valid while it stays in
+    // the caller's allocation (`blendmont`'s piece cache); it is computed in
+    // `i64` so the offset is the C one whatever the signs.
+    let abase = ((x_start as i64 + y_start as i64 * nx_dim as i64) * pix_size as i64) as usize;
     bx_offset += by_offset * nx_bdim;
 
     if nbin == 1 && pix_size == out_pix_size {

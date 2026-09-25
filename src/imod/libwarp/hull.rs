@@ -559,7 +559,7 @@ pub fn op_simp(st: &mut HullStorage, a: usize, b: usize) -> i32 {
     print_simplex(st, b, &mut dfile);
     let _ = std::io::Write::write_all(&mut dfile, b"---------------------\n");
     print_triang(st, a, &mut dfile, print_neighbor_full);
-    std::process::exit(1)
+    crate::imod::libcfshr::b3dutil::exit(1)
 }
 
 /// Original `op_vert` (`hull.c:132`) — the neighbor entry of `a` containing
@@ -589,7 +589,7 @@ pub fn op_vert(st: &mut HullStorage, a: usize, b: Site) -> i32 {
     crate::imod::libwarp::hull_ch::print_site(st, b, &mut dfile);
     let _ = std::io::Write::write_all(&mut dfile, b"---------------------\n");
     print_triang(st, a, &mut dfile, print_neighbor_full);
-    std::process::exit(1)
+    crate::imod::libcfshr::b3dutil::exit(1)
 }
 
 /// Original static `connect` (`hull.c:139`) — make neighbor connections

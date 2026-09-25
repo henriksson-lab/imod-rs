@@ -50,15 +50,29 @@ pub fn complete_model_values(fm: &mut FortModel) {
     fm.nin_order = fm.n_object;
 }
 
-/// Original: `fortModObjToCont` (`fortmodel.c:278`).
-pub fn fort_mod_obj_to_cont(fm: &FortModel, iobj: i32) -> Option<(i32, i32)> {
-    let index = usize::try_from(iobj.checked_sub(1)?).ok()?;
-    let color = fm.obj_color.get(index)?[0];
-    let contour = fm.obj_color[..=index]
-        .iter()
-        .filter(|entry| entry[0] == color)
-        .count() as i32;
-    Some((256 - color, contour))
+/// Original: `fortModObjToCont` (`fortmodel.c:264`).
+///
+/// Converts a WIMP-style object number in `iobj`, which is actually a contour
+/// number within the whole model, numbered from 1, to an IMOD object and
+/// contour number, also numbered from 1.  The source indexes
+/// `fmodObj_color[iobj * 2 - 1]`, i.e. `obj_color(2, iobj)` — the IMOD-object
+/// color code, `obj_color[iobj - 1][1]` here, not the always-1 first column.
+pub fn fort_mod_obj_to_cont(
+    iobj: i32,
+    fmod_obj_color: &[[i32; 2]],
+    imodobj: &mut i32,
+    imodcont: &mut i32,
+) {
+    let icolor: i32 = fmod_obj_color[(iobj - 1) as usize][1];
+    *imodobj = 256 - icolor;
+    *imodcont = 0;
+    let mut i = 1;
+    while i <= iobj {
+        if icolor == fmod_obj_color[(i - 1) as usize][1] {
+            *imodcont += 1;
+        }
+        i += 1;
+    }
 }
 
 /// Original: `fortObjectMover` (`fortmodel.c:307`).  Returns `true` for the
@@ -354,9 +368,11 @@ mod tests {
     #[test]
     fn maps_wimp_object_number_to_model_object_and_contour() {
         let mut fm = small_model();
-        fm.obj_color[0][0] = 254;
-        fm.obj_color[1][0] = 253;
-        fm.obj_color[2][0] = 254;
-        assert_eq!(fort_mod_obj_to_cont(&fm, 3), Some((2, 2)));
+        fm.obj_color[0][1] = 254;
+        fm.obj_color[1][1] = 253;
+        fm.obj_color[2][1] = 254;
+        let (mut obj, mut cont) = (0, 0);
+        fort_mod_obj_to_cont(3, &fm.obj_color, &mut obj, &mut cont);
+        assert_eq!((obj, cont), (2, 2));
     }
 }

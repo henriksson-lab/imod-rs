@@ -70,14 +70,17 @@ struct B3dRandState {
     b3dran_last_seed: i32,
 }
 
-static B3D_RAND_STATE: Mutex<B3dRandState> = Mutex::new(B3dRandState {
+/// The state a fresh process starts with; [`run_in_process`] resets to it.
+const B3D_RAND_STATE_INIT: B3dRandState = B3dRandState {
     words: [0; 31],
     front: 3,
     rear: 0,
     initialized: false,
     b3dran_first_time: true,
     b3dran_last_seed: 0,
-});
+};
+
+static B3D_RAND_STATE: Mutex<B3dRandState> = Mutex::new(B3D_RAND_STATE_INIT);
 
 /// One entry of `b3dutil.c`'s lock table.
 ///
@@ -281,6 +284,29 @@ impl CFile {
                 if let (SeekFrom::Start(target), Some(current)) = (pos, self.read_pos) {
                     if target >= current && target - current <= r.buffer().len() as u64 {
                         r.seek_relative((target - current) as i64)?;
+                        self.read_pos = Some(target);
+                        return Ok(target);
+                    }
+                }
+                // A relative seek moves within the read buffer when it can,
+                // as glibc's `fseek(fp, n, SEEK_CUR)` does: `mrcReadSectionAny`
+                // (`mrcsec.c:365`, `:385`) seeks past the unread X ranges of
+                // every line of a sub-area read, and `BufReader::seek` would
+                // discard the buffer and re-read the block for each line
+                // (beadtrack's box reads: twice native's `read` calls).
+                // `seek_relative` falls back to a real seek outside the
+                // buffer; the logical position is the same either way.
+                if let SeekFrom::Current(offset) = pos {
+                    let current = match self.read_pos {
+                        Some(p) => p,
+                        None => r.stream_position()?,
+                    };
+                    let target = current.checked_add_signed(offset);
+                    if let Some(target) = target {
+                        if let Err(e) = r.seek_relative(offset) {
+                            self.read_pos = None;
+                            return Err(e);
+                        }
                         self.read_pos = Some(target);
                         return Ok(target);
                     }
@@ -1377,6 +1403,223 @@ pub fn imod_prog_name(full_name: &str) -> String {
         _ => tail.to_string(),
     }
 }
+/// The program's `argv`, as C `main(int argc, char *argv[])` receives it.
+///
+/// Not a source function: upstream installs one executable per command, so
+/// each `main` reads its own process `argv`.  This crate builds a single
+/// busybox-style binary (`src/bin/imod.rs`), and for the subcommand form
+/// `imod <cmd> args...` the launcher records the `argv` the command would have
+/// had as its own executable -- `<bindir>/<cmd>`, then `args...` -- before
+/// dispatching in-process.  Every translated unit that reads `argv` reads it
+/// here instead of from `std::env::args_os()`.  When nothing was recorded (the
+/// link form, or a library caller) it is the process `argv`.
+static PROGRAM_ARGV: std::sync::OnceLock<Vec<std::ffi::OsString>> = std::sync::OnceLock::new();
+
+/// Records the effective `argv` for [`program_args_os`]; the launcher calls it
+/// once, before dispatch.  A second call is ignored.
+pub fn set_program_args(argv: Vec<std::ffi::OsString>) {
+    let _ = PROGRAM_ARGV.set(argv);
+}
+
+/// The effective `argv` (see [`PROGRAM_ARGV`]), as `std::env::args_os()`.
+pub fn program_args_os() -> Vec<std::ffi::OsString> {
+    // A command run by [`run_in_process`] sees the `argv` it was given there.
+    if let Some(argv) = IN_PROCESS_ARGV.with_borrow(|argv| argv.clone()) {
+        return argv;
+    }
+    match PROGRAM_ARGV.get() {
+        Some(argv) => argv.clone(),
+        None => std::env::args_os().collect(),
+    }
+}
+
+/// The effective `argv` as `std::env::args()` yields it, panicking on an
+/// argument that is not valid Unicode exactly as that iterator does.
+pub fn program_args() -> Vec<String> {
+    program_args_os()
+        .into_iter()
+        .map(|argument| argument.into_string().unwrap())
+        .collect()
+}
+
+// ---------------------------------------------------------------------------
+// Running one of this crate's own commands in process.
+//
+// Not a source unit.  Upstream's Python scripts (`pysrc/trimvol`) and one
+// Fortran program (`blendmont.f90:1085`, `call system('clip plane ...')`) run
+// other IMOD programs as child processes; by owner decision (2026-09-24) the
+// translations call those programs in this process instead.  A translated
+// program is a whole `main`: it reads `argv` through [`program_args_os`],
+// keeps PIP, unit and error state in `thread_local!`s, writes to the C
+// `stdout`, and ends in `exit()`.  [`run_in_process`] gives it exactly that
+// environment without a `fork`:
+//
+// * it runs on a **fresh thread**, so every `thread_local!` (PIP's option
+//   table and exit prefix, the Fortran unit table, `b3dError`'s buffer, ...)
+//   starts at its initial value, as in a new process;
+// * [`program_args_os`] returns the `argv` given here on that thread;
+// * [`exit`] -- C `exit` -- flushes every stream as C `exit()` does and then
+//   *unwinds* to the runner with the status instead of ending the process;
+// * the few process-global statics a program can set (the six
+//   `b3dutil.c` output overrides and the `rand` state) are reset to their
+//   initial values for the call and restored afterwards;
+// * standard input can be fed from given text and standard output captured,
+//   by pointing descriptors 0 and 1 at an unlinked temporary file for the
+//   duration of the call, which is what a pipe to a child does to every
+//   writer (C stdio, `println!`, `ImodFile::Stdout`) alike.
+//
+// Callers must call [`exit`], never `std::process::exit`, on any path a
+// command reached this way can take.
+// ---------------------------------------------------------------------------
+
+thread_local! {
+    /// The `argv` of the command [`run_in_process`] is running on this thread;
+    /// `Some` also marks the thread as an in-process command for [`exit`].
+    static IN_PROCESS_ARGV: RefCell<Option<Vec<std::ffi::OsString>>> = const { RefCell::new(None) };
+}
+
+/// The unwind payload [`exit`] carries back to [`run_in_process`].
+pub struct InProcessExit(pub i32);
+
+/// Flushes every output stream, as C `exit()` does before a process ends:
+/// the C streams (`fflush(NULL)`), Rust's `stdout`, and every open
+/// [`ImodFile`].
+fn flush_all_streams() {
+    unsafe { libc::fflush(std::ptr::null_mut()) };
+    let _ = std::io::stdout().flush();
+    flush_open_streams();
+}
+
+/// C `exit(status)`.
+///
+/// Outside [`run_in_process`] this is `std::process::exit`, which calls libc
+/// `exit` and so flushes the C streams and runs [`flush_open_streams`] from
+/// its `atexit` registration.  Inside it, the same flush happens here and the
+/// status unwinds to the runner, dropping (and so flushing) everything the
+/// command still held on the way.
+pub fn exit(status: i32) -> ! {
+    if IN_PROCESS_ARGV.with_borrow(|argv| argv.is_some()) {
+        flush_all_streams();
+        std::panic::resume_unwind(Box::new(InProcessExit(status)));
+    }
+    std::process::exit(status)
+}
+
+/// Runs `entry` -- a translated program's `main` -- as if it were the
+/// program `argv[0]` started with `argv`, and returns its exit status and,
+/// when `capture` is set, everything it wrote to standard output.  `input`,
+/// when given, is what the program reads on standard input.  See the section
+/// comment above for what "as if" covers.  A panic that is not an [`exit`]
+/// is re-raised in the caller after the descriptors are restored.
+pub fn run_in_process<F: FnOnce() + Send + 'static>(
+    argv: Vec<std::ffi::OsString>,
+    input: Option<&[u8]>,
+    capture: bool,
+    entry: F,
+) -> std::io::Result<(i32, Vec<u8>)> {
+    static SEQ: std::sync::atomic::AtomicU32 = std::sync::atomic::AtomicU32::new(0);
+    let temp_file = || -> std::io::Result<std::fs::File> {
+        let path = std::env::temp_dir().join(format!(
+            "imod-rs-in-process-{}-{}",
+            std::process::id(),
+            SEQ.fetch_add(1, Ordering::SeqCst)
+        ));
+        let file = std::fs::OpenOptions::new()
+            .read(true)
+            .write(true)
+            .create_new(true)
+            .open(&path)?;
+        let _ = std::fs::remove_file(&path);
+        Ok(file)
+    };
+    use std::os::fd::AsRawFd;
+    flush_all_streams();
+    let mut saved_in = -1;
+    let mut input_file = None;
+    if let Some(text) = input {
+        let mut file = temp_file()?;
+        file.write_all(text)?;
+        file.seek(SeekFrom::Start(0))?;
+        saved_in = unsafe { libc::dup(0) };
+        unsafe { libc::dup2(file.as_raw_fd(), 0) };
+        input_file = Some(file);
+    }
+    let mut saved_out = -1;
+    let mut output_file = None;
+    if capture {
+        let file = temp_file()?;
+        saved_out = unsafe { libc::dup(1) };
+        unsafe { libc::dup2(file.as_raw_fd(), 1) };
+        output_file = Some(file);
+    }
+
+    // Process-global state a fresh process would start with.
+    let overrides = [
+        &S_WRITE_BYTES_OVERRIDE,
+        &S_OUTPUT_TYPE_OVERRIDE,
+        &S_WRITE_4_BIT_MODE,
+        &S_WRITE_16_BIT_FLOATS,
+        &S_INVERT_MRC_ORIGIN_OVERRIDE,
+        &S_ALL_BIG_TIFF_OVERRIDE,
+    ];
+    let initial = [-1, -1, 0, -1, -1, -1];
+    let saved: Vec<i32> = overrides
+        .iter()
+        .zip(initial)
+        .map(|(value, init)| value.swap(init, Ordering::SeqCst))
+        .collect();
+    let saved_rand = std::mem::replace(
+        &mut *B3D_RAND_STATE.lock().expect("b3d random state poisoned"),
+        B3D_RAND_STATE_INIT,
+    );
+
+    let joined = std::thread::Builder::new()
+        .stack_size(64 << 20)
+        .spawn(move || {
+            IN_PROCESS_ARGV.with_borrow_mut(|slot| *slot = Some(argv));
+            match std::panic::catch_unwind(std::panic::AssertUnwindSafe(entry)) {
+                // A Fortran `end program` or a C `return` from `main`.
+                Ok(()) => {
+                    flush_all_streams();
+                    0
+                }
+                Err(payload) => match payload.downcast::<InProcessExit>() {
+                    Ok(status) => status.0,
+                    Err(payload) => std::panic::resume_unwind(payload),
+                },
+            }
+        })?
+        .join();
+
+    flush_all_streams();
+    if let Some(file) = input_file {
+        unsafe {
+            // Drop what C `stdin` buffered from the file, then clear its EOF.
+            libc::fflush(stdin);
+            libc::dup2(saved_in, 0);
+            libc::close(saved_in);
+            libc::clearerr(stdin);
+        }
+        drop(file);
+    }
+    let mut output = Vec::new();
+    if let Some(mut file) = output_file {
+        unsafe {
+            libc::dup2(saved_out, 1);
+            libc::close(saved_out);
+        }
+        file.seek(SeekFrom::Start(0))?;
+        file.read_to_end(&mut output)?;
+    }
+    for (value, old) in overrides.iter().zip(saved) {
+        value.store(old, Ordering::SeqCst);
+    }
+    *B3D_RAND_STATE.lock().expect("b3d random state poisoned") = saved_rand;
+    match joined {
+        Ok(status) => Ok((status, output)),
+        Err(payload) => std::panic::resume_unwind(payload),
+    }
+}
 /// Matches C `imodBackupFile` (`b3dutil.c:241`).
 ///
 /// `rmTries` and `mvTries` are 1 outside `_WIN32`, so each of the source's two
@@ -1401,6 +1644,76 @@ pub fn imod_backup_file(filename: &str) -> i32 {
         Ok(()) => 0,
         Err(_) => -1,
     }
+}
+/// Matches C `b3dOpenFile` (`b3dutil.c:302`).
+///
+/// `exitError` needs `strerror(errno)` for a failed open, and
+/// [`ImodFile::open`] reports failure as `None`; the failed `open` system call
+/// has just left its error in the thread's `errno`, which
+/// `std::io::Error::last_os_error` reads (and renders with a ` (os error N)`
+/// suffix the C library does not add, trimmed off).  The one case with no
+/// system call behind it is a mode string `fopen` would reject with `EINVAL`,
+/// which no caller passes.
+pub fn b3d_open_file(name: &str, mode: &str) -> ImodFile {
+    let stock_modes = ["r", "r+", "w+"];
+    let descrip = ["OLD file", "NEW file", "file for appending"];
+    let mut mode = mode;
+    let mut desc_ind = 0usize;
+    if mode == "ro" || mode == "RO" {
+        mode = stock_modes[0];
+    } else if mode == "old" || mode == "OLD" {
+        mode = stock_modes[1];
+    } else if mode == "new" || mode == "NEW" {
+        mode = stock_modes[2];
+    }
+    if mode.as_bytes().first() == Some(&b'w') {
+        // `imodBackupFile` returns 0 when it renamed the file or there was
+        // none, so the warning is printed when the rename *failed*; the text
+        // is the source's.
+        if imod_backup_file(name) != 0 {
+            let _ = ImodFile::Stdout.write_all(
+                c_format(
+                    "WARNING: b3dOpenFile - Renaming existing file %s\n",
+                    &[CArg::Str(name)],
+                )
+                .as_bytes(),
+            );
+        }
+        desc_ind = 1;
+    } else if mode.as_bytes().first() == Some(&b'a') {
+        desc_ind = 2;
+    }
+
+    let fp = match ImodFile::open(name, mode) {
+        Some(fp) => fp,
+        None => {
+            let error = std::io::Error::last_os_error().to_string();
+            let error = error
+                .split(" (os error ")
+                .next()
+                .unwrap_or(&error)
+                .to_string();
+            crate::imod::libcfshr::parse_params::exit_error(
+                c_format(
+                    "Opening %s, %s: %s",
+                    &[
+                        CArg::Str(descrip[desc_ind]),
+                        CArg::Str(name),
+                        CArg::Str(&error),
+                    ],
+                )
+                .as_bytes(),
+            );
+        }
+    };
+    let _ = ImodFile::Stdout.write_all(
+        c_format(
+            "\nOpened %s: %s\n",
+            &[CArg::Str(descrip[desc_ind]), CArg::Str(name)],
+        )
+        .as_bytes(),
+    );
+    fp
 }
 /// Matches C `pidToStderr` (`b3dutil.c:359`).
 pub fn pid_to_stderr() {
@@ -1783,6 +2096,36 @@ pub fn group_limits_remainder_at_end(
     );
     *start = total - 1 - inverse_end;
     *end = total - 1 - inverse_start;
+}
+/// Matches C `makeLinePointers` (`b3dutil.c:1269`).
+///
+/// The C returns a `malloc`ed array of `ysize` byte pointers, line `i` at
+/// `array + (size_t)xsize * i * dsize`, which the caller `free`s.  Here the
+/// array is `Vec<&[u8]>`, line `i` being the byte view of `array` *from* that
+/// offset to its end: the C pointer is not bounded by the line either, and
+/// the consumers (`sampleMeanSD`, `zoomWithFilter`, …) take exactly this
+/// shape, a slice of line slices over the image's bytes (`MrcData::bytes` or
+/// a caller's own byte view).  Ownership replaces the `free`.
+///
+/// `None` is the C's `NULL`: a failed allocation, including the huge request a
+/// negative `ysize` makes.  A line whose start lies past the end of `array`
+/// is a pointer the C could form but not use, and is reported as `None` too
+/// rather than a panic; every C caller already handles `NULL` as an error.
+pub fn make_line_pointers(array: &[u8], xsize: i32, ysize: i32, dsize: i32) -> Option<Vec<&[u8]>> {
+    if ysize < 0 {
+        return None;
+    }
+    let mut line_ptrs: Vec<&[u8]> = Vec::new();
+    if line_ptrs.try_reserve_exact(ysize as usize).is_err() {
+        return None;
+    }
+    for i in 0..ysize {
+        let offset = (xsize as usize)
+            .wrapping_mul(i as usize)
+            .wrapping_mul(dsize as usize);
+        line_ptrs.push(array.get(offset..)?);
+    }
+    Some(line_ptrs)
 }
 /// Matches C `b3dIMin` (`b3dutil.c:1285`). Rust’s slice is the stable equivalent of C varargs.
 pub fn b3d_i_min(values: &[i32]) -> i32 {
@@ -2487,27 +2830,43 @@ pub fn replace_file_arg_vec(
 pub fn anglewithinlimits(angle: &f32, lower: &f32, upper: &f32) -> f64 {
     angle_within_limits(*angle, *lower, *upper)
 }
-/// Matches C `getStandardGpuOptions` (`b3dutil.c:1818`) for the environment half of the source contract.
+/// Matches C `getStandardGpuOptions` (`b3dutil.c:1818`).
+///
+/// The `-UseGPU` entry overrides `IMOD_USE_GPU` and `IMOD_USE_GPU2` overrides
+/// both; `-ActionIfGPUFails` is read into the two action values only when both
+/// are supplied, and they are left untouched when it was not entered.  The
+/// environment values go through `atoi`: leading digits, 0 for none.
 pub fn get_standard_gpu_options(
     if_gpu_by_environment: &mut i32,
     action_fail_option: Option<&mut i32>,
     action_fail_environment: Option<&mut i32>,
 ) -> i32 {
+    let atoi = |value: &std::ffi::OsStr| {
+        let bytes = value.as_encoded_bytes();
+        let mut end = 0usize;
+        crate::imod::libcfshr::parse_params::strtol(bytes, &mut end, 10) as i32
+    };
     let mut use_gpu = -1;
     *if_gpu_by_environment = 0;
-    if let Ok(value) = std::env::var("IMOD_USE_GPU") {
+    if let Some(value) = std::env::var_os("IMOD_USE_GPU") {
         *if_gpu_by_environment = 1;
-        use_gpu = value.parse().unwrap_or(0);
+        use_gpu = atoi(&value);
     }
-    if let Ok(value) = std::env::var("IMOD_USE_GPU2") {
+    if crate::imod::libcfshr::parse_params::pip_get_integer(b"UseGPU", &mut use_gpu) == 0 {
+        *if_gpu_by_environment = 0;
+    }
+    if let Some(value) = std::env::var_os("IMOD_USE_GPU2") {
         *if_gpu_by_environment = 1;
-        use_gpu = value.parse().unwrap_or(0);
+        use_gpu = atoi(&value);
     }
     if let (Some(action_fail_option), Some(action_fail_environment)) =
         (action_fail_option, action_fail_environment)
     {
-        *action_fail_option = 0;
-        *action_fail_environment = 0;
+        crate::imod::libcfshr::parse_params::pip_get_two_integers(
+            b"ActionIfGPUFails",
+            action_fail_option,
+            action_fail_environment,
+        );
     }
     use_gpu
 }

@@ -94,7 +94,7 @@ fn usage(progname: &[u8]) {
 /// Original: `main` (`mrc2tif.cpp:65`).
 pub fn mrc2tif() {
     unsafe {
-        let args: Vec<String> = std::env::args().collect();
+        let args: Vec<String> = crate::imod::libcfshr::b3dutil::program_args();
         let progname_alloc = imod_prog_name(args.first().map(String::as_str).unwrap_or("mrc2tif"));
         let progname = progname_alloc.as_bytes();
         // `mrc2tif.cpp:116-117`: `sprintf(prefix, "\nERROR: %s - ", progname)`
@@ -147,7 +147,7 @@ pub fn mrc2tif() {
                 'h' => {
                     usage(progname);
                     let _ = ImodFile::Stdout.flush();
-                    std::process::exit(1);
+                    crate::imod::libcfshr::b3dutil::exit(1);
                 }
                 'c' => {
                     iarg += 1;
@@ -162,7 +162,7 @@ pub fn mrc2tif() {
                         None => {
                             usage(progname);
                             let _ = ImodFile::Stdout.flush();
-                            std::process::exit(1);
+                            crate::imod::libcfshr::b3dutil::exit(1);
                         }
                     }
                     if ![1, 5, 7, 8, 32773, 32946].contains(&compression) {
@@ -181,7 +181,7 @@ pub fn mrc2tif() {
                     let Some(value) = args.get(iarg) else {
                         usage(progname);
                         let _ = ImodFile::Stdout.flush();
-                        std::process::exit(1);
+                        crate::imod::libcfshr::b3dutil::exit(1);
                     };
                     // `mrc2tif.cpp:167`: `sscanf(argv[++iarg], "%f%*c%f", ...)`.
                     sscanf(
@@ -196,7 +196,7 @@ pub fn mrc2tif() {
                     let Some(value) = args.get(iarg) else {
                         usage(progname);
                         let _ = ImodFile::Stdout.flush();
-                        std::process::exit(1);
+                        crate::imod::libcfshr::b3dutil::exit(1);
                     };
                     sscanf(
                         value,
@@ -210,7 +210,7 @@ pub fn mrc2tif() {
                     let Some(value) = args.get(iarg) else {
                         usage(progname);
                         let _ = ImodFile::Stdout.flush();
-                        std::process::exit(1);
+                        crate::imod::libcfshr::b3dutil::exit(1);
                     };
                     // `mrc2tif.cpp:177`: the source scans into `scale` and
                     // `offset`, which are otherwise the contrast-scaling
@@ -235,7 +235,7 @@ pub fn mrc2tif() {
                     let Some(value) = args.get(iarg) else {
                         usage(progname);
                         let _ = ImodFile::Stdout.flush();
-                        std::process::exit(1);
+                        crate::imod::libcfshr::b3dutil::exit(1);
                     };
                     sscanf(
                         value,
@@ -256,7 +256,7 @@ pub fn mrc2tif() {
                     let Some(value) = args.get(iarg) else {
                         usage(progname);
                         let _ = ImodFile::Stdout.flush();
-                        std::process::exit(1);
+                        crate::imod::libcfshr::b3dutil::exit(1);
                     };
                     sscanf(
                         value,
@@ -348,7 +348,7 @@ pub fn mrc2tif() {
         if args.len().saturating_sub(iarg) != 2 {
             usage(progname);
             let _ = ImodFile::Stdout.flush();
-            std::process::exit(1);
+            crate::imod::libcfshr::b3dutil::exit(1);
         }
         if make_qimage {
             // `mrc2tif.cpp:270-271`: convert the quality for QImage use by
@@ -455,7 +455,7 @@ pub fn mrc2tif() {
         let iifile = ii_new();
         if iifile.is_null() {
             let _ = ImodFile::Stdout.flush();
-            std::process::exit(1);
+            crate::imod::libcfshr::b3dutil::exit(1);
         }
         (*iifile).format = format;
         (*iifile).file = IIFILE_TIFF;
@@ -594,7 +594,7 @@ pub fn mrc2tif() {
                 && (*iifile).backend_handle.is_null()
             {
                 let _ = ImodFile::Stdout.flush();
-                std::process::exit(1);
+                crate::imod::libcfshr::b3dutil::exit(1);
             }
         }
         let digits = if output_count >= 10000 {
@@ -1053,7 +1053,7 @@ pub fn mrc2tif() {
         }
         ii_delete(iifile);
         let _ = out.flush();
-        std::process::exit(0);
+        crate::imod::libcfshr::b3dutil::exit(0);
     }
 }
 

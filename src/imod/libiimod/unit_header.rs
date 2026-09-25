@@ -84,8 +84,13 @@ pub fn iiu_create_header(
     unsafe {
         iiu_alt_size(iunit, nxyz, &nxyzst);
         iiu_alt_sample(iunit, mxyz);
+        // `unit_header.c:256-258` assigns `xlen` twice and never `ylen`: the
+        // second line is `hdr->xlen = mxyz[1]`, so `xlen` ends up as the Y sample
+        // count and `ylen` keeps whatever the header already held (upstream
+        // defect, reproduced; `BUGS.md`).  Callers that follow with `iiuAltCell`
+        // never see it; `findsection`'s `.colmed` output does.
         (*hdr).xlen = mxyz[0] as f32;
-        (*hdr).ylen = mxyz[1] as f32;
+        (*hdr).xlen = mxyz[1] as f32;
         (*hdr).zlen = mxyz[2] as f32;
     }
     iiu_alt_labels(iunit, labels, num_labels);
@@ -654,7 +659,7 @@ pub fn iiu_alt_extended_data(i: i32, data: &[u8]) -> i32 {
                 &[CArg::Int(i.into())],
             ));
             if do_exit != 0 {
-                std::process::exit(1);
+                crate::imod::libcfshr::b3dutil::exit(1);
             }
             return -2;
         }
@@ -665,7 +670,7 @@ pub fn iiu_alt_extended_data(i: i32, data: &[u8]) -> i32 {
                 &[CArg::Int(data.len() as i64), CArg::Int(i.into())],
             ));
             if do_exit != 0 {
-                std::process::exit(1);
+                crate::imod::libcfshr::b3dutil::exit(1);
             }
             2
         } else {

@@ -37,7 +37,7 @@ pub fn odfft(array: &mut [f32], nx: i32, ny: i32, idir: i32) {
             "ERROR: odfft - nx= %d must be even with IMOD FFT routines\n",
             &[CArg::Int(nx as i64)],
         ));
-        std::process::exit(1);
+        crate::imod::libcfshr::b3dutil::exit(1);
     }
     let scale = (1.0 / nx as f64).sqrt() as f32;
     let mut dim = [0_i32; 6];
@@ -105,7 +105,7 @@ pub fn odfft(array: &mut [f32], nx: i32, ny: i32, idir: i32) {
                 "ERROR: odfft - idir = %d is an illegal option\n",
                 &[CArg::Int(idir as i64)],
             ));
-            std::process::exit(1);
+            crate::imod::libcfshr::b3dutil::exit(1);
         }
     }
 }

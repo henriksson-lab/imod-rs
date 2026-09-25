@@ -76,6 +76,10 @@ pub fn clip_bandpass_filter(
     }
     mrc_head_label(output, b"clip: fourier filter");
     show_status("Doing bandpass filter...\n");
+    // `filter.cpp:77-92` reads a new slice per section and `clipWriteSlice`
+    // frees it; the section's slice is kept instead and its storage handed
+    // to the next read (`slice_read_subm`'s `reuse`).
+    let mut spare: Option<crate::imod::libcfshr::islice::Islice> = None;
     for k in 0..options.nofsecs {
         let Some(mut slice) = slice_read_subm(
             input,
@@ -85,6 +89,7 @@ pub fn clip_bandpass_filter(
             options.iy,
             options.cx as i32,
             options.cy as i32,
+            spare.take(),
         ) else {
             return -1;
         };
@@ -99,6 +104,7 @@ pub fn clip_bandpass_filter(
         if clip_write_slice(slice.as_mut(), output, options, k, &mut z, 1).is_err() {
             return -1;
         }
+        spare = Some(slice);
     }
     crate::imod::clip::file_io::set_mrc_coords(input, output, options)
 }

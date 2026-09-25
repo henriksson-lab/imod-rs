@@ -104,6 +104,57 @@ pub fn array_min_max_mean(
     *dmean = (sum_dbl / ((ix1 + 1 - ix0) as f64 * (iy1 + 1 - iy0) as f64)) as f32;
 }
 
+/// C `imageSubareaMean` (`simplestat.c:208`).
+///
+/// The C's `void *array` with a mode is the typed `MrcData` union, read
+/// through the member the C casts to; a mode other than byte, short, unsigned
+/// short or float returns 0 as soon as a row is visited, and with no rows
+/// visited the quotient is formed from the zero sum as in the C.
+pub fn image_subarea_mean(
+    array: &crate::imod::libcfshr::islice::MrcData,
+    type_: i32,
+    nx_dim: i32,
+    ix0: i32,
+    ix1: i32,
+    iy0: i32,
+    iy1: i32,
+) -> f32 {
+    use crate::imod::libiimod::mrcfiles::{
+        MRC_MODE_BYTE, MRC_MODE_FLOAT, MRC_MODE_SHORT, MRC_MODE_USHORT,
+    };
+    let mut sum_dbl: f64 = 0.;
+    for iy in iy0..=iy1 {
+        let mut sum_tmp: f32 = 0.;
+        let base = iy as usize * nx_dim as usize + ix0 as usize;
+        let count = (ix1 + 1 - ix0).max(0) as usize;
+        match type_ {
+            MRC_MODE_BYTE => {
+                for &v in &array.b()[base..base + count] {
+                    sum_tmp += v as f32;
+                }
+            }
+            MRC_MODE_SHORT => {
+                for &v in &array.s()[base..base + count] {
+                    sum_tmp += v as f32;
+                }
+            }
+            MRC_MODE_USHORT => {
+                for &v in &array.us()[base..base + count] {
+                    sum_tmp += v as f32;
+                }
+            }
+            MRC_MODE_FLOAT => {
+                for &v in &array.f()[base..base + count] {
+                    sum_tmp += v;
+                }
+            }
+            _ => return 0.,
+        }
+        sum_dbl += sum_tmp as f64;
+    }
+    (sum_dbl / ((ix1 + 1 - ix0) as f64 * (iy1 + 1 - iy0) as f64)) as f32
+}
+
 /// C Fortran wrapper `iclden`.
 pub fn array_min_max_mean_fortran(
     array: &[f32],

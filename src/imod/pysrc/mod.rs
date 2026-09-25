@@ -9,3 +9,4 @@ pub mod prochunks;
 pub mod pysed;
 pub mod subm;
 pub mod submfg;
+pub mod trimvol;

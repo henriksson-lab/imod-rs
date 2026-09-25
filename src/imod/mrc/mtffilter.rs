@@ -4,7 +4,7 @@
 //! `fftFilter3D`, `fftFilter1D`, `amplifier`, `adjustedFakeIter`,
 //! `deconvFilter` and `convertFreqUnit`.
 
-use std::io::{BufReader, Write as _};
+use std::io::Write as _;
 
 use crate::imod::libcfshr::autodoc::{
     adoc_get_image_meta_info, adoc_open_image_metadata, adoc_set_current,
@@ -79,7 +79,7 @@ pub fn mtffilter(arguments: &[String]) -> i32 {
     let mut prior_doses: Vec<f32> = Vec::new();
     let mut iz_piece: Vec<i32>;
     let mut list_fake_sirt_iter: Vec<i32> = Vec::new();
-    let mut line = [0u8; MRC_LABEL_SIZE];
+    let mut line = [0u8; MAX_LINE as usize];
     let num_pt_stock: [i32; LIMSTOCKCURVES as usize] = [36];
     let stock: [f32; 2 * LIMSTOCKPOINTS] = [
         0.0085, 0.98585, 0.0221, 0.94238, 0.0357, 0.89398, 0.0493, 0.83569, 0.0629, 0.76320,
@@ -492,18 +492,19 @@ pub fn mtffilter(arguments: &[String]) -> i32 {
         // or read from file if one provided
         //
         let name = String::from_utf8_lossy(&mtf_file).into_owned();
-        let Ok(file) = std::fs::File::open(&name) else {
+        let Some(mut fp) = ImodFile::open(&name, "r") else {
             exit_error(&c_format_bytes(
                 "Opening file with MTF curve, %s",
                 &[CArg::Bytes(&mtf_file)],
             ));
         };
-        let mut reader = BufReader::new(file);
         num_mtf = 0;
         ierr = read_lines_for_values(
-            &mut reader,
+            &mut fp,
             &mut num_mtf,
-            LIMMTF as usize,
+            LIMMTF,
+            &mut line,
+            MAX_LINE,
             RLFV_SEPARATE_LINES,
             "ff",
             &mut [
@@ -512,9 +513,7 @@ pub fn mtffilter(arguments: &[String]) -> i32 {
             ],
         );
         if ierr != 0 {
-            if let Err(message) = exit_from_value_read_error(ierr, "MTF values") {
-                exit_error(message.as_bytes());
-            }
+            exit_from_value_read_error(ierr, "MTF values");
         }
     }
     //
@@ -793,42 +792,42 @@ pub fn mtffilter(arguments: &[String]) -> i32 {
                 // Read in plain numeric dose file of 3 types
                 if idose_file_type < 4 {
                     let name = String::from_utf8_lossy(&dose_file).into_owned();
-                    let Ok(file) = std::fs::File::open(&name) else {
+                    let Some(mut fp) = ImodFile::open(&name, "r") else {
                         exit_error(&c_format_bytes(
                             "Opening dose file %s",
                             &[CArg::Bytes(&dose_file)],
                         ));
                     };
-                    let mut reader = BufReader::new(file);
 
                     ind = nz;
                     if idose_file_type < 2 {
                         ierr = read_lines_for_values(
-                            &mut reader,
+                            &mut fp,
                             &mut ind,
-                            nz as usize,
+                            nz,
+                            &mut line,
+                            MAX_LINE,
                             RLFV_SEPARATE_LINES,
                             "f",
                             &mut [ReadValueArray::Floats(&mut sec_doses)],
                         );
                     } else {
-                        let mut pair = [
-                            ReadValueArray::Floats(&mut prior_doses),
-                            ReadValueArray::Floats(&mut sec_doses),
-                        ];
                         ierr = read_lines_for_values(
-                            &mut reader,
+                            &mut fp,
                             &mut ind,
-                            nz as usize,
+                            nz,
+                            &mut line,
+                            MAX_LINE,
                             RLFV_SEPARATE_LINES,
                             "ff",
-                            &mut pair,
+                            &mut [
+                                ReadValueArray::Floats(&mut prior_doses),
+                                ReadValueArray::Floats(&mut sec_doses),
+                            ],
                         );
                     }
                     if ierr != 0 {
-                        if let Err(message) = exit_from_value_read_error(ierr, "dose file") {
-                            exit_error(message.as_bytes());
-                        }
+                        exit_from_value_read_error(ierr, "dose file");
                     }
                     if idose_file_type == 3 {
                         for iz in 0..nz {
@@ -1392,9 +1391,14 @@ pub fn mtffilter(arguments: &[String]) -> i32 {
             }
         }
         dmean = dmean_sum / num_zdo as f32;
-        mrc_fill_label_string(title_str.as_bytes(), &mut line);
-        let label_end = line.iter().position(|&b| b == 0).unwrap_or(MRC_LABEL_SIZE);
-        let label = String::from_utf8_lossy(&line[..label_end]).into_owned();
+        let label_line: &mut [u8; MRC_LABEL_SIZE] =
+            (&mut line[..MRC_LABEL_SIZE]).try_into().unwrap();
+        mrc_fill_label_string(title_str.as_bytes(), label_line);
+        let label_end = label_line
+            .iter()
+            .position(|&b| b == 0)
+            .unwrap_or(MRC_LABEL_SIZE);
+        let label = String::from_utf8_lossy(&label_line[..label_end]).into_owned();
         if im_unit_out == 1 && num_zdo < nz {
             //
             // if writing a subset back to same file, use the extreme of existing

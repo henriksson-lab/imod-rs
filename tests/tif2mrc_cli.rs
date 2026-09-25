@@ -1075,9 +1075,16 @@ fn tif2mrc_rust_reader_preserves_palette_indices_like_libtiff() {
             String::from_utf8_lossy(&result.stderr)
         );
     }
+    // The two runs stamp their MRC labels (bytes 224..1024) with the wall
+    // clock, and can straddle a second boundary (`CLAUDE.md`, "Timestamps"), so
+    // compare everything except the label text.
+    let mask = |mut bytes: Vec<u8>| {
+        bytes[224..1024].fill(0);
+        bytes
+    };
     assert_eq!(
-        std::fs::read(&rust_output).unwrap(),
-        std::fs::read(&parity_output).unwrap(),
+        mask(std::fs::read(&rust_output).unwrap()),
+        mask(std::fs::read(&parity_output).unwrap()),
         "the Rust reader must preserve the library reader's palette-index output"
     );
     std::fs::remove_file(tiff).unwrap();

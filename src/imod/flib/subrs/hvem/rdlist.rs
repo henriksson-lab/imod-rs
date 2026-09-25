@@ -19,7 +19,15 @@ pub fn rdlist2<R: BufRead>(
     lim_list: &mut i32,
 ) -> Result<(), i32> {
     let mut line = String::new();
-    iunit.read_line(&mut line).map_err(|_| 4)?;
+    // `read(iunit, '(a)') line` has no `END=`: at end of input the gfortran
+    // runtime reports the failure and stops with status 2 (native `xfmodel`
+    // answering its section-list prompt from an exhausted stdin).
+    if iunit.read_line(&mut line).map_err(|_| 4)? == 0 {
+        use std::io::Write;
+        let _ = std::io::stdout().flush();
+        eprintln!("Fortran runtime error: End of file");
+        crate::imod::libcfshr::b3dutil::exit(2);
+    }
     parselist2(
         line.trim_end_matches(['\r', '\n']),
         list,
@@ -70,7 +78,7 @@ pub fn parselist2(
         Err(ParseListError::InvalidCharacter) => {
             println!("\nERROR: PARSELIST - BAD CHARACTER IN ENTRY");
             if *lim_list > 0 {
-                std::process::exit(1);
+                crate::imod::libcfshr::b3dutil::exit(1);
             }
             return Err(2);
         }
@@ -95,7 +103,7 @@ pub fn parselist2(
     if *lim_list > 0 {
         use std::io::Write;
         let _ = std::io::stdout().flush();
-        std::process::exit(1);
+        crate::imod::libcfshr::b3dutil::exit(1);
     }
     *lim_list = 1;
     Err(-1)

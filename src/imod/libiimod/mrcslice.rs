@@ -84,6 +84,12 @@ pub fn slice_read_mrc(hin: &mut MrcHeader, sno: i32, axis: u8) -> Option<Islice>
 ///
 /// This preserves the source's direct-section path for contained Y/Z areas and
 /// its full-plane/read-then-box path for X sections and out-of-bounds areas.
+///
+/// `reuse` is a slice the caller is done with (the previous section's, in a
+/// per-section loop).  On the direct-section path its storage takes the place
+/// of `sliceCreate`'s (`slice_recreate`), which is sound because
+/// `mrc_read_section` writes every pixel of the area or fails; the other path
+/// drops it.
 pub fn slice_read_subm(
     hin: &mut MrcHeader,
     sec_num: i32,
@@ -92,6 +98,7 @@ pub fn slice_read_subm(
     ysize: i32,
     xcen: i32,
     ycen: i32,
+    reuse: Option<Islice>,
 ) -> Option<Islice> {
     let (nx, ny) = match axis as u8 {
         b'x' | b'X' => (hin.ny, hin.nz),
@@ -122,7 +129,8 @@ pub fn slice_read_subm(
             li.ymin = lly;
             li.ymax = ury - 1;
         }
-        let mut slice = slice_create(urx - llx, ury - lly, hin.mode)?;
+        let mut slice =
+            crate::imod::libcfshr::islice::slice_recreate(reuse, urx - llx, ury - lly, hin.mode)?;
         slice.mean = hin.amean;
         if crate::imod::libiimod::mrcsec::mrc_read_section(
             hin,
@@ -135,6 +143,7 @@ pub fn slice_read_subm(
         }
         return None;
     }
+    drop(reuse);
     let Some(buffer) =
         crate::imod::libiimod::mrcfiles::mrc_mread_slice(&mut hin.fp.clone()?, hin, sec_num, axis)
     else {
@@ -762,8 +771,47 @@ pub fn slice_write_mrcfile(filename: &str, slice: &mut Islice) -> i32 {
     error
 }
 
-pub fn slice_gradient(sin: &mut Islice) -> Option<Islice> {
-    let mut s = slice_create(sin.xsize, sin.ysize, sin.mode)?;
+/// `mrcWriteImageToFile` from mrcslice.c:931.  As in
+/// `full_array_min_max_mean`, the C's stack `Islice` over the caller's
+/// array becomes a temporary slice the storage is lent to and handed back
+/// from, so nothing is copied.  The C ignores `sliceInit`'s return, so an
+/// unsupported mode is reported by `sliceInit` and the write still goes
+/// ahead, with the size fields `sliceInit` stores before it checks the mode.
+pub fn mrc_write_image_to_file(
+    filename: &str,
+    array: &mut MrcData,
+    mode: i32,
+    nx: i32,
+    ny: i32,
+) -> i32 {
+    let mut slice = Islice {
+        data: MrcData::default(),
+        xsize: 0,
+        ysize: 0,
+        mode: 0,
+        csize: 0,
+        dsize: 0,
+        min: 0.,
+        max: 0.,
+        mean: 0.,
+        index: 0,
+        cval: [0.; 4],
+    };
+    let _ = slice_init(&mut slice, nx, ny, mode, std::mem::take(array));
+    let error = slice_write_mrcfile(filename, &mut slice);
+    *array = std::mem::take(&mut slice.data);
+    error
+}
+
+/// C `sliceGradient` (`mrcslice.c:1111`).  `reuse` is a slice the caller no
+/// longer needs, offered as the storage for the output (`slice_recreate`).
+/// The source's `sliceCreate` is an uninitialised `malloc`, and no stale
+/// value can reach the result: the X pass writes columns `0..xsize-1`, the Y
+/// pass reads column `xsize-1` before anything wrote it (the C reads garbage
+/// there too) but the last-column pass then overwrites that whole column.
+pub fn slice_gradient(sin: &mut Islice, reuse: Option<Islice>) -> Option<Islice> {
+    let mut s =
+        crate::imod::libcfshr::islice::slice_recreate(reuse, sin.xsize, sin.ysize, sin.mode)?;
     for j in 0..sin.ysize {
         for i in 0..sin.xsize - 1 {
             let (mut v, mut n) = ([0.; 4], [0.; 4]);

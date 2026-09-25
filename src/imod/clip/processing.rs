@@ -271,6 +271,7 @@ pub fn clip_scaling(hin: &mut MrcHeader, hout: &mut MrcHeader, opt: &mut ClipOpt
                 opt.iy,
                 opt.cx as i32,
                 opt.cy as i32,
+                None,
             ) else {
                 crate::imod::clip::clip::show_error("clip: Error reading slice.");
                 return -1;
@@ -587,6 +588,16 @@ pub fn clip_edge(hin: &mut MrcHeader, hout: &mut MrcHeader, opt: &mut ClipOption
         )
         .as_bytes(),
     );
+    // `processing.cpp:416-458` reads a slice and, for the gradient, creates
+    // an output and frees the input, every section.  As in `clip_convolve`,
+    // freed slices are kept in `spares` and offered back by mode
+    // (`slice_recreate`) to the next read and the next gradient output; both
+    // overwrite every pixel before reading it.  At most two are kept.
+    let mut spares: Vec<Islice> = Vec::new();
+    let take_spare = |spares: &mut Vec<Islice>, mode: i32| {
+        let index = spares.iter().position(|spare| spare.mode == mode)?;
+        Some(spares.swap_remove(index))
+    };
     for k in 0..opt.nofsecs {
         let Some(mut source) = crate::imod::libiimod::mrcslice::slice_read_subm(
             hin,
@@ -596,14 +607,19 @@ pub fn clip_edge(hin: &mut MrcHeader, hout: &mut MrcHeader, opt: &mut ClipOption
             opt.iy,
             opt.cx as i32,
             opt.cy as i32,
+            take_spare(&mut spares, hin.mode),
         ) else {
             crate::imod::clip::clip::show_error("clip: Error reading slice.");
             return -1;
         };
         let mut out = if opt.process == crate::imod::clip::clip::ClipOperation::Gradient {
-            let Some(result) = crate::imod::libiimod::mrcslice::slice_gradient(&mut source) else {
+            let reuse = take_spare(&mut spares, source.mode);
+            let Some(result) = crate::imod::libiimod::mrcslice::slice_gradient(&mut source, reuse)
+            else {
                 return -1;
             };
+            // `sliceFree(s)` — kept for reuse.
+            spares.push(source);
             result
         } else {
             if source.mode != 0 {
@@ -634,6 +650,14 @@ pub fn clip_edge(hin: &mut MrcHeader, hout: &mut MrcHeader, opt: &mut ClipOption
         {
             return -1;
         };
+        // A slice `clipWriteSlice` converted to another mode can serve
+        // neither the read nor the gradient; it is freed here, as in the C.
+        if out.mode == hin.mode {
+            spares.push(out);
+        }
+        while spares.len() > 2 {
+            spares.remove(0);
+        }
     }
     crate::imod::clip::file_io::set_mrc_coords(hin, hout, opt)
 }
@@ -751,6 +775,18 @@ pub fn clip_convolve(hin: &mut MrcHeader, hout: &mut MrcHeader, opt: &mut ClipOp
     if smooth_3d {
         return clip_median(hin, hout, opt, blur, dim, z);
     }
+    // `processing.cpp:548-570` creates a slice for the read and one per
+    // filter iteration and frees each when done; here the freed slices are
+    // kept in `spares` and offered back by mode (`slice_recreate`) to the
+    // next read (input mode) and the next filter output (float), so a
+    // running loop allocates nothing when the input is float.  Each reused
+    // slice is wholly overwritten before it is read.  At most two are kept
+    // between sections, the next read's and the next filter output's.
+    let mut spares: Vec<Islice> = Vec::new();
+    let take_spare = |spares: &mut Vec<Islice>, mode: i32| {
+        let index = spares.iter().position(|spare| spare.mode == mode)?;
+        Some(spares.swap_remove(index))
+    };
     for k in 0..opt.nofsecs {
         let Some(mut s) = crate::imod::libiimod::mrcslice::slice_read_subm(
             hin,
@@ -760,6 +796,7 @@ pub fn clip_convolve(hin: &mut MrcHeader, hout: &mut MrcHeader, opt: &mut ClipOp
             opt.iy,
             opt.cx as i32,
             opt.cy as i32,
+            take_spare(&mut spares, hin.mode),
         ) else {
             crate::imod::clip::clip::show_error("clip: Error reading slice.");
             return -1;
@@ -769,18 +806,33 @@ pub fn clip_convolve(hin: &mut MrcHeader, hout: &mut MrcHeader, opt: &mut ClipOp
             if opt.process == crate::imod::clip::clip::ClipOperation::Smooth {
                 crate::imod::libiimod::mrcslice::slice_mmm(s.as_mut());
             }
-            let Some(slice) =
-                crate::imod::libcfshr::islice::slice_mat_filter(s.as_mut(), blur, dim)
-            else {
+            let Some(slice) = crate::imod::libcfshr::islice::slice_mat_filter(
+                s.as_mut(),
+                blur,
+                dim,
+                take_spare(&mut spares, crate::imod::libiimod::mrcfiles::MRC_MODE_FLOAT),
+            ) else {
                 crate::imod::clip::clip::show_error("clip: Error getting new slice for filtering.");
                 return -1;
             };
-            s = slice;
+            // `sliceFree(s); s = slice;` — the freed slice is kept for reuse.
+            spares.push(std::mem::replace(&mut s, slice));
+        }
+        // When `clipWriteSlice` converts back to a non-float mode, that
+        // conversion (`sliceNewMode`) allocates the new-mode slice itself;
+        // spares that are not float are freed before it so they do not add
+        // to the peak.  The converted slice is then the next read's spare.
+        if s.mode != opt.mode {
+            spares.retain(|spare| spare.mode == crate::imod::libiimod::mrcfiles::MRC_MODE_FLOAT);
         }
         if crate::imod::clip::file_io::clip_write_slice(s.as_mut(), hout, opt, k, &mut z, 1)
             .is_err()
         {
             return -1;
+        }
+        spares.push(s);
+        if spares.len() > 2 {
+            spares.remove(0);
         }
     }
     crate::imod::clip::file_io::set_mrc_coords(hin, hout, opt)
@@ -901,15 +953,19 @@ pub fn clip_median(
                     opt.iy,
                     opt.cx as i32,
                     opt.cy as i32,
+                    None,
                 ) else {
                     return -1;
                 };
                 let s = if kernel.is_empty() {
                     s
                 } else {
-                    let Some(f) =
-                        crate::imod::libcfshr::islice::slice_mat_filter(s.as_mut(), &kernel, size)
-                    else {
+                    let Some(f) = crate::imod::libcfshr::islice::slice_mat_filter(
+                        s.as_mut(),
+                        &kernel,
+                        size,
+                        None,
+                    ) else {
                         crate::imod::clip::clip::show_error("clip: Error getting filtered slice.");
                         return -1;
                     };
@@ -1053,6 +1109,7 @@ pub fn clip_diffusion(hin: &mut MrcHeader, hout: &mut MrcHeader, opt: &mut ClipO
             opt.iy,
             opt.cx as i32,
             opt.cy as i32,
+            None,
         ) else {
             crate::imod::clip::clip::show_error("clip: Error reading slice.");
             return -1;
@@ -2033,6 +2090,7 @@ pub fn fill_drift_corrected_edges(
             opt.iy,
             opt.cx as i32,
             opt.cy as i32,
+            None,
         ) else {
             crate::imod::clip::clip::show_error("clip: Error reading slice.");
             return -1;
@@ -2159,6 +2217,17 @@ pub fn clip_spectrum(hin: &mut MrcHeader, hout: &mut MrcHeader, opt: &mut ClipOp
         )
         .as_bytes(),
     );
+    // `processing.cpp:1611-1636` reads a slice and creates the output slice
+    // every section (the read one is never freed; `clipWriteSlice` frees the
+    // output).  Here both are handed back to the next section as storage
+    // (`slice_recreate`), and the float copy of the input reuses its vector:
+    // the read fills every input pixel, and `spectrumScaled` writes every
+    // output pixel on each path it takes for clip's filter type 3 (the byte
+    // scaling loop over `finalSize * finalSize`, `zoomWithFilter` into the
+    // output when reducing, and the mirrored fill of every column otherwise).
+    let mut spare_read: Option<Islice> = None;
+    let mut spare_out: Option<Islice> = None;
+    let mut input: Vec<f32> = Vec::new();
     for k in 0..opt.nofsecs {
         let Some(mut s) = crate::imod::libiimod::mrcslice::slice_read_subm(
             hin,
@@ -2168,6 +2237,7 @@ pub fn clip_spectrum(hin: &mut MrcHeader, hout: &mut MrcHeader, opt: &mut ClipOp
             opt.iy,
             opt.cx as i32,
             opt.cy as i32,
+            spare_read.take(),
         ) else {
             let message = c_format(
                 "clip: Error reading slice %d.",
@@ -2176,30 +2246,45 @@ pub fn clip_spectrum(hin: &mut MrcHeader, hout: &mut MrcHeader, opt: &mut ClipOp
             crate::imod::clip::clip::show_error(&message);
             return -1;
         };
-        let Some(mut out) = crate::imod::libcfshr::islice::slice_create(opt.ox, opt.oy, mode)
+        let Some(mut out) =
+            crate::imod::libcfshr::islice::slice_recreate(spare_out.take(), opt.ox, opt.oy, mode)
         else {
             crate::imod::clip::clip::show_error("clip: Error getting memory for spectrum slice.");
             return -1;
         };
-        let mut input = Vec::with_capacity((s.xsize * s.ysize) as usize);
-        for y in 0..s.ysize {
-            for x in 0..s.xsize {
-                let mut value = [0.; 4];
-                crate::imod::libcfshr::islice::slice_get_val(&s, x, y, &mut value);
-                input.push(if s.mode == 16 {
-                    value[0] + value[1] + value[2]
-                } else {
-                    value[0]
-                });
+        // `processing.cpp:1625` passes `s->data.b` with `s->mode` straight
+        // through, and `sliceTaperInPad` (`taperpad.c:236-266`) converts each
+        // mode to float itself.  Only a mode that switch has no case for
+        // (complex) still goes through the per-pixel float conversion.
+        use crate::imod::libcfshr::spectrumscaled::SpectrumInput;
+        use crate::imod::libiimod::mrcslice::{
+            SLICE_MODE_BYTE, SLICE_MODE_FLOAT, SLICE_MODE_RGB, SLICE_MODE_SHORT, SLICE_MODE_USHORT,
+        };
+        input.clear();
+        let image = match s.mode {
+            SLICE_MODE_BYTE => SpectrumInput::Byte(s.data.b()),
+            SLICE_MODE_SHORT => SpectrumInput::Short(s.data.s()),
+            SLICE_MODE_USHORT => SpectrumInput::UShort(s.data.us()),
+            SLICE_MODE_FLOAT => SpectrumInput::Float(s.data.f()),
+            SLICE_MODE_RGB => SpectrumInput::Rgb(s.data.b()),
+            _ => {
+                for y in 0..s.ysize {
+                    for x in 0..s.xsize {
+                        let mut value = [0.; 4];
+                        crate::imod::libcfshr::islice::slice_get_val(&s, x, y, &mut value);
+                        input.push(value[0]);
+                    }
+                }
+                SpectrumInput::Float(&input)
             }
-        }
+        };
         // `processing.cpp:1625` hands `spectrumScaled` the output slice's own
         // storage (`slice->data.b`); it fills the buffer in place and nothing
         // is copied afterwards.  `mode` here is byte when `bkgd > 0` and short
         // otherwise, which is exactly the member each arm writes.
         let err = if bkgd > 0 {
             crate::imod::libcfshr::spectrumscaled::spectrum_scaled(
-                crate::imod::libcfshr::spectrumscaled::SpectrumInput::Float(&input),
+                image,
                 s.xsize,
                 s.ysize,
                 crate::imod::libcfshr::spectrumscaled::SpectrumOutput::Byte(out.data.b_mut()),
@@ -2212,7 +2297,7 @@ pub fn clip_spectrum(hin: &mut MrcHeader, hout: &mut MrcHeader, opt: &mut ClipOp
             )
         } else {
             crate::imod::libcfshr::spectrumscaled::spectrum_scaled(
-                crate::imod::libcfshr::spectrumscaled::SpectrumInput::Float(&input),
+                image,
                 s.xsize,
                 s.ysize,
                 crate::imod::libcfshr::spectrumscaled::SpectrumOutput::Short(out.data.s_mut()),
@@ -2237,6 +2322,8 @@ pub fn clip_spectrum(hin: &mut MrcHeader, hout: &mut MrcHeader, opt: &mut ClipOp
         {
             return -1;
         }
+        spare_read = Some(s);
+        spare_out = Some(out);
     }
     if pad > opt.ox {
         let (mut x, mut y, mut z) = crate::imod::libiimod::mrcfiles::mrc_get_scale(&*hin);
@@ -2364,6 +2451,7 @@ pub fn clip2d_color(hin: &mut MrcHeader, hout: &mut MrcHeader, opt: &mut ClipOpt
             opt.iy,
             opt.cx as i32,
             opt.cy as i32,
+            None,
         ) else {
             crate::imod::clip::clip::show_error("clip: Error reading slice.");
             return -1;
@@ -2815,6 +2903,13 @@ pub fn clip_average(
     }
     // h1/h2 are the dispatcher-opened first two files; subsequent input files follow
     // the exact C loop by being opened from fnames for each section.
+    // `processing.cpp:2112-2152` creates the output slice every section (and
+    // never frees it) and reads and frees one slice per input file.  Here
+    // each is handed on as the next one's storage (`slice_recreate`): the
+    // output is zeroed pixel by pixel before it is read, and the read writes
+    // every pixel of the area.
+    let mut spare_out: Option<Islice> = None;
+    let mut spare_in: Option<Islice> = None;
     for k in 0..opt.nofsecs {
         let _ = ImodFile::Stdout.write_all(
             c_format(
@@ -2832,8 +2927,12 @@ pub fn clip_average(
             .as_bytes(),
         );
         let _ = ImodFile::Stdout.flush();
-        let Some(mut out) = crate::imod::libcfshr::islice::slice_create(opt.ix, opt.iy, slice_mode)
-        else {
+        let Some(mut out) = crate::imod::libcfshr::islice::slice_recreate(
+            spare_out.take(),
+            opt.ix,
+            opt.iy,
+            slice_mode,
+        ) else {
             return -1;
         };
         let mut factor = 1.0_f32;
@@ -2856,6 +2955,7 @@ pub fn clip_average(
                 opt.iy,
                 opt.cx as i32,
                 opt.cy as i32,
+                spare_in.take(),
             ) else {
                 return -1;
             };
@@ -2881,6 +2981,8 @@ pub fn clip_average(
                     }
                 }
             }
+            // `sliceFree(s)` — kept for the next read.
+            spare_in = Some(s);
             if opt.process == crate::imod::clip::clip::ClipOperation::Subtract {
                 factor = -1.;
             }
@@ -2914,10 +3016,20 @@ pub fn clip_average(
                 }
             }
         }
+        // When `clipWriteSlice` converts the output, no slice is kept: the
+        // spare read slice is freed first so the conversion does not add to
+        // the peak, and the converted slice is freed as in the C.  (Keeping
+        // the converted slice for the next read measured worse on byte input.)
+        if out.mode != opt.mode {
+            spare_in = None;
+        }
         if crate::imod::clip::file_io::clip_write_slice(out.as_mut(), hout, opt, k, &mut z, 1)
             .is_err()
         {
             return -1;
+        }
+        if out.mode == slice_mode {
+            spare_out = Some(out);
         }
     }
     let _ = ImodFile::Stdout.write_all(b"\n");
@@ -2997,6 +3109,7 @@ pub fn clip2d_average(hin: &mut MrcHeader, hout: &mut MrcHeader, opt: &mut ClipO
             opt.iy,
             opt.cx as i32,
             opt.cy as i32,
+            None,
         ) else {
             crate::imod::clip::clip::show_error("clip: Error reading slice.");
             return -1;
@@ -3181,6 +3294,11 @@ pub fn clip_multdiv(
     let mut s: Option<Islice> = None;
     let mut div_by_zero = 0;
     let mut first_defect_setup = true;
+    // `processing.cpp:2393-2480` reads (and frees) both slices every section;
+    // each freed one is handed to the next read of its file as storage
+    // (`slice_recreate`), which the read overwrites completely.
+    let mut spare_out: Option<Islice> = None;
+    let mut spare_s: Option<Islice> = None;
     for k in 0..opt.nofsecs {
         let _ = ImodFile::Stdout.write_all(
             c_format(
@@ -3202,6 +3320,7 @@ pub fn clip_multdiv(
             opt.iy,
             opt.cx as i32,
             opt.cy as i32,
+            spare_out.take(),
         ) else {
             crate::imod::clip::clip::show_error("clip: Error reading slice.");
             return -1;
@@ -3225,6 +3344,7 @@ pub fn clip_multdiv(
                 opt.iy,
                 opt.cx as i32,
                 opt.cy as i32,
+                spare_s.take(),
             );
             if s.is_none() {
                 crate::imod::clip::clip::show_error("clip: Error reading slice.");
@@ -3302,8 +3422,18 @@ pub fn clip_multdiv(
         {
             return -1;
         }
+        // Each is kept only while still in its file's mode; a converted
+        // slice is freed here, as in the C.
+        if out.mode == h1.mode {
+            spare_out = Some(out);
+        }
         if read_once == 0 || k == opt.nofsecs - 1 {
-            s = None;
+            // `sliceFree(s)` — kept for the next read, unless the next
+            // section converts its first slice: holding this one through
+            // that conversion would only raise the peak.
+            spare_s = s
+                .take()
+                .filter(|s| s.mode == h2.mode && h1.mode == hout.mode);
         }
     }
     let _ = ImodFile::Stdout.write_all(b"\n");
@@ -3419,6 +3549,7 @@ pub fn clip_planar_fit(hin: &mut MrcHeader, hout: &mut MrcHeader, opt: &mut Clip
                 opt.iy,
                 opt.cx as i32,
                 opt.cy as i32,
+                None,
             ) else {
                 crate::imod::libcfshr::parse_params::exit_error(
                     c_format(
@@ -4140,6 +4271,7 @@ pub fn clip_unpack(
             opt.iy,
             opt.cx as i32,
             opt.cy as i32,
+            None,
         ) else {
             crate::imod::clip::clip::show_error("clip: Error reading slice.");
             return -1;
@@ -4985,6 +5117,7 @@ pub fn clip_stat(hin: &mut MrcHeader, opt: &mut ClipOptions) -> Result<(), i32> 
             opt.iy,
             opt.cx as i32,
             opt.cy as i32,
+            None,
         ) else {
             crate::imod::clip::clip::show_error("stat: error reading slice.");
             return Err(-1);
@@ -5452,6 +5585,7 @@ pub fn clip_histogram(hin: &mut MrcHeader, opt: &mut ClipOptions) -> i32 {
             opt.iy,
             opt.cx as i32,
             opt.cy as i32,
+            None,
         ) else {
             crate::imod::clip::clip::show_error(&c_format(
                 "clip histogram - error reading slice %d",
@@ -5976,6 +6110,7 @@ pub fn histogram_peaks_and_dip(hin: &mut MrcHeader, opt: &mut ClipOptions) -> Re
             opt.iy,
             opt.cx as i32,
             opt.cy as i32,
+            None,
         ) else {
             let _ = ImodFile::Stdout.write_all(
                 c_format(

@@ -433,7 +433,7 @@ pub fn imod_auto_contours_from_slice(
         if ksigma > 0. {
             let mut kernel = [0f32; (KERNEL_MAXSIZE * KERNEL_MAXSIZE) as usize];
             scaled_gaussian_kernel(&mut kernel, &mut kerdim, KERNEL_MAXSIZE, ksigma);
-            if let Some(mut sout) = slice_mat_filter(&slice, &kernel, kerdim) {
+            if let Some(mut sout) = slice_mat_filter(&slice, &kernel, kerdim, None) {
                 slice_scale_and_free(&mut sout, &mut slice);
             }
         } else {

@@ -358,16 +358,27 @@ pub fn subarea_cc_coefficient(
 ) -> f64 {
     let n = ((x1 + 1 - x0) * (y1 + 1 - y0)) as f64;
     let (mut asum, mut bsum, mut csum, mut asq, mut bsq) = (0., 0., 0., 0., 0.);
+    // `filtxcorr.c:1595-1612`: each row is summed into its own `atmp` ...
+    // `ctmp` and the row totals are then added to the running sums, so the
+    // double sums associate per row.  The source's `omp parallel for
+    // reduction(+ : ...)` over rows combines per-thread partials in an order
+    // libgomp does not fix; this is its one-thread order.
     for y in y0..=y1 {
+        let (mut atmp, mut btmp, mut atmpsq, mut btmpsq, mut ctmp) = (0., 0., 0., 0., 0.);
         for x in x0..=x1 {
             let av = a[(x + y * d) as usize] as f64;
             let bv = b[(x - dx + (y - dy) * d) as usize] as f64;
-            asum += av;
-            bsum += bv;
-            csum += av * bv;
-            asq += av * av;
-            bsq += bv * bv;
+            atmp += av;
+            atmpsq += av * av;
+            btmp += bv;
+            btmpsq += bv * bv;
+            ctmp += av * bv;
         }
+        asum += atmp;
+        asq += atmpsq;
+        bsum += btmp;
+        bsq += btmpsq;
+        csum += ctmp;
     }
     let den = (n * asq - asum * asum) * (n * bsq - bsum * bsum);
     if den <= 0. {
@@ -552,12 +563,6 @@ pub fn apply_kernel_filter(
                 $v[$i]
             };
         }
-        macro_rules! unchecked_at {
-            ($v:expr, $i:expr) => {
-                // SAFETY: `interior_reads_ok` above bounds every index.
-                unsafe { *$v.get_unchecked($i) }
-            };
-        }
         macro_rules! interior {
             ($kk:expr, $at:ident, $iyo:expr, $brows:expr, $store:ident) => {
                 for ixo in below..nx - above {
@@ -574,15 +579,39 @@ pub fn apply_kernel_filter(
                 }
             };
         }
+        // The unchecked interior, with each tap row's start formed once:
+        // `aix + aiy * d` is `(ixo - below + aiy * d) + ix`, the same index
+        // (integer addition, no overflow: every value is in
+        // `0..=last <= i32::MAX` as argued above).  The sum is the same
+        // products accumulated in the same `iy`/`ix` order.  Instantiated
+        // with the literal for the odd `scaledGaussianKernel` sizes
+        // (`beadtrack` uses limits 7 and 9, `clip` uses 3) so the tap loops
+        // unroll into constant offsets from the row start; without that each
+        // tap re-formed and sign-extended its `i32` index (~1.2x native on
+        // `beadtrack`'s 5x5 Sobel smoothing, where gcc does the same).
+        macro_rules! interior_rows {
+            ($kk:expr, $iyo:expr, $brows:expr) => {
+                for ixo in below..nx - above {
+                    let mut sum = 0.;
+                    for iy in 0..$kk {
+                        let aiy = iy + $iyo - below;
+                        let arow = (ixo - below + aiy * d) as usize;
+                        let mrow = (iy * $kk) as usize;
+                        for ix in 0..$kk as usize {
+                            // SAFETY: `interior_reads_ok` bounds every index.
+                            sum += unsafe {
+                                *mat.get_unchecked(mrow + ix) * *a.get_unchecked(arow + ix)
+                            };
+                        }
+                    }
+                    // SAFETY: `unchecked` bounds every store index.
+                    unsafe { *$brows.get_unchecked_mut((ixo + ($iyo - oy0) * d) as usize) = sum };
+                }
+            };
+        }
         macro_rules! checked_store {
             ($v:expr, $i:expr, $x:expr) => {
                 $v[$i] = $x
-            };
-        }
-        macro_rules! unchecked_store {
-            ($v:expr, $i:expr, $x:expr) => {
-                // SAFETY: `unchecked` above bounds every store index.
-                unsafe { *$v.get_unchecked_mut($i) = $x }
             };
         }
         for iyo in oy0..oy1 {
@@ -596,13 +625,58 @@ pub fn apply_kernel_filter(
                 nregion = 1;
                 xend = nx;
             } else if unchecked && k == 3 {
-                interior!(3, unchecked_at, iyo, brows, unchecked_store);
+                interior_rows!(3, iyo, brows);
+            } else if unchecked && k == 5 {
+                interior_rows!(5, iyo, brows);
+            } else if unchecked && k == 7 {
+                interior_rows!(7, iyo, brows);
+            } else if unchecked && k == 9 {
+                interior_rows!(9, iyo, brows);
             } else if unchecked {
-                interior!(k, unchecked_at, iyo, brows, unchecked_store);
+                interior_rows!(k, iyo, brows);
             } else {
                 interior!(k, checked_at, iyo, brows, checked_store);
             }
+            // The clamped border: when `unchecked` holds, every clamped tap
+            // lies in `0..=nx - 1` x `0..=ny - 1`, i.e. at most `last`, so
+            // the same argument covers it; each tap row's start `aiy * d`
+            // is formed once (`aix + aiy * d` is the same integer).  Same
+            // products, same order.
+            macro_rules! border_cols {
+                ($kk:expr, $xstr:expr, $xend:expr) => {
+                    for ixo in $xstr..$xend {
+                        let mut sum = 0.;
+                        for iy in 0..$kk {
+                            let aiy = (iy + iyo - below).min(ny - 1).max(0);
+                            let arow = (aiy * d) as usize;
+                            let mrow = (iy * $kk) as usize;
+                            for ix in 0..$kk {
+                                let aix = (ix + ixo - below).min(nx - 1).max(0);
+                                // SAFETY: `interior_reads_ok`, see above.
+                                sum += unsafe {
+                                    *mat.get_unchecked(mrow + ix as usize)
+                                        * *a.get_unchecked(arow + aix as usize)
+                                };
+                            }
+                        }
+                        // SAFETY: `unchecked` bounds every store index.
+                        unsafe { *brows.get_unchecked_mut((ixo + (iyo - oy0) * d) as usize) = sum };
+                    }
+                };
+            }
             for _ireg in 0..nregion {
+                if unchecked {
+                    match k {
+                        3 => border_cols!(3, xstr, xend),
+                        5 => border_cols!(5, xstr, xend),
+                        7 => border_cols!(7, xstr, xend),
+                        9 => border_cols!(9, xstr, xend),
+                        _ => border_cols!(k, xstr, xend),
+                    }
+                    xstr = nx - above;
+                    xend = nx;
+                    continue;
+                }
                 for ixo in xstr..xend {
                     let mut sum = 0.;
                     for iy in 0..k {
@@ -751,8 +825,21 @@ pub fn fourier_shift_image(fft: &mut [f32], nx: i32, ny: i32, dx: f32, dy: f32, 
         ny as usize
     };
     let span = (ny as usize * line_len).min(fft.len());
-    let temp: &[f32] = &*temp;
-    let run_group = |(g, fft): (usize, &mut [f32])| {
+    // Performance (TO_OPT.md "Serial gaps: taperpad, newstack FFT paths,
+    // extrapolate_grid"): the inner loop had four bounds checks and an i32
+    // index computation per complex element, and the closure captured `temp`,
+    // `nxfft` and `ndim` by reference.  Now the X terms are sliced once
+    // (`temp[..2 * nxFFT]`, which the source's loop reads in full, so the
+    // slice panics exactly where the first read would) and each line is
+    // sliced to its `2 * nxFFT` elements, visited pairwise in the same order
+    // with the same four products and two sums per element; nothing is
+    // reassociated or contracted (rustc never forms an FMA), so every output
+    // bit is unchanged.  `2 * nxFFT <= nxDim` always (`nxFFT = nxPad/2 + 1`),
+    // so the line slice is within its own line; a short last line still
+    // panics, before its first element instead of mid-line.
+    let nterm = 2 * nxfft.max(0) as usize;
+    let temp: &[f32] = &temp[..nterm];
+    let run_group = move |(g, fft): (usize, &mut [f32])| {
         let y0 = (g * rows_per_group) as i32;
         let y1 = y0 + fft.len().div_ceil(line_len) as i32;
         for y in y0..y1 {
@@ -762,15 +849,15 @@ pub fn fourier_shift_image(fft: &mut [f32], nx: i32, ny: i32, dx: f32, dy: f32, 
             }
             let arg = -2. * pi as f64 * fy as f64 * dy as f64;
             let (c, s) = (arg.cos() as f32, arg.sin() as f32);
-            for x in 0..nxfft {
-                let q = 2 * x;
-                let pr = temp[q as usize] * c - temp[(q + 1) as usize] * s;
-                let pi = temp[(q + 1) as usize] * c + temp[q as usize] * s;
-                let p = (q + (y - y0) * ndim) as usize;
-                let re = fft[p];
-                let im = fft[p + 1];
-                fft[p] = pr * re - pi * im;
-                fft[p + 1] = pi * re + pr * im;
+            let start = (y - y0) as usize * line_len;
+            let line = &mut fft[start..start + nterm];
+            for (f, t) in line.chunks_exact_mut(2).zip(temp.chunks_exact(2)) {
+                let pr = t[0] * c - t[1] * s;
+                let pi = t[1] * c + t[0] * s;
+                let re = f[0];
+                let im = f[1];
+                f[0] = pr * re - pi * im;
+                f[1] = pi * re + pr * im;
             }
         }
     };
@@ -1504,8 +1591,9 @@ pub fn xcorr_peak_find_width(
         if peak[i as usize] < -0.9e30 {
             continue;
         }
-        let ix = xpeak[i as usize] as i32;
-        let iy = ypeak[i as usize] as i32;
+        // Add 0.2 just in case float was less than int assigned to it
+        let ix = (xpeak[i as usize] as f64 + 0.2) as i32;
+        let iy = (ypeak[i as usize] as f64 + 0.2) as i32;
         let cx = parabolic_fit_position(
             array[((ix + nx - 1) % nx + iy * nxdim) as usize],
             peak[i as usize],
@@ -1518,10 +1606,11 @@ pub fn xcorr_peak_find_width(
         ) as f32;
         let mut px = ix as f32 + cx;
         let mut py = iy as f32 + cy;
-        if px > nx as f32 / 2. {
+        // `xpeak[i] > nx/2`: an integer quotient, converted for the compare.
+        if px > (nx / 2) as f32 {
             px -= nx as f32;
         }
-        if py > ny as f32 / 2. {
+        if py > (ny / 2) as f32 {
             py -= ny as f32;
         }
         xpeak[i as usize] = px;

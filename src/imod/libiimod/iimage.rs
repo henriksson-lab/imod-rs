@@ -229,7 +229,10 @@ pub const MRSA_BYTE: i32 = 1;
 pub const MRSA_FLOAT: i32 = 2;
 pub const MRSA_USHORT: i32 = 3;
 static S_RW_CALL_COUNT: AtomicI32 = AtomicI32::new(0);
-static S_ALLOW_MULTI_VOLUME: AtomicI32 = AtomicI32::new(0);
+/// `iimage.c`'s `sAllowMultiVolume`.  Crate-visible so the command table's
+/// in-process runner (`commands::run_in_process`) can reset it to a fresh
+/// process's 0 for the command and restore it afterwards.
+pub(crate) static S_ALLOW_MULTI_VOLUME: AtomicI32 = AtomicI32::new(0);
 /// Registered image format probes, in the same ordered process-wide sequence
 /// used by `iimage.c`.  Functions are copied out before invoking them so a
 /// callback cannot retain the registry lock.

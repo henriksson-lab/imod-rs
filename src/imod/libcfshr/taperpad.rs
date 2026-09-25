@@ -241,10 +241,37 @@ pub fn slice_taper_in_pad(
                 // The source reads `inArray + ixEnd + iy * nxDimIn`, i.e. at
                 // the *input* index, even when `inArray == outArray`.  Source
                 // and destination share the buffer and the destination can sit
-                // below the source, so this keeps the element-by-element
-                // backward walk rather than a `memmove`.
-                for x in (ixstart..=ixend).rev() {
-                    out[(obase + x) as usize] = out[(x + y * nxdimin) as usize];
+                // below the source, so the element-by-element backward walk is
+                // kept wherever it differs from a `memmove`.
+                //
+                // Performance (TO_OPT.md "Serial gaps: taperpad, newstack
+                // FFT paths, extrapolate_grid"): the walk had two bounds
+                // checks and two i32 index computations per element.  The
+                // row's read span is `src..src + n` and its write span
+                // `dst..dst + n` (the same `obase + x` / `x + y * nxDimIn`
+                // indices, `x` from `ixStart`); one checked assert per row
+                // covers every access, so an input the old checks rejected
+                // still panics, just before the row instead of mid-row.
+                //
+                // A backward walk (`w[k] = r[k]` for `k = n-1 .. 0`) equals a
+                // `memmove` exactly when `dst >= src` (every clobbered read
+                // position `dst + k = src + j` has `j > k`, already read) or
+                // when the spans are disjoint (`src - dst >= n`).  Only
+                // `dst < src < dst + n` sees a write before its read, and
+                // there the walk is kept verbatim.  This is pure bit movement:
+                // an `f32` load/store and `memmove` both copy the 32 bits
+                // unchanged, NaN payloads included, so no output byte moves.
+                assert!(dst + n <= out.len() && src + n <= out.len());
+                let p = out.as_mut_ptr();
+                if dst >= src || src - dst >= n {
+                    // SAFETY: both spans are in bounds by the assert;
+                    // `ptr::copy` permits overlap.
+                    unsafe { core::ptr::copy(p.add(src), p.add(dst), n) };
+                } else {
+                    for k in (0..n).rev() {
+                        // SAFETY: `k < n` and both spans are in bounds.
+                        unsafe { *p.add(dst + k) = *p.add(src + k) };
+                    }
                 }
             }
             (RGB, PadIn::Rgb(a)) => {
@@ -262,22 +289,25 @@ pub fn slice_taper_in_pad(
     }
     let mean = slice_edge_mean(out, nxdimout, xlow + 1, xhigh, ylow + 1, yhigh) as f32;
     if nxbox != nx || nybox != ny {
+        // Each `for (ix = a; ix < b; ix++) outArray[ix + ixBase] = dmean;` is
+        // a store of one value to a contiguous run, so `fill` on the run's
+        // slice stores the same bits to the same elements (the order of
+        // identical stores is unobservable).  The slice index checks the
+        // run's two ends once instead of every element; an empty run
+        // (`a >= b`) is skipped, as the source's loop runs zero times.
         for y in ylow + 1..=yhigh {
-            for x in 0..=xlow {
-                out[(x + y * nxdimout) as usize] = mean;
+            let base = y * nxdimout;
+            if xlow >= 0 {
+                out[base as usize..(base + xlow + 1) as usize].fill(mean);
             }
-            for x in xhigh + 1..nx {
-                out[(x + y * nxdimout) as usize] = mean;
-            }
-        }
-        for y in 0..=ylow {
-            for x in 0..nx {
-                out[(x + y * nxdimout) as usize] = mean;
+            if xhigh + 1 < nx {
+                out[(base + xhigh + 1) as usize..(base + nx) as usize].fill(mean);
             }
         }
-        for y in yhigh + 1..ny {
-            for x in 0..nx {
-                out[(x + y * nxdimout) as usize] = mean;
+        if nx > 0 {
+            for y in (0..=ylow).chain(yhigh + 1..ny) {
+                let base = y * nxdimout;
+                out[base as usize..(base + nx) as usize].fill(mean);
             }
         }
     }
@@ -1178,8 +1208,15 @@ pub fn slice_edge_mean(a: &[f32], nxdim: i32, xl: i32, xh: i32, yl: i32, yh: i32
     let mut sum = 0.0f64;
     // `sum += array[ix + iylo * nxdim] + array[ix + iyhi * nxdim];` -- the two
     // elements are added in single precision before the double accumulation.
-    for x in xl..=xh {
-        sum += (a[(x + yl * nxdim) as usize] + a[(x + yh * nxdim) as usize]) as f64;
+    // Same elements, same order, same single-precision pair sums; the two
+    // rows are sliced once so the loop carries no per-element index checks.
+    if xh >= xl {
+        let lo = (xl + yl * nxdim) as usize;
+        let hi = (xl + yh * nxdim) as usize;
+        let n = (xh - xl + 1) as usize;
+        for (&p, &q) in a[lo..lo + n].iter().zip(&a[hi..hi + n]) {
+            sum += (p + q) as f64;
+        }
     }
     for y in yl + 1..yh {
         sum += (a[(xl + y * nxdim) as usize] + a[(xh + y * nxdim) as usize]) as f64;

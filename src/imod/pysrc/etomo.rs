@@ -93,21 +93,13 @@ pub fn etomo(arguments: &[OsString]) -> i32 {
         value
     } else {
         let mut limit = 16;
-        if let Ok(Some(lines)) = run_cmd("imodqtassist -t", None, None, Some("stdout"), &[]) {
-            for line in lines {
-                if line.contains("thread count") {
-                    let tokens = line.split_whitespace().collect::<Vec<_>>();
-                    if let Some(index) = tokens.iter().position(|token| *token == "=") {
-                        limit = limit.min(
-                            tokens
-                                .get(index + 1)
-                                .and_then(|value| value.parse().ok())
-                                .unwrap_or(limit),
-                        );
-                    }
-                }
-            }
-        }
+        // `etomo:79` ran `imodqtassist -t` and took the integer after the
+        // first `=` on its `thread count` line.  Owner decision (2026-09-24):
+        // that number is our `imodqtassist`'s "ideal thread count"
+        // (`imodqtassist.rs`, `-t`), computed here directly instead of through
+        // `sh -c`/`PATH`.
+        let cores = std::thread::available_parallelism().map_or(1, usize::from);
+        limit = limit.min(cores);
         limit.to_string()
     };
     if let Some(java_directory) = std::env::var_os("IMOD_JAVADIR") {

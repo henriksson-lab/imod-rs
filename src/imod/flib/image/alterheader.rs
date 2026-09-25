@@ -117,7 +117,7 @@ pub fn alterheader() {
         let read_record = || -> String {
             let mut line = String::new();
             if std::io::stdin().read_line(&mut line).unwrap_or(0) == 0 {
-                std::process::exit(2);
+                crate::imod::libcfshr::b3dutil::exit(2);
             }
             line.trim_end_matches(['\r', '\n']).to_owned()
         };
@@ -141,7 +141,7 @@ pub fn alterheader() {
                         Ok(value) => values[index] = value,
                         // gfortran reports "Bad real number in item N of list
                         // input" and terminates the program.
-                        Err(_) => std::process::exit(2),
+                        Err(_) => crate::imod::libcfshr::b3dutil::exit(2),
                     }
                     index += 1;
                 }
@@ -167,7 +167,7 @@ pub fn alterheader() {
                         Ok(value) => values[index] = value,
                         // gfortran reports "Bad integer for item N in list
                         // input" and terminates the program.
-                        Err(_) => std::process::exit(2),
+                        Err(_) => crate::imod::libcfshr::b3dutil::exit(2),
                     }
                     index += 1;
                 }
@@ -197,12 +197,12 @@ pub fn alterheader() {
                     if index < ints.len() {
                         match token.parse::<i32>() {
                             Ok(value) => ints[index] = value,
-                            Err(_) => std::process::exit(2),
+                            Err(_) => crate::imod::libcfshr::b3dutil::exit(2),
                         }
                     } else {
                         match token.parse::<f32>() {
                             Ok(value) => reals[index - ints.len()] = value,
-                            Err(_) => std::process::exit(2),
+                            Err(_) => crate::imod::libcfshr::b3dutil::exit(2),
                         }
                     }
                     index += 1;
@@ -257,7 +257,7 @@ pub fn alterheader() {
         } else {
             in_file = match getinout(1) {
                 Ok((input, _)) => input,
-                Err(_) => std::process::exit(2),
+                Err(_) => crate::imod::libcfshr::b3dutil::exit(2),
             };
         }
         //
@@ -543,7 +543,7 @@ pub fn alterheader() {
                     // Exit if a -1 is received after feipixel, it means there was no pixel
                     // available
                     if funcin.trim_end() == "-1" && last_func.trim_end() == "FEIPIXEL" {
-                        std::process::exit(0);
+                        crate::imod::libcfshr::b3dutil::exit(0);
                     }
                     let funcup = funcin.to_ascii_uppercase();
                     iwhich = 0;
@@ -987,7 +987,7 @@ pub fn alterheader() {
                     if failed {
                         println!();
                         println!(" ERROR: ALTERHEADER - reading file");
-                        std::process::exit(1);
+                        crate::imod::libcfshr::b3dutil::exit(1);
                     }
                     let dmeans = tsum / totn;
                     rms = ((sumsq - totn * dmeans * dmeans) / totn).sqrt() as f32;
@@ -1196,7 +1196,7 @@ pub fn alterheader() {
                                 );
                             }
                             println!("The pixel size in the extended header is not being used");
-                            std::process::exit(0);
+                            crate::imod::libcfshr::b3dutil::exit(0);
                         }
                         i_binning = [1; 3];
                     } else {
@@ -1535,7 +1535,7 @@ pub fn alterheader() {
                         &raw mut dmean,
                     );
                     iiu_close(3);
-                    std::process::exit(0);
+                    crate::imod::libcfshr::b3dutil::exit(0);
                 }
                 _ => {
                     goto_label = 30;

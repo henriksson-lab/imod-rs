@@ -238,3 +238,421 @@ pub fn invert_matrix(matrix: &[f32; 9], inverse: &mut [f32; 9]) {
 pub fn inv_matrix(matrix: &[f32; 9], inverse: &mut [f32; 9]) {
     invert_matrix(matrix, inverse)
 }
+
+/// C's `errno` as `readOneXform` leaves it for `exitFromXFReadError`
+/// (`linearxforms.c:357`, `:395`).  The source zeroes the global `errno`
+/// before its `fscanf` and tests it afterwards, and `exitFromXFReadError`
+/// reads it again to choose and fill its message; this module-level value is
+/// that global for the two functions that share it.
+static S_XF_ERRNO: std::sync::atomic::AtomicI32 = std::sync::atomic::AtomicI32::new(0);
+
+/// Original `readOneXform` (`linearxforms.c:354`).
+///
+/// The C reads with `fscanf(fp, "%f %f %f %f %f %f \n", &xf[0], &xf[2],
+/// &xf[1], &xf[3], &xf[4], &xf[5])`, and the scan is translated here rather
+/// than replaced by a parser (`NATIVE.md` §2): glibc's `vfscanf` float
+/// conversion, as it behaves in the C locale with no field width.  `fp` is a
+/// `BufRead` because that is what a `FILE *` read stream is — its buffer is
+/// the stdio buffer, and `fill_buf` gives the one character of lookahead that
+/// `vfscanf` gets from `ungetc`.  What `vfscanf` does, and so what this does:
+///
+/// - white space (`isspace`) before each conversion is skipped; end of file
+///   there is an *input* failure, which returns `EOF` if nothing was
+///   converted yet;
+/// - the characters of a number are collected greedily — a sign, then `nan`,
+///   `inf`/`infinity`, a `0x` hexadecimal significand or decimal digits with
+///   one `.`, then `e`/`p` with an optional sign — and are consumed even when
+///   they turn out not to form a number (`100e` consumes the `e` and converts
+///   100; `infx` consumes `x` and fails);
+/// - the collected text goes to `strtof`, and the conversion fails (a
+///   *matching* failure, returning the count so far) if `strtof` converts
+///   nothing, or if it is only a sign or only a sign and `0x`;
+/// - `strtof` rounds straight to `float`, as Rust's `f32` parser does, and
+///   sets `ERANGE` on overflow and on an inexact result in the subnormal
+///   range (glibc detects tininess after rounding on x86).  A hexadecimal
+///   significand goes through the double `strtod` and is then narrowed, which
+///   can double-round beyond 24 significant bits; no transform file carries
+///   one;
+/// - after the six conversions the format's trailing `" \n"` skips any white
+///   space, and end of file there is not an error.
+///
+/// A read error is an end of file to the scan, with `errno` set from it.
+pub fn read_one_xform<R: std::io::BufRead + ?Sized>(fp: &mut R, xf: &mut [f32]) -> i32 {
+    use std::sync::atomic::Ordering;
+    let num_ret: i32;
+    let mut errno: i32 = 0;
+    {
+        // `vfscanf`: `inchar` is `peek` followed by `consume(1)`; `ungetc`
+        // is not consuming the peeked byte.
+        let mut peek = |fp: &mut R, errno: &mut i32| -> Option<u8> {
+            match fp.fill_buf() {
+                Ok(buf) => buf.first().copied(),
+                Err(e) => {
+                    *errno = e.raw_os_error().unwrap_or(5);
+                    None
+                }
+            }
+        };
+        let is_space = |c: u8| matches!(c, b' ' | b'\t' | b'\n' | 0x0b | 0x0c | b'\r');
+        // `&xf[0], &xf[2], &xf[1], &xf[3], &xf[4], &xf[5]`
+        let dest: [usize; 6] = [0, 2, 1, 3, 4, 5];
+        let mut done: i32 = 0;
+        let mut completed = true;
+        'format: for &slot in dest.iter() {
+            // Eat whitespace; end of file is an input failure.
+            let mut c = loop {
+                match peek(fp, &mut errno) {
+                    Some(c) if is_space(c) => fp.consume(1),
+                    Some(c) => break c,
+                    None => {
+                        if done == 0 {
+                            done = -1;
+                        }
+                        completed = false;
+                        break 'format;
+                    }
+                }
+            };
+            let mut charbuf: Vec<u8> = Vec::new();
+            let mut got_sign = 0usize;
+            let mut hexa = false;
+            let mut conv_error = false;
+            let mut special = false;
+            // Check for a sign.
+            if c == b'-' || c == b'+' {
+                got_sign = 1;
+                charbuf.push(c);
+                fp.consume(1);
+                match peek(fp, &mut errno) {
+                    Some(next) => c = next,
+                    None => conv_error = true,
+                }
+            }
+            // Take care for the special arguments "nan" and "inf": each
+            // mismatching character is read, so consumed, before failing.
+            if !conv_error && (c | 32) == b'n' {
+                charbuf.push(c);
+                fp.consume(1);
+                for want in [b'a', b'n'] {
+                    match peek(fp, &mut errno) {
+                        Some(next) if (next | 32) == want => {
+                            charbuf.push(next);
+                            fp.consume(1);
+                        }
+                        Some(_) => {
+                            fp.consume(1);
+                            conv_error = true;
+                            break;
+                        }
+                        None => {
+                            conv_error = true;
+                            break;
+                        }
+                    }
+                }
+                special = true;
+            } else if !conv_error && (c | 32) == b'i' {
+                charbuf.push(c);
+                fp.consume(1);
+                for want in [b'n', b'f'] {
+                    match peek(fp, &mut errno) {
+                        Some(next) if (next | 32) == want => {
+                            charbuf.push(next);
+                            fp.consume(1);
+                        }
+                        Some(_) => {
+                            fp.consume(1);
+                            conv_error = true;
+                            break;
+                        }
+                        None => {
+                            conv_error = true;
+                            break;
+                        }
+                    }
+                }
+                // It is as least "inf".
+                if !conv_error {
+                    if let Some(next) = peek(fp, &mut errno) {
+                        if (next | 32) == b'i' {
+                            charbuf.push(next);
+                            fp.consume(1);
+                            for want in [b'n', b'i', b't', b'y'] {
+                                match peek(fp, &mut errno) {
+                                    Some(next) if (next | 32) == want => {
+                                        charbuf.push(next);
+                                        fp.consume(1);
+                                    }
+                                    Some(_) => {
+                                        fp.consume(1);
+                                        conv_error = true;
+                                        break;
+                                    }
+                                    None => {
+                                        conv_error = true;
+                                        break;
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+                special = true;
+            }
+            if !conv_error && !special {
+                let exp_char;
+                let mut got_digit = false;
+                let mut got_dot = false;
+                let mut got_e = false;
+                let mut cur = Some(c);
+                if c == b'0' {
+                    charbuf.push(c);
+                    fp.consume(1);
+                    cur = peek(fp, &mut errno);
+                    if cur.map(|x| x | 32) == Some(b'x') {
+                        // It is a number in hexadecimal format.
+                        charbuf.push(cur.unwrap());
+                        fp.consume(1);
+                        hexa = true;
+                        exp_char = b'p';
+                        cur = peek(fp, &mut errno);
+                    } else {
+                        exp_char = b'e';
+                        got_digit = true;
+                    }
+                } else {
+                    exp_char = b'e';
+                }
+                while let Some(ch) = cur {
+                    if ch.is_ascii_digit() {
+                        charbuf.push(ch);
+                        got_digit = true;
+                    } else if !got_e && hexa && ch.is_ascii_hexdigit() {
+                        charbuf.push(ch);
+                        got_digit = true;
+                    } else if got_e
+                        && charbuf.last() == Some(&exp_char)
+                        && (ch == b'-' || ch == b'+')
+                    {
+                        charbuf.push(ch);
+                    } else if got_digit && !got_e && (ch | 32) == exp_char {
+                        charbuf.push(exp_char);
+                        got_e = true;
+                        got_dot = true;
+                    } else if !got_dot && ch == b'.' {
+                        charbuf.push(ch);
+                        got_dot = true;
+                    } else {
+                        // The last read character is not part of the number
+                        // anymore.
+                        break;
+                    }
+                    fp.consume(1);
+                    cur = peek(fp, &mut errno);
+                }
+                // Have we read any character?  If we try to read a number in
+                // hexadecimal notation and we have read only the `0x' prefix
+                // this is an error.
+                if charbuf.len() == got_sign || (hexa && charbuf.len() == 2 + got_sign) {
+                    conv_error = true;
+                }
+            }
+            if !conv_error {
+                // scan_float: `__strtof_internal` on the collected text.
+                let s = &charbuf[..];
+                let mut i = 0usize;
+                let negative = s.first() == Some(&b'-');
+                if s.first() == Some(&b'-') || s.first() == Some(&b'+') {
+                    i = 1;
+                }
+                let rest = &s[i..];
+                let lower: Vec<u8> = rest.iter().map(|b| b | 32).collect();
+                let mut value: Option<f32> = None;
+                if lower.starts_with(b"inf") || lower.starts_with(b"nan") {
+                    let v = if lower.starts_with(b"inf") {
+                        f32::INFINITY
+                    } else {
+                        f32::NAN
+                    };
+                    value = Some(if negative { -v } else { v });
+                } else if hexa {
+                    let mut end = 0usize;
+                    let v = crate::imod::libcfshr::parse_params::strtod(s, &mut end);
+                    if end > 0 {
+                        let v32 = v as f32;
+                        if v32.is_infinite() || (v != 0. && v32.abs() < f32::MIN_POSITIVE) {
+                            errno = 34; // ERANGE
+                        }
+                        value = Some(v32);
+                    }
+                } else {
+                    // The longest prefix `strtof` accepts: digits, one `.`,
+                    // at least one digit in all, and an exponent only when
+                    // digits follow it.
+                    let mut j = 0usize;
+                    let mut mantissa_digits = 0usize;
+                    let mut nonzero = false;
+                    while j < rest.len() && rest[j].is_ascii_digit() {
+                        nonzero |= rest[j] != b'0';
+                        j += 1;
+                        mantissa_digits += 1;
+                    }
+                    if j < rest.len() && rest[j] == b'.' {
+                        j += 1;
+                        while j < rest.len() && rest[j].is_ascii_digit() {
+                            nonzero |= rest[j] != b'0';
+                            j += 1;
+                            mantissa_digits += 1;
+                        }
+                    }
+                    if mantissa_digits > 0 {
+                        let mantissa_end = j;
+                        if j < rest.len() && (rest[j] | 32) == b'e' {
+                            let mut k = j + 1;
+                            if k < rest.len() && (rest[k] == b'+' || rest[k] == b'-') {
+                                k += 1;
+                            }
+                            let digits_start = k;
+                            while k < rest.len() && rest[k].is_ascii_digit() {
+                                k += 1;
+                            }
+                            j = if k > digits_start { k } else { mantissa_end };
+                        }
+                        let text = std::str::from_utf8(&s[..i + j]).unwrap_or("0");
+                        let v32: f32 = text.parse().unwrap_or(0.);
+                        if v32.is_infinite() {
+                            errno = 34; // ERANGE: overflow
+                        } else if nonzero && v32.abs() < f32::MIN_POSITIVE {
+                            // Underflow: ERANGE when the result is inexact.
+                            // A subnormal float is exact in double, so a
+                            // double parse that lands on it is taken as the
+                            // exact value.
+                            let v64: f64 = text.parse().unwrap_or(0.);
+                            if v32 == 0. || v64 != v32 as f64 {
+                                errno = 34;
+                            }
+                        }
+                        value = Some(v32);
+                    }
+                }
+                match value {
+                    Some(v) => {
+                        xf[slot] = v;
+                        done += 1;
+                    }
+                    None => conv_error = true,
+                }
+            }
+            if conv_error {
+                completed = false;
+                break 'format;
+            }
+        }
+        if completed {
+            // The format's trailing " \n": consume the last white spaces.
+            while let Some(c) = peek(fp, &mut errno) {
+                if !is_space(c) {
+                    break;
+                }
+                fp.consume(1);
+            }
+        }
+        num_ret = done;
+    }
+    S_XF_ERRNO.store(errno, Ordering::Relaxed);
+    if errno != 0 {
+        return 2;
+    }
+    if num_ret > 0 && num_ret != -1 && num_ret < 6 {
+        return 3;
+    }
+    if num_ret == -1 {
+        return 1;
+    }
+    0
+}
+
+/// Original `readAllXforms` (`linearxforms.c:374`).  `num_read` is written
+/// only for a transform read or an end of file, as in the C.
+pub fn read_all_xforms<R: std::io::BufRead + ?Sized>(
+    fp: &mut R,
+    xforms: &mut [f32],
+    max_read: i32,
+    num_read: &mut i32,
+) -> i32 {
+    for ind in 0..max_read {
+        let ret_val = read_one_xform(fp, &mut xforms[6 * ind as usize..]);
+        if ret_val < 2 {
+            *num_read = ind + 1;
+        }
+        if ret_val != 0 {
+            return if ret_val == 1 { 0 } else { ret_val };
+        }
+    }
+    0
+}
+
+/// Original `exitFromXFReadError` (`linearxforms.c:391`).  `errno` is the
+/// value [`read_one_xform`] left, and `strerror` is the operating system's
+/// message, which `std::io::Error` renders with a ` (os error N)` suffix that
+/// the C library does not add.
+pub fn exit_from_xf_read_error(ierr: i32, descrip: &str) {
+    if ierr == 0 {
+        return;
+    }
+    let errno = S_XF_ERRNO.load(std::sync::atomic::Ordering::Relaxed);
+    if ierr == 2 && errno != 0 {
+        let text = std::io::Error::from_raw_os_error(errno).to_string();
+        let text = text
+            .split(" (os error ")
+            .next()
+            .unwrap_or(&text)
+            .to_string();
+        crate::imod::libcfshr::parse_params::exit_error(
+            c_format(
+                "Reading %s transform file: %s",
+                &[CArg::Str(descrip), CArg::Str(&text)],
+            )
+            .as_bytes(),
+        );
+    }
+    crate::imod::libcfshr::parse_params::exit_error(
+        c_format(
+            "Reading %s transform file%s",
+            &[
+                CArg::Str(descrip),
+                CArg::Str(if ierr == 3 {
+                    ": fewer than 6 values on a line"
+                } else {
+                    ""
+                }),
+            ],
+        )
+        .as_bytes(),
+    );
+}
+
+/// Original `writeXform` (`linearxforms.c:406`).  Returns the operating
+/// system's error number when the write fails, and 0 otherwise.
+pub fn write_xform(fp: &mut dyn Write, xf: &[f32]) -> i32 {
+    let ret = fp.write_all(
+        c_format(
+            " %11.7f %11.7f %11.7f %11.7f %11.3f %11.3f\n",
+            &[
+                CArg::Dbl(xf[0] as f64),
+                CArg::Dbl(xf[2] as f64),
+                CArg::Dbl(xf[1] as f64),
+                CArg::Dbl(xf[3] as f64),
+                CArg::Dbl(xf[4] as f64),
+                CArg::Dbl(xf[5] as f64),
+            ],
+        )
+        .as_bytes(),
+    );
+    match ret {
+        Ok(()) => 0,
+        // An error with no system error number behind it is reported as
+        // `EIO`, where the C library would have left one in `errno`.
+        Err(e) => e.raw_os_error().unwrap_or(5),
+    }
+}

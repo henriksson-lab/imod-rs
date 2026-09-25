@@ -162,7 +162,7 @@ pub fn mrcbyte(arguments: &[String]) -> i32 {
                     ],
                 ));
                 mrcbyte_help(program);
-                std::process::exit(1);
+                crate::imod::libcfshr::b3dutil::exit(1);
             }
         }
         index += 1;

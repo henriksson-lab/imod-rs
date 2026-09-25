@@ -1,6 +1,7 @@
 //! Translation of `IMOD/libcfshr/spectrumscaled.c`.
 
 /// Image samples accepted by `spectrum_scaled`.
+#[derive(Clone, Copy)]
 pub enum SpectrumInput<'a> {
     Byte(&'a [u8]),
     Short(&'a [i16]),
@@ -205,8 +206,12 @@ pub fn spectrum_scaled(
             if x == 0 && y == 0 {
                 continue;
             }
-            cen = cen.max(fft_magnitude(&fft, pad_size, pad_size, x, y));
-            cen = cen.max(fft_magnitude(&fft, pad_size, pad_size, x, pad_size - 1 - y));
+            // `ACCUM_MAX` is `maxv = maxv > val ? maxv : val` (`b3dutil.h:40`),
+            // which takes a NaN `val`; `f64::max` would skip it.
+            let val = fft_magnitude(&fft, pad_size, pad_size, x, y);
+            cen = if cen > val { cen } else { val };
+            let val = fft_magnitude(&fft, pad_size, pad_size, x, pad_size - 1 - y);
+            cen = if cen > val { cen } else { val };
         }
     }
     let mut sum = 0.;
@@ -226,22 +231,22 @@ pub fn spectrum_scaled(
         let mut yin = pad_size / 2;
         for yout in 0..pad_size {
             let base = yin * padx;
-            for i in (base..base + pad_size).step_by(2) {
-                let val = ((fft[i as usize] * fft[i as usize]
-                    + fft[(i + 1) as usize] * fft[(i + 1) as usize])
-                    as f64)
-                    .sqrt();
-                // C assigns the double expression through an `int` to a
-                // `short int *`.  On the x86 reference build, `cvttsd2si`
-                // produces the integer-indefinite value for non-finite or
-                // out-of-range input, then the short store retains its low
-                // 16 bits.  Rust casts otherwise saturate.
+            // C assigns the double expression through an `int` to a
+            // `short int *`.  On the x86 reference build, `cvttsd2si`
+            // produces the integer-indefinite value (`INT_MIN`) for NaN, an
+            // infinity, or anything whose truncation leaves the `int` range,
+            // i.e. outside the open interval (-2^31 - 1, 2^31); then the short
+            // store retains its low 16 bits.  Rust casts otherwise saturate.
+            // The row is walked by slices, one complex pair per output value,
+            // in the source's order: `i` steps by 2 from `ixbase` while
+            // `i < ixbase + padSize`, which is `(padSize + 1) / 2` values.
+            let count = ((pad_size + 1) / 2) as usize;
+            let row_in = &fft[base as usize..][..2 * count];
+            let row_out = &mut stemp[(yout * pad_size + pad_size / 2) as usize..][..count];
+            for (out, pair) in row_out.iter_mut().zip(row_in.chunks_exact(2)) {
+                let val = ((pair[0] * pair[0] + pair[1] * pair[1]) as f64).sqrt();
                 let converted = scale * (log_scale * val + 1.).ln();
-                stemp[(yout * pad_size + pad_size / 2 + (i - base) / 2) as usize] = if converted
-                    .is_finite()
-                    && converted >= i32::MIN as f64
-                    && converted <= i32::MAX as f64
-                {
+                *out = if converted > -2147483649. && converted < 2147483648. {
                     converted as i32 as i16
                 } else {
                     i32::MIN as i16
@@ -252,14 +257,12 @@ pub fn spectrum_scaled(
                 + fft[(i + 1) as usize] * fft[(i + 1) as usize]) as f64)
                 .sqrt();
             let converted = scale * (log_scale * val + 1.).ln();
-            stemp[(((pad_size - yout) % pad_size) * pad_size) as usize] = if converted.is_finite()
-                && converted >= i32::MIN as f64
-                && converted <= i32::MAX as f64
-            {
-                converted as i32 as i16
-            } else {
-                i32::MIN as i16
-            };
+            stemp[(((pad_size - yout) % pad_size) * pad_size) as usize] =
+                if converted > -2147483649. && converted < 2147483648. {
+                    converted as i32 as i16
+                } else {
+                    i32::MIN as i16
+                };
             yin = (yin + 1) % pad_size;
         }
         for yout in 0..pad_size {
@@ -343,17 +346,32 @@ pub fn spectrum_scaled(
             }
             if count > 3 {
                 max = (rings / count as f64) as f32;
-                let f = bkgd_gray as f32 / 256.;
-                min = (b as f32 - max * f) / (1. - f);
+                // `spectrumscaled.c:236-237`: `val` is the function's
+                // `double`, so `(float)bkgdGray / 256.f` is a float quotient
+                // widened on assignment, and the `minScale` expression
+                // evaluates in double (`bkgd` and `maxScale` promote) before
+                // narrowing to the float `minScale`.
+                let f = (bkgd_gray as f32 / 256.) as f64;
+                min = ((b as f32 as f64 - max as f64 * f) / (1. - f)) as f32;
             }
         }
         let SpectrumOutput::Byte(bytes) = &mut spectrum else {
             return -4;
         };
-        let s = 255. / (max - min);
+        // `spectrumscaled.c:243-248`: `scale` is a `double`, so the float
+        // difference `maxScale - minScale` divides in double, and each pixel
+        // is `scale * (float)(scaleIn[i] - minScale)` in double.  The `(int)`
+        // is x86 `cvttsd2si`: integer-indefinite for a non-finite or
+        // out-of-range value, which `B3DCLAMP` then takes to 0.
+        let s = 255. / (max - min) as f64;
         for i in 0..final_size * final_size {
-            bytes[i as usize] =
-                ((s * (scalein[i as usize] as f32 - min)) as i32).clamp(0, 255) as u8;
+            let converted = s * (scalein[i as usize] as f32 - min) as f64;
+            let iyout = if converted > -2147483649. && converted < 2147483648. {
+                converted as i32
+            } else {
+                i32::MIN
+            };
+            bytes[i as usize] = 0.max(255.min(iyout)) as u8;
         }
     }
     ret

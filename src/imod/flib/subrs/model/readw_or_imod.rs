@@ -1,73 +1,239 @@
-//! Model-format dispatcher from `IMOD/flib/subrs/model/readw_or_imod.f`.
+//! Translation of `IMOD/flib/subrs/model/readw_or_imod.f`.
+//!
+//! The Fortran `use fortmodel` module arrays are the [`FortModel`] passed in;
+//! the IMOD model that `openImodData` opens stays in `imodel_fwrap`'s own
+//! state (`sImod`), exactly as in the source, so a later `writeimod`,
+//! `imodWriteAsWimp` or `getimodhead` sees it.  Fortran unit 20 is the
+//! `BufReader` that `read_mod` reads; the binary WIMP stream is a `blockio`
+//! unit.
 use std::fs::File;
 use std::io::BufReader;
-use std::path::Path;
 
+use crate::imod::flib::subrs::imsubs::blockio::{qclose, qopen, qread, qseek};
+use crate::imod::flib::subrs::imsubs::convert_vms::{convert_longs, convert_shorts};
 use crate::imod::flib::subrs::model::fortmodel::{FortModel, allocate_fort_model};
 use crate::imod::flib::subrs::model::read_mod::read_mod;
-use crate::imod::libimod::imodel::{IMODF_FLIPYZ, Imod, imod_flip_yz};
-use crate::imod::libimod::imodel_files::imod_read;
+use crate::imod::libimod::imodel_fwrap::{
+    fromvmsfloats, getimod, getimodobjlist, getimodobjrange, imodcountcontspoints, openimoddata,
+};
+
+/// `lowbyte` from `include 'endian.inc'`, the file `IMOD/setup2:428` writes
+/// for the build machine: `parameter (lowbyte=1,...)` on this little-endian
+/// platform (`/tmp/imod-reference-build/include/endian.inc`).
+const LOWBYTE: i32 = 1;
 
 /// Original: `readw_or_imod` (`readw_or_imod.f:11`).
 ///
-/// `Ok(Some(model))` is the `openImodData` branch, where the C model stays
-/// open in the fortran wrapper's `sImod`; `Ok(None)` is the WIMP branch, where
-/// only the `fortmodel` module arrays in `fm` are filled and `sImod` stays
-/// null.  `convertmod` needs that distinction because `imodWriteAsWimp`
-/// returns `FWRAP_ERROR_NO_MODEL` for the second case.
-pub fn readw_or_imod(path: impl AsRef<Path>, fm: &mut FortModel) -> Result<Option<Imod>, ()> {
-    // `openImodData` is first in the source.  Its native replacement reads
-    // the same binary V1.2 model container.  On failure the Fortran routine
-    // falls through to its WIMP reader and eventually `read_mod`.
-    match imod_read(path.as_ref()) {
-        Ok(mut imod) => {
-            // `openImodData` (`imodel_fwrap.c:468-491`) first puts a model
-            // into the Fortran bridge's identity reference coordinates.  Its
-            // matching `writeimod` path reverses this before `imod_to_wmod`;
-            // retaining both f32 transforms is observable at decimal-format
-            // boundaries in `convertmod` output.
-            if imod.flags & IMODF_FLIPYZ != 0 {
-                imod_flip_yz(&mut imod);
+/// Reads an IMOD model or an old WIMP model from `filename` and returns the
+/// model contours in the model arrays of `fm`.  Returns `false` for error.
+///
+/// Source-level UB kept as a panic rather than reproduced: in the binary
+/// WIMP branch an object number `int4(1)` outside `1..=max_obj_num`, or a
+/// point number that `mod(ipt,10000)` turns into 0, indexes outside the
+/// Fortran arrays, which gfortran (no bounds checking) writes through into
+/// neighbouring memory.
+pub fn readw_or_imod(filename: &str, fm: &mut FortModel) -> bool {
+    let mut int4 = [0u8; 16];
+    let (mut num_pts_tot, mut max_num_pts, mut num_conts_tot, mut max_num_conts) = (0, 0, 0, 0);
+    let mut ierr: i32;
+    let mut istrm: i32 = 0;
+    let mut ier: i32 = 0;
+    let mut ninobj: i32;
+    let mut ipt: i32;
+    let mut flt = [0u8; 12];
+    let mut int2 = [0u8; 52];
+    let mut ptbyte = [0u8; 1];
+    // `int2(1)`, `int4(k)` and `flt(k)` read the buffers in native order.
+    let int2_1 = |b: &[u8; 52]| i16::from_ne_bytes([b[0], b[1]]);
+    let int4_k = |b: &[u8; 16], k: usize| {
+        i32::from_ne_bytes([b[4 * k - 4], b[4 * k - 3], b[4 * k - 2], b[4 * k - 1]])
+    };
+    let flt_k = |b: &[u8; 12], k: usize| {
+        f32::from_ne_bytes([b[4 * k - 4], b[4 * k - 3], b[4 * k - 2], b[4 * k - 1]])
+    };
+
+    let mut readw_or_imod = false;
+    ierr = openimoddata(filename);
+    if ierr == 0 {
+        if imodcountcontspoints(
+            &mut num_conts_tot,
+            &mut max_num_conts,
+            &mut num_pts_tot,
+            &mut max_num_pts,
+        ) != 0
+        {
+            return readw_or_imod;
+        }
+        // `int(maxNumConts * fmBoostReadInBy)`: integer times real is a
+        // real*4 product, truncated by `int`.
+        if fm.fm_max_obj_loaded > 0 {
+            fm.fm_need_objects = fm.fm_max_obj_loaded
+                * ((max_num_conts as f32 * fm.fm_boost_read_in_by) as i32)
+                    .max(max_num_conts + fm.fm_inc_read_obj_by);
+            fm.fm_need_points = fm.fm_max_obj_loaded
+                * ((max_num_pts as f32 * fm.fm_boost_read_in_by) as i32)
+                    .max(max_num_pts + fm.fm_inc_read_points_by);
+        } else {
+            fm.fm_need_objects = ((num_conts_tot as f32 * fm.fm_boost_read_in_by) as i32)
+                .max(num_conts_tot + fm.fm_inc_read_obj_by);
+            fm.fm_need_points = ((num_pts_tot as f32 * fm.fm_boost_read_in_by) as i32)
+                .max(num_pts_tot + fm.fm_inc_read_points_by);
+        }
+        allocate_fort_model(fm);
+        //
+        if getimod(
+            &mut fm.ibase_obj,
+            &mut fm.npt_in_obj,
+            &mut fm.p_coord,
+            &mut fm.obj_color,
+            &mut fm.n_point,
+            &mut fm.n_object,
+            filename,
+        ) != 0
+        {
+            return readw_or_imod;
+        }
+
+        complete_model_values(fm);
+        readw_or_imod = true;
+    } else {
+        allocate_fort_model(fm);
+        // `open(20,file=filename,status='old',err=20)`; `err=20` goes to the
+        // `close(20)`, which for a unit that never opened does nothing.
+        let mut unit20 = match File::open(filename) {
+            Ok(file) => BufReader::new(file),
+            Err(_) => return readw_or_imod,
+        };
+        qopen(&mut istrm, filename, "RO");
+        qseek(istrm, 1, 1, 1, 1, 1);
+        //
+        // Every `go to 10` below is this label: `readw_or_imod=read_mod()`,
+        // then `15 call qclose(istrm)` and `20 close(20)`.
+        'label10: {
+            qread(istrm, &mut int2, 52, &mut ier);
+            if LOWBYTE == 2 {
+                convert_shorts(&mut int2, 1);
             }
-            if let Some(reference) = imod.ref_image {
-                for object in &mut imod.obj {
-                    for contour in &mut object.cont {
-                        for point in &mut contour.pts {
-                            point.x = point.x * reference.cscale.x - reference.ctrans.x;
-                            point.y = point.y * reference.cscale.y - reference.ctrans.y;
-                            point.z = point.z * reference.cscale.z - reference.ctrans.z;
-                        }
-                    }
+            if ier != 0 || int2_1(&int2) != 3 {
+                break 'label10;
+            }
+            //
+            qread(istrm, &mut int2[..2], 2, &mut ier);
+            if LOWBYTE == 2 {
+                convert_shorts(&mut int2, 1);
+            }
+            if ier != 0 || int2_1(&int2) != 3 {
+                break 'label10;
+            }
+            //
+            qread(istrm, &mut int4[..12], 12, &mut ierr);
+            if ierr != 0 {
+                break 'label10;
+            }
+            if LOWBYTE == 2 {
+                convert_longs(&mut int4, 3);
+            }
+            //
+            fm.n_point = int4_k(&int4, 2);
+            fm.n_object = 0; //recount # of objects
+            fm.ibase_free = 0;
+            fm.ntot_in_obj = 0;
+            fm.max_mod_obj = 0;
+            for i in 1..=fm.max_obj_num {
+                fm.npt_in_obj[i as usize - 1] = 0;
+            }
+            // `100 call qread(...)` ... `go to 100`
+            loop {
+                qread(istrm, &mut int2[..2], 2, &mut ier);
+                if LOWBYTE == 2 {
+                    convert_shorts(&mut int2, 1);
                 }
+                if ier != 0 || int2_1(&int2) != 3 {
+                    break 'label10;
+                }
+                //
+                qread(istrm, &mut int4, 16, &mut ier);
+                if ier != 0 {
+                    break 'label10;
+                }
+                if LOWBYTE == 2 {
+                    convert_longs(&mut int4, 4);
+                }
+                //
+                if int4_k(&int4, 1) == 0 {
+                    break;
+                }
+                let i = int4_k(&int4, 1);
+                ninobj = int4_k(&int4, 2);
+                fm.n_object += 1;
+                fm.obj_color[i as usize - 1][0] = int4_k(&int4, 3);
+                fm.obj_color[i as usize - 1][1] = int4_k(&int4, 4);
+                fm.obj_order[fm.n_object as usize - 1] = i;
+                fm.ndx_order[i as usize - 1] = fm.n_object;
+                fm.npt_in_obj[i as usize - 1] = ninobj;
+                fm.ntot_in_obj += ninobj;
+                fm.ibase_obj[i as usize - 1] = fm.ibase_free;
+                fm.max_mod_obj = fm.max_mod_obj.max(i);
+                for ii in 1..=ninobj {
+                    qread(istrm, &mut int2[..2], 2, &mut ier);
+                    if LOWBYTE == 2 {
+                        convert_shorts(&mut int2, 1);
+                    }
+                    if ier != 0 || int2_1(&int2) != 3 {
+                        break 'label10;
+                    }
+                    //
+                    qread(istrm, &mut int4[..4], 4, &mut ier);
+                    if ier != 0 {
+                        break 'label10;
+                    }
+                    if LOWBYTE == 2 {
+                        convert_longs(&mut int4, 1);
+                    }
+                    ipt = int4_k(&int4, 1);
+                    //
+                    qread(istrm, &mut flt, 12, &mut ier);
+                    if ier != 0 {
+                        break 'label10;
+                    }
+                    fromvmsfloats(&mut flt, 3);
+                    // `if(lowbyte.eq.1.)`: integer against real, true here.
+                    if LOWBYTE as f32 == 1. {
+                        convert_longs(&mut flt, 3);
+                    }
+                    //
+                    qread(istrm, &mut ptbyte, 1, &mut ier);
+                    if ier != 0 {
+                        break 'label10;
+                    }
+                    //
+                    if ipt > 0 {
+                        if ipt > fm.n_point {
+                            ipt %= 10000; //in case of old models
+                        }
+                        fm.p_coord[ipt as usize - 1][0] = flt_k(&flt, 1);
+                        fm.p_coord[ipt as usize - 1][1] = flt_k(&flt, 2);
+                        fm.p_coord[ipt as usize - 1][2] = flt_k(&flt, 3);
+                        fm.pt_label[ipt as usize - 1] = ptbyte[0] as i8;
+                    }
+                    fm.object[(ii + fm.ibase_free) as usize - 1] = ipt;
+                }
+                fm.ibase_free += ninobj;
             }
-            // `getimod` also fills the `fortmodel` arrays from the open model.
-            // Nothing in this branch reads them back before `writeimod`, so
-            // the copy is not translated here.
-            allocate_fort_model(fm);
-            Ok(Some(imod))
+            fm.n_clabel = 0;
+            fm.nin_order = fm.n_object;
+            readw_or_imod = true;
+            // `go to 15`
+            qclose(istrm);
+            return readw_or_imod;
         }
-        Err(_) => {
-            // `call allocateFortModel()` then `open(20,file=filename,
-            // status='old',err=20)`.
-            allocate_fort_model(fm);
-            let file = match File::open(path.as_ref()) {
-                Ok(file) => file,
-                // `err=20` closes unit 20 and returns `.false.`
-                Err(_) => return Err(()),
-            };
-            // The `qopen`/`qread` branch above label `10` recognises the old
-            // *binary* WIMP container.  No `qopen` layer exists in this crate,
-            // and every text WIMP file fails its `int2(1).ne.3` test on the
-            // first record, so the source's `go to 10` fall-through to
-            // `read_mod` is what is translated here.
-            let mut unit20 = BufReader::new(file);
-            if read_mod(&mut unit20, fm) {
-                Ok(None)
-            } else {
-                Err(())
-            }
-        }
+        //
+        // `10 readw_or_imod=read_mod()`
+        readw_or_imod = read_mod(&mut unit20, fm);
+        // `15 call qclose(istrm)`; `20 close(20)` is the drop of `unit20`.
+        qclose(istrm);
     }
+    readw_or_imod
 }
 
 /// Original: `getModelObjectRange` (`readw_or_imod.f:142`).
@@ -75,14 +241,17 @@ pub fn readw_or_imod(path: impl AsRef<Path>, fm: &mut FortModel) -> Result<Optio
 /// Once a WIMP model has been opened, this routine fills the model arrays with
 /// contour data just for the objects ranging from `iobj_strt` to `iobj_end`.
 /// Returns `false` for error.
-///
-/// Gap: the `getimodobjrange` entry point of `IMOD/libimod/imodel_fwrap.c`,
-/// and the partial-mode model handle it reads, are not translated yet, so the
-/// call cannot be issued and this unit reports the error the source reports
-/// for a non-zero `ierr`.  No translated caller uses it.
 pub fn get_model_object_range(iobj_strt: i32, iobj_end: i32, fm: &mut FortModel) -> bool {
-    let _ = (iobj_strt, iobj_end);
-    let ierr: i32 = -1;
+    let ierr = getimodobjrange(
+        iobj_strt,
+        iobj_end,
+        &mut fm.ibase_obj,
+        &mut fm.npt_in_obj,
+        &mut fm.p_coord,
+        &mut fm.obj_color,
+        &mut fm.n_point,
+        &mut fm.n_object,
+    );
     let get_model_object_range = ierr == 0;
     if ierr == 0 {
         complete_model_values(fm);
@@ -95,13 +264,17 @@ pub fn get_model_object_range(iobj_strt: i32, iobj_end: i32, fm: &mut FortModel)
 /// Once a WIMP model has been opened, this routine fills the model arrays with
 /// contour data just for the list of `nin_list` objects in `iobj_list`.
 /// Returns `false` for error.
-///
-/// Gap: as for `get_model_object_range`, the `getimodobjlist` entry point of
-/// `IMOD/libimod/imodel_fwrap.c` is not translated yet.  No translated caller
-/// uses it.
 pub fn get_model_object_list(iobj_list: &[i32], nin_list: i32, fm: &mut FortModel) -> bool {
-    let _ = (iobj_list, nin_list);
-    let ierr: i32 = -1;
+    let ierr = getimodobjlist(
+        iobj_list,
+        nin_list,
+        &mut fm.ibase_obj,
+        &mut fm.npt_in_obj,
+        &mut fm.p_coord,
+        &mut fm.obj_color,
+        &mut fm.n_point,
+        &mut fm.n_object,
+    );
     let get_model_object_list = ierr == 0;
     if ierr == 0 {
         complete_model_values(fm);

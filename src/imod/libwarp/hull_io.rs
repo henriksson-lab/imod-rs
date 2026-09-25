@@ -70,7 +70,7 @@ pub fn panic(text: &str) -> ! {
     let mut dfile = ImodFile::Stderr;
     let _ = dfile.write_all(text.as_bytes());
     let _ = dfile.flush();
-    std::process::exit(1)
+    crate::imod::libcfshr::b3dutil::exit(1)
 }
 
 /// Original `efopen` (`hull-io.c:51`).
@@ -87,7 +87,7 @@ pub fn efopen(file: &str, mode: &str) -> ImodFile {
         )
         .as_bytes(),
     );
-    std::process::exit(1)
+    crate::imod::libcfshr::b3dutil::exit(1)
 }
 
 /// Original `epopen` (`hull-io.c:61`).
@@ -121,7 +121,7 @@ pub fn epopen(com: &str, mode: &str) -> Option<std::process::Child> {
         )
         .as_bytes(),
     );
-    std::process::exit(1)
+    crate::imod::libcfshr::b3dutil::exit(1)
 }
 
 /// Original `print_neighbor_snum` (`hull-io.c:74`).
@@ -299,7 +299,7 @@ pub fn check_simplex(st: &mut HullStorage, s: usize) -> usize {
             let _ = dfile.write_all(b"huh?\n");
             print_simplex_f(st, s, &mut dfile, Some(print_neighbor_full));
             print_simplex_f(st, sns, &mut dfile, Some(print_neighbor_full));
-            std::process::exit(1);
+            crate::imod::libcfshr::b3dutil::exit(1);
         }
         let mut j = -1;
         while j < cdim
@@ -316,7 +316,7 @@ pub fn check_simplex(st: &mut HullStorage, s: usize) -> usize {
             /* DEBEXP(-1, site_num(p)) -- DEBUG (-7) > -1 is false. */
             print_simplex_f(st, sns, &mut dfile, Some(print_neighbor_full));
             print_simplex_f(st, s, &mut dfile, Some(print_neighbor_full));
-            std::process::exit(1);
+            crate::imod::libcfshr::b3dutil::exit(1);
         }
         for k in -1..cdim {
             let vn = if k < 0 {
@@ -342,7 +342,7 @@ pub fn check_simplex(st: &mut HullStorage, s: usize) -> usize {
                         .write_all(b"error: neighboring simplices with incompatible vertices:\n");
                     print_simplex_f(st, sns, &mut dfile, Some(print_neighbor_full));
                     print_simplex_f(st, s, &mut dfile, Some(print_neighbor_full));
-                    std::process::exit(1);
+                    crate::imod::libcfshr::b3dutil::exit(1);
                 }
             }
         }
@@ -644,7 +644,7 @@ pub fn afacets_print(st: &mut HullStorage, s: usize, out_func_here: OutFunc) -> 
             print_simplex_f(st, s, &mut d, Some(print_neighbor_full));
             print_simplex_f(st, other, &mut d, Some(print_neighbor_full));
             let _ = d.flush();
-            std::process::exit(1);
+            crate::imod::libcfshr::b3dutil::exit(1);
         }
     }
     for j in 0..cdim {

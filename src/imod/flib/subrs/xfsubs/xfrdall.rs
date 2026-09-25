@@ -46,7 +46,12 @@ mod tests {
         let mut list = Vec::new();
         assert_eq!(xfrdall2(&mut input, &mut list, 1), 1);
         assert_eq!(list, vec![[1., 0., 0., 1., 2., 3.]]);
+        // A list-directed read that runs out of records part-way is `END=`,
+        // not `ERR=` (native `xftoxg`/`xfproduct` on a truncated last line).
         let mut input = Cursor::new(b"1 2 3\n");
+        assert_eq!(xfrdall(&mut input, &mut list), Ok(()));
+        assert!(list.is_empty());
+        let mut input = Cursor::new(b"1 0 0 x 2 3\n");
         assert_eq!(xfrdall(&mut input, &mut list), Err(()));
         assert_eq!(XfReadError::End, XfReadError::End);
     }

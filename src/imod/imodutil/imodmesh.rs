@@ -75,7 +75,7 @@ fn imodmesh_usage(prog: &str, retcode: i32) -> i32 {
     let _ = err.write_all(b"\t-Z #\tNormal scaling z multiplier.\n");
     let _ = err.write_all(b"\t-B  \tMake mesh backward-compatible to IMOD before 3.6.14.\n");
     if retcode != 0 {
-        std::process::exit(retcode);
+        crate::imod::libcfshr::b3dutil::exit(retcode);
     }
     retcode
 }
@@ -89,7 +89,7 @@ const LOWRES_TOL: f32 = 2.;
 
 /// Original: `main` (`imodmesh.c:96`).
 pub fn imodmesh() {
-    let argv: Vec<String> = std::env::args().collect();
+    let argv: Vec<String> = crate::imod::libcfshr::b3dutil::program_args();
     let argc = argv.len() as i32;
     let mut spnt = Ipoint::default();
     let mut max = Ipoint::default();
@@ -173,7 +173,7 @@ pub fn imodmesh() {
                                 let _ = ImodFile::Stderr.write_all(
                                     format!("{progname}: Error parsing object list\n").as_bytes(),
                                 );
-                                std::process::exit(3);
+                                crate::imod::libcfshr::b3dutil::exit(3);
                             }
                         }
                     }
@@ -203,7 +203,7 @@ pub fn imodmesh() {
                                 let _ = ImodFile::Stderr.write_all(
                                     format!("{progname}: Error parsing Z list\n").as_bytes(),
                                 );
-                                std::process::exit(3);
+                                crate::imod::libcfshr::b3dutil::exit(3);
                             }
                         }
                     }
@@ -236,7 +236,7 @@ pub fn imodmesh() {
                                     )
                                     .as_bytes(),
                                 );
-                                std::process::exit(3);
+                                crate::imod::libcfshr::b3dutil::exit(3);
                             }
                         }
                     }
@@ -335,7 +335,7 @@ pub fn imodmesh() {
         let _ = ImodFile::Stderr.write_all(
             format!("{progname}: You cannot enter an option and its 'no' variation\n").as_bytes(),
         );
-        std::process::exit(1);
+        crate::imod::libcfshr::b3dutil::exit(1);
     }
 
     if times {
@@ -362,7 +362,7 @@ pub fn imodmesh() {
         let Ok(mut imod) = imod_read(&argv[iarg]) else {
             let _ = ImodFile::Stderr
                 .write_all(format!("{progname}: Error reading model {}\n", argv[iarg]).as_bytes());
-            std::process::exit(3);
+            crate::imod::libcfshr::b3dutil::exit(3);
         };
 
         spnt.x = imod.xscale;
@@ -432,7 +432,7 @@ pub fn imodmesh() {
                                     format!("{progname}: Error creating new parameter structure\n")
                                         .as_bytes(),
                                 );
-                                std::process::exit(3);
+                                crate::imod::libcfshr::b3dutil::exit(3);
                             }
                         }
                     }
@@ -561,7 +561,7 @@ pub fn imodmesh() {
                             &mut old_nto,
                         ) != 0
                         {
-                            std::process::exit(3);
+                            crate::imod::libcfshr::b3dutil::exit(3);
                         }
                         nto = old_nto;
                         param.cap_skip_zlist = lto;
@@ -616,7 +616,7 @@ pub fn imodmesh() {
                             format!("{progname}: meshing error in model {}\n", argv[iarg])
                                 .as_bytes(),
                         );
-                        std::process::exit(3);
+                        crate::imod::libcfshr::b3dutil::exit(3);
                     }
 
                     /* set resolution flag now */
@@ -673,13 +673,13 @@ pub fn imodmesh() {
         if imod_backup_file(&argv[iarg]) != 0 {
             let _ = ImodFile::Stderr
                 .write_all(format!("{progname}: Error, couldn't create backup").as_bytes());
-            std::process::exit(3);
+            crate::imod::libcfshr::b3dutil::exit(3);
         }
 
         let Some(mut fout) = ImodFile::open(&argv[iarg], "wb") else {
             let _ = ImodFile::Stderr
                 .write_all(format!("{progname}: Error, couldn't open output.").as_bytes());
-            std::process::exit(3);
+            crate::imod::libcfshr::b3dutil::exit(3);
         };
 
         let _ = imod_write(&imod, &mut fout);
@@ -687,7 +687,7 @@ pub fn imodmesh() {
         drop(imod);
         iarg += 1;
     }
-    std::process::exit(0);
+    crate::imod::libcfshr::b3dutil::exit(0);
 }
 
 /// Original static `imodMeshesDeleteZRange` (`imodmesh.c:571`).

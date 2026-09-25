@@ -23,7 +23,10 @@ pub fn write_list(list: &[i32], number_of_values: i32, line_length: i32) -> i32 
         saved_string[start + index as usize] = b'\n';
         start += index as usize + 1;
     }
-    let mut out = std::io::stdout();
+    // `printf("%s", saveStr); printf("\n"); fflush(stdout);` -- the C stdio
+    // stream, which is `ImodFile::Stdout`; Rust's own `stdout` would reorder
+    // this against the caller's `printf` output under redirection.
+    let mut out = crate::imod::libcfshr::b3dutil::ImodFile::Stdout;
     let _ = out.write_all(&saved_string);
     let _ = out.write_all(b"\n");
     let _ = out.flush();

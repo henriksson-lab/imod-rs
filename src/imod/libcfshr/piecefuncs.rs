@@ -1,8 +1,7 @@
 //! Translation of `IMOD/libcfshr/piecefuncs.c`.
 
+use super::b3dutil::ImodFile;
 use super::readlinevalues::{RLFV_SEPARATE_LINES, ReadValueArray, read_lines_for_values};
-use std::fs::File;
-use std::io::BufReader;
 
 /// Matches `checkPieceList` (`IMOD/libcfshr/piecefuncs.c:38`).
 pub fn check_piece_list(
@@ -15,17 +14,36 @@ pub fn check_piece_list(
     number_pieces: &mut i32,
     overlap: &mut i32,
 ) -> i32 {
-    let mut coordinates = (0..number_piece_list)
-        .map(|index| piece_list[index * stride])
-        .collect::<Vec<_>>();
-    coordinates.sort_unstable();
-    *minimum_piece = reduction_factor * coordinates[0];
-    let maximum_piece = reduction_factor * coordinates[coordinates.len() - 1];
     let mut minimum_difference = 100_000;
-    for index in 1..coordinates.len() {
-        let difference = coordinates[index] - coordinates[index - 1];
-        if difference != 0 {
-            minimum_difference = minimum_difference.min(reduction_factor * difference);
+    *minimum_piece = 100_000;
+    let mut maximum_piece = -100_000;
+    // `coords` is allocated only for more than one piece; otherwise the old
+    // pairwise way runs, which starts `minpiece` at 100000 (`piecefuncs.c:45-78`).
+    if number_piece_list > 1 {
+        let mut coordinates = (0..number_piece_list)
+            .map(|index| piece_list[index * stride])
+            .collect::<Vec<_>>();
+        coordinates.sort_unstable();
+        *minimum_piece = reduction_factor * coordinates[0];
+        maximum_piece = reduction_factor * coordinates[coordinates.len() - 1];
+        for index in 1..coordinates.len() {
+            let difference = coordinates[index] - coordinates[index - 1];
+            if difference != 0 {
+                minimum_difference = minimum_difference.min(reduction_factor * difference);
+            }
+        }
+    } else {
+        for i in 0..number_piece_list {
+            let ipc = reduction_factor * piece_list[i * stride];
+            *minimum_piece = (*minimum_piece).min(ipc);
+            maximum_piece = maximum_piece.max(ipc);
+            for j in 0..number_piece_list {
+                let jpc = reduction_factor * piece_list[j * stride];
+                let difference = (ipc - jpc).abs();
+                if difference != 0 {
+                    minimum_difference = minimum_difference.min(difference);
+                }
+            }
         }
     }
     if minimum_difference == 100_000 {
@@ -66,7 +84,7 @@ pub fn checklist(
     number_pieces: &mut i32,
     overlap: &mut i32,
 ) -> i32 {
-    check_piece_list(
+    let retval = check_piece_list(
         piece_list,
         1,
         piece_list.len(),
@@ -75,7 +93,16 @@ pub fn checklist(
         minimum_piece,
         number_pieces,
         overlap,
-    )
+    );
+    if retval != 0 {
+        use std::io::Write;
+        let _ = write!(
+            ImodFile::Stdout,
+            "Piece coordinates not regularly spaced apart or corrupted at line {retval}\n"
+        );
+        let _ = ImodFile::Stdout.flush();
+    }
+    retval
 }
 
 /// Matches `adjustPieceOverlap` (`IMOD/libcfshr/piecefuncs.c:140`).
@@ -150,26 +177,24 @@ pub fn read_piece_list(
     let Some(name) = piece_file.filter(|name| !name.is_empty()) else {
         return 0;
     };
-    let Ok(file) = File::open(name) else {
+    let Some(mut fp) = ImodFile::open(name, "r") else {
         return 1;
     };
+    let mut line = [0u8; 160];
     let mut count = 0;
-    let capacity = maximum_pieces
-        .min(piece_x.len())
-        .min(piece_y.len())
-        .min(piece_z.len());
-    let mut destinations = [
-        ReadValueArray::Integers(piece_x),
-        ReadValueArray::Integers(piece_y),
-        ReadValueArray::Integers(piece_z),
-    ];
     let error = read_lines_for_values(
-        &mut BufReader::new(file),
+        &mut fp,
         &mut count,
-        capacity,
+        maximum_pieces as i32,
+        &mut line,
+        160,
         RLFV_SEPARATE_LINES,
         "iii",
-        &mut destinations,
+        &mut [
+            ReadValueArray::Integers(piece_x),
+            ReadValueArray::Integers(piece_y),
+            ReadValueArray::Integers(piece_z),
+        ],
     );
     *number_piece_list = count;
     error

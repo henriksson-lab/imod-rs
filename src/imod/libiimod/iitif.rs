@@ -4391,21 +4391,13 @@ pub unsafe fn ii_tiff_write_section_float(
     // fails loudly rather than inventing an error return the C does not have.
     assert!(!in_file.is_null(), "tiffWriteSectionAny: null inFile");
     let file = &mut *in_file;
-    let pixel_bytes = if file.format == IIFORMAT_RGB {
-        3
-    } else if matches!(
-        file.type_,
-        ImageDataType::UnsignedByte | ImageDataType::Byte
-    ) {
-        1
-    } else if matches!(
-        file.type_,
-        ImageDataType::UnsignedShort | ImageDataType::Short
-    ) {
-        2
-    } else {
-        4
-    };
+    // `ifFloat` is 1: the caller's buffer holds `nx * ny` *floats* whatever
+    // the file's pixel type, and `iiMakeBufferConvertIfFloat` converts them.
+    // Sizing the view by the output type (1 byte for a byte TIFF) made every
+    // non-float TIFF written through `iiWriteSectionFloat` fail with "Float
+    // buffer is too short for conversion" (`newstack -format TIF` on byte
+    // data, 2026-09-25).
+    let pixel_bytes = 4;
     let Some(byte_count) = usize::try_from(file.nx)
         .ok()
         .and_then(|nx| {

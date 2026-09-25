@@ -1,6 +1,7 @@
 //! Translation of `IMOD/flib/image/newstack.f90`.
 #![allow(dead_code)]
 
+use crate::imod::flib::subrs::compat::gfortran_rt::{gfortran_cosd_r4, gfortran_sind_r4};
 use crate::imod::flib::subrs::hvem::b3ddate::b3d_date;
 use crate::imod::flib::subrs::hvem::dopen::dopen;
 use crate::imod::flib::subrs::hvem::getbinnedsize::get_binned_size;
@@ -987,7 +988,7 @@ pub fn newstack() {
                         section + number_offset,
                         input_names[file_index]
                     );
-                    std::process::exit(1);
+                    crate::imod::libcfshr::b3dutil::exit(1);
                 }
                 if !excluded_sections.contains(&section) {
                     kept_sections.push(section);
@@ -1683,30 +1684,11 @@ pub fn newstack() {
             xfunit(&mut frot, 1.0);
             if rotate_angle != 0.0 {
                 // `cosd`/`sind` are the gfortran degree intrinsics, which
-                // enter `_gfortran_cosd_r4`/`_gfortran_sind_r4`: the angle is
-                // folded onto the nearest quadrant, the remaining degrees are
-                // turned into radians through a double multiply that is
-                // rounded back to single, and single-precision `cosf`/`sinf`
-                // supply the value.  `to_radians().cos()` is a different
-                // function: it disagrees with the reference by up to hundreds
-                // of ulps and never returns the exact 0 and 1 that a multiple
-                // of 90 degrees has to produce.
-                let magnitude = rotate_angle.abs();
-                let quadrant = (magnitude / 90.0).round_ties_even() as i32;
-                let degrees = magnitude - quadrant as f32 * 90.0;
-                let radians = (f64::from(degrees) * (std::f64::consts::PI / 180.0)) as f32;
-                let (quadrant_cos, quadrant_sin) = match quadrant & 3 {
-                    0 => (radians.cos(), radians.sin()),
-                    1 => (-radians.sin(), radians.cos()),
-                    2 => (-radians.cos(), -radians.sin()),
-                    _ => (radians.sin(), -radians.cos()),
-                };
-                frot[0] = quadrant_cos;
-                frot[2] = if rotate_angle < 0.0 {
-                    quadrant_sin
-                } else {
-                    -quadrant_sin
-                };
+                // enter `_gfortran_cosd_r4`/`_gfortran_sind_r4` (`nm
+                // newstack.o`); the library routines are transcribed in
+                // `gfortran_rt`.
+                frot[0] = gfortran_cosd_r4(rotate_angle);
+                frot[2] = -gfortran_sind_r4(rotate_angle);
                 frot[3] = frot[0];
                 frot[1] = -frot[2];
             }
@@ -2777,6 +2759,17 @@ pub fn newstack() {
         // `buffer_in_array` says which name holds it.
         let mut buffer_in_array = false;
         let mut load_temp = Vec::<f32>::new();
+        // The Fourier route's padded FFT, cropped-output and `temp` buffers
+        // (`newstack.f90:2441-2478`), which in the source are regions of the
+        // same one `array` allocation.  They were fresh `vec![0.0; n]` per
+        // section, so every section page-faulted ~13 MB in again (3x native's
+        // page faults on `-phase`).  They are now kept across sections and
+        // re-zeroed to their full length at each use (`clear` + `resize`),
+        // which leaves every element exactly as the fresh allocation did --
+        // the pad routines, the FFT and the repack see the same bits.
+        let mut fs_fft = Vec::<f32>::new();
+        let mut fs_cropped = Vec::<f32>::new();
+        let mut fs_temp = Vec::<f32>::new();
         // `newstack.f90:1517`: the preliminary pass above ran with unit
         // printing off (`newstack.f90:302`); the processing loop turns it back
         // on so `imopen` and `irdhdr` report each file that is used.
@@ -6753,13 +6746,14 @@ pub fn newstack() {
                                 // off this same start, so its total includes the
                                 // padding time counted into `taperTime`.
                                 wall_start = crate::imod::libcfshr::b3dutil::wall_time();
-                                let mut fft =
-                                    vec![0.0_f32; ((nx_fspad + 2) * ny_fspad.max(1)) as usize];
-                                let mut temp = vec![
-                                    0.0_f32;
-                                    2 * (nx_fspad.max(nx_fcrop_pad) / 2 + 2)
-                                        as usize
-                                ];
+                                // Reused buffers, zeroed to full length: the
+                                // same contents a fresh `vec![0.0; n]` had.
+                                let mut fft = std::mem::take(&mut fs_fft);
+                                fft.clear();
+                                fft.resize(((nx_fspad + 2) * ny_fspad.max(1)) as usize, 0.0);
+                                let mut temp = std::mem::take(&mut fs_temp);
+                                temp.clear();
+                                temp.resize(2 * (nx_fspad.max(nx_fcrop_pad) / 2 + 2) as usize, 0.0);
                                 if noise_pad {
                                     slice_noise_taper_pad(
                                         crate::imod::libcfshr::taperpad::PadIn::Float(&input),
@@ -6796,8 +6790,16 @@ pub fn newstack() {
                                     x_offsets[offset_index].round() - x_offsets[offset_index];
                                 let shift_y =
                                     y_offsets[offset_index].round() - y_offsets[offset_index];
-                                let mut cropped =
-                                    vec![0.0_f32; ((nx_fcrop_pad + 2) * ny_fcrop_pad) as usize];
+                                // A phase shift works in place and replaces
+                                // `cropped` with `fft` below before anything
+                                // reads it, so it only needs a buffer for a
+                                // reduction or expansion.
+                                let mut cropped = std::mem::take(&mut fs_cropped);
+                                if !phase_shift {
+                                    cropped.clear();
+                                    cropped
+                                        .resize(((nx_fcrop_pad + 2) * ny_fcrop_pad) as usize, 0.0);
+                                }
                                 if phase_shift {
                                     fourier_shift_image(
                                         &mut fft, nx_fspad, ny_fspad, shift_x, shift_y, &mut temp,
@@ -6840,8 +6842,11 @@ pub fn newstack() {
                                 // (`newstack.f90:2439, 2459`).
                                 //
                                 if phase_shift {
-                                    cropped = fft;
+                                    fs_cropped = std::mem::replace(&mut cropped, fft);
+                                } else {
+                                    fs_fft = fft;
                                 }
+                                fs_temp = temp;
                                 todfft_c(&mut cropped, nx_fcrop_pad, ny_fcrop_pad, 1);
                                 //
                                 // Replicate last real column of image into the extra
@@ -6917,6 +6922,16 @@ pub fn newstack() {
                                 iy1 + num_y_chunk - 1,
                                 dmean_sec,
                             );
+                            // Hand the Fourier buffer back for the next
+                            // section: it is the padded FFT after a phase
+                            // shift and the cropped array otherwise.
+                            if phase_shift || fourier_scaling {
+                                if phase_shift {
+                                    fs_fft = std::mem::take(&mut fourier_out);
+                                } else {
+                                    fs_cropped = std::mem::take(&mut fourier_out);
+                                }
+                            }
                             // `newstack.f90:2501-2502`.  `iChunkBase` is
                             // `integer(kind = 8)` (`newstack.f90:53`) and right
                             // justified in 20; `ioutBase` is `integer*4`

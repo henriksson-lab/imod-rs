@@ -253,22 +253,19 @@ unsafe fn ii_mrc_read_section_float(
     };
     let mut li = LoadInfo::default();
     ii_mrc_set_load_info(image, &mut li);
-    let Some(width): Option<usize> =
-        (li.xmax - li.xmin + 1 + li.pad_left.max(0) + li.pad_right.max(0))
-            .try_into()
-            .ok()
-    else {
-        return IIERR_BAD_CALL;
-    };
-    let Some(rows): Option<usize> = (if li.axis == 2 {
+    // A negative extent is not checked here in the C: `mrcReadSectionFloat`'s
+    // `iiInitReadSectionAny` reports it (with its message) before the buffer is
+    // touched, so an empty view is passed down instead of returning silently.
+    let width: usize = (li.xmax - li.xmin + 1 + li.pad_left.max(0) + li.pad_right.max(0))
+        .try_into()
+        .unwrap_or(0);
+    let rows: usize = (if li.axis == 2 {
         li.zmax - li.zmin + 1
     } else {
         li.ymax - li.ymin + 1
     })
     .try_into()
-    .ok() else {
-        return IIERR_BAD_CALL;
-    };
+    .unwrap_or(0);
     let Some(length) = width
         .checked_mul(rows)
         .and_then(|pixels| pixels.checked_mul(4))
@@ -297,24 +294,18 @@ fn read_section_unscaled(
     };
     header.fp = image.fp.clone();
     ii_change_call_count(1);
-    let Some(width): Option<usize> =
-        (li.xmax - li.xmin + 1 + li.pad_left.max(0) + li.pad_right.max(0))
-            .try_into()
-            .ok()
-    else {
-        ii_change_call_count(-1);
-        return IIERR_BAD_CALL;
-    };
-    let Some(rows): Option<usize> = (if li.axis == 2 {
+    // As in `iiMRCreadSectionFloat`: a negative extent reaches
+    // `iiInitReadSectionAny`, which reports it; it is not refused silently here.
+    let width: usize = (li.xmax - li.xmin + 1 + li.pad_left.max(0) + li.pad_right.max(0))
+        .try_into()
+        .unwrap_or(0);
+    let rows: usize = (if li.axis == 2 {
         li.zmax - li.zmin + 1
     } else {
         li.ymax - li.ymin + 1
     })
     .try_into()
-    .ok() else {
-        ii_change_call_count(-1);
-        return IIERR_BAD_CALL;
-    };
+    .unwrap_or(0);
     let err = if as_float != 0 {
         let Some(pixels) = width.checked_mul(rows) else {
             ii_change_call_count(-1);

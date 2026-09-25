@@ -43,7 +43,7 @@ pub fn todfft(array: &mut [f32], nx: i32, ny: i32, idir: i32) {
             "ERROR: todfft - nx= %d must be even with IMOD FFT routines\n",
             &[CArg::Int(nx as i64)],
         ));
-        std::process::exit(1);
+        crate::imod::libcfshr::b3dutil::exit(1);
     }
     let stride = nx + 2;
     let total = stride * ny;
@@ -54,18 +54,94 @@ pub fn todfft(array: &mut [f32], nx: i32, ny: i32, idir: i32) {
     // transposes before and after it (`OLD_FFT_TIMES` is not defined, so the
     // `malloc` is unconditional) and runs `realft`/`hermft` with unit stride
     // on the transposed copy, real and imaginary parts `ny` apart.
-    let mut transpose = vec![0.0_f32; total as usize];
-    let (mut nx_out, mut ny_out) = (stride, ny);
-    if idir == 0 {
+    //
+    // The transpose array is kept between calls on a thread instead of being
+    // allocated and freed on each: callers such as `clip filter` and
+    // `clip spectrum` transform one slice-sized image per section, and a
+    // slice-sized block freed and allocated again every section let glibc
+    // hand the heap top back to the kernel and fault it in again.  Its
+    // contents are never read stale: both directions first fill all
+    // `stride * ny` elements with `rotate_flip_image`, a permutation.
+    thread_local! {
+        static TRANSPOSE: std::cell::RefCell<Vec<f32>> =
+            const { std::cell::RefCell::new(Vec::new()) };
+    }
+    TRANSPOSE.with_borrow_mut(|transpose| {
+        transpose.resize(total as usize, 0.0);
+        let transpose = &mut transpose[..total as usize];
+        let (mut nx_out, mut ny_out) = (stride, ny);
+        if idir == 0 {
+            dim[1] = total;
+            dim[3] = total;
+            dim[2] = 2 * ny;
+            dim[4] = ny;
+            dim[5] = 1;
+            rotate_flip_image(
+                RotateFlipData::Float {
+                    array: &array[..total as usize],
+                    brray: transpose,
+                },
+                stride,
+                ny,
+                7,
+                0,
+                0,
+                0,
+                &mut nx_out,
+                &mut ny_out,
+                0,
+            );
+            realft(transpose, ny as usize, nxo2, &mut dim);
+            rotate_flip_image(
+                RotateFlipData::Float {
+                    array: transpose,
+                    brray: &mut array[..total as usize],
+                },
+                ny,
+                stride,
+                7,
+                0,
+                0,
+                0,
+                &mut nx_out,
+                &mut ny_out,
+                0,
+            );
+            dim[2] = stride;
+            dim[4] = stride;
+            dim[5] = 2;
+            cmplft(array, 1, ny, &mut dim);
+            // `for (i = 0; i < nxt1; i += 2)` visits the pairs `(i, i + 1)`
+            // from 0 while `i + 1 < nxt`, exactly the pairs
+            // `chunks_exact_mut(2)` yields over `nxt` elements; each element
+            // is scaled independently, so the index form only cost a bounds
+            // check per element.
+            for pair in array[..total as usize].chunks_exact_mut(2) {
+                pair[0] *= scale;
+                pair[1] *= scale;
+            }
+            return;
+        }
         dim[1] = total;
+        dim[2] = stride;
         dim[3] = total;
-        dim[2] = 2 * ny;
-        dim[4] = ny;
-        dim[5] = 1;
+        dim[4] = stride;
+        dim[5] = 2;
+        // The same pair walk as the forward scaling above.
+        for pair in array[..total as usize].chunks_exact_mut(2) {
+            pair[0] *= scale;
+            pair[1] = -pair[1] * scale;
+        }
+        cmplft(array, 1, ny, &mut dim);
+        let mut index = 1;
+        for _ in 0..ny {
+            array[index as usize] = array[(nx - 1 + index) as usize];
+            index += stride;
+        }
         rotate_flip_image(
             RotateFlipData::Float {
                 array: &array[..total as usize],
-                brray: &mut transpose,
+                brray: transpose,
             },
             stride,
             ny,
@@ -77,10 +153,13 @@ pub fn todfft(array: &mut [f32], nx: i32, ny: i32, idir: i32) {
             &mut ny_out,
             0,
         );
-        realft(&mut transpose, ny as usize, nxo2, &mut dim);
+        dim[2] = 2 * ny;
+        dim[4] = ny;
+        dim[5] = 1;
+        hermft(transpose, ny as usize, nxo2, &mut dim);
         rotate_flip_image(
             RotateFlipData::Float {
-                array: &transpose,
+                array: transpose,
                 brray: &mut array[..total as usize],
             },
             ny,
@@ -93,65 +172,7 @@ pub fn todfft(array: &mut [f32], nx: i32, ny: i32, idir: i32) {
             &mut ny_out,
             0,
         );
-        dim[2] = stride;
-        dim[4] = stride;
-        dim[5] = 2;
-        cmplft(array, 1, ny, &mut dim);
-        for index in (0..total - 1).step_by(2) {
-            array[index as usize] *= scale;
-            array[(index + 1) as usize] *= scale;
-        }
-        return;
-    }
-    dim[1] = total;
-    dim[2] = stride;
-    dim[3] = total;
-    dim[4] = stride;
-    dim[5] = 2;
-    for index in (0..total - 1).step_by(2) {
-        array[index as usize] *= scale;
-        array[(index + 1) as usize] = -array[(index + 1) as usize] * scale;
-    }
-    cmplft(array, 1, ny, &mut dim);
-    let mut index = 1;
-    for _ in 0..ny {
-        array[index as usize] = array[(nx - 1 + index) as usize];
-        index += stride;
-    }
-    rotate_flip_image(
-        RotateFlipData::Float {
-            array: &array[..total as usize],
-            brray: &mut transpose,
-        },
-        stride,
-        ny,
-        7,
-        0,
-        0,
-        0,
-        &mut nx_out,
-        &mut ny_out,
-        0,
-    );
-    dim[2] = 2 * ny;
-    dim[4] = ny;
-    dim[5] = 1;
-    hermft(&mut transpose, ny as usize, nxo2, &mut dim);
-    rotate_flip_image(
-        RotateFlipData::Float {
-            array: &transpose,
-            brray: &mut array[..total as usize],
-        },
-        ny,
-        stride,
-        7,
-        0,
-        0,
-        0,
-        &mut nx_out,
-        &mut ny_out,
-        0,
-    );
+    });
 }
 
 /// C `todfftc`.

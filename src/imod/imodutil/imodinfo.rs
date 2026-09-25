@@ -5,7 +5,6 @@
 //! `Imod`, `Iobj`, `Icont`, and `Imesh` declarations instead of inventing a
 //! separate command-only model representation.
 use std::cell::RefCell;
-use std::env;
 use std::io::Write;
 use std::os::fd::BorrowedFd;
 
@@ -82,14 +81,14 @@ pub fn imodinfo_usage(name: &str) {
 }
 /// Original: `main` (`imodinfo.cpp:116`).
 pub fn imodinfo() {
-    let argv: Vec<String> = env::args().collect();
+    let argv: Vec<String> = crate::imod::libcfshr::b3dutil::program_args();
     let progname = imod_prog_name(&argv[0]);
     setExitPrefix(format!("ERROR: {progname} - ").as_bytes());
     if argv.len() == 1 {
         imod_version(Some(&progname));
         imod_copyright();
         imodinfo_usage(&progname);
-        std::process::exit(0);
+        crate::imod::libcfshr::b3dutil::exit(0);
     }
     let mut iarg = 1_usize;
     let mut verbose = 0_i32;
@@ -120,7 +119,7 @@ pub fn imodinfo() {
             'g' => {
                 iarg += 1;
                 let Some(value) = argv.get(iarg) else {
-                    std::process::exit(1)
+                    crate::imod::libcfshr::b3dutil::exit(1)
                 };
                 // `atoi(argv[++i])`: `strtol` over the longest prefix that
                 // converts, and zero where nothing does.
@@ -166,7 +165,7 @@ pub fn imodinfo() {
             'n' => mode = 3,
             'i' => scaninside = true,
             // `imodinfo.cpp:241-243`: `case 'D': Debug = TRUE;` -- was accepted and ignored.
-            'D' => DEBUG.store(true, std::sync::atomic::Ordering::Relaxed),
+            'D' => DEBUG.set(true),
             'b' => {
                 iarg += 1;
                 bins = argv
@@ -245,7 +244,7 @@ pub fn imodinfo() {
             'o' => {
                 iarg += 1;
                 let Some(value) = argv.get(iarg) else {
-                    std::process::exit(1)
+                    crate::imod::libcfshr::b3dutil::exit(1)
                 };
                 let Ok(values) = parselist(value) else {
                     exit_error(format!("Parsing list {value}").as_bytes());
@@ -261,7 +260,7 @@ pub fn imodinfo() {
             'f' => {
                 iarg += 1;
                 let Some(value) = argv.get(iarg) else {
-                    std::process::exit(1)
+                    crate::imod::libcfshr::b3dutil::exit(1)
                 };
                 out_file = Some(value.clone());
             }
@@ -270,7 +269,7 @@ pub fn imodinfo() {
                 if argv[iarg].len() > 2 {
                     if argv[iarg] == "-help" {
                         imodinfo_usage(&progname);
-                        std::process::exit(0);
+                        crate::imod::libcfshr::b3dutil::exit(0);
                     }
                     exit_error(
                         format!("Unknown option {}; enter -help for help", argv[iarg]).as_bytes(),
@@ -284,14 +283,14 @@ pub fn imodinfo() {
                     argv[iarg]
                 );
                 imodinfo_usage(&progname);
-                std::process::exit(2);
+                crate::imod::libcfshr::b3dutil::exit(2);
             }
         }
         iarg += 1;
     }
     if iarg >= argv.len() {
         imodinfo_usage(&progname);
-        std::process::exit(2);
+        crate::imod::libcfshr::b3dutil::exit(2);
     }
     if let Some(filename) = out_file.as_ref() {
         if imod_backup_file(filename) != 0 {
@@ -525,7 +524,7 @@ pub fn imodinfo() {
         }
         let _ = fout.write_all(b"\n\n");
     }
-    std::process::exit(0);
+    crate::imod::libcfshr::b3dutil::exit(0);
 }
 /// Original: `imodinfo_print_model` (`imodinfo.cpp:464`).
 pub fn imodinfo_print_model(
@@ -2280,8 +2279,12 @@ pub fn info_contour_vol(cont: Option<&Icont>, _objflags: u32, pixsize: f64, zsca
 }
 /// Original: `contourVolumeFactor` (`imodinfo.cpp:1765`).
 /// C file-scope `static int Debug` (`imodinfo.cpp:114`), set by `-D` (`:242`).
-/// An atomic rather than a `thread_local!`: it is a process-global flag in C.
-static DEBUG: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+/// A `thread_local!`, like the tree's other C statics, so a run through the
+/// in-process command runner (`commands::run_in_process`) starts with it
+/// clear, as a new process would.
+thread_local! {
+    static DEBUG: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
+}
 
 /// Original: `contourVolumeFactor` (`imodinfo.cpp:1765-1888`).
 ///
@@ -2295,7 +2298,7 @@ static DEBUG: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new
 /// the *matching* point, the four-way clip against `min`/`max`, and the source's
 /// stop after the first point that finds anything.
 pub fn contour_volume_factor(obj: &Iobj, cont: &Icont, min: Ipoint, max: Ipoint) -> f32 {
-    let debug = DEBUG.load(std::sync::atomic::Ordering::Relaxed);
+    let debug = DEBUG.get();
     let mut vol_fac = 0.0_f32;
     let mut resol = 0;
     let (mut list_inc, mut vert_base, mut norm_add) = (0, 0, 0);
@@ -2686,7 +2689,7 @@ pub fn scanned_volume(
                 nestind[inbox] = -1;
                 inbox += 1;
                 // `imodinfo.cpp:2068-2070`.
-                if DEBUG.load(std::sync::atomic::Ordering::Relaxed) {
+                if DEBUG.get() {
                     let _ = ImodFile::Stdout.write_all(&c_format_bytes(
                         "contour %d  area %f  volume factor %f\n",
                         &[

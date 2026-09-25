@@ -4,7 +4,10 @@ use std::io::{self, Write};
 
 /// Original: `getinout` (`getinout.f:9`).
 pub fn getinout(narg: i32) -> io::Result<(String, String)> {
-    let arguments: Vec<String> = std::env::args().skip(1).collect();
+    let arguments: Vec<String> = crate::imod::libcfshr::b3dutil::program_args()
+        .into_iter()
+        .skip(1)
+        .collect();
     let input = match arguments.first() {
         Some(argument) => argument.clone(),
         None => {

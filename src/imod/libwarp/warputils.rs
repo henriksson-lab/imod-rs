@@ -549,290 +549,433 @@ pub fn extrapolate_grid(
         y_interval
     };
 
-    for lind in 0..N_IN_LIST.get() as usize {
-        let at = 2 * ngrid + 4 * lind;
-        let ixyind =
-            i32::from_ne_bytes([solved[at], solved[at + 1], solved[at + 2], solved[at + 3]]);
-        let ix = ixyind % xdim;
-        let iy = ixyind / xdim;
+    // Performance (TO_OPT.md "Serial gaps: taperpad, newstack FFT paths,
+    // extrapolate_grid"): from here on `solved` is only read, and every
+    // `solved[ngrid + i]` below is `blockType[i]`.  `block_type` is that view
+    // -- the whole tail from `ngrid`, so an index panics exactly when the old
+    // `solved[ngrid + i]` did (an `ngrid` past the end gives an empty view,
+    // on which every read panics, as before).  The two scans that dominate
+    // this routine (the nearest-block edge walk and the neighbourhood sweep)
+    // then check their bounds once per edge / per row instead of per element;
+    // the elements visited, their order, and all arithmetic are unchanged.
+    let solved: &[u8] = &*solved;
+    let block_type: &[u8] = solved.get(ngrid..).unwrap_or(&[]);
 
-        // `minx`/`miny` are uninitialised in the source when no block is found;
-        // nothing reads them in that case because `sNumNeigh[lind]` stays 0.
-        let mut minx = 0;
-        let mut miny = 0;
+    // The `#pragma omp parallel for` over `thread` (`warputils.c:392-600`),
+    // following TO_OPT.md's "Parallelisation round" pattern: the same closure
+    // runs one contiguous `lind` range per thread, with the source's split
+    // `thrListStart[t] = ninList * t / numThreads` and the source's thread
+    // count (`numOMPthreads(min(previous ninList, 16))` above -- 1 on the
+    // first call, as in the C).  Why the result cannot depend on the thread
+    // count or the schedule:
+    //
+    // * Writes: iteration `lind` writes only `dxGrid`/`dyGrid[indList[lind]]`,
+    //   a point that was *unsolved* when this `blockType`/`indList` pair was
+    //   built (both come from the same analysis call and live together in
+    //   `solved[ngrid..]`; the caller only rewrites the flags in
+    //   `solved[..ngrid]`).  The indices are distinct.
+    // * Reads that are used: a neighbour block `jxyind` has `btype != 0`, and
+    //   the corners each `case btype` actually uses are exactly the ones that
+    //   were *solved* at analysis (`btype` 5: all four; 1-4: the three other
+    //   than the one the number names).  So no used read ever hits a point any
+    //   iteration writes, and every iteration sees the caller's values.
+    // * The one read of an unsolved corner (`dx00` for `btype` 1, and so on)
+    //   is loaded but never used, in the C as here.
+    // * Each point accumulates its own sums over its own neighbour list, in
+    //   list order, into a local instead of into `dxGrid[ixyind]`: the same
+    //   single-precision `+=` sequence then `/= wsum`, bit for bit.  Nothing
+    //   is summed across points.
+    // * The per-thread neighbour lists are concatenated in thread order with
+    //   the start indices shifted, as the C does after the region; the
+    //   ranges are contiguous and increasing, so the result is the same array
+    //   a single sequential list gives.
+    //
+    // So each iteration's results depend only on the caller's grid and the
+    // analysis, and the scatter below writes them to the same elements the
+    // in-place loop wrote.  The worker must not touch the `thread_local!`
+    // statics (rayon threads have their own), so `ninList` is read here.
+    let nin = N_IN_LIST.get() as usize;
+    let dx_in: &[f32] = &*dx_grid;
+    let dy_in: &[f32] = &*dy_grid;
+    let (num_neigh_in, ind_neigh_start_in, neighbors_in): (&[i32], &[i32], &[i32]) =
+        (&num_neigh, &ind_neigh_start, &neighbors);
+    // One thread's results: `(ixyind, dx, dy)` per `lind`, and for a fresh
+    // analysis its `sNumNeigh`/`sIndNeighStart` entries (starts relative to
+    // its own list) and its neighbour list.
+    struct ThreadOut {
+        filled: Vec<(i32, f32, f32)>,
+        num_neigh: Vec<i32>,
+        ind_neigh_start: Vec<i32>,
+        neighbors: Vec<i32>,
+    }
+    let run_thread = move |l0: usize, l1: usize| -> ThreadOut {
+        let mut out = ThreadOut {
+            filled: Vec::with_capacity(l1 - l0),
+            num_neigh: Vec::new(),
+            ind_neigh_start: Vec::new(),
+            neighbors: Vec::new(),
+        };
+        for lind in l0..l1 {
+            let at = 2 * ngrid + 4 * lind;
+            let ixyind =
+                i32::from_ne_bytes([solved[at], solved[at + 1], solved[at + 2], solved[at + 3]]);
+            let ix = ixyind % xdim;
+            let iy = ixyind / xdim;
 
-        if reuse == 0 {
-            num_neigh[lind] = 0;
-            ind_neigh_start[lind] = neighbors.len() as i32;
+            // `minx`/`miny` are uninitialised in the source when no block is found;
+            // nothing reads them in that case because `sNumNeigh[lind]` stays 0.
+            let mut minx = 0;
+            let mut miny = 0;
 
-            let mut dmin = 1.0e30_f32;
+            let mut my_num_neigh = 0_i32;
+            let my_start = out.neighbors.len() as i32;
+            if reuse == 0 {
+                let mut dmin = 1.0e30_f32;
 
-            /* find closest block with transform */
-            /* Search progressively larger squares until half-side > minimum distance */
-            let delta_lim = if nx_grid > ny_grid { nx_grid } else { ny_grid };
-            for delta in 1..delta_lim {
-                // `delta` is an int and `0.7` a double literal, so the whole
-                // comparison is done in double with `xyint` and `dmin` promoted.
-                if (delta as f64 - 0.7) * (delta as f64 - 0.7) * xyint as f64 * xyint as f64
-                    > dmin as f64
-                {
-                    break;
-                }
-
-                /* Look at the 4 edges of the square, 4 directions;  Start in corner */
-                for dir in 0..4_usize {
-                    let mut ixcorn = ix + dx_corn[dir] * delta;
-                    let mut iycorn = iy + dy_corn[dir] * delta;
-
-                    /* If whole edge is out, skip */
-                    if (dx_along[dir] != 0 && (iycorn < 0 || iycorn >= ny_grid - 1))
-                        || (dy_along[dir] != 0 && (ixcorn < 0 || ixcorn >= nx_grid - 1))
+                /* find closest block with transform */
+                /* Search progressively larger squares until half-side > minimum distance */
+                let delta_lim = if nx_grid > ny_grid { nx_grid } else { ny_grid };
+                for delta in 1..delta_lim {
+                    // `delta` is an int and `0.7` a double literal, so the whole
+                    // comparison is done in double with `xyint` and `dmin` promoted.
+                    if (delta as f64 - 0.7) * (delta as f64 - 0.7) * xyint as f64 * xyint as f64
+                        > dmin as f64
                     {
-                        continue;
-                    }
-                    let mut num = 2 * delta;
-
-                    /* Adjust the other dimension's limits */
-                    let start;
-                    let end;
-                    if dx_along[dir] != 0 {
-                        start = {
-                            let inner = if nx_grid - 2 < ixcorn {
-                                nx_grid - 2
-                            } else {
-                                ixcorn
-                            };
-                            if 0 > inner { 0 } else { inner }
-                        };
-                        let e = ixcorn + (num - 1) * dx_along[dir];
-                        end = {
-                            let inner = if nx_grid - 2 < e { nx_grid - 2 } else { e };
-                            if 0 > inner { 0 } else { inner }
-                        };
-                        ixcorn = start;
-                    } else {
-                        start = {
-                            let inner = if ny_grid - 2 < iycorn {
-                                ny_grid - 2
-                            } else {
-                                iycorn
-                            };
-                            if 0 > inner { 0 } else { inner }
-                        };
-                        let e = iycorn + (num - 1) * dy_along[dir];
-                        end = {
-                            let inner = if ny_grid - 2 < e { ny_grid - 2 } else { e };
-                            if 0 > inner { 0 } else { inner }
-                        };
-                        iycorn = start;
+                        break;
                     }
 
-                    /* Test each position along the edge */
-                    num = (if start - end > end - start {
-                        start - end
-                    } else {
-                        end - start
-                    }) + 1;
-                    for _i in 0..num {
-                        let btype = solved[ngrid + (ixcorn + iycorn * xdim) as usize] as i32;
-                        if btype != 0 {
-                            let dx = x_interval * (ixcorn - ix) as f32 + xf_ofs_x[btype as usize];
-                            let dy = y_interval * (iycorn - iy) as f32 + xf_ofs_y[btype as usize];
-                            let dist = dx * dx + dy * dy;
-                            if dist < dmin {
-                                dmin = dist;
-                                minx = ixcorn;
-                                miny = iycorn;
-                            }
+                    /* Look at the 4 edges of the square, 4 directions;  Start in corner */
+                    for dir in 0..4_usize {
+                        let mut ixcorn = ix + dx_corn[dir] * delta;
+                        let mut iycorn = iy + dy_corn[dir] * delta;
+
+                        /* If whole edge is out, skip */
+                        if (dx_along[dir] != 0 && (iycorn < 0 || iycorn >= ny_grid - 1))
+                            || (dy_along[dir] != 0 && (ixcorn < 0 || ixcorn >= nx_grid - 1))
+                        {
+                            continue;
                         }
-                        ixcorn += dx_along[dir];
-                        iycorn += dy_along[dir];
-                    }
-                }
-            }
+                        let mut num = 2 * delta;
 
-            /* Get actual distance to look, range of indexes to search, and
-            the criterion which is square of maximum distance */
-            // `sqrt` is the double routine and its result is cast back to float
-            // before the multiply; `B3DMAX(xInterval, 1.)` compares a float with
-            // a double literal, so `dlook` is a double expression narrowed on
-            // store.  `B3DNINT` is `(int)floor(x + 0.5)`, not `round()`.
-            let dist = range * ((dmin as f64).sqrt() as f32);
-            let mut dlook = ({
-                let d = if x_interval as f64 > 1. {
-                    x_interval as f64
-                } else {
-                    1.
-                };
-                dist as f64 / d + 1.
-            }) as f32;
-            let jxmin = {
-                let n = ((ix as f32 - dlook - 1.) as f64 + 0.5).floor() as i32;
-                if 0 > n { 0 } else { n }
-            };
-            let jxmax = {
-                let n = ((ix as f32 + dlook) as f64 + 0.5).floor() as i32;
-                if nx_grid - 2 < n { nx_grid - 2 } else { n }
-            };
-            dlook = ({
-                let d = if y_interval as f64 > 1. {
-                    y_interval as f64
-                } else {
-                    1.
-                };
-                dist as f64 / d + 1.
-            }) as f32;
-            let jymin = {
-                let n = ((iy as f32 - dlook - 1.) as f64 + 0.5).floor() as i32;
-                if 0 > n { 0 } else { n }
-            };
-            let jymax = {
-                let n = ((iy as f32 + dlook) as f64 + 0.5).floor() as i32;
-                if ny_grid - 2 < n { ny_grid - 2 } else { n }
-            };
-            let distcrit = dist * dist;
-
-            /* Loop in the neighborhood, find boundary points within range */
-            for jy in jymin..=jymax {
-                for jx in jxmin..=jxmax {
-                    let btype = solved[ngrid + (jx + jy * xdim) as usize] as i32;
-                    if btype != 0 {
-                        let dxcen = (jx - ix) as f32 * x_interval + xf_ofs_x[btype as usize];
-                        let dycen = (jy - iy) as f32 * y_interval + xf_ofs_y[btype as usize];
-                        let dist = dxcen * dxcen + dycen * dycen;
-                        if dist <= distcrit {
-                            /* Find dominant direction to the point */
-                            // `atan2` is the double routine and the divide and
-                            // offset stay in double until the store into `angle`.
-                            let mut angle =
-                                ((dycen as f64).atan2(dxcen as f64) / 0.017453293 + 157.5) as f32;
-                            if angle < 0. {
-                                angle += 360.;
-                            }
-                            let ind_dom = {
-                                let v = (angle / 45.) as i32;
-                                let inner = if 7 < v { 7 } else { v };
+                        /* Adjust the other dimension's limits */
+                        let start;
+                        let end;
+                        if dx_along[dir] != 0 {
+                            start = {
+                                let inner = if nx_grid - 2 < ixcorn {
+                                    nx_grid - 2
+                                } else {
+                                    ixcorn
+                                };
                                 if 0 > inner { 0 } else { inner }
                             };
+                            let e = ixcorn + (num - 1) * dx_along[dir];
+                            end = {
+                                let inner = if nx_grid - 2 < e { nx_grid - 2 } else { e };
+                                if 0 > inner { 0 } else { inner }
+                            };
+                            ixcorn = start;
+                        } else {
+                            start = {
+                                let inner = if ny_grid - 2 < iycorn {
+                                    ny_grid - 2
+                                } else {
+                                    iycorn
+                                };
+                                if 0 > inner { 0 } else { inner }
+                            };
+                            let e = iycorn + (num - 1) * dy_along[dir];
+                            end = {
+                                let inner = if ny_grid - 2 < e { ny_grid - 2 } else { e };
+                                if 0 > inner { 0 } else { inner }
+                            };
+                            iycorn = start;
+                        }
 
-                            /* Check that this point is a boundary, i.e. does not
-                            have a neighbor in any one of the 5 directions toward
-                            or at right angles to the dominant direction */
-                            let mut boundary = 0;
-                            let mut is = ind_dom;
-                            while is <= ind_dom + 4 && boundary == 0 {
-                                let nayx = jx + ixstep[is as usize];
-                                let nayy = jy + iystep[is as usize];
-                                if nayx >= 0
-                                    && nayx < nx_grid - 1
-                                    && nayy >= 0
-                                    && nayy < ny_grid - 1
-                                    && solved[ngrid + (nayx + nayy * xdim) as usize] == 0
-                                {
-                                    boundary = 1;
+                        /* Test each position along the edge */
+                        num = (if start - end > end - start {
+                            start - end
+                        } else {
+                            end - start
+                        }) + 1;
+                        // The walk visits `idx0 + i * step`, `0 <= i < num`
+                        // (`num >= 1`), affine in `i`, so its two ends bound every
+                        // index; `ixcorn`/`iycorn` were clamped to
+                        // `[0, nGrid - 2]` above, so none is negative.  One
+                        // checked assert on the ends replaces the per-element
+                        // check and panics for exactly the walks that did.
+                        let step = dx_along[dir] as i64 + dy_along[dir] as i64 * xdim as i64;
+                        let idx0 = ixcorn as i64 + iycorn as i64 * xdim as i64;
+                        let idx_last = idx0 + (num as i64 - 1) * step;
+                        assert!(
+                            idx0.min(idx_last) >= 0
+                                && (idx0.max(idx_last) as u64) < block_type.len() as u64
+                        );
+                        let mut idx = idx0 as isize;
+                        for _i in 0..num {
+                            // SAFETY: `idx` is on the walk whose ends were checked
+                            // in bounds just above.
+                            let btype = unsafe { *block_type.get_unchecked(idx as usize) } as i32;
+                            idx += step as isize;
+                            if btype != 0 {
+                                let dx =
+                                    x_interval * (ixcorn - ix) as f32 + xf_ofs_x[btype as usize];
+                                let dy =
+                                    y_interval * (iycorn - iy) as f32 + xf_ofs_y[btype as usize];
+                                let dist = dx * dx + dy * dy;
+                                if dist < dmin {
+                                    dmin = dist;
+                                    minx = ixcorn;
+                                    miny = iycorn;
                                 }
-                                is += 1;
                             }
+                            ixcorn += dx_along[dir];
+                            iycorn += dy_along[dir];
+                        }
+                    }
+                }
 
-                            /* For boundary or min point, add to weighted sum */
-                            if boundary != 0 || (jx == minx && jy == miny) {
-                                num_neigh[lind] += 1;
-                                neighbors.push(jx + jy * xdim);
+                /* Get actual distance to look, range of indexes to search, and
+                the criterion which is square of maximum distance */
+                // `sqrt` is the double routine and its result is cast back to float
+                // before the multiply; `B3DMAX(xInterval, 1.)` compares a float with
+                // a double literal, so `dlook` is a double expression narrowed on
+                // store.  `B3DNINT` is `(int)floor(x + 0.5)`, not `round()`.
+                let dist = range * ((dmin as f64).sqrt() as f32);
+                let mut dlook = ({
+                    let d = if x_interval as f64 > 1. {
+                        x_interval as f64
+                    } else {
+                        1.
+                    };
+                    dist as f64 / d + 1.
+                }) as f32;
+                let jxmin = {
+                    let n = ((ix as f32 - dlook - 1.) as f64 + 0.5).floor() as i32;
+                    if 0 > n { 0 } else { n }
+                };
+                let jxmax = {
+                    let n = ((ix as f32 + dlook) as f64 + 0.5).floor() as i32;
+                    if nx_grid - 2 < n { nx_grid - 2 } else { n }
+                };
+                dlook = ({
+                    let d = if y_interval as f64 > 1. {
+                        y_interval as f64
+                    } else {
+                        1.
+                    };
+                    dist as f64 / d + 1.
+                }) as f32;
+                let jymin = {
+                    let n = ((iy as f32 - dlook - 1.) as f64 + 0.5).floor() as i32;
+                    if 0 > n { 0 } else { n }
+                };
+                let jymax = {
+                    let n = ((iy as f32 + dlook) as f64 + 0.5).floor() as i32;
+                    if ny_grid - 2 < n { ny_grid - 2 } else { n }
+                };
+                let distcrit = dist * dist;
+
+                /* Loop in the neighborhood, find boundary points within range */
+                for jy in jymin..=jymax {
+                    // The row's `blockType` run `[jxmin, jxmax]`, sliced once
+                    // (it panics iff the old per-element read at `jxmax` did;
+                    // an empty range reads nothing, as the loop ran zero times).
+                    if jxmin > jxmax {
+                        continue;
+                    }
+                    let row0 = (jxmin + jy * xdim) as usize;
+                    let row = &block_type[row0..=(jxmax + jy * xdim) as usize];
+                    for (k, &bt) in row.iter().enumerate() {
+                        let btype = bt as i32;
+                        let jx = jxmin + k as i32;
+                        if btype != 0 {
+                            let dxcen = (jx - ix) as f32 * x_interval + xf_ofs_x[btype as usize];
+                            let dycen = (jy - iy) as f32 * y_interval + xf_ofs_y[btype as usize];
+                            let dist = dxcen * dxcen + dycen * dycen;
+                            if dist <= distcrit {
+                                /* Find dominant direction to the point */
+                                // `atan2` is the double routine and the divide and
+                                // offset stay in double until the store into `angle`.
+                                let mut angle = ((dycen as f64).atan2(dxcen as f64) / 0.017453293
+                                    + 157.5) as f32;
+                                if angle < 0. {
+                                    angle += 360.;
+                                }
+                                let ind_dom = {
+                                    let v = (angle / 45.) as i32;
+                                    let inner = if 7 < v { 7 } else { v };
+                                    if 0 > inner { 0 } else { inner }
+                                };
+
+                                /* Check that this point is a boundary, i.e. does not
+                                have a neighbor in any one of the 5 directions toward
+                                or at right angles to the dominant direction */
+                                let mut boundary = 0;
+                                let mut is = ind_dom;
+                                while is <= ind_dom + 4 && boundary == 0 {
+                                    let nayx = jx + ixstep[is as usize];
+                                    let nayy = jy + iystep[is as usize];
+                                    if nayx >= 0
+                                        && nayx < nx_grid - 1
+                                        && nayy >= 0
+                                        && nayy < ny_grid - 1
+                                        && block_type[(nayx + nayy * xdim) as usize] == 0
+                                    {
+                                        boundary = 1;
+                                    }
+                                    is += 1;
+                                }
+
+                                /* For boundary or min point, add to weighted sum */
+                                if boundary != 0 || (jx == minx && jy == miny) {
+                                    my_num_neigh += 1;
+                                    out.neighbors.push(jx + jy * xdim);
+                                }
                             }
                         }
                     }
                 }
             }
-        }
 
-        /* Now go through the neighbor list */
-        dx_grid[ixyind as usize] = 0.;
-        dy_grid[ixyind as usize] = 0.;
-        let mut wsum = 0.0_f32;
-        for nayx in 0..num_neigh[lind] {
-            let jxyind = neighbors[(ind_neigh_start[lind] + nayx) as usize];
-            let jx = jxyind % xdim;
-            let jy = jxyind / xdim;
-            let btype = solved[ngrid + jxyind as usize] as i32;
-            let dxcen = (jx - ix) as f32 * x_interval + xf_ofs_x[btype as usize];
-            let dycen = (jy - iy) as f32 * y_interval + xf_ofs_y[btype as usize];
-            let dist = dxcen * dxcen + dycen * dycen;
-
-            /* Compute the vector transform centered on lower left of block */
-            let dx00 = dx_grid[jxyind as usize];
-            let dx10 = dx_grid[(jxyind + 1) as usize];
-            let dx01 = dx_grid[(jxyind + xdim) as usize];
-            let dx11 = dx_grid[(jxyind + xdim + 1) as usize];
-            let dy00 = dy_grid[jxyind as usize];
-            let dy10 = dy_grid[(jxyind + 1) as usize];
-            let dy01 = dy_grid[(jxyind + xdim) as usize];
-            let dy11 = dy_grid[(jxyind + xdim + 1) as usize];
-            let (mut a11, mut a12, mut dx, mut a21, mut a22, mut dy) = match btype {
-                /* These are either an exact transform (1-4) or best linear (5) */
-                1 => (
-                    dx11 - dx01,
-                    dx11 - dx10,
-                    dx10 + dx01 - dx11,
-                    dy11 - dy01,
-                    dy11 - dy10,
-                    dy10 + dy01 - dy11,
-                ),
-                2 => (
-                    dx11 - dx01,
-                    dx01 - dx00,
-                    dx00,
-                    dy11 - dy01,
-                    dy01 - dy00,
-                    dy00,
-                ),
-                3 => (
-                    dx10 - dx00,
-                    dx01 - dx00,
-                    dx00,
-                    dy10 - dy00,
-                    dy01 - dy00,
-                    dy00,
-                ),
-                4 => (
-                    dx10 - dx00,
-                    dx11 - dx10,
-                    dx00,
-                    dy10 - dy00,
-                    dy11 - dy10,
-                    dy00,
-                ),
-                // `case 5` -- and the source leaves the six values indeterminate
-                // for any other `btype`, which cannot occur.
-                _ => (
-                    ((dx10 - dx00 + dx11 - dx01) as f64 / 2.) as f32,
-                    ((dx01 - dx00 + dx11 - dx10) as f64 / 2.) as f32,
-                    ((3. * dx00 as f64 + dx01 as f64 + dx10 as f64 - dx11 as f64) / 4.) as f32,
-                    ((dy10 - dy00 + dy11 - dy01) as f64 / 2.) as f32,
-                    ((dy01 - dy00 + dy11 - dy10) as f64 / 2.) as f32,
-                    ((3. * dy00 as f64 + dy01 as f64 + dy10 as f64 - dy11 as f64) / 4.) as f32,
-                ),
+            let (cnt, start, list): (i32, i32, &[i32]) = if reuse == 0 {
+                out.num_neigh.push(my_num_neigh);
+                out.ind_neigh_start.push(my_start);
+                (my_num_neigh, my_start, &out.neighbors)
+            } else {
+                (num_neigh_in[lind], ind_neigh_start_in[lind], neighbors_in)
             };
 
-            /* Convert this to a coordinate transform centered on the point being
-            filled in, in which case dx, dy are the vector there. */
-            a11 = (1. + (a11 / x_interval) as f64) as f32;
-            a12 /= y_interval;
-            a21 /= x_interval;
-            a22 = (1. + (a22 / y_interval) as f64) as f32;
-            dx = dx + dxcen - a11 * dxcen - a12 * dycen;
-            dy = dy + dycen - a21 * dxcen - a22 * dycen;
+            /* Now go through the neighbor list */
+            // `dxGrid[ixyind] = 0.; ... += dx / dist; ... /= wsum`, held in a
+            // local and stored by the scatter after the region.
+            let mut sum_dx = 0.0_f32;
+            let mut sum_dy = 0.0_f32;
+            let mut wsum = 0.0_f32;
+            for nayx in 0..cnt {
+                let jxyind = list[(start + nayx) as usize];
+                let jx = jxyind % xdim;
+                let jy = jxyind / xdim;
+                let btype = block_type[jxyind as usize] as i32;
+                let dxcen = (jx - ix) as f32 * x_interval + xf_ofs_x[btype as usize];
+                let dycen = (jy - iy) as f32 * y_interval + xf_ofs_y[btype as usize];
+                let dist = dxcen * dxcen + dycen * dycen;
 
-            dx_grid[ixyind as usize] += dx / dist;
-            dy_grid[ixyind as usize] += dy / dist;
-            // `1.` is a double literal, so the reciprocal is formed in double
-            // and the sum narrows only on the store into the float `wsum`.
-            wsum = (wsum as f64 + 1. / dist as f64) as f32;
+                /* Compute the vector transform centered on lower left of block */
+                let dx00 = dx_in[jxyind as usize];
+                let dx10 = dx_in[(jxyind + 1) as usize];
+                let dx01 = dx_in[(jxyind + xdim) as usize];
+                let dx11 = dx_in[(jxyind + xdim + 1) as usize];
+                let dy00 = dy_in[jxyind as usize];
+                let dy10 = dy_in[(jxyind + 1) as usize];
+                let dy01 = dy_in[(jxyind + xdim) as usize];
+                let dy11 = dy_in[(jxyind + xdim + 1) as usize];
+                let (mut a11, mut a12, mut dx, mut a21, mut a22, mut dy) = match btype {
+                    /* These are either an exact transform (1-4) or best linear (5) */
+                    1 => (
+                        dx11 - dx01,
+                        dx11 - dx10,
+                        dx10 + dx01 - dx11,
+                        dy11 - dy01,
+                        dy11 - dy10,
+                        dy10 + dy01 - dy11,
+                    ),
+                    2 => (
+                        dx11 - dx01,
+                        dx01 - dx00,
+                        dx00,
+                        dy11 - dy01,
+                        dy01 - dy00,
+                        dy00,
+                    ),
+                    3 => (
+                        dx10 - dx00,
+                        dx01 - dx00,
+                        dx00,
+                        dy10 - dy00,
+                        dy01 - dy00,
+                        dy00,
+                    ),
+                    4 => (
+                        dx10 - dx00,
+                        dx11 - dx10,
+                        dx00,
+                        dy10 - dy00,
+                        dy11 - dy10,
+                        dy00,
+                    ),
+                    // `case 5` -- and the source leaves the six values indeterminate
+                    // for any other `btype`, which cannot occur.
+                    _ => (
+                        ((dx10 - dx00 + dx11 - dx01) as f64 / 2.) as f32,
+                        ((dx01 - dx00 + dx11 - dx10) as f64 / 2.) as f32,
+                        ((3. * dx00 as f64 + dx01 as f64 + dx10 as f64 - dx11 as f64) / 4.) as f32,
+                        ((dy10 - dy00 + dy11 - dy01) as f64 / 2.) as f32,
+                        ((dy01 - dy00 + dy11 - dy10) as f64 / 2.) as f32,
+                        ((3. * dy00 as f64 + dy01 as f64 + dy10 as f64 - dy11 as f64) / 4.) as f32,
+                    ),
+                };
+
+                /* Convert this to a coordinate transform centered on the point being
+                filled in, in which case dx, dy are the vector there. */
+                a11 = (1. + (a11 / x_interval) as f64) as f32;
+                a12 /= y_interval;
+                a21 /= x_interval;
+                a22 = (1. + (a22 / y_interval) as f64) as f32;
+                dx = dx + dxcen - a11 * dxcen - a12 * dycen;
+                dy = dy + dycen - a21 * dxcen - a22 * dycen;
+
+                sum_dx += dx / dist;
+                sum_dy += dy / dist;
+                // `1.` is a double literal, so the reciprocal is formed in double
+                // and the sum narrows only on the store into the float `wsum`.
+                wsum = (wsum as f64 + 1. / dist as f64) as f32;
+            }
+            sum_dx /= wsum;
+            sum_dy /= wsum;
+            out.filled.push((ixyind, sum_dx, sum_dy));
         }
-        dx_grid[ixyind as usize] /= wsum;
-        dy_grid[ixyind as usize] /= wsum;
-    }
+        out
+    };
+
+    let num_thr = if _num_threads > 1 {
+        _num_threads as usize
+    } else {
+        1
+    };
+    let thr_list_start = |t: usize| (nin as i64 * t as i64 / num_thr as i64) as usize;
+    let outs: Vec<ThreadOut> = if num_thr > 1 {
+        // `build_global` is a no-op after whichever translated unit reaches
+        // it first; the pool is bounded like native's OpenMP runtime.
+        let _ = rayon::ThreadPoolBuilder::new()
+            .num_threads(crate::imod::libcfshr::b3dutil::num_omp_threads(i32::MAX) as usize)
+            .build_global();
+        use rayon::prelude::*;
+        (0..num_thr)
+            .into_par_iter()
+            .map(|t| run_thread(thr_list_start(t), thr_list_start(t + 1)))
+            .collect()
+    } else {
+        vec![run_thread(0, nin)]
+    };
 
     /* Now copy thread neighbor lists to one array and adjust start indices */
+    let mut lind = 0_usize;
+    for out in outs {
+        for &(ixyind, sum_dx, sum_dy) in &out.filled {
+            dx_grid[ixyind as usize] = sum_dx;
+            dy_grid[ixyind as usize] = sum_dy;
+        }
+        if reuse == 0 {
+            let base = neighbors.len() as i32;
+            for (k, (&n, &st)) in out.num_neigh.iter().zip(&out.ind_neigh_start).enumerate() {
+                num_neigh[lind + k] = n;
+                ind_neigh_start[lind + k] = st + base;
+            }
+            neighbors.extend_from_slice(&out.neighbors);
+        }
+        lind += out.filled.len();
+    }
     S_NUM_NEIGH.with_borrow_mut(|v| *v = Some(num_neigh));
     S_IND_NEIGH_START.with_borrow_mut(|v| *v = Some(ind_neigh_start));
     S_NEIGHBORS.with_borrow_mut(|v| *v = Some(neighbors));

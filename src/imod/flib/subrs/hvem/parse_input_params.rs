@@ -97,7 +97,7 @@ pub fn pip_parse_entries(num_opt_arg: &mut i32, num_non_opt_arg: &mut i32) -> i3
         //
         // pass the arguments in one by one
         //
-        let arguments: Vec<std::ffi::OsString> = std::env::args_os().collect();
+        let arguments: Vec<std::ffi::OsString> = crate::imod::libcfshr::b3dutil::program_args_os();
         let iargc = arguments.len() as i32 - 1;
         for i in 1..=iargc {
             // `call getarg(i, string)` into `character*(bufferSize)`, then
@@ -208,7 +208,7 @@ pub fn pip_read_or_parse_options(
         }
         if *num_opt_arg + *num_non_opt_arg < min_args || pip_get_boolean(b"help", &mut ierr) == 0 {
             pip_print_help(prog_name.as_bytes(), 0, num_in_files, num_out_files);
-            std::process::exit(0);
+            crate::imod::libcfshr::b3dutil::exit(0);
         }
     }
 }
@@ -254,7 +254,12 @@ pub fn pip_get_in_out_file(
             print!(" {}{}", prompt, ": ");
             let _ = io::stdout().flush();
             let mut line = String::new();
-            let _ = io::stdin().read_line(&mut line);
+            // `read(5, '(a)') filename` has no `END=`: at end of input the
+            // gfortran runtime reports the failure and stops with status 2.
+            if matches!(io::stdin().read_line(&mut line), Ok(0) | Err(_)) {
+                eprintln!("Fortran runtime error: End of file");
+                crate::imod::libcfshr::b3dutil::exit(2);
+            }
             *filename = line.trim_end_matches(['\r', '\n']).to_owned();
         }
         result
@@ -307,7 +312,7 @@ pub fn exit_error(message: &str) -> ! {
             CArg::Bytes(text.as_bytes()),
         ],
     ));
-    std::process::exit(1);
+    crate::imod::libcfshr::b3dutil::exit(1);
 }
 
 /// Original Fortran `setExitPrefix` (`parse_input_params.f90:243`).

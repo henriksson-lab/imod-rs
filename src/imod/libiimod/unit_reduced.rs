@@ -8,6 +8,35 @@
 )]
 use crate::imod::libcfshr::zoomdown::{select_zoom_filter, zoom_with_filter};
 pub use crate::imod::libiimod::mrcslice::SLICE_MODE_FLOAT;
+
+/// Rust-only; no C counterpart.  A whole section of unit `unit`, already read
+/// as floats (`nx * ny`, rows contiguous) by `iiReadSectionFloat` on a second,
+/// independent handle to the same file, so that a caller can read section
+/// `iz + 1` on another thread while `zoomWithFilter` runs on section `iz`.
+/// `iiuReadReduced` takes it in place of its own `iiuReadSecPart` only when
+/// the load is full-width (`ix0 == 0`, `nxLoad == nx`): the rows it would have
+/// read into `temp` are then exactly a contiguous run of `data`, so the zoom
+/// and edge-binning calls see the same values with the same stride.  The
+/// conversion is per pixel, so reading the whole section and reading a band of
+/// it give identical floats.  Only `binvol` installs one (TO_OPT.md).
+pub struct PreloadedSection {
+    pub unit: i32,
+    pub iz: i32,
+    pub data: Vec<f32>,
+}
+
+thread_local! {
+    static PRELOADED_SECTION: std::cell::RefCell<Option<PreloadedSection>> =
+        const { std::cell::RefCell::new(None) };
+}
+
+/// Rust-only: installs `section` for the next `iiu_read_reduced` call on this
+/// thread and returns whatever was installed before (the caller's buffer back,
+/// after the call that used it).  A call whose unit, section or load geometry
+/// does not match leaves it installed and reads the file as the source does.
+pub fn iiu_preload_reduced_section(section: Option<PreloadedSection>) -> Option<PreloadedSection> {
+    PRELOADED_SECTION.with_borrow_mut(|slot| std::mem::replace(slot, section))
+}
 pub fn iiu_read_binned(
     imUnit: i32,
     iz: i32,
@@ -373,6 +402,22 @@ pub fn iiu_read_reduced(
         return;
     }
     *ierr = 5 as i32;
+    // Rust-only: take an installed `PreloadedSection` for this unit and
+    // section if the load is full-width; it is put back at the normal exit.
+    // (An error return drops it; every caller exits on that error.)
+    let preloaded: Option<PreloadedSection> = PRELOADED_SECTION.with_borrow_mut(|slot| {
+        if slot.as_ref().is_some_and(|p| {
+            p.unit == imUnit
+                && p.iz == iz
+                && ix0 == 0
+                && nxLoad == nx
+                && p.data.len() == (nx as usize) * (ny as usize)
+        }) {
+            slot.take()
+        } else {
+            None
+        }
+    });
     iyStart = 0 as i32;
     lastY1 = -(1 as i32);
     while iyStart < nyRedUse {
@@ -405,7 +450,7 @@ pub fn iiu_read_reduced(
         }
         indStart = 1 as i32;
         loadYstart = iy0;
-        if iy0 <= lastY1 && lastY1 < ny - 1 as i32 {
+        if preloaded.is_none() && iy0 <= lastY1 && lastY1 < ny - 1 as i32 {
             indStart = (iy0 - lastY0) * nxLoad;
             numCopy = (lastY1 + 1 as i32 - iy0) * nxLoad;
             ix = 0 as i32;
@@ -420,26 +465,32 @@ pub fn iiu_read_reduced(
         lastY1 = iy1;
         unsafe { crate::imod::libiimod::unit_fileio::iiu_set_position(imUnit, iz, 0) };
         *ierr = -(1 as i32);
-        ierr2 = unsafe {
-            crate::imod::libiimod::unit_fileio::iiu_read_sec_part(
-                imUnit,
-                temp[(indStart - 1) as usize..].as_mut_ptr().cast(),
-                nxLoad,
-                ix0,
-                ix1,
-                loadYstart,
-                iy1,
-            )
-        };
-        if ierr2 != 0 as i32 {
-            return;
+        if preloaded.is_none() {
+            ierr2 = unsafe {
+                crate::imod::libiimod::unit_fileio::iiu_read_sec_part(
+                    imUnit,
+                    temp[(indStart - 1) as usize..].as_mut_ptr().cast(),
+                    nxLoad,
+                    ix0,
+                    ix1,
+                    loadYstart,
+                    iy1,
+                )
+            };
+            if ierr2 != 0 as i32 {
+                return;
+            }
         }
+        // The loaded lines `iy0..=iy1`, `nxLoad` wide: `temp` as the source
+        // has it, or the same rows of a full-width `PreloadedSection`.
+        let loaded: &[f32] = match &preloaded {
+            Some(p) => &p.data[(iy0 * nx) as usize..((iy1 + 1) * nx) as usize],
+            None => &temp[..(nxLoad * (iy1 + 1 - iy0)) as usize],
+        };
         chunkYstart = yUseStart + iyStart as f32 * redFac - iy0 as f32;
         // `zoomWithFilter` takes typed line and output slices now; the
         // `makeLinePointers` block above still runs for its error-5 path.
-        let linePtrVec: Vec<&[f32]> = temp[..(nxLoad * (iy1 + 1 - iy0)) as usize]
-            .chunks(nxLoad as usize)
-            .collect();
+        let linePtrVec: Vec<&[f32]> = loaded.chunks(nxLoad as usize).collect();
         *ierr = zoom_with_filter(
             crate::imod::libcfshr::zoomdown::ZoomLines::Float(&linePtrVec),
             nxLoad,
@@ -478,7 +529,7 @@ pub fn iiu_read_reduced(
             }
             if iyStart == 0 as i32 && loadYoffset > 0 as i32 {
                 ird_red_bin_edge(
-                    &temp[..(nxLoad * (iy1 + 1 - iy0)) as usize],
+                    loaded,
                     nxLoad,
                     iy1 + 1 as i32 - iy0,
                     1 as i32,
@@ -497,7 +548,7 @@ pub fn iiu_read_reduced(
             }
             if loadXoffset > 0 as i32 {
                 ird_red_bin_edge(
-                    &temp[..(nxLoad * (iy1 + 1 - iy0)) as usize],
+                    loaded,
                     nxLoad,
                     iy1 + 1 as i32 - iy0,
                     1 as i32,
@@ -516,7 +567,7 @@ pub fn iiu_read_reduced(
             }
             if loadXextra > 0 as i32 {
                 ird_red_bin_edge(
-                    &temp[..(nxLoad * (iy1 + 1 - iy0)) as usize],
+                    loaded,
                     nxLoad,
                     iy1 + 1 as i32 - iy0,
                     nxLoad + 1 as i32 - loadXextra,
@@ -535,7 +586,7 @@ pub fn iiu_read_reduced(
             }
             if iyEnd >= nyRedUse && loadYextra > 0 as i32 {
                 ird_red_bin_edge(
-                    &temp[..(nxLoad * (iy1 + 1 - iy0)) as usize],
+                    loaded,
                     nxLoad,
                     iy1 + 1 as i32 - iy0,
                     1 as i32,
@@ -580,6 +631,9 @@ pub fn iiu_read_reduced(
                 ix += 1;
             }
         }
+    }
+    if preloaded.is_some() {
+        iiu_preload_reduced_section(preloaded);
     }
     *ierr = 0 as i32;
 }

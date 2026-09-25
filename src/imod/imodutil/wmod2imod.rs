@@ -1,6 +1,5 @@
 //! `IMOD/imodutil/wmod2imod.c`: convert a legacy ASCII WIMP model to IMOD.
 
-use std::env;
 use std::fs::File;
 
 use crate::imod::libcfshr::b3dutil::{ImodFile, fgetline};
@@ -12,11 +11,11 @@ use crate::imod::libimod::ipoint::imod_point_add;
 
 /// Original: `main` (`wmod2imod.c:21`).
 pub fn wmod2imod() {
-    let argv: Vec<String> = env::args().collect();
+    let argv: Vec<String> = crate::imod::libcfshr::b3dutil::program_args();
     if argv.len() < 2 {
         println!("wmod2imod version 1.0 usage:");
         println!("wmod2imod [-z scale] [wmod filename] [imod filename]");
-        std::process::exit(1);
+        crate::imod::libcfshr::b3dutil::exit(1);
     }
     let mut xscale = 1.0_f32;
     let mut yscale = 1.0_f32;
@@ -103,7 +102,7 @@ pub fn wmod2imod() {
         println!("i = {i}");
         println!("wmod2imod version 0.9 usage:");
         println!("wmod2imod [-z scale] [wmod filename] [imod filename]");
-        std::process::exit(1);
+        crate::imod::libcfshr::b3dutil::exit(1);
     }
     let fin = ImodFile::open(&argv[i], "r");
     let Some(mut fin) = fin else {
@@ -112,23 +111,23 @@ pub fn wmod2imod() {
             "Couldn't open {}",
             argv.get(i + 1).unwrap_or(&argv[i]).as_str()
         );
-        std::process::exit(3)
+        crate::imod::libcfshr::b3dutil::exit(3)
     };
     i += 1;
     let output = &argv[i];
     let Some(mut fout) = ImodFile::open(output, "wb") else {
         eprintln!("Couldn't open {output}");
-        std::process::exit(3)
+        crate::imod::libcfshr::b3dutil::exit(3)
     };
     let mut model = imod_from_wmod(&mut fin).unwrap_or_else(|| {
         eprintln!("Error reading imod file.");
-        std::process::exit(3)
+        crate::imod::libcfshr::b3dutil::exit(3)
     });
     // Preserve the source assignments, including its historical -x typo.
     model.zscale = xscale;
     model.yscale = yscale;
     model.zscale = zscale;
-    imod_write(&model, &mut fout).unwrap_or_else(|_| std::process::exit(3));
+    imod_write(&model, &mut fout).unwrap_or_else(|_| crate::imod::libcfshr::b3dutil::exit(3));
 }
 
 /// Original: `imod_from_wmod` (`wmod2imod.c:122`).

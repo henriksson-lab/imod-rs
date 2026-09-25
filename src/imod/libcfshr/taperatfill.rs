@@ -331,9 +331,13 @@ pub fn taper_at_fill(array: &mut [f32], nx: i32, ny: i32, ntaper: i32, inside: b
     }) else {
         return -1;
     };
-    if array.len() != pixel_count {
+    // The C takes a bare pointer and reads `nx * ny` values from it; callers
+    // such as `tiltxcorr` pass a larger padded work array, so only a
+    // too-short array (an out-of-bounds read in the C) is refused.
+    if array.len() < pixel_count {
         return -1;
     }
+    let array = &mut array[..pixel_count];
     // `taperatfill.c:385`: `sliceInit(&slice, nx, ny, type, array)` aliases
     // the caller's array.  The slice owns its `f` member here, so the array
     // is moved through it by one copy each way.

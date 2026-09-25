@@ -6,7 +6,7 @@ use std::fs::{self, OpenOptions};
 use std::io::Write;
 use std::path::Path;
 use std::process::{Command, Stdio};
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicI32, Ordering};
 use std::sync::{LazyLock, Mutex};
 
 static ERR_STRINGS: LazyLock<Mutex<Vec<String>>> = LazyLock::new(|| Mutex::new(Vec::new()));
@@ -17,6 +17,9 @@ static RAISE_KEY_INTERRUPT: LazyLock<Mutex<bool>> = LazyLock::new(|| Mutex::new(
 static FILE_TYPE_EXTENSION: LazyLock<Mutex<String>> = LazyLock::new(|| Mutex::new(String::new()));
 static CURRENT_ROOTNAME: LazyLock<Mutex<String>> = LazyLock::new(|| Mutex::new(String::new()));
 static MOC_RENAMES_OK: AtomicBool = AtomicBool::new(true);
+/// Rust-only: the unit number [`header_in_process`] opens on; `header` itself
+/// always uses unit 1 (`header.f90:132`).
+static HEADER_UNIT: AtomicI32 = AtomicI32::new(1);
 
 /// Matches Python class `ImodpyError` (`IMOD/pysrc/imodpy.py:159`).
 #[derive(Clone, Debug)]
@@ -78,6 +81,15 @@ pub fn run_cmd(
 ) -> Result<Option<Vec<String>>, ImodpyError> {
     let command = avoid_local_com_file(command);
     let command = command.as_str();
+
+    // Owner decision, 2026-09-24: a command of ours runs in this process (see
+    // `run_cmd_in_process`).  Only when standard error is left alone: the
+    // in-process runner redirects standard input and output, not error.
+    if in_stderr.is_none()
+        && let Some((own, words)) = own_command_words(command)
+    {
+        return run_own_command(command, own, words, input, outfile, ignore_status, false);
+    }
 
     // Set up flags for whether to collect output or send to stderr
     *ERR_STATUS.lock().expect("imodpy status mutex") = 0;
@@ -162,6 +174,208 @@ pub fn run_cmd(
             .map(str::to_owned)
             .collect(),
     ))
+}
+
+/// `runcmd` (`IMOD/pysrc/imodpy.py:176`) for a command this crate itself
+/// provides, run **in this process** rather than through `sh -c`.
+///
+/// Owner decision, 2026-09-24: where a Python script ran one of our own
+/// commands, the translation calls the translated program instead of
+/// spawning a process (see `CLAUDE.md`, "Our own commands are called in
+/// process").  [`run_cmd`] itself now routes every such command here, so this
+/// entry point differs from it only in the shape of the returned lines: they
+/// keep their line endings, as Python's `splitlines(True)` does, where
+/// [`run_cmd`] has always returned them without.  A command that is not one
+/// of ours goes to [`run_cmd`], and so to `sh -c`.
+///
+/// With no `outfile` the program's standard output is collected and
+/// returned; with `outfile == Some("stdout")` it goes straight to standard
+/// output; `input` lines are fed to its standard input, each ended by a
+/// newline.  A non-zero exit status raises [`ImodpyError`] with `errStrings`
+/// set to every collected line containing `ERROR:` followed by
+/// `"<cmd>: exited with status <n>"`, as `runcmd` does after the retry loop.
+/// Standard error is not redirected, as `runcmd` leaves it with `inStderr`
+/// unset.  The retry-on-broken-pipe loop and `RUNCMD_VERBOSE` echo have no
+/// counterpart: there is no pipe to break.
+pub fn run_cmd_in_process(
+    command: &str,
+    input: Option<&[String]>,
+    outfile: Option<&str>,
+) -> Result<Option<Vec<String>>, ImodpyError> {
+    let command = avoid_local_com_file(command);
+    let command = command.as_str();
+    match own_command_words(command) {
+        Some((own, words)) => run_own_command(command, own, words, input, outfile, &[], true),
+        None => {
+            let ignore: [i32; 0] = [];
+            run_cmd(command, input, outfile, None, &ignore)
+        }
+    }
+}
+
+/// Rust-only: splits `command` into words as `sh -c` would and returns them
+/// with the command table's entry for the first word, when that word names a
+/// command of ours that may run in process (`commands::Command::in_process`)
+/// and the line needs nothing else from a shell.
+///
+/// Blanks separate words outside quotes; `"..."`/`'...'` quoting and
+/// backslash escapes are removed.  Any unquoted character that would make
+/// the shell do more than split words -- a pipe, redirection, command
+/// separator, background `&`, parameter or command substitution, glob,
+/// subshell, tilde or comment -- returns `None`, and the line is left to the
+/// shell.  So does a `$` or backquote inside double quotes, where the shell
+/// would still expand it.
+fn own_command_words(
+    command: &str,
+) -> Option<(&'static crate::imod::commands::Command, Vec<String>)> {
+    let mut words: Vec<String> = Vec::new();
+    let mut current = String::new();
+    let mut in_word = false;
+    let mut chars = command.chars().peekable();
+    while let Some(c) = chars.next() {
+        match c {
+            ' ' | '\t' | '\n' => {
+                if in_word {
+                    words.push(std::mem::take(&mut current));
+                    in_word = false;
+                }
+            }
+            '\'' => {
+                in_word = true;
+                for q in chars.by_ref() {
+                    if q == '\'' {
+                        break;
+                    }
+                    current.push(q);
+                }
+            }
+            '"' => {
+                in_word = true;
+                while let Some(q) = chars.next() {
+                    match q {
+                        '"' => break,
+                        '$' | '`' => return None,
+                        '\\' if matches!(chars.peek(), Some('"' | '\\' | '$' | '`')) => {
+                            current.push(chars.next().unwrap());
+                        }
+                        _ => current.push(q),
+                    }
+                }
+            }
+            '\\' => {
+                in_word = true;
+                if let Some(q) = chars.next() {
+                    current.push(q);
+                }
+            }
+            '|' | '&' | ';' | '<' | '>' | '(' | ')' | '$' | '`' | '*' | '?' | '[' => {
+                return None;
+            }
+            '~' | '#' if !in_word => return None,
+            _ => {
+                in_word = true;
+                current.push(c);
+            }
+        }
+    }
+    if in_word {
+        words.push(current);
+    }
+    let own = crate::imod::commands::find(words.first()?)?;
+    if !own.in_process {
+        return None;
+    }
+    Some((own, words))
+}
+
+/// Rust-only: runs a command of ours in this process with `runcmd`'s
+/// contract (see [`run_cmd_in_process`]).  `keep_ends` selects the shape of
+/// the collected lines: with their endings (`splitlines(True)`) for
+/// [`run_cmd_in_process`], without for [`run_cmd`].  `ignore_status` is
+/// `runcmd`'s `ignoreStatus`.
+fn run_own_command(
+    command: &str,
+    own: &'static crate::imod::commands::Command,
+    words: Vec<String>,
+    input: Option<&[String]>,
+    outfile: Option<&str>,
+    ignore_status: &[i32],
+    keep_ends: bool,
+) -> Result<Option<Vec<String>>, ImodpyError> {
+    // The program's `argv[0]` is the path a command link would have,
+    // `<bindir>/<name>`, as `src/bin/imod.rs` records it for a subcommand.
+    let mut argv: Vec<OsString> = Vec::with_capacity(words.len());
+    argv.push(match std::env::current_exe() {
+        Ok(path) => path.with_file_name(&words[0]).into_os_string(),
+        Err(_) => OsString::from(&words[0]),
+    });
+    argv.extend(words.iter().skip(1).map(OsString::from));
+    let joined = input.map(|lines| {
+        let mut text = String::new();
+        for line in lines {
+            text.push_str(line);
+            text.push('\n');
+        }
+        text
+    });
+    let collect = outfile.is_none();
+    let capture = outfile != Some("stdout");
+    *ERR_STATUS.lock().expect("imodpy status mutex") = 0;
+    let (status, output) = match crate::imod::commands::run_in_process(
+        own,
+        argv,
+        joined.as_deref().map(str::as_bytes),
+        capture,
+    ) {
+        Ok(result) => result,
+        Err(error) => {
+            let message = format!("command {command}: {error}\n");
+            *ERR_STRINGS.lock().expect("imodpy errors mutex") = vec![message.clone()];
+            return Err(ImodpyError {
+                arguments: vec![message],
+            });
+        }
+    };
+    let mut lines: Vec<String> = Vec::new();
+    if collect {
+        let text = String::from_utf8_lossy(&output);
+        lines = if keep_ends {
+            text.split_inclusive('\n').map(str::to_owned).collect()
+        } else {
+            text.lines().map(str::to_owned).collect()
+        };
+    }
+    if status != 0 {
+        *ERR_STATUS.lock().expect("imodpy status mutex") = status;
+    }
+    if status != 0 && !ignore_status.contains(&status) {
+        let mut errors: Vec<String> = lines
+            .iter()
+            .filter(|line| line.contains("ERROR:"))
+            .cloned()
+            .collect();
+        // `exit_from_imod_error` supplies the final line ending itself.
+        errors.push(format!("{command}: exited with status {status}"));
+        *ERR_STRINGS.lock().expect("imodpy errors mutex") = errors.clone();
+        return Err(ImodpyError { arguments: errors });
+    }
+    if let Some(filename) = outfile.filter(|name| *name != "stdout") {
+        // `runcmd` hands a file object to the child as its standard output;
+        // the only callers pass `'stdout'`, so a named file keeps
+        // `run_cmd`'s shape of writing the collected text.
+        if let Err(error) = fs::write(filename, &output) {
+            let message = format!("Writing to file: {filename}  - {error}");
+            *ERR_STRINGS.lock().expect("imodpy errors mutex") = vec![message.clone()];
+            return Err(ImodpyError {
+                arguments: vec![message],
+            });
+        }
+        return Ok(None);
+    }
+    if !collect {
+        return Ok(None);
+    }
+    Ok(Some(lines))
 }
 
 /// Matches `setRetryLimit` (`IMOD/pysrc/imodpy.py:353`).
@@ -286,12 +500,667 @@ pub fn multi_char_split(line: &str, characters: &str) -> Vec<String> {
         .collect()
 }
 
-/// Matches `getmrc` (`IMOD/pysrc/imodpy.py:456`); `header` remains the source process boundary.
+/// Rust-only: runs our own translated `header` program's logic **in process**
+/// and returns the lines of its standard output that the `pysrc` callers read.
+///
+/// Owner decision (2026-09-24): where a `pysrc` translation ran one of *this
+/// crate's own* commands through `runcmd` (`sh -c`, resolved through `PATH`),
+/// it now calls the translated library directly.  Through `PATH` the command
+/// could silently be native IMOD's `header`, and a shell plus an exec per
+/// query was the slow part of `getmrc`.  This is a deliberate deviation from
+/// upstream's process-based design; genuinely external tools stay processes.
+///
+/// The lines are built with the formats `header.rs` / `irdhdr.rs` /
+/// `wrap_iiunit.rs` print them with, so every value a caller parses back has
+/// been rounded exactly as the printed text rounded it.  `command` is the
+/// command line that used to be run; it only names the failure.
+///
+/// * `stdin_name` true: the file name arrived as the `-StandardInput` line
+///   `InputFile <file>`, so it gets PIP's `ReadParamFile` treatment
+///   (`parse_params.c:1665-1760`): an in-line `#` comment is cut, trailing
+///   blanks/CR are stripped, leading blanks and at most one `=` are skipped,
+///   and an empty value is an error.  False: a command-line argument.
+///   Either way `PipGetString` fills `character*320 inFile` (`header.f90:21`),
+///   truncating past 320 bytes, and trailing blanks are trimmed.
+/// * `silent`: `None` is plain `header` (full output); `Some(false)` is
+///   `-si -mo -pi` and `Some(true)` adds `-ori -min -max -mean`.
+///
+/// Full output reproduces, in order: the `imopen` file line and file-type line
+/// (`wrap_iiunit.f90`), the multi-volume note, from `irdhdr` the `Pixel
+/// spacing` line, the titles (first 79 bytes, FORMAT 1020) and the `idtype`
+/// line, then every line `header.f90:170-340` prints (extended header, mdoc).
+/// The other `irdhdr` lines carry none of the keys any caller looks for
+/// (`Pixel spacing`, `size in nanometers =`, `axis`+`angle`, `This is a`,
+/// `ctfPhaseFlip`, `CTF correct`) and none precede the file-type line, so the
+/// first-nine-lines window of `getImageFormat` is unchanged.  Silent output
+/// reproduces the numeric lines only: the notes `irdhdr`/`header` can print
+/// before them are exactly the lines `getmrc` discards, and the mdoc lines
+/// after them are past the indices it reads.
+///
+/// Errors: every path on which `header` exits non-zero (`imopen` failure,
+/// unreadable extended header, `get_extra_header_items` failure) returns an
+/// `ImodpyError` as `runcmd` raised one — the `ERROR:` lines, then
+/// `<command>: exited with status 1` (`imodpy.py:335-344`) — and sets the
+/// error strings and last exit status the same way.
+pub fn header_in_process(
+    command: &str,
+    file: &str,
+    stdin_name: bool,
+    silent: Option<bool>,
+) -> Result<Vec<String>, ImodpyError> {
+    use crate::imod::libcfshr::autodoc::{
+        ADOC_GLOBAL_NAME, ADOC_ZVALUE_NAME, adoc_clear, adoc_get_float,
+        adoc_get_number_of_sections, adoc_get_section_name, adoc_open_image_metadata,
+    };
+    use crate::imod::libcfshr::b3dutil::{
+        b3d_get_error, b3d_get_store_error, b3d_set_store_error, extra_is_nbytes_and_flags,
+    };
+    use crate::imod::libcfshr::extraheader::{
+        get_extra_header_items, get_extra_header_value, get_fei_ext_head_angle_scale,
+    };
+    use crate::imod::libiimod::iimage::ii_allow_multi_volume;
+    use crate::imod::libiimod::unit_fileio::{
+        MAX_UNIT, iiu_close, iiu_exit_on_error, iiu_file_info, iiu_get_exit_on_error, iiu_open,
+        iiu_ret_chunk_sizes, iiu_ret_num_volumes,
+    };
+    use crate::imod::libiimod::unit_header::{
+        iiu_ret_basic_head, iiu_ret_data_type, iiu_ret_delta, iiu_ret_extended_data,
+        iiu_ret_extended_type, iiu_ret_imod_flags, iiu_ret_labels, iiu_ret_num_extended,
+        iiu_ret_origin, iiu_ret_size,
+    };
+
+    *ERR_STATUS.lock().expect("imodpy status mutex") = 0;
+    // `runcmd`'s failure branch (`imodpy.py:335-344`): the output's `ERROR:`
+    // lines, then the exit-status line.
+    let fail = |messages: Vec<String>| -> ImodpyError {
+        let mut err_strings = messages
+            .iter()
+            .flat_map(|message| message.lines())
+            .filter(|line| line.contains("ERROR:"))
+            .map(str::to_owned)
+            .collect::<Vec<_>>();
+        err_strings.push(format!("{command}: exited with status 1"));
+        *ERR_STATUS.lock().expect("imodpy status mutex") = 1;
+        *ERR_STRINGS.lock().expect("imodpy errors mutex") = err_strings.clone();
+        ImodpyError {
+            arguments: err_strings,
+        }
+    };
+
+    // The file name as `header` ends up holding it in `inFile`.
+    let mut value = file.as_bytes();
+    if stdin_name {
+        // `PipReadNextLine` reads one line of "InputFile <file>"; with the
+        // fixed prefix, the token is always `InputFile`.
+        if let Some(newline) = value.iter().position(|&byte| byte == b'\n') {
+            value = &value[..newline];
+        }
+        if let Some(comment) = value.iter().position(|&byte| byte == b'#') {
+            value = &value[..comment];
+        }
+        while let [rest @ .., b' ' | b'\t' | b'\n' | b'\r'] = value {
+            value = rest;
+        }
+        let mut got_equals = false;
+        loop {
+            match value.first() {
+                Some(b'=') if got_equals => {
+                    return Err(fail(vec![format!(
+                        "ERROR: HEADER - Two = signs in input line:  InputFile {file}"
+                    )]));
+                }
+                Some(b'=') => got_equals = true,
+                Some(b' ' | b'\t') => {}
+                _ => break,
+            }
+            value = &value[1..];
+        }
+        if value.is_empty() {
+            return Err(fail(vec![format!(
+                "ERROR: HEADER - Missing a value on the input line:  InputFile {file}"
+            )]));
+        }
+    }
+    let mut length = value.len().min(320);
+    while length > 0 && value[length - 1] == b' ' {
+        length -= 1;
+    }
+    let in_file = String::from_utf8_lossy(&value[..length]).into_owned();
+
+    // Fortran `Gw.d` editing, the closure `header.rs` and `irdhdr.rs` carry.
+    let g_edit = |value: f32, w: usize, d: i32| -> String {
+        if value.is_nan() {
+            return format!("{:>w$}", "NaN");
+        }
+        if value.is_infinite() {
+            let text = match (value < 0.0, w) {
+                (false, 8..) => "Infinity",
+                (false, _) => "Inf",
+                (true, 9..) => "-Infinity",
+                (true, _) => "-Inf",
+            };
+            return format!("{text:>w$}");
+        }
+        let magnitude = value.abs();
+        let mut digits = String::new();
+        let mut exponent = 1_i32;
+        if magnitude != 0.0 {
+            let scientific = format!("{:.*e}", (d - 1) as usize, magnitude);
+            let (mantissa, power) = scientific.split_once('e').unwrap();
+            digits = mantissa.replace('.', "");
+            exponent = power.parse::<i32>().unwrap() + 1;
+        }
+        if (0..=d).contains(&exponent) {
+            let mut text = format!("{:.*}", (d - exponent) as usize, value);
+            if exponent == d {
+                text.push('.');
+            }
+            format!("{:>1$}    ", text, w - 4)
+        } else {
+            format!(
+                "{:>1$}",
+                format!(
+                    "{}0.{}E{}{:02}",
+                    if value < 0.0 { "-" } else { "" },
+                    digits,
+                    if exponent < 0 { '-' } else { '+' },
+                    exponent.abs()
+                ),
+                w
+            )
+        }
+    };
+
+    // `header` runs with the unit layer's defaults: it exits on an open
+    // error, and prints the error.  Here the failure has to come back as a
+    // value, so exit is off and the message is stored, not printed.
+    // `iiuOpen("")` would also install an MRC check function globally
+    // (`unit_fileio.c:224`); `header` fails on an empty name either way.
+    if in_file.is_empty() {
+        return Err(fail(vec!["ERROR: iiuOpen - Could not open ''".to_owned()]));
+    }
+    // Every error path below leaves exit-on-error off and the store flag on
+    // until the unit is closed, so that nothing can exit this process.
+    let saved_exit = iiu_get_exit_on_error();
+    let saved_store = b3d_get_store_error();
+    // The unit's own store flag too: the first `findNewUnit` of a process
+    // copies it into `b3dSetStoreError` (`unit_fileio.c:985-986`).
+    iiu_exit_on_error(0, 1);
+    b3d_set_store_error(1);
+    ii_allow_multi_volume(1);
+    let im_unit = HEADER_UNIT.load(Ordering::SeqCst);
+    let ierr = unsafe { iiu_open(im_unit, &in_file, "RO") };
+    ii_allow_multi_volume(0);
+    if ierr != 0 {
+        let message = b3d_get_error();
+        // With exit-on-error off, `iiuOpen` returns with the unit still
+        // marked in use (`unit_fileio.c:233-236`).  When `iiOpen` itself
+        // failed its `iiFile` is NULL, and any later `iiuClose` of that unit
+        // number -- including the implicit one when the number is reused --
+        // dereferences it; that unit number is abandoned instead.  Every
+        // other failure has a file to close.
+        if message.contains("Could not open") {
+            HEADER_UNIT.store((im_unit % (MAX_UNIT - 1)) + 1, Ordering::SeqCst);
+        } else {
+            unsafe { iiu_close(im_unit) };
+        }
+        iiu_exit_on_error(saved_exit, -1);
+        b3d_set_store_error(saved_store);
+        return Err(fail(vec![message]));
+    }
+
+    let mut out = String::new();
+    let mut result = Ok(());
+    unsafe {
+        let (mut num_kbytes, mut itype, mut iflags) = (0, 0, 0);
+        iiu_file_info(im_unit, &mut num_kbytes, &mut itype, &mut iflags);
+        let num_volumes = iiu_ret_num_volumes(im_unit);
+        let mut nxyz = [0_i32; 3];
+        let mut mxyz = [0_i32; 3];
+        let mut mode = 0_i32;
+        let mut dmin = 0.0_f32;
+        let mut dmax = 0.0_f32;
+        let mut dmean = 0.0_f32;
+        // `irdhdr`: basic head, then the sizes again from `iiuRetSize`.
+        iiu_ret_basic_head(
+            im_unit,
+            nxyz.as_mut_ptr(),
+            mxyz.as_mut_ptr(),
+            &mut mode,
+            &mut dmin,
+            &mut dmax,
+            &mut dmean,
+        );
+        let nxyzst;
+        (nxyz, mxyz, nxyzst) = iiu_ret_size(im_unit);
+        let _ = nxyzst;
+        if let Some(do_all) = silent {
+            // `header.f90:151-161,165-167`.
+            out.push_str(&format!("{:8}{:8}{:8}\n", nxyz[0], nxyz[1], nxyz[2]));
+            if iflags & (1 << 8) != 0 {
+                mode = 12;
+            }
+            out.push_str(&format!("{:4}\n", mode));
+            let delta = iiu_ret_delta(im_unit);
+            out.push_str(&format!(
+                "{}{}{}\n",
+                g_edit(delta[0], 15, 5),
+                g_edit(delta[1], 15, 5),
+                g_edit(delta[2], 15, 5)
+            ));
+            if do_all {
+                let origin = iiu_ret_origin(im_unit);
+                out.push_str(&format!(
+                    "{}{}{}\n",
+                    g_edit(origin[0], 15, 5),
+                    g_edit(origin[1], 15, 5),
+                    g_edit(origin[2], 15, 5)
+                ));
+                out.push_str(&format!("{}\n", g_edit(dmin, 13, 5)));
+                out.push_str(&format!("{}\n", g_edit(dmax, 13, 5)));
+                out.push_str(&format!("{}\n", g_edit(dmean, 13, 5)));
+            }
+        } else {
+            // `iiuOpenPrint` (`wrap_iiunit.rs:37-73`).
+            let (mut nx_tile, mut ny_tile, mut nz_chunk) = (0, 0, 0);
+            iiu_ret_chunk_sizes(im_unit, &mut nx_tile, &mut ny_tile, &mut nz_chunk);
+            if nx_tile > 0 || ny_tile > 0 {
+                if itype == 5 && nx_tile == 0 {
+                    nx_tile = nxyz[0];
+                }
+                if ny_tile == 0 {
+                    ny_tile = nxyz[1];
+                }
+            }
+            if num_kbytes < 0 {
+                out.push_str(&format!("\n RO image file on unit{:4} : {}\n", 1, in_file));
+            } else {
+                out.push_str(&format!(
+                    "\n RO image file on unit{:4} : {}     Size= {:10} K\n",
+                    1, in_file, num_kbytes
+                ));
+            }
+            match itype {
+                1 if ny_tile > 0 && nx_tile == 0 => out.push_str(&format!(
+                    "\n                    This is a TIFF file (in strips of{:7} x{:7}).\n",
+                    nxyz[0], ny_tile
+                )),
+                1 if ny_tile > 0 => out.push_str(&format!(
+                    "\n                    This is a TIFF file (in tiles of{:7} x{:7}).\n",
+                    nx_tile, ny_tile
+                )),
+                1 => out.push_str("\n                    This is a TIFF file.\n"),
+                5 if nx_tile > 0 => out.push_str(&format!(
+                    "\n                    This is an HDF file (in chunks of{:7} x{:7} x{:5}).\n",
+                    nx_tile, ny_tile, nz_chunk
+                )),
+                5 => out.push_str("\n                    This is an HDF file.\n"),
+                6 => out.push_str("\n                    This is a JPEG file.\n"),
+                7 => out.push_str("\n                    This is an image series file.\n"),
+                2 => (),
+                _ => out.push_str("\n                    This is a non-MRC file.\n"),
+            }
+            if iflags & 1 != 0 {
+                out.push_str("\n                    This is a byte-swapped file.\n");
+            }
+            if num_volumes > 1 {
+                out.push_str(&format!(
+                    "This is the header for the first of{:4} volumes, use -vol # to see others\n",
+                    num_volumes
+                ));
+            }
+
+            // `irdhdr` (`irdhdr.rs`): the Pixel spacing line, the titles and
+            // the data-type line.
+            let delta = iiu_ret_delta(im_unit);
+            out.push_str(&format!(
+                " Pixel spacing (Angstroms).............. {}{}{}\n",
+                g_edit(delta[0], 11, 4),
+                g_edit(delta[1], 11, 4),
+                g_edit(delta[2], 11, 4)
+            ));
+            let mut labels = [[0_u8; 80]; 10];
+            let mut num_labels = 0;
+            iiu_ret_labels(im_unit, &mut labels, &mut num_labels);
+            out.push_str(&format!(" {:5} Titles :\n", num_labels));
+            for label in labels.iter().take(num_labels.clamp(0, 10) as usize) {
+                out.push_str(&format!("{}\n", String::from_utf8_lossy(&label[..79])));
+            }
+            let (idtype, _lensnum, nd1, nd2, vd1, vd2) = iiu_ret_data_type(im_unit);
+            let lxyz = [' ', 'X', 'Y', 'Z'];
+            let axis = if (1..=3).contains(&nd1) {
+                lxyz[nd1 as usize]
+            } else {
+                ' '
+            };
+            match idtype {
+                1 => out.push_str(&format!(
+                    "      TILT data set, axis= {} delta,start angle= {:8.2}{:8.2}\n\n",
+                    axis, vd1, vd2
+                )),
+                2 => out.push_str(&format!(
+                    " SERIAL STEREO data set, axis= {} left angle= {:8.2} right angle= {:8.2}\n\n",
+                    axis, vd1, vd2
+                )),
+                3 => out.push_str(&format!(
+                    "      AVERAGED data set, Navg,Noffset   =  {:6}{:6}\n\n",
+                    nd1, nd2
+                )),
+                4 => out.push_str(&format!(
+                    "      AVG STEREO data set, Navg,Noffset= {:3}{:3} L,R angles= {:8.2}{:8.2}\n\n",
+                    nd1, nd2, vd1, vd2
+                )),
+                _ => (),
+            }
+
+            // `header.rs:346-673`, printing into `out`.
+            let mut found_pixel = false;
+            let mut found_axis_rot = false;
+            let mut nbsym = iiu_ret_num_extended(im_unit);
+            'extended: {
+                if nbsym <= 0 {
+                    break 'extended;
+                }
+                let mut extended_data = Vec::new();
+                if iiu_ret_extended_data(im_unit, &mut extended_data) != 0 {
+                    result = Err(vec!["ERROR: HEADER - Reading extended header".to_owned()]);
+                    break 'extended;
+                }
+                nbsym = extended_data.len() as i32;
+                let array: Vec<f32> = extended_data
+                    .chunks_exact(4)
+                    .map(|bytes| f32::from_ne_bytes(bytes.try_into().unwrap()))
+                    .collect();
+                let [num_int, num_real] = iiu_ret_extended_type(im_unit);
+                if extra_is_nbytes_and_flags(num_int, num_real) == 0 && num_real >= 12 {
+                    // Agard/old FEI type
+                    let mut tiltaxis = array[(num_int + 10) as usize];
+                    if (-360.0..=360.0).contains(&tiltaxis) {
+                        if tiltaxis < -180.0 {
+                            tiltaxis += 360.0;
+                        }
+                        if tiltaxis > 180.0 {
+                            tiltaxis -= 360.0;
+                        }
+                        if labels[0][..4] == *b"Fei " {
+                            out.push_str(&format!(
+                                "          Tilt axis rotation angle = {:7.1}{}\n",
+                                -tiltaxis, " (Corrected sign)"
+                            ));
+                        } else {
+                            out.push_str(&format!(
+                                "          Tilt axis rotation angle = {:7.1}\n",
+                                tiltaxis
+                            ));
+                        }
+                        found_axis_rot = true;
+                    }
+                    let mut pixel = array[(num_int + 11) as usize];
+                    if array[(num_int + 11) as usize] > 0.05
+                        && array[(num_int + 11) as usize] < 100000.0
+                    {
+                        pixel /= 10.0;
+                    } else {
+                        pixel *= 1.0e9;
+                    }
+                    let (iflags, _if_imod) = iiu_ret_imod_flags(im_unit);
+                    if pixel > 0.005 && pixel < 10000.0 && iflags & 2 == 0 {
+                        let mut i_binning = 0_i32;
+                        for j in (0..3).rev() {
+                            i_binning = delta[j].round() as i32;
+                            if (delta[j] - i_binning as f32).abs() > 1.0e-6
+                                || i_binning <= 0
+                                || i_binning > 4
+                            {
+                                i_binning = 0;
+                                break;
+                            }
+                        }
+                        if i_binning == 1 {
+                            out.push_str(&format!(
+                                "          Pixel size in nanometers ={}\n",
+                                g_edit(pixel, 11, 4)
+                            ));
+                        } else if i_binning > 1 && i_binning < 5 {
+                            out.push_str(&format!(
+                                "          Pixel size in nanometers ={}{}{:2}{}\n",
+                                g_edit(pixel * i_binning as f32, 11, 4),
+                                " (Assumed binning of",
+                                i_binning,
+                                ")"
+                            ));
+                        } else {
+                            out.push_str(&format!(
+                                "          Original/extended header pixel size in nanometers ={}\n",
+                                g_edit(pixel, 11, 4)
+                            ));
+                        }
+                        found_pixel = true;
+                    }
+                }
+                // New FEI type
+                if num_int == -3 {
+                    let mut byte_value = 0_u8;
+                    let mut short_value = 0_i16;
+                    let mut mask = 0_i32;
+                    let mut j = 0_i32;
+                    let mut tiltaxis = 0.0_f32;
+                    let mut axis8 = 0.0_f64;
+                    if get_extra_header_value(
+                        &extended_data,
+                        8,
+                        3,
+                        &mut byte_value,
+                        &mut short_value,
+                        &mut mask,
+                        &mut tiltaxis,
+                        &mut axis8,
+                    ) == 0
+                        && get_extra_header_value(
+                            &extended_data,
+                            140,
+                            4,
+                            &mut byte_value,
+                            &mut short_value,
+                            &mut j,
+                            &mut tiltaxis,
+                            &mut axis8,
+                        ) == 0
+                        && mask & (1 << 12) != 0
+                    {
+                        tiltaxis = (axis8 * get_fei_ext_head_angle_scale(&extended_data)) as f32;
+                        if (-360.0..=360.0).contains(&tiltaxis) {
+                            if tiltaxis < -180.0 {
+                                tiltaxis += 360.0;
+                            }
+                            if tiltaxis > 180.0 {
+                                tiltaxis -= 360.0;
+                            }
+                            out.push_str(&format!(
+                                "          Tilt axis rotation angle = {:7.1}{}\n",
+                                -tiltaxis, " (Corrected sign)"
+                            ));
+                            found_axis_rot = true;
+                        }
+                    }
+                }
+                // SerialEM type
+                if extra_is_nbytes_and_flags(num_int, num_real) != 0 {
+                    let type_name = [
+                        "Tilt angles",
+                        "Piece coordinates",
+                        "Stage positions",
+                        "Magnifications",
+                        "Intensities",
+                        "Exposure doses",
+                    ];
+                    let extract_com = [
+                        "extracttilts",
+                        "extractpieces",
+                        "extracttilts -stage",
+                        "extracttilts -mag",
+                        "extracttilts -int",
+                        "extracttilts -exp",
+                    ];
+                    out.push_str("\nExtended header from SerialEM contains:\n");
+                    for j in 0..6 {
+                        if (num_real / (1 << j)) % 2 != 0 {
+                            out.push_str(&format!(
+                                "  {:17} - Extract with \"{}\"\n",
+                                type_name[j], extract_com[j]
+                            ));
+                        }
+                    }
+                } else {
+                    let mut tilts = vec![0.0_f32; nxyz[2].max(0) as usize + 9];
+                    let mut iz_piece = vec![0_i32; nxyz[2].max(0) as usize + 9];
+                    for j in 0..nxyz[2].max(0) as usize {
+                        iz_piece[j] = j as i32;
+                    }
+                    let mut ierr = 0;
+                    if get_extra_header_items(
+                        &extended_data,
+                        nbsym,
+                        num_int,
+                        num_real,
+                        nxyz[2],
+                        1,
+                        &mut tilts,
+                        None,
+                        &mut ierr,
+                        &iz_piece,
+                    ) != 0
+                    {
+                        result = Err(vec![format!("ERROR: HEADER - ERROR: {}", b3d_get_error())]);
+                        break 'extended;
+                    }
+                    if ierr > 0 {
+                        out.push_str(
+                            "Extended header has tilt angles - extract with \"extracttilts\"\n",
+                        );
+                    }
+                }
+            }
+
+            if result.is_ok() {
+                // If no axis rotation in extended header, look for it in labels
+                if !found_axis_rot {
+                    for label in labels.iter().take(num_labels.clamp(0, 10) as usize) {
+                        if String::from_utf8_lossy(&label[..80]).contains("Tilt axis angle") {
+                            found_axis_rot = true;
+                            break;
+                        }
+                    }
+                }
+                // if no pixel in extended header,
+                if !found_pixel {
+                    found_pixel = delta[0] != 1.0 || delta[1] != 1.0 || delta[2] != 1.0;
+                }
+                // Look for mdoc file in either case
+                if !found_pixel || !found_axis_rot {
+                    let (mut montage, mut num_sect, mut i_type_adoc) = (0, 0, 0);
+                    let ind_adoc = adoc_open_image_metadata(
+                        in_file.as_bytes(),
+                        1,
+                        &mut montage,
+                        &mut num_sect,
+                        &mut i_type_adoc,
+                    );
+                    if ind_adoc >= 0 {
+                        if !found_pixel {
+                            let mut pixel = 0.0_f32;
+                            if adoc_get_float(ADOC_GLOBAL_NAME, 0, b"PixelSpacing", &mut pixel) == 0
+                            {
+                                out.push_str(&format!(
+                                    "          Pixel size in nanometers ={}{}\n",
+                                    g_edit(pixel / 10.0, 11, 4),
+                                    "  , from mdoc"
+                                ));
+                            }
+                        }
+                        if !found_axis_rot {
+                            let num_labels = adoc_get_number_of_sections(b"T").unwrap_or(-1);
+                            for j in 0..num_labels {
+                                let Ok(name) = adoc_get_section_name(b"T", j) else {
+                                    continue;
+                                };
+                                let temp_label_str = String::from_utf8_lossy(&name);
+                                let fei_label = temp_label_str.contains("TiltAxisAngle");
+                                if !(fei_label || temp_label_str.contains("Tilt axis angle")) {
+                                    continue;
+                                }
+                                if let Some((_, rest)) = temp_label_str.split_once('=') {
+                                    let extract = rest.trim_start();
+                                    let end = extract
+                                        .find([',', ' ', '\t', '/'])
+                                        .unwrap_or(extract.len());
+                                    if let Ok(tilt_axis) = extract[..end].parse::<f32>() {
+                                        if fei_label {
+                                            let mut rot_angle = 0.0_f32;
+                                            if adoc_get_float(
+                                                ADOC_ZVALUE_NAME,
+                                                0,
+                                                b"RotationAngle",
+                                                &mut rot_angle,
+                                            ) == 0
+                                            {
+                                                if (-(rot_angle + 90.0) - tilt_axis).abs() < 0.11 {
+                                                    out.push_str(&format!(
+                                                        "          Tilt axis rotation angle = {:7.1}{}\n",
+                                                        rot_angle, "  (from RotationAngle in mdoc)"
+                                                    ));
+                                                } else if ((rot_angle - 90.0) - tilt_axis).abs()
+                                                    < 0.11
+                                                {
+                                                    out.push_str(&format!(
+                                                        "          Tilt axis rotation angle = {:7.1}{}\n",
+                                                        tilt_axis, "  (from mdoc)"
+                                                    ));
+                                                } else if (-(rot_angle - 90.0) - tilt_axis).abs()
+                                                    < 0.11
+                                                {
+                                                    out.push_str(&format!(
+                                                        "          Tilt axis rotation angle = {:7.1}{}\n",
+                                                        -tilt_axis, "  (corrected sign, from mdoc)"
+                                                    ));
+                                                }
+                                            }
+                                        } else {
+                                            out.push_str(&format!(
+                                                "          Tilt axis rotation angle = {:7.1}{}\n",
+                                                tilt_axis, "  (from mdoc)"
+                                            ));
+                                        }
+                                    }
+                                }
+                                break;
+                            }
+                        }
+                        // The `header` process ended here and took its
+                        // autodoc with it; in process it must be released.
+                        adoc_clear(ind_adoc);
+                    }
+                }
+            }
+        }
+        iiu_close(im_unit);
+    }
+    iiu_exit_on_error(saved_exit, -1);
+    b3d_set_store_error(saved_store);
+    match result {
+        Ok(()) => Ok(out.lines().map(str::to_owned).collect()),
+        Err(messages) => Err(fail(messages)),
+    }
+}
+
+/// Matches `getmrc` (`IMOD/pysrc/imodpy.py:456`); the `header` process is replaced by
+/// [`header_in_process`] (owner decision 2026-09-24).
 pub fn get_mrc(file: &str, do_all: bool, angle_line_values: bool) -> Result<MrcInfo, ImodpyError> {
-    let input = vec![format!("InputFile {file}")];
     if angle_line_values {
-        let lines =
-            run_cmd("header -StandardInput", Some(&input), None, None, &[])?.unwrap_or_default();
+        // `imodpy.py:477`: `runcmd("header -StandardInput", input)` with
+        // `input = ["InputFile " + file]`.  Owner decision (2026-09-24): our
+        // own `header` runs in process instead of through `sh -c`/`PATH`.
+        let lines = header_in_process("header -StandardInput", file, true, None)?;
         let mut values = [None; 5];
         for line in lines
             .iter()
@@ -326,7 +1195,10 @@ pub fn get_mrc(file: &str, do_all: bool, angle_line_values: bool) -> Result<MrcI
     } else {
         "header -si -mo -pi -StandardInput"
     };
-    let mut lines = run_cmd(command, Some(&input), None, None, &[])?.unwrap_or_default();
+    // `imodpy.py:500-505`: `runcmd(command, input)`, now in process (owner
+    // decision 2026-09-24); the lines carry the `3i8`/`i4`/`3g15.5`/`g13.5`
+    // text `header` prints, so the values parsed below are rounded as before.
+    let mut lines = header_in_process(command, file, true, Some(do_all))?;
     let needed = if do_all { 7 } else { 3 };
     while lines.len() >= needed
         && (lines[0].trim().is_empty()
@@ -411,11 +1283,13 @@ pub fn get_mrc_size(file: &str) -> Result<(i32, i32, i32), ImodpyError> {
     }
 }
 
-/// Matches `getmrcpixel` (`IMOD/pysrc/imodpy.py:557`); `header` remains external.
+/// Matches `getmrcpixel` (`IMOD/pysrc/imodpy.py:557`); the `header` process is replaced by
+/// [`header_in_process`] (owner decision 2026-09-24).
 pub fn get_mrc_pixel(file: &str) -> Result<f32, ImodpyError> {
-    let input = vec![format!("InputFile {file}")];
-    let lines =
-        run_cmd("header -StandardInput", Some(&input), None, None, &[])?.unwrap_or_default();
+    // `imodpy.py:565`: `runcmd("header -StandardInput", input)`, now in
+    // process; the `Pixel spacing` (g11.4) and `size in nanometers` (g11.4)
+    // lines are the text `header` prints, so the pixel keeps its rounding.
+    let lines = header_in_process("header -StandardInput", file, true, None)?;
     let mut pixel = None;
     for line in lines {
         if let Some(value) = line
@@ -499,11 +1373,11 @@ pub fn run_goodframe(x_size: i32, y_size: i32) -> (i32, i32) {
     }
 }
 
-/// Matches `getImageFormat` (`IMOD/pysrc/imodpy.py:639`); `header` remains external.
+/// Matches `getImageFormat` (`IMOD/pysrc/imodpy.py:639`); the `header` process is replaced by
+/// [`header_in_process`] (owner decision 2026-09-24).
 pub fn get_image_format(file: &str) -> Result<String, ImodpyError> {
-    let input = vec![format!("InputFile {file}")];
-    let lines =
-        run_cmd("header -StandardInput", Some(&input), None, None, &[])?.unwrap_or_default();
+    // `imodpy.py:645`: `runcmd("header -StandardInput", input)`, now in process.
+    let lines = header_in_process("header -StandardInput", file, true, None)?;
     for (description, format) in [
         ("a TIFF", "TIFF"),
         ("an HDF", "HDF"),
@@ -1174,10 +2048,19 @@ pub fn exit_from_imod_error(program_name: &str) -> ! {
     let mut prior = None;
     for line in errors {
         if let Some(previous) = prior.replace(line) {
-            prnstr(&previous, "", false);
+            // `prnstr(line, end='')`: the Python lines keep their endings;
+            // producers here that stored a line without one get it back.
+            let end = if previous.ends_with('\n') { "" } else { "\n" };
+            prnstr(&previous, end, false);
         }
     }
-    eprintln!("ERROR: {program_name} - {}", prior.unwrap_or_default());
+    // `prnstr("ERROR: " + pn + " - " + line, end='')` on stdout; the stored
+    // final line carries no line ending here, so one is written.
+    prnstr(
+        &format!("ERROR: {program_name} - {}", prior.unwrap_or_default()),
+        "\n",
+        true,
+    );
     std::process::exit(1)
 }
 
@@ -1271,14 +2154,15 @@ pub fn extract_program_entries(
 }
 
 /// Matches `getIMODversion` (`IMOD/pysrc/imodpy.py:1421`).
+///
+/// `imodpy.py:1423` ran `imodinfo` with no arguments and took the third word
+/// of its first line, `imodVersion`'s `"%s Version %s %s %s\n"` with
+/// `VERSION_NAME` (`b3dutil.c:151`).  Owner decision (2026-09-24): the
+/// process is gone and that word is returned directly.  `VERSION_NAME` is generated from
+/// `IMOD/.version` (`setup2:411`) and `imod_version` in `b3dutil.rs` writes
+/// it inline, so it is repeated here; the two must change together.
 pub fn get_imod_version() -> Option<String> {
-    run_cmd("imodinfo", None, None, None, &[])
-        .ok()
-        .flatten()?
-        .first()?
-        .split_whitespace()
-        .nth(2)
-        .map(str::to_owned)
+    Some("5.2.17".to_owned())
 }
 
 /// Matches `imodIsAbsPath` (`IMOD/pysrc/imodpy.py:1431`) outside Cygwin's `cygpath` boundary.

@@ -23,9 +23,10 @@ use super::imodpy::{
     ImodpyError, MrcInfo, OptionValue, add_imod_bin_ignore_sighup, allowed_raw_stack_extensions,
     cleanup_files, com_extension_from_option, dataset_filename, default_naming_style,
     elapsed_time_components, get_err_strings, get_montage_size, get_mrc, get_mrc_pixel,
-    get_mrc_size, get_naming_style, imod_abs_path, is_file_newer, make_backup_file, option_value,
-    parse_list, print_pid, prnstr, read_text_file, run_cmd, run_goodframe,
-    set_output_format_if_needed, set_root_and_extension, standard_type_extensions, write_text_file,
+    get_mrc_size, get_naming_style, header_in_process, imod_abs_path, is_file_newer,
+    make_backup_file, option_value, parse_list, print_pid, prnstr, read_text_file, run_cmd,
+    run_goodframe, set_output_format_if_needed, set_root_and_extension, standard_type_extensions,
+    write_text_file,
 };
 use super::pip::{
     pip_forbid_comments, pip_get_boolean, pip_get_err_no, pip_get_float, pip_get_integer,
@@ -6195,14 +6196,13 @@ impl Brt {
             && self.correct_ctf != 0
             && Path::new(&dataset_filename(".ali", None, None)).exists()
         {
-            let head_lines = match run_cmd(
-                &format!("header {}", dataset_filename(".ali", None, None)),
-                None,
-                None,
-                None,
-                &[],
-            ) {
-                Ok(lines) => lines.unwrap_or_default(),
+            // `batchruntomo:3208`: `runcmd('header ' + datasetFilename('.ali'))`.
+            // Owner decision (2026-09-24): our own `header` runs in process
+            // instead of through `sh -c`/`PATH`; the name is passed as the one
+            // argument the shell made of it.
+            let ali = dataset_filename(".ali", None, None);
+            let head_lines = match header_in_process(&format!("header {ali}"), &ali, false, None) {
+                Ok(lines) => lines,
                 Err(_) => {
                     self.report_imod_error(Some("Error reading header of existing aligned stack"));
                     return 1;

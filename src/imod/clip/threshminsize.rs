@@ -82,6 +82,7 @@ pub fn threshold_with_min_size(
                 ny,
                 opt.cx as i32,
                 opt.cy as i32,
+                None,
             );
             if next
                 .as_mut()

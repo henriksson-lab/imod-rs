@@ -51,6 +51,8 @@ pub fn diprp(
     let mut l = 0;
     let mut m = 0;
     let mut n = 0;
+    let len = data.len();
+    let dp = data.as_mut_ptr();
     nest = 14;
     nt = dim[1];
     sep = dim[2];
@@ -113,16 +115,36 @@ pub fn diprp(
                                                                     while p0 <= nt {
                                                                         p3 = p0 + size;
                                                                         p = p0 - 1;
+                                                                        // Unchecked access (see `mdftkd.rs`'s module comment for the pattern):
+                                                                        // `p` runs from `p0 - 1` in steps of `p4 > 0` up to its last value below
+                                                                        // `p3`, and every access is `p`, `p + delta` or either plus `odd`, so
+                                                                        // checking the first point (and its partner) is non-negative and the last
+                                                                        // point plus `max(delta, 0)` plus `odd` is below `len` bounds them all.
+                                                                        if p < p3 {
+                                                                            assert!(p >= 0 && p + delta >= 0 && p4 > 0 && ((p + (p3 - 1 - p) / p4 * p4 + delta.max(0)) as usize).checked_add(odd).is_some_and(|last| last < len));
+                                                                        }
                                                                         while p < p3 {
                                                                             p5 = p + delta;
-                                                                            data.swap(
-                                                                                p as usize,
-                                                                                p5 as usize,
-                                                                            );
-                                                                            data.swap(
-                                                                                p as usize + odd,
-                                                                                p5 as usize + odd,
-                                                                            );
+                                                                            unsafe {
+                                                                                std::ptr::swap(
+                                                                                    dp.add(
+                                                                                        p as usize,
+                                                                                    ),
+                                                                                    dp.add(
+                                                                                        p5 as usize,
+                                                                                    ),
+                                                                                );
+                                                                                std::ptr::swap(
+                                                                                    dp.add(
+                                                                                        p as usize
+                                                                                            + odd,
+                                                                                    ),
+                                                                                    dp.add(
+                                                                                        p5 as usize
+                                                                                            + odd,
+                                                                                    ),
+                                                                                );
+                                                                            }
                                                                             p += p4;
                                                                         }
                                                                         p0 += p2;
@@ -220,10 +242,25 @@ pub fn diprp(
                     while p0 <= nt {
                         p3 = p0 + size;
                         jj = p0 - 1;
+                        if jj < p3 {
+                            assert!(
+                                jj >= 0
+                                    && jj + delta >= 0
+                                    && p4 > 0
+                                    && ((jj + (p3 - 1 - jj) / p4 * p4 + delta.max(0)) as usize)
+                                        .checked_add(odd)
+                                        .is_some_and(|last| last < len)
+                            );
+                        }
                         while jj < p3 {
                             kk = jj + delta;
-                            data.swap(jj as usize, kk as usize);
-                            data.swap(jj as usize + odd, kk as usize + odd);
+                            unsafe {
+                                std::ptr::swap(dp.add(jj as usize), dp.add(kk as usize));
+                                std::ptr::swap(
+                                    dp.add(jj as usize + odd),
+                                    dp.add(kk as usize + odd),
+                                );
+                            }
                             jj += p4;
                         }
                         p0 += p2;

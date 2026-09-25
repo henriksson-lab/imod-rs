@@ -55,14 +55,23 @@ builds **one** binary, `imod`, which dispatches busybox-style:
    cargo run --bin imod -- newstack -bin 2 in.mrc out.mrc
    ```
 
-   This form re-execs the binary with `argv[0]` rewritten to the command name,
-   so the translated program still observes `["<bindir>/header", "-size",
-   "file.mrc"]`.  That matters: `clip`, `mrc2tif` and `imodinfo` build their
+   This form runs the command in the same process. Before dispatch, the
+   launcher records the argv the program would have seen as a link,
+   `["<bindir>/header", "-size", "file.mrc"]`, and translated code reads it
+   through `b3dutil::program_args()`, never `std::env::args()`.  That matters: `clip`, `mrc2tif` and `imodinfo` build their
    exit prefixes from `imodProgName(argv[0])`, and PIP reports the program
    name in its errors.  No translated unit knows the launcher exists.
 
 `imod` with no arguments, with `-h`/`--help`, or with an unrecognised
 subcommand prints the command listing on stderr and exits 1.
+
+The list of commands and their entry points is one table in the library,
+`src/imod/commands.rs`.  The translated Python scripts (`batchruntomo`,
+`trimvol`, ...) use the same table: when a script runs one of these commands
+through `imodpy::run_cmd`, it runs in the same process on a fresh thread
+rather than through `sh -c` and `PATH`, so a script always gets this crate's
+program, never another IMOD install's.  GUI programs, the script translations
+themselves and the detached job managers still run as child processes.
 
 ## Audit workflow
 

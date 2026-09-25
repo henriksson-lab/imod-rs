@@ -79,6 +79,39 @@ fn both_invocation_forms_give_the_program_the_same_argv() {
         String::from_utf8_lossy(&mrc2tif_missing.stdout)
     );
 
+    // A C++ program whose PIP exit prefix is `imodProgName(argv[0])`: a PIP
+    // option error names the program, not the launcher.
+    let beadtrack_bad = both_forms(
+        "beadtrack",
+        &[
+            "-image",
+            "imod-dispatch-no-such-file.mrc",
+            "-BoxSizeXandY",
+            "32,32",
+        ],
+        &[],
+    );
+    assert_eq!(beadtrack_bad.status.code(), Some(1));
+    assert!(
+        String::from_utf8_lossy(&beadtrack_bad.stdout).contains("ERROR: beadtrack - "),
+        "beadtrack's exit prefix must name the program, not the launcher: {}",
+        String::from_utf8_lossy(&beadtrack_bad.stdout)
+    );
+
+    // A Fortran main program with blendvars module state: its exit prefix is
+    // the PIP one it sets itself.
+    let blendmont_missing = both_forms(
+        "blendmont",
+        &[
+            "-imin",
+            "imod-dispatch-no-such-file.mrc",
+            "-imout",
+            "out.mrc",
+        ],
+        &[],
+    );
+    assert_eq!(blendmont_missing.status.code(), Some(1));
+
     // A Python-launcher translation reading `args_os()`.
     let submfg_usage = both_forms("submfg", &[], &[("IMOD_DIR", "/fixture/imod")]);
     assert!(String::from_utf8_lossy(&submfg_usage.stdout).contains("Usage:  submfg"));
@@ -104,7 +137,9 @@ fn launcher_lists_its_commands_and_exits_nonzero() {
             "3dmod",
             "alterheader",
             "batchruntomo",
+            "beadtrack",
             "binvol",
+            "blendmont",
             "clip",
             "convertmod",
             "etomo",
@@ -121,8 +156,13 @@ fn launcher_lists_its_commands_and_exits_nonzero() {
             "subm",
             "submfg",
             "tif2mrc",
+            "tiltalign",
+            "tiltxcorr",
             "trimvol",
             "wmod2imod",
+            "xfmodel",
+            "xfproduct",
+            "xftoxg",
         ] {
             assert!(
                 text.contains(&format!("\n  {command}\n")),

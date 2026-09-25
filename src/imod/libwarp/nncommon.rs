@@ -32,7 +32,7 @@ pub fn nn_quit(message: &str) -> ! {
     let _ = err.write_all(b"  error: libnn: ");
     let _ = err.write_all(message.as_bytes());
 
-    std::process::exit(1);
+    crate::imod::libcfshr::b3dutil::exit(1);
 }
 
 /// Original `circle_contains` (`nncommon.c:69`).

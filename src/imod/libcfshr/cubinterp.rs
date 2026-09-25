@@ -362,13 +362,24 @@ pub fn cubinterp(
                         unsafe { *array.get_unchecked($i) }
                     };
                 }
+                // In the checked span `xp`/`yp` are finite and in
+                // `[2, nxa - 1)` / `[2, nya - 1)`, so `to_int_unchecked` is
+                // the saturating `as i32` without its NaN and range tests.
                 macro_rules! cubic_span {
-                    ($at:ident, $store:expr) => {
+                    ($at:ident, $store:expr, $unchecked_trunc:expr) => {
                         for ix in ixst..=ixnd {
                             xp = a11 * ix as f32 + xbase;
                             yp = a21 * ix as f32 + ybase;
-                            ixp = xp as i32;
-                            iyp = yp as i32;
+                            if $unchecked_trunc {
+                                // SAFETY: see the hoisted check below.
+                                unsafe {
+                                    ixp = xp.to_int_unchecked::<i32>();
+                                    iyp = yp.to_int_unchecked::<i32>();
+                                }
+                            } else {
+                                ixp = xp as i32;
+                                iyp = yp as i32;
+                            }
                             dx = xp - ixp as f32;
                             dy = yp - iyp as f32;
 
@@ -428,29 +439,99 @@ pub fn cubinterp(
                         && ixbase + nxb as usize <= bray.len()
                 };
                 if span_in_bounds {
-                    cubic_span!(at_unchecked, |i: usize, v: f32| {
+                    cubic_span!(
+                        at_unchecked,
+                        |i: usize, v: f32| {
+                            // SAFETY: `i < ixbase + nxb <= bray.len()`, checked above.
+                            unsafe { *bray.get_unchecked_mut(i) = v }
+                        },
+                        true
+                    );
+                } else {
+                    cubic_span!(at_checked, |i: usize, v: f32| bray[i] = v, false);
+                }
+            } else if linear > 0 {
+                // do linear interpolation
+                //
+                // Same hoisted proof as the cubic span above: `xp` and `yp`
+                // are monotone in `ix`, so when the truncated ends satisfy
+                // `1 <= ixp <= nxa - 1` and `1 <= iyp <= nya - 1`, every
+                // `ixp`/`iyp` in the span does, every read
+                // `ind .. ind + llnxa + 1` lies in `0 .. nxa * nya`, and every
+                // coordinate is a finite float in `[1, nxa)` / `[1, nya)`, so
+                // the saturating `as i32` (NaN and range tests on each
+                // conversion) and C's plain `cvttss2si` give the same integer:
+                // `to_int_unchecked` is that conversion.  Otherwise the
+                // checked loop runs.  The arithmetic is one macro body.
+                macro_rules! linear_span {
+                    ($trunc:ident, $at:ident, $store:expr) => {
+                        for ix in ixst..=ixnd {
+                            xp = a11 * ix as f32 + xbase;
+                            yp = a21 * ix as f32 + ybase;
+                            ixp = $trunc!(xp);
+                            iyp = $trunc!(yp);
+                            dx = xp - ixp as f32;
+                            dy = yp - iyp as f32;
+                            ind = ixp as usize - 1 + (iyp as usize - 1) * llnxa;
+                            $store(
+                                ixbase + ix as usize - 1,
+                                ((1. - dy as f64)
+                                    * ((1. - dx as f64) * $at!(ind) as f64
+                                        + (dx * $at!(ind + 1)) as f64)
+                                    + dy as f64
+                                        * ((1. - dx as f64) * $at!(ind + llnxa) as f64
+                                            + (dx * $at!(ind + llnxa + 1)) as f64))
+                                    as f32,
+                            );
+                        }
+                    };
+                }
+                macro_rules! trunc_checked {
+                    ($v:expr) => {
+                        $v as i32
+                    };
+                }
+                macro_rules! trunc_unchecked {
+                    ($v:expr) => {
+                        // SAFETY: finite and in `[1, nxa)` / `[1, nya)`, see above.
+                        unsafe { $v.to_int_unchecked::<i32>() }
+                    };
+                }
+                macro_rules! lin_checked {
+                    ($i:expr) => {
+                        array[$i]
+                    };
+                }
+                macro_rules! lin_unchecked {
+                    ($i:expr) => {
+                        // SAFETY: see the hoisted check above.
+                        unsafe { *array.get_unchecked($i) }
+                    };
+                }
+                let span_in_bounds = ixst <= ixnd && ixst >= 1 && ixnd <= nxb && {
+                    let (pa, qa) = (
+                        (a11 * ixst as f32 + xbase) as i32,
+                        (a21 * ixst as f32 + ybase) as i32,
+                    );
+                    let (pb, qb) = (
+                        (a11 * ixnd as f32 + xbase) as i32,
+                        (a21 * ixnd as f32 + ybase) as i32,
+                    );
+                    let (pmin, pmax) = if pa < pb { (pa, pb) } else { (pb, pa) };
+                    let (qmin, qmax) = if qa < qb { (qa, qb) } else { (qb, qa) };
+                    pmin >= 1
+                        && pmax <= nxa - 1
+                        && qmin >= 1
+                        && qmax <= nya - 1
+                        && ixbase + nxb as usize <= bray.len()
+                };
+                if span_in_bounds {
+                    linear_span!(trunc_unchecked, lin_unchecked, |i: usize, v: f32| {
                         // SAFETY: `i < ixbase + nxb <= bray.len()`, checked above.
                         unsafe { *bray.get_unchecked_mut(i) = v }
                     });
                 } else {
-                    cubic_span!(at_checked, |i: usize, v: f32| bray[i] = v);
-                }
-            } else if linear > 0 {
-                // do linear interpolation
-                for ix in ixst..=ixnd {
-                    xp = a11 * ix as f32 + xbase;
-                    yp = a21 * ix as f32 + ybase;
-                    ixp = xp as i32;
-                    iyp = yp as i32;
-                    dx = xp - ixp as f32;
-                    dy = yp - iyp as f32;
-                    ind = ixp as usize - 1 + (iyp as usize - 1) * llnxa;
-                    bray[ixbase + ix as usize - 1] = ((1. - dy as f64)
-                        * ((1. - dx as f64) * array[ind] as f64 + (dx * array[ind + 1]) as f64)
-                        + dy as f64
-                            * ((1. - dx as f64) * array[ind + llnxa] as f64
-                                + (dx * array[ind + llnxa + 1]) as f64))
-                        as f32;
+                    linear_span!(trunc_checked, lin_checked, |i: usize, v: f32| bray[i] = v);
                 }
             } else {
                 // do nearest neighbor interpolation

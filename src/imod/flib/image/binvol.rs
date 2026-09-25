@@ -10,6 +10,7 @@ use crate::imod::flib::subrs::hvem::parse_input_params::{
 };
 use crate::imod::flib::subrs::imsubs::irdhdr::irdhdr;
 use crate::imod::flib::subrs::imsubs::wrap_iiunit::imopen;
+use crate::imod::libcfshr::b3dutil::b3d_set_store_error;
 use crate::imod::libcfshr::b3dutil::{
     b3d_physical_memory, set_float_output_for_entered_mode, standard_memory_limit_mb,
 };
@@ -23,7 +24,9 @@ use crate::imod::libcfshr::taperpad::slice_taper_out_pad;
 use crate::imod::libcfshr::zoomdown::{select_zoom_filter, zoom_filt_value};
 use crate::imod::libfft::nice_fft_limit;
 use crate::imod::libfft::thrdfft::thrdfft;
+use crate::imod::libiimod::iimage::{IIFILE_MRC, ii_delete, ii_open, ii_read_section_float};
 use crate::imod::libiimod::mrcfiles::MRC_LABEL_SIZE;
+use crate::imod::libiimod::unit_fileio::iiu_get_ii_file;
 use crate::imod::libiimod::unit_fileio::{
     iiu_close, iiu_read_lines, iiu_read_section, iiu_set_position, iiu_write_lines,
     iiu_write_section,
@@ -32,7 +35,9 @@ use crate::imod::libiimod::unit_header::{
     iiu_alt_delta, iiu_alt_mode, iiu_alt_origin, iiu_alt_sample, iiu_alt_size, iiu_ret_delta,
     iiu_ret_origin, iiu_trans_header, iiu_write_header_str,
 };
-use crate::imod::libiimod::unit_reduced::iiu_read_reduced;
+use crate::imod::libiimod::unit_reduced::{
+    PreloadedSection, iiu_preload_reduced_section, iiu_read_reduced,
+};
 use chrono::{Local, Timelike};
 
 /// `parameter (numOptions = 14)` (`binvol.f90:46`).
@@ -667,6 +672,54 @@ pub fn binvol() {
                 let mut last_z_finished = -1_i32;
                 let mut last_z_added = 0_i32;
                 //
+                // Rust-only (TO_OPT.md, binvol read/zoom overlap): when each
+                // input section is one `irdReduced` call, a reader thread
+                // reads section inz+1 of an MRC input as floats, on its own
+                // handle, while `zoomWithFilter` runs on section inz.  The
+                // section goes in through `iiu_preload_reduced_section`; a
+                // failed read hands nothing over, so the unit read below
+                // runs and reports the error exactly as the source does.
+                // Not for HDF (library not thread-safe) or TIFF.
+                let prefetch_name = if if_xy_anti_alias > 0 && num_chunks == 1 && nz > 1 {
+                    let ii_file = unsafe { &*iiu_get_ii_file(1) };
+                    if ii_file.file == IIFILE_MRC {
+                        ii_file.filename.clone()
+                    } else {
+                        None
+                    }
+                } else {
+                    None
+                };
+                let prefetch = prefetch_name.map(|name| {
+                    let (req_tx, req_rx) = std::sync::mpsc::channel::<(i32, Vec<f32>)>();
+                    let (res_tx, res_rx) = std::sync::mpsc::channel::<(i32, Vec<f32>, bool)>();
+                    let handle = std::thread::spawn(move || {
+                        // Errors are this thread's own; never print them.
+                        b3d_set_store_error(1);
+                        let file = unsafe { ii_open(name.as_bytes(), "rb") };
+                        for (iz, mut buf) in req_rx {
+                            let mut ok = false;
+                            if let Some(image) = unsafe { file.as_mut() } {
+                                image.llx = 0;
+                                image.urx = nx - 1;
+                                image.lly = 0;
+                                image.ury = ny - 1;
+                                image.pad_left = 0;
+                                image.pad_right = 0;
+                                buf.resize(nx as usize * ny as usize, 0.0);
+                                ok = ii_read_section_float(image, &mut buf, iz) == 0;
+                            }
+                            if res_tx.send((iz, buf, ok)).is_err() {
+                                break;
+                            }
+                        }
+                        unsafe { ii_delete(file) };
+                    });
+                    let _ = req_tx.send((0, Vec::new()));
+                    (req_tx, res_rx, handle)
+                });
+                let mut prefetch_spare = Some(Vec::<f32>::new());
+                //
                 // Loop on input slices and on strips in slices
                 for inz in 0..nz {
                     let mut iy = 0_i32;
@@ -676,6 +729,23 @@ pub fn binvol() {
                         let num_bin_lines = (num_lines as f32 / bin_y) as i32;
                         if if_xy_anti_alias > 0 {
                             let mut error = 0;
+                            if let Some((req_tx, res_rx, _)) = &prefetch {
+                                if let Ok((iz, buf, ok)) = res_rx.recv() {
+                                    if inz + 1 < nz {
+                                        let spare = prefetch_spare.take().unwrap_or_default();
+                                        let _ = req_tx.send((inz + 1, spare));
+                                    }
+                                    if ok && iz == inz {
+                                        iiu_preload_reduced_section(Some(PreloadedSection {
+                                            unit: 1,
+                                            iz,
+                                            data: buf,
+                                        }));
+                                    } else {
+                                        prefetch_spare = Some(buf);
+                                    }
+                                }
+                            }
                             let (before_temp, temp) = array.split_at_mut(itemp_base as usize);
                             iiu_read_reduced(
                                 1,
@@ -692,6 +762,11 @@ pub fn binvol() {
                                 nx * max_lines,
                                 &mut error,
                             );
+                            if prefetch.is_some() {
+                                if let Some(done) = iiu_preload_reduced_section(None) {
+                                    prefetch_spare = Some(done.data);
+                                }
+                            }
                             if error != 0 {
                                 exit_error("Reading image");
                             }
@@ -823,6 +898,11 @@ pub fn binvol() {
                             iring_start += 1;
                         }
                     }
+                }
+                if let Some((req_tx, res_rx, handle)) = prefetch {
+                    drop(req_tx);
+                    drop(res_rx);
+                    let _ = handle.join();
                 }
             } else {
                 //
@@ -957,7 +1037,7 @@ pub fn binvol() {
         iiu_close(1);
         //
         println!(" PROGRAM EXECUTED TO END.");
-        std::process::exit(0);
+        crate::imod::libcfshr::b3dutil::exit(0);
     }
 }
 

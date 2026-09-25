@@ -1513,7 +1513,7 @@ pub fn pip_set_error(err_string: &[u8]) -> i32 {
         let _ = out.flush();
         /* Flush Rust's standard output too, for any caller that used it. */
         let _ = io::stdout().flush();
-        std::process::exit(1);
+        crate::imod::libcfshr::b3dutil::exit(1);
     }
     0
 }
@@ -1526,7 +1526,7 @@ pub fn exit_error(format: &[u8]) -> ! {
     pip_set_error(format);
     /* PipSetError already exited when an exit prefix is set. */
     let _ = io::stdout().flush();
-    std::process::exit(1);
+    crate::imod::libcfshr::b3dutil::exit(1);
 }
 
 /// Original C `PipNumberOfEntries` (`parse_params.c:1106`).
@@ -2274,7 +2274,7 @@ pub fn pip_read_or_parse_options(
         }
         pip_print_help(prog_name, 0, num_in_files, num_out_files);
         let _ = io::stdout().flush();
-        std::process::exit(0);
+        crate::imod::libcfshr::b3dutil::exit(0);
     }
 }
 
@@ -3335,18 +3335,49 @@ pub(crate) fn strtod(s: &[u8], end: &mut usize) -> f64 {
     }
     if lower_starts(b"nan") {
         let mut j = i + 3;
-        /* nan(n-char-sequence) */
+        let mut nan = f64::NAN;
+        /* nan(n-char-sequence): glibc's `__strtod_nan` reads the sequence
+        with `strtoull(str, &endp, 0)` and, when that consumes all of it, puts
+        the value in the 51 mantissa bits below the quiet bit. */
         if j < s.len() && s[j] == b'(' {
             let mut k = j + 1;
             while k < s.len() && (s[k].is_ascii_alphanumeric() || s[k] == b'_') {
                 k += 1;
             }
             if k < s.len() && s[k] == b')' {
+                let seq = &s[j + 1..k];
+                let (base, digits): (u32, &[u8]) =
+                    if seq.len() > 2 && seq[0] == b'0' && (seq[1] | 32) == b'x' {
+                        (16, &seq[2..])
+                    } else if seq.len() > 1 && seq[0] == b'0' {
+                        (8, &seq[1..])
+                    } else {
+                        (10, seq)
+                    };
+                let mut mant: u64 = 0;
+                let mut all = !digits.is_empty();
+                for &c in digits {
+                    match (c as char).to_digit(base) {
+                        Some(d) => {
+                            mant = mant
+                                .checked_mul(base as u64)
+                                .and_then(|m| m.checked_add(d as u64))
+                                .unwrap_or(u64::MAX)
+                        }
+                        None => {
+                            all = false;
+                            break;
+                        }
+                    }
+                }
+                if all {
+                    nan = f64::from_bits(f64::NAN.to_bits() | (mant & 0x0007_ffff_ffff_ffff));
+                }
                 j = k + 1;
             }
         }
         *end = j;
-        return if negative { -f64::NAN } else { f64::NAN };
+        return if negative { -nan } else { nan };
     }
 
     /* C99 hexadecimal floating literal */

@@ -526,14 +526,14 @@ pub fn default_options(options: &mut ClipOptions) {
 pub fn clip() {
     use crate::imod::clip::{correlation, fft, filter, processing};
     use crate::imod::libiimod::{iimage, mrcfiles};
-    let raw: Vec<String> = std::env::args().collect();
+    let raw: Vec<String> = crate::imod::libcfshr::b3dutil::program_args();
     let progname = imod_prog_name(&raw[0]);
     // `clip.cpp:211` builds the prefix in `viewcmd`, the same 1024-byte buffer
     // it later reuses for the FEI defect message and the `3dmod` command line.
     setExitPrefix(c_format("ERROR: %s - ", &[CArg::Str(&progname)]).as_bytes());
     if raw.len() < 3 {
         usage();
-        std::process::exit(3);
+        crate::imod::libcfshr::b3dutil::exit(3);
     }
     let command = raw[1].clone();
     // `clip.cpp:224-362` tests the command with a run of independent
@@ -721,7 +721,7 @@ pub fn clip() {
     }
     if process == crate::imod::clip::clip::ClipOperation::None {
         usage();
-        std::process::exit(1);
+        crate::imod::libcfshr::b3dutil::exit(1);
     }
     let mut options = ClipOptions {
         pname: String::new(),
@@ -1325,13 +1325,13 @@ pub fn clip() {
     if !procout || process == crate::imod::clip::clip::ClipOperation::Blankfile {
         if raw.len() - 1 < iarg {
             usage();
-            std::process::exit(3);
+            crate::imod::libcfshr::b3dutil::exit(3);
         }
         options.infiles = (raw.len() - iarg) as i32;
     } else {
         if raw.len() < iarg + 2 {
             usage();
-            std::process::exit(3);
+            crate::imod::libcfshr::b3dutil::exit(3);
         }
         options.infiles = (raw.len() - iarg - 1) as i32;
     }
@@ -1761,7 +1761,7 @@ WARNING: This file is not a readable MRC file.\n\
         }
     };
     if retval != 0 {
-        std::process::exit(retval);
+        crate::imod::libcfshr::b3dutil::exit(retval);
     }
     if process != crate::imod::clip::clip::ClipOperation::Blankfile
         && let Some(fp) = input.fp.as_mut()
@@ -1801,7 +1801,7 @@ WARNING: This file is not a readable MRC file.\n\
             let _ = shell.status();
         }
     }
-    std::process::exit(0);
+    crate::imod::libcfshr::b3dutil::exit(0);
 }
 /// Original: `clipMakeSecList` (`clip.cpp:1002`).
 ///

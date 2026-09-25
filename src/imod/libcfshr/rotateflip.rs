@@ -199,21 +199,43 @@ pub fn rotate_flip_image(
     }
     macro_rules! gather_output_rows {
         ($t:ty, $array:expr, $brray:expr, |$v:ident| $conv:expr) => {{
-            let array = $array;
-            let run = |(g, brows): (usize, &mut [$t])| {
+            let array: &[$t] = $array;
+            /* Unchecked reads.  The source index `src_origin + yo * srcPerRow
+            + xo * srcPerCol` is affine in the output position, so over the
+            output rectangle it takes its extremes at the four corners; the
+            `assert!` checks those four are in `0..array.len()`, which puts
+            every index the loops below form in range.  Output writes stay
+            within each group's `brows`, whose length is a multiple of `nxo`
+            (`chunks_mut` of `count = nxo * nyOut` by `rows_per_group * nxo`),
+            so `line * nxo + xo < 8 * nxo` inside a strip and
+            `iy * nxo + xo < nrows * nxo` in the tail.  Checked indexing
+            spent more time on bounds tests than on the copy. */
+            let last_row = (ny_out - 1) as isize * src_per_row;
+            let last_col = (nxo - 1) as isize * src_per_col;
+            for corner in [0, last_row, last_col, last_row + last_col] {
+                let index = src_origin + corner;
+                assert!(index >= 0 && (index as usize) < array.len());
+            }
+            // `move`: the copied `nxo`, `src_per_col`, ... stay in registers;
+            // captured by reference, each was reloaded after every store.
+            let run = move |(g, brows): (usize, &mut [$t])| {
+                let ap = array.as_ptr();
                 let row0 = g * rows_per_group;
                 let nrows = brows.len() / nxo;
                 let nstrips = nrows / 8;
+                let bp = brows.as_mut_ptr();
                 for strip in 0..nstrips {
-                    let strip_rows = &mut brows[strip * 8 * nxo..(strip + 1) * 8 * nxo];
+                    let sp8 = unsafe { bp.add(strip * 8 * nxo) };
                     let mut src = [0_isize; 8];
                     for line in 0..8 {
                         src[line] = src_origin + (row0 + 8 * strip + line) as isize * src_per_row;
                     }
                     for xo in 0..nxo {
                         for line in 0..8 {
-                            let $v = array[src[line] as usize];
-                            strip_rows[line * nxo + xo] = $conv;
+                            unsafe {
+                                let $v = *ap.offset(src[line]);
+                                *sp8.add(line * nxo + xo) = $conv;
+                            }
                             src[line] += src_per_col;
                         }
                     }
@@ -221,9 +243,11 @@ pub fn rotate_flip_image(
                 /* Finish up last rows */
                 for iy in 8 * nstrips..nrows {
                     let mut sp = src_origin + (row0 + iy) as isize * src_per_row;
-                    for b in brows[iy * nxo..(iy + 1) * nxo].iter_mut() {
-                        let $v = array[sp as usize];
-                        *b = $conv;
+                    for xo in 0..nxo {
+                        unsafe {
+                            let $v = *ap.offset(sp);
+                            *bp.add(iy * nxo + xo) = $conv;
+                        }
                         sp += src_per_col;
                     }
                 }

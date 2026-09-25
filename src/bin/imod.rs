@@ -8,218 +8,34 @@
 //! parsing, same `imodProgName`-derived error prefixes.
 //!
 //! When `argv[0]` does not name a command, `argv[1]` is taken as the
-//! subcommand (`imod header -size f.mrc`).  That form re-execs `/proc/self/exe`
-//! with `argv[0]` rewritten to the command name, so the translated code — which
-//! reads `std::env::args()` directly, exactly as the C/Fortran sources read
-//! `argv` — observes `["…/header", "-size", "f.mrc"]` and never sees the
-//! `imod` wrapper.  No translated unit is aware of the launcher.
+//! subcommand (`imod header -size f.mrc`).  That form dispatches in-process:
+//! the launcher records the `argv` the command would have had as its own
+//! executable — `["<bindir>/header", "-size", "f.mrc"]` — through
+//! `b3dutil::set_program_args`, and every translated unit reads `argv` through
+//! `b3dutil::program_args`/`program_args_os` rather than `std::env::args()`,
+//! so it never sees the `imod` wrapper.  Nothing is re-exec'd: the command
+//! pays process start-up and dynamic linking once.
 
+use imod_rs::imod::commands::{COMMANDS, find};
+use imod_rs::imod::libcfshr::b3dutil::set_program_args;
 use std::ffi::OsString;
 use std::path::{Path, PathBuf};
 
-/// Every command this binary can run, in the order the usage listing prints
-/// them.  Kept sorted so the listing is stable.
-const COMMANDS: &[&str] = &[
-    "3dmod",
-    "3dmodv",
-    "alterheader",
-    "batchruntomo",
-    "binvol",
-    "clip",
-    "convertmod",
-    "dm3props",
-    "fakevolume",
-    "echo2",
-    "etomo",
-    #[cfg(feature = "gui")]
-    "etomo-gui",
-    "header",
-    "imodinfo",
-    "imodjoin",
-    "imodmesh",
-    "imodqtassist",
-    "imodsendevent",
-    "midas",
-    "manageshrmem",
-    "mrc2tif",
-    "mrcbyte",
-    "mrcinfo",
-    "raw2mrc",
-    "modifymdoc",
-    "mrclog",
-    "mrctaper",
-    "mrctilt",
-    "newstack",
-    "processchunks",
-    "sourcedoc",
-    "subm",
-    "submfg",
-    "tif2mrc",
-    "tifinfo",
-    "trimvol",
-    "wmod2imod",
-];
-
 /// Runs the named command, or returns `false` when the name is not a command.
 ///
-/// Each arm is the body the corresponding `src/bin/<command>.rs` shim used to
-/// carry, unchanged.
+/// The table itself -- names, usage order and entry points -- lives in the
+/// library (`imod_rs::imod::commands`), shared with `imodpy::run_cmd`'s
+/// in-process runner.  An entry point returns (status 0) or ends in
+/// `b3dutil::exit`, which outside the in-process runner is
+/// `std::process::exit`.
 fn dispatch(name: &str) -> bool {
-    match name {
-        // `3dmodv` is the same program under the name `imod.cpp::main` tests
-        // with `imodv = program.ends_with('v')`, exactly as upstream links it.
-        "3dmod" | "3dmodv" => {
-            // `imod.cpp`'s `App`/`ImodHelp` globals and `imodv.cpp`'s Qt
-            // objects are what these two hosts stand for.  They are installed
-            // before `main` runs, as the C++ constructs them at file scope and
-            // in `main`.
-            imod_rs::imod::three_dmod::imod::IMOD_NATIVE_BOUNDARY.with(|slot| {
-                *slot.borrow_mut() = Some(Box::new(
-                    imod_rs::imod::three_dmod::imod::ImodNativeHost::default(),
-                ));
-            });
-            #[cfg(feature = "three-dmod-gl")]
-            imod_rs::imod::three_dmod::imodv::IMODV_NATIVE_BOUNDARY.with(|slot| {
-                *slot.borrow_mut() = Some(Box::new(
-                    imod_rs::imod::three_dmod::mv_window::ImodvNativeHost,
-                ));
-            });
-            let arguments = std::env::args().collect::<Vec<_>>();
-            match imod_rs::imod::three_dmod::imod::imod_main(&arguments) {
-                Ok(status) => std::process::exit(status),
-                Err(message) => {
-                    eprintln!("{message}");
-                    std::process::exit(1);
-                }
-            }
+    match find(name) {
+        Some(command) => {
+            (command.entry)();
+            true
         }
-        "alterheader" => imod_rs::imod::flib::image::alterheader::alterheader(),
-        "batchruntomo" => std::process::exit(imod_rs::imod::pysrc::batchruntomo::batchruntomo(
-            &std::env::args_os().collect::<Vec<_>>(),
-        )),
-        "binvol" => imod_rs::imod::flib::image::binvol::binvol(),
-        "clip" => imod_rs::imod::clip::clip::clip(),
-        "convertmod" => imod_rs::imod::flib::model::convertmod::convertmod(),
-        "dm3props" => std::process::exit(imod_rs::imod::mrc::dm3props::dm3props(
-            &std::env::args().collect::<Vec<_>>(),
-        )),
-        "fakevolume" => std::process::exit(imod_rs::imod::mrc::fakevolume::fakevolume(
-            &std::env::args().collect::<Vec<_>>(),
-        )),
-        "echo2" => std::process::exit(imod_rs::imod::imodutil::echo2::echo2(
-            &std::env::args().collect::<Vec<_>>(),
-        )),
-        "etomo" => std::process::exit(imod_rs::imod::pysrc::etomo::etomo(
-            &std::env::args_os().collect::<Vec<_>>(),
-        )),
-        #[cfg(feature = "gui")]
-        "etomo-gui" => {
-            let arguments = std::env::args().skip(1).collect::<Vec<_>>();
-            let mut director = imod_rs::imod::etomo::etomo_director::EtomoDirector::new();
-            if let Err(error) = director.main_gui(&arguments) {
-                eprintln!("{error}");
-                std::process::exit(1);
-            }
-        }
-        "header" => imod_rs::imod::flib::image::header::header(),
-        "imodinfo" => imod_rs::imod::imodutil::imodinfo::imodinfo(),
-        "imodjoin" => imod_rs::imod::imodutil::imodjoin::imodjoin(),
-        "imodmesh" => imod_rs::imod::imodutil::imodmesh::imodmesh(),
-        "imodqtassist" => {
-            let arguments = std::env::args().collect::<Vec<_>>();
-            std::process::exit(
-                imod_rs::imod::qttools::qtassist::imodqtassist::imodqtassist(&arguments),
-            )
-        }
-        "imodsendevent" => {
-            let arguments = std::env::args().collect::<Vec<_>>();
-            std::process::exit(
-                imod_rs::imod::qttools::sendevent::imodsendevent::imodsendevent(&arguments),
-            )
-        }
-        "midas" => {
-            let arguments = std::env::args().collect::<Vec<_>>();
-            match imod_rs::imod::midas::midas::midas_main(&arguments) {
-                Ok(status) => std::process::exit(status),
-                Err(message) => {
-                    eprintln!("{message}");
-                    std::process::exit(1);
-                }
-            }
-        }
-        "manageshrmem" => {
-            let arguments = std::env::args().collect::<Vec<_>>();
-            std::process::exit(imod_rs::imod::mrc::manageshrmem::manageshrmem(&arguments))
-        }
-        "mrc2tif" => imod_rs::imod::qttools::mrc2tif::mrc2tif::mrc2tif(),
-        "mrcbyte" => {
-            let arguments = std::env::args().collect::<Vec<_>>();
-            std::process::exit(imod_rs::imod::mrc::mrcbyte::mrcbyte(&arguments))
-        }
-        "raw2mrc" => {
-            let arguments = std::env::args().collect::<Vec<_>>();
-            std::process::exit(imod_rs::imod::mrc::raw2mrc::raw2mrc(&arguments))
-        }
-        "mrcinfo" => {
-            let arguments = std::env::args().collect::<Vec<_>>();
-            std::process::exit(imod_rs::imod::mrc::mrcinfo::mrcinfo(&arguments))
-        }
-        "modifymdoc" => std::process::exit(imod_rs::imod::mrc::modifymdoc::modifymdoc(
-            &std::env::args().collect::<Vec<_>>(),
-        )),
-        "mrclog" => {
-            let arguments = std::env::args().collect::<Vec<_>>();
-            std::process::exit(imod_rs::imod::mrc::mrclog::mrclog(&arguments))
-        }
-        "mrctaper" => {
-            let arguments = std::env::args().collect::<Vec<_>>();
-            std::process::exit(imod_rs::imod::mrc::mrctaper::mrctaper(&arguments))
-        }
-        "mrctilt" => {
-            let arguments = std::env::args().collect::<Vec<_>>();
-            std::process::exit(imod_rs::imod::mrc::mrctilt::mrctilt(&arguments))
-        }
-        "newstack" => imod_rs::imod::flib::image::newstack::newstack(),
-        "processchunks" => {
-            // Unix-only: the scheduler drives chunks over ssh and batch queues.
-            #[cfg(unix)]
-            {
-                let arguments = std::env::args().collect::<Vec<_>>();
-                std::process::exit(
-                    imod_rs::imod::qttools::processchunks::processchunks::processchunks(&arguments),
-                )
-            }
-            #[cfg(not(unix))]
-            {
-                eprintln!("ERROR: processchunks - not available on this platform");
-                std::process::exit(1)
-            }
-        }
-        "sourcedoc" => {
-            let arguments = std::env::args().collect::<Vec<_>>();
-            std::process::exit(imod_rs::imod::qttools::sourcedoc::sourcedoc::sourcedoc(
-                &arguments,
-            ))
-        }
-        "subm" => std::process::exit(imod_rs::imod::pysrc::subm::subm(
-            &std::env::args_os().collect::<Vec<_>>(),
-        )),
-        "submfg" => std::process::exit(imod_rs::imod::pysrc::submfg::submfg(
-            &std::env::args_os().collect::<Vec<_>>(),
-        )),
-        "tif2mrc" => {
-            let arguments = std::env::args().collect::<Vec<_>>();
-            std::process::exit(imod_rs::imod::mrc::tif2mrc::tif2mrc(&arguments))
-        }
-        "tifinfo" => {
-            let arguments = std::env::args().collect::<Vec<_>>();
-            std::process::exit(imod_rs::imod::mrc::tifinfo::tifinfo(&arguments))
-        }
-        "trimvol" => std::process::exit(imod_rs::imod::flib::image::trimvol::trimvol()),
-        "wmod2imod" => imod_rs::imod::imodutil::wmod2imod::wmod2imod(),
-        _ => return false,
+        None => false,
     }
-    true
 }
 
 /// Prints the command listing.  Used for no arguments, `-h`/`--help`, and an
@@ -236,7 +52,7 @@ fn usage(launcher: &str) {
     eprintln!();
     eprintln!("Commands:");
     for command in COMMANDS {
-        eprintln!("  {command}");
+        eprintln!("  {}", command.name);
     }
 }
 
@@ -256,11 +72,11 @@ fn main() {
         .unwrap_or("imod")
         .to_string();
 
-    // 2. `argv[1]` names a command: re-exec ourselves with `argv[0]` rewritten
-    //    so the program sees the `argv` it would have had as its own binary.
+    // 2. `argv[1]` names a command: run it in-process with the `argv` it would
+    //    have had as its own binary.
     let arguments: Vec<OsString> = std::env::args_os().collect();
     let subcommand = match arguments.get(1).and_then(|a| a.to_str()) {
-        Some(name) if COMMANDS.contains(&name) => name,
+        Some(name) if find(name).is_some() => name.to_string(),
         _ => {
             usage(&launcher);
             std::process::exit(1);
@@ -271,15 +87,12 @@ fn main() {
     // is the path a command link would have: `<bindir>/newstack`, not a bare
     // name.  That is what `imodProgName` and PIP's program name see.
     let new_argv0: PathBuf = match std::env::current_exe() {
-        Ok(path) => path.with_file_name(subcommand),
-        Err(_) => PathBuf::from(subcommand),
+        Ok(path) => path.with_file_name(&subcommand),
+        Err(_) => PathBuf::from(&subcommand),
     };
-
-    use std::os::unix::process::CommandExt;
-    let error = std::process::Command::new("/proc/self/exe")
-        .arg0(&new_argv0)
-        .args(&arguments[2..])
-        .exec();
-    eprintln!("{launcher}: cannot run {subcommand}: {error}");
-    std::process::exit(1);
+    let mut argv: Vec<OsString> = Vec::with_capacity(arguments.len() - 1);
+    argv.push(new_argv0.into_os_string());
+    argv.extend(arguments.into_iter().skip(2));
+    set_program_args(argv);
+    dispatch(&subcommand);
 }

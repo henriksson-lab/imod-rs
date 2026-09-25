@@ -28,7 +28,10 @@ fn accept_point(
     new_value: f32,
 ) {
     let mut point = 0;
-    while point < dimensions && new_value >= values[index[point]] {
+    // `amoeba.c:60-62`: `if (ynew < y[index[ipt]]) break;` -- the loop goes on
+    // while that test is *false*, which includes a NaN on either side.  Writing
+    // it as `ynew >= y` stops at a NaN instead.
+    while point < dimensions && !(new_value < values[index[point]]) {
         point += 1;
     }
     let displaced = index[dimensions];
@@ -93,34 +96,47 @@ pub fn amoeba<Function: FnMut(&[f32]) -> f32>(
     let mut center = [0.0f32; NMAX];
     let mut reflection = [0.0f32; NMAX];
     let mut expansion = [0.0f32; NMAX];
+    // `amoeba.c:216`: after the loop runs out, `*iloP = ilow` -- the lowest
+    // point as of the start of the last iteration, not the current `index[0]`.
+    let mut last_low = index[0];
     for iteration in 0..1000 {
         let low = index[0];
+        last_low = low;
         let high = index[points_count - 1];
         let second = index[points_count - 2];
         // `amoeba.c:124`: `for (ipt = 1; ipt < npts && near; ipt++)` — the
         // fixed array is longer than `npts`, so the bound must be explicit.
+        // `amoeba.c:127`: `near = 0` only when `fabs(...) >= ptol[idim]`, so a
+        // NaN difference leaves the point counted as near.
         let near = index[1..points_count].iter().all(|point| {
             (0..dimensions).all(|dimension| {
-                (points[*point + dimension * fastest_dimension]
+                !((points[*point + dimension * fastest_dimension]
                     - points[low + dimension * fastest_dimension])
                     .abs()
-                    < point_tolerance[dimension]
+                    >= point_tolerance[dimension])
             })
         });
+        // `amoeba.c:136-137`: `y[ihigh] - y[ilow] <= 0.5 * (fabs((double)y[ihigh])
+        // + fabs((double)y[ilow])) * ftol` -- the right side is a double
+        // expression; only the difference on the left is a float.
         if near
-            || values[high] - values[low]
-                <= 0.5 * (values[high].abs() + values[low].abs()) * function_tolerance
+            || ((values[high] - values[low]) as f64)
+                <= 0.5
+                    * ((values[high] as f64).abs() + (values[low] as f64).abs())
+                    * function_tolerance as f64
         {
             *lowest_index = low;
             *iterations = iteration as i32;
             return;
         }
         for dimension in 0..dimensions {
-            center[dimension] = index[..points_count - 1]
-                .iter()
-                .map(|point| points[*point + dimension * fastest_dimension])
-                .sum::<f32>()
-                / dimensions as f32;
+            // `amoeba.c:143-145`: a float accumulator starting at `0.`, not
+            // `Iterator::sum`, which starts at -0.0.
+            center[dimension] = 0.;
+            for point in &index[..points_count - 1] {
+                center[dimension] += points[*point + dimension * fastest_dimension];
+            }
+            center[dimension] /= dimensions as f32;
             // `amoeba.c:147`: `pref[idim] = (1. + rho) * pcen[idim] - rho *
             // p[ihigh + idim*mp];`  `rho` is a `float` (`:103`) and the `1.`
             // is a double, so `(1. + rho)` is a *double* coefficient and the
@@ -244,7 +260,7 @@ pub fn amoeba<Function: FnMut(&[f32]) -> f32>(
             }
         }
     }
-    *lowest_index = index[0];
+    *lowest_index = last_low;
     *iterations = 1000;
 }
 

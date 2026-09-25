@@ -1,4 +1,5 @@
 //! Translation of `IMOD/flib/subrs/imsubs/wrap_iiunit.f90`.
+use crate::imod::flib::subrs::imsubs::strupcase::strupcase;
 use crate::imod::libcfshr::b3dutil::extra_is_nbytes_and_flags;
 use crate::imod::libiimod::unit_fileio::{
     iiu_alt_convert, iiu_alt_print, iiu_file_info, iiu_open, iiu_read_lines, iiu_read_sec_part,
@@ -36,7 +37,13 @@ pub unsafe fn iiu_open_print(iunit: i32, name: &str, attribute: &str) -> i32 {
     }
     let do_print = iiu_ret_print() > 0;
     let do_extra = iiu_ret_brief() == 0 && do_print;
-    let attrib = attribute.to_ascii_uppercase();
+    // `character*8 attrib` / `call strupcase(attrib, attribute)`; the prints
+    // below use `trim(attrib)` and the tests read `attrib(1:1)`.
+    let mut attrib_buf = [b' '; 8];
+    strupcase(&mut attrib_buf, attribute.as_bytes());
+    let attrib = String::from_utf8_lossy(&attrib_buf)
+        .trim_end_matches(' ')
+        .to_string();
     if !attrib.starts_with('N') && do_print {
         if attrib.starts_with('S') || num_kbytes < 0 {
             println!("\n {} image file on unit{:4} : {}", attrib, iunit, name);

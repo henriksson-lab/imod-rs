@@ -106,6 +106,7 @@ pub fn clip_fft(input: &mut MrcHeader, output: &mut MrcHeader, options: &mut Cli
             options.iy,
             options.cx as i32,
             options.cy as i32,
+            None,
         );
         let Some(mut slice) = slice else {
             crate::imod::clip::clip::show_error("fft: Error reading slice.");
@@ -140,19 +141,34 @@ pub fn slice_fft(slice: &mut Islice) -> Result<(), i32> {
         // `fft.cpp:133-138`: one `malloc` of `nx2 * ysize` floats, each row
         // `memcpy`ed into it from `slice->data.f`, the old data freed, and
         // the buffer handed to `sliceInit` as the slice's data.  The `ncs`
-        // byte count of the `memcpy` is `xsize` floats.
-        let mut tbuf = Vec::new();
+        // byte count of the `memcpy` is `xsize` floats.  Here the slice's
+        // own float storage is widened instead and the rows moved up in
+        // place, last row first so that no row is overwritten before it has
+        // moved (row `i` goes from `i * xsize` to `i * nx2 >= i * xsize`,
+        // and rows above it have already gone).  The two padding floats per
+        // row, which the C leaves uninitialised, are zeroed as the zero-filled
+        // buffer had them.  A slice filtered section after section so keeps
+        // one allocation instead of freeing and faulting in a new one.
+        let crate::imod::libcfshr::islice::MrcData::F(mut tbuf) = std::mem::take(&mut slice.data)
+        else {
+            panic!("slice_fft: sliceFloat left a slice that is not float");
+        };
+        let total = nx2 as usize * slice.ysize as usize;
         if tbuf
-            .try_reserve_exact(nx2 as usize * slice.ysize as usize)
+            .try_reserve_exact(total.saturating_sub(tbuf.len()))
             .is_err()
         {
+            slice.data = MrcData::F(tbuf);
             return Err(-1);
         }
-        tbuf.resize(nx2 as usize * slice.ysize as usize, 0_f32);
-        for i in 0..slice.ysize as usize {
-            tbuf[i * nx2 as usize..i * nx2 as usize + ncs].copy_from_slice(
-                &slice.data.f()[i * slice.xsize as usize..i * slice.xsize as usize + ncs],
+        tbuf.resize(total, 0_f32);
+        for i in (0..slice.ysize as usize).rev() {
+            let row = i * nx2 as usize;
+            tbuf.copy_within(
+                i * slice.xsize as usize..i * slice.xsize as usize + ncs,
+                row,
             );
+            tbuf[row + ncs..row + nx2 as usize].fill(0.);
         }
         mrc_to_dfft(&mut tbuf, slice.xsize, slice.ysize, 0);
         slice_init(

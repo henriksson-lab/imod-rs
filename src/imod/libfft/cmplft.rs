@@ -36,7 +36,7 @@ pub fn cmplft(data: &mut [f32], odd: usize, n: i32, dim: &mut [i32; 6]) {
             "invalid number of points for cmplft.  n = %d\n",
             &[CArg::Int(n as i64)],
         ));
-        std::process::exit(1);
+        crate::imod::libcfshr::b3dutil::exit(1);
     }
     // IMOD stores complex values as interleaved real/imaginary floats.
     // `mdftkd` receives the owned storage and the fixed odd-value bias.

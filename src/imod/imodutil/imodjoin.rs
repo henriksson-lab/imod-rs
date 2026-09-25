@@ -1,6 +1,5 @@
 //! `IMOD/imodutil/imodjoin.c`: join selected objects from IMOD model files.
 
-use std::env;
 use std::io::Write;
 
 use crate::imod::libcfshr::b3dutil::ImodFile;
@@ -38,7 +37,7 @@ pub fn usage() -> ! {
         out.write_all(b"\t-s\tIgnore scale differences between models from different volumes\n");
     let _ = out.write_all(b"\t-f\tRetain original flip state of each model\n");
     let _ = out.write_all(b"\t-n\tDo not transforms models at all\n");
-    std::process::exit(3)
+    crate::imod::libcfshr::b3dutil::exit(3)
 }
 
 /// Original: `parserr` (`imodjoin.c:42`).
@@ -75,7 +74,7 @@ pub fn objerr(object_number: i32, mod_number: i32) -> ! {
 
 /// Original: `main` (`imodjoin.c:68`).
 pub fn imodjoin() {
-    let argv: Vec<String> = env::args().collect();
+    let argv: Vec<String> = crate::imod::libcfshr::b3dutil::program_args();
     setExitPrefix(b"ERROR: imodjoin - ");
     if argv.len() < 3 {
         usage();
@@ -189,7 +188,7 @@ pub fn imodjoin() {
         &mut allocated,
     ) != 0
     {
-        std::process::exit(1);
+        crate::imod::libcfshr::b3dutil::exit(1);
     }
     if replace && first_olist {
         doublerr();

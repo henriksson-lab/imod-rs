@@ -63,7 +63,9 @@ pub fn kernel_histogram(
             let ist = ((val - first_val) as f64 / dxbin as f64).floor() as i32;
             if ist >= 0 && ist < num_bins {
                 bins[ist as usize] += 1.;
-            } else if ist == num_bins && val - last_val < 0.001 * dxbin {
+            // `histogram.c:117`: `val - lastVal < 0.001 * dxbin` -- the literal is a
+            // double, so the float difference is compared with a double product.
+            } else if ist == num_bins && ((val - last_val) as f64) < 0.001 * dxbin as f64 {
                 bins[(num_bins - 1) as usize] += 1.;
             }
         }
