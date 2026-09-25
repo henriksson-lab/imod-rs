@@ -1,0 +1,148 @@
+<?xml version="1.0" encoding="utf-8"?>
+<autodoc>
+  <PreData>
+    <Version>1.0</Version>
+    <Pip>1</Pip>
+  </PreData>
+  <Field name="RootName">
+    <short>root</short>
+    <type>CH</type>
+    <usage>Rootname for info file, joined tomogram, and other files</usage>
+    <tooltip />
+    <manpage>Rootname for info file, joined tomogram, and other intermediate files. If this option is not entered, the last non-option argument will be taken as the root name.</manpage>
+  </Field>
+  <Field name="InputTomogram">
+    <short>input</short>
+    <type>FNM</type>
+    <usage>Input tomogram from one section</usage>
+    <tooltip />
+    <manpage>Input tomogram from one section.  If this option is used to enter any tomogram name, it must be used for all of them.  If the option is not entered, the first and following non-option arguments will be used for the entries.</manpage>
+  </Field>
+  <SectionHeader name="LinkedOptions">
+    <usage>OPTIONS THAT APPLY TO INDIVIDUAL TOMOGRAMS</usage>
+    <manpage>OPTIONS THAT APPLY TO INDIVIDUAL TOMOGRAMS ^  These options apply only to a single tomogram.  All such options should be entered before the tomogram name is entered.  The name can be entered either with the -input option or as a non-option argument at the command line, but in either case it must be entered after all of the options that apply to it, and before the options that apply to the next tomogram.</manpage>
+  </SectionHeader>
+  <Field name="TopSlices">
+    <short>top</short>
+    <type>IPL</type>
+    <usage>Starting and ending slices of sample from top of section</usage>
+    <tooltip />
+    <manpage>Starting and ending slices of sample from top of section.  &quot;Top&quot; does not necessarily mean high Z; it is the end of the Z range that is contiguous to the next section.  This option must be entered for all but the last section.</manpage>
+  </Field>
+  <Field name="BottomSlices">
+    <short>bottom</short>
+    <type>IPL</type>
+    <usage>Starting and ending slices of sample from bottom of section</usage>
+    <tooltip />
+    <manpage>Starting and ending slices of sample from bottom of section. &quot;Bottom&quot; means the end of the Z range that is contiguous to the previous section.  This option must be entered for all but the first section.</manpage>
+  </Field>
+  <Field name="FlipYandZ">
+    <short>flip</short>
+    <type>BL</type>
+    <usage>Flip Y and Z of tomogram to make X/Y be in plane of section</usage>
+    <tooltip />
+    <manpage>Flip Y and Z of tomogram to make X/Y be in plane of section.  This option will invert handedness.</manpage>
+  </Field>
+  <Field name="RotateByAngles">
+    <short>rotate</short>
+    <type>FTL</type>
+    <usage>Run Rotatevol on tomogram with given rotation around X, Y, and Z axes</usage>
+    <tooltip />
+    <manpage>Run Rotatevol on tomogram with given rotation around X, Y, and Z axes, or just take account of this rotation if the -already option is entered.</manpage>
+  </Field>
+  <Field name="AlreadyRotated">
+    <short>already</short>
+    <type>BL</type>
+    <usage>Rotatevol was already run with the rotations entered with -rotate</usage>
+    <tooltip />
+    <manpage />
+  </Field>
+  <Field name="XYZsizeForRotation">
+    <short>xyzsize</short>
+    <type>ITL</type>
+    <usage>Set output size from Rotatevol to given values in X, Y, Z</usage>
+    <tooltip />
+    <manpage>Set output size from Rotatevol to given values in X, Y, Z for this section.</manpage>
+  </Field>
+  <Field name="FullSizeRotation">
+    <short>fullsize</short>
+    <type>BL</type>
+    <usage>Set Rotatevol output size to maximum needed to hold whole volume</usage>
+    <tooltip />
+    <manpage>Set Rotatevol output size to the maximum needed to hold the whole rotated section in X, Y, and Z</manpage>
+  </Field>
+  <Field name="MaxXYsizeForRotation">
+    <short>maxxysize</short>
+    <type>BL</type>
+    <usage>Set Rotatevol output size in X and Y only to maximum needed to hold volume</usage>
+    <tooltip />
+    <manpage>Set Rotatevol output size in X and Y only to the maximum needed to hold this rotated section; some portions of the original tomogram will be out of range in Z, but those are probably portions that have no sectioned material in them.</manpage>
+  </Field>
+  <SectionHeader name="GeneralOptions">
+    <usage>GENERAL OPTIONS</usage>
+    <manpage>GENERAL OPTIONS ^  These options are entered only once and can appear anywhere among the other entries.</manpage>
+  </SectionHeader>
+  <Field name="DirectoryOfSource">
+    <short>dir</short>
+    <type>FN</type>
+    <usage>Default directory for source tomograms</usage>
+    <tooltip />
+    <manpage>Default directory for source tomograms.  If this option is entered, tomograms that do not include a directory in their path will be sought in the given directory instead of the current directory.</manpage>
+  </Field>
+  <Field name="SourceExtension">
+    <short>srcext</short>
+    <type>CH</type>
+    <usage>Default extension for original tomograms (default is &quot;rec&quot;)</usage>
+    <tooltip />
+    <manpage>It is possible to enter filenames without extensions, in which case a default extension will be attached.  This option sets the default, which is otherwise &quot;rec&quot;.  This is an unsafe option to use because no extension will be attached to a filename that has a dot in it before the extension.</manpage>
+  </Field>
+  <Field name="TemporaryExtension">
+    <short>tmpext</short>
+    <type>CH</type>
+    <usage>Default extension for temporary tomograms (flipped or rotated, default tmp)</usage>
+    <tooltip />
+    <manpage>When a flipped or rotated file is created, a different extension is attached to it, which is &quot;tmp&quot; by default.  Use this option to change the extension.</manpage>
+  </Field>
+  <Field name="ReferenceForDensity">
+    <short>reference</short>
+    <type>I</type>
+    <usage>Tomogram to use as reference for density scaling (numbered from 1)</usage>
+    <tooltip />
+    <manpage>Tomogram to use as the reference for density scaling (numbered from 1).  This tomogram will be unscaled in the joined file and others will be scaled to match.  In addition, the mode of this tomogram will be used for the mode of the joined file.  The default is 1.</manpage>
+  </Field>
+  <Field name="MidasSizeLimit">
+    <short>midaslim</short>
+    <type>I</type>
+    <usage>Size to which samples will be squeezed for Midas if bigger than this.</usage>
+    <tooltip />
+    <manpage>Size to which sample slices will be squeezed for aligning in Midas(1), if they are larger than the given sizein X or Y.  The default is 1024.  Sampled slices will be scaled down with antialiasing using the -shrink option in Newstack(1).</manpage>
+  </Field>
+  <Field name="NamingStyle">
+    <short>style</short>
+    <type>I</type>
+    <usage>0 - 3 for descriptive, mrc, hdf, or tif extensions on image file names</usage>
+    <tooltip />
+    <manpage>0 for output image files to have descriptive extensions like &quot;.sample&quot;, 1 for extension &quot;.mrc&quot;, 2 for extension &quot;.hdf&quot;, or 3 for extension &quot;tif&quot;.  In the latter three cases the usual descriptive text is put before the extension, and the command file will contain an environment variable setting to make programs generate files of the corresponding type.</manpage>
+  </Field>
+  <Field name="MakeComExtensionPcm">
+    <short>pcm</short>
+    <type>I</type>
+    <usage>0 or 1 to name the output command file with extension &quot;.com&quot; or &quot;.pcm&quot;</usage>
+    <tooltip />
+    <manpage>0 or 1 to name the output command file with extension &quot;.com&quot; or &quot;.pcm&quot;.  The latter is not yet supported by Etomo.</manpage>
+  </Field>
+  <Field name="TestMode">
+    <short>test</short>
+    <type>B</type>
+    <usage>Do not run anything that requires complete image files</usage>
+    <tooltip />
+    <manpage>Do not run anything that requires complete image files, specifically, Densmatch(1).</manpage>
+  </Field>
+  <Field name="usage">
+    <short>help</short>
+    <type>B</type>
+    <usage>Print help output</usage>
+    <tooltip />
+    <manpage />
+  </Field>
+</autodoc>

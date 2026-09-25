@@ -1,0 +1,433 @@
+<?xml version="1.0" encoding="utf-8"?>
+
+<autodoc>
+  
+  <PreData>
+    
+    <Version>1.0</Version>
+    
+    <Pip>1</Pip>
+  
+  </PreData>
+  
+  <Field name="AInputFFT">
+    
+    <short>ainput</short>
+    
+    <type>FN</type>
+    
+    <usage>Input file from first tomogram (the one being matched to)</usage>
+    
+    <tooltip />
+    
+    <manpage>Input file from the first tomogram (the one being matched to): either the FFT of a chunk from the tomogram, or the tomogram itself, from which a chunk can be extracted with the 'MinAndMax' options</manpage>
+  
+  </Field>
+  
+  <Field name="BInputFFT">
+    
+    <short>binput</short>
+    
+    <type>FN</type>
+    
+    <usage>Input file from second tomogram (the transformed one)</usage>
+    
+    <tooltip />
+    
+    <manpage>Input file from the second tomogram (the transformed one): either the FFT of a chunk from the tomogram, or the tomogram itself, from which a chunk can be extracted with the 'MinAndMax' options</manpage>
+  
+  </Field>
+  
+  <Field name="OutputFFT">
+    
+    <short>output</short>
+    
+    <type>FN</type>
+    
+    <usage>Output file for combined data (omit to rewrite second input FFT file)</usage>
+    
+    <tooltip />
+    
+    <manpage>Output file for the combined FFTs or real-space volumes.  An output file must be entered with real-space input, but the file can be omitted for FFT input, in which case the program will write the combined FFT back to the second input file.</manpage>
+  
+  </Field>
+  
+  <Field name="XMinAndMax">
+    
+    <short>xminmax</short>
+    
+    <type>IP</type>
+    
+    <usage>Starting &amp; ending X coordinates to extract from tomogram, numbered from 0</usage>
+    
+    <tooltip />
+    
+    <manpage>Starting and ending X index coordinates to extract from the tomograms, numbered from 0.  The default is the whole width in X.</manpage>
+  
+  </Field>
+  
+  <Field name="YMinAndMax">
+    
+    <short>yminmax</short>
+    
+    <type>IP</type>
+    
+    <usage>Starting and ending Y coordinates to extract, numbered from 0</usage>
+    
+    <tooltip />
+    
+    <manpage>Starting and ending Y index coordinates to extract from the tomograms, numbered from 0.  The default is the whole height in Y.</manpage>
+  
+  </Field>
+  
+  <Field name="ZMinAndMax">
+    
+    <short>zminmax</short>
+    
+    <type>IP</type>
+    
+    <usage>Starting and ending Z coordinates to extract, numbered from 0</usage>
+    
+    <tooltip />
+    
+    <manpage>Starting and ending Z index coordinates to extract from the tomograms, numbered from 0.  The default is the whole depth in Z.</manpage>
+  
+  </Field>
+  
+  <Field name="TaperPadsInXYZ">
+    
+    <short>taper</short>
+    
+    <type>IT</type>
+    
+    <usage>Number of pixels over which to taper the patches in X, Y and Z</usage>
+    
+    <tooltip />
+    
+    <manpage>Number of pixels over which to taper and pad the patches in X, Y and Z.  The default is 0.  The amount of tapering in any dimension may be increased to make that dimension suitable for taking an FFT.</manpage>
+  
+  </Field>
+  
+  <Field name="ChunkSizeForHDF">
+    
+    <short>chunk</short>
+    
+    <type>IT</type>
+    
+    <usage>Chunk sizes in X, Y, and Z to set up direct writing to HDF file</usage>
+    
+    <tooltip />
+    
+    <manpage>Chunk sizes in X, Y, and Z, for an initial run to set up an HDF file for direct writing of chunks by later runs.</manpage>
+  
+  </Field>
+  
+  <Field name="LockFileForHDF">
+    
+    <short>lock</short>
+    
+    <type>FN</type>
+    
+    <usage>Name of lock file to use for parallel writing to chunked HDF file</usage>
+    
+    <tooltip />
+    
+    <manpage>Name of lock file to use for parallel writing to chunked HDF file. This option must be supplied both to the initial setup run and to each later run.  The file must already exist.</manpage>
+  
+  </Field>
+  
+  <Field name="XSaveStartAndEnd">
+    
+    <short>xsave</short>
+    
+    <type>IP</type>
+    
+    <usage>Starting &amp; ending X coordinates in padded volume to save into HDF chunk</usage>
+    
+    <tooltip />
+    
+    <manpage />
+  
+  </Field>
+  
+  <Field name="YSaveStartAndEnd">
+    
+    <short>ysave</short>
+    
+    <type>IP</type>
+    
+    <usage>Starting &amp; ending Y coordinates in padded volume to save into HDF chunk</usage>
+    
+    <tooltip />
+    
+    <manpage />
+  
+  </Field>
+  
+  <Field name="ZSaveStartAndEnd">
+    
+    <short>zsave</short>
+    
+    <type>IP</type>
+    
+    <usage>Starting &amp; ending Z coordinates in padded volume to save into HDF chunk</usage>
+    
+    <tooltip />
+    
+    <manpage />
+  
+  </Field>
+  
+  <Field name="PlaceChunkAtXYZ">
+    
+    <short>place</short>
+    
+    <type>IT</type>
+    
+    <usage>Starting X, Y, Z coordinates in HDF file at which to write chunk</usage>
+    
+    <tooltip />
+    
+    <manpage />
+  
+  </Field>
+  
+  <Field name="ATiltFile">
+    
+    <short>atiltfile</short>
+    
+    <type>FN</type>
+    
+    <usage>File with tilt angles used to generate first tomogram</usage>
+    
+    <tooltip />
+    
+    <manpage>File with tilt angles used to generate first tomogram.  The file should have one tilt angle per line.  The first and last line in the file are assumed to have the starting and ending tilt angles.</manpage>
+  
+  </Field>
+  
+  <Field name="BTiltFile">
+    
+    <short>btiltfile</short>
+    
+    <type>FN</type>
+    
+    <usage>File with tilt angles used to generate second tomogram</usage>
+    
+    <tooltip />
+    
+    <manpage>File with tilt angles used to generate second tomogram, in the same format as for ATiltFile.</manpage>
+  
+  </Field>
+  
+  <Field name="AHighestTilts">
+    
+    <short>ahighest</short>
+    
+    <type>FP</type>
+    
+    <usage>Starting and ending tilt angles used to generate first tomogram</usage>
+    
+    <tooltip />
+    
+    <manpage>Starting and ending tilt angles used to generate first tomogram. This entry and ATiltFile are mutually exclusive.</manpage>
+  
+  </Field>
+  
+  <Field name="BHighestTilts">
+    
+    <short>bhighest</short>
+    
+    <type>FP</type>
+    
+    <usage>Starting and ending tilt angles used to generate second tomogram</usage>
+    
+    <tooltip />
+    
+    <manpage>Starting and ending tilt angles used to generate second tomogram. This entry and BTiltFile are mutually exclusive.</manpage>
+  
+  </Field>
+  
+  <Field name="InverseTransformFile">
+    
+    <short>inverse</short>
+    
+    <type>FN</type>
+    
+    <usage>File with inverse of matching transformation (output by Matchvol)</usage>
+    
+    <tooltip />
+    
+    <manpage>Name of file with inverse of transformation used to match the two tomograms (output by Matchvol).  This entry is required.</manpage>
+  
+  </Field>
+  
+  <Field name="ReductionFraction">
+    
+    <short>reduce</short>
+    
+    <type>F</type>
+    
+    <usage>Reduce amplitudes in missing wedge regions by this fraction of the amount needed to match mixed data regions (default 0 for no reduction).</usage>
+    
+    <tooltip />
+    
+    <manpage>This option can be used to reduce the amplitudes in regions where data is taken only from one tomogram (missing wedge regions). Mean amplitudes are measured by dividing the volume into a number of slabs in the Y dimension, then dividing each slab into rings based on radius from the origin.  Within each ring, the mean is obtained for points in the region where data is averaged between the two tomograms (joint data region), and the regions where data are available only from A or only from B (A-only or B-only regions).  With a fraction of 1, the values in the A-only region will be reduced by the ratio of the combined mean to the mean in A-only region, and similarly for the B-only region.  If the ratio is greater than 1, no reduction occurs.  A smaller fraction will reduce values by a proportionally smaller amount.</manpage>
+  
+  </Field>
+  
+  <Field name="SeparateReduction">
+    
+    <short>separate</short>
+    
+    <type>B</type>
+    
+    <usage>Apply different reduction factors to data from A and B in a ring</usage>
+    
+    <tooltip />
+    
+    <manpage>With this option, values in regions where data are available only from A will be reduced by the ratio of the mean combined value in the joint data region to the mean value from A in the joint data region, and similarly for B.</manpage>
+  
+  </Field>
+  
+  <Field name="JointReduction">
+    
+    <short>joint</short>
+    
+    <type>B</type>
+    
+    <usage>Measure means for A and B in joint, not missing wedge, regions</usage>
+    
+    <tooltip />
+    
+    <manpage>With this option, for points in the region where data is averaged between the two tomograms (joint data region), the mean is obtained within each ring for values from A, values from B, and the combined values.  The values in missing wedge regions will be reduced by the ratio of the combined mean to the average of the means from A and B.</manpage>
+  
+  </Field>
+  
+  <Field name="RingWidth">
+    
+    <short>ring</short>
+    
+    <type>F</type>
+    
+    <usage>Width of rings used to reduce amplitudes (default 0.01)</usage>
+    
+    <tooltip />
+    
+    <manpage>Width of rings or shells used to reduce amplitudes.  The default is 0.01.</manpage>
+  
+  </Field>
+  
+  <Field name="NumberOfSlabsInY">
+    
+    <short>nslabs</short>
+    
+    <type>I</type>
+    
+    <usage>Number of divisions in Y dimension when reducing amplitudes (default 1)</usage>
+    
+    <tooltip />
+    
+    <manpage>Number of divisions in Y dimension when reducing amplitudes.  The default is 1, which will use spherical shells not divided into slabs.  If this number is increased, the ring width should be increased as well to avoid dividing the volume into too many regions with too few pixels.</manpage>
+  
+  </Field>
+  
+  <Field name="MinimumRadiusToReduce">
+    
+    <short>radius</short>
+    
+    <type>F</type>
+    
+    <usage>Radius at which to start the first ring when reducing amplitudes (default 0.02)</usage>
+    
+    <tooltip />
+    
+    <manpage />
+  
+  </Field>
+  
+  <Field name="MinimumPointsInRing">
+    
+    <short>points</short>
+    
+    <type>I</type>
+    
+    <usage>Minimum number of points required in each region of a ring for reducing amplitudes (default 30)</usage>
+    
+    <tooltip />
+    
+    <manpage />
+  
+  </Field>
+  
+  <Field name="LowFromBothRadius">
+    
+    <short>both</short>
+    
+    <type>F</type>
+    
+    <usage>Radius below which data will always be averaged from both tomograms</usage>
+    
+    <tooltip>Frequency below which data will always be averaged from both tomograms.  A value of 0.01 to 0.015 should be effective in preventing lines between pieces.</tooltip>
+    
+    <manpage>Radius below which data will always be averaged from both tomograms. Sometimes a combined tomogram shows lines between the separate pieces that were run through Combinefft, particularly for pieces containing a boundary between dense material and resin.  This option will eliminate this effect by ensuring that the low-frequency components match between the combined pieces.  A value of 0.01 to 0.015 should be effective.</manpage>
+  
+  </Field>
+  
+  <Field name="VerboseOutput">
+    
+    <short>verbose</short>
+    
+    <type>B</type>
+    
+    <usage>Output amplitudes being attenuated when reducing</usage>
+    
+    <tooltip />
+    
+    <manpage>With this option, the program will print the amplitudes and reduction factors for every region being reduced.  The columns output are: the ring number; the slab number (slabs are numbered sequentially from negative to positive Y); the zone, which is 1 for the region with data from the first tomogram only, and 3 for the region with data from the second tomogram only; the mean amplitude of the joint data region; the mean for data relevant to the zone in question; the target value for the reduction in mean; and the reduction factor.</manpage>
+  
+  </Field>
+  
+  <Field name="WeightingPower">
+    
+    <short>weight</short>
+    
+    <type>F</type>
+    
+    <usage>Weight data from A and B by the local sampling density to this power (default 0 for no weighting)</usage>
+    
+    <tooltip />
+    
+    <manpage>This option allows a weighted combination of values instead of simple averaging when data are available from both FFTs. A local sampling density is computed for the point in each of the FFTs, based upon its radius from the origin and the local density of tilted views.  These densities are raised to the given power, normalized to add to one, and used as weights in combining the two Fourier values.  Values between 0 and 1 should be tried; 0 gives no weighting.</manpage>
+  
+  </Field>
+  
+  <Field name="ParameterFile">
+    
+    <short>param</short>
+    
+    <type>PF</type>
+    
+    <usage>Read parameter entries from file</usage>
+    
+    <tooltip />
+    
+    <manpage />
+  
+  </Field>
+  
+  <Field name="usage">
+    
+    <short>help</short>
+    
+    <type>B</type>
+    
+    <usage>Print help output</usage>
+    
+    <tooltip />
+    
+    <manpage />
+  
+  </Field>
+
+</autodoc>

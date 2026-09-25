@@ -1,0 +1,40 @@
+# name	arguments	(exit status is recorded by make-blendmont-goldens.sh)
+basic	-imin bm.st -plin bm.pl -imout o.st -rootname e
+sloppy	-imin bm.st -plin bm.pl -imout o.st -rootname e -sloppy
+shift	-imin bm.st -plin bm.pl -imout o.st -rootname e -shift
+xcorr	-imin bm.st -plin bm.pl -imout o.st -rootname e -xcorr -shift
+edge	-imin bm.st -plin bm.pl -imout o.st -rootname e -edge -shift
+robust	-imin bm.st -plin bm.pl -imout o.st -rootname e -sloppy -robust 1
+numpeaks	-imin bm.st -plin bm.pl -imout o.st -rootname e -sloppy -numpeaks 4
+mode0f	-imin bm.st -plin bm.pl -imout o.st -rootname e -mode 0 -float
+mode2	-imin bm.st -plin bm.pl -imout o.st -rootname e -mode 2 -order 2
+bin2	-imin bm.st -plin bm.pl -imout o.st -rootname e -bin 2
+window	-imin bm.st -plin bm.pl -imout o.st -rootname e -xminmax 10,150 -yminmax 5,120 -origin
+nofft	-imin bm.st -plin bm.pl -imout o.st -rootname e -xminmax 10,151 -yminmax 5,120 -nofft
+frames	-imin bm.st -plin bm.pl -imout o.st -rootname e -maxsize 100,100 -plout f.pl -width 12,16
+sections	-imin bm.st -plin bm.pl -imout o.st -rootname e -sections 1 -fill 400
+aligned	-imin bm.st -plin bm.pl -imout o.st -rootname e -sloppy -aligned al.txt
+test	-imin bm.st -plin bm.pl -imout o.st -rootname e -sloppy -test
+func1	-imin bm.st -plin bm.pl -rootname e -functions 1 -sloppy
+func3	-imin bm.st -plin bm.pl -rootname e -functions 3 -sloppy -boxsize 8,12 -grid 5,6 -indents 2,4
+int1	-imin bm.st -plin bm.pl -imout o.st -rootname e -intensity 1
+int2	-imin bm.st -plin bm.pl -imout o.st -rootname e -intensity 2 -sloppy
+sum	-imin bm.st -plin bm.pl -imout o.st -rootname e -intensity 1 -sum
+gradient	-imin bm.st -plin bm.pl -imout o.st -rootname e -gradient g.txt -sloppy -adjusted
+xform	-imin bm.st -plin bm.pl -imout o.st -rootname e -xform x.xf -center 100,90
+skip	-imin bm.st -plin bm.pl -imout o.st -rootname e -sloppy -skip excl.mod
+negfile	-imin bm.st -plin bmn.pl -imout o.st -rootname e
+perneg	-imin bm.st -plin bm.pl -imout o.st -rootname e -perneg 2,2
+oldedge	-imin bm.st -plin bm.pl -imout o.st -rootname old -sloppy -oldedge
+readxcorr	-imin bm.st -plin bm.pl -imout o.st -rootname old -readxcorr -shift
+oldint	-imin bm.st -plin bm.pl -imout o.st -rootname old -intensity 2 -oldedge -sloppy
+expected	-imin bm.st -plin bm.pl -imout o.st -rootname e -sloppy -expected old.ecd
+parsetup	-imin bm.st -plin bm.pl -imout o.st -rootname e -parallel 2,0
+parhead	-imin bm.st -plin bm.pl -imout o.st -rootname old -parallel -1,0 -oldedge
+print	-imin bm.st -plin bm.pl -imout o.st -rootname e -print
+err_noroot	-imin bm.st -plin bm.pl -imout o.st
+err_mode	-imin bm.st -plin bm.pl -imout o.st -rootname e -mode 4
+err_bin	-imin bm.st -plin bm.pl -imout o.st -rootname e -bin 9
+err_nopl	-imin bm.st -plin nope.pl -imout o.st -rootname e
+err_goodedge	-imin bm.st -plin bm.pl -imout o.st -rootname e -goodedge 0,1 -sloppy
+err_sumother	-imin bm.st -plin bm.pl -imout o.st -rootname e -sum -other g.txt

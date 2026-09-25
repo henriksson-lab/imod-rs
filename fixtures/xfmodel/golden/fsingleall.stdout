@@ -1,0 +1,67 @@
+Using model header to determine center coordinates:   275.0   275.0
+                                        Deviations between transformed points on
+                                         section and points on previous section
+                                Mean     Max  @object & point #   X-Y Position
+  58 points, section #   0     182.72   332.50    13     1       479.44   507.26
+  58 points, section #   1      41.80   116.30    46     2        67.50   292.49
+  58 points, section #   2      39.58   108.38    46     3        67.50   292.49
+  58 points, section #   3      37.44   101.06    46     4        67.50   292.49
+  58 points, section #   4      35.40    94.24    46     5        67.50   292.49
+  58 points, section #   5      33.37    87.70    46     6        67.50   292.49
+  58 points, section #   6      31.44    81.64    46     7        67.50   292.49
+  58 points, section #   7      29.59    76.00    46     8        67.50   292.49
+  58 points, section #   8      27.91    70.89    46     9        67.50   292.49
+  58 points, section #   9      26.27    66.02    46    10        67.50   292.49
+  58 points, section #  10      24.69    61.40    46    11        67.50   292.49
+  58 points, section #  11      23.20    57.07    46    12        67.50   292.49
+  58 points, section #  12      21.73    52.87    46    13        67.50   292.49
+  58 points, section #  13      20.32    48.91    46    14        67.50   292.49
+  58 points, section #  14      18.94    45.11    46    15        67.50   292.49
+  58 points, section #  15      17.63    41.52    46    16        67.50   292.49
+  58 points, section #  16      16.36    38.08    46    17        67.50   292.49
+  58 points, section #  17      15.12    34.80    46    18        67.50   292.49
+  58 points, section #  18      13.89    31.63    46    19        67.50   292.49
+  58 points, section #  19      12.68    28.58    46    20        67.50   292.49
+  58 points, section #  20      11.50    25.64    46    21        67.50   292.49
+  58 points, section #  21      10.32    22.78    46    22        67.50   292.49
+  58 points, section #  22       9.17    20.03    46    23        67.50   292.49
+  58 points, section #  23       8.01    17.32    46    24        67.50   292.49
+  58 points, section #  24       6.87    14.70    46    25        67.50   292.49
+  58 points, section #  25       5.73    12.13    46    26        67.50   292.49
+  58 points, section #  26       4.58     9.61    46    27        67.50   292.49
+  58 points, section #  27       3.44     7.13    46    28        67.50   292.49
+  58 points, section #  28       2.30     4.72    46    29        67.50   292.49
+  58 points, section #  29       1.15     2.35    46    30        67.50   292.49
+ less than           4  points for section #           30
+  58 points, section #  31       1.16     2.31    46    32        67.50   292.49
+  58 points, section #  32       2.33     4.62    46    33        67.50   292.49
+  58 points, section #  33       3.49     6.84    46    34        67.50   292.49
+  58 points, section #  34       4.68     9.08    46    35        67.50   292.49
+  58 points, section #  35       5.87    11.28    46    36        67.50   292.49
+  58 points, section #  36       7.10    13.49    46    37        67.50   292.49
+  58 points, section #  37       8.35    15.69    46    38        67.50   292.49
+  58 points, section #  38       9.63    17.90    46    39        67.50   292.49
+  58 points, section #  39      10.93    20.10    46    40        67.50   292.49
+  58 points, section #  40      12.26    22.30    46    41        67.50   292.49
+  58 points, section #  41      13.64    24.52    46    42        67.50   292.49
+  58 points, section #  42      15.06    26.76    46    43        67.50   292.49
+  58 points, section #  43      16.51    28.97    46    44        67.50   292.49
+  58 points, section #  44      18.02    31.20    46    45        67.50   292.49
+  58 points, section #  45      19.57    33.44    46    46        67.50   292.49
+  58 points, section #  46      21.19    35.71    46    47        67.50   292.49
+  58 points, section #  47      22.88    37.98    46    48        67.50   292.49
+  58 points, section #  48      24.62    40.24    46    49        67.50   292.49
+  58 points, section #  49      26.46    42.51     2    50       107.64   337.45
+  58 points, section #  50      28.38    44.89     2    51       107.64   337.45
+  58 points, section #  51      30.41    47.40    24    52       132.63   292.66
+  58 points, section #  52      32.55    49.96    24    53       132.63   292.66
+  58 points, section #  53      34.77    52.53    24    54       132.63   292.66
+  58 points, section #  54      37.14    55.14    24    55       132.63   292.66
+  58 points, section #  55      39.64    57.75    24    56       132.63   292.66
+  58 points, section #  56      42.33    61.16    32    57       280.33   508.25
+  58 points, section #  57      45.16    65.18    16    58       339.03   224.03
+  58 points, section #  58      48.17    70.74    22    59       472.22   388.90
+  58 points, section #  59      51.35    77.03    22    60       472.22   388.90
+  58 points, section #  60      54.79    84.10    22    61       472.22   388.90
+
+ FORMATTED  new  file opened: o.xf

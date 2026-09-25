@@ -1,0 +1,23 @@
+Input volume: tx.st
+ Dimensions:     96     88     13   Pixel size:         1          1          1
+Mode:  1               Min, max, mean:          493         5487       1633.5
+raw2mrc: Converted to mrc format.                       25-Sep-26  02:29:20
+
+
+Opened OLD file: tx.tlt
+
+ NEW image file on unit   3 : t.mrc
+
+Binning is 2; padded, reduced size is 60 by 54
+View   8, shifts      5.02      9.36      peak    7.88855e+06
+View   9, shifts      2.40      9.79      peak    9.49934e+06
+View  10, shifts      7.05     13.69      peak    1.00483e+07
+View  11, shifts      0.62     10.73      peak    1.07276e+07
+View  12, shifts     -2.74     12.56      peak    1.29909e+07
+View  13, shifts      1.52      2.80      peak    1.42243e+07
+View   6, shifts      0.58     13.60      peak    7.57934e+06
+View   5, shifts      1.47     11.56      peak    8.40587e+06
+View   4, shifts      2.15     15.06      peak    9.06618e+06
+View   3, shifts      5.08      6.90      peak    9.71154e+06
+View   2, shifts      2.50      9.76      peak    1.27968e+07
+View   1, shifts      2.03      9.84      peak    1.48374e+07

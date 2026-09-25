@@ -1,0 +1,434 @@
+Input volume: tx.st
+ Dimensions:     96     88     13   Pixel size:         1          1          1
+Mode:  1               Min, max, mean:          493         5487       1633.5
+raw2mrc: Converted to mrc format.                       25-Sep-26  02:29:20
+
+
+Opened OLD file: tx.tlt
+0 0 at 16, 16  domain 0
+1 0 at 48, 16  domain 0
+2 0 at 80, 16  domain 0
+0 1 at 16, 44  domain 0
+1 1 at 48, 44  domain 0
+2 1 at 80, 44  domain 0
+0 2 at 16, 72  domain 0
+1 2 at 48, 72  domain 0
+2 2 at 80, 72  domain 0
+Usable patches for view: 5  9
+Usable patches for view: 6  9
+Usable patches for view: 7  6
+Usable patches for view: 8  6
+Usable patches for view: 9  9
+9 patches will be tracked  [TXC1]
+
+Binning is 1; padded, reduced size is 48 by 48
+idir = 1,  mStretch = 0.954189,  ivRef = 5,  ivCur = 6
+Tapering reference patch # 1
+Tapering current patch # 1
+  1   -1.08    1.98    3.40297e+06   -0.08   -0.02   -0.08   -0.02
+peak usdx,usdy,xpeak,ypeak -1.140201 1.983095 -1.079094 1.976673
+Tapering reference patch # 2
+Tapering current patch # 2
+  1   -1.21    1.35    7.19985e+06   -0.21    0.35   -0.21    0.35
+peak usdx,usdy,xpeak,ypeak -1.277638 1.358155 -1.213280 1.351390
+Tapering reference patch # 3
+Tapering current patch # 3
+  1   -1.23    2.16    2.81749e+06   -0.23    0.16   -0.23    0.16
+peak usdx,usdy,xpeak,ypeak -1.301026 2.167411 -1.231754 2.160130
+Tapering current patch # 4
+  1   -1.18    1.74    3.17441e+06   -0.18   -0.26   -0.18   -0.26
+peak usdx,usdy,xpeak,ypeak -1.239838 1.747297 -1.175339 1.740517
+  1   -1.31    1.07    1.64009e+06   -0.31    0.07   -0.31    0.07
+peak usdx,usdy,xpeak,ypeak -1.373070 1.076445 -1.305729 1.069367
+Tapering reference patch # 6
+Tapering current patch # 6
+  1   -0.17    1.21    3.00816e+06   -0.17    0.21   -0.17    0.21
+peak usdx,usdy,xpeak,ypeak -0.187772 1.216274 -0.173472 1.214771
+Tapering reference patch # 7
+Tapering current patch # 7
+  1   -0.65    1.63    3.68406e+06    0.35   -0.37    0.35   -0.37
+peak usdx,usdy,xpeak,ypeak -0.691816 1.638947 -0.652664 1.634832
+Tapering reference patch # 8
+Tapering current patch # 8
+  1    0.35    1.81    3.95254e+06    0.35   -0.19    0.35   -0.19
+peak usdx,usdy,xpeak,ypeak 0.359623 1.804502 0.351922 1.805311
+Tapering reference patch # 9
+Tapering current patch # 9
+  1   -0.13    1.58    1.36973e+06   -0.13   -0.42   -0.13   -0.42
+peak usdx,usdy,xpeak,ypeak -0.140730 1.585052 -0.126805 1.583589
+View   6 processed
+idir = 1,  mStretch = 0.984808,  ivRef = 6,  ivCur = 7
+Tapering reference patch # 1
+Tapering current patch # 1
+  1    0.04  -12.80    2.77108e+06    0.04    0.20    0.04    0.20
+peak usdx,usdy,xpeak,ypeak 0.063714 -12.798677 0.042544 -12.796452
+Tapering reference patch # 2
+Tapering current patch # 2
+  1   -8.78    3.63    4.36959e+06    0.22   -0.37    0.22   -0.37
+peak usdx,usdy,xpeak,ypeak -8.917539 3.646517 -8.777782 3.631827
+Tapering reference patch # 3
+Tapering current patch # 3
+  1   -0.42  -12.92    2.26055e+06   -0.42    0.08   -0.42    0.08
+peak usdx,usdy,xpeak,ypeak -0.400968 -12.916604 -0.415342 -12.915092
+Tapering reference patch # 4
+Tapering current patch # 4
+  1    0.09  -11.35    1.78314e+06    0.09   -0.35    0.09   -0.35
+peak usdx,usdy,xpeak,ypeak 0.111295 -11.349117 0.091699 -11.347057
+  1   -0.55  -10.88    1.80227e+06    0.45    0.12    0.45    0.12
+peak usdx,usdy,xpeak,ypeak -0.545765 -10.885596 -0.554756 -10.884651
+Tapering reference patch # 6
+Tapering current patch # 6
+  1   -0.38  -12.94         979680   -0.38    0.06   -0.38    0.06
+peak usdx,usdy,xpeak,ypeak -0.366673 -12.944048 -0.381606 -12.942478
+Skipping tracking of patch 7
+Skipping tracking of patch 8
+Skipping tracking of patch 9
+dom 0 n=6 xform 0.9999 0.0130 -0.0130 0.9999 0.4 11.4 dev avg, sd, max 0.81 0.27 1.28
+dropped ind  1 patch 1  dev 17.89
+Eliminated 1 outlier points
+Prediction fit error: mean 0.81  max 1.3
+View   7 processed
+idir = 1,  mStretch = 1.01543,  ivRef = 7,  ivCur = 8
+Tapering reference patch # 1
+Tapering current patch # 1
+  1    3.83    9.21    1.72518e+06   -0.17    0.21   -0.17    0.21
+peak usdx,usdy,xpeak,ypeak 3.790652 9.214195 3.833714 9.209669
+Patch 2 tracking to reference 6
+Skipping tracking of patch 2
+Tapering reference patch # 3
+Tapering current patch # 3
+  1    4.26    7.99    1.83924e+06    0.26   -0.01    0.26   -0.01
+peak usdx,usdy,xpeak,ypeak 4.255031 7.986086 4.255031 7.986086
+Tapering reference patch # 4
+Tapering current patch # 4
+  1    5.15  -13.42    1.62775e+06    0.15   -0.42    0.15   -0.42
+peak usdx,usdy,xpeak,ypeak 5.148118 -13.422344 5.148118 -13.422344
+  1   -3.10    0.73    1.35368e+06   -0.10   -0.27   -0.10   -0.27
+peak usdx,usdy,xpeak,ypeak -3.097794 0.731292 -3.097794 0.731292
+Tapering reference patch # 6
+Tapering current patch # 6
+  1    5.43    8.35    3.91997e+06    0.43    0.35    0.43    0.35
+peak usdx,usdy,xpeak,ypeak 5.427196 8.347061 5.427196 8.347061
+Patch 7 tracking to reference 6
+Tapering current patch # 7
+  1    4.45   -3.51    4.66809e+06    0.45    0.49    0.45    0.49
+peak usdx,usdy,xpeak,ypeak 4.447658 -3.507427 4.447658 -3.507427
+Patch 8 tracking to reference 6
+  1    7.03   -4.92    4.58521e+06    0.03    0.08    0.03    0.08
+peak usdx,usdy,xpeak,ypeak 7.029851 -4.916954 7.029851 -4.916954
+Patch 9 tracking to reference 6
+Tapering reference patch # 9
+Tapering current patch # 9
+  1    3.41   -3.43    1.55863e+06    0.41   -0.43    0.41   -0.43
+peak usdx,usdy,xpeak,ypeak 3.413657 -3.433361 3.413657 -3.433361
+dom 0 n=8 xform 1.0076 -0.1229 0.0084 1.3380 -4.3 -6.1 dev avg, sd, max 5.38 2.16 9.50
+Prediction fit error: mean 5.38  max 9.5
+View   8 processed
+idir = 1,  mStretch = 1.04801,  ivRef = 8,  ivCur = 9
+Tapering reference patch # 1
+Tapering current patch # 1
+  1   -2.28    0.87    2.96967e+06   -0.28   -0.13   -0.28   -0.13
+peak usdx,usdy,xpeak,ypeak -2.170928 0.860713 -2.278313 0.872000
+Patch 2 tracking to reference 6
+Tapering reference patch # 2
+Tapering current patch # 2
+  1    1.80   -2.40    5.75399e+06   -0.20   -0.40   -0.20   -0.40
+peak usdx,usdy,xpeak,ypeak 1.706328 -2.393548 1.799301 -2.403320
+Tapering reference patch # 3
+  1   -1.67    0.64    2.73237e+06    0.33   -0.36    0.33   -0.36
+peak usdx,usdy,xpeak,ypeak -1.590194 0.629269 -1.668846 0.637536
+Tapering reference patch # 4
+  1   -1.75    0.20    5.27046e+06    0.25    0.20    0.25    0.20
+peak usdx,usdy,xpeak,ypeak -1.665077 0.193267 -1.745110 0.201679
+  1   -3.32    0.47         783463   -0.32    0.47   -0.32    0.47
+peak usdx,usdy,xpeak,ypeak -3.163719 0.456065 -3.316227 0.472094
+  1   -3.07    0.14    4.19342e+06   -0.07    0.14   -0.07    0.14
+peak usdx,usdy,xpeak,ypeak -2.933170 0.127983 -3.073093 0.142690
+Tapering reference patch # 7
+Tapering current patch # 7
+  1   -2.04    0.22    4.69679e+06   -0.04    0.22   -0.04    0.22
+peak usdx,usdy,xpeak,ypeak -1.947683 0.209877 -2.041218 0.219708
+Tapering reference patch # 8
+Tapering current patch # 8
+  1   -1.48    1.02     5.3073e+06   -0.48    0.02   -0.48    0.02
+peak usdx,usdy,xpeak,ypeak -1.407573 1.010154 -1.479454 1.017709
+Tapering reference patch # 9
+Tapering current patch # 9
+  1   -2.80    0.17    1.91802e+06    0.20    0.17    0.20    0.17
+peak usdx,usdy,xpeak,ypeak -2.671598 0.156110 -2.799240 0.169525
+dom 0 n=9 xform 1.0119 -0.0065 0.0271 1.0890 2.1 -5.0 dev avg, sd, max 1.48 0.70 2.51
+dropped ind  1 patch 1  dev 9.59
+Eliminated 1 outlier points
+Prediction fit error: mean 1.48  max 2.5
+View   9 processed
+idir = 1,  mStretch = 1.08506,  ivRef = 9,  ivCur = 10
+Tapering reference patch # 1
+Tapering current patch # 1
+  1    3.87    3.67     1.9413e+06   -0.13   -0.33   -0.13   -0.33
+peak usdx,usdy,xpeak,ypeak 3.597903 3.699718 3.867893 3.671342
+Patch 2 tracking to reference 6
+Tapering reference patch # 2
+Tapering current patch # 2
+  1    4.59   -0.12    5.90106e+06   -0.41   -0.12   -0.41   -0.12
+peak usdx,usdy,xpeak,ypeak 4.038850 -0.057979 4.587584 -0.115653
+Tapering reference patch # 3
+Tapering current patch # 3
+  1    5.52    3.14    2.98314e+06   -0.48    0.14   -0.48    0.14
+peak usdx,usdy,xpeak,ypeak 4.897775 3.205072 5.516505 3.140041
+Tapering reference patch # 4
+Tapering current patch # 4
+  1    5.71    2.93    5.14023e+06   -0.29   -0.07   -0.29   -0.07
+peak usdx,usdy,xpeak,ypeak 5.065190 2.992787 5.709659 2.925051
+  1    2.43    2.53     1.3618e+06    0.43   -0.47    0.43   -0.47
+peak usdx,usdy,xpeak,ypeak 2.173765 2.561951 2.432127 2.534796
+Tapering reference patch # 6
+  1    4.82    2.70    4.82468e+06   -0.18   -0.30   -0.18   -0.30
+peak usdx,usdy,xpeak,ypeak 4.275516 2.756361 4.816229 2.699530
+Tapering reference patch # 7
+Tapering current patch # 7
+  1    5.43    3.43    4.83638e+06    0.43    0.43    0.43    0.43
+peak usdx,usdy,xpeak,ypeak 4.824954 3.493422 5.429694 3.429862
+Tapering reference patch # 8
+Tapering current patch # 8
+  1    6.36    3.96    6.78448e+06    0.36   -0.04    0.36   -0.04
+peak usdx,usdy,xpeak,ypeak 5.650505 4.039010 6.359459 3.964495
+Tapering reference patch # 9
+Tapering current patch # 9
+  1    5.09    2.51    1.75217e+06    0.09   -0.49    0.09   -0.49
+peak usdx,usdy,xpeak,ypeak 4.517888 2.571680 5.094114 2.511116
+dom 0 n=9 xform 0.9723 0.0267 -0.0019 0.9691 -3.3 -5.6 dev avg, sd, max 2.80 1.35 4.58
+Prediction fit error: mean 2.80  max 4.6
+View  10 processed
+idir = 1,  mStretch = 1.13052,  ivRef = 10,  ivCur = 11
+Tapering reference patch # 1
+Tapering current patch # 1
+  1   -5.63   -2.34    2.83985e+06    0.37   -0.34    0.37   -0.34
+peak usdx,usdy,xpeak,ypeak -5.013106 -2.403579 -5.627636 -2.338989
+Tapering reference patch # 2
+Tapering current patch # 2
+  1   -5.60   -2.04    4.08934e+06    0.40   -0.04    0.40   -0.04
+peak usdx,usdy,xpeak,ypeak -4.982688 -2.101526 -5.597389 -2.036919
+Tapering reference patch # 3
+Tapering current patch # 3
+  1   -6.04   -2.73    2.52727e+06   -0.04    0.27   -0.04    0.27
+peak usdx,usdy,xpeak,ypeak -5.386995 -2.796686 -6.044456 -2.727585
+Tapering reference patch # 4
+  1   -5.87   -2.37     6.5458e+06    0.13   -0.37    0.13   -0.37
+peak usdx,usdy,xpeak,ypeak -5.226743 -2.440985 -5.868343 -2.373550
+  1   -6.74   -3.11    1.21274e+06    0.26   -0.11    0.26   -0.11
+peak usdx,usdy,xpeak,ypeak -6.008038 -3.190781 -6.740322 -3.113815
+  1   -7.55   -3.06    2.91722e+06    0.45   -0.06    0.45   -0.06
+peak usdx,usdy,xpeak,ypeak -6.720887 -3.143799 -7.545830 -3.057095
+Tapering reference patch # 7
+Tapering current patch # 7
+  1   -6.25   -2.22    6.02078e+06   -0.25   -0.22   -0.25   -0.22
+peak usdx,usdy,xpeak,ypeak -5.561344 -2.292710 -6.248150 -2.220524
+Tapering current patch # 8
+  1   -4.29   -3.26    3.91995e+06   -0.29   -0.26   -0.29   -0.26
+peak usdx,usdy,xpeak,ypeak -3.842826 -3.303421 -4.294075 -3.255993
+Tapering reference patch # 9
+Tapering current patch # 9
+  1   -5.33   -1.35     1.5604e+06   -0.33   -0.35   -0.33   -0.35
+peak usdx,usdy,xpeak,ypeak -4.734881 -1.414699 -5.326912 -1.352474
+dom 0 n=9 xform 0.9935 -0.0283 0.0062 0.9877 6.3 -0.2 dev avg, sd, max 1.34 0.89 3.01
+dropped ind  3 patch 3  dev 8.88
+Eliminated 1 outlier points
+Prediction fit error: mean 1.34  max 3.0
+View  11 processed
+idir = 1,  mStretch = 1.19175,  ivRef = 11,  ivCur = 12
+Tapering reference patch # 1
+Tapering current patch # 1
+  1   -2.91    2.38    2.92894e+06    0.09    0.38    0.09    0.38
+peak usdx,usdy,xpeak,ypeak -2.404900 2.325193 -2.907360 2.378004
+Tapering reference patch # 2
+Tapering current patch # 2
+  1   -2.88    1.23    3.70358e+06    0.12    0.23    0.12    0.23
+peak usdx,usdy,xpeak,ypeak -2.402837 1.179023 -2.882057 1.229391
+Tapering current patch # 3
+  1   -2.91    1.12    4.14253e+06    0.09    0.12    0.09    0.12
+peak usdx,usdy,xpeak,ypeak -2.426891 1.065995 -2.908421 1.116605
+Patch 4 tracking to reference 10
+Tapering reference patch # 4
+  1   -8.94   -0.88    5.75327e+06    0.06    0.12    0.06    0.12
+peak usdx,usdy,xpeak,ypeak -6.686785 -1.113431 -8.943508 -0.876240
+  1   -4.78    1.59    1.72909e+06    0.22   -0.41    0.22   -0.41
+peak usdx,usdy,xpeak,ypeak -3.516233 1.454490 -4.776577 1.586957
+Tapering reference patch # 6
+  1   -5.62    0.70    3.88148e+06    0.38   -0.30    0.38   -0.30
+peak usdx,usdy,xpeak,ypeak -4.169603 0.548047 -5.621655 0.700664
+Tapering reference patch # 7
+Tapering current patch # 7
+  1   -4.23    2.51    6.46339e+06   -0.23   -0.49   -0.23   -0.49
+peak usdx,usdy,xpeak,ypeak -3.086491 2.393926 -4.233135 2.514443
+Tapering reference patch # 8
+Tapering current patch # 8
+  1   -1.88    1.77    5.40556e+06    0.12   -0.23    0.12   -0.23
+peak usdx,usdy,xpeak,ypeak -1.357076 1.709714 -1.884960 1.765197
+Tapering reference patch # 9
+Tapering current patch # 9
+  1   -4.76    1.89     1.6812e+06    0.24   -0.11    0.24   -0.11
+peak usdx,usdy,xpeak,ypeak -3.494168 1.762085 -4.758038 1.894923
+dom 0 n=9 xform 1.0015 -0.0159 -0.0230 0.9862 2.7 -1.5 dev avg, sd, max 1.02 0.89 3.04
+dropped ind  3 patch 3  dev 18.30
+Eliminated 1 outlier points
+Prediction fit error: mean 1.02  max 3.0
+View  12 processed
+idir = 1,  mStretch = 1.28558,  ivRef = 12,  ivCur = 13
+Tapering reference patch # 1
+Tapering current patch # 1
+  1  -16.69   -6.78    1.50704e+06    0.31    0.22    0.31    0.22
+peak usdx,usdy,xpeak,ypeak -13.177280 -7.148733 -16.687046 -6.779842
+Tapering reference patch # 2
+Tapering current patch # 2
+  1    4.14   -9.99    3.84616e+06    0.14    0.01    0.14    0.01
+peak usdx,usdy,xpeak,ypeak 2.997586 -9.868351 4.137234 -9.988132
+Tapering reference patch # 3
+  1    3.70   -9.81    2.87714e+06   -0.30    0.19   -0.30    0.19
+peak usdx,usdy,xpeak,ypeak 2.661641 -9.695939 3.701281 -9.805210
+Patch 4 tracking to reference 10
+Tapering reference patch # 4
+Tapering current patch # 4
+  1   -1.96  -10.89    4.48155e+06    0.04    0.11    0.04    0.11
+peak usdx,usdy,xpeak,ypeak -1.617675 -10.926396 -1.957447 -10.890686
+  1    2.90   -9.91    2.04437e+06   -0.10    0.09   -0.10    0.09
+peak usdx,usdy,xpeak,ypeak 1.250579 -9.736395 2.897013 -9.909443
+  1    7.13   -9.14    1.62385e+06    0.13   -0.14    0.13   -0.14
+peak usdx,usdy,xpeak,ypeak 3.746109 -8.780220 7.126673 -9.135532
+Skipping tracking of patch 7
+Skipping tracking of patch 8
+Skipping tracking of patch 9
+dom 0 n=6 xform 0.9838 0.1792 -0.1792 0.9838 -7.2 7.3 dev avg, sd, max 5.54 3.07 10.74
+dropped ind  3 patch 3  dev 28.20
+Eliminated 1 outlier points
+Prediction fit error: mean 5.54  max 10.7
+View  13 processed
+idir = 1,  mStretch = 1.08506,  ivRef = 5,  ivCur = 4
+Skipping tracking of patch 1
+Skipping tracking of patch 2
+Skipping tracking of patch 3
+  1   -0.01    2.62    3.76328e+06   -0.01   -0.38   -0.01   -0.38
+peak usdx,usdy,xpeak,ypeak 0.011856 2.618844 -0.010304 2.621173
+  1    0.41    2.17    1.55665e+06    0.41    0.17    0.41    0.17
+peak usdx,usdy,xpeak,ypeak 0.392379 2.173671 0.406170 2.172221
+Tapering reference patch # 6
+Tapering current patch # 6
+  1    2.10    2.41    3.11702e+06    0.10    0.41    0.10    0.41
+peak usdx,usdy,xpeak,ypeak 1.959364 2.426939 2.102753 2.411869
+Tapering reference patch # 7
+Tapering current patch # 7
+  1    1.14    3.07    3.90897e+06    0.14    0.07    0.14    0.07
+peak usdx,usdy,xpeak,ypeak 1.077288 3.074579 1.140737 3.067911
+Tapering reference patch # 8
+Tapering current patch # 8
+  1   -0.69    4.02    3.52531e+06    0.31    0.02    0.31    0.02
+peak usdx,usdy,xpeak,ypeak -0.605738 4.015602 -0.692211 4.024691
+Tapering reference patch # 9
+Tapering current patch # 9
+  1    0.57    2.13    1.39991e+06   -0.43    0.13   -0.43    0.13
+peak usdx,usdy,xpeak,ypeak 0.540366 2.130079 0.566994 2.127281
+dom 0 n=6 xform 1.0000 0.0028 -0.0028 1.0000 -4.2 -2.9 dev avg, sd, max 2.07 1.50 4.37
+dropped ind  0 patch 3  dev 7.69
+Eliminated 1 outlier points
+Prediction fit error: mean 2.07  max 4.4
+View   4 processed
+idir = 1,  mStretch = 1.13052,  ivRef = 4,  ivCur = 3
+Patch 1 tracking to reference 5
+Tapering reference patch # 1
+Tapering current patch # 1
+  1    3.55   -4.77    3.19075e+06   -0.45    0.23   -0.45    0.23
+peak usdx,usdy,xpeak,ypeak 2.813461 -4.687472 3.554712 -4.765381
+Patch 2 tracking to reference 5
+Tapering reference patch # 2
+Tapering current patch # 2
+  1    2.64   -3.36    5.97116e+06   -0.36   -0.36   -0.36   -0.36
+peak usdx,usdy,xpeak,ypeak 2.090672 -3.305325 2.637300 -3.362778
+Patch 3 tracking to reference 5
+Tapering reference patch # 3
+Tapering current patch # 3
+  1    3.12   -4.34    3.02392e+06    0.12   -0.34    0.12   -0.34
+peak usdx,usdy,xpeak,ypeak 2.467087 -4.268994 3.120818 -4.337704
+Patch 4 tracking to reference 5
+  1    3.64   -5.33    1.90168e+06   -0.36   -0.33   -0.36   -0.33
+peak usdx,usdy,xpeak,ypeak 2.873065 -5.253943 3.641028 -5.334660
+  1    3.20   -6.43    2.84135e+06    0.20   -0.43    0.20   -0.43
+peak usdx,usdy,xpeak,ypeak 2.489274 -6.354938 3.197135 -6.429337
+  1    2.52   -7.79    1.37029e+06   -0.48    0.21   -0.48    0.21
+peak usdx,usdy,xpeak,ypeak 1.912418 -7.720910 2.523134 -7.785099
+Tapering current patch # 7
+  1    2.71   -7.25    4.71383e+06   -0.29   -0.25   -0.29   -0.25
+peak usdx,usdy,xpeak,ypeak 2.073874 -7.178380 2.708004 -7.245029
+Tapering current patch # 8
+  1    1.52   -7.90    2.74976e+06   -0.48    0.10   -0.48    0.10
+peak usdx,usdy,xpeak,ypeak 1.091964 -7.851478 1.521806 -7.896656
+Tapering current patch # 9
+  1    2.31   -7.27    1.18756e+06    0.31   -0.27    0.31   -0.27
+peak usdx,usdy,xpeak,ypeak 1.745205 -7.211369 2.306424 -7.270355
+dom 0 n=9 xform 1.0046 -0.0207 0.0277 1.0464 -4.7 5.6 dev avg, sd, max 2.71 1.56 4.23
+dropped ind  3 patch 3  dev 10.93
+Eliminated 1 outlier points
+Prediction fit error: mean 2.71  max 4.2
+View   3 processed
+idir = 1,  mStretch = 1.19175,  ivRef = 3,  ivCur = 2
+Tapering reference patch # 1
+  1   -2.89    3.04    4.29743e+06    0.11    0.04    0.11    0.04
+peak usdx,usdy,xpeak,ypeak -2.377552 2.986714 -2.888012 3.040365
+  1   -1.43    1.38    8.59136e+06   -0.43    0.38   -0.43    0.38
+peak usdx,usdy,xpeak,ypeak -1.175323 1.351390 -1.425171 1.377650
+  1   -1.47    2.12    4.51861e+06   -0.47    0.12   -0.47    0.12
+peak usdx,usdy,xpeak,ypeak -1.200076 2.094750 -1.469437 2.123061
+Patch 4 tracking to reference 5
+  1    0.74   -2.17    2.31016e+06   -0.26   -0.17   -0.26   -0.17
+peak usdx,usdy,xpeak,ypeak 0.440738 -2.140299 0.744863 -2.172264
+  1   -1.13    1.83    3.47528e+06   -0.13   -0.17   -0.13   -0.17
+peak usdx,usdy,xpeak,ypeak -0.713510 1.791557 -1.125507 1.834859
+  1   -1.16    2.17     2.2472e+06   -0.16    0.17   -0.16    0.17
+peak usdx,usdy,xpeak,ypeak -0.726935 2.120692 -1.160870 2.166301
+Tapering reference patch # 7
+Tapering current patch # 7
+  1   -2.47    2.27    5.55966e+06   -0.47    0.27   -0.47    0.27
+peak usdx,usdy,xpeak,ypeak -1.623661 2.181870 -2.470207 2.270845
+Tapering reference patch # 8
+Tapering current patch # 8
+  1   -5.47    3.61    1.97224e+06   -0.47   -0.39   -0.47   -0.39
+peak usdx,usdy,xpeak,ypeak -3.641953 3.413291 -5.469696 3.605395
+Tapering reference patch # 9
+Tapering current patch # 9
+  1   -2.23    2.39    1.42938e+06   -0.23    0.39   -0.23    0.39
+peak usdx,usdy,xpeak,ypeak -1.454266 2.312320 -2.229687 2.393821
+dom 0 n=9 xform 0.9803 0.0194 0.0185 1.0139 3.4 0.5 dev avg, sd, max 2.01 1.54 4.92
+dropped ind  3 patch 3  dev 19.15
+Eliminated 1 outlier points
+Prediction fit error: mean 2.01  max 4.9
+View   2 processed
+idir = 1,  mStretch = 1.28558,  ivRef = 2,  ivCur = 1
+  1   -0.24    0.25      5.173e+06   -0.24    0.25   -0.24    0.25
+peak usdx,usdy,xpeak,ypeak -0.181316 0.244460 -0.239787 0.250605
+  1    0.59   -0.14    9.33136e+06   -0.41   -0.14   -0.41   -0.14
+peak usdx,usdy,xpeak,ypeak 0.457433 -0.130789 0.590520 -0.144777
+  1   -0.62   -0.11    6.67313e+06    0.38   -0.11    0.38   -0.11
+peak usdx,usdy,xpeak,ypeak -0.485234 -0.127559 -0.618504 -0.113552
+Patch 4 tracking to reference 5
+  1   -3.45   13.86    1.37642e+06   -0.45   -0.14   -0.45   -0.14
+peak usdx,usdy,xpeak,ypeak -1.178404 13.621301 -3.448574 13.859905
+  1   -0.01   -0.38     4.7998e+06   -0.01   -0.38   -0.01   -0.38
+peak usdx,usdy,xpeak,ypeak -0.025288 -0.381504 -0.012407 -0.382858
+  1    1.43   -0.58    1.78557e+06    0.43    0.42    0.43    0.42
+peak usdx,usdy,xpeak,ypeak 0.738479 -0.511083 1.427512 -0.583504
+Tapering reference patch # 7
+Tapering current patch # 7
+  1   -0.67   -0.04    6.32075e+06    0.33   -0.04    0.33   -0.04
+peak usdx,usdy,xpeak,ypeak -0.361768 -0.068798 -0.670135 -0.036387
+Tapering reference patch # 8
+Tapering current patch # 8
+  1   -3.98    0.82     1.8697e+06    0.02   -0.18    0.02   -0.18
+peak usdx,usdy,xpeak,ypeak -2.098803 0.623346 -3.981277 0.821203
+Tapering reference patch # 9
+Tapering current patch # 9
+  1   -0.91   -0.22    3.11544e+06    0.09   -0.22    0.09   -0.22
+peak usdx,usdy,xpeak,ypeak -0.497129 -0.266980 -0.905113 -0.224099
+dom 0 n=9 xform 1.0113 0.0144 0.0199 1.0073 2.3 0.7 dev avg, sd, max 1.68 1.02 3.86
+dropped ind  3 patch 3  dev 8.60
+Eliminated 1 outlier points
+Prediction fit error: mean 1.68  max 3.9
+View   1 processed
+interp 0.005   fft 0.008   peak 0.003   mask 0.000   load/extract 0.001 read/copy 0.001 CCC 0.000 SD 0.000

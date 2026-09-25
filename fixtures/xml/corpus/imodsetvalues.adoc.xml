@@ -1,0 +1,56 @@
+<?xml version="1.0" encoding="utf-8"?>
+<autodoc>
+  <PreData>
+    <Version>1.0</Version>
+    <Pip>1</Pip>
+  </PreData>
+  <Field name="ValueFile">
+    <short>values</short>
+    <type>FN</type>
+    <usage>Input values file</usage>
+    <tooltip />
+    <manpage>Input file containing values to be stored in the model.</manpage>
+  </Field>
+  <Field name="InputFile">
+    <short>input</short>
+    <type>FN</type>
+    <usage>Input model file</usage>
+    <tooltip />
+    <manpage>Input model file to clone. If this option is not entered, the first non-option argument will be used for the input file.</manpage>
+  </Field>
+  <Field name="OutputFile">
+    <short>output</short>
+    <type>FN</type>
+    <usage>Output model file to create</usage>
+    <tooltip />
+    <manpage>Name to give the output model. If this option is not entered, the second non-option argument will be used.</manpage>
+  </Field>
+  <Field name="ColumnNumber">
+    <short>column</short>
+    <type>I</type>
+    <usage>Column number containing the values to be set.</usage>
+    <tooltip />
+    <manpage>Specify a particular column in a multi-column values file which contains the values to associate with each point in the model. The result is equivalent to having constructed a single-column values file containing only these entries.</manpage>
+  </Field>
+  <Field name="MinMaxFile">
+    <short>minMax</short>
+    <type>FN</type>
+    <usage>Per object min and max values for pseudo-coloring</usage>
+    <tooltip />
+    <manpage>Input file giving the minimum and maximum values for pseudo-coloring specific objects.</manpage>
+  </Field>
+  <Field name="SkipLines">
+    <short>skip</short>
+    <type>I</type>
+    <usage>Number of header lines to skip</usage>
+    <tooltip />
+    <manpage>Number of lines to ignore at beginning of the values file. Useful for skipping over header / comment lines.</manpage>
+  </Field>
+  <Field name="usage">
+    <short>help</short>
+    <type>B</type>
+    <usage>Print help output</usage>
+    <tooltip />
+    <manpage />
+  </Field>
+</autodoc>

@@ -1,0 +1,42 @@
+
+ RO image file on unit   1 : s.mrc     Size=         10 K
+
+ OLD image file on unit   2 : f2.mrc     Size=         19 K
+
+ NEW image file on unit   3 : o.mrc
+
+ Number of columns, rows, sections .....      32      24       6
+ Map mode ..............................    1   (16-bit integer)           
+ Start cols, rows, sects, grid x,y,z ...    0     0     0      32     24      6
+ Pixel spacing (Angstroms)..............   1.000      1.000      1.000    
+ Cell angles ...........................   90.000   90.000   90.000
+ Fast, medium, slow axes ...............    X    Y    Z
+ Origin on x,y,z .......................    0.000       0.000       0.000    
+ Minimum density .......................   38.000    
+ Maximum density .......................   445.00    
+ Mean density ..........................   258.47    
+ tilt angles (original,current) ........   0.0   0.0   0.0   0.0   0.0   0.0
+ Space group,# extra bytes,idtype,lens .        0        0        0        0
+
+     1 Titles :
+raw2mrc: Converted to mrc format.                       25-Sep-26  01:20:31    
+
+ Volume 1: mean =    216.7361,  SD =     75.5277
+
+ Number of columns, rows, sections .....      32      24       6
+ Map mode ..............................    2   (32-bit float)             
+ Start cols, rows, sects, grid x,y,z ...    0     0     0      32     24      6
+ Pixel spacing (Angstroms)..............   1.000      1.000      1.000    
+ Cell angles ...........................   90.000   90.000   90.000
+ Fast, medium, slow axes ...............    X    Y    Z
+ Origin on x,y,z .......................    0.000       0.000       0.000    
+ Minimum density .......................   21.730    
+ Maximum density .......................   89.534    
+ Mean density ..........................   58.494    
+ tilt angles (original,current) ........   0.0   0.0   0.0   0.0   0.0   0.0
+ Space group,# extra bytes,idtype,lens .        0        0        0        0
+
+     1 Titles :
+raw2mrc: Converted to mrc format.                       25-Sep-26  01:20:31    
+
+ Volume 2: mean =     51.5432,  SD =     12.5873

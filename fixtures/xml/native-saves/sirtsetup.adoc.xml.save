@@ -1,0 +1,349 @@
+<?xml version="1.0" encoding="utf-8"?>
+
+<autodoc>
+  
+  <PreData>
+    
+    <Version>1.0</Version>
+    
+    <Pip>1</Pip>
+  
+  </PreData>
+  
+  <Field name="CommandFile">
+    
+    <short>co</short>
+    
+    <type>FN</type>
+    
+    <usage>Command file for reconstruction (with or without extension)</usage>
+    
+    <tooltip />
+    
+    <manpage>Command file for reconstruction, which can be entered with or without its extension of &quot;.com&quot;.  If this option is not entered, a non-option argument is used for the command file.  If the root name of this file ends in &quot;_for_sirt&quot; and the processing is not starting from the zero iteration, that ending will be stripped from the command files produced.</manpage>
+  
+  </Field>
+  
+  <Field name="NamingStyle">
+    
+    <short>naming</short>
+    
+    <type>I</type>
+    
+    <usage>0, 1 or 2 for descriptive, mrc, or hdf extensions on image file names</usage>
+    
+    <tooltip />
+    
+    <manpage>0 if image files have descriptive extensions like &quot;.preali&quot;, or 1 or 2 if descriptive text is before the extension &quot;.mrc&quot; or &quot;.hdf&quot;.  This entry is needed only if the style cannot be determined from files in the dataset.</manpage>
+  
+  </Field>
+  
+  <Field name="NumberOfProcessors">
+    
+    <short>nu</short>
+    
+    <type>I</type>
+    
+    <usage>Target or expected number of machines (default 8, or 1 if GPU is used)</usage>
+    
+    <tooltip />
+    
+    <manpage>Use this option to specify the number of machines that you expect to run the command files on.  It is passed directly to Splittilt(1) unless it is 1, in which case the processing is not divided into chunks.  The default is 8 unless the command file contains the option to use the GPU, in which case it is 1.</manpage>
+  
+  </Field>
+  
+  <Field name="ChunksPerProcessor">
+    
+    <short>ra</short>
+    
+    <type>I</type>
+    
+    <usage>Number of chunks per processor (default 5 imposed by Splittilt)</usage>
+    
+    <tooltip />
+    
+    <manpage>Use this option to set the number of chunks per processor; it will be multiplied by the number of processors to give a value for the \fB-TargetChunks\fR option to Splittilt(1).</manpage>
+  
+  </Field>
+  
+  <Field name="StartFromZero">
+    
+    <short>st</short>
+    
+    <type>B</type>
+    
+    <usage>Start from initial reconstruction even if iterations have been done</usage>
+    
+    <tooltip />
+    
+    <manpage>Do an initial reconstruction, numbered 00, even if it or later reconstructions already exist.  The default is to iterate from the last existing reconstruction.</manpage>
+  
+  </Field>
+  
+  <Field name="ResumeFromIteration">
+    
+    <short>re</short>
+    
+    <type>I</type>
+    
+    <usage>Resume from the given iteration rather than from the last one</usage>
+    
+    <tooltip />
+    
+    <manpage>Resume from the given iteration rather than from the last one.  You can resume from any iteration that has a .srec file, but not from ones for which there is only a scaled integer or trimmed file.</manpage>
+  
+  </Field>
+  
+  <Field name="IterationsToRun">
+    
+    <short>it</short>
+    
+    <type>I</type>
+    
+    <usage>Number of iterations to run (default 10)</usage>
+    
+    <tooltip />
+    
+    <manpage>Set the number of iterations to run.  If this option is not entered, the number that will be run depends on whether the LeaveIterations option is used.  If it is not, 10 iterations will be done.  If it is, iterations will be done up to the last interation number in the list being left.</manpage>
+  
+  </Field>
+  
+  <Field name="LeaveIterations">
+    
+    <short>le</short>
+    
+    <type>LI</type>
+    
+    <usage>Leave reconstructions at the listed iterations</usage>
+    
+    <tooltip>Retain the reconstructions at the listed iterations, which are numbered by absolute iteration number, not by iteration number in this round. The highest number determines how many iterations will be run (if &quot;IterationsToRun&quot; is not entered).</tooltip>
+    
+    <manpage>Leave reconstructions at the listed iterations, which are numbered by absolute iteration number.  For example, if 10 iterations have already been done and you are doing another 10, entering 14,17-19 will retain the reconstructions named setname.srec14, setname.srec17, etc, produced at the 4th, 7th, 8th and 9th new iteration.  In addition, the reconstruction from the final iteration is always retained.</manpage>
+  
+  </Field>
+  
+  <Field name="SkipVertSliceOutput">
+    
+    <short>sk</short>
+    
+    <type>B</type>
+    
+    <usage>Do not make vertical slice output files when running SIRT internally.</usage>
+    
+    <tooltip>Do not produce the vertical slice files that are output along with each retained reconstruction when SIRT is done internally.  Such files are used to avoid repeated interpolations.  Use this option for a large reconstruction if disk space is an issue and you are leaving only the final iteration.</tooltip>
+    
+    <manpage>Do not make the vertical slice output files that are needed for resuming without interpolation when SIRT is done internally.  If the iterations will be run internally in Tilt(1) and there is a non-zero X-axis tilt, the default is to create an output file containing the internal, vertical slices along with every regular reconstruction file.  When resuming for the next iteration, using such a file avoids the effects of interpolating twice between internal slices and reconstruction slices.  These effects are much more severe for cryo data than plastic section data.  Use this option if storage space is an issue and if you are leaving one iteration that you do not anticipate resuming from.  The entry is irrelevant if you have Z-factors, local alignments, no X-axis tilt, or varying X-axis tilt resulting from solving for beam tilt.</manpage>
+  
+  </Field>
+  
+  <Field name="CleanUpPastStart">
+    
+    <short>cl</short>
+    
+    <type>B</type>
+    
+    <usage>Remove all existing reconstructions past the starting point of this run</usage>
+    
+    <tooltip>Remove all existing reconstructions past the starting point of this run, for the kind of reconstruction currently being done (subarea or full).</tooltip>
+    
+    <manpage>Remove all existing reconstructions past the starting point of this run, for the kind of reconstruction currently being done (subarea or full). Specifically, this includes files with extensions containing .srec, .sint, and .strm and with a root name matching the root name used for subarea or full reconstructions (see FILES).  Sirtsetup does not remove the files; rather, it places a command to remove them into the first command file to be run and outputs a list of the files that will be deleted.  If you resume at, say, iteration 5, then the list will include all files numbered 06 and above.  If you restart at the beginning, the list will include all existing files.</manpage>
+  
+  </Field>
+  
+  <Field name="SubareaSize">
+    
+    <short>su</short>
+    
+    <type>IP</type>
+    
+    <usage>Size in X and Y of subarea to use from aligned stack, in binned pixels</usage>
+    
+    <tooltip>Size in X and Y of subarea to use from aligned stack, in binned pixels if the aligned stack is binned.</tooltip>
+    
+    <manpage>Size in X and Y of a subarea to use from the aligned stack, in actual pixels of that stack, which might be binned relative to the original tilt series.  When a subarea is specified, output files are named differently (see FILES).</manpage>
+  
+  </Field>
+  
+  <Field name="YOffsetOfSubarea">
+    
+    <short>yo</short>
+    
+    <type>I</type>
+    
+    <usage>Offset in Y from center of aligned image to center of subarea</usage>
+    
+    <tooltip>Offset in Y from center of aligned image to center of subarea, in binned pixels if the aligned stack is binned.</tooltip>
+    
+    <manpage>Offset in Y from center of aligned image to center of subarea whose size is specified with the -su option.  The shifted subarea must lie completely within the image area.  Enter a value in actual pixels of the aligned stack (positive for an area above the center).  If you want to do more iterations, you need to enter the same subarea size and offset as when you started.</manpage>
+  
+  </Field>
+  
+  <Field name="ScaleToInteger">
+    
+    <short>sc</short>
+    
+    <type>FP</type>
+    
+    <usage>Convert retained reconstructions to integers with given min/max</usage>
+    
+    <tooltip>Convert retained reconstructions to integers with (Etomo sets the min and max for scaling to -20000/20000).</tooltip>
+    
+    <manpage>Scale each retained reconstruction to integers, with the minimum and maximum in the reconstruction scaled to the given min and max values. Values of -20000,20000 are recommended.  This scaling will reduce the space needed for retained reconstructions twofold, since by default each reconstruction is generated as floating point.  This scaling is done on each file just after it is produced, so at the end of the processing the last reconstruction will be in both floating point and scaled integer form.  The file setname.srec01 is scaled to setname.sint01, etc.</manpage>
+  
+  </Field>
+  
+  <Field name="TrimvolOptions">
+    
+    <short>tr</short>
+    
+    <type>CH</type>
+    
+    <usage>Run trimvol with given options on retained reconstructions</usage>
+    
+    <tooltip />
+    
+    <manpage>Run Trimvol(1) on each retained reconstruction with the given options.  The options must be enclosed in single or double quotes.  If the options specify a scaling to bytes, this will reduce the space needed for retained reconstructions by at least fourfold.  Each reconstruction to be retained is trimmed as soon as it is made, so at the end of the processing the last reconstruction exists in both floating point and trimmed form.  The file setname.srec01 is trimmed to setname.strm01, etc.  The trimvol options can be extracted from etomo_err.log after running the Trimvol step in Etomo.</manpage>
+  
+  </Field>
+  
+  <Field name="FlatFilterFraction">
+    
+    <short>fl</short>
+    
+    <type>F</type>
+    
+    <usage>Flat filter fraction for starting reconstruction (default 1.)</usage>
+    
+    <tooltip>The fraction of a flat filter function to apply in the initial reconstruction.  The default is 1 to use just a flat filter; 0 will use just the standard radial weighting filter and give an R-weighted backprojection; values between 0 and 1 give a mixture between the two starting reconstructions and may give quicker convergence.</tooltip>
+    
+    <manpage>Set the fraction of a flat filter function to apply in the initial reconstruction.  A flat function will be mixed with the standard radial filter if the fraction is less than 1; this may give quicker convergence. The default is 1.0 for no mixing.</manpage>
+  
+  </Field>
+  
+  <Field name="RadiusAndSigma">
+    
+    <short>rd</short>
+    
+    <type>FP</type>
+    
+    <usage>Radius and falloff for radial filter in all backprojections</usage>
+    
+    <tooltip />
+    
+    <manpage>Set the radius and falloff for the high-frequency cutoff of the filter used in the backprojections.  The default provides a mild filtering with a radius is 0.4 and Gaussian falloff with a true sigma of 0.035 (which is produced by a value of 0.05 when the \fB-FalloffIsTrueSigma\fR option is not entered)</manpage>
+  
+  </Field>
+  
+  <Field name="FalloffIsTrueSigma">
+    
+    <short>falloff</short>
+    
+    <type>B</type>
+    
+    <usage>Use the falloff value directly as the sigma of the Gaussian filter</usage>
+    
+    <tooltip />
+    
+    <manpage>Use the falloff value entered with the \fB-RadiusAndSigma\fR option directly as the sigma of the Gaussian filter instead of using a sigma that is 0.707 times the entered value.  This option was added in IMOD 4.8.59, after the incorrect scaling of the falloff value was discovered in the Tilt(1) code, so that newer command files could show the true sigma value while older command files without the option would still produce the same result.</manpage>
+  
+  </Field>
+  
+  <Field name="ConstrainSign">
+    
+    <short>cs</short>
+    
+    <type>B</type>
+    
+    <usage>1 or -1 to constrain reconstruction to positive or negative values</usage>
+    
+    <tooltip />
+    
+    <manpage>Enter 1 or -1 to constrain the reconstruction to positive or negative values when subtracting the difference reconstruction.  This option is appropriate only if the projection data are normalized to be linearly proportional to projected mass density and have positive or negative values, respectively.</manpage>
+  
+  </Field>
+  
+  <Field name="SeparateRecChunks">
+    
+    <short>ch</short>
+    
+    <type>B</type>
+    
+    <usage>Write reconstructions to separate chunks, not directly to file</usage>
+    
+    <tooltip />
+    
+    <manpage>Write reconstructions in chunks to separate files and assemble these into a single tomogram.  The default is to write directly to the output file. Neither this option nor the SeparateProjChunks option should be needed with the protections provided by saving pixels at chunk boundaries into separate files; if artifacts do occur, try using the BoundaryPixels option to increase the number of pixels saved.</manpage>
+  
+  </Field>
+  
+  <Field name="SeparateProjChunks">
+    
+    <short>pc</short>
+    
+    <type>B</type>
+    
+    <usage>Write projections to separate chunks, not directly to file</usage>
+    
+    <tooltip />
+    
+    <manpage>Write reprojections in chunks to separate files instead of directly to a single output file.  The separate files are assembled with Assemblevol(1).  See the SeparateRecChunks option.</manpage>
+  
+  </Field>
+  
+  <Field name="BoundaryPixels">
+    
+    <short>bo</short>
+    
+    <type>I</type>
+    
+    <usage>Number of boundary pixels when writing directly (default 2048)</usage>
+    
+    <tooltip />
+    
+    <manpage>Set the number of boundary pixels saved in separate files to the given value when writing reconstructions or projections directly to a single output file.  The boundary pixels are rewritten to the output file after all chunks are done.</manpage>
+  
+  </Field>
+  
+  <Field name="OutputMode">
+    
+    <short>mo</short>
+    
+    <type>I</type>
+    
+    <usage>Output file mode (default 2 for floating point numbers)</usage>
+    
+    <tooltip />
+    
+    <manpage>Set the mode of the output files.  The default is 2 because scaling is somewhat unpredictable, and values generally become much larger than in standard R-weighted back-projection with Tilt(1).</manpage>
+  
+  </Field>
+  
+  <Field name="TestMode">
+    
+    <short>te</short>
+    
+    <type>I</type>
+    
+    <usage>Test mode, 1: retain diff; 2: leave command and log files</usage>
+    
+    <tooltip />
+    
+    <manpage>Run in a test mode.  A value of 1 will leave the reprojection difference between iterations and at the end, except when running SIRT internally in Tilt(1).  A value of 2 will also leave command and log files at the end of the processing.</manpage>
+  
+  </Field>
+  
+  <Field name="usage">
+    
+    <short>help</short>
+    
+    <type>B</type>
+    
+    <usage>Print help output</usage>
+    
+    <tooltip />
+    
+    <manpage />
+  
+  </Field>
+
+</autodoc>

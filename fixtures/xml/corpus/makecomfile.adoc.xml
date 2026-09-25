@@ -1,0 +1,163 @@
+<?xml version="1.0" encoding="utf-8"?>
+<autodoc>
+  <PreData>
+    <Version>1.0</Version>
+    <Pip>1</Pip>
+  </PreData>
+  <Field name="InputFile">
+    <short>input</short>
+    <type>FN</type>
+    <usage>Input command file to copy commands from or use for operations (optional)</usage>
+    <tooltip />
+    <manpage>Input command file to copy commands from or use for program operations; this entry is not required for all types of files.  Because of this, the input file cannot be entered as a non-option argument.</manpage>
+  </Field>
+  <Field name="OutputFile">
+    <short>output</short>
+    <type>FN</type>
+    <usage>Output file for commands (required)</usage>
+    <tooltip />
+    <manpage>Output file for commands, a required entry.  The filename determines the type of output, and must start with one of the names listed above in \fBOutput File Types\fR. If this option is not entered, the first (not second) non-option argument is taken as the output file.</manpage>
+  </Field>
+  <Field name="RootNameOfDataFiles">
+    <short>root</short>
+    <type>CH</type>
+    <usage>Root name of data files, including axis letter</usage>
+    <tooltip />
+    <manpage />
+  </Field>
+  <Field name="NamingStyle">
+    <short>style</short>
+    <type>I</type>
+    <usage>0, 1 or 2 for descriptive, mrc, or hdf extensions on image file names</usage>
+    <tooltip />
+    <manpage>0 if image files have descriptive extensions like &quot;.preali&quot;, or 1 or 2 if descriptive text is before the extension &quot;.mrc&quot; or &quot;.hdf&quot;.  This entry is needed only if the style cannot be determined from files in the dataset and is needed to produce the particular command file.</manpage>
+  </Field>
+  <Field name="StackExtension">
+    <short>stackext</short>
+    <type>CH</type>
+    <usage>Extension of raw stack excluding period</usage>
+    <tooltip />
+    <manpage>Extension of raw stack excluding the period. This entry is needed only if this extension cannot be determined from files in the dataset and is needed to produce the particular command file.</manpage>
+  </Field>
+  <Field name="SingleAxis">
+    <short>single</short>
+    <type>B</type>
+    <usage>Dataset is single axis (overrides last letter of output file root name)</usage>
+    <tooltip />
+    <manpage>This entry can be used to indicate that the dataset is single axis even though the output com file name ends in &quot;a&quot; or &quot;b&quot;.  It is not needed with any of the currently defined output file types.</manpage>
+  </Field>
+  <Field name="BinningOfImages">
+    <short>binning</short>
+    <type>I</type>
+    <usage>Binning value to place in command file</usage>
+    <tooltip />
+    <manpage>Binning value to place in command file, which is required by many types of files.  For Reducefiltvol, non-integer values are accepted; otherwise the entry must be an integer.</manpage>
+  </Field>
+  <Field name="BeadSize">
+    <short>bead</short>
+    <type>F</type>
+    <usage>Bead size in pixels, needed for findbeads3d</usage>
+    <tooltip />
+    <manpage>Bead size in pixels, required for findbeads3d.</manpage>
+  </Field>
+  <Field name="Use3dfindAliInput">
+    <short>use</short>
+    <type>B</type>
+    <usage>Change input file to setname_3dfind.ali if needed for tilt_3dfind</usage>
+    <tooltip />
+    <manpage />
+  </Field>
+  <Field name="ShiftInY">
+    <short>shift</short>
+    <type>F</type>
+    <usage>Amount to shift reconstruction in Y in tilt_3dfind</usage>
+    <tooltip />
+    <manpage />
+  </Field>
+  <Field name="HalfFloatModeOutput">
+    <short>halffloat</short>
+    <type>I</type>
+    <usage>Value of -halffloat option for golderaser: 1 if float input, 2 unconditionally</usage>
+    <tooltip />
+    <manpage>Value of \fB-halffloat\fR option to add to the golderaser command file: 2 to set the mode for output files to half-floats (16-bit floats) unconditionally, 1 to do so only when the input file is floating point, or 0 for regular floating point output.  This option overrides both the &quot;setupset.copyarg.halffloat&quot; and &quot;comparam.golderaser.ccderaser.HalfFloatModeOutput&quot; directives entered with \fB-change\fR or \fB-one\fR.</manpage>
+  </Field>
+  <Field name="ThicknessToMake">
+    <short>thickness</short>
+    <type>I</type>
+    <usage>Thickness of tomogram for tilt_3dfind or cryoposition, or of slabs for ctf3dsetup, required</usage>
+    <tooltip />
+    <manpage>Thickness of reconstruction in unbinned pixels for tilt_3dfind or cryoposition, or thickness of slabs in nanometers for ctf3dsetup.  This entry is required in those cases.</manpage>
+  </Field>
+  <Field name="FindBeadsInVolume">
+    <short>find</short>
+    <type>I</type>
+    <usage>Value to set for -find option in cryoposition</usage>
+    <tooltip />
+    <manpage>Value to set for -find option in cryoposition, should generally be 0 or 2.</manpage>
+  </Field>
+  <Field name="UseGPU">
+    <short>gpu</short>
+    <type>I</type>
+    <usage>Value to set for -gpu option in cryoposition</usage>
+    <tooltip />
+    <manpage />
+  </Field>
+  <Field name="NumberOfProcessors">
+    <short>procs</short>
+    <type>I</type>
+    <usage>Entry for expected number of CPUs or GPUS for -procs in ctf3dsetup</usage>
+    <tooltip />
+    <manpage />
+  </Field>
+  <Field name="LocalAlignValidation">
+    <short>local</short>
+    <type>I</type>
+    <usage>Value for testing local areas to place in Restrictalign command file</usage>
+    <tooltip />
+    <manpage>Value for testing local areas to place in command file, which is an option to Restrictalign(1)</manpage>
+  </Field>
+  <Field name="TargetAndMinRatios">
+    <short>ratios</short>
+    <type>FP</type>
+    <usage>Ratios of measurements to unknowns to place in Restrictalign command file</usage>
+    <tooltip />
+    <manpage>Values for the \fB-target\fR and \fB-minimum\fR options to places in the Restrictalign(1) command file; use 0 to omit one of the options</manpage>
+  </Field>
+  <Field name="SkipBeamTiltWithOneRot">
+    <short>skipbeam</short>
+    <type>B</type>
+    <usage>Do not add beam tilt when switching to one rotation angle in Restrictalign</usage>
+    <tooltip />
+    <manpage>Value for the \fB-skipbeam\fR option to place in the Restrictalign(1) command file.</manpage>
+  </Field>
+  <Field name="ReplaceAboveAngle">
+    <short>replace</short>
+    <type>F</type>
+    <usage>Replace points in existing model above given angle in Extenderasemod</usage>
+    <tooltip />
+    <manpage>Value for the \fB-replace\fR option to place in the Extenderasemod(1) command file.</manpage>
+  </Field>
+  <Field name="ChangeParametersFile">
+    <short>change</short>
+    <type>FNM</type>
+    <usage>Name of file with directives for changing parameters</usage>
+    <tooltip />
+    <manpage>'Name of file with directives for changing parameters.  A directive</manpage>
+    <has the form "comparam.comfile.process.option>value&quot; where &quot;comparam&quot; is a required prefix for directives to be processed by Copytomocoms, &quot;comfile&quot; is the root name of the command file with optional &quot;a&quot; or &quot;b&quot;, &quot;process&quot; is the name of a program being run on a line starting with &quot;$&quot;, &quot;option&quot; is an option to add or modify, and &quot;value&quot; is its value, which may be empty to remove an option from a command list.  Files are processed in order, and a duplicate entry for an option generally overrides an earlier one or any changes imposed by this script.  However, for a dual-axis data set, a directive specific to a particular axis, such as that example, will always be preferred over a generic directive with no &quot;a&quot; or &quot;b&quot; on the command file name will.  For a single-axis data set, directives with a &quot;b&quot; are ignored and ones with an &quot;a&quot; or with no &quot;a or &quot;b&quot; are treated equivalently, such that later ones override earlier ones.'</has the form &quot;comparam.comfile.process.option>
+  </Field>
+  <Field name="OneParameterChange">
+    <short>one</short>
+    <type>CHM</type>
+    <usage>One directive for changing parameters</usage>
+    <tooltip />
+    <manpage>'One directive for changing parameters, in the format</manpage>
+    <"comparam.comfile.process.option">value&quot;. Entries with this option are processed after change files, can override any standard changes or additions being imposed by the script, and later entries override earlier ones.'</&quot;comparam.comfile.process.option>
+  </Field>
+  <Field name="usage">
+    <short>help</short>
+    <type>B</type>
+    <usage>Print help output</usage>
+    <tooltip />
+    <manpage />
+  </Field>
+</autodoc>

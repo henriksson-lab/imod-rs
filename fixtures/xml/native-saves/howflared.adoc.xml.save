@@ -1,0 +1,181 @@
+<?xml version="1.0" encoding="utf-8"?>
+
+<autodoc>
+  
+  <PreData>
+    
+    <Version>1.0</Version>
+    
+    <Pip>1</Pip>
+  
+  </PreData>
+  
+  <Field name="OutputFile">
+    
+    <short>output</short>
+    
+    <type>FN</type>
+    
+    <usage>Output file for results</usage>
+    
+    <tooltip />
+    
+    <manpage>Output file for results. If this option is not entered, the first non-option argument will be used for the filename.</manpage>
+  
+  </Field>
+  
+  <Field name="ColumnsToOutput">
+    
+    <short>columns</short>
+    
+    <type>LI</type>
+    
+    <usage>List of columns to output (values ranging from 1 to 26)</usage>
+    
+    <tooltip />
+    
+    <manpage>List of columns to output (values ranging from 1 to 26).  For paired MT walls, columns 1-6 and 19-22 are for the left walls, 7-12 and 23-26 are for the right walls, and 13-18 are the sum of values from 1-6 and 7-12. Unpaired walls are treated as left walls, and their values will appear in both columns 1-6 and 13-18.  See description of computed values above.</manpage>
+  
+  </Field>
+  
+  <Field name="PointOutputFile">
+    
+    <short>point</short>
+    
+    <type>FN</type>
+    
+    <usage>Output file for points in the flared region of each MT</usage>
+    
+    <tooltip />
+    
+    <manpage>Output file for points in each wall, starting at the point where the flare measurement begins.  The points are rotated so that the wall above that point would be vertical, and they are expressed in nanometers relative to the starting point.  For each MT wall, there is a line starting with the number of points, then containing the 3 or 4 numbers described above as preceding the columns of output in the standard output file, and ending with 1 for a left or unpaired wall, or 2 for a right wall.  If the \fB-nopairs\fR is also entered, there will be an additional output file with positions of flaring start points along the axis, as described above.</manpage>
+  
+  </Field>
+  
+  <Field name="OutputRotatedZ">
+    
+    <short>zout</short>
+    
+    <type>B</type>
+    
+    <usage>Output Z values after rotation into a plane along with X and Y</usage>
+    
+    <tooltip />
+    
+    <manpage>Output Z values after rotation into a plane along with X and Y in the point output file.</manpage>
+  
+  </Field>
+  
+  <Field name="PixelSizeDefault">
+    
+    <short>pixel</short>
+    
+    <type>F</type>
+    
+    <usage>Default pixel size in nm, for models without pixel size (default 1)</usage>
+    
+    <tooltip />
+    
+    <manpage>Default pixel size in nm, which will be used for any models that do not have a pixel size defined.  The default is 1, namely results will be in pixels.</manpage>
+  
+  </Field>
+  
+  <Field name="WidthDefault">
+    
+    <short>width</short>
+    
+    <type>F</type>
+    
+    <usage>Default width between walls in nm, used for unpaired walls</usage>
+    
+    <tooltip />
+    
+    <manpage>Default width between walls in nm.  This value is used to compute normalized areas for unpaired walls.  The default is 20.</manpage>
+  
+  </Field>
+  
+  <Field name="UseSurfaceNumbers">
+    
+    <short>surface</short>
+    
+    <type>B</type>
+    
+    <usage>Use surface numbers to pair wall tracings and match with markers</usage>
+    
+    <tooltip />
+    
+    <manpage>Use surface numbers to determine whether two wall tracings are paired and whether a horizontal marker contour matches a wall tracing.  This is not the default because surface numbers might have been introduced by accident.</manpage>
+  
+  </Field>
+  
+  <Field name="NoPairsOrMarkers">
+    
+    <short>nopairs</short>
+    
+    <type>B</type>
+    
+    <usage>Tracings are all unpaired and there are no boundary markers</usage>
+    
+    <tooltip />
+    
+    <manpage>There are no paired tracings and no horizontal marker lines.  With this option you do not need to segregate tracings in separate objects or surfaces.</manpage>
+  
+  </Field>
+  
+  <Field name="ModelFile">
+    
+    <short>model</short>
+    
+    <type>FNM</type>
+    
+    <usage>Input model file with tracings of microtubule walls</usage>
+    
+    <tooltip />
+    
+    <manpage />
+  
+  </Field>
+  
+  <Field name="FitTopAndBottom">
+    
+    <short>fit</short>
+    
+    <type>FPM</type>
+    
+    <usage>Starting and ending fraction or distance from top for line fit</usage>
+    
+    <tooltip />
+    
+    <manpage>Upper and lower limits for the line fit.  The limits are entered as either an absolute distance from the maximum Y for a MT or a fraction of the distance from the maximum to the minimum Y.  If the upper limit is 0, the maximum Y is used.  If the lower limit is 0, the limit used depends on whether there is a horizontal marker line or not.  If there is a line, it is used as the limit; if not, the second point of the contour is used as the lower limit.  Enter this option once to use the same limit for all models, or once per model.  If it is not entered, the default limits are 0,0.</manpage>
+  
+  </Field>
+  
+  <Field name="Identifier">
+    
+    <short>id</short>
+    
+    <type>IM</type>
+    
+    <usage>First ID number, or ID number for each model</usage>
+    
+    <tooltip />
+    
+    <manpage>ID number for output.  Enter this option either once to specify a starting ID number, or once per model.  If it is not entered, the ID numbers start at 1.</manpage>
+  
+  </Field>
+  
+  <Field name="usage">
+    
+    <short>help</short>
+    
+    <type>B</type>
+    
+    <usage>Print help output</usage>
+    
+    <tooltip />
+    
+    <manpage />
+  
+  </Field>
+
+</autodoc>

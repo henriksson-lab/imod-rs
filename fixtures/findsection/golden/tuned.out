@@ -1,0 +1,17 @@
+mKfactor set to 4
+takeSqrt set to 1
+wgtThresh set to 0.3
+Analyzing X 2 69  Y 3 60  Z 0 29
+Extents edge 30 30 2  center 20 20 6
+0 cen s-e x 6 9  y 4 7  z 12 16
+edge boxes 4 10 3 9 0 27 0 27
+AND  boxes 4 10 3 9 28 28
+edge: 49     9.998    0.263
+
+               center   center SDs      edge     edge SDs      distinct-
+scale  binning  mean   median  MADN     mean   median  MADN      ness
+  1    1,1,1    453.2   15.61  0.99       2.4   10.00  0.26    13.809
+Mean extra distance for tomopitch lines = 2.0
+Median Z values of surfaces, numbered from 1, are: 9  23
+Z limits for autopatchfit combine, numbered from 1, are: 8  23
+Absolute limits of surfaces, numbered from 1, are: 8  23

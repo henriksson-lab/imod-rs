@@ -1,0 +1,54 @@
+
+ RO image file on unit   1 : s.mrc     Size=         10 K
+
+ Number of columns, rows, sections .....      32      24       6
+ Map mode ..............................    1   (16-bit integer)           
+ Start cols, rows, sects, grid x,y,z ...    0     0     0      32     24      6
+ Pixel spacing (Angstroms)..............   1.000      1.000      1.000    
+ Cell angles ...........................   90.000   90.000   90.000
+ Fast, medium, slow axes ...............    X    Y    Z
+ Origin on x,y,z .......................    0.000       0.000       0.000    
+ Minimum density .......................   38.000    
+ Maximum density .......................   445.00    
+ Mean density ..........................   258.47    
+ tilt angles (original,current) ........   0.0   0.0   0.0   0.0   0.0   0.0
+ Space group,# extra bytes,idtype,lens .        0        0        0        0
+
+     1 Titles :
+raw2mrc: Converted to mrc format.                       25-Sep-26  01:20:31    
+
+
+ NEW image file on unit   2 : o.mrc
+ section   input min&max       output min&max  &  mean
+       0     60.00    438.00     26.11     73.03     52.21
+       1     52.00    436.00     25.12     72.78     52.81
+       2     66.00    428.00     26.86     71.79     51.60
+       3     55.00    445.00     25.49     73.90     49.62
+       4     38.00    437.00     23.38     72.90     48.56
+       5     68.00    432.00     27.10     72.28     49.66
+Running densmatch to find scaling to mean and SD...
+
+ OLD image file on unit   2 : s.mrc     Size=         10 K
+
+ Number of columns, rows, sections .....      32      24       6
+ Map mode ..............................    1   (16-bit integer)           
+ Start cols, rows, sects, grid x,y,z ...    0     0     0      32     24      6
+ Pixel spacing (Angstroms)..............   1.000      1.000      1.000    
+ Cell angles ...........................   90.000   90.000   90.000
+ Fast, medium, slow axes ...............    X    Y    Z
+ Origin on x,y,z .......................    0.000       0.000       0.000    
+ Minimum density .......................   38.000    
+ Maximum density .......................   445.00    
+ Mean density ..........................   258.47    
+ tilt angles (original,current) ........   0.0   0.0   0.0   0.0   0.0   0.0
+ Space group,# extra bytes,idtype,lens .        0        0        0        0
+
+     1 Titles :
+raw2mrc: Converted to mrc format.                       25-Sep-26  01:20:31    
+
+ Volume 1: mean =    252.4673,  SD =     80.5708
+Scale factors to multiply by then add:  0.124114       18.6652    
+Contrast black/white levels determined from file were 0,0
+ 
+The newstack command was:
+newstack -siz 32,24 -off 0,0  -ori -mode 1 -multadd 0.124114,18.6652  "s.mrc" "o.mrc"

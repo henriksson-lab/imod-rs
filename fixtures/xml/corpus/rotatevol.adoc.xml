@@ -1,0 +1,112 @@
+<?xml version="1.0" encoding="utf-8"?>
+<autodoc>
+  <PreData>
+    <Version>1.0</Version>
+    <Pip>1</Pip>
+  </PreData>
+  <Field name="InputFile">
+    <short>input</short>
+    <type>FN</type>
+    <usage>Input image file to rotate</usage>
+    <tooltip />
+    <manpage />
+  </Field>
+  <Field name="OutputFile">
+    <short>output</short>
+    <type>FN</type>
+    <usage>Output file for rotated volume</usage>
+    <tooltip />
+    <manpage />
+  </Field>
+  <Field name="TemporaryDirectory">
+    <short>tempdir</short>
+    <type>CH</type>
+    <usage>Directory to use for temporary files (default is current directory)</usage>
+    <tooltip />
+    <manpage>Directory to use for temporary files.  The default is that the temporary files will be placed in the current directory.</manpage>
+  </Field>
+  <Field name="OutputSizeXYZ">
+    <short>size</short>
+    <type>IT</type>
+    <usage>X, Y, Z dimensions of the output file (default is size of input file)</usage>
+    <tooltip />
+    <manpage />
+  </Field>
+  <Field name="RotationCenterXYZ">
+    <short>center</short>
+    <type>FT</type>
+    <usage>X, Y, Z index coordinates of the center of rotation (Default is center of input file)</usage>
+    <tooltip />
+    <manpage>X, Y, Z index coordinates of the center of the region to be rotated (Default is center of input file).  This location will be placed in the center of the output volume.  Coordinates are numbered from zero.</manpage>
+  </Field>
+  <Field name="RotationAnglesZYX">
+    <short>angles</short>
+    <type>FT</type>
+    <usage>Angles to rotate about Z, Y, and X axes, in that order (defaults 0)</usage>
+    <tooltip>Angles to rotate about Z, Y, and X axes.  Rotations will be applied in that order; first around Z, then Y, then X.</tooltip>
+    <manpage />
+  </Field>
+  <Field name="BackRotate">
+    <short>back</short>
+    <type>B</type>
+    <usage>Apply inverse of transformation specified by the entered angles</usage>
+    <tooltip />
+    <manpage>Back-transform the volume by using the inverse of the transformation specified by the entered angles.</manpage>
+  </Field>
+  <Field name="InterpolationOrder">
+    <short>order</short>
+    <type>I</type>
+    <usage>Order of interpolation to use (1: linear, 2: quadratic; default is 2)</usage>
+    <tooltip />
+    <manpage>Order of interpolation to use.  Currently only quadratic (2) and linear (1) interpolation are available; the default is quadratic.</manpage>
+  </Field>
+  <Field name="QuerySizeNeeded">
+    <short>query</short>
+    <type>B</type>
+    <usage>Just return output size needed to contain whole volume</usage>
+    <tooltip />
+    <manpage>With this entry, the program will compute the size of the output volume needed to contain the whole original volume after rotation.  It will just print the sizes in X, Y, and Z then exit.</manpage>
+  </Field>
+  <Field name="FillValue">
+    <short>fill</short>
+    <type>F</type>
+    <usage>Value to fill regions without image data (default is file mean)</usage>
+    <tooltip />
+    <manpage />
+  </Field>
+  <Field name="ChunkSizesForHDF">
+    <short>chunk</short>
+    <type>IT</type>
+    <usage>Size of chunks in X, Y, Z for chunked HDF output, 0,0,0 for default</usage>
+    <tooltip />
+    <manpage>Size of chunks in X, Y, and Z for output to an HDF file organized in chunks.  Storing data this way will prevent the need to output cubes of transformed data to scratch files and read them back in to make the final output, when the volume is too large to fit in the allowed memory.  Enter 0,0,0 for the default size, which is for chunks the same size as the cubes that would ordinarily be written to scratch files, and for no chunks at all if data are being handled in one cube per layer.  If a specific size is entered for one or more axes, then the program will first determine the division into cubes, and then make the chunk size be the minimum of the cube size and the specified value for each axis.  When using chunks, the memory is limited to 15000 megabytes even if a larger value is entered.</manpage>
+  </Field>
+  <Field name="MemoryLimit">
+    <short>memory</short>
+    <type>I</type>
+    <usage>Memory to use for major arrays, in megabytes</usage>
+    <tooltip />
+    <manpage>Amount of memory to allocate for the major arrays needed by the program, in megabytes.  This always includes memory for input images and may include memory for a stack of output slices, depending on the orientation of the output.  The default is the minimum of system memory minus 1 GB, 60% of system memory, and 12 GB for system memory up to 30 GB, and 40% of system memory above 30 GB, but at least 768 MB.</manpage>
+  </Field>
+  <Field name="VerboseOutput">
+    <short>verbose</short>
+    <type>I</type>
+    <usage>1 for diagnostic output</usage>
+    <tooltip />
+    <manpage />
+  </Field>
+  <Field name="ParameterFile">
+    <short>param</short>
+    <type>PF</type>
+    <usage>Read parameter entries from file</usage>
+    <tooltip />
+    <manpage>Read parameter entries as keyword-value pairs from a parameter file.</manpage>
+  </Field>
+  <Field name="usage">
+    <short>help</short>
+    <type>B</type>
+    <usage>Print help output</usage>
+    <tooltip />
+    <manpage />
+  </Field>
+</autodoc>

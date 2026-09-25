@@ -1,0 +1,299 @@
+<?xml version="1.0" encoding="utf-8"?>
+<autodoc>
+  <PreData>
+    <Version>1.0</Version>
+    <Pip>1</Pip>
+  </PreData>
+  <SectionHeader name="FileOptions">
+    <usage>FILE, DIRECTORY, AND DATA SET OPTIONS</usage>
+    <manpage>FILE, DIRECTORY, AND DATA SET OPTIONS ^  These options give information about files, directories, and the data set name</manpage>
+  </SectionHeader>
+  <Field name="DirectiveFile">
+    <short>directive</short>
+    <type>FNM</type>
+    <usage>Input file with directives for automating one or more data sets</usage>
+    <tooltip />
+    <manpage>Input file with directives for automating one or more data sets. The filename must end in .adoc.  All non-option arguments will be taken as such input files.</manpage>
+  </Field>
+  <Field name="RootName">
+    <short>root</short>
+    <type>FNM</type>
+    <usage>Root name of data set (omit a or b for dual-axis set)</usage>
+    <tooltip />
+    <manpage>A data set name can be provided with this option to override the name contained in the directive file, thus allowing directive files to be reused without editing.  If this option is used, the number of directive files must be either one or the same as the number of root names.  The current location of the tilt series must be indicated with the -current option if only one directive file is entered with multiple root names.</manpage>
+  </Field>
+  <Field name="CurrentLocation">
+    <short>current</short>
+    <type>FNM</type>
+    <usage>Directory where tilt series is currently or was originally located</usage>
+    <tooltip />
+    <manpage>Directory where tilt series is currently located, or where it was originally located if it has already been delivered.  This entry overrides the data set directory contained in the directive file.  It can be used in two different ways.  If the \fB-deliver\fR or \fB-make\fR option is entered, this option specifies the directory where a tilt series will be moved from, and it must be entered either once (if all data sets are in the same place) or once for each data set. If neither of those options are entered, then this option specifies the directory where the data set will be processed and must be entered once for each data set or not at all.  If the program is being rerun with the \fB-deliver\fR option and the data set has already been delivered on a previous run, the entry here can be either the original location of the stack or its current location; the program will recognize that its current location is under the delivery directory.  However, if the \fB-make\fR option was used and the data set was already delivered, this entry must be the original location of the stack rather than its new location; otherwise the program will move it into a subdirectory of its data set directory.</manpage>
+  </Field>
+  <Field name="DeliverToDirectory">
+    <short>deliver</short>
+    <type>FNM</type>
+    <usage>Make a subdirectory of this directory for each data set</usage>
+    <tooltip />
+    <manpage>Make a subdirectory of the specified directory for each data set, named with the root name of the data set, and move the tilt series into the subdirectory.  This option can be entered either once, or once for each data set to deliver to more than one location.  Several other files with the same root name as the tilt series will be moved from the current location of the data set: an associated metadata file with extension &quot;.mdoc&quot;, a log of acquisition with extension &quot;.log&quot;, and a file of tilt angles with extension &quot;.rawtlt&quot;.  A raw boundary model for patch tracking or autoseeding will also be delivered.  The \fB-current\fR option must be entered either once, or once for each data set.</manpage>
+  </Field>
+  <Field name="MakeSubDirectory">
+    <short>make</short>
+    <type>B</type>
+    <usage>Make a subdirectory for each data set at its current location</usage>
+    <tooltip />
+    <manpage>Make a subdirectory for each data set at its current location, named with the root name of the data set, and move the tilt series into the subdirectory.  Other files will be moved there as well, just as for the \fB-deliver\fR option.  With this option, you can sort data sets into multiple top-level directories, and the program will take care of putting each one into its own subdirectory.  This option cannot be entered with the \fB-deliver\fR option.  The \fB-current\fR option must be entered either once, or once for each data set, and must specify the original location of the stack if the program is being rerun and the stack has already been delivered.</manpage>
+  </Field>
+  <Field name="CheckFile">
+    <short>check</short>
+    <type>FN</type>
+    <usage>File to check for quit and finish signals</usage>
+    <tooltip />
+    <manpage>File to check for quit and finish signals.  The default is batchruntomo.###.input in the directory where this program is started, where ### is the process ID. This file should not have the same name as the file used by Batchruntomo to control Processchunks when it runs jobs, which is &quot;processchunks.cmds&quot; in the data set directory.  If a Q is placed in this file, it will terminate any running jobs and stop all processing.  If an F is placed in the file, the program will stop after finishing the current data set.  Termination will usually be quicker if a Q is placed into &quot;processchunks.cmds&quot; as well, with no delay between that action and writing Q to this check file.  Thus, it should be done by a program or by entering a single command line with two commands on it.</manpage>
+  </Field>
+  <Field name="TranslatePathsFrom">
+    <short>frompath</short>
+    <type>CHM</type>
+    <usage>Prefix from which to translate directive, location, and delivery paths</usage>
+    <tooltip />
+    <manpage>Prefix from which to translate directive, location, and delivery paths.  When this program is being run in parallel, the path for accessing the directories on the current machine may be at a different mount point than on the machine where the runs were set up. When there is a RemoteDirectory entry, Splitbatch(1) will add this option and the next one to indicate how to translate the paths for directive files, current locations, and delivery locations to work on any machine.  However, it will retain any existing entries and avoid duplicating any.  These entries should be equivalent to a mountrule defined in cpu.adoc (see cpuadoc(1)). Batchruntomo will use these translated paths in all runs (hence they must work on all machines, even if they are accessed through links on some machines).  However, it will translate paths in messages to the log back to having the original prefixes so that Etomo can track file changes.  If multiple translations are entered (equivalent to having multiple global mountrules in cpu.adoc), they must all work on all machines, such as by all translating to the same mount point.</manpage>
+  </Field>
+  <Field name="TranslatePathsTo">
+    <short>topath</short>
+    <type>CHM</type>
+    <usage>Prefix to which directive, location, and delivery paths will be translated</usage>
+    <tooltip />
+    <manpage>Prefix to which directive, location, and delivery paths will be translated.  The number of entries must be the same for this option as for \fB-frompath\fR</manpage>
+  </Field>
+  <Field name="RemoteDirectory">
+    <short>remote</short>
+    <type>FN</type>
+    <usage>Path to starting directory on remote machines</usage>
+    <tooltip />
+    <manpage>Path on remote machines to directory from which this program is started.</manpage>
+  </Field>
+  <SectionHeader name="FileOptions">
+    <usage>BASIC PROCESSING RESOURCE OPTIONS</usage>
+    <manpage>BASIC PROCESSING RESOURCE OPTIONS ^  These options give information about the processing resources and their limits in the simplest case of not running data sets in parallel</manpage>
+  </SectionHeader>
+  <Field name="CPUMachineList">
+    <short>cpus</short>
+    <type>CH</type>
+    <usage>Machines to use in parallel processing, or number of local cores</usage>
+    <tooltip />
+    <manpage>Machines to use in parallel processing, or number of local cores. Each machine name can be followed by a &quot;:&quot; (colon), followed by the number of CPUs to use in that machine; e.g., druid:4,tubule:4.  Prior to IMOD 4.8.25, a &quot;#&quot; sign was used instead of &quot;:&quot;.  Using the &quot;#&quot; sign will now result in a warning when entering options on the command line and an error when entering options through standard input, because in the latter case it cannot be distinguished from the start of a comment.  If the environment variable MULTI_PROC_CPU_LIST is set, it overrides this entry to the program.</manpage>
+  </Field>
+  <Field name="SingleOnFirstCPU">
+    <short>single</short>
+    <type>B</type>
+    <usage>Run single command files on first machine in CPU list</usage>
+    <tooltip />
+    <manpage>Run single command files on the first machine in the CPU list, instead of on the local machine.  The matchvol and autopatchfit steps in combine are not affected by this entry; they are always run on the machine with the most CPUs.</manpage>
+  </Field>
+  <Field name="GPUMachineList">
+    <short>gpus</short>
+    <type>CH</type>
+    <usage>Machines to use for parallel processing with a GPU, or 1 for local GPU</usage>
+    <tooltip />
+    <manpage>Machines to use for parallel processing with a GPU, or 1 for local GPU.  As when running processchunks with the -G option, multiple or specific GPUs can be specified by colon-separated numbers after a machine name, e.g., druid:2,tubule:1:2.  If the environment variable MULTI_PROC_GPU_POOL is set, it overrides this entry to the program.</manpage>
+  </Field>
+  <Field name="NiceValue">
+    <short>nice</short>
+    <type>I</type>
+    <usage>Priority level or niceness for running jobs; default is 15</usage>
+    <tooltip />
+    <manpage>Priority level or niceness for running jobs.  Note that this applies to all computations, not just those run with parallel processing.  The default is 15.</manpage>
+  </Field>
+  <Field name="LimitLocalThreads">
+    <short>limit</short>
+    <type>I</type>
+    <usage>Limit on # of parallel threads to use when running on local machine</usage>
+    <tooltip />
+    <manpage>Limit on the number of threads when running a single command file on the local machine.  By default, this limit is set to the number of CPUs on the local machine indicated by the entry to \fB-cpus\fR.  If that entry consists only of remote machines, then the program has no information about this limit, and single command files containing programs parallelized with OpenMP will use all available cores.  This option allows one to enter a limit in this case, as well as to set a different limit than the number of CPUs in the CPU list.</manpage>
+  </Field>
+  <SectionHeader name="FileOptions">
+    <usage>OPTIONS FOR PROCESSING DATA SETS IN PARALLEL</usage>
+    <manpage>OPTIONS FOR PROCESSING DATA SETS IN PARALLEL ^  These options control the processing of multiple data sets in parallel, including on a cluster</manpage>
+  </SectionHeader>
+  <Field name="ParallelBatchRootName">
+    <short>parallel</short>
+    <type>CH</type>
+    <usage>Root name for running this program in parallel</usage>
+    <tooltip />
+    <manpage>Root name that will be sent to Gpuallocator(1) when this program is being run in parallel with other instances and needs to use one or more GPUs.  In this case, the entry for \fB-gpus\fR needs to have the full list of GPUs available for all of the instances.  This entry needs to be included to indicate batch is being run in parallel even when there are no GPUs.</manpage>
+  </Field>
+  <Field name="MaxGPUsInParallelBatch">
+    <short>maxGPUs</short>
+    <type>I</type>
+    <usage>Maximum number of GPUs to use when running in parallel (default 4)</usage>
+    <tooltip />
+    <manpage>Maximum number of GPUs to use when running this program in parallel.  The default is 4.  See Splitbatch(1) and Gpuallocator(1).</manpage>
+  </Field>
+  <Field name="QueueCommand">
+    <short>queue</short>
+    <type>CH</type>
+    <usage>Command for running processes on a cluster queue</usage>
+    <tooltip />
+    <manpage>Command for running processes on a cluster queue when running in parallel, typically a Queuechunk(1) command.  This entry would be the same as the &quot;command&quot; entry for a queue in a cpu.adoc (see cpuadoc(1) and &quot;IMOD/autodoc/cpu.adoc&quot; for examples). If the environment variable MULTI_PROC_QUEUE_COMMAND is set, it overrides this entry to the program. With this entry, the program runs all operations that can be parallelized in chunks on the queue.  The treatment of single command files for other operations depends on whether MULTI_PROC_QUEUE_COMMAND was set: if it is, then Batchruntomo assumes it is itself running on a queue and runs each command file normally; otherwise it runs each command file on the queue. With this entry, \fB-cpus\fR and \fB-gpus\fR entries are not allowed.</manpage>
+  </Field>
+  <Field name="MaxJobsOnQueue">
+    <short>jobs</short>
+    <type>I</type>
+    <usage>Maximum number of jobs to submit to the cluster queue</usage>
+    <tooltip />
+    <manpage>Maximum number of jobs to submit to the cluster queue, which influences how many chunks parallel operations will be divided into.  If the environment variable MULTI_PROC_MAX_QUEUE_JOBS is set, it overrides this entry to the program.</manpage>
+  </Field>
+  <Field name="CoresPerClusterJob">
+    <short>jcores</short>
+    <type>I</type>
+    <usage>Number of cores available to each job when running on a cluster</usage>
+    <tooltip />
+    <manpage>Number of cores available to each job when running on a cluster; these cores will be used directly instead of submitting command files to the cluster queue.  Thus, this entry and \fB-queue\fR cannot be entered together, nor can \fB-cpus\fR and \fB-gpus\fR be entered.  This entry also sets the thread limit for processes whose command files are not split into chunks. If the environment variable MULTI_PROC_JOB_CORES is set, it overrides this entry to the program.</manpage>
+  </Field>
+  <Field name="GPUsPerClusterJob">
+    <short>jgpus</short>
+    <type>I</type>
+    <usage>Number of GPUs available to each job when running on a cluster</usage>
+    <tooltip />
+    <manpage>Number of GPUs available to each job when running on a cluster; these GPUs will be used directly instead of submitting command files to the cluster queue.  This option cannot be entered unless \fB-jcores\fR is.  If the environment variable MULTI_PROC_JOB_GPUS is set, it overrides this entry to the program.</manpage>
+  </Field>
+  <Field name="GPUQueueCommand">
+    <short>gqueue</short>
+    <type>CH</type>
+    <usage>Command for running GPU-using processes on a secondary cluster queue</usage>
+    <tooltip />
+    <manpage>Command for running GPU-using processes on a secondary cluster queue, typically another Queuechunk(1) command.  For such a process, either a single command file or separate chunks will be submitted to this queue, depending on how many jobs are allowed for this queue (the \fB-gjobs\fR entry). Ideally, this queue should provide access to just one GPU, because there is no mechanism for the submitted jobs to make use of multiple GPUs. If the environment variable MULTI_PROC_GPU_QUEUE is set, it overrides this entry to the program.  The option can entered only if \fB-queue\fR or \fB-jcores\fR is entered.</manpage>
+  </Field>
+  <Field name="MaxGPUJobsOnQueue">
+    <short>gjobs</short>
+    <type>I</type>
+    <usage>Maximum number of jobs to submit to the secondary cluster queue</usage>
+    <tooltip />
+    <manpage>Maximum number of jobs to submit to the secondary cluster queue specified with \fB-gqueue\fR; this corresponds to the &quot;number&quot; entry in a cpu.adoc section for that queue.  The maximum jobs will also be limited by the entry for \fB-maxGPUs\fR.  If the environment variable MULTI_PROC_MAX_GPU_JOBS is set, it overrides this entry to the program.</manpage>
+  </Field>
+  <SectionHeader name="FileOptions">
+    <usage>PROCESSING FLOW CONTROL</usage>
+    <manpage>PROCESSING FLOW CONTROL ^  These options allow doing a subset of processing operations</manpage>
+  </SectionHeader>
+  <Field name="ProcessOneAxis">
+    <short>one</short>
+    <type>I</type>
+    <usage>1 to do only A axis, 2 to do only B axis of dual axis data set</usage>
+    <tooltip />
+    <manpage>Enter 1 to do setup and process A axis, or 2 to skip setup and process only B axis.  This entry applies to all dual-axis data sets being run.</manpage>
+  </Field>
+  <Field name="EndingStep">
+    <short>end</short>
+    <type>F</type>
+    <usage>Step to end processing with</usage>
+    <tooltip />
+    <manpage>Step to end processing with in each set and axis.  Steps are numbered as follows: ^   0: Setup ^   1: Preprocessing ^   2: Cross-correlation alignment ^   3: Prealigned stack ^   4: Patch tracking, autoseeding, or RAPTOR ^   5: Bead tracking ^   6: Alignment ^   7: Positioning ^   8: Aligned stack generation ^   9: CTF plotting ^   10: 3D gold detection ^   11: CTF correction ^   12: Gold erasing after transforming fiducial model or ^       projecting 3D model ^   13: 2D filtering ^   14: Reconstruction ^   14.5: Postprocessing on a/b axis reconstruction ^   15: Combine setup ^   16: Solvematch ^   17: Initial matchvol ^   18: Autopatchfit ^   19: Volcombine ^   20: Postprocessing with Trimvol ^   21: NAD (Nonlinear anistropic diffusion) ^   21.5: Reducefiltvol ^   22: Cleanup ^  These numbers can be relied on not to change again since this is now a floating point entry; fractional values will be used if necessary to insert more steps without renumbering.</manpage>
+  </Field>
+  <Field name="StartingStep">
+    <short>start</short>
+    <type>F</type>
+    <usage>Step to start processing with</usage>
+    <tooltip />
+    <manpage>Step to start processing with.  Steps are numbered as described for \fB-end\fR.  Each set will start at this step unless the \fB-first\fR option is entered, in which case only the first set will start with this step and others will start from the beginning.  In the latter case, add 100 to start with this step in the second axis of a dual-axis data set.</manpage>
+  </Field>
+  <Field name="StartForFirstSetOnly">
+    <short>first</short>
+    <type>B</type>
+    <usage>Skip to starting step only for the first set</usage>
+    <tooltip />
+    <manpage>Skip to starting step only for the first set; the following sets will be run from the beginning.</manpage>
+  </Field>
+  <Field name="UseExistingAlignment">
+    <short>use</short>
+    <type>B</type>
+    <usage>Use existing fine alignment instead of rerunning Tiltalign (default on)</usage>
+    <tooltip />
+    <manpage>This option can be used to rerun Tiltalign instead of using the existing fine alignment when the \fB-start\fR option is used with a value over 6 and the program will be running any steps that involve the aligned stack or reconstruction.  With an entry of 0 in this situation, the program reruns Tiltalign(1) iteratively in the usual fashion before proceeding (this can only be done with input on sequential lines, not from command line).  The default is not to do this, to keep the program from overwriting an alignment based on manually adjusted parameters.  Rerunning alignment in this situation was a necessity in early versions of the program but should no longer be needed; this option is being kept just for backwards compatibility.</manpage>
+  </Field>
+  <Field name="ExitOnError">
+    <short>exit</short>
+    <type>B</type>
+    <usage>Exit on error instead of going on to next axis or data set</usage>
+    <tooltip />
+    <manpage />
+  </Field>
+  <SectionHeader name="FileOptions">
+    <usage>EMAIL, VALIDATION, RENAMING, AND TEST OPTIONS</usage>
+    <manpage>EMAIL, VALIDATION, RENAMING, AND TEST OPTIONS ^  Aside from the email options, these are miscellaneous options for testing or for use with Etomo.</manpage>
+  </SectionHeader>
+  <Field name="EmailAddress">
+    <short>email</short>
+    <type>CH</type>
+    <usage>Address for sending email messages on failure or final completion</usage>
+    <tooltip />
+    <manpage>Address for sending email messages either when a set is aborted or when the run completes.</manpage>
+  </Field>
+  <Field name="SMTPserver">
+    <short>SMTP</short>
+    <type>CH</type>
+    <usage>SMTP server for sending email (default is localhost)</usage>
+    <tooltip />
+    <manpage>An SMTP server for sending email messages.  The default is &quot;localhost&quot;, but if the local host cannot send email, a server can be entered with this option.</manpage>
+  </Field>
+  <Field name="ValidationType">
+    <short>validation</short>
+    <type>I</type>
+    <usage>0/1/2 to validate directives (1/2 to do this then exit), or -1 not to</usage>
+    <tooltip />
+    <manpage>By default, the program will check all directives in the directive and template files against the master list of directives in IMOD_DIR/com/directives.csv.  Enter 1 to run the program just to check a directive file and exit, 2 to check a template file and exit, or -1 to skip this step.  When checking a directive file, the directive file is first processed to find certain required values, and an error in that step will prevent the checking of directives.  Template files referenced by the directive file will be checked as well.  With an entry of 2, the file will be checked right after reading.  A batch directive file is required to contain only directives with a Y in the &quot;Batch&quot; column of the master directives file, and a template file must contain only directives with a Y in the &quot;Tmplt&quot; column.</manpage>
+  </Field>
+  <Field name="NamingStyle">
+    <short>style</short>
+    <type>I</type>
+    <usage>0, 1 or 2 for descriptive, mrc, or hdf extensions on image file names</usage>
+    <tooltip />
+    <manpage>0 for output image files to have descriptive extensions like &quot;.preali&quot;, 1 for extension &quot;.mrc&quot;, or 2 for extension &quot;.hdf&quot;.  In the latter two cases the usual decriptive text is put before the extension and generated image files will have the corresponding type.</manpage>
+  </Field>
+  <Field name="MakeComExtensionPcm">
+    <short>pcm</short>
+    <type>I</type>
+    <usage>0 or 1 to name output command files with extension &quot;.com&quot; or &quot;.pcm&quot;</usage>
+    <tooltip />
+    <manpage>0 or 1 to name output command files with extension &quot;.com&quot; or &quot;.pcm&quot;.  The latter is not yet supported by Etomo.</manpage>
+  </Field>
+  <Field name="StackExtension">
+    <short>ext</short>
+    <type>CH</type>
+    <usage>Extension of existing raw stack, for renaming stacks(s) only</usage>
+    <tooltip />
+    <manpage>Extension of an existing raw stack, used when just renaming stacks(s), omitting the period.  With this entry, the program will perform the same renaming operations on one or two raw stacks in the current directory as when doing a reconstruction.  The \fB-root\fR option must be entered once with the root name of the file, and the \fB-style\fR option must also be entered.</manpage>
+  </Field>
+  <Field name="AxisOfExtension">
+    <short>axis</short>
+    <type>I</type>
+    <usage>0 for single-axis, 1 or 2 for a or b of dual-axis set when renaming only</usage>
+    <tooltip />
+    <manpage>When just renaming stacks, enter 0 for a single-axis dataset, or 1 or 2 for whether the extension provided with \fB-ext\fR applies to the a or b stack of a dual-axis set.  With a non-zero naming style, the stack that this extension applies to will keep its name, and the other axis of a dual axis set will have its extension changed to match if necessary.</manpage>
+  </Field>
+  <Field name="EtomoDebug">
+    <short>etomo</short>
+    <type>I</type>
+    <usage>Run Etomo with the given debug level</usage>
+    <tooltip />
+    <manpage />
+  </Field>
+  <Field name="BypassEtomo">
+    <short>bypass</short>
+    <type>B</type>
+    <usage>Run Copytomocoms directly instead of Etomo for setup step</usage>
+    <tooltip />
+    <manpage>Run Copytomocoms directly instead of Etomo for the setup step.  The program will add options to extract tilt angles if directives for using a raw tilt file are not present, and to specify axis rotation angles if those directives are not present.  Setupset directives in the batch file only are passed as options to Copytomocoms, but it may still need other directives there.  Excluded views are not removed since Etomo does that.  An &quot;edf&quot; file is made with just the items that would be added by Batchruntomo.</manpage>
+  </Field>
+  <Field name="PID">
+    <type>B</type>
+    <usage>Print process ID</usage>
+    <tooltip />
+    <manpage />
+  </Field>
+  <Field name="usage">
+    <short>help</short>
+    <type>B</type>
+    <usage>Print help output</usage>
+    <tooltip />
+    <manpage />
+  </Field>
+</autodoc>

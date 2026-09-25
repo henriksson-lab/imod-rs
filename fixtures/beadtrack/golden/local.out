@@ -1,0 +1,243 @@
+
+Input image file:: t1.mrc
+ Dimensions:    127    121     21   Pixel size:         1          1          1
+Mode:  1               Min, max, mean:          451         1043       997.14
+raw2mrc: Converted to mrc format.                       25-Sep-26  12:36:12
+
+Opened OLD file: t1.rawtlt
+
+Opened OLD file: t1.prexf
+To compensate for larger tilt increment, residual change criteria for deletion
+  were scaled by 1.952: to  0.078   3.90
+ First round of tracking will be split in two
+ Local area number, size, overlap - X: 2 65 1,  Y: 2 65 7
+Area   1, X:    -2 to    67, Y:    -2 to    67,    4 points,    4 new
+Area   2, X:    64 to   129, Y:     0 to    65,    6 points,    3 new
+Starting area     1, round  1,   4 contours
+  4   7   2   5
+view  10, pass 1,   4 points (-  0), mean, sd, max dev:    1.46    1.00    2.90
+   0 pts added on pass 2, conts:
+   0 pts added on pass 2, conts:
+   0 pts added on pass 2, conts:
+   0 pts added on pass 2, conts:
+view  12, pass 1,   4 points (-  0), mean, sd, max dev:    1.82    1.21    3.62
+view  13, pass 1,   4 points (-  0), mean, sd, max dev:    4.42    0.72    5.08
+   4 views,  231 cycles, F =     0.573707, mean residual =    0.42
+view  14, pass 1,   4 points (-  1), mean, sd, max dev:    0.91    0.70    1.36
+   5 views,  240 cycles, F =     0.707539, mean residual =    0.56
+view  15, pass 1,   4 points (-  0), mean, sd, max dev:    4.75    0.85    5.63
+   6 views,  168 cycles, F =     0.887194, mean residual =    0.75
+view  16, pass 1,   4 points (-  1), mean, sd, max dev:    2.28    1.27    3.42
+   7 views,  891 cycles, F =     0.788440, mean residual =    0.64
+Starting area     2, round  1,   6 contours
+  7   2   5   3   1   6
+view  10, pass 1,   6 points (-  0), mean, sd, max dev:    0.04    0.02    0.08
+view   9, pass 1,   6 points (-  0), mean, sd, max dev:    0.20    0.12    0.43
+view   8, pass 1,   6 points (-  0), mean, sd, max dev:    3.45    1.20    4.56
+   4 views,   87 cycles, F =     0.652660, mean residual =    0.55
+view   7, pass 1,   4 points (-  0), mean, sd, max dev:    0.83    0.53    1.31
+Metro error #1, Restarting with step factor of 0.22
+   5 views,  550 cycles, F =     0.662838, mean residual =    0.54
+   1 pts added on pass 2, conts:   7
+view   7, pass 2,   5 points (-  1), mean, sd, max dev:    0.32    0.20    0.49
+   5 views,  117 cycles, F =     0.804693, mean residual =    0.66
+view   6, pass 1,   4 points (-  1), mean, sd, max dev:    1.44    0.97    2.00
+   6 views,  207 cycles, F =     0.783236, mean residual =    0.63
+   0 pts added on pass 2, conts:
+view   6, pass 2,   4 points (-  0), mean, sd, max dev:    0.31    0.11    0.39
+   6 views,    1 cycles, F =     0.783237, mean residual =    0.63
+view  12, pass 1,   6 points (-  0), mean, sd, max dev:    0.81    0.57    1.90
+   7 views,  282 cycles, F =     2.983440, mean residual =    2.24
+view  13, pass 1,   3 points (-  0), mean, sd, max dev:   68.45   42.73  102.67
+view  14, pass 1,   3 points (-  0), mean, sd, max dev:  133.52   82.55  200.28
+view  15, pass 1,   3 points (-  0), mean, sd, max dev:  195.98  121.74  293.97
+view  16, pass 1,   3 points (-  0), mean, sd, max dev:  258.43  160.44  387.65
+Starting area     1, round  1,   4 contours
+  4   7   2   5
+   9 views,   11 cycles, F =     2.861255, mean residual =    1.99
+view   5, pass 1,   4 points (-  0), mean, sd, max dev:    9.01    1.48   10.73
+Metro error #3, Restarting with step factor of 0.22
+Metro error #3, Restarting with step factor of 0.28
+  10 views,  803 cycles, F =     2.334788, mean residual =    1.59
+view   4, pass 1,   4 points (-  1), mean, sd, max dev:    1.38    0.69    2.02
+Metro error #3, Restarting with step factor of 0.22
+Metro error #3, Restarting with step factor of 0.28
+Metro error #3, Restarting with step factor of 0.19
+Metro error #3, Restarting with step factor of 0.12
+  11 views, 1000 cycles, F =     2.222606, mean residual =    1.56
+tiltalign error going to view 4 even after varying step factor
+view   3, pass 1,   4 points (-  0), mean, sd, max dev:    3.73    1.26    5.24
+  12 views,  390 cycles, F =     2.212801, mean residual =    1.48
+   1 pts deleted for pass 2, conts:   5
+  11 views,  464 cycles, F =     2.181781, mean residual =    1.45
+   1 pts added on pass 2, conts:   5
+view   3, pass 2,   4 points (-  1), mean, sd, max dev:    2.25    1.14    3.37
+  12 views,  353 cycles, F =     2.164614, mean residual =    1.44
+view   2, pass 1,   4 points (-  0), mean, sd, max dev:    2.94    1.32    4.55
+  13 views,  729 cycles, F =     1.967608, mean residual =    1.22
+view   1, pass 1,   4 points (-  0), mean, sd, max dev:    0.72    0.66    1.40
+  14 views,  188 cycles, F =     2.205698, mean residual =    1.33
+  14 views,    1 cycles, F =     2.205698, mean residual =    1.33
+view  17, pass 1,   4 points (-  1), mean, sd, max dev:    5.31    2.90    7.93
+Metro error #3, Restarting with step factor of 0.22
+Metro error #3, Restarting with step factor of 0.28
+  15 views,  873 cycles, F =     2.238310, mean residual =    1.61
+   1 pts deleted for pass 2, conts:   2
+  14 views,  305 cycles, F =     2.200900, mean residual =    1.34
+   1 pts added on pass 2, conts:   2
+view  17, pass 2,   4 points (-  0), mean, sd, max dev:  161.40  130.91  322.74
+  15 views,  121 cycles, F =     3.673655, mean residual =    2.56
+view  18, pass 1,   4 points (-  1), mean, sd, max dev:    2.04    0.79    2.95
+  16 views,  755 cycles, F =     3.811090, mean residual =    2.72
+   3 pts deleted for pass 2, conts:   7   2   5
+  15 views,  819 cycles, F =     3.443864, mean residual =    2.32
+   2 pts added on pass 2, conts:   7   5
+view  18, pass 2,   3 points (-  0), mean, sd, max dev:   11.32    5.16   16.99
+  15 views,    6 cycles, F =     3.443865, mean residual =    2.32
+view  19, pass 1,   4 points (-  1), mean, sd, max dev:    1.29    0.68    1.83
+Metro error #3, Restarting with step factor of 0.22
+Metro error #3, Restarting with step factor of 0.28
+Metro error #3, Restarting with step factor of 0.19
+Metro error #3, Restarting with step factor of 0.12
+  16 views, 1000 cycles, F =     4.087476, mean residual =    2.91
+tiltalign error going to view 19 even after varying step factor
+   3 pts deleted for pass 2, conts:   4   2   5
+Metro error #3, Restarting with step factor of 0.22
+Metro error #3, Restarting with step factor of 0.28
+  15 views,  830 cycles, F =     3.429361, mean residual =    2.30
+   2 pts added on pass 2, conts:   4   2
+view  19, pass 2,   3 points (-  0), mean, sd, max dev:  214.96   93.15  322.43
+  15 views,    1 cycles, F =     3.429364, mean residual =    2.30
+view  20, pass 1,   4 points (-  1), mean, sd, max dev:    1.55    0.92    2.33
+  16 views,  484 cycles, F =     5.271244, mean residual =    3.54
+   3 pts deleted for pass 2, conts:   4   2   5
+Metro error #3, Restarting with step factor of 0.22
+Metro error #3, Restarting with step factor of 0.28
+Metro error #3, Restarting with step factor of 0.19
+  15 views,   92 cycles, F =     4.057864, mean residual =    2.79
+   2 pts added on pass 2, conts:   4   2
+view  20, pass 2,   3 points (-  0), mean, sd, max dev:   66.30   28.73   99.43
+  15 views,    1 cycles, F =     4.057861, mean residual =    2.79
+view  21, pass 1,   3 points (-  0), mean, sd, max dev:    4.42    1.25    5.73
+  15 views,    1 cycles, F =     4.057859, mean residual =    2.79
+   0 pts added on pass 2, conts:
+view  21, pass 2,   3 points (-  0), mean, sd, max dev:  112.63   48.89  168.94
+For area    1, round  1:  4 contours, points missing =    7
+ Aligning Sobel-centered points for comparison
+  15 views,    1 cycles, F =     4.057858, mean residual =    2.79
+ Aligning saved centroid-centered points
+  15 views,  920 cycles, F =     3.293883, mean residual =    2.13
+Starting area     2, round  1,   6 contours
+  7   2   5   3   1   6
+   7 views,   15 cycles, F =     3.216109, mean residual =    2.41
+view   5, pass 1,   6 points (-  2), mean, sd, max dev:    0.12    0.11    0.22
+Metro error #3, Restarting with step factor of 0.22
+Metro error #4, Restarting with step factor of 0.28
+   8 views,  493 cycles, F =     0.810357, mean residual =    0.53
+view   4, pass 1,   6 points (-  0), mean, sd, max dev:    5.05    1.80    7.68
+Metro error #3, Restarting with step factor of 0.22
+   9 views,  317 cycles, F =     2.270913, mean residual =    1.39
+view   3, pass 1,   6 points (-  0), mean, sd, max dev:    1.14    0.76    2.38
+Metro error #3, Restarting with step factor of 0.22
+Metro error #3, Restarting with step factor of 0.28
+Metro error #3, Restarting with step factor of 0.19
+Metro error #3, Restarting with step factor of 0.12
+  10 views, 1000 cycles, F =     2.158766, mean residual =    1.40
+tiltalign error going to view 3 even after varying step factor
+view   2, pass 1,   6 points (-  0), mean, sd, max dev:    1.19    0.86    2.71
+  11 views,  363 cycles, F =     1.083680, mean residual =    0.81
+view   1, pass 1,   6 points (-  2), mean, sd, max dev:    0.36    0.30    0.69
+  12 views,  451 cycles, F =     1.168282, mean residual =    0.89
+  12 views,    1 cycles, F =     1.168282, mean residual =    0.89
+view  17, pass 1,   6 points (-  2), mean, sd, max dev:    0.08    0.00    0.08
+Metro error #3, Restarting with step factor of 0.22
+Metro error #3, Restarting with step factor of 0.28
+Metro error #3, Restarting with step factor of 0.19
+Metro error #3, Restarting with step factor of 0.12
+  13 views, 1000 cycles, F =     4.666057, mean residual =    3.38
+tiltalign error going to view 17 even after varying step factor
+   2 pts deleted for pass 2, conts:   3   6
+Metro error #3, Restarting with step factor of 0.22
+Metro error #3, Restarting with step factor of 0.28
+Metro error #3, Restarting with step factor of 0.19
+Metro error #3, Restarting with step factor of 0.12
+  13 views, 1000 cycles, F =     1.710304, mean residual =    1.01
+tiltalign error going to view 17 even after varying step factor
+   2 pts added on pass 2, conts:   3   6
+view  17, pass 2,   6 points (-  2), mean, sd, max dev:    0.05    0.04    0.09
+  13 views,    1 cycles, F =     1.690142, mean residual =    0.99
+view  18, pass 1,   6 points (-  0), mean, sd, max dev:    0.23    0.13    0.45
+  14 views,  386 cycles, F =     1.525660, mean residual =    1.10
+view  19, pass 1,   6 points (-  0), mean, sd, max dev:    4.81    3.63    8.76
+Metro error #3, Restarting with step factor of 0.22
+  15 views,  982 cycles, F =     2.005369, mean residual =    1.38
+   3 pts deleted for pass 2, conts:   3   1   6
+  14 views,  900 cycles, F =     1.071534, mean residual =    0.78
+   3 pts added on pass 2, conts:   3   1   6
+view  19, pass 2,   6 points (-  2), mean, sd, max dev:    0.80    0.62    1.57
+  15 views,   10 cycles, F =     1.937651, mean residual =    1.36
+view  20, pass 1,   6 points (-  2), mean, sd, max dev:    0.69    0.62    1.28
+  16 views,    8 cycles, F =     3.592483, mean residual =    1.86
+   1 pts deleted for pass 2, conts:   5
+  16 views,    1 cycles, F =     3.593874, mean residual =    1.86
+   1 pts added on pass 2, conts:   5
+view  20, pass 2,   6 points (-  0), mean, sd, max dev:    8.55    6.76   20.86
+  16 views,    1 cycles, F =     3.578450, mean residual =    1.85
+view  21, pass 1,   6 points (-  0), mean, sd, max dev:    0.36    0.21    0.72
+  17 views,  449 cycles, F =     3.010031, mean residual =    1.74
+For area    2, round  1:  6 contours, points missing =   15
+ Aligning Sobel-centered points for comparison
+  17 views,    1 cycles, F =     3.010029, mean residual =    1.74
+ Aligning saved centroid-centered points
+  17 views,   10 cycles, F =     3.298889, mean residual =    2.01
+Starting area     1, round  2,   4 contours
+  4   7   2   5
+  19 views,  606 cycles, F =     4.183512, mean residual =    3.17
+view   6, pass 1,   4 points (-  0), mean, sd, max dev:    8.03    6.26   16.06
+  20 views,  653 cycles, F =     4.005669, mean residual =    3.00
+   1 pts deleted for pass 2, conts:   5
+  19 views,    2 cycles, F =     4.516298, mean residual =    3.27
+   1 pts added on pass 2, conts:   5
+view   6, pass 2,   4 points (-  0), mean, sd, max dev:    5.56    2.20    8.10
+  20 views,    5 cycles, F =     3.968767, mean residual =    2.96
+view   7, pass 1,   4 points (-  1), mean, sd, max dev:    2.54    1.21    3.81
+  21 views,    7 cycles, F =     5.078835, mean residual =    3.52
+   1 pts deleted for pass 2, conts:   5
+  20 views,    7 cycles, F =     4.694571, mean residual =    3.60
+   1 pts added on pass 2, conts:   5
+view   7, pass 2,   4 points (-  1), mean, sd, max dev:    2.61    1.28    3.92
+  21 views,    7 cycles, F =     5.308026, mean residual =    3.65
+For area    1, round  2:  4 contours, points missing =    0
+ Aligning Sobel-centered points for comparison
+  21 views,  662 cycles, F =     3.528367, mean residual =    2.71
+ Aligning saved centroid-centered points
+  21 views,  504 cycles, F =     3.846653, mean residual =    2.81
+Starting area     2, round  2,   6 contours
+  7   2   5   3   1   6
+  17 views,   13 cycles, F =     4.317411, mean residual =    2.72
+view  16, pass 1,   6 points (-  2), mean, sd, max dev:    1.46    0.80    2.36
+  18 views,  652 cycles, F =     3.091883, mean residual =    1.73
+   3 pts deleted for pass 2, conts:   3   1   6
+  17 views,  795 cycles, F =     3.471752, mean residual =    2.18
+   3 pts added on pass 2, conts:   3   1   6
+view  16, pass 2,   6 points (-  2), mean, sd, max dev:    1.13    0.73    2.01
+Metro error #4, Restarting with step factor of 0.22
+Metro error #4, Restarting with step factor of 0.28
+  18 views,  514 cycles, F =     3.216737, mean residual =    2.11
+view  15, pass 1,   6 points (-  2), mean, sd, max dev:    0.06    0.05    0.11
+  19 views,    9 cycles, F =     3.840288, mean residual =    2.40
+view  14, pass 1,   6 points (-  2), mean, sd, max dev:    0.09    0.05    0.15
+  20 views,    9 cycles, F =     4.049114, mean residual =    2.51
+view  13, pass 1,   6 points (-  2), mean, sd, max dev:    0.23    0.14    0.39
+  21 views,   83 cycles, F =     4.579477, mean residual =    3.02
+For area    2, round  2:  6 contours, points missing =    0
+ Aligning Sobel-centered points for comparison
+  21 views,    1 cycles, F =     4.579474, mean residual =    3.02
+ Aligning saved centroid-centered points
+  21 views,    5 cycles, F =     4.682784, mean residual =    3.14
+
+Obj cont:  Views on which points are missing
+ Total points missing = 0
+
+Mean residual 0.0000 nm from Sobel centering, 0.0000 nm from centroid centering
+  centroid centering better in   1 of   4 fits

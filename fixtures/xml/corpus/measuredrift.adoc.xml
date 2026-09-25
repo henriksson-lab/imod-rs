@@ -1,0 +1,70 @@
+<?xml version="1.0" encoding="utf-8"?>
+<autodoc>
+  <PreData>
+    <Version>1.0</Version>
+    <Pip>1</Pip>
+  </PreData>
+  <Field name="InputFile">
+    <short>input</short>
+    <type>FN</type>
+    <usage>Input image filename</usage>
+    <tooltip />
+    <manpage />
+  </Field>
+  <Field name="OutputFile">
+    <short>output</short>
+    <type>FN</type>
+    <usage>Output filename for wedge spectra and summed spectra</usage>
+    <tooltip />
+    <manpage>Output filename for wedge spectra and summed spectra.  The raw and then the smoothed spectrum is output for each wedge angle, then an average spectrum and its smoothed form is output.  Each line of a spectrum consists of a type number, frequency in reciprocal pixels, and the log spectrum value.  The type number is the wedge number (numbered from 0) plus 100 for a smoothed spectrum plus 1000 times the zection number (numbered from 0).  The average spectrum's number is the number of wedges.</manpage>
+  </Field>
+  <Field name="SectionsToDo">
+    <short>sections</short>
+    <type>LI</type>
+    <usage>List of sections to run (comma-separated ranges, numbered from 0)</usage>
+    <tooltip />
+    <manpage>List of sections to run.  Comma-separated ranges can be entered; sections are numbered from 0.  By default, all sections will be analyzed.</manpage>
+  </Field>
+  <Field name="NumberOfWedges">
+    <short>wedges</short>
+    <type>I</type>
+    <usage>Number of overlapping wedges to compute spectra in</usage>
+    <tooltip />
+    <manpage>Number of wedges in which to compute spectra.  Successive wedges overlap by half of their angular extent, so the wedge size is 360 degrees divided by this number.  For example, 12 wedges are each 30 degrees and are computed every 15 degrees.  10 or 12 wedges should be useful.</manpage>
+  </Field>
+  <Field name="FrequencyRingWidth">
+    <short>ring</short>
+    <type>F</type>
+    <usage>Width of frequency rings in reciprocal pixels</usage>
+    <tooltip />
+    <manpage>Width of frequency rings in reciprocal pixels.  Too large a value gives too few data points in the initial sharply falling part of the spectrum.  The proper value will depend on defocus as well as pixel size.  For example, a value of 0.005 is needed for images with pixel sizes around 1 Angstrom and 4 micron defocus.</manpage>
+  </Field>
+  <Field name="FrequencyRangeToFit">
+    <short>fit</short>
+    <type>FP</type>
+    <usage>Starting and ending frequency of fit used to match spectra</usage>
+    <tooltip />
+    <manpage>Starting and ending frequency for the range of points used to find the scaling between a wedge spectrum and the average spectrum, in reciprocal pixels.  This fit should generally start in the second or third ring and extend past the end of the sharply falling phase of the spectrum.</manpage>
+  </Field>
+  <Field name="OscillationEndFreq">
+    <short>oscil</short>
+    <type>F</type>
+    <usage>Ending frequency of range over which to measure spectrum oscillations</usage>
+    <tooltip />
+    <manpage>Ending frequency of the range over which to compute the variation in oscillations beyond the initial falling phase of the spectra.  The default is the end of the range to fit specified by \fB-fit\fR, but a higher value is generally more suitable for cryo images with CTF oscillations.  This frequency must not be less than the end of the range entered with \fB-fit\fR.</manpage>
+  </Field>
+  <Field name="ParameterFile">
+    <short>param</short>
+    <type>PF</type>
+    <usage>Read parameter entries from file</usage>
+    <tooltip />
+    <manpage>Read parameter entries as keyword-value pairs from a parameter file.</manpage>
+  </Field>
+  <Field name="usage">
+    <short>help</short>
+    <type>B</type>
+    <usage>Print help output</usage>
+    <tooltip />
+    <manpage />
+  </Field>
+</autodoc>

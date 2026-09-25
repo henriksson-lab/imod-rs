@@ -1,0 +1,64 @@
+
+Input image file:: t1.mrc
+ Dimensions:    127    121     21   Pixel size:         1          1          1
+Mode:  1               Min, max, mean:          451         1043       997.14
+raw2mrc: Converted to mrc format.                       25-Sep-26  12:36:12
+
+Opened OLD file: t1.rawtlt
+
+Opened OLD file: t1.prexf
+To compensate for larger tilt increment, residual change criteria for deletion
+  were scaled by 1.952: to  0.078   3.90
+ First round of tracking will be split in two
+Starting object   1, round  1,   7 contours
+view  10, pass 1,   7 points (-  0), mean, sd, max dev:    0.19    0.11    0.39
+view   9, pass 1,   7 points (-  0), mean, sd, max dev:    0.32    0.16    0.55
+view   8, pass 1,   7 points (-  0), mean, sd, max dev:    0.27    0.06    0.35
+   4 views,  345 cycles, F =     0.276863, mean residual =    0.22
+view   7, pass 1,   7 points (-  0), mean, sd, max dev:    0.18    0.09    0.31
+   5 views,    7 cycles, F =     0.454871, mean residual =    0.37
+view   6, pass 1,   7 points (-  0), mean, sd, max dev:    0.06    0.05    0.13
+   6 views,    7 cycles, F =     0.552408, mean residual =    0.44
+   6 views,    1 cycles, F =     0.552407, mean residual =    0.44
+view  12, pass 1,   7 points (-  0), mean, sd, max dev:    0.19    0.11    0.32
+   7 views,  798 cycles, F =     0.482884, mean residual =    0.37
+view  13, pass 1,   7 points (-  0), mean, sd, max dev:    0.25    0.17    0.44
+Metro error #3, Restarting with step factor of 0.22
+Metro error #3, Restarting with step factor of 0.28
+Metro error #3, Restarting with step factor of 0.19
+Metro error #3, Restarting with step factor of 0.12
+   8 views, 1000 cycles, F =     0.733499, mean residual =    0.45
+tiltalign error going to view 13 even after varying step factor
+view  14, pass 1,   7 points (-  2), mean, sd, max dev:    0.74    0.78    1.79
+Metro error #1, Restarting with step factor of 0.22
+Metro error #1, Restarting with step factor of 0.28
+Metro error #4, Restarting with step factor of 0.19
+Metro error #1, Restarting with step factor of 0.12
+   9 views,  510 cycles, F =     1.195062, mean residual =    0.88
+   2 pts deleted for pass 2, conts:   7   1
+   9 views,    4 cycles, F =     0.944365, mean residual =    0.73
+   2 pts added on pass 2, conts:   7   1
+view  14, pass 2,   7 points (-  2), mean, sd, max dev:    1.03    0.34    1.55
+   9 views,    8 cycles, F =     1.113615, mean residual =    0.86
+view  15, pass 1,   7 points (-  2), mean, sd, max dev:    1.10    0.43    1.43
+Metro error #3, Restarting with step factor of 0.22
+Metro error #3, Restarting with step factor of 0.28
+  10 views,  735 cycles, F =     1.472664, mean residual =    0.97
+   1 pts deleted for pass 2, conts:   1
+  10 views,    4 cycles, F =     1.370320, mean residual =    0.94
+   1 pts added on pass 2, conts:   1
+view  15, pass 2,   7 points (-  0), mean, sd, max dev:    0.65    0.32    1.22
+  10 views,    8 cycles, F =     1.664420, mean residual =    1.10
+view  16, pass 1,   7 points (-  0), mean, sd, max dev:    0.69    0.52    1.22
+  11 views,  695 cycles, F =     1.212606, mean residual =    0.87
+  11 views,    1 cycles, F =     1.212606, mean residual =    0.87
+view   5, pass 1,   7 points (-  0), mean, sd, max dev:    0.00    0.00    0.00
+  12 views,  111 cycles, F =     1.170030, mean residual =    0.85
+view   4, pass 1,   7 points (-  0), mean, sd, max dev:    0.08    0.06    0.14
+  13 views,   36 cycles, F =     1.253845, mean residual =    0.94
+ERROR: iiInitReadSectionAny - Specification of area to read (x 2147483630 to 126 y 2147483630 to 120) is incorrect
+
+ERROR: iiInitReadSectionAny - Specification of area to read (x 2147483630 to 126 y 2147483630 to 120) is incorrect
+
+X/Y dim 36 36 Limits of load 2147483630 -2147483631 2147483630 -2147483631
+ERROR: beadtrack - Reading image file

@@ -1,0 +1,54 @@
+
+Input projection file:: t.ali
+ Dimensions:     40     28     21   Pixel size:       3.1        3.1        3.1
+Mode:  1               Min, max, mean:          152          504       212.89
+raw2mrc: Converted to mrc format.                       25-Sep-26  01:52:41
+
+ Output map densities incremented by 1.00 and then multiplied by 300.00
+
+ Output map is sectioned perpendicular to the tilt axis
+
+ Data mode of output file is 1
+
+ Thickness of reconstructed slice is 14 pixels.
+
+ Output map rotated by 2.0 degrees about tilt axis with respect to tilt origin
+ Tilt axis displaced by 0.50 pixels from centre of projection
+
+ Width of reconstruction is 34 pixels
+
+ Output slice shifted up -1.0 and to right 1.5 pixels
+ Tilt angles were entered from a tilt file
+
+ NEW image file on unit   2 : o.rec
+
+ Projection angles:
+
+   -60.00   -54.00   -48.00   -42.00   -36.00   -30.00   -24.00   -18.00
+   -12.00    -6.00     0.00     6.00    12.00    18.00    24.00    30.00
+    36.00    42.00    48.00    54.00    60.00
+
+
+ Radial weighting function Gaussian starts at cutoff = 0.3000  sigma = 0.0354
+
+Allocated 0 MB for main arrays
+---------------------------
+Total floats in main arrays       55868
+  Radial weighting function        1808
+  Output slice                      476
+   28 Transposed projections      50624
+  Stretching buffer                1808
+
+Final reconstruction file: o.rec
+ Dimensions:     34     14     28   Pixel size:       3.1        3.1        3.1
+Mode:  1               Min, max, mean:       -32768        32767        16167
+raw2mrc: Converted to mrc format.                       25-Sep-26  01:52:41
+TILT: Tomographic reconstruction                        25-Sep-26  01:54:25
+
+ To scale output to bytes (10-245), use SCALE to add 198.342,  and scale by 0.2676
+
+ To scale output to -15000 to 15000, use SCALE to add -278.108,  and scale by 34.162
+
+ Reconstruction of 28 slices complete.
+
+ WARNING: Tilt - Some values were truncated when output to the file; check the output density scaling factor

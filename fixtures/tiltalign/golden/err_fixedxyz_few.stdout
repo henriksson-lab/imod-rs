@@ -1,0 +1,54 @@
+
+Opened NEW file: g1.tlt
+
+Opened NEW file: g1.xf
+
+Opened OLD file: g1.rawtlt
+
+                        Variable mappings 
+ View  Rotation     Tilt  (+ incr.)      Mag       Comp      Dmag      Skew
+   1   rot    1   tilt   1              fixed      fixed      fixed      fixed 
+   2   rot    2   t  1+  4            mag    2     fixed      fixed      fixed 
+   3   rot    3   t  1+  4            mag    3     fixed      fixed      fixed 
+   4   rot    4   tilt   4            mag    4     fixed      fixed      fixed 
+   5   rot    5   t  4+  8            mag    5     fixed      fixed      fixed 
+   6   rot    6   t  4+  8            mag    6     fixed      fixed      fixed 
+   7   rot    7   t  4+  8            mag    7     fixed      fixed      fixed 
+   8   rot    8   tilt   8            mag    8     fixed      fixed      fixed 
+   9   rot    9   t  8+ 13            mag    9     fixed      fixed      fixed 
+  10   rot   10   t  8+ 13            mag   10     fixed      fixed      fixed 
+  11   rot   11   t  8+ 13            mag   11     fixed      fixed      fixed 
+  12   rot   12   t  8+ 13            mag   12     fixed      fixed      fixed 
+  13   rot   13   tilt  13            mag   13     fixed      fixed      fixed 
+  14   rot   14   t 13+fix            mag   14     fixed      fixed      fixed 
+  15   rot   15   t 13+fix            mag   15     fixed      fixed      fixed 
+  16   rot   16   t 13+fix            mag   16     fixed      fixed      fixed 
+  17   rot   17   t 13+fix            mag   17     fixed      fixed      fixed 
+  18   rot   18     fixed             mag   18     fixed      fixed      fixed 
+  19   rot   19   t 24+fix            mag   19     fixed      fixed      fixed 
+  20   rot   20   t 24+fix            mag   20     fixed      fixed      fixed 
+  21   rot   21   t 24+fix            mag   21     fixed      fixed      fixed 
+  22   rot   22   t 24+fix            mag   22     fixed      fixed      fixed 
+  23   rot   23   t 24+fix            mag   23     fixed      fixed      fixed 
+  24   rot   24   tilt  24            mag   24     fixed      fixed      fixed 
+  25   rot   25   t 24+ 29            mag   25     fixed      fixed      fixed 
+  26   rot   26   t 24+ 29            mag   26     fixed      fixed      fixed 
+  27   rot   27   t 24+ 29            mag   27     fixed      fixed      fixed 
+  28   rot   28   t 24+ 29            mag   28     fixed      fixed      fixed 
+  29   rot   29   tilt  29            mag   29     fixed      fixed      fixed 
+  30   rot   30   t 29+ 34            mag   30     fixed      fixed      fixed 
+  31   rot   31   t 29+ 34            mag   31     fixed      fixed      fixed 
+  32   rot   32   t 29+ 34            mag   32     fixed      fixed      fixed 
+  33   rot   33   t 29+ 34            mag   33     fixed      fixed      fixed 
+  34   rot   34   tilt  34            mag   34     fixed      fixed      fixed 
+  35   rot   35   t 34+ 38            mag   35     fixed      fixed      fixed 
+  36   rot   36   t 34+ 38            mag   36     fixed      fixed      fixed 
+  37   rot   37   t 34+ 38            mag   37     fixed      fixed      fixed 
+  38   rot   38   tilt  38            mag   38     fixed      fixed      fixed 
+  39   rot   39   t 38+ 41            mag   39     fixed      fixed      fixed 
+  40   rot   40   t 38+ 41            mag   40     fixed      fixed      fixed 
+  41   rot   41   tilt  41            mag   41     fixed      fixed      fixed 
+
+
+Opened OLD file: few.xyz
+ERROR: tiltalign - Fewer coordinates in fixed XYZ input file than fiducial points

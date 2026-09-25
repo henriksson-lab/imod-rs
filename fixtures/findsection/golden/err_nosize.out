@@ -1,0 +1,68 @@
+findsection Version 5.2.17 Sep 19 2026 00:48:39
+Copyright (C) 1994-2025 by the Regents of the University of Colorado
+Usage: findsection [Options] input_file output_file
+Options can be abbreviated, current short name abbreviations are in parentheses
+Options:
+ -tomo (-to)  OR  -TomogramFile   File
+    Name of image file to analyze
+    (Successive entries accumulate)
+ -surface (-su)  OR  -SurfaceModel   File
+    File name for output of surface model for flattening
+ -pitch (-pi)  OR  -TomoPitchModel   File
+    File name for output of boundary model for use with Tomopitch
+ -separate (-se)  OR  -SeparatePitchLineFits
+    Fit each surface separately in making lines for Tomopitch output
+ -samples (-sa)  OR  -NumberOfSamples   Int
+    Number of positions to sample in a single tomogram for pitch lines
+ -extent (-ex)  OR  -SampleExtentInY   Int
+    Approximate extent in Y to use at each sample position, in unbinned pixels
+ -high (-hi)  OR  -HighSDboxCriterion   Float
+    Criterion for using high SD boxes to define extent for Tomopitch output
+ -bead (-be)  OR  -BeadModelFile   File
+    Name of model file with positions to use when finding extent with high SD
+ -diameter (-di)  OR  -BeadDiameter   Float
+    Diameter of beads to assume when considering bead extent (default 5)
+ -boost (-bo)  OR  -BoostHighSDThickness   Float
+    Fraction by which to increase thickness from high SD analysis
+ -lowest (-l)  OR  -LowestSDforEdges
+    Find Z planes with lowest SD and use to measure edge statistics
+ -scales (-sc)  OR  -NumberOfDefaultScales   Int
+    Number of default, isotropic binnings to analyze
+ -binning (-bi)  OR  -BinningInXYZ   3 ints
+    Binning in X, Y, and Z for each scale to analyze
+    (Successive entries accumulate)
+ -size (-si)  OR  -SizeOfBoxesInXYZ   3 ints
+    Size in X, Y, and Z of boxes in which to measure mean and SD
+    (Successive entries accumulate)
+ -spacing (-sp)  OR  -SpacingInXYZ   3 ints
+    Spacing in X, Y, and Z between boxes, in binned pixels
+    (Successive entries accumulate)
+ -block (-bl)  OR  -BlockSize   Int
+    Size of block in which to consolidate analyzed boxes (unbinned pixels)
+ -xminmax (-x)  OR  -XMinAndMax   2 ints
+    Minimum and maximum X coordinate to include in analysis
+ -yminmax (-y)  OR  -YMinAndMax   2 ints
+    Minimum and maximum Y coordinate to include in analysis
+ -zminmax (-z)  OR  -ZMinAndMax   2 ints
+    Minimum and maximum Z coordinate to include in analysis
+ -flipped (-f)  OR  -ThickDimensionIsY   Int
+    0 or 1 if the thickness dimension of the reconstruction is Z or Y
+ -axis (-a)  OR  -AxisRotationAngle   Float
+    Rotation angle from Y axis to tilt axis in raw tilt series
+ -tilt (-ti)  OR  -TiltSeriesSizeXY   2 ints
+    (Binned) size in X and Y of raw tilt series
+ -edge (-ed)  OR  -EdgeExtentInXYZ   3 ints
+    Approximate # of pixels in X, Y, and Z to use for edge statistics
+ -center (-ce)  OR  -CenterExtentInXYZ   3 ints
+    Approximate # of pixels in X, Y, and Z to use for center statistics
+ -control (-co)  OR  -ControlValue   2 floats
+    Parameter number and value for setting algorithm control parameters
+    (Successive entries accumulate)
+ -volume (-v)  OR  -VolumeRootname   String
+    Root name for output of mean and SD volumes at each scale
+ -point (-po)  OR  -PointRootname   String
+    Root name for output of models with raw and smoothed points
+ -debug (-de)  OR  -DebugOutput   Int
+    1 or 2 for debugging output
+ -help (-he)  OR  -usage
+    Print help output

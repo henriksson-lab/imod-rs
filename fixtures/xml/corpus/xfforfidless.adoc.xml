@@ -1,0 +1,101 @@
+<?xml version="1.0" encoding="utf-8"?>
+<autodoc>
+  <PreData />
+  <Field name="InputTransforms">
+    <short>input</short>
+    <type>FN</type>
+    <usage>Input file, usually of post-rotation transforms</usage>
+    <tooltip />
+    <manpage />
+  </Field>
+  <Field name="OutputTransforms">
+    <short>output</short>
+    <type>FN</type>
+    <usage>Output file, usually for complete transforms</usage>
+    <tooltip />
+    <manpage />
+  </Field>
+  <Field name="FullToPostRotation">
+    <short>full</short>
+    <type>B</type>
+    <tooltip />
+    <manpage />
+  </Field>
+  <Field name="RotationAngle">
+    <short>rotation</short>
+    <type>F</type>
+    <usage>Rotation angle from the Y axis to the tilt axis</usage>
+    <tooltip />
+    <manpage>Angle of rotation of the tilt axis in the images; specifically, the angle from the vertical to the tilt axis (counterclockwise positive).</manpage>
+  </Field>
+  <Field name="BeamTilt">
+    <short>beam</short>
+    <type>F</type>
+    <usage>Angle between the beam axis and perpendicular to the tilt axis</usage>
+    <tooltip />
+    <manpage />
+  </Field>
+  <Field name="FirstTiltAngle">
+    <short>first</short>
+    <type>F</type>
+    <usage>Tilt angle of first view in degrees</usage>
+    <tooltip />
+    <manpage>Tilt angle of first view, in degrees.  Use this option together with TiltIncrement.</manpage>
+  </Field>
+  <Field name="TiltIncrement">
+    <short>increment</short>
+    <type>F</type>
+    <usage>Increment between tilt angles</usage>
+    <tooltip />
+    <manpage>Increment between tilt angles, in degrees.  Use this option together with FirstTiltAngle.</manpage>
+  </Field>
+  <Field name="TiltFile">
+    <short>tiltfile</short>
+    <type>FN</type>
+    <usage>File with tilt angles</usage>
+    <tooltip />
+    <manpage>Use this option if tilt angles are in a file, one per line.</manpage>
+  </Field>
+  <Field name="TiltAngles">
+    <short>angles</short>
+    <type>FAM</type>
+    <usage>Individual tilt angles for each view</usage>
+    <tooltip />
+    <manpage>Use this option to enter the tilt angles for each view individually, in degrees.</manpage>
+  </Field>
+  <Field name="NewTiltFile">
+    <short>newtilt</short>
+    <type>FN</type>
+    <usage>Output file for new tilt angles</usage>
+    <tooltip />
+    <manpage />
+  </Field>
+  <Field name="XAxisTilt">
+    <short>xtilt</short>
+    <type>F</type>
+    <usage>X axis tilt of the unrotated reconstruction</usage>
+    <tooltip />
+    <manpage />
+  </Field>
+  <Field name="XTiltFile">
+    <short>xfile</short>
+    <type>FN</type>
+    <usage>Input file with X-axis tilts to be applied in reconstruction</usage>
+    <tooltip />
+    <manpage />
+  </Field>
+  <Field name="NewXTiltFile">
+    <short>newxtilt</short>
+    <type>FN</type>
+    <usage>Output file for new X-axis tilts</usage>
+    <tooltip />
+    <manpage />
+  </Field>
+  <Field name="usage">
+    <short>help</short>
+    <type>B</type>
+    <usage>Print help output</usage>
+    <tooltip />
+    <manpage />
+  </Field>
+</autodoc>

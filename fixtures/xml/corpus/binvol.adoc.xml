@@ -1,0 +1,112 @@
+<?xml version="1.0" encoding="utf-8"?>
+<autodoc>
+  <PreData>
+    <Version>1.0</Version>
+    <Pip>1</Pip>
+  </PreData>
+  <Field name="InputFile">
+    <short>input</short>
+    <type>FN</type>
+    <usage>Input image file to bin down in 3D</usage>
+    <tooltip />
+    <manpage />
+  </Field>
+  <Field name="OutputFile">
+    <short>output</short>
+    <type>FN</type>
+    <usage>Output file for binned volume</usage>
+    <tooltip />
+    <manpage />
+  </Field>
+  <Field name="ModeToOutput">
+    <short>mode</short>
+    <type>I</type>
+    <usage>Mode of output file; 0 for byte, 1 or 6 for integer, 2 or 12 for float</usage>
+    <tooltip />
+    <manpage>The storage mode of the output file; 0 for byte, 1 for 16-bit signed integer, 6 for 16-bit unsigned integer, 2 for 32-bit floating point, or 12 for 16-bit floating point. Floating point would be useful to preserve intensity resolution in the averaged data, particularly important when applying a large amount of binning to relatively small byte or integer values. The default is the mode of the input file, although the default mode of floating point output for MRC files is governed by the value of environment variable IMOD_WRITE_FLOATS_16BIT..  Mode 12 is allowed only if the output format is MRC.</manpage>
+  </Field>
+  <Field name="BinningFactor">
+    <short>binning</short>
+    <type>F</type>
+    <usage>Overall factor to reduce or expand by (default 2)</usage>
+    <tooltip />
+    <manpage>Overall factor to reduce by.  Antialiasing must be specified if the value is not an integer.  The default is 2.</manpage>
+  </Field>
+  <Field name="XBinningFactor">
+    <short>xbinning</short>
+    <type>F</type>
+    <usage>Factor to reduce or expand by in X (default same as overall factor)</usage>
+    <tooltip />
+    <manpage>Factor to reduce by in X.  It must be an integer unless antialiasing is specified and reductions in X and Y are equal.  The default is to use the overall reduction factor.</manpage>
+  </Field>
+  <Field name="YBinningFactor">
+    <short>ybinning</short>
+    <type>F</type>
+    <usage>Factor to reduce or expand by in Y (default same as overall factor)</usage>
+    <tooltip />
+    <manpage>Factor to reduce by in Y.  It must be an integer unless antialiasing is specified and reductions in X and Y are equal.  The default is to use the overall reduction factor.</manpage>
+  </Field>
+  <Field name="ZBinningFactor">
+    <short>zbinning</short>
+    <type>F</type>
+    <usage>Factor to reduce or expand by in Z (default same as overall factor)</usage>
+    <tooltip />
+    <manpage>Factor to reduce by in Z.  It must be an integer unless antialiasing is specified.  The default is to use the overall reduction factor.</manpage>
+  </Field>
+  <Field name="AntialiasZFilter">
+    <short>antialias</short>
+    <type>I</type>
+    <usage>Type of antialiasing filter to use in Z, and in X &amp; Y if possible (2 to 6)</usage>
+    <tooltip />
+    <manpage>The Z dimension will be reduced with antialiased filtering instead of with binning by default or if a number between 2 and 6 is entered to specify the filter type.  If the reduction is equal in X and Y (and greater than 1), then antialiased reduction will be applied in those dimensions as well, even if it is different from the Z reduction. The result will be slightly shifted from that obtained with the \fB-shrink\fR option to Newstack(1) if the X or Y dimension is not a multiple of the binning. The filters are as in Newstack(1): ^    2: Blackman - fast but not as good at antialiasing as slower ^                  filters ^    3: Triangle - fast but smooths more than Blackman ^    4: Mitchell - good at antialiasing, smooths a bit ^    5: Lanczos 2 lobes - good at antialiasing, less smoothing ^                  than Mitchell ^    6: Lanczos 3 lobes - slower, even less smoothing but more ^                  risk of ringing ^   -1: The default filter, which is Lanczos 3</manpage>
+  </Field>
+  <Field name="SpreadSlicesInZ">
+    <short>spread</short>
+    <type>B</type>
+    <usage>Output slices in Z that sample the range in Z as much as possible</usage>
+    <tooltip />
+    <manpage>Output slices in Z that sample, or are centered on, Z values as close to the starting and ending input slices as possible.  This option can be used only when doing antialiased reduction in Z.  By default, the first output slice is centered on the middle of the first set of slices corresponding to the binning in Z.  The bottom edge of this slice is the same as the bottom edge of the first input slice and the Z origin is unchanged.  The number of slices is truncated to an integer after division by the reduction factor.  With this option, if the size in Z is not evenly divisible by the reduction factor, an additional slice is produced, the centering of the first slice is moved down, and the Z origin is increased to adjust for this.</manpage>
+  </Field>
+  <Field name="FourierReduceByBinning">
+    <short>ftreduce</short>
+    <type>B</type>
+    <usage>Reduce volume by the binning factors with Fourier cropping</usage>
+    <tooltip />
+    <manpage>Use cropping of the 3-D Fourier transform to reduce the volume by the binning factors entered with other options.  This reduction method provides complete removal of frequencies above the highest frequency being retained (i.e., antialiasing) with no attenuation of the retained frequencies, but might produce some ringing near the edges.  The reduction must be equal in X and Y.  Also, the entire input and output volumes (plus some padding) must fit in the allowed memory at 4 bytes per pixel.  For integer reduction factors, the output should be in good register with that from real-space reduction. Currently, the reduction factor must be either an integer, or an integer divided by 2, 3, 4, 5, 6, 8, or 10.  Thus, 2.7, 1.375, 3.75, 1.333, and 2.167 are all acceptable factors.  Factors that are integers divided by 3 or 6 must be entered with three decimal places, as in the last two examples.  The actual factor applied in those cases will be a ratio of integers, not the entered number, and be within 0.001 of the entered factor.  If the factor is not acceptable, the program exits with an error.</manpage>
+  </Field>
+  <Field name="FourierExpandByBinning">
+    <short>ftexpand</short>
+    <type>B</type>
+    <usage>Scale volume up by the binning factors (&gt;= 1) with Fourier padding</usage>
+    <tooltip />
+    <manpage>Use padding of the 3-D Fourier transform to scale the volume up by the binning factors entered with other options.  This method will produce a smoother result than 3-D interpolation, e.g., with Matchvol(1).  The expansion must be equal in X and Y.  Also,  the entire input and output volumes (plus some padding) must fit in the allowed memory at 4 bytes per pixel. The allowed factors have the same limitations as described for \fB-ftreduce\fR.</manpage>
+  </Field>
+  <Field name="ShiftsInXYZ">
+    <short>shifts</short>
+    <type>FT</type>
+    <usage>Shifts in X, Y, and Z to apply to input before Fourier reduction/expansion</usage>
+    <tooltip />
+    <manpage>Shifts in X, Y, and Z to apply to the input before Fourier reduction or expansion, in addition to whatever internal shifts are applied to make the volume be in register with output from real-space reductions. This option has been used to determine those internal shifts.</manpage>
+  </Field>
+  <Field name="MemoryLimit">
+    <short>memory</short>
+    <type>I</type>
+    <usage>Maximum size of working array in megabytes</usage>
+    <tooltip />
+    <manpage>Maximum size of working array in megabytes.  The size of the array determines whether data are read in and reduced in chunks or as whole slices, which is more efficient. The default value is 1000 megabytes if the system physical memory cannot be determined; otherwise the size is the minimum of 15 GB, 3/4 of physical memory, and physical memory minus 1 GB, for memory up to 30 GB, and half of physical memory above 30 GB; but in any case at least 400 MB.  The maximum allowed value is 8000 if system memory is not determined, or 80% of physical memory.</manpage>
+  </Field>
+  <Field name="VerboseOutput">
+    <short>verbose</short>
+    <type>I</type>
+    <usage>Output debugging information: 1 for basic, 2 for output per slice</usage>
+    <tooltip />
+    <manpage />
+  </Field>
+  <Field name="usage">
+    <short>help</short>
+    <type>B</type>
+    <usage>Print help output</usage>
+    <tooltip />
+    <manpage />
+  </Field>
+</autodoc>

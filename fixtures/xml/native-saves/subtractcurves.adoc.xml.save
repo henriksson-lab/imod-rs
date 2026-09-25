@@ -1,0 +1,125 @@
+<?xml version="1.0" encoding="utf-8"?>
+
+<autodoc>
+  
+  <PreData>
+    
+    <Version>1.0</Version>
+    
+    <Pip>1</Pip>
+  
+  </PreData>
+  
+  <Field name="PositiveInputFile">
+    
+    <short>pos</short>
+    
+    <type>FN</type>
+    
+    <usage>Input file that is subtracted from (required)</usage>
+    
+    <tooltip />
+    
+    <manpage />
+  
+  </Field>
+  
+  <Field name="NegativeInputFile">
+    
+    <short>neg</short>
+    
+    <type>FN</type>
+    
+    <usage>Input file to subtract from first file (required)</usage>
+    
+    <tooltip />
+    
+    <manpage />
+  
+  </Field>
+  
+  <Field name="OutputFile">
+    
+    <short>output</short>
+    
+    <type>FN</type>
+    
+    <usage>File in which to write subtracted curves (required)</usage>
+    
+    <tooltip />
+    
+    <manpage />
+  
+  </Field>
+  
+  <Field name="ColumnToSubtract">
+    
+    <short>column</short>
+    
+    <type>I</type>
+    
+    <usage>Column with values to take difference of, numbered from 1</usage>
+    
+    <tooltip />
+    
+    <manpage>Column with values to take differences of, numbered from 1.  If the files have two columns, the default is the first column.  If the files have more than two columns, the default is the third column.</manpage>
+  
+  </Field>
+  
+  <Field name="AverageLines">
+    
+    <short>average</short>
+    
+    <type>I</type>
+    
+    <usage>Number of input lines to combine into one output line</usage>
+    
+    <tooltip />
+    
+    <manpage>Number of input lines to combine into one output line by averaging. All of the data columns in each successive, non-overlapping group of lines are averaged to produce a single output line with the average.</manpage>
+  
+  </Field>
+  
+  <Field name="RadialWeightColumn">
+    
+    <short>radial</short>
+    
+    <type>I</type>
+    
+    <usage>Column for radial weighting when averaging</usage>
+    
+    <tooltip />
+    
+    <manpage>Column for radial weighting when averaging lines.  By default, a simple average is used.  However, when the data represent averages over values in successive rings, such as Fourier ring correlations or rotationally averaged power spectra, it is necessary to weight each value by the ring radius to make the average the same as what would have been obtained originally with the larger ring size.  This entry would thus specify the column containing the ring radius.  Simple averaging will be applied to this column.</manpage>
+  
+  </Field>
+  
+  <Field name="NoTypeColumn">
+    
+    <short>notype</short>
+    
+    <type>B</type>
+    
+    <usage>First column does not have type value</usage>
+    
+    <tooltip />
+    
+    <manpage>Whenever there are more than two columns, the program assumes that there is a type number in the first column, and it restarts any averaging when the type number changes.  Thus, this entry is needed when averaging files that have no types and more than two columns.</manpage>
+  
+  </Field>
+  
+  <Field name="usage">
+    
+    <short>help</short>
+    
+    <type>B</type>
+    
+    <usage>Print help output</usage>
+    
+    <tooltip />
+    
+    <manpage />
+  
+  </Field>
+
+</autodoc>

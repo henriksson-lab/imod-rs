@@ -1,0 +1,33 @@
+Input volume: tx.st
+ Dimensions:     96     88     13   Pixel size:         1          1          1
+Mode:  1               Min, max, mean:          493         5487       1633.5
+raw2mrc: Converted to mrc format.                       25-Sep-26  02:29:20
+
+
+Opened OLD file: tx.tlt
+
+Binning is 1; padded, reduced size is 120 by 108
+View   8, shifts      4.97      9.32      peak    1.64074e+07
+  Best angle in rotation scan =    0.0   interpolated angle =    0.15
+View   9, shifts      2.32      9.68      peak    1.95092e+07
+  Best angle in rotation scan =    2.0   interpolated angle =    1.51
+View  10, shifts      6.96     13.40      peak    2.09114e+07
+  Best angle in rotation scan =   -0.9
+View  11, shifts      0.44     10.38      peak    2.25322e+07
+  Best angle in rotation scan =   -1.0
+View  12, shifts     -2.77     12.22      peak    2.66829e+07
+  Best angle in rotation scan =   -1.0
+View  13, shifts      1.41      2.44      peak    2.92525e+07
+  Best angle in rotation scan =   -0.9
+View   6, shifts      0.38     13.65      peak     1.5616e+07
+  Best angle in rotation scan =    2.0   interpolated angle =    1.51
+View   5, shifts      1.25     11.65      peak    1.76106e+07
+  Best angle in rotation scan =    2.0   interpolated angle =    1.52
+View   4, shifts      1.85     15.11      peak    1.86709e+07
+  Best angle in rotation scan =    2.0   interpolated angle =    1.51
+View   3, shifts      4.84      7.04      peak    1.98438e+07
+  Best angle in rotation scan =    2.0   interpolated angle =    1.51
+View   2, shifts      2.21      9.93      peak    2.64843e+07
+  Best angle in rotation scan =   -0.9
+View   1, shifts      1.87     10.02      peak    3.03899e+07
+  Best angle in rotation scan =   -0.8

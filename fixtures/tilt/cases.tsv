@@ -1,0 +1,24 @@
+# name	arguments (STDIN:<file> feeds the file with -StandardInput)
+basic	-input t.ali -output o.rec -TILTFILE t.tlt -THICKNESS 16 -MODE 1
+stdin	STDIN:std.com
+radial	-input t.ali -output o.rec -TILTFILE t.tlt -THICKNESS 14 -RADIAL 0.3,0.05 -SCALE 1,300 -MODE 1 -WIDTH 34 -SHIFT 1.5,-1 -OFFSET 2,0.5
+log_mode0	-input t.ali -output o.rec -TILTFILE t.tlt -THICKNESS 12 -LOG 10 -SCALE 1.2,90 -MODE 0 -SLICE 4,20
+xaxis	-input t.ali -output o.rec -TILTFILE t.tlt -THICKNESS 16 -XAXISTILT 5 -MODE 1 -XTILTINTERP 3
+xtiltfile	-input t.ali -output o.rec -TILTFILE t.tlt -THICKNESS 16 -XTILTFILE t.xtilt -ZFACTORFILE t.zfac -MODE 1
+local	-input t.ali -output o.rec -TILTFILE t.tlt -THICKNESS 16 -LOCALFILE t.local -MODE 1 -MASK 1
+fakesirt	-input t.ali -output o.rec -TILTFILE t.tlt -THICKNESS 16 -FakeSIRTiterations 12 -EXCLUDELIST2 1,21 -MODE 1
+exact	-input t.ali -output o.rec -TILTFILE t.tlt -THICKNESS 16 -ExactFilterSize 20 -COSINTERP 3,2 -MODE 1
+supersample	-input t.ali -output o.rec -TILTFILE t.tlt -THICKNESS 12 -SuperSampleFactor 2 -ExpandInputLines -SLICE 5,15 -MODE 1
+sirt	-input t.ali -output o.rec -TILTFILE t.tlt -THICKNESS 16 -SIRTIterations 2 -MODE 1 -StartingIteration 1
+parallel	-input t.ali -output o.rec -TILTFILE t.tlt -THICKNESS 16 -PARALLEL -MODE 1
+rotby90	-input t.ali -output o.rec -TILTFILE t.tlt -THICKNESS 16 -RotateBy90 -AdjustOrigin -MODE 1
+reproject_bp	-input t.ali -output o.rec -TILTFILE t.tlt -THICKNESS 16 -REPROJECT -45,0,30
+rec_reproj	-input t.ali -output o.prj -TILTFILE t.tlt -THICKNESS 16 -RecFileToReproject t.rec -SCALE 0,20 -MODE 1
+rec_reproj_local	-input t.ali -output o.prj -TILTFILE t.tlt -THICKNESS 16 -RecFileToReproject t.rec -SCALE 0,20 -LOCALFILE t.local -REPROJECT -20,5,40
+rec_thresh	-input t.ali -output o.prj -TILTFILE t.tlt -THICKNESS 16 -RecFileToReproject t.rec -SCALE 0,20 -ThresholdedReproj 60,1,0.5
+model	-input t.ali -output o.mod -TILTFILE t.tlt -THICKNESS 16 -ProjectModel pm.mod -AngleOutputFile o.ang -LOCALFILE t.local
+chunk_setup	-input t.ali -output o.rec -TILTFILE t.tlt -THICKNESS 16 -TOTALSLICES 0,27 -SLICE -1,-1
+err_no_angles	-input t.ali -output o.rec -THICKNESS 16
+err_mode	-input t.ali -output o.rec -TILTFILE t.tlt -MODE 7
+err_view_list	-input t.ali -output o.rec -TILTFILE t.tlt -EXCLUDELIST2 40
+usegpu_fail	-input t.ali -output o.rec -TILTFILE t.tlt -THICKNESS 16 -UseGPU 0 -ActionIfGPUFails 2,2

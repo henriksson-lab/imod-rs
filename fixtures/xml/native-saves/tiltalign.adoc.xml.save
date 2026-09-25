@@ -1,0 +1,1839 @@
+<?xml version="1.0" encoding="utf-8"?>
+
+<autodoc>
+  
+  <PreData>
+    
+    <Version>1.0</Version>
+    
+    <Pip>1</Pip>
+  
+  </PreData>
+  
+  <SectionHeader name="IOOptions">
+    
+    <usage>INPUT AND OUTPUT FILE OPTIONS</usage>
+    
+    <manpage>INPUT AND OUTPUT FILE OPTIONS ^  These options give information about input and output files.</manpage>
+  
+  </SectionHeader>
+  
+  <Field name="ModelFile">
+    
+    <short />
+    
+    <type>FN</type>
+    
+    <usage>Input fiducial model file</usage>
+    
+    <tooltip />
+    
+    <manpage />
+  
+  </Field>
+  
+  <Field name="ImageFile">
+    
+    <short />
+    
+    <type>FN</type>
+    
+    <usage>Image file that fiducial model was built on (optional)</usage>
+    
+    <tooltip />
+    
+    <manpage>Image file that fiducial model was built on, used to obtain information for scaling the model.  If this entry is omitted, the program will use values entered with ImageSizeXandY, ImageOriginXandY, and ImagePixelSizeXandY, or values from the model itself if those options are omitted.  In general, the information from the model header should be sufficient and none of these entries should be needed.</manpage>
+  
+  </Field>
+  
+  <Field name="ImageSizeXandY">
+    
+    <short />
+    
+    <type>IP</type>
+    
+    <usage>Dimensions of image file (optional)</usage>
+    
+    <tooltip />
+    
+    <manpage />
+  
+  </Field>
+  
+  <Field name="ImageOriginXandY">
+    
+    <short />
+    
+    <type>FP</type>
+    
+    <usage>X and Y origin values from image file header (optional)</usage>
+    
+    <tooltip />
+    
+    <manpage />
+  
+  </Field>
+  
+  <Field name="ImagePixelSizeXandY">
+    
+    <short />
+    
+    <type>FP</type>
+    
+    <usage>X and Y Pixel spacing from image file header, in Angstroms (optional)</usage>
+    
+    <tooltip />
+    
+    <manpage />
+  
+  </Field>
+  
+  <Field name="UnbinnedPixelSize">
+    
+    <short />
+    
+    <type>F</type>
+    
+    <usage>Pixel size of unbinned data in nanometers</usage>
+    
+    <tooltip />
+    
+    <manpage />
+  
+  </Field>
+  
+  <Field name="ImagesAreBinned">
+    
+    <short />
+    
+    <type>I</type>
+    
+    <usage>The binning of the images relative to the original data (default 1)</usage>
+    
+    <tooltip />
+    
+    <manpage>The current binning of the images relative to the original data. This factor is used to scale the values entered with AxisZShift and AxisXShift from unbinned to binned coordinates.  The default is 1.</manpage>
+  
+  </Field>
+  
+  <Field name="OutputModelFile">
+    
+    <short />
+    
+    <type>FN</type>
+    
+    <usage>Output file for 3-D model of solved fiducial positions</usage>
+    
+    <tooltip />
+    
+    <manpage>File in which to place 3-D model of the fiducials based on their solved positions</manpage>
+  
+  </Field>
+  
+  <Field name="OutputResidualFile">
+    
+    <short />
+    
+    <type>FN</type>
+    
+    <usage>Output file for list of all residuals</usage>
+    
+    <tooltip />
+    
+    <manpage>Output file for a list of the residuals at all projection points, which can be converted to a model with Patch2imod.  These residuals are in pixels.</manpage>
+  
+  </Field>
+  
+  <Field name="OutputModelAndResidual">
+    
+    <short />
+    
+    <type>FN</type>
+    
+    <usage>Root name for output of both a 3-D model and residuals</usage>
+    
+    <tooltip />
+    
+    <manpage>Root name for output of both a 3-D model and residuals; the files will have extensions .3dmod and .resid, respectively.</manpage>
+  
+  </Field>
+  
+  <Field name="OutputFilledInModel">
+    
+    <short />
+    
+    <type>FN</type>
+    
+    <usage>Output file for fiducial model with missing points filled in</usage>
+    
+    <tooltip />
+    
+    <manpage>Output file for fiducial model with missing points filled in on the views included in the solution.  This model can be used for erasing fiducial markers.  A missing point is first computed from the projection position of the solved 3-D position of the fiducial. Then, a line is fit to the residuals of points on the 6 nearest views and an estimated residual is subtracted from the projection position, in order to incorporate a consistent disparity between the fiducial positions and the solution.  Projection positions from a global solution are replaced by ones from local solutions, if any, and ones from multiple local areas are averaged.  This option is ignored for a model from patch tracking.</manpage>
+  
+  </Field>
+  
+  <Field name="OutputTopBotResiduals">
+    
+    <short />
+    
+    <type>FN</type>
+    
+    <usage>Root name for separate output of residuals for top and bottom points</usage>
+    
+    <tooltip />
+    
+    <manpage>Root name for output of residuals for fiducials on the top and bottom surfaces into separate files, with extensions .topres and .botres.</manpage>
+  
+  </Field>
+  
+  <Field name="OutputFidXYZFile">
+    
+    <short />
+    
+    <type>FN</type>
+    
+    <usage>File for text output of the solved X-Y-Z coordinates</usage>
+    
+    <tooltip />
+    
+    <manpage />
+  
+  </Field>
+  
+  <Field name="FixedXYZInputFile">
+    
+    <short />
+    
+    <type>FN</type>
+    
+    <usage>File with fixed X-Y-Z coordinates to use in local alignments</usage>
+    
+    <tooltip />
+    
+    <manpage>File with fixed X-Y-Z coordinates to use in local alignments.  The values will be used when initializing the coordinates for the search in each local area, but they will have little effect unless \fB-FixXYZCoordinates\fR is entered.  Each line of this file should start with the three coordinates; numbers after that are ignored.  There must be the same number of lines in the file as the number of fiducials.</manpage>
+  
+  </Field>
+  
+  <Field name="OutputTiltFile">
+    
+    <short />
+    
+    <type>FN</type>
+    
+    <usage>Output file for the solved tilt angles after adjustment for beam tilt</usage>
+    
+    <tooltip />
+    
+    <manpage>Output file for the solved tilt angles after adjustment for beam tilt, if any</manpage>
+  
+  </Field>
+  
+  <Field name="OutputUnadjustedTiltFile">
+    
+    <short />
+    
+    <type>FN</type>
+    
+    <usage>Output file for the solved tilt angles before adjustment for beam tilt</usage>
+    
+    <tooltip />
+    
+    <manpage>Output file for the solved tilt angles before adjustment for beam tilt, if any</manpage>
+  
+  </Field>
+  
+  <Field name="OutputXAxisTiltFile">
+    
+    <short />
+    
+    <type>FN</type>
+    
+    <usage>Output file for tilts around the X axis.</usage>
+    
+    <tooltip />
+    
+    <manpage />
+  
+  </Field>
+  
+  <Field name="OutputTransformFile">
+    
+    <short />
+    
+    <type>FN</type>
+    
+    <usage>Output file for 2-D transformations needed to align images</usage>
+    
+    <tooltip />
+    
+    <manpage />
+  
+  </Field>
+  
+  <Field name="OutputZFactorFile">
+    
+    <short />
+    
+    <type>FN</type>
+    
+    <usage>Output file for factors to adjust X and Y as function of Z in backprojection</usage>
+    
+    <tooltip />
+    
+    <manpage>Output file for factors to adjust X and Y as function of Z in backprojection.  When there is specimen stretch along an axis, a 2-D transformation of the projections cannot fully correct for this effect, and these factors are needed to adjust the backprojection position for different Z heights in the reconstructed slice.</manpage>
+  
+  </Field>
+  
+  <SectionHeader name="AngleViewOptions">
+    
+    <usage>ANGLE AND VIEW RELATED OPTIONS</usage>
+    
+    <manpage>ANGLE AND VIEW RELATED OPTIONS ^  These options provide information about tilt angles and the views to be included in the analysis.</manpage>
+  
+  </SectionHeader>
+  
+  <Field name="IncludeStartEndInc">
+    
+    <short />
+    
+    <type>IT</type>
+    
+    <usage>Starting and ending view numbers, and increment between views, to include in analysis</usage>
+    
+    <tooltip />
+    
+    <manpage>Starting and ending view numbers, and increment between views, to include in analysis.  This option, IncludeList, and ExcludeList are mutually exclusive.  The default is to include all views that have points in the model.</manpage>
+  
+  </Field>
+  
+  <Field name="IncludeList">
+    
+    <short />
+    
+    <type>LI</type>
+    
+    <usage>List of views to include in the analysis</usage>
+    
+    <tooltip />
+    
+    <manpage>List of views to include in the analysis (ranges allowed)</manpage>
+  
+  </Field>
+  
+  <Field name="ExcludeList">
+    
+    <short />
+    
+    <type>LI</type>
+    
+    <usage>List of views to exclude from the analysis</usage>
+    
+    <tooltip>List of views to exclude from alignment and reconstruction.</tooltip>
+    
+    <manpage>List of views to exclude from the analysis (ranges allowed)</manpage>
+  
+  </Field>
+  
+  <Field name="RotationAngle">
+    
+    <short />
+    
+    <type>F</type>
+    
+    <usage>Initial rotation angle from the Y axis to the tilt axis</usage>
+    
+    <tooltip />
+    
+    <manpage>Initial angle of rotation in the plane of projection.	 This is the rotation (CCW positive) from the Y-axis (the tilt axis after the views are aligned) to the suspected tilt axis in the unaligned views.</manpage>
+  
+  </Field>
+  
+  <Field name="SeparateGroup">
+    
+    <short />
+    
+    <type>LIM</type>
+    
+    <usage>List of views that should be grouped separately in automapping</usage>
+    
+    <tooltip>Lists of views to group separately from other views.  Multiple lists can be entered; separate them by spaces.</tooltip>
+    
+    <manpage>List of views that should be grouped separately in automapping. Multiple entries can be used to specify more than one set of separate views.</manpage>
+  
+  </Field>
+  
+  <Field name="NoSeparateTiltGroups">
+    
+    <short />
+    
+    <type>I</type>
+    
+    <usage>Group tilt angles across separate groups (1 for patch track, 2 for any)</usage>
+    
+    <tooltip />
+    
+    <manpage>Allow tilt angles to be grouped across separate view groups in order to prevent large jumps in the solved tilt angles.  Enter 1 to allow this grouping with a patch tracking model, or 2 to allow it for any fiducial model.</manpage>
+  
+  </Field>
+  
+  <Field name="FirstTiltAngle">
+    
+    <short>first</short>
+    
+    <type>F</type>
+    
+    <usage>Tilt angle of first view in degrees</usage>
+    
+    <tooltip />
+    
+    <manpage>Tilt angle of first view, in degrees.  Use this option together with TiltIncrement.</manpage>
+  
+  </Field>
+  
+  <Field name="TiltIncrement">
+    
+    <short>increment</short>
+    
+    <type>F</type>
+    
+    <usage>Increment between tilt angles</usage>
+    
+    <tooltip />
+    
+    <manpage>Increment between tilt angles, in degrees.  Use this option together with FirstTiltAngle.</manpage>
+  
+  </Field>
+  
+  <Field name="TiltFile">
+    
+    <short>tiltfile</short>
+    
+    <type>FN</type>
+    
+    <usage>File with tilt angles</usage>
+    
+    <tooltip />
+    
+    <manpage>Use this option if tilt angles are in a file, one per line.</manpage>
+  
+  </Field>
+  
+  <Field name="TiltAngles">
+    
+    <short>angles</short>
+    
+    <type>FAM</type>
+    
+    <usage>Individual tilt angles for each view</usage>
+    
+    <tooltip />
+    
+    <manpage>Use this option to enter the tilt angles for each view individually, in degrees.</manpage>
+  
+  </Field>
+  
+  <Field name="AngleOffset">
+    
+    <short />
+    
+    <type>F</type>
+    
+    <usage>Amount to add to all entered tilt angles</usage>
+    
+    <tooltip>Total amount to add to all tilt angles.</tooltip>
+    
+    <manpage>Amount to add to all entered tilt angles.</manpage>
+  
+  </Field>
+  
+  <SectionHeader name="Options">
+    
+    <usage>GLOBAL VARIABLE SELECTION OPTIONS</usage>
+    
+    <manpage>GLOBAL VARIABLE SELECTION OPTIONS ^  These options specify the variables to be included in the global fit to all of the points and information about them, such as group sizes.</manpage>
+  
+  </SectionHeader>
+  
+  <Field name="ProjectionStretch">
+    
+    <short />
+    
+    <type>B</type>
+    
+    <usage>Solve for axis skew applying to projection of all images.</usage>
+    
+    <tooltip />
+    
+    <manpage>Solve for a parameter representing a skew between the microscope X and Y axes that occurs during projection of all images.  This is equivalent to a stretch along a 45-degree line between the axes.  A component of stretch parallel to the axes cannot be distinguished from a stretch of the 3D fiducial coordinates parallel to the axes, so as of IMOD 3.10.7 only this skew component is solved for.  The initial rotation angle of the tilt axis is used to determine the approximate axis along which this stretch would occur after the final image rotation.</manpage>
+  
+  </Field>
+  
+  <Field name="BeamTiltOption">
+    
+    <short />
+    
+    <type>I</type>
+    
+    <usage>Type of beam tilt solution: 0 for none, 1 to include in fit, 2 to search</usage>
+    
+    <tooltip />
+    
+    <manpage>Type of solution for non-perpendicularity between tilt axis and beam axis, referred to as beam tilt: ^  0 for beam tilt fixed at the initial value, ^  1 to include beam tilt as a variable in the minimization ^    procedure, ^  2 to perform the minimization at a series of fixed beam tilt ^    values and search for the value that gives the smallest ^    error. ^Because some variables can covary with the beam tilt to give nearly equivalent solutions, the second option for finding the beam tilt gives more reliable results.  Some combinations of variable simply cannot be solved for, in particular the stretch variables and rotation together with beam tilt; either omit the stretch variables or solve for a single rotation angle.  Note that only the component of the beam tilt around the X axis is solved for; the component around the Y axis is indistinguishable from a change in tilt angle. When the beam tilt is non-zero, either as a result of a search or because a fixed value was entered, its effect is expressed as a varying tilt around the X axis and a modification of the tilt angles and in-plane image rotations. Thus, a file of X-tilt angles should be output when beam tilt is included in the solution.</manpage>
+  
+  </Field>
+  
+  <Field name="FixedOrInitialBeamTilt">
+    
+    <short />
+    
+    <type>F</type>
+    
+    <usage>Initial value of beam tilt when solving for it, or fixed value when not</usage>
+    
+    <tooltip>Fixed value for beam tilt if it is not zero</tooltip>
+    
+    <manpage>The entry provides either an initial value for the beam tilt, when it is being solved for, or a fixed value when it is not.</manpage>
+  
+  </Field>
+  
+  <Field name="RotOption">
+    
+    <short />
+    
+    <type>I</type>
+    
+    <usage>Type of rotation solution: 0 for none, 1 for independent, 2 for mapped, 3 or 4 for automapped, -1 for single variable</usage>
+    
+    <tooltip />
+    
+    <manpage>Type of rotation solution: ^  0 for all rotations fixed at the initial angle, ^  1 for each view having an independent rotation, ^  2 to enter general mapping of rotation variables, ^  3 or 4 for automapping of rotation variables (3 for linearly ^    changing values or 4 for values all the same within a ^    group), or ^ -1 to solve for a single rotation variable.</manpage>
+    
+    <enum.0.tooltip>Do not solve for rotations.</enum.0.tooltip>
+    
+    <enum.1.tooltip>Solve for each rotation independently.</enum.1.tooltip>
+    
+    <enum.3.tooltip>Group views to solve for fewer rotation variables.</enum.3.tooltip>
+    
+    <enum.-1.tooltip>Solve for a single rotation variable.</enum.-1.tooltip>
+  
+  </Field>
+  
+  <Field name="RotDefaultGrouping">
+    
+    <short />
+    
+    <type>I</type>
+    
+    <usage>Default group size when automapping rotation variables</usage>
+    
+    <tooltip />
+    
+    <manpage />
+  
+  </Field>
+  
+  <Field name="RotNondefaultGroup">
+    
+    <short />
+    
+    <type>ITM</type>
+    
+    <usage>Starting and ending views and group size for nondefault grouping of rotation variables.</usage>
+    
+    <tooltip />
+    
+    <manpage>Starting and ending view numbers and group size for a set of views whose rotation variables should be grouped differently from the default. Multiple entries can be used to specify more than one set of views with nondefault grouping.</manpage>
+  
+  </Field>
+  
+  <Field name="RotationFixedView">
+    
+    <short />
+    
+    <type>I</type>
+    
+    <usage>View to fix at the initial rotation angle</usage>
+    
+    <tooltip />
+    
+    <manpage>Number of view whose rotation should be fixed at the initial rotation angle.  This entry is relevant with any of the positive RotOption entries.</manpage>
+  
+  </Field>
+  
+  <Field name="TiltOption">
+    
+    <short />
+    
+    <type>I</type>
+    
+    <usage>Type of tilt angle solution: 0 for all fixed, 2 for all independent, 5 for automapping</usage>
+    
+    <tooltip />
+    
+    <manpage>Type of tilt angle solution: ^  0 to fix all tilt angles at their initial values, ^  1 to solve for all tilt angles except for a specified view, ^  2 to solve for all tilt angles except for the view at minimum ^    tilt, ^  3 to solve for all tilt angles except for a specified view and ^    the view at minimum tilt, ^  4 to specify a mapping of tilt angle variables, ^  5 or 6 to automap groups of tilt angles (5 for linearly ^    changing values or 6 for values all the same within a ^    group), or ^  7 or 8 to automap and fix two tilt angles (7 for linearly ^    changing values or 8 for values all the same within a group)</manpage>
+    
+    <enum.0.tooltip>Do not solve for tilt angles.</enum.0.tooltip>
+    
+    <enum.2.tooltip>Solve for each tilt angle independently.</enum.2.tooltip>
+    
+    <enum.5.tooltip>Group views to solve for fewer tilt angle variables.</enum.5.tooltip>
+  
+  </Field>
+  
+  <Field name="TiltFixedView">
+    
+    <short />
+    
+    <type>I</type>
+    
+    <usage>View at which to fix the tilt angle (TiltOption 1, 3, 7, or 8)</usage>
+    
+    <tooltip />
+    
+    <manpage>Number of view at which to fix the tilt angle (required with TiltOption 1, 3, 7, or 8)</manpage>
+  
+  </Field>
+  
+  <Field name="TiltSecondFixedView">
+    
+    <short />
+    
+    <type>I</type>
+    
+    <usage>Second view at which to fix the tilt angle (TiltOption 7 or 8)</usage>
+    
+    <tooltip />
+    
+    <manpage>Number of second view at which to fix the tilt angle (required with TiltOption 7 or 8)</manpage>
+  
+  </Field>
+  
+  <Field name="TiltDefaultGrouping">
+    
+    <short />
+    
+    <type>I</type>
+    
+    <usage>Average default group size when automapping tilt variables</usage>
+    
+    <tooltip>Basic grouping size for tilt angles (grouping will be less at high tilt and more at low tilt).</tooltip>
+    
+    <manpage>Average default group size when automapping tilt variables</manpage>
+  
+  </Field>
+  
+  <Field name="TiltNondefaultGroup">
+    
+    <short />
+    
+    <type>ITM</type>
+    
+    <usage>Starting and ending views and group size for nondefault grouping of tilt variables.</usage>
+    
+    <tooltip>Sets of views with non-default grouping.  For each set, enter starting and ending view number and group size, separated by commas; separate multiple sets with spaces.</tooltip>
+    
+    <manpage>Starting and ending view numbers and group size for a set of views whose tilt variables should be grouped differently from the default.</manpage>
+  
+  </Field>
+  
+  <Field name="MagReferenceView">
+    
+    <short />
+    
+    <type>I</type>
+    
+    <usage>Reference view whose magnification will be fixed at 1.0</usage>
+    
+    <tooltip>View at which magnification will be fixed at 1.0.</tooltip>
+    
+    <manpage>Number of reference view whose magnification will be fixed at 1.0. The default is the view at minimum tilt.</manpage>
+  
+  </Field>
+  
+  <Field name="MagOption">
+    
+    <short />
+    
+    <type>I</type>
+    
+    <usage>Type of magnification solution: 0 fixed, 1 independent, 2 mapped, 3 or 4 automapped.</usage>
+    
+    <tooltip />
+    
+    <manpage>Type of magnification solution: ^  0 to fix all magnifications at 1.0, ^  1 to vary all magnifications independently, ^  2 to specify a mapping of magnification variables, or ^  3 or 4 for automapping of variables (3 for linearly changing ^    values or 4 for values all the same within a group).</manpage>
+    
+    <enum.0.tooltip>Do not solve for magnifications.</enum.0.tooltip>
+    
+    <enum.1.tooltip>Solve for magnification at each view independently.</enum.1.tooltip>
+    
+    <enum.3.tooltip>Group views to solve for fewer magnification variables.</enum.3.tooltip>
+  
+  </Field>
+  
+  <Field name="MagDefaultGrouping">
+    
+    <short />
+    
+    <type>I</type>
+    
+    <usage>Default group size when automapping magnification variables</usage>
+    
+    <tooltip>Grouping size for magnifications.</tooltip>
+    
+    <manpage>Default group size when automapping magnification variables</manpage>
+  
+  </Field>
+  
+  <Field name="MagNondefaultGroup">
+    
+    <short />
+    
+    <type>ITM</type>
+    
+    <usage>Starting and ending views and group size for nondefault grouping of magnification variables.</usage>
+    
+    <tooltip>Sets of views with non-default grouping.  For each set, enter starting and ending view number and group size, separated by commas; separate multiple sets with spaces.</tooltip>
+    
+    <manpage>Starting and ending view numbers and group size for a set of views whose magnification variables should be grouped differently from the default.</manpage>
+  
+  </Field>
+  
+  <Field name="CompReferenceView">
+    
+    <short />
+    
+    <type>I</type>
+    
+    <usage>View to fix at compression 1.0</usage>
+    
+    <tooltip />
+    
+    <manpage>Number of the view to fix at compression 1.0 (something other than a view whose tilt angle is fixed at zero.)  Required if CompOption not 0.</manpage>
+  
+  </Field>
+  
+  <Field name="CompOption">
+    
+    <short />
+    
+    <type>I</type>
+    
+    <usage>Type of compression solution: 0 fixed, 1 independent, 2 mapped, 3 or 4 automapped</usage>
+    
+    <tooltip />
+    
+    <manpage>Type of compression solution: ^  0 to fix all compressions at 1.0, ^  1 to vary all compressions independently, ^  2 to specify a mapping of compression variables, or ^  3 or 4 for automapping of variables (3 for linearly changing ^    values or 4 for values all the same within a group).</manpage>
+  
+  </Field>
+  
+  <Field name="CompDefaultGrouping">
+    
+    <short />
+    
+    <type>I</type>
+    
+    <usage>Default group size when automapping compression variables</usage>
+    
+    <tooltip />
+    
+    <manpage />
+  
+  </Field>
+  
+  <Field name="CompNondefaultGroup">
+    
+    <short />
+    
+    <type>ITM</type>
+    
+    <usage>Starting and ending views and group size for nondefault grouping of compression variables.</usage>
+    
+    <tooltip />
+    
+    <manpage>Starting and ending view numbers and group size for a set of views whose compression variables should be grouped differently from the default.</manpage>
+  
+  </Field>
+  
+  <Field name="XStretchOption">
+    
+    <short />
+    
+    <type>I</type>
+    
+    <usage>Type of X-stretch solution: 0 fixed, 1 independent, 2 mapped, 3 or 4 automapped</usage>
+    
+    <tooltip />
+    
+    <manpage>Type of X-stretch solution: ^  0 to fix all X stretches at 0, ^  1 to vary all X stretches independently, ^  2 to specify a mapping of X-stretch variables, or ^  3 or 4 for automapping of variables (3 for values all the ^    same within a group or 4 for linearly changing values).</manpage>
+  
+  </Field>
+  
+  <Field name="XStretchDefaultGrouping">
+    
+    <short />
+    
+    <type>I</type>
+    
+    <usage>Default average group size when automapping X stretch variables</usage>
+    
+    <tooltip>Basic grouping size for X stretch (grouping will be less at high tilt and more at low tilt).</tooltip>
+    
+    <manpage>Default average group size when automapping X stretch variables.</manpage>
+  
+  </Field>
+  
+  <Field name="XStretchNondefaultGroup">
+    
+    <short />
+    
+    <type>ITM</type>
+    
+    <usage>Starting and ending views and group size for nondefault grouping of X stretch variables.</usage>
+    
+    <tooltip>Sets of views with non-default grouping for X stretch.  For each set, enter starting and ending view number and group size, separated by commas; separate multiple sets with spaces.</tooltip>
+    
+    <manpage>Starting and ending view numbers and group size for a set of views whose X stretch variables should be grouped differently from the default.</manpage>
+  
+  </Field>
+  
+  <Field name="SkewOption">
+    
+    <short />
+    
+    <type>I</type>
+    
+    <usage>Type of skew solution: 0 fixed, 1 independent, 2 mapped, 3 or 4 automapped</usage>
+    
+    <tooltip>Solve for skew in the plane of section.</tooltip>
+    
+    <manpage>Type of skew solution: ^  0 to fix all skew angles at 0.0, ^  1 to vary all skew angles independently, ^  2 to specify a mapping of skew variables, or ^  3 or 4 for automapping of variables (3 for linearly changing ^    values or 4 for values all the same within a group).</manpage>
+  
+  </Field>
+  
+  <Field name="SkewDefaultGrouping">
+    
+    <short />
+    
+    <type>I</type>
+    
+    <usage>Default group size when automapping skew variables</usage>
+    
+    <tooltip>Grouping size for skew angles.</tooltip>
+    
+    <manpage>Default group size when automapping skew variables</manpage>
+  
+  </Field>
+  
+  <Field name="SkewNondefaultGroup">
+    
+    <short />
+    
+    <type>ITM</type>
+    
+    <usage>Starting and ending views and group size for nondefault grouping of skew variables.</usage>
+    
+    <tooltip>Sets of views with non-default grouping for skew angles.  For each set, enter starting and ending view number and group size, separated by commas; separate multiple sets with spaces.</tooltip>
+    
+    <manpage>Starting and ending view numbers and group size for a set of views whose skew variables should be grouped differently from the default.</manpage>
+  
+  </Field>
+  
+  <Field name="XTiltOption">
+    
+    <short />
+    
+    <type>I</type>
+    
+    <usage>Type of X-axis tilt solution: 0 fixed, 1 independent, 2 mapped, 3 or 4 automapped</usage>
+    
+    <tooltip />
+    
+    <manpage>Type of X-axis tilt solution: ^  0 to fix all X tilts at 0., ^  1 to vary all X-tilts independently, ^  2 to specify a mapping of X-tilt variables, or ^  3 or 4 for automapping of variables (3 for linearly changing ^    values or 4 for values all the same within a group).</manpage>
+  
+  </Field>
+  
+  <Field name="XTiltDefaultGrouping">
+    
+    <short />
+    
+    <type>I</type>
+    
+    <usage>Default group size when automapping X-axis tilt variables</usage>
+    
+    <tooltip />
+    
+    <manpage />
+  
+  </Field>
+  
+  <Field name="XTiltNondefaultGroup">
+    
+    <short />
+    
+    <type>ITM</type>
+    
+    <usage>Starting and ending views and group size for nondefault grouping of X-axis tilt variables.</usage>
+    
+    <tooltip />
+    
+    <manpage>Starting and ending view numbers and group size for a set of views whose X-axis tilt variables should be grouped differently from the default.</manpage>
+  
+  </Field>
+  
+  <SectionHeader name="Options">
+    
+    <usage>MINIMIZATION AND OUTPUT OPTIONS</usage>
+    
+    <manpage>MINIMIZATION AND OUTPUT OPTIONS ^  These options control the minimization procedure and the outputs of the program.</manpage>
+  
+  </SectionHeader>
+  
+  <Field name="ResidualReportCriterion">
+    
+    <short />
+    
+    <type>F</type>
+    
+    <usage>Criterion number of SDs above mean residual error to report (negative for SDs relative to neighbors)</usage>
+    
+    <tooltip>Threshold number of SDs above mean for reporting large residuals.</tooltip>
+    
+    <manpage>Criterion number of standard deviations above mean residual error that should be reported. This can be based on either the overall mean and S.d. of the residual errors, or on a mean and S.d. computed from points in nearby views.  Enter a positive value for a report based on overall mean, or a negative value for a report based on the mean residual in the same and nearby views.</manpage>
+    
+    <enum.all.tooltip>Apply criterion relative to mean/SD of residuals on all views.</enum.all.tooltip>
+    
+    <enum.neighboring.tooltip>Apply criterion relative to mean/SD of residuals on neighboring views.</enum.neighboring.tooltip>
+  
+  </Field>
+  
+  <Field name="SurfacesToAnalyze">
+    
+    <short />
+    
+    <type>I</type>
+    
+    <usage>1 or 2 to determine surface angles by fitting points to 1 or 2 surfaces, or 0 for no fit</usage>
+    
+    <tooltip />
+    
+    <manpage>0 to omit surface analysis, or 1 or 2 to fit points to one or two surfaces and derive a surface angles and recommended tilt angle offset.  This entry has no effect on the global alignment solution.</manpage>
+    
+    <enum.1.tooltip>Fit one plane to all points to find angles of section.</enum.1.tooltip>
+    
+    <enum.2.tooltip>Divide points into two groups and fit two planes to find angles of section.</enum.2.tooltip>
+  
+  </Field>
+  
+  <Field name="MetroFactor">
+    
+    <short />
+    
+    <type>F</type>
+    
+    <usage>Step size for minimization procedure</usage>
+    
+    <tooltip>A step size factor; try changing by +/-10% if solutions fail.</tooltip>
+    
+    <manpage>This entry determines how large a step the variable metric minimization procedure (METRO) tries to take.  The default is 0.25, which typically works even for large data sets. When METRO fails for various reasons, the program will retry with several other nearby values of the factor.</manpage>
+  
+  </Field>
+  
+  <Field name="MaximumCycles">
+    
+    <short />
+    
+    <type>I</type>
+    
+    <usage>Limit on number of cycles for minimization procedure (default 1000)</usage>
+    
+    <tooltip>Limit on number of iterations to find a solution.</tooltip>
+    
+    <manpage>Limit on number of cycles for minimization procedure (default 1000).</manpage>
+  
+  </Field>
+  
+  <Field name="AxisZShift">
+    
+    <short />
+    
+    <type>F</type>
+    
+    <usage>Amount to shift tilt axis in Z, or 1000 to put at midpoint of range</usage>
+    
+    <tooltip>Distance to shift tilt axis in Z for reconstruction.</tooltip>
+    
+    <manpage>Amount to shift the tilt axis in Z, relative to the centroid in Z of the fiducial points or relative to the original Z axis location if ShiftZFromOriginal is entered. It is also possible to enter 1000 to shift the tilt axis to the midpoint of the range of Z values.  Enter this value in unbinned pixels.</manpage>
+  
+  </Field>
+  
+  <Field name="ShiftZFromOriginal">
+    
+    <short />
+    
+    <type>B</type>
+    
+    <usage>Apply Z shift relative to original tilt axis location</usage>
+    
+    <tooltip />
+    
+    <manpage>Apply Z shift relative to original tilt axis location.  If images were initially aligned by cross-correlation, this option will keep specimen material near the center of the reconstruction even if fiducials are on one surface.</manpage>
+  
+  </Field>
+  
+  <Field name="AxisXShift">
+    
+    <short />
+    
+    <type>F</type>
+    
+    <usage>Amount to shift the tilt axis in X</usage>
+    
+    <tooltip />
+    
+    <manpage>Amount to shift the tilt axis in X away from the center of the image.  Enter this value in unbinned pixels.</manpage>
+  
+  </Field>
+  
+  <SectionHeader name="LocalOptions">
+    
+    <usage>ROBUST FITTING, WEIGHTING, AND CROSS-VALIDATION OPTIONS</usage>
+    
+    <manpage>ROBUST FITTING, WEIGHTING, AND CROSS-VALIDATION  OPTIONS ^  These options control robust fitting to downweight outlying points and cross-validation by leaving out sets of points.</manpage>
+  
+  </SectionHeader>
+  
+  <Field name="RobustFitting">
+    
+    <type>B</type>
+    
+    <usage>Do robust fitting by giving less or no weight to outliers</usage>
+    
+    <tooltip />
+    
+    <manpage>Use a robust fitting method that gives less weight to points with residuals higher than the median residual, and no weight to the most extreme points.</manpage>
+  
+  </Field>
+  
+  <Field name="WeightWholeTracks">
+    
+    <type>B</type>
+    
+    <usage>Do robust fitting by weighting entire contours in patch track models</usage>
+    
+    <tooltip>Do robust fitting by finding weights for entire contours, giving the same weight to all points in a contour (for patch tracking models only).</tooltip>
+    
+    <manpage>When doing robust fitting with a model from patch tracking, assign the same weight to all the points in each contour.  Contours with mean residuals higher than the median will thus be given less weight, and ones with the most extreme residuals will be given weights of 0.02.</manpage>
+  
+  </Field>
+  
+  <Field name="KFactorScaling">
+    
+    <type>F</type>
+    
+    <usage>Amount to scale the K factor that controls how many points are down-weighted</usage>
+    
+    <tooltip>Amount to scale the K factor that controls how many points are down-weighted; the default is 1 and smaller values down-weight more points.</tooltip>
+    
+    <manpage>Amount to scale the K factor that controls how many points are down-weighted in the robust fitting.  The default scaling of 1 gives a K factor of 4.685, the factor commonly used for the Tukey bisquare weighting.  A smaller factor will down-weight and eliminate more points.</manpage>
+  
+  </Field>
+  
+  <Field name="WarnOnRobustFailure">
+    
+    <type>B</type>
+    
+    <usage>Do not give error if robust fitting fails and alignment is just global</usage>
+    
+    <tooltip />
+    
+    <manpage>Give just a warning instead of exiting with an error if the robust fitting fails and only a global alignment is being done.  If local alignments are being done, a failure in either the global alignment or a local area will always result in just a warning.  In all cases, the non-robust alignment is restored after a failure.</manpage>
+  
+  </Field>
+  
+  <Field name="MinWeightGroupSizes">
+    
+    <type>IP</type>
+    
+    <usage>Minimum sizes of groups of points for computing weights, global and local</usage>
+    
+    <tooltip />
+    
+    <manpage>Minimum sizes of the groups of points used for computing weights, in global and local alignment runs.  In order to apply the robust method to points that are relatively similar to each other, deviations from a median residual are computed within subsets of points that are located on adjacent views; and if there are enough points, the points in a global alignment run are also sorted into rings based on distance from the center.  These entries set the minimum sizes of these groups.  If the total number of points available for fitting falls below the minimum, the robust fitting is not done and a warning or error is issued.  The defaults are 100 and 65 when adjusting weights for individual points.  When assigning weights to whole contours with data from patch tracking, a similar approach is used to divide the contours into groups that are analyzed together.  Here, the defaults are 30 and 20.</manpage>
+  
+  </Field>
+  
+  <Field name="ObjectsWithExtraWeight">
+    
+    <short />
+    
+    <type>LI</type>
+    
+    <usage>List of model objects to be given special weighting</usage>
+    
+    <tooltip />
+    
+    <manpage>List of numbers (comma-separated ranges) for model objects that are to be given special weighting, such as a value greater than 1 for extra weighting in the fits.  These weights are fixed through the fitting process, and if robust fitting is being done, the actual weight during the minimization is the product of the error-based weight and the extra weight.  Extra weighting has not been tested thoroughly.</manpage>
+  
+  </Field>
+  
+  <Field name="ExtraWeights">
+    
+    <short />
+    
+    <type>FA</type>
+    
+    <usage>Special weighting factors for objects (just one, or one per object)</usage>
+    
+    <tooltip />
+    
+    <manpage>Special weighting factors for the objects listed in \fBObjectsWithExtraWeight\fR, either one value for all objects or one per object.</manpage>
+  
+  </Field>
+  
+  <Field name="CrossValidate">
+    
+    <type>I</type>
+    
+    <usage>1 to leave out sets of points in multiple runs, 2 for local runs only</usage>
+    
+    <tooltip>Do cross-validation by leaving out sets of points in multiple runs, predicting positions of points left out, and computing a &quot;leave-out&quot; error. This can be time-consuming.</tooltip>
+    
+    <manpage>Do cross-validation by leaving out sets of points in multiple runs. In each run, the positions of points left out are predicted from the solution and a &quot;leave-out&quot; error is computed.  This error is averaged over enough runs with different points left to give an estimate of leave-out error that is accurate enough for comparing the merit of different variable selections. Enter 1 to do this procedure for both global and local alignments, or 2 to do it only for local aligments.  The details of cross-validation are governed by the following options, which all have reasonable defaults.</manpage>
+  
+  </Field>
+  
+  <Field name="FractionToLeaveOut">
+    
+    <type>FP</type>
+    
+    <usage>Fraction of points to leave out of each cross-validation run</usage>
+    
+    <tooltip />
+    
+    <manpage>Fraction of points to leave out of each cross-validation run.  An entered value will be limited to be between 0.01 and 0.2.  The default is 0.1 for 10 or more fiducials, or 0.1 times the number of fiducials for fewer than 10 fiducials, down to 0.04.</manpage>
+  
+  </Field>
+  
+  <Field name="LeaveOutPredictAndPad">
+    
+    <type>IP</type>
+    
+    <usage># of contiguous views to predict and padding views to leave out</usage>
+    
+    <tooltip />
+    
+    <manpage>Number of points on contiguous views to leave out as a group and from which to use predicted positions to measure the leave-out error; and number of additional points on each side of this group to leave out as padding.  More padding will require more runs to reach a given accuracy level.  If the first value is 0, whole contours (fiducials) will be left out in each run and the second value does not matter.  The default is 3,1.  ^ Completely unrelated to the function of this option, entering a negative value for the second number will cause the model to be treated as if it were from patch tracking.  This is useful when analyzing a true fiducial model whose contours have been broken into pieces by Imodchopconts(1).  It allows the program to identify which contours have come from the same point, which is important for determining the actual number of fiducials present in a local area. (The absolute value of this second number will be used for the padding entry.)</manpage>
+  
+  </Field>
+  
+  <Field name="CVCoverageTargetOrFactor">
+    
+    <type>B</type>
+    
+    <usage>Target number of points, or multiple of total points, to leave out</usage>
+    
+    <tooltip />
+    
+    <manpage>This entry determines how many cross-validation runs will be done with different sets of points left out and thus how accurate the estimated error will be.  The value can be either a target number of points to get leave-out errors from, or a factor whose product with the number of fiducials would be the desired number of points to get errors from.  If whole contours are being left out, the total number left out may be limited. Specifically, if the number of fiducials times the fraction of points to leave out rounds down to 1 or less, then only one contour would be left out at once, and the number of runs would be limited to the number of fiducials.  When more than one contour is left out per run, there is no redundancy with a coverage above 1 because different combinations of fiducials will be used.  The default is 12000 points.</manpage>
+  
+  </Field>
+  
+  <Field name="CVMinAndMaxCoverageFactor">
+    
+    <type>B</type>
+    
+    <usage>Minimum and maximum values for coverage factor</usage>
+    
+    <tooltip />
+    
+    <manpage>Minimum and maximum values for the actual coverage factor, or average number of times each point is left out.  When the coverage falls below the minimum and the number of points that would be used with the minimum coverage is more than twice the target number set by \fB-CVCoverageTargetOrFactor\fR, the coverage is reduced below the minimum and the number of points to be used is increased above twice the target by the same factor. This feature reduces the excess computations that can happen with local alignments.  The default is 0.3 and 5.</manpage>
+  
+  </Field>
+  
+  <Field name="RandomSeed">
+    
+    <type>I</type>
+    
+    <usage>Specific seed value for cross-validation, or 0 for time-based value</usage>
+    
+    <tooltip />
+    
+    <manpage>A value for the seed of the random number generator used in cross-validation, or 0 for a seed computed from the current time.  Using a fixed seed value for multiple runs is important when looking at the effects of changing alignment parameters because it minimizes variability between runs due to different sets of points being chosen.  The default is to used a fixed seed.</manpage>
+  
+  </Field>
+  
+  <Field name="TestSetIntervalOrFrac">
+    
+    <type>F</type>
+    
+    <usage>Interval between points or fraction of points to use for test set</usage>
+    
+    <tooltip />
+    
+    <manpage>When running cross-validation by leaving out points or contours on multiple runs, a fraction of fiducials can be reserved as a test set as well. Solutions will be obtained using just the remaining points, including the multiple solutions with some of those points left out.  The errors for the test set will be reported both for the full solution with the remaining points and for the cross-validation runs.  This option is useful for validating the cross-validation itself but not for tuning parameters in actual data sets without a large excess in the number of fiducials.</manpage>
+  
+  </Field>
+  
+  <SectionHeader name="LocalOptions">
+    
+    <usage>LOCAL ALIGNMENT OPTIONS</usage>
+    
+    <manpage>LOCAL ALIGNMENT OPTIONS ^  These options control local alignments.</manpage>
+  
+  </SectionHeader>
+  
+  <Field name="LocalAlignments">
+    
+    <short />
+    
+    <type>B</type>
+    
+    <usage>Do alignments with subsets of points in local areas</usage>
+    
+    <tooltip>Compute alignments in local areas after finding global solution.</tooltip>
+    
+    <manpage>Do alignments with subsets of points in local areas.  When this option is selected, the appropriate Local...Option values must be entered to control what variables are solved for; the default is 0 for all of the local option values.</manpage>
+  
+  </Field>
+  
+  <Field name="OutputLocalFile">
+    
+    <short />
+    
+    <type>FN</type>
+    
+    <usage>Output file for transformations for local alignments</usage>
+    
+    <tooltip />
+    
+    <manpage />
+  
+  </Field>
+  
+  <Field name="TargetPatchSizeXandY">
+    
+    <short />
+    
+    <type>IP</type>
+    
+    <usage>Target minimum size for local patches in X and Y</usage>
+    
+    <tooltip>Target for the minimum size of local areas in the X and Y directions.</tooltip>
+    
+    <manpage>Target for the size of local patches in X and Y in which to obtain a solution from the fiducials located in that patch.  The number of patches will be set so that patches smaller or up to 5% larger than this size and overlapping by a fixed amount will fill the range occupied by fiducials (not the image area).  The patches on the edges should not have to expand as much as when the patch centers are set up to fill the image area.  If this option is entered, NumberOfLocalPatchesXandY must not be entered, and MinSizeOrOverlapXandY must specify an overlap instead of a size.</manpage>
+  
+  </Field>
+  
+  <Field name="NumberOfLocalPatchesXandY">
+    
+    <short />
+    
+    <type>IP</type>
+    
+    <usage>Number of local patches in X and Y over full area for local solutions</usage>
+    
+    <enum.new.tooltip>Number of overlapping local areas to use in the X and Y directions, if fiducials span the full area.  If fiducials occupy a subarea, fewer patches may be used.</enum.new.tooltip>
+    
+    <enum.old.tooltip>Number of overlapping local areas to use in the X and Y directions; these patches will cover the full area regardless of where fiducials are.</enum.old.tooltip>
+    
+    <manpage>Number of local patches in X and in Y in which to obtain a solution from the fiducials located in that patch.  For command files created by IMOD 5.0.1 or later, these values would apply if the X and Y fiducial coordinates cover the full range in X and in Y, and proportionally fewer patches will be used if the fiducial range is smaller.  Similarly to when TargetPatchSizeXandY is entered, patches will fill just the range occupied by fiducials, and MinSizeOrOverlapXandY must specify an overlap instead of a size.  For older command files (specifically, for ones not having the CreatedDayStamp option with a value of at least 1658), overlapping patches will be set up that fill the image area; ones outside the range of fiducials, if any, will have to expand considerably to contain the required number of points.</manpage>
+  
+  </Field>
+  
+  <Field name="MinSizeOrOverlapXandY">
+    
+    <short />
+    
+    <type>FP</type>
+    
+    <usage>Minimum fractional overlap in X and Y (if &lt; 1) or minimum size of patches (if &gt; 1).</usage>
+    
+    <tooltip>Minimum fractional overlap between patches in the X and Y directions.</tooltip>
+    
+    <manpage>Either the minimum fractional overlap between patches (values &lt; 1) or the minimum size of each patch in X and Y (enter values &gt; 1).  The latter is allowed only for command files created before IMOD 5.0.1 and only when NumberOfLocalPatchesXandY is entered.  The default is an overlap of 0.5.</manpage>
+  
+  </Field>
+  
+  <Field name="MinFidsTotalAndEachSurface">
+    
+    <short />
+    
+    <type>IP</type>
+    
+    <usage>Minimum total number of fiducials, and minimum number present on each surface if two surfaces exist</usage>
+    
+    <tooltip>Minimum total number of fiducials required in each local area, and minimum on each surface if two surfaces were analyzed for.</tooltip>
+    
+    <manpage>Minimum total number of fiducials, and minimum number present on each surface if two surfaces were assumed in the analysis of surfaces.  A patch will be expanded about its center until it contains enough points to meet both of these criteria.</manpage>
+  
+  </Field>
+  
+  <Field name="FixXYZCoordinates">
+    
+    <short />
+    
+    <type>B</type>
+    
+    <usage>Fix the X-Y-Z coordinates of the fiducials at their global values</usage>
+    
+    <tooltip />
+    
+    <manpage>Fix the X-Y-Z coordinates of the fiducials at their values from the global solution; the default is to solve for them independently in each local area.  For more on the implications of this option, see the note above in the section on local alignments.</manpage>
+  
+  </Field>
+  
+  <Field name="LocalOutputOptions">
+    
+    <short />
+    
+    <type>IT</type>
+    
+    <usage>1 for parameter output, 1 for X-Y-Z coordinate output, and 1 for high residual output</usage>
+    
+    <tooltip />
+    
+    <manpage>These three entries control the output of results for each local alignment: ^  1 to output the values of the parameters for each view or 0 ^    not to; ^  1 to output the X-Y-Z coordinates of fiducials or 0 not to; ^    and ^  1 to output points with high residuals, or 0 not to</manpage>
+  
+  </Field>
+  
+  <SectionHeader name="Options">
+    
+    <usage>LOCAL VARIABLE SELECTION OPTIONS</usage>
+    
+    <manpage>LOCAL VARIABLE SELECTION OPTIONS ^  These options specify the variables to be included in the local alignment fits and information about them, such as group sizes.</manpage>
+  
+  </SectionHeader>
+  
+  <Field name="LocalRotOption">
+    
+    <short />
+    
+    <type>I</type>
+    
+    <usage>Type of local rotation solution: 0 for none, 1 for independent, 2 for mapped, 3 or 4 for automapped, -1 for single variable</usage>
+    
+    <tooltip>Solve for local in-plane rotations.</tooltip>
+    
+    <manpage>Type of local rotation solution: ^  0 for local rotations fixed, ^  1 for each view having an independent rotation, ^  2 to enter general mapping of variables, ^  3 or 4 for automapping of rotation variables (3 for linearly ^    changing values or 4 for values all the same within a ^    group), or ^ -1 to solve for a single rotation variable.</manpage>
+  
+  </Field>
+  
+  <Field name="LocalRotDefaultGrouping">
+    
+    <short />
+    
+    <type>I</type>
+    
+    <usage>Default group size when automapping local rotation variables</usage>
+    
+    <tooltip>Grouping size for local rotations.</tooltip>
+    
+    <manpage>Default group size when automapping local rotation variables.</manpage>
+  
+  </Field>
+  
+  <Field name="LocalRotNondefaultGroup">
+    
+    <short />
+    
+    <type>ITM</type>
+    
+    <usage>Starting and ending views and group size for nondefault grouping of local rotation variables.</usage>
+    
+    <tooltip>Sets of views with non-default grouping.  For each set, enter starting and ending view number and group size, separated by commas; separate multiple sets with spaces.</tooltip>
+    
+    <manpage>Starting and ending view numbers and group size for a set of views whose local rotation variables should be grouped differently from the default.</manpage>
+  
+  </Field>
+  
+  <Field name="LocalTiltOption">
+    
+    <short />
+    
+    <type>I</type>
+    
+    <usage>Type of local tilt angle solution; same values as for global</usage>
+    
+    <tooltip>Solve for local changes in tilt angle.</tooltip>
+    
+    <manpage>Type of local tilt angle solution; values 0-8 have same meaning as for global solution.</manpage>
+  
+  </Field>
+  
+  <Field name="LocalTiltFixedView">
+    
+    <short />
+    
+    <type>I</type>
+    
+    <usage>View at which to fix the tilt angle (LocalTiltOption 1, 3, 7, or 8)</usage>
+    
+    <tooltip />
+    
+    <manpage>Number of view at which to fix the tilt angle in the local solution (required with LocalTiltOption 1, 3, 7, or 8)</manpage>
+  
+  </Field>
+  
+  <Field name="LocalTiltSecondFixedView">
+    
+    <short />
+    
+    <type>I</type>
+    
+    <usage>Second view at which to fix the tilt angle (LocalTiltOption 7 or 8)</usage>
+    
+    <tooltip />
+    
+    <manpage>Number of second view at which to fix the tilt angle in the local solution (required with LocalTiltOption 7 or 8)</manpage>
+  
+  </Field>
+  
+  <Field name="LocalTiltDefaultGrouping">
+    
+    <short />
+    
+    <type>I</type>
+    
+    <usage>Average default group size when automapping local tilt variables</usage>
+    
+    <tooltip>Grouping size for local tilt angle changes.</tooltip>
+    
+    <manpage>Average default group size when automapping local tilt variables</manpage>
+  
+  </Field>
+  
+  <Field name="LocalTiltNondefaultGroup">
+    
+    <short />
+    
+    <type>ITM</type>
+    
+    <usage>Starting and ending views and group size for nondefault grouping of local tilt variables</usage>
+    
+    <tooltip>Sets of views with non-default grouping.  For each set, enter starting and ending view number and group size, separated by commas; separate multiple sets with spaces.</tooltip>
+    
+    <manpage>Starting and ending view numbers and group size for a set of views whose local tilt variables should be grouped differently from the default.</manpage>
+  
+  </Field>
+  
+  <Field name="LocalMagReferenceView">
+    
+    <short />
+    
+    <type>I</type>
+    
+    <usage>Reference view whose local magnification will be fixed at 1.0</usage>
+    
+    <tooltip />
+    
+    <manpage>Number of reference view whose local magnification will be fixed at 1.0.  The default is the view at minimum tilt.</manpage>
+  
+  </Field>
+  
+  <Field name="LocalMagOption">
+    
+    <short />
+    
+    <type>I</type>
+    
+    <usage>Type of local magnification solution; same values as for global</usage>
+    
+    <tooltip>Solve for local changes in magnification.</tooltip>
+    
+    <manpage>Type of local magnification solution; values 0-3 have same meaning as for global solution.</manpage>
+  
+  </Field>
+  
+  <Field name="LocalMagDefaultGrouping">
+    
+    <short />
+    
+    <type>I</type>
+    
+    <usage>Default group size when automapping local magnification variables</usage>
+    
+    <tooltip>Grouping size for local magnification changes.</tooltip>
+    
+    <manpage>Default group size when automapping local magnification variables</manpage>
+  
+  </Field>
+  
+  <Field name="LocalMagNondefaultGroup">
+    
+    <short />
+    
+    <type>ITM</type>
+    
+    <usage>Starting and ending views and group size for nondefault grouping of local magnification variables.</usage>
+    
+    <tooltip>Sets of views with non-default grouping.  For each set, enter starting and ending view number and group size, separated by commas; separate multiple sets with spaces</tooltip>
+    
+    <manpage>Starting and ending view numbers and group size for a set of views whose local magnification variables should be grouped differently from the default.</manpage>
+  
+  </Field>
+  
+  <Field name="LocalXStretchOption">
+    
+    <short />
+    
+    <type>I</type>
+    
+    <usage>Type of local X-stretch solution; same values as for global</usage>
+    
+    <tooltip />
+    
+    <manpage>Type of local X-stretch solution; values 0-3 have same meaning as for global solution.</manpage>
+  
+  </Field>
+  
+  <Field name="LocalXStretchDefaultGrouping">
+    
+    <short />
+    
+    <type>I</type>
+    
+    <usage>Default average group size when automapping local X stretch variables</usage>
+    
+    <tooltip>Grouping size for local X stretch variables.</tooltip>
+    
+    <manpage>Default average group size when automapping local X stretch variables</manpage>
+  
+  </Field>
+  
+  <Field name="LocalXStretchNondefaultGroup">
+    
+    <short />
+    
+    <type>ITM</type>
+    
+    <usage>Starting and ending views and group size for nondefault grouping of local X stretch variables.</usage>
+    
+    <tooltip>Sets of views with non-default grouping for X stretch.  For each set, enter starting and ending view number and group size, separated by commas; separate multiple sets with spaces.</tooltip>
+    
+    <manpage>Starting and ending view numbers and group size for a set of views whose local X stretch variables should be grouped differently from the default.</manpage>
+  
+  </Field>
+  
+  <Field name="LocalSkewOption">
+    
+    <short />
+    
+    <type>I</type>
+    
+    <usage>Type of local skew solution; same values as for global</usage>
+    
+    <tooltip>Solve for local skew in the plane of section.</tooltip>
+    
+    <manpage>Type of local skew solution; values 0-3 have same meaning as for global solution.</manpage>
+  
+  </Field>
+  
+  <Field name="LocalSkewDefaultGrouping">
+    
+    <short />
+    
+    <type>I</type>
+    
+    <usage>Default group size when automapping local skew variables</usage>
+    
+    <tooltip>Grouping size for local skew angle variables.</tooltip>
+    
+    <manpage>Default group size when automapping local skew variables</manpage>
+  
+  </Field>
+  
+  <Field name="LocalSkewNondefaultGroup">
+    
+    <short />
+    
+    <type>ITM</type>
+    
+    <usage>Starting and ending views and group size for nondefault grouping of local skew variables.</usage>
+    
+    <tooltip>Sets of views with non-default grouping for skew angles.  For each set, enter starting and ending view number and group size, separated by commas; separate multiple sets with spaces.</tooltip>
+    
+    <manpage>Starting and ending view numbers and group size for a set of views whose local skew variables should be grouped differently from the default.</manpage>
+  
+  </Field>
+  
+  <Field name="LocalXTiltOption">
+    
+    <short />
+    
+    <type>I</type>
+    
+    <usage>Type of local X-axis tilt solution; same values as for global</usage>
+    
+    <tooltip />
+    
+    <manpage>Type of local X-axis tilt solution; values 0-3 have same meaning as for global solution.</manpage>
+  
+  </Field>
+  
+  <Field name="LocalXTiltDefaultGrouping">
+    
+    <short />
+    
+    <type>I</type>
+    
+    <usage>Default group size when automapping local X-axis tilt variables</usage>
+    
+    <tooltip />
+    
+    <manpage />
+  
+  </Field>
+  
+  <Field name="LocalXTiltNondefaultGroup">
+    
+    <short />
+    
+    <type>ITM</type>
+    
+    <usage>Starting and ending views and group size for nondefault grouping of local X-axis tilt variables.</usage>
+    
+    <tooltip />
+    
+    <manpage>Starting and ending view numbers and group size for a set of views whose local X-axis tilt variables should be grouped differently from the default.</manpage>
+  
+  </Field>
+  
+  <SectionHeader name="mappingOptions">
+    
+    <usage>MAPPING OPTIONS</usage>
+    
+    <manpage>MAPPING OPTIONS ^  These are obsolete options for ultimate control of variable mapping.</manpage>
+  
+  </SectionHeader>
+  
+  <Field name="RotMapping">
+    
+    <short />
+    
+    <type>IAM</type>
+    
+    <usage>Rotation variable number for each view (if RotOption 2)</usage>
+    
+    <tooltip />
+    
+    <manpage>If RotOption is 2, this option must be used to enter a rotation variable number for each view.  These variable numbers can be completely arbitrary, e.g. 1,1,1,3,3,3,5,5,5.  The numbers are used to define block grouping.</manpage>
+  
+  </Field>
+  
+  <Field name="LocalRotMapping">
+    
+    <short />
+    
+    <type>IAM</type>
+    
+    <usage>Local rotation variable number for each view (if LocalRotOption 2)</usage>
+    
+    <tooltip />
+    
+    <manpage>If LocalRotOption is 2, this option must be used to enter a local rotation variable number for each view.</manpage>
+  
+  </Field>
+  
+  <Field name="TiltMapping">
+    
+    <short />
+    
+    <type>IAM</type>
+    
+    <usage>Tilt variable number for each view (if TiltOption 4)</usage>
+    
+    <tooltip />
+    
+    <manpage>If TiltOption is 2, this option must be used to enter a tilt variable number for each view.</manpage>
+  
+  </Field>
+  
+  <Field name="LocalTiltMapping">
+    
+    <short />
+    
+    <type>IAM</type>
+    
+    <usage>Local tilt variable number for each view (if LocalTiltOption 4)</usage>
+    
+    <tooltip />
+    
+    <manpage>If LocalTiltOption is 4, this option must be used to enter a local tilt variable number for each view.</manpage>
+  
+  </Field>
+  
+  <Field name="MagMapping">
+    
+    <short />
+    
+    <type>IAM</type>
+    
+    <usage>Magnification variable number for each view (if MagOption 2)</usage>
+    
+    <tooltip />
+    
+    <manpage>If MagOption is 2, this option must be used to enter a magnification variable number for each view.</manpage>
+  
+  </Field>
+  
+  <Field name="LocalMagMapping">
+    
+    <short />
+    
+    <type>IAM</type>
+    
+    <usage>Local magnification variable number for each view (if LocalMagOption 2)</usage>
+    
+    <tooltip />
+    
+    <manpage>If LocalMagOption is 2, this option must be used to enter a local magnification variable number for each view.</manpage>
+  
+  </Field>
+  
+  <Field name="CompMapping">
+    
+    <short />
+    
+    <type>IAM</type>
+    
+    <usage>Compression variable number for each view (if CompOption 2)</usage>
+    
+    <tooltip />
+    
+    <manpage>If CompOption is 2, this option must be used to enter a compression variable number for each view.</manpage>
+  
+  </Field>
+  
+  <Field name="XStretchMapping">
+    
+    <short />
+    
+    <type>IAM</type>
+    
+    <usage>X stretch variable number for each view (if XStretchOption 2)</usage>
+    
+    <tooltip />
+    
+    <manpage>If XStretchOption is 2, this option must be used to enter an X stretch variable number for each view.</manpage>
+  
+  </Field>
+  
+  <Field name="LocalXStretchMapping">
+    
+    <short />
+    
+    <type>IAM</type>
+    
+    <usage>Local X stretch variable number for each view (if LocalXStretchOption 2)</usage>
+    
+    <tooltip />
+    
+    <manpage>If LocalXStretchOption is 2, this option must be used to enter a local X stretch variable number for each view.</manpage>
+  
+  </Field>
+  
+  <Field name="SkewMapping">
+    
+    <short />
+    
+    <type>IAM</type>
+    
+    <usage>Skew variable number for each view (if SkewOption 2)</usage>
+    
+    <tooltip />
+    
+    <manpage>If SkewOption is 2, this option must be used to enter a skew variable number for each view.</manpage>
+  
+  </Field>
+  
+  <Field name="LocalSkewMapping">
+    
+    <short />
+    
+    <type>IAM</type>
+    
+    <usage>Local skew variable number for each view (if LocalSkewOption 2)</usage>
+    
+    <tooltip />
+    
+    <manpage>If LocalSkewOption is 2, this option must be used to enter a local skew variable number for each view.</manpage>
+  
+  </Field>
+  
+  <Field name="XTiltMapping">
+    
+    <short />
+    
+    <type>IAM</type>
+    
+    <usage>X-axis tilt variable number for each view (if XTiltOption 2)</usage>
+    
+    <tooltip />
+    
+    <manpage>If XTiltOption is 2, this option must be used to enter an X-axis tilt variable number for each view.</manpage>
+  
+  </Field>
+  
+  <Field name="LocalXTiltMapping">
+    
+    <short />
+    
+    <type>IAM</type>
+    
+    <usage>Local X-axis tilt variable number for each view (if LocalXTiltOption 2)</usage>
+    
+    <tooltip />
+    
+    <manpage>If LocalXTiltOption is 2, this option must be used to enter a local X-axis tilt variable number for each view.</manpage>
+  
+  </Field>
+  
+  <SectionHeader name="UniversalOptions">
+    
+    <usage>OTHER OPTIONS</usage>
+  
+  </SectionHeader>
+  
+  <Field name="CreatedDayStamp">
+    
+    <short />
+    
+    <type>I</type>
+    
+    <usage>A value for when the command file was created (days since 1/1/20).</usage>
+    
+    <tooltip />
+    
+    <manpage>A value indicating when the command file was created, so that the program can determine whether to use old or new behavior for some options. Copytomocoms(1) sets this with the number of days since January 1, 2020.</manpage>
+  
+  </Field>
+  
+  <Field name="ParameterFile">
+    
+    <short>param</short>
+    
+    <type>PF</type>
+    
+    <usage>Read parameter entries from file</usage>
+    
+    <tooltip />
+    
+    <manpage>Read parameter entries as keyword-value pairs from a parameter file.</manpage>
+  
+  </Field>
+  
+  <Field name="usage">
+    
+    <short>help</short>
+    
+    <type>B</type>
+    
+    <usage>Print help output</usage>
+    
+    <tooltip />
+    
+    <manpage />
+  
+  </Field>
+
+</autodoc>

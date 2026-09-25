@@ -1,0 +1,136 @@
+
+Input image file:: t1.mrc
+ Dimensions:    127    121     21   Pixel size:         1          1          1
+Mode:  1               Min, max, mean:          451         1043       997.14
+raw2mrc: Converted to mrc format.                       25-Sep-26  12:36:12
+mBmrLowerElongLim set to 1.25
+mMaxBmrDeltaZ set to 3
+tiltIncMinForScaling set to 2
+
+Opened OLD file: t1.rawtlt
+
+Opened OLD file: t1.prexf
+To compensate for larger tilt increment, residual change criteria for deletion
+  were scaled by 1.690: to  0.068   3.38
+ First round of tracking will be split in two
+Starting object   1, round  1,   7 contours
+view  10, pass 1,   7 points (-  0), mean, sd, max dev:    0.07    0.03    0.11
+view   9, pass 1,   7 points (-  0), mean, sd, max dev:    0.13    0.07    0.21
+view   8, pass 1,   7 points (-  0), mean, sd, max dev:    0.05    0.02    0.10
+Metro error #3, Restarting with step factor of 0.22
+Metro error #3, Restarting with step factor of 0.28
+Metro error #3, Restarting with step factor of 0.19
+Metro error #3, Restarting with step factor of 0.12
+   4 views, 1000 cycles, F =     0.328696, mean residual =    0.25
+tiltalign error going to view 8 even after varying step factor
+view   7, pass 1,   7 points (-  0), mean, sd, max dev:    0.12    0.07    0.20
+   5 views,    1 cycles, F =     0.455271, mean residual =    0.35
+view   6, pass 1,   7 points (-  0), mean, sd, max dev:    0.08    0.05    0.13
+   6 views,    1 cycles, F =     0.644725, mean residual =    0.46
+   6 views,    1 cycles, F =     0.635888, mean residual =    0.45
+view  12, pass 1,   7 points (-  0), mean, sd, max dev:    0.32    0.15    0.54
+   7 views,  586 cycles, F =     0.640516, mean residual =    0.38
+view  13, pass 1,   7 points (-  0), mean, sd, max dev:    0.40    0.11    0.60
+Metro error #3, Restarting with step factor of 0.22
+Metro error #3, Restarting with step factor of 0.28
+Metro error #3, Restarting with step factor of 0.19
+Metro error #3, Restarting with step factor of 0.12
+   8 views, 1000 cycles, F =     0.736326, mean residual =    0.39
+tiltalign error going to view 13 even after varying step factor
+view  14, pass 1,   7 points (-  0), mean, sd, max dev:    0.78    0.52    1.79
+Metro error #3, Restarting with step factor of 0.22
+Metro error #3, Restarting with step factor of 0.28
+Metro error #3, Restarting with step factor of 0.19
+Metro error #3, Restarting with step factor of 0.12
+   9 views, 1000 cycles, F =     0.781694, mean residual =    0.51
+tiltalign error going to view 14 even after varying step factor
+view  15, pass 1,   7 points (-  0), mean, sd, max dev:    0.08    0.04    0.11
+  10 views,  191 cycles, F =     0.619191, mean residual =    0.42
+view  16, pass 1,   7 points (-  0), mean, sd, max dev:    0.12    0.04    0.17
+  11 views,  607 cycles, F =     0.540168, mean residual =    0.38
+  11 views,    1 cycles, F =     0.540168, mean residual =    0.38
+view   5, pass 1,   7 points (-  0), mean, sd, max dev:    0.18    0.07    0.28
+  12 views,  695 cycles, F =     0.593153, mean residual =    0.39
+view   4, pass 1,   7 points (-  0), mean, sd, max dev:    0.91    0.41    1.53
+Metro error #3, Restarting with step factor of 0.22
+Metro error #3, Restarting with step factor of 0.28
+Metro error #3, Restarting with step factor of 0.19
+Metro error #3, Restarting with step factor of 0.12
+  13 views, 1000 cycles, F =     0.701000, mean residual =    0.51
+tiltalign error going to view 4 even after varying step factor
+view   3, pass 1,   7 points (-  0), mean, sd, max dev:    0.60    0.27    0.99
+  14 views,  293 cycles, F =     0.763225, mean residual =    0.54
+view   2, pass 1,   7 points (-  0), mean, sd, max dev:    0.33    0.21    0.59
+Metro error #3, Restarting with step factor of 0.22
+Metro error #3, Restarting with step factor of 0.28
+Metro error #3, Restarting with step factor of 0.19
+Metro error #3, Restarting with step factor of 0.12
+  15 views,  733 cycles, F =     0.781787, mean residual =    0.56
+view   1, pass 1,   7 points (-  0), mean, sd, max dev:    1.08    0.48    1.58
+Metro error #3, Restarting with step factor of 0.22
+  16 views,  907 cycles, F =     0.601532, mean residual =    0.44
+  16 views,    1 cycles, F =     0.601532, mean residual =    0.44
+view  17, pass 1,   7 points (-  0), mean, sd, max dev:    0.56    0.39    1.28
+Metro error #3, Restarting with step factor of 0.22
+Metro error #3, Restarting with step factor of 0.28
+Metro error #3, Restarting with step factor of 0.19
+Metro error #3, Restarting with step factor of 0.12
+  17 views, 1000 cycles, F =     0.723560, mean residual =    0.53
+tiltalign error going to view 17 even after varying step factor
+view  18, pass 1,   7 points (-  2), mean, sd, max dev:    0.60    0.53    1.22
+Metro error #3, Restarting with step factor of 0.22
+Metro error #3, Restarting with step factor of 0.28
+Metro error #3, Restarting with step factor of 0.19
+Metro error #3, Restarting with step factor of 0.12
+  18 views, 1000 cycles, F =     1.140651, mean residual =    0.84
+tiltalign error going to view 18 even after varying step factor
+   3 pts deleted for pass 2, conts:   3   1   6
+  18 views,    8 cycles, F =     0.926173, mean residual =    0.63
+   3 pts added on pass 2, conts:   3   1   6
+view  18, pass 2,   7 points (-  2), mean, sd, max dev:    1.65    1.14    3.66
+  18 views,    6 cycles, F =     1.012350, mean residual =    0.68
+   1 pts deleted, big mean residual, conts:   5
+  18 views,    7 cycles, F =     0.897791, mean residual =    0.60
+view  19, pass 1,   7 points (-  0), mean, sd, max dev:    0.60    0.37    1.00
+Metro error #3, Restarting with step factor of 0.22
+Metro error #3, Restarting with step factor of 0.28
+  19 views,  892 cycles, F =     0.748573, mean residual =    0.51
+view  20, pass 1,   7 points (-  0), mean, sd, max dev:    0.68    0.55    1.74
+Metro error #3, Restarting with step factor of 0.22
+Metro error #3, Restarting with step factor of 0.28
+Metro error #3, Restarting with step factor of 0.19
+Metro error #3, Restarting with step factor of 0.12
+  20 views, 1000 cycles, F =     0.806551, mean residual =    0.60
+tiltalign error going to view 20 even after varying step factor
+   1 pts deleted for pass 2, conts:   5
+Metro error #3, Restarting with step factor of 0.22
+Metro error #3, Restarting with step factor of 0.28
+  20 views,  655 cycles, F =     0.725835, mean residual =    0.53
+   1 pts added on pass 2, conts:   5
+view  20, pass 2,   7 points (-  0), mean, sd, max dev:    0.91    0.80    2.17
+  20 views,    1 cycles, F =     0.737765, mean residual =    0.54
+view  21, pass 1,   7 points (-  0), mean, sd, max dev:    0.24    0.18    0.62
+  21 views,   11 cycles, F =     0.875893, mean residual =    0.61
+For object  1, round  1:  7 contours, points missing =    1
+ Aligning Sobel-centered points for comparison
+  21 views,    1 cycles, F =     0.875833, mean residual =    0.61
+ Aligning saved centroid-centered points
+  21 views,    7 cycles, F =     0.955024, mean residual =    0.55
+  21 views,    7 cycles, F =     0.876261, mean residual =    0.61
+view  18, pass 1,   7 points (-  0), mean, sd, max dev:    1.05    0.85    2.25
+  21 views,    1 cycles, F =     0.897382, mean residual =    0.62
+For object  1, round  2:  7 contours, points missing =    0
+ Aligning Sobel-centered points for comparison
+  21 views,    1 cycles, F =     0.897361, mean residual =    0.62
+ Aligning saved centroid-centered points
+  21 views,    7 cycles, F =     0.952932, mean residual =    0.56
+
+Obj cont:  Views on which points are missing
+ Total points missing = 0
+
+Mean residual 0.0000 nm from Sobel centering, 0.0000 nm from centroid centering
+  centroid centering better in   2 of   2 fits
+WARNING: BEADTRACK - Using positions from centroid centering
+because they gave a lower mean residual than Sobel centering.
+A different kernel sigma might be needed for Sobel centering.
+

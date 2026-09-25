@@ -1,0 +1,36 @@
+mxml: Entity name "bogus;" not supported under parent <root>!
+mxml: Bad control character 0xffffffff under parent <root> not allowed by XML standard!
+mxml: Mismatched close tag </b> under parent <a>!
+mxml: <b> cannot be a second root node after <a>
+mxml: Entity name "bogus;" not supported under parent <root>!
+mxml: Bad control character 0xffffffff under parent <root> not allowed by XML standard!
+mxml: Mismatched close tag </b> under parent <a>!
+mxml: <b> cannot be a second root node after <a>
+mxml: Bad integer value 'b' in parent <a>!
+mxml: Bad integer value 'text' in parent <root>!
+mxml: Bad integer value '&<>"'AB ' in parent <root>!
+mxml: Entity name "bogus;" not supported under parent <root>!
+mxml: Bad control character 0xffffffff under parent <root> not allowed by XML standard!
+mxml: Mismatched close tag </b> under parent <a>!
+mxml: <b> cannot be a second root node after <a>
+mxml: Bad integer value 'spaced' in parent <root>!
+mxml: Bad real value 'b' in parent <a>!
+mxml: Bad real value 'text' in parent <root>!
+mxml: Bad real value '&<>"'AB ' in parent <root>!
+mxml: Entity name "bogus;" not supported under parent <root>!
+mxml: Bad control character 0xffffffff under parent <root> not allowed by XML standard!
+mxml: Mismatched close tag </b> under parent <a>!
+mxml: <b> cannot be a second root node after <a>
+mxml: Bad real value 'spaced' in parent <root>!
+mxml: Entity name "bogus;" not supported under parent <root>!
+mxml: Bad control character 0xffffffff under parent <root> not allowed by XML standard!
+mxml: Mismatched close tag </b> under parent <a>!
+mxml: <b> cannot be a second root node after <a>
+mxml: Missing value for attribute 'critical_dose' in element ^!
+mxml: Missing value for attribute 'the' in element has!
+mxml: Missing value for attribute 'the' in element has!
+mxml: Missing value for attribute 'the' in element has!
+mxml: Missing value for attribute 'critical_dose' in element ^!
+mxml: Missing value for attribute 'and' in element ^particles!
+mxml: Missing value for attribute 'the' in element has!
+mxml: Missing value for attribute 'XR' in element ^!

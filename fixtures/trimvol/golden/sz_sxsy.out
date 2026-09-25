@@ -1,0 +1,58 @@
+
+ RO image file on unit   1 : s.mrc     Size=         10 K
+
+ Number of columns, rows, sections .....      32      24       6
+ Map mode ..............................    1   (16-bit integer)           
+ Start cols, rows, sects, grid x,y,z ...    0     0     0      32     24      6
+ Pixel spacing (Angstroms)..............   1.000      1.000      1.000    
+ Cell angles ...........................   90.000   90.000   90.000
+ Fast, medium, slow axes ...............    X    Y    Z
+ Origin on x,y,z .......................    0.000       0.000       0.000    
+ Minimum density .......................   38.000    
+ Maximum density .......................   445.00    
+ Mean density ..........................   258.47    
+ tilt angles (original,current) ........   0.0   0.0   0.0   0.0   0.0   0.0
+ Space group,# extra bytes,idtype,lens .        0        0        0        0
+
+     1 Titles :
+raw2mrc: Converted to mrc format.                       25-Sep-26  01:20:31    
+
+
+ NEW image file on unit   2 : o.mrc
+ section   input min&max       output min&max  &  mean
+       0     60.00    438.00      0.00    255.00    146.13
+       1     52.00    436.00      0.00    255.00    149.51
+       2     66.00    428.00      1.74    255.00    142.69
+       3     55.00    445.00      0.00    255.00    131.36
+       4     38.00    437.00      0.00    255.00    125.38
+       5     68.00    432.00      3.15    255.00    131.62
+ TRUNCATIONS OCCURRED:         10 at low end,         34 at high end of range
+Determining byte scaling of s.mrc...
+findcontrast -slice 2,5  -xminmax 4,24 -yminmax 3,19 "s.mrc"
+
+RO image file on unit   1 : s.mrc     Size=         10 K
+
+Number of columns, rows, sections .....      32      24       6
+Map mode ..............................    1   (16-bit integer)
+Start cols, rows, sects, grid x,y,z ...    0     0     0      32     24      6
+Pixel spacing (Angstroms)..............   1.000      1.000      1.000
+Cell angles ...........................   90.000   90.000   90.000
+Fast, medium, slow axes ...............    X    Y    Z
+Origin on x,y,z .......................    0.000       0.000       0.000
+Minimum density .......................   38.000
+Maximum density .......................   445.00
+Mean density ..........................   258.47
+tilt angles (original,current) ........   0.0   0.0   0.0   0.0   0.0   0.0
+Space group,# extra bytes,idtype,lens .        0        0        0        0
+
+1 Titles :
+raw2mrc: Converted to mrc format.                       25-Sep-26  01:20:31
+
+Analyzing X:     4    24  Y:     3    19  Z:     1     4
+Min and max densities in the analyzed volume are   52.000     and   445.00
+Min and max densities with truncation are   65.000     and   423.00
+Implied black and white contrast levels are  16 and 242
+Contrast black/white levels determined from file were 16,242
+ 
+The newstack command was:
+newstack -siz 32,24 -off 0,0  -ori -mode 0 -con 16,242  "s.mrc" "o.mrc"

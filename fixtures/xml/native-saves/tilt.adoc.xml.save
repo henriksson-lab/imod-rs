@@ -1,0 +1,1153 @@
+<?xml version="1.0" encoding="utf-8"?>
+
+<autodoc>
+  
+  <PreData>
+    
+    <Version>1.0</Version>
+    
+    <Pip>1</Pip>
+  
+  </PreData>
+  
+  <SectionHeader name="GenFileOptions">
+    
+    <usage>General Reconstruction-Related File Options</usage>
+    
+    <manpage>General Reconstruction-Related File Options ^  These options specify input and output files for ordinary reconstructions.</manpage>
+  
+  </SectionHeader>
+  
+  <Field name="InputProjections">
+    
+    <short>input</short>
+    
+    <type>FN</type>
+    
+    <usage>Input image file with aligned projections</usage>
+    
+    <tooltip />
+    
+    <manpage>Input image file with aligned projections.  If this option is not entered, the first non-option argument is taken as the input name.</manpage>
+  
+  </Field>
+  
+  <Field name="OutputFile">
+    
+    <short>output</short>
+    
+    <type>FN</type>
+    
+    <usage>Output file for reconstruction or reprojection</usage>
+    
+    <tooltip />
+    
+    <manpage>Output file for reconstruction or reprojection.  If this option is not entered, the second non-option argument is taken as the output name.</manpage>
+  
+  </Field>
+  
+  <Field name="TILTFILE">
+    
+    <type>FN</type>
+    
+    <usage>File with list of tilt angles</usage>
+    
+    <tooltip />
+    
+    <manpage>Use this entry to specify a file containing a list of all tilt angles.  The angles may be one per line or many per line.</manpage>
+  
+  </Field>
+  
+  <Field name="XTILTFILE">
+    
+    <type>FN</type>
+    
+    <usage>File with variable tilts around the X-axis</usage>
+    
+    <tooltip />
+    
+    <manpage>Use this entry to specify a file containing a list of tilts to be applied around the X axis for the individual views.  A global tilt specified by the XAXISTILT entry, if any, will be subtracted from these tilts.  If this file contains all zeros, the program runs the same as if the file was not entered.</manpage>
+  
+  </Field>
+  
+  <Field name="ZFACTORFILE">
+    
+    <type>FN</type>
+    
+    <usage>File with Z-factors</usage>
+    
+    <tooltip />
+    
+    <manpage>Use this entry to specify a file containing factors for adjusting the backprojection position in each image as a function of Z height in the output slice.  These factors are necessary when input images have been transformed to correct for an apparent specimen stretch.  If this entry is absent, Z factors in a local alignment file will not be applied.</manpage>
+  
+  </Field>
+  
+  <Field name="LOCALFILE">
+    
+    <type>FN</type>
+    
+    <usage>File with local tilt alignment information</usage>
+    
+    <tooltip />
+    
+    <manpage>File containing local tilt alignment information.  See Tiltalign(1) for a description of the format and contents of this file.</manpage>
+  
+  </Field>
+  
+  <Field name="BoundaryInfoFile">
+    
+    <type>FN</type>
+    
+    <usage>File with information about boundaries when writing in parallel</usage>
+    
+    <tooltip />
+    
+    <manpage>File with information about boundary locations and files when directly writing in parallel to a single output file.</manpage>
+  
+  </Field>
+  
+  <Field name="WeightAngleFile">
+    
+    <type>FN</type>
+    
+    <usage>File with full list of angles to use for weighting</usage>
+    
+    <tooltip />
+    
+    <manpage>File with a list of tilt angles to be used for computing the relative weighting of the views.  Use this entry to keep the weightings applied to each view constant across reconstructions from subsets of views, regardless of which views are actually included in a particular reconstruction.  For example, when leaving one view out, the two adjacent views would receive higher weights without this entry, but with this entry they would have the same weights as with the view included.</manpage>
+  
+  </Field>
+  
+  <Field name="WeightFile">
+    
+    <type>FN</type>
+    
+    <usage>File with list of weighting factors for all views</usage>
+    
+    <tooltip />
+    
+    <manpage>Name of a file containing a list of weighting factors to be applied to the views, such as for mass normalization.  The factors may be one per line or many per line.  These weights are ignored if the log is being taken of the data.</manpage>
+  
+  </Field>
+  
+  <SectionHeader name="GeomOptions">
+    
+    <usage>Geometry-Related Options</usage>
+    
+    <manpage>Geometry-Related Options ^  These options control the size, location, and angles of the reconstruction.</manpage>
+  
+  </SectionHeader>
+  
+  <Field name="WIDTH">
+    
+    <type>I</type>
+    
+    <usage>Width of output image</usage>
+    
+    <tooltip />
+    
+    <manpage>The width of the output image; the default is the width of the input image.</manpage>
+  
+  </Field>
+  
+  <Field name="SLICE">
+    
+    <type>IA</type>
+    
+    <usage>Starting and ending slice number, and interval between slices</usage>
+    
+    <tooltip />
+    
+    <manpage>Starting and ending slice number to reconstruct, and interval between slices.  The numbers refer to slices in the X/Z plane and correspond to Y coordinates in the projection images.  Slices are numbered from 0. The interval entry is optional, must be positive, and defaults to 1 when omitted.</manpage>
+  
+  </Field>
+  
+  <Field name="TOTALSLICES">
+    
+    <type>IP</type>
+    
+    <usage>Starting and ending slices of entire reconstruction</usage>
+    
+    <tooltip />
+    
+    <manpage>This entry is used to allow multiple runs of Tilt to compute a subset of slices and place them into the same output file.  The values specify the first and last slice to be reconstructed in the whole volume, numbered from 0.  When this entry is present, the behavior of the program depends on the SLICE entry (or the ZMinAndMax entry when reprojecting from a tomogram).  The program should be run initially with SLICE -1 -1 (or ZMinAndMax -1 -1 when reprojecting), which will cause it to create the output file and write its header.  On successive runs with SLICE or ZMinAndMax indicating a real range of slices, the program will open the existing file, write only those slices, and not write the header when it is done.</manpage>
+  
+  </Field>
+  
+  <Field name="THICKNESS">
+    
+    <type>I</type>
+    
+    <usage>Thickness in Z of reconstructed volume</usage>
+    
+    <tooltip />
+    
+    <manpage>Thickness in Z of reconstructed volume, in pixels</manpage>
+  
+  </Field>
+  
+  <Field name="OFFSET">
+    
+    <type>FA</type>
+    
+    <usage>Offsets for tilt angles and tilt axis</usage>
+    
+    <tooltip />
+    
+    <manpage>This entry can contain two numbers, DELANG and DELXX.  An offset of DELANG degrees will be applied to all tilt angles.  DELANG positive rotates reconstructed sections anticlockwise.  A DELXX entry indicates that the tilt axis would be offset in a stack of full-sized projection images, cutting the X-axis at  NX/2. + DELXX instead of NX/2.  The DELXX entry is optional and defaults to 0 when omitted.  If the tilt axis is offset from the center because the projection images are a non-centered subset of the full images, use the SUBSETSTART entry instead.  If the projection images are a non-centered subset with the tilt axis centered in them, then using this entry together with SUBSETSTART and FULLIMAGE should produce a correct result.</manpage>
+  
+  </Field>
+  
+  <Field name="SHIFT">
+    
+    <type>FA</type>
+    
+    <usage>Amount to shift reconstructed slice in X and Y</usage>
+    
+    <tooltip />
+    
+    <manpage>This entry allows one to shift the reconstructed slice in X or Z before it is output.  If the X shift is positive, the slice will be shifted to the right, and the output will contain the left part of the whole potentially reconstructable area.  If the Z shift is positive, the slice is shifted upward.  The Z entry is optional and defaults to 0 when omitted.</manpage>
+  
+  </Field>
+  
+  <Field name="ANGLES">
+    
+    <type>FAM</type>
+    
+    <usage>Tilt angles of the views</usage>
+    
+    <tooltip />
+    
+    <manpage>Use this entry to specify the tilt angles of the views if they are not in a separate file.  You must enter one tilt angle for each view.  Use more than one ANGLES entry if necessary. This information will override tilt angles specified in the file header.  If you enter angles in this way, the file header need not contain tilt information.</manpage>
+  
+  </Field>
+  
+  <Field name="XSubsetLoadRatio">
+    
+    <type>F</type>
+    
+    <usage>Ratio of size to load in X to width when reconstructing a subset in X</usage>
+    
+    <tooltip />
+    
+    <manpage>This entry enables the loading of a subset of each line in X by specifying the ratio of the length being loaded to the length actually needed for reconstructing a subset in X.  Since the same range in X will be loaded for all views, it will usually be much longer than is required for a given view, so not much additional padding is required to avoid edge effects.  A value of 1.2 should be sufficient.  When raw projections are being used and they are rotated by 90 degrees from the aligned ones, the subset is in Y in the raw stack and this option will prevent the need to access all lines of the input file to make the reconstruction.</manpage>
+  
+  </Field>
+  
+  <Field name="XAXISTILT">
+    
+    <type>F</type>
+    
+    <usage>Tilt about X-axis to correct in reconstruction</usage>
+    
+    <tooltip />
+    
+    <manpage>This entry allows one to rotate the reconstruction around the X axis, so that a section that appears to be tilted around the X axis can be made flat to fit into a smaller volume.  The angle should be the tilt of the section relative to the X-Y plane in an unrotated reconstruction.  For example, if the reconstruction extends 500 slices, and the section is 5 pixels below the middle in the first slice and 5 pixels above the middle in the last slice, the angle should be 1.1 (the arc sine of 10/500).</manpage>
+  
+  </Field>
+  
+  <Field name="COMPFRACTION">
+    
+    <type>F</type>
+    
+    <usage>Fraction of distance over which compression occurred</usage>
+    
+    <tooltip />
+    
+    <manpage>If the compression measured by TILTALIGN occurred over only a fraction of the distance between the fiducials, enter the fraction with this option.</manpage>
+  
+  </Field>
+  
+  <Field name="COMPRESS">
+    
+    <type>FAM</type>
+    
+    <usage>Compression factors of the views</usage>
+    
+    <tooltip />
+    
+    <manpage>With this entry, the program will assume that the section has compressed in Z by the amount given by the amount given for each view.  The compressions would be taken directly from the  output of TILTALIGN for incremental compression.  A value must be entered for each view.</manpage>
+  
+  </Field>
+  
+  <Field name="FULLIMAGE">
+    
+    <type>IP</type>
+    
+    <usage>Full size of original, unaligned images</usage>
+    
+    <tooltip />
+    
+    <manpage>Use this entry to specify the full size in X and Y of the original stack of tilted views, so that a subset of the aligned stack can be handled properly when using a global X-axis tilt or local alignments.</manpage>
+  
+  </Field>
+  
+  <Field name="SUBSETSTART">
+    
+    <type>IP</type>
+    
+    <usage>Lower left X, Y coordinates of aligned stack within whole images</usage>
+    
+    <tooltip />
+    
+    <manpage>If the aligned stack contains a subset of the area in the original images, and this area is not centered in X or a global X-axis tilt or local alignments are being used, use this entry to enter the X and Y index coordinates (numbered from 0) of the lower left corner of the subset within the original images.  A FULLIMAGE entry must also be included.  If the aligned stack is larger than the original images, use negative values.</manpage>
+  
+  </Field>
+  
+  <Field name="IMAGEBINNED">
+    
+    <type>I</type>
+    
+    <usage>Binning of input images</usage>
+    
+    <tooltip />
+    
+    <manpage>If the input images have been binned, this entry can be entered to specify the binning and have various other dimensions scaled down by this factor.  Values entered with SHIFT, OFFSET, THICKNESS, WIDTH, FULLIMAGESIZE, SLICE, and SUBSETSTART will be scaled.  These entries thus do not need to be changed when the input binning is changed.</manpage>
+  
+  </Field>
+  
+  <Field name="ExpandedByFactor">
+    
+    <type>F</type>
+    
+    <usage>Value of ExpandByFactor used in Newstack when making aligned stack</usage>
+    
+    <tooltip />
+    
+    <manpage>Value of ExpandByFactor used in Newstack when making aligned stack. Values entered with SHIFT, OFFSET, THICKNESS, WIDTH, FULLIMAGESIZE, SLICE, and SUBSETSTART will be scaled just as when the aligned stack is binned.  However, if Tilt is being run in parallel, the entries for SLICE and TOTALSLICES are assumed to be corrected already by this factor; Splittilt(1) does this correction.  This feature is intended to be used with factors relatively near 1, such as to make a tomogram whose pixel size matches that of another with no additional interpolation steps.  This option cannot be used with \fB-RecFileToReproject\fR or \fB-UseUnalignedImages\fR.</manpage>
+  
+  </Field>
+  
+  <Field name="ReferenceSDofScaling">
+    
+    <type>F</type>
+    
+    <usage>Standard deviation of unbinned input images, used to adjust linear scaling</usage>
+    
+    <tooltip />
+    
+    <manpage>Standard deviation of the unbinned input images, which will be used to adjust scaling when not taking the logarithm of the input.  When this option is entered, scaling is linear, and binning of input images is greater than 1, the program will find the SD in a region up to 1K by 1K in the center of the middle input image, and change the scaling to adjust for the change in SD caused by binning.</manpage>
+  
+  </Field>
+  
+  <Field name="LOCALSCALE">
+    
+    <type>F</type>
+    
+    <usage>Factor by which images were scaled relative to local alignment data</usage>
+    
+    <tooltip />
+    
+    <manpage>If local tilt alignments were obtained from unreduced data, but the aligned stack was reduced by binning or transforming, use this entry to specify the factor by which the data were scaled, so that the local alignment information can be adjusted.  Without this entry, the program will use the ratio of the pixel size at which local alignments were computed to the pixel size of the aligned images, which should be correct if data were binned and/or modified with ExpandByFactor.</manpage>
+  
+  </Field>
+  
+  <SectionHeader name="ReconOptions">
+    
+    <usage>Reconstruction Control Options</usage>
+    
+    <manpage>Reconstruction Control Options ^  These options control various other aspects of the reconstruction process.</manpage>
+  
+  </SectionHeader>
+  
+  <Field name="LOG">
+    
+    <type>F</type>
+    
+    <usage>Take the logarithm after adding the given base value</usage>
+    
+    <tooltip />
+    
+    <manpage>This entry allows one to generate a reconstruction using the logarithm of the densities in the input file, with the entered value added before taking the logarithm.</manpage>
+  
+  </Field>
+  
+  <Field name="RADIAL">
+    
+    <type>FP</type>
+    
+    <usage>Cutoff and falloff of Gaussian filter for radial weighting function</usage>
+    
+    <tooltip />
+    
+    <manpage>This entry controls low-pass filtering with the radial weighting function.  The radial weighting function is linear away from the origin out to the distance in reciprocal space specified by the first value, followed by a Gaussian fall-off determined by the second value.  The sigma (or standard deviation) of the Gaussian is the second value times 0.707, unless the option \fB-FalloffIsTrueSigma\fR is entered, in which case the second value is used directly as the sigma.  If the cutoff is greater than 1 the distances are interpreted as pixels in Fourier space; otherwise they are treated as frequencies in cycles/pixel, which range from 0 to 0.5.  Use a cutoff of 0.5 for no low-pass filtering.</manpage>
+  
+  </Field>
+  
+  <Field name="FalloffIsTrueSigma">
+    
+    <type>B</type>
+    
+    <usage>Use the falloff value directly as the sigma of the Gaussian filter</usage>
+    
+    <tooltip />
+    
+    <manpage>Use the falloff value entered with the \fB-RADIAL\fR option directly as the sigma of the Gaussian filter instead of using a sigma that is 0.707 times the entered value.  This option was added for IMOD 4.8.58, when the incorrect scaling of the falloff value was discovered in the code, so that newer command files could show the true sigma value while older command files without the option would still produce the same result.</manpage>
+  
+  </Field>
+  
+  <Field name="MultiplyByGaussian">
+    
+    <type>B</type>
+    
+    <usage>Multiply radial function by Gaussian instead of replacing it</usage>
+    
+    <tooltip />
+    
+    <manpage>Multiply the radial weighting function by the Gaussian specified with the \fB-RADIAL\fR option instead of replacing the remainder of the ramp filter with the Gaussian.</manpage>
+  
+  </Field>
+  
+  <Field name="HammingLikeFilter">
+    
+    <type>F</type>
+    
+    <usage>Cutoff radius for multiplying by Gaussian that falls off to Nyquist</usage>
+    
+    <tooltip />
+    
+    <manpage>Cutoff radius for multiplying by a Gaussian that falls to ~0.06 at the Nyquist frequency (0.5 cycles/pixel).  This function is very close to the Hamming window applied in the tomo3d program from Agulleiro and Fernandez. The sigma value of the Gaussian is 0.438 * (0.5 - cutoff).  This option cannot be entered with \fB-RADIAL\fR as it replaces the function specified by that entry.</manpage>
+  
+  </Field>
+  
+  <Field name="DENSWEIGHT">
+    
+    <type>FA</type>
+    
+    <usage>Weighting to compute local average tilt increment</usage>
+    
+    <tooltip />
+    
+    <manpage>Use this entry to control the weighting of each view proportional to the local average tilt increment between views.  The first value specifies the number of intervals on EACH side of a view to consider; the default is 2, and a value of 0 disables weighting.  Optionally, this value may be followed by that number of weights to be applied in averaging the adjacent increments (the default is equal weighting).</manpage>
+  
+  </Field>
+  
+  <Field name="ExactFilterSize">
+    
+    <type>I</type>
+    
+    <usage>Object size for using &quot;exact filters&quot; instead of standard R-weighting</usage>
+    
+    <tooltip />
+    
+    <manpage>'&quot;Object size&quot;, in unbinned pixels, controlling the shape of the &quot;exact filter&quot; functions of Harauz and van Heel, 1986.  With this option, these filters will be used in place of standard R-weighting.  Such filters start from a slighty higher point at low frequencies and rise nearly linearly.  Their shape is controlled by a mostly arbitrary parameter referred to as the &quot;object size&quot;.  For large enough sizes, the filters will rise much more rapidly than R-weighted filters and reach a plateau at some intermediate frequency.  This effectively attenuates some of the higher frequencies, relative to an R-weighted reconstruction.  For low-contrast reconstructions, these filters will increase low-frequency contrast, partly because of the higher value at low frequency, but primarily because of the plateau effect with large &quot;object sizes&quot;.  The program will output a line indicating the mean frequency at which the plateau is reached.  Spatial frequencies above this point will not be present at the right amplitude, on average, relative to the lower frequencies.  This feature arguably makes these filters unsuitable for making a reconstruction to be used for subvolume averaging.  This entry is ignored if \fB-FlatFilterFraction\fR is entered.  The Gaussian filter specified with the options above is applied at the high-frequency end of these filters.'</manpage>
+  
+  </Field>
+  
+  <Field name="FakeSIRTiterations">
+    
+    <type>I</type>
+    
+    <usage>Modify radial filter to match SIRT with given # of iterations</usage>
+    
+    <tooltip />
+    
+    <manpage>Modify the radial filter to produce a reconstruction equivalent to the one produced by the given number of iterations of SIRT. See description above.  The Gaussian filter specified with the options above is applied at the high-frequency end of the filter.</manpage>
+  
+  </Field>
+  
+  <Field name="FiltersInFile">
+    
+    <type>FN</type>
+    
+    <usage>Image file with radial filter values</usage>
+    
+    <tooltip />
+    
+    <manpage>Image file with radial filter values to be used in place of the standard ramp function.  The file should have dimensions in Y and Z of 1 and the number of views being included in the reconstruction (i.e, omitting excluded views). The size in X needs to be an integer multiple of half the padded size used in the program for radial filtering, or such a multiple plus 1. The program's error message when this requirement is not met will show the needed size.  This padded size can be determined ^   pad  IS  min(50, 2 * max(8, nxProj / 20)) ^   evenSize  IS   2 * ((nxProj + pad) / 2) ^   padSize  IS  output from running &quot;goodframe -n evenSize&quot; ^Filters will be scaled to match the standard ramp in magnitude.  If a Gaussian cutoff is specified, the filter will fall from its value at this point, as usual.  This option cannot be entered with \fB-FakeSIRTiterations\fR, \fB-ExactFilterSize\fR, \fB-HammingLikeFilter\fR, \fB-MultiplyByGaussian\fR, \fB-FlatFilterFraction\fR, or \fB-RecFileToReproject\fR.</manpage>
+  
+  </Field>
+  
+  <Field name="UseRayIntersections">
+    
+    <short>ray</short>
+    
+    <type>B</type>
+    
+    <usage>Use areas of intersection between rays and pixels instead of interpolation</usage>
+    
+    <tooltip />
+    
+    <manpage>Use areas of intersection between projection rays and reconstruction pixels instead of interpolation when computing backprojection and reprojection from a reconstruction file.  Each ray has the width of one pixel and is aligned to pixel in the projection images.  This option cannot be used with X-axis tilt, Z-factors, local alignments, cosine stretching (\fB-COSINTERP\fR must be 0), or a GPU.  This method was implemented for experimenting with SIRT and is much slower than regular interpolation.</manpage>
+  
+  </Field>
+  
+  <Field name="INCLUDE">
+    
+    <type>LIM</type>
+    
+    <usage>List of views to include in the reconstruction</usage>
+    
+    <tooltip />
+    
+    <manpage>A subset of views to be used for the reconstruction, numbered from 1.  The values can be individual view numbers or ranges, separated by spaces or commas.  Use more than one INCLUDE entry if the numbers do not all fit on one line.</manpage>
+  
+  </Field>
+  
+  <Field name="EXCLUDELIST2">
+    
+    <type>LIM</type>
+    
+    <usage>List of views to exclude (comma-separated ranges allowed)</usage>
+    
+    <tooltip />
+    
+    <manpage>List of views to be excluded from the reconstruction, numbered from 1.  The list can consist of individual view numbers, or of ranges (e.g., 1-4), separated by commas or spaces.  The EXCLUDE and EXCLUDELIST entries available in old versions of the program are treated as this option. You may have any number of entries with exclude lists, but they cannot be combined with INCLUDE entries.</manpage>
+  
+  </Field>
+  
+  <Field name="COSINTERP">
+    
+    <type>IA</type>
+    
+    <usage>Interpolation order and sampling factor for cosine stretching</usage>
+    
+    <tooltip />
+    
+    <manpage>Interpolation order and sampling factor for cosine stretching of the input data.  The order can be 1 for linear, 2 for quadratic, 3 for cubic, or 0 to disable cosine stretching. The default is linear to provide some smoothing of the data; higher orders are appropriate if data are relatively noise-free.  The factor is optional; the default is 2, which prevents further smoothing when the stretched data are linearly interpolated during backprojection.</manpage>
+  
+  </Field>
+  
+  <Field name="XTILTINTERP">
+    
+    <type>I</type>
+    
+    <usage>Interpolation order for computing X-tilted slices from vertical ones</usage>
+    
+    <tooltip />
+    
+    <manpage>This entry controls the order for interpolating an output slice tilted around the X axis from vertical, untilted slices each computed from a single line of input data.  Set the order to 1 for linear, 2 for quadratic, 3 for cubic, or 0 to disable this method of X-axis tilting and revert to computing the output slice directly from input data.  The default is 1; higher orders are appropriate if data are particularly noise-free.</manpage>
+  
+  </Field>
+  
+  <Field name="SuperSampleFactor">
+    
+    <type>I</type>
+    
+    <usage>Compute slices in pixels smaller by this factor to reduce artifacts</usage>
+    
+    <tooltip />
+    
+    <manpage>This entry makes the program compute the back projection in a slice larger by the given factor in each dimension, by interpolating the projection data at smaller intervals (&quot;super-sampling&quot;).  See description above.</manpage>
+  
+  </Field>
+  
+  <Field name="ExpandInputLines">
+    
+    <type>B</type>
+    
+    <usage>Expand projection lines by Fourier padding when super-sampling</usage>
+    
+    <tooltip />
+    
+    <manpage>Expand projection lines by Fourier padding (sync interpolation) when super-sampling, which will preserve higher frequencies better but increase memory needed.  See description above.</manpage>
+  
+  </Field>
+  
+  <Field name="UseUnalignedImages">
+    
+    <type>B</type>
+    
+    <usage>Reconstruct from raw stack using alignment transforms</usage>
+    
+    <tooltip />
+    
+    <manpage>Use the raw stack instead of an aligned stack to make a reconstruction.  The transforms for making an aligned stack must be entered with the \fB-AlignTransformFile\fR option.  These transforms are stored and used as local alignment information and they are combined with local alignments if they are also being used.  Super-sampling can be used in the back projection, but not expansion of input lines (expansion would avoid only half of the loss from interpolation because there is inevitably some interpolation between lines ).  SIRT reconstructions and reprojection from a reconstruction file cannot be used with this option.  The program may take significantly more memory and operate somewhat slower with this option.  Depending on the angle of the tilt axis, large amounts of input data may be needed to reconstruct a single slice.. Also, radial filtering needs to be done in two dimensions instead of one and the area filtered has to have a minimum aspect ratio to avoid low frequency artifacts; this operation is more efficient with more data lines instead of padding in that area.</manpage>
+  
+  </Field>
+  
+  <Field name="UseGPU">
+    
+    <type>I</type>
+    
+    <usage>Use GPU for computation; 0 for best available one or number of GPU</usage>
+    
+    <tooltip />
+    
+    <manpage>Use the GPU (graphical processing unit) for computations if possible; enter 0 to use the best GPU on the system, or the number of a specific GPU (numbered from 1).  The GPU can be used for all types of operations as long as there is sufficient memory.</manpage>
+  
+  </Field>
+  
+  <Field name="ActionIfGPUFails">
+    
+    <type>IP</type>
+    
+    <usage>0 for no action, 1 for warning, 2 for error if GPU cannot be used</usage>
+    
+    <tooltip />
+    
+    <manpage>The action to take when the GPU cannot be used after being requested: 0 to take no action, 1 to issue a warning prefixed with MESSAGE:, and 2 to exit with an error.  Enter 2 numbers: the first for the action when the GPU is requested by the UseGPU option; the second for the action when the GPU is requested only by the environment variable IMOD_USE_GPU, or by the variable IMOD_USE_GPU2.  The default is 0,0.</manpage>
+  
+  </Field>
+  
+  <SectionHeader name="OutputOptions">
+    
+    <usage>Output Control Options</usage>
+    
+    <manpage>Output Control Options ^  These options control various aspects of the output from reconstruction.</manpage>
+  
+  </SectionHeader>
+  
+  <Field name="MODE">
+    
+    <type>I</type>
+    
+    <usage>Output file mode (default 2)</usage>
+    
+    <tooltip />
+    
+    <manpage>This entry allows one to specify the data mode of the output file, which is floating point by default.  Modes are 0 for byte, 1 for 16-bit signed integer, 6 for 16-bit unsigned integer, 2 for 32-bit floating point, or 12 for 16-bit floating point.  The default mode of floating point output for MRC files is governed by the value of environment variable IMOD_WRITE_FLOATS_16BIT.  Mode 12 is allowed only if the output format is MRC.  For modes other than 2, be sure to use an appropriate SCALE entry so that data will be scaled to the proper range.  The range for mode 12 is -65504 to 65504; values are stored with 11-bit precision down to 6.1e-5 and 10-bit precision down to 6.0e-8.</manpage>
+  
+  </Field>
+  
+  <Field name="SCALE">
+    
+    <type>FP</type>
+    
+    <usage>Values to add then scale reconstructed densities by</usage>
+    
+    <tooltip />
+    
+    <manpage>With this entry, the values in the reconstruction will be scaled by adding the first value then multiplying by the second one.  The default is 0,1.  After the reconstruction is complete, the program will output the scale values that would make the data range from 10 to 245.</manpage>
+  
+  </Field>
+  
+  <Field name="MASK">
+    
+    <type>I</type>
+    
+    <usage>Mask regions with incomplete data; value is extra pixels to mask</usage>
+    
+    <tooltip />
+    
+    <manpage>This entry allows a mask to be applied so as to exclude from the reconstructed volume those parts which lie outside the volume for which the projection data are complete.  This volume is a cylinder whose axis lies along the tilt axis.  The entered value specifies the number of extra pixels to mask out in this way; a negative value can be used to set the mask farther out.  Inside the masked area, densities are smoothly tapered from the value of a pixel at the edge of the area down to the mean value at the edge. This masking is needed to prevent artifacts from building up at the edges of the slice during iterations with SIRT.</manpage>
+  
+  </Field>
+  
+  <Field name="PERPENDICULAR">
+    
+    <type>B</type>
+    
+    <usage>Output slices perpendicular to the plane of the specimen (default)</usage>
+    
+    <tooltip />
+    
+    <manpage>Output slices perpendicular to the plane of the specimen.  This output is the default since it corresponds to the way in which slices are computed and allows efficient computation of chunks in parallel.</manpage>
+  
+  </Field>
+  
+  <Field name="PARALLEL">
+    
+    <type>B</type>
+    
+    <usage>Output slices parallel to the plane of the specimen, inverting handedness</usage>
+    
+    <tooltip />
+    
+    <manpage>Output slices parallel to the plane of the zero tilt projection. This option cannot be used with direct writing of data to a single output file from parallelized Tilt runs.  It inverts the handedness of the reconstruction.</manpage>
+  
+  </Field>
+  
+  <Field name="RotateBy90">
+    
+    <type>B</type>
+    
+    <usage>Output slices parallel to the plane of the specimen without inverting handedness</usage>
+    
+    <tooltip />
+    
+    <manpage>Output slices parallel to the plane of the zero tilt projection, but in the proper order to avoid inverting handedness. This option cannot be used with direct writing of data to a single output file from parallelized Tilt runs.</manpage>
+  
+  </Field>
+  
+  <Field name="AdjustOrigin">
+    
+    <type>B</type>
+    
+    <usage>Adjust origin for shifts and size changes</usage>
+    
+    <tooltip />
+    
+    <manpage>Adjust origin for shifts with the SHIFT option and size changes with WIDTH and SLICES, and base the origin on that of the aligned stack.  With this option, reconstructions in PERPENDICULAR mode of different size and location will have congruent coordinate systems and will load models interchangeably.  In addition, reconstructions from different sized projection stacks will have congruent coordinates provided that the origin was adjusted when making the projection stack (e.g., with the -origin option to Newstack(1)).  The default is to produce legacy origin values that are not adjusted for these operations, with the origin in X and Y in the center of the volume.</manpage>
+  
+  </Field>
+  
+  <Field name="TITLE">
+    
+    <type>CH</type>
+    
+    <usage>Title string for output file header</usage>
+    
+    <tooltip />
+    
+    <manpage>An alphanumeric string giving the title for the job, which will be added to the output map.  Limit 50 characters.  This entry is optional; the default is &quot;Tomographic reconstruction&quot;.</manpage>
+  
+  </Field>
+  
+  <SectionHeader name="IncremOptions">
+    
+    <usage>Options for Incremental Reconstruction</usage>
+    
+    <manpage>Options for Incremental Reconstruction ^  These options allow reconstructions from a subset of view to be added to or subtracted from an existing reconstruction.</manpage>
+  
+  </SectionHeader>
+  
+  <Field name="BaseRecFile">
+    
+    <type>FN</type>
+    
+    <usage>Previous reconstruction file to add to or subtract from</usage>
+    
+    <tooltip />
+    
+    <manpage>Previous reconstruction file to add views to or subtract views from. One use for this option is to compute a series of reconstructions quickly with different views left out.  The BaseNumViews option must also be entered in order for the right scaling to be set up when reading in the existing reconstruction and writing out the new one (unless -1 is entered for SubtractFromBase).  If the WeightAngleFile option is also used, then incremental reconstructions computed in this way should match reconstructions computed de novo very closely.  If the input projection file contains only the views being added or subtracted, then you should also use the MinMaxMean option to keep fill values constant.</manpage>
+  
+  </Field>
+  
+  <Field name="BaseNumViews">
+    
+    <type>I</type>
+    
+    <usage>Number of views in previous reconstruction</usage>
+    
+    <tooltip />
+    
+    <manpage>When adding or subtracting views from a base reconstruction, this option must be entered with the number of views in the previous reconstruction.  However, if the SubtractFromBase option is entered with a -1 to indicate that a reconstruction is to be subtracted from a base file for SIRT, this option should not be entered.</manpage>
+  
+  </Field>
+  
+  <Field name="SubtractFromBase">
+    
+    <type>LI</type>
+    
+    <usage>Views to subtract from previous reconstruction (0 for all, -1 for SIRT)</usage>
+    
+    <tooltip />
+    
+    <manpage>Views to subtract from the previous reconstruction specified by BaseRecFile.  Without this entry, all views are added.  Enter the list of specific views to subtract, 0 to have all included views subtracted, or -1 to have all views subtracted for a SIRT reconstruction.</manpage>
+  
+  </Field>
+  
+  <Field name="MinMaxMean">
+    
+    <type>IT</type>
+    
+    <usage>Min, max, and mean densities to use instead of input file values</usage>
+    
+    <tooltip />
+    
+    <manpage>Min, max, and mean densities to use instead of values in the input projection file.  Use this entry to keep the fill value used for back projecting from outside the data constant when doing incremental reconstruction with a projection file that contains only the views being added or subtracted.</manpage>
+  
+  </Field>
+  
+  <SectionHeader name="ReprojOptions">
+    
+    <usage>Options for Reprojection</usage>
+    
+    <manpage>Options for Reprojection ^  These options activate and control reprojection from a reconstruction.</manpage>
+  
+  </SectionHeader>
+  
+  <Field name="REPROJECT">
+    
+    <type>FAM</type>
+    
+    <usage>Angles for reprojections of reconstructed slices</usage>
+    
+    <tooltip />
+    
+    <manpage>With this entry, the program will output one or more reprojections of the reconstructed slices at the given angles.  If RecFileToReproject is entered, then the reprojections should match the input projections; otherwise the reprojections will be of the computed slices and should match what Xyzproj(1) would produce.</manpage>
+  
+  </Field>
+  
+  <Field name="ViewsToReproject">
+    
+    <type>LI</type>
+    
+    <usage>List of views to reproject (0 for all, not just included ones)</usage>
+    
+    <tooltip />
+    
+    <manpage>List of views to reproject from a reconstruction file, numbered from 1.  The default is to project just the views that were included in the reconstruction.  To project all views in the input projection file, enter 0.</manpage>
+  
+  </Field>
+  
+  <Field name="RecFileToReproject">
+    
+    <short>recfile</short>
+    
+    <type>FN</type>
+    
+    <usage>Reconstruction file to reproject or run SIRT with</usage>
+    
+    <tooltip />
+    
+    <manpage>Reconstruction file to reproject or run SIRT with.  When using this option, all of the entries to the program used when building this reconstruction should be included as well.</manpage>
+  
+  </Field>
+  
+  <Field name="XMinAndMaxReproj">
+    
+    <short>xminmax</short>
+    
+    <type>IP</type>
+    
+    <usage>Starting and ending X index coordinates to reproject</usage>
+    
+    <tooltip />
+    
+    <manpage>Starting and ending X index coordinates of region to reproject from a reconstruction file (numbered from 0).  The default is the whole extent in X.</manpage>
+  
+  </Field>
+  
+  <Field name="YMinAndMaxReproj">
+    
+    <short>yminmax</short>
+    
+    <type>IP</type>
+    
+    <usage>Starting and ending Y index coordinates to reproject</usage>
+    
+    <tooltip />
+    
+    <manpage>Starting and ending Y index coordinates of region to reproject from a reconstruction file (numbered from 0).  Y is the thickness dimension. The default is the whole extent in Y.</manpage>
+  
+  </Field>
+  
+  <Field name="ZMinAndMaxReproj">
+    
+    <short>zminmax</short>
+    
+    <type>IP</type>
+    
+    <usage>Starting and ending Z index coordinates to reproject</usage>
+    
+    <tooltip />
+    
+    <manpage>Starting and ending Z index coordinates of region to reproject from a reconstruction file (numbered from 0).  Z is the the dimension along the tilt axis.  The default is the whole extent in Z.</manpage>
+  
+  </Field>
+  
+  <Field name="ThresholdedReproj">
+    
+    <short>threshold</short>
+    
+    <type>FT</type>
+    
+    <usage>Threshold, polarity, and summing value to reproject thresholded values</usage>
+    
+    <tooltip />
+    
+    <manpage>This option enables a rapid, discrete reprojection only of voxels in a volume that are beyond a threshold.  The first two values are the threshold, and 1 to pick voxels above threshold or -1 to pick ones below threshold.  The third value controls how the pixels being projected to are filled.  With a value of 1 or more, the program will form a sum in the reprojection.  For each voxel beyond threshold, a fixed value well be apportioned among the 4 pixels projected to by the voxel by their respective interpolation fractions and added into the pixels.  A value less than 1 is a criterion for binary marking of pixels; each of the 4 pixels with an interpolation fraction above the criterion is marked with a fixed value, and the resulting reprojection will have only two values in it.</manpage>
+  
+  </Field>
+  
+  <SectionHeader name="SirtOptions">
+    
+    <usage>SIRT-Related Options</usage>
+    
+    <manpage>SIRT-Related Options ^  These options activate, control, or are used in reconstructions with SIRT.</manpage>
+  
+  </SectionHeader>
+  
+  <Field name="FlatFilterFraction">
+    
+    <type>F</type>
+    
+    <usage>Fraction of constant filter to mix with R-weighting, or &gt; 1 for SIRT</usage>
+    
+    <tooltip />
+    
+    <manpage>With a value entered between 0 and 1, the radial filter will be set up as a linear combination of the standard R-weighting filter and a flat filter, which will greatly overemphasize low frequencies.  The entered value is the fraction for the flat filter.  The flat filter is scaled to give output densities roughly comparable to those obtained with the R-weighting filter.  The zero-frequency component of each filter is 0.2 times the component at the lowest non-zero frequency.  If the value is greater than one, a filter suitable for Simultaneous Iterative Reconstruction (SIRT) is set up, scaled so as to distribute input values equally along each ray.  The zero-frequency component is the same as the other components in this case.</manpage>
+  
+  </Field>
+  
+  <Field name="SIRTIterations">
+    
+    <type>I</type>
+    
+    <usage>Number of iterations to run SIRT procedure</usage>
+    
+    <tooltip />
+    
+    <manpage>This entry directs the program to compute a SIRT reconstruction internally for the given number of iterations, as described above.  If the RecFileToReproject option is given, then the program will read in slices from the existing reconstruction, interpolating between them to make vertical slices if there is a fixed X-axis tilt.  Each read-in slice or vertical slice is then used for reprojection and modified by a backprojection of the difference between the reprojection and the original projection image.  In this case, the FlatFilterFraction option is not needed, as the appropriate filter is used automatically.  If no existing reconstruction is given, then the program generates an initial reconstruction with a flat filter fraction of 1.0 unless a value is supplied with the FlatFilterFraction option.</manpage>
+  
+  </Field>
+  
+  <Field name="SIRTSubtraction">
+    
+    <type>B</type>
+    
+    <usage>Subtract reprojections from original projections before writing</usage>
+    
+    <tooltip />
+    
+    <manpage>Subtract reprojections from original projections to produce a reprojection difference for SIRT.  The width of the reprojection must match the width of the input data.</manpage>
+  
+  </Field>
+  
+  <Field name="StartingIteration">
+    
+    <type>I</type>
+    
+    <usage>Starting SIRT iteration number for reports of difference mean and SD</usage>
+    
+    <tooltip />
+    
+    <manpage>Starting SIRT iteration number, in order to obtain reports of the mean and standard deviation of a difference reconstruction in a SIRT procedure.  These values are computed for slices in the middle 80% of the slice range, in the middle 80% of the width in X, and in the middle half of the height in Y.  When running SIRT internally, the statistics are computed as each difference slice is computed.  Otherwise, they are computed just before subtracting the difference reconstruction from read-in slices.  A summary is printed when the program finishes.</manpage>
+  
+  </Field>
+  
+  <Field name="VertBoundaryFile">
+    
+    <type>FN</type>
+    
+    <usage>File with information for writing vertical slice file in parallel</usage>
+    
+    <tooltip />
+    
+    <manpage>File with information about boundaries and temporary files when writing a vertical slice output file and running multiple chunks in parallel.</manpage>
+  
+  </Field>
+  
+  <Field name="VertSliceOutputFile">
+    
+    <type>FN</type>
+    
+    <usage>File for saving vertical slices when running SIRT internally</usage>
+    
+    <tooltip />
+    
+    <manpage>File for saving internally produced vertical slices at the last iteration when running SIRT internally.  When such a file is saved, SIRT can be resumed with it and the vertical slices will not be degraded by being interpolated on output and input.</manpage>
+  
+  </Field>
+  
+  <Field name="VertForSIRTInput">
+    
+    <type>B</type>
+    
+    <usage>The file being reprojected for resuming SIRT is a vertical slice file</usage>
+    
+    <tooltip />
+    
+    <manpage>The file to be reprojected when resuming internal SIRT is a vertical slice file, specified by VertSliceOutputFile on the previous run.  When such a file is provided, the program will use its slices directly instead of having to interpolate from the slices of the reconstruction file.</manpage>
+  
+  </Field>
+  
+  <Field name="ConstrainSign">
+    
+    <type>I</type>
+    
+    <usage>Constrain sign of net output for SIRT to positive (1) or negative (-1)</usage>
+    
+    <tooltip />
+    
+    <manpage>Enter -1 or 1 to constrain the result to negative or positive when subtracting a reconstruction from a base reconstruction, or when subtracting an error reconstruction from the current slice with SIRT internally.</manpage>
+  
+  </Field>
+  
+  <SectionHeader name="ModelOptions">
+    
+    <usage>Model Projection Options</usage>
+    
+    <manpage>Model Projection Options ^  These options are used when reprojecting a model from a reconstruction onto the input projections.</manpage>
+  
+  </SectionHeader>
+  
+  <Field name="ProjectModel">
+    
+    <type>FN</type>
+    
+    <usage>Model file with point positions to reproject (output is a model)</usage>
+    
+    <tooltip />
+    
+    <manpage>Model file with point positions to reproject onto the projection images.  The output file will be a model.  All of the other parameter entries should be the same as were used for generating the tomogram upon which the model was built.  Points will be output only for the views included in that tomogram.  The model header will be set so that the model will display properly on both the aligned stack used to generate the tomogram and on aligned stacks at other binnings.</manpage>
+  
+  </Field>
+  
+  <Field name="SkipTurnedOffPoints">
+    
+    <type>B</type>
+    
+    <usage>Skip points with values below threshold if they are turned off</usage>
+    
+    <tooltip />
+    
+    <manpage>Skip points with contour values below threshold when projecting the model if they are not visible in 3dmod, namely if &quot;Turn off below threshold&quot; is set in the Bead Fixer, or &quot;Turn off Low&quot; is set in the Values panel of the Model View Object Edit dialog.</manpage>
+  
+  </Field>
+  
+  <Field name="AngleOutputFile">
+    
+    <type>FN</type>
+    
+    <usage>Output file for projection angles when projecting model</usage>
+    
+    <tooltip />
+    
+    <manpage>Output file in which to write projection angles when reprojecting a model.  The output contains one line per point in the projected model, with contour number, point number, view number (all numbered from 1), X-axis tilt, tilt angle, and rotation in the plane of the projection image, (all in degrees).  At the end of the line will be either a 0 or, if the \fI-DefocusFile\fR option is entered, the defocus in nanometers.  The rotation will be relative to the aligned projection image (and zero if there are no local alignments) unless a file of alignment transforms is entered with the AlignTransformFile option. In that case, the rotation will be relative to the raw tilt series image.  The angles have the same meaning and order as in the Tiltalign(1) alignment model: the specimen is tilted around X, then tilted around Y, then rotated around Z in order for its projection to match the image in the aligned stack, where angles are counterclockwise positive looking down each axis from the positive direction.</manpage>
+  
+  </Field>
+  
+  <Field name="AlignTransformFile">
+    
+    <type>FN</type>
+    
+    <usage>Transforms applied to align images, used for getting projection angles</usage>
+    
+    <tooltip />
+    
+    <manpage>File of linear transformations used to align the projection images. When making an output file with projection angles, this file is needed to produce rotation angles relative to the unaligned projection images.  The file also needed to make a reconstruction from raw stack images.</manpage>
+  
+  </Field>
+  
+  <Field name="DefocusFile">
+    
+    <type>FN</type>
+    
+    <usage>File of defocus values in nm for each view</usage>
+    
+    <tooltip />
+    
+    <manpage>File with defocus values in nanometers (underfocus positive) for each view, one per line.  When making an output file with projection angles, this entry allows the program to include the defocus at each position as well.</manpage>
+  
+  </Field>
+  
+  <Field name="PixelForDefocus">
+    
+    <type>FP</type>
+    
+    <usage>Pixel size for computing defocus, and 1 to invert angles or 0 not to</usage>
+    
+    <tooltip />
+    
+    <manpage>Pixel size for computing defocus when making a file of projection angles, and 1 to invert tilt angles for this computation or 0 not to.  The default is to use the pixel size of the input projections and assume no inversion.</manpage>
+  
+  </Field>
+  
+  <SectionHeader name="GenOptions">
+    
+    <usage>Obsolete, Test, and General Options</usage>
+    
+    <manpage>Obsolete, Test, and General Options ^  These miscellaneous options are obsolete, provide test output, or are general PIP options.</manpage>
+  
+  </SectionHeader>
+  
+  <Field name="DONE">
+    
+    <type>B</type>
+    
+    <usage>Terminate input to program</usage>
+    
+    <tooltip />
+    
+    <manpage>The entry is equivalent to EndInput, and lines of input following it will be ignored.  This option is provided for compatibility with old command files, but Etomo does not handle it properly, so it should not be used.</manpage>
+  
+  </Field>
+  
+  <Field name="FBPINTERP">
+    
+    <type>I</type>
+    
+    <usage>This option was discontinued in IMOD 4.0.20</usage>
+    
+    <tooltip />
+    
+    <manpage />
+  
+  </Field>
+  
+  <Field name="REPLICATE">
+    
+    <type>FPM</type>
+    
+    <usage>This option was discontinued in IMOD 4.0.21</usage>
+    
+    <tooltip />
+    
+    <manpage />
+  
+  </Field>
+  
+  <Field name="DebugOutput">
+    
+    <short>debug</short>
+    
+    <type>B</type>
+    
+    <usage>Print output for debugging</usage>
+  
+  </Field>
+  
+  <Field name="InternalSIRTSlices">
+    
+    <short>internal</short>
+    
+    <type>IP</type>
+    
+    <usage>Output reprojections (1-2) and/or internal reconstructions (1-4)</usage>
+    
+    <tooltip />
+    
+    <manpage>Output reprojections or reconstruction slices held internally on the last iteration of SIRT.  The first value is the type of reprojection: 0 for none, 1 for actual reprojection, or 2 for difference between reprojection and input data.  The second value is for type of slice: 0 for none, 1 for backprojection of difference lines, 2 for final vertical slice, 3 for slice produced on iteration 0, and 4 for vertical slice decomposed from input. Output files are sirttst.prj and sirttst.drec, respectively.</manpage>
+  
+  </Field>
+  
+  <Field name="TextureType">
+    
+    <short>texture</short>
+    
+    <type>I</type>
+    
+    <usage>Type of texture to use on GPU: 0 for 2D, -1 for 2D layered, 1 for 3D</usage>
+    
+    <tooltip />
+    
+    <manpage>Type of texture to use on GPU: 0 for 2D, -1 for 2D layered, 1 for 3D.  The type of texture is chosen automatically depending on the capability of the graphics card and what texture types are available for a particular type of alignment.  In making this choice, 3D textures are preferred if the data sizes allow it; otherwise 2D layered, otherwise 2D.  This entry overrides that choice, except in the case of single slice computations with no X-axis tilt in the back- or reprojection and no Z-factors or local alignments, where 2D textures are used.  All three types are available for back-projection with local alignments or reprojections involving multiple slices; 3D textures are not available for back-projections with X axis tilt and/or Z factors but no local alignments.  The program will exit with an error if a non-available type is specified by this entry; but if a type is chosen that does not fit within the card's texture size limits, the program will just not use the GPU.</manpage>
+  
+  </Field>
+  
+  <Field name="BorderForSuperSample">
+    
+    <short>border</short>
+    
+    <type>F</type>
+    
+    <usage>Added pixels to compute on each edge of super-sampled slice (unscaled)</usage>
+    
+    <tooltip />
+    
+    <manpage>Border size to compute on each edge of slice when super-sampling, in final pixels, i.e. not scaled by the super-sampling factor.  This border is needed so that the worst oscillations that occur at the edges of the image after Fourier reduction are removed when the slice is cropped to its final size.  The default is 40, which reduces the oscillations to about 0.1% of the SD with high-contrast reconstructions.</manpage>
+  
+  </Field>
+  
+  <Field name="ParameterFile">
+    
+    <short>param</short>
+    
+    <type>PF</type>
+    
+    <usage>Read parameter entries from file</usage>
+    
+    <tooltip />
+    
+    <manpage>Read parameter entries as keyword-value pairs from a parameter file.</manpage>
+  
+  </Field>
+  
+  <Field name="usage">
+    
+    <short>help</short>
+    
+    <type>B</type>
+    
+    <usage>Print help output</usage>
+    
+    <tooltip />
+    
+    <manpage />
+  
+  </Field>
+
+</autodoc>

@@ -1,0 +1,97 @@
+<?xml version="1.0" encoding="utf-8"?>
+<autodoc>
+  <PreData>
+    <Version>1.0</Version>
+    <Pip>1</Pip>
+  </PreData>
+  <Field name="factor">
+    <short>f</short>
+    <type>F</type>
+    <usage>&quot;Global factor to squeeze by, default = 1.6&quot;</usage>
+    <tooltip />
+    <manpage />
+  </Field>
+  <Field name="expand">
+    <short>e</short>
+    <type>F</type>
+    <usage>global expansion factor</usage>
+    <tooltip />
+    <manpage />
+  </Field>
+  <Field name="xFactor">
+    <short>x</short>
+    <type>F</type>
+    <usage>Factor to squeeze in X dimension, default is global factor or 1/expansion</usage>
+    <tooltip />
+    <manpage>Factor by which to squeeze in the X dimension.  When doing expansion, this must be the inverse of the desired expansion factor.  The default is the global squeezing factor or the inverse of the global expansion factor.</manpage>
+  </Field>
+  <Field name="yFactor">
+    <short>y</short>
+    <type>F</type>
+    <usage>Factor to squeeze in Y dimension, default is global factor or 1/expansion</usage>
+    <tooltip />
+    <manpage>Factor by which to squeeze in the Y dimension.  The default is the global squeezing factor or 1/expansion factor.</manpage>
+  </Field>
+  <Field name="zFactor">
+    <short>z</short>
+    <type>F</type>
+    <usage>Factor to squeeze in Z dimension, default is global factor or 1/expansion</usage>
+    <tooltip />
+    <manpage>Factor by which to squeeze in the Y dimension.  The default is the global squeezing factor or 1/expansion factor.</manpage>
+  </Field>
+  <Field name="ixSize">
+    <short>ix</short>
+    <type>I</type>
+    <usage>Input size in X dimension, default is full X size of volume</usage>
+    <tooltip />
+    <manpage />
+  </Field>
+  <Field name="iySize">
+    <short>iy</short>
+    <type>I</type>
+    <usage>input size in Y dimension, default is full Y size of volume</usage>
+    <tooltip />
+    <manpage />
+  </Field>
+  <Field name="izSize">
+    <short>iz</short>
+    <type>I</type>
+    <usage>input size in Z dimension, default is full Z size of volume</usage>
+    <tooltip />
+    <manpage />
+  </Field>
+  <Field name="LegacyInterpolation">
+    <short>legacy</short>
+    <type>B</type>
+    <usage>Use 3-D interpolation in Matchvol instead of Binvol</usage>
+    <tooltip />
+    <manpage />
+  </Field>
+  <Field name="tempdir">
+    <short>t</short>
+    <type>FN</type>
+    <usage>Directory to use for temporary files</usage>
+    <tooltip />
+    <manpage />
+  </Field>
+  <Field name="linear">
+    <short>l</short>
+    <type>B</type>
+    <usage>Use linear interpolation; default is quadratic</usage>
+    <tooltip />
+    <manpage />
+  </Field>
+  <Field name="PID">
+    <type>B</type>
+    <usage>Print process ID</usage>
+    <tooltip />
+    <manpage />
+  </Field>
+  <Field name="usage">
+    <short>help</short>
+    <type>B</type>
+    <usage>Print help output</usage>
+    <tooltip />
+    <manpage />
+  </Field>
+</autodoc>

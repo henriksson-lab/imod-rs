@@ -1,0 +1,197 @@
+<?xml version="1.0" encoding="utf-8"?>
+
+<autodoc>
+  
+  <PreData>
+    
+    <Version>1.0</Version>
+    
+    <Pip>1</Pip>
+  
+  </PreData>
+  
+  <Field name="InputFile">
+    
+    <short>input</short>
+    
+    <type>FN</type>
+    
+    <usage>Input volume file to be cloned</usage>
+    
+    <tooltip />
+    
+    <manpage>Input volume file to clone. If this option is not entered, the first non-option argument will be used for the input file.</manpage>
+  
+  </Field>
+  
+  <Field name="OutputFile">
+    
+    <short>output</short>
+    
+    <type>FN</type>
+    
+    <usage>Output volume file to create</usage>
+    
+    <tooltip />
+    
+    <manpage>Name to give the output volume. If this option is not entered, the second non-option argument will be used.</manpage>
+  
+  </Field>
+  
+  <Field name="AtPoints">
+    
+    <short>at</short>
+    
+    <type>FN</type>
+    
+    <usage>location/orientation file (see PEET program createdAlignedModel)</usage>
+    
+    <tooltip />
+    
+    <manpage>Name of the summary file giving coordinates and orientations at which clones are to be inserted.</manpage>
+  
+  </Field>
+  
+  <Field name="IntoFile">
+    
+    <short>into</short>
+    
+    <type>FN</type>
+    
+    <usage>Volume into which to clone copies of the input. (Required).</usage>
+    
+    <tooltip />
+    
+    <manpage>The volume to which the output should be initialized prior to inserting any clones of the input. (Required).</manpage>
+  
+  </Field>
+  
+  <Field name="XRange">
+    
+    <short>x</short>
+    
+    <type>IP</type>
+    
+    <usage>X coordinate range within which volumes will be cloned</usage>
+    
+    <tooltip />
+    
+    <manpage>The input volume will not be cloned at points outside this range.</manpage>
+  
+  </Field>
+  
+  <Field name="YRange">
+    
+    <short>y</short>
+    
+    <type>IP</type>
+    
+    <usage>X coordinate range within which volumes will be cloned</usage>
+    
+    <tooltip />
+    
+    <manpage>The input volume will not be cloned at points outside this range.</manpage>
+  
+  </Field>
+  
+  <Field name="ZRange">
+    
+    <short>z</short>
+    
+    <type>IP</type>
+    
+    <usage>X coordinate range within which volumes will be cloned</usage>
+    
+    <tooltip />
+    
+    <manpage>The input volume will not be cloned at points outside this range.</manpage>
+  
+  </Field>
+  
+  <Field name="usage">
+    
+    <short>help</short>
+    
+    <long>usage</long>
+    
+    <type>B</type>
+    
+    <usage>Print help output</usage>
+    
+    <tooltip />
+    
+    <manpage>Print help output.</manpage>
+  
+  </Field>
+  
+  <Field name="ContourNumbers">
+    
+    <short>contours</short>
+    
+    <type>LI</type>
+    
+    <usage>Contours in the model of the original volume to include (default is all).</usage>
+    
+    <tooltip />
+    
+    <manpage>A comma and dash separated list of contour numbers. If entered, clones will be created only at points belonging to one of the specified contours in the model of the original volume.</manpage>
+  
+  </Field>
+  
+  <Field name="AlphaTransparency">
+    
+    <short>alpha</short>
+    
+    <type>F</type>
+    
+    <usage>Transparency to use when cloning volumes.</usage>
+    
+    <tooltip />
+    
+    <manpage>A floating point number between 0 and 1 specifying the transparency to be used when cloning volumes  (default  0). If 0, cloned voxels will simply replace the originals. More generally, the output voxels will be alpha times the cloned voxel plus (1 - alpha) times the previous value.</manpage>
+  
+  </Field>
+  
+  <Field name="MaskFile">
+    
+    <short>mask</short>
+    
+    <type>FN</type>
+    
+    <usage>An optional byte file for masking the input volume.</usage>
+    
+    <tooltip />
+    
+    <manpage>The name of a byte (mode 0) file which will be used to mask the input volume. Non-zero values in this file indicate voxel locations in the input volume which should be cloned.</manpage>
+  
+  </Field>
+  
+  <Field name="rMin">
+    
+    <short>rmin</short>
+    
+    <type>I</type>
+    
+    <usage>The minimum distance from the center of the input volume at which points should be cloned.</usage>
+    
+    <tooltip />
+    
+    <manpage>The input volume will not be cloned at radii smaller than this.</manpage>
+  
+  </Field>
+  
+  <Field name="rMax">
+    
+    <short>rmax</short>
+    
+    <type>I</type>
+    
+    <usage>The maximum distance from the center of the input volume at which points should be cloned.</usage>
+    
+    <tooltip />
+    
+    <manpage>The input volume will not be cloned at radii larger than this.</manpage>
+  
+  </Field>
+
+</autodoc>

@@ -1,0 +1,8 @@
+Input volume: tx.st
+ Dimensions:     96     88     13   Pixel size:         1          1          1
+Mode:  1               Min, max, mean:          493         5487       1633.5
+raw2mrc: Converted to mrc format.                       25-Sep-26  02:29:20
+
+
+Binning is 1; padded, reduced size is 120 by 108
+ERROR: tiltxcorr - Maximum tilt angle is too high to use cosine stretching

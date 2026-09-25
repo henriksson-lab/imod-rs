@@ -1,0 +1,8 @@
+Using model header to determine center coordinates:   275.0   275.0
+
+ FORMATTED  ro  file opened: mg.txt
+
+ FORMATTED  ro  file opened: BBa.xf
+Back-transforming model with inverse of transforms from BBa.xf
+ Redistorting model
+Transforming model with reinverted transforms from BBa.xf

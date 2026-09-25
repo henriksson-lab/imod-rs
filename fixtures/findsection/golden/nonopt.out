@@ -1,0 +1,6 @@
+               center   center SDs      edge     edge SDs      distinct-
+scale  binning  mean   median  MADN     mean   median  MADN      ness
+  1    1,1,1      453   253.3  24.0         3   100.5   4.9     21.38
+Median Z values of surfaces, numbered from 1, are: 9  22
+Z limits for autopatchfit combine, numbered from 1, are: 8  23
+Absolute limits of surfaces, numbered from 1, are: 8  23

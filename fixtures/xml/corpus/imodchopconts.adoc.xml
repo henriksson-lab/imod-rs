@@ -1,0 +1,70 @@
+<?xml version="1.0" encoding="utf-8"?>
+<autodoc>
+  <PreData>
+    <Version>1.0</Version>
+    <Pip>1</Pip>
+  </PreData>
+  <Field name="InputModel">
+    <short>input</short>
+    <type>FN</type>
+    <usage>Input model filename</usage>
+    <tooltip />
+    <manpage>Name of input model file.  If this option is not entered, the first non-option argument will be taken as the input file.</manpage>
+  </Field>
+  <Field name="OutputModel">
+    <short>output</short>
+    <type>FN</type>
+    <usage>Output model filename</usage>
+    <tooltip />
+    <manpage>Name of output model file.  If this option is not entered, the second non-option argument will be taken as the output file.</manpage>
+  </Field>
+  <Field name="LengthOfPieces">
+    <short>length</short>
+    <type>I</type>
+    <usage>Number of points to put in each new contour</usage>
+    <tooltip />
+    <manpage>The length of the new contours, i.e., the number of points to put in each.  The actual length can be affected by the entry for \fB-overlap\fR.  If -1 is entered and the \fB-number\fR option is not, the length will be the default for breaking up contours from patch tracking in Etomo, which is the Z size in the model divided by 5, but no less than 16.  The default if neither this option nor \fB-number\fR is entered is to leave contours as they are.  Unless this option is entered with a -1, it cannot be entered with \fB-number\fR.</manpage>
+  </Field>
+  <Field name="MinimumOverlap">
+    <short>overlap</short>
+    <type>I</type>
+    <usage>Minimum overlap between pieces, or -1 for 0 overlap</usage>
+    <tooltip />
+    <manpage>The minimum number of points overlapping between pieces.  If the minimum overlap is 0 or positive, then all new contours will be given the same number of points, but both the overlap and the number of contours will vary depending on the length of the original contour.  Enter -1 to enforce zero overlap between contours and have the contours broken into variable lengths, typically less than the specified length.  The default is 4, unless 1 is entered for \fB-length\fR, in which case the default is 0.</manpage>
+  </Field>
+  <Field name="NumberOfPieces">
+    <short>number</short>
+    <type>I</type>
+    <usage>Number of pieces to break longest contours into</usage>
+    <tooltip />
+    <manpage>This option provides an alternative way to specify how to chop up contours.  The maximum number of points in any contour to be processed will be divided by the given number to determine the number of points to require in each new contour.  This option cannot be entered if \fB-length\fR is entered with a value greater than 0.</manpage>
+  </Field>
+  <Field name="AssignSurfaces">
+    <short>surfaces</short>
+    <type>B</type>
+    <usage>Give each new contour a surface number equal to old contour number</usage>
+    <tooltip />
+    <manpage>Give each new contour a surface number equal to the number of the contour from which it came.  This will replace any existing surface numbers and invalidate any fine-grained information that applies to surfaces.</manpage>
+  </Field>
+  <Field name="BreakAtColors">
+    <short>colors</short>
+    <type>I</type>
+    <usage>Break contours at color changes into new surfaces (1) or objects (2)</usage>
+    <tooltip />
+    <manpage>Break contours at fine-grained color changes, assigning them to new surfaces or new objects with the appropriate color if 1 or 2 is entered, respectively.  None of the options related to length-based chopping (\fB-length\fR, \fB-overlap\fR, \fB-number\fR, or \fB-surfaces\fR) may be entered with this option.  See above for details.</manpage>
+  </Field>
+  <Field name="ObjectsToDo">
+    <short>objects</short>
+    <type>LI</type>
+    <usage>List of objects to chop up (default is all)</usage>
+    <tooltip />
+    <manpage>List of objects to chop up, a comma-separate list of ranges.  The default is to chop up all objects.</manpage>
+  </Field>
+  <Field name="usage">
+    <short>help</short>
+    <type>B</type>
+    <usage>Print help output</usage>
+    <tooltip />
+    <manpage />
+  </Field>
+</autodoc>

@@ -1,0 +1,537 @@
+
+Input image file:: t1.mrc
+ Dimensions:    127    121     21   Pixel size:         1          1          1
+Mode:  1               Min, max, mean:          451         1043       997.14
+raw2mrc: Converted to mrc format.                       25-Sep-26  12:36:12
+
+Opened OLD file: t1.rawtlt
+
+Opened OLD file: t1.prexf
+To compensate for larger tilt increment, residual change criteria for deletion
+  were scaled by 1.952: to  0.078   3.90
+ First round of tracking will be split in two
+Starting object   1, round  1,   7 contours
+add    0    9    4   62.8   58.5   62.0   61.6      177633       12231      0.0000
+add    0    9    7   65.8   60.2   62.1   61.6      177625       17708      0.0000
+add    0    9    2   66.2   60.2   62.1   61.6      177309       17708      0.0000
+add    0    9    5   63.9   62.0   62.1   61.5      178425       17708      0.0000
+add    0    9    3   63.3   59.7   62.0   61.6      178454       17708      0.0000
+add    0    9    1   60.7   59.8   62.2   61.6      178482       17708      0.0000
+add    0    9    6   62.1   61.6   62.2   61.5      177971       16759      0.0000
+view  10, pass 1,   7 points (-  0), mean, sd, max dev:    0.07    0.03    0.11
+ Rescue-density , sec   8,  obj   4, at    -3.1     1.5, dist=  3.5, dens=     7716, crit=    10042, min=    12231
+BKGD-DENS:   4  9180.00   150.80  61.559   6.604
+JUST GO WITH RESCUE 8303.7
+add    0    8    4   62.4   60.0   67.0   61.9      233020        8304      0.0000
+ Rescue-density , sec   8,  obj   7, at     3.5     0.9, dist=  3.7, dens=     8304, crit=    15576, min=    17708
+BKGD-DENS:   7 10196.45   103.60  98.001   5.359
+NEIGH-BK:  15   262.40     8.01 1004.421 crit -27.69
+ACCEPT ANYWAY 8303.7
+ Rescue-density , sec   8,  obj   7, at     3.7    -2.7, dist=  4.6, dens=     8192, crit=    15576, min=    17708
+BKGD-DENS:   7  8192.45    89.03  81.540   5.277
+NEIGH-BK:  15   262.40     8.01 990.529 crit -22.63
+ACCEPT ANYWAY 8192.5
+Trials: 1    7    64.0    60.9    67.5    61.9   8303.7  1.4012        54.7    64.3    58.7    61.3   8192.5  1.5624
+add    0    8    7   64.0   60.9   67.5   61.9      214275        8304      0.0000
+ Rescue-density , sec   8,  obj   2, at     3.5     0.9, dist=  3.7, dens=     8304, crit=    15659, min=    17708
+BKGD-DENS:   2 10196.45   103.60  98.001   5.359
+NEIGH-BK:  16   264.83    11.60 692.718 crit -27.69
+ACCEPT ANYWAY 8303.7
+ Rescue-density , sec   8,  obj   2, at     4.4    -2.6, dist=  5.1, dens=     8192, crit=    15659, min=    17708
+BKGD-DENS:   2  8192.45   121.50  71.693   5.277
+NEIGH-BK:  16   264.83    11.60 683.135 crit -19.60
+ACCEPT ANYWAY 8192.5
+Trials: 1    2    64.2    60.9    67.5    61.9   8303.7  1.3783        53.8    64.3    58.4    61.4   8192.5  1.6073
+add    0    8    2   64.2   60.9   67.5   61.9      206744        8304      0.0000
+ Rescue-density , sec   8,  obj   5, at    -0.7    -0.2, dist=  0.7, dens=     9180, crit=    15612, min=    17708
+BKGD-DENS:   5 10196.45    86.46 111.906   5.359
+NEIGH-BK:  17   267.25    15.20 586.223 crit -31.97
+ACCEPT ANYWAY 9180.0
+ Rescue-density , sec   8,  obj   5, at     4.2    -4.6, dist=  6.2, dens=     7716, crit=    15612, min=    17708
+BKGD-DENS:   5  8192.45   106.73  77.619   5.620
+NEIGH-BK:  17   267.25    15.20 489.912 crit -21.42
+ACCEPT ANYWAY 7715.7
+Trials: 1    5    68.3    62.1    67.3    61.8   9180.0  0.9499        56.5    65.6    60.2    61.4   7715.7  1.6241
+add    0    8    5   68.3   62.1   67.3   61.8      221625        9180      0.0000
+ Rescue-density , sec   8,  obj   3, at    -0.7    -0.2, dist=  0.7, dens=     9180, crit=    15635, min=    17708
+BKGD-DENS:   3 10196.45    86.46 111.906   5.359
+NEIGH-BK:  18   267.25    15.20 586.223 crit -31.97
+ACCEPT ANYWAY 9180.0
+ Rescue-distance, sec   8,  obj   3, at     7.7    -8.8, dist= 11.7, dens=     8304, crit=    15635, min=    17708
+BKGD-DENS:   3 10196.45   101.46  93.791   5.359
+NEIGH-BK:  18   267.25    15.20 528.584 crit -26.40
+ACCEPT ANYWAY 8303.7
+Trials: 1    3    68.4    61.5    67.3    61.8   9180.0  1.0270        57.8    71.3    65.7    62.2   8303.7  2.3384
+add    0    8    3   68.4   61.5   67.3   61.8      209516        9180      0.0000
+ Rescue-density , sec   8,  obj   1, at    -0.6     0.9, dist=  1.1, dens=     9180, crit=    15264, min=    17708
+BKGD-DENS:   1 10196.45    86.46 111.906   5.359
+NEIGH-BK:  19   267.25    15.20 586.223 crit -31.97
+ACCEPT ANYWAY 9180.0
+ Rescue-distance, sec   8,  obj   1, at     6.4   -11.9, dist= 13.5, dens=     8194, crit=    15264, min=    17708
+BKGD-DENS:   1 10196.45   139.60  62.426   5.360
+NEIGH-BK:  19   267.25    15.20 521.359 crit -16.75
+ACCEPT ANYWAY 8193.8
+Trials: 1    1    67.7    60.8    67.4    61.9   9180.0  1.0192        61.2    74.9    67.4    63.1   8193.8  2.4780
+add    0    8    1   67.7   60.8   67.4   61.9      134004        9180      0.0000
+ Rescue-density , sec   8,  obj   6, at    -0.7    -0.2, dist=  0.7, dens=     9578, crit=    14862, min=    16759
+BKGD-DENS:   6 10196.45    86.46 111.906   5.359
+NEIGH-BK:  20   269.14    21.35 436.023 crit -31.97
+ACCEPT ANYWAY 9577.9
+ Rescue-density , sec   8,  obj   6, at     1.4    -1.2, dist=  1.8, dens=     9578, crit=    14862, min=    16759
+BKGD-DENS:   6 10196.45    86.46 111.906   5.359
+NEIGH-BK:  20   269.14    21.35 436.023 crit -31.97
+ACCEPT ANYWAY 9577.9
+Trials: 1    6    67.6    61.9    67.3    61.8   9577.9  1.0337        65.6    63.0    67.4    61.8   9577.9  1.2397
+add    0    8    6   67.6   61.9   67.3   61.8      227879        9578      0.0000
+view   9, pass 1,   7 points (-  0), mean, sd, max dev:    0.13    0.07    0.21
+add    0    7    4   69.7   64.2   72.0   62.8      232910        8354      0.0000
+ Rescue-density , sec   7,  obj   7, at     4.0    -0.2, dist=  4.0, dens=    10025, crit=    11668, min=     8304
+BKGD-DENS:   7  9651.33   138.03  82.977   9.555
+JUST GO WITH RESCUE 9226.0
+add    0    7    7   68.4   63.1   72.0   62.8      246064        9226      0.0000
+ Rescue-density , sec   7,  obj   2, at     4.0    -0.2, dist=  4.0, dens=    10025, crit=    11719, min=     8304
+BKGD-DENS:   2  9651.33   138.03  82.977   9.555
+JUST GO WITH RESCUE 9226.0
+add    0    7    2   68.1   63.1   72.0   62.8      246761        9226      0.0000
+ Rescue-density , sec   7,  obj   5, at     0.9     0.8, dist=  1.3, dens=    10025, crit=    11904, min=     9180
+BKGD-DENS:   5  9651.33   138.03  82.977   9.555
+JUST GO WITH RESCUE 10025.3
+add    0    7    5   70.6   62.3   71.9   62.8      245344       10025      0.0000
+ Rescue-density , sec   7,  obj   3, at     0.9    -1.2, dist=  1.6, dens=     9651, crit=    11918, min=     9180
+BKGD-DENS:   3  9651.33   138.03  82.977   9.555
+JUST GO WITH RESCUE 10025.3
+add    0    7    3   71.4   64.4   71.9   62.8      244086       10025      0.0000
+ Rescue-density , sec   7,  obj   1, at    -0.1    -1.2, dist=  1.3, dens=     9651, crit=    11688, min=     9180
+BKGD-DENS:   1  9651.33   138.03  82.977   9.555
+JUST GO WITH RESCUE 9651.3
+add    0    7    1   72.0   64.3   71.9   62.8      238529        9651      0.0000
+ Rescue-density , sec   7,  obj   6, at    -0.1    -0.2, dist=  0.2, dens=     9651, crit=    11537, min=     9578
+BKGD-DENS:   6  9651.33   138.03  82.977   9.555
+JUST GO WITH RESCUE 9651.3
+add    0    7    6   71.9   62.7   71.9   62.8      236688        9651      0.0000
+view   8, pass 1,   7 points (-  0), mean, sd, max dev:    0.05    0.02    0.10
+Metro error #3, Restarting with step factor of 0.22
+Metro error #3, Restarting with step factor of 0.28
+Metro error #3, Restarting with step factor of 0.19
+Metro error #3, Restarting with step factor of 0.12
+   4 views, 1000 cycles, F =     0.328696, mean residual =    0.25
+tiltalign error going to view 8 even after varying step factor
+add    0    6    4   71.8   62.9   76.4   63.0      251865        9108      0.0000
+ Rescue-density , sec   6,  obj   7, at     4.4    -0.0, dist=  4.4, dens=     9524, crit=    10389, min=     8304
+BKGD-DENS:   7  9523.72   103.00  84.947   3.071
+JUST GO WITH RESCUE 9108.3
+add    0    6    7   71.8   62.9   76.4   63.0      272129        9108      0.0000
+ Rescue-density , sec   6,  obj   2, at     4.4    -0.0, dist=  4.4, dens=     9524, crit=    10428, min=     8304
+BKGD-DENS:   2  9523.72   103.00  84.947   3.071
+JUST GO WITH RESCUE 9108.3
+add    0    6    2   71.8   62.9   76.4   63.0      273205        9108      0.0000
+ Rescue-density , sec   6,  obj   5, at     0.7     0.0, dist=  0.7, dens=     9524, crit=    10711, min=     9180
+BKGD-DENS:   5  9523.72   103.00  84.947   3.071
+JUST GO WITH RESCUE 9523.7
+add    0    6    5   76.3   63.0   76.7   63.0      278187        9524      0.0000
+ Rescue-density , sec   6,  obj   3, at     0.7     0.0, dist=  0.7, dens=     9524, crit=    10722, min=     9180
+BKGD-DENS:   3  9523.72   103.00  84.947   3.071
+JUST GO WITH RESCUE 9523.7
+add    0    6    3   76.4   63.0   76.7   63.0      279040        9524      0.0000
+ Rescue-density , sec   6,  obj   1, at     0.7     0.0, dist=  0.7, dens=     9524, crit=    10482, min=     9180
+BKGD-DENS:   1  9523.72   103.00  84.947   3.071
+JUST GO WITH RESCUE 9523.7
+add    0    6    1   76.5   63.0   76.7   63.0      270960        9524      0.0000
+ Rescue-density , sec   6,  obj   6, at    -0.3     0.0, dist=  0.3, dens=     9524, crit=    10369, min=     9578
+BKGD-DENS:   6  9523.72   103.00  84.947   3.071
+JUST GO WITH RESCUE 9523.7
+add    0    6    6   76.7   63.0   76.7   63.0      272451        9524      0.0000
+view   7, pass 1,   7 points (-  0), mean, sd, max dev:    0.12    0.07    0.20
+   5 views,    1 cycles, F =     0.455271, mean residual =    0.35
+add    0    5    4   75.9   63.0   74.6   58.8      220207        9015      0.0000
+ Rescue-distance, sec   5,  obj   7, at    -9.5    -5.2, dist= 10.8, dens=     9015, crit=     3294, min=     8304
+BKGD-DENS:   7  9014.86    85.67  88.396   4.109
+Trials: 1    7    75.9    63.0    74.6    58.8   9014.9  0.9897        85.4    64.4    75.5    58.8   4528.9  2.2661
+add    0    5    7   75.9   63.0   74.6   58.8      171862        9015      0.0000
+ Rescue-distance, sec   5,  obj   2, at   -10.4    -5.2, dist= 11.7, dens=     9015, crit=     3304, min=     8304
+BKGD-DENS:   2  9014.86    85.67  88.396   4.109
+Trials: 1    2    75.9    63.0    74.6    58.8   9014.9  1.0701        85.7    64.5    75.6    58.8   5255.6  2.2882
+add    0    5    2   75.9   63.0   74.6   58.8      157337        9015      0.0000
+Trials: 1    5    74.5    58.8    74.6    59.0   9014.9  1.0259        85.5    60.5    75.3    58.9   9014.9  2.1391
+add    0    5    5   74.5   58.8   74.6   59.0      171795        9015      0.0000
+ Rescue-distance, sec   5,  obj   3, at    -3.5   -11.3, dist= 11.9, dens=     9015, crit=     3620, min=     9180
+BKGD-DENS:   3  9014.86   116.03  85.219   4.112
+Trials: 1    3    74.6    58.8    74.6    59.0   9014.9  0.6746        78.4    69.7    74.5    58.7   5891.8  2.3045
+add    0    5    3   74.6   58.8   74.6   59.0      176113        9015      0.0000
+ Rescue-distance, sec   5,  obj   1, at    -3.5   -11.3, dist= 11.9, dens=     9015, crit=     3499, min=     9180
+BKGD-DENS:   1  9014.86   116.03  85.219   4.112
+Trials: 1    1    74.6    58.9    74.6    59.0   9014.9  0.6694        77.8    69.7    74.5    58.7   5891.8  2.2831
+add    0    5    1   74.6   58.9   74.6   59.0      176441        9015      0.0000
+ Rescue-density , sec   5,  obj   6, at    -5.4    -3.9, dist=  6.6, dens=       92, crit=     3460, min=     9524
+Trials: 1    6    74.7    59.0    74.6    59.0   9014.9  0.0028        55.4    22.1    39.3    10.3      0.0  3.2129
+add    0    5    6   74.7   59.0   74.6   59.0        3441        9015      0.0000
+view   6, pass 1,   7 points (-  0), mean, sd, max dev:    0.08    0.05    0.13
+   6 views,    1 cycles, F =     0.644725, mean residual =    0.46
+   6 views,    1 cycles, F =     0.635888, mean residual =    0.45
+add    0   11    4   59.9   57.0   66.4   58.6      421148       14318      0.0000
+add    0   11    7   65.8   59.9   68.1   58.5      484162       14577      0.0000
+add    0   11    2   66.4   60.1   68.1   58.5      486835       14577      0.0000
+add    0   11    5   70.5   59.6   68.2   58.4      485600       14577      0.0000
+add    0   11    3   69.8   57.6   68.2   58.6      486743       14577      0.0000
+add    0   11    1   69.1   57.9   68.2   58.6      482340       14577      0.0000
+Trials: 1    6    69.3    58.6    68.2    58.5  14576.6  1.1222        67.4    59.5    68.2    58.4  14576.6  1.1473
+add    0   11    6   69.3   58.6   68.2   58.5      488436       14577      0.0000
+view  12, pass 1,   7 points (-  0), mean, sd, max dev:    0.32    0.15    0.54
+   7 views,  586 cycles, F =     0.640516, mean residual =    0.38
+ Rescue-distance, sec  12,  obj   4, at    15.3     0.1, dist= 15.3, dens=     4273, crit=     8521, min=     8304
+BKGD-DENS:   4  3687.20   133.60  30.391   3.038
+NEIGH-BK:  21   269.87    19.08 209.856 crit  -6.89
+ACCEPT ANYWAY 4272.9
+ Rescue-density , sec  12,  obj   4, at     0.7    -2.3, dist=  2.4, dens=     8002, crit=     8521, min=     8304
+BKGD-DENS:   4  8403.41   142.20  53.960   8.301
+JUST GO WITH RESCUE 8002.3
+Trials: 2    4    38.0    57.1    53.3    57.1   4272.9  2.6978        64.6    59.6    65.7    57.7   8002.3  0.7799
+add    0   12    4   64.6   59.6   65.7   57.7      372828        8002      0.0000
+ Rescue-density , sec  12,  obj   7, at    -1.2    -1.2, dist=  1.6, dens=     6315, crit=    10253, min=     8304
+BKGD-DENS:   7  7506.72    96.67  63.693   6.094
+JUST GO WITH RESCUE 7506.7
+add    0   12    7   68.8   58.8   67.8   57.8      366191        7507      0.0000
+ Rescue-density , sec  12,  obj   2, at    -1.8    -1.2, dist=  2.2, dens=     5975, crit=    10277, min=     8304
+BKGD-DENS:   2  7506.72    96.67  63.693   6.094
+JUST GO WITH RESCUE 7506.7
+add    0   12    2   70.0   58.8   68.2   57.8      360253        7507      0.0000
+ Rescue-density , sec  12,  obj   5, at    -3.7     1.2, dist=  3.9, dens=     5587, crit=    10502, min=     9015
+BKGD-DENS:   5  7506.72    96.67  63.693   6.094
+JUST GO WITH RESCUE 7506.7
+add    0   12    5   72.7   57.5   69.3   58.2      337595        7507      0.0000
+ Rescue-density , sec  12,  obj   3, at    -4.6    -1.1, dist=  4.7, dens=     6801, crit=    10509, min=     9015
+BKGD-DENS:   3  7506.72    96.67  63.693   6.094
+JUST GO WITH RESCUE 7506.7
+add    0   12    3   74.4   59.3   69.4   57.9      327010        7507      0.0000
+ Rescue-density , sec  12,  obj   1, at    -1.0     1.1, dist=  1.5, dens=     6315, crit=    10359, min=     9015
+BKGD-DENS:   1  7506.72    96.67  63.693   6.094
+JUST GO WITH RESCUE 7318.1
+add    0   12    1   68.5   57.1   68.0   58.1      361466        7318      0.0000
+ Rescue-density , sec  12,  obj   6, at    -3.2    -1.1, dist=  3.4, dens=     5587, crit=    10288, min=     9015
+BKGD-DENS:   6  7506.72    96.67  63.693   6.094
+JUST GO WITH RESCUE 7506.7
+ Rescue-density , sec  12,  obj   6, at    -0.5    -1.2, dist=  1.3, dens=     6315, crit=    10288, min=     9015
+BKGD-DENS:   6  7506.72    96.67  63.693   6.094
+JUST GO WITH RESCUE 7506.7
+Trials: 2    6    71.7    58.8    68.8    57.9   7506.7  1.3450        67.6    58.6    67.5    57.8   7506.7  1.0821
+add    0   12    6   67.6   58.6   67.5   57.8      372255        7507      0.0000
+view  13, pass 1,   7 points (-  0), mean, sd, max dev:    0.40    0.11    0.60
+Metro error #3, Restarting with step factor of 0.22
+Metro error #3, Restarting with step factor of 0.28
+Metro error #3, Restarting with step factor of 0.19
+Metro error #3, Restarting with step factor of 0.12
+   8 views, 1000 cycles, F =     0.736326, mean residual =    0.39
+tiltalign error going to view 13 even after varying step factor
+ Rescue-density , sec  13,  obj   4, at    -3.4     3.2, dist=  4.7, dens=     7317, crit=     7396, min=     8002
+BKGD-DENS:   4  7316.72   134.13  42.226  17.109
+JUST GO WITH RESCUE 6436.3
+add    0   13    4   64.5   57.5   60.6   61.2      270070        6436      0.0000
+ Rescue-density , sec  13,  obj   7, at    -5.4     3.3, dist=  6.3, dens=     7317, crit=     9722, min=     7507
+BKGD-DENS:   7  7316.72   134.13  42.226  17.109
+JUST GO WITH RESCUE 6814.2
+add    0   13    7   67.3   57.8   61.6   61.3      266993        6814      0.0000
+ Rescue-density , sec  13,  obj   2, at    -5.5     3.4, dist=  6.5, dens=     7317, crit=     9743, min=     7507
+BKGD-DENS:   2  7316.72   113.06  50.613  15.959
+JUST GO WITH RESCUE 7316.7
+add    0   13    2   67.5   57.9   62.5   61.4      256563        7317      0.0000
+ Rescue-density , sec  13,  obj   5, at    -3.7    -1.2, dist=  3.9, dens=     7317, crit=     9940, min=     7507
+BKGD-DENS:   5  7316.72   113.06  50.613  15.959
+JUST GO WITH RESCUE 7316.7
+add    0   13    5   63.6   61.5   60.3   60.8      277099        7317      0.0000
+ Rescue-density , sec  13,  obj   3, at    -3.6    -0.1, dist=  3.6, dens=     7317, crit=     9946, min=     7507
+BKGD-DENS:   3  7316.72   113.06  50.613  15.959
+JUST GO WITH RESCUE 7316.7
+add    0   13    3   63.9   61.4   60.4   60.9      275895        7317      0.0000
+ Rescue-density , sec  13,  obj   1, at    -1.1    -0.1, dist=  1.1, dens=     7317, crit=     9796, min=     7318
+BKGD-DENS:   1  7316.72   113.06  50.613  15.959
+JUST GO WITH RESCUE 7316.7
+add    0   13    1   60.9   61.0   59.9   60.9      275201        7317      0.0000
+ Rescue-density , sec  13,  obj   6, at    -1.1    -0.1, dist=  1.1, dens=     7317, crit=     9753, min=     7507
+BKGD-DENS:   6  7316.72   113.06  50.613  15.959
+JUST GO WITH RESCUE 7316.7
+add    0   13    6   60.8   61.0   59.9   60.9      277139        7317      0.0000
+view  14, pass 1,   7 points (-  0), mean, sd, max dev:    0.78    0.52    1.79
+Metro error #3, Restarting with step factor of 0.22
+Metro error #3, Restarting with step factor of 0.28
+Metro error #3, Restarting with step factor of 0.19
+Metro error #3, Restarting with step factor of 0.12
+   9 views, 1000 cycles, F =     0.781694, mean residual =    0.51
+tiltalign error going to view 14 even after varying step factor
+add    0   14    4   62.0   61.9   58.9   59.7      200005        6066      0.0000
+ Rescue-density , sec  14,  obj   7, at    -2.1    -1.2, dist=  2.4, dens=     6868, crit=     8042, min=     6814
+BKGD-DENS:   7  6707.34   167.47  31.561   5.042
+JUST GO WITH RESCUE 6707.3
+add    0   14    7   61.2   61.4   58.9   59.8      214980        6707      0.0000
+ Rescue-density , sec  14,  obj   2, at    -2.1    -1.2, dist=  2.4, dens=     6868, crit=     8245, min=     7317
+BKGD-DENS:   2  6707.34   167.47  31.561   5.042
+JUST GO WITH RESCUE 6707.3
+add    0   14    2   61.2   61.4   58.9   59.8      214767        6707      0.0000
+ Rescue-density , sec  14,  obj   5, at     0.7     1.2, dist=  1.4, dens=     6868, crit=     8619, min=     7317
+BKGD-DENS:   5  6707.34   167.47  31.561   5.042
+JUST GO WITH RESCUE 6867.8
+add    0   14    5   58.2   59.3   58.7   60.2      227041        6868      0.0000
+ Rescue-density , sec  14,  obj   3, at    -0.2     1.2, dist=  1.2, dens=     6707, crit=     8624, min=     7317
+BKGD-DENS:   3  6707.34   167.47  31.561   5.042
+JUST GO WITH RESCUE 6867.8
+add    0   14    3   59.1   59.2   58.8   60.2      224416        6868      0.0000
+ Rescue-density , sec  14,  obj   1, at    -0.3     0.0, dist=  0.3, dens=     6868, crit=     8502, min=     7317
+BKGD-DENS:   1  6707.34   167.47  31.561   5.042
+JUST GO WITH RESCUE 6867.8
+add    0   14    1   58.9   59.7   58.7   60.0      219660        6868      0.0000
+ Rescue-density , sec  14,  obj   6, at    -0.2     0.1, dist=  0.3, dens=     6707, crit=     8452, min=     7317
+BKGD-DENS:   6  6707.34   167.47  31.561   5.042
+JUST GO WITH RESCUE 6867.8
+add    0   14    6   58.8   60.1   58.8   60.1      218863        6868      0.0000
+view  15, pass 1,   7 points (-  0), mean, sd, max dev:    0.08    0.04    0.11
+  10 views,  191 cycles, F =     0.619191, mean residual =    0.42
+add    0   15    4   59.2   58.9   61.4   64.4      169986        4775      0.0000
+add    0   15    7   59.1   59.3   61.4   64.4      170089        5494      0.0000
+add    0   15    2   59.1   59.3   61.4   64.4      169704        5494      0.0000
+add    0   15    5   61.3   64.7   61.4   64.1      169156        5995      0.0000
+add    0   15    3   61.4   64.6   61.4   64.1      168730        5995      0.0000
+add    0   15    1   61.4   64.4   61.4   64.2      170353        5995      0.0000
+add    0   15    6   61.4   64.1   61.3   64.2      170536        5995      0.0000
+view  16, pass 1,   7 points (-  0), mean, sd, max dev:    0.12    0.04    0.17
+  11 views,  607 cycles, F =     0.540168, mean residual =    0.38
+  11 views,    1 cycles, F =     0.540168, mean residual =    0.38
+Trials: 2    4    74.0    57.6    79.7    63.5   8400.6  1.9073        82.0    62.5    80.0    63.5   8400.6  1.2475
+add    0    4    4   82.0   62.5   80.0   63.5      171061        8401      0.0000
+add    0    4    7   74.4   58.4   79.7   63.5      170123        8401      0.0000
+add    0    4    2   74.3   58.3   79.7   63.5      170124        8401      0.0000
+add    0    4    5   77.5   62.8   80.1   63.4      175958        8401      0.0000
+add    0    4    3   80.5   63.3   80.0   63.4      173214        8401      0.0000
+add    0    4    1   80.3   63.3   80.1   63.4      174425        8401      0.0000
+add    0    4    6   79.9   63.5   80.1   63.4      174465        8401      0.0000
+view   5, pass 1,   7 points (-  0), mean, sd, max dev:    0.18    0.07    0.28
+  12 views,  695 cycles, F =     0.593153, mean residual =    0.39
+ Rescue-distance, sec   3,  obj   4, at     0.9   -11.2, dist= 11.2, dens=      191, crit=     2624, min=     4775
+BKGD-DENS:   4   191.33   169.20   0.109   3.577
+JUST GO WITH RESCUE 0.0
+Trials: 2    4    51.6    88.8    63.4   104.3      0.0  3.1671        82.0    62.7    86.9    60.0   7147.5  0.6224
+add    0    3    4   82.0   62.7   86.9   60.0      149004        7147      0.0000
+ Rescue-distance, sec   3,  obj   7, at    13.1    -9.4, dist= 16.1, dens=     6807, crit=     3476, min=     5494
+BKGD-DENS:   7  3276.46   208.06  19.525   4.632
+Trials: 2    7    73.8    68.7    72.4    59.3   3305.5  2.0534        82.7    62.4    86.5    60.1   7147.5  0.9568
+add    0    3    7   82.7   62.4   86.5   60.1      146940        7147      0.0000
+ Rescue-distance, sec   3,  obj   2, at    11.1    -7.1, dist= 13.2, dens=     7411, crit=     3521, min=     5494
+BKGD-DENS:   2  7479.72   150.83  65.908   2.242
+add    0    3    2   75.7   67.0   87.1   59.9      128197        5029      0.0000
+ Rescue-distance, sec   3,  obj   5, at   -11.2     8.7, dist= 14.2, dens=     7147, crit=     3689, min=     5995
+BKGD-DENS:   5  7147.45    94.17  92.796   8.745
+add    0    3    5   94.5   52.4   82.8   60.7      120137        5178      0.0000
+ Rescue-distance, sec   3,  obj   3, at   -16.3     8.8, dist= 18.5, dens=     7147, crit=     3690, min=     5995
+BKGD-DENS:   3  7147.45    94.17  92.796   8.745
+Trials: 2    3    98.5    52.0    81.7    60.8   5178.2  3.0994        90.9    59.2    83.7    60.5   7147.5  1.5350
+add    0    3    3   90.9   59.2   83.7   60.5      134214        7147      0.0000
+add    0    3    1   89.4   58.8   84.2   60.5      137587        7147      0.0000
+Trials: 2    6    80.9    61.5    85.1    60.2   7147.5  1.4876        84.8    59.9    85.7    60.4   7147.5  1.1185
+add    0    3    6   84.8   59.9   85.7   60.4      145849        7147      0.0000
+view   4, pass 1,   7 points (-  0), mean, sd, max dev:    0.91    0.41    1.53
+Metro error #3, Restarting with step factor of 0.22
+Metro error #3, Restarting with step factor of 0.28
+Metro error #3, Restarting with step factor of 0.19
+Metro error #3, Restarting with step factor of 0.12
+  13 views, 1000 cycles, F =     0.701000, mean residual =    0.51
+tiltalign error going to view 4 even after varying step factor
+ Rescue-distance, sec   2,  obj   4, at   -15.8     9.8, dist= 18.6, dens=     4493, crit=     3095, min=     4775
+BKGD-DENS:   4  6581.66   140.23  48.311   2.974
+Trials: 2    4   106.5    53.0    90.3    62.3   3899.9  3.0746        88.4    60.8    86.1    63.0   6900.0  0.9191
+add    0    2    4   88.4   60.8   86.1   63.0      123290        6900      0.0000
+add    0    2    7   89.4   58.9   85.4   63.1      124080        6900      0.0000
+add    0    2    2   90.1   58.7   85.0   63.1      122423        6900      0.0000
+ Rescue-distance, sec   2,  obj   5, at    13.6    -6.3, dist= 15.0, dens=     2065, crit=     4247, min=     5178
+BKGD-DENS:   5  4900.14    85.20  45.444   3.022
+Trials: 2    5    69.4    67.9    82.6    61.7   4449.1  2.6226        79.4    64.7    88.0    62.3   6508.3  1.6846
+add    0    2    5   79.4   64.7   88.0   62.3      126290        6508      0.0000
+ Rescue-distance, sec   2,  obj   3, at    13.3     9.2, dist= 16.1, dens=     3518, crit=     4311, min=     5995
+BKGD-DENS:   3  5957.07   152.67  58.434   2.936
+Trials: 2    3    71.4    54.4    84.3    63.2   5559.1  2.7341        81.0    60.3    87.9    62.9   6889.3  1.6269
+add    0    2    3   81.0   60.3   87.9   62.9      131251        6889      0.0000
+add    0    2    1   77.8   63.9   87.7   62.3      123256        6508      0.0000
+add    0    2    6   87.3   62.6   86.7   62.8      126200        6900      0.0000
+view   3, pass 1,   7 points (-  0), mean, sd, max dev:    0.60    0.27    0.99
+  14 views,  293 cycles, F =     0.763225, mean residual =    0.54
+Trials: 2    4    81.2    64.3    87.9    61.9   6191.9  1.7859        90.1    61.6    84.6    62.3   6464.3  1.5716
+add    0    1    4   90.1   61.6   84.6   62.3      108223        6464      0.0000
+add    0    1    7   84.5   63.4   87.2   62.1      110137        6192      0.0000
+add    0    1    2   84.2   63.5   87.2   62.1      109282        6192      0.0000
+add    0    1    5   88.6   61.6   85.0   62.3      107172        6192      0.0000
+add    0    1    3   88.0   62.2   85.6   62.3      109573        6464      0.0000
+add    0    1    1   86.4   62.3   86.5   62.2      109637        6192      0.0000
+add    0    1    6   85.8   62.2   86.5   62.3      110361        6192      0.0000
+view   2, pass 1,   7 points (-  0), mean, sd, max dev:    0.33    0.21    0.59
+Metro error #3, Restarting with step factor of 0.22
+Metro error #3, Restarting with step factor of 0.28
+Metro error #3, Restarting with step factor of 0.19
+Metro error #3, Restarting with step factor of 0.12
+  15 views,  733 cycles, F =     0.781787, mean residual =    0.56
+ Rescue-distance, sec   0,  obj   4, at    11.9    -1.6, dist= 12.0, dens=     5848, crit=     3510, min=     4775
+BKGD-DENS:   4  6400.07   123.07  47.698   4.620
+add    0    0    4   79.3   62.3   90.9   60.4       91908        3709      0.0000
+add    0    0    7   84.6   62.2   90.1   60.4      101745        6497      0.0000
+add    0    0    2   84.2   62.2   90.4   60.5      100577        6400      0.0000
+add    0    0    5   94.8   60.4   86.0   60.7       90206        6497      0.0000
+add    0    0    3   95.1   60.0   86.2   60.7       92064        6497      0.0000
+add    0    0    1   91.1   60.4   87.6   60.7       99437        6497      0.0000
+add    0    0    6   87.6   60.7   89.0   60.7       99808        6497      0.0000
+view   1, pass 1,   7 points (-  0), mean, sd, max dev:    1.08    0.48    1.58
+Metro error #3, Restarting with step factor of 0.22
+  16 views,  907 cycles, F =     0.601532, mean residual =    0.44
+  16 views,    1 cycles, F =     0.601532, mean residual =    0.44
+add    0   16    4   61.4   67.1   52.1   63.3       99163        5666      0.0000
+add    0   16    7   61.4   65.6   52.0   63.3       98927        5666      0.0000
+add    0   16    2   61.4   65.7   52.0   63.3       98703        5963      0.0000
+add    0   16    5   52.0   59.8   55.1   63.9      131452        5196      0.0000
+add    0   16    3   53.6   60.3   54.4   63.9      122929        5666      0.0000
+add    0   16    1   51.1   63.1   55.5   63.7      135501        4533      0.0000
+add    0   16    6   54.4   63.8   54.5   63.6      124060        5196      0.0000
+view  17, pass 1,   7 points (-  0), mean, sd, max dev:    0.56    0.39    1.28
+Metro error #3, Restarting with step factor of 0.22
+Metro error #3, Restarting with step factor of 0.28
+Metro error #3, Restarting with step factor of 0.19
+Metro error #3, Restarting with step factor of 0.12
+  17 views, 1000 cycles, F =     0.723560, mean residual =    0.53
+tiltalign error going to view 17 even after varying step factor
+add    0   17    4   43.8   58.8   50.3   58.3      102689        3315      0.0000
+add    0   17    7   45.0   59.5   51.6   58.4      104761        3315      0.0000
+add    0   17    2   44.2   59.1   50.3   58.3      103087        2620      0.0000
+ Rescue-distance, sec  17,  obj   5, at    10.7    -8.1, dist= 13.4, dens=     2177, crit=      713, min=     5178
+BKGD-DENS:   5  3278.27   192.33  13.932   5.554
+ Rescue-distance, sec  17,  obj   5, at   -10.1    -4.8, dist= 11.2, dens=     5675, crit=      713, min=     5178
+BKGD-DENS:   5  5787.28   177.24  28.301   7.247
+Trials: 1    5    71.7    68.5    73.4    61.3   1865.8  1.8171        58.9    63.2    48.9    58.2   2676.0  1.9373
+add    0   17    5   71.7   68.5   73.4   61.3       76073        1866      0.0000
+ Rescue-distance, sec  17,  obj   3, at    10.5    -0.3, dist= 10.6, dens=     2177, crit=      713, min=     5666
+BKGD-DENS:   3  3278.27   175.27  12.968   5.969
+ Rescue-distance, sec  17,  obj   3, at    -9.8    -2.7, dist= 10.1, dens=     5675, crit=      713, min=     5666
+BKGD-DENS:   3  5787.28   177.24  28.301   7.247
+Trials: 1    3    71.7    61.0    73.5    60.3   3278.3  1.2186        59.3    60.6    49.2    58.3   3502.8  2.0859
+add    0   17    3   71.7   61.0   73.5   60.3       75360        3278      0.0000
+ Rescue-distance, sec  17,  obj   1, at   -13.1    -1.2, dist= 13.2, dens=     6004, crit=      713, min=     4533
+BKGD-DENS:   1  3278.27   198.60  13.106   5.264
+add    0   17    1   67.0   60.0   74.9   60.5       40728        1067      0.0000
+ Rescue-distance, sec  17,  obj   6, at   -15.4    -1.5, dist= 15.4, dens=     5787, crit=      713, min=     5196
+BKGD-DENS:   6  5348.59   160.80  28.082   5.534
+add    0   17    6   63.6   59.6   48.6   58.5       59225        1522      0.0000
+view  18, pass 1,   7 points (-  2), mean, sd, max dev:    0.60    0.53    1.22
+Metro error #3, Restarting with step factor of 0.22
+Metro error #3, Restarting with step factor of 0.28
+Metro error #3, Restarting with step factor of 0.19
+Metro error #3, Restarting with step factor of 0.12
+  18 views, 1000 cycles, F =     1.140651, mean residual =    0.84
+tiltalign error going to view 18 even after varying step factor
+big res  3   1.41 0.50 2   0.8840  0.4380   0.0781   0.0145   0.0899   4.7086  3.9036
+big res  1   1.68 0.50 2   0.9245  0.4028   0.0781   0.0188   0.0557   6.8965  3.9036
+big res  6   2.11 0.50 2   1.0577  0.5233   0.0781  -0.0101   0.0779   6.7155  3.9036
+   3 pts deleted for pass 2, conts:   3   1   6
+  18 views,    8 cycles, F =     0.926173, mean residual =    0.63
+BKGD-DENS:   3  5674.54   120.33  44.957   9.165
+JUST GO WITH RESCUE 2824.3
+Trials: 2    3    63.4    60.1    56.2    58.8      0.0  1.8072        51.8    63.9    52.6    59.4   2824.3  0.5066
+add    0   17    3   51.8   63.9   52.6   59.4       59225        2824      0.0000
+BKGD-DENS:   1  1831.27   260.67   5.960   2.834
+NEIGH-BK:  26  2244.81   490.71  -3.656 crit   0.63
+BKGD-DENS:   1  5674.54   120.33  44.957   9.165
+Trials: 2    1    63.3    59.3    56.2    58.8      0.0  1.7861        53.8    63.4    53.5    59.1   4397.1  0.4781
+add    0   17    1   53.8   63.4   53.5   59.1       59225        4397      0.0000
+BKGD-DENS:   6  5787.28   177.24  28.301   7.247
+add    0   17    6   60.2   59.6   54.6   58.8       59225        3503      0.0000
+   3 pts added on pass 2, conts:   3   1   6
+view  18, pass 2,   7 points (-  2), mean, sd, max dev:    1.65    1.14    3.66
+  18 views,    6 cycles, F =     1.012350, mean residual =    0.68
+KGD-ELONG:   5  3278.27   192.33  13.932   5.554
+big res  5   2.01 0.50 3   1.0504  0.5759   0.0781   0.0284   0.1000   5.4776  3.9036
+   1 pts deleted, big mean residual, conts:   5
+  18 views,    7 cycles, F =     0.897791, mean residual =    0.60
+add    0   18    4   49.8   58.3   55.2   61.1       96376        2922      0.0000
+add    0   18    7   50.5   58.4   55.9   61.2       94507        3864      0.0000
+add    0   18    2   49.1   58.3   54.9   61.0       98244        2922      0.0000
+ Rescue-distance, sec  18,  obj   5, at   -13.7    -1.2, dist= 13.7, dens=     5407, crit=     1272, min=     5178
+BKGD-DENS:   5  5407.21   118.06  41.357   7.635
+Trials: 2    5    64.6    62.3    51.3    60.8   2827.6  2.4882        54.6    67.4    55.2    60.5   5463.5  1.2855
+add    0   18    5   54.6   67.4   55.2   60.5       86604        5463      0.0000
+add    0   18    3   58.4   62.3   53.7   60.8       73417        5407      0.0000
+add    0   18    1   57.9   61.0   53.8   60.9       72577        5407      0.0000
+add    0   18    6   54.2   61.0   55.4   60.9       83291        5463      0.0000
+view  19, pass 1,   7 points (-  0), mean, sd, max dev:    0.60    0.37    1.00
+Metro error #3, Restarting with step factor of 0.22
+Metro error #3, Restarting with step factor of 0.28
+  19 views,  892 cycles, F =     0.748573, mean residual =    0.51
+add    0   19    4   50.2   60.5   53.1   58.5       77962        3689      0.0000
+add    0   19    7   49.5   60.4   53.1   58.5       76067        4339      0.0000
+add    0   19    2   48.5   60.2   52.8   58.5       82959        3689      0.0000
+ Rescue-distance, sec  19,  obj   5, at   -15.9    -1.5, dist= 16.0, dens=     4786, crit=     2635, min=     5196
+BKGD-DENS:   5  4786.00   227.90  18.754   8.426
+add    0   19    5   64.2   59.5   48.1   58.5       48184        3620      0.0000
+ Rescue-distance, sec  19,  obj   3, at   -14.0     0.9, dist= 14.1, dens=     4786, crit=     2632, min=     2824
+BKGD-DENS:   3  3911.14   242.53  13.824   6.297
+add    0   19    3   62.8   57.7   49.0   58.9       46926        2868      0.0000
+add    0   19    1   57.4   58.2   50.7   58.8       58393        4786      0.0000
+add    0   19    6   51.0   58.6   53.0   58.7       69452        4546      0.0000
+view  20, pass 1,   7 points (-  0), mean, sd, max dev:    0.68    0.55    1.74
+Metro error #3, Restarting with step factor of 0.22
+Metro error #3, Restarting with step factor of 0.28
+Metro error #3, Restarting with step factor of 0.19
+Metro error #3, Restarting with step factor of 0.12
+  20 views, 1000 cycles, F =     0.806551, mean residual =    0.60
+tiltalign error going to view 20 even after varying step factor
+big res  5   2.70 0.50 1   0.6102  0.1893   0.0781   0.0167   0.1340   1.2884  3.9036
+   1 pts deleted for pass 2, conts:   5
+Metro error #3, Restarting with step factor of 0.22
+Metro error #3, Restarting with step factor of 0.28
+  20 views,  655 cycles, F =     0.725835, mean residual =    0.53
+BKGD-DENS:   5  4786.00   221.67  20.634  10.552
+add    0   19    5   50.4   58.8   52.7   58.7       69452        4339      0.0000
+   1 pts added on pass 2, conts:   5
+view  20, pass 2,   7 points (-  0), mean, sd, max dev:    0.91    0.80    2.17
+  20 views,    1 cycles, F =     0.737765, mean residual =    0.54
+ Rescue-distance, sec  20,  obj   4, at    18.3    -4.8, dist= 18.9, dens=     4004, crit=     1735, min=     2922
+BKGD-DENS:   4  4373.86   141.40  27.005   5.969
+Trials: 2    4    20.5    61.3    38.3    56.2   2518.0  3.0614        53.5    59.5    56.2    58.3   3841.0  0.9856
+add    0   20    4   53.5   59.5   56.2   58.3       62307        3841      0.0000
+ Rescue-distance, sec  20,  obj   7, at    18.3    -4.8, dist= 18.9, dens=     4004, crit=     2307, min=     3315
+BKGD-DENS:   7  4373.86   141.40  27.005   5.969
+Trials: 2    7    20.1    61.3    38.3    56.2   2518.0  3.1049        54.0    59.6    56.1    58.3   3841.0  0.9210
+add    0   20    7   54.0   59.6   56.1   58.3       59857        3841      0.0000
+ Rescue-distance, sec  20,  obj   2, at    18.3    -4.8, dist= 18.9, dens=     4004, crit=     2213, min=     2620
+BKGD-DENS:   2  4373.86   141.40  27.005   5.969
+Trials: 2    2    20.3    61.3    38.3    56.2   2518.0  3.0850        53.9    59.5    56.1    58.3   3841.0  0.9349
+add    0   20    2   53.9   59.5   56.1   58.3       61402        3841      0.0000
+ Rescue-distance, sec  20,  obj   5, at    17.7    -3.5, dist= 18.1, dens=     4501, crit=     2467, min=     4339
+BKGD-DENS:   5  4803.80   129.33  55.246   1.989
+Trials: 2    5    20.8    60.2    38.7    56.5   3585.2  3.0316        56.1    60.2    55.5    58.3   3841.0  1.1498
+add    0   20    5   56.1   60.2   55.5   58.3       58044        3841      0.0000
+ Rescue-density , sec  20,  obj   3, at    -2.3    -0.2, dist=  2.3, dens=      380, crit=     2437, min=     2824
+Trials: 2    3    52.7    23.2    37.8    33.4      0.0  3.0061        55.9    50.7    55.4    59.0   3841.0  0.9262
+add    0   20    3   55.9   50.7   55.4   59.0       55327        3841      0.0000
+ Rescue-density , sec  20,  obj   1, at    -2.2    -0.8, dist=  2.3, dens=      248, crit=     2459, min=     4397
+Trials: 2    1    52.7    23.3    37.8    33.4      0.0  2.9993        56.0    52.2    55.5    59.2   3841.0  0.7813
+add    0   20    1   56.0   52.2   55.5   59.2       54498        3841      0.0000
+Trials: 2    6    53.7    61.9    56.1    58.4   3841.0  1.4683        55.7    58.6    55.9    58.6   4052.5  0.9599
+add    0   20    6   55.7   58.6   55.9   58.6       54142        4053      0.0000
+view  21, pass 1,   7 points (-  0), mean, sd, max dev:    0.24    0.18    0.62
+  21 views,   11 cycles, F =     0.875893, mean residual =    0.61
+For object  1, round  1:  7 contours, points missing =    1
+ Aligning Sobel-centered points for comparison
+  21 views,    1 cycles, F =     0.875833, mean residual =    0.61
+ Aligning saved centroid-centered points
+  21 views,    7 cycles, F =     0.955024, mean residual =    0.55
+  21 views,    7 cycles, F =     0.876261, mean residual =    0.61
+add    0   17    5   54.1   59.4   50.8   58.5       71616        5675      0.0000
+view  18, pass 1,   7 points (-  0), mean, sd, max dev:    1.05    0.85    2.25
+  21 views,    1 cycles, F =     0.897382, mean residual =    0.62
+For object  1, round  2:  7 contours, points missing =    0
+ Aligning Sobel-centered points for comparison
+  21 views,    1 cycles, F =     0.897361, mean residual =    0.62
+ Aligning saved centroid-centered points
+  21 views,    7 cycles, F =     0.952932, mean residual =    0.56
+
+Obj cont:  Views on which points are missing
+ Total points missing = 0
+
+Mean residual 0.0000 nm from Sobel centering, 0.0000 nm from centroid centering
+  centroid centering better in   2 of   2 fits
+WARNING: BEADTRACK - Using positions from centroid centering
+because they gave a lower mean residual than Sobel centering.
+A different kernel sigma might be needed for Sobel centering.
+

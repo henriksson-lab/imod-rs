@@ -1,0 +1,253 @@
+
+Opened NEW file: g3.tlt
+
+Opened NEW file: g3.xtilt
+
+Opened NEW file: g3.xf
+
+Opened OLD file: g3.rawtlt
+
+                        Variable mappings 
+ View Rotation    Tilt  (+ incr.)   Mag      Comp     Dmag      Skew    X-Tilt
+   1  rot    1  tilt   1         mag    1   fixed    fixed     fixed     fixed 
+   2  rot    2  t  1+  4         mag    2   fixed    fixed     fixed     fixed 
+   3  rot    3  t  1+  4         mag    3   fixed    fixed     fixed     fixed 
+   4  rot    4  tilt   4         mag    4   fixed    fixed     fixed     fixed 
+   5  rot    5  t  4+  8         mag    5   fixed    fixed     fixed     fixed 
+   6  rot    6  t  4+  8         mag    6   fixed    fixed     fixed     fixed 
+   7  rot    7  t  4+  8         mag    7   fixed    fixed     fixed     fixed 
+   8  rot    8  tilt   8         mag    8   fixed    fixed     fixed     fixed 
+   9  rot    9  t  8+ 13         mag    9   fixed    fixed     fixed     fixed 
+  10  rot   10  t  8+ 13         mag   10   fixed    fixed     fixed     fixed 
+  11  rot   11  t  8+ 13         mag   11   fixed    fixed     fixed     fixed 
+  12  rot   12  t  8+ 13         mag   12   fixed    fixed     fixed     fixed 
+  13  rot   13  tilt  13         mag   13   fixed    fixed     fixed     fixed 
+  14  rot   14  t 13+fix         mag   14   fixed    fixed     fixed     fixed 
+  15  rot   15  t 13+fix         mag   15   fixed    fixed     fixed     fixed 
+  16  rot   16  t 13+fix         mag   16   fixed    fixed     fixed     fixed 
+  17  rot   17  t 13+fix         mag   17   fixed    fixed     fixed     fixed 
+  18  rot   18    fixed          mag   18   fixed    fixed     fixed     fixed 
+  19  rot   19  t 24+fix         mag   19   fixed    fixed     fixed     fixed 
+  20  rot   20  t 24+fix         mag   20   fixed    fixed     fixed     fixed 
+  21  rot   21  t 24+fix           fixed    fixed    fixed     fixed     fixed 
+  22  rot   22  t 24+fix         mag   22   fixed    fixed     fixed     fixed 
+  23  rot   23  t 24+fix         mag   23   fixed    fixed     fixed     fixed 
+  24  rot   24  tilt  24         mag   24   fixed    fixed     fixed     fixed 
+  25  rot   25  t 24+ 29         mag   25   fixed    fixed     fixed     fixed 
+  26  rot   26  t 24+ 29         mag   26   fixed    fixed     fixed     fixed 
+  27  rot   27  t 24+ 29         mag   27   fixed    fixed     fixed     fixed 
+  28  rot   28  t 24+ 29         mag   28   fixed    fixed     fixed     fixed 
+  29  rot   29  tilt  29         mag   29   fixed    fixed     fixed     fixed 
+  30  rot   30  t 29+ 34         mag   30   fixed    fixed     fixed     fixed 
+  31  rot   31  t 29+ 34         mag   31   fixed    fixed     fixed     fixed 
+  32  rot   32  t 29+ 34         mag   32   fixed    fixed     fixed     fixed 
+  33  rot   33  t 29+ 34         mag   33   fixed    fixed     fixed     fixed 
+  34  rot   34  tilt  34         mag   34   fixed    fixed     fixed     fixed 
+  35  rot   35  t 34+ 38         mag   35   fixed    fixed     fixed     fixed 
+  36  rot   36  t 34+ 38         mag   36   fixed    fixed     fixed     fixed 
+  37  rot   37  t 34+ 38         mag   37   fixed    fixed     fixed     fixed 
+  38  rot   38  tilt  38         mag   38   fixed    fixed     fixed     fixed 
+  39  rot   39  t 38+ 41         mag   39   fixed    fixed     fixed     fixed 
+  40  rot   40  t 38+ 41         mag   40   fixed    fixed     fixed     fixed 
+  41  rot   41  tilt  41         mag   41   fixed    fixed     fixed     fixed 
+
+
+ Variable Metric minimization                  Initial F:         1.516309
+                                               Cycle   10         0.577806
+                                               Cycle   20         0.517996
+                                               Cycle   30         0.512756
+                                               Cycle   40         0.509317
+                                               Cycle   50         0.508536
+                                               Cycle   60         0.508231
+                                               Cycle   70         0.508130
+ For beam tilt =  0.10,   71 cycles,           final   F :        0.508130
+
+ Variable Metric minimization                  Initial F:         3.369871
+                                               Cycle   10         0.646455
+                                               Cycle   20         0.620385
+                                               Cycle   30         0.620162
+                                               Cycle   40         0.620080
+                                               Cycle   50         0.620058
+ For beam tilt = -0.90,   50 cycles,           final   F :        0.620058
+
+ Variable Metric minimization                  Initial F:         3.387974
+                                               Cycle   10         0.731934
+                                               Cycle   20         0.704260
+                                               Cycle   30         0.703981
+                                               Cycle   40         0.703882
+ For beam tilt =  1.10,   49 cycles,           final   F :        0.703870
+
+ Variable Metric minimization                  Initial F:         1.737764
+                                               Cycle   10         0.533474
+                                               Cycle   20         0.525561
+                                               Cycle   30         0.525492
+                                               Cycle   40         0.525468
+ For beam tilt = -0.40,   44 cycles,           final   F :        0.525465
+
+ Variable Metric minimization                  Initial F:         1.753958
+                                               Cycle   10         0.583528
+                                               Cycle   20         0.575581
+                                               Cycle   30         0.575506
+                                               Cycle   40         0.575478
+ For beam tilt =  0.60,   44 cycles,           final   F :        0.575475
+
+ Variable Metric minimization                  Initial F:         0.970480
+                                               Cycle   10         0.507911
+                                               Cycle   20         0.505814
+                                               Cycle   30         0.505795
+ For beam tilt = -0.15,   34 cycles,           final   F :        0.505795
+ For beam tilt = -0.38,   46 cycles,           final   F :        0.523125
+ For beam tilt = -0.36,   46 cycles,           final   F :        0.520909
+ For beam tilt = -0.34,   45 cycles,           final   F :        0.518825
+ For beam tilt = -0.32,   51 cycles,           final   F :        0.516872
+ For beam tilt = -0.30,   45 cycles,           final   F :        0.515055
+ For beam tilt = -0.28,   32 cycles,           final   F :        0.513386
+ For beam tilt = -0.26,   45 cycles,           final   F :        0.511821
+ For beam tilt = -0.24,   33 cycles,           final   F :        0.510420
+ For beam tilt = -0.22,   32 cycles,           final   F :        0.509147
+ For beam tilt = -0.20,   34 cycles,           final   F :        0.508013
+ For beam tilt = -0.18,   34 cycles,           final   F :        0.507020
+ For beam tilt = -0.16,   38 cycles,           final   F :        0.506166
+ For beam tilt = -0.14,   33 cycles,           final   F :        0.505458
+ For beam tilt = -0.12,   35 cycles,           final   F :        0.504890
+ For beam tilt = -0.10,   27 cycles,           final   F :        0.504469
+ For beam tilt = -0.08,   30 cycles,           final   F :        0.504188
+ For beam tilt = -0.06,   25 cycles,           final   F :        0.504054
+ For beam tilt = -0.04,   22 cycles,           final   F :        0.504060
+ For beam tilt = -0.02,   24 cycles,           final   F :        0.504209
+ For beam tilt =  0.00,   28 cycles,           final   F :        0.504503
+ For beam tilt =  0.02,   24 cycles,           final   F :        0.504943
+ For beam tilt =  0.04,   21 cycles,           final   F :        0.505527
+ For beam tilt =  0.06,   26 cycles,           final   F :        0.506252
+ For beam tilt =  0.08,   14 cycles,           final   F :        0.507120
+
+ Solved beam tilt = -0.05,   22 cycles,        Final   F :        0.504039
+  41 views,   90 geometric variables,   24 3-D points,   916 projection points
+  Ratio of total measured values to all unknowns =  1832/ 239 =   7.67
+
+Beam tilt angle is   -0.05 degrees
+
+ At minimum tilt, rotation angle is    4.93
+
+ view   rotation    tilt    deltilt     mag      dmag      skew    resid-pixels
+   1       4.4     -59.7      0.34    1.0150    0.0000      0.00      0.51
+   2       4.5     -56.7      0.34    1.0154    0.0000      0.00      0.57
+   3       4.5     -53.7      0.34    1.0123    0.0000      0.00      0.55
+   4       4.5     -50.7      0.33    1.0127    0.0000      0.00      0.45
+   5       4.6     -47.7      0.35    1.0117    0.0000      0.00      0.48
+   6       4.6     -44.6      0.36    1.0101    0.0000      0.00      0.44
+   7       4.6     -41.6      0.37    1.0136    0.0000      0.00      0.55
+   8       4.6     -38.6      0.39    1.0092    0.0000      0.00      0.34
+   9       4.7     -35.6      0.37    1.0078    0.0000      0.00      0.42
+  10       4.7     -32.6      0.35    1.0067    0.0000      0.00      0.36
+  11       4.7     -29.7      0.34    1.0035    0.0000      0.00      0.41
+  12       4.7     -26.7      0.32    1.0060    0.0000      0.00      0.42
+  13       4.8     -23.7      0.30    1.0026    0.0000      0.00      0.47
+  14       4.8     -20.8      0.24    1.0020    0.0000      0.00      0.49
+  15       4.8     -17.8      0.18    1.0012    0.0000      0.00      0.48
+  16       4.8     -14.9      0.12    1.0041    0.0000      0.00      0.42
+  17       4.9     -11.9      0.06    1.0010    0.0000      0.00      0.44
+  18       4.9      -9.0      0.00    1.0024    0.0000      0.00      0.38
+  19       4.9      -6.0      0.05    1.0009    0.0000      0.00      0.42
+  20       4.9      -2.9      0.09    1.0009    0.0000      0.00      0.50
+  21       4.9       0.1      0.14    1.0000    0.0000      0.00      0.43
+  22       4.9       3.2      0.19    1.0010    0.0000      0.00      0.43
+  23       4.9       6.2      0.23    0.9989    0.0000      0.00      0.37
+  24       5.0       9.3      0.28    0.9994    0.0000      0.00      0.49
+  25       5.0      12.2      0.25    0.9992    0.0000      0.00      0.32
+  26       5.0      15.2      0.22    1.0019    0.0000      0.00      0.37
+  27       5.0      18.2      0.19    0.9978    0.0000      0.00      0.43
+  28       5.0      21.2      0.16    1.0010    0.0000      0.00      0.35
+  29       5.0      24.1      0.13    1.0021    0.0000      0.00      0.42
+  30       5.0      27.1      0.14    1.0023    0.0000      0.00      0.42
+  31       5.0      30.1      0.15    1.0017    0.0000      0.00      0.36
+  32       5.0      33.2      0.16    1.0024    0.0000      0.00      0.48
+  33       5.0      36.2      0.16    1.0048    0.0000      0.00      0.44
+  34       5.0      39.2      0.17    1.0029    0.0000      0.00      0.69
+  35       5.0      42.2      0.20    1.0052    0.0000      0.00      0.67
+  36       5.0      45.2      0.23    1.0028    0.0000      0.00      0.50
+  37       5.0      48.3      0.26    1.0028    0.0000      0.00      0.37
+  38       5.0      51.3      0.29    1.0031    0.0000      0.00      0.41
+  39       5.0      54.3      0.35    1.0015    0.0000      0.00      0.32
+  40       5.0      57.4      0.41    1.0050    0.0000      0.00      0.37
+  41       5.0      60.5      0.47    1.0024    0.0000      0.00      0.39
+
+
+                     3-D point coordinates (with centroid zero)
+   #       X         Y         Z      obj  cont  resid-pixels
+   1     10.54   -264.15    -62.48      1    1      0.4289
+   2    -13.47   -159.07     50.65      1    2      0.4076
+   3   -128.14    -91.27     50.24      1    3      0.4029
+   4   -155.99    -57.82     51.26      1    4      0.4461
+   5    153.58     55.31    -69.65      1    5      0.4115
+   6    360.57    244.38    -48.58      1    6      0.4336
+   7    206.47    312.87     52.36      1    7      0.4017
+   8   -296.11   -412.86    -67.13      1    8      0.4760
+   9    -64.10     26.48    -61.00      1    9      0.3799
+  10   -369.07    -53.66    -65.12      1   10      0.4871
+  11    195.77   -178.73     50.11      1   11      0.3161
+  12     29.32    135.37     52.96      1   12      0.3634
+  13    115.15    347.78     51.81      1   13      0.4229
+  14   -440.16    234.29     51.86      1   14      0.5381
+  15    167.09    387.60    -60.20      1   15      0.4402
+  16   -376.98    406.30     56.07      1   16      0.4716
+  17    372.24   -156.69     55.13      1   17      0.6212
+  18    308.17   -356.68    -66.36      1   18      0.4396
+  19    367.22   -120.14    -54.31      1   19      0.5232
+  20    -37.77   -347.93    -68.80      1   20      0.4252
+  21   -198.92    -45.66     56.76      1   21      0.4019
+  22    222.46   -136.02     58.58      1   22      0.4256
+  23    -29.60    406.91    -61.74      1   23      0.4964
+  24   -398.27   -176.62     47.58      1   24      0.4726
+
+ Midpoint of Z range relative to centroid in Z:   -5.54
+
+Opened NEW file: g3.resid
+
+ Residual error mean and sd:     0.442   0.242 pixels
+
+         Projection points with large residuals (in pixels)
+ obj  cont  view   index coordinates      residuals        # of
+   #     #     #      X         Y        X        Y        S.D.
+   1    10     2    394.02    459.88     1.07    -0.69     3.43
+   1    18    35    717.89    159.11    -0.81    -0.94     3.28
+   1    24    32    209.70    330.21     1.20    -0.28     3.28
+   1    17    11    809.79    375.27    -0.95    -0.75     3.17
+   1    17     6    735.11    384.51     1.11     0.42     3.08
+
+ SURFACE ANALYSIS:
+
+ The following parameters are appropriate if fiducials are NOT on two surfaces:
+
+ Fit of one plane to all fiducials:
+ # of points =               24
+ Mean residual =          53.96
+ Adjusted slope =       -0.0359
+ X axis tilt needed =     -2.29
+ Incremental tilt angle change =   2.06
+ Total tilt angle change =         2.06
+ 
+ The following parameters are appropriate if fiducials ARE on two surfaces,
+ based on fit of two parallel planes to fiducials sorted onto two surfaces:
+
+ On bottom surface:
+ # of points =           11
+ Mean residual =       3.62
+ Z axis intercept =   -62.4
+
+ On top surface:
+ # of points =           13
+ Mean residual =       2.36
+ Z axis intercept =    52.8
+
+ Overall mean residual =           2.94
+ Thickness at Z intercepts =      115.2
+ Adjusted slope =                0.0075
+ X axis tilt needed =             -0.40
+ Incremental tilt angle change =  -0.43
+ Total tilt angle change =        -0.43
+ 
+ Unbinned thickness needed to contain centers of all fiducials =         130
+ Incremental unbinned shift needed to center range of fiducials in Z =    -6.3
+ Total unbinned shift needed to center range of fiducials in Z =          -6.3
+

@@ -1,0 +1,461 @@
+<?xml version="1.0" encoding="utf-8"?>
+
+<autodoc>
+  
+  <PreData>
+    
+    <Version>1.0</Version>
+    
+    <Pip>1</Pip>
+  
+  </PreData>
+  
+  <Field name="InputStack">
+    
+    <short>input</short>
+    
+    <type>FN</type>
+    
+    <usage>Input stack that will be corrected</usage>
+    
+    <tooltip />
+    
+    <manpage>Input stack that will be corrected.  It must be aligned so that the tilt axis is vertical.</manpage>
+  
+  </Field>
+  
+  <Field name="OutputFileName">
+    
+    <short>output</short>
+    
+    <type>FN</type>
+    
+    <usage>Name of output file for the corrected views</usage>
+    
+    <tooltip />
+    
+    <manpage />
+  
+  </Field>
+  
+  <Field name="AngleFile">
+    
+    <short>angleFn</short>
+    
+    <type>FN</type>
+    
+    <usage>File containing tilt angles for the input stack</usage>
+    
+    <tooltip />
+    
+    <manpage>File containing tilt angles for the input stack.  Each line of this file is the tilt angle for a view of the input stack.  The angles are listed in order starting from view 1.  If no file is entered, angles will be assumed to be 0.  If all views have tilt angles of 0, the program will do a single correction of the full image for each view instead of doing strips.</manpage>
+  
+  </Field>
+  
+  <Field name="InvertTiltAngles">
+    
+    <short>invert</short>
+    
+    <type>B</type>
+    
+    <usage>Invert the sign of the tilt angles</usage>
+    
+    <tooltip />
+    
+    <manpage>Invert the sign of the tilt angles in the tilt angle file.  In general, this option is needed if Ctfplotter(1) was also run with its \fB-invert\fR option.  See the section on \fBInverting Tilt Angles\fR in the Ctfplotter(1) man page for details.</manpage>
+  
+  </Field>
+  
+  <Field name="AxisAngle">
+    
+    <short>axis</short>
+    
+    <type>F</type>
+    
+    <usage>Angle that the tilt axis is rotated from vertical</usage>
+    
+    <tooltip />
+    
+    <manpage>Angle that the tilt axis is rotated from vertical (counterclockwise positive), for correcting unaligned images in their original orientation.</manpage>
+  
+  </Field>
+  
+  <Field name="XAxisTilt">
+    
+    <short>xtilt</short>
+    
+    <type>F</type>
+    
+    <usage>Angle that the specimen is tilted around the X axis</usage>
+    
+    <tooltip />
+    
+    <manpage>Angle (counterclockwise positive) that the specimen is tilted around the axis in the plane perpendicular to the tilt axis, which is along the X axis in aligned images.  This angle should correspond to the X axis tilt found in the positioning step in Etomo.  With an X axis tilt, the program will process full images instead of strips, interpolating or copying corrected pixels along diagonals of constant focus.  This option can be entered with an axis rotation angle for correcting unaligned images, but in that case the angle entered here must be for a tilt around a corresponding rotated axis, not around the X axis in the images.</manpage>
+  
+  </Field>
+  
+  <Field name="DefocusFile">
+    
+    <short>defFn</short>
+    
+    <type>FN</type>
+    
+    <usage>File with list of tilt angle ranges and defocus values in nanometers</usage>
+    
+    <tooltip />
+    
+    <manpage>File with list of tilt angle ranges and defocus values in nanometers, such as was output by Ctfplotter(1).  The full specification of the defocus file is given below.  Each line should have a starting and ending view number (numbered from 1), a starting and ending tilt angle, and a defocus value.  Defocus is in nanometers, with positive values for underfocus.  The program will assign that defocus value to the midpoint of the range of views.  For a view at a given tilt angle, it will find the defocus either by interpolating between two surrounding midpoint angles, if there are such angles, or by taking the nearest defocus value, if the angle is beyond the range of the available midpoint angles.  To correct a tilt series with a single value of defocus, supply a file with a single line containing &quot;20 20 0. 0. defocus_value&quot;.  If you prepare a defocus file with more than one line, be sure to use the exact angles from the tilt angle file specified with the \fB-angleFn\fR option; do not round to one decimal place.  Alternatively, add the number &quot;2&quot; as an extra value at the end of the first line of the file; this will prevent the program from thinking that the view numbers might be off by one.  If you use the \fB-invert\fR option, you must do one of two things: 1) either invert all the tilt angles in this file, 2) or start the file with a line indicating that it is a version 3 file in which the angles need to be inverted (start the line with the flag 16 for inversion, plus whatever other flags are needed; see below).</manpage>
+  
+  </Field>
+  
+  <Field name="OffsetInZ">
+    
+    <short>zoff</short>
+    
+    <type>F</type>
+    
+    <usage>Adjust defocus values for the given shift in Z, in pixels</usage>
+    
+    <tooltip />
+    
+    <manpage>Adjust defocus values for the given displacement in Z, in pixels. The default CTF correction is correct only for image data in the middle of the specimen.  With this entry, each defocus value will be adjusted to be correct for positions higher or lower in Z.  When viewing a tomogram in its original X/Z slices, a Y value below the center corresponds to a positive Z displacement.  The sign of this entry is thus the same as the sign of Z in a SHIFT entry to Tilt(1) to bring this position to the middle of the tomogram. However, the SHIFT entry is in unbinned pixels whereas the entry to this option is in actual pixels of a tomogram (i.e., binned pixels if the aligned stack is binned).</manpage>
+  
+  </Field>
+  
+  <Field name="TransformFile">
+    
+    <short>xform</short>
+    
+    <type>FN</type>
+    
+    <usage>File with linear transformations used to align images</usage>
+    
+    <tooltip />
+    
+    <manpage>File with the linear transformations that were used to align the images.  Using this option has two consequences: 1) Astigmatism angles found by analyzing the raw stack will be properly rotated to the right angles for the aligned stack.  If this option is not entered, astigmatism must be found on the aligned stack.  2) The program will use the shifts in X to adjust the middle position that is considered to be at the nominal defocus value for each image.</manpage>
+  
+  </Field>
+  
+  <Field name="DefocusTol">
+    
+    <short>defTol</short>
+    
+    <type>I</type>
+    
+    <usage>Defocus tolerance in nanometers, one factor governing the strip width</usage>
+    
+    <tooltip />
+    
+    <manpage>Defocus tolerance in nanometers, which is one factor that governs the width of the strips. The actual strip width is based on the width of this region and several other factors: a fixed minimum width of 128, a minimum width required to achieve sufficient resolution in the Fourier transform, governed by the \fB-zero\fR option, and the dynamic adjustment of maximum width described above.  This width also determines the width of the strips on either edge of the image where a correction at just one defocus is used.</manpage>
+  
+  </Field>
+  
+  <Field name="MaximumStripWidth">
+    
+    <short>maxWidth</short>
+    
+    <type>I</type>
+    
+    <usage>Maximum width of strips in pixels (disables dynamic width adjustment)</usage>
+    
+    <tooltip />
+    
+    <manpage>Maximum width of strips in pixels.  This entry disables the dynamic adjustment of maximum width described above and applies a fixed maximum at all tilt angles.  As a special case, a width at least as wide as the full image size in X will make the program do each correction on full images instead of strips.</manpage>
+  
+  </Field>
+  
+  <Field name="InterpolationWidth">
+    
+    <short>iWidth</short>
+    
+    <type>I</type>
+    
+    <usage>The distance in pixels between two consecutive strips</usage>
+    
+    <tooltip />
+    
+    <manpage>The distance in pixels between the center lines of two consecutive strips. A pixel inside the region between those two center lines resides in both strips. As the two strips are corrected separately, that pixel will have 2 corrected values. The final value for that pixel is a linear interpolation of the 2 corrected values.  If a value of 1 is entered, there is no such interpolation.  For a value greater than one, the entered value will be used whenever the strip width computed from the defocus tolerance is less than 256 (i.e., at high tilt), and the value will be scaled proportional to the strip width for widths above 256.  This scaling keeps the computational time down and is reasonable because the defocus difference between adjacent wide strips at wider intervals is still less than that between the narrower strips at high tilt.  However, strips at constant spacing can still be obtained by entering the negative of the desired spacing, which disables the scaling of the spacing.</manpage>
+  
+  </Field>
+  
+  <Field name="MinimumZeroSpacing">
+    
+    <short>zero</short>
+    
+    <type>F</type>
+    
+    <usage>Minimum spacing between zeros at 0.4/pixel (default 8)</usage>
+    
+    <tooltip />
+    
+    <manpage>The minimum spacing between successive zeros at 0.4/pixel, in pixels of frequency space.  If necessary, the strip width will be increased above the value required by the defocus tolerance to maintain this much resolution in the Fourier transform at high frequency.  If a maximum width is entered with \fB-maxWidth\fR, however, strips will not be wider than that maximum.  A higher number decreases the fraction and the width of frequency pixels that straddle a zero.  The default is 8.</manpage>
+  
+  </Field>
+  
+  <Field name="PixelSize">
+    
+    <short>pixelSize</short>
+    
+    <type>F</type>
+    
+    <usage>Image pixel size in nanometers</usage>
+    
+    <tooltip />
+    
+    <manpage>Image pixel size of the input file in nanometers</manpage>
+  
+  </Field>
+  
+  <Field name="UnbinnedPixelSize">
+    
+    <short>unbinned</short>
+    
+    <type>F</type>
+    
+    <usage>Pixel size in nanometers of the original, unbinned stack</usage>
+    
+    <tooltip />
+    
+    <manpage>Pixel size in nanometers of the original, unbinned stack.  This value is used to determine the binning in order to scale shifts in the alignment transforms.  The default is the \fB-pixelSize\fR entry.</manpage>
+  
+  </Field>
+  
+  <Field name="ExpandedByFactor">
+    
+    <short>expanded</short>
+    
+    <type>F</type>
+    
+    <usage>Value of ExpandByFactor used in Newstack when making aligned stack</usage>
+    
+    <tooltip />
+    
+    <manpage>Value of ExpandByFactor used in Newstack when making aligned stack, which will be used to scale the pixel size.</manpage>
+  
+  </Field>
+  
+  <Field name="Voltage">
+    
+    <short>volt</short>
+    
+    <type>I</type>
+    
+    <usage>Microscope voltage in kV</usage>
+    
+    <tooltip />
+    
+    <manpage>Microscope voltage in kV</manpage>
+  
+  </Field>
+  
+  <Field name="SphericalAberration">
+    
+    <short>cs</short>
+    
+    <type>F</type>
+    
+    <usage>Microscope spherical aberration in millimeters</usage>
+    
+    <tooltip />
+    
+    <manpage>Microscope spherical aberration in millimeters.  A value of 0 can be entered; it will be made slightly larger to prevent division by 0 in the CTF equations.</manpage>
+  
+  </Field>
+  
+  <Field name="AmplitudeContrast">
+    
+    <short>ampContrast</short>
+    
+    <type>F</type>
+    
+    <usage>The fraction of amplitude contrast</usage>
+    
+    <tooltip />
+    
+    <manpage>The fraction of amplitude contrast. For Cryo-EM, it should be between 0.07 and 0.14.  The value should be the same as was used when detecting the defocus.</manpage>
+  
+  </Field>
+  
+  <Field name="PhaseShiftInDegrees">
+    
+    <short>degPhase</short>
+    
+    <type>F</type>
+    
+    <usage>A fixed value for phase shift from a phase plate, in degrees</usage>
+    
+    <tooltip />
+    
+    <manpage>A fixed value for the phase shift imposed by a phase plate, in degrees.    It can be entered with either positive or negative sign; the absolute value of the entered value will be subtracted when computing phase within the program.  This entered value will be overridden by the presence of any view-specific phase shift values in the defocus file.</manpage>
+  
+  </Field>
+  
+  <Field name="PhasePlateShift">
+    
+    <short>phase</short>
+    
+    <type>F</type>
+    
+    <usage>A fixed value for phase shift from a phase plate, in radians</usage>
+    
+    <tooltip />
+    
+    <manpage>A fixed value for the phase shift imposed by a phase plate, in radians.  See the \fB-degPhase\fR option, which should be used instead.  The two may not both be entered.</manpage>
+  
+  </Field>
+  
+  <Field name="CutOnFrequency">
+    
+    <short>cuton</short>
+    
+    <type>F</type>
+    
+    <usage>A fixed value for cut-on frequency that attenuates phase at low frequency</usage>
+    
+    <tooltip />
+    
+    <manpage>A fixed value for cut-on frequency that attenuates phase at low frequency, in reciprocal nanometers.  With a cut-on frequency, the phase is modeled as rising exponentially from zero at zero frequency to its true value at high frequency.  The ratio of the first zero to the cut-on frequency is the rate constant of the exponential decay to the true value.  Whenever the cut-on frequency is non-zero, the phase shift value used for a view, from either the defocus file or the \fB-phase\fR entry, will be treated as the phase at a fixed frequency of 0.3/nm rather than the shift at infinite frequency.  See the Guide to Ctfplotter for more details about cut-on.</manpage>
+  
+  </Field>
+  
+  <Field name="ScaleByCtfPower">
+    
+    <short>scale</short>
+    
+    <type>F</type>
+    
+    <usage>Scale frequency components by calculated CTF to the given power</usage>
+    
+    <tooltip>Scale frequency components by calculated CTF to the given power, attenuating components around the zeros.  Larger values attenuate a wider frequency band; values of 0.25 to 1 may be useful.</tooltip>
+    
+    <manpage>Scale frequency components by calculated CTF to the given power, in order to attenuate frequencies near the zeros of the CTF.  The scaling does not occur below 0.9 times the frequency of the first zero, and it is introduced gradually between that point and the first zero to avoid a sharp transition in scaling.  Lower powers give a narrower range of frequencies over which the strongest attenuation occurs around each zero; values of 0.25 to 1 may be useful.  This is not a Wiener filter; it will only attenuate signals and not boost any.</manpage>
+  
+  </Field>
+  
+  <Field name="UseGPU">
+    
+    <short>gpu</short>
+    
+    <type>I</type>
+    
+    <usage>Use GPU for computation; 0 for best available one or number of GPU</usage>
+    
+    <tooltip />
+    
+    <manpage>Use the GPU (graphical processing unit) for computations if possible; enter 0 to use the best GPU on the system, or the number of a specific GPU (numbered from 1).  If the GPU is not available, the program will use the CPU or take the action specified by the \fB-action\fR option if that is entered.  The program will respond in the same way if a failure occurs in the initial GPU access for each slice, where memory allocation is done, but for any GPU errors after that, it will exit with an error message.</manpage>
+  
+  </Field>
+  
+  <Field name="ActionIfGPUFails">
+    
+    <short>action</short>
+    
+    <type>IP</type>
+    
+    <usage>0 for no action, 1 for warning, 2 for error if GPU cannot be used</usage>
+    
+    <tooltip />
+    
+    <manpage>The action to take when the GPU cannot be used after being requested: 0 to take no action, 1 to issue a warning prefixed with MESSAGE:, and 2 to exit with an error.  Enter 2 numbers: the first for the action when the GPU is requested by the UseGPU option; the second for the action when the GPU is requested only by the environment variable IMOD_USE_GPU, or by the variable IMOD_USE_GPU2.  The default is 0,0.</manpage>
+  
+  </Field>
+  
+  <Field name="StartingEndingViews">
+    
+    <short>views</short>
+    
+    <type>IP</type>
+    
+    <usage>The starting and ending views to correct (numbered from 1)</usage>
+    
+    <tooltip />
+    
+    <manpage>The starting view and the ending view to correct in this run of the program, numbered from 1.  This is an optional field.  The default is to correct all views in the input stack.</manpage>
+  
+  </Field>
+  
+  <Field name="TotalViews">
+    
+    <short>totalViews</short>
+    
+    <type>IP</type>
+    
+    <usage>The starting and ending views that need to be corrected in all parallel runs of the program.</usage>
+    
+    <tooltip />
+    
+    <manpage>The starting view and the ending view that need to be corrected in all parallel runs of the program.  This field is only needed when doing parallel runs with direct writing to a single output file.  The program is run initially with a StartingEndingViews entry of -1,-1 to set up the output file.  Then it is run with actual starting and ending views for each parallel run, and each run writes to the existing output file.</manpage>
+  
+  </Field>
+  
+  <Field name="BoundaryInfoFile">
+    
+    <short>boundary</short>
+    
+    <type>FN</type>
+    
+    <usage>Name of file with information about boundaries for parallel writing</usage>
+    
+    <tooltip />
+    
+    <manpage>Name of file with information about boundaries between chunks and files in which to write lines at the boundaries, when multiple runs are writing in parallel to an output file.</manpage>
+  
+  </Field>
+  
+  <Field name="SkipCorrectedFlag">
+    
+    <short>skipFlag</short>
+    
+    <type>I</type>
+    
+    <usage>1 to not set flag that CTF was corrected, 2 to ignore flag if set, 3 for both</usage>
+    
+    <tooltip />
+    
+    <manpage />
+  
+  </Field>
+  
+  <Field name="DebugOutput">
+    
+    <short>debug</short>
+    
+    <type>I</type>
+    
+    <usage>Type of debug output: 1 for timing, 2 for column detail</usage>
+    
+    <tooltip />
+    
+    <manpage>Value to control debug output: 1 for timing, 2 for column detail, 0 for neither; add 10 to suppress initial list of angles and defocus values.</manpage>
+  
+  </Field>
+  
+  <Field name="Parameter">
+    
+    <short>param</short>
+    
+    <type>PF</type>
+    
+    <usage>Read parameter entries from file</usage>
+    
+    <tooltip />
+    
+    <manpage>Read parameter entries from this file.</manpage>
+  
+  </Field>
+  
+  <Field name="usage">
+    
+    <short>help</short>
+    
+    <type>B</type>
+    
+    <usage>Print help output</usage>
+    
+    <tooltip />
+    
+    <manpage />
+  
+  </Field>
+
+</autodoc>

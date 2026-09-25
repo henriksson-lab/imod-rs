@@ -1,0 +1,32 @@
+
+ RO image file on unit   1 : f.mrc     Size=         19 K
+
+ Number of columns, rows, sections .....      32      24       6
+ Map mode ..............................    2   (32-bit float)             
+ Start cols, rows, sects, grid x,y,z ...    0     0     0      32     24      6
+ Pixel spacing (Angstroms)..............   1.000      1.000      1.000    
+ Cell angles ...........................   90.000   90.000   90.000
+ Fast, medium, slow axes ...............    X    Y    Z
+ Origin on x,y,z .......................    0.000       0.000       0.000    
+ Minimum density .......................   29.460    
+ Maximum density .......................   165.07    
+ Mean density ..........................   102.99    
+ tilt angles (original,current) ........   0.0   0.0   0.0   0.0   0.0   0.0
+ Space group,# extra bytes,idtype,lens .        0        0        0        0
+
+     1 Titles :
+raw2mrc: Converted to mrc format.                       25-Sep-26  01:20:31    
+
+
+ NEW image file on unit   2 : f.mrc.tmp.1293705
+ section   input min&max       output min&max  &  mean
+       0     44.29    162.04     44.29    162.04    106.54
+       1     34.22    159.73     34.22    159.73     93.70
+       2     38.92    149.04     38.92    149.04     89.62
+       3     36.97    163.47     36.97    163.47     98.28
+       4     36.05    162.66     36.05    162.66    110.46
+       5     58.55    160.98     58.55    160.98    116.44
+ 
+The newstack command was:
+newstack -siz 16,24 -off -4,0  -ori   "f.mrc" "f.mrc.tmp.1293705"
+Running clip rotx

@@ -1,0 +1,33 @@
+ImageFile	t1.mrc
+ImagesAreBinned	1
+InputSeedModel	t1.seed
+OutputModel	t1.fid
+PrealignTransformFile	t1.prexf
+RotationAngle	4
+TiltFile	t1.rawtlt
+TiltDefaultGrouping	7
+MagDefaultGrouping	5
+RotDefaultGrouping	1
+BeadDiameter	9
+FillGaps
+MaxGapSize	5
+RoundsOfTracking	2
+MinViewsForTiltalign	4
+MinTiltRangeToFindAxis	10.0
+MinTiltRangeToFindAngles	20.0
+BoxSizeXandY	32,32
+MaxBeadsToAverage	4
+PointsToFitMaxAndMin	7,3
+DensityRescueFractionAndSD	0.6,1
+DistanceRescueCriterion	10
+RescueRelaxationDensityAndDistance	0.7,0.9
+PostFitRescueResidual	2.5
+DensityRelaxationPostFit	0.9
+MaxRescueDistance	2.5
+ResidualsToAnalyzeMaxAndMin	9,5
+DeletionCriterionMinAndSD	0.04,2
+MinDiamForParamScaling	12.5
+SobelFilterCentering
+ScalableSigmaForSobel	0.15
+ElongationOutputFile	t1.elong
+XYZOutputFile	t1.xyz

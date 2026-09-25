@@ -1,0 +1,182 @@
+<?xml version="1.0" encoding="utf-8"?>
+<autodoc>
+  <PreData>
+    <Version>1.0</Version>
+    <Pip>1</Pip>
+  </PreData>
+  <Field name="InputFile">
+    <short>input</short>
+    <type>FN</type>
+    <usage>Input model file</usage>
+    <tooltip />
+    <manpage>Input model file to be transformed, or from which transformations will be found.</manpage>
+  </Field>
+  <Field name="OutputFile">
+    <short>output</short>
+    <type>FN</type>
+    <usage>Output file, either transformed model or list of transformations.</usage>
+    <tooltip />
+    <manpage />
+  </Field>
+  <Field name="ImageFile">
+    <short>image</short>
+    <type>FN</type>
+    <usage>Image file that model was built on (optional)</usage>
+    <tooltip />
+    <manpage>Image file that model was built on, used to determine center coordinate for transformations.  If neither this nor CenterInXandY are entered, the image size will be used from the model header.</manpage>
+  </Field>
+  <Field name="PieceListFile">
+    <short>piece</short>
+    <type>FN</type>
+    <usage>Name of piece list file for a montaged image file</usage>
+    <tooltip />
+    <manpage />
+  </Field>
+  <Field name="AllZhaveTransforms">
+    <short>allz</short>
+    <type>B</type>
+    <usage>All Z values have transforms in even though the image has gaps in Z</usage>
+    <tooltip />
+    <manpage>When there is a list of piece coordinates that has gaps in the Z values, use this entry to indicate that transform files have transforms for all Z values; otherwise the files will be assumed to have matching gaps in Z.</manpage>
+  </Field>
+  <Field name="CenterInXandY">
+    <short>center</short>
+    <type>FP</type>
+    <usage>Center coordinates of image in X and Y (optional)</usage>
+    <tooltip />
+    <manpage>Center coordinates of image in X and Y.  If neither this nor ImageFile are entered, the image size will be used from the model header.</manpage>
+  </Field>
+  <Field name="TranslationOnly">
+    <short>transonly</short>
+    <type>B</type>
+    <usage>Solve only for translations in X and Y</usage>
+    <tooltip />
+    <manpage>Solve for transformations that include only translations in X and Y.</manpage>
+  </Field>
+  <Field name="RotationTranslation">
+    <short>rottrans</short>
+    <type>B</type>
+    <usage>Solve for rotations and translations</usage>
+    <tooltip />
+    <manpage>Solve for transformations that include rotations and translations.</manpage>
+  </Field>
+  <Field name="MagRotTrans">
+    <short>magrot</short>
+    <type>B</type>
+    <usage>Solve for magnifications, rotations, and translations</usage>
+    <tooltip />
+    <manpage>Solve for transformations that include magnifications, rotations and translations, i.e. no stretch.</manpage>
+  </Field>
+  <Field name="SectionsToAnalyze">
+    <short>sections</short>
+    <type>LI</type>
+    <usage>Sections to find transformations for (numbered from 0)</usage>
+    <tooltip />
+    <manpage>List of sections to find transformations for. identified by the second one of each pair, numbered from 0.  The default is all sections.</manpage>
+  </Field>
+  <Field name="SingleSection">
+    <short>single</short>
+    <type>I</type>
+    <usage>Align all sections to the given section</usage>
+    <tooltip />
+    <manpage>Align all sections to a single reference section with the given section number.</manpage>
+  </Field>
+  <Field name="FullReportMeanAndMax">
+    <short>full</short>
+    <type>FP</type>
+    <usage>Criterion mean deviation and maximum deviation for full report on a section</usage>
+    <tooltip />
+    <manpage>A detailed report will be printed for any section that exceeds either the given mean deviation or the given maximum deviation.</manpage>
+  </Field>
+  <Field name="PrealignTransforms">
+    <short>prealign</short>
+    <type>FN</type>
+    <usage>File of g transforms used to prealign the images modeled</usage>
+    <tooltip />
+    <manpage>File of g transforms that were used to prealign the images on which the model was built</manpage>
+  </Field>
+  <Field name="EditTransforms">
+    <short>edit</short>
+    <type>FN</type>
+    <usage>File with existing transforms to be replaced by any transforms found</usage>
+    <tooltip />
+    <manpage>Name of file with existing f transforms to be replaced by any transforms that are solved for</manpage>
+  </Field>
+  <Field name="XformsToApply">
+    <short>xforms</short>
+    <type>FN</type>
+    <usage>Transforms to apply to the model</usage>
+    <tooltip />
+    <manpage>File of g transforms to apply to transform the model</manpage>
+  </Field>
+  <Field name="UseTransformLine">
+    <short>useline</short>
+    <type>I</type>
+    <usage>Line number of single transform to apply to whole model (numbered from 0)</usage>
+    <tooltip />
+    <manpage>Line number of single transform to apply to all points in model, regardless of their Z values.  Line numbers start at 0.  This option can be used only when forward or back-transforming the model.  This option will be invoked automatically if there is only one transform in the file. If prealignment transforms are specified when transforming or undistorting a model, they will be applied as usual, with a separate transform used for each Z value.</manpage>
+  </Field>
+  <Field name="ChunkSizes">
+    <short>chunks</short>
+    <type>LI</type>
+    <usage>Size of chunk of sections corresponding to each transform in file</usage>
+    <tooltip />
+    <manpage>If the model consists of a set of blocks in Z, such as a model built on a set of serial tomograms, then this option can be used to apply one transform per chunk of Z values.  Enter a list giving the number of sections in each chunk.  Z values beyond the total of these chunk sizes will not be transformed.  The same chunk structure will be used when applying prealignment transforms if -prealign is entered.</manpage>
+  </Field>
+  <Field name="BackTransform">
+    <short>back</short>
+    <type>B</type>
+    <usage>Back-transform or re-distort model</usage>
+    <tooltip />
+    <manpage>If no distortion field is involved, apply the inverse of the transforms specified by -prealign or -xforms.  Either of these two options may be used to specify transforms, but not both.  If a distortion field or mag gradient is specified, this option can be used to transform a model built on undistorted images to match original images.  In this case, prealignment transforms will be treated differently depending on how they are specified: with -xforms, the model will be back-transformed to match the raw images; with -prealign, the model will be transformed to match prealigned but distorted images.</manpage>
+  </Field>
+  <Field name="ScaleShifts">
+    <short>scale</short>
+    <type>F</type>
+    <usage>Factor to scale X/Y translations before applying transforms factors</usage>
+    <tooltip />
+    <manpage>Factor by which to scale X/Y translations in the transforms before applying them.  Use this option if a set of transforms is appropriate for images at one scale but the model was built on images at another scale.  For example, if images are scaled by binning, the factor would be the binning of the images that the transforms apply to, divided by the binning of the images on which the model was built.</manpage>
+  </Field>
+  <Field name="AdjustForRotationBy90">
+    <short>adjust</short>
+    <type>I</type>
+    <usage>Adjust for 90-degree rotation: 1 to do if detected, 2 to do regardless</usage>
+    <tooltip />
+    <manpage>When transforming the model, adjust for a rotation near 90 degrees by shifting by the difference between center coordinates in X and Y.  This operation assumes that the model is going to be used with an image file whose X and Y sizes are transposed from the original image.  Newstack(1) automatically transposes sizes when it detects that the transformations make this size fit the transformed images better.  However, this option should not be used when the rotated image was made with the \fB-adjust\fR option to Newstack, because origin values inserted by Newstack(1) will already result in an appropriate shift in the model in Xfmodel.  Enter 1 to detect a 90-degree rotation and adjust if it is detected, or 2 to apply the adjustment regardless, which would be useful if the detection fails because a small fraction of images are not rotated enough.</manpage>
+  </Field>
+  <Field name="DistortionField">
+    <short>distort</short>
+    <type>FN</type>
+    <usage>Undistort/redistort model with image distortion field in this file</usage>
+    <tooltip />
+    <manpage>File with image distortion field to be applied in transforming model. If BackTransform is specified, the model will be redistorted, i.e. transformed to match original distorted images.</manpage>
+  </Field>
+  <Field name="BinningOfImages">
+    <short>binning</short>
+    <type>F</type>
+    <usage>The camera binning at which images were taken</usage>
+    <tooltip />
+    <manpage>The camera binning at which images were taken.  This entry may be required when undistorting if the program cannot deduce the binning unambiguously.</manpage>
+  </Field>
+  <Field name="GradientFile">
+    <short>gradient</short>
+    <type>FN</type>
+    <usage>File with magnification gradients to be applied for each Z value</usage>
+    <tooltip />
+    <manpage>File with magnification gradients to be applied for each image. This should be a file listing the tilt angle, the percent magnification change per micron of Z height, and the degrees of rotation per micron of Z height for each image, such as is produced by Extractmaggrad.  The mag gradient correction is applied before a distortion field correction and before any transformations.</manpage>
+  </Field>
+  <Field name="ParameterFile">
+    <short>param</short>
+    <type>PF</type>
+    <usage>Read parameter entries from file</usage>
+    <tooltip />
+    <manpage>Read parameter entries as keyword-value pairs from a parameter file.</manpage>
+  </Field>
+  <Field name="usage">
+    <short>help</short>
+    <type>B</type>
+    <usage>Print help output</usage>
+    <tooltip />
+    <manpage />
+  </Field>
+</autodoc>

@@ -1,0 +1,331 @@
+
+Input image file:: t1.mrc
+ Dimensions:    127    121     21   Pixel size:         1          1          1
+Mode:  1               Min, max, mean:          451         1043       997.14
+raw2mrc: Converted to mrc format.                       25-Sep-26  12:36:12
+
+Opened OLD file: t1.rawtlt
+
+Opened OLD file: t1.prexf
+To compensate for larger tilt increment, residual change criteria for deletion
+  were scaled by 1.952: to  0.078   3.90
+ First round of tracking will be split in two
+Starting object   1, round  1,   7 contours
+7 locals, crit: 2 0.800000
+crit   4   1   1   13224   20384  0.8000   10579
+crit   7   1   1   21778   20384  0.8000   17422
+crit   2   1   1   21988   20384  0.8000   17591
+crit   5   1   1   21869   20384  0.8000   17495
+crit   3   1   1   21927   20384  0.8000   17542
+crit   1   1   1   20986   20384  0.8000   16788
+crit   6   1   1   20917   20384  0.8000   16733
+view  10, pass 1,   7 points (-  0), mean, sd, max dev:    0.07    0.03    0.11
+14 locals, crit: 2 0.788952
+crit   4   2   2   12728   18587  0.7890   10042
+crit   7   2   2   19743   18587  0.7890   15576
+crit   2   2   2   19848   18587  0.7890   15659
+crit   5   2   2   19788   18587  0.7890   15612
+crit   3   2   2   19817   18587  0.7890   15635
+crit   1   2   2   19347   18587  0.7890   15264
+crit   6   2   2   18838   18587  0.7890   14862
+view   9, pass 1,   7 points (-  0), mean, sd, max dev:    0.13    0.07    0.21
+21 locals, crit: 2 0.732461
+crit   4   3   3   11253   15345  0.7325    8242
+crit   7   3   3   15930   15345  0.7325   11668
+crit   2   3   3   16000   15345  0.7325   11719
+crit   5   3   3   16252   15345  0.7325   11904
+crit   3   3   3   16272   15345  0.7325   11918
+crit   1   3   3   15958   15345  0.7325   11688
+crit   6   3   3   15751   15345  0.7325   11537
+view   8, pass 1,   7 points (-  0), mean, sd, max dev:    0.05    0.02    0.10
+Metro error #3, Restarting with step factor of 0.22
+Metro error #3, Restarting with step factor of 0.28
+Metro error #3, Restarting with step factor of 0.19
+Metro error #3, Restarting with step factor of 0.12
+   4 views, 1000 cycles, F =     0.328696, mean residual =    0.25
+tiltalign error going to view 8 even after varying step factor
+ivuse 8 iview 7
+28 locals, crit: 2 0.728890
+crit   4   4   4   10528   13872  0.7289    7674
+crit   7   4   4   14254   13872  0.7289   10389
+crit   2   4   4   14306   13872  0.7289   10428
+crit   5   4   4   14695   13872  0.7289   10711
+crit   3   4   4   14710   13872  0.7289   10722
+crit   1   4   4   14381   13872  0.7289   10482
+crit   6   4   4   14226   13872  0.7289   10369
+view   7, pass 1,   7 points (-  0), mean, sd, max dev:    0.12    0.07    0.20
+   5 views,    1 cycles, F =     0.455271, mean residual =    0.35
+ivuse 7 iview 6
+pred   5  12966.45   5290.49   4141.90   4219.29   2941.52    920.72
+35 locals, crit: 2 0.698316
+crit   4   5   5   10244   12966  0.5828    1907
+crit   7   5   5   13225   12966  0.7797    3294
+crit   2   5   5   13267   12966  0.7797    3304
+crit   5   5   5   13661   12966  0.8288    3617
+crit   3   5   5   13673   12966  0.8288    3620
+crit   1   5   5   13410   12966  0.8169    3499
+crit   6   5   5   13286   12966  0.8152    3460
+view   6, pass 1,   7 points (-  0), mean, sd, max dev:    0.08    0.05    0.13
+   6 views,    1 cycles, F =     0.644725, mean residual =    0.46
+   6 views,    1 cycles, F =     0.635888, mean residual =    0.45
+ivuse 11 iview 12
+pred   6  12307.85   4999.40  20166.69   4140.67   2245.38    724.47
+42 locals, crit: 2 0.675984
+crit   4   6   6   10039   12308  0.5828    8032
+crit   7   6   6   12523   12308  0.7797   10018
+crit   2   6   6   12558   12308  0.7797   10047
+crit   5   6   6   12887   12308  0.8152   10309
+crit   3   6   6   12896   12308  0.8152   10317
+crit   1   6   6   12677   12308  0.8152   10142
+crit   6   6   6   12574   12308  0.8000   10059
+view  12, pass 1,   7 points (-  0), mean, sd, max dev:    0.32    0.15    0.54
+   7 views,  586 cycles, F =     0.640516, mean residual =    0.38
+ivuse 12 iview 13
+pred   7  12626.68   4641.10  19196.60   4290.95   1642.48    619.34
+49 locals, crit: 2 0.662525
+crit   4   7   7   10651   12627  0.5828    8521
+crit   7   7   7   12816   12627  0.7797   10253
+crit   2   7   7   12846   12627  0.7797   10277
+crit   5   7   7   13128   12627  0.8020   10502
+crit   3   7   7   13136   12627  0.8020   10509
+crit   1   7   7   12949   12627  0.8020   10359
+crit   6   7   7   12860   12627  0.8000   10288
+view  13, pass 1,   7 points (-  0), mean, sd, max dev:    0.40    0.11    0.60
+Metro error #3, Restarting with step factor of 0.22
+Metro error #3, Restarting with step factor of 0.28
+Metro error #3, Restarting with step factor of 0.19
+Metro error #3, Restarting with step factor of 0.12
+   8 views, 1000 cycles, F =     0.736326, mean residual =    0.39
+tiltalign error going to view 13 even after varying step factor
+ivuse 13 iview 14
+pred   7  12417.50   4858.92  14748.06   6731.14    582.64    971.56
+56 locals, crit: 2 0.645986
+crit   4   8   8   10320   11992  0.5828    7396
+crit   7   8   8   12153   11992  0.7797    9722
+crit   2   8   8   12179   11992  0.7797    9743
+crit   5   8   8   12425   11992  0.8000    9940
+crit   3   8   8   12433   11992  0.8000    9946
+crit   1   8   8   12245   11992  0.8000    9796
+crit   6   8   8   12191   11992  0.7985    9753
+view  14, pass 1,   7 points (-  0), mean, sd, max dev:    0.78    0.52    1.79
+Metro error #3, Restarting with step factor of 0.22
+Metro error #3, Restarting with step factor of 0.28
+Metro error #3, Restarting with step factor of 0.19
+Metro error #3, Restarting with step factor of 0.12
+   9 views, 1000 cycles, F =     0.781694, mean residual =    0.51
+tiltalign error going to view 14 even after varying step factor
+ivuse 14 iview 15
+pred   7  12099.42   5157.24  10403.95   7279.37   -423.87   1050.69
+63 locals, crit: 2 0.645835
+crit   4   9   9    9888   11451  0.5828    5236
+crit   7   9   9   11560   11451  0.7657    8042
+crit   2   9   9   11639   11451  0.7797    8245
+crit   5   9   9   11858   11451  0.8000    8619
+crit   3   9   9   11864   11451  0.8000    8624
+crit   1   9   9   11697   11451  0.8000    8502
+crit   6   9   9   11649   11451  0.7985    8452
+view  15, pass 1,   7 points (-  0), mean, sd, max dev:    0.08    0.04    0.11
+  10 views,  191 cycles, F =     0.619191, mean residual =    0.42
+ivuse 15 iview 16
+pred   7  11707.42   5485.87   6187.94   6605.33  -1379.87    953.40
+70 locals, crit: 2 0.645693
+crit   4  10  10    9506   10976  0.7072    3790
+crit   7  10  10   11074   10976  0.7797    4868
+crit   2  10  10   11146   10976  0.7809    4907
+crit   5  10  10   11359   10976  0.8020    5136
+crit   3  10  10   11365   10976  0.8020    5138
+crit   1  10  10   11214   10976  0.8020    5070
+crit   6  10  10   11171   10976  0.8000    5038
+view  16, pass 1,   7 points (-  0), mean, sd, max dev:    0.12    0.04    0.17
+  11 views,  607 cycles, F =     0.540168, mean residual =    0.38
+  11 views,    1 cycles, F =     0.540168, mean residual =    0.38
+ivuse 6 iview 5
+pred   7  12626.68   4641.10   6056.75   4290.95   1642.48    619.34
+77 locals, crit: 2 0.649721
+crit   4  11  11    9076   10495  0.6728    3524
+crit   7  11  11   10567   10495  0.7742    4721
+crit   2  11  11   10632   10495  0.7797    4784
+crit   5  11  11   10871   10495  0.8020    5032
+crit   3  11  11   10877   10495  0.8020    5034
+crit   1  11  11   10740   10495  0.8020    4971
+crit   6  11  11   10701   10495  0.8000    4940
+view   5, pass 1,   7 points (-  0), mean, sd, max dev:    0.18    0.07    0.28
+  12 views,  695 cycles, F =     0.593153, mean residual =    0.39
+ivuse 5 iview 4
+pred   7  11749.67   4796.80   4461.68   3932.49   1822.00    567.61
+84 locals, crit: 2 0.643562
+crit   4  12  12    9020   10320  0.6728    2624
+crit   7  12  12   10386   10320  0.7742    3476
+crit   2  12  12   10446   10320  0.7797    3521
+crit   5  12  12   10665   10320  0.8000    3689
+crit   3  12  12   10670   10320  0.8000    3690
+crit   1  12  12   10545   10320  0.8000    3647
+crit   6  12  12   10509   10320  0.8000    3635
+view   4, pass 1,   7 points (-  0), mean, sd, max dev:    0.91    0.41    1.53
+Metro error #3, Restarting with step factor of 0.22
+Metro error #3, Restarting with step factor of 0.28
+Metro error #3, Restarting with step factor of 0.19
+Metro error #3, Restarting with step factor of 0.12
+  13 views, 1000 cycles, F =     0.701000, mean residual =    0.51
+tiltalign error going to view 4 even after varying step factor
+ivuse 4 iview 3
+pred   7   9775.30   3243.26   5198.59   3011.78   1144.18    434.71
+91 locals, crit: 2 0.623524
+crit   4  13  13    8876   10031  0.6728    3095
+crit   7  13  13   10137   10031  0.7742    4067
+crit   2  13  13   10029   10031  0.7742    4024
+crit   5  13  13   10243   10031  0.8000    4247
+crit   3  13  13   10399   10031  0.8000    4311
+crit   1  13  13   10283   10031  0.8000    4263
+crit   6  13  13   10250   10031  0.8000    4250
+view   3, pass 1,   7 points (-  0), mean, sd, max dev:    0.60    0.27    0.99
+  14 views,  293 cycles, F =     0.763225, mean residual =    0.54
+ivuse 3 iview 2
+pred   7   8346.26   1193.48   6496.97    937.15    462.32    135.27
+98 locals, crit: 2 0.622002
+crit   4  14  14    8734    9799  0.6728    3896
+crit   7  14  14    9906    9799  0.7742    5084
+crit   2  14  14    9806    9799  0.7742    5033
+crit   5  14  14    9976    9799  0.7954    5261
+crit   3  14  14   10149    9799  0.8000    5383
+crit   1  14  14   10014    9799  0.8000    5311
+crit   6  14  14   10011    9799  0.8000    5310
+view   2, pass 1,   7 points (-  0), mean, sd, max dev:    0.33    0.21    0.59
+Metro error #3, Restarting with step factor of 0.22
+Metro error #3, Restarting with step factor of 0.28
+Metro error #3, Restarting with step factor of 0.19
+Metro error #3, Restarting with step factor of 0.12
+  15 views,  733 cycles, F =     0.781787, mean residual =    0.56
+ivuse 2 iview 1
+pred   7   7976.05   1392.46   5531.11    634.06    611.23     91.52
+105 locals, crit: 2 0.621912
+crit   4  15  15    8583    9564  0.7072    3510
+crit   7  15  15    9658    9564  0.7797    4355
+crit   2  15  15    9565    9564  0.7797    4313
+crit   5  15  15    9724    9564  0.7954    4473
+crit   3  15  15    9903    9564  0.8020    4593
+crit   1  15  15    9759    9564  0.8000    4515
+crit   6  15  15    9756    9564  0.8000    4514
+view   1, pass 1,   7 points (-  0), mean, sd, max dev:    1.08    0.48    1.58
+Metro error #3, Restarting with step factor of 0.22
+  16 views,  907 cycles, F =     0.601532, mean residual =    0.44
+  16 views,    1 cycles, F =     0.601532, mean residual =    0.44
+ivuse 16 iview 17
+pred   7  11252.63   5879.02   1522.62   3781.13  -2432.50    545.76
+105 locals, crit: 2 0.621912
+crit   4  15  15    8583    9564  0.7072     966
+crit   7  15  15    9658    9564  0.7797    1199
+crit   2  15  15    9565    9564  0.7797    1187
+crit   5  15  15    9724    9564  0.7954    1231
+crit   3  15  15    9903    9564  0.8020    1264
+crit   1  15  15    9759    9564  0.8000    1243
+crit   6  15  15    9756    9564  0.8000    1243
+view  17, pass 1,   7 points (-  0), mean, sd, max dev:    0.56    0.39    1.28
+Metro error #3, Restarting with step factor of 0.22
+Metro error #3, Restarting with step factor of 0.28
+Metro error #3, Restarting with step factor of 0.19
+Metro error #3, Restarting with step factor of 0.12
+  17 views, 1000 cycles, F =     0.723560, mean residual =    0.53
+tiltalign error going to view 17 even after varying step factor
+ivuse 17 iview 18
+pred   7   9627.30   5661.74    558.50   4073.87  -2267.20    588.01
+105 locals, crit: 2 0.617145
+crit   4  15  15    8530    9507  0.7072     713
+crit   7  15  15    9623    9507  0.7797     713
+crit   2  15  15    9550    9507  0.7797     713
+crit   5  15  15    9658    9507  0.7954     713
+crit   3  15  15    9850    9507  0.8020     713
+crit   1  15  15    9648    9507  0.8000     713
+crit   6  15  15    9690    9507  0.8000     713
+view  18, pass 1,   7 points (-  2), mean, sd, max dev:    0.60    0.53    1.22
+Metro error #3, Restarting with step factor of 0.22
+Metro error #3, Restarting with step factor of 0.28
+Metro error #3, Restarting with step factor of 0.19
+Metro error #3, Restarting with step factor of 0.12
+  18 views, 1000 cycles, F =     1.140651, mean residual =    0.84
+tiltalign error going to view 18 even after varying step factor
+   3 pts deleted for pass 2, conts:   3   1   6
+  18 views,    8 cycles, F =     0.926173, mean residual =    0.63
+ivuse 18 iview 18
+pred   7   5432.16   1962.17   3403.66    838.80   -946.64    151.35
+105 locals, crit: 2 0.549957
+crit   4  15  15    8035    8987  0.7072    2152
+crit   7  15  15    9129    8987  0.7797    2696
+crit   2  15  15    9104    8987  0.7742    2669
+crit   5  15  15    9127    8987  0.7954    2749
+crit   3  15  15    9850    9507  0.8020    2828
+crit   1  15  15    9648    9507  0.8000    2763
+crit   6  15  15    9690    9507  0.8000    2775
+   3 pts added on pass 2, conts:   3   1   6
+view  18, pass 2,   7 points (-  2), mean, sd, max dev:    1.65    1.14    3.66
+  18 views,    6 cycles, F =     1.012350, mean residual =    0.68
+   1 pts deleted, big mean residual, conts:   5
+  18 views,    7 cycles, F =     0.897791, mean residual =    0.60
+ivuse 18 iview 19
+pred   7   7190.86   3529.37   1569.49   2581.65  -1405.34    372.63
+104 locals, crit: 2 0.624492
+crit   4  15  15    8291    9276  0.7072     992
+crit   7  15  15    9384    9276  0.7797    1238
+crit   2  15  15    9264    9276  0.7742    1213
+crit   5  14  14    9883    9701  0.7954    1272
+crit   3  15  15    9579    9276  0.8000    1297
+crit   1  15  15    9508    9276  0.8000    1287
+crit   6  15  15    9464    9276  0.8000    1281
+view  19, pass 1,   7 points (-  0), mean, sd, max dev:    0.60    0.37    1.00
+Metro error #3, Restarting with step factor of 0.22
+Metro error #3, Restarting with step factor of 0.28
+  19 views,  892 cycles, F =     0.748573, mean residual =    0.51
+ivuse 19 iview 20
+pred   7   5755.61   1505.21   3177.28    819.82   -644.58    118.33
+104 locals, crit: 2 0.574124
+crit   4  15  15    8009    9138  0.6728    1874
+crit   7  15  15    9166    9138  0.7742    2467
+crit   2  15  15    9124    9138  0.7742    2456
+crit   5  14  14    9903    9553  0.8000    2635
+crit   3  15  15    9463    9138  0.8000    2632
+crit   1  15  15    9392    9138  0.8000    2612
+crit   6  15  15    9351    9138  0.8000    2601
+view  20, pass 1,   7 points (-  0), mean, sd, max dev:    0.68    0.55    1.74
+Metro error #3, Restarting with step factor of 0.22
+Metro error #3, Restarting with step factor of 0.28
+Metro error #3, Restarting with step factor of 0.19
+Metro error #3, Restarting with step factor of 0.12
+  20 views, 1000 cycles, F =     0.806551, mean residual =    0.60
+tiltalign error going to view 20 even after varying step factor
+   1 pts deleted for pass 2, conts:   5
+Metro error #3, Restarting with step factor of 0.22
+Metro error #3, Restarting with step factor of 0.28
+  20 views,  655 cycles, F =     0.725835, mean residual =    0.53
+ivuse 20 iview 20
+pred   7   4798.88   1180.84   3706.39    807.32   -509.83    145.67
+104 locals, crit: 2 0.579909
+crit   4  15  15    7340    8509  0.6728    2151
+crit   7  15  15    8583    8509  0.7742    2894
+crit   2  15  15    8455    8509  0.7404    2727
+crit   5  14  14    9903    9553  0.8000    3074
+crit   3  15  15    8684    8509  0.7954    3009
+crit   1  15  15    8869    8509  0.8152    3149
+crit   6  15  15    8796    8509  0.8020    3073
+   1 pts added on pass 2, conts:   5
+view  20, pass 2,   7 points (-  0), mean, sd, max dev:    0.91    0.80    2.17
+  20 views,    1 cycles, F =     0.737765, mean residual =    0.54
+ivuse 20 iview 21
+pred   7   5253.63   1388.21   2964.32    905.44   -572.33    130.69
+104 locals, crit: 2 0.562413
+crit   4  15  15    7695    8848  0.6728    1735
+crit   7  15  15    8895    8848  0.7742    2307
+crit   2  15  15    8810    8848  0.7497    2213
+crit   5  14  14    9613    9242  0.8000    2467
+crit   3  15  15    9094    8848  0.8000    2437
+crit   1  15  15    9151    8848  0.8020    2459
+crit   6  15  15    9094    8848  0.8000    2438
+view  21, pass 1,   7 points (-  0), mean, sd, max dev:    0.24    0.18    0.62
+  21 views,   11 cycles, F =     0.875893, mean residual =    0.61
+For object  1, round  1:  7 contours, points missing =    1
+  21 views,    1 cycles, F =     0.875833, mean residual =    0.61
+view  18, pass 1,   7 points (-  0), mean, sd, max dev:    1.08    0.85    2.29
+  21 views,    1 cycles, F =     0.898683, mean residual =    0.63
+For object  1, round  2:  7 contours, points missing =    0
+
+Obj cont:  Views on which points are missing
+ Total points missing = 0

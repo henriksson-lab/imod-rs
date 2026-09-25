@@ -1,0 +1,157 @@
+<?xml version="1.0" encoding="utf-8"?>
+
+<autodoc>
+  
+  <PreData>
+    
+    <Version>1.0</Version>
+    
+    <Pip>1</Pip>
+  
+  </PreData>
+  
+  <Field name="InputFile">
+    
+    <short>input</short>
+    
+    <type>FN</type>
+    
+    <usage>Input image file</usage>
+    
+    <tooltip />
+    
+    <manpage />
+  
+  </Field>
+  
+  <Field name="OutputFile">
+    
+    <short>output</short>
+    
+    <type>FN</type>
+    
+    <usage>Output image file</usage>
+    
+    <tooltip />
+    
+    <manpage />
+  
+  </Field>
+  
+  <Field name="XMinAndMax">
+    
+    <short>xminmax</short>
+    
+    <type>IP</type>
+    
+    <usage>Starting and ending X index coordinates to extract, numbered from 0</usage>
+    
+    <tooltip />
+    
+    <manpage>Starting and ending X index coordinates to extract, numbered from 0.  The default is the whole width in X.</manpage>
+  
+  </Field>
+  
+  <Field name="YMinAndMax">
+    
+    <short>yminmax</short>
+    
+    <type>IP</type>
+    
+    <usage>Starting and ending Y index coordinates to extract, numbered from 0</usage>
+    
+    <tooltip />
+    
+    <manpage>Starting and ending Y index coordinates to extract, numbered from 0.  The default is the whole height in Y.</manpage>
+  
+  </Field>
+  
+  <Field name="ZMinAndMax">
+    
+    <short>zminmax</short>
+    
+    <type>IP</type>
+    
+    <usage>Starting and ending Z index coordinates to extract, numbered from 0</usage>
+    
+    <tooltip />
+    
+    <manpage>Starting and ending Z index coordinates to extract, numbered from 0.  The default is the whole depth in Z.</manpage>
+  
+  </Field>
+  
+  <Field name="TaperPadsInXYZ">
+    
+    <short>taper</short>
+    
+    <type>IT</type>
+    
+    <usage>Number of pixels over which to taper the patches in X, Y and Z</usage>
+    
+    <tooltip />
+    
+    <manpage>Number of pixels over which to taper and pad the patches in X, Y and Z.  The default is 0.  Unless the -nofft option is entered, the amount of tapering in any dimension may be increased to make that dimension suitable for taking an FFT.</manpage>
+  
+  </Field>
+  
+  <Field name="NoFFTSizes">
+    
+    <short>nofft</short>
+    
+    <type>B</type>
+    
+    <usage>Do not adjust the padding to give sizes suitable for an FFT</usage>
+    
+    <tooltip />
+    
+    <manpage>Do not adjust the padding to give sizes suitable for an FFT.  This option is particularly important if you want no tapering and padding.</manpage>
+  
+  </Field>
+  
+  <Field name="NoisePadding">
+    
+    <short>noise</short>
+    
+    <type>B</type>
+    
+    <usage>Pad with tapered noise</usage>
+    
+    <tooltip />
+    
+    <manpage>Use tapered noise based on nearby pixels along the edge of an image to pad the images.  The default is to pad with a simple taper that makes streaks outside the edge of the image.</manpage>
+  
+  </Field>
+  
+  <Field name="ParameterFile">
+    
+    <short>param</short>
+    
+    <long>ParameterFile</long>
+    
+    <type>PF</type>
+    
+    <usage>Read parameter entries from file</usage>
+    
+    <tooltip />
+    
+    <manpage>Read parameter entries as keyword-value pairs from a parameter file.</manpage>
+  
+  </Field>
+  
+  <Field name="usage">
+    
+    <short>help</short>
+    
+    <long>usage</long>
+    
+    <type>B</type>
+    
+    <usage>Print help output</usage>
+    
+    <tooltip />
+    
+    <manpage />
+  
+  </Field>
+
+</autodoc>

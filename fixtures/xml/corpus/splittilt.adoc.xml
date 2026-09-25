@@ -1,0 +1,118 @@
+<?xml version="1.0" encoding="utf-8"?>
+<autodoc>
+  <PreData>
+    <Version>1.0</Version>
+    <Pip>1</Pip>
+  </PreData>
+  <Field name="CommandFile">
+    <type>FN</type>
+    <usage>Tilt command file, with or without extension</usage>
+    <tooltip />
+    <manpage>Tilt command file.  It can be entered with or without extension, i.e., as &quot;tilt&quot;, &quot;tilt.&quot;, or &quot;tilt.com&quot;.</manpage>
+  </Field>
+  <Field name="RootNameOfOutput">
+    <short>outroot</short>
+    <type>CH</type>
+    <usage>Root name for output command files (default is root of input file)</usage>
+    <tooltip />
+    <manpage />
+  </Field>
+  <Field name="NamingStyle">
+    <short>naming</short>
+    <type>I</type>
+    <usage>0, 1 or 2 for descriptive, mrc, or hdf extensions on image file names</usage>
+    <tooltip />
+    <manpage>0 if image files have descriptive extensions like &quot;.preali&quot;, or 1 or 2 if descriptive text is before the extension &quot;.mrc&quot; or &quot;.hdf&quot;.  This entry is needed only if the style cannot be determined from files in the dataset.</manpage>
+  </Field>
+  <Field name="ProcessorNumber">
+    <short>n</short>
+    <type>I</type>
+    <usage>Target or expected number of machines (default 8)</usage>
+    <tooltip />
+    <manpage>The number of machines that you expect to run the command files on.  The default is 8</manpage>
+  </Field>
+  <Field name="SliceMinimum">
+    <short>s</short>
+    <type>I</type>
+    <usage>Minimum number of slices per chunk (default 50)</usage>
+    <tooltip />
+    <manpage />
+  </Field>
+  <Field name="TargetChunks">
+    <short>t</short>
+    <type>I</type>
+    <usage>Target number of chunks (default 5 times expected # of machines)</usage>
+    <tooltip />
+    <manpage />
+  </Field>
+  <Field name="ChunkMinimum">
+    <short>m</short>
+    <type>I</type>
+    <usage>Minimum number of chunks (default 2 times expected # of machines)</usage>
+    <tooltip />
+    <manpage>Minimum number of chunks, except when vertical slices are specified with the -v option.  The default is 2 times the expected number of machines, but with vertical slices, the minimum becomes one chunk per machine.</manpage>
+  </Field>
+  <Field name="OldStyleXtiltPenalty">
+    <short>p</short>
+    <type>F</type>
+    <usage>Computational penalty for old-style X-axis tilting (default 1.33)</usage>
+    <tooltip />
+    <manpage />
+  </Field>
+  <Field name="VerticalSlices">
+    <short>v</short>
+    <type>B</type>
+    <usage>Do vertical slices instead of old-style X-axis tilting</usage>
+    <tooltip />
+    <manpage>Do vertical slices instead of old-style X-axis tilting, regardless of the penalty.</manpage>
+  </Field>
+  <Field name="SeparateChunks">
+    <short>c</short>
+    <type>B</type>
+    <usage>Write chunks to separate files, not directly to single output file</usage>
+    <tooltip />
+    <manpage>Write chunks to separate files named setname-nnn.rec and assemble the output file from these at the end.  The default is to write directly to the output file.</manpage>
+  </Field>
+  <Field name="BoundaryPixels">
+    <short>b</short>
+    <type>I</type>
+    <usage>Number of boundary pixels for direct writing</usage>
+    <tooltip />
+    <manpage>Number of pixels at each boundary between chunks to save in separate boundary files (named setname-nnn.rbound) and rewrite to the output file in the -finish.com file, when directly writing to the output file.  The default is 2048.  This capability to rewrite lines at the boundary should make it unnecessary to write chunks to separate files.</manpage>
+  </Field>
+  <Field name="InitialComNumber">
+    <short>i</short>
+    <type>I</type>
+    <usage>Initial command file number</usage>
+    <tooltip />
+    <manpage>Start with given command file number instead of 1.  When this option is entered, the program will not delete any existing command files.  If data are being written directly to output file, the first file is named -nnn-sync.com instead of -start.com.</manpage>
+  </Field>
+  <Field name="OpenForMoreComs">
+    <short>o</short>
+    <type>B</type>
+    <usage>Leave command file set open, finish with -sync instead of -finish</usage>
+    <tooltip />
+    <manpage>Leave the command file set open by naming the command file for reassembly -nnn-sync.com instead of -finish.com, and by not cleaning up command and log files in the reassembly file.</manpage>
+  </Field>
+  <Field name="UniqueInfoFile">
+    <short>unique</short>
+    <type>B</type>
+    <usage>Attach the first command file number to a boundary info file</usage>
+    <tooltip />
+    <manpage />
+  </Field>
+  <Field name="DimensionsOfStack">
+    <short>d</short>
+    <type>IP</type>
+    <usage>X and Y size of aligned stack</usage>
+    <tooltip />
+    <manpage>Use the given values as the dimensions of the aligned stack. This option is needed when calling from Sirtsetup(1) if the log of the stack is being used or if a subarea is being done.</manpage>
+  </Field>
+  <Field name="usage">
+    <short>help</short>
+    <type>B</type>
+    <usage>Print help output</usage>
+    <tooltip />
+    <manpage />
+  </Field>
+</autodoc>

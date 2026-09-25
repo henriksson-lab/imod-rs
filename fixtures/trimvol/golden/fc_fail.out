@@ -1,0 +1,4 @@
+Determining byte scaling of f.mrc...
+findcontrast -slice 2,4  -xminmax 39,49  "f.mrc"
+ERROR: FINDCONTRAST - X or Y values outside range of volume
+ERROR: trimvol - findcontrast -slice 2,4  -xminmax 39,49  "f.mrc": exited with status 1

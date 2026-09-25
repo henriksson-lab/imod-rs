@@ -1,0 +1,245 @@
+<?xml version="1.0" encoding="utf-8"?>
+<autodoc>
+  <PreData>
+    <Version>1.0</Version>
+    <Pip>1</Pip>
+  </PreData>
+  <Field name="XMinAndMax">
+    <short>xminmax</short>
+    <type>IP</type>
+    <usage>Starting and ending X index coordinates to extract</usage>
+    <tooltip />
+    <manpage>Starting and ending X index coordinates to extract into the output volume (numbered from 0). The default is to produce an output volume the same size as the input.  The X and Y range of the output cannot be modified if the input is a Fourier transform.</manpage>
+  </Field>
+  <Field name="YMinAndMax">
+    <short>yminmax</short>
+    <type>IP</type>
+    <usage>Starting and ending Y index coordinates to extract</usage>
+    <tooltip />
+    <manpage>Starting and ending Y index coordinates to extract into the output volume (numbered from 0).</manpage>
+  </Field>
+  <Field name="ZMinAndMax">
+    <short>zminmax</short>
+    <type>IP</type>
+    <usage>Starting and ending slices to extract (numbered from 0)</usage>
+    <tooltip />
+    <manpage>Starting and ending Z slices to extract into the output volume (numbered from 0).</manpage>
+  </Field>
+  <Field name="BorderAroundObjects">
+    <short>border</short>
+    <type>I</type>
+    <usage>Border in X and Y for extracting just the volume containing objects</usage>
+    <tooltip />
+    <manpage>Use this option to extract just the volume necessary to contain all of the objects being painted, with the given border added in X and Y.  For tubular lines, the radius of the tube is taken into account in determining the limits to extract in X and Y and Z. For scattered points, the radius of each point is taken into account in determining limits to extract in all 3 dimensions.  If padding is specified with the \fB-pad\fR option, the padding is added only if it is positive. If Z limits are entered with the \fB-zminmax\fR option, then they supercede the Z limits computed from the objects with this option; this is the way to get extra slices in Z.  This option cannot be used with \fB-xminmax\fR or \fB-yminmax\fR.</manpage>
+  </Field>
+  <Field name="InvertPaintedArea">
+    <short>invert</short>
+    <type>B</type>
+    <usage>Invert: paint outside model contours instead of inside</usage>
+    <tooltip />
+    <manpage>Paint outside model contours instead of inside.  This is accomplished by painting inside the contours, then subtracting the painted volume from the original volume.  This option cannot be used when making colored data because the color is not defined outside of model objects.</manpage>
+  </Field>
+  <Field name="NoiseFillBorder">
+    <short>noise</short>
+    <type>FP</type>
+    <usage>Min &amp; max distance from contour for getting mean/SD to use to fill with noise</usage>
+    <tooltip />
+    <manpage>Fill the interior of model contours with gaussian noise with a mean and standard deviation based on the pixels outside the contour that are between the given minimum and maximum distance from the contour. This option can only be used with painting outside and thus implies the \fBinvert\fR option.  Inside contours are handled properly, i.e., the region between inner and outer contours is filled, but the noise is assessed only from pixels outside the outer contour.  The border must be at least 0.5 pixels wide.  This option cannot be used with the \fB-pad\fR or \fB-fast\fR options and works only with closed contours.</manpage>
+  </Field>
+  <Field name="ReverseContrast">
+    <short>reverse</short>
+    <type>B</type>
+    <usage>Reverse contrast (subtract from file maximum) before painting</usage>
+    <tooltip />
+    <manpage>Reverse the contrast by subtracting each value from the file maximum before painting.  The intensity range being operated on thus ranges from 0 to the original max minus the min.  For color input data, each channel is subtracted from 255.  FFT input data may not be reversed.</manpage>
+  </Field>
+  <Field name="Threshold">
+    <short>thresh</short>
+    <type>F</type>
+    <usage>Set values below threshold to 0</usage>
+    <tooltip />
+    <manpage>Set values below the given threshold to zero.  If contrast is being reversed, the threshold will be converted to the appropriate value to use after the reversal, so a value in the original data can be used.</manpage>
+  </Field>
+  <Field name="FillValue">
+    <short>fv</short>
+    <type>F</type>
+    <usage>Value to fill background with (default 0)</usage>
+    <tooltip />
+    <manpage>Value with which to fill the background pixels that are not painted with image data.  This is a value on the same scale as the values in the input volume, before any reversal of contrast.  If you enter a value and also select contrast reversal, the value is subtracted from the file maximum before being tested for whether it fits in the range for the data mode. The default is 0.</manpage>
+  </Field>
+  <Field name="FillColor">
+    <short>fc</short>
+    <type>FT</type>
+    <usage>Relative RGB intensities for coloring the fill value (default 1,1,1)</usage>
+    <tooltip />
+    <manpage>Relative values for scaling the value for background fill into a red, green, and blue components for color output.  The values should be between 0 and 1.  The default is 1,1,1.</manpage>
+  </Field>
+  <Field name="MaskValue">
+    <short>mask</short>
+    <type>F</type>
+    <usage>Value to use instead of existing pixel values, to make a binary mask</usage>
+    <tooltip />
+    <manpage>With this option, the given value will be used to generate output instead of the value in the input data.  In the simplest case, you can make a mask volume that consists of zeros and ones by using &quot;-mask 1&quot;.  You can use the \fB-invert\fR option to produce the mask value outside the painted regions and 0 inside.  A mask can be tapered with the \fB-pad\fR and \fB-taper\fR options.  When creating a mask file, either with this option or the \fB-label\fR option, a byte file will be output as unsigned so that the values in the file will equal the mask values.  Also, the input slices will not be read, which means that the input image file can be just a copy of an MRC file header, such as is created with the IMOD program copyheader.  However, the pixel spacing and origin information in whatever image file is provided must match those of the volume on which the model was generated.</manpage>
+  </Field>
+  <Field name="LabelMaskList">
+    <short>label</short>
+    <type>LI</type>
+    <usage>List of mask values to use for each included object (/ for object #'s)</usage>
+    <tooltip />
+    <manpage>A set of object-specific mask values that allows the regions inside different objects to be labeled by the different values.  There must be as many numbers in the list as objects included for consideration (i.e., either the total number of model objects, or the number entered with the \fB-objects\fR option).  Enter &quot;/&quot; to use the default, which is the object number for each object.  The mask values must fit into the output file data type and not be indistinguishable from the fill value in the output file.  This option cannot be entered with \fB-mask\fR.</manpage>
+  </Field>
+  <Field name="RetainOutsideMask">
+    <short>retain</short>
+    <type>B</type>
+    <usage>Outside of areas painted with mask, copy input values to the output</usage>
+    <tooltip />
+    <manpage>Outside of areas painted with mask values, retain the existing image data by copying values from the input to the output.  This option, which can be used only when masking, allows mask output to be added to an existing mask output file.</manpage>
+  </Field>
+  <Field name="ModeToOutput">
+    <short>mode</short>
+    <type>I</type>
+    <usage>Output file mode (0: bytes, 1/6: signed/unsigned integers, 2/12: floats)</usage>
+    <tooltip />
+    <manpage>Mode for output file: 0 for bytes, 1 or 6 for signed or unsigned integers, or 2 or 12 for 32-bit or 16-bit floating point values.  Changing the mode to 2 or 12 is essential if you want to make a mask with a value of 1 and tapering over padded regions.  You may also need to change output mode if you are inserting fill or mask values outside the range of the input mode.  You cannot change the mode of FFT input data, of RGB input data unless making a mask, or when using \fB-color\fR or \fB-project\fR.  The default mode of floating point output for MRC files is governed by the value of environment variable IMOD_WRITE_FLOATS_16BIT. Mode 12 is allowed only if the output format is MRC.</manpage>
+  </Field>
+  <Field name="PaddingSize">
+    <short>pad</short>
+    <type>F</type>
+    <usage>Distance to pad around painted area, + for outside, - for inside</usage>
+    <tooltip />
+    <manpage>This option will extend the painted region outside of the model feature with a positive padding value, or eliminate pixels just inside the boundary of the model feature with a negative padding value.  For a contour nested inside of another contour, the sense of the padding is reversed, with a positive padding extending the painted area inside, and a negative padding eliminating painted pixels outside.  For spheres, the padding size is essentially added to the sphere radius.  For tubular contours, adding padding is the same as entering a different tube diameter, unless tapering is being used.</manpage>
+  </Field>
+  <Field name="TaperOverPad">
+    <short>taper</short>
+    <type>I</type>
+    <usage>Type of tapering to background over padding region: 1 linear or 2 gaussian</usage>
+    <tooltip />
+    <manpage>With this option, values will be tapered down to the background value over a padding region.  Enter 1 for a taper that is linear with distance, or 2 for a Gaussian that falls to 0.05 at the end of the tapering distance.</manpage>
+  </Field>
+  <Field name="TaperInZOverPad">
+    <short>ztaper</short>
+    <type>B</type>
+    <usage>Do tapering over the padding distance in Z as well as in X and Y</usage>
+    <tooltip />
+    <manpage>Do tapering over the padding distance in Z as well as in X and Y. This option is allowed only with tapering inside, i.e., with a negative entry for \fB-pad\fR.  The distance in Z is 0.5 for points in a contour with no overlapping contours at adjacent Z values, 1.5 if an adjacent Z value has the last overlapping contour in that direction, etc.</manpage>
+  </Field>
+  <Field name="ObjectsToDo">
+    <short>objects</short>
+    <type>LI</type>
+    <usage>Paint only for the given list of objects</usage>
+    <tooltip />
+    <manpage>Paint only for the given list of objects.  The default is to do all closed contour objects, all scattered point objects if \fB-2dscat\fR or \fB-3dscat\fR is entered, and any open contour objects listed with \fB-tube\fR.</manpage>
+  </Field>
+  <Field name="2DScatteredPoints">
+    <short>2dscat</short>
+    <type>B</type>
+    <usage>Paint with scattered points treated as 2D circles</usage>
+    <tooltip />
+    <manpage>Paint scattered point objects, but paint only a circle in the Z plane of each point.  This would be useful for 2D FFTs.</manpage>
+  </Field>
+  <Field name="3DScatteredPoints">
+    <short>3dscat</short>
+    <type>B</type>
+    <usage>Paint with scattered points treated as 3D spheres</usage>
+    <tooltip />
+    <manpage>Paint scattered point objects with each point treated as a sphere. Options \fB-2dscat\fR and \fB-3dscat\fR are mutually exclusive.</manpage>
+  </Field>
+  <Field name="TubeObjects">
+    <short>tube</short>
+    <type>LI</type>
+    <usage>List of open contour objects to paint as tubes</usage>
+    <tooltip />
+    <manpage>List of open contour objects for which to paint a cyclinder of a particular diameter around each contour.</manpage>
+  </Field>
+  <Field name="DiameterForTubes">
+    <short>diam</short>
+    <type>F</type>
+    <usage>Diameter for tubes (1 value, or 1 value per listed object)</usage>
+    <tooltip />
+    <manpage>Diameter for open contour objects being painted as tubes.  Enter either 1 value, or 1 value per listed object.</manpage>
+  </Field>
+  <Field name="PlanarTubes">
+    <short>planar</short>
+    <type>B</type>
+    <usage>Paint open contours only in the plane where a segment lies</usage>
+    <tooltip />
+    <manpage>With this open, open contours identified as being painted as tubes will be painted in 2D only.  For each segment of the contour that lies in one Z plane, pixels will be extracted in that Z plane only.  If there is only one point in the contour, a circle will be painted around the point, which will not happen without this option.</manpage>
+  </Field>
+  <Field name="AllSectionObjects">
+    <short>allsec</short>
+    <type>LI</type>
+    <usage>List of objects to paint on all sections</usage>
+    <tooltip />
+    <manpage>List of closed contour or scattered point objects to paint on all sections.  For example, a cylinder will be painted for each sphere regardless of its Z location.</manpage>
+  </Field>
+  <Field name="ColorOutput">
+    <short>color</short>
+    <type>B</type>
+    <usage>Produce RGB output colored by model object colors</usage>
+    <tooltip />
+    <manpage>Produce RGB output colored by model object colors.  This option is available only with byte, integer, or floating point input.</manpage>
+  </Field>
+  <Field name="ScalingMinMax">
+    <short>scale</short>
+    <type>FP</type>
+    <usage>Minimum and maximum values for scaling to bytes</usage>
+    <tooltip />
+    <manpage>Minimum and maximum values for scaling to bytes, when a color volume is being produced.  The default is to scale the min and max of the file to 0 and 255 for input data modes other than bytes, but to leave bytes unscaled. This entry should produce the same scaling as the \fB-s\fR option to 3dmod(1).</manpage>
+  </Field>
+  <Field name="ProjectTiltSeries">
+    <short>project</short>
+    <type>FT</type>
+    <usage>Produce projection series with given starting, ending, increment angles</usage>
+    <tooltip />
+    <manpage>Produce projection series with given starting, ending, and increment angles.  Projection is done with xyzproj(1), then data are read back in and and scaled to bytes.  When color output is being produced, each painted color channel is output separately and projected separately, then read back in and combined into one RGB mode file.  Only byte, integer, or real data may be projected.</manpage>
+  </Field>
+  <Field name="AxisToTiltAround">
+    <short>axis</short>
+    <type>CH</type>
+    <usage>Axis to tilt around for projections (X, Y, or Z; default is Y)</usage>
+    <tooltip />
+    <manpage />
+  </Field>
+  <Field name="ConstantScaling">
+    <short>constant</short>
+    <type>B</type>
+    <usage>Use constant scaling in projections</usage>
+    <tooltip />
+    <manpage>When projecting with Xyzproj(1), scale all projections by the same amount instead of dividing them by the number of pixels along the projection ray at the particular angle.  This will give more even intensities through the projection series for nearly spherical compact objects embedded in the black background.</manpage>
+  </Field>
+  <Field name="BlackAndWhite">
+    <short>bw</short>
+    <type>IP</type>
+    <usage>Black/white values for scaling projections to bytes</usage>
+    <tooltip />
+    <manpage>Black/white values for scaling projections to bytes.  By default, the projections are scaled so that their min and max values map to 0 and 255. With this option, scaled values below the black level are set to 0, ones above the white level are set to 255, and values in between are remapped to 0 to 255.  The result is similar to reading the default scaled data into 3dmod and setting the black and white sliders to these values.</manpage>
+  </Field>
+  <Field name="TemporaryDirectory">
+    <short>tempdir</short>
+    <type>CH</type>
+    <usage>Directory for temporary files when projecting</usage>
+    <tooltip />
+    <manpage />
+  </Field>
+  <Field name="KeepTempFiles">
+    <short>keep</short>
+    <type>B</type>
+    <usage>Keep intermediate files when projecting</usage>
+    <tooltip />
+    <manpage>Keep intermediate files when projecting.  2 or 6 intermediate files are produced, depending on whether color output is being generated. The temporary volume files are named imodmop.rec0.pid (and imodmop.rec1.pid and imodmop.rec2.pid for green and blue channels of color output), where pid is the process ID.  The temporary projection files are named imodmop.xyz0.pid, etc.</manpage>
+  </Field>
+  <Field name="FastLegacyMethod">
+    <short>fast</short>
+    <type>B</type>
+    <usage>Paint closed contours using old fast and approximate method.</usage>
+    <tooltip />
+    <manpage>Paint closed contours using scan contours, the method used prior to IMOD 4.2.15.  This was about 10 times faster but was not completely accurate at identifying the pixels within contours, particularly if they were the contours small or convoluted.</manpage>
+  </Field>
+  <Field name="usage">
+    <short>help</short>
+    <type>B</type>
+    <usage>Print help output</usage>
+    <tooltip />
+    <manpage />
+  </Field>
+</autodoc>

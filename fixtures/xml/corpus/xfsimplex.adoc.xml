@@ -1,0 +1,242 @@
+<?xml version="1.0" encoding="utf-8"?>
+<autodoc>
+  <PreData />
+  <Field name="AImageFile">
+    <short>aimage</short>
+    <type>FN</type>
+    <usage>Input image file with reference image to be aligned to</usage>
+    <tooltip />
+    <manpage>Input image file with reference image to be aligned to.  If this option is not entered, the first non-option argument will be used for this input file.</manpage>
+  </Field>
+  <Field name="BImageFile">
+    <short>bimage</short>
+    <type>FN</type>
+    <usage>Name of image file with image to align to reference</usage>
+    <tooltip />
+    <manpage>Name of image file with image to align to reference.  If this option is not entered, the second non-option argument will be used for this input file.</manpage>
+  </Field>
+  <Field name="OutputFile">
+    <short>output</short>
+    <type>FN</type>
+    <usage>Output file for transformation</usage>
+    <tooltip />
+    <manpage>Output file for transformation.  If this option is not entered, the third non-option argument will be used for this output file.</manpage>
+  </Field>
+  <Field name="InitialTransformFile">
+    <short>initial</short>
+    <type>FN</type>
+    <usage>Input file with transformation to start search with</usage>
+    <tooltip />
+    <manpage>Input file with transformation to start search with.  The final reported transformation will include the initial one rather than being incremental to it.</manpage>
+  </Field>
+  <Field name="UseTransformLine">
+    <short>useline</short>
+    <type>I</type>
+    <usage>Line number of initial transform in file, numbered from 0 (default 0)</usage>
+    <tooltip />
+    <manpage />
+  </Field>
+  <Field name="SectionsToUse">
+    <short>sections</short>
+    <type>IP</type>
+    <usage>Sections to use from the first and second file (default 0,0)</usage>
+    <tooltip />
+    <manpage />
+  </Field>
+  <Field name="VariablesToSearch">
+    <short>variables</short>
+    <type>I</type>
+    <usage>Number of variables to search, or 0 to search for formal parameters</usage>
+    <tooltip />
+    <manpage>Number of semi-natural variables to search, or 0 to search for formal parameters.  See above for the meaning and order of the variables selected by this option.</manpage>
+  </Field>
+  <Field name="LimitsOnSearch">
+    <short>limits</short>
+    <type>FA</type>
+    <usage>Limits for each of the variables being searched</usage>
+    <tooltip />
+    <manpage>Limits for each of the variables being searched.  Each number entered specifies the maximum amount that the respective variable can change from its initial value.  Enter a 0 to avoid limiting a parameter.  If the search is being done on formal parameters, then only the first two (shift in X and Y) can be limited, so only 1 or 2 values can be entered.  If the search is on semi-natural parameters, then you can enter more or fewer values than the number of variables being searched.  Extra values are ignored, missing values are assumed to be zero.</manpage>
+  </Field>
+  <Field name="EdgeToIgnore">
+    <short>edge</short>
+    <type>F</type>
+    <usage>Fraction or number of pixels to ignore on edges of image</usage>
+    <tooltip />
+    <manpage>Fraction or number of pixels to ignore on edges of image.  Enter a value less than 0.5 for a fraction, or a value greater than 1 for a number of pixels.  The default is 0.05.</manpage>
+  </Field>
+  <Field name="XMinAndMax">
+    <short>xminmax</short>
+    <type>IP</type>
+    <usage>Starting and ending coordinates to analyze in X (overrides -edge)</usage>
+    <tooltip />
+    <manpage>Starting and ending coordinates to analyze in X (numbered from 1). This entry overrides the X coordinates implied by the -edge entry or default.</manpage>
+  </Field>
+  <Field name="YMinAndMax">
+    <short>yminmax</short>
+    <type>IP</type>
+    <usage>Starting and ending coordinates to analyze in Y (overrides -edge)</usage>
+    <tooltip />
+    <manpage>Starting and ending coordinates to analyze in Y (numbered from 1). This entry overrides the Y coordinates implied by the -edge entry or default.</manpage>
+  </Field>
+  <Field name="BinningToApply">
+    <short>binning</short>
+    <type>I</type>
+    <usage>Binning to apply to images (default 2)</usage>
+    <tooltip />
+    <manpage>Binning to apply to the images.  The default is 2.</manpage>
+  </Field>
+  <Field name="AntialiasFilter">
+    <short>antialias</short>
+    <type>I</type>
+    <usage>Type of antialiasing filter to reduce images with instead of binning</usage>
+    <tooltip />
+    <manpage>Type of antialiasing filter to use for image reduction instead of binning.  Antialiasing becomes important when the images are highly reduced in size. Ordinary binning reduces aliasing, but not as much as these filters do.  This option makes any filtering be applied after the image reduction (thus it implies the -after option).  As in Newstack(1), the available types here are: ^    2: Blackman - fast but not as good at antialiasing as slower ^                  filters ^    3: Triangle - fast but smooths more than Blackman ^    4: Mitchell - good at antialiasing, smooths a bit ^    5: Lanczos 2 lobes - good at antialiasing, less smoothing ^                  than Mitchell ^    6: Lanczos 3 lobes - slower, even less smoothing but more ^                  risk of ringing ^   -1: Use the default filter, currently Lanczos 2</manpage>
+  </Field>
+  <Field name="FilterSigma1">
+    <short>sig1</short>
+    <type>F</type>
+    <usage>Sigma for low-frequency inverted Gaussian filter</usage>
+    <tooltip />
+    <manpage>Sigma value to filter low frequencies in both images with a curve that is an inverted Gaussian.  This filter is 0 at 0 frequency and decays up to 1 with the given sigma value.  However, if a negative value of radius1 is entered, this filter will be zero from 0 to |radius1| then decay up to 1.</manpage>
+  </Field>
+  <Field name="FilterRadius1">
+    <short>rad1</short>
+    <type>F</type>
+    <usage>Left cutoff radius for Gaussian filter</usage>
+    <tooltip />
+    <manpage>Low spatial frequencies in both images will be attenuated by a Gaussian curve that is 1 at this cutoff radius and falls off below this radius with a standard deviation specified by FilterSigma2.  Spatial frequency units range from 0 to 0.5.  Use FilterSigma1 instead of this entry for more predictable attenuation of low frequencies.</manpage>
+  </Field>
+  <Field name="FilterRadius2">
+    <short>rad2</short>
+    <type>F</type>
+    <usage>Right cutoff radius for Gaussian filter</usage>
+    <tooltip>High frequency cutoff radius for Gaussian filter</tooltip>
+    <manpage>High spatial frequencies in both images will be attenuated by a Gaussian curve that is 1 at this cutoff radius and falls off above this radius with a standard deviation specified by FilterSigma2.</manpage>
+  </Field>
+  <Field name="FilterSigma2">
+    <short>sig2</short>
+    <type>F</type>
+    <usage>Sigma for Gaussian rolloff below radius1 and above radius2</usage>
+    <tooltip>Sigma for Gaussian rolloff below low frequency cutoff and above high frequency cutoff</tooltip>
+    <manpage>Sigma value for the Gaussian rolloff below and above the cutoff frequencies specified by FilterRadius1 and FilterRadius2</manpage>
+  </Field>
+  <Field name="FilterAfterBinning">
+    <short>after</short>
+    <type>B</type>
+    <usage>Apply the Fourier filter after binning data</usage>
+    <tooltip />
+    <manpage>Apply the Fourier filter after binning data.  This will be much faster, but it may introduce aliased noise from the higher frequencies in the original data unless antialiased reduction is used.  The radius and sigma values represent frequencies in the binned image, not the original image. If antialias reduction is not used, the default is to filter before binning, in which case the high frequencies can be removed before binning; if antialiasing is used, the filtering always happens after reduction and this option is redundant.</manpage>
+  </Field>
+  <Field name="SobelFilter">
+    <short>sobel</short>
+    <type>B</type>
+    <usage>Apply edge-detecting Sobel filter to images</usage>
+    <tooltip />
+    <manpage>Apply edge-detecting Sobel filter to both images.  This filter will be applied after binning and filtering if any.</manpage>
+  </Field>
+  <Field name="FloatOption">
+    <short>float</short>
+    <type>I</type>
+    <usage>0 to float to range, 1 to mean and SD, -1 not to float intensities</usage>
+    <tooltip />
+    <manpage>0 to float images to have the same range, 1 to float them to have the same mean and standard deviation, or -1 to leave intensities alone.  Only pixels within the range being analyzed will be considered when determining the scaling.  The default is 1.</manpage>
+  </Field>
+  <Field name="CorrelationCoefficient">
+    <short>ccc</short>
+    <type>B</type>
+    <usage>Compute correlation coefficient instead of image difference</usage>
+    <tooltip />
+    <manpage>Compute the standard cross-correlation coefficient instead of difference between images.  The difference measure that is minimized will be 1 minus the CCC, but the CCC itself is printed in the trace and final output.  It takes &lt; 5% more time to compute the CCC.</manpage>
+  </Field>
+  <Field name="LocalPatchSize">
+    <short>local</short>
+    <type>I</type>
+    <usage>Size of square subareas within which to compute SD of difference or CCC</usage>
+    <tooltip />
+    <manpage>Size of square subareas (patches) within which to compute a measure of image difference, in pixels before binning, if any.  The image will be divided into patches of this size and the measure will be computed separately within each patch; then a weighted average will be formed, weighted by the number of pixels actually available for comparison within each patch.  If image difference is being computed, the measure will be the standard deviation of the difference; otherwise the correlation coefficient is computed.  Patches with less than half the full number of pixels will be pooled with the nearest patches containing enough pixels.  This option should prevent the need for low frequency filtering, which would increase execution time by roughly 10%. Patch sizes on the order of 1/20 to 1/10 of the image size should be effective.</manpage>
+  </Field>
+  <Field name="LinearInterpolation">
+    <short>linear</short>
+    <type>B</type>
+    <usage>Use linear interpolation instead of nearest pixel</usage>
+    <tooltip />
+    <manpage>Use linear interpolation instead of nearest pixel interpolation when computing image differences or correlation coefficients.</manpage>
+  </Field>
+  <Field name="DistanceMeasure">
+    <short>distance</short>
+    <type>B</type>
+    <usage>Use distance instead of difference or correlation measure</usage>
+    <tooltip />
+    <manpage />
+  </Field>
+  <Field name="NearestDistance">
+    <short>near</short>
+    <type>I</type>
+    <usage>Distance to search to eliminate redundant points, 0 not to</usage>
+    <tooltip />
+    <manpage>Distance to search to eliminate redundant points, or 0 not to search, when using the distance measure.  The default is 0 for # of pixels &lt; 240*180, 1 if # of pixels is between 240*180 and 480*360, 2 if # of pixels &gt; 480*360.</manpage>
+  </Field>
+  <Field name="RadiusToSearch">
+    <short>radius</short>
+    <type>F</type>
+    <usage>Radius to search for matching pixels</usage>
+    <tooltip />
+    <manpage>Radius to search for matching pixels when using the distance measure.  The default is 4 if binning by 2, or 5 if not.</manpage>
+  </Field>
+  <Field name="DensityDifference">
+    <short>density</short>
+    <type>F</type>
+    <usage>Maximum density difference for match as a fraction of the range</usage>
+    <tooltip />
+    <manpage>Maximum density difference that constitutes a match when using the distance measure, as a fraction of the density range.  The default is 0.05.</manpage>
+  </Field>
+  <Field name="PercentileRanges">
+    <short>percent</short>
+    <type>FA</type>
+    <usage>Lower and upper limits of percentile ranges to match</usage>
+    <tooltip />
+    <manpage>Lower and upper limits of percentile ranges to match.  The default is to have two ranges, i.e., 0,8,92,100, for images less than 320*240, scaling down to 5% ranges as image size increases from 320*240 to 640*480.</manpage>
+  </Field>
+  <Field name="CoarseTolerances">
+    <short>coarse</short>
+    <type>FP</type>
+    <usage>Fractional tolerances in difference and parameters for initial search</usage>
+    <tooltip />
+    <manpage>Fractional tolerances in difference and parameters for the initial search.  Enter 0,0 to skip the initial search.  The default values are 0.005 and 0.2 of the basic step size.</manpage>
+  </Field>
+  <Field name="FinalTolerances">
+    <short>final</short>
+    <type>FP</type>
+    <usage>Fractional tolerances in difference and parameters for final search</usage>
+    <tooltip />
+    <manpage>Fractional tolerances in difference and parameters for the final or only search.  The default values are 0.0005 and 0.02 of the basic step size, or 0.001 and 0.04 for images no bigger than 128 by 128.</manpage>
+  </Field>
+  <Field name="StepSizeFactor">
+    <short>step</short>
+    <type>F</type>
+    <usage>Factor for initial step size (default 2)</usage>
+    <tooltip />
+    <manpage>Factor to multiply basic step size by to get initial step size.  The default is 2.</manpage>
+  </Field>
+  <Field name="TraceOutput">
+    <short>trace</short>
+    <type>I</type>
+    <usage>1 for output at each step, 2 for output at new minima</usage>
+    <tooltip />
+    <manpage />
+  </Field>
+  <Field name="ParameterFile">
+    <short>param</short>
+    <type>PF</type>
+    <usage>Read parameter entries from file</usage>
+    <tooltip />
+    <manpage>Read parameter entries as keyword-value pairs from a parameter file.</manpage>
+  </Field>
+  <Field name="usage">
+    <short>help</short>
+    <type>B</type>
+    <usage>Print help output</usage>
+    <tooltip />
+    <manpage />
+  </Field>
+</autodoc>

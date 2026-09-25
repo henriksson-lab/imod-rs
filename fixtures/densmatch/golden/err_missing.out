@@ -1,0 +1,5 @@
+
+ RO image file on unit   1 : f.mrc     Size=         19 K
+ERROR: iiOpen - Opening file nothere.mrc (No such file or directory)
+
+ERROR: iiuOpen - Could not open 'nothere.mrc'

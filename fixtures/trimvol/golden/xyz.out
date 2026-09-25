@@ -1,0 +1,29 @@
+
+ RO image file on unit   1 : s.mrc     Size=         10 K
+
+ Number of columns, rows, sections .....      32      24       6
+ Map mode ..............................    1   (16-bit integer)           
+ Start cols, rows, sects, grid x,y,z ...    0     0     0      32     24      6
+ Pixel spacing (Angstroms)..............   1.000      1.000      1.000    
+ Cell angles ...........................   90.000   90.000   90.000
+ Fast, medium, slow axes ...............    X    Y    Z
+ Origin on x,y,z .......................    0.000       0.000       0.000    
+ Minimum density .......................   38.000    
+ Maximum density .......................   445.00    
+ Mean density ..........................   258.47    
+ tilt angles (original,current) ........   0.0   0.0   0.0   0.0   0.0   0.0
+ Space group,# extra bytes,idtype,lens .        0        0        0        0
+
+     1 Titles :
+raw2mrc: Converted to mrc format.                       25-Sep-26  01:20:31    
+
+
+ NEW image file on unit   2 : o.mrc
+ section   input min&max       output min&max  &  mean
+       0     52.00    429.00     52.00    429.00    212.55
+       1     66.00    370.00     66.00    370.00    198.64
+       2     60.00    410.00     60.00    410.00    224.85
+       3     58.00    429.00     58.00    429.00    260.76
+ 
+The newstack command was:
+newstack -siz 16,16 -off -4,-2  -ori  -sec 1-4 "s.mrc" "o.mrc"

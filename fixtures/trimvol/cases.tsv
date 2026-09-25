@@ -1,0 +1,39 @@
+# name<TAB>arguments.  Inputs are fixtures/densmatch/{f,f2,s,b}.mrc (32x24x6).
+plain	f.mrc o.mrc
+x	-x 5,20 f.mrc o.mrc
+xyz	-x 5,20 -y 3,18 -z 2,5 s.mrc o.mrc
+index	-i -x 5,20 -y 3,18 -z 2,5 s.mrc o.mrc
+sizes	-nx 17 -ny 10 -nz 3 f.mrc o.mrc
+keep	-k -x 5,20 f.mrc o.mrc
+contrast	-c 60,150 f.mrc o.mrc
+mm	-mm 0,255 f.mrc o.mrc
+mm_mode	-mm -100.5,300.25 -mode 2 s.mrc o.mrc
+mode	-mode 1 f.mrc o.mrc
+sz	-sz 2,5 f.mrc o.mrc
+sz_sxsy	-sz 2,5 -sx 5,25 -sy 4,20 s.mrc o.mrc
+sz_f	-f -sz 5,20 f.mrc o.mrc
+meansd	-meansd 50,10 f.mrc o.mrc
+meansd_mode	-meansd 50,10 -mode 1 -sz 2,5 s.mrc o.mrc
+meansd_f	-meansd 120,20 -f -old 2 f.mrc o.mrc
+rx	-rx -x 5,20 f.mrc o.mrc
+yz	-yz -z 2,5 s.mrc o.mrc
+rx_mode	-rx -mode 1 f.mrc o.mrc
+rx_sz	-rx -sz 2,5 f.mrc o.mrc
+f_y	-f -y 2,5 -z 5,20 f.mrc o.mrc
+f_old	-f -old 1 -y 2,5 -z 5,20 f.mrc o.mrc
+f_i	-f -i -y 2,5 -nz 10 f.mrc o.mrc
+byte	-z 3,5 b.mrc o.mrc
+err_s	-s 3,7 f.mrc o.mrc
+err_nargs	f.mrc
+err_noinput	none.mrc o.mrc
+err_mode_c	-mode 1 -c 1,2 f.mrc o.mrc
+err_mode_sz	-mode 1 -sz 1,2 f.mrc o.mrc
+err_fmt	-format JPG f.mrc o.mrc
+err_rx_yz	-rx -yz f.mrc o.mrc
+err_nx	-nx 100 f.mrc o.mrc
+err_x	-x 30,40 f.mrc o.mrc
+err_fy	-f -y 0,12 f.mrc o.mrc
+err_z	-z 5,3 f.mrc o.mrc
+err_sz	-sz 0,5 f.mrc o.mrc
+err_sz_f	-f -sz 1,25 f.mrc o.mrc
+fc_fail	-sz 2,4 -sx 40,50 f.mrc o.mrc

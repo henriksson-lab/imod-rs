@@ -1,0 +1,211 @@
+<?xml version="1.0" encoding="utf-8"?>
+
+<autodoc>
+  
+  <PreData>
+    
+    <Version>1.0</Version>
+    
+    <Pip>1</Pip>
+  
+  </PreData>
+  
+  <Field name="MasterComFile">
+    
+    <short>master</short>
+    
+    <type>FN</type>
+    
+    <usage>Name of master command file</usage>
+    
+    <tooltip />
+    
+    <manpage>Name of master command file. If neither this option nor \fB-command\fR is entered, the first non-option argument will be taken as this name.  Either a command file or \fB-command\fR must be entered.</manpage>
+  
+  </Field>
+  
+  <Field name="OneLineCommand">
+    
+    <short>command</short>
+    
+    <type>CH</type>
+    
+    <usage>Full command to run on input file, including options</usage>
+    
+    <tooltip />
+    
+    <manpage>Full command to run on the input file, including all options except ones specifying the input and output files.  To use this option, the program being run by the command must accept input and output file names as the last non-option arguments on its command line.  If there are any options to the command and Chunksetup is run with command line arguments, the whole entry must be quoted.</manpage>
+  
+  </Field>
+  
+  <Field name="InputImageFile">
+    
+    <short>input</short>
+    
+    <type>FN</type>
+    
+    <usage>Name of input image file</usage>
+    
+    <tooltip />
+    
+    <manpage>Name of input image file.  If this option is not entered, the first non-option argument will be taken as this name, unless neither \fB-command\fR nor \fB-master\fR is entered as an option, in which case the second non-option argument is used.</manpage>
+  
+  </Field>
+  
+  <Field name="OutputImageFile">
+    
+    <short>output</short>
+    
+    <type>FN</type>
+    
+    <usage>Name of output image file</usage>
+    
+    <tooltip />
+    
+    <manpage>Name of output image file.  If this option is not entered, the last non-option argument will be taken as this name unless \fB-suffix\fR is entered.  Either this entry or \fB-suffix\fR is required.</manpage>
+  
+  </Field>
+  
+  <Field name="SuffixForOutputName">
+    
+    <short>suffix</short>
+    
+    <type>CH</type>
+    
+    <usage>String to add before extension to produce the output image file name</usage>
+    
+    <tooltip />
+    
+    <manpage>String to add to the root of the input image file name, before extension, to produce the output image file name.  For example, if the input name is &quot;setname_rec.mrc&quot;, and &quot;filt&quot; is entered for this option, the default output file name will be &quot;setname_rec_filt.mrc&quot;.  If the input file does not have an extension corresponding to an allowed file format, the extension will be placed before the suffix.  In the example, an input of &quot;setname.rec&quot; will also result in an output name &quot;setname_rec_filt.mrc&quot;.  If the environment variable IMOD_OUTPUT_FORMAT is set or the option \fB-format\fR is entered, the output will have the indicated file format and have the appropriate extension; otherwise it will be MRC format with extension &quot;.mrc&quot;.</manpage>
+  
+  </Field>
+  
+  <Field name="FormatOfOutputFile">
+    
+    <short>format</short>
+    
+    <type>CH</type>
+    
+    <usage>Type of output file: MRC, TIF or TIFF, HDF (or lower case)</usage>
+    
+    <tooltip />
+    
+    <manpage>Set output file format to MRC, TIFF, or HDF by entering MRC, TIF, TIFF, HDF, or any lower case form of these.  This entry overrides a default format set with the environment variable IMOD_OUTPUT_FORMAT.</manpage>
+  
+  </Field>
+  
+  <Field name="PaddingPixels">
+    
+    <short>p</short>
+    
+    <type>I</type>
+    
+    <usage>Pixels to pad and taper each subvolume on each edge</usage>
+    
+    <tooltip />
+    
+    <manpage>Number of pixels of padding on each edge of each subvolume.  The default is 8.</manpage>
+  
+  </Field>
+  
+  <Field name="OverlapPixels">
+    
+    <short>o</short>
+    
+    <type>I</type>
+    
+    <usage>Minimum # of pixels of overlap between subvolumes</usage>
+    
+    <tooltip />
+    
+    <manpage>Minimum number of pixels of overlap between the subvolumes.  The default is 8.</manpage>
+  
+  </Field>
+  
+  <Field name="MegavoxelMaximum">
+    
+    <short>m</short>
+    
+    <type>I</type>
+    
+    <usage>Maximum # of megavoxels in each subvolume</usage>
+    
+    <tooltip />
+    
+    <manpage>Limit each subvolume to the given number of megavoxels.  The default is whatever the default is for Tomopieces(1) (80 megaVoxels).</manpage>
+  
+  </Field>
+  
+  <Field name="XMaximumPieces">
+    
+    <short>xm</short>
+    
+    <type>I</type>
+    
+    <usage>Maximum # of pieces in X direction</usage>
+    
+    <tooltip />
+    
+    <manpage>The maximum number of chunks in the X direction.  The default is -1, which is effectively no limit.  See the man page for Tomopieces for more details on the choices for maximum number of pieces.</manpage>
+  
+  </Field>
+  
+  <Field name="YMaximumPieces">
+    
+    <short>ym</short>
+    
+    <type>I</type>
+    
+    <usage>Maximum # of pieces in Y direction</usage>
+    
+    <tooltip />
+    
+    <manpage>The maximum number of chunks in the Y direction.  The default is -1, which is effectively no limit.</manpage>
+  
+  </Field>
+  
+  <Field name="NoFFTSizes">
+    
+    <short>no</short>
+    
+    <type>B</type>
+    
+    <usage>Do not adjust padding to allow FFTs (use if no FFTs will be taken)</usage>
+    
+    <tooltip />
+    
+    <manpage>Do not increase padding to make suitable sizes for an FFT.  Use this option if no FFTs will be taken of the volumes.  It causes the &quot;-nofft&quot; option to be sent to Tomopieces(1) and to be added to the input to Taperoutvol(1) that is placed in the command files.</manpage>
+  
+  </Field>
+  
+  <Field name="ParameterFile">
+    
+    <short>param</short>
+    
+    <long>ParameterFile</long>
+    
+    <type>PF</type>
+    
+    <usage>Read parameter entries from file</usage>
+    
+    <tooltip />
+    
+    <manpage>Read parameter entries as keyword-value pairs from a parameter file.</manpage>
+  
+  </Field>
+  
+  <Field name="usage">
+    
+    <short>help</short>
+    
+    <type>B</type>
+    
+    <usage>Print help output</usage>
+    
+    <tooltip />
+    
+    <manpage />
+  
+  </Field>
+
+</autodoc>

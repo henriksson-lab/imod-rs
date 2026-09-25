@@ -1,0 +1,493 @@
+<?xml version="1.0" encoding="utf-8"?>
+
+<autodoc>
+  
+  <PreData>
+    
+    <!-- The cpu.adoc file contains descriptions of the computers you wish to use when -->
+    
+    <!-- running parallel processes with processchunks through Etomo.  The file is -->
+    
+    <!-- placed in the IMOD calibration directory (defined by $IMOD_CALIB_DIR, default -->
+    
+    <!-- location /usr/local/ImodCalib).  Run "man cpuadoc" for complete details on -->
+    
+    <!-- the entries to a cpu.adoc file.  This file shows a number of examples. -->
+    
+    <!-- -->
+    
+    <!-- An example of cpu.adoc for a standalone computer: -->
+    
+    <!-- -->
+    
+    <Version>1.2</Version>
+  
+  </PreData>
+  
+  <Computer name="localhost">
+    
+    <!-- In this example the computer has two cores or CPUs. -->
+    
+    <number>2</number>
+    
+    <!-- The computer also has three graphics cards that may be used for processing. -->
+    
+    <!-- This entry allows from one to three GPUs to be selected in the Parallel -->
+    
+    <!-- Processing panel.  The GPUs are represented here by their device number.  The -->
+    
+    <!-- priority of each GPU is represented by the order of this list. -->
+    
+    <gpu.device>2,1,3</gpu.device>
+    
+    <!-- -->
+    
+    <!-- An example of cpu.adoc for 4 computers with the same operating system and -->
+    
+    <!-- type of processor: -->
+    
+    <!-- -->
+    
+    <Version>1.2</Version>
+    
+    <units.speed>GHz</units.speed>
+    
+    <units.memory>GB</units.memory>
+  
+  </Computer>
+  
+  <Computer name="frodo">
+    
+    <!-- This computer has two cores or CPUs. -->
+    
+    <number>2</number>
+    
+    <speed>2.3</speed>
+    
+    <memory>4.0</memory>
+    
+    <!-- This computer has one graphics card that may be used for processing. -->
+    
+    <gpu>1</gpu>
+  
+  </Computer>
+  
+  <Computer name="sam">
+    
+    <!-- This computer has only 1 core. -->
+    
+    <speed>2.5</speed>
+    
+    <memory>2.0</memory>
+    
+    <!-- This computer has one graphics card that may be used for processing, but it -->
+    
+    <!-- should not be used from another computer. -->
+    
+    <gpu.local>1</gpu.local>
+  
+  </Computer>
+  
+  <Computer name="pippin">
+    
+    <speed>2.4</speed>
+    
+    <memory>2.0</memory>
+    
+    <!-- This computer has two graphics cards that may be used for processing.  GPU# 2 -->
+    
+    <!-- will be used when only one GPU is requested. -->
+    
+    <gpu.device>2,1</gpu.device>
+  
+  </Computer>
+  
+  <Computer name="merry">
+    
+    <speed>2.3 memory 2.0</speed>
+    
+    <number>2</number>
+    
+    <!-- If the resulting table in Etomo is too wide, optional cpu.adoc entries -->
+    
+    <!-- can be ommitted: -->
+    
+    <Version>1.2</Version>
+  
+  </Computer>
+  
+  <Computer name="frodo">
+    
+    <number>2</number>
+    
+    <gpu>1</gpu>
+  
+  </Computer>
+  
+  <Computer name="sam">
+    
+    <gpu.local>1</gpu.local>
+  
+  </Computer>
+  
+  <Computer name="pippin">
+    
+    <gpu.device>2,1</gpu.device>
+  
+  </Computer>
+  
+  <Computer name="merry">
+    
+    <number>2</number>
+    
+    <!-- -->
+    
+    <!-- An example of cpu.adoc for identical, single processor computers: -->
+    
+    <!-- -->
+    
+    <Version>1.2</Version>
+  
+  </Computer>
+  
+  <Computer name="frodo" />
+  
+  <Computer name="sam" />
+  
+  <Computer name="pippin" />
+  
+  <Computer name="merry">
+    
+    <!-- -->
+    
+    <!-- An example of a cpu.adoc for a larger group of computers that are mostly -->
+    
+    <!-- using Linux: -->
+    
+    <!-- -->
+    
+    <Version>1.2</Version>
+    
+    <units.speed>GHz</units.speed>
+    
+    <units.memory>GB</units.memory>
+    
+    <max.tilt>12</max.tilt>
+    
+    <max.volcombine>8</max.volcombine>
+  
+  </Computer>
+  
+  <Computer name="frodo">
+    
+    <type>AMD 64</type>
+    
+    <number>2</number>
+    
+    <speed>2.4</speed>
+    
+    <memory>2.0</memory>
+  
+  </Computer>
+  
+  <Computer name="sam">
+    
+    <type>Opteron</type>
+    
+    <speed>2.4</speed>
+    
+    <memory>8.0</memory>
+    
+    <number>2</number>
+  
+  </Computer>
+  
+  <Computer name="pippin">
+    
+    <number>2</number>
+    
+    <speed>2.3</speed>
+    
+    <memory>5.0</memory>
+    
+    <type>G5 - OSX</type>
+  
+  </Computer>
+  
+  <Computer name="merry">
+    
+    <type>P4</type>
+    
+    <speed>3.0</speed>
+    
+    <memory>2.0 . . .</memory>
+    
+    <!-- -->
+    
+    <!-- An example of cpu.adoc for Linux computers with different types of processors: -->
+    
+    <!-- -->
+    
+    <Version>1.2</Version>
+    
+    <units.speed>GHz</units.speed>
+    
+    <units.memory>GB</units.memory>
+  
+  </Computer>
+  
+  <Computer name="frodo">
+    
+    <type>AMD 64</type>
+    
+    <number>2</number>
+    
+    <speed>2.4</speed>
+    
+    <memory>2.0</memory>
+  
+  </Computer>
+  
+  <Computer name="sam">
+    
+    <type>Opteron</type>
+    
+    <speed>2.4</speed>
+    
+    <memory>8.0</memory>
+    
+    <number>2</number>
+  
+  </Computer>
+  
+  <Computer name="pippin">
+    
+    <speed>2.8</speed>
+    
+    <type>Xeon</type>
+    
+    <memory>4.0</memory>
+    
+    <number>2</number>
+  
+  </Computer>
+  
+  <Computer name="merry">
+    
+    <type>P4</type>
+    
+    <speed>3.0</speed>
+    
+    <memory>2.0</memory>
+    
+    <!-- -->
+    
+    <!-- An example of cpu.adoc for computers with different operating systems and -->
+    
+    <!-- types of processor: -->
+    
+    <!-- -->
+    
+    <Version>1.2</Version>
+    
+    <units.speed>GHz</units.speed>
+    
+    <units.memory>GB</units.memory>
+  
+  </Computer>
+  
+  <Computer name="frodo">
+    
+    <type>AMD 64</type>
+    
+    <number>2</number>
+    
+    <speed>2.4</speed>
+    
+    <memory>2.0</memory>
+    
+    <os>linux</os>
+  
+  </Computer>
+  
+  <Computer name="sam">
+    
+    <type>Opteron</type>
+    
+    <speed>2.4</speed>
+    
+    <memory>8.0</memory>
+    
+    <number>2</number>
+    
+    <os>linux</os>
+  
+  </Computer>
+  
+  <Computer name="pippin">
+    
+    <number>2</number>
+    
+    <speed>2.3</speed>
+    
+    <memory>5.0</memory>
+    
+    <os>OSX</os>
+    
+    <type>G5</type>
+  
+  </Computer>
+  
+  <Computer name="merry">
+    
+    <type>P4</type>
+    
+    <speed>3.0</speed>
+    
+    <memory>2.0</memory>
+    
+    <os>linux</os>
+    
+    <!-- -->
+    
+    <!-- Examples of cpu.adoc for running on pbs, pbs-maui, or sge cluster queues -->
+    
+    <!-- -->
+    
+    <Version>1.2</Version>
+  
+  </Computer>
+  
+  <Queue name="cluster">
+    
+    <number>370</number>
+    
+    <!-- Choose one of the following 3 lines based on the queue type. -->
+    
+    <!-- The -q option is required for pbs-maui. -->
+    
+    <command>queuechunk -t sge</command>
+    
+    <!--command = queuechunk -t pbs -->
+    
+    <!--command = queuechunk -t pbs-maui -q cluster -->
+    
+    <!-- -->
+    
+    <!-- An example of a cpu.adoc for running etomo on your local machine -->
+    
+    <!-- while ssh'ing to a PBS cluster login node to schedule each chunk. -->
+    
+    <!-- This configuration is useful for clusters which don't allow the -->
+    
+    <!-- etomo gui on the login node. -->
+    
+    <!-- -->
+    
+    <Version>1.2</Version>
+  
+  </Queue>
+  
+  <Queue name="cluster">
+    
+    <number>370</number>
+    
+    <command>queuechunk -t pbs -h clusterLoginNode.someorg.edu</command>
+    
+    <!-- -->
+    
+    <!-- Three examples of entries for running on Slurm cluster queues. -->
+    
+    <!-- Resources under Slurm are typically specified using quality of -->
+    
+    <!-- service (QOS) or partition names, rather than queue names. -->
+    
+    <!-- -->
+    
+    <Version>1.2</Version>
+  
+  </Queue>
+  
+  <!-- Crestone uses a consumable resource model. No prior allocation needed. -->
+  
+  <!-- Resources on this cluster are selected using the -q option to specify -->
+  
+  <!-- quality of service (QOS). -->
+  
+  <!-- -->
+  
+  <Queue name="Crestone">
+    
+    <!-- The following two commands are equivalent. -->
+    
+    <!-- Note the use of commas to avoid any spaces in options following -l. -->
+    
+    <command>queuechunk -t slurm -q crestone</command>
+    
+    <!--command = queuechunk -t slurm -q crestone -l -n1,-c1 -->
+    
+    <number>240</number>
+  
+  </Queue>
+  
+  <!-- This example is similar to that above, but demonstrates configuration -->
+  
+  <!-- for a system on which resources are selected via partition name (in -->
+  
+  <!-- this case "himem") rather than QOS. -->
+  
+  <!-- -->
+  
+  <Queue name="Redstone">
+    
+    <!-- The following two commands are equivalent. -->
+    
+    <!-- Note the use of commas to avoid any spaces in options following -l. -->
+    
+    <command>queuechunk -t slurm -l -n1,-c1,-phimem</command>
+    
+    <!--command = queuechunk -t slurm -l -n1,-c1,--partition=himem -->
+    
+    <number>240</number>
+  
+  </Queue>
+  
+  <!-- Janus uses exclusive node access. Prior allocation using slurmInit.sh -->
+  
+  <!-- and cleanup using slurmCleanup.sh are required. Resources are selected -->
+  
+  <!-- with QOS which is required as a second argument to the initialize -->
+  
+  <!-- command.  coresPerNode is required so etomo can compute the number of -->
+  
+  <!-- nodes needed based on the requested number of cores.  The sample -->
+  
+  <!-- slurmInit.sh file shipped with IMOD currently only supports resource -->
+  
+  <!-- selection via QOS, and would have to be modified for selection by -->
+  
+  <!-- named partitions or other options.   It is not useful to request multiple -->
+  
+  <!-- cores per job in the queue command; all parallel processing in Etomo -->
+  
+  <!-- (including parallel batch) will treat the queue as having one core per job. -->
+  
+  <Queue name="Janus">
+    
+    <command>queuechunk -t slurm -q janus</command>
+    
+    <coresPerNode>12</coresPerNode>
+    
+    <number>240</number>
+    
+    <initialize>slurmInit.sh %{nodes} janus</initialize>
+    
+    <deinitialize>slurmCleanup.sh</deinitialize>
+  
+  </Queue>
+  
+  <!-- See the Splitbatch man page for examples of queue entries for using multiple -->
+  
+  <!-- cores or one or more GPUs when running Batchruntomo in parallel -->
+
+</autodoc>

@@ -1,0 +1,7 @@
+mBeadExclPctlSpread set to 0.1
+mBeadExclPctlThick set to 0.05
+mBeadWeightFac set to 0.6
+               center   center SDs      edge     edge SDs      distinct-
+scale  binning  mean   median  MADN     mean   median  MADN      ness
+  1    1,1,1      3.7   10.04  0.26       2.7   10.03  0.24     0.250
+Thickness = 25.0  boundaries (from 1) = 1 26  alpha = -1.39  beta = -2.33

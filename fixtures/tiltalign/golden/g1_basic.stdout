@@ -1,0 +1,201 @@
+
+Opened NEW file: g1.tlt
+
+Opened NEW file: g1.xf
+
+Opened OLD file: g1.rawtlt
+
+                        Variable mappings 
+ View  Rotation     Tilt  (+ incr.)      Mag       Comp      Dmag      Skew
+   1   rot    1   tilt   1              fixed      fixed      fixed      fixed 
+   2   rot    2   t  1+  4            mag    2     fixed      fixed      fixed 
+   3   rot    3   t  1+  4            mag    3     fixed      fixed      fixed 
+   4   rot    4   tilt   4            mag    4     fixed      fixed      fixed 
+   5   rot    5   t  4+  8            mag    5     fixed      fixed      fixed 
+   6   rot    6   t  4+  8            mag    6     fixed      fixed      fixed 
+   7   rot    7   t  4+  8            mag    7     fixed      fixed      fixed 
+   8   rot    8   tilt   8            mag    8     fixed      fixed      fixed 
+   9   rot    9   t  8+ 13            mag    9     fixed      fixed      fixed 
+  10   rot   10   t  8+ 13            mag   10     fixed      fixed      fixed 
+  11   rot   11   t  8+ 13            mag   11     fixed      fixed      fixed 
+  12   rot   12   t  8+ 13            mag   12     fixed      fixed      fixed 
+  13   rot   13   tilt  13            mag   13     fixed      fixed      fixed 
+  14   rot   14   t 13+fix            mag   14     fixed      fixed      fixed 
+  15   rot   15   t 13+fix            mag   15     fixed      fixed      fixed 
+  16   rot   16   t 13+fix            mag   16     fixed      fixed      fixed 
+  17   rot   17   t 13+fix            mag   17     fixed      fixed      fixed 
+  18   rot   18     fixed             mag   18     fixed      fixed      fixed 
+  19   rot   19   t 24+fix            mag   19     fixed      fixed      fixed 
+  20   rot   20   t 24+fix            mag   20     fixed      fixed      fixed 
+  21   rot   21   t 24+fix            mag   21     fixed      fixed      fixed 
+  22   rot   22   t 24+fix            mag   22     fixed      fixed      fixed 
+  23   rot   23   t 24+fix            mag   23     fixed      fixed      fixed 
+  24   rot   24   tilt  24            mag   24     fixed      fixed      fixed 
+  25   rot   25   t 24+ 29            mag   25     fixed      fixed      fixed 
+  26   rot   26   t 24+ 29            mag   26     fixed      fixed      fixed 
+  27   rot   27   t 24+ 29            mag   27     fixed      fixed      fixed 
+  28   rot   28   t 24+ 29            mag   28     fixed      fixed      fixed 
+  29   rot   29   tilt  29            mag   29     fixed      fixed      fixed 
+  30   rot   30   t 29+ 34            mag   30     fixed      fixed      fixed 
+  31   rot   31   t 29+ 34            mag   31     fixed      fixed      fixed 
+  32   rot   32   t 29+ 34            mag   32     fixed      fixed      fixed 
+  33   rot   33   t 29+ 34            mag   33     fixed      fixed      fixed 
+  34   rot   34   tilt  34            mag   34     fixed      fixed      fixed 
+  35   rot   35   t 34+ 38            mag   35     fixed      fixed      fixed 
+  36   rot   36   t 34+ 38            mag   36     fixed      fixed      fixed 
+  37   rot   37   t 34+ 38            mag   37     fixed      fixed      fixed 
+  38   rot   38   tilt  38            mag   38     fixed      fixed      fixed 
+  39   rot   39   t 38+ 41            mag   39     fixed      fixed      fixed 
+  40   rot   40   t 38+ 41            mag   40     fixed      fixed      fixed 
+  41   rot   41   tilt  41            mag   41     fixed      fixed      fixed 
+
+
+ Variable Metric minimization                  Initial F:         1.027661
+                                               Cycle   10         0.478395
+                                               Cycle   20         0.440155
+                                               Cycle   30         0.438508
+                                               Cycle   40         0.438308
+                                               Cycle   50         0.438197
+
+ Number of cycles :    57                      Final   F :        0.438184
+  41 views,   90 geometric variables,   30 3-D points,  1128 projection points
+  Ratio of total measured values to all unknowns =  2256/ 257 =   8.78
+
+ At minimum tilt, rotation angle is  -11.81
+
+ view   rotation    tilt    deltilt     mag      dmag      skew    resid-pixels
+   1     -12.0     -59.9      0.13    1.0000    0.0000      0.00      0.44
+   2     -12.0     -57.0      0.02    1.0015    0.0000      0.00      0.45
+   3     -12.0     -54.1     -0.09    1.0020    0.0000      0.00      0.34
+   4     -12.0     -51.2     -0.20    1.0014    0.0000      0.00      0.47
+   5     -12.0     -48.2     -0.20    0.9988    0.0000      0.00      0.33
+   6     -12.0     -45.2     -0.20    1.0009    0.0000      0.00      0.38
+   7     -11.9     -42.2     -0.20    0.9996    0.0000      0.00      0.35
+   8     -12.0     -39.2     -0.20    1.0007    0.0000      0.00      0.53
+   9     -11.9     -36.2     -0.19    0.9997    0.0000      0.00      0.50
+  10     -11.9     -33.2     -0.19    0.9991    0.0000      0.00      0.36
+  11     -11.9     -30.2     -0.18    1.0008    0.0000      0.00      0.42
+  12     -11.9     -27.2     -0.17    1.0024    0.0000      0.00      0.38
+  13     -11.9     -24.2     -0.16    1.0009    0.0000      0.00      0.38
+  14     -11.9     -21.1     -0.13    0.9986    0.0000      0.00      0.38
+  15     -11.9     -18.1     -0.10    0.9981    0.0000      0.00      0.52
+  16     -11.8     -15.1     -0.07    0.9997    0.0000      0.00      0.33
+  17     -11.8     -12.0     -0.03    0.9998    0.0000      0.00      0.31
+  18     -11.9      -9.0      0.00    1.0010    0.0000      0.00      0.43
+  19     -11.8      -6.0     -0.00    0.9989    0.0000      0.00      0.38
+  20     -11.8      -3.0     -0.01    0.9996    0.0000      0.00      0.43
+  21     -11.8      -0.0     -0.01    1.0015    0.0000      0.00      0.31
+  22     -11.8       3.0     -0.01    1.0008    0.0000      0.00      0.43
+  23     -11.8       6.0     -0.02    0.9981    0.0000      0.00      0.37
+  24     -11.8       9.0     -0.02    0.9976    0.0000      0.00      0.32
+  25     -11.8      12.0     -0.04    0.9987    0.0000      0.00      0.29
+  26     -11.8      14.9     -0.05    0.9960    0.0000      0.00      0.36
+  27     -11.8      17.9     -0.07    0.9957    0.0000      0.00      0.31
+  28     -11.7      20.9     -0.09    0.9940    0.0000      0.00      0.36
+  29     -11.7      23.9     -0.10    0.9945    0.0000      0.00      0.36
+  30     -11.7      26.9     -0.07    0.9938    0.0000      0.00      0.31
+  31     -11.7      30.0     -0.05    0.9940    0.0000      0.00      0.38
+  32     -11.7      33.0     -0.02    0.9960    0.0000      0.00      0.40
+  33     -11.7      36.0      0.01    0.9969    0.0000      0.00      0.42
+  34     -11.7      39.0      0.03    0.9984    0.0000      0.00      0.29
+  35     -11.7      42.0     -0.03    0.9990    0.0000      0.00      0.32
+  36     -11.7      44.9     -0.10    0.9972    0.0000      0.00      0.33
+  37     -11.7      47.8     -0.16    0.9974    0.0000      0.00      0.44
+  38     -11.6      50.8     -0.23    0.9944    0.0000      0.00      0.31
+  39     -11.6      53.9     -0.12    0.9943    0.0000      0.00      0.36
+  40     -11.6      57.0      0.00    0.9952    0.0000      0.00      0.61
+  41     -11.6      60.1      0.12    0.9919    0.0000      0.00      0.41
+
+
+                     3-D point coordinates (with centroid zero)
+   #       X         Y         Z      obj  cont  resid-pixels
+   1   -111.79     20.50     69.47      1    1      0.3743
+   2     34.02    320.92     78.42      1    2      0.3547
+   3    364.82   -325.70    -43.08      1    3      0.3949
+   4   -236.05   -287.56    -50.49      1    4      0.3831
+   5   -159.79    154.05    -42.64      1    5      0.3904
+   6    244.62   -454.75    -54.31      1    6      0.2586
+   7     96.22    309.94    -51.63      1    7      0.3306
+   8    388.27   -124.43     73.01      1    8      0.3929
+   9    187.48    329.56    -46.19      1    9      0.3802
+  10   -343.21    134.81    -50.31      1   10      0.4004
+  11    249.31    314.66     68.06      1   11      0.3887
+  12   -152.34    -14.36     76.74      1   12      0.3865
+  13     22.11     73.52    -55.35      1   13      0.3944
+  14    -20.65    -64.03    -51.57      1   14      0.3613
+  15   -165.22   -458.62     71.12      1   15      0.4330
+  16   -409.25    335.07    -46.81      1   16      0.4222
+  17    140.09     94.82     75.60      1   17      0.3796
+  18    101.88   -141.92    -43.65      1   18      0.3473
+  19   -288.80    210.79    -48.91      1   19      0.3810
+  20    227.58     -9.23     77.45      1   20      0.3810
+  21   -342.32   -223.21    -50.78      1   21      0.3879
+  22   -239.31    273.14     71.62      1   22      0.3788
+  23    139.49    141.02    -53.87      1   23      0.3268
+  24    251.68    -95.16     70.80      1   24      0.4328
+  25   -113.56    373.93    -44.80      1   25      0.4153
+  26   -100.34   -179.85    -48.83      1   26      0.3407
+  27    348.80   -430.78    -43.43      1   27      0.4274
+  28   -226.23   -292.07     71.24      1   28      0.3925
+  29   -241.38   -311.91    -44.44      1   29      0.4121
+  30    353.86    326.85     67.55      1   30      0.4365
+
+ Midpoint of Z range relative to centroid in Z:   11.53
+
+Opened NEW file: g1.resid
+
+ Residual error mean and sd:     0.384   0.212 pixels
+
+         Projection points with large residuals (in pixels)
+ obj  cont  view   index coordinates      residuals        # of
+   #     #     #      X         Y        X        Y        S.D.
+   1    29     9    336.59    260.05     1.01    -0.75     4.14
+   1    30     8    839.84    816.19     0.84    -0.81     3.70
+   1    22    40    526.25    821.16     1.09     0.36     3.63
+   1    10    40    343.88    717.87     0.91     0.63     3.44
+   1    29     8    326.63    269.99    -0.60     0.92     3.38
+   1     5     1    548.81    689.57    -0.50     0.95     3.27
+   1     2    18    627.54    836.54    -0.76     0.74     3.21
+   1     9    37    697.61    882.22     0.86    -0.63     3.20
+   1    19    15    350.71    807.60    -1.04     0.12     3.13
+   1     4     8    339.89    293.16    -1.04    -0.06     3.10
+   1    30    40    850.20    808.94    -0.51     0.90     3.08
+
+Opened NEW file: g1fid.xyz
+
+ SURFACE ANALYSIS:
+
+ The following parameters are appropriate if fiducials are NOT on two surfaces:
+
+ Fit of one plane to all fiducials:
+ # of points =               30
+ Mean residual =          54.71
+ Adjusted slope =        0.0560
+ X axis tilt needed =     -1.38
+ Incremental tilt angle change =  -3.20
+ Total tilt angle change =        -3.20
+ 
+ The following parameters are appropriate if fiducials ARE on two surfaces,
+ based on fit of two parallel planes to fiducials sorted onto two surfaces:
+
+ On bottom surface:
+ # of points =           18
+ Mean residual =       3.57
+ Z axis intercept =   -48.4
+
+ On top surface:
+ # of points =           12
+ Mean residual =       3.05
+ Z axis intercept =    72.6
+
+ Overall mean residual =           3.36
+ Thickness at Z intercepts =      121.0
+ Adjusted slope =                0.0001
+ X axis tilt needed =              0.03
+ Incremental tilt angle change =  -0.00
+ Total tilt angle change =        -0.00
+ 
+ Unbinned thickness needed to contain centers of all fiducials =         134
+ Incremental unbinned shift needed to center range of fiducials in Z =    11.6
+ Total unbinned shift needed to center range of fiducials in Z =          11.6
+

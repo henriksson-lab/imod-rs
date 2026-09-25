@@ -1,0 +1,46 @@
+
+Input projection file:: t.ali
+ Dimensions:     40     28     21   Pixel size:       3.1        3.1        3.1
+Mode:  1               Min, max, mean:          152          504       212.89
+raw2mrc: Converted to mrc format.                       25-Sep-26  01:52:41
+
+ Output map is sectioned perpendicular to the tilt axis
+
+ Data mode of output file is 1
+
+ Global alpha tilt of 5.0 will be applied
+
+ X-tilting with vertical slices, if any, will have interpolation order 3
+
+ Thickness of reconstructed slice is 16 pixels.
+ Tilt angles were entered from a tilt file
+
+ NEW image file on unit   2 : o.rec
+
+ Projection angles:
+
+   -60.00   -54.00   -48.00   -42.00   -36.00   -30.00   -24.00   -18.00
+   -12.00    -6.00     0.00     6.00    12.00    18.00    24.00    30.00
+    36.00    42.00    48.00    54.00    60.00
+
+
+Allocated 0 MB for main arrays
+---------------------------
+Total floats in main arrays       71072
+  Radial weighting function        2144
+  Output slice                      800
+    6 Untilted slices              4800
+   28 Transposed projections      60032
+  Stretching buffer                2144
+
+Final reconstruction file: o.rec
+ Dimensions:     40     16     28   Pixel size:       3.1        3.1        3.1
+Mode:  1               Min, max, mean:      -177.13       712.31       49.674
+raw2mrc: Converted to mrc format.                       25-Sep-26  01:52:41
+TILT: Tomographic reconstruction                        25-Sep-26  01:54:26
+
+ To scale output to bytes (10-245), use SCALE to add 214.976,  and scale by 0.26421
+
+ To scale output to -15000 to 15000, use SCALE to add -267.593,  and scale by 33.729
+
+ Reconstruction of 28 slices complete.

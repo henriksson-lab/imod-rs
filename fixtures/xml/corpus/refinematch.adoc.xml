@@ -1,0 +1,126 @@
+<?xml version="1.0" encoding="utf-8"?>
+<autodoc>
+  <PreData>
+    <Version>1.0</Version>
+    <Pip>1</Pip>
+  </PreData>
+  <Field name="PatchFile">
+    <short>patch</short>
+    <type>FN</type>
+    <usage>Name of input file with positions and displacements</usage>
+    <tooltip />
+    <manpage>Name of input file with positions and displacements.  If this option is not entered, the first non-option argument will be used for the input file name.</manpage>
+  </Field>
+  <Field name="OutputFile">
+    <short>output</short>
+    <type>FN</type>
+    <usage>Output file for refining transformation (optional)</usage>
+    <tooltip />
+    <manpage>Optional output file for the refining transformation.  If this option is not entered, the second non-option argument (if any) will be used for the output file name.</manpage>
+  </Field>
+  <Field name="RegionModel">
+    <short>region</short>
+    <type>FN</type>
+    <usage>Model file with contours enclosing patches to be included in fit</usage>
+    <tooltip />
+    <manpage>Model file with contours enclosing the patches to be included in the fit</manpage>
+  </Field>
+  <Field name="VolumeOrSizeXYZ">
+    <short>volume</short>
+    <type>FN</type>
+    <usage>Filename or X, Y, Z size of volume being matched to</usage>
+    <tooltip />
+    <manpage>Either the name of the file or the X, Y, and Z dimensions of the volume being matched to.</manpage>
+  </Field>
+  <Field name="ResidualPatchOutput">
+    <short>residual</short>
+    <type>FN</type>
+    <usage>Output file for patch vectors including residual values</usage>
+    <tooltip />
+    <manpage>Output file for positions, displacements, and residual values. If the patch input file has correlation coefficients, they will be replaced by the residuals.</manpage>
+  </Field>
+  <Field name="ReducedVectorOutput">
+    <short>reduced</short>
+    <type>FN</type>
+    <usage>Output file for residual vectors after removing linear component</usage>
+    <tooltip />
+    <manpage>Output file for residual vectors from the fit, which represent the vectors remaining after removing the linear component of the vector field. These are referred to as reduced vectors.  If the input patch file has correlation coefficients, they will be passed into this output file; otherwise the residual values will be placed into the file.</manpage>
+  </Field>
+  <Field name="MeanResidualLimit">
+    <short>limit</short>
+    <type>F</type>
+    <usage>Limiting value for the mean residual</usage>
+    <tooltip />
+    <manpage>Limiting value for the mean residual; above this value, the program will exit with an error.</manpage>
+  </Field>
+  <Field name="ExtraValueSelection">
+    <short>extra</short>
+    <type>IPM</type>
+    <usage>Extra value ID or -column # and polarity for selecting patches based on criterion</usage>
+    <tooltip />
+    <manpage>Select only patches with extra value on one side of a criterion. The patch vector file can have additional columns of values after the displacements in X, Y, and Z.  These extra columns are numbered from 1, and they may also have ID values on the first line of the file indicating their type.  To include patches based on values in an extra column, enter two numbers for this option: the ID value or the negative of the extra column number; and 1 to select patches above the criterion or -1 to select ones below it.  You must also enter one or more threshold values with the \fB-select\fR option.</manpage>
+  </Field>
+  <Field name="SelectionCriteria">
+    <short>select</short>
+    <type>FAM</type>
+    <usage>One or more criteria for selecting patches based on extra values</usage>
+    <tooltip />
+    <manpage>One or more criteria for selecting patches based on extra values. If multiple criteria are entered, the fitting process will be repeated with each selection criterion to try to satisfy the residual criterion.  If there are multiple values being selected on, this option must be entered the same number of times as the \fB-extra\fR option and it must have the same number of criteria entered each time.</manpage>
+  </Field>
+  <Field name="MaxFractionToDrop">
+    <short>maxfrac</short>
+    <type>F</type>
+    <usage>Maximum fraction of patches to eliminate from the fit (default 0.1)</usage>
+    <tooltip />
+    <manpage>Maximum fraction of patches to drop from the fit by outlier elimination.  Enter 0 to for no outlier elimination.  The default is 0.1.</manpage>
+  </Field>
+  <Field name="MinResidualToDrop">
+    <short>minresid</short>
+    <type>F</type>
+    <usage>Minimum residual for outlier elimination (default 0.5)</usage>
+    <tooltip />
+    <manpage>The minimum residual for outlier elimination; patches with residuals smaller than this value will be retained no matter how extreme they are relative to the other patches.  The default is 0.5.</manpage>
+  </Field>
+  <Field name="CriterionProbabilities">
+    <short>prob</short>
+    <type>FP</type>
+    <usage>Probabilities controlling outlier elimination</usage>
+    <tooltip />
+    <manpage>Two probabilities controlling outlier elimination: a criterion probability for a patch to be evaluated as an outlier (default 0.01), and a criterion probability for a patch to be eliminated regardless of the distribution of extreme values (default 0.002).</manpage>
+  </Field>
+  <Field name="InitialTransformFile">
+    <short>initial</short>
+    <type>FN</type>
+    <usage>File with 3D transformation used to create the volume being aligned</usage>
+    <tooltip />
+    <manpage>File with the 3D transformation that was used to create the volume being aligned.  This transformation will be multiplied by the refining transform and output in the file specified by the \fB-product\fR option.  The two options must be entered together.  A side-effect of using this option is that the program will report the shift in Y (the presumed depth dimension) needed to align corresponding patches in the center of the volumes.</manpage>
+  </Field>
+  <Field name="ProductTransformFile">
+    <short>product</short>
+    <type>FN</type>
+    <usage>Name of output file for product of initial and refining transforms</usage>
+    <tooltip />
+    <manpage>Name of output file for the product of the transform entered with the \fB-initial\fR option and the refining transform.</manpage>
+  </Field>
+  <Field name="ScaleShiftByFactor">
+    <short>scale</short>
+    <type>F</type>
+    <usage>Factor by which to scale shifts in the product transform file</usage>
+    <tooltip />
+    <manpage>Factor by which to scale shifts in the transform written when the \fB-product\fR option is given. This option is needed to get a transformation that can be applied to an unbinned volume when binned volumes have been analyzed.</manpage>
+  </Field>
+  <Field name="ParameterFile">
+    <short>param</short>
+    <type>PF</type>
+    <usage>Read parameter entries from file</usage>
+    <tooltip />
+    <manpage>Read parameter entries as keyword-value pairs from a parameter file.</manpage>
+  </Field>
+  <Field name="usage">
+    <short>help</short>
+    <type>B</type>
+    <usage>Print help output</usage>
+    <tooltip />
+    <manpage />
+  </Field>
+</autodoc>

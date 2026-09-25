@@ -1,0 +1,361 @@
+<?xml version="1.0" encoding="utf-8"?>
+
+<autodoc>
+  
+  <PreData>
+    
+    <Version>1.0</Version>
+    
+    <Pip>1</Pip>
+  
+  </PreData>
+  
+  <Field name="r">
+    
+    <type>B</type>
+    
+    <usage>Resume, retaining existing finished files (the default is to remove all log files and redo everything)</usage>
+    
+    <tooltip />
+    
+    <manpage>Resume processing and retain all existing log files.  The default is to remove all existing log files, run rootname-start.com if it exists, and then run all of the individual command files, finishing with rootname-finish.com if it exists.  With this option, the program will not rerun any command files whose corresponding log files end with &quot;CHUNK DONE&quot;, including the start and finish files.</manpage>
+  
+  </Field>
+  
+  <Field name="s">
+    
+    <type>B</type>
+    
+    <usage>Run a single command file named root_name or root_name.com</usage>
+    
+    <tooltip />
+    
+    <manpage>Run a single command file on a remote machine (i.e., the first machine in machine list).  The command file is not required to be numbered. The rootname given on the command line can be either the full name or the name excluding &quot;.com&quot;.</manpage>
+  
+  </Field>
+  
+  <Field name="m">
+    
+    <type>B</type>
+    
+    <usage>Run multiple, independently named command files</usage>
+    
+    <tooltip />
+    
+    <manpage>Run multiple, independently named command files, whose full names or names without extension are given as non-option arguments after the machine list. The command files are not required to be numbered.  The program behavior changes in several ways: processing will continue even if some chunks fail; chunks that fail will be retried only once unless a different value is entered with the \fB-e\fR option; the detection of slow/hung chunks is disabled unless the \fB-C\fR option is entered.</manpage>
+  
+  </Field>
+  
+  <Field name="G">
+    
+    <type>B</type>
+    
+    <usage>Distribute jobs to multiple or specific GPUs on each machine</usage>
+    
+    <tooltip />
+    
+    <manpage>Distribute jobs to multiple or specific GPUs on each machine.  With this option, each machine name can be followed by a colon and one or more specific GPU device numbers (not number of devices) separated by colons. Devices are numbered from 1 and the numbers must be positive.  The program will run each job with the environment variable IMOD_USE_GPU2 set to the given GPU number, or set to 0 for a machine where no GPU numbers were entered (0 requests the best available GPU on that machine.)  No machine name can be entered more than once. For example, &quot;tubule:2:1,eclipse:2,druid&quot; would use two GPUs on tubule, a specific one (not two) on eclipse, and the best or only one on druid.</manpage>
+  
+  </Field>
+  
+  <Field name="O">
+    
+    <type>I</type>
+    
+    <usage>Set the thread limit to the given number or do not set if 0</usage>
+    
+    <tooltip />
+    
+    <manpage>Set the limit on the number of threads processes will run in parallel by setting environment variable OMP_NUM_THREADS to the given number. A value of 0 means do not limit multiple threads.  The default is 0 (no limit) when a single file is run with -s or when the -G option is given; otherwise the default is 1.</manpage>
+  
+  </Field>
+  
+  <Field name="M">
+    
+    <type>I</type>
+    
+    <usage>Run the given # of multi-processor jobs that do parallel operations</usage>
+    
+    <tooltip />
+    
+    <manpage>Run a limited number of chunks at a time, giving each chunk a unique set of CPU resources that it can use to run parallel operations. Specifically, all of the entered processors are divided among the entered number of jobs, with the goal of giving each job as many cores as possible on the machine on which the job runs.  Two environment variables are set for each job: MULTI_PROC_CPU_LIST with a list of processors that the job can use when running Processchunks; and MULTI_PROC_THREAD_LIMIT with the number of cores on the local machine, which the job can use to limit the number of cores used for operations parallelized with OpenMP.  If a machine is dropped either due to failures or by an external &quot;D&quot; entry, the program will allow running chunks to complete, reallocate the processors without that machine, and continue.</manpage>
+  
+  </Field>
+  
+  <Field name="p">
+    
+    <type>CH</type>
+    
+    <usage>Specification for pool of GPUs when doing multi-processor jobs</usage>
+    
+    <tooltip />
+    
+    <manpage>Specification for a pool of GPUs when doing multi-processor jobs. This list of machines is independent of the CPU machine list. The format is the same as for a machine list entered when the \fB-G\fR option is used.  When this pool is provided, the environment variable MULTI_PROC_GPU_POOL is set for each job.  If a machine on this list is dropped, the pool will be revised; also, machines that are not in the set of ones used to run the multi-processor jobs will be probed and removed from the pool if they can no longer be connected to.</manpage>
+  
+  </Field>
+  
+  <Field name="g">
+    
+    <type>B</type>
+    
+    <usage>Go process, without asking for confirmation after probing machines</usage>
+    
+    <tooltip />
+    
+    <manpage>Go start processing after probing the machines, without waiting for confirmation from the user.</manpage>
+  
+  </Field>
+  
+  <Field name="n">
+    
+    <type>I</type>
+    
+    <usage>Set the &quot;nice&quot; value to the given number (default 18, range 0-19)</usage>
+    
+    <tooltip />
+    
+    <manpage>Run jobs with &quot;niceness&quot; set to the given value, which can range from 0 for no reduction in priority to 19 for maximum reduction.  The default nice value is 18.</manpage>
+  
+  </Field>
+  
+  <Field name="w">
+    
+    <type>FN</type>
+    
+    <usage>Full path to working directory on remote machines</usage>
+    
+    <tooltip />
+    
+    <manpage>The full path for reaching the current directory on the remote machines.  This entry is needed when working on a local disk whose mounted path on the other machines is different from its path (as given by pwd) on the local machine.</manpage>
+  
+  </Field>
+  
+  <Field name="d">
+    
+    <type>I</type>
+    
+    <usage>Drop a machine after given number of failures in a row (default 5, or 10 for queue)</usage>
+    
+    <tooltip />
+    
+    <manpage>Drop a machine from the list if it fails this number of times in a row.  If there are still other jobs running on the machine, it will be put on hold with no new jobs assigned.  If all those jobs fail, it will be dropped then, but if any succeed, the failure count is reset.  The default criterion is 5 for regular machines and 10 for a cluster queue.</manpage>
+  
+  </Field>
+  
+  <Field name="e">
+    
+    <type>I</type>
+    
+    <usage>Quit after the given # of processing errors for a chunk (default 5)</usage>
+    
+    <tooltip />
+    
+    <manpage>Quit if a chunk gives a processing error (as opposed to failing to start) this number of times, unless running multiple named command files with the \fB-m\fR option.  All running jobs will be killed when quitting.  The default limit is 5 for numbered command files on multiple machines, 10 if running on a queue, or 2 when running with the \fB-m\fR option or when running on one machine.</manpage>
+  
+  </Field>
+  
+  <Field name="C">
+    
+    <type>FT</type>
+    
+    <usage>Criterion for chunk too slow within one machine, factors for between machines and for sync</usage>
+    
+    <tooltip />
+    
+    <manpage>This option enters three factors that control the program's decision to kill a chunk that appears to have hung up.  They are: 1) A criterion for how much longer a chunk can take than the slowest chunk so far on the same machine.  The default is 4; this criterion needs to reflect the intrinsic variability among chunks and extent to which machine performance could vary during a run.  A value of 0 completely disables chunk timing tests. 2) A multiplier to that criterion when comparing a chunk time with the slowest time so far on any machine.  The default is 3, so the default overall criterion is 12; this factor needs to reflect the intrinsic spread in machine capabilities.  3) A multiplier for both of these criteria when considering sync chunks.  The default is 0, for no testing for sync chunks; the factor could be 1 if sync chunks are comparable or faster than non-sync chunks.</manpage>
+  
+  </Field>
+  
+  <Field name="T">
+    
+    <type>IP</type>
+    
+    <usage>Timeouts for log file activity for non-sync and sync chunks (seconds)</usage>
+    
+    <tooltip />
+    
+    <manpage>Timeouts for log file activity for non-sync and sync chunks, in seconds.  The default is 300,0.  A value of 0 disables this test.  A non-sync chunk is killed if it is too slow by the timing tests controlled with the &quot;-C&quot; option, AND if it log is older than the first number entered here.  The same dual test is applied for a sync chunk if the log activity test is enabled with the second number here and the timing test is enabled with a non-zero factor in the third number of the &quot;-C&quot; entry.  However, if the log activity test is enabled and the timing test is not enabled, non-sync chunks will be killed solely on the basis of the log becoming too old.</manpage>
+  
+  </Field>
+  
+  <Field name="c">
+    
+    <type>FN</type>
+    
+    <usage>Check the given file for commands P, Q, and D (default &quot;processchunks.input&quot;)</usage>
+    
+    <tooltip />
+    
+    <manpage>Check the given file periodically for lines with commands to quit, pause, or drop a machine (Q, P, or D machine_name).  The default name of this file is &quot;processchunks.input&quot;.  With a quit command, the program will kill all running chunks.  With a pause, it will allow everything that is running to finish but not start any new ones.  When pausing on a cluster, it will cancel any jobs on the queue that have not started yet but allow started jobs to finish.</manpage>
+  
+  </Field>
+  
+  <Field name="L">
+    
+    <type>I</type>
+    
+    <usage>Limit to the number of jobs started per one-second cycle (default 20)</usage>
+    
+    <tooltip />
+    
+    <manpage>Set the limit on the number of jobs started sequentially during one cycle of checking jobs and machines.  The time between cycles is 1 second. The default is 20.</manpage>
+  
+  </Field>
+  
+  <Field name="q">
+    
+    <type>I</type>
+    
+    <usage>Run on cluster queue with given maximum # of jobs at once</usage>
+    
+    <tooltip />
+    
+    <manpage>Put chunks on a cluster queue instead of sending them to individual machines via ssh.  The given value indicates the maximum number of chunks to submit at any one time.  With this option, the list of machine names must be replaced by the command needed to interact with the queue.</manpage>
+  
+  </Field>
+  
+  <Field name="Q">
+    
+    <type>CH</type>
+    
+    <usage>Machine name to use for the queue (default queue)</usage>
+    
+    <tooltip />
+    
+    <manpage>When running on a queue, this option can be used to specify the name that Processchunks will use when it reports chunks being started and finishing.  The entry must be a single word with no embedded spaces.  It need not match the actual name of the queue; the default is &quot;queue&quot;.</manpage>
+  
+  </Field>
+  
+  <Field name="I">
+    
+    <type>CH</type>
+    
+    <usage>Command to send to the queue for initialization at the start</usage>
+    
+    <tooltip />
+    
+    <manpage>When running on a queue, this option can be used to specify a command that will be issued to the queue before submitting jobs, such as for allocating nodes.  It can have embedded spaces.</manpage>
+  
+  </Field>
+  
+  <Field name="D">
+    
+    <type>CH</type>
+    
+    <usage>Command to send to the queue for deinitialization before exiting</usage>
+    
+    <tooltip />
+    
+    <manpage>When running on a queue, this option can be used to specify a command that will be issued to the queue before exiting.  It can have embedded spaces.</manpage>
+  
+  </Field>
+  
+  <Field name="W">
+    
+    <type>I</type>
+    
+    <usage>Seconds to wait for queue initialization command to finish (default 30)</usage>
+    
+    <tooltip />
+    
+    <manpage>Seconds to wait for the queue initialization command given with the \fB-I\fR to finish.  Enter -1 to wait indefinitely, or a positive value up to 2000000.  The default is 30, or a value set with the environment variable IMOD_QUEUE_INIT_WAIT.  An entry here overrides a value set with that variable.</manpage>
+  
+  </Field>
+  
+  <Field name="JC">
+    
+    <type>I</type>
+    
+    <usage>Number of cores per job on cluster queue</usage>
+    
+    <tooltip />
+    
+    <manpage>Number of cores per job on cluster queue when running multi-processor jobs.  Both \fB-q\fR and \fB-M\fR must be entered as well. With this entry, Processchunks will set the environment variable MULTI_PROC_JOB_CORES instead of MULTI_PROC_QUEUE_COMMAND, which will cause Batchruntomo(1) to run chunks directly on that number of cores instead of submitting them to a queue, and to allow processes to use that number of threads.</manpage>
+  
+  </Field>
+  
+  <Field name="JG">
+    
+    <type>I</type>
+    
+    <usage>Number of GPUs per job on cluster, when cores per job are specified</usage>
+    
+    <tooltip />
+    
+    <manpage>Number of GPUs per job on cluster when running multi-processor jobs; cores per job must also be specified with \fB-JC\fR.</manpage>
+  
+  </Field>
+  
+  <Field name="SQ">
+    
+    <type>CH</type>
+    
+    <usage>Specification of secondary queue to be used by running jobs</usage>
+    
+    <tooltip />
+    
+    <manpage>Specification of secondary queue to be used by running jobs when running multi-processor jobs, instead of the main queue specified by \fB-q\fR.  With this entry, Processchunks will set the environment variable MULTI_PROC_GPU_QUEUE.  The primary use for this option is to provide a separate queue with a GPU, to be used only with processes that require it, so that GPU resources are obtained only when needed.</manpage>
+  
+  </Field>
+  
+  <Field name="SN">
+    
+    <type>I</type>
+    
+    <usage>Maximum number of jobs to submit together to secondary queue</usage>
+    
+    <tooltip />
+    
+    <manpage />
+  
+  </Field>
+  
+  <Field name="P">
+    
+    <type>B</type>
+    
+    <usage>Output process ID</usage>
+    
+    <tooltip />
+    
+    <manpage>Output process ID.  When this option is entered together with &quot;-g&quot;, the program will skip probing machine loads.</manpage>
+  
+  </Field>
+  
+  <Field name="v">
+    
+    <type>B</type>
+    
+    <usage>Verbose output</usage>
+    
+    <tooltip />
+    
+    <manpage />
+  
+  </Field>
+  
+  <Field name="V">
+    
+    <type>CH</type>
+    
+    <usage>?|?,2|class[,function[,...]][,2]|2  Debugging output from specific function.</usage>
+    
+    <tooltip />
+    
+    <manpage>This option enables debugging output from a specific class or function.  It has no effect if &quot;-v&quot; is not entered too.  The entry has the form &quot;?|?,2|class[,function[,...]][,2]|2&quot; where 2 means more verbose and ? or function[,...] lists the functions that have information to print.  The matching to class and function names is case-insensitive and to the end of the name, rather than to the whole name.</manpage>
+  
+  </Field>
+  
+  <Field name="help">
+    
+    <type>B</type>
+    
+    <usage>Print usage message</usage>
+    
+    <tooltip />
+    
+    <manpage />
+  
+  </Field>
+
+</autodoc>

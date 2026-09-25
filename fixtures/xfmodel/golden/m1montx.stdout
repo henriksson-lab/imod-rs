@@ -1,0 +1,27 @@
+
+ RO image file on unit   1 : mont.mrc     Size=          3 K
+
+ Number of columns, rows, sections .....      20      15       8
+ Map mode ..............................    0   (bytes - signed in file)   
+ Start cols, rows, sects, grid x,y,z ...    0     0     0      20     15      8
+ Pixel spacing (Angstroms)..............   1.000      1.000      1.000    
+ Cell angles ...........................   90.000   90.000   90.000
+ Fast, medium, slow axes ...............    X    Y    Z
+ Origin on x,y,z .......................    0.000       0.000       0.000    
+ Minimum density .......................   0.0000     (  -128.00     in file)
+ Maximum density .......................   254.00     (   126.00     in file)
+ Mean density ..........................   125.24     (  -2.7550     in file)
+ tilt angles (original,current) ........   0.0   0.0   0.0   0.0   0.0   0.0
+ Space group,# extra bytes,idtype,lens .        0        0        0        0
+
+     1 Titles :
+raw2mrc: Converted to mrc format.                       25-Sep-26  02:35:52    
+
+
+ FORMATTED  ro  file opened: mont.pl
+ There are   1 gaps in section Z values
+ Xform lists will be assumed to have xforms only for existing sections
+
+ FORMATTED  ro  file opened: x7.xf
+Transforming model with transforms from x7.xf
+          27  points with Z values out of range of transforms

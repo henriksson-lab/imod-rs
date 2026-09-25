@@ -1,0 +1,279 @@
+<?xml version="1.0" encoding="utf-8"?>
+
+<autodoc>
+  
+  <PreData>
+    
+    <Version>1.0</Version>
+    
+    <Pip>1</Pip>
+  
+  </PreData>
+  
+  <Field name="RootName">
+    
+    <short>root</short>
+    
+    <type>CH</type>
+    
+    <usage>Root name of tomogram</usage>
+    
+    <tooltip />
+    
+    <manpage>Root name of tomogram (include the a or b if dual axis)</manpage>
+  
+  </Field>
+  
+  <Field name="ThicknessOfTomograms">
+    
+    <short>thickness</short>
+    
+    <type>I</type>
+    
+    <usage>Thickness of binned reconstructions in unbinned pixels</usage>
+    
+    <tooltip />
+    
+    <manpage>Thickness of reconstructions in unbinned pixels.  If there is a nonzero X-axis tilt, the thickness will be increased and a reconstruction built with zero X-axis tilt.</manpage>
+  
+  </Field>
+  
+  <Field name="FindBeadsInVolume">
+    
+    <short>find</short>
+    
+    <type>I</type>
+    
+    <usage>1 to find and erase beads, 2 to take their positions into account also</usage>
+    
+    <tooltip />
+    
+    <manpage>Enter 1 to find gold particles with Findbeads3d(1), find a threshold density, and erase beads along with other compararable densities above that threshold.  Enter 2 to do this plus use the bead positions in solving for the best angles and in finding the boundaries of the sample.</manpage>
+  
+  </Field>
+  
+  <Field name="BeadSize">
+    
+    <short>size</short>
+    
+    <type>F</type>
+    
+    <usage>Diameter of beads, in unbinned pixels</usage>
+    
+    <tooltip />
+    
+    <manpage>Diameter of beads to find, in unbinned pixels.  This entry is not needed if there is a bead size entry in the Beadtrack(1) command file, but would be needed if there is only a centroid radius entry there.  It could also be used to enter an alternate size to use in Findbeads3d(1).</manpage>
+  
+  </Field>
+  
+  <Field name="LightFeatures">
+    
+    <short>light</short>
+    
+    <type>B</type>
+    
+    <usage>Beads or other strong features are lighter, not darker than background</usage>
+    
+    <tooltip />
+    
+    <manpage>Beads or other strong features are lighter, not darker than background.  This entry is not needed if there is a LightBeads entry in the Beadtrack(1) command file; it will override whatever entry is in that file.</manpage>
+  
+  </Field>
+  
+  <Field name="BinningToApply">
+    
+    <short>binning</short>
+    
+    <type>I</type>
+    
+    <usage>Binning to use for the reconstructions to analyze</usage>
+    
+    <tooltip />
+    
+    <manpage>Binning to use for the reconstructions to analyze.  The default binning if one is not entered depends on whether beads are being found.  If they are, the default binning will make the beads about 4-7 pixels, optimal for bead-finding.  Otherwise, the default binning will make the volume with a target size of ~650 pixels in X and Z, up to a maximum binning of 4, by default.</manpage>
+  
+  </Field>
+  
+  <Field name="EraseFraction">
+    
+    <short>erase</short>
+    
+    <type>F</type>
+    
+    <usage>Fraction of extreme pixels to erase if beads are not found</usage>
+    
+    <tooltip />
+    
+    <manpage>Fraction of extreme pixels to erase if beads are not being found; the default is 0.002.</manpage>
+  
+  </Field>
+  
+  <Field name="HighSDCriterion">
+    
+    <short>high</short>
+    
+    <type>F</type>
+    
+    <usage>Criterion number of MADNs above median for structure (default 5)</usage>
+    
+    <tooltip />
+    
+    <manpage>Criterion for a high SD to be considered structure in Findsection(1); it is expressed as the number of Normalized Median Absolute Deviations (MADNs) above the median at the surfaces of the volume.  The default is 5.</manpage>
+  
+  </Field>
+  
+  <Field name="BoostThickness">
+    
+    <short>boost</short>
+    
+    <type>F</type>
+    
+    <usage>Fraction by which to increase thickness in high SD analysis</usage>
+    
+    <tooltip />
+    
+    <manpage>Fraction by which to increase the thickness found by the analysis of high SDs in Findsection(1).  The lower and upper boundaries from this analysis will each be moved by half of this amount, or less if that brings one of them to the edge of the volume. The default is 0.1.</manpage>
+  
+  </Field>
+  
+  <Field name="ScalesToApply">
+    
+    <short>scales</short>
+    
+    <type>IA</type>
+    
+    <usage>Binnings to apply in the Findsection analysis</usage>
+    
+    <tooltip />
+    
+    <manpage>Binnings to apply in the Findsection(1) analysis.  Sensible defaults are set based on the initial binning of the volume, so that the smallest combined binning of the data (the product of the initial binning and the first scale to apply) is at least 3.</manpage>
+  
+  </Field>
+  
+  <Field name="BoxSizeInXYZ">
+    
+    <short>box</short>
+    
+    <type>IT</type>
+    
+    <usage>Size of boxes in Findsection analysis</usage>
+    
+    <tooltip />
+    
+    <manpage>Size of boxes at the first scale being analyzed in Findsection(1).  The default is 16x4x16 if the combined binning at the first scale is 3 or more; 32x8x32 if it is 2, or 48x12x48 if it is 1.</manpage>
+  
+  </Field>
+  
+  <Field name="SpacingOfBoxesInXYZ">
+    
+    <short>spacing</short>
+    
+    <type>IT</type>
+    
+    <usage>Spacing between boxes in Findsection analysis</usage>
+    
+    <tooltip />
+    
+    <manpage>Spacing between boxes at the first scale being analyzed in Findsection(1).  The default is to space boxes apart by half of their size in X and Z and a quarter of their size in Y.</manpage>
+  
+  </Field>
+  
+  <Field name="UseGPU">
+    
+    <short>gpu</short>
+    
+    <type>I</type>
+    
+    <usage>0 to use best available GPU, # &gt; 0 to use specific GPU, or -1 not to use GPU</usage>
+    
+    <tooltip />
+    
+    <manpage>This entry will replace whatever UseGPU entry is in the tilt.com file.  Enter 0 to use the best GPU on the system, or the number of a specific GPU (numbered from 1), or -1 not to use a GPU.</manpage>
+  
+  </Field>
+  
+  <Field name="TomoPitchModel">
+    
+    <short>pitch</short>
+    
+    <type>FN</type>
+    
+    <usage>Alternative file name for boundary model output by Findsection</usage>
+    
+    <tooltip />
+    
+    <manpage>Alternative file name for boundary model output by Findsection; otherwise it will have the standard name for a Tomopitch model (i.e., tomopitch.mod for a single-axis data set).</manpage>
+  
+  </Field>
+  
+  <Field name="ControlValue">
+    
+    <short>control</short>
+    
+    <type>FPM</type>
+    
+    <usage>Parameter number and value for setting algorithm control parameters</usage>
+    
+    <tooltip />
+    
+    <manpage>Parameter number and value for setting algorithm control parameters. Parameters and their numbers (and default values in parentheses) are: ^  1: Maximum binned bead size (7) ^  2: Maximum binning (4) ^  3: Fraction to increase size in X for oversized aligned stack (1.18) ^  4: Fraction to increase size in Y for oversized aligned stack (1.06) ^  5: Fallback threshold for averaging in Findbeads3d (0.5) ^  6: Fallback threshold for storing beads in Findbeads3d (0.5) ^  7: Fraction of extra counts on one side of extracted bead density histogram at which to pick threshold; this is used in the -E option of &quot;clip hist&quot; (0.95) ^  8: Fraction of bead volume to use as minimum feature size in thresholded volume; this is used in the -M option of &quot;clip thresh&quot; (0.33) ^  9: Bead diameter to assume for computing minimum feature size when no beads are being found (3) ^ 10: Criterion value for binary marking of pixels in reprojection; this value is used in the ThresholdedReproj option to Tilt(1) (0.05) ^ 11: Minimum value for maximum voxels to erase when the estimated fraction of voxels in beads is taken into account (0.0005) ^ 12: Maximum fraction of voxels to erase (0.01) ^ 13: Fraction of voxels in beads for a volume where the maximum fraction of voxels to erase should be 0.01; the maximum fraction to erase is the fraction of voxels in beads times 0.01 divided by this value (6.7e-5)</manpage>
+  
+  </Field>
+  
+  <Field name="FindSecOptions">
+    
+    <short>fsopt</short>
+    
+    <type>CH</type>
+    
+    <usage>Command-line options to pass to Findsection</usage>
+    
+    <tooltip />
+    
+    <manpage>Options to pass to Findsection(1).  These options must be in command-line format and all included in one entry of this option.  For example, &quot;-con 28,0.25 -deb 1&quot; would set control value 28 to 0.25 and turn on debugging output.</manpage>
+  
+  </Field>
+  
+  <Field name="LeaveTempFiles">
+    
+    <short>leave</short>
+    
+    <type>I</type>
+    
+    <usage>1 to keep all temporary files; -1, -2, or -3 to keep _cpos.rec, _cposErase.rec, or both</usage>
+    
+    <tooltip />
+    
+    <manpage />
+  
+  </Field>
+  
+  <Field name="UseTempFiles">
+    
+    <short>use</short>
+    
+    <type>I</type>
+    
+    <usage>Use temporary files if possible up to the given step</usage>
+    
+    <tooltip />
+    
+    <manpage>Use temporary files if possible up to the given step.  Steps are: ^  1: Oversized binned aligned stack ^  2: Oversized binned reconstruction ^  3: Extracted boxed beads or extreme densities ^  4: Thresholded reconstruction ^  5: Reprojection of thresholded reconstruction ^  6: Contour model of reprojection ^  7: Erased aligned stack ^  8: Reconstruction from erased stack</manpage>
+  
+  </Field>
+  
+  <Field name="usage">
+    
+    <short>help</short>
+    
+    <type>B</type>
+    
+    <usage>Print help output</usage>
+    
+    <tooltip />
+    
+    <manpage />
+  
+  </Field>
+
+</autodoc>

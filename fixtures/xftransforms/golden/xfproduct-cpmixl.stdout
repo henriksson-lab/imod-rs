@@ -1,0 +1,7 @@
+Old warping file opened: cpsmix.xf
+
+ FORMATTED  ro  file opened: gen40.xf
+           5  transforms in first file
+          40  transforms in second file
+ WARNING: XFPRODUCT - Number of transforms does not match
+    5 new transforms written to warping file: p.xf

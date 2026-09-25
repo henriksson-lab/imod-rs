@@ -1,0 +1,10 @@
+ Enter 0 to align all sections to a single average central alignment;
+    or 1 to align to an average alignment that shifts based
+          on a polynomial fit to the whole stack;
+    or N to align each section to an average alignment based
+          on a polynomial fit to the nearest N sections,
+   or -1 or -N for a hybrid of central and shifting alignments:  Enter # of parameters to do central alignment on (1 for rotation only,
+2 for translation only, 3 for both, 4 for trans/rot/mag):  Order of polynomial to fit (1 for linear):  Input file of f transforms:  Output file of g transforms: 
+ FORMATTED  old  file opened: BBa.xf
+
+ FORMATTED  new  file opened: o.xg

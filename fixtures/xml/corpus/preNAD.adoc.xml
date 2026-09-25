@@ -1,0 +1,70 @@
+<?xml version="1.0" encoding="utf-8"?>
+<autodoc>
+  <PreData>
+    <Version>1.0</Version>
+    <Pip>1</Pip>
+  </PreData>
+  <Field name="InputStack">
+    <short>input</short>
+    <type>FN</type>
+    <usage>Input image file with tilt projections</usage>
+    <tooltip />
+    <manpage>Input image file with tilt projections. PreNAD algorithm will be applied to this image.</manpage>
+  </Field>
+  <Field name="OutputFileName">
+    <short>output</short>
+    <type>FN</type>
+    <usage>Output filtered image file</usage>
+    <tooltip />
+    <manpage>Output filtered image file</manpage>
+  </Field>
+  <Field name="AnglesFile">
+    <short>angles</short>
+    <type>FN</type>
+    <usage>Tilt angles file</usage>
+    <tooltip />
+    <manpage>File with tilt angles, one per line. This file has usually a .tlt extension.</manpage>
+  </Field>
+  <Field name="MaskedVarianceDifference">
+    <short>MVD</short>
+    <type>F</type>
+    <usage>User-defined Masked Variance Difference (MVD)</usage>
+    <tooltip />
+    <manpage>User-defined Masked Variance Difference (MVD). MVD is an image-dependent parameter which defines a stopping condition for preNAD. The user-defined MVD is optional. However, generic users are suggested to ignore this parameter and use MinIterations/MaxIterations for an automatic estimation of the MVD.</manpage>
+  </Field>
+  <Field name="sigma">
+    <short>s</short>
+    <type>F</type>
+    <usage>Initial sigma for smoothing structure tensor (in pixels, default 1)</usage>
+    <tooltip />
+    <manpage>Initial sigma for smoothing the structure tensor (in pixels). Default initial sigma is 1 pixel.</manpage>
+  </Field>
+  <Field name="MinIterations">
+    <short>minite</short>
+    <type>I</type>
+    <usage>Minimum Number of Iterations</usage>
+    <tooltip />
+    <manpage>Minimum Number of Iterations allowed for each tilt projection.</manpage>
+  </Field>
+  <Field name="MaxIterations">
+    <short>maxite</short>
+    <type>I</type>
+    <usage>Maximum Number of Iterations</usage>
+    <tooltip />
+    <manpage>Maximum Number of Iterations allowed for each tilt projection.</manpage>
+  </Field>
+  <Field name="ViewsToProcess">
+    <short>views</short>
+    <type>LI</type>
+    <usage>List of views to process from input file, numbered from 1.</usage>
+    <tooltip />
+    <manpage>List of views to process from input file, numbered from 1. List should be in the form 1,3-6,9,19.  Other views will be copied to the output file, unchanged.</manpage>
+  </Field>
+  <Field name="usage">
+    <short>help</short>
+    <type>B</type>
+    <usage>Print help output</usage>
+    <tooltip />
+    <manpage />
+  </Field>
+</autodoc>

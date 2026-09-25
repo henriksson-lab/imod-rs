@@ -1,0 +1,349 @@
+<?xml version="1.0" encoding="utf-8"?>
+
+<autodoc>
+  
+  <PreData>
+    
+    <Version>1.0</Version>
+    
+    <Pip>1</Pip>
+  
+  </PreData>
+  
+  <Field name="InputDataFile">
+    
+    <short>input</short>
+    
+    <type>FN</type>
+    
+    <usage>Name of data file</usage>
+    
+    <tooltip />
+    
+    <manpage>Name of file with data to plot.  If this option is not entered, the first non-option argument is used for the name.</manpage>
+  
+  </Field>
+  
+  <Field name="NumberOfColumns">
+    
+    <short>ncol</short>
+    
+    <type>I</type>
+    
+    <usage># of columns of data, 0 if # is before data, or -1 if data all on one line</usage>
+    
+    <tooltip />
+    
+    <manpage>The number of columns of data per item in the file, or 0 if the number is in the file on a line just before the data, or -1 if all the entries for a data item are on one line, so that the number can be determined automatically.  The default is -1.</manpage>
+  
+  </Field>
+  
+  <Field name="SkipLinesAtStart">
+    
+    <short>skip</short>
+    
+    <type>I</type>
+    
+    <usage>Number of lines to skip at start at file</usage>
+    
+    <tooltip />
+    
+    <manpage>Number of lines to skip at the beginning of the data file.  If this option is not entered, the program will attempt to determine the number of lines to be ignored automatically.  This should work provided that any one of these conditions is the case: ^  1) the extra lines always start with non-numeric text; ^  2) the number of numeric values at the beginning of extra lines is fewer than the number of columns entered with -ncol (minus 1 if -types is entered too); ^  3) extra lines start with a non-integer if -ncol is entered as 0; ^  4) extra lines start with only one number if -types is entered.</manpage>
+  
+  </Field>
+  
+  <Field name="ColumnsToPlot">
+    
+    <short>columns</short>
+    
+    <type>IA</type>
+    
+    <usage>Numbers of columns to plot, numbered from 1</usage>
+    
+    <tooltip />
+    
+    <manpage>Numbers of the columns to plot, numbered from 1.  If more than one number is entered and -ordinals is not entered, the first number specifies the column to use for the X axis; otherwise all numbers specify columns to plot on the Y axis.  If there are no data types, multiple columns can be given for the Y axis; if there are data types, only one column can be listed for Y.  If this option is not entered, the default is 1 and 2, unless there is only one data column or -ordinals is entered, in which case the default is 1.</manpage>
+  
+  </Field>
+  
+  <Field name="TypesToPlot">
+    
+    <short>types</short>
+    
+    <type>IA</type>
+    
+    <usage>One or more data types to plot</usage>
+    
+    <tooltip />
+    
+    <manpage>One or more data types to plot; types are not numbered from one but correspond to the arbitrary type values in the data file.  With this entry, the first column of numbers in the file will be read as type values, and the column after that will become the first column of data.  If there are type numbers in the file and this entry is not given, the type numbers will end up in the first column of data.</manpage>
+  
+  </Field>
+  
+  <Field name="SymbolsForTypes">
+    
+    <short>symbols</short>
+    
+    <type>IA</type>
+    
+    <usage>One or more symbols to use for the different types or columns</usage>
+    
+    <tooltip />
+    
+    <manpage>One or more symbols to use for the different types or columns being plotted.  Available symbol numbers are: ^  1, 2: Open and filled squares ^  3, 4: Open and filled diamonds ^  5, 6: Open and filled triangles ^  7, 8: X and + ^  9, 10: Open and filled circles ^  11, 12: Open and filled inverted triangles ^  13, 14: U and S ^  15: Open circle with vertical line ^  18: Small dot ^  19: Horizontal line ^  0: No symbol, points are automatically connected with lines ^  -1: Draw item number at each data point ^ If no, or not enough, symbol values are entered, the program will assign symbols in order from this list: 9, 7, 5, 8, 13, 14, 1, 11, 3, 10, 6, 2, 12, 4, excluding any that have already been specified.</manpage>
+  
+  </Field>
+  
+  <Field name="ConnectWithLines">
+    
+    <short>connect</short>
+    
+    <type>B</type>
+    
+    <usage>Draw lines between successive points within a type or column</usage>
+    
+    <tooltip />
+    
+    <manpage>Draw lines between successive points within a type or column; this entry is not needed if the symbol is 0</manpage>
+  
+  </Field>
+  
+  <Field name="OrdinalsForXvalues">
+    
+    <short>ordinal</short>
+    
+    <type>B</type>
+    
+    <usage>Plot data within each column or type sequentially in X</usage>
+    
+    <tooltip />
+    
+    <manpage>Plot data within each column or type sequentially in X, i.e., versus a set up numbers that start from 1 and increase by 1 for each value plotted. This entry is implied if only one column is entered.</manpage>
+  
+  </Field>
+  
+  <Field name="XLogOrRootAndBase">
+    
+    <short>xlog</short>
+    
+    <type>FP</type>
+    
+    <usage>1 to take log or 2 to take square root of X values, and base to add</usage>
+    
+    <tooltip />
+    
+    <manpage>1 to take the logarithm or 2 to take the square root of X values, and the base to add before that operation.  A base is needed to avoid taking the logarithm or quare root of negative numbers.  An appropriate base value can also be helpful for spreading out the data more evenly.  The numeric axis labels on the graph will be in the units of the data after the operation, e.g., in log units, not in original units.</manpage>
+  
+  </Field>
+  
+  <Field name="YLogOrRootAndBase">
+    
+    <short>ylog</short>
+    
+    <type>FP</type>
+    
+    <usage>1 to take log or 2 to take square root of Y values, and base to add</usage>
+    
+    <tooltip />
+    
+    <manpage>1 to take the logarithm or 2 to take the square root of Y values, and the base to add before that operation.</manpage>
+  
+  </Field>
+  
+  <Field name="HueOfGroup">
+    
+    <short>hue</short>
+    
+    <type>CHM</type>
+    
+    <usage>Group number and color name or red, green, blue (0-255)</usage>
+    
+    <tooltip />
+    
+    <manpage>This option can be used to specify a color for each group being plotted.  Groups are numbered from 1 and correspond to the types or columns being plotted in separate curves.  Enter either 4 integers separated by commas (the group number and the red, green, and blue values, ranging from 0 to 255) or the group number and a stock color name separated by a comma.  Groups without a color will be drawn in black.</manpage>
+  
+  </Field>
+  
+  <Field name="DefaultHues">
+    
+    <short>defhue</short>
+    
+    <type>B</type>
+    
+    <usage>Assign default colors for all groups without a specific hue entry</usage>
+    
+    <tooltip />
+    
+    <manpage>Assign default colors for all groups without a specific hue entry. The default colors are a subset of 12, including black, that are chosen from the stock colors for their distinguishability.  Each group without a color specified by \fB-hue\fR will be assigned one of these default colors, with the colors used in order and cycled through again if more than 12 are needed.</manpage>
+  
+  </Field>
+  
+  <Field name="StockColorList">
+    
+    <short>stock</short>
+    
+    <type>B</type>
+    
+    <usage>List standard colors available by name</usage>
+    
+    <tooltip />
+    
+    <manpage>List standard colors available by name in the -hue option.  These are a subset of standard HTML color names and values.</manpage>
+  
+  </Field>
+  
+  <Field name="XaxisLabel">
+    
+    <short>axis</short>
+    
+    <type>CH</type>
+    
+    <usage>Label for the X axis</usage>
+    
+    <tooltip />
+    
+    <manpage />
+  
+  </Field>
+  
+  <Field name="KeyLabels">
+    
+    <short>keys</short>
+    
+    <type>CHM</type>
+    
+    <usage>Text to display on right side of window after a type's or column's symbol</usage>
+    
+    <tooltip />
+    
+    <manpage>Text to display as a key for one type or column, shown along with that type's or column's symbol, if any, on the right side of the window.  Text is drawn in a large box with word wrapping enabled, so the key can be longer than the space on the right of the graph.  The program will show default keys with the column or type number if not enough labels are entered.</manpage>
+  
+  </Field>
+  
+  <Field name="MessageBoxLine">
+    
+    <short>message</short>
+    
+    <type>CHM</type>
+    
+    <usage>One line of a message to be displayed in a message box</usage>
+    
+    <tooltip />
+    
+    <manpage />
+  
+  </Field>
+  
+  <Field name="ToolTipLine">
+    
+    <short>tooltip</short>
+    
+    <type>CHM</type>
+    
+    <usage>One line of tooltip for the graphics window</usage>
+    
+    <tooltip />
+    
+    <manpage />
+  
+  </Field>
+  
+  <Field name="SizeOfPlot">
+    
+    <short>size</short>
+    
+    <type>IP</type>
+    
+    <usage>Size of graphics window in X and Y, in pixels</usage>
+    
+    <tooltip />
+    
+    <manpage />
+  
+  </Field>
+  
+  <Field name="PositionOfPlot">
+    
+    <short>position</short>
+    
+    <type>IP</type>
+    
+    <usage>Position of top left corner of graphics window in X and Y</usage>
+    
+    <tooltip />
+    
+    <manpage>Coordinates of the top left corner of the graphics window in X and Y, in pixels, where Y is 0 at the top of the screen.</manpage>
+  
+  </Field>
+  
+  <Field name="XRangeMinAndMax">
+    
+    <short>xminmax</short>
+    
+    <type>FP</type>
+    
+    <usage>Lower and upper limit of X range for graph</usage>
+    
+    <tooltip />
+    
+    <manpage>Lower and upper limit of X range for graph.  If the limits do not define a range that is a multiple of one of the allowed factors, the range will be rounded up.</manpage>
+  
+  </Field>
+  
+  <Field name="YRangeMinAndMax">
+    
+    <short>yminmax</short>
+    
+    <type>FP</type>
+    
+    <usage>Lower and upper limit of Y range for graph</usage>
+    
+    <tooltip />
+    
+    <manpage />
+  
+  </Field>
+  
+  <Field name="SavePNGandExit">
+    
+    <short>png</short>
+    
+    <type>FN</type>
+    
+    <usage>Save graph as a PNG to the given file name and exit program</usage>
+    
+    <tooltip />
+    
+    <manpage>Save the graph as a PNG to the given file name (which should include its extension), close the graph window, and exit the program.</manpage>
+  
+  </Field>
+  
+  <Field name="RemoveDataFile">
+    
+    <short>remove</short>
+    
+    <type>B</type>
+    
+    <usage>Delete input file when exiting</usage>
+    
+    <tooltip />
+    
+    <manpage>Delete input file when exiting.  This option is meant to be used only when running in the background, as cleanup will not occur if the program is interrupted with Ctrl-C.</manpage>
+  
+  </Field>
+  
+  <Field name="usage">
+    
+    <short>help</short>
+    
+    <type>B</type>
+    
+    <usage>Print help output</usage>
+    
+    <tooltip />
+    
+    <manpage />
+  
+  </Field>
+
+</autodoc>

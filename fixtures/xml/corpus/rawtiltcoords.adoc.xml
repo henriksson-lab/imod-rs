@@ -1,0 +1,119 @@
+<?xml version="1.0" encoding="utf-8"?>
+<autodoc>
+  <PreData>
+    <Version>1.0</Version>
+    <Pip>1</Pip>
+  </PreData>
+  <Field name="RootName">
+    <short>root</short>
+    <type>CH</type>
+    <usage>Root name of dataset, including a or b if dual axis (required)</usage>
+    <tooltip />
+    <manpage>Root name of dataset.  For one axis of a dual-axis data set, include the &quot;a&quot; or &quot;b&quot; in this name.  This option is required.</manpage>
+  </Field>
+  <Field name="VolumeModeled">
+    <short>volume</short>
+    <type>FN</type>
+    <usage>Volume that was modeled or on which points were picked (required)</usage>
+    <tooltip />
+    <manpage>Name of the volume in which points were selected.  If a model file is supplied, this should be the volume that was modeled.  If a point coordinate file is supplied, the coordinates must correspond to pixel positions in this file.  This option is required.</manpage>
+  </Field>
+  <Field name="CenterPositionFile">
+    <short>center</short>
+    <type>FN</type>
+    <usage>Name of IMOD model or text file with desired center positions</usage>
+    <tooltip />
+    <manpage>Name of an IMOD model file or a point coordinate file with the desired center positions in the modeled volume.  A point coordinate file should have one point per line, with its X, Y, and Z coordinates separated by spaces, not commas.  These coordinates should correspond to pixels in the full file specified with \fB-volume\fR, where the first pixel in any dimension spans coordinates from 0 to 1. This option is required.</manpage>
+  </Field>
+  <Field name="ObjectsToUse">
+    <short>objects</short>
+    <type>LI</type>
+    <usage>List of model objects with desired point positions</usage>
+    <tooltip />
+    <manpage>If only a subset of objects in the model contain points of interest, this option can be used to enter a list of those objects (comma-separated ranges are allowed).</manpage>
+  </Field>
+  <Field name="OutputModel">
+    <short>output</short>
+    <type>FN</type>
+    <usage>Name of output model with positions in raw tilt series</usage>
+    <tooltip />
+    <manpage>Name of output model with positions in raw tilt series.  If this option is not entered, the first non-option argument will be taken as the output model name.</manpage>
+  </Field>
+  <Field name="AngleOutputFile">
+    <short>angle</short>
+    <type>FN</type>
+    <usage>Name of text file for output of projection angles at each position</usage>
+    <tooltip />
+    <manpage>Name of text file to receive a list of the projection angles at each position in the tilt series, as well as defocus values if the \fB-defocus\fR option is entered.  This file is produced by Tilt(1); see the corresponding option in that man page for a full description of the output.</manpage>
+  </Field>
+  <Field name="DefocusFile">
+    <short>defocus</short>
+    <type>FN</type>
+    <usage>File with list of defocus values, or root name of ctfphaseflip file</usage>
+    <tooltip />
+    <manpage>With this entry, the file of projection angles specified by \fB-angle\fR will also have defocus values for each point.  The entry must be one of two forms: either the file name of a file with a list of defocus values in nanometers, one per line, underfocus positive; or the root name of .com and .log files for a run of Ctfphaseflip(1).  In the latter case, typically the entry will just be &quot;ctfcorrection&quot;, with &quot;a&quot; or &quot;b&quot; added if necessary.  The program will read the .com file to determine the pixel size used for CTF correction, and whether tilt angles were inverted; and it will read the .log file to find the defocus values for each view.</manpage>
+  </Field>
+  <Field name="PixelSize">
+    <short>pixel</short>
+    <type>F</type>
+    <usage>Pixel size of raw stack</usage>
+    <tooltip />
+    <manpage>The pixel size of the raw stack; this entry is needed only when entering a defocus file that is a list of defocus values, and only if the pixel size in the aligned stack is not correct.</manpage>
+  </Field>
+  <Field name="InvertTiltAngles">
+    <short>invert</short>
+    <type>B</type>
+    <usage>Invert tilt angles for defocus computations</usage>
+    <tooltip />
+    <manpage>Invert tilt angles for defocus computations; this entry is needed only when entering a defocus file that is a list of defocus values.</manpage>
+  </Field>
+  <Field name="FullReconstruction">
+    <short>full</short>
+    <type>CH</type>
+    <usage>Name of full original reconstruction</usage>
+    <tooltip />
+    <manpage>Name of full original reconstruction.  The default is &quot;rootname_full.rec&quot; with the old naming style, or &quot;rootname_full_rec.mrc&quot; with &quot;mrc&quot; naming style, so this entry is needed if that file does not exists or if the reconstruction has a different name.  Only the header is read from this file.</manpage>
+  </Field>
+  <Field name="AlignedStack">
+    <short>ali</short>
+    <type>CH</type>
+    <usage>Name of aligned stack file</usage>
+    <tooltip />
+    <manpage>Name of aligned stack file.  The default is &quot;rootname.ali&quot; with old naming style, or &quot;rootname_ali.mrc&quot; with &quot;.mrc&quot; naming style, so this entry is needed if that file does not exists or if the aligned stack has a different name.  Only the header is read from this file.</manpage>
+  </Field>
+  <Field name="CommandFile">
+    <short>com</short>
+    <type>FN</type>
+    <usage>Tilt command file used to make the reconstruction (default tilt.com)</usage>
+    <tooltip />
+    <manpage>Tilt command file used to make the reconstruction. The default is to use &quot;tilt.com&quot;, so this option is needed for a dual-axis data set or to use a copy of the file.</manpage>
+  </Field>
+  <Field name="ReorientionType">
+    <short>reorient</short>
+    <type>I</type>
+    <usage>-1, 1, or 0 if volume was reoriented by rotation around X, swapping Y and Z, or not at all</usage>
+    <tooltip />
+    <manpage>This option can be used to specify the type of reorientation that was applied to the original reconstruction to obtain the modeled volume, in the unlikely event that the program cannot detect which was used. Reorientation by rotation around the X axis can be detected by the tilt angles in the volume header; swapping of Y and Z can be detected only if the &quot;clip: flipyz&quot; title is still present.  If necessary, the program will assume that swapping occurred if the Y dimension is more than twice the Z dimension, or that no reorientation occurred if the Z dimension is more than twice the Y dimension.  If the program makes a wrong assumption or insists that this option be used, enter a 0 for no reorientation, 1 for swapping of Y and Z, or -1 for rotation around X.</manpage>
+  </Field>
+  <Field name="SkipBackTransform">
+    <short>skip</short>
+    <type>B</type>
+    <usage>Produce output model that fits on aligned rather than raw stack</usage>
+    <tooltip />
+    <manpage>Skip the back-transformation to the raw stack and output a model that fits the aligned stack instead.</manpage>
+  </Field>
+  <Field name="ApplyDistortionTransforms">
+    <short>distort</short>
+    <type>I</type>
+    <usage>1 to account for distortion correction or -1 not to if situation ambiguous</usage>
+    <tooltip />
+    <manpage>Use this entry to control what the program does when it finds ambigous information about whether correction for a distortion field or magnification gradients were done on the aligned stack.  The program looks for this information in both newst.log and prenewst.log.  If it cannot find either log file, it looks in the respective .com files instead.  It considers the situation ambiguous when only one file is found with distortion correction options, and refuses to continue unless this option is entered.  Enter 1 to redistort the model when transforming to the raw stack, or -1 not to.</manpage>
+  </Field>
+  <Field name="usage">
+    <short>help</short>
+    <type>B</type>
+    <usage>Print help output</usage>
+    <tooltip />
+    <manpage />
+  </Field>
+</autodoc>

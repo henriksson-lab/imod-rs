@@ -1,0 +1,75 @@
+ Image file (or Return to enter Xcen, Ycen directly):  Be SURE to enter CENTER coordinates, NOT NX and NY
+ Xcen, Ycen:  Input model file:  Enter 0 to find transformations, 2 to find X/Y translations only,
+    3 to find translations and rotations only,
+    4 to find translation, rotation and mag change only,
+    1 to transform model, or -1 to back-transform model:  Model built on raw sections (0) or prealigned ones(1):  Name of old file of f transforms to edit (Return if none):  Name of new file of f transforms:  Enter / to find transforms for all section pairs,
+      or -999 to find transforms relative to a single section,
+      or a list of the section numbers to find transforms for
+         (enter number of second section of each pair, ranges are ok)
+ 1 for full reports of deviations for sections with bad fits, 0 for none: 
+ FORMATTED  ro  file opened: BBa.xf
+                                        Deviations between transformed points on
+                                         section and points on previous section
+                                Mean     Max  @object & point #   X-Y Position
+  58 points, section #   1     144.40   275.18    51     2         0.00     0.00
+  58 points, section #   2       3.34     8.94    21     3       337.01   316.73
+  58 points, section #   3       3.23     8.72    21     4       345.41   316.70
+  58 points, section #   4       3.25     8.73    21     5       353.62   316.64
+  58 points, section #   5       3.15     8.55    21     6       361.78   316.56
+  58 points, section #   6       3.08     8.40    21     7       369.94   316.57
+  58 points, section #   7       2.94     8.12    21     8       377.93   316.56
+  58 points, section #   8       2.85     8.02    21     9       385.73   316.55
+  58 points, section #   9       2.74     7.74    21    10       393.44   316.49
+  58 points, section #  10       2.66     7.56    21    11       400.99   316.51
+  58 points, section #  11       2.54     7.31    21    12       408.38   316.45
+  58 points, section #  12       2.50     7.22    21    13       415.56   316.48
+  58 points, section #  13       2.40     6.99    21    14       422.67   316.42
+  58 points, section #  14       2.30     6.72    21    15       429.64   316.43
+  58 points, section #  15       2.18     6.48    21    16       436.33   316.41
+  58 points, section #  16       2.08     6.23    21    17       442.90   316.38
+  58 points, section #  17       1.95     5.90    21    18       449.23   316.36
+  58 points, section #  18       1.86     5.67    21    19       455.31   316.37
+  58 points, section #  19       1.75     5.38    21    20       461.17   316.37
+  58 points, section #  20       1.65     5.10    21    21       466.80   316.38
+  58 points, section #  21       1.54     4.80    21    22       472.21   316.40
+  58 points, section #  22       1.39     4.50    21    23       477.34   316.38
+  58 points, section #  23       1.36     4.23    21    24       482.25   316.39
+  58 points, section #  24       1.26     3.92    21    25       486.93   316.41
+  58 points, section #  25       1.18     3.53    21    26       491.34   316.40
+  58 points, section #  26       1.15     3.39    55    27        57.74   223.77
+  58 points, section #  27       1.10     3.10    18    28        68.30   179.38
+  58 points, section #  28       1.08     2.95    18    29        65.82   179.35
+  58 points, section #  29       1.10     2.67    18    30        63.56   179.36
+  58 points, section #  30       1.14     2.46    18    31        61.57   179.35
+  58 points, section #  31       1.19     2.23    18    32        59.84   179.35
+  58 points, section #  32       1.25     2.00    18    33        58.41   179.37
+  58 points, section #  33       1.27     2.10    19    34       382.63    41.23
+  58 points, section #  34       1.32     2.26    19    35       381.39    41.20
+  58 points, section #  35       1.36     2.42    19    36       380.03    41.22
+  58 points, section #  36       1.42     2.66    29    37       500.20   364.62
+  58 points, section #  37       1.46     2.94    29    38       498.52   364.64
+  58 points, section #  38       1.54     3.27    29    39       496.58   364.66
+  58 points, section #  39       1.60     3.48    29    40       494.32   364.66
+  58 points, section #  40       1.68     3.84    29    41       491.89   364.66
+  58 points, section #  41       1.79     4.21    29    42       489.14   364.62
+  58 points, section #  42       1.88     4.44    29    43       486.06   364.59
+  58 points, section #  43       1.94     4.63    29    44       482.79   364.60
+  58 points, section #  44       2.06     4.95    29    45       479.32   364.61
+  58 points, section #  45       2.16     5.20    29    46       475.58   364.60
+  58 points, section #  46       2.28     5.52    29    47       471.59   364.62
+  58 points, section #  47       2.39     5.75    29    48       467.32   364.62
+  58 points, section #  48       2.46     5.94    29    49       462.83   364.64
+  58 points, section #  49       2.58     6.22    29    50       458.18   364.60
+  58 points, section #  50       2.68     6.47    29    51       453.25   364.60
+  58 points, section #  51       2.80     6.69    29    52       448.08   364.60
+  58 points, section #  52       2.87     6.88    29    53       442.74   364.62
+  58 points, section #  53       2.92     7.04    29    54       437.18   364.66
+  58 points, section #  54       3.07     7.35    29    55       431.47   364.65
+  58 points, section #  55       3.09     7.42    29    56       425.48   364.64
+  58 points, section #  56       3.20     7.63    29    57       419.40   364.57
+  58 points, section #  57       3.28     7.83    29    58       413.17   364.58
+  58 points, section #  58       3.35     8.01    29    59       406.74   364.59
+  58 points, section #  59       3.39     8.05    29    60       400.10   364.58
+  58 points, section #  60       3.55     8.34    29    61       393.39   364.53
+
+ FORMATTED  new  file opened: o.xf

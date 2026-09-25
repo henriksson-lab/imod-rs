@@ -1,0 +1,125 @@
+<?xml version="1.0" encoding="utf-8"?>
+
+<autodoc>
+  
+  <PreData>
+    
+    <Version>1.0</Version>
+    
+    <Pip>1</Pip>
+  
+  </PreData>
+  
+  <Field name="InputFile">
+    
+    <short>input</short>
+    
+    <type>FN</type>
+    
+    <usage>Name of &quot;.mdoc&quot; file to modify</usage>
+    
+    <tooltip />
+    
+    <manpage>Name of input .mdoc file to modify</manpage>
+  
+  </Field>
+  
+  <Field name="OutputFile">
+    
+    <short>output</short>
+    
+    <type>FN</type>
+    
+    <usage>Name of modified .mdoc file to write</usage>
+    
+    <tooltip />
+    
+    <manpage />
+  
+  </Field>
+  
+  <Field name="OrderToProduce">
+    
+    <short>order</short>
+    
+    <type>I</type>
+    
+    <usage>1 for output from - to +tilt, -1 for + to -tilt, 0 for no reordering</usage>
+    
+    <tooltip />
+    
+    <manpage>Enter 1 to reorder file with tilt angles from negative to positive, -1 to reorder from positive to negative, or 0 not to reorder file (the default).</manpage>
+  
+  </Field>
+  
+  <Field name="ElectronDosePerImage">
+    
+    <short>dose</short>
+    
+    <type>F</type>
+    
+    <usage>Electron dose to add or replace in mdoc for each tilt angle</usage>
+    
+    <tooltip />
+    
+    <manpage>Electron dose applied to each image in electrons per square Angstrom. The value will replace existing dose information, if any, and PriorRecordDose entries will be inserted based on the time information in the file (TimeStamp or DateTime entries).  If there are no such entries, the mdoc is assumed to be in order by time of acquisition.</manpage>
+  
+  </Field>
+  
+  <Field name="BinningToScaleTo">
+    
+    <short>binning</short>
+    
+    <type>F</type>
+    
+    <usage>Set pixel size, image size, and binning to match given binning</usage>
+    
+    <tooltip />
+    
+    <manpage>A new binning value to replace the existing Binning entries in the .mdoc file.  PixelSpacing and ImageSize entries will be scaled by the ratio of new to old binnings, although the ImageSize may not match the larger size actually obtained in camera frames.</manpage>
+  
+  </Field>
+  
+  <Field name="PixelSpacingToSet">
+    
+    <short>pixel</short>
+    
+    <type>F</type>
+    
+    <usage>Pixel size in Angstroms to set in the output file</usage>
+    
+    <tooltip />
+    
+    <manpage>Pixel size in Angstroms to set in the output file; this replaces existing PixelSpacing entries and overrides the pixel siz ethat would be produced by scaling for a new binning.</manpage>
+  
+  </Field>
+  
+  <Field name="ParameterFile">
+    
+    <short>param</short>
+    
+    <type>PF</type>
+    
+    <usage>Read parameter entries from file</usage>
+    
+    <tooltip />
+    
+    <manpage />
+  
+  </Field>
+  
+  <Field name="usage">
+    
+    <short>help</short>
+    
+    <type>B</type>
+    
+    <usage>Print help output</usage>
+    
+    <tooltip />
+    
+    <manpage />
+  
+  </Field>
+
+</autodoc>

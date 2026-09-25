@@ -1,0 +1,54 @@
+Usage: xfmodel [Options] input_file output_file
+Options can be abbreviated, current short name abbreviations are in parentheses
+Options:
+ -input (-in)  OR  -InputFile   File
+    Input model file
+ -output (-o)  OR  -OutputFile   File
+    Output file, either transformed model or list of transformations.
+ -image (-im)  OR  -ImageFile   File
+    Image file that model was built on (optional)
+ -piece (-pi)  OR  -PieceListFile   File
+    Name of piece list file for a montaged image file
+ -allz (-al)  OR  -AllZhaveTransforms
+    All Z values have transforms in even though the image has gaps in Z
+ -center (-ce)  OR  -CenterInXandY   2 floats
+    Center coordinates of image in X and Y (optional)
+ -transonly (-t)  OR  -TranslationOnly
+    Solve only for translations in X and Y
+ -rottrans (-r)  OR  -RotationTranslation
+    Solve for rotations and translations
+ -magrot (-m)  OR  -MagRotTrans
+    Solve for magnifications, rotations, and translations
+ -sections (-se)  OR  -SectionsToAnalyze   List
+    Sections to find transformations for (numbered from 0)
+ -single (-si)  OR  -SingleSection   Int
+    Align all sections to the given section
+ -full (-f)  OR  -FullReportMeanAndMax   2 floats
+    Criterion mean deviation and maximum deviation for full report on a
+    section
+ -prealign (-pr)  OR  -PrealignTransforms   File
+    File of g transforms used to prealign the images modeled
+ -edit (-e)  OR  -EditTransforms   File
+    File with existing transforms to be replaced by any transforms found
+ -xforms (-x)  OR  -XformsToApply   File
+    Transforms to apply to the model
+ -useline (-use)  OR  -UseTransformLine   Int
+    Line number of single transform to apply to whole model (numbered from 0)
+ -chunks (-ch)  OR  -ChunkSizes   List
+    Size of chunk of sections corresponding to each transform in file
+ -back (-ba)  OR  -BackTransform
+    Back-transform or re-distort model
+ -scale (-sc)  OR  -ScaleShifts   Float
+    Factor to scale X/Y translations before applying transforms factors
+ -adjust (-ad)  OR  -AdjustForRotationBy90   Int
+    Adjust for 90-degree rotation: 1 to do if detected, 2 to do regardless
+ -distort (-d)  OR  -DistortionField   File
+    Undistort/redistort model with image distortion field in this file
+ -binning (-bi)  OR  -BinningOfImages   Float
+    The camera binning at which images were taken
+ -gradient (-g)  OR  -GradientFile   File
+    File with magnification gradients to be applied for each Z value
+ -param (-pa)  OR  -ParameterFile   File
+    Read parameter entries from file
+ -help (-h)  OR  -usage
+    Print help output

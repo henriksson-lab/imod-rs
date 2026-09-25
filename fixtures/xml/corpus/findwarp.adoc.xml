@@ -1,0 +1,189 @@
+<?xml version="1.0" encoding="utf-8"?>
+<autodoc>
+  <PreData>
+    <Version>1.0</Version>
+    <Pip>1</Pip>
+  </PreData>
+  <Field name="PatchFile">
+    <short>patch</short>
+    <type>FN</type>
+    <usage>Name of input file with positions and displacements</usage>
+    <tooltip />
+    <manpage>Name of input file with positions and displacements.  If this option is not entered, the first non-option argument will be used for the input file name.</manpage>
+  </Field>
+  <Field name="OutputFile">
+    <short>output</short>
+    <type>FN</type>
+    <usage>Output file for warping transformations (optional)</usage>
+    <tooltip />
+    <manpage>Optional output file for warping transformations.  If this option is not entered, the second non-option argument (if any) will be used for the output file name.</manpage>
+  </Field>
+  <Field name="RegionModel">
+    <short>region</short>
+    <type>FN</type>
+    <usage>Model file with contours enclosing patches to be included in fits</usage>
+    <tooltip />
+    <manpage>Model file with contours enclosing the patches to be included in the fits.</manpage>
+  </Field>
+  <Field name="VolumeOrSizeXYZ">
+    <short>volume</short>
+    <type>FN</type>
+    <usage>Filename or X, Y, Z size of volume being matched to</usage>
+    <tooltip />
+    <manpage>Either the name of the file or the X, Y, and Z dimensions of the volume being matched to.</manpage>
+  </Field>
+  <Field name="InitialTransformFile">
+    <short>initial</short>
+    <type>FN</type>
+    <usage>File with initial 3D transform for second volume</usage>
+    <tooltip />
+    <manpage>File with initial 3D transform used to make the second volume for the patch correlations.  This transform will be incorporated into the warping transformations written to the output file.  The format of such a file is described in the Matchvol(1) man page.</manpage>
+  </Field>
+  <Field name="ResidualPatchOutput">
+    <short>residual</short>
+    <type>FN</type>
+    <usage>Output file for patch vectors including mean residual values</usage>
+    <tooltip />
+    <manpage>Output file for positions, displacements, and mean residual values, averaged over all the fits that include a position.  This value will be zero for patches excluded from all fits.  If the patch input file has correlation coefficients, they will be replaced by the residuals.  After the residual value, this file will also have a value for the fraction of fits in which the vector was removed as an outlier.</manpage>
+  </Field>
+  <Field name="TargetMeanResidual">
+    <short>target</short>
+    <type>FA</type>
+    <usage>Target mean residuals to achieve in automatic fitting</usage>
+    <tooltip />
+    <manpage>One or more mean residual values to try to reach in the automatic search for the best warping.  Multiple values should be entered in increasing order.  The program will try to find a warping with the largest number of included patches that gives a mean residual below the first value; then it tries again with the second value, etc.</manpage>
+  </Field>
+  <Field name="MeasuredRatioMinAndMax">
+    <short>measured</short>
+    <type>FP</type>
+    <usage>Min and max ratio of measurements to unknowns for automatic fits</usage>
+    <tooltip />
+    <manpage>The minimum and maximum ratio of measurements to unknowns to be allowed in the automatic fits.  The defaults are 4 and 20.</manpage>
+  </Field>
+  <Field name="LegacyRatioEvaluation">
+    <short>legacy</short>
+    <type>I</type>
+    <usage>1 to use old ratio evaluation, -1 not to, or 0 to use for old data</usage>
+    <tooltip />
+    <manpage>This entry controls the evaluation of the ratio of measurements to unknowns, as described above.  The default is 0 to use the new method only when there are ID values for the extra columns. Enter -1 or 1 to force the use of the new or old method, respectively.  This entry overrides a setting of the FINDWARP_LEGACY_RATIOS environment variable.</manpage>
+  </Field>
+  <Field name="XSkipLeftAndRight">
+    <short>xskip</short>
+    <type>IP</type>
+    <usage>Number of columns of patches to exclude on the left and right</usage>
+    <tooltip />
+    <manpage />
+  </Field>
+  <Field name="YSkipLowerAndUpper">
+    <short>yskip</short>
+    <type>IP</type>
+    <usage>Number of patches to exclude on the lower and upper sides in Y</usage>
+    <tooltip />
+    <manpage>Number of patches to exclude on the lower and upper sides in Y. This entry specifies either rows or slabs of patches to exclude, depending on whether the volume is oriented so that it is thin in the Z or Y dimension.</manpage>
+  </Field>
+  <Field name="ZSkipLowerAndUpper">
+    <short>zskip</short>
+    <type>IP</type>
+    <usage>Number of patches to exclude on the lower and upper sides in Z</usage>
+    <tooltip />
+    <manpage>Number of patches to exclude on the lower and upper sides in Z. This entry specifies either slabs or rows of patches to exclude, depending on whether the volume is oriented so that it is thin in the Z or Y dimension.</manpage>
+  </Field>
+  <Field name="ExtraValueSelection">
+    <short>extra</short>
+    <type>IPM</type>
+    <usage>Extra value ID or -column # and polarity for selecting patches based on criterion</usage>
+    <tooltip />
+    <manpage>Select only patches with extra value on one side of a criterion. To include patches based on values in an extra column, enter two numbers for this option: the ID value or the negative of the extra column number (numbered from 1); and 1 to select patches above the criterion or -1 to select ones below it.  You must also enter one or more threshold values with the \fB-select\fR option.</manpage>
+  </Field>
+  <Field name="SelectionCriteria">
+    <short>select</short>
+    <type>FAM</type>
+    <usage>One or more criteria for selecting patches based on extra values</usage>
+    <tooltip />
+    <manpage>One or more criteria for selecting patches based on extra values. Multiple criteria should be entered in order of greater selectivity. If there are multiple values being selected on, this option must be entered the same number of times as the \fB-extra\fR option and it must have the same number of criteria entered each time.</manpage>
+  </Field>
+  <Field name="DesiredMaxResidual">
+    <short>desired</short>
+    <type>F</type>
+    <usage>Continue to next selection criteria if maximum residual is above this value</usage>
+    <tooltip />
+    <manpage>When patches are selected based on extra values and the mean residual is acceptable but the maximum of the maximum residuals in the fits is above this value, the program will go on to apply the next criterion, if there is one.  It will still accept the result if the last maximum residual is above this target on the last criterion.  The default is 8 times the last residual target entered with \fB-target\fR.  Enter 0 to disable this feature.</manpage>
+  </Field>
+  <Field name="LocalRowsAndColumns">
+    <short>rowcol</short>
+    <type>IP</type>
+    <usage>Number of rows and columns of patches to include in each local fit</usage>
+    <tooltip />
+    <manpage>Number of rows and columns of patches to include in each local fit. The second value will apply to the longer of the Y and the Z dimension.  If this option is not entered, the program will automatically search for the best warping.</manpage>
+  </Field>
+  <Field name="LocalSlabs">
+    <short>slabs</short>
+    <type>I</type>
+    <usage>(Minimum) number of slabs of patches to include in each local fit</usage>
+    <tooltip />
+    <manpage>By default, fits include all slabs of patches in the shorter of the Y and Z dimensions.  This entry allow fits to be done to subsets of patches in that dimension.  If the -rowcol option is used, then this entry specifies the number of slabs of patches to include in each fit.  Otherwise, the entry sets the minimum number of slabs of patches that will be tried in the automatic search for the best warping.</manpage>
+  </Field>
+  <Field name="MinExtentToFit">
+    <short>extent</short>
+    <type>I</type>
+    <usage>Minimum # of rows and columns of patches to include in each local fit</usage>
+    <tooltip />
+    <manpage>Minimum number of rows and columns of patches to include in each local fit.   When there are many (~10 or more) overlapping patches in the thickness dimension, an entry of 3 will keep the program from doing 2 by 2 or 2 by 3 fits in the other dimensions, which would only have a single patch of overlap between laterally adjacent fits.  Such an entry would also be appropriate when the spacing between patches is unusually small, to keep the transformation from being solved over too small an extent.</manpage>
+  </Field>
+  <Field name="MaxFractionToDrop">
+    <short>maxfrac</short>
+    <type>F</type>
+    <usage>Maximum fraction of patches to eliminate from each fit (default 0.1)</usage>
+    <tooltip />
+    <manpage>Maximum fraction of patches to drop from each fit by outlier elimination.  Enter 0 to for no outlier elimination.  The default is 0.1.</manpage>
+  </Field>
+  <Field name="MinResidualToDrop">
+    <short>minresid</short>
+    <type>F</type>
+    <usage>Minimum residual for outlier elimination (default 0.5)</usage>
+    <tooltip />
+    <manpage>The minimum residual for outlier elimination; patches with residuals smaller than this value will be retained no matter how extreme they are relative to the other patches.  The default is 0.5.</manpage>
+  </Field>
+  <Field name="CriterionProbabilities">
+    <short>prob</short>
+    <type>FP</type>
+    <usage>Probabilities controlling outlier elimination</usage>
+    <tooltip />
+    <manpage>Two probabilities controlling outlier elimination: a criterion probability for a patch to be evaluated as an outlier (default 0.01), and a criterion probability for a patch to be eliminated regardless of the distribution of extreme values (default 0.002).</manpage>
+  </Field>
+  <Field name="DiscountIfZeroVectors">
+    <short>discount</short>
+    <type>F</type>
+    <usage>Do not count local fits with more than this fraction of vectors zero</usage>
+    <tooltip />
+    <manpage>Use this option to ignore local fits that have many zero vectors when computing the average mean residual and the average maximum residual.  This will prevent misleading averages when analyzing the warping fields used to align adjacent volumes for stitching.  Fits with the number of zero vectors bigger than the given fraction of the total vectors will be excluded from the averages.</manpage>
+  </Field>
+  <Field name="ZeroExitCodeIfTooHigh">
+    <short>zero</short>
+    <type>B</type>
+    <usage>Exit with status 0 instead of 2 when the residual is too high</usage>
+    <tooltip />
+    <manpage>Exit with status 0 instead of 2 when the residual is too high; Matchorwarp(1) uses this so that it can get all the output lines.</manpage>
+  </Field>
+  <Field name="DebugAtXYZ">
+    <short>debug</short>
+    <type>FT</type>
+    <usage>Center location at which to print debug output about fits</usage>
+    <tooltip />
+    <manpage />
+  </Field>
+  <Field name="ParameterFile">
+    <short>param</short>
+    <type>PF</type>
+    <usage>Read parameter entries from file</usage>
+    <tooltip />
+    <manpage>Read parameter entries as keyword-value pairs from a parameter file.</manpage>
+  </Field>
+  <Field name="usage">
+    <short>help</short>
+    <type>B</type>
+    <usage>Print help output</usage>
+    <tooltip />
+    <manpage />
+  </Field>
+</autodoc>

@@ -1,0 +1,153 @@
+<?xml version="1.0" encoding="utf-8"?>
+
+<autodoc>
+  
+  <PreData>
+    
+    <Version>1.0</Version>
+    
+    <Pip>1</Pip>
+  
+  </PreData>
+  
+  <Field name="ModelFile">
+    
+    <short>model</short>
+    
+    <type>FNM</type>
+    
+    <usage>Model file with lines to analyze</usage>
+    
+    <tooltip />
+    
+    <manpage>Model file with lines to analyze.  If there are multiple model file entries, they should be in order that they will be considered in the program.</manpage>
+  
+  </Field>
+  
+  <Field name="ExtraThickness">
+    
+    <short>extra</short>
+    
+    <type>F</type>
+    
+    <usage>Additional pixels of thickness to add on top and bottom</usage>
+    
+    <tooltip />
+    
+    <manpage>Additional pixels of thickness to add to both the top and the bottom of the tomogram, beyond the region described by the model lines.  Enter values as unbinned pixels, i.e. pixels after the scaling factor has been applied.</manpage>
+  
+  </Field>
+  
+  <Field name="SpacingInY">
+    
+    <short>spacing</short>
+    
+    <type>F</type>
+    
+    <usage>Spacing between tomogram samples (distance in Y in tilted views)</usage>
+    
+    <tooltip />
+    
+    <manpage>Spacing between tomogram samples (distance in Y in tilted views). If a non-zero number is entered, the program will compute the tilt around the X-axis that will make the tomogram be flat in its Z dimension.</manpage>
+  
+  </Field>
+  
+  <Field name="ScaleFactor">
+    
+    <short>scale</short>
+    
+    <type>F</type>
+    
+    <usage>Amount to scale the recommended Z shift and thickness (for binned-down samples)</usage>
+    
+    <tooltip />
+    
+    <manpage>Amount by which to scale the Z shift and thickness recommended by the program.  Use this entry if the model was drawn on binned-down samples or a whole binned-down tomogram but you intend to make an unbinned tomogram. The scale factor is the binning factor.</manpage>
+  
+  </Field>
+  
+  <Field name="AngleOffsetOld">
+    
+    <short>angle</short>
+    
+    <type>F</type>
+    
+    <usage>Angle offset in the alignment used to make the samples</usage>
+    
+    <tooltip />
+    
+    <manpage>Angle offset in the alignment used to make the samples.  If this entry is present, the program will output the original, added, and total offset.</manpage>
+  
+  </Field>
+  
+  <Field name="ZShiftOld">
+    
+    <short>zshift</short>
+    
+    <type>F</type>
+    
+    <usage>Z shift value in the alignment used to make the samples</usage>
+    
+    <tooltip />
+    
+    <manpage>Z shift value in the alignment used to make the samples, in unbinned pixels.  If this entry is present, the program will output the original, added, and total Z shift.</manpage>
+  
+  </Field>
+  
+  <Field name="XAxisTiltOld">
+    
+    <short>xtilt</short>
+    
+    <type>F</type>
+    
+    <usage>X axis tilt applied when the samples were made</usage>
+    
+    <tooltip />
+    
+    <manpage>X axis tilt applied when the samples were made.  If this entry is present, the program will output the original, added, and total X axis tilt.</manpage>
+  
+  </Field>
+  
+  <Field name="NoXAxisTilt">
+    
+    <short>noxtilt</short>
+    
+    <type>B</type>
+    
+    <usage>Do not solve for X axis tilt or for other values with X-tilt included</usage>
+    
+    <tooltip />
+    
+    <manpage>Do not solve for X axis tilt or changes in other values when X-axis tilt is compensated for.  An incoming value of \fB-xtilt\fR will be ignored, but if positioning tomogram(s) were remade with a non-zero X-axis tilt, the reported values will still be appropriate for such an X-tilted tomogram. Thus, it is best to have this option present on the first round of positioning, or to remake the tomogram(s) with X-axis tilt set to 0.</manpage>
+  
+  </Field>
+  
+  <Field name="ParameterFile">
+    
+    <short>param</short>
+    
+    <type>PF</type>
+    
+    <usage>Read parameter entries from file</usage>
+    
+    <tooltip />
+    
+    <manpage>Read parameter entries as keyword-value pairs from a parameter file.</manpage>
+  
+  </Field>
+  
+  <Field name="usage">
+    
+    <short>help</short>
+    
+    <type>B</type>
+    
+    <usage>Print help output</usage>
+    
+    <tooltip />
+    
+    <manpage />
+  
+  </Field>
+
+</autodoc>

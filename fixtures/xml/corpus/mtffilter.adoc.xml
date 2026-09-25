@@ -1,0 +1,317 @@
+<?xml version="1.0" encoding="utf-8"?>
+<autodoc>
+  <PreData>
+    <Version>1.0</Version>
+    <Pip>1</Pip>
+  </PreData>
+  <Field name="InputFile">
+    <short>input</short>
+    <type>FN</type>
+    <usage>Input file with images to be filtered</usage>
+    <tooltip />
+    <manpage />
+  </Field>
+  <Field name="OutputFile">
+    <short>output</short>
+    <type>FN</type>
+    <usage>Output file for filtered images (omit to rewrite input file)</usage>
+    <tooltip />
+    <manpage>Output file for filtered images.  If this file is omitted, the program will write filtered images back to the input file.</manpage>
+  </Field>
+  <Field name="StartingAndEndingZ">
+    <short>zrange</short>
+    <type>IP</type>
+    <usage>First and last Z values to filter, numbered from 1 (default is all)</usage>
+    <tooltip />
+    <manpage>First and last Z values in the file to filter.  Values are numbered from 1 and the default is to do all sections.  This entry is allowed when doing a 3D FFT on real-space input, but not for FFT input.</manpage>
+  </Field>
+  <Field name="ModeToOutput">
+    <short>mode</short>
+    <type>I</type>
+    <usage>Mode of output file; 0 for byte, 1 or 6 for integer, 2 or 12 for float</usage>
+    <tooltip />
+    <manpage>The storage mode of the output file; 0 for byte, 1 for 16-bit signed integer, 6 for 16-bit unsigned integer, 2 for 32-bit floating point, or 12 for 16-bit floating point. The default is the mode of the input file, although the default mode of floating point output for MRC files is governed by the value of environment variable IMOD_WRITE_FLOATS_16BIT.  Mode 12 is allowed only if the output format is MRC.  This entry is allowed only when writing to a new output file and when the input is not an FFT.</manpage>
+  </Field>
+  <Field name="FilterIn3D">
+    <short>3dfilter</short>
+    <type>B</type>
+    <usage>Filter data in 3D instead of in 2D</usage>
+    <tooltip />
+    <manpage>Filter data in 3D instead of in 2D.  The entire volume will be filtered, so it must fit into the allowed amount of memory and \fB-zrange\fR cannot be entered.  If the volume will not fit in memory, you can try to use &quot;clip fft -3d&quot; to get an FFT, run Mtffilter on the 3D FFT, then inverse transform with &quot;clip fft -3d -m mode&quot;, where mode is the desired output mode, typically the same as the input.  Otherwise you will need to process it in chunks.</manpage>
+  </Field>
+  <Field name="OneDimensionalFilter">
+    <short>1dfilter</short>
+    <type>B</type>
+    <usage>Filter data in 1D (in X direction) instead of in 2D</usage>
+    <tooltip />
+    <manpage />
+  </Field>
+  <Field name="UnitsForFrequency">
+    <short>units</short>
+    <type>I</type>
+    <usage>1 or 2 to enter radii in nm or A, -1 or -2 to enter as 1/nm or 1/A; 3, 4, -3, or -4 to enter sigma values the same way</usage>
+    <tooltip />
+    <manpage>Enter 1 or 2 to enter just cutoff frequencies (radius values) as periodicities in nanometers or Angstroms, or -1 or -2 to enter them as reciprocal nanometers or Angstroms. Enter 3 or 4 to enter both radius and sigma values as nm or A, or -3 or -4 to enter them as 1/nm or 1/A. By default, frequencies are entered as reciprocal pixels, with a range of 0 - 0.5 along an axis of Fourier space.  Unit conversions will be done for entries to \fB-lowpass\fR, \fB-highpass\fR, \fB-radius1\fR, \fB-invrolloff\fR, and \fB-cutoff\fR.  Note that when periodicities are entered for typical sigma value that are smaller than cutoff radii, they need to become larger than the radii.</manpage>
+  </Field>
+  <Field name="LowPassRadiusSigma">
+    <short>lowpass</short>
+    <type>FP</type>
+    <usage>Radius and sigma for high-frequency roll-off to 0.0 (default no filter)</usage>
+    <tooltip>Cutoff radius and sigma for low pass filter to provide a high-frequency Gaussian roll-off to 0.0.  (The default is no filtering)</tooltip>
+    <manpage>Cutoff radius and sigma for a low pass filter that imposes a high-frequency Gaussian roll-off to 0.0. The default is no high-frequency filtering.  These entries correspond to the Radius2 and Sigma2 entries to Enhance(1) and other programs; see the Enhance(1) or Filterplot(1) man pages for a full explanation of the effects of changing the sign of the Sigma2 or the Sigma1 and Radius1 parameters entered with the next two options.</manpage>
+  </Field>
+  <Field name="HighPassSigma">
+    <short>highpass</short>
+    <type>F</type>
+    <usage>Sigma for inverted Gaussian low-frequency filter (default no filter)</usage>
+    <tooltip />
+    <manpage>Sigma for a high pass filter based on an inverted Gaussian that starts at 0.0 at zero frequency and decays up to 1 with the given sigma. The default is no low-frequency filtering.  This entry corresponds to the Sigma1 entry to Enhance(1) and other programs.  A negative Sigma1 can be used to get a band-pass filter based on the second derivative of a Gaussian.</manpage>
+  </Field>
+  <Field name="FilterRadius1">
+    <short>radius1</short>
+    <type>F</type>
+    <usage>Cutoff radius for a high-pass filter that decays with the -lowpass sigma</usage>
+    <tooltip />
+    <manpage>Cutoff radius for a high-pass filter that is 1.0 at this radius and falls off as a Gaussian to the left of this point with sigma equal to the Sigma2 value entered with \fB-lowpass\fR.  This entry corresponds to the Radius1 entry to Enhance(1) and other programs.  A negative Radius1 will make the inverted Gaussian invoked by \fB-highpass\fR be zero out to |Radius1|.</manpage>
+  </Field>
+  <Field name="MtfFile">
+    <short>mtf</short>
+    <type>FN</type>
+    <usage>File with MTF curve</usage>
+    <tooltip />
+    <manpage>File with MTF curve.  The format of the file is a series of lines, with a spatial frequency in reciprocal pixels and an MTF value on each line.</manpage>
+  </Field>
+  <Field name="StockCurve">
+    <short>stock</short>
+    <type>I</type>
+    <usage>1 to use the stock (built-in) MTF curve</usage>
+    <tooltip />
+    <manpage>The number of the stock (built-in) MTF curve to use.  Since there is only one curve, only an entry of 1 is allowed.</manpage>
+  </Field>
+  <Field name="MaximumInverse">
+    <short>maxinv</short>
+    <type>F</type>
+    <usage>Maximum value for inverse of MTF (default 4.0)</usage>
+    <tooltip />
+    <manpage>Maximum value for inverse of MTF.  The inverse should always be limited to reduce noise.</manpage>
+  </Field>
+  <Field name="InverseRolloffRadiusSigma">
+    <short>invrolloff</short>
+    <type>FP</type>
+    <usage>Radius and sigma for gaussian roll-off of inverse to 1.0 (default 0.12 and 0.05)</usage>
+    <tooltip />
+    <manpage />
+  </Field>
+  <Field name="XScaleFactor">
+    <short>xscale</short>
+    <type>F</type>
+    <usage>Scaling factor for X-axis of MTF curve (default 1.0)</usage>
+    <tooltip />
+    <manpage>Scaling factor for X-axis of MTF curve.  Scaling the X axis is probably an adequate way to adapt a curve from one camera or binning to another.</manpage>
+  </Field>
+  <Field name="NoisePadding">
+    <short>noise</short>
+    <type>B</type>
+    <usage>Pad images with tapered noise before filtering</usage>
+    <tooltip />
+    <manpage>Use tapered noise based on nearby pixels along the edge of an image to pad an image before filtering.  The default is to pad with a simple taper that makes streaks outside the edge of the image. For low-dose images, low-pass filtering can spread these streaks into the image area after cropping and produce artifacts along the edge.  This option will avoid this effect, but is probably not suitable for higher-contrast images.</manpage>
+  </Field>
+  <Field name="DensityScaleFactor">
+    <short>denscale</short>
+    <type>F</type>
+    <usage>Density scaling factor (default 1.0)</usage>
+    <tooltip />
+    <manpage>Scaling factor for image intensities after filtering.</manpage>
+  </Field>
+  <Field name="RWeightedFilter">
+    <short>rweight</short>
+    <type>B</type>
+    <usage>Apply an R-weighted filter in the X-dimension, as in back-projection</usage>
+    <tooltip />
+    <manpage>Apply an R-weighted filter in the X-dimension, as in back-projection.  This option implies \fB-1dfilter\fR.  It cannot be used along with an inverse MTF filter.  The filter will be scaled to be 1.0 at the cutoff radius specified with the \fB-lowpass\fR option, if any, or at a frequency of 0.5.  This will likely result in a smaller range for the output values, which could lose intensity resolution by making integer values occupy too few gray levels.  To overcome this problem, use the \fB-denscale\fR option to scale the data up, or change the output mode to floating point with &quot;-mode 2&quot;.</manpage>
+  </Field>
+  <Field name="FakeSIRTiterations">
+    <short>fake</short>
+    <type>LI</type>
+    <usage>Apply a filter equivalent to one or more #s of SIRT iterations</usage>
+    <tooltip />
+    <manpage>Apply a filter to a standard R-weighted back-projection that is equivalent to doing a given number of iterations of SIRT. See the Tilt(1) man page section on SIRT for a description of the filter and the literature reference. If one number is entered, the output file will have the supplied name.  If a list of numbers (which can include ranges) is entered, a file is produced for each entered number, named by appending the number to the entered output name. This filter can be combined with others (sensibly or not).  In particular, it could be combined with \fB-rweight\fR and and applied in 1-D to tilt series.  It cannot be applied in 3-D, and when applied in 2-D, it is appropriate only when applied to a reconstruction in its original orientation as a stack of X/Z slices.  In the latter case, the output here will match the output of Tilt(1) very closely when there is no X-axis tilt or local alignments, and it will diverge increasingly with increasing X-axis tilt. Whether these differences are significant depends on your application.  In any case, applying multiple filters would be an efficient way to find the desired number of iterations.  Iteration numbers must be under 1000.</manpage>
+  </Field>
+  <Field name="PixelSize">
+    <short>pixel</short>
+    <type>F</type>
+    <usage>Pixel size in nanometers, overrides the pixel spacing in the file header</usage>
+    <tooltip />
+    <manpage>Pixel size in nanometers.  A pixel size is needed for dose weighting, deconvolution filtering, and to compute the cutoff radius for an amplifier filter from the phase plate parameters.  This entry is needed only if the pixel size in the image file header is incorrect.</manpage>
+  </Field>
+  <Field name="ExpandedByFactor">
+    <short>expanded</short>
+    <type>F</type>
+    <usage>Value of ExpandByFactor used in Newstack when making aligned stack</usage>
+    <tooltip />
+    <manpage>Value of ExpandByFactor used in Newstack when making aligned stack, which will be used to scale a pixel size entered with \fB-pixel\fR.</manpage>
+  </Field>
+  <Field name="Voltage">
+    <short>volt</short>
+    <type>I</type>
+    <usage>Microscope voltage in kV; must be either 200 or 300 for dose weighting (default 300)</usage>
+    <tooltip />
+    <manpage>Microscope voltage in kV, used for dose weighting and the deconvolution filter.  The default is 300.  For dose-weighting, this value must be either 200 or 300; when 200 is entered, the computed critical and optimal doses are multiplied by 0.8.</manpage>
+  </Field>
+  <SectionHeader name="DoseWeighting">
+    <usage>DOSE WEIGHT FILTERING OPTIONS</usage>
+    <manpage>DOSE WEIGHT FILTERING OPTIONS ^  These options control &quot;dose weighting&quot;, which filters out high frequencies as a function of the dose already applied to a cryo-specimen.</manpage>
+  </SectionHeader>
+  <Field name="TypeOfDoseFile">
+    <short>dtype</short>
+    <type>I</type>
+    <usage>Format of file with dose information (1: doses only, 2: prior dose and dose, 3: prior and ending dose, 4: mdoc)</usage>
+    <enum.1.tooltip>Use a file with one line per view containing just the dose for that view</enum.1.tooltip>
+    <enum.2.tooltip>Use a file with one line per view containing the prior accumulated dose followed by the image dose</enum.2.tooltip>
+    <enum.3.tooltip>Use a file with one line per view containing the prior dose followed by the cumulative dose at the end of that image</enum.3.tooltip>
+    <enum.4.tooltip>Use dose information from a SerialEM .mdoc file that you select</enum.4.tooltip>
+    <manpage>This option both enables dose weighting and indicates what kind of file is being provided with the dose information.  Types 1 to 3 are simple text files with a line for each image in the input file containing one or two numbers.  These types contain just the dose for each image (type 1), the prior accumulated dose followed by the image dose (type 2), or the prior dose followed by the cumulative dose at the end of that image (type 3).  Type 4 indicates information in the autodoc format: either the &quot;.mdoc&quot; file produced by SerialEM, or an HDF file that has incorporated that information into its metadata.  In the latter case, no filename would be entered with the \fB-dfile\fR option.  Whichever form is used, the information in the file must be in the same order as the images in the tilt series file.  An original .mdoc file from SerialEM will not work if the input image file has been reordered so that the part of the series acquired first is at the end of the stack.</manpage>
+  </Field>
+  <Field name="DoseWeightingFile">
+    <short>dfile</short>
+    <type>FN</type>
+    <usage>Name of file with dose information for dose weighting</usage>
+    <tooltip />
+    <manpage>Name of file with dose information for dose weighting, or a short entry indicating how to derive the file name from the image input file name.  This entry is required if \fB-dtype\fR is entered, unless a 4 is entered and the input file is an HDF file with the equivalent metadata as in an .mdoc file.  Two kinds of entries can be used to derive the .mdoc name from the input name.  1) An entry with just an extension and starting with a period (like &quot;.mrc&quot;) indicates to replace the extension of the input file with that entry and append &quot;.mdoc&quot;.  For example, if the input is &quot;setname.ali&quot;, an entry of &quot;.mrc&quot; will make it use the filename &quot;setname.mrc.mdoc&quot;.  2) An entry starting with &quot;_&quot; and consisting of both a suffix and an extension will make it strip out the suffix from the input name (provided it is just before the extension), substitute the extension in the entry for the one in the input name, and append &quot;.mdoc&quot;.  For example, if the input is &quot;setname_ali.mrc&quot;, an entry of &quot;_ali.mrc&quot; will make it seek &quot;setname.mrc.mdoc&quot; and an entry of &quot;_ali.st&quot; will make it look for &quot;setname.st.mdoc&quot;.</manpage>
+  </Field>
+  <Field name="FixedImageDose">
+    <short>dfixed</short>
+    <type>F</type>
+    <usage>Fixed dose for each image of the input file, in electrons/square Angstrom</usage>
+    <tooltip />
+    <manpage>Fixed dose for each image of the input file, in electrons/square Angstrom.  This option cannot be entered with \fB-dtype\fR.</manpage>
+  </Field>
+  <Field name="InitialDose">
+    <short>initial</short>
+    <type>F</type>
+    <usage>Dose applied before any of the images in the input file were taken</usage>
+    <tooltip />
+    <manpage>Dose applied before any of the images in the input file were taken; this value will be added to all the prior dose values, however they were obtained.</manpage>
+  </Field>
+  <Field name="BidirectionalNumViews">
+    <short>bidir</short>
+    <type>I</type>
+    <usage>Number of views in first part of bidirectional tilt series file</usage>
+    <tooltip>Number of views in first part of bidirectional tilt series file; should not be needed with an .mdoc file</tooltip>
+    <manpage>Number of views in the first part of a bidirectional tilt series file, where the order of images in the input file is inverted from their order of acquisition.  This entry is essential for a bidirectional series if a fixed dose is entered with \fB-dfixed\fR or if just a dose for each image (dose file type 1) is entered.  The program assumes that the part of the tilt series acquired first occurs at the beginning of the stack.  If this is not the case, you must enter the \fB-reversed\fR option. The \fB-bidir\fR option is ignored for dose file types 2 and 3.  It would be used for type 4 if there are neither PriorRecordDose nor DateTime entries; the latter allow the initial order of images to be deduced when there are no PriorRecordDose entries.  Intact .mdoc files from SerialEM always have DateTime entries; PriorRecordDose was added in 2017.</manpage>
+  </Field>
+  <Field name="ReversedBidirectional">
+    <short>reversed</short>
+    <type>B</type>
+    <usage>Bidirectional series is stacked with part acquired first at the end</usage>
+    <tooltip />
+    <manpage>A bidirectional series is stacked with the part acquired first at the end, and the second part at the beginning.  This entry is needed to make the \fB-bidir\fR option perform properly in the cases described there where it is needed.</manpage>
+  </Field>
+  <Field name="OptimalDoseScaling">
+    <short>optimal</short>
+    <type>F</type>
+    <usage>Factor by which to scale the computed optimal and critical doses</usage>
+    <tooltip>Factor by which to scale the computed optimal and critical doses; a factor greater than 1 gives less filtering than the standard equations indicate</tooltip>
+    <manpage>Factor by which to scale the computed optimal and critical doses that determine how much to attenuate a spatial frequency for a particular dose.  Enter a factor greater than or less than 1. to indicate that the specimen is more or less resistant to damage than the equations indicate. Another use for this entry would be to adjust the critical dose for a voltage other than 200 and 300 kV.</manpage>
+  </Field>
+  <Field name="CriticalDoseFactors">
+    <short>critical</short>
+    <type>FT</type>
+    <usage>Replacement factors a, b, and c in the equation for critical dose</usage>
+    <tooltip />
+    <manpage>&quot;Replacement factors a, b, and c in the equation</manpage>
+    <^   critical_dose>a * k^b + c ^ where k is frequency in reciprocal Angstroms.  The default factors are directly from Grant and Grigorieff and the unblur program.  Enter 0 for any of the factors to use the default for that factor.&quot;</^   critical_dose>
+  </Field>
+  <Field name="VerboseOutput">
+    <short>verbose</short>
+    <type>I</type>
+    <usage>Output additional information (doses and filters when dose weighting)</usage>
+    <tooltip />
+    <manpage>Enter a 1 to output the cumulative and image doses used and the filter functions applied for dose weighting.</manpage>
+  </Field>
+  <SectionHeader name="Deconvolution">
+    <usage>DECONVOLUTION FILTER OPTIONS</usage>
+    <manpage>DECONVOLUTION FILTER OPTIONS ^  These options control a deconvolution filter like the one implemented in Warp and IsoNet.  The filter compensates for a CTF less than 1 at lower frequencies and attenuates higher frequencies.</manpage>
+  </SectionHeader>
+  <Field name="DeconvolutionStrength">
+    <short>deconv</short>
+    <type>F</type>
+    <usage>Deconvolution strength, the degree to which low frequencies are boosted</usage>
+    <tooltip />
+    <manpage>Overall strength of the deconvolution, which controls the degree to which low frequencies are boosted.  Values around 0.25 to 1 may be useful. The bigger the value, the more low frequencies are accentuated.  This value is treated as it is in Warp; values used in IsoNet need to be divided by 3 to have the same effect here.</manpage>
+  </Field>
+  <Field name="SNRFalloff">
+    <short>snr</short>
+    <type>F</type>
+    <usage>Falloff rate in the assumed SNR with frequency (default 0.7)</usage>
+    <tooltip />
+    <manpage>Falloff rate with frequency of the signal-to-noise ratio assumed for computing the deconvolution filter; higher values attenuate high frequencies more.  Some users suggest keeping this value comparable to the \fB-deconv\fR entry.  The default is 0.7, the value in IsoNet.</manpage>
+  </Field>
+  <Field name="HighPassNyquist">
+    <short>dchigh</short>
+    <type>F</type>
+    <usage>Cutoff for high-pass filter as fraction of Nyquist (default 0.02)</usage>
+    <tooltip />
+    <manpage>Cutoff frequency of a high-pass filter to prevent excessive boosting of the lowest frequencies, where the CTF is low.  For consistency with Warp and IsoNet, the value is expressed as the fraction of Nyquist, and is thus twice the usual frequency in reciprocal pixels.  The default is 0.02 as in IsoNet.</manpage>
+  </Field>
+  <Field name="DefocusInMicrons">
+    <short>defocus</short>
+    <type>F</type>
+    <usage>Defocus in microns, underfocus positive, required for computing CTF curve</usage>
+    <tooltip />
+    <manpage>The defocus in microns (underfocus positive).  This entry is required for computing the CTF curve; there is no default.</manpage>
+  </Field>
+  <Field name="PhaseShift">
+    <short>dcphase</short>
+    <type>F</type>
+    <usage>Phase shift in degrees (default 0)</usage>
+    <tooltip />
+    <manpage />
+  </Field>
+  <Field name="SphericalAberration">
+    <short>cs</short>
+    <type>F</type>
+    <usage>Spherical aberration (Cs) in mm (default 2.7)</usage>
+    <tooltip />
+    <manpage />
+  </Field>
+  <SectionHeader name="PhasePlate">
+    <usage>PHASE PLATE FILTER OPTIONS</usage>
+    <manpage>PHASE PLATE FILTER OPTIONS ^  These options control an amplifier filter used to correct artifacts in images obtained with phase plates having a hole.</manpage>
+  </SectionHeader>
+  <Field name="AmplifierFactorAndPower">
+    <short>amplifier</short>
+    <type>FP</type>
+    <usage>Amplification factor and exponent for low-frequency amplifier filter</usage>
+    <tooltip />
+    <manpage>Amplification factor and exponent for low-frequency amplifier filter.  Either \fB-cutoff\fR or \fB-phase\fR must also be entered.</manpage>
+  </Field>
+  <Field name="CutoffForAmplifier">
+    <short>cutoff</short>
+    <type>F</type>
+    <usage>Cutoff radius in reciprocal pixels for amplifier filter</usage>
+    <tooltip />
+    <manpage>Cutoff radius in reciprocal pixels for amplifier filter.  This option cannot be entered together with \fB-phase\fR.</manpage>
+  </Field>
+  <Field name="PhasePlateParameters">
+    <short>phase</short>
+    <type>FT</type>
+    <usage>Phase plate diameter, voltage, focal length for amplifier filter</usage>
+    <tooltip />
+    <manpage>Parameters of phase plate imaging, used to compute a nominal cutoff radius for the low-frequency amplifier filter.  Enter the phase plate diameter in nanometers, the voltage in kilovolts, and the objective lens focal length in millimeters.</manpage>
+  </Field>
+  <Field name="ParameterFile">
+    <short>param</short>
+    <type>PF</type>
+    <usage>Read parameter entries from file</usage>
+    <tooltip />
+    <manpage />
+  </Field>
+  <Field name="usage">
+    <short>help</short>
+    <type>B</type>
+    <usage>Print help output</usage>
+    <tooltip />
+    <manpage />
+  </Field>
+</autodoc>

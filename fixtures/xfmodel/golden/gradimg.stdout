@@ -1,0 +1,22 @@
+
+ RO image file on unit   1 : img8.mrc     Size=         10 K
+
+ Number of columns, rows, sections .....      40      30       8
+ Map mode ..............................    0   (bytes - signed in file)   
+ Start cols, rows, sects, grid x,y,z ...    0     0     0      40     30      8
+ Pixel spacing (Angstroms)..............   1.000      1.000      1.000    
+ Cell angles ...........................   90.000   90.000   90.000
+ Fast, medium, slow axes ...............    X    Y    Z
+ Origin on x,y,z .......................    0.000       0.000       0.000    
+ Minimum density .......................   0.0000     (  -128.00     in file)
+ Maximum density .......................   254.00     (   126.00     in file)
+ Mean density ..........................   127.05     ( -0.95428     in file)
+ tilt angles (original,current) ........   0.0   0.0   0.0   0.0   0.0   0.0
+ Space group,# extra bytes,idtype,lens .        0        0        0        0
+
+     1 Titles :
+raw2mrc: Converted to mrc format.                       25-Sep-26  02:35:52    
+
+
+ FORMATTED  ro  file opened: mg.txt
+ Undistorting model

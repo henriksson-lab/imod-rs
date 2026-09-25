@@ -1,0 +1,44 @@
+Input volume: tx.st
+ Dimensions:     96     88     13   Pixel size:         1          1          1
+Mode:  1               Min, max, mean:          493         5487       1633.5
+raw2mrc: Converted to mrc format.                       25-Sep-26  02:29:20
+
+
+Opened OLD file: tx.tlt
+9 patches will be tracked  [TXC1]
+
+Binning is 1; padded, reduced size is 48 by 48
+View   7 processed
+Eliminated 1 outlier points
+Prediction fit error: mean 3.36  max 6.9
+View   8 processed
+Eliminated 1 outlier points
+Prediction fit error: mean 3.95  max 8.9
+View   9 processed
+Eliminated 1 outlier points
+Prediction fit error: mean 3.44  max 8.2
+View  10 processed
+Eliminated 1 outlier points
+Prediction fit error: mean 3.42  max 5.7
+View  11 processed
+Eliminated 1 outlier points
+Prediction fit error: mean 2.51  max 4.8
+View  12 processed
+Eliminated 1 outlier points
+Prediction fit error: mean 2.74  max 5.1
+View  13 processed
+Eliminated 1 outlier points
+Prediction fit error: mean 2.02  max 3.9
+View   5 processed
+Eliminated 1 outlier points
+Prediction fit error: mean 2.83  max 7.1
+View   4 processed
+Eliminated 1 outlier points
+Prediction fit error: mean 6.60  max 11.3
+View   3 processed
+Eliminated 1 outlier points
+Prediction fit error: mean 1.93  max 3.5
+View   2 processed
+Eliminated 1 outlier points
+Prediction fit error: mean 1.90  max 3.7
+View   1 processed

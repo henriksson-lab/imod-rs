@@ -1,0 +1,129 @@
+# name	arguments (- for none)	stdin (printf escapes, - for none)
+x1	-input BBa_erase.fid -output o.mod -xforms BBa.xf	-
+x1nonopt	BBa_erase.fid o.mod -xforms BBa.xf	-
+xback	-input BBa_erase.fid -output o.mod -xforms BBa.xf -back	-
+preali_back	-input BBa_erase.fid -output o.mod -prealign BBa.xf -back	-
+preali_fwd	-input BBa_erase.fid -output o.mod -prealign BBa.xf -xforms BBb.xf	-
+xscale	-input BBa_erase.fid -output o.mod -xforms BBa.xf -scale 2.5	-
+xline	-input BBa_erase.fid -output o.mod -xforms BBa.xf -useline 3	-
+xlineback	-input BBa_erase.fid -output o.mod -xforms BBa.xf -useline 5 -back	-
+xone	-input BBa_erase.fid -output o.mod -xforms x1.xf	-
+xoneback	-input BBa_erase.fid -output o.mod -xforms x1.xf -back	-
+xshort	-input BBa_erase.fid -output o.mod -xforms x3.xf	-
+xadj1	-input BBa_erase.fid -output o.mod -xforms BBa.xf -adjust 1	-
+xadj2	-input BBa_erase.fid -output o.mod -xforms BBa.xf -adjust 2	-
+xadjrot	-input m1.mod -output o.mod -xforms rot90.xf -adjust 1	-
+xcenter	-input BBa_erase.fid -output o.mod -xforms BBa.xf -center 300,250	-
+xchunks	-input BBa_erase.fid -output o.mod -xforms x3.xf -chunks 20,20,21	-
+xchunksback	-input BBa_erase.fid -output o.mod -xforms x3.xf -chunks 10,30 -back	-
+f1	-input BBa_erase.fid -output o.xf -sections 1-5 -full 0,0	-
+f2	-input BBa_erase.fid -output o.xf	-
+ftrans	-input BBa_erase.fid -output o.xf -trans	-
+fmag	-input BBa_erase.fid -output o.xf -magrot -sections 10-20,30	-
+fsingle	-input BBa_erase.fid -output o.xf -single 30 -sections 25-35	-
+fsingleall	-input BBa_erase.fid -output o.xf -single 30	-
+fedit	-input BBa_erase.fid -output o.xf -edit BBa.xf -sections 3,7	-
+fcenter	-input BBa_erase.fid -output o.xf -center 275,275 -sections 2-4	-
+m1find	-input m1.mod -output o.xf -full 0.1,0.5	-
+m1findtrans	-input m1.mod -output o.xf -trans -full 0,0	-
+m1img	-input m1.mod -output o.xf -image img8.mrc	-
+m1imggap	-input m1.mod -output o.xf -image img7.mrc -piece gap.pl	-
+m1imggapall	-input m1.mod -output o.xf -image img7.mrc -piece gap.pl -allz	-
+m1mont	-input m1.mod -output o.xf -image mont.mrc -piece mont.pl	-
+m1montx	-input m1.mod -output o.mod -image mont.mrc -piece mont.pl -xforms x7.xf	-
+m1imgx	-input m1.mod -output o.mod -image img8.mrc -xforms x8.xf	-
+m1gapx	-input m1.mod -output o.mod -image img7.mrc -piece gap.pl -xforms x7.xf	-
+m1gapxall	-input m1.mod -output o.mod -image img7.mrc -piece gap.pl -allz -xforms x8.xf	-
+m1gapxallback	-input m1.mod -output o.mod -image img7.mrc -piece gap.pl -allz -xforms x8.xf -back	-
+m1x	-input m1.mod -output o.mod -xforms x8.xf	-
+m1undef	-input m1.mod -output o.mod -xforms x3.xf	-
+m1undefback	-input m1.mod -output o.mod -prealign x3.xf -back	-
+m1wimpx	-input w1.wimp -output o.mod -xforms x8.xf	-
+m1wimpf	-input w1.wimp -output o.xf	-
+m2find	-input m2.mod -output o.xf -rottrans	-
+dist	-input BBa_erase.fid -output o.mod -distort dist.idf -binning 1	-
+distnobin	-input BBa_erase.fid -output o.mod -distort dist.idf	-
+dist3	-input BBa_erase.fid -output o.mod -distort dist3.idf -binning 2	-
+distback	-input BBa_erase.fid -output o.mod -distort dist.idf -binning 1 -back	-
+distb2	-input BBa_erase.fid -output o.mod -distort distb2.idf	-
+distb2bin	-input BBa_erase.fid -output o.mod -distort distb2.idf -binning 1.5	-
+distfwd	-input BBa_erase.fid -output o.mod -distort distfwd.idf -binning 1	-
+distneg	-input BBa_erase.fid -output o.mod -distort dist.idf -binning -1	-
+distx	-input BBa_erase.fid -output o.mod -distort dist.idf -binning 1 -xforms BBa.xf	-
+distpre	-input BBa_erase.fid -output o.mod -distort dist.idf -binning 1 -prealign BBa.xf	-
+distpreback	-input BBa_erase.fid -output o.mod -distort dist.idf -binning 1 -prealign BBa.xf -back	-
+distimg	-input m1.mod -output o.mod -image img8.mrc -distort dist.idf -binning 1	-
+distcenter	-input BBa_erase.fid -output o.mod -center 280,270 -distort dist.idf -binning 1	-
+grad	-input BBa_erase.fid -output o.mod -gradient mg.txt	-
+gradback	-input BBa_erase.fid -output o.mod -gradient mg.txt -back	-
+graddist	-input BBa_erase.fid -output o.mod -gradient mg.txt -distort dist.idf -binning 1	-
+graddistx	-input BBa_erase.fid -output o.mod -gradient mg.txt -distort dist.idf -binning 1 -xforms BBa.xf	-
+graddistpreback	-input BBa_erase.fid -output o.mod -gradient mg.txt -distort dist.idf -binning 1 -prealign BBa.xf -back	-
+gradbad	-input BBa_erase.fid -output o.mod -gradient mgbad.txt	-
+gradv2	-input BBa_erase.fid -output o.mod -gradient mgv2.txt	-
+e_noargs	-	-
+e_help	-help	-
+e_noinput	-output o.mod -xforms BBa.xf	-
+e_nooutput	-input BBa_erase.fid -xforms BBa.xf	-
+e_missingmodel	-input nothere.mod -output o.mod -xforms BBa.xf	-
+e_badmodel	-input BBa.xf -output o.mod -xforms BBa.xf	-
+e_missingxf	-input BBa_erase.fid -output o.mod -xforms nothere.xf	-
+e_emptyxf	-input BBa_erase.fid -output o.mod -xforms empty.xf	-
+e_badxf	-input BBa_erase.fid -output o.mod -xforms bad.xf	-
+e_emptypre	-input BBa_erase.fid -output o.mod -prealign empty.xf -back	-
+e_backboth	-input BBa_erase.fid -output o.mod -xforms BBa.xf -prealign BBa.xf -back	-
+e_backnone	-input BBa_erase.fid -output o.mod -back	-
+e_twofits	-input BBa_erase.fid -output o.xf -trans -rottrans	-
+e_fitandx	-input BBa_erase.fid -output o.xf -trans -xforms BBa.xf	-
+e_scalefind	-input BBa_erase.fid -output o.xf -scale 2	-
+e_linefind	-input BBa_erase.fid -output o.xf -useline 2	-
+e_chunkfind	-input BBa_erase.fid -output o.xf -chunks 3,4	-
+e_linechunk	-input BBa_erase.fid -output o.mod -xforms BBa.xf -useline 2 -chunks 3,4	-
+e_linedist	-input BBa_erase.fid -output o.mod -distort dist.idf -binning 1 -useline 2	-
+e_distfwdneed	-input BBa_erase.fid -output o.mod -distort BBa.xf -binning 1	-
+e_distmissing	-input BBa_erase.fid -output o.mod -distort nothere.idf -binning 1	-
+e_missingimg	-input BBa_erase.fid -output o.xf -image nothere.mrc	-
+e_missingpiece	-input m1.mod -output o.xf -image img7.mrc -piece nothere.pl	-
+e_gradmissing	-input BBa_erase.fid -output o.mod -gradient nothere.txt	-
+e_badopt	-input BBa_erase.fid -output o.mod -xforms BBa.xf -bogus 3	-
+e_prenothere	-input BBa_erase.fid -output o.mod -prealign nothere.xf -back	-
+w20x	-input BBa_erase.fid -output o.mod -xforms wgi20.xf	-
+w20back	-input BBa_erase.fid -output o.mod -xforms wgi20.xf -back	-
+w20pre	-input BBa_erase.fid -output o.mod -prealign wgi20.xf -back	-
+w20prefwd	-input BBa_erase.fid -output o.mod -prealign wgi20.xf -xforms BBa.xf	-
+w20prewarp	-input BBa_erase.fid -output o.mod -prealign wgi20.xf -xforms wgi20h.xf	-
+w20h	-input BBa_erase.fid -output o.mod -xforms wgi20h.xf	-
+w20hscale	-input BBa_erase.fid -output o.mod -xforms wgi20h.xf -scale 1	-
+w20line	-input BBa_erase.fid -output o.mod -xforms wgi20.xf -useline 2	-
+w20lineback	-input BBa_erase.fid -output o.mod -xforms wgi20.xf -useline 4 -back	-
+w3chunks	-input BBa_erase.fid -output o.mod -xforms wg3i.xf -chunks 20,20,21	-
+w1one	-input BBa_erase.fid -output o.mod -xforms wg1i.xf	-
+w1oneback	-input BBa_erase.fid -output o.mod -xforms wg1i.xf -back	-
+w3undef	-input BBa_erase.fid -output o.mod -xforms wg3i.xf	-
+w8img	-input m1.mod -output o.mod -image img8.mrc -xforms wg8i.xf	-
+w8imgback	-input m1.mod -output o.mod -image img8.mrc -prealign wg8i.xf -back	-
+w8imgpre	-input m1.mod -output o.mod -image img8.mrc -prealign wg8i.xf -xforms x8.xf	-
+w8gapall	-input m1.mod -output o.mod -image img7.mrc -piece gap.pl -allz -xforms wg8i.xf	-
+w20grad	-input BBa_erase.fid -output o.mod -gradient mg.txt -prealign wgi20.xf	-
+w20graddist	-input BBa_erase.fid -output o.mod -gradient mg.txt -distort dist.idf -binning 1 -prealign wgi20.xf	-
+w20graddistback	-input BBa_erase.fid -output o.mod -gradient mg.txt -distort dist.idf -binning 1 -prealign wgi20.xf -back	-
+w20dist	-input BBa_erase.fid -output o.mod -distort dist.idf -binning 1 -xforms wgi20.xf	-
+fedwarp	-input BBa_erase.fid -output o.xf -edit wgi20.xf -sections 3-5	-
+gradimg	-input m1.mod -output o.mod -image img8.mrc -gradient mg.txt	-
+gradimgback	-input m1.mod -output o.mod -image img8.mrc -gradient mg.txt -back -xforms x8.xf	-
+distimgback	-input m1.mod -output o.mod -image img8.mrc -distort dist.idf -binning 1 -back -prealign x8.xf	-
+e_prewarpfwd	-input BBa_erase.fid -output o.mod -prealign distfwd.idf -back	-
+i_find	-	\n275,275\nBBa_erase.fid\n0\n0\n\no.xf\n1-5\n1\n0.5 1\n
+i_xf	-	\n275 275\nBBa_erase.fid\n1\n0\no.mod\nBBa.xf\n
+i_back	-	\n0 0\nBBa_erase.fid\n-1\nBBa.xf\no.mod\n
+i_img	-	img7.mrc\ngap.pl\n1\nm1.mod\n1\n0\no.mod\nx8.xf\n
+i_single	-	\n275,275\nBBa_erase.fid\n0\n1\nBBa.xf\nBBb.xf\no.xf\n-999\n30\n25-35\n0\n
+i_trans	-	\n275,275\nBBa_erase.fid\n2\n0\nBBa.xf\no.xf\n/\n0\n
+i_eof_list	-	\n275,275\nBBa_erase.fid\n0\n0\n\no.xf\n
+i_eof_mode	-	\n275,275\nBBa_erase.fid\n
+i_eof_cen	-	\n
+i_bad_cen	-	\n275,x\n
+i_eof_new	-	\n275,275\nBBa_erase.fid\n1\n0\n
+i_eof_gap	-	img7.mrc\ngap.pl\n
+i_eof_crit	-	\n275,275\nBBa_erase.fid\n3\n0\n\no.xf\n2-9\n1\n1\n
+e_warpfwd	-input BBa_erase.fid -output o.mod -xforms distfwd.idf	-

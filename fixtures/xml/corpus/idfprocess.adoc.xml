@@ -1,0 +1,72 @@
+<?xml version="1.0" encoding="utf-8"?>
+<autodoc>
+  <PreData>
+    <Version>1.0</Version>
+    <Pip>1</Pip>
+  </PreData>
+  <Field name="InputFile1">
+    <short>in1</short>
+    <long>InputFile1</long>
+    <type>FN</type>
+    <usage>First input file with distortion fields</usage>
+    <tooltip />
+    <manpage>First input file with distortion fields.  If this option is not entered, the first non-option argument will be used for this input file.</manpage>
+  </Field>
+  <Field name="InputFile2">
+    <short>in2</short>
+    <type>FN</type>
+    <usage>Second input file with distortion fields</usage>
+    <tooltip />
+    <manpage>Second input file with distortion fields.  If this option is not entered and a second input file is expected, the second non-option argument will be used for this input file.</manpage>
+  </Field>
+  <Field name="OutputFile">
+    <short>output</short>
+    <type>FN</type>
+    <usage>Output file for processed distortion fields (optional)</usage>
+    <tooltip />
+    <manpage>Output file for processed distortion fields.  If this option is not entered, the second or third non-option argument will be used for the output file, depending on whether one or two input files are required.  If no output file is specified at all, then statistics will be computed.</manpage>
+  </Field>
+  <Field name="Product">
+    <short>product</short>
+    <type>B</type>
+    <usage>Compute product of two distortion fields</usage>
+    <tooltip />
+    <manpage />
+  </Field>
+  <Field name="Difference">
+    <short>difference</short>
+    <type>B</type>
+    <usage>Compute difference between two distortion fields</usage>
+    <tooltip />
+    <manpage />
+  </Field>
+  <Field name="Inverse">
+    <short>inverse</short>
+    <type>B</type>
+    <usage>Compute the inverse of the distortion field</usage>
+    <tooltip />
+    <manpage />
+  </Field>
+  <Field name="Statistics">
+    <short>stats</short>
+    <type>B</type>
+    <usage>Report mean, SD, and max of distortion vectors</usage>
+    <tooltip />
+    <manpage />
+  </Field>
+  <Field name="SecondGrid">
+    <short>second</short>
+    <type>B</type>
+    <usage>Use second input file's grid characteristics for output</usage>
+    <tooltip />
+    <manpage>If the grid characteristics (spacing and number of grid points) differ between the two files, convert to the second file's characteristics rather than the first.</manpage>
+  </Field>
+  <Field name="usage">
+    <short>help</short>
+    <long>usage</long>
+    <type>B</type>
+    <usage>Print help output</usage>
+    <tooltip />
+    <manpage />
+  </Field>
+</autodoc>

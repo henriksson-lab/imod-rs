@@ -1,0 +1,15 @@
+Usage: xfproduct [Options] input_files... output_file
+Options can be abbreviated, current short name abbreviations are in parentheses
+Options:
+ -in1  OR  -InputFile1   File
+    File with transforms applied first
+ -in2  OR  -InputFile2   File
+    File with transforms applied second
+ -output (-ou)  OR  -OutputFile   File
+    Output file for product transforms
+ -scale (-s)  OR  -ScaleShifts   2 floats
+    Factors to scale X/Y translations of the first and second transforms
+ -one (-on)  OR  -OneXformToMultiply   Int
+    # of one transform to multiply by a single transform (numbered from 0)
+ -help (-h)  OR  -usage
+    Print help output

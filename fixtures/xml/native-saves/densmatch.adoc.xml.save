@@ -1,0 +1,191 @@
+<?xml version="1.0" encoding="utf-8"?>
+
+<autodoc>
+  
+  <PreData>
+    
+    <Version>1.0</Version>
+    
+    <Pip>1</Pip>
+  
+  </PreData>
+  
+  <Field name="ReferenceFile">
+    
+    <short>reference</short>
+    
+    <long>ReferenceFile</long>
+    
+    <type>FN</type>
+    
+    <usage>Input file with reference volume (the one being matched to)</usage>
+    
+    <tooltip />
+    
+    <manpage>Input file with reference volume (the one being matched to).  This file can be entered on the command line as the first non-option argument.</manpage>
+  
+  </Field>
+  
+  <Field name="ScaledFile">
+    
+    <short>scaled</short>
+    
+    <long>ScaledFile</long>
+    
+    <type>FN</type>
+    
+    <usage>Input file with volume to be scaled to match</usage>
+    
+    <tooltip />
+    
+    <manpage>Input file with volume to be scaled to match.  This file can be entered on the command line as the second non-option argument, or as the first non-option argument if \fB-target\fR is entered instead of a reference file.</manpage>
+  
+  </Field>
+  
+  <Field name="OutputFile">
+    
+    <short>output</short>
+    
+    <long>OutputFile</long>
+    
+    <type>FN</type>
+    
+    <usage>Output file for scaled volume (omit to rewrite input file)</usage>
+    
+    <tooltip />
+    
+    <manpage>Output file for the scaled volume.  This file can be entered on the command line as the third non-option argument, or the second non-option argument if \fB-target\fR is entered instead of a reference file.  If this file is omitted, the program will write the scaled values back to the input file.</manpage>
+  
+  </Field>
+  
+  <Field name="TargetMeanAndSD">
+    
+    <short>target</short>
+    
+    <type>FP</type>
+    
+    <usage>Mean and SD to scale volume to (omit the reference volume)</usage>
+    
+    <tooltip />
+    
+    <manpage>Mean and standard deviation to scale the volume to (the one entered with \fB-scaled\fR).  The reference file is not entered in this case.  If you have a byte or integer image file and you want to scale to a small target SD value (such as 1, as opposed to 40), then you need to change the mode of the output file to floating point.</manpage>
+  
+  </Field>
+  
+  <Field name="ModeToOutput">
+    
+    <short>mode</short>
+    
+    <type>I</type>
+    
+    <usage>Mode of output file; 0 for byte, 1 or 6 for integer, 2 or 12 for float</usage>
+    
+    <tooltip />
+    
+    <manpage>The storage mode of the output file; 0 for byte, 1 for 16-bit signed integer, 6 for 16-bit unsigned integer, 2 for 32-bit floating point, or 12 for 16-bit floating point. The default is the mode of the input file, although the default mode of floating point output for MRC files is governed by the value of environment variable IMOD_WRITE_FLOATS_16BIT.  This entry is allowed only when writing to a new output file.  Mode 12 is allowed only if the output format is MRC.</manpage>
+  
+  </Field>
+  
+  <Field name="ReportOnly">
+    
+    <short>report</short>
+    
+    <long>ReportOnly</long>
+    
+    <type>B</type>
+    
+    <usage>Report scaling factors without writing scaled data to file</usage>
+    
+    <tooltip />
+    
+    <manpage>Report scaling factors without writing scaled data to file.  The program will report two numbers, a factor to multiply by then a constant to add; these numbers can be supplied to the -multadd option of Newstack.</manpage>
+  
+  </Field>
+  
+  <Field name="XMinAndMax">
+    
+    <short>xminmax</short>
+    
+    <type>IP</type>
+    
+    <usage>Starting and ending X coordinates of region to analyze in reference</usage>
+    
+    <tooltip />
+    
+    <manpage>Starting and ending X coordinates of region to analyze for mean and SD in reference volume.  An ending X of 0 will be converted to NX - 1, so 0,0 can be entered to use the full extent in X. The default is NX/4, 3*NX/4, where NX is the size of the scaled volume in X.  X, Y, and Z coordinates are numbered from 0.</manpage>
+  
+  </Field>
+  
+  <Field name="YMinAndMax">
+    
+    <short>yminmax</short>
+    
+    <type>IP</type>
+    
+    <usage>Starting and ending Y coordinates of region to analyze in reference</usage>
+    
+    <tooltip />
+    
+    <manpage>Starting and ending Y coordinates of region to analyze in reference volume.  An ending Y of 0 will be converted to NY - 1.  The default is NY/4, 3*NY/4, where NY is the size of the scaled volume in Y.</manpage>
+  
+  </Field>
+  
+  <Field name="ZMinAndMax">
+    
+    <short>zminmax</short>
+    
+    <type>IP</type>
+    
+    <usage>Starting and ending Z coordinates of region to analyze in reference</usage>
+    
+    <tooltip />
+    
+    <manpage>Starting and ending Z values of region to analyze in reference volume.  An ending Z of 0 will be converted to NZ - 1. The default is NZ/4, 3*NZ/4, where NZ is the number of slices in the scaled volume.</manpage>
+  
+  </Field>
+  
+  <Field name="UseAllPixels">
+    
+    <short>all</short>
+    
+    <type>B</type>
+    
+    <usage>Compute mean and SD from all pixels in the files</usage>
+    
+    <tooltip />
+    
+    <manpage>Compute mean and SD from all pixels in the files, not from a sample of pixels.  With this option, it is not necessary or allowed to enter any minimum and maximum coordinates.  Use this option to get an exact match to target values for small volumes (say, several megapixels).  For larger volumes, use &quot;-xm 0,0 -ym 0,0 -zm 0,0&quot; instead to sample the entire volume, unless you really need a precise match; with sampling, the SD will be accurate to within about 0.2%.</manpage>
+  
+  </Field>
+  
+  <Field name="OffsetRefToScaledXYZ">
+    
+    <short>offset</short>
+    
+    <type>IT</type>
+    
+    <usage>Displacement of scaled volume relative to reference in X, Y, and Z</usage>
+    
+    <tooltip />
+    
+    <manpage>Displacement of the volume being scaled relative to the reference volume in X, Y, and Z; namely, the amount to add to a pixel coordinate in the reference volume to obtain the coordinate of the corresponding pixel in the file being scaled.</manpage>
+  
+  </Field>
+  
+  <Field name="usage">
+    
+    <short>help</short>
+    
+    <long>usage</long>
+    
+    <type>B</type>
+    
+    <usage>Print help output</usage>
+    
+    <tooltip />
+    
+    <manpage />
+  
+  </Field>
+
+</autodoc>

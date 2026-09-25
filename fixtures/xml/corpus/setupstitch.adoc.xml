@@ -1,0 +1,94 @@
+<?xml version="1.0" encoding="utf-8"?>
+<autodoc>
+  <PreData>
+    <Version>1.0</Version>
+    <Pip>1</Pip>
+  </PreData>
+  <Field name="InfoFile">
+    <short>info</short>
+    <type>FN</type>
+    <usage>Name of supermontage info file to be created or edited</usage>
+    <tooltip />
+    <manpage>Name of a supermontage info file in which all data about the files will be stored.  If the file exists, it will be read in when the program starts, and renamed to filename~ before writing a new version when the program exits.  If this option is not entered, the first non-option argument will be taken as the name of the info file.</manpage>
+  </Field>
+  <Field name="NoZValues">
+    <short>noz</short>
+    <type>B</type>
+    <usage>Search for and create names without Z values</usage>
+    <tooltip />
+    <manpage>Search for and create names without Z values and assume the Z value is zero.  This option cannot be used when adding a supermontage to an existing one, or when specifying a z range with -zadd.</manpage>
+  </Field>
+  <Field name="RootName">
+    <short>root</short>
+    <type>CH</type>
+    <usage>Rootname for existing files and ones to be created</usage>
+    <tooltip />
+    <manpage>Rootname for existing files and ones to be created. Existing files need not be named according to the conventions if they are already listed in the info file.</manpage>
+  </Field>
+  <Field name="OverlapInXandY">
+    <short>overlap</short>
+    <type>IP</type>
+    <usage>Nominal overlap between adjacent volumes in X and Y</usage>
+    <tooltip />
+    <manpage>&quot;Nominal overlap between adjacent volumes in X and Y.  This only needs to be a rough approximation.  This entry is required when adding a supermontage or the first time a manually prepared info file is read.  To measure overlap, for example in X, click on a corresponding point in two adjacent volumes.  The overlap in X is XR + NXL - XL where</manpage>
+    <^   XR>X position in volume on the right</^   XR>
+    <^   NXL>Size in X of volume on the left</^   NXL>
+    <^   XL>X position in volume on the left&quot;</^   XL>
+  </Field>
+  <Field name="UnderscoreXYZ">
+    <short>underscore</short>
+    <type>B</type>
+    <usage>Use underscores between x, y, and z in composing names</usage>
+    <tooltip />
+    <manpage>Use underscores between x, y, and z in composing names for files being searched for and created.</manpage>
+  </Field>
+  <Field name="ExtensionOnVolumes">
+    <short>ext</short>
+    <type>CH</type>
+    <usage>Extension on filenames when searching for volumes (default .rec)</usage>
+    <tooltip />
+    <manpage>Extension on filenames when searching for volumes, including the period.  There may be characters before the true extension, such as if all files are named &quot;binned.rec&quot;.  The default is .rec.</manpage>
+  </Field>
+  <Field name="AddMontageXandY">
+    <short>xyadd</short>
+    <type>IP</type>
+    <usage>Add a supermontage with the given number of frames in X and Y</usage>
+    <tooltip />
+    <manpage>Add a supermontage with the given number of frames in X and Y.  The program will search for pieces by rootname and frame number in X and Y, with numbers starting from 1.</manpage>
+  </Field>
+  <Field name="AddMontageXRange">
+    <short>xadd</short>
+    <type>IP</type>
+    <usage>Add a supermontage with given starting and ending frame numbers in X</usage>
+    <tooltip />
+    <manpage>Starting and ending X values to search for when adding a supermontage.  Use this option and -yadd if the starting frame number is not 1 in X or in Y.  If one of the two options -xadd and -yadd is entered, then the other must be entered as well, and -xyadd must not be entered.</manpage>
+  </Field>
+  <Field name="AddMontageYRange">
+    <short>yadd</short>
+    <type>IP</type>
+    <usage>Add a supermontage with given starting and ending frame numbers in Y</usage>
+    <tooltip />
+    <manpage>Starting and ending Y values to search for when adding a supermontage.</manpage>
+  </Field>
+  <Field name="AddMontageZRange">
+    <short>zadd</short>
+    <type>IP</type>
+    <usage>Starting and ending Z values to search for when adding a supermontage</usage>
+    <tooltip />
+    <manpage>Starting and ending Z values to search for when adding a supermontage.  If this option is entered, then either -xyadd, or -xadd and -yadd, must be entered.</manpage>
+  </Field>
+  <Field name="DefaultRegionModel">
+    <short>model</short>
+    <type>FN</type>
+    <usage>Patch region model to use for an overlap zone if one is not found</usage>
+    <tooltip />
+    <manpage>Patch region model to use for an overlap zone if one is not found when initially setting up the Edge entries in the info file.  This option will have an effect only when adding a supermontage or processing a manually prepared info file for the first time.</manpage>
+  </Field>
+  <Field name="usage">
+    <short>help</short>
+    <type>B</type>
+    <usage>Print help output</usage>
+    <tooltip />
+    <manpage />
+  </Field>
+</autodoc>

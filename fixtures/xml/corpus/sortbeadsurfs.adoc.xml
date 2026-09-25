@@ -1,0 +1,162 @@
+<?xml version="1.0" encoding="utf-8"?>
+<autodoc>
+  <PreData>
+    <Version>1.0</Version>
+    <Pip>1</Pip>
+  </PreData>
+  <Field name="InputFile">
+    <short>input</short>
+    <type>FN</type>
+    <usage>Input model file with scattered points for 3D gold bead positions</usage>
+    <tooltip />
+    <manpage>Input model file with scattered points for 3D gold bead positions. If this option is not entered, the first non-option argument will be used for this file.</manpage>
+  </Field>
+  <Field name="OutputFile">
+    <short>output</short>
+    <type>FN</type>
+    <usage>Output file for processed model or surface information</usage>
+    <tooltip />
+    <manpage>Output file for processed model or surface information If this option is not entered, the second non-option argument will be used for this file.</manpage>
+  </Field>
+  <Field name="TextFileWithSurfaces">
+    <short>text</short>
+    <type>FN</type>
+    <usage>Name of text file to output with top/bottom assignments</usage>
+    <tooltip />
+    <manpage>Output a text file with the original contour number and the top/bottom assignments (values 1 and 2) for each point.  This is meant to be used by Pickbestseed(1), so input data should have only one object and only one point per contour.</manpage>
+  </Field>
+  <Field name="FlipYandZ">
+    <short>flipyz</short>
+    <type>I</type>
+    <usage>1 to flip Y and Z coordinates, 0 not to, or -1 to flip if nz &gt; ny</usage>
+    <tooltip />
+    <manpage>This option allows control over whether the Y and Z coordinates of the model are flipped.  By default, flipping will be done if the Z dimension (nz) of the modeled volume is greater than the Y dimension (ny).  Enter 1 to force flipping even if this is not the case, or 0 to prevent it if this is the case.</manpage>
+  </Field>
+  <Field name="SubareaSize">
+    <short>subarea</short>
+    <type>I</type>
+    <usage>Size of subareas over which to analyze for two surfaces</usage>
+    <tooltip />
+    <manpage>Size of subareas over which to analyze for two surfaces.  This option is needed only if the area coated with beads is large enough and warped enough that the analysis fails to separate the two surfaces.  The area occupied by beads will be divided into non-overlapping subregions of approximately the given size in each dimension.  Each will be analyzed separately to sort all of the beads between the two surfaces.  Make this value as large as possible, since the analysis can easily fail if there are only ~10 beads in any of the subareas.</manpage>
+  </Field>
+  <Field name="PickAreasMinNumAndSize">
+    <short>pick</short>
+    <type>IP</type>
+    <usage>Minimum bead number and area size for having program pick subarea size</usage>
+    <tooltip />
+    <manpage>The program can divide the analysis in to subareas automatically if this option is used to enter the minimum number of beads required in each area and the minimum subarea size allowed.  The program will pick the smallest possible subarea size that fits these constraints.</manpage>
+  </Field>
+  <Field name="MajorityObjectOnly">
+    <short>majority</short>
+    <type>B</type>
+    <usage>Retain only the points on the surface with more beads</usage>
+    <tooltip />
+    <manpage>Output a model with only one object containing the points on the surface that has the most beads.  Use this option if there are too few fiducials on one surface to fit a smooth surface to in Flattenwarp(1).</manpage>
+  </Field>
+  <Field name="XAxisTilt">
+    <short>xaxis</short>
+    <type>F</type>
+    <usage>X axis tilt used to generate the tomogram (for Tiltalign output only)</usage>
+    <tooltip />
+    <manpage>The value of X axis tilt used when the tomogram was generated.  This value is needed for a 3D fiducial model output by Tiltalign(1) (and only for such a model).</manpage>
+  </Field>
+  <Field name="InvertZAxis">
+    <short>invert</short>
+    <type>B</type>
+    <usage>Invert the Z coordinates of points to match a flipped reconstruction</usage>
+    <tooltip />
+    <manpage>Invert the Z coordinates of the points so that they will match a reconstruction that was Y-Z flipped rather than rotated around the X axis. This option is needed only for a 3D fiducial model output by Tiltalign(1).</manpage>
+  </Field>
+  <Field name="AlreadySorted">
+    <short>already</short>
+    <type>B</type>
+    <usage>Points are already sorted into two surfaces</usage>
+    <tooltip />
+    <manpage>Use this option to skip the analysis that sorts beads between two surfaces, and combine multiple objects by color if there are any.  You would use this for a 3D fiducial model from Tiltalign(1) if the beads are already correctly sorted into two surfaces, or if they are on only one surface and in only one object.</manpage>
+  </Field>
+  <Field name="OneSurface">
+    <short>one</short>
+    <type>B</type>
+    <usage>Points are all on one surface</usage>
+    <tooltip />
+    <manpage>Use this option to skip the analysis that sorts beads between two surfaces, and to combine all points into one object.  You would use this for a 3D fiducial model from Tiltalign(1) if the beads are all on one surface but in different objects.</manpage>
+  </Field>
+  <Field name="AlignedSizeXandY">
+    <short>aligned</short>
+    <type>IP</type>
+    <usage>Unbinned X and Y size of aligned stack used to make reconstruction</usage>
+    <tooltip />
+    <manpage>Unbinned X and Y size of the aligned stack used to make the reconstruction. Use this option if the reconstruction is based on a final aligned stack whose unbinned size is smaller or larger than that of the raw stack, and if you are processing a 3D fiducial model from Tiltalign(1).  If the prealigned stack was binned, you must also enter the -prebin option.</manpage>
+  </Field>
+  <Field name="XTrimStartAndEnd">
+    <short>xtrim</short>
+    <type>IP</type>
+    <usage>Starting and ending X coordinates of aligned stack in final volume</usage>
+    <tooltip />
+    <manpage>Starting and ending X coordinates of the aligned stack that appear in the final trimmed reconstruction, numbered from 1.  See next option.</manpage>
+  </Field>
+  <Field name="YTrimStartAndEnd">
+    <short>ytrim</short>
+    <type>IP</type>
+    <usage>Starting and ending Y coordinates of aligned stack in final volume</usage>
+    <tooltip />
+    <manpage>Starting and ending Y coordinates of the aligned stack that appear in the final trimmed reconstruction, numbered from 1.  These two options are needed only for a 3D fiducial model from Tiltalign(1).  If you built the full reconstruction (no SLICE or WIDTH and OFFSET entries to Tilt(1)), then the coordinates for these two options are just the ones used to trim the volume with Trimvol(1).  If you built a subset of the reconstruction, the WIDTH and OFFSET entries can be used to derive the X coordinates, and the SLICE entries provide the Y coordinates.  If you then trimmed the volume, you need to combine the trimming coordinates with the one used to build the reconstruction.  If you enter these coordinates, you must enter the prealigned and the aligned stack binning if either is different from one.</manpage>
+  </Field>
+  <Field name="PrealignedBinning">
+    <short>prebin</short>
+    <type>I</type>
+    <usage>Binning of prealigned stack used to build 3D fiducial model</usage>
+    <tooltip />
+    <manpage>Binning of prealigned stack used to build a 3D fiducial model.  This option is needed for a binning other than 1 if you enter the aligned stack size or trimming coordinates, or if you want to rescale to the coordinates of the reconstruction.</manpage>
+  </Field>
+  <Field name="ReconstructionBinning">
+    <short>recbin</short>
+    <type>I</type>
+    <usage>Binning of aligned stack used to build reconstruction</usage>
+    <tooltip />
+    <manpage>Binning of aligned stack used to build the reconstruction.  This option is needed for a 3D fiducial model if you are entering trimming coordinates or if you want to rescale coordinates to match the reconstruction.</manpage>
+  </Field>
+  <Field name="RescaleByBinnings">
+    <short>rescale</short>
+    <type>B</type>
+    <usage>Rescale the model coordinates to account for binning</usage>
+    <tooltip />
+    <manpage>Rescale the model coordinates to account for binning of the prealigned or final aligned stack.  By default output coordinates will still have the scaling of the prealigned stack; use this option to rescale them so that they match the scaling of the reconstruction.</manpage>
+  </Field>
+  <Field name="CheckExistingGroups">
+    <short>check</short>
+    <type>B</type>
+    <usage>Check that the sorting is the same as in the input model</usage>
+    <tooltip />
+    <manpage>Check that the sorting is the same as in the input model, which must already have points divided into two groups.  All other output is suppressed, and if the sorting matches the program just exits with 0 status; if there is a mismatch it prints the number of incorrect points and exits with an error status.</manpage>
+  </Field>
+  <Field name="ValuesToRestrainSorting">
+    <short>values</short>
+    <type>I</type>
+    <usage>Use general values of points to exclude some points from initial pairings</usage>
+    <tooltip />
+    <manpage>Use the general values of the points or contours in the model to identify a fraction of points as outliers that should be excluded from the initial pairing of points at steep angles to each other.  Enter 1 to exclude points with particularly high values (e.g., for mean residual values from Beadtrack(1)), or -1 to exclude points with low values (e.g., for peak values from imodFindBeads(1)).</manpage>
+  </Field>
+  <Field name="OutlierCriterionDeviation">
+    <short>outlier</short>
+    <type>F</type>
+    <usage>Criterion value for MAD-Median outlier identification from values</usage>
+    <tooltip />
+    <manpage>When the -values option is entered, the values of points are analyzed to determine the normalized median absolute deviation (MADN) from the median value.  Points with an absolute deviation from the median bigger than a criterion times the MADN are identified as outliers and excluded from initial pairing.  Use this option to change the criterion, whose default is 2.24.</manpage>
+  </Field>
+  <Field name="SetSurfaceSortParam">
+    <short>set</short>
+    <type>FPM</type>
+    <usage>Set given parameter (0-13) to given value in surfaceSort routine</usage>
+    <tooltip />
+    <manpage>Set one parameter specified by the first number to the value specified by the second number in the surfaceSort routine.  See the library documentation of surfaceSort (in libcfshr - &quot;Other utilty functions&quot;) for an explanation and a list of the parameters. To set the verbose level, use &quot;-set 13,1&quot; or &quot;-set 13,2&quot;.</manpage>
+  </Field>
+  <Field name="usage">
+    <short>help</short>
+    <long>usage</long>
+    <type>B</type>
+    <usage>Print help output</usage>
+    <tooltip />
+    <manpage>Print help output.</manpage>
+  </Field>
+</autodoc>

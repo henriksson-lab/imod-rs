@@ -1,0 +1,116 @@
+<?xml version="1.0" encoding="utf-8"?>
+<autodoc>
+  <PreData>
+    <Version>1.0</Version>
+    <Pip>1</Pip>
+  </PreData>
+  <Field name="InputFile">
+    <short>input</short>
+    <long>InputFile</long>
+    <type>FN</type>
+    <usage>Input image file to transform</usage>
+    <tooltip />
+    <manpage />
+  </Field>
+  <Field name="OutputFile">
+    <short>output</short>
+    <long>OutputFile</long>
+    <type>FN</type>
+    <usage>Output file for transformed volume</usage>
+    <tooltip />
+    <manpage />
+  </Field>
+  <Field name="InverseFile">
+    <short>inverse</short>
+    <long>InverseFile</long>
+    <type>FN</type>
+    <usage>Output file for inverse transform (optional)</usage>
+    <tooltip />
+    <manpage>Output file in which to write the inverse of the combined transformation.  This output is optional.</manpage>
+  </Field>
+  <Field name="TemporaryDirectory">
+    <short>tempdir</short>
+    <long>TemporaryDirectory</long>
+    <type>CH</type>
+    <usage>Directory to use for temporary files (default is current directory)</usage>
+    <tooltip />
+    <manpage>Directory to use for temporary files.  The default is that the temporary files will be placed in the current directory.</manpage>
+  </Field>
+  <Field name="OutputSizeXYZ">
+    <short>size</short>
+    <long>OutputSizeXYZ</long>
+    <type>IT</type>
+    <usage>X, Y, Z dimensions of the output file (Default is size of input file)</usage>
+    <tooltip />
+    <manpage />
+  </Field>
+  <Field name="CenterXYZ">
+    <short>center</short>
+    <long>CenterXYZ</long>
+    <type>FT</type>
+    <usage>X, Y, Z index coordinates of the center of the region to transform (Default is center of input file).</usage>
+    <tooltip />
+    <manpage>X, Y, Z index coordinates of the center of the region to transform (Default is center of input file).  Coordinates are numbered from zero.</manpage>
+  </Field>
+  <Field name="TransformFile">
+    <short>xffile</short>
+    <long>TransformFile</long>
+    <type>FNM</type>
+    <usage>Name of file with 3D transform to apply</usage>
+    <tooltip />
+    <manpage>Name of file with 3D transform to apply.  Multiple transforms are applied in the order that they are entered, and before any 3DTransform entries.</manpage>
+  </Field>
+  <Field name="3DTransform">
+    <short>3dxform</short>
+    <long>3DTransform</long>
+    <type>FAM</type>
+    <usage>A 3D transform to apply, consisting of 12 values (a11,a12,a13,dx...)</usage>
+    <tooltip />
+    <manpage>A 3D transform to apply, consisting of 12 values on one line (a11, a12, a13, dx, a21, a22, a23, dy, a31, a32, a33, dz).  Multiple transforms are applied in the order that they are entered, and after any TransformFile entries.</manpage>
+  </Field>
+  <Field name="InterpolationOrder">
+    <short>order</short>
+    <long>InterpolationOrder</long>
+    <type>I</type>
+    <usage>&quot;Order of interpolation to use (1 = linear, 2 = quadratic; default = 2)&quot;</usage>
+    <tooltip />
+    <manpage>Order of interpolation to use.  Currently only quadratic (2) and linear (1) interpolation are available; the default is quadratic.</manpage>
+  </Field>
+  <Field name="ChunkSizesForHDF">
+    <short>chunk</short>
+    <type>IT</type>
+    <usage>Size of chunks in X, Y, Z for chunked HDF output, 0,0,0 for default</usage>
+    <tooltip />
+    <manpage>Size of chunks in X, Y, and Z for output to an HDF file organized in chunks.  Storing data this way will prevent the need to output cubes of transformed data to scratch files and read them back in to make the final output, when the volume is too large to fit in the allowed memory.  Enter 0,0,0 for the default size, which is for chunks the same size as the cubes that would ordinarily be written to scratch files, and for no chunks at all if data are being handled in one cube per layer.  If a specific size is entered for one or more axes, then the program will first determine the division into cubes, and then make the chunk size be the minimum of the cube size and the specified value for each axis.  When using chunks, the memory is limited to 15000 megabytes even if a larger value is entered.</manpage>
+  </Field>
+  <Field name="MemoryLimit">
+    <short>memory</short>
+    <type>I</type>
+    <usage>Memory to use for major arrays, in megabytes</usage>
+    <tooltip />
+    <manpage>Amount of memory to allocate for the major arrays needed by the program, in megabytes.  This always includes memory for input images and may include memory for a stack of output slices, depending on the orientation of the output.  The default is the minimum of system memory minus 1 GB, 60% of system memory, and 12 GB for system memory up to 30 GB, and 40% of system memory above 30 GB, but at least 768 MB.</manpage>
+  </Field>
+  <Field name="VerboseOutput">
+    <short>verbose</short>
+    <type>I</type>
+    <usage>1 for diagnostic output</usage>
+    <tooltip />
+    <manpage />
+  </Field>
+  <Field name="ParameterFile">
+    <short>param</short>
+    <long>ParameterFile</long>
+    <type>PF</type>
+    <usage>Read parameter entries from file</usage>
+    <tooltip />
+    <manpage>Read parameter entries as keyword-value pairs from a parameter file.</manpage>
+  </Field>
+  <Field name="usage">
+    <short>help</short>
+    <long>usage</long>
+    <type>B</type>
+    <usage>Print help output</usage>
+    <tooltip />
+    <manpage />
+  </Field>
+</autodoc>

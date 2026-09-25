@@ -1,0 +1,134 @@
+<?xml version="1.0" encoding="utf-8"?>
+<autodoc>
+  <PreData>
+    <Version>1.0</Version>
+    <Pip>1</Pip>
+  </PreData>
+  <Field name="AFileSubtractFrom">
+    <short>afile</short>
+    <type>FN</type>
+    <usage>Input image file to subtract images from (file A)</usage>
+    <tooltip />
+    <manpage>Input image file to subtract images from (file A).  If this option is not entered, the first non-option argument will be used for this input file.</manpage>
+  </Field>
+  <Field name="BFileSubtractOff">
+    <short>bfile</short>
+    <type>FN</type>
+    <usage>Input image file B with images to subtract from A</usage>
+    <tooltip />
+    <manpage>Input image file B with images to subtract from A.  If this option is not entered, the second non-option argument will be used for this input file, if it exists.  If this file is not specified at all, a backup file to A will be used (the A filename with ~ appended).</manpage>
+  </Field>
+  <Field name="OutputFile">
+    <short>output</short>
+    <type>FN</type>
+    <usage>Output file C for difference images (omit for statistics only)</usage>
+    <tooltip />
+    <manpage>Output file C for difference images.  If this option is not entered, the third non-option argument will be used for this output file, if it exists.  If this file is not specified at all, only statistics will be reported for each section.</manpage>
+  </Field>
+  <Field name="DifferenceTextFile">
+    <short>text</short>
+    <type>FN</type>
+    <usage>Output file for a copy of the difference statistics</usage>
+    <tooltip />
+    <manpage>Output file for a copy of the difference statistics, which will still be printed to standard out.  The file will include the header line and &quot;all&quot; line.</manpage>
+  </Field>
+  <Field name="ModeOfOutput">
+    <short>mode</short>
+    <type>I</type>
+    <usage>Mode for output file (1 for integers, 2 or 12 for floating point)</usage>
+    <tooltip />
+    <manpage>Mode for output file (1 for signed integers, 2 for 32-bit floating point, or 12 for 16-bit floating point).  Bytes (mode 0) are rarely suitable for a difference image since they are unsigned, as is mode 6. The default is the mode of the input file, although the default mode of floating point output for MRC files is governed by the value of environment variable IMOD_WRITE_FLOATS_16BIT.  Mode 12 is allowed only if the output format is MRC.</manpage>
+  </Field>
+  <Field name="ASectionList">
+    <short>asections</short>
+    <type>LI</type>
+    <usage>List of sections in file A (numbered from 0, default is all sections)</usage>
+    <tooltip />
+    <manpage />
+  </Field>
+  <Field name="BSectionList">
+    <short>bsections</short>
+    <type>LI</type>
+    <usage>List of sections in file B (numbered from 0, default is all sections)</usage>
+    <tooltip />
+    <manpage>List of sections in file B.  Sections are numbered from 0.  The default is to use the first N sections in the file, where N is the number of sections in the list for file A.</manpage>
+  </Field>
+  <Field name="ZeroMeanOutput">
+    <short>zero</short>
+    <type>B</type>
+    <usage>Subtract mean difference for each section to make mean output 0</usage>
+    <tooltip />
+    <manpage>Make the mean of the output be zero for each section by subtracting the mean difference between sections from the difference.</manpage>
+  </Field>
+  <Field name="LowerThreshold">
+    <short>lower</short>
+    <type>F</type>
+    <usage>Truncate output to eliminate values below this threshold</usage>
+    <tooltip />
+    <manpage>Truncate the output by replacing values below this theshold with the threshold value.</manpage>
+  </Field>
+  <Field name="UpperThreshold">
+    <short>upper</short>
+    <type>F</type>
+    <usage>Truncate output to eliminate values above this threshold</usage>
+    <tooltip />
+    <manpage>Truncate the output by replacing values above this theshold with the threshold value.</manpage>
+  </Field>
+  <Field name="StatisticsXminAndMax">
+    <short>xstats</short>
+    <type>IP</type>
+    <usage>Minimum and maximum X for computing reported statistics (numbered from 0)</usage>
+    <tooltip />
+    <manpage>Minimum and maximum X for computing the minimum, maximum, mean and SD of the difference that are reported in the output. Coordinates are numbered from 0; the default is the full area in X.</manpage>
+  </Field>
+  <Field name="StatisticsYminAndMax">
+    <short>ystats</short>
+    <type>IP</type>
+    <usage>Minimum and maximum Y for computing reported statistics (numbered from 0)</usage>
+    <tooltip />
+    <manpage>Minimum and maximum Y for computing the minimum, maximum, mean and SD of the difference that are reported in the output.  Coordinates are numbered from 0; the default is the full area in Y.  This entry and the next one do not affect the size of the output images; use Clip(1) to obtain a difference volume from a subarea in one step.</manpage>
+  </Field>
+  <Field name="FractionalValues">
+    <short>frac</short>
+    <type>B</type>
+    <usage>Output summary statistics as fractions of the input data range</usage>
+    <tooltip />
+    <manpage>Output an additional line expressing the summary statistics for all sections as fractions of the data range of the two input files.</manpage>
+  </Field>
+  <Field name="ErrorMinMaxLimit">
+    <short>minmax</short>
+    <type>F</type>
+    <usage>Exit with error if absolute value of min or max exceeds this value</usage>
+    <tooltip />
+    <manpage>Exit with error if the absolute value of the minimum or maximum exceeds the given value, over the region where statistics were computed.</manpage>
+  </Field>
+  <Field name="ErrorSDLimit">
+    <short>sdlimit</short>
+    <type>F</type>
+    <usage>Exit with error if overall standard deviation exceeds this value</usage>
+    <tooltip />
+    <manpage>Exit with error if the overall standard deviation over the region where statistics were computed exceeds the given value.</manpage>
+  </Field>
+  <!--[Field = TestLimit] -->
+  <!--short = test -->
+  <!--type = I -->
+  <!--usage = Limit for the size of the array used to read and write data -->
+  <!--tooltip = -->
+  <!--manpage = Limit for the size of the array used to read and write data.  This -->
+  <!--entry can be used to test whether reading and writing in chunks is working -->
+  <!--properly. -->
+  <Field name="ParameterFile">
+    <short>param</short>
+    <type>PF</type>
+    <usage>Read parameter entries from file</usage>
+    <tooltip />
+    <manpage>Read parameter entries as keyword-value pairs from a parameter file.</manpage>
+  </Field>
+  <Field name="usage">
+    <short>help</short>
+    <type>B</type>
+    <usage>Print help output</usage>
+    <tooltip />
+    <manpage />
+  </Field>
+</autodoc>

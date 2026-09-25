@@ -1,0 +1,22 @@
+
+ NEW image file on unit   1 : vol0-scale0.means
+
+ NEW image file on unit   1 : vol0-scale1.means
+
+ NEW image file on unit   1 : vol0-scale0.SDs
+
+ NEW image file on unit   1 : vol0-scale1.SDs
+
+ NEW image file on unit   1 : vol0-scale0.colmed
+0: 2 x blocks of 7+   2 y blocks of 6+
+
+ NEW image file on unit   1 : vol0-scale1.colmed
+1: 2 x blocks of 7+   2 y blocks of 6+
+               center   center SDs      edge     edge SDs      distinct-
+scale  binning  mean   median  MADN     mean   median  MADN      ness
+  1    1,1,1      453   253.3  24.0         3   100.5   4.9     21.38
+  2    2,2,2      441   171.6  32.5         2    35.3   5.5     12.92
+Selected scaling # 1 as the best one for analysis
+Median Z values of surfaces, numbered from 1, are: 9  22
+Z limits for autopatchfit combine, numbered from 1, are: 8  23
+Absolute limits of surfaces, numbered from 1, are: 8  23

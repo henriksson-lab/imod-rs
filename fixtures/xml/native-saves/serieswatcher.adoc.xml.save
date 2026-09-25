@@ -1,0 +1,293 @@
+<?xml version="1.0" encoding="utf-8"?>
+
+<autodoc>
+  
+  <PreData>
+    
+    <Version>1.0</Version>
+    
+    <Pip>1</Pip>
+  
+  </PreData>
+  
+  <Field name="WatchDirectory">
+    
+    <short>watch</short>
+    
+    <type>FN</type>
+    
+    <usage>Directory in which to find tilt series stacks (default is current dir)</usage>
+    
+    <tooltip>Directory in which to find or watch for tilt series stacks</tooltip>
+    
+    <manpage>Directory to watch for tilt series stacks.  The default is the current directory.</manpage>
+  
+  </Field>
+  
+  <Field name="DeliverToDirectory">
+    
+    <short>deliver</short>
+    
+    <type>FN</type>
+    
+    <usage>Move each stack to this directory and process in a subdirectory</usage>
+    
+    <tooltip />
+    
+    <manpage>Move each stack to this directory and process it in a subdirectory. This entry is not needed if the batch command file has the corresponding entry, but it does override the one in the command file, if any.  If the program is being used just to deliver stacks, this option must be entered.  Even when the delivery is specified in the command file, the file is moved to the specified directory by Serieswatcher, not Batchruntomo(1), because Serieswatcher is more capable of moving files between filesystems.  Without an entry here or in the command file, data sets will be processed in subdirectories of the watched directory, because Batchruntomo(1) is run with its \fB-make\fR option.</manpage>
+  
+  </Field>
+  
+  <Field name="RemoteDirectory">
+    
+    <short>remote</short>
+    
+    <type>FN</type>
+    
+    <usage>Path to starting directory on remote machines</usage>
+    
+    <tooltip />
+    
+    <manpage>Path on remote machines to directory from which this program is started.  This entry is not needed if the batch command file has the corresponding entry, but it does override the one in the command file, if any. This would be necessary if you move a batch command file from the place where it was generated with such an entry.</manpage>
+  
+  </Field>
+  
+  <Field name="MatchPatternOrExt">
+    
+    <short>match</short>
+    
+    <type>CH</type>
+    
+    <usage>Filename pattern or extension to match (* will be prepended if necessary)</usage>
+    
+    <tooltip />
+    
+    <manpage>Filename pattern or extension to match.  This entry can have wild card characters for selecting filenames, namely * to match multiple characters, ? to match a single character, and [...] to match a single character matching one that is inside the brackets, where ranges can be included (e.g., [cd0-9].  (If you enter such a pattern at the command line, you need to enclose it in quotes.)  If no wild cards are included, a &quot;*&quot; will automatically be added before the entry.  Thus, an entry of &quot;.st&quot; will make it watch for files with extension &quot;.st&quot;.  The default pattern is &quot;.mrc&quot;.</manpage>
+  
+  </Field>
+  
+  <Field name="MinimumAgeOfStacks">
+    
+    <short>age</short>
+    
+    <type>F</type>
+    
+    <usage>Seconds since last modification before processing a stack if .openTS never seen</usage>
+    
+    <tooltip />
+    
+    <manpage>Minimum time interval in seconds between the last detected change in the modification time of a stack and starting to process the stack when no &quot;.openTS&quot; file was ever seen.  The default is 300 seconds.</manpage>
+  
+  </Field>
+  
+  <Field name="MinHoursIfOpenTSPresent">
+    
+    <short>opents</short>
+    
+    <type>F</type>
+    
+    <usage>Hours since last modification before processing a stack if .openTS present</usage>
+    
+    <tooltip />
+    
+    <manpage>Minimum time interval in hours between the last detected change in the modification time of the stack and starting to process the stack when a &quot;.openTS&quot; is still present.  The default is 17 hours.  Enter a large number to prevent such stacks from ever being processed.</manpage>
+  
+  </Field>
+  
+  <Field name="MinimumTiltRange">
+    
+    <short>range</short>
+    
+    <type>F</type>
+    
+    <usage>Minimum range of tilt angles required to process a stack (default 40)</usage>
+    
+    <tooltip />
+    
+    <manpage>Minimum range of tilt angles before accepting an apparently mature stack for processing.   The default is 40; enter a larger number if there there is some chance that you will be restarting data sets that failed with bigger tilt ranges than this.</manpage>
+  
+  </Field>
+  
+  <Field name="MinimumNumberOfViews">
+    
+    <short>views</short>
+    
+    <type>I</type>
+    
+    <usage>Minimum number of images in stack required if tilt angles cannot be used</usage>
+    
+    <tooltip />
+    
+    <manpage>If the tilt range cannot be determined, the program tests whether the number of views in a tilt series stack meets this minimum before accepting an apparently mature stack for processing.   The default is 12; enter a larger number if there are no tilt angles in your stacks and there is some chance that you will be restarting data sets that failed with bigger sizes than this.</manpage>
+  
+  </Field>
+  
+  <Field name="EtomoProjectRoot">
+    
+    <short>project</short>
+    
+    <type>FN</type>
+    
+    <usage>Root name of starting Etomo project with .com, .adoc, and .ebt files</usage>
+    
+    <tooltip />
+    
+    <manpage>Root name of starting Etomo project, including path if necessary. When files are supplied in this way, the program will make a complete batch project that can be run in Etomo. There must be a &quot;.com&quot; and a &quot;.ebt&quot; file with this root name, and there must be at least one &quot;.adoc&quot; file starting with the root name. Specifically, if any &quot;.adoc&quot; file with the data set name included, it will use the first such file that it finds and ignore the master &quot;.adoc&quot; file without a data set name, otherwise it will use the master &quot;.adoc&quot; file.  Neither \fB-com\fR nor \fB-adoc\fR can be entered with this option.</manpage>
+  
+  </Field>
+  
+  <Field name="CommandFile">
+    
+    <short>com</short>
+    
+    <type>FN</type>
+    
+    <usage>Command file for running Batchruntomo</usage>
+    
+    <tooltip />
+    
+    <manpage>Command file for running Batchruntomo.  This file can be generated in the Etomo batch interface without adding any stacks, allowing you to specify a directory to deliver, templates, and the CPU and GPU resources and to have the remote directory set, if any.  If you do add a stack, you can also set whether the data sets are dual axis and whether there is gold on two surfaces.</manpage>
+  
+  </Field>
+  
+  <Field name="DirectiveFile">
+    
+    <short>adoc</short>
+    
+    <type>FN</type>
+    
+    <usage>Batch directive file for processing stacks with Batchruntomo</usage>
+    
+    <tooltip />
+    
+    <manpage>Batch directive file for processing stacks with Batchruntomo.  This option must be entered if a command file is.</manpage>
+  
+  </Field>
+  
+  <Field name="CheckFile">
+    
+    <short>check</short>
+    
+    <type>FN</type>
+    
+    <usage>File to check for quit and finish signals</usage>
+    
+    <tooltip />
+    
+    <manpage>File to check for quit and finish signals.  The default is serieswatcher.###.input in the directory where this program is started, where ### is the process ID. A Q in this file will make the program kill all of the current reconstructions then exit; an F will make it allow those to finish then exit.  In either case, the .ebt.active file will be updated with an appropriate status for each set processed.</manpage>
+  
+  </Field>
+  
+  <Field name="DualAxis">
+    
+    <short>dual</short>
+    
+    <type>I</type>
+    
+    <usage>1 for dual-axis data, 0 if not (default 0)</usage>
+    
+    <tooltip>Set this option to process only dual-axis stacks</tooltip>
+    
+    <manpage>1 for dual-axis data, 0 if not.  This option is not needed if it is specified in the batch directive file or a template file, but if it is entered it will override any directives.  The default is 0.</manpage>
+  
+  </Field>
+  
+  <Field name="TwoSurfaces">
+    
+    <short>two</short>
+    
+    <type>I</type>
+    
+    <usage>1 if beads are on two surfaces, 0 if not (default 0)</usage>
+    
+    <tooltip>Set this option if there are expected to be fiducials on both surfaces</tooltip>
+    
+    <manpage>1 if beads are on two surfaces, 0 if not.  This option is not needed if it is specified in the batch directive file or a template file, but if it is entered it will override any directives.  The default is 0.</manpage>
+  
+  </Field>
+  
+  <Field name="CPUMachineList">
+    
+    <short>cpus</short>
+    
+    <type>CH</type>
+    
+    <usage>Machines to use in parallel processing, or number of local cores</usage>
+    
+    <tooltip />
+    
+    <manpage>Machines to use in parallel processing, or number of local cores. Each machine name can be followed by a &quot;:&quot; (colon), followed by the number of CPUs to use in that machine; e.g., druid:4,tubule:4.  This entry is required if there is no CPUMachineList entry in the batch command file, and it would override one in the command file.</manpage>
+  
+  </Field>
+  
+  <Field name="GPUMachineList">
+    
+    <short>gpus</short>
+    
+    <type>CH</type>
+    
+    <usage>Machines to use for parallel processing with a GPU, or 1 for local GPU</usage>
+    
+    <tooltip />
+    
+    <manpage>Machines to use for parallel processing with a GPU, or 1 for local GPU.  The list has the same format as the -G entry to Processchunks, with multiple or specific GPUs specified by colon-separated numbers after a machine name, e.g., druid:2,tubule:1:2.  The GPUMachineList entry in the batch command file will be used if this option is not entered, and</manpage>
+  
+  </Field>
+  
+  <Field name="ParallelRuns">
+    
+    <short>parallel</short>
+    
+    <type>I</type>
+    
+    <usage>Number of data sets to run in parallel</usage>
+    
+    <tooltip />
+    
+    <manpage>Number of data sets to process in parallel runs of Processchunks, with each data set assigned to a separate set of CPUs, referred to as a &quot;machine slot&quot;. When you select parallel runs, the total cores in the CPU list will be divided as evenly as possible among the machine slots.  If there are multiple computers being used, this may result in some slots having all cores on one machine and some having cores on more than one machine, unless the number of cores per computer is a multiple of the number being assigned to each slot.  The collection of GPUs will be managed by Gpuallocator(1), just as when running parallel batch reconstructions with Splitbatch(1), and the entry to Batchruntomo(1) for \fB-MaxGPUsInParallelBatch\fR will determine the maximum number granted to one run when it requests it.</manpage>
+  
+  </Field>
+  
+  <Field name="EtomoOptions">
+    
+    <short>etomo</short>
+    
+    <type>I</type>
+    
+    <usage>Sum of 1 not to rename active ebt at end, 2 not to clean rows from ebt, 4 to keep highest row #</usage>
+    
+    <tooltip />
+    
+    <manpage>This entry is a sum of flags useful to Etomo: ^  1 to skip renaming the active &quot;.ebt&quot; file at the end by removing &quot;.active&quot; ^  2 to skip cleaning out existing rows from the incoming &quot;.ebt&quot; file ^  4 to start adding row numbers past the highest row number found in the incoming .ebt file, even if existing rows are cleaned out</manpage>
+  
+  </Field>
+  
+  <Field name="debug">
+    
+    <short>DebugMode</short>
+    
+    <type>B</type>
+    
+    <usage>Print debugging output</usage>
+    
+    <tooltip />
+    
+    <manpage />
+  
+  </Field>
+  
+  <Field name="usage">
+    
+    <short>help</short>
+    
+    <type>B</type>
+    
+    <usage>Print help output</usage>
+    
+    <tooltip />
+    
+    <manpage />
+  
+  </Field>
+
+</autodoc>

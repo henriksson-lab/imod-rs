@@ -1,0 +1,125 @@
+<?xml version="1.0" encoding="utf-8"?>
+
+<autodoc>
+  
+  <PreData>
+    
+    <Version>1.0</Version>
+    
+    <Pip>1</Pip>
+  
+  </PreData>
+  
+  <Field name="Directory">
+    
+    <short>dir</short>
+    
+    <type>FNM</type>
+    
+    <usage>Name of directory in which to clean up files (. for current directory)</usage>
+    
+    <tooltip />
+    
+    <manpage>Name of directory in which to clean up files (. for current directory). At least one directory must be entered either with this option or as a non-option argument.</manpage>
+  
+  </Field>
+  
+  <Field name="KeepAlignedStack">
+    
+    <short>aligned</short>
+    
+    <type>B</type>
+    
+    <usage>Keep the final aligned stack file (after all modifications)</usage>
+    
+    <tooltip />
+    
+    <manpage />
+  
+  </Field>
+  
+  <Field name="KeepUntrimmedRec">
+    
+    <short>untrimmed</short>
+    
+    <type>B</type>
+    
+    <usage>Keep an untrimmed reconstruction even though a trimmed one exists</usage>
+    
+    <tooltip />
+    
+    <manpage>Keep an untrimmed reconstruction (&quot;_full&quot; file for single axis, &quot;sum&quot; file for dual axis); the default is to remove this if the final Output from Trimvol(1) exists.</manpage>
+  
+  </Field>
+  
+  <Field name="KeepAxisRecs">
+    
+    <short>axis</short>
+    
+    <type>B</type>
+    
+    <usage>Keep the single axis reconstructions of a dual-axis data set</usage>
+    
+    <tooltip />
+    
+    <manpage>Keep the single axis reconstructions of a dual-axis data set; the default is to remove these if the combined file or final trimmed reconstruction exists.</manpage>
+  
+  </Field>
+  
+  <Field name="KeepSIRTRecs">
+    
+    <short>sirt</short>
+    
+    <type>B</type>
+    
+    <usage>Keep SIRT reconstructions or ones built with SIRT-like filter</usage>
+    
+    <tooltip />
+    
+    <manpage>Keep SIRT reconstructions or ones built with SIRT-like filter; the default is to remove these.</manpage>
+  
+  </Field>
+  
+  <Field name="KeepFilterTrials">
+    
+    <short>filter</short>
+    
+    <type>B</type>
+    
+    <usage>Keep filter trials output from Multifiltsetup</usage>
+    
+    <tooltip />
+    
+    <manpage />
+  
+  </Field>
+  
+  <Field name="TrialRun">
+    
+    <short>trial</short>
+    
+    <type>I</type>
+    
+    <usage>List files to be deleted but do not remove them; 2 to list &quot;~&quot; files also</usage>
+    
+    <tooltip />
+    
+    <manpage>List files to be deleted but do not remove them. Enter 1 to have back files ending in &quot;~&quot; summarized on one line, or 2 to have them listed individually.  In the latter case, and if there is only one directory entered, the program will output only filenames that can be used directly.</manpage>
+  
+  </Field>
+  
+  <Field name="usage">
+    
+    <short>help</short>
+    
+    <type>B</type>
+    
+    <usage>Print help output</usage>
+    
+    <tooltip />
+    
+    <manpage />
+  
+  </Field>
+
+</autodoc>

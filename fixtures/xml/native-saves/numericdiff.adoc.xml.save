@@ -1,0 +1,125 @@
+<?xml version="1.0" encoding="utf-8"?>
+
+<autodoc>
+  
+  <PreData>
+    
+    <Version>1.0</Version>
+    
+    <Pip>1</Pip>
+  
+  </PreData>
+  
+  <Field name="AInputFile">
+    
+    <short>ainput</short>
+    
+    <long>AInputFile</long>
+    
+    <type>FN</type>
+    
+    <usage>First file to compare</usage>
+    
+    <tooltip />
+    
+    <manpage>First file to compare.  If this option is not entered, the first non-option argument will be used for this input file.</manpage>
+  
+  </Field>
+  
+  <Field name="BInputFile">
+    
+    <short>binput</short>
+    
+    <long>BInputFile</long>
+    
+    <type>FN</type>
+    
+    <usage>Second file to compare</usage>
+    
+    <tooltip />
+    
+    <manpage>Second file to compare.  If this option is not entered, the second non-option argument will be used for this input file, if it exists.  If this file is not specified at all, a backup file to A will be used (the A filename with ~ appended).</manpage>
+  
+  </Field>
+  
+  <Field name="MaxDifferences">
+    
+    <short>max</short>
+    
+    <long>MaxDifferences</long>
+    
+    <type>FAM</type>
+    
+    <usage>Maximum allowed difference for each column of input</usage>
+    
+    <tooltip />
+    
+    <manpage>Maximum allowed difference for each column of input.  A difference greater than the specified maximum for the particular column will cause the program to exit with a non-zero status.  In addition, if the -big option is selected, the two lines that differ will be printed.  The number of maximum values entered determines how many columns are tested; columns past that number are ignored.  If the input files have multiple sections of numeric data, this option can be entered multiple times to specify the limits for each section.  If there are more numeric sections than entries, the last entry of limits will be applied to the remaining sections.</manpage>
+  
+  </Field>
+  
+  <Field name="GeneralFormat">
+    
+    <short>general</short>
+    
+    <long>GeneralFormat</long>
+    
+    <type>B</type>
+    
+    <usage>Print maximum differences in general rather than fixed format</usage>
+    
+    <tooltip />
+    
+    <manpage>Print maximum differences in general format (up to 6 numbers per line, 5 decimal places, exponential notation for small or large numbers). The default is to use a fixed format (f10.4) that allows up to 8 numbers per line.</manpage>
+  
+  </Field>
+  
+  <Field name="StripLinesWith">
+    
+    <short>strip</short>
+    
+    <long>StripLinesWith</long>
+    
+    <type>CH</type>
+    
+    <usage>Convert lines containing this text to numeric lines</usage>
+    
+    <tooltip />
+    
+    <manpage>Convert lines containing the specified text to numeric lines.  This entry allows one type of line with labeled numeric output to be converted into pure numeric output and compared between the files.</manpage>
+  
+  </Field>
+  
+  <Field name="BigDifferenceOutput">
+    
+    <short>big</short>
+    
+    <long>BigDifferenceOutput</long>
+    
+    <type>B</type>
+    
+    <usage>Output the pair of input lines for differences above a maximum</usage>
+    
+    <tooltip />
+    
+    <manpage>Output the pair of input lines whenever one of the differences is greater than the maximum difference specified with the -max option.</manpage>
+  
+  </Field>
+  
+  <Field name="usage">
+    
+    <short>help</short>
+    
+    <long>usage</long>
+    
+    <type>B</type>
+    
+    <usage>Print help output</usage>
+    
+    <tooltip />
+    
+    <manpage />
+  
+  </Field>
+
+</autodoc>

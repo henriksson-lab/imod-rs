@@ -1,0 +1,70 @@
+<?xml version="1.0" encoding="utf-8"?>
+<autodoc>
+  <PreData>
+    <Version>1.0</Version>
+    <Pip>1</Pip>
+  </PreData>
+  <Field name="InputFile">
+    <short>input</short>
+    <long>InputFile</long>
+    <type>FN</type>
+    <usage>Input model file</usage>
+    <tooltip />
+    <manpage>Input model file.</manpage>
+  </Field>
+  <Field name="OutputFile">
+    <short>output</short>
+    <long>OutputFile</long>
+    <type>FN</type>
+    <usage>Output model file</usage>
+    <tooltip />
+    <manpage>Output model file.</manpage>
+  </Field>
+  <Field name="ExcludeObjects">
+    <short>exclude</short>
+    <long>ExcludeObjects</long>
+    <type>LI</type>
+    <usage>Objects to exclude from resampling</usage>
+    <tooltip />
+    <manpage>Objects to exclude from resampling; for example, closed contour objects.</manpage>
+  </Field>
+  <Field name="DirectionObjects">
+    <short>direction</short>
+    <long>DirectionObjects</long>
+    <type>LI</type>
+    <usage>Objects to use to determine mean direction of fibers</usage>
+    <tooltip />
+    <manpage>Objects to use to determine mean direction of fibers.  The default is to use all of the objects; enter a list to use a subset of objects, or just a single object number if you have created a special object with a contour to indicate the direction.</manpage>
+  </Field>
+  <Field name="MainAxis">
+    <short>main</short>
+    <long>MainAxis</long>
+    <type>I</type>
+    <usage>&quot;Dominant axis along which fibers run (1 = X, 2 = Y, 3 = Z; default = 3)&quot;</usage>
+    <tooltip />
+    <manpage>&quot;Dominant axis along which fibers run (1 = X, 2 = Y, or 3 = Z.) The default is the Z axis (3), which is appropriate for serial section models.  A different axis is generally needed for a model from a tomogram. If the model was built on a tomogram loaded into 3dmod with flipping (-Y), enter a number that refers to the axis that was seen in 3dmod.&quot;</manpage>
+  </Field>
+  <Field name="SkipInversion">
+    <short>skip</short>
+    <type>I</type>
+    <usage>Do not invert contours that go from high to low along main axis</usage>
+    <tooltip />
+    <manpage>Do not invert contours that go from high to low along the main axis.  The default is to reorder contours if necessary so that they go from low Z to high Z in the output model.  With an entry of 1, it will not invert contours in the output model, but it will still invert the ones being averaged when determining the mean direction of fibers so that they go in the same direction as the main axis. This means that the main axis will end up with a positive Z component no matter what direction the contours being averaged point.  To retain the direction in the contours being averaged and make the main axis end up with a negative Z component, enter a -1 so that the contours will not be inverted for averaging either.  If this option is used, it is essential that all the contours being averaged point in about the same direction, since any pointing in the opposite direction will not be fixed.</manpage>
+  </Field>
+  <Field name="ParameterFile">
+    <short>param</short>
+    <long>ParameterFile</long>
+    <type>PF</type>
+    <usage>Read parameter entries from file</usage>
+    <tooltip />
+    <manpage>Read parameter entries as keyword-value pairs from a parameter file.</manpage>
+  </Field>
+  <Field name="usage">
+    <short>help</short>
+    <long>usage</long>
+    <type>B</type>
+    <usage>Print help output</usage>
+    <tooltip />
+    <manpage>Print help output.</manpage>
+  </Field>
+</autodoc>

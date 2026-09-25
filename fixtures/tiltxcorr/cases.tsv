@@ -1,0 +1,31 @@
+# name	arguments	(exit status is recorded by make-tiltxcorr-goldens.sh)
+basic	-input tx.st -output o.xf -tiltfile tx.tlt -rotation -6 -sigma1 0.03 -radius2 0.25 -sigma2 0.05
+nonopt	-tiltfile tx.tlt -rotation -6 tx.st o.xf
+firstinc	-input tx.st -output o.xf -first -60 -increment 10 -rotation -6 -offset 0.5
+ccciter	-input tx.st -output o.xf -tiltfile tx.tlt -rotation -6 -ccc -iterate 2 -radius2 0.3 -sigma2 0.05
+cumul	-input tx.st -output o.xf -tiltfile tx.tlt -rotation -6 -cumulative -absstretch
+skipleave	-input tx.st -output o.xf -tiltfile tx.tlt -rotation -6 -skip 3 -leaveaxis -xminmax 10,85
+breakrev	-input tx.st -output o.xf -tiltfile tx.tlt -rotation -6 -break 8 -reverse
+nostretch	-input tx.st -output o.xf -tiltfile tx.tlt -rotation -6 -nostretch -views 2,12
+binaa	-input tx.st -output o.xf -tiltfile tx.tlt -rotation -6 -binning 2 -antialias 4 -taper 8,8 -pad 10,10
+exclude	-input tx.st -output o.xf -tiltfile tx.tlt -rotation -6 -exclude -binning 2 -verbose 1
+search	-input tx.st -output o.xf -tiltfile tx.tlt -rotation -6 -search -changes 8 -mag 0.95,1.05
+scan	-input tx.st -output o.xf -tiltfile tx.tlt -rotation -6 -scan 2,1
+second	-input tx.st -output o.xf -tiltfile tx.tlt -rotation -6 -second 30,30
+ref	-input tx.st -output o.xf -tiltfile tx.tlt -rotation -6 -reference tx.st -rview 7
+bound	-input tx.st -output o.xf -tiltfile tx.tlt -rotation -6 -boundary bound.mod
+test	-input tx.st -output o.xf -tiltfile tx.tlt -rotation -6 -test t.mrc -binning 2
+shift	-input tx.st -output o.xf -tiltfile tx.tlt -rotation -6 -shift 6,4 -rect -piece tx.pl
+axial	-input tx.st -output o.xf -tiltfile tx.tlt -rotation -6 -axial 6,4 -imagebinned 2 -pixel 2 -nmrad2 0.1 -binning 1 -ubborder 8,8
+patch	-input tx.st -output p.mod -tiltfile tx.tlt -rotation -6 -size 32,32 -number 3,3 -iterate 2
+patchprexf	-input tx.st -output p.mod -tiltfile tx.tlt -rotation -6 -size 32,32 -number 3,3 -prexf tx.prexf -verbose 1
+patchseed	-input tx.st -output p.mod -tiltfile tx.tlt -rotation -6 -size 24,24 -seed seed.mod -length 6,2
+patchexpand	-input tx.st -output p.mod -tiltfile tx.tlt -rotation -6 -size 20,20 -number 4,4 -expand 1.6,1.6 -sdbin 1,2 -domains 3,3 -verbose 1
+patchtest	-input tx.st -output p.mod -tiltfile tx.tlt -rotation -6 -size 32,32 -overlap 0.4,0.4 -test t.mrc -single 2
+warp	-input tx.st -output w.xf -size 24,24 -number 4,4 -warp 1 -boundary boundw.mod
+warplin	-input tx.st -output w.xf -size 24,24 -number 3,3 -warp -1
+badbin	-input tx.st -output o.xf -tiltfile tx.tlt -binning 40
+skipbreak	-input tx.st -output o.xf -tiltfile tx.tlt -skip 3 -break 5
+noout	-input tx.st -tiltfile tx.tlt
+highangle	-input tx.st -output o.xf -first -60 -increment 20
+gpu	-input tx.st -output p.mod -tiltfile tx.tlt -size 32,32 -number 2,2 -gpu 0

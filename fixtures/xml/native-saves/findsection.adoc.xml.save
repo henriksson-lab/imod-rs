@@ -1,0 +1,419 @@
+<?xml version="1.0" encoding="utf-8"?>
+
+<autodoc>
+  
+  <PreData>
+    
+    <Version>1.0</Version>
+    
+    <Pip>1</Pip>
+  
+  </PreData>
+  
+  <Field name="TomogramFile">
+    
+    <short>tomo</short>
+    
+    <type>FNM</type>
+    
+    <usage>Name of image file to analyze</usage>
+    
+    <tooltip />
+    
+    <manpage>Name of image file to analyze.  At least one image file must be entered either with this option or as a non-option argument.  All non-option arguments are taken to be tomograms for analysis.</manpage>
+  
+  </Field>
+  
+  <Field name="SurfaceModel">
+    
+    <short>surface</short>
+    
+    <type>FN</type>
+    
+    <usage>File name for output of surface model for flattening</usage>
+    
+    <tooltip />
+    
+    <manpage>File name for output of a surface model that can be used for flattening in Flattenwarp(1).</manpage>
+  
+  </Field>
+  
+  <Field name="TomoPitchModel">
+    
+    <short>pitch</short>
+    
+    <type>FN</type>
+    
+    <usage>File name for output of boundary model for use with Tomopitch</usage>
+    
+    <tooltip />
+    
+    <manpage>File name for output of boundary model for use with Tomopitch(1).  Such a model will have two straight lines at each sample position.  If multiple tomograms are analyzed, each is assumed to be a separate sample, and there will be a pair of lines for each sample, with the contours assigned to times corresponding to the sample number.  If there is only a single tomogram, then the \fB-samples\fR option must be entered to indicate how many regions in Y to sample.</manpage>
+  
+  </Field>
+  
+  <Field name="SeparatePitchLineFits">
+    
+    <short>separate</short>
+    
+    <type>B</type>
+    
+    <usage>Fit each surface separately in making lines for Tomopitch output</usage>
+    
+    <tooltip />
+    
+    <manpage>When making a model of paired lines for use in Tomopitch(1), the default is to fit a pair of parallel lines to the top and bottom surfaces. With this option, lines will be fit separately to points on each surface. This method would be suitable if every sample has material across a wide enough area so that the fit will not be thrown off by a few aberrant points.</manpage>
+  
+  </Field>
+  
+  <Field name="NumberOfSamples">
+    
+    <short>samples</short>
+    
+    <type>I</type>
+    
+    <usage>Number of positions to sample in a single tomogram for pitch lines</usage>
+    
+    <tooltip />
+    
+    <manpage>Number of positions to sample in a single tomogram to obtain lines for Tomopitch(1).  The position and spacing between these samples is determined by their number, the sample extent, and the total number of blocks of analyzed boxes in Y.</manpage>
+  
+  </Field>
+  
+  <Field name="SampleExtentInY">
+    
+    <short>extent</short>
+    
+    <type>I</type>
+    
+    <usage>Approximate extent in Y to use at each sample position, in unbinned pixels</usage>
+    
+    <tooltip />
+    
+    <manpage>Approximate extent in Y analyzed at sampled positions from a single tomogram, in unbinned pixels.  Since a surface position is estimated only for each block of boxes, spanning 100 unbinned pixels by default, the actual extent included in the analysis will be based on an integral number of blocks. The default is to analyze one block at each sample position.  When multiple tomogram samples are analyzed, all of the available positions will be used.</manpage>
+  
+  </Field>
+  
+  <Field name="HighSDboxCriterion">
+    
+    <short>high</short>
+    
+    <type>F</type>
+    
+    <usage>Criterion for using high SD boxes to define extent for Tomopitch output</usage>
+    
+    <tooltip />
+    
+    <manpage>Determine sample extent and orientation from boxes with SD values that are the given criterion number of MADNs above the edge median.</manpage>
+  
+  </Field>
+  
+  <Field name="BeadModelFile">
+    
+    <short>bead</short>
+    
+    <type>FN</type>
+    
+    <usage>Name of model file with positions to use when finding extent with high SD</usage>
+    
+    <tooltip />
+    
+    <manpage>When finding extent and orientation from boxes with high SD values, a set of fiducial positions will also be taken into account if this option is entered with a model file containing bead positions.</manpage>
+  
+  </Field>
+  
+  <Field name="BeadDiameter">
+    
+    <short>diameter</short>
+    
+    <type>F</type>
+    
+    <usage>Diameter of beads to assume when considering bead extent (default 5)</usage>
+    
+    <tooltip />
+    
+    <manpage>Diameter of beads to assume when including bead positions in the analysis.  Half the diameter will be subtracted or added to the lower or upper position based on beads, respectively.  The default is 5.</manpage>
+  
+  </Field>
+  
+  <Field name="BoostHighSDThickness">
+    
+    <short>boost</short>
+    
+    <type>F</type>
+    
+    <usage>Fraction by which to increase thickness from high SD analysis</usage>
+    
+    <tooltip />
+    
+    <manpage>Fraction by which to increase the thickness from the analysis of high SD. The lower and upper boundaries from this analysis will each be moved by half of this amount, or less if that brings one of them to the edge of the volume.  If bead positions are being considered also, limits based on them are applied after this increase.</manpage>
+  
+  </Field>
+  
+  <Field name="LowestSDforEdges">
+    
+    <short>lowest</short>
+    
+    <type>B</type>
+    
+    <usage>Find Z planes with lowest SD and use to measure edge statistics</usage>
+    
+    <tooltip />
+    
+    <manpage>Scan through Z planes for the ones with the lowest SD values and use these to measure the statistics of the edge, instead of using planes atthe surfaces of the volume.</manpage>
+  
+  </Field>
+  
+  <Field name="NumberOfDefaultScales">
+    
+    <short>scales</short>
+    
+    <type>I</type>
+    
+    <usage>Number of default, isotropic binnings to analyze</usage>
+    
+    <tooltip />
+    
+    <manpage>This option can be used to specify how many default binnings to analyze, instead of entering each one with the \fB-binning\fR option.  These binnings are isotropic (the same in each dimension).  The default binnings available are 1, 2, 3, 4, 6, 8, 12, 16, 24, 32, 48, and 64.  The default is to do a single scale at binning 1.</manpage>
+  
+  </Field>
+  
+  <Field name="BinningInXYZ">
+    
+    <short>binning</short>
+    
+    <type>ITM</type>
+    
+    <usage>Binning in X, Y, and Z for each scale to analyze</usage>
+    
+    <tooltip />
+    
+    <manpage>Binning in X, Y, and Z for each scale to analyze.  Multiple binning entries should be in order by increased binning.  This option cannot be entered with \fB-scale\fR.</manpage>
+  
+  </Field>
+  
+  <Field name="SizeOfBoxesInXYZ">
+    
+    <short>size</short>
+    
+    <type>ITM</type>
+    
+    <usage>Size in X, Y, and Z of boxes in which to measure mean and SD</usage>
+    
+    <tooltip />
+    
+    <manpage>Size in X, Y, and Z of boxes in which to measure mean and SD, in binned pixels.  This option can be entered multiple times, up to once per each scaling, but one entry seems to be sufficient.  For scalings past the last one for which a size was entered, the size in each dimension will be set to span about the same extent in unbinned pixels as for the last binning for which size was entered. The entry is required.</manpage>
+  
+  </Field>
+  
+  <Field name="SpacingInXYZ">
+    
+    <short>spacing</short>
+    
+    <type>ITM</type>
+    
+    <usage>Spacing in X, Y, and Z between boxes, in binned pixels</usage>
+    
+    <tooltip />
+    
+    <manpage>Spacing in X, Y, and Z between boxes, in binned pixels.  This option can be entered multiple times, only once, or not at all; the default is to set the spacing to half of the size.  For scalings past the last one for which a spacing was entered, the spacing in each dimension will be set to give the same overlap between boxes as for the last binning for which a spacing was entered.</manpage>
+  
+  </Field>
+  
+  <Field name="BlockSize">
+    
+    <short>block</short>
+    
+    <type>I</type>
+    
+    <usage>Size of block in which to consolidate analyzed boxes (unbinned pixels)</usage>
+    
+    <tooltip />
+    
+    <manpage>Size of block in which to consolidate the boxes for further analysis, in unbinned pixels.  If this option is not entered, the program will start with a size of 100 pixels, or 200 if making a surface model, and then increase the size to get an equivalent area if there are too few boxes in one direction (specifically, when using multiple tomogram samples, the size generally gets increased to ~300).  If the option is entered, the number is used as is, without such an adjustment.</manpage>
+  
+  </Field>
+  
+  <Field name="XMinAndMax">
+    
+    <short>xminmax</short>
+    
+    <type>IP</type>
+    
+    <usage>Minimum and maximum X coordinate to include in analysis</usage>
+    
+    <tooltip />
+    
+    <manpage>Minimum and maximum X coordinate to include in the analysis.  The default is to trim off 2.5% of the extent on each end when outputting a surface model, otherwise 5%.</manpage>
+  
+  </Field>
+  
+  <Field name="YMinAndMax">
+    
+    <short>yminmax</short>
+    
+    <type>IP</type>
+    
+    <usage>Minimum and maximum Y coordinate to include in analysis</usage>
+    
+    <tooltip />
+    
+    <manpage>Minimum and maximum Y coordinate to include in the analysis. If Y is the thickness dimension, the default is to use the whole extent; otherwise the default is to trim off either 2.5% or 5% of the extent on each end, depending on whether a surface model is being made.</manpage>
+  
+  </Field>
+  
+  <Field name="ZMinAndMax">
+    
+    <short>zminmax</short>
+    
+    <type>IP</type>
+    
+    <usage>Minimum and maximum Z coordinate to include in analysis</usage>
+    
+    <tooltip />
+    
+    <manpage>Minimum and maximum Z coordinate to include in the analysis. If Z is the thickness dimension, the default is to use the whole extent; otherwise the default is to trim off either 2.5% or 5% of the extent on each end, depending on whether a surface model is being made.</manpage>
+  
+  </Field>
+  
+  <Field name="ThickDimensionIsY">
+    
+    <short>flipped</short>
+    
+    <type>I</type>
+    
+    <usage>0 or 1 if the thickness dimension of the reconstruction is Z or Y</usage>
+    
+    <tooltip />
+    
+    <manpage>This option can be used to specify which axis of a single tomogram is the thickness dimension, if necessary.  The default is to assume that the shortest dimension of Y or Z is the thickness dimension.  Multiple tomograms are assumed to be samples as built by Tilt(1) and must have their thickness in Y.</manpage>
+  
+  </Field>
+  
+  <Field name="AxisRotationAngle">
+    
+    <short>axis</short>
+    
+    <type>F</type>
+    
+    <usage>Rotation angle from Y axis to tilt axis in raw tilt series</usage>
+    
+    <tooltip />
+    
+    <manpage>Rotation angle from Y axis to tilt axis in the raw tilt series, counterclockwise positive.  With this entry, the program will avoid analyzing regions outside the area that can be well-reconstructed from the original images.  However, the correct region is identified only if the aligned stack and reconstruction were centered on the original tilt series.</manpage>
+  
+  </Field>
+  
+  <Field name="TiltSeriesSizeXY">
+    
+    <short>tilt</short>
+    
+    <type>IP</type>
+    
+    <usage>(Binned) size in X and Y of raw tilt series</usage>
+    
+    <tooltip />
+    
+    <manpage>Size in X and Y of raw tilt series for volume being analyzed, divided by the binning applied to make its aligned stack.  When \fB-axis\fR option is entered, this option should be entered if this size differs from that of the reconstruction.</manpage>
+  
+  </Field>
+  
+  <Field name="EdgeExtentInXYZ">
+    
+    <short>edge</short>
+    
+    <type>IT</type>
+    
+    <usage>Approximate # of pixels in X, Y, and Z to use for edge statistics</usage>
+    
+    <tooltip />
+    
+    <manpage>Approximate # of pixels in X, Y, and Z to use for getting statistics about the edge of the volume in the thickness dimension.  The default is to use 2.5% of the extent in the thickness dimension and 50% of the extent in the other two dimensions.</manpage>
+  
+  </Field>
+  
+  <Field name="CenterExtentInXYZ">
+    
+    <short>center</short>
+    
+    <type>IT</type>
+    
+    <usage>Approximate # of pixels in X, Y, and Z to use for center statistics</usage>
+    
+    <tooltip />
+    
+    <manpage>Approximate # of pixels in X, Y, and Z to use for getting statistics about the center of the volume.  The default is to use 10% of the extent in the thickness dimension and 33% of the extent in the other two dimensions.</manpage>
+  
+  </Field>
+  
+  <Field name="ControlValue">
+    
+    <short>control</short>
+    
+    <type>FPM</type>
+    
+    <usage>Parameter number and value for setting algorithm control parameters</usage>
+    
+    <tooltip />
+    
+    <manpage>Parameter number and value for setting algorithm control parameters. Parameters and their numbers (and default values in parentheses) are: ^  1: Minimum # of points for using robust fit to get pitch line on one surface (6) ^  21: Fraction that the difference between distinguishability of center from edge points must improve to adopt a higher scaling for analysis (0.33) ^  22: Threshold weight from robust fit for including a point in the final smoothing fit (0.2) ^  23: Threshold weight from robust fit for counting a point as &quot;good&quot; (0.6) ^  27: Fraction of depth extent to use for center samples (0.1, or 0.4 if analyzing high SD) ^  30: Take square root of SD values if &gt; 0 (0, or 1 when analyzing high SD) ^       Parameters for finding midpoint ^  3: Number of edge MADN's above edge median that maximum value must be to proceed (2.) ^  4: Fraction of maximum - edge difference to achieve (0.5) ^  5: Number of edge MADNs above edge to achieve as well (3.) ^  6: Number of box medians that need to be above those criteria (3) ^       Parameters for fitting boundaries of columns ^  7: Number of center MADN's below the center median for inside median to be too low (5.) ^  8: Fraction of inside - edge median difference that it must fall toward edge median (0.3) ^  9, 10: Low and high limits of range of fractions of inside - edge median difference to fit (0.2 and 0.8) ^  11: Fraction of inside - edge median difference at which to save boundary (0.5) ^  12: Fraction of difference at which to estimate extra boundary distance for pitch output (0.25) ^  13: Minimum fraction of boxes in column that must yield boundaries (0.5) ^       Parameters for checking block thickness ^  14: Criterion fraction of median thickness for considering block too thin (0.5) ^  15: Drop a boundary if it is this much farther from local mean than other boundary is (2.) ^  16: Drop a boundary if its difference from the mean is this fraction of median thickness (0.35) ^       Robust fitting parameters ^  17: K-factor for the weighting function (4.68) ^  18: Maximum change in weights for terminatiom (0.02) ^  19: Maximum change in weights for terminating on an oscillation (0.05) ^  20: Maximum iterations (30) ^       Parameters for estimate of Z limits for combine with Autopatchfit ^  24: Fraction for percentile of positions included in the limits (0.10) ^  25: Fraction for lower percentile of positions that can be partly outside the limits (0.01) ^  26: Number of pixels outside the limits the latter positions can be (20) ^       Parameters for analysis of high SD ^  28: Fraction of extreme beads to exclude when finding orientation that gives minimum spread (0.04) ^  29: Basic amount to weight bead separation in the measure of spread; they will also be weighted less if they occupy less lateral area (0.33) ^  31: Type of data to use for analyzing projections of SD at each layer in depth; 1: mean, 2: median, 3: 75th percentile, 4: fraction of boxes above criterion (0) ^  32: Fraction of the way from baseline to peak for finding rising point of layer projections (0.1) ^  33: Use extrapolation to baseline rather than point where layer projection crosses the criterion (0) ^  34: Use second or fourth moment (1 or 2) of layer projection values as measure of spread (0) ^  35: Fraction of extreme beads to exclude when determining low and high boundaries (0.01)</manpage>
+  
+  </Field>
+  
+  <Field name="VolumeRootname">
+    
+    <short>volume</short>
+    
+    <type>CH</type>
+    
+    <usage>Root name for output of mean and SD volumes at each scale</usage>
+    
+    <tooltip />
+    
+    <manpage>Root name for output of mean and SD volumes at each scale.  Each pixel in such volumes corresponds to an individual box within which mean and SD were measured.  The volumes names will have the form &quot;rootname#-scale#.means&quot; and &quot;rootname#-scale#.SDs&quot;, where the first # is the tomogram number and the second is the scale index (both numbered from 0).</manpage>
+  
+  </Field>
+  
+  <Field name="PointRootname">
+    
+    <short>point</short>
+    
+    <type>CH</type>
+    
+    <usage>Root name for output of models with raw and smoothed points</usage>
+    
+    <tooltip />
+    
+    <manpage>Root name for output of models with raw positions along the surfaces of the section, and with points after smoothing the surface. The models will be named &quot;rootname#-colbound.mod&quot; and &quot;rootname#-smooth.mod&quot;, respectively, where # is the tomogram number.  There will be two scattered point objects, one for each surface.</manpage>
+  
+  </Field>
+  
+  <Field name="DebugOutput">
+    
+    <short>debug</short>
+    
+    <type>I</type>
+    
+    <usage>1 or 2 for debugging output</usage>
+    
+    <tooltip />
+    
+    <manpage>1 or 2 for debugging output; 2 gives output about individual smoothing fits.</manpage>
+  
+  </Field>
+  
+  <Field name="usage">
+    
+    <short>help</short>
+    
+    <type>B</type>
+    
+    <usage>Print help output</usage>
+    
+    <tooltip />
+    
+    <manpage />
+  
+  </Field>
+
+</autodoc>

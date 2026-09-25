@@ -1,0 +1,307 @@
+<?xml version="1.0" encoding="utf-8"?>
+
+<autodoc>
+  
+  <PreData>
+    
+    <Version>1.0</Version>
+    
+    <Pip>1</Pip>
+  
+  </PreData>
+  
+  <Field name="InputImageFile">
+    
+    <short>image</short>
+    
+    <type>FN</type>
+    
+    <usage>Input image file</usage>
+    
+    <tooltip />
+    
+    <manpage>Input file with volume to be extracted from.  If this option is not entered, the first non-option argument will be used for this input file.</manpage>
+  
+  </Field>
+  
+  <Field name="ModelFile">
+    
+    <short>model</short>
+    
+    <type>FN</type>
+    
+    <usage>Name of model file with points to be extracted</usage>
+    
+    <tooltip />
+    
+    <manpage>Name of model file with points to be extracted.  If this option is not entered, the second non-option argument will be used for this input file.</manpage>
+  
+  </Field>
+  
+  <Field name="OutputFile">
+    
+    <short>output</short>
+    
+    <type>FN</type>
+    
+    <usage>Output file for single stack of all extracted subvolumes</usage>
+    
+    <tooltip />
+    
+    <manpage>Output file for single stack of all extracted subvolumes.  If this option is not entered, the third non-option argument will be used for this output file.  Either an output file or a root name for a series of files must be entered.</manpage>
+  
+  </Field>
+  
+  <Field name="SeriesRootName">
+    
+    <short>series</short>
+    
+    <type>CH</type>
+    
+    <usage>Root name to use for series of numbered files</usage>
+    
+    <tooltip />
+    
+    <manpage>Root name to use for series of numbered files, one per point being extracted.  A dot and the number will be appended to the root name for each file.  The number of digits used for the number will be the same for all files so that they will list in order.</manpage>
+  
+  </Field>
+  
+  <Field name="PieceListFile">
+    
+    <short>piece</short>
+    
+    <type>FN</type>
+    
+    <usage>Name of input piece list file if image is montaged or out of sequence</usage>
+    
+    <tooltip />
+    
+    <manpage />
+  
+  </Field>
+  
+  <Field name="ArrayPieceList">
+    
+    <short>array</short>
+    
+    <type>FN</type>
+    
+    <usage>Name of piece list file for viewing extracted volumes in an array</usage>
+    
+    <tooltip />
+    
+    <manpage />
+  
+  </Field>
+  
+  <Field name="TruePieceList">
+    
+    <short>true</short>
+    
+    <type>FN</type>
+    
+    <usage>Name of piece list file for viewing subvolumes in original positions</usage>
+    
+    <tooltip />
+    
+    <manpage />
+  
+  </Field>
+  
+  <Field name="ObjectsToUse">
+    
+    <short>objects</short>
+    
+    <type>LI</type>
+    
+    <usage>List of model objects with points to extract</usage>
+    
+    <tooltip />
+    
+    <manpage>List of model objects with points to extract (comma-separated ranges allowed).  The default is to use all open contour or scattered point objects. This option can be used to select a subset of objects in the model or force the use of a closed contour object.</manpage>
+  
+  </Field>
+  
+  <Field name="BoxSizeXY">
+    
+    <short>box</short>
+    
+    <type>I</type>
+    
+    <usage>Size of square box to extract in X/Y plane</usage>
+    
+    <tooltip />
+    
+    <manpage>Size of square box to extract in X/Y plane.  If you want to extract a rectangular box, use the -volume option instead.  Either -box or -volume must be entered.</manpage>
+  
+  </Field>
+  
+  <Field name="VolumeSizeXYZ">
+    
+    <short>volume</short>
+    
+    <type>IT</type>
+    
+    <usage>Size of subvolume to extract in X, Y, and Z</usage>
+    
+    <tooltip />
+    
+    <manpage>Size of subvolume to extract in X, Y, and Z.  The Z entry is irrelevant if -slices is entered as well.</manpage>
+  
+  </Field>
+  
+  <Field name="SlicesBelowAndAbove">
+    
+    <short>slices</short>
+    
+    <type>IP</type>
+    
+    <usage>Number of slices to extract below and above points in Z</usage>
+    
+    <tooltip />
+    
+    <manpage>Number of slices to extract below and above points in Z.  If this option is not entered, the Z size is taken from the size entered with -box (thus giving a cube), or from the Z size entered with -volume. In these cases, the program extracts an equal number of slices below and above for an odd Z size, and one more slice below than above for an even Z size.</manpage>
+  
+  </Field>
+  
+  <Field name="WhichPointsToExtract">
+    
+    <short>which</short>
+    
+    <type>I</type>
+    
+    <usage>Which points to extract: 0 for start, 1 for end, -1 for all</usage>
+    
+    <tooltip />
+    
+    <manpage>Which points to extract from each contour: 0 for starting points, 1 for ending points, or -1 for all points.  The default is -1.</manpage>
+  
+  </Field>
+  
+  <Field name="XMinAndMax">
+    
+    <short>xminmax</short>
+    
+    <type>IP</type>
+    
+    <usage>Minimum and maximum coordinates in X for points to extract</usage>
+    
+    <tooltip />
+    
+    <manpage>Minimum and maximum coordinates in X for points to extract.  The default is to extract for any point contained within the full volume and to fill areas outside the volume with the mean intensity.</manpage>
+  
+  </Field>
+  
+  <Field name="YMinAndMax">
+    
+    <short>yminmax</short>
+    
+    <type>IP</type>
+    
+    <usage>Minimum and maximum coordinates in Y for points to extract</usage>
+    
+    <tooltip />
+    
+    <manpage />
+  
+  </Field>
+  
+  <Field name="ZMinAndMax">
+    
+    <short>zminmax</short>
+    
+    <type>IP</type>
+    
+    <usage>Minimum and maximum sections (numbered from 0) for volumes to extract</usage>
+    
+    <tooltip />
+    
+    <manpage>Minimum and maximum sections within which volumes must be contained in order to be extracted.  The default is to extract a volume for any point contained within the full volume, which will lead to blank slices for points vey near the top or bottom of the volume.  If this limit is set, the whole extracted volume, not just the center point, must be contained with in the limits.  Sections are numbered from 0.</manpage>
+  
+  </Field>
+  
+  <Field name="XformsToApply">
+    
+    <short>xforms</short>
+    
+    <type>FN</type>
+    
+    <usage>File of transforms to apply to points before extracting</usage>
+    
+    <tooltip />
+    
+    <manpage>File of transforms to apply to points before extracting.  The first transform in the file should correspond to the first section in the file.</manpage>
+  
+  </Field>
+  
+  <Field name="BackTransform">
+    
+    <short>back</short>
+    
+    <type>B</type>
+    
+    <usage>Back-transform the points with the inverse of those transforms</usage>
+    
+    <tooltip />
+    
+    <manpage>Back-transform the points with the inverse of the transforms entered with -xforms.  These options could be used to take coordinates from an aligned model and extract images from unaligned images.</manpage>
+  
+  </Field>
+  
+  <Field name="TaperAtFill">
+    
+    <short>taper</short>
+    
+    <type>IP</type>
+    
+    <usage>Distance to taper incomplete box, and 0/1 for tapering outside/inside</usage>
+    
+    <tooltip />
+    
+    <manpage>Use this option to taper the image in boxes that fall partially outside the input volume.  Enter the number of pixels over which to taper the image, and a 0 for tapering outside or 1 for tapering inside the border of the real image data.  Tapering is to the value that was used to fill the non-existent image area.  This value is the mean of the existing image if only one slice is being extracted at each point and the input file is not a montage, otherwise it is the mean of the input image file.  Boxes will be tapered in Z as well as in X and Y.</manpage>
+  
+  </Field>
+  
+  <Field name="BlankBetweenImages">
+    
+    <short>blank</short>
+    
+    <type>I</type>
+    
+    <usage>Pixels of blank space between images in array piece list (default 5)</usage>
+    
+    <tooltip />
+    
+    <manpage />
+  
+  </Field>
+  
+  <Field name="ParameterFile">
+    
+    <short>param</short>
+    
+    <type>PF</type>
+    
+    <usage>Read parameter entries from file</usage>
+    
+    <tooltip />
+    
+    <manpage>Read parameter entries as keyword-value pairs from a parameter file.</manpage>
+  
+  </Field>
+  
+  <Field name="usage">
+    
+    <short>help</short>
+    
+    <type>B</type>
+    
+    <usage>Print help output</usage>
+    
+    <tooltip />
+    
+    <manpage />
+  
+  </Field>
+
+</autodoc>
