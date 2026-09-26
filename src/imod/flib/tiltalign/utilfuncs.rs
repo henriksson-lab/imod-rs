@@ -183,13 +183,13 @@ pub fn memory_error(all_non_null: bool, descrip: &str) {
 /// in `numInView`.
 ///
 /// `av` is the file-scope pointer (`testSetFracStep` only).  The possibly-NULL
-/// `realInTestSet` and `totalPtNum` are `Option`s.  Note the source indexes
+/// `realInTestSet` and `totalPtNum` are `Option`s.
+///
+/// Fixed in translation (2026-09-26, `BUGS.md`): the source indexes
 /// `realInTestSet[listReal[j]]` with the 1-based point number
-/// (`utilfuncs.cpp:161`), i.e. the flag of the *next* point; kept as written.
-/// For the last point that is element `nrealPt` of an array `tiltalign.cpp`
-/// allocates `nrealPt` long (`:287,435`): a C heap over-read.  `tiltalign.rs`
-/// allocates both flag arrays one element longer, so that read sees a 0 here
-/// where the C reads heap residue (`BUGS.md`).
+/// (`utilfuncs.cpp:161`), i.e. the flag of the *next* point, and for the last
+/// point reads one past an array `tiltalign.cpp` allocates `nrealPt` long.
+/// Here the point's own flag, `realInTestSet[listReal[j] - 1]`, is read.
 #[allow(clippy::too_many_arguments)]
 pub fn count_num_in_view(
     av: &AlignVariables,
@@ -212,7 +212,7 @@ pub fn count_num_in_view(
     for j in 0..nreal_pt as usize {
         if let Some(test_set) = real_in_test_set
             && av.test_set_frac_step > 0.
-            && test_set[list_real[j] as usize] != 0
+            && test_set[(list_real[j] - 1) as usize] != 0
         {
             continue;
         }
@@ -252,4 +252,40 @@ pub fn formatted_error(err: f32, thresh: f32, width: i32) -> String {
     let mut buffer = c_format_bytes(&format, &[CArg::Dbl(err as f64)]);
     buffer.truncate(62);
     String::from_utf8_lossy(&buffer).into_owned()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// `BUGS.md` "`countNumInView`": the source read `realInTestSet` with the
+    /// 1-based point number (the next point's flag, and one past the array for
+    /// the last point).  Each point's own flag decides here.
+    #[test]
+    fn count_num_in_view_skips_the_flagged_point_itself() {
+        let mut av = AlignVariables::default();
+        av.test_set_frac_step = 0.5;
+        // Three points: point 1 on views 1,2; point 2 on views 2,3; point 3 on
+        // view 3 only.
+        let ireal_str = [1, 3, 5, 6];
+        let isec_view = [1, 2, 2, 3, 3];
+        let list_real = [1, 2, 3];
+        // Only the last point is in the test set.
+        let test_set = [0, 0, 1];
+        let mut num_in_view = [0; 3];
+        let mut total = 0;
+        count_num_in_view(
+            &av,
+            &list_real,
+            3,
+            &ireal_str,
+            &isec_view,
+            3,
+            &mut num_in_view,
+            Some(&test_set),
+            Some(&mut total),
+        );
+        assert_eq!(num_in_view, [1, 2, 1]);
+        assert_eq!(total, 4);
+    }
 }

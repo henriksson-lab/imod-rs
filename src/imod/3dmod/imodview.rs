@@ -6772,13 +6772,19 @@ mod tests {
             num_times: 2,
             cur_time: 2,
             image_list_storage: vec![
-                ImodImageFile {
-                    description: Some(b"first".to_vec()),
-                    ..Default::default()
+                {
+                    // A struct literal cannot take `..Default::default()` now that
+                    // `ImodImageFile` implements `Drop` (the in-process run record).
+                    let mut record = ImodImageFile::default();
+                    record.description = Some(b"first".to_vec());
+                    record
                 },
-                ImodImageFile {
-                    description: Some(b"second".to_vec()),
-                    ..Default::default()
+                {
+                    // A struct literal cannot take `..Default::default()` now that
+                    // `ImodImageFile` implements `Drop` (the in-process run record).
+                    let mut record = ImodImageFile::default();
+                    record.description = Some(b"second".to_vec());
+                    record
                 },
             ],
             ..Default::default()
@@ -6802,13 +6808,19 @@ mod tests {
             multi_file_z: 2,
             zmouse: 1.,
             image_list_storage: vec![
-                ImodImageFile {
-                    filename: Some("first.mrc".into()),
-                    ..Default::default()
+                {
+                    // A struct literal cannot take `..Default::default()` now that
+                    // `ImodImageFile` implements `Drop` (the in-process run record).
+                    let mut record = ImodImageFile::default();
+                    record.filename = Some("first.mrc".into());
+                    record
                 },
-                ImodImageFile {
-                    filename: Some("second.mrc".into()),
-                    ..Default::default()
+                {
+                    // A struct literal cannot take `..Default::default()` now that
+                    // `ImodImageFile` implements `Drop` (the in-process run record).
+                    let mut record = ImodImageFile::default();
+                    record.filename = Some("second.mrc".into());
+                    record
                 },
             ],
             ..Default::default()
@@ -6859,19 +6871,22 @@ mod tests {
 
     #[test]
     fn image_reference_uses_typed_image_and_load_info() {
-        let image = ImodImageFile {
-            xscale: 2.,
-            yscale: 3.,
-            zscale: 4.,
-            xtrans: 50.,
-            ytrans: 60.,
-            ztrans: 70.,
-            xrot: 1.,
-            yrot: 2.,
-            zrot: 3.,
-            nx: 20,
-            mirror_fft: 1,
-            ..Default::default()
+        let image = {
+            // A struct literal cannot take `..Default::default()` now that
+            // `ImodImageFile` implements `Drop` (the in-process run record).
+            let mut record = ImodImageFile::default();
+            record.xscale = 2.;
+            record.yscale = 3.;
+            record.zscale = 4.;
+            record.xtrans = 50.;
+            record.ytrans = 60.;
+            record.ztrans = 70.;
+            record.xrot = 1.;
+            record.yrot = 2.;
+            record.zrot = 3.;
+            record.nx = 20;
+            record.mirror_fft = 1;
+            record
         };
         let load_info = LoadInfo {
             xmin: 2,
@@ -6970,14 +6985,17 @@ mod tests {
             zbin: 1,
             ..Default::default()
         };
-        let image = ImodImageFile {
-            nx: 8,
-            ny: 8,
-            nz: 8,
-            urx: 7,
-            ury: 7,
-            urz: 7,
-            ..Default::default()
+        let image = {
+            // A struct literal cannot take `..Default::default()` now that
+            // `ImodImageFile` implements `Drop` (the in-process run record).
+            let mut record = ImodImageFile::default();
+            record.nx = 8;
+            record.ny = 8;
+            record.nz = 8;
+            record.urx = 7;
+            record.ury = 7;
+            record.urz = 7;
+            record
         };
         let load_info = LoadInfo::default();
         let (mut llx, mut left_x, mut right_x) = (0, 0, 0);
@@ -7178,18 +7196,24 @@ mod tests {
             pixsize: 2.5,
             ..Default::default()
         };
-        let current_image = ImodImageFile {
-            xscale: 20.,
-            ..Default::default()
+        let current_image = {
+            // A struct literal cannot take `..Default::default()` now that
+            // `ImodImageFile` implements `Drop` (the in-process run record).
+            let mut record = ImodImageFile::default();
+            record.xscale = 20.;
+            record
         };
         let view = ImodView {
             num_times: 1,
             cur_time: 1,
             zmouse: 1.,
             pixel_size_varies: 1,
-            image_list_storage: vec![ImodImageFile {
-                xscale: 40.,
-                ..Default::default()
+            image_list_storage: vec![{
+                // A struct literal cannot take `..Default::default()` now that
+                // `ImodImageFile` implements `Drop` (the in-process run record).
+                let mut record = ImodImageFile::default();
+                record.xscale = 40.;
+                record
             }],
             pix_size_index: vec![0],
             adoc_pix_sizes: vec![vec![10., 30.]],
@@ -7386,13 +7410,19 @@ mod tests {
             fake_image: 0,
             volume_stack: 1,
             image_list_storage: vec![
-                ImodImageFile {
-                    description: Some(b"first".to_vec()),
-                    ..Default::default()
+                {
+                    // A struct literal cannot take `..Default::default()` now that
+                    // `ImodImageFile` implements `Drop` (the in-process run record).
+                    let mut record = ImodImageFile::default();
+                    record.description = Some(b"first".to_vec());
+                    record
                 },
-                ImodImageFile {
-                    description: Some(b"second".to_vec()),
-                    ..Default::default()
+                {
+                    // A struct literal cannot take `..Default::default()` now that
+                    // `ImodImageFile` implements `Drop` (the in-process run record).
+                    let mut record = ImodImageFile::default();
+                    record.description = Some(b"second".to_vec());
+                    record
                 },
             ],
             ..Default::default()

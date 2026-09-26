@@ -18,7 +18,7 @@ use crate::imod::libcfshr::autodoc::{
     adoc_set_integer_array, adoc_set_key_value, adoc_set_three_floats, adoc_set_three_integers,
     adoc_set_two_floats, adoc_set_two_integers,
 };
-use crate::imod::libcfshr::b3dutil::ImodFile;
+use crate::imod::libcfshr::b3dutil::{ImodFile, b3d_error};
 use crate::imod::libiimod::hdf_imageio::{
     hdf_read_section_any, hdf_write_section_any, init_new_hdf_file,
 };
@@ -996,12 +996,22 @@ pub fn ii_hdf_check(in_file: &mut ImodImageFile) -> i32 {
                         if adoc_get_float(ADOC_ZVALUE_NAME, section, b"EMAN.minimum", &mut value)
                             == 0
                         {
-                            (*hdata).amin = (*hdata).amin.min(value);
+                            // `B3DMIN(hdata->amin, tmp)` (`iihdf.c:642`):
+                            // `a < b ? a : b`, not `f32::min`.
+                            (*hdata).amin = if (*hdata).amin < value {
+                                (*hdata).amin
+                            } else {
+                                value
+                            };
                         }
                         if adoc_get_float(ADOC_ZVALUE_NAME, section, b"EMAN.maximum", &mut value)
                             == 0
                         {
-                            (*hdata).amax = (*hdata).amax.max(value);
+                            (*hdata).amax = if (*hdata).amax > value {
+                                (*hdata).amax
+                            } else {
+                                value
+                            };
                         }
                         if adoc_get_float(ADOC_ZVALUE_NAME, section, b"EMAN.mean", &mut value) == 0
                         {
@@ -1149,20 +1159,32 @@ unsafe fn scan_group(
     }
     let list_index = state.groups.len();
     state.groups.push(group);
-    let group_ptr = state.groups.as_mut_ptr().add(list_index);
-    let mut object_info = core::mem::MaybeUninit::<H5OInfo>::uninit();
-    if H5Oget_info(group_id, object_info.as_mut_ptr()) < 0 {
-        return IIERR_IO_ERROR;
+    let mut group_ptr = state.groups.as_mut_ptr().add(list_index);
+    let mut retval = 0;
+    let mut num_objs = 0;
+
+    /* Find out if there are attributes */
+    let mut object_info = core::mem::MaybeUninit::<H5OInfo>::zeroed().assume_init();
+    if H5Oget_info(group_id, &mut object_info) < 0 {
+        retval = IIERR_IO_ERROR;
     }
-    let mut object_info = object_info.assume_init();
-    (*group_ptr).num_attributes = object_info.num_attrs as i32;
+    if retval == 0 {
+        (*group_ptr).num_attributes = object_info.num_attrs as i32;
+    }
+
+    /* Get the number of objects and iterate through them */
     let mut group_info = core::mem::MaybeUninit::<H5GInfo>::uninit();
-    if H5Gget_info(group_id, group_info.as_mut_ptr()) < 0 {
-        return IIERR_IO_ERROR;
+    if retval == 0 && H5Gget_info(group_id, group_info.as_mut_ptr()) < 0 {
+        retval = IIERR_IO_ERROR;
     }
-    let group_info = group_info.assume_init();
+    if retval == 0 {
+        num_objs = group_info.assume_init().nlinks;
+    }
     let mut num_sets = 0;
-    for ind in 0..group_info.nlinks {
+    // `iihdf.c:790-962`.  Every failure in the loop sets `retval` and
+    // `break`s, so the group is still closed at `:964` before returning.
+    for ind in 0..num_objs {
+        /* Get the name of the object */
         let size = H5Lget_name_by_idx(
             group_id,
             c".".as_ptr(),
@@ -1173,23 +1195,30 @@ unsafe fn scan_group(
             0,
             0,
         ) + 1;
+        let mut raw_name = Vec::new();
         if size <= 0 {
-            return IIERR_IO_ERROR;
+            retval = IIERR_IO_ERROR;
+        } else {
+            // HDF5 fills a `char *` of this size; the bytes are then the
+            // program's.
+            raw_name = vec![0u8; size as usize];
         }
-        // HDF5 fills a `char *` of this size; the bytes are then the program's.
-        let mut raw_name = vec![0u8; size as usize];
-        if H5Lget_name_by_idx(
-            group_id,
-            c".".as_ptr(),
-            H5_INDEX_NAME,
-            H5_ITER_INC,
-            ind,
-            raw_name.as_mut_ptr().cast(),
-            size as usize,
-            0,
-        ) < 0
+        if retval == 0
+            && H5Lget_name_by_idx(
+                group_id,
+                c".".as_ptr(),
+                H5_INDEX_NAME,
+                H5_ITER_INC,
+                ind,
+                raw_name.as_mut_ptr().cast(),
+                size as usize,
+                0,
+            ) < 0
         {
-            return IIERR_IO_ERROR;
+            retval = IIERR_IO_ERROR;
+        }
+        if retval != 0 {
+            break;
         }
         let terminator = raw_name
             .iter()
@@ -1197,9 +1226,11 @@ unsafe fn scan_group(
             .unwrap_or(raw_name.len());
         raw_name.truncate(terminator);
         let mut object_name = String::from_utf8_lossy(&raw_name).into_owned();
+
+        /* Compose absolute path if it is relative (it is...) */
         if !object_name.starts_with('/') {
-            // C `sprintf(objName, "%s/%s", groupLength > 1 ? groupName : "",
-            // relativeName)`.
+            // C `sprintf(objName, "%s/%s", dsize > 1 ? groupName : "",
+            // tmpName)`.
             let group_length = group_name.len();
             object_name = format!(
                 "{}/{}",
@@ -1211,6 +1242,8 @@ unsafe fn scan_group(
                 object_name
             );
         }
+
+        /* Get the info */
         if H5Oget_info_by_idx(
             group_id,
             c".".as_ptr(),
@@ -1221,137 +1254,182 @@ unsafe fn scan_group(
             0,
         ) < 0
         {
-            return IIERR_IO_ERROR;
+            retval = IIERR_IO_ERROR;
+            break;
         }
+
         if object_info.type_ == H5O_TYPE_GROUP {
+            /* A GROUP.  Open and scan the group */
             (*group_ptr).has_groups = 1;
             // The group path crosses into HDF5.
             let subgroup_name = std::ffi::CString::new(object_name.as_str()).unwrap();
             let subgroup_id = H5Gopen2(group_id, subgroup_name.as_ptr(), 0);
             if subgroup_id < 0 {
-                return IIERR_IO_ERROR;
+                retval = IIERR_IO_ERROR;
+                break;
             }
-            let mut subsection = 0;
-            let err = scan_group(state, subgroup_id, object_name, &mut subsection);
+            let mut sub_can_be_section = 0;
+            let err = scan_group(state, subgroup_id, object_name, &mut sub_can_be_section);
             if err != 0 {
+                // `:832-836`: the sub-scan has already closed `subID` at its
+                // own `:964`, and the source closes it a second time here.
                 H5Gclose(subgroup_id);
-                return err;
+                retval = err;
+                break;
             }
-            let parent = state.groups.as_mut_ptr().add(list_index);
-            if subsection < 0 {
-                (*parent).adoc_collection = -1;
-            } else if subsection > 0 && (*parent).adoc_collection == 0 {
-                (*parent).adoc_collection = 1;
+
+            /* Get the pointer again, it may have changed */
+            group_ptr = state.groups.as_mut_ptr().add(list_index);
+
+            /* If subgroup can't be a section, disqualify this group from being
+            collection, otherwise if it has just attributes and this can still be
+            a collection, mark it as one */
+            if sub_can_be_section < 0 {
+                (*group_ptr).adoc_collection = -1;
+            } else if sub_can_be_section > 0 && (*group_ptr).adoc_collection == 0 {
+                (*group_ptr).adoc_collection = 1;
             }
-            continue;
         } else if object_info.type_ == H5O_TYPE_DATASET {
-            (*group_ptr).has_any_datasets = 1;
+            /* A DATASET.  This disqualifies this group from being a collection */
+            let mut keep_dset = false;
             (*group_ptr).adoc_collection = -1;
+            (*group_ptr).has_any_datasets = 1;
+
+            /* Multiple datasets in a group disqualifies use of group numbers for Z */
             num_sets += 1;
             if num_sets > 1 {
                 state.numbered_groups = false;
             }
+
             // The dataset path crosses into HDF5.
             let dataset_path = std::ffi::CString::new(object_name.as_str()).unwrap();
             let dataset_id = H5Dopen2(group_id, dataset_path.as_ptr(), 0);
             if dataset_id < 0 {
-                return IIERR_IO_ERROR;
+                retval = IIERR_IO_ERROR;
+                break;
             }
+
             let type_id = H5Dget_type(dataset_id);
-            let bytes = (H5Tget_precision(type_id) / 8) as i32;
             let class = H5Tget_class(type_id);
-            let signed = H5Tget_sign(type_id) == H5T_SGN_2;
+
+            /* See if there is a valid data type */
             // The HDF5 class/precision boundary: `None` is the source's `-1`
             // for a datatype that has no `IITYPE_*` equivalent.
-            let data_type = if class == H5T_INTEGER && bytes == 1 {
-                if signed {
-                    Some(ImageDataType::Byte)
-                } else {
-                    Some(ImageDataType::UnsignedByte)
-                }
-            } else if class == H5T_INTEGER && bytes == 2 {
-                if signed {
-                    Some(ImageDataType::Short)
-                } else {
-                    Some(ImageDataType::UnsignedShort)
-                }
-            } else if class == H5T_FLOAT && bytes == 4 {
-                Some(ImageDataType::Float)
-            } else {
-                None
-            };
-            let space_id = H5Dget_space(dataset_id);
-            let rank = H5Sget_simple_extent_ndims(space_id);
-            if data_type.is_some() && (rank == 2 || rank == 3) {
-                let mut current = [0; 3];
-                let mut maximum = [0; 3];
-                H5Sget_simple_extent_dims(space_id, current.as_mut_ptr(), maximum.as_mut_ptr());
-                if H5Oget_info(dataset_id, &mut object_info) < 0 {
-                    H5Sclose(space_id);
-                    H5Tclose(type_id);
-                    H5Dclose(dataset_id);
-                    return IIERR_IO_ERROR;
-                }
-                let mut data = DatasetData {
-                    dset_id: dataset_id,
-                    name: Some(object_name),
-                    data_type: data_type.expect("dataset datatype is a supported IITYPE"),
-                    swapped: if H5Tget_order(type_id) != H5Tget_order(H5T_NATIVE_INT_g) {
-                        1
+            let mut iitype = None;
+            let dsize = (H5Tget_precision(type_id) / 8) as i32;
+            let signed_int = H5Tget_sign(type_id) == H5T_SGN_2;
+            if class == H5T_INTEGER {
+                if dsize == 1 {
+                    iitype = Some(if signed_int {
+                        ImageDataType::Byte
                     } else {
-                        0
-                    },
-                    nx: current[(rank - 1) as usize] as i32,
-                    ny: current[(rank - 2) as usize] as i32,
-                    nz: if rank == 3 { current[0] as i32 } else { 1 },
-                    chunk_x: 0,
-                    chunk_y: 0,
-                    chunk_z: 0,
-                    num_attributes: object_info.num_attrs as i32,
-                    group_num: group_number,
-                };
-                let plist_id = H5Dget_create_plist(dataset_id);
-                if H5Pget_layout(plist_id) == H5D_CHUNKED {
-                    let mut chunk = [0; 3];
-                    if H5Pget_chunk(plist_id, 3, chunk.as_mut_ptr()) >= 0 {
-                        if chunk[(rank - 1) as usize] < current[(rank - 1) as usize] {
-                            data.chunk_x = chunk[(rank - 1) as usize] as i32;
-                        }
-                        if chunk[(rank - 2) as usize] < current[(rank - 2) as usize] {
-                            data.chunk_y = chunk[(rank - 2) as usize] as i32;
-                        }
-                        if rank == 3 {
-                            data.chunk_z = chunk[0] as i32;
+                        ImageDataType::UnsignedByte
+                    });
+                }
+                if dsize == 2 {
+                    iitype = Some(if signed_int {
+                        ImageDataType::Short
+                    } else {
+                        ImageDataType::UnsignedShort
+                    });
+                }
+            } else if class == H5T_FLOAT && dsize == 4 {
+                iitype = Some(ImageDataType::Float);
+            }
+
+            /* If so, get the rank and dimensions, must be 2 or 3 dimensions */
+            if let Some(data_type) = iitype {
+                let space_id = H5Dget_space(dataset_id);
+                let rank = H5Sget_simple_extent_ndims(space_id);
+                if rank == 2 || rank == 3 {
+                    let mut current = [0; 3];
+                    let mut maximum = [0; 3];
+                    H5Sget_simple_extent_dims(space_id, current.as_mut_ptr(), maximum.as_mut_ptr());
+                    let mut ds_data = DatasetData {
+                        dset_id: dataset_id,
+                        name: Some(object_name),
+                        data_type,
+                        swapped: 0,
+                        nx: current[(rank - 1) as usize] as i32,
+                        ny: current[(rank - 2) as usize] as i32,
+                        nz: if rank == 3 { current[0] as i32 } else { 1 },
+                        chunk_x: 0,
+                        chunk_y: 0,
+                        chunk_z: 0,
+                        num_attributes: 0,
+                        group_num: 0,
+                    };
+                    if H5Tget_order(type_id) != H5Tget_order(H5T_NATIVE_INT_g) {
+                        ds_data.swapped = 1;
+                    }
+
+                    let plist_id = H5Dget_create_plist(dataset_id);
+                    if H5Pget_layout(plist_id) == H5D_CHUNKED {
+                        let mut chunk = [0; 3];
+                        if H5Pget_chunk(plist_id, 3, chunk.as_mut_ptr()) >= 0 {
+                            if (chunk[(rank - 1) as usize] as i64) < ds_data.nx as i64 {
+                                ds_data.chunk_x = chunk[(rank - 1) as usize] as i32;
+                            }
+                            if (chunk[(rank - 2) as usize] as i64) < ds_data.ny as i64 {
+                                ds_data.chunk_y = chunk[(rank - 2) as usize] as i32;
+                            }
+                            if rank == 3 {
+                                ds_data.chunk_z = chunk[0] as i32;
+                            }
                         }
                     }
+                    H5Pclose(plist_id);
+
+                    /* Keep track of group numbers for groups containing a dataset */
+                    ds_data.group_num = group_number;
+                    if !numbered {
+                        state.numbered_groups = false;
+                    }
+                    if state.numbered_groups {
+                        state.min_group_num = state.min_group_num.min(group_number);
+                        state.max_group_num = state.max_group_num.max(group_number);
+                    }
+                    ds_data.dset_id = dataset_id;
+                    if H5Oget_info(dataset_id, &mut object_info) < 0 {
+                        retval = IIERR_IO_ERROR;
+                    }
+                    if retval == 0 {
+                        ds_data.num_attributes = object_info.num_attrs as i32;
+                    }
+                    if retval == 0 {
+                        state.datasets.push(ds_data);
+                        keep_dset = true;
+                    }
                 }
-                H5Pclose(plist_id);
-                if !numbered {
-                    state.numbered_groups = false;
-                }
-                if state.numbered_groups {
-                    state.min_group_num = state.min_group_num.min(group_number);
-                    state.max_group_num = state.max_group_num.max(group_number);
-                }
-                state.datasets.push(data);
+
                 H5Sclose(space_id);
-                H5Tclose(type_id);
-                continue;
             }
-            H5Sclose(space_id);
+            // C `free(objName)` for an unusable type; the owned name goes away
+            // with the iteration.
             H5Tclose(type_id);
-            H5Dclose(dataset_id);
+            if !keep_dset {
+                H5Dclose(dataset_id);
+            }
+            if retval != 0 {
+                break;
+            }
         }
         // C `free(objName)`; the owned bytes go away with the loop iteration.
     }
+
     H5Gclose(group_id);
-    let final_group = state.groups.as_mut_ptr().add(list_index);
-    if (*final_group).has_any_datasets != 0 || (*final_group).has_groups != 0 {
+    if retval != 0 {
+        return retval;
+    }
+
+    /* Set flag for whether this can't be a section (so above group can't be
+    collection) or whether it could be one with attributes */
+    if (*group_ptr).has_any_datasets != 0 || (*group_ptr).has_groups != 0 {
         *adoc_section = -1;
-    } else if (*final_group).num_attributes != 0 {
+    } else if (*group_ptr).num_attributes != 0 {
         *adoc_section = 1;
     }
-    0
+    retval
 }
 /// C `iiHDFopenNew` (`iihdf.c:979`).
 pub fn ii_hdf_open_new(in_file: &mut ImodImageFile, mode: &str) -> i32 {
@@ -1365,6 +1443,12 @@ pub fn ii_hdf_open_new(in_file: &mut ImodImageFile, mode: &str) -> i32 {
                 || ((*in_file).stack_set_list.is_some() && (*in_file).nz > 1)
                 || (*in_file).write_section.is_none()
             {
+                b3d_error(
+                    Some(&mut ImodFile::Stderr),
+                    format_args!(
+                        "ERROR: iiHDFopenNew - Attempting to open second volume in non-HDF file, non-IMOD HDF file, stack file, or read-only file\n"
+                    ),
+                );
                 return 1;
             }
             let mut volume = ii_new_box();
@@ -1383,6 +1467,12 @@ pub fn ii_hdf_open_new(in_file: &mut ImodImageFile, mode: &str) -> i32 {
             (*volume_ptr).mrc_header = Some(MrcHeader::default());
             (*volume_ptr).fmode = (*in_file).fmode.clone();
             if (*volume_ptr).mrc_header.is_none() || (*volume_ptr).adoc_index < 0 {
+                b3d_error(
+                    Some(&mut ImodFile::Stderr),
+                    format_args!(
+                        "ERROR: iiHDFopenNew - Allocating structures for new HDF volume in existing file\n"
+                    ),
+                );
                 return 1;
             }
             set_io_funcs_plus(volume_ptr, IIHDF_IMOD, 1, (*in_file).hdf_file_id);
@@ -1400,6 +1490,14 @@ pub fn ii_hdf_open_new(in_file: &mut ImodImageFile, mode: &str) -> i32 {
         (*in_file).mrc_header = Some(MrcHeader::default());
         (*in_file).ii_volumes = vec![Some(NonNull::new_unchecked(in_file))];
         let mut error = (*in_file).mrc_header.is_none() || (*in_file).adoc_index < 0;
+        if error {
+            b3d_error(
+                Some(&mut ImodFile::Stderr),
+                format_args!(
+                    "ERROR: iiHDFopenNew - Allocating MRC header or getting new autodoc\n"
+                ),
+            );
+        }
         let mut file_id = -1;
         if !error {
             // The file name crosses into HDF5 as `char *`.
@@ -1407,6 +1505,13 @@ pub fn ii_hdf_open_new(in_file: &mut ImodImageFile, mode: &str) -> i32 {
                 std::ffi::CString::new((*in_file).filename.as_deref().unwrap_or_default()).unwrap();
             file_id = H5Fcreate(name.as_ptr(), 2, 0, 0);
             if file_id < 0 {
+                b3d_error(
+                    Some(&mut ImodFile::Stderr),
+                    format_args!(
+                        "ERROR: iiHDFopenNew - Creating new HDF file named {}\n",
+                        (*in_file).filename.as_deref().unwrap_or_default()
+                    ),
+                );
                 error = true;
             }
         }
@@ -1425,6 +1530,13 @@ pub fn ii_hdf_open_new(in_file: &mut ImodImageFile, mode: &str) -> i32 {
             }
             if error {
                 H5Fclose(file_id);
+                b3d_error(
+                    Some(&mut ImodFile::Stderr),
+                    format_args!(
+                        "ERROR: iiHDFopenNew - Creating top groups in new HDF file {}\n",
+                        (*in_file).filename.as_deref().unwrap_or_default()
+                    ),
+                );
             }
         }
         if error {
@@ -1457,15 +1569,23 @@ pub fn ii_reorder_hdf_stack(in_file: &mut ImodImageFile, sect_order: &[i32]) -> 
     unsafe {
         let in_file = in_file as *mut ImodImageFile;
         if (*in_file).stack_set_list.is_none() {
+            b3d_error(
+                Some(&mut ImodFile::Stderr),
+                format_args!("ERROR: iiReorderHDFstack - The HDF file is a volume not a stack\n"),
+            );
             return 1;
         }
         let mut new_size = 0;
         for iz in 0..(*in_file).nz {
             let new_z = sect_order[iz as usize];
+            new_size = new_size.max(new_z);
             if new_z < 0 {
+                b3d_error(
+                    Some(&mut ImodFile::Stderr),
+                    format_args!("ERROR: iiReorderHDFstack - Negative value for new section Z\n"),
+                );
                 return 1;
             }
-            new_size = new_size.max(new_z);
         }
         new_size += 8;
         let mut new_map = vec![-1; new_size as usize];
@@ -1478,6 +1598,10 @@ pub fn ii_reorder_hdf_stack(in_file: &mut ImodImageFile, sect_order: &[i32]) -> 
             }
             let new_z = sect_order[ord_ind as usize];
             if new_map[new_z as usize] >= 0 {
+                b3d_error(
+                    Some(&mut ImodFile::Stderr),
+                    format_args!("ERROR: iiReorderHDFstack - Duplicate new section # {new_z}\n"),
+                );
                 return 1;
             }
             new_map[new_z as usize] = ds_ind;
@@ -1508,6 +1632,12 @@ pub fn ii_reorder_hdf_stack(in_file: &mut ImodImageFile, sect_order: &[i32]) -> 
             let temp_c = std::ffi::CString::new(temp_name).unwrap();
             let new_c = std::ffi::CString::new(new_name).unwrap();
             if H5Lmove(file_id, temp_c.as_ptr(), file_id, new_c.as_ptr(), 0, 0) < 0 {
+                b3d_error(
+                    Some(&mut ImodFile::Stderr),
+                    format_args!(
+                        "ERROR: iiReorderHDFstack - Trying to change dataset name from original to temporary\n"
+                    ),
+                );
                 return 1;
             }
             adoc_secs[ord_ind as usize] = adoc_lookup_by_name_value(ADOC_ZVALUE_NAME, map_ind);
@@ -1531,6 +1661,12 @@ pub fn ii_reorder_hdf_stack(in_file: &mut ImodImageFile, sect_order: &[i32]) -> 
             let mut new_name = format!("/MDF/images/{new_z}");
             let new_c = std::ffi::CString::new(new_name.clone()).unwrap();
             if H5Lmove(file_id, temp_c.as_ptr(), file_id, new_c.as_ptr(), 0, 0) < 0 {
+                b3d_error(
+                    Some(&mut ImodFile::Stderr),
+                    format_args!(
+                        "ERROR: iiReorderHDFstack - Trying to change dataset name from temporary to new name\n"
+                    ),
+                );
                 return 1;
             }
             // C `strcat(newName, "/image")`.
@@ -1545,6 +1681,12 @@ pub fn ii_reorder_hdf_stack(in_file: &mut ImodImageFile, sect_order: &[i32]) -> 
                 )
                 .is_err()
                 {
+                    b3d_error(
+                        Some(&mut ImodFile::Stderr),
+                        format_args!(
+                            "ERROR: iiReorderHDFstack - Renaming autodoc section from Z = {map_ind} to {new_z}\n"
+                        ),
+                    );
                     return 1;
                 }
             }
@@ -1557,25 +1699,45 @@ pub fn ii_reorder_hdf_stack(in_file: &mut ImodImageFile, sect_order: &[i32]) -> 
 }
 /// C `hdfWriteHeader` (`iihdf.c:1246`).
 unsafe fn hdf_write_header(in_file: *mut ImodImageFile) -> i32 {
+    let mut error = 0;
+    // C `MrcHeader *hdata = (MrcHeader *)inFile->header;` -- the header is
+    // allocated by `iiHDFopenNew`/`iiHDFCheck` before any header write.
+    let hdata: *mut MrcHeader = (*in_file)
+        .mrc_header
+        .as_mut()
+        .expect("HDF header is present");
+    let mmm_offset: f32 = if (*hdata).mode == 0 && (*hdata).bytes_signed != 0 {
+        -128.0
+    } else {
+        0.0
+    };
+
+    /* Initialize file now with current information */
     if (*in_file).stack_set_list.is_none()
         && (*in_file).dataset_name.is_none()
         && init_new_hdf_file(&mut *in_file) != 0
     {
-        return 1;
-    }
-    let Some(hdata) = (*in_file).mrc_header.as_mut() else {
-        return 1;
-    };
-    if hdf_sync_from_mrc_header(in_file, hdata) != 0 {
+        b3d_error(
+            Some(&mut ImodFile::Stderr),
+            format_args!("ERROR: hdfWriteHeader - Initializing the HDF file for output"),
+        );
         return 1;
     }
     if adoc_set_current((*in_file).adoc_index).is_err() {
+        error = 1;
+    } else {
+        // C `sMrcPrefix = strdup("IMOD.MRC.")`, whose failure arm an owned
+        // `String` cannot reach.
+        *MRC_PREFIX.lock().unwrap() = Some("IMOD.MRC.".to_owned());
+    }
+
+    if error != 0 {
+        b3d_error(
+            Some(&mut ImodFile::Stderr),
+            format_args!("ERROR: hdfWriteHeader - Setting current autodoc or allocating prefix\n"),
+        );
         return 1;
     }
-    // C `free(sMrcPrefix); sMrcPrefix = strdup("IMOD.MRC.");` with a failure
-    // arm that an owned `String` cannot reach.
-    *MRC_PREFIX.lock().unwrap() = Some("IMOD.MRC.".to_owned());
-    let mut error = 0;
     let mut group_id = H5Gopen2((*in_file).hdf_file_id, c"/MDF/images".as_ptr(), 0);
     if group_id >= 0 {
         let mut image_id = (*in_file).num_volumes - 1;
@@ -1603,6 +1765,17 @@ unsafe fn hdf_write_header(in_file: *mut ImodImageFile) -> i32 {
     }
     if error != 0 || group_id < 0 {
         cleanup_malloc_bufs();
+        b3d_error(
+            Some(&mut ImodFile::Stderr),
+            format_args!(
+                "ERROR: hdfWriteHeader - {}\n",
+                if group_id < 0 {
+                    "Opening group for writing header attributes"
+                } else {
+                    "Writing imageid_max attribute to header"
+                }
+            ),
+        );
         if group_id >= 0 {
             H5Gclose(group_id);
         }
@@ -1636,11 +1809,6 @@ unsafe fn hdf_write_header(in_file: *mut ImodImageFile) -> i32 {
         add_one_prefixed_integer(group_id, b"mapc", (*hdata).mapc, &mut error);
         add_one_prefixed_integer(group_id, b"mapr", (*hdata).mapr, &mut error);
         add_one_prefixed_integer(group_id, b"maps", (*hdata).maps, &mut error);
-        let mmm_offset = if (*hdata).mode == MRC_MODE_BYTE && (*hdata).bytes_signed != 0 {
-            -128.0
-        } else {
-            0.0
-        };
         add_one_prefixed_float(group_id, b"minimum", (*hdata).amin + mmm_offset, &mut error);
         add_one_prefixed_float(group_id, b"maximum", (*hdata).amax + mmm_offset, &mut error);
         add_one_prefixed_float(group_id, b"mean", (*hdata).amean + mmm_offset, &mut error);
@@ -1669,13 +1837,43 @@ unsafe fn hdf_write_header(in_file: *mut ImodImageFile) -> i32 {
             }
         }
     }
-    if error == 0 && adoc_to_attributes(group_id, ADOC_GLOBAL_NAME, 0, Some(b"IMOD.")) != 0 {
+    if error != 0 {
+        H5Gclose(group_id);
+        cleanup_malloc_bufs();
+        b3d_error(
+            Some(&mut ImodFile::Stderr),
+            format_args!("ERROR: hdfWriteHeader - Writing basic MRC-type header attributes\n"),
+        );
+        return 1;
+    }
+
+    /* Now write any other global autodoc stuff in the same place, prefixed with IMOD */
+    if adoc_to_attributes(group_id, ADOC_GLOBAL_NAME, 0, Some(b"IMOD.")) != 0 {
         error = 1;
     }
+
+    /* Done with the group */
     H5Gclose(group_id);
+
+    /* Write any global multivolume stuff if there is a single volume, and write
+    attribute only sections for single volume or stack case.  Multiple volumes
+    require explicit call from program to write this */
     if error == 0 && (*in_file).num_volumes < 2 {
         error = hdf_write_global_adoc(&mut *in_file);
     }
+
+    if error != 0 {
+        cleanup_malloc_bufs();
+        b3d_error(
+            Some(&mut ImodFile::Stderr),
+            format_args!(
+                "ERROR: hdfWriteHeader - Writing other global or attribute-only metadata\n"
+            ),
+        );
+        return 1;
+    }
+
+    /* Finally, for a stack, write ZValue sections to section images */
     if (*in_file).stack_set_list.is_some() {
         for iz in 0..(*in_file).z_map_size {
             if error != 0 {
@@ -1712,6 +1910,12 @@ unsafe fn hdf_write_header(in_file: *mut ImodImageFile) -> i32 {
         }
     }
     cleanup_malloc_bufs();
+    if error != 0 {
+        b3d_error(
+            Some(&mut ImodFile::Stderr),
+            format_args!("ERROR: hdfWriteHeader - Writing metadata for individual Z slices\n"),
+        );
+    }
     error
 }
 /// C `hdfWriteGlobalAdoc` (`iihdf.c:1412`).
@@ -2646,10 +2850,13 @@ mod tests {
 
     #[test]
     fn safe_reorder_rejects_a_short_section_order() {
-        let mut image = ImodImageFile {
-            nz: 2,
-            z_map_size: 2,
-            ..ImodImageFile::default()
+        let mut image = {
+            // A struct literal cannot take `..Default::default()` now that
+            // `ImodImageFile` implements `Drop` (the in-process run record).
+            let mut record = ImodImageFile::default();
+            record.nz = 2;
+            record.z_map_size = 2;
+            record
         };
         assert_eq!(ii_reorder_hdf_stack(&mut image, &[0]), 1);
     }

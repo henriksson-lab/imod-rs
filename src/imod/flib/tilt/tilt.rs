@@ -1137,13 +1137,11 @@ impl Tilt {
                                 )
                             };
                             if err != 0 {
+                                // Fixed in translation (2026-09-26, `BUGS.md`): the source prints
+                                // `format920` with `mMapUsedView[nv - 1]` and `nl`, where `nv` is unset or
+                                // left from another loop; the section that failed is reported instead.
                                 exit_error_fmt!(
-                                    format920,
-                                    ci(self
-                                        .m_map_used_view
-                                        .get((nv - 1).max(0) as usize)
-                                        .copied()
-                                        .unwrap_or(0)),
+                                    "Reading section %d of the reconstruction or vertical slice file",
                                     ci(nl)
                                 );
                             }
@@ -1263,21 +1261,10 @@ impl Tilt {
                         let input = std::mem::take(&mut self.m_input_array);
                         self.project(&input, istart, lslice);
                         self.m_input_array = input;
-                        if lslice == 3000 {
-                            let mut data = crate::imod::libcfshr::islice::MrcData::F(
-                                std::mem::take(&mut self.m_out_slice_arr),
-                            );
-                            crate::imod::libiimod::mrcslice::mrc_write_image_to_file(
-                                "mask3000.mrc",
-                                &mut data,
-                                2,
-                                self.m_iwidth,
-                                self.m_ithick_bp,
-                            );
-                            if let crate::imod::libcfshr::islice::MrcData::F(v) = data {
-                                self.m_out_slice_arr = v;
-                            }
-                        }
+                        // Fixed in translation (2026-09-26, `BUGS.md`): the source
+                        // writes `mask3000.mrc` into the working directory here for
+                        // slice 3000 (`tilt.cpp:457-458`), leftover debugging code.
+                        // No file is written.
                         //
                         // move vertical slice into ring buffer, adjust ring variables
                         //
@@ -1385,14 +1372,12 @@ impl Tilt {
                                 iiu_read_section(3, self.m_read_in_array.as_mut_ptr().cast())
                             };
                             if err != 0 {
+                                // Fixed in translation (2026-09-26, `BUGS.md`): the source prints
+                                // `format920` with `mMapUsedView[nv - 1]` and `nl`, where `nv` is unset or
+                                // left from another loop; the section that failed is reported instead.
                                 exit_error_fmt!(
-                                    format920,
-                                    ci(self
-                                        .m_map_used_view
-                                        .get((nv - 1).max(0) as usize)
-                                        .copied()
-                                        .unwrap_or(0)),
-                                    ci(nl)
+                                    "Reading section %d of the reconstruction or vertical slice file",
+                                    ci(lslice)
                                 );
                             }
                             dsum = 0.;
@@ -1431,14 +1416,12 @@ impl Tilt {
                                     )
                                 };
                                 if err != 0 {
+                                    // Fixed in translation (2026-09-26, `BUGS.md`): the source prints
+                                    // `format920` with `mMapUsedView[nv - 1]` and `nl`, where `nv` is unset or
+                                    // left from another loop; the section that failed is reported instead.
                                     exit_error_fmt!(
-                                        format920,
-                                        ci(self
-                                            .m_map_used_view
-                                            .get((nv - 1).max(0) as usize)
-                                            .copied()
-                                            .unwrap_or(0)),
-                                        ci(nl)
+                                        "Reading section %d of the reconstruction or vertical slice file",
+                                        ci(lslice)
                                     );
                                 }
                             } else {
@@ -1490,14 +1473,12 @@ impl Tilt {
                                         )
                                     };
                                     if err != 0 {
+                                        // Fixed in translation (2026-09-26, `BUGS.md`): the source prints
+                                        // `format920` with `mMapUsedView[nv - 1]` and `nl`, where `nv` is unset or
+                                        // left from another loop; the section that failed is reported instead.
                                         exit_error_fmt!(
-                                            format920,
-                                            ci(self
-                                                .m_map_used_view
-                                                .get((nv - 1).max(0) as usize)
-                                                .copied()
-                                                .unwrap_or(0)),
-                                            ci(nl)
+                                            "Reading section %d of the reconstruction or vertical slice file",
+                                            ci(lri)
                                         );
                                     }
                                     for i in 0..(self.m_ithick_out * self.m_iwidth) as usize {
@@ -4844,14 +4825,11 @@ impl Tilt {
             }
             first_slice = lslice;
             num_do = self.m_islice_end + 1 - self.m_islice_start;
-            if num_do / 10 == 0 {
-                // `lslice % (numDo / 10)` is an integer division by zero for fewer
-                // than 10 slices: the reference dies with SIGFPE here, and so does
-                // this translation.
-                let _ = ImodFile::Stdout.flush();
-                unsafe { libc::raise(libc::SIGFPE) };
-            }
-            if lslice % (num_do / 10) == 0 {
+            // Fixed in translation (2026-09-26, `BUGS.md`): the source's
+            // `lslice % (numDo / 10)` divides by zero for fewer than 10 slices
+            // and dies with SIGFPE; the interval is at least 1 here, so every
+            // slice is reported.
+            if lslice % (num_do / 10).max(1) == 0 {
                 printf!(
                     "Finished slice %d of %d\n",
                     ci(lslice + 1 - self.m_islice_start),
@@ -5149,8 +5127,11 @@ impl Tilt {
         let mut origin_y: f32;
         let mut origin_z: f32;
         let gpu_memory_frac: f32;
+        // Fixed in translation (2026-09-26, `BUGS.md`): uninitialised in the
+        // source and compared before the GPU stub turns the GPU off; 0 here.
         let mut gpu_memory: f32 = 0.;
-        // Uninitialised in the source unless `-PixelForDefocus` is entered.
+        // Fixed in translation (`BUGS.md`): uninitialised in the source unless
+        // `-PixelForDefocus` is entered; 0 (the value its test looks for) here.
         let mut pix_for_defocus: f32 = 0.;
         let mut focus_invert: f32;
         let mut freq: f32;
@@ -6190,20 +6171,15 @@ impl Tilt {
         }
         //
         if pip_get_string(b"LOCALFILE", &mut card) == 0 {
-            // The source `fopen`s without a test and hands a NULL `fp` to
-            // `fgetline`, which reports it and returns -1 (`b3dutil.c:1079-1082`),
-            // so the failed first read below is what ends the program.
+            // Fixed in translation (2026-09-26, `BUGS.md`): the source `fopen`s
+            // without a test (`tilt.cpp:3472`) and hands a NULL `fp` to
+            // `fgetline`, so a missing file is reported as `fgetline: file
+            // pointer not valid` plus a failed first-line read.  The open is
+            // tested here and its failure reported as such (exit 1 either way).
             let mut fp = match ImodFile::open(String::from_utf8_lossy(&card).as_ref(), "r") {
                 Some(fp) => fp,
                 None => {
-                    crate::imod::libcfshr::b3dutil::b3d_error(
-                        Some(&mut ImodFile::Stderr),
-                        format_args!("fgetline: file pointer not valid\n"),
-                    );
-                    exit_error_fmt!(
-                        "Reading top line of local alignment file %s",
-                        CArg::Bytes(&card)
-                    )
+                    exit_error_fmt!("Opening local alignment file %s", CArg::Bytes(&card))
                 }
             };
             num_input = -1;
@@ -6431,7 +6407,9 @@ impl Tilt {
             pip_get_integer(b"SuperSampleFactor", &mut self.m_super_sample_fac);
             if self.m_super_sample_fac < 1 || self.m_super_sample_fac > max_super_fac {
                 exit_error_fmt!(
-                    "Super-sampling factor must be between 1 and %",
+                    // Fixed in translation (`BUGS.md`): the source's format has a
+                    // bare `%` with no conversion for its argument.
+                    "Super-sampling factor must be between 1 and %d",
                     ci(max_super_fac)
                 );
             }
@@ -7569,7 +7547,8 @@ impl Tilt {
             );
             if ierr != 0 {
                 exit_error_fmt!(
-                    "Initializing parallel write boundary file for vertical slices, error",
+                    // Fixed in translation (`BUGS.md`): the source drops `ierr`.
+                    "Initializing parallel write boundary file for vertical slices, error %d",
                     ci(ierr)
                 );
             }
@@ -9332,9 +9311,12 @@ impl Tilt {
                         xp_max = b3dmin!(self.m_nx_proj as f32, b3dmax!(xp_max, xproj));
                         lslice += b3dmax!(1, lslice_max - lslice_min);
                     }
-                    iy += self.m_ithick_bp - 1;
+                    // Fixed in translation (2026-09-26, `BUGS.md`): the source steps
+                    // by `mIthickBP - 1` and `mIwidth - 1` (`tilt.cpp:5584-5585`),
+                    // which loops forever for a size of 1; the step is at least 1.
+                    iy += b3dmax!(1, self.m_ithick_bp - 1);
                 }
-                ix += self.m_iwidth - 1;
+                ix += b3dmax!(1, self.m_iwidth - 1);
             }
             // print *,iv, xpmin, xpmax
             //
@@ -9475,7 +9457,8 @@ impl Tilt {
                                 min_slice = b3dmin!(min_slice, iyp);
                                 max_slice = b3dmax!(max_slice, b3dmin!(self.m_ny_proj, iyp + 1));
                                 // if (debug) print *,xx, yy, zz, iyp, minslice, maxslice
-                                iy += self.m_ithick_bp - 1;
+                                // Fixed in translation: step at least 1 (`BUGS.md`).
+                                iy += b3dmax!(1, self.m_ithick_bp - 1);
                             }
                         } else {
                             //
@@ -9508,7 +9491,10 @@ impl Tilt {
                                 iyp = b3dmax!(1., (yy - self.m_yproj_offset) as f64) as i32;
                                 min_slice = b3dmin!(min_slice, iyp);
                                 max_slice = b3dmax!(max_slice, b3dmin!(self.m_ny_proj, iyp + 1));
-                                iy += self.m_ithick_reproj - 1;
+                                // Fixed in translation (2026-09-26, `BUGS.md`): the source
+                                // steps by `mIthickReproj - 1` (`tilt.cpp:5715`), which
+                                // loops forever for a one-pixel range; step at least 1.
+                                iy += b3dmax!(1, self.m_ithick_reproj - 1);
                             }
                         }
                     }
@@ -10813,25 +10799,108 @@ impl Tilt {
                     } else {
                         //
                         // Or do the full 3D interpolation if any variation in Y
-                        for i in ix_start..=ix_end {
-                            ix = fortran_int!(f64: xx8);
-                            fx = (xx8 - ix as f64) as f32;
-                            one_mfx = (1. - fx as f64) as f32;
-                            d11 = one_mfx * one_mfy;
-                            d12 = one_mfx * fy;
-                            d21 = fx * one_mfy;
-                            d22 = fx * fy;
-                            ind = ind_base + ix - 1;
-                            reproj_lines[(i - 1) as usize] += one_mfz
-                                * (d11 * at(ind - 1)
-                                    + d12 * at(ind + ipsz - 1)
-                                    + d21 * at(ind)
-                                    + d22 * at(ind + ipsz))
-                                + fz * (d11 * at(ind + nx_load - 1)
-                                    + d12 * at(ind + ipsz + nx_load - 1)
-                                    + d21 * at(ind + nx_load)
-                                    + d22 * at(ind + ipsz + nx_load));
-                            xx8 = xx8 + del_x as f64;
+                        //
+                        // The hot loop of reprojection from a reconstruction.  The
+                        // eight samples lie at `ind - 1` plus offsets 0, 1, ipsz,
+                        // ipsz + 1, nx_load, nx_load + 1, ipsz + nx_load and
+                        // ipsz + nx_load + 1; with both sizes non-negative and the
+                        // array under `i32::MAX` elements, `0 <= ind - 1 < lim`
+                        // (`lim = len - span`) puts every one of them inside
+                        // `array` (so none of the source's `int` sums overflows),
+                        // and a single unsigned compare per step proves it.  The
+                        // output run is one slice.  Same products, same sums, same
+                        // order as the checked loop kept for the other cases.
+                        let span = ipsz as i64 + nx_load as i64 + 1;
+                        if ix_end >= ix_start
+                            && ipsz >= 0
+                            && nx_load >= 0
+                            && array.len() <= i32::MAX as usize
+                            && span < array.len() as i64
+                        {
+                            let lim = (array.len() as i64 - span) as u32;
+                            /// The loop at `tilt.cpp:6584-6599`, kept out of line so its
+                            /// invariants get registers of their own instead of being
+                            /// reloaded from the enclosing function's frame.
+                            #[inline(never)]
+                            fn interp_3d_run(
+                                out: &mut [f32],
+                                array: &[f32],
+                                mut xx8: f64,
+                                del_x: f32,
+                                ind_base: i32,
+                                lim: u32,
+                                p: usize,
+                                n: usize,
+                                one_mfz: f32,
+                                fz: f32,
+                                one_mfy: f32,
+                                fy: f32,
+                            ) {
+                                // Makes the function sound on its own: with this,
+                                // `b < lim` below bounds all eight indices.
+                                assert!(lim as usize + p + n + 1 <= array.len());
+                                for r in out.iter_mut() {
+                                    let ix = fortran_int!(f64: xx8);
+                                    let fx = (xx8 - ix as f64) as f32;
+                                    let one_mfx = (1. - fx as f64) as f32;
+                                    let d11 = one_mfx * one_mfy;
+                                    let d12 = one_mfx * fy;
+                                    let d21 = fx * one_mfy;
+                                    let d22 = fx * fy;
+                                    let ind = ind_base + ix - 1;
+                                    let b = (ind - 1) as u32;
+                                    assert!(b < lim, "reprojOneAngle: sample index out of range");
+                                    let b = b as usize;
+                                    // SAFETY: b + p + n + 1 < lim + p + n + 1 <= len (the
+                                    // entry assert); every other index is smaller, >= b >= 0.
+                                    let a = |k: usize| unsafe { *array.get_unchecked(k) };
+                                    *r += one_mfz
+                                        * (d11 * a(b)
+                                            + d12 * a(b + p)
+                                            + d21 * a(b + 1)
+                                            + d22 * a(b + p + 1))
+                                        + fz * (d11 * a(b + n)
+                                            + d12 * a(b + p + n)
+                                            + d21 * a(b + n + 1)
+                                            + d22 * a(b + p + n + 1));
+                                    xx8 = xx8 + del_x as f64;
+                                }
+                            }
+                            interp_3d_run(
+                                &mut reproj_lines[(ix_start - 1) as usize..ix_end as usize],
+                                array,
+                                xx8,
+                                del_x,
+                                ind_base,
+                                lim,
+                                ipsz as usize,
+                                nx_load as usize,
+                                one_mfz,
+                                fz,
+                                one_mfy,
+                                fy,
+                            );
+                        } else {
+                            for i in ix_start..=ix_end {
+                                ix = fortran_int!(f64: xx8);
+                                fx = (xx8 - ix as f64) as f32;
+                                one_mfx = (1. - fx as f64) as f32;
+                                d11 = one_mfx * one_mfy;
+                                d12 = one_mfx * fy;
+                                d21 = fx * one_mfy;
+                                d22 = fx * fy;
+                                ind = ind_base + ix - 1;
+                                reproj_lines[(i - 1) as usize] += one_mfz
+                                    * (d11 * at(ind - 1)
+                                        + d12 * at(ind + ipsz - 1)
+                                        + d21 * at(ind)
+                                        + d22 * at(ind + ipsz))
+                                    + fz * (d11 * at(ind + nx_load - 1)
+                                        + d12 * at(ind + ipsz + nx_load - 1)
+                                        + d21 * at(ind + nx_load)
+                                        + d22 * at(ind + ipsz + nx_load));
+                                xx8 = xx8 + del_x as f64;
+                            }
                         }
                     }
                 }

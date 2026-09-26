@@ -91,8 +91,21 @@ fn copy_to_center(
                 // work, so this arm keeps the element-by-element backward copy
                 // rather than a `memmove`, which is not the same thing when the
                 // destination sits below the source.
-                for ix in (0..nxbox).rev() {
-                    out[dst + ix as usize] = out[src + ix as usize];
+                //
+                // When `dst >= src` (always, for a real expansion: `ixlo`,
+                // `iylo >= 0` and `nxdim >= nxbox`) the backward walk reads
+                // each `out[src + ix]` before anything writes it -- a write to
+                // `dst + j` with `j > ix` lands on `src + ix` only if
+                // `dst - src = ix - j < 0` -- so it moves exactly what a
+                // `memmove` moves, and `copy_within` is that `memmove`
+                // (TO_OPT.md, "combinefft single-thread").  Otherwise the
+                // element loop stays.
+                if dst >= src {
+                    out.copy_within(src..src + n, dst);
+                } else {
+                    for ix in (0..nxbox).rev() {
+                        out[dst + ix as usize] = out[src + ix as usize];
+                    }
                 }
             }
             _ => {}

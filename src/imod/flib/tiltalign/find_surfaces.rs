@@ -36,7 +36,7 @@ const RADIANS_PER_DEGREE: f64 = 0.01745329252;
 /// `tiltAdd` is an existing change in tilt angles; `znew`, `znewInput` and
 /// `imageBinned` let it report the unbinned thickness and centering shift.
 ///
-/// Deviation (uninitialised memory): `truePlus` is only assigned by
+/// Fixed in translation (uninitialised memory, `BUGS.md`): `truePlus` is only assigned by
 /// `calcTiltNew` when `ifComp` is non-zero and `|cosNew| <= 1`, so with one
 /// surface and `ifComp == 0` the source returns stack residue in `tiltNew`
 /// (`find_surfaces.cpp:130`; measured `0x00007FFF`, `0x47AB3652`, varying by
@@ -349,9 +349,11 @@ fn two_surface_fits(
 /// Original: `calcTiltNew` (`find_surfaces.cpp:229`, file `static`) — gives the
 /// new maximum tilt angle only for compression solutions.
 ///
+/// Fixed in translation (2026-09-26, `BUGS.md`): the source's
 /// `acos(cosNew / RADIANS_PER_DEGREE)` divides *inside* the `acos`
-/// (`find_surfaces.cpp:241`), so any `|cosNew| > 0.0175` gives NaN; kept as
-/// written (upstream defect, reached only with `ifComp`).
+/// (`find_surfaces.cpp:241`), so any `|cosNew| > 0.0175` prints NaN.  Here the
+/// angle is `acos(cosNew) / RADIANS_PER_DEGREE`, the conversion the line
+/// evidently means (`acos` taken on the `float`, as C++'s overload would).
 fn calc_tilt_new(
     slope_minus: f32,
     tilt_max: f32,
@@ -372,7 +374,7 @@ fn calc_tilt_new(
     ));
     if if_comp != 0 {
         if (if cos_new >= 0. { cos_new } else { -cos_new }) <= 1. {
-            let ac = (cos_new as f64 / RADIANS_PER_DEGREE).acos();
+            let ac = cos_new.acos() as f64 / RADIANS_PER_DEGREE;
             *true_minus = (if tilt_max < 0. { -ac } else { ac }) as f32;
             let _ = out.write_all(&c_format_bytes(
                 "     or, change a fixed maximum tilt angle from %7.2f to %7.2f\n\n",
@@ -430,4 +432,21 @@ fn lsfit2_resid(
     *slope = (*a as f64
         / ((*alpha as f64 * RADIANS_PER_DEGREE).cos()
             - *b as f64 * (*alpha as f64 * RADIANS_PER_DEGREE).sin())) as f32;
+}
+
+#[cfg(test)]
+mod fixed_tests {
+    use super::*;
+
+    /// `BUGS.md` "`calcTiltNew`": the source takes `acos(cosNew /
+    /// RADIANS_PER_DEGREE)`, NaN for any real angle.  With no slope the
+    /// implied maximum tilt is the entered one.
+    #[test]
+    fn calc_tilt_new_converts_after_acos() {
+        let mut t = 0.0_f32;
+        calc_tilt_new(0.0, 60.0, &mut t, 1, 0.0);
+        assert!((t - 60.0).abs() < 1.0e-3, "{t}");
+        calc_tilt_new(0.0, -45.0, &mut t, 1, 0.0);
+        assert!((t + 45.0).abs() < 1.0e-3, "{t}");
+    }
 }

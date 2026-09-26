@@ -43,9 +43,11 @@ pub fn myroundint_float(a: f32) -> i32 {
 
 /// C++ `rankSort` (`functions.cpp:24`).
 ///
-/// `std::sort` over `std::pair<float,size_t>` orders by the value and then by
-/// the original index, so the comparison is total and the result does not
-/// depend on the sort's stability.
+/// `std::sort` over `std::pair<float,size_t>` uses the pair's `operator<`
+/// (`a.first < b.first || (!(b.first < a.first) && a.second < b.second)`).
+/// That is a total order only while no value is NaN; with one the resulting
+/// permutation -- and so the ranks -- are a property of libstdc++'s introsort,
+/// which `c_sort::std_sort` reproduces.
 pub fn rank_sort(v_temp: &[f32]) -> Vec<usize> {
     let mut v_sort: Vec<(f32, usize)> = vec![(0.0, 0); v_temp.len()];
 
@@ -53,9 +55,8 @@ pub fn rank_sort(v_temp: &[f32]) -> Vec<usize> {
         v_sort[i] = (v_temp[i], i);
     }
 
-    v_sort.sort_by(|a, b| match a.0.partial_cmp(&b.0) {
-        Some(Ordering::Equal) | None => a.1.cmp(&b.1),
-        Some(order) => order,
+    crate::imod::c_sort::std_sort(&mut v_sort, &mut |a, b| {
+        a.0 < b.0 || (!(b.0 < a.0) && a.1 < b.1)
     });
 
     // The source declares `std::pair<double, size_t> rank;`, whose default

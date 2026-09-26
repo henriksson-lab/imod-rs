@@ -2,3 +2,4 @@
 
 pub mod polyfit;
 pub mod polyterm;
+pub mod statfuncs;

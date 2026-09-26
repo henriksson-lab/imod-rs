@@ -17,13 +17,11 @@ fn fixture_dir() -> PathBuf {
     Path::new(env!("CARGO_MANIFEST_DIR")).join("fixtures/densmatch")
 }
 
-/// An MRC label carries a date and time stamp; blank the label text.
+/// Blank the wall-clock stamps (`common::mask_stamps`).  The regions native
+/// writes from uninitialised memory (`BUGS.md` §2) are reconciled first by
+/// `common::reconcile_uninitialised`, which checks ours holds the defined value.
 fn mask(bytes: &[u8]) -> Vec<u8> {
-    let mut masked = bytes.to_vec();
-    if masked.len() > 1024 {
-        masked[224..1024].fill(0);
-    }
-    masked
+    common::mask_stamps(bytes)
 }
 
 fn scratch(name: &str) -> PathBuf {
@@ -134,7 +132,7 @@ fn every_case_matches_native_golden() {
                 continue;
             };
             let theirs = std::fs::read(golden.join(name).join(file)).unwrap();
-            if mask(&ours) != mask(&theirs) {
+            if mask(&ours) != mask(&common::reconcile_uninitialised(&ours, &theirs)) {
                 failures.push(format!("{name}: {file} differs from native"));
             }
         }

@@ -14,7 +14,12 @@ pub fn getinout(narg: i32) -> io::Result<(String, String)> {
             print!(" Name of input file: ");
             io::stdout().flush()?;
             let mut value = String::new();
-            io::stdin().read_line(&mut value)?;
+            // `read(5,100)` has no `END=`: at end of input the gfortran
+            // runtime reports the failure and stops with status 2.
+            if io::stdin().read_line(&mut value)? == 0 {
+                eprintln!("Fortran runtime error: End of file");
+                crate::imod::libcfshr::b3dutil::exit(2);
+            }
             value.trim_end_matches(['\r', '\n']).to_owned()
         }
     };
@@ -25,7 +30,10 @@ pub fn getinout(narg: i32) -> io::Result<(String, String)> {
                 print!(" Name of output file: ");
                 io::stdout().flush()?;
                 let mut value = String::new();
-                io::stdin().read_line(&mut value)?;
+                if io::stdin().read_line(&mut value)? == 0 {
+                    eprintln!("Fortran runtime error: End of file");
+                    crate::imod::libcfshr::b3dutil::exit(2);
+                }
                 value.trim_end_matches(['\r', '\n']).to_owned()
             }
         }

@@ -46,6 +46,15 @@ fn wmod2imod_preserves_imodnew_scale_defaults_and_source_x_option_typo() {
         &model.name[..b"IMOD-NewModel".len() + 1],
         b"IMOD-NewModel\0"
     );
+    // `imodNew` `malloc`s the model and `imodDefault` writes 13 bytes of
+    // `name[128]`, so native writes heap residue after the terminator; the
+    // defined behaviour here is zeros (`BUGS.md` §2), checked on disk.
+    let bytes = std::fs::read(&output).unwrap();
+    assert_eq!(&bytes[8..22], b"IMOD-NewModel\0");
+    assert!(
+        bytes[22..136].iter().all(|&b| b == 0),
+        "model name tail must be zero"
+    );
     // `imodWrite` adds the byte-material, multiple-clip and mesh-thickness
     // format bits before it writes the source-created default model.
     assert_eq!(

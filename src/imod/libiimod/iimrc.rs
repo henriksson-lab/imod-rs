@@ -204,22 +204,19 @@ unsafe fn ii_mrc_read_section(in_file: *mut ImodImageFile, buf: *mut u8, in_sect
     };
     let mut li = LoadInfo::default();
     ii_mrc_set_load_info(image, &mut li);
-    let Some(width): Option<usize> =
-        (li.xmax - li.xmin + 1 + li.pad_left.max(0) + li.pad_right.max(0))
-            .try_into()
-            .ok()
-    else {
-        return IIERR_BAD_CALL;
-    };
-    let Some(rows): Option<usize> = (if li.axis == 2 {
+    // A negative extent is not checked here in the C: the `mrcReadSection*`
+    // call's `iiInitReadSectionAny` reports it (with its message) before the
+    // buffer is touched, so an empty view is passed down instead.
+    let width: usize = (li.xmax - li.xmin + 1 + li.pad_left.max(0) + li.pad_right.max(0))
+        .try_into()
+        .unwrap_or(0);
+    let rows: usize = (if li.axis == 2 {
         li.zmax - li.zmin + 1
     } else {
         li.ymax - li.ymin + 1
     })
     .try_into()
-    .ok() else {
-        return IIERR_BAD_CALL;
-    };
+    .unwrap_or(0);
     let Some(header) = image.mrc_header.as_ref() else {
         return IIERR_BAD_CALL;
     };
@@ -378,22 +375,19 @@ unsafe fn ii_mrc_read_section_byte(
     };
     let mut li = LoadInfo::default();
     ii_mrc_set_load_info(image, &mut li);
-    let Some(width): Option<usize> =
-        (li.xmax - li.xmin + 1 + li.pad_left.max(0) + li.pad_right.max(0))
-            .try_into()
-            .ok()
-    else {
-        return IIERR_BAD_CALL;
-    };
-    let Some(rows): Option<usize> = (if li.axis == 2 {
+    // A negative extent is not checked here in the C: the `mrcReadSection*`
+    // call's `iiInitReadSectionAny` reports it (with its message) before the
+    // buffer is touched, so an empty view is passed down instead.
+    let width: usize = (li.xmax - li.xmin + 1 + li.pad_left.max(0) + li.pad_right.max(0))
+        .try_into()
+        .unwrap_or(0);
+    let rows: usize = (if li.axis == 2 {
         li.zmax - li.zmin + 1
     } else {
         li.ymax - li.ymin + 1
     })
     .try_into()
-    .ok() else {
-        return IIERR_BAD_CALL;
-    };
+    .unwrap_or(0);
     let Some(length) = width.checked_mul(rows) else {
         return IIERR_BAD_CALL;
     };
@@ -411,22 +405,19 @@ unsafe fn ii_mrc_read_section_ushort(
     };
     let mut li = LoadInfo::default();
     ii_mrc_set_load_info(image, &mut li);
-    let Some(width): Option<usize> =
-        (li.xmax - li.xmin + 1 + li.pad_left.max(0) + li.pad_right.max(0))
-            .try_into()
-            .ok()
-    else {
-        return IIERR_BAD_CALL;
-    };
-    let Some(rows): Option<usize> = (if li.axis == 2 {
+    // A negative extent is not checked here in the C: the `mrcReadSection*`
+    // call's `iiInitReadSectionAny` reports it (with its message) before the
+    // buffer is touched, so an empty view is passed down instead.
+    let width: usize = (li.xmax - li.xmin + 1 + li.pad_left.max(0) + li.pad_right.max(0))
+        .try_into()
+        .unwrap_or(0);
+    let rows: usize = (if li.axis == 2 {
         li.zmax - li.zmin + 1
     } else {
         li.ymax - li.ymin + 1
     })
     .try_into()
-    .ok() else {
-        return IIERR_BAD_CALL;
-    };
+    .unwrap_or(0);
     let Some(length) = width
         .checked_mul(rows)
         .and_then(|pixels| pixels.checked_mul(2))
@@ -453,24 +444,19 @@ fn read_section_scaled(
     };
     header.fp = image.fp.clone();
     ii_change_call_count(1);
-    let Some(width): Option<usize> =
-        (li.xmax - li.xmin + 1 + li.pad_left.max(0) + li.pad_right.max(0))
-            .try_into()
-            .ok()
-    else {
-        ii_change_call_count(-1);
-        return IIERR_BAD_CALL;
-    };
-    let Some(rows): Option<usize> = (if li.axis == 2 {
+    // A negative extent is not checked here in the C: the `mrcReadSection*`
+    // call's `iiInitReadSectionAny` reports it (with its message) before the
+    // buffer is touched, so an empty view is passed down instead.
+    let width: usize = (li.xmax - li.xmin + 1 + li.pad_left.max(0) + li.pad_right.max(0))
+        .try_into()
+        .unwrap_or(0);
+    let rows: usize = (if li.axis == 2 {
         li.zmax - li.zmin + 1
     } else {
         li.ymax - li.ymin + 1
     })
     .try_into()
-    .ok() else {
-        ii_change_call_count(-1);
-        return IIERR_BAD_CALL;
-    };
+    .unwrap_or(0);
     let Some(pixels) = width.checked_mul(rows) else {
         ii_change_call_count(-1);
         return IIERR_BAD_CALL;
@@ -779,10 +765,13 @@ mod tests {
         header.next = 12;
         header.nint = 6;
         header.nreal = 2;
-        let image = ImodImageFile {
-            fp: Some(file),
-            mrc_header: Some(header),
-            ..ImodImageFile::default()
+        let image = {
+            // A struct literal cannot take `..Default::default()` now that
+            // `ImodImageFile` implements `Drop` (the in-process run record).
+            let mut record = ImodImageFile::default();
+            record.fp = Some(file);
+            record.mrc_header = Some(header);
+            record
         };
         let mut load = LoadInfo::default();
 

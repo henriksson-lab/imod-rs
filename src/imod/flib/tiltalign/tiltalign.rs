@@ -65,13 +65,14 @@
 //! # Deviations (uninitialised or out-of-bounds reads in the source)
 //!
 //! - `crossValOption` (`:109`) is never initialised and `PipGetInteger`
-//!   leaves it unchanged when `CrossValidate` is not entered; it is 0 here
-//!   (`BUGS.md`).
+//!   leaves it unchanged when `CrossValidate` is not entered.  Fixed in
+//!   translation (2026-09-26, `BUGS.md`): it defaults to 0, no
+//!   cross-validation.
 //! - `countNumInView` and `addToLocalIfInRange` index the test-set flag arrays
-//!   with 1-based point numbers, reading one element past arrays allocated
-//!   `nrealPt` long (`BUGS.md`, wave 2 and wave 6 sections).  Both arrays are
-//!   allocated one element longer here, and that element is 0, where the
-//!   source reads heap residue.
+//!   with 1-based point numbers, reading the next point's flag and one element
+//!   past arrays allocated `nrealPt` long (`BUGS.md`, wave 2 and wave 6
+//!   sections).  Fixed in translation (2026-09-26): each reads the point's own
+//!   flag.
 //! - With one fiducial point the initial `solveXyzd` (`:630`) reads the
 //!   uninitialised `xxUse`/`nrealUse` pointers; here it uses `av`'s arrays.
 //! - `ivst`/`ivnd` (`:1228`) and `err`/`robErr` (`:2709-2712`) start at 0.
@@ -663,8 +664,8 @@ impl TiltAlign {
         //
         // fallbacks from ../../manpages/autodoc2man 2 2  tiltalign
         //
-        let num_options = 123;
-        let options: [&[u8]; 123] = [
+        let num_options = 125;
+        let options: [&[u8]; 125] = [
             b":ModelFile:FN:",
             b":ImageFile:FN:",
             b":ImageSizeXandY:IP:",
@@ -739,8 +740,15 @@ impl TiltAlign {
             b":CrossValidate:I:",
             b":FractionToLeaveOut:FP:",
             b":LeaveOutPredictAndPad:IP:",
-            b":CVCoverageTargetOrFactor:B:",
-            b":CVMinAndMaxCoverageFactor:B:",
+            // Fixed in translation (2026-09-26, `BUGS.md`): the source's fallback
+            // table types these two `B` (`tiltalign.cpp:156-157`) although they
+            // are read as a float and a float pair, and lacks the two
+            // extra-weight options `input_model` reads, so a run without an
+            // autodoc exits "Illegal option: ObjectsWithExtraWeight".
+            b":CVCoverageTargetOrFactor:F:",
+            b":CVMinAndMaxCoverageFactor:FP:",
+            b":ObjectsWithExtraWeight:LI:",
+            b":ExtraWeights:FA:",
             b":RandomSeed:I:",
             b":TestSetIntervalOrFrac:F:",
             b":LocalAlignments:B:",
@@ -1065,7 +1073,8 @@ impl TiltAlign {
         pip_get_boolean(b"WeightWholeTracks", &mut self.av.robust_by_track);
         if self.m_if_do_robust > 0 && self.av.robust_by_track != 0 && self.av.patch_track_model == 0
         {
-            printf!("Option to weight whole contours is being ignored for non-patch track model");
+            // Fixed in translation (`BUGS.md`): the source's message has no newline.
+            printf!("Option to weight whole contours is being ignored for non-patch track model\n");
             self.av.robust_by_track = 0;
         }
         if pip_get_two_integers(
@@ -1177,7 +1186,11 @@ impl TiltAlign {
             if ierr != 0 {
                 exit_from_value_read_error(ierr, "fixed XYZ input file");
             }
-            if index < self.av.nreal_pt {
+            // Fixed in translation (2026-09-26, `BUGS.md`): `index` counts values,
+            // three per point, and the source tests it against `nrealPt`
+            // (`tiltalign.cpp:409`), accepting a file with 1 to 3 times fewer
+            // values than needed and reading unset coordinates.
+            if index < 3 * self.av.nreal_pt {
                 error_exit::<false>(
                     "Fewer coordinates in fixed XYZ input file than fiducial points",
                     0,
@@ -1210,10 +1223,8 @@ impl TiltAlign {
             self.av.real_left_out = vec![0; lv_out_max_real_pt as usize];
             self.av.times_left_out = vec![0; lv_out_max_real_pt as usize];
             self.m_var_all_points = vec![0.; max_var as usize];
-            // One element longer than the source's `lvOutMaxRealPt`: both arrays
-            // are indexed with 1-based point numbers (module doc).
-            self.av.real_in_test_set = vec![0; lv_out_max_real_pt as usize + 1];
-            self.m_all_real_in_test_set = vec![0; lv_out_max_real_pt as usize + 1];
+            self.av.real_in_test_set = vec![0; lv_out_max_real_pt as usize];
+            self.m_all_real_in_test_set = vec![0; lv_out_max_real_pt as usize];
             self.m_lv_out_save_all_xyz = vec![0.; 3 * lv_out_max_real_pt as usize];
             memory_error(true, "arrays for leave-out tests");
 
@@ -2753,9 +2764,11 @@ impl TiltAlign {
             szoz = 0.;
             i = 1;
             while i <= self.av.nreal_pt {
-                // The source tests `realInTestSet[j]` with `j` left at `nrealPt` by the
-                // residual loop above, not the point `i` (`BUGS.md`).
-                if self.m_lv_out_num_predict >= 0 && self.av.real_in_test_set[j as usize] != 0 {
+                // Fixed in translation (2026-09-26, `BUGS.md`): the source tests
+                // `realInTestSet[j]` with `j` left at `nrealPt` by the residual loop
+                // above (`tiltalign.cpp:1254`); the point `i`'s own flag is tested.
+                if self.m_lv_out_num_predict >= 0 && self.av.real_in_test_set[(i - 1) as usize] != 0
+                {
                     i += 1;
                     continue;
                 }
@@ -3442,8 +3455,10 @@ impl TiltAlign {
                 iv = self.m_map_all_file_to_view[k];
                 self.m_h[k] = 0.;
                 if iv > 0 {
-                    // The source reads `mGrad[i]`, the file-view index (`BUGS.md`).
-                    self.m_h[k] = self.m_grad[k];
+                    // Fixed in translation (2026-09-26, `BUGS.md`): the source reads
+                    // `mGrad[i]` with the file-view index (`tiltalign.cpp:1701`);
+                    // the values are in all-view order, so view `iv` is read.
+                    self.m_h[k] = self.m_grad[(iv - 1) as usize];
                 }
             }
             for k in 0..self.av.nfile_views {
@@ -3468,8 +3483,10 @@ impl TiltAlign {
                 for k in 0..self.av.nfile_views as usize {
                     iv = self.m_map_all_file_to_view[k] - 1;
                     self.m_h[k] = 0.;
-                    // `iv > 0`, so the first view is always output as 0 (`BUGS.md`).
-                    if iv > 0 {
+                    // Fixed in translation (2026-09-26, `BUGS.md`): the source tests
+                    // `iv > 0` on the 0-based index (`tiltalign.cpp:1716`), so the
+                    // first view's X-axis tilt is always written as 0.
+                    if iv >= 0 {
                         self.m_h[k] = self.m_grad[iv as usize];
                     }
                 }
@@ -4210,8 +4227,11 @@ impl TiltAlign {
 
             // reduce a fixed coverage by the excess of points in runs over actual points
             // or base a coverage on a target and the total in the runs
+            // Fixed in translation (2026-09-26, `BUGS.md`): the source indexes
+            // `mIallRealStr[av->nrealPt]` (`tiltalign.cpp:2175`), where `nrealPt` is
+            // the count in the *last* local area; the total, `mNAllRealPt`, is used.
             self.m_lv_out_coverage = (self.m_lv_out_target_cover
-                * self.m_iall_real_str[self.av.nreal_pt as usize] as f32)
+                * self.m_iall_real_str[self.m_n_all_real_pt as usize] as f32)
                 / tot_num_in_areas as f32;
             if self.m_lv_out_target_cover >= 100. {
                 self.m_lv_out_coverage = self.m_lv_out_target_cover / tot_num_in_areas as f32;
@@ -4712,9 +4732,10 @@ impl TiltAlign {
     /// Original: `TiltAlign::addToLocalIfInRange` (`tiltalign.cpp:2455`).
     ///
     /// Adds one real point to a local area if its xyz position is in range.
-    /// `mAllRealInTestSet[ireal]` is indexed with the 1-based point number, i.e.
-    /// the next point's flag (`BUGS.md`); the array is one element longer here
-    /// (module doc).
+    /// Fixed in translation (2026-09-26, `BUGS.md`): the source indexes
+    /// `mAllRealInTestSet[ireal]` with the 1-based point number
+    /// (`tiltalign.cpp:2461,2463`), i.e. the next point's flag, and one past the
+    /// array for the last point; the point's own flag, `[ireal - 1]`, is read.
     pub fn add_to_local_if_in_range(&mut self, ireal: i32) {
         let x = self.m_all_xyz[(ireal * 3 - 3) as usize];
         let y = self.m_all_xyz[(ireal * 3 - 2) as usize];
@@ -4726,12 +4747,12 @@ impl TiltAlign {
             self.m_ind_all_real[self.av.nreal_pt as usize] = ireal;
             if self.m_lv_out_num_predict >= 0 && self.av.test_set_frac_step > 0. {
                 self.av.real_in_test_set[self.av.nreal_pt as usize] =
-                    self.m_all_real_in_test_set[ireal as usize];
+                    self.m_all_real_in_test_set[(ireal - 1) as usize];
             }
             self.av.nreal_pt += 1;
             if self.m_lv_out_num_predict < 0
                 || self.av.test_set_frac_step <= 0.
-                || self.m_all_real_in_test_set[ireal as usize] == 0
+                || self.m_all_real_in_test_set[(ireal - 1) as usize] == 0
             {
                 if self.m_num_surface >= 2 {
                     if self.m_igroup[(ireal - 1) as usize] == 1 {

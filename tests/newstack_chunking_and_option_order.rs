@@ -328,8 +328,9 @@ fn a_chunked_float2_run_uses_the_scratch_file_and_keeps_the_sources_chunk_sums()
 /// holding `numLinesOut(iChunk)` lines and `:2443-2450` pads
 /// `(nxFSpad + 2) * (nyFSpad + 1)` elements into an `idimInOut` that
 /// `numChunks == 0` has already proved smaller.  The reference reads and
-/// writes past its array -- `-phase -test 1000,1` segfaults -- so both are
-/// refused by name.
+/// writes past its array -- `-phase -test 1000,1` segfaults.  Fixed in
+/// translation (`BUGS.md` §4): the source's own guards fire on the real chunk
+/// count, with the source's messages.
 #[test]
 fn a_multi_chunk_taper_or_fourier_operation_is_refused_by_name() {
     let dir = scratch("refuse");
@@ -343,7 +344,7 @@ fn a_multi_chunk_taper_or_fourier_operation_is_refused_by_name() {
     assert_eq!(status, 1, "{stdout}");
     assert!(
         stdout.ends_with(
-            "\nERROR: NEWSTACK - -taper with -memory or -test is not supported by this translation\n"
+            "\nERROR: NEWSTACK - Cannot taper output image - it does not fit completely in memory\n"
         ),
         "stdout was:\n{stdout}"
     );
@@ -354,7 +355,7 @@ fn a_multi_chunk_taper_or_fourier_operation_is_refused_by_name() {
     assert_eq!(status, 1, "{stdout}");
     assert!(
         stdout.ends_with(
-            "\nERROR: NEWSTACK - Fourier operations with -memory or -test are not supported by this translation\n"
+            "\nERROR: NEWSTACK - Cannot apply Fourier operations - input and output images do not fit completely in memory\n"
         ),
         "stdout was:\n{stdout}"
     );

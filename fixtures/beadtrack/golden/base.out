@@ -56,9 +56,54 @@ view   5, pass 1,   7 points (-  0), mean, sd, max dev:    0.00    0.00    0.00
   12 views,  111 cycles, F =     1.170030, mean residual =    0.85
 view   4, pass 1,   7 points (-  0), mean, sd, max dev:    0.08    0.06    0.14
   13 views,   36 cycles, F =     1.253845, mean residual =    0.94
-ERROR: iiInitReadSectionAny - Specification of area to read (x 2147483630 to 126 y 2147483630 to 120) is incorrect
+view   3, pass 1,   4 points (-  0), mean, sd, max dev:    -nan    0.00   -1.00
+Metro error #4, Restarting with step factor of 0.22
+  14 views,  914 cycles, F =     0.969814, mean residual =    0.68
+   0 pts added on pass 2, conts:
+view   3, pass 2,   4 points (-  0), mean, sd, max dev:    -nan    0.00   -1.00
+view   2, pass 1,   7 points (-  0), mean, sd, max dev:    0.00    0.00    0.00
+  15 views,   45 cycles, F =     0.958260, mean residual =    0.71
+view   1, pass 1,   7 points (-  0), mean, sd, max dev:    0.00    0.00    0.00
+  16 views,   43 cycles, F =     1.620441, mean residual =    1.00
+  16 views,    1 cycles, F =     1.620456, mean residual =    1.00
+view  17, pass 1,   6 points (-  0), mean, sd, max dev:    0.29    0.15    0.52
+  17 views,  602 cycles, F =     1.002837, mean residual =    0.71
+   1 pts added on pass 2, conts:   4
+view  17, pass 2,   7 points (-  0), mean, sd, max dev:    0.18    0.11    0.37
+  17 views,    1 cycles, F =     1.005097, mean residual =    0.70
+view  18, pass 1,   6 points (-  0), mean, sd, max dev:    0.84    0.57    1.60
+Metro error #1, Restarting with step factor of 0.22
+  18 views,  603 cycles, F =     2.126913, mean residual =    1.77
+   2 pts deleted for pass 2, conts:   5   6
+  18 views,    1 cycles, F =     2.133237, mean residual =    1.78
+   0 pts added on pass 2, conts:
+view  18, pass 2,   4 points (-  0), mean, sd, max dev:    0.33    0.21    0.59
+view  19, pass 1,   7 points (-  0), mean, sd, max dev:    0.80    0.55    1.56
+  19 views,   83 cycles, F =     5.387837, mean residual =    3.40
+   7 pts deleted for pass 2, conts:   4   7   2   5   3   1   6
+  18 views,  331 cycles, F =     2.631929, mean residual =    1.76
+   7 pts added on pass 2, conts:   4   7   2   5   3   1   6
+view  19, pass 2,   7 points (-  0), mean, sd, max dev:    0.64    0.54    1.80
+  19 views,  295 cycles, F =     1.900479, mean residual =    1.39
+view  20, pass 1,   7 points (-  2), mean, sd, max dev:    0.23    0.22    0.58
+  20 views,   96 cycles, F =     4.969928, mean residual =    2.76
+   7 pts deleted for pass 2, conts:   4   7   2   5   3   1   6
+  19 views,  350 cycles, F =     0.879822, mean residual =    0.53
+   7 pts added on pass 2, conts:   4   7   2   5   3   1   6
+view  20, pass 2,   7 points (-  2), mean, sd, max dev:    0.19    0.14    0.38
+  20 views,  184 cycles, F =     1.007568, mean residual =    0.67
+view  21, pass 1,   7 points (-  0), mean, sd, max dev:    0.32    0.15    0.56
+  21 views,  309 cycles, F =     1.044334, mean residual =    0.70
+For object  1, round  1:  7 contours, points missing =    6
+  21 views,    2 cycles, F =     1.044343, mean residual =    0.70
+view   3, pass 1,   4 points (-  0), mean, sd, max dev:    -nan    0.00   -1.00
+  21 views,    1 cycles, F =     1.044344, mean residual =    0.70
+view  18, pass 1,   4 points (-  0), mean, sd, max dev:    0.04    0.03    0.07
+For object  1, round  2:  7 contours, points missing =    6
 
-ERROR: iiInitReadSectionAny - Specification of area to read (x 2147483630 to 126 y 2147483630 to 120) is incorrect
-
-X/Y dim 36 36 Limits of load 2147483630 -2147483631 2147483630 -2147483631
-ERROR: beadtrack - Reading image file
+Obj cont:  Views on which points are missing
+ 1   1: 3
+ 1   3: 3,18
+ 1   5: 18
+ 1   6: 3,18
+ Total points missing = 6

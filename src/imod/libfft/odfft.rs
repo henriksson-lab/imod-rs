@@ -50,20 +50,25 @@ pub fn odfft(array: &mut [f32], nx: i32, ny: i32, idir: i32) {
             dim[3] = total;
             dim[4] = total;
             dim[5] = stride;
+            // `total` is even (`2 * nx * ny`), so the source's `j += 2` loops
+            // visit exactly the pairs of `chunks_exact_mut(2)`, in order, with
+            // the same operations; the iterators drop the per-element bounds
+            // checks (TO_OPT.md, "combinefft single-thread").
+            let total_u = total.max(0) as usize;
             if idir == -2 {
-                for i in (0..total - 1).step_by(2) {
-                    array[i as usize] *= scale;
-                    array[(i + 1) as usize] = -array[(i + 1) as usize] * scale;
+                for pair in array[..total_u].chunks_exact_mut(2) {
+                    pair[0] *= scale;
+                    pair[1] = -pair[1] * scale;
                 }
             }
             cmplft(array, 1, nx, &mut dim);
             if idir == -2 {
-                for i in (0..total - 1).step_by(2) {
-                    array[(i + 1) as usize] = -array[(i + 1) as usize];
+                for pair in array[..total_u].chunks_exact_mut(2) {
+                    pair[1] = -pair[1];
                 }
             } else {
-                for i in 0..total {
-                    array[i as usize] *= scale;
+                for value in &mut array[..total_u] {
+                    *value *= scale;
                 }
             }
         }
@@ -76,8 +81,8 @@ pub fn odfft(array: &mut [f32], nx: i32, ny: i32, idir: i32) {
             dim[4] = total;
             dim[5] = stride;
             realft(array, 1, nx / 2, &mut dim);
-            for i in 0..total {
-                array[i as usize] *= scale;
+            for value in &mut array[..total.max(0) as usize] {
+                *value *= scale;
             }
         }
         1 => {
@@ -88,9 +93,11 @@ pub fn odfft(array: &mut [f32], nx: i32, ny: i32, idir: i32) {
             dim[3] = total;
             dim[4] = total;
             dim[5] = stride;
-            for i in (0..total - 1).step_by(2) {
-                array[i as usize] *= scale;
-                array[(i + 1) as usize] = -array[(i + 1) as usize] * scale;
+            // `total = (nx + 2) * ny` with `nx` even (checked above), so the
+            // pairs are exactly those of `chunks_exact_mut(2)`.
+            for pair in array[..total.max(0) as usize].chunks_exact_mut(2) {
+                pair[0] *= scale;
+                pair[1] = -pair[1] * scale;
             }
             let mut index = 1;
             for _ in 0..ny {

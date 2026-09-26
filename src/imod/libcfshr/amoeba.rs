@@ -282,12 +282,14 @@ pub fn amoeba_init<Function: FnMut(&[f32]) -> f32>(
     let mut temporary = [0.0f32; NMAX];
     for simplex in 0..=dimensions {
         for dimension in 0..dimensions {
-            points[simplex + dimension * fastest_dimension] = initial[dimension]
-                + if simplex != 0 && dimension == simplex - 1 {
-                    delta_factor * delta[dimension]
-                } else {
-                    0.
-                };
+            // `amoeba.c:235-237`: the plain copy, then the displaced value
+            // for the one perturbed dimension.  Adding `0.` instead would
+            // turn a `-0.` start value into `+0.`.
+            points[simplex + dimension * fastest_dimension] = initial[dimension];
+            if simplex != 0 && dimension == simplex - 1 {
+                points[simplex + dimension * fastest_dimension] =
+                    initial[dimension] + delta_factor * delta[dimension];
+            }
             temporary[dimension] = points[simplex + dimension * fastest_dimension];
             point_tolerance[dimension] = delta[dimension] * tolerance_factor;
         }

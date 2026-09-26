@@ -3,12 +3,26 @@ use crate::imod::libcfshr::parselist::{ParseListError, parselist as parse_list};
 use std::io::BufRead;
 
 /// Original `rdlist` (`rdlist.f90:16`).
+///
+/// Fixed in translation (BUGS.md, `xfmodel`): the source passes the literal
+/// `0` as LIMLIST (`rdlist.f90:19`), and `parselist2`'s error path assigns
+/// `limList = ierr + 2` (`:80`) -- a store into a constant that gfortran keeps
+/// in read-only memory, so native segfaults (exit 139) on any bad character,
+/// its message lost in the unflushed buffer.  This "unsafe" form has no way to
+/// hand an error back, so an error ends the program with status 1 after
+/// `parselist2` has printed its message, as for a positive LIMLIST.
 pub fn rdlist<R: BufRead>(
     iunit: &mut R,
     list: &mut [i32],
     num_in_list: &mut i32,
 ) -> Result<(), i32> {
-    rdlist2(iunit, list, num_in_list, &mut 0)
+    let result = rdlist2(iunit, list, num_in_list, &mut 0);
+    if result.is_err() {
+        use std::io::Write;
+        let _ = std::io::stdout().flush();
+        crate::imod::libcfshr::b3dutil::exit(1);
+    }
+    result
 }
 
 /// Original `rdlist2` (`rdlist.f90:28`).
@@ -55,8 +69,18 @@ pub fn read_big_list<R: BufRead>(
 }
 
 /// Original `parselist` (`rdlist.f90:53`).
+///
+/// Fixed in translation (BUGS.md, `xfmodel`): as for [`rdlist`], the literal
+/// `0` LIMLIST (`rdlist.f90:57`) makes native segfault on a bad character;
+/// an error here prints `parselist2`'s message and exits with status 1.
 pub fn parselist(line: &str, list: &mut [i32], num_in_list: &mut i32) -> Result<(), i32> {
-    parselist2(line, list, num_in_list, &mut 0)
+    let result = parselist2(line, list, num_in_list, &mut 0);
+    if result.is_err() {
+        use std::io::Write;
+        let _ = std::io::stdout().flush();
+        crate::imod::libcfshr::b3dutil::exit(1);
+    }
+    result
 }
 
 /// Original `parselist2` (`rdlist.f90:63`).
@@ -80,6 +104,8 @@ pub fn parselist2(
             if *lim_list > 0 {
                 crate::imod::libcfshr::b3dutil::exit(1);
             }
+            // `limList = ierr + 2` (`rdlist.f90:80`), ierr 2 for a bad character.
+            *lim_list = 4;
             return Err(2);
         }
     };
@@ -130,6 +156,12 @@ mod tests {
             Err(-1)
         );
         assert_eq!(negative_limit, 1);
+        let mut negative_limit = -12;
+        assert_eq!(
+            parselist2("1-3x", &mut values, &mut count, &mut negative_limit),
+            Err(2)
+        );
+        assert_eq!(negative_limit, 4);
     }
 
     #[test]

@@ -1660,8 +1660,7 @@ impl Image {
         }
 
         let sorted_len = (number_of_voxels - 1).max(0) as usize;
-        buffer_array[..sorted_len]
-            .sort_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal));
+        crate::imod::c_sort::std_sort(&mut buffer_array[..sorted_len], &mut |a, b| a < b);
         median_value = buffer_array[(number_of_voxels / 2) as usize];
 
         median_value

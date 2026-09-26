@@ -221,3 +221,165 @@ fn changes_a_real_imod_command_file_block() {
     let changed = modify_for_change_list(&lines, "tilt", "", &changes, false).unwrap();
     assert!(changed.iter().any(|line| line == "THICKNESS\t250"));
 }
+
+/// Writes an 8x6x2 float MRC through our `raw2mrc` into `dir/<name>.mrc`
+/// and replaces its titles with `labels` (each blank-padded to 80 bytes, as
+/// SerialEM writes them).
+fn titled_stack(dir: &std::path::Path, name: &str, labels: &[&str]) -> PathBuf {
+    let raw = dir.join("src.raw");
+    let pixels: Vec<u8> = (0..8 * 6 * 2)
+        .flat_map(|index| (index as f32 * 0.25).to_le_bytes())
+        .collect();
+    std::fs::write(&raw, pixels).unwrap();
+    let mrc = dir.join(format!("{name}.mrc"));
+    let status = common::imod_cmd("raw2mrc")
+        .args(["-x", "8", "-y", "6", "-z", "2", "-t", "float"])
+        .arg(&raw)
+        .arg(&mrc)
+        .output()
+        .unwrap()
+        .status;
+    assert!(status.success());
+    let mut bytes = std::fs::read(&mrc).unwrap();
+    bytes[220..224].copy_from_slice(&(labels.len() as i32).to_le_bytes());
+    for (index, label) in labels.iter().enumerate() {
+        let mut padded = label.as_bytes().to_vec();
+        padded.resize(80, b' ');
+        bytes[224 + 80 * index..224 + 80 * (index + 1)].copy_from_slice(&padded[..80]);
+    }
+    std::fs::write(&mrc, bytes).unwrap();
+    mrc
+}
+
+/// `imodpy.getmrc(angleLineValues=True)` crashes on Python 3 (`len()` of a
+/// `filter` object; BUGS.md, "fixed in translation").  The defined behaviour
+/// is the loop the code intends, `list(multiCharSplit(line, ' ,='))`.  Every
+/// expectation below was produced by the reference Python with exactly that
+/// one change, running the native `header` on the same titles.
+#[test]
+fn getmrc_angle_line_values_defined_behaviour() {
+    use imod_rs::imod::pysrc::imodpy::{MrcInfo, get_mrc};
+
+    let dir = std::env::temp_dir().join(format!("imod-rs-brt-getmrc-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&dir);
+    std::fs::create_dir_all(&dir).unwrap();
+    // A 79-byte title (all `header` prints) whose last token is a value, and
+    // one whose last token is a key: the line's newline is then a token of
+    // its own only when the title is shorter than 79 bytes.
+    let full = format!(
+        "Tilt axis angle = 12.25 binning = 3 {} camera = 1",
+        "z".repeat(79 - 36 - 11)
+    );
+    let key_last = format!("{:<71} binning", "Tilt axis angle = 5 junk");
+    type Values = [Option<f64>; 5];
+    let cases: Vec<(&str, Vec<&str>, Option<Values>)> = vec![
+        (
+            "serialem",
+            vec!["SerialEM: Tilt axis angle = 85.3, binning = 1  spot = 8  camera = 0"],
+            Some([Some(85.3), Some(1.0), Some(8.0), Some(0.0), None]),
+        ),
+        (
+            "neg",
+            vec!["Tilt axis angle = -11.5, binning = 2  spot = 2  camera = 2"],
+            Some([Some(-11.5), Some(2.0), Some(2.0), Some(2.0), None]),
+        ),
+        (
+            "full",
+            vec![full.as_str()],
+            Some([Some(12.25), Some(3.0), None, Some(1.0), None]),
+        ),
+        (
+            "keylastfull",
+            vec![key_last.as_str()],
+            Some([Some(5.0), None, None, None, None]),
+        ),
+        // Python: `float('\n')` raises ValueError -> ImodpyError.
+        ("keylast", vec!["Tilt axis angle = 5 binning"], None),
+        ("bad", vec!["Tilt axis angle = abc"], None),
+        ("badint", vec!["Tilt axis angle = 4 spot = 2.5"], None),
+        ("none", vec!["Just some title"], Some([None; 5])),
+        ("nolabels", vec![], Some([None; 5])),
+        (
+            "second",
+            vec!["Generic title", "Tilt axis angle = 3.5,binning=2,bidir=-20"],
+            Some([Some(3.5), Some(2.0), None, None, Some(-20.0)]),
+        ),
+        (
+            "twolines",
+            vec!["Tilt axis angle = 1.5", "Tilt axis angle = 7.5 spot = 9"],
+            Some([Some(7.5), None, Some(9.0), None, None]),
+        ),
+        (
+            "nospace",
+            vec!["axis angle=44"],
+            Some([Some(44.0), None, None, None, None]),
+        ),
+    ];
+    for (name, labels, expected) in cases {
+        let mrc = titled_stack(&dir, name, &labels);
+        match (get_mrc(mrc.to_str().unwrap(), false, true), expected) {
+            (Ok(MrcInfo::AngleLines(values)), Some(expected)) => {
+                assert_eq!(values, expected, "{name}")
+            }
+            (Err(_), None) => {}
+            (other, expected) => panic!("{name}: got {other:?}, expected {expected:?}"),
+        }
+    }
+    std::fs::remove_dir_all(&dir).unwrap();
+}
+
+/// `batchruntomo -BypassEtomo` with no `rotation` directive on a SerialEM
+/// stack: the reference Python dies there with the `getmrc` TypeError and
+/// exits 1.  With the defined behaviour it takes the axis angle from the
+/// title and sets the data set up.  The com files and `batchruntomo.log`
+/// match, byte for byte (time stamps aside), those of the reference Python
+/// with the one-line `list(...)` fix, run with the native binaries.
+#[test]
+fn bypass_setup_reads_rotation_from_serialem_title() {
+    let source = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("IMOD");
+    let dir = std::env::temp_dir().join(format!("imod-rs-brt-rotation-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&dir);
+    std::fs::create_dir_all(&dir).unwrap();
+    titled_stack(
+        &dir,
+        "ts",
+        &["SerialEM: Tilt axis angle = 85.3, binning = 1  spot = 8  camera = 0"],
+    );
+    std::fs::write(dir.join("ts.rawtlt"), "-3.0\n3.0\n").unwrap();
+    std::fs::write(
+        dir.join("dir.adoc"),
+        format!(
+            "setupset.copyarg.name = ts\nsetupset.copyarg.stackext = mrc\n\
+             setupset.copyarg.dual = 0\nsetupset.copyarg.pixel = 1.0\n\
+             setupset.copyarg.gold = 10\nsetupset.copyarg.userawtlt = 1\n\
+             setupset.copyarg.buserawtlt = 1\nsetupset.datasetDirectory = {}\n",
+            dir.display()
+        ),
+    )
+    .unwrap();
+    // `copytomocoms` runs as a child process, found through `PATH`.
+    for command in imod_rs::imod::commands::COMMANDS {
+        common::imod_link(command.name);
+    }
+    let path = format!(
+        "{}:/usr/bin:/bin",
+        common::command_link_directory().display()
+    );
+    let result = common::imod_cmd("batchruntomo")
+        .current_dir(&dir)
+        .env("PATH", path)
+        .env("IMOD_DIR", &source)
+        .env("AUTODOC_DIR", source.join("autodoc"))
+        .args(["-directive", "dir.adoc", "-end", "0", "-bypass"])
+        .output()
+        .unwrap();
+    common::remove_command_links();
+    assert!(result.status.success(), "{result:?}");
+    let stderr = String::from_utf8_lossy(&result.stderr);
+    assert!(!stderr.contains("TypeError"), "{stderr}");
+    let align = std::fs::read_to_string(dir.join("align.com")).unwrap();
+    assert!(align.contains("RotationAngle\t85.3\n"), "{align}");
+    let ctfplotter = std::fs::read_to_string(dir.join("ctfplotter.com")).unwrap();
+    assert!(ctfplotter.contains("AxisAngle\t85.3\n"), "{ctfplotter}");
+    std::fs::remove_dir_all(&dir).unwrap();
+}

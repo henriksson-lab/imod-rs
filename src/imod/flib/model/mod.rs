@@ -1,2 +1,11 @@
+pub mod ccderaser;
 pub mod convertmod;
+pub mod corrsearch3d;
+pub mod filltomo;
+pub mod findwarp;
+pub mod get_region_contours;
+pub mod refinematch;
+pub mod solve_wo_outliers;
+pub mod solvematch;
+pub mod tomopitch;
 pub mod xfmodel;

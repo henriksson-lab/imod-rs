@@ -229,11 +229,39 @@ pub fn r2cftk(
         for _itrip in 0..ntrip {
             let mut kk = k0;
             while kk <= n_sep {
+                // Whether every per-`l` assertion below would pass, so it may
+                // be skipped (TO_OPT.md, "combinefft single-thread"): a
+                // `false` keeps it.  Exact: `(k1 - 1 - k)` is `extent_between`
+                // for every `l`, so the loop runs iff `extent_between >= 0`
+                // and its last index `l - 1 + extent_between / sep_between *
+                // sep_between` increases with `l`; with `lim_along > 0` the
+                // `l` run is `kk ..= kk + (tot_floats - kk) / lim_along *
+                // lim_along`, so the assertions all hold iff `kk - 1 >= 0`
+                // and the bound holds at the last `l`.  In `i64`/`u128`, so
+                // nothing here overflows.
+                let kk_ok = if kk > tot_floats {
+                    true
+                } else if lim_along <= 0 || sep_between <= 0 || extent_between < 0 {
+                    false
+                } else {
+                    let (kkl, totl, laln, ebl, sbl) = (
+                        kk as i64,
+                        tot_floats as i64,
+                        lim_along as i64,
+                        extent_between as i64,
+                        sep_between as i64,
+                    );
+                    let last_l = kkl + (totl - kkl) / laln * laln;
+                    let last = last_l - 1 + ebl / sbl * sbl;
+                    kkl - 1 >= 0
+                        && last <= i32::MAX as i64
+                        && (top as u128 + last as u128) < len as u128
+                };
                 let mut l = kk;
                 while l <= tot_floats {
                     let k1 = l + extent_between;
                     let mut k = l - 1;
-                    if k < k1 {
+                    if !kk_ok && k < k1 {
                         assert!(
                             k >= 0
                                 && sep_between > 0
@@ -340,11 +368,39 @@ pub fn r3cftk(
         for _itrip in 0..ntrip {
             let mut kk = k0;
             while kk <= n_sep {
+                // Whether every per-`l` assertion below would pass, so it may
+                // be skipped (TO_OPT.md, "combinefft single-thread"): a
+                // `false` keeps it.  Exact: `(k1 - 1 - k)` is `extent_between`
+                // for every `l`, so the loop runs iff `extent_between >= 0`
+                // and its last index `l - 1 + extent_between / sep_between *
+                // sep_between` increases with `l`; with `lim_along > 0` the
+                // `l` run is `kk ..= kk + (tot_floats - kk) / lim_along *
+                // lim_along`, so the assertions all hold iff `kk - 1 >= 0`
+                // and the bound holds at the last `l`.  In `i64`/`u128`, so
+                // nothing here overflows.
+                let kk_ok = if kk > tot_floats {
+                    true
+                } else if lim_along <= 0 || sep_between <= 0 || extent_between < 0 {
+                    false
+                } else {
+                    let (kkl, totl, laln, ebl, sbl) = (
+                        kk as i64,
+                        tot_floats as i64,
+                        lim_along as i64,
+                        extent_between as i64,
+                        sep_between as i64,
+                    );
+                    let last_l = kkl + (totl - kkl) / laln * laln;
+                    let last = last_l - 1 + ebl / sbl * sbl;
+                    kkl - 1 >= 0
+                        && last <= i32::MAX as i64
+                        && (top as u128 + last as u128) < len as u128
+                };
                 let mut l = kk;
                 while l <= tot_floats {
                     let k1 = l + extent_between;
                     let mut k = l - 1;
-                    if k < k1 {
+                    if !kk_ok && k < k1 {
                         assert!(
                             k >= 0
                                 && sep_between > 0
@@ -472,11 +528,39 @@ pub fn r4cftk(
         for _itrip in 0..ntrip {
             let mut kk = k0;
             while kk <= n_sep {
+                // Whether every per-`l` assertion below would pass, so it may
+                // be skipped (TO_OPT.md, "combinefft single-thread"): a
+                // `false` keeps it.  Exact: `(k1 - 1 - k)` is `extent_between`
+                // for every `l`, so the loop runs iff `extent_between >= 0`
+                // and its last index `l - 1 + extent_between / sep_between *
+                // sep_between` increases with `l`; with `lim_along > 0` the
+                // `l` run is `kk ..= kk + (tot_floats - kk) / lim_along *
+                // lim_along`, so the assertions all hold iff `kk - 1 >= 0`
+                // and the bound holds at the last `l`.  In `i64`/`u128`, so
+                // nothing here overflows.
+                let kk_ok = if kk > tot_floats {
+                    true
+                } else if lim_along <= 0 || sep_between <= 0 || extent_between < 0 {
+                    false
+                } else {
+                    let (kkl, totl, laln, ebl, sbl) = (
+                        kk as i64,
+                        tot_floats as i64,
+                        lim_along as i64,
+                        extent_between as i64,
+                        sep_between as i64,
+                    );
+                    let last_l = kkl + (totl - kkl) / laln * laln;
+                    let last = last_l - 1 + ebl / sbl * sbl;
+                    kkl - 1 >= 0
+                        && last <= i32::MAX as i64
+                        && (top as u128 + last as u128) < len as u128
+                };
                 let mut l = kk;
                 while l <= tot_floats {
                     let k1 = l + extent_between;
                     let mut k = l - 1;
-                    if k < k1 {
+                    if !kk_ok && k < k1 {
                         assert!(
                             k >= 0
                                 && sep_between > 0
@@ -631,11 +715,39 @@ pub fn r5cftk(
         for _itrip in 0..ntrip {
             let mut kk = k0;
             while kk <= n_sep {
+                // Whether every per-`l` assertion below would pass, so it may
+                // be skipped (TO_OPT.md, "combinefft single-thread"): a
+                // `false` keeps it.  Exact: `(k1 - 1 - k)` is `extent_between`
+                // for every `l`, so the loop runs iff `extent_between >= 0`
+                // and its last index `l - 1 + extent_between / sep_between *
+                // sep_between` increases with `l`; with `lim_along > 0` the
+                // `l` run is `kk ..= kk + (tot_floats - kk) / lim_along *
+                // lim_along`, so the assertions all hold iff `kk - 1 >= 0`
+                // and the bound holds at the last `l`.  In `i64`/`u128`, so
+                // nothing here overflows.
+                let kk_ok = if kk > tot_floats {
+                    true
+                } else if lim_along <= 0 || sep_between <= 0 || extent_between < 0 {
+                    false
+                } else {
+                    let (kkl, totl, laln, ebl, sbl) = (
+                        kk as i64,
+                        tot_floats as i64,
+                        lim_along as i64,
+                        extent_between as i64,
+                        sep_between as i64,
+                    );
+                    let last_l = kkl + (totl - kkl) / laln * laln;
+                    let last = last_l - 1 + ebl / sbl * sbl;
+                    kkl - 1 >= 0
+                        && last <= i32::MAX as i64
+                        && (top as u128 + last as u128) < len as u128
+                };
                 let mut l = kk;
                 while l <= tot_floats {
                     let k1 = l + extent_between;
                     let mut k = l - 1;
-                    if k < k1 {
+                    if !kk_ok && k < k1 {
                         assert!(
                             k >= 0
                                 && sep_between > 0
@@ -831,11 +943,39 @@ pub fn r8cftk(
         for _itrip in 0..ntrip {
             let mut kk = k0;
             while kk <= n_sep {
+                // Whether every per-`l` assertion below would pass, so it may
+                // be skipped (TO_OPT.md, "combinefft single-thread"): a
+                // `false` keeps it.  Exact: `(k1 - 1 - k)` is `extent_between`
+                // for every `l`, so the loop runs iff `extent_between >= 0`
+                // and its last index `l - 1 + extent_between / sep_between *
+                // sep_between` increases with `l`; with `lim_along > 0` the
+                // `l` run is `kk ..= kk + (tot_floats - kk) / lim_along *
+                // lim_along`, so the assertions all hold iff `kk - 1 >= 0`
+                // and the bound holds at the last `l`.  In `i64`/`u128`, so
+                // nothing here overflows.
+                let kk_ok = if kk > tot_floats {
+                    true
+                } else if lim_along <= 0 || sep_between <= 0 || extent_between < 0 {
+                    false
+                } else {
+                    let (kkl, totl, laln, ebl, sbl) = (
+                        kk as i64,
+                        tot_floats as i64,
+                        lim_along as i64,
+                        extent_between as i64,
+                        sep_between as i64,
+                    );
+                    let last_l = kkl + (totl - kkl) / laln * laln;
+                    let last = last_l - 1 + ebl / sbl * sbl;
+                    kkl - 1 >= 0
+                        && last <= i32::MAX as i64
+                        && (top as u128 + last as u128) < len as u128
+                };
                 let mut l = kk;
                 while l <= tot_floats {
                     let k1 = l + extent_between;
                     let mut k = l - 1;
-                    if k < k1 {
+                    if !kk_ok && k < k1 {
                         assert!(
                             k >= 0
                                 && sep_between > 0

@@ -1,6 +1,7 @@
 //! Translation of `IMOD/flib/subrs/imsubs/irdhdr.f90`.
 #![allow(unused_variables)]
 
+use crate::imod::flib::subrs::compat::gfortran_rt::minss;
 use crate::imod::libiimod::unit_fileio::{iiu_file_info, iiu_ret_brief, iiu_ret_print};
 use crate::imod::libiimod::unit_header::{
     iiu_ret_axis_map, iiu_ret_basic_head, iiu_ret_cell, iiu_ret_data_type, iiu_ret_delta,
@@ -172,7 +173,9 @@ pub unsafe fn irdhdr(
             } else {
                 "..................."
             };
-            let mean_text = if *dmean < (*dmin).min(*dmax) {
+            // `min(dmin, dmax)` (`irdhdr.f90:96`): `minss dmin, dmax` in the
+            // reference object, so a NaN `dmax` makes the test false.
+            let mean_text = if *dmean < minss(*dmin, *dmax) {
                 "...(undetermined).."
             } else {
                 "..................."
@@ -215,8 +218,12 @@ pub unsafe fn irdhdr(
                 g_edit(delta[2], 11, 4)
             );
             println!(
-                " Cell angles ...........................{:9.3}{:9.3}{:9.3}",
-                cell[3], cell[4], cell[5]
+                " Cell angles ...........................{}{}{}",
+                // `3F9.3` (`irdhdr.f90:133`): Fortran F editing, which fills
+                // an overflowing field with asterisks.
+                crate::imod::flib::subrs::compat::gfortran_rt::format_f(f64::from(cell[3]), 9, 3),
+                crate::imod::flib::subrs::compat::gfortran_rt::format_f(f64::from(cell[4]), 9, 3),
+                crate::imod::flib::subrs::compat::gfortran_rt::format_f(f64::from(cell[5]), 9, 3)
             );
             let lxyz = [' ', 'X', 'Y', 'Z'];
             println!(
@@ -285,8 +292,26 @@ pub unsafe fn irdhdr(
                 );
             }
             println!(
-                " tilt angles (original,current) ........{:6.1}{:6.1}{:6.1}{:6.1}{:6.1}{:6.1}",
-                tilt_orig[0], tilt_orig[1], tilt_orig[2], tilt[0], tilt[1], tilt[2]
+                " tilt angles (original,current) ........{}{}{}{}{}{}",
+                // `6f6.1` (`irdhdr.f90:142`).
+                crate::imod::flib::subrs::compat::gfortran_rt::format_f(
+                    f64::from(tilt_orig[0]),
+                    6,
+                    1
+                ),
+                crate::imod::flib::subrs::compat::gfortran_rt::format_f(
+                    f64::from(tilt_orig[1]),
+                    6,
+                    1
+                ),
+                crate::imod::flib::subrs::compat::gfortran_rt::format_f(
+                    f64::from(tilt_orig[2]),
+                    6,
+                    1
+                ),
+                crate::imod::flib::subrs::compat::gfortran_rt::format_f(f64::from(tilt[0]), 6, 1),
+                crate::imod::flib::subrs::compat::gfortran_rt::format_f(f64::from(tilt[1]), 6, 1),
+                crate::imod::flib::subrs::compat::gfortran_rt::format_f(f64::from(tilt[2]), 6, 1)
             );
             // FORMAT `4I9`: an integer wider than the field prints as nine
             // asterisks (`libgfortran/io/write.c`, `write_integer`), which a
@@ -334,6 +359,11 @@ pub unsafe fn irdhdr(
             );
             // `irdhdr.f90:146-147` writes labels(i,1) unconditionally as the
             // tail of FORMAT 1008, and labels(i,numLabels) when numLabels > 1.
+            // With numLabels == 0 native prints its uninitialised `labels`
+            // array (`BUGS.md` §2); defined here: a blank title (79 spaces).
+            if num_labels < 1 {
+                labels[0] = [b' '; 80];
+            }
             println!("{}", String::from_utf8_lossy(&labels[0][..79]));
             if num_labels > 1 {
                 println!(
@@ -349,25 +379,25 @@ pub unsafe fn irdhdr(
             let lxyz = [' ', 'X', 'Y', 'Z'];
             if idtype == 1 {
                 println!(
-                    "      TILT data set, axis= {} delta,start angle= {:8.2}{:8.2}\n",
+                    "      TILT data set, axis= {} delta,start angle= {}{}\n",
                     if (1..=3).contains(&nd1) {
                         lxyz[nd1 as usize]
                     } else {
                         ' '
                     },
-                    vd1,
-                    vd2
+                    crate::imod::flib::subrs::compat::gfortran_rt::format_f(f64::from(vd1), 8, 2),
+                    crate::imod::flib::subrs::compat::gfortran_rt::format_f(f64::from(vd2), 8, 2)
                 );
             } else if idtype == 2 {
                 println!(
-                    " SERIAL STEREO data set, axis= {} left angle= {:8.2} right angle= {:8.2}\n",
+                    " SERIAL STEREO data set, axis= {} left angle= {} right angle= {}\n",
                     if (1..=3).contains(&nd1) {
                         lxyz[nd1 as usize]
                     } else {
                         ' '
                     },
-                    vd1,
-                    vd2
+                    crate::imod::flib::subrs::compat::gfortran_rt::format_f(f64::from(vd1), 8, 2),
+                    crate::imod::flib::subrs::compat::gfortran_rt::format_f(f64::from(vd2), 8, 2)
                 );
             } else if idtype == 3 {
                 println!(
@@ -376,8 +406,11 @@ pub unsafe fn irdhdr(
                 );
             } else if idtype == 4 {
                 println!(
-                    "      AVG STEREO data set, Navg,Noffset= {:3}{:3} L,R angles= {:8.2}{:8.2}\n",
-                    nd1, nd2, vd1, vd2
+                    "      AVG STEREO data set, Navg,Noffset= {:3}{:3} L,R angles= {}{}\n",
+                    nd1,
+                    nd2,
+                    crate::imod::flib::subrs::compat::gfortran_rt::format_f(f64::from(vd1), 8, 2),
+                    crate::imod::flib::subrs::compat::gfortran_rt::format_f(f64::from(vd2), 8, 2)
                 );
             }
         }

@@ -215,7 +215,11 @@ pub fn slice_new_mode_ex(s: &mut Islice, mode: i32, free_data: i32) -> i32 {
             } else if mode == MRC_MODE_COMPLEX_FLOAT || mode == MRC_MODE_COMPLEX_SHORT {
                 val[1] = 0.;
             }
-            if mode == MRC_MODE_RGB {
+            // `mrcslice.c:98-106,138-147`: the grey-to-RGB replication is only
+            // in the arms for a single-channel or complex source.  A
+            // `SLICE_MODE_MAX` (99) source takes the outer `default:` arm,
+            // `default_copy`, which clamps and keeps each channel.
+            if mode == MRC_MODE_RGB && s.mode != 99 {
                 if limit {
                     val[0] = val[0].clamp(lo, hi);
                 }

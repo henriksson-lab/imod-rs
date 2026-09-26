@@ -85,12 +85,11 @@ pub fn iiu_create_header(
         iiu_alt_size(iunit, nxyz, &nxyzst);
         iiu_alt_sample(iunit, mxyz);
         // `unit_header.c:256-258` assigns `xlen` twice and never `ylen`: the
-        // second line is `hdr->xlen = mxyz[1]`, so `xlen` ends up as the Y sample
-        // count and `ylen` keeps whatever the header already held (upstream
-        // defect, reproduced; `BUGS.md`).  Callers that follow with `iiuAltCell`
-        // never see it; `findsection`'s `.colmed` output does.
+        // second line is `hdr->xlen = mxyz[1]`.  Fixed in translation
+        // (2026-09-26, `BUGS.md`): native leaves `xlen` = the Y sample count and
+        // `ylen` unchanged; this sets `xlen` and `ylen` from their own samples.
         (*hdr).xlen = mxyz[0] as f32;
-        (*hdr).xlen = mxyz[1] as f32;
+        (*hdr).ylen = mxyz[1] as f32;
         (*hdr).zlen = mxyz[2] as f32;
     }
     iiu_alt_labels(iunit, labels, num_labels);

@@ -11,7 +11,7 @@ use std::io::{Read, Write};
 const CAPTURE_NONBS: &str = "([^\\\\])";
 
 /// Translation of `usage`.
-pub fn usage(progname: &str) {
+pub fn usage(progname: &str) -> ! {
     println!("Usage: {progname} [options] input_doc output_doc");
     println!("  input_doc is the input html document to be scanned");
     println!("  output_doc is the output document");
@@ -19,12 +19,13 @@ pub fn usage(progname: &str) {
     println!("    -f       Source files are Fortran (default is C/C++)");
     println!("    -d path  Set path to source files");
     println!("    -D       Debug mode");
+    crate::imod::libcfshr::b3dutil::exit(1);
 }
 
 /// Translation of `main`.
 ///
-/// It returns the C program's process status so the thin Rust executable can
-/// retain the original command-line boundary.
+/// The error paths `exit(1)` where the source does; the normal end returns
+/// the source's `return 0` to the launcher.
 pub fn sourcedoc(argv: &[String]) -> i32 {
     const LIST_FUNCTIONS_FROM: &str = "LIST FUNCTIONS FROM ";
     const DESCRIBE_FUNCTIONS_FROM: &str = "DESCRIBE FUNCTIONS FROM ";
@@ -39,7 +40,6 @@ pub fn sourcedoc(argv: &[String]) -> i32 {
 
     if argv.len() < 3 {
         usage(PROGNAME);
-        return 1;
     }
 
     let mut fort77 = false;
@@ -68,7 +68,6 @@ pub fn sourcedoc(argv: &[String]) -> i32 {
                     if ind >= argv.len() {
                         eprintln!("ERROR: {PROGNAME} - unknown argument {argument}");
                         usage(PROGNAME);
-                        return 1;
                     }
                     path = argv[ind].clone();
                     path.push(std::path::MAIN_SEPARATOR);
@@ -76,32 +75,65 @@ pub fn sourcedoc(argv: &[String]) -> i32 {
                 _ => {
                     eprintln!("ERROR: {PROGNAME} - unknown argument {argument}");
                     usage(PROGNAME);
-                    return 1;
                 }
             }
         } else {
             eprintln!("ERROR: {PROGNAME} - too many arguments");
             usage(PROGNAME);
-            return 1;
         }
         ind += 1;
     }
 
     let input_name = &argv[ind];
-    let mut input = String::new();
+    // `QFile` opened `QIODevice::Text` read through a `QTextStream`: the
+    // device drops every `\r` (measured: `a\rb\r\n` reads as `ab`), the
+    // stream skips a leading UTF-8 byte-order mark, and the codec is UTF-8
+    // under every locale tried (C, POSIX, C.UTF-8, en_US.ISO-8859-1 give
+    // identical output), with each byte of an invalid sequence becoming one
+    // U+FFFD (measured: a truncated 4-byte sequence gives three).
+    // `IMOD/libwarp/nnpi.c` is ISO-8859.
+    let qt_text_read = |bytes: &[u8]| -> String {
+        let bytes: Vec<u8> = bytes
+            .iter()
+            .copied()
+            .filter(|&byte| byte != b'\r')
+            .collect();
+        let mut rest: &[u8] = &bytes;
+        if rest.starts_with(b"\xef\xbb\xbf") {
+            rest = &rest[3..];
+        }
+        let mut text = String::with_capacity(rest.len());
+        while !rest.is_empty() {
+            match std::str::from_utf8(rest) {
+                Ok(valid) => {
+                    text.push_str(valid);
+                    break;
+                }
+                Err(error) => {
+                    let good = error.valid_up_to();
+                    text.push_str(std::str::from_utf8(&rest[..good]).unwrap());
+                    text.push('\u{FFFD}');
+                    rest = &rest[good + 1..];
+                }
+            }
+        }
+        text
+    };
+    let mut input_bytes = Vec::new();
     if File::open(input_name)
-        .and_then(|mut file| file.read_to_string(&mut input))
+        .and_then(|mut file| file.read_to_end(&mut input_bytes))
         .is_err()
     {
         eprintln!("ERROR: {PROGNAME} - cannot open input file {input_name}");
-        return 1;
+        crate::imod::libcfshr::b3dutil::exit(1);
     }
+    let input = qt_text_read(&input_bytes);
     let output_name = &argv[ind + 1];
     let mut output = match File::create(output_name) {
         Ok(file) => file,
         Err(_) => {
             eprintln!("ERROR: {PROGNAME} - cannot open output file {output_name}");
-            return 1;
+            crate::imod::libcfshr::b3dutil::exit(1);
         }
     };
 
@@ -152,9 +184,11 @@ pub fn sourcedoc(argv: &[String]) -> i32 {
                     .map(str::to_owned)
                     .collect::<Vec<_>>()
             };
+            // `tmpList[0]` of an empty list (no file name after the marker)
+            // is undefined in the source; report it as the missing file.
             if fields.is_empty() {
                 eprintln!("ERROR: {PROGNAME} - cannot open source file ");
-                return 1;
+                crate::imod::libcfshr::b3dutil::exit(1);
             }
             let file_name = fields[0].clone();
             let section_name = if fields.len() > 1 {
@@ -171,14 +205,15 @@ pub fn sourcedoc(argv: &[String]) -> i32 {
                 println!("{section_name}");
                 println!("{}{}", path, file_name);
             }
-            let mut source = String::new();
+            let mut source_bytes = Vec::new();
             if File::open(format!("{path}{file_name}"))
-                .and_then(|mut file| file.read_to_string(&mut source))
+                .and_then(|mut file| file.read_to_end(&mut source_bytes))
                 .is_err()
             {
                 eprintln!("ERROR: {PROGNAME} - cannot open source file {file_name}");
-                return 1;
+                crate::imod::libcfshr::b3dutil::exit(1);
             }
+            let source = qt_text_read(&source_bytes);
             let source_lines = source.lines().collect::<Vec<_>>();
             let mut source_index = 0usize;
             let mut in_section = false;
@@ -201,24 +236,20 @@ pub fn sourcedoc(argv: &[String]) -> i32 {
                 if !do_code && doc_start_re.is_match(&line) {
                     let mut documentation = Vec::<String>::new();
                     line = line.trim().to_owned();
-                    let bang = line.find('!').unwrap_or(usize::MAX);
-                    line = if bang == usize::MAX {
-                        String::new()
-                    } else {
-                        line[bang + 1..].to_owned()
-                    };
+                    // `str.right(str.length() - ind - 1)`: with no `!` (`ind` -1)
+                    // `right` of the full length returns the whole string.
+                    if let Some(bang) = line.find('!') {
+                        line = line[bang + 1..].to_owned();
+                    }
                     if debug {
                         println!("{line}");
                     }
                     loop {
                         if let Some(found) = doc_end_re.find(&line) {
                             if fort77 {
-                                let bang = line.find('!').unwrap_or(usize::MAX);
-                                line = if bang == usize::MAX {
-                                    String::new()
-                                } else {
-                                    line[bang + 1..].to_owned()
-                                };
+                                if let Some(bang) = line.find('!') {
+                                    line = line[bang + 1..].to_owned();
+                                }
                             } else {
                                 line.truncate(found.start());
                             }
@@ -235,7 +266,7 @@ pub fn sourcedoc(argv: &[String]) -> i32 {
                             eprintln!(
                                 "ERROR: {PROGNAME} - end of file {file_name} in middle of comment"
                             );
-                            return 1;
+                            crate::imod::libcfshr::b3dutil::exit(1);
                         }
                         line = source_lines[source_index].to_owned();
                         source_index += 1;
@@ -251,7 +282,7 @@ pub fn sourcedoc(argv: &[String]) -> i32 {
                             eprintln!(
                                 "ERROR: {PROGNAME} - end of file {file_name} in middle of function"
                             );
-                            return 1;
+                            crate::imod::libcfshr::b3dutil::exit(1);
                         }
                         line = source_lines[source_index].to_owned();
                         source_index += 1;
@@ -277,12 +308,12 @@ pub fn sourcedoc(argv: &[String]) -> i32 {
                                 line.truncate(found.start() + 1);
                             }
                         }
+                        // `str.right(str.length() - 1)` drops the first character;
+                        // on an empty string `right(-1)` returns it unchanged.
                         if fort77 && !function.is_empty() {
-                            line = if line.is_empty() {
-                                String::new()
-                            } else {
-                                line[1..].trim().to_owned()
-                            };
+                            let mut chars = line.chars();
+                            chars.next();
+                            line = chars.as_str().trim().to_owned();
                         }
                         if !line.is_empty() || !function.is_empty() {
                             function.push(line.clone());
@@ -295,18 +326,36 @@ pub fn sourcedoc(argv: &[String]) -> i32 {
                     if debug {
                         println!("{first}");
                     }
-                    let open = function_name_open_re
+                    // `ind2 = str.indexOf(QREGEXP(" *\\("))`, -1 when absent.
+                    let ind2: i64 = function_name_open_re
                         .find(first)
-                        .map(|value| value.start())
-                        .unwrap_or(0);
+                        .map_or(-1, |value| value.start() as i64);
                     if debug {
-                        println!("ind2 {open}");
+                        println!("ind2 {ind2}");
                     }
-                    let prefix = function_name_prefix_re
-                        .find_iter(&first[..open])
+                    // `ind1 = str.lastIndexOf(QREGEXP("[* :]"), ind2 - 1) + 1`:
+                    // `lastIndexOf` takes the last match starting at or before
+                    // `from`, and a negative `from` counts back from the end.
+                    let mut from = ind2 - 1;
+                    if from < 0 {
+                        from += first.len() as i64;
+                    }
+                    let ind1: i64 = function_name_prefix_re
+                        .find_iter(first)
+                        .filter(|value| value.start() as i64 <= from)
                         .last()
-                        .map_or(0, |value| value.start() + 1);
-                    let function_name = first[prefix..open].to_owned();
+                        .map_or(-1, |value| value.start() as i64)
+                        + 1;
+                    let prefix = ind1 as usize;
+                    // `str.mid(ind1, ind2 - ind1)`: a negative length runs to the end.
+                    let function_name = if ind2 - ind1 < 0 {
+                        first[prefix..].to_owned()
+                    } else {
+                        first[prefix..ind2 as usize].to_owned()
+                    };
+                    // `str.right(str.length() - ind2)`: for `ind2` -1 the
+                    // whole string.
+                    let open = ind2.max(0) as usize;
                     if debug {
                         println!("{function_name}");
                     }
@@ -348,9 +397,7 @@ pub fn sourcedoc(argv: &[String]) -> i32 {
                         {
                             item = item[1..].trim().to_owned();
                         }
-                        if !convert_special_codes(&mut item, PROGNAME, debug) {
-                            return 1;
-                        }
+                        convert_special_codes(&mut item, PROGNAME, debug);
                         descriptions.push(item);
                     }
                     descriptions.push("</P>\n".to_owned());
@@ -379,7 +426,7 @@ pub fn sourcedoc(argv: &[String]) -> i32 {
                             eprintln!(
                                 "ERROR: {PROGNAME} - end of file {file_name} in middle of code"
                             );
-                            return 1;
+                            crate::imod::libcfshr::b3dutil::exit(1);
                         }
                         line = source_lines[source_index].to_owned();
                         source_index += 1;
@@ -402,9 +449,7 @@ pub fn sourcedoc(argv: &[String]) -> i32 {
                             }
                             line = line.trim().to_owned();
                             if !line.is_empty() {
-                                if !convert_special_codes(&mut line, PROGNAME, debug) {
-                                    return 1;
-                                }
+                                convert_special_codes(&mut line, PROGNAME, debug);
                                 descriptions.push(line);
                             }
                         } else {
@@ -455,7 +500,7 @@ pub fn sourcedoc(argv: &[String]) -> i32 {
                 eprintln!(
                     "ERROR: {PROGNAME} - function descriptions requested from {file_name} but no such\nfile processed for function list"
                 );
-                return 1;
+                crate::imod::libcfshr::b3dutil::exit(1);
             }
         } else {
             writeln!(output, "{line}").unwrap();
@@ -465,17 +510,19 @@ pub fn sourcedoc(argv: &[String]) -> i32 {
 }
 
 /// Translation of `convertSpecialCodes`.
-pub fn convert_special_codes(string: &mut String, progname: &str, debug: bool) -> bool {
+pub fn convert_special_codes(string: &mut String, progname: &str, debug: bool) {
     *string = string
         .replace('&', "&amp;")
         .replace('<', "&lt;")
         .replace('>', "&gt;");
-    for (character, replacement) in [
-        ('[', "<B>"),
-        (']', "</B>"),
-        ('{', "<I>"),
-        ('}', "</I>"),
-        ('^', "<BR>"),
+    // `sourcedoc.cpp:430-438`: every character gets the not-after-a-backslash
+    // rule, but only `[`, `{` and `^` also get a start-of-line rule.
+    for (character, replacement, at_start) in [
+        ('[', "<B>", true),
+        (']', "</B>", false),
+        ('{', "<I>", true),
+        ('}', "</I>", false),
+        ('^', "<BR>", true),
     ] {
         let expression = Regex::new(&format!(
             "{CAPTURE_NONBS}{}",
@@ -485,7 +532,7 @@ pub fn convert_special_codes(string: &mut String, progname: &str, debug: bool) -
         *string = expression
             .replace_all(string, format!("$1{replacement}"))
             .into_owned();
-        if string.starts_with(character) {
+        if at_start && string.starts_with(character) {
             string.replace_range(..character.len_utf8(), replacement);
         }
     }
@@ -506,7 +553,8 @@ pub fn convert_special_codes(string: &mut String, progname: &str, debug: bool) -
         let initial = if string.starts_with('@') {
             1
         } else {
-            unescaped_at.find(string).unwrap().start() + 2
+            // `indexOf(QREGEXP("[^\\\\]@")) + 2`: the position after the `@`.
+            unescaped_at.find(string).unwrap().end()
         };
         let mut start = initial;
         let bytes = string.as_bytes();
@@ -515,10 +563,14 @@ pub fn convert_special_codes(string: &mut String, progname: &str, debug: bool) -
             while bytes.get(start) == Some(&b' ') {
                 start += 1;
             }
-            let end = string[start + 1..].find('@').map(|value| start + 1 + value);
+            // `str.indexOf('@', ind1 + 1)` is -1 when `ind1 + 1` is past the end.
+            let end = string
+                .get(start + 1..)
+                .and_then(|rest| rest.find('@'))
+                .map(|value| start + 1 + value);
             let Some(end) = end else {
                 eprintln!("ERROR: {progname} - Empty or unterminated @@ link in\n{string}");
-                return false;
+                crate::imod::libcfshr::b3dutil::exit(1);
             };
             let function_name = string[start..end].to_owned();
             let href = if function_name.contains('#') {
@@ -574,5 +626,4 @@ pub fn convert_special_codes(string: &mut String, progname: &str, debug: bool) -
     if debug {
         println!("{string}");
     }
-    true
 }

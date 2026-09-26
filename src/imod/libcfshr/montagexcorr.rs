@@ -1706,9 +1706,10 @@ pub fn row_of_three_corrs(
                 // search the source's index for the neighbouring row or
                 // column can fall outside the allocation (`montagexcorr.c`
                 // `rowOfThreeCorrs`/`columnOfThreeCorrs`), which reads heap
-                // bytes past (or before) it.  Source-level UB: an element
-                // outside the array is read as 0 here, which is what native
-                // reads from freshly grown heap (`blendmont -very`).
+                // bytes past (or before) it.  Fixed in translation
+                // (`BUGS.md`): a position outside the weight map has weight 0
+                // (what native reads from freshly grown heap, `blendmont
+                // -very`), so it contributes nothing to the sums.
                 let wgt_at = |w: &[f32], i: i32| -> f32 {
                     usize::try_from(i)
                         .ok()
@@ -2021,9 +2022,10 @@ pub fn column_of_three_corrs(
                 // search the source's index for the neighbouring row or
                 // column can fall outside the allocation (`montagexcorr.c`
                 // `rowOfThreeCorrs`/`columnOfThreeCorrs`), which reads heap
-                // bytes past (or before) it.  Source-level UB: an element
-                // outside the array is read as 0 here, which is what native
-                // reads from freshly grown heap (`blendmont -very`).
+                // bytes past (or before) it.  Fixed in translation
+                // (`BUGS.md`): a position outside the weight map has weight 0
+                // (what native reads from freshly grown heap, `blendmont
+                // -very`), so it contributes nothing to the sums.
                 let wgt_at = |w: &[f32], i: i32| -> f32 {
                     usize::try_from(i)
                         .ok()

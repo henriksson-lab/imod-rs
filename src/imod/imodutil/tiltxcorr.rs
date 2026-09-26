@@ -21,15 +21,14 @@
 //!   forms the line pointers the member is evidently meant to hold -- the
 //!   `makeLinePointers` view of the cached full image -- at the point of use.
 //!   Recorded in `BUGS.md`.
-//! * `rotScanPeaks` gets one extra, zeroed element: `tiltxcorr.cpp:2063`
-//!   tests `indBestRot <= numRotSteps` and reads `rotScanPeaks[indBestRot + 1]`,
-//!   one past the allocation when the best angle is the last step.  Recorded
-//!   in `BUGS.md`.
-//! * `mPairMat` is allocated with `mMatCols` rather than `mPairCols` columns:
-//!   `tiltxcorr.cpp:4058-4059` store into it with the wrong stride
-//!   (`ind * mMatCols`), past the end of the source's allocation for the later
-//!   points.  The extra space changes no value the source reads.  Recorded in
-//!   `BUGS.md`.
+//! * Fixed in translation: `tiltxcorr.cpp:2063` tests `indBestRot <=
+//!   numRotSteps` and reads `rotScanPeaks[indBestRot + 1]`, one past the
+//!   scanned steps when the best angle is the last step; no fit is made there.
+//!   Recorded in `BUGS.md`.
+//! * Fixed in translation: `tiltxcorr.cpp:4058-4059` store into `mPairMat`
+//!   with the stride of `mXmat` (`ind * mMatCols`), past the end of its
+//!   allocation for the later points; the stride is `mPairCols` here.
+//!   Recorded in `BUGS.md`.
 //!
 //! OpenMP: the one region in the unit, `maskOutsideBoundaries`
 //! (`tiltxcorr.cpp:3051`), writes each pixel independently, so its result
@@ -1316,7 +1315,11 @@ impl TiltXCorr {
         let mut num_views = num_views as i32;
         //
         // Get the output file
-        if pip_get_in_out_file(b"OutputFile", 2, &mut xf_file_out) != 0 {
+        // Fixed in translation (2026-09-26, `BUGS.md`): the source asks for
+        // non-option argument 2 (`tiltxcorr.cpp:371`), so `tiltxcorr in out`
+        // fails although the usage reads `input_file output_file`; the output
+        // file is the second non-option argument, index 1.
+        if pip_get_in_out_file(b"OutputFile", 1, &mut xf_file_out) != 0 {
             exit_error(b"No output file specified");
         }
         let xf_file_out = String::from_utf8_lossy(&xf_file_out).into_owned();
@@ -1565,9 +1568,7 @@ impl TiltXCorr {
                 }
                 num_rot_steps = b3dnint!(2. * scan_rot_max as f64 / scan_rot_interval as f64) + 1;
                 scan_rot_interval = (2. * scan_rot_max as f64 / (num_rot_steps - 1) as f64) as f32;
-                // One element more than the source allocates; see the module
-                // comment.
-                rot_scan_peaks = vec![0.; num_rot_steps as usize + 1];
+                rot_scan_peaks = vec![0.; num_rot_steps as usize];
             }
         }
 
@@ -2389,11 +2390,15 @@ impl TiltXCorr {
                         &mut pct1_sd[ib],
                     );
                     // `VEC_MINIMUM`/`VEC_MAXIMUM`: `std::min_element` and
-                    // `std::max_element` over the whole vector, keeping the
-                    // first extreme.
+                    // `std::max_element`, keeping the first extreme.  Fixed in
+                    // translation (2026-09-26, `BUGS.md`): the source runs them
+                    // over the whole vector (`tiltxcorr.cpp:1058-1059`), including
+                    // the zero slots past the `mNumPatches` patches that
+                    // `getPatchSdStats` fills; here only those patches, as `avgSD`
+                    // on the next line uses.
                     vec_min = sd_means[ib][0];
                     vec_max = sd_means[ib][0];
-                    for &v in &sd_means[ib][1..] {
+                    for &v in &sd_means[ib][1..self.m_num_patches.max(1) as usize] {
                         if v < vec_min {
                             vec_min = v;
                         }
@@ -3106,9 +3111,7 @@ impl TiltXCorr {
             xmodel = vec![-1.0e10; nmod];
             ymodel = vec![-1.0e10; nmod];
             self.m_xmat = vec![0.; (self.m_mat_cols * self.m_num_patches_all) as usize];
-            // `mMatCols` rather than `mPairCols` columns; see the module comment.
-            self.m_pair_mat =
-                vec![0.; (self.m_mat_cols.max(self.m_pair_cols) * self.m_num_patches_all) as usize];
+            self.m_pair_mat = vec![0.; (self.m_pair_cols * self.m_num_patches_all) as usize];
             if len_contour <= 0 {
                 len_contour = self.m_iz_end + 1 - self.m_iz_start;
             }
@@ -4023,7 +4026,12 @@ impl TiltXCorr {
                                 self.m_iter += 1;
                             }
                             angle = ind_best_rot as f32 * scan_rot_interval - scan_rot_max;
-                            if ind_best_rot > 0 && ind_best_rot <= num_rot_steps {
+                            // Fixed in translation (2026-09-26, `BUGS.md`): the source
+                            // tests `indBestRot <= numRotSteps` (`tiltxcorr.cpp:2063`)
+                            // and so fits through `rotScanPeaks[indBestRot + 1]`, past
+                            // the last scanned step, when the best angle is the last
+                            // one.  No parabolic fit is made at either end here.
+                            if ind_best_rot > 0 && ind_best_rot < num_rot_steps - 1 {
                                 best_angle = angle;
                                 angle = ((parabolic_fit_position(
                                     rot_scan_peaks[(ind_best_rot - 1) as usize],
@@ -4124,10 +4132,10 @@ impl TiltXCorr {
                             ypeak_cum = y_peak_last;
                             self.m_peak_val = peak_last;
                             x_frac_to_add = x_frac_last;
-                            // `tiltxcorr.cpp:2120` assigns `xFracToAdd` twice; the Y
-                            // fraction is never restored (unobservable while
-                            // `numPeakToProc` is 1).
-                            x_frac_to_add = y_frac_last;
+                            // Fixed in translation (2026-09-26, `BUGS.md`):
+                            // `tiltxcorr.cpp:2120` assigns `xFracToAdd` twice, so
+                            // the Y fraction is never restored; it is here.
+                            y_frac_to_add = y_frac_last;
                             break;
                         }
                         xpeak_last = xpeak_cum;
@@ -4394,7 +4402,9 @@ impl TiltXCorr {
                             //
                             // DEPENDENCY: transferfid is looking for 'Best angle in' and reads
                             // the number after the last =
-                            if ind_best_rot > 1 && ind_best_rot < num_rot_steps {
+                            // Fixed in translation (`BUGS.md`): no fit at the last
+                            // step (above), so no interpolated angle to report.
+                            if ind_best_rot > 1 && ind_best_rot < num_rot_steps - 1 {
                                 printf!(
                                     "%s %6.1f%s %7.2f\n",
                                     CArg::Str("  Best angle in rotation scan ="),
@@ -4527,9 +4537,10 @@ impl TiltXCorr {
                             self.m_fs[4] -= x_vector[i] / num_control as f32;
                             self.m_fs[5] -= y_vector[i] / num_control as f32;
                         }
-                        // `tiltxcorr.cpp:2381` passes `iv`, not `iv - 1` as the other
-                        // warp calls do.
-                        ierr = set_linear_transform(iv, &self.m_fs, 2);
+                        // Fixed in translation (2026-09-26, `BUGS.md`):
+                        // `tiltxcorr.cpp:2381` passes `iv`, the next section's slot,
+                        // where every other warp call on this view uses `iv - 1`.
+                        ierr = set_linear_transform(iv - 1, &self.m_fs, 2);
                         if ierr != 0 {
                             exit_error(b"Setting linear transform in warp file");
                         }
@@ -7319,9 +7330,11 @@ impl TiltXCorr {
                             }
                             xmodel[ipt] = self.m_model_xvecs[ipatch][mp];
                             ymodel[ipt] = self.m_model_yvecs[ipatch][mp];
-                            // `tiltxcorr.cpp:4058-4059` index with `mMatCols`, not
-                            // `mPairCols` (see the module comment).
-                            let mc = self.m_mat_cols as usize;
+                            // Fixed in translation (2026-09-26, `BUGS.md`):
+                            // `tiltxcorr.cpp:4058-4059` index with the `mMatCols`
+                            // stride of `mXmat`, writing past `mPairMat`; the row
+                            // is `ind * mPairCols`.
+                            let mc = self.m_pair_cols as usize;
                             self.m_pair_mat[indp * mc + 2] = xmodel[ipt] - self.m_xcen as f32;
                             self.m_pair_mat[indp * mc + 3] = ymodel[ipt] - self.m_ycen as f32;
                             num_replaced += 1;

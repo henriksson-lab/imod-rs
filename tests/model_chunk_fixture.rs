@@ -299,20 +299,18 @@ fn imodjoin_reproduces_the_reference_output_byte_for_byte() {
         .expect("imodjoin executable must start");
     assert!(status.success());
 
-    let mut got = std::fs::read(dir.join("out.mod")).unwrap();
+    let got = std::fs::read(dir.join("out.mod")).unwrap();
     let want = std::fs::read(root.join("fixtures/model-view-clip-label.joined.mod")).unwrap();
     let _ = std::fs::remove_dir_all(&dir);
 
     assert_eq!(got.len(), want.len(), "joined model must be the same size");
-    let minx = want
-        .windows(4)
-        .position(|w| w == b"MINX")
-        .expect("the joined model must carry a MINX chunk");
-    for (from, to) in [(minx + 8, minx + 20), (minx + 32, minx + 44)] {
-        for byte in &mut got[from..to] {
-            *byte = 0;
-        }
-    }
+    assert!(
+        want.windows(4).any(|w| w == b"MINX"),
+        "the joined model must carry a MINX chunk"
+    );
+    // The fixture holds zeros for `oscale`/`orot`; ours must hold the defined
+    // identity there (`BUGS.md` §2), which this checks and adopts.
+    let want = common::reconcile_uninitialised(&got, &want);
     let differing = (0..want.len()).filter(|i| want[*i] != got[*i]).count();
     assert_eq!(differing, 0, "joined model must match the reference");
 }

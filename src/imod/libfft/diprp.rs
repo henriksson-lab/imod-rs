@@ -112,6 +112,55 @@ pub fn diprp(
                                                                     delta = (n - jj) * sep;
                                                                     p1 = (jj - 1) * sep + 1;
                                                                     p0 = p1;
+                                                                    let all_ok = {
+                                                                        // Whether every per-`p0` assertion of the loop below would pass, so it
+                                                                        // may be skipped (TO_OPT.md, "combinefft single-thread"); `false` keeps
+                                                                        // it.  Exact: the inner loop runs only when `size >= 0`, from `p0 - 1`
+                                                                        // to `p0 - 1 + size / p4 * p4` (the assertion's `(p3 - 1 - p) / p4 *
+                                                                        // p4`), both increasing in `p0`; with `p2 > 0` the smallest `p0` is `p1`
+                                                                        // and the largest `p1 + (nt - p1) / p2 * p2`, so the lower bounds all
+                                                                        // hold iff they hold at `p1` and the upper bounds iff at the last `p0`.
+                                                                        // In `i64`, so nothing here overflows.
+                                                                        if p1 > nt {
+                                                                            true
+                                                                        } else if p2 <= 0
+                                                                            || p4 <= 0
+                                                                            || size < 0
+                                                                        {
+                                                                            false
+                                                                        } else {
+                                                                            let (
+                                                                                p1l,
+                                                                                ntl,
+                                                                                p2l,
+                                                                                sizel,
+                                                                                p4l,
+                                                                                deltal,
+                                                                            ) = (
+                                                                                p1 as i64,
+                                                                                nt as i64,
+                                                                                p2 as i64,
+                                                                                size as i64,
+                                                                                p4 as i64,
+                                                                                delta as i64,
+                                                                            );
+                                                                            let last = p1l
+                                                                                + (ntl - p1l) / p2l
+                                                                                    * p2l
+                                                                                - 1
+                                                                                + sizel / p4l * p4l
+                                                                                + deltal.max(0);
+                                                                            p1l - 1 >= 0
+                                                                                && p1l - 1 + deltal
+                                                                                    >= 0
+                                                                                && last
+                                                                                    <= i32::MAX
+                                                                                        as i64
+                                                                                && last
+                                                                                    + (odd as i64)
+                                                                                    < len as i64
+                                                                        }
+                                                                    };
                                                                     while p0 <= nt {
                                                                         p3 = p0 + size;
                                                                         p = p0 - 1;
@@ -120,7 +169,7 @@ pub fn diprp(
                                                                         // `p3`, and every access is `p`, `p + delta` or either plus `odd`, so
                                                                         // checking the first point (and its partner) is non-negative and the last
                                                                         // point plus `max(delta, 0)` plus `odd` is below `len` bounds them all.
-                                                                        if p < p3 {
+                                                                        if !all_ok && p < p3 {
                                                                             assert!(p >= 0 && p + delta >= 0 && p4 > 0 && ((p + (p3 - 1 - p) / p4 * p4 + delta.max(0)) as usize).checked_add(odd).is_some_and(|last| last < len));
                                                                         }
                                                                         while p < p3 {
@@ -239,10 +288,41 @@ pub fn diprp(
                 while m <= pts {
                     p1 = (m + j - 1) * sep + 1;
                     p0 = p1;
+                    let all_ok = {
+                        // Whether every per-`p0` assertion of the loop below would pass, so it
+                        // may be skipped (TO_OPT.md, "combinefft single-thread"); `false` keeps
+                        // it.  Exact: the inner loop runs only when `size >= 0`, from `p0 - 1`
+                        // to `p0 - 1 + size / p4 * p4` (the assertion's `(p3 - 1 - p) / p4 *
+                        // p4`), both increasing in `p0`; with `p2 > 0` the smallest `p0` is `p1`
+                        // and the largest `p1 + (nt - p1) / p2 * p2`, so the lower bounds all
+                        // hold iff they hold at `p1` and the upper bounds iff at the last `p0`.
+                        // In `i64`, so nothing here overflows.
+                        if p1 > nt {
+                            true
+                        } else if p2 <= 0 || p4 <= 0 || size < 0 {
+                            false
+                        } else {
+                            let (p1l, ntl, p2l, sizel, p4l, deltal) = (
+                                p1 as i64,
+                                nt as i64,
+                                p2 as i64,
+                                size as i64,
+                                p4 as i64,
+                                delta as i64,
+                            );
+                            let last = p1l + (ntl - p1l) / p2l * p2l - 1
+                                + sizel / p4l * p4l
+                                + deltal.max(0);
+                            p1l - 1 >= 0
+                                && p1l - 1 + deltal >= 0
+                                && last <= i32::MAX as i64
+                                && last + (odd as i64) < len as i64
+                        }
+                    };
                     while p0 <= nt {
                         p3 = p0 + size;
                         jj = p0 - 1;
-                        if jj < p3 {
+                        if !all_ok && jj < p3 {
                             assert!(
                                 jj >= 0
                                     && jj + delta >= 0

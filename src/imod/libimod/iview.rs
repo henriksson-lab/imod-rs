@@ -464,10 +464,13 @@ pub fn imod_objview_complete(imod: &mut Imod) -> i32 {
         if imod.view[i].objview.len() < imod.obj.len() {
             /* If there are missing object views, first allocate enough objviews */
             let objsize = imod.obj.len();
+            let objvsize = imod.view[i].objview.len();
             imod.view[i].objview.resize(objsize, Iobjview::default());
 
-            /* Then copy the missing objects into the view */
-            for j in 0..objsize {
+            /* Then copy the missing objects into the view.  `iview.c:540`
+            starts at the old `objvsize`: the existing object views are kept,
+            not overwritten from the objects. */
+            for j in objvsize..objsize {
                 let obj = imod.obj[j].clone();
                 imod_objview_from_object(&obj, &mut imod.view[i].objview[j]);
             }

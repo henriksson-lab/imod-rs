@@ -102,11 +102,15 @@ fn processchunks(work: &Path, bin: &Path, args: &[&str]) -> std::process::Output
     command.output().unwrap()
 }
 
+/// A local chunk runs as `imod runcom -P -c ...` (comrun, 2026-09-26), not
+/// through `vmstopy` and `python`: with neither on `PATH` it still runs, gets
+/// `CHUNK DONE` from `-c`, and leaves no `.py` file.  (Native, with both,
+/// prints the same and leaves the same files.)
 #[test]
-fn processchunks_runs_a_real_tiny_comfile_through_imod_vmstopy() {
+fn processchunks_runs_a_local_chunk_without_vmstopy_or_python() {
     let (work, bin) = work_dir("local");
-    // A real IMOD command-file command starts with `$`; vmstopy owns the
-    // conversion and emits `CHUNK DONE` because processchunks passes `-c`.
+    fs::remove_file(bin.join("vmstopy")).unwrap();
+    fs::remove_file(bin.join("python")).unwrap();
     fs::write(work.join("tiny-001.com"), "$echo processchunks-tiny\n").unwrap();
     let result = processchunks(&work, &bin, &["-g", "1", "tiny"]);
     let stdout = String::from_utf8_lossy(&result.stdout);
@@ -120,11 +124,11 @@ fn processchunks_runs_a_real_tiny_comfile_through_imod_vmstopy() {
         "{stdout}"
     );
     assert!(stdout.contains("Finished reassembling"), "{stdout}");
-    assert!(
-        fs::read_to_string(work.join("tiny-001.log"))
-            .unwrap()
-            .contains("CHUNK DONE")
+    assert_eq!(
+        fs::read_to_string(work.join("tiny-001.log")).unwrap(),
+        "processchunks-tiny\nSUCCESSFULLY COMPLETED\nCHUNK DONE\n"
     );
+    assert!(!work.join("tiny-001.py").exists());
     fs::remove_dir_all(work).unwrap();
 }
 

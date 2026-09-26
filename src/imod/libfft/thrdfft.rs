@@ -18,20 +18,42 @@ pub fn thrdfft(array: &mut [f32], brray: &mut [f32], nx: i32, ny: i32, nz: i32, 
             todfft::todfft_c(plane, nx, ny, idir);
         }
     }
-    for y in 0..ny {
-        for z in 0..nz {
-            let base = y * stride + z * ny * stride;
-            for x in 0..nxo2 {
-                brray[(2 * (z + x * nz)) as usize] = array[(base + 2 * x) as usize];
-                brray[(2 * (z + x * nz) + 1) as usize] = array[(base + 2 * x + 1) as usize];
+    // Unchecked gather/scatter (TO_OPT.md, "combinefft single-thread").
+    // Soundness: with `stride = nx + 2` and `nxo2 = (nx + 2) / 2`, the largest
+    // array index formed is `(ny - 1) * stride + (nz - 1) * ny * stride +
+    // 2 * (nxo2 - 1) + 1 <= array_len - stride + stride - 1 < array_len`
+    // (`2 * nxo2 <= stride`), and the largest work index is
+    // `2 * ((nz - 1) + (nxo2 - 1) * nz) + 1 = work_len - 1`; both lengths are
+    // asserted above.  Loop bounds are the source's, each counter is
+    // non-negative, and the element copies are the same in the same order.
+    let (nyu, nzu, nxo2u, strideu) = (
+        ny.max(0) as usize,
+        nz.max(0) as usize,
+        nxo2.max(0) as usize,
+        stride as usize,
+    );
+    for y in 0..nyu {
+        for z in 0..nzu {
+            let base = y * strideu + z * nyu * strideu;
+            for x in 0..nxo2u {
+                unsafe {
+                    *brray.get_unchecked_mut(2 * (z + x * nzu)) =
+                        *array.get_unchecked(base + 2 * x);
+                    *brray.get_unchecked_mut(2 * (z + x * nzu) + 1) =
+                        *array.get_unchecked(base + 2 * x + 1);
+                }
             }
         }
         odfft::odfft_c(brray, nz, nxo2, oddir);
-        for z in 0..nz {
-            let base = y * stride + z * ny * stride;
-            for x in 0..nxo2 {
-                array[(base + 2 * x) as usize] = brray[(2 * (z + x * nz)) as usize];
-                array[(base + 2 * x + 1) as usize] = brray[(2 * (z + x * nz) + 1) as usize];
+        for z in 0..nzu {
+            let base = y * strideu + z * nyu * strideu;
+            for x in 0..nxo2u {
+                unsafe {
+                    *array.get_unchecked_mut(base + 2 * x) =
+                        *brray.get_unchecked(2 * (z + x * nzu));
+                    *array.get_unchecked_mut(base + 2 * x + 1) =
+                        *brray.get_unchecked(2 * (z + x * nzu) + 1);
+                }
             }
         }
     }

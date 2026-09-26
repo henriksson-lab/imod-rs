@@ -1,4 +1,7 @@
 # name	arguments	(exit status is recorded by make-tiltxcorr-goldens.sh)
+# DEFINED (not native) goldens, BUGS.md "tiltxcorr", fixed in translation 2026-09-26:
+#   nonopt (output file as 2nd non-option argument), scan (no parabolic fit at the
+#   last rotation step).  make-tiltxcorr-goldens.sh would overwrite them with native.
 basic	-input tx.st -output o.xf -tiltfile tx.tlt -rotation -6 -sigma1 0.03 -radius2 0.25 -sigma2 0.05
 nonopt	-tiltfile tx.tlt -rotation -6 tx.st o.xf
 firstinc	-input tx.st -output o.xf -first -60 -increment 10 -rotation -6 -offset 0.5

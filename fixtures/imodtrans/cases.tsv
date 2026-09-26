@@ -1,4 +1,4 @@
-# name	input	arguments (before the two files)	native exit status
+# name	input	arguments (before the two files)	native exit status	[arguments for native, when a fixed upstream bug (BUGS.md) makes them differ]
 tx	multi.mod	-tx 5.5 -ty -3 -tz 2	0
 txembed	multi.mod	-tx5.5 -ty-3 -tz2	0
 sxyz	multi.mod	-sx 1.5 -sy 0.75 -sz 2	0
@@ -16,7 +16,7 @@ Rfid	BBa_erase.fid	-R 1	0
 x2five	multi.mod	-2 five.xf	0
 x2odd	multi.mod	-2 odd.xf	0
 x2l	multi.mod	-2 five.xf -l 2	0
-x2lt	multi.mod	-2 five.xf -l 3 -tx 1.5 -ty 2 -tz 1	0
+x2lt	multi.mod	-2 five.xf -l 3 -tx 1.5 -ty 2 -tz 1	0	-2 five.xf -l 3 -tx 0.75 -ty 1 -tz 1
 x2lS	meshed.mod	-2 five.xf -l 4 -S 2	0
 x2big	BBa_erase.fid	-2 BBa.xf -S 0.5 -tx 3	0
 x3S	meshed.mod	-3 m3d.xf -S 2 -tx 1 -ty 2 -tz 3	0

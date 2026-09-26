@@ -80,8 +80,9 @@ pub fn bead_integral(
     let mut nann = 0_i32;
     let mut censum = 0_f64;
     let mut annsum = 0_f64;
-    let ixcen = (xpcen + 0.5).floor() as i32;
-    let iycen = (ypcen + 0.5).floor() as i32;
+    // `B3DNINT`: the `0.5` is a double, so the float widens before the add.
+    let ixcen = (xpcen as f64 + 0.5).floor() as i32;
+    let iycen = (ypcen as f64 + 0.5).floor() as i32;
     let iradout = (r_outer + 1.5) as i32;
     for iy in iycen - iradout..=iycen + iradout {
         if iy < 0 || iy >= ny {

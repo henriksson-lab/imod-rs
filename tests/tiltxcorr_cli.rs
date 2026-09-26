@@ -10,6 +10,12 @@
 //! breaking, the mag search and rotation scan, a reference file, boundary
 //! models, test output, patch tracking (grid, seed model, prealignment, patch
 //! expansion, local domains) and both warp modes, plus error exits.
+//!
+//! **Defined, not native, goldens** (`BUGS.md` "`tiltxcorr`", fixed in
+//! translation 2026-09-26): `nonopt` (the output file as the second non-option
+//! argument, which native rejects with "No output file specified") and `scan`
+//! (no parabolic fit through the element past `rotScanPeaks` when the best
+//! rotation is the last step: 2.0 degrees where native interpolated 1.51).
 
 mod common;
 
@@ -19,30 +25,11 @@ fn fixture_dir() -> PathBuf {
     Path::new(env!("CARGO_MANIFEST_DIR")).join("fixtures/tiltxcorr")
 }
 
-/// Blank what native cannot reproduce.  A model's `MINX` chunk carries the
-/// `IrefImage` that `putimageref` `malloc`s without setting `oscale` or
-/// `orot` (`imodel_fwrap.c:2013-2027`), so those 24 bytes are heap residue in
-/// native; an MRC file's labels carry a date/time stamp, and the label slots
-/// past `nlabl` are stack residue (`BUGS.md` §2).
+/// Blank the wall-clock stamps (`common::mask_stamps`).  The regions native
+/// writes from uninitialised memory (`BUGS.md` §2) are reconciled first by
+/// `common::reconcile_uninitialised`, which checks ours holds the defined value.
 fn mask(bytes: &[u8]) -> Vec<u8> {
-    let mut masked = bytes.to_vec();
-    if masked.starts_with(b"IMOD") {
-        if let Some(pos) = masked.windows(4).position(|w| w == b"MINX") {
-            masked[pos + 8..pos + 20].fill(0);
-            masked[pos + 32..pos + 44].fill(0);
-        }
-    } else if masked.len() > 1024 && &masked[208..212] == b"MAP " {
-        let nlabl = i32::from_le_bytes(masked[220..224].try_into().unwrap()).max(0) as usize;
-        for lab in 0..10 {
-            let start = 224 + 80 * lab;
-            if lab >= nlabl {
-                masked[start..start + 80].fill(0);
-            } else {
-                masked[start + 55..start + 80].fill(0);
-            }
-        }
-    }
-    masked
+    common::mask_stamps(bytes)
 }
 
 fn scratch(name: &str) -> PathBuf {
@@ -142,7 +129,7 @@ fn every_case_matches_native_golden() {
                 continue;
             };
             let theirs = std::fs::read(golden.join(name).join(file)).unwrap();
-            if mask(&ours) != mask(&theirs) {
+            if mask(&ours) != mask(&common::reconcile_uninitialised(&ours, &theirs)) {
                 failures.push(format!("{name}: {file} differs from native"));
             }
         }

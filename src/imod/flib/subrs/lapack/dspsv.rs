@@ -95,9 +95,11 @@ use faer::{Auto, Col, Mat};
 /// reference `dspsv_` with the NaN column last (`K = N`, `N = 1, 4, 20`) ends in
 /// `DGER`'s `XERBLA`, printing ` ** On entry to DGER   parameter number  1 had
 /// an illegal value` and `STOP`ping the whole process with status 0; with the
-/// NaN column first it returns `INFO = 0` and an all-NaN `b`.  This function
-/// returns `INFO = 0` and an all-NaN `b` in every case (source-level UB, per
-/// CLAUDE.md, is documented rather than reproduced).
+/// NaN column first it returns `INFO = 0` and an all-NaN `b`.  Fixed in
+/// translation (2026-09-26): a NaN or infinity anywhere in `AP` is reported as
+/// `INFO = K > 0` for the first packed column holding one, in factorisation
+/// order, with `IPIV` the identity and `b` untouched -- the same contract as
+/// an exactly singular column, so callers take their existing failure path.
 ///
 /// **Deviation.** On return `AP` holds `DSPTRF`'s packed factor in LAPACK; here
 /// it is left unchanged.  No caller in the closure reads `AP` after the call
@@ -160,6 +162,40 @@ pub fn dspsv(
 
     let nn = n as usize;
     if nn == 0 {
+        return;
+    }
+
+    // Non-finite matrix: fixed in translation (2026-09-26, `BUGS.md` "Reference
+    // `dsptrf` on a NaN column").  The reference `DSPTRF` reads an unset `IMAX`
+    // and writes `IPIV(0)` on a NaN column (see the NaN paragraph above).
+    // Defined behaviour: the matrix is reported singular at the first packed
+    // column, in `DSPTRF`'s factorisation order (`K = N..1` for 'U', `1..N`
+    // for 'L'), that holds a NaN or infinity; `IPIV` is the identity and `B`
+    // is left untouched, exactly as for an exactly singular column.
+    let ncols = nn;
+    let column_start = |k: usize| -> (usize, usize) {
+        // Packed range of LAPACK column k (1-based) of the stored triangle.
+        if upper {
+            let start = (k - 1) * k / 2;
+            (start, start + k)
+        } else {
+            let start = (k - 1) * (2 * ncols - k + 2) / 2;
+            (start, start + ncols - k + 1)
+        }
+    };
+    let order: Vec<usize> = if upper {
+        (1..=nn).rev().collect()
+    } else {
+        (1..=nn).collect()
+    };
+    if let Some(&k) = order.iter().find(|&&k| {
+        let (lo, hi) = column_start(k);
+        ap[lo..hi].iter().any(|v| !v.is_finite())
+    }) {
+        for (i, p) in ipiv[..nn].iter_mut().enumerate() {
+            *p = (i + 1) as i32;
+        }
+        *info = k as i32;
         return;
     }
 
@@ -694,5 +730,52 @@ mod tests {
                 tr / tn
             );
         }
+    }
+
+    /// `BUGS.md` "Reference `dsptrf` on a NaN column": defined as singular.
+    #[test]
+    fn non_finite_column_is_reported_singular() {
+        // 3x3 'U' packed: A11 A12 A22 A13 A23 A33; NaN column 1 (first packed).
+        let mut ap = [f64::NAN, f64::NAN, 2.0, f64::NAN, 1.0, 3.0];
+        let mut b = [1.0, 2.0, 3.0];
+        let mut ipiv = [0; 3];
+        let mut info = 0;
+        dspsv("U", 3, 1, &mut ap, &mut ipiv, &mut b, 3, &mut info);
+        // Column 3 holds A13 = NaN and is the first in 'U' order (K = N..1).
+        assert_eq!(info, 3);
+        assert_eq!(ipiv, [1, 2, 3]);
+        assert_eq!(b, [1.0, 2.0, 3.0]);
+        // NaN only in the last column's diagonal.
+        let mut ap = [4.0, 1.0, 5.0, 0.0, 1.0, f64::NAN];
+        let mut info = 0;
+        dspsv(
+            "U",
+            3,
+            1,
+            &mut ap,
+            &mut ipiv,
+            &mut [1.0, 2.0, 3.0],
+            3,
+            &mut info,
+        );
+        assert_eq!(info, 3);
+        // 'L', NaN in column 2 only (A22, A32).
+        let mut ap = [4.0, 0.0, 1.0, f64::NAN, f64::NAN, 6.0];
+        let mut info = 0;
+        dspsv(
+            "L",
+            3,
+            1,
+            &mut ap,
+            &mut ipiv,
+            &mut [1.0, 2.0, 3.0],
+            3,
+            &mut info,
+        );
+        assert_eq!(info, 2);
+        let mut ap = [f64::NAN];
+        let mut info = 0;
+        dspsv("U", 1, 1, &mut ap, &mut ipiv, &mut [1.0], 1, &mut info);
+        assert_eq!(info, 1);
     }
 }

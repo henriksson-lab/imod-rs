@@ -10,12 +10,14 @@
 //! **Scanning.**  `clip.cpp` parses its 30 option values with `sscanf`, not
 //! with a parser: it accepts a partial match, leaves the remaining arguments
 //! untouched when a conversion fails, and uses `%*c` to step over a separator
-//! that may be a comma or an `x`.  [`sscanf`], [`strtod`] and [`strtol`] below
-//! are translations of those C library routines, for the same reason
-//! `c_format` is a translation of `printf`.
+//! that may be a comma or an `x`.  [`sscanf`] and [`strtol`] below are
+//! translations of those C library routines, for the same reason `c_format` is
+//! a translation of `printf`; `strtod`/`strtof` are the shared ones in
+//! `parse_params` (`%f` into a `float` converts with `strtof`).
 use crate::imod::libcfshr::b3dutil::{CArg, ImodFile, c_format, imod_prog_name};
 use crate::imod::libcfshr::parse_params::exit_error;
 use crate::imod::libcfshr::parse_params::setExitPrefix;
+use crate::imod::libcfshr::parse_params::{strtod, strtof};
 pub use crate::imod::libiimod::mrcslice::{
     SLICE_MODE_SBYTE, SLICE_MODE_UBYTE, SLICE_MODE_UNDEFINED,
 };
@@ -1959,14 +1961,16 @@ pub fn fscanf(sb: &[u8], pos: &mut usize, fmt: &str, args: &mut [ScanArg]) -> i3
                         stop!(true);
                     }
                     let mut end = 0usize;
-                    let value = strtod(&sb[si..], &mut end);
+                    /* glibc converts `%f` into a `float *` with `strtof`: one
+                    rounding from the text, not `strtod` and a narrowing. */
+                    let value = strtof(&sb[si..], &mut end);
                     if end == 0 {
                         stop!(false);
                     }
                     si += end;
                     if !suppress {
                         match args.get_mut(ai) {
-                            Some(ScanArg::Flt(target)) => **target = value as f32,
+                            Some(ScanArg::Flt(target)) => **target = value,
                             Some(ScanArg::Int(target)) => **target = value as i32,
                             None => stop!(false),
                         }
@@ -2086,158 +2090,6 @@ fn strtol(s: &[u8], end: &mut usize, base: i32) -> i64 {
         return if negative { i64::MIN } else { i64::MAX };
     }
     if negative { -value } else { value }
-}
-
-/// The C library's `strtod`, as a Rust function.
-///
-/// Accepts what glibc accepts — leading white space, a sign, a decimal or C99
-/// hexadecimal significand with an optional exponent, and `inf`/`infinity`/
-/// `nan` — and reports in `*end` the index in `s` where the scan stopped, which
-/// is 0 when no conversion was performed.
-fn strtod(s: &[u8], end: &mut usize) -> f64 {
-    let mut i = 0usize;
-    while i < s.len() && s[i].is_ascii_whitespace() {
-        i += 1;
-    }
-    let start = i;
-    let mut negative = false;
-    if i < s.len() && (s[i] == b'+' || s[i] == b'-') {
-        negative = s[i] == b'-';
-        i += 1;
-    }
-    let rest = &s[i..];
-    let lower = |b: u8| b | 32;
-    /* inf / infinity */
-    if rest.len() >= 3 && lower(rest[0]) == b'i' && lower(rest[1]) == b'n' && lower(rest[2]) == b'f'
-    {
-        i += 3;
-        if rest.len() >= 8
-            && lower(rest[3]) == b'i'
-            && lower(rest[4]) == b'n'
-            && lower(rest[5]) == b'i'
-            && lower(rest[6]) == b't'
-            && lower(rest[7]) == b'y'
-        {
-            i += 5;
-        }
-        *end = i;
-        return if negative {
-            f64::NEG_INFINITY
-        } else {
-            f64::INFINITY
-        };
-    }
-    /* nan, with an optional parenthesised character sequence */
-    if rest.len() >= 3 && lower(rest[0]) == b'n' && lower(rest[1]) == b'a' && lower(rest[2]) == b'n'
-    {
-        i += 3;
-        if i < s.len() && s[i] == b'(' {
-            let mut j = i + 1;
-            while j < s.len() && (s[j].is_ascii_alphanumeric() || s[j] == b'_') {
-                j += 1;
-            }
-            if j < s.len() && s[j] == b')' {
-                i = j + 1;
-            }
-        }
-        *end = i;
-        return if negative { -f64::NAN } else { f64::NAN };
-    }
-    /* Hexadecimal significand */
-    if i + 1 < s.len() && s[i] == b'0' && lower(s[i + 1]) == b'x' {
-        let mut j = i + 2;
-        let mut digits = 0usize;
-        while j < s.len() && (s[j] as char).is_ascii_hexdigit() {
-            j += 1;
-            digits += 1;
-        }
-        if j < s.len() && s[j] == b'.' {
-            j += 1;
-            while j < s.len() && (s[j] as char).is_ascii_hexdigit() {
-                j += 1;
-                digits += 1;
-            }
-        }
-        if digits > 0 {
-            let mut k = j;
-            if k < s.len() && lower(s[k]) == b'p' {
-                let mut m = k + 1;
-                if m < s.len() && (s[m] == b'+' || s[m] == b'-') {
-                    m += 1;
-                }
-                if m < s.len() && s[m].is_ascii_digit() {
-                    while m < s.len() && s[m].is_ascii_digit() {
-                        m += 1;
-                    }
-                    k = m;
-                }
-            }
-            let text = core::str::from_utf8(&s[start..k]).unwrap_or("");
-            /* Rust parses "0x1p3" only through a manual expansion. */
-            let body = &s[i + 2..j];
-            let mut mantissa = 0.0f64;
-            let mut exponent = 0i32;
-            let mut seen_point = false;
-            for &b in body {
-                if b == b'.' {
-                    seen_point = true;
-                    continue;
-                }
-                mantissa = mantissa * 16.0 + (b as char).to_digit(16).unwrap_or(0) as f64;
-                if seen_point {
-                    exponent -= 4;
-                }
-            }
-            if k > j {
-                let expo: i32 = core::str::from_utf8(&s[j + 1..k])
-                    .unwrap_or("0")
-                    .trim_start_matches('+')
-                    .parse()
-                    .unwrap_or(0);
-                exponent += expo;
-            }
-            let _ = text;
-            *end = k;
-            let value = mantissa * (2.0f64).powi(exponent);
-            return if negative { -value } else { value };
-        }
-    }
-    /* Decimal */
-    let mut j = i;
-    let mut digits = 0usize;
-    while j < s.len() && s[j].is_ascii_digit() {
-        j += 1;
-        digits += 1;
-    }
-    if j < s.len() && s[j] == b'.' {
-        j += 1;
-        while j < s.len() && s[j].is_ascii_digit() {
-            j += 1;
-            digits += 1;
-        }
-    }
-    if digits == 0 {
-        *end = 0;
-        return 0.0;
-    }
-    let mut k = j;
-    if k < s.len() && lower(s[k]) == b'e' {
-        let mut m = k + 1;
-        if m < s.len() && (s[m] == b'+' || s[m] == b'-') {
-            m += 1;
-        }
-        if m < s.len() && s[m].is_ascii_digit() {
-            while m < s.len() && s[m].is_ascii_digit() {
-                m += 1;
-            }
-            k = m;
-        }
-    }
-    *end = k;
-    core::str::from_utf8(&s[start..k])
-        .ok()
-        .and_then(|t| t.parse::<f64>().ok())
-        .unwrap_or(0.0)
 }
 
 #[cfg(test)]

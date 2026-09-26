@@ -80,7 +80,13 @@ fn masked_mrc_digest(path: &Path) -> String {
     let nlabl = i32::from_le_bytes(bytes[220..224].try_into().unwrap());
     assert!((0..=10).contains(&nlabl), "nlabl {nlabl} out of range");
     let used = 224 + 80 * nlabl as usize;
-    bytes[used..1024].fill(0);
+    // Native's unused slots are stack residue; ours are defined as zero
+    // (`BUGS.md` §2), so they are checked rather than masked.
+    assert!(
+        bytes[used..1024].iter().all(|&b| b == 0),
+        "{}: unused label slots must be zero",
+        path.display()
+    );
     // Blank `dd-Mmm-yy  HH:MM:SS` wherever it falls inside the used labels.
     let stamp: Vec<usize> = (224..used.saturating_sub(18))
         .filter(|&i| {

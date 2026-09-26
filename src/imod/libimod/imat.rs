@@ -5,7 +5,9 @@
 #![allow(unused_variables)]
 // `imat.c:289` is `if (sina - sina) return 0;`.  That is false for every
 // finite `sina` and true only for an infinity or NaN, i.e. a NaN test
-// written obliquely.  Reproduced as written; see `BUGS.md`.
+// written obliquely.  Kept as written (`BUGS.md` §12, 2026-09-26): it reads
+// as an intended guard that leaves the matrix unchanged for a non-finite
+// angle.
 #![allow(clippy::eq_op)]
 
 use crate::imod::libcfshr::linearxforms::matrix_to_angles;

@@ -194,6 +194,15 @@ pub fn raw2mrc(arguments: &[String]) -> i32 {
 
     if pip_get_string(b"DataType", &mut temp_str) == 0 {
         intype = setintype(&temp_str, &mut pixsize, &mut outtype);
+        // Fixed in translation (2026-09-26, `BUGS.md` §10): the source assigns
+        // `setintype`'s -1 for an unrecognised type and never tests it, so
+        // `raw2mrc.c:181-182` converts the data as byte with exit 0.  An
+        // unknown `-t` is refused instead.
+        if intype < 0 {
+            let mut message = b"Unknown data type entered with -t: ".to_vec();
+            message.extend_from_slice(&temp_str);
+            exit_error(&message);
+        }
         // `free(tempStr);`
         drop(std::mem::take(&mut temp_str));
     }

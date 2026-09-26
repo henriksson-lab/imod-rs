@@ -148,8 +148,8 @@ fn cases() -> Vec<(&'static str, Vec<&'static str>)> {
             vec!["-x", "64", "-y", "48", "-z", "1", "-t", "byte", "b.raw"],
         ),
         (
-            // An unknown type is accepted and converted as byte; see the note
-            // at the status check below.
+            // An unknown type is refused (`BUGS.md` §10, fixed in
+            // translation); see the note at the status check below.
             "bad-type",
             vec!["-x", "64", "-y", "48", "-z", "3", "-t", "bogus", "b.raw"],
         ),
@@ -210,13 +210,23 @@ fn conversions_have_the_requested_geometry_and_error_paths_report() {
         //   **stdout** (`exitError` routes through `PipSetError`).
         // * `no-size` reaches `PipReadOrParseOptions`'s usage path: it prints
         //   the banner and option list and exits **0**, writing nothing.
-        // * `bad-type` succeeds: `setintype` returns -1 (`raw2mrc.c:539`) and
-        //   `main` never tests it, so `raw2mrc.c:181-182` falls back to the
-        //   byte default and the conversion runs.
+        // * `bad-type` fails.  Native succeeds: `setintype` returns -1
+        //   (`raw2mrc.c:539`), `main` never tests it, and `raw2mrc.c:181-182`
+        //   falls back to the byte default.  Fixed in translation
+        //   (`BUGS.md` §10): the translation refuses the type by name.
         //
-        // Native does all three the same way; the native comparison below is
-        // what establishes that.
-        let failing = matches!(name, "missing-input" | "short-input");
+        // Native does the first two the same way; the native comparison below
+        // is what establishes that (it skips `bad-type`).
+        let failing = matches!(name, "missing-input" | "short-input" | "bad-type");
+        if name == "bad-type" {
+            assert_eq!(result.status.code(), Some(1), "{name}: {result:?}");
+            assert!(
+                String::from_utf8_lossy(&result.stdout)
+                    .contains("Unknown data type entered with -t: bogus"),
+                "{name}: {result:?}"
+            );
+            assert!(!output.exists(), "{name} should not have written a file");
+        }
         let usage_only = name == "no-size";
         if usage_only {
             assert!(result.status.success(), "{name}: {result:?}");
@@ -292,6 +302,11 @@ fn native_comparison_matches_every_case() {
     make_inputs(&dir);
 
     for (name, argv) in cases() {
+        // `bad-type` is the fixed upstream defect (`BUGS.md` §10); its defined
+        // behaviour is asserted above instead.
+        if name == "bad-type" {
+            continue;
+        }
         let mut outputs = Vec::new();
         for side in ["nat", "rs"] {
             let output = dir.join(format!("{side}-{name}.mrc"));

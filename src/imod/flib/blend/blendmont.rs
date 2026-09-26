@@ -42,7 +42,10 @@
 //! (`nm blendmont.o`), reproduced by
 //! [`crate::imod::flib::subrs::compat::gfortran_rt`].  `nint` is `lroundf`
 //! (`f32::round`); real-to-integer assignment truncates.  Reals `MIN`/`MAX`
-//! are written in source order as in `bsubs.rs`.  Formatted and
+//! on data and weights are `gfortran_rt::{minss,maxss}` in the operand order
+//! read from the reference object at each site (see `bsubs.rs`); the
+//! integer-derived ones (`gridScale`, `edgeStart`, the edge limits) keep
+//! source order, which cannot differ there.  Formatted and
 //! list-directed output use the gfortran editing functions at the end of
 //! this file (runtime boundary code, not translated units).  Output goes to
 //! C `stdout` ([`ImodFile::Stdout`]), the stream `bsubs.rs` and
@@ -71,7 +74,9 @@ use super::setoverlap::set_overlap;
 use super::shuffler::{clear_shuffle, scale_cached_pieces, shuffler};
 use super::solvescaling::solve_scaling;
 use crate::imod::flib::subrs::compat::datetime::time;
-use crate::imod::flib::subrs::compat::gfortran_rt::{gfortran_cosd_r4, gfortran_sind_r4};
+use crate::imod::flib::subrs::compat::gfortran_rt::{
+    gfortran_cosd_r4, gfortran_sind_r4, maxss, minss,
+};
 use crate::imod::flib::subrs::hvem::b3ddate::b3d_date;
 use crate::imod::flib::subrs::hvem::dopen::dopen;
 use crate::imod::flib::subrs::hvem::frefor::{ListItem, ListReadError, frefor, list_read};
@@ -81,7 +86,7 @@ use crate::imod::flib::subrs::hvem::parse_input_params::{
     exit_error, memory_error, pip_get_in_out_file, pip_get_logical, pip_read_or_parse_options,
 };
 use crate::imod::flib::subrs::hvem::rdlist::{parselist, rdlist};
-use crate::imod::flib::subrs::imsubs::convert_vms::convert_longs;
+use crate::imod::flib::subrs::imsubs::convert_vms::{convert_floats, convert_longs};
 use crate::imod::flib::subrs::imsubs::irdhdr::irdhdr;
 use crate::imod::flib::subrs::imsubs::wrap_iiunit::{imopen, irdsec};
 use crate::imod::flib::subrs::model::fortmodel::FortModel;
@@ -102,8 +107,7 @@ use crate::imod::libcfshr::montagexcorr::{
 };
 use crate::imod::libcfshr::parse_params::{
     pip_done, pip_get_boolean, pip_get_float, pip_get_integer, pip_get_integer_array,
-    pip_get_string, pip_get_three_floats, pip_get_two_floats, pip_get_two_integers,
-    pip_number_of_entries,
+    pip_get_three_floats, pip_get_two_floats, pip_get_two_integers, pip_number_of_entries,
 };
 use crate::imod::libcfshr::piecefuncs::{checklist, fill_listz};
 use crate::imod::libcfshr::robuststat::{rs_mad_median_outliers, rs_median};
@@ -507,11 +511,14 @@ pub fn blendmont() {
     // The Fortran wrapper `pipgetstring` (`pip_fwrap.c`): the variable is left
     // untouched unless the option is found; trailing blanks are the
     // `character*320` padding, trimmed wherever the source uses `trim`.
-    let get_string = |option: &[u8], string: &mut String| -> i32 {
-        let mut value: Vec<u8> = Vec::new();
-        let err = pip_get_string(option, &mut value);
+    // `c2fString` there copies at most the variable's declared length
+    // (blendmont.f90:34-35,80,93: every name read is `character*320`); a longer entry fails with `In PipGetString, string is too
+    // long for character variable`, which exits under the exit prefix.
+    let get_string = |option: &[u8], length: usize, string: &mut String| -> i32 {
+        let mut record = vec![b' '; length];
+        let err = crate::imod::libcfshr::pip_fwrap::pipgetstring_(option, &mut record);
         if err == 0 {
-            *string = String::from_utf8_lossy(&value).into_owned();
+            *string = crate::imod::libcfshr::b3dutil::fortran_string(&record);
         }
         err
     };
@@ -629,6 +636,7 @@ pub fn blendmont() {
         num_non_opt_arg + 1,
         "Input image file",
         &mut image_in_file,
+        320,
     ) != 0
     {
         exit_error("No input image file specified");
@@ -670,6 +678,7 @@ pub fn blendmont() {
         num_non_opt_arg + 1,
         "Output image file",
         &mut out_file,
+        320,
     ) != 0
         && h.if_edge_func_only == 0
     {
@@ -721,7 +730,7 @@ pub fn blendmont() {
     file_name = String::new();
     if pip_input {
         ierr = pip_get_boolean(b"FloatToRange", &mut if_float);
-        ierr = get_string(b"TransformFile", &mut file_name);
+        ierr = get_string(b"TransformFile", 320, &mut file_name);
         ierr = pip_get_logical("JustUndistort", &mut undistort_only);
     } else {
         let _ = write!(out, " 1 to float each section to maximum range, 0 not to: ");
@@ -1017,7 +1026,7 @@ pub fn blendmont() {
 
         if !h.xc_read_in && h.shift_each {
             ierr = pip_get_logical("MdocForExpectedShifts", &mut expected_from_mdoc);
-            ierr = get_string(b"ExpectedShiftsFromEcd", &mut ecd_for_expected);
+            ierr = get_string(b"ExpectedShiftsFromEcd", 320, &mut ecd_for_expected);
             if ierr == 0 && expected_from_mdoc {
                 exit_error("You cannot enter both ExpectedShiftsFromEcd and MdocForExpectedShifts");
             }
@@ -1049,7 +1058,7 @@ pub fn blendmont() {
         //if (iDensFromEdges > 0) &
         //ierr = PipGetInteger('EdgeIntensitySampling', iDenSample)
         ierr = pip_get_logical("SumPiecesForGradient", &mut sum_for_grad);
-        ierr = get_string(b"OtherSumGradientFile", &mut other_grad_file);
+        ierr = get_string(b"OtherSumGradientFile", 320, &mut other_grad_file);
         if ierr == 0 && sum_for_grad {
             exit_error("You cannot enter both -SumPiecesForGradient and -OtherSumGradientFile");
         }
@@ -1060,7 +1069,7 @@ pub fn blendmont() {
         }
 
         // Handle a flatfield file: check, open, allocate, read image, set flag
-        if get_string(b"FlatfieldFile", &mut h.edge_name) == 0 {
+        if get_string(b"FlatfieldFile", 320, &mut h.edge_name) == 0 {
             if sum_for_grad || !blank(&other_grad_file) {
                 exit_error(
                     "You cannot use a flatfield file with -SumPiecesForGradient or -OtherSumGradientFile",
@@ -1162,8 +1171,13 @@ pub fn blendmont() {
     //
     if iopt_abs == 1 {
         if pip_input {
+            // Fixed in translation (`BUGS.md`): `blendmont.f90:638` reads
+            // `FramesPerNegativeXandY` a second time here, so
+            // `-MissingFromFirstNegativeXandY` is never read and the missing
+            // counts equal the frames per negative.  The option the counts
+            // belong to is read (they stay 0 when it is not entered).
             ierr = pip_get_two_integers(
-                b"FramesPerNegativeXandY",
+                b"MissingFromFirstNegativeXandY",
                 &mut num_xmissing,
                 &mut num_ymissing,
             );
@@ -1221,14 +1235,14 @@ pub fn blendmont() {
     //
     pl_out_file = String::new();
     if pip_input {
-        ierr = get_string(b"PieceListOutput", &mut pl_out_file);
+        ierr = get_string(b"PieceListOutput", 320, &mut pl_out_file);
     } else {
         let _ = write!(out, " Name of new piece list file (Return for none): ");
         pl_out_file = read5_a();
     }
     outputpl = !blank(&pl_out_file) && h.if_edge_func_only == 0;
     ali_coord_file = String::new();
-    ierr = get_string(b"AlignedPieceCoordFile", &mut ali_coord_file);
+    ierr = get_string(b"AlignedPieceCoordFile", 320, &mut ali_coord_file);
     //
     // find out center of transforms
     //
@@ -1260,7 +1274,7 @@ pub fn blendmont() {
     }
     num_zwant = num_list_z;
     if pip_input {
-        if get_string(b"SectionsToDo", &mut file_name) == 0 {
+        if get_string(b"SectionsToDo", 320, &mut file_name) == 0 {
             let _ = parselist(
                 file_name.trim_end_matches(' '),
                 &mut iz_pc_temp,
@@ -1370,7 +1384,7 @@ pub fn blendmont() {
                 if i_binning > MAX_BIN {
                     exit_error("Binning is too large");
                 }
-                if get_string(b"UnsmoothedPatchFile", &mut h.edge_name) == 0 {
+                if get_string(b"UnsmoothedPatchFile", 320, &mut h.edge_name) == 0 {
                     units.unit10 = Some(BufWriter::new(dopen(
                         10,
                         h.edge_name.trim_end_matches(' '),
@@ -1379,7 +1393,7 @@ pub fn blendmont() {
                     )));
                     bv.iz_unsmoothed_patch = 0;
                 }
-                if get_string(b"SmoothedPatchFile", &mut h.edge_name) == 0 {
+                if get_string(b"SmoothedPatchFile", 320, &mut h.edge_name) == 0 {
                     units.unit11 = Some(BufWriter::new(dopen(
                         11,
                         h.edge_name.trim_end_matches(' '),
@@ -1626,7 +1640,7 @@ pub fn blendmont() {
     //
     if pip_input && !undistort_only {
         ierr = pip_get_boolean(b"OldEdgeFunctions", &mut h.if_old_edge);
-        if get_string(b"RootNameForEdges", &mut h.root_name) != 0 {
+        if get_string(b"RootNameForEdges", 320, &mut h.root_name) != 0 {
             exit_error("No root name for edge functions specified");
         }
     } else if !undistort_only {
@@ -1746,7 +1760,7 @@ pub fn blendmont() {
                     iy_out_offset = (line_start - new_min_ypiece) / i_binning;
                     num_lines_write = (line_end + 1 - line_start) / i_binning;
                 } else {
-                    if get_string(b"SubsetToDo", &mut file_name) != 0 {
+                    if get_string(b"SubsetToDo", 320, &mut file_name) != 0 {
                         exit_error("You must enter SubsetToDo with this parallel mode");
                     }
                     //
@@ -1766,7 +1780,7 @@ pub fn blendmont() {
                 }
                 parallel_hdf = mode_parallel == -2
                     && ii_test_if_hdf(out_file.trim_end_matches(' ').as_bytes()) > 0;
-                ierr = get_string(b"BoundaryInfoFile", &mut bound_file);
+                ierr = get_string(b"BoundaryInfoFile", 320, &mut bound_file);
                 if parallel_hdf && blank(&bound_file) {
                     exit_error(
                         "A boundary info file must be entered for parallel mode -2 if output file type is HDF",
@@ -1940,6 +1954,21 @@ pub fn blendmont() {
                     exit_error("Wrong # of edges in edge function file");
                 }
                 bv.need_byte_swap = 1;
+                // Fixed in translation (`BUGS.md`): the source swaps only the
+                // edge-function counts (`blendmont.f90:1127-1131`); the edge
+                // density files written with them (header at `:1118`, records
+                // at `:1954`) are used as read.  Their header is swapped here
+                // and their records where they are read.
+                let mut bytes: Vec<u8> = num_den_tmp.iter().flat_map(|v| v.to_ne_bytes()).collect();
+                convert_longs(&mut bytes, 12);
+                for (k, c) in bytes.chunks(4).enumerate() {
+                    num_den_tmp[k] = i32::from_ne_bytes(c.try_into().unwrap());
+                }
+                let mut bytes: Vec<u8> = grad_tmp.iter().flat_map(|v| v.to_ne_bytes()).collect();
+                convert_floats(&mut bytes, 4);
+                for (k, c) in bytes.chunks(4).enumerate() {
+                    grad_tmp[k] = f32::from_ne_bytes(c.try_into().unwrap());
+                }
             }
             if num_edge_tmp[3] != num_edge_tmp[9] || num_edge_tmp[4] != num_edge_tmp[8] {
                 exit_error("Inconsistent grid spacings between edge function files");
@@ -2258,7 +2287,6 @@ pub fn blendmont() {
     }
     //
     // Read old .ecd file(s) or expected shifts
-    let mut unit5_closed = false;
     if (h.xc_read_in || !blank(&ecd_for_expected)) && !undistort_only {
         ierr = pip_get_float(b"BinningForEdgeShifts", &mut ecd_binning);
         iedge_del_x = 0;
@@ -2275,10 +2303,15 @@ pub fn blendmont() {
         }
         let mut unit5: Option<BufReader<File>> = None;
         if !blank(&ecd_for_expected) {
-            // `iy` is not set on this branch: it keeps the exit value of the
+            // `iy` is not set on this branch in the source
+            // (`blendmont.f90:1343-1349`): it keeps the exit value of the
             // edge-listing loop (`nxPieces + 1`) or of the parallel chunk
-            // loop, and becomes the unit the Y edges are read from below.
+            // loop, and becomes the unit the Y edges are read from below --
+            // an unconnected `fort.<n>` (End of file), or standard input for
+            // a 4-wide montage.  Fixed in translation (`BUGS.md`): the Y
+            // edges follow the X edges in the one `.ecd` file, unit 4.
             h.edge_name = ecd_for_expected.trim_end_matches(' ').to_string();
+            iy = 4;
         } else {
             h.edge_name = format!("{root}{}", XCORR_EXTENSION[0]);
             exist = std::path::Path::new(&h.edge_name).exists();
@@ -2393,10 +2426,12 @@ pub fn blendmont() {
         }
         // `close(4)`, `close(5)`: closing unit 5 closes standard input when
         // it was never reconnected, and a later `read(5, ...)` (the
-        // interactive blending-width prompt) then finds it closed.
+        // interactive blending-width prompt) then finds it closed
+        // (`blendmont.f90:1402`).  Fixed in translation (`BUGS.md`): unit 5
+        // is closed only when it was reconnected to the second file, and
+        // standard input stays open otherwise.
         drop(unit4);
         drop(unit5);
-        unit5_closed = true;
     }
 
     // Or get adjusted overlaps from mdoc file and set up edge displacements
@@ -2659,30 +2694,11 @@ pub fn blendmont() {
             i_edit(bv.iblend[0], 5),
             i_edit(bv.iblend[1], 5)
         );
-        if unit5_closed {
-            // gfortran: a `read` on a closed preconnected unit connects it
-            // to `fort.5`, which does not normally exist, so the read ends in
-            // the End-of-file runtime error.
-            let name = "fort.5";
-            let file = std::fs::OpenOptions::new()
-                .read(true)
-                .write(true)
-                .create(true)
-                .open(name);
-            let Ok(file) = file else {
-                read_runtime_error(ListReadError::End);
-            };
-            let (a, b) = bv.iblend.split_at_mut(1);
-            if let Err(err) = list_read(
-                &mut BufReader::new(file),
-                &mut [ListItem::Integer(&mut a[0]), ListItem::Integer(&mut b[0])],
-            ) {
-                read_runtime_error(err);
-            }
-        } else {
-            let (a, b) = bv.iblend.split_at_mut(1);
-            read5(&mut [ListItem::Integer(&mut a[0]), ListItem::Integer(&mut b[0])]);
-        }
+        // `read(5,*) iblend` after the `.ecd` read's `close(5)`: native then
+        // reads `fort.5` (End of file).  Standard input stays connected here
+        // (fixed in translation, `BUGS.md`).
+        let (a, b) = bv.iblend.split_at_mut(1);
+        read5(&mut [ListItem::Integer(&mut a[0]), ListItem::Integer(&mut b[0])]);
     }
     //
     // Do other Pip-only options,
@@ -2692,7 +2708,7 @@ pub fn blendmont() {
         bv.interp_order = 3;
         ierr = pip_get_integer(b"InterpolationOrder", &mut bv.interp_order);
         ierr = pip_get_logical("AdjustedFocus", &mut bv.focus_adjusted);
-        if get_string(b"GradientFile", &mut file_name) == 0 {
+        if get_string(b"GradientFile", 320, &mut file_name) == 0 {
             bv.do_mag_grad = true;
             read_mag_gradients(
                 file_name.trim_end_matches(' '),
@@ -2717,7 +2733,7 @@ pub fn blendmont() {
         //
         // Look for tilt angles if no mag gradients, then adjust if any
         //
-        if bv.num_angles == 0 && get_string(b"TiltFile", &mut file_name) == 0 {
+        if bv.num_angles == 0 && get_string(b"TiltFile", 320, &mut file_name) == 0 {
             let _ = out.flush();
             read_tilt_file(
                 &mut bv.num_angles,
@@ -2776,7 +2792,7 @@ pub fn blendmont() {
             bv.max_fields = 16;
         }
         //
-        if get_string(b"DistortionField", &mut file_name) == 0 {
+        if get_string(b"DistortionField", 320, &mut file_name) == 0 {
             bv.undistort = true;
             ierr = read_check_warp_file(
                 file_name.trim_end_matches(' '),
@@ -2903,7 +2919,7 @@ pub fn blendmont() {
         }
         //
         // Check for model of edges to exclude
-        if get_string(b"SkipEdgeModelFile", &mut file_name) == 0 && !undistort_only {
+        if get_string(b"SkipEdgeModelFile", 320, &mut file_name) == 0 && !undistort_only {
             let lim_edge = bv.lim_edge;
             read_exclusion_model(
                 &mut bv,
@@ -3090,8 +3106,8 @@ pub fn blendmont() {
     // allows up to 4 slots: the source writes the fields of slots 2-4 past the
     // end of `fieldDx`/`fieldDy` (a heap overflow; `BUGS.md`).  Each slot's
     // grid is written just before `warpInterp` reads it, so where native
-    // survives it computes what per-slot storage would.  The translation
-    // gives the arrays that storage instead of overflowing.
+    // survives it computes what per-slot storage would.  Fixed in
+    // translation (`BUGS.md`): the arrays get one field per cache slot.
     if bv.do_fields && bv.max_load > bv.max_fields {
         let (lm, slots) = (bv.lm_field as usize, bv.max_load as usize);
         bv.field_dx.resize(lm * lm * slots, 0.);
@@ -3309,8 +3325,16 @@ pub fn blendmont() {
                                     let rec = unit
                                         .read_record(jedge + 1)
                                         .unwrap_or_else(|err| unit.runtime_error(err));
+                                    // Swapped for an old file of the other byte
+                                    // order (fixed in translation, `BUGS.md`).
+                                    let swap = bv.need_byte_swap != 0;
                                     let word = |k: usize| -> [u8; 4] {
-                                        rec[4 * k..4 * k + 4].try_into().unwrap()
+                                        let mut w: [u8; 4] =
+                                            rec[4 * k..4 * k + 4].try_into().unwrap();
+                                        if swap {
+                                            w.reverse();
+                                        }
+                                        w
                                     };
                                     bv.nx_den_buf[iu] = i32::from_ne_bytes(word(0));
                                     bv.ny_den_buf[iu] = i32::from_ne_bytes(word(1));
@@ -3602,8 +3626,11 @@ pub fn blendmont() {
                         tsum = 0.;
                         let start = (ind_array + (iy - 1) * nxin - 1) as usize;
                         for &a in &bv.array[start..start + nxin as usize] {
-                            cur_in_min = if a < cur_in_min { a } else { cur_in_min };
-                            cur_in_max = if a > cur_in_max { a } else { cur_in_max };
+                            // `blendmont.f90:2134-2135`: `minss curInMin, a` /
+                            // `maxss curInMax, a` in the reference object, so a
+                            // NaN pixel replaces the running extreme.
+                            cur_in_min = minss(cur_in_min, a);
+                            cur_in_max = maxss(cur_in_max, a);
                             tsum += a as f64;
                         }
                         cur_sum += tsum;
@@ -3626,7 +3653,8 @@ pub fn blendmont() {
         //
         {
             let range = cur_in_max - cur_in_min;
-            pixel_scale = (out_max - out_min) / if 1. > range { 1. } else { range };
+            // `blendmont.f90:2154`: `maxss curInMax - curInMin, 1.`.
+            pixel_scale = (out_max - out_min) / maxss(range, 1.);
         }
         pixel_add = out_min - pixel_scale * cur_in_min;
         //
@@ -3663,8 +3691,10 @@ pub fn blendmont() {
                     for v in &mut bv.array[base..base + bv.npix_in as usize] {
                         val = pixel_scale * *v + pixel_add;
                         *v = val;
-                        dmin_out = if val < dmin_out { val } else { dmin_out };
-                        dmax_out = if val > dmax_out { val } else { dmax_out };
+                        // `blendmont.f90:2188-2189`: running extreme as
+                        // destination.
+                        dmin_out = minss(dmin_out, val);
+                        dmax_out = maxss(dmax_out, val);
                         tsum += val as f64;
                     }
                     grand_sum += tsum;
@@ -3979,13 +4009,11 @@ pub fn blendmont() {
                                     //
                                     // stick limited pixval into array and mark as output
                                     //
-                                    let lo = if cur_in_max < h.pix_val {
-                                        cur_in_max
-                                    } else {
-                                        h.pix_val
-                                    };
+                                    // `max(curInMin, min(curInMax, pixVal))`
+                                    // (`blendmont.f90:2373`): `minss pixVal,
+                                    // curInMax` then `maxss ., curInMin`.
                                     bv.brray[(line_base + indx - 1) as usize] =
-                                        if cur_in_min > lo { cur_in_min } else { lo };
+                                        maxss(minss(h.pix_val, cur_in_max), cur_in_min);
                                     any_pixels = true;
                                 }
                                 line_base += nx_out;
@@ -4421,11 +4449,12 @@ pub fn find_section_edge_functions(h: &mut Host, bv: &mut BlendVars, units: &mut
 ///
 /// Finds h transforms if multiple negatives (UNTESTED! in the source).  The
 /// negative and joint tables are host variables used only here, so they are
-/// locals.  Two properties of the source are reproduced: the iteration count
-/// `ishift` is never incremented, so the loop runs until `errAdjust <=
-/// errLim`; and the final recentring subtracts the mean X shift from the
-/// *angle* (`hCum(1, i)`) and the mean Y shift from the X shift
-/// (`hCum(2, i)`) (`BUGS.md`).
+/// locals.  Two defects of the source are fixed in translation (`BUGS.md`):
+/// the iteration count `ishift` is never incremented there, so the loop runs
+/// until `errAdjust <= errLim`; and the final recentring subtracts the mean X
+/// shift from the *angle* (`hCum(1, i)`) and the mean Y shift from the X
+/// shift (`hCum(2, i)`).  Here the loop stops after `numShiftNeg` iterations
+/// and the shifts `hCum(2:3, i)` are recentred.
 pub fn find_multineg_transforms(h: &mut Host, bv: &mut BlendVars, units: &mut BlendUnits) {
     let limneg = LIMNEG as usize;
     let mut min_neg_x = [0i32; LIMNEG as usize];
@@ -4605,7 +4634,11 @@ pub fn find_multineg_transforms(h: &mut Host, bv: &mut BlendVars, units: &mut Bl
     //
     // start loop - who knows how long this will take
     //
-    let ishift = 1;
+    // Fixed in translation (`BUGS.md`): the source never increments `ishift`
+    // (`blendmont.f90:2743-2796`), so the `numShiftNeg` limit never applies
+    // and a non-converging adjustment loops forever.  It counts iterations
+    // here.
+    let mut ishift = 1;
     let mut err_adjust = 1.0e10f32;
     let num_shift_neg = 100;
     let err_lim = 0.1 * num_negatives as f32;
@@ -4685,15 +4718,20 @@ pub fn find_multineg_transforms(h: &mut Host, bv: &mut BlendVars, units: &mut Bl
             dx_sum += h_cum[k + 1];
             dy_sum += h_cum[k + 2];
         }
+        ishift += 1;
         //
     } //end of cycle
     //
     // shift all dx and dy to have a mean of zero
     //
+    // Fixed in translation (`BUGS.md`): `blendmont.f90:2800-2803` subtracts
+    // the mean X shift from `hCum(1, i)` (the angle) and the mean Y shift
+    // from `hCum(2, i)` (the X shift); the sums were taken over `hCum(2, i)`
+    // and `hCum(3, i)`, which are recentred here.
     for i in 1..=num_negatives {
         let k = hc(i);
-        h_cum[k] -= dx_sum / num_negatives as f32;
-        h_cum[k + 1] -= dy_sum / num_negatives as f32;
+        h_cum[k + 1] -= dx_sum / num_negatives as f32;
+        h_cum[k + 2] -= dy_sum / num_negatives as f32;
     }
     //
     // compute the h function (and hinv) centered on corner of frame
@@ -4982,7 +5020,8 @@ pub fn get_best_piece_shifts(h: &mut Host, bv: &mut BlendVars, units: &mut Blend
         // `dmagPerUm(min(ilistz, numMagGrad))`: with no gradients this is
         // element 0, before the array; the source reads the 4 bytes in front
         // of the allocation (the high half of the malloc size word, 0 for
-        // these sizes).  The translation uses 0.
+        // these sizes).  Fixed in translation (`BUGS.md`): with no gradients
+        // the gradient is defined as 0.
         let ig = bv.ilistz.min(bv.num_mag_grad);
         let dmag = if ig >= 1 {
             bv.dmag_per_um[(ig - 1) as usize]
@@ -5228,22 +5267,6 @@ pub fn compute_edge_fractions(h: &mut Host, bv: &mut BlendVars, units: &mut Blen
             }
         }
     }
-}
-
-/// `MAX` of reals as gcc's `MAX_EXPR` chain in source order (module note).
-macro_rules! rmax {
-    ($a:expr, $b:expr) => {{
-        let (a, b) = ($a, $b);
-        if a > b { a } else { b }
-    }};
-}
-
-/// `MIN` of reals, likewise.
-macro_rules! rmin {
-    ($a:expr, $b:expr) => {{
-        let (a, b) = ($a, $b);
-        if a < b { a } else { b }
-    }};
 }
 
 /// Original: `subroutine getPixelFromPieces()`, contained in `blendmont`
@@ -5510,7 +5533,9 @@ pub fn get_pixel_from_pieces(h: &mut Host, bv: &mut BlendVars) {
         let ipiece3 = bv.in_piece[jnd_p3 as usize];
         x1 = bv.x_in_piece[(jnd_p1 - 1) as usize];
         y1 = bv.y_in_piece[(jnd_p1 - 1) as usize];
-        let w_max = rmax!(rmax!(w1, w2), w3);
+        // `max(w1, w2, w3)` (`blendmont.f90:3278`): `maxss(maxss(w1, w2), w3)`
+        // in the reference object.
+        let w_max = maxss(maxss(w1, w2), w3);
         //
         // set up to solve equations for new (x1, y1), (x2, y2)
         // and (x3, y3) given the differences between them and
@@ -5689,7 +5714,10 @@ pub fn get_pixel_from_pieces(h: &mut Host, bv: &mut BlendVars) {
             (bv.inde24 - 1) as usize,
         );
         if h.num_edges_in == 4 {
-            let emin = rmin!(rmin!(rmin!(ex, 1. - ex), ey), 1. - ey);
+            // `min(ex, 1. - ex, ey, 1. - ey)` (`blendmont.f90:3422`): the
+            // reference object computes
+            // `minss(minss(1. - ey, 1. - ex), minss(ex, ey))`.
+            let emin = minss(minss(1. - ey, 1. - ex), minss(ex, ey));
             if ex == emin {
                 h.active4[0][i34] = false;
             } else if 1. - ex == emin {
@@ -5744,7 +5772,10 @@ pub fn get_pixel_from_pieces(h: &mut Host, bv: &mut BlendVars) {
         let ipiece4 = bv.in_piece[jnd_p4 as usize];
         x1 = bv.x_in_piece[(indp1 - 1) as usize];
         y1 = bv.y_in_piece[(indp1 - 1) as usize];
-        let w_max = rmax!(rmax!(rmax!(w1, w2), w3), w4);
+        // `max(w1, w2, w3, w4)` (`blendmont.f90:3477`): the reference object
+        // computes `maxss(maxss(w2, w4), maxss(w3, w1))` (the last pair hoisted
+        // above the branch that picks `w2`/`w4`).
+        let w_max = maxss(maxss(w2, w4), maxss(w3, w1));
         //
         // set up to solve equations for new (x1, y1), (x2, y2)
         // (x3, y3), and (x4, y4) given the differences between
@@ -5946,10 +5977,10 @@ pub fn get_pixel_from_pieces(h: &mut Host, bv: &mut BlendVars) {
 /// Gets indices of pieces and edges and the weighting of each piece.
 /// `use blendvars`, so the module struct comes first; it calls `edgeSwap`,
 /// so it also takes the unit connections.  Its locals are not SAVE; none is
-/// read before it is assigned on any path.  Reproduced from the source:
-/// in the X-disjoint branch for a missing upper-right piece, `er1` is
-/// computed from `dr3`, not the `dr1` assigned on the line before
-/// (`blendmont.f90:3927-3928`; `BUGS.md`).
+/// read before it is assigned on any path.  In the X-disjoint branch for a
+/// missing upper-right piece the source computes `er1` from `dr3`, not the
+/// `dr1` assigned on the line before (`blendmont.f90:3927-3928`); here from
+/// `dr1` (fixed in translation, `BUGS.md`).
 pub fn get_piece_indices_and_weighting(
     bv: &mut BlendVars,
     units: &mut BlendUnits,
@@ -6340,11 +6371,14 @@ pub fn get_piece_indices_and_weighting(
             // Now if there is disjoint edge, modify edge and end fractions to
             // start at the midpoint of the piece
             let (ss, es) = (bv.start_skew, bv.end_skew);
-            let frac = |v: f32| rmax!(0.0f32, rmin!(1.0f32, (v - ss) / (es - ss)));
+            // `max(0., min(1., ...))` and `max(0., d)` (`blendmont.f90:3886-3927`):
+            // `minss expr, 1.` then `maxss ., 0.`, and `maxss d, 0.`, in the
+            // reference object.
+            let frac = |v: f32| maxss(minss((v - ss) / (es - ss), 1.0f32), 0.0f32);
             if ixy_disjoint == 1 {
                 if indp1 == 0 {
                     bv.edge_frac4[1][0] = frac(yin(bv, indp4));
-                    db4 = rmax!(0.0f32, yin(bv, indp4) - ss);
+                    db4 = maxss(yin(bv, indp4) - ss, 0.0f32);
                     eb4 = (db4 + 1.) / iblend[1] as f32;
                     if bv.debug {
                         let _ = writeln!(
@@ -6360,35 +6394,38 @@ pub fn get_piece_indices_and_weighting(
                     }
                 } else if indp2 == 0 {
                     bv.edge_frac4[1][0] = frac(yin(bv, indp3));
-                    db3 = rmax!(0.0f32, yin(bv, indp3) - ss);
+                    db3 = maxss(yin(bv, indp3) - ss, 0.0f32);
                     eb3 = (db3 + 1.) / iblend[1] as f32;
                 } else if indp3 == 0 {
                     bv.edge_frac4[1][0] = frac(yin(bv, indp2));
-                    dt2 = rmax!(0.0f32, es - yin(bv, indp2));
+                    dt2 = maxss(es - yin(bv, indp2), 0.0f32);
                     et2 = (dt2 + 1.) / iblend[1] as f32;
                 } else {
                     bv.edge_frac4[1][0] = frac(yin(bv, indp1));
-                    dt1 = rmax!(0.0f32, es - yin(bv, indp1));
+                    dt1 = maxss(es - yin(bv, indp1), 0.0f32);
                     et1 = (dt1 + 1.) / iblend[1] as f32;
                 }
             } else if ixy_disjoint == 2 {
                 if indp1 == 0 {
                     bv.edge_frac4[0][0] = frac(xin(bv, indp4));
-                    dl4 = rmax!(0.0f32, xin(bv, indp4) - ss);
+                    dl4 = maxss(xin(bv, indp4) - ss, 0.0f32);
                     el4 = (dl4 + 1.) / iblend[0] as f32;
                 } else if indp2 == 0 {
                     bv.edge_frac4[0][0] = frac(xin(bv, indp3));
-                    dr3 = rmax!(0.0f32, es - xin(bv, indp3));
+                    dr3 = maxss(es - xin(bv, indp3), 0.0f32);
                     er3 = (dr3 + 1.) / iblend[0] as f32;
                 } else if indp3 == 0 {
                     bv.edge_frac4[0][0] = frac(xin(bv, indp2));
-                    dl2 = rmax!(0.0f32, xin(bv, indp2) - ss);
+                    dl2 = maxss(xin(bv, indp2) - ss, 0.0f32);
                     el2 = (dl2 + 1.) / iblend[0] as f32;
                 } else {
                     bv.edge_frac4[0][0] = frac(xin(bv, indp1));
-                    dr1 = rmax!(0.0f32, es - xin(bv, indp1));
-                    // `er1 = (dr3 + 1.) / iblend(1)`, as the source has it.
-                    er1 = (dr3 + 1.) / iblend[0] as f32;
+                    dr1 = maxss(es - xin(bv, indp1), 0.0f32);
+                    // Fixed in translation (`BUGS.md`): the source has
+                    // `er1 = (dr3 + 1.) / iblend(1)` (`blendmont.f90:3928`),
+                    // the wrong variable -- `dr1` was just computed for it, as
+                    // every sibling branch pairs `dXn` with `eXn`.
+                    er1 = (dr1 + 1.) / iblend[0] as f32;
                 }
             }
         }
@@ -6404,10 +6441,12 @@ pub fn get_piece_indices_and_weighting(
         // edge in 2 or 3-piece cases
         //
         if bv.num_pieces == 4 {
-            let dla = rmin!(dl2, dl4);
-            let dra = rmin!(dr1, dr3);
-            let dba = rmin!(db3, db4);
-            let dta = rmin!(dt1, dt2);
+            // `blendmont.f90:3944-3947`, operand order from the reference
+            // object: only `dla` comes out reversed.
+            let dla = minss(dl4, dl2);
+            let dra = minss(dr1, dr3);
+            let dba = minss(db3, db4);
+            let dta = minss(dt1, dt2);
             let ax = dba / (dta + dba);
             let ay = dla / (dra + dla);
             bv.ex = ((1. - ay) * db3 + ay * db4) / ((1. - ay) * (dt1 + db3) + ay * (dt2 + db4));
@@ -6426,10 +6465,12 @@ pub fn get_piece_indices_and_weighting(
         // attenuated if necessary by fractional distance to
         // end of piece, then normalized to sum to 1.
         //
-        bv.wll = rmin!(1. - fx, et1) * rmin!(1. - fy, er1);
-        bv.wlr = rmin!(fx, et2) * rmin!(1. - fy, el2);
-        bv.wul = rmin!(1. - fx, eb3) * rmin!(fy, er3);
-        bv.wur = rmin!(fx, eb4) * rmin!(fy, el4);
+        // `blendmont.f90:3966-3969`, each `min` in the operand order of the
+        // reference object (`-fverbose-asm`).
+        bv.wll = minss(et1, 1. - fx) * minss(er1, 1. - fy);
+        bv.wlr = minss(et2, fx) * minss(1. - fy, el2);
+        bv.wul = minss(1. - fx, eb3) * minss(er3, fy);
+        bv.wur = minss(eb4, fx) * minss(fy, el4);
         let w_sum = bv.wll + bv.wlr + bv.wul + bv.wur;
         if w_sum > 0. {
             bv.wll /= w_sum;
@@ -6458,14 +6499,16 @@ pub fn get_piece_indices_and_weighting(
         // piece where the point is most interior
         //
         if bv.n_active_p == 2 && bv.wll * bv.wur > 0. {
-            if rmin!(dt1, dr1) < rmin!(db4, dl4) {
+            // `blendmont.f90:3990, 3997`: `minss dr1, dt1` < `minss dl4, db4`,
+            // and `minss dl2, dt2` < `minss db3, dr3`.
+            if minss(dr1, dt1) < minss(dl4, db4) {
                 bv.wll = 0.;
             } else {
                 bv.wur = 0.;
             }
             bv.n_active_p = 1;
         } else if bv.n_active_p == 2 && bv.wul * bv.wlr > 0. {
-            if rmin!(dt2, dl2) < rmin!(db3, dr3) {
+            if minss(dl2, dt2) < minss(db3, dr3) {
                 bv.wlr = 0.;
             } else {
                 bv.wul = 0.;

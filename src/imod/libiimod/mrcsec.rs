@@ -34,17 +34,19 @@ pub fn mrc_read_z(hdata: &mut MrcHeader, li: &mut LoadInfo, buf: &mut [u8], z: i
     let rows = li.ymax - li.ymin + 1;
     let mut bytes = 0;
     let mut channels = 0;
-    if width < 0
-        || rows < 0
-        || mrc_getdcsize(hdata.mode, &mut bytes, &mut channels) != 0
-        || buf.len()
-            < width as usize
-                * rows as usize
-                * if hdata.half_floats != 0 && hdata.mode == MRC_MODE_FLOAT {
-                    2
-                } else {
-                    (bytes * channels) as usize
-                }
+    // A negative extent reaches `iiInitReadSectionAny`, which reports it
+    // as the C does; only a bad mode or a short buffer is refused here.
+    if mrc_getdcsize(hdata.mode, &mut bytes, &mut channels) != 0
+        || width >= 0
+            && rows >= 0
+            && buf.len()
+                < width as usize
+                    * rows as usize
+                    * if hdata.half_floats != 0 && hdata.mode == MRC_MODE_FLOAT {
+                        2
+                    } else {
+                        (bytes * channels) as usize
+                    }
     {
         return -1;
     }
@@ -53,7 +55,9 @@ pub fn mrc_read_z(hdata: &mut MrcHeader, li: &mut LoadInfo, buf: &mut [u8], z: i
 pub fn mrc_read_z_byte(hdata: &mut MrcHeader, li: &mut LoadInfo, buf: &mut [u8], z: i32) -> i32 {
     let width = li.xmax - li.xmin + 1 + li.pad_left.max(0) + li.pad_right.max(0);
     let rows = li.ymax - li.ymin + 1;
-    if width < 0 || rows < 0 || buf.len() < width as usize * rows as usize {
+    // A negative extent reaches `iiInitReadSectionAny`, which reports it
+    // as the C does; only a short buffer for a valid extent is refused.
+    if width >= 0 && rows >= 0 && buf.len() < width as usize * rows as usize {
         return -1;
     }
     call_ii_or_mrsa(hdata, li, buf, z, 0, 1, Some(ii_read_section_byte_callback))
@@ -61,7 +65,9 @@ pub fn mrc_read_z_byte(hdata: &mut MrcHeader, li: &mut LoadInfo, buf: &mut [u8],
 pub fn mrc_read_z_ushort(hdata: &mut MrcHeader, li: &mut LoadInfo, buf: &mut [u16], z: i32) -> i32 {
     let width = li.xmax - li.xmin + 1 + li.pad_left.max(0) + li.pad_right.max(0);
     let rows = li.ymax - li.ymin + 1;
-    if width < 0 || rows < 0 || buf.len() < width as usize * rows as usize {
+    // A negative extent reaches `iiInitReadSectionAny`, which reports it
+    // as the C does; only a short buffer for a valid extent is refused.
+    if width >= 0 && rows >= 0 && buf.len() < width as usize * rows as usize {
         return -1;
     }
     call_ii_or_mrsa(
@@ -77,7 +83,9 @@ pub fn mrc_read_z_ushort(hdata: &mut MrcHeader, li: &mut LoadInfo, buf: &mut [u1
 pub fn mrc_read_z_float(hdata: &mut MrcHeader, li: &mut LoadInfo, buf: &mut [f32], z: i32) -> i32 {
     let width = li.xmax - li.xmin + 1 + li.pad_left.max(0) + li.pad_right.max(0);
     let rows = li.ymax - li.ymin + 1;
-    if width < 0 || rows < 0 || buf.len() < width as usize * rows as usize {
+    // A negative extent reaches `iiInitReadSectionAny`, which reports it
+    // as the C does; only a short buffer for a valid extent is refused.
+    if width >= 0 && rows >= 0 && buf.len() < width as usize * rows as usize {
         return -1;
     }
     call_ii_or_mrsa(
@@ -95,17 +103,19 @@ pub fn mrc_read_y(hdata: &mut MrcHeader, li: &mut LoadInfo, buf: &mut [u8], z: i
     let rows = li.zmax - li.zmin + 1;
     let mut bytes = 0;
     let mut channels = 0;
-    if width < 0
-        || rows < 0
-        || mrc_getdcsize(hdata.mode, &mut bytes, &mut channels) != 0
-        || buf.len()
-            < width as usize
-                * rows as usize
-                * if hdata.half_floats != 0 && hdata.mode == MRC_MODE_FLOAT {
-                    2
-                } else {
-                    (bytes * channels) as usize
-                }
+    // A negative extent reaches `iiInitReadSectionAny`, which reports it
+    // as the C does; only a bad mode or a short buffer is refused here.
+    if mrc_getdcsize(hdata.mode, &mut bytes, &mut channels) != 0
+        || width >= 0
+            && rows >= 0
+            && buf.len()
+                < width as usize
+                    * rows as usize
+                    * if hdata.half_floats != 0 && hdata.mode == MRC_MODE_FLOAT {
+                        2
+                    } else {
+                        (bytes * channels) as usize
+                    }
     {
         return -1;
     }
@@ -114,7 +124,9 @@ pub fn mrc_read_y(hdata: &mut MrcHeader, li: &mut LoadInfo, buf: &mut [u8], z: i
 pub fn mrc_read_y_byte(hdata: &mut MrcHeader, li: &mut LoadInfo, buf: &mut [u8], z: i32) -> i32 {
     let width = li.xmax - li.xmin + 1 + li.pad_left.max(0) + li.pad_right.max(0);
     let rows = li.zmax - li.zmin + 1;
-    if width < 0 || rows < 0 || buf.len() < width as usize * rows as usize {
+    // A negative extent reaches `iiInitReadSectionAny`, which reports it
+    // as the C does; only a short buffer for a valid extent is refused.
+    if width >= 0 && rows >= 0 && buf.len() < width as usize * rows as usize {
         return -1;
     }
     call_ii_or_mrsa(hdata, li, buf, z, 1, 1, Some(ii_read_section_byte_callback))
@@ -122,7 +134,9 @@ pub fn mrc_read_y_byte(hdata: &mut MrcHeader, li: &mut LoadInfo, buf: &mut [u8],
 pub fn mrc_read_y_ushort(hdata: &mut MrcHeader, li: &mut LoadInfo, buf: &mut [u16], z: i32) -> i32 {
     let width = li.xmax - li.xmin + 1 + li.pad_left.max(0) + li.pad_right.max(0);
     let rows = li.zmax - li.zmin + 1;
-    if width < 0 || rows < 0 || buf.len() < width as usize * rows as usize {
+    // A negative extent reaches `iiInitReadSectionAny`, which reports it
+    // as the C does; only a short buffer for a valid extent is refused.
+    if width >= 0 && rows >= 0 && buf.len() < width as usize * rows as usize {
         return -1;
     }
     call_ii_or_mrsa(
@@ -138,7 +152,9 @@ pub fn mrc_read_y_ushort(hdata: &mut MrcHeader, li: &mut LoadInfo, buf: &mut [u1
 pub fn mrc_read_y_float(hdata: &mut MrcHeader, li: &mut LoadInfo, buf: &mut [f32], z: i32) -> i32 {
     let width = li.xmax - li.xmin + 1 + li.pad_left.max(0) + li.pad_right.max(0);
     let rows = li.zmax - li.zmin + 1;
-    if width < 0 || rows < 0 || buf.len() < width as usize * rows as usize {
+    // A negative extent reaches `iiInitReadSectionAny`, which reports it
+    // as the C does; only a short buffer for a valid extent is refused.
+    if width >= 0 && rows >= 0 && buf.len() < width as usize * rows as usize {
         return -1;
     }
     call_ii_or_mrsa(
@@ -160,17 +176,19 @@ pub fn mrc_read_section(hdata: &mut MrcHeader, li: &mut LoadInfo, buf: &mut [u8]
     };
     let mut bytes = 0;
     let mut channels = 0;
-    if width < 0
-        || rows < 0
-        || mrc_getdcsize(hdata.mode, &mut bytes, &mut channels) != 0
-        || buf.len()
-            < width as usize
-                * rows as usize
-                * if hdata.half_floats != 0 && hdata.mode == MRC_MODE_FLOAT {
-                    2
-                } else {
-                    (bytes * channels) as usize
-                }
+    // A negative extent reaches `iiInitReadSectionAny`, which reports it
+    // as the C does; only a bad mode or a short buffer is refused here.
+    if mrc_getdcsize(hdata.mode, &mut bytes, &mut channels) != 0
+        || width >= 0
+            && rows >= 0
+            && buf.len()
+                < width as usize
+                    * rows as usize
+                    * if hdata.half_floats != 0 && hdata.mode == MRC_MODE_FLOAT {
+                        2
+                    } else {
+                        (bytes * channels) as usize
+                    }
     {
         return -1;
     }
@@ -196,7 +214,9 @@ pub fn mrc_read_section_byte(
     } else {
         li.ymax - li.ymin + 1
     };
-    if width < 0 || rows < 0 || buf.len() < width as usize * rows as usize {
+    // A negative extent reaches `iiInitReadSectionAny`, which reports it
+    // as the C does; only a short buffer for a valid extent is refused.
+    if width >= 0 && rows >= 0 && buf.len() < width as usize * rows as usize {
         return -1;
     }
     call_ii_or_mrsa(
@@ -221,7 +241,9 @@ pub fn mrc_read_section_ushort(
     } else {
         li.ymax - li.ymin + 1
     };
-    if width < 0 || rows < 0 || buf.len() < width as usize * rows as usize {
+    // A negative extent reaches `iiInitReadSectionAny`, which reports it
+    // as the C does; only a short buffer for a valid extent is refused.
+    if width >= 0 && rows >= 0 && buf.len() < width as usize * rows as usize {
         return -1;
     }
     call_ii_or_mrsa(
@@ -879,46 +901,66 @@ pub unsafe fn ii_process_read_line(
                     }
                 }
                 MRC_MODE_RGB => {
-                    // `mrcsec.c:740-782` and `:1027-1033` are five separate tight
+                    // `mrcsec.c:740-782` and `:1030-1037` are five separate tight
                     // loops selected by `byte`/`doScale`/`type` outside the loop;
-                    // the luminance expression is byte-for-byte the same in each.
+                    // the luminance expression is the same in each except the
+                    // unscaled ushort one, which folds 255 into each factor.
                     if d.type_ == MRSA_FLOAT {
                         for i in 0..n {
                             let p = bdata.add(3 * i);
-                            *fbufp.add(i) =
-                                0.3 * *p as f32 + 0.59 * *p.add(1) as f32 + 0.11 * *p.add(2) as f32;
+                            *fbufp.add(i) = {
+                                // `fpixel` is a `b3dFloat`: each step is a
+                                // double product and sum rounded to float.
+                                let mut fpixel = (0.3 * *p as f64) as f32;
+                                fpixel = (fpixel as f64 + 0.59 * *p.add(1) as f64) as f32;
+                                (fpixel as f64 + 0.11 * *p.add(2) as f64) as f32
+                            };
                         }
                     } else if d.byte != 0 {
                         if d.do_scale != 0 {
                             for i in 0..n {
                                 let p = bdata.add(3 * i);
-                                let fpixel = 0.3 * *p as f32
-                                    + 0.59 * *p.add(1) as f32
-                                    + 0.11 * *p.add(2) as f32;
+                                let fpixel: f32 = {
+                                    // `fpixel` is a `b3dFloat`: each step is a
+                                    // double product and sum rounded to float.
+                                    let mut fpixel = (0.3 * *p as f64) as f32;
+                                    fpixel = (fpixel as f64 + 0.59 * *p.add(1) as f64) as f32;
+                                    (fpixel as f64 + 0.11 * *p.add(2) as f64) as f32
+                                };
                                 *bufp.add(i) = *map.add((fpixel + 0.499) as usize);
                             }
                         } else {
                             for i in 0..n {
                                 let p = bdata.add(3 * i);
-                                let fpixel = 0.3 * *p as f32
-                                    + 0.59 * *p.add(1) as f32
-                                    + 0.11 * *p.add(2) as f32;
+                                let fpixel: f32 = {
+                                    // `fpixel` is a `b3dFloat`: each step is a
+                                    // double product and sum rounded to float.
+                                    let mut fpixel = (0.3 * *p as f64) as f32;
+                                    fpixel = (fpixel as f64 + 0.59 * *p.add(1) as f64) as f32;
+                                    (fpixel as f64 + 0.11 * *p.add(2) as f64) as f32
+                                };
                                 *bufp.add(i) = (fpixel + 0.5) as u8;
                             }
                         }
                     } else if d.do_scale != 0 {
                         for i in 0..n {
                             let p = bdata.add(3 * i);
-                            let fpixel =
-                                0.3 * *p as f32 + 0.59 * *p.add(1) as f32 + 0.11 * *p.add(2) as f32;
+                            let fpixel: f32 = {
+                                // `fpixel` is a `b3dFloat`: each step is a
+                                // double product and sum rounded to float.
+                                let mut fpixel = (0.3 * *p as f64) as f32;
+                                fpixel = (fpixel as f64 + 0.59 * *p.add(1) as f64) as f32;
+                                (fpixel as f64 + 0.11 * *p.add(2) as f64) as f32
+                            };
                             *usbufp.add(i) = *usmap.add((fpixel + 0.499) as usize);
                         }
                     } else {
                         for i in 0..n {
                             let p = bdata.add(3 * i);
-                            let fpixel =
-                                0.3 * *p as f32 + 0.59 * *p.add(1) as f32 + 0.11 * *p.add(2) as f32;
-                            *usbufp.add(i) = (255. * fpixel + 0.5) as u16;
+                            let mut fpixel = (255. * 0.3 * *p as f64) as f32;
+                            fpixel = (fpixel as f64 + 255. * 0.59 * *p.add(1) as f64) as f32;
+                            fpixel = (fpixel as f64 + 255. * 0.11 * *p.add(2) as f64) as f32;
+                            *usbufp.add(i) = (fpixel + 0.5) as u16;
                         }
                     }
                 }
@@ -1782,7 +1824,12 @@ mod tests {
                 ),
                 0
             );
-            assert_eq!(output, [1.81]);
+            // `mrcsec.c:1033-1035` rounds each double partial sum to the
+            // float `fpixel`: 0.3, then 1.48, then 1.8100001.
+            // The all-float expression this test once asserted gives 1.81;
+            // `mtffilter` on an RGB stack is byte-identical to native only
+            // with the source's rounding.
+            assert_eq!(output, [1.810_000_1]);
         }
     }
 

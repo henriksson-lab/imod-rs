@@ -7,6 +7,7 @@
 //! the Fortran wrappers' `iz - 1` and `rows = 2` inlined (`warpwrapfort.c`,
 //! `linearxforms.c`).
 
+use crate::imod::flib::subrs::compat::gfortran_rt::{maxss, minss};
 use crate::imod::flib::subrs::hvem::dopen::dopen;
 use crate::imod::flib::subrs::hvem::parse_input_params::{
     exit_error, memory_error, pip_get_in_out_file, pip_read_or_parse_options,
@@ -91,9 +92,13 @@ pub fn xfproduct() {
     let mut if_use_2nd: i32;
     let mut nx_grids = [0_i32; 2];
     let mut ny_grids = [0_i32; 2];
-    // Uninitialised in the source when there is no PIP input
-    // (`xfproduct.f:98` assigns it only inside `if (pipinput)`); it is read
-    // only when both inputs are warpings.
+    // Fixed in translation (BUGS.md, `xftoxg` / `xfproduct`): uninitialised
+    // in the source when there is no PIP input (`xfproduct.f:95` assigns it
+    // only inside `if (pipinput)`), and read when both inputs are warpings,
+    // so native's interactive run takes the "entered scales" branch or not
+    // depending on stack residue.  Interactive entry cannot enter scales, so
+    // it is defined as 0: no scales entered, the first file is scaled by the
+    // warpings' pixel-size ratio.
     let mut if_scales = 0_i32;
     let (mut x_new_cont, mut y_new_cont, mut x_new_cpv, mut y_new_cpv): (f32, f32, f32, f32);
     let warp_scale: f32;
@@ -129,6 +134,7 @@ pub fn xfproduct() {
         1,
         "File of transforms applied first",
         &mut gfile[0],
+        320,
     ) != 0
     {
         exit_error("NO FIRST INPUT FILE SPECIFIED");
@@ -138,6 +144,7 @@ pub fn xfproduct() {
         2,
         "File of transforms applied second",
         &mut gfile[1],
+        320,
     ) != 0
     {
         exit_error("NO SECOND INPUT FILE SPECIFIED");
@@ -147,6 +154,7 @@ pub fn xfproduct() {
         3,
         "New file for product transforms",
         &mut out_file,
+        320,
     ) != 0
     {
         exit_error("NO OUTPUT FILE SPECIFIED");
@@ -298,12 +306,15 @@ pub fn xfproduct() {
                     }
                     nxg_dim = nxg_dim.max(nx_gr_tmp);
                     nyg_dim = nyg_dim.max(ny_gr_tmp);
-                    x_all_str[ifs] = x_all_str[ifs].min(x_str_tmp);
-                    x_all_int = x_all_int.min(x_int_tmp);
-                    x_all_end[ifs] = x_all_end[ifs].max((nx_gr_tmp - 1) as f32 * x_int_tmp);
-                    y_all_str[ifs] = y_all_str[ifs].min(y_str_tmp);
-                    y_all_int = y_all_int.min(y_int_tmp);
-                    y_all_end[ifs] = y_all_end[ifs].max((ny_gr_tmp - 1) as f32 * y_int_tmp);
+                    // `xfproduct.f:157-162`: the reference object has the
+                    // running value as `minss` destination and the product as
+                    // `maxss` destination.
+                    x_all_str[ifs] = minss(x_all_str[ifs], x_str_tmp);
+                    x_all_int = minss(x_all_int, x_int_tmp);
+                    x_all_end[ifs] = maxss((nx_gr_tmp - 1) as f32 * x_int_tmp, x_all_end[ifs]);
+                    y_all_str[ifs] = minss(y_all_str[ifs], y_str_tmp);
+                    y_all_int = minss(y_all_int, y_int_tmp);
+                    y_all_end[ifs] = maxss((ny_gr_tmp - 1) as f32 * y_int_tmp, y_all_end[ifs]);
                 }
             }
 
@@ -315,13 +326,22 @@ pub fn xfproduct() {
                 exit_error("CANNOT WORK WITH GRIDS THAT EXTEND OUTSIDE THE DEFINED IMAGE AREA");
             }
             if x_all_str[ifs] < nx[ifs] as f32 {
-                x_all_str[ifs] = x_all_str[ifs].min(x_all_int / 2.);
-                x_all_end[ifs] = x_all_end[ifs].max(nx[ifs] as f32 - x_all_int / 2.);
-                y_all_str[ifs] = y_all_str[ifs].min(y_all_int / 2.);
-                y_all_end[ifs] = y_all_end[ifs].max(ny[ifs] as f32 - y_all_int / 2.);
-                iz = (2.0_f32).max((x_all_end[ifs] - x_all_str[ifs]) / x_all_int + 1.05) as i32;
+                // `xfproduct.f:173-179`, operand order from the reference
+                // object: `maxss xAllEnd, nx - .` but `maxss ny - ., yAllEnd`,
+                // and `maxss expr, 2.` for the grid counts.
+                x_all_str[ifs] = minss(x_all_str[ifs], x_all_int / 2.);
+                x_all_end[ifs] = maxss(x_all_end[ifs], nx[ifs] as f32 - x_all_int / 2.);
+                y_all_str[ifs] = minss(y_all_str[ifs], y_all_int / 2.);
+                y_all_end[ifs] = maxss(ny[ifs] as f32 - y_all_int / 2., y_all_end[ifs]);
+                iz = maxss(
+                    (x_all_end[ifs] - x_all_str[ifs]) / x_all_int + 1.05,
+                    2.0_f32,
+                ) as i32;
                 nxg_dim = nxg_dim.max(iz);
-                iz = (2.0_f32).max((y_all_end[ifs] - y_all_str[ifs]) / y_all_int + 1.05) as i32;
+                iz = maxss(
+                    (y_all_end[ifs] - y_all_str[ifs]) / y_all_int + 1.05,
+                    2.0_f32,
+                ) as i32;
                 nyg_dim = nyg_dim.max(iz);
             }
             linear_only[ifs] = control_pts[ifs] && max_control[ifs] <= 3;

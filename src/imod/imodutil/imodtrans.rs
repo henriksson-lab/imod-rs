@@ -305,7 +305,8 @@ pub fn imodtrans() {
         exit_error(b"You cannot enter both -2 and -3");
     }
     if rot_model != 0 && (flip_model != 0 || toggle_flip != 0) {
-        exit_error(b"You cannot enter -R with either -F or -T");
+        // BUGS.md: the source names a nonexistent `-F`; the flag is `-Y`.
+        exit_error(b"You cannot enter -R with either -Y or -T");
     }
 
     if mode != 0 && rot_scaleopt != 0 {
@@ -570,10 +571,13 @@ fn filetrans(
             } else if k == one_line {
                 mat3d.data[0] = mat[0];
                 mat3d.data[4] = mat[1];
-                mat3d.data[12] = mat[4] + transx;
+                // BUGS.md: `imodtrans.c:492,495` add `transx`/`transy` a
+                // second time; they are already in `mat[4]`/`mat[5]` above.
+                // Fixed in translation: the translation is applied once.
+                mat3d.data[12] = mat[4];
                 mat3d.data[1] = mat[2];
                 mat3d.data[5] = mat[3];
-                mat3d.data[13] = mat[5] + transy;
+                mat3d.data[13] = mat[5];
                 mat3d.data[8] = 0.;
                 mat3d.data[9] = 0.;
                 mat3d.data[10] = 1.;

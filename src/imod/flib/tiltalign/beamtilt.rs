@@ -120,7 +120,10 @@ pub fn search_beam_tilt(
     let dtor: f32 = 0.0174532_f64 as f32;
     let mut stdout = ImodFile::Stdout;
 
-    bt_max = 5.;
+    // Fixed in translation (2026-09-26, `BUGS.md`): the source's `btMax = 5.`
+    // (`beamtilt.cpp:51`) is compared with `beamTilt` in radians and printed
+    // as `btMax / dtor` (286.5); the limit is 5 degrees, in radians, here.
+    bt_max = 5. * dtor;
     bt_orig = av.beam_tilt;
     num_cuts = -1;
     loop {

@@ -252,6 +252,117 @@ thread_local! {
 /// entering foreign code so a callback may safely register a replacement.
 static S_QUIT_CHECK_FUNC: Mutex<Option<unsafe fn(i32) -> i32>> = Mutex::new(None);
 
+/// Rust-only support for the in-process runner (`commands::run_in_process`);
+/// no C counterpart.  A process that ends releases every image file it still
+/// holds; a command run on a runner thread does not end a process, so each
+/// run keeps a record of the image files allocated (`iiNew`) or opened
+/// (`addToOpenedList`) on its thread, and [`ii_release_run_record`] deletes
+/// whatever is still alive when the command's `main` ends.  Entries are
+/// keyed by the runner thread, so a nested run (a command that runs another
+/// in process) keeps its own record and files on unrelated threads are never
+/// recorded.  `Drop for ImodImageFile` takes a freed record out of every run,
+/// whichever path freed it, so a recorded address is always a live one.
+static S_RUN_RECORDS: Mutex<Vec<(std::thread::ThreadId, Vec<usize>)>> = Mutex::new(Vec::new());
+/// Number of entries in [`S_RUN_RECORDS`], read without the lock by `Drop`.
+static S_NUM_RUN_RECORDS: AtomicI32 = AtomicI32::new(0);
+
+/// Starts the current thread's run record; see [`S_RUN_RECORDS`].
+pub(crate) fn ii_begin_run_record() {
+    let mut records = S_RUN_RECORDS
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner());
+    records.push((std::thread::current().id(), Vec::new()));
+    S_NUM_RUN_RECORDS.store(records.len() as i32, Ordering::SeqCst);
+}
+
+/// Adds `file` to the current thread's run record, if it has one.
+fn record_in_run(file: *const ImodImageFile) {
+    if S_NUM_RUN_RECORDS.load(Ordering::SeqCst) == 0 {
+        return;
+    }
+    let thread = std::thread::current().id();
+    let mut records = S_RUN_RECORDS
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner());
+    if let Some((_, record)) = records.iter_mut().rev().find(|(id, _)| *id == thread) {
+        if !record.contains(&(file as usize)) {
+            record.push(file as usize);
+        }
+    }
+}
+
+/// Deletes every image file still alive in the current thread's run record
+/// and ends the record.  Everything that is not a secondary HDF volume goes
+/// first: deleting an HDF primary either frees its secondary volumes or,
+/// when they are still in use, hands them to the `iiDelete` boundary
+/// (`hdfDelete`, `iihdf.c:1568-1575`), so the secondary volumes still alive
+/// afterwards are deleted last.  A file is looked up again before each
+/// deletion because deleting one file can free others (TIFF thread copies,
+/// HDF volumes).
+pub(crate) fn ii_release_run_record() {
+    let thread = std::thread::current().id();
+    let snapshot = {
+        let records = S_RUN_RECORDS
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        match records.iter().rev().find(|(id, _)| *id == thread) {
+            Some((_, record)) => record.clone(),
+            None => return,
+        }
+    };
+    let is_secondary_volume = |address: usize| {
+        let file = address as *const ImodImageFile;
+        unsafe {
+            (*file).file == IIFILE_HDF
+                && (*file)
+                    .ii_volumes
+                    .first()
+                    .copied()
+                    .flatten()
+                    .is_some_and(|primary| primary.as_ptr() as usize != address)
+        }
+    };
+    let (secondary, primary): (Vec<usize>, Vec<usize>) = snapshot
+        .into_iter()
+        .partition(|&address| is_secondary_volume(address));
+    for address in primary.into_iter().chain(secondary) {
+        let alive = S_RUN_RECORDS
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+            .iter()
+            .rev()
+            .find(|(id, _)| *id == thread)
+            .is_some_and(|(_, record)| record.contains(&address));
+        if alive {
+            unsafe { ii_delete(address as *mut ImodImageFile) };
+        }
+    }
+    let mut records = S_RUN_RECORDS
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner());
+    if let Some(index) = records.iter().rposition(|(id, _)| *id == thread) {
+        records.remove(index);
+    }
+    S_NUM_RUN_RECORDS.store(records.len() as i32, Ordering::SeqCst);
+}
+
+impl Drop for ImodImageFile {
+    /// Takes a freed image file out of every run record (see
+    /// [`S_RUN_RECORDS`]); nothing else happens on a drop.
+    fn drop(&mut self) {
+        if S_NUM_RUN_RECORDS.load(Ordering::SeqCst) == 0 {
+            return;
+        }
+        let address = self as *mut ImodImageFile as usize;
+        let mut records = S_RUN_RECORDS
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        for (_, record) in records.iter_mut() {
+            record.retain(|&recorded| recorded != address);
+        }
+    }
+}
+
 /// One dataset in an HDF image stack.  It is entirely crate-owned state: HDF5
 /// receives the identifier and a temporary C-compatible path separately.
 #[derive(Clone)]
@@ -739,7 +850,9 @@ pub fn ii_new_box() -> Box<ImodImageFile> {
 /// made by [`ii_new_box`] and must be returned exactly once to [`ii_delete`].
 /// Internal callers that can retain ownership use `ii_new_box` directly.
 pub fn ii_new() -> *mut ImodImageFile {
-    Box::into_raw(ii_new_box())
+    let file = Box::into_raw(ii_new_box());
+    record_in_run(file);
+    file
 }
 
 /// C `iiOpen`.  Format probing is deliberately kept in the format units; this
@@ -1276,6 +1389,7 @@ pub fn ii_add_to_opened_list(ii_file: &mut ImodImageFile) -> i32 {
 
 /// Matches C static `addToOpenedList(ImodImageFile *)` (`iimage.c:791`).
 pub fn add_to_opened_list(ii_file: &mut ImodImageFile) -> i32 {
+    record_in_run(ii_file);
     S_OPENED_FILES
         .lock()
         .unwrap_or_else(|poisoned| poisoned.into_inner())
@@ -2273,15 +2387,50 @@ pub fn ii_convert_line_of_floats(
     bytes_signed: bool,
     pack_4bits: bool,
 ) {
+    // C's `(int)` conversion of a float or double is `cvttss2si`/`cvttsd2si`,
+    // which gives INT_MIN for NaN and anything out of `int` range; Rust's `as`
+    // saturates instead (NaN -> 0, +inf -> i32::MAX).  After `B3DCLAMP` the
+    // C therefore writes the *low* limit for NaN and +-inf alike: -32768 in
+    // the short arm and 0 in the unsigned ones.
+    let int_of_float = |x: f32| -> i32 {
+        #[cfg(target_arch = "x86_64")]
+        {
+            // SAFETY: SSE is part of the x86-64 baseline.
+            unsafe { core::arch::x86_64::_mm_cvttss_si32(core::arch::x86_64::_mm_set_ss(x)) }
+        }
+        #[cfg(not(target_arch = "x86_64"))]
+        {
+            if x.is_nan() || x >= 2147483648.0 || x < -2147483648.0 {
+                i32::MIN
+            } else {
+                x as i32
+            }
+        }
+    };
+    let int_of_double = |x: f64| -> i32 {
+        #[cfg(target_arch = "x86_64")]
+        {
+            // SAFETY: SSE2 is part of the x86-64 baseline.
+            unsafe { core::arch::x86_64::_mm_cvttsd_si32(core::arch::x86_64::_mm_set_sd(x)) }
+        }
+        #[cfg(not(target_arch = "x86_64"))]
+        {
+            if x.is_nan() || x >= 2147483648.0 || x <= -2147483649.0 {
+                i32::MIN
+            } else {
+                x as i32
+            }
+        }
+    };
     match mrc_mode {
         MRC_MODE_BYTE => {
             if pack_4bits {
                 for (packed, values) in output.iter_mut().zip(floats.chunks(2)) {
-                    let mut ival = (values[0] + 0.5) as i32;
+                    let mut ival = int_of_float(values[0] + 0.5);
                     ival = ival.clamp(0, 15);
                     let hval = values
                         .get(1)
-                        .map_or(0, |value| ((value + 0.5) as i32).clamp(0, 15));
+                        .map_or(0, |value| int_of_float(value + 0.5).clamp(0, 15));
                     *packed = (ival + (hval << 4)) as u8;
                 }
             } else if bytes_signed {
@@ -2290,13 +2439,13 @@ pub fn ii_convert_line_of_floats(
                     // is the double version, so the float promotes and the
                     // whole expression evaluates in double.  Doing it in f32
                     // lands one off on values near a .5 boundary.
-                    let mut ival = (*value as f64 - 127.5).floor() as i32;
+                    let mut ival = int_of_double((*value as f64 - 127.5).floor());
                     ival = ival.clamp(-128, 127);
                     *byte = ival as i8 as u8;
                 }
             } else {
                 for (value, byte) in floats.iter().zip(output.iter_mut()) {
-                    let mut ival = (*value + 0.5) as i32;
+                    let mut ival = int_of_float(*value + 0.5);
                     ival = ival.clamp(0, 255);
                     *byte = ival as u8;
                 }
@@ -2306,14 +2455,14 @@ pub fn ii_convert_line_of_floats(
             for (value, bytes) in floats.iter().zip(output.chunks_exact_mut(2)) {
                 // `iimage.c:1357`: `0.5` is a double literal and `floor` is the
                 // double version -- unlike the unsigned arms, which use `0.5f`.
-                let mut ival = (*value as f64 + 0.5).floor() as i32;
+                let mut ival = int_of_double((*value as f64 + 0.5).floor());
                 ival = ival.clamp(-32768, 32767);
                 bytes.copy_from_slice(&(ival as i16).to_ne_bytes());
             }
         }
         MRC_MODE_USHORT => {
             for (value, bytes) in floats.iter().zip(output.chunks_exact_mut(2)) {
-                let mut ival = (*value + 0.5) as i32;
+                let mut ival = int_of_float(*value + 0.5);
                 ival = ival.clamp(0, 65535);
                 bytes.copy_from_slice(&(ival as u16).to_ne_bytes());
             }
@@ -2830,21 +2979,24 @@ mod tests {
             0
         }
 
-        let mut image = ImodImageFile {
-            fp: Some(ImodFile::Token(1)),
-            nx: 2,
-            ny: 1,
-            nz: 1,
-            llx: 0,
-            urx: 1,
-            lly: 0,
-            ury: 0,
-            llz: 0,
-            urz: 0,
-            axis: 3,
-            mode: MRC_MODE_BYTE,
-            read_section: Some(read_two_bytes),
-            ..ImodImageFile::default()
+        let mut image = {
+            // A struct literal cannot take `..Default::default()` now that
+            // `ImodImageFile` implements `Drop` (the in-process run record).
+            let mut record = ImodImageFile::default();
+            record.fp = Some(ImodFile::Token(1));
+            record.nx = 2;
+            record.ny = 1;
+            record.nz = 1;
+            record.llx = 0;
+            record.urx = 1;
+            record.lly = 0;
+            record.ury = 0;
+            record.llz = 0;
+            record.urz = 0;
+            record.axis = 3;
+            record.mode = MRC_MODE_BYTE;
+            record.read_section = Some(read_two_bytes);
+            record
         };
 
         let mut short = [0_u8; 1];

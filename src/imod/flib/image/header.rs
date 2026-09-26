@@ -207,6 +207,11 @@ pub fn header() {
         }
     };
 
+    // Fortran `Fw.d` edit descriptor (`header.f90:193`, FORMAT 101 `f7.1`).
+    let f_edit = |value: f32, w: usize, d: usize| -> String {
+        crate::imod::flib::subrs::compat::gfortran_rt::format_f(f64::from(value), w, d)
+    };
+
     // `computed`, `briefSep`, `foundPixel` and `foundAxisRot` are declared once
     // for the whole program in `header.f90:29,30,72,73`, so their state carries
     // from one input file to the next inside the loop below.
@@ -379,11 +384,15 @@ pub fn header() {
                             iiu_ret_labels(im_unit, &mut labels, &mut nlabel);
                             if labels[0][..4] == *b"Fei " {
                                 println!(
-                                    "          Tilt axis rotation angle = {:7.1}{}",
-                                    -tiltaxis, " (Corrected sign)"
+                                    "          Tilt axis rotation angle = {}{}",
+                                    f_edit(-tiltaxis, 7, 1),
+                                    " (Corrected sign)"
                                 );
                             } else {
-                                println!("          Tilt axis rotation angle = {:7.1}", tiltaxis);
+                                println!(
+                                    "          Tilt axis rotation angle = {}",
+                                    f_edit(tiltaxis, 7, 1)
+                                );
                             }
                             found_axis_rot = true;
                         }
@@ -479,8 +488,9 @@ pub fn header() {
                                     tiltaxis -= 360.0;
                                 }
                                 println!(
-                                    "          Tilt axis rotation angle = {:7.1}{}",
-                                    -tiltaxis, " (Corrected sign)"
+                                    "          Tilt axis rotation angle = {}{}",
+                                    f_edit(-tiltaxis, 7, 1),
+                                    " (Corrected sign)"
                                 );
                                 found_axis_rot = true;
                             }
@@ -629,8 +639,8 @@ pub fn header() {
                                                         < 0.11
                                                     {
                                                         println!(
-                                                            "          Tilt axis rotation angle = {:7.1}{}",
-                                                            rot_angle,
+                                                            "          Tilt axis rotation angle = {}{}",
+                                                            f_edit(rot_angle, 7, 1),
                                                             "  (from RotationAngle in mdoc)"
                                                         );
                                                     // If they corrected it to match SerialEM
@@ -638,8 +648,9 @@ pub fn header() {
                                                         < 0.11
                                                     {
                                                         println!(
-                                                            "          Tilt axis rotation angle = {:7.1}{}",
-                                                            tilt_axis, "  (from mdoc)"
+                                                            "          Tilt axis rotation angle = {}{}",
+                                                            f_edit(tilt_axis, 7, 1),
+                                                            "  (from mdoc)"
                                                         );
                                                     // If they sorta corrected it but kept it
                                                     // inverted as in TS file
@@ -648,8 +659,8 @@ pub fn header() {
                                                         < 0.11
                                                     {
                                                         println!(
-                                                            "          Tilt axis rotation angle = {:7.1}{}",
-                                                            -tilt_axis,
+                                                            "          Tilt axis rotation angle = {}{}",
+                                                            f_edit(-tilt_axis, 7, 1),
                                                             "  (corrected sign, from mdoc)"
                                                         );
                                                         tilt_axis = -tilt_axis;
@@ -658,8 +669,9 @@ pub fn header() {
                                                 }
                                             } else {
                                                 println!(
-                                                    "          Tilt axis rotation angle = {:7.1}{}",
-                                                    tilt_axis, "  (from mdoc)"
+                                                    "          Tilt axis rotation angle = {}{}",
+                                                    f_edit(tilt_axis, 7, 1),
+                                                    "  (from mdoc)"
                                                 );
                                             }
                                         }

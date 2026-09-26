@@ -1,11 +1,23 @@
 //! Translation of `IMOD/mrc/modifymdoc.cpp`.
+//!
+//! The unit is one function, `main`.  Every `exitError` goes through
+//! [`exit_error`], whose prefix `PipReadOrParseOptions` set, and ends in
+//! `b3dutil::exit`, so the command is safe to run in process.
 
-use crate::imod::libcfshr::autodoc::*;
-use crate::imod::libcfshr::b3dutil::{ImodFile, imod_prog_name, imod_usage_header};
+use crate::imod::libcfshr::autodoc::{
+    ADOC_GLOBAL_NAME, ADOC_ZVALUE_NAME, adoc_change_section_name, adoc_delete_key_value, adoc_done,
+    adoc_get_float, adoc_get_two_integers, adoc_open_image_metadata, adoc_order_write_by_value,
+    adoc_set_float, adoc_set_two_integers, adoc_write,
+};
+use crate::imod::libcfshr::b3dutil::{
+    CArg, ImodFile, b3d_get_error, c_format_bytes, exit, imod_prog_name, imod_usage_header,
+};
 use crate::imod::libcfshr::extraheader::{get_metadata_items, get_metadata_weighting_doses};
 use crate::imod::libcfshr::parse_params::{
-    pip_done, pip_get_float, pip_get_in_out_file, pip_get_integer, pip_read_or_parse_options,
+    exit_error, pip_done, pip_get_float, pip_get_in_out_file, pip_get_integer,
+    pip_read_or_parse_options,
 };
+use crate::imod::libcfshr::robuststat::rs_sort_indexed_floats;
 use std::io::Write;
 
 /// The `imodUsageHeader` callback in the shape `PipReadOrParseOptions` takes.
@@ -16,8 +28,38 @@ fn imod_usage_header_for_pip(prog_name: &[u8]) {
     let _ = ImodFile::Stdout.flush();
 }
 
-/// C `main` in `modifymdoc.cpp`.
-pub fn modifymdoc(arguments: &[String]) -> i32 {
+/// C `main` in `modifymdoc.cpp:19`.
+pub fn modifymdoc(arguments: &[String]) -> ! {
+    let prog_name = imod_prog_name(arguments.first().map_or("", String::as_str));
+    let mut in_file = Vec::new();
+    let mut out_file = Vec::new();
+    let mut reorder: i32 = 0;
+    let mut prior: f32 = 0.;
+    let mut dose: f32 = 0.;
+    let mut new_binning: f32 = 0.;
+    let mut old_binning: f32;
+    // Uninitialised in the source; it is read only when `newBinning` is
+    // nonzero, which is exactly when it has been assigned.
+    let mut bin_scale: f32 = 0.;
+    let mut old_pixel: f32;
+    let mut new_pixel: f32 = 0.;
+    let mut montage: i32 = 0;
+    let mut num_sect: i32 = 0;
+    let mut sect_type: i32 = 0;
+    let mut ind: i32;
+    let mut num_found: i32 = 0;
+    let mut num_vals: i32 = 0;
+    let mut nx: i32 = 0;
+    let mut ny: i32 = 0;
+    let mut iz_piece: Vec<i32> = Vec::new();
+    let mut tilts: Vec<f32> = Vec::new();
+    let mut sec_doses: Vec<f32> = Vec::new();
+    let mut prior_doses: Vec<f32> = Vec::new();
+
+    // Fallbacks from ../manpages/autodoc2man 2 1 modifymdoc
+    let mut num_opt_args = 0;
+    let mut num_non_opt_args = 0;
+    let num_options = 8;
     let options: [&[u8]; 8] = [
         b"input:InputFile:FN:",
         b"output:OutputFile:FN:",
@@ -28,240 +70,281 @@ pub fn modifymdoc(arguments: &[String]) -> i32 {
         b"param:ParameterFile:PF:",
         b"help:usage:B:",
     ];
+
+    // Startup with fallback
     let argv = arguments
         .iter()
         .map(|arg| arg.as_bytes().to_vec())
         .collect::<Vec<_>>();
-    // `char *progName = imodProgName(argv[0]);`
-    let prog_name = imod_prog_name(arguments.first().map_or("", String::as_str));
-    let mut opt_args = 0;
-    let mut non_opt_args = 0;
     pip_read_or_parse_options(
         argv.len() as i32,
         &argv,
         &options,
-        8,
+        num_options,
         prog_name.as_bytes(),
         3,
         1,
         1,
-        &mut opt_args,
-        &mut non_opt_args,
+        &mut num_opt_args,
+        &mut num_non_opt_args,
         Some(imod_usage_header_for_pip),
     );
-    let mut input = Vec::new();
-    let mut output = Vec::new();
-    if pip_get_in_out_file(b"InputFile", 0, &mut input) != 0
-        || pip_get_in_out_file(b"OutputFile", 1, &mut output) != 0
-    {
-        pip_done();
-        return 1;
+
+    // Get options
+    if pip_get_in_out_file(b"InputFile", 0, &mut in_file) != 0 {
+        exit_error(b"No input file specified");
     }
-    let mut reorder = 0_i32;
-    let mut dose = 0.;
-    let mut binning = 0.;
-    let mut pixel = 0.;
-    let have_dose = pip_get_float(b"ElectronDosePerImage", &mut dose) == 0;
-    let have_bin = pip_get_float(b"BinningToScaleTo", &mut binning) == 0;
-    let have_pixel = pip_get_float(b"PixelSpacingToSet", &mut pixel) == 0;
-    let _ = pip_get_integer(b"OrderToProduce", &mut reorder);
+    if pip_get_in_out_file(b"OutputFile", 1, &mut out_file) != 0 {
+        exit_error(b"No output file specified");
+    }
+    if pip_get_float(b"ElectronDosePerImage", &mut dose) == 0 && dose <= 0. {
+        exit_error(b"The electron dose must be positive");
+    }
+    pip_get_integer(b"OrderToProduce", &mut reorder);
+    // `fabs(newBinning - 0.5)` is a double expression; `B3DNINT(newBinning) -
+    // newBinning` is int - float, a float, widened for `fabs`.
+    if pip_get_float(b"BinningToScaleTo", &mut new_binning) == 0
+        && !((new_binning as f64 - 0.5).abs() < 0.001
+            || (new_binning as f64 > 0.51
+                && ((((new_binning as f64 + 0.5).floor() as i32) as f32 - new_binning) as f64)
+                    .abs()
+                    < 0.001))
+    {
+        exit_error(b"New binning must be 0.5 or an integer");
+    }
+    if pip_get_float(b"PixelSpacingToSet", &mut new_pixel) == 0 && new_pixel as f64 <= 0. {
+        exit_error(b"New pixel size must be positive");
+    }
     pip_done();
-    if (have_dose && dose <= 0.)
-        || (have_pixel && pixel <= 0.)
-        || (have_bin
-            && !((binning - 0.5).abs() < 0.001
-                || (binning > 0.51 && (binning.round() - binning).abs() < 0.001)))
-    {
-        return 1;
+
+    // Open the mdoc, check errors
+    let adoc_ind =
+        adoc_open_image_metadata(&in_file, 0, &mut montage, &mut num_sect, &mut sect_type);
+    if adoc_ind == -1 {
+        exit_error(&c_format_bytes(
+            "Opening or reading input file %s",
+            &[CArg::Bytes(&in_file)],
+        ));
     }
-    let (mut montage, mut sections, mut section_type) = (0, 0, 0);
-    let adoc = adoc_open_image_metadata(&input, 0, &mut montage, &mut sections, &mut section_type);
-    if adoc < 0 || montage != 0 || section_type != 1 || sections < 2 {
-        adoc_done();
-        return 1;
+    if adoc_ind == -2 {
+        exit_error(&c_format_bytes(
+            // BUGS.md: the source's message reads "dose not exist".
+            "Input file %s does not exist",
+            &[CArg::Bytes(&in_file)],
+        ));
     }
-    let mut order = (0..sections).collect::<Vec<_>>();
-    let mut tilts = vec![0.; sections as usize];
-    let mut unused = tilts.clone();
-    let (mut values, mut found) = (0, 0);
+    if adoc_ind < -2 {
+        exit_error(&c_format_bytes(
+            "The input file %s is not a valid autodoc",
+            &[CArg::Bytes(&in_file)],
+        ));
+    }
+    if montage != 0 {
+        exit_error(b"An mdoc file from a montage cannot be reordered");
+    }
+    if sect_type != 1 {
+        exit_error(&c_format_bytes(
+            "This program can be used only with a file having sections named %s",
+            &[CArg::Bytes(ADOC_ZVALUE_NAME)],
+        ));
+    }
+    if num_sect < 2 {
+        exit_error(b"There must be at least two sections in the input file");
+    }
+
+    // Set up Z/index list and get the tilts
+    for iz in 0..num_sect {
+        iz_piece.push(iz);
+    }
+    tilts.resize(num_sect as usize, 0.);
+    // The source passes `NULL` for `val2`, which `getMetadataByKey` never
+    // touches for a single-float key; the translated routine takes a slice.
+    let mut null_val2: Vec<f32> = vec![0.; num_sect as usize];
     if get_metadata_items(
-        adoc,
-        section_type,
-        sections,
+        adoc_ind,
+        sect_type,
+        num_sect,
         1,
         &mut tilts,
-        &mut unused,
-        &mut values,
-        &mut found,
-        &order,
+        &mut null_val2,
+        &mut num_vals,
+        &mut num_found,
+        &iz_piece,
     ) != 0
-        || found < sections
     {
-        adoc_done();
-        return 1;
+        exit_error(&c_format_bytes(
+            "Getting tilt angles from mdoc: %s",
+            &[CArg::Str(&b3d_get_error())],
+        ));
     }
-    if have_dose {
-        let mut priors = vec![0.; sections as usize];
-        let mut section_doses = priors.clone();
-        for section in 0..sections {
-            if adoc_set_float(ADOC_ZVALUE_NAME, section, b"ExposureDose", dose) != 0 {
-                adoc_done();
-                return 1;
+    if num_found < num_sect {
+        exit_error(&c_format_bytes(
+            "There are tilt angles in only %d of %d sections",
+            &[CArg::Int(num_found as i64), CArg::Int(num_sect as i64)],
+        ));
+    }
+
+    // Handle dose: Set dose and remove prior information if present
+    if dose != 0. {
+        sec_doses.resize(num_sect as usize, 0.);
+        prior_doses.resize(num_sect as usize, 0.);
+        for iz in 0..num_sect {
+            if adoc_set_float(ADOC_ZVALUE_NAME, iz, b"ExposureDose", dose) != 0 {
+                exit_error(&c_format_bytes(
+                    "Adding ExposureDose for section %d",
+                    &[CArg::Int(iz as i64)],
+                ));
             }
-            let mut prior = 0.;
-            if adoc_get_float(ADOC_ZVALUE_NAME, section, b"PriorRecordDose", &mut prior) == 0
-                && adoc_delete_key_value(ADOC_ZVALUE_NAME, section, b"PriorRecordDose").is_err()
+            if adoc_get_float(ADOC_ZVALUE_NAME, iz, b"PriorRecordDose", &mut prior) == 0
+                && adoc_delete_key_value(ADOC_ZVALUE_NAME, iz, b"PriorRecordDose").is_err()
             {
-                adoc_done();
-                return 1;
+                exit_error(&c_format_bytes(
+                    "Removing PriorRecordDose for section %d",
+                    &[CArg::Int(iz as i64)],
+                ));
             }
         }
+
+        // Get accumulated doses using time stamps
+        // BUGS.md, fixed in translation: `modifymdoc.cpp:97` fails on any nonzero
+        // return, but -1 is `getMetadataWeightingDoses`'s documented success
+        // for an mdoc with no DateTime entries (doses summed in file order, as
+        // the man page promises).  Only a positive return is an error here.
         if get_metadata_weighting_doses(
-            adoc,
-            section_type,
-            sections,
-            &order,
+            adoc_ind,
+            sect_type,
+            num_sect,
+            &iz_piece,
             0,
-            &mut priors,
-            &mut section_doses,
-        ) != 0
+            &mut prior_doses,
+            &mut sec_doses,
+        ) > 0
         {
-            adoc_done();
-            return 1;
+            exit_error(&c_format_bytes(
+                "Getting accumulated dose information back: %s",
+                &[CArg::Str(&b3d_get_error())],
+            ));
         }
-        for (section, prior) in priors.into_iter().enumerate() {
-            if adoc_set_float(ADOC_ZVALUE_NAME, section as i32, b"PriorRecordDose", prior) != 0 {
-                adoc_done();
-                return 1;
+
+        // Set them (again)
+        for iz in 0..num_sect {
+            if adoc_set_float(
+                ADOC_ZVALUE_NAME,
+                iz,
+                b"PriorRecordDose",
+                prior_doses[iz as usize],
+            ) != 0
+            {
+                exit_error(b"Putting new PriorRecordDose entries into autodoc");
             }
         }
     }
-    if have_bin || have_pixel {
-        let mut old_bin = 1.;
-        let mut old_pixel = 0.;
-        let new_bin = if have_bin { binning } else { 1. };
-        if have_bin && adoc_get_float(ADOC_ZVALUE_NAME, 0, b"Binning", &mut old_bin) < 0 {
-            adoc_done();
-            return 1;
+
+    // Handle binning change
+    if new_binning != 0. || new_pixel != 0. {
+        old_binning = 1.;
+        old_pixel = 0.;
+        if new_binning != 0. {
+            if adoc_get_float(ADOC_ZVALUE_NAME, 0, b"Binning", &mut old_binning) < 0 {
+                exit_error(b"Getting old binning from section 0 of autodoc");
+            }
+            bin_scale = new_binning / old_binning;
         }
-        let scale = new_bin / old_bin;
-        let mut new_pixel = if have_pixel { pixel } else { 0. };
-        if !have_pixel {
-            let ret = adoc_get_float(ADOC_GLOBAL_NAME, 0, b"PixelSpacing", &mut old_pixel);
-            if ret < 0
-                || (ret > 0
-                    && adoc_get_float(ADOC_ZVALUE_NAME, 0, b"PixelSpacing", &mut old_pixel) < 0)
-            {
-                adoc_done();
-                return 1;
+
+        if new_pixel == 0. {
+            // Get pixel spacing from global, fall back to first section
+            ind = adoc_get_float(ADOC_GLOBAL_NAME, 0, b"PixelSpacing", &mut old_pixel);
+            if ind < 0 {
+                exit_error(b"Getting old PixelSpacing from global section of autodoc");
+            }
+            if ind > 0 {
+                ind = adoc_get_float(ADOC_ZVALUE_NAME, 0, b"PixelSpacing", &mut old_pixel);
+                if ind < 0 {
+                    exit_error(b"Getting old PixelSpacing from section 0 of autodoc");
+                }
             }
             if old_pixel != 0. {
-                new_pixel = old_pixel * scale;
+                new_pixel = old_pixel * bin_scale;
             }
         }
-        if have_bin {
-            let (mut nx, mut ny) = (0, 0);
-            let ret = adoc_get_two_integers(ADOC_GLOBAL_NAME, 0, b"ImageSize", &mut nx, &mut ny);
-            if ret < 0 {
-                adoc_done();
-                return 1;
+
+        // Handle image size (poorly)
+        if new_binning != 0. {
+            ind = adoc_get_two_integers(ADOC_GLOBAL_NAME, 0, b"ImageSize", &mut nx, &mut ny);
+            if ind < 0 {
+                exit_error(b"Getting old ImageSize from global section of autodoc");
             }
-            if ret == 0
-                && adoc_set_two_integers(
-                    ADOC_GLOBAL_NAME,
-                    0,
-                    b"ImageSize",
-                    (nx as f32 / scale).round() as i32,
-                    (ny as f32 / scale).round() as i32,
-                ) != 0
-            {
-                adoc_done();
-                return 1;
+            if ind == 0 {
+                // `B3DNINT(nx / binScale)`: int / float is a float quotient,
+                // widened for `+ 0.5` and `floor`.
+                nx = ((nx as f32 / bin_scale) as f64 + 0.5).floor() as i32;
+                ny = ((ny as f32 / bin_scale) as f64 + 0.5).floor() as i32;
+                if adoc_set_two_integers(ADOC_GLOBAL_NAME, 0, b"ImageSize", nx, ny) != 0 {
+                    exit_error(b"Setting new ImageSize in autodoc");
+                }
             }
         }
+
+        // Set the pixel size and binning in the sections
         if (old_pixel != 0. || new_pixel != 0.)
             && adoc_set_float(ADOC_GLOBAL_NAME, 0, b"PixelSpacing", new_pixel) != 0
         {
-            adoc_done();
-            return 1;
+            exit_error(b"Setting new PixelSpacing in global section of autodoc");
         }
-        for section in 0..sections {
-            if (have_bin && adoc_set_float(ADOC_ZVALUE_NAME, section, b"Binning", new_bin) != 0)
+        for iz in 0..num_sect {
+            if (new_binning != 0.
+                && adoc_set_float(ADOC_ZVALUE_NAME, iz, b"Binning", new_binning) != 0)
                 || ((old_pixel != 0. || new_pixel != 0.)
-                    && adoc_set_float(ADOC_ZVALUE_NAME, section, b"PixelSpacing", new_pixel) != 0)
+                    && adoc_set_float(ADOC_ZVALUE_NAME, iz, b"PixelSpacing", new_pixel) != 0)
             {
-                adoc_done();
-                return 1;
+                exit_error(&c_format_bytes(
+                    "Setting new PixelSpacing or Binning in section %d of autodoc",
+                    &[CArg::Int(iz as i64)],
+                ));
             }
         }
     }
+
+    // For reordering
     if reorder != 0 {
-        order.sort_by(|a, b| tilts[*a as usize].total_cmp(&tilts[*b as usize]));
+        rs_sort_indexed_floats(&tilts, &mut iz_piece, num_sect);
+
+        // reverse indexes
         if reorder < 0 {
-            order.reverse();
+            for iz in 0..num_sect / 2 {
+                iz_piece.swap(iz as usize, ((num_sect - 1) - iz) as usize);
+            }
         }
-        for (name, section) in order.iter().enumerate() {
-            if adoc_change_section_name(ADOC_ZVALUE_NAME, *section, name.to_string().as_bytes())
-                .is_err()
-            {
-                adoc_done();
-                return 1;
+
+        // Set the names and set up to write in order by name
+        for iz in 0..num_sect {
+            let buffer = c_format_bytes("%d", &[CArg::Int(iz as i64)]);
+            if adoc_change_section_name(ADOC_ZVALUE_NAME, iz_piece[iz as usize], &buffer).is_err() {
+                exit_error(&c_format_bytes(
+                    "Changing name for section %d to %s",
+                    &[
+                        CArg::Int(iz_piece[iz as usize] as i64),
+                        CArg::Bytes(&buffer),
+                    ],
+                ));
             }
         }
         if adoc_order_write_by_value(Some(ADOC_ZVALUE_NAME)) != 0 {
-            adoc_done();
-            return 1;
+            exit_error(b"Memory error setting up to write sections in new order");
         }
     }
-    let status = adoc_write(&output);
-    adoc_done();
-    if status < 0 {
-        return 1;
-    }
-    println!("Wrote new mdoc file {}", String::from_utf8_lossy(&output));
-    0
-}
 
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use std::sync::atomic::{AtomicUsize, Ordering};
-    static SEQUENCE: AtomicUsize = AtomicUsize::new(0);
-
-    #[test]
-    fn parameter_file_reorders_real_mdoc_sections_and_scales_metadata() {
-        let number = SEQUENCE.fetch_add(1, Ordering::Relaxed);
-        let root = std::env::temp_dir().join(format!(
-            "imod-rs-modifymdoc-{}-{number}",
-            std::process::id()
+    // Write file
+    if adoc_write(&out_file) < 0 {
+        exit_error(&c_format_bytes(
+            "Writing the new mdoc file %s",
+            &[CArg::Bytes(&out_file)],
         ));
-        let input = root.with_extension("in.mdoc");
-        let output = root.with_extension("out.mdoc");
-        let params = root.with_extension("com");
-        std::fs::write(&input, "ImageFile = source.mrc\nPixelSpacing = 2.0\nImageSize = 100 80\n\n[ZValue = 0]\nTiltAngle = 10\nBinning = 1\n\n[ZValue = 1]\nTiltAngle = -10\nBinning = 1\n").unwrap();
-        std::fs::write(
-            &params,
-            format!(
-                "InputFile = {}\nOutputFile = {}\nOrderToProduce = 1\nBinningToScaleTo = 2\n",
-                input.display(),
-                output.display()
-            ),
-        )
-        .unwrap();
-        assert_eq!(
-            modifymdoc(&[
-                "modifymdoc".into(),
-                "-param".into(),
-                params.display().to_string()
-            ]),
-            0
-        );
-        let result = std::fs::read_to_string(&output).unwrap();
-        assert!(result.contains("ImageSize = 50 40"));
-        assert!(result.contains("PixelSpacing = 4"));
-        assert!(result.find("[ZValue = 0]").unwrap() < result.find("TiltAngle = -10").unwrap());
-        let _ = std::fs::remove_file(input);
-        let _ = std::fs::remove_file(output);
-        let _ = std::fs::remove_file(params);
     }
+    adoc_done();
+    let _ = ImodFile::Stdout.write_all(&c_format_bytes(
+        "Wrote new mdoc file %s\n",
+        &[CArg::Bytes(&out_file)],
+    ));
+    exit(0);
 }

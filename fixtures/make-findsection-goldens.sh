@@ -30,3 +30,8 @@ grep -v '^#' "$HERE/cases.tsv" | while IFS=$'\t' read -r name args; do
   done
   rm -rf "$work"
 done
+# Upstream bugs fixed in translation (BUGS.md, `findsection`): the table's
+# binning column prints mBinning[scl][1] twice, and lowSDerrStrings is indexed
+# with the 1-based error code.  The goldens carry the defined behaviour.
+sed -i 's/^  2    2,2,2      445/  2    2,2,1      445/' "$HERE/golden/binning.out"
+sed -i 's/^   No minimum in median SD value found on one side of peak$/   No peak in median SD value found except at top or bottom/' "$HERE/golden/lowest.out"

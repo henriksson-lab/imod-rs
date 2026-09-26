@@ -5348,6 +5348,49 @@ fn median_3d_uses_the_source_slice_window_on_real_mrc_data() {
 }
 
 #[test]
+fn blankfile_unused_label_slots_are_zero_and_output_is_reproducible() {
+    // Native `mrc_head_new` never clears `labels` and `clip` keeps the header
+    // on the stack, so three identical native runs give three different files
+    // (stack addresses in the slots past `nlabl`, `BUGS.md` §2).  Defined here:
+    // those slots are zero, so two runs give identical files.
+    let mut runs = Vec::new();
+    for run in 0..2 {
+        let output = std::env::temp_dir().join(format!(
+            "imod-rs-clip-blank-repro-{}-{run}.mrc",
+            std::process::id()
+        ));
+        let result = common::imod_cmd("clip")
+            .args([
+                "blankfile",
+                "-ox",
+                "32",
+                "-oy",
+                "32",
+                "-oz",
+                "2",
+                "-m",
+                "2",
+                "-p",
+                "1.5",
+            ])
+            .arg(&output)
+            .output()
+            .unwrap();
+        assert!(result.status.success());
+        runs.push(std::fs::read(&output).unwrap());
+        let _ = std::fs::remove_file(output);
+    }
+    let nlabl = i32::from_le_bytes(runs[0][220..224].try_into().unwrap());
+    assert_eq!(nlabl, 1);
+    assert!(runs[0][224 + 80..1024].iter().all(|&b| b == 0));
+    let masked: Vec<Vec<u8>> = runs.iter().map(|r| common::mask_stamps(r)).collect();
+    assert_eq!(
+        masked[0], masked[1],
+        "two identical runs must write the same bytes"
+    );
+}
+
+#[test]
 fn blankfile_writes_a_real_constant_mrc_volume() {
     let output =
         std::env::temp_dir().join(format!("imod-rs-clip-blankfile-{}.mrc", std::process::id()));
@@ -7916,4 +7959,226 @@ fn fourier_processes_rustfft_outputs_match_the_parity_outputs() {
             "clip {case} RMS difference {rms} against scale {scale}"
         );
     }
+}
+
+/// `BUGS.md` "clip average / clip sum variance": `processing.cpp:2150` adds
+/// channel 2's square into channel 1.  Native writes `[2, 98, 0]` for these
+/// two RGB inputs; fixed in translation, each channel's own variance is
+/// `(2, 8, 18)`.  The plain average (unaffected) is `(2, 4, 6)` on both sides.
+#[test]
+fn variance_3d_rgb_accumulates_each_channel_own_square() {
+    let dir = std::env::temp_dir().join(format!("imod-rs-clip-rgbvar-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&dir);
+    std::fs::create_dir_all(&dir).unwrap();
+    let write = |name: &str, px: [u8; 6]| {
+        let mut h = vec![0u8; 1024];
+        for (k, v) in [2i32, 1, 1, 16, 0, 0, 0, 2, 1, 1].iter().enumerate() {
+            h[4 * k..4 * k + 4].copy_from_slice(&v.to_le_bytes());
+        }
+        for (k, v) in [2f32, 1., 1., 90., 90., 90.].iter().enumerate() {
+            h[40 + 4 * k..44 + 4 * k].copy_from_slice(&v.to_le_bytes());
+        }
+        for (k, v) in [1i32, 2, 3].iter().enumerate() {
+            h[64 + 4 * k..68 + 4 * k].copy_from_slice(&v.to_le_bytes());
+        }
+        h[208..212].copy_from_slice(b"MAP ");
+        h[212] = 0x44;
+        h[213] = 0x44;
+        h.extend_from_slice(&px);
+        std::fs::write(dir.join(name), h).unwrap();
+    };
+    write("a.mrc", [1, 2, 3, 1, 2, 3]);
+    write("b.mrc", [3, 6, 9, 3, 6, 9]);
+    for (op, expected) in [("variance", [2u8, 8, 18]), ("average", [2, 4, 6])] {
+        let out = dir.join(format!("{op}.mrc"));
+        let status = common::imod_cmd("clip")
+            .args([op, "-3d"])
+            .arg(dir.join("a.mrc"))
+            .arg(dir.join("b.mrc"))
+            .arg(&out)
+            .output()
+            .unwrap()
+            .status;
+        assert!(status.success(), "{op}");
+        let bytes = std::fs::read(&out).unwrap();
+        assert_eq!(&bytes[1024..], &[expected, expected].concat()[..], "{op}");
+    }
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+/// `BUGS.md` §1, fixed in translation: the 3x3 float median fast path reads
+/// out of bounds on an image under 3 pixels wide (`sliceproc.c:429,431`).
+/// Defined behaviour: such an image takes the general path, the median of the
+/// clipped window (2 columns by up to 3 rows), which for an even count is the
+/// mean of the two middle values.
+#[test]
+fn float_median_on_a_two_pixel_wide_image_matches_the_general_path() {
+    let dir =
+        std::env::temp_dir().join(format!("imod-rs-clip-narrow-median-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&dir);
+    std::fs::create_dir_all(&dir).unwrap();
+    let values: Vec<u8> = vec![
+        9, 3, 7, 1, 250, 4, 8, 2, 6, 5, 0, 11, 13, 12, 10, 14, 90, 70, 80, 60, 20, 40, 30, 50,
+    ];
+    std::fs::write(dir.join("b.raw"), &values).unwrap();
+    let floats: Vec<u8> = values
+        .iter()
+        .flat_map(|&v| (v as f32).to_le_bytes())
+        .collect();
+    std::fs::write(dir.join("f.raw"), &floats).unwrap();
+    for (raw, kind, mrc) in [("b.raw", "byte", "b.mrc"), ("f.raw", "float", "f.mrc")] {
+        let made = common::imod_cmd("raw2mrc")
+            .current_dir(&dir)
+            .args(["-x", "2", "-y", "4", "-z", "3", "-t", kind, raw, mrc])
+            .output()
+            .unwrap();
+        assert!(made.status.success(), "{made:?}");
+    }
+    let pixels = |path: &std::path::Path| -> Vec<f32> {
+        let mut out = Vec::new();
+        for z in 0..3 {
+            let mut section = [0_f32; 8];
+            unsafe {
+                let name = CString::new(path.to_string_lossy().as_bytes()).unwrap();
+                let file = ii_open(name.to_bytes(), "rb");
+                assert_eq!(ii_read_section_float(&mut *file, &mut section, z), 0);
+                ii_delete(file);
+            }
+            out.extend_from_slice(&section);
+        }
+        out
+    };
+    let result = common::imod_cmd("clip")
+        .current_dir(&dir)
+        .args(["median", "-2d", "-n", "3", "f.mrc", "fo.mrc"])
+        .output()
+        .unwrap();
+    assert!(result.status.success(), "{result:?}");
+    let mut expected = Vec::new();
+    for z in 0..3 {
+        for y in 0..4usize {
+            let mut window: Vec<f32> = (y.saturating_sub(1)..=(y + 1).min(3))
+                .flat_map(|yy| [values[z * 8 + yy * 2], values[z * 8 + yy * 2 + 1]])
+                .map(|v| v as f32)
+                .collect();
+            window.sort_by(|a, b| a.partial_cmp(b).unwrap());
+            let n = window.len();
+            let median = (window[n / 2 - 1] + window[n / 2]) / 2.;
+            expected.extend_from_slice(&[median, median]);
+        }
+    }
+    assert_eq!(pixels(&dir.join("fo.mrc")), expected);
+    // The 3-D form reaches the same filter; it must finish and succeed.
+    let result = common::imod_cmd("clip")
+        .current_dir(&dir)
+        .args(["median", "-3d", "-n", "3", "f.mrc", "f3.mrc"])
+        .output()
+        .unwrap();
+    assert!(result.status.success(), "{result:?}");
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+/// `BUGS.md` "percentileFloat / percentileInt do not terminate on NaN input":
+/// native `clip median -2d -n 5` spins forever on this volume (the 3x3 float
+/// fast path does not use `percentileFloat`, so `-n 3` would not show it).  Fixed
+/// in translation: the selection finishes with NaN ordered above every
+/// number, so the run ends and the non-NaN neighbourhoods keep their medians.
+#[test]
+fn median_of_float_volume_with_nan_terminates() {
+    let dir = std::env::temp_dir().join(format!("imod-rs-clip-nanmed-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&dir);
+    std::fs::create_dir_all(&dir).unwrap();
+    let (nx, ny) = (8i32, 6i32);
+    let mut h = vec![0u8; 1024];
+    for (k, v) in [nx, ny, 1, 2, 0, 0, 0, nx, ny, 1].iter().enumerate() {
+        h[4 * k..4 * k + 4].copy_from_slice(&v.to_le_bytes());
+    }
+    for (k, v) in [nx as f32, ny as f32, 1., 90., 90., 90.].iter().enumerate() {
+        h[40 + 4 * k..44 + 4 * k].copy_from_slice(&v.to_le_bytes());
+    }
+    for (k, v) in [1i32, 2, 3].iter().enumerate() {
+        h[64 + 4 * k..68 + 4 * k].copy_from_slice(&v.to_le_bytes());
+    }
+    h[208..212].copy_from_slice(b"MAP ");
+    h[212] = 0x44;
+    h[213] = 0x44;
+    for i in 0..nx * ny {
+        let v = if i % 7 == 3 {
+            f32::NAN
+        } else {
+            (i * 37 % 11) as f32
+        };
+        h.extend_from_slice(&v.to_le_bytes());
+    }
+    std::fs::write(dir.join("n.mrc"), h).unwrap();
+    let mut child = common::imod_cmd("clip")
+        .current_dir(&dir)
+        .args(["median", "-2d", "-n", "5", "n.mrc", "o.mrc"])
+        .stdout(std::process::Stdio::null())
+        .spawn()
+        .unwrap();
+    let start = std::time::Instant::now();
+    let status = loop {
+        if let Some(status) = child.try_wait().unwrap() {
+            break status;
+        }
+        if start.elapsed().as_secs() > 60 {
+            let _ = child.kill();
+            panic!("clip median on NaN input did not terminate");
+        }
+        std::thread::sleep(std::time::Duration::from_millis(20));
+    };
+    assert!(status.success());
+    assert_eq!(
+        std::fs::metadata(dir.join("o.mrc")).unwrap().len(),
+        1024 + 4 * 48
+    );
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+/// BUGS.md, fixed in translation: `processing.cpp:2150` accumulates channel
+/// 2's square into channel 1 (`oval[1] += val[2] * val[2]`), so native's
+/// `clip standev`/`variance` of RGB input is wrong in green and blue.  Every
+/// channel accumulates its own square here: for two inputs each channel's
+/// SD is |a - b| / sqrt(2), to within the byte conversion.  (Red, and all
+/// single-channel data, are unaffected and byte-identical to native.)
+#[test]
+fn clip_standev_rgb_uses_each_channels_own_sum_of_squares() {
+    let dir = std::env::temp_dir().join(format!("imod-rs-clip-rgbsd-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&dir);
+    std::fs::create_dir_all(&dir).unwrap();
+    let count = 16 * 12 * 2 * 3;
+    let a: Vec<u8> = (0..count).map(|i| ((i * 37 + 11) % 251) as u8).collect();
+    let b: Vec<u8> = (0..count).map(|i| ((i * 91 + 5) % 241) as u8).collect();
+    for (name, data) in [("a", &a), ("b", &b)] {
+        std::fs::write(dir.join(format!("{name}.raw")), data).unwrap();
+        assert!(
+            common::imod_cmd("raw2mrc")
+                .current_dir(&dir)
+                .args(["-x", "16", "-y", "12", "-z", "2", "-t", "rgb"])
+                .args([format!("{name}.raw"), format!("{name}.mrc")])
+                .output()
+                .unwrap()
+                .status
+                .success()
+        );
+    }
+    let output = common::imod_cmd("clip")
+        .current_dir(&dir)
+        .args(["standev", "a.mrc", "b.mrc", "sd.mrc"])
+        .output()
+        .unwrap();
+    assert!(output.status.success());
+    let sd = std::fs::read(dir.join("sd.mrc")).unwrap();
+    let data = &sd[sd.len() - count..];
+    for index in 0..count {
+        let expected = (a[index] as f64 - b[index] as f64).abs() / 2f64.sqrt();
+        assert!(
+            (data[index] as f64 - expected).abs() <= 1.0,
+            "byte {index} (channel {}): {} vs {expected}",
+            index % 3,
+            data[index]
+        );
+    }
+    let _ = std::fs::remove_dir_all(&dir);
 }

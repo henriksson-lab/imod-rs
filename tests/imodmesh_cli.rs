@@ -6,9 +6,10 @@
 //! contour in it is written by IMOD rather than by this crate.  With
 //! `IMOD_NATIVE_IMODMESH` pointing at a native `imodmesh`, every case in the
 //! matrix runs on both sides and stdout, stderr, exit status and the written
-//! model bytes are compared, masking only the regions `CLAUDE.md` records as
-//! unmatchable: `Imod.name[128]` past what `imodDefault` writes, and the
-//! `MINX` chunk's `oscale`/`orot`.
+//! model bytes are compared.  Where native writes residue (`Imod.name[128]`
+//! past what `imodDefault` writes, the `MINX` chunk's `oscale`/`orot`;
+//! `BUGS.md` §2) ours must hold the defined value
+//! (`common::reconcile_uninitialised`).
 //!
 //! `IMOD_NATIVE_WMOD2IMOD` (or a native `wmod2imod` beside `IMOD_NATIVE_IMODMESH`)
 //! is what builds the fixtures; without it the suite is skipped, because a
@@ -198,31 +199,6 @@ fn cases() -> Vec<(&'static str, &'static str, Vec<&'static str>)> {
     ]
 }
 
-/// Blank the regions a native model comparison cannot match: the model name
-/// field past the 13 bytes `imodDefault` writes (native leaks heap residue
-/// there) and, when present, the `MINX` chunk's uninitialised `oscale` and
-/// `orot`.
-fn mask(bytes: &[u8]) -> Vec<u8> {
-    let mut masked = bytes.to_vec();
-    if masked.len() > 136 && masked.starts_with(b"IMODV1.2") {
-        masked[8 + 13..136].fill(0);
-    }
-    let mut index = 0;
-    while index + 80 <= masked.len() {
-        if &masked[index..index + 4] == b"MINX" {
-            // After the 4-byte id and the 4-byte chunk size comes `IrefImage`
-            // in field order: oscale, otrans, orot, cscale, ctrans, crot.
-            let base = index + 8;
-            masked[base..base + 12].fill(0); // oscale
-            masked[base + 24..base + 36].fill(0); // orot
-            index += 80;
-        } else {
-            index += 1;
-        }
-    }
-    masked
-}
-
 /// Build the fixture models with a native `wmod2imod`.  Returns `None` when no
 /// native binary is available, in which case the suite is skipped rather than
 /// falling back on a model this crate wrote.
@@ -371,8 +347,8 @@ fn native_comparison_matches_every_case() {
         match (native_file, rust_file) {
             (Some(native_bytes), Some(rust_bytes)) => {
                 assert_eq!(
-                    mask(&native_bytes),
-                    mask(&rust_bytes),
+                    common::reconcile_uninitialised(&rust_bytes, &native_bytes),
+                    rust_bytes,
                     "{name} model bytes differ"
                 );
             }

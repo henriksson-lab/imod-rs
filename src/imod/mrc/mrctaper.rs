@@ -1,200 +1,282 @@
 //! Translation of `IMOD/mrc/mrctaper.c`.
 //!
-//! The command uses an owned [`Islice`] rather than the source's malloc buffer;
-//! MRC handles remain only at the read/write boundary.
+//! Retranslated statement by statement (2026-09-26) after the body-fidelity
+//! audit found an invented parser (`str::parse`, a `parse_range` helper and
+//! four error messages the source does not have) and `eprintln!` in place of
+//! `exitError`.
 
 use std::io::Write;
 
-use crate::imod::libcfshr::b3dutil::{ImodFile, b3d_output_file_type, imod_prog_name};
-use crate::imod::libcfshr::islice::{slice_create, slice_mode_if_real};
+use crate::imod::clip::clip::{ScanArg, sscanf};
+use crate::imod::libcfshr::b3dutil::{
+    CArg, ImodFile, b3d_output_file_type, c_format_bytes, imod_copyright, imod_prog_name,
+};
+use crate::imod::libcfshr::islice::{Islice, MrcData, slice_init, slice_mode_if_real};
+use crate::imod::libcfshr::parse_params::{exit_error, set_standard_exit_prefix};
 use crate::imod::libcfshr::taperatfill::slice_taper_at_fill;
-use crate::imod::libiimod::iimage::IIFILE_TIFF;
+use crate::imod::libiimod::iimage::{IIFILE_TIFF, ii_fclose, ii_fopen};
 use crate::imod::libiimod::mrcfiles::{
-    MrcHeader, mrc_head_label, mrc_head_read, mrc_head_write, mrc_init_output_header,
-    mrc_read_slice, mrc_write_slice,
+    MrcHeader, mrc_getdcsize, mrc_head_label, mrc_head_read, mrc_head_write,
+    mrc_init_output_header, mrc_read_slice, mrc_write_slice,
 };
 
 const DEFAULT_TAPER: i32 = 16;
 
-/// `mrctaper_help` (`mrctaper.c:23`).
+/// `mrctaper_help` (`mrctaper.c:23`).  The usage line goes to stderr and the
+/// rest to stdout, as in the source.
 pub fn mrctaper_help(name: &str) {
-    eprintln!("Usage: {name} [-i] [-t #] [-z min,max] input_file [output_file]");
-    println!("Options:");
-    println!("\t-i\tTaper inside (default is outside).");
-    println!("\t-t #\tTaper over the given # of pixels (default {DEFAULT_TAPER} or 1% of size).");
-    println!("\t-z min,max\tDo only sections between min and max.");
-    println!("\tWith no output file, images are written back to input file.");
+    let _ = ImodFile::Stderr.write_all(&c_format_bytes(
+        "Usage: %s [-i] [-t #] [-z min,max] input_file [output_file]\n",
+        &[CArg::Bytes(name.as_bytes())],
+    ));
+    let _ = ImodFile::Stdout.write_all(b"Options:\n");
+    let _ = ImodFile::Stdout.write_all(b"\t-i\tTaper inside (default is outside).\n");
+    let _ = ImodFile::Stdout.write_all(&c_format_bytes(
+        "\t-t #\tTaper over the given # of pixels (default %d or 1%% of size).\n",
+        &[CArg::Int(DEFAULT_TAPER as i64)],
+    ));
+    let _ = ImodFile::Stdout.write_all(b"\t-z min,max\tDo only sections between min and max.\n");
+    let _ = ImodFile::Stdout
+        .write_all(b"\tWith no output file, images are written back to input file.\n");
 }
 
-fn parse_range(value: &str) -> Option<(i32, i32)> {
-    let (first, second) = value.split_once(',').or_else(|| value.split_once(':'))?;
-    Some((first.trim().parse().ok()?, second.trim().parse().ok()?))
-}
+/// C `main` in `mrctaper.c:34`, returning its process status for the dispatcher.
+pub fn mrctaper(argv: &[String]) -> i32 {
+    let argc = argv.len();
+    let mut inside = false;
+    let mut ntaper = DEFAULT_TAPER;
+    let mut taper_entered = false;
+    let mut zmin = -1_i32;
+    let mut zmax = -1_i32;
+    let progname = imod_prog_name(argv.first().map_or("mrctaper", |a| a.as_str()));
+    set_standard_exit_prefix(progname.as_bytes());
 
-/// C `main` in `mrctaper.c`, returning its process status for the dispatcher.
-pub fn mrctaper(arguments: &[String]) -> i32 {
-    let progname = arguments
-        .first()
-        .map(|argument| imod_prog_name(argument))
-        .unwrap_or_else(|| "mrctaper".to_owned());
-    if arguments.len() < 2 {
+    // `mrctaper.c:52`: `argv[1][0] == '-' && argv[1][0] == 'h'` can never be
+    // true, so `-h` falls through to the illegal-option branch below.
+    #[allow(clippy::nonminimal_bool)]
+    if argc < 2
+        || (argv[1].as_bytes().first() == Some(&b'-') && argv[1].as_bytes().first() == Some(&b'h'))
+    {
+        let _ = ImodFile::Stderr.write_all(&c_format_bytes(
+            "%s version %s\n",
+            &[CArg::Bytes(progname.as_bytes()), CArg::Bytes(b"5.2.17")],
+        ));
+        imod_copyright();
         mrctaper_help(&progname);
         return 3;
     }
 
-    let (mut inside, mut ntaper, mut taper_entered, mut zmin, mut zmax) =
-        (false, DEFAULT_TAPER, false, -1, -1);
-    let mut index = 1;
-    while let Some(argument) = arguments.get(index) {
-        if !argument.starts_with('-') || argument == "-" {
+    let mut i = 1;
+    while i < argc {
+        let arg = argv[i].as_bytes();
+        if arg.first() == Some(&b'-') {
+            match arg.get(1).copied().unwrap_or(0) {
+                b'i' => inside = true,
+                b't' => {
+                    taper_entered = true;
+                    if arg.get(2).copied().unwrap_or(0) != 0 {
+                        sscanf(&argv[i], "-t%d", &mut [ScanArg::Int(&mut ntaper)]);
+                    } else {
+                        i += 1;
+                        // `sscanf(argv[++i], ...)` past the last argument
+                        // dereferences `argv[argc]`, a NULL: the source
+                        // crashes.  Not reproducible; refuse with the usage.
+                        let Some(value) = argv.get(i) else {
+                            mrctaper_help(&progname);
+                            return 3;
+                        };
+                        sscanf(value, "%d", &mut [ScanArg::Int(&mut ntaper)]);
+                    }
+                }
+                b'z' => {
+                    if arg.get(2).copied().unwrap_or(0) != 0 {
+                        sscanf(
+                            &argv[i],
+                            "-z%d%*c%d",
+                            &mut [ScanArg::Int(&mut zmin), ScanArg::Int(&mut zmax)],
+                        );
+                    } else {
+                        i += 1;
+                        let Some(value) = argv.get(i) else {
+                            mrctaper_help(&progname);
+                            return 3;
+                        };
+                        sscanf(
+                            value,
+                            "%d%*c%d",
+                            &mut [ScanArg::Int(&mut zmin), ScanArg::Int(&mut zmax)],
+                        );
+                    }
+                }
+                _ => {
+                    let _ = ImodFile::Stdout.write_all(&c_format_bytes(
+                        "ERROR: %s - illegal option\n",
+                        &[CArg::Bytes(progname.as_bytes())],
+                    ));
+                    mrctaper_help(&progname);
+                    return 1;
+                }
+            }
+        } else {
             break;
         }
-        match argument.as_bytes().get(1).copied() {
-            Some(b'i') if argument.len() == 2 => inside = true,
-            Some(b't') => {
-                taper_entered = true;
-                let value = if argument.len() > 2 {
-                    &argument[2..]
-                } else {
-                    index += 1;
-                    let Some(value) = arguments.get(index) else {
-                        eprintln!("ERROR: {progname} - missing taper width");
-                        return 1;
-                    };
-                    value
-                };
-                let Ok(value) = value.parse() else {
-                    eprintln!("ERROR: {progname} - invalid taper width");
-                    return 1;
-                };
-                ntaper = value;
-            }
-            Some(b'z') => {
-                let value = if argument.len() > 2 {
-                    &argument[2..]
-                } else {
-                    index += 1;
-                    let Some(value) = arguments.get(index) else {
-                        eprintln!("ERROR: {progname} - missing section range");
-                        return 1;
-                    };
-                    value
-                };
-                let Some((minimum, maximum)) = parse_range(value) else {
-                    eprintln!("ERROR: {progname} - invalid section range");
-                    return 1;
-                };
-                zmin = minimum;
-                zmax = maximum;
-            }
-            _ => {
-                println!("ERROR: {progname} - illegal option");
-                mrctaper_help(&progname);
-                return 1;
-            }
-        }
-        index += 1;
+        i += 1;
     }
-    let positional = &arguments[index..];
-    if positional.is_empty() || positional.len() > 2 {
+
+    if (i as isize) < argc as isize - 2 || i == argc {
         mrctaper_help(&progname);
         return 3;
     }
+
     if !(1..=127).contains(&ntaper) {
-        eprintln!("ERROR: {progname} - Taper must be between 1 and 127.");
-        return 1;
+        exit_error(b"Taper must be between 1 and 127.");
     }
 
-    let input_name = &positional[0];
-    let writing_input = positional.len() == 1;
-    let Some(mut input) = ImodFile::open(input_name, if writing_input { "rb+" } else { "rb" })
-    else {
-        eprintln!("ERROR: {progname} - Opening {input_name}.");
-        return 1;
+    let fin = if i < argc - 1 {
+        i += 1;
+        ii_fopen(argv[i - 1].as_bytes(), "rb")
+    } else {
+        i += 1;
+        ii_fopen(argv[i - 1].as_bytes(), "rb+")
     };
-    let mut input_header = MrcHeader::default();
-    if mrc_head_read(&mut input, &mut input_header) != 0 {
-        eprintln!("ERROR: {progname} - Can't Read Input File Header.");
-        return 1;
+    let Some(mut fin) = fin else {
+        exit_error(&c_format_bytes(
+            "Opening %s.",
+            &[CArg::Bytes(argv[i - 1].as_bytes())],
+        ));
+    };
+    let mut hdata = MrcHeader::default();
+    if mrc_head_read(&mut fin, &mut hdata) != 0 {
+        exit_error(b"Can't Read Input File Header.");
     }
-    if slice_mode_if_real(input_header.mode) < 0 {
-        eprintln!("ERROR: {progname} - Can operate only on byte, integer and real data.");
-        return 1;
+
+    if slice_mode_if_real(hdata.mode) < 0 {
+        exit_error(b"Can operate only on byte, integer and real data.");
     }
+
     if !taper_entered {
-        ntaper = ((input_header.nx + input_header.ny) / 200).clamp(DEFAULT_TAPER, 127);
-        println!("Tapering over {ntaper} pixels");
+        ntaper = (hdata.nx + hdata.ny) / 200;
+        // B3DMIN(127, B3DMAX(DEFAULT_TAPER, ntaper))
+        let m = if DEFAULT_TAPER > ntaper {
+            DEFAULT_TAPER
+        } else {
+            ntaper
+        };
+        ntaper = if 127 < m { 127 } else { m };
+        let _ = ImodFile::Stdout.write_all(&c_format_bytes(
+            "Tapering over %d pixels\n",
+            &[CArg::Int(ntaper as i64)],
+        ));
     }
+
     if zmin == -1 && zmax == -1 {
         zmin = 0;
-        zmax = input_header.nz - 1;
+        zmax = hdata.nz - 1;
     } else {
-        zmin = zmin.max(0);
-        zmax = zmax.min(input_header.nz - 1);
+        if zmin < 0 {
+            zmin = 0;
+        }
+        if zmax >= hdata.nz {
+            zmax = hdata.nz - 1;
+        }
     }
 
-    let (mut output, mut output_header, section_offset) =
-        if let Some(output_name) = positional.get(1) {
-            let Some(output) = ImodFile::open(output_name, "wb") else {
-                eprintln!("ERROR: {progname} - Opening {output_name}.");
-                return 1;
-            };
-            let mut header = input_header.clone();
-            mrc_init_output_header(&mut header);
-            header.nz = zmax + 1 - zmin;
-            header.mz = header.nz;
-            header.zlen = header.nz as f32;
-            (output, header, zmin)
-        } else {
-            if b3d_output_file_type() == IIFILE_TIFF {
-                eprintln!("ERROR: {progname} - Cannot write to an existing TIFF file.");
-                return 1;
-            }
-            (input.clone(), input_header.clone(), 0)
+    // `hptr` is `&hout` for a separate output and `&hdata` in place; `None`
+    // here stands for the latter so that the one header is used for both the
+    // reads and the writes, as the source does.
+    let mut hout: Option<MrcHeader> = None;
+    let mut fout;
+    let secofs;
+    if i < argc {
+        let Some(opened) = ii_fopen(argv[i].as_bytes(), "wb") else {
+            exit_error(&c_format_bytes(
+                "Opening %s.",
+                &[CArg::Bytes(argv[i].as_bytes())],
+            ));
         };
-    let Some(mut slice) = slice_create(input_header.nx, input_header.ny, input_header.mode) else {
-        eprintln!("ERROR: {progname} - Couldn't get memory for slice.");
-        return 1;
+        fout = opened;
+        let mut header = hdata.clone();
+        header.fp = Some(fout.clone());
+
+        /* DNM: eliminate extra header info in the output, and mark it as not swapped  */
+        mrc_init_output_header(&mut header);
+        header.nz = zmax + 1 - zmin;
+        header.mz = header.nz;
+        header.zlen = header.nz as f32;
+        hout = Some(header);
+        secofs = zmin;
+    } else {
+        if b3d_output_file_type() == IIFILE_TIFF {
+            exit_error(b"Cannot write to an existing TIFF file.");
+        }
+        fout = fin.clone();
+        secofs = 0;
+    }
+
+    let mut dsize = 0;
+    let mut csize = 0;
+    mrc_getdcsize(hdata.mode, &mut dsize, &mut csize);
+
+    let bsize = hdata.nx * hdata.ny;
+    let Some(buf) = MrcData::try_zeroed(hdata.mode, (dsize * csize * bsize) as usize) else {
+        exit_error(b"Couldn't get memory for slice.");
     };
-    for section in zmin..=zmax {
-        print!("\rDoing section #{section:4}");
-        let _ = std::io::stdout().flush();
-        if mrc_read_slice(
-            slice.data.bytes_mut(),
-            &mut input,
-            &mut input_header,
-            section,
-            b'Z',
-        ) != 0
-        {
-            eprintln!("\nERROR: {progname} - Reading section {section}.");
-            return 1;
+    let mut slice = Islice {
+        data: MrcData::default(),
+        xsize: 0,
+        ysize: 0,
+        mode: 0,
+        csize: 0,
+        dsize: 0,
+        min: 0.,
+        max: 0.,
+        mean: 0.,
+        index: 0,
+        cval: [0.; 4],
+    };
+    let _ = slice_init(&mut slice, hdata.nx, hdata.ny, hdata.mode, buf);
+
+    let mut i = zmin;
+    while i <= zmax {
+        let _ = ImodFile::Stdout.write_all(&c_format_bytes(
+            "\rDoing section #%4d",
+            &[CArg::Int(i as i64)],
+        ));
+        let _ = ImodFile::Stdout.flush();
+        if mrc_read_slice(slice.data.bytes_mut(), &mut fin, &mut hdata, i, b'Z') != 0 {
+            exit_error(&c_format_bytes(
+                "Reading section %d.",
+                &[CArg::Int(i as i64)],
+            ));
         }
+
         if slice_taper_at_fill(&mut slice, ntaper, inside) != 0 {
-            eprintln!("\nERROR: {progname} - Can't get memory for taper operation.");
-            return 1;
+            exit_error(b"Can't get memory for taper operation.");
         }
-        if mrc_write_slice(
-            slice.data.bytes(),
-            &mut output,
-            &mut output_header,
-            section - section_offset,
-            b'Z',
-        ) != 0
-        {
-            eprintln!("\nERROR: {progname} - Writing section {section}.");
-            return 1;
+
+        let hptr = match hout.as_mut() {
+            Some(h) => h,
+            None => &mut hdata,
+        };
+        if mrc_write_slice(slice.data.bytes(), &mut fout, hptr, i - secofs, b'Z') != 0 {
+            exit_error(&c_format_bytes(
+                "Writing section %d.",
+                &[CArg::Int(i as i64)],
+            ));
         }
+        i += 1;
     }
-    println!("\nDone!");
-    mrc_head_label(
-        &mut output_header,
-        b"mrctaper: Image tapered down to fill value at edges",
-    );
-    if mrc_head_write(&mut output, &mut output_header) != 0 {
-        eprintln!("ERROR: {progname} - Writing output header.");
-        return 1;
-    }
+    let _ = ImodFile::Stdout.write_all(b"\nDone!\n");
+
+    let hptr = match hout.as_mut() {
+        Some(h) => h,
+        None => &mut hdata,
+    };
+    mrc_head_label(hptr, b"mrctaper: Image tapered down to fill value at edges");
+
+    mrc_head_write(&mut fout, hptr);
+    ii_fclose(&mut fout);
+
     0
 }
 
@@ -265,13 +347,5 @@ mod tests {
         assert_ne!(tapered, plane);
         let _ = std::fs::remove_file(input_path);
         let _ = std::fs::remove_file(output_path);
-    }
-
-    #[test]
-    fn rejects_invalid_taper_width_before_opening_input() {
-        assert_eq!(
-            mrctaper(&["mrctaper".into(), "-t0".into(), "missing.mrc".into()]),
-            1
-        );
     }
 }

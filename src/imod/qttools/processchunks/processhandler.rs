@@ -220,7 +220,12 @@ impl ProcessHandler {
             self.command = processchunks.get_queue_command().to_owned();
         } else {
             //Local host command
-            self.command = "python".to_owned();
+            // Changed (owner, 2026-09-26): `python` -> this binary as
+            // `runcom` (the in-process command file runner), its arguments
+            // set by `Processchunks::makePyFile` (`set_runcom_param_list`)
+            self.command = std::env::current_exe()
+                .map(|path| path.to_string_lossy().into_owned())
+                .unwrap_or_else(|_| "imod".to_owned());
         }
         self.init_process();
     }
@@ -260,11 +265,17 @@ impl ProcessHandler {
                     "R".to_owned(),
                     jobs.get_root(index).to_owned(),
                 ]);
-            } else {
-                self.param_list
-                    .extend(["-u".to_owned(), jobs.get_py_file_name(index)]);
             }
+            // A local job's arguments (`-u` and the .py file for `python` in
+            // the source) are those of `runcom`, set by `makePyFile`
         }
+    }
+
+    /// Rust-only: the arguments of `runcom` for a local job, from
+    /// `Processchunks::makePyFile` (its `vmstopy` options, the command file
+    /// and the log).
+    pub fn set_runcom_param_list(&mut self, param_list: Vec<String>) {
+        self.param_list = param_list;
     }
 
     /// C++ `ProcessHandler::setFlagNotDone`.
@@ -1093,10 +1104,19 @@ impl ProcessHandler {
         process pipe count would be 6.  In that case the total number of CPUs
         allowed (Processchunks::setupMachineList::numCpusLimit) would have to be
         reduced.*/
+        let local_runcom = !queue && command.is_none();
         let mut process = match &command {
             Some(command) => Command::new(command),
             None => Command::new(&self.command),
         };
+        // A local job is this binary run as `runcom` (see `setup`); the
+        // launcher dispatches on the base name of `argv[0]`
+        if local_runcom {
+            std::os::unix::process::CommandExt::arg0(
+                &mut process,
+                std::path::Path::new(&self.command).with_file_name("runcom"),
+            );
+        }
         match &param_list {
             Some(param_list) => {
                 process.args(param_list);
@@ -1113,7 +1133,10 @@ impl ProcessHandler {
             })) {
                 process.stdout(Stdio::from(file));
             }
-            if let Ok(file) = fs::File::open(unsafe {
+            if local_runcom {
+                // No .py file to hook stdin to; the runner never reads it
+                process.stdin(Stdio::null());
+            } else if let Ok(file) = fs::File::open(unsafe {
                 (*self.processchunks)
                     .get_com_file_jobs()
                     .get_py_file_name(self.com_file_job_index as usize)

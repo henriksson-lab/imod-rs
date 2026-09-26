@@ -48,6 +48,9 @@ use crate::imod::libcfshr::regression::multregress;
 /// - `call polyfit` discards the function result, as the source does.
 /// - `multRegress` resolves to the `multregress_` wrapper
 ///   (`regression.c:317`), which subtracts 1 from `wgtCol`.
+/// - Fixed in translation (2026-09-26, `BUGS.md`): a failed `multRegress`
+///   leaves the positions it would have fitted at their current values,
+///   where the source evaluates an uninitialised `c`.
 #[allow(clippy::too_many_arguments)]
 pub fn smoothgrid(
     dxgrid: &mut [f32],
@@ -401,7 +404,7 @@ pub fn smoothgrid(
                 }
                 //
                 // Solve for dx, dy, den as function of terms and compute fitted values
-                multregress(
+                let regress_err = multregress(
                     &xr,
                     &MSIZ,
                     &1,
@@ -416,6 +419,21 @@ pub fn smoothgrid(
                     &mut sd,
                     &mut ssd,
                 );
+                // Fixed in translation (2026-09-26, `BUGS.md`): the source
+                // never tests `multRegress` and, when the fit is singular
+                // (return 3 before `cons` is written), evaluates an
+                // uninitialised `c` with a partly reduced `bb`.  A position
+                // whose fit fails keeps its current (outlier-replaced) value.
+                if regress_err != 0 {
+                    for ix in ixfitstr..=ixfitend {
+                        for iy in iyfitstr..=iyfitend {
+                            dxnew[n(ix, iy)] = dxgrid[g(ix, iy)];
+                            dynew[n(ix, iy)] = dygrid[g(ix, iy)];
+                            denew[n(ix, iy)] = ddengrid[g(ix, iy)];
+                        }
+                    }
+                    continue;
+                }
                 for ix in ixfitstr..=ixfitend {
                     for iy in iyfitstr..=iyfitend {
                         poly_term(ix - ixcen, iy - iycen, norder, &mut vect);
@@ -446,4 +464,51 @@ pub fn smoothgrid(
         }
     }
     //
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// `BUGS.md` "`smoothgrid` ignores `multRegress` failure": a 3x3 grid
+    /// fitted at order 2 with a 2x2 window has 4 points for 5 terms, so every
+    /// fit is singular.  The defined behaviour keeps every value as it was
+    /// (criteria set so that no outlier is replaced).
+    #[test]
+    fn singular_fit_keeps_values() {
+        let (nx, ny) = (3, 3);
+        let mut dx: Vec<f32> = (0..9).map(|i| 1.5 + i as f32 * 0.25).collect();
+        let mut dy: Vec<f32> = (0..9).map(|i| -2.0 + (i * i) as f32 * 0.125).collect();
+        let sd: Vec<f32> = (0..9).map(|i| 0.5 + (i % 4) as f32 * 0.01).collect();
+        let mut den: Vec<f32> = (0..9).map(|i| 0.01 * i as f32).collect();
+        let (dx0, dy0, den0) = (dx.clone(), dy.clone(), den.clone());
+        smoothgrid(
+            &mut dx, &mut dy, &sd, &mut den, nx, ny, nx, ny, 1.0e6, 1.0e6, 2, 2, 2, 1, 1,
+        );
+        assert_eq!(dx, dx0);
+        assert_eq!(dy, dy0);
+        assert_eq!(den, den0);
+    }
+
+    /// A determined fit still replaces values with the polynomial: a plane
+    /// in a 3x3 window at order 1 is reproduced.
+    #[test]
+    fn determined_fit_reproduces_plane() {
+        let (nx, ny) = (3, 3);
+        let plane = |i: i32| {
+            let (ix, iy) = (i % 3, i / 3);
+            0.5 * ix as f32 - 0.25 * iy as f32 + 3.0
+        };
+        let mut dx: Vec<f32> = (0..9).map(plane).collect();
+        let mut dy = dx.clone();
+        let sd = vec![1.0_f32; 9];
+        let mut den = vec![0.0_f32; 9];
+        let dx0 = dx.clone();
+        smoothgrid(
+            &mut dx, &mut dy, &sd, &mut den, nx, ny, nx, ny, 1.0e6, 1.0e6, 3, 3, 1, 1, 1,
+        );
+        for (a, b) in dx.iter().zip(dx0.iter()) {
+            assert!((a - b).abs() < 1.0e-4, "{a} vs {b}");
+        }
+    }
 }

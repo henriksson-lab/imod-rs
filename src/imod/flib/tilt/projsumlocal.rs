@@ -2,6 +2,8 @@
 //!
 //! Array and index conventions are described in `super` (`tilt/mod.rs`).
 
+use crate::imod::flib::subrs::compat::gfortran_rt::{maxss, minss};
+
 /// Original `projSumLocal` (`projsumlocal.f90:5`).
 ///
 /// Assesses making a regular step (a jump) in the local reprojection, and then
@@ -14,11 +16,14 @@
 /// `indJump * delX`) convert the integer to single.
 ///
 /// `ind = max(1., min(float(numWarpDelz), xx / dxWarpDelz))` is gfortran's
-/// `MIN`/`MAX`, whose result with a NaN operand is unspecified; it is written
-/// here as `f32::min`/`max`, which agree with it for every non-NaN value.
+/// `MIN`/`MAX`, written as `gfortran_rt::{minss,maxss}` in the operand order of
+/// the reference object.
 ///
-/// If `numJump <= 0` while `tryJump` stays true the source's `do while` never
-/// terminates (nothing in the loop changes); that is reproduced, not guarded.
+/// Fixed in translation (2026-09-26, `BUGS.md`): if `numJump <= 0` while
+/// `tryJump` stays true the source's `do while` never terminates (nothing in
+/// the loop changes) — with the caller's `zJump` that happens at tilt angles
+/// of 90 degrees or more.  Here a pass that can make no jump ends the loop,
+/// which changes nothing for any input on which the source terminates.
 #[allow(clippy::too_many_arguments)]
 pub fn proj_sum_local(
     xx: &mut f32,
@@ -54,11 +59,18 @@ pub fn proj_sum_local(
         let xx_good = *xx;
         let yy_good = *yy;
         let zz_good = *zz;
-        let mut ind = fortran_int!(f32: 1f32.max((num_warp_delz as f32).min(*xx / dx_warp_delz)));
+        // `max(1., min(float(numWarpDelz), xx / dxWarpDelz))`
+        // (`projsumlocal.f90:26`): `minss xx / dxWarpDelz, float(numWarpDelz)`
+        // then `maxss ., 1.` in the reference object.
+        let mut ind =
+            fortran_int!(f32: maxss(minss(*xx / dx_warp_delz, num_warp_delz as f32), 1f32));
         let del_z = warp_delz[(ind - 1) as usize];
         let mut num_jump = fortran_int!(f32: z_jump / del_z);
         if *zz + z_jump > ithick_reproj as f32 - ycen_adj - 1f32 {
             num_jump = fortran_int!(f32: (ithick_reproj as f32 - ycen_adj - 1f32 - *zz) / del_z);
+            try_jump = false;
+        }
+        if num_jump <= 0 {
             try_jump = false;
         }
         if num_jump > 0 {
@@ -224,5 +236,44 @@ pub fn loaded_projecting_point(
             if_done = 1;
         }
         iter += 1;
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// `BUGS.md` "`projSumLocal` never exits": with `zJump <= 0` (tilt angles
+    /// of 90 degrees or more) nothing in the source's loop changes.  The
+    /// defined behaviour ends the loop, leaving position and sum unchanged.
+    #[test]
+    fn no_jump_possible_returns() {
+        let (mut xx, mut yy, mut zz, mut sum) = (5.0_f32, 3.0_f32, -4.0_f32, 1.25_f64);
+        let empty: [f32; 0] = [];
+        proj_sum_local(
+            &mut xx,
+            &mut yy,
+            &mut zz,
+            &mut sum,
+            5.0,
+            3.0,
+            &empty,
+            &empty,
+            &empty,
+            &empty,
+            &empty,
+            1,
+            1.0,
+            &[1.0],
+            20,
+            0.5,
+            10,
+            1,
+            8,
+            100,
+            -2.0,
+            0.0,
+        );
+        assert_eq!((xx, yy, zz, sum), (5.0, 3.0, -4.0, 1.25));
     }
 }

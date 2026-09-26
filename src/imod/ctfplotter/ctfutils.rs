@@ -143,9 +143,13 @@ pub fn read_defocus_file(
     let mut read_astig = false;
     let mut read_phase = false;
     let mut read_cuton = false;
-    let mut langtmp: f32;
-    let mut hangtmp: f32;
-    let mut defoctmp: f32;
+    // The source resets only the four trailing values per line
+    // (`ctfutils.cpp:86`); these three keep the previous line's value when a
+    // `sscanf` stops short.  The C leaves them uninitialised before the first
+    // line.
+    let mut langtmp: f32 = 0.;
+    let mut hangtmp: f32 = 0.;
+    let mut defoctmp: f32 = 0.;
     let mut defoc2tmp: f32;
     let mut astigtmp: f32;
     let mut phasetmp: f32;
@@ -173,9 +177,6 @@ pub fn read_defocus_file(
                 astigtmp = 0.;
                 phasetmp = 0.;
                 cutontmp = 0.;
-                langtmp = 0.;
-                hangtmp = 0.;
-                defoctmp = 0.;
                 let end = line.iter().position(|&b| b == 0).unwrap_or(line.len());
                 let text = String::from_utf8_lossy(&line[..end]).into_owned();
                 if read_astig && read_phase && read_cuton {

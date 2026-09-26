@@ -17,26 +17,6 @@ fn fixture_dir() -> PathBuf {
     Path::new(env!("CARGO_MANIFEST_DIR")).join("fixtures/imodtrans")
 }
 
-/// Blank the one region native cannot reproduce: when `-i` gives a model with
-/// no `IrefImage` one, `imodtrans.c:399-404` `malloc`s it and copies a stack
-/// `IrefImage` whose `orot` and `oscale` were never set, so the `MINX` chunk's
-/// `oscale` and `orot` vary between two native runs.
-fn mask(bytes: &[u8]) -> Vec<u8> {
-    let mut masked = bytes.to_vec();
-    let mut index = 0;
-    while index + 80 <= masked.len() {
-        if &masked[index..index + 4] == b"MINX" {
-            let base = index + 8;
-            masked[base..base + 12].fill(0);
-            masked[base + 24..base + 36].fill(0);
-            index += 80;
-        } else {
-            index += 1;
-        }
-    }
-    masked
-}
-
 fn scratch(name: &str) -> PathBuf {
     let dir =
         std::env::temp_dir().join(format!("imod-rs-imodtrans-{}-{}", std::process::id(), name));
@@ -87,7 +67,10 @@ fn every_case_matches_native_golden() {
         let written = std::fs::read(dir.join("out.mod")).ok();
         match (golden, written) {
             (None, None) => {}
-            (Some(g), Some(w)) if mask(&g) == mask(&w) => {}
+            // `MINX` `oscale`/`orot` are native residue when `-i` supplies no
+            // `IrefImage` (`imodtrans.c:93`, `:404`); reconciled against the
+            // defined identity (`BUGS.md` §2).
+            (Some(g), Some(w)) if common::reconcile_uninitialised(&w, &g) == w => {}
             (g, w) => failures.push(format!(
                 "{name}: output differs (native {:?} bytes, ours {:?} bytes)",
                 g.map(|b| b.len()),
@@ -158,5 +141,24 @@ fn backup_and_usage_exits() {
         .output()
         .unwrap();
     assert_eq!(output.status.code(), Some(1));
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+/// BUGS.md, fixed in translation: the `-R` conflict message names `-Y`,
+/// the option that exists, not the source's nonexistent `-F`.  (The other
+/// `imodtrans` fix, `-tx`/`-ty` applied once with `-2 file -l N`, is the
+/// `x2lt` row of `cases.tsv`, whose golden is native run with half the shift.)
+#[test]
+fn r_conflict_message_names_y() {
+    let dir = scratch("r-message");
+    let output = common::imod_cmd("imodtrans")
+        .current_dir(&dir)
+        .args(["-R", "1", "-Y", "multi.mod", "out2.mod"])
+        .output()
+        .unwrap();
+    assert_eq!(output.status.code(), Some(1));
+    let text = String::from_utf8_lossy(&output.stdout).into_owned()
+        + &String::from_utf8_lossy(&output.stderr);
+    assert!(text.contains("-R with either -Y or -T"), "{text}");
     let _ = std::fs::remove_dir_all(&dir);
 }

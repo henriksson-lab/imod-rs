@@ -42,7 +42,8 @@
 //!   before they are read on every path the differential reaches except two:
 //!   `mMinzDelzNearZero` (set to 0 only when `ShiftsNearZeroTilt` is absent,
 //!   `beadtrack.cpp:673`) and `mMaxDelzNearZero` (never set unless
-//!   `SetIndexedParameter -5` is given).  They start at 0 here; see `BUGS.md`.
+//!   `SetIndexedParameter -5` is given).  Fixed in translation (2026-09-26,
+//!   `BUGS.md`): they start at 0.
 //!
 //! # Arithmetic
 //!
@@ -991,7 +992,7 @@ impl BeadTrack {
         let mut sdmin: f32;
         let mut sdmax: f32;
         // `sdavg` is uninitialised in the source when no edge SD was saved;
-        // 0 here (see `BUGS.md`).
+        // fixed in translation: it starts at 0 (see `BUGS.md`).
         let mut sdavg: f32 = 0.;
         let mut sdmed: f32;
         let mut sdmean: f32;
@@ -1368,19 +1369,18 @@ impl BeadTrack {
         let seed_name = String::from_utf8_lossy(&model_file_bytes).into_owned();
         if read_fort_model(&seed_name, &mut self.fm).is_err() {
             let tmp = fort_mod_open_error();
-            // `beadtrack.cpp:404` passes one argument to a format with two
-            // `%s`; the second reads whatever the varargs area holds (see
-            // `BUGS.md`).  The first is the open error text; for the second the
-            // reference build's register held NULL in every run observed, which
-            // glibc prints as `(null)`.
+            // Fixed in translation (2026-09-26, `BUGS.md`): `beadtrack.cpp:404`
+            // passes only the error text to a format with two `%s`, so native
+            // prints the error where the file name belongs and `(null)` after
+            // it.  The file name and then the error are printed here.
             exit_error_fmt!(
                 "Reading seed model file %s: %s",
+                CArg::Str(&seed_name),
                 CArg::Str(if tmp.is_empty() {
                     "no reason returned"
                 } else {
                     &tmp
-                }),
-                CArg::Str("(null)")
+                })
             );
         }
         if self.fm.n_point == 0 || self.fm.max_mod_obj == 0 {
@@ -1642,7 +1642,8 @@ impl BeadTrack {
                     2 * (((xtmp * self.m_ny_box as f32 / box_geo_mean) as f64 / 2.) as i32);
             }
             printf!(
-                "Box size in X and Y adjusted for binning to: %d %d",
+                // Fixed in translation (`BUGS.md`): the source has no newline.
+                "Box size in X and Y adjusted for binning to: %d %d\n",
                 CArg::Int(self.m_nx_box as i64),
                 CArg::Int(self.m_ny_box as i64)
             );
@@ -1819,7 +1820,8 @@ impl BeadTrack {
                 self.m_rad_max_fit *= param_scale;
                 self.m_res_diff_min *= param_scale;
                 printf!(
-                    "/nTo compensate for binning, parameters were scaled by%6.3f:\n	Distance rescue criterion -> %6.2f	 Post-fit rescue criterion -> %6.2f\n	Max rescue distance ->%6.2f		Residual criterion for deletion ->%7.3f\n",
+                    // Fixed in translation (`BUGS.md`): the source has `/n` for `\n`.
+                    "\nTo compensate for binning, parameters were scaled by%6.3f:\n	Distance rescue criterion -> %6.2f	 Post-fit rescue criterion -> %6.2f\n	Max rescue distance ->%6.2f		Residual criterion for deletion ->%7.3f\n",
                     CArg::Dbl(param_scale as f64),
                     CArg::Dbl(self.m_dist_crit as f64),
                     CArg::Dbl(self.m_fit_dist_crit as f64),
@@ -2154,12 +2156,14 @@ impl BeadTrack {
                 ran_frac = limcx_bound as f32 / self.tc.num_obj_do as f32;
                 i = 1;
                 while i <= self.tc.num_obj_do {
-                    // `rand() / RAND_MAX` is an integer quotient: 1 only when
-                    // `rand()` returns `RAND_MAX`.  `b3drand` returns that draw
-                    // divided by `RAND_MAX` in `float`, which reaches 1.0 for the
-                    // top 64 of 2^31 values (see `BUGS.md`/`TODO.md`).
-                    let quotient: i32 = if b3drand() >= 1.0 { 1 } else { 0 };
-                    if (quotient as f32) < ran_frac && num_bound < limcx_bound {
+                    // Fixed in translation (2026-09-26, `BUGS.md`): the source's
+                    // `rand() / RAND_MAX` is an integer quotient, 0 except for one
+                    // draw, so its "random subset" is simply the first
+                    // `limcxBound` beads.  The draw is compared as the fraction
+                    // it is meant to be, `(float)rand() / RAND_MAX` — `b3drand`,
+                    // the same seeded generator — so the subset is the intended
+                    // deterministic random one.
+                    if b3drand() < ran_frac && num_bound < limcx_bound {
                         num_bound += 1;
                         xxtmp[(num_bound - 1) as usize] = xxtmp[(i - 1) as usize];
                         yytmp[(num_bound - 1) as usize] = yytmp[(i - 1) as usize];
@@ -2568,10 +2572,13 @@ impl BeadTrack {
                     iobj_lis_tmp[self.tc.num_obj_do as usize] = self.tc.num_obj_do; // Is now numbered from 0
                     iobj_map[self.tc.num_obj_do as usize] = iobj;
                     self.tc.num_obj_do += 1;
-                    // `tc->xyzSave[(iobj - 1) * 2]` and `[(iobj - 1) * + 1]` as
-                    // written (`beadtrack.cpp:1255-1256`; see `BUGS.md`).
-                    let dx = self.tc.xyz_save[((iobj - 1) * 2) as usize] - xpos;
-                    let dy = self.tc.xyz_save[(iobj - 1) as usize] - ypos;
+                    // Fixed in translation (2026-09-26, `BUGS.md`): the source reads
+                    // `tc->xyzSave[(iobj - 1) * 2]` and `[(iobj - 1) * + 1]`
+                    // (`beadtrack.cpp:1255-1256`), stride 2 and 1 in a stride-3
+                    // array; the bead's own X and Y, `[(iobj - 1) * 3]` and
+                    // `[(iobj - 1) * 3 + 1]`, are read here.
+                    let dx = self.tc.xyz_save[((iobj - 1) * 3) as usize] - xpos;
+                    let dy = self.tc.xyz_save[((iobj - 1) * 3 + 1) as usize] - ypos;
                     seq_dist[(self.tc.num_obj_do - 1) as usize] = dx * dx + dy * dy;
                 }
                 iobj += 1;
@@ -2992,8 +2999,11 @@ impl BeadTrack {
                 if nobj_lists > 1 {
                     i = 1;
                     while i <= self.tc.num_obj_do {
+                        // Fixed in translation (2026-09-26, `BUGS.md`): the source's
+                        // 4-digit format `"%4d"` drops the separator argument
+                        // (`beadtrack.cpp:1588`), so the list runs together.
                         printf!(
-                            if self.m_need4digits { "%4d" } else { "%3d%s" },
+                            if self.m_need4digits { "%4d%s" } else { "%3d%s" },
                             CArg::Int(self.tc.iobj_seq[(i - 1) as usize] as i64),
                             CArg::Str(
                                 if i == self.tc.num_obj_do
@@ -3122,8 +3132,10 @@ impl BeadTrack {
                         );
                         i = 1;
                         while i <= self.m_num_added {
+                            // Fixed in translation (`BUGS.md`): the source's `"%5d"`
+                            // drops the line-break argument (`beadtrack.cpp:1672`).
                             printf!(
-                                if self.m_need4digits { "%5d" } else { "%4d%s" },
+                                if self.m_need4digits { "%5d%s" } else { "%4d%s" },
                                 CArg::Int(self.m_iobj_del[(i - 1) as usize] as i64),
                                 CArg::Str(
                                     if i == self.m_num_added
@@ -3251,18 +3263,16 @@ impl BeadTrack {
         //
         // If CG points gave more alignments with better residual, switch to them
         if self.m_num_sobel_cgeval > 0 {
-            // `formattedError` returns its one static buffer, so both `%s`
-            // arguments of the source's single `printf` point at whichever
-            // call ran last; g++ evaluates the arguments right to left, so
-            // both print the Sobel value (`beadtrack.cpp:1742-1746`, see
-            // `BUGS.md`).
+            // Fixed in translation (2026-09-26, `BUGS.md`): `formattedError`
+            // returns its one static buffer, so both `%s` arguments of the
+            // source's single `printf` print whichever call ran last — the
+            // Sobel value (`beadtrack.cpp:1742-1746`).  Each is printed here.
             let cg_str = formatted_error(
                 pixel_size * image_binned as f32 * self.m_cg_res_sum
                     / self.m_num_sobel_cgeval as f32,
                 0.3,
                 0,
             );
-            let _ = cg_str;
             let sobel_str = formatted_error(
                 pixel_size * image_binned as f32 * self.m_sobel_res_sum
                     / self.m_num_sobel_cgeval as f32,
@@ -3272,7 +3282,7 @@ impl BeadTrack {
             printf!(
                 "\nMean residual %s nm from Sobel centering, %s nm from centroid centering\n  centroid centering better in %3d of %3d fits\n",
                 CArg::Str(&sobel_str),
-                CArg::Str(&sobel_str),
+                CArg::Str(&cg_str),
                 CArg::Int(self.m_num_cgbetter as i64),
                 CArg::Int(self.m_num_sobel_cgeval as i64)
             );
@@ -3317,8 +3327,9 @@ impl BeadTrack {
             //
             // `mEdgeSdSave` is allocated only with an elongation file
             // (`beadtrack.cpp:1305`); with an XYZ file alone the source reads
-            // an uninitialised pointer here.  The translation reads it as an
-            // array of -1, i.e. "no edge SD saved" (see `BUGS.md`).
+            // an uninitialised pointer here and segfaults.  Fixed in translation
+            // (2026-09-26, `BUGS.md`): it reads as an array of -1, i.e. "no edge
+            // SD saved".
             let max_view_do = self.m_max_view_do;
             let edge_sd = |s: &Vec<f32>, ind: i32| -> f32 {
                 if s.is_empty() { -1. } else { s[ind as usize] }
@@ -5273,10 +5284,16 @@ impl BeadTrack {
             i = 0;
             while i < self.m_max_peaks {
                 self.m_sobel_wsums[i as usize] = -1.;
-                // `*= mScaleFacSobel + xOffSobel` as written (`beadtrack.cpp:2830-2831`;
-                // see `BUGS.md`).
-                self.m_sobel_xpeaks[i as usize] *= self.m_scale_fac_sobel + x_off_sobel;
-                self.m_sobel_ypeaks[i as usize] *= self.m_scale_fac_sobel + y_off_sobel;
+                // Fixed in translation (2026-09-26, `BUGS.md`): the source writes
+                // `*= mScaleFacSobel + xOffSobel` (`beadtrack.cpp:2830-2831`),
+                // multiplying by the sum; its comment says the peaks are scaled
+                // and then the centroid offset is added, which is what is done
+                // (as `imodfindbeads.cpp:1085` and `beadfix.cpp:2045` map a
+                // Sobel-scaled coordinate: `coord * scaleFactor + offset`).
+                self.m_sobel_xpeaks[i as usize] =
+                    self.m_sobel_xpeaks[i as usize] * self.m_scale_fac_sobel + x_off_sobel;
+                self.m_sobel_ypeaks[i as usize] =
+                    self.m_sobel_ypeaks[i as usize] * self.m_scale_fac_sobel + y_off_sobel;
                 i += 1;
             }
             /*for (i = 0; i < mMaxPeaks; i++) {
@@ -5878,8 +5895,9 @@ impl BeadTrack {
         let nx_trunc: i32;
         let ny_trunc: i32;
         // `mIfLast` and `fillVal` are uninitialised in the source when the box
-        // needs a fill but no taper, or the trial taper fails; 0 here, which
-        // makes `shiftAndFillBox` take the edge mean (see `BUGS.md`).
+        // needs a fill but no taper, or the trial taper fails.  Fixed in
+        // translation (2026-09-26, `BUGS.md`): 0 here, which makes
+        // `shiftAndFillBox` fill with the edge mean.
         let mut m_if_last: i32 = 0;
         let mut fill_val: f32 = 0.;
 

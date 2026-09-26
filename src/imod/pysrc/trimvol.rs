@@ -4,23 +4,30 @@
 //! is the module's top level, translated here statement by statement as
 //! [`trimvol`].  It composes `densmatch`, `findcontrast`, `newstack` and
 //! `clip` command lines and runs them; by owner decision (2026-09-24) those
-//! four are this crate's own programs and run **in process** through
-//! [`run_cmd_in_process`], which keeps `runcmd`'s contract (collected output
-//! lines, `ERROR:` lines and exit status on failure) — see `CLAUDE.md`, "Our
-//! own commands are called in process".
+//! four are this crate's own programs and run **in process**.  `newstack`
+//! and `clip` go through [`run_cmd_in_process`], which keeps `runcmd`'s
+//! contract (collected output lines, `ERROR:` lines and exit status on
+//! failure) — see `CLAUDE.md`, "Our own commands are called in process".
+//! `densmatch` and `findcontrast`, whose printed values the script parsed,
+//! are **direct calls** since 2026-09-26 (`densmatch_compute`,
+//! `findcontrast_compute` through `imodpy::call_own_program`): the script
+//! uses their returned values, rounded as the printed text rounded them.
 //!
-//! Python values: `PipGetTwoFloats` returns Python floats (doubles) and the
-//! script formats them with `str.format`, i.e. `repr`.  This crate's PIP
-//! parses into `f32`, so a float entry is written as the shortest decimal
-//! that reads back as that `f32`, then in Python's `repr` shape (`0.0`,
-//! `255.0`) — the same text Python prints for any entry of up to seven
-//! significant digits, and a text that the called program parses back to the
-//! same `f32` it would have parsed from Python's.
+//! Python values: `PipGetTwoFloats` returns Python floats (doubles), and so
+//! does `pip::pip_get_two_floats`; the script formats them with
+//! `str.format`, i.e. `repr`, which `py_str_float` reproduces.
 
+use crate::imod::flib::image::densmatch::{
+    DensmatchParams, densmatch_compute, densmatch_g_edit, densmatch_scale_line,
+};
+use crate::imod::flib::image::findcontrast::{
+    FindcontrastParams, findcontrast_compute, findcontrast_report_lines,
+};
+use crate::imod::flib::subrs::hvem::parse_input_params;
 use crate::imod::pysrc::batchruntomo::py_str_float;
 use crate::imod::pysrc::imodpy::{
-    add_imod_bin_ignore_sighup, exit_from_imod_error, fmtstr, get_mrc_size, print_pid, prnstr,
-    run_cmd_in_process,
+    add_imod_bin_ignore_sighup, call_own_program, exit_from_imod_error, fmtstr, get_mrc_size,
+    print_pid, prnstr, run_cmd_in_process,
 };
 use crate::imod::pysrc::pip::{
     exit_error, pip_get_boolean, pip_get_err_no, pip_get_integer, pip_get_non_option_arg,
@@ -38,13 +45,7 @@ pub fn trimvol(arguments: &[OsString]) -> i32 {
     let prefix = format!("ERROR: {progname} - ");
 
     // `str(float)` of a PIP float entry; see the module comment.
-    let py_float = |value: f32| -> String {
-        py_str_float(
-            format!("{value}")
-                .parse::<f64>()
-                .unwrap_or(f64::from(value)),
-        )
-    };
+    let py_float = |value: f64| -> String { py_str_float(value) };
     let s = |value: i32| value.to_string();
 
     //
@@ -111,7 +112,7 @@ pub fn trimvol(arguments: &[OsString]) -> i32 {
         return 1;
     }
 
-    let (_opts, nonopts) = pip_read_or_parse_options(&argv, &options, progname, 2, 1, 1, None);
+    let (_opts, nonopts) = pip_read_or_parse_options(&argv, &options, progname, 2, 1, 1);
     if nonopts != 2 {
         prnstr(&(prefix.clone() + "wrong number of arguments"), "\n", false);
         pip_print_help(progname, 0, 1, 1);
@@ -440,32 +441,73 @@ pub fn trimvol(arguments: &[OsString]) -> i32 {
             "\n",
             false,
         );
-        let dens_lines = match run_cmd_in_process("densmatch -StandardInput", Some(&comlines), None)
-        {
-            Ok(lines) => lines.unwrap_or_default(),
-            Err(_) => exit_from_imod_error(progname),
+        // Direct call (owner rule, 2026-09-26): the parameters `comlines`
+        // gives densmatch on its standard input, and the returned factors in
+        // place of the "Scale factors to" line the script parses
+        // (`trimvol:300-313`).  The script read the factors back from that
+        // line's `2g14.6` fields, so each is rounded to those six significant
+        // digits here, as the printed text had it, before `str(float)` puts it
+        // on the newstack command line.  `comlines` is still built: it is the
+        // text densmatch used to read, and the `-StandardInput` command line
+        // names it in `errStrings`.
+        let _ = &comlines;
+        let params = DensmatchParams {
+            pip_input: true,
+            target_mean_sd: Some((targ_mean as f32, targ_sd as f32)),
+            reference_file: None,
+            scaled_file: input_file.clone(),
+            output_file: String::from(" "),
+            report_only: true,
+            x_min_max: Some((xsmin, xsmax)),
+            y_min_max: Some((ysmin, ysmax)),
+            z_min_max: Some((zsmin, zsmax)),
+            use_all_pixels: false,
+            offset: None,
+            mode: None,
+            files_opened: false,
+        };
+        let (result, dens_lines) = match call_own_program(
+            "densmatch -StandardInput",
+            &["densmatch"],
+            None,
+            true,
+            move || {
+                parse_input_params::pip_exit_on_error(0, "ERROR: DENSMATCH - ");
+                densmatch_compute(&params)
+            },
+        ) {
+            // The compute functions have no `exit(0)`, so a value always
+            // comes back on success.
+            Ok((Some(result), lines)) => (result, lines),
+            _ => exit_from_imod_error(progname),
         };
 
         for line in &dens_lines {
             prnstr(line.trim_end_matches(['\r', '\n']), "\n", false);
-            if line.starts_with("Scale factors to") {
-                let lsplit: Vec<&str> = line.split_whitespace().collect();
-                // `try: ... except Exception: pass`
-                if lsplit.len() >= 2 {
-                    if let (Ok(multfac), Ok(sdfac)) = (
-                        lsplit[lsplit.len() - 2].parse::<f64>(),
-                        lsplit[lsplit.len() - 1].parse::<f64>(),
-                    ) {
-                        if if_mode == 0 {
-                            mode = 0;
-                        }
-                        contout = fmtstr(
-                            "-mode {} -multadd {},{}",
-                            &[s(mode), py_str_float(multfac), py_str_float(sdfac)],
-                        );
-                    }
-                }
+        }
+        prnstr(
+            &densmatch_scale_line(result.scale_fac, result.add_fac),
+            "\n",
+            false,
+        );
+        // `float()` of each printed field; a field that does not read back
+        // (never, for `Gw.d` output) leaves `contout` empty, as the script's
+        // `except` did.
+        if let (Ok(multfac), Ok(sdfac)) = (
+            densmatch_g_edit(result.scale_fac, 14, 6)
+                .trim()
+                .parse::<f64>(),
+            densmatch_g_edit(result.add_fac, 14, 6)
+                .trim()
+                .parse::<f64>(),
+        ) {
+            if if_mode == 0 {
+                mode = 0;
             }
+            contout = fmtstr(
+                "-mode {} -multadd {},{}",
+                &[s(mode), py_str_float(multfac), py_str_float(sdfac)],
+            );
         }
 
         if contout.is_empty() {
@@ -501,40 +543,43 @@ pub fn trimvol(arguments: &[OsString]) -> i32 {
             ],
         );
         prnstr(&findcom, "\n", false);
-        let findlines = match run_cmd_in_process(&findcom, None, None) {
-            Ok(lines) => lines.unwrap_or_default(),
-            Err(_) => exit_from_imod_error(progname),
+        // Direct call (owner rule, 2026-09-26): the parameters `findcom` puts
+        // on findcontrast's command line, and the returned levels in place of
+        // the "Implied ... are" line the script parses (`trimvol:333-345`).
+        // `iconLow`/`iconHigh` print as `i4` and are checked to lie in
+        // 0..=255 before printing, so the parsed integers are the returned
+        // values exactly.  The captured header listing and "Analyzing" line
+        // are echoed stripped, then the report lines, as the loop did.
+        let params = FindcontrastParams {
+            pip_input: true,
+            input_file: input_file.clone(),
+            slices: Some((slicest, slicend)),
+            x_min_max: (!sxarg.is_empty()).then_some((xsmin, xsmax)),
+            y_min_max: (!syarg.is_empty()).then_some((ysmin, ysmax)),
+            flip_y_and_z: !fliparg.is_empty(),
+            old_flipping: fliparg.ends_with("-oldflip"),
+            truncate: None,
         };
+        let (result, findlines) =
+            match call_own_program(&findcom, &["findcontrast"], None, true, move || {
+                parse_input_params::pip_exit_on_error(0, "ERROR: FINDCONTRAST - ");
+                findcontrast_compute(&params)
+            }) {
+                // The compute functions have no `exit(0)`, so a value always
+                // comes back on success.
+                Ok((Some(result), lines)) => (result, lines),
+                _ => exit_from_imod_error(progname),
+            };
 
         // Get the black white while printing the lines
-        let mut found_black: Option<i32> = None;
         for line in &findlines {
             prnstr(line.trim(), "\n", false);
-            if found_black.is_none() && line.contains("Implied") {
-                if let Some(ind) = line.find("are ").filter(|ind| *ind > 0) {
-                    let bwsplit: Vec<&str> = line[ind + 3..].split_whitespace().collect();
-                    if bwsplit.len() > 2 {
-                        // Python `int()`: a non-integer token raises and the
-                        // script ends with a traceback and status 1.
-                        let parse = |token: &str| -> i32 {
-                            token.parse::<i32>().unwrap_or_else(|_| {
-                                eprintln!(
-                                    "ValueError: invalid literal for int() with base 10: '{token}'"
-                                );
-                                std::process::exit(1)
-                            })
-                        };
-                        found_black = Some(parse(bwsplit[0]));
-                        white = parse(bwsplit[2]);
-                    }
-                }
-            }
         }
-
-        match found_black {
-            Some(value) => black = value,
-            None => exit_error("Findcontrast failed to return scaling values"),
+        for line in findcontrast_report_lines(&result) {
+            prnstr(line.trim(), "\n", false);
         }
+        black = result.icon_low;
+        white = result.icon_high;
         contout = fmtstr("-mode 0 -con {},{}", &[s(black), s(white)]);
     }
 

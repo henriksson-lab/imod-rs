@@ -1541,7 +1541,15 @@ pub fn run_in_process<F: FnOnce() + Send + 'static>(
         file.write_all(text)?;
         file.seek(SeekFrom::Start(0))?;
         saved_in = unsafe { libc::dup(0) };
-        unsafe { libc::dup2(file.as_raw_fd(), 0) };
+        unsafe {
+            libc::dup2(file.as_raw_fd(), 0);
+            // A caller that read its own standard input to the end (a script
+            // run with -StandardInput) leaves C `stdin` at EOF, which is
+            // sticky: drop what it buffered and clear that EOF, or the
+            // command reads nothing from its input
+            libc::fflush(stdin);
+            libc::clearerr(stdin);
+        }
         input_file = Some(file);
     }
     let mut saved_out = -1;
@@ -1876,6 +1884,23 @@ pub fn c2f_string(c_string: &[u8], fortran_string: &mut [u8]) -> Result<(), ()> 
         index += 1;
     }
     Ok(())
+}
+
+/// Matches the Fortran-callable C `imodgetenv` (`b3dutil.c:333`): gets the
+/// environment variable `var` (a blank-padded `character*(*)`) and returns
+/// its value in `value`, the destination `character*(*)`.  Returns 1 if the
+/// variable is not defined, -1 if the value does not fit in `value` (which
+/// then holds as much as fits, as `c2fString` leaves it), and 0 on success.
+pub fn imodgetenv(var: &[u8], value: &mut [u8]) -> i32 {
+    let cstr = fortran_string(var);
+    let Some(val_ptr) = std::env::var_os(&cstr) else {
+        return 1;
+    };
+    use std::os::unix::ffi::OsStrExt;
+    match c2f_string(val_ptr.as_bytes(), value) {
+        Ok(()) => 0,
+        Err(()) => -1,
+    }
 }
 
 /// Matches C `b3dFseek` (`b3dutil.c:899`).

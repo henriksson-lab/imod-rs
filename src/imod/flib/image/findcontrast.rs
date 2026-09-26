@@ -5,6 +5,7 @@
 //! bytes.  The Fortran main program maps to [`findcontrast`]; the source has
 //! no other program units.
 
+use crate::imod::flib::subrs::compat::gfortran_rt::maxss;
 use crate::imod::flib::subrs::hvem::parse_input_params::{
     exit_error, pip_get_in_out_file, pip_get_logical, pip_read_or_parse_options,
 };
@@ -26,55 +27,170 @@ const FINDCONTRAST_OPTIONS: &str = "input:InputFile:FN:@slices:SlicesMinAndMax:I
 yminmax:YMinAndMax:IP:@flipyz:FlipYandZ:B:@oldflip:OldFlipping:B:@\
 truncate:TruncateBlackAndWhite:IP:@help:usage:B:";
 
-/// Original program `findcontrast` (`findcontrast.f90:15`).
+/// Rust-only: the options `findcontrast` reads through PIP, as the program's
+/// direct-call interface (`CLAUDE.md`, "Wherever we control both sides, use a
+/// direct function call now").  `None` is an option not entered, which leaves
+/// the program's default in place exactly as a failed `PipGetTwoIntegers`
+/// does.  `pip_input` false is the interactive path, which prompts for the
+/// limits on standard input.
+#[derive(Clone, Debug, Default)]
+pub struct FindcontrastParams {
+    pub pip_input: bool,
+    pub input_file: String,
+    pub slices: Option<(i32, i32)>,
+    pub x_min_max: Option<(i32, i32)>,
+    pub y_min_max: Option<(i32, i32)>,
+    pub flip_y_and_z: bool,
+    pub old_flipping: bool,
+    pub truncate: Option<(i32, i32)>,
+}
+
+/// Rust-only: what `findcontrast` computes and prints in its FORMAT 101
+/// report (`findcontrast.f90:171-176`).
+#[derive(Clone, Copy, Debug, Default)]
+pub struct FindcontrastResult {
+    /// `ivalMin / histScale` and `ivalMax / histScale`.
+    pub min_density: f32,
+    pub max_density: f32,
+    /// `realLow`, `realHigh`: the densities with truncation.
+    pub real_low: f32,
+    pub real_high: f32,
+    /// `iconLow`, `iconHigh`: the implied black and white levels.
+    pub icon_low: i32,
+    pub icon_high: i32,
+}
+
+/// Original program `findcontrast` (`findcontrast.f90:15`): option parsing,
+/// then [`findcontrast_compute`], then the report.
+///
+/// The PIP reads that the source makes after opening the file (`:78-79`,
+/// `:96-98`, `:123`) are made here before it, which is invisible except in
+/// the order of the header listing and a PIP error on a malformed entry.
+pub fn findcontrast() {
+    let mut filename = String::new();
+    let (mut num_opt_arg, mut num_non_opt_arg) = (0_i32, 0_i32);
+    //
+    // Pip startup: set error, parse options, check help, set flag if used
+    //
+    pip_read_or_parse_options(
+        &[FINDCONTRAST_OPTIONS],
+        FINDCONTRAST_NUM_OPTIONS,
+        "findcontrast",
+        "ERROR: FINDCONTRAST - ",
+        true,
+        1,
+        1,
+        0,
+        &mut num_opt_arg,
+        &mut num_non_opt_arg,
+    );
+    let pipinput = num_opt_arg + num_non_opt_arg > 0;
+
+    if pip_get_in_out_file("InputFile", 1, "Name of image file", &mut filename, 320) != 0 {
+        exit_error("No input file specified");
+    }
+    let mut params = FindcontrastParams {
+        pip_input: pipinput,
+        input_file: filename,
+        ..Default::default()
+    };
+    if pipinput {
+        let _ = pip_get_logical("FlipYandZ", &mut params.flip_y_and_z);
+        let _ = pip_get_logical("OldFlipping", &mut params.old_flipping);
+        let two = |option: &[u8]| -> Option<(i32, i32)> {
+            let (mut first, mut second) = (0_i32, 0_i32);
+            (pip_get_two_integers(option, &mut first, &mut second) == 0).then_some((first, second))
+        };
+        params.slices = two(b"SlicesMinAndMax");
+        params.x_min_max = two(b"XMinAndMax");
+        params.y_min_max = two(b"YMinAndMax");
+        params.truncate = two(b"TruncateBlackAndWhite");
+    }
+    let result = findcontrast_compute(&params);
+    for line in findcontrast_report_lines(&result) {
+        println!("{line}");
+    }
+    exit(0);
+}
+
+/// Rust-only: the three FORMAT 101 lines `findcontrast` ends with
+/// (`findcontrast.f90:171-176`), without line endings.
+pub fn findcontrast_report_lines(result: &FindcontrastResult) -> [String; 3] {
+    // `Gw.d` editing, as `header.rs` carries it (FORMAT 101's `g13.5`).
+    let g_edit = |value: f32, w: usize, d: i32| -> String {
+        if value.is_nan() {
+            return format!("{:>w$}", "NaN");
+        }
+        if value.is_infinite() {
+            let text = match (value < 0.0, w) {
+                (false, 8..) => "Infinity",
+                (false, _) => "Inf",
+                (true, 9..) => "-Infinity",
+                (true, _) => "-Inf",
+            };
+            return format!("{text:>w$}");
+        }
+        let magnitude = value.abs();
+        let mut digits = String::new();
+        let mut exponent = 1_i32;
+        if magnitude != 0.0 {
+            let scientific = format!("{:.*e}", (d - 1) as usize, magnitude);
+            let (mantissa, power) = scientific.split_once('e').unwrap();
+            digits = mantissa.replace('.', "");
+            exponent = power.parse::<i32>().unwrap() + 1;
+        }
+        if (0..=d).contains(&exponent) {
+            let mut text = format!("{:.*}", (d - exponent) as usize, value);
+            if exponent == d {
+                text.push('.');
+            }
+            format!("{:>1$}    ", text, w - 4)
+        } else {
+            format!(
+                "{:>1$}",
+                format!(
+                    "{}0.{}E{}{:02}",
+                    if value < 0.0 { "-" } else { "" },
+                    digits,
+                    if exponent < 0 { '-' } else { '+' },
+                    exponent.abs()
+                ),
+                w
+            )
+        }
+    };
+    // `Iw`: a value too wide for the field is written as `w` asterisks.
+    let i_edit = |value: i32, w: usize| -> String {
+        let text = format!("{value:>w$}");
+        if text.len() > w { "*".repeat(w) } else { text }
+    };
+    [
+        format!(
+            "Min and max densities in the analyzed volume are{} and{}",
+            g_edit(result.min_density, 13, 5),
+            g_edit(result.max_density, 13, 5)
+        ),
+        format!(
+            "Min and max densities with truncation are{} and{}",
+            g_edit(result.real_low, 13, 5),
+            g_edit(result.real_high, 13, 5)
+        ),
+        format!(
+            "Implied black and white contrast levels are{} and{}",
+            i_edit(result.icon_low, 4),
+            i_edit(result.icon_high, 4)
+        ),
+    ]
+}
+
+/// The body of program `findcontrast` (`findcontrast.f90:57-170`) after
+/// option parsing: reads the file, builds the histogram and returns the
+/// report's values.  Errors end through `exitError`, as in the program.
 ///
 /// `array(IDIM)` and `ihist(-LIMDEN:LIMDEN)` are static-size Fortran arrays;
 /// they are heap vectors here, `ihist` indexed at `ival + LIMDEN`.
-pub fn findcontrast() {
+pub fn findcontrast_compute(params: &FindcontrastParams) -> FindcontrastResult {
     unsafe {
-        // `Gw.d` editing, as `header.rs` carries it (FORMAT 101's `g13.5`).
-        let g_edit = |value: f32, w: usize, d: i32| -> String {
-            if value.is_nan() {
-                return format!("{:>w$}", "NaN");
-            }
-            if value.is_infinite() {
-                let text = match (value < 0.0, w) {
-                    (false, 8..) => "Infinity",
-                    (false, _) => "Inf",
-                    (true, 9..) => "-Infinity",
-                    (true, _) => "-Inf",
-                };
-                return format!("{text:>w$}");
-            }
-            let magnitude = value.abs();
-            let mut digits = String::new();
-            let mut exponent = 1_i32;
-            if magnitude != 0.0 {
-                let scientific = format!("{:.*e}", (d - 1) as usize, magnitude);
-                let (mantissa, power) = scientific.split_once('e').unwrap();
-                digits = mantissa.replace('.', "");
-                exponent = power.parse::<i32>().unwrap() + 1;
-            }
-            if (0..=d).contains(&exponent) {
-                let mut text = format!("{:.*}", (d - exponent) as usize, value);
-                if exponent == d {
-                    text.push('.');
-                }
-                format!("{:>1$}    ", text, w - 4)
-            } else {
-                format!(
-                    "{:>1$}",
-                    format!(
-                        "{}0.{}E{}{:02}",
-                        if value < 0.0 { "-" } else { "" },
-                        digits,
-                        if exponent < 0 { '-' } else { '+' },
-                        exponent.abs()
-                    ),
-                    w
-                )
-            }
-        };
         // `Iw`: a value too wide for the field is written as `w` asterisks.
         let i_edit = |value: i32, w: usize| -> String {
             let text = format!("{value:>w$}");
@@ -124,32 +240,12 @@ pub fn findcontrast() {
         let mut ihist = vec![0_i32; (2 * LIMDEN + 1) as usize];
         let (mut dmin, mut dmax, mut dmean) = (0.0_f32, 0.0_f32, 0.0_f32);
         let mut mode = 0_i32;
-        let mut filename = String::new();
-        let (mut num_opt_arg, mut num_non_opt_arg) = (0_i32, 0_i32);
-        //
-        // Pip startup: set error, parse options, check help, set flag if used
-        //
-        pip_read_or_parse_options(
-            &[FINDCONTRAST_OPTIONS],
-            FINDCONTRAST_NUM_OPTIONS,
-            "findcontrast",
-            "ERROR: FINDCONTRAST - ",
-            true,
-            1,
-            1,
-            0,
-            &mut num_opt_arg,
-            &mut num_non_opt_arg,
-        );
-        let pipinput = num_opt_arg + num_non_opt_arg > 0;
-
-        if pip_get_in_out_file("InputFile", 1, "Name of image file", &mut filename) != 0 {
-            exit_error("No input file specified");
-        }
+        let pipinput = params.pip_input;
+        let filename = &params.input_file;
         //
         // Open image file
         //
-        imopen(1, &filename, "RO");
+        imopen(1, filename, "RO");
         irdhdr(
             1,
             nxyz.as_mut_ptr(),
@@ -166,15 +262,11 @@ pub fn findcontrast() {
         // For non-integer mode, set up a scaling that should fill 1/5 of the histogram
         // at most, but allow the rest of the range in case the min and max are in error
         if mode != 1 && mode != 6 && mode != 0 {
-            // `max(abs(dmin), abs(dmax), 1.e-10)`: gfortran's MAX keeps the
-            // first argument unless a later one is greater.
-            let mut largest = dmin.abs();
-            if dmax.abs() > largest {
-                largest = dmax.abs();
-            }
-            if 1.0e-10 > largest {
-                largest = 1.0e-10;
-            }
+            // `max(abs(dmin), abs(dmax), 1.e-10)` (`findcontrast.f90:67`): the
+            // reference object computes `maxss |dmin|, |dmax|` and then
+            // `maxss ., 1.e-10`, so a NaN `dmax` gives NaN and a NaN in the
+            // first result gives `1.e-10`.
+            let largest = maxss(maxss(dmin.abs(), dmax.abs()), 1.0e-10);
             hist_scale = (LIMDEN / 5) as f32 / largest;
         }
 
@@ -185,8 +277,8 @@ pub fn findcontrast() {
         let mut flipped = !pipinput;
         let mut old_flip = false;
         if pipinput {
-            let _ = pip_get_logical("FlipYandZ", &mut flipped);
-            let _ = pip_get_logical("OldFlipping", &mut old_flip);
+            flipped = params.flip_y_and_z;
+            old_flip = params.old_flipping;
         }
         //
         // Set up default limits
@@ -201,9 +293,15 @@ pub fn findcontrast() {
         let mut iy_high = iylim - 1 - iy_low;
         //
         if pipinput {
-            let _ = pip_get_two_integers(b"SlicesMinAndMax", &mut iz_low, &mut iz_high);
-            let _ = pip_get_two_integers(b"XMinAndMax", &mut ix_low, &mut ix_high);
-            let _ = pip_get_two_integers(b"YMinAndMax", &mut iy_low, &mut iy_high);
+            if let Some((low, high)) = params.slices {
+                (iz_low, iz_high) = (low, high);
+            }
+            if let Some((low, high)) = params.x_min_max {
+                (ix_low, ix_high) = (low, high);
+            }
+            if let Some((low, high)) = params.y_min_max {
+                (iy_low, iy_high) = (low, high);
+            }
         } else {
             // `write(*,'(1x,a,/,a,$)')`
             print!(
@@ -235,15 +333,15 @@ pub fn findcontrast() {
             exit_error("X or Y values outside range of volume");
         }
         //
-        let area_fac = 1.0_f32.max(nx.wrapping_mul(iylim) as f32 * 1.0e-6);
+        // `max(1., nx * iylim * 1.e-6)` (`findcontrast.f90:118`): `maxss`
+        // with the product as destination in the reference object.
+        let area_fac = maxss(nx.wrapping_mul(iylim) as f32 * 1.0e-6, 1.0_f32);
         let mut num_trunc_lo = (area_fac * (iz_high + 1 - iz_low) as f32) as i32;
         let mut num_trunc_hi = num_trunc_lo;
         if pipinput {
-            let _ = pip_get_two_integers(
-                b"TruncateBlackAndWhite",
-                &mut num_trunc_lo,
-                &mut num_trunc_hi,
-            );
+            if let Some((low, high)) = params.truncate {
+                (num_trunc_lo, num_trunc_hi) = (low, high);
+            }
         } else {
             // `write(*,'(1x,a,/,a,2i8,a,$)')`
             print!(
@@ -351,22 +449,14 @@ pub fn findcontrast() {
                 "The file minimum or maximum is too far off to allow contrast scaling; use Alterheader with mmm option to fix min/max",
             );
         }
-        // FORMAT 101
-        println!(
-            "Min and max densities in the analyzed volume are{} and{}",
-            g_edit(ival_min as f32 / hist_scale, 13, 5),
-            g_edit(ival_max as f32 / hist_scale, 13, 5)
-        );
-        println!(
-            "Min and max densities with truncation are{} and{}",
-            g_edit(real_low, 13, 5),
-            g_edit(real_high, 13, 5)
-        );
-        println!(
-            "Implied black and white contrast levels are{} and{}",
-            i_edit(icon_low, 4),
-            i_edit(icon_high, 4)
-        );
-        exit(0);
+        // FORMAT 101 is written by the caller (`findcontrast_report_lines`).
+        FindcontrastResult {
+            min_density: ival_min as f32 / hist_scale,
+            max_density: ival_max as f32 / hist_scale,
+            real_low,
+            real_high,
+            icon_low,
+            icon_high,
+        }
     }
 }

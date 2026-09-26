@@ -5,6 +5,7 @@
 //! single dispatch loop over the same label numbers.
 #![allow(unused_variables)]
 
+use crate::imod::flib::subrs::compat::gfortran_rt::{maxss, minss};
 use crate::imod::flib::subrs::hvem::getinout::getinout;
 use crate::imod::flib::subrs::hvem::parse_input_params::{exit_error, pip_read_or_parse_options};
 use crate::imod::flib::subrs::hvem::rdlist::{parselist2, rdlist};
@@ -12,8 +13,7 @@ use crate::imod::flib::subrs::imsubs::irdhdr::irdhdr;
 use crate::imod::flib::subrs::imsubs::wrap_iiunit::imopen;
 use crate::imod::libcfshr::b3dutil::{extra_is_nbytes_and_flags, override_invert_mrc_origin};
 use crate::imod::libcfshr::parse_params::{
-    pip_get_boolean, pip_get_integer, pip_get_non_option_arg, pip_get_string, pip_get_three_floats,
-    pip_get_three_integers,
+    pip_get_boolean, pip_get_integer, pip_get_three_floats, pip_get_three_integers,
 };
 use crate::imod::libcfshr::simplestat::array_min_max_mean_sd_fortran;
 use crate::imod::libiimod::unit_fileio::{
@@ -242,14 +242,22 @@ pub fn alterheader() {
             }
             // `alterheader.f90:69` assigns the status to `ierr` and never
             // tests it; on failure the Fortran `inFile` is left untouched.
-            if let Ok(name) = pip_get_non_option_arg(0) {
-                in_file = String::from_utf8_lossy(&name).into_owned();
+            // `PipGetNonOptionArg(1, inFile)` is the `pip_fwrap.c:190`
+            // wrapper into the `character*320` (`alterheader.f90:21`); a
+            // longer argument fails and exits under the exit prefix.
+            let mut record = [b' '; 320];
+            if crate::imod::libcfshr::pip_fwrap::pipgetnonoptionarg_(1, &mut record) == 0 {
+                in_file = crate::imod::libcfshr::b3dutil::fortran_string(&record);
             }
             ind_pip_opt = 0;
-            let mut copy_name: Vec<u8> = Vec::new();
-            copy_from = pip_get_string(b"CopyFromImage", &mut copy_name) == 0;
+            // `PipGetString('CopyFromImage', string)`: the wrapper into the
+            // `character*320 string` (`alterheader.f90:21,71`).
+            let mut copy_name = [b' '; 320];
+            copy_from =
+                crate::imod::libcfshr::pip_fwrap::pipgetstring_(b"CopyFromImage", &mut copy_name)
+                    == 0;
             if copy_from {
-                string = String::from_utf8_lossy(&copy_name).into_owned();
+                string = crate::imod::libcfshr::b3dutil::fortran_string(&copy_name);
             }
             if copy_from && num_opt_arg > 1 {
                 exit_error("No other options can be entered with -copy");
@@ -481,9 +489,14 @@ pub fn alterheader() {
                             }
                         }
                         24 => {
-                            let mut list: Vec<u8> = Vec::new();
-                            if pip_get_string(b"RemoveTitles", &mut list) == 0 {
-                                string = String::from_utf8_lossy(&list).into_owned();
+                            // Into the `character*320 string` (`alterheader.f90:181`).
+                            let mut list = [b' '; 320];
+                            if crate::imod::libcfshr::pip_fwrap::pipgetstring_(
+                                b"RemoveTitles",
+                                &mut list,
+                            ) == 0
+                            {
+                                string = crate::imod::libcfshr::b3dutil::fortran_string(&list);
                                 let _ = parselist2(&string, &mut listdel, &mut ndel, &mut 1000);
                                 if ndel == 1 && listdel[0] <= 0 {
                                     exit_error("Title number to remove must be positive");
@@ -503,12 +516,17 @@ pub fn alterheader() {
                             }
                         }
                         26 => {
-                            let mut text: Vec<u8> = Vec::new();
-                            if pip_get_string(b"TitleToAdd", &mut text) == 0 {
+                            // Into the `character*320 string` (`alterheader.f90:197`).
+                            let mut text = [b' '; 320];
+                            if crate::imod::libcfshr::pip_fwrap::pipgetstring_(
+                                b"TitleToAdd",
+                                &mut text,
+                            ) == 0
+                            {
                                 // `PipGetString('TitleToAdd', string)` fills the
                                 // shared `string` variable that label 10 reads
                                 // the new label from.
-                                string = String::from_utf8_lossy(&text).into_owned();
+                                string = crate::imod::libcfshr::b3dutil::fortran_string(&text);
                                 title[0] = [b' '; 80];
                                 let bytes = string.as_bytes();
                                 let len = bytes.len().min(80);
@@ -600,13 +618,26 @@ pub fn alterheader() {
                         cell = iiu_ret_cell(2);
                         println!(" Alter cell.  Current size and angles:");
                         println!(
-                            "{}{}{}{:9.3}{:9.3}{:9.3}",
+                            "{}{}{}{}{}{}",
                             g_edit(cell[0], 14, 5),
                             g_edit(cell[1], 14, 5),
                             g_edit(cell[2], 14, 5),
-                            cell[3],
-                            cell[4],
-                            cell[5]
+                            // `3f9.3` (`alterheader.f90:247`).
+                            crate::imod::flib::subrs::compat::gfortran_rt::format_f(
+                                f64::from(cell[3]),
+                                9,
+                                3
+                            ),
+                            crate::imod::flib::subrs::compat::gfortran_rt::format_f(
+                                f64::from(cell[4]),
+                                9,
+                                3
+                            ),
+                            crate::imod::flib::subrs::compat::gfortran_rt::format_f(
+                                f64::from(cell[5]),
+                                9,
+                                3
+                            )
                         );
                         print!("New size and angles: ");
                         let _ = std::io::stdout().flush();
@@ -628,7 +659,19 @@ pub fn alterheader() {
                 3 => {
                     (itype, lens, n1, n2, v1, v2) = iiu_ret_data_type(2);
                     println!(" Alter data type.  Current type, lens, n1, n2, v1, v2:");
-                    println!("{itype:5}{lens:5}{n1:5}{n2:5}{v1:10.3}{v2:10.3}");
+                    println!(
+                        "{itype:5}{lens:5}{n1:5}{n2:5}{}{}",
+                        crate::imod::flib::subrs::compat::gfortran_rt::format_f(
+                            f64::from(v1),
+                            10,
+                            3
+                        ),
+                        crate::imod::flib::subrs::compat::gfortran_rt::format_f(
+                            f64::from(v2),
+                            10,
+                            3
+                        )
+                    );
                     println!(
                         " Enter new type (0 regular serial sections, 1 tilt series, 2 serial stereo"
                     );
@@ -687,7 +730,19 @@ pub fn alterheader() {
                         [v1, v2] = two;
                     }
                     println!(" Proposed new type, lens, n1, n2, v1, v2:");
-                    println!("{itype:5}{lens:5}{n1:5}{n2:5}{v1:10.3}{v2:10.3}");
+                    println!(
+                        "{itype:5}{lens:5}{n1:5}{n2:5}{}{}",
+                        crate::imod::flib::subrs::compat::gfortran_rt::format_f(
+                            f64::from(v1),
+                            10,
+                            3
+                        ),
+                        crate::imod::flib::subrs::compat::gfortran_rt::format_f(
+                            f64::from(v2),
+                            10,
+                            3
+                        )
+                    );
                     print!(" Enter / to accept, or a new type, lens, n1, n2, v1, v2: ");
                     let _ = std::io::stdout().flush();
                     let mut ints = [itype, lens, n1, n2];
@@ -807,8 +862,22 @@ pub fn alterheader() {
                     if !pip_input {
                         tilt = iiu_ret_tilt(2);
                         println!(
-                            " Alter current tilt angles.  Current angles:{:6.1}{:6.1}{:6.1}",
-                            tilt[0], tilt[1], tilt[2]
+                            " Alter current tilt angles.  Current angles:{}{}{}",
+                            crate::imod::flib::subrs::compat::gfortran_rt::format_f(
+                                f64::from(tilt[0]),
+                                6,
+                                1
+                            ),
+                            crate::imod::flib::subrs::compat::gfortran_rt::format_f(
+                                f64::from(tilt[1]),
+                                6,
+                                1
+                            ),
+                            crate::imod::flib::subrs::compat::gfortran_rt::format_f(
+                                f64::from(tilt[2]),
+                                6,
+                                1
+                            )
                         );
                         // FORMAT 117 is `6f6.1` with three items, so output
                         // stops at the fourth data edit descriptor and the
@@ -825,8 +894,22 @@ pub fn alterheader() {
                     if !pip_input {
                         tilt = iiu_ret_tilt_orig(2);
                         println!(
-                            " Alter original tilt angles.  Current angles:{:6.1}{:6.1}{:6.1}",
-                            tilt[0], tilt[1], tilt[2]
+                            " Alter original tilt angles.  Current angles:{}{}{}",
+                            crate::imod::flib::subrs::compat::gfortran_rt::format_f(
+                                f64::from(tilt[0]),
+                                6,
+                                1
+                            ),
+                            crate::imod::flib::subrs::compat::gfortran_rt::format_f(
+                                f64::from(tilt[1]),
+                                6,
+                                1
+                            ),
+                            crate::imod::flib::subrs::compat::gfortran_rt::format_f(
+                                f64::from(tilt[2]),
+                                6,
+                                1
+                            )
                         );
                         // FORMAT 118 is `6f6.1` with three items; see above.
                         read_reals(&mut tilt);
@@ -977,8 +1060,11 @@ pub fn alterheader() {
                                 &mut dmean,
                                 &mut sd,
                             );
-                            dmin = dmin.min(dmins);
-                            dmax = dmax.max(dmaxs);
+                            // `alterheader.f90:498-499`: `minss`/`maxss` with the
+                            // running `dmin`/`dmax` as destination in the
+                            // reference object.
+                            dmin = minss(dmin, dmins);
+                            dmax = maxss(dmax, dmaxs);
                             tsum += sums;
                             sumsq += sumsqs;
                             totn += f64::from(nxyz[0] * num_lines);
@@ -1069,13 +1155,23 @@ pub fn alterheader() {
                     iiu_alt_mode(2, mode);
                     if dmax > 32767.0 && mode == 1 {
                         println!(
-                            "\nThe file maximum is{dmax:12.1} and numbers bigger than 32767 will not be"
+                            "\nThe file maximum is{} and numbers bigger than 32767 will not be",
+                            crate::imod::flib::subrs::compat::gfortran_rt::format_f(
+                                f64::from(dmax),
+                                12,
+                                1
+                            )
                         );
                         println!(" represented correctly in this mode.");
                     }
                     if dmin < 0.0 && mode == 6 {
                         println!(
-                            "\nThe file minimum is{dmin:12.1} and negative numbers will not be"
+                            "\nThe file minimum is{} and negative numbers will not be",
+                            crate::imod::flib::subrs::compat::gfortran_rt::format_f(
+                                f64::from(dmin),
+                                12,
+                                1
+                            )
                         );
                         println!(" represented correctly in this mode.");
                     }

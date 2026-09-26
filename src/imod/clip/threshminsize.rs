@@ -30,7 +30,10 @@ pub fn threshold_with_min_size(
         direction = -1.;
         (thresh_hi, thresh_lo)
     } else {
-        thresh *= 1.0000006;
+        // `threshminsize.cpp:97`: `float thresh` times the double literal
+        // `1.0000006` is a double product narrowed on the store; an f32
+        // multiply by `1.0000006f32` rounds differently for ~1 threshold in 9.
+        thresh = (thresh as f64 * 1.0000006) as f32;
         (thresh_lo, thresh_hi)
     };
     let (nx, ny) = (opt.ix, opt.iy);

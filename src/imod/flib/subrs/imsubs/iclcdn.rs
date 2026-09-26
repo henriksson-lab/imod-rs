@@ -17,7 +17,10 @@ pub fn iclcdn(
     for iy in ny1..=ny2 {
         for ix in nx1..=nx2 {
             let index = 2 * (((iy - 1) * mx + (ix - 1)) as usize);
-            let val = (array[index] * array[index] + array[index + 1] * array[index + 1]).sqrt();
+            // `VAL = CABS(ARRAY(IX,IY))`: gfortran calls libm `cabsf`
+            // (`nm libmrcim.so`), which is glibc's `hypotf` -- not
+            // `sqrt(re*re + im*im)`, which differs in the last bit.
+            let val = array[index].hypot(array[index + 1]);
             dmean += val;
             // `iclcdn.f:24-25` is `IF (VAL .LT. DMIN) DMIN = VAL`, a plain
             // comparison, not `MIN`; `f32::min` would take the non-NaN operand

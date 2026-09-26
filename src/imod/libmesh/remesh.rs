@@ -246,7 +246,7 @@ pub fn imesh_remesh_normal(
                 if numatz[l] != 0 {
                     let n = numatz[l] as usize;
                     let iptz = &mut vecatz[l];
-                    iptz[..n].sort_by(ptcompare_ord);
+                    crate::imod::c_sort::qsort(&mut iptz[..n], &mut |a, b| ptcompare(a, b));
                     l2 = 1;
                     l1 = 1;
                     while l1 < numatz[l] {
@@ -488,11 +488,6 @@ fn ptcompare(pt1: &Ipoint, pt2: &Ipoint) -> i32 {
         return 1;
     }
     -1
-}
-
-/// `ptcompare` as an ordering, for the source's `qsort` call.
-fn ptcompare_ord(pt1: &Ipoint, pt2: &Ipoint) -> std::cmp::Ordering {
-    ptcompare(pt1, pt2).cmp(&0)
 }
 
 /// The source's `bsearch` over `nm->vert` with a stride of two `Ipoint`s,

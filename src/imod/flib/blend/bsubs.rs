@@ -40,8 +40,13 @@
 //! assignment truncates (`as i32`).  `MAX`/`MIN` of reals become gcc
 //! `MAX_EXPR`/`MIN_EXPR` (`maxss`/`minss`), whose operand order for a NaN or a
 //! signed-zero tie is gcc's choice (it even reassociates the five-argument
-//! `max` in `oneintrp`); they are written here as `if a > b { a } else { b }`
-//! in source order, which is exact for every other input.
+//! `max` in `oneintrp`).  Every site that can see image data or a position is
+//! written with `gfortran_rt::{maxss,minss}` in the order read from the
+//! reference object; the rest are `if a > b { a } else { b }` in source order,
+//! which is `maxss(a, b)` and matched the object where checked.  Not
+//! transcribed: `getExtraIndents`' vectorised `max` reductions over the
+//! distortion field (`bsubs.f90:3078-3092`), whose lane order would decide
+//! which NaN survives.
 //!
 //! **Aliasing at call sites.**  `blendmont` calls `lincom_rotrans` and
 //! `recen_rotrans` with the output array aliasing an input
@@ -59,6 +64,7 @@ use super::edgesubs::{findedgefunc, setgridchars};
 use super::shuffler::shuffler;
 use super::smoothgrid::smoothgrid;
 pub use crate::imod::flib::subrs::compat::gfortran_rt::{gfortran_cosd_r4, gfortran_sind_r4};
+use crate::imod::flib::subrs::compat::gfortran_rt::{maxss, minss};
 use crate::imod::flib::subrs::hvem::b3dxor::b3dxor;
 use crate::imod::flib::subrs::hvem::frefor::frefor;
 use crate::imod::flib::subrs::hvem::inside::inside;
@@ -78,7 +84,6 @@ use crate::imod::libcfshr::montagexcorr::{
     mont_xc_get_last_trimmed_max_sd, montxcbasicsizes, montxcgetlastrunnersup, montxcindsandctf,
     montxcorredge,
 };
-use crate::imod::libcfshr::parse_params::pip_get_string;
 use crate::imod::libcfshr::reduce_by_binning::extractwithbinning;
 use crate::imod::libcfshr::sdsearch::montbigsearch;
 use crate::imod::libcfshr::simplestat::array_min_max_mean_fortran;
@@ -224,12 +229,14 @@ pub fn read_list(
     // trailing blanks of a file name.
     let mut file_name: String;
     if pip_input {
-        let mut value = Vec::new();
-        if pip_get_string(b"PieceListInput", &mut value) != 0 {
+        // `PipGetString('PieceListInput', fileName)`: the `pip_fwrap.c:206`
+        // wrapper, whose `c2fString` fails (and exits under the exit prefix)
+        // for an entry longer than the variable.
+        let mut value = [b' '; 320];
+        if crate::imod::libcfshr::pip_fwrap::pipgetstring_(b"PieceListInput", &mut value) != 0 {
             exit_error("No input piece list file specified");
         }
-        value.truncate(320);
-        file_name = String::from_utf8_lossy(&value).into_owned();
+        file_name = crate::imod::libcfshr::b3dutil::fortran_string(&value);
     } else {
         // `write(*,'(1x,a,$)')` then `read(5, '(a)') fileName`.
         let _ = ImodFile::Stdout.write_all(b" name of input piece list file: ");
@@ -432,14 +439,12 @@ pub fn oneintrp(
         let v6 = a(ixp_p1, iyp);
         let v8 = a(ixp, iyp_p1);
         // find min and max of all 5 points
-        let mut vmax = v2;
-        for v in [v4, v5, v6, v8] {
-            vmax = if vmax > v { vmax } else { v };
-        }
-        let mut vmin = v2;
-        for v in [v4, v5, v6, v8] {
-            vmin = if vmin < v { vmin } else { v };
-        }
+        // `max(v2, v4, v5, v6, v8)` / `min(...)` (`bsubs.f90:216-217`): the
+        // reference object reassociates both into
+        // `maxss(maxss(maxss(v2, v8), maxss(v4, v5)), v6)` (and the same with
+        // `minss`).
+        let vmax = maxss(maxss(maxss(v2, v8), maxss(v4, v5)), v6);
+        let vmin = minss(minss(minss(v2, v8), minss(v4, v5)), v6);
         //
         let a2 = (v6 + v4) * 0.5 - v5;
         let b = (v8 + v2) * 0.5 - v5;
@@ -448,8 +453,9 @@ pub fn oneintrp(
         //
         // limit the new density to between the min and max of original points
         let val = a2 * dx * dx + b * dy * dy + c * dx + d * dy + v5;
-        let inner = if vmax < val { vmax } else { val };
-        oneintrp = if vmin > inner { vmin } else { inner };
+        // `max(vmin, min(vmax, expr))` (`bsubs.f90:225`): `minss expr, vmax`
+        // then `maxss ., vmin`.
+        oneintrp = maxss(minss(val, vmax), vmin);
     } else {
         //
         // cubic interpolation
@@ -686,14 +692,12 @@ pub fn fast_interp(
                     //
                     // find min and max of all 5 points
                     //
-                    let mut vmax = v2;
-                    for v in [v4, v5, v6, v8] {
-                        vmax = if vmax > v { vmax } else { v };
-                    }
-                    let mut vmin = v2;
-                    for v in [v4, v5, v6, v8] {
-                        vmin = if vmin < v { vmin } else { v };
-                    }
+                    // `bsubs.f90:403-404` (`fastInterp`): reassociated by the
+                    // reference object differently from `oneintrp`, as
+                    // `maxss(maxss(maxss(v5, v4), maxss(v2, v8)), v6)` and
+                    // `minss(minss(minss(v4, v5), minss(v2, v8)), v6)`.
+                    let vmax = maxss(maxss(maxss(v5, v4), maxss(v2, v8)), v6);
+                    let vmin = minss(minss(minss(v4, v5), minss(v2, v8)), v6);
                     //
                     let a2 = (v6 + v4) * 0.5 - v5;
                     let b = (v8 + v2) * 0.5 - v5;
@@ -703,8 +707,8 @@ pub fn fast_interp(
                     // limit the new density to between min and max of original points
                     //
                     let val = a2 * dx * dx + b * dy * dy + c * dx + d * dy + v5;
-                    let inner = if vmax < val { vmax } else { val };
-                    pix_val = if vmin > inner { vmin } else { inner };
+                    // `bsubs.f90:413-414`: `minss expr, vmax`, `maxss ., vmin`.
+                    pix_val = maxss(minss(val, vmax), vmin);
                 }
                 // 80
                 arr_out[out(ix_out, iy_out)] = pix_val;
@@ -1038,7 +1042,7 @@ pub fn edgeswap(
 ///
 /// For a skipped edge the source zeroes the scratch grids `dxgrid`,
 /// `dygrid`, `ddengrid` — not the buffer just read (`bsubs.f90:777-781`);
-/// reproduced.
+/// the buffer is zeroed here (fixed in translation, `BUGS.md`).
 pub fn read_edge_func(
     bv: &mut BlendVars,
     units: &mut BlendUnits,
@@ -1132,16 +1136,20 @@ pub fn read_edge_func(
             }
         }
     }
+    // Fixed in translation (`BUGS.md`): `bsubs.f90:777-781` zeroes the
+    // module scratch grids `dxgrid`/`dygrid`/`ddengrid` here, leaving the
+    // skipped edge's function just read into buffer `indbuf` in use.  The
+    // evident intent is a zero function for a skipped edge, so the buffer is
+    // cleared (the scratch grids are left alone).
     if bv.if_skip_edge[(iedge - 1) as usize + bv.if_skip_edge_ext[0] * (ixy - 1) as usize] > 0 {
-        for grid_ext in [
-            (&mut bv.dx_grid, bv.dx_grid_ext),
-            (&mut bv.dy_grid, bv.dy_grid_ext),
-            (&mut bv.dden_grid, bv.dden_grid_ext),
+        for (grid, ext) in [
+            (&mut bv.dx_gr_bf, bv.dx_gr_bf_ext),
+            (&mut bv.dy_gr_bf, bv.dy_gr_bf_ext),
+            (&mut bv.dden_gr_bf, bv.dden_gr_bf_ext),
         ] {
-            let (grid, ext) = grid_ext;
             for j in 1..=nygr {
                 for i in 1..=nxgr {
-                    grid[(i - 1) as usize + ext[0] * (j - 1) as usize] = 0.;
+                    grid[gbf(i, j, &ext)] = 0.;
                 }
             }
         }
@@ -1167,8 +1175,9 @@ pub fn read_edge_func(
                 / bv.interval_den[(ixy - 1) as usize] as f32
                 + 1.;
             let lim = nx_den as f32 - 0.01;
-            let inner = if lim < x_in_den { lim } else { x_in_den };
-            x_in_den = if 1. > inner { 1. } else { inner };
+            // `max(1., min(nxDen - 0.01, xInDen))` (`bsubs.f90:800, 806`):
+            // `minss xInDen, lim` then `maxss ., 1.` in the reference object.
+            x_in_den = maxss(minss(x_in_den, lim), 1.);
             let ix_den = x_in_den as i32;
             let fx_den = x_in_den - ix_den as f32;
             for iygr in 1..=nygr {
@@ -1177,8 +1186,7 @@ pub fn read_edge_func(
                     / bv.interval_den[(3 - ixy - 1) as usize] as f32
                     + 1.;
                 let lim = bv.ny_den_buf[idn] as f32 - 0.01;
-                let inner = if lim < y_in_den { lim } else { y_in_den };
-                y_in_den = if 1. > inner { 1. } else { inner };
+                y_in_den = maxss(minss(y_in_den, lim), 1.);
                 let iy_den = y_in_den as i32;
                 let fy_den = y_in_den - iy_den as f32;
                 let ind_val = (iy_den - 1) * nx_den + ix_den;
@@ -1188,9 +1196,18 @@ pub fn read_edge_func(
                 // `fyDen = 0` (`fxDen = 0`), and the neighbour the source still
                 // reads, weighted by 0, lies past this edge's samples: in the
                 // next column of `deltaDenBuf`, or for the last edge past the
-                // whole array (heap bytes; `BUGS.md`).  An element outside the
-                // array is read as 0 here.
-                let at = |k: usize| del.get(k).copied().unwrap_or(0.0);
+                // whole array (heap bytes).  Fixed in translation (`BUGS.md`):
+                // a neighbour outside this edge's `nxDen * nyDen` samples is
+                // taken as 0, so it contributes nothing whatever lies there.
+                let n_samples = (nx_den * bv.ny_den_buf[idn]) as usize;
+                let col0 = e[0] * idn;
+                let at = |k: usize| {
+                    if k >= col0 && k < col0 + n_samples {
+                        del.get(k).copied().unwrap_or(0.0)
+                    } else {
+                        0.0
+                    }
+                };
                 let k = gbf(ixgr, iygr, &bv.dden_gr_bf_ext);
                 bv.dden_gr_bf[k] = bv.dden_gr_bf[k]
                     + (1. - fy_den)
@@ -1215,7 +1232,8 @@ pub fn read_edge_func(
 ///
 /// With `needByteSwap` set, the source swaps `dxgrid`/`dygrid`/`ddengrid`
 /// in place to write them (`bsubs.f90:1208-1212`), so the next edge of a
-/// joint derives its rotation from byte-swapped grids; reproduced.
+/// joint derives its rotation from byte-swapped grids; here only the
+/// written record is swapped (fixed in translation, `BUGS.md`).
 pub fn doedge(
     bv: &mut BlendVars,
     units: &mut BlendUnits,
@@ -1730,27 +1748,30 @@ pub fn doedge(
                 arr[0] = i32::from_ne_bytes(b[..4].try_into().unwrap());
                 arr[1] = i32::from_ne_bytes(b[4..].try_into().unwrap());
             }
-            for iy in 1..=nygr {
-                for grid in [&mut bv.dx_grid, &mut bv.dy_grid, &mut bv.dden_grid] {
-                    let start = g(1, iy);
-                    let row = &mut grid[start..start + nxgr as usize];
-                    // SAFETY: `u8` has alignment 1 and every bit pattern is
-                    // valid for both `u8` and `f32`; the view covers `row`.
-                    let bytes = unsafe {
-                        std::slice::from_raw_parts_mut(row.as_mut_ptr().cast::<u8>(), row.len() * 4)
-                    };
-                    convert_floats(bytes, nxgr);
-                }
-            }
             for v in [ixdisp, iydisp, igrstr[0], igrofs[0], igrstr[1], igrofs[1]] {
                 record.extend_from_slice(&v.to_ne_bytes());
             }
         }
+        // Fixed in translation (`BUGS.md`): `bsubs.f90:1208-1212` swaps
+        // `dxgrid`/`dygrid`/`ddengrid` in place with `convert_floats` before
+        // the write, so after a swapped write the module grids hold
+        // byte-swapped values, and the next edge of a multinegative joint
+        // derives its predicted displacement from them (`edge_to_rotrans`).
+        // The swap is applied to the record's copy only; the grids keep
+        // their values.
         for iy in 1..=nygr {
             for ix in 1..=nxgr {
-                record.extend_from_slice(&bv.dx_grid[g(ix, iy)].to_ne_bytes());
-                record.extend_from_slice(&bv.dy_grid[g(ix, iy)].to_ne_bytes());
-                record.extend_from_slice(&bv.dden_grid[g(ix, iy)].to_ne_bytes());
+                for v in [
+                    bv.dx_grid[g(ix, iy)],
+                    bv.dy_grid[g(ix, iy)],
+                    bv.dden_grid[g(ix, iy)],
+                ] {
+                    let mut b = v.to_ne_bytes();
+                    if bv.need_byte_swap != 0 {
+                        convert_floats(&mut b, 1);
+                    }
+                    record.extend_from_slice(&b);
+                }
             }
         }
         unit.write_record(jedge + 1, &record)
@@ -1820,7 +1841,9 @@ pub fn recen_rotrans(r: &[f32], xcenew: f32, ycenew: f32, s: &mut [f32]) {
 /// `inEdge` and related module arrays.
 ///
 /// The `maxInside` of the y branch of the most-interior search is computed
-/// with `nyin - 1 - xinpiece(i)` (`bsubs.f90:1595`); reproduced.
+/// with `nyin - 1 - xinpiece(i)` in the source (`bsubs.f90:1595`); here with
+/// `yinpiece` as tested (fixed in translation, `BUGS.md`).  `maxInside` stays
+/// `integer`, as declared.
 pub fn countedges(
     bv: &mut BlendVars,
     indx: i32,
@@ -1973,10 +1996,13 @@ pub fn countedges(
                     // distance is negative for a piece that point is actually in;
                     // it is negative of distance from nearest edge
                     //
-                    let mut dist = -xtmp;
-                    for v in [xtmp - (nxin - 1) as f32, -ytmp, ytmp - (nyin - 1) as f32] {
-                        dist = if dist > v { dist } else { v };
-                    }
+                    // `max(-xtmp, xtmp - (nxin - 1), -ytmp, ytmp - (nyin - 1))`
+                    // (`bsubs.f90:1402`): the reference object computes
+                    // `maxss(-minss(xtmp, ytmp), maxss(xtmp - .., ytmp - ..))`.
+                    let dist = maxss(
+                        -minss(xtmp, ytmp),
+                        maxss(xtmp - (nxin - 1) as f32, ytmp - (nyin - 1) as f32),
+                    );
                     if dist < distmin {
                         distmin = dist;
                         bv.min_xframe = ixfrm;
@@ -2195,16 +2221,21 @@ pub fn countedges(
             let k = (i - 1) as usize;
             let (xi, yi) = (bv.x_in_piece[k], bv.y_in_piece[k]);
             let vx = (nxin - 1) as f32 - xi;
-            let mx = if xi < vx { xi } else { vx };
+            // `bsubs.f90:1590-1595`: every `min` here is `minss nx - 1 - x, x`
+            // (the difference as destination) in the reference object.
+            let mx = minss(vx, xi);
             if mx > max_inside as f32 {
                 max_inside = mx as i32;
                 axisin = 1;
             }
             let vy = (nyin - 1) as f32 - yi;
-            let my = if yi < vy { yi } else { vy };
+            let my = minss(vy, yi);
             if my > max_inside as f32 {
-                let vyx = (nyin - 1) as f32 - xi;
-                max_inside = (if yi < vyx { yi } else { vyx }) as i32;
+                // Fixed in translation (`BUGS.md`): `bsubs.f90:1595` assigns
+                // `min(yinpiece(i), nyin - 1 - xinpiece(i))`, a copy-paste of
+                // the X line, where the test above it uses `yinpiece`; the
+                // tested value is assigned here.
+                max_inside = my as i32;
                 axisin = 2;
             }
         }
@@ -2309,13 +2340,14 @@ pub fn countedges(
         // Use cross piece if point is more interior along the other axis from
         // the disjoint edges (ixy is 1, 2 for X, 3, 4 for Y)
         if ixy > 0 {
-            let fmin = |a: f32, b: f32| if a < b { a } else { b };
+            // `bsubs.f90:1670-1673`: each `min(v, n - 1 - v)` is
+            // `minss n - 1 - v, v` in the reference object.
             if (ixy <= 2
-                && fmin(ypc_cross, (nyin - 1) as f32 - ypc_cross)
-                    > fmin(bv.y_in_piece[0], (nyin - 1) as f32 - bv.y_in_piece[0]))
+                && minss((nyin - 1) as f32 - ypc_cross, ypc_cross)
+                    > minss((nyin - 1) as f32 - bv.y_in_piece[0], bv.y_in_piece[0]))
                 || (ixy > 2
-                    && fmin(xpc_cross, (nxin - 1) as f32 - xpc_cross)
-                        > fmin(bv.x_in_piece[0], (nxin - 1) as f32 - bv.x_in_piece[0]))
+                    && minss((nxin - 1) as f32 - xpc_cross, xpc_cross)
+                        > minss((nxin - 1) as f32 - bv.x_in_piece[0], bv.x_in_piece[0]))
             {
                 bv.in_piece[1] = ipc_cross;
                 bv.x_in_piece[0] = xpc_cross;
@@ -2410,20 +2442,21 @@ pub fn most_interior_frames(
                 let iy = bv.inp_yframe[k] + 1 - iyfrm;
                 if (ix + 1) / 2 == 1 && (iy + 1) / 2 == 1 {
                     let v = nxyin as f32 - xyinpiece[k];
-                    distin[(iy - 1) as usize][(ix - 1) as usize] =
-                        if xyinpiece[k] < v { xyinpiece[k] } else { v };
+                    // `bsubs.f90:1742`: `minss nxyin - xy, xy`.
+                    distin[(iy - 1) as usize][(ix - 1) as usize] = minss(v, xyinpiece[k]);
                 }
             }
-            let fmin = |a: f32, b: f32| if a < b { a } else { b };
+            // `bsubs.f90:1745-1749`: in the reference object `dist1` is
+            // `minss distin(1,1), .` but `dist2` is `minss distin(2,2), .`.
             let (dist1, dist2) = if ixy == 1 {
                 (
-                    fmin(distin[0][0], distin[1][0]),
-                    fmin(distin[0][1], distin[1][1]),
+                    minss(distin[0][0], distin[1][0]),
+                    minss(distin[1][1], distin[0][1]),
                 )
             } else {
                 (
-                    fmin(distin[0][0], distin[0][1]),
-                    fmin(distin[1][0], distin[1][1]),
+                    minss(distin[0][0], distin[0][1]),
+                    minss(distin[1][1], distin[1][0]),
                 )
             };
             //
@@ -2437,7 +2470,8 @@ pub fn most_interior_frames(
                     *iybest = iyfrm;
                 }
             } else {
-                let closest = fmin(dist1, dist2);
+                // `bsubs.f90:1762`: `minss dist1, dist2`.
+                let closest = minss(dist1, dist2);
                 if closest <= nxyin as f32 && closest > max_one_col as f32 {
                     max_one_col = closest as i32;
                     ix_one_col = ixfrm;
@@ -2564,7 +2598,8 @@ pub fn find_nearest_piece(bv: &BlendVars, ix_frame: &mut i32, iy_frame: &mut i32
 ///
 /// Takes a coordinate in the lower piece of the edge in buffer `indedg`,
 /// interpolates the edge function bilinearly, and returns the coordinate in
-/// the upper piece and the density difference.
+/// the upper piece and the density difference.  A one-position axis of the
+/// grid is not interpolated along (fixed in translation, `BUGS.md`).
 pub fn dxydgrinterp(
     bv: &BlendVars,
     x1: f32,
@@ -2593,15 +2628,21 @@ pub fn dxydgrinterp(
     let mut iyg = ygrid as i32;
     iyg = 1.max((bv.ny_gr_bf[ie] - 1).min(iyg));
     let d = xgrid - ixg as f32;
-    let inner = if 1. < d { 1. } else { d };
-    let fx1 = if 0. > inner { 0. } else { inner }; //NO EXTRAPOLATIONS ALLOWED
+    // `max(0., min(1., d))` (`bsubs.f90:1913, 1916`): `minss d, 1.` then
+    // `maxss ., 0.` in the reference object.
+    let fx1 = maxss(minss(d, 1.), 0.); //NO EXTRAPOLATIONS ALLOWED
     let fx = 1. - fx1;
-    let ixg1 = ixg + 1;
+    // Fixed in translation (`BUGS.md`): for a grid with a single column
+    // (row), `ixg` (`iyg`) is clamped to 1 and the source still reads
+    // column (row) 2 with weight `fx1` (`fy1`), which `doedge` never wrote
+    // (unwritten heap natively, `bsubs.f90:1911-1918`).  The second index is
+    // limited to the grid here, so a one-long axis is constant along it; for
+    // every grid of two or more positions `ixg + 1 <= nxgr` already.
+    let ixg1 = (ixg + 1).min(bv.nx_gr_bf[ie].max(1));
     let d = ygrid - iyg as f32;
-    let inner = if 1. < d { 1. } else { d };
-    let fy1 = if 0. > inner { 0. } else { inner };
+    let fy1 = maxss(minss(d, 1.), 0.);
     let fy = 1. - fy1;
-    let iyg1 = iyg + 1;
+    let iyg1 = (iyg + 1).min(bv.ny_gr_bf[ie].max(1));
     let c00 = fx * fy;
     let c10 = fx1 * fy;
     let c01 = fx * fy1;
@@ -2656,10 +2697,10 @@ pub fn crossvalue(xinlong: bool, nxpieces: i32, nypieces: i32, nshort: &mut i32,
 /// `array` -- the previous piece in the cache.  Only a read before `array`
 /// itself (from the first cache slot) is out of bounds in the source too.
 ///
-/// Both `taperAtFill` calls taper the *lower* box, `brray`
-/// (`bsubs.f90:2019-2020`, `:2037-2038`): the upper box at
-/// `brray(maxbsiz / 2 + 1)` is never tapered and the lower one is tapered
-/// twice.  Reproduced.
+/// Both `taperAtFill` calls in the source taper the *lower* box, `brray`
+/// (`bsubs.f90:2019-2020`, `:2037-2038`); the second one here tapers the
+/// upper box at `brray(maxbsiz / 2 + 1)` instead (fixed in translation,
+/// `BUGS.md`).
 pub fn xcorr_edge(
     bv: &mut BlendVars,
     array: &[f32],
@@ -2840,8 +2881,18 @@ pub fn xcorr_edge(
             &mut idum,
         );
     }
+    // Fixed in translation (`BUGS.md`): `bsubs.f90:2037-2038` passes `brray`
+    // again, so native tapers the lower box a second time and never the
+    // upper one.  The evident intent is to taper the box just extracted, at
+    // `brray(maxbsiz / 2 + 1)`.
     if bv.ifill_treatment == 2 {
-        ierr = taperatfill(&mut bv.brray[..nbox], &nxy_box[0], &nxy_box[1], &64, &0);
+        ierr = taperatfill(
+            &mut bv.brray[half..half + nbox],
+            &nxy_box[0],
+            &nxy_box[1],
+            &64,
+            &0,
+        );
     }
     let _ = ierr;
 
@@ -3463,8 +3514,10 @@ pub fn find_best_shifts(
                     (ax * ax + ay * ay).sqrt()
                 };
                 asum += adist;
-                *amax = if *amax > adist { *amax } else { adist };
-                *bmax = if *bmax > bdist { *bmax } else { bdist };
+                // `bsubs.f90:2511-2512`: `maxss adist, amax` / `maxss bdist,
+                // bmax` in the reference object.
+                *amax = maxss(adist, *amax);
+                *bmax = maxss(bdist, *bmax);
                 *nsum += 1;
             }
         }
@@ -3833,7 +3886,8 @@ pub fn gradfunc(bv: &mut BlendVars, fc: &mut FuncCom, p: &[f32], func_err: &mut 
     // `tiltAngles(min(ilistz, numAngles))`: with no tilt angles (blendmont
     // `-test` without `-gradient`/`-tiltfile`) this is element 0, the 4 bytes
     // in front of the allocation -- the high half of the malloc size word,
-    // 0 for any allocation under 4 GB.  The translation uses 0 there.
+    // 0 for any allocation under 4 GB.  Fixed in translation (`BUGS.md`):
+    // with no angles entered the tilt angle is defined as 0.
     let iang = bv.ilistz.min(bv.num_angles);
     let tiltang = if iang >= 1 {
         bv.tilt_angles[(iang - 1) as usize]
@@ -4536,4 +4590,41 @@ pub fn dumpedge(
     }
     //
     iiu_write_header(2 + ixy, &title, -1, 0., 255., 128.);
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// A one-row edge grid is constant across the edge: `dxydgrinterp`
+    /// does not blend toward row 2, which `doedge` never wrote for it
+    /// (fixed in translation, `BUGS.md`).  Row 2 holds a sentinel that
+    /// must not reach the result.
+    #[test]
+    fn dxydgrinterp_single_row_grid_does_not_read_row_two() {
+        let mut bv = BlendVars::default();
+        let ext = [3usize, 2, 1];
+        let fill = |row1: [f32; 3]| {
+            let mut v = vec![1000.0f32; 6];
+            v[..3].copy_from_slice(&row1);
+            v
+        };
+        bv.dx_gr_bf = fill([1., 2., 3.]);
+        bv.dy_gr_bf = fill([10., 20., 30.]);
+        bv.dden_gr_bf = fill([0.5, 1.5, 2.5]);
+        bv.dx_gr_bf_ext = ext;
+        bv.dy_gr_bf_ext = ext;
+        bv.dden_gr_bf_ext = ext;
+        bv.nx_gr_bf[0] = 3;
+        bv.ny_gr_bf[0] = 1;
+        bv.int_xgr_bf[0] = 10;
+        bv.int_ygr_bf[0] = 10;
+        let (mut x2, mut y2, mut dden) = (0.0f32, 0.0f32, 0.0f32);
+        // Halfway between grid columns 1 and 2, and half a grid step past
+        // the single row.
+        dxydgrinterp(&bv, 5., 5., 1, &mut x2, &mut y2, &mut dden);
+        assert_eq!(x2, 5. + 1.5);
+        assert_eq!(y2, 5. + 15.);
+        assert_eq!(dden, 1.0);
+    }
 }

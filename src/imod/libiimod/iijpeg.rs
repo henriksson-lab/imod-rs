@@ -1,509 +1,788 @@
-//! Safe, owned JPEG backend for `IMOD/libiimod/iijpeg.c`.
-use crate::imod::libcfshr::b3dutil::ImodFile;
+//! Translation of `IMOD/libiimod/iijpeg.c`: JPEG-type `ImodImageFile`s.
+//!
+//! One Rust function per source function.  The source drives libjpeg; this
+//! translation keeps **only the codec itself** behind a Rust crate boundary
+//! (the deliberate Rust-native JPEG decision, `RUST_NATIVE_BACKENDS_PLAN.md`):
+//!
+//! - decoding: `zune-jpeg` stands in for `jpeg_read_header`,
+//!   `jpeg_start_decompress` and `jpeg_read_scanlines`.  The crate decodes a
+//!   whole image at once, so the scanlines are taken from its top-down output
+//!   one at a time, in the order libjpeg hands them over, into the same
+//!   one-line `tmpData` buffer the source reads into.  Everything around that
+//!   - the file checks, the header setup, the load-info/sub-area/scaling/
+//!   padding set-up through `iiMRCsetLoadInfo` and `iiInitReadSectionAny`, the
+//!   bottom-up placement, and every conversion including RGB to gray
+//!   (`iiProcessReadLine`, `mrcsec.c:740-782`) - is the translated source.
+//! - encoding: the `image` crate's `JpegEncoder` stands in for
+//!   `jpeg_create_compress` .. `jpeg_finish_compress`; the scanline order,
+//!   quality and JFIF density follow `jpegWriteSection`.
+//!
+//! The libjpeg decoder and `zune-jpeg` are different IDCT/upsampling/colour
+//! conversion implementations, so decoded pixel values can differ by small
+//! amounts; `TOFIX.md` records the measured difference.
+//!
+//! Two libjpeg behaviours that are observable through IMOD are reproduced at
+//! the boundary because they decide the exit status: libjpeg refuses an
+//! `out_color_space` of `JCS_RGB` for CMYK/YCCK input at
+//! `jpeg_start_decompress` (`JERR_CONVERSION_NOTIMPL`), and
+//! `jpeg_finish_decompress` longjmps with `JERR_TOO_LITTLE_DATA` whenever the
+//! reading loop stopped before the last scanline, which is what the source's
+//! error block (`iijpeg.c:233-247`) turns into a normal return or an error.
+//!
+//! The source's static `sJerr` error manager and its `setjmp`/`longjmp` have
+//! no counterpart: a crate error is returned, and the source's error block is
+//! executed in place at each point where libjpeg could have longjmp'd.
+
+use crate::imod::libcfshr::b3dutil::{ImodFile, b3d_error};
 use crate::imod::libiimod::iimage::{
-    IIERR_BAD_CALL, IIERR_IO_ERROR, IIERR_NOT_FORMAT, IIFILE_JPEG, IIFORMAT_LUMINANCE,
-    IIFORMAT_RGB, IISTATE_READY, ImageDataType, ImodImageFile, ii_convert_line_of_floats,
-    ii_simple_fill_mrc_header_callback,
+    IIERR_BAD_CALL, IIERR_IO_ERROR, IIERR_NOT_FORMAT, IIERR_QUITTING, IIFILE_JPEG,
+    IIFORMAT_LUMINANCE, IIFORMAT_RGB, IISTATE_READY, ImageDataType, ImodImageFile, LineProcData,
+    MRSA_BYTE, MRSA_FLOAT, MRSA_NOPROC, MRSA_USHORT, ii_make_buffer_convert_if_float,
+    ii_simple_fill_mrc_header, ii_simple_fill_mrc_header_callback,
 };
-use crate::imod::libiimod::mrcfiles::{MRC_MODE_BYTE, MRC_MODE_RGB};
-use image::codecs::jpeg::JpegEncoder;
-use image::{ColorType, GenericImageView, ImageFormat, Luma, Pixel, Rgb};
+use crate::imod::libiimod::iimrc::ii_mrc_set_load_info;
+use crate::imod::libiimod::mrcfiles::{LoadInfo, MRC_MODE_BYTE, MRC_MODE_RGB, MrcHeader};
+use crate::imod::libiimod::mrcsec::{ii_init_read_section_any, ii_process_read_line};
+use image::ImageEncoder;
+use image::codecs::jpeg::{JpegEncoder, PixelDensity, PixelDensityUnit};
 use std::io::{Read as _, Seek as _, SeekFrom};
-use std::marker::PhantomData;
-const NOPROC: i32 = 0;
-const BYTE: i32 = 1;
-const FLOAT: i32 = 2;
-const USHORT: i32 = 3;
-fn count(f: &ImodImageFile) -> Option<usize> {
-    usize::try_from(f.nx)
-        .ok()?
-        .checked_mul(usize::try_from(f.ny).ok()?)
-}
-fn jpeg_delete(f: &mut ImodImageFile) {
-    f.native_image_pixels = None;
-    f.native_image_rgb = false;
-}
-/// C `iiJPEGCheck`: decode once into crate-owned pixels instead of retaining libjpeg state.
-pub fn ii_jpeg_check(f: &mut ImodImageFile) -> i32 {
-    let Some(mut fp) = f.fp.clone() else {
-        return IIERR_BAD_CALL;
-    };
-    if fp.seek(SeekFrom::Start(0)).is_err() {
-        return IIERR_IO_ERROR;
-    };
-    let mut raw = vec![];
-    if fp.read_to_end(&mut raw).is_err() || raw.len() < 3 {
-        return IIERR_IO_ERROR;
-    };
-    if raw[..3] != [255, 216, 255] {
-        return IIERR_NOT_FORMAT;
-    };
-    let Ok(im) = image::load_from_memory_with_format(&raw, ImageFormat::Jpeg) else {
-        return IIERR_IO_ERROR;
-    };
-    let gray = matches!(
-        im.color(),
-        ColorType::L8 | ColorType::La8 | ColorType::L16 | ColorType::La16
-    );
-    let (w, h) = (im.width(), im.height());
-    let Ok(nx) = i32::try_from(w) else {
-        return IIERR_IO_ERROR;
-    };
-    let Ok(ny) = i32::try_from(h) else {
-        return IIERR_IO_ERROR;
-    };
-    f.nx = nx;
-    f.ny = ny;
-    f.nz = 1;
-    f.type_ = ImageDataType::UnsignedByte;
-    f.format = if gray {
-        IIFORMAT_LUMINANCE
-    } else {
-        IIFORMAT_RGB
-    };
-    f.mode = if gray { MRC_MODE_BYTE } else { MRC_MODE_RGB };
-    f.file = IIFILE_JPEG;
-    f.amin = 0.;
-    f.amax = 255.;
-    f.amean = 128.;
-    f.native_image_rgb = !gray;
-    f.native_image_pixels = Some(if gray {
-        im.into_luma8().into_raw()
-    } else {
-        im.into_rgb8().into_raw()
-    });
-    f.clean_up = Some(jpeg_delete_callback);
-    f.fill_mrc_header = Some(ii_simple_fill_mrc_header_callback);
-    f.read_section = Some(read_callback);
-    f.read_section_byte = Some(read_byte_callback);
-    f.read_section_ushort = Some(read_ushort_callback);
-    f.read_section_float = Some(read_float_callback);
-    0
-}
-/// C `jpegReadSectionAny`.
-fn jpeg_read_section_any(f: &ImodImageFile, out: &mut [u8], z: i32, kind: i32) -> i32 {
-    if z != 0 {
-        return IIERR_BAD_CALL;
+use zune_jpeg::JpegDecoder;
+use zune_jpeg::zune_core::bytestream::ZCursor;
+use zune_jpeg::zune_core::colorspace::ColorSpace;
+use zune_jpeg::zune_core::options::DecoderOptions;
+
+/// `IIERR_MEMORY_ERR` (`iimage.h:73`).
+const IIERR_MEMORY_ERR: i32 = 3;
+
+/// The libjpeg header state `iiJPEGCheck` and `jpegReadSectionAny` get from
+/// `jpeg_read_header`: rewind the file, read it, and parse the headers.  The
+/// source keeps a `jpeg_decompress_struct` in `inFile->header` for this; the
+/// crate decoder borrows the file bytes, so each call re-reads them, as the
+/// source's `rewind` + `jpeg_stdio_src` + `jpeg_read_header` does.
+///
+/// `jpeg_read_header` equivalent: returns the file bytes, or the crate's
+/// error text where libjpeg would have longjmp'd with a message.
+fn jpeg_read_header(fp: &mut ImodFile) -> Result<Vec<u8>, String> {
+    let mut raw = Vec::new();
+    if let Err(error) = fp
+        .seek(SeekFrom::Start(0))
+        .and_then(|_| fp.read_to_end(&mut raw))
+    {
+        return Err(error.to_string());
     }
-    let Some(src) = f.native_image_pixels.as_deref() else {
+    Ok(raw)
+}
+
+/// Decoder options: libjpeg accepts dimensions up to `JPEG_MAX_DIMENSION`
+/// (65500); the crate's default ceiling is 16384.
+fn jpeg_decoder(raw: &[u8], out_color_space: ColorSpace) -> JpegDecoder<ZCursor<&[u8]>> {
+    JpegDecoder::new_with_options(
+        ZCursor::new(raw),
+        DecoderOptions::default()
+            .set_max_width(65535)
+            .set_max_height(65535)
+            .jpeg_set_out_colorspace(out_color_space),
+    )
+}
+
+/// C `iiJPEGCheck` (`iijpeg.c:54`): check for and open a JPEG file.
+pub fn ii_jpeg_check(in_file: &mut ImodImageFile) -> i32 {
+    let mut buf = [0u8; 4];
+    let Some(mut fp) = in_file.fp.clone() else {
         return IIERR_BAD_CALL;
     };
-    let Some(n) = count(f) else {
-        return IIERR_BAD_CALL;
-    };
-    let c = if f.native_image_rgb { 3 } else { 1 };
-    let b = match kind {
-        FLOAT => 4,
-        USHORT => 2,
-        _ => 1,
-    };
-    let ch = if kind == NOPROC { c } else { 1 };
-    if out.len() != n * ch * b || src.len() != n * c {
-        return IIERR_BAD_CALL;
-    }
-    for oy in 0..f.ny as usize {
-        let sy = f.ny as usize - 1 - oy;
-        for x in 0..f.nx as usize {
-            let si = (sy * f.nx as usize + x) * c;
-            let lum = if c == 1 {
-                src[si]
-            } else {
-                (0.299 * src[si] as f32 + 0.587 * src[si + 1] as f32 + 0.114 * src[si + 2] as f32)
-                    .round() as u8
-            };
-            let i = oy * f.nx as usize + x;
-            match kind {
-                NOPROC => out[i * c..i * c + c].copy_from_slice(&src[si..si + c]),
-                BYTE => out[i] = lum,
-                USHORT => out[2 * i..2 * i + 2].copy_from_slice(&(lum as u16 * 257).to_ne_bytes()),
-                FLOAT => out[4 * i..4 * i + 4].copy_from_slice(&(lum as f32).to_ne_bytes()),
-                _ => return IIERR_BAD_CALL,
+
+    /* Look for the magic numbers at start */
+    let mut num_read = 0;
+    if fp.seek(SeekFrom::Start(0)).is_ok() {
+        while num_read < 4 {
+            match fp.read(&mut buf[num_read..]) {
+                Ok(0) | Err(_) => break,
+                Ok(n) => num_read += n,
             }
         }
     }
-    0
-}
-
-/// C `jpegReadSection`.
-fn jpeg_read_section(f: &ImodImageFile, out: &mut [u8], z: i32) -> i32 {
-    jpeg_read_section_any(f, out, z, NOPROC)
-}
-
-/// C `jpegReadSectionByte`.
-fn jpeg_read_section_byte(f: &ImodImageFile, out: &mut [u8], z: i32) -> i32 {
-    jpeg_read_section_any(f, out, z, BYTE)
-}
-
-/// C `jpegReadSectionUShort`.
-fn jpeg_read_section_ushort(f: &ImodImageFile, out: &mut [u8], z: i32) -> i32 {
-    jpeg_read_section_any(f, out, z, USHORT)
-}
-
-/// C `jpegReadSectionFloat`.
-fn jpeg_read_section_float(f: &ImodImageFile, out: &mut [u8], z: i32) -> i32 {
-    jpeg_read_section_any(f, out, z, FLOAT)
-}
-/// C `jpegOpenNew`.
-pub fn jpeg_open_new(f: &mut ImodImageFile) -> i32 {
-    let Some(name) = f.filename.as_deref() else {
-        return IIERR_BAD_CALL;
-    };
-    let Some(fp) = ImodFile::open(name, "wb") else {
+    if num_read < 4 {
+        b3d_error(
+            Some(&mut ImodFile::Stderr),
+            format_args!(
+                "ERROR: iiJPEGCheck - Reading file {}\n",
+                in_file.filename.as_deref().unwrap_or("")
+            ),
+        );
         return IIERR_IO_ERROR;
+    }
+    if buf[0] != 0xFF || buf[1] != 0xD8 || buf[2] != 0xFF {
+        return IIERR_NOT_FORMAT;
+    }
+
+    /* Create object and read header to get properties.  The source's
+    error block (`iijpeg.c:84-94`) is executed wherever libjpeg would
+    have longjmp'd. */
+    let header_error = |message: &str| {
+        b3d_error(
+            Some(&mut ImodFile::Stderr),
+            format_args!("iiJPEGCheck: JPEG warning/error {}\n", message),
+        );
+        IIERR_IO_ERROR
     };
-    f.fp = Some(fp);
-    f.state = IISTATE_READY;
-    f.clean_up = Some(jpeg_delete_callback);
-    f.fill_mrc_header = Some(ii_simple_fill_mrc_header_callback);
-    f.write_section = Some(write_callback);
-    f.write_section_float = Some(write_float_callback);
-    // C treats any nonzero `lastWrittenZ` as the not-yet-written sentinel;
-    // `-1` is the normal iimage new-file value.
-    f.last_written_z = -1;
+    let raw = match jpeg_read_header(&mut fp) {
+        Ok(raw) => raw,
+        Err(message) => return header_error(&message),
+    };
+    let mut cinfo = jpeg_decoder(&raw, ColorSpace::RGB);
+    if let Err(error) = cinfo.decode_headers() {
+        return header_error(&error.to_string());
+    }
+    let (Some(info), Some(jpeg_color_space)) = (cinfo.info(), cinfo.input_colorspace()) else {
+        return header_error("headers not decoded");
+    };
+
+    in_file.nx = info.width as i32;
+    in_file.ny = info.height as i32;
+    in_file.nz = 1;
+    in_file.type_ = ImageDataType::UnsignedByte;
+    if jpeg_color_space == ColorSpace::Luma {
+        in_file.format = IIFORMAT_LUMINANCE;
+        in_file.mode = MRC_MODE_BYTE;
+    } else if info.components > 2 {
+        in_file.format = IIFORMAT_RGB;
+        in_file.mode = MRC_MODE_RGB;
+    } else {
+        b3d_error(
+            Some(&mut ImodFile::Stderr),
+            format_args!(
+                "ERROR: iiJPEGCheck - JPEG colorspace not GRAYSCALE and # of components is {}\n",
+                info.components
+            ),
+        );
+        return IIERR_NOT_FORMAT;
+    }
+
+    /* Pixel size smaller than 400 nm cannot be encoded in the 16-bit integers of the JFIF
+    so skip setting a pixel size */
+
+    /* Set up the rest ofteh basic stuff and pointers for reading routines */
+    in_file.amin = 0.;
+    in_file.amax = 255.;
+    in_file.amean = 128.;
+    in_file.file = IIFILE_JPEG;
+    in_file.clean_up = Some(jpeg_delete_callback);
+    in_file.fill_mrc_header = Some(ii_simple_fill_mrc_header_callback);
+
+    in_file.read_section = Some(jpeg_read_section);
+    in_file.read_section_ushort = Some(jpeg_read_section_ushort);
+    in_file.read_section_byte = Some(jpeg_read_section_byte);
+    in_file.read_section_float = Some(jpeg_read_section_float);
+
+    /* We need abort the object and redo header later because some callers might close
+    and reopen the file */
     0
 }
 
-pub(crate) unsafe fn jpeg_open_new_callback(p: *mut ImodImageFile) -> i32 {
-    let Some(file) = (unsafe { file(p) }) else {
+pub(crate) unsafe fn ii_jpeg_check_callback(in_file: *mut ImodImageFile) -> i32 {
+    let Some(in_file) = (unsafe { in_file.as_mut() }) else {
         return IIERR_BAD_CALL;
     };
-    jpeg_open_new(file)
-}
-/// The caller's buffer seen through `iijpeg.c:502-506`'s scanline loop:
-/// output row `r` is buffer row `inverted ? r : ny - 1 - r`, read in place.
-/// The C hands libjpeg one row pointer at a time and copies nothing; the
-/// `image` encoder has no scanline entry point, but `JpegEncoder::encode` is
-/// itself only `ImageBuffer::from_raw` followed by `encode_image`, and
-/// `encode_image` reads pixels solely through `dimensions`/`get_pixel`.  So
-/// this view feeds it exactly the values a flipped top-down copy would, with
-/// the same pixel types `encode` picks (`Luma<u8>`, `Rgb<u8>`), and the
-/// encoded bytes are identical without an image-sized copy.
-struct ScanlineRows<'a, P> {
-    buf: &'a [u8],
-    nx: u32,
-    ny: u32,
-    inverted: bool,
-    pixel: PhantomData<P>,
+    ii_jpeg_check(in_file)
 }
 
-impl<P: Pixel<Subpixel = u8>> GenericImageView for ScanlineRows<'_, P> {
-    type Pixel = P;
-    fn dimensions(&self) -> (u32, u32) {
-        (self.nx, self.ny)
-    }
-    fn get_pixel(&self, x: u32, y: u32) -> P {
-        let use_y = if self.inverted { y } else { self.ny - 1 - y };
-        let channels = P::CHANNEL_COUNT as usize;
-        let start = (use_y as usize * self.nx as usize + x as usize) * channels;
-        *P::from_slice(&self.buf[start..start + channels])
+/// C `jpegDelete` (`iijpeg.c:141`): when a file is being deleted, that is
+/// when to destroy and free the (de)compression object.  The crate decoder
+/// and encoder live only for the duration of one call, so there is nothing
+/// left to destroy.
+fn jpeg_delete(_in_file: &mut ImodImageFile) {}
+
+unsafe fn jpeg_delete_callback(in_file: *mut ImodImageFile) {
+    if let Some(in_file) = unsafe { in_file.as_mut() } {
+        jpeg_delete(in_file)
     }
 }
 
-/// `jpegWriteSection` (`iijpeg.c:435`).  This is the direct one-section
-/// writer used after iimage has converted float data and selected quality.
-/// The `image` encoder used by the Rust backend does not expose JFIF density
-/// fields, so `resolution` is validated at this layer but the host encoder
-/// cannot currently emit it.
+/// C `jpegReadSectionByte` (`iijpeg.c:156`).
+unsafe fn jpeg_read_section_byte(
+    in_file: *mut ImodImageFile,
+    buf: *mut u8,
+    in_section: i32,
+) -> i32 {
+    unsafe { jpeg_read_section_any(in_file, buf, in_section, MRSA_BYTE) }
+}
+
+/// C `jpegReadSectionUShort` (`iijpeg.c:161`).
+unsafe fn jpeg_read_section_ushort(
+    in_file: *mut ImodImageFile,
+    buf: *mut u8,
+    in_section: i32,
+) -> i32 {
+    unsafe { jpeg_read_section_any(in_file, buf, in_section, MRSA_USHORT) }
+}
+
+/// C `jpegReadSectionFloat` (`iijpeg.c:166`).
+unsafe fn jpeg_read_section_float(
+    in_file: *mut ImodImageFile,
+    buf: *mut u8,
+    in_section: i32,
+) -> i32 {
+    unsafe { jpeg_read_section_any(in_file, buf, in_section, MRSA_FLOAT) }
+}
+
+/// C `jpegReadSection` (`iijpeg.c:171`).
+unsafe fn jpeg_read_section(in_file: *mut ImodImageFile, buf: *mut u8, in_section: i32) -> i32 {
+    unsafe { jpeg_read_section_any(in_file, buf, in_section, MRSA_NOPROC) }
+}
+
+/// C `jpegReadSectionAny` (`iijpeg.c:179`): the main reading routine.
+unsafe fn jpeg_read_section_any(
+    in_file: *mut ImodImageFile,
+    buf: *mut u8,
+    in_section: i32,
+    type_: i32,
+) -> i32 {
+    let in_file = unsafe { &mut *in_file };
+    let mut pix_size_buf: [i32; 4] = [0, 1, 4, 2];
+    let mut hdata = MrcHeader::default();
+    let mut d = LineProcData::default();
+    let mut load_info = LoadInfo::default();
+    let li = &mut load_info;
+    let pad_left: i32;
+    let pad_right: i32;
+    let ny = in_file.ny;
+    let mut y_end: i32;
+    let mut err: i32 = -1;
+    let mut jpeg_line: i32 = 0;
+    let tval: i32;
+
+    if in_file.read_section.is_none() {
+        b3d_error(
+            Some(&mut ImodFile::Stderr),
+            format_args!(
+                "ERROR: jpegReadSectionAny - Trying to read from newly created JPEG file\n"
+            ),
+        );
+        return IIERR_BAD_CALL;
+    }
+
+    if in_section != 0 {
+        b3d_error(
+            Some(&mut ImodFile::Stderr),
+            format_args!(
+                "ERROR: jpegReadSectionAny - Trying to read section {}; only section0 can be read from JPEG file\n",
+                in_section
+            ),
+        );
+        return IIERR_BAD_CALL;
+    }
+
+    let mut tmp_data: Vec<u8> = Vec::new();
+    let tmp_size = in_file.nx as usize * if in_file.format == IIFORMAT_RGB { 3 } else { 1 };
+    if tmp_data.try_reserve_exact(tmp_size).is_err() {
+        b3d_error(
+            Some(&mut ImodFile::Stderr),
+            format_args!(
+                "ERROR: jpegReadSectionAny - Allocating line buffer for reading JPEG file\n"
+            ),
+        );
+        return IIERR_MEMORY_ERR;
+    }
+    tmp_data.resize(tmp_size, 0);
+
+    /* Initialize any variables used in the error block to make compiler happy */
+    d.y_start = 0;
+
+    /* The error block (`iijpeg.c:233-247`), run where libjpeg would longjmp.
+    `jpeg_abort_decompress`, freeing `tmpData` and the map are drops here.
+
+    `err` and `jpegLine` are non-volatile locals modified between `setjmp` and
+    `longjmp`, so after the jump their values are indeterminate (C11
+    7.13.2.1p3).  The reference binary (gcc -O2) reads them as they were at
+    the `setjmp` call, `err = -1` and `jpegLine = 0`, so every sub-area that
+    excludes row 0 fails with "too few scanlines" (`BUGS.md`, JPEG input).
+    Fixed in translation (2026-09-26): the block receives the *live* `err`
+    and `jpegLine`, which is what the test `jpegLine < d.yStart && !err` and
+    the loop comment "it is safe to stop when the desired lines are obtained
+    as the error is suppressed above" evidently intend -- stopping early
+    after a clean read of the wanted lines is a normal return. */
+    let error_block = |y_start: i32, mut err: i32, jpeg_line: i32, message: &str| -> i32 {
+        if err != IIERR_QUITTING {
+            err = if jpeg_line < y_start && err == 0 {
+                0
+            } else {
+                IIERR_IO_ERROR
+            };
+            if err != 0 {
+                b3d_error(
+                    Some(&mut ImodFile::Stderr),
+                    format_args!("jpegReadSectionAny: JPEG error - {}\n", message),
+                );
+            }
+        }
+        err
+    };
+
+    /* Reestablish the object, data source and header */
+    let Some(mut fp) = in_file.fp.clone() else {
+        return IIERR_BAD_CALL;
+    };
+    let raw = match jpeg_read_header(&mut fp) {
+        Ok(raw) => raw,
+        Err(message) => return error_block(d.y_start, err, jpeg_line, &message),
+    };
+
+    /* Set output properties if not grayscale */
+    let out_color_space = if in_file.format == IIFORMAT_RGB {
+        ColorSpace::RGB
+    } else {
+        ColorSpace::Luma
+    };
+    let mut cinfo = jpeg_decoder(&raw, out_color_space);
+    if let Err(error) = cinfo.decode_headers() {
+        return error_block(d.y_start, err, jpeg_line, &error.to_string());
+    }
+
+    /* Translate the information to a loadInfo to call common routines and set some
+    type-dependent settings as in iimrc; setup MRC header too */
+    ii_simple_fill_mrc_header(in_file, &mut hdata);
+    ii_mrc_set_load_info(in_file, li);
+    pad_left = 0.max(li.pad_left);
+    pad_right = 0.max(li.pad_right);
+    y_end = li.ymax;
+    if type_ == MRSA_FLOAT || type_ == 0 {
+        li.outmin = in_file.smin as i32;
+        li.outmax = in_file.smax as i32;
+    } else {
+        li.outmin = 0;
+        li.outmax = if type_ == MRSA_USHORT { 65535 } else { 255 };
+    }
+
+    /* Initialize members of data structure */
+    d.type_ = type_;
+    d.read_y = 0;
+    d.cz = 0;
+    d.swapped = 0;
+    err = unsafe {
+        ii_init_read_section_any(&hdata, li, buf, &mut d, &mut y_end, "jpegReadSectionAny")
+    };
+    if err != 0 {
+        return err;
+    }
+
+    /* Fill in some missing pieces and adjust pointers/indexes for inversion
+    No need to invert yStart/yEnd because they are used as limits for line numbers
+    counting from the true bottom */
+    d.x_dimension = d.xsize + pad_left + pad_right;
+    d.need_data = 1;
+    pix_size_buf[0] = d.pix_size;
+    tval = (y_end - d.y_start) * d.x_dimension;
+    d.pix_index = d.pix_index.wrapping_add(tval as u32);
+    // `d.bufp`, `d.usbufp` and `d.fbufp` all advance by `tval` pixels of their
+    // own type; the Rust `LineProcData` keeps the one byte offset they share.
+    d.bufp_offset += (pix_size_buf[type_ as usize] * tval) as isize;
+    d.delta_y_sign = -1;
+
+    /* Loop from the top of the image; it is safe to stop when the desired lines are
+    obtained as the error is suppressed above */
+    jpeg_line = ny - 1;
+
+    // `jpeg_start_decompress`: libjpeg cannot convert CMYK or YCCK to RGB
+    // (`jinit_color_deconverter`, `JERR_CONVERSION_NOTIMPL`).
+    if matches!(
+        cinfo.input_colorspace(),
+        Some(ColorSpace::CMYK | ColorSpace::YCCK)
+    ) {
+        return error_block(
+            d.y_start,
+            err,
+            jpeg_line,
+            "Unsupported color conversion request",
+        );
+    }
+    let decoded = match cinfo.decode() {
+        Ok(decoded) => decoded,
+        Err(error) => return error_block(d.y_start, err, jpeg_line, &error.to_string()),
+    };
+    let mut output_scanline: usize = 0;
+    err = 0;
+    while jpeg_line >= 0 && jpeg_line >= d.y_start {
+        // `jpeg_read_scanlines(cinfoPtr, &tmpData, 1)`
+        let start = output_scanline * tmp_size;
+        tmp_data.copy_from_slice(&decoded[start..start + tmp_size]);
+        output_scanline += 1;
+        if jpeg_line <= y_end {
+            d.bdata = unsafe { tmp_data.as_mut_ptr().add((d.x_start * d.pix_size) as usize) };
+            err = unsafe {
+                ii_process_read_line(
+                    &hdata,
+                    li,
+                    &mut d,
+                    core::ptr::null_mut(),
+                    core::ptr::null_mut(),
+                )
+            };
+            if err != 0 {
+                break;
+            }
+        }
+        jpeg_line -= 1;
+    }
+
+    // `jpeg_finish_decompress` longjmps with `JERR_TOO_LITTLE_DATA` when fewer
+    // than all the scanlines were read.
+    if output_scanline < ny as usize {
+        return error_block(
+            d.y_start,
+            err,
+            jpeg_line,
+            "Application transferred too few scanlines",
+        );
+    }
+    err
+}
+
+/// C `jpegOpenNew` (`iijpeg.c:313`): open a new JPEG file: just setup
+/// function pointers and allocate compression object.
+pub fn jpeg_open_new(in_file: &mut ImodImageFile) -> i32 {
+    in_file.state = IISTATE_READY;
+    in_file.clean_up = Some(jpeg_delete_callback);
+    in_file.fill_mrc_header = Some(ii_simple_fill_mrc_header_callback);
+    in_file.write_section = Some(ii_jpeg_write_section);
+    in_file.write_section_float = Some(ii_jpeg_write_section_float);
+    in_file.fp = in_file
+        .filename
+        .as_deref()
+        .and_then(|name| ImodFile::open(name, "wb"));
+    if in_file.fp.is_none() {
+        return IIERR_IO_ERROR;
+    }
+    // The compression object is created by the encoder inside
+    // `jpegWriteSection`; there is nothing to allocate here.
+    0
+}
+
+pub(crate) unsafe fn jpeg_open_new_callback(in_file: *mut ImodImageFile) -> i32 {
+    let Some(in_file) = (unsafe { in_file.as_mut() }) else {
+        return IIERR_BAD_CALL;
+    };
+    jpeg_open_new(in_file)
+}
+
+/// C `iiJpegWriteSection` (`iijpeg.c:334`).
+unsafe fn ii_jpeg_write_section(in_file: *mut ImodImageFile, buf: *mut u8, in_section: i32) -> i32 {
+    unsafe { ii_jpeg_write_section_any(in_file, buf, in_section, 0) }
+}
+
+/// C `iiJpegWriteSectionFloat` (`iijpeg.c:339`).
+unsafe fn ii_jpeg_write_section_float(
+    in_file: *mut ImodImageFile,
+    buf: *mut u8,
+    in_section: i32,
+) -> i32 {
+    unsafe { ii_jpeg_write_section_any(in_file, buf, in_section, 1) }
+}
+
+/// C `iiJpegWriteSectionAny` (`iijpeg.c:348`): wrapper that handles the
+/// iimage calls in, checks for possible bad things in a generic call, and
+/// sets quality and resolution from environment variables.
+unsafe fn ii_jpeg_write_section_any(
+    in_file: *mut ImodImageFile,
+    buf: *mut u8,
+    in_section: i32,
+    if_float: i32,
+) -> i32 {
+    let in_file = unsafe { &mut *in_file };
+    let mut quality: i32 = -1;
+    let mut resolution: i32 = 0;
+    let mut inverted = false;
+    let mut err: i32 = 0;
+    // C `atoi`: leading blanks, an optional sign, then digits.
+    let atoi = |text: &str| -> i32 {
+        let text = text.trim_start_matches([' ', '\t', '\n', '\r', '\x0b', '\x0c']);
+        let (negative, digits) = match text.as_bytes().first() {
+            Some(b'-') => (true, &text[1..]),
+            Some(b'+') => (false, &text[1..]),
+            _ => (false, text),
+        };
+        let mut value: i32 = 0;
+        for byte in digits.bytes().take_while(u8::is_ascii_digit) {
+            value = value.wrapping_mul(10).wrapping_add((byte - b'0') as i32);
+        }
+        if negative {
+            value.wrapping_neg()
+        } else {
+            value
+        }
+    };
+
+    if in_section != 0 {
+        b3d_error(
+            Some(&mut ImodFile::Stderr),
+            format_args!(
+                "ERROR: iiJpegWriteSectionAny - Trying to write section {} to a JPEG file; only 0 is allowed\n",
+                in_section
+            ),
+        );
+        err = IIERR_BAD_CALL;
+    }
+    if err == 0 && (in_file.pad_left != 0 || in_file.pad_right != 0) {
+        b3d_error(
+            Some(&mut ImodFile::Stderr),
+            format_args!("ERROR: iiJpegWriteSectionAny - Cannot write from a subset of an array\n"),
+        );
+        err = -1;
+    }
+    if err == 0
+        && !((in_file.format == IIFORMAT_LUMINANCE && in_file.mode == MRC_MODE_BYTE)
+            || (in_file.format == IIFORMAT_RGB && if_float == 0))
+    {
+        b3d_error(
+            Some(&mut ImodFile::Stderr),
+            format_args!(
+                "ERROR: iiJpegWriteSectionAny - {}\n",
+                if in_file.format == IIFORMAT_RGB && if_float != 0 {
+                    "Cannot write float data to an RGB JPEG file"
+                } else {
+                    "File mode must be byte or RGB to write to a JPEG file"
+                }
+            ),
+        );
+        err = -1;
+    }
+    if err == 0
+        && (in_file.llx != 0
+            || in_file.lly != 0
+            || (in_file.urx != -1 && in_file.urx != in_file.nx - 1)
+            || (in_file.ury != -1 && in_file.ury != in_file.ny - 1))
+    {
+        b3d_error(
+            Some(&mut ImodFile::Stderr),
+            format_args!("ERROR: iiJpegWriteSectionAny - Can only write a whole section at once\n"),
+        );
+        err = -1;
+    }
+
+    /* Convert floats if necessary */
+    let mut converted: Option<Vec<u8>> = None;
+    if err == 0 && if_float != 0 {
+        let count = in_file.nx as usize * in_file.ny as usize;
+        let floats = unsafe { core::slice::from_raw_parts(buf.cast::<f32>(), count) };
+        match ii_make_buffer_convert_if_float(
+            in_file,
+            Some(floats),
+            &mut inverted,
+            "iiJpegWriteSectionAny",
+        ) {
+            Ok(buffer) => converted = buffer,
+            Err(()) => err = IIERR_MEMORY_ERR,
+        }
+    }
+
+    /* Free the header, it has not been initialized yet, just created */
+    if err != 0 {
+        return err;
+    }
+
+    /* Get environment variable values */
+    if let Ok(value) = std::env::var("IMOD_JPEG_QUALITY") {
+        quality = atoi(&value);
+        quality = 1.max(100.min(quality));
+    }
+    if let Ok(value) = std::env::var("IMOD_JPEG_RESOLUTION") {
+        err = atoi(&value);
+        if err > 65535 {
+            b3d_error(
+                Some(&mut ImodFile::Stderr),
+                format_args!(
+                    "WARNING: iiJpegWriteSectionAny - IMOD_JPEG_RESOLUTION is set too high to be stored in 16-bit field of JPEG file\n"
+                ),
+            );
+        } else {
+            resolution = err;
+        }
+        resolution = 1.max(resolution);
+    }
+
+    /* Call through central routine */
+    let channels = if in_file.mode == MRC_MODE_RGB { 3 } else { 1 };
+    let use_buf: &[u8] = match converted.as_deref() {
+        Some(buffer) => buffer,
+        None => unsafe {
+            core::slice::from_raw_parts(buf, in_file.nx as usize * in_file.ny as usize * channels)
+        },
+    };
+    err = jpeg_write_section(in_file, use_buf, inverted, resolution, quality);
+    if err == 0 {
+        in_file.last_written_z = 0;
+    }
+    err
+}
+
+/// C `jpegWriteSection` (`iijpeg.c:435`).
+///
+/// Writes the section in `buf` to a JPEG file open on `in_file`, which must
+/// have a mode of RGB or BYTE.  Set `inverted` if line order is already
+/// inverted in Y (first line at top); `resolution` to a value up to 65535 in
+/// dots per inch or 0 for none, and `quality` to a value from 1 to 100, or -1
+/// for no setting (libjpeg's default is 75, and so is the encoder's here).
 pub fn jpeg_write_section(
-    f: &mut ImodImageFile,
-    input: &[u8],
+    in_file: &mut ImodImageFile,
+    buf: &[u8],
     inverted: bool,
     resolution: i32,
     quality: i32,
 ) -> i32 {
-    if f.write_section.is_none()
-        || f.last_written_z == 0
-        || !matches!(f.mode, MRC_MODE_BYTE | MRC_MODE_RGB)
-    {
-        return IIERR_BAD_CALL;
+    let mut err = 0;
+
+    /* Check various bad things */
+    if in_file.write_section.is_none() {
+        b3d_error(
+            Some(&mut ImodFile::Stderr),
+            format_args!("ERROR: jpegWriteSection - Trying to write to an existing JPEG file\n"),
+        );
+        err = IIERR_BAD_CALL;
     }
-    let Some(n) = count(f) else {
+    if err == 0 && in_file.last_written_z == 0 {
+        b3d_error(
+            Some(&mut ImodFile::Stderr),
+            format_args!(
+                "ERROR: jpegWriteSection - Trying to write more than one section to a JPEG file\n"
+            ),
+        );
+        err = IIERR_BAD_CALL;
+    }
+    if err == 0 && in_file.mode != MRC_MODE_BYTE && in_file.mode != MRC_MODE_RGB {
+        b3d_error(
+            Some(&mut ImodFile::Stderr),
+            format_args!(
+                "ERROR: jpegWriteSection - Mode for writing a JPEG file must be either byte or RGB; it is {}\n",
+                in_file.mode
+            ),
+        );
+        err = IIERR_BAD_CALL;
+    }
+
+    /* Free the header, it has not been initialized yet, just created */
+    if err != 0 {
+        return err;
+    }
+
+    /* Set up error handling */
+    let Some(fp) = in_file.fp.as_mut() else {
         return IIERR_BAD_CALL;
     };
-    let channels = if f.mode == MRC_MODE_RGB { 3 } else { 1 };
-    if input.len() != n * channels {
-        return IIERR_BAD_CALL;
-    }
-    // Native accepts 0 for no JFIF density and otherwise writes a u16 value.
-    let _resolution = resolution.clamp(0, u16::MAX as i32);
-    let Some(fp) = f.fp.as_mut() else {
-        return IIERR_BAD_CALL;
+    let write_error = |message: String| {
+        b3d_error(
+            Some(&mut ImodFile::Stderr),
+            format_args!("jpegWriteSection: JPEG error - {}\n", message),
+        );
+        IIERR_IO_ERROR
     };
-    if fp.seek(SeekFrom::Start(0)).is_err() {
-        return IIERR_IO_ERROR;
+    if let Err(error) = fp.seek(SeekFrom::Start(0)) {
+        return write_error(error.to_string());
     }
-    let quality = if quality > 0 {
-        quality.clamp(1, 100)
+
+    /* Create the compression object and set the basic properties as well as optional
+    quality and resolution */
+    let input_components: usize = if in_file.mode == MRC_MODE_RGB { 3 } else { 1 };
+    let mut cinfo = if quality > 0 {
+        JpegEncoder::new_with_quality(&mut *fp, 100.min(quality) as u8)
     } else {
-        75
-    } as u8;
-    let mut encoder = JpegEncoder::new_with_quality(fp, quality);
-    let (nx, ny) = (f.nx as u32, f.ny as u32);
-    let encoded = if channels == 1 {
-        encoder.encode_image(&ScanlineRows::<Luma<u8>> {
-            buf: input,
-            nx,
-            ny,
-            inverted,
-            pixel: PhantomData,
-        })
-    } else {
-        encoder.encode_image(&ScanlineRows::<Rgb<u8>> {
-            buf: input,
-            nx,
-            ny,
-            inverted,
-            pixel: PhantomData,
-        })
+        JpegEncoder::new(&mut *fp)
     };
-    if encoded.is_err() {
-        return IIERR_IO_ERROR;
+    if resolution > 0 {
+        cinfo.set_pixel_density(PixelDensity {
+            density: (resolution as u16, resolution as u16),
+            unit: PixelDensityUnit::Inches,
+        });
     }
-    f.last_written_z = 0;
+
+    /* Do the compression line by line.  The encoder takes the whole image, so
+    the scanlines are gathered top-down in the order the source hands them to
+    jpeg_write_scanlines. */
+    let nx = in_file.nx as usize;
+    let row = input_components * nx;
+    let mut scanlines = Vec::with_capacity(row * in_file.ny as usize);
+    let mut iy = in_file.ny - 1;
+    while iy >= 0 {
+        let use_y = if inverted { (in_file.ny - 1) - iy } else { iy } as usize;
+        scanlines.extend_from_slice(&buf[input_components * use_y * nx..][..row]);
+        iy -= 1;
+    }
+    if let Err(error) = cinfo.write_image(
+        &scanlines,
+        in_file.nx as u32,
+        in_file.ny as u32,
+        if input_components == 3 {
+            image::ExtendedColorType::Rgb8
+        } else {
+            image::ExtendedColorType::L8
+        },
+    ) {
+        return write_error(error.to_string());
+    }
     0
-}
-/// C `iiJpegWriteSectionAny`.
-fn ii_jpeg_write_section_any(f: &mut ImodImageFile, input: &[u8], z: i32, floats: bool) -> i32 {
-    if z != 0
-        || f.pad_left != 0
-        || f.pad_right != 0
-        || !((f.format == IIFORMAT_LUMINANCE && f.mode == MRC_MODE_BYTE)
-            || (f.format == IIFORMAT_RGB && !floats))
-        || f.llx != 0
-        || f.lly != 0
-        || (f.urx != -1 && f.urx != f.nx - 1)
-        || (f.ury != -1 && f.ury != f.ny - 1)
-    {
-        return IIERR_BAD_CALL;
-    }
-    let Some(n) = count(f) else {
-        return IIERR_BAD_CALL;
-    };
-    let c = if f.mode == MRC_MODE_RGB { 3 } else { 1 };
-    if input.len() != n * c * if floats { 4 } else { 1 } {
-        return IIERR_BAD_CALL;
-    }
-    // `iijpeg.c:392-393` gets its buffer from `iiMakeBufferConvertIfFloat`,
-    // which returns `buf` itself when the data are not floats
-    // (`iimage.c:1281,1288`); `iiJpegWriteSectionAny` then frees it only
-    // `if (useBuf != buf)` (`iijpeg.c:424-425`).  The non-float path therefore
-    // allocates and copies nothing, so pass the caller's buffer through
-    // instead of duplicating a whole section.
-    //
-    // For floats, `iiMakeBufferConvertIfFloat` (`iimage.c:1295-1299`) converts
-    // each line with `iiConvertLineOfFloats(..., mode, 0, 0)`, whose unsigned
-    // byte arm is `(int)(fbufp[i] + 0.5f)` then `B3DCLAMP(ival, 0, 255)`.  That
-    // is not `f32::round`: `0.49999997f + 0.5f` rounds up to `1.0f` in single
-    // precision.  Call the translated routine rather than re-deriving it.  The
-    // C writes the converted rows bottom-up and passes `inverted = 1`; keeping
-    // the rows in order with `inverted = false` feeds `jpegWriteSection` the
-    // same scanlines (`iijpeg.c:502-506`).  Only byte mode reaches here with
-    // floats (the RGB format rejects them above).
-    let converted: Option<Vec<u8>> = if floats {
-        let nx = f.nx as usize;
-        let mut data = vec![0u8; n * c];
-        let mut line = vec![0f32; nx];
-        // `chunks_exact(0)` panics; an empty section has no lines to convert.
-        let lines = if nx == 0 { 0 } else { f.ny as usize };
-        for (out_line, in_line) in data
-            .chunks_exact_mut(nx.max(1))
-            .zip(input.chunks_exact(4 * nx.max(1)))
-            .take(lines)
-        {
-            for (value, bytes) in line.iter_mut().zip(in_line.chunks_exact(4)) {
-                *value = f32::from_ne_bytes(bytes.try_into().unwrap());
-            }
-            ii_convert_line_of_floats(&line, out_line, f.mode, false, false);
-        }
-        Some(data)
-    } else {
-        None
-    };
-    let q = std::env::var("IMOD_JPEG_QUALITY")
-        .ok()
-        .and_then(|x| x.parse().ok())
-        .unwrap_or(75)
-        .clamp(1, 100) as u8;
-    jpeg_write_section(f, converted.as_deref().unwrap_or(input), false, 0, q as i32)
-}
-
-/// C `iiJpegWriteSection`.
-fn ii_jpeg_write_section(f: &mut ImodImageFile, input: &[u8], z: i32) -> i32 {
-    ii_jpeg_write_section_any(f, input, z, false)
-}
-
-/// C `iiJpegWriteSectionFloat`.
-fn ii_jpeg_write_section_float(f: &mut ImodImageFile, input: &[u8], z: i32) -> i32 {
-    ii_jpeg_write_section_any(f, input, z, true)
-}
-unsafe fn file(p: *mut ImodImageFile) -> Option<&'static mut ImodImageFile> {
-    unsafe { p.as_mut() }
-}
-unsafe fn slice<'a>(p: *mut u8, n: usize) -> Option<&'a mut [u8]> {
-    if p.is_null() {
-        None
-    } else {
-        Some(unsafe { core::slice::from_raw_parts_mut(p, n) })
-    }
-}
-pub(crate) unsafe fn ii_jpeg_check_callback(p: *mut ImodImageFile) -> i32 {
-    let Some(f) = (unsafe { file(p) }) else {
-        return IIERR_BAD_CALL;
-    };
-    ii_jpeg_check(f)
-}
-unsafe fn jpeg_delete_callback(p: *mut ImodImageFile) {
-    if let Some(f) = unsafe { file(p) } {
-        jpeg_delete(f)
-    }
-}
-unsafe fn read_callback(p: *mut ImodImageFile, b: *mut u8, z: i32) -> i32 {
-    let Some(f) = (unsafe { file(p) }) else {
-        return IIERR_BAD_CALL;
-    };
-    let Some(n) = count(f) else {
-        return IIERR_BAD_CALL;
-    };
-    let channels = if f.native_image_rgb { 3 } else { 1 };
-    let Some(out) = (unsafe { slice(b, n * channels) }) else {
-        return IIERR_BAD_CALL;
-    };
-    jpeg_read_section(f, out, z)
-}
-unsafe fn read_byte_callback(p: *mut ImodImageFile, b: *mut u8, z: i32) -> i32 {
-    let Some(f) = (unsafe { file(p) }) else {
-        return IIERR_BAD_CALL;
-    };
-    let Some(n) = count(f) else {
-        return IIERR_BAD_CALL;
-    };
-    let Some(out) = (unsafe { slice(b, n) }) else {
-        return IIERR_BAD_CALL;
-    };
-    jpeg_read_section_byte(f, out, z)
-}
-unsafe fn read_ushort_callback(p: *mut ImodImageFile, b: *mut u8, z: i32) -> i32 {
-    let Some(f) = (unsafe { file(p) }) else {
-        return IIERR_BAD_CALL;
-    };
-    let Some(n) = count(f) else {
-        return IIERR_BAD_CALL;
-    };
-    let Some(out) = (unsafe { slice(b, n * 2) }) else {
-        return IIERR_BAD_CALL;
-    };
-    jpeg_read_section_ushort(f, out, z)
-}
-unsafe fn read_float_callback(p: *mut ImodImageFile, b: *mut u8, z: i32) -> i32 {
-    let Some(f) = (unsafe { file(p) }) else {
-        return IIERR_BAD_CALL;
-    };
-    let Some(n) = count(f) else {
-        return IIERR_BAD_CALL;
-    };
-    let Some(out) = (unsafe { slice(b, n * 4) }) else {
-        return IIERR_BAD_CALL;
-    };
-    jpeg_read_section_float(f, out, z)
-}
-unsafe fn write_callback(p: *mut ImodImageFile, b: *mut u8, z: i32) -> i32 {
-    let Some(f) = (unsafe { file(p) }) else {
-        return IIERR_BAD_CALL;
-    };
-    let Some(n) = count(f) else {
-        return IIERR_BAD_CALL;
-    };
-    let channels = if f.mode == MRC_MODE_RGB { 3 } else { 1 };
-    let Some(input) = (unsafe { slice(b, n * channels) }) else {
-        return IIERR_BAD_CALL;
-    };
-    ii_jpeg_write_section(f, input, z)
-}
-unsafe fn write_float_callback(p: *mut ImodImageFile, b: *mut u8, z: i32) -> i32 {
-    let Some(f) = (unsafe { file(p) }) else {
-        return IIERR_BAD_CALL;
-    };
-    let Some(n) = count(f) else {
-        return IIERR_BAD_CALL;
-    };
-    let channels = if f.mode == MRC_MODE_RGB { 3 } else { 1 };
-    let Some(input) = (unsafe { slice(b, n * channels * 4) }) else {
-        return IIERR_BAD_CALL;
-    };
-    ii_jpeg_write_section_float(f, input, z)
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
 
-    #[test]
-    fn owned_jpeg_roundtrip_preserves_dimensions_and_imod_row_order() {
-        let file = ImodFile::tmpfile().unwrap();
+    fn writer(file: &ImodFile, nx: i32, ny: i32) -> ImodImageFile {
         let mut writer = ImodImageFile::default();
         writer.fp = Some(file.clone());
-        writer.nx = 2;
-        writer.ny = 2;
+        writer.nx = nx;
+        writer.ny = ny;
         writer.nz = 1;
         writer.mode = MRC_MODE_BYTE;
         writer.format = IIFORMAT_LUMINANCE;
-        writer.write_section = Some(write_callback);
+        writer.write_section = Some(ii_jpeg_write_section);
         writer.last_written_z = -1;
         writer.urx = -1;
         writer.ury = -1;
-        // IMOD order is bottom row then top row.
-        let pixels = [0_u8, 0, 255, 255];
-        assert_eq!(ii_jpeg_write_section(&mut writer, &pixels, 0), 0);
+        writer
+    }
 
+    #[test]
+    fn check_reads_the_header_and_rejects_non_jpeg() {
+        let file = ImodFile::tmpfile().unwrap();
+        let mut out = writer(&file, 2, 2);
+        let mut pixels = [0_u8, 0, 255, 255];
+        assert_eq!(
+            unsafe { ii_jpeg_write_section(&mut out, pixels.as_mut_ptr(), 0) },
+            0
+        );
         let mut reader = ImodImageFile::default();
         reader.fp = Some(file);
         assert_eq!(ii_jpeg_check(&mut reader), 0);
         assert_eq!(
-            (reader.nx, reader.ny, reader.nz, reader.mode),
-            (2, 2, 1, MRC_MODE_BYTE)
+            (reader.nx, reader.ny, reader.nz, reader.mode, reader.format),
+            (2, 2, 1, MRC_MODE_BYTE, IIFORMAT_LUMINANCE)
         );
-        let mut restored = [0_u8; 4];
-        assert_eq!(jpeg_read_section(&reader, &mut restored, 0), 0);
-        assert!(restored[..2].iter().all(|pixel| *pixel < 20));
-        assert!(restored[2..].iter().all(|pixel| *pixel > 235));
+
+        let other = ImodFile::tmpfile().unwrap();
+        {
+            use std::io::Write as _;
+            let mut handle = other.clone();
+            handle.write_all(b"MRC not a jpeg").unwrap();
+            handle.flush().unwrap();
+        }
+        let mut reader = ImodImageFile::default();
+        reader.fp = Some(other);
+        assert_eq!(ii_jpeg_check(&mut reader), IIERR_NOT_FORMAT);
     }
 
     #[test]
-    fn direct_jpeg_writer_rejects_second_section_and_obeys_row_inversion() {
+    fn writer_rejects_a_second_section_and_nonzero_section() {
         let file = ImodFile::tmpfile().unwrap();
-        let mut writer = ImodImageFile::default();
-        writer.fp = Some(file.clone());
-        writer.nx = 1;
-        writer.ny = 2;
-        writer.mode = MRC_MODE_BYTE;
-        writer.write_section = Some(write_callback);
-        writer.last_written_z = -1;
-        writer.urx = -1;
-        writer.ury = -1;
-        assert_eq!(jpeg_write_section(&mut writer, &[0, 255], false, 0, 100), 0);
+        let mut out = writer(&file, 1, 2);
+        let mut pixels = [0_u8, 255];
         assert_eq!(
-            jpeg_write_section(&mut writer, &[0, 255], false, 0, 100),
+            unsafe { ii_jpeg_write_section(&mut out, pixels.as_mut_ptr(), 1) },
             IIERR_BAD_CALL
         );
-        let mut reader = ImodImageFile::default();
-        reader.fp = Some(file);
-        assert_eq!(ii_jpeg_check(&mut reader), 0);
-        let mut pixels = [0; 2];
-        assert_eq!(jpeg_read_section(&reader, &mut pixels, 0), 0);
-        assert!(pixels[0] < 5 && pixels[1] > 250);
-    }
-
-    #[test]
-    fn jpeg_read_converts_owned_luminance_to_requested_scalar_types() {
-        let mut image = ImodImageFile::default();
-        image.nx = 1;
-        image.ny = 1;
-        image.native_image_pixels = Some(vec![128]);
-        let mut ushort = [0_u8; 2];
-        let mut float = [0_u8; 4];
-        assert_eq!(jpeg_read_section_ushort(&image, &mut ushort, 0), 0);
-        assert_eq!(jpeg_read_section_float(&image, &mut float, 0), 0);
-        assert_eq!(u16::from_ne_bytes(ushort), 32_896);
-        assert_eq!(f32::from_ne_bytes(float), 128.);
+        assert_eq!(jpeg_write_section(&mut out, &pixels, false, 0, 100), 0);
+        out.last_written_z = 0;
+        assert_eq!(
+            jpeg_write_section(&mut out, &pixels, false, 0, 100),
+            IIERR_BAD_CALL
+        );
     }
 }

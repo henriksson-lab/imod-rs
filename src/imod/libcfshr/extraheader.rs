@@ -4,11 +4,13 @@ use std::sync::Mutex;
 
 use super::autodoc::{
     ADOC_ZVALUE_NAME, adoc_get_float, adoc_get_integer, adoc_get_string, adoc_get_three_floats,
-    adoc_get_two_floats, adoc_lookup_by_name_value, adoc_set_current,
+    adoc_get_three_integers, adoc_get_two_floats, adoc_lookup_by_name_value, adoc_set_current,
 };
 use super::b3dutil::{
-    b3d_error, b3d_get_store_error, b3d_set_store_error, extra_is_nbytes_and_flags,
+    ImodFile, b3d_error, b3d_get_error, b3d_get_store_error, b3d_set_store_error, exit,
+    extra_is_nbytes_and_flags,
 };
+use std::io::Write;
 
 const MRC_EXT_TYPE_FEI: i32 = 3;
 const RADIANS_PER_DEGREE: f64 = 0.017_453_292_52;
@@ -294,6 +296,69 @@ pub fn get_extra_header_items(
     0
 }
 
+/// C Fortran wrapper `get_extra_header_tilts` (`extraheader.c:83`): exits
+/// with an `ERROR:` string upon error.
+pub fn get_extra_header_tilts_fortran(
+    array: &[u8],
+    num_extra_bytes: i32,
+    nbytes: i32,
+    iflags: i32,
+    nz: i32,
+    tilt: &mut [f32],
+    num_tilts: &mut i32,
+    iz_piece: &[i32],
+) {
+    b3d_set_store_error(1);
+    if get_extra_header_tilts(
+        array,
+        num_extra_bytes,
+        nbytes,
+        iflags,
+        nz,
+        tilt,
+        num_tilts,
+        iz_piece,
+    ) != 0
+    {
+        let _ = ImodFile::Stdout.write_all(format!("\nERROR: {}\n", b3d_get_error()).as_bytes());
+        exit(1);
+    }
+}
+
+/// C Fortran wrapper `get_extra_header_items` (`extraheader.c:236`): exits
+/// with an `ERROR:` string upon error.  A caller passing the same array as
+/// `val1` and `val2` passes `None` for `val2`.
+pub fn get_extra_header_items_fortran(
+    array: &[u8],
+    num_extra_bytes: i32,
+    nbytes: i32,
+    iflags: i32,
+    nz: i32,
+    itype: i32,
+    val1: &mut [f32],
+    val2: Option<&mut [f32]>,
+    num_vals: &mut i32,
+    iz_piece: &[i32],
+) {
+    b3d_set_store_error(1);
+    if get_extra_header_items(
+        array,
+        num_extra_bytes,
+        nbytes,
+        iflags,
+        nz,
+        itype,
+        val1,
+        val2,
+        num_vals,
+        iz_piece,
+    ) != 0
+    {
+        let _ = ImodFile::Stdout.write_all(format!("\nERROR: {}\n", b3d_get_error()).as_bytes());
+        exit(1);
+    }
+}
+
 /// C `SEMshortsToFloat` (`extraheader.c:252`).
 pub fn semshorts_to_float(mut low: i16, mut ihigh: i16) -> f64 {
     let mut value_sign = 1;
@@ -369,6 +434,37 @@ pub fn get_metadata_items(
         nz,
         iz_piece,
     )
+}
+
+/// C Fortran wrapper `get_metadata_items` (`extraheader.c:305`): `indAdoc`
+/// is 1-based; exits with an `ERROR:` string upon error.
+pub fn get_metadata_items_fortran(
+    ind_adoc: i32,
+    adoc_type: i32,
+    nz: i32,
+    data_type: i32,
+    val1: &mut [f32],
+    val2: &mut [f32],
+    num_vals: &mut i32,
+    num_found: &mut i32,
+    iz_piece: &[i32],
+) {
+    b3d_set_store_error(1);
+    if get_metadata_items(
+        ind_adoc - 1,
+        adoc_type,
+        nz,
+        data_type,
+        val1,
+        val2,
+        num_vals,
+        num_found,
+        iz_piece,
+    ) != 0
+    {
+        let _ = ImodFile::Stdout.write_all(format!("\nERROR: {}\n", b3d_get_error()).as_bytes());
+        exit(1);
+    }
 }
 
 /// C `getMetadataByKey` (`extraheader.c:345`).
@@ -534,7 +630,255 @@ pub fn get_metadata_by_key(
     0
 }
 
+/// C Fortran wrapper `get_metadata_by_key` (`extraheader.c:421`): `indAdoc`
+/// is 1-based, an error return is printed and exits, and for string items the
+/// first `numFound` returned strings are copied into the character array
+/// `valString` (`c2fString`: truncated to `val_size` characters; the caller
+/// trims the blank padding) -- by position, so a string beyond `numFound` is
+/// dropped and a missing one below it becomes a blank.  Elements past
+/// `numFound` are left as they were.
+pub fn get_metadata_by_key_fortran(
+    ind_adoc: i32,
+    adoc_type: i32,
+    nz: i32,
+    key: &str,
+    value_type: i32,
+    val1: &mut [f32],
+    val2: &mut [f32],
+    val3: &mut [f32],
+    val_string: &mut [String],
+    val_size: usize,
+    num_vals: &mut i32,
+    num_found: &mut i32,
+    max_vals: i32,
+    iz_piece: &[i32],
+) {
+    let mut new_strings: Vec<Option<String>> = Vec::new();
+    b3d_set_store_error(1);
+    *num_vals = 0;
+    *num_found = 0;
+    // `f2cString` strips the trailing blanks of the Fortran key.
+    let ckey = key.trim_end_matches(' ');
+    if value_type == 0 {
+        new_strings = vec![None; max_vals.max(0) as usize];
+    }
+    if get_metadata_by_key(
+        ind_adoc - 1,
+        adoc_type,
+        nz,
+        ckey,
+        value_type,
+        val1,
+        val2,
+        val3,
+        if value_type == 0 {
+            Some(&mut new_strings[..])
+        } else {
+            None
+        },
+        num_vals,
+        num_found,
+        max_vals,
+        iz_piece,
+    ) != 0
+    {
+        let _ = ImodFile::Stdout.write_all(format!("\nERROR: {}\n", b3d_get_error()).as_bytes());
+        exit(1);
+    }
+
+    /* Ignore strings not long enough... */
+    if value_type == 0 {
+        for ind in 0..*num_found as usize {
+            match new_strings[ind].take() {
+                Some(string) => {
+                    let mut end = string.len().min(val_size);
+                    while !string.is_char_boundary(end) {
+                        end -= 1;
+                    }
+                    val_string[ind] = string[..end].to_owned();
+                }
+                None => val_string[ind] = " ".to_owned(),
+            }
+        }
+    }
+}
+
+/// C `getExtraHeaderPieces` (`extraheader.c:472`).
+///
+/// Reads the three unsigned shorts at each section's offset; bytes past the
+/// end of `array` read as zero (the source reads whatever follows).
+pub fn get_extra_header_pieces(
+    array: &[u8],
+    num_extra_bytes: i32,
+    nbytes: i32,
+    iflags: i32,
+    nz: i32,
+    ix_piece: &mut [i32],
+    iy_piece: &mut [i32],
+    iz_piece: &mut [i32],
+    num_pieces: &mut i32,
+    max_piece: i32,
+) -> i32 {
+    let short_at = |offset: i32| -> i32 {
+        let offset = offset as usize;
+        match array.get(offset..offset + 2) {
+            Some(bytes) => u16::from_ne_bytes([bytes[0], bytes[1]]) as i32,
+            None => 0,
+        }
+    };
+    *num_pieces = 0;
+    if num_extra_bytes == 0 {
+        return 0;
+    }
+    if nz > max_piece {
+        b3d_error(
+            Some(&mut ImodFile::Stdout),
+            format_args!("getExtraHeaderPieces - arrays not large enough for piece lists\n"),
+        );
+        return 1;
+    }
+
+    /* if data are packed as shorts, see if the montage flag is set
+     * set starting index based on whether there are tilt angles too */
+    let shorts = extra_is_nbytes_and_flags(nbytes, iflags);
+    if nbytes == 0 || shorts == 0 || (iflags / 2) % 2 == 0 {
+        return 0;
+    }
+    let mut ind = 0_i32;
+    if iflags % 2 != 0 {
+        ind = 2;
+    }
+    for i in 0..nz.max(0) as usize {
+        if ind > num_extra_bytes {
+            return 0;
+        }
+        ix_piece[i] = short_at(ind);
+        iy_piece[i] = short_at(ind + 2);
+        iz_piece[i] = short_at(ind + 4);
+        ind += nbytes;
+        *num_pieces = i as i32 + 1;
+    }
+    0
+}
+
+/// C Fortran wrapper `get_extra_header_pieces` (`extraheader.c:510`): exits
+/// with an `ERROR:` string upon error.
+pub fn get_extra_header_pieces_fortran(
+    array: &[u8],
+    num_extra_bytes: i32,
+    nbytes: i32,
+    iflags: i32,
+    nz: i32,
+    ix_piece: &mut [i32],
+    iy_piece: &mut [i32],
+    iz_piece: &mut [i32],
+    num_pieces: &mut i32,
+    max_piece: i32,
+) {
+    b3d_set_store_error(1);
+    if get_extra_header_pieces(
+        array,
+        num_extra_bytes,
+        nbytes,
+        iflags,
+        nz,
+        ix_piece,
+        iy_piece,
+        iz_piece,
+        num_pieces,
+        max_piece,
+    ) != 0
+    {
+        let _ = ImodFile::Stdout.write_all(format!("\nERROR: {}\n", b3d_get_error()).as_bytes());
+        exit(1);
+    }
+}
+
+/// C `getMetadataPieces` (`extraheader.c:537`).
+pub fn get_metadata_pieces(
+    ind_adoc: i32,
+    adoc_type: i32,
+    nz: i32,
+    ix_piece: &mut [i32],
+    iy_piece: &mut [i32],
+    iz_piece: &mut [i32],
+    max_piece: i32,
+    num_found: &mut i32,
+) -> i32 {
+    let sect_names: [&[u8]; 3] = [ADOC_ZVALUE_NAME, b"Image", ADOC_ZVALUE_NAME];
+    *num_found = 0;
+
+    if nz > max_piece {
+        b3d_error(
+            Some(&mut ImodFile::Stdout),
+            format_args!("getMetadataPieces - Arrays not large enough for piece lists"),
+        );
+        return 1;
+    }
+    if adoc_set_current(ind_adoc).is_err() {
+        b3d_error(
+            Some(&mut ImodFile::Stdout),
+            format_args!("get_metadata_pieces - Failed to set autodoc index"),
+        );
+        return 1;
+    }
+    let name = sect_names[(adoc_type - 1) as usize];
+    for i in 0..nz.max(0) {
+        let mut ind = i;
+        if adoc_type == 3 {
+            ind = adoc_lookup_by_name_value(name, i);
+            if ind < 0 {
+                continue;
+            }
+        }
+        let iu = i as usize;
+        let (mut ix, mut iy, mut iz) = (ix_piece[iu], iy_piece[iu], iz_piece[iu]);
+        if adoc_get_three_integers(name, ind, b"PieceCoordinates", &mut ix, &mut iy, &mut iz) == 0 {
+            *num_found += 1;
+        }
+        (ix_piece[iu], iy_piece[iu], iz_piece[iu]) = (ix, iy, iz);
+    }
+    0
+}
+
+/// C Fortran wrapper `get_metadata_pieces` (`extraheader.c:567`): `indAdoc`
+/// is 1-based; exits with an `ERROR:` string upon error.
+pub fn get_metadata_pieces_fortran(
+    ind_adoc: i32,
+    adoc_type: i32,
+    nz: i32,
+    ix_piece: &mut [i32],
+    iy_piece: &mut [i32],
+    iz_piece: &mut [i32],
+    max_piece: i32,
+    num_found: &mut i32,
+) {
+    b3d_set_store_error(1);
+    if get_metadata_pieces(
+        ind_adoc - 1,
+        adoc_type,
+        nz,
+        ix_piece,
+        iy_piece,
+        iz_piece,
+        max_piece,
+        num_found,
+    ) != 0
+    {
+        let _ = ImodFile::Stdout.write_all(format!("\nERROR: {}\n", b3d_get_error()).as_bytes());
+        exit(1);
+    }
+}
+
 /// C `getMetadataWeightingDoses` (`extraheader.c:614`).
+///
+/// `mktime` is the C library's (the conversion depends on the local time zone
+/// and normalises out-of-range fields, and the sort compares its results with
+/// `difftime`), and the `sscanf("%d-%3s-%d %d:%d:%d")` scan is translated in
+/// place: a conversion that fails leaves that field and every later one
+/// holding what the previous section's scan put there, as the source's `tim`
+/// and `monthBuf` do (their first values are uninitialised in the source;
+/// zero and empty here).
 pub fn get_metadata_weighting_doses(
     ind_adoc: i32,
     adoc_type: i32,
@@ -544,26 +888,39 @@ pub fn get_metadata_weighting_doses(
     prior_dose: &mut [f32],
     sec_dose: &mut [f32],
 ) -> i32 {
-    let Ok(nz_usize) = usize::try_from(nz) else {
-        return 1;
-    };
-    if iz_piece.len() < nz_usize || prior_dose.len() < nz_usize || sec_dose.len() < nz_usize {
-        return 1;
-    }
-    let (mut min_dose, accum_dose) = {
+    let mut dummy1 = 0.0_f32;
+    let mut dummy2 = 0.0_f32;
+    let mut num_vals = 0_i32;
+    let mut num_found = 0_i32;
+    let mut ret_val = 0_i32;
+    let mut val_strings: Vec<Option<String>>;
+    let mut full_times: Vec<libc::time_t> = Vec::new();
+    let mut min_dose = 0.0_f32;
+    let mut replace_dose = 0.0_f32;
+    let mut accum_dose = 0.0_f32;
+    let mut time_inds: Vec<i32> = Vec::new();
+    let mut month_buf: Vec<u8> = Vec::new();
+    let is_bidir = bidir_num_invert > 1 || bidir_num_invert < 0;
+    let save_error = b3d_get_store_error();
+    // SAFETY: an all-zero `tm` is a valid value (plain integers and, on glibc,
+    // a null `tm_zone` pointer that `mktime` does not read).
+    let mut tim: libc::tm = unsafe { core::mem::zeroed() };
+    let months: [&[u8]; 12] = [
+        b"Jan", b"Feb", b"Mar", b"Apr", b"May", b"Jun", b"Jul", b"Aug", b"Sep", b"Oct", b"Nov",
+        b"Dec",
+    ];
+    {
         let mut zero = S_ZERO_DOSE.lock().unwrap();
         if zero.threshold > 0. {
-            let value = (zero.threshold, zero.accumulated);
-            *zero = ZeroDoseSettings::default();
-            value
-        } else {
-            (0., 0.)
+            min_dose = zero.threshold;
+            zero.threshold = 0.;
+            accum_dose = zero.accumulated;
+            zero.accumulated = 0.;
+            replace_dose = 0.001_f64.min(zero.threshold as f64 / 10.) as f32;
         }
-    };
-    let mut dummy1 = 0.;
-    let mut dummy2 = 0.;
-    let mut num_values = 0;
-    let mut num_found = 0;
+    }
+
+    /* ExposureDose HAS to be there */
     if get_metadata_by_key(
         ind_adoc,
         adoc_type,
@@ -574,7 +931,7 @@ pub fn get_metadata_weighting_doses(
         core::slice::from_mut(&mut dummy1),
         core::slice::from_mut(&mut dummy2),
         None,
-        &mut num_values,
+        &mut num_vals,
         &mut num_found,
         nz,
         iz_piece,
@@ -584,25 +941,38 @@ pub fn get_metadata_weighting_doses(
     }
     if num_found < nz {
         b3d_error(
-            None,
+            Some(&mut ImodFile::Stdout),
             format_args!(
-                "getMetadataWeightingDoses - {} entries were found in autodoc file for ExposureDose",
+                "getMetadataWeightingDoses - {} entries were found in autodoc file for \
+                 ExposureDose\n",
                 if num_found != 0 { "Not enough" } else { "No" }
             ),
         );
         return 2;
     }
-    for dose in &sec_dose[..nz_usize] {
-        if *dose <= 0. && min_dose <= 0. {
-            b3d_error(
-                None,
-                format_args!(
-                    "getMetadataWeightingDoses - Some sections have 0 for ExposureDose in the autodoc file"
-                ),
-            );
-            return 2;
+
+    /* And they have to be non-zero */
+    for ind in 0..nz as usize {
+        if sec_dose[ind] <= 0. && min_dose <= 0. {
+            if min_dose > 0. {
+                if sec_dose[ind] < replace_dose {
+                    sec_dose[ind] = replace_dose;
+                }
+            } else {
+                b3d_error(
+                    Some(&mut ImodFile::Stdout),
+                    format_args!(
+                        "getMetadataWeightingDoses - Some sections have 0 for ExposureDose in \
+                         the autodoc file\n"
+                    ),
+                );
+                return 2;
+            }
         }
     }
+
+    /* Look for PriorRecordDose; if they are there we are done
+    Need to ignore incomplete number of these entries thanks to a bug in SerialEM! */
     if get_metadata_by_key(
         ind_adoc,
         adoc_type,
@@ -613,7 +983,7 @@ pub fn get_metadata_weighting_doses(
         core::slice::from_mut(&mut dummy1),
         core::slice::from_mut(&mut dummy2),
         None,
-        &mut num_values,
+        &mut num_vals,
         &mut num_found,
         nz,
         iz_piece,
@@ -624,113 +994,269 @@ pub fn get_metadata_weighting_doses(
     if num_found == nz && (min_dose <= 0. || accum_dose <= 0.01) {
         return 0;
     }
-    let bidir = bidir_num_invert > 1 || bidir_num_invert < 0;
-    let saved_error = b3d_get_store_error();
-    if bidir {
+
+    ret_val = 0;
+
+    /* Get DateTime strings to determine section order.
+    New 9/6/21: Use this in preference to bidir information, which can be inadvertent
+    So from here on, any error causes it to fall back to bidir if present */
+    if is_bidir {
         b3d_set_store_error(1);
     }
-    let mut strings: Vec<Option<String>> = vec![None; nz_usize];
-    let ret = get_metadata_by_key(
-        ind_adoc,
-        adoc_type,
-        nz,
-        "DateTime",
-        0,
-        prior_dose,
-        core::slice::from_mut(&mut dummy1),
-        core::slice::from_mut(&mut dummy2),
-        Some(&mut strings[..]),
-        &mut num_values,
-        &mut num_found,
-        nz,
-        iz_piece,
-    );
-    if ret != 0 || num_found == 0 || num_found < nz {
-        if bidir {
-            prior_doses_from_image_doses(
-                &sec_dose[..nz_usize],
-                bidir_num_invert,
-                &mut prior_dose[..nz_usize],
-            );
-            b3d_set_store_error(saved_error);
-            return 0;
+    val_strings = vec![None; nz.max(0) as usize];
+
+    if ret_val == 0 {
+        if get_metadata_by_key(
+            ind_adoc,
+            adoc_type,
+            nz,
+            "DateTime",
+            0,
+            prior_dose,
+            core::slice::from_mut(&mut dummy1),
+            core::slice::from_mut(&mut dummy2),
+            Some(&mut val_strings[..]),
+            &mut num_vals,
+            &mut num_found,
+            nz,
+            iz_piece,
+        ) != 0
+        {
+            // `freeValStrings`
+            val_strings.clear();
+            ret_val = 1;
+            if !is_bidir {
+                return 1;
+            }
         }
-        if num_found == 0 {
-            prior_doses_from_image_doses(&sec_dose[..nz_usize], 0, &mut prior_dose[..nz_usize]);
+    }
+
+    /* If no time stamps, have to rely on images being in order if no bidir information.
+    Return -1 in this case */
+    if num_found == 0 {
+        if is_bidir {
+            ret_val = -1;
+        } else {
+            prior_doses_from_image_doses(
+                &sec_dose[..nz as usize],
+                0,
+                &mut prior_dose[..nz as usize],
+            );
             return -1;
         }
-        return if ret != 0 { 1 } else { 2 };
     }
-    let months = [
-        "Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec",
-    ];
-    let mut times = Vec::with_capacity(nz_usize);
-    let mut bad = false;
-    for (i, string) in strings.into_iter().enumerate() {
-        let string = string.unwrap_or_default();
-        let parts: Vec<_> = string.split(['-', ' ', ':']).collect();
-        if parts.len() != 6 {
-            bad = true;
-            break;
-        }
-        let month = months.iter().position(|&m| m == parts[1]);
-        let parsed = (
-            parts[0].parse::<i32>(),
-            parts[2].parse::<i32>(),
-            parts[3].parse::<i32>(),
-            parts[4].parse::<i32>(),
-            parts[5].parse::<i32>(),
-        );
-        if month.is_none()
-            || parsed.0.is_err()
-            || parsed.1.is_err()
-            || parsed.2.is_err()
-            || parsed.3.is_err()
-            || parsed.4.is_err()
-        {
-            bad = true;
-            break;
-        }
-        // `mktime` ordering is all the C source needs here; this monotonically sortable tuple is equivalent.
-        times.push((
-            (
-                parsed.1.unwrap(),
-                month.unwrap() as i32,
-                parsed.0.unwrap(),
-                parsed.2.unwrap(),
-                parsed.3.unwrap(),
-                parsed.4.unwrap(),
+
+    if num_found > 0 && num_found < nz {
+        b3d_error(
+            Some(&mut ImodFile::Stdout),
+            format_args!(
+                "getMetadataWeightingDoses - The autodoc file has DateTime entries for only \
+                 {} of {} sections\n",
+                num_found, nz
             ),
-            i,
-        ));
-    }
-    if bad {
-        if bidir {
-            prior_doses_from_image_doses(
-                &sec_dose[..nz_usize],
-                bidir_num_invert,
-                &mut prior_dose[..nz_usize],
-            );
-            b3d_set_store_error(saved_error);
-            return 0;
+        );
+        val_strings.clear();
+        ret_val = 1;
+        if !is_bidir {
+            return 2;
         }
-        return 2;
     }
-    times.sort_by_key(|entry| entry.0);
-    prior_dose[times[0].1] = 0.;
-    for i in 1..times.len() {
-        let dose = sec_dose[times[i - 1].1];
-        prior_dose[times[i].1] = prior_dose[times[i - 1].1]
-            + if dose < min_dose && accum_dose >= 0.01 {
-                accum_dose.max(dose)
-            } else {
-                dose
-            };
+
+    /* Now convert the date-time stamps with sscanf, look up month, fill tm struct and
+    convert to time_t */
+    if ret_val == 0 {
+        full_times = vec![0; nz as usize];
+        time_inds = vec![0; nz as usize];
     }
-    if bidir {
-        b3d_set_store_error(saved_error);
+    if ret_val == 0 {
+        for ind in 0..nz as usize {
+            let text: &[u8] = val_strings[ind].as_deref().map_or(b"", str::as_bytes);
+            // `sscanf(valStrings[ind], "%d-%3s-%d %d:%d:%d", &tim.tm_mday, monthBuf,
+            //         &tim.tm_year, &tim.tm_hour, &tim.tm_min, &tim.tm_sec)`
+            let mut pos = 0_usize;
+            'scan: for conv in 0..6 {
+                if conv == 1 || conv == 2 {
+                    // literal '-'
+                    if text.get(pos) != Some(&b'-') {
+                        break 'scan;
+                    }
+                    pos += 1;
+                } else if conv == 3 {
+                    // ' ' matches any run of white space, including none
+                    while text.get(pos).is_some_and(|c| c.is_ascii_whitespace()) {
+                        pos += 1;
+                    }
+                } else if conv > 3 {
+                    if text.get(pos) != Some(&b':') {
+                        break 'scan;
+                    }
+                    pos += 1;
+                }
+                while text.get(pos).is_some_and(|c| c.is_ascii_whitespace()) {
+                    pos += 1;
+                }
+                if conv == 1 {
+                    // `%3s`
+                    let start = pos;
+                    while pos < text.len() && pos - start < 3 && !text[pos].is_ascii_whitespace() {
+                        pos += 1;
+                    }
+                    if pos == start {
+                        break 'scan;
+                    }
+                    month_buf = text[start..pos].to_vec();
+                    continue;
+                }
+                // `%d`: optional sign then decimal digits, as `strtol` reads them
+                let start = pos;
+                let mut negative = false;
+                if matches!(text.get(pos), Some(b'+') | Some(b'-')) {
+                    negative = text[pos] == b'-';
+                    pos += 1;
+                }
+                let digits = pos;
+                let mut value = 0_i64;
+                while pos < text.len() && text[pos].is_ascii_digit() {
+                    value = value
+                        .saturating_mul(10)
+                        .saturating_add((text[pos] - b'0') as i64);
+                    pos += 1;
+                }
+                if pos == digits {
+                    let _ = start;
+                    break 'scan;
+                }
+                let value = (if negative { -value } else { value }) as i32;
+                match conv {
+                    0 => tim.tm_mday = value,
+                    2 => tim.tm_year = value,
+                    3 => tim.tm_hour = value,
+                    4 => tim.tm_min = value,
+                    _ => tim.tm_sec = value,
+                }
+            }
+            tim.tm_year += 100;
+            let mut mon_ind = 0_usize;
+            while mon_ind < 12 {
+                if month_buf == months[mon_ind] {
+                    break;
+                }
+                mon_ind += 1;
+            }
+            if mon_ind > 11 {
+                b3d_error(
+                    Some(&mut ImodFile::Stdout),
+                    format_args!(
+                        "getMetadataWeightingDoses - The DateTime entry {} in the autodoc file \
+                         has an improper month string\n",
+                        String::from_utf8_lossy(text)
+                    ),
+                );
+                ret_val = 2;
+                break;
+            }
+            tim.tm_mon = mon_ind as i32;
+            tim.tm_isdst = -1;
+            // SAFETY: `tim` is a valid, exclusively borrowed `tm`.
+            full_times[ind] = unsafe { libc::mktime(&mut tim) };
+            time_inds[ind] = ind as i32;
+        }
     }
-    0
+
+    /* Sort the times by index
+    difftime gives the time interval FROM the second time TO the first time */
+    if ret_val == 0 {
+        for ind in 0..(nz - 1).max(0) as usize {
+            for jnd in ind + 1..nz as usize {
+                // `difftime(a, b) > 0.` is `(double)a - (double)b > 0.`
+                if full_times[time_inds[ind] as usize] as f64
+                    - full_times[time_inds[jnd] as usize] as f64
+                    > 0.
+                {
+                    let mon_ind = time_inds[ind];
+                    time_inds[ind] = time_inds[jnd];
+                    time_inds[jnd] = mon_ind;
+                }
+            }
+        }
+
+        /* Now compute the prior doses */
+        prior_dose[time_inds[0] as usize] = 0.;
+        for ind in 1..nz as usize {
+            dummy1 = sec_dose[time_inds[ind - 1] as usize];
+            prior_dose[time_inds[ind] as usize] = prior_dose[time_inds[ind - 1] as usize]
+                + if dummy1 < min_dose && accum_dose >= 0.01 {
+                    if accum_dose < dummy1 {
+                        dummy1
+                    } else {
+                        accum_dose
+                    }
+                } else {
+                    dummy1
+                };
+        }
+    }
+
+    /* If there was an error but information about bidirectional is present, use it to
+    compute priorDose in the right order */
+    if ret_val != 0 && is_bidir {
+        let mut out = ImodFile::Stdout;
+        if ret_val > 0 {
+            let _ = out.write_all(format!("WARNING: {}", b3d_get_error()).as_bytes());
+        }
+        let _ = out.write_all(
+            format!(
+                "{}alling back to using entry for bidirectional tilt series\n",
+                if ret_val > 0 {
+                    "F"
+                } else {
+                    "No date-time information; f"
+                }
+            )
+            .as_bytes(),
+        );
+        let _ = out.flush();
+        ret_val = 0;
+        b3d_error(Some(&mut ImodFile::Stdout), format_args!(""));
+        prior_doses_from_image_doses(
+            &sec_dose[..nz as usize],
+            bidir_num_invert,
+            &mut prior_dose[..nz as usize],
+        );
+    }
+
+    /* Clean up */
+    if is_bidir {
+        b3d_set_store_error(save_error);
+    }
+    ret_val
+}
+
+/// C Fortran wrapper `getmetadataweightingdoses` (`extraheader.c:797`):
+/// `indAdoc` is 1-based, and an error return is printed and exits.
+pub fn get_metadata_weighting_doses_fortran(
+    ind_adoc: i32,
+    adoc_type: i32,
+    nz: i32,
+    iz_piece: &[i32],
+    bidir_num_invert: i32,
+    prior_dose: &mut [f32],
+    sec_dose: &mut [f32],
+) -> i32 {
+    let err = get_metadata_weighting_doses(
+        ind_adoc - 1,
+        adoc_type,
+        nz,
+        iz_piece,
+        bidir_num_invert,
+        prior_dose,
+        sec_dose,
+    );
+    if err > 0 {
+        let _ = ImodFile::Stdout.write_all(format!("\nERROR: {}\n", b3d_get_error()).as_bytes());
+        exit(1);
+    }
+    err
 }
 
 /// C `setZeroDoseThreshAndAccum` (`extraheader.c:815`).

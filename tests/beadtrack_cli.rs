@@ -13,6 +13,17 @@
 //! save-all objects, box output, the trace output, and the error paths
 //! (including the degenerate-fit NaN position that makes native fail reading
 //! the image, reached by `base` and `elong`).
+//!
+//! **Defined, not native, goldens** (`BUGS.md` "`beadtrack` `beadtrack.cpp`",
+//! fixed in translation 2026-09-26): `base` and `elong` (a NaN position is in
+//! no piece, so the run completes where native fails reading the image, exit
+//! 1 -> 0), `err-noseed` (the seed-model message names the file), and every
+//! Sobel-centering case -- `boxout`, `indexed`, `local`, `objs`, `rounds3`,
+//! `skip`, `snap`, `sobel`, `sobelelong`, `trace` -- where the Sobel peaks are
+//! scaled and then offset (`peak * scale + offset`) instead of multiplied by
+//! `scale + offset`, and the Sobel/centroid residual report prints both
+//! values.  They were regenerated from the translation; re-running
+//! `make-beadtrack-goldens.sh` would put native's output back.
 
 mod common;
 
@@ -22,16 +33,11 @@ fn fixture_dir() -> PathBuf {
     Path::new(env!("CARGO_MANIFEST_DIR")).join("fixtures/beadtrack")
 }
 
-/// Blank what native cannot reproduce: the MRC labels of the box stacks carry
-/// a date/time stamp.
-fn mask(name: &str, bytes: &[u8]) -> Vec<u8> {
-    let mut masked = bytes.to_vec();
-    if (name.ends_with(".box") || name.ends_with(".ref") || name.ends_with(".cor"))
-        && masked.len() > 1024
-    {
-        masked[224..1024].fill(0);
-    }
-    masked
+/// Blank the wall-clock stamps (`common::mask_stamps`).  The regions native
+/// writes from uninitialised memory (`BUGS.md` §2) are reconciled first by
+/// `common::reconcile_uninitialised`, which checks ours holds the defined value.
+fn mask(bytes: &[u8]) -> Vec<u8> {
+    common::mask_stamps(bytes)
 }
 
 fn scratch(name: &str) -> PathBuf {
@@ -128,7 +134,7 @@ fn every_case_matches_native_golden() {
                 continue;
             };
             let theirs = std::fs::read(golden.join(name).join(file)).unwrap();
-            if mask(file, &ours) != mask(file, &theirs) {
+            if mask(&ours) != mask(&common::reconcile_uninitialised(&ours, &theirs)) {
                 failures.push(format!("{name}: {file} differs from native"));
             }
         }

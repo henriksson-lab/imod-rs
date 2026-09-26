@@ -86,7 +86,7 @@ pub fn proc_vars(
         }
         map_separate_group::<true>(
             &mut sg.iviews_in_group[iv * mv..],
-            sg.num_sep_in_group[iv],
+            &mut sg.num_sep_in_group[iv],
             &av.map_file_to_view,
             av.nfile_views,
         );

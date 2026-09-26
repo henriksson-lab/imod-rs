@@ -132,3 +132,35 @@ fn every_case_matches_native_golden() {
     assert!(count >= 40, "only {count} cases read");
     assert!(failures.is_empty(), "{}", failures.join("\n"));
 }
+
+/// BUGS.md `xftoxg` / `xfproduct`, fixed in translation: interactive entry
+/// never assigns `ifScales`, which native then reads uninitialised when both
+/// inputs are warpings.  Defined: no scales entered, so the interactive run
+/// gives exactly what the command-line run without `-scale` gives -- which is
+/// native's `ww` golden.
+#[test]
+fn interactive_two_warpings_take_the_no_scale_branch() {
+    let dir = scratch("defined_interactive_ww");
+    let mut child = common::imod_cmd(PROGRAM)
+        .current_dir(&dir)
+        .env(
+            "AUTODOC_DIR",
+            concat!(env!("CARGO_MANIFEST_DIR"), "/IMOD/autodoc"),
+        )
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .unwrap();
+    child
+        .stdin
+        .take()
+        .unwrap()
+        .write_all(b"w10.xf\nw10.xf\np.xf\n")
+        .unwrap();
+    let output = child.wait_with_output().unwrap();
+    assert_eq!(output.status.code(), Some(0), "{output:?}");
+    let golden = std::fs::read(fixture_dir().join("golden/xfproduct-ww.out")).unwrap();
+    assert_eq!(std::fs::read(dir.join("p.xf")).unwrap(), golden);
+    let _ = std::fs::remove_dir_all(&dir);
+}

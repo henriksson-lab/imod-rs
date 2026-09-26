@@ -5,6 +5,7 @@
 //! The Fortran main program maps to [`densmatch`]; the source has no other
 //! program units.
 
+use crate::imod::flib::subrs::compat::gfortran_rt::{maxss, minss};
 use crate::imod::flib::subrs::hvem::b3ddate::b3d_date;
 use crate::imod::flib::subrs::hvem::parse_input_params::{
     exit_error, memory_error, pip_get_in_out_file, pip_get_logical, pip_read_or_parse_options,
@@ -30,57 +31,229 @@ target:TargetMeanAndSD:FP:@mode:ModeToOutput:I:@report:ReportOnly:B:@\
 xminmax:XMinAndMax:IP:@yminmax:YMinAndMax:IP:@zminmax:ZMinAndMax:IP:@\
 all:UseAllPixels:B:@offset:OffsetRefToScaledXYZ:IT:@help:usage:B:";
 
-/// Original program `densmatch` (`densmatch.f90:17`).
+/// Rust-only: Fortran `Gw.d` editing of a `real*4`, as `header.rs` carries
+/// it (FORMAT 102's `2g14.6`).  Public so a direct caller can reproduce the
+/// rounding of a value it used to read back from the printed report.
+pub fn densmatch_g_edit(value: f32, w: usize, d: i32) -> String {
+    if value.is_nan() {
+        return format!("{:>w$}", "NaN");
+    }
+    if value.is_infinite() {
+        let text = match (value < 0.0, w) {
+            (false, 8..) => "Infinity",
+            (false, _) => "Inf",
+            (true, 9..) => "-Infinity",
+            (true, _) => "-Inf",
+        };
+        return format!("{text:>w$}");
+    }
+    let magnitude = value.abs();
+    let mut digits = String::new();
+    let mut exponent = 1_i32;
+    if magnitude != 0.0 {
+        let scientific = format!("{:.*e}", (d - 1) as usize, magnitude);
+        let (mantissa, power) = scientific.split_once('e').unwrap();
+        digits = mantissa.replace('.', "");
+        exponent = power.parse::<i32>().unwrap() + 1;
+    }
+    if (0..=d).contains(&exponent) {
+        let mut text = format!("{:.*}", (d - exponent) as usize, value);
+        if exponent == d {
+            text.push('.');
+        }
+        format!("{:>1$}    ", text, w - 4)
+    } else {
+        format!(
+            "{:>1$}",
+            format!(
+                "{}0.{}E{}{:02}",
+                if value < 0.0 { "-" } else { "" },
+                digits,
+                if exponent < 0 { '-' } else { '+' },
+                exponent.abs()
+            ),
+            w
+        )
+    }
+}
+
+/// Rust-only: the options `densmatch` reads through PIP (or interactively),
+/// as the program's direct-call interface (`CLAUDE.md`, "Wherever we control
+/// both sides, use a direct function call now").  `None` is an option not
+/// entered.  `reference_file` is `None` exactly when a target mean and SD was
+/// entered; `output_file` blank is "rewrite the scaled file".
+#[derive(Clone, Debug, Default)]
+pub struct DensmatchParams {
+    pub pip_input: bool,
+    pub target_mean_sd: Option<(f32, f32)>,
+    pub reference_file: Option<String>,
+    pub scaled_file: String,
+    pub output_file: String,
+    pub report_only: bool,
+    pub x_min_max: Option<(i32, i32)>,
+    pub y_min_max: Option<(i32, i32)>,
+    pub z_min_max: Option<(i32, i32)>,
+    pub use_all_pixels: bool,
+    pub offset: Option<(i32, i32, i32)>,
+    pub mode: Option<i32>,
+    /// The caller has already opened the files on units 1 (reference), 2
+    /// (scaled) and 3 (output, when not blank), as `densmatch` does right
+    /// after it reads each name; otherwise [`densmatch_compute`] opens them.
+    pub files_opened: bool,
+}
+
+/// Rust-only: what `densmatch` computes: the sampled mean and SD of each
+/// volume (FORMAT 103) and the scaling (FORMAT 102).  With a target entered,
+/// slot 0 holds the target.
+#[derive(Clone, Copy, Debug, Default)]
+pub struct DensmatchResult {
+    pub average: [f32; 2],
+    pub stan_dev: [f32; 2],
+    pub scale_fac: f32,
+    pub add_fac: f32,
+}
+
+/// Rust-only: FORMAT 102's line (`densmatch.f90:240`), without its ending.
+pub fn densmatch_scale_line(scale_fac: f32, add_fac: f32) -> String {
+    format!(
+        "Scale factors to multiply by then add:{}{}",
+        densmatch_g_edit(scale_fac, 14, 6),
+        densmatch_g_edit(add_fac, 14, 6)
+    )
+}
+
+/// Original program `densmatch` (`densmatch.f90:17`): option parsing, then
+/// [`densmatch_compute`], then the report line of `-report`.
+///
+/// The files are opened here as each name is read, as in the source, so the
+/// interactive prompts and the open listings keep their order.
+pub fn densmatch() {
+    let mut in_file = String::new();
+    let mut out_file = String::from(" ");
+    let (mut num_opt_arg, mut num_non_opt_arg) = (0_i32, 0_i32);
+    let mut params = DensmatchParams::default();
+    let mut non_opt_scaled_num = 2_i32;
+    //
+    // Pip startup: set error, parse options, check help, set flag if used
+    //
+    pip_read_or_parse_options(
+        &[DENSMATCH_OPTIONS],
+        DENSMATCH_NUM_OPTIONS,
+        "densmatch",
+        "ERROR: DENSMATCH - ",
+        true,
+        1,
+        2,
+        1,
+        &mut num_opt_arg,
+        &mut num_non_opt_arg,
+    );
+    let pip_input = num_opt_arg + num_non_opt_arg > 0;
+    params.pip_input = pip_input;
+    //
+    // Determine if target mean and SD
+    if pip_input {
+        let (mut avg1, mut sd1) = (0.0_f32, 0.0_f32);
+        if pip_get_two_floats(b"TargetMeanAndSD", &mut avg1, &mut sd1) == 0 {
+            params.target_mean_sd = Some((avg1, sd1));
+            non_opt_scaled_num = 1;
+            let mut ierr = 0;
+            pip_number_of_entries(b"ReferenceFile", &mut ierr);
+            if ierr > 0 {
+                exit_error("You cannot enter both -target and -reference");
+            }
+        }
+    }
+    //
+    // If not, get input file
+    if params.target_mean_sd.is_none() {
+        if pip_get_in_out_file(
+            "ReferenceFile",
+            1,
+            "Name of reference volume",
+            &mut in_file,
+            320,
+        ) != 0
+        {
+            exit_error("Either a reference file or a target mean/SD must be entered");
+        }
+        params.reference_file = Some(in_file.clone());
+        imopen(1, &in_file, "ro");
+    }
+    //
+    // Get output file(s)
+    if pip_get_in_out_file(
+        "ScaledFile",
+        non_opt_scaled_num,
+        "Name of volume to be scaled",
+        &mut in_file,
+        320,
+    ) != 0
+    {
+        exit_error("No file was specified to be scaled");
+    }
+    imopen(2, &in_file, "old");
+    params.scaled_file = in_file;
+    //
+    let _ = pip_get_in_out_file(
+        "OutputFile",
+        non_opt_scaled_num + 1,
+        "Name of output file, or Return to rewrite file to be scaled",
+        &mut out_file,
+        320,
+    );
+    // `outFile` is `character*320`: an empty entry is the blank record.
+    if !out_file.trim_end_matches(' ').is_empty() {
+        imopen(3, &out_file, "new");
+    }
+    params.output_file = out_file;
+    params.files_opened = true;
+    if pip_input {
+        let _ = pip_get_logical("ReportOnly", &mut params.report_only);
+        let two = |option: &[u8]| -> Option<(i32, i32)> {
+            let (mut first, mut second) = (0_i32, 0_i32);
+            (pip_get_two_integers(option, &mut first, &mut second) == 0).then_some((first, second))
+        };
+        params.x_min_max = two(b"XMinAndMax");
+        params.y_min_max = two(b"YMinAndMax");
+        params.z_min_max = two(b"ZMinAndMax");
+        let _ = pip_get_logical("UseAllPixels", &mut params.use_all_pixels);
+        let (mut shift0, mut shift1, mut shift2) = (0_i32, 0_i32, 0_i32);
+        if pip_get_three_integers(
+            b"OffsetRefToScaledXYZ",
+            &mut shift0,
+            &mut shift1,
+            &mut shift2,
+        ) == 0
+        {
+            params.offset = Some((shift0, shift1, shift2));
+        }
+        let mut new_mode = 0_i32;
+        if pip_get_integer(b"ModeToOutput", &mut new_mode) == 0 {
+            params.mode = Some(new_mode);
+        }
+    }
+    pip_done();
+    let result = densmatch_compute(&params);
+    if params.report_only {
+        // FORMAT 102: `('Scale factors to multiply by then add:', 2g14.6)`
+        println!("{}", densmatch_scale_line(result.scale_fac, result.add_fac));
+    }
+    exit(0);
+}
+
+/// The body of program `densmatch` (`densmatch.f90:17-280`) after option
+/// parsing: opens the files, samples each volume, and -- unless
+/// `report_only` -- writes the scaled volume.  Returns the sampled means and
+/// SDs and the scaling; the `-report` line is left to the caller.  Errors end
+/// through `exitError`, as in the program.
 ///
 /// The `equivalence`d scalar/array pairs (`nx`/`nxyz(1)`, `ixStart`/
 /// `ixyzStart(1)`, ...) are the arrays alone, read by index where the source
 /// names the scalar.  Fortran unit 6 is written with `println!`, the stream
 /// `imopen`/`irdhdr` print their banners on, so the two stay in order.
-pub fn densmatch() {
+pub fn densmatch_compute(params: &DensmatchParams) -> DensmatchResult {
     unsafe {
-        // `Gw.d` editing, as `header.rs` carries it (FORMAT 102's `2g14.6`).
-        let g_edit = |value: f32, w: usize, d: i32| -> String {
-            if value.is_nan() {
-                return format!("{:>w$}", "NaN");
-            }
-            if value.is_infinite() {
-                let text = match (value < 0.0, w) {
-                    (false, 8..) => "Infinity",
-                    (false, _) => "Inf",
-                    (true, 9..) => "-Infinity",
-                    (true, _) => "-Inf",
-                };
-                return format!("{text:>w$}");
-            }
-            let magnitude = value.abs();
-            let mut digits = String::new();
-            let mut exponent = 1_i32;
-            if magnitude != 0.0 {
-                let scientific = format!("{:.*e}", (d - 1) as usize, magnitude);
-                let (mantissa, power) = scientific.split_once('e').unwrap();
-                digits = mantissa.replace('.', "");
-                exponent = power.parse::<i32>().unwrap() + 1;
-            }
-            if (0..=d).contains(&exponent) {
-                let mut text = format!("{:.*}", (d - exponent) as usize, value);
-                if exponent == d {
-                    text.push('.');
-                }
-                format!("{:>1$}    ", text, w - 4)
-            } else {
-                format!(
-                    "{:>1$}",
-                    format!(
-                        "{}0.{}E{}{:02}",
-                        if value < 0.0 { "-" } else { "" },
-                        digits,
-                        if exponent < 0 { '-' } else { '+' },
-                        exponent.abs()
-                    ),
-                    w
-                )
-            }
-        };
         // `Fw.d`: a value too wide for the field is written as `w` asterisks.
         let f_edit = |value: f32, w: usize, d: usize| -> String {
             let text = format!("{value:>w$.d$}");
@@ -95,11 +268,9 @@ pub fn densmatch() {
         let mut num_samp_xyz = [0_i32; 3];
         let mut dxyz_sample = [0.0_f32; 3];
         let mut array: Vec<f32> = Vec::new();
-        let mut in_file = String::new();
-        let mut out_file;
         let mut average = [0.0_f32; 2];
         let mut stan_dev = [0.0_f32; 2];
-        let mut report = false;
+        let report = params.report_only;
         let mut all_pixels = false;
         let mut iunit_out;
         let mut ierr: i32;
@@ -117,96 +288,59 @@ pub fn densmatch() {
         let (mut dmin, mut dmax, mut dmean) = (0.0_f32, 0.0_f32, 0.0_f32);
         let mut sem = 0.0_f32;
         let mut idim = 0_i32;
-        let (mut num_opt_arg, mut num_non_opt_arg) = (0_i32, 0_i32);
-
-        out_file = String::from(" ");
         let max_dim = 100000000_i32;
         //
         // This number of samples improves SD accuracy to 0.2%, down from 1-2% with 100000
         // without increasing data access time that much
         let max_samples = 1000000_i32;
-        let mut non_opt_scaled_num = 2_i32;
         let mut iun_start = 1_i32;
         for i in 0..3 {
             if_min_max[i] = 0;
             i_shift[i] = 0;
             i_start[i] = 0;
         }
+        let pip_input = params.pip_input;
         //
-        // Pip startup: set error, parse options, check help, set flag if used
-        //
-        pip_read_or_parse_options(
-            &[DENSMATCH_OPTIONS],
-            DENSMATCH_NUM_OPTIONS,
-            "densmatch",
-            "ERROR: DENSMATCH - ",
-            true,
-            1,
-            2,
-            1,
-            &mut num_opt_arg,
-            &mut num_non_opt_arg,
-        );
-        let pip_input = num_opt_arg + num_non_opt_arg > 0;
-        //
-        // Determine if target mean and SD
-        if pip_input {
-            let (mut avg1, mut sd1) = (average[0], stan_dev[0]);
-            if pip_get_two_floats(b"TargetMeanAndSD", &mut avg1, &mut sd1) == 0 {
-                average[0] = avg1;
-                stan_dev[0] = sd1;
-                iun_start = 2;
-                non_opt_scaled_num = 1;
-                ierr = 0;
-                pip_number_of_entries(b"ReferenceFile", &mut ierr);
-                if ierr > 0 {
-                    exit_error("You cannot enter both -target and -reference");
-                }
-            }
+        // Determine if target mean and SD (the conflict with -reference is
+        // tested by the caller, `densmatch`, where the source tests it)
+        if let Some((avg1, sd1)) = params.target_mean_sd {
+            average[0] = avg1;
+            stan_dev[0] = sd1;
+            iun_start = 2;
         }
         //
         // If not, get input file
-        if iun_start == 1 {
-            if pip_get_in_out_file("ReferenceFile", 1, "Name of reference volume", &mut in_file)
-                != 0
-            {
-                exit_error("Either a reference file or a target mean/SD must be entered");
-            }
-            imopen(1, &in_file, "ro");
+        if iun_start == 1 && !params.files_opened {
+            imopen(1, params.reference_file.as_deref().unwrap_or(""), "ro");
         }
         //
         // Get output file(s)
-        if pip_get_in_out_file(
-            "ScaledFile",
-            non_opt_scaled_num,
-            "Name of volume to be scaled",
-            &mut in_file,
-        ) != 0
-        {
-            exit_error("No file was specified to be scaled");
+        if !params.files_opened {
+            imopen(2, &params.scaled_file, "old");
         }
-        imopen(2, &in_file, "old");
         //
-        let _ = pip_get_in_out_file(
-            "OutputFile",
-            non_opt_scaled_num + 1,
-            "Name of output file, or Return to rewrite file to be scaled",
-            &mut out_file,
-        );
+        let out_file = &params.output_file;
         // `outFile` is `character*320`: an empty entry is the blank record.
         let out_blank = out_file.trim_end_matches(' ').is_empty();
         //
         iunit_out = 2;
         if !out_blank {
-            imopen(3, &out_file, "new");
+            if !params.files_opened {
+                imopen(3, out_file, "new");
+            }
             iunit_out = 3;
         }
         if pip_input {
-            let _ = pip_get_logical("ReportOnly", &mut report);
-            if_min_max[0] = 1 - pip_get_two_integers(b"XMinAndMax", &mut i_start[0], &mut i_end[0]);
-            if_min_max[1] = 1 - pip_get_two_integers(b"YMinAndMax", &mut i_start[1], &mut i_end[1]);
-            if_min_max[2] = 1 - pip_get_two_integers(b"ZMinAndMax", &mut i_start[2], &mut i_end[2]);
-            let _ = pip_get_logical("UseAllPixels", &mut all_pixels);
+            for (i, entry) in [params.x_min_max, params.y_min_max, params.z_min_max]
+                .into_iter()
+                .enumerate()
+            {
+                if let Some((start, end)) = entry {
+                    (i_start[i], i_end[i]) = (start, end);
+                    if_min_max[i] = 1;
+                }
+            }
+            all_pixels = params.use_all_pixels;
             if all_pixels {
                 if if_min_max[0] + if_min_max[1] + if_min_max[2] > 0 {
                     exit_error("You cannot enter -all with an option specifying a min and max");
@@ -215,8 +349,8 @@ pub fn densmatch() {
                 i_start = [0; 3];
                 i_end = [0; 3];
             }
-            let [shift0, shift1, shift2] = &mut i_shift;
-            if pip_get_three_integers(b"OffsetRefToScaledXYZ", shift0, shift1, shift2) == 0 {
+            if let Some((shift0, shift1, shift2)) = params.offset {
+                i_shift = [shift0, shift1, shift2];
                 if if_min_max[0] + if_min_max[1] + if_min_max[2] == 0 {
                     exit_error("You must enter min and max X, Y, or Z if you enter offsets");
                 }
@@ -224,12 +358,14 @@ pub fn densmatch() {
                     exit_error("You cannot enter both -target and -offset");
                 }
             }
-            if_mode = 1 - pip_get_integer(b"ModeToOutput", &mut new_mode);
+            if let Some(entered) = params.mode {
+                new_mode = entered;
+                if_mode = 1;
+            }
             if if_mode > 0 && out_blank {
                 exit_error("You cannot enter a new mode unless outputting to a new file");
             }
         }
-        pip_done();
         //
         // sample each volume to find mean and SD
         //
@@ -366,13 +502,13 @@ pub fn densmatch() {
         let add_fac = average[0] - average[1] * scale_fac;
         //
         if report {
-            // FORMAT 102: `('Scale factors to multiply by then add:', 2g14.6)`
-            println!(
-                "Scale factors to multiply by then add:{}{}",
-                g_edit(scale_fac, 14, 6),
-                g_edit(add_fac, 14, 6)
-            );
-            exit(0);
+            // FORMAT 102 is written by the caller (`densmatch_scale_line`).
+            return DensmatchResult {
+                average,
+                stan_dev,
+                scale_fac,
+                add_fac,
+            };
         }
         //
         if iunit_out == 3 {
@@ -404,15 +540,21 @@ pub fn densmatch() {
                     }
                 } else {
                     for value in &mut array[..count] {
-                        *value = 255.0_f32.min(0.0_f32.max(scale_fac * *value + add_fac));
+                        // `min(255., max(0., scaleFac * array(i) + addFac))`
+                        // (`densmatch.f90:248`): the reference object computes
+                        // `maxss expr, 0` then `minss ., 255` (vectorised as
+                        // `maxps`/`minps`, same operand order).
+                        *value = minss(maxss(scale_fac * *value + add_fac, 0.0_f32), 255.0_f32);
                     }
                 }
                 array_min_max_mean_fortran(
                     &array, &nx, &num_lines, &1, &nx, &1, &num_lines, &mut dmin, &mut dmax,
                     &mut dmean,
                 );
-                tmin = tmin.min(dmin);
-                tmax = tmax.max(dmax);
+                // `densmatch.f90:252-253`: `minss`/`maxss` with the running
+                // `tmin`/`tmax` as destination in the reference object.
+                tmin = minss(tmin, dmin);
+                tmax = maxss(tmax, dmax);
                 tsum += dmean * num_lines as f32;
                 iiu_set_position(iunit_out, iz - 1, iy_line);
                 iiu_write_lines(iunit_out, array.as_mut_ptr().cast(), num_lines);
@@ -440,6 +582,11 @@ pub fn densmatch() {
         titlech[67..75].copy_from_slice(tim.as_bytes());
         iiuwriteheaderstr(&iunit_out, &titlech, &1, &tmin, &tmax, &tmean);
         iiu_close(iunit_out);
-        exit(0);
+        DensmatchResult {
+            average,
+            stan_dev,
+            scale_fac,
+            add_fac,
+        }
     }
 }

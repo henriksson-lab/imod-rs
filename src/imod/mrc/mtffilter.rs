@@ -10,7 +10,7 @@ use crate::imod::libcfshr::autodoc::{
     adoc_get_image_meta_info, adoc_open_image_metadata, adoc_set_current,
 };
 use crate::imod::libcfshr::b3dutil::{
-    CArg, ImodFile, c_format_bytes, imod_prog_name, imod_usage_header,
+    CArg, ImodFile, c_format_bytes, exit, imod_prog_name, imod_usage_header,
     set_float_output_for_entered_mode, standard_memory_limit_mb,
 };
 use crate::imod::libcfshr::extraheader::{
@@ -33,8 +33,9 @@ use crate::imod::libcfshr::reduce_by_binning::repack_float_image;
 use crate::imod::libcfshr::simplestat::array_min_max_mean;
 use crate::imod::libcfshr::taperpad::{PadIn, slice_noise_taper_pad, slice_taper_out_pad};
 use crate::imod::libfft::odfft::nice_fft_limit;
-use crate::imod::libfft::rustfft_backend::{odfftc, todfftc};
+use crate::imod::libfft::odfft::odfft_c;
 use crate::imod::libfft::thrdfft::thrdfftc;
+use crate::imod::libfft::todfft::todfft_c;
 use crate::imod::libiimod::mrcfiles::{MRC_LABEL_SIZE, MRC_MODE_FLOAT, mrc_fill_label_string};
 use crate::imod::libiimod::mrcslice::full_array_min_max_mean;
 use crate::imod::libiimod::unit_fileio::{
@@ -237,26 +238,56 @@ pub fn mtffilter(arguments: &[String]) -> i32 {
     // fallbacks from ../../manpages/autodoc2man -3 2  mtffilter
     //
     let num_options: i32 = 42;
-    let options: [&[u8]; 1] = [concat!(
-        "input:InputFile:FN:@output:OutputFile:FN:@zrange:StartingAndEndingZ:IP:@",
-        "mode:ModeToOutput:I:@3dfilter:FilterIn3D:B:@1dfilter:OneDimensionalFilter:B:@",
-        "units:UnitsForFrequency:I:@lowpass:LowPassRadiusSigma:FP:@",
-        "highpass:HighPassSigma:F:@radius1:FilterRadius1:F:@mtf:MtfFile:FN:@",
-        "stock:StockCurve:I:@maxinv:MaximumInverse:F:@",
-        "invrolloff:InverseRolloffRadiusSigma:FP:@xscale:XScaleFactor:F:@",
-        "noise:NoisePadding:B:@denscale:DensityScaleFactor:F:@",
-        "rweight:RWeightedFilter:B:@fake:FakeSIRTiterations:LI:@pixel:PixelSize:F:@",
-        "expanded:ExpandedByFactor:F:@volt:Voltage:I:@dtype:TypeOfDoseFile:I:@",
-        "dfile:DoseWeightingFile:FN:@dfixed:FixedImageDose:F:@initial:InitialDose:F:@",
-        "bidir:BidirectionalNumViews:I:@reversed:ReversedBidirectional:B:@",
-        "optimal:OptimalDoseScaling:F:@critical:CriticalDoseFactors:FT:@",
-        "verbose:VerboseOutput:I:@deconv:DeconvolutionStrength:F:@snr:SNRFalloff:F:@",
-        "dchigh:HighPassNyquist:F:@defocus:DefocusInMicrons:F:@dcphase:PhaseShift:F:@",
-        "cs:SphericalAberration:F:@amplifier:AmplifierFactorAndPower:FP:@",
-        "cutoff:CutoffForAmplifier:F:@phase:PhasePlateParameters:FT:@",
-        "param:ParameterFile:PF:@help:usage:B:"
-    )
-    .as_bytes()];
+    // `mtffilter.cpp:113-129` writes the table as adjacent string literals
+    // (the `//` after each is a comment), so `options[]` has ONE element
+    // holding all 42 options joined by `@`, while `numOptions` is 42:
+    // without `mtffilter.adoc` native reads 41 pointers past the array and
+    // segfaults (BUGS.md).  Defined behaviour: the 42 options as 42 entries,
+    // so the program parses the same with or without its autodoc.
+    let options: [&[u8]; 42] = [
+        b"input:InputFile:FN:",
+        b"output:OutputFile:FN:",
+        b"zrange:StartingAndEndingZ:IP:",
+        b"mode:ModeToOutput:I:",
+        b"3dfilter:FilterIn3D:B:",
+        b"1dfilter:OneDimensionalFilter:B:",
+        b"units:UnitsForFrequency:I:",
+        b"lowpass:LowPassRadiusSigma:FP:",
+        b"highpass:HighPassSigma:F:",
+        b"radius1:FilterRadius1:F:",
+        b"mtf:MtfFile:FN:",
+        b"stock:StockCurve:I:",
+        b"maxinv:MaximumInverse:F:",
+        b"invrolloff:InverseRolloffRadiusSigma:FP:",
+        b"xscale:XScaleFactor:F:",
+        b"noise:NoisePadding:B:",
+        b"denscale:DensityScaleFactor:F:",
+        b"rweight:RWeightedFilter:B:",
+        b"fake:FakeSIRTiterations:LI:",
+        b"pixel:PixelSize:F:",
+        b"expanded:ExpandedByFactor:F:",
+        b"volt:Voltage:I:",
+        b"dtype:TypeOfDoseFile:I:",
+        b"dfile:DoseWeightingFile:FN:",
+        b"dfixed:FixedImageDose:F:",
+        b"initial:InitialDose:F:",
+        b"bidir:BidirectionalNumViews:I:",
+        b"reversed:ReversedBidirectional:B:",
+        b"optimal:OptimalDoseScaling:F:",
+        b"critical:CriticalDoseFactors:FT:",
+        b"verbose:VerboseOutput:I:",
+        b"deconv:DeconvolutionStrength:F:",
+        b"snr:SNRFalloff:F:",
+        b"dchigh:HighPassNyquist:F:",
+        b"defocus:DefocusInMicrons:F:",
+        b"dcphase:PhaseShift:F:",
+        b"cs:SphericalAberration:F:",
+        b"amplifier:AmplifierFactorAndPower:FP:",
+        b"cutoff:CutoffForAmplifier:F:",
+        b"phase:PhasePlateParameters:FT:",
+        b"param:ParameterFile:PF:",
+        b"help:usage:B:",
+    ];
 
     //
     // Pip startup: set error, parse options, do help output
@@ -532,11 +563,11 @@ pub fn mtffilter(arguments: &[String]) -> i32 {
         if im < num_mtf - 2 && s > xmtf[(im + 1).min(num_mtf - 1) as usize] {
             im += 1;
         }
-        ctfa[j as usize] = (0.0f64).max(
-            (ymtf[im as usize]
-                + (ymtf[(im + 1) as usize] - ymtf[im as usize]) * (s - xmtf[im as usize])
-                    / (xmtf[(im + 1) as usize] - xmtf[im as usize])) as f64,
-        ) as f32;
+        // `B3DMAX(0., v)` is `0. > v ? 0. : v`, which keeps a NaN `v`.
+        let value = (ymtf[im as usize]
+            + (ymtf[(im + 1) as usize] - ymtf[im as usize]) * (s - xmtf[im as usize])
+                / (xmtf[(im + 1) as usize] - xmtf[im as usize])) as f64;
+        ctfa[j as usize] = (if 0. > value { 0. } else { value }) as f32;
         j += 1;
     }
     if (ind_stock != 0 || have_mtf_file) && r_weight != 0 {
@@ -955,7 +986,8 @@ pub fn mtffilter(arguments: &[String]) -> i32 {
     for j in 0..nsize {
         atten = 1.;
         if s > radius1 {
-            atten = ((beta1 * (s - radius1) * (s - radius1)) as f64).exp() as f32;
+            // `exp` of a `float` is C++'s `expf` overload.
+            atten = (beta1 * (s - radius1) * (s - radius1)).exp();
         }
         if r_weight != 0 {
             ctfa[j as usize] = j as f32 * rad_scale;
@@ -972,8 +1004,7 @@ pub fn mtffilter(arguments: &[String]) -> i32 {
         if num_fake_sirt_iter == 1 && s >= fake_alpha {
             ctfa[j as usize] = (ctfa[j as usize] as f64
                 * (1.
-                    - (1. - fake_alpha as f64 / s as f64)
-                        .powf((fake_iter_use + fake_match_add) as f64)))
+                    - (1. - (fake_alpha / s) as f64).powf((fake_iter_use + fake_match_add) as f64)))
                 as f32;
         }
         if delta_rad != 0. {
@@ -981,7 +1012,7 @@ pub fn mtffilter(arguments: &[String]) -> i32 {
             xa = (s / delta_rad - indf as f32) as f32;
             ctfa[j as usize] = (ctfa[j as usize] as f64
                 * ((1. - xa as f64) * ctfb[indf as usize] as f64
-                    + xa as f64 * ctfb[(indf + 1) as usize] as f64))
+                    + (xa * ctfb[(indf + 1) as usize]) as f64))
                 as f32;
         }
         if (j % mod_print) == 0 && s <= 0.5 && num_fake_sirt_iter < 2 && idose_file_type < 0 {
@@ -1024,7 +1055,7 @@ pub fn mtffilter(arguments: &[String]) -> i32 {
                 if s >= fake_alpha {
                     ctfa[j as usize] = (ctfa[j as usize] as f64
                         * (1.
-                            - (1. - fake_alpha as f64 / s as f64)
+                            - (1. - (fake_alpha / s) as f64)
                                 .powf((fake_iter_use + fake_match_add) as f64)))
                         as f32;
                 }
@@ -1108,7 +1139,7 @@ pub fn mtffilter(arguments: &[String]) -> i32 {
                         ));
                         for iy in 0..=40 {
                             s = ((0.5 * iy as f64) / 40.) as f32;
-                            indf = (s / delta + 0.5) as i32;
+                            indf = ((s / delta) as f64 + 0.5) as i32;
                             let _ = ImodFile::Stdout.write_all(&c_format_bytes(
                                 "%7.3f%9.4f)\n",
                                 &[CArg::Dbl(s as f64), CArg::Dbl(ctfa[indf as usize] as f64)],
@@ -1140,7 +1171,7 @@ pub fn mtffilter(arguments: &[String]) -> i32 {
                         for ix in 0..nx {
                             xa = delx * ix as f32;
                             s = ((xa * xa + ya_sq + za_sq) as f64).sqrt() as f32;
-                            indf = (s / delta + 0.5) as i32;
+                            indf = ((s / delta) as f64 + 0.5) as i32;
                             array[ind as usize] *= ctfa[indf as usize];
                             array[(ind + 1) as usize] *= ctfa[indf as usize];
                             ind += 2;
@@ -1193,12 +1224,12 @@ pub fn mtffilter(arguments: &[String]) -> i32 {
                     }
                     //
                     if one_dfilter != 0 {
-                        let _ = odfftc(&mut array, nx_pad, ny_pad, 0);
+                        odfft_c(&mut array, nx_pad, ny_pad, 0);
                         fft_filter_1d(&mut array, nx_dim / 2, ny_pad, &ctfa, delta);
-                        let _ = odfftc(&mut array, nx_pad, ny_pad, 1);
+                        odfft_c(&mut array, nx_pad, ny_pad, 1);
                     } else {
                         // print *,'taking fft'
-                        let _ = todfftc(&mut array, nx_pad, ny_pad, 0);
+                        todfft_c(&mut array, nx_pad, ny_pad, 0);
                         xcorr_filter_part(
                             FilterIn::InPlace,
                             &mut array,
@@ -1209,28 +1240,36 @@ pub fn mtffilter(arguments: &[String]) -> i32 {
                         );
                         //
                         // print *,'taking back fft'
-                        let _ = todfftc(&mut array, nx_pad, ny_pad, 1);
+                        todfft_c(&mut array, nx_pad, ny_pad, 1);
                     }
 
                     // print *,'repack, set density, write'
                     // `repackFloatImage(array, array, ...)` repacks in place;
                     // the translated routine cannot alias its two arguments,
-                    // so the source region is copied first.  With `nbin` 1 the
-                    // copy is a pure move of the selected rows, so the result
-                    // is the same bytes (`mtffilter.cpp:758`).
-                    let source: Vec<u8> =
-                        array.iter().flat_map(|value| value.to_ne_bytes()).collect();
-                    let mut dest = vec![0u8; source.len()];
-                    repack_float_image(
-                        &mut dest,
-                        &source,
-                        nx_dim,
-                        ix_start,
-                        ix_start + nx - 1,
-                        iy_start,
-                        iy_start + ny - 1,
-                    );
-                    for (value, chunk) in array.iter_mut().zip(dest.chunks_exact(4)) {
+                    // so it reads the padded plane and writes a separate
+                    // `nx * ny` buffer, which is copied back over the first
+                    // `nx * ny` elements -- the only ones the in-place C
+                    // repack changes (`mtffilter.cpp:791`).
+                    let nxy = (nx * ny) as usize;
+                    let mut dest = vec![0u8; nxy * 4];
+                    {
+                        let plane = (nx_dim * ny_pad) as usize;
+                        // SAFETY: reinterprets `plane` initialised floats as
+                        // bytes for the `void *` the C routine takes.
+                        let source = unsafe {
+                            std::slice::from_raw_parts(array.as_ptr().cast::<u8>(), plane * 4)
+                        };
+                        repack_float_image(
+                            &mut dest,
+                            source,
+                            nx_dim,
+                            ix_start,
+                            ix_start + nx - 1,
+                            iy_start,
+                            iy_start + ny - 1,
+                        );
+                    }
+                    for (value, chunk) in array[..nxy].iter_mut().zip(dest.chunks_exact(4)) {
                         *value = f32::from_ne_bytes([chunk[0], chunk[1], chunk[2], chunk[3]]);
                     }
                     array_min_max_mean(
@@ -1324,21 +1363,33 @@ pub fn mtffilter(arguments: &[String]) -> i32 {
             while iz <= izHigh {
                 unsafe { iiu_set_position(im_unit_out, iz, 0) };
                 ibase = nx_dim as i64 * ny_pad as i64 * (iz - iz_start) as i64;
-                let source: Vec<u8> = array[ibase as usize..]
-                    .iter()
-                    .flat_map(|value| value.to_ne_bytes())
-                    .collect();
-                let mut dest = vec![0u8; source.len()];
-                repack_float_image(
-                    &mut dest,
-                    &source,
-                    nx_dim,
-                    ix_start,
-                    ix_start + nx - 1,
-                    iy_start,
-                    iy_start + ny - 1,
-                );
-                for (value, chunk) in array[ibase as usize..].iter_mut().zip(dest.chunks_exact(4)) {
+                // In-place repack of this plane only; see the 2-D branch.
+                let nxy = (nx * ny) as usize;
+                let mut dest = vec![0u8; nxy * 4];
+                {
+                    let plane = (nx_dim * ny_pad) as usize;
+                    // SAFETY: reinterprets `plane` initialised floats of this
+                    // plane as bytes for the `void *` the C routine takes.
+                    let source = unsafe {
+                        std::slice::from_raw_parts(
+                            array[ibase as usize..].as_ptr().cast::<u8>(),
+                            plane * 4,
+                        )
+                    };
+                    repack_float_image(
+                        &mut dest,
+                        source,
+                        nx_dim,
+                        ix_start,
+                        ix_start + nx - 1,
+                        iy_start,
+                        iy_start + ny - 1,
+                    );
+                }
+                for (value, chunk) in array[ibase as usize..ibase as usize + nxy]
+                    .iter_mut()
+                    .zip(dest.chunks_exact(4))
+                {
                     *value = f32::from_ne_bytes([chunk[0], chunk[1], chunk[2], chunk[3]]);
                 }
                 array_min_max_mean(
@@ -1366,8 +1417,8 @@ pub fn mtffilter(arguments: &[String]) -> i32 {
         ind = mode_map[(mode_out + 1) as usize] - 1;
         if ind >= 0 {
             diff_lim = (0.004 * (mode_max[ind as usize] - mode_min[ind as usize]) as f64) as f32;
-            if (dmin as f64) < mode_min[ind as usize] as f64 - diff_lim as f64
-                || dmax as f64 >= mode_max[ind as usize] as f64 + diff_lim as f64
+            if dmin < mode_min[ind as usize] as f32 - diff_lim
+                || dmax >= mode_max[ind as usize] as f32 + diff_lim
             {
                 mode_try = 2;
                 if dmin >= -32900. && dmax < 32900. {
@@ -1418,8 +1469,7 @@ pub fn mtffilter(arguments: &[String]) -> i32 {
     unsafe { iiu_close(1) };
     //
     let _ = ImodFile::Stdout.write_all(b" PROGRAM EXECUTED TO END.\n");
-    let _ = ImodFile::Stdout.flush();
-    std::process::exit(0);
+    exit(0);
 }
 
 /// C `fftFilter3D` (`mtffilter.cpp:855`).
@@ -1455,7 +1505,7 @@ pub fn fft_filter_3d(array: &mut [f32], nx_dim: i32, ny: i32, nz: i32, ctf: &[f3
             for jx in 0..nx_dim {
                 xa = jx as f32 * delx;
                 s = ((xa * xa + ya * ya + za * za) as f64).sqrt() as f32;
-                indf = (s / delta + 0.5) as i32;
+                indf = ((s / delta) as f64 + 0.5) as i32;
                 array[(xbase + 2 * jx) as usize] *= ctf[indf as usize];
                 array[(xbase + 2 * jx + 1) as usize] *= ctf[indf as usize];
             }
@@ -1475,7 +1525,7 @@ pub fn fft_filter_1d(array: &mut [f32], nx_dim: i32, ny: i32, ctf: &[f32], delta
     for jy in 0..ny {
         for jx in 0..nx_dim {
             s = jx as f32 * delx;
-            indf = (s / delta + 0.5) as i32;
+            indf = ((s / delta) as f64 + 0.5) as i32;
             array[(jy * 2 * nx_dim + jx * 2) as usize] *= ctf[indf as usize];
             array[(jy * 2 * nx_dim + jx * 2 + 1) as usize] *= ctf[indf as usize];
         }
@@ -1502,7 +1552,7 @@ pub fn amplifier(
     // Functional form: (1 + (amp-1)*exp( -(r/cutoff) ^power)) / a"""
     s = 0.;
     for i in 0..*nsize {
-        ctf[i as usize] = ((1. + (ampfac - 1.) as f64 * (-(s / cutoff).powf(power) as f64).exp())
+        ctf[i as usize] = ((1. + (ampfac - 1.) as f64 * (-(s / cutoff).powf(power)).exp() as f64)
             / ampfac as f64) as f32;
         if ctf[i as usize] < 1.0e-6 {
             ctf[i as usize] = 0.;
@@ -1584,8 +1634,10 @@ pub fn deconv_filter(
         term1 = lambda * lambda * lambda * cs * k2 * k2;
         w = ((pi as f64 / 2.) * (term1 + lambda2 * defocus * k2) as f64 - phase_shift as f64)
             as f32;
-        ctf = ((w as f64).cos() * amplitude as f64
-            - (1. - (amplitude * amplitude) as f64).sqrt() * (w as f64).sin()) as f32;
+        // `cos(w)`/`sin(w)` of a `float` are C++'s `cosf`/`sinf` overloads,
+        // and `cos(w) * amplitude` is a float product.
+        ctf = ((w.cos() * amplitude) as f64
+            - (1. - (amplitude * amplitude) as f64).sqrt() * w.sin() as f64) as f32;
         ctfb[ind as usize] = (if ctf >= 0. { ctf } else { -ctf } as f64
             / ((ctf * ctf) as f64 + 1. / snr as f64)) as f32;
     }

@@ -2,8 +2,8 @@
 
 use std::io::Write;
 
-use super::b3dutil::ImodFile;
 use super::b3dutil::num_omp_threads;
+use super::b3dutil::{CArg, ImodFile, c_format_bytes};
 
 /// Locations of a histogram dip and the peaks bracketing it.
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -251,30 +251,37 @@ pub fn find_histogram_dip(
             }
             index -= 1;
         }
-        upper_lim = first_val + range * (index as f32 / (bins.len() - 1) as f32).min(1.);
+        // `histogram.c:308`: `i / (numBins - 1.)` and `B3DMIN(1., ...)` are
+        // double, so the product and sum are double and only the result narrows.
+        let frac = index as f64 / (bins.len() as f64 - 1.);
+        upper_lim = (first_val as f64 + range as f64 * if 1. < frac { 1. } else { frac }) as f32;
     }
     let mut cut = 0;
     let coarse = loop {
         kernel_histogram(values, bins, first_val, last_val, coarse_h, verbose);
         if let Some(result) = scan_histogram(bins, first_val, last_val, first_val, upper_lim, true)
-            && result.peak_above < first_val + 0.999 * range
+            && (result.peak_above as f64) < first_val as f64 + 0.999 * range as f64
         {
             break result;
         }
-        coarse_h *= 0.707;
+        // `coarseH *= 0.707`: a double product narrowed back to float.
+        coarse_h = (coarse_h as f64 * 0.707) as f32;
         cut += 1;
         if cut == 4 {
             return None;
         }
     };
     if verbose >= 0 {
-        let _ = writeln!(
-            ImodFile::Stdout,
-            "Histogram smoothed with H = {coarse_h:.3} has dip at {}, peaks at {} and {}",
-            coarse.dip,
-            coarse.peak_below,
-            coarse.peak_above,
-        );
+        // `histogram.c:326`: `%.3f` and `%g`, not Rust's shortest form.
+        let _ = ImodFile::Stdout.write_all(&c_format_bytes(
+            "Histogram smoothed with H = %.3f has dip at %g, peaks at %g and %g\n",
+            &[
+                CArg::Dbl(coarse_h as f64),
+                CArg::Dbl(coarse.dip as f64),
+                CArg::Dbl(coarse.peak_below as f64),
+                CArg::Dbl(coarse.peak_above as f64),
+            ],
+        ));
     }
     kernel_histogram(values, bins, first_val, last_val, fine_h, verbose);
     let fine = scan_histogram(
@@ -290,11 +297,10 @@ pub fn find_histogram_dip(
         ..coarse
     };
     if verbose >= 0 {
-        let _ = writeln!(
-            ImodFile::Stdout,
-            "Histogram smoothed with H = {fine_h} has lowest dip at {}",
-            result.dip
-        );
+        let _ = ImodFile::Stdout.write_all(&c_format_bytes(
+            "Histogram smoothed with H = %g has lowest dip at %g\n",
+            &[CArg::Dbl(fine_h as f64), CArg::Dbl(result.dip as f64)],
+        ));
         let _ = ImodFile::Stdout.flush();
     }
     Some(result)

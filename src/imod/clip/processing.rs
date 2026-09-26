@@ -2972,11 +2972,11 @@ pub fn clip_average(
                         slice_get_val(sq.as_mut().unwrap(), x, y, &mut a);
                         a[0] += v[0] * v[0];
                         a[1] += v[1] * v[1];
-                        // DELIBERATE: `processing.cpp:2150` is `oval[1] += val[2] * val[2];`
-                        // -- index 1, not 2.  An upstream typo (BUGS.md): channel 2's
-                        // sum of squares is folded into channel 1 and channel 2's own is
-                        // never accumulated.  Reproduced for parity; do not "fix".
-                        a[1] += v[2] * v[2];
+                        // BUGS.md, fixed in translation: `processing.cpp:2150` is
+                        // `oval[1] += val[2] * val[2];` -- index 1, not 2, so native folds
+                        // channel 2's sum of squares into channel 1 and never accumulates
+                        // channel 2's own.  Each channel accumulates its own square here.
+                        a[2] += v[2] * v[2];
                         slice_put_val(sq.as_mut().unwrap(), x, y, a);
                     }
                 }
@@ -5000,6 +5000,25 @@ pub fn clip_get_stat3d(
     *rz = zmax;
     0
 }
+thread_local! {
+    /// Where [`clip_stat`] records the mean and SD of each section row it
+    /// prints, when a direct caller set it through [`clip_recording_stat`].
+    static STAT_SINK: std::cell::RefCell<Option<std::sync::Arc<std::sync::Mutex<Vec<(f64, f64)>>>>> =
+        const { std::cell::RefCell::new(None) };
+}
+
+/// Rust-only: runs program `clip` (its `argv` from the in-process runner)
+/// with the mean and SD of every section row `clip stat` prints (the
+/// `%9.4f  %9.4f` columns of a plain, non-montage, non-outlier report)
+/// recorded into `sink`, for a direct caller that used to parse those
+/// columns (`copytomocoms`; see `CLAUDE.md`, "Wherever we control both
+/// sides, use a direct function call now").  The program's output is
+/// unchanged.  Run it under `commands::call_in_process`.
+pub fn clip_recording_stat(sink: std::sync::Arc<std::sync::Mutex<Vec<(f64, f64)>>>) {
+    STAT_SINK.with_borrow_mut(|slot| *slot = Some(sink));
+    crate::imod::clip::clip::clip();
+}
+
 /// Matches C++ `clip_stat`.
 pub fn clip_stat(hin: &mut MrcHeader, opt: &mut ClipOptions) -> Result<(), i32> {
     let outliers = opt.val != crate::imod::clip::clip::IP_DEFAULT as f32
@@ -5253,15 +5272,17 @@ pub fn clip_stat(hin: &mut MrcHeader, opt: &mut ClipOptions) -> Result<(), i32> 
         }
         let (mut cx, mut cy) = (0_f64, 0_f64);
         crate::imod::clip::correlation::parabolic_fit(&mut cx, &mut cy, &data);
-        let (mut peak_x, mut peak_y) = (cx + xmax as f64, cy + ymax as f64);
+        // `processing.cpp:3481` declares `float x, y`: the fitted peak is
+        // rounded to float here, and `:3653-3658` adjust it in float.
+        let (mut peak_x, mut peak_y) = ((cx + xmax as f64) as f32, (cy + ymax as f64) as f32);
         if opt.sano != 0 {
-            peak_x -= s.xsize as f64 / 2.;
-            peak_y -= s.ysize as f64 / 2.;
+            peak_x -= s.xsize as f32 / 2.;
+            peak_y -= s.ysize as f32 / 2.;
         } else {
             let adjust_x = opt.cx as i32 - opt.ix / 2;
             let adjust_y = opt.cy as i32 - opt.iy / 2;
-            peak_x += adjust_x as f64;
-            peak_y += adjust_y as f64;
+            peak_x += adjust_x as f32;
+            peak_y += adjust_y as f32;
             xmin += adjust_x;
             ymin += adjust_y;
         }
@@ -5277,8 +5298,12 @@ pub fn clip_stat(hin: &mut MrcHeader, opt: &mut ClipOptions) -> Result<(), i32> 
                         CArg::Int((ymin + pcoords[base + 1] + add) as i64),
                         CArg::Int((pcoords[base + 2] + add) as i64),
                         CArg::Dbl((max as f64) as f64),
-                        CArg::Int((peak_x.round() as i32 + pcoords[base] + add) as i64),
-                        CArg::Int((peak_y.round() as i32 + pcoords[base + 1] + add) as i64),
+                        CArg::Int(
+                            ((peak_x as f64 + 0.5).floor() as i32 + pcoords[base] + add) as i64,
+                        ),
+                        CArg::Int(
+                            ((peak_y as f64 + 0.5).floor() as i32 + pcoords[base + 1] + add) as i64,
+                        ),
                         CArg::Int((pcoords[base + 2] + add) as i64),
                         CArg::Dbl((mean) as f64),
                     ],
@@ -5303,6 +5328,13 @@ pub fn clip_stat(hin: &mut MrcHeader, opt: &mut ClipOptions) -> Result<(), i32> 
                 )
                 .as_bytes(),
             );
+            STAT_SINK.with_borrow(|slot| {
+                if let Some(sink) = slot {
+                    sink.lock()
+                        .expect("clip stat sink")
+                        .push((mean as f64, sd as f64));
+                }
+            });
         }
         // `processing.cpp:3660-3676`: the first selected section seeds the
         // extrema, and its zmax is set to 0 rather than to iz.
@@ -5391,8 +5423,13 @@ pub fn clip_stat(hin: &mut MrcHeader, opt: &mut ClipOptions) -> Result<(), i32> 
                             CArg::Int((pcoords[zbase] + add) as i64),
                             CArg::Dbl((allmaxes[kk] as f64) as f64),
                             CArg::Chr((starmax as i32) as u8),
-                            CArg::Int((peak_x.round() as i32 + pcoords[base] + add) as i64),
-                            CArg::Int((peak_y.round() as i32 + pcoords[base + 1] + add) as i64),
+                            CArg::Int(
+                                ((peak_x as f64 + 0.5).floor() as i32 + pcoords[base] + add) as i64,
+                            ),
+                            CArg::Int(
+                                ((peak_y as f64 + 0.5).floor() as i32 + pcoords[base + 1] + add)
+                                    as i64,
+                            ),
                             CArg::Int((pcoords[zbase] + add) as i64),
                             CArg::Dbl((mean) as f64),
                             CArg::Dbl((sd) as f64),
@@ -5412,8 +5449,8 @@ pub fn clip_stat(hin: &mut MrcHeader, opt: &mut ClipOptions) -> Result<(), i32> 
                             CArg::Int((ymin) as i64),
                             CArg::Dbl((allmaxes[kk] as f64) as f64),
                             CArg::Chr((starmax as i32) as u8),
-                            CArg::Int((peak_x.round() as i32) as i64),
-                            CArg::Int((peak_y.round() as i32) as i64),
+                            CArg::Int(((peak_x as f64 + 0.5).floor() as i32) as i64),
+                            CArg::Int(((peak_y as f64 + 0.5).floor() as i32) as i64),
                             CArg::Dbl((mean) as f64),
                             CArg::Dbl((sd) as f64),
                         ],

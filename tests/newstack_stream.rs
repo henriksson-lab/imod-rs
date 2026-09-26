@@ -4931,10 +4931,13 @@ fn newstack_float_two_and_three_scale_under_a_memory_limit() {
                     native.args(["-test", limits]);
                 }
                 assert!(native.status().unwrap().success());
-                let mut reference = std::fs::read(&native_output).unwrap();
-                let mut mine = written.clone();
-                reference[224..1024].fill(0);
-                mine[224..1024].fill(0);
+                // Stamps masked; unused label slots must be our defined
+                // zeros where native holds stack residue (`BUGS.md` §2).
+                let reference = common::mask_stamps(&common::reconcile_uninitialised(
+                    &written,
+                    &std::fs::read(&native_output).unwrap(),
+                ));
+                let mine = common::mask_stamps(&written);
                 assert_eq!(
                     reference, mine,
                     "-float {float} with -test {limits:?} must match the native output"
@@ -5437,4 +5440,157 @@ fn newstack_rustfft_fourier_options_match_the_parity_output() {
             "newstack {case} RMS difference {rms} against scale {scale}"
         );
     }
+}
+
+/// BUGS.md, fixed in translation: `scaleAndWriteChunk` assigns the host
+/// variable `optimalOut` for mode-2 output (`newstack.f90:3228,3231`), so
+/// native scales the first chunk of a memory-split `-scale 0,0 -mode 2`
+/// section to 0..255 and every later chunk to 0..1.e30.  The translation
+/// scales every chunk as the unsplit section: the `-test 3000,300` output
+/// equals the unchunked one (which is byte-identical to native).
+#[test]
+fn newstack_split_scale_output_matches_unsplit() {
+    let dir = std::env::temp_dir().join(format!(
+        "imod-rs-newstack-optimalout-{}",
+        std::process::id()
+    ));
+    let _ = std::fs::remove_dir_all(&dir);
+    std::fs::create_dir_all(&dir).unwrap();
+    let mut raw = Vec::with_capacity(64 * 48 * 2 * 4);
+    for index in 0..64 * 48 * 2 {
+        let value = ((index * 7919) % 1013) as f32 * 0.37 - 50.0;
+        raw.extend_from_slice(&value.to_le_bytes());
+    }
+    std::fs::write(dir.join("in.raw"), &raw).unwrap();
+    assert!(
+        common::imod_cmd("raw2mrc")
+            .current_dir(&dir)
+            .args([
+                "-x", "64", "-y", "48", "-z", "2", "-t", "float", "in.raw", "in.mrc"
+            ])
+            .output()
+            .unwrap()
+            .status
+            .success()
+    );
+    for (name, limit) in [("full.mrc", None), ("split.mrc", Some("3000,300"))] {
+        let mut command = common::imod_cmd("newstack");
+        command
+            .current_dir(&dir)
+            .env("AUTODOC_DIR", AUTODOC)
+            .args(["-scale", "0,0", "-mode", "2"]);
+        if let Some(limit) = limit {
+            command.args(["-test", limit]);
+        }
+        let output = command.args(["in.mrc", name]).output().unwrap();
+        assert!(output.status.success(), "{name}");
+    }
+    let full = std::fs::read(dir.join("full.mrc")).unwrap();
+    let split = std::fs::read(dir.join("split.mrc")).unwrap();
+    assert_eq!(full.len(), split.len());
+    // Header statistics (amin, amax, amean) and every data byte; the label
+    // time stamp is the only other difference between two runs.
+    assert_eq!(full[76..88], split[76..88]);
+    assert_eq!(full[1024..], split[1024..]);
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+/// BUGS.md, fixed in translation: `newstack -rot` without `-fill` takes the
+/// fill from `sliceEdgeMedian`, whose `percentileFloat` never terminates
+/// natively when a NaN is among the edge samples (native was killed after
+/// 19 minutes at 100% CPU).  The translation terminates; with `-fill 0` the
+/// same input is unaffected and byte-identical to native.
+#[test]
+fn newstack_rotate_nan_input_without_fill_terminates() {
+    let dir = std::env::temp_dir().join(format!("imod-rs-newstack-rotnan-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&dir);
+    std::fs::create_dir_all(&dir).unwrap();
+    let mut raw = Vec::with_capacity(64 * 48 * 3 * 4);
+    for index in 0..64 * 48 * 3 {
+        let value = if index % 97 == 0 {
+            f32::NAN
+        } else {
+            ((index * 7919) % 1013) as f32 / 1013.0
+        };
+        raw.extend_from_slice(&value.to_le_bytes());
+    }
+    std::fs::write(dir.join("in.raw"), &raw).unwrap();
+    assert!(
+        common::imod_cmd("raw2mrc")
+            .current_dir(&dir)
+            .args([
+                "-x", "64", "-y", "48", "-z", "3", "-t", "float", "in.raw", "in.mrc"
+            ])
+            .output()
+            .unwrap()
+            .status
+            .success()
+    );
+    let mut child = common::imod_cmd("newstack")
+        .current_dir(&dir)
+        .env("AUTODOC_DIR", AUTODOC)
+        .args(["-rot", "13", "in.mrc", "out.mrc"])
+        .stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::null())
+        .spawn()
+        .unwrap();
+    let start = std::time::Instant::now();
+    let status = loop {
+        if let Some(status) = child.try_wait().unwrap() {
+            break status;
+        }
+        if start.elapsed() > std::time::Duration::from_secs(60) {
+            let _ = child.kill();
+            panic!("newstack -rot on NaN input did not terminate");
+        }
+        std::thread::sleep(std::time::Duration::from_millis(20));
+    };
+    assert!(status.success());
+    assert!(dir.join("out.mrc").is_file());
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+/// BUGS.md, fixed in translation: a Fourier-reduction factor whose numerator
+/// has a prime above `niceFFTlimit` (17 for 1.7) has no padded FFT size;
+/// native `newstack` and `binvol` pad into the negative size `niceFrame`
+/// returns and segfault.  The translation refuses the factor with exit 1.
+#[test]
+fn fourier_reduce_prime_numerator_is_refused() {
+    let dir = std::env::temp_dir().join(format!("imod-rs-ftreduce-prime-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&dir);
+    std::fs::create_dir_all(&dir).unwrap();
+    let raw: Vec<u8> = (0..32 * 32 * 4)
+        .flat_map(|index| ((index % 251) as f32).to_le_bytes())
+        .collect();
+    std::fs::write(dir.join("in.raw"), &raw).unwrap();
+    assert!(
+        common::imod_cmd("raw2mrc")
+            .current_dir(&dir)
+            .args([
+                "-x", "32", "-y", "32", "-z", "4", "-t", "float", "in.raw", "in.mrc"
+            ])
+            .output()
+            .unwrap()
+            .status
+            .success()
+    );
+    for (program, args) in [
+        ("newstack", &["-ftreduce", "1.7", "in.mrc", "out.mrc"][..]),
+        (
+            "binvol",
+            &["-ftreduce", "-binning", "1.7", "in.mrc", "out.mrc"][..],
+        ),
+    ] {
+        let output = common::imod_cmd(program)
+            .current_dir(&dir)
+            .env("AUTODOC_DIR", AUTODOC)
+            .args(args)
+            .output()
+            .unwrap();
+        assert_eq!(output.status.code(), Some(1), "{program}");
+        let text = String::from_utf8_lossy(&output.stdout).into_owned()
+            + &String::from_utf8_lossy(&output.stderr);
+        assert!(text.contains("no FFT size"), "{program}: {text}");
+    }
+    let _ = std::fs::remove_dir_all(&dir);
 }

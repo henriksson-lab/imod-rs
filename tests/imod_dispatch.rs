@@ -112,6 +112,34 @@ fn both_invocation_forms_give_the_program_the_same_argv() {
     );
     assert_eq!(blendmont_missing.status.code(), Some(1));
 
+    // Two C++ programs whose PIP error prefix comes from `imodProgName`.
+    let ctfphaseflip_missing = both_forms("ctfphaseflip", &["-output", "out.mrc"], &[]);
+    assert_eq!(ctfphaseflip_missing.status.code(), Some(1));
+    assert!(
+        String::from_utf8_lossy(&ctfphaseflip_missing.stdout)
+            .contains("ERROR: ctfphaseflip - No stack specified"),
+        "{}",
+        String::from_utf8_lossy(&ctfphaseflip_missing.stdout)
+    );
+    let mtffilter_missing = both_forms(
+        "mtffilter",
+        &["-output", "out.mrc", "-lowpass", "0.2,0.05"],
+        // mtffilter's compiled-in fallback option table is one `@`-joined
+        // string counted as 42 entries, so without its autodoc native reads
+        // past the array (BUGS.md); the autodoc is the supported path.
+        &[(
+            "AUTODOC_DIR",
+            concat!(env!("CARGO_MANIFEST_DIR"), "/IMOD/autodoc"),
+        )],
+    );
+    assert_eq!(mtffilter_missing.status.code(), Some(1));
+    assert!(
+        String::from_utf8_lossy(&mtffilter_missing.stdout)
+            .contains("ERROR: mtffilter - No input file specified"),
+        "{}",
+        String::from_utf8_lossy(&mtffilter_missing.stdout)
+    );
+
     // A Python-launcher translation reading `args_os()`.
     let submfg_usage = both_forms("submfg", &[], &[("IMOD_DIR", "/fixture/imod")]);
     assert!(String::from_utf8_lossy(&submfg_usage.stdout).contains("Usage:  submfg"));
@@ -135,34 +163,75 @@ fn launcher_lists_its_commands_and_exits_nonzero() {
         let text = String::from_utf8_lossy(&listing.stderr);
         for command in [
             "3dmod",
+            "alignlog",
             "alterheader",
+            "assemblevol",
+            "autopatchfit",
+            "b3dcopy",
+            "b3dremove",
             "batchruntomo",
             "beadtrack",
             "binvol",
             "blendmont",
+            "ccderaser",
+            "chunksetup",
             "clip",
+            "collectmmm",
+            "combinefft",
             "convertmod",
+            "copytomocoms",
+            "corrsearch3d",
+            "ctfphaseflip",
+            "dualvolmatch",
             "etomo",
+            "extractmagrad",
+            "extracttilts",
+            "filltomo",
+            "findbeads3d",
+            "findwarp",
+            "fixboundaries",
+            "refinematch",
             "header",
             "imodinfo",
             "imodjoin",
             "imodqtassist",
             "imodsendevent",
+            "makecomfile",
+            "matchorwarp",
+            "matchrotpairs",
+            "matchvol",
             "midas",
             "mrc2tif",
+            "mtffilter",
             "newstack",
+            "patch2imod",
             "processchunks",
+            "runcom",
+            "setupcombine",
+            "solvematch",
             "sourcedoc",
+            "splitcombine",
+            "splittilt",
             "subm",
             "submfg",
             "tif2mrc",
             "tiltalign",
             "tiltxcorr",
+            "tomocleanup",
+            "tomopieces",
+            "tomopitch",
             "trimvol",
+            "vmstocsh",
+            "vmstopy",
+            "warpvol",
             "wmod2imod",
+            "xcorrstack",
+            "xf2rotmagstr",
             "xfmodel",
             "xfproduct",
+            "xfsimplex",
             "xftoxg",
+            "xyzproj",
         ] {
             assert!(
                 text.contains(&format!("\n  {command}\n")),

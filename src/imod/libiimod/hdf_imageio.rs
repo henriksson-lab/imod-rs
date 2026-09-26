@@ -202,19 +202,25 @@ pub unsafe fn hdf_read_section_any(
     if !read_stack_y {
         dset = get_dataset_for_z(&mut *in_file, cz, &mut no_data);
         if no_data != 0 {
+            /* If there are no data, fill array with zero as an MRC file would do.
+            Fixed in translation (2026-09-26, `BUGS.md`): `hdf_imageio.c:135-138`
+            advances the pointer by the padding alone, so native zeroes line 0
+            over and over and leaves every other line holding stale data.  This
+            zeroes the data span of every line and steps a whole padded line
+            (`xDimension`) each time.  `pixSizeBuf[0]` is `d.pixSize` (`:75`). */
             for _ in d.y_start..=y_end {
                 let pixel_size = match typ {
                     MRSA_BYTE => 1,
                     MRSA_FLOAT => 4,
                     MRSA_USHORT => 2,
-                    _ => 0,
+                    _ => d.pix_size as usize,
                 };
                 core::ptr::write_bytes(
                     d.buf.offset(d.bufp_offset),
                     0,
                     pixel_size * d.xsize as usize,
                 );
-                d.bufp_offset += pixel_size as isize * (pad_left + pad_right) as isize;
+                d.bufp_offset += pixel_size as isize * (d.xsize + pad_left + pad_right) as isize;
             }
             return 0;
         }

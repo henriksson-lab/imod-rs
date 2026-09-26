@@ -368,7 +368,9 @@ pub fn istore_next_obj_item<'a>(
 }
 /// Original: `istoreSort` (`istore.c:152`).
 pub fn istore_sort(list: &mut Vec<Istore>) {
-    list.sort_by(store_compare);
+    if list.len() >= 2 {
+        crate::imod::c_sort::qsort(list, &mut |a, b| store_compare(a, b) as i32);
+    }
 }
 /// Original: `istoreInsert` (`istore.c:184`).
 pub fn istore_insert(list: &mut Vec<Istore>, store: Istore) -> i32 {

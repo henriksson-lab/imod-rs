@@ -276,8 +276,12 @@ pub fn input_model(
             av.object_weight_map
                 .entry(obj_list[iobject as usize])
                 .or_insert(
-                    obj_weights[(if num_wgts < iobject {
-                        num_wgts
+                    // Fixed in translation (2026-09-26, `BUGS.md`): the source
+                    // indexes `B3DMIN(numWgts, iobject)` (`input_model.cpp:115`),
+                    // so one weight applies to the first object only and the rest
+                    // read the zero past it; `numWgts - 1` is the last weight.
+                    obj_weights[(if num_wgts - 1 < iobject {
+                        num_wgts - 1
                     } else {
                         iobject
                     }) as usize],

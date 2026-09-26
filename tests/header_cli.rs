@@ -691,3 +691,45 @@ fn header_brief_is_boolean_so_a_following_number_becomes_an_input_file() {
     assert!(result.stderr.is_empty());
     std::fs::remove_file(input).unwrap();
 }
+
+#[test]
+fn brief_with_no_labels_prints_a_blank_title() {
+    // `irdhdr.f90:147` writes `labels(i,1)` unconditionally, so native prints
+    // its uninitialised label array when `nlabl == 0` (`BUGS.md` §2).  Defined
+    // here: a blank title of 79 spaces.
+    let dir = std::env::temp_dir().join(format!("imod-rs-header-nolabel-{}", std::process::id()));
+    std::fs::create_dir_all(&dir).unwrap();
+    let file = dir.join("n.mrc");
+    let made = common::imod_cmd("clip")
+        .args([
+            "blankfile",
+            "-ox",
+            "4",
+            "-oy",
+            "4",
+            "-oz",
+            "1",
+            "-m",
+            "2",
+            "-p",
+            "0",
+        ])
+        .arg(&file)
+        .output()
+        .unwrap();
+    assert!(made.status.success());
+    let mut bytes = std::fs::read(&file).unwrap();
+    bytes[220..224].copy_from_slice(&0i32.to_le_bytes());
+    bytes[224..1024].fill(0);
+    std::fs::write(&file, &bytes).unwrap();
+    let out = common::imod_cmd("header")
+        .arg("-brief")
+        .arg(&file)
+        .output()
+        .unwrap();
+    assert!(out.status.success());
+    let text = String::from_utf8_lossy(&out.stdout);
+    assert!(!out.stdout.contains(&0), "{text:?}");
+    assert!(text.lines().any(|l| l == " ".repeat(79)), "{text:?}");
+    let _ = std::fs::remove_dir_all(dir);
+}

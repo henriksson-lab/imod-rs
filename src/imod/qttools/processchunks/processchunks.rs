@@ -21,6 +21,7 @@ use crate::imod::libcfshr::parse_params::{
     exit_error, pip_done, pip_get_boolean, pip_get_integer, pip_get_non_option_arg, pip_get_string,
     pip_get_three_floats, pip_get_two_integers, pip_print_help, pip_read_or_parse_options,
 };
+use crate::imod::pysrc::vmstopy::VmstopyOptions;
 use std::fs;
 use std::io::{self, BufRead, Read, Write};
 use std::path::PathBuf;
@@ -2958,6 +2959,41 @@ impl Processchunks {
         }
         param_list.push(com_file_name.clone());
         param_list.push(process.get_log_file_name());
+
+        // Changed (owner, 2026-09-26: no Python, no pipes): a local chunk is
+        // not converted to a .py file for `python -u`; it runs as
+        // `imod runcom -P <the vmstopy options> chunk.com chunk.log`, a child
+        // of this binary (the runner points descriptors 1 and 2 at the log,
+        // so each chunk needs its own process).  `-P` prints the PID line
+        // the kill path reads, as the script's `printPID(True)` did.  The
+        // conversion is still checked here, in process, so a command file
+        // `vmstopy` rejects gives up the same way.  Remote (ssh) and queue
+        // chunks still get a .py file from `vmstopy`: the other end runs it.
+        if self.queue == 0 && self.name_is_local_host(machine.get_name()) {
+            let mut options = VmstopyOptions::default();
+            options.chunk = true;
+            let converted = fs::File::open(&com_file_name)
+                .map_err(|_| format!("ERROR: vmstopy - Opening command file {com_file_name}"))
+                .and_then(|com| {
+                    crate::imod::pysrc::vmstopy::convert(
+                        com,
+                        &process.get_log_file_name(),
+                        &options,
+                        &mut Vec::new(),
+                    )
+                    .map_err(|message| format!("ERROR: vmstopy - {message}"))
+                });
+            if let Err(message) = converted {
+                self.write_out(&format!(
+                    "Warning: vmstopy conversion of {com_file_name} exited with error code 1 {message}\n\n"
+                ));
+                return 2;
+            }
+            let mut runcom_params = vec!["-P".to_owned()];
+            runcom_params.extend(param_list);
+            process.set_runcom_param_list(runcom_params);
+            return 0;
+        }
         param_list.push(py_file_name);
         let spawned = Command::new(&command)
             .args(&param_list)

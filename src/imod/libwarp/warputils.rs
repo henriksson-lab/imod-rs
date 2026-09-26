@@ -48,7 +48,20 @@ pub fn interpolate_grid(
     dy: &mut f32,
 ) {
     let xgrid = (x - x_grid_start) / x_grid_intrv;
-    let mut ixg = xgrid as i32;
+    // `ixg = xgrid;` is C's float-to-int conversion, `cvttss2si`: out of
+    // range (an infinity from a zero grid interval, or NaN) it gives
+    // INT_MIN, where Rust's `as` saturates (`flib/tilt/mod.rs` `fortran_int!`).
+    let mut ixg = {
+        #[cfg(target_arch = "x86_64")]
+        {
+            // SAFETY: SSE is part of the x86-64 baseline.
+            unsafe { core::arch::x86_64::_mm_cvttss_si32(core::arch::x86_64::_mm_set_ss(xgrid)) }
+        }
+        #[cfg(not(target_arch = "x86_64"))]
+        {
+            xgrid as i32
+        }
+    };
     ixg = {
         let inner = if nx_grid - 2 < ixg { nx_grid - 2 } else { ixg };
         if 0 > inner { 0 } else { inner }
@@ -62,7 +75,20 @@ pub fn interpolate_grid(
     let fx = 1. - fx1;
     let ixg1 = ixg + 1;
     let ygrid = (y - y_grid_start) / y_grid_intrv;
-    let mut iyg = ygrid as i32;
+    // `ixg = xgrid;` is C's float-to-int conversion, `cvttss2si`: out of
+    // range (an infinity from a zero grid interval, or NaN) it gives
+    // INT_MIN, where Rust's `as` saturates (`flib/tilt/mod.rs` `fortran_int!`).
+    let mut iyg = {
+        #[cfg(target_arch = "x86_64")]
+        {
+            // SAFETY: SSE is part of the x86-64 baseline.
+            unsafe { core::arch::x86_64::_mm_cvttss_si32(core::arch::x86_64::_mm_set_ss(ygrid)) }
+        }
+        #[cfg(not(target_arch = "x86_64"))]
+        {
+            ygrid as i32
+        }
+    };
     iyg = {
         let inner = if ny_grid - 2 < iyg { ny_grid - 2 } else { iyg };
         if 0 > inner { 0 } else { inner }

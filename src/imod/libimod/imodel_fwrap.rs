@@ -2055,14 +2055,12 @@ pub fn putimageref(delta: &[f32; 3], origin: &[f32; 3], tilt: &[f32; 3]) -> i32 
             return FWRAP_ERROR_NO_MODEL;
         };
         if imod.ref_image.is_none() {
-            imod.ref_image = Some(Iref_image {
-                oscale: Ipoint::default(),
-                otrans: Ipoint::default(),
-                orot: Ipoint::default(),
-                cscale: Ipoint::default(),
-                ctrans: Ipoint::default(),
-                crot: Ipoint::default(),
-            });
+            // `imodel_fwrap.c:2013` `malloc`s the `IrefImage` and never sets
+            // `oscale` or `orot`, so native writes heap residue into the
+            // `MINX` chunk (`BUGS.md` §2).  Defined here as the identity that
+            // `imodSetRefImage` (`imodel.c:1792-1793`) writes: `oscale` 1,
+            // `orot` 0 — `Iref_image::default()`.
+            imod.ref_image = Some(Iref_image::default());
         }
         let iref = imod.ref_image.as_mut().unwrap();
         iref.cscale.x = delta[0];

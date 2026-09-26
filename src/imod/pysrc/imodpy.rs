@@ -16,6 +16,10 @@ static RUN_MAX_TIME_FOR_RETRY: LazyLock<Mutex<f64>> = LazyLock::new(|| Mutex::ne
 static RAISE_KEY_INTERRUPT: LazyLock<Mutex<bool>> = LazyLock::new(|| Mutex::new(false));
 static FILE_TYPE_EXTENSION: LazyLock<Mutex<String>> = LazyLock::new(|| Mutex::new(String::new()));
 static CURRENT_ROOTNAME: LazyLock<Mutex<String>> = LazyLock::new(|| Mutex::new(String::new()));
+/// `pyVersion` (`imodpy.py:113-116`) for the Python 3 interpreter the
+/// scripts run under (3.12 in the reference setup: `100 * 3 + 10 * 12` does
+/// not apply past 3.9, so `10000 * 3 + 100 * 12`).
+const PY_VERSION: i32 = 31200;
 static MOC_RENAMES_OK: AtomicBool = AtomicBool::new(true);
 /// Rust-only: the unit number [`header_in_process`] opens on; `header` itself
 /// always uses unit 1 (`header.f90:132`).
@@ -32,30 +36,33 @@ pub struct ImodpyError {
 pub enum OptionValue {
     String(String),
     Integers(Vec<i32>),
-    Floats(Vec<f32>),
+    Floats(Vec<f64>),
     Boolean(bool),
 }
 
-/// Return shapes of `getmrc` (`IMOD/pysrc/imodpy.py:456`).
+/// Return shapes of `getmrc` (`IMOD/pysrc/imodpy.py:456`).  The float
+/// members are Python floats -- doubles parsed from `header`'s text.
 #[derive(Clone, Debug, PartialEq)]
 pub enum MrcInfo {
-    Basic(i32, i32, i32, i32, f32, f32, f32),
+    Basic(i32, i32, i32, i32, f64, f64, f64),
     All(
         i32,
         i32,
         i32,
         i32,
-        f32,
-        f32,
-        f32,
-        f32,
-        f32,
-        f32,
-        f32,
-        f32,
-        f32,
+        f64,
+        f64,
+        f64,
+        f64,
+        f64,
+        f64,
+        f64,
+        f64,
+        f64,
     ),
-    AngleLines([Option<f32>; 5]),
+    /// `[axis angle, binning, spot, camera, bidir angle]`; spot and camera
+    /// are Python ints, held here as their exact double values.
+    AngleLines([Option<f64>; 5]),
 }
 
 impl Display for ImodpyError {
@@ -66,12 +73,33 @@ impl Display for ImodpyError {
 
 impl std::error::Error for ImodpyError {}
 
+/// Rust-only: records a failed command run the way `runcmd` does on a
+/// non-zero status (`errStrings`, `errStatus`) and returns the error to
+/// raise, for callers that run a command without `runcmd`
+/// (`comrun::run_com_as_command`).
+pub fn set_run_error(errors: Vec<String>, status: i32) -> ImodpyError {
+    *ERR_STATUS.lock().expect("imodpy status mutex") = status;
+    *ERR_STRINGS.lock().expect("imodpy errors mutex") = errors.clone();
+    ImodpyError { arguments: errors }
+}
+
 /// Matches `getErrStrings` (`IMOD/pysrc/imodpy.py:167`).
 pub fn get_err_strings() -> Vec<String> {
     ERR_STRINGS.lock().expect("imodpy errors mutex").clone()
 }
 
-/// Matches `runcmd` (`IMOD/pysrc/imodpy.py:176`).
+/// Matches `runcmd` (`IMOD/pysrc/imodpy.py:176`) under Python 3, where
+/// `useSubprocess` is always true.
+///
+/// Shapes of the arguments: `outfile` is `None` (collect and return the
+/// output), `"stdout"`, or the name of a file standing for the source's open
+/// file object (opened here with `'w'`); `in_stderr` is `None`, `"stdout"`,
+/// `"pipe"`, or likewise a file name.  The returned lines have their endings
+/// removed; they are split at Python's `str.splitlines` boundaries.
+///
+/// The source's retry-on-`Broken pipe` loop is not translated: on Python 3
+/// `Popen.communicate` swallows `BrokenPipeError` itself, so the exception
+/// it retries on is never raised.
 pub fn run_cmd(
     command: &str,
     input: Option<&[String]>,
@@ -82,98 +110,256 @@ pub fn run_cmd(
     let command = avoid_local_com_file(command);
     let command = command.as_str();
 
+    // Set up flags for whether to collect output or send to stderr
+    let verbose = std::env::var("RUNCMD_VERBOSE").ok().as_deref() == Some("1");
+    if verbose {
+        prnstr("+++++++++++++++++++++++++", "\n", false);
+        prnstr("   runcmd running command:", "\n", false);
+        prnstr(command, "\n", false);
+        if let Some(lines) = input.filter(|lines| !lines.is_empty()) {
+            prnstr("   With input:", "\n", false);
+            for l in lines {
+                prnstr(l, "\n", false);
+            }
+        }
+        let _ = std::io::stdout().flush();
+    }
+
     // Owner decision, 2026-09-24: a command of ours runs in this process (see
     // `run_cmd_in_process`).  Only when standard error is left alone: the
     // in-process runner redirects standard input and output, not error.
     if in_stderr.is_none()
         && let Some((own, words)) = own_command_words(command)
     {
-        return run_own_command(command, own, words, input, outfile, ignore_status, false);
+        return run_own_command(
+            command,
+            own,
+            words,
+            input,
+            outfile,
+            ignore_status,
+            false,
+            verbose,
+        );
     }
 
-    // Set up flags for whether to collect output or send to stderr
     *ERR_STATUS.lock().expect("imodpy status mutex") = 0;
-    let mut process = Command::new("sh");
-    process.arg("-c").arg(command);
-    if input.is_some() {
-        process.stdin(Stdio::piped());
-    }
-    if outfile == Some("stdout") {
-        process.stdout(Stdio::inherit());
-    } else {
-        process.stdout(Stdio::piped());
-    }
-    if outfile == Some("stdout") || in_stderr == Some("stdout") {
-        process.stderr(Stdio::inherit());
-    } else if in_stderr == Some("pipe") {
-        process.stderr(Stdio::piped());
-    }
-    let mut child = match process.spawn() {
-        Ok(child) => child,
-        Err(error) => {
-            let message = format!("Starting command {command}: {error}");
-            *ERR_STRINGS.lock().expect("imodpy errors mutex") = vec![message.clone()];
-            return Err(ImodpyError {
-                arguments: vec![message],
-            });
+    let collect = outfile.is_none();
+    let to_stdout = outfile == Some("stdout");
+    let raise = |message: String| -> ImodpyError {
+        *ERR_STRINGS.lock().expect("imodpy errors mutex") = vec![message.clone()];
+        ImodpyError {
+            arguments: vec![message],
         }
     };
-    if let Some(lines) = input {
-        if let Some(mut stdin) = child.stdin.take() {
-            for line in lines {
-                if stdin
-                    .write_all(line.as_bytes())
-                    .and_then(|_| stdin.write_all(b"\n"))
-                    .is_err()
-                {
-                    break;
+    // `str(sys.exc_info()[1])` of an OSError
+    let exc_text = |error: &std::io::Error, name: &str| -> String {
+        let text = error.to_string();
+        match error.raw_os_error() {
+            Some(errno) => format!(
+                "[Errno {errno}] {}: '{name}'",
+                text.strip_suffix(&format!(" (os error {errno})"))
+                    .unwrap_or(&text)
+            ),
+            None => text,
+        }
+    };
+
+    // The subprocess interface: input must be all one string
+    let mut joined: Option<Vec<u8>> = None;
+    if let Some(lines) = input.filter(|lines| !lines.is_empty()) {
+        let mut text = String::new();
+        for l in lines {
+            text.push_str(l);
+            text.push('\n');
+        }
+        joined = Some(text.into_bytes());
+    }
+
+    // `Popen(cmd, shell=True)` runs `/bin/sh -c cmd` with `argv[0]` "sh"
+    let mut process = Command::new("/bin/sh");
+    std::os::unix::process::CommandExt::arg0(&mut process, "sh");
+    process.arg("-c").arg(command);
+    // `Popen(..., stdin=PIPE)` in all three of the source's forms, so the
+    // command reads the given input and then end-of-file, never the caller's
+    // standard input
+    process.stdin(Stdio::piped());
+    let mut merged: Option<std::io::PipeReader> = None;
+    let setup: Result<(), String> = (|| {
+        // Run it three different ways depending on where output goes
+        if to_stdout {
+            // `Popen(cmd, shell=True, stdin=PIPE)`: inStderr is ignored
+            process.stdout(Stdio::inherit());
+            process.stderr(Stdio::inherit());
+            return Ok(());
+        }
+        // The standard output target: a pipe to collect, or the file
+        let out_file = match outfile {
+            None => None,
+            Some(filename) => Some(
+                OpenOptions::new()
+                    .create(true)
+                    .write(true)
+                    .truncate(true)
+                    .open(filename)
+                    .map_err(|error| exc_text(&error, filename))?,
+            ),
+        };
+        match in_stderr {
+            // `stderr=STDOUT`: standard error joins standard output,
+            // whether that is collected or bound for `outfile`
+            Some("stdout") => match out_file {
+                Some(file) => {
+                    let second = file.try_clone().map_err(|error| error.to_string())?;
+                    process.stdout(Stdio::from(file));
+                    process.stderr(Stdio::from(second));
+                }
+                None => {
+                    let (reader, writer) = std::io::pipe().map_err(|error| error.to_string())?;
+                    let second = writer.try_clone().map_err(|error| error.to_string())?;
+                    process.stdout(writer);
+                    process.stderr(second);
+                    merged = Some(reader);
+                }
+            },
+            other => {
+                match out_file {
+                    Some(file) => {
+                        process.stdout(Stdio::from(file));
+                    }
+                    None => {
+                        process.stdout(Stdio::piped());
+                    }
+                }
+                match other {
+                    None => {
+                        process.stderr(Stdio::inherit());
+                    }
+                    // `PIPE`: read by `communicate` and dropped
+                    Some("pipe") => {
+                        process.stderr(Stdio::piped());
+                    }
+                    Some(filename) => {
+                        let file = OpenOptions::new()
+                            .create(true)
+                            .write(true)
+                            .truncate(true)
+                            .open(filename)
+                            .map_err(|error| exc_text(&error, filename))?;
+                        process.stderr(Stdio::from(file));
+                    }
                 }
             }
         }
-    }
-    let output = match child.wait_with_output() {
-        Ok(output) => output,
-        Err(error) => {
-            let message = format!("Waiting for command {command}: {error}");
-            *ERR_STRINGS.lock().expect("imodpy errors mutex") = vec![message.clone()];
-            return Err(ImodpyError {
-                arguments: vec![message],
-            });
+        Ok(())
+    })();
+    let spawned = setup.and_then(|()| process.spawn().map_err(|error| exc_text(&error, "sh")));
+    let mut child = match spawned {
+        Ok(child) => child,
+        Err(exception) => {
+            return Err(raise(format!("command {command}: {exception}\n")));
         }
     };
-    let status = output.status.code().unwrap_or(1);
-    *ERR_STATUS.lock().expect("imodpy status mutex") = status;
-    let standard_error = String::from_utf8_lossy(&output.stderr).into_owned();
-    if !output.status.success() && !ignore_status.contains(&status) {
-        let mut errors = standard_error
-            .lines()
-            .map(str::to_owned)
-            .collect::<Vec<_>>();
-        if errors.is_empty() {
-            errors.push(format!("{command}: exit status {status}"));
+    // The parent's copies of a merged pipe's write end live in `process`
+    drop(process);
+
+    // `p.communicate(input)`: the input is written while the output is read,
+    // and a command that stops reading early (a broken pipe) is not an error
+    let writer = child.stdin.take().map(|mut stdin| {
+        std::thread::spawn(move || {
+            if let Some(bytes) = joined {
+                let _ = stdin.write_all(&bytes);
+            }
+        })
+    });
+    let waited = match merged {
+        Some(mut reader) => {
+            let mut bytes = Vec::new();
+            let _ = std::io::Read::read_to_end(&mut reader, &mut bytes);
+            child.wait().map(|status| std::process::Output {
+                status,
+                stdout: bytes,
+                stderr: Vec::new(),
+            })
         }
+        None => child.wait_with_output(),
+    };
+    if let Some(writer) = writer {
+        let _ = writer.join();
+    }
+    let output = match waited {
+        Ok(output) => output,
+        Err(error) => {
+            return Err(raise(format!("command {command}: {error}\n")));
+        }
+    };
+    let mut output_lines: Option<Vec<String>> = None;
+    if collect {
+        let kout = String::from_utf8_lossy(&output.stdout);
+        if !kout.is_empty() {
+            // `kout.splitlines(True)`, with the endings then removed
+            let mut lines = Vec::new();
+            let mut current = String::new();
+            let mut chars = kout.chars().peekable();
+            while let Some(c) = chars.next() {
+                match c {
+                    '\n' | '\u{0b}' | '\u{0c}' | '\u{1c}' | '\u{1d}' | '\u{1e}' | '\u{85}'
+                    | '\u{2028}' | '\u{2029}' => lines.push(std::mem::take(&mut current)),
+                    '\r' => {
+                        if chars.peek() == Some(&'\n') {
+                            chars.next();
+                        }
+                        lines.push(std::mem::take(&mut current));
+                    }
+                    _ => current.push(c),
+                }
+            }
+            if !current.is_empty() {
+                lines.push(current);
+            }
+            output_lines = Some(lines);
+        }
+    }
+    // `p.returncode` is minus the signal number for a killed command
+    let ec = output.status.code().unwrap_or_else(|| {
+        std::os::unix::process::ExitStatusExt::signal(&output.status).map_or(1, |signal| -signal)
+    });
+    if ec != 0 {
+        *ERR_STATUS.lock().expect("imodpy status mutex") = ec;
+    }
+
+    if verbose {
+        if let Some(lines) = &output_lines {
+            prnstr("    Output:", "\n", false);
+            for l in lines {
+                prnstr(l, "\n", false);
+            }
+        }
+        prnstr("-------------------------", "\n", true);
+    }
+
+    if ec != 0 && !ignore_status.contains(&ec) {
+        // look thru the output for 'ERROR' line(s) and put them before this.
+        // The lines are stored without their endings, as the in-process
+        // route stores them; `exit_from_imod_error` supplies the endings.
+        let mut errors: Vec<String> = Vec::new();
+        if let Some(lines) = &output_lines {
+            errors = lines
+                .iter()
+                .filter(|line| line.contains("ERROR:"))
+                .cloned()
+                .collect();
+        }
+        errors.push(format!("{command}: exited with status {ec}"));
         *ERR_STRINGS.lock().expect("imodpy errors mutex") = errors.clone();
         return Err(ImodpyError { arguments: errors });
     }
-    if let Some(filename) = outfile.filter(|name| *name != "stdout") {
-        if let Err(error) = fs::write(filename, &output.stdout) {
-            let message = format!("Writing to file: {filename}  - {error}");
-            *ERR_STRINGS.lock().expect("imodpy errors mutex") = vec![message.clone()];
-            return Err(ImodpyError {
-                arguments: vec![message],
-            });
-        }
-        return Ok(None);
+
+    if collect {
+        // `output` is None when nothing was printed
+        return Ok(Some(output_lines.unwrap_or_default()));
     }
-    if outfile == Some("stdout") {
-        return Ok(None);
-    }
-    Ok(Some(
-        String::from_utf8_lossy(&output.stdout)
-            .lines()
-            .map(str::to_owned)
-            .collect(),
-    ))
+    Ok(None)
 }
 
 /// `runcmd` (`IMOD/pysrc/imodpy.py:176`) for a command this crate itself
@@ -205,12 +391,83 @@ pub fn run_cmd_in_process(
     let command = avoid_local_com_file(command);
     let command = command.as_str();
     match own_command_words(command) {
-        Some((own, words)) => run_own_command(command, own, words, input, outfile, &[], true),
+        Some((own, words)) => {
+            run_own_command(command, own, words, input, outfile, &[], true, false)
+        }
         None => {
             let ignore: [i32; 0] = [];
             run_cmd(command, input, outfile, None, &ignore)
         }
     }
+}
+
+/// Rust-only: calls one of our own programs **directly** and returns the
+/// value it computed, with `runcmd`'s error contract.
+///
+/// Owner rule, 2026-09-26 (`CLAUDE.md`, "Wherever we control both sides, use
+/// a direct function call now"): a script that ran our program and parsed its
+/// printed output instead calls the program's compute function (or, for a
+/// program not yet split, runs it with its reported values recorded into a
+/// result struct) and uses the returned values.  `body` runs through
+/// `commands::call_in_process`, so it gets a fresh command environment
+/// (Fortran unit table, PIP state, exit via `b3dutil::exit`) exactly as
+/// [`run_cmd_in_process`] gave the whole program.  `words` are the program
+/// name and any arguments it still reads through PIP, and `input` its
+/// standard-input lines (each given a newline); `command` is the command
+/// line the script used to run, and names the command in `errStrings`.
+///
+/// With `capture` set, what the program printed is returned as lines that
+/// keep their endings (`splitlines(True)`), for a script that echoes the
+/// program's report; otherwise it goes straight to standard output and the
+/// list is empty.  The value is `None` when the program ended through `exit`
+/// rather than returning it.  A non-zero exit status sets `errStrings` to the
+/// captured `ERROR:` lines followed by `"<command>: exited with status <n>"`
+/// and the last exit status, as `runcmd` does, and raises [`ImodpyError`].
+pub fn call_own_program<R: Send + 'static>(
+    command: &str,
+    words: &[&str],
+    input: Option<&[String]>,
+    capture: bool,
+    body: impl FnOnce() -> R + Send + 'static,
+) -> Result<(Option<R>, Vec<String>), ImodpyError> {
+    let joined = input.map(|lines| {
+        let mut text = String::new();
+        for line in lines {
+            text.push_str(line);
+            text.push('\n');
+        }
+        text
+    });
+    *ERR_STATUS.lock().expect("imodpy status mutex") = 0;
+    let (status, value, output) = match crate::imod::commands::call_in_process(
+        words,
+        joined.as_deref().map(str::as_bytes),
+        capture,
+        body,
+    ) {
+        Ok(result) => result,
+        Err(error) => {
+            let message = format!("command {command}: {error}\n");
+            *ERR_STRINGS.lock().expect("imodpy errors mutex") = vec![message.clone()];
+            return Err(ImodpyError {
+                arguments: vec![message],
+            });
+        }
+    };
+    let text = String::from_utf8_lossy(&output);
+    let lines: Vec<String> = text.split_inclusive('\n').map(str::to_owned).collect();
+    if status != 0 {
+        *ERR_STATUS.lock().expect("imodpy status mutex") = status;
+        let mut errors: Vec<String> = lines
+            .iter()
+            .filter(|line| line.contains("ERROR:"))
+            .map(|line| line.trim_end_matches(['\r', '\n']).to_owned())
+            .collect();
+        errors.push(format!("{command}: exited with status {status}"));
+        *ERR_STRINGS.lock().expect("imodpy errors mutex") = errors.clone();
+        return Err(ImodpyError { arguments: errors });
+    }
+    Ok((value, lines))
 }
 
 /// Rust-only: splits `command` into words as `sh -c` would and returns them
@@ -301,6 +558,7 @@ fn run_own_command(
     outfile: Option<&str>,
     ignore_status: &[i32],
     keep_ends: bool,
+    verbose: bool,
 ) -> Result<Option<Vec<String>>, ImodpyError> {
     // The program's `argv[0]` is the path a command link would have,
     // `<bindir>/<name>`, as `src/bin/imod.rs` records it for a subcommand.
@@ -347,6 +605,17 @@ fn run_own_command(
     }
     if status != 0 {
         *ERR_STATUS.lock().expect("imodpy status mutex") = status;
+    }
+    // `RUNCMD_VERBOSE` trailer (`imodpy.py:327-332`)
+    if verbose {
+        if collect && !lines.is_empty() {
+            prnstr("    Output:", "\n", false);
+            for l in &lines {
+                let end = if l.ends_with('\n') { "" } else { "\n" };
+                prnstr(l, end, false);
+            }
+        }
+        prnstr("-------------------------", "\n", true);
     }
     if status != 0 && !ignore_status.contains(&status) {
         let mut errors: Vec<String> = lines
@@ -399,6 +668,13 @@ pub fn get_last_exit_status() -> i32 {
 }
 
 /// Matches `bkgdProcess` (`IMOD/pysrc/imodpy.py:376`).
+///
+/// Only the source's `useSubprocess` branch exists (it is always taken on
+/// Python 3).  `errfile == Some("stdout")` is `subprocess.STDOUT`: the
+/// child's standard error goes wherever its standard output goes -- into
+/// `outfile` when one is given, otherwise to this process's standard output.
+/// An error is `action + "  - " + str(exception)`, with the OSError text in
+/// Python's `[Errno n] strerror: 'name'` form.
 pub fn bkgd_process(
     command_array: &[OsString],
     outfile: Option<&str>,
@@ -406,88 +682,106 @@ pub fn bkgd_process(
     return_on_error: bool,
     append: bool,
 ) -> Result<(), ImodpyError> {
-    if command_array.is_empty() {
-        let message = "Starting background process: empty command".to_owned();
-        if return_on_error {
-            return Err(ImodpyError {
-                arguments: vec![message],
-            });
+    // `str(sys.exc_info()[1])` of an OSError
+    let exc_text = |error: &std::io::Error, name: &str| -> String {
+        let text = error.to_string();
+        match error.raw_os_error() {
+            Some(errno) => format!(
+                "[Errno {errno}] {}: '{name}'",
+                text.strip_suffix(&format!(" (os error {errno})"))
+                    .unwrap_or(&text)
+            ),
+            None => text,
         }
-        crate::imod::pysrc::pip::exit_error(&message);
-    }
-    let mut process = Command::new(&command_array[0]);
-    process.args(&command_array[1..]);
-    if let Some(filename) = outfile {
-        let mut options = OpenOptions::new();
-        options.create(true).write(true);
-        if append {
-            options.append(true);
-        } else {
-            options.truncate(true);
-        }
-        match options.open(filename) {
-            Ok(file) => process.stdout(Stdio::from(file)),
-            Err(error) => {
-                let message = format!("Opening {filename} for output  - {error}");
-                if return_on_error {
-                    return Err(ImodpyError {
-                        arguments: vec![message],
-                    });
-                }
-                crate::imod::pysrc::pip::exit_error(&message);
-            }
-        };
-    } else {
-        process.stdout(Stdio::inherit());
-    }
-    if errfile == Some("stdout") {
-        // Python passes subprocess.STDOUT, not the parent's stderr stream.
-        // On the Unix source target, reopen the inherited stdout descriptor
-        // for the spawned child's stderr.
-        #[cfg(unix)]
-        match OpenOptions::new().write(true).open("/dev/stdout") {
-            Ok(file) => process.stderr(Stdio::from(file)),
-            Err(_) => process.stderr(Stdio::inherit()),
-        };
-        #[cfg(not(unix))]
-        process.stderr(Stdio::inherit());
-    } else if errfile == Some("devnull") {
-        process.stderr(Stdio::null());
-    } else if let Some(filename) = errfile {
-        let mut options = OpenOptions::new();
-        options.create(true).write(true);
-        if append {
-            options.append(true);
-        } else {
-            options.truncate(true);
-        }
-        match options.open(filename) {
-            Ok(file) => process.stderr(Stdio::from(file)),
-            Err(error) => {
-                let message = format!("Opening {filename} for error output  - {error}");
-                if return_on_error {
-                    return Err(ImodpyError {
-                        arguments: vec![message],
-                    });
-                }
-                crate::imod::pysrc::pip::exit_error(&message);
-            }
-        };
-    }
-    match process.spawn() {
-        Ok(_) => Ok(()),
-        Err(error) => {
-            let message = format!(
-                "Starting background process {}  - {error}",
-                command_array[0].to_string_lossy()
-            );
-            if return_on_error {
-                Err(ImodpyError {
-                    arguments: vec![message],
-                })
+    };
+    let mut action = String::new();
+    let result: Result<(), String> = (|| {
+        // If subprocess is allowed, open the files if any
+        let mut outf: Option<fs::File> = None;
+        let mut errf: Option<Stdio> = None;
+        let err_to_stdout = errfile == Some("stdout");
+        if let Some(outfile) = outfile.filter(|name| !name.is_empty()) {
+            let mut options = OpenOptions::new();
+            options.create(true).write(true);
+            if append && Path::new(outfile).exists() {
+                options.append(true);
             } else {
-                crate::imod::pysrc::pip::exit_error(&message)
+                options.truncate(true);
             }
+            action = format!("Opening {outfile} for output");
+            outf = Some(
+                options
+                    .open(outfile)
+                    .map_err(|error| exc_text(&error, outfile))?,
+            );
+        }
+        if let Some(errfile) = errfile.filter(|name| !name.is_empty() && *name != "stdout") {
+            action = format!("Opening {errfile} for error output");
+            if errfile == "devnull" {
+                errf = Some(Stdio::null());
+            } else {
+                let mut options = OpenOptions::new();
+                options.create(true).write(true);
+                if append && Path::new(errfile).exists() {
+                    options.append(true);
+                } else {
+                    options.truncate(true);
+                }
+                errf = Some(Stdio::from(
+                    options
+                        .open(errfile)
+                        .map_err(|error| exc_text(&error, errfile))?,
+                ));
+            }
+        }
+
+        let program = command_array
+            .first()
+            .map(|name| name.to_string_lossy().into_owned());
+        action = format!(
+            "Starting background process {}",
+            program.clone().unwrap_or_default()
+        );
+        let Some(program) = program else {
+            return Err("list index out of range".to_owned());
+        };
+        let mut process = Command::new(&command_array[0]);
+        process.args(&command_array[1..]);
+        // `stderr=STDOUT`: the child's standard error duplicates its
+        // standard output descriptor, whatever that is
+        if err_to_stdout {
+            let duplicate = match &outf {
+                Some(file) => file.try_clone().map(std::os::fd::OwnedFd::from),
+                None => {
+                    use std::os::fd::AsFd;
+                    std::io::stdout().as_fd().try_clone_to_owned()
+                }
+            };
+            errf = Some(Stdio::from(
+                duplicate.map_err(|error| exc_text(&error, &program))?,
+            ));
+        }
+        if let Some(file) = outf {
+            process.stdout(Stdio::from(file));
+        }
+        if let Some(stdio) = errf {
+            process.stderr(stdio);
+        }
+        process
+            .spawn()
+            .map(|_| ())
+            .map_err(|error| exc_text(&error, &program))
+    })();
+    match result {
+        Ok(()) => Ok(()),
+        Err(exception) => {
+            let err_string = format!("{action}  - {exception}");
+            if return_on_error {
+                return Err(ImodpyError {
+                    arguments: vec![err_string],
+                });
+            }
+            crate::imod::pysrc::pip::exit_error(&err_string)
         }
     }
 }
@@ -1155,123 +1449,153 @@ pub fn header_in_process(
 
 /// Matches `getmrc` (`IMOD/pysrc/imodpy.py:456`); the `header` process is replaced by
 /// [`header_in_process`] (owner decision 2026-09-24).
+///
+/// Python's `int()`/`float()` of a `header` token that is not a number raise
+/// a ValueError the source does not catch outside the angle-line loop; that
+/// is reported here as an `ImodpyError` naming the token.
 pub fn get_mrc(file: &str, do_all: bool, angle_line_values: bool) -> Result<MrcInfo, ImodpyError> {
+    let raise = |message: String| -> ImodpyError {
+        *ERR_STRINGS.lock().expect("imodpy errors mutex") = vec![message.clone()];
+        ImodpyError {
+            arguments: vec![message],
+        }
+    };
+    let py_int = |text: &str| -> Result<i32, ImodpyError> {
+        text.trim()
+            .parse::<i32>()
+            .map_err(|_| raise(format!("invalid literal for int() with base 10: '{text}'")))
+    };
+    let py_float = |text: &str| -> Result<f64, ImodpyError> {
+        text.trim()
+            .parse::<f64>()
+            .map_err(|_| raise(format!("could not convert string to float: '{text}'")))
+    };
     if angle_line_values {
+        let mut retval: [Option<f64>; 5] = [None; 5];
+        let keys = ["angle", "binning", "spot", "camera", "bidir"];
+        let types = [1, 1, 0, 0, 1];
         // `imodpy.py:477`: `runcmd("header -StandardInput", input)` with
         // `input = ["InputFile " + file]`.  Owner decision (2026-09-24): our
         // own `header` runs in process instead of through `sh -c`/`PATH`.
-        let lines = header_in_process("header -StandardInput", file, true, None)?;
-        let mut values = [None; 5];
-        for line in lines
-            .iter()
-            .filter(|line| line.to_ascii_lowercase().contains("axis") && line.contains("angle"))
-        {
-            let tokens = multi_char_split(line, " ,=");
-            for index in 0..tokens.len().saturating_sub(1) {
-                match tokens[index].as_str() {
-                    "angle" | "binning" | "bidir" => {
-                        values[["angle", "binning", "spot", "camera", "bidir"]
-                            .iter()
-                            .position(|key| *key == tokens[index])
-                            .unwrap()] = tokens[index + 1].parse().ok()
+        let hdrout = header_in_process("header -StandardInput", file, true, None)?;
+        for line in &hdrout {
+            if line.to_lowercase().contains("axis") && line.contains("angle") {
+                // Here is  good way to split on multiple characters; filter removes empty
+                // strings from the separators
+                // `runcmd` returns `kout.splitlines(True)`, so the source's
+                // `line` still ends in its newline, which becomes part of the
+                // last token (or a token of its own after trailing blanks);
+                // `header_in_process` returns the lines without it.
+                let line_with_end = format!("{line}\n");
+                // Defined behaviour (BUGS.md, "fixed in translation"): the
+                // source calls `len()` on `multiCharSplit`'s result, a
+                // `filter` object on Python 3, and dies with a TypeError that
+                // no caller catches.  This is the loop the code clearly
+                // intends -- `list(multiCharSplit(line, ' ,='))` -- which is
+                // also what it did under Python 2.
+                let tokens = multi_char_split(&line_with_end, " ,=");
+                for ind in 0..tokens.len().saturating_sub(1) {
+                    for key_ind in 0..keys.len() {
+                        if tokens[ind] == keys[key_ind] {
+                            // Python's `float()`/`int()` strip surrounding
+                            // whitespace, including the line's newline.
+                            let converted = if types[key_ind] != 0 {
+                                tokens[ind + 1].trim().parse::<f64>().ok()
+                            } else {
+                                tokens[ind + 1].trim().parse::<i32>().ok().map(f64::from)
+                            };
+                            match converted {
+                                Some(value) => retval[key_ind] = Some(value),
+                                None => {
+                                    return Err(raise(format!(
+                                        "header {file}: Error converting value to integer or float in title {line}\n"
+                                    )));
+                                }
+                            }
+                        }
                     }
-                    "spot" | "camera" => {
-                        values[["angle", "binning", "spot", "camera", "bidir"]
-                            .iter()
-                            .position(|key| *key == tokens[index])
-                            .unwrap()] = tokens[index + 1]
-                            .parse::<i32>()
-                            .ok()
-                            .map(|value| value as f32)
-                    }
-                    _ => {}
                 }
             }
         }
-        return Ok(MrcInfo::AngleLines(values));
+        return Ok(MrcInfo::AngleLines(retval));
     }
-    let command = if do_all {
-        "header -si -mo -pi -ori -min -max -mean -StandardInput"
-    } else {
-        "header -si -mo -pi -StandardInput"
-    };
     // `imodpy.py:500-505`: `runcmd(command, input)`, now in process (owner
     // decision 2026-09-24); the lines carry the `3i8`/`i4`/`3g15.5`/`g13.5`
     // text `header` prints, so the values parsed below are rounded as before.
-    let mut lines = header_in_process(command, file, true, Some(do_all))?;
-    let needed = if do_all { 7 } else { 3 };
-    while lines.len() >= needed
-        && (lines[0].trim().is_empty()
-            || ["a", "e", "i", "o"]
-                .iter()
-                .any(|letter| lines[0].contains(letter)))
-    {
-        lines.remove(0);
+    let (mut hdrout, needed) = if do_all {
+        (
+            header_in_process(
+                "header -si -mo -pi -ori -min -max -mean -StandardInput",
+                file,
+                true,
+                Some(true),
+            )?,
+            7,
+        )
+    } else {
+        (
+            header_in_process("header -si -mo -pi -StandardInput", file, true, Some(false))?,
+            3,
+        )
+    };
+
+    // Eat any lines with PIP fallback output
+    while hdrout.len() >= needed {
+        if hdrout[0].trim().is_empty()
+            || hdrout[0].contains('a')
+            || hdrout[0].contains('e')
+            || hdrout[0].contains('i')
+            || hdrout[0].contains('o')
+        {
+            hdrout.remove(0);
+        } else {
+            break;
+        }
     }
-    if lines.len() < needed {
-        return Err(ImodpyError {
-            arguments: vec![format!("header {file}: too few lines of output")],
-        });
+
+    if hdrout.len() < needed {
+        return Err(raise(format!("header {file}: too few lines of output\n")));
     }
-    let dimensions = lines[0]
-        .split_whitespace()
-        .map(str::parse::<i32>)
-        .collect::<Result<Vec<_>, _>>()
-        .map_err(|_| ImodpyError {
-            arguments: vec![format!("header {file}: invalid -si output")],
-        })?;
-    let pixels = lines[2]
-        .split_whitespace()
-        .map(str::parse::<f32>)
-        .collect::<Result<Vec<_>, _>>()
-        .map_err(|_| ImodpyError {
-            arguments: vec![format!("header {file}: invalid -pi output")],
-        })?;
-    if dimensions.len() < 3 || pixels.len() < 3 {
-        return Err(ImodpyError {
-            arguments: vec![format!("header {file}: too few numbers")],
-        });
+
+    let nxyz: Vec<&str> = hdrout[0].split_whitespace().collect();
+    let pxyz: Vec<&str> = hdrout[2].split_whitespace().collect();
+    let orixyz: Vec<&str> = if do_all {
+        hdrout[3].split_whitespace().collect()
+    } else {
+        Vec::new()
+    };
+    if nxyz.len() < 3 || pxyz.len() < 3 || (do_all && orixyz.len() < 3) {
+        let bad_line = if nxyz.len() < 3 {
+            format!("-si option: {}", hdrout[0].trim())
+        } else if pxyz.len() < 3 {
+            format!("-pi option: {}", hdrout[2].trim())
+        } else {
+            format!("-ori option: {}", hdrout[3].trim())
+        };
+        return Err(raise(format!(
+            "header {file}: too few numbers on line for {bad_line}\n"
+        )));
     }
-    let mode = lines[1].trim().parse::<i32>().map_err(|_| ImodpyError {
-        arguments: vec![format!("header {file}: invalid mode")],
-    })?;
+    let ix = py_int(nxyz[0])?;
+    let iy = py_int(nxyz[1])?;
+    let iz = py_int(nxyz[2])?;
+    let mode = py_int(&hdrout[1])?;
+    let px = py_float(pxyz[0])?;
+    let py = py_float(pxyz[1])?;
+    let pz = py_float(pxyz[2])?;
+
     if !do_all {
-        return Ok(MrcInfo::Basic(
-            dimensions[0],
-            dimensions[1],
-            dimensions[2],
-            mode,
-            pixels[0],
-            pixels[1],
-            pixels[2],
-        ));
+        return Ok(MrcInfo::Basic(ix, iy, iz, mode, px, py, pz));
     }
-    let origin = lines[3]
-        .split_whitespace()
-        .map(str::parse::<f32>)
-        .collect::<Result<Vec<_>, _>>()
-        .map_err(|_| ImodpyError {
-            arguments: vec![format!("header {file}: invalid origin")],
-        })?;
-    if origin.len() < 3 {
-        return Err(ImodpyError {
-            arguments: vec![format!("header {file}: too few origin numbers")],
-        });
-    }
+
+    let orix = py_float(orixyz[0])?;
+    let oriy = py_float(orixyz[1])?;
+    let oriz = py_float(orixyz[2])?;
+    let minv = py_float(&hdrout[4])?;
+    let maxv = py_float(&hdrout[5])?;
+    let meanv = py_float(&hdrout[6])?;
     Ok(MrcInfo::All(
-        dimensions[0],
-        dimensions[1],
-        dimensions[2],
-        mode,
-        pixels[0],
-        pixels[1],
-        pixels[2],
-        origin[0],
-        origin[1],
-        origin[2],
-        lines[4].trim().parse().unwrap_or(0.),
-        lines[5].trim().parse().unwrap_or(0.),
-        lines[6].trim().parse().unwrap_or(0.),
+        ix, iy, iz, mode, px, py, pz, orix, oriy, oriz, minv, maxv, meanv,
     ))
 }
 
@@ -1285,92 +1609,117 @@ pub fn get_mrc_size(file: &str) -> Result<(i32, i32, i32), ImodpyError> {
 
 /// Matches `getmrcpixel` (`IMOD/pysrc/imodpy.py:557`); the `header` process is replaced by
 /// [`header_in_process`] (owner decision 2026-09-24).
-pub fn get_mrc_pixel(file: &str) -> Result<f32, ImodpyError> {
+pub fn get_mrc_pixel(file: &str) -> Result<f64, ImodpyError> {
+    let raise = |message: String| -> ImodpyError {
+        *ERR_STRINGS.lock().expect("imodpy errors mutex") = vec![message.clone()];
+        ImodpyError {
+            arguments: vec![message],
+        }
+    };
     // `imodpy.py:565`: `runcmd("header -StandardInput", input)`, now in
     // process; the `Pixel spacing` (g11.4) and `size in nanometers` (g11.4)
     // lines are the text `header` prints, so the pixel keeps its rounding.
-    let lines = header_in_process("header -StandardInput", file, true, None)?;
-    let mut pixel = None;
-    for line in lines {
-        if let Some(value) = line
-            .split(".. ")
-            .nth(1)
-            .filter(|_| line.contains("Pixel spacing"))
-            .and_then(|value| value.split_whitespace().next())
-            .and_then(|value| value.parse::<f32>().ok())
-        {
-            pixel = Some(value);
+    let hdrout = header_in_process("header -StandardInput", file, true, None)?;
+    let mut pixel = -1.0f64;
+    for line in &hdrout {
+        let conversion_error = || {
+            raise(format!(
+                "header {file}: error converting pixel size to float"
+            ))
+        };
+        if line.contains("Pixel spacing") {
+            let dot_ind = line.find(".. ").map_or(1, |index| index as i64 + 2);
+            if dot_ind < 3 {
+                return Err(raise(format!("header {file}: cannot find pixel sizes")));
+            }
+            let lsplit: Vec<&str> = line[dot_ind as usize..].split_whitespace().collect();
+            if lsplit.len() < 3 {
+                return Err(raise(format!(
+                    "header {file}: pixel sizes not interpretable"
+                )));
+            }
+            pixel = lsplit[0].parse::<f64>().map_err(|_| conversion_error())?;
         }
-        if let Some(value) = line
-            .split('=')
-            .nth(1)
-            .filter(|_| line.contains("size in nanometers ="))
-            .and_then(|value| value.split_whitespace().next())
-            .and_then(|value| value.parse::<f32>().ok())
-        {
-            pixel = Some(10. * value);
+
+        if line.contains("size in nanometers =") {
+            let ind = line.find('=').unwrap() + 1;
+            let lsplit: Vec<&str> = line[ind..].split_whitespace().collect();
+            if !lsplit.is_empty() {
+                pixel = 10. * lsplit[0].parse::<f64>().map_err(|_| conversion_error())?;
+            }
         }
     }
-    pixel.ok_or_else(|| ImodpyError {
-        arguments: vec![format!("header {file}: cannot find pixel size")],
-    })
+
+    if pixel < 0. {
+        return Err(raise(format!("header {file}: cannot find pixel size")));
+    }
+
+    Ok(pixel)
 }
 
 /// Matches `getMontageSize` (`IMOD/pysrc/imodpy.py:596`); `montagesize` remains external.
 pub fn get_montage_size(
     stack: &str,
-    piece_list: Option<&str>,
+    pl_name: Option<&str>,
 ) -> Result<(i32, i32, i32), ImodpyError> {
     let mut command = format!("montagesize \"{stack}\"");
-    if let Some(piece_list) = piece_list.filter(|piece_list| Path::new(piece_list).exists()) {
-        command.push_str(&format!(" \"{piece_list}\""));
+    if let Some(pl_name) = pl_name.filter(|name| !name.is_empty() && Path::new(name).exists()) {
+        command.push_str(&format!(" \"{pl_name}\""));
     }
-    let lines = run_cmd(&command, None, None, None, &[])?.unwrap_or_default();
-    let line = lines.last().ok_or_else(|| ImodpyError {
-        arguments: vec![format!("{command}: No output returned")],
-    })?;
-    let values = line
-        .split_once("NZ:")
-        .map(|(_, values)| {
-            values
-                .split_whitespace()
-                .map(str::parse::<i32>)
-                .collect::<Result<Vec<_>, _>>()
-        })
-        .transpose()
-        .ok()
-        .flatten()
-        .filter(|values| values.len() >= 3)
-        .ok_or_else(|| ImodpyError {
-            arguments: vec![format!(
-                "{command}: Uninterpretable output on line with NZ:"
-            )],
-        })?;
-    Ok((values[0], values[1], values[2]))
+    let size_lines = run_cmd(&command, None, None, None, &[])?;
+    let mut problem = "No output returned";
+    let parsed: Option<(i32, i32, i32)> = (|| {
+        let lines = size_lines.as_ref()?;
+        let line = lines.last()?;
+        let chars: Vec<char> = line.chars().collect();
+        // `line.find('NZ:')`, or -5 so that `line[-2:]` is taken
+        let start = match line.find("NZ:") {
+            Some(index) => line[..index].chars().count() as i64 + 3,
+            None => {
+                problem = "Line with NZ: not found in output";
+                chars.len() as i64 - 2
+            }
+        };
+        let rest: String = chars[start.clamp(0, chars.len() as i64) as usize..]
+            .iter()
+            .collect();
+        let lsplit: Vec<&str> = rest.split_whitespace().collect();
+        problem = "Uninterpretable output on line with NZ:";
+        let raw_xsize = lsplit.first()?.parse::<i32>().ok()?;
+        let raw_ysize = lsplit.get(1)?.parse::<i32>().ok()?;
+        let zsize = lsplit.get(2)?.parse::<i32>().ok()?;
+        Some((raw_xsize, raw_ysize, zsize))
+    })();
+    match parsed {
+        Some(sizes) => Ok(sizes),
+        None => {
+            // Fixed in translation (BUGS.md): native sets `errStrings =
+            // command + ': ' + problem` (`imodpy.py:618`), a string, so a caller
+            // iterating it prints one character per line; here it is a
+            // one-line list, as `runcmd` leaves it.
+            let message = format!("{command}: {problem}");
+            *ERR_STRINGS.lock().expect("imodpy errors mutex") = vec![message.clone()];
+            Err(ImodpyError {
+                arguments: vec![message],
+            })
+        }
+    }
 }
 
 /// Matches `runGoodframe` (`IMOD/pysrc/imodpy.py:624`); `goodframe` remains external.
-pub fn run_goodframe(x_size: i32, y_size: i32) -> (i32, i32) {
-    let Ok(Some(lines)) = run_cmd(
-        &format!("goodframe {x_size} {y_size}"),
-        None,
-        None,
-        None,
-        &[],
-    ) else {
-        return (-1, -1);
+pub fn run_goodframe(nx: i32, ny: i32) -> (i32, i32) {
+    let goodout = match run_cmd(&format!("goodframe {nx} {ny}"), None, None, None, &[]) {
+        Ok(lines) => lines,
+        Err(_) => return (-1, -1),
     };
-    let Some(line) = lines.last() else {
-        return (-2, -2);
-    };
-    let values = line
-        .split_whitespace()
-        .map(str::parse::<i32>)
-        .collect::<Result<Vec<_>, _>>();
-    match values {
-        Ok(values) if values.len() >= 2 => (values[0], values[1]),
-        _ => (-2, -2),
-    }
+    let parsed: Option<(i32, i32)> = (|| {
+        let goodout = goodout?;
+        let gsplit: Vec<&str> = goodout.last()?.split_whitespace().collect();
+        let gfnx = gsplit.first()?.parse::<i32>().ok()?;
+        let gfny = gsplit.get(1)?.parse::<i32>().ok()?;
+        Some((gfnx, gfny))
+    })();
+    parsed.unwrap_or((-2, -2))
 }
 
 /// Matches `getImageFormat` (`IMOD/pysrc/imodpy.py:639`); the `header` process is replaced by
@@ -1401,18 +1750,32 @@ pub fn read_text_file(
     return_on_error: bool,
     maximum_lines: Option<usize>,
 ) -> Result<Vec<String>, String> {
+    let mut descrip = description.unwrap_or("");
+    if descrip.is_empty() {
+        descrip = " ";
+    }
     match fs::read_to_string(filename) {
+        // Python opens the file with universal newlines, so `\r\n` and a lone
+        // `\r` both end a line
         Ok(text) => Ok(text
+            .replace("\r\n", "\n")
+            .replace('\r', "\n")
             .lines()
             .take(maximum_lines.unwrap_or(usize::MAX))
             .map(|line| line.trim_end_matches([' ', '\t', '\r', '\n']).to_owned())
             .collect()),
         Err(error) => {
-            let message = format!(
-                "Opening {} {}: {error}",
-                description.unwrap_or(" "),
-                filename
-            );
+            // `str(sys.exc_info()[1])` of the OSError: `[Errno n] strerror: 'name'`
+            let text = error.to_string();
+            let exc_info = match error.raw_os_error() {
+                Some(errno) => format!(
+                    "[Errno {errno}] {}: '{filename}'",
+                    text.strip_suffix(&format!(" (os error {errno})"))
+                        .unwrap_or(&text)
+                ),
+                None => text.clone(),
+            };
+            let message = format!("Opening {descrip} {filename}: {exc_info}");
             if return_on_error {
                 Err(message)
             } else {
@@ -1436,7 +1799,17 @@ pub fn write_text_file(
     match fs::write(filename, contents) {
         Ok(()) => Ok(()),
         Err(error) => {
-            let message = format!("Opening file: {filename}  - {error}");
+            // `str(sys.exc_info()[1])` of the OSError: `[Errno n] strerror: 'name'`
+            let text = error.to_string();
+            let exc_info = match error.raw_os_error() {
+                Some(errno) => format!(
+                    "[Errno {errno}] {}: '{filename}'",
+                    text.strip_suffix(&format!(" (os error {errno})"))
+                        .unwrap_or(&text)
+                ),
+                None => text.clone(),
+            };
+            let message = format!("Opening file: {filename}  - {exc_info}");
             if return_on_error {
                 Err(message)
             } else {
@@ -1448,15 +1821,23 @@ pub fn write_text_file(
 
 /// Matches `convertToInteger` (`IMOD/pysrc/imodpy.py:1242`).
 pub fn convert_to_integer(value_string: &str, description: &str) -> i32 {
-    match value_string.parse() {
-        Ok(value) => value,
-        Err(_) => crate::imod::pysrc::pip::exit_error(&format!(
+    match py_int(value_string) {
+        Some(value) => value as i32,
+        None => crate::imod::pysrc::pip::exit_error(&format!(
             "Converting {description} ({value_string}) to integer"
         )),
     }
 }
 
 /// Matches `optionValue` (`IMOD/pysrc/imodpy.py:1153`).
+///
+/// The source's three regular expressions are used as written: `optre`
+/// anchors the option at the start of the line, `comre` rejects a line with
+/// `# option` **anywhere** in it, and `subre` takes the value after the
+/// *last* occurrence of the option and the rest of that word.  A line that
+/// `subre` does not match is left whole by `re.sub`, so its whole stripped
+/// text becomes the value.  Floats are Python floats (doubles).  A
+/// `numVal == 1` scalar is returned as a one-element list.
 pub fn option_value(
     lines: &[String],
     option: &str,
@@ -1466,187 +1847,224 @@ pub fn option_value(
     other_separator: Option<char>,
     empty_return: Option<&str>,
 ) -> Option<OptionValue> {
-    let mut result = None;
+    let mut sep = r"\s".to_owned();
+    if let Some(other) = other_separator {
+        sep = format!(r"\s*{}", other);
+    }
+    let build = |pattern: String| {
+        regex::RegexBuilder::new(&pattern)
+            .case_insensitive(ignore_case)
+            .build()
+            .expect("optionValue regular expression")
+    };
+    let optre = build(format!(r"^\s*{option}"));
+    let subre = build(format!(r".*{option}[^\s]*{sep}([^#]*).*"));
+    let comre = build(format!(r"\s*#\s*{option}"));
+    let mut retval = None;
     for line in lines {
-        let trimmed = line.trim_start();
-        let matches = if ignore_case {
-            trimmed[..trimmed.len().min(option.len())].eq_ignore_ascii_case(option)
-        } else {
-            trimmed.starts_with(option)
-        };
-        if !matches
-            || trimmed.starts_with(&format!("# {option}"))
-            || trimmed.starts_with(&format!("#{option}"))
-        {
-            continue;
-        }
-        let after_option = &trimmed[option.len()..];
-        let value = if let Some(separator) = other_separator {
-            after_option
-                .split_once(separator)
-                .map(|(_, value)| value)
-                .unwrap_or("")
-        } else {
-            after_option.trim_start()
-        };
-        let value = value.split('#').next().unwrap_or("").trim();
-        if value_type > 2 {
-            let lower = value.to_ascii_lowercase();
-            result = match lower.as_str() {
-                "0" | "f" | "off" | "false" => Some(OptionValue::Boolean(false)),
-                "1" | "t" | "on" | "true" | "" => Some(OptionValue::Boolean(true)),
-                _ if value == option => Some(OptionValue::Boolean(true)),
-                _ => {
+        if optre.is_match(line) && !comre.is_match(line) {
+            let valstr = subre.replace_all(line, "${1}").trim().to_owned();
+            if value_type > 2 {
+                // A boolean can be any of these values, but it can also be a line with no
+                // separator, which requires a separate re test
+                let bval = valstr.to_lowercase();
+                if bval == "0" || bval == "f" || bval == "off" || bval == "false" {
+                    retval = Some(OptionValue::Boolean(false));
+                } else if bval == "1"
+                    || bval == "t"
+                    || bval == "on"
+                    || bval == "true"
+                    || bval.is_empty()
+                    || valstr == option
+                    || (other_separator.is_none()
+                        && build(format!(r".*{option}[^\s]*([^#]*).*"))
+                            .replace_all(line, "${1}")
+                            .trim()
+                            .is_empty())
+                {
+                    retval = Some(OptionValue::Boolean(true));
+                } else {
                     prnstr(
                         &format!(
-                            "WARNING: optionValue - Boolean entry found with improper value ({lower}) in: {line}"
+                            "WARNING: optionValue - Boolean entry found with improper value ({bval}) in: {line}"
                         ),
                         "\n",
                         false,
                     );
-                    result
                 }
-            };
-        } else if value.is_empty() {
-            result = empty_return.map(|entry| OptionValue::String(entry.to_owned()));
-            if result.is_none() {
-                prnstr(
-                    &format!("WARNING: optionValue - No value for option in: {line}"),
-                    "\n",
-                    false,
-                );
-            }
-        } else if value_type <= 0 {
-            result = Some(OptionValue::String(value.to_owned()));
-        } else {
-            let replaced = value.replace(',', " ");
-            let entries = replaced.split_whitespace().collect::<Vec<_>>();
-            if number_values != 0 && entries.len() < number_values {
-                return None;
-            }
-            let limit = if number_values == 0 {
-                entries.len()
+            } else if valstr.is_empty() {
+                if let Some(entry) = empty_return.filter(|entry| !entry.is_empty()) {
+                    retval = Some(OptionValue::String(entry.to_owned()));
+                } else {
+                    prnstr(
+                        &format!("WARNING: optionValue - No value for option in: {line}"),
+                        "\n",
+                        false,
+                    );
+                }
+            } else if value_type <= 0 {
+                retval = Some(OptionValue::String(valstr));
             } else {
-                number_values
-            };
-            if value_type == 1 {
-                match entries[..limit]
-                    .iter()
-                    .map(|entry| entry.parse::<i32>())
-                    .collect::<Result<Vec<_>, _>>()
-                {
-                    Ok(values) => result = Some(OptionValue::Integers(values)),
-                    Err(_) => {
-                        prnstr(
-                            &format!(
-                                "WARNING: optionValue - Bad character in numeric entry in: {line}"
-                            ),
-                            "\n",
-                            false,
-                        );
+                let replaced = valstr.replace(',', " ");
+                let splits = replaced.split_whitespace().collect::<Vec<_>>();
+                let mut num_conv = splits.len();
+                if number_values != 0 {
+                    if num_conv < number_values {
                         return None;
                     }
+                    num_conv = number_values;
                 }
-            } else {
-                match entries[..limit]
-                    .iter()
-                    .map(|entry| entry.parse::<f32>())
-                    .collect::<Result<Vec<_>, _>>()
-                {
-                    Ok(values) => result = Some(OptionValue::Floats(values)),
-                    Err(_) => {
-                        prnstr(
-                            &format!(
-                                "WARNING: optionValue - Bad character in numeric entry in: {line}"
-                            ),
-                            "\n",
-                            false,
-                        );
-                        return None;
+                if value_type == 1 {
+                    let mut values = Vec::new();
+                    for val in &splits[..num_conv] {
+                        match val.parse::<i32>() {
+                            Ok(value) => values.push(value),
+                            Err(_) => {
+                                prnstr(
+                                    &format!(
+                                        "WARNING: optionValue - Bad character in numeric entry in: {line}"
+                                    ),
+                                    "\n",
+                                    false,
+                                );
+                                return None;
+                            }
+                        }
                     }
+                    retval = Some(OptionValue::Integers(values));
+                } else {
+                    let mut values = Vec::new();
+                    for val in &splits[..num_conv] {
+                        match val.parse::<f64>() {
+                            Ok(value) => values.push(value),
+                            Err(_) => {
+                                prnstr(
+                                    &format!(
+                                        "WARNING: optionValue - Bad character in numeric entry in: {line}"
+                                    ),
+                                    "\n",
+                                    false,
+                                );
+                                return None;
+                            }
+                        }
+                    }
+                    retval = Some(OptionValue::Floats(values));
                 }
             }
         }
     }
-    result
+    retval
 }
 
 /// Matches `completeAndCheckComFile` (`IMOD/pysrc/imodpy.py:1251`).
-pub fn complete_and_check_com_file(command_file: &str) -> (String, String) {
-    if command_file.is_empty() {
+///
+/// Returns `(comfile, rootname)` in the source's order.
+pub fn complete_and_check_com_file(comfile: &str) -> (String, String) {
+    if comfile.is_empty() {
         crate::imod::pysrc::pip::exit_error("A command file must be entered");
     }
-    let (root, complete) = if command_file.ends_with(".com") || command_file.ends_with(".pcm") {
-        (
-            command_file[..command_file.len() - 4].to_owned(),
-            command_file.to_owned(),
-        )
+    let mut comfile = comfile.to_owned();
+
+    let is_com = comfile.ends_with(".com");
+    let is_pcm = comfile.ends_with(".pcm");
+    let rootname = if is_com || is_pcm {
+        py_slice_end(&comfile, 4)
+    } else if comfile.ends_with('.') {
+        comfile.trim_end_matches('.').to_owned()
     } else {
-        let root = command_file.trim_end_matches('.').to_owned();
-        let com = format!("{root}.com");
-        let pcm = format!("{root}.pcm");
-        if Path::new(&com).exists() && Path::new(&pcm).exists() {
+        comfile.clone()
+    };
+
+    // Look for the one we know it is, or both if it had neither extension
+    let mut pcm_exists = false;
+    let mut com_exists = false;
+    if !is_com {
+        pcm_exists = Path::new(&format!("{rootname}.pcm")).exists();
+    }
+    if !is_pcm {
+        com_exists = Path::new(&format!("{rootname}.com")).exists();
+    }
+
+    // Handle lack of specified file with extension known
+    if (is_com && !com_exists) || (is_pcm && !pcm_exists) {
+        crate::imod::pysrc::pip::exit_error(&format!("Command file {comfile} does not exist"));
+    }
+
+    // Handle possibilities of looking for either extension: error or assign name
+    if !(is_com || is_pcm) {
+        if com_exists && pcm_exists {
             crate::imod::pysrc::pip::exit_error(&format!(
-                "Both {com} and {pcm} exist; specify which"
+                "The full command file name must be entered because both {rootname}.com and {rootname}.pcm exist"
             ));
         }
-        if Path::new(&com).exists() {
-            (root, com)
-        } else if Path::new(&pcm).exists() {
-            (root, pcm)
+        if com_exists {
+            comfile = format!("{rootname}.com");
+        } else if pcm_exists {
+            comfile = format!("{rootname}.pcm");
         } else {
-            crate::imod::pysrc::pip::exit_error(&format!("Neither {com} nor {pcm} exists"));
+            crate::imod::pysrc::pip::exit_error(&format!(
+                "The full command file name must be entered because neither {rootname}.com nor {rootname}.pcm exist"
+            ));
         }
-    };
-    (root, complete)
+    }
+
+    (comfile, rootname)
 }
 
 /// Matches `cleanupFiles` (`IMOD/pysrc/imodpy.py:1317`).
 pub fn cleanup_files(files: &[String]) {
-    let mut remaining = files.to_vec();
-    for _ in 0..10 {
-        remaining
-            .retain(|filename| fs::remove_file(filename).is_err() && Path::new(filename).exists());
-        if remaining.is_empty() {
-            break;
+    // Even wih a wait of 0.01 it only took two trials, so try 0.1 for this
+    let retry_wait = std::time::Duration::from_millis(100);
+    let max_trials = 10;
+    let mut num_to_do = files.len();
+    let mut still_to_do = vec![1; files.len()];
+    let mut trial = 0;
+    while trial < max_trials && num_to_do != 0 {
+        trial += 1;
+        for ind in 0..files.len() {
+            if still_to_do[ind] != 0 {
+                let removed = match fs::remove_file(&files[ind]) {
+                    Ok(()) => 1,
+                    Err(error) if error.kind() == std::io::ErrorKind::NotFound => 0,
+                    Err(_) => -1,
+                };
+                if removed >= 0 {
+                    still_to_do[ind] = 0;
+                    num_to_do -= 1;
+                }
+            }
         }
-        std::thread::sleep(std::time::Duration::from_millis(100));
+
+        if num_to_do != 0 {
+            std::thread::sleep(retry_wait);
+        }
     }
 }
 
 /// Matches `cleanChunkFiles` (`IMOD/pysrc/imodpy.py:1296`).
-pub fn clean_chunk_files(root_name: &str, log_only: bool) {
-    let directory = Path::new(root_name)
-        .parent()
-        .unwrap_or_else(|| Path::new("."));
-    let base = Path::new(root_name)
-        .file_name()
-        .unwrap_or_default()
-        .to_string_lossy();
-    if let Ok(entries) = fs::read_dir(directory) {
-        for entry in entries.flatten() {
-            let name = entry.file_name().to_string_lossy().into_owned();
-            let suffix = name.strip_prefix(&format!("{base}-"));
-            let numbered = suffix.is_some_and(|suffix| {
-                suffix
-                    .as_bytes()
-                    .get(0..3)
-                    .is_some_and(|digits| digits.iter().all(u8::is_ascii_digit))
-            });
-            let start_or_finish = name == format!("{base}-start.log")
-                || name == format!("{base}-finish.log")
-                || (!log_only
-                    && ["com", "pcm"].iter().any(|extension| {
-                        name == format!("{base}-start.{extension}")
-                            || name == format!("{base}-finish.{extension}")
-                    }));
-            let selected = (numbered
-                && (name.ends_with(".log")
-                    || (!log_only && (name.ends_with(".com") || name.ends_with(".pcm")))))
-                || start_or_finish;
-            if selected {
-                let _ = fs::remove_file(entry.path());
+pub fn clean_chunk_files(rootname: &str, log_only: bool) {
+    let mut rmlist = glob_glob(&format!("{rootname}-[0-9][0-9][0-9]*.log"));
+    if Path::new(&format!("{rootname}-start.log")).exists() {
+        rmlist.push(format!("{rootname}-start.log"));
+    }
+    if Path::new(&format!("{rootname}-finish.log")).exists() {
+        rmlist.push(format!("{rootname}-finish.log"));
+    }
+    if !log_only {
+        for ext in [".com", ".pcm"] {
+            rmlist.extend(glob_glob(&format!("{rootname}-[0-9][0-9][0-9]*{ext}")));
+            if Path::new(&format!("{rootname}-start{ext}")).exists() {
+                rmlist.push(format!("{rootname}-start{ext}"));
             }
+            if Path::new(&format!("{rootname}-finish{ext}")).exists() {
+                rmlist.push(format!("{rootname}-finish{ext}"));
+            }
+        }
+    }
+    for filename in &rmlist {
+        if fs::remove_file(filename).is_err() {
+            break;
         }
     }
 }
@@ -1660,19 +2078,118 @@ pub fn balanced_group_limits(total: i32, groups: i32, group_index: i32) -> (i32,
     (start, end)
 }
 
-/// Matches `fmtstr` (`IMOD/pysrc/imodpy.py:1801`) on supported modern Python versions.
-pub fn fmtstr(format_string: &str, values: &[String]) -> String {
+/// Matches `fmtstr` (`IMOD/pysrc/imodpy.py:1801`), which on Python 3.1 or
+/// later is `string.format(*args)` (`imodpy.py:1818-1819`); the pre-2.7
+/// rewriting below that line is never reached.
+///
+/// The arguments arrive already converted to text (the caller applies
+/// Python's `str()` or format), so this is `str.format` over `str`
+/// arguments: `{{` and `}}` are literal braces, `{}` takes the next argument
+/// and `{N}` argument `N`, and a `:spec` applies a string format
+/// specification -- `[[fill]align][width][.precision]`, left-aligned by
+/// default.  A malformed field, which Python rejects with a ValueError,
+/// panics.
+pub fn fmtstr(string_in: &str, args: &[String]) -> String {
+    let chars: Vec<char> = string_in.chars().collect();
     let mut result = String::new();
-    let mut value_index = 0usize;
-    let mut characters = format_string.chars().peekable();
-    while let Some(character) = characters.next() {
-        if character == '{' && characters.peek() == Some(&'}') {
-            characters.next();
-            result.push_str(values.get(value_index).map(String::as_str).unwrap_or(""));
-            value_index += 1;
-        } else {
-            result.push(character);
+    let mut auto_index = 0usize;
+    // Python refuses to mix `{}` and `{N}` in one string
+    let mut numbering: Option<bool> = None;
+    let mut ind = 0usize;
+    while ind < chars.len() {
+        let c = chars[ind];
+        if c == '}' {
+            assert!(
+                chars.get(ind + 1) == Some(&'}'),
+                "Single '}}' encountered in format string: {string_in}"
+            );
+            result.push('}');
+            ind += 2;
+            continue;
         }
+        if c != '{' {
+            result.push(c);
+            ind += 1;
+            continue;
+        }
+        if chars.get(ind + 1) == Some(&'{') {
+            result.push('{');
+            ind += 2;
+            continue;
+        }
+        let close = chars[ind + 1..]
+            .iter()
+            .position(|c| *c == '}')
+            .map(|offset| ind + 1 + offset)
+            .unwrap_or_else(|| panic!("Single '{{' encountered in format string: {string_in}"));
+        let field: String = chars[ind + 1..close].iter().collect();
+        let (name, spec) = match field.split_once(':') {
+            Some((name, spec)) => (name, spec),
+            None => (field.as_str(), ""),
+        };
+        assert!(
+            numbering.is_none_or(|automatic| automatic == name.is_empty()),
+            "cannot switch between automatic and manual field numbering in {string_in}"
+        );
+        numbering = Some(name.is_empty());
+        let arg_index = if name.is_empty() {
+            auto_index += 1;
+            auto_index - 1
+        } else {
+            name.parse::<usize>()
+                .unwrap_or_else(|_| panic!("Unsupported replacement field {{{field}}}"))
+        };
+        let value = args
+            .get(arg_index)
+            .unwrap_or_else(|| panic!("Replacement index {arg_index} out of range"));
+        // Format specification for a `str`
+        let spec_chars: Vec<char> = spec.chars().collect();
+        let mut fill = ' ';
+        let mut align = '<';
+        let mut pos = 0usize;
+        if spec_chars.len() >= 2 && matches!(spec_chars[1], '<' | '>' | '^') {
+            fill = spec_chars[0];
+            align = spec_chars[1];
+            pos = 2;
+        } else if !spec_chars.is_empty() && matches!(spec_chars[0], '<' | '>' | '^') {
+            align = spec_chars[0];
+            pos = 1;
+        }
+        let rest: String = spec_chars[pos..].iter().collect();
+        let rest = rest.strip_suffix('s').unwrap_or(&rest);
+        let (width_text, precision_text) = match rest.split_once('.') {
+            Some((width, precision)) => (width, Some(precision)),
+            None => (rest, None),
+        };
+        let mut text: String = value.clone();
+        if let Some(precision) = precision_text {
+            let precision = precision
+                .parse::<usize>()
+                .unwrap_or_else(|_| panic!("Unsupported format spec {spec}"));
+            text = text.chars().take(precision).collect();
+        }
+        let width = if width_text.is_empty() {
+            0
+        } else {
+            width_text
+                .parse::<usize>()
+                .unwrap_or_else(|_| panic!("Unsupported format spec {spec}"))
+        };
+        let count = text.chars().count();
+        if count < width {
+            let pad = width - count;
+            let (left, right) = match align {
+                '>' => (pad, 0),
+                '^' => (pad / 2, pad - pad / 2),
+                _ => (0, pad),
+            };
+            result.extend(std::iter::repeat_n(fill, left));
+            result.push_str(&text);
+            result.extend(std::iter::repeat_n(fill, right));
+        } else {
+            result.push_str(&text);
+        }
+        ind = close + 1;
     }
     result
 }
@@ -1717,164 +2234,410 @@ pub fn find_root_axis_and_extensions(
     force_single: i32,
     use_tilt: Option<&str>,
 ) -> (String, i32, String, Option<String>, String) {
+    // Find tilt com file under either extension and determine axis state
     let mut root = String::new();
-    let mut type_extension = None;
-    let mut stack_extension = String::new();
-    let mut dual_number = 0;
-    let mut tilt_sums = [0i32; 2];
-    let mut eraser_sums = [0i32; 2];
-    let mut tilt_extension = String::new();
-    let mut eraser_extension = String::new();
-    let mut passed_tilt = use_tilt
-        .filter(|file| Path::new(file).exists())
-        .map(str::to_owned);
-    let mut tried_extension = None::<String>;
-    if let Some(file) = &passed_tilt {
-        if let Some(extension) = Path::new(file)
-            .extension()
-            .map(|extension| extension.to_string_lossy().into_owned())
-            .filter(|extension| extension == "com" || extension == "pcm")
-        {
-            tilt_extension = extension.clone();
-            tried_extension = Some(extension);
+    let mut type_ext: Option<String> = None;
+    let mut stack_ext = String::new();
+    let mut dual_num = 0;
+    let mut tilt_sum = [0i32; 2];
+    let mut eraser_sum = [0i32; 2];
+    let mut tilt_ext = String::new();
+    let mut eraser_ext = String::new();
+    let mut try_ext: Option<String> = None;
+    let mut use_tilt = use_tilt.filter(|file| !file.is_empty()).map(str::to_owned);
+
+    // Test the passed tilt file: if it is not there or extension is bad, clear the markers
+    // if it is there, set the com ex
+    if let Some(file) = use_tilt.clone() {
+        if Path::new(&file).exists() {
+            let (_tilt_root, ext) = os_path_splitext(&file);
+            if ext == ".com" || ext == ".pcm" {
+                tilt_ext = ext[1..].to_owned();
+                try_ext = Some(ext);
+            } else {
+                try_ext = None;
+            }
         } else {
-            passed_tilt = None;
+            use_tilt = None;
         }
     }
-    for (index, extension) in ["com", "pcm"].iter().enumerate() {
+
+    // Check tilt and eraser, single and dual unless forced to do only one
+    // If already got extension from passed-in tilt, skip tilt, but otherwise do try to
+    // analyze tilt[ab].com
+    for (com_ext, ind) in [("com", 0usize), ("pcm", 1usize)] {
         if force_single >= 0 {
-            if tried_extension.is_none() && Path::new(&format!("tilt.{extension}")).exists() {
-                tilt_extension = (*extension).to_owned();
-                tilt_sums[index] += 1;
+            if try_ext.is_none() && Path::new(&format!("tilt.{com_ext}")).exists() {
+                tilt_ext = com_ext.to_owned();
+                tilt_sum[ind] += 1;
             }
-            if Path::new(&format!("eraser.{extension}")).exists() {
-                eraser_extension = (*extension).to_owned();
-                eraser_sums[index] += 1;
+            if Path::new(&format!("eraser.{com_ext}")).exists() {
+                eraser_ext = com_ext.to_owned();
+                eraser_sum[ind] += 1;
             }
         }
         if force_single <= 0 {
-            if tried_extension.is_none()
-                && Path::new(&format!("tilta.{extension}")).exists()
-                && Path::new(&format!("tiltb.{extension}")).exists()
+            if try_ext.is_none()
+                && Path::new(&format!("tilta.{com_ext}")).exists()
+                && Path::new(&format!("tiltb.{com_ext}")).exists()
             {
-                tilt_extension = (*extension).to_owned();
-                tilt_sums[index] += 2;
+                tilt_ext = com_ext.to_owned();
+                tilt_sum[ind] += 2;
             }
-            if Path::new(&format!("erasera.{extension}")).exists()
-                && Path::new(&format!("eraserb.{extension}")).exists()
+            if Path::new(&format!("erasera.{com_ext}")).exists()
+                && Path::new(&format!("eraserb.{com_ext}")).exists()
             {
-                eraser_extension = (*extension).to_owned();
-                eraser_sums[index] += 2;
+                eraser_ext = com_ext.to_owned();
+                eraser_sum[ind] += 2;
             }
         }
     }
-    if tilt_sums.iter().min().copied().unwrap_or(0) > 0
-        || eraser_sums.iter().min().copied().unwrap_or(0) > 0
-        || tilt_sums.iter().max().copied().unwrap_or(0) > 2
-        || eraser_sums.iter().max().copied().unwrap_or(0) > 2
-        || (tilt_sums.iter().max().copied().unwrap_or(0) > 0
-            && eraser_sums.iter().max().copied().unwrap_or(0) > 0
-            && (tilt_sums.iter().max() != eraser_sums.iter().max()
-                || tilt_extension != eraser_extension))
+
+    // Require only com or pcm to appear, require no contamination between single and dual
+    // names unless it was forced to be one or the other, but do not require both to exist
+    let max_tilt = tilt_sum[0].max(tilt_sum[1]);
+    let max_eraser = eraser_sum[0].max(eraser_sum[1]);
+    if tilt_sum[0].min(tilt_sum[1]) > 0
+        || eraser_sum[0].min(eraser_sum[1]) > 0
+        || max_tilt > 2
+        || max_eraser > 2
+        || (max_tilt.min(max_eraser) > 0 && (max_tilt != max_eraser || eraser_ext != tilt_ext))
     {
         return (String::new(), -1, String::new(), None, String::new());
     }
-    let command_extension = if !tilt_extension.is_empty() {
-        tilt_extension.clone()
-    } else {
-        eraser_extension.clone()
-    };
-    let mut use_extension = format!(".{command_extension}");
-    if tilt_sums.iter().max().copied().unwrap_or(0) > 1
-        || eraser_sums.iter().max().copied().unwrap_or(0) > 1
-    {
-        dual_number = 2;
-        use_extension = format!("a.{command_extension}");
+
+    // Finalize com extension now
+    let mut com_ext = tilt_ext.clone();
+    if com_ext.is_empty() {
+        com_ext = eraser_ext.clone();
     }
+    let mut use_ext = format!(".{com_ext}");
+    if max_tilt > 1 || max_eraser > 1 {
+        dual_num = 2;
+        use_ext = format!("a.{com_ext}");
+    }
+
+    // Then read the file options from the tilt file
     let mut tilt_root_failed = false;
-    if !tilt_extension.is_empty() {
-        let tilt_file = passed_tilt.unwrap_or_else(|| format!("tilt{use_extension}"));
-        let tilt_lines = read_text_file(&tilt_file, None, true, None).ok();
-        let track_lines = read_text_file(&format!("track{use_extension}"), None, true, None).ok();
-        let input_line = tilt_lines.as_ref().and_then(|lines| {
-            match option_value(lines, "InputProjections", 0, false, 0, None, None) {
-                Some(OptionValue::String(value)) => Some(value),
-                _ => None,
+    if !tilt_ext.is_empty() {
+        let use_tilt = use_tilt.unwrap_or_else(|| format!("tilt{use_ext}"));
+
+        // Tilt output is variable, so just for redundancy in test, read track file too
+        let tilt_lines = read_text_file(&use_tilt, None, true, None);
+        let track_lines = read_text_file(&format!("track{use_ext}"), None, true, None);
+        let bad_tilt = tilt_lines.is_err();
+        let bad_track = track_lines.is_err();
+        if !(bad_tilt && bad_track) {
+            let mut input_line = String::new();
+            let mut image_line = String::new();
+            let mut descrip = "";
+            if let Ok(lines) = &tilt_lines {
+                if let Some(OptionValue::String(value)) =
+                    option_value(lines, "InputProjections", 0, false, 0, None, None)
+                {
+                    input_line = value;
+                }
+                descrip = ".ali";
             }
-        });
-        let image_line = track_lines.as_ref().and_then(|lines| {
-            match option_value(lines, "ImageFile", 0, false, 0, None, None) {
-                Some(OptionValue::String(value)) => Some(value),
-                _ => None,
+            if let Ok(lines) = &track_lines {
+                if let Some(OptionValue::String(value)) =
+                    option_value(lines, "ImageFile", 0, false, 0, None, None)
+                {
+                    image_line = value;
+                }
+                descrip = ".preali";
             }
-        });
-        if let (Some(input), Some(image)) = (input_line, image_line) {
-            let input_path = Path::new(&input);
-            let image_path = Path::new(&image);
-            let mut input_root = input_path.with_extension("").to_string_lossy().into_owned();
-            let mut image_root = image_path.with_extension("").to_string_lossy().into_owned();
-            let input_extension = input_path
-                .extension()
-                .map(|extension| extension.to_string_lossy().into_owned())
-                .unwrap_or_default();
-            let image_extension = image_path
-                .extension()
-                .map(|extension| extension.to_string_lossy().into_owned())
-                .unwrap_or_default();
-            if input_extension == "ali" && image_extension == "preali" {
-                type_extension = Some(String::new());
-            } else if !input_extension.is_empty()
-                && input_extension == image_extension
-                && input_root.ends_with("ali")
-                && image_root.ends_with("preali")
-            {
-                type_extension = Some(input_extension);
-                input_root.truncate(input_root.len() - 3);
-                image_root.truncate(image_root.len() - 6);
-            }
-            if dual_number != 0 {
-                if input_root.ends_with('a') || input_root.ends_with('b') {
-                    input_root.pop();
-                    image_root.pop();
-                } else {
+
+            // If both read OK and option lines were found, proceed with two-name analysis
+            if !input_line.is_empty() && !image_line.is_empty() {
+                let (mut img_root, img_ext) = os_path_splitext(&image_line);
+                let (new_root, inp_ext) = os_path_splitext(&input_line);
+                root = new_root;
+
+                // If the extensions are descriptive style, file type extension is blank,
+                // if they match then it is a file-type extension
+                if inp_ext == ".ali" && img_ext == ".preali" {
+                    type_ext = Some(String::new());
+                } else if inp_ext.len() > 1
+                    && inp_ext == img_ext
+                    && root.ends_with("ali")
+                    && img_root.ends_with("preali")
+                {
+                    type_ext = Some(inp_ext[1..].to_owned());
+                    root = py_slice_end(&root, 4);
+                    img_root = py_slice_end(&img_root, 7);
+                }
+
+                // Make sure the rootname is sensible for dual axis
+                if dual_num != 0 {
+                    if root.ends_with('a') || root.ends_with('b') {
+                        root = py_slice_end(&root, 1);
+                        img_root = py_slice_end(&img_root, 1);
+                    } else {
+                        root = String::new();
+                        tilt_root_failed = true;
+                    }
+                }
+
+                if root != img_root {
+                    root = String::new();
                     tilt_root_failed = true;
                 }
-            }
-            if input_root == image_root && !tilt_root_failed {
-                root = input_root;
-            } else {
-                tilt_root_failed = true;
-            }
-        }
-    }
-    if !eraser_extension.is_empty()
-        && let Ok(lines) = read_text_file(&format!("eraser{use_extension}"), None, true, None)
-    {
-        if let Some(OptionValue::String(input)) =
-            option_value(&lines, "InputFile", 0, false, 0, None, None)
-        {
-            let path = Path::new(&input);
-            let root2 = path.with_extension("").to_string_lossy().into_owned();
-            stack_extension = path
-                .extension()
-                .map(|extension| extension.to_string_lossy().into_owned())
-                .unwrap_or_default();
-            if root.is_empty() && tilt_root_failed {
-                if dual_number == 0 {
-                    root = root2;
-                } else if root2.ends_with('a') {
-                    root = root2[..root2.len() - 1].to_owned();
+
+            // Otherwise just make sure the entry from one file matches the expected one
+            // and set the type extension and root that way
+            } else if !input_line.is_empty() || !image_line.is_empty() {
+                let (new_root, inp_ext) = if !input_line.is_empty() {
+                    os_path_splitext(&input_line)
+                } else {
+                    os_path_splitext(&image_line)
+                };
+                root = new_root;
+                if inp_ext == descrip {
+                    type_ext = Some(String::new());
+                } else if inp_ext.len() > 1 && root.ends_with(&descrip[1..]) {
+                    type_ext = Some(inp_ext[1..].to_owned());
+                    root = py_slice_end(&root, descrip.len());
+                }
+
+                // And rootname must still be good for dual axis
+                if dual_num != 0 {
+                    if root.ends_with('a') || root.ends_with('b') {
+                        root = py_slice_end(&root, 1);
+                    } else {
+                        root = String::new();
+                        tilt_root_failed = true;
+                    }
                 }
             }
         }
     }
-    (
-        command_extension,
-        dual_number,
-        root,
-        type_extension,
-        stack_extension,
-    )
+
+    // Next get raw stack extension from eraser.com
+    if !eraser_ext.is_empty() {
+        if let Ok(eraser_lines) = read_text_file(&format!("eraser{use_ext}"), None, true, None) {
+            if let Some(OptionValue::String(input_line)) =
+                option_value(&eraser_lines, "InputFile", 0, false, 0, None, None)
+            {
+                let (root2, inp_ext) = os_path_splitext(&input_line);
+                if inp_ext.len() > 1 {
+                    stack_ext = inp_ext[1..].to_owned();
+                }
+
+                // This gives us another shot at the rootname if tilt reading failed
+                if root.is_empty() && tilt_root_failed {
+                    if dual_num != 0 {
+                        if root2.ends_with('a') {
+                            root = py_slice_end(&root2, 1);
+                        }
+                    } else {
+                        root = root2;
+                    }
+                }
+            }
+        }
+    }
+
+    // Return what was successfully gotten
+    (com_ext, dual_num, root, type_ext, stack_ext)
+}
+
+/// Rust-only: Python's `s[:-n]` for `n > 0`, counted in characters as
+/// Python counts code points (the empty string when `n` reaches past the
+/// start).
+pub fn py_slice_end(text: &str, n: usize) -> String {
+    let keep = text.chars().count().saturating_sub(n);
+    text.chars().take(keep).collect()
+}
+
+/// Rust-only stand-in for Python's `os.path.splitext` (`posixpath.py`,
+/// `genericpath._splitext`): the extension runs from the last `.` of the
+/// last path component, provided that component has a character other than
+/// `.` before it; otherwise the extension is empty.  `Path::extension`
+/// differs for `name.` (Python keeps `.` as the extension).
+pub fn os_path_splitext(path: &str) -> (String, String) {
+    let sep_index = path.rfind('/').map(|index| index as isize).unwrap_or(-1);
+    let dot_index = path.rfind('.').map(|index| index as isize).unwrap_or(-1);
+    if dot_index > sep_index {
+        // skip all leading dots
+        let mut filename_index = (sep_index + 1) as usize;
+        let dot = dot_index as usize;
+        while filename_index < dot {
+            if path.as_bytes()[filename_index] != b'.' {
+                return (path[..dot].to_owned(), path[dot..].to_owned());
+            }
+            filename_index += 1;
+        }
+    }
+    (path.to_owned(), String::new())
+}
+
+/// Rust-only stand-in for Python's `int(str)` in base 10: surrounding
+/// whitespace is ignored, one `+` or `-` sign is allowed, and single
+/// underscores may separate digits.  `None` is the ValueError.  Values past
+/// `i64` (Python ints are unbounded) are also `None`.
+pub fn py_int(text: &str) -> Option<i64> {
+    let trimmed = text.trim();
+    let (negative, digits) = match trimmed.as_bytes().first() {
+        Some(b'-') => (true, &trimmed[1..]),
+        Some(b'+') => (false, &trimmed[1..]),
+        _ => (false, trimmed),
+    };
+    if digits.is_empty()
+        || digits.starts_with('_')
+        || digits.ends_with('_')
+        || digits.contains("__")
+    {
+        return None;
+    }
+    let cleaned: String = digits.chars().filter(|c| *c != '_').collect();
+    if !cleaned.chars().all(|c| c.is_ascii_digit()) {
+        return None;
+    }
+    let value = cleaned.parse::<i64>().ok()?;
+    Some(if negative { -value } else { value })
+}
+
+/// Rust-only stand-in for Python's `os.path.normpath` (`posixpath.py`):
+/// collapses repeated separators and `.` components and resolves `..`
+/// lexically, keeping exactly two leading slashes but reducing three or more
+/// to one, and returning `.` for an empty result.  `Path::components` differs:
+/// it keeps `..` and folds `//` to `/`.
+pub fn os_path_normpath(path: &str) -> String {
+    if path.is_empty() {
+        return ".".to_owned();
+    }
+    let mut initial_slashes = if path.starts_with('/') { 1 } else { 0 };
+    // POSIX allows one or two initial slashes, but treats three or more
+    // as single slash.
+    if initial_slashes == 1 && path.starts_with("//") && !path.starts_with("///") {
+        initial_slashes = 2;
+    }
+    let mut new_comps: Vec<&str> = Vec::new();
+    for comp in path.split('/') {
+        if comp.is_empty() || comp == "." {
+            continue;
+        }
+        if comp != ".."
+            || (initial_slashes == 0 && new_comps.is_empty())
+            || new_comps.last() == Some(&"..")
+        {
+            new_comps.push(comp);
+        } else if !new_comps.is_empty() {
+            new_comps.pop();
+        }
+    }
+    let mut result = "/".repeat(initial_slashes);
+    result.push_str(&new_comps.join("/"));
+    if result.is_empty() {
+        return ".".to_owned();
+    }
+    result
+}
+
+/// Rust-only stand-in for Python's `os.path.abspath` (`posixpath.py`):
+/// joins a relative path onto `os.getcwd()` and normalises it with
+/// [`os_path_normpath`], without touching the file system beyond the working
+/// directory -- so, unlike `fs::canonicalize`, symbolic links are kept and
+/// the path need not exist, and unlike `std::path::absolute`, `..` is
+/// resolved.
+pub fn os_path_abspath(path: &str) -> String {
+    if path.starts_with('/') {
+        return os_path_normpath(path);
+    }
+    let cwd = std::env::current_dir()
+        .map(|dir| dir.to_string_lossy().into_owned())
+        .unwrap_or_default();
+    // `os.path.join(cwd, path)`
+    let mut joined = cwd;
+    if !joined.is_empty() && !joined.ends_with('/') {
+        joined.push('/');
+    }
+    joined.push_str(path);
+    os_path_normpath(&joined)
+}
+
+/// Rust-only stand-in for Python's `glob.glob(pattern)` (`glob.py`, Python
+/// 3.12) for a pattern whose directory part holds no wildcard, which is every
+/// pattern the translated scripts pass: without a wildcard the pattern itself
+/// is returned if it exists (`os.path.lexists`); otherwise the directory is
+/// listed in `os.scandir` order -- `read_dir`, both being `readdir` -- names
+/// starting with `.` are skipped unless the pattern's name part does, and the
+/// rest are matched with `fnmatch` (`*`, `?`, `[...]`, `[!...]`).
+pub fn glob_glob(pattern: &str) -> Vec<String> {
+    let has_magic = |text: &str| text.contains(['*', '?', '[']);
+    if !has_magic(pattern) {
+        if fs::symlink_metadata(pattern).is_ok() {
+            return vec![pattern.to_owned()];
+        }
+        return Vec::new();
+    }
+    let (dirname, basename) = match pattern.rfind('/') {
+        Some(index) => (&pattern[..index + 1], &pattern[index + 1..]),
+        None => ("", pattern),
+    };
+    // `fnmatch.translate`
+    let chars = basename.chars().collect::<Vec<_>>();
+    let mut regex_text = String::from("(?s:");
+    let mut i = 0;
+    let n = chars.len();
+    while i < n {
+        let c = chars[i];
+        i += 1;
+        if c == '*' {
+            if !regex_text.ends_with(".*") {
+                regex_text.push_str(".*");
+            }
+        } else if c == '?' {
+            regex_text.push('.');
+        } else if c == '[' {
+            let mut j = i;
+            if j < n && chars[j] == '!' {
+                j += 1;
+            }
+            if j < n && chars[j] == ']' {
+                j += 1;
+            }
+            while j < n && chars[j] != ']' {
+                j += 1;
+            }
+            if j >= n {
+                regex_text.push_str("\\[");
+            } else {
+                let mut stuff = chars[i..j].iter().collect::<String>();
+                stuff = stuff.replace('\\', "\\\\");
+                i = j + 1;
+                if let Some(rest) = stuff.strip_prefix('!') {
+                    stuff = format!("^{rest}");
+                } else if stuff.starts_with('^') || stuff.starts_with('[') {
+                    stuff = format!("\\{stuff}");
+                }
+                regex_text.push('[');
+                regex_text.push_str(&stuff);
+                regex_text.push(']');
+            }
+        } else {
+            regex_text.push_str(&regex::escape(&c.to_string()));
+        }
+    }
+    regex_text.push_str(")\\z");
+    let Ok(matcher) = regex::Regex::new(&format!("^{regex_text}")) else {
+        return Vec::new();
+    };
+    let list_dir = if dirname.is_empty() { "." } else { dirname };
+    let mut result = Vec::new();
+    if let Ok(entries) = fs::read_dir(list_dir) {
+        for entry in entries.flatten() {
+            let name = entry.file_name().to_string_lossy().into_owned();
+            if name.starts_with('.') && !basename.starts_with('.') {
+                continue;
+            }
+            if matcher.is_match(&name) {
+                result.push(format!("{dirname}{name}"));
+            }
+        }
+    }
+    result
 }
 
 /// Matches `defaultNamingStyle` (`IMOD/pysrc/imodpy.py:866`).
@@ -1974,15 +2737,19 @@ pub fn add_output_format_var_to_lines(
     output_format: Option<&str>,
     allow_extra: bool,
 ) {
-    let output_format = output_format.map(str::to_owned).or_else(|| {
-        if naming_style > 0 {
-            get_type_ext_allowing_extra(naming_style)
-                .filter(|extension| allow_extra || extension != "tif")
-                .map(|extension| extension.to_uppercase())
-        } else {
-            None
-        }
-    });
+    // `if not outputFormat`: an empty format counts as none
+    let output_format = output_format
+        .filter(|format| !format.is_empty())
+        .map(str::to_owned)
+        .or_else(|| {
+            if naming_style > 0 {
+                get_type_ext_allowing_extra(naming_style)
+                    .filter(|extension| allow_extra || extension != "tif")
+                    .map(|extension| extension.to_uppercase())
+            } else {
+                None
+            }
+        });
     if let Some(output_format) = output_format {
         let line = format!("$setenv IMOD_OUTPUT_FORMAT {output_format}");
         match lines.iter().position(|entry| !entry.starts_with('#')) {
@@ -2017,13 +2784,16 @@ pub fn set_output_format_if_needed(type_extension: &str, allow_extra: bool) {
 /// Matches `makeBackupFile` (`IMOD/pysrc/imodpy.py:961`).
 pub fn make_backup_file(filename: &str) {
     if Path::new(filename).exists() {
-        let backup = format!("{filename}~");
-        if Path::new(&backup).exists() {
-            let _ = fs::remove_file(&backup);
-        }
-        if let Err(error) = fs::rename(filename, &backup) {
+        let backname = format!("{filename}~");
+        let renamed: std::io::Result<()> = (|| {
+            if Path::new(&backname).exists() {
+                fs::remove_file(&backname)?;
+            }
+            fs::rename(filename, &backname)
+        })();
+        if renamed.is_err() {
             prnstr(
-                &format!("WARNING: Failed to rename existing file {filename} to {backup}: {error}"),
+                &format!("WARNING: Failed to rename existing file {filename} to {backname}"),
                 "\n",
                 false,
             );
@@ -2173,11 +2943,7 @@ pub fn imod_is_abs_path(path: &str) -> bool {
 /// Matches `imodAbsPath` (`IMOD/pysrc/imodpy.py:1443`).
 pub fn imod_abs_path(path: &str) -> String {
     // Cygwin will not work with a windows path, so convert it
-    let cygwin = cygwin_path(path);
-    let mut absp = std::path::absolute(&cygwin)
-        .unwrap_or_else(|_| Path::new(&cygwin).to_path_buf())
-        .to_string_lossy()
-        .into_owned();
+    let mut absp = os_path_abspath(&cygwin_path(path));
     if cfg!(windows) || cfg!(target_os = "cygwin") {
         absp = get_cygpath(true, &absp, "-m");
     }
@@ -2194,31 +2960,27 @@ pub fn new_psutil_api(version: &str) -> bool {
 }
 
 /// Matches `imodTempDir` (`IMOD/pysrc/imodpy.py:1486`).
-///
-/// `os.access(path, os.W_OK)` is read here as "some write permission bit is
-/// set", which is what `std` exposes without a `libc::access` call.
 pub fn imod_temp_dir() -> String {
+    // `os.access(path, os.W_OK)`: the POSIX `access` call itself, which asks
+    // about this process's real user rather than the permission bits alone
+    let writable = |path: &str| -> bool {
+        std::ffi::CString::new(path)
+            .map(|path| unsafe { libc::access(path.as_ptr(), libc::W_OK) } == 0)
+            .unwrap_or(false)
+    };
     let windows = cfg!(windows) || cfg!(target_os = "cygwin");
     if let Some(imodtemp) = std::env::var_os("IMOD_TMPDIR") {
         let imodtemp = get_cygpath(windows, &imodtemp.to_string_lossy(), "-m");
-        let path = Path::new(&imodtemp);
-        if path.exists()
-            && path.is_dir()
-            && fs::metadata(path).is_ok_and(|metadata| !metadata.permissions().readonly())
-        {
+        if Path::new(&imodtemp).exists() && Path::new(&imodtemp).is_dir() && writable(&imodtemp) {
             return imodtemp;
         }
     }
     let imodtemp = get_cygpath(windows, "/usr/tmp", "-m");
-    let path = Path::new(&imodtemp);
-    if path.exists() && fs::metadata(path).is_ok_and(|metadata| !metadata.permissions().readonly())
-    {
+    if Path::new(&imodtemp).exists() && writable(&imodtemp) {
         return imodtemp;
     }
     let imodtemp = get_cygpath(windows, "/tmp", "-m");
-    let path = Path::new(&imodtemp);
-    if path.exists() && fs::metadata(path).is_ok_and(|metadata| !metadata.permissions().readonly())
-    {
+    if Path::new(&imodtemp).exists() && writable(&imodtemp) {
         return imodtemp;
     }
     ".".to_owned()
@@ -2397,52 +3159,97 @@ pub fn make_current_dir_writable(subdirectory: &str) -> Option<String> {
     }
 }
 
-/// Matches `initializeMoveOrCopy` (`IMOD/pysrc/imodpy.py:1653`).
-pub fn initialize_move_or_copy(_skip_windows_copy: i32) {
+/// Matches `initializeMoveOrCopy` (`IMOD/pysrc/imodpy.py:1653`).  The
+/// Windows probe for `robocopy`/`xcopy` is not translated: on this platform
+/// only `mocRenamesOK` and `mocXcopyExists` are reset.
+pub fn initialize_move_or_copy(_skip_win_copy: i32) {
     MOC_RENAMES_OK.store(true, Ordering::SeqCst);
 }
 
-/// Matches `moveOrCopyWithRetry` (`IMOD/pysrc/imodpy.py:1672`); Unix `cp -rf` remains an external process boundary.
+/// Matches `moveOrCopyWithRetry` (`IMOD/pysrc/imodpy.py:1672`) on a
+/// non-Windows platform, where the source's Windows command branch is never
+/// taken and `mocRecursiveCopyOK` stays true.  `cp -rf` is an external
+/// process boundary.
+///
+/// Not translated: the `numTrials > 1` branch's `shutil.copy`/`shutil.move`
+/// for a **directory** (`shutil.move`'s `copytree` fallback); a file is
+/// handled.  No caller in this crate reaches this function (its source
+/// callers are `serieswatcher` and `framewatcher`); see TOFIX.md.
 pub fn move_or_copy_with_retry(
     from_file: &str,
-    to_directory: &str,
-    message: &str,
-    copy: bool,
-    trials: i32,
+    to_dir: &str,
+    mess: &str,
+    if_copy: bool,
+    num_trials: i32,
 ) -> i32 {
-    let source = Path::new(from_file);
-    let destination = Path::new(to_directory).join(source.file_name().unwrap_or_default());
-    if !copy && MOC_RENAMES_OK.load(Ordering::SeqCst) && fs::rename(source, &destination).is_ok() {
-        return 0;
-    }
-    MOC_RENAMES_OK.store(false, Ordering::SeqCst);
-    for trial in 0..trials {
-        let result = run_cmd(
-            &format!("cp -rf \"{from_file}\" \"{to_directory}\""),
-            None,
-            None,
-            None,
-            &[],
-        );
-        if result.is_ok() {
-            if !copy {
-                let _ = if source.is_dir() {
-                    fs::remove_dir_all(source)
-                } else {
-                    fs::remove_file(source)
-                };
-            }
+    let moving_dir = Path::new(from_file).is_dir();
+    let from_file = os_path_normpath(from_file);
+    let to_dir = os_path_normpath(to_dir);
+    // `os.path.basename`
+    let basename = |path: &str| -> String { path.rsplit('/').next().unwrap_or(path).to_owned() };
+
+    // If moving and renames have been OK so far or not tested yet, try one os.rename
+    // and if anything goes wrong, mark renames as bad and fall back to copy/deletes
+    if MOC_RENAMES_OK.load(Ordering::SeqCst) && !if_copy {
+        if fs::rename(&from_file, format!("{to_dir}/{}", basename(&from_file))).is_ok() {
             return 0;
         }
-        if trial + 1 < trials {
-            std::thread::sleep(std::time::Duration::from_millis(500));
+        MOC_RENAMES_OK.store(false, Ordering::SeqCst);
+    }
+
+    let mut last_error = String::new();
+    for trial in 0..num_trials {
+        let attempt: Result<(), String> = (|| {
+            // If multiple trials use the dog-slow shutil
+            if num_trials > 1 {
+                let real_dst = format!("{to_dir}/{}", basename(&from_file));
+                if if_copy {
+                    // `shutil.copy`: contents and permission bits
+                    fs::copy(&from_file, &real_dst).map_err(|error| error.to_string())?;
+                } else {
+                    // `shutil.move`
+                    if Path::new(&real_dst).exists() {
+                        return Err(format!("Destination path '{real_dst}' already exists"));
+                    }
+                    if fs::rename(&from_file, &real_dst).is_err() {
+                        fs::copy(&from_file, &real_dst).map_err(|error| error.to_string())?;
+                        fs::remove_file(&from_file).map_err(|error| error.to_string())?;
+                    }
+                }
+            } else {
+                let command = fmtstr("cp -rf \"{}\" \"{}\"", &[from_file.clone(), to_dir.clone()]);
+                // `runcmd` raises a bare `ImodpyError`, whose `str()` is empty
+                run_cmd(&command, None, None, None, &[]).map_err(|_| String::new())?;
+
+                // Now for move, remove the tree or file
+                if !if_copy {
+                    if moving_dir {
+                        fs::remove_dir_all(&from_file).map_err(|error| error.to_string())?;
+                    } else {
+                        fs::remove_file(&from_file).map_err(|error| error.to_string())?;
+                    }
+                }
+            }
+            Ok(())
+        })();
+        match attempt {
+            Ok(()) => return 0,
+            // Just catch anything here and retry or give up
+            Err(error) => {
+                last_error = error;
+                if trial < num_trials - 1 {
+                    std::thread::sleep(std::time::Duration::from_millis(500));
+                }
+            }
         }
     }
+
     prnstr(
-        &format!("An error occurred {message} to {to_directory} :"),
+        &format!("An error occurred {mess} to {to_dir} :"),
         "\n",
         false,
     );
+    prnstr(&format!("    {last_error}"), "\n", false);
     1
 }
 
@@ -2453,9 +3260,11 @@ pub fn patch_size_from_entry(patch_entry: &str) -> (i32, i32, i32, i32) {
         let xy = [64, 80, 100, 120][index] as i32;
         return (xy, xy, [32, 40, 50, 60][index], 0);
     }
+    // `int()` strips surrounding whitespace, which the `#, #, #` form Etomo
+    // sends to setupcombine relies on
     let values = patch_entry
         .split(',')
-        .map(str::parse::<i32>)
+        .map(|value| value.trim().parse::<i32>())
         .collect::<Result<Vec<_>, _>>();
     match values {
         Ok(values) if values.len() == 3 => (values[0], values[1], values[2], 0),
@@ -2487,11 +3296,14 @@ pub fn auto_patch_number(
 
 /// Matches `parallelBoundarySize` (`IMOD/pysrc/imodpy.py:1629`).
 pub fn parallel_boundary_size(default_value: i32) -> i32 {
-    std::env::var("PARALLEL_BOUNDARY_SIZE")
-        .ok()
-        .and_then(|value| value.parse::<i32>().ok())
-        .filter(|value| *value > default_value)
-        .unwrap_or(default_value)
+    if let Ok(val_str) = std::env::var("PARALLEL_BOUNDARY_SIZE")
+        && !val_str.is_empty()
+        && let Some(new_val) = py_int(&val_str)
+        && new_val > default_value as i64
+    {
+        return new_val as i32;
+    }
+    default_value
 }
 
 /// Matches `elapsedTimeComponents` (`IMOD/pysrc/imodpy.py:1642`), with Unix seconds as input.
@@ -2504,7 +3316,8 @@ pub fn elapsed_time_components(start_time: f64) -> (i32, i32, i32) {
     let minutes = (used / 60.0) as i32;
     let seconds_float = used - 60.0 * minutes as f64;
     let seconds = seconds_float as i32;
-    let fraction = ((seconds_float - seconds as f64) * 10.0).round() as i32;
+    // Python 3's `round` rounds half to even
+    let fraction = ((seconds_float - seconds as f64) * 10.0).round_ties_even() as i32;
     (minutes, seconds, fraction)
 }
 

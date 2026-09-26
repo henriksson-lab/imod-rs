@@ -28,9 +28,27 @@ use std::path::{Path, PathBuf};
 /// in-process runner.  An entry point returns (status 0) or ends in
 /// `b3dutil::exit`, which outside the in-process runner is
 /// `std::process::exit`.
+///
+/// **Signal disposition (process boundary).**  The Rust runtime starts every
+/// binary with `SIGPIPE` ignored, so a write to a closed pipe returns `EPIPE`:
+/// Rust's `print!` then panics (exit 101) and libc `printf` carries on.  A
+/// C, C++ or Fortran program -- what every `in_process` command translates --
+/// runs with the default disposition and is killed by the signal (a shell sees
+/// status 141, `imod header f.mrc | head -1`).  So the default is restored here,
+/// once, before the command runs.  The Python-script translations and the
+/// other non-`in_process` commands keep `SIG_IGN`, which is what the Python
+/// interpreter itself installs at start-up.  Children spawned through
+/// `std::process::Command` are unaffected either way: std resets `SIGPIPE` to
+/// the default in the child before `exec`, as Python's `subprocess` does.
 fn dispatch(name: &str) -> bool {
     match find(name) {
         Some(command) => {
+            if command.in_process {
+                // SAFETY: `signal` with a valid signal number and `SIG_DFL` has
+                // no memory-safety preconditions; it runs before the command
+                // starts any thread.
+                unsafe { libc::signal(libc::SIGPIPE, libc::SIG_DFL) };
+            }
             (command.entry)();
             true
         }

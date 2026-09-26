@@ -1,7 +1,7 @@
                center   center SDs      edge     edge SDs      distinct-
 scale  binning  mean   median  MADN     mean   median  MADN      ness
   1    1,1,1      453   253.3  24.0         3   100.5   4.9     21.38
-  2    2,2,2      445   197.2  43.1         2    50.2   5.3     11.57
+  2    2,2,1      445   197.2  43.1         2    50.2   5.3     11.57
 Selected scaling # 1 as the best one for analysis
 Median Z values of surfaces, numbered from 1, are: 9  22
 Z limits for autopatchfit combine, numbered from 1, are: 8  23

@@ -779,9 +779,16 @@ pub fn mrc_head_write(fout: &mut ImodFile, hdata: &mut MrcHeader) -> i32 {
     hdata.blank[1] = 0;
 
     let mut hcopy = hdata.clone();
+    // `B3DMAX(0., hcopy.amin)` is `0. > amin ? 0. : amin` (`mrcfiles.c:413-423`),
+    // not `f32::max`: a NaN extreme passes through unchanged, as it does
+    // natively (a byte `blendmont` output of NaN pixels keeps NaN min/max).
     if hdata.mode == MRC_MODE_BYTE {
-        hcopy.amin = hcopy.amin.max(0.0);
-        hcopy.amax = hcopy.amax.min(255.0);
+        hcopy.amin = if 0.0 > hcopy.amin { 0.0 } else { hcopy.amin };
+        hcopy.amax = if 255.0 < hcopy.amax {
+            255.0
+        } else {
+            hcopy.amax
+        };
         if hdata.bytes_signed != 0 && hdata.packed4bits == 0 {
             hcopy.amin -= 128.0;
             hcopy.amax -= 128.0;
@@ -790,16 +797,18 @@ pub fn mrc_head_write(fout: &mut ImodFile, hdata: &mut MrcHeader) -> i32 {
     } else if (hdata.mode == MRC_MODE_SHORT || hdata.mode == MRC_MODE_USHORT)
         && hcopy.amin < hcopy.amax
     {
-        hcopy.amin = hcopy.amin.max(if hdata.mode == MRC_MODE_USHORT {
+        let lo = if hdata.mode == MRC_MODE_USHORT {
             0.0
         } else {
             -32768.0
-        });
-        hcopy.amax = hcopy.amax.min(if hdata.mode == MRC_MODE_USHORT {
+        };
+        let hi = if hdata.mode == MRC_MODE_USHORT {
             65535.0
         } else {
             32767.0
-        });
+        };
+        hcopy.amin = if lo > hcopy.amin { lo } else { hcopy.amin };
+        hcopy.amax = if hi < hcopy.amax { hi } else { hcopy.amax };
     }
 
     if hdata.packed4bits == PACKED_4BIT_MODE {

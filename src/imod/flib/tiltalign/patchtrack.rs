@@ -26,10 +26,11 @@
 //!   not passed; it is an `Option`, and the other five are only read when it is
 //!   `Some`.
 //!
-//! # Upstream, kept as written
+//! # Upstream defect fixed in translation (2026-09-26, `BUGS.md`)
 //!
 //! `loadPatchSubset` prints `"Need to add %d for view %d\n"` with the view
-//! number and the count **swapped** (`patchtrack.cpp:326`; `BUGS.md`).
+//! number and the count **swapped** (`patchtrack.cpp:326`); here the count
+//! comes first, as the message reads.
 
 use std::io::Write;
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -463,7 +464,7 @@ pub fn load_patch_subset(
             num_fill = min_in_view - num_in_view[(iv - 1) as usize];
             let _ = stdout.write_all(&c_format_bytes(
                 "Need to add %d for view %d\n",
-                &[CArg::Int(iv as i64), CArg::Int(num_fill as i64)],
+                &[CArg::Int(num_fill as i64), CArg::Int(iv as i64)],
             ));
             //
             // Go to the midpoint of equally spaced segments and find nearest not used with

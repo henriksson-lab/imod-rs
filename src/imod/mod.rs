@@ -1,6 +1,8 @@
 pub mod backends;
+pub mod c_sort;
 pub mod clip;
 pub mod commands;
+pub mod comrun;
 pub mod ctfplotter;
 pub mod etomo;
 pub mod flib;

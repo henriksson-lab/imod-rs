@@ -71,53 +71,42 @@ fn submfg_unrecognized_option_uses_source_pip_stdout_route() {
     assert!(output.stderr.is_empty());
 }
 
+// The command file runs in process (comrun, 2026-09-26): no `vmstopy`,
+// `python` or temporary script is needed, so a PATH holding none of them
+// still runs it, and nothing is left behind but the log.
 #[cfg(unix)]
 #[test]
-fn submfg_resolves_vmstopy_from_imod_bin_and_runs_generated_command() {
-    use std::os::unix::fs::PermissionsExt;
-
+fn submfg_runs_command_file_without_python_or_vmstopy() {
     let root = std::env::temp_dir().join(format!("imod-rs-submfg-launch-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&root);
     let bin = root.join("bin");
-    let com = root.join("fixture.com");
-    let vmstopy_args = root.join("vmstopy-arguments");
-    let generated = root.join("generated-command");
     std::fs::create_dir_all(&bin).unwrap();
-    std::fs::write(&com, "$ fake command file\n").unwrap();
-    let python = bin.join("python");
-    std::fs::write(&python, "#!/bin/sh\nexec /usr/bin/python3 \"$@\"\n").unwrap();
-    let mut permissions = std::fs::metadata(&python).unwrap().permissions();
-    permissions.set_mode(0o755);
-    std::fs::set_permissions(&python, permissions).unwrap();
-    let vmstopy = bin.join("vmstopy");
-    std::fs::write(
-        &vmstopy,
-        "#!/bin/sh\nprintf '%s\\n%s\\n%s\\n' \"$1\" \"$2\" \"$3\" > \"$VMSTOPY_MARKER\"\nprintf 'import os\\nopen(os.environ[\"SUBMFG_MARKER\"], \"w\").write(\"generated\")\\n' > \"$3\"\n",
-    )
-    .unwrap();
-    let mut permissions = std::fs::metadata(&vmstopy).unwrap().permissions();
-    permissions.set_mode(0o755);
-    std::fs::set_permissions(&vmstopy, permissions).unwrap();
+    std::fs::write(root.join("fixture.com"), "$echo hello from the runner\n").unwrap();
     let result = common::imod_cmd("submfg")
         .current_dir(&root)
         .env("IMOD_DIR", &root)
-        .env("PATH", "/usr/bin:/bin")
-        .env("VMSTOPY_MARKER", &vmstopy_args)
-        .env("SUBMFG_MARKER", &generated)
-        .arg(&com)
+        .env("PATH", &bin)
+        .env_remove("SUBM_MESSAGE")
+        .env_remove("SUBM_LOG_TYPE")
+        .arg("fixture")
         .output()
-        .expect("run submfg with isolated installed vmstopy");
+        .expect("run submfg with no python or vmstopy on PATH");
     assert!(result.status.success(), "{:?}", result);
-    let arguments = std::fs::read_to_string(&vmstopy_args).unwrap();
-    let values = arguments.lines().collect::<Vec<_>>();
-    assert_eq!(values[0], com.to_string_lossy());
-    assert_eq!(values[1], root.join("fixture.log").to_string_lossy());
-    assert!(values[2].starts_with("submtemp."));
-    assert_eq!(std::fs::read_to_string(&generated).unwrap(), "generated");
-    for path in [generated, vmstopy_args, vmstopy, python, com] {
-        std::fs::remove_file(path).unwrap();
-    }
-    std::fs::remove_dir(bin).unwrap();
-    std::fs::remove_dir(root).unwrap();
+    assert_eq!(
+        String::from_utf8_lossy(&result.stdout),
+        "Running fixture.com ... fixture.com  finished successfully\x07\n"
+    );
+    assert_eq!(
+        std::fs::read_to_string(root.join("fixture.log")).unwrap(),
+        "hello from the runner\nSUCCESSFULLY COMPLETED\n"
+    );
+    let mut names: Vec<String> = std::fs::read_dir(&root)
+        .unwrap()
+        .map(|entry| entry.unwrap().file_name().to_string_lossy().into_owned())
+        .collect();
+    names.sort();
+    assert_eq!(names, ["bin", "fixture.com", "fixture.log"]);
+    std::fs::remove_dir_all(root).unwrap();
 }
 
 #[test]
@@ -168,24 +157,32 @@ fn subm_launches_imod_bin_submfg_and_routes_child_stderr_to_stdout() {
 }
 
 #[test]
-fn real_imod_com_fixture_reaches_vmstopy_boundary() {
-    let fixture = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("IMOD/com/tilt.com");
+fn real_imod_com_fixture_fails_in_tilt_without_its_inputs() {
+    let source = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("IMOD/com/tilt.com");
     assert!(
-        fixture.is_file(),
+        source.is_file(),
         "bundled IMOD command fixture must be present"
     );
+    // A copy: the log is written next to the command file, never under IMOD/
+    let root = std::env::temp_dir().join(format!("imod-rs-submfg-tilt-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&root);
+    std::fs::create_dir_all(&root).unwrap();
+    let fixture = root.join("tilt.com");
+    std::fs::copy(&source, &fixture).unwrap();
     let output = common::imod_cmd("submfg")
+        .current_dir(&root)
         .env("IMOD_DIR", "/fixture/imod")
         .arg(&fixture)
         .output()
         .expect("run submfg against real command fixture");
-    // The fixture is deliberately allowed to reach the external `vmstopy`
-    // boundary; the translator is an installed IMOD program, not Rust code.
+    // The runner runs `tilt`, which cannot open the `g5a` inputs
     assert_eq!(output.status.code(), Some(1));
-    assert!(
-        String::from_utf8_lossy(&output.stderr)
-            .contains(&format!("Error executing {}", fixture.display()))
-    );
+    // `prnstr('Error executing ' + comname + bell)` writes to stdout
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(stdout.contains(&format!("Error executing {}", fixture.display())));
+    let log = std::fs::read_to_string(root.join("tilt.log")).unwrap();
+    assert!(log.contains("ERROR:"), "{log}");
+    std::fs::remove_dir_all(root).unwrap();
 }
 
 #[test]
@@ -208,4 +205,261 @@ fn missing_com_and_pcm_root_uses_source_exiterror_stdout() {
         )
     );
     assert!(result.stderr.is_empty());
+}
+
+// ---------------------------------------------------------------------------
+// Native differentials (2026-09-26).  The expected output below was captured
+// from the Python source (`python3 IMOD/pysrc/submfg`) running the same
+// command files through the vendored `IMOD/pysrc/vmstopy`, and compared byte
+// for byte (stdout, every file left behind, exit status) against
+// `imod submfg` over 32 cases, including `-s` through the native `vmstocsh`
+// and a real `tcsh`.
+
+struct Fixture {
+    root: std::path::PathBuf,
+    run: std::path::PathBuf,
+}
+
+impl Fixture {
+    fn new(name: &str, files: &[(&str, &str)]) -> Fixture {
+        let root = std::env::temp_dir().join(format!(
+            "imod-rs-submfg-native-{name}-{}",
+            std::process::id()
+        ));
+        let _ = std::fs::remove_dir_all(&root);
+        let bin = root.join("bin");
+        let run = root.join("run");
+        std::fs::create_dir_all(&bin).unwrap();
+        std::fs::create_dir_all(root.join("imod/bin")).unwrap();
+        std::fs::create_dir_all(&run).unwrap();
+        std::os::unix::fs::symlink("/usr/bin/python3", bin.join("python")).unwrap();
+        std::os::unix::fs::symlink(
+            std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("IMOD/pysrc/vmstopy"),
+            bin.join("vmstopy"),
+        )
+        .unwrap();
+        for (name, text) in files {
+            let path = run.join(name);
+            std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+            std::fs::write(path, text).unwrap();
+        }
+        Fixture { root, run }
+    }
+
+    fn run(&self, args: &[&str]) -> std::process::Output {
+        common::imod_cmd("submfg")
+            .args(args)
+            .current_dir(&self.run)
+            .env("IMOD_DIR", self.root.join("imod"))
+            .env(
+                "PATH",
+                format!("{}:/usr/bin:/bin", self.root.join("bin").display()),
+            )
+            .env(
+                "PYTHONPATH",
+                std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("IMOD/pysrc"),
+            )
+            .env_remove("SUBM_MESSAGE")
+            .env_remove("SUBM_LOG_TYPE")
+            .env_remove("RUNCMD_VERBOSE")
+            .output()
+            .unwrap()
+    }
+
+    fn files(&self) -> Vec<String> {
+        let mut names = Vec::new();
+        for entry in std::fs::read_dir(&self.run).unwrap() {
+            let name = entry.unwrap().file_name().to_string_lossy().into_owned();
+            if name.starts_with("submtemp.") {
+                names.push("submtemp.PID".to_owned());
+            } else {
+                names.push(name);
+            }
+        }
+        names.sort();
+        names
+    }
+
+    fn read(&self, name: &str) -> String {
+        std::fs::read_to_string(self.run.join(name)).unwrap()
+    }
+}
+
+impl Drop for Fixture {
+    fn drop(&mut self) {
+        let _ = std::fs::remove_dir_all(&self.root);
+    }
+}
+
+const OK_COM: (&str, &str) = ("ok.com", "# a comment\n$echo running ok\n$echo second\n");
+const OK2_COM: (&str, &str) = ("ok2.com", "$echo ok two\n");
+const FAIL_COM: (&str, &str) = (
+    "fail.com",
+    "$sh -c 'echo before; echo ERROR: bad thing; exit 2'\n",
+);
+const FAILNE_COM: (&str, &str) = (
+    "failne.com",
+    "$sh -c 'echo l1; echo l2; echo l3; echo l4; echo l5; exit 3'\n",
+);
+
+#[test]
+fn native_runs_each_command_file_and_logs_it() {
+    let fixture = Fixture::new("ok", &[OK_COM, OK2_COM]);
+    let output = fixture.run(&["ok.com", "ok2"]);
+    assert_eq!(output.status.code(), Some(0));
+    assert_eq!(
+        String::from_utf8_lossy(&output.stdout),
+        "Running ok.com ... ok.com  finished successfully\x07\nRunning ok2.com ... ok2.com  finished successfully\x07\n"
+    );
+    assert_eq!(
+        fixture.read("ok.log"),
+        "running ok\nsecond\nSUCCESSFULLY COMPLETED\n"
+    );
+    assert_eq!(fixture.files(), ["ok.com", "ok.log", "ok2.com", "ok2.log"]);
+}
+
+// Fixed in translation (BUGS.md): native leaves the previous file's
+// `submtemp.<pid>` behind on these exits; the translation removes it.
+#[test]
+fn native_both_and_neither_exit_at_once_even_under_continue() {
+    // `exitError` is a SystemExit, which the per-file `try` does not catch:
+    // the program stops, and the previous file's temporary is left behind
+    let fixture = Fixture::new(
+        "both",
+        &[
+            OK_COM,
+            OK2_COM,
+            ("x.com", "$echo a\n"),
+            ("x.pcm", "$echo b\n"),
+        ],
+    );
+    let output = fixture.run(&["-c", "ok", "x", "ok2"]);
+    assert_eq!(output.status.code(), Some(1));
+    assert_eq!(
+        String::from_utf8_lossy(&output.stdout),
+        "Running ok.com ... ok.com  finished successfully\x07\nERROR: submfg - Both x.com and x.pcm exist; specify which\n"
+    );
+    assert_eq!(
+        fixture.files(),
+        ["ok.com", "ok.log", "ok2.com", "x.com", "x.pcm"]
+    );
+
+    let fixture = Fixture::new("neither", &[OK_COM, OK2_COM]);
+    let output = fixture.run(&["-c", "ok", "nothere", "ok2"]);
+    assert_eq!(output.status.code(), Some(1));
+    assert_eq!(
+        String::from_utf8_lossy(&output.stdout),
+        "Running ok.com ... ok.com  finished successfully\x07\nERROR: submfg - Neither nothere.com nor nothere.pcm exists\n"
+    );
+    assert_eq!(fixture.files(), ["ok.com", "ok.log", "ok2.com"]);
+}
+
+#[test]
+fn native_failures_report_log_errors_and_continue_under_c() {
+    let fixture = Fixture::new("fail", &[OK_COM, FAIL_COM, FAILNE_COM]);
+    let output = fixture.run(&["-c", "fail", "failne", "ok"]);
+    assert_eq!(output.status.code(), Some(1));
+    assert_eq!(
+        String::from_utf8_lossy(&output.stdout),
+        "Running fail.com ... Error executing fail.com\x07\n\
+ERROR: bad thing\n\
+ERROR: sh -c 'echo before; echo ERROR: bad thing; exit 2': exited with status 2\n\
+Running failne.com ... Error executing failne.com\x07\n\
+ERROR: sh -c 'echo l1; echo l2; echo l3; echo l4; echo l5; exit 3': exited with status 3\n\
+Running ok.com ... ok.com  finished successfully\x07\n"
+    );
+    assert_eq!(
+        fixture.files(),
+        [
+            "fail.com",
+            "fail.log",
+            "failne.com",
+            "failne.log",
+            "ok.com",
+            "ok.log"
+        ]
+    );
+
+    // Without -c the loop stops at the first failure
+    let fixture = Fixture::new("fail-stop", &[OK_COM, FAIL_COM]);
+    let output = fixture.run(&["fail", "ok"]);
+    assert_eq!(output.status.code(), Some(1));
+    assert!(!String::from_utf8_lossy(&output.stdout).contains("Running ok.com"));
+    assert_eq!(fixture.files(), ["fail.com", "fail.log", "ok.com"]);
+}
+
+#[test]
+fn native_failure_without_a_log_prints_the_error_strings() {
+    let fixture = Fixture::new("nolog", &[OK_COM]);
+    let output = fixture.run(&["-c", "missing.com", "ok"]);
+    assert_eq!(output.status.code(), Some(1));
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    let pid = regex::Regex::new(r"submtemp\.\d+").unwrap();
+    assert_eq!(
+        pid.replace_all(&stdout, "submtemp.PID"),
+        "ERROR: vmstopy - Opening command file missing.com\n\
+Error executing missing.com\x07\n\
+vmstopy missing.com missing.log: exited with status 1\n\
+\n\
+Running ok.com ... ok.com  finished successfully\x07\n"
+    );
+}
+
+#[test]
+fn native_numbered_logs_take_the_integer_after_the_last_dash() {
+    // `int()` accepts `1_5` as 15; `7-2` gives 2; `x` and `9a` are skipped
+    let fixture = Fixture::new(
+        "lognum",
+        &[
+            OK_COM,
+            OK2_COM,
+            ("ok.log-3", "x"),
+            ("ok.log-12", "x"),
+            ("ok.log-x", "x"),
+            ("ok.log-1_5", "x"),
+            ("ok.log-7-2", "x"),
+            ("ok.log-9a", "x"),
+        ],
+    );
+    let output = fixture.run(&["-l", "2", "ok", "ok2"]);
+    assert_eq!(output.status.code(), Some(0));
+    assert_eq!(
+        String::from_utf8_lossy(&output.stdout),
+        "Running ok.com with log in ok.log-16 ... ok.com  finished successfully\x07\nRunning ok2.com with log in ok2.log-01 ... ok2.com  finished successfully\x07\n"
+    );
+
+    // The digit count is capped at 4 but a longer number is kept whole
+    let fixture = Fixture::new("lognum9", &[OK_COM, ("ok.log-12345", "x")]);
+    let output = fixture.run(&["-l", "9", "ok"]);
+    assert_eq!(
+        String::from_utf8_lossy(&output.stdout),
+        "Running ok.com with log in ok.log-12346 ... ok.com  finished successfully\x07\n"
+    );
+}
+
+// `-s` ran the file through `vmstocsh` and `tcsh -ef`, which leave
+// programs' standard error out of the log; the runner keeps that, and like
+// the default path writes no temporary file.  (Native's tcsh file had a blank
+// line after every line -- BUGS.md -- and no longer exists.)
+#[test]
+fn dash_s_leaves_program_stderr_out_of_the_log() {
+    let com = ("err.com", "$sh -c 'echo to stdout; echo to stderr >&2'\n");
+    let fixture = Fixture::new("dash-s", &[com]);
+    let output = fixture.run(&["-s", "err"]);
+    assert_eq!(output.status.code(), Some(0), "{output:?}");
+    assert_eq!(
+        fixture.read("err.log"),
+        "to stdout\nSUCCESSFULLY COMPLETED\n"
+    );
+    assert!(String::from_utf8_lossy(&output.stderr).contains("to stderr"));
+    assert_eq!(fixture.files(), ["err.com", "err.log"]);
+
+    // Without -s both streams are logged
+    let fixture = Fixture::new("dash-s-off", &[com]);
+    let output = fixture.run(&["err"]);
+    assert_eq!(output.status.code(), Some(0), "{output:?}");
+    assert_eq!(
+        fixture.read("err.log"),
+        "to stdout\nto stderr\nSUCCESSFULLY COMPLETED\n"
+    );
 }

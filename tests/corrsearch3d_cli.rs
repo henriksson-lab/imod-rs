@@ -1,0 +1,137 @@
+//! Native-golden coverage for `corrsearch3d` (`IMOD/flib/model/corrsearch3d.f90`).
+//!
+//! Every row of `fixtures/corrsearch3d/cases.tsv` was run through the native
+//! reference program at `OMP_NUM_THREADS=1` by
+//! `fixtures/make-corrsearch3d-goldens.sh`, with standard output captured
+//! through a pipe.  `golden/<case>.rc` is the exit status, `.stdout` the
+//! standard output and `.patch` the displacement file, when native wrote one.
+//! The patch file and exit status are compared exactly.  Standard output is
+//! compared exactly except for the wall-clock lines `-debug` prints
+//! (`LETKZ, search, oneCCC:`, `multiBinStats time`, `histogram time`,
+//! `patch structure time`), whose numbers are timings.
+
+mod common;
+
+use std::io::Write;
+use std::path::{Path, PathBuf};
+use std::process::Stdio;
+
+const PROGRAM: &str = "corrsearch3d";
+
+fn fixture_dir() -> PathBuf {
+    Path::new(env!("CARGO_MANIFEST_DIR")).join("fixtures/corrsearch3d")
+}
+
+fn scratch(name: &str) -> PathBuf {
+    let dir =
+        std::env::temp_dir().join(format!("imod-rs-{PROGRAM}-{}-{}", std::process::id(), name));
+    let _ = std::fs::remove_dir_all(&dir);
+    std::fs::create_dir_all(&dir).unwrap();
+    for entry in std::fs::read_dir(fixture_dir()).unwrap() {
+        let path = entry.unwrap().path();
+        if path.is_file() && path.file_name().is_some_and(|n| n != "cases.tsv") {
+            std::fs::copy(&path, dir.join(path.file_name().unwrap())).unwrap();
+        }
+    }
+    dir
+}
+
+/// Drops the timing lines of a `-debug` run.
+fn mask_stdout(bytes: &[u8]) -> String {
+    String::from_utf8_lossy(bytes)
+        .lines()
+        .filter(|line| !line.contains("LETKZ") && !line.contains(" time"))
+        .collect::<Vec<_>>()
+        .join("\n")
+}
+
+/// The `printf` escapes the golden script feeds the interactive cases.
+fn unescape(text: &str) -> String {
+    if text == "-" {
+        return String::new();
+    }
+    text.replace("\\n", "\n")
+}
+
+#[test]
+fn every_case_matches_native_golden() {
+    let table = std::fs::read_to_string(fixture_dir().join("cases.tsv")).unwrap();
+    let golden = fixture_dir().join("golden");
+    let mut failures = Vec::new();
+    let mut count = 0;
+    for line in table
+        .lines()
+        .filter(|l| !l.starts_with('#') && !l.is_empty())
+    {
+        let fields: Vec<&str> = line.split('\t').collect();
+        let (name, args, stdin) = (fields[0], fields[1], fields[2]);
+        let dir = scratch(name);
+        let args: Vec<&str> = if args == "-" {
+            Vec::new()
+        } else {
+            args.split_whitespace().collect()
+        };
+        let mut child = common::imod_cmd(PROGRAM)
+            .current_dir(&dir)
+            .env(
+                "AUTODOC_DIR",
+                concat!(env!("CARGO_MANIFEST_DIR"), "/IMOD/autodoc"),
+            )
+            .env("OMP_NUM_THREADS", "1")
+            .args(&args)
+            .stdin(Stdio::piped())
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped())
+            .spawn()
+            .unwrap();
+        child
+            .stdin
+            .take()
+            .unwrap()
+            .write_all(unescape(stdin).as_bytes())
+            .unwrap();
+        let output = child.wait_with_output().unwrap();
+        count += 1;
+        let rc: i32 = std::fs::read_to_string(golden.join(format!("{name}.rc")))
+            .unwrap()
+            .trim()
+            .parse()
+            .unwrap();
+        if output.status.code() != Some(rc) {
+            failures.push(format!(
+                "{name}: exit {:?}, native {rc}\n{}",
+                output.status.code(),
+                String::from_utf8_lossy(&output.stderr)
+            ));
+        }
+        let stdout = std::fs::read(golden.join(format!("{name}.stdout"))).unwrap();
+        if mask_stdout(&output.stdout) != mask_stdout(&stdout) {
+            failures.push(format!(
+                "{name}: stdout differs\n--- native\n{}\n--- ours\n{}",
+                String::from_utf8_lossy(&stdout),
+                String::from_utf8_lossy(&output.stdout)
+            ));
+        }
+        let expected = golden.join(format!("{name}.patch"));
+        let ours = dir.join("out.patch");
+        match (expected.exists(), ours.exists()) {
+            (true, true) => {
+                if std::fs::read(&expected).unwrap() != std::fs::read(&ours).unwrap() {
+                    failures.push(format!("{name}: patch file differs"));
+                }
+            }
+            (false, false) => {}
+            (native, rust) => failures.push(format!(
+                "{name}: patch file present natively {native}, here {rust}"
+            )),
+        }
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+    assert!(count > 0, "no cases read");
+    assert!(
+        failures.is_empty(),
+        "{} of {count} cases differ:\n{}",
+        failures.len(),
+        failures.join("\n")
+    );
+}

@@ -69,9 +69,16 @@ pub fn gaussj_det(
     let mut pivot = [0f32; MSIZ as usize];
     let mut ipivot = [0i16; MSIZ as usize];
     // `irow` and `icolum` are uninitialised in the source until the pivot
-    // search sets them, and an all-zero submatrix leaves them so.
+    // search sets them, and an all-zero (or all-NaN) matrix leaves them so on
+    // the first pass, where the C then indexes `ipivot`, `a` and `b` with
+    // stack garbage (the `polyfit` one-point abort in `BUGS.md`).  Fixed in
+    // translation (2026-09-26): a first pass that finds no pivot reports the
+    // matrix singular, which is what the routine's contract says a matrix
+    // with no usable pivot is.  Later passes keep the C's (defined) reuse of
+    // the previous pass's indices.
     let mut irow: i32 = 0;
     let mut icolum: i32 = 0;
+    let mut pivot_found = false;
 
     *determ = 1.;
     for j in 0..n {
@@ -88,6 +95,7 @@ pub fn gaussj_det(
                             abstmp = -abstmp;
                         }
                         if amax < abstmp {
+                            pivot_found = true;
                             irow = j;
                             icolum = k;
                             amax = abstmp;
@@ -98,6 +106,9 @@ pub fn gaussj_det(
                     }
                 }
             }
+        }
+        if !pivot_found {
+            return Err(GaussjError::Singular);
         }
         ipivot[icolum as usize] += 1;
         if irow != icolum {
@@ -217,5 +228,40 @@ mod tests {
         );
         assert_eq!(gaussjfw(&mut [], &2001, &0, &mut [], &0, &0), -1);
         assert_eq!(gaussjfw(&mut [], &2, &2, &mut [], &1, &1), 1);
+    }
+
+    /// `BUGS.md` "polyfit with one point and order 1": the C indexes with
+    /// uninitialised `irow`/`icolum` when the first pivot search finds
+    /// nothing.  Defined behaviour: singular.
+    #[test]
+    fn no_first_pivot_is_singular() {
+        assert_eq!(
+            gaussj(&mut [0.0], 1, 1, &mut [1.0], 1, 1),
+            Err(GaussjError::Singular)
+        );
+        assert_eq!(
+            gaussj(
+                &mut [f32::NAN, f32::NAN, 0.0, f32::NAN],
+                2,
+                2,
+                &mut [1.0, 2.0],
+                1,
+                1
+            ),
+            Err(GaussjError::Singular)
+        );
+        let (x, y) = ([3.0_f32], [5.0_f32]);
+        let (mut slopes, mut bint) = ([0.0_f32; 2], 0.0_f32);
+        assert_eq!(
+            crate::imod::flib::subrs::statsubs::polyfit::polyfit(
+                &x,
+                &y,
+                1,
+                1,
+                &mut slopes,
+                &mut bint
+            ),
+            3
+        );
     }
 }

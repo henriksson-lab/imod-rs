@@ -1,360 +1,416 @@
 //! Translation of `IMOD/pysrc/submfg`.
 //!
-//! The original is a Python command program, so its one top-level program body is
-//! represented by [`submfg`].  `vmstopy`, `vmstocsh`, `tcsh`, and the generated
-//! Python command file are intentionally retained as process boundaries: they are
-//! separate IMOD command units, not alternate Rust implementations.
+//! The original is a Python command program, so its one top-level program
+//! body is [`submfg`], translated statement by statement.  **Changed
+//! (owner, 2026-09-26: no Python, no pipes):** each command file is run by
+//! the in-process runner ([`crate::imod::comrun::run_com_file`]) instead of
+//! `vmstopy` + `python -u` (or `vmstocsh` + `tcsh -ef` with -s), so no
+//! `submtemp.<pid>` file is written and no `Python PID:` line is printed.
+//! -s now means only "programs' standard error is not logged", the one
+//! observable difference of the tcsh path the runner can keep; -n nices this
+//! process once; -t appends `in N.NN sec` to the completion line (the
+//! source's Windows form) instead of the shell's `time` report.
+//!
+//! The script's `try` over each command file catches `ImodpyError` (a failed
+//! `runcmd`) and `KeyboardInterrupt`; `exitError` inside it is a
+//! `SystemExit` and ends the program there, without the final
+//! `cleanupFiles`.  A Ctrl-C is Python's `KeyboardInterrupt`, which `runcmd`
+//! passes on after `passOnKeyInterrupt(True)`; the translation records the
+//! signal and takes the `except KeyboardInterrupt: break` arm once the
+//! interrupted command has returned.
 
 use std::ffi::OsString;
-use std::fs;
-use std::io::{self, Write};
+use std::io::Write;
 use std::path::Path;
-use std::process::Command;
-use std::time::Instant;
+use std::sync::atomic::{AtomicBool, AtomicI32, Ordering};
 
-use super::imodpy::{add_imod_bin_ignore_sighup, pass_on_key_interrupt};
-use super::pip::expand_arg_list;
+use super::imodpy::{
+    ImodpyError, add_imod_bin_ignore_sighup, convert_to_integer, get_err_strings, glob_glob,
+    os_path_splitext, pass_on_key_interrupt, prnstr, read_text_file, set_run_error,
+};
+use super::pip::{exit_error, expand_arg_list, set_exit_prefix};
+use super::vmstopy::VmstopyOptions;
+use crate::imod::comrun::{ComOptions, run_com_file};
 
 /// Original Python top-level program (`IMOD/pysrc/submfg:1`).
 pub fn submfg(arguments: &[OsString]) -> i32 {
     let progname = "submfg";
-    let prefix = "ERROR: submfg - ";
-    if std::env::var_os("IMOD_DIR").is_none() {
-        println!("{prefix} IMOD_DIR is not defined!");
+    let prefix = format!("ERROR: {progname} - ");
+    let sys_argv = arguments
+        .iter()
+        .map(|argument| argument.to_string_lossy().into_owned())
+        .collect::<Vec<_>>();
+
+    //
+    // Setup runtime environment
+    if let Some(imod_dir) = std::env::var_os("IMOD_DIR") {
+        let mut imod_dir = imod_dir.to_string_lossy().into_owned();
+        if cfg!(target_os = "cygwin") {
+            imod_dir = imod_dir.replace('\\', "/");
+            let bytes = imod_dir.as_bytes();
+            if bytes.len() < 3 {
+                eprintln!("IndexError: string index out of range");
+                return 1;
+            }
+            if bytes[1] == b':' && bytes[2] == b'/' {
+                imod_dir = format!(
+                    "/cygdrive/{}{}",
+                    (bytes[0] as char).to_ascii_lowercase(),
+                    &imod_dir[2..]
+                );
+            }
+        }
+        // `sys.path.insert(0, os.path.join(IMOD_DIR, 'pylib'))` and
+        // `from imodpy import *` locate the Python library; here it is linked
+        let _ = imod_dir;
+        add_imod_bin_ignore_sighup();
+    } else {
+        print!("{prefix} IMOD_DIR is not defined!\n");
         return 1;
     }
-    // Source startup does this before resolving vmstopy/vmstocsh from PATH.
-    add_imod_bin_ignore_sighup();
-    let comtmp = format!("submtemp.{}", std::process::id());
+
+    //
+    // load IMOD Libraries
+    set_exit_prefix(prefix);
+
     let bell = "\x07";
     let mut message = format!(" finished successfully{bell}");
     if let Some(value) = std::env::var_os("SUBM_MESSAGE") {
         message = value.to_string_lossy().into_owned();
     }
-    let mut log_type = match std::env::var("SUBM_LOG_TYPE") {
-        Ok(value) => match value.parse::<i32>() {
-            Ok(value) => value,
-            Err(_) => {
-                eprintln!(
-                    "{prefix}Converting environment variable SUBM_LOG_TYPE ({value}) to integer"
-                );
-                return 1;
-            }
-        },
-        Err(_) => 0,
-    };
-    if arguments.len() < 2 {
-        println!("{}",
-            "subm or submfg will execute a series of command files in sequence\nUsage:  submfg [options] command_file1 command_file2 ...\n        Command files can have default extension .com or .pcm\n        If the filename is comfile.com or comfile.pcm, you can enter \n                 comfile    comfile.  or  comfile.com or comfile.pcm\n        submfg will execute the files in the foreground\n        subm is an alias defined in the IMOD startup script to execute submfg\n               in the background\n        Set the environment variable SUBM_MESSAGE to modify the message upon\n               completion\n        Set the environment variable SUBM_LOG_TYPE to set a default log type\n    Options:\n        -t     Report the execution time\n        -c     Continue with the next command file if one fails\n        -s     Translate file with vmstocsh and run with tcsh\n                 (default is to translate with vmstopy and run with python)\n        -k     Keep backslashes instead of converting to forward slashes\n        -n #   Run niced with # as nice increment (range 1 to 19)\n        -l #   Log type for numbered or time-stamped logs:\n                  1 - 4 for sequential numbers with 1-4 digits\n                 -1 for date-time stamps like Mar-01-195046.4\n                 -2 for date-time stamps like 20120301-195121.9\n                 -3 for date-time stamps like 2012-03-01T19:51:51.9"
-        .replace("forward slashes\n", "forward slashes'\n"));
+    let mut log_type = 0;
+    if let Some(value) = std::env::var_os("SUBM_LOG_TYPE") {
+        log_type = convert_to_integer(
+            &value.to_string_lossy(),
+            "environment variable SUBM_LOG_TYPE",
+        );
+    }
+
+    // Process arguments
+    let lenarg = sys_argv.len();
+    let mut argind = 1;
+    if lenarg < 2 {
+        prnstr(
+            "subm or submfg will execute a series of command files in sequence
+Usage:  submfg [options] command_file1 command_file2 ...
+        Command files can have default extension .com or .pcm
+        If the filename is comfile.com or comfile.pcm, you can enter\x20
+                 comfile    comfile.  or  comfile.com or comfile.pcm
+        submfg will execute the files in the foreground
+        subm is an alias defined in the IMOD startup script to execute submfg
+               in the background
+        Set the environment variable SUBM_MESSAGE to modify the message upon
+               completion
+        Set the environment variable SUBM_LOG_TYPE to set a default log type
+    Options:
+        -t     Report the execution time
+        -c     Continue with the next command file if one fails
+        -s     Translate file with vmstocsh and run with tcsh
+                 (default is to translate with vmstopy and run with python)
+        -k     Keep backslashes instead of converting to forward slashes'
+        -n #   Run niced with # as nice increment (range 1 to 19)
+        -l #   Log type for numbered or time-stamped logs:
+                  1 - 4 for sequential numbers with 1-4 digits
+                 -1 for date-time stamps like Mar-01-195046.4
+                 -2 for date-time stamps like 20120301-195121.9
+                 -3 for date-time stamps like 2012-03-01T19:51:51.9",
+            "\n",
+            false,
+        );
         return 0;
     }
-    let mut argind = 1usize;
-    let mut nice = 0i32;
+
+    let mut nice = 0;
     let mut use_tcsh = false;
-    let mut do_time = false;
-    let mut continue_if_error = false;
+    let mut dotime = false;
+    let mut cont_if_err = false;
     let mut keep_backslash = false;
     let windows = cfg!(windows);
-    while argind < arguments.len() {
-        let original = arguments[argind].to_string_lossy();
-        if !original.starts_with('-') {
-            break;
-        }
-        match original.as_ref() {
-            "-t" => do_time = true,
-            "-c" => continue_if_error = true,
-            "-k" => keep_backslash = true,
-            "-s" => {
+    while argind < lenarg {
+        let oarg = sys_argv[argind].as_str();
+        if oarg.starts_with('-') {
+            if oarg == "-t" {
+                dotime = true;
+            } else if oarg == "-c" {
+                cont_if_err = true;
+            } else if oarg == "-k" {
+                keep_backslash = true;
+            } else if oarg == "-s" {
                 use_tcsh = true;
                 if windows {
-                    eprintln!("{prefix}You cannot run command files with tcsh from Windows Python");
-                    return 1;
+                    exit_error("You cannot run command files with tcsh from Windows Python");
                 }
-            }
-            "-n" | "-l" => {
+            } else if oarg == "-n" {
                 argind += 1;
-                if argind >= arguments.len() {
+                if argind >= lenarg {
                     break;
                 }
-                let value = arguments[argind].to_string_lossy();
-                match value.parse::<i32>() {
-                    Ok(value) if original == "-n" => nice = value,
-                    Ok(value) => log_type = value,
-                    Err(_) => {
-                        let description = if original == "-n" {
-                            "\"nice\" value"
-                        } else {
-                            "log type value"
-                        };
-                        // `convertToInteger` calls Python PIP `exitError`; this
-                        // program installed only an exit prefix, whose default
-                        // destination is stdout.
-                        println!("{prefix}Converting {description} ({value}) to integer");
-                        return 1;
-                    }
+                nice = convert_to_integer(&sys_argv[argind], "\"nice\" value");
+            } else if oarg == "-l" {
+                argind += 1;
+                if argind >= lenarg {
+                    break;
                 }
+                log_type = convert_to_integer(&sys_argv[argind], "log type value");
+            } else {
+                exit_error(&format!("Unrecognized argument {oarg}"));
             }
-            _ => {
-                println!("{prefix}Unrecognized argument {original}");
-                return 1;
-            }
+            argind += 1;
+        } else {
+            break;
         }
-        argind += 1;
     }
-    if argind >= arguments.len() {
-        // Missing values after -n/-l fall through here in the source and
-        // report via its stdout PIP exit route.
-        println!("{prefix}No command file was entered");
-        return 1;
+
+    if argind >= lenarg {
+        exit_error("No command file was entered");
     }
-    let (expanded_arguments, no_match) = expand_arg_list(&arguments[argind..]);
-    if no_match >= 0 {
-        eprintln!(
-            "{prefix}No files match the entry: {}",
-            arguments[argind + no_match as usize].to_string_lossy()
-        );
-        return 1;
+
+    let (new_args, no_match_ind) = expand_arg_list(&arguments[argind..]);
+    if no_match_ind >= 0 {
+        exit_error(&format!(
+            "No files match the entry: {}",
+            sys_argv[argind + no_match_ind as usize]
+        ));
     }
 
     pass_on_key_interrupt(true);
 
+    // `-n`: the source nices each job (`imodNice` in the vmstopy script, or
+    // `nice +n` in the tcsh file); the jobs run in this process now
+    if nice != 0 {
+        unsafe {
+            libc::nice(nice as libc::c_int);
+        }
+    }
+
+    // Python raises KeyboardInterrupt on SIGINT; `runcmd` passes it on.
+    // While a command file runs in this process, the interrupt ends the
+    // program the way native's `except KeyboardInterrupt: break` does once
+    // the interrupted child has died: with the exit value so far (the
+    // `cleanupFiles` there has no temporary file to remove any more).
+    static KEY_INTERRUPT: AtomicBool = AtomicBool::new(false);
+    static RUNNING: AtomicBool = AtomicBool::new(false);
+    static EXIT_VAL: AtomicI32 = AtomicI32::new(0);
+    extern "C" fn key_interrupt(_signal: libc::c_int) {
+        KEY_INTERRUPT.store(true, Ordering::SeqCst);
+        if RUNNING.load(Ordering::SeqCst) {
+            unsafe { libc::_exit(EXIT_VAL.load(Ordering::SeqCst)) };
+        }
+    }
+    unsafe {
+        libc::signal(
+            libc::SIGINT,
+            key_interrupt as extern "C" fn(libc::c_int) as libc::sighandler_t,
+        );
+    }
+
     // Loop over the command files
-    let new_args = expanded_arguments
-        .iter()
-        .map(|argument| argument.to_string_lossy().into_owned())
-        .collect::<Vec<_>>();
-    let mut exit_value = 0;
+    let mut exit_val = 0;
     for argname in new_args {
-        let path = Path::new(&argname);
-        // Python `splitext("name.")` returns `(name, ".")`; `Path` does
-        // not preserve that distinction, so retain it from the original text.
-        let trailing_dot = argname.ends_with('.');
-        let rootname = if trailing_dot {
-            argname.trim_end_matches('.').to_owned()
-        } else {
-            path.with_extension("").to_string_lossy().into_owned()
-        };
-        let extension = path
-            .extension()
-            .map(|extension| extension.to_string_lossy().into_owned())
-            .unwrap_or_default();
-        let comname = if extension.is_empty() || trailing_dot {
-            let com_exists = Path::new(&(rootname.clone() + ".com")).exists();
-            let pcm_exists = Path::new(&(rootname.clone() + ".pcm")).exists();
+        let argname = argname.to_string_lossy().into_owned();
+        if KEY_INTERRUPT.load(Ordering::SeqCst) {
+            break;
+        }
+
+        // Get the full command file name
+        let (rootname, ext) = os_path_splitext(&argname);
+        let comname;
+        if ext.is_empty() || ext == "." {
+            let com_exists = Path::new(&format!("{rootname}.com")).exists();
+            let pcm_exists = Path::new(&format!("{rootname}.pcm")).exists();
+            // (Native leaves the previous file's `submtemp.<pid>` behind at
+            // these `exitError`s; there is no temporary file any more.)
             if com_exists && pcm_exists {
-                // `submfg:127-128`: PIP `exitError` follows the prefix's
-                // default stdout route for command-file resolution errors.
-                println!("{prefix}Both {rootname}.com and {rootname}.pcm exist; specify which");
-                exit_value = 1;
-                if !continue_if_error {
-                    break;
-                }
-                continue;
-            }
-            if com_exists {
-                rootname.clone() + ".com"
-            } else if pcm_exists {
-                rootname.clone() + ".pcm"
-            } else {
-                println!("{prefix}Neither {rootname}.com nor {rootname}.pcm exists");
-                exit_value = 1;
-                if !continue_if_error {
-                    break;
-                }
-                continue;
-            }
-        } else {
-            argname.clone()
-        };
-        let mut logname = format!("{rootname}.log");
-        if log_type > 0 {
-            let digits = log_type.min(4) as usize;
-            let mut lognum = 1u32;
-            if let Some(parent) = Path::new(&logname).parent() {
-                if let Ok(entries) = fs::read_dir(parent) {
-                    let prefix_name = format!(
-                        "{}-",
-                        Path::new(&logname)
-                            .file_name()
-                            .unwrap_or_default()
-                            .to_string_lossy()
-                    );
-                    for entry in entries.flatten() {
-                        let file_name = entry.file_name().to_string_lossy().into_owned();
-                        if let Some(number) = file_name
-                            .strip_prefix(&prefix_name)
-                            .and_then(|tail| tail.parse::<u32>().ok())
-                        {
-                            lognum = lognum.max(number + 1);
-                        }
-                    }
-                }
-            }
-            logname.push_str(&format!("-{lognum:0digits$}"));
-        } else if log_type < 0 {
-            // Python's local-time datetime formatting is retained at the process
-            // boundary using `date`; this avoids adding a non-source time library.
-            let date_format = if log_type == -1 {
-                "+%b-%d-%H%M%S"
-            } else if log_type == -2 {
-                "+%Y%m%d-%H%M%S"
-            } else {
-                "+%Y-%m-%dT%H:%M:%S"
-            };
-            let stamp = Command::new("date")
-                .arg(date_format)
-                .output()
-                .ok()
-                .and_then(|output| String::from_utf8(output.stdout).ok())
-                .unwrap_or_default()
-                .trim()
-                .to_owned();
-            let tenth = Command::new("date")
-                .arg("+%N")
-                .output()
-                .ok()
-                .and_then(|output| String::from_utf8(output.stdout).ok())
-                .and_then(|value| value.trim().parse::<u32>().ok())
-                .unwrap_or(0)
-                / 100_000_000;
-            logname.push_str(&format!("-{stamp}.{tenth}"));
-        }
-        let conversion = if use_tcsh {
-            match fs::read_to_string(&comname) {
-                Ok(lines) => match Command::new("sh")
-                    .arg("-c")
-                    .arg(format!("vmstocsh {logname}"))
-                    .stdin(std::process::Stdio::piped())
-                    .stdout(std::process::Stdio::piped())
-                    .spawn()
-                {
-                    Ok(mut child) => {
-                        if let Some(mut stdin) = child.stdin.take() {
-                            let _ = stdin.write_all(lines.as_bytes());
-                        }
-                        match child.wait_with_output() {
-                            Ok(output) if output.status.success() => {
-                                let mut cshlines =
-                                    String::from_utf8_lossy(&output.stdout).into_owned();
-                                if nice != 0 {
-                                    cshlines = format!("nice +{nice}\n{cshlines}");
-                                }
-                                fs::write(&comtmp, cshlines).map_err(|error| error.to_string())
-                            }
-                            Ok(output) => Err(String::from_utf8_lossy(&output.stderr).into_owned()),
-                            Err(error) => Err(error.to_string()),
-                        }
-                    }
-                    Err(error) => Err(error.to_string()),
-                },
-                Err(error) => Err(error.to_string()),
-            }
-        } else {
-            // `runcmd` receives an argument string here, but its process has
-            // no shell syntax.  Pass the original individual arguments so a
-            // command/log/tmp name containing shell metacharacters is not
-            // reinterpreted by an invented shell boundary.
-            let mut command = Command::new("vmstopy");
-            if nice != 0 {
-                command.args(["-n", &nice.to_string()]);
-            }
-            if keep_backslash {
-                command.arg("-k");
-            }
-            command
-                .arg(&comname)
-                .arg(&logname)
-                .arg(&comtmp)
-                .status()
-                .map_err(|error| error.to_string())
-                .and_then(|status| {
-                    if status.success() {
-                        Ok(())
-                    } else {
-                        Err(format!("exit status {status}"))
-                    }
-                })
-        };
-        if let Err(error) = conversion {
-            eprintln!("Error executing {comname}{bell}");
-            if !error.is_empty() {
-                eprintln!("{error}");
-            }
-            exit_value = 1;
-            if !continue_if_error {
-                break;
-            }
-            continue;
-        }
-        let mut command = if use_tcsh {
-            "tcsh -ef ".to_owned()
-        } else {
-            "python -u ".to_owned()
-        };
-        command.push_str(&comtmp);
-        if do_time && !windows {
-            command = format!("time {command}");
-        }
-        if log_type != 0 {
-            print!("Running {comname} with log in {logname} ... ");
-        } else {
-            print!("Running {comname} ... ");
-        }
-        let _ = io::stdout().flush();
-        let start_time = Instant::now();
-        let status = Command::new("sh").arg("-c").arg(command).status();
-        if status.as_ref().is_err() || status.as_ref().is_ok_and(|status| !status.success()) {
-            eprintln!("Error executing {comname}{bell}");
-            exit_value = 1;
-            if let Ok(lines) = fs::read_to_string(&logname) {
-                let mut found = false;
-                for line in lines.lines().filter(|line| line.contains("ERROR:")) {
-                    println!("{line}");
-                    found = true;
-                }
-                if !found {
-                    println!("   last lines of log:");
-                    for line in lines
-                        .lines()
-                        .rev()
-                        .take(4)
-                        .collect::<Vec<_>>()
-                        .into_iter()
-                        .rev()
-                    {
-                        println!("{line}");
-                    }
-                }
-            } else if let Err(error) = status {
-                eprintln!("{error}");
-            }
-            if !continue_if_error {
-                break;
-            }
-        } else {
-            if do_time && windows {
-                message.push_str(&format!(
-                    "   in {:.2} sec",
-                    start_time.elapsed().as_secs_f64()
+                exit_error(&format!(
+                    "Both {rootname}.com and {rootname}.pcm exist; specify which"
                 ));
             }
-            println!("{comname} {message}");
+            if com_exists {
+                comname = format!("{rootname}.com");
+            } else if pcm_exists {
+                comname = format!("{rootname}.pcm");
+            } else {
+                exit_error(&format!("Neither {rootname}.com nor {rootname}.pcm exists"));
+            }
+        } else {
+            comname = argname.clone();
+        }
+
+        // Get the log file name
+        let mut logname = format!("{rootname}.log");
+        if log_type > 0 {
+            log_type = std::cmp::min(4, log_type);
+            let loglist = glob_glob(&format!("{logname}-[0-9]*"));
+            let mut lognum: i64 = 1;
+            for log in &loglist {
+                let logspl = log.split('-').collect::<Vec<_>>();
+                // `int(logspl[len(logspl) - 1])`: white space around, one
+                // sign, and single underscores between digits are accepted
+                let token = logspl[logspl.len() - 1].trim();
+                let (negative, body) = match token.strip_prefix('-') {
+                    Some(body) => (true, body),
+                    None => (false, token.strip_prefix('+').unwrap_or(token)),
+                };
+                if !body.is_empty()
+                    && !body.starts_with('_')
+                    && !body.ends_with('_')
+                    && !body.contains("__")
+                    && body.chars().all(|c| c.is_ascii_digit() || c == '_')
+                    && let Ok(value) = body.replace('_', "").parse::<i64>()
+                {
+                    let num = if negative { -value } else { value };
+                    lognum = std::cmp::max(num + 1, lognum);
+                }
+            }
+
+            logname += &format!("-{:0width$}", lognum, width = log_type as usize);
+        } else if log_type < 0 {
+            let d = chrono::Local::now();
+            let stamp;
+            if log_type < -1 {
+                // `d.isoformat()`: microseconds follow only when non-zero
+                let mut iso = d.format("%Y-%m-%dT%H:%M:%S").to_string();
+                let microsecond = d.timestamp_subsec_micros();
+                if microsecond != 0 {
+                    iso += &format!(".{microsecond:06}");
+                }
+                let mut iso_stamp = iso;
+                if let Some(msind) = iso_stamp.find('.').filter(|&msind| msind > 0) {
+                    iso_stamp.truncate(msind);
+                }
+                if log_type == -2 {
+                    iso_stamp = iso_stamp
+                        .replace('-', "")
+                        .replace(':', "")
+                        .replace('T', "-");
+                }
+                stamp = iso_stamp;
+            } else {
+                stamp = d.format("%b-%d-%H%M%S").to_string();
+            }
+
+            logname += &format!("-{stamp}.{}", d.timestamp_subsec_micros() / 100000);
+        }
+
+        let attempt: Result<(), ImodpyError> = 'attempt: {
+            // Changed (owner, 2026-09-26: no Python, no pipes): the command
+            // file is run by the in-process runner instead of being converted
+            // to `comtmp` with `vmstopy` and run with `python -u` (or, with
+            // -s, with `vmstocsh` and `tcsh -ef`).  -s keeps what separated
+            // the tcsh path observably: programs' standard error is not
+            // logged.  -k is `vmstopy -k`; -n is applied once, before the
+            // loop; -t reports the time the way the source's Windows branch
+            // does, since there is no `time` command to prefix.
+            let options = ComOptions {
+                log: Some(logname.clone().into()),
+                vmstopy: VmstopyOptions {
+                    keep_backslash,
+                    ..VmstopyOptions::default()
+                },
+                stderr_to_log: !use_tcsh,
+            };
+
+            // Convert the command file: `vmstopy` failed before `Running ...`
+            // was printed, with its message on stdout; the runner converts
+            // it again, identically
+            let converted = match std::fs::File::open(&comname) {
+                Ok(com) if !Path::new(&comname).is_dir() => {
+                    super::vmstopy::convert(com, &logname, &options.vmstopy, &mut Vec::new())
+                }
+                _ => Err(format!("Opening command file {comname}")),
+            };
+            if let Err(error) = converted {
+                prnstr(&format!("ERROR: vmstopy - {error}"), "\n", false);
+                break 'attempt Err(set_run_error(
+                    vec![format!("vmstopy {comname} {logname}: exited with status 1")],
+                    1,
+                ));
+            }
+
+            // Run it
+            if log_type != 0 {
+                prnstr(
+                    &format!("Running {comname} with log in {logname} ... "),
+                    "",
+                    false,
+                );
+            } else {
+                prnstr(&format!("Running {comname} ... "), "", false);
+            }
+            let _ = std::io::stdout().flush();
+            let start_time = std::time::Instant::now();
+
+            RUNNING.store(true, Ordering::SeqCst);
+            let result = run_com_file(Path::new(&comname), &options);
+            RUNNING.store(false, Ordering::SeqCst);
+            if result.status != 0 {
+                if let Some(error) = &result.error {
+                    prnstr(error, "\n", false);
+                }
+                break 'attempt Err(set_run_error(
+                    vec![format!("{comname}: exited with status {}", result.status)],
+                    result.status,
+                ));
+            }
+            if dotime {
+                prnstr(
+                    &format!(
+                        "{comname} {message}   in {:.2} sec",
+                        start_time.elapsed().as_secs_f64()
+                    ),
+                    "\n",
+                    false,
+                );
+            } else {
+                prnstr(&format!("{comname} {message}"), "\n", false);
+            }
+            Ok(())
+        };
+
+        if KEY_INTERRUPT.load(Ordering::SeqCst) {
+            break;
+        }
+        if attempt.is_err() {
+            prnstr(&format!("Error executing {comname}{bell}"), "\n", false);
+            exit_val = 1;
+            EXIT_VAL.store(exit_val, Ordering::SeqCst);
+
+            // If log exists, find ERROR:, and if not do last few lines
+            if Path::new(&logname).exists() {
+                let Ok(loglines) =
+                    read_text_file(&logname, Some(" log file to find ERROR"), false, None)
+                else {
+                    unreachable!("readTextFile exits on error");
+                };
+                let mut got_err = 0;
+                for l in &loglines {
+                    if l.contains("ERROR:") {
+                        prnstr(l, "\n", false);
+                        got_err = 1;
+                    }
+                }
+                if got_err == 0 {
+                    prnstr("   last lines of log:", "\n", false);
+                    let ind = std::cmp::max(0, loglines.len() as isize - 4) as usize;
+                    for l in &loglines[ind..] {
+                        prnstr(l, "\n", false);
+                    }
+                }
+            } else {
+                // If no log file, dump any error strings from runcmd; each
+                // still carries its line ending in the source
+                let err_strings = get_err_strings();
+                for l in err_strings {
+                    prnstr(&format!("{l}\n"), "\n", false);
+                }
+            }
+
+            // stop loop unless continuing from errors
+            if !cont_if_err {
+                break;
+            }
         }
     }
-    let _ = fs::remove_file(&comtmp);
-    exit_value
-}
 
-#[cfg(test)]
-mod tests {
-    use super::submfg;
-    use std::ffi::OsString;
-
-    #[test]
-    fn requires_imod_dir_as_source_does() {
-        // This test cannot mutate process environment in Rust 2024; an empty
-        // environment-independent argument list still exercises the source usage path.
-        assert!(matches!(submfg(&[OsString::from("submfg")]), 0 | 1));
-    }
+    exit_val
 }

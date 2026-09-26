@@ -1436,11 +1436,14 @@ mod tests {
         bytes[3624..3628].copy_from_slice(&4.0_f32.to_ne_bytes());
         bytes[3704..3708].copy_from_slice(&90.0_f32.to_ne_bytes());
         bytes[3944..3948].copy_from_slice(&2_i32.to_ne_bytes());
-        let image = ImodImageFile {
-            user_data: bytes.as_mut_ptr(),
-            user_count: bytes.len() as i32,
-            user_flags: IIFLAG_TVIPS_DATA,
-            ..ImodImageFile::default()
+        let image = {
+            // A struct literal cannot take `..Default::default()` now that
+            // `ImodImageFile` implements `Drop` (the in-process run record).
+            let mut record = ImodImageFile::default();
+            record.user_data = bytes.as_mut_ptr();
+            record.user_count = bytes.len() as i32;
+            record.user_flags = IIFLAG_TVIPS_DATA;
+            record
         };
         let mut state = TvipsMetadataState::default();
         let mut label = [0_u8; MRC_LABEL_SIZE];

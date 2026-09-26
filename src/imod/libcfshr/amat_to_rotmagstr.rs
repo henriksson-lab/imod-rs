@@ -90,7 +90,8 @@ pub fn amat_to_rotmagstr(a11: f32, mut a12: f32, a21: f32, mut a22: f32) -> (f32
     if f2 < 1.0e-10 && f2 > -1.0e-10 {
         cosphisq = 1.0;
     } else {
-        let afac = (f3 - f1) as f64 * (f3 - f1) as f64;
+        // `afac = (f3-f1)*(f3-f1)`: a float product, widened on assignment.
+        let afac = ((f3 - f1) * (f3 - f1)) as f64;
         let bfac = 4.0_f64 * f2 as f64 * f2 as f64;
         cosphisq = 0.5 * (1.0 + (1.0 - bfac / (bfac + afac)).sqrt());
         let sinphisq = 1.0 - cosphisq;
@@ -117,7 +118,8 @@ pub fn amat_to_rotmagstr(a11: f32, mut a12: f32, a21: f32, mut a22: f32) -> (f32
         (factmp + f2) / (factmp - f2)
     };
 
-    let dentmp = str_ * cosphisq as f32 + sinphisq as f32;
+    // `(float)(*str * cosphisq + sinphisq)`: evaluated in double.
+    let dentmp = (str_ as f64 * cosphisq + sinphisq) as f32;
     let mut smag = if dentmp > 1.0e-5 || dentmp < -1.0e-5 {
         f1 / dentmp
     } else {

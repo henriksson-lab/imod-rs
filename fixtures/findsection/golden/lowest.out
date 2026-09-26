@@ -11,7 +11,7 @@ scale  binning  mean   median  MADN     mean   median  MADN      ness
   1    1,1,1    379.3   14.50  1.75       2.7   10.03  0.24     1.000
 For this scaling, an error occurred finding slices with a
    value of median SD to use for edge samples with this scaling:
-   No minimum in median SD value found on one side of peak
+   No peak in median SD value found except at top or bottom
 numhigh 195
 mSpreadNorms[0] = 1.48258,  mSpreadNorms[1] = 1.48258
 numBins = 30,  binWidth = 1,  maxBin = 70.25,  indMax = 7

@@ -30,43 +30,41 @@ Metro error #3, Restarting with step factor of 0.19
 Metro error #3, Restarting with step factor of 0.12
    4 views, 1000 cycles, F =     0.328696, mean residual =    0.25
 tiltalign error going to view 8 even after varying step factor
-view   7, pass 1,   7 points (-  0), mean, sd, max dev:    0.12    0.07    0.20
-   5 views,    1 cycles, F =     0.455271, mean residual =    0.35
-   5 views,    1 cycles, F =     0.452359, mean residual =    0.35
-view  12, pass 1,   7 points (-  0), mean, sd, max dev:    0.33    0.15    0.55
+view   7, pass 1,   7 points (-  0), mean, sd, max dev:    0.11    0.07    0.19
+   5 views,    1 cycles, F =     0.454770, mean residual =    0.35
+   5 views,    1 cycles, F =     0.451855, mean residual =    0.34
+view  12, pass 1,   7 points (-  0), mean, sd, max dev:    0.32    0.14    0.55
 Metro error #3, Restarting with step factor of 0.22
 Metro error #3, Restarting with step factor of 0.28
 Metro error #3, Restarting with step factor of 0.19
 Metro error #3, Restarting with step factor of 0.12
-   6 views,  879 cycles, F =     0.686594, mean residual =    0.43
-view  13, pass 1,   7 points (-  0), mean, sd, max dev:    0.29    0.16    0.58
-Metro error #4, Restarting with step factor of 0.22
-   7 views,  664 cycles, F =     0.687760, mean residual =    0.43
-view  14, pass 1,   7 points (-  2), mean, sd, max dev:    0.38    0.21    0.55
+   6 views,  686 cycles, F =     0.678906, mean residual =    0.42
+view  13, pass 1,   7 points (-  0), mean, sd, max dev:    0.71    0.31    1.22
+   7 views,  431 cycles, F =     0.785817, mean residual =    0.52
+view  14, pass 1,   7 points (-  0), mean, sd, max dev:    0.76    0.21    1.02
+   8 views,  408 cycles, F =     0.509787, mean residual =    0.34
+view  15, pass 1,   7 points (-  0), mean, sd, max dev:    0.13    0.03    0.18
+   9 views,  235 cycles, F =     0.489381, mean residual =    0.32
+view  16, pass 1,   7 points (-  0), mean, sd, max dev:    0.05    0.03    0.09
 Metro error #3, Restarting with step factor of 0.22
-   8 views,  985 cycles, F =     0.833040, mean residual =    0.44
-view  15, pass 1,   7 points (-  0), mean, sd, max dev:    0.77    0.43    1.35
-   9 views,  465 cycles, F =     0.999654, mean residual =    0.60
-view  16, pass 1,   7 points (-  2), mean, sd, max dev:    1.41    1.25    2.77
-  10 views,  534 cycles, F =     1.123112, mean residual =    0.78
-   2 pts deleted for pass 2, conts:   7   2
-  10 views,    8 cycles, F =     0.922130, mean residual =    0.63
-   2 pts added on pass 2, conts:   7   2
-view  16, pass 2,   7 points (-  0), mean, sd, max dev:    0.26    0.23    0.70
-  10 views,    5 cycles, F =     0.909109, mean residual =    0.62
+Metro error #3, Restarting with step factor of 0.28
+Metro error #3, Restarting with step factor of 0.19
+Metro error #3, Restarting with step factor of 0.12
+  10 views, 1000 cycles, F =     0.582103, mean residual =    0.44
+tiltalign error going to view 16 even after varying step factor
 For object  1, round  1:  7 contours, points missing =    0
  Aligning Sobel-centered points for comparison
-  10 views,    1 cycles, F =     0.909070, mean residual =    0.62
+  10 views,    1 cycles, F =     0.582049, mean residual =    0.44
  Aligning saved centroid-centered points
-  10 views,  433 cycles, F =     0.889838, mean residual =    0.62
+  10 views,  780 cycles, F =     0.881244, mean residual =    0.58
 For object  1, round  2:  7 contours, points missing =    0
  Aligning Sobel-centered points for comparison
-  10 views,   88 cycles, F =     0.908778, mean residual =    0.61
+  10 views,   19 cycles, F =     0.675742, mean residual =    0.49
  Aligning saved centroid-centered points
-  10 views,   99 cycles, F =     0.890173, mean residual =    0.62
+  10 views,    7 cycles, F =     0.881335, mean residual =    0.58
 
 Obj cont:  Views on which points are missing
  Total points missing = 0
 
 Mean residual 0.0000 nm from Sobel centering, 0.0000 nm from centroid centering
-  centroid centering better in   1 of   2 fits
+  centroid centering better in   0 of   2 fits

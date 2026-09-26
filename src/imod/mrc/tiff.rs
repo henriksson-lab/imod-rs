@@ -7,6 +7,7 @@
 //! layout.  Its default reader is source-compatible; the optional Rust reader
 //! is selected only through `IMOD_RS_TIFF_BACKEND=rust`.
 use std::cell::Cell;
+use std::io::Write;
 
 use crate::imod::libcfshr::b3dutil::{
     ImodFile, SEEK_CUR, SEEK_END, SEEK_SET, b3d_fread, b3d_fseek, b3d_fwrite, b3d_rewind,
@@ -319,38 +320,64 @@ pub fn tiff_ifd_number(fp: &mut ImodFile) -> i32 {
 }
 
 /// C `read_tiffentries` (`tiff.c:432`).
+///
+/// Two different swap tests, as in the source: the entry count follows the
+/// file-scope `swapData` (`:466-467`), while every entry field and every
+/// strip offset/size follows `tiff->header.byteorder != M_BYTEORDER`
+/// (`:492-497`, `:708`, `:720`).  The SHORT-in-LONG shift at `:500-502` keys
+/// on the *file* being big-endian, not the host.
 pub fn read_tiffentries(fp: &mut ImodFile, tif: &mut TfInfo) -> i32 {
+    let machine: u16 = if cfg!(target_endian = "little") {
+        0x4949
+    } else {
+        0x4d4d
+    };
+    let mut out = ImodFile::Stdout;
     tif.nstrip = 1;
     b3d_fseek(fp, (tif.header.first_ifd_offset as i64) as i32, SEEK_SET);
-    let mut numentries_raw = [0u8; 2];
+    let mut numentries_raw = tif.numentries.to_ne_bytes();
     b3d_fread(&mut numentries_raw, 2, 1, fp);
     if SWAP_DATA.load(std::sync::atomic::Ordering::Relaxed) {
         swap(&mut numentries_raw);
     }
     tif.numentries = i16::from_ne_bytes(numentries_raw);
-    for _ in 0..tif.numentries {
+    // `:469-470` swaps the still-uninitialised `tag` before the loop; the
+    // loop's first statement overwrites it, so nothing survives.
+    let mut i = 0_i32;
+    while i < tif.numentries as i32 {
         let mut tag_raw = [0u8; 2];
-        let mut typ_raw = [0u8; 2];
+        let mut type_raw = [0u8; 2];
         let mut len_raw = [0u8; 4];
         let mut value_raw = [0u8; 4];
-        if b3d_fread(&mut tag_raw, 2, 1, fp) < 1
-            || b3d_fread(&mut typ_raw, 2, 1, fp) < 1
-            || b3d_fread(&mut len_raw, 4, 1, fp) < 1
-            || b3d_fread(&mut value_raw, 4, 1, fp) < 1
-        {
+        if b3d_fread(&mut tag_raw, 2, 1, fp) < 1 {
+            let _ = out.write_all(b"ERROR: read_tiffentries() - reading tag");
             return 0;
         }
-        if SWAP_DATA.load(std::sync::atomic::Ordering::Relaxed) {
+        if b3d_fread(&mut type_raw, 2, 1, fp) < 1 {
+            let _ = out.write_all(b"ERROR: read_tiffentries() - reading type");
+            return 0;
+        }
+        if b3d_fread(&mut len_raw, 4, 1, fp) < 1 {
+            let _ = out.write_all(b"ERROR: read_tiffentries() - reading length");
+            return 0;
+        }
+        if b3d_fread(&mut value_raw, 4, 1, fp) < 1 {
+            let _ = out.write_all(b"ERROR: read_tiffentries() - reading value");
+            return 0;
+        }
+        if tif.header.byteorder as u16 != machine {
             swap(&mut tag_raw);
-            swap(&mut typ_raw);
+            swap(&mut type_raw);
             swap(&mut len_raw);
             swap(&mut value_raw);
         }
         let tag = u16::from_ne_bytes(tag_raw);
-        let typ = u16::from_ne_bytes(typ_raw);
+        let type_ = u16::from_ne_bytes(type_raw);
         let len = u32::from_ne_bytes(len_raw);
         let mut value = u32::from_ne_bytes(value_raw);
-        if cfg!(target_endian = "little") == false && typ == 3 && len < 3 {
+        /* DNM 12/10/00: this was done as else on the swap, but it needs to
+        be done if data are big endian ? */
+        if tif.header.byteorder as u16 == 0x4d4d && type_ == 3 && len < 3 {
             value >>= 16;
         }
         match tag {
@@ -368,25 +395,51 @@ pub fn read_tiffentries(fp: &mut ImodFile, tif: &mut TfInfo) -> i32 {
                     if value == 16 {
                         tif.mode = 2;
                     }
-                } else if len == 3 {
+                }
+                if len == 3 {
+                    // `:535-544`: three raw `short` reads, never swapped.
                     let pos = fp.tell();
                     b3d_fseek(fp, (value as i64) as i32, SEEK_SET);
-                    let mut bits_raw = [0u8; 2];
-                    b3d_fread(&mut bits_raw, 2, 1, fp);
-                    if SWAP_DATA.load(std::sync::atomic::Ordering::Relaxed) {
-                        swap(&mut bits_raw);
-                    }
-                    tif.bits_per_sample = u16::from_ne_bytes(bits_raw) as i32;
+                    let mut red = [0u8; 2];
+                    let mut green = [0u8; 2];
+                    let mut blue = [0u8; 2];
+                    b3d_fread(&mut red, 2, 1, fp);
+                    b3d_fread(&mut green, 2, 1, fp);
+                    b3d_fread(&mut blue, 2, 1, fp);
+                    b3d_fseek(fp, pos as i32, SEEK_SET);
+                    /* Assume red,green,blue same size*/
+                    tif.bits_per_sample = i16::from_ne_bytes(red) as i32;
                     tif.mode = 16;
-                    b3d_fseek(fp, (pos) as i32, SEEK_SET);
                 }
             }
-            259 if value != 1 => return 0,
-            262 => {
-                if value == 3 {
+            259 => {
+                if value != 1 {
+                    let comp_type = match value {
+                        2 => "CCITT 1D",
+                        3 => "Group 3 Fax",
+                        4 => "Group 4 Fax",
+                        5 => "LZW",
+                        6 | 7 => "JPEG",
+                        32773 => "PackBits",
+                        _ => "Unknown",
+                    };
+                    let _ = out.write_all(
+                        format!(
+                            "ERROR: read_tiffentries - {comp_type} compressed tiff data not supported without tifflib.so. ({value})\n"
+                        )
+                        .as_bytes(),
+                    );
                     return 0;
                 }
+            }
+            262 => {
                 tif.photometric_interpretation = value as i32;
+                if value == 3 {
+                    let _ = out.write_all(
+                        b"ERROR: read_tiffentries -  color index data not supported without tifflib.so.\n",
+                    );
+                    return 0;
+                }
             }
             273 => {
                 tif.strip_pos = value as i32;
@@ -394,39 +447,46 @@ pub fn read_tiffentries(fp: &mut ImodFile, tif: &mut TfInfo) -> i32 {
             }
             278 => tif.rows_per_strip = value as i32,
             279 => tif.strip_byte_counts = value as i32,
-            324 | 325 => return 0,
+            324 | 325 => {
+                let _ = out.write_all(
+                    b"ERROR: read_tiffentries - tiled data are not supported without libtiff.so;\n copy data to a file with strips (e.g., tiffcp -s)\n",
+                );
+                return 0;
+            }
             _ => {}
         }
+        i += 1;
     }
-    // `tiff.c:534-536`: `malloc(sizeof(int) * tiff->nstrip)` for each.
-    // A negative `nstrip` cannot reach here -- it comes from an unsigned
-    // IFD length field -- so the cast is the C's own implicit one.
+
+    // `tiff.c:704`: `malloc(sizeof(b3dInt32) * tiff->nstrip)`.  `nstrip` is
+    // an IFD length, so it is never negative on a path that gets here.
     tif.stripoff = vec![0_i32; tif.nstrip.max(0) as usize];
-    tif.stripsize = vec![0_i32; tif.nstrip.max(0) as usize];
     if tif.nstrip == 1 {
         tif.stripoff[0] = tif.strip_pos;
+    } else {
+        b3d_fseek(fp, tif.strip_pos, SEEK_SET);
+        for i in 0..tif.nstrip.max(0) as usize {
+            let mut raw = [0_u8; 4];
+            b3d_fread(&mut raw, 4, 1, fp);
+            if tif.header.byteorder as u16 != machine {
+                swap(&mut raw);
+            }
+            tif.stripoff[i] = i32::from_ne_bytes(raw);
+        }
+    }
+
+    tif.stripsize = vec![0_i32; tif.nstrip.max(0) as usize];
+    if tif.nstrip == 1 {
         tif.stripsize[0] = tif.strip_byte_counts;
     } else {
-        let pos = fp.tell();
-        b3d_fseek(fp, (tif.strip_pos as i64) as i32, SEEK_SET);
-        let nstrip = tif.nstrip.max(0) as usize;
-        for offset in &mut tif.stripoff {
+        b3d_fseek(fp, tif.strip_byte_counts, SEEK_SET);
+        for i in 0..tif.nstrip.max(0) as usize {
             let mut raw = [0_u8; 4];
             b3d_fread(&mut raw, 4, 1, fp);
-            *offset = i32::from_ne_bytes(raw);
-        }
-        b3d_fseek(fp, (tif.strip_byte_counts as i64) as i32, SEEK_SET);
-        for size in &mut tif.stripsize {
-            let mut raw = [0_u8; 4];
-            b3d_fread(&mut raw, 4, 1, fp);
-            *size = i32::from_ne_bytes(raw);
-        }
-        b3d_fseek(fp, (pos) as i32, SEEK_SET);
-        if SWAP_DATA.load(std::sync::atomic::Ordering::Relaxed) {
-            for i in 0..nstrip {
-                tif.stripoff[i] = tif.stripoff[i].swap_bytes();
-                tif.stripsize[i] = tif.stripsize[i].swap_bytes();
+            if tif.header.byteorder as u16 != machine {
+                swap(&mut raw);
             }
+            tif.stripsize[i] = i32::from_ne_bytes(raw);
         }
     }
     1
@@ -439,7 +499,22 @@ pub fn tiff_read_section(fp: &mut ImodFile, tif: &mut TfInfo, section: i32) -> O
     }
     if tif.iifile.is_none() {
         tif.header.first_ifd_offset = tiff_ifd(fp, section) as i32;
-        if tif.header.first_ifd_offset == 0 || read_tiffentries(fp, tif) == 0 {
+
+        b3d_fseek(fp, tif.header.first_ifd_offset, SEEK_SET);
+        let mut numentries_raw = tif.numentries.to_ne_bytes();
+        b3d_fread(&mut numentries_raw, 2, 1, fp);
+        if tif.header.byteorder as u16
+            != if cfg!(target_endian = "little") {
+                0x4949
+            } else {
+                0x4d4d
+            }
+        {
+            swap(&mut numentries_raw);
+        }
+        tif.numentries = i16::from_ne_bytes(numentries_raw);
+
+        if read_tiffentries(fp, tif) == 0 {
             return None;
         }
     }
@@ -447,20 +522,21 @@ pub fn tiff_read_section(fp: &mut ImodFile, tif: &mut TfInfo, section: i32) -> O
     let y = tif.directory[2].value;
     let data_size = x as usize * y as usize;
     // `tiff.c:141-145`: the pixel size comes from BitsPerSample and is then
-    // overridden for RGB.  Sub-byte data therefore leaves `pixSize` at 0.
+    // overridden for RGB.  Sub-byte data leaves the C's `pixSize` at 0, so
+    // native allocates a zero-byte block, reads the 1-bit strips with a
+    // zero element size, and expands `xsize * ysize` bytes into that block
+    // (SIGABRT, `BUGS.md` §5).  Fixed in translation (2026-09-26): the
+    // source's 1-bit branch plainly means to expand one bit to one byte, so
+    // a 1-bit image is given a one-byte output pixel here.
     let mut pixel = tif.bits_per_sample / 8;
     if tif.photometric_interpretation == 2 {
         pixel = 3;
     }
+    if tif.bits_per_sample == 1 {
+        pixel = 1;
+    }
     // `tiff.c:148-152` allocates `(data_size + xsize + ysize) * pixSize`.
-    // With `pixSize` 0 that is a zero-byte block which the C then reads and
-    // writes far beyond (see the 1-bit branch below), so native `tif2mrc`
-    // has no defined output for sub-byte data.  Allocate the block the
-    // caller will actually consume, cleared, rather than reproducing the
-    // out-of-bounds access.
     let allocated = (data_size + x as usize + y as usize) * pixel.max(1) as usize;
-    // The C distinguishes `malloc` from `calloc` only to keep the sub-byte
-    // branch's over-read deterministic; a `Vec` is zeroed either way.
     let mut data = vec![0_u8; allocated];
     if let Some(iifile) = tif.iifile.as_mut() {
         // `tiff.c` delegates library-backed data to iiReadSection or
@@ -472,38 +548,34 @@ pub fn tiff_read_section(fp: &mut ImodFile, tif: &mut TfInfo, section: i32) -> O
     }
     /* binary image. */
     if tif.bits_per_sample == 1 {
-        // `tiff.c:167-189`.  `pixSize` is 0 on this path, so the C's
-        // `fread(&bitdata[dpos], pixSize, tiff->stripsize[i], fp)`
-        // transfers nothing and the expansion below runs over the
-        // uninitialized `malloc(data_size)` block, writing `data_size`
-        // bytes into a zero-byte `tiff->data`.  Native `tif2mrc` therefore
-        // aborts in `free()` for any 1-bit TIFF that declares
-        // BitsPerSample = 1 (verified: SIGABRT, "free(): invalid pointer").
-        // The zero-length reads are kept; `bitdata` is cleared so this
-        // produces a deterministic all-zero image instead of a crash.
-        let mut bitdata = vec![0_u8; data_size];
-        let mut dpos = 0_i32;
+        // `tiff.c:167-189`, fixed in translation (2026-09-26, `BUGS.md` §5).
+        // Native reads the strips with element size `pixSize` = 0, so nothing
+        // is transferred and the expansion runs over uninitialised memory into
+        // a zero-byte block.  Here the strips are read as bytes ("stripsize is
+        // in bytes regardless of pixel size", `tiff.c:199`), and each row is
+        // expanded from its own byte-aligned start (TIFF pads every 1-bit row
+        // to a whole byte; the C's `bitdata[i / 8]` agrees with that whenever
+        // the width is a multiple of 8).  A set bit becomes 0xff, a clear bit
+        // 0x00, as in the source.
+        let row_bytes = (x as usize).div_ceil(8);
+        let mut bitdata = vec![0_u8; data_size.max(row_bytes * y as usize)];
+        let mut dpos = 0_usize;
         for i in 0..tif.nstrip as usize {
             b3d_fseek(fp, tif.stripoff[i], SEEK_SET);
-            let count = tif.stripsize[i].max(0) as usize;
-            b3d_fread(
-                &mut bitdata[dpos as usize..dpos as usize + pixel as usize * count],
-                pixel as usize,
-                count,
-                fp,
-            );
-            dpos += tif.stripsize[i];
+            let count = (tif.stripsize[i].max(0) as usize).min(bitdata.len() - dpos);
+            b3d_fread(&mut bitdata[dpos..dpos + count], 1, count, fp);
+            dpos += count;
         }
-        for i in 0..data_size {
-            // C reads through `char *bitdata` into an `int cbyte`, so the
-            // byte is sign extended before the mask is applied.
-            let cbyte = bitdata[i / 8] as i8 as i32;
-            let cbit = (i % 8) as i32;
-            data[i] = if cbyte & ((1 << 7) >> cbit) != 0 {
-                0xff
-            } else {
-                0x00
-            };
+        for iy in 0..y as usize {
+            for ix in 0..x as usize {
+                let cbyte = bitdata[iy * row_bytes + ix / 8] as i32;
+                let cbit = (ix % 8) as i32;
+                data[iy * x as usize + ix] = if cbyte & ((1 << 7) >> cbit) != 0 {
+                    0xff
+                } else {
+                    0x00
+                };
+            }
         }
         tif.bits_per_sample = 8;
     } else {
@@ -613,31 +685,10 @@ pub fn tiff_open_file(filename: &[u8], mode: &str, tif: &mut TfInfo, any_tif_pix
     if tif.fp.is_none() {
         return 1;
     }
-    tif.iifile = Some(crate::imod::libiimod::iimage::ImodImageFile::default());
+    // `tiff.c:266`: `tiff->iifile = iiNew()`.
+    tif.iifile = Some(*crate::imod::libiimod::iimage::ii_new_box());
     if let Some(iifile) = tif.iifile.as_mut() {
-        iifile.xscale = 1.0;
-        iifile.yscale = 1.0;
-        iifile.zscale = 1.0;
-        iifile.slope = 1.0;
-        iifile.smax = 255.0;
-        iifile.axis = 3;
-        iifile.mirror_fft = 0;
-        iifile.llx = 0;
-        iifile.lly = 0;
-        iifile.llz = 0;
-        iifile.urx = -1;
-        iifile.ury = -1;
-        iifile.urz = -1;
-        iifile.rms = -1.0;
-        iifile.last_written_z = -1;
-        iifile.packed4bits = 0;
-        iifile.half_floats = 0;
         iifile.any_tiff_pix_size = any_tif_pixel;
-        iifile.raw_palette_bytes = 0;
-        iifile.tiff_compression = 1;
-        iifile.adoc_index = -1;
-        iifile.global_adoc_index = -1;
-        iifile.hdf_compression = -1;
         iifile.fp = crate::imod::libcfshr::b3dutil::ImodFile::open(&path, mode);
         iifile.filename = Some(String::from_utf8_lossy(filename).into_owned());
         iifile.fmode = mode.chars().take(3).collect();
@@ -1102,17 +1153,10 @@ mod tests {
             crate::imod::libcfshr::b3dutil::b3d_rewind(&mut file);
             let mut tif = TfInfo::default();
             let result = tiff_read_file(&mut file, &mut tif).expect("one-bit reader returned data");
-            // `tiff.c:141` sets `pixSize = BitsPerSample / 8`, which is 0 here,
-            // so the strip read at `tiff.c:174` is `fread(ptr, 0, stripsize,
-            // fp)` and transfers nothing: the packed 0b1011_0010 byte never
-            // reaches the expansion loop and every output pixel is 0.  Native
-            // `tif2mrc` cannot get this far - the expansion writes xsize*ysize
-            // bytes into the zero-byte `malloc` from `tiff.c:150`, and the
-            // binary aborts in `free()` ("free(): invalid pointer", exit 134)
-            // on every 1-bit TIFF that declares BitsPerSample = 1.  There is no
-            // defined native output to match, so this only pins the C's
-            // zero-length reads.
-            assert_eq!(&result[..8], &[0; 8]);
+            // Defined behaviour (`BUGS.md` §5, fixed in translation): the
+            // packed 0b1011_0010 byte is expanded MSB first, set bit -> 0xff.
+            // Native aborts in `free()` on every 1-bit TIFF (zero `pixSize`).
+            assert_eq!(&result[..8], &[0xff, 0, 0xff, 0xff, 0, 0, 0xff, 0]);
             drop(file);
         }
     }

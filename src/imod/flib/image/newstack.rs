@@ -1,13 +1,15 @@
 //! Translation of `IMOD/flib/image/newstack.f90`.
 #![allow(dead_code)]
 
-use crate::imod::flib::subrs::compat::gfortran_rt::{gfortran_cosd_r4, gfortran_sind_r4};
+use crate::imod::flib::subrs::compat::gfortran_rt::{
+    cvttss2si, format_f, gfortran_cosd_r4, gfortran_sind_r4, maxsd, maxss, minss,
+};
 use crate::imod::flib::subrs::hvem::b3ddate::b3d_date;
 use crate::imod::flib::subrs::hvem::dopen::dopen;
 use crate::imod::flib::subrs::hvem::getbinnedsize::get_binned_size;
 use crate::imod::flib::subrs::hvem::parse_input_params::set_current_adoc_or_exit;
 use crate::imod::flib::subrs::hvem::parse_input_params::{exit_error, pip_read_or_parse_options};
-use crate::imod::flib::subrs::hvem::rdlist::parselist2;
+use crate::imod::flib::subrs::hvem::rdlist::{parselist2, rdlist2};
 use crate::imod::flib::subrs::hvem::temp_filename::temp_filename;
 use crate::imod::flib::subrs::imsubs::irdhdr::irdhdr;
 use crate::imod::flib::subrs::imsubs::wrap_iiunit::{
@@ -36,12 +38,12 @@ use crate::imod::libcfshr::extraheader::{
 use crate::imod::libcfshr::filtxcorr::{
     fourier_crop_sizes, fourier_expand_image, fourier_reduce_image, fourier_shift_image, nice_frame,
 };
-use crate::imod::libcfshr::linearxforms::{xfmult, xfunit};
+use crate::imod::libcfshr::linearxforms::{xfapply, xfmult, xfunit};
 use crate::imod::libcfshr::parse_params::{
     pip_get_boolean, pip_get_float, pip_get_float_array, pip_get_integer, pip_get_integer_array,
-    pip_get_non_option_arg, pip_get_string, pip_get_three_integers, pip_get_two_floats,
-    pip_get_two_integers, pip_number_of_entries,
+    pip_get_three_integers, pip_get_two_floats, pip_get_two_integers, pip_number_of_entries,
 };
+use crate::imod::libcfshr::pip_fwrap::{pipgetnonoptionarg_, pipgetstring_};
 use crate::imod::libcfshr::robuststat::rs_mad_median_outliers;
 use crate::imod::libcfshr::taperpad::{
     slice_edge_median, slice_noise_taper_pad, slice_taper_out_pad,
@@ -111,18 +113,151 @@ pub fn newstack() {
         &mut num_opt_arg,
         &mut num_non_opt_arg,
     );
-    // `pipinput = numOptArg + numNonOptArg > 0` (`newstack.f90:186`).  The
-    // source's interactive branch (`read(5,*)` prompting from
-    // `newstack.f90:341`) is not translated; without PIP entries this program
-    // unit has nothing to do.
+    // `pipinput = numOptArg + numNonOptArg > 0` (`newstack.f90:186`).
+    // Without it the source prompts on unit 5 for the entries that have an
+    // interactive form (`newstack.f90:341-1335`); everything else keeps its
+    // default, since nothing reads PIP.
     let pipinput = num_opt_arg + num_non_opt_arg > 0;
-    if !pipinput {
-        exit_error("Interactive entry is not supported by this translation");
-    }
+    //
+    // Unit 5 reads for the interactive entries.  A `read` with no `END=` at
+    // end of input is a gfortran runtime error, exit status 2.
+    let read_record = || -> String {
+        use std::io::BufRead;
+        let mut line = String::new();
+        let got = std::io::stdin().lock().read_line(&mut line).unwrap_or(0);
+        if got == 0 {
+            use std::io::Write;
+            let _ = std::io::stdout().flush();
+            eprintln!("Fortran runtime error: End of file");
+            crate::imod::libcfshr::b3dutil::exit(2);
+        }
+        line.trim_end_matches(['\r', '\n']).to_owned()
+    };
+    // `read(5, 101)` with `101 format(a)` into a `character*320`: the whole
+    // record, of which the program uses the non-blank extent.
+    let read_a = || -> String {
+        let mut record = read_record();
+        record.truncate(record.len().min(320));
+        record.trim_end_matches(' ').to_owned()
+    };
+    // List-directed `read(5,*)` of `count` items: blanks and commas separate
+    // values, a comma with no value before it is a null value that leaves the
+    // item unchanged, `r*value` repeats and `r*` gives r nulls, a slash ends
+    // the read leaving the remaining items unchanged, and the read continues
+    // onto further records until the items are filled.  `store` gets the
+    // item index and the value text and returns false for a value the item's
+    // type cannot take, which is a runtime error.
+    let read_list = |count: usize, store: &mut dyn FnMut(usize, &str) -> bool| {
+        let mut index = 0_usize;
+        let mut after_separator = true;
+        while index < count {
+            let record = read_record();
+            let chars: Vec<char> = record.chars().collect();
+            let mut pos = 0;
+            while pos < chars.len() && index < count {
+                let ch = chars[pos];
+                if ch == ' ' || ch == '\t' {
+                    pos += 1;
+                    continue;
+                }
+                if ch == '/' {
+                    return;
+                }
+                if ch == ',' {
+                    if after_separator {
+                        index += 1;
+                    }
+                    after_separator = true;
+                    pos += 1;
+                    continue;
+                }
+                let start = pos;
+                while pos < chars.len() && !matches!(chars[pos], ' ' | '\t' | ',' | '/') {
+                    pos += 1;
+                }
+                let token: String = chars[start..pos].iter().collect();
+                let (repeat, value) = match token.split_once('*') {
+                    Some((times, value)) if times.parse::<usize>().is_ok() => {
+                        (times.parse::<usize>().unwrap(), value.to_owned())
+                    }
+                    _ => (1, token.clone()),
+                };
+                for _ in 0..repeat {
+                    if index >= count {
+                        break;
+                    }
+                    if !value.is_empty() && !store(index, &value) {
+                        use std::io::Write;
+                        let _ = std::io::stdout().flush();
+                        eprintln!(
+                            "Fortran runtime error: Bad value during read for item {} in list input",
+                            index + 1
+                        );
+                        crate::imod::libcfshr::b3dutil::exit(2);
+                    }
+                    index += 1;
+                }
+                after_separator = false;
+                // A comma right after a value is its separator, not a null.
+                while pos < chars.len() && (chars[pos] == ' ' || chars[pos] == '\t') {
+                    pos += 1;
+                }
+                if pos < chars.len() && chars[pos] == ',' {
+                    after_separator = true;
+                    pos += 1;
+                }
+            }
+        }
+    };
+    let read_ints = |values: &mut [i32]| {
+        let count = values.len();
+        read_list(
+            count,
+            &mut |index, text| match text.trim_start_matches('+').parse::<i32>() {
+                Ok(value) => {
+                    values[index] = value;
+                    true
+                }
+                Err(_) => false,
+            },
+        );
+    };
+    let read_reals = |values: &mut [f32]| {
+        let count = values.len();
+        read_list(
+            count,
+            &mut |index, text| match text.replace(['d', 'D'], "e").parse::<f32>() {
+                Ok(value) => {
+                    values[index] = value;
+                    true
+                }
+                Err(_) => false,
+            },
+        );
+    };
     // `newstack.f90:302` suppresses the iiunit open/header banner while it
     // probes each input; command-owned diagnostics remain enabled below.
     {
         ialprt(false)
+    };
+    // `PipGetString`/`PipGetNonOptionArg` in a Fortran unit are the
+    // `pip_fwrap.c:190,206` wrappers: `c2fString` copies at most the declared
+    // length of the receiving variable (`newstack.f90:26-30`: file names are
+    // `character*320`, `listString` is `character*100000`) and an entry that
+    // is longer fails with `In PipGetString, string is too long for character
+    // variable`, which exits under the exit prefix set above.  The variable
+    // is blank-padded; what the program sees is its non-blank extent.
+    let get_string = |option: &[u8], length: usize, string: &mut Vec<u8>| -> i32 {
+        let mut record = vec![b' '; length];
+        let err = pipgetstring_(option, &mut record);
+        if err == 0 {
+            let end = record
+                .iter()
+                .rposition(|byte| *byte != b' ')
+                .map_or(0, |i| i + 1);
+            *string = record[..end].to_vec();
+        }
+        err
     };
     let mut input_entries = 0;
     let mut output_entries = 0;
@@ -320,12 +455,12 @@ pub fn newstack() {
         let mut string_value: Vec<u8> = Vec::new();
         let mut integer_value = 0_i32;
         let mut float_value = 0.0_f32;
-        if pip_get_string(b"FileOfInputs", &mut string_value) == 0 {
+        if get_string(b"FileOfInputs", 320, &mut string_value) == 0 {
             input_list_name = String::from_utf8_lossy(&string_value).into_owned();
         }
         pip_number_of_entries(b"InputFile", &mut input_entries);
         for _ in 0..input_entries {
-            if pip_get_string(b"InputFile", &mut string_value) == 0 {
+            if get_string(b"InputFile", 320, &mut string_value) == 0 {
                 input_names.push(String::from_utf8_lossy(&string_value).into_owned());
             }
         }
@@ -334,8 +469,15 @@ pub fn newstack() {
         // (`newstack.f90:311, 558`): every non-option argument but the last is
         // an input, the last one is the output.
         for index in 0..num_non_opt_arg {
-            if let Ok(arg_value) = pip_get_non_option_arg(index) {
-                non_options.push(String::from_utf8_lossy(&arg_value).into_owned());
+            // `PipGetNonOptionArg(..., inFile(indFile))` / `outFile(i)`
+            // (`newstack.f90:422, 636`): the wrapper into a `character*320`.
+            let mut record = [b' '; 320];
+            if pipgetnonoptionarg_(index + 1, &mut record) == 0 {
+                let end = record
+                    .iter()
+                    .rposition(|byte| *byte != b' ')
+                    .map_or(0, |i| i + 1);
+                non_options.push(String::from_utf8_lossy(&record[..end]).into_owned());
             }
         }
         pip_number_of_entries(b"SectionsToRead", &mut section_list_entries);
@@ -383,7 +525,7 @@ pub fn newstack() {
         if pip_get_integer(b"BytesSignedInOutput", &mut integer_value) == 0 {
             bytes_signed = Some(integer_value);
         }
-        if pip_get_string(b"ExcludeSections", &mut string_value) == 0 {
+        if get_string(b"ExcludeSections", 100000, &mut string_value) == 0 {
             let list = String::from_utf8_lossy(&string_value).into_owned();
             let mut parsed = vec![0_i32; 1_000_000];
             let (mut count, mut limit) = (0, 1_000_000);
@@ -393,7 +535,7 @@ pub fn newstack() {
             excluded_sections.extend_from_slice(&parsed[..count as usize]);
         }
         // `newstack.f90:376-385`.
-        if pip_get_string(b"FormatOfOutputFile", &mut string_value) == 0 {
+        if get_string(b"FormatOfOutputFile", 100000, &mut string_value) == 0 {
             let value = String::from_utf8_lossy(&string_value).into_owned();
             let error = set_output_type_from_string(&value);
             if error == -5 {
@@ -414,12 +556,12 @@ pub fn newstack() {
         if pip_get_boolean(b"PixelSizeFromMdoc", &mut integer_value) == 0 {
             pixel_from_mdoc = integer_value != 0;
         }
-        let remove_entered = pip_get_string(b"RemoveForMdocName", &mut string_value) == 0;
+        let remove_entered = get_string(b"RemoveForMdocName", 320, &mut string_value) == 0;
         if remove_entered {
             remove_from_name = String::from_utf8_lossy(&string_value).into_owned();
             use_mdoc_files = true;
         }
-        if pip_get_string(b"AddBackForMdocName", &mut string_value) == 0 {
+        if get_string(b"AddBackForMdocName", 320, &mut string_value) == 0 {
             if !remove_entered {
                 exit_error("You cannot enter -addback without -remove");
             }
@@ -427,12 +569,12 @@ pub fn newstack() {
         }
         //
         // Output files (`newstack.f90:556-563`).
-        if pip_get_string(b"FileOfOutputs", &mut string_value) == 0 {
+        if get_string(b"FileOfOutputs", 320, &mut string_value) == 0 {
             output_list_name = String::from_utf8_lossy(&string_value).into_owned();
         }
         pip_number_of_entries(b"OutputFile", &mut output_entries);
         for _ in 0..output_entries {
-            if pip_get_string(b"OutputFile", &mut string_value) == 0 {
+            if get_string(b"OutputFile", 320, &mut string_value) == 0 {
                 output_names.push(String::from_utf8_lossy(&string_value).into_owned());
             }
         }
@@ -440,7 +582,7 @@ pub fn newstack() {
         if pip_get_integer(b"SplitStartingNumber", &mut integer_value) == 0 {
             series_base = integer_value;
         }
-        if pip_get_string(b"AppendExtension", &mut string_value) == 0 {
+        if get_string(b"AppendExtension", 320, &mut string_value) == 0 {
             series_ext = String::from_utf8_lossy(&string_value).into_owned();
         }
         //
@@ -460,7 +602,7 @@ pub fn newstack() {
             nearest_entered = true;
             if_linear = -1;
         }
-        if pip_get_string(b"TransformFile", &mut string_value) == 0 {
+        if get_string(b"TransformFile", 320, &mut string_value) == 0 {
             xf_file = String::from_utf8_lossy(&string_value).into_owned();
         }
         // `UseTransformLines` is read inside `getItemsToUse`
@@ -500,10 +642,10 @@ pub fn newstack() {
             i_verbose = integer_value;
         }
         // `newstack.f90:979-980`.
-        if pip_get_string(b"DistortionField", &mut string_value) == 0 {
+        if get_string(b"DistortionField", 320, &mut string_value) == 0 {
             idf_file = String::from_utf8_lossy(&string_value).into_owned();
         }
-        if pip_get_string(b"GradientFile", &mut string_value) == 0 {
+        if get_string(b"GradientFile", 320, &mut string_value) == 0 {
             mag_grad_file = String::from_utf8_lossy(&string_value).into_owned();
         }
         // `newstack.f90:1046`.
@@ -527,13 +669,13 @@ pub fn newstack() {
         if pip_get_integer(b"ReorderByTiltAngle", &mut integer_value) == 0 {
             reorder_by_tilt = integer_value;
         }
-        if pip_get_string(b"AngleFileToReorder", &mut string_value) == 0 {
+        if get_string(b"AngleFileToReorder", 320, &mut string_value) == 0 {
             angle_file_to_reorder = String::from_utf8_lossy(&string_value).into_owned();
         }
-        if pip_get_string(b"NewAngleOutputFile", &mut string_value) == 0 {
+        if get_string(b"NewAngleOutputFile", 320, &mut string_value) == 0 {
             new_angle_output_file = String::from_utf8_lossy(&string_value).into_owned();
         }
-        if pip_get_string(b"TiltAngleFile", &mut string_value) == 0 {
+        if get_string(b"TiltAngleFile", 320, &mut string_value) == 0 {
             // `newstack.f90:1008`.
             if strip_extra {
                 exit_error("You cannot enter both -tilt and -strip");
@@ -567,6 +709,88 @@ pub fn newstack() {
     // exclusive with these direct forms.
     // `numInFiles = numInputFiles + max(0, numNonOptArg - 1)`
     // (`newstack.f90:311-313`): a lone non-option argument is the output file.
+    //
+    // Interactive entry (`newstack.f90:340-345, 356-362, 413-490, 569-651,
+    // 690-716, 767-776`): the prompts come in the source's order, and the
+    // answers land in the variables the option block above fills from PIP.
+    // `listTotal`, the section numbers in `inList` and `modeOfFirst` are
+    // needed by later prompts and defaults, so each file is opened as its
+    // name is read, as the source does at `newstack.f90:444`.
+    let mut interactive_in_list = Vec::<i32>::new();
+    let mut interactive_offsets: Option<(Vec<f32>, Vec<f32>)> = None;
+    let mut interactive_num_out = 0_i32;
+    let mut mode_of_first = 0_i32;
+    let mut list_total = 0_i32;
+    let mut interactive_list_file = false;
+    if !pipinput {
+        let mut num_in_files = [0_i32];
+        print!(" # of input files (or -1 to read list of input files from file): ");
+        read_ints(&mut num_in_files);
+        let num_in_files = num_in_files[0];
+        if num_in_files == 0 {
+            exit_error("No input file specified");
+        }
+        if num_in_files < 0 {
+            print!(" Name of input list file: ");
+            input_list_name = read_a();
+            interactive_list_file = true;
+        } else {
+            for ind_file in 1..=num_in_files {
+                if num_in_files == 1 {
+                    print!(" Name of input file: ");
+                } else {
+                    print!(" Name of input file #{:3}: ", ind_file);
+                }
+                input_names.push(read_a());
+                // `call openInputFile(indFile)` and `call irdhdr(1, ...)`
+                // (`newstack.f90:444-445`).
+                let mut need_close = 0_i32;
+                unsafe {
+                    open_input_file(ind_file as usize, 0, &[], &input_names, &mut need_close);
+                    let header = (*iiu_mrc_header(1, "iiuRetBasicHead", 1, 0)).clone();
+                    if ind_file == 1 {
+                        mode_of_first = header.mode;
+                    }
+                    iiu_close(1);
+                    if need_close > 0 {
+                        iiu_close(need_close);
+                    }
+                    // `newstack.f90:471-476`: the default list is every
+                    // section; `readBigList` keeps it for a `/` entry.
+                    let mut in_list: Vec<i32> = (0..header.nz).collect();
+                    let mut nlist = header.nz;
+                    println!(
+                        " Enter list of sections to read from file (/ for all, 1st sec is 0; ranges OK)"
+                    );
+                    in_list.resize(lim_sec.max(header.nz).max(1) as usize, 0);
+                    // `ierr = listTotal - limSec`: a negative limit returns the
+                    // error instead of exiting.
+                    let mut ierr = list_total - lim_sec;
+                    let record = read_record();
+                    let result = parselist2(&record, &mut in_list, &mut nlist, &mut ierr);
+                    // `parselist2` sets `limList = ierr + 2`: 4 for a bad
+                    // character, 1 for too many values.
+                    match result {
+                        Err(2) => exit_error(
+                            "There must be a readable section list after each filename in list of input files",
+                        ),
+                        Err(_) => exit_error("Processing section list in list of input files"),
+                        Ok(()) => (),
+                    }
+                    in_list.truncate(nlist.max(0) as usize);
+                    list_total += nlist;
+                    interactive_in_list.extend_from_slice(&in_list);
+                    // An explicit list replaces the default; the default is the
+                    // empty list this translation expands per file below.
+                    if record.trim_start().starts_with('/') {
+                        section_lists.push(Vec::new());
+                    } else {
+                        section_lists.push(in_list);
+                    }
+                }
+            }
+        }
+    }
     if !input_list_name.is_empty() && (!input_names.is_empty() || non_options.len() > 1) {
         exit_error("You cannot enter both input files and an input list file");
     }
@@ -600,6 +824,12 @@ pub fn newstack() {
             parsed.truncate(count as usize);
             section_lists.push(parsed);
         }
+        // `numOutFiles = numOutputFiles + min(1, numNonOptArg)`
+        // (`newstack.f90:558`): with an input list file the one non-option
+        // argument allowed is still the output file.
+        if !non_options.is_empty() {
+            output_names.push(non_options[non_options.len() - 1].clone());
+        }
     } else if !non_options.is_empty() {
         input_names.extend(non_options[..non_options.len() - 1].iter().cloned());
         output_names.push(non_options[non_options.len() - 1].clone());
@@ -607,6 +837,121 @@ pub fn newstack() {
     // `newstack.f90:355`.
     if input_names.is_empty() {
         exit_error("No input file specified");
+    }
+    if !pipinput {
+        // With a list of input files the names and section lists came from
+        // unit 7 above; the source opened each file in its input loop
+        // (`newstack.f90:444`), which is where `modeOfFirst` and `listTotal`
+        // come from.
+        if interactive_list_file {
+            for (index, _) in input_names.iter().enumerate() {
+                let mut need_close = 0_i32;
+                unsafe {
+                    open_input_file(index + 1, 0, &[], &input_names, &mut need_close);
+                    let header = (*iiu_mrc_header(1, "iiuRetBasicHead", 1, 0)).clone();
+                    if index == 0 {
+                        mode_of_first = header.mode;
+                    }
+                    iiu_close(1);
+                    if need_close > 0 {
+                        iiu_close(need_close);
+                    }
+                    if section_lists[index].is_empty() {
+                        interactive_in_list.extend(0..header.nz);
+                        list_total += header.nz;
+                    } else {
+                        interactive_in_list.extend_from_slice(&section_lists[index]);
+                        list_total += section_lists[index].len() as i32;
+                    }
+                }
+            }
+        }
+        //
+        // `newstack.f90:569-604`.
+        let mut num_out_files = [0_i32];
+        print!(" # of output files (or -1 to read list of output files from file): ");
+        read_ints(&mut num_out_files);
+        interactive_num_out = num_out_files[0];
+        if interactive_num_out == 0 {
+            exit_error("No output file specified");
+        }
+        if interactive_num_out < 0 {
+            print!(" Name of output list file: ");
+            output_list_name = read_a();
+        } else if interactive_num_out == 1 {
+            print!(" Name of output file: ");
+            output_names.push(read_a());
+        } else {
+            // `newstack.f90:639-649`.
+            for i in 1..=interactive_num_out {
+                print!(" Name of output file #{:3}: ", i);
+                output_names.push(read_a());
+                print!(" Number of sections to store in that file: ");
+                let mut number = [0_i32];
+                read_ints(&mut number);
+                num_output_sections.push(number[0]);
+            }
+        }
+        //
+        // `newstack.f90:690-716`.  `nxOut`, `nyOut` default to -1 and
+        // `newMode` to `modeOfFirst`; the entered mode always goes through
+        // `setFloatOutputForEnteredMode`.
+        let mut size = [-1_i32, -1];
+        print!(" Output file X and Y dimensions (/ for same as first input file): ");
+        read_ints(&mut size);
+        size_to_output = Some(size);
+        let mut new_mode = [mode_of_first];
+        print!(" Output file data mode (/ for same as first input file): ");
+        read_ints(&mut new_mode);
+        mode = Some(set_float_output_for_entered_mode(new_mode[0]));
+        //
+        // get list of x, y coordinate offsets
+        //
+        print!(
+            " 1 to offset centers of individual images,\n  -1 to apply same offset to all sections, or 0 for no offsets: "
+        );
+        let mut if_offset = [0_i32];
+        read_ints(&mut if_offset);
+        let (mut xcen, mut ycen) = (
+            vec![0.0_f32; list_total.max(0) as usize],
+            vec![0.0_f32; list_total.max(0) as usize],
+        );
+        let (mut x_offs_all, mut y_offs_all) = (0.0_f32, 0.0_f32);
+        if if_offset[0] > 0 {
+            println!(" Enter X and Y center offsets for each section");
+            let mut values = vec![0.0_f32; 2 * list_total.max(0) as usize];
+            read_reals(&mut values);
+            for i in 0..list_total.max(0) as usize {
+                xcen[i] = values[2 * i];
+                ycen[i] = values[2 * i + 1];
+            }
+        } else if if_offset[0] < 0 {
+            print!(" X and Y center offsets for all sections: ");
+            let mut values = [0.0_f32; 2];
+            read_reals(&mut values);
+            (x_offs_all, y_offs_all) = (values[0], values[1]);
+        }
+        //
+        // fill offset list if only one or none
+        if if_offset[0] <= 0 {
+            for i in 0..list_total.max(0) as usize {
+                xcen[i] = x_offs_all;
+                ycen[i] = y_offs_all;
+            }
+        }
+        interactive_offsets = Some((xcen, ycen));
+        //
+        // `newstack.f90:767-776`.
+        print!(" 1 or 2 to transform images with cubic or linear interpolation, 0 not to: ");
+        let mut if_xform = [0_i32];
+        read_ints(&mut if_xform);
+        if if_xform[0] != 0 {
+            print!(" Name of transform file: ");
+            xf_file = read_a();
+        }
+        if if_xform[0] > 1 {
+            if_linear = 1;
+        }
     }
     // `newstack.f90:560-562`.  This sits in the output-file block at
     // `newstack.f90:556-568`, after `No input file specified`.
@@ -671,7 +1016,7 @@ pub fn newstack() {
     {
         let mut string_value: Vec<u8> = Vec::new();
         // `newstack.f90:386-390`.
-        if pip_get_string(b"VolumesToRead", &mut string_value) == 0 {
+        if get_string(b"VolumesToRead", 100000, &mut string_value) == 0 {
             let list = String::from_utf8_lossy(&string_value).into_owned();
             // `call parseList2(listString, inList, numVolRead, limSec)`: with
             // a positive `limList` the routine prints its own diagnostic and
@@ -730,7 +1075,7 @@ pub fn newstack() {
     {
         let mut string_value: Vec<u8> = Vec::new();
         for _ in 0..section_list_entries {
-            if pip_get_string(b"SectionsToRead", &mut string_value) == 0 {
+            if get_string(b"SectionsToRead", 100000, &mut string_value) == 0 {
                 // `newstack.f90:491-493`.
                 if two_directions {
                     exit_error("You cannot enter section lists with -twodir");
@@ -784,6 +1129,8 @@ pub fn newstack() {
         }
     }
     let mut transforms = Vec::<[f32; 6]>::new();
+    // `transposeXY = .false.` (`newstack.f90:284`).
+    let mut transpose_xy = false;
     if !xf_file.is_empty() {
         // `ierr = readCheckWarpFile(xfFile, 0, 1, ...)` and
         // `if (ierr < -1) call exitError(listString)` (`newstack.f90:781-783`).
@@ -851,6 +1198,60 @@ pub fn newstack() {
         } else {
             ", transformed".to_owned()
         };
+    }
+    //
+    // Interactive entry, continued: the transform line list
+    // (`newstack.f90:808-810`, `getItemsToUse` reading unit 5) and the
+    // floating entries (`newstack.f90:938-968, 1331-1336`).  Nothing reads
+    // unit 5 between these in the source, so taking the `-float 4` range here
+    // rather than at `newstack.f90:1333` consumes the same records in the
+    // same order.
+    let mut interactive_lines: Option<Vec<i32>> = None;
+    let mut interactive_float: Option<(i32, [f32; 2])> = None;
+    if !pipinput {
+        if !xf_file.is_empty() {
+            let n_xforms = if if_warping != 0 {
+                warp_num_fields
+            } else {
+                transforms.len() as i32
+            };
+            interactive_lines = Some(get_items_to_use(
+                n_xforms,
+                list_total,
+                &interactive_in_list,
+                b"UseTransformLines",
+                false,
+                "TRANSFORM LINE",
+                0,
+                input_names.len() as i32,
+                0,
+                list_total + 10,
+            ));
+        }
+        print!(
+            " Enter 0 for no floating\n        -2 to scale to bytes based on black and white contrast levels\n        -1 to specify a single rescaling of all sections\n         1 to float all sections to same range\n         2 to float all sections to same mean & standard deviation\n         3 to shift sections to same mean without scaling\n      or 4 to shift to same mean and specify a single rescaling: "
+        );
+        let mut if_float = [0_i32];
+        read_ints(&mut if_float);
+        let if_float = if_float[0];
+        let mut limits = [0.0_f32; 2];
+        if if_float == -1 {
+            print!(
+                " Values to scale input file's min and max to,\n   or / to scale to maximum range, or 1,1 to override mode scaling: "
+            );
+            read_reals(&mut limits);
+        } else if if_float < -1 {
+            // `contrastLo = 0`, `contrastHi = 255` (`newstack.f90:870-871`).
+            limits = [0., 255.];
+            print!(" Contrast ramp black and white settings (values between 0 and 255): ");
+            read_reals(&mut limits);
+        } else if if_float > 3 {
+            print!(
+                " Values to scale the shifted min and max to,\n   or / to scale to maximum range: "
+            );
+            read_reals(&mut limits);
+        }
+        interactive_float = Some((if_float, limits));
     }
     unsafe {
         let mut routes = Vec::<(usize, i32)>::new();
@@ -1039,7 +1440,14 @@ pub fn newstack() {
         // `newstack.f90:584` exactly when `-fileoutlist` was entered, and that
         // branch has already filled both arrays from the list file, so
         // `pipinput .and. inUnit .ne. 7` reduces to the test below.
-        if output_list_name.is_empty() && series_base < 0 {
+        if !pipinput {
+            // `newstack.f90:595-604`: the single interactive output takes every
+            // section; several took their counts at the prompts
+            // (`newstack.f90:639-649`).
+            if interactive_num_out == 1 {
+                num_output_sections = vec![routes.len() as i32];
+            }
+        } else if output_list_name.is_empty() && series_base < 0 {
             if output_names.len() == 1 {
                 num_output_sections = vec![routes.len() as i32];
             } else if output_names.len() == routes.len() {
@@ -1256,6 +1664,27 @@ pub fn newstack() {
         } == 0;
         let mut float_densities = 0_i32;
         let float_entered = pip_get_integer(b"FloatDensities", &mut float_densities) == 0;
+        // The interactive `ifFloat` entry maps onto the options it stands
+        // for: -1 is `-scale`, anything below is `-contrast`, 4 and up take
+        // the shifted range as `-scale` does with `-float 4`.
+        let (contrast_entered, scale_entered) = match interactive_float {
+            Some((if_float, limits)) => {
+                if if_float == -1 {
+                    scale_limits = limits;
+                    (false, true)
+                } else if if_float < -1 {
+                    contrast_limits = limits;
+                    (true, false)
+                } else {
+                    float_densities = if_float;
+                    if if_float > 3 {
+                        scale_limits = limits;
+                    }
+                    (false, if_float > 3)
+                }
+            }
+            None => (contrast_entered, scale_entered),
+        };
         // `newstack.f90:899-900`'s `if (ifFloat < 0)` check is **not** made
         // here: it sits after the mutually-exclusive check at
         // `newstack.f90:896-898` and inside the `ifFloat < 4` arm, so it is
@@ -1359,7 +1788,8 @@ pub fn newstack() {
         let range_scale_entered = scale_entered || contrast_entered;
         // `newstack.f90:963-967`: the contrast entry becomes the scale range.
         if contrast_entered {
-            contrast_limits[1] = contrast_limits[1].max(contrast_limits[0] + 1.0);
+            // `newstack.f90:964` compiles to `maxss contrastHi, contrastLo + 1.`.
+            contrast_limits[1] = maxss(contrast_limits[0] + 1.0, contrast_limits[1]);
             scale_limits[0] =
                 -contrast_limits[0] * 255.0 / (contrast_limits[1] - contrast_limits[0]);
             scale_limits[1] = scale_limits[0] + 65025.0 / (contrast_limits[1] - contrast_limits[0]);
@@ -1594,14 +2024,20 @@ pub fn newstack() {
             // Set up default field numbers to use then process use list if any
             //
             let default_fields = routes.iter().map(|route| route.1).collect::<Vec<_>>();
+            // `newstack.f90:1206-1207`: `ifOnePerFile` and `numInFiles` are
+            // passed as 0, and `limSec` is `listAlloc` (`listTotal + 10`,
+            // `newstack.f90:541`).
             let mut fields = get_items_to_use(
                 num_fields,
+                default_fields.len() as i32,
                 &default_fields,
                 b"UseFields",
+                pipinput,
                 "FIELD",
-                false,
-                input_names.len() as i32,
+                0,
+                0,
                 i32::from(numbered_from_one),
+                routes.len() as i32 + 10,
             );
             if fields.len() == 1 {
                 fields.resize(routes.len(), fields[0]);
@@ -1637,27 +2073,18 @@ pub fn newstack() {
         if if_distort > 0 {
             warp_x_offsets = vec![0.0_f32; routes.len().max(1)];
             warp_y_offsets = vec![0.0_f32; routes.len().max(1)];
-            let mut subarea_entries = Vec::<Vec<f32>>::new();
-            let mut subarea_count = 0_i32;
-            pip_number_of_entries(b"SubareaOffsetsXandY", &mut subarea_count);
-            for _ in 0..subarea_count {
-                let mut pair = [0.0_f32; 2];
-                let mut number = 0_i32;
-                if pip_get_float_array(b"SubareaOffsetsXandY", &mut pair, &mut number, 2) != 0 {
-                    exit_error("Getting subarea offset");
-                }
-                subarea_entries.push(pair[..number.max(0) as usize].to_vec());
-            }
-            if get_offset_entries(
-                &subarea_entries,
-                routes.len(),
+            // `newstack.f90:1235-1236`.
+            let (mut x_offs_all, mut y_offs_all) = (0.0_f32, 0.0_f32);
+            get_offset_entries(
+                b"SubareaOffsetsXandY",
+                "subarea offset",
                 &mut warp_x_offsets,
                 &mut warp_y_offsets,
-            )
-            .is_err()
-            {
-                exit_error("There must be either one subarea offset or an offset for each section");
-            }
+                routes.len() as i32,
+                lim_sec,
+                &mut x_offs_all,
+                &mut y_offs_all,
+            );
         }
         //
         // if not transforming and distorting, rotating, or expanding, set up
@@ -1679,6 +2106,15 @@ pub fn newstack() {
         // set up rotation and expansion transforms and multiply by transforms
         // (`newstack.f90:1258-1279`).
         //
+        // `newstack.f90:843-855` tests the transforms as read from the file
+        // (warp-scaled), at a point where the source has not yet multiplied
+        // them by the rotation and expansion below; this route computes the
+        // transform lines later, so keep the file's transforms for that test.
+        let file_transforms = if xf_file.is_empty() {
+            Vec::new()
+        } else {
+            transforms.clone()
+        };
         if rotate_angle != 0.0 || expand_factor != 0.0 {
             let mut frot = [0.0_f32; 6];
             xfunit(&mut frot, 1.0);
@@ -1725,6 +2161,11 @@ pub fn newstack() {
         // Source `mode`, the mode of the last header `irdhdr` read
         // (`newstack.f90:1349`).
         let mut scan_mode = header.mode;
+        // Which sections the scan below reached: `newstack.f90:1361` scans
+        // only `iSecRead >= 0 .and. iSecRead < nz`, so a blank section (one
+        // outside its file, `-blank`) stores nothing.
+        let mut sec_scanned = Vec::<bool>::new();
+        let mut scan_nz = 0_i32;
         if float_densities > 1 && !mean_sd_entered {
             let mut scan_input = usize::MAX;
             // `newstack.f90:1348-1355`: this scan is also a loop over input
@@ -1775,6 +2216,7 @@ pub fn newstack() {
                     // (`newstack.f90:1349`), which `newstack.f90:1439` then
                     // tests for the compression note.
                     scan_mode = scan_header.mode;
+                    scan_nz = scan_header.nz;
                     (scan_bin_nx, scan_rx_offset) =
                         get_reduced_size(scan_header.nx, read_reduction, read_shrunk, odd_even_ok);
                     (scan_bin_ny, scan_ry_offset) =
@@ -1787,7 +2229,6 @@ pub fn newstack() {
                     // this translation's own.
                     if i_verbose > 0 {
                         let mut allocation = ReallocateIfNeeded {
-                            physical_memory,
                             process_in_place,
                             ft_reduce_fac,
                             phase_shift,
@@ -1809,8 +2250,6 @@ pub fn newstack() {
                             ny_fcrop_pad,
                             ft_expand_fac,
                             noise_pad,
-                            nx_bin_fft: scan_bin_nx,
-                            ny_bin_fft: scan_bin_ny,
                             lim_to_alloc: alloc_lim_to_alloc,
                             len_temp: alloc_len_temp,
                             pre_set_scaling: false,
@@ -1892,11 +2331,25 @@ pub fn newstack() {
                     },
                     0.0_f32,
                 );
+                // `newstack.f90:1361`: a section outside the file is not
+                // scanned and leaves `secMean(ind)`, `secMins(ind)`,
+                // `secMaxes(ind)` and `secZmins/Zmaxes(ind)` as allocated.
+                // The Z entries are then still part of the outlier analysis;
+                // a fresh allocation reads as zero here, which is what the
+                // zero placeholders give.
+                if section < 0 || section >= scan_nz {
+                    sec_mean.push(0.);
+                    sec_mins.push(0.);
+                    sec_maxes.push(0.);
+                    sec_sds.push(0.);
+                    sec_scanned.push(false);
+                    continue;
+                }
                 // `newstack.f90:1367`.
                 if i_verbose > 0 {
                     print!(" scanning for mean/sd {:>11}\n", section);
                 }
-                let Ok((dmin, dmax, dmean, sd, _load_start, _load_end)) = scan_section(
+                let (dmin, dmax, dmean, sd, _load_start, _load_end) = scan_section(
                     &mut scan_array,
                     scan_bin_nx,
                     scan_bin_ny,
@@ -1904,32 +2357,18 @@ pub fn newstack() {
                     read_reduction,
                     scan_rx_offset,
                     scan_ry_offset,
+                    section,
                     float_densities,
+                    ind_filter,
+                    read_shrunk,
                     0.0,
-                    |data, lines, x_start, y_start| {
-                        read_binned_or_reduced(
-                            1,
-                            section,
-                            data,
-                            scan_bin_nx,
-                            lines,
-                            x_start,
-                            y_start,
-                            read_reduction,
-                            scan_bin_nx,
-                            lines,
-                            ind_filter,
-                            read_shrunk,
-                            &mut scan_temp,
-                        )
-                    },
-                ) else {
-                    exit_error("Reading image file");
-                };
+                    &mut scan_temp,
+                );
                 sec_mean.push(dmean);
                 sec_mins.push(dmin);
                 sec_maxes.push(dmax);
                 sec_sds.push(sd);
+                sec_scanned.push(true);
             }
             if scan_input != usize::MAX {
                 iiu_close(1);
@@ -1945,18 +2384,33 @@ pub fn newstack() {
         // Source `floatText = ', mean shift&scaled'` at `newstack.f90:1443`.
         let mut compress_to_fit_range = false;
         if float_densities > 2 && !sec_mean.is_empty() {
+            // `newstack.f90:1419-1423` accumulate only the scanned sections.
             let diff_min_mean = sec_mins
                 .iter()
                 .zip(&sec_mean)
-                .map(|(&minimum, &mean)| minimum - mean)
-                .fold(0.0_f32, f32::min);
+                .zip(&sec_scanned)
+                .filter(|(_, scanned)| **scanned)
+                .map(|((&minimum, &mean), _)| minimum - mean)
+                // `newstack.f90:1420`: `minss diffMinMean, dmin2 - dmean2`.
+                .fold(0.0_f32, |acc, diff| minss(diff, acc));
             let diff_max_mean = sec_maxes
                 .iter()
                 .zip(&sec_mean)
-                .map(|(&maximum, &mean)| maximum - mean)
-                .fold(0.0_f32, f32::max);
-            let grand_mean = sec_mean.iter().sum::<f32>() / sec_mean.len() as f32;
-            shift_min = (grand_mean + diff_min_mean).max(0.0);
+                .zip(&sec_scanned)
+                .filter(|(_, scanned)| **scanned)
+                .map(|((&maximum, &mean), _)| maximum - mean)
+                // `newstack.f90:1421`: `maxss diffMaxMean, dmax2 - dmean2`.
+                .fold(0.0_f32, |acc, diff| maxss(diff, acc));
+            let (mut grand_sum, mut nsum) = (0.0_f32, 0_i32);
+            for (&mean, &scanned) in sec_mean.iter().zip(&sec_scanned) {
+                if scanned {
+                    grand_sum = grand_sum + mean;
+                    nsum = nsum + 1;
+                }
+            }
+            let grand_mean = grand_sum / nsum as f32;
+            // `newstack.f90:1436`: `maxss 0., grandMean + diffMinMean`.
+            shift_min = maxss(grand_mean + diff_min_mean, 0.0);
             shift_mean = shift_min - diff_min_mean;
             shift_max = shift_mean + diff_max_mean;
             //
@@ -2010,17 +2464,33 @@ pub fn newstack() {
         let mut z_max_outlier = Vec::<f32>::new();
         let mut num_sec_trunc = 0_i32;
         if float_densities == 2 && !sec_mean.is_empty() {
+            // `newstack.f90:1410-1415`: both Z values stay 0 unless
+            // `dmax2 > dmin2 .and. sdSec > 0.`.
             let mut zmins = sec_mins
                 .iter()
+                .zip(&sec_maxes)
                 .zip(&sec_mean)
                 .zip(&sec_sds)
-                .map(|((&minimum, &mean), &sd)| if sd > 0. { (minimum - mean) / sd } else { 0. })
+                .map(|(((&minimum, &maximum), &mean), &sd)| {
+                    if maximum > minimum && sd > 0. {
+                        (minimum - mean) / sd
+                    } else {
+                        0.
+                    }
+                })
                 .collect::<Vec<_>>();
             let mut zmaxs = sec_maxes
                 .iter()
+                .zip(&sec_mins)
                 .zip(&sec_mean)
                 .zip(&sec_sds)
-                .map(|((&maximum, &mean), &sd)| if sd > 0. { (maximum - mean) / sd } else { 0. })
+                .map(|(((&maximum, &minimum), &mean), &sd)| {
+                    if maximum > minimum && sd > 0. {
+                        (maximum - mean) / sd
+                    } else {
+                        0.
+                    }
+                })
                 .collect::<Vec<_>>();
             let mut min_outliers = vec![0.0_f32; zmins.len()];
             let mut max_outliers = vec![0.0_f32; zmaxs.len()];
@@ -2028,14 +2498,16 @@ pub fn newstack() {
             rs_mad_median_outliers(&zmaxs, zmaxs.len() as i32, 8.0, &mut max_outliers);
             for (&z, &outlier) in zmins.iter().zip(&min_outliers) {
                 if outlier >= 0.0 {
-                    float2_zmin = float2_zmin.min(z);
+                    // `newstack.f90:1456`: `minss secZmins(i), zmin`.
+                    float2_zmin = minss(float2_zmin, z);
                 } else {
                     num_sec_trunc += 1;
                 }
             }
             for (&z, &outlier) in zmaxs.iter().zip(&max_outliers) {
                 if outlier <= 0.0 {
-                    float2_zmax = float2_zmax.max(z);
+                    // `newstack.f90:1464`: `maxss secZmaxes(i), zmax`.
+                    float2_zmax = maxss(float2_zmax, z);
                 } else {
                     num_sec_trunc += 1;
                 }
@@ -2045,17 +2517,30 @@ pub fn newstack() {
         }
         let transform_lines = if transforms.is_empty() {
             Vec::new()
+        } else if xf_file.is_empty() {
+            // The unit transform (`newstack.f90:1244-1252`): `lineUse(i) = 0`
+            // for every section, and `getItemsToUse` is never called, so an
+            // entered `UseTransformLines` is ignored (`matchrotpairs` passes
+            // `-use 0,1` with `-dist` and no transform file).
+            vec![0; routes.len()]
         } else {
             let default_lines = routes.iter().map(|route| route.1).collect::<Vec<_>>();
-            let mut lines = get_items_to_use(
-                transforms.len() as i32,
-                &default_lines,
-                b"UseTransformLines",
-                "TRANSFORM LINE",
-                one_per_file,
-                input_names.len() as i32,
-                i32::from(numbered_from_one),
-            );
+            // `newstack.f90:808-810`; `limSec` is `listAlloc`.
+            let mut lines = match interactive_lines.take() {
+                Some(lines) => lines,
+                None => get_items_to_use(
+                    transforms.len() as i32,
+                    default_lines.len() as i32,
+                    &default_lines,
+                    b"UseTransformLines",
+                    pipinput,
+                    "TRANSFORM LINE",
+                    i32::from(one_per_file),
+                    input_names.len() as i32,
+                    i32::from(numbered_from_one),
+                    routes.len() as i32 + 10,
+                ),
+            };
             // `newstack.f90:812-828`: with one transform per file, expand the
             // per-file list into one line for each section of that file.
             if one_per_file {
@@ -2076,32 +2561,51 @@ pub fn newstack() {
             if lines.len() != routes.len() {
                 exit_error("Specified # of transform lines does not match # of sections");
             }
+            //
+            // Now assess need to transpose if no size is entered
+            // (`newstack.f90:843-855`).  Only a transform file sets `ifXform`
+            // at this point in the source, so the unit transform does not.
+            if !file_transforms.is_empty() {
+                let mut iscan = 0_usize;
+                for &line in &lines {
+                    let mut ftmp = file_transforms[line as usize];
+                    ftmp[4] = 0.;
+                    ftmp[5] = 0.;
+                    let (tmp_min, tmp_max) = xfapply(&ftmp, 0., 0., 2., -1.);
+                    let (tmp_min2, tmp_max2) = xfapply(&ftmp, 0., 0., 2., 1.);
+                    // Fortran `max` of reals; the operands differ only for a
+                    // NaN transform, which is not otherwise supported here.
+                    // `newstack.f90:852`: reference object reads
+                    // `maxss |tmpMax2|, |tmpMax|` and `maxss |tmpMin|, |tmpMin2|`.
+                    if maxss(tmp_max2.abs(), tmp_max.abs()) > maxss(tmp_min.abs(), tmp_min2.abs()) {
+                        iscan += 1;
+                    }
+                }
+                transpose_xy = iscan == lines.len();
+            }
             lines
         };
-        let mut offset_entries = Vec::<Vec<f32>>::new();
-        let mut offset_count = 0_i32;
-        pip_number_of_entries(b"OffsetsInXandY", &mut offset_count);
-        for _ in 0..offset_count {
-            let mut values = vec![0.0_f32; 2 * routes.len()];
-            let values_len = values.len() as i32;
-            let mut number = 0_i32;
-            if pip_get_float_array(b"OffsetsInXandY", &mut values, &mut number, values_len) != 0 {
-                exit_error("Getting offset entries");
-            }
-            values.truncate(number as usize);
-            offset_entries.push(values);
-        }
         let mut x_offsets = vec![0.0_f32; routes.len()];
         let mut y_offsets = vec![0.0_f32; routes.len()];
-        if get_offset_entries(
-            &offset_entries,
-            routes.len(),
-            &mut x_offsets,
-            &mut y_offsets,
-        )
-        .is_err()
-        {
-            exit_error("There must be either one offset or an offset for each section");
+        // `call getOffsetEntries('OffsetsInXandY', 'offset', xcen, ycen,
+        // ifOffset)` (`newstack.f90:686`).
+        let (mut x_offs_all, mut y_offs_all) = (0.0_f32, 0.0_f32);
+        if let Some((xcen, ycen)) = interactive_offsets.take() {
+            // Entered interactively (`newstack.f90:696-715`).
+            let count = x_offsets.len().min(xcen.len());
+            x_offsets.copy_from_slice(&xcen[..count]);
+            y_offsets.copy_from_slice(&ycen[..count]);
+        } else {
+            get_offset_entries(
+                b"OffsetsInXandY",
+                "offset",
+                &mut x_offsets,
+                &mut y_offsets,
+                routes.len() as i32,
+                lim_sec,
+                &mut x_offs_all,
+                &mut y_offs_all,
+            );
         }
         let mut apply_first = 0_i32;
         pip_get_boolean(b"ApplyOffsetsFirst", &mut apply_first);
@@ -2199,6 +2703,20 @@ pub fn newstack() {
                 if i_verbose > 0 {
                     print!(" Actual factor {}\n", list_real(actual_fac));
                 }
+                // Deviation (BUGS.md, "`newstack -ftreduce` with a factor whose
+                // numerator has a prime above niceFFTlimit"): `fourierCropSizes`
+                // pads to a multiple of `2 * numerator` and `niceFrame` then
+                // looks for a size with no prime factor above `niceFFTlimit()`
+                // (5).  For a numerator such as 17 (`-ftreduce 1.7`) or 7 (3.5)
+                // no such multiple exists, the search runs until the int wraps
+                // and returns a negative size, and the source goes on to pad
+                // into it -- native segfaults in `copyToCenter`.  There is no
+                // correct result to reproduce, so the combination is refused.
+                if nx_fspad <= 0 || ny_fspad <= 0 || nx_fcrop_pad <= 0 || ny_fcrop_pad <= 0 {
+                    exit_error(
+                        "Reduction or expansion factor gives no FFT size with small enough prime factors; use a factor whose numerator is a product of 2, 3 and 5",
+                    );
+                }
                 //
                 // When cropping, reduce the shifts here for use when extracting
                 // image area; the fractional part will be boosted back up for
@@ -2220,7 +2738,7 @@ pub fn newstack() {
         let (mut replace_dmin, mut replace_dmax, mut replace_dmean) = (0.0_f32, 0.0_f32, 0.0_f32);
         let mut replace_mode_old = 0_i32;
         let mut replace_list_string: Vec<u8> = Vec::new();
-        if pip_get_string(b"ReplaceSections", &mut replace_list_string) == 0 {
+        if get_string(b"ReplaceSections", 100000, &mut replace_list_string) == 0 {
             let list = String::from_utf8_lossy(&replace_list_string).into_owned();
             let mut parsed = vec![0_i32; routes.len().max(1)];
             let (mut num_replace, mut limit) = (0_i32, parsed.len() as i32);
@@ -2330,7 +2848,7 @@ pub fn newstack() {
         let size_x = size_to_output.map(|size| size[0]).filter(|size| *size > 0);
         let size_y = size_to_output.map(|size| size[1]).filter(|size| *size > 0);
         let factor = expand_factor;
-        let transpose = (rotate_angle.abs() - 90.0).abs() < 40.0;
+        let transpose = (rotate_angle.abs() - 90.0).abs() < 40.0 || transpose_xy;
         // `newstack.f90:1570-1571` uses `getReducedSize`, whose X and Y
         // offsets are the starting coordinates handed to
         // `readBinnedOrReduced`; dropping them reads from the wrong corner
@@ -2346,10 +2864,16 @@ pub fn newstack() {
         // input size times `expandFactor`, which is 1 unless `-expand`,
         // `-shrink` on the post-read route or Fourier scaling changed it.
         let (output_nx, output_ny) = if size_x.is_none() && size_y.is_none() && transpose {
-            (
+            let (nx_out, ny_out) = (
                 (bin_ny as f32 * factor).round() as i32,
                 (bin_nx as f32 * factor).round() as i32,
-            )
+            );
+            if transpose_xy && nx_out != ny_out {
+                println!(
+                    " Transposing X and Y sizes for output because of rotation in the transforms"
+                );
+            }
+            (nx_out, ny_out)
         } else {
             (
                 size_x.unwrap_or_else(|| (bin_nx as f32 * factor).round() as i32),
@@ -2390,15 +2914,20 @@ pub fn newstack() {
                     // source writes `xnBig = -dx` twice and never gives
                     // `ynbig` its own initialiser, so it keeps the value the
                     // `else` branch above put there.
+                    // `newstack.f90:1729-1732` compile to `maxss`/`minss` with the
+                    // running value as dest and the new term as src (reference
+                    // object), so a NaN term replaces the running value.
                     for index in 0..routes.len() {
-                        xn_big = xn_big.max(
+                        xn_big = maxss(
+                            xn_big,
                             (output_nx as f32 + x_offsets[index]) * read_reduction / warp_scale,
                         );
-                        dx = dx.min(x_offsets[index] * read_reduction / warp_scale);
-                        yn_big = yn_big.max(
+                        dx = minss(dx, x_offsets[index] * read_reduction / warp_scale);
+                        yn_big = maxss(
+                            yn_big,
                             (output_ny as f32 + y_offsets[index]) * read_reduction / warp_scale,
                         );
-                        dy = dy.min(y_offsets[index] * read_reduction / warp_scale);
+                        dy = minss(dy, y_offsets[index] * read_reduction / warp_scale);
                     }
                 }
             }
@@ -2485,7 +3014,6 @@ pub fn newstack() {
                     // this translation's own.
                     if i_verbose > 0 {
                         let mut allocation = ReallocateIfNeeded {
-                            physical_memory,
                             process_in_place,
                             ft_reduce_fac,
                             phase_shift,
@@ -2507,8 +3035,6 @@ pub fn newstack() {
                             ny_fcrop_pad,
                             ft_expand_fac,
                             noise_pad,
-                            nx_bin_fft: bin_nx,
-                            ny_bin_fft: bin_ny,
                             lim_to_alloc: alloc_lim_to_alloc,
                             len_temp: alloc_len_temp,
                             pre_set_scaling: false,
@@ -2528,7 +3054,7 @@ pub fn newstack() {
                 if i_verbose > 0 {
                     print!(" scanning for mean/sd {:>11}\n", section);
                 }
-                let Ok((minimum, maximum, mean, sd, _, _)) = scan_section(
+                let (minimum, maximum, mean, sd, _, _) = scan_section(
                     &mut scan_array,
                     header.nx,
                     header.ny,
@@ -2536,31 +3062,18 @@ pub fn newstack() {
                     1.0,
                     0.0,
                     0.0,
+                    section,
                     0,
+                    0,
+                    false,
                     fix_range[0],
-                    |data, lines, x_start, y_start| {
-                        read_binned_or_reduced(
-                            1,
-                            section,
-                            data,
-                            header.nx,
-                            lines,
-                            x_start,
-                            y_start,
-                            1.0,
-                            header.nx,
-                            lines,
-                            0,
-                            false,
-                            &mut scan_temp,
-                        )
-                    },
-                ) else {
-                    exit_error("Reading image file");
-                };
+                    &mut scan_temp,
+                );
                 let range_add = (range_params[1] - 1.0) * (maximum - minimum);
-                let limited_minimum = (mean - fix_range[0] * sd).max(minimum - range_add);
-                let limited_maximum = (mean + fix_range[0] * sd).min(maximum + range_add);
+                // `newstack.f90:1377-1378`: `maxss`/`minss` with the second
+                // Fortran argument as the source operand.
+                let limited_minimum = maxss(mean - fix_range[0] * sd, minimum - range_add);
+                let limited_maximum = minss(mean + fix_range[0] * sd, maximum + range_add);
                 if sd < range_params[0] {
                     need_scale_fix = true;
                 }
@@ -2619,13 +3132,16 @@ pub fn newstack() {
                 if do_range_scale || do_scale_only {
                     factor = fix_range[1];
                     println!(
-                        "INFO: Newstack scaling values by {:6.1} to preserve intensity resolution",
-                        factor
+                        "INFO: Newstack scaling values by {} to preserve intensity resolution",
+                        format_f(f64::from(factor), 6, 1)
                     );
                     // `newstack.f90:1486-1488`: the literal ends at "below"
                     // with no separating blank, and the format's trailing "/"
                     // writes one more empty record.
-                    println!("  because SD of values is below{:6.1}\n", range_params[0]);
+                    println!(
+                        "  because SD of values is below{}\n",
+                        format_f(f64::from(range_params[0]), 6, 1)
+                    );
                 }
                 if do_range_scale || do_range_only {
                     if output_mode == 6 {
@@ -3348,10 +3864,14 @@ pub fn newstack() {
                 // reference reads and writes past it: at `-test 3000,30` it
                 // aborts with a glibc heap error (rc 134) after writing an
                 // output, and at `-test 2500,25` it survives with whatever the
-                // adjacent array held.  There is nothing here to be faithful
-                // to, so this is a refusal by name.
+                // adjacent array held.
+                //
+                // Fixed in translation (2026-09-26, `BUGS.md` §4): the guard
+                // at `newstack.f90:2200` is meant to refuse a taper whenever
+                // the output is not held whole, so it fires here too, with the
+                // source's own message, before anything is written.
                 if num_taper > 0 {
-                    exit_error("-taper with -memory or -test is not supported by this translation");
+                    exit_error("Cannot taper output image - it does not fit completely in memory");
                 }
                 // `newstack.f90:2591-2611`: with `preSetScaling` false the
                 // source writes each chunk to temporary storage -- to the
@@ -3865,9 +4385,7 @@ pub fn newstack() {
                     {
                         exit_error("Transferring global data between autodocs");
                     }
-                    if let Err(message) = transfer_collections(ADOC_ZVALUE_NAME, ind_adoc_out) {
-                        exit_error(&message);
-                    }
+                    transfer_collections(ADOC_ZVALUE_NAME, ind_adoc_out);
                 }
                 if ind_adoc_out > 0 && ind_adoc_in > 0 && frame_set {
                     set_current_adoc_or_exit(ind_adoc_out, "output");
@@ -3894,13 +4412,15 @@ pub fn newstack() {
             // file is created; with `-replace` they keep the values `irdhdr`
             // put there from the existing output file, so the header ends up
             // with the min and max over both old and replaced sections.
+            // `dmax = -1.e30`, `dmin = 1.e30` (`newstack.f90:1899-1900`):
+            // with all-NaN sections these survive into the header.
             let mut dmin = if list_replace.is_empty() {
-                f32::INFINITY
+                1.0e30_f32
             } else {
                 replace_dmin
             };
             let mut dmax = if list_replace.is_empty() {
-                f32::NEG_INFINITY
+                -1.0e30_f32
             } else {
                 replace_dmax
             };
@@ -4364,15 +4884,41 @@ pub fn newstack() {
                     let (mut max_field_x, mut max_field_y) = (0_i32, 0_i32);
                     if if_mag_grad != 0 || has_warp {
                         let (mut field_max_x, mut field_max_y) = (0.0_f32, 0.0_f32);
+                        // `newstack.f90:2134-2141` as the reference object runs
+                        // it: for `nxGrid >= 4` each row is vectorised (`maxps`,
+                        // four lanes seeded with the running maximum, lane =
+                        // `maxss(lane, new)`, reduced as
+                        // `maxss(maxss(l3, l1), maxss(l2, l0))`), then the
+                        // remainder in scalar `maxss(running, new)`.  Only a NaN
+                        // in the field can tell the orders apart.
                         for iy in 0..ny_grid as usize {
-                            for ix in 0..nx_grid as usize {
-                                let index = ix + iy * lm_grid as usize;
-                                field_max_x = field_max_x.max(field_dx[index].abs());
-                                field_max_y = field_max_y.max(field_dy[index].abs());
+                            let row = iy * lm_grid as usize;
+                            let nx = nx_grid as usize;
+                            let mut start = 0;
+                            if nx >= 4 {
+                                let mut lx = [field_max_x; 4];
+                                let mut ly = [field_max_y; 4];
+                                for group in 0..nx / 4 {
+                                    for lane in 0..4 {
+                                        let index = row + 4 * group + lane;
+                                        lx[lane] = maxss(lx[lane], field_dx[index].abs());
+                                        ly[lane] = maxss(ly[lane], field_dy[index].abs());
+                                    }
+                                }
+                                field_max_x = maxss(maxss(lx[3], lx[1]), maxss(lx[2], lx[0]));
+                                field_max_y = maxss(maxss(ly[3], ly[1]), maxss(ly[2], ly[0]));
+                                start = nx & !3;
+                            }
+                            for ix in start..nx {
+                                let index = row + ix;
+                                field_max_x = maxss(field_max_x, field_dx[index].abs());
+                                field_max_y = maxss(field_max_y, field_dy[index].abs());
                             }
                         }
-                        max_field_x = (field_max_x as f64 + 1.5) as i32;
-                        max_field_y = (field_max_y as f64 + 1.5) as i32;
+                        // `int(fieldMaxX + 1.5)`: a `real*4` add (`addss`), then
+                        // `cvttss2si`.
+                        max_field_x = cvttss2si(field_max_x + 1.5_f32);
+                        max_field_y = cvttss2si(field_max_y + 1.5_f32);
                     }
                     let mut fprod = *transform;
                     if apply_first != 0 {
@@ -4452,7 +4998,6 @@ pub fn newstack() {
                         && output_ny <= ny_dim_need
                         && section_needed.in_place;
                     let mut allocation = ReallocateIfNeeded {
-                        physical_memory,
                         process_in_place,
                         ft_reduce_fac,
                         phase_shift,
@@ -4474,8 +5019,6 @@ pub fn newstack() {
                         ny_fcrop_pad,
                         ft_expand_fac,
                         noise_pad,
-                        nx_bin_fft: bin_nx,
-                        ny_bin_fft: bin_ny,
                         lim_to_alloc: alloc_lim_to_alloc,
                         len_temp: alloc_len_temp,
                         pre_set_scaling,
@@ -4751,7 +5294,7 @@ pub fn newstack() {
                                 scan_temp.len()
                             );
                         }
-                        let Ok((_, _, mean, _, scan_y_start, scan_y_end)) = scan_section(
+                        let (_, _, mean, _, scan_y_start, scan_y_end) = scan_section(
                             &mut scan_array,
                             scan_nx,
                             scan_ny,
@@ -4759,28 +5302,13 @@ pub fn newstack() {
                             read_reduction,
                             rx_offset,
                             ry_offset,
+                            in_section,
                             0,
+                            ind_filter,
+                            read_shrunk,
                             0.0,
-                            |data, lines, x_start, y_start| {
-                                read_binned_or_reduced(
-                                    1,
-                                    in_section,
-                                    data,
-                                    scan_nx,
-                                    lines,
-                                    x_start,
-                                    y_start,
-                                    read_reduction,
-                                    scan_nx,
-                                    lines,
-                                    ind_filter,
-                                    read_shrunk,
-                                    &mut scan_temp,
-                                )
-                            },
-                        ) else {
-                            exit_error("Reading image file");
-                        };
+                            &mut scan_temp,
+                        );
                         //
                         // `scanSection` reads each of its loads into
                         // `array(1)` (`newstack.f90:3437`), so the section's
@@ -4864,8 +5392,6 @@ pub fn newstack() {
                         scale_const: scale_factors
                             .get(input_index.min(scale_factors.len().saturating_sub(1)))
                             .map_or(0.0, |entry| entry[1]),
-                        float_average: 0.0,
-                        float_sd: 0.0,
                         zmin: float2_zmin,
                         zmax: float2_zmax,
                         float_z_margin,
@@ -4873,7 +5399,11 @@ pub fn newstack() {
                         opt_float_min,
                         section_min: 0.0,
                         section_max: 0.0,
-                        section_intentionally_truncated: true,
+                        i_sec_read: in_section,
+                        nz: header.nz,
+                        num_sec_trunc,
+                        z_min_outlier: 0.0,
+                        z_max_outlier: 0.0,
                     };
                     //
                     // `newstack.f90:2514-2545`: the per-chunk statistics.  For
@@ -4990,10 +5520,11 @@ pub fn newstack() {
                             if load_temp.len() < effective_len_temp.max(1) as usize {
                                 load_temp.resize(effective_len_temp.max(1) as usize, 0.0);
                             }
+                            let len_temp = load_temp.len() as i32;
                             let mut temp = &mut load_temp;
                             // `newstack.f90:2376-2379`: the start is the reduced
                             // offset plus the reduction times the load offset.
-                            if read_binned_or_reduced(
+                            read_binned_or_reduced(
                                 1,
                                 in_section,
                                 &mut input[load_base_ind..],
@@ -5007,11 +5538,8 @@ pub fn newstack() {
                                 ind_filter,
                                 read_shrunk,
                                 &mut temp,
-                            )
-                            .is_err()
-                            {
-                                exit_error("Reading image file");
-                            }
+                                len_temp,
+                            );
                             load_y_start = needed.iy_in_1;
                             load_y_end = needed.iy_in_2;
                         }
@@ -5192,8 +5720,10 @@ pub fn newstack() {
                                 chunk_dsum += tsum;
                                 chunk_tsum = tsum;
                             }
-                            tmp_min = tmp_min.min(tmin2);
-                            tmp_max = tmp_max.max(tmax2);
+                            // `newstack.f90:2528-2529` compile to `minss tmpMin, tmin2`
+                            // and `maxss tmpMax, tmax2`: a NaN keeps the running value.
+                            tmp_min = minss(tmin2, tmp_min);
+                            tmp_max = maxss(tmax2, tmp_max);
                             // `newstack.f90:2531`.
                             if i_verbose > 0 {
                                 print!(
@@ -5213,8 +5743,12 @@ pub fn newstack() {
                             // the running total is accumulated in double.
                             let mut tsum = 0.0_f64;
                             for value in &output {
-                                tmp_min = tmp_min.min(*value);
-                                tmp_max = tmp_max.max(*value);
+                                if *value < tmp_min {
+                                    tmp_min = *value;
+                                }
+                                if *value > tmp_max {
+                                    tmp_max = *value;
+                                }
                                 tsum += f64::from(*value);
                             }
                             chunk_dsum += tsum;
@@ -5239,11 +5773,13 @@ pub fn newstack() {
                                 if *value > optimal_in {
                                     num_trunc_high += 1;
                                 }
-                                *value = bottom_in.max(optimal_in.min(*value));
+                                // `newstack.f90:2557`: `minss val, optimalIn` then `maxss ., bottomIn`.
+                                *value = maxss(minss(*value, optimal_in), bottom_in);
                                 tsum2 += f64::from(*value);
                             }
-                            tmp_min = tmp_min.max(bottom_in);
-                            tmp_max = tmp_max.min(optimal_in);
+                            // `newstack.f90:2561-2562`.
+                            tmp_min = maxss(tmp_min, bottom_in);
+                            tmp_max = minss(tmp_max, optimal_in);
                             chunk_dsum = chunk_dsum + tsum2 - chunk_tsum;
                         }
                         if pre_set_scaling {
@@ -5251,8 +5787,18 @@ pub fn newstack() {
                             // not depend on this chunk's min and max, so the
                             // chunk is scaled and written straight away.
                             let (save_min, save_max) = (tmp_min, tmp_max);
-                            let factors =
-                                find_scale_factors(&chunk_scale_values, header.amin, header.amax);
+                            // `optimalOut` is one host variable shared with
+                            // `scaleAndWriteChunk`; native raises it there for mode 2, the
+                            // translation does not (BUGS.md, fixed in translation).
+                            chunk_scale_values.optimal_out = chunk_scaling.optimal_out;
+                            let factors = find_scale_factors(
+                                &chunk_scale_values,
+                                header.amin,
+                                header.amax,
+                                &dsum_chunk,
+                                &sd_chunk,
+                                &pix_chunk,
+                            );
                             // `newstack.f90:2571-2574` saves and restores
                             // `tmpMin`/`tmpMax` around this call because
                             // `findScaleFactors` modifies them.
@@ -5263,27 +5809,18 @@ pub fn newstack() {
                             // section, so the state is carried here too.
                             chunk_scaling.scale_factor = factors.scale_factor;
                             chunk_scaling.const_add = factors.const_add;
-                            if scale_and_write_chunk(
+                            scale_and_write_chunk(
                                 &mut output,
                                 output_nx,
+                                output_lines,
                                 &mut chunk_scaling,
-                                |_| Ok(()),
-                            )
-                            .is_err()
-                            {
-                                exit_error("Scaling output image");
-                            }
-                            // `scaleAndWriteChunk` does its own write
-                            // (`newstack.f90:3255-3257`); here the write stayed
-                            // with the caller, so the report sits in front of
-                            // it.
-                            if i_verbose > 0 {
-                                print!(" writing {:>11}\n", chunk_index);
-                            }
-                            iiu_set_position(2, out_section as i32, line_out_start);
-                            if iiu_write_lines(2, output.as_mut_ptr().cast(), output_lines) != 0 {
-                                exit_error("Writing image file");
-                            }
+                                i_verbose,
+                                chunk_index as i32,
+                                out_section as i32,
+                                line_out_start,
+                                &mut wall_start,
+                                &mut save_time,
+                            );
                         } else if chunk_index != layout.len() && if_out_chunk > 0 {
                             // `newstack.f90:2585-2588`: every chunk but the
                             // last goes out to the scratch file, and the
@@ -5320,32 +5857,26 @@ pub fn newstack() {
                         //
                         // `findScaleFactors` reads the accumulated sums for
                         // `-float 2`, `-float 3` and `-meansd`.
-                        let (float_average, float_sd) = if dsum_chunk.is_empty() {
-                            (0.0, 0.0)
-                        } else {
-                            chunk_sums_to_avgsd(
-                                &dsum_chunk,
-                                &sd_chunk,
-                                &pix_chunk,
-                                output_nx,
-                                output_ny,
-                            )
-                        };
                         let section = route_index - 1;
                         chunk_scale_values.dsum = chunk_dsum;
                         chunk_scale_values.dsum_sq = chunk_dsum_sq;
-                        chunk_scale_values.float_average = float_average;
-                        chunk_scale_values.float_sd = float_sd;
                         chunk_scale_values.section_min =
                             sec_mins.get(section).copied().unwrap_or(0.0);
                         chunk_scale_values.section_max =
                             sec_maxes.get(section).copied().unwrap_or(0.0);
-                        // The negated group of `newstack.f90:3057-3059`.
-                        chunk_scale_values.section_intentionally_truncated = output_mode == 2
-                            || (num_sec_trunc > 0
-                                && (z_min_outlier.get(section).copied().unwrap_or(0.0) < 0.0
-                                    || z_max_outlier.get(section).copied().unwrap_or(0.0) > 0.0));
-                        let factors = find_scale_factors(&chunk_scale_values, tmp_min, tmp_max);
+                        chunk_scale_values.z_min_outlier =
+                            z_min_outlier.get(section).copied().unwrap_or(0.0);
+                        chunk_scale_values.z_max_outlier =
+                            z_max_outlier.get(section).copied().unwrap_or(0.0);
+                        chunk_scale_values.optimal_out = chunk_scaling.optimal_out;
+                        let factors = find_scale_factors(
+                            &chunk_scale_values,
+                            tmp_min,
+                            tmp_max,
+                            &dsum_chunk,
+                            &sd_chunk,
+                            &pix_chunk,
+                        );
                         // `newstack.f90:2594` keeps what `findScaleFactors`
                         // does to `tmpMin` and `tmpMax` -- unlike the
                         // `preSetScaling` call above, which saves and restores
@@ -5371,25 +5902,19 @@ pub fn newstack() {
                                     exit_error("Reading temporary file");
                                 }
                             }
-                            if scale_and_write_chunk(chunk, output_nx, &mut chunk_scaling, |_| {
-                                Ok(())
-                            })
-                            .is_err()
-                            {
-                                exit_error("Scaling output image");
-                            }
-                            // `wallStart = wallTime()` (`newstack.f90:3254`).
-                            let wall_start = crate::imod::libcfshr::b3dutil::wall_time();
-                            // `newstack.f90:3255`.
-                            if i_verbose > 0 {
-                                print!(" writing {:>11}\n", index + 1);
-                            }
-                            iiu_set_position(2, out_section as i32, *start);
-                            if iiu_write_lines(2, chunk.as_mut_ptr().cast(), *lines) != 0 {
-                                exit_error("Writing image file");
-                            }
-                            // `newstack.f90:3258`.
-                            save_time += crate::imod::libcfshr::b3dutil::wall_time() - wall_start;
+                            let mut wall_start = 0.0_f64;
+                            scale_and_write_chunk(
+                                chunk,
+                                output_nx,
+                                *lines,
+                                &mut chunk_scaling,
+                                i_verbose,
+                                index as i32 + 1,
+                                out_section as i32,
+                                *start,
+                                &mut wall_start,
+                                &mut save_time,
+                            );
                         }
                     }
                     num_trunc_low += chunk_scaling.num_trunc_low;
@@ -5409,36 +5934,17 @@ pub fn newstack() {
                         println!(
                             "{:8}{}{}{}{}{}",
                             route_index - 1,
-                            if format!("{tmp_min:.2}").len() > 10 {
-                                "**********".to_owned()
-                            } else {
-                                format!("{tmp_min:10.2}")
-                            },
-                            if format!("{tmp_max:.2}").len() > 10 {
-                                "**********".to_owned()
-                            } else {
-                                format!("{tmp_max:10.2}")
-                            },
-                            if format!("{chunk_dmin2:.2}").len() > 10 {
-                                "**********".to_owned()
-                            } else {
-                                format!("{chunk_dmin2:10.2}")
-                            },
-                            if format!("{chunk_dmax2:.2}").len() > 10 {
-                                "**********".to_owned()
-                            } else {
-                                format!("{chunk_dmax2:10.2}")
-                            },
-                            if format!("{dmean2:.2}").len() > 10 {
-                                "**********".to_owned()
-                            } else {
-                                format!("{dmean2:10.2}")
-                            }
+                            format_f(f64::from(tmp_min), 10, 2),
+                            format_f(f64::from(tmp_max), 10, 2),
+                            format_f(f64::from(chunk_dmin2), 10, 2),
+                            format_f(f64::from(chunk_dmax2), 10, 2),
+                            format_f(f64::from(dmean2), 10, 2)
                         );
                     }
                     // `newstack.f90:2630-2635`.
-                    dmin = dmin.min(chunk_scaling.dmin2);
-                    dmax = dmax.max(chunk_scaling.dmax2);
+                    // Compiled as `minss dmin2, dmin` / `maxss dmax2, dmax`.
+                    dmin = minss(chunk_scaling.dmin2, dmin);
+                    dmax = maxss(chunk_scaling.dmax2, dmax);
                     // The source has one section loop, so its label 80 tail
                     // (`newstack.f90:2630-2683`) runs for a chunked section
                     // exactly as it does for a whole-section one.  This route
@@ -5567,7 +6073,6 @@ pub fn newstack() {
                     // over too.  Only the reports are consumed here.
                     if i_verbose > 0 {
                         let mut allocation = ReallocateIfNeeded {
-                            physical_memory,
                             process_in_place,
                             ft_reduce_fac,
                             phase_shift,
@@ -5589,8 +6094,6 @@ pub fn newstack() {
                             ny_fcrop_pad,
                             ft_expand_fac,
                             noise_pad,
-                            nx_bin_fft: bin_nx,
-                            ny_bin_fft: bin_ny,
                             lim_to_alloc: alloc_lim_to_alloc,
                             len_temp: alloc_len_temp,
                             pre_set_scaling,
@@ -5643,18 +6146,23 @@ pub fn newstack() {
                         scale_const: scale_factors
                             .get(input_index.min(scale_factors.len().saturating_sub(1)))
                             .map_or(0.0, |entry| entry[1]),
-                        float_average: tmp_min,
-                        float_sd: 0.0,
                         zmin: float2_zmin,
                         zmax: float2_zmax,
                         float_z_margin,
                         opt_float_range,
                         opt_float_min,
+                        // `secMins(ind)`/`secMaxes(ind)` are only read when the
+                        // section is inside the file.
                         section_min: tmp_min,
                         section_max: tmp_max,
-                        section_intentionally_truncated: true,
+                        i_sec_read: in_section,
+                        nz: header.nz,
+                        num_sec_trunc,
+                        z_min_outlier: 0.0,
+                        z_max_outlier: 0.0,
                     };
-                    let factors = find_scale_factors(&scaling_values, tmp_min, tmp_max);
+                    let factors =
+                        find_scale_factors(&scaling_values, tmp_min, tmp_max, &[], &[], &[]);
                     let blank_need = output_nx as usize * output_ny as usize;
                     if array.len() < blank_need {
                         array.resize(blank_need, 0.0);
@@ -5799,15 +6307,41 @@ pub fn newstack() {
                     let (mut max_field_x, mut max_field_y) = (0_i32, 0_i32);
                     if if_mag_grad != 0 || has_warp {
                         let (mut field_max_x, mut field_max_y) = (0.0_f32, 0.0_f32);
+                        // `newstack.f90:2134-2141` as the reference object runs
+                        // it: for `nxGrid >= 4` each row is vectorised (`maxps`,
+                        // four lanes seeded with the running maximum, lane =
+                        // `maxss(lane, new)`, reduced as
+                        // `maxss(maxss(l3, l1), maxss(l2, l0))`), then the
+                        // remainder in scalar `maxss(running, new)`.  Only a NaN
+                        // in the field can tell the orders apart.
                         for iy in 0..ny_grid as usize {
-                            for ix in 0..nx_grid as usize {
-                                let index = ix + iy * lm_grid as usize;
-                                field_max_x = field_max_x.max(field_dx[index].abs());
-                                field_max_y = field_max_y.max(field_dy[index].abs());
+                            let row = iy * lm_grid as usize;
+                            let nx = nx_grid as usize;
+                            let mut start = 0;
+                            if nx >= 4 {
+                                let mut lx = [field_max_x; 4];
+                                let mut ly = [field_max_y; 4];
+                                for group in 0..nx / 4 {
+                                    for lane in 0..4 {
+                                        let index = row + 4 * group + lane;
+                                        lx[lane] = maxss(lx[lane], field_dx[index].abs());
+                                        ly[lane] = maxss(ly[lane], field_dy[index].abs());
+                                    }
+                                }
+                                field_max_x = maxss(maxss(lx[3], lx[1]), maxss(lx[2], lx[0]));
+                                field_max_y = maxss(maxss(ly[3], ly[1]), maxss(ly[2], ly[0]));
+                                start = nx & !3;
+                            }
+                            for ix in start..nx {
+                                let index = row + ix;
+                                field_max_x = maxss(field_max_x, field_dx[index].abs());
+                                field_max_y = maxss(field_max_y, field_dy[index].abs());
                             }
                         }
-                        max_field_x = (field_max_x as f64 + 1.5) as i32;
-                        max_field_y = (field_max_y as f64 + 1.5) as i32;
+                        // `int(fieldMaxX + 1.5)`: a `real*4` add (`addss`), then
+                        // `cvttss2si`.
+                        max_field_x = cvttss2si(field_max_x + 1.5_f32);
+                        max_field_y = cvttss2si(field_max_y + 1.5_f32);
                     }
                     //
                     // Get the index of the transform (`newstack.f90:2048-2053`)
@@ -5912,7 +6446,6 @@ pub fn newstack() {
                         && output_ny <= ny_dim_need
                         && needed_for_output.in_place;
                     let mut allocation = ReallocateIfNeeded {
-                        physical_memory,
                         process_in_place,
                         ft_reduce_fac,
                         phase_shift,
@@ -5934,8 +6467,6 @@ pub fn newstack() {
                         ny_fcrop_pad,
                         ft_expand_fac,
                         noise_pad,
-                        nx_bin_fft: bin_nx,
-                        ny_bin_fft: bin_ny,
                         lim_to_alloc: alloc_lim_to_alloc,
                         len_temp: alloc_len_temp,
                         pre_set_scaling,
@@ -6100,16 +6631,19 @@ pub fn newstack() {
                     // writes past its array -- `-phase -test 1000,1` segfaults
                     // (rc 139), `-size ... -test 1000,1` with a fill prints
                     // `NaN` from uninitialised memory -- so there is nothing
-                    // here to be faithful to.  Both are refusals by name, as
-                    // the chunked-affine route already refuses the taper.
+                    // here to be faithful to.  Fixed in translation
+                    // (2026-09-26, `BUGS.md` §4): the guards at
+                    // `newstack.f90:2200-2205` are meant to refuse exactly
+                    // this, so they fire on the real chunk count, with the
+                    // source's own messages.
                     if layout.len() > 1 && num_taper > 0 {
                         exit_error(
-                            "-taper with -memory or -test is not supported by this translation",
+                            "Cannot taper output image - it does not fit completely in memory",
                         );
                     }
                     if layout.len() > 1 && (phase_shift || fourier_scaling) {
                         exit_error(
-                            "Fourier operations with -memory or -test are not supported by this translation",
+                            "Cannot apply Fourier operations - input and output images do not fit completely in memory",
                         );
                     }
                     // `newstack.f90:2276-2281`.
@@ -6273,7 +6807,7 @@ pub fn newstack() {
                                 scan_temp.len()
                             );
                         }
-                        let Ok((_, _, mean, _, scan_y_start, scan_y_end)) = scan_section(
+                        let (_, _, mean, _, scan_y_start, scan_y_end) = scan_section(
                             &mut scan_array,
                             scan_nx,
                             scan_ny,
@@ -6281,28 +6815,13 @@ pub fn newstack() {
                             read_reduction,
                             rx_offset,
                             ry_offset,
+                            in_section,
                             0,
+                            ind_filter,
+                            read_shrunk,
                             0.0,
-                            |data, lines, x_start, y_start| {
-                                read_binned_or_reduced(
-                                    1,
-                                    in_section,
-                                    data,
-                                    scan_nx,
-                                    lines,
-                                    x_start,
-                                    y_start,
-                                    read_reduction,
-                                    scan_nx,
-                                    lines,
-                                    ind_filter,
-                                    read_shrunk,
-                                    &mut scan_temp,
-                                )
-                            },
-                        ) else {
-                            exit_error("Reading image file");
-                        };
+                            &mut scan_temp,
+                        );
                         //
                         // `scanSection` reads each of its loads into
                         // `array(1)` (`newstack.f90:3437`), so the section's
@@ -6408,8 +6927,6 @@ pub fn newstack() {
                         scale_const: scale_factors
                             .get(input_index.min(scale_factors.len().saturating_sub(1)))
                             .map_or(0.0, |entry| entry[1]),
-                        float_average: 0.,
-                        float_sd: 0.,
                         zmin: float2_zmin,
                         zmax: float2_zmax,
                         float_z_margin,
@@ -6417,11 +6934,11 @@ pub fn newstack() {
                         opt_float_min,
                         section_min: sec_mins.get(section).copied().unwrap_or(0.0),
                         section_max: sec_maxes.get(section).copied().unwrap_or(0.0),
-                        // The negated group of `newstack.f90:3057-3059`.
-                        section_intentionally_truncated: output_mode == 2
-                            || (num_sec_trunc > 0
-                                && (z_min_outlier.get(section).copied().unwrap_or(0.0) < 0.0
-                                    || z_max_outlier.get(section).copied().unwrap_or(0.0) > 0.0)),
+                        i_sec_read: in_section,
+                        nz: header.nz,
+                        num_sec_trunc,
+                        z_min_outlier: z_min_outlier.get(section).copied().unwrap_or(0.0),
+                        z_max_outlier: z_max_outlier.get(section).copied().unwrap_or(0.0),
                     };
                     // `scaleAndWriteChunk` accumulates `dmin2`, `dmax2` and
                     // `dmean2` across every chunk of the section, so the state
@@ -6566,10 +7083,11 @@ pub fn newstack() {
                                     input.resize(degenerate_need, 0.0);
                                 }
                             }
+                            let len_temp = load_temp.len() as i32;
                             let mut temp = &mut load_temp;
                             // `newstack.f90:2376-2379`: the start is the reduced
                             // offset plus the reduction times the load offset.
-                            if read_binned_or_reduced(
+                            read_binned_or_reduced(
                                 1,
                                 in_section,
                                 &mut input[load_base_ind..],
@@ -6583,11 +7101,8 @@ pub fn newstack() {
                                 ind_filter,
                                 read_shrunk,
                                 &mut temp,
-                            )
-                            .is_err()
-                            {
-                                exit_error("End of image while reading");
-                            }
+                                len_temp,
+                            );
                             load_y_start = need_y_start;
                             load_y_end = need_y_end;
                         }
@@ -6977,7 +7492,11 @@ pub fn newstack() {
                         // any rescaling.
                         //
                         let mut chunk_tsum = 0.0_f64;
-                        if if_float == 2 {
+                        // `newstack.f90:2514`: the statistics are gathered
+                        // only `if (.not.rescale .or. ifMean .ne. 0)`;
+                        // otherwise the quick min/max loop below runs.
+                        let stats_needed = !rescale || if_mean != 0;
+                        if stats_needed && if_float == 2 {
                             // `call iclAvgSd(...)` (`newstack.f90:2516`).
                             // `arrayMinMaxMeanSd` (`simplestat.c:270-320`) does not
                             // return the plain pixel sums: it accumulates about a
@@ -7022,8 +7541,10 @@ pub fn newstack() {
                                 );
                             }
                             // `newstack.f90:2529-2531`.
-                            tmp_min = tmp_min.min(tmin2);
-                            tmp_max = tmp_max.max(tmax2);
+                            // `newstack.f90:2528-2529` compile to `minss tmpMin, tmin2`
+                            // and `maxss tmpMax, tmax2`: a NaN keeps the running value.
+                            tmp_min = minss(tmin2, tmp_min);
+                            tmp_max = maxss(tmax2, tmp_max);
                             chunk_tsum = tsum;
                             dsum += tsum;
                             // `dsumSq = dsumSq + tsumSq` (`newstack.f90:2522`);
@@ -7039,7 +7560,7 @@ pub fn newstack() {
                                     list_real(tmp_max)
                                 );
                             }
-                        } else {
+                        } else if stats_needed {
                             // `call iclden(...)` then `tsum = tmean2 * numPix`
                             // (`newstack.f90:2523-2526`).  `arrayMinMaxMean`
                             // (`simplestat.c:177-199`) keeps its per-line running
@@ -7059,8 +7580,10 @@ pub fn newstack() {
                                 &mut tmean2,
                             );
                             // `newstack.f90:2529-2531`.
-                            tmp_min = tmp_min.min(tmin2);
-                            tmp_max = tmp_max.max(tmax2);
+                            // `newstack.f90:2528-2529` compile to `minss tmpMin, tmin2`
+                            // and `maxss tmpMax, tmax2`: a NaN keeps the running value.
+                            tmp_min = minss(tmin2, tmp_min);
+                            tmp_max = maxss(tmax2, tmp_max);
                             // `tsum = tmean2 * numPix` keeps a real*4 result.
                             chunk_tsum =
                                 f64::from(tmean2 * (output_nx as f32 * num_y_chunk as f32));
@@ -7075,6 +7598,23 @@ pub fn newstack() {
                                     list_real(tmp_max)
                                 );
                             }
+                        } else {
+                            //
+                            // "otherwise get new min and max quickly"
+                            // (`newstack.f90:2535-2545`); `tsum` is real*8.
+                            //
+                            let mut tsum = 0.0_f64;
+                            for value in &array[base..end] {
+                                if *value < tmp_min {
+                                    tmp_min = *value;
+                                }
+                                if *value > tmp_max {
+                                    tmp_max = *value;
+                                }
+                                tsum += f64::from(*value);
+                            }
+                            dsum += tsum;
+                            chunk_tsum = tsum;
                         }
                         //
                         // 6/27/01: really want to truncate rather than rescale; so
@@ -7095,15 +7635,17 @@ pub fn newstack() {
                                 if *value > optimal_in {
                                     num_trunc_high += 1;
                                 }
-                                *value = bottom_in.max(optimal_in.min(*value));
+                                // `newstack.f90:2557`: `minss val, optimalIn` then `maxss ., bottomIn`.
+                                *value = maxss(minss(*value, optimal_in), bottom_in);
                                 tsum2 += f64::from(*value);
                             }
-                            tmp_min = tmp_min.max(bottom_in);
-                            tmp_max = tmp_max.min(optimal_in);
+                            // `newstack.f90:2561-2562`.
+                            tmp_min = maxss(tmp_min, bottom_in);
+                            tmp_max = minss(tmp_max, optimal_in);
                             dsum = dsum + tsum2 - chunk_tsum;
                         }
                         // `wallStart = wallTime()` (`newstack.f90:2570`).
-                        let wall_start = crate::imod::libcfshr::b3dutil::wall_time();
+                        let mut wall_start = crate::imod::libcfshr::b3dutil::wall_time();
                         if pre_set_scaling {
                             // `newstack.f90:2570-2576`: the pre-set factors do
                             // not depend on this chunk's min and max, so the
@@ -7111,30 +7653,34 @@ pub fn newstack() {
                             // `findScaleFactors` modifies `tmpMin`/`tmpMax`, so
                             // the source saves and restores them around it.
                             let (save_min, save_max) = (tmp_min, tmp_max);
-                            let factors =
-                                find_scale_factors(&scaling_values, header.amin, header.amax);
+                            // `optimalOut` is one host variable shared with
+                            // `scaleAndWriteChunk`; native raises it there for mode 2, the
+                            // translation does not (BUGS.md, fixed in translation).
+                            scaling_values.optimal_out = scaling.optimal_out;
+                            let factors = find_scale_factors(
+                                &scaling_values,
+                                header.amin,
+                                header.amax,
+                                &dsum_chunk,
+                                &sd_chunk,
+                                &pix_chunk,
+                            );
                             tmp_min = save_min;
                             tmp_max = save_max;
                             scaling.scale_factor = factors.scale_factor;
                             scaling.const_add = factors.const_add;
-                            if scale_and_write_chunk(
+                            scale_and_write_chunk(
                                 &mut array[base..end],
                                 output_nx,
+                                num_lines_out,
                                 &mut scaling,
-                                |_| Ok(()),
-                            )
-                            .is_err()
-                            {
-                                exit_error("Scaling output image");
-                            }
-                            // `scaleAndWriteChunk` does its own write
-                            // (`newstack.f90:3255-3257`); here the write stayed
-                            // with the caller, so the report sits in front of it.
-                            if i_verbose > 0 {
-                                print!(" writing {:>11}\n", chunk_index + 1);
-                            }
-                            iiu_set_position(2, write_section, line_out_st);
-                            iiu_write_lines(2, array[base..end].as_mut_ptr().cast(), num_lines_out);
+                                i_verbose,
+                                chunk_index as i32 + 1,
+                                write_section,
+                                line_out_st,
+                                &mut wall_start,
+                                &mut save_time,
+                            );
                         } else if !rescale {
                             // `newstack.f90:2581-2584`.
                             if i_verbose > 0 {
@@ -7162,23 +7708,8 @@ pub fn newstack() {
                         // `newstack.f90:2590`.
                         save_time += crate::imod::libcfshr::b3dutil::wall_time() - wall_start;
                     }
-                    // `chunkSumsToAvgsd` (`newstack.f90:3556`) over the chunks
-                    // as `iclAvgSd` supplied them.
-                    let (float_average, float_sd) = if dsum_chunk.is_empty() {
-                        (0.0, 0.0)
-                    } else {
-                        chunk_sums_to_avgsd(
-                            &dsum_chunk,
-                            &sd_chunk,
-                            &pix_chunk,
-                            output_nx,
-                            output_ny,
-                        )
-                    };
                     scaling_values.dsum = dsum;
                     scaling_values.dsum_sq = dsum_sq;
-                    scaling_values.float_average = float_average;
-                    scaling_values.float_sd = float_sd;
                     if !pre_set_scaling {
                         //
                         // `newstack.f90:2592-2611`: find the factors from the
@@ -7187,7 +7718,15 @@ pub fn newstack() {
                         // is not cosmetic: `dmin2`, `dmax2` and `dmean2`
                         // accumulate in that order.
                         //
-                        let factors = find_scale_factors(&scaling_values, tmp_min, tmp_max);
+                        scaling_values.optimal_out = scaling.optimal_out;
+                        let factors = find_scale_factors(
+                            &scaling_values,
+                            tmp_min,
+                            tmp_max,
+                            &dsum_chunk,
+                            &sd_chunk,
+                            &pix_chunk,
+                        );
                         tmp_min = factors.tmp_min;
                         tmp_max = factors.tmp_max;
                         scaling.scale_factor = factors.scale_factor;
@@ -7214,26 +7753,19 @@ pub fn newstack() {
                                     exit_error("Reading temporary file");
                                 }
                             }
-                            if scale_and_write_chunk(
+                            let mut wall_start = 0.0_f64;
+                            scale_and_write_chunk(
                                 &mut array[base..end],
                                 output_nx,
+                                num_lines_out,
                                 &mut scaling,
-                                |_| Ok(()),
-                            )
-                            .is_err()
-                            {
-                                exit_error("Scaling output image");
-                            }
-                            // `wallStart = wallTime()` (`newstack.f90:3254`).
-                            let wall_start = crate::imod::libcfshr::b3dutil::wall_time();
-                            // `newstack.f90:3255`.
-                            if i_verbose > 0 {
-                                print!(" writing {:>11}\n", chunk_index + 1);
-                            }
-                            iiu_set_position(2, write_section, line_out_st);
-                            iiu_write_lines(2, array[base..end].as_mut_ptr().cast(), num_lines_out);
-                            // `newstack.f90:3258`.
-                            save_time += crate::imod::libcfshr::b3dutil::wall_time() - wall_start;
+                                i_verbose,
+                                chunk_index as i32 + 1,
+                                write_section,
+                                line_out_st,
+                                &mut wall_start,
+                                &mut save_time,
+                            );
                         }
                     }
                     num_trunc_low += scaling.num_trunc_low;
@@ -7289,37 +7821,18 @@ pub fn newstack() {
                         println!(
                             "{:8}{}{}{}{}{}",
                             route_index - 1,
-                            if format!("{tmp_min:.2}").len() > 10 {
-                                "**********".to_owned()
-                            } else {
-                                format!("{tmp_min:10.2}")
-                            },
-                            if format!("{tmp_max:.2}").len() > 10 {
-                                "**********".to_owned()
-                            } else {
-                                format!("{tmp_max:10.2}")
-                            },
-                            if format!("{dmin2:.2}").len() > 10 {
-                                "**********".to_owned()
-                            } else {
-                                format!("{dmin2:10.2}")
-                            },
-                            if format!("{dmax2:.2}").len() > 10 {
-                                "**********".to_owned()
-                            } else {
-                                format!("{dmax2:10.2}")
-                            },
-                            if format!("{dmean2:.2}").len() > 10 {
-                                "**********".to_owned()
-                            } else {
-                                format!("{dmean2:10.2}")
-                            }
+                            format_f(f64::from(tmp_min), 10, 2),
+                            format_f(f64::from(tmp_max), 10, 2),
+                            format_f(f64::from(dmin2), 10, 2),
+                            format_f(f64::from(dmax2), 10, 2),
+                            format_f(f64::from(dmean2), 10, 2)
                         );
                     }
                 }
                 // `newstack.f90:2630-2635`.
-                dmin = dmin.min(dmin2);
-                dmax = dmax.max(dmax2);
+                // Compiled as `minss dmin2, dmin` / `maxss dmax2, dmax`.
+                dmin = minss(dmin2, dmin);
+                dmax = maxss(dmax2, dmax);
                 // The source only accumulates `dmean` when `numReplace == 0`,
                 // so a replaced file keeps the mean its header already had.
                 if list_replace.is_empty() {
@@ -7430,7 +7943,11 @@ pub fn newstack() {
                                 if value < -180. {
                                     value += 360.;
                                 }
-                                let title_text = format!("Tilt axis angle = {value:8.1}");
+                                // `(a,f8.1)` (`newstack.f90:2698`).
+                                let title_text = format!(
+                                    "Tilt axis angle = {}",
+                                    format_f(f64::from(value), 8, 1)
+                                );
                                 set_current_adoc_or_exit(ind_adoc_out, "output");
                                 if adoc_add_section(b"T", title_text.as_bytes()).is_err() {
                                     exit_error("Adding title section to autodoc");
@@ -7598,7 +8115,8 @@ pub fn newstack() {
             };
             use std::io::Write;
             for angle in &extra_tilts {
-                if writeln!(file, "{angle:9.2}").is_err() {
+                // `(f9.2)` (`newstack.f90:2772`).
+                if writeln!(file, "{}", format_f(f64::from(*angle), 9, 2)).is_err() {
                     exit_error("Writing new tilt angle output file");
                 }
             }
@@ -7729,22 +8247,33 @@ pub fn back_xform(
     )
 }
 
-/// Original `getReducedSize` (`newstack.f90:3507`).
+/// Original `getReducedSize` (`newstack.f90:3507`).  Returns `nxBin` and
+/// `xOffset`.
 pub fn get_reduced_size(
     nx: i32,
     reduction: f32,
     do_shrink: bool,
     if_odd_even_ok: i32,
 ) -> (i32, f32) {
+    let nx_bin: i32;
+    let x_offset: f32;
+    //
+    // For non-integer shrinkage, just cut the size, otherwise match the binned
+    // size for consistency in tilt series processing
+    // (`nint` rounds half away from zero, as `f32::round` does.)
     if do_shrink && (reduction.round() - reduction).abs() > 1.0e-4 {
-        let nx_bin = (nx as f32 / reduction) as i32;
-        return (nx_bin, (nx as f32 - nx_bin as f32 * reduction) / 2.0);
+        nx_bin = (nx as f32 / reduction) as i32;
+        x_offset = (nx as f32 - nx_bin as f32 * reduction) / 2.;
+    } else {
+        let (binned, ix_offset) = get_binned_size(nx, reduction.round() as i32, if_odd_even_ok);
+        nx_bin = binned;
+        x_offset = ix_offset as f32;
     }
-    let (nx_bin, ix_offset) = get_binned_size(nx, reduction.round() as i32, if_odd_even_ok);
-    (nx_bin, ix_offset as f32)
+    (nx_bin, x_offset)
 }
 
-/// Original `chunkSumsToAvgsd` (`newstack.f90:3556`).
+/// Original `chunkSumsToAvgsd` (`newstack.f90:3556`).  `numChunks` is the
+/// slices' length; returns `avgSec` and `sdSec`.
 pub fn chunk_sums_to_avgsd(
     dsum_chunk: &[f64],
     sd_chunk: &[f32],
@@ -7752,94 +8281,130 @@ pub fn chunk_sums_to_avgsd(
     nx: i32,
     ny: i32,
 ) -> (f32, f32) {
-    let pix_tot = f64::from(nx) * f64::from(ny);
-    let dsum: f64 = dsum_chunk.iter().sum();
-    let dmean = dsum / pix_tot;
+    let num_chunks = dsum_chunk.len();
+    let mut avg_chunk = vec![0.0_f64; num_chunks];
+    let mut dsum = 0.0_f64;
+    let pix_tot = (nx as i64 * ny as i64) as f64;
+    for ichunk in 0..num_chunks {
+        dsum = dsum + dsum_chunk[ichunk];
+        avg_chunk[ichunk] = dsum_chunk[ichunk] / pix_chunk[ichunk];
+    }
+    let dmean8 = dsum / pix_tot;
+    let avg_sec = dmean8 as f32;
+    let mut dsum_sq = 0.0_f64;
     // `newstack.f90:3572-3574`: the two terms are added onto the running
     // `dsumSq` one after the other, and `sdChunk(ichunk)**2` squares a
     // **real*4**, so the square is rounded to single precision before it is
     // widened for the product.
-    let mut dsum_sq = 0.0_f64;
-    for index in 0..dsum_chunk.len() {
-        let average = dsum_chunk[index] / pix_chunk[index];
+    for ichunk in 0..num_chunks {
         dsum_sq = dsum_sq
-            + pix_chunk[index] * (average * average - dmean * dmean)
-            + (pix_chunk[index] - 1.0) * f64::from(sd_chunk[index] * sd_chunk[index]);
+            + pix_chunk[ichunk] * (avg_chunk[ichunk] * avg_chunk[ichunk] - dmean8 * dmean8)
+            + (pix_chunk[ichunk] - 1.0) * f64::from(sd_chunk[ichunk] * sd_chunk[ichunk]);
     }
-    (
-        dmean as f32,
-        (dsum_sq.max(0.0) / (pix_tot - 1.0).max(1.0)).sqrt() as f32,
-    )
+    // `newstack.f90:3576` `sqrt(max(0., dsumSq / max(1., pixTot - 1.)))`,
+    // compiled as two `maxsd` with the constant as the source operand.
+    let sd_sec = maxsd(dsum_sq / maxsd(pix_tot - 1.0, 1.0), 0.0).sqrt() as f32;
+    (avg_sec, sd_sec)
 }
 
 /// Original `getItemsToUse` (`newstack.f90:3296`).
+///
+/// `lineUse`/`nLineUse` are the returned `Vec` and its length; `limSec` is
+/// the caller's `listAlloc`, the declared size of `lineUse`.  The scratch
+/// `listString` is the caller's `character*100000` (`newstack.f90:30`).
 pub fn get_items_to_use(
-    nxforms: i32,
+    n_xforms: i32,
+    list_total: i32,
     in_list: &[i32],
     option: &[u8],
+    pipinput: bool,
     error: &str,
-    one_per_file: bool,
+    if_one_per_file: i32,
     num_in_files: i32,
     number_offset: i32,
+    lim_sec: i32,
 ) -> Vec<i32> {
-    let mut line_use = if nxforms == 1 {
-        vec![number_offset]
-    } else if one_per_file {
-        (0..num_in_files)
-            .map(|index| index + number_offset)
-            .collect()
-    } else {
-        in_list.iter().map(|&index| index + number_offset).collect()
-    };
+    let mut line_use = vec![0_i32; lim_sec.max(num_in_files).max(list_total).max(1) as usize];
+    let mut n_line_use: i32;
     //
-    // `newstack.f90:3333-3344`: the option is read **here**, and every one of
-    // its `PipNumberOfEntries` entries is parsed and appended.  Reading a
-    // single entry outside made `-uselines 0,1 -uselines 2,3,4` use only the
-    // first, which then failed the caller's section-count check.
+    // Set up default list, add one back if numbered from one
+    // (`newstack.f90:3306`: `errString` is written here and overwritten
+    // before it is ever used.)
+    let mut err_string = format!("Too many {error} numbers for arrays");
+    if n_xforms == 1 {
+        //
+        // for one transform, set up single line for now
+        //
+        n_line_use = 1;
+        line_use[0] = number_offset;
+    } else if if_one_per_file > 0 {
+        //
+        // for one transform per file, default is 0 to nfile - 1
+        //
+        n_line_use = num_in_files;
+        for i in 1..=num_in_files {
+            line_use[i as usize - 1] = i + number_offset - 1;
+        }
+    } else {
+        //
+        // Otherwise default comes from section list
+        //
+        n_line_use = list_total;
+        for i in 1..=list_total {
+            line_use[i as usize - 1] = in_list[i as usize - 1] + number_offset;
+        }
+    }
     //
     let mut num_xf_lines = 0_i32;
-    {
-        pip_number_of_entries(option, &mut num_xf_lines)
-    };
-    if num_xf_lines > 0 {
-        let mut parsed = Vec::<i32>::new();
-        for _ in 0..num_xf_lines {
-            let mut string_value: Vec<u8> = Vec::new();
-            let list = {
-                if pip_get_string(option, &mut string_value) != 0 {
-                    continue;
-                }
-                let list = String::from_utf8_lossy(&string_value).into_owned();
-                list
-            };
-            let mut values = vec![0_i32; 1_000_000 - parsed.len()];
-            let (mut count, mut limit) = (0, (1_000_000 - parsed.len()) as i32);
-            // `parseList2` prints its own `ERROR: PARSELIST - ...` and exits
-            // for a positive `limList` (`rdlist.f90:71-79`), which is what the
-            // source passes, so there is no failure for this routine to
-            // report.
-            drop(parselist2(&list, &mut values, &mut count, &mut limit));
-            values.truncate(count as usize);
-            parsed.extend(values);
+    if pipinput {
+        pip_number_of_entries(option, &mut num_xf_lines);
+        if num_xf_lines > 0 {
+            let mut num_lines_temp = n_line_use;
+            n_line_use = 0;
+            let mut list_string = vec![b' '; 100000];
+            for _i in 1..=num_xf_lines {
+                // `ierr = PipGetString(option, listString)`, not tested.
+                let _ierr = pipgetstring_(option, &mut list_string);
+                let end = list_string
+                    .iter()
+                    .rposition(|byte| *byte != b' ')
+                    .map_or(0, |i| i + 1);
+                // `parseList2` prints its own `ERROR: PARSELIST - ...` and
+                // exits for a positive `limList` (`rdlist.f90:71-79`).
+                let mut lim_list = lim_sec - n_line_use;
+                let _ = parselist2(
+                    &String::from_utf8_lossy(&list_string[..end]),
+                    &mut line_use[n_line_use as usize..],
+                    &mut num_lines_temp,
+                    &mut lim_list,
+                );
+                n_line_use += num_lines_temp;
+            }
         }
-        line_use = parsed;
+    } else {
+        //
+        println!(" Enter list of lines to use in file, or a single line number to apply that");
+        println!("  transform to all sections (1st line is 0; ranges OK; / for section list)");
+        let mut lim_list = lim_sec;
+        let _ = rdlist2(
+            &mut std::io::stdin().lock(),
+            &mut line_use,
+            &mut n_line_use,
+            &mut lim_list,
+        );
     }
-    for line in &mut line_use {
-        *line -= number_offset;
-        if *line < 0 || *line >= nxforms {
-            //
-            // `newstack.f90:3355-3358`: the subroutine builds
-            // `error // ' number out of bounds:' // i5` and calls
-            // `exitError(trim(errString))` itself.  Returning the failure to
-            // the caller instead lost the offending index and the `i5` field,
-            // and left each caller to invent its own wording.
-            //
-            exit_error(&format!(
+
+    for i in 1..=n_line_use as usize {
+        line_use[i - 1] -= number_offset;
+        if line_use[i - 1] < 0 || line_use[i - 1] >= n_xforms {
+            err_string = format!(
                 "{error} number out of bounds:{:5}",
-                *line + number_offset
-            ));
+                line_use[i - 1] + number_offset
+            );
+            exit_error(err_string.trim_end());
         }
     }
+    line_use.truncate(n_line_use.max(0) as usize);
     line_use
 }
 
@@ -7889,9 +8454,9 @@ pub fn lines_needed_for_output(
         // divisions promote to real for the sum with `ycen`, and the whole
         // expression truncates on assignment to the integer.
         let iy_base =
-            ((values.ny_bin / 2) as f32 + values.ycen - (values.ny_out / 2) as f32) as i32;
+            cvttss2si((values.ny_bin / 2) as f32 + values.ycen - (values.ny_out / 2) as f32);
         let ix_base =
-            ((values.nx_bin / 2) as f32 + values.xcen - (values.nx_out / 2) as f32) as i32;
+            cvttss2si((values.nx_bin / 2) as f32 + values.xcen - (values.nx_out / 2) as f32);
         return LinesNeededResult {
             iy_in_1: 0.max(iy_base + line_out_first),
             iy_in_2: (values.ny_bin - 1).min(iy_base + line_out_last),
@@ -7956,33 +8521,28 @@ pub fn lines_needed_for_output(
             line_out_last + 1,
         ),
     ];
-    let ix1 = points
-        .iter()
-        .map(|point| point.0)
-        .fold(f32::INFINITY, f32::min) as i32
-        - 2
-        - values.max_field_x
-        - values.lines_shrink;
-    let ix2 = points
-        .iter()
-        .map(|point| point.0)
-        .fold(f32::NEG_INFINITY, f32::max) as i32
-        + 1
-        + values.max_field_x
-        + values.lines_shrink;
-    let iy1 = points
-        .iter()
-        .map(|point| point.1)
-        .fold(f32::INFINITY, f32::min) as i32
+    // `newstack.f90:2956-2959`: the four-argument `min`/`max` as the reference
+    // object associates them (operand orders read from the disassembly of
+    // the inlined `backXform` results), converted with `cvttss2si`.
+    let (xp1, yp1) = points[0];
+    let (xp2, yp2) = points[1];
+    let (xp3, yp3) = points[2];
+    let (xp4, yp4) = points[3];
+    let iy1 = cvttss2si(minss(minss(yp2, yp1), minss(yp4, yp3)))
         - 2
         - values.max_field_y
         - values.lines_shrink;
-    let iy2 = points
-        .iter()
-        .map(|point| point.1)
-        .fold(f32::NEG_INFINITY, f32::max) as i32
+    let iy2 = cvttss2si(maxss(maxss(yp2, yp1), maxss(yp4, yp3)))
         + 1
         + values.max_field_y
+        + values.lines_shrink;
+    let ix1 = cvttss2si(minss(minss(xp4, xp3), minss(xp2, xp1)))
+        - 2
+        - values.max_field_x
+        - values.lines_shrink;
+    let ix2 = cvttss2si(maxss(maxss(xp4, xp3), maxss(xp2, xp1)))
+        + 1
+        + values.max_field_x
         + values.lines_shrink;
     LinesNeededResult {
         iy_in_1: iy1.clamp(0, values.ny_bin - 1),
@@ -8035,8 +8595,6 @@ pub struct FindScaleFactors {
     pub const_add: f32,
     pub scale_fac: f32,
     pub scale_const: f32,
-    pub float_average: f32,
-    pub float_sd: f32,
     pub zmin: f32,
     pub zmax: f32,
     pub float_z_margin: f32,
@@ -8044,7 +8602,13 @@ pub struct FindScaleFactors {
     pub opt_float_min: f32,
     pub section_min: f32,
     pub section_max: f32,
-    pub section_intentionally_truncated: bool,
+    /// `iSecRead` and the input's `nz`: a section outside the file is blank.
+    pub i_sec_read: i32,
+    pub nz: i32,
+    /// `numSecTrunc` and this section's `zMinOutlier(ind)`/`zMaxOutlier(ind)`.
+    pub num_sec_trunc: i32,
+    pub z_min_outlier: f32,
+    pub z_max_outlier: f32,
 }
 
 /// Result values (including source's mutable `tmpMin/tmpMax`) of
@@ -8063,6 +8627,9 @@ pub fn find_scale_factors(
     values: &FindScaleFactors,
     tmp_min_in: f32,
     tmp_max_in: f32,
+    dsum_chunk: &[f64],
+    sd_chunk: &[f32],
+    pix_chunk: &[f64],
 ) -> ScaleFactors {
     let mut scale_factor = 1.;
     let mut const_add = 0.;
@@ -8097,15 +8664,44 @@ pub fn find_scale_factors(
         if values.if_mean == 0 {
             dmax_out = values.optimal_out;
         } else if values.if_float == 2 {
-            let average = values.float_average;
-            let mut sd = if tmp_min == tmp_max || values.float_sd == 0. {
-                1.
+            // :float to mean, it's very hairy
+            // For blank image, use same approach as before to get a 0 sd, otherwise get the
+            // accurate SD from the chunk sums
+            let (mut average, mut sd) = (0.0_f32, 0.0_f32);
+            if values.i_sec_read < 0 || values.i_sec_read >= values.nz {
+                // `sums_to_avgsd8`, the Fortran wrapper of `sumsToAvgSDdbl`.
+                crate::imod::libcfshr::simplestat::sums_to_avg_sd_dbl(
+                    values.dsum,
+                    values.dsum_sq,
+                    values.nx_out,
+                    values.ny_out,
+                    &mut average,
+                    &mut sd,
+                );
             } else {
-                values.float_sd
-            };
+                (average, sd) = chunk_sums_to_avgsd(
+                    dsum_chunk,
+                    sd_chunk,
+                    pix_chunk,
+                    values.nx_out,
+                    values.ny_out,
+                );
+            }
+            if tmp_min == tmp_max || sd == 0. {
+                sd = 1.;
+            }
+            //
+            // If either the min or the max has become MORE extreme due to
+            // interpolation than the margin on the range, reduce the scaling.
+            // Exempt blank sections, float output and sections that are
+            // intentionally being truncated due to outliers.
             let zmin_now = (tmp_min - average) / sd;
             let zmax_now = (tmp_max - average) / sd;
-            if !values.section_intentionally_truncated
+            if !(values.i_sec_read < 0
+                || values.i_sec_read >= values.nz
+                || values.new_mode == 2
+                || (values.num_sec_trunc > 0
+                    && (values.z_min_outlier < 0. || values.z_max_outlier > 0.)))
                 && (zmin_now < values.zmin - values.float_z_margin
                     || zmax_now > values.zmax + values.float_z_margin)
             {
@@ -8121,20 +8717,28 @@ pub fn find_scale_factors(
                 {
                     boost_max = zmax_now / (values.zmax + values.float_z_margin);
                 }
-                sd *= boost_min.max(boost_max);
+                // `max(boostForMin, boostForMax)` is `maxss boostForMin,
+                // boostForMax` in the reference object (dest = boostForMax).
+                sd *= maxss(boost_max, boost_min);
             }
-            tmp_min = tmp_min.max(values.zmin * sd + average);
-            tmp_max = tmp_max.min(values.zmax * sd + average);
+            // `newstack.f90:3073-3074` compile to `maxss zmin*sd+avg, tmpMin`
+            // and `minss tmpMax, zmax*sd+avg` (read from the reference
+            // object): a NaN keeps `tmpMin` but replaces `tmpMax`.
+            tmp_min = maxss(values.zmin * sd + average, tmp_min);
+            tmp_max = minss(tmp_max, values.zmax * sd + average);
             let zmin_section = (tmp_min - average) / sd;
             let zmax_section = (tmp_max - average) / sd;
-            dmin_out = ((zmin_section - values.zmin) * values.opt_float_range
-                / (values.zmax - values.zmin)
-                + values.opt_float_min)
-                .max(0.);
-            dmax_out = ((zmax_section - values.zmin) * values.opt_float_range
-                / (values.zmax - values.zmin)
-                + values.opt_float_min)
-                .min(values.optimal_out);
+            // `newstack.f90:3079-3080`: `maxss dminOut, 0.`, `minss dmaxOut, optimalOut`.
+            dmin_out = maxss(
+                (zmin_section - values.zmin) * values.opt_float_range / (values.zmax - values.zmin)
+                    + values.opt_float_min,
+                0.,
+            );
+            dmax_out = minss(
+                (zmax_section - values.zmin) * values.opt_float_range / (values.zmax - values.zmin)
+                    + values.opt_float_min,
+                values.optimal_out,
+            );
         } else {
             // `tmpMean = dsum / (float(nxOut) * nyOut)`: a real*8 numerator
             // over a real*4 product, rounded once on assignment.
@@ -8146,7 +8750,8 @@ pub fn find_scale_factors(
                 dmin_out = tmp_min_shift;
                 dmax_out = tmp_max_shift;
                 if values.new_mode != 2 {
-                    let optimal_in = values.optimal_in.max(values.shift_max);
+                    // `newstack.f90:3104`: `maxss optimalIn, shiftMax`.
+                    let optimal_in = maxss(values.optimal_in, values.shift_max);
                     dmin_out = tmp_min_shift * values.optimal_out / optimal_in;
                     dmax_out = tmp_max_shift * values.optimal_out / optimal_in;
                 }
@@ -8201,7 +8806,10 @@ pub fn find_scale_factors(
     }
 }
 
-/// Original `readBinnedOrReduced` (`newstack.f90:3528`).
+/// Original `readBinnedOrReduced` (`newstack.f90:3528`).  `iiu_read_reduced`
+/// and `iiu_read_binned` are the C entry points behind the `irdReduced` /
+/// `irdBinned` Fortran wrappers (`unit_reduced.c`), which pass every argument
+/// through unchanged.
 pub fn read_binned_or_reduced(
     im_unit: i32,
     iz: i32,
@@ -8216,32 +8824,22 @@ pub fn read_binned_or_reduced(
     ifilt_type: i32,
     do_shrink: bool,
     temp: &mut [f32],
-) -> Result<(), i32> {
+    len_temp: i32,
+) {
     let mut ierr = 0;
     if do_shrink {
         iiu_read_reduced(
-            im_unit,
-            iz,
-            array,
-            nx_dim,
-            x_ub_start,
-            y_ub_start,
-            red_fac,
-            nx_red,
-            ny_red,
-            ifilt_type,
-            temp,
-            temp.len() as i32,
-            &mut ierr,
+            im_unit, iz, array, nx_dim, x_ub_start, y_ub_start, red_fac, nx_red, ny_red,
+            ifilt_type, temp, len_temp, &mut ierr,
         );
-        // `newstack.f90:3539-3543`, whose `write(listString, '(a,i2,a)')`
-        // right-justifies the code in two columns.
+        // `write(listString, '(a,i2,a)')` right-justifies the code in two
+        // columns.
         if ierr > 0 {
-            exit_error(&format!(
-                "Calling irdReduced to read image (error code{ierr:2})"
-            ));
+            let list_string = format!("Calling irdReduced to read image (error code{ierr:2})");
+            exit_error(&list_string);
         }
     } else {
+        // `nint` rounds half away from zero, as `f32::round` does.
         iiu_read_binned(
             im_unit,
             iz,
@@ -8254,22 +8852,19 @@ pub fn read_binned_or_reduced(
             nx_red,
             ny_red,
             temp,
-            temp.len() as i32,
+            len_temp,
             &mut ierr,
         );
     }
-    // `newstack.f90:3548`: the subroutine itself exits on a read failure, so
-    // the message is this routine's, not the caller's.
     if ierr != 0 {
         exit_error("Reading image file");
     }
-    if ierr == 0 { Ok(()) } else { Err(ierr) }
 }
 
-/// Original `scanSection` (`newstack.f90:3408`) chunking and statistics.
-/// The closure is the source's `readBinnedOrReduced` call retained at its
-/// call site in the program unit.
-pub fn scan_section<F>(
+/// Original `scanSection` (`newstack.f90:3408`).  `array` is `idimInOut`
+/// elements and `temp` is `lenTemp`; returns `dmin2`, `dmax2`, `dmean2`,
+/// `sdSec`, `loadYstart` and `loadYend`.
+pub fn scan_section(
     array: &mut [f32],
     nx: i32,
     ny_needed: i32,
@@ -8277,106 +8872,129 @@ pub fn scan_section<F>(
     reduction: f32,
     rx_offset: f32,
     ry_offset: f32,
+    i_sec_read: i32,
     if_float: i32,
+    ind_filter: i32,
+    read_shrunk: bool,
     fix_range_sds: f32,
-    mut read: F,
-) -> Result<(f32, f32, f32, f32, i32, i32), i32>
-where
-    F: FnMut(&mut [f32], i32, f32, f32) -> Result<(), i32>,
-{
-    let max_lines = array.len() as i32 / nx;
+    temp: &mut [f32],
+) -> (f32, f32, f32, f32, i32, i32) {
+    let idim_in_out = array.len() as i64;
+    let len_temp = temp.len() as i32;
+    let (mut tmin2, mut tmax2, mut tmean2) = (0.0_f32, 0.0_f32, 0.0_f32);
+    let mut tsum_sq = 0.0_f64;
+    let mut dmean2 = 0.0_f32;
+    let mut sd_sec = 0.0_f32;
+    //
+    // load in chunks if necessary, based on the maximum number
+    // of lines that will fit in the array
+    //
+    let max_lines = (idim_in_out / nx as i64) as i32;
+    // `numLoads` divides by `maxLines`: an array narrower than one line is an
+    // integer divide by zero in the source (SIGFPE).  Not reproduced.
     if max_lines <= 0 {
-        return Err(1);
+        exit_error("Reading image file");
     }
     let num_loads = (ny_needed + max_lines - 1) / max_lines;
-    let (mut line, mut dmin2, mut dmax2, mut dsum, mut last_lines) =
-        (need_y_first, 1.0e30_f32, -1.0e30_f32, 0_f64, 0);
-    let (mut sums, mut sds, mut pixels) = (Vec::new(), Vec::new(), Vec::new());
-    for load in 1..=num_loads {
-        let mut lines = ny_needed / num_loads;
-        if load <= ny_needed % num_loads {
-            lines += 1;
+    // `sumLoad`, `sdLoad`, `pixLoad` are automatic arrays of
+    // `1 + nyNeeded / (idimInOut / nx)` elements.
+    let dim_loads = (1 + ny_needed / max_lines) as usize;
+    let mut sum_load = vec![0.0_f64; dim_loads.max(num_loads as usize)];
+    let mut sd_load = vec![0.0_f32; dim_loads.max(num_loads as usize)];
+    let mut pix_load = vec![0.0_f64; dim_loads.max(num_loads as usize)];
+    let mut iline = need_y_first;
+    let mut dmin2 = 1.0e30_f32;
+    let mut dmax2 = -dmin2;
+    let mut dsum = 0.0_f64;
+    let mut num_lines = 0;
+    for iload in 1..=num_loads {
+        num_lines = ny_needed / num_loads;
+        if iload <= ny_needed % num_loads {
+            num_lines += 1;
         }
-        let count = nx as usize * lines as usize;
-        read(
-            &mut array[..count],
-            lines,
+        let count = nx as usize * num_lines as usize;
+        read_binned_or_reduced(
+            1,
+            i_sec_read,
+            array,
+            nx,
+            num_lines,
             rx_offset,
-            ry_offset + reduction * line as f32,
-        )?;
-        let values = &array[..count];
-        dmin2 = dmin2.min(values.iter().copied().fold(f32::INFINITY, f32::min));
-        dmax2 = dmax2.max(values.iter().copied().fold(f32::NEG_INFINITY, f32::max));
+            ry_offset + reduction * iline as f32,
+            reduction,
+            nx,
+            num_lines,
+            ind_filter,
+            read_shrunk,
+            temp,
+            len_temp,
+        );
+        let il = iload as usize - 1;
         //
-        // accumulate sums for mean and sd if float 2, otherwise just the mean
+        // accumulate sums for mean and sd if float 2, otherwise
+        // just the mean.  Store the floating SD's and # of pixels, compute more accurate mean
         //
-        let sum = if if_float == 2 || fix_range_sds > 0. {
-            // `call iclAvgSd(array, nx, numLines, 1, nx, 1, numLines, tmin2,
-            // tmax2, sumLoad(iload), tsumSq, dmean2, sdLoad(iload))`
-            // (`newstack.f90:3443-3445`).  `arrayMinMaxMeanSd`
-            // (`simplestat.c:270-320`) does not return the plain pixel sum: it
-            // accumulates in single precision about a subsampled rough mean
-            // and then rebuilds the sum as `nxArea * (nyArea * avg8)`, so
-            // summing the pixels here instead gives a different `sumLoad` and
-            // a different `sdLoad`.
-            let (mut tmin2, mut tmax2) = (0.0_f32, 0.0_f32);
-            let (mut sum, mut tsum_sq) = (0.0_f64, 0.0_f64);
-            let (mut avg_sec, mut sd_load) = (0.0_f32, 0.0_f32);
-            {
-                crate::imod::libcfshr::simplestat::array_min_max_mean_sd(
-                    &values,
-                    nx,
-                    lines,
-                    0,
-                    nx - 1,
-                    0,
-                    lines - 1,
-                    &mut tmin2,
-                    &mut tmax2,
-                    &mut sum,
-                    &mut tsum_sq,
-                    &mut avg_sec,
-                    &mut sd_load,
-                );
-            }
-            sds.push(sd_load);
-            sum
+        if if_float == 2 || fix_range_sds > 0. {
+            // `call iclAvgSd(array, nx, numLines, 1, nx, 1, numLines, ...)`:
+            // the wrapper passes 0-based limits to `arrayMinMaxMeanSd`
+            // (`simplestat.c:270-320`), which rebuilds the sum as
+            // `nxArea * (nyArea * avg8)` rather than returning the pixel sum.
+            crate::imod::libcfshr::simplestat::array_min_max_mean_sd(
+                &array[..count],
+                nx,
+                num_lines,
+                0,
+                nx - 1,
+                0,
+                num_lines - 1,
+                &mut tmin2,
+                &mut tmax2,
+                &mut sum_load[il],
+                &mut tsum_sq,
+                &mut dmean2,
+                &mut sd_load[il],
+            );
+            pix_load[il] = (nx as i64 * num_lines as i64) as f64;
         } else {
-            // `call iclden(...)` then `sumLoad(iload) = (tmean2 * nx) * numLines`:
-            // `arrayMinMaxMean` (`simplestat.c:177-199`) keeps the per-line
-            // running total in single precision, and the Fortran product of a
-            // real*4 mean with integer extents stays in single precision.
-            let mut sum_dbl = 0.0_f64;
-            for row in values.chunks_exact(nx as usize) {
-                let mut sum_tmp = 0.0_f32;
-                for value in row {
-                    sum_tmp += *value;
-                }
-                sum_dbl += f64::from(sum_tmp);
-            }
-            let tmean2 = (sum_dbl / count as f64) as f32;
-            sds.push(0.);
-            f64::from((tmean2 * nx as f32) * lines as f32)
-        };
-        dsum += sum;
-        sums.push(sum);
-        pixels.push(count as f64);
-        line += lines;
-        last_lines = lines;
+            // `call iclden(...)`: `arrayMinMaxMean` (`simplestat.c:177-199`).
+            crate::imod::libcfshr::simplestat::array_min_max_mean(
+                &array[..count],
+                nx,
+                num_lines,
+                0,
+                nx - 1,
+                0,
+                num_lines - 1,
+                &mut tmin2,
+                &mut tmax2,
+                &mut tmean2,
+            );
+            // `(tmean2 * nx) * numLines` is single precision.
+            sum_load[il] = f64::from((tmean2 * nx as f32) * num_lines as f32);
+        }
+        // `newstack.f90:3452-3453` compile to `minss dmin2, tmin2` and
+        // `maxss dmax2, tmax2`: a NaN `tmin2`/`tmax2` replaces the running value.
+        dmin2 = minss(dmin2, tmin2);
+        dmax2 = maxss(dmax2, tmax2);
+        dsum = dsum + sum_load[il];
+        iline = iline + num_lines;
     }
-    let dmean2 = (dsum / nx as f64 / ny_needed as f64) as f32;
-    let sd_sec = if if_float == 2 || fix_range_sds > 0. {
-        chunk_sums_to_avgsd(&sums, &sds, &pixels, nx, ny_needed).1
-    } else {
-        0.
-    };
-    Ok((dmin2, dmax2, dmean2, sd_sec, line - last_lines, line - 1))
+    //
+    // Compute accurate overall mean, and then combine all the mean and SD data to get the SD
+    dmean2 = ((dsum / nx as f64) / ny_needed as f64) as f32;
+    if if_float == 2 || fix_range_sds > 0. {
+        let n = num_loads as usize;
+        (dmean2, sd_sec) =
+            chunk_sums_to_avgsd(&sum_load[..n], &sd_load[..n], &pix_load[..n], nx, ny_needed);
+    }
+    let load_y_end = iline - 1;
+    let load_y_start = iline - num_lines;
+    (dmin2, dmax2, dmean2, sd_sec, load_y_start, load_y_end)
 }
 
 /// Program-unit values used by `reallocateIfNeeded` (`newstack.f90:2798`).
 #[derive(Clone, Copy, Debug)]
 pub struct ReallocateIfNeeded {
-    pub physical_memory: f64,
     pub process_in_place: bool,
     pub ft_reduce_fac: f32,
     pub phase_shift: bool,
@@ -8399,8 +9017,6 @@ pub struct ReallocateIfNeeded {
     pub ny_fcrop_pad: i32,
     pub ft_expand_fac: f32,
     pub noise_pad: bool,
-    pub nx_bin_fft: i32,
-    pub ny_bin_fft: i32,
     pub lim_to_alloc: usize,
     pub len_temp: usize,
     /// `preSetScaling` (`newstack.f90:78`), which decides at
@@ -8474,18 +9090,25 @@ pub fn reallocate_if_needed(values: &mut ReallocateIfNeeded) -> (usize, usize) {
     // (`newstack.f90:117, 2801`), so every step of this rounds to single
     // precision; computing it in `f64` and casting at the end lands an ulp
     // away in the reported megabytes.
-    let physical_mem = (values.physical_memory / 4.) as f32;
+    // `physicalMem = b3dPhysicalMemory() / 4.` (`newstack.f90:2808`); the
+    // host variable is `real*4`.
+    let physical_mem = (crate::imod::libcfshr::b3dutil::b3d_physical_memory() / 4.) as f32;
     let def_limit = 3.75e9_f32;
     let mut use_limit = def_limit;
     if values.process_in_place && values.ft_reduce_fac == 0. && !values.phase_shift {
         values.in_place_fac = 0.25;
     }
     if physical_mem > 0. {
-        use_limit = (0.75 * values.in_place_fac * physical_mem)
-            .min(physical_mem - 0.25e9)
-            .max(0.1e9);
+        // Operand orders read from the reference object (`reallocateifneeded`).
+        use_limit = maxss(
+            minss(
+                0.75 * values.in_place_fac * physical_mem,
+                physical_mem - 0.25e9,
+            ),
+            0.1e9,
+        );
         if use_limit > def_limit {
-            use_limit = def_limit.max(0.5 * values.in_place_fac * physical_mem);
+            use_limit = maxss(def_limit, 0.5 * values.in_place_fac * physical_mem);
         }
     }
     // `newstack.f90:2815-2816`.
@@ -8498,14 +9121,21 @@ pub fn reallocate_if_needed(values: &mut ReallocateIfNeeded) -> (usize, usize) {
     }
     if values.lim_entered != 1 {
         let mut need_temp = 1_i64;
+        //
+        // Anticipate irdReduced's needs; 6 is the biggest support width needed for any
+        // filter
         if values.read_shrunk {
-            let minimum = if values.read_reduction > 32. { 3. } else { 10. };
-            // `newstack.f90:2827` is `nx * (ceiling(...) + 20)`: the 20 is
-            // inside the parentheses, multiplied by `nx`.
-            need_temp = ((values.nx as f32
-                * (((minimum + 6.) * values.read_reduction).ceil() + 20.))
-                as i64)
-                .max((values.nx as i64 * values.ny as i64).min(5_000_000));
+            let mut min_chunk_lines = 10_i32;
+            if values.read_reduction > 32. {
+                min_chunk_lines = 3;
+            }
+            // `nx * (ceiling((minChunkLines + 6) * readReduction) + 20)`:
+            // `ceiling` of the `real*4` product is a default integer, so the
+            // rest is integer arithmetic.
+            need_temp = (values.nx as i64
+                * ((((min_chunk_lines + 6) as f32 * values.read_reduction).ceil() as i32) + 20)
+                    as i64)
+                .max((values.nx as i64 * values.ny as i64).min(MAX_TEMP));
         }
         if values.i_binning > 1 {
             need_temp = values.nx as i64 * values.i_binning as i64;
@@ -8517,9 +9147,9 @@ pub fn reallocate_if_needed(values: &mut ReallocateIfNeeded) -> (usize, usize) {
         if (values.phase_shift || values.fourier_scaling) && values.nx_fspad > 0 && values.noise_pad
         {
             need_temp = need_temp.max(
-                2 * i64::from(values.nx_bin_fft.max(values.ny_bin_fft))
-                    + i64::from(values.nx_fspad - values.nx_bin_fft)
-                    + i64::from(values.ny_fspad - values.ny_bin_fft),
+                2 * i64::from(values.nx_bin.max(values.ny_bin))
+                    + i64::from(values.nx_fspad - values.nx_bin)
+                    + i64::from(values.ny_fspad - values.ny_bin),
             );
         }
         values.len_temp = need_temp as usize;
@@ -8591,20 +9221,27 @@ pub fn reallocate_if_needed(values: &mut ReallocateIfNeeded) -> (usize, usize) {
     (values.idim_in_out, values.len_temp)
 }
 
-/// Original `reallocateArray` (`newstack.f90:2886`).
+/// Original `reallocateArray` (`newstack.f90:2886`).  `array`, `limToAlloc`,
+/// `idimInOut`, `lenTemp`, `limIfFail` and `iVerbose` are host variables.
+///
+/// Not called: this translation sizes a working buffer per stage instead of
+/// carving everything out of the one `array` (TOFIX.md, "newstack"), so the
+/// three source call sites (`newstack.f90:1038, 1969, 2869`) keep only this
+/// routine's `-verbose` report.  Allocating `limToAlloc` elements here that
+/// nothing reads would cost the resident memory the source's array costs
+/// without the use.
 pub fn reallocate_array(
     array: &mut Vec<f32>,
-    lim_to_alloc: usize,
+    lim_to_alloc: &mut usize,
+    idim_in_out: &mut usize,
     len_temp: usize,
     lim_if_fail: usize,
     i_verbose: i32,
-) -> Result<usize, String> {
-    let mut limit = lim_to_alloc;
-    // `newstack.f90:2887-2888`.  `limToAlloc / (1024 * 256.)` divides the
-    // `integer(kind = 8)` by a `real*4`, so the quotient is `real*4` and is
-    // edited as `G16.9E2`.
+) {
+    // `limToAlloc / (1024 * 256.)` divides the `integer(kind = 8)` by a
+    // `real*4`, so the quotient is `real*4` and is edited as `G16.9E2`.
     if i_verbose > 0 {
-        let value = limit as f32 / (1024 * 256) as f32;
+        let value = *lim_to_alloc as f32 / (1024 * 256) as f32;
         let magnitude = value.abs();
         let mut exponent = 1_i32;
         if magnitude != 0.0 {
@@ -8639,30 +9276,30 @@ pub fn reallocate_array(
         };
         print!(" reallocating array to {field}  MB\n");
     }
-    if limit.saturating_sub(len_temp) < 100 {
-        return Err("With achievable memory allocation, the temporary array does not leave enough space for input/output".to_owned());
-    }
-    if array.try_reserve_exact(limit).is_err() && limit > lim_if_fail {
-        limit = lim_if_fail;
-        // `newstack.f90:2894-2895`.  `limToAlloc / (1024 * 256)` is an integer
-        // division here, so this one is right justified in 20.
+    // `deallocate(array)` then `allocate(array(limToAlloc), stat = ierr)`.
+    *array = Vec::new();
+    let mut ierr = i32::from(array.try_reserve_exact(*lim_to_alloc).is_err());
+    if ierr != 0 && *lim_to_alloc > lim_if_fail {
+        *lim_to_alloc = lim_if_fail;
+        *idim_in_out = *lim_to_alloc - len_temp;
+        // `limToAlloc / (1024 * 256)` is an integer division here, so this
+        // one is right justified in 20.
         if i_verbose > 0 {
             print!(
                 " failed, dropping reallocation to {:>20}  MB\n",
-                limit / (1024 * 256)
+                *lim_to_alloc / (1024 * 256)
             );
         }
+        ierr = i32::from(array.try_reserve_exact(*lim_to_alloc).is_err());
     }
-    let mut replacement = Vec::new();
-    replacement
-        .try_reserve_exact(limit)
-        .map_err(|_| "Reallocating memory for main array".to_owned())?;
-    replacement.resize(limit, 0.);
-    *array = replacement;
-    if limit.saturating_sub(len_temp) < 100 {
-        Err("With achievable memory allocation, the temporary array does not leave enough space for input/output".to_owned())
-    } else {
-        Ok(limit - len_temp)
+    if ierr != 0 {
+        exit_error("Reallocating memory for main array");
+    }
+    array.resize(*lim_to_alloc, 0.);
+    if (*lim_to_alloc as i64) - (len_temp as i64) < 100 {
+        exit_error(
+            "With achievable memory allocation, the temporary array does not leave enough space for input/output",
+        );
     }
 }
 
@@ -8684,121 +9321,178 @@ pub struct ScaleAndWriteChunk {
     pub num_trunc_high: i32,
 }
 
-/// Original `scaleAndWriteChunk` scaling/truncation/accumulation.  The writer
-/// is `iiuWriteLines` at the source call site.
-pub fn scale_and_write_chunk<F>(
+/// Original `scaleAndWriteChunk` (`newstack.f90:3221`).  The host
+/// variables it reads and updates are `values` (`newMode`, `scaleFactor`,
+/// `constAdd`, `optimalOut`, `dmin2`, `dmax2`, `dmean2`, the truncation
+/// counts), `wallStart` and `saveTime`; `array` is the chunk starting at
+/// `array(iChunkBase)`, `numLinesOut` lines of `nxOut`.  `isecOut - 1` and
+/// `lineOutSt(iChunk)` position the write.
+pub fn scale_and_write_chunk(
     array: &mut [f32],
     nx_out: i32,
+    num_lines_out: i32,
     values: &mut ScaleAndWriteChunk,
-    mut write: F,
-) -> Result<(), i32>
-where
-    F: FnMut(&[f32]) -> Result<(), i32>,
-{
-    let (dens_out_min, optimal_out) = if values.new_mode == 1 {
-        (-32768., values.optimal_out)
+    i_verbose: i32,
+    i_chunk: i32,
+    isec_out_minus_1: i32,
+    line_out_st: i32,
+    wall_start: &mut f64,
+    save_time: &mut f64,
+) {
+    let dens_out_min: f32;
+    // set up minimum value to output based on mode
+    // BUGS.md, fixed in translation: `newstack.f90:3228,3231` assign the host
+    // variable `optimalOut`, so native's later chunks of the same section see
+    // 1.e30 (or 65504) in `findScaleFactors` where the first chunk saw
+    // `optimalMax(3)`, and a memory-split `-scale 0,0 -mode 2` output is
+    // scaled differently chunk by chunk.  The truncation ceiling is a local
+    // here, so every chunk is scaled as the unsplit section would be.
+    let mut dens_out_max = values.optimal_out;
+    if values.new_mode == 1 {
+        dens_out_min = -32768.;
     } else if values.new_mode == 2 && values.write_16_bit_mode_for_floats {
-        (-65504., 65504.)
+        dens_out_min = -65504.;
+        dens_out_max = 65504.;
     } else if values.new_mode == 2 {
-        (-1.0e30_f32, 1.0e30_f32)
+        dens_out_min = -1.0e30;
+        dens_out_max = 1.0e30;
     } else {
-        (0., values.optimal_out)
-    };
-    for line in array.chunks_exact_mut(nx_out as usize) {
-        let mut sum = 0_f64;
-        for density in line {
-            let mut scaled = values.scale_factor * *density + values.const_add;
-            if scaled < dens_out_min {
-                values.num_trunc_low += 1;
-                scaled = dens_out_min;
-            } else if scaled > optimal_out {
-                values.num_trunc_high += 1;
-                scaled = optimal_out;
-            }
-            *density = scaled;
-            sum += f64::from(scaled);
-            // `newstack.f90:3250-3251` `min(dmin2, dens)` / `max(dmax2, dens)`:
-            // gfortran expands MIN(a1, a2) as `if (a2 < m || isnan(m)) m = a2`
-            // (trans-intrinsic.c, gfc_conv_intrinsic_minmax), which keeps the
-            // first operand on a tie and drops a NaN running value.  Written
-            // out so the compiler emits the compare rather than `minss`'s
-            // unordered blend.
-            if scaled < values.dmin2 || values.dmin2.is_nan() {
-                values.dmin2 = scaled;
-            }
-            if scaled > values.dmax2 || values.dmax2.is_nan() {
-                values.dmax2 = scaled;
-            }
-        }
-        values.dmean2 = (f64::from(values.dmean2) + sum) as f32;
+        dens_out_min = 0.;
     }
-    write(array)
+    for iy in 1..=num_lines_out as usize {
+        let istart = (iy - 1) * nx_out as usize;
+        // `tsum` is `real*8` (`newstack.f90:119`); `dmean2` is `real*4`.
+        let mut tsum = 0.0_f64;
+        for i8 in istart..istart + nx_out as usize {
+            let mut dens = values.scale_factor * array[i8] + values.const_add;
+            if dens < dens_out_min {
+                values.num_trunc_low += 1;
+                dens = dens_out_min;
+            } else if dens > dens_out_max {
+                values.num_trunc_high += 1;
+                dens = dens_out_max;
+            }
+            array[i8] = dens;
+            tsum = tsum + f64::from(dens);
+            // `newstack.f90:3249-3250` `min(dmin2, dens)` / `max(dmax2, dens)`.
+            // gfortran 11 lowers these to `MIN_EXPR`/`MAX_EXPR`, and the
+            // reference object (`scaleandwritechunk`) computes them as
+            // `minss dens, dmin2` and `maxss dmax2, dens`: a NaN `dens` leaves
+            // `dmin2` alone but *becomes* `dmax2`, and the next finite `dens`
+            // then replaces that NaN -- so the running maximum restarts after
+            // every NaN.
+            values.dmin2 = minss(dens, values.dmin2);
+            values.dmax2 = maxss(values.dmax2, dens);
+        }
+        values.dmean2 = (f64::from(values.dmean2) + tsum) as f32;
+    }
+    *wall_start = crate::imod::libcfshr::b3dutil::wall_time();
+    if i_verbose > 0 {
+        print!(" writing {:>11}\n", i_chunk);
+    }
+    // The unit layer exits on a write error for a Fortran program
+    // (`sExitOnError`), so the source does not test it.
+    unsafe {
+        iiu_set_position(2, isec_out_minus_1, line_out_st);
+        iiu_write_lines(2, array.as_mut_ptr().cast(), num_lines_out);
+    }
+    *save_time = *save_time + crate::imod::libcfshr::b3dutil::wall_time() - *wall_start;
 }
 
-/// Original `getOffsetEntries` (`newstack.f90:3179`) after PIP has returned
-/// its repeated float-array entries.  The PIP adapter belongs in the program
-/// unit; this procedure preserves the source's one-or-one-per-section rule.
+/// Original `getOffsetEntries` (`newstack.f90:3179`).  The host variables
+/// it touches come in as arguments: `listTotal`, `limSec`, and `xOffsAll` /
+/// `yOffsAll`; the scratch it fills is the program's main `array`, which is
+/// at least `4 * limSec` elements (`newstack.f90:297`).  Returns
+/// `ifOneManyOffsets`.
 pub fn get_offset_entries(
-    entries: &[Vec<f32>],
-    list_total: usize,
+    option: &[u8],
+    name_text: &str,
     x_offset: &mut [f32],
     y_offset: &mut [f32],
-) -> Result<(f32, f32, i32), String> {
-    if entries.is_empty() {
-        return Ok((0., 0., 0));
+    list_total: i32,
+    lim_sec: i32,
+    x_offs_all: &mut f32,
+    y_offs_all: &mut f32,
+) -> i32 {
+    let mut if_one_many_offsets = 0;
+    *x_offs_all = 0.;
+    *y_offs_all = 0.;
+    let mut num_out_entries = 0_i32;
+    pip_number_of_entries(option, &mut num_out_entries);
+    if num_out_entries > 0 {
+        if_one_many_offsets = 1;
+        let mut array = vec![0.0_f32; 2 * lim_sec.max(1) as usize];
+        let mut num_out_values = 0_i32;
+        for _i in 1..=num_out_entries {
+            let mut num_to_get = 0_i32;
+            // `ierr = PipGetFloatArray(...)`, not tested.
+            let _ierr = pip_get_float_array(
+                option,
+                &mut array[num_out_values as usize..],
+                &mut num_to_get,
+                lim_sec * 2 - num_out_values,
+            );
+            num_out_values += num_to_get;
+        }
+        if num_out_values != 2 && num_out_values != 2 * list_total {
+            exit_error(&format!(
+                "There must be either one {} or an {} for each section",
+                name_text.trim_end(),
+                name_text.trim_end()
+            ));
+        }
+        for i in 1..=(num_out_values / 2) as usize {
+            x_offset[i - 1] = array[2 * i - 2];
+            y_offset[i - 1] = array[2 * i - 1];
+        }
+        if num_out_values == 2 {
+            if_one_many_offsets = -1;
+        }
+        *x_offs_all = x_offset[0];
+        *y_offs_all = y_offset[0];
     }
-    let values: Vec<f32> = entries.iter().flatten().copied().collect();
-    if values.len() != 2 && values.len() != 2 * list_total {
-        return Err("There must be either one offset or an offset for each section".to_owned());
-    }
-    for (index, pair) in values.chunks_exact(2).enumerate() {
-        x_offset[index] = pair[0];
-        y_offset[index] = pair[1];
-    }
-    let one_or_many = if values.len() == 2 { -1 } else { 1 };
-    let x_all = x_offset[0];
-    let y_all = y_offset[0];
-    if one_or_many <= 0 {
-        for index in 0..list_total {
-            x_offset[index] = x_all;
-            y_offset[index] = y_all;
+    //
+    // Zero out the lists if one or no entry
+    if if_one_many_offsets <= 0 {
+        for i in 1..=list_total as usize {
+            x_offset[i - 1] = *x_offs_all;
+            y_offset[i - 1] = *y_offs_all;
         }
     }
-    Ok((x_all, y_all, one_or_many))
+    if_one_many_offsets
 }
 
 /// Original `transferCollections` (`newstack.f90:3265`).  `ind_adoc_out` and
 /// the loop indices are the source's 1-based ones; the Fortran wrappers
 /// (`adoc_fwrap.c:481, 397, 493`) subtract one before the C entry points, so
-/// this does the same at each call.
-pub fn transfer_collections(zvalue_name: &[u8], ind_adoc_out: i32) -> Result<(), String> {
-    let count = adoc_get_num_collections().unwrap_or(-1);
-    for collection in 1..=count {
-        let Ok(name) = adoc_get_collection_name(collection - 1) else {
-            return Err("Getting collection name for transferring other autodoc sections".into());
+/// this does the same at each call.  `zvalueName` and `indAdocOut` are host
+/// variables passed in.
+pub fn transfer_collections(zvalue_name: &[u8], ind_adoc_out: i32) {
+    // `AdocGetNumCollections()` returns -1 for no current autodoc.
+    let num_coll = adoc_get_num_collections().unwrap_or(-1);
+    for coll in 1..=num_coll {
+        let Ok(coll_name) = adoc_get_collection_name(coll - 1) else {
+            exit_error("Getting collection name for transferring other autodoc sections");
         };
-        if name != zvalue_name && name != b"T" {
-            let count = adoc_get_number_of_sections(&name).unwrap_or(-1);
-            for section in 1..=count {
-                let Ok(section_name) = adoc_get_section_name(&name, section - 1) else {
-                    return Err(
-                        "Getting section name for transferring other autodoc sections".into(),
-                    );
+        if coll_name != zvalue_name && coll_name != b"T" {
+            let num_sect = adoc_get_number_of_sections(&coll_name).unwrap_or(-1);
+            for isect in 1..=num_sect {
+                let Ok(list_string) = adoc_get_section_name(&coll_name, isect - 1) else {
+                    exit_error("Getting section name for transferring other autodoc sections");
                 };
                 if adoc_transfer_section(
-                    &name,
-                    section - 1,
+                    &coll_name,
+                    isect - 1,
                     ind_adoc_out - 1,
-                    Some(&section_name),
+                    Some(&list_string),
                     0,
                 ) != 0
                 {
-                    return Err("transferring other autodoc section".into());
+                    exit_error("transferring other autodoc section");
                 }
             }
         }
     }
-    Ok(())
 }
 
 /// Original `openInputFile` (`newstack.f90:3157`).  `ind_in_file` is the
@@ -8882,12 +9576,15 @@ mod tests {
         assert_eq!(
             get_items_to_use(
                 5,
+                2,
                 &[0, 2],
                 b"UseTransformLines",
+                true,
                 "TRANSFORM LINE",
-                false,
                 0,
-                0
+                0,
+                0,
+                12
             ),
             [1, 2, 3, 0]
         );
@@ -8955,8 +9652,6 @@ mod tests {
             const_add: 0.,
             scale_fac: 0.,
             scale_const: 0.,
-            float_average: 0.,
-            float_sd: 0.,
             zmin: 0.,
             zmax: 0.,
             float_z_margin: 0.,
@@ -8964,10 +9659,14 @@ mod tests {
             opt_float_min: 0.,
             section_min: 0.,
             section_max: 0.,
-            section_intentionally_truncated: false,
+            i_sec_read: 0,
+            nz: 1,
+            num_sec_trunc: 0,
+            z_min_outlier: 0.,
+            z_max_outlier: 0.,
         };
         assert_eq!(
-            find_scale_factors(&values, 2., 8.),
+            find_scale_factors(&values, 2., 8., &[], &[], &[]),
             ScaleFactors {
                 tmp_min: 2.,
                 tmp_max: 8.,
@@ -8975,34 +9674,5 @@ mod tests {
                 const_add: 0.
             }
         );
-    }
-    #[test]
-    fn scaling_and_write_truncates_at_source_mode_limits() {
-        let mut state = ScaleAndWriteChunk {
-            new_mode: 0,
-            write_16_bit_mode_for_floats: false,
-            scale_factor: 2.,
-            const_add: 0.,
-            optimal_out: 255.,
-            dmin2: f32::INFINITY,
-            dmax2: f32::NEG_INFINITY,
-            dmean2: 0.,
-            num_trunc_low: 0,
-            num_trunc_high: 0,
-        };
-        let mut pixels = [-2., 2., 200.];
-        scale_and_write_chunk(&mut pixels, 3, &mut state, |_| Ok(())).unwrap();
-        assert_eq!(pixels, [0., 4., 255.]);
-        assert_eq!((state.num_trunc_low, state.num_trunc_high), (1, 1));
-    }
-    #[test]
-    fn offset_entries_expand_one_entry_as_source_does() {
-        let (mut x, mut y) = ([0.; 3], [0.; 3]);
-        assert_eq!(
-            get_offset_entries(&[vec![2., -3.]], 3, &mut x, &mut y).unwrap(),
-            (2., -3., -1)
-        );
-        assert_eq!(x, [2.; 3]);
-        assert_eq!(y, [-3.; 3]);
     }
 }

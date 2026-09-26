@@ -15,9 +15,21 @@
 //! `-sum`, whose `clip plane` runs in process), mag gradients, g transforms,
 //! an exclusion model, multiple negatives, old edge functions, read-in and
 //! expected correlations, parallel setup and header writing, and error exits.
-//! The montage's overlaps are wide enough that no edge grid has a single row
-//! or column, which keeps every case clear of the source's reads of
-//! uninitialised memory (`BUGS.md`, blendmont).
+//!
+//! Where a fix of an upstream defect applies (`BUGS.md`, blendmont), the
+//! golden holds the defined behaviour instead, taken from this translation
+//! (2026-09-26); every other file is native's.  The edge grids of this
+//! montage are one position across the overlap (20 pixels at the default
+//! grid spacing), so the source's interpolation reads a second row or
+//! column `readEdgeFunc` never wrote for that edge (stale values from the
+//! buffer's previous edge): `o.st` of basic, sloppy, shift, xcorr, edge,
+//! robust, numpeaks, mode0f, mode2, bin2, window, nofft, frames, sections,
+//! aligned, int1, int2, sum, gradient, xform, skip, oldedge, readxcorr,
+//! oldint and expected is the fixed interpolation's.  `negfile` and `perneg`
+//! also carry the `findMultinegTransforms` fixes, and `perneg` the
+//! `-MissingFromFirstNegativeXandY` fix (so its stdout numbers the
+//! negatives 1-4 where native, taking 2 missing, numbers them 5-9).  Every
+//! other case, and every other file of these cases, is native's.
 
 mod common;
 
@@ -27,22 +39,11 @@ fn fixture_dir() -> PathBuf {
     Path::new(env!("CARGO_MANIFEST_DIR")).join("fixtures/blendmont")
 }
 
-/// Blank what native cannot reproduce: an MRC file's label date/time stamps,
-/// and the label slots past `nlabl`, which are stack residue (`BUGS.md` §2).
+/// Blank the wall-clock stamps (`common::mask_stamps`).  The regions native
+/// writes from uninitialised memory (`BUGS.md` §2) are reconciled first by
+/// `common::reconcile_uninitialised`, which checks ours holds the defined value.
 fn mask(bytes: &[u8]) -> Vec<u8> {
-    let mut masked = bytes.to_vec();
-    if masked.len() >= 1024 && &masked[208..212] == b"MAP " {
-        let nlabl = i32::from_le_bytes(masked[220..224].try_into().unwrap()).max(0) as usize;
-        for lab in 0..10 {
-            let start = 224 + 80 * lab;
-            if lab >= nlabl {
-                masked[start..start + 80].fill(0);
-            } else {
-                masked[start + 55..start + 80].fill(0);
-            }
-        }
-    }
-    masked
+    common::mask_stamps(bytes)
 }
 
 fn scratch(name: &str) -> (PathBuf, Vec<String>) {
@@ -141,7 +142,7 @@ fn every_case_matches_native_golden() {
                 continue;
             };
             let theirs = std::fs::read(golden.join(name).join(file)).unwrap();
-            if mask(&ours) != mask(&theirs) {
+            if mask(&ours) != mask(&common::reconcile_uninitialised(&ours, &theirs)) {
                 failures.push(format!("{name}: {file} differs from native"));
             }
         }
@@ -149,4 +150,182 @@ fn every_case_matches_native_golden() {
     }
     assert!(count >= 38, "only {count} cases ran");
     assert!(failures.is_empty(), "{}", failures.join("\n"));
+}
+
+/// Run `blendmont` in `dir` with `args` (and `stdin`, if any).
+fn run_in(dir: &Path, args: &[&str], stdin: Option<&[u8]>) -> std::process::Output {
+    use std::io::Write;
+    use std::process::Stdio;
+    let mut child = common::imod_cmd("blendmont")
+        .current_dir(dir)
+        .env(
+            "AUTODOC_DIR",
+            concat!(env!("CARGO_MANIFEST_DIR"), "/IMOD/autodoc"),
+        )
+        .env("OMP_NUM_THREADS", "1")
+        .args(args)
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .unwrap();
+    {
+        let mut pipe = child.stdin.take().unwrap();
+        if let Some(bytes) = stdin {
+            pipe.write_all(bytes).unwrap();
+        }
+    }
+    child.wait_with_output().unwrap()
+}
+
+/// The output image with the header's time stamps blanked.
+fn image(dir: &Path, name: &str) -> Vec<u8> {
+    mask(&std::fs::read(dir.join(name)).unwrap())
+}
+
+const BASE: [&str; 6] = ["-imin", "bm.st", "-plin", "bm.pl", "-imout", "o.st"];
+
+/// `-MissingFromFirstNegativeXandY` is read (`blendmont.f90:638` reads
+/// `FramesPerNegativeXandY` twice, so natively the missing counts equal the
+/// frames per negative; fixed in translation, `BUGS.md`).  Unentered, the
+/// counts are 0, and an entered count changes the negative assignment.
+#[test]
+fn missing_from_first_negative_is_read() {
+    let (dir, _) = scratch("missing");
+    let mut outs = Vec::new();
+    for (k, extra) in [&[][..], &["-missing", "0,0"], &["-missing", "1,1"]]
+        .iter()
+        .enumerate()
+    {
+        let root = format!("r{k}");
+        let mut args: Vec<&str> = BASE.to_vec();
+        args.extend(["-rootname", &root, "-perneg", "2,2"]);
+        args.extend(extra.iter());
+        let out = run_in(&dir, &args, None);
+        assert_eq!(out.status.code(), Some(0), "{extra:?}");
+        outs.push(image(&dir, "o.st"));
+    }
+    assert!(outs[0] == outs[1], "-missing 0,0 is not the default");
+    assert!(outs[0] != outs[2], "-missing 1,1 had no effect");
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+/// `-ExpectedShiftsFromEcd` on a montage that is not 3 pieces wide reads
+/// the Y edges from the `.ecd` file too.  Natively the Y unit is the stale
+/// `nxPieces + 1` (unit 3 here: `fort.3`, End of file, status 2); fixed in
+/// translation (`BUGS.md`).  The 2 x 2 montage is pieces 0, 1, 3, 4 of the
+/// fixture.
+#[test]
+fn expected_shifts_on_two_wide_montage() {
+    let (dir, _) = scratch("expected22");
+    let out = common::imod_cmd("newstack")
+        .current_dir(&dir)
+        .args(["-secs", "0,1,3,4", "bm.st", "m22.st"])
+        .output()
+        .unwrap();
+    assert_eq!(out.status.code(), Some(0));
+    std::fs::write(dir.join("m22.pl"), "0 0 0\n44 0 0\n0 36 0\n44 36 0\n").unwrap();
+    let m22 = ["-imin", "m22.st", "-plin", "m22.pl", "-imout", "o.st"];
+    let mut args: Vec<&str> = m22.to_vec();
+    args.extend(["-rootname", "e", "-sloppy"]);
+    assert_eq!(run_in(&dir, &args, None).status.code(), Some(0));
+    let mut args: Vec<&str> = m22.to_vec();
+    args.extend(["-rootname", "f", "-sloppy", "-expected", "e.ecd"]);
+    let out = run_in(&dir, &args, None);
+    assert_eq!(
+        out.status.code(),
+        Some(0),
+        "{}{}",
+        String::from_utf8_lossy(&out.stdout),
+        String::from_utf8_lossy(&out.stderr)
+    );
+    assert!(!dir.join("fort.3").exists());
+    assert!(dir.join("o.st").exists());
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+/// Interactive input with read-in correlations: standard input stays open
+/// for the blending-width prompt after the `.ecd` file is read.  Natively
+/// `close(5)` closes it and the read ends in End of file on `fort.5`
+/// (status 2); fixed in translation (`BUGS.md`).
+#[test]
+fn interactive_read_in_correlations_keeps_stdin() {
+    let (dir, _) = scratch("inter_readx");
+    std::fs::copy(dir.join("old.ecd"), dir.join("e.ecd")).unwrap();
+    let out = run_in(
+        &dir,
+        &[],
+        Some(b"bm.st\no.st\n/\n0\n\nbm.pl\n4\n\n/\n/\n/\n0\n0\ne\n/\n"),
+    );
+    assert_eq!(
+        out.status.code(),
+        Some(0),
+        "{}{}",
+        String::from_utf8_lossy(&out.stdout),
+        String::from_utf8_lossy(&out.stderr)
+    );
+    assert!(!dir.join("fort.5").exists());
+    assert!(dir.join("o.st").exists());
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+/// An edge excluded with `-skip` blends with a zero edge function when the
+/// functions come from an old edge file, as it does when they are computed
+/// in the same run: `readEdgeFunc` zeroes the buffer it read (natively it
+/// zeroes the scratch grids and blends with the old function; fixed in
+/// translation, `BUGS.md`).
+#[test]
+fn skipped_edge_from_old_file_blends_with_zero_function() {
+    let (dir, _) = scratch("skip_old");
+    let mut args: Vec<&str> = BASE.to_vec();
+    args.extend(["-rootname", "e"]);
+    assert_eq!(run_in(&dir, &args, None).status.code(), Some(0));
+    let mut args: Vec<&str> = BASE.to_vec();
+    args.extend(["-rootname", "f", "-skip", "excl.mod"]);
+    assert_eq!(run_in(&dir, &args, None).status.code(), Some(0));
+    let fresh = image(&dir, "o.st");
+    let mut args: Vec<&str> = BASE.to_vec();
+    args.extend(["-rootname", "e", "-oldedge", "-skip", "excl.mod"]);
+    assert_eq!(run_in(&dir, &args, None).status.code(), Some(0));
+    let old = image(&dir, "o.st");
+    assert!(old == fresh);
+    // And the exclusion does change the blend (natively, with old edge
+    // files, it does not).
+    let mut args: Vec<&str> = BASE.to_vec();
+    args.extend(["-rootname", "e", "-oldedge"]);
+    assert_eq!(run_in(&dir, &args, None).status.code(), Some(0));
+    assert!(image(&dir, "o.st") != old);
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+/// Old edge function and edge density files of the other byte order give
+/// the same result as the native-order files: the density files are
+/// swapped along with the edge functions (natively only the edge-function
+/// counts are; fixed in translation, `BUGS.md`).
+#[test]
+fn byte_swapped_old_edge_and_density_files() {
+    let (dir, _) = scratch("swapped");
+    let mut args: Vec<&str> = BASE.to_vec();
+    args.extend(["-rootname", "old", "-intensity", "2", "-oldedge", "-sloppy"]);
+    assert_eq!(run_in(&dir, &args, None).status.code(), Some(0));
+    let native_order = image(&dir, "o.st");
+    for ext in ["xef", "yef", "xaed", "yaed"] {
+        let path = dir.join(format!("old.{ext}"));
+        let mut bytes = std::fs::read(&path).unwrap();
+        assert_eq!(bytes.len() % 4, 0);
+        for word in bytes.chunks_mut(4) {
+            word.reverse();
+        }
+        std::fs::write(&path, bytes).unwrap();
+    }
+    let out = run_in(&dir, &args, None);
+    assert_eq!(
+        out.status.code(),
+        Some(0),
+        "{}{}",
+        String::from_utf8_lossy(&out.stdout),
+        String::from_utf8_lossy(&out.stderr)
+    );
+    assert!(image(&dir, "o.st") == native_order);
+    let _ = std::fs::remove_dir_all(&dir);
 }

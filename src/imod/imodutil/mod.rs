@@ -1,4 +1,5 @@
 pub mod echo2;
+pub mod findbeads3d;
 pub mod findsection;
 pub mod imodauto;
 pub mod imodinfo;
@@ -6,5 +7,6 @@ pub mod imodjoin;
 pub mod imodmesh;
 pub mod imodtrans;
 pub mod nogputxc;
+pub mod patch2imod;
 pub mod tiltxcorr;
 pub mod wmod2imod;

@@ -271,7 +271,7 @@ pub fn analyze_prep_skin_obj(
         cen.z /= volsum;
         let _volavg = volsum / nin_surf as f32;
 
-        volsort_v[..nin_surf].sort_by(floatcmp_ord);
+        crate::imod::c_sort::qsort(&mut volsort_v[..nin_surf], &mut |a, b| floatcmp(*a, *b));
         let volmed = volsort_v[nin_surf / 2];
 
         let mut num_norm = 0;
@@ -561,11 +561,6 @@ fn floatcmp(f1: f32, f2: f32) -> i32 {
         return 1;
     }
     0
-}
-
-/// `floatcmp` as an ordering, for the source's `qsort` call.
-fn floatcmp_ord(f1: &f32, f2: &f32) -> std::cmp::Ordering {
-    floatcmp(*f1, *f2).cmp(&0)
 }
 
 /// Original: `imodMeshesDeleteRes` (`objprep.c:438`).

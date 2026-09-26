@@ -88,8 +88,9 @@ const MAX_THREADS: usize = 8;
 /// function-local `static double errorMin` (`:152`).
 ///
 /// `numOMPthreads` can return more than `MAX_THREADS` only under
-/// `IMOD_FORCE_OMP_THREADS`; the source then writes past the static arrays,
-/// and the translation panics on the index instead.
+/// `IMOD_FORCE_OMP_THREADS`; the source then writes past the static arrays.
+/// Fixed in translation (2026-09-26, `BUGS.md`): the thread count is limited
+/// to `MAX_THREADS`.
 pub struct FunctStatics {
     /// Original: `static double *sGradSums[MAX_THREADS]`.
     grad_sums: [Vec<f64>; MAX_THREADS],
@@ -337,7 +338,7 @@ impl EvalFunct {
             statics.error_min = 1.0e37;
             ii = (av.nreal_pt as f64 / 16.0 + 0.5).floor() as i32;
             ii = 1.max(6.min(ii));
-            ii = num_omp_threads(ii);
+            ii = num_omp_threads(ii).min(MAX_THREADS as i32);
             if 3 * av.nreal_pt > statics.thread_alloc || ii != statics.num_threads {
                 self.free_thread_allocations(statics);
                 statics.thread_alloc = 3 * av.nreal_pt;
@@ -786,12 +787,13 @@ impl EvalFunct {
                         val_add = (av.dum_dmag_fac as f64
                             * (1. - av.frc_dmag[iv - 1] as f64)
                             * grad_sum) as f32;
-                        // Upstream assigns here rather than accumulating
-                        // (`funct.cpp:583`), so a view whose `linDmag` is the dummy
-                        // overwrites what earlier views sharing `mapDmag` added; kept
-                        // as written.
-                        grad[(av.map_dmag[iv - 1] - 1) as usize] =
-                            (av.frc_dmag[iv - 1] as f64 * grad_sum) as f32;
+                        // Fixed in translation (2026-09-26, `BUGS.md`): the source
+                        // assigns here rather than accumulating (`funct.cpp:583`), so a
+                        // view whose `linDmag` is the dummy overwrites what earlier
+                        // views sharing `mapDmag` added; it accumulates here, as every
+                        // other gradient site does.
+                        let m = (av.map_dmag[iv - 1] - 1) as usize;
+                        grad[m] = (grad[m] as f64 + av.frc_dmag[iv - 1] as f64 * grad_sum) as f32;
                     }
                     for jj in av.map_dmag_start..=av.map_dum_dmag - 1 {
                         grad[(jj - 1) as usize] = grad[(jj - 1) as usize] + val_add;

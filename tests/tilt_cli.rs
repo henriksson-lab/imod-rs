@@ -21,42 +21,11 @@ fn fixture_dir() -> PathBuf {
     Path::new(env!("CARGO_MANIFEST_DIR")).join("fixtures/tilt")
 }
 
-/// Replace every `HH:MM:SS` in `bytes` with `XX:XX:XX`.
-fn mask_times(bytes: &mut [u8]) {
-    let mut i = 0;
-    while i + 8 <= bytes.len() {
-        let w = &bytes[i..i + 8];
-        let digit = |k: usize| w[k].is_ascii_digit();
-        if digit(0)
-            && digit(1)
-            && w[2] == b':'
-            && digit(3)
-            && digit(4)
-            && w[5] == b':'
-            && digit(6)
-            && digit(7)
-        {
-            bytes[i..i + 8].copy_from_slice(b"XX:XX:XX");
-            i += 8;
-        } else {
-            i += 1;
-        }
-    }
-}
-
-/// Blank what native cannot reproduce: a model's 128-byte name field
-/// (`Imod.name`, bytes 8..136) is `malloc` residue past its terminator in
-/// native (`imodNew`), and an MRC file's labels carry a date/time stamp; only
-/// the time is masked.
+/// Blank the wall-clock stamps (`common::mask_stamps`).  The regions native
+/// writes from uninitialised memory (`BUGS.md` §2) are reconciled first by
+/// `common::reconcile_uninitialised`, which checks ours holds the defined value.
 fn mask(bytes: &[u8]) -> Vec<u8> {
-    let mut masked = bytes.to_vec();
-    if masked.starts_with(b"IMOD") && masked.len() > 136 {
-        let end = masked[8..136].iter().position(|&b| b == 0).unwrap_or(128);
-        masked[8 + end..136].fill(0);
-    } else if masked.len() >= 1024 {
-        mask_times(&mut masked[224..1024]);
-    }
-    masked
+    common::mask_stamps(bytes)
 }
 
 fn scratch(name: &str) -> PathBuf {
@@ -91,7 +60,7 @@ fn every_case_matches_native_golden() {
             .trim()
             .parse()
             .unwrap();
-        let mut expected_out = std::fs::read(golden.join(format!("{name}.out"))).unwrap();
+        let expected_out = std::fs::read(golden.join(format!("{name}.out"))).unwrap();
         let dir = scratch(name);
         let inputs: Vec<String> = std::fs::read_dir(&dir)
             .unwrap()
@@ -128,9 +97,8 @@ fn every_case_matches_native_golden() {
             ));
         }
         // The header listings carry the labels' time stamps.
-        let mut ours = output.stdout.clone();
-        mask_times(&mut ours);
-        mask_times(&mut expected_out);
+        let ours = common::mask_stamps(&output.stdout);
+        let expected_out = common::mask_stamps(&expected_out);
         if ours != expected_out {
             failures.push(format!(
                 "{name}: stdout differs\n--- native\n{}\n--- ours\n{}",
@@ -159,7 +127,7 @@ fn every_case_matches_native_golden() {
                 continue;
             };
             let theirs = std::fs::read(golden.join(name).join(file)).unwrap();
-            if mask(&ours) != mask(&theirs) {
+            if mask(&ours) != mask(&common::reconcile_uninitialised(&ours, &theirs)) {
                 failures.push(format!("{name}: {file} differs from native"));
             }
         }

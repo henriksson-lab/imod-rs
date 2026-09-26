@@ -118,6 +118,27 @@ pub unsafe fn iiu_open(iunit: i32, name: &str, attribute: &str) -> i32 {
     u = find_new_unit(iunit);
     iiu_memory_error(u, "ERROR: iiuOpen - Allocating new unit");
     (*u).being_used = true;
+    // Fixed in translation (2026-09-26, `BUGS.md` "iiuOpen leaves a unit
+    // marked in use"): native returns from every failure below with the unit
+    // still marked in use (and a NULL or open file), so a later `iiuClose` of
+    // that unit number crashes.  Each failure return here first releases the
+    // unit -- the open file closed and deleted, the slot freed -- so the unit
+    // number is simply not open, as after `iiuClose`.
+    let release_failed_unit = |u: *mut Unit| unsafe {
+        if !(*u).ii_file.is_null() {
+            iiClose((*u).ii_file);
+            iiDelete((*u).ii_file);
+            (*u).ii_file = ::core::ptr::null_mut();
+        }
+        (*u).header = UnitHeader::None;
+        (*u).being_used = false;
+        UNIT_TABLE.with(|unit_table| {
+            let mut table = unit_table.borrow_mut();
+            if let Some(slot) = table.map.get_mut(iunit as usize - 1) {
+                *slot = None;
+            }
+        });
+    };
     (*u).read_only = false;
     (*u).current_sec = 0 as i32;
     (*u).current_line = 0 as i32;
@@ -169,6 +190,7 @@ pub unsafe fn iiu_open(iunit: i32, name: &str, attribute: &str) -> i32 {
             if UNIT_OPTIONS.with(|options| options.exit_on_error.get()) != 0 {
                 exit(1 as i32);
             } else {
+                release_failed_unit(u);
                 return 1 as i32;
             }
         }
@@ -188,6 +210,7 @@ pub unsafe fn iiu_open(iunit: i32, name: &str, attribute: &str) -> i32 {
             if UNIT_OPTIONS.with(|options| options.exit_on_error.get()) != 0 {
                 exit(1 as i32);
             } else {
+                release_failed_unit(u);
                 return 1 as i32;
             }
         }
@@ -205,6 +228,7 @@ pub unsafe fn iiu_open(iunit: i32, name: &str, attribute: &str) -> i32 {
             if UNIT_OPTIONS.with(|options| options.exit_on_error.get()) != 0 {
                 exit(1 as i32);
             } else {
+                release_failed_unit(u);
                 return 1 as i32;
             }
         }
@@ -220,6 +244,7 @@ pub unsafe fn iiu_open(iunit: i32, name: &str, attribute: &str) -> i32 {
                 if UNIT_OPTIONS.with(|options| options.exit_on_error.get()) != 0 {
                     exit(1 as i32);
                 } else {
+                    release_failed_unit(u);
                     return 1 as i32;
                 }
             }
@@ -242,6 +267,7 @@ pub unsafe fn iiu_open(iunit: i32, name: &str, attribute: &str) -> i32 {
             if UNIT_OPTIONS.with(|options| options.exit_on_error.get()) != 0 {
                 exit(1 as i32);
             } else {
+                release_failed_unit(u);
                 return 1 as i32;
             }
         }
@@ -330,10 +356,14 @@ pub fn release_all_units() {
                 let u = table.units[slot].as_mut();
                 if u.being_used {
                     u.being_used = false;
-                    unsafe {
-                        iiClose(u.ii_file);
-                        u.header = UnitHeader::None;
-                        iiDelete(u.ii_file);
+                    // A unit whose open failed (`iiuOpen` exits with the unit
+                    // marked in use and no image file) has nothing to close
+                    if !u.ii_file.is_null() {
+                        unsafe {
+                            iiClose(u.ii_file);
+                            u.header = UnitHeader::None;
+                            iiDelete(u.ii_file);
+                        }
                     }
                 }
             }
@@ -1156,6 +1186,29 @@ mod tests {
 
         iiu_alt_brief(-1);
         iiu_alt_print(1);
+        iiu_exit_on_error(1, -1);
+    }
+
+    /// Defined behaviour for `BUGS.md` "iiuOpen leaves a unit marked in use":
+    /// after a failed open with exit-on-error off, the unit is not open, so
+    /// closing it is a no-op and the number can be opened again.
+    #[test]
+    fn failed_iiu_open_releases_the_unit() {
+        iiu_exit_on_error(0, 1);
+        let missing = std::env::temp_dir().join(format!(
+            "imod-rs-iiu-open-missing-{}.mrc",
+            std::process::id()
+        ));
+        unsafe {
+            assert_eq!(super::iiu_open(37, missing.to_str().unwrap(), "RO"), 1);
+            super::iiu_close(37);
+            super::UNIT_TABLE.with(|unit_table| {
+                let table = unit_table.borrow();
+                assert!(table.map.get(36).copied().flatten().is_none());
+                assert!(table.units.iter().all(|unit| !unit.being_used));
+            });
+            assert_eq!(super::iiu_open(37, missing.to_str().unwrap(), "RO"), 1);
+        }
         iiu_exit_on_error(1, -1);
     }
 

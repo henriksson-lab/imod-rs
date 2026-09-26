@@ -103,7 +103,6 @@ thread_local! {
     static S_RECLOSE_WALL_SUM: Cell<f64> = const { Cell::new(0.0) };
     static S_PREPARE_WALL_SUM: Cell<f64> = const { Cell::new(0.0) };
 }
-#[derive(Default)]
 struct BoundaryWriteState {
     hbound: Option<MrcHeader>,
     dsize: i32,
@@ -112,6 +111,21 @@ struct BoundaryWriteState {
     sections: [i32; 2],
     start_lines: [i32; 2],
     fp_bound: Option<ImodFile>,
+}
+/// `parallelwrite.c:246`: `static int dsize, csize, linesBound = -1;` -- the
+/// `-1` is what makes the first call look up the boundary properties.
+impl Default for BoundaryWriteState {
+    fn default() -> Self {
+        Self {
+            hbound: None,
+            dsize: 0,
+            csize: 0,
+            lines_bound: -1,
+            sections: [0; 2],
+            start_lines: [0; 2],
+            fp_bound: None,
+        }
+    }
 }
 pub fn par_wrt_initialize(filename: &str, nxin: i32, nyin: i32) -> i32 {
     S_PARALLEL_WRITE.with(|state| {
@@ -287,6 +301,44 @@ pub fn par_wrt_close() {
         }
     })
 }
+/// Original Fortran-callable `parwrtgetregion` (`parallelwrite.c:426`).
+///
+/// Gets the parameters of parallel writing region number [region_num]
+/// (numbered from 1): the boundary file name into the Fortran character
+/// variable [filename] (blank-padded, through `c2fString`), and the sections
+/// and starting lines.  Returns 2 if writing is not initialized, 1 if the
+/// region number is out of bounds, or `c2fString`'s -1 if the name does not
+/// fit.  Used by Fixboundaries.
+pub fn par_wrt_get_region(
+    region_num: i32,
+    filename: &mut [u8],
+    sections: &mut [i32; 2],
+    start_lines: &mut [i32; 2],
+) -> i32 {
+    S_PARALLEL_WRITE.with(|state| {
+        let state = state.borrow();
+        let reg = region_num - 1;
+        if state.num_infos == 0
+            || state.cur_info < 0
+            || state.infos[state.cur_info as usize].regions.is_empty()
+        {
+            return 2;
+        }
+        let bi = &state.infos[state.cur_info as usize];
+        if reg < 0 || reg >= bi.num_files {
+            return 1;
+        }
+        let region = &bi.regions[reg as usize];
+        sections[0] = region.section[0];
+        start_lines[0] = region.start_line[0];
+        sections[1] = region.section[1];
+        start_lines[1] = region.start_line[1];
+        match crate::imod::libcfshr::b3dutil::c2f_string(region.file.as_bytes(), filename) {
+            Ok(()) => 0,
+            Err(()) => -1,
+        }
+    })
+}
 pub unsafe fn parallel_write_slice(
     buf: *mut ::core::ffi::c_void,
     fout: &mut ImodFile,
@@ -352,7 +404,17 @@ unsafe fn parallel_write_slice_state(
         }
         fout = (*ii_file).fp.clone().unwrap();
     }
-    let image_bytes = (state.dsize * state.csize * (*hdata).nx * (*hdata).ny) as usize;
+    // The C passes `buf` as `void *`; the slice handed to the translated
+    // `mrc_write_slice` covers one section at this header's mode.  The static
+    // `dsize`/`csize` are not set yet on a non-HDF first call, so the size
+    // comes from locals.
+    let (mut slice_dsize, mut slice_csize) = (0, 0);
+    crate::imod::libiimod::mrcfiles::mrc_getdcsize(
+        (*hdata).mode,
+        &mut slice_dsize,
+        &mut slice_csize,
+    );
+    let image_bytes = (slice_dsize * slice_csize * (*hdata).nx * (*hdata).ny) as usize;
     let mut err = crate::imod::libiimod::mrcfiles::mrc_write_slice(
         core::slice::from_raw_parts(buf.cast(), image_bytes),
         &mut fout,
@@ -604,7 +666,7 @@ pub unsafe fn par_wrt_sec(iunit: i32, array: *mut ::core::ffi::c_void) -> i32 {
         advance_section();
         return 0;
     }
-    let Some((iz_cur, iz_bound, iunit_bound, nx_full, ny_full, lines_bound)) = S_PARALLEL_WRITE
+    let Some((iz_cur, mut iz_bound, iunit_bound, nx_full, ny_full, lines_bound)) = S_PARALLEL_WRITE
         .with(|state| {
             let state = state.borrow();
             if state.num_infos <= 0 || state.cur_info < 0 {
@@ -636,6 +698,12 @@ pub unsafe fn par_wrt_sec(iunit: i32, array: *mut ::core::ffi::c_void) -> i32 {
         );
         crate::imod::libcfshr::b3dutil::exit(1);
     }
+    // The C reads sIzBound after pwOpenIfNeeded, which sets it on the first
+    // call (parallelwrite.c:582-586); a copy taken before the open is stale.
+    iz_bound = S_PARALLEL_WRITE.with(|state| {
+        let state = state.borrow();
+        state.iz_bound[state.cur_info as usize]
+    });
     if iz_cur == iz_bound[0] {
         crate::imod::libiimod::unit_fileio::iiu_set_position(iunit_bound, 0, 0);
         crate::imod::libiimod::unit_fileio::iiu_write_section(iunit_bound, array);
@@ -708,26 +776,34 @@ pub unsafe fn par_wrt_lin(iunit: i32, array: *mut ::core::ffi::c_void) -> i32 {
         advance_line();
         return 0;
     }
-    let Some((iz_cur, iy_cur, iy_bound, iz_bound, if_all_sec, lines_bound, iunit_bound, if_open)) =
-        S_PARALLEL_WRITE.with(|state| {
-            let state = state.borrow();
-            if state.num_infos <= 0 || state.cur_info < 0 {
-                return None;
-            }
-            let index = state.cur_info as usize;
-            (state.lines_bound[index] != 0).then(|| {
-                (
-                    state.iz_cur[index],
-                    state.iy_cur[index],
-                    state.iy_bound[index],
-                    state.iz_bound[index],
-                    state.if_all_sec[index],
-                    state.lines_bound[index],
-                    state.iunit_bound[index],
-                    state.if_open[index],
-                )
-            })
+    let Some((
+        iz_cur,
+        iy_cur,
+        mut iy_bound,
+        mut iz_bound,
+        if_all_sec,
+        lines_bound,
+        iunit_bound,
+        if_open,
+    )) = S_PARALLEL_WRITE.with(|state| {
+        let state = state.borrow();
+        if state.num_infos <= 0 || state.cur_info < 0 {
+            return None;
+        }
+        let index = state.cur_info as usize;
+        (state.lines_bound[index] != 0).then(|| {
+            (
+                state.iz_cur[index],
+                state.iy_cur[index],
+                state.iy_bound[index],
+                state.iz_bound[index],
+                state.if_all_sec[index],
+                state.lines_bound[index],
+                state.iunit_bound[index],
+                state.if_open[index],
+            )
         })
+    })
     else {
         return 0;
     };
@@ -743,6 +819,13 @@ pub unsafe fn par_wrt_lin(iunit: i32, array: *mut ::core::ffi::c_void) -> i32 {
             );
             crate::imod::libcfshr::b3dutil::exit(1);
         }
+        // pwOpenIfNeeded sets sIzBound/sIyBound, which the C reads afterwards
+        // (parallelwrite.c:660-684)
+        (iz_bound, iy_bound) = S_PARALLEL_WRITE.with(|state| {
+            let state = state.borrow();
+            let index = state.cur_info as usize;
+            (state.iz_bound[index], state.iy_bound[index])
+        });
     }
     if if_all_sec != 0 {
         if iy_cur < iy_bound[0] + lines_bound {

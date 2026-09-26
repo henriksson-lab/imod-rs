@@ -4,6 +4,7 @@
 //! maps to [`slice_weighting`]; no non-source algorithm helpers are introduced.
 #![allow(unused_variables)]
 
+use crate::imod::flib::subrs::compat::gfortran_rt::{maxss, minss};
 use crate::imod::flib::subrs::hvem::b3ddate::b3d_date;
 use crate::imod::flib::subrs::hvem::parse_input_params::{
     exit_error, pip_get_in_out_file, pip_get_logical, pip_read_or_parse_options,
@@ -132,11 +133,11 @@ pub fn binvol() {
             &mut num_non_opt_arg,
         );
         let mut big_file = String::new();
-        if pip_get_in_out_file("InputFile", 1, " ", &mut big_file) != 0 {
+        if pip_get_in_out_file("InputFile", 1, " ", &mut big_file, 320) != 0 {
             exit_error("No input file specified");
         }
         let mut out_file = String::new();
-        if pip_get_in_out_file("OutputFile", 2, " ", &mut out_file) != 0 {
+        if pip_get_in_out_file("OutputFile", 2, " ", &mut out_file, 320) != 0 {
             exit_error("No output file specified");
         }
 
@@ -286,6 +287,17 @@ pub fn binvol() {
                 if ierr > 0 {
                     exit_error(
                         "Reduction or expansion factor must be an integer or integer divided by 2, 3, 4, 5, 6, 8, or 10 to 3 decimal places",
+                    );
+                }
+                // BUGS.md ("`newstack -ftreduce` with a factor whose numerator has
+                // a prime above niceFFTlimit"), fixed in translation: for a
+                // numerator such as 17 (`-binning 1.7`) no padded size has only
+                // small prime factors, `niceFrame` runs until the int wraps and
+                // returns a negative size, and native segfaults padding into it.
+                // The factor is refused, as in `newstack`.
+                if nfs_pad[i] <= 0 || ncrop_pad[i] <= 0 {
+                    exit_error(
+                        "Reduction or expansion factor gives no FFT size with small enough prime factors; use a factor whose numerator is a product of 2, 3 and 5",
                     );
                 }
                 nxyz_bin[i] = (nxyz[i] as f32 / actual_fac) as i32;
@@ -528,8 +540,11 @@ pub fn binvol() {
                     &mut dmean2,
                 );
                 iiu_write_section(3, fft_out[ibase..].as_mut_ptr().cast());
-                dmax = dmax.max(dmax2);
-                dmin = dmin.min(dmin2);
+                // `max(dmax, dmax2)` / `min(dmin, dmin2)` (`binvol.f90:285-286, 444-445,
+                // 484-485`): `maxss`/`minss` with `dmax`/`dmin` as destination in the
+                // reference object, so a NaN section extreme replaces the running one.
+                dmax = maxss(dmax, dmax2);
+                dmin = minss(dmin, dmin2);
                 dmean_sum += f64::from(dmean2);
             }
             dmean = (dmean_sum / f64::from(nz_bin)) as f32;
@@ -890,8 +905,11 @@ pub fn binvol() {
                                 );
                             }
                             //
-                            dmax = dmax.max(dmax2);
-                            dmin = dmin.min(dmin2);
+                            // `max(dmax, dmax2)` / `min(dmin, dmin2)` (`binvol.f90:285-286, 444-445,
+                            // 484-485`): `maxss`/`minss` with `dmax`/`dmin` as destination in the
+                            // reference object, so a NaN section extreme replaces the running one.
+                            dmax = maxss(dmax, dmax2);
+                            dmin = minss(dmin, dmin2);
                             dmean_sum += f64::from(dmean2 * ny_bin as f32 * nx_bin as f32);
                             pix_sum += f64::from(ny_bin * nx_bin);
                             last_z_finished = iz_out;
@@ -985,8 +1003,11 @@ pub fn binvol() {
                         );
                         iiu_write_lines(3, array.as_mut_ptr().cast(), num_bin_lines);
                         //
-                        dmax = dmax.max(dmax2);
-                        dmin = dmin.min(dmin2);
+                        // `max(dmax, dmax2)` / `min(dmin, dmin2)` (`binvol.f90:285-286, 444-445,
+                        // 484-485`): `maxss`/`minss` with `dmax`/`dmin` as destination in the
+                        // reference object, so a NaN section extreme replaces the running one.
+                        dmax = maxss(dmax, dmax2);
+                        dmin = minss(dmin, dmin2);
                         dmean_sum += f64::from(dmean2 * num_bin_lines as f32 * nx_bin as f32);
                         pix_sum += f64::from(num_bin_lines * nx_bin);
                     }
@@ -1008,12 +1029,31 @@ pub fn binvol() {
         );
         //
         let mut titlech = [b' '; MRC_LABEL_SIZE + 1];
+        // `3f7.2` (`binvol.f90:1501-1502`): Fortran F editing.
+        let fw = |value: f32| {
+            crate::imod::flib::subrs::compat::gfortran_rt::format_f(f64::from(value), 7, 2)
+        };
         let head = if ft_crop {
-            format!("BINVOL: Volume Fourier reduced by{bin_x:7.2}{bin_y:7.2}{bin_z:7.2}")
+            format!(
+                "BINVOL: Volume Fourier reduced by{}{}{}",
+                fw(bin_x),
+                fw(bin_y),
+                fw(bin_z)
+            )
         } else if ft_expand {
-            format!("BINVOL: Volume Fourier expanded by{bin_x:7.2}{bin_y:7.2}{bin_z:7.2}")
+            format!(
+                "BINVOL: Volume Fourier expanded by{}{}{}",
+                fw(bin_x),
+                fw(bin_y),
+                fw(bin_z)
+            )
         } else if if_xy_anti_alias > 0 || antialias_z {
-            format!("BINVOL: Volume reduced by factors{bin_x:7.2}{bin_y:7.2}{bin_z:7.2}")
+            format!(
+                "BINVOL: Volume reduced by factors{}{}{}",
+                fw(bin_x),
+                fw(bin_y),
+                fw(bin_z)
+            )
         } else {
             format!(
                 "BINVOL: Volume binned down by factors{:4}{:4}{:4}",

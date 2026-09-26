@@ -32,7 +32,7 @@ pub enum ReadValueArray<'a> {
 /// `num_to_get_p` in the latter two cases.  Lines are read into `line`, of size
 /// `max_line`.  With `RLFV_SEPARATE_LINES` in `flags` one set is read per line.
 /// Returns -1 for a read error, -2 for end of file before `num_to_get_p` sets,
-/// -3 for the array being full, -4 for a parse error, -5 for a non-integer
+/// -3 for data remaining after the array is full (see the fix below), -4 for a parse error, -5 for a non-integer
 /// value for an integer argument, -6 for a memory error, -7 for a programming
 /// error.
 ///
@@ -186,6 +186,44 @@ pub fn read_lines_for_values(
         }
     }
 
+    // Fixed in translation (2026-09-26, `BUGS.md` "readLinesForValues"): the
+    // source's -3 ("the whole file not fitting in the arrays", as its doc
+    // comment says) tests `ierr < 0`, i.e. end of file on the very line that
+    // filled the array.  So a file with more data after the array fills
+    // returns 0 with the data silently truncated, and a file that fills the
+    // array exactly on an unterminated last line is reported as not fitting.
+    // Defined here as documented: with `*numToGetP == 0` and the array full,
+    // the rest of the file is scanned, and -3 is returned only if another line
+    // holds anything but blanks and separators.
+    let mut does_not_fit = false;
+    if perr == 0 && num_to_get_in == 0 && num_got == val_size && ierr > 0 {
+        loop {
+            let more = fgetline(fp, line, max_line);
+            if more == -1 {
+                ierr = -1;
+                break;
+            }
+            if more == -2 {
+                break;
+            }
+            if more == 0 {
+                continue;
+            }
+            let len = if more > 0 { more } else { -more - 2 } as usize;
+            if line[..len.min(line.len())]
+                .iter()
+                .take_while(|&&c| c != 0)
+                .any(|&c| !matches!(c, b' ' | b'\t' | b'\r' | b','))
+            {
+                does_not_fit = true;
+                break;
+            }
+            if more < 0 {
+                break;
+            }
+        }
+    }
+
     /* If no error condition, return the data to multiple args */
     if num_args > 1
         && !(perr != 0
@@ -264,7 +302,7 @@ pub fn read_lines_for_values(
         return -2; /* End of file looking for specific number */
     }
 
-    if ierr < 0 && num_to_get_in == 0 && num_got == val_size {
+    if does_not_fit {
         return -3; /* Array was full */
     }
 
@@ -331,4 +369,57 @@ pub fn exit_from_value_read_error(ierr: i32, descrip: &str) {
         "Unknown error code (%d) reading values from file of %s",
         &[CArg::Int(ierr as i64), CArg::Str(descrip)],
     ));
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn read_all(text: &str, val_size: i32, num_to_get: i32) -> (i32, i32, Vec<i32>) {
+        let path = std::env::temp_dir().join(format!(
+            "imod-rs-readlinevalues-{}-{}-{}",
+            std::process::id(),
+            val_size,
+            text.len()
+        ));
+        std::fs::write(&path, text).unwrap();
+        let mut fp = ImodFile::open(&path, "r").unwrap();
+        let mut line = [0u8; 120];
+        let mut values = vec![0i32; val_size as usize];
+        let mut num = num_to_get;
+        let err = read_lines_for_values(
+            &mut fp,
+            &mut num,
+            val_size,
+            &mut line,
+            120,
+            0,
+            "i",
+            &mut [ReadValueArray::Integers(&mut values)],
+        );
+        drop(fp);
+        let _ = std::fs::remove_file(&path);
+        (err, num, values)
+    }
+
+    /// Fixed in translation: with a count of 0, data past a full array is
+    /// -3, as the doc comment says (native returns 0 and truncates).
+    #[test]
+    fn data_past_a_full_array_is_an_error() {
+        assert_eq!(read_all("1 2\n3\n4\n", 3, 0).0, -3);
+        // -1 still takes whatever fits, without an error.
+        let (err, num, values) = read_all("1 2\n3\n4\n", 3, -1);
+        assert_eq!((err, num, values), (0, 3, vec![1, 2, 3]));
+    }
+
+    /// Fixed in translation: a file that fills the array exactly fits, with
+    /// or without a newline on its last line, and trailing blank lines do not
+    /// count as more data (native returns -3 for the unterminated case).
+    #[test]
+    fn a_file_that_fills_the_array_exactly_fits() {
+        for text in ["1 2\n3", "1 2\n3\n", "1 2\n3\n\n  \n"] {
+            let (err, num, values) = read_all(text, 3, 0);
+            assert_eq!((err, num, values), (0, 3, vec![1, 2, 3]), "{text:?}");
+        }
+    }
 }

@@ -14,6 +14,7 @@ use crate::imod::libcfshr::parse_params::{
     pip_next_arg, pip_number_of_args, pip_print_entries, pip_print_help, pip_read_option_file,
     pip_read_prog_defaults, pip_read_stdin_if_set, pip_set_error,
 };
+use crate::imod::libcfshr::pip_fwrap::{pipgetnonoptionarg_, pipgetstring_};
 use std::io::{self, Write};
 use std::sync::Mutex;
 
@@ -214,11 +215,16 @@ pub fn pip_read_or_parse_options(
 }
 
 /// Original Fortran `PipGetInOutFile` (`parse_input_params.f90:185`).
+///
+/// `filename_len` is the declared length of the caller's `character*(*)`
+/// variable -- the hidden length argument gfortran passes -- which bounds both
+/// the PIP copy and the interactive read.
 pub fn pip_get_in_out_file(
     option: &str,
     non_opt_arg_no: i32,
     prompt: &str,
     filename: &mut String,
+    filename_len: usize,
 ) -> i32 {
     {
         let mut result = 0_i32;
@@ -230,23 +236,26 @@ pub fn pip_get_in_out_file(
         // then get the given non-option argument if there are enough
         //
         if num_opt_arg + num_non_opt_arg > 0 {
-            let mut value: Vec<u8> = Vec::new();
-            result = pip_get_string(option.as_bytes(), &mut value);
-            if result == 0 {
-                *filename = String::from_utf8_lossy(&value).into_owned();
-            }
+            // `filename` is the caller's `character*(*)` variable, and the
+            // Fortran `PipGetString`/`PipGetNonOptionArg` are the
+            // `pip_fwrap.c` wrappers, whose `c2fString` copies at most the
+            // variable's length and then returns -1 ("string is too long for
+            // character variable") with the truncated text left in it -- so an
+            // entry longer than the variable counts as *not given* and the
+            // non-option argument is tried instead.
+            let mut record = vec![b' '; filename_len];
+            let current = filename.as_bytes();
+            let count = current.len().min(filename_len);
+            record[..count].copy_from_slice(&current[..count]);
+            result = pipgetstring_(option.as_bytes(), &mut record);
             if result != 0 {
+                *filename = crate::imod::libcfshr::b3dutil::fortran_string(&record);
                 if num_non_opt_arg < non_opt_arg_no {
                     return result;
                 }
-                result = match pip_get_non_option_arg(non_opt_arg_no - 1) {
-                    Ok(value) => {
-                        *filename = String::from_utf8_lossy(&value).into_owned();
-                        0
-                    }
-                    Err(()) => -1,
-                };
+                result = pipgetnonoptionarg_(non_opt_arg_no, &mut record);
             }
+            *filename = crate::imod::libcfshr::b3dutil::fortran_string(&record);
         } else {
             //
             // Otherwise get interactive input with the prompt
@@ -260,7 +269,12 @@ pub fn pip_get_in_out_file(
                 eprintln!("Fortran runtime error: End of file");
                 crate::imod::libcfshr::b3dutil::exit(2);
             }
-            *filename = line.trim_end_matches(['\r', '\n']).to_owned();
+            // `A` editing without a width reads `len(filename)` characters: a
+            // longer record is cut to the variable's length, and the blank
+            // padding is dropped as every other route into the `String` does.
+            let mut bytes = line.trim_end_matches(['\r', '\n']).as_bytes().to_vec();
+            bytes.truncate(filename_len);
+            *filename = crate::imod::libcfshr::b3dutil::fortran_string(&bytes);
         }
         result
     }

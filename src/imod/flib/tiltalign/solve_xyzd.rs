@@ -291,7 +291,11 @@ pub fn solve_xyzd<const BEADTRACK: bool>(
     for v in xyz[..(3 * num_real_pt) as usize].iter_mut() {
         *v = 0.;
     }
-    i = 1;
+    // Fixed in translation (2026-09-26, `BUGS.md`): the source does not test
+    // `ierr` here and reads `bl` — the pivot indices plus `malloc` residue
+    // after a failed `dspsv` — back as coordinates.  After a failed solve the
+    // coordinates stay 0 (the callers already test `ierr` where they use it).
+    i = if *ierr != 0 { num_real_pt } else { 1 };
     while i <= num_real_pt - 1 {
         for ixy in 1..=3 {
             icol = 3 * (i - 1) + ixy;
@@ -669,19 +673,13 @@ fn solve_packed_sums(
     let one = 1;
     {
         // dspsv("U", &m, &one, ss, b, &ss[ind - 1], &m, &ierr, 1): AP is ss up to
-        // ind - 1, the right-hand side is ss from ind - 1, and IPIV is b.
+        // ind - 1, the right-hand side is ss from ind - 1, and IPIV is b.  The
+        // pivot indices are scratch here; `b` is written only on success
+        // (the source leaves the pivot bits in it, which `solveXyzd` then read
+        // as coordinates: fixed there, `BUGS.md`).
         let (ap, rhs) = ss.split_at_mut((ind - 1) as usize);
         let mut ipiv = vec![0i32; m as usize];
         dspsv("U", m, one, ap, &mut ipiv, &mut rhs[..m as usize], m, ierr);
-        for (k, &piv) in ipiv.iter().enumerate() {
-            let bits = b[k / 2].to_bits();
-            let bits = if k % 2 == 0 {
-                (bits & 0xFFFF_FFFF_0000_0000) | piv as u32 as u64
-            } else {
-                (bits & 0x0000_0000_FFFF_FFFF) | ((piv as u32 as u64) << 32)
-            };
-            b[k / 2] = f64::from_bits(bits);
-        }
     }
     if *ierr != 0 {
         return;
@@ -1135,10 +1133,10 @@ pub fn regression_cross_products(
 /// its projection points, the set of all projection points, and the 6 factors
 /// and cross-products.
 ///
-/// Upstream, kept as written: the first Cramer numerator's last term is
-/// `am13 * (bv1 * am32 - am22 * bv3)` (`:838`), where the determinant with
-/// the right-hand side in column 1 has `bv2 * am32`; so `bvec[0]` is not the
-/// solution's x unless `bv1 == bv2` (see `BUGS.md`).
+/// Fixed in translation (2026-09-26, `BUGS.md`): the source's first Cramer
+/// numerator ends `am13 * (bv1 * am32 - am22 * bv3)` (`:838`), where the
+/// determinant with the right-hand side in column 1 has `bv2 * am32`, so its
+/// x is wrong unless `bv1 == bv2`.  Here the term is `bv2 * am32`.
 pub fn one_xyz_by_regression(
     a: &[f32],
     b: &[f32],
@@ -1214,7 +1212,7 @@ pub fn one_xyz_by_regression(
     det = am11 * (am22 * am33 - am23 * am32) - am12 * (am21 * am33 - am23 * am31)
         + am13 * (am21 * am32 - am22 * am31);
     bvec[0] = (bv1 * (am22 * am33 - am23 * am32) - am12 * (bv2 * am33 - am23 * bv3)
-        + am13 * (bv1 * am32 - am22 * bv3))
+        + am13 * (bv2 * am32 - am22 * bv3))
         / det;
     bvec[1] = (am11 * (bv2 * am33 - am23 * bv3) - bv1 * (am21 * am33 - am23 * am31)
         + am13 * (am21 * bv3 - bv2 * am31))
@@ -1222,4 +1220,55 @@ pub fn one_xyz_by_regression(
     bvec[2] = (am11 * (am22 * bv3 - bv2 * am32) - am12 * (am21 * bv3 - bv2 * am31)
         + bv1 * (am21 * am32 - am22 * am31))
         / det;
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// `BUGS.md` "`oneXYZbyRegression`": with the source's `bv1 * am32` the
+    /// x of an exactly determined point is wrong whenever `bv1 != bv2`.  The
+    /// fixed Cramer numerator recovers a point from noise-free projections.
+    #[test]
+    fn one_xyz_by_regression_recovers_the_point() {
+        // Three views: tilt about Y by -30, 0, 40 degrees, a small rotation.
+        let angles = [-30.0_f32, 0.0, 40.0];
+        let rot = [0.1_f32, -0.05, 0.2];
+        let (mut a, mut b, mut c, mut d, mut e, mut f) =
+            (vec![], vec![], vec![], vec![], vec![], vec![]);
+        for (t, r) in angles.iter().zip(rot.iter()) {
+            let (ct, st) = (t.to_radians().cos(), t.to_radians().sin());
+            let (cr, sr) = (r.cos(), r.sin());
+            // Projection of (x, y, z): tilt about Y, then rotate in the plane.
+            a.push(cr * ct);
+            b.push(-sr);
+            c.push(cr * st);
+            d.push(sr * ct);
+            e.push(cr);
+            f.push(sr * st);
+        }
+        let n = angles.len();
+        let sq = |p: &[f32], q: &[f32], r: &[f32], s: &[f32]| -> Vec<f32> {
+            (0..n).map(|i| p[i] * q[i] + r[i] * s[i]).collect()
+        };
+        let (asq, bsq, csq) = (sq(&a, &a, &d, &d), sq(&b, &b, &e, &e), sq(&c, &c, &f, &f));
+        let (axb, axc, bxc) = (sq(&a, &b, &d, &e), sq(&a, &c, &d, &f), sq(&b, &c, &e, &f));
+        let dxy = vec![1.5_f32, -2.0, 0.5, 0.25, -1.0, 3.0];
+        let (px, py, pz) = (37.0_f32, -12.0_f32, 8.0_f32);
+        let mut xx = vec![];
+        let mut yy = vec![];
+        for i in 0..n {
+            xx.push(a[i] * px + b[i] * py + c[i] * pz + dxy[2 * i]);
+            yy.push(d[i] * px + e[i] * py + f[i] * pz + dxy[2 * i + 1]);
+        }
+        let isec_view = [1, 2, 3];
+        let mut bvec = [0f32; 3];
+        one_xyz_by_regression(
+            &a, &b, &c, &d, &e, &f, &asq, &bsq, &csq, &axb, &axc, &bxc, &dxy, &xx, &yy, 1, 3,
+            &isec_view, &mut bvec,
+        );
+        for (got, want) in bvec.iter().zip([px, py, pz]) {
+            assert!((got - want).abs() < 1.0e-2, "{bvec:?} vs {px} {py} {pz}");
+        }
+    }
 }

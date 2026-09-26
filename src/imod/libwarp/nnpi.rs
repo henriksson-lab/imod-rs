@@ -505,38 +505,19 @@ fn nnpi_getneighbours(
 
         // `qsort(&v[1], *n - 1, sizeof(indexedpoint), compare_indexedpoints)`.
         //
-        // **The one measured divergence in this module.**
         // `compare_indexedpoints` never returns 0 and is not antisymmetric, so
         // it is not a total order and the permutation it produces is a
-        // property of the sorting *algorithm*, not of the comparator: glibc
-        // 2.35 sorts this with `msort_with_tmp`, and any other correct sort may
-        // legitimately land elsewhere.  Rust's `sort_by` additionally *panics*
-        // on a comparator it detects as inconsistent, so this is written as the
-        // insertion sort a small `qsort` would perform — identical to a merge
-        // sort wherever the comparator is a proper weak order, deterministic
-        // where it is not, and incapable of aborting.
-        //
-        // Quantified against the C: over 1628 NON_SIBSONIAN queries, 12 have a
-        // differing `nvertices` and **none** has a differing interpolated `z` —
-        // what moves is residual weights no larger than 2^-328 (a `BIGNUMBER`
-        // term after normalisation).  Patching this same insertion sort into
-        // the vendored `nnpi.c` makes all 18421 lines of the differential
-        // byte-identical, which is what proves the sort is the sole cause.  Nothing in IMOD reaches this branch: `nn_rule` is only
-        // set to `NON_SIBSONIAN` inside `nnai.c`'s `#if defined(NNAI_TEST)`
-        // test main.
-        let lo = 1_usize;
-        let hi = *n as usize;
-        let mut k = lo + 1;
-        while k < hi {
-            let cur = v[k];
-            let mut j = k;
-            while j > lo && compare_indexedpoints(&v[j - 1], &cur) > 0 {
-                v[j] = v[j - 1];
-                j -= 1;
-            }
-            v[j] = cur;
-            k += 1;
-        }
+        // property of the sorting *algorithm*: glibc 2.35's merge sort, which
+        // `c_sort::qsort` reproduces.  (An insertion sort stood here before;
+        // over 1628 NON_SIBSONIAN queries it differed from the C in 12
+        // `nvertices`, and patching that same insertion sort into `nnpi.c`
+        // made the differential byte-identical -- i.e. the sort was the sole
+        // difference.)  Nothing in IMOD reaches this branch: `nn_rule` is
+        // only set to `NON_SIBSONIAN` inside `nnai.c`'s `#if
+        // defined(NNAI_TEST)` test main.
+        crate::imod::c_sort::qsort(&mut v[1..*n as usize], &mut |a, b| {
+            compare_indexedpoints(a, b)
+        });
     }
 
     nids.clear();
@@ -849,22 +830,7 @@ pub fn nnpi_interpolate_point(nn: &mut Nnpi, p: &mut Point) {
                 }
 
                 // `qsort(ivs, nn->nvertices, sizeof(indexedvalue), cmp_iv)`.
-                // Written as an insertion sort: it agrees with glibc's merge
-                // sort wherever the comparator is a weak order, and cannot
-                // panic on the NaN weights a degenerate case can produce,
-                // where Rust's `sort_by` may reject the comparator.
-                let hi = nn.vertices.len();
-                let mut k = 1_usize;
-                while k < hi {
-                    let cur = ivs[k];
-                    let mut j = k;
-                    while j > 0 && cmp_iv(&ivs[j - 1], &cur) > 0 {
-                        ivs[j] = ivs[j - 1];
-                        j -= 1;
-                    }
-                    ivs[j] = cur;
-                    k += 1;
-                }
+                crate::imod::c_sort::qsort(&mut ivs, &mut |a, b| cmp_iv(a, b));
             }
 
             if nn.n == 0 {

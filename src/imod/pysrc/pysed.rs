@@ -7,16 +7,16 @@ use std::sync::atomic::{AtomicBool, Ordering};
 /// Matches `escslash` (`IMOD/pysrc/pysed.py:11`).
 const ESC_SLASH: &str = "#escSlash^";
 
-/// Matches the module global `pysedReturnOnErr` (`IMOD/pysrc/pysed.py:12`).
+/// Matches the module globals `pysedReturnOnErr` (`IMOD/pysrc/pysed.py:12`,
+/// read by `psReportErr`) and `pysedReturnError` (`pysed.py:75-76`, assigned
+/// by `pysed` from its `retErr` argument).
 ///
-/// Nothing in the source ever assigns it: `pysed` assigns `pysedReturnError`
-/// (`pysed.py:75-76`), a different name, so `psReportErr` always reaches its
-/// `sys.exit(1)` and the `retErr` argument has no effect.  Verified by running
-/// the Python: `pysed(["s/a/"], ["x"], retErr=True)` prints
-/// `ERROR: pysed - Incorrect s/// entry: s/a/` and exits 1.
+/// Fixed in translation (2026-09-26, `BUGS.md` §9): the source declares and
+/// reads one name and assigns the other, so `retErr=True` never takes effect
+/// and every error exits the calling script.  The evident intent is one flag,
+/// so both names map to this one: with `retErr` set, `psReportErr` prints the
+/// message and returns it, and `pysed` returns `Err(message)`.
 static PYSED_RETURN_ON_ERR: AtomicBool = AtomicBool::new(false);
-/// Matches the module global `pysedReturnError` that `pysed` assigns (`pysed.py:76`).
-static PYSED_RETURN_ERROR: AtomicBool = AtomicBool::new(false);
 
 /// Matches `psReportErr` (`IMOD/pysrc/pysed.py:14`).
 pub fn ps_report_err(error: String) -> String {
@@ -213,7 +213,7 @@ pub enum PysedSrc<'a> {
 ///
 /// Returns `Ok(Some(lines))` for the source's list return, `Ok(None)` for its
 /// `return None` after writing `dstfile`, and `Err(message)` for the string
-/// `psReportErr` returns — which, per [`PYSED_RETURN_ON_ERR`], it never does.
+/// `psReportErr` returns when `ret_err` is set (see [`PYSED_RETURN_ON_ERR`]).
 pub fn pysed(
     sedregs_in: &[String],
     src: PysedSrc,
@@ -222,7 +222,7 @@ pub fn pysed(
     delim: char,
     ret_err: bool,
 ) -> Result<Option<Vec<String>>, String> {
-    PYSED_RETURN_ERROR.store(ret_err, Ordering::SeqCst);
+    PYSED_RETURN_ON_ERR.store(ret_err, Ordering::SeqCst);
 
     // Set error prefix and try to open input file
     // `progname` is not a name in this module (it is a global of the calling
@@ -482,6 +482,27 @@ pub fn sed_modify(option: &str, value: &str, delim: char) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// `BUGS.md` §9, fixed in translation: with `retErr` set, a bad
+    /// expression comes back as `Err(message)` instead of exiting the process
+    /// (native's `pysed.py` exits because its flag is misnamed).
+    #[test]
+    fn ret_err_returns_the_error() {
+        let lines = vec!["abc".to_owned()];
+        let result = pysed(
+            &["s/a/".to_owned()],
+            PysedSrc::Lines(&lines),
+            None,
+            false,
+            '/',
+            true,
+        );
+        assert_eq!(
+            result.unwrap_err(),
+            "ERROR: pysed - Incorrect s/// entry: s/a/"
+        );
+        PYSED_RETURN_ON_ERR.store(false, Ordering::SeqCst);
+    }
 
     /// Differential driver against the Python `pysed.pysed` run by
     /// `python3` over the same cases file: `IMOD_PYSED_CASES` names a file

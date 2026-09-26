@@ -17,20 +17,11 @@ fn fixture_dir() -> PathBuf {
     Path::new(env!("CARGO_MANIFEST_DIR")).join("fixtures/findsection")
 }
 
-/// Blank what native cannot reproduce.  A model's 128-byte name field
-/// (`Imod.name`, bytes 8..136) is `malloc` residue past its terminator in
-/// native (`imodNew`), and an MRC file's labels carry a date/time stamp.
-fn mask(name: &str, bytes: &[u8]) -> Vec<u8> {
-    let mut masked = bytes.to_vec();
-    if masked.starts_with(b"IMOD") && masked.len() > 136 {
-        let end = masked[8..136].iter().position(|&b| b == 0).unwrap_or(128);
-        masked[8 + end..136].fill(0);
-    } else if (name.ends_with(".means") || name.ends_with(".SDs") || name.ends_with(".colmed"))
-        && masked.len() > 1024
-    {
-        masked[224..1024].fill(0);
-    }
-    masked
+/// Blank the wall-clock stamps (`common::mask_stamps`).  The regions native
+/// writes from uninitialised memory (`BUGS.md` §2) are reconciled first by
+/// `common::reconcile_uninitialised`, which checks ours holds the defined value.
+fn mask(bytes: &[u8]) -> Vec<u8> {
+    common::mask_stamps(bytes)
 }
 
 fn scratch(name: &str) -> PathBuf {
@@ -132,7 +123,7 @@ fn every_case_matches_native_golden() {
                 continue;
             };
             let theirs = std::fs::read(golden.join(name).join(file)).unwrap();
-            if mask(file, &ours) != mask(file, &theirs) {
+            if mask(&ours) != mask(&common::reconcile_uninitialised(&ours, &theirs)) {
                 failures.push(format!("{name}: {file} differs from native"));
             }
         }
@@ -140,4 +131,31 @@ fn every_case_matches_native_golden() {
     }
     assert!(count >= 18, "only {count} cases ran");
     assert!(failures.is_empty(), "{}", failures.join("\n"));
+}
+
+/// BUGS.md, fixed in translation: `findsection.cpp:411` passes the NULL model
+/// pointer to `%s` (native prints "(null)"); the message names the file.
+/// (The binning-column and low-SD-message fixes are in the `binning` and
+/// `lowest` goldens.)
+#[test]
+fn unreadable_bead_model_message_names_the_file() {
+    let dir = scratch("nobead");
+    let output = common::imod_cmd("findsection")
+        .current_dir(&dir)
+        .env(
+            "AUTODOC_DIR",
+            concat!(env!("CARGO_MANIFEST_DIR"), "/IMOD/autodoc"),
+        )
+        .args(["-tomo", "fz.mrc", "-size", "8,8,2", "-high", "3"])
+        .args(["-bead", "nosuch.mod", "-diameter", "6"])
+        .output()
+        .unwrap();
+    assert_eq!(output.status.code(), Some(1));
+    let text = String::from_utf8_lossy(&output.stdout).into_owned()
+        + &String::from_utf8_lossy(&output.stderr);
+    assert!(
+        text.contains("Reading in bead model file nosuch.mod"),
+        "{text}"
+    );
+    let _ = std::fs::remove_dir_all(&dir);
 }

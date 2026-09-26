@@ -75,108 +75,140 @@ pub fn fort_mod_obj_to_cont(
     }
 }
 
-/// Original: `fortObjectMover` (`fortmodel.c:307`).  Returns `true` for the
+/// Original: `fortObjectMover` (`fortmodel.c:289`).  Returns `true` for the
 /// native `failed != 0` result.
+///
+/// Line for line with the C: no bounds checks of its own (an out-of-range
+/// `iobj` is an index panic here where the C reads out of bounds), and the
+/// `insufficient space` message when the repack does not help.
 pub fn fort_object_mover(fm: &mut FortModel, iobj: i32) -> bool {
-    let Some(index) = iobj
-        .checked_sub(1)
-        .and_then(|value| usize::try_from(value).ok())
-    else {
-        return true;
-    };
-    if index >= fm.npt_in_obj.len() {
-        return true;
+    //
+    // just return if object already at top of list
+    //
+    let mut failed;
+    if fm.nin_order > 0 {
+        if fm.obj_order[(fm.nin_order - 1) as usize] == iobj {
+            return false;
+        }
     }
-    if fm.nin_order > 0 && fm.obj_order[fm.nin_order as usize - 1] == iobj {
-        return false;
-    }
-    let count = fm.npt_in_obj[index];
-    if fm.nin_order >= fm.max_obj_order || fm.ibase_free + count + 4 >= fm.len_object {
+    //
+    // if the order array is full or there's not enough space in the object
+    // array, first try to repack arrays, then give up if still too full
+    //
+    let num_in_obj = fm.npt_in_obj[(iobj - 1) as usize];
+    failed = fm.nin_order >= fm.max_obj_order || fm.ibase_free + num_in_obj + 4 >= fm.len_object;
+    if failed {
         fort_object_packer(fm);
     }
-    if fm.nin_order >= fm.max_obj_order || fm.ibase_free + count + 4 >= fm.len_object {
+    failed = fm.nin_order >= fm.max_obj_order || fm.ibase_free + num_in_obj + 4 >= fm.len_object;
+    if failed {
+        print!("fortObjectMover: insufficient space to make desired object current\n");
+        let _ = std::io::Write::flush(&mut std::io::stdout());
         return true;
     }
-    if count <= 0 {
-        return false;
+    //
+    // if object is not null, move to top of OBJECT and adjust things;
+    // otherwise assume nothing is set up, not even base pointer
+    //
+    if num_in_obj > 0 {
+        let ibase = fm.ibase_obj[(iobj - 1) as usize];
+        fm.ibase_obj[(iobj - 1) as usize] = fm.ibase_free;
+        let mut ind = ibase + 1;
+        while ind <= ibase + num_in_obj {
+            fm.ibase_free += 1;
+            fm.object[(fm.ibase_free - 1) as usize] = fm.object[(ind - 1) as usize];
+            ind += 1;
+        }
+        fm.nin_order += 1; // add to end of order list
+        fm.obj_order[(fm.nin_order - 1) as usize] = iobj;
+        // clear earlier spot in list
+        // An object the packer dropped from the order list has
+        // `fmodNdx_order` 0, and the C then stores to `fmodObj_order[-1]`, a
+        // write before the allocation (source-level UB, CLAUDE.md); that
+        // store is skipped here rather than reproduced.
+        let earlier = fm.ndx_order[(iobj - 1) as usize];
+        if earlier > 0 {
+            fm.obj_order[(earlier - 1) as usize] = 0;
+        }
+        fm.ndx_order[(iobj - 1) as usize] = fm.nin_order; // set up index to order list
     }
-    let old_base = fm.ibase_obj[index] as usize;
-    let new_base = fm.ibase_free as usize;
-    let count = count as usize;
-    if old_base + count > fm.object.len() || new_base + count > fm.object.len() {
-        return true;
-    }
-    // `copy_within` deliberately preserves the native memmove semantics if a
-    // caller moves an object whose old slot overlaps the free tail.
-    fm.object.copy_within(old_base..old_base + count, new_base);
-    fm.ibase_obj[index] = fm.ibase_free;
-    fm.ibase_free += count as i32;
-    fm.nin_order += 1;
-    fm.obj_order[fm.nin_order as usize - 1] = iobj;
-    let old_order = fm.ndx_order[index];
-    if old_order > 0 && (old_order as usize) <= fm.obj_order.len() {
-        fm.obj_order[old_order as usize - 1] = 0;
-    }
-    fm.ndx_order[index] = fm.nin_order;
     false
 }
 
-/// Original: `fortObjectPacker` (`fortmodel.c:367`).
+/// Original: `fortObjectPacker` (`fortmodel.c:337`).
+/// Repacks the fmodObject array so that all objects are contiguous.
 pub fn fort_object_packer(fm: &mut FortModel) {
-    let saved_total = fm.ntot_in_obj;
-    let saved_objects = fm.n_object;
-    let saved_max = fm.max_mod_obj;
+    //
+    // recompute total entries in OBJECT, total # of objects, max object #
+    //
+    let ntot_save = fm.ntot_in_obj;
+    let num_obj_save = fm.n_object;
+    let max_save = fm.max_mod_obj;
     fm.ntot_in_obj = 0;
     fm.n_object = 0;
-    fm.max_mod_obj = 0;
-    for (index, &count) in fm.npt_in_obj.iter().enumerate() {
-        if count > 0 {
-            fm.ntot_in_obj += count;
+    for iobj in 1..=fm.max_obj_num {
+        if fm.npt_in_obj[(iobj - 1) as usize] > 0 {
+            fm.ntot_in_obj += fm.npt_in_obj[(iobj - 1) as usize];
             fm.n_object += 1;
-            fm.max_mod_obj = index as i32 + 1;
+            fm.max_mod_obj = iobj;
         }
     }
-    let _mismatch =
-        saved_total != fm.ntot_in_obj || saved_objects != fm.n_object || saved_max < fm.max_mod_obj;
+    if ntot_save != fm.ntot_in_obj || num_obj_save != fm.n_object || max_save < fm.max_mod_obj {
+        print!(
+            "fortObjectPacker mismatch: ntot {} {}, nobj {} {}, max {} {}\n",
+            ntot_save, fm.ntot_in_obj, num_obj_save, fm.n_object, max_save, fm.max_mod_obj
+        );
+        let _ = std::io::Write::flush(&mut std::io::stdout());
+    }
+    //
+    // if total entries in OBJECT is less than the current free pointer,
+    // pack the array down
+    //
     if fm.ntot_in_obj < fm.ibase_free {
-        let mut free = 0usize;
-        for order in 0..fm.nin_order.max(0) as usize {
-            let object = fm.obj_order[order];
-            if object <= 0 {
-                continue;
+        fm.ibase_free = 0;
+        for iord in 1..=fm.nin_order {
+            let iobj = fm.obj_order[(iord - 1) as usize];
+            if iobj != 0 {
+                let num_in_obj = fm.npt_in_obj[(iobj - 1) as usize];
+                let ibase_obj = fm.ibase_obj[(iobj - 1) as usize];
+                if num_in_obj != 0 {
+                    if ibase_obj != fm.ibase_free {
+                        // move pointers down if needed
+                        let mut ibase_down = fm.ibase_free;
+                        let mut ibase = 1 + ibase_obj;
+                        while ibase <= num_in_obj + ibase_obj {
+                            ibase_down += 1;
+                            fm.object[(ibase_down - 1) as usize] = fm.object[(ibase - 1) as usize];
+                            ibase += 1;
+                        }
+                    }
+                    fm.ibase_obj[(iobj - 1) as usize] = fm.ibase_free; // in any case, reset these
+                    fm.ibase_free += num_in_obj;
+                } else {
+                    // if fmodObject empty, clear spot
+                    fm.obj_order[(iord - 1) as usize] = 0;
+                }
             }
-            let index = object as usize - 1;
-            let count = fm.npt_in_obj[index].max(0) as usize;
-            if count == 0 {
-                fm.obj_order[order] = 0;
-                continue;
-            }
-            let base = fm.ibase_obj[index].max(0) as usize;
-            if base != free {
-                fm.object.copy_within(base..base + count, free);
-            }
-            fm.ibase_obj[index] = free as i32;
-            free += count;
         }
-        fm.ibase_free = free as i32;
     }
+    //
+    // repack the object order array if # of objects is < # in order array
+    //
     if fm.n_object < fm.nin_order {
-        let mut retained = 0usize;
-        for order in 0..fm.nin_order.max(0) as usize {
-            let object = fm.obj_order[order];
-            if object <= 0 {
-                continue;
+        let mut ind_order = 0;
+        for iord in 1..=fm.nin_order {
+            let iobj = fm.obj_order[(iord - 1) as usize];
+            if iobj != 0 {
+                if fm.npt_in_obj[(iobj - 1) as usize] != 0 {
+                    ind_order += 1;
+                    fm.obj_order[(ind_order - 1) as usize] = iobj;
+                    fm.ndx_order[(iobj - 1) as usize] = ind_order;
+                } else {
+                    fm.ndx_order[(iobj - 1) as usize] = 0;
+                }
             }
-            let index = object as usize - 1;
-            if fm.npt_in_obj[index] == 0 {
-                fm.ndx_order[index] = 0;
-                continue;
-            }
-            fm.obj_order[retained] = object;
-            fm.ndx_order[index] = retained as i32 + 1;
-            retained += 1;
         }
-        fm.nin_order = retained as i32;
+        fm.nin_order = ind_order;
     }
 }
 
@@ -242,15 +274,32 @@ pub fn put_fort_mod_objects(fm: &mut FortModel) -> Result<(), i32> {
         fm.n_point,
         fm.max_mod_obj,
     );
-    if error == 0 { Ok(()) } else { Err(error) }
+    // `fortmodel.c:231-232`: the C exits here rather than returning the code.
+    if error != 0 {
+        crate::imod::libcfshr::parse_params::exit_error(b"putting objects back into IMOD model");
+    }
+    Ok(())
 }
 
-/// Original: `writeFortModel` (`fortmodel.c:208`).
+/// Original: `writeFortModel` (`fortmodel.c:204`).
+///
+/// The C returns nothing: a failed backup is a warning and a failed write an
+/// `exitError` (`fortmodel.c:207-214`), so this always returns `Ok`.
 pub fn write_fort_model(filename: &str, fm: &mut FortModel) -> Result<(), i32> {
-    let _ = imod_backup_file(filename);
+    let ierr = imod_backup_file(filename);
+    if ierr != 0 {
+        use std::io::Write as _;
+        let _ = crate::imod::libcfshr::b3dutil::ImodFile::Stdout
+            .write_all(b"WARNING: writeFortModel - Error attempting to rename existing model file");
+    }
     put_fort_mod_objects(fm)?;
     let error = writeimod(filename);
-    if error == 0 { Ok(()) } else { Err(error) }
+    if error != 0 {
+        crate::imod::libcfshr::parse_params::exit_error(
+            format!("Writing output model file {filename}").as_bytes(),
+        );
+    }
+    Ok(())
 }
 
 /// Original: `fortModOpenError` (`fortmodel.c:201`).

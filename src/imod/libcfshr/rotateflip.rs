@@ -258,10 +258,62 @@ pub fn rotate_flip_image(
                     .enumerate()
                     .for_each(run);
             } else {
-                $brray[..count]
-                    .chunks_mut(rows_per_group * nxo)
-                    .enumerate()
-                    .for_each(run);
+                /* One thread: the source's own copy (`rotateflip.c:151-195`),
+                eight *input* lines at a time scattered through the cursors
+                `xstart + nxOut * ystart + line * dinter + ix * dalong`
+                (TO_OPT.md, "combinefft single-thread": with 8 contiguous
+                output stores per step it beat the gather, which writes 8
+                output-row streams, by ~30% on `todfft`'s transposes).  The
+                same bijection as the gather, so every output element gets the
+                same value.  Unchecked: the cursor is affine in `(ix, line)`,
+                so its extremes over the input rectangle are at the four
+                corners, which the `assert!` puts in `0..count`; reads run over
+                `0..nx * ny`, which the gather's corner check already put
+                inside `array` (the inverse map is onto the input). */
+                let _ = run;
+                let nxu = nx as usize;
+                let ny_in = ny as usize;
+                let out_origin = (xstart + nx_out * ystart) as isize;
+                let (dal, din) = (dalong as isize, dinter as isize);
+                for (ix, line) in [(0, 0), (nxu - 1, 0), (0, ny_in - 1), (nxu - 1, ny_in - 1)] {
+                    let index = out_origin + line as isize * din + ix as isize * dal;
+                    assert!(index >= 0 && (index as usize) < count);
+                }
+                assert!(nxu * ny_in <= array.len());
+                let ap = array.as_ptr();
+                let bp = $brray[..count].as_mut_ptr();
+                let num_strips = ny_in / 8;
+                for strip in 0..num_strips {
+                    let b_start = out_origin + (8 * strip) as isize * din;
+                    let a_start = 8 * strip * nxu;
+                    let mut bcur = [0_isize; 8];
+                    for line in 0..8 {
+                        bcur[line] = b_start + line as isize * din;
+                    }
+                    for ix in 0..nxu {
+                        for line in 0..8 {
+                            unsafe {
+                                let $v = *ap.add(a_start + line * nxu + ix);
+                                *bp.offset(bcur[line]) = $conv;
+                            }
+                            bcur[line] += dal;
+                        }
+                    }
+                }
+                let mut b_start = out_origin + (8 * num_strips) as isize * din;
+                let mut a_cur = 8 * num_strips * nxu;
+                for _iy in 8 * num_strips..ny_in {
+                    let mut bcur = b_start;
+                    for _ix in 0..nxu {
+                        unsafe {
+                            let $v = *ap.add(a_cur);
+                            *bp.offset(bcur) = $conv;
+                        }
+                        a_cur += 1;
+                        bcur += dal;
+                    }
+                    b_start += din;
+                }
             }
         }};
     }

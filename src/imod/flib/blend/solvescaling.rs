@@ -18,6 +18,7 @@
 
 use super::blendvars::BlendVars;
 use super::bsubs::find_best_shifts;
+use crate::imod::flib::subrs::compat::gfortran_rt::{maxss, minss};
 use crate::imod::libcfshr::b3dutil::ImodFile;
 use crate::imod::libcfshr::simplestat::array_min_max_mean_fortran;
 use std::io::Write;
@@ -78,8 +79,11 @@ pub fn solve_scaling(
                             &mut tmax,
                             &mut tmean,
                         );
-                        all_min = if tmin < all_min { tmin } else { all_min };
-                        all_max = if tmax > all_max { tmax } else { all_max };
+                        // `solvescaling.f90:37-38, 41-42`: the reference object
+                        // merges the two updates into
+                        // `allMin = minss(allMin, minss(tminA, tminB))` and
+                        // `allMax = maxss(maxss(tmaxA, tmaxB), allMax)`.
+                        let (tmin_a, tmax_a) = (tmin, tmax);
                         let off = bv.den_bbuf_ext[0] * iu;
                         array_min_max_mean_fortran(
                             &bv.den_bbuf[off..],
@@ -93,8 +97,8 @@ pub fn solve_scaling(
                             &mut tmax,
                             &mut tmean,
                         );
-                        all_min = if tmin < all_min { tmin } else { all_min };
-                        all_max = if tmax > all_max { tmax } else { all_max };
+                        all_min = minss(all_min, minss(tmin_a, tmin));
+                        all_max = maxss(maxss(tmax_a, tmax), all_max);
                     }
                 }
             }
@@ -102,11 +106,8 @@ pub fn solve_scaling(
     }
 
     let base_lim = all_min - 0.02 * (all_max - all_min);
-    zero_base = if base_lim < zero_base {
-        base_lim
-    } else {
-        zero_base
-    };
+    // `solvescaling.f90:50`: `minss zeroBase, allMin - ...`.
+    zero_base = minss(zero_base, base_lim);
 
     let xcen = bv.nxyz_in[0] as f32 / 2.;
     let ycen = bv.nxyz_in[1] as f32 / 2.;
@@ -397,8 +398,10 @@ pub fn get_average_diffs(
                         if ratio > 1.0e-6 {
                             dygridmean[ke] = ratio.ln();
                         }
-                        *diff_min = if diff < *diff_min { diff } else { *diff_min };
-                        *diff_max = if diff > *diff_max { diff } else { *diff_max };
+                        // `solvescaling.f90:194-196`: `minss diffMin, diff`,
+                        // `maxss diffMax, diff`, `minss ratio, ratioMin`.
+                        *diff_min = minss(*diff_min, diff);
+                        *diff_max = maxss(*diff_max, diff);
                         *ratio_min = if ratio < *ratio_min {
                             ratio
                         } else {

@@ -2716,10 +2716,12 @@ unsafe fn decode_eer_image(
 /// so skipping it changes no pixel; with one thread this is also what keeps a read of a
 /// few rows from testing every electron in the frame.
 ///
-/// Left serial: the gain-normalized antialiased loop (`iitif.c:1893`).  Its `refVal` is
-/// `private` and assigned only in the interior branch, so the edge branch uses whatever
-/// the previous interior electron in the same thread left there; that depends on the
-/// partition, so the loop keeps the serial source order over all electrons.
+/// Left serial: the gain-normalized antialiased loop (`iitif.c:1893`).  In the source
+/// its `refVal` is `private` and assigned only in the interior branch, so the edge
+/// branch uses whatever the previous interior electron in the same thread left there,
+/// which depends on the partition.  The translation reads the edge electron's own gain
+/// pixel instead (fixed in translation, `BUGS.md`), so the result no longer depends on
+/// order; the loop is simply still serial.
 #[inline(never)]
 unsafe fn convert_eer_positions(
     in_file: *mut ImodImageFile,
@@ -2994,8 +2996,12 @@ unsafe fn convert_eer_positions(
                 // Serial: see the function comment on `refVal`.
                 y_offset = (*in_file).ny * red_fac - 1;
                 let nx_gain = red_fac * (*in_file).nx;
-                // The source declares `refVal` outside the loop and assigns it only in
-                // the interior branch, so the edge branch below reuses the last value.
+                // The source declares `refVal` private and assigns it only in the
+                // interior branch, so its edge branch uses whichever value that thread
+                // last set -- stale, and dependent on the OpenMP split.  Fixed in
+                // translation (2026-09-26, `BUGS.md`): the edge branch reads the gain
+                // at the electron's own super-resolution pixel, `xsr + ysr * nxGain`,
+                // the same lookup the interior branch makes.
                 let mut ref_val: f32 = 0.0;
                 for ind in 0..num_electrons as usize {
                     let xsr =
@@ -3026,6 +3032,7 @@ unsafe fn convert_eer_positions(
                             }
                         }
                     } else if x >= 0 && x < out_xsize && y >= 0 && y < out_ysize {
+                        ref_val = *gain_reference.add((xsr + ysr * nx_gain) as usize);
                         let cell = sbuf.add((x + y * out_xsize) as usize);
                         let value = ((scale * ref_val) as f64 + 0.5).floor() as i32;
                         *cell = (*cell).wrapping_add(value as i16);
@@ -4239,6 +4246,13 @@ pub unsafe fn tiff_write_strip(in_file: *mut ImodImageFile, strip: i32, buf: *mu
                 .x_tile_size
                 .min((*in_file).nx - x_tile * state.x_tile_size))
                 * state.pix_size;
+            // `iitif.c:2647` fills only the rows and columns the image has and
+            // writes the whole tile, so native's padding past `nx`/`ny` is
+            // allocation residue (`BUGS.md` §2).  Defined here: the padding is
+            // zero.
+            if num_bytes < state.line_bytes || lines < state.rows_per_strip {
+                tmp_buf.fill(0);
+            }
             for line in 0..lines {
                 let source_line = if state.already_inverted != 0 {
                     line
@@ -5402,6 +5416,61 @@ mod tests {
             // rounds each of the 16 weighted contributions independently, so the
             // deposited total is one short of `scale * refVal` = 100 * 200.
             assert_eq!(output.iter().map(|v| *v as i32).sum::<i32>(), 19999);
+            S_GAIN_REFERENCE.store(core::ptr::null_mut(), Ordering::SeqCst);
+            cleanup_from_eer(
+                core::ptr::null_mut(),
+                core::ptr::null_mut(),
+                core::ptr::null_mut(),
+                core::ptr::null_mut(),
+                core::ptr::null_mut(),
+            );
+            ii_delete(image);
+        }
+    }
+
+    /// Defined behaviour for the stale-`refVal` upstream defect (`BUGS.md`): an edge
+    /// electron is scaled by the gain at its own pixel, not by the last interior one's.
+    #[test]
+    fn convert_eer_positions_gain_edge_electron_uses_its_own_gain() {
+        let _lock = TIFF_IO_TEST_LOCK.lock().unwrap();
+        unsafe {
+            let mut width = 0;
+            assert_eq!(select_zoom_filter(3, 0.5, &mut width), 0);
+            let filter_count = 2 * 2;
+            *S_EER_FILTERS.lock().unwrap() = EerFilters {
+                all: vec![0; filter_count * 16],
+                x_start: vec![0; filter_count],
+                y_start: vec![0; filter_count],
+            };
+            let image = ii_new();
+            (*image).nx = 16;
+            (*image).ny = 16;
+            (*image).mode = MRC_MODE_SHORT;
+            (*image).read_eer_as_super_res = 1;
+            (*image).antialias_eerfilter = 3;
+            (*image).eerkernel_scale = 100;
+            S_EER_FLAGS.store(0, Ordering::SeqCst);
+            let mut gain = [0_f32; 1024];
+            gain[496] = 200.0;
+            // Electron at chip position 0: super-res (0, 31), output (0, 15) -- an edge.
+            gain[992] = 50.0;
+            S_GAIN_REFERENCE.store(gain.as_mut_ptr(), Ordering::SeqCst);
+            let positions = [36_i32, 0];
+            let symbols = [0_u8, 0];
+            let mut output = [0_i16; 256];
+            convert_eer_positions(
+                image,
+                positions.as_ptr().cast_mut(),
+                symbols.as_ptr().cast_mut(),
+                2,
+                output.as_mut_ptr().cast(),
+                0,
+                15,
+                0,
+                15,
+            );
+            assert_eq!(output[15 * 16], 5000);
+            assert_eq!(output.iter().map(|v| *v as i32).sum::<i32>(), 19999 + 5000);
             S_GAIN_REFERENCE.store(core::ptr::null_mut(), Ordering::SeqCst);
             cleanup_from_eer(
                 core::ptr::null_mut(),

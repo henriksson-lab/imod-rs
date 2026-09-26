@@ -121,7 +121,8 @@ impl PyVal {
 }
 
 /// `repr(float)` / `str(float)`: the shortest decimal that round-trips, with
-/// `.0` forced on an integral value and exponent form outside `1e-4 ..= 1e16`.
+/// `.0` forced on an integral value in positional form and exponent form
+/// outside `1e-4 ..= 1e16` (where an integral mantissa stays bare, `1e-05`).
 ///
 /// Rust's `{}` prints `1` for `1.0f64` and never uses exponent form, so a
 /// string built by the script with `str()` or `'{}'.format()` needs this.
@@ -142,14 +143,10 @@ pub fn py_str_float(value: f64) -> String {
         .and_then(|(_, exponent)| exponent.parse().ok())
         .unwrap_or(0);
     if exponent < -4 || exponent >= 16 {
+        // `repr` keeps an integral mantissa bare: `1e-05`, `1e+16`
         let (mantissa, _) = scientific
             .split_once('e')
             .unwrap_or((scientific.as_str(), "0"));
-        let mantissa = if mantissa.contains('.') {
-            mantissa.to_owned()
-        } else {
-            format!("{mantissa}.0")
-        };
         let sign = if exponent < 0 { '-' } else { '+' };
         return format!("{mantissa}e{sign}{:02}", exponent.abs());
     }
@@ -496,10 +493,6 @@ pub struct Brt {
     pub axis_upper_let: String,
     pub data_name: String,
     pub axis_com: String,
-
-    /// `prochunks.finishSetAndQuit` (`IMOD/pysrc/prochunks.py:27`), which the
-    /// translated `check_for_pro_chunks_quit` takes as an out parameter.
-    pub prochunks_finish_set_and_quit: bool,
 }
 
 impl Brt {
@@ -660,8 +653,6 @@ impl Brt {
             axis_upper_let: "A".to_owned(),
             data_name: String::new(),
             axis_com: String::new(),
-
-            prochunks_finish_set_and_quit: false,
         }
     }
 
@@ -2386,15 +2377,7 @@ impl Brt {
     pub fn check_for_quit(&mut self) {
         let check_file = self.check_file.clone();
         let pro_chunk = self.pro_chunk_check_file.clone();
-        let mut finish = self.prochunks_finish_set_and_quit;
-        let action = check_for_pro_chunks_quit(
-            Some(&check_file),
-            Some(&pro_chunk),
-            false,
-            false,
-            &mut finish,
-        );
-        self.prochunks_finish_set_and_quit = finish;
+        let action = check_for_pro_chunks_quit(Some(&check_file), Some(&pro_chunk), false, false);
         self.process_quit_action(&action, "");
     }
 }
@@ -2514,6 +2497,7 @@ impl Brt {
             &outfile,
             Some(&check_file),
             &pro_chunk,
+            false,
             false,
             false,
         );
@@ -9598,7 +9582,7 @@ pub fn batchruntomo(arguments: &[OsString]) -> i32 {
         .map(|argument| argument.to_string_lossy().into_owned())
         .collect();
     let options: Vec<String> = OPTIONS.iter().map(|entry| (*entry).to_owned()).collect();
-    let (_opts, nonopts) = pip_read_or_parse_options(&argv, &options, PROGNAME, 1, 1, 0, None);
+    let (_opts, nonopts) = pip_read_or_parse_options(&argv, &options, PROGNAME, 1, 1, 0);
     unsafe {
         std::env::set_var("PIP_PRINT_ENTRIES", "0");
         std::env::set_var("SKIP_PHYSICAL_DPI", "1");

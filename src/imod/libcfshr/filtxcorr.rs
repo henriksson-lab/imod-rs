@@ -589,9 +589,46 @@ pub fn apply_kernel_filter(
         // unroll into constant offsets from the row start; without that each
         // tap re-formed and sign-extended its `i32` index (~1.2x native on
         // `beadtrack`'s 5x5 Sobel smoothing, where gcc does the same).
+        //
+        // Each pixel's sum is one serial `f32` chain of `k * k` dependent
+        // adds, so a lone chain runs at the add latency (native too: its
+        // 13x13 case on `ccderaser -expand -target` is latency-bound).  The
+        // main part therefore carries sixteen adjacent output pixels at once:
+        // lane `l` receives exactly the scalar sequence for pixel `ixo + l` —
+        // `sum += mat[mrow + ix] * a[arow + ix + l]`, same operands, same
+        // order, from the same `0.` — so each output is bit-identical; only
+        // independent chains are interleaved (lane-wise `mulps`/`addps` are
+        // IEEE-identical to `mulss`/`addss`, and there is no FMA on the
+        // target).  Every pixel of a block is an interior column
+        // (`ixo + 15 <= nx - above - 1`), so the reads and the store are
+        // covered by the same bounds as the scalar loop, which finishes the
+        // row.
         macro_rules! interior_rows {
             ($kk:expr, $iyo:expr, $brows:expr) => {
-                for ixo in below..nx - above {
+                let x_end = nx - above;
+                let mut ixb = below;
+                while ixb + 16 <= x_end {
+                    let mut sum = [0f32; 16];
+                    for iy in 0..$kk {
+                        let aiy = iy + $iyo - below;
+                        let arow = (ixb - below + aiy * d) as usize;
+                        let mrow = (iy * $kk) as usize;
+                        for ix in 0..$kk as usize {
+                            // SAFETY: `interior_reads_ok` bounds every index
+                            // `arow + ix + l` (that of interior pixel `ixb + l`).
+                            let m = unsafe { *mat.get_unchecked(mrow + ix) };
+                            let av = unsafe { &*(a.as_ptr().add(arow + ix) as *const [f32; 16]) };
+                            for l in 0..16 {
+                                sum[l] += m * av[l];
+                            }
+                        }
+                    }
+                    let o = (ixb + ($iyo - oy0) * d) as usize;
+                    // SAFETY: `unchecked` bounds every store index.
+                    unsafe { $brows.get_unchecked_mut(o..o + 16) }.copy_from_slice(&sum);
+                    ixb += 16;
+                }
+                for ixo in ixb..x_end {
                     let mut sum = 0.;
                     for iy in 0..$kk {
                         let aiy = iy + $iyo - below;

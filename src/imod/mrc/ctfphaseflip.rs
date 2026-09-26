@@ -16,7 +16,7 @@ use crate::imod::ctfplotter::ctfutils::{
 use crate::imod::libcfshr::amat_to_rotmagstr::amat_to_rotmagstr;
 use crate::imod::libcfshr::b3dutil::{
     CArg, ImodFile, angle_within_limits, b3d_lock_file, b3d_output_file_type, b3d_unlock_file,
-    c_format_bytes, fgetline, get_standard_gpu_options, imod_backup_file, imod_prog_name,
+    c_format_bytes, exit, fgetline, get_standard_gpu_options, imod_backup_file, imod_prog_name,
     set_or_clear_flags,
 };
 use crate::imod::libcfshr::coresprocsthreads::wall_time;
@@ -28,7 +28,7 @@ use crate::imod::libcfshr::parse_params::{
 };
 use crate::imod::libcfshr::taperpad::{PadIn, slice_taper_in_pad};
 use crate::imod::libfft::odfft::nice_fft_limit;
-use crate::imod::libfft::rustfft_backend::todfftc;
+use crate::imod::libfft::todfft::todfft_c;
 use crate::imod::libiimod::iihdf::hdf_write_dummy_section;
 use crate::imod::libiimod::iihdf::ii_test_if_hdf;
 use crate::imod::libiimod::iimage::{
@@ -197,8 +197,7 @@ pub fn ctfphaseflip(arguments: &[String]) -> i32 {
     ierr = 0;
     if pip_get_boolean(b"usage", &mut ierr) == 0 {
         pip_print_help(progname, 0, 0, 0);
-        let _ = ImodFile::Stdout.flush();
-        std::process::exit(0);
+        exit(0);
     }
     pip_get_integer(b"DebugOutput", &mut debug_mode);
     if debug_mode >= 10 {
@@ -299,7 +298,8 @@ pub fn ctfphaseflip(arguments: &[String]) -> i32 {
         "stackFn = %s, angleFn=%s,  invertAngles=%d\n",
         &[
             CArg::Bytes(&stack_fn),
-            CArg::Bytes(&angle_fn),
+            // glibc prints a NULL `%s` argument as `(null)`.
+            CArg::Bytes(if have_angle_fn { &angle_fn } else { b"(null)" }),
             CArg::Int(invert_angles.into()),
         ],
     ));
@@ -782,7 +782,8 @@ pub fn ctfphaseflip(arguments: &[String]) -> i32 {
     }
 
     // Report the angles, after applying the offset if any
-    offset_in_z = (offset_in_z as f64 * 0.001 * pixel_size as f64) as f32;
+    // `offsetInZ *= 0.001 * pixelSize` multiplies by the whole right side.
+    offset_in_z = (offset_in_z as f64 * (0.001 * pixel_size as f64)) as f32;
     focus_diff = offset_in_z;
     for k in 0..nz {
         if offset_in_z != 0. {
@@ -833,10 +834,14 @@ pub fn ctfphaseflip(arguments: &[String]) -> i32 {
             let _ = ImodFile::Stdout.write_all(b"\n");
         }
     }
+    // The source's report loop leaves its counter `k` at `nz`; the GPU error
+    // messages below print that `k`.
+    k = nz;
 
     wl = (12.3984 / (volt as f64 * (volt as f64 + 1022.0)).sqrt()) as f32; //wavelength in Angstroms;
     c1 = (MY_PI * wl as f64) as f32;
-    c2 = (c1 as f64 * cs as f64 * 1.0e7 * wl as f64 * wl as f64 / 2.0) as f32; // All in Angstroms
+    // `C1 * cs` is a float product before the double `1.e7` widens it.
+    c2 = ((c1 * cs) as f64 * 1.0e7 * wl as f64 * wl as f64 / 2.0) as f32; // All in Angstroms
 
     let mut strip_dist = [0i32; 2];
     let mut strip_limit: i32;
@@ -1019,7 +1024,7 @@ pub fn ctfphaseflip(arguments: &[String]) -> i32 {
                     volt as f64,
                 );
             while max_width < max_strip_width
-                && zero_shift < (1. - (curr_angle as f64).tan().abs()) * min_zero_shift as f64
+                && zero_shift < (1. - curr_angle.tan().abs() as f64) * min_zero_shift as f64
             {
                 max_width += 2;
                 zero_shift = 0.5
@@ -1254,7 +1259,7 @@ pub fn ctfphaseflip(arguments: &[String]) -> i32 {
                     wall_prep += cur_time - wall_start;
                     wall_start = cur_time;
                 }
-                let _ = todfftc(&mut full_image, nx_pad, ny, 0);
+                todfft_c(&mut full_image, nx_pad, ny, 0);
                 if debug_mode != 0 {
                     cur_time = wall_time();
                     wall_fft += cur_time - wall_start;
@@ -1271,8 +1276,9 @@ pub fn ctfphaseflip(arguments: &[String]) -> i32 {
                 // Get the axis of constant Z before rotation by the tilt axis angle
                 // Keep it in the 1st and 2nd quadrant, on both sides of tilt axis
                 if x_axis_tilt != 0. {
-                    constant_zaxis =
-                        ((curr_angle as f64).sin() / (x_axis_tilt as f64).tan()).atan() as f32;
+                    constant_zaxis = (curr_angle.sin() / x_axis_tilt.tan()).atan();
+                    // C++ `<cmath>` overloads: `atan`, `sin` and `tan` of a
+                    // `float` are `atanf`, `sinf` and `tanf` (so below too).
                     if constant_zaxis < 0. {
                         constant_zaxis = (constant_zaxis as f64 + 180. * RADIANS_PER_DEGREE) as f32;
                     }
@@ -1282,13 +1288,14 @@ pub fn ctfphaseflip(arguments: &[String]) -> i32 {
 
                 // Add tilt axis angle to get actual axis in image
                 view_axis_angle = constant_zaxis + tilt_axis_angle;
-                sin_view_axis = (view_axis_angle as f64).sin() as f32;
-                cos_view_axis = (view_axis_angle as f64).cos() as f32;
-                cornerdist1 = (-sin_view_axis as f64 * nx as f64 / 2.
-                    - cos_view_axis as f64 * nyfile as f64 / 2.)
+                sin_view_axis = view_axis_angle.sin();
+                cos_view_axis = view_axis_angle.cos();
+                // `-sinViewAxis * nx` is a float product; `/ 2.` widens it.
+                cornerdist1 = ((-sin_view_axis * nx as f32) as f64 / 2.
+                    - (cos_view_axis * nyfile as f32) as f64 / 2.)
                     .abs() as f32;
-                cornerdist2 = (-sin_view_axis as f64 * nx as f64 / 2.
-                    + cos_view_axis as f64 * nyfile as f64 / 2.)
+                cornerdist2 = ((-sin_view_axis * nx as f32) as f64 / 2.
+                    + (cos_view_axis * nyfile as f32) as f64 / 2.)
                     .abs() as f32;
                 effective_nx = 2
                     * (if cornerdist1 > cornerdist2 {
@@ -1419,16 +1426,17 @@ pub fn ctfphaseflip(arguments: &[String]) -> i32 {
                     && ((curr_angle as f64).abs() <= MIN_ANGLE * RADIANS_PER_DEGREE
                         || (constant_zaxis as f64).abs() < 1.0e-6)
                 {
-                    delta_z = (axis_dist as f64 * (x_axis_tilt as f64).tan()) as f32;
+                    delta_z = axis_dist * x_axis_tilt.tan();
                 } else {
-                    delta_z = (axis_dist as f64 * (curr_angle as f64).tan()
-                        / (constant_zaxis as f64).sin()) as f32;
+                    delta_z = axis_dist * curr_angle.tan() / constant_zaxis.sin();
                 }
             } else {
                 // For regular tilt, the axis distance is negative x at positive tilt
-                delta_z = ((((nx / 2) as f32 + x_shifts[(view - 1) as usize] - strip_mid as f32)
-                    * pixel_size) as f64
-                    * (curr_angle as f64).tan()) as f32;
+                // `tan` of a `float` is C++'s `tanf` overload, and the
+                // whole product stays in single precision.
+                delta_z = ((nx / 2) as f32 + x_shifts[(view - 1) as usize] - strip_mid as f32)
+                    * pixel_size
+                    * curr_angle.tan();
             }
 
             // The defocus is higher with negative deltaZ, so subtract it
@@ -1450,8 +1458,8 @@ pub fn ctfphaseflip(arguments: &[String]) -> i32 {
                     (astig_angle[(view - 1) as usize] as f64 * RADIANS_PER_DEGREE).sin() as f32;
                 cos_astig =
                     (astig_angle[(view - 1) as usize] as f64 * RADIANS_PER_DEGREE).cos() as f32;
-                focus_sum = (0.5 * (strip_defocus as f64 + strip_focus2 as f64)) as f32;
-                focus_diff = (0.5 * (strip_defocus as f64 - strip_focus2 as f64)) as f32;
+                focus_sum = (0.5 * (strip_defocus + strip_focus2) as f64) as f32;
+                focus_diff = (0.5 * (strip_defocus - strip_focus2) as f64) as f32;
             }
 
             // Get the first zero and frequency to start attenuation at (if any) as a square
@@ -1507,7 +1515,7 @@ pub fn ctfphaseflip(arguments: &[String]) -> i32 {
                         wall_prep += cur_time - wall_start;
                         wall_start = cur_time;
                     }
-                    let _ = todfftc(cur_strip, strip_pixel_num, ny, 0);
+                    todfft_c(cur_strip, strip_pixel_num, ny, 0);
                     if debug_mode != 0 {
                         cur_time = wall_time();
                         wall_fft += cur_time - wall_start;
@@ -1550,7 +1558,7 @@ pub fn ctfphaseflip(arguments: &[String]) -> i32 {
                             }
                             if cuton_to_use > 0. {
                                 phase_frac = (phase_frac_factor as f64
-                                    * (1. - ((-f2.sqrt() / cuton_angstroms) as f64).exp()))
+                                    * (1. - (-f2.sqrt() / cuton_angstroms).exp() as f64))
                                     as f32;
                             }
                             wave_aberration =
@@ -1558,14 +1566,15 @@ pub fn ctfphaseflip(arguments: &[String]) -> i32 {
 
                             // Produce a positive ctf for consistency and so it can be used
                             // for scaling
-                            ctf = -((wave_aberration - amp_angle) as f64).sin() as f32;
+                            // `sin` of a `float` is C++'s `sinf` overload.
+                            ctf = -(wave_aberration - amp_angle).sin();
                             if do_scale_by_power && f2 > min_atten_freq_sq {
                                 if power_is_half {
                                     ctf = ((ctf as f64).abs().sqrt()
                                         * if ctf >= 0. { 1. } else { -1. })
                                         as f32;
                                 } else if general_power {
-                                    ctf = ((ctf as f64).abs().powf(scale_by_power as f64)
+                                    ctf = (ctf.abs().powf(scale_by_power) as f64
                                         * if ctf >= 0. { 1. } else { -1. })
                                         as f32;
                                 }
@@ -1593,7 +1602,7 @@ pub fn ctfphaseflip(arguments: &[String]) -> i32 {
                     }
 
                     //inverse FFT;
-                    let _ = todfftc(cur_strip, strip_pixel_num, ny, 1);
+                    todfft_c(cur_strip, strip_pixel_num, ny, 1);
                     if debug_mode != 0 {
                         cur_time = wall_time();
                         wall_fft += cur_time - wall_start;
@@ -1785,9 +1794,13 @@ pub fn ctfphaseflip(arguments: &[String]) -> i32 {
                                 strip_mid,
                             ) != 0
                             {
+                                // `ctfphaseflip.cpp:1117`, `:1183`, `:1221` and
+                                // `:1235` print `k`, the defocus-report loop's
+                                // counter (always `nz` here), where the view is
+                                // meant (BUGS.md).  Defined: the view number.
                                 exit_error(&c_format_bytes(
                                     "Calling gpuCopyColumns for column %d of view %d",
-                                    &[CArg::Int(strip_mid.into()), CArg::Int(k.into())],
+                                    &[CArg::Int(strip_mid.into()), CArg::Int(view.into())],
                                 ));
                             }
                         }
@@ -1819,7 +1832,17 @@ pub fn ctfphaseflip(arguments: &[String]) -> i32 {
                                 axis_dist = -sin_view_axis * (column as f32 - x_pix_center)
                                     + cos_view_axis * (row as f32 - y_pix_center);
                                 if axis_dist >= low_lim && axis_dist <= high_lim {
-                                    axis_dist = last_axis_dist.max(cur_axis_dist.min(axis_dist));
+                                    // `B3DCLAMP(a, lo, hi)` is `a = MAX(lo, MIN(hi, a))`.
+                                    axis_dist = if cur_axis_dist < axis_dist {
+                                        cur_axis_dist
+                                    } else {
+                                        axis_dist
+                                    };
+                                    axis_dist = if last_axis_dist > axis_dist {
+                                        last_axis_dist
+                                    } else {
+                                        axis_dist
+                                    };
                                     cur_ax_frac = (if axis_dist < cur_axis_dist {
                                         axis_dist
                                     } else {
@@ -1827,10 +1850,10 @@ pub fn ctfphaseflip(arguments: &[String]) -> i32 {
                                     } - last_axis_dist)
                                         / strip_stride as f32;
                                     out_slice.data.f_mut()[(row * nx + column) as usize] =
-                                        (cur_ax_frac as f64
+                                        ((cur_ax_frac
                                             * cur_strip[((row + yoff) * strip_xdim + xoff + column)
-                                                as usize]
-                                                as f64
+                                                as usize])
+                                            as f64
                                             + (1. - cur_ax_frac as f64)
                                                 * last_strip[((row + yoff) * strip_xdim
                                                     + xoff
@@ -1916,7 +1939,7 @@ pub fn ctfphaseflip(arguments: &[String]) -> i32 {
                             &[
                                 CArg::Int((strip_mid - strip_stride + 1).into()),
                                 CArg::Int(strip_mid.into()),
-                                CArg::Int(k.into()),
+                                CArg::Int(view.into()),
                             ],
                         ));
                     }
@@ -2017,7 +2040,7 @@ pub fn ctfphaseflip(arguments: &[String]) -> i32 {
                             &[
                                 CArg::Int((strip_mid + 1).into()),
                                 CArg::Int((nx - 1).into()),
-                                CArg::Int(k.into()),
+                                CArg::Int(view.into()),
                             ],
                         ));
                     }
@@ -2041,7 +2064,7 @@ pub fn ctfphaseflip(arguments: &[String]) -> i32 {
         if use_gpu >= 0 && gpu_return_image(out_slice.data.f_mut()) != 0 {
             exit_error(&c_format_bytes(
                 "Calling gpuReturnImage for view %d",
-                &[CArg::Int(k.into())],
+                &[CArg::Int(view.into())],
             ));
         }
 

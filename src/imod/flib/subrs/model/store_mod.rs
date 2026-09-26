@@ -147,12 +147,14 @@ pub fn store_mod(unit20: &mut impl Write, model_file: &str, fm: &mut FortModel) 
                 }
                 record.push(b' ');
                 for axis in 0..3 {
-                    let field = format!("{:7.2}", coordinate[axis]);
-                    if field.len() > 7 {
-                        record.extend_from_slice(b"*******");
-                    } else {
-                        record.extend_from_slice(field.as_bytes());
-                    }
+                    // Fortran `f7.2`: asterisks on overflow, `Inf`/`NaN` spelled
+                    // as libgfortran spells them.
+                    let field = crate::imod::flib::subrs::compat::gfortran_rt::format_f(
+                        f64::from(coordinate[axis]),
+                        7,
+                        2,
+                    );
+                    record.extend_from_slice(field.as_bytes());
                     record.push(b' ');
                 }
                 let field = format!("{:3}", mark);

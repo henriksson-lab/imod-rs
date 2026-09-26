@@ -563,7 +563,12 @@ pub fn read_one_xform<R: std::io::BufRead + ?Sized>(fp: &mut R, xf: &mut [f32]) 
     if errno != 0 {
         return 2;
     }
-    if num_ret > 0 && num_ret != -1 && num_ret < 6 {
+    // Fixed in translation (2026-09-26, `BUGS.md` "readOneXform accepts a line
+    // with no number"): the C tests `numRet > 0`, so a line on which `fscanf`
+    // converts nothing (text such as `abc`) returns 0 -- success -- with `xf`
+    // untouched and nothing consumed.  Zero conversions is "fewer than 6
+    // items" too, and is reported as such.
+    if num_ret >= 0 && num_ret < 6 {
         return 3;
     }
     if num_ret == -1 {
@@ -573,7 +578,8 @@ pub fn read_one_xform<R: std::io::BufRead + ?Sized>(fp: &mut R, xf: &mut [f32]) 
 }
 
 /// Original `readAllXforms` (`linearxforms.c:374`).  `num_read` is written
-/// only for a transform read or an end of file, as in the C.
+/// only for a transform read or an end of file, as in the C (but see the
+/// end-of-file count below).
 pub fn read_all_xforms<R: std::io::BufRead + ?Sized>(
     fp: &mut R,
     xforms: &mut [f32],
@@ -582,8 +588,15 @@ pub fn read_all_xforms<R: std::io::BufRead + ?Sized>(
 ) -> i32 {
     for ind in 0..max_read {
         let ret_val = read_one_xform(fp, &mut xforms[6 * ind as usize..]);
-        if ret_val < 2 {
+        // Fixed in translation (2026-09-26): the C sets `*numRead = ind + 1`
+        // for end of file as well as for a transform read, so a file one
+        // transform short reports a full count and the caller's "Not enough
+        // transforms" test (`tiltxcorr.cpp:957`, `beadtrack.cpp:655`) passes
+        // on an unset last transform.  End of file counts only what was read.
+        if ret_val == 0 {
             *num_read = ind + 1;
+        } else if ret_val == 1 {
+            *num_read = ind;
         }
         if ret_val != 0 {
             return if ret_val == 1 { 0 } else { ret_val };
@@ -654,5 +667,48 @@ pub fn write_xform(fp: &mut dyn Write, xf: &[f32]) -> i32 {
         // An error with no system error number behind it is reported as
         // `EIO`, where the C library would have left one in `errno`.
         Err(e) => e.raw_os_error().unwrap_or(5),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// Fixed in translation: a line with no number is a read error (3), not
+    /// a transform left unset.
+    #[test]
+    fn a_line_with_no_number_is_an_error() {
+        let mut xf = [0f32; 6];
+        let mut input: &[u8] = b"abc\n";
+        assert_eq!(read_one_xform(&mut input, &mut xf), 3);
+        let mut xforms = [7f32; 12];
+        let mut num_read = -1;
+        let mut input: &[u8] = b"1 0 0 1 2 3\nabc\n";
+        assert_eq!(
+            read_all_xforms(&mut input, &mut xforms, 2, &mut num_read),
+            3
+        );
+        assert_eq!(num_read, 1);
+    }
+
+    /// Fixed in translation: end of file counts only the transforms read, so
+    /// a file one short of `max_read` reports one fewer.
+    #[test]
+    fn end_of_file_counts_only_what_was_read() {
+        let mut xforms = [0f32; 18];
+        let mut num_read = -1;
+        let mut input: &[u8] = b"1 0 0 1 2 3\n1 0 0 1 4 5\n";
+        assert_eq!(
+            read_all_xforms(&mut input, &mut xforms, 3, &mut num_read),
+            0
+        );
+        assert_eq!(num_read, 2);
+        assert_eq!(&xforms[6..12], &[1., 0., 0., 1., 4., 5.]);
+        let mut input: &[u8] = b"1 0 0 1 2 3\n1 0 0 1 4 5\n";
+        assert_eq!(
+            read_all_xforms(&mut input, &mut xforms, 2, &mut num_read),
+            0
+        );
+        assert_eq!(num_read, 2);
     }
 }

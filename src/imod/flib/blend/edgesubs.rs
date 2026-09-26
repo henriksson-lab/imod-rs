@@ -392,8 +392,11 @@ pub fn sdintscan(
     // compared a pixel, and a comparison of no pixels returns `sd = 9999.`,
     // which is below `sdmin = 1.e10` — so a box entirely outside `brray` on
     // the first displacement stores whatever `dden` held (stack residue in
-    // native, 0 here), and on a later one the previous displacement's value
-    // (the same on both sides, since `dden` persists across iterations).
+    // native), and on a later one the previous displacement's value (the
+    // same on both sides, since `dden` persists across iterations).  Fixed
+    // in translation (`BUGS.md`): `dden` starts at 0, so no uninitialised
+    // value is stored; `findedgefunc`, the only caller, does not use
+    // `ddenmin` in any case (`edgesubs.f:121-127`).
     let mut sd = 0.0_f32;
     let mut dden = 0.0_f32;
     //

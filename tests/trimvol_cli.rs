@@ -606,7 +606,8 @@ fn trimvol_rotate_x_uses_source_clip_rotx_minus_ninety_plane_order() {
 /// through the native Python `IMOD/pysrc/trimvol` driving the native
 /// `densmatch`, `findcontrast`, `newstack`, `clip` and `header` by
 /// `fixtures/make-trimvol-goldens.sh`, stdout captured through a pipe.  Output
-/// files are compared with their MRC labels (date/time stamps) blanked.
+/// files are compared with their MRC label date/time stamps and unused label
+/// slots (native stack residue) blanked.
 /// Stdout is compared as a multiset of lines, with the `.tmp.<pid>` name of
 /// the flip/rotate intermediate normalised: native Python block-buffers its
 /// own `print`s into the pipe, so the called programs' output lands ahead of
@@ -639,13 +640,9 @@ fn trimvol_cases_match_native_golden() {
         lines.sort();
         lines
     };
-    let mask = |bytes: &[u8]| -> Vec<u8> {
-        let mut masked = bytes.to_vec();
-        if masked.len() > 1024 {
-            masked[224..1024].fill(0);
-        }
-        masked
-    };
+    // Stamps only; uninitialised-memory regions are reconciled by
+    // `common::reconcile_uninitialised` at the comparison (`BUGS.md` §2).
+    let mask = |bytes: &[u8]| -> Vec<u8> { common::mask_stamps(bytes) };
     let mut failures = Vec::new();
     let mut count = 0;
     for line in table
@@ -723,7 +720,7 @@ fn trimvol_cases_match_native_golden() {
                 continue;
             };
             let theirs = std::fs::read(golden.join(name).join(file)).unwrap();
-            if mask(&ours) != mask(&theirs) {
+            if mask(&ours) != mask(&common::reconcile_uninitialised(&ours, &theirs)) {
                 failures.push(format!("{name}: {file} differs from native"));
             }
         }

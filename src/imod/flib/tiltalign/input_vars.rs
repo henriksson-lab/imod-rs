@@ -32,16 +32,18 @@
 //! product) and add `(1. - frc) * value`, which is double; the whole difference
 //! is then stored to `float`.
 //!
-//! # Upstream, kept as written
+//! # Upstream defects fixed in translation (2026-09-26, `BUGS.md`)
 //!
 //! - The compression automap (`:425-427`) passes the **X-tilt** grouping
-//!   statics (`nmapDefXtilt`, `nRanSpecXtilt`, …); there are no compression
-//!   ones.  It only runs on the global pass, before the X-tilt automap
-//!   overwrites them.
+//!   statics (`nmapDefXtilt`, `nRanSpecXtilt`, …) in the source; it has
+//!   compression statics of its own here.
+//! - `automap`'s `nRanSpecIn` is by value in the source, so the statics
+//!   `nRanSpec*` stay 0; it is by reference here (`map_vars.rs`).
+//!
+//! # Upstream, kept as written
+//!
 //! - The dummy-dmag block (`:544`) is guarded by `ifLocal <= -1`, which no
 //!   caller passes; it is translated but unreachable.
-//! - `automap`'s `nRanSpecIn` is by value (`map_vars.rs`), so the statics
-//!   `nRanSpec*` are never written and stay 0.
 
 use std::io::Write;
 use std::sync::Mutex;
@@ -92,6 +94,11 @@ pub struct InputVarsStatics {
     nmap_spec_xtilt: [i32; NGRP],
     iv_spec_str_xtilt: [i32; NGRP],
     iv_spec_end_xtilt: [i32; NGRP],
+    nmap_def_comp: i32,
+    n_ran_spec_comp: i32,
+    nmap_spec_comp: [i32; NGRP],
+    iv_spec_str_comp: [i32; NGRP],
+    iv_spec_end_comp: [i32; NGRP],
     nmap_def_dist: [i32; 2],
     n_ran_spec_dist: [i32; 2],
     nmap_spec_dist: [i32; NGRP * 2],
@@ -135,6 +142,11 @@ static INPUT_VARS_STATICS: Mutex<InputVarsStatics> = Mutex::new(InputVarsStatics
     nmap_spec_xtilt: [0; NGRP],
     iv_spec_str_xtilt: [0; NGRP],
     iv_spec_end_xtilt: [0; NGRP],
+    nmap_def_comp: 0,
+    n_ran_spec_comp: 0,
+    nmap_spec_comp: [0; NGRP],
+    iv_spec_str_comp: [0; NGRP],
+    iv_spec_end_comp: [0; NGRP],
     nmap_def_dist: [0; 2],
     n_ran_spec_dist: [0; 2],
     nmap_spec_dist: [0; NGRP * 2],
@@ -281,7 +293,7 @@ pub fn input_vars(
         for ig in 1..=sg.num_separate_groups {
             map_separate_group::<false>(
                 &mut sg.iviews_in_group[((ig - 1) * mx.max_view) as usize..],
-                sg.num_sep_in_group[(ig - 1) as usize],
+                &mut sg.num_sep_in_group[(ig - 1) as usize],
                 &av.map_file_to_view,
                 av.nfile_views,
             );
@@ -393,7 +405,7 @@ pub fn input_vars(
             nin_thresh,
             if_local,
             &mut st.nmap_def_rot,
-            st.n_ran_spec_rot,
+            &mut st.n_ran_spec_rot,
             &mut st.iv_spec_str_rot,
             &mut st.iv_spec_end_rot,
             &mut st.nmap_spec_rot,
@@ -517,7 +529,9 @@ pub fn input_vars(
                 ) != 0
             {
                 error_exit::<false>(
-                    "You must enter a second fixed view with this av->tilt option",
+                    // Fixed in translation (`BUGS.md`): the source reads
+                    // "this av->tilt option", a search-and-replace artifact.
+                    "You must enter a second fixed view with this tilt option",
                     0,
                 );
             }
@@ -556,7 +570,7 @@ pub fn input_vars(
             nin_thresh,
             if_local,
             &mut st.nmap_def_tilt,
-            st.n_ran_spec_tilt,
+            &mut st.n_ran_spec_tilt,
             &mut st.iv_spec_str_tilt,
             &mut st.iv_spec_end_tilt,
             &mut st.nmap_spec_tilt,
@@ -687,7 +701,7 @@ pub fn input_vars(
             nin_thresh,
             if_local,
             &mut st.nmap_def_mag,
-            st.n_ran_spec_mag,
+            &mut st.n_ran_spec_mag,
             &mut st.iv_spec_str_mag,
             &mut st.iv_spec_end_mag,
             &mut st.nmap_spec_mag,
@@ -783,11 +797,14 @@ pub fn input_vars(
                 num_in_view,
                 nin_thresh,
                 if_local,
-                &mut st.nmap_def_xtilt,
-                st.n_ran_spec_xtilt,
-                &mut st.iv_spec_str_xtilt,
-                &mut st.iv_spec_end_xtilt,
-                &mut st.nmap_spec_xtilt,
+                // Fixed in translation (2026-09-26, `BUGS.md`): the source passes
+                // the X-tilt grouping statics here (`:425-427`); compression has
+                // its own.
+                &mut st.nmap_def_comp,
+                &mut st.n_ran_spec_comp,
+                &mut st.iv_spec_str_comp,
+                &mut st.iv_spec_end_comp,
+                &mut st.nmap_spec_comp,
             );
             // if (.not.pipinput)
             // TODO?
@@ -928,7 +945,7 @@ pub fn input_vars(
                     nin_thresh,
                     if_local,
                     &mut st.nmap_def_dist[d],
-                    st.n_ran_spec_dist[d],
+                    &mut st.n_ran_spec_dist[d],
                     &mut st.iv_spec_str_dist[d * NGRP..],
                     &mut st.iv_spec_end_dist[d * NGRP..],
                     &mut st.nmap_spec_dist[d * NGRP..],
@@ -1105,7 +1122,7 @@ pub fn input_vars(
             nin_thresh,
             if_local,
             &mut st.nmap_def_xtilt,
-            st.n_ran_spec_xtilt,
+            &mut st.n_ran_spec_xtilt,
             &mut st.iv_spec_str_xtilt,
             &mut st.iv_spec_end_xtilt,
             &mut st.nmap_spec_xtilt,

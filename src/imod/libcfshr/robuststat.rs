@@ -1,6 +1,7 @@
 //! Translation of `IMOD/libcfshr/robuststat.c` and its `cfsemshare.h` APIs.
 
 use super::percentile::percentile_float;
+use crate::imod::c_sort::qsort;
 use core::cell::Cell;
 use core::cmp::Ordering;
 
@@ -31,15 +32,7 @@ fn int_compar(val1: &i32, val2: &i32) -> i32 {
 /// differential over 40 trials matches only with a stable sort), so all three
 /// sorts here are stable.
 pub fn rs_sort_ints(x: &mut [i32], n: i32) {
-    x[..n as usize].sort_by(|a, b| {
-        if int_compar(a, b) < 0 {
-            Ordering::Less
-        } else if int_compar(a, b) > 0 {
-            Ordering::Greater
-        } else {
-            Ordering::Equal
-        }
-    });
+    qsort(&mut x[..n as usize], &mut |a, b| int_compar(a, b));
 }
 /// Original `rssortints` (`robuststat.c:64`).
 pub fn rssortints(x: &mut [i32], n: &i32) {
@@ -58,15 +51,7 @@ fn float_compar(val1: &f32, val2: &f32) -> i32 {
 }
 /// Original `rsSortFloats` (`robuststat.c:83`).
 pub fn rs_sort_floats(x: &mut [f32], n: i32) {
-    x[..n as usize].sort_by(|a, b| {
-        if float_compar(a, b) < 0 {
-            Ordering::Less
-        } else if float_compar(a, b) > 0 {
-            Ordering::Greater
-        } else {
-            Ordering::Equal
-        }
-    });
+    qsort(&mut x[..n as usize], &mut |a, b| float_compar(a, b));
 }
 /// Original `rssortfloats` (`robuststat.c:91`).
 pub fn rssortfloats(x: &mut [f32], n: &i32) {
@@ -95,14 +80,8 @@ fn indexed_float_compar(val_array: &[f32], val1: &i32, val2: &i32) -> i32 {
 /// Original `rsSortIndexedFloats` (`robuststat.c:115`).
 pub fn rs_sort_indexed_floats(x: &[f32], index: &mut [i32], n: i32) {
     let val_array = x;
-    index[..n as usize].sort_by(|a, b| {
-        if indexed_float_compar(val_array, a, b) < 0 {
-            Ordering::Less
-        } else if indexed_float_compar(val_array, a, b) > 0 {
-            Ordering::Greater
-        } else {
-            Ordering::Equal
-        }
+    qsort(&mut index[..n as usize], &mut |a, b| {
+        indexed_float_compar(val_array, a, b)
     });
     INDEX_OFFSET.store(0, std::sync::atomic::Ordering::Relaxed);
 }

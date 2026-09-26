@@ -2,10 +2,12 @@
 //! and nesting analysis.
 // `skinobj.c:24` defines `CONNECT_BOTH` as `(ICONT_CONNECT_TOP &
 // ICONT_CONNECT_BOTTOM)` -- a bitwise AND of two distinct flag bits, so the
-// constant is **zero**.  Every `flags |= CONNECT_BOTH` is therefore a no-op
-// and every `flags & CONNECT_BOTH` is always false; the author meant `|`.
-// Reproduced faithfully; see `BUGS.md`.
-#![allow(clippy::bad_bit_mask)]
+// constant is **zero**; the author meant `|`.  Fixed in translation
+// (2026-09-26, `BUGS.md` §11): `CONNECT_BOTH` is the `|` of the two bits.  The
+// observable difference is only that `imodContourMakeZTables` now clears
+// stale connect bits a model's contours carry in on entry, as its call at
+// `skinobj.c:643` intends; the `!psize` marking at `:718-727` is unreachable
+// either way, because the Z tables list only non-empty contours.
 
 use std::borrow::Cow;
 use std::cell::Cell;
@@ -56,7 +58,7 @@ const CONNECT_TOP: u32 = ICONT_CONNECT_TOP;
 /// Original: `CONNECT_BOTTOM` (`skinobj.c:23`).
 const CONNECT_BOTTOM: u32 = ICONT_CONNECT_BOTTOM;
 /// Original: `CONNECT_BOTH` (`skinobj.c:24`).
-const CONNECT_BOTH: u32 = ICONT_CONNECT_TOP & ICONT_CONNECT_BOTTOM;
+const CONNECT_BOTH: u32 = ICONT_CONNECT_TOP | ICONT_CONNECT_BOTTOM;
 
 /// Original: `connectTop` (`skinobj.c:26`).
 fn connect_top(f: u32) -> u32 {

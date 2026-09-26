@@ -1,68 +1,98 @@
 //! Translation of `IMOD/mrc/mrctilt.c`.
+//!
+//! Retranslated statement by statement (2026-09-26): the earlier body parsed
+//! the tilts with `str::parse` and invented two "Invalid ..." errors, parsed
+//! before opening the files, formatted the `%g` report with `{}`, computed
+//! `first * 100.0` in `float` where the source multiplies by a double
+//! literal, and added a helper and an error for `mrc_head_write`.
+//!
+//! Note that `mrctilt` is not in `IMOD/mrc/Makefile`'s `PROGS`, so upstream
+//! never builds or installs it.
 
-use crate::imod::libcfshr::b3dutil::ImodFile;
+use std::io::Write;
+
+use crate::imod::clip::clip::{ScanArg, sscanf};
+use crate::imod::libcfshr::b3dutil::{CArg, ImodFile, c_format_bytes};
 use crate::imod::libiimod::mrcfiles::{MrcHeader, mrc_head_read, mrc_head_write};
 
-/// Apply the source's tilt-header conversion to an already loaded MRC header.
-/// `vd1` and `vd2` are stored in hundredths of a degree by this legacy format.
-pub fn apply_tilt_information(header: &mut MrcHeader, first_tilt: f32, tilt_increment: f32) {
-    header.idtype = 1;
-    header.vd1 = (first_tilt * 100.0) as i16;
-    header.vd2 = (tilt_increment * 100.0) as i16;
-}
+/// C `main` in `mrctilt.c:34`, returning its process status for the launcher.
+pub fn mrctilt(argv: &[String]) -> i32 {
+    let argc = argv.len();
+    let argv0 = argv.first().map_or("mrctilt", String::as_str).as_bytes();
+    // `float first, inc;` are uninitialised in the source and keep that value
+    // when `sscanf` assigns nothing; they start at zero here.
+    let mut first = 0.0_f32;
+    let mut inc = 0.0_f32;
 
-/// C `main` in `mrctilt.c`, returning its process status for the launcher.
-pub fn mrctilt(arguments: &[String]) -> i32 {
-    let program = arguments.first().map_or("mrctilt", String::as_str);
-    if arguments.len() != 4 {
-        eprintln!("{program} version 1.0 Copyright (C)1994 Boulder Laboratory for");
-        eprintln!("3-Dimensional Fine Structure, University of Colorado.");
-        eprintln!("{program}: Modify a mrc header to contain tilt information.");
-        eprintln!("Usage: {program} [image file] [first tilt] [tilt increment]");
+    if argc != 4 {
+        let _ = ImodFile::Stderr.write_all(&c_format_bytes(
+            "%s version 1.0 Copyright (C)1994 Boulder Laboratory for\n",
+            &[CArg::Bytes(argv0)],
+        ));
+        let _ =
+            ImodFile::Stderr.write_all(b"3-Dimensional Fine Structure, University of Colorado.\n");
+        let _ = ImodFile::Stderr.write_all(&c_format_bytes(
+            "%s: Modify a mrc header to contain tilt information.\n",
+            &[CArg::Bytes(argv0)],
+        ));
+        let _ = ImodFile::Stderr.write_all(&c_format_bytes(
+            "Usage: %s [image file] [first tilt] [tilt increment]\n",
+            &[CArg::Bytes(argv0)],
+        ));
         return 3;
     }
-    let filename = &arguments[1];
-    let first_tilt = match arguments[2].parse::<f32>() {
-        Ok(value) => value,
-        Err(_) => {
-            eprintln!("Invalid first tilt {}.", arguments[2]);
-            return 3;
-        }
-    };
-    let tilt_increment = match arguments[3].parse::<f32>() {
-        Ok(value) => value,
-        Err(_) => {
-            eprintln!("Invalid tilt increment {}.", arguments[3]);
-            return 3;
-        }
-    };
-    let Some(mut input) = ImodFile::open(filename, "rb") else {
-        eprintln!("Error opening {filename}.");
+
+    let Some(mut fin) = ImodFile::open(&argv[1], "rb") else {
+        let _ = ImodFile::Stderr.write_all(&c_format_bytes(
+            "Error opening %s.\n",
+            &[CArg::Bytes(argv[1].as_bytes())],
+        ));
         return 3;
     };
-    let Some(mut output) = ImodFile::open(filename, "rb+") else {
-        // The C source's typo tests `fin` here.  Report the intended output
-        // failure instead of silently attempting a write through no handle.
-        eprintln!("Error opening {filename}.");
+
+    // `mrctilt.c:61` tests `fin` again rather than `fout`, so a failed
+    // `rb+` open is not reported and the source goes on to `mrc_head_write`
+    // through a NULL stream.  That would crash; exit 3 with the message the
+    // source prints (naming `argv[2]`, as it does) instead.
+    let Some(mut fout) = ImodFile::open(&argv[1], "rb+") else {
+        let _ = ImodFile::Stderr.write_all(&c_format_bytes(
+            "Error opening %s.\n",
+            &[CArg::Bytes(argv[2].as_bytes())],
+        ));
         return 3;
     };
-    let mut header = MrcHeader::default();
-    if mrc_head_read(&mut input, &mut header) != 0 {
-        eprintln!("Can't Read Input File Header.");
-        return 3;
-    }
-    println!("First tilt = {first_tilt}, Inc = {tilt_increment}");
-    apply_tilt_information(&mut header, first_tilt, tilt_increment);
-    if mrc_head_write(&mut output, &mut header) != 0 {
-        eprintln!("Can't Write Output File Header.");
+
+    sscanf(&argv[2], "%f", &mut [ScanArg::Flt(&mut first)]);
+    sscanf(&argv[3], "%f", &mut [ScanArg::Flt(&mut inc)]);
+
+    let mut hdata = MrcHeader::default();
+    if mrc_head_read(&mut fin, &mut hdata) != 0 {
+        let _ = ImodFile::Stderr.write_all(b"Can't Read Input File Header.\n");
         return 3;
     }
+
+    let _ = ImodFile::Stdout.write_all(&c_format_bytes(
+        "First tilt = %g, Inc = %g\n",
+        &[CArg::Dbl(first as f64), CArg::Dbl(inc as f64)],
+    ));
+
+    hdata.idtype = 1;
+    // `first * 100.0` is a double product converted to `short`.  Out of
+    // `short` range that conversion is undefined; gcc on x86-64 truncates to
+    // `int` (`cvttsd2si`) and keeps the low 16 bits, which is what a tilt of
+    // 400 degrees gives natively (-25536), so the same two steps are written.
+    hdata.vd1 = (first as f64 * 100.0) as i32 as i16;
+    hdata.vd2 = (inc as f64 * 100.0) as i32 as i16;
+
+    mrc_head_write(&mut fout, &mut hdata);
+    drop(fin);
+    drop(fout);
     0
 }
 
 #[cfg(test)]
 mod tests {
-    use super::{apply_tilt_information, mrctilt};
+    use super::mrctilt;
     use crate::imod::libcfshr::b3dutil::ImodFile;
     use crate::imod::libiimod::mrcfiles::{
         MRC_MODE_BYTE, MrcHeader, mrc_head_new, mrc_head_read, mrc_head_write,
@@ -70,13 +100,6 @@ mod tests {
     use std::sync::atomic::{AtomicUsize, Ordering};
 
     static FILE_SEQUENCE: AtomicUsize = AtomicUsize::new(0);
-
-    #[test]
-    fn stores_tilts_in_hundredths_of_a_degree() {
-        let mut header = MrcHeader::default();
-        apply_tilt_information(&mut header, -61.25, 1.5);
-        assert_eq!((header.idtype, header.vd1, header.vd2), (1, -6125, 150));
-    }
 
     #[test]
     fn updates_a_real_mrc_header_in_place() {

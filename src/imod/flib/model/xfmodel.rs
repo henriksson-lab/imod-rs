@@ -142,8 +142,11 @@ pub fn xfmodel() {
     let mut if_full_report: i32;
     let mut ierr: i32;
     let mut ind_g_xf: i32;
-    // Not assigned by the interactive branch of the source, which reads it
-    // at `xfmodel.f90:602` and `:672` all the same (uninitialised there); 0.
+    // Fixed in translation (BUGS.md, `xfmodel`): not assigned by the
+    // interactive branch of the source, which reads it at `xfmodel.f90:602`
+    // and `:672` all the same (uninitialised there).  Interactive entry
+    // cannot enter a shift scale, so it is defined as 0: no scale entered,
+    // use the warping file's pixel-size ratio.
     let mut if_shift_scale = 0_i32;
     let mut zz = 0.0_f32;
     let mut z_index: f32;
@@ -160,9 +163,12 @@ pub fn xfmodel() {
     let mut num_points: i32;
     let mut num_in_obj: i32;
     let mut ipnt: i32;
-    // Uninitialised in the source until `findTransform` sets it; it is not
-    // set when every deviation is NaN, and the source then indexes `xmat`
-    // with whatever it held.  1 here, so that case reads the first point.
+    // Fixed in translation (BUGS.md, `xfmodel`): uninitialised in the source
+    // until `findTransform` sets it, which it does only for a deviation above
+    // -1 (`findtransform.c:184-202`); when every deviation of the first
+    // fitted section is NaN, native indexes `xmat(6, ipntMax)` with stack
+    // residue and segfaults.  Defined as 1 here, so that case reports the
+    // first point of the section and the program carries on.
     let mut ipnt_max = 1_i32;
     let mut devmax = 0.0_f32;
     let mut dev_avg = 0.0_f32;
@@ -288,13 +294,17 @@ pub fn xfmodel() {
         line.trim_end_matches(['\r', '\n']).to_owned()
     };
     // The Fortran wrapper `pipgetstring` (`pip_fwrap.c:206`): the variable is
-    // left untouched unless the option is found.
-    let get_string = |option: &[u8], string: &mut String| -> i32 {
-        let mut value: Vec<u8> = Vec::new();
-        let err = pip_get_string(option, &mut value);
-        if err == 0 {
-            *string = String::from_utf8_lossy(&value).into_owned();
-        }
+    // left untouched unless the option is found, and `c2fString` fills at most
+    // the variable's declared length (`xfmodel.f90:25-26,53`: file names are
+    // `character*320`, `stringList` is `character*10240`), returning -1 with
+    // the truncated text left in it when the entry is longer.
+    let get_string = |option: &[u8], string: &mut String, length: usize| -> i32 {
+        let mut record = vec![b' '; length];
+        let current = string.as_bytes();
+        let count = current.len().min(length);
+        record[..count].copy_from_slice(&current[..count]);
+        let err = crate::imod::libcfshr::pip_fwrap::pipgetstring_(option, &mut record);
+        *string = crate::imod::libcfshr::b3dutil::fortran_string(&record);
         err
     };
     let blank = |string: &str| string.bytes().all(|b| b == b' ');
@@ -333,7 +343,7 @@ pub fn xfmodel() {
     // get parameters
     //
     if pip_input {
-        get_string(b"ImageFile", &mut modelfile);
+        get_string(b"ImageFile", &mut modelfile, 320);
     } else {
         print!(" Image file (or Return to enter Xcen, Ycen directly): ");
         let _ = std::io::stdout().flush();
@@ -388,7 +398,7 @@ pub fn xfmodel() {
         //
         modelfile = String::new();
         if pip_input {
-            get_string(b"PieceListFile", &mut modelfile);
+            get_string(b"PieceListFile", &mut modelfile, 320);
         } else {
             print!(" Piece list file if image is a montage, otherwise Return: ");
             let _ = std::io::stdout().flush();
@@ -489,7 +499,7 @@ pub fn xfmodel() {
     //
     // make index from z values to transform list: index=0 for non-existent
     //
-    if pip_input && get_string(b"ChunkSizes", &mut string_list) == 0 {
+    if pip_input && get_string(b"ChunkSizes", &mut string_list, 10240) == 0 {
         let _ = parselist(&string_list, &mut num_in_chunks, &mut num_chunks);
     }
     for i in 1..=LIMNUMXF {
@@ -528,7 +538,7 @@ pub fn xfmodel() {
     //
     ifxfmod = 0;
     if_prealign = 0;
-    if pip_get_in_out_file("InputFile", 1, "Input model file", &mut modelfile) != 0 {
+    if pip_get_in_out_file("InputFile", 1, "Input model file", &mut modelfile, 320) != 0 {
         exit_error("No input file specified");
     }
     old_xfg_file = String::new();
@@ -547,16 +557,16 @@ pub fn xfmodel() {
         pip_get_integer(b"AdjustForRotationBy90", &mut if_adjust_for90);
         if_shift_scale = 1 - pip_get_float(b"ScaleShifts", &mut shift_scale);
 
-        if get_string(b"XformsToApply", &mut old_xf_file) == 0 {
+        if get_string(b"XformsToApply", &mut old_xf_file, 320) == 0 {
             ifxfmod = 1;
         }
-        if get_string(b"DistortionField", &mut idf_file) == 0 {
+        if get_string(b"DistortionField", &mut idf_file, 320) == 0 {
             ifxfmod = 1;
         }
-        if get_string(b"GradientFile", &mut mag_grad_file) == 0 {
+        if get_string(b"GradientFile", &mut mag_grad_file, 320) == 0 {
             ifxfmod = 1;
         }
-        if get_string(b"PrealignTransforms", &mut old_xfg_file) == 0 {
+        if get_string(b"PrealignTransforms", &mut old_xfg_file, 320) == 0 {
             if_prealign = 1;
         }
         //
@@ -673,25 +683,29 @@ pub fn xfmodel() {
     //
     // Extend the range so that properly extrapolated grids can be used to find inverse
     // point for forward transforms
-    // (`xmodMax + gridExtendFrac + xLast` is `+`, not `*`, in the source;
-    // BUGS.md.)
+    // Fixed in translation (BUGS.md, `xfmodel`): the source's upper ends are
+    // `xmodMax + gridExtendFrac + xLast` (`xfmodel.f90:371,374`), a `+` for
+    // the `*` of the matching lower ends, so native grows the range by the
+    // whole model extent plus 0.1 instead of 10%, and builds needlessly large
+    // (and slow to extrapolate) grids.  Both ends are extended by
+    // `gridExtendFrac` of the extent here, as the comment above says.
     x_last = xmod_max + 1. - xmod_min;
     xmod_min -= grid_extend_frac * x_last;
-    xmod_max = xmod_max + grid_extend_frac + x_last;
+    xmod_max += grid_extend_frac * x_last;
     y_last = y_mod_max + 1. - y_mod_min;
     y_mod_min -= grid_extend_frac * y_last;
-    y_mod_max = y_mod_max + grid_extend_frac + y_last;
+    y_mod_max += grid_extend_frac * y_last;
     //
     if_single = 0;
     if_full_report = 0;
     num_to_find = 0;
     if pip_input {
-        if pip_get_in_out_file("OutputFile", 2, " ", &mut new_xf_file) != 0 {
+        if pip_get_in_out_file("OutputFile", 2, " ", &mut new_xf_file, 320) != 0 {
             exit_error("No output file specified");
         }
         if ifxfmod == 0 {
             old_xf_file = String::new();
-            get_string(b"EditTransforms", &mut old_xf_file);
+            get_string(b"EditTransforms", &mut old_xf_file, 320);
 
             if pip_get_two_floats(
                 b"FullReportMeanAndMax",
@@ -704,7 +718,7 @@ pub fn xfmodel() {
             if pip_get_integer(b"SingleSection", &mut iz_single) == 0 {
                 if_single = 1;
             }
-            if get_string(b"SectionsToAnalyze", &mut string_list) == 0 {
+            if get_string(b"SectionsToAnalyze", &mut string_list, 10240) == 0 {
                 let _ = parselist(&string_list, &mut num_sec, &mut num_to_find);
             }
         } else {
@@ -1824,7 +1838,9 @@ pub fn transform_model(
             let b = tmp_max2.abs();
             let c = tmp_min.abs();
             let d = tmp_min2.abs();
-            if (if a > b { a } else { b }) > (if c > d { c } else { d }) {
+            // `xfmodel.f90:1030`: `maxss |tmpMax2|, |tmpMax|` on the left and
+            // `maxss |tmpMin|, |tmpMin2|` on the right in the reference object.
+            if (if b > a { b } else { a }) > (if c > d { c } else { d }) {
                 iscan += 1;
             }
         }

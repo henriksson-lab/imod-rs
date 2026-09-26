@@ -396,11 +396,18 @@ pub fn find_piece(
     let mut ipc_at_z: i32;
     //
     crit_non_blank = 0.75;
-    // `B3DNINT` converts with `cvttsd2si`, which gives `INT_MIN` for a NaN or
-    // out-of-range position (a NaN `xnext` comes from a degenerate
-    // `findxf_wo_outliers` fit), and the index arithmetic then wraps; Rust's
-    // saturating `as i32` would give 0 and a different box.  Reproduced so the
-    // caller fails the way native does (`beadtrack` "Reading image file").
+    // Fixed in translation (2026-09-26, `BUGS.md`): `B3DNINT` converts with
+    // `cvttsd2si`, which gives `INT_MIN` for a NaN or out-of-range position (a
+    // NaN `xnext` comes from a degenerate `findxf_wo_outliers` fit); the index
+    // arithmetic then wraps, the box is accepted, and native dies reading the
+    // image.  Here a position that is not a representable pixel index is in no
+    // piece: the bead is simply not found on this view.
+    if !(xnext.is_finite() && ynext.is_finite() && xnext.abs() < 1.0e9 && ynext.abs() < 1.0e9) {
+        *ipcz = -1;
+        *need_taper = false;
+        *need_fill = false;
+        return;
+    }
     indx0 = b3dnint_cvtt!(xnext).wrapping_sub(nx_box / 2);
     indx1 = indx0.wrapping_add(nx_box).wrapping_sub(1);
     indy0 = b3dnint_cvtt!(ynext).wrapping_sub(ny_box / 2);
@@ -568,8 +575,11 @@ pub fn peak_find(
     peak: &mut f32,
 ) {
     let nx_rot: i32;
-    let mut ix_peak: i32 = 0;
-    let mut iy_peak: i32 = 0;
+    // Fixed in translation (2026-09-26, `BUGS.md`): `ixPeak`/`iyPeak` are
+    // uninitialised in the source and stay so when nothing exceeds -1.e30 (an
+    // all-NaN array); here they start at the origin pixel, i.e. a zero shift.
+    let mut ix_peak: i32 = 1;
+    let mut iy_peak: i32 = 1;
     nx_rot = nx_plus - 2;
     //
     // find peak
@@ -962,9 +972,11 @@ pub fn check_sobel_peak(
 /// intensity; `nxBox`, `nyBox` must be the basic box size, which the
 /// `cp->elong*` arrays are dimensioned to.
 ///
-/// `bestSum` is read uninitialised in the source when `bestCenterForCG` leaves
-/// it unassigned (a centre 1 pixel from, or on, the box edge) and the range
-/// test below still passes; it starts at 0 here (`BUGS.md`).
+/// Fixed in translation (2026-09-26, `BUGS.md`): `bestSum` is read
+/// uninitialised in the source when `bestCenterForCG` leaves it unassigned (a
+/// centre 1 pixel from, or on, the box edge) and the range test below still
+/// passes.  Here such a centre gives no measurement (`elongation = -1`), as
+/// the range test does for a centre outside the box.
 #[allow(clippy::too_many_arguments)]
 pub fn calc_elongation(
     cp: &mut CGPixels,
@@ -1014,6 +1026,8 @@ pub fn calc_elongation(
             &cp.elong_kernel,
             cp.kern_dim_elong,
         );
+        // NaN marks "not assigned by bestCenterForCG" (see the doc comment).
+        best_sum = f32::NAN;
         best_center_for_cg(
             cp,
             &elong_smooth,
@@ -1045,7 +1059,13 @@ pub fn calc_elongation(
         );
         cp.get_edge_sd = edge_sd_save;
         cp.edge_median = edge_median_save;
-        if i != 0 || ixcen <= 0 || ixcen > nx_box || iycen <= 0 || iycen > ny_box {
+        if i != 0
+            || ixcen <= 0
+            || ixcen > nx_box
+            || iycen <= 0
+            || iycen > ny_box
+            || best_sum.is_nan()
+        {
             break 'body;
         }
         //
@@ -1555,16 +1575,14 @@ pub fn findxf_wo_outliers(
 /// `xyzObj`.  `ninObjList` and `indObjList` must hold `nobjLists + 1`
 /// entries: the source writes the entry past the last area.
 ///
-/// # Out-of-bounds indexing in the source
+/// # Out-of-bounds indexing in the source, fixed in translation
 ///
 /// The three `for (i = 1; i <= 3; i++)` loops over `dxyzAvg`, `sumDxyz` and
 /// `dxyzLast` (`tracksubs.cpp:1228-1242`) index 1..3 of 3-element stack
 /// arrays: element 0 is never accumulated, tested or reset, and element 3
-/// is past the end, read from `sumDxyz` and written to `dxyzAvg` and
-/// `dxyzLast` (`BUGS.md`).  Those three arrays are given a fourth slot here
-/// so the in-bounds behaviour is exact; `sumDxyz[3]` stays 0, so the
-/// out-of-bounds slots carry nothing into the printed or returned values,
-/// which matches native as long as the stray stores land on nothing live.
+/// is past the end.  Fixed in translation (2026-09-26, `BUGS.md`): the loops
+/// run over 0..3, so X is averaged and tested like Y and Z and the printed
+/// averages show X's value instead of 0.000.
 /// The three `B3DMALLOC`ed arrays are never freed in the source.
 #[allow(clippy::too_many_arguments)]
 pub fn adjust_xyz_in_areas(
@@ -1581,9 +1599,9 @@ pub fn adjust_xyz_in_areas(
     let mut ind_start_in_prev_list: Vec<i32>;
     let mut list_prev_inds: Vec<i32> = Vec::new();
     let mut dxyz = [0f32; 3];
-    let mut sum_dxyz = [0f32; 4];
-    let mut dxyz_last = [0f32; 4];
-    let mut dxyz_avg = [0f32; 4];
+    let mut sum_dxyz = [0f32; 3];
+    let mut dxyz_last = [0f32; 3];
+    let mut dxyz_avg = [0f32; 3];
     let mut dxyz_max = [0f32; 3];
     let mut avg_xyz = [0f32; 3];
     let mut ind_free: i32;
@@ -1783,14 +1801,14 @@ pub fn adjust_xyz_in_areas(
 
         // Periodically accumulate the average move over several iterations
         if (iter % interval_for_test) >= interval_for_test - num_avg_for_test {
-            for i in 1..=3usize {
+            for i in 0..3usize {
                 dxyz_avg[i] += sum_dxyz[i] / (nobj_lists - 1) as f32;
             }
         }
 
         // Then test whether the average move has fallen by less than this criterion
         if (iter % interval_for_test) == interval_for_test - 1 {
-            for i in 1..=3usize {
+            for i in 0..3usize {
                 dxyz_avg[i] /= num_avg_for_test as f32;
             }
             if dxyz_last[0] - dxyz_avg[0] < crit_move_diff
@@ -1799,7 +1817,7 @@ pub fn adjust_xyz_in_areas(
             {
                 break;
             }
-            for i in 1..=3usize {
+            for i in 0..3usize {
                 dxyz_last[i] = dxyz_avg[i];
                 dxyz_avg[i] = 0.;
             }
@@ -1820,5 +1838,79 @@ pub fn adjust_xyz_in_areas(
             xyz_obj[(iobj * 3 - 1) as usize] += xa!(ind, 2) / num_in_sum as f32;
             //xyzObj(1:3, iobj) += xyzAll(1:3, ind) / numInSum;
         }
+    }
+}
+
+#[cfg(test)]
+mod fixed_tests {
+    use super::*;
+
+    /// `BUGS.md` "`peakFind`": on an all-NaN array nothing exceeds -1.e30 and
+    /// the source returns uninitialised indices; the defined peak is the
+    /// origin, a zero shift.
+    #[test]
+    fn peak_find_on_nan_is_a_zero_shift() {
+        let array = vec![f32::NAN; 10 * 8];
+        let (mut x, mut y, mut peak) = (9.0_f32, 9.0_f32, 0.0_f32);
+        peak_find(&array, 10, 8, &mut x, &mut y, &mut peak);
+        assert_eq!((x, y), (0.0, 0.0));
+    }
+
+    /// `BUGS.md` "A NaN position": native converts a NaN position to
+    /// `INT_MIN`, wraps the box indices and fails reading the image.  The
+    /// defined behaviour finds no piece, so the bead is missing on that view.
+    #[test]
+    fn find_piece_rejects_a_nan_position() {
+        let (ixl, iyl, izl) = ([0], [0], [0]);
+        let (mut ix0, mut ix1, mut iy0, mut iy1, mut ipcz) = (0, 0, 0, 0, 7);
+        let (mut taper, mut fill) = (true, true);
+        find_piece(
+            &ixl,
+            &iyl,
+            &izl,
+            1,
+            64,
+            64,
+            16,
+            16,
+            f32::NAN,
+            20.0,
+            0,
+            &mut ix0,
+            &mut ix1,
+            &mut iy0,
+            &mut iy1,
+            &mut ipcz,
+            0,
+            &[],
+            &mut taper,
+            &mut fill,
+        );
+        assert_eq!(ipcz, -1);
+        assert!(!taper && !fill);
+        // An ordinary position still finds the piece.
+        find_piece(
+            &ixl,
+            &iyl,
+            &izl,
+            1,
+            64,
+            64,
+            16,
+            16,
+            30.0,
+            20.0,
+            0,
+            &mut ix0,
+            &mut ix1,
+            &mut iy0,
+            &mut iy1,
+            &mut ipcz,
+            0,
+            &[],
+            &mut taper,
+            &mut fill,
+        );
+        assert_eq!((ipcz, ix0, ix1, iy0, iy1), (0, 22, 37, 12, 27));
     }
 }

@@ -71,6 +71,7 @@ pub fn percentile_float(mut selected: i32, values: &mut [f32], count: i32) -> f3
                 *values.get_unchecked_mut(selected as usize) = *values.get_unchecked(low as usize);
                 *values.get_unchecked_mut(low as usize) = temporary;
                 while left < right {
+                    let (entry_left, entry_right) = (left, right);
                     while *values.get_unchecked(right as usize) > temporary {
                         right -= 1;
                     }
@@ -81,6 +82,12 @@ pub fn percentile_float(mut selected: i32, values: &mut [f32], count: i32) -> f3
                     }
                     *values.get_unchecked_mut(right as usize) =
                         *values.get_unchecked(left as usize);
+                    if left == entry_left && right == entry_right {
+                        // BUGS.md "percentileFloat / percentileInt do not
+                        // terminate on NaN input": only a NaN stops both
+                        // scans; the C spins here forever.
+                        return percentile_float_nan_fallback(selected, values, count);
+                    }
                 }
                 *values.get_unchecked_mut(left as usize) = temporary;
                 if selected < left {
@@ -92,6 +99,7 @@ pub fn percentile_float(mut selected: i32, values: &mut [f32], count: i32) -> f3
                 *values.get_unchecked_mut(selected as usize) = *values.get_unchecked(high as usize);
                 *values.get_unchecked_mut(high as usize) = temporary;
                 while left < right {
+                    let (entry_left, entry_right) = (left, right);
                     while *values.get_unchecked(left as usize) < temporary {
                         left += 1;
                     }
@@ -102,6 +110,10 @@ pub fn percentile_float(mut selected: i32, values: &mut [f32], count: i32) -> f3
                     }
                     *values.get_unchecked_mut(left as usize) =
                         *values.get_unchecked(right as usize);
+                    if left == entry_left && right == entry_right {
+                        // As above: a NaN stalled both scans.
+                        return percentile_float_nan_fallback(selected, values, count);
+                    }
                 }
                 *values.get_unchecked_mut(right as usize) = temporary;
                 if selected > right {
@@ -112,6 +124,29 @@ pub fn percentile_float(mut selected: i32, values: &mut [f32], count: i32) -> f3
             }
         }
     }
+    values[selected as usize]
+}
+
+/// Defined behaviour for the non-terminating NaN case of `percentileFloat`
+/// (fixed in translation, 2026-09-26; `BUGS.md`).  Not in the source.
+///
+/// A partition pass in which *neither* scan moves is impossible for ordered
+/// data: the first scan stops on an element that the second scan's
+/// comparison then accepts, so one index always advances.  Only a NaN makes
+/// both comparisons false, and the C then loops forever with the array in a
+/// fixed state.  Rather than spin, the selection is finished by sorting the
+/// first `count` values with every NaN ordered above `+inf` and returning
+/// item `selected` (0-based) of that order.  Input without a NaN never gets
+/// here, so its selection and its array permutation are unchanged; input with
+/// a NaN on which the C does terminate also never gets here and gives the C's
+/// answer.
+fn percentile_float_nan_fallback(selected: i32, values: &mut [f32], count: i32) -> f32 {
+    values[..count as usize].sort_by(|a, b| match (a.is_nan(), b.is_nan()) {
+        (false, false) => a.partial_cmp(b).unwrap(),
+        (false, true) => std::cmp::Ordering::Less,
+        (true, false) => std::cmp::Ordering::Greater,
+        (true, true) => std::cmp::Ordering::Equal,
+    });
     values[selected as usize]
 }
 
@@ -208,5 +243,24 @@ mod tests {
         let mut integers = [7_i32, 2, 2, 4, 9, 1];
         assert_eq!(percentile_int(3, &mut integers, 6), 2);
         assert_eq!(percentile_float(1, &mut [], 0), 0.0);
+    }
+
+    /// `BUGS.md`: the C never returns on these.  Defined behaviour: NaN
+    /// orders above every number, so the median of {3,1,NaN,2,5} is 3 and the
+    /// top item is NaN.
+    #[test]
+    fn nan_input_terminates_with_nan_ordered_highest() {
+        let mut v = [3.0_f32, 1.0, f32::NAN, 2.0, 5.0];
+        assert_eq!(percentile_float(3, &mut v, 5), 3.0);
+        let mut v = [3.0_f32, 1.0, f32::NAN, 2.0, 5.0];
+        assert!(percentile_float(5, &mut v, 5).is_nan());
+        let mut v = [3.0_f32, 1.0, f32::NAN, 2.0, 5.0];
+        assert_eq!(percentile_float(1, &mut v, 5), 1.0);
+        let mut v = [f32::NAN; 9];
+        assert!(percentile_float(5, &mut v, 9).is_nan());
+        for s in 1..=9 {
+            let mut v = [4.0_f32, f32::NAN, 7.0, -1.0, f32::NAN, 0.5, 9.0, 2.0, 3.0];
+            let _ = percentile_float(s, &mut v, 9);
+        }
     }
 }

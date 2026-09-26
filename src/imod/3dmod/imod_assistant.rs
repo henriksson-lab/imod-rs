@@ -255,6 +255,12 @@ impl ImodAssistant {
                 self.assistant_error("Unable to send remote-control command to Qt Assistant");
                 return 1;
             }
+            // Fixed in translation (BUGS.md): if the assistant exits during
+            // these sends, native's `assistantExited` deletes `mAssistant` and
+            // the `QTextStream` then writes through it
+            // (`imod_assistant.cpp:199-222`, segfault).  Here the child is
+            // owned, a write to the exited process fails with EPIPE, and that
+            // is reported as an error with return 1.
             if send_twice {
                 for _ in 0..2 {
                     // Source calls QApplication::processEvents then b3dMilliSleep(400).

@@ -3282,6 +3282,147 @@ pub(crate) fn strtol(s: &[u8], end: &mut usize, base: i32) -> i64 {
     if negative { -value } else { value }
 }
 
+/// The C library's `strtof`, as a Rust function.
+///
+/// Same syntax and end index as [`strtod`] (it scans with it), but the value
+/// is rounded **once** from the decimal or hexadecimal text to `float`, as
+/// glibc's `strtof` does: `strtod` followed by a narrowing cast rounds twice,
+/// and lands one ulp away whenever the double result sits on a float tie
+/// (`"1.00000005960464477539062500001"` is just above the tie between 1 and
+/// the next float, so it rounds up; through a double it becomes the tie itself
+/// and rounds to even, down).  This is what `scanf("%f")` into a `float *`
+/// uses.  A NaN's `n-char-sequence` payload goes to the 22 mantissa bits below
+/// the quiet bit (`__strtof_nan`).
+pub(crate) fn strtof(s: &[u8], end: &mut usize) -> f32 {
+    let value = strtod(s, end);
+    if *end == 0 {
+        return 0.0;
+    }
+    if value.is_nan() {
+        let bits = 0x7fc0_0000u32 | (value.to_bits() & 0x003f_ffff) as u32;
+        let nan = f32::from_bits(bits);
+        return if value.is_sign_negative() { -nan } else { nan };
+    }
+    if value.is_infinite() {
+        return value as f32;
+    }
+    let mut i = 0usize;
+    while i < *end && !(s[i].is_ascii_digit() || s[i] == b'.') {
+        i += 1;
+    }
+    let negative = s[..i].contains(&b'-');
+    let text = &s[i..*end];
+    let magnitude: f32 = if text.len() > 1 && text[0] == b'0' && (text[1] | 32) == b'x' {
+        /* Hexadecimal: the exact significand (60 bits + sticky, as in
+        `strtod`) rounded once to 24 bits, nearest-even, with float's
+        subnormal range and overflow to infinity. */
+        let mut j = 2usize;
+        let mut mantissa: u64 = 0;
+        let mut sticky = false;
+        let mut bin_exp: i64 = 0;
+        let mut seen_point = false;
+        while j < text.len() {
+            let c = text[j];
+            if c == b'.' && !seen_point {
+                seen_point = true;
+                j += 1;
+                continue;
+            }
+            let Some(digit) = (c as char).to_digit(16) else {
+                break;
+            };
+            if mantissa >> 60 == 0 {
+                mantissa = mantissa * 16 + digit as u64;
+                if seen_point {
+                    bin_exp -= 4;
+                }
+            } else {
+                if !seen_point {
+                    bin_exp += 4;
+                }
+                sticky |= digit != 0;
+            }
+            j += 1;
+        }
+        if j < text.len() && (text[j] | 32) == b'p' {
+            let mut k = j + 1;
+            let mut esign = 1i64;
+            if k < text.len() && (text[k] == b'+' || text[k] == b'-') {
+                if text[k] == b'-' {
+                    esign = -1;
+                }
+                k += 1;
+            }
+            let mut ev: i64 = 0;
+            while k < text.len() && text[k].is_ascii_digit() {
+                ev = (ev * 10 + (text[k] - b'0') as i64).min(1 << 40);
+                k += 1;
+            }
+            bin_exp += esign * ev;
+        }
+        if mantissa == 0 {
+            0.0
+        } else {
+            let lz = mantissa.leading_zeros() as i64;
+            let top: u128 = ((mantissa as u128) << (64 + lz)) | (sticky as u128);
+            let e: i64 = bin_exp + 63 - lz;
+            if e > 127 {
+                f32::INFINITY
+            } else if e < -126 {
+                /* A subnormal result, as glibc 2.35 `round_and_return` does it
+                for a hex significand: the significand is first cut to
+                MANT_DIG (24) bits, keeping the bits below the first dropped
+                one only as `more_bits`, and the denormalising shift then takes
+                its round bit from the kept bits -- the first dropped bit is
+                lost.  So `0x2981552p-154` rounds down where the exact value
+                (and `0x2981551p-154`) rounds up; measured against the
+                library, not the standard. */
+                let m24: u128 = top >> 104;
+                let more0 = top & ((1u128 << 103) - 1) != 0;
+                let shift = -126 - e;
+                if shift > 24 {
+                    0.0
+                } else {
+                    let round = (m24 >> (shift - 1)) & 1 == 1;
+                    let more = more0 || m24 & ((1u128 << (shift - 1)) - 1) != 0;
+                    let mut keep = if shift == 24 { 0 } else { m24 >> shift };
+                    if round && (more || keep & 1 == 1) {
+                        keep += 1;
+                    }
+                    (keep as f64 * 2f64.powi(-149)) as f32
+                }
+            } else {
+                let prec: i64 = 24;
+                let shift = 128 - prec;
+                let (mut keep, rem, half): (u128, u128, u128) = if shift >= 129 {
+                    (0, 1, u128::MAX)
+                } else if shift == 128 {
+                    (0, top, 1u128 << 127)
+                } else {
+                    (
+                        top >> shift,
+                        top & ((1u128 << shift) - 1),
+                        1u128 << (shift - 1),
+                    )
+                };
+                if rem > half || (rem == half && keep & 1 == 1) {
+                    keep += 1;
+                }
+                /* keep * 2^(e - prec + 1) */
+                let k = e - prec + 1;
+                (keep as f64 * 2f64.powi(k as i32)) as f32
+            }
+        }
+    } else {
+        /* Decimal: Rust's parser is correctly rounded to the target type. */
+        std::str::from_utf8(text)
+            .ok()
+            .and_then(|t| t.parse::<f32>().ok())
+            .unwrap_or(0.0)
+    };
+    if negative { -magnitude } else { magnitude }
+}
+
 /// The C library's `strtod`, as a Rust function.
 ///
 /// Accepts what glibc accepts — leading white space, a sign, a decimal or C99
@@ -3383,19 +3524,35 @@ pub(crate) fn strtod(s: &[u8], end: &mut usize) -> f64 {
     /* C99 hexadecimal floating literal */
     if i + 1 < s.len() && s[i] == b'0' && (s[i + 1] | 32) == b'x' {
         let mut j = i + 2;
-        let mut mantissa: f64 = 0.0;
+        /* glibc rounds the whole hex significand once, to nearest-even: keep
+        the first 60 significant bits exactly in an integer, count the digits
+        that no longer fit as exponent (integer part) and fold their bits into
+        a sticky flag. */
+        let mut mantissa: u64 = 0;
+        let mut sticky = false;
         let mut any = false;
+        let mut bin_exp: i32 = 0;
         while j < s.len() && (s[j] as char).is_digit(16) {
-            mantissa = mantissa * 16.0 + (s[j] as char).to_digit(16).unwrap() as f64;
+            let digit = (s[j] as char).to_digit(16).unwrap() as u64;
+            if mantissa >> 60 == 0 {
+                mantissa = mantissa * 16 + digit;
+            } else {
+                bin_exp = bin_exp.saturating_add(4);
+                sticky |= digit != 0;
+            }
             j += 1;
             any = true;
         }
-        let mut bin_exp: i32 = 0;
         if j < s.len() && s[j] == b'.' {
             j += 1;
             while j < s.len() && (s[j] as char).is_digit(16) {
-                mantissa = mantissa * 16.0 + (s[j] as char).to_digit(16).unwrap() as f64;
-                bin_exp -= 4;
+                let digit = (s[j] as char).to_digit(16).unwrap() as u64;
+                if mantissa >> 60 == 0 {
+                    mantissa = mantissa * 16 + digit;
+                    bin_exp = bin_exp.saturating_sub(4);
+                } else {
+                    sticky |= digit != 0;
+                }
                 j += 1;
                 any = true;
             }
@@ -3425,7 +3582,68 @@ pub(crate) fn strtod(s: &[u8], end: &mut usize) -> f64 {
                 }
             }
             *end = j;
-            let value = mantissa * (2.0f64).powi(bin_exp);
+            let value = if mantissa == 0 {
+                0.0
+            } else {
+                /* value = mantissa * 2^bin_exp; normalise so the top bit is
+                bit 127 of a u128 with the sticky bit at the bottom, i.e. the
+                value is (top / 2^127) * 2^e. */
+                let lz = mantissa.leading_zeros() as i64;
+                let top: u128 = ((mantissa as u128) << (64 + lz)) | (sticky as u128);
+                let e: i64 = bin_exp as i64 + 63 - lz;
+                if e > 1023 {
+                    f64::INFINITY
+                } else if e < -1022 {
+                    /* Subnormal: glibc 2.35 `round_and_return` for a hex
+                    significand cuts it to MANT_DIG (53) bits first, keeps the
+                    bits below the first dropped one only as `more_bits`, and
+                    takes the round bit of the denormalising shift from the
+                    kept bits, so the first dropped bit is lost (see
+                    `strtof`).  Measured against the library. */
+                    let m53: u128 = top >> 75;
+                    let more0 = top & ((1u128 << 74) - 1) != 0;
+                    let shift = -1022 - e;
+                    if shift > 53 {
+                        0.0
+                    } else {
+                        let round = (m53 >> (shift - 1)) & 1 == 1;
+                        let more = more0 || m53 & ((1u128 << (shift - 1)) - 1) != 0;
+                        let mut keep = if shift == 53 { 0 } else { m53 >> shift };
+                        if round && (more || keep & 1 == 1) {
+                            keep += 1;
+                        }
+                        /* keep * 2^-1074, exactly */
+                        f64::from_bits(keep as u64)
+                    }
+                } else {
+                    /* significant bits available: 53, fewer when subnormal */
+                    let prec: i64 = if e >= -1022 { 53 } else { 53 - (-1022 - e) };
+                    let shift = 128 - prec;
+                    let (mut keep, rem, half): (u128, u128, u128) = if shift >= 129 {
+                        (0, 1, u128::MAX)
+                    } else if shift == 128 {
+                        (0, top, 1u128 << 127)
+                    } else {
+                        (
+                            top >> shift,
+                            top & ((1u128 << shift) - 1),
+                            1u128 << (shift - 1),
+                        )
+                    };
+                    if rem > half || (rem == half && keep & 1 == 1) {
+                        keep += 1;
+                    }
+                    /* keep * 2^(e - prec + 1); that exponent is >= -1074 */
+                    let k = e - prec.max(0) + 1;
+                    let k = if e < -1022 { -1074 } else { k };
+                    let scale = if k >= -1022 {
+                        f64::from_bits(((k + 1023) as u64) << 52)
+                    } else {
+                        f64::from_bits(1u64 << (k + 1074))
+                    };
+                    keep as f64 * scale
+                }
+            };
             return if negative { -value } else { value };
         }
     }
@@ -3471,4 +3689,34 @@ pub(crate) fn strtod(s: &[u8], end: &mut usize) -> f64 {
     let text = std::str::from_utf8(&s[num_start..j]).unwrap_or("0");
     let value: f64 = text.parse().unwrap_or(0.0);
     if negative { -value } else { value }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// `BUGS.md` §6, fixed in translation: a value-line error whose option
+    /// text is longer than the C's fixed buffers (`sTempStr`, 1024 bytes;
+    /// `exitError`'s 512-byte `errorMess`) overruns them natively.  Here the
+    /// error comes back whole, and the value text is appended only up to the
+    /// buffer's room.
+    #[test]
+    fn long_value_line_error_is_reported_without_overrun() {
+        let option = vec![b'v'; 2000];
+        let mut values = [0i32; 4];
+        let mut num = 0;
+        let result = pip_get_line_of_values(
+            &option,
+            b"1 x",
+            PipValueArray::Int(&mut values),
+            PIP_INTEGER,
+            &mut num,
+            4,
+        );
+        assert!(result.is_err());
+        let mut message = Vec::new();
+        assert_eq!(pip_get_error(&mut message), 0);
+        assert!(message.starts_with(b"Illegal character in value entry:  vvvv"));
+        assert!(message.windows(2000).any(|w| w == &option[..]));
+    }
 }

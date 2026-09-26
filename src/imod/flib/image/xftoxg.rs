@@ -17,6 +17,7 @@
 //! the C entry points with the Fortran wrappers' `iz - 1` and `rows = 2`
 //! inlined (`warpwrapfort.c`, `linearxforms.c`, `amat_to_rotmagstr.c`).
 
+use crate::imod::flib::subrs::compat::gfortran_rt::{maxss, minss};
 use crate::imod::flib::subrs::hvem::dopen::dopen;
 use crate::imod::flib::subrs::hvem::frefor::{ListItem, ListReadError, list_read};
 use crate::imod::flib::subrs::hvem::parse_input_params::{
@@ -254,7 +255,14 @@ pub fn xftoxg() {
     }
     iorder = 1.max(10.min(iorder));
     //
-    if pip_get_in_out_file("InputFile", 1, "Input file of f transforms", &mut in_file) != 0 {
+    if pip_get_in_out_file(
+        "InputFile",
+        1,
+        "Input file of f transforms",
+        &mut in_file,
+        320,
+    ) != 0
+    {
         exit_error("No input file specified");
     }
     if pip_get_in_out_file(
@@ -262,6 +270,7 @@ pub fn xftoxg() {
         2,
         "Output file of g transforms",
         &mut out_file,
+        320,
     ) != 0
     {
         // `i = len_trim(inFile)`; `inFile(i - 1:i) .ne. 'xf'`
@@ -388,28 +397,54 @@ pub fn xftoxg() {
                 {
                     exit_error("Getting grid parameters");
                 }
-                x_start = x_start.min(x_str_tmp);
-                x_interval = x_interval.min(x_int_tmp);
-                x_end = x_end.max((nx_gr_tmp - 1) as f32 * x_interval);
-                y_start = y_start.min(y_str_tmp);
-                y_interval = y_interval.min(y_int_tmp);
-                y_end = y_end.max((ny_gr_tmp - 1) as f32 * y_interval);
+                // `xftoxg.f90:219-224`.  The reference object does the four
+                // `min`s as one `minps` with the running values as
+                // destination, but recomputes `xInterval` for line 221 as a
+                // scalar `minss xIntTmp, xInterval` (the other operand order);
+                // both `max`es are `maxss product, running`.
+                let x_int_scalar = minss(x_int_tmp, x_interval);
+                x_start = minss(x_start, x_str_tmp);
+                x_interval = minss(x_interval, x_int_tmp);
+                x_end = maxss((nx_gr_tmp - 1) as f32 * x_int_scalar, x_end);
+                y_start = minss(y_start, y_str_tmp);
+                y_interval = minss(y_interval, y_int_tmp);
+                y_end = maxss((ny_gr_tmp - 1) as f32 * y_interval, y_end);
             }
         }
         if x_start <= 0. || x_end >= nx as f32 || y_start <= 0. || y_end >= ny as f32 {
             exit_error("Cannot work with grids that extend outside the defined image area");
         }
+        // Fixed in translation (BUGS.md, `xftoxg` / `xfproduct`): when no
+        // section of a control-point file has 4 or more points, no section
+        // contributes a grid above, `xStart`/`xEnd` stay at their "no grid"
+        // starting values, and the common grid computed below has zero
+        // extent and a zero interval.  Native then carries NaN through the
+        // cumulative warps into the rotation angles, and `groupRotations`
+        // loops forever.  There is no warping grid to align, so this is an
+        // error here.
+        if control && !n_control[..nlist as usize].iter().any(|&n| n >= 4) {
+            exit_error("No section has enough control points (4) to define a warping grid");
+        }
         //
         // Figure out the grid size and interval that fits in the range, but make it
         // fill the range
-        x_start = x_start.min(x_interval / 2.);
-        x_end = x_end.max(nx as f32 - x_interval / 2.);
-        y_start = y_start.min(y_interval / 2.);
-        y_end = y_end.max(ny as f32 - y_interval / 2.);
-        nx_grid = (2.0_f32).max((x_end - x_start) / x_interval + 1.05) as i32;
-        x_interval = (x_end - x_start) / (nx_grid - 1) as f32;
-        ny_grid = (2.0_f32).max((y_end - y_start) / y_interval + 1.05) as i32;
-        y_interval = (y_end - y_start) / (ny_grid - 1) as f32;
+        //
+        // `xftoxg.f90:234-241`.  In the reference object `xStart`/`yStart`
+        // are `minss start, interval / 2.`; the `max`es are computed twice:
+        // a scalar `maxss n - interval / 2., end` feeds the grid size and
+        // interval, while the value stored back into `xEnd`/`yEnd` (read
+        // again later) is a `maxps end, n - interval / 2.`.  The grid counts
+        // are `maxss expr, 2.`.
+        x_start = minss(x_start, x_interval / 2.);
+        let x_end_scalar = maxss(nx as f32 - x_interval / 2., x_end);
+        y_start = minss(y_start, y_interval / 2.);
+        let y_end_scalar = maxss(ny as f32 - y_interval / 2., y_end);
+        x_end = maxss(x_end, nx as f32 - x_interval / 2.);
+        y_end = maxss(y_end, ny as f32 - y_interval / 2.);
+        nx_grid = maxss((x_end_scalar - x_start) / x_interval + 1.05, 2.0_f32) as i32;
+        x_interval = (x_end_scalar - x_start) / (nx_grid - 1) as f32;
+        ny_grid = maxss((y_end_scalar - y_start) / y_interval + 1.05, 2.0_f32) as i32;
+        y_interval = (y_end_scalar - y_start) / (ny_grid - 1) as f32;
         //
         if control {
             //
@@ -1072,6 +1107,16 @@ fn cumulative_warp(
         } else {
             *nx_gr_tmp = nx_grid;
             *ny_gr_tmp = ny_grid;
+            // Fixed in translation (BUGS.md, `xftoxg` / `xfproduct`): the
+            // source (`xftoxg.f90:541-545`) sets only the zero grid's size to
+            // the common layout and leaves its start and interval at whatever
+            // the previous section's grid had -- or unset, when no earlier
+            // section had a grid.  The zero grid is meant to be in the common
+            // layout, so its start and interval are the common ones here.
+            *x_str_tmp = x_start;
+            *y_str_tmp = y_start;
+            *x_int_tmp = x_interval;
+            *y_int_tmp = y_interval;
             dx_grid.fill(0.);
             dy_grid.fill(0.);
         }
@@ -1104,7 +1149,26 @@ fn cumulative_warp(
             &mut cum_after[..nxy],
             &mut dy_after[..nxy],
             &mut g_after[0],
-            0,
+            // Fixed in translation (BUGS.md, `xftoxg` / `xfproduct`): the
+            // source passes `useSecond = 0` (`xftoxg.f90:548-552`), so each
+            // cumulative product is stored in *this section's* grid layout
+            // (its own interval, expanded to the common range), while every
+            // later reader -- the next product, the mean grid, the fits --
+            // treats `dxCum(:, :, kl)` as the common `nxGrid x nyGrid`
+            // layout.  When a section's grid differs from the common one,
+            // native therefore reads positions it never wrote (heap residue,
+            // different from run to run).  The product is meant to live in
+            // the common layout of the second (cumulative) grid, so it is
+            // stored there (`useSecond = 1`) whenever this section's grid
+            // size differs from the common one.  When the sizes agree every
+            // common position is written, and the source's own call
+            // (`useSecond = 0`) is kept, so those files stay byte-identical
+            // to native.
+            if *nx_gr_tmp == nx_grid && *ny_gr_tmp == ny_grid {
+                0
+            } else {
+                1
+            },
             2,
         ) != 0
         {
@@ -1286,8 +1350,8 @@ pub fn group_rotations(
     let mut num_in_group: i32;
     let mut max_in_group: i32;
     // Uninitialised in the source; it is always assigned before use because
-    // every ungrouped item is within range of itself unless `range < 0`, and
-    // then the source loops forever as this does.
+    // every ungrouped item is within range of itself unless `range < 0` or
+    // the angle is NaN, which the loop below now stops on.
     let mut i_max = k_start;
     //
     num_free = k_end + 1 - k_start;
@@ -1303,7 +1367,7 @@ pub fn group_rotations(
         // `xftoxg`), i.e. `acc < f ? acc : f`, so a NaN angle replaces the
         // running value.  With a NaN left in `angleMax - angleMin` the range
         // test fails and the grouping loop below never assigns anything; the
-        // reference then loops forever, and so does this.  (For more than six
+        // reference then loops forever, and this stops with an error.  (For more than six
         // sections the reference vectorises this loop four lanes wide, which
         // can change which NaN survives but not whether one does when the
         // last section's angle is NaN.)
@@ -1357,6 +1421,16 @@ pub fn group_rotations(
                 }
             }
             i += 1;
+        }
+        // Fixed in translation (BUGS.md, `xftoxg` / `xfproduct`): when no
+        // ungrouped angle fits within the range even of itself -- a NaN
+        // angle, or a negative range -- `maxInGroup` stays 0, `numFree`
+        // never falls, and the source loops forever (`xftoxg.f90:661-689`).
+        // That is an error here.
+        if max_in_group == 0 {
+            exit_error(
+                "Rotation angles cannot be grouped: an angle is not a number or the range is negative",
+            );
         }
         //
         // Now assign the angles within range to the group

@@ -353,9 +353,12 @@ fn fill_var_name(var_name: &mut [u8], name: &[u8], view: i32) {
 
 /// Original: `automap` (`map_vars.cpp:285`).
 ///
-/// `nRanSpecIn` is by value in the source, and `inputGroupings` sets this
-/// function's copy of it (its parameter is `int &`), which `makeMapList` then
-/// reads; the caller's variable is not changed.
+/// Fixed in translation (2026-09-26, `BUGS.md`): `nRanSpecIn` is by value in
+/// the source, so the count `inputGroupings` sets (its parameter is `int &`)
+/// reaches only this function's copy; `input_vars.cpp`'s statics stay 0 and
+/// for local areas after the first (`ifLocal = 2`, where `inputGroupings` is
+/// skipped) the `Local...NondefaultGroup` entries are lost.  It is passed by
+/// reference here, so they apply to every local area.
 pub fn automap<const BEADTRACK: bool>(
     mx: &ArrayMaxes,
     sg: &MapSepGroups,
@@ -371,7 +374,7 @@ pub fn automap<const BEADTRACK: bool>(
     nin_thresh: i32,
     if_local: i32,
     nmap_def: &mut i32,
-    mut n_ran_spec_in: i32,
+    n_ran_spec_in: &mut i32,
     iv_spec_str_in: &mut [i32],
     iv_spec_end_in: &mut [i32],
     nmap_spec: &mut [i32],
@@ -387,7 +390,7 @@ pub fn automap<const BEADTRACK: bool>(
             iv_spec_str_in,
             iv_spec_end_in,
             nmap_spec,
-            &mut n_ran_spec_in,
+            n_ran_spec_in,
             max_groups,
         );
     }
@@ -403,7 +406,7 @@ pub fn automap<const BEADTRACK: bool>(
         iv_spec_str_in,
         iv_spec_end_in,
         nmap_spec,
-        n_ran_spec_in,
+        *n_ran_spec_in,
         num_in_view,
         nin_thresh,
     );
@@ -990,21 +993,21 @@ pub fn set_grp_size(tilt: &[f32], nview: i32, power: f32, group_size: &mut [f32]
 /// Remap the view numbers in a separate group from file views to internal
 /// views.
 ///
-/// Upstream, kept as written: `numSepInGroup` is passed **by value**
-/// (`tafuncs.h:133`), so when a view is dropped (its file view is not in the
-/// alignment) the list is shifted down here but the caller's count is not
-/// reduced; the caller keeps the old count and the last entry is duplicated
-/// (`input_vars.cpp:103`, `proc_vars.cpp:59`).
+/// Fixed in translation (2026-09-26, `BUGS.md`): the source passes
+/// `numSepInGroup` **by value** (`tafuncs.h:133`), so when a view is dropped
+/// (its file view is not in the alignment) the list is shifted down but the
+/// caller's count is not reduced and the last entry is counted twice
+/// (`input_vars.cpp:103`, `proc_vars.cpp:59`).  The count is updated here.
 pub fn map_separate_group<const BEADTRACK: bool>(
     iviews_in_group: &mut [i32],
-    mut num_sep_in_group: i32,
+    num_sep_in_group: &mut i32,
     map_file_to_view: &[i32],
     n_file_views: i32,
 ) {
     let mut i: i32;
     //
     i = 1;
-    while i <= num_sep_in_group {
+    while i <= *num_sep_in_group {
         if iviews_in_group[(i - 1) as usize] <= 0
             || iviews_in_group[(i - 1) as usize] > n_file_views
         {
@@ -1016,12 +1019,38 @@ pub fn map_separate_group<const BEADTRACK: bool>(
         iviews_in_group[(i - 1) as usize] =
             map_file_to_view[(iviews_in_group[(i - 1) as usize] - 1) as usize];
         if iviews_in_group[(i - 1) as usize] == 0 {
-            num_sep_in_group = num_sep_in_group - 1;
-            for j in i..=num_sep_in_group {
+            *num_sep_in_group = *num_sep_in_group - 1;
+            for j in i..=*num_sep_in_group {
                 iviews_in_group[(j - 1) as usize] = iviews_in_group[(j + 1 - 1) as usize];
             }
         } else {
             i = i + 1;
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// `BUGS.md` "`mapSeparateGroup`": the count was by value, so a view not
+    /// in the alignment was removed from the list but still counted, and the
+    /// last entry appeared twice.  The count now follows the list.
+    #[test]
+    fn map_separate_group_drops_excluded_views_from_the_count() {
+        // 21 file views, 5 and 20 excluded: file view -> internal view.
+        let mut map = vec![0; 21];
+        let mut next = 1;
+        for fv in 1..=21 {
+            if fv != 5 && fv != 20 {
+                map[fv - 1] = next;
+                next += 1;
+            }
+        }
+        let mut views = vec![3, 5, 7, 20, 21];
+        let mut count = 5;
+        map_separate_group::<false>(&mut views, &mut count, &map, 21);
+        assert_eq!(count, 3);
+        assert_eq!(&views[..3], &[3, 6, 19]);
     }
 }

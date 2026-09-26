@@ -500,6 +500,7 @@ impl FindSect {
         let mut ratio_diff: f32;
         // `lastDiff` is read before it is set when the first scaling has too few
         // center boxes (`findsection.cpp:930`); the C value is stack residue.
+        // BUGS.md, fixed in translation: defined as 0, "no earlier difference".
         let mut last_diff: f32 = 0.;
         let mut pixel_delta: [f32; 3];
         let mut new_cell = [0f32; 6];
@@ -956,9 +957,16 @@ tomopitch",
         // Get bead model and transform it to this volume
         if let Some(bead_name) = &bead_file {
             let Ok(model) = imod_read(String::from_utf8_lossy(bead_name).to_string()) else {
-                // `findsection.cpp:411` passes the NULL model pointer, not the
-                // name, to `%s`; glibc prints "(null)".
-                exit_error(b"Reading in bead model file (null)");
+                // BUGS.md, fixed in translation: `findsection.cpp:411` passes the
+                // NULL model pointer, not the name, to `%s` (glibc prints
+                // "(null)"); the file name is what the message means.
+                exit_error(
+                    format!(
+                        "Reading in bead model file {}",
+                        String::from_utf8_lossy(bead_name)
+                    )
+                    .as_bytes(),
+                );
             };
             let mut model = model;
             let Some(mod_ref) = model.ref_image else {
@@ -1740,7 +1748,10 @@ scale  binning  mean   median  MADN     mean   median  MADN      ness\n"
                                     / 2;
                                 starts[self.m_thick_ind] = if v > 0 { v } else { 0 };
                                 let a = starts[self.m_thick_ind] + z_range - 1;
-                                let b = self.m_num_boxes[scl][self.m_thick_ind];
+                                // BUGS.md, fixed in translation: `findsection.cpp:860-861`
+                                // clamps to `mNumBoxes` without the `- 1`, so the sample
+                                // could end one box past the last; clamp to the last box.
+                                let b = self.m_num_boxes[scl][self.m_thick_ind] - 1;
                                 ends[self.m_thick_ind] = if a < b { a } else { b };
                             }
                             self.add_boxes_to_sample(
@@ -1836,7 +1847,9 @@ scale  binning  mean   median  MADN     mean   median  MADN      ness\n"
                 &[
                     CArg::Int(self.m_binning[scl][0] as i64),
                     CArg::Int(self.m_binning[scl][1] as i64),
-                    CArg::Int(self.m_binning[scl][1] as i64),
+                    // BUGS.md, fixed in translation: `findsection.cpp:901-902`
+                    // prints `mBinning[scl][1]` twice; the Z binning is `[2]`.
+                    CArg::Int(self.m_binning[scl][2] as i64),
                 ],
             );
             printf!(
@@ -1908,18 +1921,14 @@ be detected for scaling # %d\n",
         if high_sd_crit > 0. && lowest_sd_for_edges != 0 {
             let err = low_sd_error[self.m_best_scale];
             if err != 0 {
-                // `findsection.cpp:945` indexes the four-entry table with the 1-based
-                // error code, so codes 1-3 print the *next* message and code 4 reads
-                // past the array; that read has no defined value to reproduce.
+                // BUGS.md, fixed in translation: `findsection.cpp:945` indexes the
+                // four-entry table with the 1-based error code, so native prints the
+                // *next* message for codes 1-3 and reads past the array for 4.  The
+                // code is 1-based (`findLowestSDEdges` returns 1-4), so index `err - 1`.
                 printf!(
                     "For this scaling, an error occurred finding slices with a\n   \
 value of median SD to use for edge samples with this scaling:\n   %s\n",
-                    CArg::Str(
-                        low_sd_err_strings
-                            .get(err as usize)
-                            .copied()
-                            .unwrap_or("(null)")
-                    )
+                    CArg::Str(low_sd_err_strings[(err - 1) as usize])
                 );
             } else {
                 printf!(
@@ -2704,9 +2713,9 @@ b %f %f c %.1f\n",
         let xfit = 0usize;
         let yfit = max_pts;
         let zfit = 2 * max_pts;
-        // `slopes[1]`/`intercepts[1]` are left unset when a separate robust fit of
-        // the bottom succeeds and the top has too few points for one
-        // (`findsection.cpp:1417-1443`); the C reads stack residue there.
+        // `slopes[1]`/`intercepts[1]` were left unset by the source when a
+        // separate robust fit of the bottom succeeded and the top had too few
+        // points for one (`findsection.cpp:1417-1443`); see the loop below.
         let mut slopes = [0f32; 2];
         let mut intercepts = [0f32; 2];
         let mut xmin = [0f32; 2];
@@ -2768,6 +2777,12 @@ b %f %f c %.1f\n",
             num_fit = num_bot;
             ind_fit = 0;
             for ind in 0..2usize {
+                // BUGS.md, fixed in translation: the source sets `err = 1` only
+                // before this loop, so when the bottom's robust fit succeeds and
+                // the top has too few points for one, native skips the top's
+                // standard fit and reads `slopes[1]`/`intercepts[1]` unset.  Each
+                // surface starts from "no robust fit" here.
+                err = 1;
                 // Use robust fit if there are enough points
                 if num_fit >= self.m_min_for_robust_pitch && num_fit <= MAX_FIT_DATA as i32 {
                     for ix in 0..num_fit as usize {
@@ -2933,9 +2948,9 @@ b %f %f c %.1f\n",
     /// mBuffer and accumulate the sum of means in meanSum.
     ///
     /// The source can be handed an end one past the last box
-    /// (`findsection.cpp:860-861`); such an index lands in the next scaling's
-    /// statistics, which the whole-allocation indexing here reproduces.  Past
-    /// the end of the allocation the C reads heap residue, and 0 is used.
+    /// (`findsection.cpp:860-861`); the translation's caller clamps that end
+    /// to the last box (BUGS.md, fixed in translation), so no index here
+    /// leaves the scaling's own statistics.
     #[allow(clippy::too_many_arguments)]
     fn add_boxes_to_sample(
         &mut self,
@@ -4254,7 +4269,13 @@ b %f %f c %.1f\n",
                         xy_const = x_coeff * (x_col - xcen) + y_coeff * (y_col - ycen);
                         z_col =
                             ((z_slice - zcen - xy_const) / z_coeff + zcen) / binnings[ti] as f32;
-                        if z_col >= 0. && z_col <= num_boxes[ti] as f32 {
+                        // BUGS.md, fixed in translation: `findsection.cpp:2349,2779` accept
+                        // `zCol <= numBoxes`, so native interpolates towards box `iz + 1`
+                        // up to `numBoxes + 1`, past this scaling's SDs (heap residue
+                        // for the last scaling).  Only columns inside the box range
+                        // are sampled, and the upper box is clamped to the last one
+                        // (its weight `zfrac` is then 0).
+                        if z_col >= 0. && z_col <= (num_boxes[ti] - 1) as f32 {
                             iz = z_col as i32;
                             zfrac = z_col - iz as f32;
                             iz_box = if flipped { ilong } else { iz };
@@ -4270,11 +4291,9 @@ b %f %f c %.1f\n",
                             };
                             self.m_proj_slice[n] = ((1. - zfrac as f64) * this as f64) as f32;
 
-                            // `iz + 1` can be one past the last box (`findsection.cpp:2359`);
-                            // inside the allocation that is the next data, past it
-                            // the C reads residue and 0 is used here.
-                            iz_box = if flipped { ilong } else { iz + 1 };
-                            iy_box = if flipped { iz + 1 } else { ilong };
+                            let iz_next = if iz + 1 < num_boxes[ti] { iz + 1 } else { iz };
+                            iz_box = if flipped { ilong } else { iz_next };
+                            iy_box = if flipped { iz_next } else { ilong };
                             box_ind = sds_base
                                 + ((iz_box * num_boxes[B3D_Y] + iy_box) * num_boxes[B3D_X] + ix_box)
                                     as usize;
@@ -4342,14 +4361,16 @@ b %f %f c %.1f\n",
                     ind_max = ind;
                 }
             }
-            // `projStat[B3DMAX(0, indMax + 1)]` (`findsection.cpp:2403`) reads one past
-            // the array when the peak is last; that residue is taken as 0 here.
+            // BUGS.md, fixed in translation: `findsection.cpp:2403` is
+            // `projStat[B3DMAX(0, indMax + 1)]`, which reads one past the array
+            // when the peak is the last layer; `B3DMIN(numBoxes - 1, ...)` is meant.
             peak_mean = ((proj_stat[ind_max as usize]
                 + proj_stat[if 0 > ind_max - 1 { 0 } else { ind_max - 1 } as usize]
-                + proj_stat
-                    .get(if 0 > ind_max + 1 { 0 } else { ind_max + 1 } as usize)
-                    .copied()
-                    .unwrap_or(0.)) as f64
+                + proj_stat[if num_boxes[ti] - 1 < ind_max + 1 {
+                    num_boxes[ti] - 1
+                } else {
+                    ind_max + 1
+                } as usize]) as f64
                 / 3.) as f32;
             let i3 = (num_boxes[ti] - 3) as usize;
             edge_mean = ((proj_stat[0]
@@ -5015,7 +5036,13 @@ the edge of the volume",
                         xy_const = x_coeff * (x_col - xcen) + y_coeff * (y_col - ycen);
                         z_col =
                             ((z_slice - zcen - xy_const) / z_coeff + zcen) / binnings[ti] as f32;
-                        if z_col >= 0. && z_col <= num_boxes[ti] as f32 {
+                        // BUGS.md, fixed in translation: `findsection.cpp:2349,2779` accept
+                        // `zCol <= numBoxes`, so native interpolates towards box `iz + 1`
+                        // up to `numBoxes + 1`, past this scaling's SDs (heap residue
+                        // for the last scaling).  Only columns inside the box range
+                        // are sampled, and the upper box is clamped to the last one
+                        // (its weight `zfrac` is then 0).
+                        if z_col >= 0. && z_col <= (num_boxes[ti] - 1) as f32 {
                             let iz = z_col as i32;
                             zfrac = z_col - iz as f32;
                             let mut iz_box = if flipped { ilong } else { iz };
@@ -5031,9 +5058,9 @@ the edge of the volume",
                             self.m_proj_slice[num_in_slice] =
                                 ((1. - zfrac as f64) * this as f64) as f32;
 
-                            // See `analyze_high_sd` for the `iz + 1` read past the end.
-                            iz_box = if flipped { ilong } else { iz + 1 };
-                            iy_box = if flipped { iz + 1 } else { ilong };
+                            let iz_next = if iz + 1 < num_boxes[ti] { iz + 1 } else { iz };
+                            iz_box = if flipped { ilong } else { iz_next };
+                            iy_box = if flipped { iz_next } else { ilong };
                             box_ind = sds_base
                                 + ((iz_box * num_boxes[B3D_Y] + iy_box) * num_boxes[B3D_X] + ix_box)
                                     as usize;
