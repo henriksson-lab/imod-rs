@@ -1,0 +1,1 @@
+$clip median INPUTFILE x

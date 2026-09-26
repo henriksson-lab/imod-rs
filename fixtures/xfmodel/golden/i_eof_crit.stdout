@@ -1,9 +1,0 @@
- Image file (or Return to enter Xcen, Ycen directly):  Be SURE to enter CENTER coordinates, NOT NX and NY
- Xcen, Ycen:  Input model file:  Enter 0 to find transformations, 2 to find X/Y translations only,
-    3 to find translations and rotations only,
-    4 to find translation, rotation and mag change only,
-    1 to transform model, or -1 to back-transform model:  Model built on raw sections (0) or prealigned ones(1):  Name of old file of f transforms to edit (Return if none):  Name of new file of f transforms:  Enter / to find transforms for all section pairs,
-      or -999 to find transforms relative to a single section,
-      or a list of the section numbers to find transforms for
-         (enter number of second section of each pair, ranges are ok)
- 1 for full reports of deviations for sections with bad fits, 0 for none:  Enter criterion mean deviation and max deviation; full reports will be given      for sections with mean OR max greater than these criteria: 

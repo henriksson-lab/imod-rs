@@ -1,0 +1,44 @@
+# name	arguments (- for none)	stdin (printf escapes, - for none)
+tp_three	-model s1.mod -model s2.mod -model s3.mod -spacing 100	-
+#full	tp_three_neg	-model s1.mod -model s2.mod -model s3.mod -spacing -100 -extra 5	-
+tp_three_all	-model s1.mod -model s2.mod -model s3.mod -spacing 150 -extra 0 -scale 2 -angle 1.5 -zshift -10 -xtilt 0.7	-
+tp_three_noxtilt	-model s1.mod -model s2.mod -model s3.mod -spacing 150 -xtilt 2 -noxtilt	-
+tp_two_files	-model s1.mod -model s3.mod -spacing 80 -angle 0.5 -zshift 3	-
+tp_two_nospacing	-model s1.mod -model s3.mod	-
+tp_single	-model s1.mod	-
+#full	tp_single_opts	-model s2.mod -extra 3.5 -scale 0.5 -angle -2 -zshift 7 -xtilt 1	-
+tp_scaled	-model scaled.mod -scale 3	-
+tp_times	-model tm.mod -spacing 100	-
+#full	tp_times_opts	-model tm.mod -spacing -120 -xtilt 1 -angle 2 -zshift 4 -extra 1	-
+#full	tp_times_nosp	-model tm.mod	-
+tp_times_missing	-model tm_missing.mod	-
+tp_times_three	-model tm_three.mod -spacing 100	-
+tp_times_one	-model tm_one.mod -spacing 100	-
+tp_whole	-model whole.mod	-
+tp_whole_opts	-model whole.mod -xtilt 0.5 -angle 1 -zshift 2 -extra 4 -scale 2	-
+#full	tp_whole_noxtilt	-model whole.mod -noxtilt -xtilt 0.5	-
+tp_whole_obj	-model whole_obj.mod	-
+tp_whole_badsp	-model whole_badsp.mod	-
+tp_whole_nosep	-model whole_nosep.mod -spacing 200	-
+#full	tp_whole_nosep0	-model whole_nosep.mod	-
+#full	tp_whole_odd	-model whole_odd.mod	-
+tp_crossed	-model crossed.mod	-
+#full	tp_crossed_opts	-model crossed.mod -xtilt 0.3 -angle 0.2 -zshift 1 -scale 1.5	-
+tp_crossed_bad	-model crossed_bad.mod	-
+#full	tp_crossed_far	-model crossed_far.mod	-
+tp_three_pts	-model three_pts.mod	-
+tp_diag	-model diag.mod	-
+tp_steep	-model steep.mod	-
+tp_short	-model short.mod	-
+tp_cross	-model cross.mod	-
+tp_onecont	-model onecont.mod	-
+#full	tp_onepoint	-model onepoint.mod	-
+tp_nofile	-model nothere.mod	-
+tp_badfile	-model bad.mod	-
+tp_nomodel	-extra 3	-
+tp_help	-help	-
+#full	tp_multi_err	-model s1.mod -model steep.mod -spacing 10	-
+tp_interactive	-	2\n100\n3\ns1.mod\ns2.mod\ns3.mod\n
+tp_interactive1	-	2,0\n1\ns1.mod\n
+tp_interactive_eof	-	2\n100\n
+#full	tp_interactive_eof2	-	2\n100\n2\ns1.mod\n

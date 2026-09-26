@@ -1,0 +1,101 @@
+# imod-rs native golden manifest for fixtures/warpvol; see fixtures/README.md.
+# Regenerate with fixtures/regen-golden.sh warpvol; do not edit by hand.
+sha256 d8f830f53ec024a3f14be33eac3a790258fa698b18526ccedd03734795b5bf9a 8878 golden/w_1y.out.o.mrc
+text 2 golden/w_1y.rc
+0
+
+sha256 f16b944e6dde06e60c898568ae00b8422bf85c0aed46acca0f2a1d5597c0582f 1228 golden/w_1y.stdout
+sha256 323b4f4d8e7d0077d10b8167090b9a0df897735c7807b46a7709231ab3c9690e 25724 golden/w_2d.out.o.mrc
+text 2 golden/w_2d.rc
+0
+
+sha256 eac01e82844e31317ccd72370f0701845afb3dfb3e5ea7c9fcbc98d4cc9ab2ce 1228 golden/w_2d.stdout
+sha256 91529c741601cf51dca085c82d9ed800f743d4c618322b567462314a5cc3bc7d 25724 golden/w_3.out.o.mrc
+text 2 golden/w_3.rc
+0
+
+sha256 69a22593eb3c16747d49401d66bda38808b790a09be3467c1125ad76a6362b21 1227 golden/w_3.stdout
+text 2 golden/w_5.rc
+1
+
+sha256 f2b2f24a599905d911799eefb76ba477c04f1f9cfda7189dd6b170c3fb4165dc 1076 golden/w_5.stdout
+sha256 453317fc833713a481eb1b34cb3e84966a4a6ed39acee60d5b75e3c838d7c1b6 25724 golden/w_9.out.o.mrc
+text 2 golden/w_9.rc
+0
+
+sha256 30980bf9261a6a4c5fa66efd5790a5781e3939cbcf0ae65b89e59871f1d12e56 1227 golden/w_9.stdout
+sha256 80ef8f63493feeebccc1e653865ae781262e9d746611c032b3ff5e1948971d72 25724 golden/w_9def.out.o.mrc
+text 2 golden/w_9def.rc
+0
+
+sha256 30980bf9261a6a4c5fa66efd5790a5781e3939cbcf0ae65b89e59871f1d12e56 1227 golden/w_9def.stdout
+text 2 golden/w_bad.rc
+1
+
+sha256 d5ebe2c92007db3444673bbe39496261786628e4429be340e797bdc254b549a9 1084 golden/w_bad.stdout
+text 2 golden/w_badchunk.rc
+1
+
+sha256 7cef236d3222136e5a94839e2030efdf6fdc1d5abcb15e254e1e200cb66acf1a 1067 golden/w_badchunk.stdout
+sha256 bd630595d0b555336f68b34b08326a42ae13e0c0d7cca5c1e4169d58f8d014ff 25724 golden/w_drop.out.o.mrc
+text 2 golden/w_drop.rc
+0
+
+sha256 f55f58b961701ecc0ed571ae2aef89417cfa868e2768487fff66483561c048ba 1230 golden/w_drop.stdout
+text 2 golden/w_empty.rc
+2
+
+sha256 6aeda33cb520779bf7360fb029fe177e3ea472ae3c219da4081637f26d9190e7 1014 golden/w_empty.stdout
+sha256 0a789cfeb5534a32267183a53ef6f97abbaa2d1a4a120416716a43517f1a7df8 14751 golden/w_fill.out.f.txt
+text 2 golden/w_fill.rc
+0
+
+sha256 69b6f71da406f8f1f93a3dcbed0d73f6f2cda1065834545fdfc7721ee72fb2e1 1050 golden/w_fill.stdout
+sha256 e1f6ef0e2bedfd56f7eee7f4259ad17286c69fd977c8d8af871529d803fb2b9f 25724 golden/w_flip.out.o.mrc
+text 2 golden/w_flip.rc
+0
+
+sha256 10492e14d2cabbcf75ed8d0605eb9b50d7949fde5b4425f0f4f2f6872a89de1a 2732 golden/w_flip.stdout
+sha256 80ef8f63493feeebccc1e653865ae781262e9d746611c032b3ff5e1948971d72 25724 golden/w_interactive.out.o.mrc
+text 2 golden/w_interactive.rc
+0
+
+sha256 cd882ac24b7c1f494e142c5cc410661d381c8d85bb309b36e2cc8710a0d694f0 1475 golden/w_interactive.stdout
+sha256 680ab7c1601dc404db2ba449875f5e0f049529ed0c3ec3f0709ccb2cb7b599f2 271024 golden/w_mb.out.o.mrc
+text 2 golden/w_mb.rc
+0
+
+sha256 a50f6d2c4ab08ef6aecb935585fc98e58e050e27d22883afb7ec6313b655649b 1340 golden/w_mb.stdout
+sha256 01153cdc93228e240684466ebf22237508ee3d812f8d7889a13c2615c7faf261 271024 golden/w_mbdef.out.o.mrc
+text 2 golden/w_mbdef.rc
+0
+
+sha256 f4301ac6a7591554ca03a1d9e2b4413c2145e244f79ea26fba73ac70cfb3c872 1300 golden/w_mbdef.stdout
+text 2 golden/w_noout.rc
+0
+
+sha256 5d01e16bde214b80b3d124fc1e7798e77363fde4d99531a7e0b3a3460ba0eef0 1573 golden/w_noout.stdout
+text 2 golden/w_noxf.rc
+1
+
+sha256 2414b8cac8fa6248945bdf3e219b201f9492e4ed818c4fc8fe7f67a0133a4b4d 1033 golden/w_noxf.stdout
+sha256 b13cdcc466537bc0ed767a0b8de449abf728983362d07a66ec87b461d79bbb9b 5509 golden/w_patch.out.p.txt
+text 2 golden/w_patch.rc
+0
+
+sha256 acf164a11334e590608ea1a4d262c778d4abd5b8a2c11fc862dc4504cd89a331 1050 golden/w_patch.stdout
+sha256 b5875c0148188d6db23c0e6725067291a4b0ee907421474fea53a45e7668b1f9 25724 golden/w_scale.out.o.mrc
+text 2 golden/w_scale.rc
+0
+
+sha256 30980bf9261a6a4c5fa66efd5790a5781e3939cbcf0ae65b89e59871f1d12e56 1227 golden/w_scale.stdout
+sha256 8d95c362da58930ea1b911eb841905ed8fb042babb41eb9313bb29482e1a63aa 13024 golden/w_size.out.o.mrc
+text 2 golden/w_size.rc
+0
+
+sha256 30980bf9261a6a4c5fa66efd5790a5781e3939cbcf0ae65b89e59871f1d12e56 1227 golden/w_size.stdout
+sha256 12bdbe2aa77dafc69f3955c73761575f3e3d7c7dfeafec008a33317af7d6fbff 8878 golden/w_small.out.o.mrc
+text 2 golden/w_small.rc
+0
+
+sha256 83a27ad733f1f4de44d0f00ca11676dbc565c010ee27bbe6944a261a0e3cee6d 1231 golden/w_small.stdout

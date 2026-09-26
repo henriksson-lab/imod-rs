@@ -1,0 +1,246 @@
+# imod-rs native golden manifest for fixtures/findbeads3d; see fixtures/README.md.
+# Regenerate with fixtures/regen-golden.sh findbeads3d; do not edit by hand.
+sha256 f72e0a2419cee2bff595e6820a263a095163d205354a148fafa0a93b2b5b6a22 952 defined/angle.out
+text 2 defined/angle.rc
+0
+
+sha256 3e3f15cb067992d6113392c7d0a72a6087733c16cdd779a1e6795f6c01232b7a 988 defined/angle/o.mod
+sha256 02fba1bdf800e912fb2177430b2cc79f23cbabf7eb7d553c098a5d22a9317537 985 defined/anglecap.out
+text 2 defined/anglecap.rc
+0
+
+sha256 bb5b1cbb14ce21f0bebed3cea670e283da7fde481568aa66f7b97e0019bd9933 812 defined/anglecap/o.mod
+sha256 b89adc02edcdffa59f627aa579c0f56557971f6869cb1060a9c230a6032402d9 1186 defined/annulus.out
+text 2 defined/annulus.rc
+0
+
+sha256 3267778052a8bfd6a14fb2d244607913f5f4085d5aa356d20f89d36920dd36d3 1120 defined/annulus/o.mod
+sha256 67e493b946f08eda7a7fbe7296d0810cbbc81b300d5435564a88711db0d250a8 1704 defined/annulus/t.txt
+sha256 ebe41b2c93f882f078f9dafe3fef9b405ff5fb81b408c4226165e9abc2b71f2f 987 defined/binexp.out
+text 2 defined/binexp.rc
+0
+
+sha256 65fbc882f664eee5fb8528e8230bb5b7fcaa22471d6a4ed5bb85759d27c47f39 1120 defined/binexp/o.mod
+sha256 926c3a61184d5f6354841a7c16c85e6429cbbc44de057003db03fb6575e0a353 927 defined/fallback.out
+text 2 defined/fallback.rc
+0
+
+sha256 65fbc882f664eee5fb8528e8230bb5b7fcaa22471d6a4ed5bb85759d27c47f39 1120 defined/fallback/o.mod
+sha256 6c6f3aca443bb80ee0af18fbf496292c3c1746820567c5204ef2f3616d418377 923 defined/guessmax.out
+text 2 defined/guessmax.rc
+0
+
+sha256 d268bea84a49e66a738c68974d3790d9c14035acfcb465b24816112e2e0c1eda 988 defined/guessmax/o.mod
+sha256 bd616dd572df28fd2aed4f93ab7b5b8861cd494aaf428b8dbbe76fb5943a40a7 927 defined/light.out
+text 2 defined/light.rc
+0
+
+sha256 174049d842df8efcfd5e6956f4e9580ca59893a7dba4f48a0c6e2824bfe9a8d9 2748 defined/light/c.mod
+sha256 d6caee55770812bcf0ebc6117aa0da53866fdd7ad69f01167c63cf256a056336 988 defined/light/o.mod
+sha256 54e614fd2d73b8ba530f046c7d7ea4dd976bb6928034c9aa296240f0f07b9ad7 923 defined/minmax.out
+text 2 defined/minmax.rc
+0
+
+sha256 9161cb92af5441f78fbfea417d5e7db89f03303327a7889da5ce2f8a8328de0b 944 defined/minmax/o.mod
+sha256 926c3a61184d5f6354841a7c16c85e6429cbbc44de057003db03fb6575e0a353 927 defined/nonopt.out
+text 2 defined/nonopt.rc
+0
+
+sha256 65fbc882f664eee5fb8528e8230bb5b7fcaa22471d6a4ed5bb85759d27c47f39 1120 defined/nonopt/o.mod
+sha256 bd616dd572df28fd2aed4f93ab7b5b8861cd494aaf428b8dbbe76fb5943a40a7 927 defined/nooutput.out
+text 2 defined/nooutput.rc
+0
+
+sha256 926c3a61184d5f6354841a7c16c85e6429cbbc44de057003db03fb6575e0a353 927 defined/param.out
+text 2 defined/param.rc
+0
+
+sha256 65fbc882f664eee5fb8528e8230bb5b7fcaa22471d6a4ed5bb85759d27c47f39 1120 defined/param/p.mod
+sha256 8d5bf68faa6dbfd95f14419cbaf5fc761e10be7667772329d86fdd82b1d544db 3144 defined/param/pc.mod
+sha256 8f6634cca1ced7338c4335c8e21e506262cb763da37314047a72642416fb3e05 925 defined/peakmin.out
+text 2 defined/peakmin.rc
+0
+
+sha256 e412a4e4ba7191aff69d7560d4a20ef255baf75c072dd9a8ecee41df26739ac7 988 defined/peakmin/o.mod
+sha256 926c3a61184d5f6354841a7c16c85e6429cbbc44de057003db03fb6575e0a353 927 defined/plain.out
+text 2 defined/plain.rc
+0
+
+sha256 8d5bf68faa6dbfd95f14419cbaf5fc761e10be7667772329d86fdd82b1d544db 3144 defined/plain/c.mod
+sha256 65fbc882f664eee5fb8528e8230bb5b7fcaa22471d6a4ed5bb85759d27c47f39 1120 defined/plain/o.mod
+sha256 9a74bcf72aee18819e7a18c36cff5f139e666de6e0860bbcc562eaa10b56f481 795 defined/spacing.out
+text 2 defined/spacing.rc
+1
+
+sha256 04f11d32b9b1c12d9f62f170c0815806801ad37cdf51d6b2a638aa5b4fcc62a1 876 defined/storefrac.out
+text 2 defined/storefrac.rc
+0
+
+sha256 65fbc882f664eee5fb8528e8230bb5b7fcaa22471d6a4ed5bb85759d27c47f39 1120 defined/storefrac/o.mod
+sha256 ea8adac7a41d4cbd5c253b756e5b4cf8f3b0d9f57a4cd071156ca0749f2d7c20 887 defined/storeneg.out
+text 2 defined/storeneg.rc
+0
+
+sha256 1d4083952c7bfb3546d5715390450cd3a06308e3e2f6c47a65d4b9ea8b4d961f 1428 defined/storeneg/o.mod
+sha256 fdcdcc044c622fb77bfa8f861ad63dc39edc80ed3a47296dda19b9c21397b02e 875 defined/storeone.out
+text 2 defined/storeone.rc
+0
+
+sha256 e0ad908de847ed8397af4848fa80b82fbe9c0d066a7edee82f762cd1156ac339 592 defined/storeone/o.mod
+sha256 1993c83f7411ea6d93be692f63a7356660a00b2f34bc25b75a9f908b71ee335f 1187 defined/template.out
+text 2 defined/template.rc
+0
+
+sha256 d0de4f9376610a33bd2e8a1cd03f15139dd3a48b4660fd32fe2938343a8aeb1a 1208 defined/template/o.mod
+sha256 0f727066673b8fc1137ac198f9068baf40fb3109b3c7b3ab69665ad4922a5e5d 903 defined/template/t.txt
+sha256 e69466ada5a699ca842e4afed8087f843a1f77354d50d14f440e0c1792a5af07 927 defined/thrfrac.out
+text 2 defined/thrfrac.rc
+0
+
+sha256 791789b9e3432d0b77ce4032bd79fd58a21f5e4bf1dcb9f8f914c9e452d549c4 1164 defined/thrfrac/o.mod
+sha256 b697b8a7a888d844a510f1977c70dbe9e67b346a30b91d936fb75f7dfa96f29b 926 defined/thrneg.out
+text 2 defined/thrneg.rc
+0
+
+sha256 062820c9052982efc79a7bde287140665e7171713b9f11566d002e46552ecf28 1120 defined/thrneg/o.mod
+sha256 b956340438aa12491e54f3c0e855ddc38975af37bc9c309c161f8655999074e5 925 defined/thrnum.out
+text 2 defined/thrnum.rc
+0
+
+sha256 df5fbd44ff9656fc0cfa388955ec16d85c9d42903b766843d64a72d574d8bc0e 1120 defined/thrnum/o.mod
+sha256 62359dce749a6d13eb33d25e7130d62fc9a1cda2205824ec8e245f0d6dc68355 952 defined/tilt.out
+text 2 defined/tilt.rc
+0
+
+sha256 3e3f15cb067992d6113392c7d0a72a6087733c16cdd779a1e6795f6c01232b7a 988 defined/tilt/o.mod
+sha256 9c94be0c20b13322639542b2f4f96298e3f460e0ca935aa104da23ee61bd162b 1945 defined/verbose2.out
+text 2 defined/verbose2.rc
+0
+
+sha256 65fbc882f664eee5fb8528e8230bb5b7fcaa22471d6a4ed5bb85759d27c47f39 1120 defined/verbose2/o.mod
+sha256 3956ea631335460809a6c2f5d25902cf727d516ae3c07f351d448a79e951cfc1 5024 defined/verbose2/voladded.st
+sha256 9f14f80a2d3dfd2c3d3df438589c421095a0fd3addfabb146c2946c645cf22fe 5024 defined/verbose2/volsum.st
+sha256 b649ea624db82bbb2d124b1b43eb2da9959d88779387ca62a46fb145a061d008 5347 defined/verbose3.out
+text 2 defined/verbose3.rc
+0
+
+sha256 65fbc882f664eee5fb8528e8230bb5b7fcaa22471d6a4ed5bb85759d27c47f39 1120 defined/verbose3/o.mod
+sha256 3956ea631335460809a6c2f5d25902cf727d516ae3c07f351d448a79e951cfc1 5024 defined/verbose3/voladded.st
+sha256 9f14f80a2d3dfd2c3d3df438589c421095a0fd3addfabb146c2946c645cf22fe 5024 defined/verbose3/volsum.st
+sha256 bd616dd572df28fd2aed4f93ab7b5b8861cd494aaf428b8dbbe76fb5943a40a7 927 defined/ylong.out
+text 2 defined/ylong.rc
+0
+
+sha256 d6caee55770812bcf0ebc6117aa0da53866fdd7ad69f01167c63cf256a056336 988 defined/ylong/o.mod
+text 408 golden/e_angletilt.out
+Input volume: fb_f.mrc
+ Dimensions:     53     47     29   Pixel size:         1          1          1
+Mode:  0               Min, max, mean:            0          255       150.34
+raw2mrc: Converted to mrc format.                       26-Sep-26  01:28:28
+NEWSTACK: Images copied             , densities scaled  26-Sep-26  22:52:53
+
+ERROR: findbeads3d - You cannot enter both an angle range and a tilt file
+
+text 2 golden/e_angletilt.rc
+1
+
+sha256 940c4ad5f1e4f826e895e29af7f8a90ccf2c5fed19e7a933231506ec71c8d03b 689 golden/e_annulus.out
+text 2 golden/e_annulus.rc
+1
+
+text 380 golden/e_binning.out
+Input volume: fb_f.mrc
+ Dimensions:     53     47     29   Pixel size:         1          1          1
+Mode:  0               Min, max, mean:            0          255       150.34
+raw2mrc: Converted to mrc format.                       26-Sep-26  01:28:28
+NEWSTACK: Images copied             , densities scaled  26-Sep-26  22:52:53
+
+ERROR: findbeads3d - Binning must be positive
+
+text 2 golden/e_binning.rc
+1
+
+text 399 golden/e_expanded.out
+Input volume: fb_f.mrc
+ Dimensions:     53     47     29   Pixel size:         1          1          1
+Mode:  0               Min, max, mean:            0          255       150.34
+raw2mrc: Converted to mrc format.                       26-Sep-26  01:28:28
+NEWSTACK: Images copied             , densities scaled  26-Sep-26  22:52:53
+
+ERROR: findbeads3d - Entry for -expanded factor must be positive
+
+text 2 golden/e_expanded.rc
+1
+
+text 403 golden/e_max.out
+Input volume: fb_f.mrc
+ Dimensions:     53     47     29   Pixel size:         1          1          1
+Mode:  0               Min, max, mean:            0          255       150.34
+raw2mrc: Converted to mrc format.                       26-Sep-26  01:28:28
+NEWSTACK: Images copied             , densities scaled  26-Sep-26  22:52:53
+
+ERROR: findbeads3d - The -MaxNumBeads entry is negative or too small
+
+text 2 golden/e_max.rc
+1
+
+text 417 golden/e_narrow.out
+Input volume: fb_f.mrc
+ Dimensions:     53     47     29   Pixel size:         1          1          1
+Mode:  0               Min, max, mean:            0          255       150.34
+raw2mrc: Converted to mrc format.                       26-Sep-26  01:28:28
+NEWSTACK: Images copied             , densities scaled  26-Sep-26  22:52:53
+
+ERROR: findbeads3d - An angular range of 20.00 degrees is too low for finding gold
+
+text 2 golden/e_narrow.rc
+1
+
+sha256 4bb1d96a7ceeda054f82213b1e3eb1e1c865bfd684c2747bdda9adf04cf0f462 3036 golden/e_noinput.out
+text 2 golden/e_noinput.rc
+0
+
+text 385 golden/e_nosize.out
+Input volume: fb_f.mrc
+ Dimensions:     53     47     29   Pixel size:         1          1          1
+Mode:  0               Min, max, mean:            0          255       150.34
+raw2mrc: Converted to mrc format.                       26-Sep-26  01:28:28
+NEWSTACK: Images copied             , densities scaled  26-Sep-26  22:52:53
+
+ERROR: findbeads3d - Bead diameter must be entered
+
+text 2 golden/e_nosize.rc
+1
+
+text 384 golden/e_notilt.out
+Input volume: fb_f.mrc
+ Dimensions:     53     47     29   Pixel size:         1          1          1
+Mode:  0               Min, max, mean:            0          255       150.34
+raw2mrc: Converted to mrc format.                       26-Sep-26  01:28:28
+NEWSTACK: Images copied             , densities scaled  26-Sep-26  22:52:53
+
+ERROR: findbeads3d - Opening tilt file nofile.tlt
+
+text 2 golden/e_notilt.rc
+1
+
+text 431 golden/e_range.out
+Input volume: fb_f.mrc
+ Dimensions:     53     47     29   Pixel size:         1          1          1
+Mode:  0               Min, max, mean:            0          255       150.34
+raw2mrc: Converted to mrc format.                       26-Sep-26  01:28:28
+NEWSTACK: Images copied             , densities scaled  26-Sep-26  22:52:53
+
+ERROR: findbeads3d - Coordinate min and max values are out of range or define too small a volume
+
+text 2 golden/e_range.rc
+1
+
+sha256 274d357c20a752b228a9c40a4d2fd79de008895d572176cebef6288f2ae42046 694 golden/e_tempedge.out
+text 2 golden/e_tempedge.rc
+1
+
+sha256 4bb1d96a7ceeda054f82213b1e3eb1e1c865bfd684c2747bdda9adf04cf0f462 3036 golden/help.out
+text 2 golden/help.rc
+0
+

@@ -1,0 +1,149 @@
+# imod-rs native golden manifest for fixtures/findsection; see fixtures/README.md.
+# Regenerate with fixtures/regen-golden.sh findsection; do not edit by hand.
+sha256 9547f0dd89bd31e7ca47d7ad381fecf5a1a9e34eee4b0dbc64408d73ab84338b 572 golden/all.out
+text 2 golden/all.rc
+0
+
+sha256 ee0e2af495665795734c58bf1b9820fd54fc9a991b10e7cd3eb1e1f294e79b43 704 golden/all/p.mod
+sha256 dc97ef1f5c10e92bdcf76bf70ba31900c149fa9548c675f1defc481962477bed 916 golden/all/pt0-colbound.mod
+sha256 d3a99637aef0cc56812dafa1e03eb15ac53c9ae7ccd58f0fc6df87779bbb0670 916 golden/all/pt0-smooth.mod
+sha256 6ec3164b0571c3d349aece6a34ea891276d2dde87de58c01858bab1f309358f3 752 golden/all/s.mod
+sha256 2fe9a74f796799bb755580bc5e228d1f673b90e3cc837cd4aa7518dd5885eac4 884 golden/bead.out
+text 2 golden/bead.rc
+0
+
+text 375 golden/bead_pct.out
+mBeadExclPctlSpread set to 0.1
+mBeadExclPctlThick set to 0.05
+mBeadWeightFac set to 0.6
+               center   center SDs      edge     edge SDs      distinct-
+scale  binning  mean   median  MADN     mean   median  MADN      ness
+  1    1,1,1     73.5    3.61  0.08      73.3    3.61  0.08     0.250
+Thickness = 21.0  boundaries (from 1) = 5 26  alpha = -1.52  beta = -2.35
+
+text 2 golden/bead_pct.rc
+0
+
+sha256 776d2f709729f3749a20671e9fc8122c9770a5cb77bf4af87df104d3dcfe4b10 792 golden/bead_pct/p.mod
+text 510 golden/binning.out
+               center   center SDs      edge     edge SDs      distinct-
+scale  binning  mean   median  MADN     mean   median  MADN      ness
+  1    1,1,1      131    32.7   3.1        73    13.0   0.6     23.78
+  2    2,2,1      130    25.5   5.5        73     6.5   0.7     11.17
+Selected scaling # 1 as the best one for analysis
+Median Z values of surfaces, numbered from 1, are: 9  22
+Z limits for autopatchfit combine, numbered from 1, are: 8  23
+Absolute limits of surfaces, numbered from 1, are: 8  23
+
+text 2 golden/binning.rc
+0
+
+text 76 golden/err_multihigh.out
+ERROR: findsection - You cannot analyze for high SD with multiple tomograms
+
+text 2 golden/err_multihigh.rc
+1
+
+text 117 golden/err_noref.out
+ERROR: findsection - Bead model does not contain coordinate information needed to transform to volume being analyzed
+
+text 2 golden/err_noref.rc
+1
+
+text 104 golden/err_nosamples.out
+ERROR: findsection - You must specify the number of samples for a boundary model from a single tomogram
+
+text 2 golden/err_nosamples.rc
+1
+
+sha256 191cd3c14310070a4f176d66bcf2d82f84fdac842169f54be4c9fa72e8dc48db 3421 golden/err_nosize.out
+text 2 golden/err_nosize.rc
+0
+
+text 81 golden/err_range.out
+ERROR: findsection - Starting or ending X coordinate outside of range for volume
+
+text 2 golden/err_range.rc
+1
+
+text 452 golden/flipped.out
+               center   center SDs      edge     edge SDs      distinct-
+scale  binning  mean   median  MADN     mean   median  MADN      ness
+  1    1,1,1      124    30.2   2.4        61    13.2   0.7     18.20
+WARNING: With a block size of 20, there can be only 2 samples
+Median Z values of surfaces, numbered from 1, are: 7  19
+Z limits for autopatchfit combine, numbered from 1, are: 6  19
+Absolute limits of surfaces, numbered from 1, are: 6  19
+
+text 2 golden/flipped.rc
+0
+
+sha256 85da50b7a521a16458d1b5e27543da412ce2c94eb7ff1127a755dd228e4476cf 704 golden/flipped/p.mod
+sha256 0d5a929970528df553a4209aa870bd45e0ac4c065492ab932ecbd154c24e560e 868 golden/flipped/pt0-colbound.mod
+sha256 0d5a929970528df553a4209aa870bd45e0ac4c065492ab932ecbd154c24e560e 868 golden/flipped/pt0-smooth.mod
+sha256 f610f7894517f54770686dc2360225c1fe01bf185289dc8f760d5ed63b98469f 704 golden/flipped/s.mod
+text 287 golden/high.out
+               center   center SDs      edge     edge SDs      distinct-
+scale  binning  mean   median  MADN     mean   median  MADN      ness
+  1    1,1,1     73.5    3.61  0.08      73.3    3.61  0.08     0.250
+Thickness = 23.1  boundaries (from 1) = 4 27  alpha = -1.36  beta = -2.47
+
+text 2 golden/high.rc
+0
+
+sha256 423e5b1fa54639e4ea5507f89bfa2cad6521d8f8b353f06cbad05628ec14b233 792 golden/high/p.mod
+sha256 ec211460b58c081fcfb7967d7a963d6b04872ba59a7008cbb19f7fce1923c4a7 5452 golden/high/pt0-highSDbound.mod
+sha256 c6ebb86c3372a7bcb3d5f3eb6172b49b0de7d7fd836e0474b95e96d2c5a351ae 1052 golden/lowest.out
+text 2 golden/lowest.rc
+0
+
+text 213 golden/multi.out
+               center   center SDs      edge     edge SDs      distinct-
+scale  binning  mean   median  MADN     mean   median  MADN      ness
+  1    1,1,1      124    31.2   2.8        61    13.1   0.9     14.48
+
+text 2 golden/multi.rc
+0
+
+sha256 c1b135eedd90161c3804a0a3c4c022a9f5605f9a88301f9a1ae313cd7601d0c2 704 golden/multi/p.mod
+sha256 5e893dfa02953b392dac0e3671eb481ebb47c5b56c66d0c3dad5c63a2ebe6d35 868 golden/multi/pt0-colbound.mod
+sha256 5e893dfa02953b392dac0e3671eb481ebb47c5b56c66d0c3dad5c63a2ebe6d35 868 golden/multi/pt0-smooth.mod
+sha256 5e893dfa02953b392dac0e3671eb481ebb47c5b56c66d0c3dad5c63a2ebe6d35 868 golden/multi/pt1-colbound.mod
+sha256 5e893dfa02953b392dac0e3671eb481ebb47c5b56c66d0c3dad5c63a2ebe6d35 868 golden/multi/pt1-smooth.mod
+text 390 golden/nonopt.out
+               center   center SDs      edge     edge SDs      distinct-
+scale  binning  mean   median  MADN     mean   median  MADN      ness
+  1    1,1,1      131    32.7   3.1        73    13.0   0.6     23.78
+Median Z values of surfaces, numbered from 1, are: 9  22
+Z limits for autopatchfit combine, numbered from 1, are: 8  23
+Absolute limits of surfaces, numbered from 1, are: 8  23
+
+text 2 golden/nonopt.rc
+0
+
+text 390 golden/separate.out
+               center   center SDs      edge     edge SDs      distinct-
+scale  binning  mean   median  MADN     mean   median  MADN      ness
+  1    1,1,1      131    32.7   3.1        73    13.0   0.6     23.78
+Median Z values of surfaces, numbered from 1, are: 9  22
+Z limits for autopatchfit combine, numbered from 1, are: 8  23
+Absolute limits of surfaces, numbered from 1, are: 8  23
+
+text 2 golden/separate.rc
+0
+
+sha256 587d58965c8fb4700b90ee48cbedd7ae444afef7a13d31e2276c8532e68a4644 792 golden/separate/p.mod
+sha256 f7d213e96e7ee03a66b6134d066ef8ea94f65c514d9c4b2a7277ed8844f2e054 680 golden/tuned.out
+text 2 golden/tuned.rc
+0
+
+sha256 7f5db34ac7f3ea23f85800f542cf382ca05599b9a25f1a55aba76cd99f49603f 912 golden/volume.out
+text 2 golden/volume.rc
+0
+
+sha256 2f43617129eab72103f4f90f69427bf5c667a46c0eda5deb5e59a72a5be61396 23644 golden/volume/vol0-scale0.SDs
+sha256 63d6febab4150126642427929c6944aeb425ab1331f0143c8b72bd63c63c2f93 4504 golden/volume/vol0-scale0.colmed
+sha256 747d1e986008056aa37eaa2e79c0393beea4a1d022388f8285b732da11ffa622 23644 golden/volume/vol0-scale0.means
+sha256 035376bcb977267b5d8dc0cbe992541c5d3b0edeb3b814b9409b1ac70e38a3cb 12724 golden/volume/vol0-scale1.SDs
+sha256 1f2f1e8e76e54cf1be991c44dfe8140b8564d0551ef7a37f02838c57ab878def 2824 golden/volume/vol0-scale1.colmed
+sha256 95670fd7a1cf27bc340987f417307d549bbf8364822b18d7f01f598280aeae2f 12724 golden/volume/vol0-scale1.means

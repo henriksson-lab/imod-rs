@@ -1,0 +1,753 @@
+# imod-rs native golden manifest for fixtures/.; see fixtures/README.md.
+# Regenerate with fixtures/regen-golden.sh .; do not edit by hand.
+text 427 model-closed-contours.c.txt
+# MODEL model-closed-contours.mod
+# NAME  view-fixture
+# PIX SCALE:  x = 1
+#             y = 1
+#             z = 1
+# PIX SIZE      = 1.5
+# UNITS: pixels
+
+#Obj       Cyl. Vol      Cont Vol   Vol Inside Mesh   Mesh Surf              Center
+#--------------------------------------------------------------------------------------------
+   1        1143.12             0         121.5       191.648      24.72     18.02      0.50
+
+
+
+text 725 model-closed-contours.e.txt
+# MODEL model-closed-contours.mod
+# NAME  view-fixture
+# PIX SCALE:  x = 1
+#             y = 1
+#             z = 1
+# PIX SIZE      = 1.5
+# UNITS: pixels
+
+
+OBJECT 1
+NAME:  clipped object
+contour     center (pixels)                 axes (pixels)        eccen-   long
+   #      x        y        z       semi-major   semi-minor  tricity  angle
+   1     19.9     16.0      0.0         17.697       7.2562   0.9121  180.00
+   2     29.9     20.0      1.0          12.97       8.6228   0.7470   90.00
+Mean                                    15.334       7.9395   0.8295  135.00
+ SD                                     3.3429      0.96631   0.1167   63.64
+WARNING: The range of angles is 90 degrees and the mean may be inaccurate
+
+
+
+text 206 model-closed-contours.r.txt
+# MODEL model-closed-contours.mod
+# NAME  view-fixture
+# PIX SCALE:  x = 1
+#             y = 1
+#             z = 1
+# PIX SIZE      = 1.5
+# UNITS: pixels
+
+OBJECT 1
+NAME:  clipped object
+1 4.9027
+2 5.08482
+
+
+
+text 785 model-view-clip-label.F.txt
+# MODEL model-view-clip-label.mod
+# NAME  view-fixture
+# PIX SCALE:  x = 1
+#             y = 1
+#             z = 1
+# PIX SIZE      = 1.5
+# UNITS: pixels
+
+Object # 1:
+clipped object
+	Number of Contours = 2
+	Number of Contours with Data = 2
+	Number of Meshes   = 1
+	Number of Surfaces = 2
+	Color  = (Red, Green, Blue, Alpha) = (0.25, 0.5, 0.75, 0.04)
+	Ambient Light  = 102
+	Diffuse Light  = 255
+	Specular Light = 127
+	Shininess      = 4
+
+	Bounding Box   = { (1, 2, 0), (9, 7, 1)}
+	Center         = (5.21068, 3.78932, 0.00284697)
+	Cylinder Volume         = 47.25 pixels^3
+	Volume Inside Mesh      = 121.5 pixels^3
+	Mesh Surface Area       = 191.648 pixels^2
+	Clip 0 Normal    = (0, 0, -1)
+	Clip 0 Point     = (-1, -2, -3)
+	Clip 1 Normal    = (1, 0, 0)
+	Clip 1 Point     = (-4, -5, -6)
+
+
+
+
+text 434 model-view-clip-label.ascii.c.txt
+# MODEL model-view-clip-label.ascii.txt
+# NAME  IMOD-NewModel
+# PIX SCALE:  x = 1
+#             y = 1
+#             z = 1
+# PIX SIZE      = 1.5
+# UNITS: pixels
+
+#Obj       Cyl. Vol      Cont Vol   Vol Inside Mesh   Mesh Surf              Center
+#--------------------------------------------------------------------------------------------
+   1              0             0         121.5             0       5.21      3.79      0.00
+
+
+
+text 1283 model-view-clip-label.ascii.txt
+# MODEL model-view-clip-label.mod
+# NAME  view-fixture
+# PIX SCALE:  x = 1
+#             y = 1
+#             z = 1
+# PIX SIZE      = 1.5
+# UNITS: pixels
+
+# imod ascii file version 2.0
+
+imod 1
+max 64 48 20
+offsets 0 0 0
+angles 0 0 0
+scale 1 1 1
+mousemode  1
+drawmode   1
+b&w_level  0,255
+resolution 3
+threshold  128
+pixsize    1.5
+units      pixels
+flipped    0
+currentview  1
+view 1
+viewfovy  45
+viewcnear 0
+viewcfar  1
+viewflags 1
+viewtrans 0 0 0
+viewrot 0 0 0
+viewlight 0.5 0.5
+depthcue 0.2 0.8
+viewlabel fixture view
+globalclips 2 3 1 0
+0 0 -1 -16 -17 -18
+0 -1 0 -19 -20 -21
+
+object 0 2 1
+name clipped object
+color 0.25 0.5 0.75 4
+Fillcolor 10 20 30
+scattered
+linewidth 1
+surfsize  2
+pointsize 7
+axis      0
+drawmode  1
+width2D   2
+symbol    1
+symsize   3
+symflags  0
+ambient   102
+diffuse   255
+specular  127
+shininess 4
+obquality 3
+valblack  0
+valwhite  255
+meshthick 0
+matflags2 0
+objclips 2 3 0 1
+0 0 -1 -1 -2 -3
+1 0 0 -4 -5 -6
+contour 0 1 3
+1 2 0
+5 6 0
+9 3 0
+contour 1 2 2
+2 4 1
+8 7 1
+mesh 0 24 27
+0 0 -36
+0 0 0
+0 0 -36
+0 6 0
+0 0 -36
+6 0 0
+0 -36 0
+0 0 0
+0 -36 0
+6 0 0
+0 -36 0
+0 0 6
+-36 0 0
+0 0 0
+-36 0 0
+0 0 6
+-36 0 0
+0 6 0
+36 36 36
+6 0 0
+36 36 36
+0 6 0
+36 36 36
+0 0 6
+-23
+0
+1
+2
+3
+4
+5
+6
+7
+8
+9
+10
+11
+12
+13
+14
+15
+16
+17
+18
+19
+20
+21
+22
+23
+-22
+-1
+Meshsurf 1
+# end of IMOD model
+
+
+
+text 427 model-view-clip-label.c.txt
+# MODEL model-view-clip-label.mod
+# NAME  view-fixture
+# PIX SCALE:  x = 1
+#             y = 1
+#             z = 1
+# PIX SIZE      = 1.5
+# UNITS: pixels
+
+#Obj       Cyl. Vol      Cont Vol   Vol Inside Mesh   Mesh Surf              Center
+#--------------------------------------------------------------------------------------------
+   1              0             0         121.5             0       5.21      3.79      0.00
+
+
+
+text 397 model-view-clip-label.i.txt
+# MODEL model-view-clip-label.mod
+# NAME  view-fixture
+# PIX SCALE:  x = 1
+#             y = 1
+#             z = 1
+# PIX SIZE      = 1.5
+# UNITS: pixels
+
+OBJECT 1
+NAME:  clipped object
+       2 contours
+       object uses scattered points.
+       color (red, green, blue) = (0.25, 0.5, 0.75)
+
+
+	Total cylinder volume = 47.25
+	Total volume inside mesh = 121.5
+	Total mesh surface area = 191.648
+
+
+
+
+text 549 model-view-clip-label.s.txt
+# MODEL model-view-clip-label.mod
+# NAME  view-fixture
+# PIX SCALE:  x = 1
+#             y = 1
+#             z = 1
+# PIX SIZE      = 1.5
+# UNITS: pixels
+
+
+#Object 1 data, clipped object
+#Surface : Contours,  Cyl. Volume,  Cont. Volume,  Mesh Volume,  Mesh Surface,  Max Extent
+      0          0              0             0             0             0             0
+      1          1          47.25             0         121.5             0       12.0934
+      2          1              0             0             0             0       10.0623
+
+
+
+text 397 model-view-clip-label.t1.txt
+# MODEL model-view-clip-label.mod
+# NAME  view-fixture
+# PIX SCALE:  x = 1
+#             y = 1
+#             z = 1
+# PIX SIZE      = 1.5
+# UNITS: pixels
+
+OBJECT 1
+NAME:  clipped object
+       2 contours
+       object uses scattered points.
+       color (red, green, blue) = (0.25, 0.5, 0.75)
+
+
+	Total cylinder volume = 47.25
+	Total volume inside mesh = 121.5
+	Total mesh surface area = 50.3827
+
+
+
+
+text 683 model-view-clip-label.verbose.txt
+# MODEL model-view-clip-label.mod
+# NAME  view-fixture
+# PIX SCALE:  x = 1
+#             y = 1
+#             z = 1
+# PIX SIZE      = 1.5
+# UNITS: pixels
+
+OBJECT 1
+NAME:  clipped object
+       2 contours
+       object uses scattered points.
+       color (red, green, blue) = (0.25, 0.5, 0.75)
+
+	CONTOUR #1,1,1  3 points
+	contour label : "c0"
+	  0 : "first point label"
+.
+		x	y	z
+		1	2	0
+		5	6	0
+		9	3	0
+		Center of Mass     = (5, 3.66667, 0) in pixel coords.
+	CONTOUR #2,1,2  2 points
+	contour label : "c1"
+	  0 : "first point label"
+.
+		x	y	z
+		2	4	1
+		8	7	1
+		Center of Mass     = (5, 5.5, 1) in pixel coords.
+	Total volume inside mesh = 121.5
+	Total mesh surface area = 191.648
+
+
+
+
+text 398 model-view-clip-label.x05.txt
+# MODEL model-view-clip-label.mod
+# NAME  view-fixture
+# PIX SCALE:  x = 1
+#             y = 1
+#             z = 1
+# PIX SIZE      = 1.5
+# UNITS: pixels
+
+OBJECT 1
+NAME:  clipped object
+       2 contours
+       object uses scattered points.
+       color (red, green, blue) = (0.25, 0.5, 0.75)
+
+
+	Total cylinder volume = 23.625
+	Total volume inside mesh = 121.5
+	Total mesh surface area = 141.265
+
+
+
+
+text 549 model-view-clip-label.x05s.txt
+# MODEL model-view-clip-label.mod
+# NAME  view-fixture
+# PIX SCALE:  x = 1
+#             y = 1
+#             z = 1
+# PIX SIZE      = 1.5
+# UNITS: pixels
+
+
+#Object 1 data, clipped object
+#Surface : Contours,  Cyl. Volume,  Cont. Volume,  Mesh Volume,  Mesh Surface,  Max Extent
+      0          0              0             0             0             0             0
+      1          1         23.625             0         121.5             0       12.0934
+      2          1              0             0             0             0       10.0623
+
+
+
+text 915 mrcsec-mode0.out.txt
+li xmin 0 xmax 20 ymin 0 ymax 12 mode 0
+rc=0 sec n=273 sum=11733627092451631214 first=accececbe5dacad8
+rc=0 secB n=273 sum=11733627092451631214 first=accececbe5dacad8
+rc=1 secU n=273 sum=0 first=0000000000000000
+rc=0 secF n=273 sum=10143505491513654780 first=00002c4300004e43
+rc=0 z n=273 sum=11733627092451631214 first=accececbe5dacad8
+rc=0 zB n=273 sum=11733627092451631214 first=accececbe5dacad8
+rc=1 zU n=273 sum=0 first=0000000000000000
+rc=0 zF n=273 sum=10143505491513654780 first=00002c4300004e43
+rc=0 y n=84 sum=4366517952141585926 first=95b7b7b4cec3b3c1
+rc=0 yB n=84 sum=4366517952141585926 first=95b7b7b4cec3b3c1
+rc=1 yU n=84 sum=0 first=0000000000000000
+rc=0 yF n=84 sum=15662144424159557185 first=0000154300003743
+rc=0 subB n=135 sum=226146898223997131 first=ffffffffffffffdb
+rc=0 subF n=135 sum=12182363414758701588 first=00004f4300004843
+rc=0 subYF n=60 sum=2906721370255382741 first=0000344300004e43
+
+text 905 mrcsec-mode1.out.txt
+li xmin 0 xmax 20 ymin 0 ymax 12 mode 1
+rc=0 sec n=273 sum=982651735292365787 first=304381505d502a4f
+rc=0 secB n=273 sum=7036213067573941279 first=ffffffffffffffff
+rc=1 secU n=273 sum=0 first=0000000000000000
+rc=0 secF n=273 sum=6310721923371088488 first=006086460002a146
+rc=0 z n=273 sum=982651735292365787 first=304381505d502a4f
+rc=0 zB n=273 sum=7036213067573941279 first=ffffffffffffffff
+rc=1 zU n=273 sum=0 first=0000000000000000
+rc=0 zF n=273 sum=6310721923371088488 first=006086460002a146
+rc=0 y n=84 sum=841948252730733516 first=373a874764473146
+rc=0 yB n=84 sum=11419533456241315512 first=ffffffffffffffff
+rc=1 yU n=84 sum=0 first=0000000000000000
+rc=0 yF n=84 sum=7632557299952024830 first=00dc6846000e8f46
+rc=0 subB n=135 sum=6486166044574455611 first=ffffffffffffffff
+rc=0 subF n=135 sum=6890505092399050730 first=00c8a146007c9c46
+rc=0 subYF n=60 sum=563495281921063748 first=00b08c46002ca146
+
+text 914 mrcsec-mode2.out.txt
+li xmin 0 xmax 20 ymin 0 ymax 12 mode 2
+rc=0 sec n=273 sum=7367296177404504194 first=00002c4379164e43
+rc=0 secB n=273 sum=11733627092451631214 first=accececbe5dacad8
+rc=1 secU n=273 sum=0 first=0000000000000000
+rc=0 secF n=273 sum=17464547679623821711 first=00002c4379164e43
+rc=0 z n=273 sum=7367296177404504194 first=00002c4379164e43
+rc=0 zB n=273 sum=11733627092451631214 first=accececbe5dacad8
+rc=1 zU n=273 sum=0 first=0000000000000000
+rc=0 zF n=273 sum=17464547679623821711 first=00002c4379164e43
+rc=0 y n=84 sum=3404771873684741404 first=ca061543441d3743
+rc=0 yB n=84 sum=4366517952141585926 first=95b7b7b4cec3b3c1
+rc=1 yU n=84 sum=0 first=0000000000000000
+rc=0 yF n=84 sum=12751410666992890005 first=ca061543441d3743
+rc=0 subB n=135 sum=1050528740306620265 first=ffffffffffffffdb
+rc=0 subF n=135 sum=17049767780535110624 first=96134f43914b4843
+rc=0 subYF n=60 sum=4267298596871398577 first=96133443914b4e43
+
+text 818 mrcsec-mode4.out.txt
+li xmin 0 xmax 20 ymin 0 ymax 12 mode 4
+rc=0 sec n=273 sum=5282661071300877999 first=f628dc3ff628dc3f
+rc=0 secB n=273 sum=9242387935279454658 first=0202020202020202
+rc=1 secU n=273 sum=0 first=0000000000000000
+rc=1 secF n=273 sum=0 first=0000000000000000
+rc=0 z n=273 sum=5282661071300877999 first=f628dc3ff628dc3f
+rc=0 zB n=273 sum=9242387935279454658 first=0202020202020202
+rc=1 zU n=273 sum=0 first=0000000000000000
+rc=1 zF n=273 sum=0 first=0000000000000000
+rc=0 y n=84 sum=294224417475294622 first=03c1be3f7d3be53f
+rc=0 yB n=84 sum=2693811190455005840 first=0202020202020202
+rc=1 yU n=84 sum=0 first=0000000000000000
+rc=1 yF n=84 sum=0 first=0000000000000000
+rc=0 subB n=135 sum=12157800407919640313 first=0100010000000000
+rc=1 subF n=135 sum=0 first=0000000000000000
+rc=1 subYF n=60 sum=0 first=0000000000000000
+
+text 914 mrcsec-mode6.out.txt
+li xmin 0 xmax 20 ymin 0 ymax 12 mode 6
+rc=0 sec n=273 sum=6428350211188296457 first=608602a1bba0549e
+rc=0 secB n=273 sum=7036213067573941279 first=ffffffffffffffff
+rc=1 secU n=273 sum=0 first=0000000000000000
+rc=0 secF n=273 sum=10625714832734880067 first=0060064700022147
+rc=0 z n=273 sum=6428350211188296457 first=608602a1bba0549e
+rc=0 zB n=273 sum=7036213067573941279 first=ffffffffffffffff
+rc=1 zU n=273 sum=0 first=0000000000000000
+rc=0 zF n=273 sum=10625714832734880067 first=0060064700022147
+rc=0 y n=84 sum=11176193753559600550 first=6d740f8fc88e618c
+rc=0 yB n=84 sum=11419533456241315512 first=ffffffffffffffff
+rc=1 yU n=84 sum=0 first=0000000000000000
+rc=0 yF n=84 sum=3495384387253674562 first=00dae846000f0f47
+rc=0 subB n=135 sum=6486166044574455611 first=ffffffffffffffff
+rc=0 subF n=135 sum=11638047726957372346 first=00c72147007b1c47
+rc=0 subYF n=60 sum=12879864161465544453 first=00af0c47002b2147
+
+text 415 newstack-mdoc-plain.mdoc
+PixelSpacing = 2.5
+ImageFile = newstack-mdoc-byte.mrc
+ImageSize = 21 13
+DataMode = 0
+
+[MontSection = 0]
+StagePosition = 1.5 2.5
+BufISvalue = 0.1
+
+[MontSection = 1]
+StagePosition = 3.5 4.5
+BufISvalue = 0.2
+
+[ZValue = 0]
+TiltAngle = -10.0
+PixelSpacing = 2.5
+ExposureDose = 1.25
+
+[ZValue = 1]
+TiltAngle = 0.0
+PixelSpacing = 2.5
+ExposureDose = 1.30
+
+[ZValue = 2]
+TiltAngle = 10.0
+PixelSpacing = 2.5
+ExposureDose = 1.35
+
+sha256 6fa2eb5ad701ea75e24fa39bce7c27abc8796c10e9acf8eaf25c73c5fd1dd545 1330 newstack-mdoc-plain.txt
+text 346 newstack-mdoc-reorder.mdoc
+PixelSpacing = 2.5
+ImageFile = newstack-mdoc-byte.mrc
+ImageSize = 21 13
+DataMode = 0
+
+[MontSection = 0]
+StagePosition = 1.5 2.5
+BufISvalue = 0.1
+
+[MontSection = 1]
+StagePosition = 3.5 4.5
+BufISvalue = 0.2
+
+[ZValue = 0]
+TiltAngle = 10.0
+PixelSpacing = 2.5
+ExposureDose = 1.35
+
+[ZValue = 1]
+TiltAngle = -10.0
+PixelSpacing = 2.5
+ExposureDose = 1.25
+
+sha256 0d081d9198b2196a9086316d4d8e1fd4cdc354bd912c0da13b1293ab6f6c4ab2 1271 newstack-mdoc-reorder.txt
+text 341 newstack-mdoc-tilts.mdoc
+PixelSpacing = 2.5
+ImageFile = newstack-mdoc-byte.mrc
+ImageSize = 21 13
+DataMode = 0
+
+[MontSection = 0]
+StagePosition = 1.5 2.5
+BufISvalue = 0.1
+
+[MontSection = 1]
+StagePosition = 3.5 4.5
+BufISvalue = 0.2
+
+[ZValue = 0]
+TiltAngle = -12
+PixelSpacing = 2.5
+ExposureDose = 1.35
+
+[ZValue = 1]
+TiltAngle = 0
+PixelSpacing = 2.5
+ExposureDose = 1.25
+
+sha256 aaef5a801cd3eb897a8fd6ed542278934d16effbd6ad06baa1d42976b7146980 1311 newstack-mdoc-tilts.txt
+sha256 34c0f5ebd0f218095f8536b6df055b11d03ffbf07d340a0bd86f757ccfc84177 556 newstack-mdoc-twofiles.mdoc
+sha256 381c05a828e98b107ea9259ae299c645e951f82d0dfcaad04af408e6af0798e0 2570 newstack-mdoc-twofiles.txt
+sha256 b8623472e04f8ba9d99e6a6f4216686c145acc4df573bbbd129d493292c148de 2662 newstack-mixed-byteshort.mrc
+sha256 1ecdc37860130c4958876b77181e7026204dc01cc3a23a15ff856e994b3d4e9d 2507 newstack-mixed-byteshort.txt
+sha256 dfb18199138147745f69f63df0948aeba0027ad891ea61e1afbb8e9875b10e19 2662 newstack-mixed-bytesmall.mrc
+sha256 ee4f5af0c8cf4c134ba743f096878a748c6c3af17ee2332066cda90eaae4a043 2579 newstack-mixed-bytesmall.txt
+sha256 cdf24afddb309439ed4851079b3f85e27d662c5f872cd55c7841d25f00180466 4300 newstack-mixed-shortbyte.mrc
+sha256 b3a849cbcaa2e7437695532f08d544dcb3e2342334ab847c2e8931f78dd327c1 2507 newstack-mixed-shortbyte.txt
+sha256 8461fa369188cfbe364f45ed037d7819096939b982a0d45d78c46398e420687b 1486 newstack-mixed-smallbyte.mrc
+sha256 6660e26327a653a31021c994603eccb67ed5347139b191c62e34632023eba038 2579 newstack-mixed-smallbyte.txt
+sha256 2f223c4eeb55a70fb83a5f9a126a518e45ba4bf6839d2e117b5f78fd78ee94a8 1486 newstack-mixed-smallshortfloat2.mrc
+sha256 fc027bc404341c4f2982dfd51a49d914ee27fe92d5e2ed7561ece3f1358bae4c 2593 newstack-mixed-smallshortfloat2.txt
+sha256 eb643f29869a3fbe2e383753a504a5ab9492531e357a2e49c85cbddbff43d4ba 1444 newstack-reduce-bin3.mrc
+sha256 eb643f29869a3fbe2e383753a504a5ab9492531e357a2e49c85cbddbff43d4ba 1444 newstack-reduce-bin3origin.mrc
+sha256 9252c6278bd9f98e00a30979fad6929852bcfbd6a33a90064ab6eeb9b86dfe4d 1504 newstack-reduce-shrink25.mrc
+sha256 9dacf24920e20428ad246cc5281a766e4f04881b59be8981b77f60dcca482376 1444 newstack-reduce-shrink3.mrc
+sha256 0c6322e1a2d245219880a07a8ebd423c29bf257e0d4086a1aacfd25ab5b8d371 1120 newstack-reduce-shrink3bin2.mrc
+sha256 532a5daea56218f1166aacbb783606904b3a398db677bedb94ec06f549f7bc99 1843 newstack-replace-float2.mrc
+sha256 3ceaa8b83cbb82fd7a567149bf040bfd0dcad036714585f3a31d2f27171ceea9 2284 newstack-replace-float2.txt
+sha256 683ab42e46428df39787c3f8a7b021423b65981ada56709f049f6584b823371b 1843 newstack-replace-scale.mrc
+sha256 12e8f5105ddf6f40f94a663546ea88332b7ee747f6de22f957175cab3971dde4 2343 newstack-replace-scale.txt
+sha256 5fe2fe02f9b9e887cb54bc663279c05b065c705ed01a382a7f7280dcd85d4b6c 1843 newstack-replace-sec02to21.mrc
+sha256 381366105db425cb2721fedec485a6410a3791269b9ac20b948d7760bff09361 2343 newstack-replace-sec02to21.txt
+sha256 3b954e92874a5109147c8ab1316222923d2a6e61e6ce8f7e1d454bd2021fe877 1843 newstack-replace-sec1to0.mrc
+sha256 21cf6a3b289bb8c4b7a5adb732e9f03bdc8fcf24259b184d6b3a0846af9f7c03 2284 newstack-replace-sec1to0.txt
+sha256 96a29fc3831a43a476adbb5cfb6f6166426e9b767acb16b08aaea9c7677763ff 7110 newstack-warp-big-distort10.txt
+sha256 8a3ea79d345c5c85bee5d640df6c5166f7f855748bdc75c83c06b37301f5e754 3198 newstack-warp-big-distort2.txt
+sha256 fe268f884e6ee143ec85504610838524c3b4b2e8d4111d129e3c28fc883fa2aa 3915 newstack-warp-big-distort3.txt
+sha256 f7cb83686b48741068e881076f2809787a3ed15d17843cf6b2eecb3a7d1fe4ea 7434 newstack-warp-big-distort8.txt
+sha256 207cac5a4dd0ecadf8a3c3d4cd0731a484ab812f9ee84830a0453f69604fdd31 7434 newstack-warp-big-distortsparse.txt
+sha256 ab8a92ee88915cbbd710b0adebc906830db6d29154c1e31ca7c334391d90e711 12822 newstack-warp-big-gradient16.txt
+sha256 00ce9fcb6090ef30cb6676c0c53b20f957f1f66b25bb50834963e640d4b378c5 4125 newstack-warp-big-gradient3.txt
+sha256 7a49cb3299d9e0f2f6de939d89b2fd2c05dded78eb2ecec889ed4d5ee4201bec 3224 newstack-warp-big-xfwarp2.txt
+sha256 af735218aba8fa06fa30895609053d2b4a590b33b1de6e35aa3dec271e573846 4115 newstack-warp-big-xfwarp3.txt
+sha256 40982bcc81d5acadf8444eb2b11ce45a45267f6e461cae317ec22398ad197072 8129 newstack-warp-big-xfwarp9.txt
+sha256 5c84861e8c6202b64177cfb8363ea9d1faec5c75a11463426499e1f48b702c2d 37888 newstack-warp-both.mrc
+sha256 3ca8e61052f7fa0dff37bfe38de9bd1aececf17c8efc8422d1f07047cb6527c2 1290 newstack-warp-both.txt
+sha256 83ea3c5ade6af2cc6ef401b50f0ffeff71b981e4c57c44d9576fd1035c1500bf 37888 newstack-warp-distort.mrc
+sha256 c1e26ecb997fd5b4c0d1c6a6005fd7d9cee654511209f04ded7c13a80e95cf5b 1242 newstack-warp-distort.txt
+sha256 eb3eaf76241faadf02780a1b610d0f723e771bc9c8e9e0c53bfdb25d909f2f91 37888 newstack-warp-gradient.mrc
+sha256 2e1c99388abe11cb7cf0b721602e3e9e4592f697ae00b41afaacec04bcb86652 1290 newstack-warp-gradient.txt
+sha256 e3657483e73f4aafe6c0755623a2b165457e3ed4266e9702e4d262b34d0c52eb 37888 newstack-warp-linear.mrc
+sha256 fdb9072a5b59c8638023c1d6d034e2d605493519f1c350549b237a0cb410a3b3 1290 newstack-warp-linear.txt
+sha256 2433d933ff34d86050f0a98d6ff20c6fd4f8e43e7b077b285116273dc5b2499b 37888 newstack-warp-nearest.mrc
+sha256 a414054b5aeaf008249f8ae6798ba32c33cac5c98583352159cc9d56ab9cbe05 1242 newstack-warp-nearest.txt
+sha256 83d53074eb759739972a559484a1a2b4e192cc5d865db69e994bcd199ecefcaa 37888 newstack-warp-subarea.mrc
+sha256 c93208f055271ff4cacda5a94c404b9c642d763429d85bd2500a69ed68c533f5 1242 newstack-warp-subarea.txt
+sha256 2127852ee60c4db85d8ac1333533fefd3df5e35cac1ef8a7d06caa5a63f40268 37888 newstack-warp-xfwarp.mrc
+sha256 5ecd43776671aebde29e7747791c6de3d2108b1aa70168ee74f1e60096ba38e5 1280 newstack-warp-xfwarp.txt
+sha256 a071b9160e149c7426dc91da2187e72944624a06854f8172e4dfcb834b70dd34 37888 newstack-warp-xfwarpoff.mrc
+sha256 0a0e52cbf77b5b07a035fe5122df1d6bdf6b3a05cddfbde9b45028fb992a83a5 1280 newstack-warp-xfwarpoff.txt
+sha256 7f29e26b42bb314123422f9408940a14e439b903d2dbd08c6f8b9e2afa7c1218 10240 newstack-warp-xfwarpshrink.mrc
+sha256 6d98c2422a69551c670d0a7d3a5017bf42eeae51090cb3d710d127b71e1ce32c 1280 newstack-warp-xfwarpshrink.txt
+text 4413 usage-clip.txt
+Copyright (C) 1994-2025 by the Regents of the University of Colorado
+----------------------------------------------------
+clip usage:
+clip [process] [options] [input files...] [output file]
+
+process:
+	add         - Add images together.
+	average     - Average files together.
+	boxsd       - Compute SD or SD/mean in local boxes around each pixel.
+	blankfile   - Make constant volume (enter -ox, -oy, -oz, -m, -p).
+	brightness  - Increase or decrease brightness.
+	color       - Add false color.
+	contrast    - Increase or decrease contrast.
+	correlation - Do a auto/cross correlation.
+	defectmap   - Output map of all pixels in defects entered with -B.
+	diffusion   - Do 2-D anisotropic diffusion on slices.
+	divide      - Divide one image volume by another.
+	flatfield   - MAKE a flatfielding image from sum of all slices.
+	gradient    - Compute gradient as in 3dmod.
+	graham      - Apply Graham filter as in 3dmod.
+	histogram   - Print histogram of values.
+	info        - Print information to stdout.
+	integral    - Compute local integral at points beyond threshold .
+	fft         - Do a fft or inverse fft transform.
+	filter      - Do a bandpass filter.
+	flip..      - Flip image about various axes.
+	joinrgb     - Join 3 byte files into an RGB file.
+	laplacian   - Apply Laplacian filter as in 3dmod.
+	median      - Do median filtering.
+	multiply    - Multiple one image volume by another.
+	normalize   - Multiply by gain ref., scale, remove big values.
+	planefit    - Fit plane to sum of all slices to get gradient.
+	prewitt     - Apply Prewitt filter as in 3dmod.
+	quadrant    - Correct quadrant disparities from 4-port camera.
+	resize      - Cut out and/or pad image data.
+	rotx        - Rotate volume by -90 about X axis.
+	shadow      - Increase or decrease image shadows.
+	sharpen     - Sharpen image as in 3dmod.
+	smooth      - Smooth image as in 3dmod.
+	sobel       - Apply Sobel filter as in 3dmod.
+	spectrum    - Compute scaled, reduced power spectrum.
+	splitrgb    - Split RGB image file into 3 byte files.
+	standev     - Compute standard deviation for averaged images.
+	stats       - Print some stats on image file.
+	subtract    - Subtract one image volume from another.
+	supergain   - Analyze EER file(s) .
+	threshold   - Apply threshold to make binary image.
+	truncate    - Limit image values at low or high end.
+	unwrap      - Undo a wraparound of integer intensity values.
+	unpack      - Unpack 4-bit data into bytes - same as normalize.
+	variance    - Compute variance for averaged images.
+
+options:
+	[-v]  view output data.
+	[-3d] or [-2d] treat image as 3d (default) or 2d.
+	[-s] Switch, [-n #] Amount; Depends on function.
+	[-n #] [-l #] Iterations and Gaussian sigma for smoothing.
+	[-h #] [-l #] [-t #] Values for filter, threshold, or truncate.
+	[-op file] Name of file for output of points above threshold.
+	[-cc #] [-l #] [-k #] values for anisotropic diffusion.
+	[-r #] [-g #] [-b #] red, green, blue values.
+	[-x #,#]  [-y #,#]  starting and ending input coords.
+	[-cx #]  [-cy #]  [-cz #]  center coords.
+	[-ix #]  [-iy #]  [-iz #]  input sizes.
+	[-ox #]  [-oy #]  [-oz #]  output sizes.
+	[-CX #]  [-CY #]  [-CZ #]  chunk sizes for tiled HDF output.
+	[-a] Append output to file.
+	[-ov #] Overwrite output starting at section # and truncate file
+	[-or #] Overwrite output starting at section # and retain to end
+	[-m (mode#)] Output data mode.
+	[-f format] Output file format (MRC, TIFF, HDF, JPEG).
+	[-p (pad#)] Pad empty data value.
+	[-1] Number Z values from 1 instead of 0.
+	[-P file] Name of piece list file for stats on a montage.
+	[-O #,#]  Overlaps in X and Y in displayed montage.
+	[-D file] Apply defect correction using defect list in given file.
+	[-B #] Binning value to use in defect correction.
+	[-S]   Scale defect list up by 2 if it is not already scaled.
+	[-R #] Rotation/flip to apply to gain reference, or -1 for r/f.
+	[-E #,#] Analyze histogram for extra counts on one side.
+	[-F #,#] Analyze histogram for fastest falloff point.
+	[-M #,#] Set minimum size of connected regions when thresholding.
+	[-es #] Set super-resolution factor when reading from EER files.
+	[-ez #] Set summing of frames when reading from EER files.
+	[-et]   Read thumbnail, not frames, from EER file.
+	[-ep #] Set padding of defects from gain reference for EER file.
+	[-ed file] Write defects from EER gain reference to file.
+	[-eg file] File for adjusting super-resolution gain reference.
+
+
+text 1419 usage-mrc2tif.txt
+Copyright (C) 1994-2025 by the Regents of the University of Colorado
+mrc2tif [options] <mrc file> <tiff name/root>
+
+ Without -s, a series of tiff files will be created with the
+ prefix [tiff root name] and with the suffix nnn.tif, where nnn is the z number. 
+  Options:
+    -s         Stack all images in the mrc file into a single tiff file
+    -c val     Compress data; val can be lzw, zip, jpeg, or numbers defined
+		 in libtiff
+    -q #       Quality for jpeg compression (0-100) or for zip compression (1-9)
+    -S min,max Initial scaling limits for conversion to bytes
+    -C b,w     Contrast black/white values for conversion to bytes
+    -a mn,sd   Scale to mean and SD for conversion to bytes (0,0 for default)
+    -z min,max Starting and ending Z (from 0) to output
+    -i #       Initial file number (default is starting Z)
+    -j         Output jpeg file instead of tiff
+    -p         Output png file instead of tiff
+    -r #       Resolution setting in dots per inch
+    -P         Use pixel spacing in MRC header for resolution setting
+    -m         Use pixel spacings in mdoc file for resolution setting
+    -T nx[,ny] Output data in tiles of size nx by ny (nx by nx if ny omitted)
+    -O #       Override default for parallel tiff compression on whole image
+    -t #       Criterion image size in megabytes for processing file in strips
+    -o         Write file with old IMOD code instead of libtiff
+
+text 1114 usage-tif2mrc.txt
+Copyright (C) 1994-2025 by the Regents of the University of Colorado
+Usage: tif2mrc [options] <tiff files...> <mrcfile>
+Options:
+	-g      Convert 24-bit RGB to 8-bit grayscale
+	-G      Convert 24-bit RGB to 8-bit grayscale with NTSC scaling
+	-u      Convert unsigned 16-bit values by subtracting 32768
+	-d      Convert unsigned 16-bit values by dividing by 2
+	-k      Keep unsigned 16-bit values; store in unsigned integer mode
+	-s      Store 16-bit as signed (mode 1) even if data are unsigned
+	-B #    Write bytes as unsigned (for # 0) or signed (for # 1)
+	-i      Invert order of sections in output stack
+	-p  #   Set pixel spacing in MRC header to given #
+	-P      Set pixel spacing in MRC header from resolution in TIFF file
+	-T file Output tilt angles from TVIPS input files to given file
+	-f      Read only first image of multi-page file
+	-o x,y  Set output file size in X and Y
+	-F  #   Set value to fill areas with no image data to given #
+	-b file Background subtract image in given file
+	-t #    Set criterion in megabytes for reading files in chunks
+	-m      Turn off file-to-memory mapping in libtiff
+

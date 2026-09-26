@@ -1,0 +1,37 @@
+# name	inputs (src:dst from inputs/)	env	arguments
+g1_basic_all	g1_basic.log:aligna.log	-	-m -e -s -l -c -r -a -b -w -p a
+#full	g1_basic_e	g1_basic.log:align.log	-	-e
+#full	g1_basic_s	g1_basic.log:align.log	-	-s
+#full	g1_basic_w	g1_basic.log:align.log	-	-w
+#full	g1_basic_a	g1_basic.log:align.log	-	-a
+#full	g1_basic_p	g1_basic.log:align.log	-	-p
+g1_robust_cv_all	g1_robust_cv.log:aligna.log	-	-m -e -s -l -c -r -a -b -w -p a
+#full	g1_robust_cv_e	g1_robust_cv.log:align.log	-	-e
+#full	g1_robust_cv_s	g1_robust_cv.log:align.log	-	-s
+#full	g1_robust_cv_w	g1_robust_cv.log:align.log	-	-w
+#full	g1_robust_cv_a	g1_robust_cv.log:align.log	-	-a
+#full	g1_robust_cv_p	g1_robust_cv.log:align.log	-	-p
+g3_xtilt_beam_all	g3_xtilt_beam.log:aligna.log	-	-m -e -s -l -c -r -a -b -w -p a
+#full	g3_xtilt_beam_e	g3_xtilt_beam.log:align.log	-	-e
+#full	g3_xtilt_beam_s	g3_xtilt_beam.log:align.log	-	-s
+#full	g3_xtilt_beam_w	g3_xtilt_beam.log:align.log	-	-w
+#full	g3_xtilt_beam_a	g3_xtilt_beam.log:align.log	-	-a
+#full	g3_xtilt_beam_p	g3_xtilt_beam.log:align.log	-	-p
+g2_local_robust_cv_all	g2_local_robust_cv.log:aligna.log	-	-m -e -s -l -c -r -a -b -w -p a
+g2_local_robust_cv_e	g2_local_robust_cv.log:align.log	-	-e
+g2_local_robust_cv_s	g2_local_robust_cv.log:align.log	-	-s
+g2_local_robust_cv_w	g2_local_robust_cv.log:align.log	-	-w
+g2_local_robust_cv_a	g2_local_robust_cv.log:align.log	-	-a
+g2_local_robust_cv_p	g2_local_robust_cv.log:align.log	-	-p
+unit_aligna_all	../../../IMOD/Etomo/unitTestData/aligna.log:aligna.log	-	-m -e -s -l -c -r -a -b -w -p a
+#full	unit_aligna_e	../../../IMOD/Etomo/unitTestData/aligna.log:align.log	-	-e
+#full	unit_aligna_s	../../../IMOD/Etomo/unitTestData/aligna.log:align.log	-	-s
+#full	unit_aligna_w	../../../IMOD/Etomo/unitTestData/aligna.log:align.log	-	-w
+#full	unit_aligna_a	../../../IMOD/Etomo/unitTestData/aligna.log:align.log	-	-a
+#full	unit_aligna_p	../../../IMOD/Etomo/unitTestData/aligna.log:align.log	-	-p
+path_b	g1_basic.log:sub/x.log g1_basic.log:alignb.log	-	-e -p b
+repeat	g1_basic.log:align.log	-	-p -e -p
+no_options	g1_basic.log:align.log	-	align.log
+missing	-	-	-e b
+bad_option	g1_basic.log:align.log	-	-q
+usage	-	-	-

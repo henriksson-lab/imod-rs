@@ -9,6 +9,7 @@
 //! wrote, when it wrote one.  Inputs: the seeded linear, grid-warping and
 //! control-point files in `fixtures/xftransforms`, plus three `.xf` files
 //! from the vendored `IMOD/Etomo/uitestData`.
+//! Pruned 2026-09-26: 44 of 78 xftoxg rows kept (dropped nfit/order/ref/mixed/robust value permutations, extra small-count and warp-fit variants, the large `medium` input and one interactive form); the rest stay in cases.tsv as `#full` rows (FULL=1, fixtures/README.md).
 
 mod common;
 
@@ -59,10 +60,7 @@ fn every_case_matches_native_golden() {
     let golden = fixture_dir().join("golden");
     let mut failures = Vec::new();
     let mut count = 0;
-    for line in table
-        .lines()
-        .filter(|l| !l.starts_with('#') && !l.is_empty())
-    {
+    for line in common::golden::case_rows(&table) {
         let fields: Vec<&str> = line.split('\t').collect();
         let (program, name, args, stdin) = (fields[0], fields[1], fields[2], fields[3]);
         if program != PROGRAM {
@@ -95,8 +93,7 @@ fn every_case_matches_native_golden() {
             .unwrap();
         let output = child.wait_with_output().unwrap();
         count += 1;
-        let rc: i32 = std::fs::read_to_string(golden.join(format!("{stem}.rc")))
-            .unwrap()
+        let rc: i32 = common::golden::read_to_string(&golden.join(format!("{stem}.rc")))
             .trim()
             .parse()
             .unwrap();
@@ -106,11 +103,11 @@ fn every_case_matches_native_golden() {
                 output.status.code()
             ));
         }
-        let stdout = std::fs::read(golden.join(format!("{stem}.stdout"))).unwrap();
-        if output.stdout != stdout {
+        let stdout = common::golden::expect(&golden.join(format!("{stem}.stdout")));
+        if !stdout.matches(&output.stdout) {
             failures.push(format!(
                 "{name}: stdout differs\n--- native\n{}\n--- ours\n{}",
-                String::from_utf8_lossy(&stdout),
+                stdout.display(),
                 String::from_utf8_lossy(&output.stdout)
             ));
         }
@@ -123,24 +120,23 @@ fn every_case_matches_native_golden() {
         // read as the common one; the zero grid now carries the common
         // layout (differences in the third decimal of the output grid).
         let defined = fixture_dir().join("defined").join(format!("{stem}.out"));
-        let expected = std::fs::read(&defined)
-            .or_else(|_| std::fs::read(golden.join(format!("{stem}.out"))))
-            .ok();
+        let expected = common::golden::load(&defined)
+            .or_else(|| common::golden::load(&golden.join(format!("{stem}.out"))));
         let written = ["o.xg", "BBa.xg", "p.xf"]
             .iter()
             .find_map(|o| std::fs::read(dir.join(o)).ok());
         match (expected, written) {
             (None, None) => {}
-            (Some(g), Some(w)) if g == w => {}
+            (Some(g), Some(w)) if g.matches(&w) => {}
             (g, w) => failures.push(format!(
-                "{name}: output differs (native {:?} bytes, ours {:?} bytes)",
-                g.map(|b| b.len()),
+                "{name}: output differs (native {:?}, ours {:?} bytes)",
+                g.map(|b| b.describe()),
                 w.map(|b| b.len())
             )),
         }
         let _ = std::fs::remove_dir_all(&dir);
     }
-    assert!(count >= 40, "only {count} cases read");
+    assert!(count >= 44, "only {count} cases read");
     assert!(failures.is_empty(), "{}", failures.join("\n"));
 }
 

@@ -1,0 +1,70 @@
+# imod-rs native golden manifest for fixtures/comrun; see fixtures/README.md.
+# Regenerate with fixtures/regen-golden.sh comrun; do not edit by hand.
+sha256 c0253d37b91852383cf5cdd9297be94324871811becc6c911e6c50bb552d0d06 1574 convert/align.csh
+sha256 05c594da63b959b225edfdf6b6c88768ad55428c72b06967508222ac0cb52acf 3627 convert/align.py
+text 0 convert/align.pyout
+
+sha256 5e60b21448a7532039c95aa0f49e2a8bcc429bc944c9c710d34458fb667a1f1c 2901 convert/combine.csh
+sha256 e00322f029d4017224f4f742010f09dcd3e498f8e494c6b8ba97bad705f270ba 2221 convert/combine.nolog.csh
+sha256 5e8b5aa97a236a03ad019129ca730ae19e05eec83df4bd2d9b6cd7df495eb42e 4394 convert/combine.py
+text 0 convert/combine.pyout
+
+text 458 convert/continuation.csh
+nohup
+if (-e "x.log") \mv -f "x.log" "x.log~"
+if ($?IMOD_DIR) then
+    setenv PATH "$IMOD_DIR/bin:$PATH"
+endif
+if ($?IMOD_QTLIBDIR && $?LD_LIBRARY_PATH) then
+    setenv LD_LIBRARY_PATH "${IMOD_QTLIBDIR}:$LD_LIBRARY_PATH"
+endif
+setenv PIP_PRINT_ENTRIES 1
+echo2 Shell PID: $$
+prog a   b c  > "x.log"
+two \
+next line >> "x.log"
+three << HERESTRING >> "x.log"
+inp1
+$var
+HERESTRING
+pct << HERESTRING >> "x.log"
+x
+HERESTRING
+echo SUCCESSFULLY COMPLETED >> "x.log"
+
+sha256 65dba98e573b1549be5c859a2aeb1a1d327916c2c1c303821383e62603f90b33 1801 convert/continuation.py
+text 0 convert/continuation.pyout
+
+sha256 8b6528a4d5e65190b35378c53460563a15d3cd58ce8d95faa9527b5361340b81 648 convert/finish_remove.csh
+sha256 164e60c515d3fc7115ce31ac1eba1dcfa30d345a175885cfc0995c100a15686a 1916 convert/finish_remove.py
+text 0 convert/finish_remove.pyout
+
+text 313 convert/localpart.csh
+nohup
+if (-e "x.log") \mv -f "x.log" "x.log~"
+if ($?IMOD_DIR) then
+    setenv PATH "$IMOD_DIR/bin:$PATH"
+endif
+if ($?IMOD_QTLIBDIR && $?LD_LIBRARY_PATH) then
+    setenv LD_LIBRARY_PATH "${IMOD_QTLIBDIR}:$LD_LIBRARY_PATH"
+endif
+setenv PIP_PRINT_ENTRIES 1
+echo2 Shell PID: $$
+echo SUCCESSFULLY COMPLETED  > "x.log"
+
+sha256 afc305a2d64df49366f6b770bb3c9f9477a587b8fc64640daa5cde9fe660ec66 1045 convert/localpart.py
+text 102 convert/localpart.pyout
+ERROR: vmstopy - Expected command or Python line: 5,5	NUMBER OF LOCAL PATCHES TO SOLVE FOR IN X AND Y
+
+sha256 862e3e982bdf67e3e88bb0a435bb02d37dba2e70157e1d27f17fc70e497f0276 729 convert/tilt_sync.csh
+sha256 36c26f1c019cac0ecbb484c467381b74b72e051851c50904235fd593107f64d3 2231 convert/tilt_sync.py
+text 0 convert/tilt_sync.pyout
+
+sha256 bb591f78d789251d8df4a24bf7a25300fc6666ce314c8af7fff714842d3e4ead 699 convert/volcombine.csh
+sha256 ad8dac62c56f985b97be35b9c363009a64bb24bd0b3e81dc8aca1596c00a1fa3 1905 convert/volcombine.py
+text 0 convert/volcombine.pyout
+
+sha256 058fffee77457574c46087fe064aee71e7c490c4f31db49d6045af31791752f1 992 convert/volcombine_tmpdir.csh
+sha256 93177f5f882223b302d2169673be920f3e52bbb259abc9e20a1574d8eac06bae 2174 convert/volcombine_tmpdir.py
+text 0 convert/volcombine_tmpdir.pyout
+

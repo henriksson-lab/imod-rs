@@ -1,0 +1,17 @@
+# name	arguments (- for none)	stdin (printf escapes, - for none)
+f_z	mainf.mrc z.info	-
+f_z2	mainf.mrc z2.info	-
+f_y	mainf.mrc y.info	-
+f_zbyte	mainb.mrc z.info	-
+#full	f_ybyte	mainb.mrc y.info	-
+f_badnx	mainf.mrc badnx.info	-
+#full	f_nolines	mainf.mrc nolines.info	-
+#full	f_trunc	mainf.mrc trunc.info	-
+f_nofile	mainf.mrc nofile.info	-
+f_short	mainf.mrc short.info	-
+#full	f_empty	mainf.mrc empty.info	-
+f_noinfo	mainf.mrc nosuch.info	-
+f_nomain	nosuch.mrc z.info	-
+f_stdin	-	mainf.mrc\nz.info\n
+f_onearg	mainf.mrc	y.info\n
+f_eof	-	-

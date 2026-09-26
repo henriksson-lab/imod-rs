@@ -53,7 +53,7 @@ fn scratch(name: &str) -> PathBuf {
         if path.is_file()
             && path
                 .file_name()
-                .is_some_and(|n| n != "cases.tsv" && n != "gen6.py")
+                .is_some_and(|n| n != "cases.tsv" && n != "gen6.py" && n != "golden.manifest")
         {
             std::fs::copy(&path, dir.join(path.file_name().unwrap())).unwrap();
         }
@@ -137,16 +137,10 @@ fn compare_binary(expected: &[u8], actual: &[u8]) -> Result<(), String> {
 fn every_case_matches_native_golden() {
     let table = std::fs::read_to_string(fixture_dir().join("cases.tsv")).unwrap();
     let golden = fixture_dir().join("golden");
-    let golden_names: Vec<String> = std::fs::read_dir(&golden)
-        .unwrap()
-        .map(|e| e.unwrap().file_name().to_string_lossy().into_owned())
-        .collect();
+    let golden_names: Vec<String> = common::golden::list(&golden);
     let mut failures = Vec::new();
     let mut count = 0;
-    for line in table
-        .lines()
-        .filter(|l| !l.starts_with('#') && !l.is_empty())
-    {
+    for line in common::golden::case_rows(&table) {
         let fields: Vec<&str> = line.split('\t').collect();
         let (name, args) = (fields[0], fields[1]);
         let dir = scratch(name);
@@ -171,8 +165,7 @@ fn every_case_matches_native_golden() {
             .output()
             .unwrap();
         count += 1;
-        let rc: i32 = std::fs::read_to_string(golden.join(format!("{name}.rc")))
-            .unwrap()
+        let rc: i32 = common::golden::read_to_string(&golden.join(format!("{name}.rc")))
             .trim()
             .parse()
             .unwrap();
@@ -195,8 +188,8 @@ fn every_case_matches_native_golden() {
                 bytes.to_vec()
             }
         };
-        let want = unbannered(&std::fs::read(golden.join(format!("{name}.stdout"))).unwrap());
-        if let Err(why) = compare_text(&want, &unbannered(&output.stdout)) {
+        let want = common::golden::expect(&golden.join(format!("{name}.stdout")));
+        if let Err(why) = want.compare_tolerant(&output.stdout, unbannered, compare_text) {
             failures.push(format!("{name}: stdout {why}"));
         }
         // Every file native created must exist and match; nothing else may appear.
@@ -207,14 +200,14 @@ fn every_case_matches_native_golden() {
             .filter(|f| *f != "rc" && *f != "stdout")
             .collect();
         for file in &expected_files {
-            let want = std::fs::read(golden.join(format!("{name}.{file}"))).unwrap();
+            let want = common::golden::expect(&golden.join(format!("{name}.{file}")));
             match std::fs::read(dir.join(file)) {
                 Err(_) => failures.push(format!("{name}: {file} not written")),
                 Ok(got) => {
                     let result = if file.ends_with(".3dmod") || file.ends_with(".fid") {
-                        compare_binary(&want, &got)
+                        want.compare_tolerant(&got, common::golden::identity, compare_binary)
                     } else {
-                        compare_text(&want, &got)
+                        want.compare_tolerant(&got, common::golden::identity, compare_text)
                     };
                     if let Err(why) = result {
                         failures.push(format!("{name}: {file} {why}"));

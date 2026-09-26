@@ -1,0 +1,128 @@
+# imod-rs native golden manifest for fixtures/tomopieces; see fixtures/README.md.
+# Regenerate with fixtures/regen-golden.sh tomopieces; do not edit by hand.
+text 2 golden/t_badsize.rc
+1
+
+text 108 golden/t_badsize.stdout
+ERROR: iiOpen - Opening file 100,200 (No such file or directory)
+
+ERROR: iiuOpen - Could not open '100,200'
+
+text 2 golden/t_file.rc
+0
+
+text 41 golden/t_file.stdout
+   1   1   1
+0,9,0,5,0,7
+10,19
+5,10
+8,15
+
+text 2 golden/t_hdf.rc
+0
+
+sha256 9ec680012a8868327f36a728534761dc7f810f5db4e985969cdba0934513b922 1668 golden/t_hdf.stdout
+text 2 golden/t_help.rc
+0
+
+sha256 ccded4f84bd923be0b32330dcf21031d2ec25a07cf399a937be4605a3fc72363 1399 golden/t_help.stdout
+text 2 golden/t_mega.rc
+0
+
+sha256 3f256ab922c8e3f3c9d31fe0158782d2b84f0099ec357f61f578e5071a0274d7 2884 golden/t_mega.stdout
+text 2 golden/t_missing.rc
+1
+
+text 95 golden/t_missing.stdout
+
+ERROR: TOMOPIECES - you must enter option TomogramOrSizeXYZ to specify file size or file name
+
+text 2 golden/t_nofft.rc
+0
+
+sha256 50e82be152918cba3aec5e9f1ce4532c8a17cae6795de618da5163874bfe05d0 970 golden/t_nofft.stdout
+text 2 golden/t_nofile.rc
+1
+
+text 114 golden/t_nofile.stdout
+ERROR: iiOpen - Opening file nosuch.mrc (No such file or directory)
+
+ERROR: iiuOpen - Could not open 'nosuch.mrc'
+
+text 2 golden/t_none.rc
+0
+
+sha256 ccded4f84bd923be0b32330dcf21031d2ec25a07cf399a937be4605a3fc72363 1399 golden/t_none.stdout
+text 2 golden/t_nonopt.rc
+1
+
+text 95 golden/t_nonopt.stdout
+
+ERROR: TOMOPIECES - you must enter option TomogramOrSizeXYZ to specify file size or file name
+
+text 2 golden/t_odd.rc
+0
+
+sha256 5a773e1c6fd09081b7808bdc2ca202d721b19c9904a007339ec969e774e4aad0 777 golden/t_odd.stdout
+text 2 golden/t_overlap.rc
+0
+
+sha256 8c9c569e10dd94fdf53ac252ca157dc985b75ca8fc83bd89010c8956dba32fcd 1462 golden/t_overlap.stdout
+text 2 golden/t_pad.rc
+0
+
+text 182 golden/t_pad.stdout
+   3   1   2
+0,343,0,299,0,513
+340,683,0,299,0,513
+680,1023,0,299,0,513
+0,343,0,299,510,1023
+340,683,0,299,510,1023
+680,1023,0,299,510,1023
+20,361
+22,361
+22,363
+10,309
+13,524
+15,526
+
+text 2 golden/t_size.rc
+0
+
+text 51 golden/t_size.stdout
+   1   1   1
+0,511,0,149,0,511
+14,525
+5,154
+14,525
+
+text 2 golden/t_tiny.rc
+1
+
+text 73 golden/t_tiny.stdout
+
+ERROR: TOMOPIECES - Pieces are all too large with given maximum numbers
+
+text 2 golden/t_toobig.rc
+1
+
+text 73 golden/t_toobig.stdout
+
+ERROR: TOMOPIECES - Pieces are all too large with given maximum numbers
+
+text 2 golden/t_x0y1.rc
+0
+
+sha256 afdfa683c5047f2410823eb769d040111084b8c976110e1059a68e63cc5efa09 799 golden/t_x0y1.stdout
+text 2 golden/t_x1y0.rc
+0
+
+sha256 52f9ee43449b39bd3746f0e354cc605fe43effc0ff10e0ab42e254474b876f62 725 golden/t_x1y0.stdout
+text 2 golden/t_xy.rc
+0
+
+sha256 7e8a41701eb91910c71ac2253afeaee12efde57451c5f5153acdb164bd139121 727 golden/t_xy.stdout
+text 2 golden/t_zmax.rc
+0
+
+sha256 3b7862377079762169ee8fd19705b980f1ed93a3e81bc81aed56991a21366eef 725 golden/t_zmax.stdout

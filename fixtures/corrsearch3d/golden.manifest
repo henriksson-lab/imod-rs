@@ -1,0 +1,191 @@
+# imod-rs native golden manifest for fixtures/corrsearch3d; see fixtures/README.md.
+# Regenerate with fixtures/regen-golden.sh corrsearch3d; do not edit by hand.
+sha256 5bc2663d7057d9c7efa7925cc7a6a6b4fd523b7b97255c1a9eca9625f56dd2f6 1029 golden/basic.patch
+text 2 golden/basic.rc
+0
+
+sha256 59e4de3500606e5c1bb9ac9dbce0b3291d2f6cb6885154de28d388e7ac605e8b 2134 golden/basic.stdout
+sha256 23466d7a903aad21bc26fe157c0542c62e6037434c7138d2f66bcc7e9bd7423f 693 golden/bregion.patch
+text 2 golden/bregion.rc
+0
+
+sha256 b2090fd7146c226ddeea5a979d5b501cc6c1149c8cb2ddd3134f709c7a7a7a38 2251 golden/bregion.stdout
+sha256 5bc2663d7057d9c7efa7925cc7a6a6b4fd523b7b97255c1a9eca9625f56dd2f6 1029 golden/bsourcefile.patch
+text 2 golden/bsourcefile.rc
+0
+
+sha256 59e4de3500606e5c1bb9ac9dbce0b3291d2f6cb6885154de28d388e7ac605e8b 2134 golden/bsourcefile.stdout
+sha256 070fa4eef53941c5eda6bdf715cce8b457a7f16061c85d8cc7e3288701b84e64 1029 golden/bxform.patch
+text 2 golden/bxform.rc
+0
+
+sha256 2f8df21f5c0caf48eaa3f1192a001220999bace0387c36cb54af5449ab0fa190 2173 golden/bxform.stdout
+text 2 golden/bxformnosrc.rc
+1
+
+sha256 c235ba7d08b1c3c43e790c2b91269a3d6194f4d74333fc24eebef458de662ced 2178 golden/bxformnosrc.stdout
+text 2 golden/bxformshort.rc
+1
+
+sha256 f1772037541fa143680a4fa681b659b01e406b45b260f3b8030ecac9f6320dae 2178 golden/bxformshort.stdout
+sha256 0cc4595f2cc605093898dbd29a43b272c600ac89efc64080c6f99a8dcad09064 1828 golden/debug3.patch
+text 2 golden/debug3.rc
+0
+
+sha256 9a3675e7122bf88fa86c1e9b2bc108f7adcfa3dee226e19b0a4eb69a377d4ecb 2645 golden/debug3.stdout
+sha256 defff25da013a71c997b10ee6e72f7eb71f4087f4ee684310b57912ec71d6585 1029 golden/filter.patch
+text 2 golden/filter.rc
+0
+
+sha256 59e4de3500606e5c1bb9ac9dbce0b3291d2f6cb6885154de28d388e7ac605e8b 2134 golden/filter.stdout
+sha256 65d5db623f64d077ac2be273d995574769d8e792f9ea5e274c1b5715465d3e3c 1029 golden/flipped.patch
+text 2 golden/flipped.rc
+0
+
+sha256 2bdc57ba878be1bcde5a648e2570fedbd3f29c0d6c9f64dba61624d3929bfeae 2134 golden/flipped.stdout
+sha256 caeecdc478510017ee656027c83e05bcb06302381409f2d03a8425557e2b6941 1029 golden/flipregion.patch
+text 2 golden/flipregion.rc
+0
+
+sha256 600db5cde3cd9e79f45dc5884a67b484bac73846241349106a636b1808b41e0f 2205 golden/flipregion.stdout
+text 2 golden/help.rc
+0
+
+sha256 1f6005ce02b29a32fc0c876e0d3c4c205b99ce12d742dd0f0d1850df4924e717 3691 golden/help.stdout
+sha256 b9ad941d8f2e3ab63daf4ffcc6c41cb339c99d7072efbfaa836a54a9390f294a 1029 golden/initial.patch
+text 2 golden/initial.rc
+0
+
+sha256 59e4de3500606e5c1bb9ac9dbce0b3291d2f6cb6885154de28d388e7ac605e8b 2134 golden/initial.stdout
+sha256 5bc2663d7057d9c7efa7925cc7a6a6b4fd523b7b97255c1a9eca9625f56dd2f6 1029 golden/interactive.patch
+text 2 golden/interactive.rc
+0
+
+sha256 f90a85b0e9bfc0a00d738e5786d8f5bc2171c73394805ec0e857ccd5f3f18575 2834 golden/interactive.stdout
+text 2 golden/interactiveeof.rc
+2
+
+sha256 00dbc1d2454f6b9413d806e4e690e18e85b89c887663deca53f2bf9292ab2b6a 2341 golden/interactiveeof.stdout
+sha256 5bc2663d7057d9c7efa7925cc7a6a6b4fd523b7b97255c1a9eca9625f56dd2f6 1029 golden/invert.patch
+text 2 golden/invert.rc
+0
+
+sha256 59e4de3500606e5c1bb9ac9dbce0b3291d2f6cb6885154de28d388e7ac605e8b 2134 golden/invert.stdout
+sha256 2f1bb780a900e6eeaddb15620a4bdb0804b7f2bc745c3ba94b69c8318002a803 1029 golden/kernel5.patch
+text 2 golden/kernel5.rc
+0
+
+sha256 59e4de3500606e5c1bb9ac9dbce0b3291d2f6cb6885154de28d388e7ac605e8b 2134 golden/kernel5.stdout
+text 2 golden/ksizebad.rc
+1
+
+sha256 7ba7512fef507d0b20ee68feab77539bd5f6f42df8d90d8356a1120347963fd7 2143 golden/ksizebad.stdout
+sha256 f7e12afa0d24b537162b1154cb2e0c74d8a8f5f02f91741841663d02b72ff81a 1359 golden/lsd1.patch
+text 2 golden/lsd1.rc
+0
+
+sha256 d99c7512cdad1d27d9609bd7a8e050f9c722010609b0e5684c2c7140eecc477b 2657 golden/lsd1.stdout
+sha256 20dbf2251c74bb80ce492c925c848b5b015ac1dabd4033d9c7400fee7854fc03 1359 golden/lsd2.patch
+text 2 golden/lsd2.rc
+0
+
+sha256 f2da2d1ecad5375973cf3c07e5f6d35b43558384541294e25256b5a3462d18b3 3168 golden/lsd2.stdout
+sha256 ea79a59b9dc8bd11083cd396916f2edf231728dbeadcd97ee6d614d36434fbcd 1359 golden/lsdbig.patch
+text 2 golden/lsdbig.rc
+0
+
+sha256 0904ba1204117655fc21e78a488978c0ba1c9e8e3ce15c9a3c0e5e7808cca6d9 2490 golden/lsdbig.stdout
+text 2 golden/lsdnobox.rc
+1
+
+sha256 2d021f66c8be1438c5f9a59ab58652d2d1ed9c1ec647ff9d67300689ae39c6d1 2163 golden/lsdnobox.stdout
+text 2 golden/lsdsmall.rc
+1
+
+sha256 81891ef020de1c2071e2f2b386d8f06ba1a3de721e2dc4f4d3d05c561e2f4a4e 2152 golden/lsdsmall.stdout
+text 2 golden/lsdtoomany.rc
+1
+
+sha256 630d251f5dc8c6401be33e010e4e67b75cdde0ead62c4aa66e75b9a7c30c8efb 2153 golden/lsdtoomany.stdout
+sha256 5bc2663d7057d9c7efa7925cc7a6a6b4fd523b7b97255c1a9eca9625f56dd2f6 1029 golden/maxshift.patch
+text 2 golden/maxshift.rc
+0
+
+sha256 59e4de3500606e5c1bb9ac9dbce0b3291d2f6cb6885154de28d388e7ac605e8b 2134 golden/maxshift.stdout
+text 2 golden/negborder.rc
+1
+
+sha256 7ca4a7993a0dfad8405737c333391a7f54f2c9e4229687d73fd6b3bed6b5e6a1 2161 golden/negborder.stdout
+text 133 golden/nofit.patch
+      2 positions  1
+    24    24    15     0.30     0.01     1.62    0.3310
+    24    24     5     0.85    -0.09     1.24    0.2900
+
+text 2 golden/nofit.rc
+0
+
+sha256 59e4de3500606e5c1bb9ac9dbce0b3291d2f6cb6885154de28d388e7ac605e8b 2134 golden/nofit.stdout
+text 2 golden/nominmax.rc
+1
+
+sha256 441a5b9e65f96f9edfbd13f72180c49e869960a8599aaac0f4a8e62d2f225b20 2171 golden/nominmax.stdout
+sha256 5bc2663d7057d9c7efa7925cc7a6a6b4fd523b7b97255c1a9eca9625f56dd2f6 1029 golden/nonopt.patch
+text 2 golden/nonopt.rc
+0
+
+sha256 59e4de3500606e5c1bb9ac9dbce0b3291d2f6cb6885154de28d388e7ac605e8b 2134 golden/nonopt.stdout
+sha256 2481cbdb04da39609ed916d5ba52bd60a80992b99d372ba6f3870827f7e7a671 693 golden/nonplanar.patch
+text 2 golden/nonplanar.rc
+0
+
+sha256 f5441c928299e65e61c04f637e3c8110b0a741e1f078e387f7cf0c77500455ae 2280 golden/nonplanar.stdout
+text 2 golden/nosize.rc
+1
+
+sha256 390fb2cbaac08b121006c3705b509d3e3bc0f6936683948418328c966717b52e 2140 golden/nosize.stdout
+sha256 b5f8749dc3d20ca4588283856d75dc8ceccf72cbab8f750661e503f7da13ce8e 1029 golden/param.patch
+text 2 golden/param.rc
+0
+
+sha256 59e4de3500606e5c1bb9ac9dbce0b3291d2f6cb6885154de28d388e7ac605e8b 2134 golden/param.stdout
+sha256 5bc2663d7057d9c7efa7925cc7a6a6b4fd523b7b97255c1a9eca9625f56dd2f6 1029 golden/region.patch
+text 2 golden/region.rc
+0
+
+sha256 d2b17bcafa110bce74b53473e0f97f1ddc44e2946d0d467426e3c1252ea11dae 2205 golden/region.stdout
+text 113 golden/region_debug2.patch
+      2 positions  1
+    24    24    15     2.00     2.00     2.00
+    24    24     5     2.00     2.00     2.00
+
+text 2 golden/region_debug2.rc
+0
+
+sha256 c56ff8760b0eb5387b3c34317801e6b374c9ddac571c7b7fb070449dc3e8e6d7 4025 golden/region_debug2.stdout
+sha256 5bc2663d7057d9c7efa7925cc7a6a6b4fd523b7b97255c1a9eca9625f56dd2f6 1029 golden/taperpad.patch
+text 2 golden/taperpad.rc
+0
+
+sha256 59e4de3500606e5c1bb9ac9dbce0b3291d2f6cb6885154de28d388e7ac605e8b 2134 golden/taperpad.stdout
+sha256 5bc2663d7057d9c7efa7925cc7a6a6b4fd523b7b97255c1a9eca9625f56dd2f6 1029 golden/tilt.patch
+text 2 golden/tilt.rc
+0
+
+sha256 59e4de3500606e5c1bb9ac9dbce0b3291d2f6cb6885154de28d388e7ac605e8b 2134 golden/tilt.stdout
+text 2 golden/tiltnoaxis.rc
+1
+
+sha256 4706878e3fa953847e8adaaa023b0a9056ade89d6505a786a9c00e2ab9758d0c 2186 golden/tiltnoaxis.stdout
+text 2 golden/toobig.rc
+1
+
+sha256 a13f62f02dfd92ba169cb4f5e8c250facf44b4e09f85646f26eb709300232c16 2188 golden/toobig.stdout
+text 2 golden/toosmall.rc
+1
+
+sha256 e03e3628891001f6d26ee709603d930ad8e5d9da8174963eec23991259c74b65 2164 golden/toosmall.stdout
+sha256 2fccd798b76b70d06f732439e6a11f6bc1568bb69a7369cd85c9695953fa351f 1365 golden/volume.patch
+text 2 golden/volume.rc
+0
+
+sha256 59e4de3500606e5c1bb9ac9dbce0b3291d2f6cb6885154de28d388e7ac605e8b 2134 golden/volume.stdout

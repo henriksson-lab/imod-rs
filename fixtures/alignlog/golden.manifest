@@ -1,0 +1,128 @@
+# imod-rs native golden manifest for fixtures/alignlog; see fixtures/README.md.
+# Regenerate with fixtures/regen-golden.sh alignlog; do not edit by hand.
+text 10 golden/bad_option.files
+align.log
+
+text 36 golden/bad_option.out
+ERROR: alignlog - Illegal option: q
+
+text 2 golden/bad_option.rc
+1
+
+text 11 golden/g1_basic_all.files
+aligna.log
+
+sha256 8ca14d041ea87b6889f25509250635ef75aabb7833cf0c2970eebdf5140a21d8 11532 golden/g1_basic_all.out
+text 2 golden/g1_basic_all.rc
+0
+
+text 11 golden/g1_robust_cv_all.files
+aligna.log
+
+sha256 5bc47b5bf1144217984f3b57e3afbcbb919dabdc306dff68d6d30f1e2af9a488 12822 golden/g1_robust_cv_all.out
+text 2 golden/g1_robust_cv_all.rc
+0
+
+text 10 golden/g2_local_robust_cv_a.files
+align.log
+
+sha256 ee6673ef3c8084100ba8c2edda888db185f21742f23af896a3fdbfbf37edee2b 1183 golden/g2_local_robust_cv_a.out
+text 2 golden/g2_local_robust_cv_a.rc
+0
+
+text 11 golden/g2_local_robust_cv_all.files
+aligna.log
+
+sha256 f5f1340d44f51dd87be110a75e696933cc11893552e6a0020656857e80e51e35 61068 golden/g2_local_robust_cv_all.out
+text 2 golden/g2_local_robust_cv_all.rc
+0
+
+text 10 golden/g2_local_robust_cv_e.files
+align.log
+
+sha256 1e08cfe0f13ca48b3c207959f929a1922446e55b6e0d9210f49f63ba499ae187 2164 golden/g2_local_robust_cv_e.out
+text 2 golden/g2_local_robust_cv_e.rc
+0
+
+text 10 golden/g2_local_robust_cv_p.files
+align.log
+
+sha256 2c627fc5106e4610e756ce503277e71423078890eb14da44b93eca21e6567c97 608 golden/g2_local_robust_cv_p.out
+text 2 golden/g2_local_robust_cv_p.rc
+0
+
+text 10 golden/g2_local_robust_cv_s.files
+align.log
+
+sha256 ce992e1c45f4350e9cf31f941d8a174e9d94c069f57c5a10c44c5311f2ad8f8e 23325 golden/g2_local_robust_cv_s.out
+text 2 golden/g2_local_robust_cv_s.rc
+0
+
+text 10 golden/g2_local_robust_cv_w.files
+align.log
+
+sha256 c0d2261233b1320a0e25fc60e0f199b57f7273557b01691d4e80f9308f205791 2511 golden/g2_local_robust_cv_w.out
+text 2 golden/g2_local_robust_cv_w.rc
+0
+
+text 11 golden/g3_xtilt_beam_all.files
+aligna.log
+
+sha256 4ffbb1e1914491316b5876f008c56ea28146210aab21a3b748a765a5bde6e19d 13159 golden/g3_xtilt_beam_all.out
+text 2 golden/g3_xtilt_beam_all.rc
+0
+
+text 0 golden/missing.files
+
+text 63 golden/missing.out
+ERROR: alignlog - Alignment log file alignb.log does not exist
+
+text 2 golden/missing.rc
+1
+
+text 10 golden/no_options.files
+align.log
+
+text 0 golden/no_options.out
+
+text 2 golden/no_options.rc
+0
+
+text 21 golden/path_b.files
+alignb.log
+sub/x.log
+
+text 464 golden/path_b.out
+ Number of cycles :    57                      Final   F :        0.438184
+  41 views,   90 geometric variables,   30 3-D points,  1128 projection points
+  Ratio of total measured values to all unknowns =  2256/ 257 =   8.78
+ Residual error mean and sd:     0.384   0.212 pixels
+ 
+* * * * * * * * * * * * * * * * * * * * * * * * * * * *
+ 
+  Ratio of total measured values to all unknowns =  2256/ 257 =   8.78
+ Residual error mean and sd:     0.384   0.212 pixels
+
+text 2 golden/path_b.rc
+0
+
+text 10 golden/repeat.files
+align.log
+
+sha256 25dafc69e9c7047189660824b639bedbeaf74c1ae0dbf96d91ae3bb416c414d2 649 golden/repeat.out
+text 2 golden/repeat.rc
+0
+
+text 11 golden/unit_aligna_all.files
+aligna.log
+
+sha256 33fa700d0551727ddfdcf585d3ca41d16758579dcff01125eecf30c4aef649c5 56197 golden/unit_aligna_all.out
+text 2 golden/unit_aligna_all.rc
+0
+
+text 0 golden/usage.files
+
+sha256 853f349c2dd22bc58ea381d6c900e902e0b333d81c244e7f820238285b5d998c 777 golden/usage.out
+text 2 golden/usage.rc
+0
+

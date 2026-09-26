@@ -1,0 +1,41 @@
+# name<TAB>arguments ('.' for none).  Native tifinfo.c assumes a big-endian host and
+# cannot read a real TIFF here (BUGS.md, fixed in translation); every case that walks
+# IFD entries has a translation-written golden -- see make-tifinfo-goldens.sh.
+badver	badver.tif
+v_badver	-v badver.tif
+empty	empty.tif
+#full	v_empty	-v empty.tif
+#full	iibe_byte	iibe_byte.tif
+#full	v_iibe_byte	-v iibe_byte.tif
+#full	iibe_multi	iibe_multi.tif
+#full	v_iibe_multi	-v iibe_multi.tif
+#full	iibe_tiled	iibe_tiled.tif
+#full	v_iibe_tiled	-v iibe_tiled.tif
+#full	mmle_byte	mmle_byte.tif
+#full	v_mmle_byte	-v mmle_byte.tif
+#full	mmle_multi	mmle_multi.tif
+#full	v_mmle_multi	-v mmle_multi.tif
+#full	mmle_tiled	mmle_tiled.tif
+#full	v_mmle_tiled	-v mmle_tiled.tif
+noifd	noifd.tif
+v_noifd	-v noifd.tif
+nottif	nottif.bin
+#full	v_nottif	-v nottif.bin
+several	-v iibe_byte.tif mmle_multi.tif iibe_tiled.tif noifd.tif
+quiet_several	iibe_multi.tif mmle_tiled.tif
+missing_middle	iibe_byte.tif nosuch.tif mmle_byte.tif
+v_only	-v
+noargs	.
+#full	other_flag	-x iibe_byte.tif
+real_le	real_le.tif
+v_real_le	-v real_le.tif
+#full	real_be	real_be.tif
+v_real_be	-v real_be.tif
+#full	real_le_multi	real_le_multi.tif
+v_real_le_multi	-v real_le_multi.tif
+#full	real_be_multi	real_be_multi.tif
+#full	v_real_be_multi	-v real_be_multi.tif
+v_real_le_tiled	-v real_le_tiled.tif
+#full	v_real_be_tiled	-v real_be_tiled.tif
+#full	v_real_le_byte	-v real_le_byte.tif
+v_real_be_byte	-v real_be_byte.tif

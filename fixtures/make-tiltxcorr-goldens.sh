@@ -3,7 +3,8 @@
 #
 # Inputs in fixtures/tiltxcorr: tx.st is a seeded synthetic tilt series (96 x 88,
 # 13 views at -60..60 in 10-degree steps, tilt axis at -6 degrees, per-view random
-# shifts and noise, short mode) written by the native raw2mrc from the generator in
+# shifts and noise, short mode, converted to bytes by the native `newstack -mode 0
+# -scale 0,255`; the short original is in git history) written by the native raw2mrc from the generator in
 # /big/henriksson/realbench/wave2-2C/make_series.py; tx.tlt its angles; tx.prexf the
 # native `tiltxcorr -input tx.st -output tx.prexf -tiltfile tx.tlt -rotation -6`
 # output; bound.mod/boundw.mod/seed.mod small hand-written ASCII models (a closed
@@ -15,14 +16,23 @@ set -e
 REF=${REF:-/tmp/imod-reference-build}
 HERE=$(cd "$(dirname "$0")/tiltxcorr" && pwd)
 export AUTODOC_DIR=$REF/autodoc LD_LIBRARY_PATH=$REF/buildlib OMP_NUM_THREADS=1
+# Cases whose golden is the defined behaviour of an upstream bug fixed in
+# translation (BUGS.md, tiltxcorr) are run with our build ($RSBIN) instead:
+# `nonopt` (the output file as the second non-option argument) and `scan`
+# (no parabolic fit at the end of the rotation scan).
+DEFINED="nonopt scan"
+RSBIN=${RSBIN:-$(cd "$HERE/../.." && pwd)/target/release/imod}
 rm -rf "$HERE/golden"; mkdir -p "$HERE/golden"
-grep -v '^#' "$HERE/cases.tsv" | while IFS=$'\t' read -r name args; do
+sed "${FULL:+s/^#full\t//;}/^#/d" "$HERE/cases.tsv" | while IFS=$'\t' read -r name args; do
   [ -z "$name" ] && continue
   work=$(mktemp -d)
   cp "$HERE"/tx.* "$HERE"/*.mod "$work"/
   ls "$work" > "$work/.inputs"
+  PROG=$REF/imodutil/tiltxcorr
+  case " $DEFINED " in *" $name "*)
+    PROG="env AUTODOC_DIR=$HERE/../../IMOD/autodoc $RSBIN tiltxcorr" ;; esac
   set +e
-  (cd "$work" && $REF/imodutil/tiltxcorr $args | cat > "$work/.stdout"; echo "${PIPESTATUS[0]}" > "$work/.rc")
+  (cd "$work" && $PROG $args | cat > "$work/.stdout"; echo "${PIPESTATUS[0]}" > "$work/.rc")
   set -e
   mkdir -p "$HERE/golden/$name"
   cp "$work/.stdout" "$HERE/golden/$name.out"

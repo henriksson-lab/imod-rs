@@ -1,0 +1,21 @@
+# name	arguments (steps separated by ' ;; ' run in the same directory; exit status and stdout recorded by make-ctfphaseflip-goldens.sh)
+basic	-input f48.mrc -output out.mrc -angleFn t7.tlt -defFn v2.defocus -defTol 200 -iWidth 15 -pixelSize 0.5 -volt 300 -cs 2.7 -ampContrast 0.07
+byte	-input b45.mrc -output out.mrc -angleFn t5.tlt -defFn v5.defocus -defTol 200 -iWidth 15 -pixelSize 0.5 -volt 300 -cs 2.7 -ampContrast 0.07 -iWidth 1
+#full	strips	-input s160.mrc -output out.mrc -angleFn t5.tlt -defFn v5.defocus -defTol 20 -iWidth 6 -pixelSize 0.8 -volt 200 -cs 2 -ampContrast 0.1
+v1off	-input f48.mrc -output out.mrc -angleFn t7.tlt -defFn v1off.defocus -defTol 200 -iWidth 15 -pixelSize 0.5 -volt 300 -cs 2.7 -ampContrast 0.07 -invert
+noangles	-input f48.mrc -output out.mrc -defFn single.defocus -defTol 200 -iWidth 15 -pixelSize 0.5 -volt 300 -cs 2.7 -ampContrast 0.07
+astigxf	-input f48.mrc -output out.mrc -angleFn t7.tlt -defFn astig.defocus -defTol 200 -iWidth 15 -pixelSize 0.5 -volt 300 -cs 2.7 -ampContrast 0.07 -xform x7.xf -unbinned 0.25
+phasecut	-input f48.mrc -output out.mrc -angleFn t7.tlt -defFn phasecut.defocus -defTol 200 -iWidth 15 -pixelSize 0.5 -volt 300 -cs 2.7 -ampContrast 0.07 -scale 0.5
+allscale	-input f48.mrc -output out.mrc -angleFn t7.tlt -defFn all.defocus -defTol 200 -iWidth 15 -pixelSize 0.5 -volt 300 -cs 2.7 -ampContrast 0.07 -scale 0.7 -zoff 20
+cuton	-input f48.mrc -output out.mrc -angleFn t7.tlt -defFn v2.defocus -defTol 200 -iWidth 15 -pixelSize 0.5 -volt 300 -cs 2.7 -ampContrast 0.07 -degPhase 50 -cuton 0.05 -scale 1
+diagonal	-input f48.mrc -output out.mrc -angleFn t7.tlt -defFn v2.defocus -defTol 200 -iWidth 15 -pixelSize 0.5 -volt 300 -cs 2.7 -ampContrast 0.07 -xtilt 4 -axis 10 -expanded 1.2
+maxwidth	-input f48.mrc -output out.mrc -angleFn t7.tlt -defFn v2.defocus -defTol 200 -iWidth 15 -pixelSize 0.5 -volt 300 -cs 2.7 -ampContrast 0.07 -maxWidth 24 -iWidth -4 -zero 5 -views 2,6
+gpu	-input f48.mrc -output out.mrc -angleFn t7.tlt -defFn v2.defocus -defTol 200 -iWidth 15 -pixelSize 0.5 -volt 300 -cs 2.7 -ampContrast 0.07 -gpu 0 -debug 10 -skipFlag 2
+parallel	-input f48.mrc -output out.mrc -angleFn t7.tlt -defFn v2.defocus -defTol 200 -iWidth 15 -pixelSize 0.5 -volt 300 -cs 2.7 -ampContrast 0.07 -views -1,-1 -totalViews 1,7 ;; -input f48.mrc -output out.mrc -angleFn t7.tlt -defFn v2.defocus -defTol 200 -iWidth 15 -pixelSize 0.5 -volt 300 -cs 2.7 -ampContrast 0.07 -views 1,3 -totalViews 1,7 -boundary bound.info ;; -input f48.mrc -output out.mrc -angleFn t7.tlt -defFn v2.defocus -defTol 200 -iWidth 15 -pixelSize 0.5 -volt 300 -cs 2.7 -ampContrast 0.07 -views 4,7 -totalViews 1,7 -boundary bound.info
+flagged	-input f48.mrc -output out.mrc -angleFn t7.tlt -defFn v2.defocus -defTol 200 -iWidth 15 -pixelSize 0.5 -volt 300 -cs 2.7 -ampContrast 0.07 -views -1,-1 -totalViews 1,7 ;; -input out.mrc -output o2.mrc -angleFn t7.tlt -defFn v2.defocus -defTol 200 -iWidth 15 -pixelSize 0.5 -volt 300 -cs 2.7 -ampContrast 0.07
+badview	-input f48.mrc -output out.mrc -angleFn t7.tlt -defFn v2.defocus -defTol 200 -iWidth 15 -pixelSize 0.5 -volt 300 -cs 2.7 -ampContrast 0.07 -maxWidth 24 -xtilt 3
+nodefocus	-input f48.mrc -output out.mrc -angleFn t7.tlt -defFn none.defocus -defTol 200 -iWidth 15 -pixelSize 0.5 -volt 300 -cs 2.7 -ampContrast 0.07
+notol	-input f48.mrc -output out.mrc -angleFn t7.tlt -defFn v2.defocus -iWidth 15
+gpufail	-input f48.mrc -output out.mrc -angleFn t7.tlt -defFn v2.defocus -defTol 200 -iWidth 15 -pixelSize 0.5 -volt 300 -cs 2.7 -ampContrast 0.07 -gpu 1 -action 2
+bothphase	-input f48.mrc -output out.mrc -angleFn t7.tlt -defFn v2.defocus -defTol 200 -iWidth 15 -pixelSize 0.5 -volt 300 -cs 2.7 -ampContrast 0.07 -phase 0.5 -degPhase 30
+help	-help

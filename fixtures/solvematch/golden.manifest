@@ -1,0 +1,705 @@
+# imod-rs native golden manifest for fixtures/solvematch; see fixtures/README.md.
+# Regenerate with fixtures/regen-golden.sh solvematch; do not edit by hand.
+text 123 golden/aniso01.out.out.xf
+ -0.025851 -0.015836 -1.000018     3.009
+  0.000493  0.996773 -0.017020    -2.032
+  0.999549 -0.002219 -0.025722     3.959
+
+text 2 golden/aniso01.rc
+0
+
+sha256 1593816236e7cbe528f66b2916383ec7e4c2dd1dd159d09ed2baaa5d3759a94d 744 golden/aniso01.stdout
+text 123 golden/anisoY.out.out.xf
+ -0.025846 -0.007137 -1.000128     2.991
+  0.000718  0.996874 -0.008292    -2.058
+  0.999549 -0.002219 -0.025722     3.959
+
+text 2 golden/anisoY.rc
+0
+
+sha256 2788a671400dfa5414c55c2df5e7392d27b9612fa650de438c1479f79b3fba4f 950 golden/anisoY.stdout
+text 123 golden/atob.out.out.xf
+ -0.025851 -0.015836 -1.000018     3.009
+  0.000493  0.996773 -0.017020    -2.032
+  0.999549 -0.002219 -0.025722     3.959
+
+text 2 golden/atob.rc
+0
+
+sha256 6abad08de8f6f260bd7e1c8729ec5e9413b26d49e669c78802cb829c8477bbd3 665 golden/atob.stdout
+text 123 golden/basic.out.out.xf
+ -0.025851 -0.015836 -1.000018     3.009
+  0.000493  0.996773 -0.017020    -2.032
+  0.999549 -0.002219 -0.025722     3.959
+
+text 2 golden/basic.rc
+0
+
+sha256 b546be8a7009d32463a08d47f8b5970be2d7a12a0432f9dfc8d18490fa2aafdf 665 golden/basic.stdout
+text 123 golden/basic_nonopt.out.out.xf
+ -0.025851 -0.015836 -1.000018     3.009
+  0.000493  0.996773 -0.017020    -2.032
+  0.999549 -0.002219 -0.025722     3.959
+
+text 2 golden/basic_nonopt.rc
+0
+
+sha256 b546be8a7009d32463a08d47f8b5970be2d7a12a0432f9dfc8d18490fa2aafdf 665 golden/basic_nonopt.stdout
+text 123 golden/defaultlist.out.out.xf
+  0.081613  1.173542  0.123920     7.658
+  0.006837 -0.067479  0.016116     0.129
+  0.198089 -0.906793  0.107880    -9.304
+
+text 2 golden/defaultlist.rc
+1
+
+sha256 deed938ae2bec465a3f8ffe404e621d0205605bc6182311c5c38d329e651e63b 1060 golden/defaultlist.stdout
+text 2 golden/err_bad.rc
+2
+
+text 40 golden/err_bad.stdout
+
+ FORMATTED  old  file opened: badA.xyz
+
+text 123 golden/err_baddim.out.out.xf
+ -0.025851 -0.015836 -1.000018   198.009
+  0.000493  0.996773 -0.017020    -2.032
+  0.999549 -0.002219 -0.025722   198.959
+
+text 2 golden/err_baddim.rc
+0
+
+sha256 55ebe53bb0c46bc13ee040572e750fe7cdad207a5e1751ada86fcd8acc8d5361 668 golden/err_baddim.stdout
+text 2 golden/err_badlist.rc
+1
+
+text 206 golden/err_badlist.stdout
+
+ FORMATTED  old  file opened: twoA.xyz
+          30  points from first tomogram
+
+ FORMATTED  old  file opened: twoB.xyz
+          30  points from second tomogram
+
+ERROR: PARSELIST - BAD CHARACTER IN ENTRY
+
+text 2 golden/err_badtom.rc
+1
+
+text 279 golden/err_badtom.stdout
+
+ FORMATTED  old  file opened: twoA.xyz
+          30  points from first tomogram
+
+ FORMATTED  old  file opened: twoB.xyz
+          30  points from second tomogram
+ERROR: iiOpen - Opening file nothere.mrc (No such file or directory)
+
+ERROR: iiuOpen - Could not open 'nothere.mrc'
+
+text 2 golden/err_empty.rc
+1
+
+text 235 golden/err_empty.stdout
+
+ FORMATTED  old  file opened: empty.xyz
+           0  points from first tomogram
+
+ FORMATTED  old  file opened: twoB.xyz
+          30  points from second tomogram
+
+ ERROR: SOLVEMATCH - Need at least           4  points to get started
+
+text 2 golden/err_few.rc
+1
+
+text 234 golden/err_few.stdout
+
+ FORMATTED  old  file opened: fewA.xyz
+           3  points from first tomogram
+
+ FORMATTED  old  file opened: fewB.xyz
+           3  points from second tomogram
+
+ ERROR: SOLVEMATCH - Need at least           4  points to get started
+
+text 2 golden/err_nobfid.rc
+1
+
+text 156 golden/err_nobfid.stdout
+
+ FORMATTED  old  file opened: twoA.xyz
+          30  points from first tomogram
+
+ERROR: SOLVEMATCH - No file specified for fiducials in second tilt series
+
+text 2 golden/err_nofile.rc
+1
+
+text 48 golden/err_nofile.stdout
+
+ERROR: DOPEN - FILE nothere.xyz DOES NOT EXIST
+
+text 2 golden/err_nooutput.rc
+1
+
+sha256 85ec273f530c36ca54b55dc0da1bf30a0b629737a163fbe062c05da8d1a253cb 673 golden/err_nooutput.stdout
+text 123 golden/err_zeroid.out.out.xf
+ -0.025851 -0.015836 -1.000018     3.009
+  0.000493  0.996773 -0.017020    -2.032
+  0.999549 -0.002219 -0.025722     3.959
+
+text 2 golden/err_zeroid.rc
+0
+
+sha256 82f9272e0ad8dba7f29e24e929b64c76e07a8fa9b4fa630f4baf499229f42b5e 850 golden/err_zeroid.stdout
+text 2 golden/help.rc
+0
+
+sha256 75a2bbce38f261549ed381a545f0804eb71d8cdd0c81488a2de71e93594ed256 2949 golden/help.stdout
+text 2 golden/hiid.rc
+1
+
+text 222 golden/hiid.stdout
+
+ FORMATTED  old  file opened: hiidA.xyz
+          10  points from first tomogram
+
+ FORMATTED  old  file opened: hiidB.xyz
+          10  points from second tomogram
+
+ERROR: SOLVEMATCH - Contour numbers too high for arrays
+
+text 2 golden/interactive_eof.rc
+2
+
+sha256 d43cd91327cfce461c3cfdb887b9cad58ce2826560c4080d20e68510ed34a2ca 648 golden/interactive_eof.stdout
+text 2 golden/interactive_fid.rc
+1
+
+sha256 4f9a2385f0afd553014a408a9cf074ebfacc23712b08b916a8b6f0e52affce68 1528 golden/interactive_fid.stdout
+text 123 golden/interactive_fid_s0.out.out.xf
+ -0.025744 -0.016073 -0.999542   203.706
+  0.000426  0.996750 -0.016962   -46.152
+  0.999489 -0.002307 -0.025615  -185.833
+
+text 2 golden/interactive_fid_s0.rc
+0
+
+sha256 226c7651bcf21f12ba1addcabf33f066a67ad84b63366c1349abbd3890a72d70 1964 golden/interactive_fid_s0.stdout
+text 123 golden/interactive_models.out.out.xf
+ -0.025424  0.039071 -0.999380     1.254
+  0.000296  0.996649 -0.016846    -2.031
+  0.999269 -0.090811 -0.024040     6.768
+
+text 2 golden/interactive_models.rc
+0
+
+sha256 6f9f9558ddcd3d8f31a4d34e726e7d890672a537f565bcc49aafa2d669bf4de9 917 golden/interactive_models.stdout
+text 123 golden/inv_s1.out.out.xf
+ -0.025254  0.017512 -1.000156     2.973
+  0.001691  1.000279  0.017472    42.061
+  0.999881 -0.001225 -0.026672     3.961
+
+text 2 golden/inv_s1.rc
+0
+
+sha256 b84828596e4fdd815434ab24d95685a3fd037fcac58be184a964170203000d6a 665 golden/inv_s1.stdout
+text 2 golden/listhigh.rc
+1
+
+text 250 golden/listhigh.stdout
+
+ FORMATTED  old  file opened: twoA.xyz
+          30  points from first tomogram
+
+ FORMATTED  old  file opened: twoB.xyz
+          30  points from second tomogram
+
+ERROR: SOLVEMATCH -  You entered a point number higher than the number of points in A
+
+text 2 golden/listmismatch.rc
+1
+
+text 304 golden/listmismatch.stdout
+
+ FORMATTED  old  file opened: twoA.xyz
+          30  points from first tomogram
+
+ FORMATTED  old  file opened: twoB.xyz
+          30  points from second tomogram
+
+ ERROR: SOLVEMATCH - You must have the same number  of entries in each listyou made           6  and           5  entries for lists A and B
+
+text 2 golden/listtoomany.rc
+1
+
+text 259 golden/listtoomany.stdout
+
+ FORMATTED  old  file opened: twoA.xyz
+          30  points from first tomogram
+
+ FORMATTED  old  file opened: twoB.xyz
+          30  points from second tomogram
+
+ERROR: SOLVEMATCH - You have entered more numbers than the minimum number of points in A and B
+
+text 2 golden/listtwice.rc
+1
+
+text 229 golden/listtwice.stdout
+
+ FORMATTED  old  file opened: twoA.xyz
+          30  points from first tomogram
+
+ FORMATTED  old  file opened: twoB.xyz
+          30  points from second tomogram
+
+ ERROR: SOLVEMATCH - Point #           5  IN A referred to twice
+
+text 2 golden/listzero.rc
+1
+
+text 238 golden/listzero.stdout
+
+ FORMATTED  old  file opened: twoA.xyz
+          30  points from first tomogram
+
+ FORMATTED  old  file opened: twoB.xyz
+          30  points from second tomogram
+
+ERROR: SOLVEMATCH - You entered a point number less than or equal to zero
+
+text 123 golden/local8.out.out.xf
+ -0.025851 -0.015836 -1.000018     3.009
+  0.000493  0.996773 -0.017020    -2.032
+  0.999549 -0.002219 -0.025722     3.959
+
+text 2 golden/local8.rc
+1
+
+sha256 92f76cca114de52f45a05110b514a0a1e38efe1a1ba87c546239f01f726ca11a 1276 golden/local8.stdout
+text 123 golden/local8c1.out.out.xf
+ -0.025851 -0.015836 -1.000018     3.009
+  0.000493  0.996773 -0.017020    -2.032
+  0.999549 -0.002219 -0.025722     3.959
+
+text 2 golden/local8c1.rc
+1
+
+sha256 f33ccc22bc47b28f561f62b7b725c84e83d97c12644e3a9fc4afeb444aa52e88 1686 golden/local8c1.stdout
+text 123 golden/match_bad.out.out.xf
+ -0.025682 -0.016109 -0.999497   398.713
+  0.000451  0.996735 -0.016944     1.351
+  0.999415 -0.002266 -0.025667     9.159
+
+text 2 golden/match_bad.rc
+0
+
+sha256 e844b0e78acf5b7eb5050c92c5c56605e570490be62ab981ebff9642b6ea45bf 904 golden/match_bad.stdout
+text 2 golden/match_badmod.rc
+1
+
+text 40 golden/match_badmod.stdout
+
+ERROR: SOLVEMATCH - Reading model file
+
+text 123 golden/match_fids.out.out.xf
+ -0.025744 -0.016074 -0.999542   398.706
+  0.000426  0.996750 -0.016962     1.348
+  0.999489 -0.002308 -0.025615     9.167
+
+text 2 golden/match_fids.rc
+0
+
+sha256 56c5e53f7d8af53db1ec65e923e13384c55effde934821b474148f1a6c67ca03 780 golden/match_fids.stdout
+text 123 golden/match_fids_lo.out.out.xf
+ -0.025744 -0.016074 -0.999542   398.706
+  0.000426  0.996750 -0.016962     1.348
+  0.999489 -0.002308 -0.025615     9.167
+
+text 2 golden/match_fids_lo.rc
+1
+
+sha256 d21c443ce0b3883ad958a2a07dc991cbdc63a113ddd559b2ee39c3434834f4ea 1151 golden/match_fids_lo.stdout
+text 123 golden/match_m2.out.out.xf
+ -0.025424  0.039044 -0.999379   394.237
+  0.000296  0.996649 -0.016846     1.355
+  0.999269 -0.090806 -0.024040    15.911
+
+text 2 golden/match_m2.rc
+0
+
+text 464 golden/match_m2.stdout
+          15  point pairs from models
+          15  pairs of points are available for fitting
+
+
+ Mean residual   0.448,  maximum    0.798 at point #  10 (in A)
+  Deviations:    0.558    0.511    0.254
+
+ Transformation matrix for matchvol:
+ -0.025424  0.039044 -0.999379   394.237
+  0.000296  0.996649 -0.016846     1.355
+  0.999269 -0.090806 -0.024040    15.911
+
+Scaling along the three axes - X:  1.000  Y:  1.002  Z:  1.000
+
+ FORMATTED  new  file opened: out.xf
+
+text 2 golden/match_mismatch.rc
+1
+
+text 72 golden/match_mismatch.stdout
+
+ERROR: SOLVEMATCH - # of points does not match between matching models
+
+text 2 golden/match_nob.rc
+1
+
+text 65 golden/match_nob.stdout
+
+ ERROR: SOLVEMATCH - No matching model for tomogram           2
+
+text 123 golden/match_noisy.out.out.xf
+ -0.024961 -0.016357 -1.000430   398.484
+ -0.001175  0.996252 -0.021020     1.832
+  1.001749 -0.000301 -0.029170     9.829
+
+text 2 golden/match_noisy.rc
+0
+
+sha256 74ba4fb4c47235551e74abb25f79f6e72ea3394ee96f62fe9a5c35ea78f1f4c5 780 golden/match_noisy.stdout
+text 2 golden/match_notom.rc
+1
+
+text 87 golden/match_notom.stdout
+
+ERROR: SOLVEMATCH - you must enter option ATomogram to specify file size or file name
+
+text 123 golden/match_only.out.out.xf
+ -0.025424  0.039044 -0.999379   394.237
+  0.000296  0.996649 -0.016846     1.355
+  0.999269 -0.090806 -0.024040    15.911
+
+text 2 golden/match_only.rc
+0
+
+text 464 golden/match_only.stdout
+          15  point pairs from models
+          15  pairs of points are available for fitting
+
+
+ Mean residual   0.448,  maximum    0.798 at point #  10 (in A)
+  Deviations:    0.558    0.511    0.254
+
+ Transformation matrix for matchvol:
+ -0.025424  0.039044 -0.999379   394.237
+  0.000296  0.996649 -0.016846     1.355
+  0.999269 -0.090806 -0.024040    15.911
+
+Scaling along the three axes - X:  1.000  Y:  1.002  Z:  1.000
+
+ FORMATTED  new  file opened: out.xf
+
+text 123 golden/maxresid.out.out.xf
+ -0.025851 -0.015836 -1.000018     3.009
+  0.000493  0.996773 -0.017020    -2.032
+  0.999549 -0.002219 -0.025722     3.959
+
+text 2 golden/maxresid.rc
+1
+
+sha256 b66ff1d4c6dc971a1cb96393f63fbc4a1059b15667ed4383fb7a2e78af1d8453 1036 golden/maxresid.stdout
+text 2 golden/noargs_eof.rc
+2
+
+text 119 golden/noargs_eof.stdout
+ Name of file with 3-D fiducial coordinates for first tilt series,
+ or Return to align with matching model files only: 
+text 123 golden/nocol.out.out.xf
+ -0.026509 -0.017880 -0.999124     2.966
+ -0.000787  0.999673 -0.017010    -1.974
+  1.000078 -0.000050 -0.026826     3.987
+
+text 2 golden/nocol.rc
+0
+
+sha256 9a033653130b1572a87c311fb544a73a03064a8c81b8410cfbf4a44e37c96f85 653 golden/nocol.stdout
+text 123 golden/old_pix.out.out.xf
+ -0.025851 -0.015836 -1.000018   398.053
+  0.000493  0.996773 -0.017020     1.191
+  0.999549 -0.002219 -0.025722     9.063
+
+text 2 golden/old_pix.rc
+0
+
+sha256 8b3c429ccdfc385b9123478045c29b3a2f1b1a78ab79773f654ac72bcf0985bf 665 golden/old_pix.stdout
+text 123 golden/one_s1.out.out.xf
+ -0.024954 -0.015905 -0.998502     2.813
+ -0.000605  0.998827 -0.015895    -1.838
+  0.998594  0.000171 -0.027299     3.893
+
+text 2 golden/one_s1.rc
+0
+
+sha256 83516599d8a9603215e159da6a55a5d3212a95657eb87fae760c1f81cee00a56 665 golden/one_s1.stdout
+text 123 golden/one_s1_inv1.out.out.xf
+ -0.024944 -0.017424 -0.998469     2.847
+ -0.001251 -0.998787  0.017461    41.937
+  0.998575 -0.001727 -0.027263     3.934
+
+text 2 golden/one_s1_inv1.rc
+0
+
+sha256 34b261c5ff562c36d9105c1dcb07c66e3b501fdf3e290cbcf39a2be54db34ec7 665 golden/one_s1_inv1.stdout
+text 123 golden/one_s2.out.out.xf
+ -0.024960 -0.053134 -0.997884     3.629
+ -0.000797  0.409035 -0.006048    11.086
+  0.998591 -0.003733 -0.027222     3.979
+
+text 2 golden/one_s2.rc
+0
+
+sha256 caf72179d033e6b4bcacb94e4938f456e8517610de3b3dade7513b30e314bced 744 golden/one_s2.stdout
+text 123 golden/one_sm1.out.out.xf
+ -0.024954 -0.015905 -0.998502     2.813
+ -0.000605  0.998827 -0.015895    -1.838
+  0.998594  0.000171 -0.027299     3.893
+
+text 2 golden/one_sm1.rc
+0
+
+sha256 83516599d8a9603215e159da6a55a5d3212a95657eb87fae760c1f81cee00a56 665 golden/one_sm1.stdout
+text 123 golden/outlier.out.out.xf
+ -0.025393 -0.019873 -0.999870     3.046
+  0.001210  0.996042 -0.018206    -1.903
+  0.999230 -0.000392 -0.026978     4.035
+
+text 2 golden/outlier.rc
+0
+
+sha256 8fae871c23e81191d93a62944469e2f1767f0e9b6b1d0e6ac4333461afb2be97 789 golden/outlier.stdout
+text 2 golden/param.rc
+1
+
+sha256 af91f0f7628960687abf1a4a640e9be3a5d9f1f393407b053fdad356604fdbfd 601 golden/param.stdout
+text 123 golden/partial4.out.out.xf
+ -0.025805 -0.014913 -1.000167     3.033
+  0.000516  0.997182 -0.017085    -2.021
+  0.999554 -0.002187 -0.025726     3.960
+
+text 2 golden/partial4.rc
+0
+
+sha256 e1e6106a40da39415a2be3a6bcbd6fa4d12464735381c640e4de0dffbbcc04db 981 golden/partial4.stdout
+text 2 golden/rel.rc
+1
+
+sha256 46c73e7e2b6c583f7ada6296ea658c49584b3d41670cc9b016ff9b877be2dcb2 601 golden/rel.stdout
+text 123 golden/scl_scales.out.out.xf
+ -0.025962 -0.013656 -1.000675     3.074
+ -0.000091  1.000491 -0.016940    -1.879
+  0.999537 -0.000201 -0.027252     4.010
+
+text 2 golden/scl_scales.rc
+0
+
+sha256 7d8eff37d9aa8f59c6b9522a06a39cb3008c29eb87e9881d23879f42aa3a06a9 665 golden/scl_scales.stdout
+text 123 golden/scl_tom.out.out.xf
+ -0.025962 -0.013656 -1.000675     3.074
+ -0.000091  1.000491 -0.016940    -1.879
+  0.999537 -0.000201 -0.027252     4.010
+
+text 2 golden/scl_tom.rc
+0
+
+sha256 7d8eff37d9aa8f59c6b9522a06a39cb3008c29eb87e9881d23879f42aa3a06a9 665 golden/scl_tom.stdout
+text 2 golden/sizes.rc
+1
+
+sha256 af91f0f7628960687abf1a4a640e9be3a5d9f1f393407b053fdad356604fdbfd 601 golden/sizes.stdout
+text 123 golden/sizes_scales.out.out.xf
+ -0.025851 -0.015836 -1.000018     3.009
+  0.000493  0.996773 -0.017020    -2.032
+  0.999549 -0.002219 -0.025722     3.959
+
+text 2 golden/sizes_scales.rc
+0
+
+sha256 b546be8a7009d32463a08d47f8b5970be2d7a12a0432f9dfc8d18490fa2aafdf 665 golden/sizes_scales.stdout
+text 123 golden/transfer.out.out.xf
+ -0.025851 -0.015836 -1.000018     3.009
+  0.000493  0.996773 -0.017020    -2.032
+  0.999549 -0.002219 -0.025722     3.959
+
+text 2 golden/transfer.rc
+0
+
+sha256 d6cfa7c83bd1ba628a2867edb5257b691bb63cdb0e7f861e0e9610af7e1f732d 886 golden/transfer.stdout
+text 2 golden/transfer_atob.rc
+1
+
+text 279 golden/transfer_atob.stdout
+
+ FORMATTED  old  file opened: twoA.xyz
+          30  points from first tomogram
+
+ FORMATTED  old  file opened: twoB.xyz
+          30  points from second tomogram
+
+ FORMATTED  ro  file opened: two.transfer
+
+ERROR: SOLVEMATCH - No corresponding points found using transfer coords
+
+text 2 golden/transfer_badmod.rc
+1
+
+text 261 golden/transfer_badmod.stdout
+
+ FORMATTED  old  file opened: twoA.xyz
+          30  points from first tomogram
+
+ FORMATTED  old  file opened: twoB.xyz
+          30  points from second tomogram
+
+ FORMATTED  ro  file opened: two.transfer
+
+ERROR: SOLVEMATCH - Reading fiducial model for axis A
+
+text 123 golden/transfer_badz.out.out.xf
+ -0.025851 -0.015836 -1.000018     3.009
+  0.000493  0.996773 -0.017020    -2.032
+  0.999549 -0.002219 -0.025722     3.959
+
+text 2 golden/transfer_badz.rc
+0
+
+sha256 c17c3ae83d4b887fbc22faee713aaeba8d3b05d5a334b8f1c7691fbd7e4f6670 890 golden/transfer_badz.stdout
+text 123 golden/transfer_btoa.out.out.xf
+ -0.025851 -0.015836 -1.000018     3.009
+  0.000493  0.996773 -0.017020    -2.032
+  0.999549 -0.002219 -0.025722     3.959
+
+text 2 golden/transfer_btoa.rc
+0
+
+sha256 a807b29294fca2d88c49a1c85142633ce17c9d85ac1325255d695e97541d9b1b 890 golden/transfer_btoa.stdout
+text 2 golden/transfer_empty.rc
+2
+
+text 203 golden/transfer_empty.stdout
+
+ FORMATTED  old  file opened: twoA.xyz
+          30  points from first tomogram
+
+ FORMATTED  old  file opened: twoB.xyz
+          30  points from second tomogram
+
+ FORMATTED  ro  file opened: empty.xyz
+
+text 2 golden/transfer_nomodel.rc
+1
+
+text 296 golden/transfer_nomodel.stdout
+
+ FORMATTED  old  file opened: twoA.xyz
+          30  points from first tomogram
+
+ FORMATTED  old  file opened: twoB.xyz
+          30  points from second tomogram
+
+ FORMATTED  ro  file opened: two.transfer
+
+ERROR: SOLVEMATCH - Fiducial models for both axes must be entered to use transfer coords
+
+text 123 golden/transfer_pix.out.out.xf
+ -0.025851 -0.015836 -1.000018     3.009
+  0.000493  0.996773 -0.017020    -2.032
+  0.999549 -0.002219 -0.025722     3.959
+
+text 2 golden/transfer_pix.rc
+0
+
+sha256 61d4ca8c1ec07197e13518f59428b52b2a0c79174d42a8fa974015b7f3b440fe 889 golden/transfer_pix.stdout
+text 123 golden/transfer_use.out.out.xf
+ -0.025851 -0.015836 -1.000018     3.009
+  0.000493  0.996773 -0.017020    -2.032
+  0.999549 -0.002219 -0.025722     3.959
+
+text 2 golden/transfer_use.rc
+0
+
+sha256 62186d48d9ea83ef48a97d8fecf43bdc1611358d5514da67320b6933fde98179 886 golden/transfer_use.stdout
+text 123 golden/two_tomhalf.out.out.xf
+ -0.012926 -0.007918 -0.500009     1.504
+  0.000246  0.498387 -0.008510    -1.016
+  0.499775 -0.001110 -0.012861     1.980
+
+text 2 golden/two_tomhalf.rc
+0
+
+sha256 7ade64dde310335e0f9370c94ff2a07de9d083cbae28437c81a02a63793e4ac4 665 golden/two_tomhalf.stdout
+text 123 golden/warp_good.out.out.xf
+ -0.025670 -0.017689 -0.999337     8.047
+ -0.000081  0.999572 -0.017499    -1.930
+  0.999667 -0.000572 -0.035481     4.205
+
+text 2 golden/warp_good.rc
+0
+
+sha256 cc80f93b1e6d03bd29d9e27401f6e0b557f82cc08b72a59719856603d6e95cac 927 golden/warp_good.stdout
+text 123 golden/warp_shiftbad.out.out.xf
+ -0.025670 -0.017689 -0.999337     8.047
+ -0.000081  0.999572 -0.017499    -1.930
+  0.999667 -0.000572 -0.035481     4.205
+
+text 2 golden/warp_shiftbad.rc
+1
+
+sha256 a65eaea22ef7c96c0ee15e23fccd540094a90f46deb73d9217f2dc4817f1e6bc 1358 golden/warp_shiftbad.stdout
+text 123 golden/warp_shiftok.out.out.xf
+ -0.025670 -0.017689 -0.999337     8.047
+ -0.000081  0.999572 -0.017499    -1.930
+  0.999667 -0.000572 -0.035481     4.205
+
+text 2 golden/warp_shiftok.rc
+1
+
+sha256 dce84239f46c15bd8b72492887c4d4b7656a575ccf24cfea611f9a65b73dce3e 1483 golden/warp_shiftok.stdout
+text 123 golden/warp_transfer.out.out.xf
+ -0.025425 -0.018365 -0.999224     8.073
+ -0.000136  0.999368 -0.017462    -1.939
+  0.999525 -0.000906 -0.035424     4.173
+
+text 2 golden/warp_transfer.rc
+1
+
+sha256 40b76c0166522339629cd919de875c818431df9f3616b75d23e661095b2a74e4 1860 golden/warp_transfer.stdout
+text 123 golden/warp_transfer_local.out.out.xf
+ -0.025425 -0.018365 -0.999224     8.073
+ -0.000136  0.999368 -0.017462    -1.939
+  0.999525 -0.000906 -0.035424     4.173
+
+text 2 golden/warp_transfer_local.rc
+1
+
+sha256 5c5a66adcb51a801df832e8d53afe4a1f361812e7e98cf8bee032a06f91da43e 1969 golden/warp_transfer_local.stdout
+text 123 golden/wrong3.out.out.xf
+ -0.023966 -0.002283 -0.996482     2.641
+  0.001639  1.000509 -0.017339    -2.004
+  1.000763  0.022296 -0.022580     3.504
+
+text 2 golden/wrong3.rc
+1
+
+sha256 d086e8d949ad8a3fdc98fbbbce8a6a8bc1d55446ae0a86540b2cb5fbe8113fa2 1076 golden/wrong3.stdout
+text 123 golden/xtilts.out.out.xf
+ -0.025851 -0.042009 -0.999260     3.009
+ -0.043107  0.995164 -0.041946    -2.202
+  0.998619  0.040555 -0.027511     3.867
+
+text 2 golden/xtilts.rc
+0
+
+sha256 1bb5064e80c5c999d480debe4e87298134e22cdd88ec466ea9f01e42acd8fad8 665 golden/xtilts.stdout

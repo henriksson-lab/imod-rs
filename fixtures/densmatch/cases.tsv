@@ -2,10 +2,10 @@
 report	-report f.mrc f2.mrc
 out	f.mrc f2.mrc o.mrc
 inplace	f.mrc f2.mrc
-mode0	-mode 0 f.mrc f2.mrc o.mrc
+#full	mode0	-mode 0 f.mrc f2.mrc o.mrc
 mode1	-mode 1 s.mrc f2.mrc o.mrc
 bytein	f.mrc b.mrc o.mrc
-target	-target 50,10 -scaled f.mrc -report
+#full	target	-target 50,10 -scaled f.mrc -report
 target_out	-target 50,10 f.mrc o.mrc
 all	-all -report f.mrc s.mrc
 minmax	-xminmax 3,20 -yminmax 5,18 -zminmax 1,4 -report f.mrc s.mrc
@@ -13,7 +13,7 @@ zend0	-zminmax 2,0 -report f.mrc s.mrc
 offset	-xminmax 3,20 -offset 2,1,1 -report f.mrc s.mrc
 offset_bad	-xminmax 3,20 -offset 30,1,1 -report f.mrc s.mrc
 start_bad	-yminmax 30,40 -report f.mrc s.mrc
-onesamp	-zminmax 4,4 -report f.mrc s.mrc
+#full	onesamp	-zminmax 4,4 -report f.mrc s.mrc
 err_all_mm	-all -xminmax 1,5 f.mrc s.mrc
 err_offset_nomm	-offset 1,1,1 f.mrc s.mrc
 err_target_ref	-target 1,2 -reference f.mrc s.mrc

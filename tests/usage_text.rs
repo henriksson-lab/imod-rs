@@ -9,10 +9,10 @@
 mod common;
 
 fn golden(name: &str) -> String {
-    std::fs::read_to_string(
-        std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join(format!("fixtures/usage-{name}.txt")),
+    common::golden::read_to_string(
+        &std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join(format!("fixtures/usage-{name}.txt")),
     )
-    .unwrap()
 }
 
 #[test]

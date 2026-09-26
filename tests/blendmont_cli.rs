@@ -30,6 +30,7 @@
 //! `-MissingFromFirstNegativeXandY` fix (so its stdout numbers the
 //! negatives 1-4 where native, taking 2 missing, numbers them 5-9).  Every
 //! other case, and every other file of these cases, is native's.
+//! Pruned 2026-09-26: 38 of 39 rows kept (every other row selects its own option or exit; dropped `-functions 1`, the one-direction form of `func3`'s edge-functions-only run); the rest stay in cases.tsv as `#full` rows (FULL=1, fixtures/README.md).
 
 mod common;
 
@@ -56,7 +57,7 @@ fn scratch(name: &str) -> (PathBuf, Vec<String>) {
         let path = entry.unwrap().path();
         if path.is_file() {
             let file = path.file_name().unwrap().to_str().unwrap().to_string();
-            if file == "cases.tsv" || file == "excl.txt" {
+            if file == "cases.tsv" || file == "excl.txt" || file == "golden.manifest" {
                 continue;
             }
             std::fs::copy(&path, dir.join(&file)).unwrap();
@@ -72,17 +73,13 @@ fn every_case_matches_native_golden() {
     let golden = fixture_dir().join("golden");
     let mut failures = Vec::new();
     let mut count = 0;
-    for line in table
-        .lines()
-        .filter(|l| !l.starts_with('#') && !l.is_empty())
-    {
+    for line in common::golden::case_rows(&table) {
         let (name, args) = line.split_once('\t').unwrap();
-        let rc: i32 = std::fs::read_to_string(golden.join(format!("{name}.rc")))
-            .unwrap()
+        let rc: i32 = common::golden::read_to_string(&golden.join(format!("{name}.rc")))
             .trim()
             .parse()
             .unwrap();
-        let expected_out = std::fs::read(golden.join(format!("{name}.out"))).unwrap();
+        let expected_out = common::golden::expect(&golden.join(format!("{name}.out")));
         let (dir, inputs) = scratch(name);
         let output = common::imod_cmd("blendmont")
             .current_dir(&dir)
@@ -105,27 +102,22 @@ fn every_case_matches_native_golden() {
         // open print go to a stream of their own here, so their order against
         // the program's C-stdio lines can differ from native's (messages need
         // not interleave the same way; the lines themselves must all be there).
-        let lines = |b: &[u8]| -> Vec<String> {
+        let lines = |b: &[u8]| -> Vec<u8> {
             let mut v: Vec<String> = String::from_utf8_lossy(b)
                 .lines()
                 .map(str::to_owned)
                 .collect();
             v.sort();
-            v
+            v.join("\n").into_bytes()
         };
-        let (ours, theirs) = (lines(&output.stdout), lines(&expected_out));
-        if ours != theirs {
+        if !expected_out.matches_masked(&output.stdout, lines) {
             failures.push(format!(
                 "{name}: stdout differs\n--- native\n{}\n--- ours\n{}",
-                String::from_utf8_lossy(&expected_out),
+                expected_out.display(),
                 String::from_utf8_lossy(&output.stdout)
             ));
         }
-        let mut expected_files: Vec<String> = std::fs::read_dir(golden.join(name))
-            .unwrap()
-            .map(|e| e.unwrap().file_name().to_str().unwrap().to_string())
-            .collect();
-        expected_files.sort();
+        let expected_files: Vec<String> = common::golden::list(&golden.join(name));
         let mut produced: Vec<String> = std::fs::read_dir(&dir)
             .unwrap()
             .map(|e| e.unwrap().file_name().to_str().unwrap().to_string())
@@ -141,9 +133,9 @@ fn every_case_matches_native_golden() {
             let Ok(ours) = std::fs::read(dir.join(file)) else {
                 continue;
             };
-            let theirs = std::fs::read(golden.join(name).join(file)).unwrap();
-            if mask(&ours) != mask(&common::reconcile_uninitialised(&ours, &theirs)) {
-                failures.push(format!("{name}: {file} differs from native"));
+            let theirs = common::golden::expect(&golden.join(name).join(file));
+            if let Err(why) = theirs.compare(&ours, mask, true) {
+                failures.push(format!("{name}: {file} differs from native: {why}"));
             }
         }
         let _ = std::fs::remove_dir_all(&dir);

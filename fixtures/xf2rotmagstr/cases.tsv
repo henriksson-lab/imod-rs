@@ -1,0 +1,15 @@
+# name	arguments (- for none)	stdin (printf escapes, - for none)
+lin	lin.xf	-
+grid3	grid3.warp	-
+ctrl3	ctrl3.warp	-
+fwd3	fwd3.warp	-
+#full	grid2	grid2.warp	-
+grid1	grid1.warp	-
+badwarp	bad.warp	-
+badxf	badxf.xf	-
+#full	shortxf	shortxf.xf	-
+emptyxf	empty.xf	-
+missing	nothere.xf	-
+#full	twoargs	lin.xf extra	-
+prompt	-	lin.xf\n
+prompt_eof	-	-

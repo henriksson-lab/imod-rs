@@ -1,0 +1,513 @@
+# imod-rs native golden manifest for fixtures/chunksetup; see fixtures/README.md.
+# Regenerate with fixtures/regen-golden.sh chunksetup; do not edit by hand.
+text 59 golden/basic.files
+filt-001.com
+filt-all.com
+filt-finish.com
+filt.com
+vol.mrc
+
+text 439 golden/basic.out
+1 command files were generated and are ready to run.
+
+You can run filt-all.com (with subm) to run all command files in 
+sequence, reassemble the volume, and clean up intermediate image and 
+command files.
+
+If you have multiple processors available, you can use 
+  processchunks machine_list filt
+to do these operations in parallel, where machine_list is a comma-separated 
+list of available machines or just the number of local processors
+
+text 2 golden/basic.rc
+0
+
+text 46 golden/basic.tomopieces
+   1   1   1
+0,127,0,95,0,5
+8,135
+12,107
+9,14
+
+text 216 golden/basic/filt-001.com
+$taperoutvol -StandardInput
+InputFile vol.mrc
+OutputFile filt-001.in
+XMinAndMax 0,127
+YMinAndMax 0,95
+ZMinAndMax 0,5
+TaperPadsInXYZ 8,8,8
+$clip median -n 3 filt-001.in filt-001.out
+$echo done
+
+$b3dremove filt-001.in
+
+text 211 golden/basic/filt-all.com
+# THIS IS A COMMAND FILE TO RUN ALL THE PIECES AND PUT THEM TOGETHER
+#
+$echo Working on piece  1  of 1
+$vmstopy -x filt-001.com filt-001.log
+$echo Reassembling pieces
+$vmstopy -x filt-finish.com filt-finish.log
+
+text 322 golden/basic/filt-finish.com
+# THIS COMMAND FILE REASSEMBLES THE PIECES
+#
+$setenv IMOD_OUTPUT_FORMAT mrc
+$assemblevol -StandardInput
+OutputFile out.mrc
+StartEndToExtractInX 8,135
+StartEndToExtractInY 12,107
+StartEndToExtractInZ 9,14
+InputFile filt-001.out
+$b3dremove -g filt-[0-9][0-9][0-9]*.com* filt-[0-9][0-9][0-9]*.log* filt-[0-9][0-9][0-9]*.out*
+
+text 59 golden/command.files
+clip-cs-001.com
+clip-cs-all.com
+clip-cs-finish.com
+vol.mrc
+
+text 445 golden/command.out
+1 command files were generated and are ready to run.
+
+You can run clip-cs-all.com (with subm) to run all command files in 
+sequence, reassemble the volume, and clean up intermediate image and 
+command files.
+
+If you have multiple processors available, you can use 
+  processchunks machine_list clip-cs
+to do these operations in parallel, where machine_list is a comma-separated 
+list of available machines or just the number of local processors
+
+text 2 golden/command.rc
+0
+
+text 46 golden/command.tomopieces
+   1   1   1
+0,127,0,95,0,5
+8,135
+12,107
+9,14
+
+text 210 golden/command/clip-cs-001.com
+$taperoutvol -StandardInput
+InputFile vol.mrc
+OutputFile clip-cs-001.in
+XMinAndMax 0,127
+YMinAndMax 0,95
+ZMinAndMax 0,5
+TaperPadsInXYZ 8,8,8
+$clip "clip-cs-001.in"  "clip-cs-001.out"
+
+$b3dremove clip-cs-001.in
+
+text 223 golden/command/clip-cs-all.com
+# THIS IS A COMMAND FILE TO RUN ALL THE PIECES AND PUT THEM TOGETHER
+#
+$echo Working on piece  1  of 1
+$vmstopy -x clip-cs-001.com clip-cs-001.log
+$echo Reassembling pieces
+$vmstopy -x clip-cs-finish.com clip-cs-finish.log
+
+text 334 golden/command/clip-cs-finish.com
+# THIS COMMAND FILE REASSEMBLES THE PIECES
+#
+$setenv IMOD_OUTPUT_FORMAT mrc
+$assemblevol -StandardInput
+OutputFile out.mrc
+StartEndToExtractInX 8,135
+StartEndToExtractInY 12,107
+StartEndToExtractInZ 9,14
+InputFile clip-cs-001.out
+$b3dremove -g clip-cs-[0-9][0-9][0-9]*.com* clip-cs-[0-9][0-9][0-9]*.log* clip-cs-[0-9][0-9][0-9]*.out*
+
+text 59 golden/env_format.files
+filt-001.com
+filt-all.com
+filt-finish.com
+filt.com
+vol.mrc
+
+text 439 golden/env_format.out
+1 command files were generated and are ready to run.
+
+You can run filt-all.com (with subm) to run all command files in 
+sequence, reassemble the volume, and clean up intermediate image and 
+command files.
+
+If you have multiple processors available, you can use 
+  processchunks machine_list filt
+to do these operations in parallel, where machine_list is a comma-separated 
+list of available machines or just the number of local processors
+
+text 2 golden/env_format.rc
+0
+
+text 46 golden/env_format.tomopieces
+   1   1   1
+0,127,0,95,0,5
+8,135
+12,107
+9,14
+
+text 216 golden/env_format/filt-001.com
+$taperoutvol -StandardInput
+InputFile vol.mrc
+OutputFile filt-001.in
+XMinAndMax 0,127
+YMinAndMax 0,95
+ZMinAndMax 0,5
+TaperPadsInXYZ 8,8,8
+$clip median -n 3 filt-001.in filt-001.out
+$echo done
+
+$b3dremove filt-001.in
+
+text 211 golden/env_format/filt-all.com
+# THIS IS A COMMAND FILE TO RUN ALL THE PIECES AND PUT THEM TOGETHER
+#
+$echo Working on piece  1  of 1
+$vmstopy -x filt-001.com filt-001.log
+$echo Reassembling pieces
+$vmstopy -x filt-finish.com filt-finish.log
+
+text 320 golden/env_format/filt-finish.com
+# THIS COMMAND FILE REASSEMBLES THE PIECES
+#
+$setenv IMOD_OUTPUT_FORMAT hdf
+$assemblevol -StandardInput
+OutputFile o.hdf
+StartEndToExtractInX 8,135
+StartEndToExtractInY 12,107
+StartEndToExtractInZ 9,14
+InputFile filt-001.out
+$b3dremove -g filt-[0-9][0-9][0-9]*.com* filt-[0-9][0-9][0-9]*.log* filt-[0-9][0-9][0-9]*.out*
+
+text 17 golden/err_arguments.files
+filt.com
+vol.mrc
+
+text 98 golden/err_arguments.out
+ERROR: chunksetup - There are 4 non-option arguments and there must be 3 with the options entered
+
+text 2 golden/err_arguments.rc
+1
+
+text 17 golden/err_both_command.files
+filt.com
+vol.mrc
+
+text 80 golden/err_both_command.out
+ERROR: chunksetup - You cannot enter both a command file and a one-line command
+
+text 2 golden/err_both_command.rc
+1
+
+text 17 golden/err_both_output.files
+filt.com
+vol.mrc
+
+text 95 golden/err_both_output.out
+ERROR: chunksetup - You cannot enter both an output file name and a suffix for making the name
+
+text 2 golden/err_both_output.rc
+1
+
+text 17 golden/err_format.files
+filt.com
+vol.mrc
+
+text 60 golden/err_format.out
+ERROR: chunksetup - Output format jpg is not a valid format
+
+text 2 golden/err_format.rc
+1
+
+text 8 golden/err_no_com.files
+vol.mrc
+
+text 59 golden/err_no_com.out
+ERROR: chunksetup - Command file nofile.com does not exist
+
+text 2 golden/err_no_com.rc
+1
+
+text 9 golden/err_no_image.files
+filt.com
+
+text 61 golden/err_no_image.out
+ERROR: chunksetup - Image file file novol.mrc does not exist
+
+text 2 golden/err_no_image.rc
+1
+
+text 17 golden/err_no_keys.files
+filt.com
+vol.mrc
+
+text 91 golden/err_no_keys.out
+ERROR: chunksetup - The master command file does not contain both INPUTFILE and OUTPUTFILE
+
+text 2 golden/err_no_keys.rc
+1
+
+text 59 golden/format_tif.files
+filt-001.com
+filt-all.com
+filt-finish.com
+filt.com
+vol.mrc
+
+text 473 golden/format_tif.out
+Output file: vol_x.tif    [CHS1]
+
+1 command files were generated and are ready to run.
+
+You can run filt-all.com (with subm) to run all command files in 
+sequence, reassemble the volume, and clean up intermediate image and 
+command files.
+
+If you have multiple processors available, you can use 
+  processchunks machine_list filt
+to do these operations in parallel, where machine_list is a comma-separated 
+list of available machines or just the number of local processors
+
+text 2 golden/format_tif.rc
+0
+
+text 46 golden/format_tif.tomopieces
+   1   1   1
+0,127,0,95,0,5
+8,135
+12,107
+9,14
+
+text 216 golden/format_tif/filt-001.com
+$taperoutvol -StandardInput
+InputFile vol.mrc
+OutputFile filt-001.in
+XMinAndMax 0,127
+YMinAndMax 0,95
+ZMinAndMax 0,5
+TaperPadsInXYZ 8,8,8
+$clip median -n 3 filt-001.in filt-001.out
+$echo done
+
+$b3dremove filt-001.in
+
+text 211 golden/format_tif/filt-all.com
+# THIS IS A COMMAND FILE TO RUN ALL THE PIECES AND PUT THEM TOGETHER
+#
+$echo Working on piece  1  of 1
+$vmstopy -x filt-001.com filt-001.log
+$echo Reassembling pieces
+$vmstopy -x filt-finish.com filt-finish.log
+
+text 324 golden/format_tif/filt-finish.com
+# THIS COMMAND FILE REASSEMBLES THE PIECES
+#
+$setenv IMOD_OUTPUT_FORMAT tif
+$assemblevol -StandardInput
+OutputFile vol_x.tif
+StartEndToExtractInX 8,135
+StartEndToExtractInY 12,107
+StartEndToExtractInZ 9,14
+InputFile filt-001.out
+$b3dremove -g filt-[0-9][0-9][0-9]*.com* filt-[0-9][0-9][0-9]*.log* filt-[0-9][0-9][0-9]*.out*
+
+text 59 golden/options.files
+filt-001.com
+filt-all.com
+filt-finish.com
+filt.com
+vol.mrc
+
+text 439 golden/options.out
+1 command files were generated and are ready to run.
+
+You can run filt-all.com (with subm) to run all command files in 
+sequence, reassemble the volume, and clean up intermediate image and 
+command files.
+
+If you have multiple processors available, you can use 
+  processchunks machine_list filt
+to do these operations in parallel, where machine_list is a comma-separated 
+list of available machines or just the number of local processors
+
+text 2 golden/options.rc
+0
+
+text 43 golden/options.tomopieces
+   1   1   1
+0,127,0,95,0,5
+4,131
+4,99
+4,9
+
+text 227 golden/options/filt-001.com
+$taperoutvol -StandardInput
+InputFile vol.mrc
+OutputFile filt-001.in
+XMinAndMax 0,127
+YMinAndMax 0,95
+ZMinAndMax 0,5
+TaperPadsInXYZ 4,4,4
+NoFFTSizes
+$clip median -n 3 filt-001.in filt-001.out
+$echo done
+
+$b3dremove filt-001.in
+
+text 211 golden/options/filt-all.com
+# THIS IS A COMMAND FILE TO RUN ALL THE PIECES AND PUT THEM TOGETHER
+#
+$echo Working on piece  1  of 1
+$vmstopy -x filt-001.com filt-001.log
+$echo Reassembling pieces
+$vmstopy -x filt-finish.com filt-finish.log
+
+text 319 golden/options/filt-finish.com
+# THIS COMMAND FILE REASSEMBLES THE PIECES
+#
+$setenv IMOD_OUTPUT_FORMAT mrc
+$assemblevol -StandardInput
+OutputFile out.mrc
+StartEndToExtractInX 4,131
+StartEndToExtractInY 4,99
+StartEndToExtractInZ 4,9
+InputFile filt-001.out
+$b3dremove -g filt-[0-9][0-9][0-9]*.com* filt-[0-9][0-9][0-9]*.log* filt-[0-9][0-9][0-9]*.out*
+
+text 75 golden/subdir.files
+sub/filt
+sub/filt-001.com
+sub/filt-all.com
+sub/filt-finish.com
+sub/vol.mrc
+
+text 439 golden/subdir.out
+1 command files were generated and are ready to run.
+
+You can run filt-all.com (with subm) to run all command files in 
+sequence, reassemble the volume, and clean up intermediate image and 
+command files.
+
+If you have multiple processors available, you can use 
+  processchunks machine_list filt
+to do these operations in parallel, where machine_list is a comma-separated 
+list of available machines or just the number of local processors
+
+text 2 golden/subdir.rc
+0
+
+text 46 golden/subdir.tomopieces
+   1   1   1
+0,127,0,95,0,5
+8,135
+12,107
+9,14
+
+text 216 golden/subdir/sub/filt-001.com
+$taperoutvol -StandardInput
+InputFile vol.mrc
+OutputFile filt-001.in
+XMinAndMax 0,127
+YMinAndMax 0,95
+ZMinAndMax 0,5
+TaperPadsInXYZ 8,8,8
+$clip median -n 3 filt-001.in filt-001.out
+$echo done
+
+$b3dremove filt-001.in
+
+text 219 golden/subdir/sub/filt-all.com
+# THIS IS A COMMAND FILE TO RUN ALL THE PIECES AND PUT THEM TOGETHER
+#
+$echo Working on piece  1  of 1
+$vmstopy -x sub/filt-001.com filt-001.log
+$echo Reassembling pieces
+$vmstopy -x sub/filt-finish.com filt-finish.log
+
+text 322 golden/subdir/sub/filt-finish.com
+# THIS COMMAND FILE REASSEMBLES THE PIECES
+#
+$setenv IMOD_OUTPUT_FORMAT mrc
+$assemblevol -StandardInput
+OutputFile out.mrc
+StartEndToExtractInX 8,135
+StartEndToExtractInY 12,107
+StartEndToExtractInZ 9,14
+InputFile filt-001.out
+$b3dremove -g filt-[0-9][0-9][0-9]*.com* filt-[0-9][0-9][0-9]*.log* filt-[0-9][0-9][0-9]*.out*
+
+text 58 golden/suffix.files
+filt-001.pcm
+filt-all.pcm
+filt-finish.pcm
+filt.pcm
+vol.st
+
+text 478 golden/suffix.out
+Output file: vol_st_med.mrc    [CHS1]
+
+1 command files were generated and are ready to run.
+
+You can run filt-all.pcm (with subm) to run all command files in 
+sequence, reassemble the volume, and clean up intermediate image and 
+command files.
+
+If you have multiple processors available, you can use 
+  processchunks machine_list filt
+to do these operations in parallel, where machine_list is a comma-separated 
+list of available machines or just the number of local processors
+
+text 2 golden/suffix.rc
+0
+
+text 46 golden/suffix.tomopieces
+   1   1   1
+0,127,0,95,0,5
+8,135
+12,107
+9,14
+
+text 215 golden/suffix/filt-001.pcm
+$taperoutvol -StandardInput
+InputFile vol.st
+OutputFile filt-001.in
+XMinAndMax 0,127
+YMinAndMax 0,95
+ZMinAndMax 0,5
+TaperPadsInXYZ 8,8,8
+$clip median -n 3 filt-001.in filt-001.out
+$echo done
+
+$b3dremove filt-001.in
+
+text 211 golden/suffix/filt-all.pcm
+# THIS IS A COMMAND FILE TO RUN ALL THE PIECES AND PUT THEM TOGETHER
+#
+$echo Working on piece  1  of 1
+$vmstopy -x filt-001.pcm filt-001.log
+$echo Reassembling pieces
+$vmstopy -x filt-finish.pcm filt-finish.log
+
+text 329 golden/suffix/filt-finish.pcm
+# THIS COMMAND FILE REASSEMBLES THE PIECES
+#
+$setenv IMOD_OUTPUT_FORMAT mrc
+$assemblevol -StandardInput
+OutputFile vol_st_med.mrc
+StartEndToExtractInX 8,135
+StartEndToExtractInY 12,107
+StartEndToExtractInZ 9,14
+InputFile filt-001.out
+$b3dremove -g filt-[0-9][0-9][0-9]*.pcm* filt-[0-9][0-9][0-9]*.log* filt-[0-9][0-9][0-9]*.out*
+
+text 0 golden/usage.files
+
+sha256 316643d020be8fec1e58bfc786bba9d81c70e92a3aee3cc3205a2c7b58b54401 1320 golden/usage.out
+text 2 golden/usage.rc
+0
+

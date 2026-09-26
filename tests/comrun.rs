@@ -4,7 +4,12 @@
 //!   (`IMOD/pysrc/vmstopy`) against goldens the native converters wrote for
 //!   the command files in `fixtures/comrun/convert` (IMOD templates, files
 //!   written by splitcombine/splittilt/chunksetup, a continuation-line case
-//!   and an error case).  The wider differential -- 1131 distinct command
+//!   and an error case).  The goldens are digests in
+//!   `fixtures/comrun/golden.manifest`, keyed `convert/<case>.{csh,py,pyout}`
+//!   and `convert/combine.nolog.csh` (`fixtures/README.md`): to re-record,
+//!   put the native outputs back under those names and run
+//!   `RECORD_ONLY=1 fixtures/regen-golden.sh comrun`, then delete them.
+//!   The wider differential -- 1131 distinct command
 //!   files, byte-identical except the `0o766` fix -- is recorded in
 //!   `TODO.md`.
 //! * `runcom` (`src/imod/comrun.rs`) on the command files in
@@ -46,7 +51,7 @@ fn vmstocsh_matches_native_goldens() {
     let dir = fixture_dir("convert");
     for case in CONVERT_CASES {
         let input = std::fs::read(dir.join(format!("{case}.com"))).unwrap();
-        let golden = std::fs::read(dir.join(format!("{case}.csh"))).unwrap();
+        let golden = common::golden::expect(&dir.join(format!("{case}.csh")));
         let mut child = common::imod_cmd("vmstocsh")
             .arg("x.log")
             .stdin(std::process::Stdio::piped())
@@ -57,23 +62,21 @@ fn vmstocsh_matches_native_goldens() {
         child.stdin.take().unwrap().write_all(&input).unwrap();
         let output = child.wait_with_output().unwrap();
         assert_eq!(output.status.code(), Some(0), "{case}");
-        assert!(
-            output.stdout == golden,
-            "vmstocsh output differs for {case}"
-        );
+        if let Err(why) = golden.compare(&output.stdout, common::golden::identity, false) {
+            panic!("vmstocsh output differs for {case}: {why}");
+        }
     }
     // No log argument: every command line ends in a blank instead
     let input = std::fs::read(dir.join("combine.com")).unwrap();
-    let golden = std::fs::read(dir.join("combine.nolog.csh")).unwrap();
+    let golden = common::golden::expect(&dir.join("combine.nolog.csh"));
     let output = common::imod_cmd("vmstocsh")
         .stdin(std::fs::File::open(dir.join("combine.com")).unwrap())
         .output()
         .unwrap();
     let _ = input;
-    assert!(
-        output.stdout == golden,
-        "vmstocsh output differs without a log"
-    );
+    if let Err(why) = golden.compare(&output.stdout, common::golden::identity, false) {
+        panic!("vmstocsh output differs without a log: {why}");
+    }
 }
 
 #[test]
@@ -89,18 +92,20 @@ fn vmstopy_matches_native_goldens() {
             .arg(&out)
             .output()
             .unwrap();
-        let golden_out = std::fs::read(dir.join(format!("{case}.pyout"))).unwrap();
-        let expected_status = if golden_out.is_empty() { 0 } else { 1 };
+        let golden_out = common::golden::expect(&dir.join(format!("{case}.pyout")));
+        let expected_status = if golden_out.len() == 0 { 0 } else { 1 };
         assert_eq!(output.status.code(), Some(expected_status), "{case}");
-        assert!(
-            output.stdout == golden_out,
-            "vmstopy messages differ for {case}"
-        );
-        let golden = std::fs::read(dir.join(format!("{case}.py"))).unwrap();
-        assert!(
-            std::fs::read(&out).unwrap() == golden,
-            "vmstopy script differs for {case}"
-        );
+        if let Err(why) = golden_out.compare(&output.stdout, common::golden::identity, false) {
+            panic!("vmstopy messages differ for {case}: {why}");
+        }
+        let golden = common::golden::expect(&dir.join(format!("{case}.py")));
+        if let Err(why) = golden.compare(
+            &std::fs::read(&out).unwrap(),
+            common::golden::identity,
+            false,
+        ) {
+            panic!("vmstopy script differs for {case}: {why}");
+        }
     }
     let _ = std::fs::remove_dir_all(&work);
 }

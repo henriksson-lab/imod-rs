@@ -1,0 +1,153 @@
+# imod-rs native golden manifest for fixtures/tifinfo; see fixtures/README.md.
+# Regenerate with fixtures/regen-golden.sh tifinfo; do not edit by hand.
+text 0 golden/badver.err
+
+text 55 golden/badver.out
+TIFF: 4949
+Bad TIFF Version number. Must be 42, not 43
+
+text 2 golden/badver.rc
+0
+
+text 0 golden/empty.err
+
+text 60 golden/empty.out
+Not a tif file: first word must be 0x4949 or 0x4d4d,  not 0
+
+text 2 golden/empty.rc
+0
+
+text 0 golden/missing_middle.err
+
+text 60 golden/missing_middle.out
+TIFF: 4949 2a00
+Reading 0 entries in record 1 at 134217728:
+
+text 2 golden/missing_middle.rc
+1
+
+text 0 golden/noargs.err
+
+text 0 golden/noargs.out
+
+text 2 golden/noargs.rc
+0
+
+text 0 golden/noifd.err
+
+text 16 golden/noifd.out
+TIFF: 4d4d 2a00
+
+text 2 golden/noifd.rc
+0
+
+text 0 golden/nottif.err
+
+text 63 golden/nottif.out
+Not a tif file: first word must be 0x4949 or 0x4d4d,  not 5958
+
+text 2 golden/nottif.rc
+0
+
+text 0 golden/quiet_several.err
+
+text 120 golden/quiet_several.out
+TIFF: 4949 2a00
+Reading 0 entries in record 1 at 134217728:
+TIFF: 4d4d 2a00
+Reading 0 entries in record 1 at 134217728:
+
+text 2 golden/quiet_several.rc
+0
+
+text 0 golden/real_le.err
+
+text 297 golden/real_le.out
+TIFF: 4949 2a
+Reading 14 entries in record 1 at 8:
+	256 LONG  1 24 
+	257 LONG  1 20 
+	258 SHORT 1 8 
+	259 SHORT 1 1 
+	262 SHORT 1 1 
+	270 ASCII 20 182 
+	273 LONG  1 256 
+	277 SHORT 1 1 
+	278 LONG  1 20 
+	279 LONG  1 480 
+	282 RATIONAL 1 218 
+	283 RATIONAL 1 226 
+	296 SHORT 1 1 
+	305 ASCII 8 234 
+
+text 2 golden/real_le.rc
+0
+
+text 0 golden/several.err
+
+text 196 golden/several.out
+TIFF: 4949 2a00
+Reading 0 entries in record 1 at 134217728:
+TIFF: 4d4d 2a00
+Reading 0 entries in record 1 at 134217728:
+TIFF: 4949 2a00
+Reading 0 entries in record 1 at 134217728:
+TIFF: 4d4d 2a00
+
+text 2 golden/several.rc
+0
+
+text 0 golden/v_badver.err
+
+text 55 golden/v_badver.out
+TIFF: 4949
+Bad TIFF Version number. Must be 42, not 43
+
+text 2 golden/v_badver.rc
+0
+
+text 0 golden/v_noifd.err
+
+text 16 golden/v_noifd.out
+TIFF: 4d4d 2a00
+
+text 2 golden/v_noifd.rc
+0
+
+text 0 golden/v_only.err
+
+text 0 golden/v_only.out
+
+text 2 golden/v_only.rc
+1
+
+text 0 golden/v_real_be.err
+
+sha256 66efc6f35495ed2ee0e9122ffe83849d559d6fe9d3e65936c35e26a3b6ee8965 333 golden/v_real_be.out
+text 2 golden/v_real_be.rc
+0
+
+text 0 golden/v_real_be_byte.err
+
+sha256 cbbfe29e63f973a6ddce93a797e51ee4b9e1ef1a835c74e8d2e411e37f2f3c86 366 golden/v_real_be_byte.out
+text 2 golden/v_real_be_byte.rc
+0
+
+text 0 golden/v_real_le.err
+
+sha256 d35472cee61296ab6725fcddc853a34da2f8b4943c8f2066122c2b11bb67846d 333 golden/v_real_le.out
+text 2 golden/v_real_le.rc
+0
+
+text 0 golden/v_real_le_multi.err
+
+sha256 52f63137ca1e1efb07ae96c72f132c637175e3c00cbb1ade1a0ab8fb170fcf6f 436 golden/v_real_le_multi.out
+text 2 golden/v_real_le_multi.rc
+0
+
+text 0 golden/v_real_le_tiled.err
+
+sha256 e09e759f1f42c61292c99b0df3928af73a3316f9665be14f537cab72df17333c 693 golden/v_real_le_tiled.out
+text 2 golden/v_real_le_tiled.rc
+0
+

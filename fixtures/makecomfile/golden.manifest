@@ -1,0 +1,1163 @@
+# imod-rs native golden manifest for fixtures/makecomfile; see fixtures/README.md.
+# Regenerate with fixtures/regen-golden.sh makecomfile; do not edit by hand.
+text 462 golden/autofidseed_b.files
+align.com
+autofidseedb.com
+b.rawtlt
+b.seed
+b.st
+ctfcorrection.com
+ctfplotter.com
+eraser.com
+mtffilter.com
+newst.com
+origcoms/align.com
+origcoms/autofidseedb.com
+origcoms/ctfcorrection.com
+origcoms/ctfplotter.com
+origcoms/eraser.com
+origcoms/mtffilter.com
+origcoms/newst.com
+origcoms/prenewst.com
+origcoms/sample.com
+origcoms/tilt.com
+origcoms/tomopitch.com
+origcoms/track.com
+origcoms/xcorr.com
+prenewst.com
+sample.com
+tilt.com
+tomopitch.com
+track.com
+xcorr.com
+
+text 0 golden/autofidseed_b.out
+
+text 2 golden/autofidseed_b.rc
+0
+
+text 178 golden/autofidseed_b/autofidseedb.com
+# Command file for running autofidseed created by makecomfile
+$autofidseed -StandardInput
+TrackCommandFile	trackb.com
+MinSpacing	0.85
+PeakStorageFraction	1.0
+AppendToSeedModel	1
+
+text 178 golden/autofidseed_b/origcoms/autofidseedb.com
+# Command file for running autofidseed created by makecomfile
+$autofidseed -StandardInput
+TrackCommandFile	trackb.com
+MinSpacing	0.85
+PeakStorageFraction	1.0
+AppendToSeedModel	1
+
+text 462 golden/autofidseed_single.files
+align.com
+autofidseedb.com
+b.rawtlt
+b.seed
+b.st
+ctfcorrection.com
+ctfplotter.com
+eraser.com
+mtffilter.com
+newst.com
+origcoms/align.com
+origcoms/autofidseedb.com
+origcoms/ctfcorrection.com
+origcoms/ctfplotter.com
+origcoms/eraser.com
+origcoms/mtffilter.com
+origcoms/newst.com
+origcoms/prenewst.com
+origcoms/sample.com
+origcoms/tilt.com
+origcoms/tomopitch.com
+origcoms/track.com
+origcoms/xcorr.com
+prenewst.com
+sample.com
+tilt.com
+tomopitch.com
+track.com
+xcorr.com
+
+text 0 golden/autofidseed_single.out
+
+text 2 golden/autofidseed_single.rc
+0
+
+text 157 golden/autofidseed_single/autofidseedb.com
+# Command file for running autofidseed created by makecomfile
+$autofidseed -StandardInput
+TrackCommandFile	track.com
+MinSpacing	0.85
+PeakStorageFraction	1.0
+
+text 157 golden/autofidseed_single/origcoms/autofidseedb.com
+# Command file for running autofidseed created by makecomfile
+$autofidseed -StandardInput
+TrackCommandFile	track.com
+MinSpacing	0.85
+PeakStorageFraction	1.0
+
+text 488 golden/cryoposition.files
+align.com
+b.rawtlt
+b.seed
+b.st
+cryoposition.com
+ctfcorrection.com
+ctfplotter.com
+dfltcoms/cryoposition.com
+eraser.com
+mtffilter.com
+newst.com
+origcoms/align.com
+origcoms/cryoposition.com
+origcoms/ctfcorrection.com
+origcoms/ctfplotter.com
+origcoms/eraser.com
+origcoms/mtffilter.com
+origcoms/newst.com
+origcoms/prenewst.com
+origcoms/sample.com
+origcoms/tilt.com
+origcoms/tomopitch.com
+origcoms/track.com
+origcoms/xcorr.com
+prenewst.com
+sample.com
+tilt.com
+tomopitch.com
+track.com
+xcorr.com
+
+text 0 golden/cryoposition.out
+
+text 2 golden/cryoposition.rc
+0
+
+text 202 golden/cryoposition/cryoposition.com
+# Command file for running cryoposition created by makecomfile
+$setenv IMOD_OUTPUT_FORMAT MRC
+$cryoposition -StandardInput
+ThicknessOfTomograms	300
+FindBeadsInVolume	1
+UseGPU	0
+RootName b
+BeadSize 10.0
+
+text 148 golden/cryoposition/dfltcoms/cryoposition.com
+# Command file for running cryoposition created by makecomfile
+$setenv IMOD_OUTPUT_FORMAT MRC
+$cryoposition -StandardInput
+RootName b
+BeadSize 10.0
+
+text 202 golden/cryoposition/origcoms/cryoposition.com
+# Command file for running cryoposition created by makecomfile
+$setenv IMOD_OUTPUT_FORMAT MRC
+$cryoposition -StandardInput
+ThicknessOfTomograms	300
+FindBeadsInVolume	1
+UseGPU	0
+RootName b
+BeadSize 10.0
+
+text 458 golden/ctf3dsetup.files
+align.com
+b.rawtlt
+b.seed
+b.st
+ctf3dsetup.com
+ctfcorrection.com
+ctfplotter.com
+eraser.com
+mtffilter.com
+newst.com
+origcoms/align.com
+origcoms/ctf3dsetup.com
+origcoms/ctfcorrection.com
+origcoms/ctfplotter.com
+origcoms/eraser.com
+origcoms/mtffilter.com
+origcoms/newst.com
+origcoms/prenewst.com
+origcoms/sample.com
+origcoms/tilt.com
+origcoms/tomopitch.com
+origcoms/track.com
+origcoms/xcorr.com
+prenewst.com
+sample.com
+tilt.com
+tomopitch.com
+track.com
+xcorr.com
+
+text 0 golden/ctf3dsetup.out
+
+text 2 golden/ctf3dsetup.rc
+0
+
+text 155 golden/ctf3dsetup/ctf3dsetup.com
+# Command file for running ctf3dsetup created by makecomfile
+$ctf3dsetup -StandardInput
+TiltCommandFile tilt.com
+SlabThicknessInNm 50
+NumberOfProcessors 4
+
+text 155 golden/ctf3dsetup/origcoms/ctf3dsetup.com
+# Command file for running ctf3dsetup created by makecomfile
+$ctf3dsetup -StandardInput
+TiltCommandFile tilt.com
+SlabThicknessInNm 50
+NumberOfProcessors 4
+
+text 419 golden/err_no_binning.files
+align.com
+b.rawtlt
+b.seed
+b.st
+ctfcorrection.com
+ctfplotter.com
+eraser.com
+mtffilter.com
+newst.com
+origcoms/align.com
+origcoms/ctfcorrection.com
+origcoms/ctfplotter.com
+origcoms/eraser.com
+origcoms/mtffilter.com
+origcoms/newst.com
+origcoms/prenewst.com
+origcoms/sample.com
+origcoms/tilt.com
+origcoms/tomopitch.com
+origcoms/track.com
+origcoms/xcorr.com
+prenewst.com
+sample.com
+tilt.com
+tomopitch.com
+track.com
+xcorr.com
+
+text 55 golden/err_no_binning.out
+ERROR: makecomfile - Binning of images must be entered
+
+text 2 golden/err_no_binning.rc
+1
+
+text 0 golden/err_no_root.files
+
+text 102 golden/err_no_root.out
+ERROR: makecomfile - Root name of dataset files must be entered, it cannot be determined from dataset
+
+text 2 golden/err_no_root.rc
+1
+
+text 419 golden/err_no_tiltxcorr.files
+align.com
+b.rawtlt
+b.seed
+b.st
+ctfcorrection.com
+ctfplotter.com
+eraser.com
+mtffilter.com
+newst.com
+origcoms/align.com
+origcoms/ctfcorrection.com
+origcoms/ctfplotter.com
+origcoms/eraser.com
+origcoms/mtffilter.com
+origcoms/newst.com
+origcoms/prenewst.com
+origcoms/sample.com
+origcoms/tilt.com
+origcoms/tomopitch.com
+origcoms/track.com
+origcoms/xcorr.com
+prenewst.com
+sample.com
+tilt.com
+tomopitch.com
+track.com
+xcorr.com
+
+text 64 golden/err_no_tiltxcorr.out
+ERROR: makecomfile - Cannot find tiltxcorr command line in file
+
+text 2 golden/err_no_tiltxcorr.rc
+1
+
+text 419 golden/err_unknown.files
+align.com
+b.rawtlt
+b.seed
+b.st
+ctfcorrection.com
+ctfplotter.com
+eraser.com
+mtffilter.com
+newst.com
+origcoms/align.com
+origcoms/ctfcorrection.com
+origcoms/ctfplotter.com
+origcoms/eraser.com
+origcoms/mtffilter.com
+origcoms/newst.com
+origcoms/prenewst.com
+origcoms/sample.com
+origcoms/tilt.com
+origcoms/tomopitch.com
+origcoms/track.com
+origcoms/xcorr.com
+prenewst.com
+sample.com
+tilt.com
+tomopitch.com
+track.com
+xcorr.com
+
+text 73 golden/err_unknown.out
+ERROR: makecomfile - foo.com is not a recognized type of output com file
+
+text 2 golden/err_unknown.rc
+1
+
+text 474 golden/extenderasemod.files
+align.com
+autofidseed.com
+b.rawtlt
+b.seed
+b.st
+ctfcorrection.com
+ctfplotter.com
+eraser.com
+extenderasemod
+mtffilter.com
+newst.com
+origcoms/align.com
+origcoms/ctfcorrection.com
+origcoms/ctfplotter.com
+origcoms/eraser.com
+origcoms/extenderasemod
+origcoms/mtffilter.com
+origcoms/newst.com
+origcoms/prenewst.com
+origcoms/sample.com
+origcoms/tilt.com
+origcoms/tomopitch.com
+origcoms/track.com
+origcoms/xcorr.com
+prenewst.com
+sample.com
+tilt.com
+tomopitch.com
+track.com
+xcorr.com
+
+text 0 golden/extenderasemod.out
+
+text 2 golden/extenderasemod.rc
+0
+
+text 145 golden/extenderasemod/extenderasemod
+# Command file for running extenderasemod created by makecomfile
+$extenderasemod -StandardInput
+RootName b
+ReplaceAboveAngle 45.50
+AdjustSizes 1
+
+text 145 golden/extenderasemod/origcoms/extenderasemod
+# Command file for running extenderasemod created by makecomfile
+$extenderasemod -StandardInput
+RootName b
+ReplaceAboveAngle 45.50
+AdjustSizes 1
+
+text 497 golden/findbeads3d.files
+align.com
+b.rawtlt
+b.seed
+b.st
+change.adoc
+ctfcorrection.com
+ctfplotter.com
+dfltcoms/findbeads3d.com
+eraser.com
+findbeads3d.com
+mtffilter.com
+newst.com
+origcoms/align.com
+origcoms/ctfcorrection.com
+origcoms/ctfplotter.com
+origcoms/eraser.com
+origcoms/findbeads3d.com
+origcoms/mtffilter.com
+origcoms/newst.com
+origcoms/prenewst.com
+origcoms/sample.com
+origcoms/tilt.com
+origcoms/tomopitch.com
+origcoms/track.com
+origcoms/xcorr.com
+prenewst.com
+sample.com
+tilt.com
+tomopitch.com
+track.com
+xcorr.com
+
+text 0 golden/findbeads3d.out
+
+text 2 golden/findbeads3d.rc
+0
+
+text 222 golden/findbeads3d/dfltcoms/findbeads3d.com
+# Command file for running findbeads3d created by makecomfile
+$findbeads3d -StandardInput
+InputFile	b_3dfind_rec.mrc
+OutputFile	b_3dfind.mod
+MinRelativeStrength	0.05
+MinSpacing	0.9
+StorageThreshold	0
+ExpandedByFactor	1.25
+
+text 255 golden/findbeads3d/findbeads3d.com
+# Command file for running findbeads3d created by makecomfile
+$findbeads3d -StandardInput
+BinningOfVolume	2
+BeadSize	10.55
+InputFile	b_3dfind_rec.mrc
+OutputFile	b_3dfind.mod
+MinRelativeStrength	0.05
+MinSpacing	0.9
+StorageThreshold	0
+ExpandedByFactor	1.25
+
+text 255 golden/findbeads3d/origcoms/findbeads3d.com
+# Command file for running findbeads3d created by makecomfile
+$findbeads3d -StandardInput
+BinningOfVolume	2
+BeadSize	10.55
+InputFile	b_3dfind_rec.mrc
+OutputFile	b_3dfind.mod
+MinRelativeStrength	0.05
+MinSpacing	0.9
+StorageThreshold	0
+ExpandedByFactor	1.25
+
+text 482 golden/golderaser.files
+align.com
+b.rawtlt
+b.seed
+b.st
+ctfcorrection.com
+ctfplotter.com
+dfltcoms/golderaser.com
+eraser.com
+golderaser.com
+mtffilter.com
+newst.com
+origcoms/align.com
+origcoms/ctfcorrection.com
+origcoms/ctfplotter.com
+origcoms/eraser.com
+origcoms/golderaser.com
+origcoms/mtffilter.com
+origcoms/newst.com
+origcoms/prenewst.com
+origcoms/sample.com
+origcoms/tilt.com
+origcoms/tomopitch.com
+origcoms/track.com
+origcoms/xcorr.com
+prenewst.com
+sample.com
+tilt.com
+tomopitch.com
+track.com
+xcorr.com
+
+text 0 golden/golderaser.out
+
+text 2 golden/golderaser.rc
+0
+
+text 275 golden/golderaser/dfltcoms/golderaser.com
+# Command file for running ccderaser created by makecomfile
+$setenv IMOD_OUTPUT_FORMAT MRC
+$ccderaser -StandardInput
+InputFile	b_ali.mrc
+OutputFile	b_erase_ali.mrc
+ModelFile	b_erase.fid
+MergePatches	1
+ExcludeAdjacent	1
+CircleObjects	/
+SkipTurnedOffPoints	1
+PolynomialOrder	0
+
+text 315 golden/golderaser/golderaser.com
+# Command file for running ccderaser created by makecomfile
+$setenv IMOD_OUTPUT_FORMAT MRC
+$ccderaser -StandardInput
+BetterRadius	5.06
+HalfFloatModeOutput	1
+InputFile	b_ali.mrc
+OutputFile	b_erase_ali.mrc
+ModelFile	b_erase.fid
+MergePatches	1
+ExcludeAdjacent	1
+CircleObjects	/
+SkipTurnedOffPoints	1
+PolynomialOrder	0
+
+text 315 golden/golderaser/origcoms/golderaser.com
+# Command file for running ccderaser created by makecomfile
+$setenv IMOD_OUTPUT_FORMAT MRC
+$ccderaser -StandardInput
+BetterRadius	5.06
+HalfFloatModeOutput	1
+InputFile	b_ali.mrc
+OutputFile	b_erase_ali.mrc
+ModelFile	b_erase.fid
+MergePatches	1
+ExcludeAdjacent	1
+CircleObjects	/
+SkipTurnedOffPoints	1
+PolynomialOrder	0
+
+text 494 golden/golderaser_directive.files
+align.com
+b.rawtlt
+b.seed
+b.st
+change.adoc
+ctfcorrection.com
+ctfplotter.com
+dfltcoms/golderaser.com
+eraser.com
+golderaser.com
+mtffilter.com
+newst.com
+origcoms/align.com
+origcoms/ctfcorrection.com
+origcoms/ctfplotter.com
+origcoms/eraser.com
+origcoms/golderaser.com
+origcoms/mtffilter.com
+origcoms/newst.com
+origcoms/prenewst.com
+origcoms/sample.com
+origcoms/tilt.com
+origcoms/tomopitch.com
+origcoms/track.com
+origcoms/xcorr.com
+prenewst.com
+sample.com
+tilt.com
+tomopitch.com
+track.com
+xcorr.com
+
+text 0 golden/golderaser_directive.out
+
+text 2 golden/golderaser_directive.rc
+0
+
+text 297 golden/golderaser_directive/dfltcoms/golderaser.com
+# Command file for running ccderaser created by makecomfile
+$setenv IMOD_OUTPUT_FORMAT MRC
+$ccderaser -StandardInput
+InputFile	b_ali.mrc
+OutputFile	b_erase_ali.mrc
+ModelFile	b_erase.fid
+MergePatches	1
+ExcludeAdjacent	1
+CircleObjects	/
+SkipTurnedOffPoints	1
+PolynomialOrder	0
+HalfFloatModeOutput	1
+
+text 340 golden/golderaser_directive/golderaser.com
+# Command file for running ccderaser created by makecomfile
+$setenv IMOD_OUTPUT_FORMAT MRC
+$ccderaser -StandardInput
+ExpandCircleIterations	3
+BetterRadius	5.00
+InputFile	b_ali.mrc
+OutputFile	b_erase_ali.mrc
+ModelFile	b_erase.fid
+MergePatches	1
+ExcludeAdjacent	1
+CircleObjects	/
+SkipTurnedOffPoints	1
+PolynomialOrder	0
+HalfFloatModeOutput	1
+
+text 340 golden/golderaser_directive/origcoms/golderaser.com
+# Command file for running ccderaser created by makecomfile
+$setenv IMOD_OUTPUT_FORMAT MRC
+$ccderaser -StandardInput
+ExpandCircleIterations	3
+BetterRadius	5.00
+InputFile	b_ali.mrc
+OutputFile	b_erase_ali.mrc
+ModelFile	b_erase.fid
+MergePatches	1
+ExcludeAdjacent	1
+CircleObjects	/
+SkipTurnedOffPoints	1
+PolynomialOrder	0
+HalfFloatModeOutput	1
+
+text 500 golden/newst_3dfind.files
+align.com
+b.rawtlt
+b.seed
+b.st
+change.adoc
+ctfcorrection.com
+ctfplotter.com
+dfltcoms/newst_3dfind.com
+eraser.com
+mtffilter.com
+newst.com
+newst_3dfind.com
+origcoms/align.com
+origcoms/ctfcorrection.com
+origcoms/ctfplotter.com
+origcoms/eraser.com
+origcoms/mtffilter.com
+origcoms/newst.com
+origcoms/newst_3dfind.com
+origcoms/prenewst.com
+origcoms/sample.com
+origcoms/tilt.com
+origcoms/tomopitch.com
+origcoms/track.com
+origcoms/xcorr.com
+prenewst.com
+sample.com
+tilt.com
+tomopitch.com
+track.com
+xcorr.com
+
+text 0 golden/newst_3dfind.out
+
+text 2 golden/newst_3dfind.rc
+0
+
+sha256 592105a942665f3f79de7a3c952425f60b9cdbdcb33a90d31cb08c64e01c4383 677 golden/newst_3dfind/dfltcoms/newst_3dfind.com
+sha256 3af3c9ece637c2217001bd65ead1c6861ce9bec109add0499c6e02064f40df9d 691 golden/newst_3dfind/newst_3dfind.com
+sha256 3af3c9ece637c2217001bd65ead1c6861ce9bec109add0499c6e02064f40df9d 691 golden/newst_3dfind/origcoms/newst_3dfind.com
+text 464 golden/reducefiltvol.files
+align.com
+b.rawtlt
+b.seed
+b.st
+ctfcorrection.com
+ctfplotter.com
+eraser.com
+mtffilter.com
+newst.com
+origcoms/align.com
+origcoms/ctfcorrection.com
+origcoms/ctfplotter.com
+origcoms/eraser.com
+origcoms/mtffilter.com
+origcoms/newst.com
+origcoms/prenewst.com
+origcoms/reducefiltvol.com
+origcoms/sample.com
+origcoms/tilt.com
+origcoms/tomopitch.com
+origcoms/track.com
+origcoms/xcorr.com
+prenewst.com
+reducefiltvol.com
+sample.com
+tilt.com
+tomopitch.com
+track.com
+xcorr.com
+
+text 0 golden/reducefiltvol.out
+
+text 2 golden/reducefiltvol.rc
+0
+
+text 174 golden/reducefiltvol/origcoms/reducefiltvol.com
+# Command file for running reducefiltvol created by makecomfile
+$setenv IMOD_OUTPUT_FORMAT MRC
+$reducefiltvol -StandardInput
+InputFile  b_rec.mrc
+OutputFile b_red2.0filt.mrc
+
+text 174 golden/reducefiltvol/reducefiltvol.com
+# Command file for running reducefiltvol created by makecomfile
+$setenv IMOD_OUTPUT_FORMAT MRC
+$reducefiltvol -StandardInput
+InputFile  b_rec.mrc
+OutputFile b_red2.0filt.mrc
+
+text 464 golden/reducefiltvol_frac.files
+align.com
+b.rawtlt
+b.seed
+b.st
+ctfcorrection.com
+ctfplotter.com
+eraser.com
+mtffilter.com
+newst.com
+origcoms/align.com
+origcoms/ctfcorrection.com
+origcoms/ctfplotter.com
+origcoms/eraser.com
+origcoms/mtffilter.com
+origcoms/newst.com
+origcoms/prenewst.com
+origcoms/reducefiltvol.com
+origcoms/sample.com
+origcoms/tilt.com
+origcoms/tomopitch.com
+origcoms/track.com
+origcoms/xcorr.com
+prenewst.com
+reducefiltvol.com
+sample.com
+tilt.com
+tomopitch.com
+track.com
+xcorr.com
+
+text 0 golden/reducefiltvol_frac.out
+
+text 2 golden/reducefiltvol_frac.rc
+0
+
+text 174 golden/reducefiltvol_frac/origcoms/reducefiltvol.com
+# Command file for running reducefiltvol created by makecomfile
+$setenv IMOD_OUTPUT_FORMAT MRC
+$reducefiltvol -StandardInput
+InputFile  b_rec.mrc
+OutputFile b_red1.5filt.mrc
+
+text 174 golden/reducefiltvol_frac/reducefiltvol.com
+# Command file for running reducefiltvol created by makecomfile
+$setenv IMOD_OUTPUT_FORMAT MRC
+$reducefiltvol -StandardInput
+InputFile  b_rec.mrc
+OutputFile b_red1.5filt.mrc
+
+text 464 golden/restrictalign.files
+align.com
+b.rawtlt
+b.seed
+b.st
+ctfcorrection.com
+ctfplotter.com
+eraser.com
+mtffilter.com
+newst.com
+origcoms/align.com
+origcoms/ctfcorrection.com
+origcoms/ctfplotter.com
+origcoms/eraser.com
+origcoms/mtffilter.com
+origcoms/newst.com
+origcoms/prenewst.com
+origcoms/restrictalign.com
+origcoms/sample.com
+origcoms/tilt.com
+origcoms/tomopitch.com
+origcoms/track.com
+origcoms/xcorr.com
+prenewst.com
+restrictalign.com
+sample.com
+tilt.com
+tomopitch.com
+track.com
+xcorr.com
+
+text 0 golden/restrictalign.out
+
+text 2 golden/restrictalign.rc
+0
+
+text 241 golden/restrictalign/origcoms/restrictalign.com
+# Command file for running restrictalign created by makecomfile
+$restrictalign -StandardInput
+AlignCommandFile align.com
+UseCrossValidation 1
+LocalAlignValidation 1
+TargetMeasurementRatio 4.5
+MinMeasurementRatio 3.0
+SkipBeamTiltWithOneRot 1
+
+text 241 golden/restrictalign/restrictalign.com
+# Command file for running restrictalign created by makecomfile
+$restrictalign -StandardInput
+AlignCommandFile align.com
+UseCrossValidation 1
+LocalAlignValidation 1
+TargetMeasurementRatio 4.5
+MinMeasurementRatio 3.0
+SkipBeamTiltWithOneRot 1
+
+text 456 golden/sirtsetup.files
+align.com
+b.rawtlt
+b.seed
+b.st
+ctfcorrection.com
+ctfplotter.com
+eraser.com
+mtffilter.com
+newst.com
+origcoms/align.com
+origcoms/ctfcorrection.com
+origcoms/ctfplotter.com
+origcoms/eraser.com
+origcoms/mtffilter.com
+origcoms/newst.com
+origcoms/prenewst.com
+origcoms/sample.com
+origcoms/sirtsetup.com
+origcoms/tilt.com
+origcoms/tomopitch.com
+origcoms/track.com
+origcoms/xcorr.com
+prenewst.com
+sample.com
+sirtsetup.com
+tilt.com
+tomopitch.com
+track.com
+xcorr.com
+
+text 0 golden/sirtsetup.out
+
+text 2 golden/sirtsetup.rc
+0
+
+text 213 golden/sirtsetup/origcoms/sirtsetup.com
+# Command file for running sirtsetup created by makecomfile
+$setenv IMOD_OUTPUT_FORMAT MRC
+$sirtsetup -StandardInput
+CommandFile	tilt.com
+RadiusAndSigma	0.4,0.035
+FalloffIsTrueSigma	1
+StartFromZero
+NamingStyle -1
+
+text 213 golden/sirtsetup/sirtsetup.com
+# Command file for running sirtsetup created by makecomfile
+$setenv IMOD_OUTPUT_FORMAT MRC
+$sirtsetup -StandardInput
+CommandFile	tilt.com
+RadiusAndSigma	0.4,0.035
+FalloffIsTrueSigma	1
+StartFromZero
+NamingStyle -1
+
+text 485 golden/tilt_3dfind.files
+align.com
+b.rawtlt
+b.seed
+b.st
+ctfcorrection.com
+ctfplotter.com
+dfltcoms/tilt_3dfind.com
+eraser.com
+mtffilter.com
+newst.com
+origcoms/align.com
+origcoms/ctfcorrection.com
+origcoms/ctfplotter.com
+origcoms/eraser.com
+origcoms/mtffilter.com
+origcoms/newst.com
+origcoms/prenewst.com
+origcoms/sample.com
+origcoms/tilt.com
+origcoms/tilt_3dfind.com
+origcoms/tomopitch.com
+origcoms/track.com
+origcoms/xcorr.com
+prenewst.com
+sample.com
+tilt.com
+tilt_3dfind.com
+tomopitch.com
+track.com
+xcorr.com
+
+text 0 golden/tilt_3dfind.out
+
+text 2 golden/tilt_3dfind.rc
+0
+
+sha256 520b11d90351af9f6c67f34f84c435cb6c8626a88b523c17f582ca930ea1ce4f 618 golden/tilt_3dfind/dfltcoms/tilt_3dfind.com
+sha256 686b9a98db1dc5a0870534909b8b93d6c17c2e0e18eac429f4757a896bbf7b56 632 golden/tilt_3dfind/origcoms/tilt_3dfind.com
+sha256 686b9a98db1dc5a0870534909b8b93d6c17c2e0e18eac429f4757a896bbf7b56 632 golden/tilt_3dfind/tilt_3dfind.com
+text 480 golden/tilt_3dfind_reproject.files
+align.com
+b.rawtlt
+b.seed
+b.st
+ctfcorrection.com
+ctfplotter.com
+eraser.com
+mtffilter.com
+newst.com
+origcoms/align.com
+origcoms/ctfcorrection.com
+origcoms/ctfplotter.com
+origcoms/eraser.com
+origcoms/mtffilter.com
+origcoms/newst.com
+origcoms/prenewst.com
+origcoms/sample.com
+origcoms/tilt.com
+origcoms/tilt_3dfind_reproject.com
+origcoms/tomopitch.com
+origcoms/track.com
+origcoms/xcorr.com
+prenewst.com
+sample.com
+tilt.com
+tilt_3dfind_reproject.com
+tomopitch.com
+track.com
+xcorr.com
+
+text 0 golden/tilt_3dfind_reproject.out
+
+text 2 golden/tilt_3dfind_reproject.rc
+0
+
+sha256 74c835df3b43cc63460513f93a7953d1220cbc6be4ac5021ebd8455723577dff 632 golden/tilt_3dfind_reproject/origcoms/tilt_3dfind_reproject.com
+sha256 74c835df3b43cc63460513f93a7953d1220cbc6be4ac5021ebd8455723577dff 632 golden/tilt_3dfind_reproject/tilt_3dfind_reproject.com
+text 460 golden/transferfid.files
+align.com
+b.rawtlt
+b.seed
+b.st
+ctfcorrection.com
+ctfplotter.com
+eraser.com
+mtffilter.com
+newst.com
+origcoms/align.com
+origcoms/ctfcorrection.com
+origcoms/ctfplotter.com
+origcoms/eraser.com
+origcoms/mtffilter.com
+origcoms/newst.com
+origcoms/prenewst.com
+origcoms/sample.com
+origcoms/tilt.com
+origcoms/tomopitch.com
+origcoms/track.com
+origcoms/transferfid.com
+origcoms/xcorr.com
+prenewst.com
+sample.com
+tilt.com
+tomopitch.com
+track.com
+transferfid.com
+xcorr.com
+
+text 0 golden/transferfid.out
+
+text 2 golden/transferfid.rc
+0
+
+text 141 golden/transferfid/origcoms/transferfid.com
+# Command file for running transferfid created by makecomfile
+$transferfid -StandardInput
+Setname	b
+CorrespondingCoordFile	transferfid.coord
+
+text 141 golden/transferfid/transferfid.com
+# Command file for running transferfid created by makecomfile
+$transferfid -StandardInput
+Setname	b
+CorrespondingCoordFile	transferfid.coord
+
+text 0 golden/usage.files
+
+sha256 04fdcce9b2c73a3a8e66dccacac10f248feb169e587fdc8e553b75a8124d9383 2472 golden/usage.out
+text 2 golden/usage.rc
+0
+
+text 468 golden/varypatchtrack.files
+align.com
+b.rawtlt
+b.seed
+b.st
+ctfcorrection.com
+ctfplotter.com
+eraser.com
+mtffilter.com
+newst.com
+origcoms/align.com
+origcoms/ctfcorrection.com
+origcoms/ctfplotter.com
+origcoms/eraser.com
+origcoms/mtffilter.com
+origcoms/newst.com
+origcoms/prenewst.com
+origcoms/sample.com
+origcoms/tilt.com
+origcoms/tomopitch.com
+origcoms/track.com
+origcoms/varypatchtracka.com
+origcoms/xcorr.com
+prenewst.com
+sample.com
+tilt.com
+tomopitch.com
+track.com
+varypatchtracka.com
+xcorr.com
+
+text 0 golden/varypatchtrack.out
+
+text 2 golden/varypatchtrack.rc
+0
+
+text 198 golden/varypatchtrack/origcoms/varypatchtracka.com
+# Command file for running varypatchtrack created by makecomfile
+$varypatchtrack -StandardInput
+XCorrCommandFile   xcorr_pta.com
+AlignCommandFile   aligna.com
+NumFilterSteps  8
+NumPatchSizeSteps  8
+
+text 198 golden/varypatchtrack/varypatchtracka.com
+# Command file for running varypatchtrack created by makecomfile
+$varypatchtrack -StandardInput
+XCorrCommandFile   xcorr_pta.com
+AlignCommandFile   aligna.com
+NumFilterSteps  8
+NumPatchSizeSteps  8
+
+text 476 golden/xcorr_pt.files
+align.com
+b.rawtlt
+b.seed
+b.st
+ctfcorrection.com
+ctfplotter.com
+dfltcoms/xcorr_pt.com
+eraser.com
+mtffilter.com
+newst.com
+origcoms/align.com
+origcoms/ctfcorrection.com
+origcoms/ctfplotter.com
+origcoms/eraser.com
+origcoms/mtffilter.com
+origcoms/newst.com
+origcoms/prenewst.com
+origcoms/sample.com
+origcoms/tilt.com
+origcoms/tomopitch.com
+origcoms/track.com
+origcoms/xcorr.com
+origcoms/xcorr_pt.com
+prenewst.com
+sample.com
+tilt.com
+tomopitch.com
+track.com
+xcorr.com
+xcorr_pt.com
+
+text 0 golden/xcorr_pt.out
+
+text 2 golden/xcorr_pt.rc
+0
+
+text 417 golden/xcorr_pt/dfltcoms/xcorr_pt.com
+$goto doxcorr
+$doxcorr:
+$tiltxcorr -StandardInput
+BordersInXandY	3,2
+IterateCorrelations	1
+InputFile	b_preali.mrc
+OutputFile	b_pt.fid
+PrealignmentTransformFile	b.prexg
+PixelSize	1.0
+TiltFile	b.rawtlt
+RotationAngle	-85.3
+FilterSigma1	0.03
+FilterRadius2	0.25
+FilterSigma2	0.05
+$dochop:
+$imodchopconts -StandardInput
+InputModel b_pt.fid
+OutputModel b.fid
+MinimumOverlap 4
+AssignSurfaces 1
+$if (-e ./savework) ./savework
+
+text 435 golden/xcorr_pt/origcoms/xcorr_pt.com
+$goto doxcorr
+$doxcorr:
+$tiltxcorr -StandardInput
+BordersInXandY	3,2
+IterateCorrelations	1
+ImagesAreBinned	2
+InputFile	b_preali.mrc
+OutputFile	b_pt.fid
+PrealignmentTransformFile	b.prexg
+PixelSize	1.0
+TiltFile	b.rawtlt
+RotationAngle	-85.3
+FilterSigma1	0.03
+FilterRadius2	0.25
+FilterSigma2	0.05
+$dochop:
+$imodchopconts -StandardInput
+InputModel b_pt.fid
+OutputModel b.fid
+MinimumOverlap 4
+AssignSurfaces 1
+$if (-e ./savework) ./savework
+
+text 435 golden/xcorr_pt/xcorr_pt.com
+$goto doxcorr
+$doxcorr:
+$tiltxcorr -StandardInput
+BordersInXandY	3,2
+IterateCorrelations	1
+ImagesAreBinned	2
+InputFile	b_preali.mrc
+OutputFile	b_pt.fid
+PrealignmentTransformFile	b.prexg
+PixelSize	1.0
+TiltFile	b.rawtlt
+RotationAngle	-85.3
+FilterSigma1	0.03
+FilterRadius2	0.25
+FilterSigma2	0.05
+$dochop:
+$imodchopconts -StandardInput
+InputModel b_pt.fid
+OutputModel b.fid
+MinimumOverlap 4
+AssignSurfaces 1
+$if (-e ./savework) ./savework
+

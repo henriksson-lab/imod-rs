@@ -78,8 +78,8 @@ pub fn run_cases(script: &str) -> Vec<String> {
     let cases = std::fs::read_to_string(here.join("cases.tsv")).expect("cases.tsv");
     let mut failures = Vec::new();
     let mut count = 0;
-    for row in cases.lines() {
-        if row.starts_with('#') || row.trim().is_empty() {
+    for row in common::golden::case_rows(&cases) {
+        if row.trim().is_empty() {
             continue;
         }
         let fields = row.split('\t').collect::<Vec<_>>();
@@ -127,13 +127,15 @@ pub fn run_cases(script: &str) -> Vec<String> {
             }
         }
         let bin = work.with_extension("bin");
-        let stand_in = golden.join(format!("{name}.tomopieces"));
-        if stand_in.exists() {
+        if let Some(stand_in) = common::golden::read_opt(&golden.join(format!("{name}.tomopieces")))
+        {
             std::fs::create_dir_all(&bin).unwrap();
+            let printed = bin.join("tomopieces.out");
+            std::fs::write(&printed, stand_in).unwrap();
             let program = bin.join("tomopieces");
             std::fs::write(
                 &program,
-                format!("#!/bin/sh\ncat '{}'\n", stand_in.display()),
+                format!("#!/bin/sh\ncat '{}'\n", printed.display()),
             )
             .unwrap();
             use std::os::unix::fs::PermissionsExt as _;
@@ -152,8 +154,7 @@ pub fn run_cases(script: &str) -> Vec<String> {
         }
         let output = command.output().expect("run imod");
 
-        let expected_rc = std::fs::read_to_string(golden.join(format!("{name}.rc")))
-            .unwrap()
+        let expected_rc = common::golden::read_to_string(&golden.join(format!("{name}.rc")))
             .trim()
             .parse::<i32>()
             .unwrap();
@@ -164,19 +165,19 @@ pub fn run_cases(script: &str) -> Vec<String> {
                 String::from_utf8_lossy(&output.stdout)
             ));
         }
-        let expected_out = std::fs::read(golden.join(format!("{name}.out"))).unwrap();
-        if output.stdout != expected_out {
+        let expected_out = common::golden::expect(&golden.join(format!("{name}.out")));
+        if !expected_out.matches(&output.stdout) {
             failures.push(format!(
                 "{name}: stdout differs:\n{}\n--- native:\n{}",
                 String::from_utf8_lossy(&output.stdout),
-                String::from_utf8_lossy(&expected_out)
+                expected_out.display()
             ));
         }
 
         let mut remaining = Vec::new();
         walk(&work, &work, &mut remaining);
         remaining.sort();
-        let expected_files = std::fs::read_to_string(golden.join(format!("{name}.files"))).unwrap();
+        let expected_files = common::golden::read_to_string(&golden.join(format!("{name}.files")));
         let expected_files = expected_files
             .lines()
             .map(str::to_owned)
@@ -188,11 +189,9 @@ pub fn run_cases(script: &str) -> Vec<String> {
         }
         for file in &remaining {
             let actual = std::fs::read(work.join(file)).unwrap();
-            let golden_file = golden.join(name).join(file);
-            if golden_file.exists() {
-                let expected = std::fs::read(&golden_file).unwrap();
-                if common::mask_stamps(&actual) != common::mask_stamps(&expected) {
-                    failures.push(format!("{name}: {file} differs from native"));
+            if let Some(expected) = common::golden::load(&golden.join(name).join(file)) {
+                if let Err(why) = expected.compare(&actual, common::mask_stamps, false) {
+                    failures.push(format!("{name}: {file} differs from native: {why}"));
                 }
             } else if placed.get(file) != Some(&actual) {
                 failures.push(format!("{name}: {file} changed, native left it as input"));

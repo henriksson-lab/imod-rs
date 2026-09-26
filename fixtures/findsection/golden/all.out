@@ -1,9 +1,0 @@
-               center   center SDs      edge     edge SDs      distinct-
-scale  binning  mean   median  MADN     mean   median  MADN      ness
-  1    1,1,1      472   248.5  26.2         2    98.8   7.1     13.78
-  2    2,2,2      496   165.4  21.6         2    35.9   6.0     14.40
-Selected scaling # 2 as the best one for analysis
-WARNING: With a block size of 20, there can be only 2 samples
-Median Z values of surfaces, numbered from 1, are: 9  22
-Z limits for autopatchfit combine, numbered from 1, are: 8  23
-Absolute limits of surfaces, numbered from 1, are: 8  23

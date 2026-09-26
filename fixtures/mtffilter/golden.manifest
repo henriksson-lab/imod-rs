@@ -1,0 +1,173 @@
+# imod-rs native golden manifest for fixtures/mtffilter; see fixtures/README.md.
+# Regenerate with fixtures/regen-golden.sh mtffilter; do not edit by hand.
+text 380 golden/ampconflict.out
+ Dimensions:     48     40      7   Pixel size:         1          1          1
+Mode:  2               Min, max, mean:       5.0696       15.691       10.082
+raw2mrc: Converted to mrc format.                       26-Sep-26  01:22:52
+
+ NEW image file on unit   3 : out.mrc
+ERROR: mtffilter - To use the amplifier filter you must enter -amplifier and either -phase or -cutoff
+rc=1
+
+text 2 golden/ampconflict.rc
+1
+
+text 0 golden/ampconflict/out.mrc
+
+sha256 dfe5f30f224681156248f96cbfa8455fe23d07c0bd833032353ede9cdab17689 718 golden/amplifier.out
+text 2 golden/amplifier.rc
+0
+
+sha256 2a2dd80ecbeeab9699cb5ed0216cc059b936e7b9f54920a3492100bdd0c9b776 54784 golden/amplifier/out.mrc
+text 335 golden/badmode.out
+ Dimensions:     48     40      7   Pixel size:         1          1          1
+Mode:  2               Min, max, mean:       5.0696       15.691       10.082
+raw2mrc: Converted to mrc format.                       26-Sep-26  01:22:52
+
+ NEW image file on unit   3 : out.mrc
+ERROR: mtffilter - Output mode must be 0, 1, 2, 6, or 12
+rc=1
+
+text 2 golden/badmode.rc
+1
+
+text 0 golden/badmode/out.mrc
+
+sha256 d0aa897606cc785729907f08c042f699455e2751c6d23618a3b7042c8c44cd58 770 golden/deconv.out
+text 2 golden/deconv.rc
+0
+
+sha256 560ad787479484df3824c9aaacb365b0d90d61bce1b61b23c2a4e52c7619100c 20164 golden/deconv/out.mrc
+text 348 golden/deconvnodef.out
+ Dimensions:     48     40      7   Pixel size:         1          1          1
+Mode:  2               Min, max, mean:       5.0696       15.691       10.082
+raw2mrc: Converted to mrc format.                       26-Sep-26  01:22:52
+
+ NEW image file on unit   3 : out.mrc
+ERROR: mtffilter - You must enter -defocus for a deconvolution filter
+rc=1
+
+text 2 golden/deconvnodef.rc
+1
+
+text 0 golden/deconvnodef/out.mrc
+
+sha256 93359a072e08e85a89d2b7b18db36eb4ff0b43ab3383ebe9eba0496bb8b86f2f 6182 golden/dfixed.out
+text 2 golden/dfixed.rc
+0
+
+sha256 7c791c6aed3dd05624c89a0816339e7196fe5bbf17c08cc391a13e6376c70806 54784 golden/dfixed/out.mrc
+text 386 golden/doseconflict.out
+ Dimensions:     48     40      7   Pixel size:         1          1          1
+Mode:  2               Min, max, mean:       5.0696       15.691       10.082
+raw2mrc: Converted to mrc format.                       26-Sep-26  01:22:52
+
+ NEW image file on unit   3 : out.mrc
+ERROR: mtffilter - You cannot use dose weighting with inverse, 1-D, 3-D, R-weighted, or fake SIRT filtering
+rc=1
+
+text 2 golden/doseconflict.rc
+1
+
+text 0 golden/doseconflict/out.mrc
+
+sha256 77f1d4e49f2be945675caa14cb52d70ff929e5ade26b16e56ef913c955aaf4ef 566 golden/dtype1.out
+text 2 golden/dtype1.rc
+0
+
+sha256 3025fa59e54299e37541c79a47bb0a73d30005be7be7168778a2b76b6dc605b3 54784 golden/dtype1/out.mrc
+sha256 77f1d4e49f2be945675caa14cb52d70ff929e5ade26b16e56ef913c955aaf4ef 566 golden/dtype2.out
+text 2 golden/dtype2.rc
+0
+
+sha256 3025fa59e54299e37541c79a47bb0a73d30005be7be7168778a2b76b6dc605b3 54784 golden/dtype2/out.mrc
+sha256 ae7850cbdef5edf301a972973442db3cb1475428e02b5b2647162037838bd0de 566 golden/dtype3.out
+text 2 golden/dtype3.rc
+0
+
+sha256 51f188db5d6a7ab0630bf94ee4e7ce36137fdc5e7526e3a65b432c2947762222 54784 golden/dtype3/out.mrc
+sha256 039978bd1eb14f553f128eb1580d837eda403aca975e2e72db79025783b95791 718 golden/fake.out
+text 2 golden/fake.rc
+0
+
+sha256 a3154ee666f50317bfb515e1594a4d7444f7e4c56186c0135235abcc8da4ae6e 54784 golden/fake/out.mrc
+text 349 golden/fakemulti.out
+ Dimensions:     48     40      7   Pixel size:         1          1          1
+Mode:  2               Min, max, mean:       5.0696       15.691       10.082
+raw2mrc: Converted to mrc format.                       26-Sep-26  01:22:52
+
+ NEW image file on unit   3 : out.mrc005
+
+ NEW image file on unit   3 : out.mrc120
+ PROGRAM EXECUTED TO END.
+rc=0
+
+text 2 golden/fakemulti.rc
+0
+
+sha256 5d835487c5ff8c341b78d78d55cf14e207fc754940bc7bbea31cd3abed8d3edf 54784 golden/fakemulti/out.mrc005
+sha256 2f43d54f9e670f111534b93ef5caa95e9b7c64792f455e54cabf6b8db455f607 54784 golden/fakemulti/out.mrc120
+sha256 5017692ab8ba157652cd3c754078d30651398a5cb7d56c909a8863c34854cf92 794 golden/fft.out
+text 2 golden/fft.rc
+0
+
+sha256 99fd700656e31ae38c1c67111bfa458269f515e85136aff448cf7ec515a91134 26944 golden/fft/out.mrc
+sha256 29090abdf8666121b29dc42998d36ed0709a7bc6a6799d039ec7f29033bc5b64 718 golden/filter3d.out
+text 2 golden/filter3d.rc
+0
+
+sha256 f58027b3cfb393778cacb8beaddcc98a23aa24eb73565414473d2e4372b80b29 16336 golden/filter3d/out.mrc
+sha256 887c3b394cd24f0f08147d69774f378355ebf5e07a2e5ecaed7131efc5253006 4887 golden/help.out
+text 2 golden/help.rc
+0
+
+sha256 c3e5a9e08596cdd762682c1fab2ae3cc3598fa5bab9c6c8faf873ae60b2b5813 679 golden/inplace.out
+text 2 golden/inplace.rc
+0
+
+sha256 2498ad6caac2f54c7624caf410fe699911fdc1e3a485b31d7a2a6958ce8022bb 20164 golden/inplace/f33.mrc
+sha256 89173ee1dbd016d964c746656fc6e2b038f8c959effd0e7e2768d5bfb5d19e7a 718 golden/lowpass.out
+text 2 golden/lowpass.rc
+0
+
+sha256 a26f9b944e146e147bae1e1f4e246f3f97cd970a7472d6c9eb38ad0c9003bd55 54784 golden/lowpass/out.mrc
+sha256 16667b47f4cfffd33416394a8bf84bb9dd87a07260afa9a8d2a6da6b40f0ab34 6182 golden/mdoc.out
+text 2 golden/mdoc.rc
+0
+
+sha256 3025fa59e54299e37541c79a47bb0a73d30005be7be7168778a2b76b6dc605b3 54784 golden/mdoc/out.mrc
+sha256 740ac62f2369d9f9374dde941d4e4b8d5d5fec8a4db14c69c52231ef98b9319f 718 golden/mtf.out
+text 2 golden/mtf.rc
+0
+
+sha256 99e10e30e3bba54cc08bc521487bba23f4ef0ba2b19a90b13bdfe12e05cb6934 54784 golden/mtf/out.mrc
+sha256 371c23095e83b32df5f878ac0f26731b8ba1e2d99da56b89780bf589b79c63b9 718 golden/odd.out
+text 2 golden/odd.rc
+0
+
+sha256 231a9db6e2eeb67f61e77c9266064c9e241bd692adcde0b4911d0ed2eef05d86 10594 golden/odd/out.mrc
+sha256 1ab47e8bf1d3deb99bb63f9a3d836b4faaeae096e43abc87d22825b573d0e79e 770 golden/phaseplate.out
+text 2 golden/phaseplate.rc
+0
+
+sha256 936863eeb236980aaf4b572bada43253bff2df362976ae07ad10ef825e21b920 54784 golden/phaseplate/out.mrc
+sha256 4fae54da45fd465ab4de791eefefcf051cba69c849454f70276bf6b052a2b29d 701 golden/rweight.out
+text 2 golden/rweight.rc
+0
+
+sha256 24c58ca5634214cc5d0a1f8899312a042dc706cbfcc8fc684ad5cd475b60f900 54784 golden/rweight/out.mrc
+sha256 0a5d4240f1775003c61a534b6dcac50227b74daf499a2d82808cbb9cd14526e0 718 golden/short.out
+text 2 golden/short.rc
+0
+
+sha256 1f3ad9cfea9625ccf5c678ee44fde334eefdb4ae21305b73ff6e3c42a609abf9 12544 golden/short/out.mrc
+sha256 5765c06242ab43a1c250bd65dc4769ddda295b1e1be1e1589597244f25558d64 718 golden/stock.out
+text 2 golden/stock.rc
+0
+
+sha256 44ff65667a2ea441587f9021a1975a7684d618ccbb740a92144405ec7a5c2c0e 20164 golden/stock/out.mrc
+sha256 ea989782673ea30ffc375966d6fd780a68f7c3e282931828334b0b93f6ebbf92 770 golden/units.out
+text 2 golden/units.rc
+0
+
+sha256 26ee4b3bd813a21d66717e8f06a4faf3297e60ce3f217f739178747b12e33ff3 54784 golden/units/out.mrc

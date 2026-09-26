@@ -1,0 +1,11 @@
+ReferenceFile s1_a.mrc
+FileToAlign s1_b.mrc
+OutputFile out.patch
+PatchSizeXYZ 14,14,8
+NumberOfPatchesXYZ 3,3,2
+XMinAndMax 4,45
+YMinAndMax 4,45
+ZMinAndMax 2,19
+BSourceBorderXLoHi 3,3
+BSourceBorderYZLoHi 2,2
+KernelSigma 1.2

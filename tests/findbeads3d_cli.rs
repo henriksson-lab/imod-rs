@@ -14,6 +14,7 @@
 //! `fixtures/make-findbeads3d-goldens.sh defined`); `golden/` keeps the
 //! native record for every case.  The fixes are asserted directly by the
 //! tests after the golden loop.
+//! Pruned 2026-09-26: 37 of 39 rows kept (every `defined.list` case stays; dropped `-annulus` combined with `-ylong`, each covered alone, and `e_small`, the same coordinate-range exit as `e_range`); the rest stay in cases.tsv as `#full` rows (FULL=1, fixtures/README.md).
 
 mod common;
 
@@ -56,23 +57,19 @@ fn every_case_matches_native_golden() {
     let golden = fixture_dir().join("golden");
     let mut failures = Vec::new();
     let mut count = 0;
-    for line in table
-        .lines()
-        .filter(|l| !l.starts_with('#') && !l.is_empty())
-    {
+    for line in common::golden::case_rows(&table) {
         let (name, args) = line.split_once('\t').unwrap();
         let defined = fixture_dir().join("defined");
-        let golden = if defined.join(format!("{name}.rc")).exists() {
+        let golden = if common::golden::exists(&defined.join(format!("{name}.rc"))) {
             &defined
         } else {
             &golden
         };
-        let rc: i32 = std::fs::read_to_string(golden.join(format!("{name}.rc")))
-            .unwrap()
+        let rc: i32 = common::golden::read_to_string(&golden.join(format!("{name}.rc")))
             .trim()
             .parse()
             .unwrap();
-        let expected_out = std::fs::read(golden.join(format!("{name}.out"))).unwrap();
+        let expected_out = common::golden::expect(&golden.join(format!("{name}.out")));
         let dir = scratch(name);
         let inputs: Vec<String> = std::fs::read_dir(&dir)
             .unwrap()
@@ -97,28 +94,23 @@ fn every_case_matches_native_golden() {
         }
         // The usage listing starts with a version banner carrying the build
         // date (`imodVersion`); only the lines after it are compared.
-        let (ours, theirs) = if expected_out.starts_with(b"findbeads3d Version") {
-            let skip = |b: &[u8]| -> Vec<u8> {
+        let skip = |b: &[u8]| -> Vec<u8> {
+            if b.starts_with(b"findbeads3d Version") {
                 b.iter()
                     .position(|&c| c == b'\n')
                     .map_or(Vec::new(), |p| b[p + 1..].to_vec())
-            };
-            (skip(&output.stdout), skip(&expected_out))
-        } else {
-            (output.stdout.clone(), expected_out)
+            } else {
+                b.to_vec()
+            }
         };
-        if ours != theirs {
+        if !expected_out.matches_masked(&output.stdout, skip) {
             failures.push(format!(
                 "{name}: stdout differs\n--- native\n{}\n--- ours\n{}",
-                String::from_utf8_lossy(&theirs),
-                String::from_utf8_lossy(&ours)
+                expected_out.display(),
+                String::from_utf8_lossy(&output.stdout)
             ));
         }
-        let mut expected_files: Vec<String> = std::fs::read_dir(golden.join(name))
-            .unwrap()
-            .map(|e| e.unwrap().file_name().to_str().unwrap().to_string())
-            .collect();
-        expected_files.sort();
+        let expected_files: Vec<String> = common::golden::list(&golden.join(name));
         let mut produced: Vec<String> = std::fs::read_dir(&dir)
             .unwrap()
             .map(|e| e.unwrap().file_name().to_str().unwrap().to_string())
@@ -134,9 +126,9 @@ fn every_case_matches_native_golden() {
             let Ok(ours) = std::fs::read(dir.join(file)) else {
                 continue;
             };
-            let theirs = std::fs::read(golden.join(name).join(file)).unwrap();
-            if mask(&ours) != mask(&common::reconcile_uninitialised(&ours, &theirs)) {
-                failures.push(format!("{name}: {file} differs from native"));
+            let theirs = common::golden::expect(&golden.join(name).join(file));
+            if let Err(why) = theirs.compare(&ours, mask, true) {
+                failures.push(format!("{name}: {file} differs from native: {why}"));
             }
         }
         let _ = std::fs::remove_dir_all(&dir);

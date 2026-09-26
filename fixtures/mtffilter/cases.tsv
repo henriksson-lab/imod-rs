@@ -1,0 +1,27 @@
+# name	arguments (steps separated by ' ;; '; exit status and stdout recorded by make-mtffilter-goldens.sh)
+lowpass	f48.mrc out.mrc -lowpass 0.2,0.05 -highpass 0.02
+odd	f33.mrc out.mrc -lowpass 0.25,0.03 -radius1 0.05 -mode 1
+short	s40.mrc out.mrc -lowpass 0.3,0.05 -noise
+#full	zrange	f48.mrc out.mrc -zrange 2,5 -lowpass 0.2,0.05 -mode 0
+units	f48.mrc out.mrc -units -3 -pixel 0.5 -lowpass 0.4,20 -highpass 60
+mtf	f48.mrc out.mrc -mtf mtf.dat -maxinv 3 -invrolloff 0.2,0.08 -xscale 1.3 -denscale 2
+stock	f33.mrc out.mrc -stock 1
+filter3d	f33.mrc out.mrc -3dfilter -zrange 2,4 -lowpass 0.3,0.05
+rweight	f48.mrc out.mrc -rweight -1dfilter -lowpass 0.35,0.05
+fake	f48.mrc out.mrc -fake 20
+fakemulti	f48.mrc out.mrc -fake 5,120
+dfixed	f48.mrc out.mrc -dfixed 2.5 -pixel 0.3 -verbose 1 -volt 200 -initial 5 -bidir 3 -reversed -optimal 0.8 -critical 0.3,-1.6,2.8
+dtype1	f48.mrc out.mrc -dtype 1 -dfile dose1.txt -pixel 0.4
+dtype2	f48.mrc out.mrc -dtype 2 -dfile dose2.txt -pixel 0.4
+dtype3	f48.mrc out.mrc -dtype 3 -dfile dose3.txt -pixel 0.4 -expanded 2
+mdoc	f48.mrc out.mrc -dtype 4 -dfile f48.mrc.mdoc -pixel 0.4 -verbose 1
+deconv	f33.mrc out.mrc -deconv 0.7 -defocus 2 -pixel 0.4 -snr 0.9 -dchigh 0.05 -dcphase 30 -cs 2.0 -volt 200
+amplifier	f48.mrc out.mrc -amplifier 3,2 -cutoff 0.05
+phaseplate	f48.mrc out.mrc -amplifier 2,1.5 -phase 500,300,20 -pixel 0.5
+fft	fft.mrc out.mrc -lowpass 0.2,0.05
+inplace	f33.mrc -zrange 2,3 -lowpass 0.2,0.05
+badmode	f48.mrc out.mrc -mode 3
+doseconflict	f48.mrc out.mrc -dfixed 2 -rweight
+ampconflict	f48.mrc out.mrc -amplifier 3,2
+deconvnodef	f48.mrc out.mrc -deconv 1
+help	-help

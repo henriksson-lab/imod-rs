@@ -1,0 +1,112 @@
+# imod-rs native golden manifest for fixtures/matchorwarp; see fixtures/README.md.
+# Regenerate with fixtures/regen-golden.sh matchorwarp; do not edit by hand.
+text 33 golden/err_input.files
+ga.rec
+gb.rec
+patch.out
+solve.xf
+
+text 58 golden/err_input.out
+ERROR: matchorwarp - Input volume nope.rec does not exist
+
+text 2 golden/err_input.rc
+1
+
+text 33 golden/err_iter_nocom.files
+ga.rec
+gb.rec
+patch.out
+solve.xf
+
+text 108 golden/err_iter_nocom.out
+ERROR: matchorwarp - The full command file name must be entered because neither nope.com nor nope.pcm exist
+
+text 2 golden/err_iter_nocom.rc
+1
+
+text 40 golden/err_iter_nomat.files
+ga.rec
+gb.rec
+patch.out
+pc.com
+solve.xf
+
+text 65 golden/err_iter_nomat.out
+ERROR: matchorwarp - Cannot find name of file to align in pc.com
+
+text 2 golden/err_iter_nomat.rc
+1
+
+text 40 golden/err_iter_noout.files
+ga.rec
+gb.rec
+patch.out
+pc.com
+solve.xf
+
+text 69 golden/err_iter_noout.out
+ERROR: matchorwarp - Cannot find name of patch output file in pc.com
+
+text 2 golden/err_iter_noout.rc
+1
+
+text 33 golden/err_model.files
+ga.rec
+gb.rec
+patch.out
+solve.xf
+
+text 56 golden/err_model.out
+ERROR: matchorwarp - Model file nope.mod does not exist
+
+text 2 golden/err_model.rc
+1
+
+text 33 golden/err_patch.files
+ga.rec
+gb.rec
+patch.out
+solve.xf
+
+text 56 golden/err_patch.out
+ERROR: matchorwarp - Input file nope.out does not exist
+
+text 2 golden/err_patch.rc
+1
+
+text 47 golden/err_sizefile.files
+ga.rec
+gb.rec
+patch.out
+patchcorr.com
+solve.xf
+
+text 125 golden/err_sizefile.out
+ERROR: iiuOpen - Could not open 'patchcorr.com'
+ERROR: matchorwarp - header -si -mo -pi -StandardInput: exited with status 1
+
+text 2 golden/err_sizefile.rc
+1
+
+text 33 golden/err_vec.files
+ga.rec
+gb.rec
+patch.out
+solve.xf
+
+text 78 golden/err_vec.out
+ERROR: matchorwarp - A residual file must be specified to make a vector model
+
+text 2 golden/err_vec.rc
+1
+
+text 33 golden/usage.files
+ga.rec
+gb.rec
+patch.out
+solve.xf
+
+sha256 5e17e5caa873e6ef7ae9863c608def5b4ef3739b88818f582c97e18ab2df422e 2980 golden/usage.out
+text 2 golden/usage.rc
+0
+

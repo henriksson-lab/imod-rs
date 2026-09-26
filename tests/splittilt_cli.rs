@@ -5,6 +5,8 @@
 //! script by `fixtures/make-splittilt-goldens.sh`; see `tests/pysetup_common` for
 //! what is compared.  The wider differential behind these goldens is recorded
 //! in `TODO.md` (single-axis setup scripts).
+//!
+//! Pruned 2026-09-26: 17 of 19 rows kept (dropped `basic_n4`, a processor-count variant of `basic`, and `old_style_sep`, -c already covered by `separate`); the rest stay in cases.tsv as `#full` rows (FULL=1, fixtures/README.md).
 
 mod common;
 mod pysetup_common;

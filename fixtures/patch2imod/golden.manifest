@@ -1,0 +1,170 @@
+# imod-rs native golden manifest for fixtures/patch2imod; see fixtures/README.md.
+# Regenerate with fixtures/regen-golden.sh patch2imod; do not edit by hand.
+sha256 02c23882b201609209fdc5ef5046094cd7c7f3ab6e0a1ed38980a7d95b6fbde6 2716 golden/clip.mod
+text 2 golden/clip.rc
+0
+
+text 0 golden/clip.stdout
+
+sha256 dd3b29d23b01902cb1c463b4985059f1833878a31fba149ae8c71020b27baf0e 976 golden/comma.mod
+text 2 golden/comma.rc
+0
+
+text 0 golden/comma.stdout
+
+sha256 e117b72bd6a970c45709282b6cbd75b7ce651dd5cf2b6199b05c32fe3e7e85f5 4008 golden/display.mod
+text 2 golden/display.rc
+0
+
+text 0 golden/display.stdout
+
+text 2 golden/e_args.rc
+1
+
+sha256 e78c47cd1865ab782484b81e23d98b26eadddacf6011406a2ca2a8565b5353c3 743 golden/e_args.stdout
+text 0 golden/e_badhead.mod
+
+text 2 golden/e_badhead.rc
+1
+
+text 90 golden/e_badhead.stdout
+ERROR: patch2imod -  Converting the first item on the first line to get number of patches
+
+text 2 golden/e_illegal.rc
+1
+
+text 41 golden/e_illegal.stdout
+ERROR: patch2imod -  Illegal argument -q
+
+text 2 golden/e_lines_id.rc
+1
+
+text 92 golden/e_lines_id.stdout
+ERROR: patch2imod -  You cannot enter a column ID if there is no first line with data count
+
+text 2 golden/e_missing.rc
+1
+
+text 47 golden/e_missing.stdout
+ERROR: patch2imod -  Couldn't open nothere.out
+
+text 0 golden/e_short.mod
+
+text 2 golden/e_short.rc
+1
+
+text 52 golden/e_short.stdout
+ERROR: patch2imod -  Error reading file at line 25.
+
+text 2 golden/e_value0.rc
+1
+
+text 81 golden/e_value0.stdout
+ERROR: patch2imod -  Value column # or ID must be positive and between -1 and -6
+
+text 0 golden/e_value_noid.mod
+
+text 2 golden/e_value_noid.rc
+1
+
+text 85 golden/e_value_noid.stdout
+ERROR: patch2imod -  There is no value column ID # corresponding to the entered ID #
+
+text 2 golden/e_warp_bad.rc
+1
+
+text 57 golden/e_warp_bad.stdout
+ERROR: patch2imod -  Reading plain.out as a warping file
+
+sha256 17ab59fce0c729be2925da6b7d1c0063669d971dba07532857645c270ca5e6a9 1296 golden/lines_hdr.mod
+text 2 golden/lines_hdr.rc
+0
+
+text 0 golden/lines_hdr.stdout
+
+sha256 717f261a671b9886a0a39689a27e922e1d952a9bf6580ff651c656e4f5979cdf 1296 golden/lines_hdr_col.mod
+text 2 golden/lines_hdr_col.rc
+0
+
+text 0 golden/lines_hdr_col.stdout
+
+sha256 643e189f8ebbd436b0d8772fb6808c33deb9918c89f807bed3daac141e4489db 1504 golden/name.mod
+text 2 golden/name.rc
+0
+
+text 0 golden/name.stdout
+
+sha256 d7b07b434d06c206bd53ead80385a70cc544330f508a8d53bc430f171cdf144a 2412 golden/noflip.mod
+text 2 golden/noflip.rc
+0
+
+text 0 golden/noflip.stdout
+
+sha256 9e4661ace0aebd8286d2332edd52a8c802bfe87625ee249a87a359864088a933 536 golden/nolastnl_nl.mod
+text 2 golden/nolastnl_nl.rc
+0
+
+text 0 golden/nolastnl_nl.stdout
+
+sha256 c07306139f4557d8ca29640a78e78d028021ce043299c22e6cd39524b401965b 1504 golden/plain.mod
+text 2 golden/plain.rc
+0
+
+text 0 golden/plain.stdout
+
+sha256 5e1cdf7a95095de123cbdcd4f7eb5c2feb497ac811522b7134438f5e435e52fd 976 golden/resid.mod
+text 2 golden/resid.rc
+0
+
+text 0 golden/resid.stdout
+
+sha256 0bc04f7e1223913395024fe2fdc1fb85b21dccc18ea19a483cd4f3874ebc85f5 2412 golden/scale.mod
+text 2 golden/scale.rc
+0
+
+text 0 golden/scale.stdout
+
+sha256 3f93fc930a15c1f8046afd898a0dd11e369a2037882c36a55b8e41fd15a4d63f 2412 golden/times.mod
+text 2 golden/times.rc
+0
+
+text 0 golden/times.stdout
+
+sha256 676551fcb6f72cf38af031f96582433e2a7aca7cc50771b41553cd0eee2c78cb 2412 golden/vals3.mod
+text 2 golden/vals3.rc
+0
+
+text 0 golden/vals3.stdout
+
+sha256 a9cb3dc90466d72e765a0fd625fefbc0c0d7dd89fca2cd29912d908175fa58dd 2412 golden/value_col.mod
+text 2 golden/value_col.rc
+0
+
+text 0 golden/value_col.stdout
+
+sha256 a9cb3dc90466d72e765a0fd625fefbc0c0d7dd89fca2cd29912d908175fa58dd 2412 golden/value_id.mod
+text 2 golden/value_id.rc
+0
+
+text 41 golden/value_id.stdout
+The value with ID 7 is in extra column 2
+
+sha256 42cbe914317a3eecaaff2429c654ecaf80f8da2df883496996ae6575ca2d41e4 4008 golden/value_zero.mod
+text 2 golden/value_zero.rc
+0
+
+text 41 golden/value_zero.stdout
+The value with ID 4 is in extra column 4
+
+sha256 ce95921b227324833149ab94b7ff21c3ddfbca84f8e71fcaa45f00928922e083 844 golden/warp_ctrl.mod
+text 2 golden/warp_ctrl.rc
+0
+
+text 0 golden/warp_ctrl.stdout
+
+sha256 f5ea64aaa3af0c3e177080421963ff3fb90f348df0e8d33fcffef6b1a110c216 976 golden/warp_grid.mod
+text 2 golden/warp_grid.rc
+0
+
+text 0 golden/warp_grid.stdout
+

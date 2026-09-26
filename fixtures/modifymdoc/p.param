@@ -1,0 +1,5 @@
+InputFile = tilt.mdoc
+OutputFile = out.mdoc
+OrderToProduce = 1
+BinningToScaleTo = 2
+ElectronDosePerImage = 2.2

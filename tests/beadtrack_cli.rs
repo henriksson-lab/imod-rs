@@ -22,8 +22,10 @@
 //! `skip`, `snap`, `sobel`, `sobelelong`, `trace` -- where the Sobel peaks are
 //! scaled and then offset (`peak * scale + offset`) instead of multiplied by
 //! `scale + offset`, and the Sobel/centroid residual report prints both
-//! values.  They were regenerated from the translation; re-running
-//! `make-beadtrack-goldens.sh` would put native's output back.
+//! values.  They are listed in `fixtures/beadtrack/defined.list` and
+//! `fixtures/regen-golden.sh beadtrack` records them from our own build
+//! (`make-beadtrack-goldens.sh defined`); a build with only the Sobel fix
+//! reverted reproduces native on every Sobel case.
 
 mod common;
 
@@ -71,12 +73,11 @@ fn every_case_matches_native_golden() {
     let mut failures = Vec::new();
     for name in &cases {
         let input = std::fs::read(fixture_dir().join("cases").join(format!("{name}.in"))).unwrap();
-        let rc: i32 = std::fs::read_to_string(golden.join(format!("{name}.rc")))
-            .unwrap()
+        let rc: i32 = common::golden::read_to_string(&golden.join(format!("{name}.rc")))
             .trim()
             .parse()
             .unwrap();
-        let expected_out = std::fs::read(golden.join(format!("{name}.out"))).unwrap();
+        let expected_out = common::golden::expect(&golden.join(format!("{name}.out")));
         let dir = scratch(name);
         let inputs: Vec<String> = std::fs::read_dir(&dir)
             .unwrap()
@@ -106,18 +107,14 @@ fn every_case_matches_native_golden() {
                 output.status.code()
             ));
         }
-        if output.stdout != expected_out {
+        if !expected_out.matches(&output.stdout) {
             failures.push(format!(
                 "{name}: stdout differs\n--- native\n{}\n--- ours\n{}",
-                String::from_utf8_lossy(&expected_out),
+                expected_out.display(),
                 String::from_utf8_lossy(&output.stdout)
             ));
         }
-        let mut expected_files: Vec<String> = std::fs::read_dir(golden.join(name))
-            .unwrap()
-            .map(|e| e.unwrap().file_name().to_str().unwrap().to_string())
-            .collect();
-        expected_files.sort();
+        let expected_files: Vec<String> = common::golden::list(&golden.join(name));
         let mut produced: Vec<String> = std::fs::read_dir(&dir)
             .unwrap()
             .map(|e| e.unwrap().file_name().to_str().unwrap().to_string())
@@ -133,9 +130,9 @@ fn every_case_matches_native_golden() {
             let Ok(ours) = std::fs::read(dir.join(file)) else {
                 continue;
             };
-            let theirs = std::fs::read(golden.join(name).join(file)).unwrap();
-            if mask(&ours) != mask(&common::reconcile_uninitialised(&ours, &theirs)) {
-                failures.push(format!("{name}: {file} differs from native"));
+            let theirs = common::golden::expect(&golden.join(name).join(file));
+            if let Err(why) = theirs.compare(&ours, mask, true) {
+                failures.push(format!("{name}: {file} differs from native: {why}"));
             }
         }
         let _ = std::fs::remove_dir_all(&dir);

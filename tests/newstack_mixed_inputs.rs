@@ -92,28 +92,19 @@ fn inputs_of_differing_mode_and_size_match_the_reference_output() {
             String::from_utf8_lossy(&output.stderr)
         );
         let want_text =
-            std::fs::read_to_string(root.join(format!("fixtures/newstack-mixed-{name}.txt")))
-                .unwrap();
-        assert_eq!(
-            String::from_utf8_lossy(&output.stdout),
-            want_text,
-            "{name}: stdout must match the reference run"
-        );
+            common::golden::expect(&root.join(format!("fixtures/newstack-mixed-{name}.txt")));
+        if let Err(why) = want_text.compare(&output.stdout, common::golden::identity, false) {
+            panic!("{name}: stdout must match the reference run: {why}");
+        }
         let mut got = std::fs::read(dir.join(&out_name)).unwrap();
-        let want = std::fs::read(root.join(format!("fixtures/newstack-mixed-{name}.mrc"))).unwrap();
+        let want =
+            common::golden::expect(&root.join(format!("fixtures/newstack-mixed-{name}.mrc")));
         for byte in &mut got[224..1024] {
             *byte = 0;
         }
-        assert_eq!(
-            got.len(),
-            want.len(),
-            "{name}: output size must match the reference"
-        );
-        let differing = (0..want.len()).filter(|i| want[*i] != got[*i]).count();
-        assert_eq!(
-            differing, 0,
-            "{name}: {differing} bytes differ from the reference output"
-        );
+        if let Err(why) = want.compare(&got, common::golden::identity, false) {
+            panic!("{name}: output differs from the reference: {why}");
+        }
     }
     let _ = std::fs::remove_dir_all(&dir);
 }

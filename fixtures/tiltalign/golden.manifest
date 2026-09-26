@@ -1,0 +1,887 @@
+# imod-rs native golden manifest for fixtures/tiltalign; see fixtures/README.md.
+# Regenerate with fixtures/regen-golden.sh tiltalign; do not edit by hand.
+sha256 4d6ed82ab668f6d13cbb591da3a3f673e20925376ce5153227874f9a0d19d401 47393 golden/err_both.g1.resid
+text 328 golden/err_both.g1.tlt
+ -59.87
+ -56.98
+ -54.09
+ -51.20
+ -48.20
+ -45.20
+ -42.20
+ -39.20
+ -36.19
+ -33.19
+ -30.18
+ -27.17
+ -24.16
+ -21.13
+ -18.10
+ -15.07
+ -12.03
+  -9.00
+  -6.00
+  -3.01
+  -0.01
+   2.99
+   5.98
+   8.98
+  11.96
+  14.95
+  17.93
+  20.91
+  23.90
+  26.93
+  29.95
+  32.98
+  36.01
+  39.03
+  41.97
+  44.90
+  47.84
+  50.77
+  53.88
+  57.00
+  60.12
+
+sha256 6353a5a17c5535ab73b7f8ebbeb1e3916b2ab47c7747a63dbc442a059071b2e6 2993 golden/err_both.g1.xf
+sha256 17a493a318e1d5a6ce26de9fac874b5708e727b5885742eb7330fb35ebe137b3 1444 golden/err_both.g1fid.xyz
+text 2 golden/err_both.rc
+1
+
+sha256 5b4e87d8237a4ca6c36c3831fcd940fad3e3ca476ae345cf34555d69e38de0fe 10412 golden/err_both.stdout
+text 0 golden/err_cv_btype.g1.tlt
+
+text 0 golden/err_cv_btype.g1.xf
+
+text 2 golden/err_cv_btype.rc
+1
+
+sha256 d0b74de1b11a9abb3f0107dc1718bf65217ac0f80cc20f99542eace23f68fe82 3585 golden/err_cv_btype.stdout
+text 0 golden/err_fixedxyz_few.g1.tlt
+
+text 0 golden/err_fixedxyz_few.g1.xf
+
+text 2 golden/err_fixedxyz_few.rc
+1
+
+sha256 3b11b7f816d525270d13e1173402b510d1e5ff261e26af51484ae732db247f04 3586 golden/err_fixedxyz_few.stdout
+text 2 golden/err_noargs.rc
+0
+
+sha256 b1f01491a38917e66196d17608f02c982c4c3a24d07f90d465d9d03474ddc75c 13653 golden/err_noargs.stdout
+sha256 4d6ed82ab668f6d13cbb591da3a3f673e20925376ce5153227874f9a0d19d401 47393 golden/err_nolocalfile.g1.resid
+text 328 golden/err_nolocalfile.g1.tlt
+ -59.87
+ -56.98
+ -54.09
+ -51.20
+ -48.20
+ -45.20
+ -42.20
+ -39.20
+ -36.19
+ -33.19
+ -30.18
+ -27.17
+ -24.16
+ -21.13
+ -18.10
+ -15.07
+ -12.03
+  -9.00
+  -6.00
+  -3.01
+  -0.01
+   2.99
+   5.98
+   8.98
+  11.96
+  14.95
+  17.93
+  20.91
+  23.90
+  26.93
+  29.95
+  32.98
+  36.01
+  39.03
+  41.97
+  44.90
+  47.84
+  50.77
+  53.88
+  57.00
+  60.12
+
+sha256 6353a5a17c5535ab73b7f8ebbeb1e3916b2ab47c7747a63dbc442a059071b2e6 2993 golden/err_nolocalfile.g1.xf
+sha256 17a493a318e1d5a6ce26de9fac874b5708e727b5885742eb7330fb35ebe137b3 1444 golden/err_nolocalfile.g1fid.xyz
+text 2 golden/err_nolocalfile.rc
+1
+
+sha256 4744458a4f0c6e0d85363f0a21a0e6f1cd9c5ce47e2566730b49a3835b0752b1 10392 golden/err_nolocalfile.stdout
+sha256 570c5056add3711bf3b6f0b5716902a11710c08bb0563b3916645e638b8d8a35 1612 golden/g1_basic.g1.3dmod
+sha256 4d6ed82ab668f6d13cbb591da3a3f673e20925376ce5153227874f9a0d19d401 47393 golden/g1_basic.g1.resid
+text 328 golden/g1_basic.g1.tlt
+ -59.87
+ -56.98
+ -54.09
+ -51.20
+ -48.20
+ -45.20
+ -42.20
+ -39.20
+ -36.19
+ -33.19
+ -30.18
+ -27.17
+ -24.16
+ -21.13
+ -18.10
+ -15.07
+ -12.03
+  -9.00
+  -6.00
+  -3.01
+  -0.01
+   2.99
+   5.98
+   8.98
+  11.96
+  14.95
+  17.93
+  20.91
+  23.90
+  26.93
+  29.95
+  32.98
+  36.01
+  39.03
+  41.97
+  44.90
+  47.84
+  50.77
+  53.88
+  57.00
+  60.12
+
+sha256 6353a5a17c5535ab73b7f8ebbeb1e3916b2ab47c7747a63dbc442a059071b2e6 2993 golden/g1_basic.g1.xf
+sha256 17a493a318e1d5a6ce26de9fac874b5708e727b5885742eb7330fb35ebe137b3 1444 golden/g1_basic.g1fid.xyz
+text 2 golden/g1_basic.rc
+0
+
+sha256 805132a06182e5c4731aa4e651f67ff36b391dc423f57d3d95658c3ce68d054e 11500 golden/g1_basic.stdout
+sha256 3079817905c6ff74d24efe4cb01409827c4154ce1731d915d2f574c7c4e318b7 1408 golden/g1_binned.g1.3dmod
+sha256 787ef4d0b26687ef4f87577d3a8f352d6ee7af01bc63284b807aec18ba63d2e6 47393 golden/g1_binned.g1.resid
+text 328 golden/g1_binned.g1.tlt
+ -59.87
+ -56.97
+ -54.08
+ -51.19
+ -48.19
+ -45.20
+ -42.20
+ -39.20
+ -36.19
+ -33.18
+ -30.17
+ -27.17
+ -24.16
+ -21.13
+ -18.10
+ -15.06
+ -12.03
+  -9.00
+  -6.00
+  -3.00
+  -0.01
+   2.99
+   5.99
+   8.99
+  11.97
+  14.95
+  17.94
+  20.92
+  23.90
+  26.93
+  29.96
+  32.99
+  36.01
+  39.04
+  41.97
+  44.91
+  47.84
+  50.77
+  53.89
+  57.01
+  60.12
+
+sha256 d2477d942569345b4c1cc9eb8d2918d2c5efcd8cd83e60c571ee43cd33f38abf 2993 golden/g1_binned.g1.xf
+sha256 c086420dacc199454d95ef69798cf40a50a0597429d3a04b30232488f2912e71 1444 golden/g1_binned.g1fid.xyz
+text 2 golden/g1_binned.rc
+0
+
+sha256 ca9eca2f041d5b92d109d2a82826134c1de18bd088fc7837bb5c901e7e6701b7 10239 golden/g1_binned.stdout
+sha256 570c5056add3711bf3b6f0b5716902a11710c08bb0563b3916645e638b8d8a35 1612 golden/g1_fill.g1.3dmod
+sha256 4d6ed82ab668f6d13cbb591da3a3f673e20925376ce5153227874f9a0d19d401 47393 golden/g1_fill.g1.resid
+text 328 golden/g1_fill.g1.tlt
+ -59.87
+ -56.98
+ -54.09
+ -51.20
+ -48.20
+ -45.20
+ -42.20
+ -39.20
+ -36.19
+ -33.19
+ -30.18
+ -27.17
+ -24.16
+ -21.13
+ -18.10
+ -15.07
+ -12.03
+  -9.00
+  -6.00
+  -3.01
+  -0.01
+   2.99
+   5.98
+   8.98
+  11.96
+  14.95
+  17.93
+  20.91
+  23.90
+  26.93
+  29.95
+  32.98
+  36.01
+  39.03
+  41.97
+  44.90
+  47.84
+  50.77
+  53.88
+  57.00
+  60.12
+
+sha256 6353a5a17c5535ab73b7f8ebbeb1e3916b2ab47c7747a63dbc442a059071b2e6 2993 golden/g1_fill.g1.xf
+sha256 ad7cf70e512e7355574e7f1774b7bdfeed495fee871eb8d5cd08eac82e6212a9 15808 golden/g1_fill.g1_nogaps.fid
+sha256 17a493a318e1d5a6ce26de9fac874b5708e727b5885742eb7330fb35ebe137b3 1444 golden/g1_fill.g1fid.xyz
+sha256 43ecfc9e5dd589d762380d5837c0a39b3a0918da464450912249047b12b06524 28409 golden/g1_fill.g1tb.botres
+sha256 7683ffc5f936a44fac7d6798b4184003337ef0f5544b930bd85612db13c0d843 19001 golden/g1_fill.g1tb.topres
+text 328 golden/g1_fill.g1u.tlt
+ -59.87
+ -56.98
+ -54.09
+ -51.20
+ -48.20
+ -45.20
+ -42.20
+ -39.20
+ -36.19
+ -33.19
+ -30.18
+ -27.17
+ -24.16
+ -21.13
+ -18.10
+ -15.07
+ -12.03
+  -9.00
+  -6.00
+  -3.01
+  -0.01
+   2.99
+   5.98
+   8.98
+  11.96
+  14.95
+  17.93
+  20.91
+  23.90
+  26.93
+  29.95
+  32.98
+  36.01
+  39.03
+  41.97
+  44.90
+  47.84
+  50.77
+  53.88
+  57.00
+  60.12
+
+text 2 golden/g1_fill.rc
+0
+
+sha256 56c239aebebe6abb394a293419fed5b7a645496e2c7ab4d713b8c73a3addf911 11586 golden/g1_fill.stdout
+sha256 c4ffe7918147f98a9faef913d20e1a76b18119208f204f50a80c3790b057e8f7 1408 golden/g1_robust.g1.3dmod
+sha256 84486781902b3ededf18b8660e05cbd9e5c67fc8eede87618e43a7ba69aeaf6d 47393 golden/g1_robust.g1.resid
+text 328 golden/g1_robust.g1.tlt
+ -59.86
+ -56.97
+ -54.08
+ -51.18
+ -48.18
+ -45.18
+ -42.18
+ -39.17
+ -36.17
+ -33.17
+ -30.16
+ -27.16
+ -24.16
+ -21.13
+ -18.09
+ -15.06
+ -12.03
+  -9.00
+  -6.00
+  -3.00
+  -0.00
+   3.00
+   6.00
+   9.00
+  11.98
+  14.96
+  17.95
+  20.93
+  23.91
+  26.94
+  29.97
+  32.99
+  36.02
+  39.04
+  41.97
+  44.90
+  47.83
+  50.76
+  53.89
+  57.01
+  60.14
+
+sha256 97047b734bdc669823bd521cbd142ee41d3cd221fdf282bc4c38f6c61cab1b7b 2993 golden/g1_robust.g1.xf
+sha256 6e4f3233d771c8095c01e18f510fea9ac7669306cd9ee83c2a9f810f607b13ed 1444 golden/g1_robust.g1fid.xyz
+text 2 golden/g1_robust.rc
+0
+
+sha256 42bb83755d92f9f41ba70f65fc445b822198f687a0d40f7f48b9b37f1555833b 10909 golden/g1_robust.stdout
+sha256 e6c4b8511e5c6e77e1b1db5344df59c26e81fae17959e15e45ba1e41ecd01c00 1408 golden/g1_robust_fail.g1.3dmod
+sha256 da975758bbcc1e7ac7d57524f00bb7820398f8dd37cc5fc127b0d13f0b282a15 47393 golden/g1_robust_fail.g1.resid
+text 328 golden/g1_robust_fail.g1.tlt
+ -59.93
+ -56.99
+ -54.05
+ -51.11
+ -48.12
+ -45.12
+ -42.13
+ -39.13
+ -36.11
+ -33.08
+ -30.05
+ -27.03
+ -24.00
+ -21.00
+ -18.00
+ -15.00
+ -12.00
+  -9.00
+  -5.99
+  -2.99
+   0.02
+   3.02
+   6.03
+   9.03
+  12.05
+  15.06
+  18.07
+  21.08
+  24.10
+  27.07
+  30.04
+  33.02
+  35.99
+  38.97
+  41.95
+  44.93
+  47.91
+  50.89
+  53.96
+  57.03
+  60.09
+
+sha256 ecc088c9fb6771193ef5b82425ccc25ed25cdb7c2c0d0a069420bcbb50dabe00 2993 golden/g1_robust_fail.g1.xf
+sha256 6e97fcc2d97055fa65657dedab328af96c5e751441a752d69074a1204dbad4ff 1444 golden/g1_robust_fail.g1fid.xyz
+text 2 golden/g1_robust_fail.rc
+0
+
+sha256 b20c835d62f9f1bed9faaee2ac7235bcb4023b0fcf205e0a4562576a9a726ad5 10570 golden/g1_robust_fail.stdout
+sha256 6525aa12b84bce71e2543484ca79260cd3c1e393ef5377d9c161330799c2a523 1408 golden/g1_testfrac.g1.3dmod
+sha256 ca7f59319deb383974106ee079884f13f437abfe5aca6cf5621bd6cebf7d1625 47393 golden/g1_testfrac.g1.resid
+text 328 golden/g1_testfrac.g1.tlt
+ -59.82
+ -56.94
+ -54.06
+ -51.17
+ -48.17
+ -45.17
+ -42.17
+ -39.17
+ -36.16
+ -33.15
+ -30.15
+ -27.14
+ -24.13
+ -21.10
+ -18.08
+ -15.05
+ -12.03
+  -9.00
+  -6.00
+  -3.00
+  -0.01
+   2.99
+   5.99
+   8.99
+  11.97
+  14.96
+  17.94
+  20.93
+  23.91
+  26.94
+  29.97
+  32.99
+  36.02
+  39.05
+  41.99
+  44.93
+  47.87
+  50.81
+  53.92
+  57.03
+  60.14
+
+sha256 b7753e9e255bd363d2f9120a2908a2b933e7f21cfb7bfe235ab859fce3450748 2993 golden/g1_testfrac.g1.xf
+sha256 54c55c3b221bb48f24cc3b3a885f44415791f7826029c2b1d24a40bc23f57a54 1444 golden/g1_testfrac.g1fid.xyz
+text 2 golden/g1_testfrac.rc
+0
+
+sha256 5cf742b6af7c933d159098e78ce4cd50089f2d8a5c4fa147f1ce1de1d825f3f9 10078 golden/g1_testfrac.stdout
+sha256 ae74900495f7fd86038c74a755ad842a7ca7d879c01c80c65e7cf224828c1544 1612 golden/g1_zorig.g1.3dmod
+sha256 42ba69c073c6d129297317648c77219aaad8bb7b3ee07d367d29a87abbd57d24 47393 golden/g1_zorig.g1.resid
+text 328 golden/g1_zorig.g1.tlt
+ -58.38
+ -55.49
+ -52.60
+ -49.71
+ -46.71
+ -43.71
+ -40.71
+ -37.71
+ -34.70
+ -31.70
+ -28.69
+ -25.68
+ -22.67
+ -19.64
+ -16.61
+ -13.58
+ -10.56
+  -7.53
+  -4.50
+  -1.51
+   1.48
+   4.47
+   7.46
+  10.45
+  13.45
+  16.45
+  19.44
+  22.44
+  25.44
+  28.44
+  31.45
+  34.45
+  37.46
+  40.47
+  43.48
+  46.43
+  49.37
+  52.32
+  55.27
+  58.46
+  61.65
+
+sha256 b5bbad0d375b5698d16d4c902d8fd88c9facd10bc6c7bd065c3c6a7dbfa2a656 2993 golden/g1_zorig.g1.xf
+sha256 a7fcf021b7382e7339a6f069eb4c81da30693c03bc3b02e382f329c2719041a4 1444 golden/g1_zorig.g1fid.xyz
+text 2 golden/g1_zorig.rc
+0
+
+sha256 5123fde28a41abda5610cfc516ce25e6a6c31f6f23bb1769b6e63119d047e4b7 12215 golden/g1_zorig.stdout
+sha256 e9f6675757e26e20a0b55a18d25f48fa20398a4dafe51a2606393a3498e6e912 3708 golden/g2_local.g2.3dmod
+sha256 074aee02ffcb6ac46b06f93245660158adf5a0abc3785fba4c3074f533bb185e 165287 golden/g2_local.g2.resid
+text 488 golden/g2_local.g2.tlt
+ -59.72
+ -57.79
+ -55.85
+ -53.92
+ -51.96
+ -49.99
+ -48.03
+ -46.02
+ -44.02
+ -42.01
+ -40.01
+ -38.00
+ -36.00
+ -34.00
+ -32.01
+ -30.01
+ -28.01
+ -25.99
+ -23.98
+ -21.96
+ -19.95
+ -17.93
+ -15.94
+ -13.95
+ -11.96
+  -9.98
+  -7.99
+  -6.00
+  -3.99
+  -1.98
+   0.03
+   2.05
+   4.06
+   6.07
+   8.04
+  10.01
+  11.98
+  13.94
+  15.91
+  17.88
+  19.94
+  22.00
+  24.05
+  26.11
+  28.17
+  30.11
+  32.05
+  33.99
+  35.93
+  37.87
+  39.92
+  41.96
+  44.01
+  46.05
+  48.10
+  50.06
+  52.03
+  53.99
+  55.98
+  57.97
+  59.95
+
+sha256 9920b79ee7cdcbace5cd66fd4861df5d6484be67b578b97c39004421a321c564 4453 golden/g2_local.g2.xf
+text 488 golden/g2_local.g2.xtilt
+   0.00
+   0.00
+   0.00
+   0.00
+   0.00
+   0.00
+   0.00
+   0.00
+   0.00
+   0.00
+   0.00
+   0.00
+   0.00
+   0.00
+   0.00
+   0.00
+   0.00
+   0.00
+   0.00
+   0.00
+   0.00
+   0.00
+   0.00
+   0.00
+   0.00
+   0.00
+   0.00
+   0.00
+   0.00
+   0.00
+   0.00
+   0.00
+   0.00
+   0.00
+   0.00
+   0.00
+   0.00
+   0.00
+   0.00
+   0.00
+   0.00
+   0.00
+   0.00
+   0.00
+   0.00
+   0.00
+   0.00
+   0.00
+   0.00
+   0.00
+   0.00
+   0.00
+   0.00
+   0.00
+   0.00
+   0.00
+   0.00
+   0.00
+   0.00
+   0.00
+   0.00
+
+sha256 f94a5a70c37c59d1278f9aefa15b35052e9a782b07614d23397f5fadbb0e9cbe 1525 golden/g2_local.g2.zfac
+sha256 9cc039a4155628428eec31584437310c66597e7911c854a1eef780726b7c878a 3324 golden/g2_local.g2fid.xyz
+sha256 c78015cd84b9c0bf8a99a6819bf6c0dd942377017b9b4c2c5c1f97fafa075a7d 102011 golden/g2_local.g2local.xf
+text 2 golden/g2_local.rc
+0
+
+sha256 9d5d6a7761b14e6c61d2907d85514d5d06443df4380f78c1fa281d63c02b910f 117330 golden/g2_local.stdout
+sha256 25d6fd8ee570a9a4bf86918b60e938c36ed9b120c58b1e9e98206bc760e7194a 1420 golden/g3_dist.g3.3dmod
+sha256 51d9807b5c36988f88266a2b898fb643e0815cbc209d4e4d9cc3a94056a32155 38489 golden/g3_dist.g3.resid
+text 328 golden/g3_dist.g3.tlt
+ -59.91
+ -56.92
+ -53.92
+ -50.92
+ -47.87
+ -44.83
+ -41.78
+ -38.74
+ -35.75
+ -32.76
+ -29.77
+ -26.78
+ -23.79
+ -20.83
+ -17.87
+ -14.91
+ -11.96
+  -9.00
+  -5.96
+  -2.92
+   0.13
+   3.17
+   6.21
+   9.25
+  12.24
+  15.23
+  18.21
+  21.20
+  24.19
+  27.21
+  30.24
+  33.26
+  36.29
+  39.32
+  42.30
+  45.28
+  48.26
+  51.24
+  54.30
+  57.36
+  60.42
+
+sha256 cb3d1420de68dbd71883de73cc4b0b8dbb29bccb726870891dc3829df6ba9aa6 2993 golden/g3_dist.g3.xf
+text 328 golden/g3_dist.g3.xtilt
+   0.00
+   0.00
+   0.00
+   0.00
+   0.00
+   0.00
+   0.00
+   0.00
+   0.00
+   0.00
+   0.00
+   0.00
+   0.00
+   0.00
+   0.00
+   0.00
+   0.00
+   0.00
+   0.00
+   0.00
+   0.00
+   0.00
+   0.00
+   0.00
+   0.00
+   0.00
+   0.00
+   0.00
+   0.00
+   0.00
+   0.00
+   0.00
+   0.00
+   0.00
+   0.00
+   0.00
+   0.00
+   0.00
+   0.00
+   0.00
+   0.00
+
+text 2 golden/g3_dist.rc
+0
+
+sha256 bf2604b22df3ae559f4ee22107400725410723dd8ae327643e486ac5be2cd59b 11103 golden/g3_dist.stdout
+sha256 04361a36c43e5f989caf24b598c630063fbd38ba7c15323de7c65a9e2bd7b14f 1420 golden/g3_xtilt_beam.g3.3dmod
+sha256 e6f2ba42dd898ff58c37738b5f67ad7498c2ef8bad25e8c1b15cfc9edf8e099a 38489 golden/g3_xtilt_beam.g3.resid
+text 328 golden/g3_xtilt_beam.g3.tlt
+ -59.66
+ -56.66
+ -53.66
+ -50.67
+ -47.65
+ -44.64
+ -41.63
+ -38.61
+ -35.63
+ -32.65
+ -29.66
+ -26.68
+ -23.70
+ -20.76
+ -17.82
+ -14.88
+ -11.94
+  -9.00
+  -5.95
+  -2.91
+   0.14
+   3.19
+   6.23
+   9.28
+  12.25
+  15.22
+  18.19
+  21.16
+  24.13
+  27.14
+  30.15
+  33.15
+  36.16
+  39.17
+  42.20
+  45.23
+  48.26
+  51.29
+  54.35
+  57.41
+  60.47
+
+sha256 e9996f0889751d60fbdb20a0e11c082470cdb9da505bf9fa793c8a16ba1f6274 2993 golden/g3_xtilt_beam.g3.xf
+text 328 golden/g3_xtilt_beam.g3.xtilt
+  -0.05
+  -0.04
+  -0.03
+  -0.03
+  -0.02
+  -0.02
+  -0.02
+  -0.01
+  -0.01
+  -0.01
+  -0.01
+  -0.01
+  -0.00
+  -0.00
+  -0.00
+  -0.00
+  -0.00
+  -0.00
+  -0.00
+  -0.00
+  -0.00
+  -0.00
+  -0.00
+  -0.00
+  -0.00
+  -0.00
+  -0.00
+  -0.00
+  -0.00
+  -0.01
+  -0.01
+  -0.01
+  -0.01
+  -0.01
+  -0.02
+  -0.02
+  -0.03
+  -0.03
+  -0.04
+  -0.04
+  -0.05
+
+text 2 golden/g3_xtilt_beam.rc
+0
+
+sha256 c09cfa66a3642815005e3a15c8150ca020830dd091951898a4d2979087fa02c3 15080 golden/g3_xtilt_beam.stdout
+sha256 f614eb4034d3a1516b75475c717e30568018640d79a267f9510df8298f8995e8 1036 golden/g4_transpose.g4.3dmod
+text 248 golden/g4_transpose.g4.tlt
+ -45.00
+ -42.00
+ -39.00
+ -36.00
+ -33.00
+ -30.00
+ -27.00
+ -24.00
+ -21.00
+ -18.00
+ -15.00
+ -12.00
+  -9.00
+  -6.00
+  -3.00
+   0.00
+   3.00
+   6.00
+   9.00
+  12.00
+  15.00
+  18.00
+  21.00
+  24.00
+  27.00
+  30.00
+  33.00
+  36.00
+  39.00
+  42.00
+  45.00
+
+sha256 faa754bf1045474dbaae527af2874cbd933bfa0cd09d6be1fd00aa52238598e5 2263 golden/g4_transpose.g4.xf
+sha256 30a62b1ead4c6c43dcf2de04d82ce2209f3fd9cead871e730e5456fe09a9f4b1 598 golden/g4_transpose.g4fid.xyz
+text 2 golden/g4_transpose.rc
+0
+
+sha256 41a7b3fadad6cda9f21f30938c01b5c0d711524b98377676bf0cf3c0b2d55c5b 8102 golden/g4_transpose.stdout

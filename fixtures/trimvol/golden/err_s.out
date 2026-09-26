@@ -1,1 +1,0 @@
-ERROR: trimvol - The -s option has been eliminated; use -sz instead and add -f if coordinates are from a volume loaded with flipping

@@ -1,0 +1,496 @@
+# imod-rs native golden manifest for fixtures/extracttilts; see fixtures/README.md.
+# Regenerate with fixtures/regen-golden.sh extracttilts; do not edit by hand.
+text 2 golden/et_agard.rc
+0
+
+sha256 14fbbc8b1f847375837026cb22dd6c9d1549ecd6215d76be8c02e77a9f22c2dc 1021 golden/et_agard.stdout
+text 2 golden/et_agard_int.rc
+0
+
+sha256 d719fe6c784580e678c239d264d6b1762a35e655c180f6cb9f4aae8496878a7e 1153 golden/et_agard_int.stdout
+text 2 golden/et_agard_mag.rc
+1
+
+sha256 4b13e22ffa6f4b87c9197e420c4f1271ad8e602a3eda9146709519e3f6993b78 1020 golden/et_agard_mag.stdout
+text 2 golden/et_agard_noflt.rc
+1
+
+sha256 805ab8afd2b9fc5598992a2029d318a7899c25d5931306b613c0dc9a29e518d6 1023 golden/et_agard_noflt.stdout
+text 136 golden/et_backup.out.plain.st.mdoc
+ -60.00
+ -52.50
+ -45.00
+ -37.50
+ -30.00
+ -22.50
+ -15.00
+  -7.50
+   0.00
+   7.50
+  15.00
+  22.50
+  30.00
+  37.50
+  45.00
+  52.50
+  60.00
+
+sha256 8b808951171f2dc2502fcba3c037b550eab0c010185066e3eee986bdf1259a91 1339 golden/et_backup.out.plain.st.mdoc~
+text 2 golden/et_backup.rc
+0
+
+sha256 71ae1932aaddd1ff6c14d3fd18f6104b92aa34270379bb645e01b09bd8df81a0 1039 golden/et_backup.stdout
+text 2 golden/et_err_attrib_noimg.rc
+1
+
+text 71 golden/et_err_attrib_noimg.stdout
+
+ERROR: EXTRACTTILTS - You must enter an input image file with -attrib
+
+text 2 golden/et_err_attrib_nonhdf.rc
+1
+
+sha256 fea6905e0ea0aaa2724cb5bee9a000e2d395b8f5b63a47467a158b2fb372e8ff 1202 golden/et_err_attrib_nonhdf.stdout
+text 2 golden/et_err_attrib_noout.rc
+1
+
+text 75 golden/et_err_attrib_noout.stdout
+
+ERROR: EXTRACTTILTS - You must enter an output file to extract attributes
+
+text 2 golden/et_err_attrib_opt.rc
+1
+
+text 96 golden/et_err_attrib_opt.stdout
+
+ERROR: EXTRACTTILTS - You cannot specify anything to extract when writing attributes to a file
+
+text 2 golden/et_err_both.rc
+1
+
+text 62 golden/et_err_both.stdout
+
+ERROR: EXTRACTTILTS - You cannot enter both -mdoc and -other
+
+text 2 golden/et_err_fixed_mdoc.rc
+1
+
+text 106 golden/et_err_fixed_mdoc.stdout
+
+ERROR: EXTRACTTILTS - You cannot produce a dose information file for an FEI file when using an mdoc file
+
+text 2 golden/et_err_fixed_nonfei.rc
+1
+
+sha256 39d201897626193fb60273e79f3d9f5ae40c25023807da3c12d0262874f765c0 1210 golden/et_err_fixed_nonfei.stdout
+text 2 golden/et_err_key_nomdoc.rc
+1
+
+sha256 587bd979a9a6f9a6870ed13fcbe12330b291acc001e91c9821ed7b1c9dd634cc 1039 golden/et_err_key_nomdoc.stdout
+text 2 golden/et_err_mdoc_missing.rc
+1
+
+sha256 b5dc71dbdc7c196c85e53ceb7fc1532fbbd6c13e42c36e20230cb20684755035 1005 golden/et_err_mdoc_missing.stdout
+text 2 golden/et_err_nodata.rc
+1
+
+sha256 09efc3bfce14f1e8771e26c254082db447c5954080a7ff953be69a57be75b0aa 1021 golden/et_err_nodata.stdout
+text 2 golden/et_err_nofile.rc
+1
+
+text 112 golden/et_err_nofile.stdout
+ERROR: iiOpen - Opening file nofile.st (No such file or directory)
+
+ERROR: iiuOpen - Could not open 'nofile.st'
+
+text 2 golden/et_err_noinput.rc
+1
+
+text 96 golden/et_err_noinput.stdout
+
+ERROR: EXTRACTTILTS - You must enter either an input image file or a metadata file with -other
+
+text 2 golden/et_err_two.rc
+1
+
+text 74 golden/et_err_two.stdout
+
+ERROR: EXTRACTTILTS - You must enter only one option for data to extract
+
+text 2 golden/et_fei.rc
+0
+
+sha256 a0094543fee10679bfcee68b6cb4b430705deff0e7caf212f99a94134fedde18 1039 golden/et_fei.stdout
+text 2 golden/et_fei_bug.rc
+0
+
+sha256 6a7f596990c01b87fd8e19e372aa5257eba74784aeec4cbc9b93b1a8530cb28b 1027 golden/et_fei_bug.stdout
+text 2 golden/et_fei_exp.rc
+0
+
+sha256 2d1fbef31a85aad1fc2154a46be652af8244e9d473c11ba6518fc869a5125042 1069 golden/et_fei_exp.stdout
+text 2 golden/et_fei_fixed_aretomo.rc
+0
+
+sha256 92e3228ddab34d1183e11405d1ab554e5b76544f66ac4498a087dec610e6bd48 1094 golden/et_fei_fixed_aretomo.stdout
+text 105 golden/et_fei_fixed_prior.out.info.txt
+    15.000     2.500
+    10.000     2.500
+    17.500     2.500
+    12.500     2.500
+    20.000     2.500
+
+text 2 golden/et_fei_fixed_prior.rc
+0
+
+sha256 a7a7b98cbfbf713a50b6082f6035c050cc3696275eb12b92579fabc8130f18ba 1039 golden/et_fei_fixed_prior.stdout
+text 2 golden/et_fei_notilt.rc
+1
+
+sha256 1d9709b257dc67bacef31f2b43e722c904c7e4a46d5d4bf0cc215c60a84549b4 1074 golden/et_fei_notilt.stdout
+text 2 golden/et_fei_notime_aretomo.rc
+1
+
+sha256 2e2059df03c36392bedc230bfb0caabcdb1da3ad381fc0bb6cb01b809fc993e9 1068 golden/et_fei_notime_aretomo.stdout
+text 2 golden/et_fei_notime_fixed.rc
+1
+
+sha256 e3a9f4a3c52c9f563af8053ef4a7bca95e1f5df3ee88229c70973ee242b3e2c4 1080 golden/et_fei_notime_fixed.stdout
+text 2 golden/et_fei_stage.rc
+1
+
+sha256 571550d93fe73c0bedff3d247910de71557f2aa424efef583568a2f7e9d357a9 1071 golden/et_fei_stage.stdout
+text 2 golden/et_help.rc
+0
+
+sha256 4bce5fe17e136ec589d883223d82bf2e35c5640cab0e74c21898ad8059fd1402 2024 golden/et_help.stdout
+text 2 golden/et_interactive.rc
+0
+
+sha256 000c0556eafc519eba9cd6c02c45c9eb5b0891d9426348597cc648f2ba1e0b8a 1161 golden/et_interactive.stdout
+text 2 golden/et_interactive_eof.rc
+2
+
+text 72 golden/et_interactive_eof.stdout
+ Image input file:  Name of output file, or return to print out values: 
+text 136 golden/et_interactive_out.out.out.tlt
+ -60.00
+ -52.50
+ -45.00
+ -37.50
+ -30.00
+ -22.50
+ -15.00
+  -7.50
+   0.00
+   7.50
+  15.00
+  22.50
+  30.00
+  37.50
+  45.00
+  52.50
+  60.00
+
+text 2 golden/et_interactive_out.rc
+0
+
+sha256 c4f2f58354b733a84a9ce19f5533458d8a659a6d03df58bcec41e5cd2351c7f7 1105 golden/et_interactive_out.stdout
+text 2 golden/et_other_badangle_mintilt.rc
+0
+
+text 41 golden/et_other_badangle_mintilt.stdout
+Minimum tilt angle     0.00 at view    5
+
+text 2 golden/et_other_badmonth_aretomo.rc
+1
+
+text 125 golden/et_other_badmonth_aretomo.stdout
+
+ERROR: getMetadataWeightingDoses - The DateTime entry 21-Foo-20  14:22:00 in the autodoc file has an improper month string
+
+
+text 2 golden/et_other_dosym_mintilt.rc
+0
+
+text 93 golden/et_other_dosym_mintilt.stdout
+Minimum tilt angle     0.00 at view    5
+Starting dose-symmetric angle     7.40 at view    5
+
+text 2 golden/et_other_mdoc.rc
+0
+
+text 40 golden/et_other_mdoc.stdout
+   0.01
+   3.00
+  -3.00
+   6.00
+  -6.00
+
+text 2 golden/et_other_missing_stage.rc
+0
+
+text 95 golden/et_other_missing_stage.stdout
+     1.50    -2.25
+     1.60    -2.20
+     1.70    -2.15
+     1.80    -2.10
+     1.90    -2.05
+
+text 2 golden/et_other_missing_tilt.rc
+1
+
+text 87 golden/et_other_missing_tilt.stdout
+
+ERROR: EXTRACTTILTS - tilt angle is missing for all or some sections in metadata file
+
+text 2 golden/et_other_noeq_mintilt.rc
+0
+
+text 41 golden/et_other_noeq_mintilt.stdout
+Minimum tilt angle     0.00 at view    5
+
+text 2 golden/et_other_nonexist.rc
+1
+
+text 56 golden/et_other_nonexist.stdout
+
+ERROR: EXTRACTTILTS - The metadata file does not exist
+
+text 2 golden/et_other_partial_dt_aretomo.rc
+1
+
+text 100 golden/et_other_partial_dt_aretomo.stdout
+
+ERROR: getMetadataWeightingDoses - The autodoc file has DateTime entries for only 4 of 5 sections
+
+
+text 2 golden/et_other_series.rc
+0
+
+text 16 golden/et_other_series.stdout
+   3.00
+   4.00
+
+text 2 golden/et_other_ties_aretomo.rc
+0
+
+text 95 golden/et_other_ties_aretomo.stdout
+  -30.00     8.400
+  -22.50    10.900
+  -15.00     5.700
+   -7.50     0.000
+    0.00     2.800
+
+text 2 golden/et_other_withimage.rc
+1
+
+sha256 c13859899dfbbe852d9a405261eae5c02bc3b8479e570981fdf72f0102137427 1045 golden/et_other_withimage.stdout
+text 2 golden/et_other_withimage5.rc
+0
+
+sha256 7703cc0cab552e1a6c73481ebf4e0781312ae8b646ddfcdd7fffd10cc45e6449 989 golden/et_other_withimage5.stdout
+text 2 golden/et_other_zerodose_aretomo.rc
+1
+
+text 95 golden/et_other_zerodose_aretomo.stdout
+
+ERROR: getMetadataWeightingDoses - Some sections have 0 for ExposureDose in the autodoc file
+
+
+text 2 golden/et_plain.rc
+0
+
+sha256 eb7c2372dec94e89aa54e124e5aaabb8a8dc85aec4c5668d248bce174b54138b 1039 golden/et_plain.stdout
+text 2 golden/et_plain6_mont.rc
+0
+
+sha256 8a2b2405d4fd030ad62113cd1fa7bdf60104d3f6c51e9e2775e338ceab2b4d80 1024 golden/et_plain6_mont.stdout
+text 2 golden/et_plain6_mont_all.rc
+0
+
+sha256 4ec06c918f7d757d6f1af7dbcb6ee98488608e2260bba198bfec9a4be14b9fa1 1048 golden/et_plain6_mont_all.stdout
+text 2 golden/et_plain6_mont_mdoc.rc
+0
+
+sha256 db40587f7e9933ffe03088b71e3bb06be211ca1bb05a918904e4c4eba5cf82c6 974 golden/et_plain6_mont_mdoc.stdout
+text 2 golden/et_plain_aretomo_dates.rc
+0
+
+sha256 0e3dffde7cd6b23bc497491238459738084bcd2b339e091af930e0f86caeb65d 1094 golden/et_plain_aretomo_dates.stdout
+text 2 golden/et_plain_aretomo_prior.rc
+0
+
+sha256 0e3dffde7cd6b23bc497491238459738084bcd2b339e091af930e0f86caeb65d 1094 golden/et_plain_aretomo_prior.stdout
+text 2 golden/et_plain_bidir_aretomo_nodates.rc
+0
+
+sha256 0cc2ae70c615e5d0af6f7cb4dcc5d1e9637d9b49585900ab5df714b2d49dac10 1418 golden/et_plain_bidir_aretomo_nodates.stdout
+text 2 golden/et_plain_bidir_mintilt_image.rc
+0
+
+text 142 golden/et_plain_bidir_mintilt_image.stdout
+ Taking information from associated metadata file
+Minimum tilt angle     0.00 at view    5
+Starting bidirectional angle   -20.00 at view    2
+
+text 2 golden/et_plain_mdoc_all.rc
+0
+
+sha256 5d158fb1400e323cb26c736b2ccc8e2885ecd8570160a4a6e598039375d39c36 1204 golden/et_plain_mdoc_all.stdout
+text 2 golden/et_plain_mdoc_aretomo.rc
+0
+
+sha256 fc449cd8dd231fc55b8feeebe5fbd95a503f4459da8ac523b524b07a45d4ea65 1259 golden/et_plain_mdoc_aretomo.stdout
+text 2 golden/et_plain_mdoc_defocus.rc
+0
+
+sha256 b4da179624cd4929e8e221429fc76ac489cea547a55dbdc79e9a11af73e97844 1224 golden/et_plain_mdoc_defocus.stdout
+text 2 golden/et_plain_mdoc_exp.rc
+0
+
+sha256 c3955b034cb9e4ebed63456c058ce75d32f8e817c135a5d736cfa41bd89bd58b 1234 golden/et_plain_mdoc_exp.stdout
+text 2 golden/et_plain_mdoc_key.rc
+0
+
+sha256 fe4a14479d223858b835518132d078d617ec82006dcbf19eec6852583f95db55 1213 golden/et_plain_mdoc_key.stdout
+text 2 golden/et_plain_mdoc_mintilt.rc
+0
+
+text 142 golden/et_plain_mdoc_mintilt.stdout
+ Taking information from associated metadata file
+Minimum tilt angle     0.01 at view    1
+Starting bidirectional angle   -20.00 at view    5
+
+text 2 golden/et_seri_all_defocus_fallback.rc
+0
+
+sha256 ca5dfc0da58395607c69049ae5f376071c16a3597ff85ed6bc59c0596f355d2f 1366 golden/et_seri_all_defocus_fallback.stdout
+text 2 golden/et_seri_all_exp.rc
+0
+
+sha256 3aac72d04941f1dbba9576fa676a6b9f9bf029e9ce47fb4fd5dc497dc40f5382 1350 golden/et_seri_all_exp.stdout
+text 2 golden/et_seri_all_int.rc
+0
+
+sha256 23f200d6d85f1bf6739e4842481a70d2ef343942a56a38232b484ffd027f8471 1265 golden/et_seri_all_int.stdout
+text 2 golden/et_seri_all_key.rc
+0
+
+sha256 0ca66398f50e94ecd0135456d7c671b9742b2d837dcee7ee6522246175f1cfb7 1927 golden/et_seri_all_key.stdout
+text 2 golden/et_seri_all_key_missing.rc
+1
+
+sha256 7b51b61fe1396905e173172c145e6c9b88621a06b4c2c46be945025d5ce68e3e 1293 golden/et_seri_all_key_missing.stdout
+text 2 golden/et_seri_all_mag.rc
+0
+
+sha256 f1b3e35e4f42e2e7853b781faccb00100f1a488b7c6a42d692e0ec7827bc0baa 1248 golden/et_seri_all_mag.stdout
+text 2 golden/et_seri_all_mdoc.rc
+0
+
+sha256 c3285ae753865578606bae4e9d4e44bf73a2c75ade12f8fe0cd4bb4614b8945a 1248 golden/et_seri_all_mdoc.stdout
+text 2 golden/et_seri_all_mintilt.rc
+0
+
+text 92 golden/et_seri_all_mintilt.stdout
+Minimum tilt angle     0.00 at view    9
+Starting bidirectional angle   -20.00 at view    6
+
+text 2 golden/et_seri_all_pixel_fallback.rc
+0
+
+sha256 63010d2e9d266e96cbf8069e35e33fcf3ce247d07d4cf8181d022194a5d2fbd2 1366 golden/et_seri_all_pixel_fallback.stdout
+text 2 golden/et_seri_all_stage.rc
+0
+
+sha256 a1811853b920d95df5be6a8ad72a8f2604122b89d6e114abbf61f97d40a6db31 1435 golden/et_seri_all_stage.stdout
+text 2 golden/et_seri_dosym_mintilt.rc
+0
+
+text 93 golden/et_seri_dosym_mintilt.stdout
+Minimum tilt angle     0.00 at view    9
+Starting dose-symmetric angle     0.00 at view    9
+
+text 2 golden/et_seri_mag_tilt_nomdoc.rc
+1
+
+sha256 100c75eafbf59cb09a16bf45425ac27233dda10d98109a0a1781fd5ef283789c 1020 golden/et_seri_mag_tilt_nomdoc.stdout
+text 2 golden/et_seri_mont.rc
+0
+
+sha256 69f90c74e18badc8de2bb40908e241db3bc09f677eb8130e520d69ac26376351 977 golden/et_seri_mont.stdout
+text 2 golden/et_seri_mont_all.rc
+0
+
+sha256 c7f433e923e1adda8c64050d138fe5b9f8497c9365936225bbf3b3b6328468ca 1001 golden/et_seri_mont_all.stdout
+text 2 golden/et_seri_mont_notilt.rc
+1
+
+sha256 bc8e9a44168a9373860890ee16bbb5ee750cb9434976ef9940888b19e13d0713 1028 golden/et_seri_mont_notilt.stdout
+text 2 golden/et_seri_tilt.rc
+0
+
+sha256 e2a13459cf77b97ab6d04c8e46c015ea71eaefc54185532898213a7140e165b0 1089 golden/et_seri_tilt.stdout
+text 2 golden/et_seri_tilt_defocus_wrongcount.rc
+1
+
+sha256 a4cde3b808f995d622b3af72477e3efe4efddd97a9735295a673b1b7cab9f825 1043 golden/et_seri_tilt_defocus_wrongcount.stdout
+text 2 golden/et_seri_tilt_mdoc_wrongcount.rc
+1
+
+sha256 c13859899dfbbe852d9a405261eae5c02bc3b8479e570981fdf72f0102137427 1045 golden/et_seri_tilt_mdoc_wrongcount.stdout
+text 136 golden/et_seri_tilt_optout.out.o.tlt
+ -60.00
+ -52.50
+ -45.00
+ -37.50
+ -30.00
+ -22.50
+ -15.00
+  -7.50
+   0.00
+   7.50
+  15.00
+  22.50
+  30.00
+  37.50
+  45.00
+  52.50
+  60.00
+
+text 2 golden/et_seri_tilt_optout.rc
+0
+
+sha256 3e01424963eb18a53b23efea3e33e0290e77b5a4aaa3920a94151071c33adb06 1031 golden/et_seri_tilt_optout.stdout
+text 136 golden/et_seri_tilt_out.out.out.tlt
+ -60.00
+ -52.50
+ -45.00
+ -37.50
+ -30.00
+ -22.50
+ -15.00
+  -7.50
+   0.00
+   7.50
+  15.00
+  22.50
+  30.00
+  37.50
+  45.00
+  52.50
+  60.00
+
+text 2 golden/et_seri_tilt_out.rc
+0
+
+sha256 5f5e7e274afb75d25e67fe50c1e63292224f947d317214c78496fd90ea4d2cfd 1033 golden/et_seri_tilt_out.stdout
+text 2 golden/et_seri_zero_nowarn.rc
+0
+
+sha256 bba644487412872bc6f58c403c473408a6db21476afb346e3b82cd6c940c9332 1009 golden/et_seri_zero_nowarn.stdout
+text 2 golden/et_seri_zero_warn.rc
+0
+
+sha256 0c02fba2b3de69154c0891bf11c82e914098edf8d7527fffd3e3beab09e46736 1167 golden/et_seri_zero_warn.stdout

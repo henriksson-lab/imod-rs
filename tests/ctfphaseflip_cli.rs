@@ -9,6 +9,8 @@
 //! native left behind is in `golden/<case>/`.  The inputs are seeded synthetic
 //! stacks written by the native `raw2mrc` and text files in every defocus
 //! format `ctfutils.cpp` reads (`fixtures/make-ctfphaseflip-mtffilter-inputs.py`).
+//!
+//! Pruned 2026-09-26: 19 of 20 rows kept (dropped `strips`, the large short-mode s160 run; integer input and strip handling stay covered by `byte` and the float cases); the rest stay in cases.tsv as `#full` rows (FULL=1, fixtures/README.md).
 
 mod common;
 
@@ -46,7 +48,10 @@ fn scratch(name: &str) -> PathBuf {
     std::fs::create_dir_all(&dir).unwrap();
     for entry in std::fs::read_dir(fixture_dir()).unwrap() {
         let path = entry.unwrap().path();
-        if path.is_file() && path.file_name().unwrap() != "cases.tsv" {
+        if path.is_file()
+            && path.file_name().unwrap() != "cases.tsv"
+            && path.file_name().unwrap() != "golden.manifest"
+        {
             std::fs::copy(&path, dir.join(path.file_name().unwrap())).unwrap();
         }
     }
@@ -59,17 +64,13 @@ fn every_case_matches_native_golden() {
     let golden = fixture_dir().join("golden");
     let mut failures = Vec::new();
     let mut count = 0;
-    for line in table
-        .lines()
-        .filter(|l| !l.starts_with('#') && !l.is_empty())
-    {
+    for line in common::golden::case_rows(&table) {
         let (name, args) = line.split_once('\t').unwrap();
-        let rc: i32 = std::fs::read_to_string(golden.join(format!("{name}.rc")))
-            .unwrap()
+        let rc: i32 = common::golden::read_to_string(&golden.join(format!("{name}.rc")))
             .trim()
             .parse()
             .unwrap();
-        let expected_out = std::fs::read(golden.join(format!("{name}.out"))).unwrap();
+        let expected_out = common::golden::expect(&golden.join(format!("{name}.out")));
         let dir = scratch(name);
         let inputs: Vec<String> = std::fs::read_dir(&dir)
             .unwrap()
@@ -100,19 +101,15 @@ fn every_case_matches_native_golden() {
         if status != Some(rc) {
             failures.push(format!("{name}: exit {status:?}, native {rc}"));
         }
-        let (ours, theirs) = (without_banner(&stdout), without_banner(&expected_out));
-        if ours != theirs {
+        let ours = without_banner(&stdout);
+        if !expected_out.matches_masked(&stdout, without_banner) {
             failures.push(format!(
                 "{name}: stdout differs\n--- native\n{}\n--- ours\n{}",
-                String::from_utf8_lossy(&theirs),
+                expected_out.display(),
                 String::from_utf8_lossy(&ours)
             ));
         }
-        let mut expected_files: Vec<String> = std::fs::read_dir(golden.join(name))
-            .unwrap()
-            .map(|e| e.unwrap().file_name().to_str().unwrap().to_string())
-            .collect();
-        expected_files.sort();
+        let expected_files: Vec<String> = common::golden::list(&golden.join(name));
         let mut produced: Vec<String> = std::fs::read_dir(&dir)
             .unwrap()
             .map(|e| e.unwrap().file_name().to_str().unwrap().to_string())
@@ -132,13 +129,13 @@ fn every_case_matches_native_golden() {
             let Ok(ours) = std::fs::read(dir.join(file)) else {
                 continue;
             };
-            let theirs = std::fs::read(golden.join(name).join(file)).unwrap();
-            if mask(&ours) != mask(&common::reconcile_uninitialised(&ours, &theirs)) {
-                failures.push(format!("{name}: {file} differs from native"));
+            let theirs = common::golden::expect(&golden.join(name).join(file));
+            if let Err(why) = theirs.compare(&ours, mask, true) {
+                failures.push(format!("{name}: {file} differs from native: {why}"));
             }
         }
         let _ = std::fs::remove_dir_all(&dir);
     }
-    assert!(count >= 20, "only {count} cases ran");
+    assert!(count >= 19, "only {count} cases ran");
     assert!(failures.is_empty(), "{}", failures.join("\n"));
 }

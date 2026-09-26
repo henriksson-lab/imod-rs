@@ -6,6 +6,8 @@
 //! what is compared.  The wider differential behind these goldens (with the
 //! native combine programs on `PATH`) is recorded in `TODO.md` (dual-axis
 //! combine scripts).
+//!
+//! Pruned 2026-09-26: 6 of 7 rows kept (dropped `err_nopc`, the same open-failure error as `err_nomow`); the rest stay in cases.tsv as `#full` rows (FULL=1, fixtures/README.md).
 
 mod common;
 mod pysetup_common;

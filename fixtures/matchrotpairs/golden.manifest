@@ -1,0 +1,340 @@
+# imod-rs native golden manifest for fixtures/matchrotpairs; see fixtures/README.md.
+# Regenerate with fixtures/regen-golden.sh matchrotpairs; do not edit by hand.
+text 10 golden/err_all_nodir.files
+a.st
+b.st
+
+text 109 golden/err_all_nodir.out
+ERROR: matchrotpairs - You need to use midas or specify the rotation direction to get all transforms written
+
+text 2 golden/err_all_nodir.rc
+1
+
+text 10 golden/err_bad_angle.files
+a.st
+b.st
+
+text 77 golden/err_bad_angle.out
+ERROR: matchrotpairs - Illegal character in value entry:  AngleOfRotation  x
+
+text 2 golden/err_bad_angle.rc
+1
+
+text 10 golden/err_even_range.files
+a.st
+b.st
+
+text 464 golden/err_even_range.out
+Finding the best matched pair of views in the two series:
+              (Type Ctrl-C to end search)
+A 4 B 4 rotation  90 regular difference    0.840808*
+A 4 B 5 rotation  90 regular difference    0.816008*
+A 4 B 3 rotation  90 regular difference    0.865516 
+ERROR: matchrotpairs - Running tiltxcorr to get initial correlation alignment
+ERROR: tiltxcorr - Reference view number is out of range
+ERROR: matchrotpairs - tiltxcorr -StandardInput: exited with status 1
+
+text 2 golden/err_even_range.rc
+1
+
+text 5 golden/err_nofile.files
+a.st
+
+text 54 golden/err_nofile.out
+ERROR: matchrotpairs - Image file b.st does not exist
+
+text 2 golden/err_nofile.rc
+1
+
+text 10 golden/err_noout.files
+a.st
+b.st
+
+text 73 golden/err_noout.out
+ERROR: matchrotpairs - You must enter two input files and an output file
+
+text 2 golden/err_noout.rc
+1
+
+text 10 golden/err_za_order.files
+a.st
+b.st
+
+text 89 golden/err_za_order.out
+ERROR: matchrotpairs - Starting and ending views from A are out of range or out of order
+
+text 2 golden/err_za_order.rc
+1
+
+text 10 golden/err_zb_high.files
+a.st
+b.st
+
+text 89 golden/err_zb_high.out
+ERROR: matchrotpairs - Starting and ending views from B are out of range or out of order
+
+text 2 golden/err_zb_high.rc
+1
+
+text 62 golden/run_all_mirror.files
+a.st
+b.st
+out-1.xf
+out-2.xf
+out-3.xf
+out-4.xf
+out-5.xf
+out.xf
+
+sha256 1d01ff1cffac98562ae7de9221a6c36183e6667b74d3314b9f15efd82774a8f9 1490 golden/run_all_mirror.out
+text 2 golden/run_all_mirror.rc
+0
+
+text 365 golden/run_all_mirror/out-1.xf
+  -0.0299659  -0.9995475  -0.9971294   0.0326560      24.257       3.987
+  -0.0602027  -0.9987234  -1.0191386   0.0567832      21.913       2.245
+  -0.0302932  -0.9977940  -0.9966893   0.0309587      20.166       2.087
+  -0.0300598  -0.9977545  -1.0011355   0.0321063      18.144       0.279
+  -0.0289085  -0.9988564  -0.9967875   0.0330279      17.097       0.200
+
+text 365 golden/run_all_mirror/out-2.xf
+   0.0040042  -1.0175714  -1.0526364  -0.0037610      23.457       4.953
+  -0.0291132  -0.9992808  -0.9989898   0.0293113      21.207       4.085
+  -0.0307066  -1.0008079  -1.0075175   0.0244178      18.185       2.953
+  -0.0290137  -0.9994076  -0.9970061   0.0284694      17.117       1.418
+   0.0312982  -0.9992123  -1.0022724  -0.0327931      15.524       1.246
+
+text 365 golden/run_all_mirror/out-3.xf
+  -0.0277595  -1.0012964  -1.0009068   0.0255254      21.262       6.057
+  -0.0293057  -1.0025115  -1.0114486   0.0326209      19.219       4.755
+  -0.0259462  -1.0527947  -1.0176717   0.0324397      17.012       3.735
+   0.0322940  -0.9982663  -1.0019881  -0.0332188      16.478       3.325
+   0.0171638  -1.0006669  -0.9993336  -0.0178933      17.540       2.382
+
+text 365 golden/run_all_mirror/out-4.xf
+   0.3293080  -1.0318784  -0.9887695  -0.3259813      24.631      12.993
+   0.3311913  -1.0253252  -0.9841931  -0.3608096      23.078      11.657
+  -0.0298148  -1.0023111  -1.0019507   0.0325962      15.184       4.353
+  -0.0277202  -1.0007261  -0.9963203   0.0354580      13.142       4.114
+  -0.0285848  -0.9982796  -0.9978147   0.0280923      11.090       2.499
+
+text 365 golden/run_all_mirror/out-5.xf
+  -0.0604490  -1.0138812  -1.0119752   0.0598584      17.127       6.989
+  -0.0601512  -0.9986628  -1.0153377   0.0628925      14.810       6.080
+  -0.0299183  -1.0048717  -1.0022378   0.0275164      12.201       5.321
+  -0.0299828  -1.0038983  -1.0066998   0.0319790      11.167       4.660
+  -0.0602819  -0.9989243  -1.0139796   0.0600202       8.635       3.388
+
+text 85 golden/run_all_mirror/out.xf
+1 0 0 1 0 0
+   0.3293080  -1.0318784  -0.9887695  -0.3259813      24.631      12.993
+
+text 25 golden/run_backup.files
+a.st
+b.st
+out.xf
+out.xf~
+
+text 377 golden/run_backup.out
+Finding the best matched pair of views in the two series:
+              (Type Ctrl-C to end search)
+A 4 B 3 rotation  90 regular difference    0.860761*
+A 4 B 4 rotation  90 regular difference    0.839434*
+A 5 B 3 rotation  90 regular difference    0.844684 
+A 5 B 4 rotation  90 regular difference    0.818541*
+Views in best pair: A 5  B 4
+Best pair is at end of search range
+
+text 2 golden/run_backup.rc
+0
+
+text 85 golden/run_backup/out.xf
+1 0 0 1 0 0
+  -0.0063728  -0.9863508   1.0167140   0.0083802     -10.360       4.935
+
+text 12 golden/run_backup/out.xf~
+1 0 0 1 0 0
+
+text 27 golden/run_default.files
+a.st
+b.st
+out.stack
+out.xf
+
+sha256 9a009c1c559721bba0d38c26bddc6f346de2bb685b524154f3c1695a8d12195b 1650 golden/run_default.out
+text 2 golden/run_default.rc
+0
+
+sha256 c998b323d4c62f97d1e3fcae04946fe592d8f4f5561e1d0f32c174312cb5803c 9216 golden/run_default/out.stack
+text 85 golden/run_default/out.xf
+1 0 0 1 0 0
+   0.0000662   1.0000542  -1.0000420  -0.0004267       0.002       2.006
+
+text 35 golden/run_dist.files
+a.st
+b.st
+d64.idf
+out.stack
+out.xf
+
+sha256 b3d348036bc8a8bca8fbf007d0dd635ae4c98da0313156f689d99008f9473328 642 golden/run_dist.out
+text 2 golden/run_dist.rc
+0
+
+sha256 cfe1a406718d800717958ff3a2fc5d308bb2194479072d00c40fc57a74419f3b 9216 golden/run_dist/out.stack
+text 85 golden/run_dist/out.xf
+1 0 0 1 0 0
+   0.0119188  -1.0352235   1.0511585   0.0320635      -8.493       3.543
+
+text 15 golden/run_options.files
+a.st
+b.st
+o.xf
+
+sha256 5e54259b9e226b1cd66bab5eacefa0c38446f072fa4251ff58efa3eb271e6aa3 1544 golden/run_options.out
+text 2 golden/run_options.rc
+0
+
+text 85 golden/run_options/o.xf
+1 0 0 1 0 0
+   0.0020071   0.9999980  -0.9999980   0.0020071      -0.045       1.799
+
+text 12 golden/run_same_file.files
+a.st
+out.xf
+
+sha256 4a7b14df83ac7c166dff3f30ca6bfc23ea03d01942e7557cd1002afbde2f02cc 642 golden/run_same_file.out
+text 2 golden/run_same_file.rc
+0
+
+text 85 golden/run_same_file/out.xf
+1 0 0 1 0 0
+   0.3184412  -0.9542230   0.9819925   0.3181104      22.559      -1.978
+
+text 72 golden/run_scan_edge.files
+a.st
+b.st
+out-1.xf
+out-2.xf
+out-3.xf
+out-4.xf
+out-5.xf
+out.stack
+out.xf
+
+sha256 705d81b95861247534b03292f42ce4f29f12610bc271bb32bc9ad8bba551c237 1490 golden/run_scan_edge.out
+text 2 golden/run_scan_edge.rc
+0
+
+text 365 golden/run_scan_edge/out-1.xf
+   0.4810666  -0.8783070  -0.8592184  -0.5322430      27.106      12.982
+   0.3708470  -0.9376101  -0.9313738  -0.3646988      27.132       8.518
+   0.3473457  -0.9172058  -0.9334245  -0.3390455      25.836       6.601
+   0.3686005  -0.9289541  -0.9105632  -0.4120396      24.266       5.728
+   0.3548951  -0.8988454  -0.9136563  -0.3822078      22.503       3.677
+
+text 365 golden/run_scan_edge/out-2.xf
+   0.4720710  -0.8920912  -0.8897182  -0.4968468      25.499      13.452
+   0.4515745  -0.8854606  -0.8775563  -0.4926691      24.133      11.544
+   0.3913385  -0.9215338  -0.9122915  -0.4212332      23.574       8.650
+   0.4360259  -0.9090567  -0.8844032  -0.4769266      21.482       7.465
+   0.4005542  -0.9141924  -0.8970571  -0.4444945      20.328       5.215
+
+text 365 golden/run_scan_edge/out-3.xf
+   0.4311709  -0.9535784  -0.9282879  -0.4750214      24.547      14.134
+   0.3816316  -0.9702995  -0.9371365  -0.4274796      23.618      11.473
+   0.3728259  -0.9513154  -0.9309434  -0.4200561      22.118       9.695
+   0.3942013  -0.9366038  -0.9090543  -0.4427118      20.436       8.143
+   0.3765343  -0.9330035  -0.9193273  -0.4121787      19.022       6.086
+
+text 365 golden/run_scan_edge/out-4.xf
+   0.4249333  -0.9905180  -0.9400391  -0.4342322      23.338      14.540
+   0.3601677  -1.0106548  -0.9671266  -0.3653700      22.813      11.815
+   0.3410002  -1.0059236  -0.9687189  -0.3653902      21.601      10.336
+   0.3605550  -0.9774694  -0.9399480  -0.3999266      19.318       8.691
+   0.3597813  -0.9646748  -0.9382166  -0.4083756      17.789       6.970
+
+text 365 golden/run_scan_edge/out-5.xf
+   0.3824325  -1.0301470  -0.9761912  -0.3760431      22.123      14.475
+   0.3499786  -1.0387435  -0.9862189  -0.3496415      21.488      12.664
+   0.3032488  -1.0443429  -1.0047597  -0.3349801      20.525      10.726
+   0.3100197  -1.0363402  -1.0014426  -0.3564468      18.899       9.284
+   0.3455657  -0.9840486  -0.9510261  -0.3931995      16.345       7.828
+
+sha256 0d68a9663a27d8a5d47f50ab501b6eade8fadb7a70434f8153aee9dd2edad851 9216 golden/run_scan_edge/out.stack
+text 85 golden/run_scan_edge/out.xf
+1 0 0 1 0 0
+   0.4720710  -0.8920912  -0.8897182  -0.4968468      25.499      13.452
+
+text 17 golden/run_scan_fixed.files
+a.st
+b.st
+out.xf
+
+sha256 c15386a86d63018c0a628d3fef701b30bca4e69c708c6e9fad640a3ada2e6f02 1490 golden/run_scan_fixed.out
+text 2 golden/run_scan_fixed.rc
+0
+
+text 85 golden/run_scan_fixed/out.xf
+1 0 0 1 0 0
+   0.0161385  -1.0349760   1.0681814   0.0390258     -12.516       6.385
+
+text 62 golden/run_swap_all.files
+a.st
+b.st
+out-1.xf
+out-2.xf
+out-3.xf
+out-4.xf
+out-5.xf
+out.xf
+
+sha256 1db114b683122065ffae40bb1fdb8a4be65592b85dca3fddf9f64b54303f4b2d 1491 golden/run_swap_all.out
+text 2 golden/run_swap_all.rc
+0
+
+text 365 golden/run_swap_all/out-1.xf
+   0.0030971  -0.9935717   1.0123237   0.0054406       3.838       3.951
+   0.0035723  -1.0063589   1.0129987  -0.0002823       5.178       5.785
+   0.0064975  -1.0016118   1.0199405   0.0215910       5.773       7.457
+   0.0070018  -0.9819065   1.0072290   0.0077729       7.161       9.499
+   0.0049365  -0.9817569   0.9930528   0.0249857       8.103      11.503
+
+text 365 golden/run_swap_all/out-2.xf
+   0.0014623  -1.0036589   1.0110579   0.0074125       3.339       1.926
+  -0.0068122  -0.9980085   1.0165540  -0.0052962       3.986       3.960
+  -0.0072704  -0.9986074   1.0191336  -0.0000520       5.043       5.967
+   0.0017178  -0.9897375   0.9991354   0.0008172       6.218       7.930
+   0.0038274  -0.9832100   0.9941003   0.0006922       7.126       9.745
+
+text 365 golden/run_swap_all/out-3.xf
+   0.0037088  -0.9999931   0.9999931   0.0037088       1.837       0.018
+   0.0037088  -0.9999931   0.9999931   0.0037088       2.748       1.804
+   0.0044929  -0.9999899   0.9999899   0.0044929       3.669       3.701
+  -0.0039237  -0.9977750   1.0175655   0.0000260       5.173       5.953
+   0.0037088  -0.9999931   0.9999931   0.0037088       5.651       7.746
+
+text 365 golden/run_swap_all/out-4.xf
+   0.0037088  -0.9999931   0.9999931   0.0037088       0.923      -1.763
+   0.0037088  -0.9999931   0.9999931   0.0037088       1.833       0.014
+   0.0022793  -0.9999973   0.9999973   0.0022793       2.744       1.857
+   0.0037088  -0.9999931   0.9999931   0.0037088       3.671       3.781
+   0.0037088  -0.9999931   0.9999931   0.0037088       4.654       5.778
+
+text 365 golden/run_swap_all/out-5.xf
+   0.0087076  -0.9987361   1.0096742   0.0087880      -0.178      -4.028
+   0.0037088  -0.9999931   0.9999931   0.0037088       0.934      -1.824
+   0.0012418  -0.9999992   0.9999992   0.0012418       1.846       0.024
+   0.0037088  -0.9999931   0.9999931   0.0037088       2.750       1.885
+   0.0037088  -0.9999931   0.9999931   0.0037088       3.698       3.786
+
+text 85 golden/run_swap_all/out.xf
+1 0 0 1 0 0
+   0.0037088  -0.9999931   0.9999931   0.0037088       1.833       0.014
+
+text 0 golden/usage.files
+
+sha256 705a896c7559aec04a669ef4490e90fe7886f4be79daab9746d1afbb9a917365 1610 golden/usage.out
+text 2 golden/usage.rc
+0
+

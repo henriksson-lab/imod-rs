@@ -1,1 +1,6 @@
 /target/
+# Native golden outputs are recorded into fixtures/<suite>/golden.manifest and
+# not stored (fixtures/README.md); these directories exist only transiently.
+/fixtures/*/golden/
+/fixtures/*/defined/
+/fixtures/*/golden.manifest.*

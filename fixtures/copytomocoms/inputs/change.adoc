@@ -1,0 +1,8 @@
+comparam.tilt.tilt.THICKNESS = 300
+comparam.track.beadtrack.LocalAreaTracking = 1
+comparam.newst.newstack.ExpandByFactor = 1.5
+comparam.newst.newstack.SizeToOutputInXandY = 400,400
+comparam.xcorr.tiltxcorr.FilterRadius2 = 0.2
+setupset.copyarg.voltage = 300
+setupset.copyarg.Cs = 2.7
+setupset.copyarg.defocus = 4000

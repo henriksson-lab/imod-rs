@@ -1,0 +1,670 @@
+# imod-rs native golden manifest for fixtures/xfmodel; see fixtures/README.md.
+# Regenerate with fixtures/regen-golden.sh xfmodel; do not edit by hand.
+sha256 423f67f27aaa1ab646fd9559a2a921f599f3e273fd1bcfc1a6d7efd7d35d35f1 44860 defined/dist.out
+sha256 f1b35b1ae3c1759f249163fe6b6a9b5d0bbc85ab62855e22b34894fdca093f9a 44860 defined/distb2bin.out
+sha256 0e1fd694c779567841776e8f02dfac066918263b46a612cd2da3c64e39087f4f 44860 defined/distback.out
+sha256 80b346464bb59be20107ffc3048f1c8001e032c68704e517093c5faf2200cc6c 44860 defined/distcenter.out
+sha256 3bc067c6f3f35b2240beca194fe540beece09d24e80f34af7cdfe8cafbb5c0e8 44860 defined/distpre.out
+sha256 654cd3b6cdb565075869f5f70bbc90e233f5c5f5fa3cc1ade3f64d3d333644eb 44860 defined/distpreback.out
+sha256 d40b281ef8d27e5776d6c4f21e49613023fc455553b218783771bf34030eb123 44860 defined/distx.out
+sha256 e1d08a86ad7a2c8c3a057651efa0b41c277c8a82e53bf246f57c4cf3338c767a 44860 defined/graddist.out
+sha256 0838885af62dfa71d242b9e723919da923fe8e33749a3390d0bcdae5abba85b1 44860 defined/graddistpreback.out
+sha256 7363b4922ff4c11b2ecde6995e68dbd28cb1eb1bfca495efdf5a0149ac43ae59 44860 defined/graddistx.out
+sha256 93e405a43ed840d4538deaef25ddd238ab4c4e3c9bb3283d09c3f9907639d471 44860 defined/w20dist.out
+sha256 b69faa8aa1876f4c412deb59c703ccb6891b0fa534bc170516216418a719ef53 44860 defined/w20graddist.out
+sha256 5413caa5569d658c22bc9bb14971b3cc0543c607ddfabcd4efb358150ea9e18f 44860 defined/w20graddistback.out
+sha256 34baa566a6570c18c5ea2a5c3a0d1e3b292cf4d41dff9f7e6a2c8ef7c623cac1 1464 defined/w8gapall.out
+sha256 12dd1504d7ba3e4d2f2a971bb9b28f7da599899e767fa97d2bf0db3f3fadef03 1464 defined/w8img.out
+sha256 fed8878f91490de7b2efb745b49ce533072a2d2bc0039381fc69f7e193d20fe3 1464 defined/w8imgback.out
+sha256 3f6b8949424cf6bfa1dc29a42b02091ff047465b632ffd91a95a59c04909a7da 1464 defined/w8imgpre.out
+text 2 golden/dist.rc
+0
+
+text 88 golden/dist.stdout
+Using model header to determine center coordinates:   275.0   275.0
+ Undistorting model
+
+text 2 golden/distb2bin.rc
+0
+
+text 88 golden/distb2bin.stdout
+Using model header to determine center coordinates:   275.0   275.0
+ Undistorting model
+
+text 2 golden/distback.rc
+0
+
+text 88 golden/distback.stdout
+Using model header to determine center coordinates:   275.0   275.0
+ Redistorting model
+
+text 2 golden/distcenter.rc
+0
+
+text 20 golden/distcenter.stdout
+ Undistorting model
+
+text 2 golden/distfwd.rc
+1
+
+text 81 golden/distfwd.stdout
+
+ERROR: XFMODEL - DISTORTION CORRECTION CAN BE DONE ONLY WITH INVERSE TRANSFORMS
+
+text 2 golden/distneg.rc
+1
+
+text 126 golden/distneg.stdout
+Using model header to determine center coordinates:   275.0   275.0
+
+ERROR: XFMODEL - Image binning must be a positive number
+
+text 2 golden/distnobin.rc
+1
+
+text 175 golden/distnobin.stdout
+Using model header to determine center coordinates:   275.0   275.0
+
+ERROR: XFMODEL - You must specify binning of images because they are not larger than half the camera size
+
+text 2 golden/distpre.rc
+0
+
+text 246 golden/distpre.stdout
+Using model header to determine center coordinates:   275.0   275.0
+
+ FORMATTED  ro  file opened: BBa.xf
+Back-transforming model with inverse of transforms from BBa.xf
+ Undistorting model
+Transforming model with reinverted transforms from BBa.xf
+
+text 2 golden/distpreback.rc
+0
+
+text 246 golden/distpreback.stdout
+Using model header to determine center coordinates:   275.0   275.0
+
+ FORMATTED  ro  file opened: BBa.xf
+Back-transforming model with inverse of transforms from BBa.xf
+ Redistorting model
+Transforming model with reinverted transforms from BBa.xf
+
+text 2 golden/distx.rc
+0
+
+text 172 golden/distx.stdout
+Using model header to determine center coordinates:   275.0   275.0
+
+ FORMATTED  ro  file opened: BBa.xf
+ Undistorting model
+Transforming model with transforms from BBa.xf
+
+text 2 golden/e_backboth.rc
+1
+
+text 72 golden/e_backboth.stdout
+
+ERROR: XFMODEL - You cannot enter both -xform and -prealign with -back
+
+text 2 golden/e_backnone.rc
+1
+
+text 85 golden/e_backnone.stdout
+
+ERROR: XFMODEL - You must enter -xform, -prealign, -distort or -gradient with -back
+
+text 2 golden/e_badopt.rc
+1
+
+text 39 golden/e_badopt.stdout
+ERROR: XFMODEL - Illegal option: bogus
+
+text 2 golden/e_distmissing.rc
+1
+
+text 53 golden/e_distmissing.stdout
+
+ERROR: XFMODEL - OPENING OR READING DISTORTION FILE
+
+text 2 golden/e_emptyxf.rc
+1
+
+text 173 golden/e_emptyxf.stdout
+Using model header to determine center coordinates:   275.0   275.0
+
+ FORMATTED  ro  file opened: empty.xf
+
+ERROR: XFMODEL - The input file of transforms is empty: empty.xf
+
+text 2 golden/e_fitandx.rc
+1
+
+text 72 golden/e_fitandx.stdout
+
+ERROR: XFMODEL - You cannot both find transforms and transform a model
+
+text 2 golden/e_gradmissing.rc
+1
+
+text 48 golden/e_gradmissing.stdout
+
+ERROR: DOPEN - FILE nothere.txt DOES NOT EXIST
+
+text 2 golden/e_help.rc
+0
+
+sha256 dc3b02e6032ac2e52131ccafe7faae149ab12a99c7ed680e0a3897b2d18c31b3 2564 golden/e_help.stdout
+text 2 golden/e_linechunk.rc
+1
+
+text 71 golden/e_linechunk.stdout
+
+ERROR: XFMODEL - It is meaningless to enter both -useline and -chunks
+
+text 2 golden/e_linefind.rc
+1
+
+text 80 golden/e_linefind.stdout
+
+ERROR: XFMODEL - You cannot enter -useline unless you are transforming a model
+
+text 2 golden/e_missingimg.rc
+1
+
+text 116 golden/e_missingimg.stdout
+ERROR: iiOpen - Opening file nothere.mrc (No such file or directory)
+
+ERROR: iiuOpen - Could not open 'nothere.mrc'
+
+text 2 golden/e_missingmodel.rc
+1
+
+text 37 golden/e_missingmodel.stdout
+
+ERROR: XFMODEL - Reading model file
+
+text 2 golden/e_missingpiece.rc
+1
+
+sha256 ec5f0c064a5a8f8fa4f0bbd877fd7c7ce988c47f1e80404876f01f115f13e592 1094 golden/e_missingpiece.stdout
+text 2 golden/e_missingxf.rc
+1
+
+text 120 golden/e_missingxf.stdout
+Using model header to determine center coordinates:   275.0   275.0
+
+ERROR: XFMODEL - OPENING OR READING TRANSFORM FILE
+
+text 2 golden/e_noargs.rc
+2
+
+text 54 golden/e_noargs.stdout
+ Image file (or Return to enter Xcen, Ycen directly): 
+text 2 golden/e_noinput.rc
+1
+
+text 42 golden/e_noinput.stdout
+
+ERROR: XFMODEL - No input file specified
+
+text 2 golden/e_nooutput.rc
+1
+
+text 43 golden/e_nooutput.stdout
+
+ERROR: XFMODEL - No output file specified
+
+text 2 golden/e_twofits.rc
+1
+
+text 72 golden/e_twofits.stdout
+
+ERROR: XFMODEL - Only one of -trans, -rottrans, -magrot may be entered
+
+text 2 golden/e_warpfwd.rc
+1
+
+text 146 golden/e_warpfwd.stdout
+Using model header to determine center coordinates:   275.0   275.0
+
+ERROR: XFMODEL - THIS PROGRAM WILL WORK ONLY WITH INVERSE WARP DISPLACEMENTS
+
+text 438 golden/f1.out
+   1.0000000   0.0000000   0.0000000   1.0000000       0.000       0.000
+   0.0000000   0.0000000   0.0000000   0.0000000    -275.000    -275.000
+   0.9581710  -0.0037580  -0.0004735   0.9999641      -0.981      -0.008
+   0.9607822  -0.0035027  -0.0003073   0.9999095      -0.942       0.039
+   0.9616337  -0.0034892  -0.0001646   1.0002058      -0.868       0.021
+   0.9642705  -0.0032896  -0.0002871   0.9997947      -0.963      -0.000
+
+text 2 golden/f1.rc
+0
+
+sha256 650b78ebb2e0a384f9589441f7ed5813ab123dde4b995352161ecbafc975e1ca 23174 golden/f1.stdout
+sha256 b0c8646288503f100f796c12fdb89a397bed1152a3387d58c8635f1847e5c28b 4453 golden/f2.out
+text 2 golden/f2.rc
+0
+
+sha256 69decf2e78af745a0fe75333947f32e097bb5e0e3ff3cbecde861d76978d84a5 5204 golden/f2.stdout
+sha256 d258aae3b9c9d589343d85de22dde4ec7d4a93d53d55966b27d4b793d1f88b8a 4453 golden/fedit.out
+text 2 golden/fedit.rc
+0
+
+sha256 bd20a999c4285c0392e0b7a4ae1c13bf61ea7a6880bb0d7e8e22622188415b70 543 golden/fedit.stdout
+sha256 d1b0eebb3d76024d63d64d3b0be56286f9553c8e1f097359711a4342344b36ac 4453 golden/fedwarp.out
+text 2 golden/fedwarp.rc
+0
+
+sha256 9c07a285b66f62d9113f717e5dfa300cb87d43f7e594e40bbd857892c50adb59 617 golden/fedwarp.stdout
+sha256 d56b4346d65e1c36d5d17843c8d4059fc615be956734fd259455fbc56707b1fd 2263 golden/fmag.out
+text 2 golden/fmag.rc
+0
+
+sha256 eb5c25f79f8db56f1364d9de5f791a723f75ad087d6f71ced836202559054398 1316 golden/fmag.stdout
+sha256 29b72454e8381034b14d16c7cb78c5ac8ce28a2bc645e4f9a710b0fecb2b5071 2628 golden/fsingle.out
+text 2 golden/fsingle.rc
+0
+
+sha256 5e367f97f8095f6c68e0afe11444d92737fbe7a105b1134bb7fd046fc8009987 1212 golden/fsingle.stdout
+sha256 f7b1750693a46412349c71aa8e53b3f94bfc32baf6a4aec835f52267866d8f73 4453 golden/ftrans.out
+text 2 golden/ftrans.rc
+0
+
+sha256 170cb6a2cc713349717ef32b360973ccf066f2799400d42b5571e37b49cace6c 5204 golden/ftrans.stdout
+sha256 79f6ae2a8b26bd5b38bf9fef6426d9b872ff01b193619f53c03c928b4966efdf 44860 golden/grad.out
+text 2 golden/grad.rc
+0
+
+text 125 golden/grad.stdout
+
+ FORMATTED  ro  file opened: mg.txt
+Using model header to determine center coordinates:   275.0   275.0
+ Undistorting model
+
+text 2 golden/gradbad.rc
+2
+
+text 40 golden/gradbad.stdout
+
+ FORMATTED  ro  file opened: mgbad.txt
+
+text 2 golden/graddist.rc
+0
+
+text 125 golden/graddist.stdout
+Using model header to determine center coordinates:   275.0   275.0
+
+ FORMATTED  ro  file opened: mg.txt
+ Undistorting model
+
+text 2 golden/graddistpreback.rc
+0
+
+text 283 golden/graddistpreback.stdout
+Using model header to determine center coordinates:   275.0   275.0
+
+ FORMATTED  ro  file opened: mg.txt
+
+ FORMATTED  ro  file opened: BBa.xf
+Back-transforming model with inverse of transforms from BBa.xf
+ Redistorting model
+Transforming model with reinverted transforms from BBa.xf
+
+text 2 golden/graddistx.rc
+0
+
+text 209 golden/graddistx.stdout
+Using model header to determine center coordinates:   275.0   275.0
+
+ FORMATTED  ro  file opened: mg.txt
+
+ FORMATTED  ro  file opened: BBa.xf
+ Undistorting model
+Transforming model with transforms from BBa.xf
+
+text 2 golden/gradv2.rc
+1
+
+text 120 golden/gradv2.stdout
+
+ FORMATTED  ro  file opened: mgv2.txt
+
+ ERROR: readMagGradients - version           2  of gradient file not recognized
+
+text 2 golden/i_bad_cen.rc
+2
+
+text 120 golden/i_bad_cen.stdout
+ Image file (or Return to enter Xcen, Ycen directly):  Be SURE to enter CENTER coordinates, NOT NX and NY
+ Xcen, Ycen: 
+text 438 golden/i_find.out
+   1.0000000   0.0000000   0.0000000   1.0000000       0.000       0.000
+   0.0000000   0.0000000   0.0000000   0.0000000    -275.000    -275.000
+   0.9581710  -0.0037580  -0.0004735   0.9999641      -0.981      -0.008
+   0.9607822  -0.0035027  -0.0003073   0.9999095      -0.942       0.039
+   0.9616337  -0.0034892  -0.0001646   1.0002058      -0.868       0.021
+   0.9642705  -0.0032896  -0.0002871   0.9997947      -0.963      -0.000
+
+text 2 golden/i_find.rc
+0
+
+sha256 7e0bbb1aaaa8a4276289a47603887acd89440d11c760b7aff471ceb2d3e74111 19601 golden/i_find.stdout
+sha256 1c0753e181dbc7743e30c793d981fbf1ef2d89ad3b705ee51afe3003d192dd5a 1464 golden/i_img.out
+text 2 golden/i_img.rc
+0
+
+sha256 3e13336e1e19c750ed4e0a17024f95d0da9d91b02c9b7d72a9dcae0c489b0ffe 1885 golden/i_img.stdout
+sha256 e600006c31ac777025b96e08ea34c0e65891e8bf641600bf8922276342cff311 1464 golden/m1gapx.out
+text 2 golden/m1gapx.rc
+0
+
+sha256 4ea48a380cd04a116dfd52832c19fc6d78710e9559c419212fd88d229a4ba09b 1339 golden/m1gapx.stdout
+sha256 ba5804c9302a7dedac5d431e6b2dece0ef4324cd867a6e02b4c8571dacc7512b 584 golden/m1img.out
+text 2 golden/m1img.rc
+0
+
+sha256 a3462b71e217e5db75132ba02a1b4cf8550c9ddbc0d724b66a0c36fbd4fde8e1 1844 golden/m1img.stdout
+text 511 golden/m1imggap.out
+   1.0000000   0.0000000   0.0000000   1.0000000       0.000       0.000
+   1.0009899   0.0017845  -0.0008160   0.9947055      -2.011       1.568
+   0.9977716   0.0010765  -0.0034569   0.9975371      -1.176       1.756
+   1.0004508   0.0003512  -0.0005171   1.0074112      -3.405       0.485
+   1.0016828   0.0002703   0.0029939   0.9956771      -1.547       0.695
+   0.9996988  -0.0029376  -0.0004034   1.0014807      -1.411       0.735
+   1.0009667   0.0010599  -0.0002389   0.9990196      -1.578       0.664
+
+text 2 golden/m1imggap.rc
+0
+
+sha256 b21f1b2217758b23aed21b3fdfccb4bf49030a4d947ed8a3bc57e93a759fb073 1957 golden/m1imggap.stdout
+sha256 dcfe53e0c0e538be922e0d086b74593b7d1149f3ff3f7ae888732af9d42f14bb 584 golden/m1imggapall.out
+text 2 golden/m1imggapall.rc
+0
+
+sha256 cf86905c57fc6d1c7de59c19925f32e3a9d5d41d8cbed65e5743dce1cda04608 1947 golden/m1imggapall.stdout
+text 292 golden/m1mont.out
+   1.0000000   0.0000000   0.0000000   1.0000000       0.000       0.000
+   1.0009899   0.0017845  -0.0008160   0.9947055      -1.946       1.542
+   0.9977716   0.0010765  -0.0034569   0.9975371      -1.363       1.498
+   1.0004508   0.0003512  -0.0005171   1.0074112      -3.371       0.388
+
+text 2 golden/m1mont.rc
+0
+
+sha256 b46030b1b644ada189d5ffa14afeaf7352a9ae2ee2114a9ce449e445cfbd0778 1715 golden/m1mont.stdout
+sha256 695ce65fd25c61477275ee9d14aa811079f02cc54d880c8a56b488e3168e1706 584 golden/m2find.out
+text 2 golden/m2find.rc
+0
+
+sha256 e6fde7f86a6ad2d1ad149bce92bd5f77e67703ea8786ff01366537255be9b9e3 865 golden/m2find.stdout
+sha256 041b19c4c08e752d176752dc33ac29e4dfb1e1ee1c0a76d7cd311d1712f480f8 44860 golden/preali_back.out
+text 2 golden/preali_back.rc
+0
+
+text 168 golden/preali_back.stdout
+Using model header to determine center coordinates:   275.0   275.0
+
+ FORMATTED  ro  file opened: BBa.xf
+Back-transforming model with inverse of transforms from BBa.xf
+
+sha256 9b63ceee977529717349ee9bfd58ee9e7039494ed1592515f3aa88bc81d964b3 44860 golden/preali_fwd.out
+text 2 golden/preali_fwd.rc
+0
+
+text 252 golden/preali_fwd.stdout
+Using model header to determine center coordinates:   275.0   275.0
+
+ FORMATTED  ro  file opened: BBa.xf
+Back-transforming model with inverse of transforms from BBa.xf
+
+ FORMATTED  ro  file opened: BBb.xf
+Transforming model with transforms from BBb.xf
+
+sha256 c620833ae4bac7ccd95b1826a8fe937e327589779b329b9d80e9b4324486e090 44860 golden/w1one.out
+text 2 golden/w1one.rc
+0
+
+text 214 golden/w1one.stdout
+Using model header to determine center coordinates:   275.0   275.0
+Warping file opened: wg1i.xf
+ There is only one transform and it is being applied at all Z values
+Transforming model with transforms from wg1i.xf
+
+text 2 golden/w20dist.rc
+0
+
+text 167 golden/w20dist.stdout
+Using model header to determine center coordinates:   275.0   275.0
+Warping file opened: wgi20.xf
+ Undistorting model
+Transforming model with transforms from wgi20.xf
+
+sha256 28886cdc0fbb274d8127ac247488690aba2348bcd544fc323a2ca794151abd10 44860 golden/w20grad.out
+text 2 golden/w20grad.rc
+0
+
+text 280 golden/w20grad.stdout
+
+ FORMATTED  ro  file opened: mg.txt
+Using model header to determine center coordinates:   275.0   275.0
+Warping file opened: wgi20.xf
+Back-transforming model with inverse of transforms from wgi20.xf
+ Undistorting model
+Transforming model with reinverted transforms from wgi20.xf
+
+text 2 golden/w20graddist.rc
+0
+
+text 280 golden/w20graddist.stdout
+Using model header to determine center coordinates:   275.0   275.0
+
+ FORMATTED  ro  file opened: mg.txt
+Warping file opened: wgi20.xf
+Back-transforming model with inverse of transforms from wgi20.xf
+ Undistorting model
+Transforming model with reinverted transforms from wgi20.xf
+
+text 2 golden/w20graddistback.rc
+0
+
+text 280 golden/w20graddistback.stdout
+Using model header to determine center coordinates:   275.0   275.0
+
+ FORMATTED  ro  file opened: mg.txt
+Warping file opened: wgi20.xf
+Back-transforming model with inverse of transforms from wgi20.xf
+ Redistorting model
+Transforming model with reinverted transforms from wgi20.xf
+
+sha256 cb7be393a4aaebab2d36bf271a03811f74e5f97bbc51363c96d8e89489fdf064 44860 golden/w20hscale.out
+text 2 golden/w20hscale.rc
+0
+
+text 149 golden/w20hscale.stdout
+Using model header to determine center coordinates:   275.0   275.0
+Warping file opened: wgi20h.xf
+Transforming model with transforms from wgi20h.xf
+
+sha256 b4238ca8db8d8a50eec9ad20698a51a6d2972b154070fe8c0e20140a591ad78f 44860 golden/w20line.out
+text 2 golden/w20line.rc
+0
+
+text 147 golden/w20line.stdout
+Using model header to determine center coordinates:   275.0   275.0
+Warping file opened: wgi20.xf
+Transforming model with transforms from wgi20.xf
+
+sha256 8bb666540f75e693a07171543bd6ff2e4f3c98d664b538550261d9baf2db7f01 44860 golden/w20pre.out
+text 2 golden/w20pre.rc
+0
+
+text 163 golden/w20pre.stdout
+Using model header to determine center coordinates:   275.0   275.0
+Warping file opened: wgi20.xf
+Back-transforming model with inverse of transforms from wgi20.xf
+
+sha256 6247d5fc3c14c7bba1eed682ba80ffce37947e90493476c1f712d628189281b8 44860 golden/w20prewarp.out
+text 2 golden/w20prewarp.rc
+0
+
+text 244 golden/w20prewarp.stdout
+Using model header to determine center coordinates:   275.0   275.0
+Warping file opened: wgi20.xf
+Warping file opened: wgi20h.xf
+Back-transforming model with inverse of transforms from wgi20.xf
+Transforming model with transforms from wgi20h.xf
+
+sha256 5944e93617d8ef347609822f291c2677d2c5023b41cc71cc9a17e2af029ffa3d 44860 golden/w20x.out
+text 2 golden/w20x.rc
+0
+
+text 147 golden/w20x.stdout
+Using model header to determine center coordinates:   275.0   275.0
+Warping file opened: wgi20.xf
+Transforming model with transforms from wgi20.xf
+
+sha256 ecb394f2881c551684eee2dfd1e93ece1a8d63a9eca8cd8b6e9f0a4b55d1b1b2 44860 golden/w3chunks.out
+text 2 golden/w3chunks.rc
+0
+
+text 145 golden/w3chunks.stdout
+Using model header to determine center coordinates:   275.0   275.0
+Warping file opened: wg3i.xf
+Transforming model with transforms from wg3i.xf
+
+sha256 269f885d41bf55289bd2bdff0d6a3e9ba141bd398f483a73a308ccbf575d973e 44860 golden/w3undef.out
+text 2 golden/w3undef.rc
+0
+
+text 145 golden/w3undef.stdout
+Using model header to determine center coordinates:   275.0   275.0
+Warping file opened: wg3i.xf
+Transforming model with transforms from wg3i.xf
+
+text 2 golden/w8gapall.rc
+0
+
+sha256 f8f4574f8c66478bdf6d7eaa92dfa83e22ae337532ed89f7fb5138b2917ed31a 1262 golden/w8gapall.stdout
+text 2 golden/w8img.rc
+0
+
+sha256 1cb4cf06c27131a9d218e49e887022a00ef14aeb563c77b4b5c1a68fba7c3cec 1124 golden/w8img.stdout
+text 2 golden/w8imgback.rc
+0
+
+sha256 a0bb2bcc3b910050b3d9a9847538fcb93505bfc2776f436114656e3326af8e92 1140 golden/w8imgback.stdout
+text 2 golden/w8imgpre.rc
+0
+
+sha256 502b66aa084c2ca5cfe81d5b1b5ca00e754900097094a9d61e35ff2607a86de8 1222 golden/w8imgpre.stdout
+sha256 76ec72180c17ecc2ebe8ac5e08e83a5cacfc8177bece1f0fc9640f5d08ad672d 44860 golden/x1.out
+text 2 golden/x1.rc
+0
+
+text 152 golden/x1.stdout
+Using model header to determine center coordinates:   275.0   275.0
+
+ FORMATTED  ro  file opened: BBa.xf
+Transforming model with transforms from BBa.xf
+
+sha256 76ec72180c17ecc2ebe8ac5e08e83a5cacfc8177bece1f0fc9640f5d08ad672d 44860 golden/x1nonopt.out
+text 2 golden/x1nonopt.rc
+0
+
+text 152 golden/x1nonopt.stdout
+Using model header to determine center coordinates:   275.0   275.0
+
+ FORMATTED  ro  file opened: BBa.xf
+Transforming model with transforms from BBa.xf
+
+sha256 76ec72180c17ecc2ebe8ac5e08e83a5cacfc8177bece1f0fc9640f5d08ad672d 44860 golden/xadj1.out
+text 2 golden/xadj1.rc
+0
+
+text 152 golden/xadj1.stdout
+Using model header to determine center coordinates:   275.0   275.0
+
+ FORMATTED  ro  file opened: BBa.xf
+Transforming model with transforms from BBa.xf
+
+sha256 bcce5a756222c2d1a3568efafc434a7ae7251d43ea8f810e73c3553d4b4c3a37 44860 golden/xadj2.out
+text 2 golden/xadj2.rc
+0
+
+text 152 golden/xadj2.stdout
+Using model header to determine center coordinates:   275.0   275.0
+
+ FORMATTED  ro  file opened: BBa.xf
+Transforming model with transforms from BBa.xf
+
+sha256 041b19c4c08e752d176752dc33ac29e4dfb1e1ee1c0a76d7cd311d1712f480f8 44860 golden/xback.out
+text 2 golden/xback.rc
+0
+
+text 168 golden/xback.stdout
+Using model header to determine center coordinates:   275.0   275.0
+
+ FORMATTED  ro  file opened: BBa.xf
+Back-transforming model with inverse of transforms from BBa.xf
+
+sha256 1be36c3f561c3b9250828feae87c64e31805b7dc81afea4249245ae631aad142 44860 golden/xcenter.out
+text 2 golden/xcenter.rc
+0
+
+text 84 golden/xcenter.stdout
+
+ FORMATTED  ro  file opened: BBa.xf
+Transforming model with transforms from BBa.xf
+
+sha256 149f3903fc162dec2d78c2a125dc179dddd8e3480383d45cb636f5cb9f06c168 44860 golden/xchunks.out
+text 2 golden/xchunks.rc
+0
+
+text 150 golden/xchunks.stdout
+Using model header to determine center coordinates:   275.0   275.0
+
+ FORMATTED  ro  file opened: x3.xf
+Transforming model with transforms from x3.xf
+
+sha256 4073535c7716646564bbadd219f24b3db558ebf3f792718192bded76076e0961 44860 golden/xline.out
+text 2 golden/xline.rc
+0
+
+text 152 golden/xline.stdout
+Using model header to determine center coordinates:   275.0   275.0
+
+ FORMATTED  ro  file opened: BBa.xf
+Transforming model with transforms from BBa.xf
+
+sha256 f6b71b3fc9d7f3036930b2aaf7ac1fb3bf59a56f037d300f84396bef6fc72bae 44860 golden/xone.out
+text 2 golden/xone.rc
+0
+
+text 219 golden/xone.stdout
+Using model header to determine center coordinates:   275.0   275.0
+
+ FORMATTED  ro  file opened: x1.xf
+ There is only one transform and it is being applied at all Z values
+Transforming model with transforms from x1.xf
+
+sha256 229936f1431ef417871d5d5e8fe02ab5dee8c60fa591236f30be646d23160f73 44860 golden/xscale.out
+text 2 golden/xscale.rc
+0
+
+text 152 golden/xscale.stdout
+Using model header to determine center coordinates:   275.0   275.0
+
+ FORMATTED  ro  file opened: BBa.xf
+Transforming model with transforms from BBa.xf
+
+sha256 3f6e7566c2743c4e2f82843e2df75d78b2eddf5c96a0535e97c318f7df8c1c6b 44860 golden/xshort.out
+text 2 golden/xshort.rc
+0
+
+text 212 golden/xshort.stdout
+Using model header to determine center coordinates:   275.0   275.0
+
+ FORMATTED  ro  file opened: x3.xf
+Transforming model with transforms from x3.xf
+        3364  points with Z values out of range of transforms
+

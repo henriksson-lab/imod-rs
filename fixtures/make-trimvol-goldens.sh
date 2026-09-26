@@ -16,7 +16,7 @@ done
 export AUTODOC_DIR=$REF/autodoc LD_LIBRARY_PATH=$REF/buildlib OMP_NUM_THREADS=1
 export IMOD_DIR=$REF PYTHONPATH=$ROOT/IMOD/pysrc PATH=$BIN:$PATH
 rm -rf "$HERE/golden"; mkdir -p "$HERE/golden"
-grep -v '^#' "$HERE/cases.tsv" | while IFS=$'\t' read -r name args; do
+sed "${FULL:+s/^#full\t//;}/^#/d" "$HERE/cases.tsv" | while IFS=$'\t' read -r name args; do
   [ -z "$name" ] && continue
   work=$(mktemp -d)
   cp "$ROOT"/fixtures/densmatch/*.mrc "$work"/

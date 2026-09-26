@@ -1,6 +1,0 @@
- Enter 0 to align all sections to a single average central alignment;
-    or 1 to align to an average alignment that shifts based
-          on a polynomial fit to the whole stack;
-    or N to align each section to an average alignment based
-          on a polynomial fit to the nearest N sections,
-   or -1 or -N for a hybrid of central and shifting alignments: 

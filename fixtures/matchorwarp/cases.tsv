@@ -1,0 +1,11 @@
+# name	inputs (src:dst from inputs/)	env	arguments
+usage	ga.rec:ga.rec gb.rec:gb.rec patch.out:patch.out solve.xf:solve.xf	-	gb.rec gb.mat
+err_vec	ga.rec:ga.rec gb.rec:gb.rec patch.out:patch.out solve.xf:solve.xf	-	-size ga.rec -vectormodel v.mod gb.rec gb.mat
+err_model	ga.rec:ga.rec gb.rec:gb.rec patch.out:patch.out solve.xf:solve.xf	-	-size ga.rec -modelfile nope.mod gb.rec gb.mat
+err_input	ga.rec:ga.rec gb.rec:gb.rec patch.out:patch.out solve.xf:solve.xf	-	-size ga.rec nope.rec gb.mat
+err_patch	ga.rec:ga.rec gb.rec:gb.rec patch.out:patch.out solve.xf:solve.xf	-	-size ga.rec -patchfile nope.out gb.rec gb.mat
+#full	err_solve	ga.rec:ga.rec gb.rec:gb.rec patch.out:patch.out solve.xf:solve.xf	-	-size ga.rec -solvefile nope.xf gb.rec gb.mat
+err_sizefile	ga.rec:ga.rec gb.rec:gb.rec patch.out:patch.out solve.xf:solve.xf patchcorr.com:patchcorr.com	-	-size patchcorr.com gb.rec gb.mat
+err_iter_nocom	ga.rec:ga.rec gb.rec:gb.rec patch.out:patch.out solve.xf:solve.xf	-	-size ga.rec -iterations 3 -patchcorr nope gb.rec gb.mat
+err_iter_noout	ga.rec:ga.rec gb.rec:gb.rec patch.out:patch.out solve.xf:solve.xf pc_noout.com:pc.com	-	-size ga.rec -iterations 2 -patchcorr pc.com gb.rec gb.mat
+err_iter_nomat	ga.rec:ga.rec gb.rec:gb.rec patch.out:patch.out solve.xf:solve.xf pc_nomat.com:pc.com	-	-size ga.rec -iterations 2 -patchcorr pc.com gb.rec gb.mat

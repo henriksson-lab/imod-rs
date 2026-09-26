@@ -13,7 +13,7 @@ F=$(cd "$(dirname "$0")/xftransforms" && pwd)
 V="$F/../../IMOD/Etomo/uitestData"
 S=$(mktemp -d)
 rm -f "$F"/golden/*
-grep -v '^#' "$F/cases.tsv" | while IFS=$'\t' read -r prog name args stdin; do
+sed "${FULL:+s/^#full\t//;}/^#/d" "$F/cases.tsv" | while IFS=$'\t' read -r prog name args stdin; do
   [ "$args" = "-" ] && args=""
   d="$S/$prog-$name"; mkdir "$d"
   cp "$F"/*.xf "$V/BB/BBa.xf" "$V/midzone2/midzone2a.xf" "$V/mediumscansb2/mediumscansb2_midas.xf" "$d"/

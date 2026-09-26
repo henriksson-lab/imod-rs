@@ -15,7 +15,7 @@ rm -f "$F"/golden/*
 # An optional fifth column gives the arguments native is run with instead:
 # `-2 f -l N` adds -tx/-ty twice natively (BUGS.md, fixed in translation), so
 # the golden for the translation's `-tx 1.5 -ty 2` is native's `-tx 0.75 -ty 1`.
-grep -v '^#' "$F/cases.tsv" | while IFS=$'\t' read -r name input args rc nargs; do
+sed "${FULL:+s/^#full\t//;}/^#/d" "$F/cases.tsv" | while IFS=$'\t' read -r name input args rc nargs; do
   [ -n "$nargs" ] && args=$nargs
   d="$S/$name"; mkdir "$d"; cp "$S"/*.xf "$S"/*.mrc "$d"/; cp "$S/$input" "$d/in"
   set +e

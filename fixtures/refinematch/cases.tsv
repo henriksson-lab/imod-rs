@@ -1,0 +1,25 @@
+# name	arguments (- for none)	stdin (printf escapes, - for none)	native-equivalent arguments for a case reaching a bug fixed in translation (BUGS.md)	sed on that run's stdout
+r_basic	-patch p1.patch -output r.xf -volume 512,128,512 -limit 0.6 -residual rr.out -reduced red.out	-
+r_nonopt	-volume 512,128,512 -limit 0.6 p1.patch r.xf	-
+r_high	-patch p1.patch -output r.xf -volume 512,128,512 -limit 0.2	-
+r_nolimit	-patch p1.patch -output r.xf -volume 512,128,512	-
+r_prod	-patch p2.patch -output r.xf -volume 512,512,100 -limit 1 -initial init.xf -product prod.xf -scale 2	-
+#full	r_prod1	-patch p1.patch -output r.xf -volume 512,128,512 -limit 1 -initial init.xf -product prod.xf	-
+r_initonly	-patch p1.patch -output r.xf -volume 512,128,512 -limit 1 -initial init.xf	-
+#full	r_prodonly	-patch p1.patch -output r.xf -volume 512,128,512 -limit 1 -product prod.xf	-
+r_badinit	-patch p1.patch -output r.xf -volume 512,128,512 -limit 1 -initial badinit2.xf -product prod.xf	-
+r_region	-patch p1.patch -output r.xf -volume 512,128,512 -limit 1 -region reg1.mod -residual rr.out -reduced red.out	-
+r_region2	-patch p2.patch -output r.xf -volume 512,512,100 -limit 1 -region reg2.mod -initial init.xf -product prod.xf	-	-	s/^Implied center shift is     -0.4$/Implied center shift is     -0.2/
+r_select	-patch p1.patch -output r.xf -volume 512,128,512 -limit 0.3 -extra 1,1 -select 0.2,0.5,0.7	-
+#full	r_select_pass	-patch p1.patch -output r.xf -volume 512,128,512 -limit 0.6 -extra 1,1 -select 0.2,0.5,0.7 -residual rr.out -reduced red.out	-
+r_select3	-patch p3.patch -output r.xf -volume 512,512,120 -limit 2 -extra 5,-1 -select 0.5 -residual rr.out -reduced red.out	-
+r_onelayer	-patch p5.patch -output r.xf -volume 400,60,400 -limit 1 -residual rr.out -reduced red.out	-
+#full	r_onelayer_prod	-patch p5.patch -output r.xf -volume 400,60,400 -limit 1 -initial init.xf -product prod.xf	-
+r_twodims	-patch p13.patch -output r.xf -volume 400,60,60 -limit 1	-
+r_toofew	-patch p9.patch -output r.xf -volume 200,60,200 -limit 1 -extra 1,1 -select 0.75	-
+r_nofile	-patch nope.patch -output r.xf -volume 512,128,512 -limit 1	-
+r_novol	-patch p1.patch -output r.xf -limit 1	-
+#full	r_nooutput	-patch p1.patch -volume 512,128,512 -limit 1	-
+r_help	-help	-
+ri_basic	-	p1.patch\n512,128,512\n\n0.6\nri.xf\n
+ri_region	-	p1.patch\n512,128,512\nreg1.mod\n0.3\n\n

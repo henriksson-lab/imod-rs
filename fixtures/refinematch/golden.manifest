@@ -1,0 +1,198 @@
+# imod-rs native golden manifest for fixtures/refinematch; see fixtures/README.md.
+# Regenerate with fixtures/regen-golden.sh refinematch; do not edit by hand.
+text 2 golden/r_badinit.rc
+1
+
+text 135 golden/r_badinit.stdout
+
+ FORMATTED  old  file opened: p1.patch
+
+ FORMATTED  ro  file opened: badinit2.xf
+
+ERROR: REFINEMATCH - Reading initial transform file
+
+text 123 golden/r_basic.out.r.xf
+  1.013113 -0.009277 -0.004712     2.984
+  0.005282  0.992868 -0.003605     0.707
+ -0.002966 -0.000262  0.994287     1.916
+
+sha256 7bfbd5b6b509a8cc4204050089e6f41b6a503043906010377b683a3a61bccc7d 11162 golden/r_basic.out.red.out
+sha256 b5738b027c4dcf15136c35b1d0cf29f5d9cb94f0785b82e1cb3d1bce98b70f39 13090 golden/r_basic.out.rr.out
+text 2 golden/r_basic.rc
+0
+
+sha256 f635a91ce122b2a64fbf8db1b167d581eb1a8dc0df678be819717c03d7db2739 625 golden/r_basic.stdout
+text 2 golden/r_help.rc
+0
+
+sha256 bce1614d7ac309abbfdc33253e660ecf10c88dafaf245b2c1480093fdcb7451d 1987 golden/r_help.stdout
+text 123 golden/r_high.out.r.xf
+  1.013113 -0.009277 -0.004712     2.984
+  0.005282  0.992868 -0.003605     0.707
+ -0.002966 -0.000262  0.994287     1.916
+
+text 2 golden/r_high.rc
+2
+
+sha256 e219b4a87441a2afa0df079e6bca5174a4765460b46a83901ac4feeb7264f351 625 golden/r_high.stdout
+text 2 golden/r_initonly.rc
+1
+
+text 124 golden/r_initonly.stdout
+
+ FORMATTED  old  file opened: p1.patch
+
+ERROR: REFINEMATCH - You must enter both -initial and -product files, not just one
+
+text 2 golden/r_nofile.rc
+1
+
+text 47 golden/r_nofile.stdout
+
+ERROR: DOPEN - FILE nope.patch DOES NOT EXIST
+
+text 2 golden/r_nolimit.rc
+1
+
+text 99 golden/r_nolimit.stdout
+
+ FORMATTED  old  file opened: p1.patch
+
+ERROR: REFINEMATCH - You must enter a mean residual limit
+
+text 2 golden/r_nonopt.rc
+0
+
+text 512 golden/r_nonopt.stdout
+
+ FORMATTED  old  file opened: p1.patch
+         192  data points will be used for fit
+
+  5 patches dropped by outlier elimination:
+     patch position     residual
+   -83.     7.   -85.     9.68
+    70.    39.   -26.    11.32
+   190.   -55.  -209.    13.93
+   138.   -47.   146.    14.16
+    79.    49.    93.    14.47
+
+ Mean residual   0.490,  maximum   1.219
+
+ Refining transformation:
+  1.013113 -0.009277 -0.004712     2.984
+  0.005282  0.992868 -0.003605     0.707
+ -0.002966 -0.000262  0.994287     1.916
+
+text 2 golden/r_novol.rc
+1
+
+text 134 golden/r_novol.stdout
+
+ FORMATTED  old  file opened: p1.patch
+
+ERROR: REFINEMATCH - you must enter option VolumeOrSizeXYZ to specify file size or file name
+
+text 123 golden/r_onelayer.out.r.xf
+  0.995801 -0.005653 -0.000973     3.852
+  0.005693  1.004104 -0.007473    -6.432
+ -0.017230  0.007632  1.012300    -0.984
+
+sha256 ce90cc9e93d8daa03da060f234f47984e8c63a5fee0b48a4933dae3baf3994e8 3738 golden/r_onelayer.out.red.out
+sha256 1200a91bfb4630939fd08755ef4e16f2fd639afe06700031a39303927d0b828e 4386 golden/r_onelayer.out.rr.out
+text 2 golden/r_onelayer.rc
+0
+
+sha256 089ba42dcbead20f7380f59e72b27d2e02089f2fe2b239d260087c2cdaff58e7 587 golden/r_onelayer.stdout
+text 123 golden/r_prod.out.prod.xf
+  1.033327 -0.016417 -0.014466     7.906
+  0.002288  0.991969  0.002696     4.292
+  0.007564 -0.008428  0.984058     2.090
+
+text 123 golden/r_prod.out.r.xf
+  1.023100 -0.018638 -0.011265     1.410
+  0.003260  1.001984 -0.001295     3.345
+  0.005540 -0.009513  0.979217    -2.212
+
+text 2 golden/r_prod.rc
+0
+
+sha256 f3824547f40561803cabfdb7738a6a57861bd6d6ff711b2780aea1992c82b90b 658 golden/r_prod.stdout
+text 123 golden/r_region.out.r.xf
+  1.013163 -0.009292 -0.004511     2.960
+  0.005745  0.992929 -0.003879     0.705
+ -0.002830 -0.001087  0.994364     1.935
+
+sha256 d3e2d63597f6795615bae15153cc2aabd3154a2d3ef994c80c567e2e17672150 7218 golden/r_region.out.red.out
+sha256 5a221e8e0c8df89299892de45ad44bae2b1aadde32a2e0444d9b8f0cbc43e4dc 8466 golden/r_region.out.rr.out
+text 2 golden/r_region.rc
+0
+
+sha256 78c725a6ffb21b322c588f90234cf6dc8ec3c020e35503fca23b81303610fd02 665 golden/r_region.stdout
+text 123 golden/r_region2.out.prod.xf
+  1.032571 -0.016201 -0.014179     4.013
+  0.002448  0.994185  0.003331     2.194
+  0.008268 -0.008807  0.978036     0.904
+
+text 123 golden/r_region2.out.r.xf
+  1.022351 -0.018418 -0.010984     1.471
+  0.003420  1.004221 -0.000672     3.393
+  0.006250 -0.009892  0.973228    -2.336
+
+text 2 golden/r_region2.rc
+0
+
+sha256 dd6a4f69d89d320ba532925fa7bd7c90cc5e7315fbc313b7f33755c0915434d5 605 golden/r_region2.stdout
+text 123 golden/r_select.out.r.xf
+  1.013435 -0.010204 -0.004402     2.941
+  0.005896  0.992968 -0.003922     0.840
+ -0.002772 -0.001225  0.994295     1.939
+
+text 2 golden/r_select.rc
+2
+
+sha256 fbfab9c065dfa6cdb9e7ed6a7e6cfd3d934d6690dff62d1c65eea72d02b61530 869 golden/r_select.stdout
+text 123 golden/r_select3.out.r.xf
+  0.999918  0.004450  0.001829     1.450
+  0.019642  1.010707  0.010385     2.838
+ -0.033378 -0.002112  0.995496     3.991
+
+sha256 86cf9d17d5b334af8cec842c9f72dac1f14910b316a47a8ffb21added56cdb7b 9472 golden/r_select3.out.red.out
+sha256 2ce75b64b105c89829ebff946b0353f8e39f4f730131aca06378ea6dce220c33 10630 golden/r_select3.out.rr.out
+text 2 golden/r_select3.rc
+0
+
+sha256 dba0493c81a1c1f781091184a440c45bc73fd64120db133a5a7035493e46d9b0 651 golden/r_select3.stdout
+text 2 golden/r_toofew.rc
+1
+
+text 182 golden/r_toofew.stdout
+
+ FORMATTED  old  file opened: p9.patch
+      18 total patches in patch file
+
+Applying extra column selection criteria    0.750
+
+ERROR: REFINEMATCH - Too few data points for fitting
+
+text 2 golden/r_twodims.rc
+1
+
+text 119 golden/r_twodims.stdout
+
+ FORMATTED  old  file opened: p13.patch
+
+ERROR: REFINEMATCH - Cannot fit to patches that extend in only one dimension
+
+text 123 golden/ri_basic.out.ri.xf
+  1.013113 -0.009277 -0.004712     2.984
+  0.005282  0.992868 -0.003605     0.707
+ -0.002966 -0.000262  0.994287     1.916
+
+text 2 golden/ri_basic.rc
+0
+
+sha256 cfbd774cd4e8586463b26e9cdac2564d6481c81853c44b26f71d44f1df89cf67 882 golden/ri_basic.stdout
+text 2 golden/ri_region.rc
+2
+
+sha256 7edbee5c3c0af75b8edba3edf7cac28215585ea0415fa52719694d39013585f9 962 golden/ri_region.stdout

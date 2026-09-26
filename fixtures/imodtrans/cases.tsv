@@ -3,7 +3,7 @@ tx	multi.mod	-tx 5.5 -ty -3 -tz 2	0
 txembed	multi.mod	-tx5.5 -ty-3 -tz2	0
 sxyz	multi.mod	-sx 1.5 -sy 0.75 -sz 2	0
 rall	meshed.mod	-rx 10 -ry 20 -rz 30 -tx 3	0
-srt	meshed.mod	-sx 2 -rz 15 -tx 4 -ty 1	0
+#full	srt	meshed.mod	-sx 2 -rz 15 -tx 4 -ty 1	0
 nsize	multi.mod	-rz 20 -n 120,90,8	0
 zscale	multi.mod	-z -rx 30	0
 flipped	flipped.mod	-rx 30 -tz 2	0
@@ -11,14 +11,14 @@ flippedf	flipped.mod	-f -rx 30 -tz 2	0
 Y	multi.mod	-Y	0
 T	multi.mod	-T	0
 R1	multi.mod	-R 1	0
-R0	flipped.mod	-R 0	0
-Rfid	BBa_erase.fid	-R 1	0
+#full	R0	flipped.mod	-R 0	0
+#full	Rfid	BBa_erase.fid	-R 1	0
 x2five	multi.mod	-2 five.xf	0
 x2odd	multi.mod	-2 odd.xf	0
 x2l	multi.mod	-2 five.xf -l 2	0
 x2lt	multi.mod	-2 five.xf -l 3 -tx 1.5 -ty 2 -tz 1	0	-2 five.xf -l 3 -tx 0.75 -ty 1 -tz 1
 x2lS	meshed.mod	-2 five.xf -l 4 -S 2	0
-x2big	BBa_erase.fid	-2 BBa.xf -S 0.5 -tx 3	0
+#full	x2big	BBa_erase.fid	-2 BBa.xf -S 0.5 -tx 3	0
 x3S	meshed.mod	-3 m3d.xf -S 2 -tx 1 -ty 2 -tz 3	0
 x3flip	flipped.mod	-3 m3d.xf	0
 i1	multi.mod	-i img1.mrc	0
@@ -34,5 +34,5 @@ e2r	multi.mod	-2 five.xf -rx 3	1
 e2tz	multi.mod	-2 five.xf -tz 1	1
 e2rep	multi.mod	-2 five.xf -tx 1 -tx 2	1
 badopt	multi.mod	-q	1
-badt	multi.mod	-tq 3	1
+#full	badt	multi.mod	-tq 3	1
 twoextra	multi.mod	-tx 1 extra	3

@@ -1,0 +1,20 @@
+# name	inputs (src:dst from inputs/)	env	arguments
+basic	tilt.com:tilt.com TS01.xtilt:TS01.xtilt	-	tilt
+#full	basic_n4	tilt.com:tilt.com TS01.xtilt:TS01.xtilt	-	-n 4 tilt.com
+separate	tilt.com:tilt.com TS01.xtilt:TS01.xtilt	-	-c -n 2 tilt
+ali_stack	tilt.com:tilt.com TS01.xtilt:TS01.xtilt ali.mrc:TS01_ali.mrc	-	-n 3 tilt
+xtilt_vertical	xtilt.com:tilt.com TS01.xtilt:TS01.xtilt	-	-n 4 -v tilt
+xtilt_old	xtilt.com:tilt.com TS01.xtilt:TS01.xtilt	-	-n 4 tilt
+xtilt_penalty	xtilt.com:tilt.com TS01.xtilt:TS01.xtilt	-	-n 4 -p 1.5 -t 10 -m 3 tilt
+binned_slice	binned.com:tilt.com TS01.xtilt:TS01.xtilt	-	-n 2 tilt
+reproject	reproj.com:tilt.com TS01.xtilt:TS01.xtilt	-	-n 2 tilt
+vertslice	vs.com:tilt.com TS01.xtilt:TS01.xtilt	-	-n 2 tilt
+start_unique	tilt.com:tilt.com TS01.xtilt:TS01.xtilt	-	-n 2 -i 5 -o -unique -outroot tchunk tilt
+dims_bound	tilt.com:tilt.com TS01.xtilt:TS01.xtilt	PARALLEL_BOUNDARY_SIZE=5000	-n 2 -d 600,700 -b 100 tilt
+old_style	old.com:tilt.com	-	-n 2 tilt
+#full	old_style_sep	old.com:tilt.com	-	-n 2 -c tilt
+naming	tilt.com:tilt.pcm TS01.xtilt:TS01.xtilt	-	-n 2 -naming 1 tilt
+err_no_thickness	nothick.com:tilt.com TS01.xtilt:TS01.xtilt	-	tilt
+err_no_xtilt	tilt.com:tilt.com	-	tilt
+err_missing	-	-	tilt
+usage	-	-	-

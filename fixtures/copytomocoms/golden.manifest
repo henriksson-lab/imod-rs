@@ -1,0 +1,1606 @@
+# imod-rs native golden manifest for fixtures/copytomocoms; see fixtures/README.md.
+# Regenerate with fixtures/regen-golden.sh copytomocoms; do not edit by hand.
+text 410 golden/angles_dosesym_skip.files
+align.com
+b.seed
+b.st
+ctfcorrection.com
+ctfplotter.com
+eraser.com
+mtffilter.com
+newst.com
+origcoms/align.com
+origcoms/ctfcorrection.com
+origcoms/ctfplotter.com
+origcoms/eraser.com
+origcoms/mtffilter.com
+origcoms/newst.com
+origcoms/prenewst.com
+origcoms/sample.com
+origcoms/tilt.com
+origcoms/tomopitch.com
+origcoms/track.com
+origcoms/xcorr.com
+prenewst.com
+sample.com
+tilt.com
+tomopitch.com
+track.com
+xcorr.com
+
+text 39 golden/angles_dosesym_skip.out
+All command files successfully created
+
+text 2 golden/angles_dosesym_skip.rc
+0
+
+sha256 d52fa8bfa132c209c0b4b5ec4d2c43dcefdc34f5a5af23b503a1fd5d47110d25 2723 golden/angles_dosesym_skip/align.com
+sha256 c5bfb5739a50a03206f68f281dfea153d70d5174edd3a1416eaef600207c966d 528 golden/angles_dosesym_skip/b.seed
+sha256 4c90bd21b44f620c71df80a137354d184f70a94b0f3a7e51033ceb5d5ba6b2e6 775 golden/angles_dosesym_skip/ctfcorrection.com
+sha256 09b9126c6a7bc9c17f904c78a8c3aa6483f368579deae5555ac39ef307f7fade 916 golden/angles_dosesym_skip/ctfplotter.com
+sha256 9d5ddf99d483a55e222a7bbd34c5a9c5636843661eabef137436bf477bd5311f 1462 golden/angles_dosesym_skip/eraser.com
+sha256 c8a554df404269b690866c7a12e1481a15473e097127a301c6fd54c733e391a9 843 golden/angles_dosesym_skip/mtffilter.com
+sha256 f0b2937804b1e9329257817307bd226208138f499ec33a64259d9386f1e4fd42 671 golden/angles_dosesym_skip/newst.com
+sha256 d52fa8bfa132c209c0b4b5ec4d2c43dcefdc34f5a5af23b503a1fd5d47110d25 2723 golden/angles_dosesym_skip/origcoms/align.com
+sha256 4c90bd21b44f620c71df80a137354d184f70a94b0f3a7e51033ceb5d5ba6b2e6 775 golden/angles_dosesym_skip/origcoms/ctfcorrection.com
+sha256 09b9126c6a7bc9c17f904c78a8c3aa6483f368579deae5555ac39ef307f7fade 916 golden/angles_dosesym_skip/origcoms/ctfplotter.com
+sha256 9d5ddf99d483a55e222a7bbd34c5a9c5636843661eabef137436bf477bd5311f 1462 golden/angles_dosesym_skip/origcoms/eraser.com
+sha256 c8a554df404269b690866c7a12e1481a15473e097127a301c6fd54c733e391a9 843 golden/angles_dosesym_skip/origcoms/mtffilter.com
+sha256 f0b2937804b1e9329257817307bd226208138f499ec33a64259d9386f1e4fd42 671 golden/angles_dosesym_skip/origcoms/newst.com
+text 490 golden/angles_dosesym_skip/origcoms/prenewst.com
+# THIS IS A COMMAND FILE TO PRODUCE A PRE-ALIGNED STACK
+# 
+# The stack will be floated and converted to bytes under the assumption that
+# you will go back to the raw stack to make the final aligned stack
+#
+$setenv IMOD_OUTPUT_FORMAT MRC
+$xftoxg
+0
+b.prexf
+b.prexg
+$newstack -StandardInput
+InputFile	b.st
+OutputFile	b_preali.mrc
+TransformFile	b.prexg
+ModeToOutput	0
+FloatDensities 2
+BinByFactor	1
+#DistortionField	.idf
+ImagesAreBinned	1
+#GradientFile	b.maggrad
+$if (-e ./savework) ./savework
+
+sha256 90eb08a5c1342bb7938eca7b363679effd8ba0e3c27c93cf1ab0ba8ceed28dcf 3550 golden/angles_dosesym_skip/origcoms/sample.com
+sha256 14e9c2c250884a0e4254f12690c03ff2539dadf46069a5da73d886f5060a03cd 621 golden/angles_dosesym_skip/origcoms/tilt.com
+sha256 7fa7506dab0d75e592aa9fec2c0ae370444490df3cb0514b7f6beedae14e1550 601 golden/angles_dosesym_skip/origcoms/tomopitch.com
+sha256 b0e96ce2416f9182d1ef6b375e2c69536bbbad444e26167e2b9c28f015f2e6e2 1989 golden/angles_dosesym_skip/origcoms/track.com
+sha256 c9498355f21e5f0a2b3242f697bab606f2c884b867057111a04d00fa970e8b6e 570 golden/angles_dosesym_skip/origcoms/xcorr.com
+text 490 golden/angles_dosesym_skip/prenewst.com
+# THIS IS A COMMAND FILE TO PRODUCE A PRE-ALIGNED STACK
+# 
+# The stack will be floated and converted to bytes under the assumption that
+# you will go back to the raw stack to make the final aligned stack
+#
+$setenv IMOD_OUTPUT_FORMAT MRC
+$xftoxg
+0
+b.prexf
+b.prexg
+$newstack -StandardInput
+InputFile	b.st
+OutputFile	b_preali.mrc
+TransformFile	b.prexg
+ModeToOutput	0
+FloatDensities 2
+BinByFactor	1
+#DistortionField	.idf
+ImagesAreBinned	1
+#GradientFile	b.maggrad
+$if (-e ./savework) ./savework
+
+sha256 90eb08a5c1342bb7938eca7b363679effd8ba0e3c27c93cf1ab0ba8ceed28dcf 3550 golden/angles_dosesym_skip/sample.com
+sha256 14e9c2c250884a0e4254f12690c03ff2539dadf46069a5da73d886f5060a03cd 621 golden/angles_dosesym_skip/tilt.com
+sha256 7fa7506dab0d75e592aa9fec2c0ae370444490df3cb0514b7f6beedae14e1550 601 golden/angles_dosesym_skip/tomopitch.com
+sha256 b0e96ce2416f9182d1ef6b375e2c69536bbbad444e26167e2b9c28f015f2e6e2 1989 golden/angles_dosesym_skip/track.com
+sha256 c9498355f21e5f0a2b3242f697bab606f2c884b867057111a04d00fa970e8b6e 570 golden/angles_dosesym_skip/xcorr.com
+text 487 golden/ctf_change.files
+align.com
+b.rawtlt
+b.seed
+b.st
+change.adoc
+ctfcorrection.com
+ctfplotter.com
+dfltcoms/newst.com
+dfltcoms/tilt.com
+dfltcoms/xcorr.com
+eraser.com
+mtffilter.com
+newst.com
+origcoms/align.com
+origcoms/ctfcorrection.com
+origcoms/ctfplotter.com
+origcoms/eraser.com
+origcoms/mtffilter.com
+origcoms/newst.com
+origcoms/prenewst.com
+origcoms/sample.com
+origcoms/tilt.com
+origcoms/tomopitch.com
+origcoms/track.com
+origcoms/xcorr.com
+prenewst.com
+sample.com
+tilt.com
+tomopitch.com
+track.com
+xcorr.com
+
+text 41 golden/ctf_change.out
+ 
+All command files successfully created
+
+text 2 golden/ctf_change.rc
+0
+
+sha256 efb0335f56339f17e9dd8734e69ed381daf7d829b85e84469c1333299c0782d7 2692 golden/ctf_change/align.com
+sha256 c5bfb5739a50a03206f68f281dfea153d70d5174edd3a1416eaef600207c966d 528 golden/ctf_change/b.seed
+sha256 de6a1ea60195b06ac82f90841536b760879ef5865cc157d83cdc1aaf2d20da3a 827 golden/ctf_change/ctfcorrection.com
+sha256 38b4e3b1df8258af9961282d55fcec4038c17c59eb36088557638458a5d967e1 1046 golden/ctf_change/ctfplotter.com
+sha256 12d138ba0b2b5a346ab9caef15a13f6ad8b1fa425d7bb2f4c8b168086f3502cc 674 golden/ctf_change/dfltcoms/newst.com
+sha256 05a64ee12a606eac6105998f7d597e3804d5e36599885f1d9c3fa65d45577962 627 golden/ctf_change/dfltcoms/tilt.com
+sha256 de8c408f6f924c8f01716540210747f92bbbcbb2bfde53808bb054fd604b44a1 526 golden/ctf_change/dfltcoms/xcorr.com
+sha256 f2360bde13774c937179ff93e3138eb48550b017faa081415333895f41150f67 1462 golden/ctf_change/eraser.com
+sha256 9fb15a8b7e521f7470114229bff4d0ac26a8af10f2390a61a272635c2d85875c 872 golden/ctf_change/mtffilter.com
+sha256 abc491c8e10accb9113a43f9b2a6dcbca13c6d2d23b848ef0d932db7469eee6f 693 golden/ctf_change/newst.com
+sha256 efb0335f56339f17e9dd8734e69ed381daf7d829b85e84469c1333299c0782d7 2692 golden/ctf_change/origcoms/align.com
+sha256 de6a1ea60195b06ac82f90841536b760879ef5865cc157d83cdc1aaf2d20da3a 827 golden/ctf_change/origcoms/ctfcorrection.com
+sha256 38b4e3b1df8258af9961282d55fcec4038c17c59eb36088557638458a5d967e1 1046 golden/ctf_change/origcoms/ctfplotter.com
+sha256 f2360bde13774c937179ff93e3138eb48550b017faa081415333895f41150f67 1462 golden/ctf_change/origcoms/eraser.com
+sha256 9fb15a8b7e521f7470114229bff4d0ac26a8af10f2390a61a272635c2d85875c 872 golden/ctf_change/origcoms/mtffilter.com
+sha256 abc491c8e10accb9113a43f9b2a6dcbca13c6d2d23b848ef0d932db7469eee6f 693 golden/ctf_change/origcoms/newst.com
+text 490 golden/ctf_change/origcoms/prenewst.com
+# THIS IS A COMMAND FILE TO PRODUCE A PRE-ALIGNED STACK
+# 
+# The stack will be floated and converted to bytes under the assumption that
+# you will go back to the raw stack to make the final aligned stack
+#
+$setenv IMOD_OUTPUT_FORMAT MRC
+$xftoxg
+0
+b.prexf
+b.prexg
+$newstack -StandardInput
+InputFile	b.st
+OutputFile	b_preali.mrc
+TransformFile	b.prexg
+ModeToOutput	0
+FloatDensities 2
+BinByFactor	1
+#DistortionField	.idf
+ImagesAreBinned	2
+#GradientFile	b.maggrad
+$if (-e ./savework) ./savework
+
+sha256 cfd2ac538bbaac58320cb93ce4f31b3941ad0b29214f675a940a86772b54790c 3624 golden/ctf_change/origcoms/sample.com
+sha256 fe0d3e9d437549937bad4805a1c9b61094f6aea2c760ac756c711e161a53676b 627 golden/ctf_change/origcoms/tilt.com
+sha256 bce529081bf11b7225577fde792d8ceff3acbafe7fd12fb8d7b9949b0afa029f 601 golden/ctf_change/origcoms/tomopitch.com
+sha256 fa1853a1581e4c44b57e38484ba0adf639e27eb1ae565df56b2a2fafae41f5f1 1935 golden/ctf_change/origcoms/track.com
+sha256 ad7c8f183f560cfa6c7666560059a22d2348c5bba45db435b6b065f4c40e9a68 525 golden/ctf_change/origcoms/xcorr.com
+text 490 golden/ctf_change/prenewst.com
+# THIS IS A COMMAND FILE TO PRODUCE A PRE-ALIGNED STACK
+# 
+# The stack will be floated and converted to bytes under the assumption that
+# you will go back to the raw stack to make the final aligned stack
+#
+$setenv IMOD_OUTPUT_FORMAT MRC
+$xftoxg
+0
+b.prexf
+b.prexg
+$newstack -StandardInput
+InputFile	b.st
+OutputFile	b_preali.mrc
+TransformFile	b.prexg
+ModeToOutput	0
+FloatDensities 2
+BinByFactor	1
+#DistortionField	.idf
+ImagesAreBinned	2
+#GradientFile	b.maggrad
+$if (-e ./savework) ./savework
+
+sha256 cfd2ac538bbaac58320cb93ce4f31b3941ad0b29214f675a940a86772b54790c 3624 golden/ctf_change/sample.com
+sha256 fe0d3e9d437549937bad4805a1c9b61094f6aea2c760ac756c711e161a53676b 627 golden/ctf_change/tilt.com
+sha256 bce529081bf11b7225577fde792d8ceff3acbafe7fd12fb8d7b9949b0afa029f 601 golden/ctf_change/tomopitch.com
+sha256 fa1853a1581e4c44b57e38484ba0adf639e27eb1ae565df56b2a2fafae41f5f1 1935 golden/ctf_change/track.com
+sha256 ad7c8f183f560cfa6c7666560059a22d2348c5bba45db435b6b065f4c40e9a68 525 golden/ctf_change/xcorr.com
+text 98 golden/ctf_only.files
+b.rawtlt
+b.st
+ctfcorrection.com
+ctfplotter.com
+origcoms/ctfcorrection.com
+origcoms/ctfplotter.com
+
+text 2 golden/ctf_only.out
+ 
+
+text 2 golden/ctf_only.rc
+0
+
+sha256 2e1966a5be2912fe5e4d0d3086efa2837dcf6c95fd4d4dc47ceebe29798b476a 775 golden/ctf_only/ctfcorrection.com
+sha256 4b0dfc53c0c717dedef21c392766223c5c5f88b7e985b1e7f8bb3a067a727259 901 golden/ctf_only/ctfplotter.com
+sha256 2e1966a5be2912fe5e4d0d3086efa2837dcf6c95fd4d4dc47ceebe29798b476a 775 golden/ctf_only/origcoms/ctfcorrection.com
+sha256 4b0dfc53c0c717dedef21c392766223c5c5f88b7e985b1e7f8bb3a067a727259 901 golden/ctf_only/origcoms/ctfplotter.com
+text 892 golden/dual.files
+aligna.com
+alignb.com
+ba.rawtlt
+ba.seed
+ba.st
+bb.rawtlt
+bb.seed
+bb.st
+ctfcorrectiona.com
+ctfcorrectionb.com
+ctfplottera.com
+ctfplotterb.com
+erasera.com
+eraserb.com
+mtffiltera.com
+mtffilterb.com
+newsta.com
+newstb.com
+origcoms/aligna.com
+origcoms/alignb.com
+origcoms/ctfcorrectiona.com
+origcoms/ctfcorrectionb.com
+origcoms/ctfplottera.com
+origcoms/ctfplotterb.com
+origcoms/erasera.com
+origcoms/eraserb.com
+origcoms/mtffiltera.com
+origcoms/mtffilterb.com
+origcoms/newsta.com
+origcoms/newstb.com
+origcoms/prenewsta.com
+origcoms/prenewstb.com
+origcoms/samplea.com
+origcoms/sampleb.com
+origcoms/tilta.com
+origcoms/tiltb.com
+origcoms/tomopitcha.com
+origcoms/tomopitchb.com
+origcoms/tracka.com
+origcoms/trackb.com
+origcoms/xcorra.com
+origcoms/xcorrb.com
+prenewsta.com
+prenewstb.com
+samplea.com
+sampleb.com
+tilta.com
+tiltb.com
+tomopitcha.com
+tomopitchb.com
+tracka.com
+trackb.com
+xcorra.com
+xcorrb.com
+
+text 43 golden/dual.out
+ 
+ 
+All command files successfully created
+
+text 2 golden/dual.rc
+0
+
+sha256 4f8ac712cd305b7b9b185a4930d9a88115ab42b16945ee7ce94a635dad067919 2713 golden/dual/aligna.com
+sha256 7ea8edc304afdbf8bef3ce7ac19b4cb9c1a3ef4698cedac13e5d88bf4992d5c9 2725 golden/dual/alignb.com
+sha256 c5bfb5739a50a03206f68f281dfea153d70d5174edd3a1416eaef600207c966d 528 golden/dual/ba.seed
+sha256 c5bfb5739a50a03206f68f281dfea153d70d5174edd3a1416eaef600207c966d 528 golden/dual/bb.seed
+sha256 fd159f7ab2eeddee08832152fe37c3d612918bfbf4eaca1bc295c8efcf9a193a 780 golden/dual/ctfcorrectiona.com
+sha256 66c28fa42663defec94bebde917c8dc8e9400127b3d7f5900115b85917dd5429 780 golden/dual/ctfcorrectionb.com
+sha256 c28a612e0a2c4605dc2890b9a29f21eace971a6b1e5c0256a1424a66e5141e69 904 golden/dual/ctfplottera.com
+sha256 fcf752324a4f430cbeb36b2e4f063cf8465b3a823c419ce2c2f57194d900fc83 916 golden/dual/ctfplotterb.com
+sha256 9f38845a3dcf79a1ada2248183d07539095369c35ee09a1b4e11336c26f0ec71 1466 golden/dual/erasera.com
+sha256 e45e325e29b6c83b9afcf5de7d204c1d5575edd52fc3dc4779a1ce2ad8cc8898 1466 golden/dual/eraserb.com
+sha256 53c329b7458673c610d0305275f222e87c67ae43803c39a530525c90f136a052 848 golden/dual/mtffiltera.com
+sha256 86baa9054222e537444be6f059eea7b7aabe8f788f703a2593bee6d42fb9e168 848 golden/dual/mtffilterb.com
+sha256 ab1759a40cc8cb7b81b609e77f1fcd412196b87e36780e3ed9cdb2e2078c5617 677 golden/dual/newsta.com
+sha256 81eb08be3f36c7ff25d2cd479ad681ddcf8146f45b3480adeaee013bae4a3757 675 golden/dual/newstb.com
+sha256 4f8ac712cd305b7b9b185a4930d9a88115ab42b16945ee7ce94a635dad067919 2713 golden/dual/origcoms/aligna.com
+sha256 7ea8edc304afdbf8bef3ce7ac19b4cb9c1a3ef4698cedac13e5d88bf4992d5c9 2725 golden/dual/origcoms/alignb.com
+sha256 fd159f7ab2eeddee08832152fe37c3d612918bfbf4eaca1bc295c8efcf9a193a 780 golden/dual/origcoms/ctfcorrectiona.com
+sha256 66c28fa42663defec94bebde917c8dc8e9400127b3d7f5900115b85917dd5429 780 golden/dual/origcoms/ctfcorrectionb.com
+sha256 c28a612e0a2c4605dc2890b9a29f21eace971a6b1e5c0256a1424a66e5141e69 904 golden/dual/origcoms/ctfplottera.com
+sha256 fcf752324a4f430cbeb36b2e4f063cf8465b3a823c419ce2c2f57194d900fc83 916 golden/dual/origcoms/ctfplotterb.com
+sha256 9f38845a3dcf79a1ada2248183d07539095369c35ee09a1b4e11336c26f0ec71 1466 golden/dual/origcoms/erasera.com
+sha256 e45e325e29b6c83b9afcf5de7d204c1d5575edd52fc3dc4779a1ce2ad8cc8898 1466 golden/dual/origcoms/eraserb.com
+sha256 53c329b7458673c610d0305275f222e87c67ae43803c39a530525c90f136a052 848 golden/dual/origcoms/mtffiltera.com
+sha256 86baa9054222e537444be6f059eea7b7aabe8f788f703a2593bee6d42fb9e168 848 golden/dual/origcoms/mtffilterb.com
+sha256 ab1759a40cc8cb7b81b609e77f1fcd412196b87e36780e3ed9cdb2e2078c5617 677 golden/dual/origcoms/newsta.com
+sha256 81eb08be3f36c7ff25d2cd479ad681ddcf8146f45b3480adeaee013bae4a3757 675 golden/dual/origcoms/newstb.com
+text 496 golden/dual/origcoms/prenewsta.com
+# THIS IS A COMMAND FILE TO PRODUCE A PRE-ALIGNED STACK
+# 
+# The stack will be floated and converted to bytes under the assumption that
+# you will go back to the raw stack to make the final aligned stack
+#
+$setenv IMOD_OUTPUT_FORMAT MRC
+$xftoxg
+0
+ba.prexf
+ba.prexg
+$newstack -StandardInput
+InputFile	ba.st
+OutputFile	ba_preali.mrc
+TransformFile	ba.prexg
+ModeToOutput	0
+FloatDensities 2
+BinByFactor	1
+#DistortionField	.idf
+ImagesAreBinned	1
+#GradientFile	ba.maggrad
+$if (-e ./savework) ./savework
+
+text 496 golden/dual/origcoms/prenewstb.com
+# THIS IS A COMMAND FILE TO PRODUCE A PRE-ALIGNED STACK
+# 
+# The stack will be floated and converted to bytes under the assumption that
+# you will go back to the raw stack to make the final aligned stack
+#
+$setenv IMOD_OUTPUT_FORMAT MRC
+$xftoxg
+0
+bb.prexf
+bb.prexg
+$newstack -StandardInput
+InputFile	bb.st
+OutputFile	bb_preali.mrc
+TransformFile	bb.prexg
+ModeToOutput	0
+FloatDensities 2
+BinByFactor	1
+#DistortionField	.idf
+ImagesAreBinned	1
+#GradientFile	bb.maggrad
+$if (-e ./savework) ./savework
+
+sha256 d8a29100de1fbb8e11a7880c209bf8f70fc119e9c931d7a455064aa5f7e63393 3603 golden/dual/origcoms/samplea.com
+sha256 dafd31b9cbf725e404f1841c26e9789a335aefb624cb9a39b517a14c413ef712 3589 golden/dual/origcoms/sampleb.com
+sha256 dec7c7269ed34fea58f8585db62f650ffb43ff709fff4c0a5804c14648ceb62f 609 golden/dual/origcoms/tilta.com
+sha256 5620252e8997fbd11fc7d44aad27acd9143776444e2fb28eb519c47fe40cb602 623 golden/dual/origcoms/tiltb.com
+sha256 8e60439276b74b820f23663c315cf6f34f339dd5b9929be8ff8a6833e4664dcb 609 golden/dual/origcoms/tomopitcha.com
+sha256 5672f9b1ad133040341dbe2da6529dfe4132f15fb616e1c7fb7208ee708403f2 609 golden/dual/origcoms/tomopitchb.com
+sha256 ace9393a72fd6141d483d875e06cce184388c918dd3147afdb6fa388f62e21fe 1940 golden/dual/origcoms/tracka.com
+sha256 92b59698e72610187b27eb74f82c8a3ce42fa8901be673f79cb8b713bfb078ef 1950 golden/dual/origcoms/trackb.com
+sha256 d460a2abad1ec191934e893b2b369e40b036c3f73aa589d9fd0cd894c80fbc9b 529 golden/dual/origcoms/xcorra.com
+sha256 a82ecb1ec0caac1885d12070198dd4466c5768fc1ca7afa435c28fa103ea8066 539 golden/dual/origcoms/xcorrb.com
+text 496 golden/dual/prenewsta.com
+# THIS IS A COMMAND FILE TO PRODUCE A PRE-ALIGNED STACK
+# 
+# The stack will be floated and converted to bytes under the assumption that
+# you will go back to the raw stack to make the final aligned stack
+#
+$setenv IMOD_OUTPUT_FORMAT MRC
+$xftoxg
+0
+ba.prexf
+ba.prexg
+$newstack -StandardInput
+InputFile	ba.st
+OutputFile	ba_preali.mrc
+TransformFile	ba.prexg
+ModeToOutput	0
+FloatDensities 2
+BinByFactor	1
+#DistortionField	.idf
+ImagesAreBinned	1
+#GradientFile	ba.maggrad
+$if (-e ./savework) ./savework
+
+text 496 golden/dual/prenewstb.com
+# THIS IS A COMMAND FILE TO PRODUCE A PRE-ALIGNED STACK
+# 
+# The stack will be floated and converted to bytes under the assumption that
+# you will go back to the raw stack to make the final aligned stack
+#
+$setenv IMOD_OUTPUT_FORMAT MRC
+$xftoxg
+0
+bb.prexf
+bb.prexg
+$newstack -StandardInput
+InputFile	bb.st
+OutputFile	bb_preali.mrc
+TransformFile	bb.prexg
+ModeToOutput	0
+FloatDensities 2
+BinByFactor	1
+#DistortionField	.idf
+ImagesAreBinned	1
+#GradientFile	bb.maggrad
+$if (-e ./savework) ./savework
+
+sha256 d8a29100de1fbb8e11a7880c209bf8f70fc119e9c931d7a455064aa5f7e63393 3603 golden/dual/samplea.com
+sha256 dafd31b9cbf725e404f1841c26e9789a335aefb624cb9a39b517a14c413ef712 3589 golden/dual/sampleb.com
+sha256 dec7c7269ed34fea58f8585db62f650ffb43ff709fff4c0a5804c14648ceb62f 609 golden/dual/tilta.com
+sha256 5620252e8997fbd11fc7d44aad27acd9143776444e2fb28eb519c47fe40cb602 623 golden/dual/tiltb.com
+sha256 8e60439276b74b820f23663c315cf6f34f339dd5b9929be8ff8a6833e4664dcb 609 golden/dual/tomopitcha.com
+sha256 5672f9b1ad133040341dbe2da6529dfe4132f15fb616e1c7fb7208ee708403f2 609 golden/dual/tomopitchb.com
+sha256 ace9393a72fd6141d483d875e06cce184388c918dd3147afdb6fa388f62e21fe 1940 golden/dual/tracka.com
+sha256 92b59698e72610187b27eb74f82c8a3ce42fa8901be673f79cb8b713bfb078ef 1950 golden/dual/trackb.com
+sha256 d460a2abad1ec191934e893b2b369e40b036c3f73aa589d9fd0cd894c80fbc9b 529 golden/dual/xcorra.com
+sha256 a82ecb1ec0caac1885d12070198dd4466c5768fc1ca7afa435c28fa103ea8066 539 golden/dual/xcorrb.com
+text 892 golden/dual_no_b.files
+aligna.com
+alignb.com
+ba.rawtlt
+ba.seed
+ba.st
+bb.seed
+ctfcorrectiona.com
+ctfcorrectionb.com
+ctfplottera.com
+ctfplotterb.com
+erasera.com
+eraserb.com
+laterbsetup.com
+mtffiltera.com
+mtffilterb.com
+newsta.com
+newstb.com
+origcoms/aligna.com
+origcoms/alignb.com
+origcoms/ctfcorrectiona.com
+origcoms/ctfcorrectionb.com
+origcoms/ctfplottera.com
+origcoms/ctfplotterb.com
+origcoms/erasera.com
+origcoms/eraserb.com
+origcoms/mtffiltera.com
+origcoms/mtffilterb.com
+origcoms/newsta.com
+origcoms/newstb.com
+origcoms/prenewsta.com
+origcoms/prenewstb.com
+origcoms/samplea.com
+origcoms/sampleb.com
+origcoms/tilta.com
+origcoms/tiltb.com
+origcoms/tomopitcha.com
+origcoms/tomopitchb.com
+origcoms/tracka.com
+origcoms/trackb.com
+origcoms/xcorra.com
+origcoms/xcorrb.com
+prenewsta.com
+prenewstb.com
+samplea.com
+sampleb.com
+tilta.com
+tiltb.com
+tomopitcha.com
+tomopitchb.com
+tracka.com
+trackb.com
+xcorra.com
+xcorrb.com
+
+text 41 golden/dual_no_b.out
+ 
+All command files successfully created
+
+text 2 golden/dual_no_b.rc
+0
+
+sha256 4f8ac712cd305b7b9b185a4930d9a88115ab42b16945ee7ce94a635dad067919 2713 golden/dual_no_b/aligna.com
+sha256 bdd5ef35e7d0df0139a43c03e49e0a34035ba464d6d116da9bfebfb5d30e1c7b 2713 golden/dual_no_b/alignb.com
+sha256 c5bfb5739a50a03206f68f281dfea153d70d5174edd3a1416eaef600207c966d 528 golden/dual_no_b/ba.seed
+sha256 c5bfb5739a50a03206f68f281dfea153d70d5174edd3a1416eaef600207c966d 528 golden/dual_no_b/bb.seed
+sha256 fd159f7ab2eeddee08832152fe37c3d612918bfbf4eaca1bc295c8efcf9a193a 780 golden/dual_no_b/ctfcorrectiona.com
+sha256 66c28fa42663defec94bebde917c8dc8e9400127b3d7f5900115b85917dd5429 780 golden/dual_no_b/ctfcorrectionb.com
+sha256 c28a612e0a2c4605dc2890b9a29f21eace971a6b1e5c0256a1424a66e5141e69 904 golden/dual_no_b/ctfplottera.com
+sha256 6a7d6ab2ef9cd3de8952596542979e9992cff4380d5301d719d663f9c907dbc1 904 golden/dual_no_b/ctfplotterb.com
+sha256 9f38845a3dcf79a1ada2248183d07539095369c35ee09a1b4e11336c26f0ec71 1466 golden/dual_no_b/erasera.com
+sha256 e45e325e29b6c83b9afcf5de7d204c1d5575edd52fc3dc4779a1ce2ad8cc8898 1466 golden/dual_no_b/eraserb.com
+text 30 golden/dual_no_b/laterbsetup.com
+$extracttilts bb.st bb.rawtlt
+
+sha256 53c329b7458673c610d0305275f222e87c67ae43803c39a530525c90f136a052 848 golden/dual_no_b/mtffiltera.com
+sha256 86baa9054222e537444be6f059eea7b7aabe8f788f703a2593bee6d42fb9e168 848 golden/dual_no_b/mtffilterb.com
+sha256 ab1759a40cc8cb7b81b609e77f1fcd412196b87e36780e3ed9cdb2e2078c5617 677 golden/dual_no_b/newsta.com
+sha256 10d2ce064a0e4f02431ff3500b01ea6104ff82abd38803d5c9c9d9ee6b991a1f 663 golden/dual_no_b/newstb.com
+sha256 4f8ac712cd305b7b9b185a4930d9a88115ab42b16945ee7ce94a635dad067919 2713 golden/dual_no_b/origcoms/aligna.com
+sha256 bdd5ef35e7d0df0139a43c03e49e0a34035ba464d6d116da9bfebfb5d30e1c7b 2713 golden/dual_no_b/origcoms/alignb.com
+sha256 fd159f7ab2eeddee08832152fe37c3d612918bfbf4eaca1bc295c8efcf9a193a 780 golden/dual_no_b/origcoms/ctfcorrectiona.com
+sha256 66c28fa42663defec94bebde917c8dc8e9400127b3d7f5900115b85917dd5429 780 golden/dual_no_b/origcoms/ctfcorrectionb.com
+sha256 c28a612e0a2c4605dc2890b9a29f21eace971a6b1e5c0256a1424a66e5141e69 904 golden/dual_no_b/origcoms/ctfplottera.com
+sha256 6a7d6ab2ef9cd3de8952596542979e9992cff4380d5301d719d663f9c907dbc1 904 golden/dual_no_b/origcoms/ctfplotterb.com
+sha256 9f38845a3dcf79a1ada2248183d07539095369c35ee09a1b4e11336c26f0ec71 1466 golden/dual_no_b/origcoms/erasera.com
+sha256 e45e325e29b6c83b9afcf5de7d204c1d5575edd52fc3dc4779a1ce2ad8cc8898 1466 golden/dual_no_b/origcoms/eraserb.com
+sha256 53c329b7458673c610d0305275f222e87c67ae43803c39a530525c90f136a052 848 golden/dual_no_b/origcoms/mtffiltera.com
+sha256 86baa9054222e537444be6f059eea7b7aabe8f788f703a2593bee6d42fb9e168 848 golden/dual_no_b/origcoms/mtffilterb.com
+sha256 ab1759a40cc8cb7b81b609e77f1fcd412196b87e36780e3ed9cdb2e2078c5617 677 golden/dual_no_b/origcoms/newsta.com
+sha256 10d2ce064a0e4f02431ff3500b01ea6104ff82abd38803d5c9c9d9ee6b991a1f 663 golden/dual_no_b/origcoms/newstb.com
+text 496 golden/dual_no_b/origcoms/prenewsta.com
+# THIS IS A COMMAND FILE TO PRODUCE A PRE-ALIGNED STACK
+# 
+# The stack will be floated and converted to bytes under the assumption that
+# you will go back to the raw stack to make the final aligned stack
+#
+$setenv IMOD_OUTPUT_FORMAT MRC
+$xftoxg
+0
+ba.prexf
+ba.prexg
+$newstack -StandardInput
+InputFile	ba.st
+OutputFile	ba_preali.mrc
+TransformFile	ba.prexg
+ModeToOutput	0
+FloatDensities 2
+BinByFactor	1
+#DistortionField	.idf
+ImagesAreBinned	1
+#GradientFile	ba.maggrad
+$if (-e ./savework) ./savework
+
+text 496 golden/dual_no_b/origcoms/prenewstb.com
+# THIS IS A COMMAND FILE TO PRODUCE A PRE-ALIGNED STACK
+# 
+# The stack will be floated and converted to bytes under the assumption that
+# you will go back to the raw stack to make the final aligned stack
+#
+$setenv IMOD_OUTPUT_FORMAT MRC
+$xftoxg
+0
+bb.prexf
+bb.prexg
+$newstack -StandardInput
+InputFile	bb.st
+OutputFile	bb_preali.mrc
+TransformFile	bb.prexg
+ModeToOutput	0
+FloatDensities 2
+BinByFactor	1
+#DistortionField	.idf
+ImagesAreBinned	1
+#GradientFile	bb.maggrad
+$if (-e ./savework) ./savework
+
+sha256 d8a29100de1fbb8e11a7880c209bf8f70fc119e9c931d7a455064aa5f7e63393 3603 golden/dual_no_b/origcoms/samplea.com
+sha256 657f937cb95f02915a53105bef0176358b3fbd69a47bbbf649d289ba8c9643e1 3555 golden/dual_no_b/origcoms/sampleb.com
+sha256 dec7c7269ed34fea58f8585db62f650ffb43ff709fff4c0a5804c14648ceb62f 609 golden/dual_no_b/origcoms/tilta.com
+sha256 e92af20b89c845803a172dcb9391611ac6fdb28ed568ea532c6471a52b9bd56f 609 golden/dual_no_b/origcoms/tiltb.com
+sha256 8e60439276b74b820f23663c315cf6f34f339dd5b9929be8ff8a6833e4664dcb 609 golden/dual_no_b/origcoms/tomopitcha.com
+sha256 5672f9b1ad133040341dbe2da6529dfe4132f15fb616e1c7fb7208ee708403f2 609 golden/dual_no_b/origcoms/tomopitchb.com
+sha256 ace9393a72fd6141d483d875e06cce184388c918dd3147afdb6fa388f62e21fe 1940 golden/dual_no_b/origcoms/tracka.com
+sha256 a6b784776028bd0e112e79ab929d4358894b3754095406980ce5ed92278c5852 1940 golden/dual_no_b/origcoms/trackb.com
+sha256 d460a2abad1ec191934e893b2b369e40b036c3f73aa589d9fd0cd894c80fbc9b 529 golden/dual_no_b/origcoms/xcorra.com
+sha256 e293c9e04e907f5770e1e10a143c5c4341cd9d4795dbeb8ccd9d80b152825dc8 529 golden/dual_no_b/origcoms/xcorrb.com
+text 496 golden/dual_no_b/prenewsta.com
+# THIS IS A COMMAND FILE TO PRODUCE A PRE-ALIGNED STACK
+# 
+# The stack will be floated and converted to bytes under the assumption that
+# you will go back to the raw stack to make the final aligned stack
+#
+$setenv IMOD_OUTPUT_FORMAT MRC
+$xftoxg
+0
+ba.prexf
+ba.prexg
+$newstack -StandardInput
+InputFile	ba.st
+OutputFile	ba_preali.mrc
+TransformFile	ba.prexg
+ModeToOutput	0
+FloatDensities 2
+BinByFactor	1
+#DistortionField	.idf
+ImagesAreBinned	1
+#GradientFile	ba.maggrad
+$if (-e ./savework) ./savework
+
+text 496 golden/dual_no_b/prenewstb.com
+# THIS IS A COMMAND FILE TO PRODUCE A PRE-ALIGNED STACK
+# 
+# The stack will be floated and converted to bytes under the assumption that
+# you will go back to the raw stack to make the final aligned stack
+#
+$setenv IMOD_OUTPUT_FORMAT MRC
+$xftoxg
+0
+bb.prexf
+bb.prexg
+$newstack -StandardInput
+InputFile	bb.st
+OutputFile	bb_preali.mrc
+TransformFile	bb.prexg
+ModeToOutput	0
+FloatDensities 2
+BinByFactor	1
+#DistortionField	.idf
+ImagesAreBinned	1
+#GradientFile	bb.maggrad
+$if (-e ./savework) ./savework
+
+sha256 d8a29100de1fbb8e11a7880c209bf8f70fc119e9c931d7a455064aa5f7e63393 3603 golden/dual_no_b/samplea.com
+sha256 657f937cb95f02915a53105bef0176358b3fbd69a47bbbf649d289ba8c9643e1 3555 golden/dual_no_b/sampleb.com
+sha256 dec7c7269ed34fea58f8585db62f650ffb43ff709fff4c0a5804c14648ceb62f 609 golden/dual_no_b/tilta.com
+sha256 e92af20b89c845803a172dcb9391611ac6fdb28ed568ea532c6471a52b9bd56f 609 golden/dual_no_b/tiltb.com
+sha256 8e60439276b74b820f23663c315cf6f34f339dd5b9929be8ff8a6833e4664dcb 609 golden/dual_no_b/tomopitcha.com
+sha256 5672f9b1ad133040341dbe2da6529dfe4132f15fb616e1c7fb7208ee708403f2 609 golden/dual_no_b/tomopitchb.com
+sha256 ace9393a72fd6141d483d875e06cce184388c918dd3147afdb6fa388f62e21fe 1940 golden/dual_no_b/tracka.com
+sha256 a6b784776028bd0e112e79ab929d4358894b3754095406980ce5ed92278c5852 1940 golden/dual_no_b/trackb.com
+sha256 d460a2abad1ec191934e893b2b369e40b036c3f73aa589d9fd0cd894c80fbc9b 529 golden/dual_no_b/xcorra.com
+sha256 e293c9e04e907f5770e1e10a143c5c4341cd9d4795dbeb8ccd9d80b152825dc8 529 golden/dual_no_b/xcorrb.com
+text 419 golden/env_style.files
+align.pcm
+b.rawtlt
+b.seed
+b.st
+ctfcorrection.pcm
+ctfplotter.pcm
+eraser.pcm
+mtffilter.pcm
+newst.pcm
+origcoms/align.pcm
+origcoms/ctfcorrection.pcm
+origcoms/ctfplotter.pcm
+origcoms/eraser.pcm
+origcoms/mtffilter.pcm
+origcoms/newst.pcm
+origcoms/prenewst.pcm
+origcoms/sample.pcm
+origcoms/tilt.pcm
+origcoms/tomopitch.pcm
+origcoms/track.pcm
+origcoms/xcorr.pcm
+prenewst.pcm
+sample.pcm
+tilt.pcm
+tomopitch.pcm
+track.pcm
+xcorr.pcm
+
+text 41 golden/env_style.out
+ 
+All command files successfully created
+
+text 2 golden/env_style.rc
+0
+
+sha256 1d8fa9d754b7eb4f11e38bcdd6937772246d46c98431f196355b6b4d3f2257bc 2657 golden/env_style/align.pcm
+sha256 c5bfb5739a50a03206f68f281dfea153d70d5174edd3a1416eaef600207c966d 528 golden/env_style/b.seed
+sha256 7f21c838332be348bb700e3f46283cb45f85a88ba3f8eaa888cae03ea883042f 736 golden/env_style/ctfcorrection.pcm
+sha256 6c1281ee30f0c2bc02225d5a185bf282af92cc3e8f15c9d47f001ef47d5c7bc0 870 golden/env_style/ctfplotter.pcm
+sha256 b2dd0522e49f1f93431c98c6a6669c7e981a55ff5d95b6538f7ca215b7e2f650 1431 golden/env_style/eraser.pcm
+sha256 f0d294de21caf2a3f77d6cedf6083b5e6e76b533d1645cb7475cb1d9637d55fe 803 golden/env_style/mtffilter.pcm
+sha256 bf13869a128461ed917fa7b3ef157c6f088d0cf64e77948d3299e259adfa82cb 638 golden/env_style/newst.pcm
+sha256 1d8fa9d754b7eb4f11e38bcdd6937772246d46c98431f196355b6b4d3f2257bc 2657 golden/env_style/origcoms/align.pcm
+sha256 7f21c838332be348bb700e3f46283cb45f85a88ba3f8eaa888cae03ea883042f 736 golden/env_style/origcoms/ctfcorrection.pcm
+sha256 6c1281ee30f0c2bc02225d5a185bf282af92cc3e8f15c9d47f001ef47d5c7bc0 870 golden/env_style/origcoms/ctfplotter.pcm
+sha256 b2dd0522e49f1f93431c98c6a6669c7e981a55ff5d95b6538f7ca215b7e2f650 1431 golden/env_style/origcoms/eraser.pcm
+sha256 f0d294de21caf2a3f77d6cedf6083b5e6e76b533d1645cb7475cb1d9637d55fe 803 golden/env_style/origcoms/mtffilter.pcm
+sha256 bf13869a128461ed917fa7b3ef157c6f088d0cf64e77948d3299e259adfa82cb 638 golden/env_style/origcoms/newst.pcm
+text 455 golden/env_style/origcoms/prenewst.pcm
+# THIS IS A COMMAND FILE TO PRODUCE A PRE-ALIGNED STACK
+# 
+# The stack will be floated and converted to bytes under the assumption that
+# you will go back to the raw stack to make the final aligned stack
+#
+$xftoxg
+0
+b.prexf
+b.prexg
+$newstack -StandardInput
+InputFile	b.st
+OutputFile	b.preali
+TransformFile	b.prexg
+ModeToOutput	0
+FloatDensities 2
+BinByFactor	1
+#DistortionField	.idf
+ImagesAreBinned	1
+#GradientFile	b.maggrad
+$if (-e ./savework) ./savework
+
+sha256 ea2eedb96dd1a14394b8873f9559f4e0c1f86e9a342cf0780f96311a92a62a5c 3380 golden/env_style/origcoms/sample.pcm
+sha256 4f08162f275fb687b10a7a3cf4085e4bf0e2a9cf4e51104a993456ae73fd1ced 566 golden/env_style/origcoms/tilt.pcm
+sha256 d6856c109adce101a5b85c712251fd2a611ac9c4fad0abce1fff0f5add3b99a5 570 golden/env_style/origcoms/tomopitch.pcm
+sha256 a1d127fcdccd3ae18f75039c0b5552cb6e7031703a9bbcac2954bf4a0c80ca1a 1900 golden/env_style/origcoms/track.pcm
+text 495 golden/env_style/origcoms/xcorr.pcm
+# THIS IS A COMMAND FILE TO RUN TILTXCORR AND DETERMINE CROSS-CORRELATION
+# ALIGNMENT OF A TILT SERIES
+#
+#
+# TO RUN TILTXCORR
+#
+####CreatedVersion####5.2.17
+#
+# Add BordersInXandY to use a centered region smaller than the default
+# or XMinAndMax and YMinAndMax  to specify a non-centered region
+#
+$tiltxcorr -StandardInput
+InputFile	b.st
+OutputFile	b.prexf
+PixelSize	1.0
+TiltFile	b.rawtlt
+RotationAngle	-85.3
+FilterSigma1	0.03
+FilterRadius2	0.25
+FilterSigma2	0.05
+$if (-e ./savework) ./savework
+
+text 455 golden/env_style/prenewst.pcm
+# THIS IS A COMMAND FILE TO PRODUCE A PRE-ALIGNED STACK
+# 
+# The stack will be floated and converted to bytes under the assumption that
+# you will go back to the raw stack to make the final aligned stack
+#
+$xftoxg
+0
+b.prexf
+b.prexg
+$newstack -StandardInput
+InputFile	b.st
+OutputFile	b.preali
+TransformFile	b.prexg
+ModeToOutput	0
+FloatDensities 2
+BinByFactor	1
+#DistortionField	.idf
+ImagesAreBinned	1
+#GradientFile	b.maggrad
+$if (-e ./savework) ./savework
+
+sha256 ea2eedb96dd1a14394b8873f9559f4e0c1f86e9a342cf0780f96311a92a62a5c 3380 golden/env_style/sample.pcm
+sha256 4f08162f275fb687b10a7a3cf4085e4bf0e2a9cf4e51104a993456ae73fd1ced 566 golden/env_style/tilt.pcm
+sha256 d6856c109adce101a5b85c712251fd2a611ac9c4fad0abce1fff0f5add3b99a5 570 golden/env_style/tomopitch.pcm
+sha256 a1d127fcdccd3ae18f75039c0b5552cb6e7031703a9bbcac2954bf4a0c80ca1a 1900 golden/env_style/track.pcm
+text 495 golden/env_style/xcorr.pcm
+# THIS IS A COMMAND FILE TO RUN TILTXCORR AND DETERMINE CROSS-CORRELATION
+# ALIGNMENT OF A TILT SERIES
+#
+#
+# TO RUN TILTXCORR
+#
+####CreatedVersion####5.2.17
+#
+# Add BordersInXandY to use a centered region smaller than the default
+# or XMinAndMax and YMinAndMax  to specify a non-centered region
+#
+$tiltxcorr -StandardInput
+InputFile	b.st
+OutputFile	b.prexf
+PixelSize	1.0
+TiltFile	b.rawtlt
+RotationAngle	-85.3
+FilterSigma1	0.03
+FilterRadius2	0.25
+FilterSigma2	0.05
+$if (-e ./savework) ./savework
+
+text 5 golden/err_no_pixel.files
+b.st
+
+text 64 golden/err_no_pixel.out
+ERROR: copytomocoms - You must enter a pixel size in nanometers
+
+text 2 golden/err_no_pixel.rc
+1
+
+text 0 golden/err_no_size.files
+
+text 77 golden/err_no_size.out
+ERROR: copytomocoms - Stack is not present; you must enter -xsize and -ysize
+
+text 2 golden/err_no_size.rc
+1
+
+text 14 golden/err_tilt_bad.files
+b.rawtlt
+b.st
+
+text 93 golden/err_tilt_bad.out
+ 
+ERROR: copytomocoms - Converting comparam.tilt.tilt.THICKNESS = 300 to float from b.rawtlt
+
+text 2 golden/err_tilt_bad.rc
+1
+
+text 5 golden/err_twodir_dosesym.files
+b.st
+
+text 65 golden/err_twodir_dosesym.out
+ERROR: copytomocoms - You cannot enter both -twodir and -dosesym
+
+text 2 golden/err_twodir_dosesym.rc
+1
+
+text 410 golden/firstinc_inverted.files
+align.com
+b.seed
+b.st
+ctfcorrection.com
+ctfplotter.com
+eraser.com
+mtffilter.com
+newst.com
+origcoms/align.com
+origcoms/ctfcorrection.com
+origcoms/ctfplotter.com
+origcoms/eraser.com
+origcoms/mtffilter.com
+origcoms/newst.com
+origcoms/prenewst.com
+origcoms/sample.com
+origcoms/tilt.com
+origcoms/tomopitch.com
+origcoms/track.com
+origcoms/xcorr.com
+prenewst.com
+sample.com
+tilt.com
+tomopitch.com
+track.com
+xcorr.com
+
+text 39 golden/firstinc_inverted.out
+All command files successfully created
+
+text 2 golden/firstinc_inverted.rc
+0
+
+sha256 cd04990b0db7915ac128bef11aa32d067a30ddfd075f0770dc12474c28a2efd3 2713 golden/firstinc_inverted/align.com
+sha256 c5bfb5739a50a03206f68f281dfea153d70d5174edd3a1416eaef600207c966d 528 golden/firstinc_inverted/b.seed
+sha256 2e1966a5be2912fe5e4d0d3086efa2837dcf6c95fd4d4dc47ceebe29798b476a 775 golden/firstinc_inverted/ctfcorrection.com
+sha256 4b0dfc53c0c717dedef21c392766223c5c5f88b7e985b1e7f8bb3a067a727259 901 golden/firstinc_inverted/ctfplotter.com
+sha256 f2360bde13774c937179ff93e3138eb48550b017faa081415333895f41150f67 1462 golden/firstinc_inverted/eraser.com
+sha256 20529add21bfbe827139694747d4c5dd29a6c031d3de647c059373321355ba97 843 golden/firstinc_inverted/mtffilter.com
+sha256 6847f9cc82f39aeb060b2bbe915c2493211fbb11f66ef9b02367dbee7fc7779a 673 golden/firstinc_inverted/newst.com
+sha256 cd04990b0db7915ac128bef11aa32d067a30ddfd075f0770dc12474c28a2efd3 2713 golden/firstinc_inverted/origcoms/align.com
+sha256 2e1966a5be2912fe5e4d0d3086efa2837dcf6c95fd4d4dc47ceebe29798b476a 775 golden/firstinc_inverted/origcoms/ctfcorrection.com
+sha256 4b0dfc53c0c717dedef21c392766223c5c5f88b7e985b1e7f8bb3a067a727259 901 golden/firstinc_inverted/origcoms/ctfplotter.com
+sha256 f2360bde13774c937179ff93e3138eb48550b017faa081415333895f41150f67 1462 golden/firstinc_inverted/origcoms/eraser.com
+sha256 20529add21bfbe827139694747d4c5dd29a6c031d3de647c059373321355ba97 843 golden/firstinc_inverted/origcoms/mtffilter.com
+sha256 6847f9cc82f39aeb060b2bbe915c2493211fbb11f66ef9b02367dbee7fc7779a 673 golden/firstinc_inverted/origcoms/newst.com
+text 490 golden/firstinc_inverted/origcoms/prenewst.com
+# THIS IS A COMMAND FILE TO PRODUCE A PRE-ALIGNED STACK
+# 
+# The stack will be floated and converted to bytes under the assumption that
+# you will go back to the raw stack to make the final aligned stack
+#
+$setenv IMOD_OUTPUT_FORMAT MRC
+$xftoxg
+0
+b.prexf
+b.prexg
+$newstack -StandardInput
+InputFile	b.st
+OutputFile	b_preali.mrc
+TransformFile	b.prexg
+ModeToOutput	0
+FloatDensities 2
+BinByFactor	1
+#DistortionField	.idf
+ImagesAreBinned	1
+#GradientFile	b.maggrad
+$if (-e ./savework) ./savework
+
+sha256 54e3b2f0b456afe779852f4467559be1168a11b283ab1ad5e96648902720d30c 3564 golden/firstinc_inverted/origcoms/sample.com
+sha256 d22d2c2e48f549f024acf05056672d3426d53339d305cd826303bd723803e27a 605 golden/firstinc_inverted/origcoms/tilt.com
+sha256 bce529081bf11b7225577fde792d8ceff3acbafe7fd12fb8d7b9949b0afa029f 601 golden/firstinc_inverted/origcoms/tomopitch.com
+sha256 3b737593447a98ffc7559990cae60b4f5f0b069a63a33540fd0edaf2e72d5622 1956 golden/firstinc_inverted/origcoms/track.com
+sha256 42d39edd01ef0b6a4d8771ba2c6c5a1cd7386a7152ab34c83d23fde1d7ce39f9 547 golden/firstinc_inverted/origcoms/xcorr.com
+text 490 golden/firstinc_inverted/prenewst.com
+# THIS IS A COMMAND FILE TO PRODUCE A PRE-ALIGNED STACK
+# 
+# The stack will be floated and converted to bytes under the assumption that
+# you will go back to the raw stack to make the final aligned stack
+#
+$setenv IMOD_OUTPUT_FORMAT MRC
+$xftoxg
+0
+b.prexf
+b.prexg
+$newstack -StandardInput
+InputFile	b.st
+OutputFile	b_preali.mrc
+TransformFile	b.prexg
+ModeToOutput	0
+FloatDensities 2
+BinByFactor	1
+#DistortionField	.idf
+ImagesAreBinned	1
+#GradientFile	b.maggrad
+$if (-e ./savework) ./savework
+
+sha256 54e3b2f0b456afe779852f4467559be1168a11b283ab1ad5e96648902720d30c 3564 golden/firstinc_inverted/sample.com
+sha256 d22d2c2e48f549f024acf05056672d3426d53339d305cd826303bd723803e27a 605 golden/firstinc_inverted/tilt.com
+sha256 bce529081bf11b7225577fde792d8ceff3acbafe7fd12fb8d7b9949b0afa029f 601 golden/firstinc_inverted/tomopitch.com
+sha256 3b737593447a98ffc7559990cae60b4f5f0b069a63a33540fd0edaf2e72d5622 1956 golden/firstinc_inverted/track.com
+sha256 42d39edd01ef0b6a4d8771ba2c6c5a1cd7386a7152ab34c83d23fde1d7ce39f9 547 golden/firstinc_inverted/xcorr.com
+text 410 golden/firstinc_twodir.files
+align.com
+b.seed
+b.st
+ctfcorrection.com
+ctfplotter.com
+eraser.com
+mtffilter.com
+newst.com
+origcoms/align.com
+origcoms/ctfcorrection.com
+origcoms/ctfplotter.com
+origcoms/eraser.com
+origcoms/mtffilter.com
+origcoms/newst.com
+origcoms/prenewst.com
+origcoms/sample.com
+origcoms/tilt.com
+origcoms/tomopitch.com
+origcoms/track.com
+origcoms/xcorr.com
+prenewst.com
+sample.com
+tilt.com
+tomopitch.com
+track.com
+xcorr.com
+
+text 39 golden/firstinc_twodir.out
+All command files successfully created
+
+text 2 golden/firstinc_twodir.rc
+0
+
+sha256 656fe5da4787591b3b028d8c2eb52df5de267f00a811a5e97cb7413dfe453e11 2732 golden/firstinc_twodir/align.com
+sha256 c5bfb5739a50a03206f68f281dfea153d70d5174edd3a1416eaef600207c966d 528 golden/firstinc_twodir/b.seed
+sha256 2e1966a5be2912fe5e4d0d3086efa2837dcf6c95fd4d4dc47ceebe29798b476a 775 golden/firstinc_twodir/ctfcorrection.com
+sha256 2a6a885ba4ec26838165d89bab3a4761a5a3d565b693f6c6ce24aa4a6888bb9e 925 golden/firstinc_twodir/ctfplotter.com
+sha256 f2360bde13774c937179ff93e3138eb48550b017faa081415333895f41150f67 1462 golden/firstinc_twodir/eraser.com
+sha256 f8208b5774bee2055c7f0b7e6d3af9af2b23fe1f507413f9b283604f7a6837f8 891 golden/firstinc_twodir/mtffilter.com
+sha256 6847f9cc82f39aeb060b2bbe915c2493211fbb11f66ef9b02367dbee7fc7779a 673 golden/firstinc_twodir/newst.com
+sha256 656fe5da4787591b3b028d8c2eb52df5de267f00a811a5e97cb7413dfe453e11 2732 golden/firstinc_twodir/origcoms/align.com
+sha256 2e1966a5be2912fe5e4d0d3086efa2837dcf6c95fd4d4dc47ceebe29798b476a 775 golden/firstinc_twodir/origcoms/ctfcorrection.com
+sha256 2a6a885ba4ec26838165d89bab3a4761a5a3d565b693f6c6ce24aa4a6888bb9e 925 golden/firstinc_twodir/origcoms/ctfplotter.com
+sha256 f2360bde13774c937179ff93e3138eb48550b017faa081415333895f41150f67 1462 golden/firstinc_twodir/origcoms/eraser.com
+sha256 f8208b5774bee2055c7f0b7e6d3af9af2b23fe1f507413f9b283604f7a6837f8 891 golden/firstinc_twodir/origcoms/mtffilter.com
+sha256 6847f9cc82f39aeb060b2bbe915c2493211fbb11f66ef9b02367dbee7fc7779a 673 golden/firstinc_twodir/origcoms/newst.com
+text 490 golden/firstinc_twodir/origcoms/prenewst.com
+# THIS IS A COMMAND FILE TO PRODUCE A PRE-ALIGNED STACK
+# 
+# The stack will be floated and converted to bytes under the assumption that
+# you will go back to the raw stack to make the final aligned stack
+#
+$setenv IMOD_OUTPUT_FORMAT MRC
+$xftoxg
+0
+b.prexf
+b.prexg
+$newstack -StandardInput
+InputFile	b.st
+OutputFile	b_preali.mrc
+TransformFile	b.prexg
+ModeToOutput	0
+FloatDensities 2
+BinByFactor	1
+#DistortionField	.idf
+ImagesAreBinned	1
+#GradientFile	b.maggrad
+$if (-e ./savework) ./savework
+
+sha256 54e3b2f0b456afe779852f4467559be1168a11b283ab1ad5e96648902720d30c 3564 golden/firstinc_twodir/origcoms/sample.com
+sha256 d22d2c2e48f549f024acf05056672d3426d53339d305cd826303bd723803e27a 605 golden/firstinc_twodir/origcoms/tilt.com
+sha256 bce529081bf11b7225577fde792d8ceff3acbafe7fd12fb8d7b9949b0afa029f 601 golden/firstinc_twodir/origcoms/tomopitch.com
+sha256 b026c9d7c9a59176beeb0a4623e636d2affb29ae51d1b8088ed7d8ca2633baa4 1975 golden/firstinc_twodir/origcoms/track.com
+sha256 06223a9a94e592bf96c05d7438e9114d57cf6b68bfa4b00bb1bdca65be292c1c 570 golden/firstinc_twodir/origcoms/xcorr.com
+text 490 golden/firstinc_twodir/prenewst.com
+# THIS IS A COMMAND FILE TO PRODUCE A PRE-ALIGNED STACK
+# 
+# The stack will be floated and converted to bytes under the assumption that
+# you will go back to the raw stack to make the final aligned stack
+#
+$setenv IMOD_OUTPUT_FORMAT MRC
+$xftoxg
+0
+b.prexf
+b.prexg
+$newstack -StandardInput
+InputFile	b.st
+OutputFile	b_preali.mrc
+TransformFile	b.prexg
+ModeToOutput	0
+FloatDensities 2
+BinByFactor	1
+#DistortionField	.idf
+ImagesAreBinned	1
+#GradientFile	b.maggrad
+$if (-e ./savework) ./savework
+
+sha256 54e3b2f0b456afe779852f4467559be1168a11b283ab1ad5e96648902720d30c 3564 golden/firstinc_twodir/sample.com
+sha256 d22d2c2e48f549f024acf05056672d3426d53339d305cd826303bd723803e27a 605 golden/firstinc_twodir/tilt.com
+sha256 bce529081bf11b7225577fde792d8ceff3acbafe7fd12fb8d7b9949b0afa029f 601 golden/firstinc_twodir/tomopitch.com
+sha256 b026c9d7c9a59176beeb0a4623e636d2affb29ae51d1b8088ed7d8ca2633baa4 1975 golden/firstinc_twodir/track.com
+sha256 06223a9a94e592bf96c05d7438e9114d57cf6b68bfa4b00bb1bdca65be292c1c 570 golden/firstinc_twodir/xcorr.com
+text 405 golden/no_stack.files
+align.com
+b.seed
+ctfcorrection.com
+ctfplotter.com
+eraser.com
+mtffilter.com
+newst.com
+origcoms/align.com
+origcoms/ctfcorrection.com
+origcoms/ctfplotter.com
+origcoms/eraser.com
+origcoms/mtffilter.com
+origcoms/newst.com
+origcoms/prenewst.com
+origcoms/sample.com
+origcoms/tilt.com
+origcoms/tomopitch.com
+origcoms/track.com
+origcoms/xcorr.com
+prenewst.com
+sample.com
+tilt.com
+tomopitch.com
+track.com
+xcorr.com
+
+text 39 golden/no_stack.out
+All command files successfully created
+
+text 2 golden/no_stack.rc
+0
+
+sha256 6697cd2a032949f27ffa3a612f9337ceb74ac5f8b6e821e505ffca84a31f9886 2693 golden/no_stack/align.com
+sha256 c5bfb5739a50a03206f68f281dfea153d70d5174edd3a1416eaef600207c966d 528 golden/no_stack/b.seed
+sha256 2e1966a5be2912fe5e4d0d3086efa2837dcf6c95fd4d4dc47ceebe29798b476a 775 golden/no_stack/ctfcorrection.com
+sha256 4b0dfc53c0c717dedef21c392766223c5c5f88b7e985b1e7f8bb3a067a727259 901 golden/no_stack/ctfplotter.com
+sha256 f2360bde13774c937179ff93e3138eb48550b017faa081415333895f41150f67 1462 golden/no_stack/eraser.com
+sha256 20529add21bfbe827139694747d4c5dd29a6c031d3de647c059373321355ba97 843 golden/no_stack/mtffilter.com
+sha256 35c606afa4296bc99c1cfb9ad3034531fa50e66d3fd9a9eba376f66a788ee862 659 golden/no_stack/newst.com
+sha256 6697cd2a032949f27ffa3a612f9337ceb74ac5f8b6e821e505ffca84a31f9886 2693 golden/no_stack/origcoms/align.com
+sha256 2e1966a5be2912fe5e4d0d3086efa2837dcf6c95fd4d4dc47ceebe29798b476a 775 golden/no_stack/origcoms/ctfcorrection.com
+sha256 4b0dfc53c0c717dedef21c392766223c5c5f88b7e985b1e7f8bb3a067a727259 901 golden/no_stack/origcoms/ctfplotter.com
+sha256 f2360bde13774c937179ff93e3138eb48550b017faa081415333895f41150f67 1462 golden/no_stack/origcoms/eraser.com
+sha256 20529add21bfbe827139694747d4c5dd29a6c031d3de647c059373321355ba97 843 golden/no_stack/origcoms/mtffilter.com
+sha256 35c606afa4296bc99c1cfb9ad3034531fa50e66d3fd9a9eba376f66a788ee862 659 golden/no_stack/origcoms/newst.com
+text 490 golden/no_stack/origcoms/prenewst.com
+# THIS IS A COMMAND FILE TO PRODUCE A PRE-ALIGNED STACK
+# 
+# The stack will be floated and converted to bytes under the assumption that
+# you will go back to the raw stack to make the final aligned stack
+#
+$setenv IMOD_OUTPUT_FORMAT MRC
+$xftoxg
+0
+b.prexf
+b.prexg
+$newstack -StandardInput
+InputFile	b.st
+OutputFile	b_preali.mrc
+TransformFile	b.prexg
+ModeToOutput	0
+FloatDensities 2
+BinByFactor	1
+#DistortionField	.idf
+ImagesAreBinned	1
+#GradientFile	b.maggrad
+$if (-e ./savework) ./savework
+
+sha256 15186546a0a58f9c57e02a4a0e2e89b296bc003e369022ecd43b83454dbcd512 3529 golden/no_stack/origcoms/sample.com
+sha256 9db86dc46826b42f581428bc13fd8242c704184a296fd317fedc8f0396ba873f 606 golden/no_stack/origcoms/tilt.com
+sha256 3a270fb1a9f2d230da407e730a648d28500495b3574ab35e2c62f98ce42c86a1 601 golden/no_stack/origcoms/tomopitch.com
+sha256 fa1853a1581e4c44b57e38484ba0adf639e27eb1ae565df56b2a2fafae41f5f1 1935 golden/no_stack/origcoms/track.com
+sha256 de8c408f6f924c8f01716540210747f92bbbcbb2bfde53808bb054fd604b44a1 526 golden/no_stack/origcoms/xcorr.com
+text 490 golden/no_stack/prenewst.com
+# THIS IS A COMMAND FILE TO PRODUCE A PRE-ALIGNED STACK
+# 
+# The stack will be floated and converted to bytes under the assumption that
+# you will go back to the raw stack to make the final aligned stack
+#
+$setenv IMOD_OUTPUT_FORMAT MRC
+$xftoxg
+0
+b.prexf
+b.prexg
+$newstack -StandardInput
+InputFile	b.st
+OutputFile	b_preali.mrc
+TransformFile	b.prexg
+ModeToOutput	0
+FloatDensities 2
+BinByFactor	1
+#DistortionField	.idf
+ImagesAreBinned	1
+#GradientFile	b.maggrad
+$if (-e ./savework) ./savework
+
+sha256 15186546a0a58f9c57e02a4a0e2e89b296bc003e369022ecd43b83454dbcd512 3529 golden/no_stack/sample.com
+sha256 9db86dc46826b42f581428bc13fd8242c704184a296fd317fedc8f0396ba873f 606 golden/no_stack/tilt.com
+sha256 3a270fb1a9f2d230da407e730a648d28500495b3574ab35e2c62f98ce42c86a1 601 golden/no_stack/tomopitch.com
+sha256 fa1853a1581e4c44b57e38484ba0adf639e27eb1ae565df56b2a2fafae41f5f1 1935 golden/no_stack/track.com
+sha256 de8c408f6f924c8f01716540210747f92bbbcbb2bfde53808bb054fd604b44a1 526 golden/no_stack/xcorr.com
+text 457 golden/one_change.files
+align.com
+b.rawtlt
+b.seed
+b.st
+ctfcorrection.com
+ctfplotter.com
+dfltcoms/eraser.com
+dfltcoms/tilt.com
+eraser.com
+mtffilter.com
+newst.com
+origcoms/align.com
+origcoms/ctfcorrection.com
+origcoms/ctfplotter.com
+origcoms/eraser.com
+origcoms/mtffilter.com
+origcoms/newst.com
+origcoms/prenewst.com
+origcoms/sample.com
+origcoms/tilt.com
+origcoms/tomopitch.com
+origcoms/track.com
+origcoms/xcorr.com
+prenewst.com
+sample.com
+tilt.com
+tomopitch.com
+track.com
+xcorr.com
+
+text 41 golden/one_change.out
+ 
+All command files successfully created
+
+text 2 golden/one_change.rc
+0
+
+sha256 efb0335f56339f17e9dd8734e69ed381daf7d829b85e84469c1333299c0782d7 2692 golden/one_change/align.com
+sha256 c5bfb5739a50a03206f68f281dfea153d70d5174edd3a1416eaef600207c966d 528 golden/one_change/b.seed
+sha256 2e1966a5be2912fe5e4d0d3086efa2837dcf6c95fd4d4dc47ceebe29798b476a 775 golden/one_change/ctfcorrection.com
+sha256 4b0dfc53c0c717dedef21c392766223c5c5f88b7e985b1e7f8bb3a067a727259 901 golden/one_change/ctfplotter.com
+sha256 f2360bde13774c937179ff93e3138eb48550b017faa081415333895f41150f67 1462 golden/one_change/dfltcoms/eraser.com
+sha256 d22d2c2e48f549f024acf05056672d3426d53339d305cd826303bd723803e27a 605 golden/one_change/dfltcoms/tilt.com
+sha256 59bdf31629483085ba3846fd2f821e5362cadf96131f69f73b00d981a769ffcf 1460 golden/one_change/eraser.com
+sha256 20529add21bfbe827139694747d4c5dd29a6c031d3de647c059373321355ba97 843 golden/one_change/mtffilter.com
+sha256 6847f9cc82f39aeb060b2bbe915c2493211fbb11f66ef9b02367dbee7fc7779a 673 golden/one_change/newst.com
+sha256 efb0335f56339f17e9dd8734e69ed381daf7d829b85e84469c1333299c0782d7 2692 golden/one_change/origcoms/align.com
+sha256 2e1966a5be2912fe5e4d0d3086efa2837dcf6c95fd4d4dc47ceebe29798b476a 775 golden/one_change/origcoms/ctfcorrection.com
+sha256 4b0dfc53c0c717dedef21c392766223c5c5f88b7e985b1e7f8bb3a067a727259 901 golden/one_change/origcoms/ctfplotter.com
+sha256 59bdf31629483085ba3846fd2f821e5362cadf96131f69f73b00d981a769ffcf 1460 golden/one_change/origcoms/eraser.com
+sha256 20529add21bfbe827139694747d4c5dd29a6c031d3de647c059373321355ba97 843 golden/one_change/origcoms/mtffilter.com
+sha256 6847f9cc82f39aeb060b2bbe915c2493211fbb11f66ef9b02367dbee7fc7779a 673 golden/one_change/origcoms/newst.com
+text 490 golden/one_change/origcoms/prenewst.com
+# THIS IS A COMMAND FILE TO PRODUCE A PRE-ALIGNED STACK
+# 
+# The stack will be floated and converted to bytes under the assumption that
+# you will go back to the raw stack to make the final aligned stack
+#
+$setenv IMOD_OUTPUT_FORMAT MRC
+$xftoxg
+0
+b.prexf
+b.prexg
+$newstack -StandardInput
+InputFile	b.st
+OutputFile	b_preali.mrc
+TransformFile	b.prexg
+ModeToOutput	0
+FloatDensities 2
+BinByFactor	1
+#DistortionField	.idf
+ImagesAreBinned	1
+#GradientFile	b.maggrad
+$if (-e ./savework) ./savework
+
+sha256 54e3b2f0b456afe779852f4467559be1168a11b283ab1ad5e96648902720d30c 3564 golden/one_change/origcoms/sample.com
+sha256 698b6c33551f780eb4a936c0a7222bf76ea761c3ccad670fa372a1bc6cd10fc9 607 golden/one_change/origcoms/tilt.com
+sha256 bce529081bf11b7225577fde792d8ceff3acbafe7fd12fb8d7b9949b0afa029f 601 golden/one_change/origcoms/tomopitch.com
+sha256 fa1853a1581e4c44b57e38484ba0adf639e27eb1ae565df56b2a2fafae41f5f1 1935 golden/one_change/origcoms/track.com
+sha256 de8c408f6f924c8f01716540210747f92bbbcbb2bfde53808bb054fd604b44a1 526 golden/one_change/origcoms/xcorr.com
+text 490 golden/one_change/prenewst.com
+# THIS IS A COMMAND FILE TO PRODUCE A PRE-ALIGNED STACK
+# 
+# The stack will be floated and converted to bytes under the assumption that
+# you will go back to the raw stack to make the final aligned stack
+#
+$setenv IMOD_OUTPUT_FORMAT MRC
+$xftoxg
+0
+b.prexf
+b.prexg
+$newstack -StandardInput
+InputFile	b.st
+OutputFile	b_preali.mrc
+TransformFile	b.prexg
+ModeToOutput	0
+FloatDensities 2
+BinByFactor	1
+#DistortionField	.idf
+ImagesAreBinned	1
+#GradientFile	b.maggrad
+$if (-e ./savework) ./savework
+
+sha256 54e3b2f0b456afe779852f4467559be1168a11b283ab1ad5e96648902720d30c 3564 golden/one_change/sample.com
+sha256 698b6c33551f780eb4a936c0a7222bf76ea761c3ccad670fa372a1bc6cd10fc9 607 golden/one_change/tilt.com
+sha256 bce529081bf11b7225577fde792d8ceff3acbafe7fd12fb8d7b9949b0afa029f 601 golden/one_change/tomopitch.com
+sha256 fa1853a1581e4c44b57e38484ba0adf639e27eb1ae565df56b2a2fafae41f5f1 1935 golden/one_change/track.com
+sha256 de8c408f6f924c8f01716540210747f92bbbcbb2bfde53808bb054fd604b44a1 526 golden/one_change/xcorr.com
+text 419 golden/short_negative.files
+align.com
+ctfcorrection.com
+ctfplotter.com
+eraser.com
+mtffilter.com
+newst.com
+origcoms/align.com
+origcoms/ctfcorrection.com
+origcoms/ctfplotter.com
+origcoms/eraser.com
+origcoms/mtffilter.com
+origcoms/newst.com
+origcoms/prenewst.com
+origcoms/sample.com
+origcoms/tilt.com
+origcoms/tomopitch.com
+origcoms/track.com
+origcoms/xcorr.com
+prenewst.com
+s.rawtlt
+s.seed
+s.st
+sample.com
+tilt.com
+tomopitch.com
+track.com
+xcorr.com
+
+text 41 golden/short_negative.out
+ 
+All command files successfully created
+
+text 2 golden/short_negative.rc
+0
+
+sha256 37348f54023efd3e6948371a51170f9f29f49b2d785c1fd219f397b0190435c5 2691 golden/short_negative/align.com
+sha256 cee03c0dd744c8756cae331f037cec3253e526f0a469084b34957df37977f685 775 golden/short_negative/ctfcorrection.com
+sha256 4c8635978e5dc6c27d79864a21adff646b20d14f5de9ddb27b130cf961fd7b69 900 golden/short_negative/ctfplotter.com
+sha256 70bae89d8862a798571a163f8b6e78fadcff5807ee56f9d09d1fabbe09ba58db 1462 golden/short_negative/eraser.com
+sha256 593eb9371498c7f17c1de517407f1332927235796e9fb05fb266caba276ddc3a 843 golden/short_negative/mtffilter.com
+sha256 b990170df1eab29c1dadb18df79ab0a6ee69358e6f3c8d9c648f50e625caa8a0 658 golden/short_negative/newst.com
+sha256 37348f54023efd3e6948371a51170f9f29f49b2d785c1fd219f397b0190435c5 2691 golden/short_negative/origcoms/align.com
+sha256 cee03c0dd744c8756cae331f037cec3253e526f0a469084b34957df37977f685 775 golden/short_negative/origcoms/ctfcorrection.com
+sha256 4c8635978e5dc6c27d79864a21adff646b20d14f5de9ddb27b130cf961fd7b69 900 golden/short_negative/origcoms/ctfplotter.com
+sha256 70bae89d8862a798571a163f8b6e78fadcff5807ee56f9d09d1fabbe09ba58db 1462 golden/short_negative/origcoms/eraser.com
+sha256 593eb9371498c7f17c1de517407f1332927235796e9fb05fb266caba276ddc3a 843 golden/short_negative/origcoms/mtffilter.com
+sha256 b990170df1eab29c1dadb18df79ab0a6ee69358e6f3c8d9c648f50e625caa8a0 658 golden/short_negative/origcoms/newst.com
+text 490 golden/short_negative/origcoms/prenewst.com
+# THIS IS A COMMAND FILE TO PRODUCE A PRE-ALIGNED STACK
+# 
+# The stack will be floated and converted to bytes under the assumption that
+# you will go back to the raw stack to make the final aligned stack
+#
+$setenv IMOD_OUTPUT_FORMAT MRC
+$xftoxg
+0
+s.prexf
+s.prexg
+$newstack -StandardInput
+InputFile	s.st
+OutputFile	s_preali.mrc
+TransformFile	s.prexg
+ModeToOutput	0
+FloatDensities 2
+BinByFactor	1
+#DistortionField	.idf
+ImagesAreBinned	1
+#GradientFile	s.maggrad
+$if (-e ./savework) ./savework
+
+sha256 6295b44693d25459e2755588910ddccddf01ca668494f613c264f86e989bf5a8 3519 golden/short_negative/origcoms/sample.com
+sha256 724e2bd673c6886697fd6c037d703a6216054fe0659ffbd40f80e99970389f73 605 golden/short_negative/origcoms/tilt.com
+sha256 bce529081bf11b7225577fde792d8ceff3acbafe7fd12fb8d7b9949b0afa029f 601 golden/short_negative/origcoms/tomopitch.com
+sha256 0c5c08a67fe8a06687060defd334ebc755e45440eac5269c3cd8b0a3a987884b 1934 golden/short_negative/origcoms/track.com
+sha256 5b0f00785d265ff7052e72747524aeb0d1d84614e7cc8f6184f253487b1c8bfc 525 golden/short_negative/origcoms/xcorr.com
+text 490 golden/short_negative/prenewst.com
+# THIS IS A COMMAND FILE TO PRODUCE A PRE-ALIGNED STACK
+# 
+# The stack will be floated and converted to bytes under the assumption that
+# you will go back to the raw stack to make the final aligned stack
+#
+$setenv IMOD_OUTPUT_FORMAT MRC
+$xftoxg
+0
+s.prexf
+s.prexg
+$newstack -StandardInput
+InputFile	s.st
+OutputFile	s_preali.mrc
+TransformFile	s.prexg
+ModeToOutput	0
+FloatDensities 2
+BinByFactor	1
+#DistortionField	.idf
+ImagesAreBinned	1
+#GradientFile	s.maggrad
+$if (-e ./savework) ./savework
+
+sha256 c5bfb5739a50a03206f68f281dfea153d70d5174edd3a1416eaef600207c966d 528 golden/short_negative/s.seed
+sha256 6295b44693d25459e2755588910ddccddf01ca668494f613c264f86e989bf5a8 3519 golden/short_negative/sample.com
+sha256 724e2bd673c6886697fd6c037d703a6216054fe0659ffbd40f80e99970389f73 605 golden/short_negative/tilt.com
+sha256 bce529081bf11b7225577fde792d8ceff3acbafe7fd12fb8d7b9949b0afa029f 601 golden/short_negative/tomopitch.com
+sha256 0c5c08a67fe8a06687060defd334ebc755e45440eac5269c3cd8b0a3a987884b 1934 golden/short_negative/track.com
+sha256 5b0f00785d265ff7052e72747524aeb0d1d84614e7cc8f6184f253487b1c8bfc 525 golden/short_negative/xcorr.com
+text 419 golden/single_rawtlt.files
+align.com
+b.rawtlt
+b.seed
+b.st
+ctfcorrection.com
+ctfplotter.com
+eraser.com
+mtffilter.com
+newst.com
+origcoms/align.com
+origcoms/ctfcorrection.com
+origcoms/ctfplotter.com
+origcoms/eraser.com
+origcoms/mtffilter.com
+origcoms/newst.com
+origcoms/prenewst.com
+origcoms/sample.com
+origcoms/tilt.com
+origcoms/tomopitch.com
+origcoms/track.com
+origcoms/xcorr.com
+prenewst.com
+sample.com
+tilt.com
+tomopitch.com
+track.com
+xcorr.com
+
+text 41 golden/single_rawtlt.out
+ 
+All command files successfully created
+
+text 2 golden/single_rawtlt.rc
+0
+
+sha256 efb0335f56339f17e9dd8734e69ed381daf7d829b85e84469c1333299c0782d7 2692 golden/single_rawtlt/align.com
+sha256 c5bfb5739a50a03206f68f281dfea153d70d5174edd3a1416eaef600207c966d 528 golden/single_rawtlt/b.seed
+sha256 2e1966a5be2912fe5e4d0d3086efa2837dcf6c95fd4d4dc47ceebe29798b476a 775 golden/single_rawtlt/ctfcorrection.com
+sha256 4b0dfc53c0c717dedef21c392766223c5c5f88b7e985b1e7f8bb3a067a727259 901 golden/single_rawtlt/ctfplotter.com
+sha256 f2360bde13774c937179ff93e3138eb48550b017faa081415333895f41150f67 1462 golden/single_rawtlt/eraser.com
+sha256 20529add21bfbe827139694747d4c5dd29a6c031d3de647c059373321355ba97 843 golden/single_rawtlt/mtffilter.com
+sha256 6847f9cc82f39aeb060b2bbe915c2493211fbb11f66ef9b02367dbee7fc7779a 673 golden/single_rawtlt/newst.com
+sha256 efb0335f56339f17e9dd8734e69ed381daf7d829b85e84469c1333299c0782d7 2692 golden/single_rawtlt/origcoms/align.com
+sha256 2e1966a5be2912fe5e4d0d3086efa2837dcf6c95fd4d4dc47ceebe29798b476a 775 golden/single_rawtlt/origcoms/ctfcorrection.com
+sha256 4b0dfc53c0c717dedef21c392766223c5c5f88b7e985b1e7f8bb3a067a727259 901 golden/single_rawtlt/origcoms/ctfplotter.com
+sha256 f2360bde13774c937179ff93e3138eb48550b017faa081415333895f41150f67 1462 golden/single_rawtlt/origcoms/eraser.com
+sha256 20529add21bfbe827139694747d4c5dd29a6c031d3de647c059373321355ba97 843 golden/single_rawtlt/origcoms/mtffilter.com
+sha256 6847f9cc82f39aeb060b2bbe915c2493211fbb11f66ef9b02367dbee7fc7779a 673 golden/single_rawtlt/origcoms/newst.com
+text 490 golden/single_rawtlt/origcoms/prenewst.com
+# THIS IS A COMMAND FILE TO PRODUCE A PRE-ALIGNED STACK
+# 
+# The stack will be floated and converted to bytes under the assumption that
+# you will go back to the raw stack to make the final aligned stack
+#
+$setenv IMOD_OUTPUT_FORMAT MRC
+$xftoxg
+0
+b.prexf
+b.prexg
+$newstack -StandardInput
+InputFile	b.st
+OutputFile	b_preali.mrc
+TransformFile	b.prexg
+ModeToOutput	0
+FloatDensities 2
+BinByFactor	1
+#DistortionField	.idf
+ImagesAreBinned	1
+#GradientFile	b.maggrad
+$if (-e ./savework) ./savework
+
+sha256 54e3b2f0b456afe779852f4467559be1168a11b283ab1ad5e96648902720d30c 3564 golden/single_rawtlt/origcoms/sample.com
+sha256 d22d2c2e48f549f024acf05056672d3426d53339d305cd826303bd723803e27a 605 golden/single_rawtlt/origcoms/tilt.com
+sha256 bce529081bf11b7225577fde792d8ceff3acbafe7fd12fb8d7b9949b0afa029f 601 golden/single_rawtlt/origcoms/tomopitch.com
+sha256 fa1853a1581e4c44b57e38484ba0adf639e27eb1ae565df56b2a2fafae41f5f1 1935 golden/single_rawtlt/origcoms/track.com
+sha256 de8c408f6f924c8f01716540210747f92bbbcbb2bfde53808bb054fd604b44a1 526 golden/single_rawtlt/origcoms/xcorr.com
+text 490 golden/single_rawtlt/prenewst.com
+# THIS IS A COMMAND FILE TO PRODUCE A PRE-ALIGNED STACK
+# 
+# The stack will be floated and converted to bytes under the assumption that
+# you will go back to the raw stack to make the final aligned stack
+#
+$setenv IMOD_OUTPUT_FORMAT MRC
+$xftoxg
+0
+b.prexf
+b.prexg
+$newstack -StandardInput
+InputFile	b.st
+OutputFile	b_preali.mrc
+TransformFile	b.prexg
+ModeToOutput	0
+FloatDensities 2
+BinByFactor	1
+#DistortionField	.idf
+ImagesAreBinned	1
+#GradientFile	b.maggrad
+$if (-e ./savework) ./savework
+
+sha256 54e3b2f0b456afe779852f4467559be1168a11b283ab1ad5e96648902720d30c 3564 golden/single_rawtlt/sample.com
+sha256 d22d2c2e48f549f024acf05056672d3426d53339d305cd826303bd723803e27a 605 golden/single_rawtlt/tilt.com
+sha256 bce529081bf11b7225577fde792d8ceff3acbafe7fd12fb8d7b9949b0afa029f 601 golden/single_rawtlt/tomopitch.com
+sha256 fa1853a1581e4c44b57e38484ba0adf639e27eb1ae565df56b2a2fafae41f5f1 1935 golden/single_rawtlt/track.com
+sha256 de8c408f6f924c8f01716540210747f92bbbcbb2bfde53808bb054fd604b44a1 526 golden/single_rawtlt/xcorr.com
+text 428 golden/style0_pcm.files
+align.pcm
+b.rawtlt
+b.seed
+b.st
+ctfcorrection.pcm
+ctfplotter.pcm
+eraser.pcm
+mtffilter.pcm
+newst.pcm
+origcoms/align.pcm
+origcoms/ctfcorrection.pcm
+origcoms/ctfplotter.pcm
+origcoms/eraser.pcm
+origcoms/mtffilter.pcm
+origcoms/newst.pcm
+origcoms/prenewst.pcm
+origcoms/sample.pcm
+origcoms/tilt.pcm
+origcoms/tomopitch.pcm
+origcoms/track.pcm
+origcoms/xcorr.pcm
+prenewst.pcm
+sample.pcm
+savework
+tilt.pcm
+tomopitch.pcm
+track.pcm
+xcorr.pcm
+
+text 41 golden/style0_pcm.out
+ 
+All command files successfully created
+
+text 2 golden/style0_pcm.rc
+0
+
+sha256 1d8fa9d754b7eb4f11e38bcdd6937772246d46c98431f196355b6b4d3f2257bc 2657 golden/style0_pcm/align.pcm
+sha256 c5bfb5739a50a03206f68f281dfea153d70d5174edd3a1416eaef600207c966d 528 golden/style0_pcm/b.seed
+sha256 7f21c838332be348bb700e3f46283cb45f85a88ba3f8eaa888cae03ea883042f 736 golden/style0_pcm/ctfcorrection.pcm
+sha256 6c1281ee30f0c2bc02225d5a185bf282af92cc3e8f15c9d47f001ef47d5c7bc0 870 golden/style0_pcm/ctfplotter.pcm
+sha256 b2dd0522e49f1f93431c98c6a6669c7e981a55ff5d95b6538f7ca215b7e2f650 1431 golden/style0_pcm/eraser.pcm
+sha256 f0d294de21caf2a3f77d6cedf6083b5e6e76b533d1645cb7475cb1d9637d55fe 803 golden/style0_pcm/mtffilter.pcm
+sha256 bf13869a128461ed917fa7b3ef157c6f088d0cf64e77948d3299e259adfa82cb 638 golden/style0_pcm/newst.pcm
+sha256 1d8fa9d754b7eb4f11e38bcdd6937772246d46c98431f196355b6b4d3f2257bc 2657 golden/style0_pcm/origcoms/align.pcm
+sha256 7f21c838332be348bb700e3f46283cb45f85a88ba3f8eaa888cae03ea883042f 736 golden/style0_pcm/origcoms/ctfcorrection.pcm
+sha256 6c1281ee30f0c2bc02225d5a185bf282af92cc3e8f15c9d47f001ef47d5c7bc0 870 golden/style0_pcm/origcoms/ctfplotter.pcm
+sha256 b2dd0522e49f1f93431c98c6a6669c7e981a55ff5d95b6538f7ca215b7e2f650 1431 golden/style0_pcm/origcoms/eraser.pcm
+sha256 f0d294de21caf2a3f77d6cedf6083b5e6e76b533d1645cb7475cb1d9637d55fe 803 golden/style0_pcm/origcoms/mtffilter.pcm
+sha256 bf13869a128461ed917fa7b3ef157c6f088d0cf64e77948d3299e259adfa82cb 638 golden/style0_pcm/origcoms/newst.pcm
+text 455 golden/style0_pcm/origcoms/prenewst.pcm
+# THIS IS A COMMAND FILE TO PRODUCE A PRE-ALIGNED STACK
+# 
+# The stack will be floated and converted to bytes under the assumption that
+# you will go back to the raw stack to make the final aligned stack
+#
+$xftoxg
+0
+b.prexf
+b.prexg
+$newstack -StandardInput
+InputFile	b.st
+OutputFile	b.preali
+TransformFile	b.prexg
+ModeToOutput	0
+FloatDensities 2
+BinByFactor	1
+#DistortionField	.idf
+ImagesAreBinned	1
+#GradientFile	b.maggrad
+$if (-e ./savework) ./savework
+
+sha256 ea2eedb96dd1a14394b8873f9559f4e0c1f86e9a342cf0780f96311a92a62a5c 3380 golden/style0_pcm/origcoms/sample.pcm
+sha256 4f08162f275fb687b10a7a3cf4085e4bf0e2a9cf4e51104a993456ae73fd1ced 566 golden/style0_pcm/origcoms/tilt.pcm
+sha256 d6856c109adce101a5b85c712251fd2a611ac9c4fad0abce1fff0f5add3b99a5 570 golden/style0_pcm/origcoms/tomopitch.pcm
+sha256 a1d127fcdccd3ae18f75039c0b5552cb6e7031703a9bbcac2954bf4a0c80ca1a 1900 golden/style0_pcm/origcoms/track.pcm
+text 495 golden/style0_pcm/origcoms/xcorr.pcm
+# THIS IS A COMMAND FILE TO RUN TILTXCORR AND DETERMINE CROSS-CORRELATION
+# ALIGNMENT OF A TILT SERIES
+#
+#
+# TO RUN TILTXCORR
+#
+####CreatedVersion####5.2.17
+#
+# Add BordersInXandY to use a centered region smaller than the default
+# or XMinAndMax and YMinAndMax  to specify a non-centered region
+#
+$tiltxcorr -StandardInput
+InputFile	b.st
+OutputFile	b.prexf
+PixelSize	1.0
+TiltFile	b.rawtlt
+RotationAngle	-85.3
+FilterSigma1	0.03
+FilterRadius2	0.25
+FilterSigma2	0.05
+$if (-e ./savework) ./savework
+
+text 455 golden/style0_pcm/prenewst.pcm
+# THIS IS A COMMAND FILE TO PRODUCE A PRE-ALIGNED STACK
+# 
+# The stack will be floated and converted to bytes under the assumption that
+# you will go back to the raw stack to make the final aligned stack
+#
+$xftoxg
+0
+b.prexf
+b.prexg
+$newstack -StandardInput
+InputFile	b.st
+OutputFile	b.preali
+TransformFile	b.prexg
+ModeToOutput	0
+FloatDensities 2
+BinByFactor	1
+#DistortionField	.idf
+ImagesAreBinned	1
+#GradientFile	b.maggrad
+$if (-e ./savework) ./savework
+
+sha256 ea2eedb96dd1a14394b8873f9559f4e0c1f86e9a342cf0780f96311a92a62a5c 3380 golden/style0_pcm/sample.pcm
+sha256 62b47eba74d2a8bd6193e7587d68e41292552b7caa16e55563e938727018e755 791 golden/style0_pcm/savework
+sha256 4f08162f275fb687b10a7a3cf4085e4bf0e2a9cf4e51104a993456ae73fd1ced 566 golden/style0_pcm/tilt.pcm
+sha256 d6856c109adce101a5b85c712251fd2a611ac9c4fad0abce1fff0f5add3b99a5 570 golden/style0_pcm/tomopitch.pcm
+sha256 a1d127fcdccd3ae18f75039c0b5552cb6e7031703a9bbcac2954bf4a0c80ca1a 1900 golden/style0_pcm/track.pcm
+text 495 golden/style0_pcm/xcorr.pcm
+# THIS IS A COMMAND FILE TO RUN TILTXCORR AND DETERMINE CROSS-CORRELATION
+# ALIGNMENT OF A TILT SERIES
+#
+#
+# TO RUN TILTXCORR
+#
+####CreatedVersion####5.2.17
+#
+# Add BordersInXandY to use a centered region smaller than the default
+# or XMinAndMax and YMinAndMax  to specify a non-centered region
+#
+$tiltxcorr -StandardInput
+InputFile	b.st
+OutputFile	b.prexf
+PixelSize	1.0
+TiltFile	b.rawtlt
+RotationAngle	-85.3
+FilterSigma1	0.03
+FilterRadius2	0.25
+FilterSigma2	0.05
+$if (-e ./savework) ./savework
+
+text 0 golden/usage.files
+
+sha256 228ac00294519733b01804d53de5c0df20a56b9abbfe00c5911ef3216c8b06a8 4487 golden/usage.out
+text 2 golden/usage.rc
+0
+

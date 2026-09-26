@@ -8,6 +8,8 @@
 //! terminator is heap residue in native and must be our defined zeros there
 //! (`BUGS.md` §2, `common::reconcile_uninitialised`); standard output with the `imodVersion` banner's compile date
 //! and time masked (compile metadata).
+//!
+//! Pruned 2026-09-26: 27 of 34 rows kept (dropped: vals6 plain (display/value_zero read it), -f on the comma form, odd -c with -f, -t on residuals, -w with -c/-n, the all-options combination, and a second out-of-range -v); the rest stay in cases.tsv as `#full` rows (FULL=1 / IMOD_RS_FULL_CASES=1, fixtures/README.md).
 
 mod common;
 
@@ -26,7 +28,11 @@ fn scratch(name: &str) -> PathBuf {
     std::fs::create_dir_all(&dir).unwrap();
     for entry in std::fs::read_dir(fixture_dir()).unwrap() {
         let path = entry.unwrap().path();
-        if path.is_file() && path.file_name().is_some_and(|n| n != "cases.tsv") {
+        if path.is_file()
+            && path
+                .file_name()
+                .is_some_and(|n| n != "cases.tsv" && n != "golden.manifest")
+        {
             std::fs::copy(&path, dir.join(path.file_name().unwrap())).unwrap();
         }
     }
@@ -52,10 +58,7 @@ fn every_case_matches_native_golden() {
     let golden = fixture_dir().join("golden");
     let mut failures = Vec::new();
     let mut count = 0;
-    for line in table
-        .lines()
-        .filter(|l| !l.starts_with('#') && !l.is_empty())
-    {
+    for line in common::golden::case_rows(&table) {
         let fields: Vec<&str> = line.split('\t').collect();
         let (name, args) = (fields[0], fields[1]);
         let dir = scratch(name);
@@ -70,8 +73,7 @@ fn every_case_matches_native_golden() {
             .output()
             .unwrap();
         count += 1;
-        let rc: i32 = std::fs::read_to_string(golden.join(format!("{name}.rc")))
-            .unwrap()
+        let rc: i32 = common::golden::read_to_string(&golden.join(format!("{name}.rc")))
             .trim()
             .parse()
             .unwrap();
@@ -82,28 +84,28 @@ fn every_case_matches_native_golden() {
                 String::from_utf8_lossy(&output.stderr)
             ));
         }
-        let stdout = std::fs::read(golden.join(format!("{name}.stdout"))).unwrap();
-        if mask_banner(&output.stdout) != mask_banner(&stdout) {
+        let stdout = common::golden::expect(&golden.join(format!("{name}.stdout")));
+        if !stdout.matches_masked(&output.stdout, mask_banner) {
             failures.push(format!(
                 "{name}: stdout differs\n--- native\n{}\n--- ours\n{}",
-                String::from_utf8_lossy(&stdout),
+                stdout.display(),
                 String::from_utf8_lossy(&output.stdout)
             ));
         }
-        let expected = std::fs::read(golden.join(format!("{name}.mod"))).ok();
+        let expected = common::golden::load(&golden.join(format!("{name}.mod")));
         let written = std::fs::read(dir.join("o.mod")).ok();
         match (expected, written) {
             (None, None) => {}
-            (Some(g), Some(w)) if common::reconcile_uninitialised(&w, &g) == w => {}
+            (Some(g), Some(w)) if g.matches_reconciled(&w, common::golden::identity) => {}
             (g, w) => failures.push(format!(
-                "{name}: o.mod differs (native {:?} bytes, ours {:?} bytes)",
-                g.map(|b| b.len()),
+                "{name}: o.mod differs (native {:?}, ours {:?} bytes)",
+                g.map(|b| b.describe()),
                 w.map(|b| b.len())
             )),
         }
         let _ = std::fs::remove_dir_all(&dir);
     }
-    assert!(count >= 34, "only {count} cases read");
+    assert!(count >= 27, "only {count} cases read");
     assert!(failures.is_empty(), "{}", failures.join("\n"));
 }
 
@@ -138,10 +140,10 @@ fn count_lines_maps_value_columns_like_a_first_line() {
     ] {
         let (rc, _, model) = run_ours(name, &args);
         assert_eq!(rc, Some(0), "{name}");
-        let native = std::fs::read(golden.join(format!("{name}.mod"))).unwrap();
+        let native = common::golden::expect(&golden.join(format!("{name}.mod")));
         let model = model.unwrap();
         assert!(
-            common::reconcile_uninitialised(&model, &native) == model,
+            native.matches_reconciled(&model, common::golden::identity),
             "{name}: model differs"
         );
     }
@@ -154,9 +156,9 @@ fn count_lines_maps_value_columns_like_a_first_line() {
 fn last_line_without_newline_is_read() {
     let (rc, _, model) = run_ours("nolastnl", &["nolastnl.out", "o.mod"]);
     assert_eq!(rc, Some(0));
-    let native = std::fs::read(fixture_dir().join("golden/nolastnl_nl.mod")).unwrap();
+    let native = common::golden::expect(&fixture_dir().join("golden/nolastnl_nl.mod"));
     let model = model.unwrap();
-    assert!(common::reconcile_uninitialised(&model, &native) == model);
+    assert!(native.matches_reconciled(&model, common::golden::identity));
 }
 
 /// BUGS.md: an option needing a value given last dereferenced `argv[argc]`

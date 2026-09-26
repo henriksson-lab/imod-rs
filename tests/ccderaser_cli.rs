@@ -18,6 +18,7 @@
 //! `fixtures/make-ccderaser-goldens.sh defined`); `golden/` keeps the native
 //! record for every case.  The fixes are asserted directly by the tests
 //! after the golden loop.
+//! Pruned 2026-09-26: 56 of 68 rows kept (dropped: find_points_trial, find_xyscan_edge, model_multi, model_lines_b, model_trial, noskip (paths other rows reach), and the near-duplicate defined-output rows find_b, find_verbose, find_half_s, find_iter6, model_merge, interactive2 -- the border-ring fix they carry is pinned by the rest); the pruned rows stay in cases.tsv as `#full` rows (FULL=1, fixtures/README.md).
 
 mod common;
 
@@ -38,7 +39,11 @@ fn scratch(name: &str) -> PathBuf {
     std::fs::create_dir_all(&dir).unwrap();
     for entry in std::fs::read_dir(fixture_dir()).unwrap() {
         let path = entry.unwrap().path();
-        if path.is_file() && path.file_name().is_some_and(|n| n != "cases.tsv") {
+        if path.is_file()
+            && path
+                .file_name()
+                .is_some_and(|n| n != "cases.tsv" && n != "golden.manifest")
+        {
             std::fs::copy(&path, dir.join(path.file_name().unwrap())).unwrap();
         }
     }
@@ -59,14 +64,11 @@ fn every_case_matches_native_golden() {
     let golden = fixture_dir().join("golden");
     let mut failures = Vec::new();
     let mut count = 0;
-    for line in table
-        .lines()
-        .filter(|l| !l.starts_with('#') && !l.is_empty())
-    {
+    for line in common::golden::case_rows(&table) {
         let fields: Vec<&str> = line.split('\t').collect();
         let (name, args, stdin) = (fields[0], fields[1], fields[2]);
         let defined = fixture_dir().join("defined");
-        let golden = if defined.join(format!("{name}.rc")).exists() {
+        let golden = if common::golden::exists(&defined.join(format!("{name}.rc"))) {
             &defined
         } else {
             &golden
@@ -98,8 +100,7 @@ fn every_case_matches_native_golden() {
             .unwrap();
         let output = child.wait_with_output().unwrap();
         count += 1;
-        let rc: i32 = std::fs::read_to_string(golden.join(format!("{name}.rc")))
-            .unwrap()
+        let rc: i32 = common::golden::read_to_string(&golden.join(format!("{name}.rc")))
             .trim()
             .parse()
             .unwrap();
@@ -110,11 +111,11 @@ fn every_case_matches_native_golden() {
                 String::from_utf8_lossy(&output.stderr)
             ));
         }
-        let stdout = std::fs::read(golden.join(format!("{name}.stdout"))).unwrap();
-        if common::mask_stamps(&output.stdout) != common::mask_stamps(&stdout) {
+        let stdout = common::golden::expect(&golden.join(format!("{name}.stdout")));
+        if !stdout.matches_masked(&output.stdout, common::mask_stamps) {
             failures.push(format!(
                 "{name}: stdout differs\n--- native\n{}\n--- ours\n{}",
-                String::from_utf8_lossy(&stdout),
+                stdout.display(),
                 String::from_utf8_lossy(&output.stdout)
             ));
         }
@@ -139,21 +140,20 @@ fn every_case_matches_native_golden() {
             ("inplace", inplace, common::mask_stamps),
         ];
         for (suffix, written, mask) in checks {
-            let expected = std::fs::read(golden.join(format!("{name}.{suffix}"))).ok();
+            let expected = common::golden::load(&golden.join(format!("{name}.{suffix}")));
             match (expected, written) {
                 (None, None) => {}
-                (Some(g), Some(w))
-                    if mask(&common::reconcile_uninitialised(&w, &g)) == mask(&w) => {}
+                (Some(g), Some(w)) if g.matches_reconciled(&w, mask) => {}
                 (g, w) => failures.push(format!(
-                    "{name}: {suffix} differs (native {:?} bytes, ours {:?} bytes)",
-                    g.map(|b| b.len()),
+                    "{name}: {suffix} differs (native {:?}, ours {:?} bytes)",
+                    g.map(|b| b.describe()),
                     w.map(|b| b.len())
                 )),
             }
         }
         let _ = std::fs::remove_dir_all(&dir);
     }
-    assert!(count >= 60, "only {count} cases read");
+    assert!(count >= 56, "only {count} cases read");
     assert!(failures.is_empty(), "{}", failures.join("\n"));
 }
 

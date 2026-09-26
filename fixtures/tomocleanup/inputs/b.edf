@@ -1,0 +1,4 @@
+Setup.DatasetName=b
+Setup.AxisType=Single Axis
+Setup.ImageFile.ImageFilenameStyle=MRC
+Setup.Setup.OrigImageStackExt=st

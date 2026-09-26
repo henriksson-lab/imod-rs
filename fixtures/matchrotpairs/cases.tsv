@@ -1,0 +1,28 @@
+# name	inputs (src:dst from inputs/)	env	arguments
+usage	-	-	-
+run_default	a.st:a.st b.st:b.st	-	-scan 0,0 a.st b.st out.xf
+run_options	a.st:a.st b.st:b.st	-	-nearest -ia a.st -ib b.st -output o.xf -a -90
+run_swap_all	a.st:a.st b.st:b.st	-	-nearest -swap -x -a 1 a.st b.st out.xf
+run_all_mirror	a.st:a.st b.st:b.st	-	-nearest -scan 0,0 -x -a 1 -mirror 1 a.st b.st out.xf
+#full	run_nearest	a.st:a.st b.st:b.st	-	-nearest -mirror -1 a.st b.st out.xf
+#full	run_scan_legacy	a.st:a.st b.st:b.st	-	-nearest -scan 0,0 -a 1 -za 2,4 -zb 2,4 a.st b.st out.xf
+run_scan_fixed	a.st:a.st b.st:b.st	-	-nearest -scan 5,0 -a 1 -mirror -1 a.st b.st out.xf
+#full	run_scan_step	a.st:a.st b.st:b.st	-	-nearest -scan 10,5 -a 1 -mirror -1 -za 1,3 a.st b.st out.xf
+run_same_file	a.st:a.st	-	-nearest -za 1,3 -zb 3,5 -a 1 -mirror -1 a.st a.st out.xf
+run_dist	a.st:a.st b.st:b.st d64.idf:d64.idf	-	-d d64.idf -b 1 -a 1 -mirror -1 -za 2,4 -zb 2,4 a.st b.st out.xf
+run_backup	a.st:a.st b.st:b.st old.xf:out.xf	-	-nearest -a 1 -mirror -1 -za 3,4 -zb 2,3 a.st b.st out.xf
+err_even_range	a.st:a.st b.st:b.st	-	-a 1 -mirror -1 -za 2,5 -zb 2,5 a.st b.st out.xf
+err_all_nodir	a.st:a.st b.st:b.st	-	-x a.st b.st out.xf
+err_nofile	a.st:a.st	-	-scan 0,0 a.st b.st out.xf
+err_noout	a.st:a.st b.st:b.st	-	a.st b.st
+#full	err_za_low	a.st:a.st b.st:b.st	-	-za 0,3 a.st b.st out.xf
+err_za_order	a.st:a.st b.st:b.st	-	-za 4,3 a.st b.st out.xf
+err_zb_high	a.st:a.st b.st:b.st	-	-zb 1,9 a.st b.st out.xf
+#full	err_swap_range	a.st:a.st b.st:b.st	-	-swap -za 1,9 a.st b.st out.xf
+err_bad_angle	a.st:a.st b.st:b.st	-	-a x a.st b.st out.xf
+# DEFINED (not native) golden, BUGS.md "tiltxcorr" rotation scan, fixed in translation
+# 2026-09-26: the scan peaks at its last step (+20); native tiltxcorr fits through the word
+# past rotScanPeaks (interpolated 18.2 on the 128x128 helpers4 series) where imod-rs reports
+# 20.0, so tiltmatch also runs the rotation-only xfsimplex.  Native out.xf here:
+#    0.4399963  -0.9341114  -0.9094162  -0.4904433      25.981      13.187
+run_scan_edge	a.st:a.st b.st:b.st	-	-x -a 90 -mirror 1 a.st b.st out.xf

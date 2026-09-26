@@ -1,0 +1,71 @@
+# name<TAB>arguments ("." for none)
+noargs	.
+help	-help
+#full	plain	tilt.mdoc out.mdoc
+inplace	-order 1 tilt.mdoc tilt.mdoc
+order1	-order 1 tilt.mdoc out.mdoc
+orderm1	-order -1 tilt.mdoc out.mdoc
+order0	-order 0 tilt.mdoc out.mdoc
+#full	order5	-order 5 tilt.mdoc out.mdoc
+orderbad	-order x tilt.mdoc out.mdoc
+dose	-dose 2.5 tilt.mdoc out.mdoc
+#full	doseorder	-dose 2.5 -order 1 tilt.mdoc out.mdoc
+dosenotime	-dose 1.75 notime.mdoc out.mdoc
+doseparttime	-dose 1 parttime.mdoc out.mdoc
+dosebadmonth	-dose 1 badmonth.mdoc out.mdoc
+dose0	-dose 0 tilt.mdoc out.mdoc
+#full	doseneg	-dose -1 tilt.mdoc out.mdoc
+#full	dosebad	-dose abc tilt.mdoc out.mdoc
+bin2	-binning 2 tilt.mdoc out.mdoc
+bin05	-binning 0.5 tilt.mdoc out.mdoc
+#full	bin3	-binning 3 tilt.mdoc out.mdoc
+bin4of3	-binning 4 bin3.mdoc out.mdoc
+#full	bin1of3	-binning 1 bin3.mdoc out.mdoc
+bin1super	-binning 1 superres.mdoc out.mdoc
+#full	bin05super	-binning 0.5 superres.mdoc out.mdoc
+bin15	-binning 1.5 tilt.mdoc out.mdoc
+#full	bin0	-binning 0 tilt.mdoc out.mdoc
+#full	bin0505	-binning 0.5005 tilt.mdoc out.mdoc
+#full	bin2001	-binning 2.0009 tilt.mdoc out.mdoc
+#full	bin052	-binning 0.52 tilt.mdoc out.mdoc
+#full	binneg	-binning -2 tilt.mdoc out.mdoc
+binsecpix	-binning 4 secpix.mdoc out.mdoc
+binnopix	-binning 2 nopix.mdoc out.mdoc
+#full	binemptypix	-binning 2 emptypix.mdoc out.mdoc
+binbadbin	-binning 2 badbin.mdoc out.mdoc
+binbadsize	-binning 2 badsize.mdoc out.mdoc
+binbadpix	-binning 2 badpix.mdoc out.mdoc
+pix	-pixel 2.2 tilt.mdoc out.mdoc
+#full	pixnopix	-pixel 2.2 nopix.mdoc out.mdoc
+pixbin	-pixel 3.3 -binning 2 tilt.mdoc out.mdoc
+pix0	-pixel 0 tilt.mdoc out.mdoc
+#full	pixneg	-pixel -1 tilt.mdoc out.mdoc
+#full	pixbadpix	-pixel 1 badpix.mdoc out.mdoc
+all	-dose 3 -binning 2 -pixel 2.5 -order -1 tilt.mdoc out.mdoc
+#full	allsecpix	-dose 3 -binning 1 -order 1 secpix.mdoc out.mdoc
+nantilt1	-order 1 nantilt.mdoc out.mdoc
+#full	nantiltm1	-order -1 nantilt.mdoc out.mdoc
+#full	nantiltdose	-dose 2 nantilt.mdoc out.mdoc
+missingtilt	-order 1 missingtilt.mdoc out.mdoc
+montage	-order 1 montage.mdoc out.mdoc
+#full	noimagefile	-order 1 noimagefile.mdoc out.mdoc
+series	-order 1 series.mdoc out.mdoc
+#full	frameset	-order 1 frameset.mdoc out.mdoc
+nosect	-order 1 nosect.mdoc out.mdoc
+onesect	-order 1 onesect.mdoc out.mdoc
+garbage	-order 1 garbage.mdoc out.mdoc
+nonexist	-order 1 nothere.mdoc out.mdoc
+#full	dirinput	-order 1 sub out.mdoc
+nooutput	-order 1 -dose 2 tilt.mdoc
+#full	nooutputopt	-order 1 -dose 2 -input tilt.mdoc
+badoutdir	-order 1 tilt.mdoc nodir/out.mdoc
+scrambled1	-order 1 scrambled.mdoc out.mdoc
+#full	scrambledm1	-order -1 scrambled.mdoc out.mdoc
+scrambleddose	-dose 2 scrambled.mdoc out.mdoc
+ties1	-order 1 ties.mdoc out.mdoc
+#full	tiesm1	-order -1 -dose 4 ties.mdoc out.mdoc
+param	-param p.param
+badopt	-bogus 1 tilt.mdoc out.mdoc
+#full	twoopt	-input tilt.mdoc -output out.mdoc
+paramonly	-pa p.param -order -1
+noinput	-order 1 -dose 2 -binning 2

@@ -1,0 +1,3 @@
+comparam.solvematch.solvematch.MaximumResidual = 12
+comparam.matchorwarp.matchorwarp.WarpLimits=0.3,0.4
+comparam.volcombine.combinefft.ReductionFraction=0.1

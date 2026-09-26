@@ -1,0 +1,116 @@
+# name	arguments (- for none)	stdin (printf escapes, - for none)
+et_seri_tilt	seri_tilt.st	-
+et_seri_tilt_out	seri_tilt.st out.tlt	-
+et_seri_tilt_optout	-input seri_tilt.st -output o.tlt -tilts	-
+#full	et_seri_all_tilt	seri_all.st	-
+et_seri_all_stage	-stage seri_all.st	-
+et_seri_all_mag	-mag seri_all.st	-
+et_seri_all_int	-int seri_all.st	-
+et_seri_all_exp	-exp seri_all.st	-
+#full	et_seri_all_exp_out	-exp seri_all.st d.txt	-
+et_seri_all_defocus_fallback	-defocus seri_all.st	-
+et_seri_all_pixel_fallback	-pixel seri_all.st	-
+#full	et_seri_all_camera_fallback	-camera seri_all.st	-
+et_seri_all_mintilt	-mintilt seri_all.st	-
+#full	et_seri_all_mintilt_out	-mintilt seri_all.st m.txt	-
+et_seri_all_key	-key Note seri_all.st	-
+#full	et_seri_all_key_out	-key Note seri_all.st k.txt	-
+et_seri_all_key_missing	-key NoSuchKey seri_all.st	-
+et_seri_all_mdoc	-mdoc seri_all.st	-
+#full	et_seri_all_mdoc_mag	-mdoc -mag seri_all.st	-
+#full	et_seri_mag	-mag seri_mag.st	-
+et_seri_mag_tilt_nomdoc	seri_mag.st	-
+et_seri_mont	seri_mont.st	-
+#full	et_seri_mont_int	-int seri_mont.st	-
+et_seri_mont_all	-all seri_mont.st	-
+#full	et_seri_mont_all_int	-all -int seri_mont.st	-
+et_seri_mont_notilt	seri_mont_notilt.st	-
+#full	et_seri_mont_notilt_int	-int seri_mont_notilt.st	-
+et_seri_zero_warn	-warn seri_zero.st	-
+et_seri_zero_nowarn	seri_zero.st	-
+et_seri_dosym_mintilt	-mintilt seri_dosym.st	-
+#full	et_seri_dosym_warn	-warn seri_dosym.st	-
+et_seri_tilt_mdoc_wrongcount	-mdoc seri_tilt.st	-
+et_seri_tilt_defocus_wrongcount	-defocus seri_tilt.st	-
+et_agard	agard.st	-
+et_agard_int	agard_int.st	-
+#full	et_agard_int_mintilt	-mintilt agard_int.st	-
+et_agard_mag	-mag agard.st	-
+et_agard_noflt	agard_noflt.st	-
+et_fei	fei.st	-
+et_fei_exp	-exp fei.st	-
+et_fei_bug	fei_bug.st	-
+#full	et_fei_bug_exp	-exp fei_bug.st	-
+#full	et_fei_fixed	-fixed 2.5 fei.st	-
+et_fei_fixed_prior	-fixed 2.5 -prior 10 fei.st info.txt	-
+et_fei_fixed_aretomo	-fixed 1.5 -aretomo fei.st	-
+#full	et_fei_fixed_aretomo_prior	-fixed 1.5 -aretomo -prior 3 fei.st o.txt	-
+et_fei_notilt	fei_notilt.st	-
+#full	et_fei_notilt_fixed	-fixed 1 fei_notilt.st	-
+#full	et_fei_notilt_aretomo	-fixed 1 -aretomo fei_notilt.st	-
+et_fei_notime_fixed	-fixed 1 fei_notime.st	-
+et_fei_notime_aretomo	-fixed 1 -aretomo fei_notime.st	-
+et_fei_stage	-stage fei.st	-
+#full	et_plain_tilt_nomdoc	plain6.st	-
+et_plain	plain.st	-
+et_plain_mdoc_all	plain_mdoc.st	-
+#full	et_plain_mdoc_stage	-stage plain_mdoc.st	-
+#full	et_plain_mdoc_mag	-mag plain_mdoc.st	-
+#full	et_plain_mdoc_int	-int plain_mdoc.st	-
+et_plain_mdoc_exp	-exp plain_mdoc.st	-
+#full	et_plain_mdoc_pixel	-pixel plain_mdoc.st	-
+et_plain_mdoc_defocus	-defocus plain_mdoc.st	-
+#full	et_plain_mdoc_camera	-camera plain_mdoc.st	-
+et_plain_mdoc_key	-key Note plain_mdoc.st	-
+#full	et_plain_mdoc_key_date	-key DateTime plain_mdoc.st kk.txt	-
+et_plain_mdoc_mintilt	-mintilt plain_mdoc.st	-
+et_plain_mdoc_aretomo	-aretomo plain_mdoc.st	-
+#full	et_plain_mdoc_aretomo_out	-aretomo plain_mdoc.st a.txt	-
+et_plain_aretomo_dates	-aretomo plain.st	-
+et_plain_aretomo_prior	-aretomo -prior 5 plain.st	-
+et_plain_bidir_aretomo_nodates	-aretomo plain_bidir.st	-
+et_plain_bidir_mintilt_image	-mintilt plain_bidir.st	-
+et_plain6_mont	plain6.st	-
+#full	et_plain6_mont_int	-int plain6.st	-
+et_plain6_mont_all	-all plain6.st	-
+et_plain6_mont_mdoc	-mdoc plain6.st	-
+et_other_mdoc	-other plain_mdoc.st.mdoc	-
+#full	et_other_mdoc_out	-other plain_mdoc.st.mdoc -output oo.txt	-
+#full	et_other_mdoc_mintilt	-other plain_mdoc.st.mdoc -mintilt	-
+et_other_dosym_mintilt	-other other_dosym.mdoc -mintilt	-
+et_other_badangle_mintilt	-other other_badangle.mdoc -mintilt	-
+et_other_noeq_mintilt	-other other_noeq.mdoc -mintilt	-
+et_other_missing_tilt	-other other_missing.mdoc	-
+#full	et_other_missing_defocus	-other other_missing.mdoc -defocus	-
+et_other_missing_stage	-other other_missing.mdoc -stage	-
+et_other_partial_dt_aretomo	-other other_partial_dt.mdoc -aretomo	-
+et_other_badmonth_aretomo	-other other_badmonth.mdoc -aretomo	-
+et_other_ties_aretomo	-other other_ties.mdoc -aretomo	-
+et_other_zerodose_aretomo	-other other_zerodose.mdoc -aretomo	-
+et_other_series	-other series.mdoc	-
+et_other_nonexist	-other nothere.mdoc	-
+et_other_withimage	-other plain_mdoc.st.mdoc seri_tilt.st	-
+et_other_withimage5	-other plain_mdoc.st.mdoc plain.st	-
+et_err_both	-mdoc -other x.mdoc seri_tilt.st	-
+et_err_two	-mag -int seri_all.st	-
+et_err_attrib_opt	-attrib -mag seri_all.st o	-
+et_err_attrib_noimg	-attrib -other plain_mdoc.st.mdoc	-
+et_err_attrib_noout	-attrib seri_all.st	-
+et_err_attrib_nonhdf	-attrib seri_all.st o.txt	-
+et_err_noinput	-tilts	-
+et_err_fixed_mdoc	-fixed 1 -mdoc fei.st	-
+et_err_fixed_nonfei	-fixed 1 seri_all.st	-
+et_err_nofile	nofile.st	-
+et_err_mdoc_missing	-mdoc agard.st	-
+et_err_nodata	-stage agard.st	-
+#full	et_err_nodata2	-int plain.st	-
+et_err_key_nomdoc	-key Foo agard.st	-
+et_help	-help	-
+# et_interactive, et_interactive_out: native reads an uninitialised ifInfoFile
+# here and exits 1 (BUGS.md, fixed in translation); their goldens were written by
+# the translation and equal the PIP runs et_seri_tilt / et_seri_tilt_out apart
+# from the prompts.  Keep them when regenerating from native.
+et_interactive	-	seri_tilt.st\n\n
+et_interactive_out	-	seri_tilt.st\nout.tlt\n
+et_interactive_eof	-	seri_tilt.st\n
+et_backup	seri_tilt.st plain.st.mdoc	-

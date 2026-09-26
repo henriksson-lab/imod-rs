@@ -1,0 +1,21 @@
+# name	arguments (- for none)	stdin (printf escapes, - for none)
+a_nonopt	-nxfiles 3 -nyfiles 2 -nzfiles 2 p000.mrc p100.mrc p200.mrc p010.mrc p110.mrc p210.mrc p001.mrc p101.mrc p201.mrc p011.mrc p111.mrc p211.mrc out.mrc	-
+a_extract	-xextract 0,9 -xextract 2,12 -xextract 3,11 -yextract 1,9 -yextract 0,10 -zextract 1,3 -zextract 0,0 p000.mrc p100.mrc p200.mrc p010.mrc p110.mrc p210.mrc p001.mrc p101.mrc p201.mrc p011.mrc p111.mrc p211.mrc out.mrc	-
+a_inopt	-input p000.mrc -input p100.mrc -output out.mrc -nxfiles 2	-
+#full	a_mixin	-input p000.mrc -nxfiles 2 p100.mrc -output out.mrc	-
+a_special	-xextract -1,-1 -xextract 0,0 -xextract 4,4 -yextract 0,0 -yextract -1,-1 -nzfiles 2 p000.mrc p100.mrc p200.mrc p010.mrc p110.mrc p210.mrc p001.mrc p101.mrc p201.mrc p011.mrc p111.mrc p211.mrc out.mrc	-
+a_zspecial	-zextract -1,-1 -zextract 2,3 -nxfiles 3 -nyfiles 2 p000.mrc p100.mrc p200.mrc p010.mrc p110.mrc p210.mrc p001.mrc p101.mrc p201.mrc p011.mrc p111.mrc p211.mrc out.mrc	-
+a_both	-xextract 0,5 -nxfiles 3 -nyfiles 2 -nzfiles 2 p000.mrc p100.mrc p200.mrc p010.mrc p110.mrc p210.mrc p001.mrc p101.mrc p201.mrc p011.mrc p111.mrc p211.mrc out.mrc	-
+a_count	-nxfiles 3 -nyfiles 2 p000.mrc p100.mrc p200.mrc p010.mrc p110.mrc p210.mrc p001.mrc p101.mrc p201.mrc p011.mrc p111.mrc p211.mrc out.mrc	-
+a_mode	-nxfiles 2 s0.mrc b0.mrc out.mrc	-
+a_high	-xextract 0,13 p000.mrc out.mrc	-
+a_order	-xextract 5,2 p000.mrc out.mrc	-
+#full	a_neg	-yextract -2,3 p000.mrc out.mrc	-
+a_short	-nxfiles 2 s0.mrc s1.mrc out.mrc	-
+#full	a_shorty	-nyfiles 2 -xextract 2,7 s0.mrc s1.mrc out.mrc	-
+a_byte	-zextract 1,3 -zextract 0,2 b0.mrc b1.mrc out.mrc	-
+#full	a_noout	-input p000.mrc	-
+a_help	-help	-
+a_missing	-nxfiles 2 p000.mrc nosuch.mrc out.mrc	-
+a_interactive	-	out.mrc\n2 1 1\n0 10\n3 12\n0,0\n0 0\np000.mrc\np100.mrc\n
+a_interneg	-	out.mrc\n-1 1 1\n

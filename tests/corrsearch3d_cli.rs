@@ -9,6 +9,7 @@
 //! compared exactly except for the wall-clock lines `-debug` prints
 //! (`LETKZ, search, oneCCC:`, `multiBinStats time`, `histogram time`,
 //! `patch structure time`), whose numbers are timings.
+//! Pruned 2026-09-26: 39 of 44 rows kept (dropped `-kernel 1.0` and `-ksize 5` beside the auto-size-5 kernel, `-debug 2` beside `region_debug2`, the flipped pair's `-messages -lowpass`, and a 30x30x9 patch grid); the rest stay in cases.tsv as `#full` rows (FULL=1, fixtures/README.md).
 
 mod common;
 
@@ -29,7 +30,11 @@ fn scratch(name: &str) -> PathBuf {
     std::fs::create_dir_all(&dir).unwrap();
     for entry in std::fs::read_dir(fixture_dir()).unwrap() {
         let path = entry.unwrap().path();
-        if path.is_file() && path.file_name().is_some_and(|n| n != "cases.tsv") {
+        if path.is_file()
+            && path
+                .file_name()
+                .is_some_and(|n| n != "cases.tsv" && n != "golden.manifest")
+        {
             std::fs::copy(&path, dir.join(path.file_name().unwrap())).unwrap();
         }
     }
@@ -59,10 +64,7 @@ fn every_case_matches_native_golden() {
     let golden = fixture_dir().join("golden");
     let mut failures = Vec::new();
     let mut count = 0;
-    for line in table
-        .lines()
-        .filter(|l| !l.starts_with('#') && !l.is_empty())
-    {
+    for line in common::golden::case_rows(&table) {
         let fields: Vec<&str> = line.split('\t').collect();
         let (name, args, stdin) = (fields[0], fields[1], fields[2]);
         let dir = scratch(name);
@@ -92,8 +94,7 @@ fn every_case_matches_native_golden() {
             .unwrap();
         let output = child.wait_with_output().unwrap();
         count += 1;
-        let rc: i32 = std::fs::read_to_string(golden.join(format!("{name}.rc")))
-            .unwrap()
+        let rc: i32 = common::golden::read_to_string(&golden.join(format!("{name}.rc")))
             .trim()
             .parse()
             .unwrap();
@@ -104,27 +105,33 @@ fn every_case_matches_native_golden() {
                 String::from_utf8_lossy(&output.stderr)
             ));
         }
-        let stdout = std::fs::read(golden.join(format!("{name}.stdout"))).unwrap();
-        if mask_stdout(&output.stdout) != mask_stdout(&stdout) {
+        let stdout = common::golden::expect(&golden.join(format!("{name}.stdout")));
+        if !stdout.matches_masked(&output.stdout, |b| mask_stdout(b).into_bytes()) {
             failures.push(format!(
                 "{name}: stdout differs\n--- native\n{}\n--- ours\n{}",
-                String::from_utf8_lossy(&stdout),
+                stdout.display(),
                 String::from_utf8_lossy(&output.stdout)
             ));
         }
-        let expected = golden.join(format!("{name}.patch"));
+        let expected = common::golden::load(&golden.join(format!("{name}.patch")));
         let ours = dir.join("out.patch");
-        match (expected.exists(), ours.exists()) {
-            (true, true) => {
-                if std::fs::read(&expected).unwrap() != std::fs::read(&ours).unwrap() {
-                    failures.push(format!("{name}: patch file differs"));
+        match (expected, ours.exists()) {
+            (Some(expected), true) => {
+                if let Err(why) = expected.compare(
+                    &std::fs::read(&ours).unwrap(),
+                    common::golden::identity,
+                    false,
+                ) {
+                    failures.push(format!("{name}: patch file differs: {why}"));
                 }
             }
-            (false, false) => {}
+            (None, false) => {}
             (native, rust) => failures.push(format!(
-                "{name}: patch file present natively {native}, here {rust}"
+                "{name}: patch file present natively {}, here {rust}",
+                native.is_some()
             )),
         }
+
         let _ = std::fs::remove_dir_all(&dir);
     }
     assert!(count > 0, "no cases read");

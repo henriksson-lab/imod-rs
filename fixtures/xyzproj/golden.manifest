@@ -1,0 +1,224 @@
+# imod-rs native golden manifest for fixtures/xyzproj; see fixtures/README.md.
+# Regenerate with fixtures/regen-golden.sh xyzproj; do not edit by hand.
+sha256 ada6580188543b3c6261b033763b9926ae24fcf86742486b4a4a21f5e6e1480d 5776 golden/x_addmult.out.o.mrc
+text 2 golden/x_addmult.rc
+0
+
+sha256 0a230a9af4f1e45a7f48ac5e936b0c05d67ba40c58fe8a80d30585129f63fe2d 1009 golden/x_addmult.stdout
+sha256 cfd8557bf41021d4f6a9ebae73149b2467752dbede8cc3f8768c340219660c8b 10528 golden/x_adjust.out.o.mrc
+text 2 golden/x_adjust.rc
+0
+
+sha256 541c7e6ce8dd6c390afb0eddbbea4fbc1c5399d64f29f8d0b3f5b4d38c404953 1045 golden/x_adjust.stdout
+text 2 golden/x_badaxis.rc
+1
+
+sha256 28f9ed3c7da686911b8cb9b6b2f79c95a41bdc78597eb6f1ae30eb6096e5fb99 1041 golden/x_badaxis.stdout
+sha256 ac37255731debbaad71f3436482f4cb78749568498663ca33234a658cfaf5b61 2608 golden/x_big.out.o.mrc
+text 2 golden/x_big.rc
+0
+
+sha256 0a230a9af4f1e45a7f48ac5e936b0c05d67ba40c58fe8a80d30585129f63fe2d 1009 golden/x_big.stdout
+sha256 cf41ac10e1ac63ce4ca18f422e4301ef104d1130179fabe90f680e923388a718 2194 golden/x_byte.out.o.mrc
+text 2 golden/x_byte.rc
+0
+
+sha256 ea1e694fdb209b0d77f8d9cc93804d03ca8b674c3f9619cb941f40674343ecc9 1081 golden/x_byte.stdout
+sha256 e85e2a557a52e6f0fd03fd8af908e4d3d9c575a922088b31524a359775622974 5776 golden/x_clip.out.o.mrc
+text 2 golden/x_clip.rc
+0
+
+sha256 0a230a9af4f1e45a7f48ac5e936b0c05d67ba40c58fe8a80d30585129f63fe2d 1009 golden/x_clip.stdout
+text 2 golden/x_conflict.rc
+1
+
+sha256 b2bee9b575e3eb505ef628f287233d727a1ccee5470f1ad96f529fb93d933e56 1059 golden/x_conflict.stdout
+sha256 4c948bbd9e36df4627d49105ab1a0035f2a3963e338da8df5d87601e2a289829 8944 golden/x_const.out.o.mrc
+text 2 golden/x_const.rc
+0
+
+sha256 0a230a9af4f1e45a7f48ac5e936b0c05d67ba40c58fe8a80d30585129f63fe2d 1009 golden/x_const.stdout
+sha256 b6e5dad375f3a8e2872c489aa4f741dca705268df44fb8ced1353d75af65fdd8 6904 golden/x_fill.out.o.mrc
+text 2 golden/x_fill.rc
+0
+
+sha256 0a230a9af4f1e45a7f48ac5e936b0c05d67ba40c58fe8a80d30585129f63fe2d 1009 golden/x_fill.stdout
+text 2 golden/x_firstnoser.rc
+1
+
+sha256 f82c1e13672635860ae3cda98db836292681baeaafe866b5d5da33af272517cb 1061 golden/x_firstnoser.stdout
+text 2 golden/x_help.rc
+0
+
+sha256 dfd07f27424322fb1b696134f116287f41eeee2b040566f7ea5af496ac478866 2207 golden/x_help.stdout
+sha256 4eb6eb6101896cc2ef3952334e49314ea04ccc9acf51c3cb69e6314c3f0d5e39 2256 golden/x_inc0.out.o.mrc
+text 2 golden/x_inc0.rc
+0
+
+sha256 0a230a9af4f1e45a7f48ac5e936b0c05d67ba40c58fe8a80d30585129f63fe2d 1009 golden/x_inc0.stdout
+sha256 bd317b4d944b450366aa1e0b62c10992720ede965a83851c6a5012cf47d18a9f 8944 golden/x_inter.out.o.mrc
+text 2 golden/x_inter.rc
+0
+
+sha256 829d628f82a9917375dcfcc371c321897af7a22092243d6e8ac5233a9b69b18a 1448 golden/x_inter.stdout
+sha256 979c434569f9b3dd7a6e7d89921c2a65807b660eff0efc19d182b982ccd4c435 2299 golden/x_inter2.out.o.mrc
+text 2 golden/x_inter2.rc
+0
+
+sha256 675157c61a992289ebff50df03f8483a2a72284dfdc31b0f251108015c77602b 1448 golden/x_inter2.stdout
+sha256 080e51ef5831d6cb1176b799c2d78edc89d0cb05bcc611aebcff441850a7e35b 12112 golden/x_lower.out.o.mrc
+text 2 golden/x_lower.rc
+0
+
+sha256 0a230a9af4f1e45a7f48ac5e936b0c05d67ba40c58fe8a80d30585129f63fe2d 1009 golden/x_lower.stdout
+text 2 golden/x_missing.rc
+1
+
+text 114 golden/x_missing.stdout
+ERROR: iiOpen - Opening file nosuch.mrc (No such file or directory)
+
+ERROR: iiuOpen - Could not open 'nosuch.mrc'
+
+sha256 b387ea6a1922d8b6951e0d61232465e0ac497c07a346886165ae08efdf83d496 2212 golden/x_mode0.out.o.mrc
+text 2 golden/x_mode0.rc
+0
+
+sha256 0a230a9af4f1e45a7f48ac5e936b0c05d67ba40c58fe8a80d30585129f63fe2d 1009 golden/x_mode0.stdout
+sha256 969f5c96dc39245eb2f03a7e357dd5183842a038e8f28209f6a97d81526bcd0c 3400 golden/x_mode12.out.o.mrc
+text 2 golden/x_mode12.rc
+0
+
+sha256 0a230a9af4f1e45a7f48ac5e936b0c05d67ba40c58fe8a80d30585129f63fe2d 1009 golden/x_mode12.stdout
+sha256 c6b12fc936af4784cf2077c16731933c18a6269f0d403c9e377f8c8ac3828543 2968 golden/x_narrow.out.o.mrc
+text 2 golden/x_narrow.rc
+0
+
+sha256 0a230a9af4f1e45a7f48ac5e936b0c05d67ba40c58fe8a80d30585129f63fe2d 1009 golden/x_narrow.stdout
+sha256 d3e694f193cbf5c0a4b4f4d765f1aa0114914e568484acc22c6112b6f012be42 12112 golden/x_neginc.out.o.mrc
+text 2 golden/x_neginc.rc
+0
+
+sha256 0a230a9af4f1e45a7f48ac5e936b0c05d67ba40c58fe8a80d30585129f63fe2d 1009 golden/x_neginc.stdout
+text 2 golden/x_noaxis.rc
+1
+
+sha256 09a11fd5c443d2df1b17a7f6bf353d059d8685384e9c33b4ed2ce80e2b092c2c 1028 golden/x_noaxis.stdout
+text 2 golden/x_noin.rc
+0
+
+sha256 dfd07f27424322fb1b696134f116287f41eeee2b040566f7ea5af496ac478866 2207 golden/x_noin.stdout
+text 2 golden/x_noout.rc
+0
+
+sha256 dfd07f27424322fb1b696134f116287f41eeee2b040566f7ea5af496ac478866 2207 golden/x_noout.stdout
+text 2 golden/x_novol.rc
+1
+
+sha256 7e32f803cbc90a7fe7486d6443f5c98915d989599f546e2d18ad4c937619fb13 1010 golden/x_novol.stdout
+sha256 cc3bc803cfce64b4ea7e2f47986b0479e477826c2a25ecd36c441bc447ba7bea 15280 golden/x_ray.out.o.mrc
+text 2 golden/x_ray.rc
+0
+
+sha256 0a230a9af4f1e45a7f48ac5e936b0c05d67ba40c58fe8a80d30585129f63fe2d 1009 golden/x_ray.stdout
+sha256 53d6b73f28d276b178ffe51ae7ef958e041dbb8695635230c4091cce6b843579 5776 golden/x_rayconst.out.o.mrc
+text 2 golden/x_rayconst.rc
+0
+
+sha256 0a230a9af4f1e45a7f48ac5e936b0c05d67ba40c58fe8a80d30585129f63fe2d 1009 golden/x_rayconst.stdout
+sha256 99709b482eccb7b3e8606dd1ffb7f746acca13ea11c3d575730d279393e4c88d 7360 golden/x_rayx.out.o.mrc
+text 2 golden/x_rayx.rc
+0
+
+sha256 0a230a9af4f1e45a7f48ac5e936b0c05d67ba40c58fe8a80d30585129f63fe2d 1009 golden/x_rayx.stdout
+sha256 1a8c515bf815ea8aade15560532d6ef1328d538fd226374ce839098db69318ba 9424 golden/x_rayz.out.o.mrc
+text 2 golden/x_rayz.rc
+0
+
+sha256 0a230a9af4f1e45a7f48ac5e936b0c05d67ba40c58fe8a80d30585129f63fe2d 1009 golden/x_rayz.stdout
+sha256 712a9762bc77043045a17d264c467deacc63d0ff3f368e95adf72b3da056cfe1 5864 golden/x_revz.out.o.mrc
+text 2 golden/x_revz.rc
+0
+
+sha256 0a230a9af4f1e45a7f48ac5e936b0c05d67ba40c58fe8a80d30585129f63fe2d 1009 golden/x_revz.stdout
+sha256 fe0d432d1ddd8e33efef304afa1b31e8080bb45ec01d937888ffd704cc04fd23 3832 golden/x_series.out.o.mrc
+text 2 golden/x_series.rc
+0
+
+sha256 2974af13195d7f396343b0e39c3a9e7d92ec66c61f03f9693dbf023bf6822814 1047 golden/x_series.stdout
+text 2 golden/x_seriesaxis.rc
+1
+
+sha256 db1f233f587c9c0e30b3b8888cd9adc9009af0187f0a3600ada28be193d5b71e 1104 golden/x_seriesaxis.stdout
+text 2 golden/x_seriescount.rc
+1
+
+sha256 b318ac9124d03b1b97002490e2eb0f5d753aa79517b6cddc4ba6af2cff708a04 1059 golden/x_seriescount.stdout
+sha256 8a17d5e965c4266c8023ce6e1f416cb7942dc73d1bd0630b9df28c113ecd7982 4048 golden/x_seriesfirst.out.o.mrc
+text 2 golden/x_seriesfirst.rc
+0
+
+sha256 e4c7ae14569333aaf0fe00532f767125f03099137adc8899dc950b670d26011b 1010 golden/x_seriesfirst.stdout
+sha256 6c1f467ea683907ee9e9407f2f9067f316ecbefd5175492faf012351cd88c665 1744 golden/x_seriesfull.out.o.mrc
+text 2 golden/x_seriesfull.rc
+0
+
+sha256 2974af13195d7f396343b0e39c3a9e7d92ec66c61f03f9693dbf023bf6822814 1047 golden/x_seriesfull.stdout
+text 2 golden/x_seriesray.rc
+1
+
+sha256 d8db986b39c153d7fa11f772349bf93335b0140c77fe299a6a0c0e280c64b8fd 1053 golden/x_seriesray.stdout
+sha256 9bb72a09cc283905385e371e24462d0677ea84618dc81921af3268ed52041bec 1584 golden/x_seriesrev.out.o.mrc
+text 2 golden/x_seriesrev.rc
+0
+
+sha256 2974af13195d7f396343b0e39c3a9e7d92ec66c61f03f9693dbf023bf6822814 1047 golden/x_seriesrev.stdout
+sha256 37f72dca5c78ea6d1e29bd416375f27d07964495663ad6f705c67dd412666a5e 2064 golden/x_seriessub.out.o.mrc
+text 2 golden/x_seriessub.rc
+0
+
+sha256 2974af13195d7f396343b0e39c3a9e7d92ec66c61f03f9693dbf023bf6822814 1047 golden/x_seriessub.stdout
+sha256 74add28b529084f19271b45d9bd054c95518c388b7da65827ee1d5101e54d1fe 4048 golden/x_seriesz.out.o.mrc
+text 2 golden/x_seriesz.rc
+0
+
+sha256 2974af13195d7f396343b0e39c3a9e7d92ec66c61f03f9693dbf023bf6822814 1047 golden/x_seriesz.stdout
+sha256 4a347aac118e553649521a876609ec35192a93df073ec3acb22f9aed9f50d761 6904 golden/x_sub.out.o.mrc
+text 2 golden/x_sub.rc
+0
+
+sha256 0a230a9af4f1e45a7f48ac5e936b0c05d67ba40c58fe8a80d30585129f63fe2d 1009 golden/x_sub.stdout
+sha256 6e7dcee3342ccc3538eb639c12c51f0ee9d0ccb190f1e53ef887f9e1ec8401e4 6064 golden/x_subz.out.o.mrc
+text 2 golden/x_subz.rc
+0
+
+sha256 0a230a9af4f1e45a7f48ac5e936b0c05d67ba40c58fe8a80d30585129f63fe2d 1009 golden/x_subz.stdout
+sha256 ac8c60c2eb97b7540a3b03a5515a97709ace5c05ac0c32af1da8ad2fce68407a 8944 golden/x_tangles.out.o.mrc
+text 2 golden/x_tangles.rc
+0
+
+sha256 0a230a9af4f1e45a7f48ac5e936b0c05d67ba40c58fe8a80d30585129f63fe2d 1009 golden/x_tangles.stdout
+sha256 213a0ce576dac4b9ac189921aa02777311841d96ba3a06c691654fe875cca19a 10528 golden/x_tilefile.out.o.mrc
+text 2 golden/x_tilefile.rc
+0
+
+sha256 541c7e6ce8dd6c390afb0eddbbea4fbc1c5399d64f29f8d0b3f5b4d38c404953 1045 golden/x_tilefile.stdout
+sha256 57ba6d61b347ec2ea0c45cb3892fdaa4b62cf42ec881fd0d1aba45197fc8972d 8944 golden/x_wrap.out.o.mrc
+text 2 golden/x_wrap.rc
+0
+
+sha256 0a230a9af4f1e45a7f48ac5e936b0c05d67ba40c58fe8a80d30585129f63fe2d 1009 golden/x_wrap.stdout
+sha256 4e3b296256b7aee733c4783bddc3f1708677c7dde34a1b1fe82eaec0e8a3166f 12112 golden/x_x.out.o.mrc
+text 2 golden/x_x.rc
+0
+
+sha256 0a230a9af4f1e45a7f48ac5e936b0c05d67ba40c58fe8a80d30585129f63fe2d 1009 golden/x_x.stdout
+sha256 aa7b7d43e75a0ec5c95b2b3dfb5da68f0f78468fce0c3535d05187d7eef9a1ef 15280 golden/x_y.out.o.mrc
+text 2 golden/x_y.rc
+0
+
+sha256 0a230a9af4f1e45a7f48ac5e936b0c05d67ba40c58fe8a80d30585129f63fe2d 1009 golden/x_y.stdout
+sha256 ded182ce4ea48c1a5764da25437b6eb1bad0d5c9439b74c069999c74a5bd8af8 23200 golden/x_z.out.o.mrc
+text 2 golden/x_z.rc
+0
+
+sha256 0a230a9af4f1e45a7f48ac5e936b0c05d67ba40c58fe8a80d30585129f63fe2d 1009 golden/x_z.stdout

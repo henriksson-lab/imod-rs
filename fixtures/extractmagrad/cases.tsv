@@ -1,0 +1,26 @@
+# name	arguments (- for none)	stdin (printf escapes, - for none)
+em_v1	-input mg.st -output o.mg -gradient grad1.mgt -rotation 85.3 -pixel 0.25	-
+#full	em_v1_nonopt	mg.st o.mg -gradient grad1.mgt -rotation -12.5 -pixel 0.25	-
+em_v1_hdrpix	mg_px.st o.mg -gradient grad1.mgt -rotation 85.3	-
+em_v1_nopix	mg.st o.mg -gradient grad1.mgt -rotation 85.3	-
+em_v1_delta	mg.st o.mg -gradient grad1.mgt -rotation 85.3 -pixel 0.25 -dgrad 0.1 -drot -0.05	-
+em_v2	mg.st o.mg -gradient grad2.mgt -rotation 85.3 -pixel 0.25	-
+#full	em_v2_delta	mg_px.st o.mg -gradient grad2.mgt -rotation 5 -dgrad -0.3 -drot 1	-
+em_split	mg.st o.mg -gradient grad_split.mgt -rotation 85.3 -pixel 0.25	-
+em_bad	mg.st o.mg -gradient grad_bad.mgt -rotation 85.3 -pixel 0.25	-
+em_empty	mg.st o.mg -gradient grad_empty.mgt -rotation 85.3 -pixel 0.25	-
+#full	em_nocross	mg.st o.mg -gradient grad_nocross.mgt -rotation 85.3 -pixel 0.25	-
+em_notable	mg.st o.mg -gradient nothere.mgt -rotation 85.3 -pixel 0.25	-
+em_mont	mg_mont.st o.mg -gradient grad1.mgt -rotation 85.3 -pixel 0.25	-
+em_notilt	seri_mag.st o.mg -gradient grad1.mgt -rotation 85.3 -pixel 0.25	-
+em_noint	seri_tilt.st o.mg -gradient grad1.mgt -rotation 85.3 -pixel 0.25	-
+em_agard	agard.st o.mg -gradient grad1.mgt -rotation 85.3 -pixel 0.25	-
+#full	em_fei	fei.st o.mg -gradient grad1.mgt -rotation 85.3 -pixel 0.25	-
+em_nograd	mg.st o.mg -rotation 85.3	-
+em_norot	mg.st o.mg -gradient grad1.mgt	-
+em_noout	-input mg.st -gradient grad1.mgt -rotation 3	-
+em_noin	-output o -gradient grad1.mgt -rotation 3	-
+em_help	-help	-
+em_few	mg.st	-
+em_backup	mg.st grad2.mgt -gradient grad1.mgt -rotation 85.3 -pixel 0.25	-
+em_nofile	nofile.st o.mg -gradient grad1.mgt -rotation 85.3 -pixel 0.25	-

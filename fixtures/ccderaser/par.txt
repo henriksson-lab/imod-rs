@@ -1,0 +1,4 @@
+FindPeaks
+PeakCriterion 7
+PointModel p.mod
+Verbose 1

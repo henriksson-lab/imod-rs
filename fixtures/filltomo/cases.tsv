@@ -1,0 +1,24 @@
+# name	arguments (- for none)	stdin (printf escapes, - for none)	native-equivalent arguments for a case reaching a bug fixed in translation (BUGS.md)	sed on that run's stdout
+f_basic	-matched mat.mrc -fill fill.mrc -source src.mrc -inverse inv.xf	-
+f_xyfill	-matched mat.mrc -fill fill.mrc -source src.mrc -inverse inv.xf -xfill 3,2 -yfill 1,4	-
+f_sxform	-matched mat.mrc -fill fill.mrc -source src.mrc -inverse inv.xf -sraw 22,12,16 -sxform stack.xf	-
+f_bin	-matched mat.mrc -fill fill.mrc -source src.mrc -inverse inv.xf -sraw 44,24,32 -sxform stack.xf -binning 2	-
+f_mxform	-matched mat.mrc -fill fill.mrc -source src.mrc -inverse inv.xf -mraw 18,8,15 -mxform stack.xf	-
+f_bothx	-matched mat.mrc -fill fill.mrc -source src.mrc -inverse inv.xf -sraw 22,12,16 -sxform stack.xf -mraw 18,8,15 -mxform stack.xf -xfill 1,1	-	-matched mat.mrc -fill fill.mrc -source src.mrc -inverse inv.xf -sraw 22,12,16 -sxform stack.xf -mraw 18,8,15 -mxform stack2.xf -xfill 1,1	s/stack2\.xf/stack.xf/
+f_fewxf	-matched mat.mrc -fill fill.mrc -source src.mrc -inverse inv.xf -sraw 22,12,16 -sxform stackfew.xf	-
+f_manyxf	-matched mat.mrc -fill fill.mrc -source src.mrc -inverse inv.xf -sraw 22,12,5 -sxform stack.xf	-
+f_sbound	-matched mat.mrc -fill fill.mrc -source src.mrc -inverse inv.xf -sboundary bnd.mod	-
+f_mbound	-matched mat.mrc -fill fill.mrc -source src.mrc -inverse inv.xf -mboundary bnd2.mod	-
+f_bndxy	-matched mat.mrc -fill fill.mrc -source src.mrc -inverse inv.xf -mboundary bndxy.mod	-
+f_mix	-matched mat.mrc -fill fill.mrc -source src.mrc -inverse inv.xf -sboundary mix.mod	-
+f_both	-matched mat.mrc -fill fill.mrc -source src.mrc -inverse inv.xf -sboundary bnd.mod -sraw 22,12,16 -sxform stack.xf	-
+f_noraw	-matched mat.mrc -fill fill.mrc -source src.mrc -inverse inv.xf -sxform stack.xf	-
+f_dims	-matched other.mrc -fill fill.mrc -source src.mrc -inverse inv.xf	-
+f_short	-matched mats.mrc -fill fills.mrc -source src.mrc -inverse inv2.xf -yfill 2,2	-
+f_nonopt	mat.mrc fill.mrc -source src.mrc -inverse inv.xf	-	-matched mat.mrc -fill fill.mrc -source src.mrc -inverse inv.xf
+f_noinv	-matched mat.mrc -fill fill.mrc -source src.mrc	-
+f_nosrc	-matched mat.mrc -fill fill.mrc -inverse inv.xf	-
+f_nofill	-matched mat.mrc	-
+f_inter	-	fill.mrc\nmat.mrc\nsrc.mrc\ninv.xf\n2 1 0 3\n
+#full	f_inter_nums	-	fill.mrc\nmat.mrc\n19 9 15\ninv.xf\n0 0 0 0\n
+#full	f_bothx3	-matched mat.mrc -fill fill.mrc -source src.mrc -inverse inv.xf -sraw 22,12,5 -sxform stack.xf -mraw 18,8,15 -mxform stackfew.xf	-

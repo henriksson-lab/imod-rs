@@ -1,7 +1,0 @@
-
- FORMATTED  ro  file opened: gen40.xf
-Old warping file opened: w10.xf
-          40  transforms in first file
-          10  transforms in second file
- WARNING: XFPRODUCT - Number of transforms does not match
-   10 new transforms written to warping file: p.xf

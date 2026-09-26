@@ -5,6 +5,8 @@
 //! script by `fixtures/make-makecomfile-goldens.sh`; see `tests/pysetup_common` for
 //! what is compared.  The wider differential behind these goldens is recorded
 //! in `TODO.md` (single-axis setup scripts).
+//!
+//! Pruned 2026-09-26: 23 of 25 rows kept (dropped `autofidseed`, the no-axis-letter form other types cover, and `xcorr_pt_change`, a -change run other types cover); the rest stay in cases.tsv as `#full` rows (FULL=1, fixtures/README.md).
 
 mod common;
 mod pysetup_common;

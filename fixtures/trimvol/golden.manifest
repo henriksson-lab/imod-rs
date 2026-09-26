@@ -1,0 +1,168 @@
+# imod-rs native golden manifest for fixtures/trimvol; see fixtures/README.md.
+# Regenerate with fixtures/regen-golden.sh trimvol; do not edit by hand.
+sha256 8a52b084f9f1028bfcfd11d6c384577e9bd63a0e7b054dda6d31c0bb4afec779 1338 golden/byte.out
+text 2 golden/byte.rc
+0
+
+sha256 edd39bb1fc0e42946f9cba77b69b34bc1fdcdd5b422b84496c13f0d4efde8457 3328 golden/byte/o.mrc
+sha256 74d26077b0eafe185116978029f18b79fcc2f8cdce6f2ac618b8d701e7a00c4e 1488 golden/contrast.out
+text 2 golden/contrast.rc
+0
+
+sha256 d8d1b530f05a7d4fc2bc4ced63b7a64d4c60207b8a09e22f3aa41dbee56b405b 5632 golden/contrast/o.mrc
+text 57 golden/err_fmt.out
+ERROR: trimvol - Output format JPG is not a valid format
+
+text 2 golden/err_fmt.rc
+1
+
+text 78 golden/err_mode_c.out
+ERROR: trimvol - You cannot enter -mode with -c, or when running findcontrast
+
+text 2 golden/err_mode_c.rc
+1
+
+sha256 1d31fb58c5d325abfe984f2b1ae4bb08cfec34086cf997474ba7c5b8a6a04b5b 2079 golden/err_nargs.out
+text 2 golden/err_nargs.rc
+0
+
+text 52 golden/err_noinput.out
+ERROR: trimvol - Input file none.mrc does not exist
+
+text 2 golden/err_noinput.rc
+1
+
+text 43 golden/err_nx.out
+ERROR: trimvol - Illegal X size in -nx 100
+
+text 2 golden/err_nx.rc
+1
+
+text 57 golden/err_rx_yz.out
+ERROR: trimvol - You cannot use both -yz and -rx options
+
+text 2 golden/err_rx_yz.rc
+1
+
+text 133 golden/err_s.out
+ERROR: trimvol - The -s option has been eliminated; use -sz instead and add -f if coordinates are from a volume loaded with flipping
+
+text 2 golden/err_s.rc
+1
+
+text 57 golden/err_sz.out
+ERROR: trimvol - Slices out of range for file in -sz 0,5
+
+text 2 golden/err_sz.rc
+1
+
+sha256 772ec5911eb53a3b8bacdd5b847026b182b945aa9a2fa30cb39f653088f3b674 1393 golden/err_x.out
+text 2 golden/err_x.rc
+0
+
+sha256 19757b603c72d59df048b310508df19d81ad142cbcd79d6d610f6077a557b69e 7360 golden/err_x/o.mrc
+text 63 golden/err_z.out
+ERROR: trimvol - z coordinates out of range for file in -z 4,2
+
+text 2 golden/err_z.rc
+1
+
+sha256 032dbdb0688a3f27c0735fd389a46b66347e0af6c59ec7807b1ccaf8ccf0d92b 1296 golden/f_i.out
+text 2 golden/f_i.rc
+0
+
+sha256 7bc1753d5dcc3bca3d8528d80dff9d4aad727d372f72963824875cb4228dadae 6144 golden/f_i/o.mrc
+sha256 4da29f662b0f4f55584fb310c2a3eed7cf0baa3ce7a76b4d121b3e358ded9c65 1296 golden/f_old.out
+text 2 golden/f_old.rc
+0
+
+sha256 f20c08bddd6ce562cda2f4832528f787a5a99b9bc0407bf71a042d5f122b7df2 9216 golden/f_old/o.mrc
+sha256 4da29f662b0f4f55584fb310c2a3eed7cf0baa3ce7a76b4d121b3e358ded9c65 1296 golden/f_y.out
+text 2 golden/f_y.rc
+0
+
+sha256 f20c08bddd6ce562cda2f4832528f787a5a99b9bc0407bf71a042d5f122b7df2 9216 golden/f_y/o.mrc
+text 234 golden/fc_fail.out
+Determining byte scaling of f.mrc...
+findcontrast -slice 2,4  -xminmax 39,49  "f.mrc"
+ERROR: FINDCONTRAST - X or Y values outside range of volume
+ERROR: trimvol - findcontrast -slice 2,4  -xminmax 39,49  "f.mrc": exited with status 1
+
+text 2 golden/fc_fail.rc
+1
+
+sha256 8fb45f68969943db46ce2625fe22322e35a80cba4e69456244b23a9110f88742 1300 golden/index.out
+text 2 golden/index.rc
+0
+
+sha256 2a436db700084ab9761a4d1cd573dbc649239285581079b834936e254a56cac7 3072 golden/index/o.mrc
+sha256 efeec76fe87b63e62d102610de763d6d0a9be7d5622e4eb8c7db3f09463c6fdb 1389 golden/keep.out
+text 2 golden/keep.rc
+0
+
+sha256 e02ab2c9608eed295f0bcba50834fdc579bfb34bceef983b807bfc5ae5ed3165 10240 golden/keep/o.mrc
+sha256 67a80d26358949cec95a68c30d0f082200290ea1467b321479146b832e3dc22b 2502 golden/meansd_f.out
+text 2 golden/meansd_f.rc
+0
+
+sha256 d84d2c38d5abe898a8a923e3e2543fba40aac15c47a818cced105dcbbfeb32db 5632 golden/meansd_f/o.mrc
+sha256 056f6cf3bcd394c3819f1e400d3be94b661536b81e3d63fe8077215cfe6379b7 2564 golden/meansd_mode.out
+text 2 golden/meansd_mode.rc
+0
+
+sha256 e29e8a930194bacbb1b85f476e8638b410fb0753f844f0164083b2c860ef0418 10240 golden/meansd_mode/o.mrc
+sha256 a658a147b617d5f7c4c6236aada3148f95c4f4d3cc04cee0914559beaff844da 1414 golden/mm.out
+text 2 golden/mm.rc
+0
+
+sha256 e57cb7dd009c94c1b2fee0d0d01d4ace75fdbc9cb771b7b53ff56452a1d77f51 10240 golden/mm/o.mrc
+sha256 10f53c61526d9c09659ef5245a09aeeed406409ab8644bb720814da67d5bd6dc 1420 golden/mm_mode.out
+text 2 golden/mm_mode.rc
+0
+
+sha256 f0a0aea2e17557942f2f364cea64c2312736eef47ba2f965c9bb19f37c2e37e5 19456 golden/mm_mode/o.mrc
+sha256 da53efcf11fa944b4b9b101bb1745262ce55e4fe360928b02c5f75bfab195e2a 1399 golden/mode.out
+text 2 golden/mode.rc
+0
+
+sha256 95ba7c45d79890404a8886ed658d9ddd30209ec1e587fd5da29d41a374d97289 10240 golden/mode/o.mrc
+sha256 fd6194e25096b1786c93047d0298dac933b0a3878f0f33f5f3f266523dcfc141 1392 golden/plain.out
+text 2 golden/plain.rc
+0
+
+sha256 bdcd3f20500c39fa81c1c114fe8a51d8c618482d21a572a5fe03b1abb33d320b 19456 golden/plain/o.mrc
+sha256 78abcfe235a110dff9b525b6bcf65bfa881db2222083df4bcc8899f9b698cec9 1427 golden/rx.out
+text 2 golden/rx.rc
+0
+
+sha256 49edc90c85986ee5340244d03d18bf9e516b890d06558abace03afaf5e098431 10240 golden/rx/o.mrc
+sha256 9624256da348a2c719cda97d721d1462d9573fc541417f9bf0d3715b9c8f7a6e 1433 golden/rx_mode.out
+text 2 golden/rx_mode.rc
+0
+
+sha256 ea5b3eb11c6a3b218de2ea8ab765c6accbb9962f2afdcd1843263490db7a83aa 10240 golden/rx_mode/o.mrc
+sha256 ca06293ca04ec19b5f6da34c3ec773586e93be10f93896fceb0ed0ea2df7e659 1244 golden/sizes.out
+text 2 golden/sizes.rc
+0
+
+sha256 d1a09f8edd922d7298f437b25b198d919586f84f15b7bf7dbb95ef046bac4e76 3064 golden/sizes/o.mrc
+sha256 636f6ca29f97d36672b50fd90860e03a37812f7bc042c40e7455338b8fd6bca6 2796 golden/sz_f.out
+text 2 golden/sz_f.rc
+0
+
+sha256 05a4d90d5d4556a53be9205705b1f1383ffcee684509ee7c98dff42417b5e670 5632 golden/sz_f/o.mrc
+sha256 af6cd53c33db8ca1b43e737af6be321f115e5a0f17588ab77347a9dd13178c5e 2820 golden/sz_sxsy.out
+text 2 golden/sz_sxsy.rc
+0
+
+sha256 db2ee696206319590832a3e3f11395d8d616f761729e6169b904cb3a78606f20 5632 golden/sz_sxsy/o.mrc
+sha256 c19ae43d0ba7251b50da7ecdbcbeb88ebf26359353e320aec1463d6551db1109 1300 golden/xyz.out
+text 2 golden/xyz.rc
+0
+
+sha256 c64eaff39cd35613aec7c95b84a47d39ce56bf58f9b6c6d1b48a59e2a76b0037 3072 golden/xyz/o.mrc
+sha256 3c979ff0d4bf3ccb77aa6fb907d41b7ece02e8ffc1023e75eb7136146d86b41d 1334 golden/yz.out
+text 2 golden/yz.rc
+0
+
+sha256 06337cc60ad6a008462725b1e237eb562335a14499bced096a089ec57279910c 7168 golden/yz/o.mrc

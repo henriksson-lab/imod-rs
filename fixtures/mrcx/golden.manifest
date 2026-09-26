@@ -1,0 +1,255 @@
+# imod-rs native golden manifest for fixtures/mrcx; see fixtures/README.md.
+# Regenerate with fixtures/regen-golden.sh mrcx; do not edit by hand.
+text 35 golden/badout.err
+mrcx: Couldn't open nodir/out.mrc.
+
+text 0 golden/badout.out
+
+text 3 golden/badout.rc
+10
+
+text 94 golden/dash.err
+mrcx: Usage [filename] [opt filename]
+There is no option to convert VMS data on this machine.
+
+text 0 golden/dash.out
+
+text 2 golden/dash.rc
+1
+
+text 0 golden/inplace_byte_le.err
+
+text 50 golden/inplace_byte_le.out
+Converting little-endian IEEE to big-endian IEEE.
+
+text 2 golden/inplace_byte_le.rc
+0
+
+sha256 16a046b59709f35ac01e6d1ed20a5615df2a64eea0cc9904dd5094da7a4d5873 1120 golden/inplace_byte_le/byte_le.mrc
+text 0 golden/inplace_float_le.err
+
+text 50 golden/inplace_float_le.out
+Converting little-endian IEEE to big-endian IEEE.
+
+text 2 golden/inplace_float_le.rc
+0
+
+sha256 0a93e0bcf9575de5d0030d1c4b8a7a23875e6c4a7310092b36d6979a296d63b0 1444 golden/inplace_float_le/float_le.mrc
+text 0 golden/inplace_short_be.err
+
+text 50 golden/inplace_short_be.out
+Converting big-endian IEEE to little-endian IEEE.
+
+text 2 golden/inplace_short_be.rc
+0
+
+sha256 b464a570282292bc2adfc90da649e5da087650a443d765a5316d113b6848e9c0 1216 golden/inplace_short_be/short_be.mrc
+text 32 golden/missing.err
+mrcx: Couldn't open nosuch.mrc.
+
+text 0 golden/missing.out
+
+text 3 golden/missing.rc
+10
+
+text 0 golden/new_byte_be.err
+
+text 50 golden/new_byte_be.out
+Converting big-endian IEEE to little-endian IEEE.
+
+text 2 golden/new_byte_be.rc
+0
+
+sha256 68fac88e6aaabb071fbb3e0cd2b0afffe02143b1d2bd92b85613f72185d8d3c5 1120 golden/new_byte_be/out_byte_be.mrc
+text 0 golden/new_cfloat_be.err
+
+text 50 golden/new_cfloat_be.out
+Converting big-endian IEEE to little-endian IEEE.
+
+text 2 golden/new_cfloat_be.rc
+0
+
+sha256 b7fc67a4df9c3c8f672d70d2543ff44c3fa243dec81c40d0535c2450cd8b572f 1216 golden/new_cfloat_be/out_cfloat_be.mrc
+text 0 golden/new_cshort_be.err
+
+text 50 golden/new_cshort_be.out
+Converting big-endian IEEE to little-endian IEEE.
+
+text 2 golden/new_cshort_be.rc
+0
+
+sha256 b57fe6ad03934627760efaaf915ddfa21a84511cae55246f9147b3da0a393346 1120 golden/new_cshort_be/out_cshort_be.mrc
+text 207 golden/new_cut_le.err
+mrcx: Warning input file is 1112 bytes, expected size is 1152.
+mrcx: Read Failed While Reading Long Quantities
+mrcx: Read Failed While Reading Long Quantities
+mrcx: Read Failed While Reading Long Quantities
+
+text 50 golden/new_cut_le.out
+Converting little-endian IEEE to big-endian IEEE.
+
+text 2 golden/new_cut_le.rc
+0
+
+sha256 ce339e1481df86c62135c246b1b77d732d5726458c2f344bc698b499b5baef89 1152 golden/new_cut_le/out_cut_le.mrc
+text 92 golden/new_cutbyte_le.err
+mrcx: Warning input file is 1051 bytes, expected size is 1056.
+Error copying data : Success
+
+text 50 golden/new_cutbyte_le.out
+Converting little-endian IEEE to big-endian IEEE.
+
+text 2 golden/new_cutbyte_le.rc
+0
+
+sha256 3a1cbb1df117b3ceed20dd61e650f98e9fc43da0a67d77bd8dbb9c13a182d439 1051 golden/new_cutbyte_le/out_cutbyte_le.mrc
+text 0 golden/new_ext_odd_be.err
+
+text 50 golden/new_ext_odd_be.out
+Converting big-endian IEEE to little-endian IEEE.
+
+text 2 golden/new_ext_odd_be.rc
+0
+
+sha256 65cbfbde91895f504534a718953ff9abfdd60e669c9208a89aec758be1c21a04 1127 golden/new_ext_odd_be/out_ext_odd_be.mrc
+text 0 golden/new_extreme_le.err
+
+text 50 golden/new_extreme_le.out
+Converting little-endian IEEE to big-endian IEEE.
+
+text 2 golden/new_extreme_le.rc
+0
+
+sha256 12555fd8e526bc1644b9ee874065316a68228f94668547978d857a8b97088a16 1040 golden/new_extreme_le/out_extreme_le.mrc
+text 0 golden/new_float_be.err
+
+text 50 golden/new_float_be.out
+Converting big-endian IEEE to little-endian IEEE.
+
+text 2 golden/new_float_be.rc
+0
+
+sha256 911c9537424ddf6dcbc0053681e0263d52cf3893c0e6948fbc311064333c98ae 1444 golden/new_float_be/out_float_be.mrc
+text 0 golden/new_float_le.err
+
+text 50 golden/new_float_le.out
+Converting little-endian IEEE to big-endian IEEE.
+
+text 2 golden/new_float_le.rc
+0
+
+sha256 0a93e0bcf9575de5d0030d1c4b8a7a23875e6c4a7310092b36d6979a296d63b0 1444 golden/new_float_le/out_float_le.mrc
+text 32 golden/new_half_le.err
+mrcx: data type 12 unsupported.
+
+text 0 golden/new_half_le.out
+
+text 2 golden/new_half_le.rc
+3
+
+text 0 golden/new_half_le/out_half_le.mrc
+
+text 0 golden/new_labels_le.err
+
+text 50 golden/new_labels_le.out
+Converting little-endian IEEE to big-endian IEEE.
+
+text 2 golden/new_labels_le.rc
+0
+
+sha256 12205fb05cb577826e3ec30fe9be5b9b4032ae992e83e772018aed2d283a9ceb 1040 golden/new_labels_le/out_labels_le.mrc
+text 68 golden/new_notmrc.err
+mrcx: This is not an MRC file, even after swapping bytes in header.
+
+text 0 golden/new_notmrc.out
+
+text 2 golden/new_notmrc.rc
+3
+
+text 0 golden/new_notmrc/out_notmrc.mrc
+
+text 0 golden/new_old_be.err
+
+text 83 golden/new_old_be.out
+Converting big-endian IEEE to little-endian IEEE.
+Preserving old-style MRC header.
+
+text 2 golden/new_old_be.rc
+0
+
+sha256 3d4ace33eb67a8b0259e63491b146dedd04e774f83c5a09bb74bf92a8b8bad7d 1104 golden/new_old_be/out_old_be.mrc
+text 0 golden/new_old_le.err
+
+text 83 golden/new_old_le.out
+Converting little-endian IEEE to big-endian IEEE.
+Preserving old-style MRC header.
+
+text 2 golden/new_old_le.rc
+0
+
+sha256 48c6184cc9c2d3c07b13c89644c5cda0b86c955c5339266897af17b8281ddb3c 1104 golden/new_old_le/out_old_le.mrc
+text 0 golden/new_rgb_be.err
+
+text 50 golden/new_rgb_be.out
+Converting big-endian IEEE to little-endian IEEE.
+
+text 2 golden/new_rgb_be.rc
+0
+
+sha256 ad38de9871125eb20cde20e794f1f7d3078a776d8eb88f9240d8bc77bde2163f 1096 golden/new_rgb_be/out_rgb_be.mrc
+text 0 golden/new_rgb_le.err
+
+text 50 golden/new_rgb_le.out
+Converting little-endian IEEE to big-endian IEEE.
+
+text 2 golden/new_rgb_le.rc
+0
+
+sha256 21c38369afaa5d98b869741227d3e0832ebc8988d8b3e0e2179867a34daea995 1096 golden/new_rgb_le/out_rgb_le.mrc
+text 0 golden/new_short_le.err
+
+text 50 golden/new_short_le.out
+Converting little-endian IEEE to big-endian IEEE.
+
+text 2 golden/new_short_le.rc
+0
+
+sha256 230ab3a4bfac3e035ded1e10d0c77a0f27dc770f2e3256ddae30de110aecfed1 1216 golden/new_short_le/out_short_le.mrc
+text 28 golden/new_tiny.err
+mrcx: Error Reading header.
+
+text 0 golden/new_tiny.out
+
+text 2 golden/new_tiny.rc
+3
+
+text 0 golden/new_tiny/out_tiny.mrc
+
+text 0 golden/new_trail100_le.err
+
+text 50 golden/new_trail100_le.out
+Converting little-endian IEEE to big-endian IEEE.
+
+text 2 golden/new_trail100_le.rc
+0
+
+sha256 0bfce8e7b66eaea915e9e9d001e53e2a3acb577c61340e46131a8f97892aefe5 1088 golden/new_trail100_le/out_trail100_le.mrc
+text 63 golden/new_trail600_le.err
+mrcx: Warning input file is 1688 bytes, expected size is 1088.
+
+text 50 golden/new_trail600_le.out
+Converting little-endian IEEE to big-endian IEEE.
+
+text 2 golden/new_trail600_le.rc
+0
+
+sha256 b7770559d9511140cfd8e874d3bc5bae594c23bb2a778077b2605bd8b64fddcf 1088 golden/new_trail600_le/out_trail600_le.mrc
+text 94 golden/noargs.err
+mrcx: Usage [filename] [opt filename]
+There is no option to convert VMS data on this machine.
+
+text 0 golden/noargs.out
+
+text 2 golden/noargs.rc
+1
+

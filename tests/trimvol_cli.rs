@@ -1,3 +1,5 @@
+//! Pruned 2026-09-26: 31 of 38 rows kept (dropped: -x alone (xyz covers it), plain -sz and -meansd (their -sx/-sy, -mode and -f variants cover the branches), -rx with -sz, and duplicate error classes: second -mode conflict, flipped-Y range, flipped -sz range); the rest stay in cases.tsv as `#full` rows (FULL=1 / IMOD_RS_FULL_CASES=1, fixtures/README.md).
+
 mod common;
 
 use imod_rs::imod::libiimod::iimage::{
@@ -620,7 +622,7 @@ fn trimvol_cases_match_native_golden() {
     let inputs_dir = root.join("fixtures/densmatch");
     let golden = fixtures.join("golden");
     let table = std::fs::read_to_string(fixtures.join("cases.tsv")).unwrap();
-    let lines_of = |bytes: &[u8]| -> Vec<String> {
+    let lines_of = |bytes: &[u8]| -> Vec<u8> {
         let text = String::from_utf8_lossy(bytes);
         let mut lines: Vec<String> = text
             .lines()
@@ -638,24 +640,20 @@ fn trimvol_cases_match_native_golden() {
             .filter(|line| !line.is_empty())
             .collect();
         lines.sort();
-        lines
+        lines.join("\n").into_bytes()
     };
     // Stamps only; uninitialised-memory regions are reconciled by
     // `common::reconcile_uninitialised` at the comparison (`BUGS.md` §2).
     let mask = |bytes: &[u8]| -> Vec<u8> { common::mask_stamps(bytes) };
     let mut failures = Vec::new();
     let mut count = 0;
-    for line in table
-        .lines()
-        .filter(|l| !l.starts_with('#') && !l.is_empty())
-    {
+    for line in common::golden::case_rows(&table) {
         let (name, args) = line.split_once('\t').unwrap();
-        let rc: i32 = std::fs::read_to_string(golden.join(format!("{name}.rc")))
-            .unwrap()
+        let rc: i32 = common::golden::read_to_string(&golden.join(format!("{name}.rc")))
             .trim()
             .parse()
             .unwrap();
-        let expected_out = std::fs::read(golden.join(format!("{name}.out"))).unwrap();
+        let expected_out = common::golden::expect(&golden.join(format!("{name}.out")));
         let dir = std::env::temp_dir().join(format!(
             "imod-rs-trimvol-golden-{}-{name}",
             std::process::id()
@@ -689,21 +687,14 @@ fn trimvol_cases_match_native_golden() {
                 output.status.code()
             ));
         }
-        if lines_of(&output.stdout) != lines_of(&expected_out) {
+        if !expected_out.matches_masked(&output.stdout, lines_of) {
             failures.push(format!(
                 "{name}: stdout differs\n--- native\n{}\n--- ours\n{}",
-                String::from_utf8_lossy(&expected_out),
+                expected_out.display(),
                 String::from_utf8_lossy(&output.stdout)
             ));
         }
-        let mut expected_files: Vec<String> = std::fs::read_dir(golden.join(name))
-            .map(|entries| {
-                entries
-                    .map(|e| e.unwrap().file_name().to_str().unwrap().to_string())
-                    .collect()
-            })
-            .unwrap_or_default();
-        expected_files.sort();
+        let expected_files: Vec<String> = common::golden::list(&golden.join(name));
         let mut produced: Vec<String> = std::fs::read_dir(&dir)
             .unwrap()
             .map(|e| e.unwrap().file_name().to_str().unwrap().to_string())
@@ -719,9 +710,9 @@ fn trimvol_cases_match_native_golden() {
             let Ok(ours) = std::fs::read(dir.join(file)) else {
                 continue;
             };
-            let theirs = std::fs::read(golden.join(name).join(file)).unwrap();
-            if mask(&ours) != mask(&common::reconcile_uninitialised(&ours, &theirs)) {
-                failures.push(format!("{name}: {file} differs from native"));
+            let theirs = common::golden::expect(&golden.join(name).join(file));
+            if let Err(why) = theirs.compare(&ours, mask, true) {
+                failures.push(format!("{name}: {file} differs from native: {why}"));
             }
         }
         let _ = std::fs::remove_dir_all(&dir);

@@ -1,0 +1,131 @@
+# imod-rs native golden manifest for fixtures/assemblevol; see fixtures/README.md.
+# Regenerate with fixtures/regen-golden.sh assemblevol; do not edit by hand.
+text 2 golden/a_both.rc
+1
+
+text 86 golden/a_both.stdout
+
+ERROR: ASSEMBLEVOL - You cannot enter both StartEndToExtractInX and NumberOfFilesInX
+
+sha256 bbd1e58b92770e84cfaaa2cf800850c981cc8a149bfb6ec07267af9ceb45928b 1402 golden/a_byte.out.out.mrc
+text 2 golden/a_byte.rc
+0
+
+text 65 golden/a_byte.stdout
+
+ NEW image file on unit   1 : out.mrc
+
+     2 files reassembled
+
+text 2 golden/a_count.rc
+1
+
+text 140 golden/a_count.stdout
+
+ERROR: ASSEMBLEVOL - The number of input files entered does not equal the product of the number in X, Y and Z implied by the other entries
+
+sha256 b7776509226b45684664b32936951b809536ae7c7d017fd13def1b3478994834 20224 golden/a_extract.out.out.mrc
+text 2 golden/a_extract.rc
+0
+
+text 65 golden/a_extract.stdout
+
+ NEW image file on unit   1 : out.mrc
+
+    12 files reassembled
+
+text 2 golden/a_help.rc
+0
+
+sha256 27202fcd1bfc764c8540c68a7139334f13227854bb44bcb0d3fd7eba48f17ff9 1246 golden/a_help.stdout
+text 2 golden/a_high.rc
+1
+
+text 62 golden/a_high.stdout
+
+ERROR: ASSEMBLEVOL - Upper coordinate too high for this file
+
+sha256 4b03dbc83bf041bc81324b91f9fb9f42bc5fdc54b21ab54fe085728a7a3bc26b 6744 golden/a_inopt.out.out.mrc
+text 2 golden/a_inopt.rc
+0
+
+text 65 golden/a_inopt.stdout
+
+ NEW image file on unit   1 : out.mrc
+
+     2 files reassembled
+
+sha256 20e1439447e7fe0134120accc4e0e9a920eac94a33db4439145cc5d30ab3cebc 5644 golden/a_interactive.out.out.mrc
+text 2 golden/a_interactive.rc
+0
+
+sha256 ca745d1a8cc5919a3e46c78c0629715df86ea60345033f3b9fd5841d2760abeb 649 golden/a_interactive.stdout
+text 2 golden/a_interneg.rc
+1
+
+text 130 golden/a_interneg.stdout
+ Output file for assembled volume:  Numbers of input files in X, Y, and Z: 
+ERROR: ASSEMBLEVOL - Number of files must be positive
+
+text 2 golden/a_missing.rc
+1
+
+text 114 golden/a_missing.stdout
+ERROR: iiOpen - Opening file nosuch.mrc (No such file or directory)
+
+ERROR: iiuOpen - Could not open 'nosuch.mrc'
+
+text 2 golden/a_mode.rc
+1
+
+text 50 golden/a_mode.stdout
+
+ERROR: ASSEMBLEVOL - Mode mismatch for this file
+
+sha256 e371bdd8ed1e46fce7c4bb3399affc0e93450aa6ee54c781589ac690c24f6b2a 35344 golden/a_nonopt.out.out.mrc
+text 2 golden/a_nonopt.rc
+0
+
+text 65 golden/a_nonopt.stdout
+
+ NEW image file on unit   1 : out.mrc
+
+    12 files reassembled
+
+text 2 golden/a_order.rc
+1
+
+text 74 golden/a_order.stdout
+
+ERROR: ASSEMBLEVOL - Illegal X coordinate less than zero or out of order
+
+sha256 1e57c0f96df24559a9989027af26d9443f4d635ca09c355b4c58d89d06409194 2032 golden/a_short.out.out.mrc
+text 2 golden/a_short.rc
+0
+
+text 65 golden/a_short.stdout
+
+ NEW image file on unit   1 : out.mrc
+
+     2 files reassembled
+
+sha256 d1cc2ca6d69a236de02548bdca8094a685a1e5fa33c96315f950cba7f530ca65 8224 golden/a_special.out.out.mrc
+text 2 golden/a_special.rc
+0
+
+text 65 golden/a_special.stdout
+
+ NEW image file on unit   1 : out.mrc
+
+    12 files reassembled
+
+sha256 3f9495f48ba807fd2182412e14cd5a93055a24ca985f79872b33ead35ac857dc 11320 golden/a_zspecial.out.out.mrc
+text 2 golden/a_zspecial.rc
+0
+
+text 65 golden/a_zspecial.stdout
+
+ NEW image file on unit   1 : out.mrc
+
+    12 files reassembled
+

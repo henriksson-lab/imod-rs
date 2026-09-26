@@ -1,0 +1,35 @@
+# name	args
+plain	plain.out o.mod
+vals3	vals3.out o.mod
+#full	vals6	vals6.out o.mod
+comma	comma.out o.mod
+resid	resid.out o.mod
+scale	-s 3.5 vals3.out o.mod
+noflip	-f vals3.out o.mod
+#full	noflip_comma	-f comma.out o.mod
+name	-n patches plain.out o.mod
+clip	-c 50 vals3.out o.mod
+#full	clip_odd_noflip	-c 37 -f plain.out o.mod
+display	-d vals6.out o.mod
+value_id	-v 7 vals3.out o.mod
+value_col	-v -2 vals3.out o.mod
+value_zero	-v 4 -z vals6.out o.mod
+lines_hdr	lvalshdr.out o.mod
+lines_hdr_col	-v -2 lvalshdr.out o.mod
+times	-t vals3.out o.mod
+#full	times_resid	-t resid.out o.mod
+warp_grid	-w grid.warp o.mod
+warp_ctrl	-w -t ctrl.warp o.mod
+#full	warp_grid_clip	-w -c 100 -n warp grid.warp o.mod
+#full	all	-s 2 -f -n all -c 64 -d -v -3 -z -t vals6.out o.mod
+e_value0	-v 0 vals3.out o.mod
+#full	e_value_neg	-v -7 vals3.out o.mod
+e_value_noid	-v 9 vals3.out o.mod
+e_lines_id	-l -v 2 lvals.out o.mod
+e_short	short.out o.mod
+nolastnl_nl	nolastnlnl.out o.mod
+e_badhead	badhead.out o.mod
+e_warp_bad	-w plain.out o.mod
+e_missing	nothere.out o.mod
+e_illegal	-q plain.out o.mod
+e_args	-f plain.out

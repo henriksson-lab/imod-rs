@@ -16,10 +16,10 @@ F=$(cd "$(dirname "$0")/xfmodel" && pwd)
 V="$F/../../IMOD/Etomo/uitestData/BB"
 S=$(mktemp -d)
 rm -f "$F"/golden/*
-grep -v '^#' "$F/cases.tsv" | while IFS=$'\t' read -r name args stdin; do
+sed "${FULL:+s/^#full\t//;}/^#/d" "$F/cases.tsv" | while IFS=$'\t' read -r name args stdin; do
   [ "$args" = "-" ] && args=""
   d="$S/$name"; mkdir "$d"
-  find "$F" -maxdepth 1 -type f ! -name cases.tsv -exec cp {} "$d"/ \;
+  find "$F" -maxdepth 1 -type f ! -name cases.tsv ! -name golden.manifest -exec cp {} "$d"/ \;
   cp "$V/BBa_erase.fid" "$V/BBa.xf" "$V/BBb.xf" "$d"/
   [ "$stdin" = "-" ] && stdin=""
   set +e

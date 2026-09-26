@@ -1,0 +1,40 @@
+# name	arguments (run in a copy of fixtures/findbeads3d)
+plain	-in fb_f.mrc -out o.mod -size 6 -candidate c.mod
+nonopt	fb_f.mrc o.mod -size 6
+light	-in fb_s.mrc -out o.mod -size 6 -light -candidate c.mod
+binexp	-in fb_f.mrc -out o.mod -size 9 -binning 3 -expanded 2
+minmax	-in fb_f.mrc -out o.mod -size 6 -xminmax 5,50 -yminmax 3,44
+angle	-in fb_f.mrc -out o.mod -size 6 -angle -60,60
+anglecap	-in fb_f.mrc -out o.mod -size 6 -angle -25,25
+tilt	-in fb_f.mrc -out o.mod -size 6 -tilt angles.tlt
+ylong	-in fb_s.mrc -out o.mod -size 6 -light -ylong
+peakmin	-in fb_f.mrc -out o.mod -size 6 -peakmin 0.2
+thrfrac	-in fb_f.mrc -out o.mod -size 6 -threshold 0.5
+thrnum	-in fb_f.mrc -out o.mod -size 6 -threshold 8
+thrneg	-in fb_f.mrc -out o.mod -size 6 -threshold -0.5
+storefrac	-in fb_f.mrc -out o.mod -size 6 -store 0.4
+storeone	-in fb_f.mrc -out o.mod -size 6 -store 1
+storeneg	-in fb_f.mrc -out o.mod -size 6 -store -1.5
+fallback	-in fb_f.mrc -out o.mod -size 6 -fallback 0.5,0.4
+spacing	-in fb_f.mrc -out o.mod -size 6 -spacing 2 -both
+guessmax	-in fb_f.mrc -out o.mod -size 6 -guess 10 -max 20
+verbose2	-in fb_f.mrc -out o.mod -size 6 -verbose 2
+verbose3	-in fb_f.mrc -out o.mod -size 6 -verbose 3
+template	-in fb_f.mrc -out o.mod -size 6 -template tdark.mrc -center 10,10,11 -text t.txt
+annulus	-in fb_f.mrc -out o.mod -size 6 -template tdark.mrc -annulus 0,0 -text t.txt
+#full	annylong	-in fb_f.mrc -out o.mod -size 6 -template tdark.mrc -annulus 4,7 -ylong -text t.txt
+param	-param p.param
+nooutput	-in fb_s.mrc -size 6 -light
+e_noinput	-size 6
+e_nosize	-in fb_f.mrc -out o.mod
+e_binning	-in fb_f.mrc -out o.mod -size 6 -binning 0
+e_expanded	-in fb_f.mrc -out o.mod -size 6 -expanded 0.01
+e_angletilt	-in fb_f.mrc -out o.mod -size 6 -angle -60,60 -tilt angles.tlt
+e_notilt	-in fb_f.mrc -out o.mod -size 6 -tilt nofile.tlt
+e_narrow	-in fb_f.mrc -out o.mod -size 6 -tilt narrow.tlt
+e_range	-in fb_f.mrc -out o.mod -size 6 -xminmax 0,50
+#full	e_small	-in fb_f.mrc -out o.mod -size 6 -yminmax 10,20
+e_max	-in fb_f.mrc -out o.mod -size 6 -max 2
+e_annulus	-in fb_f.mrc -out o.mod -size 6 -template tdark.mrc -annulus 2,9
+e_tempedge	-in fb_f.mrc -out o.mod -size 6 -template tdark.mrc -center 2,10,10
+help	-help

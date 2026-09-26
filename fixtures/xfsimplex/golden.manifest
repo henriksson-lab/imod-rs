@@ -1,0 +1,279 @@
+# imod-rs native golden manifest for fixtures/xfsimplex; see fixtures/README.md.
+# Regenerate with fixtures/regen-golden.sh xfsimplex; do not edit by hand.
+text 73 golden/s_after.out.o.xf
+   1.0030127   0.0686519  -0.0686519   1.0030127      -2.407       1.549
+
+text 2 golden/s_after.rc
+0
+
+sha256 60e08d2710a280cffd9171e7f14ed4ddf965b0383bae2eadef1b388ad417d7bf 2148 golden/s_after.stdout
+text 73 golden/s_anti.out.o.xf
+   0.9930113   0.0652084  -0.0801196   1.0108222      -2.137       1.945
+
+text 2 golden/s_anti.rc
+0
+
+sha256 0c1ce50ec85c8a0b0e123a4ee51cd6988ae4e9dd6e49a12a8f474d127d795e00 2148 golden/s_anti.stdout
+text 2 golden/s_badinit.rc
+1
+
+text 137 golden/s_badinit.stdout
+
+ERROR: A problem occurred testing whether the initial transform file had warpings
+
+ERROR: XFSIMPLEX - OPENING OR READING TRANSFORM FILE
+
+text 73 golden/s_basic.out.o.xf
+   1.0035568   0.0837469  -0.0664116   1.0136609      -2.292       1.830
+
+text 2 golden/s_basic.rc
+0
+
+sha256 ecf5ea6cbba629257ec7db6134b9885994781143a11557cdd32956fe1cd70a88 2075 golden/s_basic.stdout
+text 73 golden/s_ccc.out.o.xf
+   0.9950984   0.0624364  -0.0680441   1.0242057      -2.343       1.682
+
+text 2 golden/s_ccc.rc
+0
+
+sha256 f5c21a7040b80df49e44ff4c8a87517359fa3bdc4f6479d2354e7844dd175236 2148 golden/s_ccc.stdout
+text 73 golden/s_coarse0.out.o.xf
+   0.9969965   0.0774474  -0.0774474   0.9969965      -2.181       1.793
+
+text 2 golden/s_coarse0.rc
+0
+
+sha256 45d420abcd5eea7fed979ba2aba80b338549fb33893e68518c0885a943d7edea 2148 golden/s_coarse0.stdout
+text 73 golden/s_dist.out.o.xf
+   0.9979128   0.0645752  -0.0645752   0.9979128      -2.264       1.898
+
+text 2 golden/s_dist.rc
+0
+
+sha256 54671f4e7ce4ce7c59fe79d702831913bbd6452084651a9b4d6678ecf98a93be 2184 golden/s_dist.stdout
+text 2 golden/s_distodd.rc
+1
+
+text 81 golden/s_distodd.stdout
+
+ERROR: XFSIMPLEX - You must enter an even number of values for PercentileRanges
+
+text 73 golden/s_distopts.out.o.xf
+   1.0331217   0.0621192  -0.0621192   1.0331217      -1.969       2.654
+
+text 2 golden/s_distopts.rc
+0
+
+sha256 afbf3ca468546f11839d7aaba8939fcb377ff100aba46550821e3d4942b311d8 2184 golden/s_distopts.stdout
+text 0 golden/s_edgebig.out.o.xf
+
+text 2 golden/s_edgebig.rc
+1
+
+sha256 5274c201f13b92669c1a89850617fc2c1203a49026f49cfa260f35f0c9c6cfba 2052 golden/s_edgebig.stdout
+text 73 golden/s_edgepix.out.o.xf
+   1.0005153   0.0681238  -0.0681238   1.0005153      -2.229       1.831
+
+text 2 golden/s_edgepix.rc
+0
+
+sha256 0167c9f4023437f2eb9e2722d2fa9fcf7069de6c04a7e7f009e34aecf9bea86e 2148 golden/s_edgepix.stdout
+text 73 golden/s_filter.out.o.xf
+   0.9917961   0.0829023  -0.0729647   1.0197469      -2.411       1.691
+
+text 2 golden/s_filter.rc
+0
+
+sha256 806977346de2e6f17fc801d537173c612c829d17a2f668d0c540974afe475e40 2148 golden/s_filter.stdout
+text 73 golden/s_float0.out.o.xf
+   0.9969949   0.0774672  -0.0774672   0.9969949      -2.432       1.745
+
+text 2 golden/s_float0.rc
+0
+
+sha256 8ae48da741f90000494583ec5f36f4c946ed85fb8c49a23491964647228e98f4 2148 golden/s_float0.stdout
+text 73 golden/s_floatneg.out.o.xf
+   0.9966843   0.0813658  -0.0813658   0.9966843      -2.376       1.695
+
+text 2 golden/s_floatneg.rc
+0
+
+sha256 36f630869fee7cf8af08121ef65d6b1428e962bad2778ddd8f0b2bfd55aced25 2148 golden/s_floatneg.stdout
+text 2 golden/s_help.rc
+0
+
+sha256 8f23a816a4b107a203a6a7f1fc009b77ca3de0518647dcad31f7749fadbdfa14 3486 golden/s_help.stdout
+text 73 golden/s_init.out.o.xf
+   0.9935410   0.0674177  -0.0975337   1.0231326      -2.141       1.869
+
+text 2 golden/s_init.rc
+0
+
+sha256 be89c49e2bc3b4b0a99389be63e9f955a7be45e28157fece3db5ca390b933aaf 2187 golden/s_init.stdout
+text 73 golden/s_initformal.out.o.xf
+   1.0035568   0.0837469  -0.0664116   1.0136609      -2.292       1.830
+
+text 2 golden/s_initformal.rc
+0
+
+sha256 4d58e21707b0fb2d29ff62cec5e908fee55a492a178bc0af08ec44210614c786 2114 golden/s_initformal.stdout
+text 73 golden/s_inter.out.o.xf
+   0.9975730   0.0696280  -0.0696280   0.9975730      -2.242       1.766
+
+text 2 golden/s_inter.rc
+0
+
+sha256 96ea97e049d7cff3ec7408b8bbf78c642b242a9936607817a0e4dc1db7bc5061 2845 golden/s_inter.stdout
+text 73 golden/s_interdist.out.o.xf
+   1.0106378   0.0567839  -0.0567839   1.0106378      -2.100       2.077
+
+text 2 golden/s_interdist.rc
+0
+
+sha256 976d8572478519284a5b9264d81d19ab55f0d9d8d4ef9621f9fb50539705d428 3162 golden/s_interdist.stdout
+text 2 golden/s_limbad.rc
+1
+
+text 109 golden/s_limbad.stdout
+
+ERROR: XFSIMPLEX - You can limit only X and Y shifts when searching for formal parameters; try -variables 6
+
+text 73 golden/s_limformal.out.o.xf
+   0.9978367   0.0811708  -0.0719511   1.0191983      -2.386       1.789
+
+text 2 golden/s_limformal.rc
+0
+
+sha256 f25b28674b39477968401ca76518678b3b36f38a1f5fd3762161fa6f957ebece 2075 golden/s_limformal.stdout
+text 73 golden/s_limits.out.o.xf
+   1.0013103   0.0730662  -0.0756640   1.0201678      -2.331       1.767
+
+text 2 golden/s_limits.rc
+0
+
+sha256 e6b5f37d124d3d7ff66d05e4d8ea8ec5f3bfe6758dd76fb1d814721528f22220 2148 golden/s_limits.stdout
+text 73 golden/s_local.out.o.xf
+   0.9978673   0.0716314  -0.0674528   1.0261922      -2.205       1.817
+
+text 2 golden/s_local.rc
+0
+
+sha256 4123df6acfc19cf7873788b3ebbb05eb9970b9d56811180afeb5d79a2b14f77a 2148 golden/s_local.stdout
+text 73 golden/s_localccc.out.o.xf
+   1.0028794   0.0687558  -0.0687558   1.0028794      -2.266       1.678
+
+text 2 golden/s_localccc.rc
+0
+
+sha256 c5cb995f9eb2da958d8065f5bc350af540a2e02e8f67c484927e2d7065802eb2 2148 golden/s_localccc.stdout
+text 0 golden/s_localsmall.out.o.xf
+
+text 2 golden/s_localsmall.rc
+1
+
+sha256 7976554defa8d568e8b574842f280dee6ea58bced82ec47acfd3f76b6a20c8ff 2051 golden/s_localsmall.stdout
+text 2 golden/s_missing.rc
+1
+
+text 114 golden/s_missing.stdout
+ERROR: iiOpen - Opening file nosuch.mrc (No such file or directory)
+
+ERROR: iiuOpen - Could not open 'nosuch.mrc'
+
+text 2 golden/s_nob.rc
+0
+
+sha256 8f23a816a4b107a203a6a7f1fc009b77ca3de0518647dcad31f7749fadbdfa14 3486 golden/s_nob.stdout
+text 2 golden/s_noinit.rc
+1
+
+text 137 golden/s_noinit.stdout
+
+ERROR: A problem occurred testing whether the initial transform file had warpings
+
+ERROR: XFSIMPLEX - OPENING OR READING TRANSFORM FILE
+
+text 73 golden/s_nonopt.out.o.xf
+   1.0035568   0.0837469  -0.0664116   1.0136609      -2.292       1.830
+
+text 2 golden/s_nonopt.rc
+0
+
+sha256 ecf5ea6cbba629257ec7db6134b9885994781143a11557cdd32956fe1cd70a88 2075 golden/s_nonopt.stdout
+text 2 golden/s_secbad.rc
+1
+
+sha256 afc610ba87f824dc15a95bc3c318b715dca763f7034a83b73a3c3f69b1126e81 2007 golden/s_secbad.stdout
+text 73 golden/s_sections.out.o.xf
+   0.8275613  -0.1055711   0.1871214   0.9443323       6.075      -6.385
+
+text 2 golden/s_sections.rc
+0
+
+sha256 118aa8287d61f48e98fbbdb475232866eadd6df4c6e4f26fd7ed6df16721a5f2 2148 golden/s_sections.stdout
+text 2 golden/s_size.rc
+1
+
+sha256 800daa1bf44521451e2f341b07b8900f93d7c25e559f3f981dcd6fa60ef74f4f 2014 golden/s_size.stdout
+text 73 golden/s_sobel.out.o.xf
+   0.9975520   0.0699292  -0.0699292   0.9975520      -2.308       1.614
+
+text 2 golden/s_sobel.rc
+0
+
+sha256 98c870dd8023a09218cbb714e657d9303ef74039baf70c1775593040b824fbb7 2148 golden/s_sobel.stdout
+text 73 golden/s_tiltmatch.out.o.xf
+   0.9974394   0.0715159  -0.0715159   0.9974394      -2.212       1.812
+
+text 2 golden/s_tiltmatch.rc
+0
+
+sha256 540b0bdc28309e9fa55b296c56c623ca69fcf14219c070914e017d68fe10d7aa 2148 golden/s_tiltmatch.stdout
+text 73 golden/s_trace2.out.o.xf
+   0.9970881   0.0762575  -0.0762575   0.9970881      -2.408       1.624
+
+text 2 golden/s_trace2.rc
+0
+
+sha256 d81be49bb80f27d6f390a792f6497038c02836d92a597aa31acd6ef13ac95803 3520 golden/s_trace2.stdout
+text 2 golden/s_useneg.rc
+1
+
+text 58 golden/s_useneg.stdout
+
+ERROR: XFSIMPLEX - Initial transform number out of range
+
+text 73 golden/s_var3.out.o.xf
+   0.9973506   0.0727449  -0.0727449   0.9973506      -2.276       1.725
+
+text 2 golden/s_var3.rc
+0
+
+sha256 7b5ccaa25267c97c2540b2aeb3dbf057ffd9c757a04275a50137275eaca7c8bd 2148 golden/s_var3.stdout
+text 73 golden/s_var4.out.o.xf
+   1.0044272   0.0675108  -0.0675108   1.0044272      -2.233       1.731
+
+text 2 golden/s_var4.rc
+0
+
+sha256 3daf6f452d5ed1273919399ecabc087fbc49b11a1b9a36f76d3b6ab12c711365 2148 golden/s_var4.stdout
+text 2 golden/s_var7.rc
+1
+
+text 66 golden/s_var7.stdout
+
+ERROR: XFSIMPLEX - Number of variables to search is out of range
+
+text 73 golden/s_xy.out.o.xf
+   0.9976088   0.0691130  -0.0691130   0.9976088      -2.191       1.791
+
+text 2 golden/s_xy.rc
+0
+
+sha256 b956b5bbf3fc958cf738df3b4ff831396d088d9e10da77863b3c1e201d2ede3b 2148 golden/s_xy.stdout
+text 0 golden/s_xybad.out.o.xf
+
+text 2 golden/s_xybad.rc
+1
+
+sha256 f8c84536a8e8c263afe2cd424cb3fd8e50a42d459ef13c95fec7e9a9c92bc258 2054 golden/s_xybad.stdout

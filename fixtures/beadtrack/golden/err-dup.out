@@ -1,7 +1,0 @@
-
-Input image file:: t1.mrc
- Dimensions:    127    121     21   Pixel size:         1          1          1
-Mode:  1               Min, max, mean:          451         1043       997.14
-raw2mrc: Converted to mrc format.                       25-Sep-26  12:36:12
-ERROR: beadtrack - Two points (# 1 and 2) on view 11 in contour 1 of object 1
-

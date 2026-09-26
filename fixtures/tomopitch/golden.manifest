@@ -1,0 +1,185 @@
+# imod-rs native golden manifest for fixtures/tomopitch; see fixtures/README.md.
+# Regenerate with fixtures/regen-golden.sh tomopitch; do not edit by hand.
+text 2 golden/tp_badfile.rc
+3
+
+text 34 golden/tp_badfile.stdout
+
+ERROR: qread - reading 'bad.mod'
+
+text 2 golden/tp_cross.rc
+1
+
+text 114 golden/tp_cross.stdout
+
+
+ Analysis of positions from cross.mod:
+
+ERROR: TOMOPITCH - Lines cross when extrapolated to the full range in X
+
+text 2 golden/tp_crossed.rc
+0
+
+sha256 375650eac8af07e0cb73eaddf3249984cc99ef62bfe458b7f13832f8e2246b2f 1399 golden/tp_crossed.stdout
+text 2 golden/tp_crossed_bad.rc
+1
+
+text 106 golden/tp_crossed_bad.stdout
+
+ERROR: TOMOPITCH - Distance between horizontal lines must be less than 0.3 times length of vertical ones
+
+text 2 golden/tp_diag.rc
+1
+
+text 73 golden/tp_diag.stdout
+
+ERROR: TOMOPITCH - Contour    1 in object  1 is too diagonal to analyze
+
+text 2 golden/tp_help.rc
+0
+
+sha256 0db606c13ec599366138e5e49a971ecf63626b2e275d1bf427843ed25891cfa9 1085 golden/tp_help.stdout
+text 2 golden/tp_interactive.rc
+0
+
+sha256 ff450d805c6ea3b5a510533d41e839ca981c3e542f1cfa086e79e51d4d31ecea 1635 golden/tp_interactive.stdout
+text 2 golden/tp_interactive1.rc
+2
+
+text 145 golden/tp_interactive1.stdout
+ Additional thickness to add outside model lines:  For analysis of X-axis tilt, enter distance between sample tomograms:  Number of model files: 
+text 2 golden/tp_interactive_eof.rc
+2
+
+text 145 golden/tp_interactive_eof.stdout
+ Additional thickness to add outside model lines:  For analysis of X-axis tilt, enter distance between sample tomograms:  Number of model files: 
+text 2 golden/tp_nofile.rc
+1
+
+text 88 golden/tp_nofile.stdout
+
+ERROR: TOMOPITCH - Model file nothere.mod does not exist - did you save it from 3dmod?
+
+text 2 golden/tp_nomodel.rc
+1
+
+text 42 golden/tp_nomodel.stdout
+
+ERROR: TOMOPITCH - No model file entered
+
+text 2 golden/tp_onecont.rc
+1
+
+text 81 golden/tp_onecont.stdout
+
+ERROR: TOMOPITCH - You must have an even number of lines in a single model file
+
+text 2 golden/tp_scaled.rc
+0
+
+sha256 c838e136f96c337b8e9a9a6f219c50be668673a0ce8e24fba0b8d6c23a7d6f8c 588 golden/tp_scaled.stdout
+text 2 golden/tp_short.rc
+1
+
+text 77 golden/tp_short.stdout
+
+ERROR: TOMOPITCH - The line going from   -50. to     0. is too short to use
+
+text 2 golden/tp_single.rc
+0
+
+sha256 cdae74133f2fd208f3a0e4f7d1371f96e26b4aca7250259aed0bb5172a947695 584 golden/tp_single.stdout
+text 2 golden/tp_steep.rc
+1
+
+text 81 golden/tp_steep.stdout
+
+ERROR: TOMOPITCH - Line from  -450.  -140. to  -440.   150. is too steep to use
+
+text 2 golden/tp_three.rc
+0
+
+sha256 756e75c4a077cd8b2bb5ed992baab144fdbd0c6dcf7f0a5aedb010c379e887d5 1415 golden/tp_three.stdout
+text 2 golden/tp_three_all.rc
+0
+
+sha256 8a6237ea99b6dc54a2c0f31015c6c43b94982c9d733a18dbbc3178b0471bac09 1620 golden/tp_three_all.stdout
+text 2 golden/tp_three_noxtilt.rc
+0
+
+sha256 d6ba0db6237f50198d6afb20ad8720c0934f485c0108f1b28c0272cc6b7e4ef3 1194 golden/tp_three_noxtilt.stdout
+text 2 golden/tp_three_pts.rc
+1
+
+text 69 golden/tp_three_pts.stdout
+
+ERROR: TOMOPITCH - Contour    1 in object  1 has more than 2 points
+
+text 2 golden/tp_times.rc
+0
+
+sha256 8f1358f052eb15071bc1a0e764371efb0a12eadeca5bac4508235bd26efe129d 1443 golden/tp_times.stdout
+text 2 golden/tp_times_missing.rc
+1
+
+text 159 golden/tp_times_missing.stdout
+
+ERROR: TOMOPITCH - The model file has multiple times but has some contours with no time index. Either contours with time or ones without should be eliminated
+
+text 2 golden/tp_times_one.rc
+1
+
+text 417 golden/tp_times_one.stdout
+
+ MODEL FILES OR TIMES MUST OCCUR IN ORDER OF INCREASING SAMPLE COORDINATE
+
+
+
+ Analysis of positions from time index  1:
+ unrotated lines imply added Z shift of    45.1; thickness of  194.2, set to  196
+ slope =  0.0057: to make level, add   0.3 to total angle offset
+  rotated  lines imply added Z shift of    42.5; thickness of  194.2, set to  196
+
+ERROR: TOMOPITCH - Model or time  2 does not have enough contours
+
+text 2 golden/tp_times_three.rc
+1
+
+text 146 golden/tp_times_three.stdout
+
+ MODEL FILES OR TIMES MUST OCCUR IN ORDER OF INCREASING SAMPLE COORDINATE
+
+
+ERROR: TOMOPITCH - There are more than two contours at time index  1
+
+text 2 golden/tp_two_files.rc
+0
+
+sha256 f8c2660d60b8eba6e7aa62adc61e509ef3b68758bbee16899b564ecd58a812c4 1285 golden/tp_two_files.stdout
+text 2 golden/tp_two_nospacing.rc
+0
+
+sha256 60ee064cee94f1293112cfe75ef19e59d72a000be1be4ccb6cc994a7f0e3675d 851 golden/tp_two_nospacing.stdout
+text 2 golden/tp_whole.rc
+0
+
+sha256 635f7636499387c99824ce822abc1350052870f42177a8c22c381a6a17a4c259 1395 golden/tp_whole.stdout
+text 2 golden/tp_whole_badsp.rc
+1
+
+text 114 golden/tp_whole_badsp.stdout
+
+ERROR: TOMOPITCH - The spacing between two lines of a pair must be less than 0.3 times the spacing between pairs
+
+text 2 golden/tp_whole_nosep.rc
+1
+
+sha256 cfeda6663dd12202999a9957700d2d4adf214fd9fd7172bbce12264a25e27c25 790 golden/tp_whole_nosep.stdout
+text 2 golden/tp_whole_obj.rc
+0
+
+sha256 2e4b7544b64f8fac9ce121de9d23434fd0253249721766f6c53c898573060996 1111 golden/tp_whole_obj.stdout
+text 2 golden/tp_whole_opts.rc
+0
+
+sha256 2f06a7028f200453973a7defd98fc9e8f5218b6d04853b0dcab4e9faca5244cb 1600 golden/tp_whole_opts.stdout

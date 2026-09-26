@@ -1,0 +1,45 @@
+# name	args	stdin	sed on the native stdout for a case reaching a bug fixed in translation (BUGS.md)
+basic	-ref s1_a.mrc -align s1_b.mrc -output out.patch -size 14,14,8 -number 3,3,2 -xminmax 4,45 -yminmax 4,45 -zminmax 2,19 -bxborder 3,3 -byzborder 2,2	-
+nonopt	s1_a.mrc s1_b.mrc out.patch -size 14,14,8 -number 3,3,2 -xminmax 4,45 -yminmax 4,45 -zminmax 2,19 -bxborder 3,3 -byzborder 2,2	-
+maxshift	-ref s1_a.mrc -align s1_b.mrc -output out.patch -size 14,14,8 -number 3,3,2 -xminmax 4,45 -yminmax 4,45 -zminmax 2,19 -bxborder 3,3 -byzborder 2,2 -maxshift 3	-
+volume	-ref s1_a.mrc -align s1_b.mrc -output out.patch -size 14,14,8 -number 3,3,2 -xminmax 4,45 -yminmax 4,45 -zminmax 2,19 -bxborder 3,3 -byzborder 2,2 -volume 1,-1,0.5	-
+initial	-ref s1_a.mrc -align s1_b.mrc -output out.patch -size 14,14,8 -number 3,3,2 -xminmax 4,45 -yminmax 4,45 -zminmax 2,19 -bxborder 3,3 -byzborder 2,2 -initial 1,0,1	-
+taperpad	-ref s1_a.mrc -align s1_b.mrc -output out.patch -size 14,14,8 -number 3,3,2 -xminmax 4,45 -yminmax 4,45 -zminmax 2,19 -bxborder 3,3 -byzborder 2,2 -taper 2,2,1 -pad 4,4,2	-
+#full	kernel3	-ref s1_a.mrc -align s1_b.mrc -output out.patch -size 14,14,8 -number 3,3,2 -xminmax 4,45 -yminmax 4,45 -zminmax 2,19 -bxborder 3,3 -byzborder 2,2 -kernel 1.0	-
+kernel5	-ref s1_a.mrc -align s1_b.mrc -output out.patch -size 14,14,8 -number 3,3,2 -xminmax 4,45 -yminmax 4,45 -zminmax 2,19 -bxborder 3,3 -byzborder 2,2 -kernel 1.6	-
+#full	ksize5	-ref s1_a.mrc -align s1_b.mrc -output out.patch -size 14,14,8 -number 3,3,2 -xminmax 4,45 -yminmax 4,45 -zminmax 2,19 -bxborder 3,3 -byzborder 2,2 -kernel 1.0 -ksize 5	-
+ksizebad	-ref s1_a.mrc -align s1_b.mrc -output out.patch -size 14,14,8 -number 3,3,2 -xminmax 4,45 -yminmax 4,45 -zminmax 2,19 -bxborder 3,3 -byzborder 2,2 -ksize 4	-
+filter	-ref s1_a.mrc -align s1_b.mrc -output out.patch -size 14,14,8 -number 3,3,2 -xminmax 4,45 -yminmax 4,45 -zminmax 2,19 -bxborder 3,3 -byzborder 2,2 -lowpass 0.35,0.05 -sigma1 0.03	-
+region	-ref s1_a.mrc -align s1_b.mrc -output out.patch -size 14,14,8 -number 3,3,2 -xminmax 4,45 -yminmax 4,45 -zminmax 2,19 -bxborder 3,3 -byzborder 2,2 -region s1_rega.mod	-
+bregion	-ref s1_a.mrc -align s1_b.mrc -output out.patch -size 14,14,8 -number 3,3,2 -xminmax 4,45 -yminmax 4,45 -zminmax 2,19 -bxborder 3,3 -byzborder 2,2 -bregion s1_regb.mod -messages	-
+nonplanar	-ref s1_a.mrc -align s1_b.mrc -output out.patch -size 14,14,8 -number 3,3,2 -xminmax 4,45 -yminmax 4,45 -zminmax 2,19 -bxborder 3,3 -byzborder 2,2 -region s1_nonplanar.mod	-
+bsourcefile	-ref s1_a.mrc -align s1_b.mrc -output out.patch -size 14,14,8 -number 3,3,2 -xminmax 4,45 -yminmax 4,45 -zminmax 2,19 -bxborder 3,3 -byzborder 2,2 -bsource s1_b.mrc	-
+bxform	-ref s1_a.mrc -align s1_b.mrc -output out.patch -size 14,14,8 -number 3,3,2 -xminmax 4,45 -yminmax 4,45 -zminmax 2,19 -bxborder 3,3 -byzborder 2,2 -bsource 50,46,22 -bxform small.xf	-
+bxformnosrc	-ref s1_a.mrc -align s1_b.mrc -output out.patch -size 14,14,8 -number 3,3,2 -xminmax 4,45 -yminmax 4,45 -zminmax 2,19 -bxborder 3,3 -byzborder 2,2 -bxform small.xf	-
+bxformshort	-ref s1_a.mrc -align s1_b.mrc -output out.patch -size 14,14,8 -number 3,3,2 -xminmax 4,45 -yminmax 4,45 -zminmax 2,19 -bxborder 3,3 -byzborder 2,2 -bsource 48,48,20 -bxform short.xf	-
+tilt	-ref s1_a.mrc -align s1_b.mrc -output out.patch -size 14,14,8 -number 3,3,2 -xminmax 4,45 -yminmax 4,45 -zminmax 2,19 -bxborder 3,3 -byzborder 2,2 -tilt 44,44 -axis 5 -btilt 44,44 -bsource 48,48,20	-
+tiltnoaxis	-ref s1_a.mrc -align s1_b.mrc -output out.patch -size 14,14,8 -number 3,3,2 -xminmax 4,45 -yminmax 4,45 -zminmax 2,19 -bxborder 3,3 -byzborder 2,2 -tilt 44,44	-
+invert	-ref s1_a.mrc -align s1_b.mrc -output out.patch -size 14,14,8 -number 3,3,2 -xminmax 4,45 -yminmax 4,45 -zminmax 2,19 -bxborder 3,3 -byzborder 2,2 -invert	-
+lsd1	-ref s1_a.mrc -align s1_b.mrc -output out.patch -size 14,14,8 -number 3,3,2 -xminmax 4,45 -yminmax 4,45 -zminmax 2,19 -bxborder 3,3 -byzborder 2,2 -binnings 2 -box 7,7,4 -elim 1,0.3	-
+lsd2	-ref s1_a.mrc -align s1_b.mrc -output out.patch -size 14,14,8 -number 3,3,2 -xminmax 4,45 -yminmax 4,45 -zminmax 2,19 -bxborder 3,3 -byzborder 2,2 -binnings 2 -box 6,6,4 -elim 2,0.5 -debug 1	-
+lsdsmall	-ref s1_a.mrc -align s1_b.mrc -output out.patch -size 14,14,8 -number 3,3,2 -xminmax 4,45 -yminmax 4,45 -zminmax 2,19 -bxborder 3,3 -byzborder 2,2 -binnings 2 -box 3,3,2	-
+lsdbig	-ref s1_a.mrc -align s1_b.mrc -output out.patch -size 14,14,8 -number 3,3,2 -xminmax 4,45 -yminmax 4,45 -zminmax 2,19 -bxborder 3,3 -byzborder 2,2 -binnings 1 -box 10,4,6	-
+lsdtoomany	-ref s1_a.mrc -align s1_b.mrc -output out.patch -size 14,14,8 -number 3,3,2 -xminmax 4,45 -yminmax 4,45 -zminmax 2,19 -bxborder 3,3 -byzborder 2,2 -binnings 7 -box 4,4,2	-
+lsdnobox	-ref s1_a.mrc -align s1_b.mrc -output out.patch -size 14,14,8 -number 3,3,2 -xminmax 4,45 -yminmax 4,45 -zminmax 2,19 -bxborder 3,3 -byzborder 2,2 -binnings 2	-
+#full	debug2	-ref s1_a.mrc -align s1_b.mrc -output out.patch -size 14,14,8 -number 3,3,2 -xminmax 4,45 -yminmax 4,45 -zminmax 2,19 -bxborder 3,3 -byzborder 2,2 -debug 2	-
+debug3	-ref s1_a.mrc -align s1_b.mrc -output out.patch -size 14,14,8 -number 3,3,2 -xminmax 4,45 -yminmax 4,45 -zminmax 2,19 -bxborder 3,3 -byzborder 2,2 -debug 3	-
+flipped	-ref s2_a.mrc -align s2_b.mrc -output out.patch -size 12,8,12 -number 3,2,3 -xminmax 3,43 -yminmax 3,17 -zminmax 3,41 -bxborder 3,3 -byzborder 2,2	-
+flipregion	-ref s2_a.mrc -align s2_b.mrc -output out.patch -size 12,8,12 -number 3,2,3 -xminmax 3,43 -yminmax 3,17 -zminmax 3,41 -bxborder 3,3 -byzborder 2,2 -region s2_rega.mod -kernel 1.2	-
+#full	flipmsg	-ref s2_a.mrc -align s2_b.mrc -output out.patch -size 12,8,12 -number 3,2,3 -xminmax 3,43 -yminmax 3,17 -zminmax 3,41 -bxborder 3,3 -byzborder 2,2 -messages -lowpass 0.3,0.05	-
+nosize	-ref s1_a.mrc -align s1_b.mrc -output out.patch -number 3,3,2 -xminmax 4,45 -yminmax 4,45 -zminmax 2,19	-
+nominmax	-ref s1_a.mrc -align s1_b.mrc -output out.patch -size 14,14,8 -number 3,3,2 -xminmax 4,45 -yminmax 4,45	-
+negborder	-ref s1_a.mrc -align s1_b.mrc -output out.patch -size 14,14,8 -number 3,3,2 -xminmax 0,45 -yminmax 4,45 -zminmax 2,19	-
+toosmall	-ref s1_a.mrc -align s1_b.mrc -output out.patch -size 4,14,8 -number 3,3,2 -xminmax 4,45 -yminmax 4,45 -zminmax 2,19	-
+toobig	-ref s1_a.mrc -align s1_b.mrc -output out.patch -size 14,14,30 -number 3,3,2 -xminmax 4,45 -yminmax 4,45 -zminmax 2,19	-
+nofit	-ref s1_a.mrc -align s1_b.mrc -output out.patch -size 14,14,8 -number 3,3,2 -xminmax 4,45 -yminmax 4,45 -zminmax 2,19	-
+#full	manypatch	-ref s1_a.mrc -align s1_b.mrc -output out.patch -size 14,14,8 -number 30,30,9 -xminmax 4,45 -yminmax 4,45 -zminmax 2,19 -bxborder 3,3 -byzborder 2,2	-
+param	-param cs.param	-
+help	-help	-
+interactive	-	s1_a.mrc\ns1_b.mrc\nout.patch\n\n\n14 14 8\n3 3 2\n3 3 3 3 1 1\n2 2 1\n5\n48 48 20\n\n3 3 2 2\n
+interactiveeof	-	s1_a.mrc\ns1_b.mrc\nout.patch\n\n\n14 14 8\n
+region_debug2	-ref s1_a.mrc -align s1_b.mrc -output out.patch -size 14,14,8 -number 3,3,2 -xminmax 4,45 -yminmax 4,45 -zminmax 2,19 -bxborder 3,3 -byzborder 2,2 -region s1_small.mod -debug 2	-	s/eliminated by A model contour           0$/eliminated by A model contour           1/

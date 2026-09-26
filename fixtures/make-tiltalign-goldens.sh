@@ -14,10 +14,10 @@ R=${IMOD_REF:-/tmp/imod-reference-build}
 F=$(cd "$(dirname "$0")/tiltalign" && pwd)
 S=$(mktemp -d)
 rm -f "$F"/golden/*
-grep -v '^#' "$F/cases.tsv" | while IFS=$'\t' read -r name args; do
+sed "${FULL:+s/^#full\t//;}/^#/d" "$F/cases.tsv" | while IFS=$'\t' read -r name args; do
   [ "$args" = "-" ] && args=""
   d="$S/$name"; mkdir "$d"
-  find "$F" -maxdepth 1 -type f ! -name cases.tsv ! -name gen6.py -exec cp {} "$d"/ \;
+  find "$F" -maxdepth 1 -type f ! -name cases.tsv ! -name gen6.py ! -name golden.manifest -exec cp {} "$d"/ \;
   ls "$d" > "$S/inputs"
   set +e
   (cd "$d" && OMP_NUM_THREADS=1 AUTODOC_DIR=$R/autodoc LD_LIBRARY_PATH=$R/buildlib \

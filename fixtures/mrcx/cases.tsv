@@ -1,0 +1,69 @@
+# name<TAB>arguments ('.' for none); run in a directory holding every input
+new_byte_be	byte_be.mrc out_byte_be.mrc
+#full	inplace_byte_be	byte_be.mrc
+#full	new_byte_le	byte_le.mrc out_byte_le.mrc
+inplace_byte_le	byte_le.mrc
+new_cfloat_be	cfloat_be.mrc out_cfloat_be.mrc
+#full	inplace_cfloat_be	cfloat_be.mrc
+#full	new_cfloat_le	cfloat_le.mrc out_cfloat_le.mrc
+#full	inplace_cfloat_le	cfloat_le.mrc
+new_cshort_be	cshort_be.mrc out_cshort_be.mrc
+#full	inplace_cshort_be	cshort_be.mrc
+#full	new_cshort_le	cshort_le.mrc out_cshort_le.mrc
+#full	inplace_cshort_le	cshort_le.mrc
+#full	new_cut_be	cut_be.mrc out_cut_be.mrc
+#full	inplace_cut_be	cut_be.mrc
+new_cut_le	cut_le.mrc out_cut_le.mrc
+#full	inplace_cut_le	cut_le.mrc
+#full	new_cutbyte_be	cutbyte_be.mrc out_cutbyte_be.mrc
+#full	inplace_cutbyte_be	cutbyte_be.mrc
+new_cutbyte_le	cutbyte_le.mrc out_cutbyte_le.mrc
+#full	inplace_cutbyte_le	cutbyte_le.mrc
+new_ext_odd_be	ext_odd_be.mrc out_ext_odd_be.mrc
+#full	inplace_ext_odd_be	ext_odd_be.mrc
+#full	new_ext_odd_le	ext_odd_le.mrc out_ext_odd_le.mrc
+#full	inplace_ext_odd_le	ext_odd_le.mrc
+new_extreme_le	extreme_le.mrc out_extreme_le.mrc
+#full	inplace_extreme_le	extreme_le.mrc
+new_float_be	float_be.mrc out_float_be.mrc
+#full	inplace_float_be	float_be.mrc
+new_float_le	float_le.mrc out_float_le.mrc
+inplace_float_le	float_le.mrc
+#full	new_half_be	half_be.mrc out_half_be.mrc
+#full	inplace_half_be	half_be.mrc
+new_half_le	half_le.mrc out_half_le.mrc
+#full	inplace_half_le	half_le.mrc
+#full	new_labels_be	labels_be.mrc out_labels_be.mrc
+#full	inplace_labels_be	labels_be.mrc
+new_labels_le	labels_le.mrc out_labels_le.mrc
+#full	inplace_labels_le	labels_le.mrc
+new_notmrc	notmrc.bin out_notmrc.mrc
+#full	inplace_notmrc	notmrc.bin
+new_old_be	old_be.mrc out_old_be.mrc
+#full	inplace_old_be	old_be.mrc
+new_old_le	old_le.mrc out_old_le.mrc
+#full	inplace_old_le	old_le.mrc
+new_rgb_be	rgb_be.mrc out_rgb_be.mrc
+#full	inplace_rgb_be	rgb_be.mrc
+new_rgb_le	rgb_le.mrc out_rgb_le.mrc
+#full	inplace_rgb_le	rgb_le.mrc
+#full	new_short_be	short_be.mrc out_short_be.mrc
+inplace_short_be	short_be.mrc
+new_short_le	short_le.mrc out_short_le.mrc
+#full	inplace_short_le	short_le.mrc
+new_tiny	tiny.bin out_tiny.mrc
+#full	inplace_tiny	tiny.bin
+#full	new_trail100_be	trail100_be.mrc out_trail100_be.mrc
+#full	inplace_trail100_be	trail100_be.mrc
+new_trail100_le	trail100_le.mrc out_trail100_le.mrc
+#full	inplace_trail100_le	trail100_le.mrc
+#full	new_trail600_be	trail600_be.mrc out_trail600_be.mrc
+#full	inplace_trail600_be	trail600_be.mrc
+new_trail600_le	trail600_le.mrc out_trail600_le.mrc
+#full	inplace_trail600_le	trail600_le.mrc
+noargs	.
+dash	-ieee byte_le.mrc
+#full	toomany	byte_le.mrc a.mrc b.mrc
+missing	nosuch.mrc
+#full	missing_out	nosuch.mrc out.mrc
+badout	byte_le.mrc nodir/out.mrc

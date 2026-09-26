@@ -1,0 +1,124 @@
+# imod-rs native golden manifest for fixtures/ctfphaseflip; see fixtures/README.md.
+# Regenerate with fixtures/regen-golden.sh ctfphaseflip; do not edit by hand.
+sha256 a19f468a3298f201f25a901be4ed4fbd2d1c70b58dfac0c1b8c0affccf8fdd13 2027 golden/allscale.out
+text 2 golden/allscale.rc
+0
+
+sha256 658a4f45ccf37a60af542cc88b8015a71e8b05755424c4775be9eaec8c586eb3 54784 golden/allscale/out.mrc
+sha256 a4c239c6348155f2dbf9bc45ba51ec947a3133f71ff7f87ab45d4c6f69787252 1493 golden/astigxf.out
+text 2 golden/astigxf.rc
+0
+
+sha256 b8d95abdb049574ead9f012045a412bd69ba36b8cc37908c7bec036d20671bfd 54784 golden/astigxf/out.mrc
+text 312 golden/badview.out
+stackFn = f48.mrc, angleFn=t7.tlt,  invertAngles=0
+volt=300 Kv, interpolationWidth=15 pixels, defocusTol=200 nm 
+pixelSize=0.500000 nm, cs=2.700000 mm, ampContrast=0.070000 
+ERROR: ctfphaseflip - You cannot enter a maximum strip width less than the image size with a non-zero X-axis tilt or tilt axis angle
+rc=1
+
+text 2 golden/badview.rc
+1
+
+sha256 7bf0f8893dbe258816bf847e199879df77dd3eaf778f6b88308d9d1c554625fb 1224 golden/basic.out
+text 2 golden/basic.rc
+0
+
+sha256 2a7a0e9812e111b9f58ca892584833028e22cc032208587408ade9ce87269782 54784 golden/basic/out.mrc
+text 84 golden/bothphase.out
+ERROR: ctfphaseflip - You cannot enter phase shift in both degrees and radians
+rc=1
+
+text 2 golden/bothphase.rc
+1
+
+sha256 4db42b30804c1f6f0b1fba17159e73616e6c3bc059f5385d2121fe46909109bc 920 golden/byte.out
+text 2 golden/byte.rc
+0
+
+sha256 3fc8f517e9063c0dd6a2012d635b0d95641a36d95ff663f2324cdf6fcc654731 9574 golden/byte/out.mrc
+sha256 e30dae95f7b25677f3c97c81cffbef786b8176ff870360ad6c01275bbab075a8 1518 golden/cuton.out
+text 2 golden/cuton.rc
+0
+
+sha256 532a40a17caaca408ae34c71b96dae541e7e4413de120fcc3a9abd0c32bcfa59 54784 golden/cuton/out.mrc
+sha256 8f6ac6bd8680ca52bdd46c968463c633646ca273c5cc5c08708fb3344a707d0b 1409 golden/diagonal.out
+text 2 golden/diagonal.rc
+0
+
+sha256 5808d286514a9923c6825e090156d8fb9d9a000d78bb7749036d1903f6d83b83 54784 golden/diagonal/out.mrc
+text 456 golden/flagged.out
+stackFn = f48.mrc, angleFn=t7.tlt,  invertAngles=0
+volt=300 Kv, interpolationWidth=15 pixels, defocusTol=200 nm 
+pixelSize=0.500000 nm, cs=2.700000 mm, ampContrast=0.070000 
+rc=0
+stackFn = out.mrc, angleFn=t7.tlt,  invertAngles=0
+volt=300 Kv, interpolationWidth=15 pixels, defocusTol=200 nm 
+pixelSize=0.500000 nm, cs=2.700000 mm, ampContrast=0.070000 
+ERROR: ctfphaseflip - The input file stack header has the flag set that it has been CTF corrected
+rc=1
+
+text 2 golden/flagged.rc
+1
+
+sha256 943f461e581e6f9aefbbd490f2ec8fcd9a964ca681d6ef1d2bc1f25a5033ae3c 1024 golden/flagged/out.mrc
+sha256 c612d77c9c0fd026875dddb9720659ece9805abe07e66f7e2573b9c0381f74be 1078 golden/gpu.out
+text 2 golden/gpu.rc
+0
+
+sha256 3b1a054b60223f364c9178332b16476efc1ae1c73a3ea12cdcdcf4031f6a3b49 54784 golden/gpu/out.mrc
+text 106 golden/gpufail.out
+ERROR: ctfphaseflip - 2 values expected but only 1 values found in value entry:  ActionIfGPUFails  2
+rc=1
+
+text 2 golden/gpufail.rc
+1
+
+sha256 9d668b8e83fa943245331da9e3e45ae28f0c9988cef3bb8b72402cdeae3af715 3353 golden/help.out
+text 2 golden/help.rc
+0
+
+sha256 03e3960542e24ce89ec0a0b754ba823df6ab363473b761ef2ab5644111107a42 979 golden/maxwidth.out
+text 2 golden/maxwidth.rc
+0
+
+sha256 09da9d45630c2f5bc54dcf2ff83fcb240db267c227fcbe61105c9e3487df6920 39424 golden/maxwidth/out.mrc
+sha256 fb81e3f3b7eb9437cec73a14532008c7bf53111d1f8a799a5604d71a71ddd97f 1376 golden/noangles.out
+text 2 golden/noangles.rc
+0
+
+sha256 77c11c28747f0a331878196dfb8153ef3e57a3178451837bdf92ff4fcb2b0b97 54784 golden/noangles/out.mrc
+text 286 golden/nodefocus.out
+stackFn = f48.mrc, angleFn=t7.tlt,  invertAngles=0
+volt=300 Kv, interpolationWidth=15 pixels, defocusTol=200 nm 
+pixelSize=0.500000 nm, cs=2.700000 mm, ampContrast=0.070000 
+ERROR: ctfphaseflip - The defocus file none.defocus is non-existent or empty - did you save in ctfplotter?
+rc=1
+
+text 2 golden/nodefocus.rc
+1
+
+text 51 golden/notol.out
+ERROR: ctfphaseflip - No DefocusTol specified
+rc=1
+
+text 2 golden/notol.rc
+1
+
+sha256 867b273e9aae30b0fd8eca551d7dc2c41ee0791ba751c257b266a296d08790c0 1917 golden/parallel.out
+text 2 golden/parallel.rc
+0
+
+sha256 88ec27c9d501df77958b98dc785927b9e02aaf6ef33ddd5c35a415792761cd8e 2560 golden/parallel/b1.mrc
+sha256 86f1b778115b4ad2633d075c59cab1df3407041b94e87f9b902172e68df98b67 1792 golden/parallel/b2.mrc
+sha256 36e1e7c171010d71091e35ef2715ea113531d8ea3a2f1f1c25c06c945a91cb90 54784 golden/parallel/out.mrc
+sha256 34cecb0e0733b3846c3453803ce154dcb4b5dfc961728173b149aebacf4f379b 1693 golden/phasecut.out
+text 2 golden/phasecut.rc
+0
+
+sha256 a6ac2e221d88b5d2ba00d4311c72e21d03f8d0f782bbf49a66c6320af7b93e0d 54784 golden/phasecut/out.mrc
+sha256 9a7aeb8ebf8be8a9e51756c2b95805bae6a0fe99c9a1672659b0128057b11059 1422 golden/v1off.out
+text 2 golden/v1off.rc
+0
+
+sha256 22f9ee0e3a5dea7c93bfe035b45a9c5c73a6ee39de1b1f9a3510db018b311d49 54784 golden/v1off/out.mrc

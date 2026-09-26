@@ -4,45 +4,45 @@ xftoxg	nonopt	BBa.xf o.xg	-
 xftoxg	defname	BBa.xf	-
 xftoxg	global	-in BBa.xf -g o.xg -nfit 0	-
 xftoxg	nfit1	-in BBa.xf -g o.xg -nfit 1	-
-xftoxg	nfit1o3	-in midzone2a.xf -g o.xg -nfit 1 -order 3	-
+#full	xftoxg	nfit1o3	-in midzone2a.xf -g o.xg -nfit 1 -order 3	-
 xftoxg	nfit5o2	-in midzone2a.xf -g o.xg -nfit 5 -order 2	-
-xftoxg	nfit20o4	-in gen200.xf -g o.xg -nfit 20 -order 4	-
+#full	xftoxg	nfit20o4	-in gen200.xf -g o.xg -nfit 20 -order 4	-
 xftoxg	ref	-in BBa.xf -g o.xg -ref 10	-
-xftoxg	ref1	-in gen40.xf -g o.xg -ref 1	-
+#full	xftoxg	ref1	-in gen40.xf -g o.xg -ref 1	-
 xftoxg	refbad0	-in gen40.xf -g o.xg -ref 0	-
 xftoxg	refbig	-in gen40.xf -g o.xg -ref 41	-
 xftoxg	refnfit	-in gen40.xf -g o.xg -ref 3 -nfit 5	-
-xftoxg	refnfit0	-in gen40.xf -g o.xg -ref 3 -nfit 0	-
+#full	xftoxg	refnfit0	-in gen40.xf -g o.xg -ref 3 -nfit 0	-
 xftoxg	negnfit	-in gen40.xf -g o.xg -nfit -2	-
-xftoxg	mixed1	-in gen40.xf -g o.xg -mixed 1	-
-xftoxg	mixed2	-in gen40.xf -g o.xg -mixed 2	-
+#full	xftoxg	mixed1	-in gen40.xf -g o.xg -mixed 1	-
+#full	xftoxg	mixed2	-in gen40.xf -g o.xg -mixed 2	-
 xftoxg	mixed3	-in gen40.xf -g o.xg -nfit 9 -mixed 3	-
-xftoxg	mixed4	-in gen40.xf -g o.xg -nfit 1 -mixed 4	-
-xftoxg	mixed9	-in gen40.xf -g o.xg -mixed 9	-
+#full	xftoxg	mixed4	-in gen40.xf -g o.xg -nfit 1 -mixed 4	-
+#full	xftoxg	mixed9	-in gen40.xf -g o.xg -mixed 9	-
 xftoxg	mixedneg	-in gen40.xf -g o.xg -mixed -1	-
 xftoxg	mixedglobal	-in gen40.xf -g o.xg -nfit 0 -mixed 2	-
 xftoxg	range	-in groups.xf -g o.xg -range 10	-
 xftoxg	rangeglob	-in groups.xf -g o.xg -nfit 0 -range 5	-
-xftoxg	range1	-in groups.xf -g o.xg -nfit 1 -range 5	-
+#full	xftoxg	range1	-in groups.xf -g o.xg -nfit 1 -range 5	-
 xftoxg	rangetiny	-in groups.xf -g o.xg -nfit 3 -range 0.0001	-
 xftoxg	rot	-in rot.xf -g o.xg	-
-xftoxg	rotg	-in rot.xf -g o.xg -nfit 0	-
-xftoxg	rot1	-in rot.xf -g o.xg -nfit 1 -order 2	-
+#full	xftoxg	rotg	-in rot.xf -g o.xg -nfit 0	-
+#full	xftoxg	rot1	-in rot.xf -g o.xg -nfit 1 -order 2	-
 xftoxg	robust	-in gen200.xf -g o.xg -robust	-
-xftoxg	robust1	-in BBa.xf -g o.xg -nfit 1 -robust	-
+#full	xftoxg	robust1	-in BBa.xf -g o.xg -nfit 1 -robust	-
 xftoxg	robustk	-in gen200.xf -g o.xg -robust -kfactor 2 -nfit 15 -order 2	-
 xftoxg	robustmax	-in gen40.xf -g o.xg -robust -max 3	-
 xftoxg	robustiter	-in gen40.xf -g o.xg -robust -iteration 0.3,0.05,0.08	-
-xftoxg	order0	-in gen40.xf -g o.xg -order 0 -nfit 1	-
-xftoxg	order15	-in gen40.xf -g o.xg -order 15 -nfit 1	-
+#full	xftoxg	order0	-in gen40.xf -g o.xg -order 0 -nfit 1	-
+#full	xftoxg	order15	-in gen40.xf -g o.xg -order 15 -nfit 1	-
 xftoxg	one	-in gen1.xf -g o.xg	-
 xftoxg	two	-in gen2.xf -g o.xg	-
-xftoxg	two1	-in gen2.xf -g o.xg -nfit 1	-
-xftoxg	three	-in gen3.xf -g o.xg -nfit 1	-
-xftoxg	three2	-in gen3.xf -g o.xg -nfit 2	-
-xftoxg	five	-in gen5.xf -g o.xg	-
+#full	xftoxg	two1	-in gen2.xf -g o.xg -nfit 1	-
+#full	xftoxg	three	-in gen3.xf -g o.xg -nfit 1	-
+#full	xftoxg	three2	-in gen3.xf -g o.xg -nfit 2	-
+#full	xftoxg	five	-in gen5.xf -g o.xg	-
 xftoxg	empty	-in empty.xf -g o.xg	-
-xftoxg	emptyg	-in empty.xf -g o.xg -nfit 0	-
+#full	xftoxg	emptyg	-in empty.xf -g o.xg -nfit 0	-
 xftoxg	odd	-in odd.xf -g o.xg -nfit 0	-
 xftoxg	bad	-in bad.xf -g o.xg	-
 xftoxg	partial	-in partial.xf -g o.xg -nfit 0	-
@@ -50,50 +50,50 @@ xftoxg	big	-in big.xf -g o.xg -nfit 0	-
 xftoxg	missing	-in nosuch.xf -g o.xg	-
 xftoxg	noin	-g o.xg	-
 xftoxg	help	-help	-
-xftoxg	medium	-in mediumscansb2_midas.xf -g o.xg	-
+#full	xftoxg	medium	-in mediumscansb2_midas.xf -g o.xg	-
 xftoxg	interactive0	-	0\nBBa.xf\no.xg\n
-xftoxg	interactive1	-	1\n2\nBBa.xf\no.xg\n
+#full	xftoxg	interactive1	-	1\n2\nBBa.xf\no.xg\n
 xftoxg	interactiveneg	-	-7\n3\n1\nBBa.xf\no.xg\n
 xftoxg	interactiveeof	-	-
 xftoxg	w10	-in w10.xf -g o.xg	-
 xftoxg	w10g	-in w10.xf -g o.xg -nfit 0	-
-xftoxg	w10r	-in w10.xf -g o.xg -ref 4	-
-xftoxg	w10n1	-in w10.xf -g o.xg -nfit 1	-
-xftoxg	w10n5	-in w10.xf -g o.xg -nfit 5 -order 2	-
-xftoxg	w2	-in w2.xf -g o.xg	-
+#full	xftoxg	w10r	-in w10.xf -g o.xg -ref 4	-
+#full	xftoxg	w10n1	-in w10.xf -g o.xg -nfit 1	-
+#full	xftoxg	w10n5	-in w10.xf -g o.xg -nfit 5 -order 2	-
+#full	xftoxg	w2	-in w2.xf -g o.xg	-
 xftoxg	w1	-in w1.xf -g o.xg	-
 xftoxg	cp8	-in cps.xf -g o.xg -nfit 0	-
-xftoxg	cp8n4	-in cps.xf -g o.xg -nfit 4	-
+#full	xftoxg	cp8n4	-in cps.xf -g o.xg -nfit 4	-
 xftoxg	cpmix	-in cpsmix.xf -g o.xg -nfit 0	-
 xftoxg	wfwd	-in wfwd.xf -g o.xg	-
 xftoxg	w10mixed	-in w10.xf -g o.xg -mixed 3	-
 xftoxg	w10robust	-in w10.xf -g o.xg -robust -nfit 7	-
-xftoxg	w10range	-in w10.xf -g o.xg -range 0.5 -nfit 0	-
-xftoxg	nfit2	-in gen40.xf -g o.xg -nfit 2	-
-xftoxg	nfit2o5	-in gen40.xf -g o.xg -nfit 2 -order 5	-
-xftoxg	nfit100	-in gen40.xf -g o.xg -nfit 100	-
-xftoxg	robustrot	-in rot.xf -g o.xg -robust -nfit 11 -order 2	-
-xftoxg	robustglob1	-in gen200.xf -g o.xg -robust -nfit 1 -order 3	-
-xftoxg	mixedrange	-in groups.xf -g o.xg -mixed 4 -range 20	-
-xftoxg	BBrobust	-in BBa.xf -g o.xg -robust -kfactor 0.5	-
+#full	xftoxg	w10range	-in w10.xf -g o.xg -range 0.5 -nfit 0	-
+#full	xftoxg	nfit2	-in gen40.xf -g o.xg -nfit 2	-
+#full	xftoxg	nfit2o5	-in gen40.xf -g o.xg -nfit 2 -order 5	-
+#full	xftoxg	nfit100	-in gen40.xf -g o.xg -nfit 100	-
+#full	xftoxg	robustrot	-in rot.xf -g o.xg -robust -nfit 11 -order 2	-
+#full	xftoxg	robustglob1	-in gen200.xf -g o.xg -robust -nfit 1 -order 3	-
+#full	xftoxg	mixedrange	-in groups.xf -g o.xg -mixed 4 -range 20	-
+#full	xftoxg	BBrobust	-in BBa.xf -g o.xg -robust -kfactor 0.5	-
 xftoxg	w10half	-in w10half.xf -g o.xg	-
 xfproduct	basic	BBa.xf midzone2a.xf p.xf	-
 xfproduct	opts	-in1 BBa.xf -in2 BBa.xf -output p.xf	-
-xfproduct	same	gen40.xf gen40.xf p.xf	-
+#full	xfproduct	same	gen40.xf gen40.xf p.xf	-
 xfproduct	scale	-in1 gen40.xf -in2 gen40.xf -output p.xf -scale 2,0.5	-
 xfproduct	scale1	-in1 gen40.xf -in2 gen40.xf -output p.xf -scale 3	-
 xfproduct	single2	gen40.xf one.xf p.xf	-
-xfproduct	single1	one.xf gen40.xf p.xf	-
+#full	xfproduct	single1	one.xf gen40.xf p.xf	-
 xfproduct	one2	gen40.xf one.xf p.xf -one 5	-
 xfproduct	one1	one.xf gen40.xf p.xf -one 0	-
-xfproduct	onebig	one.xf gen40.xf p.xf -one 40	-
-xfproduct	oneneg	gen40.xf one.xf p.xf -one -3	-
-xfproduct	oneboth	one.xf one.xf p.xf -one 0	-
+#full	xfproduct	onebig	one.xf gen40.xf p.xf -one 40	-
+#full	xfproduct	oneneg	gen40.xf one.xf p.xf -one -3	-
+#full	xfproduct	oneboth	one.xf one.xf p.xf -one 0	-
 xfproduct	mismatch	gen40.xf gen5.xf p.xf	-
 xfproduct	empty1	empty.xf gen5.xf p.xf	-
-xfproduct	empty2	gen5.xf empty.xf p.xf	-
+#full	xfproduct	empty2	gen5.xf empty.xf p.xf	-
 xfproduct	bad	bad.xf gen5.xf p.xf	-
-xfproduct	partial	partial.xf gen5.xf p.xf	-
+#full	xfproduct	partial	partial.xf gen5.xf p.xf	-
 xfproduct	odd	odd.xf odd.xf p.xf	-
 xfproduct	big	big.xf big.xf p.xf -scale 100,100	-
 xfproduct	missing	nosuch.xf gen5.xf p.xf	-
@@ -106,26 +106,26 @@ xfproduct	ww	w10.xf w10.xf p.xf	-
 xfproduct	wl	w10.xf gen40.xf p.xf	-
 xfproduct	lw	gen40.xf w10.xf p.xf	-
 xfproduct	wone	w10.xf one.xf p.xf	-
-xfproduct	wone5	w10.xf one.xf p.xf -one 5	-
-xfproduct	onew	one.xf w10.xf p.xf -one 2	-
-xfproduct	w1w	w1.xf w10.xf p.xf	-
+#full	xfproduct	wone5	w10.xf one.xf p.xf -one 5	-
+#full	xfproduct	onew	one.xf w10.xf p.xf -one 2	-
+#full	xfproduct	w1w	w1.xf w10.xf p.xf	-
 xfproduct	ww7	w7var.xf w7var.xf p.xf	-
-xfproduct	wvar_l	w7var.xf gen40.xf p.xf	-
-xfproduct	l_wvar	gen5.xf w7var.xf p.xf	-
-xfproduct	whalf	w10.xf w10half.xf p.xf	-
+#full	xfproduct	wvar_l	w7var.xf gen40.xf p.xf	-
+#full	xfproduct	l_wvar	gen5.xf w7var.xf p.xf	-
+#full	xfproduct	whalf	w10.xf w10half.xf p.xf	-
 xfproduct	whalfs	w10.xf w10half.xf p.xf -scale 0.5,1	-
 xfproduct	whalfbad	w10.xf w10half.xf p.xf -scale 1,1	-
 xfproduct	wscale	w10.xf gen40.xf p.xf -scale 2,2	-
 xfproduct	cpl	cps.xf gen40.xf p.xf	-
 xfproduct	lcp	gen40.xf cps.xf p.xf	-
-xfproduct	cpcp	cps.xf cps.xf p.xf	-
+#full	xfproduct	cpcp	cps.xf cps.xf p.xf	-
 xfproduct	cpw	cps.xf w10.xf p.xf	-
-xfproduct	wcp	w10.xf cps.xf p.xf	-
-xfproduct	cpmixl	cpsmix.xf gen40.xf p.xf	-
-xfproduct	lcpmix	gen40.xf cpsmix.xf p.xf	-
-xfproduct	cpmixw	cpsmix.xf w10.xf p.xf	-
+#full	xfproduct	wcp	w10.xf cps.xf p.xf	-
+#full	xfproduct	cpmixl	cpsmix.xf gen40.xf p.xf	-
+#full	xfproduct	lcpmix	gen40.xf cpsmix.xf p.xf	-
+#full	xfproduct	cpmixw	cpsmix.xf w10.xf p.xf	-
 xfproduct	cplinl	cplin.xf gen40.xf p.xf	-
-xfproduct	cplinw	cplin.xf w10.xf p.xf	-
-xfproduct	cponel	cps.xf one.xf p.xf -one 2	-
-xfproduct	cpscale	cps.xf gen40.xf p.xf -scale 2,2	-
+#full	xfproduct	cplinw	cplin.xf w10.xf p.xf	-
+#full	xfproduct	cponel	cps.xf one.xf p.xf -one 2	-
+#full	xfproduct	cpscale	cps.xf gen40.xf p.xf -scale 2,2	-
 xfproduct	wfwd	wfwd.xf gen5.xf p.xf	-

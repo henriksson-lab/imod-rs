@@ -1,0 +1,184 @@
+# imod-rs native golden manifest for fixtures/fakevolume; see fixtures/README.md.
+# Regenerate with fixtures/regen-golden.sh fakevolume; do not edit by hand.
+sha256 dcba633515f3cbe4c23c47408c38e9516f916a2e61e58ff1918cde60dd4d6e0f 37024 golden/c1.o.mrc
+text 2 golden/c1.rc
+0
+
+text 37 golden/c1.stdout
+
+ NEW image file on unit   2 : o.mrc
+
+sha256 bb88044262ba5db44fe52751b87310b444c26cda1c3deb778a68b940afac691a 37024 golden/c2.o.mrc
+text 2 golden/c2.rc
+0
+
+text 37 golden/c2.stdout
+
+ NEW image file on unit   2 : o.mrc
+
+sha256 07c526ac6101c7ca97db2560a8d3a9692181989e4e116c3138b6334a1b21b81c 37024 golden/c3.o.mrc
+text 2 golden/c3.rc
+0
+
+text 37 golden/c3.stdout
+
+ NEW image file on unit   2 : o.mrc
+
+sha256 0ae285b55641c425e802b8a80fcb0e5bac1a97bd8a16c566146a71aebe4219cd 37024 golden/c5.o.mrc
+text 2 golden/c5.rc
+0
+
+text 37 golden/c5.stdout
+
+ NEW image file on unit   2 : o.mrc
+
+sha256 9974d7c32f70747a8f11d2ffa318ba83adca224683f06a36e0f25d53d952012f 7168 golden/c6.o.mrc
+text 2 golden/c6.rc
+0
+
+text 37 golden/c6.stdout
+
+ NEW image file on unit   2 : o.mrc
+
+text 0 golden/e_ends.o.mrc
+
+text 2 golden/e_ends.rc
+1
+
+text 115 golden/e_ends.stdout
+
+ NEW image file on unit   2 : o.mrc
+ERROR: fakevolume - You must enter the same number of cylinder starts as ends
+
+text 0 golden/e_mixtype.o.mrc
+
+text 2 golden/e_mixtype.rc
+1
+
+text 153 golden/e_mixtype.stdout
+
+ NEW image file on unit   2 : o.mrc
+ERROR: fakevolume - You must enter -stype, -sdens, and -sradii for all spheres since they are not all the same type
+
+text 0 golden/e_mode.o.mrc
+
+text 2 golden/e_mode.rc
+1
+
+text 95 golden/e_mode.stdout
+
+ NEW image file on unit   2 : o.mrc
+ERROR: fakevolume - Output mode must be 0, 1, 2, 6, or 12
+
+text 0 golden/e_noback.o.mrc
+
+text 2 golden/e_noback.rc
+1
+
+text 92 golden/e_noback.stdout
+
+ NEW image file on unit   2 : o.mrc
+ERROR: fakevolume - Background density must be entered
+
+text 0 golden/e_nocen.o.mrc
+
+text 2 golden/e_nocen.rc
+1
+
+text 133 golden/e_nocen.stdout
+
+ NEW image file on unit   2 : o.mrc
+ERROR: fakevolume - You cannot enter -sdens, -sradii, or -stype without entering sphere centers
+
+text 0 golden/e_nocyl.o.mrc
+
+text 2 golden/e_nocyl.rc
+1
+
+text 134 golden/e_nocyl.stdout
+
+ NEW image file on unit   2 : o.mrc
+ERROR: fakevolume - You cannot enter -cdens, -cradii, or -trunc without entering cylinder points
+
+text 0 golden/e_nosize.o.mrc
+
+text 2 golden/e_nosize.rc
+1
+
+text 85 golden/e_nosize.stdout
+
+ NEW image file on unit   2 : o.mrc
+ERROR: fakevolume - Volume size must be entered
+
+text 0 golden/e_range.o.mrc
+
+text 2 golden/e_range.rc
+1
+
+text 86 golden/e_range.stdout
+
+ NEW image file on unit   2 : o.mrc
+ERROR: fakevolume - X, Y, or Z size out of range
+
+text 0 golden/e_sdens.o.mrc
+
+text 2 golden/e_sdens.rc
+1
+
+text 102 golden/e_sdens.stdout
+
+ NEW image file on unit   2 : o.mrc
+ERROR: fakevolume - You must enter -sdens either once or 3 times
+
+text 0 golden/e_sradii.o.mrc
+
+text 2 golden/e_sradii.rc
+1
+
+text 103 golden/e_sradii.stdout
+
+ NEW image file on unit   2 : o.mrc
+ERROR: fakevolume - You must enter -sradii either once or 3 times
+
+text 0 golden/e_stype.o.mrc
+
+text 2 golden/e_stype.rc
+1
+
+text 102 golden/e_stype.stdout
+
+ NEW image file on unit   2 : o.mrc
+ERROR: fakevolume - You must enter -stype either once or 3 times
+
+sha256 0b906b0cf0ef8d087c5487d42bc3e07b3dec9321e5ce6c44189efd7364e5b59c 9664 golden/s1.o.mrc
+text 2 golden/s1.rc
+0
+
+text 37 golden/s1.stdout
+
+ NEW image file on unit   2 : o.mrc
+
+sha256 ce566b89c2b2719b20a8c46ecc887e76bac1004b59356f3c6651fdf25bf706b1 16384 golden/s2.o.mrc
+text 2 golden/s2.rc
+0
+
+text 37 golden/s2.stdout
+
+ NEW image file on unit   2 : o.mrc
+
+sha256 abe5c1425e9011b44df3dc161042b9cf3187602b35831b3c11b0f721524ce497 8704 golden/s3.o.mrc
+text 2 golden/s3.rc
+0
+
+text 37 golden/s3.stdout
+
+ NEW image file on unit   2 : o.mrc
+
+sha256 083ff3206cf38511850ab4cd8fb9b36fa19ec0116211034946f39cd41b1d6d92 8704 golden/s6.o.mrc
+text 2 golden/s6.rc
+0
+
+text 37 golden/s6.stdout
+
+ NEW image file on unit   2 : o.mrc
+

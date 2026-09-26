@@ -1,0 +1,952 @@
+# imod-rs native golden manifest for fixtures/splittilt; see fixtures/README.md.
+# Regenerate with fixtures/regen-golden.sh splittilt; do not edit by hand.
+text 106 golden/ali_stack.files
+TS01.xtilt
+TS01_ali.mrc
+tilt-001.com
+tilt-002.com
+tilt-bound.info
+tilt-finish.com
+tilt-start.com
+tilt.com
+
+text 117 golden/ali_stack.out
+4 command files for 2 chunks created and ready to run
+  with processchunks or parallel processing interface in Etomo
+
+text 2 golden/ali_stack.rc
+0
+
+sha256 e5222b23e0ea28860b93c02ad9b27c08fda2e2e548a0854513d9dec447d7dd79 683 golden/ali_stack/tilt-001.com
+sha256 2d7a9f9f09edb8fbab93b082adf6cdbec9e8dd7f2b4bf4bfc45626d4fd87ecd0 684 golden/ali_stack/tilt-002.com
+text 67 golden/ali_stack/tilt-bound.info
+1 0 128 16 2
+TS01-001.rbound
+-1 0 47 -1
+TS01-002.rbound
+48 0 -1 -1
+
+text 211 golden/ali_stack/tilt-finish.com
+$fixboundaries "TS01_rec.mrc" "tilt-bound.info"
+$collectmmm pixels= "tilt" 2 "TS01_rec.mrc" 1
+$b3dremove -g tilt-[0-9][0-9][0-9]*.com* tilt-[0-9][0-9][0-9]*.log* "TS01-[0-9][0-9][0-9]*.rbound" "tilt-bound.info"
+
+sha256 4fcbf0609ea6f7021e2247a7f0824a2ba4eb955a17d524c7e5de4ca92a5ae2a8 649 golden/ali_stack/tilt-start.com
+text 197 golden/basic.files
+TS01.xtilt
+tilt-001.com
+tilt-002.com
+tilt-003.com
+tilt-004.com
+tilt-005.com
+tilt-006.com
+tilt-007.com
+tilt-008.com
+tilt-009.com
+tilt-010.com
+tilt-bound.info
+tilt-finish.com
+tilt-start.com
+tilt.com
+
+text 206 golden/basic.out
+WARNING: splittilt - aligned stack not found; sizes will be taken from FULLIMAGE entry
+12 command files for 10 chunks created and ready to run
+  with processchunks or parallel processing interface in Etomo
+
+text 2 golden/basic.rc
+0
+
+sha256 48415c8781a0bb18c7050fcddf6c733e97a48ba645ff5e3f7aedf191d27cf016 684 golden/basic/tilt-001.com
+sha256 e2d5aedde5f23ad328f59518a4054cc8983ef96ddfcb982bd29cca9319eeab5f 686 golden/basic/tilt-002.com
+sha256 99ef029b47f2bad7f6ec98254b8263a8b2a234785bbf7c306ddc579a3ecf7beb 687 golden/basic/tilt-003.com
+sha256 beb4b00e255259638b912d5dbf877c5fbe25863785308e605be68af7b1cb09a6 687 golden/basic/tilt-004.com
+sha256 d41c4681c5653a93f24356f0877f16252fe85553e612fe5b354ff9c60334e0be 687 golden/basic/tilt-005.com
+sha256 21d9dfc471e508e9f04dc0b9f1c044ab49bf316a4313d7173ce4384992aeb5c2 687 golden/basic/tilt-006.com
+sha256 c138857b8744da72bd59fd9d97f27ffbf1882a7334f677f6808c14f433fe9f1c 687 golden/basic/tilt-007.com
+sha256 b27da36bed893291a150d86b537bcb4f5dc8e023703822efaf2b1e345292422d 687 golden/basic/tilt-008.com
+sha256 dd8743e61affb461eb6234d8dae84f5bfba294b7b6e6dca29c050cfbee8b4d07 687 golden/basic/tilt-009.com
+sha256 1b3e71b05d77c432a512c0f5a650b1f01b3cd3512499f83096ae9c6990c38ab3 687 golden/basic/tilt-010.com
+text 299 golden/basic/tilt-bound.info
+1 0 512 4 10
+TS01-001.rbound
+-1 0 51 -1
+TS01-002.rbound
+52 0 103 -1
+TS01-003.rbound
+104 0 154 -1
+TS01-004.rbound
+155 0 205 -1
+TS01-005.rbound
+206 0 256 -1
+TS01-006.rbound
+257 0 307 -1
+TS01-007.rbound
+308 0 358 -1
+TS01-008.rbound
+359 0 409 -1
+TS01-009.rbound
+410 0 460 -1
+TS01-010.rbound
+461 0 -1 -1
+
+text 212 golden/basic/tilt-finish.com
+$fixboundaries "TS01_rec.mrc" "tilt-bound.info"
+$collectmmm pixels= "tilt" 10 "TS01_rec.mrc" 1
+$b3dremove -g tilt-[0-9][0-9][0-9]*.com* tilt-[0-9][0-9][0-9]*.log* "TS01-[0-9][0-9][0-9]*.rbound" "tilt-bound.info"
+
+sha256 360d670401052e49f3d154edb0ad30d8f2f0dbbcb300729a6486c48e26aafa18 650 golden/basic/tilt-start.com
+text 197 golden/binned_slice.files
+TS01.xtilt
+tilt-001.com
+tilt-002.com
+tilt-003.com
+tilt-004.com
+tilt-005.com
+tilt-006.com
+tilt-007.com
+tilt-008.com
+tilt-009.com
+tilt-010.com
+tilt-bound.info
+tilt-finish.com
+tilt-start.com
+tilt.com
+
+text 206 golden/binned_slice.out
+WARNING: splittilt - aligned stack not found; sizes will be taken from FULLIMAGE entry
+12 command files for 10 chunks created and ready to run
+  with processchunks or parallel processing interface in Etomo
+
+text 2 golden/binned_slice.rc
+0
+
+sha256 bb34325c7c4b7fd22170253fa8df6cdbde08168c8b48e011f54b4f13cfc2d55e 711 golden/binned_slice/tilt-001.com
+sha256 badbc3085075d5e3b40a4de6db5fbd082ec5a94cde13166443295fa4a6406dac 712 golden/binned_slice/tilt-002.com
+sha256 661e85dbb8f5fc3398b2f90edf0a0b37354d47749fecd05d205716b5031cf45f 712 golden/binned_slice/tilt-003.com
+sha256 0b9ef781f7a72657ab445f803ac76ae4362886972b75c110a5bb8b8ddc6227ad 712 golden/binned_slice/tilt-004.com
+sha256 80fcd0aa753039b4cfd958e853eac6a887938a786ca00940645dfb1ec494d5aa 712 golden/binned_slice/tilt-005.com
+sha256 dc2f0aae8091ed8b0179292455677dbf057db8973028bed870f95b5e248df1eb 712 golden/binned_slice/tilt-006.com
+sha256 abd0c43ca7e498a6f54957972befa2d9b784700ec44a92f452a0f73e0136b996 712 golden/binned_slice/tilt-007.com
+sha256 7c184799ac721023fff64269674fefe359b00556a762b4d126af25acf2faeef3 712 golden/binned_slice/tilt-008.com
+sha256 e9253d3729bbff4ab5989af5d4330a7343309d5fe7f5e133c712c4f20cf8e1d2 712 golden/binned_slice/tilt-009.com
+sha256 65e57585c01afe9a2bab867db8b27e28a92383af5ccb07152f504f12f31a70ab 713 golden/binned_slice/tilt-010.com
+text 299 golden/binned_slice/tilt-bound.info
+1 0 512 4 10
+TS01-001.rbound
+-1 0 51 -1
+TS01-002.rbound
+52 0 103 -1
+TS01-003.rbound
+104 0 155 -1
+TS01-004.rbound
+156 0 207 -1
+TS01-005.rbound
+208 0 259 -1
+TS01-006.rbound
+260 0 311 -1
+TS01-007.rbound
+312 0 363 -1
+TS01-008.rbound
+364 0 415 -1
+TS01-009.rbound
+416 0 466 -1
+TS01-010.rbound
+467 0 -1 -1
+
+text 212 golden/binned_slice/tilt-finish.com
+$fixboundaries "TS01_rec.mrc" "tilt-bound.info"
+$collectmmm pixels= "tilt" 10 "TS01_rec.mrc" 1
+$b3dremove -g tilt-[0-9][0-9][0-9]*.com* tilt-[0-9][0-9][0-9]*.log* "TS01-[0-9][0-9][0-9]*.rbound" "tilt-bound.info"
+
+sha256 1431645a5215c664c391e03e3a193bcf914540ba2e41915daf309e22e2cf89c8 675 golden/binned_slice/tilt-start.com
+text 197 golden/dims_bound.files
+TS01.xtilt
+tilt-001.com
+tilt-002.com
+tilt-003.com
+tilt-004.com
+tilt-005.com
+tilt-006.com
+tilt-007.com
+tilt-008.com
+tilt-009.com
+tilt-010.com
+tilt-bound.info
+tilt-finish.com
+tilt-start.com
+tilt.com
+
+text 119 golden/dims_bound.out
+12 command files for 10 chunks created and ready to run
+  with processchunks or parallel processing interface in Etomo
+
+text 2 golden/dims_bound.rc
+0
+
+sha256 51ab53b9a8b6153035cca15ff45d60c1003c5fa55774dd918ffb5f896ce6d538 684 golden/dims_bound/tilt-001.com
+sha256 e9edbb593c6ffbd61c1622856a9f310efe0351c14f2f78e0f612bb5e799a405f 686 golden/dims_bound/tilt-002.com
+sha256 8274aa960b3bf104a1bcd4755616aaabbcc74de537cfc83ca385941d604a07b7 687 golden/dims_bound/tilt-003.com
+sha256 f168e1c325d168aba69a1ffef6740c37b750e50590a47e43fefe1613b15e69c0 687 golden/dims_bound/tilt-004.com
+sha256 92c3b1c5329f2ee39a9894c01d974fe803ba5119573c6086aeccd1e7ab186785 687 golden/dims_bound/tilt-005.com
+sha256 7ffb42d728bf2504afeb27574046fb92ccebb0a135a784417d0a3d4c63f08d60 687 golden/dims_bound/tilt-006.com
+sha256 b625574ea095710d3101e9419ac30ebf9383d80380368f48d43b070586938560 687 golden/dims_bound/tilt-007.com
+sha256 df37545c1e406af44cd0f534442022aedde76209feb7bd3b9329c75cbbc5c0ca 687 golden/dims_bound/tilt-008.com
+sha256 ff55d2ab57bc63b0bc4a8b42c75d2a6e024d9b5dda962721d4252f63d2edce48 687 golden/dims_bound/tilt-009.com
+sha256 b4622e3105f41c60cacb377b96b74176c88d6a5d1652bc03a25cb29261b8eb6c 687 golden/dims_bound/tilt-010.com
+text 299 golden/dims_bound/tilt-bound.info
+1 0 600 1 10
+TS01-001.rbound
+-1 0 69 -1
+TS01-002.rbound
+70 0 139 -1
+TS01-003.rbound
+140 0 209 -1
+TS01-004.rbound
+210 0 279 -1
+TS01-005.rbound
+280 0 349 -1
+TS01-006.rbound
+350 0 419 -1
+TS01-007.rbound
+420 0 489 -1
+TS01-008.rbound
+490 0 559 -1
+TS01-009.rbound
+560 0 629 -1
+TS01-010.rbound
+630 0 -1 -1
+
+text 212 golden/dims_bound/tilt-finish.com
+$fixboundaries "TS01_rec.mrc" "tilt-bound.info"
+$collectmmm pixels= "tilt" 10 "TS01_rec.mrc" 1
+$b3dremove -g tilt-[0-9][0-9][0-9]*.com* tilt-[0-9][0-9][0-9]*.log* "TS01-[0-9][0-9][0-9]*.rbound" "tilt-bound.info"
+
+sha256 2c05e884c31262f1cfd4b4b3b15c6ecc68ca16f0970a22d0c7eda54fcd31b720 650 golden/dims_bound/tilt-start.com
+text 0 golden/err_missing.files
+
+text 106 golden/err_missing.out
+ERROR: splittilt - The full command file name must be entered because neither tilt.com nor tilt.pcm exist
+
+text 2 golden/err_missing.rc
+1
+
+text 20 golden/err_no_thickness.files
+TS01.xtilt
+tilt.com
+
+text 55 golden/err_no_thickness.out
+ERROR: splittilt - Command file has no THICKNESS entry
+
+text 2 golden/err_no_thickness.rc
+1
+
+text 9 golden/err_no_xtilt.files
+tilt.com
+
+text 101 golden/err_no_xtilt.out
+ERROR: splittilt - Opening X-tilt file TS01.xtilt: [Errno 2] No such file or directory: 'TS01.xtilt'
+
+text 2 golden/err_no_xtilt.rc
+1
+
+text 197 golden/naming.files
+TS01.xtilt
+tilt-001.pcm
+tilt-002.pcm
+tilt-003.pcm
+tilt-004.pcm
+tilt-005.pcm
+tilt-006.pcm
+tilt-007.pcm
+tilt-008.pcm
+tilt-009.pcm
+tilt-010.pcm
+tilt-bound.info
+tilt-finish.pcm
+tilt-start.pcm
+tilt.pcm
+
+text 206 golden/naming.out
+WARNING: splittilt - aligned stack not found; sizes will be taken from FULLIMAGE entry
+12 command files for 10 chunks created and ready to run
+  with processchunks or parallel processing interface in Etomo
+
+text 2 golden/naming.rc
+0
+
+sha256 48415c8781a0bb18c7050fcddf6c733e97a48ba645ff5e3f7aedf191d27cf016 684 golden/naming/tilt-001.pcm
+sha256 e2d5aedde5f23ad328f59518a4054cc8983ef96ddfcb982bd29cca9319eeab5f 686 golden/naming/tilt-002.pcm
+sha256 99ef029b47f2bad7f6ec98254b8263a8b2a234785bbf7c306ddc579a3ecf7beb 687 golden/naming/tilt-003.pcm
+sha256 beb4b00e255259638b912d5dbf877c5fbe25863785308e605be68af7b1cb09a6 687 golden/naming/tilt-004.pcm
+sha256 d41c4681c5653a93f24356f0877f16252fe85553e612fe5b354ff9c60334e0be 687 golden/naming/tilt-005.pcm
+sha256 21d9dfc471e508e9f04dc0b9f1c044ab49bf316a4313d7173ce4384992aeb5c2 687 golden/naming/tilt-006.pcm
+sha256 c138857b8744da72bd59fd9d97f27ffbf1882a7334f677f6808c14f433fe9f1c 687 golden/naming/tilt-007.pcm
+sha256 b27da36bed893291a150d86b537bcb4f5dc8e023703822efaf2b1e345292422d 687 golden/naming/tilt-008.pcm
+sha256 dd8743e61affb461eb6234d8dae84f5bfba294b7b6e6dca29c050cfbee8b4d07 687 golden/naming/tilt-009.pcm
+sha256 1b3e71b05d77c432a512c0f5a650b1f01b3cd3512499f83096ae9c6990c38ab3 687 golden/naming/tilt-010.pcm
+text 299 golden/naming/tilt-bound.info
+1 0 512 4 10
+TS01-001.rbound
+-1 0 51 -1
+TS01-002.rbound
+52 0 103 -1
+TS01-003.rbound
+104 0 154 -1
+TS01-004.rbound
+155 0 205 -1
+TS01-005.rbound
+206 0 256 -1
+TS01-006.rbound
+257 0 307 -1
+TS01-007.rbound
+308 0 358 -1
+TS01-008.rbound
+359 0 409 -1
+TS01-009.rbound
+410 0 460 -1
+TS01-010.rbound
+461 0 -1 -1
+
+text 212 golden/naming/tilt-finish.pcm
+$fixboundaries "TS01_rec.mrc" "tilt-bound.info"
+$collectmmm pixels= "tilt" 10 "TS01_rec.mrc" 1
+$b3dremove -g tilt-[0-9][0-9][0-9]*.pcm* tilt-[0-9][0-9][0-9]*.log* "TS01-[0-9][0-9][0-9]*.rbound" "tilt-bound.info"
+
+sha256 360d670401052e49f3d154edb0ad30d8f2f0dbbcb300729a6486c48e26aafa18 650 golden/naming/tilt-start.pcm
+text 186 golden/old_style.files
+tilt-001.com
+tilt-002.com
+tilt-003.com
+tilt-004.com
+tilt-005.com
+tilt-006.com
+tilt-007.com
+tilt-008.com
+tilt-009.com
+tilt-010.com
+tilt-bound.info
+tilt-finish.com
+tilt-start.com
+tilt.com
+
+text 206 golden/old_style.out
+WARNING: splittilt - aligned stack not found; sizes will be taken from FULLIMAGE entry
+12 command files for 10 chunks created and ready to run
+  with processchunks or parallel processing interface in Etomo
+
+text 2 golden/old_style.rc
+0
+
+text 212 golden/old_style/tilt-001.com
+$sync
+$setenv IMOD_OUTPUT_FORMAT MRC
+# old style
+$tilt
+TS01.ali
+# comment
+TS01.rec
+IMAGEBINNED 1
+THICKNESS 120
+SLICE 0 51
+#
+TOTALSLICES 0 511
+BoundaryInfoFile tilt-bound.info
+FULLIMAGE 512 512
+LOG 0
+SCALE 0 1000
+
+text 214 golden/old_style/tilt-002.com
+$sync
+$setenv IMOD_OUTPUT_FORMAT MRC
+# old style
+$tilt
+TS01.ali
+# comment
+TS01.rec
+IMAGEBINNED 1
+THICKNESS 120
+SLICE 52 103
+#
+TOTALSLICES 0 511
+BoundaryInfoFile tilt-bound.info
+FULLIMAGE 512 512
+LOG 0
+SCALE 0 1000
+
+text 215 golden/old_style/tilt-003.com
+$sync
+$setenv IMOD_OUTPUT_FORMAT MRC
+# old style
+$tilt
+TS01.ali
+# comment
+TS01.rec
+IMAGEBINNED 1
+THICKNESS 120
+SLICE 104 154
+#
+TOTALSLICES 0 511
+BoundaryInfoFile tilt-bound.info
+FULLIMAGE 512 512
+LOG 0
+SCALE 0 1000
+
+text 215 golden/old_style/tilt-004.com
+$sync
+$setenv IMOD_OUTPUT_FORMAT MRC
+# old style
+$tilt
+TS01.ali
+# comment
+TS01.rec
+IMAGEBINNED 1
+THICKNESS 120
+SLICE 155 205
+#
+TOTALSLICES 0 511
+BoundaryInfoFile tilt-bound.info
+FULLIMAGE 512 512
+LOG 0
+SCALE 0 1000
+
+text 215 golden/old_style/tilt-005.com
+$sync
+$setenv IMOD_OUTPUT_FORMAT MRC
+# old style
+$tilt
+TS01.ali
+# comment
+TS01.rec
+IMAGEBINNED 1
+THICKNESS 120
+SLICE 206 256
+#
+TOTALSLICES 0 511
+BoundaryInfoFile tilt-bound.info
+FULLIMAGE 512 512
+LOG 0
+SCALE 0 1000
+
+text 215 golden/old_style/tilt-006.com
+$sync
+$setenv IMOD_OUTPUT_FORMAT MRC
+# old style
+$tilt
+TS01.ali
+# comment
+TS01.rec
+IMAGEBINNED 1
+THICKNESS 120
+SLICE 257 307
+#
+TOTALSLICES 0 511
+BoundaryInfoFile tilt-bound.info
+FULLIMAGE 512 512
+LOG 0
+SCALE 0 1000
+
+text 215 golden/old_style/tilt-007.com
+$sync
+$setenv IMOD_OUTPUT_FORMAT MRC
+# old style
+$tilt
+TS01.ali
+# comment
+TS01.rec
+IMAGEBINNED 1
+THICKNESS 120
+SLICE 308 358
+#
+TOTALSLICES 0 511
+BoundaryInfoFile tilt-bound.info
+FULLIMAGE 512 512
+LOG 0
+SCALE 0 1000
+
+text 215 golden/old_style/tilt-008.com
+$sync
+$setenv IMOD_OUTPUT_FORMAT MRC
+# old style
+$tilt
+TS01.ali
+# comment
+TS01.rec
+IMAGEBINNED 1
+THICKNESS 120
+SLICE 359 409
+#
+TOTALSLICES 0 511
+BoundaryInfoFile tilt-bound.info
+FULLIMAGE 512 512
+LOG 0
+SCALE 0 1000
+
+text 215 golden/old_style/tilt-009.com
+$sync
+$setenv IMOD_OUTPUT_FORMAT MRC
+# old style
+$tilt
+TS01.ali
+# comment
+TS01.rec
+IMAGEBINNED 1
+THICKNESS 120
+SLICE 410 460
+#
+TOTALSLICES 0 511
+BoundaryInfoFile tilt-bound.info
+FULLIMAGE 512 512
+LOG 0
+SCALE 0 1000
+
+text 215 golden/old_style/tilt-010.com
+$sync
+$setenv IMOD_OUTPUT_FORMAT MRC
+# old style
+$tilt
+TS01.ali
+# comment
+TS01.rec
+IMAGEBINNED 1
+THICKNESS 120
+SLICE 461 511
+#
+TOTALSLICES 0 511
+BoundaryInfoFile tilt-bound.info
+FULLIMAGE 512 512
+LOG 0
+SCALE 0 1000
+
+text 299 golden/old_style/tilt-bound.info
+1 0 512 4 10
+TS01-001.rbound
+-1 0 51 -1
+TS01-002.rbound
+52 0 103 -1
+TS01-003.rbound
+104 0 154 -1
+TS01-004.rbound
+155 0 205 -1
+TS01-005.rbound
+206 0 256 -1
+TS01-006.rbound
+257 0 307 -1
+TS01-007.rbound
+308 0 358 -1
+TS01-008.rbound
+359 0 409 -1
+TS01-009.rbound
+410 0 460 -1
+TS01-010.rbound
+461 0 -1 -1
+
+text 204 golden/old_style/tilt-finish.com
+$fixboundaries "TS01.rec" "tilt-bound.info"
+$collectmmm pixels= "tilt" 10 "TS01.rec" 1
+$b3dremove -g tilt-[0-9][0-9][0-9]*.com* tilt-[0-9][0-9][0-9]*.log* "TS01-[0-9][0-9][0-9]*.rbound" "tilt-bound.info"
+
+text 178 golden/old_style/tilt-start.com
+$setenv IMOD_OUTPUT_FORMAT MRC
+# old style
+$tilt
+TS01.ali
+# comment
+TS01.rec
+IMAGEBINNED 1
+THICKNESS 120
+SLICE -1 -1
+TOTALSLICES 0 511
+FULLIMAGE 512 512
+LOG 0
+SCALE 0 1000
+$sync
+
+text 95 golden/reproject.files
+TS01.xtilt
+tilt-001.com
+tilt-002.com
+tilt-finish.com
+tilt-rpbound.info
+tilt-start.com
+tilt.com
+
+text 204 golden/reproject.out
+WARNING: splittilt - aligned stack not found; sizes will be taken from FULLIMAGE entry
+4 command files for 2 chunks created and ready to run
+  with processchunks or parallel processing interface in Etomo
+
+text 2 golden/reproject.rc
+0
+
+sha256 2f802fad9e7ca271b62f89c58d6d433861f3bb03fded1b475978532742e84081 723 golden/reproject/tilt-001.com
+sha256 7abf4375d2068e2acece59b47ba5096c41dab6f9867b3f85b3f14ab31860b2f6 724 golden/reproject/tilt-002.com
+text 215 golden/reproject/tilt-finish.com
+$fixboundaries "TS01_rec.mrc" "tilt-rpbound.info"
+$collectmmm pixels= "tilt" 2 "TS01_rec.mrc" 1
+$b3dremove -g tilt-[0-9][0-9][0-9]*.com* tilt-[0-9][0-9][0-9]*.log* "TS01-[0-9][0-9][0-9]*.rbound" "tilt-rpbound.info"
+
+text 68 golden/reproject/tilt-rpbound.info
+1 1 512 4 2
+TS01-001.rbound
+-1 -1 -1 39
+TS01-002.rbound
+-1 43 -1 -1
+
+sha256 306888c709200c20ac371616f611476205fdfebe3eab6a6629119d5ed82143f5 687 golden/reproject/tilt-start.com
+text 166 golden/separate.files
+TS01.xtilt
+tilt-001.com
+tilt-002.com
+tilt-003.com
+tilt-004.com
+tilt-005.com
+tilt-006.com
+tilt-007.com
+tilt-008.com
+tilt-009.com
+tilt-010.com
+tilt-finish.com
+tilt.com
+
+text 206 golden/separate.out
+WARNING: splittilt - aligned stack not found; sizes will be taken from FULLIMAGE entry
+11 command files for 10 chunks created and ready to run
+  with processchunks or parallel processing interface in Etomo
+
+text 2 golden/separate.rc
+0
+
+sha256 3ea1262535584dff18724d292178e13c25438b088b8c632330af53e9ceec2427 637 golden/separate/tilt-001.com
+sha256 abcaa407e2ef9c3a2dc860d36173c017c611248a4ae606b6b008ab37a47ef81f 639 golden/separate/tilt-002.com
+sha256 963307df4147003465341f08496fe2f5e0b9c5ec0dabf1d67946c770ff265264 640 golden/separate/tilt-003.com
+sha256 5b4c0a5f0080c5985b4c9750597748db15c5d68924a5d2f535b2864e89e8535c 640 golden/separate/tilt-004.com
+sha256 7d5d1b7ea759b85350ef57c5114eab04ca59ac133c94eb529a4f433c089fccee 640 golden/separate/tilt-005.com
+sha256 531e051df9c76b1b1d23a5cb19a80743b8462dd70ee6fff262b774c5121f914a 640 golden/separate/tilt-006.com
+sha256 b78c9336d7d5f65c4007c592964591aada0ab58a5ac97ac2abde7bdb908fe877 640 golden/separate/tilt-007.com
+sha256 35c3b3a15c0b076769d7c4081dea44b4e6a40807384cca7ca4d3347abe86c398 640 golden/separate/tilt-008.com
+sha256 761faefc48f92574fd91ac0af161be86b75466554c913712bb4325fc93741e93 640 golden/separate/tilt-009.com
+sha256 d151c8c0c1f5b678b94e54727e4145a530ad703128912620843106119d52afa4 640 golden/separate/tilt-010.com
+text 415 golden/separate/tilt-finish.com
+$newstack -StandardInput
+OutputFile TS01_rec.mrc
+InputFile TS01-001_rec.mrc
+InputFile TS01-002_rec.mrc
+InputFile TS01-003_rec.mrc
+InputFile TS01-004_rec.mrc
+InputFile TS01-005_rec.mrc
+InputFile TS01-006_rec.mrc
+InputFile TS01-007_rec.mrc
+InputFile TS01-008_rec.mrc
+InputFile TS01-009_rec.mrc
+InputFile TS01-010_rec.mrc
+$b3dremove -g tilt-[0-9][0-9][0-9]*.com* tilt-[0-9][0-9][0-9]*.log* "TS01-[0-9][0-9][0-9]*.rec"
+
+text 232 golden/start_unique.files
+TS01.xtilt
+tchunk-005-sync.com
+tchunk-006.com
+tchunk-007.com
+tchunk-008.com
+tchunk-009.com
+tchunk-010.com
+tchunk-011.com
+tchunk-012.com
+tchunk-013.com
+tchunk-014.com
+tchunk-015.com
+tchunk-016-sync.com
+tchunk-bound-005.info
+tilt.com
+
+text 206 golden/start_unique.out
+WARNING: splittilt - aligned stack not found; sizes will be taken from FULLIMAGE entry
+12 command files for 10 chunks created and ready to run
+  with processchunks or parallel processing interface in Etomo
+
+text 2 golden/start_unique.rc
+0
+
+sha256 360d670401052e49f3d154edb0ad30d8f2f0dbbcb300729a6486c48e26aafa18 650 golden/start_unique/tchunk-005-sync.com
+sha256 8cdb6b7db360299024447ac7e4670a6a650d8824cf809037521eb7ecdd01bffc 690 golden/start_unique/tchunk-006.com
+sha256 3ffdf55e0689133518f728a8a4b83dd93d29eb1356908303ea51651a7e9c308e 692 golden/start_unique/tchunk-007.com
+sha256 e81bff5b4717100b78ee3905cb61fd235d63e236e536b7ced99b6ac0c4842f52 693 golden/start_unique/tchunk-008.com
+sha256 17339de0a47653a53b56f14a10d1a7ce42a4bd3bacc918992c4534876abffacd 693 golden/start_unique/tchunk-009.com
+sha256 cd2871f2b776d56617a2a74f74d5c15f3d44037e1ae2d7530916b1ad57434398 693 golden/start_unique/tchunk-010.com
+sha256 7a72546745cbf94dbf59feca5f60bc4516c9e4795ec300ce740f6ea3c2bcfbdd 693 golden/start_unique/tchunk-011.com
+sha256 312f80fb61f002c588b815e427b68eda2c91233b4a841e56c86c6589b7130ca5 693 golden/start_unique/tchunk-012.com
+sha256 08e271170d7bda3dc5226aa28cddc9d35f27d438349764f1b5dbaea02da3d3d4 693 golden/start_unique/tchunk-013.com
+sha256 6a1632e2c2cca76745e22b515ab3680fabca87db2df487f84b1a734bfbd03f9f 693 golden/start_unique/tchunk-014.com
+sha256 2c22fb45421e9959eb92fec7de1b4239b687e79341df032623a95af1be20e3b6 693 golden/start_unique/tchunk-015.com
+text 149 golden/start_unique/tchunk-016-sync.com
+$fixboundaries "TS01_rec.mrc" "tchunk-bound-005.info"
+$collectmmm pixels= "tchunk" 10 "TS01_rec.mrc" 6
+$b3dremove -g "TS01-[0-9][0-9][0-9]*.rbound" 
+
+text 299 golden/start_unique/tchunk-bound-005.info
+1 0 512 4 10
+TS01-006.rbound
+-1 0 51 -1
+TS01-007.rbound
+52 0 103 -1
+TS01-008.rbound
+104 0 154 -1
+TS01-009.rbound
+155 0 205 -1
+TS01-010.rbound
+206 0 256 -1
+TS01-011.rbound
+257 0 307 -1
+TS01-012.rbound
+308 0 358 -1
+TS01-013.rbound
+359 0 409 -1
+TS01-014.rbound
+410 0 460 -1
+TS01-015.rbound
+461 0 -1 -1
+
+text 0 golden/usage.files
+
+sha256 794c5fb05810c366108b500c183477eb1f62ca4f38209dcf26c2c74baf16709f 1541 golden/usage.out
+text 2 golden/usage.rc
+0
+
+text 215 golden/vertslice.files
+TS01.xtilt
+tilt-001.com
+tilt-002.com
+tilt-003.com
+tilt-004.com
+tilt-005.com
+tilt-006.com
+tilt-007.com
+tilt-008.com
+tilt-009.com
+tilt-010.com
+tilt-bound.info
+tilt-finish.com
+tilt-start.com
+tilt-vsbound.info
+tilt.com
+
+text 206 golden/vertslice.out
+WARNING: splittilt - aligned stack not found; sizes will be taken from FULLIMAGE entry
+12 command files for 10 chunks created and ready to run
+  with processchunks or parallel processing interface in Etomo
+
+text 2 golden/vertslice.rc
+0
+
+sha256 f33d2338da94062e51d3188970517f2ce1c88771a3c62eb03ae4b205a0b3ddd5 747 golden/vertslice/tilt-001.com
+sha256 5c2a1cea8098862a75b7587097a120eeed8dda3693c8164d081284aa67e7d0bd 749 golden/vertslice/tilt-002.com
+sha256 580c7a2fb17d00832e09eadf48ea008ec90eb309f5cf3760024db572f11c91d8 750 golden/vertslice/tilt-003.com
+sha256 4ba3c4c2a29af0f34c4def1768c4f0e8cd7a29056898b4d1902ff32194823b5e 750 golden/vertslice/tilt-004.com
+sha256 9e67449e2f132a9d8b5376bf6a3e434ddfd55b42535ee53c00bd3e853aba7f6d 750 golden/vertslice/tilt-005.com
+sha256 71ad63a669f2594e2e2a65299ba59f5b00b71f83feb7928044829d4431feb6d1 750 golden/vertslice/tilt-006.com
+sha256 e6b8fadfc045db2f07af80c469227f7d5d7cb9619dd4039723cfa94956bb2b06 750 golden/vertslice/tilt-007.com
+sha256 7f676c09a7e8286a05f7583ddf4853f73ecef5538a40c6121ace79356cc3cbfd 750 golden/vertslice/tilt-008.com
+sha256 aac126cb9254462c2eae73e6b3b4711d751163d62ff75a35d979ba111ef4d05e 750 golden/vertslice/tilt-009.com
+sha256 fdbf5183e3ceedcb67d9f2415fb0afcce5523e76b0413749fa5b831f1d00003c 750 golden/vertslice/tilt-010.com
+text 299 golden/vertslice/tilt-bound.info
+1 0 512 4 10
+TS01-001.rbound
+-1 0 51 -1
+TS01-002.rbound
+52 0 103 -1
+TS01-003.rbound
+104 0 154 -1
+TS01-004.rbound
+155 0 205 -1
+TS01-005.rbound
+206 0 256 -1
+TS01-006.rbound
+257 0 307 -1
+TS01-007.rbound
+308 0 358 -1
+TS01-008.rbound
+359 0 409 -1
+TS01-009.rbound
+410 0 460 -1
+TS01-010.rbound
+461 0 -1 -1
+
+text 377 golden/vertslice/tilt-finish.com
+$fixboundaries "TS01_rec.mrc" "tilt-bound.info"
+$fixboundaries "TS01.vs" "tilt-vsbound.info"
+$collectmmm pixels= "tilt" 10 "TS01_rec.mrc" 1
+$b3dremove -g tilt-[0-9][0-9][0-9]*.com* tilt-[0-9][0-9][0-9]*.log* "TS01-[0-9][0-9][0-9]*.rbound" "tilt-bound.info" "tilt-vsbound.info"
+$b3dremove -g tilt-[0-9][0-9][0-9]*.com* tilt-[0-9][0-9][0-9]*.log* "TS01-[0-9][0-9][0-9]*.vsbound"
+
+sha256 bd1ebef578f39d8a68bc460ba489251695ebc0bcb12299148647e929c4beaf1a 678 golden/vertslice/tilt-start.com
+text 309 golden/vertslice/tilt-vsbound.info
+1 0 512 4 10
+TS01-001.vsbound
+-1 0 51 -1
+TS01-002.vsbound
+52 0 103 -1
+TS01-003.vsbound
+104 0 154 -1
+TS01-004.vsbound
+155 0 205 -1
+TS01-005.vsbound
+206 0 256 -1
+TS01-006.vsbound
+257 0 307 -1
+TS01-007.vsbound
+308 0 358 -1
+TS01-008.vsbound
+359 0 409 -1
+TS01-009.vsbound
+410 0 460 -1
+TS01-010.vsbound
+461 0 -1 -1
+
+text 171 golden/xtilt_old.files
+TS01.xtilt
+tilt-001.com
+tilt-002.com
+tilt-003.com
+tilt-004.com
+tilt-005.com
+tilt-006.com
+tilt-007.com
+tilt-008.com
+tilt-bound.info
+tilt-finish.com
+tilt-start.com
+tilt.com
+
+text 205 golden/xtilt_old.out
+WARNING: splittilt - aligned stack not found; sizes will be taken from FULLIMAGE entry
+10 command files for 8 chunks created and ready to run
+  with processchunks or parallel processing interface in Etomo
+
+text 2 golden/xtilt_old.rc
+0
+
+sha256 f9679933e8098081578c53532098e9eb82ec1593f02c235d62f076fa7fa4838e 686 golden/xtilt_old/tilt-001.com
+sha256 96a00719566b2a314714aacb5482321d214d6d425e559cc136f4b555a977d831 688 golden/xtilt_old/tilt-002.com
+sha256 bba5df1b675c4627302997ebe9d530551664d7c1ce180bd350c689363beac560 689 golden/xtilt_old/tilt-003.com
+sha256 aa3577fb138fe379cb45e6752de68eecb75c7c9aab00c6a191f7968fcc0f8554 689 golden/xtilt_old/tilt-004.com
+sha256 7da8e4b30901ce293f09962ddef8f2f3df314b7c41c6d5b65be904d3035d14cc 689 golden/xtilt_old/tilt-005.com
+sha256 597b9a647710b71598ca019c471004f35db481bf521bbd858b08ff44edbf4e9e 689 golden/xtilt_old/tilt-006.com
+sha256 b587d8dac3dd3fb770d52ca86376bcfaac70b6c77e07c8f11ad086a376dcfdef 689 golden/xtilt_old/tilt-007.com
+sha256 0125661d75665747ae0dacd5f220d54e489cf55647fe0493eab86705556b8ea1 689 golden/xtilt_old/tilt-008.com
+text 240 golden/xtilt_old/tilt-bound.info
+1 0 512 4 8
+TS01-001.rbound
+-1 0 63 -1
+TS01-002.rbound
+64 0 127 -1
+TS01-003.rbound
+128 0 191 -1
+TS01-004.rbound
+192 0 255 -1
+TS01-005.rbound
+256 0 319 -1
+TS01-006.rbound
+320 0 383 -1
+TS01-007.rbound
+384 0 447 -1
+TS01-008.rbound
+448 0 -1 -1
+
+text 211 golden/xtilt_old/tilt-finish.com
+$fixboundaries "TS01_rec.mrc" "tilt-bound.info"
+$collectmmm pixels= "tilt" 8 "TS01_rec.mrc" 1
+$b3dremove -g tilt-[0-9][0-9][0-9]*.com* tilt-[0-9][0-9][0-9]*.log* "TS01-[0-9][0-9][0-9]*.rbound" "tilt-bound.info"
+
+sha256 ef45cde194e0c35dbd2394537a3ff1eceecd51611ed6c7d4b3d772e72fd01374 652 golden/xtilt_old/tilt-start.com
+text 106 golden/xtilt_penalty.files
+TS01.xtilt
+tilt-001.com
+tilt-002.com
+tilt-003.com
+tilt-bound.info
+tilt-finish.com
+tilt-start.com
+tilt.com
+
+text 204 golden/xtilt_penalty.out
+WARNING: splittilt - aligned stack not found; sizes will be taken from FULLIMAGE entry
+5 command files for 3 chunks created and ready to run
+  with processchunks or parallel processing interface in Etomo
+
+text 2 golden/xtilt_penalty.rc
+0
+
+sha256 85b72d69bd61a037218466e7fe38c1a66440171fcf7c616e3750a69e3686d099 687 golden/xtilt_penalty/tilt-001.com
+sha256 2217db49356e8363d5c0c9ecd61c8a8b3e9d5ac31817a422a285181cec83feaf 689 golden/xtilt_penalty/tilt-002.com
+sha256 d08ab0ac37e056af81b3cdd2f5bc9c259120496a2ff70510534990921d508e00 689 golden/xtilt_penalty/tilt-003.com
+text 97 golden/xtilt_penalty/tilt-bound.info
+1 0 512 4 3
+TS01-001.rbound
+-1 0 170 -1
+TS01-002.rbound
+171 0 341 -1
+TS01-003.rbound
+342 0 -1 -1
+
+text 211 golden/xtilt_penalty/tilt-finish.com
+$fixboundaries "TS01_rec.mrc" "tilt-bound.info"
+$collectmmm pixels= "tilt" 3 "TS01_rec.mrc" 1
+$b3dremove -g tilt-[0-9][0-9][0-9]*.com* tilt-[0-9][0-9][0-9]*.log* "TS01-[0-9][0-9][0-9]*.rbound" "tilt-bound.info"
+
+sha256 ef45cde194e0c35dbd2394537a3ff1eceecd51611ed6c7d4b3d772e72fd01374 652 golden/xtilt_penalty/tilt-start.com
+text 171 golden/xtilt_vertical.files
+TS01.xtilt
+tilt-001.com
+tilt-002.com
+tilt-003.com
+tilt-004.com
+tilt-005.com
+tilt-006.com
+tilt-007.com
+tilt-008.com
+tilt-bound.info
+tilt-finish.com
+tilt-start.com
+tilt.com
+
+text 205 golden/xtilt_vertical.out
+WARNING: splittilt - aligned stack not found; sizes will be taken from FULLIMAGE entry
+10 command files for 8 chunks created and ready to run
+  with processchunks or parallel processing interface in Etomo
+
+text 2 golden/xtilt_vertical.rc
+0
+
+sha256 f9679933e8098081578c53532098e9eb82ec1593f02c235d62f076fa7fa4838e 686 golden/xtilt_vertical/tilt-001.com
+sha256 96a00719566b2a314714aacb5482321d214d6d425e559cc136f4b555a977d831 688 golden/xtilt_vertical/tilt-002.com
+sha256 bba5df1b675c4627302997ebe9d530551664d7c1ce180bd350c689363beac560 689 golden/xtilt_vertical/tilt-003.com
+sha256 aa3577fb138fe379cb45e6752de68eecb75c7c9aab00c6a191f7968fcc0f8554 689 golden/xtilt_vertical/tilt-004.com
+sha256 7da8e4b30901ce293f09962ddef8f2f3df314b7c41c6d5b65be904d3035d14cc 689 golden/xtilt_vertical/tilt-005.com
+sha256 597b9a647710b71598ca019c471004f35db481bf521bbd858b08ff44edbf4e9e 689 golden/xtilt_vertical/tilt-006.com
+sha256 b587d8dac3dd3fb770d52ca86376bcfaac70b6c77e07c8f11ad086a376dcfdef 689 golden/xtilt_vertical/tilt-007.com
+sha256 0125661d75665747ae0dacd5f220d54e489cf55647fe0493eab86705556b8ea1 689 golden/xtilt_vertical/tilt-008.com
+text 240 golden/xtilt_vertical/tilt-bound.info
+1 0 512 4 8
+TS01-001.rbound
+-1 0 63 -1
+TS01-002.rbound
+64 0 127 -1
+TS01-003.rbound
+128 0 191 -1
+TS01-004.rbound
+192 0 255 -1
+TS01-005.rbound
+256 0 319 -1
+TS01-006.rbound
+320 0 383 -1
+TS01-007.rbound
+384 0 447 -1
+TS01-008.rbound
+448 0 -1 -1
+
+text 211 golden/xtilt_vertical/tilt-finish.com
+$fixboundaries "TS01_rec.mrc" "tilt-bound.info"
+$collectmmm pixels= "tilt" 8 "TS01_rec.mrc" 1
+$b3dremove -g tilt-[0-9][0-9][0-9]*.com* tilt-[0-9][0-9][0-9]*.log* "TS01-[0-9][0-9][0-9]*.rbound" "tilt-bound.info"
+
+sha256 ef45cde194e0c35dbd2394537a3ff1eceecd51611ed6c7d4b3d772e72fd01374 652 golden/xtilt_vertical/tilt-start.com

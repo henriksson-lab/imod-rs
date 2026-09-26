@@ -1,0 +1,21 @@
+# name	inputs (src:dst from inputs/)	env	arguments
+info	-	-	-info
+#full	basic	ga.rec:ga.rec gb.rec:gb.rec ga.st:ga.st gb.st:gb.st ga.xf:ga.xf gb.xf:gb.xf ga.tlt:ga.tlt gb.tlt:gb.tlt tilta.com:tilta.com tiltb.com:tiltb.com	-	-name g -surfaces 1 -zlimits 3,17 -stackext st
+initial_atob	ga.rec:ga.rec gb.rec:gb.rec ga.st:ga.st gb.st:gb.st ga.xf:ga.xf gb.xf:gb.xf ga.tlt:ga.tlt gb.tlt:gb.tlt tilta.com:tilta.com tiltb.com:tiltb.com	-	-name g -initial -atob -zlimits 1,20 -stackext st -warnings
+lists	ga.rec:ga.rec gb.rec:gb.rec ga.st:ga.st gb.st:gb.st ga.xf:ga.xf gb.xf:gb.xf ga.tlt:ga.tlt gb.tlt:gb.tlt tilta.com:tilta.com tiltb.com:tiltb.com	-	-name g -surfaces -2 -zlimits 3,17 -tolist 1-3,5/7 -fromlist 2/4 -uselist 1,2/3 -transfer tr.mod -stackext st
+patch_limits	ga.rec:ga.rec gb.rec:gb.rec ga.st:ga.st gb.st:gb.st ga.xf:ga.xf gb.xf:gb.xf ga.tlt:ga.tlt gb.tlt:gb.tlt tilta.com:tilta.com tiltb.com:tiltb.com	-	-name g -surfaces 2 -zlimits 2,18 -patchsize 20,20,8 -xlimits 5,60 -ylimits 6,50 -stackext st
+auto	ga.rec:ga.rec gb.rec:gb.rec ga.st:ga.st gb.st:gb.st ga.xf:ga.xf gb.xf:gb.xf ga.tlt:ga.tlt gb.tlt:gb.tlt tilta.com:tilta.com tiltb.com:tiltb.com	-	-name g -initial -autopatch 30,30,10 -extra 0.4,0.5 -patchsize 20,20,8 -regionmod reg.mod -stackext st
+volcomb	ga.rec:ga.rec gb.rec:gb.rec ga.st:ga.st gb.st:gb.st ga.xf:ga.xf gb.xf:gb.xf ga.tlt:ga.tlt gb.tlt:gb.tlt tilta.com:tilta.com tiltb.com:tiltb.com	-	-name g -surfaces 1 -zlimits 3,17 -lowradius 0.05 -wedgefrac 1e-5 -stackext st
+change	ga.rec:ga.rec gb.rec:gb.rec ga.st:ga.st gb.st:gb.st ga.xf:ga.xf gb.xf:gb.xf ga.tlt:ga.tlt gb.tlt:gb.tlt tilta.com:tilta.com tiltb.com:tiltb.com change.adoc:ch.adoc empty:origcoms/x empty:dfltcoms/x	-	-name g -surfaces 1 -zlimits 3,17 -change ch.adoc -one comparam.patchcorr.corrsearch3d.KernelSigma=1.5 -stackext st
+chunked	ga.rec:ga.rec gb.rec:gb.rec ga.st:ga.st gb.st:gb.st ga.xf:ga.xf gb.xf:gb.xf ga.tlt:ga.tlt gb.tlt:gb.tlt tilta.com:tilta.com tiltb.com:tiltb.com	-	-name g -surfaces 1 -zlimits 3,17 -chunked 1 -stackext st
+centered	ga.rec:ga.rec gb.rec:gb.rec ga.st:ga.st gb.st:gb.st ga.xf:ga.xf gb.xf:gb.xf ga.tlt:ga.tlt gb.tlt:gb.tlt ga.ali:ga.ali gb.ali:gb.ali ctilta.com:tilta.com ctiltb.com:tiltb.com empty:newstb.com	-	-name g -surfaces 1 -zlimits 3,17 -stackext st
+only	-	-	-only -autopatch M -extra 0.5,0.6 -initial -stackext st
+style0	ga.rec:ga.rec gb.rec:gb.rec ga.st:ga.st gb.st:gb.st ga.xf:ga.xf gb.xf:gb.xf ga.tlt:ga.tlt gb.tlt:gb.tlt tilta.com:tilta.com tiltb.com:tiltb.com	-	-name g -surfaces 1 -zlimits 3,17 -style 0 -stackext st
+err_patch	ga.rec:ga.rec gb.rec:gb.rec ga.st:ga.st gb.st:gb.st ga.xf:ga.xf gb.xf:gb.xf ga.tlt:ga.tlt gb.tlt:gb.tlt tilta.com:tilta.com tiltb.com:tiltb.com	-	-name g -surfaces 1 -zlimits 3,17 -patchsize Q -stackext st
+err_auto_small	ga.rec:ga.rec gb.rec:gb.rec ga.st:ga.st gb.st:gb.st ga.xf:ga.xf gb.xf:gb.xf ga.tlt:ga.tlt gb.tlt:gb.tlt tilta.com:tilta.com tiltb.com:tiltb.com	-	-name g -initial -autopatch S -stackext st
+err_zlim	ga.rec:ga.rec gb.rec:gb.rec ga.st:ga.st gb.st:gb.st ga.xf:ga.xf gb.xf:gb.xf ga.tlt:ga.tlt gb.tlt:gb.tlt tilta.com:tilta.com tiltb.com:tiltb.com	-	-name g -surfaces 1 -stackext st
+err_xlim	ga.rec:ga.rec gb.rec:gb.rec ga.st:ga.st gb.st:gb.st ga.xf:ga.xf gb.xf:gb.xf ga.tlt:ga.tlt gb.tlt:gb.tlt tilta.com:tilta.com tiltb.com:tiltb.com	-	-name g -surfaces 1 -zlimits 3,17 -xlimits 60,5 -stackext st
+err_surf	ga.rec:ga.rec gb.rec:gb.rec ga.st:ga.st gb.st:gb.st ga.xf:ga.xf gb.xf:gb.xf ga.tlt:ga.tlt gb.tlt:gb.tlt tilta.com:tilta.com tiltb.com:tiltb.com	-	-name g -surfaces 3 -zlimits 3,17 -stackext st
+err_noname	ga.rec:ga.rec gb.rec:gb.rec ga.st:ga.st gb.st:gb.st ga.xf:ga.xf gb.xf:gb.xf ga.tlt:ga.tlt gb.tlt:gb.tlt tilta.com:tilta.com tiltb.com:tiltb.com	-	-surfaces 1 -zlimits 3,17 -stackext st
+err_noext	ga.rec:ga.rec gb.rec:gb.rec ga.st:ga.st gb.st:gb.st ga.xf:ga.xf gb.xf:gb.xf ga.tlt:ga.tlt gb.tlt:gb.tlt tilta.com:tilta.com tiltb.com:tiltb.com	-	-name g -surfaces 1 -zlimits 3,17
+err_tempdir	ga.rec:ga.rec gb.rec:gb.rec ga.st:ga.st gb.st:gb.st ga.xf:ga.xf gb.xf:gb.xf ga.tlt:ga.tlt gb.tlt:gb.tlt tilta.com:tilta.com tiltb.com:tiltb.com	-	-name g -surfaces 1 -zlimits 3,17 -tempdir nodir -stackext st

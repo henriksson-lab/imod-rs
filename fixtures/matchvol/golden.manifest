@@ -1,0 +1,95 @@
+# imod-rs native golden manifest for fixtures/matchvol; see fixtures/README.md.
+# Regenerate with fixtures/regen-golden.sh matchvol; do not edit by hand.
+text 2 golden/m_badchunk.rc
+1
+
+sha256 5f9c9c79f3d6ec6c4d9b83560fc0dee0ec26959a60fc09069198b66071505adc 1068 golden/m_badchunk.stdout
+text 2 golden/m_badnum.rc
+1
+
+sha256 5e750d2a738af6c921d31d658688df7ec91e0855b43176f272ee4e5ad1f07ac3 1076 golden/m_badnum.stdout
+text 2 golden/m_badsize.rc
+1
+
+sha256 c2d468c32c6d6bfdf7bc665c4aedb66dcf939206a9cec879ada3a51a600e560c 1048 golden/m_badsize.stdout
+sha256 ebaad662579fbf3fa65d00552ace21d930544e20993b14d97a0dcbee81f0fd04 25724 golden/m_chain.out.o.mrc
+text 2 golden/m_chain.rc
+0
+
+sha256 ad0fbd82859b2d82be112ba08cdf9c2e9ab51b1d7808c3b70a62a51d79774dde 1483 golden/m_chain.stdout
+sha256 e3add35efb5294a4f0e300b566d031b077bedee8d76867a47b508236bdfb60c9 13824 golden/m_flip.out.o.mrc
+text 2 golden/m_flip.rc
+0
+
+sha256 329f9dc4b52ae2373cebb78129184b50981635ba783a805d88e9478ea2f3926a 1450 golden/m_flip.stdout
+sha256 0cb5ed9ae02aebe49736c0fb96560504f4833e7be043c08c7571b3141951a1f8 25724 golden/m_inline.out.o.mrc
+text 2 golden/m_inline.rc
+0
+
+sha256 4e838af01004834c7631765dece462663fa5243653a2ed7a375d31097da32e0e 1411 golden/m_inline.stdout
+text 123 golden/m_interactive.out.inv2.xf
+  0.958968 -0.000000 -0.203835    -3.112
+  0.010668  0.979049  0.050189    -0.783
+  0.203556 -0.051310  0.957654    -1.826
+
+sha256 a99cd904900f8d0e721a03b650da9669c35fbece5538f4de9a0208396d54228a 13024 golden/m_interactive.out.o.mrc
+text 2 golden/m_interactive.rc
+0
+
+sha256 3456522ec027d89cfc5f207c7fc123c1d777d9869e1299123cab17289dc43dc8 2145 golden/m_interactive.stdout
+text 2 golden/m_interactive_eof.rc
+2
+
+sha256 7ff4e3f8bd852d656c749457c836ff78f104c381290da43f0af1386757dfd96c 1220 golden/m_interactive_eof.stdout
+sha256 a92c88a079849135d964adc8d3b3a7b937ab24b82b6ea3cde2a1296bca6695dc 25724 golden/m_lin.out.o.mrc
+text 2 golden/m_lin.rc
+0
+
+sha256 928652adaa14db1a2201eb66e6770d38173170e25e7e9265add42bbac3489015 1447 golden/m_lin.stdout
+sha256 c8f2d83d97f1bd4816a19109d2947c899e281048e56c5d2d3c8f0c6717e11ac9 271024 golden/m_mb.out.o.mrc
+text 2 golden/m_mb.rc
+0
+
+sha256 31230ba6d82f558e994b89a42a44f9097e016a09ac9bec2e691de74ba45a72e3 2578 golden/m_mb.stdout
+sha256 3fd05520992798a1e9befb84dc6aea758842e5ee5ce7a384885830ddd59e139f 271024 golden/m_mbyx.out.o.mrc
+text 2 golden/m_mbyx.rc
+0
+
+sha256 b84de93f4d2a067194350ec1f56266844f5f811e32cccd2fbf5a1514a5e33141 1560 golden/m_mbyx.stdout
+sha256 10d6223b51c3ac5e310de2fa8c5c7d471182834e3707ba7567f2058c41d8dc4e 271024 golden/m_mbzx.out.o.mrc
+text 2 golden/m_mbzx.rc
+0
+
+sha256 34413944265d40e8ae0457da084983c63c4db5d7b72dceeaec4679676112cb1d 1610 golden/m_mbzx.stdout
+text 2 golden/m_missingxf.rc
+1
+
+sha256 f6f59ff3b6c234157ccada107de3f07f17898f97f660ea5e74f8adae5007ed89 1020 golden/m_missingxf.stdout
+text 2 golden/m_noout.rc
+0
+
+sha256 2e27b85b39c04d3bbc32c4352a10b94b7821bb8a338b2a40d401918cc300d00b 1556 golden/m_noout.stdout
+text 2 golden/m_noxf.rc
+0
+
+sha256 2e27b85b39c04d3bbc32c4352a10b94b7821bb8a338b2a40d401918cc300d00b 1556 golden/m_noxf.stdout
+sha256 caed55af55774515374636ec7997b815e94a40f38807e1fb349e13d5d53f108d 25724 golden/m_t1.out.o.mrc
+text 2 golden/m_t1.rc
+0
+
+sha256 928652adaa14db1a2201eb66e6770d38173170e25e7e9265add42bbac3489015 1447 golden/m_t1.stdout
+text 123 golden/m_t1s.out.inv.xf
+  0.958968 -0.000000 -0.203835    -2.255
+  0.010668  0.979049  0.050189     1.211
+  0.203556 -0.051310  0.957654    -1.246
+
+sha256 b7928b5388f8dc7e2779defb11c9fbc91807dbb4f1550d5e4696847e5180025f 8878 golden/m_t1s.out.o.mrc
+text 2 golden/m_t1s.rc
+0
+
+sha256 ad6321dab7d7d3da25590d3f73711f7de1fd2750d36fea849cdde0674abb2a41 1485 golden/m_t1s.stdout
+sha256 d9e32b0c798d20ed677003303d3f7c73162a659e05749826f20b0f5449e75825 8878 golden/m_zx.out.o.mrc
+text 2 golden/m_zx.rc
+0
+
+sha256 55f3a8998ab279eb793f779d16cd39117a25bf8b8c51ddcb8a52aba3b60fb34e 1448 golden/m_zx.stdout

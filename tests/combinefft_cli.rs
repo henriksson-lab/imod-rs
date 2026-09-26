@@ -11,6 +11,8 @@
 //! libc stdout and the gfortran unit-6 lines interleave differently in the
 //! two programs, and message order is not part of the acceptance target
 //! (CLAUDE.md), while every line native prints must still be printed.
+//!
+//! Pruned 2026-09-26: 27 of 30 rows kept (dropped: -weight with a tilt file (the -weight/-both/-highest case is kept), interactive output into B, and the short inverse-xf read error (bad.xf kept)); the rest stay in cases.tsv as `#full` rows (FULL=1 / IMOD_RS_FULL_CASES=1, fixtures/README.md).
 
 mod common;
 
@@ -31,7 +33,11 @@ fn scratch(name: &str) -> PathBuf {
     std::fs::create_dir_all(&dir).unwrap();
     for entry in std::fs::read_dir(fixture_dir()).unwrap() {
         let path = entry.unwrap().path();
-        if path.is_file() && path.file_name().is_some_and(|n| n != "cases.tsv") {
+        if path.is_file()
+            && path
+                .file_name()
+                .is_some_and(|n| n != "cases.tsv" && n != "golden.manifest")
+        {
             std::fs::copy(&path, dir.join(path.file_name().unwrap())).unwrap();
         }
     }
@@ -47,14 +53,14 @@ fn unescape(text: &str) -> String {
     text.replace("\\n", "\n")
 }
 
-/// Standard output as a sorted list of lines, stamps masked.
-fn lines(bytes: &[u8]) -> Vec<Vec<u8>> {
+/// Standard output with its lines sorted, stamps masked.
+fn lines(bytes: &[u8]) -> Vec<u8> {
     let mut lines: Vec<Vec<u8>> = common::mask_stamps(bytes)
         .split(|&b| b == b'\n')
         .map(<[u8]>::to_vec)
         .collect();
     lines.sort();
-    lines
+    lines.join(&b'\n')
 }
 
 #[test]
@@ -63,10 +69,7 @@ fn every_case_matches_native_golden() {
     let golden = fixture_dir().join("golden");
     let mut failures = Vec::new();
     let mut count = 0;
-    for line in table
-        .lines()
-        .filter(|l| !l.starts_with('#') && !l.is_empty())
-    {
+    for line in common::golden::case_rows(&table) {
         let fields: Vec<&str> = line.split('\t').collect();
         let (name, args, stdin) = (fields[0], fields[1], fields[2]);
         let dir = scratch(name);
@@ -96,8 +99,7 @@ fn every_case_matches_native_golden() {
             .unwrap();
         let output = child.wait_with_output().unwrap();
         count += 1;
-        let rc: i32 = std::fs::read_to_string(golden.join(format!("{name}.rc")))
-            .unwrap()
+        let rc: i32 = common::golden::read_to_string(&golden.join(format!("{name}.rc")))
             .trim()
             .parse()
             .unwrap();
@@ -108,11 +110,11 @@ fn every_case_matches_native_golden() {
                 String::from_utf8_lossy(&output.stderr)
             ));
         }
-        let stdout = std::fs::read(golden.join(format!("{name}.stdout"))).unwrap();
-        if lines(&output.stdout) != lines(&stdout) {
+        let stdout = common::golden::expect(&golden.join(format!("{name}.stdout")));
+        if !stdout.matches_masked(&output.stdout, lines) {
             failures.push(format!(
                 "{name}: stdout differs\n--- native\n{}\n--- ours\n{}",
-                String::from_utf8_lossy(&stdout),
+                stdout.display(),
                 String::from_utf8_lossy(&output.stdout)
             ));
         }
@@ -126,19 +128,19 @@ fn every_case_matches_native_golden() {
         if bb != std::fs::read(fixture_dir().join("b.fft")).unwrap() {
             written = Some(bb);
         }
-        let expected = std::fs::read(golden.join(format!("{name}.out"))).ok();
+        let expected = common::golden::load(&golden.join(format!("{name}.out")));
         match (expected, written) {
             (None, None) => {}
-            (Some(g), Some(w)) if common::mask_stamps(&g) == common::mask_stamps(&w) => {}
+            (Some(g), Some(w)) if g.matches_masked(&w, common::mask_stamps) => {}
             (g, w) => failures.push(format!(
-                "{name}: output differs (native {:?} bytes, ours {:?} bytes)",
-                g.map(|b| b.len()),
+                "{name}: output differs (native {:?}, ours {:?} bytes)",
+                g.map(|b| b.describe()),
                 w.map(|b| b.len())
             )),
         }
         let _ = std::fs::remove_dir_all(&dir);
     }
-    assert!(count >= 30, "only {count} cases read");
+    assert!(count >= 27, "only {count} cases read");
     assert!(failures.is_empty(), "{}", failures.join("\n"));
 }
 

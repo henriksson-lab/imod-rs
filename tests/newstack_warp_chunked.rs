@@ -249,12 +249,10 @@ fn warping_corrections_on_the_chunked_route_match_the_reference() {
             "{name}: the run must actually reach {chunks} chunks, got:\n{got_text}"
         );
         let want_text =
-            std::fs::read_to_string(root.join(format!("fixtures/newstack-warp-big-{name}.txt")))
-                .unwrap();
-        assert_eq!(
-            got_text, want_text,
-            "{name}: stdout must match the reference run"
-        );
+            common::golden::expect(&root.join(format!("fixtures/newstack-warp-big-{name}.txt")));
+        if let Err(why) = want_text.compare(got_text.as_bytes(), common::golden::identity, false) {
+            panic!("{name}: stdout must match the reference run: {why}");
+        }
         let mut got = std::fs::read(dir.join("o.mrc")).unwrap();
         for byte in &mut got[224..1024] {
             *byte = 0;

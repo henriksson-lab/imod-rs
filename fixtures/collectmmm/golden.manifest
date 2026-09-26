@@ -1,0 +1,109 @@
+# imod-rs native golden manifest for fixtures/collectmmm; see fixtures/README.md.
+# Regenerate with fixtures/regen-golden.sh collectmmm; do not edit by hand.
+text 38 golden/basic.files
+img.mrc
+r-001.log
+r-002.log
+r-003.log
+
+sha256 4645b5a8066a56807d98e063b11cf6be7be339b183e298e3922dc48149f55af5 2728 golden/basic.out
+text 2 golden/basic.rc
+0
+
+sha256 4d284c12765e4ace85b3771009f3d91bda8661fdbafe27a04cd6bf4a689a8b07 3904 golden/basic/img.mrc
+text 38 golden/err_int.files
+img.mrc
+r-001.log
+r-002.log
+r-003.log
+
+text 84 golden/err_int.out
+ERROR: collectmmm - Converting number of logs or number of first file to an integer
+
+text 2 golden/err_int.rc
+1
+
+text 38 golden/err_missinglog.files
+img.mrc
+r-001.log
+r-002.log
+r-003.log
+
+text 94 golden/err_missinglog.out
+ERROR: collectmmm - Opening   ./r-004.log: [Errno 2] No such file or directory: './r-004.log'
+
+text 2 golden/err_missinglog.rc
+1
+
+text 38 golden/err_noimage.files
+img.mrc
+r-001.log
+r-002.log
+r-003.log
+
+text 185 golden/err_noimage.out
+ Name of input file: ERROR: iiOpen - Opening file none.mrc (No such file or directory)
+
+ERROR: iiuOpen - Could not open 'none.mrc'
+ERROR: collectmmm - alterheader: exited with status 1
+
+text 2 golden/err_noimage.rc
+1
+
+text 38 golden/err_notag.files
+img.mrc
+r-001.log
+r-002.log
+r-003.log
+
+text 68 golden/err_notag.out
+ERROR: collectmmm - ./r-001.log does not contain a line with "mmm:"
+
+text 2 golden/err_notag.rc
+1
+
+text 18 golden/err_three.files
+img.mrc
+r-001.log
+
+text 76 golden/err_three.out
+ERROR: collectmmm - ./r-001.log does not contain 4 values after tag:  1 2 3
+
+text 2 golden/err_three.rc
+1
+
+text 18 golden/err_value.files
+img.mrc
+r-001.log
+
+text 67 golden/err_value.out
+ERROR: collectmmm - Converting x in ./r-001.log to a numeric value
+
+text 2 golden/err_value.rc
+1
+
+text 36 golden/start_dir.files
+img.mrc
+sub/r-002.log
+sub/r-003.log
+
+sha256 2a9012d3422fbaf77956218b9ff2cbd9a02e2265cb8f75d969cf670ac47db915 2728 golden/start_dir.out
+text 2 golden/start_dir.rc
+0
+
+sha256 e8842474f3646157b924ac69f21e7ff57453a3fe12979fbb69e49280613f6846 3904 golden/start_dir/img.mrc
+text 0 golden/usage.files
+
+text 439 golden/usage.out
+
+Usage: collectmmm tag rootname #_of_logs image_file [starting_#] [logdir]
+   tag  =  a unique text string prefix to the min, max, mean, and pixel #
+   rootname = root name of numbered log files, rootname-nnn.log
+   #_of_logs = number of log files
+   image_file = image file to correct the header of 
+   starting_# = optional entry of number of first file, default is 1
+   log_dir = path from working directory to directory where logs are
+
+text 2 golden/usage.rc
+1
+

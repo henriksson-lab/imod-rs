@@ -1,0 +1,61 @@
+# imod-rs native golden manifest for fixtures/b3dremove; see fixtures/README.md.
+# Regenerate with fixtures/regen-golden.sh b3dremove; do not edit by hand.
+text 20 golden/err_both.files
+a1.log
+a2.log
+b.txt
+
+text 51 golden/err_both.out
+ERROR: b3dremove - You cannot enter both -r and -g
+
+text 2 golden/err_both.rc
+1
+
+text 21 golden/err_dir.files
+a1.log
+a2.log
+d1/x/y
+
+text 40 golden/err_dir.out
+ERROR: b3dremove - Could not remove: d1
+
+text 2 golden/err_dir.rc
+1
+
+text 7 golden/files.files
+a2.log
+
+text 0 golden/files.out
+
+text 2 golden/files.rc
+0
+
+text 6 golden/glob.files
+b.txt
+
+text 0 golden/glob.out
+
+text 2 golden/glob.rc
+0
+
+text 20 golden/tree.files
+a1.log
+a2.log
+b.txt
+
+text 0 golden/tree.out
+
+text 2 golden/tree.rc
+0
+
+text 0 golden/usage.files
+
+text 275 golden/usage.out
+Usage: b3dremove [-e] [-g] filenames OR -r directories
+    Removes files with optional -g to glob on wild cards in the filenames, or
+    removes directory trees with the -r option.  In either case -e makes it
+    exit with an error if it fails to remove a file or directory.
+
+text 2 golden/usage.rc
+0
+

@@ -1,0 +1,28 @@
+# name	program	args	check
+# check: "stdout" = exit status and stdout exact; "rc" = exit status only, and
+# no output file where native wrote none; "gray"/"color" = exit status, then
+# o.mrc's size/mode words exact and its float pixels within the decoder
+# tolerance measured against libjpeg-turbo (TOFIX.md, iijpeg): gray max |d| 1
+# on at most 2% of pixels, color (RGB->luminance) max |d| 1.7 on at most 55%.
+hd_g1	header	g1.jpg	stdout
+hd_c420	header	c420.jpg	stdout
+hd_cmyk	header	cmyk.jpg	stdout
+nsf_g1	newstack	-mode 2 g1.jpg o.mrc	gray
+nsf_g2	newstack	-mode 2 g2.jpg o.mrc	gray
+nsf_gprog	newstack	-mode 2 gprog.jpg o.mrc	gray
+nsf_mtb	newstack	-mode 2 mtb.jpg o.mrc	gray
+nsf_c420	newstack	-mode 2 c420.jpg o.mrc	color
+nsf_c444	newstack	-mode 2 c444.jpg o.mrc	color
+nsf_c422	newstack	-mode 2 c422.jpg o.mrc	color
+nsf_cprog	newstack	-mode 2 cprog.jpg o.mrc	color
+nsf_mtrgb	newstack	-mode 2 mtrgb.jpg o.mrc	color
+nsf_cam	newstack	-mode 2 cam.jpg o.mrc	color
+nsf_rst	newstack	-mode 2 rst.jpg o.mrc	color
+sub_row0	newstack	-mode 2 -size 30,20 -offset 3,-38 g2.jpg o.mrc	gray
+sub_above	newstack	-mode 2 -size 30,20 -offset 3,-2 g2.jpg o.mrc	rc
+sub_above_rgb	newstack	-mode 2 -size 30,20 -offset 3,-2 c420.jpg o.mrc	rc
+bin2	newstack	-mode 2 -bin 2 g2.jpg o.mrc	rc
+cmyk_read	newstack	-mode 2 cmyk.jpg o.mrc	rc
+color_out	newstack	mtrgb.jpg o.mrc	rc
+sec1	newstack	-secs 1 g1.jpg o.mrc	rc
+cstat_sub	clip	stats -x 5,40 -y 3,30 g2.jpg	rc

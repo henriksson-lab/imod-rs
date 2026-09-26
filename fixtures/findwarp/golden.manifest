@@ -1,0 +1,399 @@
+# imod-rs native golden manifest for fixtures/findwarp; see fixtures/README.md.
+# Regenerate with fixtures/regen-golden.sh findwarp; do not edit by hand.
+sha256 d6be61b48eca15cf9e6ffeeca20e767e805c48d661fbdd171bb9b62d3ff4b8ea 2737 golden/f_auto1.out.w.xf
+text 2 golden/f_auto1.rc
+0
+
+sha256 fda0d40541f863a91906e31b05283fc9c2e54809fc0a8953daf1826dc7d88569 863 golden/f_auto1.stdout
+sha256 05454bf5440c85c73b0a9e14059e875f7b9eee4dc472f1c80f4148f564e3aeaf 4231 golden/f_debug2.out.w.xf
+text 2 golden/f_debug2.rc
+0
+
+sha256 f023c2409b3164d853ab3248ade3a42ac688b64d6cdbabe629c7d931ff763355 2301 golden/f_debug2.stdout
+sha256 aa16413d1f6d32aa5af715505e120b1569b5b7a0da924993ad88249ebd29ca2f 2903 golden/f_desired_sel.out.w.xf
+text 2 golden/f_desired_sel.rc
+0
+
+sha256 c2a9ffedd9a1f82a95d692f04ef42c930ae40a4a16e44b8b79df97e2d64a2dda 1197 golden/f_desired_sel.stdout
+text 2 golden/f_discount.rc
+1
+
+text 326 golden/f_discount.stdout
+
+ FORMATTED  old  file opened: p6.patch
+ Number of patches in X, Y and Z is:           6           3           6
+Patch vector length mean, SD and max:    0.00    0.00    0.00
+
+Seeking a warping with mean residual below    0.400
+
+ERROR: FINDWARP - All fits had too many zero vectors: raise -discount fraction or set it to zero
+
+sha256 697bdf47af8d043d5111d33a715530a0d99d97dfbc1579bc3461b8f4fbc796cb 2737 golden/f_discount_fail.out.w.xf
+text 2 golden/f_discount_fail.rc
+0
+
+text 402 golden/f_discount_fail.stdout
+
+ FORMATTED  old  file opened: p6.patch
+ Number of patches in X, Y and Z is:           6           3           6
+Patch vector length mean, SD and max:    0.00    0.00    0.00
+Mean residual has an average of   0.000 and a maximum of   0.000    [FWP1]
+Max  residual has an average of   0.000 and a maximum of   0.000
+
+These averages are based on      0 of     16 fits
+
+ FORMATTED  new  file opened: w.xf
+
+sha256 d9c330de1ee73c78b3ffa4ee304f6c0ab7285626ad4cc1f735263f1eca3f5bc5 14442 golden/f_elim.out.r.out
+sha256 e8053d9959d30f7db573b7016a2e30b8d23a4bb10227bf25913bd012ddff99f1 2737 golden/f_elim.out.w.xf
+text 2 golden/f_elim.rc
+0
+
+sha256 2da0734f638480493ec3f7ca38798d1367294de2b8d3cd663fe8c5f3e8572d74 804 golden/f_elim.stdout
+text 2 golden/f_extent.rc
+2
+
+text 318 golden/f_extent.stdout
+
+ FORMATTED  old  file opened: p1.patch
+ Number of patches in X, Y and Z is:           8           3           8
+Patch vector length mean, SD and max:    4.15    2.03   15.18
+
+Seeking a warping with mean residual below    0.400
+
+ERROR: FINDWARP - Failed to find a warping with a mean residual below    0.451    [FWP2]
+
+sha256 26875ba59081195f08ea088e580f94392d0b514893f66257993d6a3f7dc435ef 4729 golden/f_extra.out.w.xf
+text 2 golden/f_extra.rc
+0
+
+sha256 03c5de8e3474ccbe33c104db727d8aba7aa99f9b0a2c1e96f824bf1df6020da7 855 golden/f_extra.stdout
+text 2 golden/f_extra_bad0.rc
+1
+
+text 233 golden/f_extra_bad0.stdout
+
+ FORMATTED  old  file opened: p1.patch
+ Number of patches in X, Y and Z is:           8           3           8
+Patch vector length mean, SD and max:    4.15    2.03   15.18
+
+ERROR: FINDWARP - 0 is not a value column number or id #
+
+text 2 golden/f_extra_badid.rc
+1
+
+text 266 golden/f_extra_badid.stdout
+
+ FORMATTED  old  file opened: p1.patch
+ Number of patches in X, Y and Z is:           8           3           8
+Patch vector length mean, SD and max:    4.15    2.03   15.18
+
+ERROR: FINDWARP - There is no extra value column with the column id # entered with -extra
+
+text 2 golden/f_extra_badsign.rc
+1
+
+text 248 golden/f_extra_badsign.stdout
+
+ FORMATTED  old  file opened: p1.patch
+ Number of patches in X, Y and Z is:           8           3           8
+Patch vector length mean, SD and max:    4.15    2.03   15.18
+
+ERROR: FINDWARP - The second value on the -select entry must be 1 or -1
+
+sha256 308693af6397f95d617fdb668c5160b71973835f8e8a998636e92536b580c719 21343 golden/f_extra_neg.out.r.out
+text 2 golden/f_extra_neg.rc
+2
+
+text 477 golden/f_extra_neg.stdout
+
+ FORMATTED  old  file opened: p3.patch
+ Number of patches in X, Y and Z is:           9           9           3
+Patch vector length mean, SD and max:    7.17    2.93   29.97
+
+Seeking a warping with mean residual below    0.500
+  with extra column selection criteria    0.700
+    - eliminates    53 of   215 patches, gives best mean residual   0.560
+
+ FORMATTED  new  file opened: r.out
+
+ERROR: FINDWARP - Failed to find a warping with a mean residual below    0.560    [FWP2]
+
+text 2 golden/f_extra_none.rc
+1
+
+text 245 golden/f_extra_none.stdout
+
+ FORMATTED  old  file opened: p7.patch
+ Number of patches in X, Y and Z is:           8           3           8
+Patch vector length mean, SD and max:    6.03    3.36   24.47
+
+ERROR: FINDWARP - There are no extra value columns in the patch file
+
+text 2 golden/f_extra_nosel.rc
+1
+
+text 248 golden/f_extra_nosel.stdout
+
+ FORMATTED  old  file opened: p1.patch
+ Number of patches in X, Y and Z is:           8           3           8
+Patch vector length mean, SD and max:    4.15    2.03   15.18
+
+ERROR: FINDWARP - There must be one -select entry for each -extra entry
+
+sha256 11b990abe0431a7423f4a5c685f8c7cc26b869377a20547e7f4b130ba132c664 14442 golden/f_fail.out.r.out
+text 2 golden/f_fail.rc
+2
+
+text 408 golden/f_fail.stdout
+
+ FORMATTED  old  file opened: p1.patch
+ Number of patches in X, Y and Z is:           8           3           8
+Patch vector length mean, SD and max:    4.15    2.03   15.18
+
+Seeking a warping with mean residual below    0.010
+
+Seeking a warping with mean residual below    0.020
+
+ FORMATTED  new  file opened: r.out
+
+ERROR: FINDWARP - Failed to find a warping with a mean residual below    0.396    [FWP2]
+
+text 2 golden/f_help.rc
+0
+
+sha256 5fff5ad11b437e3689d92601b69373357081e4cfcf737afa65c44f0e947543ff 3050 golden/f_help.stdout
+sha256 9c22298061578d2f0b218491e4cd604f64c42a072489480b733a742581b95615 7053 golden/f_init.out.w.xf
+text 2 golden/f_init.rc
+0
+
+sha256 52da03ae9a8d92435596b4e6a07eb0536cbbe4065e099a371c3f2bb0293d9958 844 golden/f_init.stdout
+text 2 golden/f_init_bad.rc
+2
+
+sha256 4681d7988becfeb513b5b291cb3b5cb05907515dff48b6c08fa46dbe819f975f 816 golden/f_init_bad.stdout
+text 2 golden/f_legacym1.rc
+2
+
+text 318 golden/f_legacym1.stdout
+
+ FORMATTED  old  file opened: p7.patch
+ Number of patches in X, Y and Z is:           8           3           8
+Patch vector length mean, SD and max:    6.03    3.36   24.47
+
+Seeking a warping with mean residual below    0.400
+
+ERROR: FINDWARP - Failed to find a warping with a mean residual below    0.495    [FWP2]
+
+sha256 81a7250365b3ad0b1e64f90c953efba3a9179fc390f716f5ffc133dc5b4922a6 7053 golden/f_measured.out.w.xf
+text 2 golden/f_measured.rc
+0
+
+sha256 0281634ec087df04f2df49ce87622fe4a32a40cbc20d0e9d3092c6b150f47376 767 golden/f_measured.stdout
+sha256 546df53d01a8211f359da886d435fdfb7bd189a90a1d971bccfd70f8efdb1bcf 21343 golden/f_missing3.out.r.out
+text 2 golden/f_missing3.rc
+2
+
+text 355 golden/f_missing3.stdout
+
+ FORMATTED  old  file opened: p3.patch
+ Number of patches in X, Y and Z is:           9           9           3
+Patch vector length mean, SD and max:    7.17    2.93   29.97
+
+Seeking a warping with mean residual below    0.500
+
+ FORMATTED  new  file opened: r.out
+
+ERROR: FINDWARP - Failed to find a warping with a mean residual below    0.574    [FWP2]
+
+text 2 golden/f_nofile.rc
+1
+
+text 47 golden/f_nofile.stdout
+
+ERROR: DOPEN - FILE nope.patch DOES NOT EXIST
+
+sha256 d6be61b48eca15cf9e6ffeeca20e767e805c48d661fbdd171bb9b62d3ff4b8ea 2737 golden/f_nonopt.out.w.xf
+text 2 golden/f_nonopt.rc
+0
+
+sha256 9557165538e3676ebf27802762ee63cbda6abd3b5759039eee213a8cc33f4042 810 golden/f_nonopt.stdout
+sha256 20982ba36880f507d781248e6e952d516be6d506d0d4574c8f88ea5fcd71ee50 14442 golden/f_nooutput.out.r.out
+text 2 golden/f_nooutput.rc
+0
+
+sha256 0f28b62e0866b3abe425b48de75de15c374f537f2d4e7a52185a633bb656a89a 768 golden/f_nooutput.stdout
+text 2 golden/f_nopatch.rc
+1
+
+text 49 golden/f_nopatch.stdout
+
+ERROR: FINDWARP - No input patch file specified
+
+text 2 golden/f_notarget.rc
+1
+
+text 250 golden/f_notarget.stdout
+
+ FORMATTED  old  file opened: p1.patch
+ Number of patches in X, Y and Z is:           8           3           8
+Patch vector length mean, SD and max:    4.15    2.03   15.18
+
+ERROR: FINDWARP - Target mean residual must be entered for automatic fits
+
+text 2 golden/f_novol.rc
+1
+
+text 204 golden/f_novol.stdout
+
+ FORMATTED  old  file opened: p1.patch
+ Number of patches in X, Y and Z is:           8           3           8
+
+ERROR: FINDWARP - you must enter option VolumeOrSizeXYZ to specify file size or file name
+
+sha256 b589e02547e4cb89478b637dc41caead667e3175f3eac69aa802cbb0eda3c685 4842 golden/f_onelayer.out.r.out
+sha256 00d8d6d2b9ec5f3b265803a21e4fcdbdf4569f3f9e4abc6830219e75c48681eb 5061 golden/f_onelayer.out.w.xf
+text 2 golden/f_onelayer.rc
+0
+
+sha256 acd104f972bda3d18c31dc89d791dfe599374ef5ba276db7eed2e333e5a410fa 973 golden/f_onelayer.stdout
+sha256 af3f263b7ac037ef4c73171b0a83847adbc0ecb09f251c6ce6c7f48b2a24ff3b 5891 golden/f_region1.out.w.xf
+text 2 golden/f_region1.rc
+0
+
+sha256 3fced4729c189ff5a7fee85df35575e4de1fb50e3fd66bcff5825f962060bed1 915 golden/f_region1.stdout
+sha256 d3a825aba67073518985db6d5764cf332658f2b4f44de897a520741469ee3cb2 3899 golden/f_region_noinit.out.w.xf
+text 2 golden/f_region_noinit.rc
+0
+
+sha256 6ad7c3c8afd6158faf81a72e386b7e4cb828a9fe5ce44cdca721e49f5d624135 584 golden/f_region_noinit.stdout
+sha256 0171b1e0244bd2f8a928aa80a83b11acb432388ff596a0bcbbc7a9e880efef91 14442 golden/f_rowcol.out.r.out
+sha256 f3ffd5dcc252a7600a57ac50b2d8fcefdf178879bf069bea5dec95516c73b0e6 4231 golden/f_rowcol.out.w.xf
+text 2 golden/f_rowcol.rc
+0
+
+sha256 a49c9d342288969d190905c31ab2d55b3efa3d0db53b87ad1272cc2eb0afc184 718 golden/f_rowcol.stdout
+sha256 3fb4fedf3650a096b45bffc78be909c5f17a1834208096685a12f2efed3ad06e 2571 golden/f_skip.out.w.xf
+text 2 golden/f_skip.rc
+0
+
+sha256 cca3e3da70984a80aa872019cbee92e9504360a345553db42e1d60926b4cb5ac 930 golden/f_skip.stdout
+text 2 golden/f_skipbad.rc
+1
+
+text 246 golden/f_skipbad.stdout
+
+ FORMATTED  old  file opened: p1.patch
+ Number of patches in X, Y and Z is:           8           3           8
+Patch vector length mean, SD and max:    4.15    2.03   15.18
+
+ERROR: FINDWARP - Illegal entry for number of columns to exclude in X
+
+text 2 golden/f_skipbady.rc
+1
+
+text 244 golden/f_skipbady.stdout
+
+ FORMATTED  old  file opened: p2.patch
+ Number of patches in X, Y and Z is:           8           8           3
+Patch vector length mean, SD and max:    5.77    1.76   11.64
+
+ERROR: FINDWARP - Illegal entry for number of ROWS  to exclude in Y
+
+sha256 53af42a02f15114269d271140b8ad86269dca343bbb3f957d2c9be21bbee57a5 3401 golden/f_skipy.out.w.xf
+text 2 golden/f_skipy.rc
+0
+
+sha256 e6d493adf62be1bf74f5dd7d610276860aaf1d45605a54e8173df284d426c359 633 golden/f_skipy.stdout
+sha256 a6c027d80c82b5eb7070d788eb17b7c19c7d265b479edbb1c4a3d612e7ef3335 8381 golden/f_slabs.out.w.xf
+text 2 golden/f_slabs.rc
+0
+
+sha256 6b1ff151da7fff2aad926de2786ca7b3cae196baa564dedbb6d2129c84b726e6 807 golden/f_slabs.stdout
+text 2 golden/f_slabs_bad.rc
+1
+
+text 237 golden/f_slabs_bad.stdout
+
+ FORMATTED  old  file opened: p2.patch
+ Number of patches in X, Y and Z is:           8           8           3
+Patch vector length mean, SD and max:    5.77    1.76   11.64
+
+ERROR: FINDWARP - Number of local slabs out of allowed range
+
+text 2 golden/f_toofew.rc
+1
+
+text 305 golden/f_toofew.stdout
+
+ FORMATTED  old  file opened: p9.patch
+ Number of patches in X, Y and Z is:           3           2           3
+Patch vector length mean, SD and max:   10.69    0.26   11.28
+
+ERROR: FINDWARP - No fitting parameters give the required ratio of measurements to unknowns - there are probably too few patches
+
+sha256 3374eb3bcfa0f1c8ff57be82aaf58fa40345e004c97e9b6ce1dd74f1ed3b7f9d 4231 golden/f_warp.out.w.xf
+text 2 golden/f_warp.rc
+0
+
+sha256 fc03fc203c0556b71d6dc45cc5b1a5e14dad72a8cd050205d5a06e41d896de3a 919 golden/f_warp.stdout
+text 2 golden/f_warp_inc.rc
+1
+
+text 303 golden/f_warp_inc.stdout
+
+ FORMATTED  old  file opened: p2.patch
+ Number of patches in X, Y and Z is:           8           8           3
+Patch vector length mean, SD and max:    5.77    1.76   11.64
+
+ FORMATTED  ro  file opened: w2inc.xf
+
+ERROR: FINDWARP - Warp file provided for initial transforms is not complete (filled in)
+
+text 0 golden/f_warp_mismatch.out.w.xf
+
+text 2 golden/f_warp_mismatch.rc
+1
+
+sha256 4722cb5ed29d73261bf2c3a94244bdea30a5fb76c851df5bcfdd5db43af7d38a 1033 golden/f_warp_mismatch.stdout
+sha256 3374eb3bcfa0f1c8ff57be82aaf58fa40345e004c97e9b6ce1dd74f1ed3b7f9d 4231 golden/f_warp_old.out.w.xf
+text 2 golden/f_warp_old.rc
+0
+
+sha256 ec7e9f6bf82563db0e892e0366137a293b37613b50924366c48184010ff79361 922 golden/f_warp_old.stdout
+sha256 11b990abe0431a7423f4a5c685f8c7cc26b869377a20547e7f4b130ba132c664 14442 golden/f_zero.out.r.out
+text 2 golden/f_zero.rc
+0
+
+text 355 golden/f_zero.stdout
+
+ FORMATTED  old  file opened: p1.patch
+ Number of patches in X, Y and Z is:           8           3           8
+Patch vector length mean, SD and max:    4.15    2.03   15.18
+
+Seeking a warping with mean residual below    0.010
+
+ FORMATTED  new  file opened: r.out
+
+ERROR: FINDWARP - Failed to find a warping with a mean residual below    0.396    [FWP2]
+
+sha256 d6be61b48eca15cf9e6ffeeca20e767e805c48d661fbdd171bb9b62d3ff4b8ea 2737 golden/fi_auto.out.wa.xf
+text 2 golden/fi_auto.rc
+0
+
+sha256 f38d4b095d472eca8f44c24b1b37af514bb22154aec0c088356a3fc10b69af59 1477 golden/fi_auto.stdout
+sha256 6a8f1fe9dbe9354777bc2846bbf5e396bb6f9ac837cb452ac9e786ee3e5cc971 2073 golden/fi_illegal.out.wx.xf
+text 2 golden/fi_illegal.rc
+0
+
+sha256 57707e24180282e445151246bff99a051aa773eea557a30489f5e9ff07d4e144 2233 golden/fi_illegal.stdout
+sha256 bcde3bc2854046b8311b056542b1e53c423613527acc7d51e5c2d1b75d31de19 3899 golden/fi_loop.out.wl.xf
+text 2 golden/fi_loop.rc
+0
+
+sha256 8b6de7148b02590155ee6dde1504dba877700c1b4239a322aef056dbc8b7ced8 3298 golden/fi_loop.stdout
+sha256 a3a47efe6d2a0c06b1b0695cb9b182cd67fbc59a19caa6952352502c05dca862 2073 golden/fi_manual.out.wi.xf
+text 2 golden/fi_manual.rc
+0
+
+sha256 eb110a6732ed3c914d8917c6764f0aca1ecf20ca39c7f6a58a54bcd7ca2c1bb8 2250 golden/fi_manual.stdout

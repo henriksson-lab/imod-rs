@@ -5,7 +5,10 @@
 //! in the same order on the same fixture and prints a rolling hash of each
 //! result.  The fixtures are authored by `fixtures/make-mrcsec-inputs.py`
 //! straight from the MRC layout; their 21x13x4 size is odd on purpose so the
-//! sub-rectangle reads are unaligned.
+//! sub-rectangle reads are unaligned.  The driver's output is kept in
+//! `fixtures/golden.manifest` (keys `mrcsec-mode<m>.out.txt`).
+
+mod common;
 
 use imod_rs::imod::libiimod::mrcfiles::{MrcHeader, mrc_head_read, mrc_init_li};
 use imod_rs::imod::libiimod::mrcsec::{
@@ -32,9 +35,9 @@ fn every_section_reader_matches_the_reference_for_every_mode() {
     let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR"));
     for mode in [0, 1, 2, 4, 6] {
         let path = root.join(format!("fixtures/mrcsec-mode{mode}.mrc"));
-        let want =
-            std::fs::read_to_string(root.join(format!("fixtures/mrcsec-mode{mode}.out.txt")))
-                .unwrap();
+        let want = common::golden::read_to_string(
+            &root.join(format!("fixtures/mrcsec-mode{mode}.out.txt")),
+        );
         let mut got = String::new();
         unsafe {
             let mut fp = imod_rs::imod::libcfshr::b3dutil::ImodFile::open(&path, "rb").unwrap();

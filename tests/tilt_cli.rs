@@ -10,6 +10,8 @@
 //! scattered-point model made by the native `point2model`.  An argument column
 //! `STDIN:<file>` runs `tilt -StandardInput` with the file on standard input,
 //! the way `tilt.com` drives it.
+//!
+//! Pruned 2026-09-26: 22 of 23 rows kept (dropped `basic`, the base argument set every other run extends); the rest stay in cases.tsv as `#full` rows (FULL=1, fixtures/README.md).
 
 mod common;
 
@@ -50,17 +52,13 @@ fn every_case_matches_native_golden() {
     let golden = fixture_dir().join("golden");
     let mut failures = Vec::new();
     let mut count = 0;
-    for line in table
-        .lines()
-        .filter(|l| !l.starts_with('#') && !l.is_empty())
-    {
+    for line in common::golden::case_rows(&table) {
         let (name, args) = line.split_once('\t').unwrap();
-        let rc: i32 = std::fs::read_to_string(golden.join(format!("{name}.rc")))
-            .unwrap()
+        let rc: i32 = common::golden::read_to_string(&golden.join(format!("{name}.rc")))
             .trim()
             .parse()
             .unwrap();
-        let expected_out = std::fs::read(golden.join(format!("{name}.out"))).unwrap();
+        let expected_out = common::golden::expect(&golden.join(format!("{name}.out")));
         let dir = scratch(name);
         let inputs: Vec<String> = std::fs::read_dir(&dir)
             .unwrap()
@@ -98,19 +96,14 @@ fn every_case_matches_native_golden() {
         }
         // The header listings carry the labels' time stamps.
         let ours = common::mask_stamps(&output.stdout);
-        let expected_out = common::mask_stamps(&expected_out);
-        if ours != expected_out {
+        if !expected_out.matches_masked(&output.stdout, common::mask_stamps) {
             failures.push(format!(
                 "{name}: stdout differs\n--- native\n{}\n--- ours\n{}",
-                String::from_utf8_lossy(&expected_out),
+                expected_out.display(),
                 String::from_utf8_lossy(&ours)
             ));
         }
-        let mut expected_files: Vec<String> = std::fs::read_dir(golden.join(name))
-            .unwrap()
-            .map(|e| e.unwrap().file_name().to_str().unwrap().to_string())
-            .collect();
-        expected_files.sort();
+        let expected_files: Vec<String> = common::golden::list(&golden.join(name));
         let mut produced: Vec<String> = std::fs::read_dir(&dir)
             .unwrap()
             .map(|e| e.unwrap().file_name().to_str().unwrap().to_string())
@@ -126,9 +119,9 @@ fn every_case_matches_native_golden() {
             let Ok(ours) = std::fs::read(dir.join(file)) else {
                 continue;
             };
-            let theirs = std::fs::read(golden.join(name).join(file)).unwrap();
-            if mask(&ours) != mask(&common::reconcile_uninitialised(&ours, &theirs)) {
-                failures.push(format!("{name}: {file} differs from native"));
+            let theirs = common::golden::expect(&golden.join(name).join(file));
+            if let Err(why) = theirs.compare(&ours, mask, true) {
+                failures.push(format!("{name}: {file} differs from native: {why}"));
             }
         }
         let _ = std::fs::remove_dir_all(&dir);

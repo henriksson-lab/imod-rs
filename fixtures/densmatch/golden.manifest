@@ -1,0 +1,125 @@
+# imod-rs native golden manifest for fixtures/densmatch; see fixtures/README.md.
+# Regenerate with fixtures/regen-golden.sh densmatch; do not edit by hand.
+sha256 d7224d3d6e2bc73661855022f95978ca2231695a178fb7438b728a6153cdfb13 2110 golden/all.out
+text 2 golden/all.rc
+0
+
+sha256 ef91e7364f28a95fbb84f2ee900c8752f8114cb975db215321fe9aaa9e4de7c5 2152 golden/bytein.out
+text 2 golden/bytein.rc
+0
+
+sha256 81de8b7ce911967c176276ab654784d8ea4eeef0ce8347143d2cc1b90baaa632 5632 golden/bytein/o.mrc
+text 201 golden/err_all_mm.out
+
+ RO image file on unit   1 : f.mrc     Size=         19 K
+
+ OLD image file on unit   2 : s.mrc     Size=         10 K
+
+ERROR: DENSMATCH - You cannot enter -all with an option specifying a min and max
+
+text 2 golden/err_all_mm.rc
+1
+
+text 175 golden/err_missing.out
+
+ RO image file on unit   1 : f.mrc     Size=         19 K
+ERROR: iiOpen - Opening file nothere.mrc (No such file or directory)
+
+ERROR: iiuOpen - Could not open 'nothere.mrc'
+
+text 2 golden/err_missing.rc
+1
+
+text 199 golden/err_mode_noout.out
+
+ RO image file on unit   1 : f.mrc     Size=         19 K
+
+ OLD image file on unit   2 : s.mrc     Size=         10 K
+
+ERROR: DENSMATCH - You cannot enter a new mode unless outputting to a new file
+
+text 2 golden/err_mode_noout.rc
+1
+
+text 55 golden/err_noscaled.out
+
+ERROR: DENSMATCH - No file was specified to be scaled
+
+text 2 golden/err_noscaled.rc
+1
+
+text 198 golden/err_offset_nomm.out
+
+ RO image file on unit   1 : f.mrc     Size=         19 K
+
+ OLD image file on unit   2 : s.mrc     Size=         10 K
+
+ERROR: DENSMATCH - You must enter min and max X, Y, or Z if you enter offsets
+
+text 2 golden/err_offset_nomm.rc
+1
+
+text 122 golden/err_target_off.out
+
+ OLD image file on unit   2 : s.mrc     Size=         10 K
+
+ERROR: DENSMATCH - You cannot enter both -target and -offset
+
+text 2 golden/err_target_off.rc
+1
+
+text 65 golden/err_target_ref.out
+
+ERROR: DENSMATCH - You cannot enter both -target and -reference
+
+text 2 golden/err_target_ref.rc
+1
+
+sha256 e6ffc4f09f7ea4907458719837a2439dcb68b9ead8c9681194e5f7637c222484 2044 golden/inplace.out
+text 2 golden/inplace.rc
+0
+
+sha256 f999bd763ae1132c1a67273fa16df4178d1a8921f55be9003c986cd81cfe8329 19456 golden/inplace/f2.mrc
+sha256 b0f8c945f895708661303190f4bab04b6187e6f5da6944db5d6276374690ae8d 2110 golden/minmax.out
+text 2 golden/minmax.rc
+0
+
+sha256 e102747a53e720daef7ac6427eb020a1a8494b86b6acd2d9a49c9811cb46d5e0 2081 golden/mode1.out
+text 2 golden/mode1.rc
+0
+
+sha256 2a7269a7a9051c168a05e8de3b2b65f1e26a9e4b387f362864c4ab311895dc7c 10240 golden/mode1/o.mrc
+sha256 343ec7cb9f4622f16319b8504d2a068fbe915cc3548d1027725442f120453658 2110 golden/offset.out
+text 2 golden/offset.rc
+0
+
+sha256 2ad0dbd58b455a6b0530a4c1da8adf27ade6d88a041ba3cd6805fafdd724f583 2063 golden/offset_bad.out
+text 2 golden/offset_bad.rc
+1
+
+sha256 0e50d0ca6da7aeda13e12e8db3fc2bc93ff45d09cc99eafe1463016bec0c78b9 2081 golden/out.out
+text 2 golden/out.rc
+0
+
+sha256 9812393d95e494b9b0726ec85eb2eb6b14c61e22baa416cc4cbfe86c4226ddbc 19456 golden/out/o.mrc
+sha256 7462312cce14ada3b313ab6be4df5694381563e4e0ae341bbe774e63b429c69e 2111 golden/report.out
+text 2 golden/report.rc
+0
+
+sha256 de493f4652efec84a4c2264e5e0c49f3bb34e816917011578a68bbdf50afaed3 1101 golden/start_bad.out
+text 2 golden/start_bad.rc
+1
+
+sha256 a5de9341a45d7d3fffe41f29a8bd7f5c31b67eadd9694210a0b41071c1d970db 1089 golden/stdin.out
+text 2 golden/stdin.rc
+0
+
+sha256 35ea72bda596ce592e49e400831c18efcaf8f9390950ae646d835ac6ab2b9dd9 1059 golden/target_out.out
+text 2 golden/target_out.rc
+0
+
+sha256 4f9c58193cb0ec9345733baab52de27804f1b2972d9b8b37b4be4b628158eeab 19456 golden/target_out/o.mrc
+sha256 4edfb165e817eaeec437878888e3e953f79049ae18cdd66ae6567a7b691a80a6 2110 golden/zend0.out
+text 2 golden/zend0.rc
+0
+

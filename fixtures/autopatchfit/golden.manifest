@@ -1,0 +1,111 @@
+# imod-rs native golden manifest for fixtures/autopatchfit; see fixtures/README.md.
+# Regenerate with fixtures/regen-golden.sh autopatchfit; do not edit by hand.
+text 30 golden/err_final.files
+matchorwarp.com
+patchcorr.com
+
+text 98 golden/err_final.out
+ERROR: autopatchfit - You must enter one of S, M, L, or E or sizes in X,Y,Z for the -final option
+
+text 2 golden/err_final.rc
+1
+
+text 14 golden/err_nomow.files
+patchcorr.com
+
+text 104 golden/err_nomow.out
+ERROR: autopatchfit - Opening   matchorwarp.com: [Errno 2] No such file or directory: 'matchorwarp.com'
+
+text 2 golden/err_nomow.rc
+1
+
+text 47 golden/err_nosizes.files
+matchorwarp.com
+matchorwarp.com~
+patchcorr.com
+
+text 109 golden/err_nosizes.out
+ERROR: autopatchfit - Cannot find one of patch size, number of patches, or X, Y or Z limits in patchcorr.com
+
+text 2 golden/err_nosizes.rc
+1
+
+text 386 golden/err_nosizes/matchorwarp.com
+#$if (! -e g5tmpdir) mkdir g5tmpdir
+#
+# MATCHORWARP RUNS REFINEMATCH AND MATCHVOL, OR FINDWARP AND WARPVOL.
+#
+####CreatedVersion#### 4.8.28
+#
+$matchorwarp -StandardInput
+TrialMode 1
+InputVolume      gb.rec
+OutputVolume     gb.mat
+SizeXYZorVolume  ga.rec
+RefineLimit      0.3
+WarpLimits       0.2,0.27,0.35
+ResidualFile     patch.resid
+ClipPlaneBoxSize 600
+#TemporaryDirectory  g5tmpdir
+
+text 374 golden/err_nosizes/matchorwarp.com~
+#$if (! -e g5tmpdir) mkdir g5tmpdir
+#
+# MATCHORWARP RUNS REFINEMATCH AND MATCHVOL, OR FINDWARP AND WARPVOL.
+#
+####CreatedVersion#### 4.8.28
+#
+$matchorwarp -StandardInput
+InputVolume      gb.rec
+OutputVolume     gb.mat
+SizeXYZorVolume  ga.rec
+RefineLimit      0.3
+WarpLimits       0.2,0.27,0.35
+ResidualFile     patch.resid
+ClipPlaneBoxSize 600
+#TemporaryDirectory  g5tmpdir
+
+text 30 golden/err_nowarp.files
+matchorwarp.com
+patchcorr.com
+
+text 79 golden/err_nowarp.out
+ERROR: autopatchfit - Cannot find existing residual targets in matchorwarp.com
+
+text 2 golden/err_nowarp.rc
+1
+
+text 47 golden/err_smaller.files
+matchorwarp.com
+matchorwarp.com~
+patchcorr.com
+
+text 92 golden/err_smaller.out
+ERROR: autopatchfit - Final patch size cannot be smaller that current size in any dimension
+
+text 2 golden/err_smaller.rc
+1
+
+text 374 golden/err_smaller/matchorwarp.com~
+#$if (! -e g5tmpdir) mkdir g5tmpdir
+#
+# MATCHORWARP RUNS REFINEMATCH AND MATCHVOL, OR FINDWARP AND WARPVOL.
+#
+####CreatedVersion#### 4.8.28
+#
+$matchorwarp -StandardInput
+InputVolume      gb.rec
+OutputVolume     gb.mat
+SizeXYZorVolume  ga.rec
+RefineLimit      0.3
+WarpLimits       0.2,0.27,0.35
+ResidualFile     patch.resid
+ClipPlaneBoxSize 600
+#TemporaryDirectory  g5tmpdir
+
+text 0 golden/usage.files
+
+sha256 629c65336d53638821eef259c509326646e91443b582ddb4f990a9dc390bd126 731 golden/usage.out
+text 2 golden/usage.rc
+0
+

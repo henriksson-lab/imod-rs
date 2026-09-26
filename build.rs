@@ -1,4 +1,11 @@
 fn main() {
+    // Without these, cargo reruns this script — and so recompiles the whole
+    // library with a new timestamp — whenever *any* file in the package
+    // changes, fixtures included: recording a golden manifest
+    // (`fixtures/regen-golden.sh`) cost a full rebuild per suite.  The stamp
+    // still moves whenever the code does, as `__DATE__` would.
+    println!("cargo:rerun-if-changed=build.rs");
+    println!("cargo:rerun-if-changed=src");
     // The C sources embed `__DATE__`/`__TIME__` from the compilation of the
     // reference binary.  Those are build metadata, not input-dependent output;
     // emit the same two fields in the identical C formats ("Mmm dd yyyy" with a

@@ -1,0 +1,36 @@
+# name<TAB>arguments ('.' for none); inputs are fixtures/mrcx/*
+#full	byte_be	byte_be.mrc
+byte_le	byte_le.mrc
+#full	cfloat_be	cfloat_be.mrc
+cfloat_le	cfloat_le.mrc
+#full	cshort_be	cshort_be.mrc
+cshort_le	cshort_le.mrc
+#full	cut_be	cut_be.mrc
+#full	cut_le	cut_le.mrc
+#full	cutbyte_be	cutbyte_be.mrc
+#full	cutbyte_le	cutbyte_le.mrc
+#full	ext_odd_be	ext_odd_be.mrc
+#full	ext_odd_le	ext_odd_le.mrc
+extreme_le	extreme_le.mrc
+#full	float_be	float_be.mrc
+float_le	float_le.mrc
+#full	half_be	half_be.mrc
+half_le	half_le.mrc
+#full	labels_be	labels_be.mrc
+labels_le	labels_le.mrc
+notmrc	notmrc.bin
+old_be	old_be.mrc
+old_le	old_le.mrc
+#full	rgb_be	rgb_be.mrc
+rgb_le	rgb_le.mrc
+short_be	short_be.mrc
+short_le	short_le.mrc
+tiny	tiny.bin
+#full	trail100_be	trail100_be.mrc
+#full	trail100_le	trail100_le.mrc
+#full	trail600_be	trail600_be.mrc
+#full	trail600_le	trail600_le.mrc
+noargs	.
+missing	nosuch.mrc
+#full	directory	sub
+#full	two	float_le.mrc byte_le.mrc

@@ -1,0 +1,77 @@
+# imod-rs native golden manifest for fixtures/xf2rotmagstr; see fixtures/README.md.
+# Regenerate with fixtures/regen-golden.sh xf2rotmagstr; do not edit by hand.
+text 2 golden/badwarp.rc
+1
+
+text 154 golden/badwarp.stdout
+
+ERROR: XF2ROTMAGSTR - INAPPROPRIATE VALUE OR MEMORY ERROR PROCESSING TRANSFORM FILE AS A WARPING FILE (IT DOES NOT APPEAR TO BE A LINEAR TRANSFORM FILE)
+
+text 2 golden/badxf.rc
+1
+
+text 85 golden/badxf.stdout
+
+ FORMATTED  ro  file opened: badxf.xf
+
+ERROR: XF2ROTMAGSTR - READING TRANSFORM FILE
+
+text 2 golden/ctrl3.rc
+0
+
+text 297 golden/ctrl3.stdout
+ Reading warping file and extracting linear transformations
+    1: rot=   -0.86, mag= 1.0109, str= 0.9687 on   54.6 axis, Mean mag= 0.9950
+    2: rot=   -1.43, mag= 0.9891, str= 1.0226 on  -12.6 axis, Mean mag= 1.0002
+    3: rot=   -2.06, mag= 0.9893, str= 1.0308 on   14.3 axis, Mean mag= 1.0044
+
+text 2 golden/emptyxf.rc
+0
+
+text 39 golden/emptyxf.stdout
+
+ FORMATTED  ro  file opened: empty.xf
+
+text 2 golden/fwd3.rc
+1
+
+text 83 golden/fwd3.stdout
+
+ERROR: XF2ROTMAGSTR - THIS PROGRAM WILL WORK ONLY WITH INVERSE WARP DISPLACEMENTS
+
+text 2 golden/grid1.rc
+0
+
+text 139 golden/grid1.stdout
+ Reading warping file and extracting linear transformations
+    1: rot=    0.14, mag= 0.9995, str= 1.0057 on   10.6 axis, Mean mag= 1.0023
+
+text 2 golden/grid3.rc
+0
+
+text 297 golden/grid3.stdout
+ Reading warping file and extracting linear transformations
+    1: rot=   -0.69, mag= 1.0081, str= 0.9676 on   50.9 axis, Mean mag= 0.9917
+    2: rot=   -1.58, mag= 1.0098, str= 0.9735 on   78.4 axis, Mean mag= 0.9964
+    3: rot=   -2.07, mag= 0.9806, str= 1.0407 on    5.7 axis, Mean mag= 1.0003
+
+text 2 golden/lin.rc
+0
+
+sha256 9396f3f695cde27b7fc24bcc901c56ebb15f92d39e244d58f69cfbba4f9a0a47 669 golden/lin.stdout
+text 2 golden/missing.rc
+1
+
+text 57 golden/missing.stdout
+
+ERROR: XF2ROTMAGSTR - OPENING OR READING TRANSFORM FILE
+
+text 2 golden/prompt.rc
+0
+
+sha256 f57db8ece3bc33c4621c2fe222f1f1370ab9ca9f8ba381df896f818abf1351e1 690 golden/prompt.stdout
+text 2 golden/prompt_eof.rc
+2
+
+text 21 golden/prompt_eof.stdout
+ Name of input file: 

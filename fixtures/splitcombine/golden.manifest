@@ -1,0 +1,159 @@
+# imod-rs native golden manifest for fixtures/splitcombine; see fixtures/README.md.
+# Regenerate with fixtures/regen-golden.sh splitcombine; do not edit by hand.
+text 77 golden/chunk.files
+volcombine-001.com
+volcombine-finish.com
+volcombine-start.com
+volcombine.com
+
+text 99 golden/chunk.out
+3 command files created and ready to run with
+  processchunks or the parallel processing interface
+
+text 2 golden/chunk.rc
+0
+
+sha256 4b117a09325fb6d00344d4c3a6dbcbdc11eb9930b37e038c855b49f2fc862f6b 647 golden/chunk/volcombine-001.com
+text 425 golden/chunk/volcombine-finish.com
+$echo STATUS: REASSEMBLING PIECES
+#
+$echo
+$echo STATUS: RUNNING FILLTOMO ON FINAL VOLUME
+$echo
+#
+$\rm -f sum[1-9]*.rec sum[1-9]*_rec.*
+$filltomo -StandardInput
+FillTomogram	sum.rec
+MatchedToTomogram	ga.rec
+SourceTomogram	gb.rec
+InverseTransformFile	inverse.xf
+$if (-e ./savework) ./savework
+$collectmmm pixels= volcombine 1 sum.rec
+$b3dremove -g volcombine-[0-9][0-9][0-9]*.com* volcombine-[0-9][0-9][0-9]*.log* sum.rec.lock
+
+sha256 0086bae67c844de55c67ab3604f250c3a983af7485e767c67f43f289b3d7c104 1501 golden/chunk/volcombine-start.com
+text 77 golden/default.files
+volcombine-001.com
+volcombine-finish.com
+volcombine-start.com
+volcombine.com
+
+text 99 golden/default.out
+3 command files created and ready to run with
+  processchunks or the parallel processing interface
+
+text 2 golden/default.rc
+0
+
+sha256 9b7e0731618f0d0f6b7ab820432b6131e8e2e9cc8b330ead88f63fed0a9ee781 531 golden/default/volcombine-001.com
+sha256 b45c4c29eea2a413dcd87d0ecacbefc91366304bbd75d015bf38759a768e2af8 524 golden/default/volcombine-finish.com
+sha256 1292ccd2f1969a235599caaa1efffee119ebc1d1be962adb04206a2be0794722 1219 golden/default/volcombine-start.com
+text 30 golden/err_both.files
+volcombine.com
+volcombine.pcm
+
+text 118 golden/err_both.out
+ERROR: splitcombine - The full command file name must be entered because both volcombine.com and volcombine.pcm exist
+
+text 2 golden/err_both.rc
+1
+
+text 15 golden/err_local_only.files
+volcombine.com
+
+text 82 golden/err_local_only.out
+ERROR: splitcombine - If you enter one of -local and -global, you must enter both
+
+text 2 golden/err_local_only.rc
+1
+
+text 0 golden/err_missing.files
+
+text 58 golden/err_missing.out
+ERROR: splitcombine - Command file foo.com does not exist
+
+text 2 golden/err_missing.rc
+1
+
+text 15 golden/err_tmp.files
+volcombine.com
+
+text 81 golden/err_tmp.out
+ERROR: splitcombine - Unable to write sum*.rec to directory /tmp/combine.3505246
+
+text 2 golden/err_tmp.rc
+1
+
+text 15 golden/err_usrtmp.files
+volcombine.com
+
+text 85 golden/err_usrtmp.out
+ERROR: splitcombine - Unable to write sum*.rec to directory /usr/tmp/combine.3505246
+
+text 2 golden/err_usrtmp.rc
+1
+
+text 77 golden/lowrad_pcm.files
+volcombine-001.pcm
+volcombine-finish.pcm
+volcombine-start.pcm
+volcombine.pcm
+
+text 99 golden/lowrad_pcm.out
+3 command files created and ready to run with
+  processchunks or the parallel processing interface
+
+text 2 golden/lowrad_pcm.rc
+0
+
+sha256 3f8c0cdb5c378441488e75d20d0fcac15928f5cf86fbfb58845940d620935365 533 golden/lowrad_pcm/volcombine-001.pcm
+sha256 1356111c4a1c4c107551800bb7f48aa3fc85ea0ac35c1cea65f0c320be0fd703 524 golden/lowrad_pcm/volcombine-finish.pcm
+sha256 8c6dc752381cd7886eb308c314147bfe2acc51c1625f7a335512ad0faa645c23 1221 golden/lowrad_pcm/volcombine-start.pcm
+text 77 golden/pieces.files
+volcombine-001.com
+volcombine-finish.com
+volcombine-start.com
+volcombine.com
+
+text 99 golden/pieces.out
+3 command files created and ready to run with
+  processchunks or the parallel processing interface
+
+text 2 golden/pieces.rc
+0
+
+sha256 211fcb71e000013f999fa3bab0b9e6b559c804b123785d2612d11c62099f01b8 533 golden/pieces/volcombine-001.com
+sha256 64f3804e42064f0a952e22f6b5305c6d69ae6da4d73603530f9da47e116715bb 529 golden/pieces/volcombine-finish.com
+sha256 1292ccd2f1969a235599caaa1efffee119ebc1d1be962adb04206a2be0794722 1219 golden/pieces/volcombine-start.com
+text 77 golden/pieces_chunk.files
+volcombine-001.com
+volcombine-finish.com
+volcombine-start.com
+volcombine.com
+
+text 99 golden/pieces_chunk.out
+3 command files created and ready to run with
+  processchunks or the parallel processing interface
+
+text 2 golden/pieces_chunk.rc
+0
+
+sha256 08f518d4ddbeee3edec077d868f29a021d1c5e9d8f230ad56cd633a467241c47 561 golden/pieces_chunk/volcombine-001.com
+text 425 golden/pieces_chunk/volcombine-finish.com
+$echo STATUS: REASSEMBLING PIECES
+#
+$echo
+$echo STATUS: RUNNING FILLTOMO ON FINAL VOLUME
+$echo
+#
+$\rm -f sum[1-9]*.rec sum[1-9]*_rec.*
+$filltomo -StandardInput
+FillTomogram	sum.rec
+MatchedToTomogram	ga.rec
+SourceTomogram	gb.rec
+InverseTransformFile	inverse.xf
+$if (-e ./savework) ./savework
+$collectmmm pixels= volcombine 1 sum.rec
+$b3dremove -g volcombine-[0-9][0-9][0-9]*.com* volcombine-[0-9][0-9][0-9]*.log* sum.rec.lock
+
+sha256 6fe4ebe57f0e1c6653b10a8b3a81dc2e3eb930b237e15eb4d780d2f31d7cf050 1506 golden/pieces_chunk/volcombine-start.com

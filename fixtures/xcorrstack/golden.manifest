@@ -1,0 +1,91 @@
+# imod-rs native golden manifest for fixtures/xcorrstack; see fixtures/README.md.
+# Regenerate with fixtures/regen-golden.sh xcorrstack; do not edit by hand.
+sha256 2d9e1b4a635ad63ad7a253436734f41a71d6ae5e07f122925de87b0fed9d1c12 9664 golden/xc_backup.out.small.mrc
+sha256 5cedec3c53032d3c06c88dba9e34c6a0d370d28bab40bc228a3243c33b27bec5 2032 golden/xc_backup.out.small.mrc~
+text 2 golden/xc_backup.rc
+0
+
+sha256 1b5c8edeff6cab9032a469d989aec04f7dd535586b714ceade6e1e9d1431e1a7 2087 golden/xc_backup.stdout
+sha256 2d9e1b4a635ad63ad7a253436734f41a71d6ae5e07f122925de87b0fed9d1c12 9664 golden/xc_basic.out.out.mrc
+text 2 golden/xc_basic.rc
+0
+
+sha256 8719717152f51f252e1113169a5e47fd11f95b213c010b2eef427f7ad6477b00 2085 golden/xc_basic.stdout
+text 2 golden/xc_big.rc
+1
+
+sha256 bd9f73c638ef49d4ce87362f2c24463fe1aa53aba6f68b23ef0f2cca487a7905 2030 golden/xc_big.stdout
+sha256 1e74c42b1afe88b68079a83b820d377631118969704c2aeb50a68fe322da9aca 2304 golden/xc_byte.out.out.mrc
+text 2 golden/xc_byte.rc
+0
+
+sha256 66285eb344306fea1e197af492e45859adba81b3ebc01924fec0de63ec08ef41 2199 golden/xc_byte.stdout
+sha256 2d9e1b4a635ad63ad7a253436734f41a71d6ae5e07f122925de87b0fed9d1c12 9664 golden/xc_fill.out.out.mrc
+text 2 golden/xc_fill.rc
+0
+
+sha256 8719717152f51f252e1113169a5e47fd11f95b213c010b2eef427f7ad6477b00 2085 golden/xc_fill.stdout
+sha256 340b7c79518bb3870278954da5f2bf6f3a9d638d802c3d32b2babb949ad5f7ae 9664 golden/xc_filter.out.out.mrc
+text 2 golden/xc_filter.rc
+0
+
+sha256 8719717152f51f252e1113169a5e47fd11f95b213c010b2eef427f7ad6477b00 2085 golden/xc_filter.stdout
+sha256 ea20c1db6650d4527535cb105a488ac518760f1a869fc3c07bd4894290709e72 9664 golden/xc_filter_negsig.out.out.mrc
+text 2 golden/xc_filter_negsig.rc
+0
+
+sha256 8719717152f51f252e1113169a5e47fd11f95b213c010b2eef427f7ad6477b00 2085 golden/xc_filter_negsig.stdout
+text 2 golden/xc_help.rc
+0
+
+sha256 be7352d254bed32d1140d2787668ffb11020eed6a066b8c9d32fe7ae67d15832 1305 golden/xc_help.stdout
+sha256 83de7ccdfef30b534e4bf7ac2ba1d43f8dff52fceb5b3dcc4e33c837c97d5e5d 3184 golden/xc_mode0.out.out.mrc
+text 2 golden/xc_mode0.rc
+0
+
+sha256 8719717152f51f252e1113169a5e47fd11f95b213c010b2eef427f7ad6477b00 2085 golden/xc_mode0.stdout
+sha256 e2ea6c4128376a322d1406b66852c4cb2c158f4757e43ea1590bc2c45d7f8f81 5344 golden/xc_mode12.out.out.mrc
+text 2 golden/xc_mode12.rc
+0
+
+sha256 8719717152f51f252e1113169a5e47fd11f95b213c010b2eef427f7ad6477b00 2085 golden/xc_mode12.stdout
+text 0 golden/xc_mode3.out.out.mrc
+
+text 2 golden/xc_mode3.rc
+1
+
+sha256 20797b690ff73dced55ddb1a515f9c05a02780a4cceb33ef18075856560f8b8a 2030 golden/xc_mode3.stdout
+text 2 golden/xc_nofile.rc
+1
+
+text 114 golden/xc_nofile.stdout
+ERROR: iiOpen - Opening file nofile.mrc (No such file or directory)
+
+ERROR: iiuOpen - Could not open 'nofile.mrc'
+
+sha256 2d9e1b4a635ad63ad7a253436734f41a71d6ae5e07f122925de87b0fed9d1c12 9664 golden/xc_opts.out.out.mrc
+text 2 golden/xc_opts.rc
+0
+
+sha256 8719717152f51f252e1113169a5e47fd11f95b213c010b2eef427f7ad6477b00 2085 golden/xc_opts.stdout
+text 0 golden/xc_sections_bad.out.out.mrc
+
+text 2 golden/xc_sections_bad.rc
+1
+
+sha256 fbe1ff8960745f3d8f4747fad61f1b7831e21f4f7d00ca98c76bd68f71751d6b 2072 golden/xc_sections_bad.stdout
+sha256 81621a9b4cee7e6e9c0ce5825123885a71f6d71878ca9f1ed5f51ec6e30efbc1 2924 golden/xc_short_small.out.out.mrc
+text 2 golden/xc_short_small.rc
+0
+
+sha256 501a9ddd2442a212ba02f9740a14484e6fc0760ef6fcd56621916048ec2b7de9 2061 golden/xc_short_small.stdout
+sha256 76412ecda9191f481536bdfd679b2ab10c78c1d76489063af6e41cd1682b91cf 9664 golden/xc_small.out.out.mrc
+text 2 golden/xc_small.rc
+0
+
+sha256 0cd32eb8862043719e449691e663846cbac52b198e0bfacd57225cfd1ab4d445 2084 golden/xc_small.stdout
+sha256 7c382a0a0634ead8f12716a8b2f5aba6c229bb449cd2ccd2f322ad82f8ec1a5c 9664 golden/xc_split.out.out.mrc
+text 2 golden/xc_split.rc
+0
+
+sha256 8719717152f51f252e1113169a5e47fd11f95b213c010b2eef427f7ad6477b00 2085 golden/xc_split.stdout

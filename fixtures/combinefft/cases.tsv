@@ -1,0 +1,31 @@
+# name	args	stdin
+fft_tilt	-ainput a.fft -binput b.fft -output out.fft -inverse inv.xf -atiltfile a.tlt -btiltfile b.tlt	-
+fft_high	-ainput a.fft -binput b.fft -output out.fft -inverse inv.xf -ahighest -60,60 -bhighest 63,-57	-
+#full	fft_weight	-ainput a.fft -binput b.fft -output out.fft -inverse inv.xf -atiltfile c.tlt -btiltfile b.tlt -weight 0.5	-
+fft_weight_high	-ainput a.fft -binput b.fft -output out.fft -inverse inv.xf -ahighest -60,60 -bhighest -57,63 -weight 1 -both 0.1	-
+fft_reduce	-ainput a.fft -binput b.fft -output out.fft -inverse inv.xf -atiltfile a.tlt -btiltfile b.tlt -reduce 0.5 -verbose -points 6	-
+fft_reduce_sep	-ainput a.fft -binput b.fft -output out.fft -inverse inv.xf -atiltfile a.tlt -btiltfile b.tlt -reduce 0.5 -separate -verbose -points 6 -ring 0.05	-
+fft_reduce_joint	-ainput a.fft -binput b.fft -output out.fft -inverse inv.xf -atiltfile a.tlt -btiltfile b.tlt -reduce 0.4 -joint -verbose -points 6 -nslabs 2 -radius 0.05	-
+fft_into_b	a.fft bb.fft -inverse inv.xf -atiltfile a.tlt -btiltfile b.tlt	-
+real_float	-ainput a.mrc -binput b.mrc -output out.mrc -inverse inv.xf -atiltfile a.tlt -btiltfile b.tlt	-
+real_sub	-ainput a.mrc -binput b.mrc -output out.mrc -inverse inv.xf -atiltfile c.tlt -bhighest -57,63 -xminmax 1,13 -yminmax 2,11 -zminmax 1,5 -taper 3,2,2 -weight 0.5 -reduce 0.5 -points 6	-
+real_short_byte	-ainput as.mrc -binput bb.mrc -output out.mrc -inverse inv.xf -atiltfile a.tlt -btiltfile b.tlt	-
+interactive	-	a.fft\nb.fft\nout.fft\ninv.xf\na.tlt\n-57 63\n
+#full	interactive_into_b	-	a.fft\nbb.fft\n\ninv.xf\n-60,60\nb.tlt\n
+help	-help	-
+e_size	-ainput a.fft -binput a.mrc -output out.fft -inverse inv.xf -atiltfile a.tlt -btiltfile b.tlt	-
+e_real_no_output	-ainput a.mrc -binput b.mrc -inverse inv.xf -atiltfile a.tlt -btiltfile b.tlt	-
+e_real_interactive	-	a.mrc\nb.mrc\nout.mrc\n
+e_both_tilts	-ainput a.fft -binput b.fft -output out.fft -inverse inv.xf -atiltfile a.tlt -ahighest -60,60 -btiltfile b.tlt	-
+e_no_tilts	-ainput a.fft -binput b.fft -output out.fft -inverse inv.xf -btiltfile b.tlt	-
+e_one_tilt	-ainput a.fft -binput b.fft -output out.fft -inverse inv.xf -atiltfile one.tlt -btiltfile b.tlt	-
+e_bad_tilt	-ainput a.fft -binput b.fft -output out.fft -inverse inv.xf -atiltfile bad.tlt -btiltfile b.tlt	-
+e_no_inverse	-ainput a.fft -binput b.fft -output out.fft -atiltfile a.tlt -btiltfile b.tlt	-
+#full	e_short_xf	-ainput a.fft -binput b.fft -output out.fft -inverse short.xf -atiltfile a.tlt -btiltfile b.tlt	-
+e_bad_xf	-ainput a.fft -binput b.fft -output out.fft -inverse bad.xf -atiltfile a.tlt -btiltfile b.tlt	-
+e_reduce	-ainput a.fft -binput b.fft -output out.fft -inverse inv.xf -atiltfile a.tlt -btiltfile b.tlt -reduce 11	-
+e_ring	-ainput a.fft -binput b.fft -output out.fft -inverse inv.xf -atiltfile a.tlt -btiltfile b.tlt -reduce 0.5 -ring 0	-
+e_points	-ainput a.fft -binput b.fft -output out.fft -inverse inv.xf -atiltfile a.tlt -btiltfile b.tlt -reduce 0.5 -points 5	-
+e_block	-ainput a.mrc -binput b.mrc -output out.mrc -inverse inv.xf -atiltfile a.tlt -btiltfile b.tlt -xminmax 0,15	-
+e_save_partial	-ainput a.mrc -binput b.mrc -output out.mrc -inverse inv.xf -atiltfile a.tlt -btiltfile b.tlt -xsave 0,5	-
+e_save_not_hdf	-ainput a.mrc -binput b.mrc -output out.mrc -inverse inv.xf -atiltfile a.tlt -btiltfile b.tlt -xsave 0,5 -ysave 0,5 -zsave 0,3 -place 0,0,0	-

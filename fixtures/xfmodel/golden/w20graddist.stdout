@@ -1,7 +1,0 @@
-Using model header to determine center coordinates:   275.0   275.0
-
- FORMATTED  ro  file opened: mg.txt
-Warping file opened: wgi20.xf
-Back-transforming model with inverse of transforms from wgi20.xf
- Undistorting model
-Transforming model with reinverted transforms from wgi20.xf

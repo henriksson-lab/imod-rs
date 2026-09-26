@@ -1,0 +1,4 @@
+InputFile fb_f.mrc
+OutputFile p.mod
+BeadSize 6
+CandidateModel pc.mod

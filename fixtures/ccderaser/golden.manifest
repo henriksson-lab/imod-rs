@@ -1,0 +1,304 @@
+# imod-rs native golden manifest for fixtures/ccderaser; see fixtures/README.md.
+# Regenerate with fixtures/regen-golden.sh ccderaser; do not edit by hand.
+sha256 35d5915e58e33cdca87ff6f1f243682fb971f0ffa1d22d50e270d411e936ecf1 17152 defined/find_border_order.o.mrc
+text 2 defined/find_border_order.rc
+0
+
+sha256 f8116b1cc21f1c99e49abf39d7428721bc4c6e28b9fdcaa6443d04ef931a2c96 1130 defined/find_border_order.stdout
+sha256 f7594d1454986dde51cd621be755faeae857de09c03408458930f344cd87a692 17152 defined/find_criteria.o.mrc
+text 2 defined/find_criteria.rc
+0
+
+sha256 f5c039880196163662d9d540c41c0ba14521493f550ed157b441391df50aa04a 1130 defined/find_criteria.stdout
+sha256 433d75437892d27555e8491762bbac3718efb1403753f28de6e400a3a9077dee 33280 defined/find_f.o.mrc
+text 2 defined/find_f.rc
+0
+
+sha256 143fa4d05bae59077ca766cd57ecf30f39ef6200d10acb9a46e58ff15a1c533c 1130 defined/find_f.stdout
+sha256 5f7a5b3410ac25be1e5a16907a4cf7850bc95e820d8b65ae5bb4b02ae012e7d5 17152 defined/find_giant.o.mrc
+text 2 defined/find_giant.rc
+0
+
+sha256 5b7afa75d3cece6cfd8b0d739c016bcca0c706882381f41b30b804396e45339e 5206 defined/find_giant.stdout
+sha256 d91f5ca067192df85844b11909860d2f3d2f01b7830fe9585ca67148d480e378 17152 defined/find_giant0.o.mrc
+text 2 defined/find_giant0.rc
+0
+
+sha256 f8116b1cc21f1c99e49abf39d7428721bc4c6e28b9fdcaa6443d04ef931a2c96 1130 defined/find_giant0.stdout
+sha256 efa40655086483d93ee298586001dd6e6b5cf6c702c5f8f552a37a98f77ae4b5 17152 defined/find_half.o.mrc
+text 2 defined/find_half.rc
+0
+
+sha256 143fa4d05bae59077ca766cd57ecf30f39ef6200d10acb9a46e58ff15a1c533c 1130 defined/find_half.stdout
+sha256 c4da845e8942be132fad4fc0424413e9797560de20921a91e01f490c4974ae7c 17152 defined/find_inplace.inplace
+text 2 defined/find_inplace.rc
+0
+
+sha256 4c09116003e9979773e31f1e81b11b073b8ee9015d3f28b5ecb55c5e2277d645 1094 defined/find_inplace.stdout
+text 2 defined/find_iter.rc
+0
+
+sha256 0c6336bd1912b61bee1302b0e8d7cde0ab1d3be2460993de0402703a8be3dd2f 5337 defined/find_iter.stdout
+sha256 2fe805ba2c6d886b9ccfdc1960bbf59bec06e463b9dc3ec09fe168279d0cfba7 17152 defined/find_maxdiff.o.mrc
+text 2 defined/find_maxdiff.rc
+0
+
+sha256 3d4b65894d53abf3144a20aa87f466f30b824f7775ebfeb4cc614cd501c8537c 1130 defined/find_maxdiff.stdout
+sha256 d91f5ca067192df85844b11909860d2f3d2f01b7830fe9585ca67148d480e378 17152 defined/find_nonopt.o.mrc
+text 2 defined/find_nonopt.rc
+0
+
+sha256 f8116b1cc21f1c99e49abf39d7428721bc4c6e28b9fdcaa6443d04ef931a2c96 1130 defined/find_nonopt.stdout
+sha256 7c25b482c9929a906df6ecce75d78b2f9e645a265b4b77673b6e4bcf93b9aa50 17152 defined/find_order1_excl.o.mrc
+text 2 defined/find_order1_excl.rc
+0
+
+sha256 f8116b1cc21f1c99e49abf39d7428721bc4c6e28b9fdcaa6443d04ef931a2c96 1130 defined/find_order1_excl.stdout
+sha256 d91f5ca067192df85844b11909860d2f3d2f01b7830fe9585ca67148d480e378 17152 defined/find_points.o.mrc
+sha256 2ae29ff8d9e900ca47e2ac28d4465b2f2091b5da6012484e94433dd289c944d1 2040 defined/find_points.p.mod
+text 2 defined/find_points.rc
+0
+
+sha256 4ba5ba241159d5a634d05acc8222a6d3257ae59888c53543e6c36793c8756141 1417 defined/find_points.stdout
+sha256 b912ba9ddb07005b8d497ae2380fc593c5b07243f9c6f2db346ca042f76da358 17152 defined/find_radius.o.mrc
+text 2 defined/find_radius.rc
+0
+
+sha256 4af1f69f8bf5d801e52b73f398b47f6507c691e3c330f4080898031a62c1bedb 1130 defined/find_radius.stdout
+sha256 d91f5ca067192df85844b11909860d2f3d2f01b7830fe9585ca67148d480e378 17152 defined/find_s.o.mrc
+text 2 defined/find_s.rc
+0
+
+sha256 f8116b1cc21f1c99e49abf39d7428721bc4c6e28b9fdcaa6443d04ef931a2c96 1130 defined/find_s.stdout
+sha256 04e7591fb2563a58d317428dca4cadf741ef0d270e0573f57190c25957c90635 17152 defined/find_width.o.mrc
+text 2 defined/find_width.rc
+0
+
+sha256 ea04c550bdf155fbcfbf1b6d81811bced43a83558ec6e84b9dfee2e88fd7c391 1130 defined/find_width.stdout
+sha256 dc18cc375a8c80fb0664940a3796c610e4c140ed3764ca9cca2503f2a59b47b0 17152 defined/find_xyscan.o.mrc
+text 2 defined/find_xyscan.rc
+0
+
+sha256 adf1822547ff48f90e916a180224487b9df11f7077f5a67a553056fa660a2a92 1130 defined/find_xyscan.stdout
+sha256 51222eb4556fb10eaf62221f18574644edfbb4fd953cf47ec709c7155e98031f 17152 defined/interactive.o.mrc
+text 2 defined/interactive.rc
+0
+
+sha256 09e110a0671ae18d65b1a9cb1ce16c39e2ca1c615df76dceeea937d70497e7e5 1536 defined/interactive.stdout
+sha256 e60bdc684d9424508b5ae5dcf9fd915f644752a9f0f3b3c5669dd09856409d0b 17152 defined/model_all.o.mrc
+text 2 defined/model_all.rc
+0
+
+sha256 bc59f8a4301d65ddb04f3b56b14d78fd8f4fce4c23175c954e5d04c69d328879 1137 defined/model_all.stdout
+sha256 c0b628971ec3b768f00b7d7e2059da0552fcb666f4de693b17f17579e8d3b9b2 33280 defined/model_all_find.o.mrc
+sha256 53f95531c5816ff2a7b114cc1642d22d5eaa39ca2e34d4de6465c6b3046a99f7 1860 defined/model_all_find.p.mod
+text 2 defined/model_all_find.rc
+0
+
+sha256 278ffa962005f1d63a3885166bc39d89e3cbc2da5ec3ef1bea295838eabb8d26 6180 defined/model_all_find.stdout
+sha256 02b4c8752d17ea0d397de6314f8846ffc37f253ae8df0626b505724634b34f70 17152 defined/model_better_all.o.mrc
+text 2 defined/model_better_all.rc
+0
+
+sha256 32a73578545ea1dc60e097b1fb2f4e738d2d19ac5d5e1ba6181ddf03ec2843d5 1082 defined/model_better_all.stdout
+sha256 237fc99c836b7b4d9ff9aa94519547e208eba5965f486b7c3172b0667fd90fc2 17152 defined/model_better_list.o.mrc
+text 2 defined/model_better_list.rc
+0
+
+sha256 32a73578545ea1dc60e097b1fb2f4e738d2d19ac5d5e1ba6181ddf03ec2843d5 1082 defined/model_better_list.stdout
+sha256 f0350b15bc4323a3297155de375569be281771262f32d25626eb5810f4970c09 17152 defined/model_border9.o.mrc
+text 2 defined/model_border9.rc
+0
+
+sha256 32a73578545ea1dc60e097b1fb2f4e738d2d19ac5d5e1ba6181ddf03ec2843d5 1082 defined/model_border9.stdout
+sha256 b5d2e6ea79ef376381a6579d362163149208198ce742154d76706e9ce0cbf0a7 17152 defined/model_boundary.o.mrc
+text 2 defined/model_boundary.rc
+0
+
+sha256 bd575c7f73b5d8e506e313a2d85cacd0be6351829aaa986add43199854c03a4e 1207 defined/model_boundary.stdout
+sha256 68f24014117ca595bca0ded6ef1fc94efc9896b1992d0ce20ef37bbcc7929271 17152 defined/model_boundary_order.o.mrc
+text 2 defined/model_boundary_order.rc
+0
+
+sha256 32a73578545ea1dc60e097b1fb2f4e738d2d19ac5d5e1ba6181ddf03ec2843d5 1082 defined/model_boundary_order.stdout
+sha256 b05371eabbd94f5220e08f9ffda7dd69e5104d3e32f49fa32293d395493be8b0 17152 defined/model_defaults.o.mrc
+text 2 defined/model_defaults.rc
+0
+
+sha256 32a73578545ea1dc60e097b1fb2f4e738d2d19ac5d5e1ba6181ddf03ec2843d5 1082 defined/model_defaults.stdout
+sha256 f7db2379406827aa35bc1c6c88ec3bd123ccde840149237280ba3918c36a7ec1 17152 defined/model_expand_halo.o.mrc
+text 2 defined/model_expand_halo.rc
+0
+
+sha256 b7d9a3c9c3429f90f5671260644cd6cbcfcd514fa27df51ba56823a0462fe083 3835 defined/model_expand_halo.stdout
+sha256 c2636be9737bb4414c2511fcdf7b04bca721a1c781c6eb749204750373a5ccb1 17152 defined/model_inplace.inplace
+text 2 defined/model_inplace.rc
+0
+
+sha256 1c7c8a3ca86f4cc344402d2941cc9954fa7cf2810c08eb26fe1743bc8110e983 1076 defined/model_inplace.stdout
+sha256 aa57be4ff8c5a0c157b8bf6779e42358f8a14e10ee8fd98d4d9c76c9b22a6d2a 17152 defined/model_nosize.o.mrc
+text 2 defined/model_nosize.rc
+0
+
+sha256 32a73578545ea1dc60e097b1fb2f4e738d2d19ac5d5e1ba6181ddf03ec2843d5 1082 defined/model_nosize.stdout
+sha256 46a661b7f3c93d747ee18b011f76f501356e1cd62fe2e669d379524b5d990e8a 17152 defined/model_piece.o.mrc
+sha256 cd3ee2e840b8026e80fabb50699db4b65a5d7c434e0eecf587a07a2f32929a00 2040 defined/model_piece.p.mod
+text 2 defined/model_piece.rc
+0
+
+sha256 eac62b604257e43d6bf00aee08182d2b5b3d968dd3b446b0fc62d72d449d53c1 1487 defined/model_piece.stdout
+sha256 5e7db2d72263ffb631dd9db4b28c97a1a687b692cca24dc7e069c059d22b6d83 17152 defined/model_piece_overlap.o.mrc
+sha256 0a08553816b5ab33f1f884a11cc3b07c8b3c686bd35dc2f04b9e9e2f428a700e 2040 defined/model_piece_overlap.p.mod
+text 2 defined/model_piece_overlap.rc
+0
+
+sha256 eac62b604257e43d6bf00aee08182d2b5b3d968dd3b446b0fc62d72d449d53c1 1487 defined/model_piece_overlap.stdout
+sha256 66d44fb5020efcb9a19fc9da366ae58af14ef12a589550ea04c0ba53f373b08f 17152 defined/model_scat.o.mrc
+text 2 defined/model_scat.rc
+0
+
+sha256 32a73578545ea1dc60e097b1fb2f4e738d2d19ac5d5e1ba6181ddf03ec2843d5 1082 defined/model_scat.stdout
+sha256 1aa876917a2c5baa731647e6bbde0dff373d75c4e203bbc52d6857b179cb2272 33280 defined/model_target.o.mrc
+text 2 defined/model_target.rc
+0
+
+sha256 ecb963f52eecdd5e2fe27504458358ebfb0a729222708c420ee5bd995409c709 4076 defined/model_target.stdout
+text 0 defined/model_z.o.mrc
+
+text 2 defined/model_z.rc
+1
+
+sha256 745e86cb6bf0ef056263300f61f8e8e50ca1f9b75ecdb38f8fdf2e00bfe7966e 1077 defined/model_z.stdout
+sha256 1a216dca9ba57e95787a6d4f6f828f0b1ffcf75eb1c9caaa1d79d7d5bad1613f 17152 defined/param.o.mrc
+sha256 fda3f075c75cc3b95a2c4f20c4546725028cb28d6e3786d289756234f10e6454 2480 defined/param.p.mod
+text 2 defined/param.rc
+0
+
+sha256 8a78a86738ca5d01dd1dca2e4e707a3062a52ad6775bd661c7eea2c143bd1f94 5857 defined/param.stdout
+sha256 d91f5ca067192df85844b11909860d2f3d2f01b7830fe9585ca67148d480e378 17152 defined/pid.o.mrc
+text 2 defined/pid.rc
+0
+
+sha256 f8116b1cc21f1c99e49abf39d7428721bc4c6e28b9fdcaa6443d04ef931a2c96 1130 defined/pid.stdout
+sha256 6af649c12cd0f59e43de900863c53c3a7a7fe842d658a57db5cd7be5915e5c0a 17152 defined/skip.o.mrc
+sha256 43acae31f744e9e1ad880e4e882373657daa0072ebaa50bb284cc2af77f1b65b 1956 defined/skip.p.mod
+text 2 defined/skip.rc
+0
+
+sha256 bc3c44174c0c04f8ff153ed37ec5a0a24c25edeaa1a0d22887434a1017d032a7 5453 defined/skip.stdout
+text 0 golden/bigcircle.o.mrc
+
+text 2 golden/bigcircle.rc
+1
+
+sha256 96c49794f611a7454f872bac99bcca244f7557af4f09c59ee4881c74bc0dedf0 1082 golden/bigcircle.stdout
+text 2 golden/err_badopt.rc
+1
+
+text 41 golden/err_badopt.stdout
+ERROR: CCDERASER - Illegal option: bogus
+
+text 2 golden/err_missing_input.rc
+1
+
+text 114 golden/err_missing_input.stdout
+ERROR: iiOpen - Opening file nosuch.mrc (No such file or directory)
+
+ERROR: iiuOpen - Could not open 'nosuch.mrc'
+
+text 0 golden/err_missing_model.o.mrc
+
+text 2 golden/err_missing_model.rc
+1
+
+sha256 69889cc09f5920ea1eca262e09a65c5b69b805bef31554d80ff87acbd9546679 1048 golden/err_missing_model.stdout
+text 2 golden/err_noinput.rc
+1
+
+text 44 golden/err_noinput.stdout
+
+ERROR: CCDERASER - No input file specified
+
+text 0 golden/err_nomodel.o.mrc
+
+text 2 golden/err_nomodel.rc
+1
+
+sha256 cd0eb8f3f22fa3df41b1798b4b56aac614736f2942e725c02cd13e5186e8d360 1074 golden/err_nomodel.stdout
+sha256 530ddbf226f9559df579ce4e41b87f96a9df491f5dd629685b8706d875eca121 17152 golden/find_crit0.o.mrc
+text 2 golden/find_crit0.rc
+0
+
+sha256 d4701f29b5445ee37b5b48c5d438052ee0244230e2ceb4b83a0d5b2d904bac2b 1050 golden/find_crit0.stdout
+sha256 0f3b47f7843b255c2ab3e5fa3bffe18b1c72099319a3866d1fa865bc33978f96 17152 golden/find_order0.o.mrc
+text 2 golden/find_order0.rc
+0
+
+sha256 f8116b1cc21f1c99e49abf39d7428721bc4c6e28b9fdcaa6443d04ef931a2c96 1130 golden/find_order0.stdout
+text 0 golden/find_outerwidth.o.mrc
+
+text 2 golden/find_outerwidth.rc
+1
+
+sha256 7ce00e98a69f2e687e7e2018bb9b85ee8e0c4ba0941186a4c0c56ba2a784d5dc 1069 golden/find_outerwidth.stdout
+text 2 golden/help.rc
+0
+
+sha256 5fa0b4befee6a8c8424635afd421dcfe0b11b211ed86eb202779b3de7a9faee9 4015 golden/help.stdout
+text 0 golden/interactive_eof.o.mrc
+
+text 2 golden/interactive_eof.rc
+2
+
+sha256 956fda0e0e157a07b0a74c46f5692179e315f4d57b0bdd959966fb7de3f1225a 1315 golden/interactive_eof.stdout
+text 0 golden/model_better_bad.o.mrc
+
+text 2 golden/model_better_bad.rc
+1
+
+sha256 b39a58a4adc241fbbfa70aa1dbfadcb03cc99c4d6b9371dd6090708378033510 1125 golden/model_better_bad.stdout
+text 0 golden/model_circle_allsec.o.mrc
+
+text 2 golden/model_circle_allsec.rc
+1
+
+sha256 e317b4234e7e5dfc15e679dd2ebe217d74811bbaae7bb3f6cc81febc58cd0816 1087 golden/model_circle_allsec.stdout
+text 0 golden/model_line3.o.mrc
+
+text 2 golden/model_line3.rc
+1
+
+sha256 a43f9029bcca59df4540b2968069992f87a7580fa0b7e12568bf209d3e980336 1088 golden/model_line3.stdout
+text 0 golden/model_lined.o.mrc
+
+text 2 golden/model_lined.rc
+1
+
+sha256 812889c224479ec5e96a6613c80b62e6d8c9a87597fec4d9a16a616de87eb018 1114 golden/model_lined.stdout
+sha256 451e305793baa30109ba6ed0a63a0bb5c29c2c575d3f20661a0a245663c247ad 17152 golden/model_lines.o.mrc
+text 2 golden/model_lines.rc
+0
+
+sha256 857c6b1ed1274f24cdb9beee7018285636cfe7a396b489827876627f751378b7 1080 golden/model_lines.stdout
+text 0 golden/model_linez.o.mrc
+
+text 2 golden/model_linez.rc
+1
+
+sha256 624995a0375d670b47ce7e097ffc66cc5378dd9b1e7a2cb726c5df41fba35875 1106 golden/model_linez.stdout
+text 0 golden/model_piece_bad.o.mrc
+
+text 2 golden/model_piece_bad.rc
+1
+
+sha256 0c1f778d6c178e25982f1e62b5c699ee69b7d4c7af7e95e052dbccd23bc2ab44 1134 golden/model_piece_bad.stdout
+sha256 f9475ad8e30fc8470ff2e9d976f111519e1efdfb99072428f1e94151c921bb23 17152 golden/model_z_allsec.o.mrc
+text 2 golden/model_z_allsec.rc
+0
+
+sha256 32a73578545ea1dc60e097b1fb2f4e738d2d19ac5d5e1ba6181ddf03ec2843d5 1082 golden/model_z_allsec.stdout
+sha256 4c81abc3d683d4e41f133cd965ff835b5615395b760857773f0b3f0f787eb764 9088 golden/taper_err.o.mrc
+text 2 golden/taper_err.rc
+1
+
+sha256 b1b211fdf2277225700870ead27379e53228a16017e28e4b88263b6baba68abb 1151 golden/taper_err.stdout

@@ -1,7 +1,0 @@
- Image file (or Return to enter Xcen, Ycen directly):  Be SURE to enter CENTER coordinates, NOT NX and NY
- Xcen, Ycen:  Input model file:  Enter 0 to find transformations, 2 to find X/Y translations only,
-    3 to find translations and rotations only,
-    4 to find translation, rotation and mag change only,
-    1 to transform model, or -1 to back-transform model:  Model built on raw sections (0) or prealigned ones(1):  New model file name:  File for list of g transforms to apply: 
- FORMATTED  ro  file opened: BBa.xf
-Transforming model with transforms from BBa.xf

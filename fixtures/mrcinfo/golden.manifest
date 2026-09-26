@@ -1,0 +1,270 @@
+# imod-rs native golden manifest for fixtures/mrcinfo; see fixtures/README.md.
+# Regenerate with fixtures/regen-golden.sh mrcinfo; do not edit by hand.
+text 135 golden/byte_le.err
+/tmp/tmp.r81UlB9YXH/mrcinfo version 1.0 Copyright (C)1994 Boulder Laboratory for
+3-Dimensional Fine Structure, University of Colorado.
+
+text 469 golden/byte_le.out
+MRCinfo: Info on image file byte_le.mrc
+mode = Byte
+Image size    =  ( 8, 6, 2)
+minimum value = 130
+maximum value = 382
+mean value    = 263.677
+Start reading image at ( 0, 0, 0).
+Read length   =  ( 8, 6, 2).
+Size of voxel is ( 12 x 9 x 3 ) um.
+Rotation      =  ( 90, 90, 90).
+Col, rows, sections  = axis (1 , 2, 3)
+Angles (0, 0, 0) --> (0, 0, 0)
+orgin = ( -0, -0, -0)
+Thare are 1 labels.
+
+mrcx fixture                                                                    
+text 2 golden/byte_le.rc
+0
+
+text 135 golden/cfloat_le.err
+/tmp/tmp.r81UlB9YXH/mrcinfo version 1.0 Copyright (C)1994 Boulder Laboratory for
+3-Dimensional Fine Structure, University of Colorado.
+
+text 490 golden/cfloat_le.out
+MRCinfo: Info on image file cfloat_le.mrc
+mode = Complex Float
+Image size    =  ( 4, 3, 2)
+minimum value = -273.004
+maximum value = 221.202
+mean value    = 1.09282
+Start reading image at ( 0, 0, 0).
+Read length   =  ( 4, 3, 2).
+Size of voxel is ( 6 x 4.5 x 3 ) um.
+Rotation      =  ( 90, 90, 90).
+Col, rows, sections  = axis (1 , 2, 3)
+Angles (0, 0, 0) --> (0, 0, 0)
+orgin = ( -0, -0, -0)
+Thare are 1 labels.
+
+mrcx fixture                                                                    
+text 2 golden/cfloat_le.rc
+0
+
+text 135 golden/cshort_le.err
+/tmp/tmp.r81UlB9YXH/mrcinfo version 1.0 Copyright (C)1994 Boulder Laboratory for
+3-Dimensional Fine Structure, University of Colorado.
+
+text 480 golden/cshort_le.out
+MRCinfo: Info on image file cshort_le.mrc
+mode = Complex Short
+Image size    =  ( 4, 3, 2)
+minimum value = -99
+maximum value = 94
+mean value    = 1.79167
+Start reading image at ( 0, 0, 0).
+Read length   =  ( 4, 3, 2).
+Size of voxel is ( 6 x 4.5 x 3 ) um.
+Rotation      =  ( 90, 90, 90).
+Col, rows, sections  = axis (1 , 2, 3)
+Angles (0, 0, 0) --> (0, 0, 0)
+orgin = ( -0, -0, -0)
+Thare are 1 labels.
+
+mrcx fixture                                                                    
+text 2 golden/cshort_le.rc
+0
+
+text 228 golden/extreme_le.err
+/tmp/tmp.r81UlB9YXH/mrcinfo version 1.0 Copyright (C)1994 Boulder Laboratory for
+3-Dimensional Fine Structure, University of Colorado.
+ERROR: mrc_head_read - impossible number of labels, 11.
+Warning: File is not in MRC format.
+
+
+text 411 golden/extreme_le.out
+MRCinfo: Info on image file extreme_le.mrc
+mode = Float
+Image size    =  ( 2, 2, 1)
+minimum value = -3.4e+38
+maximum value = 1e-30
+mean value    = 1.17549e-38
+Start reading image at ( 0, 0, 0).
+Read length   =  ( 2, 2, 1).
+Size of voxel is ( 3 x 3 x 1.5 ) um.
+Rotation      =  ( 90, 90, 90).
+Col, rows, sections  = axis (1 , 2, 3)
+Angles (0, 0, 0) --> (0, 0, 0)
+orgin = ( -0, -0, -0)
+There are to many labels.
+
+
+text 2 golden/extreme_le.rc
+0
+
+text 135 golden/float_le.err
+/tmp/tmp.r81UlB9YXH/mrcinfo version 1.0 Copyright (C)1994 Boulder Laboratory for
+3-Dimensional Fine Structure, University of Colorado.
+
+sha256 a87b1a65c8c4b947602cc22243f2eb6cceaec951518fce162e8395796b01cb18 519 golden/float_le.out
+text 2 golden/float_le.rc
+0
+
+text 135 golden/half_le.err
+/tmp/tmp.r81UlB9YXH/mrcinfo version 1.0 Copyright (C)1994 Boulder Laboratory for
+3-Dimensional Fine Structure, University of Colorado.
+
+text 484 golden/half_le.out
+MRCinfo: Info on image file half_le.mrc
+mode = Float
+Image size    =  ( 2, 2, 1)
+minimum value = -1.58203
+maximum value = -0.421875
+mean value    = -0.891357
+Start reading image at ( 0, 0, 0).
+Read length   =  ( 2, 2, 1).
+Size of voxel is ( 3 x 3 x 1.5 ) um.
+Rotation      =  ( 90, 90, 90).
+Col, rows, sections  = axis (1 , 2, 3)
+Angles (0, 0, 0) --> (0, 0, 0)
+orgin = ( -0, -0, -0)
+Thare are 1 labels.
+
+mrcx fixture                                                                    
+text 2 golden/half_le.rc
+0
+
+text 135 golden/labels_le.err
+/tmp/tmp.r81UlB9YXH/mrcinfo version 1.0 Copyright (C)1994 Boulder Laboratory for
+3-Dimensional Fine Structure, University of Colorado.
+
+sha256 98feaf67abec9085bc7416b1bc7a6ffa42290f7596ec438f5d68ba61dec9fe78 1184 golden/labels_le.out
+text 2 golden/labels_le.rc
+0
+
+text 161 golden/missing.err
+/tmp/tmp.r81UlB9YXH/mrcinfo version 1.0 Copyright (C)1994 Boulder Laboratory for
+3-Dimensional Fine Structure, University of Colorado.
+Error opening nosuch.mrc.
+
+text 0 golden/missing.out
+
+text 2 golden/missing.rc
+3
+
+text 183 golden/noargs.err
+/tmp/tmp.r81UlB9YXH/mrcinfo version 1.0 Copyright (C)1994 Boulder Laboratory for
+3-Dimensional Fine Structure, University of Colorado.
+Usage: /tmp/tmp.r81UlB9YXH/mrcinfo <image file>
+
+text 0 golden/noargs.out
+
+text 2 golden/noargs.rc
+3
+
+text 172 golden/notmrc.err
+/tmp/tmp.r81UlB9YXH/mrcinfo version 1.0 Copyright (C)1994 Boulder Laboratory for
+3-Dimensional Fine Structure, University of Colorado.
+Warning: File is not in MRC format.
+
+
+sha256 c5c98e204f5d2680d623539f165e0233c1a80e1322a81be8c0e9419cdd78910b 752 golden/notmrc.out
+text 2 golden/notmrc.rc
+0
+
+text 135 golden/old_be.err
+/tmp/tmp.r81UlB9YXH/mrcinfo version 1.0 Copyright (C)1994 Boulder Laboratory for
+3-Dimensional Fine Structure, University of Colorado.
+
+text 469 golden/old_be.out
+MRCinfo: Info on image file old_be.mrc
+mode = Short
+Image size    =  ( 5, 4, 2)
+minimum value = -483
+maximum value = 457
+mean value    = 32.35
+Start reading image at ( 0, 0, 0).
+Read length   =  ( 5, 4, 2).
+Size of voxel is ( 7.5 x 6 x 3 ) um.
+Rotation      =  ( 90, 90, 90).
+Col, rows, sections  = axis (1 , 2, 3)
+Angles (0, 0, 0) --> (0, 0, 0)
+orgin = ( -2, -3, -1)
+Thare are 1 labels.
+
+mrcx fixture                                                                    
+text 2 golden/old_be.rc
+0
+
+text 135 golden/old_le.err
+/tmp/tmp.r81UlB9YXH/mrcinfo version 1.0 Copyright (C)1994 Boulder Laboratory for
+3-Dimensional Fine Structure, University of Colorado.
+
+text 471 golden/old_le.out
+MRCinfo: Info on image file old_le.mrc
+mode = Short
+Image size    =  ( 5, 4, 2)
+minimum value = -483
+maximum value = 464
+mean value    = -31.125
+Start reading image at ( 0, 0, 0).
+Read length   =  ( 5, 4, 2).
+Size of voxel is ( 7.5 x 6 x 3 ) um.
+Rotation      =  ( 90, 90, 90).
+Col, rows, sections  = axis (1 , 2, 3)
+Angles (0, 0, 0) --> (0, 0, 0)
+orgin = ( -2, -3, -1)
+Thare are 1 labels.
+
+mrcx fixture                                                                    
+text 2 golden/old_le.rc
+0
+
+text 135 golden/rgb_le.err
+/tmp/tmp.r81UlB9YXH/mrcinfo version 1.0 Copyright (C)1994 Boulder Laboratory for
+3-Dimensional Fine Structure, University of Colorado.
+
+text 471 golden/rgb_le.out
+MRCinfo: Info on image file rgb_le.mrc
+mode = rgb byte
+Image size    =  ( 4, 3, 2)
+minimum value = 0
+maximum value = 244
+mean value    = 108.264
+Start reading image at ( 0, 0, 0).
+Read length   =  ( 4, 3, 2).
+Size of voxel is ( 6 x 4.5 x 3 ) um.
+Rotation      =  ( 90, 90, 90).
+Col, rows, sections  = axis (1 , 2, 3)
+Angles (0, 0, 0) --> (0, 0, 0)
+orgin = ( -0, -0, -0)
+Thare are 1 labels.
+
+mrcx fixture                                                                    
+text 2 golden/rgb_le.rc
+0
+
+text 135 golden/short_be.err
+/tmp/tmp.r81UlB9YXH/mrcinfo version 1.0 Copyright (C)1994 Boulder Laboratory for
+3-Dimensional Fine Structure, University of Colorado.
+
+sha256 12b4bfd35f72c4cd5a467eb4510a6946b034228d13d4499679f51573a4c9ccba 540 golden/short_be.out
+text 2 golden/short_be.rc
+0
+
+text 135 golden/short_le.err
+/tmp/tmp.r81UlB9YXH/mrcinfo version 1.0 Copyright (C)1994 Boulder Laboratory for
+3-Dimensional Fine Structure, University of Colorado.
+
+sha256 a84ebb5810180d98588810dee5cea7924f948417bbcf0711d871bcf3567dee93 541 golden/short_le.out
+text 2 golden/short_le.rc
+0
+
+text 251 golden/tiny.err
+/tmp/tmp.r81UlB9YXH/mrcinfo version 1.0 Copyright (C)1994 Boulder Laboratory for
+3-Dimensional Fine Structure, University of Colorado.
+ERROR: mrc_head_read - reading header data; 2 of 56 words read, system error: Success
+Can't Read Input File Header.
+
+text 0 golden/tiny.out
+
+text 2 golden/tiny.rc
+3
+

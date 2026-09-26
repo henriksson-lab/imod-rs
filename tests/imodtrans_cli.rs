@@ -8,6 +8,8 @@
 //! `flipped.mod` by `imodtrans -T`, and `img1/img2.mrc` by `raw2mrc` plus
 //! `alterheader`; `BBa_erase.fid` and `BBa.xf` are read from the vendored
 //! tree.
+//!
+//! Pruned 2026-09-26: 32 of 37 rows kept (dropped the scale-rotate-shift mix beside `rall`/`sxyz`, `-R 0` beside `-R 1`, `-R` and `-2 -S` repeated on the larger `BBa_erase.fid`, and `-tq`, the same invalid-option exit as `-q`); the rest stay in cases.tsv as `#full` rows (FULL=1, fixtures/README.md).
 
 mod common;
 
@@ -24,7 +26,7 @@ fn scratch(name: &str) -> PathBuf {
     std::fs::create_dir_all(&dir).unwrap();
     for entry in std::fs::read_dir(fixture_dir()).unwrap() {
         let path = entry.unwrap().path();
-        if path.is_file() {
+        if path.is_file() && path.file_name().unwrap() != "golden.manifest" {
             std::fs::copy(&path, dir.join(path.file_name().unwrap())).unwrap();
         }
     }
@@ -40,10 +42,7 @@ fn every_case_matches_native_golden() {
     let table = std::fs::read_to_string(fixture_dir().join("cases.tsv")).unwrap();
     let mut failures = Vec::new();
     let mut count = 0;
-    for line in table
-        .lines()
-        .filter(|l| !l.starts_with('#') && !l.is_empty())
-    {
+    for line in common::golden::case_rows(&table) {
         let fields: Vec<&str> = line.split('\t').collect();
         let (name, input, args, rc) = (fields[0], fields[1], fields[2], fields[3]);
         let rc: i32 = rc.parse().unwrap();
@@ -63,23 +62,24 @@ fn every_case_matches_native_golden() {
                 String::from_utf8_lossy(&output.stdout)
             ));
         }
-        let golden = std::fs::read(fixture_dir().join("golden").join(format!("{name}.mod"))).ok();
+        let golden =
+            common::golden::load(&fixture_dir().join("golden").join(format!("{name}.mod")));
         let written = std::fs::read(dir.join("out.mod")).ok();
         match (golden, written) {
             (None, None) => {}
             // `MINX` `oscale`/`orot` are native residue when `-i` supplies no
             // `IrefImage` (`imodtrans.c:93`, `:404`); reconciled against the
             // defined identity (`BUGS.md` §2).
-            (Some(g), Some(w)) if common::reconcile_uninitialised(&w, &g) == w => {}
+            (Some(g), Some(w)) if g.matches_reconciled(&w, common::golden::identity) => {}
             (g, w) => failures.push(format!(
-                "{name}: output differs (native {:?} bytes, ours {:?} bytes)",
-                g.map(|b| b.len()),
+                "{name}: output differs (native {:?}, ours {:?} bytes)",
+                g.map(|b| b.describe()),
                 w.map(|b| b.len())
             )),
         }
         let _ = std::fs::remove_dir_all(&dir);
     }
-    assert!(count >= 37, "only {count} cases read");
+    assert!(count >= 30, "only {count} cases read");
     assert!(failures.is_empty(), "{}", failures.join("\n"));
 }
 
@@ -90,11 +90,11 @@ fn every_case_matches_native_golden() {
 #[test]
 fn embedded_values_and_failed_transform_leave_native_state() {
     let golden = fixture_dir().join("golden");
-    assert_eq!(
-        std::fs::read(golden.join("tx.mod")).unwrap(),
-        std::fs::read(golden.join("txembed.mod")).unwrap()
+    assert!(
+        common::golden::expect(&golden.join("tx.mod"))
+            .same_as(&common::golden::expect(&golden.join("txembed.mod")))
     );
-    assert_eq!(std::fs::read(golden.join("x2lfar.mod")).unwrap().len(), 0);
+    assert_eq!(common::golden::expect(&golden.join("x2lfar.mod")).len(), 0);
 }
 
 /// An existing output is backed up to `name~` before being overwritten
@@ -122,9 +122,9 @@ fn backup_and_usage_exits() {
         std::fs::read(dir.join("out.mod~")).unwrap(),
         std::fs::read(dir.join("meshed.mod")).unwrap()
     );
-    assert_eq!(
-        std::fs::read(dir.join("out.mod")).unwrap(),
-        std::fs::read(fixture_dir().join("golden/tx.mod")).unwrap()
+    assert!(
+        common::golden::expect(&fixture_dir().join("golden/tx.mod"))
+            .matches(&std::fs::read(dir.join("out.mod")).unwrap())
     );
     for argv in [&[][..], &["only.mod"][..]] {
         let output = common::imod_cmd("imodtrans")

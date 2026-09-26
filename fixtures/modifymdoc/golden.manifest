@@ -1,0 +1,282 @@
+# imod-rs native golden manifest for fixtures/modifymdoc; see fixtures/README.md.
+# Regenerate with fixtures/regen-golden.sh modifymdoc; do not edit by hand.
+text 29 golden/all.out
+Wrote new mdoc file out.mdoc
+
+text 2 golden/all.rc
+0
+
+sha256 7f558baa38cf726152460adeeea6f4c61dc203096e0ffdb5bb484420bacae3b4 3728 golden/all/out.mdoc
+text 42 golden/badopt.out
+ERROR: modifymdoc - Illegal option: bogus
+
+text 2 golden/badopt.rc
+1
+
+text 61 golden/badoutdir.out
+ERROR: modifymdoc - Writing the new mdoc file nodir/out.mdoc
+
+text 2 golden/badoutdir.rc
+1
+
+text 29 golden/bin05.out
+Wrote new mdoc file out.mdoc
+
+text 2 golden/bin05.rc
+0
+
+sha256 0ce644b63b1849749cc42c280b3b5de63203de248d8e1001491c47f5b125d033 3784 golden/bin05/out.mdoc
+text 58 golden/bin15.out
+ERROR: modifymdoc - New binning must be 0.5 or an integer
+
+text 2 golden/bin15.rc
+1
+
+text 29 golden/bin1super.out
+Wrote new mdoc file out.mdoc
+
+text 2 golden/bin1super.rc
+0
+
+sha256 c3609eb2b9180f380ba42a1f0fb68d3a2fe27dfbcfd91b525c4b67be67704125 2636 golden/bin1super/out.mdoc
+text 29 golden/bin2.out
+Wrote new mdoc file out.mdoc
+
+text 2 golden/bin2.rc
+0
+
+sha256 342b13839d72894e6546743afa3e038751bdc58c740ed988f52eb9e17b2f297b 3754 golden/bin2/out.mdoc
+text 29 golden/bin4of3.out
+Wrote new mdoc file out.mdoc
+
+text 2 golden/bin4of3.rc
+0
+
+sha256 377cb27820dafb5c984b8a39e793e40985980a1180a6d12f2f3aa995da0fcfcd 2636 golden/bin4of3/out.mdoc
+text 64 golden/binbadbin.out
+ERROR: modifymdoc - Illegal character in value entry:  two  two
+
+text 2 golden/binbadbin.rc
+1
+
+text 66 golden/binbadpix.out
+ERROR: modifymdoc - Illegal character in value entry:  wide  wide
+
+text 2 golden/binbadpix.rc
+1
+
+text 90 golden/binbadsize.out
+ERROR: modifymdoc - 2 values expected but only 1 values found in value entry:  4095  4095
+
+text 2 golden/binbadsize.rc
+1
+
+text 29 golden/binnopix.out
+Wrote new mdoc file out.mdoc
+
+text 2 golden/binnopix.rc
+0
+
+sha256 988b7fe5e605f188e78cbc98fe993f2c82741dedc5108dacf70d25116c4c23e3 1772 golden/binnopix/out.mdoc
+text 29 golden/binsecpix.out
+Wrote new mdoc file out.mdoc
+
+text 2 golden/binsecpix.rc
+0
+
+sha256 2e377321c9a6e7ac731ca3d543799efed5906f5460e37c63bd015ff998af5b70 1984 golden/binsecpix/out.mdoc
+text 29 golden/dose.out
+Wrote new mdoc file out.mdoc
+
+text 2 golden/dose.rc
+0
+
+sha256 89c583c1ce748fa9163fd1db6048545efb3dcd7b4e9a29ef0db86489bc4dbd17 3756 golden/dose/out.mdoc
+text 55 golden/dose0.out
+ERROR: modifymdoc - The electron dose must be positive
+
+text 2 golden/dose0.rc
+1
+
+text 296 golden/dosebadmonth.out
+getMetadataWeightingDoses - The DateTime entry 02-Mxr-23  10:23:10 in the autodoc file has an improper month string
+ERROR: modifymdoc - Getting accumulated dose information back: getMetadataWeightingDoses - The DateTime entry 02-Mxr-23  10:23:10 in the autodoc file has an improper month string
+
+
+text 2 golden/dosebadmonth.rc
+1
+
+text 29 golden/dosenotime.out
+Wrote new mdoc file out.mdoc
+
+text 2 golden/dosenotime.rc
+0
+
+sha256 ea979bbc01666594f868cc9c057893090f490666d502102081a4c4e4fb1efea3 3551 golden/dosenotime/out.mdoc
+text 246 golden/doseparttime.out
+getMetadataWeightingDoses - The autodoc file has DateTime entries for only 3 of 7 sections
+ERROR: modifymdoc - Getting accumulated dose information back: getMetadataWeightingDoses - The autodoc file has DateTime entries for only 3 of 7 sections
+
+
+text 2 golden/doseparttime.rc
+1
+
+text 63 golden/garbage.out
+ERROR: modifymdoc - Opening or reading input file garbage.mdoc
+
+text 2 golden/garbage.rc
+1
+
+sha256 d491b9e53b59daec4a075a7b331a562b43e89331dbf096defc3e3b86822d7f3d 922 golden/help.out
+text 2 golden/help.rc
+0
+
+text 30 golden/inplace.out
+Wrote new mdoc file tilt.mdoc
+
+text 2 golden/inplace.rc
+0
+
+sha256 8935dfc28a371926ff8ed164a73fbe0504ec22b019fffabe9249497e7031ff2c 3762 golden/inplace/tilt.mdoc
+sha256 2fb6facc5cb17a2adf386c0007369cf1a3c267cd3ebd459e4e5a6b594d21e686 3770 golden/inplace/tilt.mdoc~
+text 66 golden/missingtilt.out
+ERROR: modifymdoc - There are tilt angles in only 6 of 7 sections
+
+text 2 golden/missingtilt.rc
+1
+
+text 68 golden/montage.out
+ERROR: modifymdoc - An mdoc file from a montage cannot be reordered
+
+text 2 golden/montage.rc
+1
+
+text 29 golden/nantilt1.out
+Wrote new mdoc file out.mdoc
+
+text 2 golden/nantilt1.rc
+0
+
+sha256 684fb1a7951e0d31e9356465141d5f9866e30d7b9da3f66eab942f95d508927e 3591 golden/nantilt1/out.mdoc
+sha256 d491b9e53b59daec4a075a7b331a562b43e89331dbf096defc3e3b86822d7f3d 922 golden/noargs.out
+text 2 golden/noargs.rc
+0
+
+text 44 golden/noinput.out
+ERROR: modifymdoc - No input file specified
+
+text 2 golden/noinput.rc
+1
+
+text 59 golden/nonexist.out
+ERROR: modifymdoc - Input file nothere.mdoc does not exist
+
+text 2 golden/nonexist.rc
+1
+
+text 45 golden/nooutput.out
+ERROR: modifymdoc - No output file specified
+
+text 2 golden/nooutput.rc
+1
+
+text 70 golden/nosect.out
+ERROR: modifymdoc - The input file nosect.mdoc is not a valid autodoc
+
+text 2 golden/nosect.rc
+1
+
+text 74 golden/onesect.out
+ERROR: modifymdoc - There must be at least two sections in the input file
+
+text 2 golden/onesect.rc
+1
+
+text 29 golden/order0.out
+Wrote new mdoc file out.mdoc
+
+text 2 golden/order0.rc
+0
+
+sha256 d28564f99cb8172d32ef0c1e345f54796ed3013cf6408ca60bf305cc889d9e33 3762 golden/order0/out.mdoc
+text 29 golden/order1.out
+Wrote new mdoc file out.mdoc
+
+text 2 golden/order1.rc
+0
+
+sha256 8935dfc28a371926ff8ed164a73fbe0504ec22b019fffabe9249497e7031ff2c 3762 golden/order1/out.mdoc
+text 73 golden/orderbad.out
+ERROR: modifymdoc - Illegal character in value entry:  OrderToProduce  x
+
+text 2 golden/orderbad.rc
+1
+
+text 29 golden/orderm1.out
+Wrote new mdoc file out.mdoc
+
+text 2 golden/orderm1.rc
+0
+
+sha256 e08d42e96f0f41d132a3da5a422aa01e84aa477442f65d4a94ba1cdbacb31ee7 3762 golden/orderm1/out.mdoc
+text 29 golden/param.out
+Wrote new mdoc file out.mdoc
+
+text 2 golden/param.rc
+0
+
+sha256 791b5068197b3e91cf2641c443ec1ab07784c38439e47b30630d4b28424b0393 3751 golden/param/out.mdoc
+text 29 golden/paramonly.out
+Wrote new mdoc file out.mdoc
+
+text 2 golden/paramonly.rc
+0
+
+sha256 2402d448b03602680cb2d3d1aaf7f022e60a33441ef90867d2a663f194db5cb4 3751 golden/paramonly/out.mdoc
+text 29 golden/pix.out
+Wrote new mdoc file out.mdoc
+
+text 2 golden/pix.rc
+0
+
+sha256 bba95c912f03494db9f54f833a6bf3f13d747be124769f06d6edaeffa608c778 3754 golden/pix/out.mdoc
+text 52 golden/pix0.out
+ERROR: modifymdoc - New pixel size must be positive
+
+text 2 golden/pix0.rc
+1
+
+text 29 golden/pixbin.out
+Wrote new mdoc file out.mdoc
+
+text 2 golden/pixbin.rc
+0
+
+sha256 c12d71253c2a03039ae9625c01b335db15858a51375406dfce421618b7baad1d 3754 golden/pixbin/out.mdoc
+text 29 golden/scrambled1.out
+Wrote new mdoc file out.mdoc
+
+text 2 golden/scrambled1.rc
+0
+
+sha256 470f311757cfa072ad9d587c77f496fbb8a9cc4dc06549e576692539024fbf80 2103 golden/scrambled1/out.mdoc
+text 29 golden/scrambleddose.out
+Wrote new mdoc file out.mdoc
+
+text 2 golden/scrambleddose.rc
+0
+
+sha256 c9efcd8f252f58035558b6812d5b0018b0752fef4a23c17574db7cfbdbb4033e 2175 golden/scrambleddose/out.mdoc
+text 91 golden/series.out
+ERROR: modifymdoc - This program can be used only with a file having sections named ZValue
+
+text 2 golden/series.rc
+1
+
+text 29 golden/ties1.out
+Wrote new mdoc file out.mdoc
+
+text 2 golden/ties1.rc
+0
+
+sha256 aaa0ecf3558b1424f90254fff86e1607dec8e4c4b0b2903c47f170b0f704aae3 3119 golden/ties1/out.mdoc

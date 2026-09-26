@@ -1,0 +1,5 @@
+comparam.newst.newstack.ExpandByFactor = 1.25
+comparam.tilt_3dfind.tilt.RADIAL = 0.4 0.05
+comparam.golderaser.ccderaser.ExpandCircleIterations = 3
+comparam.xcorr_pt.tiltxcorr.SizeOfPatchesXandY = 300,300
+setupset.copyarg.halffloat = 1

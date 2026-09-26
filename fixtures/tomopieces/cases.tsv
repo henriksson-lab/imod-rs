@@ -1,0 +1,30 @@
+# name	arguments (- for none)	stdin (printf escapes, - for none)
+t_size	-tomogram 512,150,512	-
+t_nonopt	512,150,512	-
+t_file	-tomogram tomo.mrc	-
+#full	t_filenonopt	tomo.mrc	-
+#full	t_big	-tomogram 2048,400,2048	-
+t_mega	-tomogram 2048,400,2048 -megavox 20	-
+#full	t_megasmall	-tomogram 1024,300,1024 -megavox 2.5	-
+t_pad	-tomogram 1024,300,1024 -xpad 16 -ypad 2 -zpad 12	-
+#full	t_xmax	-tomogram 2048,400,2048 -xmaxpiece 2	-
+#full	t_ymax	-tomogram 2048,400,2048 -ymaxpiece 3	-
+t_x1y0	-tomogram 2048,400,2048 -xmaxpiece 1	-
+t_x0y1	-tomogram 2048,400,2048 -ymaxpiece 1	-
+t_xy	-tomogram 2048,400,2048 -xmaxpiece 3 -ymaxpiece 2	-
+t_zmax	-tomogram 2048,400,2048 -zmaxpiece 1	-
+#full	t_zmax0	-tomogram 2048,400,2048 -zmaxpiece 0	-
+t_overlap	-tomogram 1024,300,1024 -minoverlap 10 -megavox 10	-
+t_hdf	-tomogram 2048,400,2048 -hdf	-
+#full	t_hdfmega	-tomogram 1000,301,999 -hdf -megavox 5 -minoverlap 7	-
+t_nofft	-tomogram 1000,301,999 -nofft -megavox 10	-
+#full	t_nofft_hdf	-tomogram 1000,301,999 -nofft -hdf -megavox 10	-
+t_odd	-tomogram 777,133,555 -megavox 3	-
+t_toobig	-tomogram 2048,400,2048 -xmaxpiece 1 -ymaxpiece 1 -zmaxpiece 1	-
+t_tiny	-tomogram 20,10,30 -megavox 0.001	-
+t_missing	-megavox 10	-
+t_nofile	-tomogram nosuch.mrc	-
+t_badsize	-tomogram 100,200	-
+t_help	-help	-
+t_none	-	-
+#full	t_many	-tomogram 4096,1000,4096 -megavox 1	-

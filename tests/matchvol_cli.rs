@@ -15,6 +15,8 @@
 //! stamp in an MRC label, the time-derived digits of scratch file names
 //! (`<input>.mat<hhmmss>N`, `.wrp<hhmmss>N`) and the verbose timing lines,
 //! which differ between runs.
+//!
+//! Pruned 2026-09-26: 18 of 21 rows kept (dropped: the Y-X order on the float volume (kept with -memory), -verbose alone (kept with -memory), and a third interactive run); the rest stay in cases.tsv as `#full` rows (FULL=1 / IMOD_RS_FULL_CASES=1, fixtures/README.md).
 
 mod common;
 
@@ -38,7 +40,11 @@ fn inputs() -> BTreeMap<String, Vec<u8>> {
     for entry in std::fs::read_dir(fixture_dir()).unwrap() {
         let path = entry.unwrap().path();
         let name = path.file_name().unwrap().to_string_lossy().into_owned();
-        if !path.is_file() || name == "cases.tsv" || name.starts_with("make-") {
+        if !path.is_file()
+            || name == "cases.tsv"
+            || name == "golden.manifest"
+            || name.starts_with("make-")
+        {
             continue;
         }
         map.insert(name, std::fs::read(&path).unwrap());
@@ -77,10 +83,7 @@ fn every_case_matches_native_golden() {
     let inputs = inputs();
     let mut failures = Vec::new();
     let mut count = 0;
-    for line in table
-        .lines()
-        .filter(|l| !l.starts_with('#') && !l.is_empty())
-    {
+    for line in common::golden::case_rows(&table) {
         let fields: Vec<&str> = line.split('\t').collect();
         let (name, args, stdin) = (fields[0], fields[1], fields[2]);
         let dir =
@@ -120,8 +123,7 @@ fn every_case_matches_native_golden() {
             .unwrap();
         let output = child.wait_with_output().unwrap();
         count += 1;
-        let rc: i32 = std::fs::read_to_string(golden.join(format!("{name}.rc")))
-            .unwrap()
+        let rc: i32 = common::golden::read_to_string(&golden.join(format!("{name}.rc")))
             .trim()
             .parse()
             .unwrap();
@@ -131,20 +133,19 @@ fn every_case_matches_native_golden() {
                 output.status.code()
             ));
         }
-        let stdout = std::fs::read(golden.join(format!("{name}.stdout"))).unwrap();
-        if mask_stdout(&output.stdout) != mask_stdout(&stdout) {
+        let stdout = common::golden::expect(&golden.join(format!("{name}.stdout")));
+        if !stdout.matches_masked(&output.stdout, |b| mask_stdout(b).into_bytes()) {
             failures.push(format!(
                 "{name}: stdout differs\n--- native\n{}\n--- ours\n{}",
-                String::from_utf8_lossy(&stdout),
+                stdout.display(),
                 String::from_utf8_lossy(&output.stdout)
             ));
         }
         let prefix = format!("{name}.out.");
         let mut expected = BTreeMap::new();
-        for entry in std::fs::read_dir(&golden).unwrap() {
-            let file = entry.unwrap().file_name().to_string_lossy().into_owned();
+        for file in common::golden::list(&golden) {
             if let Some(out) = file.strip_prefix(&prefix) {
-                expected.insert(out.to_owned(), std::fs::read(golden.join(&file)).unwrap());
+                expected.insert(out.to_owned(), common::golden::expect(&golden.join(&file)));
             }
         }
         let mut written = BTreeMap::new();
@@ -163,15 +164,15 @@ fn every_case_matches_native_golden() {
                 expected.keys().collect::<Vec<_>>()
             ));
         }
-        for (file, bytes) in &expected {
+        for (file, native) in &expected {
             if let Some(ours) = written.get(file) {
-                if common::mask_stamps(ours) != common::mask_stamps(bytes) {
-                    failures.push(format!("{name}: {file} differs from native"));
+                if let Err(why) = native.compare(ours, common::mask_stamps, false) {
+                    failures.push(format!("{name}: {file} differs from native: {why}"));
                 }
             }
         }
         let _ = std::fs::remove_dir_all(&dir);
     }
-    assert!(count >= 20, "only {count} cases read");
+    assert!(count >= 18, "only {count} cases read");
     assert!(failures.is_empty(), "{}", failures.join("\n"));
 }

@@ -1,0 +1,140 @@
+# imod-rs native golden manifest for fixtures/tilt; see fixtures/README.md.
+# Regenerate with fixtures/regen-golden.sh tilt; do not edit by hand.
+sha256 3515f0a6d267e04e2f7a57f4db60ad1fc334fc8ff973835372f3a5ebc8c4f2ef 847 golden/chunk_setup.out
+text 2 golden/chunk_setup.rc
+0
+
+sha256 05d3a6aa6c125eaf607c42ec4d4eb91907c6432b6677a897f22cc9b09c83ff5d 1024 golden/chunk_setup/o.rec
+text 356 golden/err_mode.out
+
+Input projection file:: t.ali
+ Dimensions:     40     28     21   Pixel size:       3.1        3.1        3.1
+Mode:  1               Min, max, mean:          152          504       212.89
+raw2mrc: Converted to mrc format.                       25-Sep-26  01:52:41
+
+ Output map is sectioned perpendicular to the tilt axis
+ERROR: tilt - Illegal output mode
+
+text 2 golden/err_mode.rc
+1
+
+text 472 golden/err_no_angles.out
+
+Input projection file:: t.ali
+ Dimensions:     40     28     21   Pixel size:       3.1        3.1        3.1
+Mode:  1               Min, max, mean:          152          504       212.89
+raw2mrc: Converted to mrc format.                       25-Sep-26  01:52:41
+
+ Output map is sectioned perpendicular to the tilt axis
+
+ Thickness of reconstructed slice is 16 pixels.
+ERROR: tilt - There are no tilt angles from ANGLES or TILTFILE entries or from the image file header
+
+text 2 golden/err_no_angles.rc
+1
+
+text 372 golden/err_view_list.out
+
+Input projection file:: t.ali
+ Dimensions:     40     28     21   Pixel size:       3.1        3.1        3.1
+Mode:  1               Min, max, mean:          152          504       212.89
+raw2mrc: Converted to mrc format.                       25-Sep-26  01:52:41
+
+ Output map is sectioned perpendicular to the tilt axis
+ERROR: tilt - Illegal view number in EXCLUDE list
+
+text 2 golden/err_view_list.rc
+1
+
+sha256 bdf94c99cbc7cd75ee53e7ad87751b824630676ed39ac47e4c2abd8c17a61149 1669 golden/exact.out
+text 2 golden/exact.rc
+0
+
+sha256 e04fccf936eaaff743ac1ad3a7a2b2fda5629082a5c3d7d996046422b1e7aa04 36864 golden/exact/o.rec
+sha256 0bf911602af94c1d61aca108254c015e0dde195cf02c97dc83db928980d8576b 1494 golden/fakesirt.out
+text 2 golden/fakesirt.rc
+0
+
+sha256 129d18e3c7739cb877e7e25cea0c5496546b41d6aba115f6ae55ccec5e240d51 36864 golden/fakesirt/o.rec
+sha256 36bf56a070f2cd41ae5895bc81b1fdc616459d9f2402a853ff5207733f4f4dfa 1590 golden/local.out
+text 2 golden/local.rc
+0
+
+sha256 b3c1e2a8c0e9bf25199b1aceabd340b6891a75105608090c8070f781976f01d6 36864 golden/local/o.rec
+sha256 1207b335257b5bf91e4702b25fcfefeae601c0ca312fbb7ea5e4a25f2e81b3c1 1684 golden/log_mode0.out
+text 2 golden/log_mode0.rc
+0
+
+sha256 db7db42a488c24cbfa37a1cda90481cc69e71f948d32770a58f390f95555bff1 9184 golden/log_mode0/o.rec
+sha256 f14ff434b5d0924c076319cb607ee4e4c61942ad3bc0d30a24f736038da2f4fe 714 golden/model.out
+text 2 golden/model.rc
+0
+
+sha256 5ff2a8fe0689c02b5a67e2daa90c05a84c329227cd000adb7d854bbcbe880810 6930 golden/model/o.ang
+sha256 762ae071b8c4613d3d1665142ea698baeb177ad20105c01cb14fb4c3fb00beb6 2712 golden/model/o.mod
+sha256 8ca5133d4596b067d9eb016a5218e3ae8d1efd6cb71ed4f156aad9ad94e55f60 1912 golden/parallel.out
+text 2 golden/parallel.rc
+0
+
+sha256 19dbe93fe48ce48747049e73311d5ec01045f420aa951b1441a1d2fddca7f0e7 36864 golden/parallel/o.rec
+sha256 024bc4b249c661c3abc03d0e5ec0323adf08fd22dd0573120079bdcbdaee5cf8 2010 golden/radial.out
+text 2 golden/radial.rc
+0
+
+sha256 ccab601c3fb084d6334668d569328ccaa86bef9b243787259d1944947fc1372b 27680 golden/radial/o.rec
+sha256 11f0f5fedcb36a46eed28a4616cae8d17ad65fd18d6834d4cbf5babd0135940a 1432 golden/rec_reproj.out
+text 2 golden/rec_reproj.rc
+0
+
+sha256 08b451304cbfeb3d04421e7384eb7203c82ee13fe81652bde13d87ba9b115479 48064 golden/rec_reproj/o.prj
+sha256 080b6f57cb10480150a27ebe125795424f8f440f0c88c476be512352714e376e 1329 golden/rec_reproj_local.out
+text 2 golden/rec_reproj_local.rc
+0
+
+sha256 2663bd87b9cee0b03fc256fe470e0da42dca695b89484a618da2821e6be952ae 14464 golden/rec_reproj_local/o.prj
+sha256 7925e71175aff718f183041aa3fd74c570e2414e6e4e03d392be5417cf170e84 1400 golden/rec_thresh.out
+text 2 golden/rec_thresh.rc
+0
+
+sha256 997fcdc4665d157712e6c53dbe427b306e83f3961c70c3d56f30f4e3e9e2f3b8 95104 golden/rec_thresh/o.prj
+sha256 44974f0eb1046bfa8c411aa754a79ee9a4e7407478a0920e23c838aa1b8bb129 1311 golden/reproject_bp.out
+text 2 golden/reproject_bp.rc
+0
+
+sha256 89a4863cf0617f83389e8965085179e8e618ed27dae2e5bb11980c2d8d7bd5eb 14464 golden/reproject_bp/o.rec
+sha256 43416beb38c42807f1182953c3d582a1c5148e1765167d438937ad24f02c4b6d 1912 golden/rotby90.out
+text 2 golden/rotby90.rc
+0
+
+sha256 9e884c4b981ad97d917ba961c399918d248645a9da95c682c5857966b079a8d4 36864 golden/rotby90/o.rec
+sha256 5469a0af6c47ac1c33d458297d438d1517ec42a8474eb54b722dcbfed67b67ec 1556 golden/sirt.out
+text 2 golden/sirt.rc
+0
+
+sha256 236f572c489cfb3b4bdc97ca51a036c08e7080aebedee28ad1ca44e11bee59c8 36864 golden/sirt/o.rec
+sha256 91eb201ae686c36d4409a2f63a11425bc5b1fa886c10592f0e3c6059d3b4a465 1868 golden/stdin.out
+text 2 golden/stdin.rc
+0
+
+sha256 3db6c73ffe9aac86aba36c1bf606bfe19211353ebb740afbea6c2616c60f1248 36864 golden/stdin/t.out
+sha256 e5f467ee214b8c6ad31429d83cb059f1c287567ee2a4d84ca78e22ce3f550d93 1576 golden/supersample.out
+text 2 golden/supersample.rc
+0
+
+sha256 3da6ab8b1adfaf84ee2dd42bb9c949e7f72a0544e13fc3c05908e3e117cae072 11584 golden/supersample/o.rec
+sha256 f54235557537149141e904996e423f8b0bbb8359122a088799e01b660f6f0eeb 836 golden/usegpu_fail.out
+text 2 golden/usegpu_fail.rc
+1
+
+text 0 golden/usegpu_fail/o.rec
+
+sha256 ee3a73a38d4fb37fb11d968f972eb40b35c1d44b7ad9539118781dadc8353498 1670 golden/xaxis.out
+text 2 golden/xaxis.rc
+0
+
+sha256 7fde6c5aa0070229a65b8f30ea8236927d7edd9986b504248805fc30cd3a67bc 36864 golden/xaxis/o.rec
+sha256 6eb042cadaab2a0e32bc56e425b0fd988593bf0aad08b9f23d3e3316e2808117 1623 golden/xtiltfile.out
+text 2 golden/xtiltfile.rc
+0
+
+sha256 e3544847b9ae05f58a004c3f9ef26efa3f55bd03a47bdedd55f33ec326e79bcb 36864 golden/xtiltfile/o.rec

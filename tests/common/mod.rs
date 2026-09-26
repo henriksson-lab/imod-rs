@@ -9,6 +9,8 @@
 use std::path::PathBuf;
 use std::process::Command;
 
+pub mod golden;
+
 /// A `Command` running `<command>` through the `imod <command> …` subcommand
 /// form.  The launcher re-execs itself with `argv[0]` rewritten, so the
 /// translated program observes exactly the `argv` it would have as its own

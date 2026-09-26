@@ -1,0 +1,45 @@
+# Cases whose expectation is in defined/ (make-ccderaser-goldens.sh defined): an upstream-bug
+# fix (BUGS.md, ccderaser, 2026-09-26) changes their output.  name<TAB>fix
+# "cleanArea border rings": ccderaser.f90:1915 marks around stale ixl/iyl; fixed to ixOffset/iyOffset.
+find_f	cleanArea border rings
+find_s	cleanArea border rings
+find_b	cleanArea border rings
+find_nonopt	cleanArea border rings
+find_verbose	cleanArea border rings
+find_points	cleanArea border rings
+find_inplace	cleanArea border rings
+find_criteria	cleanArea border rings
+find_radius	cleanArea border rings
+find_width	cleanArea border rings
+find_giant	cleanArea border rings
+find_giant0	cleanArea border rings
+find_maxdiff	cleanArea border rings
+find_xyscan	cleanArea border rings
+find_iter	cleanArea border rings
+find_iter6	cleanArea border rings
+find_border_order	cleanArea border rings
+find_order1_excl	cleanArea border rings
+find_half	cleanArea border rings
+find_half_s	cleanArea border rings
+model_all	cleanArea border rings
+model_all_find	no [CCE1] debug line; merged-contour patch box; cleanArea border rings
+model_merge	merged-contour patch box; cleanArea border rings
+model_expand_halo	cleanArea border rings
+model_target	cleanArea border rings
+model_better_list	cleanArea border rings
+model_better_all	no [CCE1] debug line; cleanArea border rings
+model_nosize	cleanArea border rings
+model_scat	cleanArea border rings
+model_defaults	cleanArea border rings
+model_z	is-not-in-one-Z-plane message and exit 1 (native: gfortran runtime error, status 2)
+model_boundary	cleanArea border rings
+model_boundary_order	cleanArea border rings
+model_inplace	cleanArea border rings
+model_border9	cleanArea border rings
+model_piece	cleanArea border rings
+model_piece_overlap	cleanArea border rings
+skip	cleanArea border rings
+param	cleanArea border rings
+pid	cleanArea border rings
+interactive	interactive input no longer puts every object on the circle and boundary lists
+interactive2	interactive input no longer puts every object on the circle and boundary lists

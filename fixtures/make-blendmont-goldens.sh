@@ -20,7 +20,7 @@ cp "$HERE"/bm.st "$HERE"/bm.pl "$work"/
 cp "$work"/old.* "$HERE"/
 rm -rf "$work"
 rm -rf "$HERE/golden"; mkdir -p "$HERE/golden"
-grep -v '^#' "$HERE/cases.tsv" | while IFS=$'\t' read -r name args; do
+sed "${FULL:+s/^#full\t//;}/^#/d" "$HERE/cases.tsv" | while IFS=$'\t' read -r name args; do
   [ -z "$name" ] && continue
   work=$(mktemp -d)
   cp "$HERE"/bm.st "$HERE"/*.pl "$HERE"/*.mod "$HERE"/g.txt "$HERE"/x.xf "$HERE"/old.* "$work"/

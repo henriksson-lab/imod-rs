@@ -11,6 +11,8 @@
 //! reference build's binary is put on `PATH` through a wrapper, and when that
 //! is absent too the test reports why and does nothing.  The wider
 //! differential behind these goldens is recorded in `TODO.md`.
+//!
+//! Pruned 2026-09-26: 17 of 22 rows kept (dropped `run_nearest`, `run_scan_legacy`, `run_scan_step` -- scan branches other runs reach -- and `err_za_low`/`err_swap_range`, repeats of the A-range error in `err_za_order`); the rest stay in cases.tsv as `#full` rows (FULL=1, fixtures/README.md).
 
 mod common;
 mod pysetup_common;

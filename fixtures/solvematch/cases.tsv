@@ -1,0 +1,118 @@
+# name	arguments (- for none)	stdin (printf escapes, - for none)
+basic	-afid twoA.xyz -bfid twoB.xyz -alist 1-30 -blist 6,23,10,24,29,13,3,7,21,20,8,12,11,16,14,19,22,5,1,26,15,30,28,25,2,9,17,4,18,27 -atom tiny1.mrc -btom tiny1.mrc -output out.xf	-
+basic_nonopt	-afid twoA.xyz -bfid twoB.xyz -alist 1-30 -blist 6,23,10,24,29,13,3,7,21,20,8,12,11,16,14,19,22,5,1,26,15,30,28,25,2,9,17,4,18,27 -atom tiny1.mrc -btom tiny1.mrc out.xf	-
+sizes	-afid twoA.xyz -bfid twoB.xyz -alist 1-30 -blist 6,23,10,24,29,13,3,7,21,20,8,12,11,16,14,19,22,5,1,26,15,30,28,25,2,9,17,4,18,27 -atom 400,100,400 -btom 400,100,400 -output out.xf	-
+#full	nosizes	-afid twoA.xyz -bfid twoB.xyz -alist 1-30 -blist 6,23,10,24,29,13,3,7,21,20,8,12,11,16,14,19,22,5,1,26,15,30,28,25,2,9,17,4,18,27 -output out.xf	-
+sizes_scales	-afid twoA.xyz -bfid twoB.xyz -alist 1-30 -blist 6,23,10,24,29,13,3,7,21,20,8,12,11,16,14,19,22,5,1,26,15,30,28,25,2,9,17,4,18,27 -atom 400,100,400 -btom 400,100,400 -scales 1,1 -output out.xf	-
+#full	nosizes_scales	-afid twoA.xyz -bfid twoB.xyz -alist 1-30 -blist 6,23,10,24,29,13,3,7,21,20,8,12,11,16,14,19,22,5,1,26,15,30,28,25,2,9,17,4,18,27 -scales 1,1 -output out.xf	-
+defaultlist	-afid twoA.xyz -bfid twoB.xyz -atom tiny1.mrc -btom tiny1.mrc -output out.xf	-
+#full	partial6	-afid twoA.xyz -bfid twoB.xyz -alist 1-6 -blist 6,23,10,24,29,13 -atom tiny1.mrc -btom tiny1.mrc -output out.xf	-
+partial4	-afid twoA.xyz -bfid twoB.xyz -alist 2,4,6,8 -blist 23,24,13,7 -atom tiny1.mrc -btom tiny1.mrc -output out.xf	-
+#full	partial3	-afid twoA.xyz -bfid twoB.xyz -alist 1-3 -blist 6,23,10 -atom tiny1.mrc -btom tiny1.mrc -output out.xf	-
+listmismatch	-afid twoA.xyz -bfid twoB.xyz -alist 1-6 -blist 1-5 -atom tiny1.mrc -btom tiny1.mrc -output out.xf	-
+listzero	-afid twoA.xyz -bfid twoB.xyz -alist 0-5 -blist 1-6 -atom tiny1.mrc -btom tiny1.mrc -output out.xf	-
+listhigh	-afid twoA.xyz -bfid twoB.xyz -alist 1-5,31 -blist 1-6 -atom tiny1.mrc -btom tiny1.mrc -output out.xf	-
+#full	listhighb	-afid twoA.xyz -bfid twoB.xyz -alist 1-6 -blist 1-5,40 -atom tiny1.mrc -btom tiny1.mrc -output out.xf	-
+listtwice	-afid twoA.xyz -bfid twoB.xyz -alist 1-5,5 -blist 1-6 -atom tiny1.mrc -btom tiny1.mrc -output out.xf	-
+#full	listtwiceb	-afid twoA.xyz -bfid twoB.xyz -alist 1-6 -blist 1-5,5 -atom tiny1.mrc -btom tiny1.mrc -output out.xf	-
+listtoomany	-afid twoA.xyz -bfid twoB.xyz -alist 1-30,1 -blist 1-31 -atom tiny1.mrc -btom tiny1.mrc -output out.xf	-
+maxresid	-afid twoA.xyz -bfid twoB.xyz -alist 1-30 -blist 6,23,10,24,29,13,3,7,21,20,8,12,11,16,14,19,22,5,1,26,15,30,28,25,2,9,17,4,18,27 -atom tiny1.mrc -btom tiny1.mrc -maxresid 0.6 -output out.xf	-
+#full	maxresid_lo	-afid twoA.xyz -bfid twoB.xyz -alist 1-30 -blist 6,23,10,24,29,13,3,7,21,20,8,12,11,16,14,19,22,5,1,26,15,30,28,25,2,9,17,4,18,27 -atom tiny1.mrc -btom tiny1.mrc -maxresid 0.3 -output out.xf	-
+#full	maxresid_hi	-afid twoA.xyz -bfid twoB.xyz -alist 1-30 -blist 6,23,10,24,29,13,3,7,21,20,8,12,11,16,14,19,22,5,1,26,15,30,28,25,2,9,17,4,18,27 -atom tiny1.mrc -btom tiny1.mrc -maxresid 0.1 -output out.xf	-
+local8	-afid twoA.xyz -bfid twoB.xyz -alist 1-30 -blist 6,23,10,24,29,13,3,7,21,20,8,12,11,16,14,19,22,5,1,26,15,30,28,25,2,9,17,4,18,27 -atom tiny1.mrc -btom tiny1.mrc -maxresid 0.6 -local 8 -output out.xf	-
+local8c1	-afid twoA.xyz -bfid twoB.xyz -alist 1-30 -blist 6,23,10,24,29,13,3,7,21,20,8,12,11,16,14,19,22,5,1,26,15,30,28,25,2,9,17,4,18,27 -atom tiny1.mrc -btom tiny1.mrc -maxresid 0.6 -local 8 -center 0.01 -output out.xf	-
+#full	local8c0	-afid twoA.xyz -bfid twoB.xyz -alist 1-30 -blist 6,23,10,24,29,13,3,7,21,20,8,12,11,16,14,19,22,5,1,26,15,30,28,25,2,9,17,4,18,27 -atom tiny1.mrc -btom tiny1.mrc -maxresid 0.6 -local 8 -center 0 -output out.xf	-
+#full	local5	-afid twoA.xyz -bfid twoB.xyz -alist 1-30 -blist 6,23,10,24,29,13,3,7,21,20,8,12,11,16,14,19,22,5,1,26,15,30,28,25,2,9,17,4,18,27 -atom tiny1.mrc -btom tiny1.mrc -maxresid 0.6 -local 5 -output out.xf	-
+#full	local40	-afid twoA.xyz -bfid twoB.xyz -alist 1-30 -blist 6,23,10,24,29,13,3,7,21,20,8,12,11,16,14,19,22,5,1,26,15,30,28,25,2,9,17,4,18,27 -atom tiny1.mrc -btom tiny1.mrc -maxresid 0.6 -local 40 -output out.xf	-
+#full	local8lo	-afid twoA.xyz -bfid twoB.xyz -alist 1-30 -blist 6,23,10,24,29,13,3,7,21,20,8,12,11,16,14,19,22,5,1,26,15,30,28,25,2,9,17,4,18,27 -atom tiny1.mrc -btom tiny1.mrc -maxresid 0.2 -local 8 -output out.xf	-
+xtilts	-afid twoA.xyz -bfid twoB.xyz -alist 1-30 -blist 6,23,10,24,29,13,3,7,21,20,8,12,11,16,14,19,22,5,1,26,15,30,28,25,2,9,17,4,18,27 -atom tiny1.mrc -btom tiny1.mrc -xtilts 2.5,-1.5 -output out.xf	-
+#full	angles	-afid twoA.xyz -bfid twoB.xyz -alist 1-30 -blist 6,23,10,24,29,13,3,7,21,20,8,12,11,16,14,19,22,5,1,26,15,30,28,25,2,9,17,4,18,27 -atom tiny1.mrc -btom tiny1.mrc -angles 1.5,-2 -output out.xf	-
+#full	zshifts	-afid twoA.xyz -bfid twoB.xyz -alist 1-30 -blist 6,23,10,24,29,13,3,7,21,20,8,12,11,16,14,19,22,5,1,26,15,30,28,25,2,9,17,4,18,27 -atom tiny1.mrc -btom tiny1.mrc -zshifts 3,-4 -output out.xf	-
+#full	allrot	-afid twoA.xyz -bfid twoB.xyz -alist 1-30 -blist 6,23,10,24,29,13,3,7,21,20,8,12,11,16,14,19,22,5,1,26,15,30,28,25,2,9,17,4,18,27 -atom tiny1.mrc -btom tiny1.mrc -xtilts 1,1 -angles 1,-1 -zshifts 2,2 -output out.xf	-
+aniso01	-afid twoA.xyz -bfid twoB.xyz -alist 1-30 -blist 6,23,10,24,29,13,3,7,21,20,8,12,11,16,14,19,22,5,1,26,15,30,28,25,2,9,17,4,18,27 -atom tiny1.mrc -btom tiny1.mrc -aniso 0.1 -output out.xf	-
+#full	aniso03	-afid twoA.xyz -bfid twoB.xyz -alist 1-30 -blist 6,23,10,24,29,13,3,7,21,20,8,12,11,16,14,19,22,5,1,26,15,30,28,25,2,9,17,4,18,27 -atom tiny1.mrc -btom tiny1.mrc -aniso 0.3 -output out.xf	-
+#full	aniso0	-afid twoA.xyz -bfid twoB.xyz -alist 1-30 -blist 6,23,10,24,29,13,3,7,21,20,8,12,11,16,14,19,22,5,1,26,15,30,28,25,2,9,17,4,18,27 -atom tiny1.mrc -btom tiny1.mrc -aniso 0 -output out.xf	-
+anisoY	-afid twoA.xyz -bfid twoB.xyz -alist 1-30 -blist 6,23,10,24,29,13,3,7,21,20,8,12,11,16,14,19,22,5,1,26,15,30,28,25,2,9,17,4,18,27 -atom tiny1.mrc -btom tiny1.mrc -aniso 0.1 -angles 0.5,0 -output out.xf	-
+atob	-afid twoA.xyz -bfid twoB.xyz -alist 1-30 -blist 6,23,10,24,29,13,3,7,21,20,8,12,11,16,14,19,22,5,1,26,15,30,28,25,2,9,17,4,18,27 -atom tiny1.mrc -btom tiny1.mrc -atob -output out.xf	-
+one_s1	-afid oneA.xyz -bfid oneB.xyz -alist 1-24 -blist 1,6,14,18,15,24,5,3,4,21,22,10,2,13,8,20,16,23,19,17,11,7,12,9 -atom tiny1.mrc -btom tiny1.mrc -surfaces 1 -output out.xf	-
+#full	one_s1_inv0	-afid oneA.xyz -bfid oneB.xyz -alist 1-24 -blist 1,6,14,18,15,24,5,3,4,21,22,10,2,13,8,20,16,23,19,17,11,7,12,9 -atom tiny1.mrc -btom tiny1.mrc -surfaces 1 -inverted 0 -output out.xf	-
+one_s1_inv1	-afid oneA.xyz -bfid oneB.xyz -alist 1-24 -blist 1,6,14,18,15,24,5,3,4,21,22,10,2,13,8,20,16,23,19,17,11,7,12,9 -atom tiny1.mrc -btom tiny1.mrc -surfaces 1 -inverted 1 -output out.xf	-
+one_sm1	-afid oneA.xyz -bfid oneB.xyz -alist 1-24 -blist 1,6,14,18,15,24,5,3,4,21,22,10,2,13,8,20,16,23,19,17,11,7,12,9 -atom tiny1.mrc -btom tiny1.mrc -surfaces -1 -output out.xf	-
+one_s2	-afid oneA.xyz -bfid oneB.xyz -alist 1-24 -blist 1,6,14,18,15,24,5,3,4,21,22,10,2,13,8,20,16,23,19,17,11,7,12,9 -atom tiny1.mrc -btom tiny1.mrc -surfaces 2 -output out.xf	-
+inv_s1	-afid invA.xyz -bfid invB.xyz -alist 1-24 -blist 1,10,13,7,12,11,9,14,16,2,17,15,5,3,8,23,20,18,21,4,19,22,6,24 -atom tiny1.mrc -btom tiny1.mrc -surfaces 1 -output out.xf	-
+#full	inv_s1_inv1	-afid invA.xyz -bfid invB.xyz -alist 1-24 -blist 1,10,13,7,12,11,9,14,16,2,17,15,5,3,8,23,20,18,21,4,19,22,6,24 -atom tiny1.mrc -btom tiny1.mrc -surfaces 1 -inverted 1 -output out.xf	-
+#full	inv_s1_partial	-afid invA.xyz -bfid invB.xyz -alist 1-5 -blist 1,10,13,7,12 -atom tiny1.mrc -btom tiny1.mrc -surfaces 1 -output out.xf	-
+#full	one_s1_partial	-afid oneA.xyz -bfid oneB.xyz -alist 1-6 -blist 1,6,14,18,15,24 -atom tiny1.mrc -btom tiny1.mrc -surfaces 1 -output out.xf	-
+outlier	-afid outA.xyz -bfid outB.xyz -alist 1-40 -blist 24,27,10,28,33,35,18,21,37,12,13,9,25,5,38,34,40,29,3,1,30,4,20,6,11,8,31,15,7,32,17,26,23,39,36,2,14,22,16,19 -atom tiny1.mrc -btom tiny1.mrc -output out.xf	-
+#full	outlier_s1	-afid outA.xyz -bfid outB.xyz -alist 1-40 -blist 24,27,10,28,33,35,18,21,37,12,13,9,25,5,38,34,40,29,3,1,30,4,20,6,11,8,31,15,7,32,17,26,23,39,36,2,14,22,16,19 -atom tiny1.mrc -btom tiny1.mrc -surfaces 1 -output out.xf	-
+scl_tom	-afid sclA.xyz -bfid sclB.xyz -alist 1-30 -blist 5,10,3,26,9,29,1,2,20,30,7,6,24,8,25,17,12,27,23,14,22,11,18,15,21,19,28,4,13,16 -atom tiny1.mrc -btom tiny1.mrc -output out.xf	-
+scl_scales	-afid sclA.xyz -bfid sclB.xyz -alist 1-30 -blist 5,10,3,26,9,29,1,2,20,30,7,6,24,8,25,17,12,27,23,14,22,11,18,15,21,19,28,4,13,16 -atom 400,100,400 -btom 400,100,400 -scales 0.5,0.5 -output out.xf	-
+#full	scl_tom2	-afid sclA.xyz -bfid sclB.xyz -alist 1-30 -blist 5,10,3,26,9,29,1,2,20,30,7,6,24,8,25,17,12,27,23,14,22,11,18,15,21,19,28,4,13,16 -atom tiny2.mrc -btom tiny2.mrc -output out.xf	-
+two_tomhalf	-afid twoA.xyz -bfid twoB.xyz -alist 1-30 -blist 6,23,10,24,29,13,3,7,21,20,8,12,11,16,14,19,22,5,1,26,15,30,28,25,2,9,17,4,18,27 -atom tiny2.mrc -btom tiny1.mrc -output out.xf	-
+nocol	-afid nocolA.xyz -bfid nocolB.xyz -atom tiny1.mrc -btom tiny1.mrc -output out.xf	-
+#full	nocol_list	-afid nocolA.xyz -bfid nocolB.xyz -alist 3-20 -blist 3-20 -atom tiny1.mrc -btom tiny1.mrc -output out.xf	-
+rel	-afid relA.xyz -bfid relB.xyz -alist 1-30 -blist 6,23,10,24,29,13,3,7,21,20,8,12,11,16,14,19,22,5,1,26,15,30,28,25,2,9,17,4,18,27 -atom tiny1.mrc -btom tiny1.mrc -output out.xf	-
+old_pix	-afid oldA.xyz -bfid oldB.xyz -alist 1-30 -blist 6,23,10,24,29,13,3,7,21,20,8,12,11,16,14,19,22,5,1,26,15,30,28,25,2,9,17,4,18,27 -atom tiny1.mrc -btom tiny1.mrc -output out.xf	-
+#full	rel_s0	-afid relA.xyz -bfid relB.xyz -alist 1-30 -blist 6,23,10,24,29,13,3,7,21,20,8,12,11,16,14,19,22,5,1,26,15,30,28,25,2,9,17,4,18,27 -surfaces 0 -amatch twoAmatch.mod -bmatch twoBmatch.mod -atom tiny1.mrc -btom tiny1.mrc -output out.xf	-
+match_fids	-afid twoA.xyz -bfid twoB.xyz -alist 1-30 -blist 6,23,10,24,29,13,3,7,21,20,8,12,11,16,14,19,22,5,1,26,15,30,28,25,2,9,17,4,18,27 -surfaces 0 -amatch twoAmatch.mod -bmatch twoBmatch.mod -atom tiny1.mrc -btom tiny1.mrc -output out.xf	-
+#full	match_fids_sz	-afid twoA.xyz -bfid twoB.xyz -alist 1-30 -blist 6,23,10,24,29,13,3,7,21,20,8,12,11,16,14,19,22,5,1,26,15,30,28,25,2,9,17,4,18,27 -surfaces 0 -amatch twoAmatch.mod -bmatch twoBmatch.mod -atom 400,100,400 -btom 400,100,400 -output out.xf	-
+match_fids_lo	-afid twoA.xyz -bfid twoB.xyz -alist 1-30 -blist 6,23,10,24,29,13,3,7,21,20,8,12,11,16,14,19,22,5,1,26,15,30,28,25,2,9,17,4,18,27 -surfaces 0 -amatch twoAmatch.mod -bmatch twoBmatch.mod -atom tiny1.mrc -btom tiny1.mrc -maxresid 0.5 -output out.xf	-
+match_only	-surfaces 0 -amatch twoAmatch.mod -bmatch twoBmatch.mod -atom tiny1.mrc -btom tiny1.mrc -output out.xf	-
+match_m2	-afid twoA.xyz -bfid twoB.xyz -surfaces -2 -amatch twoAmatch.mod -bmatch twoBmatch.mod -atom tiny1.mrc -btom tiny1.mrc -output out.xf	-
+#full	match_m2_lo	-afid twoA.xyz -bfid twoB.xyz -surfaces -2 -amatch twoAmatch.mod -bmatch twoBmatch.mod -atom tiny1.mrc -btom tiny1.mrc -maxresid 0.2 -local 6 -output out.xf	-
+match_mismatch	-surfaces 0 -amatch twoAmatch.mod -bmatch oneBmatch.mod -atom tiny1.mrc -btom tiny1.mrc -output out.xf	-
+match_nob	-surfaces 0 -amatch twoAmatch.mod -atom tiny1.mrc -btom tiny1.mrc -output out.xf	-
+match_notom	-surfaces 0 -amatch twoAmatch.mod -bmatch twoBmatch.mod -output out.xf	-
+match_badmod	-surfaces 0 -amatch nothere.mod -bmatch twoBmatch.mod -atom tiny1.mrc -btom tiny1.mrc -output out.xf	-
+#full	match_nomatchopt	-afid twoA.xyz -bfid twoB.xyz -alist 1-30 -blist 6,23,10,24,29,13,3,7,21,20,8,12,11,16,14,19,22,5,1,26,15,30,28,25,2,9,17,4,18,27 -surfaces 0 -atom tiny1.mrc -btom tiny1.mrc -output out.xf	-
+transfer	-afid twoA.xyz -bfid twoB.xyz -transfer two.transfer -amodel twoAfid.mod -bmodel twoBfid.mod -atom tiny1.mrc -btom tiny1.mrc -output out.xf	-
+transfer_use	-afid twoA.xyz -bfid twoB.xyz -transfer two.transfer -amodel twoAfid.mod -bmodel twoBfid.mod -use 1-12 -atom tiny1.mrc -btom tiny1.mrc -output out.xf	-
+#full	transfer_use4	-afid twoA.xyz -bfid twoB.xyz -transfer two.transfer -amodel twoAfid.mod -bmodel twoBfid.mod -use 2,5,9,14 -atom tiny1.mrc -btom tiny1.mrc -output out.xf	-
+transfer_atob	-afid twoA.xyz -bfid twoB.xyz -transfer two.transfer -amodel twoAfid.mod -bmodel twoBfid.mod -atob -atom tiny1.mrc -btom tiny1.mrc -output out.xf	-
+#full	transfer_lo	-afid twoA.xyz -bfid twoB.xyz -transfer two.transfer -amodel twoAfid.mod -bmodel twoBfid.mod -atom tiny1.mrc -btom tiny1.mrc -maxresid 0.5 -output out.xf	-
+transfer_nomodel	-afid twoA.xyz -bfid twoB.xyz -transfer two.transfer -amodel twoAfid.mod -atom tiny1.mrc -btom tiny1.mrc -output out.xf	-
+#full	transfer_none	-afid twoA.xyz -bfid twoB.xyz -transfer two.transfer -amodel oneAfid.mod -bmodel oneBfid.mod -atom tiny1.mrc -btom tiny1.mrc -output out.xf	-
+transfer_badz	-afid twoA.xyz -bfid twoB.xyz -transfer tr_badz.transfer -amodel twoAfid.mod -bmodel twoBfid.mod -atom tiny1.mrc -btom tiny1.mrc -output out.xf	-
+transfer_btoa	-afid twoA.xyz -bfid twoB.xyz -transfer tr_btoa.transfer -amodel twoAfid.mod -bmodel twoBfid.mod -atom tiny1.mrc -btom tiny1.mrc -output out.xf	-
+#full	transfer_btoa_atob	-afid twoA.xyz -bfid twoB.xyz -transfer tr_btoa.transfer -amodel twoAfid.mod -bmodel twoBfid.mod -atob -atom tiny1.mrc -btom tiny1.mrc -output out.xf	-
+transfer_pix	-afid twoA.xyz -bfid twoB.xyz -transfer tr_pix.transfer -amodel twoAfid.mod -bmodel twoBfid.mod -atom tiny1.mrc -btom tiny1.mrc -output out.xf	-
+transfer_empty	-afid twoA.xyz -bfid twoB.xyz -transfer empty.xyz -amodel twoAfid.mod -bmodel twoBfid.mod -atom tiny1.mrc -btom tiny1.mrc -output out.xf	-
+transfer_badmod	-afid twoA.xyz -bfid twoB.xyz -transfer two.transfer -amodel nothere.mod -bmodel twoBfid.mod -atom tiny1.mrc -btom tiny1.mrc -output out.xf	-
+err_nobfid	-afid twoA.xyz -atom tiny1.mrc -btom tiny1.mrc -output out.xf	-
+err_nofile	-afid nothere.xyz -bfid twoB.xyz -atom tiny1.mrc -btom tiny1.mrc -output out.xf	-
+err_nooutput	-afid twoA.xyz -bfid twoB.xyz -alist 1-30 -blist 6,23,10,24,29,13,3,7,21,20,8,12,11,16,14,19,22,5,1,26,15,30,28,25,2,9,17,4,18,27 -atom tiny1.mrc -btom tiny1.mrc	-
+err_empty	-afid empty.xyz -bfid twoB.xyz -atom tiny1.mrc -btom tiny1.mrc -output out.xf	-
+err_bad	-afid badA.xyz -bfid twoB.xyz -atom tiny1.mrc -btom tiny1.mrc -output out.xf	-
+err_baddim	-afid baddimA.xyz -bfid twoB.xyz -alist 1-30 -blist 6,23,10,24,29,13,3,7,21,20,8,12,11,16,14,19,22,5,1,26,15,30,28,25,2,9,17,4,18,27 -atom tiny1.mrc -btom tiny1.mrc -output out.xf	-
+err_few	-afid fewA.xyz -bfid fewB.xyz -atom tiny1.mrc -btom tiny1.mrc -output out.xf	-
+#full	err_blank	-afid blankline.xyz -bfid twoB.xyz -atom tiny1.mrc -btom tiny1.mrc -output out.xf	-
+err_zeroid	-afid zeroidA.xyz -bfid twoB.xyz -alist 1,3-30 -blist 6,10,24,29,13,3,7,21,20,8,12,11,16,14,19,22,5,1,26,15,30,28,25,2,9,17,4,18,27 -atom tiny1.mrc -btom tiny1.mrc -output out.xf	-
+err_badtom	-afid twoA.xyz -bfid twoB.xyz -alist 1-30 -blist 6,23,10,24,29,13,3,7,21,20,8,12,11,16,14,19,22,5,1,26,15,30,28,25,2,9,17,4,18,27 -atom nothere.mrc -btom tiny1.mrc -output out.xf	-
+#full	err_badsize	-afid twoA.xyz -bfid twoB.xyz -alist 1-30 -blist 6,23,10,24,29,13,3,7,21,20,8,12,11,16,14,19,22,5,1,26,15,30,28,25,2,9,17,4,18,27 -atom 400,100 -btom 400,100,400 -output out.xf	-
+err_badlist	-afid twoA.xyz -bfid twoB.xyz -alist 1-x -blist 6,23,10,24,29,13,3,7,21,20,8,12,11,16,14,19,22,5,1,26,15,30,28,25,2,9,17,4,18,27 -atom tiny1.mrc -btom tiny1.mrc -output out.xf	-
+param	-param params.txt	-
+help	-help	-
+noargs_eof	-	-
+interactive_fid	-	twoA.xyz\ntwoB.xyz\n1-30\n6,23,10,24,29,13,3,7,21,20,8,12,11,16,14,19,22,5,1,26,15,30,28,25,2,9,17,4,18,27\n0,0\n8\n2\nout.xf\n
+#full	interactive_fid_slash	-	nocolA.xyz\nnocolB.xyz\n/\n/\n0,0\n8\n2\nout.xf\n
+#full	interactive_fid_s1	-	oneA.xyz\noneB.xyz\n1-24\n1,6,14,18,15,24,5,3,4,21,22,10,2,13,8,20,16,23,19,17,11,7,12,9\n0 0\n8\n-1\n\n
+interactive_fid_s0	-	twoA.xyz\ntwoB.xyz\n1-30\n6,23,10,24,29,13,3,7,21,20,8,12,11,16,14,19,22,5,1,26,15,30,28,25,2,9,17,4,18,27\n0,0\n8\n0\n400,100,400\ntwoAmatch.mod\ntiny1.mrc\ntwoBmatch.mod\nout.xf\n
+interactive_models	-	\n8\n400 100 400\ntwoAmatch.mod\n400 100 400\ntwoBmatch.mod\nout.xf\n
+interactive_eof	-	twoA.xyz\ntwoB.xyz\n1-30\n
+#full	interactive_badnum	-	twoA.xyz\ntwoB.xyz\n1-30\n6,23,10,24,29,13,3,7,21,20,8,12,11,16,14,19,22,5,1,26,15,30,28,25,2,9,17,4,18,27\nx y
+match_noisy	-afid twoA.xyz -bfid twoB.xyz -alist 1-30 -blist 6,23,10,24,29,13,3,7,21,20,8,12,11,16,14,19,22,5,1,26,15,30,28,25,2,9,17,4,18,27 -surfaces 0 -amatch twoAmatch.mod -bmatch twoBmatchnoisy.mod -atom tiny1.mrc -btom tiny1.mrc -output out.xf	-
+#full	match_noisy_lo	-afid twoA.xyz -bfid twoB.xyz -alist 1-30 -blist 6,23,10,24,29,13,3,7,21,20,8,12,11,16,14,19,22,5,1,26,15,30,28,25,2,9,17,4,18,27 -surfaces 0 -amatch twoAmatch.mod -bmatch twoBmatchnoisy.mod -atom tiny1.mrc -btom tiny1.mrc -maxresid 4 -output out.xf	-
+match_bad	-afid twoA.xyz -bfid twoB.xyz -alist 1-30 -blist 6,23,10,24,29,13,3,7,21,20,8,12,11,16,14,19,22,5,1,26,15,30,28,25,2,9,17,4,18,27 -surfaces 0 -amatch twoAmatch.mod -bmatch twoBmatchbad.mod -atom tiny1.mrc -btom tiny1.mrc -output out.xf	-
+warp_good	-afid warpA.xyz -bfid warpB.xyz -alist 1-150 -blist 105,24,31,14,150,34,114,49,44,15,57,82,63,84,17,56,40,47,140,131,70,79,55,32,142,38,6,25,1,138,66,7,72,61,21,83,99,134,92,53,145,46,120,33,3,27,74,65,146,89,88,60,8,64,36,42,5,149,132,136,67,90,39,45,95,20,28,139,107,51,130,54,13,101,144,76,52,75,113,43,19,87,18,137,80,23,81,147,4,30,110,16,109,115,93,48,119,2,35,125,22,124,86,91,10,97,121,94,117,59,58,96,133,37,41,29,100,77,108,104,50,11,68,127,148,116,98,12,9,26,118,128,111,112,62,71,85,123,103,126,106,69,141,73,122,78,135,143,102,129 -atom tiny1.mrc -btom tiny1.mrc -maxresid 1.5 -local 10 -center 1 -output out.xf	-
+#full	warp_good20	-afid warpA.xyz -bfid warpB.xyz -alist 1-150 -blist 105,24,31,14,150,34,114,49,44,15,57,82,63,84,17,56,40,47,140,131,70,79,55,32,142,38,6,25,1,138,66,7,72,61,21,83,99,134,92,53,145,46,120,33,3,27,74,65,146,89,88,60,8,64,36,42,5,149,132,136,67,90,39,45,95,20,28,139,107,51,130,54,13,101,144,76,52,75,113,43,19,87,18,137,80,23,81,147,4,30,110,16,109,115,93,48,119,2,35,125,22,124,86,91,10,97,121,94,117,59,58,96,133,37,41,29,100,77,108,104,50,11,68,127,148,116,98,12,9,26,118,128,111,112,62,71,85,123,103,126,106,69,141,73,122,78,135,143,102,129 -atom tiny1.mrc -btom tiny1.mrc -maxresid 2 -local 20 -output out.xf	-
+warp_shiftok	-afid warpA.xyz -bfid warpB.xyz -alist 1-150 -blist 105,24,31,14,150,34,114,49,44,15,57,82,63,84,17,56,40,47,140,131,70,79,55,32,142,38,6,25,1,138,66,7,72,61,21,83,99,134,92,53,145,46,120,33,3,27,74,65,146,89,88,60,8,64,36,42,5,149,132,136,67,90,39,45,95,20,28,139,107,51,130,54,13,101,144,76,52,75,113,43,19,87,18,137,80,23,81,147,4,30,110,16,109,115,93,48,119,2,35,125,22,124,86,91,10,97,121,94,117,59,58,96,133,37,41,29,100,77,108,104,50,11,68,127,148,116,98,12,9,26,118,128,111,112,62,71,85,123,103,126,106,69,141,73,122,78,135,143,102,129 -atom tiny1.mrc -btom tiny3.mrc -maxresid 1.5 -local 10 -center 0.05 -output out.xf	-
+warp_shiftbad	-afid warpA.xyz -bfid warpB.xyz -alist 1-150 -blist 105,24,31,14,150,34,114,49,44,15,57,82,63,84,17,56,40,47,140,131,70,79,55,32,142,38,6,25,1,138,66,7,72,61,21,83,99,134,92,53,145,46,120,33,3,27,74,65,146,89,88,60,8,64,36,42,5,149,132,136,67,90,39,45,95,20,28,139,107,51,130,54,13,101,144,76,52,75,113,43,19,87,18,137,80,23,81,147,4,30,110,16,109,115,93,48,119,2,35,125,22,124,86,91,10,97,121,94,117,59,58,96,133,37,41,29,100,77,108,104,50,11,68,127,148,116,98,12,9,26,118,128,111,112,62,71,85,123,103,126,106,69,141,73,122,78,135,143,102,129 -atom tiny3.mrc -btom tiny1.mrc -maxresid 0.6 -local 10 -center 0.05 -output out.xf	-
+#full	warp_nolocal	-afid warpA.xyz -bfid warpB.xyz -alist 1-150 -blist 105,24,31,14,150,34,114,49,44,15,57,82,63,84,17,56,40,47,140,131,70,79,55,32,142,38,6,25,1,138,66,7,72,61,21,83,99,134,92,53,145,46,120,33,3,27,74,65,146,89,88,60,8,64,36,42,5,149,132,136,67,90,39,45,95,20,28,139,107,51,130,54,13,101,144,76,52,75,113,43,19,87,18,137,80,23,81,147,4,30,110,16,109,115,93,48,119,2,35,125,22,124,86,91,10,97,121,94,117,59,58,96,133,37,41,29,100,77,108,104,50,11,68,127,148,116,98,12,9,26,118,128,111,112,62,71,85,123,103,126,106,69,141,73,122,78,135,143,102,129 -atom tiny1.mrc -btom tiny1.mrc -maxresid 1.5 -output out.xf	-
+warp_transfer	-afid warpA.xyz -bfid warpB.xyz -transfer warp.transfer -amodel warpAfid.mod -bmodel warpBfid.mod -atom tiny1.mrc -btom tiny1.mrc -maxresid 0.9 -output out.xf	-
+#full	warp_transfer15	-afid warpA.xyz -bfid warpB.xyz -transfer warp.transfer -amodel warpAfid.mod -bmodel warpBfid.mod -atom tiny1.mrc -btom tiny1.mrc -maxresid 1.5 -output out.xf	-
+warp_transfer_local	-afid warpA.xyz -bfid warpB.xyz -transfer warp.transfer -amodel warpAfid.mod -bmodel warpBfid.mod -atom tiny1.mrc -btom tiny1.mrc -maxresid 0.9 -local 12 -output out.xf	-
+#full	warp_s1	-afid warpA.xyz -bfid warpB.xyz -alist 1-150 -blist 105,24,31,14,150,34,114,49,44,15,57,82,63,84,17,56,40,47,140,131,70,79,55,32,142,38,6,25,1,138,66,7,72,61,21,83,99,134,92,53,145,46,120,33,3,27,74,65,146,89,88,60,8,64,36,42,5,149,132,136,67,90,39,45,95,20,28,139,107,51,130,54,13,101,144,76,52,75,113,43,19,87,18,137,80,23,81,147,4,30,110,16,109,115,93,48,119,2,35,125,22,124,86,91,10,97,121,94,117,59,58,96,133,37,41,29,100,77,108,104,50,11,68,127,148,116,98,12,9,26,118,128,111,112,62,71,85,123,103,126,106,69,141,73,122,78,135,143,102,129 -atom tiny1.mrc -btom tiny1.mrc -surfaces 1 -maxresid 1.5 -local 10 -output out.xf	-
+hiid	-afid hiidA.xyz -bfid hiidB.xyz -atom tiny1.mrc -btom tiny1.mrc -output out.xf	-
+#full	nocol_atob	-afid nocolA.xyz -bfid nocolB.xyz -atob -atom tiny1.mrc -btom tiny1.mrc -output out.xf	-
+wrong3	-afid outA.xyz -bfid outB.xyz -alist 1-35 -blist 24,27,10,2,33,35,18,21,14,12,13,9,25,22,38,34,40,29,3,1,30,4,20,6,11,8,31,15,7,32,17,26,23,39,36 -atom tiny1.mrc -btom tiny1.mrc -maxresid 6 -output out.xf	-
+#full	wrong5	-afid outA.xyz -bfid outB.xyz -alist 1-35 -blist 24,27,10,2,33,35,18,21,37,14,13,9,25,5,38,22,40,29,3,1,30,16,20,6,11,8,31,19,7,32,17,26,23,39,36 -atom tiny1.mrc -btom tiny1.mrc -output out.xf	-

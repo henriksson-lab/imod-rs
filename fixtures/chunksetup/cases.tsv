@@ -1,0 +1,16 @@
+# name	inputs (src:dst from inputs/)	env	arguments
+basic	vol.mrc:vol.mrc filt.com:filt.com	-	filt.com vol.mrc out.mrc
+options	vol.mrc:vol.mrc filt.com:filt.com	-	-p 4 -o 6 -m 1 -xm 3 -ym 2 -no filt.com vol.mrc out.mrc
+command	vol.mrc:vol.mrc	-	-command clip -m 1 vol.mrc out.mrc
+suffix	vol.mrc:vol.st filt.com:filt.pcm	-	-suffix med -master filt.pcm -input vol.st
+format_tif	vol.mrc:vol.mrc filt.com:filt.com	-	-format TIFF -suffix x filt.com vol.mrc
+env_format	vol.mrc:vol.mrc filt.com:filt.com	IMOD_OUTPUT_FORMAT=hdf	filt.com vol.mrc o.hdf
+subdir	vol.mrc:sub/vol.mrc filt.com:sub/filt	-	-m 1 sub/filt vol.mrc out.mrc
+err_format	vol.mrc:vol.mrc filt.com:filt.com	-	-format jpg filt.com vol.mrc o.hdf
+err_both_command	vol.mrc:vol.mrc filt.com:filt.com	-	-master filt.com -command x vol.mrc o.mrc
+err_both_output	vol.mrc:vol.mrc filt.com:filt.com	-	-output o.mrc -suffix x filt.com vol.mrc
+err_arguments	vol.mrc:vol.mrc filt.com:filt.com	-	filt.com vol.mrc o.mrc extra
+err_no_com	vol.mrc:vol.mrc	-	nofile.com vol.mrc o.mrc
+err_no_image	filt.com:filt.com	-	filt.com novol.mrc o.mrc
+err_no_keys	vol.mrc:vol.mrc nokeys.com:filt.com	-	filt.com vol.mrc o.mrc
+usage	-	-	-

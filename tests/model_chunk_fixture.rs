@@ -220,7 +220,7 @@ fn imodinfo_ascii_and_verbose_match_the_reference_output() {
             .expect("imodinfo executable must start");
         assert!(out.status.success());
         let got = String::from_utf8_lossy(&out.stdout).to_string();
-        let want = std::fs::read_to_string(&golden).unwrap();
+        let want = common::golden::read_to_string(&golden);
         assert_eq!(got, want, "imodinfo {args:?} must match the reference text");
     }
 }
@@ -265,7 +265,7 @@ fn reads_the_ascii_form_the_reference_writes() {
     assert!(out.status.success());
     let got = String::from_utf8_lossy(&out.stdout).to_string();
     let want =
-        std::fs::read_to_string(root.join("fixtures/model-view-clip-label.ascii.c.txt")).unwrap();
+        common::golden::read_to_string(&root.join("fixtures/model-view-clip-label.ascii.c.txt"));
     assert_eq!(got, want);
 }
 
@@ -336,7 +336,7 @@ fn imodinfo_closed_contour_modes_match_the_reference_output() {
             .expect("imodinfo executable must start");
         assert!(out.status.success());
         let got = String::from_utf8_lossy(&out.stdout).to_string();
-        let want = std::fs::read_to_string(root.join(golden)).unwrap();
+        let want = common::golden::read_to_string(&root.join(golden));
         assert_eq!(got, want, "imodinfo {args:?} must match the reference text");
     }
 }

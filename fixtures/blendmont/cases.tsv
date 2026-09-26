@@ -15,7 +15,7 @@ frames	-imin bm.st -plin bm.pl -imout o.st -rootname e -maxsize 100,100 -plout f
 sections	-imin bm.st -plin bm.pl -imout o.st -rootname e -sections 1 -fill 400
 aligned	-imin bm.st -plin bm.pl -imout o.st -rootname e -sloppy -aligned al.txt
 test	-imin bm.st -plin bm.pl -imout o.st -rootname e -sloppy -test
-func1	-imin bm.st -plin bm.pl -rootname e -functions 1 -sloppy
+#full	func1	-imin bm.st -plin bm.pl -rootname e -functions 1 -sloppy
 func3	-imin bm.st -plin bm.pl -rootname e -functions 3 -sloppy -boxsize 8,12 -grid 5,6 -indents 2,4
 int1	-imin bm.st -plin bm.pl -imout o.st -rootname e -intensity 1
 int2	-imin bm.st -plin bm.pl -imout o.st -rootname e -intensity 2 -sloppy

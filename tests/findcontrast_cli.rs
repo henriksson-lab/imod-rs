@@ -5,7 +5,11 @@
 //! stdout captured through a pipe.  The exit status is `golden/<case>.rc`,
 //! stdout is `golden/<case>.out`, and every file native created or changed
 //! is in `golden/<case>/`.  A third column in the table is fed on stdin.
-//! The inputs are seeded synthetic volumes written by the native `raw2mrc`.
+//! The inputs are seeded synthetic volumes written by the native `raw2mrc`:
+//! `f.mrc`, `s.mrc` and `b.mrc` from `fixtures/densmatch`, which uses the same
+//! three (they are not stored twice).
+//!
+//! Pruned 2026-09-26: 15 of 19 rows kept (dropped: second -slices and -xminmax/-yminmax errors (identical output), -truncate 0,0, and a second interactive run); the rest stay in cases.tsv as `#full` rows (FULL=1 / IMOD_RS_FULL_CASES=1, fixtures/README.md).
 
 mod common;
 
@@ -16,6 +20,13 @@ use std::process::Stdio;
 fn fixture_dir() -> PathBuf {
     Path::new(env!("CARGO_MANIFEST_DIR")).join("fixtures/findcontrast")
 }
+
+/// Where the input volumes live: `fixtures/densmatch`'s `f.mrc`, `s.mrc`, `b.mrc`.
+fn input_dir() -> PathBuf {
+    Path::new(env!("CARGO_MANIFEST_DIR")).join("fixtures/densmatch")
+}
+
+const INPUTS: [&str; 3] = ["f.mrc", "s.mrc", "b.mrc"];
 
 /// Blank the wall-clock stamps (`common::mask_stamps`).  The regions native
 /// writes from uninitialised memory (`BUGS.md` §2) are reconciled first by
@@ -32,11 +43,8 @@ fn scratch(name: &str) -> PathBuf {
     ));
     let _ = std::fs::remove_dir_all(&dir);
     std::fs::create_dir_all(&dir).unwrap();
-    for entry in std::fs::read_dir(fixture_dir()).unwrap() {
-        let path = entry.unwrap().path();
-        if path.extension().is_some_and(|e| e == "mrc") {
-            std::fs::copy(&path, dir.join(path.file_name().unwrap())).unwrap();
-        }
+    for name in INPUTS {
+        std::fs::copy(input_dir().join(name), dir.join(name)).unwrap();
     }
     dir
 }
@@ -47,10 +55,7 @@ fn every_case_matches_native_golden() {
     let golden = fixture_dir().join("golden");
     let mut failures = Vec::new();
     let mut count = 0;
-    for line in table
-        .lines()
-        .filter(|l| !l.starts_with('#') && !l.is_empty())
-    {
+    for line in common::golden::case_rows(&table) {
         let mut fields = line.split('\t');
         let name = fields.next().unwrap();
         let args = fields.next().unwrap_or(".");
@@ -60,12 +65,11 @@ fn every_case_matches_native_golden() {
         } else {
             args.split_whitespace().collect()
         };
-        let rc: i32 = std::fs::read_to_string(golden.join(format!("{name}.rc")))
-            .unwrap()
+        let rc: i32 = common::golden::read_to_string(&golden.join(format!("{name}.rc")))
             .trim()
             .parse()
             .unwrap();
-        let expected_out = std::fs::read(golden.join(format!("{name}.out"))).unwrap();
+        let expected_out = common::golden::expect(&golden.join(format!("{name}.out")));
         let dir = scratch(name);
         let mut child = common::imod_cmd("findcontrast")
             .current_dir(&dir)
@@ -99,27 +103,20 @@ fn every_case_matches_native_golden() {
                 b.to_vec()
             }
         };
-        let (ours, theirs) = (skip_banner(&output.stdout), skip_banner(&expected_out));
-        if ours != theirs {
+        let ours = skip_banner(&output.stdout);
+        if !expected_out.matches_masked(&output.stdout, skip_banner) {
             failures.push(format!(
                 "{name}: stdout differs\n--- native\n{}\n--- ours\n{}",
-                String::from_utf8_lossy(&theirs),
+                expected_out.display(),
                 String::from_utf8_lossy(&ours)
             ));
         }
-        let mut expected_files: Vec<String> = std::fs::read_dir(golden.join(name))
-            .map(|entries| {
-                entries
-                    .map(|e| e.unwrap().file_name().to_str().unwrap().to_string())
-                    .collect()
-            })
-            .unwrap_or_default();
-        expected_files.sort();
+        let expected_files: Vec<String> = common::golden::list(&golden.join(name));
         let mut produced: Vec<String> = std::fs::read_dir(&dir)
             .unwrap()
             .map(|e| e.unwrap().file_name().to_str().unwrap().to_string())
             .filter(|f| {
-                let fixture = fixture_dir().join(f);
+                let fixture = input_dir().join(f);
                 !(fixture.is_file()
                     && std::fs::read(&fixture).unwrap() == std::fs::read(dir.join(f)).unwrap())
             })
@@ -134,9 +131,9 @@ fn every_case_matches_native_golden() {
             let Ok(ours) = std::fs::read(dir.join(file)) else {
                 continue;
             };
-            let theirs = std::fs::read(golden.join(name).join(file)).unwrap();
-            if mask(&ours) != mask(&common::reconcile_uninitialised(&ours, &theirs)) {
-                failures.push(format!("{name}: {file} differs from native"));
+            let theirs = common::golden::expect(&golden.join(name).join(file));
+            if let Err(why) = theirs.compare(&ours, mask, true) {
+                failures.push(format!("{name}: {file} differs from native: {why}"));
             }
         }
         let _ = std::fs::remove_dir_all(&dir);

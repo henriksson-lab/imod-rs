@@ -1,0 +1,1194 @@
+# imod-rs native golden manifest for fixtures/setupcombine; see fixtures/README.md.
+# Regenerate with fixtures/regen-golden.sh setupcombine; do not edit by hand.
+text 201 golden/auto.files
+combine.com
+dualvolmatch.com
+ga.rec
+ga.st
+ga.tlt
+ga.xf
+gb.rec
+gb.st
+gb.tlt
+gb.xf
+matchorwarp.com
+matchvol1.com
+matchvol2.com
+patchcorr.com
+solvematch.com
+tilta.com
+tiltb.com
+volcombine.com
+warpvol.com
+
+text 198 golden/auto.out
+500 MBytes of disk space will be needed for combining
+ 
+The number of patches for Corrsearch3d is 1 in X, 2 in Y, and 1 in Z
+   (Y and Z are not flipped in entries to corrsearch3d in patchcorr.com)
+
+text 2 golden/auto.rc
+0
+
+text 43 golden/auto.tomopieces
+   1   1   1
+0,63,0,19,0,63
+8,71
+5,24
+8,71
+
+sha256 d62e7e9745a763f302ff29c13ae0b88f0126fadc4472e15fdea9814ca7fb0610 3069 golden/auto/combine.com
+text 227 golden/auto/dualvolmatch.com
+# THIS COMMAND FILE RUNS DUALVOLMATCH
+#
+####CreatedVersion####5.2.17
+#
+$dualvolmatch -StandardInput
+RootName	g
+NamingStyle	0
+MatchAtoB	0
+MaximumResidual	10.
+CenterShiftLimit	10.
+#
+$ echo "STATUS: DUALVOLMATCH RAN SUCCESSFULLY"
+
+text 413 golden/auto/matchorwarp.com
+#$if (! -e ) mkdir 
+#
+# MATCHORWARP RUNS REFINEMATCH AND MATCHVOL, OR FINDWARP AND WARPVOL.
+#
+####CreatedVersion####5.2.17
+#
+$matchorwarp -StandardInput
+InputVolume      gb.rec
+OutputVolume     gb.mat
+SizeXYZorVolume  ga.rec
+RefineLimit      0.3
+WarpLimits       0.2,0.27,0.35
+ExtentToFit	3
+StructureCriteria	0.5,0.57,0.65
+ModelFile	reg.mod
+ResidualFile     patch.resid
+ClipPlaneBoxSize 600
+#TemporaryDirectory  
+
+sha256 ad6fc00858c042a71a380c835d8a0c4dfa30c4f1f61f33cb62c1d90a33a65d9c 544 golden/auto/matchvol1.com
+text 428 golden/auto/matchvol2.com
+#$if (! -e ) mkdir 
+#
+# THIS FILE RUNS A SECOND MATCHVOL
+# IT IS RUN ONLY IF YOU HAVE TO DO FINDWARP BY HAND, GET A GOOD
+# REFINE.XF BY OMITTING ROWS OR COLUMNS, AND HAVE TO RESTART THE PROCESS
+#
+$matchvol -StandardInput
+InputFile       gb.rec
+OutputFile      gb.mat
+#TemporaryDirectory      
+# The default output size is NZ, NY, NX
+OutputSizeXYZ   64 20 64
+TransformFile solve.xf
+TransformFile refine.xf
+InverseFile inverse.xf
+
+sha256 31164dbeeca80dead81ba7586e00e5827493c66c312a190e9097d5fe942412be 780 golden/auto/patchcorr.com
+sha256 fd50ba7c5b005a777ca6da8da875c736a920b4e85a1f189b0b074b31c8093e93 1045 golden/auto/solvematch.com
+sha256 8e1fe57c01d9045f0063010532a2a721ba1afca5b5a859f53de985291779febb 2019 golden/auto/volcombine.com
+text 313 golden/auto/warpvol.com
+#$if (! -e ) mkdir 
+#
+# THIS FILE RUNS WARPVOL 
+#
+# IT IS RUN ONLY IF YOU HAVE TO DO FINDWARP BY HAND AND
+# RESTART THE PROCESS
+#
+$warpvol -StandardInput
+InputFile       gb.rec
+OutputFile      gb.mat
+#TemporaryDirectory      
+# The default output size is NZ, NY, NX
+OutputSizeXYZ   64 20 64
+TransformFile warp.xf
+
+text 226 golden/centered.files
+combine.com
+dualvolmatch.com
+ga.ali
+ga.rec
+ga.st
+ga.tlt
+ga.xf
+gb.ali
+gb.rec
+gb.st
+gb.tlt
+gb.xf
+matchorwarp.com
+matchvol1.com
+matchvol2.com
+newstb.com
+patchcorr.com
+solvematch.com
+tilta.com
+tiltb.com
+volcombine.com
+warpvol.com
+
+text 198 golden/centered.out
+500 MBytes of disk space will be needed for combining
+ 
+The number of patches for Corrsearch3d is 0 in X, 1 in Y, and 0 in Z
+   (Y and Z are not flipped in entries to corrsearch3d in patchcorr.com)
+
+text 2 golden/centered.rc
+0
+
+text 43 golden/centered.tomopieces
+   1   1   1
+0,63,0,19,0,63
+8,71
+5,24
+8,71
+
+sha256 e522d3dceaf805bc2f4705e2c4e0eb49ae233cb16de083138ab3ba03087f26f4 3045 golden/centered/combine.com
+text 227 golden/centered/dualvolmatch.com
+# THIS COMMAND FILE RUNS DUALVOLMATCH
+#
+####CreatedVersion####5.2.17
+#
+$dualvolmatch -StandardInput
+RootName	g
+NamingStyle	0
+MatchAtoB	0
+MaximumResidual	10.
+CenterShiftLimit	10.
+#
+$ echo "STATUS: DUALVOLMATCH RAN SUCCESSFULLY"
+
+text 349 golden/centered/matchorwarp.com
+#$if (! -e ) mkdir 
+#
+# MATCHORWARP RUNS REFINEMATCH AND MATCHVOL, OR FINDWARP AND WARPVOL.
+#
+####CreatedVersion####5.2.17
+#
+$matchorwarp -StandardInput
+InputVolume      gb.rec
+OutputVolume     gb.mat
+SizeXYZorVolume  ga.rec
+RefineLimit      0.3
+WarpLimits       0.2,0.27,0.35
+ResidualFile     patch.resid
+ClipPlaneBoxSize 600
+#TemporaryDirectory  
+
+sha256 ad6fc00858c042a71a380c835d8a0c4dfa30c4f1f61f33cb62c1d90a33a65d9c 544 golden/centered/matchvol1.com
+text 428 golden/centered/matchvol2.com
+#$if (! -e ) mkdir 
+#
+# THIS FILE RUNS A SECOND MATCHVOL
+# IT IS RUN ONLY IF YOU HAVE TO DO FINDWARP BY HAND, GET A GOOD
+# REFINE.XF BY OMITTING ROWS OR COLUMNS, AND HAVE TO RESTART THE PROCESS
+#
+$matchvol -StandardInput
+InputFile       gb.rec
+OutputFile      gb.mat
+#TemporaryDirectory      
+# The default output size is NZ, NY, NX
+OutputSizeXYZ   64 20 64
+TransformFile solve.xf
+TransformFile refine.xf
+InverseFile inverse.xf
+
+sha256 7754e3f6a91dbe602249afa170cff437c768d7596ee17c6aa3a4bb52a61a8fda 617 golden/centered/patchcorr.com
+sha256 f47016c8af5f256e457d4f448478dd359f7e155511156a45c94727e7852831bf 1044 golden/centered/solvematch.com
+sha256 8e1fe57c01d9045f0063010532a2a721ba1afca5b5a859f53de985291779febb 2019 golden/centered/volcombine.com
+text 313 golden/centered/warpvol.com
+#$if (! -e ) mkdir 
+#
+# THIS FILE RUNS WARPVOL 
+#
+# IT IS RUN ONLY IF YOU HAVE TO DO FINDWARP BY HAND AND
+# RESTART THE PROCESS
+#
+$warpvol -StandardInput
+InputFile       gb.rec
+OutputFile      gb.mat
+#TemporaryDirectory      
+# The default output size is NZ, NY, NX
+OutputSizeXYZ   64 20 64
+TransformFile warp.xf
+
+text 401 golden/change.files
+ch.adoc
+combine.com
+dfltcoms/matchorwarp.com
+dfltcoms/patchcorr.com
+dfltcoms/solvematch.com
+dfltcoms/x
+dualvolmatch.com
+ga.rec
+ga.st
+ga.tlt
+ga.xf
+gb.rec
+gb.st
+gb.tlt
+gb.xf
+matchorwarp.com
+matchvol1.com
+matchvol2.com
+origcoms/dualvolmatch.com
+origcoms/matchorwarp.com
+origcoms/patchcorr.com
+origcoms/solvematch.com
+origcoms/x
+patchcorr.com
+solvematch.com
+tilta.com
+tiltb.com
+volcombine.com
+warpvol.com
+
+text 198 golden/change.out
+500 MBytes of disk space will be needed for combining
+ 
+The number of patches for Corrsearch3d is 0 in X, 1 in Y, and 0 in Z
+   (Y and Z are not flipped in entries to corrsearch3d in patchcorr.com)
+
+text 2 golden/change.rc
+0
+
+text 43 golden/change.tomopieces
+   1   1   1
+0,63,0,19,0,63
+8,71
+5,24
+8,71
+
+sha256 e522d3dceaf805bc2f4705e2c4e0eb49ae233cb16de083138ab3ba03087f26f4 3045 golden/change/combine.com
+text 349 golden/change/dfltcoms/matchorwarp.com
+#$if (! -e ) mkdir 
+#
+# MATCHORWARP RUNS REFINEMATCH AND MATCHVOL, OR FINDWARP AND WARPVOL.
+#
+####CreatedVersion####5.2.17
+#
+$matchorwarp -StandardInput
+InputVolume      gb.rec
+OutputVolume     gb.mat
+SizeXYZorVolume  ga.rec
+RefineLimit      0.3
+WarpLimits       0.2,0.27,0.35
+ResidualFile     patch.resid
+ClipPlaneBoxSize 600
+#TemporaryDirectory  
+
+sha256 d73daa874c00d0b0fc385399bace265694b90fa926362f79a771af7720c93f4d 689 golden/change/dfltcoms/patchcorr.com
+sha256 eb56f6e00527f88cb36c47e3bd9ac91ad497e2dfa41d7f894d00cb65294be9a3 1045 golden/change/dfltcoms/solvematch.com
+text 227 golden/change/dualvolmatch.com
+# THIS COMMAND FILE RUNS DUALVOLMATCH
+#
+####CreatedVersion####5.2.17
+#
+$dualvolmatch -StandardInput
+RootName	g
+NamingStyle	0
+MatchAtoB	0
+MaximumResidual	10.
+CenterShiftLimit	10.
+#
+$ echo "STATUS: DUALVOLMATCH RAN SUCCESSFULLY"
+
+text 337 golden/change/matchorwarp.com
+#$if (! -e ) mkdir 
+#
+# MATCHORWARP RUNS REFINEMATCH AND MATCHVOL, OR FINDWARP AND WARPVOL.
+#
+####CreatedVersion####5.2.17
+#
+$matchorwarp -StandardInput
+InputVolume      gb.rec
+OutputVolume     gb.mat
+SizeXYZorVolume  ga.rec
+RefineLimit      0.3
+WarpLimits	0.3,0.4
+ResidualFile     patch.resid
+ClipPlaneBoxSize 600
+#TemporaryDirectory  
+
+sha256 ad6fc00858c042a71a380c835d8a0c4dfa30c4f1f61f33cb62c1d90a33a65d9c 544 golden/change/matchvol1.com
+text 428 golden/change/matchvol2.com
+#$if (! -e ) mkdir 
+#
+# THIS FILE RUNS A SECOND MATCHVOL
+# IT IS RUN ONLY IF YOU HAVE TO DO FINDWARP BY HAND, GET A GOOD
+# REFINE.XF BY OMITTING ROWS OR COLUMNS, AND HAVE TO RESTART THE PROCESS
+#
+$matchvol -StandardInput
+InputFile       gb.rec
+OutputFile      gb.mat
+#TemporaryDirectory      
+# The default output size is NZ, NY, NX
+OutputSizeXYZ   64 20 64
+TransformFile solve.xf
+TransformFile refine.xf
+InverseFile inverse.xf
+
+text 227 golden/change/origcoms/dualvolmatch.com
+# THIS COMMAND FILE RUNS DUALVOLMATCH
+#
+####CreatedVersion####5.2.17
+#
+$dualvolmatch -StandardInput
+RootName	g
+NamingStyle	0
+MatchAtoB	0
+MaximumResidual	10.
+CenterShiftLimit	10.
+#
+$ echo "STATUS: DUALVOLMATCH RAN SUCCESSFULLY"
+
+text 337 golden/change/origcoms/matchorwarp.com
+#$if (! -e ) mkdir 
+#
+# MATCHORWARP RUNS REFINEMATCH AND MATCHVOL, OR FINDWARP AND WARPVOL.
+#
+####CreatedVersion####5.2.17
+#
+$matchorwarp -StandardInput
+InputVolume      gb.rec
+OutputVolume     gb.mat
+SizeXYZorVolume  ga.rec
+RefineLimit      0.3
+WarpLimits	0.3,0.4
+ResidualFile     patch.resid
+ClipPlaneBoxSize 600
+#TemporaryDirectory  
+
+sha256 03cec9a86379f0f387c7bc3cc557aa2762a1ddc5ad1d5b513d51dbb38fbf047e 684 golden/change/origcoms/patchcorr.com
+sha256 8853cde185b9b15e420af3e7b10b9d791e983f18872d297c7f5e33b094196722 1045 golden/change/origcoms/solvematch.com
+sha256 03cec9a86379f0f387c7bc3cc557aa2762a1ddc5ad1d5b513d51dbb38fbf047e 684 golden/change/patchcorr.com
+sha256 8853cde185b9b15e420af3e7b10b9d791e983f18872d297c7f5e33b094196722 1045 golden/change/solvematch.com
+sha256 8e1fe57c01d9045f0063010532a2a721ba1afca5b5a859f53de985291779febb 2019 golden/change/volcombine.com
+text 313 golden/change/warpvol.com
+#$if (! -e ) mkdir 
+#
+# THIS FILE RUNS WARPVOL 
+#
+# IT IS RUN ONLY IF YOU HAVE TO DO FINDWARP BY HAND AND
+# RESTART THE PROCESS
+#
+$warpvol -StandardInput
+InputFile       gb.rec
+OutputFile      gb.mat
+#TemporaryDirectory      
+# The default output size is NZ, NY, NX
+OutputSizeXYZ   64 20 64
+TransformFile warp.xf
+
+text 201 golden/chunked.files
+combine.com
+dualvolmatch.com
+ga.rec
+ga.st
+ga.tlt
+ga.xf
+gb.rec
+gb.st
+gb.tlt
+gb.xf
+matchorwarp.com
+matchvol1.com
+matchvol2.com
+patchcorr.com
+solvematch.com
+tilta.com
+tiltb.com
+volcombine.com
+warpvol.com
+
+text 198 golden/chunked.out
+500 MBytes of disk space will be needed for combining
+ 
+The number of patches for Corrsearch3d is 0 in X, 1 in Y, and 0 in Z
+   (Y and Z are not flipped in entries to corrsearch3d in patchcorr.com)
+
+text 2 golden/chunked.rc
+0
+
+text 71 golden/chunked.tomopieces
+   1   1   1
+     64     20     64
+0,63,0,19,0,63
+8,71,5,24,8,71,0,0,0
+
+sha256 e522d3dceaf805bc2f4705e2c4e0eb49ae233cb16de083138ab3ba03087f26f4 3045 golden/chunked/combine.com
+text 227 golden/chunked/dualvolmatch.com
+# THIS COMMAND FILE RUNS DUALVOLMATCH
+#
+####CreatedVersion####5.2.17
+#
+$dualvolmatch -StandardInput
+RootName	g
+NamingStyle	0
+MatchAtoB	0
+MaximumResidual	10.
+CenterShiftLimit	10.
+#
+$ echo "STATUS: DUALVOLMATCH RAN SUCCESSFULLY"
+
+text 349 golden/chunked/matchorwarp.com
+#$if (! -e ) mkdir 
+#
+# MATCHORWARP RUNS REFINEMATCH AND MATCHVOL, OR FINDWARP AND WARPVOL.
+#
+####CreatedVersion####5.2.17
+#
+$matchorwarp -StandardInput
+InputVolume      gb.rec
+OutputVolume     gb.mat
+SizeXYZorVolume  ga.rec
+RefineLimit      0.3
+WarpLimits       0.2,0.27,0.35
+ResidualFile     patch.resid
+ClipPlaneBoxSize 600
+#TemporaryDirectory  
+
+sha256 ad6fc00858c042a71a380c835d8a0c4dfa30c4f1f61f33cb62c1d90a33a65d9c 544 golden/chunked/matchvol1.com
+text 428 golden/chunked/matchvol2.com
+#$if (! -e ) mkdir 
+#
+# THIS FILE RUNS A SECOND MATCHVOL
+# IT IS RUN ONLY IF YOU HAVE TO DO FINDWARP BY HAND, GET A GOOD
+# REFINE.XF BY OMITTING ROWS OR COLUMNS, AND HAVE TO RESTART THE PROCESS
+#
+$matchvol -StandardInput
+InputFile       gb.rec
+OutputFile      gb.mat
+#TemporaryDirectory      
+# The default output size is NZ, NY, NX
+OutputSizeXYZ   64 20 64
+TransformFile solve.xf
+TransformFile refine.xf
+InverseFile inverse.xf
+
+sha256 d73daa874c00d0b0fc385399bace265694b90fa926362f79a771af7720c93f4d 689 golden/chunked/patchcorr.com
+sha256 eb56f6e00527f88cb36c47e3bd9ac91ad497e2dfa41d7f894d00cb65294be9a3 1045 golden/chunked/solvematch.com
+sha256 0786f51e48a456cfa1eeca46fec7ae626dd5ccadd1cb44f07685c073a4337369 2184 golden/chunked/volcombine.com
+text 313 golden/chunked/warpvol.com
+#$if (! -e ) mkdir 
+#
+# THIS FILE RUNS WARPVOL 
+#
+# IT IS RUN ONLY IF YOU HAVE TO DO FINDWARP BY HAND AND
+# RESTART THE PROCESS
+#
+$warpvol -StandardInput
+InputFile       gb.rec
+OutputFile      gb.mat
+#TemporaryDirectory      
+# The default output size is NZ, NY, NX
+OutputSizeXYZ   64 20 64
+TransformFile warp.xf
+
+text 72 golden/err_auto_small.files
+ga.rec
+ga.st
+ga.tlt
+ga.xf
+gb.rec
+gb.st
+gb.tlt
+gb.xf
+tilta.com
+tiltb.com
+
+text 109 golden/err_auto_small.out
+ERROR: setupcombine - The final patch size for Autopatchfit must not be smaller than the starting patch size
+
+text 2 golden/err_auto_small.rc
+1
+
+text 72 golden/err_noext.files
+ga.rec
+ga.st
+ga.tlt
+ga.xf
+gb.rec
+gb.st
+gb.tlt
+gb.xf
+tilta.com
+tiltb.com
+
+text 102 golden/err_noext.out
+ERROR: setupcombine - Raw stack extension must be entered; it cannot be determined from dataset files
+
+text 2 golden/err_noext.rc
+1
+
+text 72 golden/err_noname.files
+ga.rec
+ga.st
+ga.tlt
+ga.xf
+gb.rec
+gb.st
+gb.tlt
+gb.xf
+tilta.com
+tiltb.com
+
+text 50 golden/err_noname.out
+ERROR: setupcombine - A root name must be entered
+
+text 2 golden/err_noname.rc
+1
+
+text 72 golden/err_patch.files
+ga.rec
+ga.st
+ga.tlt
+ga.xf
+gb.rec
+gb.st
+gb.tlt
+gb.xf
+tilta.com
+tiltb.com
+
+text 102 golden/err_patch.out
+ERROR: setupcombine - You must enter one of S, M, L, or E or sizes in X,Y,Z for the -patchsize option
+
+text 2 golden/err_patch.rc
+1
+
+text 72 golden/err_surf.files
+ga.rec
+ga.st
+ga.tlt
+ga.xf
+gb.rec
+gb.st
+gb.tlt
+gb.xf
+tilta.com
+tiltb.com
+
+text 117 golden/err_surf.out
+ERROR: setupcombine - You must enter either the -initial option or the -surface option with a value between -2 and 2
+
+text 2 golden/err_surf.rc
+1
+
+text 72 golden/err_tempdir.files
+ga.rec
+ga.st
+ga.tlt
+ga.xf
+gb.rec
+gb.st
+gb.tlt
+gb.xf
+tilta.com
+tiltb.com
+
+text 119 golden/err_tempdir.out
+500 MBytes of disk space will be needed for combining
+ERROR: setupcombine - nodir does not exist or is not a directory
+
+text 2 golden/err_tempdir.rc
+1
+
+text 72 golden/err_xlim.files
+ga.rec
+ga.st
+ga.tlt
+ga.xf
+gb.rec
+gb.st
+gb.tlt
+gb.xf
+tilta.com
+tiltb.com
+
+text 68 golden/err_xlim.out
+ERROR: setupcombine - X limits (60, 5) out of range or out of order
+
+text 2 golden/err_xlim.rc
+1
+
+text 72 golden/err_zlim.files
+ga.rec
+ga.st
+ga.tlt
+ga.xf
+gb.rec
+gb.st
+gb.tlt
+gb.xf
+tilta.com
+tiltb.com
+
+text 57 golden/err_zlim.out
+ERROR: setupcombine - You must enter the -zlimits option
+
+text 2 golden/err_zlim.rc
+1
+
+text 0 golden/info.files
+
+text 64 golden/info.out
+S:  64  64  32
+M:  80  80  40
+L:  100  100  50
+E:  120  120  60
+
+text 2 golden/info.rc
+0
+
+text 201 golden/initial_atob.files
+combine.com
+dualvolmatch.com
+ga.rec
+ga.st
+ga.tlt
+ga.xf
+gb.rec
+gb.st
+gb.tlt
+gb.xf
+matchorwarp.com
+matchvol1.com
+matchvol2.com
+patchcorr.com
+solvematch.com
+tilta.com
+tiltb.com
+volcombine.com
+warpvol.com
+
+text 319 golden/initial_atob.out
+ 
+WARNING: Only one layer of patches will be computed in Z
+
+ 
+WARNING: Patch thickness set to 20 to fit within Z limits
+
+500 MBytes of disk space will be needed for combining
+ 
+The number of patches for Corrsearch3d is 0 in X, 1 in Y, and 0 in Z
+   (Y and Z are not flipped in entries to corrsearch3d in patchcorr.com)
+
+text 2 golden/initial_atob.rc
+0
+
+text 43 golden/initial_atob.tomopieces
+   1   1   1
+0,63,0,19,0,63
+8,71
+5,24
+8,71
+
+sha256 54a80bbba111c49df6861f03d42004f0c3a4f0ffe9312c343f16d7a8de5f7aa0 3047 golden/initial_atob/combine.com
+text 227 golden/initial_atob/dualvolmatch.com
+# THIS COMMAND FILE RUNS DUALVOLMATCH
+#
+####CreatedVersion####5.2.17
+#
+$dualvolmatch -StandardInput
+RootName	g
+NamingStyle	0
+MatchAtoB	1
+MaximumResidual	10.
+CenterShiftLimit	10.
+#
+$ echo "STATUS: DUALVOLMATCH RAN SUCCESSFULLY"
+
+text 349 golden/initial_atob/matchorwarp.com
+#$if (! -e ) mkdir 
+#
+# MATCHORWARP RUNS REFINEMATCH AND MATCHVOL, OR FINDWARP AND WARPVOL.
+#
+####CreatedVersion####5.2.17
+#
+$matchorwarp -StandardInput
+InputVolume      ga.rec
+OutputVolume     ga.mat
+SizeXYZorVolume  gb.rec
+RefineLimit      0.3
+WarpLimits       0.2,0.27,0.35
+ResidualFile     patch.resid
+ClipPlaneBoxSize 600
+#TemporaryDirectory  
+
+sha256 3ad84e5f3eb63320057a88f1498126db6cb9d254462c50273d647caafda42a1c 544 golden/initial_atob/matchvol1.com
+text 428 golden/initial_atob/matchvol2.com
+#$if (! -e ) mkdir 
+#
+# THIS FILE RUNS A SECOND MATCHVOL
+# IT IS RUN ONLY IF YOU HAVE TO DO FINDWARP BY HAND, GET A GOOD
+# REFINE.XF BY OMITTING ROWS OR COLUMNS, AND HAVE TO RESTART THE PROCESS
+#
+$matchvol -StandardInput
+InputFile       ga.rec
+OutputFile      ga.mat
+#TemporaryDirectory      
+# The default output size is NZ, NY, NX
+OutputSizeXYZ   64 20 64
+TransformFile solve.xf
+TransformFile refine.xf
+InverseFile inverse.xf
+
+sha256 ebcd15888790b45fe3ea40b606612af19e9b6095a00f90591e0a4795a55731ed 689 golden/initial_atob/patchcorr.com
+sha256 7d29364d363f89663fb191382d4af182fb8c680f6f07a7d0a3ea5bcece13dd14 1045 golden/initial_atob/solvematch.com
+sha256 bff3548ad6aafcce8de625805785256a24023de789bf64f618c99c83530a1a40 2019 golden/initial_atob/volcombine.com
+text 313 golden/initial_atob/warpvol.com
+#$if (! -e ) mkdir 
+#
+# THIS FILE RUNS WARPVOL 
+#
+# IT IS RUN ONLY IF YOU HAVE TO DO FINDWARP BY HAND AND
+# RESTART THE PROCESS
+#
+$warpvol -StandardInput
+InputFile       ga.rec
+OutputFile      ga.mat
+#TemporaryDirectory      
+# The default output size is NZ, NY, NX
+OutputSizeXYZ   64 20 64
+TransformFile warp.xf
+
+text 201 golden/lists.files
+combine.com
+dualvolmatch.com
+ga.rec
+ga.st
+ga.tlt
+ga.xf
+gb.rec
+gb.st
+gb.tlt
+gb.xf
+matchorwarp.com
+matchvol1.com
+matchvol2.com
+patchcorr.com
+solvematch.com
+tilta.com
+tiltb.com
+volcombine.com
+warpvol.com
+
+text 198 golden/lists.out
+500 MBytes of disk space will be needed for combining
+ 
+The number of patches for Corrsearch3d is 0 in X, 1 in Y, and 0 in Z
+   (Y and Z are not flipped in entries to corrsearch3d in patchcorr.com)
+
+text 2 golden/lists.rc
+0
+
+text 43 golden/lists.tomopieces
+   1   1   1
+0,63,0,19,0,63
+8,71
+5,24
+8,71
+
+sha256 e522d3dceaf805bc2f4705e2c4e0eb49ae233cb16de083138ab3ba03087f26f4 3045 golden/lists/combine.com
+text 227 golden/lists/dualvolmatch.com
+# THIS COMMAND FILE RUNS DUALVOLMATCH
+#
+####CreatedVersion####5.2.17
+#
+$dualvolmatch -StandardInput
+RootName	g
+NamingStyle	0
+MatchAtoB	0
+MaximumResidual	10.
+CenterShiftLimit	10.
+#
+$ echo "STATUS: DUALVOLMATCH RAN SUCCESSFULLY"
+
+text 349 golden/lists/matchorwarp.com
+#$if (! -e ) mkdir 
+#
+# MATCHORWARP RUNS REFINEMATCH AND MATCHVOL, OR FINDWARP AND WARPVOL.
+#
+####CreatedVersion####5.2.17
+#
+$matchorwarp -StandardInput
+InputVolume      gb.rec
+OutputVolume     gb.mat
+SizeXYZorVolume  ga.rec
+RefineLimit      0.3
+WarpLimits       0.2,0.27,0.35
+ResidualFile     patch.resid
+ClipPlaneBoxSize 600
+#TemporaryDirectory  
+
+sha256 ad6fc00858c042a71a380c835d8a0c4dfa30c4f1f61f33cb62c1d90a33a65d9c 544 golden/lists/matchvol1.com
+text 428 golden/lists/matchvol2.com
+#$if (! -e ) mkdir 
+#
+# THIS FILE RUNS A SECOND MATCHVOL
+# IT IS RUN ONLY IF YOU HAVE TO DO FINDWARP BY HAND, GET A GOOD
+# REFINE.XF BY OMITTING ROWS OR COLUMNS, AND HAVE TO RESTART THE PROCESS
+#
+$matchvol -StandardInput
+InputFile       gb.rec
+OutputFile      gb.mat
+#TemporaryDirectory      
+# The default output size is NZ, NY, NX
+OutputSizeXYZ   64 20 64
+TransformFile solve.xf
+TransformFile refine.xf
+InverseFile inverse.xf
+
+sha256 d73daa874c00d0b0fc385399bace265694b90fa926362f79a771af7720c93f4d 689 golden/lists/patchcorr.com
+sha256 2e9ef5a61c5bda114c0c8fefe9ae8a86d6113691f08f1af7aa6771f2dfd3edc9 1063 golden/lists/solvematch.com
+sha256 8e1fe57c01d9045f0063010532a2a721ba1afca5b5a859f53de985291779febb 2019 golden/lists/volcombine.com
+text 313 golden/lists/warpvol.com
+#$if (! -e ) mkdir 
+#
+# THIS FILE RUNS WARPVOL 
+#
+# IT IS RUN ONLY IF YOU HAVE TO DO FINDWARP BY HAND AND
+# RESTART THE PROCESS
+#
+$warpvol -StandardInput
+InputFile       gb.rec
+OutputFile      gb.mat
+#TemporaryDirectory      
+# The default output size is NZ, NY, NX
+OutputSizeXYZ   64 20 64
+TransformFile warp.xf
+
+text 12 golden/only.files
+combine.com
+
+text 0 golden/only.out
+
+text 2 golden/only.rc
+0
+
+sha256 3937f1480559bc4cb11e13e57d6740d26a3a468b47ca7b31a15680a99a42084f 3062 golden/only/combine.com
+text 201 golden/patch_limits.files
+combine.com
+dualvolmatch.com
+ga.rec
+ga.st
+ga.tlt
+ga.xf
+gb.rec
+gb.st
+gb.tlt
+gb.xf
+matchorwarp.com
+matchvol1.com
+matchvol2.com
+patchcorr.com
+solvematch.com
+tilta.com
+tiltb.com
+volcombine.com
+warpvol.com
+
+text 198 golden/patch_limits.out
+500 MBytes of disk space will be needed for combining
+ 
+The number of patches for Corrsearch3d is 1 in X, 2 in Y, and 0 in Z
+   (Y and Z are not flipped in entries to corrsearch3d in patchcorr.com)
+
+text 2 golden/patch_limits.rc
+0
+
+text 43 golden/patch_limits.tomopieces
+   1   1   1
+0,63,0,19,0,63
+8,71
+5,24
+8,71
+
+sha256 e522d3dceaf805bc2f4705e2c4e0eb49ae233cb16de083138ab3ba03087f26f4 3045 golden/patch_limits/combine.com
+text 227 golden/patch_limits/dualvolmatch.com
+# THIS COMMAND FILE RUNS DUALVOLMATCH
+#
+####CreatedVersion####5.2.17
+#
+$dualvolmatch -StandardInput
+RootName	g
+NamingStyle	0
+MatchAtoB	0
+MaximumResidual	10.
+CenterShiftLimit	10.
+#
+$ echo "STATUS: DUALVOLMATCH RAN SUCCESSFULLY"
+
+text 349 golden/patch_limits/matchorwarp.com
+#$if (! -e ) mkdir 
+#
+# MATCHORWARP RUNS REFINEMATCH AND MATCHVOL, OR FINDWARP AND WARPVOL.
+#
+####CreatedVersion####5.2.17
+#
+$matchorwarp -StandardInput
+InputVolume      gb.rec
+OutputVolume     gb.mat
+SizeXYZorVolume  ga.rec
+RefineLimit      0.3
+WarpLimits       0.2,0.27,0.35
+ResidualFile     patch.resid
+ClipPlaneBoxSize 600
+#TemporaryDirectory  
+
+sha256 ad6fc00858c042a71a380c835d8a0c4dfa30c4f1f61f33cb62c1d90a33a65d9c 544 golden/patch_limits/matchvol1.com
+text 428 golden/patch_limits/matchvol2.com
+#$if (! -e ) mkdir 
+#
+# THIS FILE RUNS A SECOND MATCHVOL
+# IT IS RUN ONLY IF YOU HAVE TO DO FINDWARP BY HAND, GET A GOOD
+# REFINE.XF BY OMITTING ROWS OR COLUMNS, AND HAVE TO RESTART THE PROCESS
+#
+$matchvol -StandardInput
+InputFile       gb.rec
+OutputFile      gb.mat
+#TemporaryDirectory      
+# The default output size is NZ, NY, NX
+OutputSizeXYZ   64 20 64
+TransformFile solve.xf
+TransformFile refine.xf
+InverseFile inverse.xf
+
+sha256 c867540f9582a20d7dd3706819bf4ce1211bafd86f4b121d7d58963e94f763e9 686 golden/patch_limits/patchcorr.com
+sha256 fd50ba7c5b005a777ca6da8da875c736a920b4e85a1f189b0b074b31c8093e93 1045 golden/patch_limits/solvematch.com
+sha256 8e1fe57c01d9045f0063010532a2a721ba1afca5b5a859f53de985291779febb 2019 golden/patch_limits/volcombine.com
+text 313 golden/patch_limits/warpvol.com
+#$if (! -e ) mkdir 
+#
+# THIS FILE RUNS WARPVOL 
+#
+# IT IS RUN ONLY IF YOU HAVE TO DO FINDWARP BY HAND AND
+# RESTART THE PROCESS
+#
+$warpvol -StandardInput
+InputFile       gb.rec
+OutputFile      gb.mat
+#TemporaryDirectory      
+# The default output size is NZ, NY, NX
+OutputSizeXYZ   64 20 64
+TransformFile warp.xf
+
+text 201 golden/style0.files
+combine.com
+dualvolmatch.com
+ga.rec
+ga.st
+ga.tlt
+ga.xf
+gb.rec
+gb.st
+gb.tlt
+gb.xf
+matchorwarp.com
+matchvol1.com
+matchvol2.com
+patchcorr.com
+solvematch.com
+tilta.com
+tiltb.com
+volcombine.com
+warpvol.com
+
+text 198 golden/style0.out
+500 MBytes of disk space will be needed for combining
+ 
+The number of patches for Corrsearch3d is 0 in X, 1 in Y, and 0 in Z
+   (Y and Z are not flipped in entries to corrsearch3d in patchcorr.com)
+
+text 2 golden/style0.rc
+0
+
+text 43 golden/style0.tomopieces
+   1   1   1
+0,63,0,19,0,63
+8,71
+5,24
+8,71
+
+sha256 e522d3dceaf805bc2f4705e2c4e0eb49ae233cb16de083138ab3ba03087f26f4 3045 golden/style0/combine.com
+text 227 golden/style0/dualvolmatch.com
+# THIS COMMAND FILE RUNS DUALVOLMATCH
+#
+####CreatedVersion####5.2.17
+#
+$dualvolmatch -StandardInput
+RootName	g
+NamingStyle	0
+MatchAtoB	0
+MaximumResidual	10.
+CenterShiftLimit	10.
+#
+$ echo "STATUS: DUALVOLMATCH RAN SUCCESSFULLY"
+
+text 349 golden/style0/matchorwarp.com
+#$if (! -e ) mkdir 
+#
+# MATCHORWARP RUNS REFINEMATCH AND MATCHVOL, OR FINDWARP AND WARPVOL.
+#
+####CreatedVersion####5.2.17
+#
+$matchorwarp -StandardInput
+InputVolume      gb.rec
+OutputVolume     gb.mat
+SizeXYZorVolume  ga.rec
+RefineLimit      0.3
+WarpLimits       0.2,0.27,0.35
+ResidualFile     patch.resid
+ClipPlaneBoxSize 600
+#TemporaryDirectory  
+
+sha256 ad6fc00858c042a71a380c835d8a0c4dfa30c4f1f61f33cb62c1d90a33a65d9c 544 golden/style0/matchvol1.com
+text 428 golden/style0/matchvol2.com
+#$if (! -e ) mkdir 
+#
+# THIS FILE RUNS A SECOND MATCHVOL
+# IT IS RUN ONLY IF YOU HAVE TO DO FINDWARP BY HAND, GET A GOOD
+# REFINE.XF BY OMITTING ROWS OR COLUMNS, AND HAVE TO RESTART THE PROCESS
+#
+$matchvol -StandardInput
+InputFile       gb.rec
+OutputFile      gb.mat
+#TemporaryDirectory      
+# The default output size is NZ, NY, NX
+OutputSizeXYZ   64 20 64
+TransformFile solve.xf
+TransformFile refine.xf
+InverseFile inverse.xf
+
+sha256 d73daa874c00d0b0fc385399bace265694b90fa926362f79a771af7720c93f4d 689 golden/style0/patchcorr.com
+sha256 eb56f6e00527f88cb36c47e3bd9ac91ad497e2dfa41d7f894d00cb65294be9a3 1045 golden/style0/solvematch.com
+sha256 8e1fe57c01d9045f0063010532a2a721ba1afca5b5a859f53de985291779febb 2019 golden/style0/volcombine.com
+text 313 golden/style0/warpvol.com
+#$if (! -e ) mkdir 
+#
+# THIS FILE RUNS WARPVOL 
+#
+# IT IS RUN ONLY IF YOU HAVE TO DO FINDWARP BY HAND AND
+# RESTART THE PROCESS
+#
+$warpvol -StandardInput
+InputFile       gb.rec
+OutputFile      gb.mat
+#TemporaryDirectory      
+# The default output size is NZ, NY, NX
+OutputSizeXYZ   64 20 64
+TransformFile warp.xf
+
+text 201 golden/volcomb.files
+combine.com
+dualvolmatch.com
+ga.rec
+ga.st
+ga.tlt
+ga.xf
+gb.rec
+gb.st
+gb.tlt
+gb.xf
+matchorwarp.com
+matchvol1.com
+matchvol2.com
+patchcorr.com
+solvematch.com
+tilta.com
+tiltb.com
+volcombine.com
+warpvol.com
+
+text 198 golden/volcomb.out
+500 MBytes of disk space will be needed for combining
+ 
+The number of patches for Corrsearch3d is 0 in X, 1 in Y, and 0 in Z
+   (Y and Z are not flipped in entries to corrsearch3d in patchcorr.com)
+
+text 2 golden/volcomb.rc
+0
+
+text 43 golden/volcomb.tomopieces
+   1   1   1
+0,63,0,19,0,63
+8,71
+5,24
+8,71
+
+sha256 e522d3dceaf805bc2f4705e2c4e0eb49ae233cb16de083138ab3ba03087f26f4 3045 golden/volcomb/combine.com
+text 227 golden/volcomb/dualvolmatch.com
+# THIS COMMAND FILE RUNS DUALVOLMATCH
+#
+####CreatedVersion####5.2.17
+#
+$dualvolmatch -StandardInput
+RootName	g
+NamingStyle	0
+MatchAtoB	0
+MaximumResidual	10.
+CenterShiftLimit	10.
+#
+$ echo "STATUS: DUALVOLMATCH RAN SUCCESSFULLY"
+
+text 349 golden/volcomb/matchorwarp.com
+#$if (! -e ) mkdir 
+#
+# MATCHORWARP RUNS REFINEMATCH AND MATCHVOL, OR FINDWARP AND WARPVOL.
+#
+####CreatedVersion####5.2.17
+#
+$matchorwarp -StandardInput
+InputVolume      gb.rec
+OutputVolume     gb.mat
+SizeXYZorVolume  ga.rec
+RefineLimit      0.3
+WarpLimits       0.2,0.27,0.35
+ResidualFile     patch.resid
+ClipPlaneBoxSize 600
+#TemporaryDirectory  
+
+sha256 ad6fc00858c042a71a380c835d8a0c4dfa30c4f1f61f33cb62c1d90a33a65d9c 544 golden/volcomb/matchvol1.com
+text 428 golden/volcomb/matchvol2.com
+#$if (! -e ) mkdir 
+#
+# THIS FILE RUNS A SECOND MATCHVOL
+# IT IS RUN ONLY IF YOU HAVE TO DO FINDWARP BY HAND, GET A GOOD
+# REFINE.XF BY OMITTING ROWS OR COLUMNS, AND HAVE TO RESTART THE PROCESS
+#
+$matchvol -StandardInput
+InputFile       gb.rec
+OutputFile      gb.mat
+#TemporaryDirectory      
+# The default output size is NZ, NY, NX
+OutputSizeXYZ   64 20 64
+TransformFile solve.xf
+TransformFile refine.xf
+InverseFile inverse.xf
+
+sha256 d73daa874c00d0b0fc385399bace265694b90fa926362f79a771af7720c93f4d 689 golden/volcomb/patchcorr.com
+sha256 eb56f6e00527f88cb36c47e3bd9ac91ad497e2dfa41d7f894d00cb65294be9a3 1045 golden/volcomb/solvematch.com
+sha256 5ac5b9a06eac59036826f21f508600b02abcc9fb976e8216d356514936027b33 2026 golden/volcomb/volcombine.com
+text 313 golden/volcomb/warpvol.com
+#$if (! -e ) mkdir 
+#
+# THIS FILE RUNS WARPVOL 
+#
+# IT IS RUN ONLY IF YOU HAVE TO DO FINDWARP BY HAND AND
+# RESTART THE PROCESS
+#
+$warpvol -StandardInput
+InputFile       gb.rec
+OutputFile      gb.mat
+#TemporaryDirectory      
+# The default output size is NZ, NY, NX
+OutputSizeXYZ   64 20 64
+TransformFile warp.xf
+

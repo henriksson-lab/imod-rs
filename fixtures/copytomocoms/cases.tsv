@@ -1,0 +1,19 @@
+# name	inputs (src:dst from inputs/)	env	arguments
+single_rawtlt	b.st:b.st b.rawtlt:b.rawtlt	-	-name b -pixel 1 -gold 5 -rotation -85.3 -userawtlt
+firstinc_twodir	b.st:b.st	-	-name b -pixel 1 -gold 5 -rotation -85.3 -firstinc -50,20 -twodir 10 -reversed
+firstinc_inverted	b.st:b.st	-	-name b -pixel 1 -gold 5 -rotation -85.3 -firstinc 50,20
+angles_dosesym_skip	b.st:b.st	-	-name b -pixel 0.5 -gold 10 -rotation 12.5 -angles -50,-30,-10,10,30,50 -dosesym 3 -skip 1,6
+ctf_change	b.st:b.st b.rawtlt:b.rawtlt change.adoc:change.adoc	-	-name b -pixel 1 -gold 5 -rotation -85.3 -userawtlt -voltage 200 -Cs 2.7 -defocus 3000 -ctfnoise /x/y.cfg -change change.adoc -binning 2 -focus -halffloat 2
+one_change	b.st:b.st b.rawtlt:b.rawtlt	-	-name b -pixel 1 -gold 5 -rotation -85.3 -userawtlt -one comparam.tilt.tilt.RADIAL=0.35,0.035 -one comparam.eraser.ccderaser.PeakCriterion=8.0
+style0_pcm	b.st:b.st b.rawtlt:b.rawtlt	-	-name b -pixel 1 -gold 5 -rotation -85.3 -userawtlt -style 0 -pcm 1 -backup /tmp/bk
+short_negative	s.st:s.st s.rawtlt:s.rawtlt	-	-name s -pixel 1 -gold 5 -rotation 90 -userawtlt
+dual	b.st:ba.st b.st:bb.st b.rawtlt:ba.rawtlt b.rawtlt:bb.rawtlt	-	-name b -dual -pixel 1 -gold 5 -rotation -85.3 -brotation 5 -userawtlt -buserawtlt -bskip 3 -bfocus
+dual_no_b	b.st:ba.st b.rawtlt:ba.rawtlt	-	-name b -dual -pixel 1 -gold 5 -rotation -85.3 -userawtlt -bextract -xsize 96 -ysize 128
+ctf_only	b.st:b.st b.rawtlt:b.rawtlt	-	-name b -pixel 1 -gold 5 -rotation -85.3 -userawtlt -CTFfiles 3
+no_stack	-	-	-name b -pixel 1 -gold 5 -rotation -85.3 -userawtlt -xsize 200 -ysize 300 -stackext st
+env_style	b.st:b.st b.rawtlt:b.rawtlt	TEST_NAMING_STYLE=0 TEST_USE_PCM_FOR_COM=1	-name b -pixel 1 -gold 5 -rotation -85.3 -userawtlt
+err_no_pixel	b.st:b.st	-	-name b -gold 5 -rotation 0 -userawtlt
+err_twodir_dosesym	b.st:b.st	-	-name b -pixel 1 -gold 5 -rotation -85.3 -userawtlt -twodir 1 -dosesym 1
+err_tilt_bad	b.st:b.st change.adoc:b.rawtlt	-	-name b -pixel 1 -gold 5 -rotation -85.3 -userawtlt
+err_no_size	-	-	-name b -pixel 1 -gold 5 -rotation -85.3 -userawtlt -stackext st
+usage	-	-	-

@@ -1,0 +1,57 @@
+# imod-rs native golden manifest for fixtures/dualvolmatch; see fixtures/README.md.
+# Regenerate with fixtures/regen-golden.sh dualvolmatch; do not edit by hand.
+text 7 golden/err_missing.files
+ga.rec
+
+text 54 golden/err_missing.out
+ERROR: dualvolmatch - Tomogram does not exist: gb.rec
+
+text 2 golden/err_missing.rc
+1
+
+text 14 golden/err_refine.files
+ga.rec
+gb.rec
+
+text 81 golden/err_refine.out
+ERROR: dualvolmatch - Number of tilt angle refinements should be between 0 and 5
+
+text 2 golden/err_refine.rc
+1
+
+text 14 golden/err_style.files
+ga.rec
+gb.rec
+
+text 55 golden/err_style.out
+ERROR: dualvolmatch - Naming style must be less than 2
+
+text 2 golden/err_style.rc
+1
+
+text 14 golden/err_tiltbig.files
+ga.rec
+gb.rec
+
+text 87 golden/err_tiltbig.out
+ERROR: dualvolmatch - The tilt interval must not be bigger than the maximum tilt angle
+
+text 2 golden/err_tiltbig.rc
+1
+
+text 14 golden/err_tiltneg.files
+ga.rec
+gb.rec
+
+text 79 golden/err_tiltneg.out
+ERROR: dualvolmatch - Both maximum tilt angle and step size should be positive
+
+text 2 golden/err_tiltneg.rc
+1
+
+text 0 golden/usage.files
+
+sha256 c13fab8ffcc4c3a17f2f607c9c0897bff45c8ecf2437faed0861cf578bbfa943 1343 golden/usage.out
+text 2 golden/usage.rc
+0
+

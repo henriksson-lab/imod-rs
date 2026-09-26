@@ -1,0 +1,139 @@
+# imod-rs native golden manifest for fixtures/combinefft; see fixtures/README.md.
+# Regenerate with fixtures/regen-golden.sh combinefft; do not edit by hand.
+text 0 golden/e_bad_tilt.out
+
+text 2 golden/e_bad_tilt.rc
+1
+
+sha256 c25467a74ac67852af10aa56a49dbb1e85844531ee4d97747bf106834e811be4 2458 golden/e_bad_tilt.stdout
+text 0 golden/e_bad_xf.out
+
+text 2 golden/e_bad_xf.rc
+2
+
+sha256 da4b758ca2b42cbc40d52f8a6329ac17ad99f99579e8d546330c321860314fe5 2375 golden/e_bad_xf.stdout
+text 2 golden/e_block.rc
+1
+
+sha256 b3d2e58810b4670171a6628017be3fff955558758a61c73e30326ff48683c408 1994 golden/e_block.stdout
+text 0 golden/e_both_tilts.out
+
+text 2 golden/e_both_tilts.rc
+1
+
+sha256 85889b06db35f346a7d8976742889d1babdbac69ed689ebb93d7564c910e75b0 2455 golden/e_both_tilts.stdout
+text 0 golden/e_no_inverse.out
+
+text 2 golden/e_no_inverse.rc
+1
+
+sha256 75dfd2382316890c77800afc0c0b06f77367e1d9872d653e347bed252b0e0afb 2405 golden/e_no_inverse.stdout
+text 0 golden/e_no_tilts.out
+
+text 2 golden/e_no_tilts.rc
+1
+
+sha256 143bae43cc544ab0d8ea707e76d42fbf0c2683fb3c487d307fd239a83ac852ee 2454 golden/e_no_tilts.stdout
+text 0 golden/e_one_tilt.out
+
+text 2 golden/e_one_tilt.rc
+1
+
+sha256 9dc1cfe160976feebb5e45310294266d74bec49d3021181b4b2c6641a5626f82 2462 golden/e_one_tilt.stdout
+text 0 golden/e_points.out
+
+text 2 golden/e_points.rc
+1
+
+sha256 9cc420f7f3b1720eb25e5542ddf362e4afffc6d4f6f5e392230c3df733398620 2521 golden/e_points.stdout
+text 2 golden/e_real_interactive.rc
+1
+
+sha256 0857fe518e4b240e8b7b0c82871d20720c37831acafc3f6d7faef08b59a6afb3 2129 golden/e_real_interactive.stdout
+text 2 golden/e_real_no_output.rc
+1
+
+sha256 69f0f6f136f98875dfcaee2bb6fa48a6905175ee228dd08b6d44b8129b53b8cb 2016 golden/e_real_no_output.stdout
+text 0 golden/e_reduce.out
+
+text 2 golden/e_reduce.rc
+1
+
+sha256 de600f163efb2d0da32ca4895caf7973182881624ba92b61c4a8d224ce9ccf53 2514 golden/e_reduce.stdout
+text 0 golden/e_ring.out
+
+text 2 golden/e_ring.rc
+1
+
+sha256 5ea3c11f60218ef6130e48592b1d8a08b49012cea64e3c62fe2109bf88f68a41 2497 golden/e_ring.stdout
+text 2 golden/e_save_not_hdf.rc
+1
+
+sha256 0dca972dbdd58797606c3392854e8f978b96f674a183fddf31c17a14c64590d9 2074 golden/e_save_not_hdf.stdout
+text 2 golden/e_save_partial.rc
+1
+
+sha256 e2a395603e2eb74e6605ee3535cc9f70f0320bf63cec5912bbb109790bdc8f05 2056 golden/e_save_partial.stdout
+text 2 golden/e_size.rc
+1
+
+sha256 4e3d5ecbaba7ba276cc304fce2038ff4e11249a938f08b8f5dea45ffb7107c72 2162 golden/e_size.stdout
+sha256 46751ac821ec45e45ff62581f9024c2c7441f5414735aac3ed893f5566c98cd8 16864 golden/fft_high.out
+text 2 golden/fft_high.rc
+0
+
+sha256 9085bacc36a0abb835d0dc59f8ac9fc74500b1986d5efc4d6d95ceb32d1574be 2375 golden/fft_high.stdout
+sha256 d5b7a58b4e6c5c25f9d0f81b681a7c765467eede7c0289ddb4d2f4fde12ffd50 16864 golden/fft_into_b.out
+text 2 golden/fft_into_b.rc
+0
+
+sha256 669212cc00a729f4fd3754b1972063bb74472c12dd86eebfe1d029ec3ef3bf0f 2409 golden/fft_into_b.stdout
+sha256 6b0516a11c971f7ac6d24966335b10902a633b1dfb894b391867be8161d51b35 16864 golden/fft_reduce.out
+text 2 golden/fft_reduce.rc
+0
+
+sha256 e7f27643f51bac1dec879cbd7c5607185f32a8d9238a4be3cb3f0aa8bf2d05fe 6425 golden/fft_reduce.stdout
+sha256 0fe3ca4bf44d9d5023c323c5a894053b47eb4e1ad7b71cb197cf034f51b22e66 16864 golden/fft_reduce_joint.out
+text 2 golden/fft_reduce_joint.rc
+0
+
+sha256 6ba2a4ecb61069fcd7c8cd96dfe7e96772c6c525791027b1c0ca9ba8f38998d0 10579 golden/fft_reduce_joint.stdout
+sha256 757223b42c0a477fa80310cf98a4195746c8bf149e3a48701993f11cbbdb9275 16864 golden/fft_reduce_sep.out
+text 2 golden/fft_reduce_sep.rc
+0
+
+sha256 352beacee9784a56efed4ce4eb7639047c0ab5ad72031f83d2f8b7c93ce9c1fb 4379 golden/fft_reduce_sep.stdout
+sha256 46751ac821ec45e45ff62581f9024c2c7441f5414735aac3ed893f5566c98cd8 16864 golden/fft_tilt.out
+text 2 golden/fft_tilt.rc
+0
+
+sha256 684aca4ca20e99ef8694d9779881e3e80f125a9284612ef2313e5980b366572d 2447 golden/fft_tilt.stdout
+sha256 f020aabed3f7287c44b462eeaca31134d372a2c62f8550ee9c9dfd7f622afdee 16864 golden/fft_weight_high.out
+text 2 golden/fft_weight_high.rc
+0
+
+sha256 9085bacc36a0abb835d0dc59f8ac9fc74500b1986d5efc4d6d95ceb32d1574be 2375 golden/fft_weight_high.stdout
+text 2 golden/help.rc
+0
+
+sha256 dbf9fe2b8462e5f8005a9af15d3c011d05eeee6ed7b80bd8275a216d12c17ad5 3538 golden/help.stdout
+sha256 46751ac821ec45e45ff62581f9024c2c7441f5414735aac3ed893f5566c98cd8 16864 golden/interactive.out
+text 2 golden/interactive.rc
+0
+
+sha256 631a250849670da0a76066874cb72921d0af5c12fb30dde8b33cb72d0e9c2b36 2824 golden/interactive.stdout
+sha256 7676fd580a0d02088d8df978b6b745f2ab099282bb4a9f4a0c9836107b253b73 9216 golden/real_float.out
+text 2 golden/real_float.rc
+0
+
+sha256 d87a269e05891bc00c29300a714339efef7cdf93db4e69e01ce3c54ff35795a2 2245 golden/real_float.stdout
+sha256 db84ae23fcb7f99ece1063103f887d6e6448337d122902979d082b77508ad5d5 5120 golden/real_short_byte.out
+text 2 golden/real_short_byte.rc
+0
+
+sha256 02c9c90dbd774678232c695f2c1cb9d0112ca004949269127e5f570ee580fb79 2479 golden/real_short_byte.stdout
+sha256 e3807323999b36934aa01445f2ab84763a6aabaabfff2e4f3ba20df950ac9636 13824 golden/real_sub.out
+text 2 golden/real_sub.rc
+0
+
+sha256 259c04c49e83e81820fa794e4d1ddea1875d1e6b0ab10ed39041139ea696d726 2209 golden/real_sub.stdout

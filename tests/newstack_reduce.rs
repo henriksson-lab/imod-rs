@@ -53,18 +53,11 @@ fn reduction_options_match_the_reference_output() {
         );
         let mut got = std::fs::read(dir.join(&out_name)).unwrap();
         let want =
-            std::fs::read(root.join(format!("fixtures/newstack-reduce-{name}.mrc"))).unwrap();
+            common::golden::expect(&root.join(format!("fixtures/newstack-reduce-{name}.mrc")));
         mask_labels(&mut got);
-        assert_eq!(
-            got.len(),
-            want.len(),
-            "{name}: output size must match the reference"
-        );
-        let differing = (0..want.len()).filter(|i| want[*i] != got[*i]).count();
-        assert_eq!(
-            differing, 0,
-            "{name}: {differing} bytes differ from the reference output"
-        );
+        if let Err(why) = want.compare(&got, common::golden::identity, false) {
+            panic!("{name}: output differs from the reference: {why}");
+        }
     }
     let _ = std::fs::remove_dir_all(&dir);
 }

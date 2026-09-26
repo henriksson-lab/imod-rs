@@ -1,0 +1,69 @@
+# imod-rs native golden manifest for fixtures/findcontrast; see fixtures/README.md.
+# Regenerate with fixtures/regen-golden.sh findcontrast; do not edit by hand.
+sha256 3213a6850f4ba98c099614fa7aecf2817d330e4253cb501b64570371ed5f076f 1308 golden/byte.out
+text 2 golden/byte.rc
+0
+
+text 47 golden/err_noinput.out
+
+ERROR: FINDCONTRAST - No input file specified
+
+text 2 golden/err_noinput.rc
+1
+
+sha256 5f9b01b801e5edf9a5729729a844e0f2f6526f6c924db1996a6b0e45d950cb0b 1037 golden/err_slice.out
+text 2 golden/err_slice.rc
+1
+
+sha256 0f4ac7295c4b23f0be08300f6bf2af739286eb960bbd481d6c18e90a1965008b 1033 golden/err_xy.out
+text 2 golden/err_xy.rc
+1
+
+sha256 a5da47dd1e5f9c6c1d93589f3092184113264effc2c4baa6e99751aee3771e6d 1236 golden/flip.out
+text 2 golden/flip.rc
+0
+
+sha256 78976c4b8e411eaa78862080492e477bc0aab1e5091cfe49185684f02d83910b 1236 golden/float.out
+text 2 golden/float.rc
+0
+
+sha256 bca9f22dc1e91a397c72690a838c6e9023ea6ba2e601610146f964fb70b71596 1308 golden/input_opt.out
+text 2 golden/input_opt.rc
+0
+
+sha256 47f84837d218f26c6f7b87c868cbc245e72dd67da5170a47685839a60a651436 1562 golden/interactive.out
+text 2 golden/interactive.rc
+0
+
+sha256 90b8ee05552c96e089f8da7388b3c521bbd80789933969624c665fe22e5bdcb0 1254 golden/interactive3.out
+text 2 golden/interactive3.rc
+1
+
+text 110 golden/missing.out
+ERROR: iiOpen - Opening file none.mrc (No such file or directory)
+
+ERROR: iiuOpen - Could not open 'none.mrc'
+
+text 2 golden/missing.rc
+1
+
+sha256 c2e7ec02bc223c6bd7d9c930e51b3554a019f68232c211e3568e9be361e800b2 1236 golden/oldflip.out
+text 2 golden/oldflip.rc
+0
+
+sha256 5bd8b174f95be0fa026819ae6256c298769c71fbdb09c013af377d08110b8201 1236 golden/short.out
+text 2 golden/short.rc
+0
+
+sha256 cf46bd18d22e2801dc540e386f4be8030b1fadfce051479e37431ca40da7d97f 1236 golden/slices.out
+text 2 golden/slices.rc
+0
+
+sha256 6c383d7988ce0a1914efac3f6181bd31b213a1e650eec83fcf82f62cfef3bc9c 1236 golden/trunc.out
+text 2 golden/trunc.rc
+0
+
+sha256 c046fe0e069702543784031eeb57606490a10b39781067269e3e2d76777b0747 1236 golden/xy.out
+text 2 golden/xy.rc
+0
+

@@ -1,0 +1,7 @@
+# name	inputs (src:dst from inputs/)	env	arguments
+usage	-	-	-
+files	a1.log:a1.log a2.log:a2.log b.txt:b.txt	-	a1.log nope b.txt
+glob	a1.log:a1.log a2.log:a2.log b.txt:b.txt	-	-g a*.log zz*
+tree	a1.log:a1.log a2.log:a2.log b.txt:b.txt d1/:d1	-	-r d1 nope
+err_both	a1.log:a1.log a2.log:a2.log b.txt:b.txt	-	-g -r x
+err_dir	a1.log:a1.log a2.log:a2.log b.txt:b.txt d1/:d1	-	-e d1 b.txt

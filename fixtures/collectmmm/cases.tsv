@@ -1,0 +1,10 @@
+# name	inputs (src:dst from inputs/)	env	arguments
+usage	-	-	a b c
+basic	img.mrc:img.mrc r-001.log:r-001.log r-002.log:r-002.log r-003.log:r-003.log	-	pixels= r 3 img.mrc
+start_dir	img.mrc:img.mrc r-002.log:sub/r-002.log r-003.log:sub/r-003.log	-	pixels= r 2 img.mrc 2 sub
+err_int	img.mrc:img.mrc r-001.log:r-001.log r-002.log:r-002.log r-003.log:r-003.log	-	pixels= r x img.mrc
+err_missinglog	img.mrc:img.mrc r-001.log:r-001.log r-002.log:r-002.log r-003.log:r-003.log	-	pixels= r 4 img.mrc
+err_notag	img.mrc:img.mrc r-001.log:r-001.log r-002.log:r-002.log r-003.log:r-003.log	-	mmm: r 1 img.mrc
+err_three	img.mrc:img.mrc three.log:r-001.log	-	pixels= r 1 img.mrc
+err_value	img.mrc:img.mrc bad.log:r-001.log	-	pixels= r 1 img.mrc
+err_noimage	img.mrc:img.mrc r-001.log:r-001.log r-002.log:r-002.log r-003.log:r-003.log	-	pixels= r 3 none.mrc

@@ -5,6 +5,8 @@
 //! script by `fixtures/make-alignlog-goldens.sh`; see `tests/pysetup_common` for
 //! what is compared.  The wider differential behind these goldens is recorded
 //! in `TODO.md` (single-axis setup scripts).
+//!
+//! Pruned 2026-09-26: 16 of 36 rows kept (single-option -e/-s/-w/-a/-p runs kept for `g2_local_robust_cv` only; the other four logs keep their all-options row); the rest stay in cases.tsv as `#full` rows (FULL=1, fixtures/README.md).
 
 mod common;
 mod pysetup_common;

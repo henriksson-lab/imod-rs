@@ -7,6 +7,7 @@
 //! `golden/<case>.out`, and every file native created or changed is in
 //! `golden/<case>/`.  The inputs are hand-authored SerialEM-style `.mdoc`
 //! files; each case's directory also holds an empty directory `sub`.
+//! Pruned 2026-09-26: 43 of 70 rows kept (dropped: value permutations of -order/-binning/-pixel that reach the same branch, a second case per exitError message (doseneg, bin0/052/neg, pixneg, nooutputopt, dirinput, frameset, noimagefile), the reversed-order twins of the NaN/scrambled/tie sorts, and the usage-only plain/twoopt); the rest stay in cases.tsv as `#full` rows (FULL=1, fixtures/README.md).
 
 mod common;
 
@@ -43,10 +44,7 @@ fn every_case_matches_native_golden() {
     let golden = fixture_dir().join("golden");
     let mut failures = Vec::new();
     let mut count = 0;
-    for line in table
-        .lines()
-        .filter(|l| !l.starts_with('#') && !l.is_empty())
-    {
+    for line in common::golden::case_rows(&table) {
         let mut fields = line.split('\t');
         let name = fields.next().unwrap();
         let args = fields.next().unwrap_or(".");
@@ -55,12 +53,11 @@ fn every_case_matches_native_golden() {
         } else {
             args.split_whitespace().collect()
         };
-        let rc: i32 = std::fs::read_to_string(golden.join(format!("{name}.rc")))
-            .unwrap()
+        let rc: i32 = common::golden::read_to_string(&golden.join(format!("{name}.rc")))
             .trim()
             .parse()
             .unwrap();
-        let expected_out = std::fs::read(golden.join(format!("{name}.out"))).unwrap();
+        let expected_out = common::golden::expect(&golden.join(format!("{name}.out")));
         let dir = scratch(name);
         let output = common::imod_cmd("modifymdoc")
             .current_dir(&dir)
@@ -93,22 +90,15 @@ fn every_case_matches_native_golden() {
                 b.to_vec()
             }
         };
-        let (ours, theirs) = (skip_banner(&output.stdout), skip_banner(&expected_out));
-        if ours != theirs {
+        let ours = skip_banner(&output.stdout);
+        if !expected_out.matches_masked(&output.stdout, skip_banner) {
             failures.push(format!(
                 "{name}: stdout differs\n--- native\n{}\n--- ours\n{}",
-                String::from_utf8_lossy(&theirs),
+                expected_out.display(),
                 String::from_utf8_lossy(&ours)
             ));
         }
-        let mut expected_files: Vec<String> = std::fs::read_dir(golden.join(name))
-            .map(|entries| {
-                entries
-                    .map(|e| e.unwrap().file_name().to_str().unwrap().to_string())
-                    .collect()
-            })
-            .unwrap_or_default();
-        expected_files.sort();
+        let expected_files: Vec<String> = common::golden::list(&golden.join(name));
         let mut produced: Vec<String> = std::fs::read_dir(&dir)
             .unwrap()
             .map(|e| e.unwrap().path())
@@ -130,13 +120,13 @@ fn every_case_matches_native_golden() {
             let Ok(ours) = std::fs::read(dir.join(file)) else {
                 continue;
             };
-            let theirs = std::fs::read(golden.join(name).join(file)).unwrap();
-            if ours != theirs {
-                failures.push(format!("{name}: {file} differs from native"));
+            let theirs = common::golden::expect(&golden.join(name).join(file));
+            if let Err(why) = theirs.compare(&ours, common::golden::identity, false) {
+                failures.push(format!("{name}: {file} differs from native: {why}"));
             }
         }
         let _ = std::fs::remove_dir_all(&dir);
     }
-    assert!(count > 50, "only {count} cases ran");
+    assert!(count >= 43, "only {count} cases ran");
     assert!(failures.is_empty(), "{}", failures.join("\n"));
 }

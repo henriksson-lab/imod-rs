@@ -1,5 +1,14 @@
 # Fixture provenance manifest
 
+**Since 2026-09-26 native outputs are not stored as files** (`fixtures/README.md`).
+The golden files named below — the `newstack-*` `.mrc`/`.txt`/`.mdoc` outputs,
+the `model-*.txt` `imodinfo` listings (except `model-view-clip-label.ascii.txt`,
+which is also an input), `usage-*.txt` and `mrcsec-mode*.out.txt` — live in
+`fixtures/golden.manifest` under the same names; the tables keep their
+provenance.  `mrcsec-mode*.err.txt` (the C driver's stderr, which no test
+compared) were dropped.  Several inputs were reduced the same day; the
+per-suite `make-*` scripts and the test headers record how.
+
 Reference revision: Mercurial `1da960f68556bf3d737eb166c2623b69e9f66baf`
 (`IMOD/.version` = 5.2.17, `IMOD/setup2:10` copyright 1994-2025).
 

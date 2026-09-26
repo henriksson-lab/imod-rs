@@ -9,6 +9,7 @@
 //! for byte.  Diagnostics are compared by line count only -- whether a
 //! message happens is behaviour, its wording is not (`CLAUDE.md`); the
 //! `argv[0]` and `errno` text in them differ by construction.
+//! Pruned 2026-09-26: 16 of 35 rows kept (dropped: the big-endian twin of every layout but short and old-style, the trailing-byte/truncated/odd-extended-header files (mrcinfo never checks the body), and the directory/two-file cases that repeat an existing path); the rest stay in cases.tsv as `#full` rows (FULL=1, fixtures/README.md).
 
 mod common;
 
@@ -24,7 +25,9 @@ fn input_dir() -> PathBuf {
 }
 
 fn is_input(path: &Path) -> bool {
-    path.is_file() && !path.extension().is_some_and(|e| e == "py" || e == "tsv")
+    path.is_file()
+        && path.file_name().unwrap() != "golden.manifest"
+        && !path.extension().is_some_and(|e| e == "py" || e == "tsv")
 }
 
 fn scratch(name: &str) -> PathBuf {
@@ -46,10 +49,7 @@ fn every_case_matches_native_golden() {
     let golden = fixture_dir().join("golden");
     let mut failures = Vec::new();
     let mut count = 0;
-    for line in table
-        .lines()
-        .filter(|l| !l.starts_with('#') && !l.is_empty())
-    {
+    for line in common::golden::case_rows(&table) {
         let mut fields = line.split('\t');
         let name = fields.next().unwrap();
         let args = fields.next().unwrap_or(".");
@@ -58,13 +58,12 @@ fn every_case_matches_native_golden() {
         } else {
             args.split_whitespace().collect()
         };
-        let rc: i32 = std::fs::read_to_string(golden.join(format!("{name}.rc")))
-            .unwrap()
+        let rc: i32 = common::golden::read_to_string(&golden.join(format!("{name}.rc")))
             .trim()
             .parse()
             .unwrap();
-        let expected_out = std::fs::read(golden.join(format!("{name}.out"))).unwrap();
-        let expected_err = std::fs::read(golden.join(format!("{name}.err"))).unwrap();
+        let expected_out = common::golden::expect(&golden.join(format!("{name}.out")));
+        let expected_err = common::golden::expect(&golden.join(format!("{name}.err")));
         let dir = scratch(name);
         let output = common::imod_cmd("mrcinfo")
             .current_dir(&dir)
@@ -81,29 +80,22 @@ fn every_case_matches_native_golden() {
                 output.status.code()
             ));
         }
-        if output.stdout != expected_out {
+        if !expected_out.matches(&output.stdout) {
             failures.push(format!(
                 "{name}: stdout differs\n--- native\n{}\n--- ours\n{}",
-                String::from_utf8_lossy(&expected_out),
+                expected_out.display(),
                 String::from_utf8_lossy(&output.stdout)
             ));
         }
         let lines = |b: &[u8]| b.iter().filter(|&&c| c == b'\n').count();
-        if lines(&output.stderr) != lines(&expected_err) {
+        if !expected_err.matches_masked(&output.stderr, |b| lines(b).to_string().into_bytes()) {
             failures.push(format!(
                 "{name}: stderr differs\n--- native\n{}\n--- ours\n{}",
-                String::from_utf8_lossy(&expected_err),
+                expected_err.display(),
                 String::from_utf8_lossy(&output.stderr)
             ));
         }
-        let mut expected_files: Vec<String> = std::fs::read_dir(golden.join(name))
-            .map(|entries| {
-                entries
-                    .map(|e| e.unwrap().file_name().to_str().unwrap().to_string())
-                    .collect()
-            })
-            .unwrap_or_default();
-        expected_files.sort();
+        let expected_files: Vec<String> = common::golden::list(&golden.join(name));
         let mut produced: Vec<String> = std::fs::read_dir(&dir)
             .unwrap()
             .map(|e| e.unwrap().path())
@@ -125,13 +117,13 @@ fn every_case_matches_native_golden() {
             let Ok(ours) = std::fs::read(dir.join(file)) else {
                 continue;
             };
-            let theirs = std::fs::read(golden.join(name).join(file)).unwrap();
-            if ours != theirs {
-                failures.push(format!("{name}: {file} differs from native"));
+            let theirs = common::golden::expect(&golden.join(name).join(file));
+            if let Err(why) = theirs.compare(&ours, common::golden::identity, false) {
+                failures.push(format!("{name}: {file} differs from native: {why}"));
             }
         }
         let _ = std::fs::remove_dir_all(&dir);
     }
-    assert!(count >= 35, "only {count} cases ran");
+    assert!(count >= 16, "only {count} cases ran");
     assert!(failures.is_empty(), "{}", failures.join("\n"));
 }

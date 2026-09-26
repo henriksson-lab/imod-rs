@@ -1,0 +1,29 @@
+# Cases whose expectation is in defined/ (make-findbeads3d-goldens.sh defined): an upstream-bug
+# fix (BUGS.md, findbeads3d, 2026-09-26) changes their output: addToSortedList returns -1 for a
+# rejected peak (not slot 0), findValueInList returns the count, the black level divides by
+# peakMax - peakMin; minmax also by the first piece of a -xminmax/-yminmax range being a boundary.
+plain
+nonopt
+light
+binexp
+minmax
+angle
+anglecap
+tilt
+ylong
+peakmin
+thrfrac
+thrnum
+thrneg
+storefrac
+storeone
+storeneg
+fallback
+spacing
+guessmax
+verbose2
+verbose3
+template
+annulus
+param
+nooutput

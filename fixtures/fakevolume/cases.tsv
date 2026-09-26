@@ -1,0 +1,26 @@
+# name	args (whitespace-separated; output file is o.mrc in the case directory)
+s1	-output o.mrc -size 20,18,6 -back 1 -scen 10,9,3 -stype 1 -sradii 4 -sdens 5
+s2	-output o.mrc -size 24,20,8 -back 0.5 -offsets 0.3,-0.7,0.2 -scen 10,9,3 -scen 15,12,5 -stype 2 -stype 3 -sradii 1,4 -sradii 2,5 -sdens 5,1 -sdens 3,7
+s3	-output o.mrc -size 24,20,8 -back 0 -scen 10,9,3 -scen 15,12,5 -scen 5,5,5 -stype 1 -sradii 3 -sdens 2 -mode 1
+#full	s4	-output o.mrc -size 24,20,8 -back 0 -scen 10,9,3 -stype 1 -sradii 3 -sdens 2 -mode 0
+#full	s5	-output o.mrc -size 24,20,8 -back 0 -scen 10,9,3 -stype 1 -sradii 3 -sdens 2 -mode 6
+s6	-output o.mrc -size 24,20,8 -back 0 -scen 10,9,3 -stype 1 -sradii 3 -sdens 2 -mode 12
+c1	-output o.mrc -size 30,30,10 -back 1 -cstart 5,5,1 -cend 25,22,9 -cradii 1,3 -cdens 4,2
+c2	-output o.mrc -size 30,30,10 -back 1 -offsets 1.5,-2,0.5 -cstart 5,5,1 -cend 25,22,9 -cstart 3,20,2 -cend 20,4,8 -trunc 1 -trunc 1 -cradii 1,3 -cradii 2,2.5 -cdens 4,2 -cdens 1,6
+c3	-output o.mrc -size 30,30,10 -back 1 -cstart 5,5,1 -cend 25,22,9 -cstart 3,20,2 -cend 20,4,8 -trunc 0 -trunc 1 -cradii 1,3 -cdens 4,2 -scen 12,12,4 -scen 20,20,6 -stype 1 -sradii 3 -sdens 2
+c5	-output o.mrc -size 30,30,10 -back 1 -cstart 5,5,1 -cend 25,22,9 -cradii 1,3 -cdens 4,2 -scen 12,12,4 -scen 20,20,6 -stype 1 -sradii 3 -sdens 2 -trunc 1
+c6	-output o.mrc -size 16,16,6 -back 1 -cstart 5,5,3 -cend 5,5,3 -trunc 1 -cradii 1,3 -cdens 4,2
+#full	c7	-output o.mrc -size 16,16,6 -back 1 -cstart 5,5,3 -cend 9,5,3 -trunc 0 -cradii 1,3 -cdens 4,2
+#full	mix	-output o.mrc -size 40,36,12 -back 0.25 -offsets 0.37,0.11,-0.23 -scen 12.3,13.7,5.1 -scen 25,24.2,6.6 -scen 20,10,4 -stype 1 -stype 2 -stype 3 -sradii 4.2 -sradii 2.1,5.4 -sradii 1.5,4 -sdens 3.3 -sdens 2.1,0.4 -sdens 0.7,5.5 -cstart 3.3,30,1 -cend 38,4.7,11.2 -cstart 6,6,2 -cend 30,33,10 -cstart 3,18,6 -cend 38,19,5.5 -trunc 0 -trunc 1 -trunc 0 -cradii 1.1,2.9 -cradii 2,3.4 -cradii 0,1.7 -cdens 1.5,0.6 -cdens -2,3 -cdens 9,9
+e_nosize	-output o.mrc -back 1 -scen 1,1,1
+e_range	-output o.mrc -size 0,4,4 -back 1
+#full	e_big	-output o.mrc -size 50000,50000,1 -back 1
+e_mode	-output o.mrc -size 4,4,4 -back 1 -mode 3
+e_noback	-output o.mrc -size 4,4,4 -scen 1,1,1
+e_stype	-output o.mrc -size 4,4,4 -back 1 -scen 1,1,1 -scen 2,2,2 -scen 3,3,3 -stype 1 -stype 1 -sradii 1 -sdens 1
+e_sradii	-output o.mrc -size 4,4,4 -back 1 -scen 1,1,1 -scen 2,2,2 -scen 3,3,3 -stype 1 -sradii 1 -sradii 1 -sdens 1
+e_sdens	-output o.mrc -size 4,4,4 -back 1 -scen 1,1,1 -scen 2,2,2 -scen 3,3,3 -stype 1 -sradii 1 -sdens 1 -sdens 2
+e_mixtype	-output o.mrc -size 4,4,4 -back 1 -scen 1,1,1 -scen 2,2,2 -stype 1 -stype 2 -sradii 1 -sdens 1 -sdens 2
+e_nocen	-output o.mrc -size 4,4,4 -back 1 -sradii 1
+e_ends	-output o.mrc -size 4,4,4 -back 1 -cstart 1,1,1
+e_nocyl	-output o.mrc -size 4,4,4 -back 1 -cradii 1,2

@@ -1,0 +1,101 @@
+# imod-rs native golden manifest for fixtures/filltomo; see fixtures/README.md.
+# Regenerate with fixtures/regen-golden.sh filltomo; do not edit by hand.
+sha256 b50949867fd83fdceafbc240612c9649e87bfe1384c0cd7be014dec7d6b78181 11284 golden/f_basic.out.fill.mrc
+text 2 golden/f_basic.rc
+0
+
+sha256 12604fca4052e51770bbe8fce89c3f9fbd3475894360391f01ff519262750e78 2216 golden/f_basic.stdout
+sha256 e2879b3302a02f73a2a0bb13d32481f4d07c37311effc471f37800e208634ce5 11284 golden/f_bin.out.fill.mrc
+text 2 golden/f_bin.rc
+0
+
+sha256 3dfb18d28600dfadda9b77d1e7b3d334f2cd169f20c8b3418a826e451f7cb1eb 2255 golden/f_bin.stdout
+sha256 e9d82092d6d96023ddc08d211402c6412c03ae489ed136cf9ac44042e6b2ee5d 11284 golden/f_bndxy.out.fill.mrc
+text 2 golden/f_bndxy.rc
+0
+
+sha256 7003e72514483d9ceaf3b9772495b7e503da99725a7c4a0424e61922dae084b7 2216 golden/f_bndxy.stdout
+text 2 golden/f_both.rc
+1
+
+sha256 fbebe8ab42e536612c24a3b3243c4ee278352418d5fbe8e8742a442492b8e68e 2172 golden/f_both.stdout
+sha256 f1d4f878c591ab4a64595574c87925210c5496dec729747737b20ff841e1ec4d 11284 golden/f_bothx.out.fill.mrc
+text 2 golden/f_bothx.rc
+0
+
+sha256 a2a4a7c3893ad11a40776cd31190d54d7f8fd05027d46deda14345fb1ad8abaf 2294 golden/f_bothx.stdout
+text 2 golden/f_dims.rc
+1
+
+sha256 fb53961d9dc60ba5ad83265d95e9a66f0b13ada3010fabecab5364b3bcd4bfa0 2121 golden/f_dims.stdout
+sha256 5ca975a7acf9b3819e6c9ab1850efd50e72375cf28021bdf5a8a3c17ab4e78a0 11284 golden/f_fewxf.out.fill.mrc
+text 2 golden/f_fewxf.rc
+0
+
+sha256 ef1d5103b1c85b7e0dd15be7b2429a372742768e88735fd61cbfcd6355c842b9 2258 golden/f_fewxf.stdout
+sha256 304c0e08e846c56d212ba8952012a9f4551a35642999a8be5ef6c14169309bee 11284 golden/f_inter.out.fill.mrc
+text 2 golden/f_inter.rc
+0
+
+sha256 2688855d9d056cf28156c69426c39a0e8baa4863bc05fcddefa7ea8b1ea846e4 2560 golden/f_inter.stdout
+sha256 e2879b3302a02f73a2a0bb13d32481f4d07c37311effc471f37800e208634ce5 11284 golden/f_manyxf.out.fill.mrc
+text 2 golden/f_manyxf.rc
+0
+
+sha256 3dfb18d28600dfadda9b77d1e7b3d334f2cd169f20c8b3418a826e451f7cb1eb 2255 golden/f_manyxf.stdout
+sha256 3c3130fbf6161262800a3859656ce179cc5923e692cb7141b098e971f6f058d9 11284 golden/f_mbound.out.fill.mrc
+text 2 golden/f_mbound.rc
+0
+
+sha256 a40e6fb503b3c0eb5aebbc56d7dbd91987037b70054598cfd2e0963b7bf3673a 2216 golden/f_mbound.stdout
+sha256 64a40d013c2fded4d566ffd01236d1438554b64ece3056b08602bf25a9dd2fe6 11284 golden/f_mix.out.fill.mrc
+text 2 golden/f_mix.rc
+0
+
+sha256 7afefd23ec495e7e035c33f5a3c0fe6d78a35a9552ae57e17d499457782b7ea2 2287 golden/f_mix.stdout
+sha256 6f1991debe27b99524795ce12f9a9fbf7d14c0c893f055d865593bdcc15f80b2 11284 golden/f_mxform.out.fill.mrc
+text 2 golden/f_mxform.rc
+0
+
+sha256 9a382142d265fb68125386bfe6abca4b0092bce99e7d18d96e9e84e58394d50e 2255 golden/f_mxform.stdout
+text 2 golden/f_nofill.rc
+0
+
+sha256 5855861d8569ae8378898444b02f365ba6ac7cd27231f26b77efa4a5fbedfabc 1798 golden/f_nofill.stdout
+text 2 golden/f_noinv.rc
+1
+
+sha256 2188a88a76a52f18d2e6f122b1b371cc4dd4f9a89cef7ce9c69697b1c2bdb20e 2083 golden/f_noinv.stdout
+sha256 b50949867fd83fdceafbc240612c9649e87bfe1384c0cd7be014dec7d6b78181 11284 golden/f_nonopt.out.fill.mrc
+text 2 golden/f_nonopt.rc
+0
+
+sha256 12604fca4052e51770bbe8fce89c3f9fbd3475894360391f01ff519262750e78 2216 golden/f_nonopt.stdout
+text 2 golden/f_noraw.rc
+1
+
+sha256 7444575c5df0238002c110290ac630fb23bf42613633f5b8b5ca98ea2cd96e1f 2149 golden/f_noraw.stdout
+text 2 golden/f_nosrc.rc
+1
+
+sha256 c780a26cbd1709a7290f84c9e74908f7025b0076e905c3346be81f3a1092d132 2081 golden/f_nosrc.stdout
+sha256 6a015205682898804c5cfdd31cbb39333eb946846bfcba4dca40cdd9d053cd74 11284 golden/f_sbound.out.fill.mrc
+text 2 golden/f_sbound.rc
+0
+
+sha256 832a1d8528dd6a31563fb46a54ef43ea615acd665f90e7456d32d64287a30465 2216 golden/f_sbound.stdout
+sha256 bbf85629dd8f7caa6a7522d016825bceb5493553b9aaae112f25871cc87ddc65 11284 golden/f_short.out.fills.mrc
+text 2 golden/f_short.rc
+0
+
+sha256 da342c62dad6d089c453ae8ce76fbb7fab0042dae7043cfba43494f611dda982 2219 golden/f_short.stdout
+sha256 e2879b3302a02f73a2a0bb13d32481f4d07c37311effc471f37800e208634ce5 11284 golden/f_sxform.out.fill.mrc
+text 2 golden/f_sxform.rc
+0
+
+sha256 3dfb18d28600dfadda9b77d1e7b3d334f2cd169f20c8b3418a826e451f7cb1eb 2255 golden/f_sxform.stdout
+sha256 bfaba12520f86b9424b4a60a173b7b3c5c79f234d095e2174e5b6405168757fe 11284 golden/f_xyfill.out.fill.mrc
+text 2 golden/f_xyfill.rc
+0
+
+sha256 a05ded1d74c122993d5c8a2f9b9b5c1447ba467f5f9167767af21d398e809b57 2216 golden/f_xyfill.stdout

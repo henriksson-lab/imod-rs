@@ -1,5 +1,5 @@
 # name	arguments (STDIN:<file> feeds the file with -StandardInput)
-basic	-input t.ali -output o.rec -TILTFILE t.tlt -THICKNESS 16 -MODE 1
+#full	basic	-input t.ali -output o.rec -TILTFILE t.tlt -THICKNESS 16 -MODE 1
 stdin	STDIN:std.com
 radial	-input t.ali -output o.rec -TILTFILE t.tlt -THICKNESS 14 -RADIAL 0.3,0.05 -SCALE 1,300 -MODE 1 -WIDTH 34 -SHIFT 1.5,-1 -OFFSET 2,0.5
 log_mode0	-input t.ali -output o.rec -TILTFILE t.tlt -THICKNESS 12 -LOG 10 -SCALE 1.2,90 -MODE 0 -SLICE 4,20

@@ -1,0 +1,11 @@
+# name	inputs (src:dst from inputs/)	env	arguments
+default	vc_basic.com:volcombine.com	-	-
+pieces	vc_pieces.com:volcombine.com	-	volcombine
+pieces_chunk	vc_pieces_chunk.com:volcombine.com	-	-tempdir /scratch/x
+chunk	vc_chunk.com:volcombine.com	-	-local /usr/tmp -global /net/tmp
+lowrad_pcm	vc_lowrad.com:volcombine.pcm	-	-comfile volcombine
+err_tmp	vc_tmp.com:volcombine.com	-	-
+err_usrtmp	vc_usrtmp.com:volcombine.com	-	-
+err_local_only	vc_basic.com:volcombine.com	-	-local /usr/tmp
+err_missing	-	-	foo.com
+err_both	vc_basic.com:volcombine.com vc_basic.com:volcombine.pcm	-	-

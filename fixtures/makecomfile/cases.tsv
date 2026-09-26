@@ -1,0 +1,26 @@
+# name	inputs (src:dst from inputs/)	env	arguments
+xcorr_pt	dataset/:.	-	-input xcorr.com -output xcorr_pt.com -binning 2
+#full	xcorr_pt_change	dataset/:. change.adoc:change.adoc	-	-input xcorr.com -output xcorr_pt.com -binning 4 -change change.adoc
+#full	autofidseed	dataset/:.	-	-output autofidseed.com
+autofidseed_b	dataset/:.	-	-output autofidseedb.com
+autofidseed_single	dataset/:.	-	-output autofidseedb.com -single
+transferfid	dataset/:.	-	-output transferfid.com
+cryoposition	dataset/:.	-	-output cryoposition.com -thickness 300 -bead 10 -find 1 -gpu 0
+newst_3dfind	dataset/:. change.adoc:change.adoc	-	-input newst.com -output newst_3dfind.com -binning 2 -change change.adoc
+tilt_3dfind	dataset/:.	-	-input tilt.com -output tilt_3dfind.com -binning 2 -thickness 200 -shift 3.456 -use
+tilt_3dfind_reproject	dataset/:.	-	-input tilt.com -output tilt_3dfind_reproject.com
+findbeads3d	dataset/:. change.adoc:change.adoc	-	-output findbeads3d.com -binning 2 -bead 10.555 -change change.adoc
+golderaser	dataset/:.	-	-output golderaser.com -bead 10.125 -halffloat 1
+golderaser_directive	dataset/:. change.adoc:change.adoc	-	-output golderaser.com -bead 10 -change change.adoc
+sirtsetup	dataset/:.	-	-output sirtsetup.com
+ctf3dsetup	dataset/:.	-	-input tilt.com -output ctf3dsetup.com -thickness 50 -procs 4
+restrictalign	dataset/:.	-	-input align.com -output restrictalign.com -local 1 -ratios 4.5,3 -skipbeam
+reducefiltvol	dataset/:.	-	-input b_rec.mrc -output reducefiltvol.com -binning 2
+reducefiltvol_frac	dataset/:.	-	-input b_rec.mrc -output reducefiltvol.com -binning 1.5
+extenderasemod	dataset/:. afs.com:autofidseed.com	-	-output extenderasemod -replace 45.5
+varypatchtrack	dataset/:.	-	-output varypatchtracka.com
+err_unknown	dataset/:.	-	-output foo.com
+err_no_binning	dataset/:.	-	-input xcorr.com -output xcorr_pt.com
+err_no_tiltxcorr	dataset/:.	-	-input tilt.com -output xcorr_pt.com -binning 2
+err_no_root	-	-	-output transferfid.com
+usage	-	-	-

@@ -1,0 +1,8 @@
+# name	inputs (src:dst from inputs/)	env	arguments
+usage	-	-	-
+err_final	patchcorr.com:patchcorr.com matchorwarp.com:matchorwarp.com	-	-final X
+err_nomow	patchcorr.com:patchcorr.com	-	-final L
+#full	err_nopc	matchorwarp.com:matchorwarp.com	-	-final L
+err_nowarp	patchcorr.com:patchcorr.com mow_nowarp.com:matchorwarp.com	-	-final L -trial
+err_nosizes	pc_nosizes.com:patchcorr.com matchorwarp.com:matchorwarp.com	-	-final L -extra 0.5 -trial
+err_smaller	patchcorr.com:patchcorr.com matchorwarp.com:matchorwarp.com	-	-final 16,16,8

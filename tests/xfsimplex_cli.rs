@@ -11,6 +11,7 @@
 //! float and short MRC written by the native raw2mrc, and transform files.
 //! Exit status, standard output and every output file must match byte for
 //! byte.
+//! Pruned 2026-09-26: 41 of 54 rows kept (dropped value-only repeats of a covered option -- `-variables 1`/`6`, `-edge` fraction, `-binning 1`/`3`, `-antialias -1`, `-linear` alone, `-step`, `-trace 1`, the 6-variable tiltmatch form -- the short-mode B, identical A/B, and `-useline` past the end, the same exit as negative); the rest stay in cases.tsv as `#full` rows (FULL=1, fixtures/README.md).  The rows that used the 128x104 `al.mrc`/`bl.mrc` pair run on `a.mrc`/`b.mrc` since the same day (same options, a quarter of the input).
 
 mod common;
 
@@ -34,7 +35,11 @@ fn inputs() -> BTreeMap<String, Vec<u8>> {
     for entry in std::fs::read_dir(fixture_dir()).unwrap() {
         let path = entry.unwrap().path();
         let name = path.file_name().unwrap().to_string_lossy().into_owned();
-        if !path.is_file() || name == "cases.tsv" || name.starts_with("make-") {
+        if !path.is_file()
+            || name == "cases.tsv"
+            || name == "golden.manifest"
+            || name.starts_with("make-")
+        {
             continue;
         }
         map.insert(name, std::fs::read(&path).unwrap());
@@ -49,10 +54,7 @@ fn every_case_matches_native_golden() {
     let inputs = inputs();
     let mut failures = Vec::new();
     let mut count = 0;
-    for line in table
-        .lines()
-        .filter(|l| !l.starts_with('#') && !l.is_empty())
-    {
+    for line in common::golden::case_rows(&table) {
         let fields: Vec<&str> = line.split('\t').collect();
         let (name, args, stdin) = (fields[0], fields[1], fields[2]);
         let dir =
@@ -92,8 +94,7 @@ fn every_case_matches_native_golden() {
             .unwrap();
         let output = child.wait_with_output().unwrap();
         count += 1;
-        let rc: i32 = std::fs::read_to_string(golden.join(format!("{name}.rc")))
-            .unwrap()
+        let rc: i32 = common::golden::read_to_string(&golden.join(format!("{name}.rc")))
             .trim()
             .parse()
             .unwrap();
@@ -103,20 +104,19 @@ fn every_case_matches_native_golden() {
                 output.status.code()
             ));
         }
-        let stdout = std::fs::read(golden.join(format!("{name}.stdout"))).unwrap();
-        if output.stdout != stdout {
+        let stdout = common::golden::expect(&golden.join(format!("{name}.stdout")));
+        if !stdout.matches(&output.stdout) {
             failures.push(format!(
                 "{name}: stdout differs\n--- native\n{}\n--- ours\n{}",
-                String::from_utf8_lossy(&stdout),
+                stdout.display(),
                 String::from_utf8_lossy(&output.stdout)
             ));
         }
         let prefix = format!("{name}.out.");
         let mut expected = BTreeMap::new();
-        for entry in std::fs::read_dir(&golden).unwrap() {
-            let file = entry.unwrap().file_name().to_string_lossy().into_owned();
+        for file in common::golden::list(&golden) {
             if let Some(out) = file.strip_prefix(&prefix) {
-                expected.insert(out.to_owned(), std::fs::read(golden.join(&file)).unwrap());
+                expected.insert(out.to_owned(), common::golden::expect(&golden.join(&file)));
             }
         }
         let mut written = BTreeMap::new();
@@ -135,10 +135,10 @@ fn every_case_matches_native_golden() {
                 expected.keys().collect::<Vec<_>>()
             ));
         }
-        for (file, bytes) in &expected {
+        for (file, native) in &expected {
             if let Some(ours) = written.get(file) {
-                if common::mask_stamps(ours) != common::mask_stamps(bytes) {
-                    failures.push(format!("{name}: {file} differs from native"));
+                if let Err(why) = native.compare(ours, common::mask_stamps, false) {
+                    failures.push(format!("{name}: {file} differs from native: {why}"));
                 }
             }
         }
@@ -159,7 +159,7 @@ fn different_y_size_is_refused() {
     for (file, bytes) in &inputs() {
         std::fs::write(dir.join(file), bytes).unwrap();
     }
-    let raw: Vec<u8> = (0..96 * 70 * 2)
+    let raw: Vec<u8> = (0..64 * 46 * 2)
         .flat_map(|index| ((index % 97) as f32).to_le_bytes())
         .collect();
     std::fs::write(dir.join("by.raw"), &raw).unwrap();
@@ -167,7 +167,7 @@ fn different_y_size_is_refused() {
         common::imod_cmd("raw2mrc")
             .current_dir(&dir)
             .args([
-                "-x", "96", "-y", "70", "-z", "2", "-t", "float", "by.raw", "by.mrc"
+                "-x", "64", "-y", "46", "-z", "2", "-t", "float", "by.raw", "by.mrc"
             ])
             .output()
             .unwrap()

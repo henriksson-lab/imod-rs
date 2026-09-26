@@ -1,0 +1,18 @@
+# Cases whose goldens come from imod-rs, not native: each reaches an upstream
+# xyzproj defect that the translation fixes (BUGS.md, "xyzproj").  All other
+# cases' goldens are native.  make-xyzproj-goldens.sh regenerates these from
+# the imod-rs binary ($RSBIN, default target/release/imod) after the native run.
+#   x_series x_seriesz x_seriesfirst x_seriessub x_seriesrev: each view's own
+#     tilt angle for foreshortening (native uses the next view's), and the last
+#     ray of each projection row kept (native zeroes it).
+#   x_seriesfull: the last ray kept (-full does no foreshortening).
+#   x_rayx x_rayz: -ray limits each slice line to the slice width (native: the
+#     output width, reading into the next line or dropping pixels).
+x_series
+x_seriesz
+x_seriesfirst
+x_seriessub
+x_seriesrev
+x_seriesfull
+x_rayx
+x_rayz

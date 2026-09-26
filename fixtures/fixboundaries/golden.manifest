@@ -1,0 +1,62 @@
+# imod-rs native golden manifest for fixtures/fixboundaries; see fixtures/README.md.
+# Regenerate with fixtures/regen-golden.sh fixboundaries; do not edit by hand.
+text 2 golden/f_badnx.rc
+1
+
+sha256 08309242e1534da7a70a205b29d25d577a4c0b37f3be46fe2f72dc6229de01b6 1055 golden/f_badnx.stdout
+text 2 golden/f_eof.rc
+2
+
+text 21 golden/f_eof.stdout
+ Name of input file: 
+text 2 golden/f_nofile.rc
+1
+
+sha256 ce892a7cedbdb928962d2790d64657c002878dbf190e857946e8a59ca1dc18d5 1091 golden/f_nofile.stdout
+text 2 golden/f_noinfo.rc
+1
+
+sha256 08309242e1534da7a70a205b29d25d577a4c0b37f3be46fe2f72dc6229de01b6 1055 golden/f_noinfo.stdout
+text 2 golden/f_nomain.rc
+1
+
+text 114 golden/f_nomain.stdout
+ERROR: iiOpen - Opening file nosuch.mrc (No such file or directory)
+
+ERROR: iiuOpen - Could not open 'nosuch.mrc'
+
+sha256 7620c20f94014e98f3153db49c8e16d629250ecde076d297f25949f6106b58a8 8704 golden/f_onearg.out.mainf.mrc
+text 2 golden/f_onearg.rc
+0
+
+sha256 37dc5dc001c2fa4686ee58459da8092f2d7bcbac6eb1d095b32ed0a0092b1c96 2947 golden/f_onearg.stdout
+sha256 106c4cc0c4ab5c981012d1e7454cf77976543433773004cb7cd0d3240aa0060a 8704 golden/f_short.out.mainf.mrc
+text 2 golden/f_short.rc
+1
+
+sha256 b08937f53b747d0ab0e621b3479786cdd410fbc461284c2bc865cad3614e378b 2163 golden/f_short.stdout
+sha256 b210696628f34357a348b5ea7e40b88d78d44ea0c618d691104bfc4360059372 8704 golden/f_stdin.out.mainf.mrc
+text 2 golden/f_stdin.rc
+0
+
+sha256 e2c833bc44ee874a7e5d0ae24f5adcbca0fe5437782e2d55b644fd9de3caa352 3942 golden/f_stdin.stdout
+sha256 7620c20f94014e98f3153db49c8e16d629250ecde076d297f25949f6106b58a8 8704 golden/f_y.out.mainf.mrc
+text 2 golden/f_y.rc
+0
+
+sha256 f8126ed7acc7c063667cde407e7bb730b95b727d74d9bea4d0904da72e342184 2925 golden/f_y.stdout
+sha256 b210696628f34357a348b5ea7e40b88d78d44ea0c618d691104bfc4360059372 8704 golden/f_z.out.mainf.mrc
+text 2 golden/f_z.rc
+0
+
+sha256 c355248c7fb2298f07d42e4bdb34dcc34b586f209caebfc70348ad5f22abb340 3899 golden/f_z.stdout
+sha256 345c168ce1f4a2c03571f44b38221e4e5954cc2f539b4fa93ce184f1d9081236 8704 golden/f_z2.out.mainf.mrc
+text 2 golden/f_z2.rc
+0
+
+sha256 7125d8f034a886bf96e2eae858878743c7edcc47a7bd9231c5ae3f3fa918ab5b 1951 golden/f_z2.stdout
+sha256 f89a67836e74f4ce7c0baf068c104796ad3419d73353191a263e6f1423228849 2944 golden/f_zbyte.out.mainb.mrc
+text 2 golden/f_zbyte.rc
+0
+
+sha256 35c4c737c2a4453545441858ef3aa5d58b8d0ccf2739ada0086523c905f02112 3971 golden/f_zbyte.stdout

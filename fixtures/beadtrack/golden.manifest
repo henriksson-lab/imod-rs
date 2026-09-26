@@ -1,0 +1,158 @@
+# imod-rs native golden manifest for fixtures/beadtrack; see fixtures/README.md.
+# Regenerate with fixtures/regen-golden.sh beadtrack; do not edit by hand.
+sha256 2d4ad462bee3c8419010924c134fa073ddc052b5f1f55fc3bdb4a53e3df79750 6379 golden/base.out
+text 2 golden/base.rc
+0
+
+sha256 4887f2b7ad78bb7627588f52128ccceb01946d0b505015b1f015e50ff67bb1a1 2360 golden/base/t1.fid
+sha256 2615e52c3cd6473913244e96a006a72584ed9f7bcf00bcc5985f7ae28515cb52 3253 golden/boxout.out
+text 2 golden/boxout.rc
+0
+
+sha256 f7c52a5bccd87fc78312b72fb81e36edbef7b57530c0d1bdcb9abd432ddeb1df 82672 golden/boxout/t1.bx.box
+sha256 04bd3f3707c79f8a639ffef0ae245ed7150af0e30921cf977312ac8f7be01433 1323 golden/boxout/t1.bx.brpl
+sha256 e5fef1048aadf9067a4a10f0f7dd74221cf4e1c138b081e0e0534bb646066533 171376 golden/boxout/t1.bx.cor
+sha256 f1c8e5135416870163f7a23b87edb484bc59f602edf900258136c13e1f7ffccd 1323 golden/boxout/t1.bx.cpl
+sha256 691517f25a00713313860e43d1d7ceaef6ebd8eeffceb493c0fcd7845767b574 82672 golden/boxout/t1.bx.ref
+sha256 b29eac4c516f1f515f62d2565ac27fb27c97fd47f63853f838b5403bbcc67966 1508 golden/boxout/t1.fid
+sha256 2578d2248305c639941f531ae51e14404d93a0cd78309ddf78e590536e34c91a 6227 golden/elong.out
+text 2 golden/elong.rc
+0
+
+sha256 d6cfb893d76019a6ace3c6d42cebfe4a1c87266c0314014b8553b37575129f4f 700 golden/elong/t1.elong
+sha256 859e8be202c4dfd87e42a93ce5fab85820b4cc9b74e1e82277d64137d4918818 2360 golden/elong/t1.fid
+text 385 golden/elong/t1.xyz
+     1      -1.269       0.073      -7.183       0.786
+     2       0.926      -0.054       6.387       0.645
+     3      -1.298       0.073      -6.700       0.733
+     4       1.108      -0.057       0.528       0.828
+     5       0.923      -0.052       6.562       0.726
+     6      -1.321       0.071      -5.896       0.970
+     7       0.930      -0.054       6.302       0.680
+
+text 450 golden/err-both.out
+
+Input image file:: t1.mrc
+ Dimensions:    127    121     21   Pixel size:         1          1          1
+Mode:  0               Min, max, mean:            0          255       235.25
+raw2mrc: Converted to mrc format.                       25-Sep-26  12:36:12
+NEWSTACK: Images copied             , densities scaled  26-Sep-26  23:46:02
+
+Opened OLD file: t1.rawtlt
+ERROR: beadtrack - You must enter either BeadDiameter or CentroidRadius but not both
+
+text 2 golden/err-both.rc
+1
+
+text 416 golden/err-dup.out
+
+Input image file:: t1.mrc
+ Dimensions:    127    121     21   Pixel size:         1          1          1
+Mode:  0               Min, max, mean:            0          255       235.25
+raw2mrc: Converted to mrc format.                       25-Sep-26  12:36:12
+NEWSTACK: Images copied             , densities scaled  26-Sep-26  23:46:02
+ERROR: beadtrack - Two points (# 1 and 2) on view 11 in contour 1 of object 1
+
+
+text 2 golden/err-dup.rc
+1
+
+text 410 golden/err-nobox.out
+
+Input image file:: t1.mrc
+ Dimensions:    127    121     21   Pixel size:         1          1          1
+Mode:  0               Min, max, mean:            0          255       235.25
+raw2mrc: Converted to mrc format.                       25-Sep-26  12:36:12
+NEWSTACK: Images copied             , densities scaled  26-Sep-26  23:46:02
+
+Opened OLD file: t1.rawtlt
+ERROR: beadtrack - You must enter a box size
+
+text 2 golden/err-nobox.rc
+1
+
+text 413 golden/err-noseed.out
+
+Input image file:: t1.mrc
+ Dimensions:    127    121     21   Pixel size:         1          1          1
+Mode:  0               Min, max, mean:            0          255       235.25
+raw2mrc: Converted to mrc format.                       25-Sep-26  12:36:12
+NEWSTACK: Images copied             , densities scaled  26-Sep-26  23:46:02
+ERROR: beadtrack - Reading seed model file nothere.mod: FILE DOES NOT EXIST
+
+text 2 golden/err-noseed.rc
+1
+
+text 416 golden/err-oddidx.out
+
+Input image file:: t1.mrc
+ Dimensions:    127    121     21   Pixel size:         1          1          1
+Mode:  0               Min, max, mean:            0          255       235.25
+raw2mrc: Converted to mrc format.                       25-Sep-26  12:36:12
+NEWSTACK: Images copied             , densities scaled  26-Sep-26  23:46:02
+ERROR: beadtrack - An odd number of values was entered for SetIndexedParameter
+
+text 2 golden/err-oddidx.rc
+1
+
+sha256 8d2c22303ff122431506cad148eb93ffa8d25ea70c85be1c61d3e5bbc18998ae 6448 golden/indexed.out
+text 2 golden/indexed.rc
+0
+
+sha256 2d9e67978aafb63bd4e90074d40ac6b3e0ae3a4ae32ac50132891d284894d749 2432 golden/indexed/t1.fid
+sha256 95582535a49968a96f18be7a4335f56022059c0fa1fe3ec6ac07e1691bdd39b2 694 golden/lightwrong.out
+text 2 golden/lightwrong.rc
+1
+
+sha256 6874de51af09f903e76455ce66787be6214ce55a1f63b64d7eb90850e80293ce 12949 golden/local.out
+text 2 golden/local.rc
+0
+
+sha256 71239980ace12c930b4fd1f667d71ad2aa785a3c4b68e4458cb1254b3574746b 2240 golden/local/t1.fid
+sha256 d15dda6b14e8f76b9700a16e9e42a020aed4cfff09abb3e050c84c59168543a0 7579 golden/objs.out
+text 2 golden/objs.rc
+0
+
+sha256 095361c70cb7fc4a7b745bd25ea80e9c34045b00027010f9847e50510c4ba538 2636 golden/objs/t1.fid
+sha256 1a1d9b153fd6e65c944feb2191f7802db7fd782483d1733920754e01d55187fb 9978 golden/rounds3.out
+text 2 golden/rounds3.rc
+0
+
+sha256 0ee3b50c0288e6c34a6a5481d99656674879b9353b9a6e704ba50c9ae11ea240 2432 golden/rounds3/t1.fid
+sha256 028827b11f90e10809372a0096a64119fdb14f93d18039246dde9e3a5f4221cd 4784 golden/skip.out
+text 2 golden/skip.rc
+0
+
+sha256 5622b090ca4d61aa6aae1863f507f519ba516471bcf9b9e0b1ac2953fd7d25a8 1964 golden/skip/t1.fid
+sha256 c9fab8316f8a75ea9a5ed91b2439d4c29cf60bc29f0c8af8d13b2399f33170f0 14186 golden/snap.out
+text 2 golden/snap.rc
+0
+
+sha256 967236b4b297477d9e5577df21f0c093793bce1006946e70e9b354980307918f 15016 golden/snap/t1.fid
+sha256 090432494897c0e33f5c843bb359455777a4d6074ac6ab4bdd2c976bfd34cc4d 8260 golden/snap/t1.fid.12.1
+sha256 f1da3a107fa6c173225fbeb30ad430ae8230d4b2b73e81e610a72d57933fa320 6160 golden/snap/t1.fid.9.1
+sha256 0c0a042a2b4903b67c5010857f9806fd5fdbe64273d8e67543a8f76a61652d86 6840 golden/sobel.out
+text 2 golden/sobel.rc
+0
+
+sha256 4621d881baad67e3203bbc2e54d0e289eab260e790ad2ec1e55e772c73d4aa40 2360 golden/sobel/t1.fid
+sha256 aef0cf1b8d9432d7332a0a6fb225e33cb1e2440123a56292bf006d60c2c6d976 5058 golden/sobelelong.out
+text 2 golden/sobelelong.rc
+0
+
+sha256 112b1b2ebdfcb77d0982c4fad14a3e6a1072e2d2f46adc123e9e197003781b21 700 golden/sobelelong/t1.elong
+sha256 3d40cf54de32d70afe59cdbfb012c909d02713f93f487fc92e6bd145085ab53e 2432 golden/sobelelong/t1.fid
+text 385 golden/sobelelong/t1.xyz
+     1      -0.708      -0.643       0.248       0.256
+     2       0.668       0.211      -0.153       0.216
+     3      -0.969      -0.166       0.797       0.177
+     4       1.292       0.173      -2.555       0.323
+     5      -1.026      -0.061       0.444       0.179
+     6      -0.132       0.207       1.627       0.357
+     7       0.874       0.279      -0.408       0.205
+
+sha256 5b78fb9f4b95d291b5e216bf9827ca2120d25b33feaa4e872aeb089f53ce4a1d 31389 golden/trace.out
+text 2 golden/trace.rc
+0
+
+sha256 2d9e67978aafb63bd4e90074d40ac6b3e0ae3a4ae32ac50132891d284894d749 2432 golden/trace/t1.fid

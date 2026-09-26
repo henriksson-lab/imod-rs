@@ -1,0 +1,55 @@
+# name	arguments (- for none)	stdin (printf escapes, - for none)
+s_basic	-aimage a.mrc -bimage b.mrc -output o.xf	-
+s_nonopt	a.mrc b.mrc o.xf	-
+s_var3	-aimage a.mrc -bimage b.mrc -output o.xf -variables 3	-
+s_var4	-aimage a.mrc -bimage b.mrc -output o.xf -variables 4 -linear	-
+#full	s_var6	-aimage a.mrc -bimage b.mrc -output o.xf -variables 6	-
+#full	s_var1	-aimage a.mrc -bimage b.mrc -output o.xf -variables 1	-
+s_init	-aimage a.mrc -bimage b.mrc -output o.xf -variables 6 -initial init.xf -useline 1	-
+s_initformal	-aimage a.mrc -bimage b.mrc -output o.xf -initial init.xf	-
+s_limits	-aimage a.mrc -bimage b.mrc -output o.xf -variables 6 -limits 4,4,5,0.05,0.05,3	-
+s_limformal	-aimage a.mrc -bimage b.mrc -output o.xf -limits 3,3	-
+s_limbad	-aimage a.mrc -bimage b.mrc -output o.xf -limits 3,3,1	-
+#full	s_edge	-aimage a.mrc -bimage b.mrc -output o.xf -edge 0.1 -binning 1	-
+s_edgepix	-aimage a.mrc -bimage b.mrc -output o.xf -edge 6 -binning 1 -variables 4	-
+s_edgebig	-aimage a.mrc -bimage b.mrc -output o.xf -edge 0.5	-
+s_xy	-aimage a.mrc -bimage b.mrc -output o.xf -xminmax 7,57 -yminmax 6,49 -binning 1 -variables 3	-
+s_xybad	-aimage a.mrc -bimage b.mrc -output o.xf -xminmax 50,10	-
+#full	s_bin1	-aimage a.mrc -bimage b.mrc -output o.xf -binning 1 -variables 6	-
+#full	s_bin3	-aimage a.mrc -bimage b.mrc -output o.xf -binning 3 -variables 6	-
+s_anti	-aimage a.mrc -bimage b.mrc -output o.xf -binning 2 -antialias 4 -variables 6	-
+#full	s_antineg	-aimage a.mrc -bimage b.mrc -output o.xf -binning 3 -antialias -1 -variables 3	-
+s_filter	-aimage a.mrc -bimage b.mrc -output o.xf -sig1 0.05 -rad2 0.3 -sig2 0.05 -variables 6	-
+s_after	-aimage a.mrc -bimage b.mrc -output o.xf -rad1 0.05 -rad2 0.25 -sig2 0.05 -after -variables 4	-
+s_sobel	-aimage a.mrc -bimage b.mrc -output o.xf -sobel -binning 1 -variables 3	-
+s_float0	-aimage a.mrc -bimage b.mrc -output o.xf -float 0 -variables 3	-
+s_floatneg	-aimage a.mrc -bimage b.mrc -output o.xf -float -1 -variables 3	-
+s_ccc	-aimage a.mrc -bimage b.mrc -output o.xf -ccc -variables 6 -binning 1	-
+s_local	-aimage a.mrc -bimage b.mrc -output o.xf -local 40 -variables 6 -binning 1	-
+s_localccc	-aimage a.mrc -bimage b.mrc -output o.xf -local 40 -ccc -linear -variables 4	-
+s_localsmall	-aimage a.mrc -bimage b.mrc -output o.xf -local 12	-
+#full	s_linear	-aimage a.mrc -bimage b.mrc -output o.xf -linear -variables 6 -binning 1	-
+s_dist	-aimage a.mrc -bimage b.mrc -output o.xf -distance -variables 3 -binning 1	-
+s_distopts	-aimage a.mrc -bimage b.mrc -output o.xf -distance -near 1 -radius 3 -density 0.1 -percent 0,10,90,100 -variables 4	-
+s_distodd	-aimage a.mrc -bimage b.mrc -output o.xf -distance -percent 0,10,90	-
+s_coarse0	-aimage a.mrc -bimage b.mrc -output o.xf -coarse 0,0 -final 1e-3,0.05 -variables 3	-
+#full	s_step	-aimage a.mrc -bimage b.mrc -output o.xf -step 3 -variables 3	-
+#full	s_trace1	-aimage a.mrc -bimage b.mrc -output o.xf -trace 1 -variables 3	-
+s_trace2	-aimage a.mrc -bimage b.mrc -output o.xf -trace 2 -variables 3 -ccc	-
+s_sections	-aimage a.mrc -bimage b.mrc -output o.xf -sections 1,0 -variables 6	-
+s_secbad	-aimage a.mrc -bimage b.mrc -output o.xf -sections 2,0	-
+#full	s_short	-aimage a.mrc -bimage bs.mrc -output o.xf -variables 6	-
+#full	s_same	-aimage a.mrc -bimage a.mrc -output o.xf	-
+s_size	-aimage a.mrc -bimage odd.mrc -output o.xf	-
+s_var7	-aimage a.mrc -bimage b.mrc -output o.xf -variables 7	-
+s_badinit	-aimage a.mrc -bimage b.mrc -output o.xf -initial bad.xf	-
+s_noinit	-aimage a.mrc -bimage b.mrc -output o.xf -initial nosuch.xf	-
+s_useneg	-aimage a.mrc -bimage b.mrc -output o.xf -initial init.xf -useline -1	-
+#full	s_usebig	-aimage a.mrc -bimage b.mrc -output o.xf -initial init.xf -useline 5	-
+s_tiltmatch	-aimage a.mrc -bimage b.mrc -output o.xf -sections 0,0 -variables 3 -binning 1 -limits 19,16,15	-
+#full	s_tiltmatch6	-aimage a.mrc -bimage b.mrc -output o.xf -sections 0,0 -variables 6 -linear 0 -binning 1 -limits 19,16,15,.1,.05,2	-
+s_missing	-aimage nosuch.mrc -bimage b.mrc -output o.xf	-
+s_nob	-aimage a.mrc	-
+s_help	-help	-
+s_inter	-	a.mrc\nb.mrc\no.xf\n\n/\n3\n/\n/\n1\n0\n1\n
+s_interdist	-	a.mrc\nb.mrc\no.xf\ninit.xf\n5e-4,.02,0,0,2,0\n4\n0.05\n1\n1\n1\n0\n4\n0.05\n2\n0 8 92 100\n

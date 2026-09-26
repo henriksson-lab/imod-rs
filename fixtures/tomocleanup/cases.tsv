@@ -1,0 +1,12 @@
+# name	inputs (src:dst from inputs/)	env	arguments
+trial1	dataset/:. junk/:.	-	-trial 1 .
+trial2	dataset/:. junk/:.	-	-trial 2 .
+remove	dataset/:. junk/:.	-	.
+keep_all	dataset/:. junk/:.	-	-aligned -untrimmed -axis -sirt -filter -trial 1 .
+edf	dataset/:. junk/:. b.edf:b.edf	-	-trial 2 .
+edf_conflict	dataset/:. junk/:. conflict.edf:b.edf	-	-trial 2 .
+two_edf	dataset/:. junk/:. b.edf:b.edf conflict.edf:c.edf	-	-trial 1 .
+two_dirs	dataset/:a junk/:a b.edf:c/b.edf	-	-trial 1 a -dir c
+nothing	dataset/:.	-	.
+err_not_dir	-	-	nodir
+usage	-	-	-

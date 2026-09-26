@@ -11,6 +11,21 @@ a documented non-achievable.
 environment variable is needed and no reference build has to be present: the
 native side is already here, as bytes.
 
+## Since 2026-09-26: digests, not files
+
+`corpus/` and `native-saves/` are no longer stored.  Their SHA-256 digests are
+in `golden.manifest` (keys `corpus/<name>.adoc.xml`,
+`native-saves/<input>.save`; `fixtures/README.md`).  `tests/xml_corpus.rs`
+regenerates the corpus at test time exactly as `drivers/genxml.c` made it —
+the translated `AdocRead`, `AdocSetWriteAsXML(1)`, `AdocWrite`, `AdocClear`
+over `IMOD/autodoc/*.adoc` in byte order — and every generated document must
+match native's digest before it is loaded and saved; each save must then match
+native's save digest.  So the byte-parity contract below is unchanged, and
+`AdocWrite`'s XML mode is checked on the way.  To re-record, put native's
+`corpus/` and `native-saves/` back here (from `drivers/genxml.c` and
+`drivers/probe.c`), run `RECORD_ONLY=1 fixtures/regen-golden.sh xml`, then delete them again.
+The table below describes what those directories held.
+
 ## What is here
 
 | path | what |

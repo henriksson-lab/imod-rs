@@ -76,19 +76,17 @@ fn mdoc_metadata_transfer_matches_the_reference_output() {
             String::from_utf8_lossy(&output.stderr)
         );
         let want_text =
-            std::fs::read_to_string(root.join(format!("fixtures/newstack-mdoc-{name}.txt")))
-                .unwrap();
-        assert_eq!(
-            String::from_utf8_lossy(&output.stdout),
-            want_text,
-            "{name}: stdout must match the reference run"
-        );
+            common::golden::expect(&root.join(format!("fixtures/newstack-mdoc-{name}.txt")));
+        if let Err(why) = want_text.compare(&output.stdout, common::golden::identity, false) {
+            panic!("{name}: stdout must match the reference run: {why}");
+        }
         let got = std::fs::read_to_string(dir.join("o.mrc.mdoc"))
             .unwrap_or_else(|_| panic!("{name}: no output mdoc was written"));
         let want =
-            std::fs::read_to_string(root.join(format!("fixtures/newstack-mdoc-{name}.mdoc")))
-                .unwrap();
-        assert_eq!(got, want, "{name}: output mdoc must match the reference");
+            common::golden::expect(&root.join(format!("fixtures/newstack-mdoc-{name}.mdoc")));
+        if let Err(why) = want.compare(got.as_bytes(), common::golden::identity, false) {
+            panic!("{name}: output mdoc must match the reference: {why}");
+        }
     }
     let _ = std::fs::remove_dir_all(&dir);
 }

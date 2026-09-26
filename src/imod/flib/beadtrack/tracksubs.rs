@@ -1325,7 +1325,16 @@ pub fn count_missing(
         missing[i] = true;
     }
     for i in 1..=num_exlude as usize {
-        missing[iz_exclude[i - 1] as usize] = false;
+        // Source-level UB (`tracksubs.cpp:892`): `SkipViews` is never checked
+        // against the stack size, so a skipped view past `maxView` writes past
+        // the `B3DMALLOC(bool, mx->maxView)` array (`beadtrack.cpp:335`) --
+        // native survives by landing in malloc's slack.  Entries past
+        // `nviewAll` are never read (the loops below stop there), so dropping
+        // the out-of-bounds write changes nothing observable; indexing it
+        // panicked (exit 101 where native exits 0).
+        if let Some(slot) = missing.get_mut(iz_exclude[i - 1] as usize) {
+            *slot = false;
+        }
     }
     for ip in 1..=num_in_obj {
         iz = (fm.p_coord[(fm.object[(ibase + ip - 1) as usize] - 1) as usize][2] as f64 + 0.5)

@@ -1,0 +1,7 @@
+# name	inputs (src:dst from inputs/)	env	arguments
+usage	-	-	-
+err_missing	ga.rec:ga.rec	-	-name g
+err_tiltneg	ga.rec:ga.rec gb.rec:gb.rec	-	-name g -tilt -1,2
+err_tiltbig	ga.rec:ga.rec gb.rec:gb.rec	-	-name g -tilt 1,2
+err_refine	ga.rec:ga.rec gb.rec:gb.rec	-	-name g -refine 6
+err_style	ga.rec:ga.rec gb.rec:gb.rec	-	-name g -style 4

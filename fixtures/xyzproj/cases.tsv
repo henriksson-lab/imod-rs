@@ -1,0 +1,58 @@
+# name	arguments (- for none)	stdin (printf escapes, - for none)
+x_y	-input v.mrc -output o.mrc -axis Y -angles -60,60,15	-
+x_x	-input v.mrc -output o.mrc -axis X -angles -45,45,15	-
+x_z	-input v.mrc -output o.mrc -axis Z -angles 0,170,10	-
+x_lower	v.mrc o.mrc -axis y -angles -90,90,30	-
+#full	x_zero	-input v.mrc -output o.mrc -axis Y -angles 0,0,1	-
+x_wrap	-input v.mrc -output o.mrc -axis Y -angles 170,-170,5	-
+x_neginc	-input v.mrc -output o.mrc -axis X -angles 30,-30,-10	-
+x_inc0	-input v.mrc -output o.mrc -axis Z -angles 25,40,0	-
+x_big	-input v.mrc -output o.mrc -axis Y -angles 400,-300,40	-
+x_sub	-input v.mrc -output o.mrc -axis Y -angles -30,30,10 -xminmax 3,17 -yminmax 2,15 -zminmax 1,12	-
+#full	x_subx	-input v.mrc -output o.mrc -axis X -angles -30,30,10 -xminmax 3,17 -yminmax 2,15 -zminmax 1,12	-
+x_subz	-input v.mrc -output o.mrc -axis Z -angles -30,30,10 -xminmax 3,17 -yminmax 2,15 -zminmax 1,12	-
+x_revz	-input v.mrc -output o.mrc -axis Z -angles -30,30,15 -zminmax 12,2	-
+#full	x_revzy	-input v.mrc -output o.mrc -axis Y -angles -30,30,15 -zminmax 12,2	-
+x_clip	-input v.mrc -output o.mrc -axis Y -angles 0,90,45 -xminmax -5,40 -zminmax -3,99	-
+x_novol	-input v.mrc -output o.mrc -axis Y -angles 0,90,45 -xminmax 10,5	-
+x_tangles	-input v.mrc -output o.mrc -axis Y -tangles -40,-10,0,22.5,61	-
+x_tilefile	-input v.mrc -output o.mrc -axis X -tiltfile v.tlt	-
+x_adjust	-input v.mrc -output o.mrc -axis Y -tiltfile v.tlt -adjust 4.5	-
+#full	x_adjnofile	-input v.mrc -output o.mrc -axis Y -tangles 10,20 -adjust 4.5	-
+x_conflict	-input v.mrc -output o.mrc -axis Y -tangles 10,20 -angles 0,10,5	-
+x_mode0	-input v.mrc -output o.mrc -axis Y -angles -30,30,30 -mode 0	-
+#full	x_mode1	-input v.mrc -output o.mrc -axis Y -angles -30,30,30 -mode 1	-
+#full	x_mode6	-input v.mrc -output o.mrc -axis Y -angles -30,30,30 -mode 6	-
+x_mode12	-input v.mrc -output o.mrc -axis Y -angles -30,30,30 -mode 12	-
+#full	x_width	-input v.mrc -output o.mrc -axis Y -angles -45,45,45 -width 40	-
+x_narrow	-input v.mrc -output o.mrc -axis Y -angles -45,45,45 -width 9	-
+x_addmult	-input v.mrc -output o.mrc -axis Y -angles -45,45,45 -addmult 10,0.5 -fill 3	-
+x_fill	-input v.mrc -output o.mrc -axis Z -angles -45,45,45 -fill -100 -width 35	-
+x_const	-input v.mrc -output o.mrc -axis Y -angles -60,60,30 -constant	-
+#full	x_constx	-input v.mrc -output o.mrc -axis X -angles -60,60,30 -constant -addmult 5,2	-
+x_ray	-input v.mrc -output o.mrc -axis Y -angles -60,60,15 -ray	-
+x_rayx	-input v.mrc -output o.mrc -axis X -angles 0,90,30 -ray	-
+x_rayz	-input v.mrc -output o.mrc -axis Z -angles -90,90,45 -ray -width 30	-
+x_rayconst	-input v.mrc -output o.mrc -axis Y -angles -30,30,30 -ray -constant -addmult 1,3	-
+#full	x_short	-input s.mrc -output o.mrc -axis Y -angles -30,30,30	-
+x_byte	-input b.mrc -output o.mrc -axis X -angles -30,30,30	-
+#full	x_bytez	-input b.mrc -output o.mrc -axis Z -angles 0,90,30 -mode 2	-
+x_series	-input ts.mrc -output o.mrc -series -tiltfile ts.tlt -angles 0,90,45	-
+x_seriesz	-input ts.mrc -output o.mrc -series -tiltfile ts.tlt -axis z -angles -20,20,20	-
+x_seriesfull	-input ts.mrc -output o.mrc -series -tiltfile ts.tlt -full -angles 10,10,0	-
+x_seriesfirst	-input ts.mrc -output o.mrc -series -first -48 -increment 12 -angles -10,10,10	-
+x_seriessub	-input ts.mrc -output o.mrc -series -tiltfile ts.tlt -angles 0,30,30 -zminmax 2,6 -xminmax 4,31	-
+x_seriesrev	-input ts.mrc -output o.mrc -series -tiltfile ts.tlt -angles 0,0,1 -zminmax 7,3	-
+x_seriesaxis	-input ts.mrc -output o.mrc -series -tiltfile ts.tlt -axis X	-
+x_seriesray	-input ts.mrc -output o.mrc -series -tiltfile ts.tlt -ray	-
+x_seriescount	-input ts.mrc -output o.mrc -series -tangles 0,10	-
+x_firstnoser	-input v.mrc -output o.mrc -axis Y -first -30 -increment 10	-
+x_noaxis	-input v.mrc -output o.mrc -angles 0,10,5	-
+x_badaxis	-input v.mrc -output o.mrc -axis Q -angles 0,10,5	-
+#full	x_longaxis	-input v.mrc -output o.mrc -axis YZ -angles 0,10,5	-
+x_noout	-input v.mrc -axis Y	-
+x_noin	-axis Y	-
+x_missing	-input nosuch.mrc -output o.mrc -axis Y	-
+x_help	-help	-
+x_inter	-	v.mrc\no.mrc\n/\nY\n-30 30 15\n/\n/\n/\n/\n
+x_inter2	-	v.mrc\no.mrc\n2 18 1 16 3 10\nx\n0,60,30\n25\n0\n1.5,2\n7\n

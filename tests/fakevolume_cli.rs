@@ -8,6 +8,8 @@
 //! left one.  The volume is compared byte for byte with label stamps masked
 //! (`common::mask_stamps`); stdout likewise (it carries the `NEW image file`
 //! line and the `exitError` messages).
+//!
+//! Pruned 2026-09-26: 20 of 25 rows kept (dropped: modes 0 and 6 (generic output conversion; 1 and 12 kept), the large mixed scene, the oversize error (same message as e_range) and an explicit -trunc 0 cylinder); the rest stay in cases.tsv as `#full` rows (FULL=1 / IMOD_RS_FULL_CASES=1, fixtures/README.md).
 
 mod common;
 
@@ -26,10 +28,7 @@ fn every_case_matches_native_golden() {
     let golden = fixture_dir().join("golden");
     let mut failures = Vec::new();
     let mut count = 0;
-    for line in table
-        .lines()
-        .filter(|l| !l.starts_with('#') && !l.is_empty())
-    {
+    for line in common::golden::case_rows(&table) {
         let (name, args) = line.split_once('\t').unwrap();
         let dir =
             std::env::temp_dir().join(format!("imod-rs-{PROGRAM}-{}-{}", std::process::id(), name));
@@ -46,8 +45,7 @@ fn every_case_matches_native_golden() {
             .output()
             .unwrap();
         count += 1;
-        let rc: i32 = std::fs::read_to_string(golden.join(format!("{name}.rc")))
-            .unwrap()
+        let rc: i32 = common::golden::read_to_string(&golden.join(format!("{name}.rc")))
             .trim()
             .parse()
             .unwrap();
@@ -58,28 +56,28 @@ fn every_case_matches_native_golden() {
                 String::from_utf8_lossy(&output.stderr)
             ));
         }
-        let stdout = std::fs::read(golden.join(format!("{name}.stdout"))).unwrap();
-        if common::mask_stamps(&output.stdout) != common::mask_stamps(&stdout) {
+        let stdout = common::golden::expect(&golden.join(format!("{name}.stdout")));
+        if !stdout.matches_masked(&output.stdout, common::mask_stamps) {
             failures.push(format!(
                 "{name}: stdout differs\n--- native\n{}\n--- ours\n{}",
-                String::from_utf8_lossy(&stdout),
+                stdout.display(),
                 String::from_utf8_lossy(&output.stdout)
             ));
         }
-        let expected = std::fs::read(golden.join(format!("{name}.o.mrc"))).ok();
+        let expected = common::golden::load(&golden.join(format!("{name}.o.mrc")));
         let written = std::fs::read(dir.join("o.mrc")).ok();
         match (expected, written) {
             (None, None) => {}
-            (Some(g), Some(w)) if common::mask_stamps(&g) == common::mask_stamps(&w) => {}
+            (Some(g), Some(w)) if g.matches_masked(&w, common::mask_stamps) => {}
             (g, w) => failures.push(format!(
-                "{name}: o.mrc differs (native {:?} bytes, ours {:?} bytes)",
-                g.map(|b| b.len()),
+                "{name}: o.mrc differs (native {:?}, ours {:?} bytes)",
+                g.map(|b| b.describe()),
                 w.map(|b| b.len())
             )),
         }
         let _ = std::fs::remove_dir_all(&dir);
     }
-    assert!(count >= 25, "only {count} cases read");
+    assert!(count >= 20, "only {count} cases read");
     assert!(failures.is_empty(), "{}", failures.join("\n"));
 }
 
@@ -111,8 +109,8 @@ fn single_trunc_entry_applies_to_every_cylinder() {
         .output()
         .unwrap();
     assert_eq!(output.status.code(), Some(0));
-    let golden = std::fs::read(fixture_dir().join("golden/c2.o.mrc")).unwrap();
+    let golden = common::golden::expect(&fixture_dir().join("golden/c2.o.mrc"));
     let written = std::fs::read(dir.join("o.mrc")).unwrap();
-    assert!(common::mask_stamps(&golden) == common::mask_stamps(&written));
+    assert!(golden.matches_masked(&written, common::mask_stamps));
     let _ = std::fs::remove_dir_all(&dir);
 }

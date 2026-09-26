@@ -1,0 +1,837 @@
+# imod-rs native golden manifest for fixtures/xftransforms; see fixtures/README.md.
+# Regenerate with fixtures/regen-golden.sh xftransforms; do not edit by hand.
+sha256 46ce905eca9f6f8cbe6ae652bcd0a8c10af4b7f860c3fc815dfa0abf3501118a 198938 defined/xftoxg-cpmix.out
+text 2 golden/xfproduct-bad.rc
+1
+
+text 80 golden/xfproduct-bad.stdout
+
+ FORMATTED  ro  file opened: bad.xf
+
+ERROR: XFPRODUCT - READING TRANSFORM FILE
+
+sha256 670519b922bf857c16d5015febf93276e39c23f55140115127c8c3c5a4b07b7a 4453 golden/xfproduct-basic.out
+text 2 golden/xfproduct-basic.rc
+0
+
+text 290 golden/xfproduct-basic.stdout
+
+ FORMATTED  ro  file opened: BBa.xf
+
+ FORMATTED  ro  file opened: midzone2a.xf
+          61  transforms in first file
+          81  transforms in second file
+
+ FORMATTED  new  file opened: p.xf
+ WARNING: XFPRODUCT - Number of transforms does not match
+          61  new transforms written
+
+text 219 golden/xfproduct-big.out
+   1.0000000   0.0000000   0.0000000   1.0000000************************
+   1.0000000   0.0000000   0.0000000   1.0000000     600.000     800.000
+   1.0000000   0.0000000   0.0000000   1.0000000    1000.000    1200.000
+
+text 2 golden/xfproduct-big.rc
+0
+
+text 226 golden/xfproduct-big.stdout
+
+ FORMATTED  ro  file opened: big.xf
+
+ FORMATTED  ro  file opened: big.xf
+           3  transforms in first file
+           3  transforms in second file
+
+ FORMATTED  new  file opened: p.xf
+           3  new transforms written
+
+sha256 cff4136fa745f159ba755814eb0918212b0189460b4b728385e32ab9085b5f45 1097 golden/xfproduct-cpl.out
+text 2 golden/xfproduct-cpl.rc
+0
+
+text 259 golden/xfproduct-cpl.stdout
+Old warping file opened: cps.xf
+
+ FORMATTED  ro  file opened: gen40.xf
+           5  transforms in first file
+          40  transforms in second file
+ WARNING: XFPRODUCT - Number of transforms does not match
+    5 new transforms written to warping file: p.xf
+
+text 292 golden/xfproduct-cplinl.out
+   1.0074409  -0.0256763   0.0223028   1.0094035      28.966       6.100
+   0.9761037   0.0560230  -0.0585017   0.9736555       9.617      -6.382
+   0.9941443  -0.0169227   0.0159899   0.9952378      30.134      -4.549
+   1.0042844   0.0118226  -0.0035772   0.9908427      35.293     -23.881
+
+text 2 golden/xfproduct-cplinl.rc
+0
+
+text 283 golden/xfproduct-cplinl.stdout
+Old warping file opened: cplin.xf
+
+ FORMATTED  ro  file opened: gen40.xf
+           4  transforms in first file
+          40  transforms in second file
+
+ FORMATTED  new  file opened: p.xf
+ WARNING: XFPRODUCT - Number of transforms does not match
+           4  new transforms written
+
+text 2 golden/xfproduct-cpw.rc
+1
+
+text 234 golden/xfproduct-cpw.stdout
+Old warping file opened: cps.xf
+Old warping file opened: w10.xf
+           5  transforms in first file
+          10  transforms in second file
+
+ERROR: XFPRODUCT - WARPINGS THAT ARE NOT OF THE SAME SIZE IMAGE AREA CANNOT BE MULTIPLIED
+
+text 2 golden/xfproduct-empty1.rc
+1
+
+text 131 golden/xfproduct-empty1.stdout
+
+ FORMATTED  ro  file opened: empty.xf
+
+ FORMATTED  ro  file opened: gen5.xf
+
+ERROR: XFPRODUCT - NO TRANSFORMS IN FIRST INPUT FILE
+
+text 2 golden/xfproduct-help.rc
+0
+
+sha256 f2c025bb3ec3c1aed34c56172d7c4046ba049bfb0886365de31e06263c846b99 639 golden/xfproduct-help.stdout
+text 365 golden/xfproduct-interactive.out
+   0.9930282  -0.0034758   0.0015981   0.9998770      40.267       0.696
+   0.9688257   0.0041987  -0.0098580   0.9727191     -40.829      -4.270
+   0.9906917   0.0083928  -0.0118074   0.9875063      22.984       9.676
+   1.0016487   0.0060670   0.0022477   0.9881003      21.298     -37.250
+   1.0005230  -0.0411729   0.0294084   0.9963233     -21.437     -12.606
+
+text 2 golden/xfproduct-interactive.rc
+0
+
+text 392 golden/xfproduct-interactive.stdout
+ File of transforms applied first:  File of transforms applied second:  New file for product transforms: 
+ FORMATTED  ro  file opened: gen5.xf
+
+ FORMATTED  ro  file opened: gen40.xf
+           5  transforms in first file
+          40  transforms in second file
+
+ FORMATTED  new  file opened: p.xf
+ WARNING: XFPRODUCT - Number of transforms does not match
+           5  new transforms written
+
+text 2 golden/xfproduct-interactiveeof.rc
+2
+
+text 71 golden/xfproduct-interactiveeof.stdout
+ File of transforms applied first:  File of transforms applied second: 
+sha256 d8fe12e8ad31ab86ecc1a7f6c8ada4820075901f41f70f8d6b04146cd31f19e0 1095 golden/xfproduct-lcp.out
+text 2 golden/xfproduct-lcp.rc
+0
+
+text 259 golden/xfproduct-lcp.stdout
+
+ FORMATTED  ro  file opened: gen40.xf
+Old warping file opened: cps.xf
+          40  transforms in first file
+           5  transforms in second file
+ WARNING: XFPRODUCT - Number of transforms does not match
+    5 new transforms written to warping file: p.xf
+
+sha256 722dcf3ea3e25ec84022795ee0ab2acd878536d48f39b01bac0b447978018116 4960 golden/xfproduct-lw.out
+text 2 golden/xfproduct-lw.rc
+0
+
+text 259 golden/xfproduct-lw.stdout
+
+ FORMATTED  ro  file opened: gen40.xf
+Old warping file opened: w10.xf
+          40  transforms in first file
+          10  transforms in second file
+ WARNING: XFPRODUCT - Number of transforms does not match
+   10 new transforms written to warping file: p.xf
+
+text 365 golden/xfproduct-mismatch.out
+   0.9930048  -0.0033460   0.0017082   0.9999004      39.786       0.068
+   0.9692005   0.0039591  -0.0101215   0.9723443     -41.046      -7.013
+   0.9907039   0.0084211  -0.0117724   0.9874940      22.914       9.481
+   1.0018094   0.0057919   0.0019741   0.9879396      20.599     -37.801
+   1.0006907  -0.0409128   0.0296133   0.9961556     -22.046     -12.499
+
+text 2 golden/xfproduct-mismatch.rc
+0
+
+text 287 golden/xfproduct-mismatch.stdout
+
+ FORMATTED  ro  file opened: gen40.xf
+
+ FORMATTED  ro  file opened: gen5.xf
+          40  transforms in first file
+           5  transforms in second file
+
+ FORMATTED  new  file opened: p.xf
+ WARNING: XFPRODUCT - Number of transforms does not match
+           5  new transforms written
+
+text 2 golden/xfproduct-missing.rc
+1
+
+text 54 golden/xfproduct-missing.stdout
+
+ERROR: XFPRODUCT - OPENING OR READING TRANSFORM FILE
+
+text 2 golden/xfproduct-noout.rc
+0
+
+sha256 f2c025bb3ec3c1aed34c56172d7c4046ba049bfb0886365de31e06263c846b99 639 golden/xfproduct-noout.stdout
+text 292 golden/xfproduct-odd.out
+   1.0000000   0.0000000   0.0000000   1.0000000       5.000      -6.000
+   0.9800000   0.0198000  -0.0198000   0.9800000      19.920       3.880
+   0.9600000   0.0392000  -0.0392000   0.9600000      10.020      11.780
+   1.0000000   0.0000000   0.0000000   1.0000000      14.000      16.000
+
+text 2 golden/xfproduct-odd.rc
+0
+
+text 226 golden/xfproduct-odd.stdout
+
+ FORMATTED  ro  file opened: odd.xf
+
+ FORMATTED  ro  file opened: odd.xf
+           4  transforms in first file
+           4  transforms in second file
+
+ FORMATTED  new  file opened: p.xf
+           4  new transforms written
+
+sha256 ee9424863f6446dc17ff7820972541fba00a2cd4580c16a3b875c2ec37423070 2920 golden/xfproduct-one1.out
+text 2 golden/xfproduct-one1.rc
+0
+
+text 294 golden/xfproduct-one1.stdout
+
+ FORMATTED  ro  file opened: one.xf
+
+ FORMATTED  ro  file opened: gen40.xf
+           1  transforms in first file
+          40  transforms in second file
+
+ FORMATTED  new  file opened: p.xf
+ Single first transform applied to second transform #           0
+          40  new transforms written
+
+sha256 06e32eb99e42a75da679f8868fdaf2137df44f7958b60da215b10c0b90e1a274 2920 golden/xfproduct-one2.out
+text 2 golden/xfproduct-one2.rc
+0
+
+text 294 golden/xfproduct-one2.stdout
+
+ FORMATTED  ro  file opened: gen40.xf
+
+ FORMATTED  ro  file opened: one.xf
+          40  transforms in first file
+           1  transforms in second file
+
+ FORMATTED  new  file opened: p.xf
+ Single second transform applied to first transform #           5
+          40  new transforms written
+
+sha256 a4580d43e0c3ac311c30f146e2096df7f029d22c164a4df369989d876f7a1b42 4453 golden/xfproduct-opts.out
+text 2 golden/xfproduct-opts.rc
+0
+
+text 226 golden/xfproduct-opts.stdout
+
+ FORMATTED  ro  file opened: BBa.xf
+
+ FORMATTED  ro  file opened: BBa.xf
+          61  transforms in first file
+          61  transforms in second file
+
+ FORMATTED  new  file opened: p.xf
+          61  new transforms written
+
+sha256 eed5b52952afa3422c33d192b8871010523a0f8f1fb79a14a49c6820d3b6276e 2920 golden/xfproduct-scale.out
+text 2 golden/xfproduct-scale.rc
+0
+
+text 230 golden/xfproduct-scale.stdout
+
+ FORMATTED  ro  file opened: gen40.xf
+
+ FORMATTED  ro  file opened: gen40.xf
+          40  transforms in first file
+          40  transforms in second file
+
+ FORMATTED  new  file opened: p.xf
+          40  new transforms written
+
+text 2 golden/xfproduct-scale1.rc
+1
+
+text 250 golden/xfproduct-scale1.stdout
+
+ FORMATTED  ro  file opened: gen40.xf
+
+ FORMATTED  ro  file opened: gen40.xf
+          40  transforms in first file
+          40  transforms in second file
+ERROR: XFPRODUCT - 2 values expected but only 1 values found in value entry:  ScaleShifts  3
+
+sha256 b3c5970fa82428935122105a77c538126f603f4c38d19708c063ac3119bf62a0 2920 golden/xfproduct-single2.out
+text 2 golden/xfproduct-single2.rc
+0
+
+text 285 golden/xfproduct-single2.stdout
+
+ FORMATTED  ro  file opened: gen40.xf
+
+ FORMATTED  ro  file opened: one.xf
+          40  transforms in first file
+           1  transforms in second file
+
+ FORMATTED  new  file opened: p.xf
+ Single second transform applied to all first transforms
+          40  new transforms written
+
+text 2 golden/xfproduct-twoargs.rc
+1
+
+text 45 golden/xfproduct-twoargs.stdout
+
+ERROR: XFPRODUCT - NO OUTPUT FILE SPECIFIED
+
+text 2 golden/xfproduct-wfwd.rc
+1
+
+text 80 golden/xfproduct-wfwd.stdout
+
+ERROR: XFPRODUCT - THIS PROGRAM WILL WORK ONLY WITH INVERSE WARP DISPLACEMENTS
+
+text 2 golden/xfproduct-whalfbad.rc
+1
+
+text 235 golden/xfproduct-whalfbad.stdout
+Old warping file opened: w10.xf
+Old warping file opened: w10half.xf
+          10  transforms in first file
+          10  transforms in second file
+
+ERROR: XFPRODUCT - YOU MUST ENTER SCALES THAT KEEP THE WARPED IMAGE AREA THE SAME SIZE
+
+sha256 a20cab2e26f1026c658bda4e19057395c0bb5b2b4ba7a3a6e919f742b174e9e1 4941 golden/xfproduct-whalfs.out
+text 2 golden/xfproduct-whalfs.rc
+0
+
+text 198 golden/xfproduct-whalfs.stdout
+Old warping file opened: w10.xf
+Old warping file opened: w10half.xf
+          10  transforms in first file
+          10  transforms in second file
+   10 new transforms written to warping file: p.xf
+
+sha256 fdb4fc0de084f6ac627070e790a9c034c4de95527b5e6dfb45bf3eea6e7caff9 4958 golden/xfproduct-wl.out
+text 2 golden/xfproduct-wl.rc
+0
+
+text 259 golden/xfproduct-wl.stdout
+Old warping file opened: w10.xf
+
+ FORMATTED  ro  file opened: gen40.xf
+          10  transforms in first file
+          40  transforms in second file
+ WARNING: XFPRODUCT - Number of transforms does not match
+   10 new transforms written to warping file: p.xf
+
+sha256 eaa77080299ab7ef4bf3dbaa69459b8363308e8d979fcdfa5e2ef41b862fb1b2 4948 golden/xfproduct-wone.out
+text 2 golden/xfproduct-wone.rc
+0
+
+text 256 golden/xfproduct-wone.stdout
+Old warping file opened: w10.xf
+
+ FORMATTED  ro  file opened: one.xf
+          10  transforms in first file
+           1  transforms in second file
+ Single second transform applied to all first transforms
+   10 new transforms written to warping file: p.xf
+
+sha256 d1e049feda12ec98f45a5593552f550d516fca20c805dc3f46c8312edee6b1d0 4965 golden/xfproduct-wscale.out
+text 2 golden/xfproduct-wscale.rc
+0
+
+text 259 golden/xfproduct-wscale.stdout
+Old warping file opened: w10.xf
+
+ FORMATTED  ro  file opened: gen40.xf
+          10  transforms in first file
+          40  transforms in second file
+ WARNING: XFPRODUCT - Number of transforms does not match
+   10 new transforms written to warping file: p.xf
+
+sha256 4b1d702f9c5e1453502e8b443f47eb8e434c8392ac7fd8ec192fbf7eb4ac2187 4962 golden/xfproduct-ww.out
+text 2 golden/xfproduct-ww.rc
+0
+
+text 194 golden/xfproduct-ww.stdout
+Old warping file opened: w10.xf
+Old warping file opened: w10.xf
+          10  transforms in first file
+          10  transforms in second file
+   10 new transforms written to warping file: p.xf
+
+sha256 1c19ed48ac6660327138be4ebc5e8a3732bc0106747f2ecba3080375c178a214 3553 golden/xfproduct-ww7.out
+text 2 golden/xfproduct-ww7.rc
+0
+
+text 198 golden/xfproduct-ww7.stdout
+Old warping file opened: w7var.xf
+Old warping file opened: w7var.xf
+           7  transforms in first file
+           7  transforms in second file
+    7 new transforms written to warping file: p.xf
+
+text 0 golden/xftoxg-bad.out
+
+text 2 golden/xftoxg-bad.rc
+1
+
+text 114 golden/xftoxg-bad.stdout
+
+ FORMATTED  old  file opened: bad.xf
+
+ FORMATTED  new  file opened: o.xg
+
+ERROR: XFTOXG - Reading transform file
+
+text 219 golden/xftoxg-big.out
+   1.0000000   0.0000000   0.0000000   1.0000000      -3.667      -4.667
+   1.0000000   0.0000000   0.0000000   1.0000000      -0.667      -0.667
+   1.0000000   0.0000000   0.0000000   1.0000000       4.333       5.333
+
+text 2 golden/xftoxg-big.rc
+0
+
+text 74 golden/xftoxg-big.stdout
+
+ FORMATTED  old  file opened: big.xf
+
+ FORMATTED  new  file opened: o.xg
+
+sha256 c79ad7c6317f3006ed5587e4a13aad7e920a72f235fc23df4aa99a9b93562d5c 78669 golden/xftoxg-cp8.out
+text 2 golden/xftoxg-cp8.rc
+0
+
+text 63 golden/xftoxg-cp8.stdout
+Old warping file opened: cps.xf
+New warping file written: o.xg
+
+text 2 golden/xftoxg-cpmix.rc
+0
+
+text 66 golden/xftoxg-cpmix.stdout
+Old warping file opened: cpsmix.xf
+New warping file written: o.xg
+
+sha256 34103f18a2cd78720877d4dc13f5ece75d5bc50efd826ecc16bf6928880b36ca 4453 golden/xftoxg-default7.out
+text 2 golden/xftoxg-default7.rc
+0
+
+text 74 golden/xftoxg-default7.stdout
+
+ FORMATTED  old  file opened: BBa.xf
+
+ FORMATTED  new  file opened: o.xg
+
+sha256 34103f18a2cd78720877d4dc13f5ece75d5bc50efd826ecc16bf6928880b36ca 4453 golden/xftoxg-defname.out
+text 2 golden/xftoxg-defname.rc
+0
+
+text 76 golden/xftoxg-defname.stdout
+
+ FORMATTED  old  file opened: BBa.xf
+
+ FORMATTED  new  file opened: BBa.xg
+
+text 0 golden/xftoxg-empty.out
+
+text 2 golden/xftoxg-empty.rc
+0
+
+text 164 golden/xftoxg-empty.stdout
+
+ FORMATTED  old  file opened: empty.xf
+
+ FORMATTED  new  file opened: o.xg
+
+WARNING: XFTOXG - Computing a global alignment since there are fewer than 3 transforms
+
+sha256 721c55192e3268323d704905b6c4d7e3671004e620781e63417166048718abe7 4453 golden/xftoxg-global.out
+text 2 golden/xftoxg-global.rc
+0
+
+text 74 golden/xftoxg-global.stdout
+
+ FORMATTED  old  file opened: BBa.xf
+
+ FORMATTED  new  file opened: o.xg
+
+text 2 golden/xftoxg-help.rc
+0
+
+sha256 f9c9a52ae43491b075b29edd85ce0041dd07570a0d5bcb07e7b209c7841431ed 1435 golden/xftoxg-help.stdout
+sha256 721c55192e3268323d704905b6c4d7e3671004e620781e63417166048718abe7 4453 golden/xftoxg-interactive0.out
+text 2 golden/xftoxg-interactive0.rc
+0
+
+text 495 golden/xftoxg-interactive0.stdout
+ Enter 0 to align all sections to a single average central alignment;
+    or 1 to align to an average alignment that shifts based
+          on a polynomial fit to the whole stack;
+    or N to align each section to an average alignment based
+          on a polynomial fit to the nearest N sections,
+   or -1 or -N for a hybrid of central and shifting alignments:  Input file of f transforms:  Output file of g transforms: 
+ FORMATTED  old  file opened: BBa.xf
+
+ FORMATTED  new  file opened: o.xg
+
+text 2 golden/xftoxg-interactiveeof.rc
+2
+
+text 362 golden/xftoxg-interactiveeof.stdout
+ Enter 0 to align all sections to a single average central alignment;
+    or 1 to align to an average alignment that shifts based
+          on a polynomial fit to the whole stack;
+    or N to align each section to an average alignment based
+          on a polynomial fit to the nearest N sections,
+   or -1 or -N for a hybrid of central and shifting alignments: 
+sha256 afce4cd6ec16b2262c25735f05a14ba6a98d63c1a01e6c5b877a211cca7c61f9 4453 golden/xftoxg-interactiveneg.out
+text 2 golden/xftoxg-interactiveneg.rc
+0
+
+sha256 aaf4d64c6999a8e7c517206a297dc777a86ae650c840fb4610509e3f05d84a5e 669 golden/xftoxg-interactiveneg.stdout
+text 2 golden/xftoxg-missing.rc
+1
+
+text 51 golden/xftoxg-missing.stdout
+
+ERROR: XFTOXG - OPENING OR READING TRANSFORM FILE
+
+sha256 8edddb84841aad134827a3059045cc35823dc35938fcb7d41383ae4d490d69f0 2920 golden/xftoxg-mixed3.out
+text 2 golden/xftoxg-mixed3.rc
+0
+
+text 76 golden/xftoxg-mixed3.stdout
+
+ FORMATTED  old  file opened: gen40.xf
+
+ FORMATTED  new  file opened: o.xg
+
+text 2 golden/xftoxg-mixedglobal.rc
+1
+
+text 69 golden/xftoxg-mixedglobal.stdout
+
+ERROR: XFTOXG - You cannot use hybrid and global alignment together
+
+text 2 golden/xftoxg-mixedneg.rc
+1
+
+text 70 golden/xftoxg-mixedneg.stdout
+
+ERROR: XFTOXG - A negative value for hybrid alignment is not allowed
+
+text 2 golden/xftoxg-negnfit.rc
+1
+
+text 58 golden/xftoxg-negnfit.stdout
+
+ERROR: XFTOXG - A negative value for nfit is not allowed
+
+sha256 97e4a284515ab71f7659fe289c81730a23063b8447e88ab1b6c879364eca08d2 4453 golden/xftoxg-nfit1.out
+text 2 golden/xftoxg-nfit1.rc
+0
+
+text 290 golden/xftoxg-nfit1.stdout
+
+ FORMATTED  old  file opened: BBa.xf
+
+ FORMATTED  new  file opened: o.xg
+ constants and coefficients of fit to          61  natural parameters
+ 336.1198730  -0.0515954   1.1140516  -0.0197598     -61.390     -61.681
+  11.3569489  -0.0028005   0.0050436  -0.0005186       1.705      -0.732
+
+sha256 0100c2c326ff14937310da2d82268ba9ef11501c2313185a766e8d5c4924b281 5913 golden/xftoxg-nfit5o2.out
+text 2 golden/xftoxg-nfit5o2.rc
+0
+
+text 80 golden/xftoxg-nfit5o2.stdout
+
+ FORMATTED  old  file opened: midzone2a.xf
+
+ FORMATTED  new  file opened: o.xg
+
+text 2 golden/xftoxg-noin.rc
+1
+
+text 41 golden/xftoxg-noin.stdout
+
+ERROR: XFTOXG - No input file specified
+
+sha256 34103f18a2cd78720877d4dc13f5ece75d5bc50efd826ecc16bf6928880b36ca 4453 golden/xftoxg-nonopt.out
+text 2 golden/xftoxg-nonopt.rc
+0
+
+text 74 golden/xftoxg-nonopt.stdout
+
+ FORMATTED  old  file opened: BBa.xf
+
+ FORMATTED  new  file opened: o.xg
+
+text 292 golden/xftoxg-odd.out
+   1.0174040  -0.0180895   0.0180895   1.0174040     -11.852      -6.656
+   1.0074108  -0.0077345   0.0077345   1.0074108      -1.714      -4.440
+   0.9874173   0.0125684  -0.0125684   0.9874173       3.277       1.643
+   0.9874173   0.0125684  -0.0125684   0.9874173      10.289       9.454
+
+text 2 golden/xftoxg-odd.rc
+0
+
+text 74 golden/xftoxg-odd.stdout
+
+ FORMATTED  old  file opened: odd.xf
+
+ FORMATTED  new  file opened: o.xg
+
+text 73 golden/xftoxg-one.out
+   1.0000000   0.0000000   0.0000000   1.0000000       0.000       0.000
+
+text 2 golden/xftoxg-one.rc
+0
+
+text 163 golden/xftoxg-one.stdout
+
+ FORMATTED  old  file opened: gen1.xf
+
+ FORMATTED  new  file opened: o.xg
+
+WARNING: XFTOXG - Computing a global alignment since there are fewer than 3 transforms
+
+text 73 golden/xftoxg-partial.out
+   1.0000000   0.0000000   0.0000000   1.0000000       0.000       0.000
+
+text 2 golden/xftoxg-partial.rc
+0
+
+text 78 golden/xftoxg-partial.stdout
+
+ FORMATTED  old  file opened: partial.xf
+
+ FORMATTED  new  file opened: o.xg
+
+sha256 c023fd30c9c913f2ca53ab2da25da3149c21eaf714fe2971442e098af53917e8 2190 golden/xftoxg-range.out
+text 2 golden/xftoxg-range.rc
+0
+
+text 77 golden/xftoxg-range.stdout
+
+ FORMATTED  old  file opened: groups.xf
+
+ FORMATTED  new  file opened: o.xg
+
+sha256 ffb95c53442324daca199a5834444ed93701185994adf8d6ff7f0ae0792dc549 2190 golden/xftoxg-rangeglob.out
+text 2 golden/xftoxg-rangeglob.rc
+0
+
+text 77 golden/xftoxg-rangeglob.stdout
+
+ FORMATTED  old  file opened: groups.xf
+
+ FORMATTED  new  file opened: o.xg
+
+text 0 golden/xftoxg-rangetiny.out
+
+text 2 golden/xftoxg-rangetiny.rc
+1
+
+text 153 golden/xftoxg-rangetiny.stdout
+
+ FORMATTED  old  file opened: groups.xf
+
+ FORMATTED  new  file opened: o.xg
+
+ERROR: XFTOXG - Only 1 point in fit; increase NumberToFit or RangeOfAngles
+
+sha256 a6edfd4018c5c2ac0fd1a4c2d5a7a6df18e3331ec3710c1222a64f1e0ddb2113 4453 golden/xftoxg-ref.out
+text 2 golden/xftoxg-ref.rc
+0
+
+text 74 golden/xftoxg-ref.stdout
+
+ FORMATTED  old  file opened: BBa.xf
+
+ FORMATTED  new  file opened: o.xg
+
+text 2 golden/xftoxg-refbad0.rc
+1
+
+text 59 golden/xftoxg-refbad0.stdout
+
+ERROR: XFTOXG - Reference section number must be positive
+
+text 0 golden/xftoxg-refbig.out
+
+text 2 golden/xftoxg-refbig.rc
+1
+
+text 153 golden/xftoxg-refbig.stdout
+
+ FORMATTED  old  file opened: gen40.xf
+
+ FORMATTED  new  file opened: o.xg
+
+ERROR: XFTOXG - Reference section number too large for number of transforms
+
+text 2 golden/xftoxg-refnfit.rc
+1
+
+text 76 golden/xftoxg-refnfit.stdout
+
+ERROR: XFTOXG - A reference section can only be used with global alignment
+
+sha256 3b8481bd3d0bc43abab77cb3a5a7c1a499f58aa7ffd12a4d02afd2d000b5a971 14600 golden/xftoxg-robust.out
+text 2 golden/xftoxg-robust.rc
+0
+
+sha256 d93448877beba9e8474e3b95eaf093d6b82a790be21c0688c620ece95bed9ded 861 golden/xftoxg-robust.stdout
+sha256 0a00448f6354d1556fec21cc0034a1afa6ca1e57f5832e36521bd390c74ff660 2920 golden/xftoxg-robustiter.out
+text 2 golden/xftoxg-robustiter.rc
+0
+
+text 154 golden/xftoxg-robustiter.stdout
+
+ FORMATTED  old  file opened: gen40.xf
+
+ FORMATTED  new  file opened: o.xg
+Robust fitting to shifts failed for section   24, falling back to regular fit
+
+sha256 4946b4ad7916a51c3dacffdbb67def68cc229fd210ef78ff2f1dc8d96a5688f7 14600 golden/xftoxg-robustk.out
+text 2 golden/xftoxg-robustk.rc
+0
+
+text 234 golden/xftoxg-robustk.stdout
+
+ FORMATTED  old  file opened: gen200.xf
+
+ FORMATTED  new  file opened: o.xg
+Robust fitting to rot/mag failed for section   37, falling back to regular fit
+Robust fitting to shifts failed for section  132, falling back to regular fit
+
+sha256 db4c4cfb821cb02a916bfa80538bd97721b9cb06a47e655f26b9aafd7bcabe91 2920 golden/xftoxg-robustmax.out
+text 2 golden/xftoxg-robustmax.rc
+0
+
+sha256 7a879946a46dde28f5f1d0030984a4a9c8b484ec1b4f96a4ed63ef3353663856 2591 golden/xftoxg-robustmax.stdout
+sha256 40910c5bef7242ba3d1f4b94dbf7bc8eba1c56812365fc9cef4c06c76b81a183 2920 golden/xftoxg-rot.out
+text 2 golden/xftoxg-rot.rc
+0
+
+text 74 golden/xftoxg-rot.stdout
+
+ FORMATTED  old  file opened: rot.xf
+
+ FORMATTED  new  file opened: o.xg
+
+text 146 golden/xftoxg-two.out
+   0.9931532  -0.0297899   0.0280389   0.9949632      -3.438      -9.371
+   1.0060534   0.0300679  -0.0284002   1.0041369       3.438       9.371
+
+text 2 golden/xftoxg-two.rc
+0
+
+text 163 golden/xftoxg-two.stdout
+
+ FORMATTED  old  file opened: gen2.xf
+
+ FORMATTED  new  file opened: o.xg
+
+WARNING: XFTOXG - Computing a global alignment since there are fewer than 3 transforms
+
+text 502 golden/xftoxg-w1.out
+3
+1024 1024 1 1 1.000000 1
+102.400002  204.799988  5  102.400002  204.799988  5
+1.000000  0.000000  0.000000  1.000000  0.000 0.000
+  -0.000  -0.000  0.000  -0.000  0.000  -0.000  0.000  -0.000
+  0.000  -0.000
+  -0.000  0.000  0.000  0.000  0.000  0.000  0.000  0.000
+  0.000  0.000
+  -0.000  0.000  0.000  0.000  0.000  0.000  0.000  0.000
+  0.000  0.000
+  -0.000  0.000  0.000  0.000  0.000  0.000  0.000  0.000
+  0.000  0.000
+  -0.000  0.000  0.000  0.000  0.000  0.000  0.000  0.000
+  0.000  0.000
+
+text 2 golden/xftoxg-w1.rc
+0
+
+text 150 golden/xftoxg-w1.stdout
+
+WARNING: XFTOXG - Computing a global alignment since there are fewer than 3 transforms
+Old warping file opened: w1.xf
+New warping file written: o.xg
+
+sha256 fb3bcebd50eda90ec54182b6aaaf52e1288cee34d8ead2e0d2a7f74d0580750d 4950 golden/xftoxg-w10.out
+text 2 golden/xftoxg-w10.rc
+0
+
+text 63 golden/xftoxg-w10.stdout
+Old warping file opened: w10.xf
+New warping file written: o.xg
+
+sha256 d8c8ef5f03def7578b73dfb3cb019ed274ee35b8d1fba2a0f915e69d2889aa65 4955 golden/xftoxg-w10g.out
+text 2 golden/xftoxg-w10g.rc
+0
+
+text 63 golden/xftoxg-w10g.stdout
+Old warping file opened: w10.xf
+New warping file written: o.xg
+
+sha256 688d80dcb77b45a0f8b1075aa597233de8d659b34585bd326d339b2d0eeec12f 4932 golden/xftoxg-w10half.out
+text 2 golden/xftoxg-w10half.rc
+0
+
+text 67 golden/xftoxg-w10half.stdout
+Old warping file opened: w10half.xf
+New warping file written: o.xg
+
+sha256 ec2a801930b9d72717a5e92aadaaa93fb474a0f2d2b238bd5079ad98ec5b600e 4954 golden/xftoxg-w10mixed.out
+text 2 golden/xftoxg-w10mixed.rc
+0
+
+text 63 golden/xftoxg-w10mixed.stdout
+Old warping file opened: w10.xf
+New warping file written: o.xg
+
+sha256 e45168c5496ae2d7f0e16e8a3c2935daddc7c4ac098164e7e172585d9bb0f105 4951 golden/xftoxg-w10robust.out
+text 2 golden/xftoxg-w10robust.rc
+0
+
+text 63 golden/xftoxg-w10robust.stdout
+Old warping file opened: w10.xf
+New warping file written: o.xg
+
+text 2 golden/xftoxg-wfwd.rc
+1
+
+text 77 golden/xftoxg-wfwd.stdout
+
+ERROR: XFTOXG - THIS PROGRAM WILL WORK ONLY WITH INVERSE WARP DISPLACEMENTS
+
