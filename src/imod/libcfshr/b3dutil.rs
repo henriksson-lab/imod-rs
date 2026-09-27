@@ -1202,43 +1202,57 @@ pub fn c_format_bytes(fmt: &str, args: &[CArg]) -> Vec<u8> {
                             } else {
                                 c_exponent_digits(mag, p - 1)
                             };
-                            let mut d = if x < -4 || x >= p as i32 {
-                                let mut m = mant;
-                                if alt && p - 1 == 0 {
-                                    m.push('.');
+                            // Built in one buffer (no intermediate strings):
+                            // the same text as the `%e`/`%f` forms with C's
+                            // trailing-zero removal applied to the mantissa.
+                            let mut d = String::with_capacity(p + 8);
+                            let trim = |d: &mut String| {
+                                if d.contains('.') {
+                                    let kept = d.trim_end_matches('0').trim_end_matches('.').len();
+                                    d.truncate(kept);
                                 }
-                                format!(
-                                    "{m}{}{}{:02}",
-                                    if upper { 'E' } else { 'e' },
-                                    if x < 0 { '-' } else { '+' },
-                                    x.abs()
-                                )
+                            };
+                            if x < -4 || x >= p as i32 {
+                                d.push_str(&mant);
+                                if alt && p - 1 == 0 {
+                                    d.push('.');
+                                }
+                                if !alt {
+                                    trim(&mut d);
+                                }
+                                d.push(if upper { 'E' } else { 'e' });
+                                d.push(if x < 0 { '-' } else { '+' });
+                                if x.abs() < 10 {
+                                    d.push('0');
+                                }
+                                d.push_str(&x.abs().to_string());
                             } else {
                                 let fp = (p as i32 - 1 - x).max(0) as usize;
-                                let digits: String = mant.chars().filter(|&c| c != '.').collect();
-                                let mut d = if x >= 0 {
-                                    let (int, frac) = digits.split_at(x as usize + 1);
+                                let mut digits = mant.bytes().filter(|&c| c != b'.');
+                                if x >= 0 {
+                                    for c in digits.by_ref().take(x as usize + 1) {
+                                        d.push(c as char);
+                                    }
                                     if fp > 0 {
-                                        format!("{int}.{frac}")
-                                    } else {
-                                        int.to_string()
+                                        d.push('.');
+                                        for c in digits {
+                                            d.push(c as char);
+                                        }
                                     }
                                 } else {
-                                    format!("0.{}{digits}", "0".repeat((-x - 1) as usize))
-                                };
+                                    d.push_str("0.");
+                                    for _ in 0..(-x - 1) {
+                                        d.push('0');
+                                    }
+                                    for c in digits {
+                                        d.push(c as char);
+                                    }
+                                }
                                 if alt && fp == 0 {
                                     d.push('.');
                                 }
-                                d
-                            };
-                            if !alt {
-                                // Trailing zeros are removed from the
-                                // fractional part, and a bare `.` with them.
-                                let cut = d.find(['e', 'E']).unwrap_or(d.len());
-                                let (mant, exp) = d.split_at(cut);
-                                if mant.contains('.') {
-                                    let m = mant.trim_end_matches('0').trim_end_matches('.');
-                                    d = format!("{m}{exp}");
+                                if !alt {
+                                    trim(&mut d);
                                 }
                             }
                             d.into_bytes()
@@ -1325,7 +1339,12 @@ pub fn c_format_bytes(fmt: &str, args: &[CArg]) -> Vec<u8> {
 /// U+FFFD and the output stops matching native. Use [`c_format_bytes`] there;
 /// see its documentation for the differential that found this.
 pub fn c_format(fmt: &str, args: &[CArg]) -> String {
-    String::from_utf8_lossy(&c_format_bytes(fmt, args)).into_owned()
+    // Valid UTF-8 (nearly always) is taken as is rather than scanned and
+    // copied again by `from_utf8_lossy`; invalid bytes are replaced as before.
+    match String::from_utf8(c_format_bytes(fmt, args)) {
+        Ok(text) => text,
+        Err(error) => String::from_utf8_lossy(error.as_bytes()).into_owned(),
+    }
 }
 
 /// `round(mag * 10^pos)` for a finite `mag >= 0`, computed exactly in integer
@@ -1418,7 +1437,10 @@ fn c_exponent_digits(mag: f64, prec: usize) -> (String, i32) {
                 x -= 1;
                 continue;
             }
-            let digits = n.to_string();
+            let digits = match u64::try_from(n) {
+                Ok(n) => n.to_string(),
+                Err(_) => n.to_string(),
+            };
             let mut m = String::with_capacity(prec + 2);
             m.push_str(&digits[..1]);
             if prec > 0 {
@@ -1438,7 +1460,10 @@ fn c_exponent_digits(mag: f64, prec: usize) -> (String, i32) {
 fn c_fixed_digits(mag: f64, prec: usize) -> String {
     if mag.is_finite() && prec <= 22 {
         if let Some(n) = c_exact_scaled_round(mag, prec as i32) {
-            let digits = n.to_string();
+            let digits = match u64::try_from(n) {
+                Ok(n) => n.to_string(),
+                Err(_) => n.to_string(),
+            };
             if prec == 0 {
                 return digits;
             }

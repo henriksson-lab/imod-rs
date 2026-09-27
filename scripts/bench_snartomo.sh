@@ -93,7 +93,12 @@ chmod +x $RSI/bin/python
 # natively on the Rust side too (none of them is a SNARTomo command;
 # archiveorig is a native Python script whose own children are imod-rs).
 for c in montagesize archiveorig subimage; do
-  [ -e $RSI/bin/$c ] || { ln -s $(readlink $NTI/bin/$c) $RSI/bin/$c; echo "NOTE: imod-rs side uses native $c" >&2; }
+  # A wrapper, not a link: the native program needs the reference build's
+  # libraries, and the imod-rs side runs without LD_LIBRARY_PATH (an imod-rs
+  # install needs none; setting it would cost every imod-rs start ~300 failed
+  # library probes that native's own install does not pay).
+  [ -e $RSI/bin/$c ] || { printf '#!/bin/sh\nLD_LIBRARY_PATH=%s exec %s "$@"\n' $REF/buildlib $(readlink $NTI/bin/$c) > $RSI/bin/$c
+                          chmod +x $RSI/bin/$c; echo "NOTE: imod-rs side uses native $c" >&2; }
 done
 # Commands SNARTomo needs that the translation does not have fall back to
 # native on the Rust side, and are reported (none expected).
@@ -103,10 +108,13 @@ for c in header newstack alterheader binvol mrc2tif clip tif2mrc trimvol convert
 done
 
 side_env() { # side -> env assignments
-  local I=$NTI; [ $1 = rs ] && I=$RSI
-  echo "PATH=$I/bin:/usr/bin:/bin IMOD_DIR=$I AUTODOC_DIR=$REF/autodoc LD_LIBRARY_PATH=$REF/buildlib"
+  if [ $1 = rs ]; then
+    echo "PATH=$RSI/bin:/usr/bin:/bin IMOD_DIR=$RSI AUTODOC_DIR=$REF/autodoc"
+  else
+    echo "PATH=$NTI/bin:/usr/bin:/bin IMOD_DIR=$NTI AUTODOC_DIR=$REF/autodoc LD_LIBRARY_PATH=$REF/buildlib"
+  fi
 }
-nat() { env $(side_env nat) "$@"; }
+nat() { env -u LD_LIBRARY_PATH $(side_env nat) "$@"; }
 
 # ---------------------------------------------------------------- input data
 # TS_01: 4096 x 4096 x 35 float, 1.179 A, real detector data (read only).  No
@@ -301,7 +309,7 @@ run_once() { # side threads dir cmd -> "wall rss cpu rc" ; leaves out.txt err.tx
   local side=$1 th=$2 d=$3 cmd=$4 omp=""
   [ "$th" != default ] && omp="OMP_NUM_THREADS=$th"
   ( cd $d && perf stat -e task-clock -x, -o .perf /usr/bin/time -f "%e %M" -o .time \
-      env $(side_env $side) $omp timeout 3600 bash -c "$cmd" 2>err.txt </dev/null | cat > out.txt
+      env -u LD_LIBRARY_PATH $(side_env $side) $omp timeout 3600 bash -c "$cmd" 2>err.txt </dev/null | cat > out.txt
     exit ${PIPESTATUS[0]} )
   local rc=$?
   local cpu=$(awk -F, '$3=="task-clock"{printf "%.2f", $1/1000}' $d/.perf)
@@ -361,7 +369,7 @@ while IFS='|' read -r name inputs cmd outs; do
     if [[ $MODE != parity ]] && awk -v a=$nw -v b=$rw 'BEGIN{exit !(a<0.2 && b<0.2)}'; then
       for side in nat rs; do
         d=$B/run/$name/$th/$side; omp=""; [ "$th" != default ] && omp="OMP_NUM_THREADS=$th"
-        ( cd $d && env $(side_env $side) $omp perf stat -r ${SHORTREPS:-20} -e task-clock -o .perfr \
+        ( cd $d && env -u LD_LIBRARY_PATH $(side_env $side) $omp perf stat -r ${SHORTREPS:-20} -e task-clock -o .perfr \
             bash -c "$cmd" </dev/null >/dev/null 2>&1 )
         pw=$(awk '/seconds time elapsed/{printf "%.4f", $1}' $d/.perfr)
         pc=$(awk '/task-clock/{gsub(",","",$1); printf "%.4f", $1/1000}' $d/.perfr)
