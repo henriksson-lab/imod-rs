@@ -369,6 +369,12 @@ pub struct Brt {
     pub total_del_tilt: f64,
     pub latest_messages: Vec<String>,
     pub suppress_abort: bool,
+    /// Defined behaviour (BUGS.md, "batchruntomo: a failure under
+    /// `suppressAbort` ..."): the text of the latest `abortSet` call that
+    /// `suppressAbort` swallowed, reported if the axis then stops anyway.
+    pub suppressed_abort: Option<String>,
+    /// Defined behaviour (same entry): count of `abortSet` calls reported.
+    pub num_aborts: i32,
     pub abs_directive_file: String,
     pub user_template_dir: Option<PathBuf>,
     pub summary_message: String,
@@ -531,6 +537,8 @@ impl Brt {
             total_del_tilt: 0.,
             latest_messages: Vec::new(),
             suppress_abort: false,
+            suppressed_abort: None,
+            num_aborts: 0,
             abs_directive_file: String::new(),
             user_template_dir: None,
             summary_message: String::new(),
@@ -758,11 +766,14 @@ impl Brt {
     /// `abortSet` (`IMOD/pysrc/batchruntomo:95`).
     pub fn abort_set(&mut self, err_string: &str) {
         if self.suppress_abort {
+            // Defined behaviour (BUGS.md): remember what was suppressed
+            self.suppressed_abort = Some(err_string.to_owned());
             return;
         }
         if self.renaming_only {
             self.exit_error(&format!("renaming only - {err_string}"));
         }
+        self.num_aborts += 1;
 
         let abort_str = ["ABORT SET: ", "ABORT AXIS: ", "ABORT AXIS: "];
         let line = format!("{}{err_string}", abort_str[self.axis_num]);
@@ -3186,6 +3197,7 @@ impl Brt {
         } else {
             "Finding Z limits of the material in the tomogram"
         };
+        self.suppressed_abort = None;
         self.suppress_abort = failure_ok;
         let err = self.run_one_process(&com_name, true, false, mess, false);
         self.suppress_abort = false;
@@ -5620,6 +5632,7 @@ impl Brt {
             let mess = format!(
                 "Doing fine alignment with no distortion or local alignments, {rob_text} robust fitting"
             );
+            self.suppressed_abort = None;
             self.suppress_abort = loop_index == 0 && do_robust != 0;
             let mut sedcom = vec![
                 sed_modify("SurfacesToAnalyze", &self.num_surfaces.to_string(), '/'),
@@ -5848,6 +5861,7 @@ impl Brt {
                     mess += "out";
                 }
                 mess += &format!(" local alignments, {rob_text} robust fitting");
+                self.suppressed_abort = None;
                 self.suppress_abort = loop_index == 0 && do_robust != 0;
                 let mut del_tilt = self.total_del_tilt;
                 if total_fid < min_tot_to_set_angle
@@ -6631,6 +6645,7 @@ impl Brt {
             if self.erase_gold.int() > 1 {
                 comlines.push("ReplaceAboveAngle 0.".to_owned());
             }
+            self.suppressed_abort = None;
             self.suppress_abort = true;
             let out_com = format!("extenderasemod{}", self.axis_com);
             let err = self.make_and_run_one_com(
@@ -7363,6 +7378,7 @@ impl Brt {
                 comlines.push("UseGPU 0".to_owned());
             }
 
+            self.suppressed_abort = None;
             self.suppress_abort = true;
             let out_com = format!("cryoposition{}", self.axis_com);
             let use_gpu = !self.gpu_list.is_empty();
@@ -7598,6 +7614,7 @@ impl Brt {
             ));
         }
 
+        self.suppressed_abort = None;
         self.suppress_abort = true;
         let comfile = format!("tomopitch{}", self.axis_com);
         let err = self.modify_write_and_run_com(
@@ -8172,6 +8189,7 @@ impl Brt {
 
         for _loop in 0..num_loop {
             // Run the process and process and read log regardless
+            self.suppressed_abort = None;
             self.suppress_abort = true;
             let com = format!("{com_root}{}", self.com_ext);
             let err = self.run_one_process(
@@ -10710,7 +10728,21 @@ pub fn batchruntomo(arguments: &[OsString]) -> i32 {
             while brt.starting_step > 100. {
                 brt.starting_step -= 100.;
             }
+            let aborts_before = brt.num_aborts;
+            brt.suppressed_abort = None;
             if brt.run_one_axis() != 0 {
+                // Defined behaviour (BUGS.md, "batchruntomo: a failure under
+                // `suppressAbort` ..."): the source can stop an axis without any
+                // `abortSet` (a failure whose abort was suppressed for a retry that
+                // is then not made) and report "no failures occurred"; report it.
+                if brt.num_aborts == aborts_before {
+                    brt.suppress_abort = false;
+                    let err = brt.suppressed_abort.take().unwrap_or_else(|| {
+                        "Processing stopped after an error that was not reported".to_owned()
+                    });
+                    brt.abort_set(&err);
+                }
+
                 // When an axis fails, mark failure to prevent going on to combine
                 axis_failed = true;
                 if brt.first_start != 0 {
@@ -10756,9 +10788,20 @@ pub fn batchruntomo(arguments: &[OsString]) -> i32 {
             brt.axis_com = brt.com_ext.clone();
             brt.data_name = brt.set_name.clone();
             set_root_and_extension(&brt.data_name.clone(), &brt.type_extension.clone());
+            let aborts_before = brt.num_aborts;
+            brt.suppressed_abort = None;
             if axis_failed {
                 brt.abort_set("One of the axes failed");
-            } else if brt.run_combine() == 0 {
+            } else if brt.run_combine() != 0 {
+                // Defined behaviour (BUGS.md): as for an axis above
+                if brt.num_aborts == aborts_before {
+                    brt.suppress_abort = false;
+                    let err = brt.suppressed_abort.take().unwrap_or_else(|| {
+                        "Processing stopped after an error that was not reported".to_owned()
+                    });
+                    brt.abort_set(&err);
+                }
+            } else {
                 let (minutes, seconds, frac) = elapsed_time_components(start_time);
                 let message = format!(
                     "Completed dataset {}  in {minutes:02}:{seconds:02}.{frac}   [brt4]",

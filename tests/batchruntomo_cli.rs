@@ -383,3 +383,159 @@ fn bypass_setup_reads_rotation_from_serialem_title() {
     assert!(ctfplotter.contains("AxisAngle\t85.3\n"), "{ctfplotter}");
     std::fs::remove_dir_all(&dir).unwrap();
 }
+
+/// Runs `batchruntomo -start 6 -end 6` (fine alignment only) on a dataset
+/// made from the `restrictalign` fixtures: `b25.fid` as `ts.fid`, the header-only
+/// `stub.mrc` as the stack, `align.tmpl` as `align.com`, with the directive
+/// lines in `extra` and the files in `remove` deleted.  Returns the exit
+/// status and standard output.
+fn fine_alignment_run(case: &str, extra: &str, remove: &[&str]) -> (Option<i32>, String) {
+    let source = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("IMOD");
+    let fixtures = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("fixtures/restrictalign");
+    let dir = std::env::temp_dir().join(format!("imod-rs-brt-{case}-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&dir);
+    std::fs::create_dir_all(&dir).unwrap();
+    for (from, to) in [
+        ("stub.mrc", "stub.mrc"),
+        ("stub.mrc", "ts.st"),
+        ("ts.rawtlt", "ts.rawtlt"),
+        ("ts.prexg", "ts.prexg"),
+        ("b25.fid", "ts.fid"),
+    ] {
+        std::fs::copy(fixtures.join(from), dir.join(to)).unwrap();
+    }
+    let template = std::fs::read_to_string(fixtures.join("align.tmpl")).unwrap();
+    std::fs::write(dir.join("align.com"), template.replace("MODEL", "ts.fid")).unwrap();
+    // Read (and rewritten) by makeSeedAndTrack even when step 5 is not run
+    std::fs::write(
+        dir.join("track.com"),
+        "$beadtrack -StandardInput\nImageFile\tts.preali\n",
+    )
+    .unwrap();
+    std::fs::write(dir.join("ts.edf"), "Setup.DatasetName=ts\n").unwrap();
+    std::fs::write(
+        dir.join("brt.adoc"),
+        format!(
+            "setupset.copyarg.dual = 0\nsetupset.copyarg.pixel = 0.4716\n\
+             setupset.copyarg.gold = 10\nsetupset.copyarg.rotation = -90\n\
+             setupset.copyarg.userawtlt = 1\n\
+             runtime.Fiducials.any.trackingMethod = 1\n{extra}"
+        ),
+    )
+    .unwrap();
+    for file in remove {
+        std::fs::remove_file(dir.join(file)).unwrap();
+    }
+    for command in imod_rs::imod::commands::COMMANDS {
+        common::imod_link(command.name);
+    }
+    let path = format!(
+        "{}:/usr/bin:/bin",
+        common::command_link_directory().display()
+    );
+    let result = common::imod_cmd("batchruntomo")
+        .current_dir(&dir)
+        .env("PATH", path)
+        .env("IMOD_DIR", &source)
+        .env("AUTODOC_DIR", source.join("autodoc"))
+        .env("OMP_NUM_THREADS", "1")
+        .args(["-RootName", "ts", "-CurrentLocation"])
+        .arg(&dir)
+        .arg("-DirectiveFile")
+        .arg(dir.join("brt.adoc"))
+        .args(["-StartingStep", "6", "-EndingStep", "6"])
+        .output()
+        .unwrap();
+    common::remove_command_links();
+    let stdout = String::from_utf8_lossy(&result.stdout).into_owned();
+    std::fs::remove_dir_all(&dir).unwrap();
+    (result.status.code(), stdout)
+}
+
+/// BUGS.md, "batchruntomo: a failure under `suppressAbort` ...": restrictalign
+/// fails (no model) during the first, robust fine alignment, whose abort
+/// `runTiltalign` suppresses for a retry.  Native (`IMOD/pysrc/batchruntomo`
+/// with the reference programs, this same dataset) stops the set after
+/// printing the restrictalign error and then reports "no failures occurred",
+/// exit 0.  Defined: the suppressed abort is reported and the set counted as
+/// failed; the exit status stays the source's 0.
+#[test]
+fn restrictalign_failure_under_robust_fitting_is_reported() {
+    let (status, stdout) = fine_alignment_run(
+        "restrictfail",
+        "comparam.align.tiltalign.RobustFitting = 1\n",
+        &["ts.fid"],
+    );
+    assert_eq!(status, Some(0), "{stdout}");
+    assert!(
+        stdout.contains("model file ts.fid does not exist"),
+        "{stdout}"
+    );
+    assert!(
+        stdout.contains("\nABORT SET: An error occurred running restrictalign.com\n"),
+        "{stdout}"
+    );
+    assert_eq!(stdout.matches("ABORT SET:").count(), 1, "{stdout}");
+    assert!(!stdout.contains("Doing fine alignment"), "{stdout}");
+    assert!(
+        stdout.ends_with("Batch run finished; failures occurred for 1 datasets\n"),
+        "{stdout}"
+    );
+}
+
+/// Same entry: restrictalign succeeds ("No restriction"), then `align.com`
+/// fails (its `xfproduct` step has no `ts.prexg`) with no robust-fitting
+/// message to retry on.  Native, on this dataset: "no failures occurred",
+/// exit 0.  Defined: reported as an abort, one failed dataset, exit 0.
+#[test]
+fn align_failure_under_robust_fitting_is_reported() {
+    let (status, stdout) = fine_alignment_run(
+        "alignfail",
+        "comparam.align.tiltalign.RobustFitting = 1\n\
+         comparam.restrictalign.restrictalign.UseCrossValidation = 0\n\
+         runtime.RestrictAlign.any.targetMeasurementRatio = 0.1\n\
+         runtime.RestrictAlign.any.minMeasurementRatio = 0.1\n",
+        &["ts.prexg"],
+    );
+    assert_eq!(status, Some(0), "{stdout}");
+    assert!(
+        stdout.contains("restrictalign: No restriction of parameters needed\n"),
+        "{stdout}"
+    );
+    assert!(
+        stdout.contains("ERROR: XFPRODUCT - OPENING OR READING TRANSFORM FILE"),
+        "{stdout}"
+    );
+    assert!(
+        stdout.contains("\nABORT SET: An error occurred running align.com\n"),
+        "{stdout}"
+    );
+    assert_eq!(stdout.matches("ABORT SET:").count(), 1, "{stdout}");
+    assert!(
+        stdout.ends_with("Batch run finished; failures occurred for 1 datasets\n"),
+        "{stdout}"
+    );
+}
+
+/// Control for the two above: without robust fitting nothing is suppressed,
+/// and native already reports the restrictalign failure.  Its standard output
+/// matched ours line for line (timestamps and the PID aside): one abort, one
+/// failed dataset, exit 0 -- the defined behaviour must not report it twice.
+#[test]
+fn restrictalign_failure_without_robust_fitting_is_reported_once() {
+    let (status, stdout) = fine_alignment_run(
+        "restrictfail0",
+        "comparam.align.tiltalign.RobustFitting = 0\n",
+        &["ts.fid"],
+    );
+    assert_eq!(status, Some(0), "{stdout}");
+    assert!(
+        stdout.contains("\nABORT SET: An error occurred running restrictalign.com\n"),
+        "{stdout}"
+    );
+    assert_eq!(stdout.matches("ABORT SET:").count(), 1, "{stdout}");
+    assert!(
+        stdout.ends_with("Batch run finished; failures occurred for 1 datasets\n"),
+        "{stdout}"
+    );
+}
