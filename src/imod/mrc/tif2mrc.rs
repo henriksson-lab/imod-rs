@@ -367,16 +367,77 @@ fn minmaxmean(
     }
     if mode == MRC_MODE_FLOAT {
         // C assigns this float through its `int pixel` local before
-        // updating statistics, so preserve its truncating conversion.
-        for pixel in tifdata[..4 * size].chunks_exact(4) {
-            let value = f32::from_ne_bytes([pixel[0], pixel[1], pixel[2], pixel[3]]) as i32 as f32;
-            if value < *min {
-                *min = value;
+        // updating statistics, so preserve its truncating conversion --
+        // x86's `cvttss2si`, which gives INT_MIN for NaN and out-of-range
+        // values (Rust's `as` saturates instead).
+        let to_pixel = |bytes: &[u8]| -> i32 {
+            let v = f32::from_ne_bytes([bytes[0], bytes[1], bytes[2], bytes[3]]);
+            if v >= -2147483648.0 && v < 2147483648.0 {
+                v as i32
+            } else {
+                i32::MIN
             }
-            if value > *max {
-                *max = value;
+        };
+        // Integer reduction, as for the integer modes above (SUBSTITUTION,
+        // `TO_OPT.md`): the C adds `int` values to a `double`, which is
+        // exact while every partial sum stays within 2^53 -- guaranteed when
+        // `size * max|pixel| <= 2^53` -- and then equals the `i64` sum.  The
+        // float comparisons see `(float)pixel`, a non-decreasing function of
+        // the integer, so the running min/max end at the float of the
+        // integer extremes (or the untouched initial bounds).  When the bound
+        // does not hold, the C's loop runs as written.
+        let mut lo = i32::MAX;
+        let mut hi = i32::MIN;
+        let mut sum: i64 = 0;
+        let data = &tifdata[..4 * size];
+        let quads = data.chunks_exact(16);
+        let tail = quads.remainder();
+        for quad in quads {
+            // `cvttps2dq` is the same truncation, four at a time, with the
+            // same INT_MIN for NaN and out-of-range values.
+            #[cfg(target_arch = "x86_64")]
+            let values: [i32; 4] = {
+                use core::arch::x86_64::{_mm_cvttps_epi32, _mm_loadu_ps};
+                // SAFETY: `quad` is 16 readable bytes (an unaligned load is
+                // allowed), and SSE2 is part of the x86_64 baseline.
+                unsafe {
+                    core::mem::transmute(_mm_cvttps_epi32(_mm_loadu_ps(quad.as_ptr().cast())))
+                }
+            };
+            #[cfg(not(target_arch = "x86_64"))]
+            let values: [i32; 4] = std::array::from_fn(|k| to_pixel(&quad[4 * k..4 * k + 4]));
+            for value in values {
+                lo = lo.min(value);
+                hi = hi.max(value);
+                sum += value as i64;
             }
-            mean += value as f64;
+        }
+        for pixel in tail.chunks_exact(4) {
+            let value = to_pixel(pixel);
+            lo = lo.min(value);
+            hi = hi.max(value);
+            sum += value as i64;
+        }
+        let largest = (lo as i64).unsigned_abs().max((hi as i64).unsigned_abs());
+        if size > 0 && (largest as u128) * (size as u128) <= 1_u128 << 53 {
+            if (lo as f32) < *min {
+                *min = lo as f32;
+            }
+            if (hi as f32) > *max {
+                *max = hi as f32;
+            }
+            mean = sum as f64;
+        } else {
+            for pixel in tifdata[..4 * size].chunks_exact(4) {
+                let value = to_pixel(pixel);
+                if (value as f32) < *min {
+                    *min = value as f32;
+                }
+                if (value as f32) > *max {
+                    *max = value as f32;
+                }
+                mean += value as f64;
+            }
         }
     }
     (mean / size as f64) as f32

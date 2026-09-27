@@ -331,6 +331,22 @@ pub fn slice_init(
     }
     Ok(())
 }
+
+/// Original `sliceClear` (`islice.c:114`).
+///
+/// Sets the entire slice `s` to the value `val`.
+pub fn slice_clear(s: &mut Islice, val: [f32; 4]) {
+    let magnitude = slice_get_val_magnitude(val, s.mode);
+    s.min = magnitude;
+    s.max = magnitude;
+    s.mean = magnitude;
+    for j in 0..s.ysize {
+        for i in 0..s.xsize {
+            slice_put_val(s, i, j, val);
+        }
+    }
+}
+
 pub fn slice_mode(mst: &[u8]) -> i32 {
     {
         let value = mst;

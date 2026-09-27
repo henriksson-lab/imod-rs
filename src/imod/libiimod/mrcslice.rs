@@ -173,6 +173,28 @@ pub fn slice_read_subm(
     Some(slice)
 }
 
+/// `sliceReadFloat` from mrcslice.c:1086.
+///
+/// Returns a slice with one Z plane of data at `secno` from the file
+/// described by `hin`, read with `mrcReadFloatSlice` (which converts to float
+/// and swaps bytes if necessary), or `None` for errors.  Restored 2026-09-27
+/// for `imodfindbeads` (it had been deleted as dead while that program was
+/// untranslated; drop its `DEAD_CODE.md` row).
+pub fn slice_read_float(hin: &mut MrcHeader, secno: i32) -> Option<Islice> {
+    if crate::imod::libcfshr::islice::slice_mode_if_real(hin.mode) < 0 {
+        crate::imod::libcfshr::b3dutil::b3d_error(
+            Some(&mut crate::imod::libcfshr::b3dutil::ImodFile::Stderr),
+            format_args!("ERROR: sliceReadFloat - file mode must be real\n"),
+        );
+        return None;
+    }
+    let mut slice = slice_create(hin.nx, hin.ny, MRC_MODE_FLOAT)?;
+    if crate::imod::libiimod::mrcfiles::mrc_read_float_slice(slice.data.f_mut(), hin, secno) != 0 {
+        return None;
+    }
+    Some(slice)
+}
+
 /// `sliceNewMode` from mrcslice.c:31.
 pub fn slice_new_mode(s: &mut Islice, mode: i32) -> i32 {
     slice_new_mode_ex(s, mode, 1)
@@ -199,6 +221,50 @@ pub fn slice_new_mode_ex(s: &mut Islice, mode: i32, free_data: i32) -> i32 {
         MRC_MODE_USHORT => (true, 0., 65535.),
         _ => (false, 0., 0.),
     };
+    // Performance, not translation: a single-channel real source going to
+    // byte, short or unsigned short is the C's `default_copy` arm with
+    // `limit_val` and `csize == 1` (`mrcslice.c:186-199`): per pixel, the
+    // `sliceGetVal` member read as float, `B3DMIN(maxval, B3DMAX(minval, v))`
+    // (`clamp`, identical including NaN), and the `slicePutVal` cast.  Here
+    // the members are indexed directly -- the bounds test inside the pair is
+    // always true and the mode `switch` is fixed -- with nothing computed
+    // differently.
+    if s.xsize > 0 && s.ysize > 0 && matches!(s.mode, 0 | 1 | 2 | 6) && matches!(mode, 0 | 1 | 6) {
+        let n = s.xsize as usize * s.ysize as usize;
+        let source: Vec<f32> = match s.mode {
+            0 => s.data.b()[..n].iter().map(|&v| v as f32).collect(),
+            1 => s.data.s()[..n].iter().map(|&v| v as f32).collect(),
+            6 => s.data.us()[..n].iter().map(|&v| v as f32).collect(),
+            _ => Vec::new(),
+        };
+        let source: &[f32] = if s.mode == 2 {
+            &s.data.f()[..n]
+        } else {
+            &source
+        };
+        match mode {
+            0 => {
+                for (d, &v) in ns.data.b_mut()[..n].iter_mut().zip(source) {
+                    *d = v.clamp(lo, hi) as i32 as u8;
+                }
+            }
+            1 => {
+                for (d, &v) in ns.data.s_mut()[..n].iter_mut().zip(source) {
+                    *d = v.clamp(lo, hi) as i32 as i16;
+                }
+            }
+            _ => {
+                for (d, &v) in ns.data.us_mut()[..n].iter_mut().zip(source) {
+                    *d = v.clamp(lo, hi) as i32 as u16;
+                }
+            }
+        }
+        s.data = ns.data;
+        s.mode = ns.mode;
+        s.csize = ns.csize;
+        s.dsize = ns.dsize;
+        return mode;
+    }
     for j in 0..s.ysize {
         for i in 0..s.xsize {
             let mut val = [0.; 4];

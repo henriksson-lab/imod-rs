@@ -816,7 +816,17 @@ pub fn bin_into_slice(
         // single sum.  The partition holds its own slice of `brray`, so
         // `indBase` is the row's offset within that slice rather than within
         // the whole output.
-        let num_threads = num_omp_threads(8);
+        let mut num_threads = num_omp_threads(8);
+        // Performance: below about a million input elements a region is
+        // over before rayon's idle workers settle, and their stealing costs
+        // more than the loop (a `binvol -x 2 -z 2` of a 512 x 200 x 512
+        // tomogram: 512 regions of 0.2 M elements, 0.31 s wall and 3.0 s CPU
+        // on the pool against 0.19 s serial; native 0.19 s with 8 threads).
+        // The rows are disjoint and each sum runs in one iteration, so the
+        // thread count cannot change the output (see above).
+        if (ny_bin as i64) * (bin_y as i64) * (nx_bin as i64) * (bin_x as i64) < 1 << 20 {
+            num_threads = 1;
+        }
         let rows_per_group = if num_threads > 1 {
             (ny_bin as usize).div_ceil(num_threads as usize).max(1)
         } else {
@@ -887,10 +897,23 @@ pub fn bin_into_slice(
             let _ = rayon::ThreadPoolBuilder::new()
                 .num_threads(num_omp_threads(i32::MAX) as usize)
                 .build_global();
-            bray[..(ny_bin * nx_bin) as usize]
-                .par_chunks_mut(rows_per_group * nx_bin as usize)
-                .enumerate()
-                .for_each(run_group);
+            // As in `zoomWithFilter`: OpenMP's master runs one partition
+            // itself and the other `numThreads - 1` go to workers, one task
+            // each.  `par_chunks_mut` instead split the rows recursively and
+            // left the caller blocked, which on the many small slices of a
+            // `binvol -x 2 -z 2` of a tomogram cost more than the loop (0.35 s
+            // wall and 3.7 s CPU against 0.17 s serial).  Same partitions.
+            let run_group = &run_group;
+            let mut tasks = bray[..(ny_bin * nx_bin) as usize]
+                .chunks_mut(rows_per_group * nx_bin as usize)
+                .enumerate();
+            let first = tasks.next().unwrap();
+            rayon::in_place_scope(|s| {
+                for task in tasks {
+                    s.spawn(move |_| run_group(task));
+                }
+                run_group(first);
+            });
         } else {
             bray[..(ny_bin * nx_bin) as usize]
                 .chunks_mut(rows_per_group * nx_bin as usize)

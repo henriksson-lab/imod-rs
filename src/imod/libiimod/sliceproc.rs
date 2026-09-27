@@ -280,13 +280,23 @@ pub fn slice_median_filter(sl_out: &mut Islice, stack: &[Islice], size: i32) -> 
     for any permutation — but `opt_med9` swaps only on `>`, so when the nine
     values contain `+0.0` and `-0.0` together, or a NaN, which of the tied bit
     patterns lands in slot 4 depends on the permutation.  Native's output on
-    such data therefore depends on its thread count.  To match it at every
-    count the rows are partitioned exactly as the static schedule GCC emits for
-    a `parallel for` with no `schedule` clause does: with
-    `q = ny / numThreads` and `r = ny % numThreads`, thread `t` takes
-    `q + (t < r)` consecutive rows starting at `t * q + min(t, r)`, and each
-    group starts with its buffer unloaded.  With one thread this is the single
-    group the previous sequential code ran.
+    such data therefore depends on its thread count (`BUGS.md`, "Output
+    depends on the number of threads").
+
+    **Fixed in translation (2026-09-27): the result is native's at
+    `OMP_NUM_THREADS=1`, on any thread count.**  The rows are still split into
+    the source's static-schedule blocks (thread `t` of `T` takes `q + (t < r)`
+    rows from `t * q + min(t, r)`, `q = ny / T`, `r = ny % T`) and run in
+    parallel, but each block's first row loads its buffer the way the *serial*
+    sweep has it at that row, not freshly: in the one-thread run row 0 loads
+    rows `0, 0, min(1, ny - 1)` into slots 0, 1, 2 with `offset = 0`, and each
+    row `k >= 1` writes row `min(k + 1, ny - 1)` into slot `(k - 1) % 3`.  So at
+    row `oy`, slot `s` holds the row written by the latest `k <= oy`,
+    `k >= 1`, with `k % 3 == (s + 1) % 3` — or its row-0 content if there is
+    none — and `offset` is `oy % 3`.  Row 0 gives exactly the source's initial
+    load, so one block is the source's serial run, and every later row of a
+    block then continues the serial rotation.  The value order handed to
+    `opt_med9` is therefore a function of the absolute row only.
 
     (a) Each group writes only output rows `row0 .. row1` — `ox + oy * outNx`
     for `ox < inNx <= outNx` — so the groups' output slices are disjoint.
@@ -326,16 +336,26 @@ pub fn slice_median_filter(sl_out: &mut Islice, stack: &[Islice], size: i32) -> 
             for oy in row0..row1 {
                 if !initial_loaded {
                     /* Set up pointers and copy the three lines interleaved the
-                    first time */
-                    let line1 = if oy == 0 { 0 } else { oy - 1 };
-                    let line2 = oy;
-                    let line3 = (ny - 1).min(oy + 1);
+                    first time -- in the slots the one-thread sweep has them
+                    at this row (see above); at `oy == 0` this is the source's
+                    `oy - 1, oy, oy + 1` (clamped) in slots 0, 1, 2. */
+                    let initial = [0, 0, (ny - 1).min(1)];
+                    let mut rows = [0usize; 3];
+                    for (slot, row) in rows.iter_mut().enumerate() {
+                        // Latest `k` in `1..=oy` with `k % 3 == (slot + 1) % 3`.
+                        let back = (oy + 3 - (slot + 1) % 3) % 3;
+                        *row = if oy >= back + 1 {
+                            (ny - 1).min(oy - back + 1)
+                        } else {
+                            initial[slot]
+                        };
+                    }
                     for ox in 0..in_nx {
-                        for (slot, row) in [line1, line2, line3].into_iter().enumerate() {
+                        for (slot, &row) in rows.iter().enumerate() {
                             line_vals[3 * ox + slot] = src[ox + row * in_nx];
                         }
                     }
-                    offset = 0;
+                    offset = oy % 3;
                     initial_loaded = true;
                 } else {
                     /* Thereafter just copy the third line into the free slot */
@@ -369,14 +389,9 @@ pub fn slice_median_filter(sl_out: &mut Islice, stack: &[Islice], size: i32) -> 
         if in_nx > out_nx {
             // Not reachable from `clip`, whose output slice has the input's
             // size: the far endpoint of row `oy` then lands in row `oy + 1`,
-            // so rows are not disjoint.  Run the same partition, in order, on
-            // the whole array — which is what a single native thread would do
-            // for each block in turn.
-            for t in 0..nthr {
-                let row0 = t * q + t.min(r);
-                let row1 = row0 + q + usize::from(t < r);
-                run_group((row0, row1, &mut out[..], 0));
-            }
+            // so rows are not disjoint.  Run the one-thread sweep on the whole
+            // array.
+            run_group((0, ny, &mut out[..], 0));
             return 0;
         }
         let mut groups = Vec::with_capacity(nthr);
@@ -754,6 +769,48 @@ mod tests {
         assert_eq!(output.data.f()[4], 5.0);
         assert_eq!(output.data.f()[0], 3.0);
         assert_eq!(output.data.f()[8], 7.0);
+    }
+
+    /// `BUGS.md`, "Output depends on the number of threads": each row block
+    /// of the 3x3 float fast path starts from the one-thread sweep's window
+    /// state, so values with `+0.0`/`-0.0` and NaN ties come out bit for bit
+    /// the same at any thread count (native differs between 1 and 4 threads
+    /// on such data).
+    #[test]
+    fn three_by_three_float_path_is_thread_independent_on_ties() {
+        let (nx, ny) = (61usize, 97usize);
+        let mut input = slice_create(nx as i32, ny as i32, SLICE_MODE_FLOAT).unwrap();
+        let mut seed = 12345u32;
+        for value in input.data.f_mut().iter_mut() {
+            seed = seed.wrapping_mul(1_103_515_245).wrapping_add(12345);
+            *value = match (seed >> 16) % 16 {
+                0 => f32::NAN,
+                1 => 1.,
+                k if k % 2 == 0 => 0.,
+                _ => -0.,
+            };
+        }
+        let stack = vec![input];
+        let run = |threads: &str| {
+            // SAFETY: the gate runs tests serially (`--test-threads=1`).
+            unsafe { std::env::set_var("IMOD_FORCE_OMP_THREADS", threads) };
+            let mut output = slice_create(nx as i32, ny as i32, SLICE_MODE_FLOAT).unwrap();
+            assert_eq!(slice_median_filter(&mut output, &stack, 3), 0);
+            output
+                .data
+                .f()
+                .iter()
+                .map(|v| v.to_bits())
+                .collect::<Vec<u32>>()
+        };
+        let one = run("1");
+        for threads in ["2", "3", "4", "5", "6"] {
+            assert!(
+                run(threads) == one,
+                "3x3 median differs at {threads} threads"
+            );
+        }
+        unsafe { std::env::remove_var("IMOD_FORCE_OMP_THREADS") };
     }
 
     #[test]

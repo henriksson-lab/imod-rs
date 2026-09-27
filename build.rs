@@ -1,4 +1,12 @@
 fn main() {
+    // The `imod` executable is linked as a fixed-address (non-PIE)
+    // executable: every command is a separate process start, and a PIE of
+    // this size carries ~77 000 relative relocations that the loader applies
+    // -- touching ~190 extra pages -- at every start.  Short commands such as
+    // `header` are dominated by start-up, where native IMOD's small
+    // executables pay none of it.  Code generation is unchanged (still
+    // position-independent code); only the final link differs.
+    println!("cargo:rustc-link-arg-bins=-no-pie");
     // Without these, cargo reruns this script — and so recompiles the whole
     // library with a new timestamp — whenever *any* file in the package
     // changes, fixtures included: recording a golden manifest

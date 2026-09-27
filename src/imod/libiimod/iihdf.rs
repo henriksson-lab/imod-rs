@@ -192,9 +192,85 @@ impl HdfScanState {
     }
 }
 
+/// Resolves one HDF5 entry point, loading the library on first use.
+///
+/// HDF5 is not linked into the executable: `libhdf5_serial` drags in about 25
+/// shared libraries (curl, gnutls, krb5, ldap, ssh, ...) whose loading and
+/// constructors cost ~8 ms at *every* start of *every* command, which is more
+/// than a whole native `header` run.  An HDF file is only ever reached through
+/// `iiHDFCheck`, which the check list (`iimage.c:52-71`) tries after TIFF and
+/// MRC, so an MRC or TIFF input never loads it.  The calls themselves are
+/// unchanged: same symbols, same signatures, same library.
+pub(crate) fn hdf5_symbol(name: &str) -> *mut c_void {
+    static HANDLE: std::sync::OnceLock<usize> = std::sync::OnceLock::new();
+    let handle = *HANDLE.get_or_init(|| {
+        for library in [c"libhdf5_serial.so.103", c"libhdf5_serial.so"] {
+            // SAFETY: dlopen of a system library by name; the handle is kept
+            // for the life of the process (never dlclose'd).
+            let handle =
+                unsafe { libc::dlopen(library.as_ptr(), libc::RTLD_NOW | libc::RTLD_GLOBAL) };
+            if !handle.is_null() {
+                return handle as usize;
+            }
+        }
+        panic!("cannot load the HDF5 library libhdf5_serial.so.103");
+    });
+    // SAFETY: `name` is NUL-terminated by the `hdf5_lazy!` expansion.
+    let symbol = unsafe { libc::dlsym(handle as *mut c_void, name.as_ptr().cast()) };
+    assert!(
+        !symbol.is_null(),
+        "HDF5 library has no symbol {}",
+        name.trim_end_matches('\0')
+    );
+    symbol
+}
+
+/// Declares HDF5 functions and globals resolved through [`hdf5_symbol`] on
+/// first use: each function keeps its C name and signature, and each C global
+/// `X_g` becomes a function `X_g()` that reads the global at call time (the C
+/// macros `H5T_NATIVE_INT` etc. also read it at each use).
+macro_rules! hdf5_lazy {
+    ($(fn $name:ident($($arg:ident: $ty:ty),* $(,)?) -> $ret:ty;)* $(static $global:ident: $gty:ty;)*) => {
+        $(
+            #[allow(non_snake_case)]
+            unsafe fn $name($($arg: $ty),*) -> $ret {
+                static SYMBOL: core::sync::atomic::AtomicPtr<core::ffi::c_void> =
+                    core::sync::atomic::AtomicPtr::new(core::ptr::null_mut());
+                let mut symbol = SYMBOL.load(core::sync::atomic::Ordering::Relaxed);
+                if symbol.is_null() {
+                    symbol = crate::imod::libiimod::iihdf::hdf5_symbol(
+                        concat!(stringify!($name), "\0"));
+                    SYMBOL.store(symbol, core::sync::atomic::Ordering::Relaxed);
+                }
+                // SAFETY: the symbol is the HDF5 function of this name, whose C
+                // prototype is the declared signature.
+                let function: unsafe extern "C" fn($($ty),*) -> $ret =
+                    unsafe { core::mem::transmute(symbol) };
+                unsafe { function($($arg),*) }
+            }
+        )*
+        $(
+            #[allow(non_snake_case)]
+            unsafe fn $global() -> $gty {
+                static SYMBOL: core::sync::atomic::AtomicPtr<core::ffi::c_void> =
+                    core::sync::atomic::AtomicPtr::new(core::ptr::null_mut());
+                let mut symbol = SYMBOL.load(core::sync::atomic::Ordering::Relaxed);
+                if symbol.is_null() {
+                    symbol = crate::imod::libiimod::iihdf::hdf5_symbol(
+                        concat!(stringify!($global), "\0"));
+                    SYMBOL.store(symbol, core::sync::atomic::Ordering::Relaxed);
+                }
+                // SAFETY: the symbol is the address of the HDF5 global of this
+                // name and type.
+                unsafe { *(symbol as *const $gty) }
+            }
+        )*
+    };
+}
+pub(crate) use hdf5_lazy;
+
 /* HDF5 calls stay here, rather than being replaced by a Rust HDF crate. */
-#[link(name = "hdf5_serial")]
-unsafe extern "C" {
+hdf5_lazy! {
     fn H5Fis_hdf5(filename: *const c_char) -> i32;
     fn H5Gopen2(file: HidT, name: *const c_char, access: HidT) -> HidT;
     fn H5Gcreate2(
@@ -1359,7 +1435,7 @@ unsafe fn scan_group(
                         num_attributes: 0,
                         group_num: 0,
                     };
-                    if H5Tget_order(type_id) != H5Tget_order(H5T_NATIVE_INT_g) {
+                    if H5Tget_order(type_id) != H5Tget_order(H5T_NATIVE_INT_g()) {
                         ds_data.swapped = 1;
                     }
 
@@ -2338,7 +2414,7 @@ unsafe fn attributes_to_adoc(
                 S_FLOAT_BUF.resize(num_vals.max(0) as usize, 0.0);
                 if H5Aread(
                     attrib_id,
-                    H5T_NATIVE_FLOAT_g,
+                    H5T_NATIVE_FLOAT_g(),
                     S_FLOAT_BUF.as_mut_ptr().cast(),
                 ) < 0
                 {
@@ -2383,9 +2459,9 @@ unsafe fn attributes_to_adoc(
                     if H5Aread(
                         attrib_id,
                         if signed_int {
-                            H5T_NATIVE_SHORT_g
+                            H5T_NATIVE_SHORT_g()
                         } else {
-                            H5T_NATIVE_USHORT_g
+                            H5T_NATIVE_USHORT_g()
                         },
                         S_SHORT_BUF.as_mut_ptr().cast(),
                     ) < 0
@@ -2402,7 +2478,7 @@ unsafe fn attributes_to_adoc(
                         }
                     }
                 } else if retval == 0
-                    && H5Aread(attrib_id, H5T_NATIVE_INT_g, S_INT_BUF.as_mut_ptr().cast()) < 0
+                    && H5Aread(attrib_id, H5T_NATIVE_INT_g(), S_INT_BUF.as_mut_ptr().cast()) < 0
                 {
                     retval = IIERR_IO_ERROR;
                 }
@@ -2569,11 +2645,11 @@ unsafe fn add_integer_attribute(
     if space < 0 {
         return 1;
     }
-    let attribute = H5Acreate2(parent_id, key.as_ptr(), H5T_NATIVE_INT_g, space, 0, 0);
+    let attribute = H5Acreate2(parent_id, key.as_ptr(), H5T_NATIVE_INT_g(), space, 0, 0);
     let result = if attribute < 0 {
         -1
     } else {
-        let value = H5Awrite(attribute, H5T_NATIVE_INT_g, ivals.cast());
+        let value = H5Awrite(attribute, H5T_NATIVE_INT_g(), ivals.cast());
         H5Aclose(attribute);
         value
     };
@@ -2592,11 +2668,11 @@ unsafe fn add_float_attribute(parent_id: HidT, key: &[u8], vals: *mut f32, num_v
     if space < 0 {
         return 1;
     }
-    let attribute = H5Acreate2(parent_id, key.as_ptr(), H5T_NATIVE_FLOAT_g, space, 0, 0);
+    let attribute = H5Acreate2(parent_id, key.as_ptr(), H5T_NATIVE_FLOAT_g(), space, 0, 0);
     let result = if attribute < 0 {
         -1
     } else {
-        let value = H5Awrite(attribute, H5T_NATIVE_FLOAT_g, vals.cast());
+        let value = H5Awrite(attribute, H5T_NATIVE_FLOAT_g(), vals.cast());
         H5Aclose(attribute);
         value
     };
@@ -2615,7 +2691,7 @@ unsafe fn add_string_attribute(parent_id: HidT, key: &[u8], val_str: &[u8]) -> i
     if space < 0 {
         return 1;
     }
-    let typ = H5Tcopy(H5T_C_S1_g);
+    let typ = H5Tcopy(H5T_C_S1_g());
     if typ < 0 {
         H5Sclose(space);
         return 1;

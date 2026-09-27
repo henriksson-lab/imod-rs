@@ -2962,7 +2962,9 @@ impl BeadTrack {
                     && (self.m_isequence % 2) == 1)
             {
                 self.m_iview_seq = 1;
-                self.m_res_mean[..(lim_resid * self.m_max_all_real) as usize].fill(-1.);
+                // `INIT_ARRAY(mResMean, limResid * mMaxAllReal, -1.)`; the whole
+                // array, which can have grown past `limResid` rows (below)
+                self.m_res_mean.fill(-1.);
             }
 
             if self.m_list_seq[isq] != self.m_last_seq {
@@ -3155,6 +3157,16 @@ impl BeadTrack {
                     fflush_stdout!();
                 }
                 self.m_iview_seq += 1;
+                // Fixed in translation (BUGS.md, beadtrack): `mResMean` holds
+                // `limResid` rows of `mMaxAllReal`, but the view sequence number
+                // can exceed `limResid` (e.g. when the view range at the ends is
+                // cut by SkipViews), and native then reads and writes past the
+                // allocation.  Defined: the array grows by rows of -1, the value
+                // every row starts at.
+                let needed = (self.m_iview_seq * self.m_max_all_real) as usize;
+                if self.m_res_mean.len() < needed {
+                    self.m_res_mean.resize(needed, -1.);
+                }
                 fflush_stdout!();
                 self.m_iv_list += 1;
             }

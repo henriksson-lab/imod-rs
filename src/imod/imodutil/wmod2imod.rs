@@ -453,6 +453,57 @@ pub fn imod_from_wmod(fin: &mut ImodFile) -> Option<Imod> {
                         let start = scan;
                         let mut end = text.len();
                         let mut scanned = None;
+                        // Performance: the longest prefix Rust's float parser
+                        // accepts is, for decimal text, the maximal munch of
+                        // `[+-]digits[.digits][e[+-]digits]`, found in one
+                        // scan and parsed once, instead of trying every
+                        // shorter prefix of the rest of the line.  Text that
+                        // could be `inf`/`nan` keeps the search below.
+                        {
+                            let mut k = start;
+                            if k < text.len() && (text[k] == b'-' || text[k] == b'+') {
+                                k += 1;
+                            }
+                            let special = k < text.len()
+                                && matches!(text[k].to_ascii_lowercase(), b'i' | b'n');
+                            let mantissa_start = k;
+                            while k < text.len() && text[k].is_ascii_digit() {
+                                k += 1;
+                            }
+                            let mut digits = k - mantissa_start;
+                            if k < text.len() && text[k] == b'.' {
+                                k += 1;
+                                let fraction = k;
+                                while k < text.len() && text[k].is_ascii_digit() {
+                                    k += 1;
+                                }
+                                digits += k - fraction;
+                            }
+                            if digits > 0 && k < text.len() && (text[k] | 32) == b'e' {
+                                let mut x = k + 1;
+                                if x < text.len() && (text[x] == b'-' || text[x] == b'+') {
+                                    x += 1;
+                                }
+                                let exponent = x;
+                                while x < text.len() && text[x].is_ascii_digit() {
+                                    x += 1;
+                                }
+                                if x > exponent {
+                                    k = x;
+                                }
+                            }
+                            if !special {
+                                if digits == 0 {
+                                    end = start;
+                                } else if let Ok(value) = std::str::from_utf8(&text[start..k])
+                                    .unwrap_or("")
+                                    .parse::<f32>()
+                                {
+                                    scanned = Some((value, k));
+                                    end = start;
+                                }
+                            }
+                        }
                         while end > start {
                             if let Ok(value) = std::str::from_utf8(&text[start..end])
                                 .unwrap_or("")

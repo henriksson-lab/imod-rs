@@ -159,7 +159,8 @@ fn every_case_matches_native_golden() {
                 "AUTODOC_DIR",
                 concat!(env!("CARGO_MANIFEST_DIR"), "/IMOD/autodoc"),
             )
-            .env("OMP_NUM_THREADS", "1")
+            // No OMP_NUM_THREADS pin: the goldens are native at one thread and
+            // metroSearch/funct give that result at any thread count (BUGS.md).
             .args(&args)
             .stdin(Stdio::null())
             .output()

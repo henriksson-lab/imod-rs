@@ -5202,6 +5202,48 @@ pub fn clip_stat(hin: &mut MrcHeader, opt: &mut ClipOptions) -> Result<(), i32> 
                 tsumsq += (m * m) as f64;
             }};
         }
+        // Performance: the same pixel sequence as `process_pixel!`, in two
+        // passes over a row.  The extremes and the sums never read each
+        // other, so they can be taken separately.  The extremes pass first
+        // asks, over the whole row, whether any pixel is strictly beyond the
+        // current extremes (a vectorisable test); only then does it rescan
+        // the row in order with the macro's own `>`/`<` updates, which are
+        // the only ones that could fire (max only grows, min only shrinks,
+        // NaN never compares).  The sums then run in the source's order.
+        // LLVM otherwise turned the two tests into a chain of four
+        // conditional moves per pixel: 25% slower than native on a
+        // 4096 x 4096 x 35 float stack.
+        macro_rules! process_row {
+            ($row:expr, $y:expr, $to_f32:expr) => {{
+                let row = $row;
+                let to_f32 = $to_f32;
+                let mut beyond = false;
+                for &v in row {
+                    let m: f32 = to_f32(v);
+                    beyond |= (m > max) | (m < min);
+                }
+                if beyond {
+                    for (x, &v) in row.iter().enumerate() {
+                        let m: f32 = to_f32(v);
+                        if m > max {
+                            max = m;
+                            xmax = x as i32;
+                            ymax = $y;
+                        }
+                        if m < min {
+                            min = m;
+                            xmin = x as i32;
+                            ymin = $y;
+                        }
+                    }
+                }
+                for &v in row {
+                    let m = (to_f32(v) as f64 - prelim_mean) as f32;
+                    tsum += m as f64;
+                    tsumsq += (m * m) as f64;
+                }
+            }};
+        }
         for y in 0..s.ysize {
             // `processing.cpp:3587-3624` accumulates a row at a time, so
             // the summation order is per row, not over the whole slice.
@@ -5216,23 +5258,17 @@ pub fn clip_stat(hin: &mut MrcHeader, opt: &mut ClipOptions) -> Result<(), i32> 
                 crate::imod::libcfshr::reduce_by_binning::SLICE_MODE_SHORT => {
                     // `processing.cpp:3594`: `sdata = &slice->data.s[slice->xsize * j]`.
                     let row = &s.data.s()[(s.xsize * y) as usize..][..s.xsize as usize];
-                    for (x, &m) in row.iter().enumerate() {
-                        process_pixel!(m as f32, x as i32, y);
-                    }
+                    process_row!(row, y, |v: i16| v as f32);
                 }
                 crate::imod::libcfshr::reduce_by_binning::SLICE_MODE_USHORT => {
                     // `processing.cpp:3602`: `usdata = &slice->data.us[slice->xsize * j]`.
                     let row = &s.data.us()[(s.xsize * y) as usize..][..s.xsize as usize];
-                    for (x, &m) in row.iter().enumerate() {
-                        process_pixel!(m as f32, x as i32, y);
-                    }
+                    process_row!(row, y, |v: u16| v as f32);
                 }
                 crate::imod::libcfshr::reduce_by_binning::SLICE_MODE_FLOAT => {
                     // `processing.cpp:3610`: `fdata = &slice->data.f[slice->xsize * j]`.
                     let row = &s.data.f()[(s.xsize * y) as usize..][..s.xsize as usize];
-                    for (x, &m) in row.iter().enumerate() {
-                        process_pixel!(m, x as i32, y);
-                    }
+                    process_row!(row, y, |v: f32| v);
                 }
                 // Byte takes the source's `default:` arm, whose
                 // `sliceGetPixelMagnitude` returns the byte widened to
@@ -5240,9 +5276,7 @@ pub fn clip_stat(hin: &mut MrcHeader, opt: &mut ClipOptions) -> Result<(), i32> 
                 // hands `PROCESS_PIXEL` the identical value in the same order.
                 crate::imod::libiimod::mrcslice::SLICE_MODE_BYTE if s.csize == 1 => {
                     let row = &s.data.b()[(s.xsize * y) as usize..][..s.xsize as usize];
-                    for (x, &m) in row.iter().enumerate() {
-                        process_pixel!(m as f32, x as i32, y);
-                    }
+                    process_row!(row, y, |v: u8| v as f32);
                 }
                 _ => {
                     for x in 0..s.xsize {

@@ -14,22 +14,22 @@
 //!   output cannot depend on the thread count, and they are split into
 //!   disjoint row groups (`chunks_mut`, one pool task per group), as `TO_OPT.md`'s
 //!   parallelisation round prescribes.
-//! - **`metro.c:270`** reduces `gammaHGamma` and `posdef` — and here the
-//!   thread count **is** observable.  Each iteration adds into
+//! - **`metro.c:270`** reduces `gammaHGamma` and `posdef`, and there
+//!   native's thread count **is** observable.  Each iteration adds into
 //!   `thr*[BREAK_SUMS * threadNum + j % BREAK_SUMS]`, and those 8 x
 //!   `numThreads` partial sums are then added in index order, so the grouping
 //!   of the double-precision sum depends on which `j` each thread ran.  The
 //!   source's comment says as much ("1 thread gave different sums from more
-//!   than 1").  With no `schedule` clause libgomp uses its static schedule:
-//!   thread `t` of `T` gets `q + (t < r)` consecutive iterations starting at
-//!   `t * q + min(t, r)`, with `q = n / T`, `r = n % T`
-//!   (`gomp_iter_static_next`).  That partition is reproduced exactly here, so
-//!   the result equals native at the *same* `numThreads` — which
-//!   [`num_omp_threads`] computes from `OMP_NUM_THREADS` exactly as native
-//!   does — at every thread count, and serial at 1.  Each partition runs as
-//!   one rayon task with its own 8 bins, and the bins are combined serially in
-//!   the source's index order; the parallelism therefore changes nothing but
-//!   the wall time.
+//!   than 1").  **Fixed in translation (2026-09-27, `BUGS.md` "Output depends
+//!   on the number of threads"): the sums are native's at
+//!   `OMP_NUM_THREADS=1` on any thread count.**  The row loop still runs in
+//!   parallel over the libgomp static-schedule partition (thread `t` of `T`
+//!   gets `q + (t < r)` rows from `t * q + min(t, r)`), but each row stores
+//!   its two contributions `(G - grad) * HdotGamma` and `G * sig` instead of
+//!   adding them into a per-thread bin; the caller then adds them serially,
+//!   `j = 1..=n`, into bin `j % BREAK_SUMS` of thread 0, and the eight bins in
+//!   order — exactly the one-thread run.  That serial pass is `2n` adds
+//!   against the `2n^2` of the rows, so the speed-up is kept.
 //!
 //! All three regions run on [`OMP_TEAM_POOL`], with the calling thread taking
 //! the first share as the OpenMP master does.  The inner loops run over
@@ -363,15 +363,21 @@ pub fn metro_search(
             let grad = &arg_grad[nu..2 * nu];
             let g = &g[..nu];
             let mat = &*mat;
-            // One partition of the libgomp static schedule: thread `thr`'s
-            // `j` range (0-based here) and its own run of `HGamma`, returning
-            // its `BREAK_SUMS` bins of each sum.
-            let run_thread = |(thr, j0, h_gamma_part): (usize, usize, &mut [f32])| {
-                let mut ghg = [0f64; BREAK_SUMS];
-                let mut pos = [0f64; BREAK_SUMS];
-                for (jj, h_gamma_j) in h_gamma_part.iter_mut().enumerate() {
+            // One partition of the libgomp static schedule: rows `j0 + 1 ..`,
+            // its own run of `HGamma` and of the two contribution arrays.
+            let run_thread = |(j0, h_gamma_part, ghg_part, pos_part): (
+                usize,
+                &mut [f32],
+                &mut [f64],
+                &mut [f64],
+            )| {
+                for (jj, ((h_gamma_j, ghg_j), pos_j)) in h_gamma_part
+                    .iter_mut()
+                    .zip(ghg_part.iter_mut())
+                    .zip(pos_part.iter_mut())
+                    .enumerate()
+                {
                     let j = j0 + jj + 1;
-                    let ind_thr = j % BREAK_SUMS;
                     let mut sig = 0.0f64;
                     let mut h_dot_gamma = 0.0f64;
                     let row = &mat[(j - 1) * nu..j * nu];
@@ -382,24 +388,31 @@ pub fn metro_search(
                         h_dot_gamma += hdbl * (gk - grad_k) as f64;
                     }
                     *h_gamma_j = h_dot_gamma as f32;
-                    ghg[ind_thr] += (g[j - 1] - grad[j - 1]) as f64 * h_dot_gamma;
-                    pos[ind_thr] += g[j - 1] as f64 * sig;
+                    *ghg_j = (g[j - 1] - grad[j - 1]) as f64 * h_dot_gamma;
+                    *pos_j = g[j - 1] as f64 * sig;
                 }
-                (thr, ghg, pos)
             };
             let nthr = num_threads as usize;
             let q = nu / nthr;
             let r = nu % nthr;
-            let mut parts: Vec<(usize, usize, &mut [f32])> = Vec::with_capacity(nthr);
+            let mut ghg_terms = vec![0f64; nu];
+            let mut pos_terms = vec![0f64; nu];
+            let mut parts: Vec<(usize, &mut [f32], &mut [f64], &mut [f64])> =
+                Vec::with_capacity(nthr);
             let mut remaining = &mut h_gamma[..nu];
+            let mut ghg_rest = &mut ghg_terms[..];
+            let mut pos_rest = &mut pos_terms[..];
             for thr in 0..nthr {
                 let count = q + usize::from(thr < r);
                 let start = thr * q + thr.min(r);
                 let (part, rest) = remaining.split_at_mut(count);
                 remaining = rest;
-                parts.push((thr, start, part));
+                let (ghg_part, rest) = std::mem::take(&mut ghg_rest).split_at_mut(count);
+                ghg_rest = rest;
+                let (pos_part, rest) = std::mem::take(&mut pos_rest).split_at_mut(count);
+                pos_rest = rest;
+                parts.push((start, part, ghg_part, pos_part));
             }
-            let mut results = [(0usize, [0f64; BREAK_SUMS], [0f64; BREAK_SUMS]); MAX_THREADS];
             if nthr > 1 {
                 // The calling thread runs partition 0 itself, as the OpenMP
                 // master does; the pool runs the others.
@@ -409,30 +422,29 @@ pub fn metro_search(
                         .build()
                         .expect("metroSearch: cannot start the thread pool")
                 });
-                let mut jobs = parts.into_iter().zip(results.iter_mut());
+                let mut jobs = parts.into_iter();
                 let first = jobs.next();
                 team.in_place_scope(|s| {
-                    for (part, slot) in jobs {
-                        s.spawn(move |_| *slot = run_thread(part));
+                    for part in jobs {
+                        s.spawn(move |_| run_thread(part));
                     }
-                    if let Some((part, slot)) = first {
-                        *slot = run_thread(part);
+                    if let Some(part) = first {
+                        run_thread(part);
                     }
                 });
             } else {
-                for (part, slot) in parts.into_iter().zip(results.iter_mut()) {
-                    *slot = run_thread(part);
-                }
+                parts.into_iter().for_each(run_thread);
             }
-            for &(thr, ghg, pos) in &results[..nthr] {
-                for ind in 0..BREAK_SUMS {
-                    thr_ghg[BREAK_SUMS * thr + ind] += ghg[ind];
-                    thr_posdef[BREAK_SUMS * thr + ind] += pos[ind];
-                }
+            // The one-thread accumulation: thread 0's bins, `j` in order.
+            for j in 1..=nu {
+                let ind_thr = j % BREAK_SUMS;
+                thr_ghg[ind_thr] += ghg_terms[j - 1];
+                thr_posdef[ind_thr] += pos_terms[j - 1];
             }
         }
 
-        for ind_thr in 0..BREAK_SUMS * num_threads as usize {
+        // One thread's bins, as native at `OMP_NUM_THREADS=1` adds them.
+        for ind_thr in 0..BREAK_SUMS {
             gamma_h_gamma += thr_ghg[ind_thr];
             posdef += thr_posdef[ind_thr];
         }
@@ -580,4 +592,79 @@ fn dot_product(a: &[f32], b: &[f32], n: i32) -> f64 {
 
     // DNM 11/27/13: get rid of assignment to float then back
     product
+}
+
+#[cfg(test)]
+mod tests {
+    use super::metro_search;
+
+    /// `BUGS.md`, "Output depends on the number of threads": the
+    /// `metro.c:270` sums are the one-thread sums on any thread count, so a
+    /// minimisation big enough to use several threads (`n >= 225`) is
+    /// bit-identical at 1, 2, 3 and 4 threads.  The objectives are badly
+    /// scaled (curvatures over nine decades) so that regrouping the sums
+    /// changes the result.
+    #[test]
+    fn metro_search_is_thread_independent() {
+        let run = |n: usize, decades: i32, threads: &str| {
+            // SAFETY: the gate runs tests serially (`--test-threads=1`).
+            unsafe { std::env::set_var("IMOD_FORCE_OMP_THREADS", threads) };
+            let scale =
+                |i: usize| 10f64.powi((i * 7 % (decades as usize + 1)) as i32 - decades / 2);
+            let mut x: Vec<f32> = (0..n)
+                .map(|i| ((i * 37 % 101) as f32 - 50.) * 0.013)
+                .collect();
+            let mut funct = |nn: i32, xv: &mut [f32], f: &mut f32, g: &mut [f32]| {
+                let nn = nn as usize;
+                let mut sum = 0f64;
+                for i in 0..nn {
+                    let left = if i > 0 { xv[i - 1] as f64 } else { 0. };
+                    let d = xv[i] as f64 - 0.3 * left - (i % 7) as f64 * 0.11;
+                    sum += 0.5 * scale(i) * d * d + 0.01 * (xv[i] as f64).powi(4);
+                    g[i] = (scale(i) * d + 0.04 * (xv[i] as f64).powi(3)) as f32;
+                }
+                for i in 0..nn - 1 {
+                    let d = xv[i + 1] as f64 - 0.3 * xv[i] as f64 - ((i + 1) % 7) as f64 * 0.11;
+                    g[i] -= (0.3 * scale(i + 1) * d) as f32;
+                }
+                *f = sum as f32;
+            };
+            let mut f = 0f32;
+            let mut g = vec![0f32; n];
+            let mut h = vec![0f32; n * (n + 3)];
+            let mut ier = 0;
+            let mut num_iter = 0;
+            metro_search(
+                n as i32,
+                &mut x,
+                &mut funct,
+                &mut f,
+                &mut g,
+                0.1,
+                1e-7,
+                -300,
+                &mut ier,
+                &mut h,
+                &mut num_iter,
+                0.,
+            );
+            let bits: Vec<u32> = x.iter().chain(&g).chain(&h).map(|v| v.to_bits()).collect();
+            (bits, f.to_bits(), ier, num_iter)
+        };
+        let mut differ = Vec::new();
+        for (n, decades) in [(300, 0), (457, 6)] {
+            let one = run(n, decades, "1");
+            assert!(one.3 > 5, "too few iterations to exercise the update");
+            for threads in ["2", "3", "4"] {
+                if run(n, decades, threads) != one {
+                    differ.push(format!("n {n} decades {decades} threads {threads}"));
+                }
+            }
+        }
+        unsafe { std::env::remove_var("IMOD_FORCE_OMP_THREADS") };
+        assert!(
+            differ.is_empty(),
+            "metroSearch differs from one thread: {differ:?}"
+        );
+    }
 }

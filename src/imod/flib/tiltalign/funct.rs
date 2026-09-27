@@ -29,25 +29,20 @@
 //!
 //! The coordinate-gradient loop is `#pragma omp parallel for` over real
 //! points with no `schedule` clause, which GCC compiles to the static
-//! schedule: thread `t` of `n` gets `q + (t < r)` iterations starting at
-//! `t*q + min(t, r)` (`q = nrealPt / n`, `r = nrealPt % n`).  Each thread
-//! accumulates into its own `sGradSums[t]`, and the sums are then added in
-//! thread order starting from `0.`.  That is a floating-point reduction whose
-//! grouping depends on the thread count, so native output can in principle
-//! depend on `sNumThreads`.  Measured (2026-09-25, `/big/henriksson/realbench/
-//! wave3-funct`): native at `OMP_NUM_THREADS` 1-6 gave bit-identical `funct`
-//! output over 444 evaluations in 12 configurations, and identical results
-//! through 10 full native `metroSearch` minimisations — the double partials
-//! are sums of `2. * w * float` terms, whose regrouping differences are far
-//! below the `float` rounding of `grad`.  The translation reproduces the
-//! partition exactly: it computes `sNumThreads` through `numOMPthreads` as
-//! the source does, runs each static-schedule chunk as its own task into its
-//! own `grad_sums[t]` (concurrently on `metro::OMP_TEAM_POOL`, the caller running chunk 0,
-//! when `sNumThreads > 1`),
-//! and reduces them serially in thread order.  Which worker runs a chunk
-//! cannot change a value, so the result is bit-identical to native at every
-//! thread count and to the serial run at the same `sNumThreads`, including
-//! `OMP_NUM_THREADS=1`, where it is the plain serial order.
+//! schedule.  Each thread accumulates into its own `sGradSums[t]`, and the
+//! sums are then added in thread order starting from `0.`.  That is a
+//! floating-point reduction whose grouping depends on the thread count, so
+//! native output can depend on `sNumThreads` (measured 2026-09-25 as
+//! bit-identical at 1-6 threads over 444 evaluations, but not guaranteed).
+//! **Fixed in translation (2026-09-27, `BUGS.md` "Output depends on the
+//! number of threads"): the gradient is native's at `OMP_NUM_THREADS=1` on
+//! any thread count.**  The loop is split over the gradient *elements*
+//! (contiguous runs of points `kpt`) rather than over `jpt`: every task walks
+//! all projections in the source's order and adds only into its own
+//! elements, so each element gets the one-thread sequence of additions.  The
+//! tasks run concurrently on `metro::OMP_TEAM_POOL` (the caller running task
+//! 0) when `sNumThreads > 1`; `sNumThreads` is still computed through
+//! `numOMPthreads` as the source does and now only sets the task count.
 //!
 //! # Arithmetic
 //!
@@ -114,10 +109,6 @@ static FUNCT_STATICS: Mutex<FunctStatics> = Mutex::new(FunctStatics {
     num_threads: 1,
     error_min: 0.,
 });
-
-/// One partition of the `funct.cpp:713` region: thread index and that
-/// thread's `sCoefX`, `sCoefY` and `sGradSums`.
-type FunctPart<'a> = (i32, &'a mut Vec<f32>, &'a mut Vec<f32>, &'a mut Vec<f64>);
 
 /// Original: `double functWallCum = 0.;` (`funct.cpp:142`).
 pub static FUNCT_WALL_CUM: Mutex<f64> = Mutex::new(0.);
@@ -1016,23 +1007,31 @@ impl EvalFunct {
         }
 
         // `#pragma omp parallel for num_threads(sNumThreads)` (`funct.cpp:713`).
-        // GCC's static schedule gives thread `indThread` the iterations
-        // `start + 1 ..= start + q` below, and each thread accumulates into its
-        // own `sGradSums[indThread]` using its own `sCoefX/Y[indThread]`, so
-        // each partition is an independent task: running the partitions one
-        // after another or concurrently produces the same per-thread sums,
-        // which are then added in thread order below exactly as the source
-        // does.  The partition, not the worker that runs it, fixes every
-        // floating-point grouping, so the result depends only on
-        // `sNumThreads` — which `numOMPthreads` computes as native does.
+        // Native splits the `jpt` loop over threads, each adding into its own
+        // `sGradSums[indThread]`, and then adds the per-thread sums; the
+        // grouping of every gradient sum therefore depends on the thread
+        // count.  **Fixed in translation (2026-09-27, `BUGS.md` "Output
+        // depends on the number of threads"): the gradient is native's at
+        // `OMP_NUM_THREADS=1` on any thread count.**  At one thread each
+        // element `ivar` is `0. + (0. + t_1 + t_2 + ...)` over the projections
+        // `ii` in loop order (`jpt` ascending, then `ii`).  Those sums are
+        // independent of each other, so the work is split over the *variables*
+        // instead of the points: each of `sNumThreads` tasks owns a contiguous
+        // run of `kpt` (and so of `sGradSums[0]`), walks every `jpt` and `ii`
+        // in the source's order, and adds only its own elements — each element
+        // sees the one-thread sequence of additions, whichever task runs it.
+        // The per-projection work outside the `kpt` loop is repeated per task;
+        // it is `O(1)` against the task's `O(nrealPt / sNumThreads)`.
         //
         // Per projection `ii`, the source's `kpt` loop stores one of three
         // sextuples into the coefficient arrays: `m? + ?Rlast` for `kpt ==
         // jpt`, `?Rlast` when point `kpt` is in the view, `m?OverN + ?Rlast`
         // otherwise.  Each sum's operands do not depend on `kpt`, so the three
         // sextuples are formed once per `ii` (the same `float` additions of the
-        // same operands, hence the same values) and the loop only selects and
-        // stores them.
+        // same operands, hence the same values), and the element loop selects
+        // one per `kpt` and adds `2. * weight * (xresid * coefX + yresid *
+        // coefY)` directly; `sCoefX`/`sCoefY` hold nothing a later statement
+        // reads, so they are not written.
         let num_threads = statics.num_threads;
         let nm1 = (nreal_pt - 1).max(0) as usize;
         let max_real_u = max_real as usize;
@@ -1054,19 +1053,11 @@ impl EvalFunct {
         let weight = &av.weight[..];
         let xresid = &av.xresid[..];
         let yresid = &av.yresid[..];
-        let run_thread = |(ind_thread, coef_x, coef_y, grad_sums): FunctPart| {
-            let mut q = nreal_pt.max(0) / num_threads;
-            let mut r = nreal_pt.max(0) % num_threads;
-            if ind_thread < r {
-                q += 1;
-                r = 0;
-            }
-            let chunk_start = q * ind_thread + r;
-            let chunk_end = chunk_start + q;
-            let coef_x = &mut coef_x[..nvmat_u];
-            let coef_y = &mut coef_y[..nvmat_u];
-            let grad_sums = &mut grad_sums[..nvmat_u];
-            for jpt in chunk_start + 1..=chunk_end {
+        // One task: points `k0 .. k0 + n` (0-based `kpt - 1`) and their
+        // `3 * n` gradient sums.
+        let run_thread = |(k0, grad_part): (usize, &mut [f64])| {
+            let k1 = k0 + grad_part.len() / 3;
+            for jpt in 1..=nreal_pt {
                 //
                 // for each projection of the real point, find how that point
                 // contributes to the derivative w / r to each of the x, y, z
@@ -1130,60 +1121,55 @@ impl EvalFunct {
                         m_fon[ivm] + ypz_rlast,
                     ];
                     let riv = &real_in_view[ivm * max_real_u..][..nm1];
-                    // `kpt == jpt` happens at most once, at index `jpt - 1`
-                    // (never when `jpt == nrealPt`); the stretches before and
-                    // after it only choose between the other two sextuples.
-                    let fill = |cx: &mut [f32], cy: &mut [f32], riv: &[i8]| {
-                        for ((cx, cy), &inv) in
-                            cx.chunks_exact_mut(3).zip(cy.chunks_exact_mut(3)).zip(riv)
-                        {
-                            let v = if inv != 0 { in_view } else { not_in_view };
-                            cx[0] = v[0];
-                            cx[1] = v[1];
-                            cx[2] = v[2];
-                            cy[0] = v[3];
-                            cy[1] = v[4];
-                            cy[2] = v[5];
-                        }
-                    };
-                    let jsame = (jpt - 1) as usize;
-                    if jsame < nm1 {
-                        let (cx_lo, cx_hi) = coef_x.split_at_mut(3 * jsame);
-                        let (cy_lo, cy_hi) = coef_y.split_at_mut(3 * jsame);
-                        fill(cx_lo, cy_lo, &riv[..jsame]);
-                        cx_hi[..3].copy_from_slice(&same[..3]);
-                        cy_hi[..3].copy_from_slice(&same[3..]);
-                        fill(&mut cx_hi[3..], &mut cy_hi[3..], &riv[jsame + 1..]);
-                    } else {
-                        fill(coef_x, coef_y, riv);
-                    }
                     //
                     // The coefficients directly yield derivatives
                     //
                     let w2 = 2. * weight[(ii - 1) as usize] as f64;
                     let xr = xresid[(ii - 1) as usize];
                     let yr = yresid[(ii - 1) as usize];
-                    for ((sum, &cx), &cy) in grad_sums.iter_mut().zip(&*coef_x).zip(&*coef_y) {
-                        *sum += w2 * (xr * cx + yr * cy) as f64;
+                    // `kpt == jpt` happens at most once, at index `jpt - 1`
+                    // (never when `jpt == nrealPt`); the stretches before and
+                    // after it only choose between the other two sextuples.
+                    let add = |sums: &mut [f64], riv: &[i8]| {
+                        for (sum, &inv) in sums.chunks_exact_mut(3).zip(riv) {
+                            let v = if inv != 0 { &in_view } else { &not_in_view };
+                            sum[0] += w2 * (xr * v[0] + yr * v[3]) as f64;
+                            sum[1] += w2 * (xr * v[1] + yr * v[4]) as f64;
+                            sum[2] += w2 * (xr * v[2] + yr * v[5]) as f64;
+                        }
+                    };
+                    let jsame = (jpt - 1) as usize;
+                    if jsame >= k0 && jsame < k1 {
+                        let (lo, hi) = grad_part.split_at_mut(3 * (jsame - k0));
+                        add(lo, &riv[k0..jsame]);
+                        hi[0] += w2 * (xr * same[0] + yr * same[3]) as f64;
+                        hi[1] += w2 * (xr * same[1] + yr * same[4]) as f64;
+                        hi[2] += w2 * (xr * same[2] + yr * same[5]) as f64;
+                        add(&mut hi[3..], &riv[jsame + 1..k1]);
+                    } else {
+                        add(grad_part, &riv[k0..k1]);
                     }
                     //
                 }
             }
         };
-        let parts: Vec<FunctPart> = statics
-            .coef_x
-            .iter_mut()
-            .zip(statics.coef_y.iter_mut())
-            .zip(statics.grad_sums.iter_mut())
-            .take(num_threads as usize)
-            .enumerate()
-            .map(|(it, ((cx, cy), gs))| (it as i32, cx, cy, gs))
-            .collect();
-        if num_threads > 1 {
-            // The calling thread runs thread 0's partition itself, as the
-            // OpenMP master does, and the shared region pool
-            // (`metro::OMP_TEAM_POOL`) runs the others; `in_place_scope`
-            // returns when all of them are done.
+        // Contiguous runs of points, as even as the static schedule makes
+        // them: task `t` of `T` gets `q + (t < r)` points from `t*q + min(t, r)`.
+        let nthr = (num_threads.max(1) as usize).min(nm1.max(1));
+        let q = nm1 / nthr;
+        let r = nm1 % nthr;
+        let mut parts: Vec<(usize, &mut [f64])> = Vec::with_capacity(nthr);
+        let mut rest = &mut statics.grad_sums[0][..nvmat_u];
+        for t in 0..nthr {
+            let count = q + usize::from(t < r);
+            let (head, tail) = std::mem::take(&mut rest).split_at_mut(3 * count);
+            rest = tail;
+            parts.push((t * q + t.min(r), head));
+        }
+        if nthr > 1 {
+            // The calling thread runs task 0 itself, as the OpenMP master
+            // does, and the shared region pool (`metro::OMP_TEAM_POOL`) runs
+            // the others; `in_place_scope` returns when all of them are done.
             let team = OMP_TEAM_POOL.get_or_init(|| {
                 rayon::ThreadPoolBuilder::new()
                     .num_threads((num_omp_threads(6) - 1).max(1) as usize)
@@ -1204,12 +1190,11 @@ impl EvalFunct {
             parts.into_iter().for_each(run_thread);
         }
 
-        // Add up the gradients from the threads, keeping the sum double until assignment
+        // Add up the gradients from the threads, keeping the sum double until
+        // assignment -- the one-thread form, with every sum in `sGradSums[0]`.
         for ivar in 0..nvmat_u {
             grad_sum = 0.;
-            for ii in 0..statics.num_threads as usize {
-                grad_sum += statics.grad_sums[ii][ivar];
-            }
+            grad_sum += statics.grad_sums[0][ivar];
             grad[ivar + icoord_bas as usize] = grad_sum as f32;
         }
 

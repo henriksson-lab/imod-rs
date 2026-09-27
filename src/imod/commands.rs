@@ -61,6 +61,7 @@ pub const COMMANDS: &[Command] = &[
         crate::imod::flib::image::assemblevol::assemblevol,
         true,
     ),
+    cmd("autofidseed", autofidseed, false),
     cmd("autopatchfit", autopatchfit, false),
     cmd("b3dcopy", b3dcopy, false),
     cmd("b3dremove", b3dremove, false),
@@ -89,6 +90,11 @@ pub const COMMANDS: &[Command] = &[
         true,
     ),
     cmd("clip", crate::imod::clip::clip::clip, true),
+    cmd(
+        "clipmodel",
+        crate::imod::flib::model::clipmodel::clipmodel,
+        true,
+    ),
     cmd("collectmmm", collectmmm, false),
     cmd("runcom", crate::imod::comrun::runcom, false),
     cmd(
@@ -108,6 +114,11 @@ pub const COMMANDS: &[Command] = &[
         true,
     ),
     cmd("ctfphaseflip", ctfphaseflip, true),
+    cmd(
+        "ctfplotter",
+        crate::imod::ctfplotter::batch::ctfplotter,
+        true,
+    ),
     cmd(
         "densmatch",
         crate::imod::flib::image::densmatch::densmatch,
@@ -138,6 +149,7 @@ pub const COMMANDS: &[Command] = &[
         true,
     ),
     cmd("findsection", findsection, true),
+    cmd("findsirtdiffs", findsirtdiffs, false),
     cmd(
         "fixboundaries",
         crate::imod::flib::image::fixboundaries::fixboundaries,
@@ -148,7 +160,18 @@ pub const COMMANDS: &[Command] = &[
     #[cfg(feature = "gui")]
     cmd("etomo-gui", etomo_gui, false),
     cmd("header", crate::imod::flib::image::header::header, true),
+    cmd(
+        "imodchopconts",
+        crate::imod::imodutil::imodchopconts::imodchopconts,
+        true,
+    ),
+    cmd(
+        "imodfindbeads",
+        crate::imod::imodutil::imodfindbeads::imodfindbeads,
+        true,
+    ),
     cmd("imodinfo", crate::imod::imodutil::imodinfo::imodinfo, true),
+    cmd("imodmop", crate::imod::imodutil::imodmop::imodmop, true),
     cmd("imodjoin", crate::imod::imodutil::imodjoin::imodjoin, true),
     cmd("imodmesh", crate::imod::imodutil::imodmesh::imodmesh, true),
     cmd(
@@ -192,11 +215,28 @@ pub const COMMANDS: &[Command] = &[
         crate::imod::imodutil::patch2imod::patch2imod,
         true,
     ),
+    cmd(
+        "pickbestseed",
+        crate::imod::imodutil::pickbestseed::pickbestseed,
+        true,
+    ),
+    cmd(
+        "point2model",
+        crate::imod::imodutil::point2model::point2model,
+        true,
+    ),
     cmd("processchunks", processchunks, false),
+    cmd("restrictalign", restrictalign, false),
     cmd("setupcombine", setupcombine, false),
     cmd(
         "solvematch",
         crate::imod::flib::model::solvematch::solvematch,
+        true,
+    ),
+    cmd("sirtsetup", sirtsetup, false),
+    cmd(
+        "sortbeadsurfs",
+        crate::imod::flib::model::sortbeadsurfs::sortbeadsurfs,
         true,
     ),
     cmd("sourcedoc", sourcedoc, true),
@@ -589,6 +629,22 @@ fn makecomfile() {
     ))
 }
 
+fn autofidseed() {
+    exit(crate::imod::pysrc::autofidseed::autofidseed(
+        &program_args_os(),
+    ))
+}
+
+fn sirtsetup() {
+    exit(crate::imod::pysrc::sirtsetup::sirtsetup(&program_args_os()))
+}
+
+fn findsirtdiffs() {
+    exit(crate::imod::pysrc::findsirtdiffs::findsirtdiffs(
+        &program_args_os(),
+    ))
+}
+
 fn splittilt() {
     exit(crate::imod::pysrc::splittilt::splittilt(&program_args_os()))
 }
@@ -601,6 +657,12 @@ fn tomocleanup() {
 
 fn copytomocoms() {
     exit(crate::imod::pysrc::copytomocoms::copytomocoms(
+        &program_args_os(),
+    ))
+}
+
+fn restrictalign() {
+    exit(crate::imod::pysrc::restrictalign::restrictalign(
         &program_args_os(),
     ))
 }

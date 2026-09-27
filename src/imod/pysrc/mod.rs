@@ -1,6 +1,7 @@
 //! Rust translations of command programs in `IMOD/pysrc`.
 
 pub mod alignlog;
+pub mod autofidseed;
 pub mod autopatchfit;
 pub mod b3dcopy;
 pub mod b3dremove;
@@ -11,6 +12,7 @@ pub mod comchanger;
 pub mod copytomocoms;
 pub mod dualvolmatch;
 pub mod etomo;
+pub mod findsirtdiffs;
 pub mod imodpy;
 pub mod makecomfile;
 pub mod matchrotpairs;
@@ -18,7 +20,9 @@ pub mod matchorwarp;
 pub mod pip;
 pub mod prochunks;
 pub mod pysed;
+pub mod restrictalign;
 pub mod setupcombine;
+pub mod sirtsetup;
 pub mod splitcombine;
 pub mod splittilt;
 pub mod subm;

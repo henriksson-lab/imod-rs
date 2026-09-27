@@ -2,7 +2,8 @@
 """Regenerate the native goldens for one of the single-axis setup scripts
 (copytomocoms, makecomfile, splittilt, alignlog, chunksetup, tomocleanup) or
 of the dual-axis combine scripts (setupcombine, splitcombine, collectmmm,
-b3dremove, dualvolmatch, matchorwarp, autopatchfit), and for matchrotpairs.
+b3dremove, dualvolmatch, matchorwarp, autopatchfit), and for matchrotpairs and
+sirtsetup.
 
 Usage: make-pysetup-goldens.py <script>        (called by make-<script>-goldens.sh)
 
@@ -272,6 +273,44 @@ def make_combine_inputs(env):
     shutil.rmtree(work)
 
 
+def make_sirtsetup_inputs(env):
+    """Inputs for sirtsetup: header-only aligned stacks (sirtsetup reads only
+    their sizes and mode), tilt command files for the internal-SIRT, vertical
+    slice (X-axis tilt), local-alignment (external SIRT with LOG and SCALE)
+    and GPU cases, X-tilt files, and header-only "srec"/"vsr"/"sint" files of
+    the reconstruction's X/Z size for the resume and cleanup cases."""
+    import numpy as np
+    inp = os.path.join(HERE, 'inputs')
+    shutil.rmtree(inp, ignore_errors=True)
+    os.makedirs(inp)
+    work = tempfile.mkdtemp()
+    np.zeros((5, 48, 64), np.uint8).tofile(work + '/a.raw')
+    subprocess.run(['raw2mrc', '-x', '64', '-y', '48', '-z', '5', '-t', 'byte', work + '/a.raw',
+                    inp + '/ts.ali'], env=env, check=True, stdout=subprocess.DEVNULL)
+    header_only(inp + '/ts.ali')
+    np.zeros((48, 1, 64), np.uint8).tofile(work + '/r.raw')
+    subprocess.run(['raw2mrc', '-x', '64', '-y', '1', '-z', '48', '-t', 'byte', work + '/r.raw',
+                    inp + '/rec.mrc'], env=env, check=True, stdout=subprocess.DEVNULL)
+    header_only(inp + '/rec.mrc')
+    shutil.rmtree(work)
+    tilt = ('# Command file to run Tilt\n#\n$tilt -StandardInput\nInputProjections ts.ali\n'
+            'OutputFile ts.rec\nIMAGEBINNED 1\nTILTFILE ts.tlt\nXTILTFILE ts.xtilt\n'
+            'THICKNESS 30\nRADIAL .35 .035\nFalloffIsTrueSigma 1\nXAXISTILT 0.\nLOG 0\n'
+            'SCALE 0 1000\nPERPENDICULAR\nMODE 2\nFULLIMAGE 64 48\nSUBSETSTART 0 0\n'
+            'AdjustOrigin 1\n$if (-e ./savework) ./savework\n')
+    open(inp + '/tilt.com', 'w').write(tilt)
+    open(inp + '/xtilt.com', 'w').write(tilt.replace('XAXISTILT 0.', 'XAXISTILT 3.5'))
+    open(inp + '/local.com', 'w').write(tilt.replace('XAXISTILT 0.', 'LOCALFILE tslocal.xf'))
+    open(inp + '/noscale.com', 'w').write(
+        tilt.replace('XAXISTILT 0.', 'LOCALFILE tslocal.xf').replace('SCALE 0 1000\n', ''))
+    open(inp + '/gpu.com', 'w').write(tilt.replace('MODE 2', 'MODE 2\nUseGPU 0'))
+    open(inp + '/ts.xtilt', 'w').write('0\n' * 5)
+    open(inp + '/xtvar.xtilt', 'w').write('1.5\n' * 4 + '2.0\n')
+    open(inp + '/xtsame.xtilt', 'w').write('1.5\n' * 5)
+    open(inp + '/empty', 'w').write('')
+    open(inp + '/ts.tlt', 'w').write(''.join('%.2f\n' % (-40 + 20 * i) for i in range(5)))
+
+
 def make_matchrotpairs_inputs(env):
     """Two small byte tilt series for matchrotpairs: A is 5 views of a smooth
     random field drifting slowly from view to view; B holds the same views
@@ -354,6 +393,12 @@ def main():
         make_matchrotpairs_inputs(env)
     if SCRIPT == 'copytomocoms':
         make_inputs(env)
+    if SCRIPT == 'sirtsetup':
+        # sirtsetup runs `splittilt`, a Python script, through the shell
+        wrap = os.path.join(bindir, 'splittilt')
+        open(wrap, 'w').write('#!/bin/sh\nexec python3 %s/IMOD/pysrc/splittilt "$@"\n' % ROOT)
+        os.chmod(wrap, 0o755)
+        make_sirtsetup_inputs(env)
     if SCRIPT == 'alignlog':
         make_alignlog_inputs(env)
     if SCRIPT in ('setupcombine', 'splitcombine', 'collectmmm', 'b3dremove', 'dualvolmatch',

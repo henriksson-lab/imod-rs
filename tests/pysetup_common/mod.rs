@@ -126,6 +126,22 @@ pub fn run_cases(script: &str) -> Vec<String> {
                 command.env(key, value);
             }
         }
+        // A suite whose script runs one of our Python-script translations
+        // through the shell (`runcmd` resolves it on PATH) lists it in
+        // `own_commands`; links to our binary go first on PATH.
+        if let Ok(own) = std::fs::read_to_string(here.join("own_commands")) {
+            for name in own.split_whitespace() {
+                common::imod_link(name);
+            }
+            command.env(
+                "PATH",
+                format!(
+                    "{}:{}",
+                    common::command_link_directory().display(),
+                    std::env::var("PATH").unwrap_or_default()
+                ),
+            );
+        }
         let bin = work.with_extension("bin");
         if let Some(stand_in) = common::golden::read_opt(&golden.join(format!("{name}.tomopieces")))
         {

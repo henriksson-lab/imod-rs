@@ -10,6 +10,7 @@ use crate::imod::libcfshr::autodoc::adoc_new;
 use crate::imod::libcfshr::b3dutil::ImodFile;
 use crate::imod::libcfshr::b3dutil::{CArg, b3d_error, b3d_shift_bytes, c_format};
 use crate::imod::libcfshr::islice::slice_mode_if_real;
+use crate::imod::libiimod::iihdf::hdf5_lazy;
 use crate::imod::libiimod::iimage::{
     IIFORMAT_COMPLEX, IIFORMAT_RGB, ImageDataType, ImodImageFile, LineProcData, MRSA_BYTE,
     MRSA_FLOAT, MRSA_USHORT, StackSetData, ii_convert_line_of_floats,
@@ -32,7 +33,7 @@ const H5T_ORDER_LE: c_int = 0;
 const H5T_ORDER_BE: c_int = 1;
 const H5S_UNLIMITED: HsizeT = !0;
 
-unsafe extern "C" {
+hdf5_lazy! {
     fn H5Screate_simple(rank: c_int, dims: *const HsizeT, maxdims: *const HsizeT) -> HidT;
     fn H5Sclose(id: HidT) -> c_int;
     fn H5Sselect_hyperslab(
@@ -720,7 +721,7 @@ unsafe fn create_group_and_dataset(
     let mut cparms = H5P_DEFAULT;
     let mut aparms = H5P_DEFAULT;
     if chunked {
-        cparms = H5Pcreate(H5P_CLS_DATASET_CREATE_ID_g);
+        cparms = H5Pcreate(H5P_CLS_DATASET_CREATE_ID_g());
         if H5Pset_deflate(cparms, in_file.hdf_compression as c_uint) < 0 {
             return -1;
         }
@@ -751,7 +752,7 @@ unsafe fn create_group_and_dataset(
         if H5Pset_chunk(cparms, rank, chunks.as_ptr()) < 0 {
             return -1;
         }
-        aparms = H5Pcreate(H5P_CLS_DATASET_ACCESS_ID_g);
+        aparms = H5Pcreate(H5P_CLS_DATASET_ACCESS_ID_g());
         let (mut slots, mut bytes, mut w0) = (0usize, 0usize, 0f64);
         if H5Pget_chunk_cache(aparms, &mut slots, &mut bytes, &mut w0) < 0 {
             return -1;
@@ -826,14 +827,14 @@ fn get_file_xscale(format: i32) -> i32 {
 /// C static `lookupNativeDatatype` (`hdf_imageio.c:624`).
 unsafe fn lookup_native_datatype(in_file: &ImodImageFile) -> HidT {
     match in_file.type_ {
-        ImageDataType::Byte => H5T_NATIVE_SCHAR_g,
-        ImageDataType::UnsignedByte => H5T_NATIVE_UCHAR_g,
-        ImageDataType::Short => H5T_NATIVE_SHORT_g,
-        ImageDataType::UnsignedShort => H5T_NATIVE_USHORT_g,
-        ImageDataType::Float => H5T_NATIVE_FLOAT_g,
+        ImageDataType::Byte => H5T_NATIVE_SCHAR_g(),
+        ImageDataType::UnsignedByte => H5T_NATIVE_UCHAR_g(),
+        ImageDataType::Short => H5T_NATIVE_SHORT_g(),
+        ImageDataType::UnsignedShort => H5T_NATIVE_USHORT_g(),
+        ImageDataType::Float => H5T_NATIVE_FLOAT_g(),
         // C `default:` (`hdf_imageio.c:624`): IITYPE_INT and IITYPE_UINT are
         // the only remaining values and fall to the signed-char type.
-        ImageDataType::Int | ImageDataType::UnsignedInt => H5T_NATIVE_SCHAR_g,
+        ImageDataType::Int | ImageDataType::UnsignedInt => H5T_NATIVE_SCHAR_g(),
     }
 }
 /// C static `getDatasetForZ` (`hdf_imageio.c:646`).
@@ -985,7 +986,7 @@ mod tests {
             assert_eq!(
                 H5Dwrite(
                     image.dataset_id,
-                    H5T_NATIVE_FLOAT_g,
+                    H5T_NATIVE_FLOAT_g(),
                     H5P_DEFAULT,
                     H5P_DEFAULT,
                     H5P_DEFAULT,
@@ -997,7 +998,7 @@ mod tests {
             assert_eq!(
                 H5Dread(
                     image.dataset_id,
-                    H5T_NATIVE_FLOAT_g,
+                    H5T_NATIVE_FLOAT_g(),
                     H5P_DEFAULT,
                     H5P_DEFAULT,
                     H5P_DEFAULT,
@@ -1025,7 +1026,7 @@ mod tests {
             assert_eq!(
                 H5Dread(
                     image.dataset_id,
-                    H5T_NATIVE_FLOAT_g,
+                    H5T_NATIVE_FLOAT_g(),
                     H5P_DEFAULT,
                     H5P_DEFAULT,
                     H5P_DEFAULT,
@@ -1108,7 +1109,7 @@ mod tests {
             assert_eq!(
                 H5Dread(
                     stack.dset_id,
-                    H5T_NATIVE_FLOAT_g,
+                    H5T_NATIVE_FLOAT_g(),
                     H5P_DEFAULT,
                     H5P_DEFAULT,
                     H5P_DEFAULT,

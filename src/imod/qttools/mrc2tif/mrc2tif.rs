@@ -834,7 +834,45 @@ pub fn mrc2tif() {
                     offset = auto_mean - scale * image_mean;
                 }
                 if convert {
-                    for y in 0..nlines {
+                    // Performance, not translation: for a single-channel
+                    // real slice filling the whole buffer, the per-pixel
+                    // `sliceGetVal`/`slicePutVal` pair reduces to reading
+                    // and writing the one `MrcData` member for the mode (its
+                    // bounds test is always true here, its `switch` fixed),
+                    // so the same arithmetic runs on that member directly,
+                    // in the same order: `v * scale + offset` in float,
+                    // clamped to [0, 255], stored with the same casts.
+                    let pixels = hdata.nx.max(0) as usize * nlines.max(0) as usize;
+                    let fast = psize != 3
+                        && slice.xsize == hdata.nx
+                        && slice.ysize == nlines
+                        && matches!(slice.mode, 0 | 1 | 2 | 6);
+                    if fast {
+                        let scaled = |v: f32| (v * scale + offset).clamp(0., 255.);
+                        match slice.mode {
+                            0 => {
+                                for v in &mut slice.data.b_mut()[..pixels] {
+                                    *v = scaled(*v as f32) as i32 as u8;
+                                }
+                            }
+                            1 => {
+                                for v in &mut slice.data.s_mut()[..pixels] {
+                                    *v = scaled(*v as f32) as i32 as i16;
+                                }
+                            }
+                            6 => {
+                                for v in &mut slice.data.us_mut()[..pixels] {
+                                    *v = scaled(*v as f32) as i32 as u16;
+                                }
+                            }
+                            _ => {
+                                for v in &mut slice.data.f_mut()[..pixels] {
+                                    *v = scaled(*v);
+                                }
+                            }
+                        }
+                    }
+                    for y in 0..if fast { 0 } else { nlines } {
                         for x in 0..hdata.nx {
                             let mut value = [0.; 4];
                             slice_get_val(slice.as_mut(), x, y, &mut value);

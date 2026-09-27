@@ -1163,7 +1163,7 @@ pub fn c_format_bytes(fmt: &str, args: &[CArg]) -> Vec<u8> {
                     match conv.to_ascii_lowercase() {
                         b'f' => {
                             let p = prec.unwrap_or(6).max(0) as usize;
-                            let mut d = format!("{mag:.p$}");
+                            let mut d = c_fixed_digits(mag, p);
                             if alt && p == 0 {
                                 d.push('.');
                             }
@@ -1182,17 +1182,50 @@ pub fn c_format_bytes(fmt: &str, args: &[CArg]) -> Vec<u8> {
                             }
                             let p = p as usize;
                             // X is the exponent the `%e` form would use.
-                            let x = if mag == 0.0 {
-                                0i32
+                            // Both forms print the value correctly rounded to
+                            // P significant digits, so the one `%e`-style
+                            // formatting gives the digits for either: the
+                            // fixed form is those digits with the point moved
+                            // (when rounding carries, e.g. 9.9999996 -> 1e+01,
+                            // the fixed form's coarser rounding yields the
+                            // same 10^X).  Formatting once instead of twice
+                            // halves the cost of every `%g`.
+                            let (mant, x) = if mag == 0.0 {
+                                (
+                                    if p > 1 {
+                                        format!("0.{}", "0".repeat(p - 1))
+                                    } else {
+                                        "0".to_string()
+                                    },
+                                    0i32,
+                                )
                             } else {
-                                let e = format!("{mag:.*e}", p - 1);
-                                e[e.find('e').unwrap() + 1..].parse::<i32>().unwrap_or(0)
+                                c_exponent_digits(mag, p - 1)
                             };
                             let mut d = if x < -4 || x >= p as i32 {
-                                c_format_e(mag, p - 1, alt, upper)
+                                let mut m = mant;
+                                if alt && p - 1 == 0 {
+                                    m.push('.');
+                                }
+                                format!(
+                                    "{m}{}{}{:02}",
+                                    if upper { 'E' } else { 'e' },
+                                    if x < 0 { '-' } else { '+' },
+                                    x.abs()
+                                )
                             } else {
                                 let fp = (p as i32 - 1 - x).max(0) as usize;
-                                let mut d = format!("{mag:.fp$}");
+                                let digits: String = mant.chars().filter(|&c| c != '.').collect();
+                                let mut d = if x >= 0 {
+                                    let (int, frac) = digits.split_at(x as usize + 1);
+                                    if fp > 0 {
+                                        format!("{int}.{frac}")
+                                    } else {
+                                        int.to_string()
+                                    }
+                                } else {
+                                    format!("0.{}{digits}", "0".repeat((-x - 1) as usize))
+                                };
                                 if alt && fp == 0 {
                                     d.push('.');
                                 }
@@ -1295,6 +1328,132 @@ pub fn c_format(fmt: &str, args: &[CArg]) -> String {
     String::from_utf8_lossy(&c_format_bytes(fmt, args)).into_owned()
 }
 
+/// `round(mag * 10^pos)` for a finite `mag >= 0`, computed exactly in integer
+/// arithmetic from the binary value (ties to even, as glibc's printf rounds
+/// in the default mode), or `None` when the operands would not fit in 128
+/// bits.  Performance only: the conversions below used Rust's exact
+/// formatter (Grisu with a Dragon4 bignum fallback) for every `%e`/`%f`/`%g`,
+/// which cost ~300 ns a number; `imodinfo -a` of a 5 000-point model spent
+/// most of its time there.  The digits are the same correctly rounded ones,
+/// and `None` falls back to that formatter.
+fn c_exact_scaled_round(mag: f64, pos: i32) -> Option<u128> {
+    let bits = mag.to_bits();
+    let biased = ((bits >> 52) & 0x7ff) as i32;
+    let fraction = (bits & ((1_u64 << 52) - 1)) as u128;
+    let (m, e) = if biased == 0 {
+        (fraction, -1074)
+    } else {
+        (fraction | (1 << 52), biased - 1075)
+    };
+    if m == 0 {
+        return Some(0);
+    }
+    let round = |q: u128, r: u128, half: u128| -> u128 {
+        if r > half || (r == half && q & 1 == 1) {
+            q + 1
+        } else {
+            q
+        }
+    };
+    if pos >= 0 {
+        if pos > 22 {
+            return None;
+        }
+        let num = m * 10_u128.pow(pos as u32);
+        if e >= 0 {
+            if 128 - num.leading_zeros() as i32 + e > 127 {
+                return None;
+            }
+            return Some(num << e);
+        }
+        let shift = -e;
+        if shift > 127 {
+            return None;
+        }
+        let q = num >> shift;
+        let r = num & ((1_u128 << shift) - 1);
+        Some(round(q, r, 1_u128 << (shift - 1)))
+    } else {
+        let j = -pos;
+        if j > 38 {
+            return None;
+        }
+        let ten = 10_u128.pow(j as u32);
+        let (num, den) = if e >= 0 {
+            if 128 - m.leading_zeros() as i32 + e > 127 {
+                return None;
+            }
+            (m << e, ten)
+        } else {
+            let shift = -e;
+            if 128 - ten.leading_zeros() as i32 + shift > 127 {
+                return None;
+            }
+            (m, ten << shift)
+        };
+        let q = num / den;
+        let r = num % den;
+        // Compare 2r with den exactly: den is even (a multiple of 10).
+        let half = den / 2;
+        Some(round(q, r, half))
+    }
+}
+
+/// The `%e` digits of `mag` with `prec` decimals: the mantissa as
+/// `d.ddd` (no point when `prec` is 0) and the decimal exponent, exactly as
+/// `format!("{mag:.prec$e}")` gives them.
+fn c_exponent_digits(mag: f64, prec: usize) -> (String, i32) {
+    if mag > 0.0 && mag.is_finite() && prec <= 30 {
+        let mut x = mag.log10().floor() as i32;
+        for _ in 0..3 {
+            let Some(n) = c_exact_scaled_round(mag, prec as i32 - x) else {
+                break;
+            };
+            let low = 10_u128.pow(prec as u32);
+            if n >= 10 * low {
+                x += 1;
+                continue;
+            }
+            if n < low {
+                x -= 1;
+                continue;
+            }
+            let digits = n.to_string();
+            let mut m = String::with_capacity(prec + 2);
+            m.push_str(&digits[..1]);
+            if prec > 0 {
+                m.push('.');
+                m.push_str(&digits[1..]);
+            }
+            return (m, x);
+        }
+    }
+    let s = format!("{mag:.prec$e}");
+    let at = s.find('e').unwrap();
+    (s[..at].to_string(), s[at + 1..].parse().unwrap_or(0))
+}
+
+/// `format!("{mag:.prec$}")` for the `%f` conversion, via
+/// [`c_exact_scaled_round`] when it applies.
+fn c_fixed_digits(mag: f64, prec: usize) -> String {
+    if mag.is_finite() && prec <= 22 {
+        if let Some(n) = c_exact_scaled_round(mag, prec as i32) {
+            let digits = n.to_string();
+            if prec == 0 {
+                return digits;
+            }
+            let digits = if digits.len() <= prec {
+                format!("{}{digits}", "0".repeat(prec + 1 - digits.len()))
+            } else {
+                digits
+            };
+            let (int, frac) = digits.split_at(digits.len() - prec);
+            return format!("{int}.{frac}");
+        }
+    }
+    format!("{mag:.prec$}")
+}
+
 /// The `%e` conversion of [`c_format`], for a non-negative finite `mag`.
 ///
 /// Rust's `{:e}` writes `1.5e5`; C writes `1.500000e+05` — the exponent always
@@ -1302,11 +1461,7 @@ pub fn c_format(fmt: &str, args: &[CArg]) -> String {
 /// the identical conversion, which is the language boundary the no-helpers
 /// rule allows for.
 fn c_format_e(mag: f64, prec: usize, alt: bool, upper: bool) -> String {
-    let s = format!("{mag:.prec$e}");
-    let at = s.find('e').unwrap();
-    let (mant, exp) = s.split_at(at);
-    let e: i32 = exp[1..].parse().unwrap_or(0);
-    let mut m = mant.to_string();
+    let (mut m, e) = c_exponent_digits(mag, prec);
     if alt && prec == 0 {
         m.push('.');
     }
@@ -2056,13 +2211,52 @@ pub fn fgetline(fp: &mut ImodFile, s: &mut [u8], limit: i32) -> i32 {
 
     let mut c;
     let mut i = 0usize;
-    loop {
-        c = fp.getc();
-        if c == -1 || i >= (limit - 1) as usize || c == b'\n' as i32 {
-            break;
+    // Performance: for a file, the `getc` loop below is run over the read
+    // buffer directly -- the same bytes consumed, the same stopping byte
+    // consumed with them, the same EOF/error value -- instead of one
+    // borrow-and-`read` per character (half of `wmod2imod`'s time on a
+    // 5 000-point model).
+    if let ImodFile::File(file) = fp {
+        use std::io::BufRead;
+        let mut file = file.borrow_mut();
+        c = -1;
+        'fill: loop {
+            let Ok(reader) = file.reader() else {
+                break;
+            };
+            let buffer = match reader.fill_buf() {
+                Ok(buffer) if !buffer.is_empty() => buffer,
+                _ => break,
+            };
+            let mut consumed = 0;
+            let mut stopped = false;
+            for &byte in buffer {
+                consumed += 1;
+                if i >= (limit - 1) as usize || byte == b'\n' {
+                    c = byte as i32;
+                    stopped = true;
+                    break;
+                }
+                s[i] = byte;
+                i += 1;
+            }
+            reader.consume(consumed);
+            if let Some(p) = file.read_pos.as_mut() {
+                *p += consumed as u64;
+            }
+            if stopped {
+                break 'fill;
+            }
         }
-        s[i] = c as u8;
-        i += 1;
+    } else {
+        loop {
+            c = fp.getc();
+            if c == -1 || i >= (limit - 1) as usize || c == b'\n' as i32 {
+                break;
+            }
+            s[i] = c as u8;
+            i += 1;
+        }
     }
 
     /* 1/25/12: Take off a return too! */

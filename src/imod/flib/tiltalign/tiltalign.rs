@@ -4824,7 +4824,12 @@ impl TiltAlign {
                 // Track group: compute mean residual of each track and save it
                 if self.av.patch_track_model != 0 && self.av.robust_by_track != 0 {
                     if self.av.itrack_group[(self.m_ind_all_real[iu] - 1) as usize] == iv {
-                        nin_view_sum += 1;
+                        // Fixed in translation (BUGS.md, tiltalign): the source
+                        // counts the track here (`ninViewSum += 1`) even when all
+                        // of its projections are left out and nothing is added to
+                        // `tmpRes`, so the median then reads past the values it
+                        // collected.  Defined: a track counts when its mean
+                        // residual is added, below.
                         self.av.track_resid[iu] = 0.;
                         nin_track = 0;
                         j = self.av.ireal_str[iu] - 1;
@@ -4842,6 +4847,7 @@ impl TiltAlign {
                         if nin_track != 0 {
                             self.av.track_resid[iu] /= nin_track as f32;
                             tmp_res.push(self.av.track_resid[iu]);
+                            nin_view_sum += 1;
                         }
                     }
                 } else {
