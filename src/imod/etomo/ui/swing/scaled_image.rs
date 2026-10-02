@@ -1,155 +1,137 @@
 //! `IMOD/Etomo/src/etomo/ui/swing/ScaledImage.java`.
-#![allow(dead_code)]
+//!
+//! An icon image (from the `images/` resources) scaled with the user's font size.
+//! Loading, scaling and drawing the image are painting and are not modelled: an image
+//! is identified by its file name, which is what [`ScaledImage::get_image`] returns.
+//! The decision whether to scale (`init`, `Scale`, `Ratio`) is kept.
 
-/// Java `MediaTracker` image-loading statuses used by `ScaledImage`.
-pub const COMPLETE: i32 = 8;
+use std::sync::Mutex;
 
-/// The Java singleton image identities and their resource file names.
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub enum ScaledImageName {
-    OpenFile,
-    OpenFilePeet,
-    OpenFileFool,
-    OpenFileRed,
-    Clear,
-    ClearBlue,
-    ClearRed,
-    SmallX,
-    SmallXPressed,
-    SmallXRollover,
-    Imod,
-    ImodPressed,
-    ImodRollover,
-    Etomo,
-    EtomoPressed,
-    EtomoRollover,
-    EtomoLog,
-    EtomoLogPressed,
-    EtomoLogRollover,
-    BrtLog,
-    BrtLogPressed,
-    BrtLogRollover,
-}
+use crate::imod::etomo::etomo_director::{self, EtomoDirector};
 
-impl ScaledImageName {
-    /// Java private `ScaledImage(String)` file-name argument.
-    pub fn file_name(self) -> &'static str {
-        match self {
-            Self::OpenFile => "openFile.gif",
-            Self::OpenFilePeet => "openFilePeet.png",
-            Self::OpenFileFool => "openFileFool.png",
-            Self::OpenFileRed => "openFileRed.png",
-            Self::Clear => "clear.png",
-            Self::ClearBlue => "clearBlue.png",
-            Self::ClearRed => "clearRed.png",
-            Self::SmallX => "smallX.png",
-            Self::SmallXPressed => "smallX-pressed.png",
-            Self::SmallXRollover => "smallX-rollover.png",
-            Self::Imod => "b3dicon.png",
-            Self::ImodPressed => "b3dicon-pressed.png",
-            Self::ImodRollover => "b3dicon-rollover.png",
-            Self::Etomo => "etomoicon.png",
-            Self::EtomoPressed => "etomoicon-pressed.png",
-            Self::EtomoRollover => "etomoicon-rollover.png",
-            Self::EtomoLog => "projlogicon.png",
-            Self::EtomoLogPressed => "projlogicon-pressed.png",
-            Self::EtomoLogRollover => "projlogicon-rollover.png",
-            Self::BrtLog => "logicon.png",
-            Self::BrtLogPressed => "logicon-pressed.png",
-            Self::BrtLogRollover => "logicon-rollover.png",
-        }
-    }
-}
+/// Java `OPEN_FILE`.
+pub static OPEN_FILE: ScaledImage = ScaledImage::new("openFile.gif");
+/// Java `OPEN_FILE_PEET`.
+pub static OPEN_FILE_PEET: ScaledImage = ScaledImage::new("openFilePeet.png");
+/// Java `OPEN_FILE_FOOL`.
+pub static OPEN_FILE_FOOL: ScaledImage = ScaledImage::new("openFileFool.png");
+/// Java `OPEN_FILE_RED`.
+pub static OPEN_FILE_RED: ScaledImage = ScaledImage::new("openFileRed.png");
+/// Java `CLEAR`.
+pub static CLEAR: ScaledImage = ScaledImage::new("clear.png");
+/// Java `CLEAR_BLUE`.
+pub static CLEAR_BLUE: ScaledImage = ScaledImage::new("clearBlue.png");
+/// Java `CLEAR_RED`.
+pub static CLEAR_RED: ScaledImage = ScaledImage::new("clearRed.png");
+/// Java `SMALL_X`.
+pub static SMALL_X: ScaledImage = ScaledImage::new("smallX.png");
+/// Java `SMALL_X_PRESSED`.
+pub static SMALL_X_PRESSED: ScaledImage = ScaledImage::new("smallX-pressed.png");
+/// Java `SMALL_X_ROLLOVER`.
+pub static SMALL_X_ROLLOVER: ScaledImage = ScaledImage::new("smallX-rollover.png");
+/// Java `IMOD`.
+pub static IMOD: ScaledImage = ScaledImage::new("b3dicon.png");
+/// Java `IMOD_PRESSED`.
+pub static IMOD_PRESSED: ScaledImage = ScaledImage::new("b3dicon-pressed.png");
+/// Java `IMOD_ROLLOVER`.
+pub static IMOD_ROLLOVER: ScaledImage = ScaledImage::new("b3dicon-rollover.png");
+/// Java `ETOMO`.
+pub static ETOMO: ScaledImage = ScaledImage::new("etomoicon.png");
+/// Java `ETOMO_PRESSED`.
+pub static ETOMO_PRESSED: ScaledImage = ScaledImage::new("etomoicon-pressed.png");
+/// Java `ETOMO_ROLLOVER`.
+pub static ETOMO_ROLLOVER: ScaledImage = ScaledImage::new("etomoicon-rollover.png");
+/// Java `ETOMO_LOG`.
+pub static ETOMO_LOG: ScaledImage = ScaledImage::new("projlogicon.png");
+/// Java `ETOMO_LOG_PRESSED`.
+pub static ETOMO_LOG_PRESSED: ScaledImage = ScaledImage::new("projlogicon-pressed.png");
+/// Java `ETOMO_LOG_ROLLOVER`.
+pub static ETOMO_LOG_ROLLOVER: ScaledImage = ScaledImage::new("projlogicon-rollover.png");
+/// Java `BRT_LOG`.
+pub static BRT_LOG: ScaledImage = ScaledImage::new("logicon.png");
+/// Java `BRT_LOG_PRESSED`.
+pub static BRT_LOG_PRESSED: ScaledImage = ScaledImage::new("logicon-pressed.png");
+/// Java `BRT_LOG_ROLLOVER`.
+pub static BRT_LOG_ROLLOVER: ScaledImage = ScaledImage::new("logicon-rollover.png");
 
-/// Java final `ScaledImage`; toolkit loading and pixel scaling remain a native GUI boundary.
-#[derive(Clone, Debug, Eq, PartialEq)]
+/// Java private static `Scale`.
+static SCALE: Mutex<Option<bool>> = Mutex::new(None);
+/// Java private static `Ratio`.
+static RATIO: Mutex<Option<f32>> = Mutex::new(None);
+
+/// Java `ScaledImage`.
 pub struct ScaledImage {
-    pub file_name: &'static str,
-    pub orig_image_present: bool,
-    pub orig_image_load_status: Option<i32>,
-    pub image_present: bool,
-    pub scale: Option<bool>,
-    pub ratio_milli: Option<i32>,
+    /// Java `fileName`.
+    file_name: &'static str,
+    // Java fields `origImage`, `origImageLoadStatus`, `image`: the loaded and scaled
+    // images - painting, not modelled.
 }
 
 impl ScaledImage {
-    /// Java private `loadImage()`; native toolkit decoding is represented by
-    /// the optional status supplied by the GUI boundary.
-    pub fn load_image(image_load_status: Option<i32>) -> i32 {
-        image_load_status.unwrap_or(COMPLETE)
-    }
-
     /// Java private `ScaledImage(String)`.
-    pub fn new(name: ScaledImageName, resource_present: bool, load_status: Option<i32>) -> Self {
-        Self {
-            file_name: name.file_name(),
-            orig_image_present: resource_present,
-            orig_image_load_status: resource_present.then_some(Self::load_image(load_status)),
-            image_present: false,
-            scale: None,
-            ratio_milli: None,
-        }
+    const fn new(file_name: &'static str) -> ScaledImage {
+        // Swing painting: url = ClassLoader.getSystemResource("images/" + fileName); if
+        // found, origImage = Toolkit.getDefaultToolkit().getImage(url) and
+        // origImageLoadStatus = loadImage(origImage).
+        ScaledImage { file_name }
     }
-    /// Java private static synchronized `init()` state transition.
-    pub fn init(
-        &mut self,
-        user_preference_loaded: bool,
-        font_size: i32,
-        above: i32,
-        below: i32,
-    ) -> bool {
-        if self.scale.is_some() {
-            return true;
-        }
-        if !user_preference_loaded {
-            return false;
-        }
-        if font_size > above || font_size < below {
-            self.scale = Some(true);
-            self.ratio_milli = Some((font_size * 1000) / above);
-        } else {
-            self.scale = Some(false);
-        }
-        true
-    }
-    /// Java `getImage(ImageObserver)`, retaining loading/scaling decisions but not native pixels.
-    pub fn get_image(
-        &mut self,
-        user_preference_loaded: bool,
-        font_size: i32,
-        above: i32,
-        below: i32,
-    ) -> bool {
-        if self.image_present {
-            return true;
-        }
-        if !self.orig_image_present {
-            return false;
-        }
-        if self.orig_image_load_status != Some(COMPLETE) {
-            return true;
-        }
-        if self.scale.is_none() && !self.init(user_preference_loaded, font_size, above, below) {
-            return true;
-        }
-        self.image_present = true;
-        self.orig_image_present = false;
-        true
-    }
-}
 
-#[cfg(test)]
-mod tests {
-    use super::*;
-    #[test]
-    fn resources_and_delayed_preference_initialization_follow_source() {
-        let mut image = ScaledImage::new(ScaledImageName::Imod, true, Some(COMPLETE));
-        assert_eq!(image.file_name, "b3dicon.png");
-        assert!(image.get_image(false, 12, 12, 10));
-        assert!(!image.image_present);
-        assert!(image.get_image(true, 18, 12, 10));
-        assert!(image.image_present);
-        assert_eq!(image.ratio_milli, Some(1500));
-        assert!(!image.orig_image_present);
+    // Java private `loadImage(Image)`: builds an `ImageIcon` to wait for the image and
+    // prints "Warning: difficulty loading <fileName>." unless loading completed.
+    // Painting, not modelled.
+
+    /// Java private static synchronized `init()`.  Initialize the first time an image
+    /// is requested.  Returns true if successful.
+    fn init() -> bool {
+        let mut scale = SCALE.lock().unwrap();
+        if scale.is_some() {
+            // Already initialized.
+            return true;
+        }
+        if !EtomoDirector::is_user_preference_loaded() {
+            return false;
+        }
+        let font_size = EtomoDirector::get_user_font_size();
+        if font_size > etomo_director::SCALE_IMAGES_ABOVE_FONT_SIZE
+            || font_size < etomo_director::SCALE_IMAGES_BELOW_FONT_SIZE
+        {
+            // Scaling is necessary.
+            *scale = Some(true);
+            *RATIO.lock().unwrap() =
+                Some(font_size as f32 / etomo_director::SCALE_IMAGES_ABOVE_FONT_SIZE as f32);
+        } else {
+            *scale = Some(false);
+        }
+        true
+    }
+
+    /// Java public synchronized `getImage(ImageObserver)`.  Return the original image
+    /// if scaling is unnecessary, or attempt to scale it.  The image is identified by
+    /// its file name.
+    pub fn get_image(&self) -> &'static str {
+        // Swing painting: return the cached scaled image if one was made; return null if
+        // the original image was not found; retry loadImage and return the original
+        // with "Warning: unable to load <fileName>." if it still fails.
+        let scale_is_null = SCALE.lock().unwrap().is_none();
+        if scale_is_null && !ScaledImage::init() {
+            // The user configuration hasn't been loaded yet.
+            return self.file_name;
+        }
+        // Scale the image if required.
+        let scale = *SCALE.lock().unwrap();
+        if scale == Some(true) {
+            // Swing painting: draw origImage into a BufferedImage of
+            // max(round(width * Ratio), 1) x max(round(height * Ratio), 1) with bilinear
+            // interpolation; if it does not load, print "Warning: unable to scale
+            // <fileName>." and return the original.  (Ratio is RATIO; Math.round is
+            // ui_utilities::java_math_round_f32.)
+        }
+        // Since the image has been set, delete origImage.
+        self.file_name
+    }
+
+    /// Java `fileName` (the image's identity in this stand-in).
+    pub fn get_file_name(&self) -> &'static str {
+        self.file_name
     }
 }

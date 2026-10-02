@@ -976,7 +976,63 @@ impl BatchRunTomoDatasetDialog {
         if let Some(field) = &self.ltf_gradient {
             values.insert("GRADIENT".into(), field.get_text());
         }
+        // Tracking method and fiducialless (`BatchRunTomoDatasetDialog.java:1328-1348`):
+        // the selected radio's TrackingMethod value, or, for "Coarse alignment only",
+        // fiducialless with empty tracking and seeding methods.  Seed also writes the
+        // Both seeding method.
+        {
+            use crate::imod::etomo::logic::{seeding_method, tracking_method};
+            let selected = [
+                (&self.rb_tracking_method_seed, tracking_method::SEED),
+                (&self.rb_tracking_method_raptor, tracking_method::RAPTOR),
+                (
+                    &self.rb_tracking_method_patch_tracking,
+                    tracking_method::PATCH_TRACKING,
+                ),
+            ]
+            .into_iter()
+            .find(|(radio, _)| radio.is_selected());
+            match selected {
+                Some((radio, method)) => {
+                    values.insert(
+                        "TRACKING_METHOD".into(),
+                        if radio.is_enabled() {
+                            method.get_value().to_string()
+                        } else {
+                            String::new()
+                        },
+                    );
+                    if method == tracking_method::SEED && radio.is_enabled() {
+                        values.insert(
+                            "SEEDING_METHOD".into(),
+                            seeding_method::BOTH.get_value().to_string(),
+                        );
+                    }
+                }
+                None => {
+                    values.insert(
+                        "FIDUCIALLESS".into(),
+                        if self.rb_fiducialless.is_selected() {
+                            "1".into()
+                        } else {
+                            "0".into()
+                        },
+                    );
+                    values.insert("TRACKING_METHOD".into(), String::new());
+                    values.insert("SEEDING_METHOD".into(), String::new());
+                }
+            }
+        }
         values.insert("GOLD".into(), gold);
+        // `BatchTool.saveTextToAutodoc(ltfNumberOfMarkers, ...)`: empty when disabled
+        values.insert(
+            "NUMBER_OF_MARKERS".into(),
+            if self.ltf_number_of_markers.is_enabled() {
+                self.ltf_number_of_markers.get_text()
+            } else {
+                String::new()
+            },
+        );
         values.insert(
             "LENGTH_OF_PIECES".into(),
             if self.cb_length_of_pieces.is_selected() {
@@ -1090,13 +1146,29 @@ impl BatchRunTomoDatasetDialog {
         if let Some(value) = directive_files.get("TUNE_FITTING_AND_SAMPLING") {
             self.cb_tune_fitting_and_sampling.set_selected(value != "0");
         }
+        // Tracking, seeding radio buttons (`BatchRunTomoDatasetDialog.java:1568-1610`):
+        // the directive holds TrackingMethod's value (0-2).  Seed is selected only
+        // with an autofidseed seeding method.
         if let Some(value) = directive_files.get("TRACKING_METHOD") {
-            self.rb_tracking_method_seed.set_selected(value == "seed");
-            self.rb_tracking_method_raptor
-                .set_selected(value == "raptor");
-            self.rb_tracking_method_patch_tracking
-                .set_selected(value == "patchTracking");
-            self.update_gold_panel();
+            use crate::imod::etomo::logic::{seeding_method, tracking_method};
+            let tracking_method =
+                tracking_method::TrackingMethod::get_instance(Some(value.as_str()));
+            let seeding_method = directive_files
+                .get("SEEDING_METHOD")
+                .and_then(|value| seeding_method::SeedingMethod::get_instance(Some(value)));
+            if let Some(tracking_method) = tracking_method {
+                if tracking_method == tracking_method::SEED
+                    && (seeding_method == Some(seeding_method::AUTO_FID_SEED)
+                        || seeding_method == Some(seeding_method::BOTH))
+                {
+                    self.rb_tracking_method_seed.set_selected(true);
+                } else if tracking_method == tracking_method::RAPTOR {
+                    self.rb_tracking_method_raptor.set_selected(true);
+                } else if tracking_method == tracking_method::PATCH_TRACKING {
+                    self.rb_tracking_method_patch_tracking.set_selected(true);
+                }
+                self.update_gold_panel();
+            }
         }
         if let Some(value) = directive_files.get("SCAN_DEFOCUS_RANGE") {
             let converted = value

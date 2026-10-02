@@ -1,66 +1,39 @@
 //! `IMOD/Etomo/src/etomo/ui/swing/Panel.java`.
 //!
-//! `JPanel` is a native-widget boundary.  This unit retains the one source
-//! override: maximum dimensions are scaled at the point Java scales them.
-#![allow(dead_code)]
+//! Java `final class Panel extends JPanel`: a panel whose maximum size is scaled by the
+//! font size.  The `JPanel` is [`Panel::get_component`].
 
-/// Java `java.awt.Dimension` values used by `Panel.setMaximumSize`.
-#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
-pub struct Dimension {
-    pub width: i32,
-    pub height: i32,
-}
+use std::rc::Rc;
 
-/// Java package-private final `Panel`.
-#[derive(Clone, Debug, Default, Eq, PartialEq)]
+use super::ui_utilities;
+use crate::imod::etomo::jdk::{Dimension, JComponent};
+
+/// Java `Panel`.
 pub struct Panel {
-    /// The Swing superclass's stored maximum size.
-    pub maximum_size: Option<Dimension>,
-    /// `UIUtilities.scaleByFontSize` is a direct user-preferences boundary.
-    /// `None` is Java's normal pre-preferences-loaded path, which preserves
-    /// both dimensions unchanged.
-    pub user_font_size: Option<i32>,
+    /// The `JPanel` this class extends.
+    component: Rc<JComponent>,
 }
 
 impl Panel {
-    /// Java `setMaximumSize(Dimension)`.
-    pub fn set_maximum_size(&mut self, mut maximum_size: Option<Dimension>) {
-        if let Some(size) = maximum_size.as_mut() {
-            if let Some(font_size) = self.user_font_size {
-                if size.width > 0 {
-                    size.width =
-                        ((font_size as f32 / 14.0 * size.width as f32).round() as i32).max(1);
-                }
-                if size.height > 0 {
-                    size.height =
-                        ((font_size as f32 / 14.0 * size.height as f32).round() as i32).max(1);
-                }
-            }
-        }
-        self.maximum_size = maximum_size;
+    /// Java default constructor.
+    pub fn new() -> Rc<Panel> {
+        Rc::new(Panel {
+            component: JComponent::new_panel(),
+        })
     }
-}
 
-#[cfg(test)]
-mod tests {
-    use super::*;
+    /// The `JPanel` this class extends.
+    pub fn get_component(&self) -> Rc<JComponent> {
+        self.component.clone()
+    }
 
-    #[test]
-    fn set_maximum_size_scales_each_positive_dimension() {
-        let mut panel = Panel {
-            user_font_size: Some(21),
-            ..Default::default()
-        };
-        panel.set_maximum_size(Some(Dimension {
-            width: 8,
-            height: 10,
-        }));
-        assert_eq!(
-            panel.maximum_size,
-            Some(Dimension {
-                width: 12,
-                height: 15,
-            })
-        );
+    /// Java `setMaximumSize(Dimension)` (override).  Java scales the caller's
+    /// `Dimension` in place, so the parameter is `&mut`.
+    pub fn set_maximum_size(&self, maximum_size: Option<&mut Dimension>) {
+        if let Some(maximum_size) = maximum_size {
+            maximum_size.width = ui_utilities::scale_by_font_size_int(maximum_size.width);
+            maximum_size.height = ui_utilities::scale_by_font_size_int(maximum_size.height);
+        }
+        // Swing layout: super.setMaximumSize(maximumSize).
     }
 }

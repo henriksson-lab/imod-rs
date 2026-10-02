@@ -16,6 +16,36 @@ export global EtomoStyle {
     out property <int> font-size-pt: 12;
 }
 
+// The link between the drawn widgets and the translated Swing units in
+// `src/imod/etomo/ui/swing` (not a Swing class).  A widget is identified the
+// way eTomo's own UI tests identify components (`UITestFieldType` prefix +
+// label, `IMOD/Etomo/tests/*.adoc`): its kind ("bn" button, "cb" check box,
+// "rb" radio button, "tf" text field, "sp" spinner, "mb" panel header) and
+// its label.  Each window component has its own instance of this global, so
+// the axis-B frame's widgets report through its own copy.
+//
+// Unwired (the standalone dialog crates' previews), every widget keeps the
+// static value its parent gives it.  Wired, the Rust side answers the
+// `*-value` queries from the dialog's state and bumps `generation` whenever
+// that state changes, which re-evaluates every bound value.
+export global EtomoBridge {
+    in property <bool> wired: false;
+    in property <int> generation: 0;
+    callback activated(string /* kind */, string /* label */);
+    callback toggled(string /* kind */, string /* label */, bool);
+    callback edited(string /* kind */, string /* label */, string);
+    // The keyboard focus entered (true) or left (false) a field: Swing's
+    // FOCUS_GAINED / FOCUS_LOST.
+    callback focus-changed(string /* kind */, string /* label */, bool /* gained */);
+    // A combo box's item list (the `toString()` of each item) and the user
+    // choosing item `index` from it.
+    pure callback items(string /* kind */, string /* label */, int /* generation */) -> [string];
+    callback selected(string /* kind */, string /* label */, int /* index */);
+    pure callback text-value(string /* kind */, string /* label */, string /* default */, int /* generation */) -> string;
+    pure callback bool-value(string /* kind */, string /* label */, bool /* default */, int /* generation */) -> bool;
+    pure callback enabled-value(string /* kind */, string /* label */, bool /* default */, int /* generation */) -> bool;
+}
+
 // `BeveledBorder` (`BeveledBorder.java`): a titled, bevelled group box.
 export component BeveledBorder inherits Rectangle {
     in property <string> title;
@@ -39,7 +69,13 @@ export component BeveledBorder inherits Rectangle {
 export component PanelHeader inherits Rectangle {
     in property <string> title;
     in property <bool> open: true;
+    property <bool> shown-open: EtomoBridge.wired
+        ? EtomoBridge.bool-value("mb", root.title, root.open, EtomoBridge.generation)
+        : root.open;
     height: EtomoStyle.field-height;
+    TouchArea {
+        clicked => { EtomoBridge.activated("mb", root.title); }
+    }
     background: EtomoStyle.panel;
     border-width: 1px;
     border-color: EtomoStyle.border;
@@ -49,7 +85,7 @@ export component PanelHeader inherits Rectangle {
         spacing: EtomoStyle.gap;
         alignment: start;
         Text {
-            text: root.open ? "-" : "+";
+            text: root.shown-open ? "-" : "+";
             vertical-alignment: center;
             color: EtomoStyle.text;
         }
@@ -62,36 +98,183 @@ export component PanelHeader inherits Rectangle {
     }
 }
 
+// Rust-only wiring primitives (not Swing classes): the interactive parts the
+// widget components below and the dialog crates' local widgets are built
+// from.  Each reports through `EtomoBridge` as the Swing component of `kind`
+// and `label` would (`ui/swing/slint_bridge.rs`); "fbn" is the file-chooser
+// button that sits beside the text field labelled `label`.
+
+// An entry box.  Every keystroke is written to the Swing field, and the shown
+// text follows the field.  A spinner's box ("sp") follows it only while it
+// does not have the keyboard focus, because the spinner reformats the number
+// it parses (typing "1." must not turn into "1.0" under the cursor).
+export component BridgedTextBox inherits Rectangle {
+    in property <string> kind: "tf";
+    in property <string> label;
+    in property <string> text;
+    in property <bool> enabled: true;
+    out property <bool> shown-enabled: EtomoBridge.wired
+        ? EtomoBridge.enabled-value(root.kind, root.label, root.enabled, EtomoBridge.generation)
+        : root.enabled;
+    property <string> model-text: EtomoBridge.wired
+        ? EtomoBridge.text-value(root.kind, root.label, root.text, EtomoBridge.generation)
+        : root.text;
+    changed model-text => {
+        if !input.has-focus || root.kind != "sp" {
+            input.text = root.model-text;
+        }
+    }
+    init => { input.text = root.model-text; }
+    height: EtomoStyle.field-height;
+    background: root.shown-enabled ? EtomoStyle.field-background : EtomoStyle.panel;
+    border-width: 1px;
+    border-color: EtomoStyle.border;
+    input := TextInput {
+        x: 3px;
+        width: parent.width - 6px;
+        enabled: root.shown-enabled;
+        vertical-alignment: center;
+        single-line: true;
+        color: root.shown-enabled ? EtomoStyle.text : EtomoStyle.disabled-text;
+        edited => { EtomoBridge.edited(root.kind, root.label, self.text); }
+        changed has-focus => {
+            EtomoBridge.focus-changed(root.kind, root.label, self.has-focus);
+            if !self.has-focus {
+                self.text = root.model-text;
+            }
+        }
+    }
+}
+
+// A press-to-act area over whatever its parent draws.
+export component BridgedButton inherits TouchArea {
+    in property <string> kind: "bn";
+    in property <string> label;
+    in property <bool> default-enabled: true;
+    out property <bool> shown-enabled: EtomoBridge.wired
+        ? EtomoBridge.enabled-value(root.kind, root.label, root.default-enabled, EtomoBridge.generation)
+        : root.default-enabled;
+    enabled: root.shown-enabled;
+    clicked => { EtomoBridge.activated(root.kind, root.label); }
+}
+
+// A check-box/radio-button state area: `checked` is the shown state.
+export component BridgedToggle inherits TouchArea {
+    in property <string> kind: "cb";
+    in property <string> label;
+    in property <bool> default-checked;
+    in property <bool> default-enabled: true;
+    // A radio button only ever selects itself.
+    in property <bool> radio: false;
+    out property <bool> checked: EtomoBridge.wired
+        ? EtomoBridge.bool-value(root.kind, root.label, root.default-checked, EtomoBridge.generation)
+        : root.default-checked;
+    out property <bool> shown-enabled: EtomoBridge.wired
+        ? EtomoBridge.enabled-value(root.kind, root.label, root.default-enabled, EtomoBridge.generation)
+        : root.default-enabled;
+    enabled: root.shown-enabled;
+    clicked => { EtomoBridge.toggled(root.kind, root.label, root.radio ? true : !root.checked); }
+}
+
+// A drop-down: the selected item, and a popup listing the items.
+export component BridgedComboBox inherits Rectangle {
+    in property <string> kind: "cbb";
+    in property <string> label;
+    in property <string> text;
+    in property <bool> enabled: true;
+    out property <bool> shown-enabled: EtomoBridge.wired
+        ? EtomoBridge.enabled-value(root.kind, root.label, root.enabled, EtomoBridge.generation)
+        : root.enabled;
+    property <string> shown-text: EtomoBridge.wired
+        ? EtomoBridge.text-value(root.kind, root.label, root.text, EtomoBridge.generation)
+        : root.text;
+    property <[string]> shown-items: EtomoBridge.wired
+        ? EtomoBridge.items(root.kind, root.label, EtomoBridge.generation)
+        : [];
+    height: EtomoStyle.field-height;
+    background: EtomoStyle.field-background;
+    border-width: 1px;
+    border-color: EtomoStyle.border;
+    HorizontalLayout {
+        padding-left: 3px;
+        Text {
+            text: root.shown-text;
+            vertical-alignment: center;
+            overflow: elide;
+            color: root.shown-enabled ? EtomoStyle.text : EtomoStyle.disabled-text;
+        }
+        Rectangle {
+            width: 16px;
+            background: EtomoStyle.panel;
+            border-width: 1px;
+            border-color: EtomoStyle.border;
+            Text { text: "v"; horizontal-alignment: center; vertical-alignment: center; }
+        }
+    }
+    TouchArea {
+        enabled: root.shown-enabled && root.shown-items.length > 0;
+        clicked => { popup.show(); }
+    }
+    popup := PopupWindow {
+        x: 0;
+        y: root.height;
+        width: root.width;
+        Rectangle {
+            background: EtomoStyle.field-background;
+            border-width: 1px;
+            border-color: EtomoStyle.border;
+            VerticalLayout {
+                for item[index] in root.shown-items: Rectangle {
+                    height: EtomoStyle.field-height;
+                    background: area.has-hover ? EtomoStyle.panel : transparent;
+                    Text {
+                        x: 3px;
+                        text: item;
+                        vertical-alignment: center;
+                        color: EtomoStyle.text;
+                    }
+                    area := TouchArea {
+                        clicked => { EtomoBridge.selected(root.kind, root.label, index); }
+                    }
+                }
+            }
+        }
+    }
+}
+
 // `LabeledTextField` (`LabeledTextField.java`): label then entry box.
 export component LabeledTextField inherits HorizontalLayout {
+    // Wired: "#N" when the dialog draws N showing widgets with this label
+    // (the A and B axis copies); appended to the bridge label.
+    in property <string> occurrence;
     in property <string> label;
     in property <string> text;
     in property <bool> enabled: true;
     in property <length> label-width: 180px;
+    property <bool> shown-enabled: EtomoBridge.wired
+        ? EtomoBridge.enabled-value("tf", root.label + root.occurrence, root.enabled, EtomoBridge.generation)
+        : root.enabled;
     spacing: EtomoStyle.gap;
     Text {
         text: root.label;
         width: root.label-width;
         vertical-alignment: center;
-        color: root.enabled ? EtomoStyle.text : EtomoStyle.disabled-text;
+        color: root.shown-enabled ? EtomoStyle.text : EtomoStyle.disabled-text;
         font-size: EtomoStyle.font-size-pt * 1px;
     }
-    Rectangle {
-        height: EtomoStyle.field-height;
-        background: EtomoStyle.field-background;
-        border-width: 1px;
-        border-color: EtomoStyle.border;
-        Text {
-            x: 3px;
-            text: root.text;
-            vertical-alignment: center;
-            color: root.enabled ? EtomoStyle.text : EtomoStyle.disabled-text;
-        }
+    BridgedTextBox {
+        kind: "tf";
+        label: root.label + root.occurrence;
+        text: root.text;
+        enabled: root.enabled;
     }
 }
 
 // `LabeledSpinner` (`LabeledSpinner.java`): label, entry box, up/down arrows.
 export component LabeledSpinner inherits HorizontalLayout {
+    // Wired: "#N" when the dialog draws N showing widgets with this label
+    // (the A and B axis copies); appended to the bridge label.
+    in property <string> occurrence;
     in property <string> label;
     in property <string> text;
     in property <bool> enabled: true;
@@ -103,13 +286,12 @@ export component LabeledSpinner inherits HorizontalLayout {
         vertical-alignment: center;
         color: root.enabled ? EtomoStyle.text : EtomoStyle.disabled-text;
     }
-    Rectangle {
+    BridgedTextBox {
         width: 60px;
-        height: EtomoStyle.field-height;
-        background: EtomoStyle.field-background;
-        border-width: 1px;
-        border-color: EtomoStyle.border;
-        Text { x: 3px; text: root.text; vertical-alignment: center; }
+        kind: "sp";
+        label: root.label + root.occurrence;
+        text: root.text;
+        enabled: root.enabled;
     }
     Rectangle {
         width: 14px;
@@ -118,17 +300,34 @@ export component LabeledSpinner inherits HorizontalLayout {
         border-width: 1px;
         border-color: EtomoStyle.border;
         VerticalLayout {
-            Text { text: "^"; horizontal-alignment: center; }
-            Text { text: "v"; horizontal-alignment: center; }
+            Text {
+                text: "^";
+                horizontal-alignment: center;
+                TouchArea { clicked => { EtomoBridge.toggled("sp", root.label + root.occurrence, true); } }
+            }
+            Text {
+                text: "v";
+                horizontal-alignment: center;
+                TouchArea { clicked => { EtomoBridge.toggled("sp", root.label + root.occurrence, false); } }
+            }
         }
     }
 }
 
 // `CheckBox` (`CheckBox.java`).
 export component CheckBox inherits HorizontalLayout {
+    // Wired: "#N" when the dialog draws N showing widgets with this label
+    // (the A and B axis copies); appended to the bridge label.
+    in property <string> occurrence;
     in property <string> text;
     in property <bool> checked;
     in property <bool> enabled: true;
+    property <bool> shown-checked: EtomoBridge.wired
+        ? EtomoBridge.bool-value("cb", root.text + root.occurrence, root.checked, EtomoBridge.generation)
+        : root.checked;
+    property <bool> shown-enabled: EtomoBridge.wired
+        ? EtomoBridge.enabled-value("cb", root.text + root.occurrence, root.enabled, EtomoBridge.generation)
+        : root.enabled;
     spacing: EtomoStyle.gap;
     alignment: start;
     Rectangle {
@@ -138,20 +337,37 @@ export component CheckBox inherits HorizontalLayout {
         background: EtomoStyle.field-background;
         border-width: 1px;
         border-color: EtomoStyle.border;
-        if root.checked: Text { text: "x"; horizontal-alignment: center; vertical-alignment: center; }
+        if root.shown-checked: Text { text: "x"; horizontal-alignment: center; vertical-alignment: center; }
+        TouchArea {
+            enabled: root.shown-enabled;
+            clicked => { EtomoBridge.toggled("cb", root.text + root.occurrence, !root.shown-checked); }
+        }
     }
     Text {
         text: root.text;
         vertical-alignment: center;
-        color: root.enabled ? EtomoStyle.text : EtomoStyle.disabled-text;
+        color: root.shown-enabled ? EtomoStyle.text : EtomoStyle.disabled-text;
+        TouchArea {
+            enabled: root.shown-enabled;
+            clicked => { EtomoBridge.toggled("cb", root.text + root.occurrence, !root.shown-checked); }
+        }
     }
 }
 
 // `RadioButton` (`RadioButton.java`).
 export component RadioButton inherits HorizontalLayout {
+    // Wired: "#N" when the dialog draws N showing widgets with this label
+    // (the A and B axis copies); appended to the bridge label.
+    in property <string> occurrence;
     in property <string> text;
     in property <bool> selected;
     in property <bool> enabled: true;
+    property <bool> shown-selected: EtomoBridge.wired
+        ? EtomoBridge.bool-value("rb", root.text + root.occurrence, root.selected, EtomoBridge.generation)
+        : root.selected;
+    property <bool> shown-enabled: EtomoBridge.wired
+        ? EtomoBridge.enabled-value("rb", root.text + root.occurrence, root.enabled, EtomoBridge.generation)
+        : root.enabled;
     spacing: EtomoStyle.gap;
     alignment: start;
     Rectangle {
@@ -162,26 +378,45 @@ export component RadioButton inherits HorizontalLayout {
         background: EtomoStyle.field-background;
         border-width: 1px;
         border-color: EtomoStyle.border;
-        if root.selected: Rectangle {
+        if root.shown-selected: Rectangle {
             width: 7px;
             height: 7px;
             border-radius: 3px;
             background: EtomoStyle.text;
         }
+        TouchArea {
+            enabled: root.shown-enabled;
+            clicked => { EtomoBridge.toggled("rb", root.text + root.occurrence, true); }
+        }
     }
     Text {
         text: root.text;
         vertical-alignment: center;
-        color: root.enabled ? EtomoStyle.text : EtomoStyle.disabled-text;
+        color: root.shown-enabled ? EtomoStyle.text : EtomoStyle.disabled-text;
+        TouchArea {
+            enabled: root.shown-enabled;
+            clicked => { EtomoBridge.toggled("rb", root.text + root.occurrence, true); }
+        }
     }
 }
 
 // `MultiLineButton` (`MultiLineButton.java`): eTomo's action button.
 export component MultiLineButton inherits Rectangle {
+    // Wired: "#N" when the dialog draws N showing widgets with this label
+    // (the A and B axis copies); appended to the bridge label.
+    in property <string> occurrence;
     in property <string> text;
     in property <bool> enabled: true;
+    property <bool> shown-enabled: EtomoBridge.wired
+        ? EtomoBridge.enabled-value("bn", root.text + root.occurrence, root.enabled, EtomoBridge.generation)
+        : root.enabled;
+    // A toggle-style process button (`MultiLineButton.getToggleButtonInstance`)
+    // stays pressed after its process succeeded.
+    property <bool> shown-selected: EtomoBridge.wired
+        ? EtomoBridge.bool-value("bn", root.text + root.occurrence, false, EtomoBridge.generation)
+        : false;
     height: 28px;
-    background: EtomoStyle.panel;
+    background: root.shown-selected ? EtomoStyle.panel.darker(20%) : EtomoStyle.panel;
     border-width: 2px;
     border-color: EtomoStyle.border;
     Text {
@@ -189,8 +424,12 @@ export component MultiLineButton inherits Rectangle {
         horizontal-alignment: center;
         vertical-alignment: center;
         wrap: word-wrap;
-        color: root.enabled ? EtomoStyle.text : EtomoStyle.disabled-text;
+        color: root.shown-enabled ? EtomoStyle.text : EtomoStyle.disabled-text;
         font-weight: 700;
+    }
+    TouchArea {
+        enabled: root.shown-enabled;
+        clicked => { EtomoBridge.activated("bn", root.text + root.occurrence); }
     }
 }
 

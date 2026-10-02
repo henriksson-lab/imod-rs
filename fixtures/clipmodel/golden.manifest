@@ -1,0 +1,241 @@
+# imod-rs native golden manifest for fixtures/clipmodel; see fixtures/README.md.
+# Regenerate with fixtures/regen-golden.sh clipmodel; do not edit by hand.
+sha256 938db2f725acaec3cd7778dd55e86f0cf61e8ef67de6b33ed44d124105b42667 1688 golden/areapix.mod
+text 2 golden/areapix.rc
+0
+
+text 142 golden/areapix.stdout
+
+ Number of non-empty contours reduced from      15 to        5
+ Number of points reduced from       143 to        23
+
+ CLIPPED MODEL WRITTEN
+
+sha256 8eddfdd5fa5f229ff22a1934b690c4a0b8aa3edf7564aa418ec8204ab1a9de60 4848 golden/areaum.mod
+text 2 golden/areaum.rc
+0
+
+text 142 golden/areaum.stdout
+
+ Number of non-empty contours reduced from      15 to       15
+ Number of points reduced from       143 to       143
+
+ CLIPPED MODEL WRITTEN
+
+sha256 827da9943a26a2e646676e98d906ea749347f30f7c51bddb235071cdeaf811f9 3048 golden/bound.mod
+text 2 golden/bound.rc
+0
+
+text 271 golden/bound.stdout
+
+ Number of non-empty contours reduced from      13 to        7
+ Number of points reduced from       135 to        67
+
+ Total length of cut edges is        0.01195 microns
+ Approximate surface area of cut edges is        0.00000299 square microns
+
+ CLIPPED MODEL WRITTEN
+
+sha256 99e988ac8332d2a2bdde5cf1a328bbf424a80ea679c5c21f4ec006c2e1d26395 1456 golden/contval.mod
+text 2 golden/contval.rc
+0
+
+text 142 golden/contval.stdout
+
+ Number of non-empty contours reduced from       1 to        1
+ Number of points reduced from        40 to        40
+
+ CLIPPED MODEL WRITTEN
+
+sha256 acd0a69357c819cffabd351cee3f380ae784aff0945513732f652c19617baa50 2364 golden/coplanar.mod
+text 2 golden/coplanar.rc
+0
+
+text 271 golden/coplanar.stdout
+
+ Number of non-empty contours reduced from      13 to        4
+ Number of points reduced from       135 to        42
+
+ Total length of cut edges is        0.00600 microns
+ Approximate surface area of cut edges is        0.00000150 square microns
+
+ CLIPPED MODEL WRITTEN
+
+text 2 golden/corners.rc
+0
+
+text 176 golden/corners.stdout
+
+ Number of non-empty contours reduced from       5 to        5
+ Number of points reduced from        42 to        39
+
+
+ FORMATTED  new  file opened: o.txt
+ POINT LIST WRITTEN
+
+sha256 10d6441c6b5615ea792b3a340d366d22c3d8fa4b6cf543cd467bf9199d2c6a3e 1125 golden/corners.txt
+sha256 2f832889c88bfe675fa5d3808742e593e2b41afac6a0fa475b13eb11a079e84a 1480 golden/ends.mod
+text 2 golden/ends.rc
+0
+
+text 142 golden/ends.stdout
+
+ Number of non-empty contours reduced from       5 to        5
+ Number of points reduced from        42 to        27
+
+ CLIPPED MODEL WRITTEN
+
+text 2 golden/endsnoobj.rc
+1
+
+text 85 golden/endsnoobj.stdout
+
+ERROR: CLIPMODEL - You must enter an object list when clipping from starts and ends
+
+sha256 26493568184239ed9154008dde0b1c597944be2da635a4b6473a4ece6cf1e333 4008 golden/exclude.mod
+text 2 golden/exclude.rc
+0
+
+text 271 golden/exclude.stdout
+
+ Number of non-empty contours reduced from      15 to       15
+ Number of points reduced from       143 to       108
+
+ Total length of cut edges is        0.01733 microns
+ Approximate surface area of cut edges is        0.00000433 square microns
+
+ CLIPPED MODEL WRITTEN
+
+sha256 8401ead3270b1f07fd20b466193b55b25d9759d827f5dc9cb7110df4e36ba368 3252 golden/include.mod
+text 2 golden/include.rc
+0
+
+text 321 golden/include.stdout
+
+ Selected volume is   0.162563E-06 cubic microns
+
+ Number of non-empty contours reduced from      15 to       12
+ Number of points reduced from       143 to        80
+
+ Total length of cut edges is        0.02000 microns
+ Approximate surface area of cut edges is        0.00000500 square microns
+
+ CLIPPED MODEL WRITTEN
+
+sha256 9ac8f5248658d1edec4372ca7ebdcb74be69e5e1ef29927314501e862804d491 688 golden/keepz.mod
+text 2 golden/keepz.rc
+0
+
+text 142 golden/keepz.stdout
+
+ Number of non-empty contours reduced from       1 to        1
+ Number of points reduced from        40 to         8
+
+ CLIPPED MODEL WRITTEN
+
+sha256 861c532e7dc568ce968e7ab859347077c914430637aa37f70924f27a681d8e35 1208 golden/longest.mod
+text 2 golden/longest.rc
+0
+
+text 142 golden/longest.stdout
+
+ Number of non-empty contours reduced from       5 to        3
+ Number of points reduced from        42 to        18
+
+ CLIPPED MODEL WRITTEN
+
+sha256 9658e24cf91f09bd45759e8b9da875551afc522e265746cdb7fcf1463c68f1ce 3984 golden/multi.mod
+text 2 golden/multi.rc
+0
+
+sha256 9b5b8012fbea49fa5351593c627dbc19e6186eb8c304aa14752541766551c718 518 golden/multi.stdout
+text 2 golden/noaction.rc
+1
+
+text 53 golden/noaction.stdout
+
+ERROR: CLIPMODEL - You must specify something to do
+
+text 2 golden/noargs.rc
+2
+
+text 27 golden/noargs.stdout
+ Name of input model file: 
+text 2 golden/nofile.rc
+1
+
+text 39 golden/nofile.stdout
+
+ERROR: CLIPMODEL - Opening model file
+
+sha256 6622ebd55961f16ac8839db8f5586f29ba4e96ed24502d9c8b0910b285e7fe23 4404 golden/objects.mod
+text 2 golden/objects.rc
+0
+
+text 142 golden/objects.stdout
+
+ Number of non-empty contours reduced from      15 to       12
+ Number of points reduced from       143 to       128
+
+ CLIPPED MODEL WRITTEN
+
+text 2 golden/objxyz.rc
+1
+
+text 89 golden/objxyz.stdout
+
+ERROR: CLIPMODEL - You cannot enter an object list with coordinate inclusion/exclusions
+
+sha256 98abbcd434ab998433b62200297fd3127b15f613a477724d2185bb44e9b45412 1360 golden/openkeep.mod
+text 2 golden/openkeep.rc
+0
+
+text 142 golden/openkeep.stdout
+
+ Number of non-empty contours reduced from       5 to        5
+ Number of points reduced from        42 to        22
+
+ CLIPPED MODEL WRITTEN
+
+text 2 golden/points.rc
+0
+
+text 176 golden/points.stdout
+
+ Number of non-empty contours reduced from       1 to        1
+ Number of points reduced from        40 to        28
+
+
+ FORMATTED  new  file opened: o.txt
+ POINT LIST WRITTEN
+
+sha256 108579f061580c5b4272c5fba2ca592ba0d189057e998abe6a6cb2e4700bbf7a 700 golden/points.txt
+sha256 cc9da4f28d1c5d90d64a7bfc60216e77d3252efde38059d3a569780569c3d1dd 1384 golden/pointval.mod
+text 2 golden/pointval.rc
+0
+
+text 142 golden/pointval.stdout
+
+ Number of non-empty contours reduced from       5 to        5
+ Number of points reduced from        42 to        23
+
+ CLIPPED MODEL WRITTEN
+
+sha256 5ead072d7e43e79da9c4ed01b648ef6552c13cbc3052640714c1f1800f9f52b3 1288 golden/pointvalout.mod
+text 2 golden/pointvalout.rc
+0
+
+text 142 golden/pointvalout.stdout
+
+ Number of non-empty contours reduced from       5 to        5
+ Number of points reduced from        42 to        19
+
+ CLIPPED MODEL WRITTEN
+
+text 2 golden/updkeep.rc
+1
+
+text 54 golden/updkeep.stdout
+
+ERROR: CLIPMODEL - You cannot use -update with -keep
+

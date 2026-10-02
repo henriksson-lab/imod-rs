@@ -33,15 +33,14 @@
 
 use super::imodpy::{
     ImodpyError, OptionValue, add_imod_bin_ignore_sighup, convert_to_integer, exit_from_imod_error,
-    get_err_strings, get_mrc_size, make_backup_file, option_value, print_pid, prnstr, py_int,
-    read_text_file, run_cmd,
+    get_err_strings, get_mrc_size, make_backup_file, option_value, print_pid, prnstr, py_fixed,
+    py_float, py_int, py_raise, py_true_div, read_text_file, run_cmd,
 };
 use super::pip::{
     exit_error, pip_get_boolean, pip_get_err_no, pip_get_float, pip_get_in_out_file,
     pip_get_integer, pip_get_integer_array, pip_read_or_parse_options,
 };
 use super::pysed::{PysedSrc, pysed, sed_del_and_add, sed_modify};
-use super::vmstopy::python_float;
 use std::ffi::OsString;
 use std::io::Write as _;
 
@@ -509,7 +508,7 @@ impl Ra {
                         if line.contains("rotation angle") && line.contains("closer to") {
                             let mut angles: Vec<f64> = Vec::new();
                             for word in line.split_whitespace() {
-                                if let Some(value) = python_float(word) {
+                                if let Some(value) = py_float(word) {
                                     angles.push(value);
                                 }
                             }
@@ -531,7 +530,7 @@ impl Ra {
                         let lsplit: Vec<&str> = line.split_whitespace().collect();
                         for ind in 0..lsplit.len().saturating_sub(1) {
                             if lsplit[ind].ends_with("):") {
-                                match python_float(lsplit[ind + 1]) {
+                                match py_float(lsplit[ind + 1]) {
                                     Some(value) => errors.push(value),
                                     None => exit_error(&format!(
                                         "Converting {} to floating point number",
@@ -543,7 +542,7 @@ impl Ra {
                                 && lsplit[ind].contains('g')
                                 && lsplit[ind].contains('t')
                             {
-                                match python_float(lsplit[ind + 1]) {
+                                match py_float(lsplit[ind + 1]) {
                                     Some(value) => errors.push(value),
                                     None => exit_error(&format!(
                                         "Converting {} to floating point number",
@@ -645,32 +644,40 @@ impl Ra {
                 if self.doing_robust {
                     prnstr(
                         &format!(
-                            "{:.3} {:.3} {:.3} {:.3}: errors with {descrip}",
-                            e(0),
-                            e(1),
-                            e(2),
-                            e(3)
+                            "{} {} {} {}: errors with {descrip}",
+                            py_fixed(e(0), 0, 3),
+                            py_fixed(e(1), 0, 3),
+                            py_fixed(e(2), 0, 3),
+                            py_fixed(e(3), 0, 3)
                         ),
                         "",
                         false,
                     );
                 } else {
-                    prnstr(&format!("{:.3}: error with {descrip}", e(0)), "", false);
+                    prnstr(
+                        &format!("{}: error with {descrip}", py_fixed(e(0), 0, 3)),
+                        "",
+                        false,
+                    );
                 }
             } else if self.doing_robust {
                 prnstr(
                     &format!(
-                        "{:.4} {:.4} {:.4} {:.4}: errors with {descrip}",
-                        e(0),
-                        e(1),
-                        e(2),
-                        e(3)
+                        "{} {} {} {}: errors with {descrip}",
+                        py_fixed(e(0), 0, 4),
+                        py_fixed(e(1), 0, 4),
+                        py_fixed(e(2), 0, 4),
+                        py_fixed(e(3), 0, 4)
                     ),
                     "",
                     false,
                 );
             } else {
-                prnstr(&format!("{:.4}: error with {descrip}", e(0)), "", false);
+                prnstr(
+                    &format!("{}: error with {descrip}", py_fixed(e(0), 0, 4)),
+                    "",
+                    false,
+                );
             }
         }
 
@@ -716,7 +723,11 @@ impl Ra {
             if diff > 0. || diff == -999. {
                 prnstr(" ", "\n", false);
             } else if diff < 0. {
-                prnstr(&format!(" -  {:.2}% higher", -100. * diff), "\n", false);
+                prnstr(
+                    &format!(" -  {}% higher", py_fixed(-100. * diff, 0, 2)),
+                    "\n",
+                    false,
+                );
             } else {
                 prnstr(" -  the same", "\n", false);
             }
@@ -734,7 +745,10 @@ impl Ra {
             self.new_required = self.next_required.clone();
             self.new_area_or_num = self.next_area_or_num.clone();
             prnstr(
-                &format!("Leave-out error {:.2}% lower with {descrip}", diff * 100.),
+                &format!(
+                    "Leave-out error {}% lower with {descrip}",
+                    py_fixed(diff * 100., 0, 2)
+                ),
                 "\n",
                 false,
             );
@@ -1819,10 +1833,10 @@ pub fn restrictalign(arguments: &[OsString]) -> i32 {
         if patch_track {
             prnstr(
                 &format!(
-                    "{} full tracks, {} unique points, {:.1} average points per view",
+                    "{} full tracks, {} unique points, {} average points per view",
                     ra.num_beads,
                     ra.num_points,
-                    ra.num_points as f64 / ra.num_views as f64
+                    py_fixed(ra.num_points as f64 / ra.num_views as f64, 0, 1)
                 ),
                 "\n",
                 false,
@@ -1830,10 +1844,10 @@ pub fn restrictalign(arguments: &[OsString]) -> i32 {
         } else {
             prnstr(
                 &format!(
-                    "{} beads, {} total points, {:.1} average points per view",
+                    "{} beads, {} total points, {} average points per view",
                     ra.num_beads,
                     ra.num_points,
-                    ra.num_points as f64 / ra.num_views as f64
+                    py_fixed(ra.num_points as f64 / ra.num_views as f64, 0, 1)
                 ),
                 "\n",
                 false,
@@ -1887,7 +1901,10 @@ pub fn restrictalign(arguments: &[OsString]) -> i32 {
     let mut new_ratio = ra.measured_to_unknown(&ra.new_param);
     if ra.verbose {
         prnstr(
-            &format!("Original estimated ratio of measurements to unknowns: {new_ratio:.2}"),
+            &format!(
+                "Original estimated ratio of measurements to unknowns: {new_ratio_fx}",
+                new_ratio_fx = py_fixed(new_ratio, 0, 2)
+            ),
             "\n",
             false,
         );
@@ -2098,7 +2115,8 @@ pub fn restrictalign(arguments: &[OsString]) -> i32 {
                     } else {
                         prnstr(
                             &format!(
-                                "Turning off robust alignments for evaluation; the benefit is only {benefit:.1}%"
+                                "Turning off robust alignments for evaluation; the benefit is only {benefit_fx}%",
+                                benefit_fx = py_fixed(benefit, 0, 1)
                             ),
                             "\n",
                             false,
@@ -2152,6 +2170,7 @@ pub fn restrictalign(arguments: &[OsString]) -> i32 {
                         // maybe.  Terminate only when bead number is too high, just fix the
                         // area size or number if that reaches a limit
                         ra.next_required[0] = (last_required + 1)
+                            // finite: lastRequired is an int
                             .max((1.1 * last_required as f64).round_ties_even() as i64);
                         if ra.next_required[0] > ra.num_beads.div_euclid(2) {
                             ra.next_required[0] = ra.num_beads.div_euclid(2);
@@ -2162,9 +2181,16 @@ pub fn restrictalign(arguments: &[OsString]) -> i32 {
                         }
 
                         last_required = ra.next_required[0];
-                        let mut ratio = ra.next_required[0] as f64 / ra.orig_required[0] as f64;
+                        // outside any `try`: a zero `MinFidsTotalAndEachSurface` raises
+                        // ZeroDivisionError and a negative ratio makes `math.sqrt` raise
+                        // ValueError, both uncaught; past those every value is finite
+                        let mut ratio =
+                            py_true_div(ra.next_required[0] as f64, ra.orig_required[0] as f64);
                         ra.next_required[1] =
                             (ra.orig_required[1] as f64 * ratio).round_ties_even() as i64;
+                        if ratio < 0. {
+                            py_raise("ValueError: math domain error");
+                        }
                         ratio = ratio.sqrt();
 
                         if ra.target_size {
@@ -2181,10 +2207,11 @@ pub fn restrictalign(arguments: &[OsString]) -> i32 {
                                 ra.next_area_or_num = last_area_or_num;
                             }
                         } else {
+                            // a zero ratio (next required 0) raises ZeroDivisionError
                             ra.next_area_or_num[0] =
-                                (ra.orig_area_or_num[0] as f64 / ratio).ceil() as i64;
+                                py_true_div(ra.orig_area_or_num[0] as f64, ratio).ceil() as i64;
                             ra.next_area_or_num[1] =
-                                (ra.orig_area_or_num[1] as f64 / ratio).ceil() as i64;
+                                py_true_div(ra.orig_area_or_num[1] as f64, ratio).ceil() as i64;
                             if ra.next_area_or_num[0] < 2 && ra.next_area_or_num[1] < 2 {
                                 if full_nx > full_ny {
                                     ra.next_area_or_num[0] = 2;
@@ -2349,8 +2376,8 @@ pub fn restrictalign(arguments: &[OsString]) -> i32 {
                 if diff < 0. {
                     prnstr(
                         &format!(
-                            "Permutation{ord_text} reduced leave-out error by {:.1}%",
-                            -diff * 100.
+                            "Permutation{ord_text} reduced leave-out error by {}%",
+                            py_fixed(-diff * 100., 0, 1)
                         ),
                         "\n",
                         false,
@@ -2371,7 +2398,7 @@ pub fn restrictalign(arguments: &[OsString]) -> i32 {
             }
 
             prnstr(
-                &format!("Biggest change was {:.2}%", -best_diff * 100.),
+                &format!("Biggest change was {}%", py_fixed(-best_diff * 100., 0, 2)),
                 "\n",
                 false,
             );
@@ -2480,9 +2507,9 @@ pub fn restrictalign(arguments: &[OsString]) -> i32 {
                 if changed != 0 && one_step_per_var > 1 {
                     prnstr(
                         &format!(
-                            "Changing {} for {:.2}% improvement",
+                            "Changing {} for {}% improvement",
                             var_names[(best_var - 1) as usize],
-                            100. * best_diff
+                            py_fixed(100. * best_diff, 0, 2)
                         ),
                         "\n",
                         false,
@@ -2559,12 +2586,22 @@ pub fn restrictalign(arguments: &[OsString]) -> i32 {
             ra.new_errors = final_errors;
             ra.test_local = save_test_loc;
             if ra.verbose {
-                prnstr(&format!(" - benefit now {benefit:.1}%"), "\n", false);
+                prnstr(
+                    &format!(
+                        " - benefit now {benefit_fx}%",
+                        benefit_fx = py_fixed(benefit, 0, 1)
+                    ),
+                    "\n",
+                    false,
+                );
             }
         }
 
         if benefit <= 0. {
-            robust_off = format!("robust fitting gives no benefit ({benefit:.1}%)");
+            robust_off = format!(
+                "robust fitting gives no benefit ({benefit_fx}%)",
+                benefit_fx = py_fixed(benefit, 0, 1)
+            );
         }
     }
 
@@ -2608,8 +2645,8 @@ pub fn restrictalign(arguments: &[OsString]) -> i32 {
             if diff < 0. {
                 prnstr(
                     &format!(
-                        "{PROGNAME}: {change_text} to reduce errors of points left out by {:.1}%",
-                        -diff * 100.
+                        "{PROGNAME}: {change_text} to reduce errors of points left out by {}%",
+                        py_fixed(-diff * 100., 0, 1)
                     ),
                     "\n",
                     false,
@@ -2636,7 +2673,8 @@ pub fn restrictalign(arguments: &[OsString]) -> i32 {
     } else if no_param_change {
         prnstr(
             &format!(
-                "{PROGNAME}: {change_text} given the measured/unknown ratio of ~{new_ratio:.1}"
+                "{PROGNAME}: {change_text} given the measured/unknown ratio of ~{new_ratio_fx}",
+                new_ratio_fx = py_fixed(new_ratio, 0, 1)
             ),
             "\n",
             false,
@@ -2644,7 +2682,8 @@ pub fn restrictalign(arguments: &[OsString]) -> i32 {
     } else {
         prnstr(
             &format!(
-                "{PROGNAME}: {change_text} to achieve measured/unknown ratio of ~{new_ratio:.1}"
+                "{PROGNAME}: {change_text} to achieve measured/unknown ratio of ~{new_ratio_fx}",
+                new_ratio_fx = py_fixed(new_ratio, 0, 1)
             ),
             "\n",
             false,

@@ -51,6 +51,9 @@ export component MainTomogramPanel inherits Rectangle {
     // empty here rather than duplicated.
     in property <bool> showing-setup: false;
     in property <bool> compact-display: false;
+    // Rust-only wiring: false when the main window draws the progress panel
+    // in the dialog column (`MainFrameWindow`).
+    in property <bool> show-status-panel: true;
 
     background: EtomoStyle.background;
 
@@ -83,6 +86,7 @@ export component MainTomogramPanel inherits Rectangle {
         if !root.showing-setup && root.showing-axis == "A": TomogramProcessPanel {
             axis-id: root.axis-type == "SINGLE_AXIS" ? "ONLY" : "FIRST";
             compact-display: root.compact-display;
+            show-status-panel: root.show-status-panel;
         }
 
         // `addAxisPanelB()` (`:433-437`): `scrollB` holds `axisPanelB`, built

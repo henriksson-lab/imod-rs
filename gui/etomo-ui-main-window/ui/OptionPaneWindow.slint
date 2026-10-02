@@ -1,0 +1,61 @@
+// Rust-only wiring (`ui/swing/ui_harness.rs`, `present_popup`): the modal
+// `JOptionPane` dialog eTomo's popups are shown in
+// (`AbstractFrame.showOptionDialog` -> `JOptionPane.createDialog(parent,
+// title)` -> `dialog.setVisible(true)`).  It is drawn by a child process
+// (`imod etomo-popup`), so the dialog is modal the way Swing's is: the main
+// window's event dispatch thread waits for the answer.
+//
+// `message-type` is the `JOptionPane` constant after `AbstractFrame`'s icon
+// adjustment: 0 ERROR_MESSAGE, 1 INFORMATION_MESSAGE, 2 WARNING_MESSAGE,
+// 3 QUESTION_MESSAGE, -1 PLAIN_MESSAGE.  `options` are the buttons the pane
+// shows, in order; `initial` the initially selected one (-1 none).
+
+import { EtomoStyle } from "../../etomo-ui-common/ui/widgets.slint";
+import { JOptionPane, JButton } from "../../etomo-ui-windows/ui/WindowWidgets.slint";
+
+export component OptionPaneWindow inherits Window {
+    in property <string> title-text;
+    in property <int> message-type: -1;
+    in property <[string]> message-lines;
+    in property <[string]> options: ["OK"];
+    in property <int> initial: -1;
+    callback chosen(int);
+    title: root.title-text;
+    background: EtomoStyle.background;
+    VerticalLayout {
+        padding: 6px;
+        spacing: 6px;
+        JOptionPane {
+            // The pane draws an error glyph for 0 and a question glyph
+            // otherwise.
+            message-type: root.message-type == 0 || root.message-type == 2 ? 0 : 3;
+            for line in root.message-lines: Text {
+                text: line;
+                color: EtomoStyle.text;
+                font-size: EtomoStyle.font-size-pt * 1px;
+            }
+        }
+        HorizontalLayout {
+            alignment: center;
+            spacing: 6px;
+            for option[index] in root.options: Rectangle {
+                min-width: 73px;
+                height: 26px;
+                background: EtomoStyle.panel;
+                border-width: index == root.initial ? 2px : 1px;
+                border-color: EtomoStyle.border;
+                HorizontalLayout {
+                    padding-left: 8px;
+                    padding-right: 8px;
+                    Text {
+                        text: option;
+                        horizontal-alignment: center;
+                        vertical-alignment: center;
+                        color: EtomoStyle.text;
+                    }
+                }
+                TouchArea { clicked => { root.chosen(index); } }
+            }
+        }
+    }
+}

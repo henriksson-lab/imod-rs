@@ -1,75 +1,47 @@
 //! `IMOD/Etomo/src/etomo/ui/swing/UIExpert.java`.
+//!
+//! Experts live on the event dispatch thread with the dialogs they drive.  The
+//! manager holds each one as an `Rc` of the concrete expert and hands it out as
+//! `Rc<dyn UIExpert>` (Java `getUIExpert`).  Every method takes `&self`: a
+//! Java expert is re-entered from its own dialog (`saveAction` ->
+//! `ProcessDialog.saveAction` -> `done` -> `expert.doneDialog`), so the mutable
+//! state of a concrete expert sits in `Cell`/`RefCell` fields and no borrow of
+//! the expert is held across a call out.
 
+use crate::imod::etomo::process_series::{Process, ProcessSeriesHandle};
 use crate::imod::etomo::r#type::dialog_type::DialogType;
+use crate::imod::etomo::r#type::process_result_display::ProcessResultDisplayHandle;
+use crate::imod::etomo::ui::swing::process_dialog::DialogExitState;
+use crate::imod::etomo::ui::swing::process_display::ProcessDisplay;
+use std::rc::Rc;
 
-/// Java `UIExpert`.
-///
-/// The three process collaborators are associated types because their Java
-/// concrete source units own their state.  This preserves every interface
-/// signature without substituting a common process model.
-pub trait UIExpert {
-    type Process;
-    type ProcessResultDisplay;
-    type ProcessSeries;
-    type DialogExitState;
-    type ProcessDisplay;
+/// Java `public static final String rcsid`.
+pub const RCSID: &str = "$Id$";
 
+/// Java interface `UIExpert`.
+pub trait UIExpert: std::any::Any {
     /// Java `openDialog()`.
-    fn open_dialog(&mut self);
+    fn open_dialog(&self);
+
     /// Java `startNextProcess(ProcessSeries.Process, ProcessResultDisplay,
     /// ProcessSeries, DialogType, ProcessDisplay)`.
     fn start_next_process(
-        &mut self,
-        process: &mut Self::Process,
-        process_result_display: &mut Self::ProcessResultDisplay,
-        process_series: &mut Self::ProcessSeries,
-        dialog_type: DialogType,
-        display: &mut Self::ProcessDisplay,
+        &self,
+        process: &Process,
+        process_result_display: Option<ProcessResultDisplayHandle>,
+        process_series: Option<ProcessSeriesHandle>,
+        dialog_type: Option<DialogType>,
+        display: Option<Rc<dyn ProcessDisplay>>,
     ) -> bool;
-    /// Java `saveAction()`.
-    fn save_action(&mut self);
-    /// Java `saveDialog(DialogExitState)`.
-    fn save_dialog(&mut self, exit_state: Self::DialogExitState);
-}
 
-#[cfg(test)]
-mod tests {
-    use super::UIExpert;
-    use crate::imod::etomo::r#type::dialog_type::DialogType;
-    struct Expert;
-    impl UIExpert for Expert {
-        type Process = ();
-        type ProcessResultDisplay = ();
-        type ProcessSeries = ();
-        type DialogExitState = ();
-        type ProcessDisplay = ();
-        fn open_dialog(&mut self) {}
-        fn start_next_process(
-            &mut self,
-            _: &mut (),
-            _: &mut (),
-            _: &mut (),
-            _: DialogType,
-            _: &mut (),
-        ) -> bool {
-            true
-        }
-        fn save_action(&mut self) {}
-        fn save_dialog(&mut self, _: ()) {}
-    }
-    #[test]
-    fn all_java_interface_methods_are_implementable() {
-        let mut expert = Expert;
-        let (mut process, mut result, mut series, mut display) = ((), (), (), ());
-        expert.open_dialog();
-        assert!(expert.start_next_process(
-            &mut process,
-            &mut result,
-            &mut series,
-            DialogType::TomogramGeneration,
-            &mut display
-        ));
-        expert.save_action();
-        expert.save_dialog(());
-    }
+    /// Java `saveAction()`.
+    fn save_action(&self);
+
+    /// Java `saveDialog(DialogExitState)`.
+    fn save_dialog(&self, exit_state: DialogExitState);
+
+    /// Rust-only: the Java callers cast the `UIExpert` returned by
+    /// `ApplicationManager.getUIExpert` to its concrete class
+    /// (`(TomogramPositioningExpert) getUIExpert(...)`); this is the cast.
+    fn as_any(&self) -> &dyn std::any::Any;
 }

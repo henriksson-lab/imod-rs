@@ -30,13 +30,13 @@
 //! its input, which is the `WeightsForScore` line whenever weights were
 //! added, instead of the target entry.
 
-use super::batchruntomo::py_str_float;
 use super::imodpy::{
     MrcInfo, OptionValue, add_imod_bin_ignore_sighup, call_own_program, cleanup_files,
     convert_to_integer, exit_from_imod_error, get_mrc, get_mrc_pixel, get_mrc_size, glob_glob,
     make_current_dir_writable, option_value, os_path_splitext, parse_list, prnstr, read_text_file,
     run_cmd, write_text_file,
 };
+use super::imodpy::{py_fixed, py_float, py_int_of_float, py_round, py_str_float, py_true_div};
 use super::pip::{
     exit_error, pip_get_boolean, pip_get_err_no, pip_get_float, pip_get_integer, pip_get_string,
     pip_get_two_integers, pip_read_or_parse_options,
@@ -435,10 +435,7 @@ impl Afs {
             comlines.push("LightBeads 1".to_owned());
         }
         if self.using_sobel {
-            comlines.push(format!(
-                "KernelSigma {}",
-                c_format("%.3f", &[CArg::Dbl(self.ksigma)])
-            ));
+            comlines.push(format!("KernelSigma {}", py_fixed(self.ksigma, 0, 3)));
         }
         if !self.bound_model.is_empty() {
             comlines.push(format!("AreaModel {}", self.bound_model));
@@ -488,9 +485,9 @@ impl Afs {
                 && self.adjust_size != 0
             {
                 // `float(l.split()[-1])` of the line printed with `%.2f`
-                match c_format("%.2f", &[CArg::Dbl(*size as f64)]).parse::<f64>() {
-                    Ok(value) => self.new_bead_size = Some(value),
-                    Err(_) => exit_error("Converting new bead size to float"),
+                match py_float(&c_format("%.2f", &[CArg::Dbl(*size as f64)])) {
+                    Some(value) => self.new_bead_size = Some(value),
+                    None => exit_error("Converting new bead size to float"),
                 }
             }
         }
@@ -500,7 +497,7 @@ impl Afs {
         // then `total peaks being ...`, or `Failed to find dip`.
         if reports.len() < 2 {
             eprintln!("IndexError: list index out of range");
-            std::process::exit(1)
+            crate::imod::libcfshr::b3dutil::exit(1)
         }
         let second = &reports[reports.len() - 2];
         let last = &reports[reports.len() - 1];
@@ -822,6 +819,7 @@ pub fn autofidseed(arguments: &[OsString]) -> i32 {
             );
         }
         if if_guess == 0 {
+            // finite: a constant fraction of the integer JustFindShiftsNearZero entry
             g.guess = (guess_frac_if_just_shifts * just_shifts as f64).round_ties_even() as i64;
             if_guess = 1;
         }
@@ -861,7 +859,7 @@ pub fn autofidseed(arguments: &[OsString]) -> i32 {
             Some(list) => list,
             None => {
                 eprintln!("TypeError: object of type 'NoneType' has no len()");
-                std::process::exit(1)
+                crate::imod::libcfshr::b3dutil::exit(1)
             }
         };
     }
@@ -872,7 +870,7 @@ pub fn autofidseed(arguments: &[OsString]) -> i32 {
             Some(list) => list,
             None => {
                 eprintln!("TypeError: object of type 'NoneType' has no len()");
-                std::process::exit(1)
+                crate::imod::libcfshr::b3dutil::exit(1)
             }
         };
     }
@@ -1090,9 +1088,9 @@ pub fn autofidseed(arguments: &[OsString]) -> i32 {
         let tilt_lines = read_text_file(&tilt_file, None, false, None).unwrap_or_default();
         for i in 0..tilt_lines.len() {
             if !tilt_lines[i].trim().is_empty() {
-                match tilt_lines[i].trim().parse::<f64>() {
-                    Ok(value) => tilt_angles.push(value),
-                    Err(_) => exit_error(&format!(
+                match py_float(&tilt_lines[i]) {
+                    Some(value) => tilt_angles.push(value),
+                    None => exit_error(&format!(
                         "Converting lines in {tilt_file} to floating point values"
                     )),
                 }
@@ -1249,9 +1247,9 @@ pub fn autofidseed(arguments: &[OsString]) -> i32 {
             let mut found = false;
             for report in &sink.lock().expect("imodfindbeads result").reports {
                 if let FindbeadsReport::Area(area) = report {
-                    match c_format("%.3f", &[CArg::Dbl(*area)]).trim().parse::<f64>() {
-                        Ok(value) => total_area = value,
-                        Err(_) => {
+                    match py_float(&c_format("%.3f", &[CArg::Dbl(*area)])) {
+                        Some(value) => total_area = value,
+                        None => {
                             exit_error("Converting area being analyzed from imodfindbeads output")
                         }
                     }
@@ -1269,22 +1267,31 @@ pub fn autofidseed(arguments: &[OsString]) -> i32 {
     }
 
     // Now it is possible to convert to get fallbacks for the guess and thresholds
+    // `int(round())` outside any `try`: a NaN or infinite `-density` or
+    // `-number` raises uncaught
     if if_guess == 0 {
-        g.guess = 1.max((g.target_number * target_to_guess_frac).round_ties_even() as i64);
+        g.guess = 1.max(py_int_of_float(py_round(
+            g.target_number * target_to_guess_frac,
+        )));
     }
-    g.average_fallback = 1.max((g.target_number * target_to_average_fb).round_ties_even() as i64);
-    g.storage_fallback = 1.max((g.target_number * target_to_storage_fb).round_ties_even() as i64);
+    g.average_fallback = 1.max(py_int_of_float(py_round(
+        g.target_number * target_to_average_fb,
+    )));
+    g.storage_fallback = 1.max(py_int_of_float(py_round(
+        g.target_number * target_to_storage_fb,
+    )));
 
     // `int(os.stat(f).st_mtime)`: whole seconds, truncated
     let mtime = |file: &str| -> i64 {
         match std::fs::metadata(file).and_then(|meta| meta.modified()) {
             Ok(time) => match time.duration_since(std::time::UNIX_EPOCH) {
                 Ok(duration) => duration.as_secs() as i64,
+                // finite: a Duration's seconds (Python int(st_mtime))
                 Err(error) => -(error.duration().as_secs_f64().ceil() as i64),
             },
             Err(error) => {
                 eprintln!("FileNotFoundError: {error}: '{file}'");
-                std::process::exit(1)
+                crate::imod::libcfshr::b3dutil::exit(1)
             }
         }
     };
@@ -1372,6 +1379,7 @@ pub fn autofidseed(arguments: &[OsString]) -> i32 {
                     || (views_entered != 0
                         && num_seed_arr.as_ref().unwrap()[0] == g.num_seed_views)))
             && nonempty_f(&adj_size_arr)
+            // finite: this script writes AdjustSize into its own info file as an int
             && adj_size_arr.as_ref().unwrap()[0].round_ties_even() as i32 == g.adjust_size
             && nonempty_f(&zero_frac_arr)
             && zero_frac_arr.as_ref().unwrap()[0] == shifts_frac
@@ -1569,7 +1577,8 @@ pub fn autofidseed(arguments: &[OsString]) -> i32 {
         let min_z = py_index!(g.included_views, view_below_zero);
         let mid_z = py_index!(g.included_views, view_near_zero);
         let max_z = py_index!(g.included_views, view_above_zero);
-        let diam = (1.5 * g.bead_size) as i64;
+        // a NaN or infinite bead size raises uncaught
+        let diam = py_int_of_float(1.5 * g.bead_size);
         let mop_file = format!("{}{}mop", g.tmproot, g.pid);
         let dmean = match get_mrc(&g.image_file, true, false) {
             Ok(MrcInfo::All(.., dmean)) => dmean,
@@ -1600,7 +1609,8 @@ pub fn autofidseed(arguments: &[OsString]) -> i32 {
         let increment = (tilt(view_above_zero) - tilt(view_below_zero)).abs() / 2.;
         let max_swing = 800. * increment.to_radians().sin();
         let pixel = pixel_size.unwrap();
-        let length = (2. * max_swing / (g.binning as f64 * pixel)) as i64;
+        // a zero pixel size raises ZeroDivisionError, uncaught
+        let length = py_int_of_float(py_true_div(2. * max_swing, g.binning as f64 * pixel));
         let mut xcorr_com = vec![
             format!("InputFile {mop_trim}"),
             format!("OutputFile {}{}mopxf", g.tmproot, g.pid),
@@ -1700,14 +1710,14 @@ pub fn autofidseed(arguments: &[OsString]) -> i32 {
 
                 // Convert numbers, apply sign to shift
                 for ind in 1..num_split.len().min(7) {
-                    match num_split[ind].parse::<f64>() {
-                        Ok(value) => {
+                    match py_float(num_split[ind]) {
+                        Some(value) => {
                             shifts[sh_ind][ind - 1] = value;
                             if ind != 3 && ind != 6 {
                                 shifts[sh_ind][ind - 1] *= sign / div_by_views[sh_ind] as f64;
                             }
                         }
-                        Err(_) => {
+                        None => {
                             let mut all: Vec<&str> = CLEAN_EXTS.to_vec();
                             all.extend(RESUME_EXTS);
                             all.extend(INFO_EXTS);
@@ -1754,7 +1764,7 @@ pub fn autofidseed(arguments: &[OsString]) -> i32 {
         let box0 = box_size_arr.as_ref().unwrap()[0];
         let binning = g.binning as f64;
         let pair =
-            |a: f64, b: f64| -> String { c_format("%.1f,%.1f", &[CArg::Dbl(a), CArg::Dbl(b)]) };
+            |a: f64, b: f64| -> String { format!("{},{}", py_fixed(a, 0, 1), py_fixed(b, 0, 1)) };
         if g.max_length < length as f64 / 2. && g.max_length * binning > shifts_frac * box0 as f64 {
             // If primary angles match, set first shift and look for second
             if g.vectors_match(0, 0, 1, 0) || g.vectors_match(0, 1, 1, 1) {
@@ -1835,7 +1845,7 @@ pub fn autofidseed(arguments: &[OsString]) -> i32 {
         prnstr(
             &format!(
                 "Tracking parameters adjusted for new unbinned bead size of {}   [AFS1]",
-                c_format("%.2f", &[CArg::Dbl(unbinned_new_size)])
+                py_fixed(unbinned_new_size, 0, 2)
             ),
             "\n",
             false,
@@ -1867,7 +1877,7 @@ pub fn autofidseed(arguments: &[OsString]) -> i32 {
                     if let Some(crit) = crit.filter(|crit| *crit != 0.) {
                         adjust_sed.push(format!(
                             "?^{option}?s?[ \t].*? {}?",
-                            c_format("%.2f", &[CArg::Dbl(crit * scale)])
+                            py_fixed(crit * scale, 0, 2)
                         ));
                     }
                 }
@@ -1883,9 +1893,10 @@ pub fn autofidseed(arguments: &[OsString]) -> i32 {
                 if let Some(crit_arr) = crit_arr.filter(|values| values.len() > 1) {
                     adjust_sed.push(format!(
                         "?^DeletionCriterionMinAndSD?s?[ \t].*? {}?",
-                        c_format(
-                            "%.3f,%.2f",
-                            &[CArg::Dbl(crit_arr[0] * scale), CArg::Dbl(crit_arr[1])]
+                        format!(
+                            "{},{}",
+                            py_fixed(crit_arr[0] * scale, 0, 3),
+                            py_fixed(crit_arr[1], 0, 2)
                         )
                     ));
                 }
@@ -1899,8 +1910,10 @@ pub fn autofidseed(arguments: &[OsString]) -> i32 {
                     None,
                 ));
                 if let Some(box_arr) = box_arr.filter(|values| values.len() > 1) {
-                    let new_xbox = 2 * (box_arr[0] as f64 * scale / 2.).round_ties_even() as i64;
-                    let new_ybox = 2 * (box_arr[1] as f64 * scale / 2.).round_ties_even() as i64;
+                    // `scale` comes from the bead sizes, which may be NaN or
+                    // infinite; `int(round())` then raises uncaught
+                    let new_xbox = 2 * py_int_of_float(py_round(box_arr[0] as f64 * scale / 2.));
+                    let new_ybox = 2 * py_int_of_float(py_round(box_arr[1] as f64 * scale / 2.));
                     adjust_sed.push(format!("?^BoxSizeXandY?s?[ \t].*? {new_xbox},{new_ybox}?"));
                 }
             }
@@ -2006,8 +2019,10 @@ pub fn autofidseed(arguments: &[OsString]) -> i32 {
                 local_track = 1;
                 let density = num_peaks as f64 / (g.nx as f64 * g.ny as f64);
                 local_size = (min_local_size as i64)
+                    // finite: density = numPeaks / (nx * ny) > 0, numPeaks >= minPointsForLocal
                     .max(((opt_local_points * opt_local_size / density).powf(0.333)) as i64);
                 if density * (local_size as f64).powi(2) < min_local_points {
+                    // finite: density > 0 as above
                     local_size = (min_local_points / density).sqrt() as i64;
                 }
                 if local_size as f64 > 0.8 * g.nx as f64 && local_size as f64 > 0.8 * g.ny as f64 {
@@ -2060,7 +2075,7 @@ pub fn autofidseed(arguments: &[OsString]) -> i32 {
             if two_surf != 0 {
                 let pointcom = format!(
                     "point2model -values -1 -sphere {} \"{}\" \"{}\"",
-                    ((g.bead_size + 2.) / 2.) as i64,
+                    py_int_of_float((g.bead_size + 2.) / 2.),
                     tmpxyzpt[ind],
                     tmpxyzmod[ind]
                 );
@@ -2248,7 +2263,7 @@ pub fn autofidseed(arguments: &[OsString]) -> i32 {
             let opt_split: Vec<&str> = opt.trim_start_matches('-').split_whitespace().collect();
             let Some(first) = opt_split.first() else {
                 eprintln!("IndexError: list index out of range");
-                std::process::exit(1)
+                crate::imod::libcfshr::b3dutil::exit(1)
             };
             if "WeightsForScore".starts_with(first) || "weights".starts_with(first) {
                 weight_entered = true;
@@ -2266,6 +2281,7 @@ pub fn autofidseed(arguments: &[OsString]) -> i32 {
             py_str_float(g.target_density)
         ));
     } else {
+        // finite: in this branch targetNumber is the -number integer
         pickcom.push(format!("TargetNumberOfBeads {}", g.target_number as i64));
     }
 
@@ -2275,7 +2291,7 @@ pub fn autofidseed(arguments: &[OsString]) -> i32 {
         let scale = min_size_for_weight_scaling / size_for_weights;
         pickcom.push(format!(
             "WeightsForScore 1.,1.,{}",
-            c_format("%.4f,%.4f", &[CArg::Dbl(scale), CArg::Dbl(scale)])
+            format!("{},{}", py_fixed(scale, 0, 4), py_fixed(scale, 0, 4))
         ));
     }
 
@@ -2340,6 +2356,7 @@ pub fn autofidseed(arguments: &[OsString]) -> i32 {
                         false,
                     );
                     prnstr(" ", "\n", false);
+                    // finite: this branch needs major > maxMajorMinor * minor + 1, false for NaN/inf
                     let new_target = (2. * max_major_minor * minor as f64) as i64 + 1;
                     pickcom[target_index] = format!("TargetNumberOfBeads {new_target}");
                     pickcom.push("LimitMajorityToTarget".to_owned());

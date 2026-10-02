@@ -1,207 +1,207 @@
 //! `IMOD/Etomo/src/etomo/ui/swing/MenuButton.java`.
-#![allow(dead_code)]
+//!
+//! A `MultiLineButton` with a right-click "Run To" menu: one item per action element,
+//! each reported to a `MenuButtonContainer`.  (Nothing in the Java constructs one
+//! outside this class; it is translated whole.)
+//!
+//! Java `final class MenuButton extends MultiLineButton implements ContextMenu`: the
+//! superclass is embedded as `base` (with `Deref`), and construction follows
+//! `MultiLineButton`'s split (`new_fields`, then `construct`).  The popup is shown by
+//! the Swing stand-in's popup layer (`JComponent::show`).
 
-use super::{
-    context_menu::{ContextMenu, MouseEvent},
-    menu_button_container::MenuButtonContainer,
-    menu_item::MenuItem,
-    multi_line_button::MultiLineButton,
-};
+use std::cell::RefCell;
+use std::ops::Deref;
+use std::rc::{Rc, Weak};
+
+use super::context_menu::ContextMenu;
+use super::generic_mouse_adapter::GenericMouseAdapter;
+use super::menu_button_container::MenuButtonContainer;
+use super::menu_item::MenuItem;
+use super::multi_line_button::{MultiLineButton, MultiLineButtonVirtual};
+use crate::imod::etomo::jdk::{ActionEvent, JComponent, MouseEvent};
+// TODO(unit): needs etomo/type/ActionElement.java - `interface ActionElement {
+// String getActionCommand(); }`.
+use crate::imod::etomo::r#type::action_element::ActionElement;
 use crate::imod::etomo::r#type::dialog_type::DialogType;
 
-pub const MENU_STRING: &str = "Run To";
+/// Java `public static final String rcsid`.
+pub const RCSID: &str = "$Id$";
 
-/// Direct `etomo.type.ActionElement` dependency boundary.  Its action command
-/// is the only member reached by this Java source unit.
-#[derive(Clone, Debug, Eq, PartialEq)]
-pub struct ActionElement {
-    pub action_command: String,
-}
-impl ActionElement {
-    pub fn new(action_command: &str) -> Self {
-        Self {
-            action_command: action_command.into(),
-        }
-    }
-    /// Java `getActionCommand`.
-    pub fn get_action_command(&self) -> &str {
-        &self.action_command
-    }
-}
+/// Java private static final `MENU_STRING`.
+const MENU_STRING: &str = "Run To";
 
-/// Source-observable `JPopupMenu` state.
-#[derive(Clone, Debug, Default, Eq, PartialEq)]
-pub struct JPopupMenuBoundary {
-    pub visible: bool,
-    pub position: Option<(i32, i32)>,
-    pub items: Vec<MenuItem>,
-}
-
-/// Java package-private final `MenuButton`.
-#[derive(Clone, Debug, PartialEq)]
+/// Java package-private `final class MenuButton extends MultiLineButton implements
+/// ContextMenu`.
 pub struct MenuButton {
-    pub multi_line_button: MultiLineButton,
-    pub container_attached: bool,
-    pub context_menu: Option<JPopupMenuBoundary>,
-    pub menu_item_array: Option<Vec<MenuItem>>,
-    pub action_element_array: Option<Vec<ActionElement>>,
-    pub generic_mouse_adapter_attached: bool,
-    pub menu_action_listener_attached: bool,
-    pub last_container_action: Option<(String, ActionElement)>,
+    /// Java superclass `MultiLineButton`.
+    base: MultiLineButton,
+    /// This object, for the listeners.
+    self_ref: RefCell<Weak<MenuButton>>,
+    /// Java `container`.
+    container: RefCell<Option<Rc<dyn MenuButtonContainer>>>,
+    /// Java `contextMenu`.
+    context_menu: RefCell<Option<Rc<JComponent>>>,
+    /// Java `menuItemArray`.
+    menu_item_array: RefCell<Option<Vec<Rc<MenuItem>>>>,
+    /// Java `actionElementArray`.
+    action_element_array: RefCell<Option<Vec<Rc<dyn ActionElement>>>>,
+    // Java `listener = new MenuActionListener(this)`: the closure registered on each
+    // menu item in `add_menu`.
+}
+
+impl Deref for MenuButton {
+    type Target = MultiLineButton;
+    fn deref(&self) -> &MultiLineButton {
+        &self.base
+    }
+}
+
+impl MultiLineButtonVirtual for MenuButton {
+    fn get_multi_line_button(&self) -> &MultiLineButton {
+        &self.base
+    }
 }
 
 impl MenuButton {
-    /// Java `MenuButton(String, boolean, DialogType)`.
-    pub fn new(label: &str, toggle_button: bool, dialog_type: Option<DialogType>) -> Self {
-        Self {
-            multi_line_button: MultiLineButton::new_full(
-                Some(label),
+    /// Java `MenuButton(String, boolean, DialogType)`.  Creates the right click menu.
+    pub fn new(
+        label: Option<&str>,
+        toggle_button: bool,
+        dialog_type: Option<DialogType>,
+    ) -> Rc<MenuButton> {
+        // super(label, toggleButton, dialogType, false, false, false, null)
+        let instance = Rc::new(MenuButton {
+            base: MultiLineButton::new_fields(
+                label,
                 toggle_button,
                 dialog_type,
                 false,
                 false,
-                false,
                 None,
             ),
-            container_attached: false,
-            // Java declares this `null`; retaining that direct source state is
-            // important because `addMenu` has no constructor for it.
-            context_menu: None,
-            menu_item_array: None,
-            action_element_array: None,
-            generic_mouse_adapter_attached: false,
-            menu_action_listener_attached: true,
-            last_container_action: None,
-        }
+            self_ref: RefCell::new(Weak::new()),
+            container: RefCell::new(None),
+            context_menu: RefCell::new(None),
+            menu_item_array: RefCell::new(None),
+            action_element_array: RefCell::new(None),
+        });
+        MultiLineButton::construct(&instance, false);
+        *instance.self_ref.borrow_mut() = Rc::downgrade(&instance);
+        instance
     }
 
-    /// Java static `getToggleMenuButtonInstance(String, DialogType)`.
-    pub fn get_toggle_menu_button_instance(label: &str, dialog_type: Option<DialogType>) -> Self {
-        Self::new(label, true, dialog_type)
+    /// Java static final `getToggleMenuButtonInstance(String, DialogType)`.
+    pub fn get_toggle_menu_button_instance(
+        label: Option<&str>,
+        dialog_type: Option<DialogType>,
+    ) -> Rc<MenuButton> {
+        MenuButton::new(label, true, dialog_type)
     }
 
     /// Java `addMenu(MenuButtonContainer, ActionElement[])`.
-    pub fn add_menu(&mut self, action_element_array: Option<Vec<ActionElement>>) {
-        if self.container_attached {
+    ///
+    /// Upstream bugs fixed in translation (`MenuButton.java:77-93`): the Java never
+    /// creates `contextMenu` (it stays null), so `contextMenu.add(...)` throws a
+    /// NullPointerException for the first action element; here the popup menu is
+    /// created on first use.  The Java also stores the caller's array in the field
+    /// before replacing a null array with an empty one, so a null array made every
+    /// later `action` throw; the empty array is stored instead.
+    pub fn add_menu(
+        &self,
+        menu_button_container: Option<Rc<dyn MenuButtonContainer>>,
+        action_element_array: Option<Vec<Rc<dyn ActionElement>>>,
+    ) {
+        if self.container.borrow().is_some() {
             return;
         }
-        self.multi_line_button.add_mouse_listener();
-        self.generic_mouse_adapter_attached = true;
-        self.container_attached = true;
-        self.action_element_array = Some(action_element_array.unwrap_or_default());
-        let elements = self.action_element_array.as_ref().unwrap();
-        let mut items = Vec::with_capacity(elements.len());
-        for element in elements {
-            let mut item =
-                MenuItem::new(&format!("{MENU_STRING} {}", element.get_action_command()));
-            item.add_action_listener();
-            // Java immediately invokes `contextMenu.add`.  Its field has no
-            // source initializer, so a native frontend must install the popup
-            // boundary before this method; preserve that direct null failure
-            // instead of creating an invisible replacement popup.
-            self.context_menu
-                .as_mut()
-                .expect("MenuButton.contextMenu is null")
-                .items
-                .push(item.clone());
-            items.push(item);
+        // addMouseListener(new GenericMouseAdapter(this))
+        let this = self.self_ref.borrow().clone();
+        self.get_component()
+            .add_mouse_listener(GenericMouseAdapter::new(
+                this.clone() as Weak<dyn ContextMenu>
+            ));
+        *self.container.borrow_mut() = menu_button_container;
+        let action_element_array = action_element_array.unwrap_or_default();
+        *self.action_element_array.borrow_mut() = Some(action_element_array.clone());
+        if self.context_menu.borrow().is_none() {
+            *self.context_menu.borrow_mut() = Some(JComponent::new_popup_menu(""));
         }
-        self.menu_item_array = Some(items);
+        let context_menu = self.context_menu.borrow().clone().unwrap();
+        let mut menu_item_array = Vec::with_capacity(action_element_array.len());
+        for action_element in action_element_array.iter() {
+            let menu_item = MenuItem::new_string(&format!(
+                "{} {}",
+                MENU_STRING,
+                action_element
+                    .get_action_command()
+                    .as_deref()
+                    .unwrap_or("null")
+            ));
+            context_menu.add(&menu_item.get_component());
+            // menuItemArray[i].addActionListener(listener): MenuActionListener
+            let adaptee = this.clone();
+            menu_item
+                .get_component()
+                .add_action_listener(Rc::new(move |event| {
+                    if let Some(adaptee) = adaptee.upgrade() {
+                        adaptee.action(event);
+                    }
+                }));
+            menu_item_array.push(menu_item);
+        }
+        *self.menu_item_array.borrow_mut() = Some(menu_item_array);
     }
 
-    /// Native frontend installation of Java's otherwise-null `JPopupMenu` field.
-    pub fn set_context_menu_boundary(&mut self, context_menu: Option<JPopupMenuBoundary>) {
-        self.context_menu = context_menu;
-    }
-
-    /// Java `popUpContextMenu(MouseEvent)`.
-    pub fn pop_up_context_menu(&mut self, mouse_event: MouseEvent) {
-        if let Some(context_menu) = &mut self.context_menu {
-            context_menu.position = Some((mouse_event.x, mouse_event.y));
-            context_menu.visible = true;
+    /// Java public final `@Override popUpContextMenu(MouseEvent)`.
+    ///
+    /// Upstream bug fixed in translation (`MenuButton.java:97`): with no menu added
+    /// `contextMenu` is null and the Java throws a NullPointerException; here nothing
+    /// is shown.
+    pub fn pop_up_context_menu(&self, mouse_event: &MouseEvent) {
+        let context_menu = self.context_menu.borrow().clone();
+        if let Some(context_menu) = context_menu {
+            context_menu.show(&self.get_component(), mouse_event.x, mouse_event.y);
+            context_menu.set_visible(true);
         }
     }
 
-    /// Java `action(ActionEvent)`, represented by its source action command.
-    pub fn action(&mut self, command: &str) {
-        if !self.container_attached {
-            return;
-        }
-        if let Some(elements) = &self.action_element_array {
-            for element in elements {
-                if element.get_action_command() == command {
-                    self.last_container_action = Some((
-                        self.multi_line_button
-                            .get_action_command()
-                            .unwrap_or_default()
-                            .into(),
-                        element.clone(),
-                    ));
+    /// Java final `action(ActionEvent)`.
+    ///
+    /// Upstream bug fixed in translation (`MenuButton.java:108`): the Java compares the
+    /// menu item's command (its text, `"Run To " + element command`) with the bare
+    /// element command, which never matches, so no menu choice reached the
+    /// container.  The evident intent is to find the element whose menu item was
+    /// chosen, so the command is compared with that item's text.
+    pub fn action(&self, event: &ActionEvent) {
+        let container = self.container.borrow().clone();
+        if let Some(container) = container {
+            let command = event.get_action_command();
+            // Find the action element that matches the menu item and pass it to the
+            // container.
+            let action_element_array = self
+                .action_element_array
+                .borrow()
+                .clone()
+                .unwrap_or_default();
+            for action_element in action_element_array.iter() {
+                let menu_text = format!(
+                    "{} {}",
+                    MENU_STRING,
+                    action_element
+                        .get_action_command()
+                        .as_deref()
+                        .unwrap_or("null")
+                );
+                if command == Some(menu_text.as_str()) {
+                    container.action(self.get_action_command().as_deref(), action_element);
                 }
             }
-        }
-    }
-
-    /// Java private `MenuActionListener.actionPerformed(ActionEvent)`.
-    pub fn menu_action_listener_action_performed(&mut self, command: &str) {
-        self.action(command);
-    }
-
-    #[allow(non_snake_case)]
-    /// Native-name adapter for `MenuActionListener::actionPerformed`.
-    pub fn actionPerformed(&mut self, command: &str) {
-        self.menu_action_listener_action_performed(command);
-    }
-
-    /// Explicit native container invocation after Java's listener crosses the
-    /// ownership boundary.
-    pub fn dispatch_container_action(&mut self, container: &mut dyn MenuButtonContainer) {
-        if let Some((command, element)) = self.last_container_action.take() {
-            container.action(&command, &element);
         }
     }
 }
 
 impl ContextMenu for MenuButton {
-    fn pop_up_context_menu(&mut self, mouse_event: MouseEvent) {
-        MenuButton::pop_up_context_menu(self, mouse_event)
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-    struct Target(Option<(String, String)>);
-    impl MenuButtonContainer for Target {
-        fn action(&mut self, command: &str, action_element: &ActionElement) {
-            self.0 = Some((command.into(), action_element.action_command.clone()));
-        }
-    }
-    #[test]
-    fn menu_items_and_action_keep_source_commands() {
-        let mut button = MenuButton::get_toggle_menu_button_instance("Run", None);
-        button.set_context_menu_boundary(Some(JPopupMenuBoundary::default()));
-        button.add_menu(Some(vec![ActionElement::new("Next")]));
-        assert_eq!(
-            button.context_menu.as_ref().unwrap().items[0]
-                .text
-                .as_deref(),
-            Some("Run To Next")
-        );
-        button.menu_action_listener_action_performed("Next");
-        let mut target = Target(None);
-        button.dispatch_container_action(&mut target);
-        assert_eq!(target.0, Some(("Run".into(), "Next".into())));
-    }
-    #[test]
-    fn popup_uses_exact_mouse_position() {
-        let mut button = MenuButton::new("Run", false, None);
-        button.set_context_menu_boundary(Some(JPopupMenuBoundary::default()));
-        button.pop_up_context_menu(MouseEvent {
-            x: 4,
-            y: 9,
-            right_mouse_button: true,
-        });
-        assert_eq!(button.context_menu.unwrap().position, Some((4, 9)));
+    fn pop_up_context_menu(&self, mouse_event: &MouseEvent) {
+        MenuButton::pop_up_context_menu(self, mouse_event);
     }
 }

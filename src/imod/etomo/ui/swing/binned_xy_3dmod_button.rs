@@ -1,171 +1,114 @@
 //! `IMOD/Etomo/src/etomo/ui/swing/BinnedXY3dmodButton.java`.
 //!
-//! `JPanel`, `BoxLayout`, `Box`, `JLabel`, etched borders, action listeners,
-//! `TooltipFormatter`, and the eventual `Run3dmodButtonContainer` dispatch are
-//! native GUI/application boundaries.  This unit retains the source's lazy
-//! component hierarchy and all state passed across those boundaries.
-#![allow(dead_code)]
+//! A 3dmod button with a spinner choosing the X/Y binning to open with.
 
+use std::cell::RefCell;
+use std::rc::{Rc, Weak};
+
+use crate::imod::etomo::jdk::{ActionListener, JComponent};
+
+use super::deferred_3dmod_button::Deferred3dmodButton;
 use super::labeled_spinner::LabeledSpinner;
 use super::run_3dmod_button::Run3dmodButton;
 use super::run_3dmod_button_container::Run3dmodButtonContainer;
-
-/// Source-visible, lazily-created Swing panel tree returned by `getContainer`.
-#[derive(Clone, Debug, PartialEq)]
-pub struct BinnedXY3dmodButtonContainer {
-    pub box_layout_axis: i32,
-    pub alignment_x: f32,
-    pub leading_horizontal_glue_count: usize,
-    pub trailing_horizontal_glue_count: usize,
-    pub border_box_layout_axis: i32,
-    pub border_etched: bool,
-    pub border_alignment_x: f32,
-    pub spinner_box_layout_axis: i32,
-    pub spinner_alignment_x: f32,
-    pub button_box_layout_axis: i32,
-    pub button_alignment_x: f32,
-}
+use super::spaced_panel::SpacedPanel;
+use super::tooltip_formatter::TooltipFormatter;
 
 /// Java package-private final `BinnedXY3dmodButton`.
-#[derive(Clone, Debug)]
 pub struct BinnedXY3dmodButton {
-    pub button: Run3dmodButton,
-    pub sp_binning_xy: LabeledSpinner,
-    pub label: String,
-    pub label_enabled: bool,
-    pub label_tooltip: Option<String>,
-    pub panel: Option<BinnedXY3dmodButtonContainer>,
+    /// Java final `button`.
+    button: Rc<Run3dmodButton>,
+    /// Java final `spBinningXY`.
+    sp_binning_xy: Rc<LabeledSpinner>,
+    /// Java final `label`.
+    label: Rc<JComponent>,
+    /// Java `panel`.
+    panel: RefCell<Option<Rc<JComponent>>>,
 }
 
 impl BinnedXY3dmodButton {
-    /// Java package-private constructor.
-    pub fn new<C: Run3dmodButtonContainer>(label: &str, _container: &C) -> Self {
-        Self {
-            sp_binning_xy: LabeledSpinner::get_instance("Open binned by ", 1, 1, 50, 1),
-            label: " in X and Y".into(),
-            button: Run3dmodButton::get_3dmod_instance(label, true),
-            label_enabled: true,
-            label_tooltip: None,
-            panel: None,
+    /// Java public static final `rcsid`.
+    pub const RCSID: &'static str = "$Id$";
+
+    /// Java `BinnedXY3dmodButton(String, Run3dmodButtonContainer)`.
+    pub fn new(
+        label: Option<&str>,
+        container: Option<Weak<dyn Run3dmodButtonContainer>>,
+    ) -> Rc<BinnedXY3dmodButton> {
+        let sp_binning_xy =
+            LabeledSpinner::get_instance_string_int_int_int_int(Some("Open binned by "), 1, 1, 50, 1);
+        let label_component = JComponent::new_label(" in X and Y");
+        let button =
+            Run3dmodButton::get_3dmod_instance_string_run_3dmod_button_container(label, container);
+        Rc::new(BinnedXY3dmodButton {
+            button,
+            sp_binning_xy,
+            label: label_component,
+            panel: RefCell::new(None),
+        })
+    }
+
+    /// Java `getContainer()`.
+    pub fn get_container(&self) -> Rc<JComponent> {
+        if self.panel.borrow().is_none() {
+            let panel = JComponent::new_panel();
+            // Swing layout: X_AXIS BoxLayout, CENTER_ALIGNMENT, three
+            // horizontal glues before and after the bordered panel.
+            let border_panel = SpacedPanel::get_instance_void();
+            // Swing layout: borderPanel Y_AXIS box layout, etched border,
+            // CENTER_ALIGNMENT.
+            let spinner_panel = JComponent::new_panel();
+            // Swing layout: spinnerPanel X_AXIS BoxLayout, CENTER_ALIGNMENT.
+            spinner_panel.add(&self.sp_binning_xy.get_container());
+            spinner_panel.add(&self.label);
+            border_panel.add_j_panel(&spinner_panel);
+            let pnl_buttons = JComponent::new_panel();
+            // Swing layout: pnlButtons X_AXIS BoxLayout, CENTER_ALIGNMENT.
+            pnl_buttons.add(&self.button.get_component());
+            border_panel.add_j_panel(&pnl_buttons);
+            panel.add(&border_panel.get_container());
+            *self.panel.borrow_mut() = Some(panel);
         }
+        self.panel.borrow().clone().unwrap()
     }
 
-    /// Java `getContainer`.  Widget creation is intentionally lazy and its
-    /// exact BoxLayout/glue/border insertion sequence is retained as state.
-    pub fn get_container(&mut self) -> &BinnedXY3dmodButtonContainer {
-        if self.panel.is_none() {
-            self.panel = Some(BinnedXY3dmodButtonContainer {
-                box_layout_axis: 0,
-                alignment_x: 0.5,
-                leading_horizontal_glue_count: 3,
-                trailing_horizontal_glue_count: 3,
-                border_box_layout_axis: 1,
-                border_etched: true,
-                border_alignment_x: 0.5,
-                spinner_box_layout_axis: 0,
-                spinner_alignment_x: 0.5,
-                button_box_layout_axis: 0,
-                button_alignment_x: 0.5,
-            });
-        }
-        self.panel.as_ref().expect("Java panel assigned above")
+    /// Java `getButton()`.
+    pub fn get_button(&self) -> Rc<dyn Deferred3dmodButton> {
+        self.button.clone()
     }
 
-    /// Java `getButton` returns its `Deferred3dmodButton` implementation.
-    pub fn get_button(&self) -> &Run3dmodButton {
-        &self.button
+    /// Java `setSpinnerToolTipText(String)`.
+    pub fn set_spinner_tool_tip_text(&self, text: Option<&str>) {
+        self.sp_binning_xy.set_tool_tip_text(text);
+        self.label
+            .set_tool_tip_text(super::tooltip_formatter::INSTANCE.format(text).as_deref());
     }
 
-    /// Java `setSpinnerToolTipText`; `TooltipFormatter` remains the native
-    /// presentation boundary and receives the same unformatted source text.
-    pub fn set_spinner_tool_tip_text(&mut self, text: &str) {
-        self.sp_binning_xy.set_tool_tip_text(Some(text));
-        self.label_tooltip = Some(text.into());
-    }
-
-    /// Java `setButtonToolTipText`.
-    pub fn set_button_tool_tip_text(&mut self, text: &str) {
+    /// Java `setButtonToolTipText(String)`.
+    pub fn set_button_tool_tip_text(&self, text: Option<&str>) {
         self.button.set_tool_tip_text(text);
     }
 
-    /// Java `addActionListener`.
-    pub fn add_action_listener(&mut self) {
-        self.button.add_action_listener();
+    /// Java `addActionListener(ActionListener)`.
+    pub fn add_action_listener(&self, action_listener: ActionListener) {
+        self.button.add_action_listener(action_listener);
     }
 
-    /// Java `getActionCommand`.
-    pub fn get_action_command(&self) -> Option<&str> {
+    /// Java `getActionCommand()`.
+    pub fn get_action_command(&self) -> Option<String> {
         self.button.get_action_command()
     }
 
-    /// Java `getBinningInXandY`.
-    pub fn get_binning_in_x_and_y(&self) -> i32 {
-        self.sp_binning_xy.get_value()
+    /// Java `getBinningInXandY()`: `((Integer) spBinningXY.getValue()).intValue()`.
+    /// The spinner is an integer spinner, so the value is integral.
+    pub fn get_binning_in_xand_y(&self) -> i32 {
+        self.sp_binning_xy.get_value().int_value()
     }
 
-    /// Java `setEnabled`.
-    pub fn set_enabled(&mut self, enabled: bool) {
+    /// Java `setEnabled(boolean)`.
+    pub fn set_enabled(&self, enabled: bool) {
         self.sp_binning_xy.set_enabled(enabled);
-        self.label_enabled = enabled;
+        self.label.set_enabled(enabled);
         self.button.set_enabled(enabled);
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    struct Container;
-    impl Run3dmodButtonContainer for Container {
-        fn action(
-            &mut self,
-            _: &str,
-            _: Option<
-                &mut dyn crate::imod::etomo::ui::swing::deferred_3dmod_button::Deferred3dmodButton,
-            >,
-            _: crate::imod::etomo::process::imod_process::Run3dmodMenuOptions,
-        ) {
-        }
-    }
-
-    #[test]
-    fn source_constructor_and_lazy_container_preserve_widget_state() {
-        let mut button = BinnedXY3dmodButton::new("Open in 3dmod", &Container);
-        assert_eq!(button.sp_binning_xy.get_value(), 1);
-        assert_eq!(button.sp_binning_xy.minimum, 1);
-        assert_eq!(button.sp_binning_xy.maximum, 50);
-        assert_eq!(button.label, " in X and Y");
-        assert!(button.panel.is_none());
-        let panel = button.get_container();
-        assert_eq!(panel.box_layout_axis, 0);
-        assert_eq!(panel.leading_horizontal_glue_count, 3);
-        assert_eq!(panel.trailing_horizontal_glue_count, 3);
-        assert!(panel.border_etched);
-        assert_eq!(panel.border_box_layout_axis, 1);
-    }
-
-    #[test]
-    fn source_tooltips_actions_binning_and_enabled_state_are_forwarded() {
-        let mut button = BinnedXY3dmodButton::new("Open in 3dmod", &Container);
-        button.set_spinner_tool_tip_text("bin images");
-        button.set_button_tool_tip_text("open images");
-        button.add_action_listener();
-        button.sp_binning_xy.set_value_int(4);
-        button.set_enabled(false);
-        assert_eq!(button.label_tooltip.as_deref(), Some("bin images"));
-        assert_eq!(button.sp_binning_xy.tooltip.as_deref(), Some("bin images"));
-        assert_eq!(
-            button.button.multi_line_button.button.tooltip.as_deref(),
-            Some("open images")
-        );
-        assert_eq!(
-            button.button.multi_line_button.button.action_listener_count,
-            1
-        );
-        assert_eq!(button.get_action_command(), Some("Open in 3dmod"));
-        assert_eq!(button.get_binning_in_x_and_y(), 4);
-        assert!(!button.sp_binning_xy.is_enabled());
-        assert!(!button.label_enabled);
-        assert!(!button.button.multi_line_button.is_enabled());
     }
 }

@@ -228,6 +228,21 @@ impl CombinePatchSize {
     }
 }
 
+/// Java `CombinePatchSize implements EnumeratedType`.
+impl crate::imod::etomo::r#type::enumerated_type::EnumeratedType for CombinePatchSize {
+    fn is_default(&self) -> bool {
+        CombinePatchSize::is_default(*self)
+    }
+    /// Java returns null; the trait's value is non-nullable, so an empty (null-valued)
+    /// number stands in for it.
+    fn get_value(&self) -> crate::imod::etomo::r#type::const_etomo_number::ConstEtomoNumber {
+        crate::imod::etomo::r#type::const_etomo_number::ConstEtomoNumber::new()
+    }
+    fn get_label(&self) -> Option<String> {
+        Some(CombinePatchSize::get_label(*self).to_owned())
+    }
+}
+
 impl std::fmt::Display for CombinePatchSize {
     /// Java `toString`.
     fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {

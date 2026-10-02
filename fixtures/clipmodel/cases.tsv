@@ -1,0 +1,26 @@
+# name	args
+keepz	-keep -zmin 2,2 sc.mod o.mod
+include	-xminmax 10,60 -yminmax 10,60 -zminmax 0,3 cl.mod o.mod
+exclude	-exclude 1 -xminmax 20,40 -yminmax 0,100 cl.mod o.mod
+multi	-exclude 0,1 -xminmax 0,80 -xminmax 20,30 -yminmax 0,100 -yminmax 0,100 cl.mod o.mod
+longest	-longest -xminmax 0,50 -yminmax 0,100 op.mod o.mod
+openkeep	-xminmax 20,70 -yminmax 0,100 -keep op.mod o.mod
+objects	-objects 2 cl.mod o.mod
+ends	-objects 1,2 -ends 1,2 op.mod o.mod
+contval	-values 1 -range 0,0.5 sc.mod o.mod
+pointval	-values 2 -range 0.3,0.7 op.mod o.mod
+pointvalout	-values -2 -range 0.3,0.7 -update op.mod o.mod
+areapix	-areas 1 -range 0,300 cl.mod o.mod
+areaum	-areas 2 -range 0,0.000015 cl.mod o.mod
+#full	areanm	-areas -3 -range 0,1000 cl.mod o.mod
+bound	-bound 3 cl.mod o.mod
+coplanar	-bound 3 -coplanar cl.mod o.mod
+points	-point 1 -xminmax 10,90 -yminmax 10,90 sc.mod o.txt
+corners	-point -1 -xminmax 10,90 -yminmax 10,90 op.mod o.txt
+noaction	cl.mod o.mod
+updkeep	-update -keep -zmin 1,1 cl.mod o.mod
+objxyz	-objects 1 -xminmax 1,2 cl.mod o.mod
+endsnoobj	-ends 1,1 op.mod o.mod
+#full	xcount	-exclude 0,1 -xminmax 0,10 cl.mod o.mod
+nofile	missing.mod o.mod
+noargs	-

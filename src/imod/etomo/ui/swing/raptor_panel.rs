@@ -1,366 +1,357 @@
 //! `IMOD/Etomo/src/etomo/ui/swing/RaptorPanel.java`.
 //!
-//! Swing component construction and `ApplicationManager` calls are direct
-//! boundaries.  The source unit's controls, parameter transfer, validation
-//! order, and four-way action dispatch remain owned by this panel.
-#![allow(dead_code)]
+//! Java `final class RaptorPanel implements Run3dmodButtonContainer,
+//! ContextMenu`: the "Run RAPTOR" panel of the fiducial model dialog.  An EDT
+//! object: created as `Rc<Self>` by [`RaptorPanel::get_instance`]; every
+//! method takes `&self`.  The inner listener class `RaptorPanelActionListener`
+//! is a closure holding a weak reference to the panel.
 
-use std::cell::RefCell;
-use std::rc::Rc;
+use std::rc::{Rc, Weak};
+use std::sync::Arc;
 
+use crate::imod::etomo::r#type::process_result_display::ProcessResultDisplay;
+use crate::imod::etomo::util::event_queue::EdtRef;
+
+use super::context_menu::ContextMenu;
+use super::context_popup::{self, ContextPopup};
+use super::deferred_3dmod_button::Deferred3dmodButton;
+use super::etched_border::EtchedBorder;
+use super::generic_mouse_adapter::GenericMouseAdapter;
+use super::labeled_text_field::LabeledTextField;
+use super::multi_line_button::MultiLineButton;
+use super::radio_button::RadioButton;
+use super::run_3dmod_button::Run3dmodButton;
+use super::run_3dmod_button_container::Run3dmodButtonContainer;
+use super::spaced_panel::{SpacedPanel, X_AXIS, Y_AXIS};
+use super::ui_harness;
+use crate::imod::etomo::application_manager::ApplicationManager;
+use crate::imod::etomo::base_manager::BaseManager;
+use crate::imod::etomo::comscript::beadtrack_param::BeadtrackParam;
+use crate::imod::etomo::comscript::runraptor_param::RunraptorParam;
+use crate::imod::etomo::jdk::{ActionEvent, ActionListener, ButtonGroup, JComponent, MouseEvent};
 use crate::imod::etomo::process::imod_process::Run3dmodMenuOptions;
 use crate::imod::etomo::r#type::axis_id::AxisID;
+use crate::imod::etomo::r#type::const_meta_data::ConstMetaData;
 use crate::imod::etomo::r#type::dialog_type::DialogType;
+use crate::imod::etomo::r#type::meta_data::MetaData;
+use crate::imod::etomo::r#type::process_result_display::ProcessResultDisplayHandle;
 use crate::imod::etomo::r#type::view_type::ViewType;
+use crate::imod::etomo::ui::field::Field;
 use crate::imod::etomo::ui::field_type::FieldType;
+use crate::imod::etomo::ui::field_validation_failed_exception::FieldValidationFailedException;
+use crate::imod::etomo::util::utilities;
 
-use super::context_popup::{ContextPopup, MouseEvent, TOMO_GUIDE};
-use super::labeled_text_field::{FieldValidationFailedException, LabeledTextField};
-use super::multi_line_button::MultiLineButton;
-use super::radio_button::{RadioButton, RadioButtonGroup};
-use super::tilt_panel::Deferred3dmodButton;
+/// Java `public static final String rcsid`.
+pub const RCSID: &str = "$Id$";
 
-pub const MARK_LABEL: &str = "# of beads to choose";
-pub const DIAM_LABEL: &str = "Unbinned Bead diameter";
+/// Java private static final `MARK_LABEL`.
+const MARK_LABEL: &str = "# of beads to choose";
+/// Java private static final `DIAM_LABEL`.
+const DIAM_LABEL: &str = "Unbinned Bead diameter";
+/// Java package-private static final `RUN_RAPTOR_LABEL`.
 pub const RUN_RAPTOR_LABEL: &str = "Run RAPTOR";
+/// Java package-private static final `USE_RAPTOR_RESULT_LABEL`.
 pub const USE_RAPTOR_RESULT_LABEL: &str = "Use RAPTOR Result as Fiducial Model";
 
-/// The `BeadtrackParam` read performed by `setBeadtrackParams`.
-pub trait RaptorBeadtrackParam {
-    fn bead_diameter(&self) -> Option<f64>;
-}
-
-/// The `RunraptorParam` write boundary used by `getParameters`.
-pub trait RaptorRunraptorParam {
-    fn set_use_raw_stack(&mut self, use_raw_stack: bool);
-    fn set_mark(&mut self, mark: String) -> Option<String>;
-    fn set_diam(&mut self, diameter: String, preali_stack: bool) -> Option<String>;
-}
-
-/// The `ConstMetaData` and `MetaData` fields touched by this source unit.
-pub trait RaptorMetaData {
-    fn track_raptor_use_raw_stack(&self) -> bool;
-    fn track_raptor_mark(&self) -> String;
-    fn track_raptor_diam(&self) -> Option<String>;
-    fn set_track_raptor_use_raw_stack(&mut self, value: bool);
-    fn set_track_raptor_mark(&mut self, value: String);
-    fn set_track_raptor_diam(&mut self, value: String);
-}
-
-/// The direct `ApplicationManager`/`UIHarness` calls in `RaptorPanel.java`.
-pub trait RaptorPanelApplicationManager {
-    fn view_type(&self) -> ViewType;
-    fn imod_raw_stack(&mut self, axis_id: AxisID, options: Option<Run3dmodMenuOptions>);
-    fn imod_coarse_align(
-        &mut self,
-        axis_id: AxisID,
-        options: Option<Run3dmodMenuOptions>,
-        model: Option<&str>,
-        something: bool,
-    );
-    fn runraptor(
-        &mut self,
-        button: &MultiLineButton,
-        process_series: Option<&str>,
-        deferred_3dmod_button: Option<&Deferred3dmodButton>,
-        options: Option<Run3dmodMenuOptions>,
-        dialog_type: DialogType,
-        axis_id: AxisID,
-    );
-    fn imod_runraptor_result(&mut self, axis_id: AxisID, options: Option<Run3dmodMenuOptions>);
-    fn use_runraptor_result(
-        &mut self,
-        button: &MultiLineButton,
-        axis_id: AxisID,
-        dialog_type: DialogType,
-    );
-    fn open_message_dialog(&mut self, message: String, title: &str, axis_id: AxisID);
-}
-
-/// Source-visible Swing layout/listener state of `RaptorPanel`.
-#[derive(Clone, Debug, Default, Eq, PartialEq)]
-pub struct RaptorPanelLayout {
-    pub root_box_layout_y_axis: bool,
-    pub root_border_title: Option<String>,
-    pub root_component_order: Vec<String>,
-    pub input_box_layout_y_axis: bool,
-    pub input_border_etched: bool,
-    pub input_component_order: Vec<String>,
-    pub raptor_buttons_box_layout_x_axis: bool,
-    pub raptor_buttons_component_order: Vec<String>,
-    pub root_visible: bool,
-    pub mouse_listener_count: usize,
-    pub tooltip_initialized: bool,
-}
-
-/// Java `RaptorPanel`.
+/// Java `final class RaptorPanel implements Run3dmodButtonContainer, ContextMenu`.
 pub struct RaptorPanel {
-    pub pnl_root: RaptorPanelLayout,
-    pub btn_open_stack: MultiLineButton,
-    pub ltf_mark: LabeledTextField,
-    pub ltf_diam: LabeledTextField,
-    pub bg_input: Rc<RefCell<RadioButtonGroup>>,
-    pub rb_input_preali: RadioButton,
-    pub rb_input_raw: RadioButton,
-    pub btn_raptor: MultiLineButton,
-    pub btn_open_raptor_result: MultiLineButton,
-    pub btn_use_raptor_result: MultiLineButton,
-    pub axis_id: AxisID,
-    pub dialog_type: DialogType,
-    /// Java `btnRaptor.setDeferred3dmodButton(btnOpenRaptorResult)` boundary.
-    pub raptor_deferred_result_button: bool,
-    /// Java's private inner listener is represented by its registered target.
-    pub action_listener_registered: bool,
-    pub last_context_popup: Option<ContextPopup>,
+    /// Java private final `pnlRoot = SpacedPanel.getInstance()`.
+    pnl_root: Rc<SpacedPanel>,
+    /// Java private final `pnlInput = new JPanel()`.
+    pnl_input: Rc<JComponent>,
+    /// Java private final `btnOpenStack`.
+    btn_open_stack: Rc<Run3dmodButton>,
+    /// Java private final `ltfMark`.
+    ltf_mark: Rc<LabeledTextField>,
+    /// Java private final `ltfDiam`.
+    ltf_diam: Rc<LabeledTextField>,
+    /// Java private final `bgInput = new ButtonGroup()`.
+    #[allow(dead_code)]
+    bg_input: Rc<ButtonGroup>,
+    /// Java private final `rbInputPreali`.
+    rb_input_preali: Rc<RadioButton>,
+    /// Java private final `rbInputRaw`.
+    rb_input_raw: Rc<RadioButton>,
+    /// Java private final `btnRaptor`.
+    btn_raptor: Rc<Run3dmodButton>,
+    /// Java private final `btnOpenRaptorResult`.
+    btn_open_raptor_result: Rc<Run3dmodButton>,
+    /// Java private final `btnUseRaptorResult`.
+    btn_use_raptor_result: Rc<MultiLineButton>,
+    /// Java private final `actionListener` (a `RaptorPanelActionListener`).
+    action_listener: ActionListener,
+
+    /// Java private final `axisID`.
+    axis_id: AxisID,
+    /// Java private final `manager`.
+    manager: &'static ApplicationManager,
+    /// Java private final `dialogType` (stored, never read).
+    #[allow(dead_code)]
+    dialog_type: DialogType,
+    /// Java `this`, for `createPanel`'s `btnRaptor.setContainer(this)` and the
+    /// mouse adapter.
+    this: Weak<RaptorPanel>,
 }
 
 impl RaptorPanel {
-    /// Java private `RaptorPanel(ApplicationManager, AxisID, DialogType)`.
-    pub fn new(axis_id: AxisID, dialog_type: DialogType) -> Self {
-        let bg_input = Rc::new(RefCell::new(RadioButtonGroup::new()));
-        let mut result = Self {
-            pnl_root: RaptorPanelLayout {
-                root_visible: true,
-                ..Default::default()
-            },
-            btn_open_stack: MultiLineButton::new_with_label(Some("Open Stack in 3dmod")),
-            ltf_mark: LabeledTextField::new(FieldType::Integer, "# of beads to choose: "),
-            ltf_diam: LabeledTextField::new(
+    /// Java private constructor `RaptorPanel(ApplicationManager, AxisID,
+    /// DialogType)`, with the field initializers.
+    fn new(
+        manager: &'static ApplicationManager,
+        axis_id: AxisID,
+        dialog_type: DialogType,
+    ) -> Rc<RaptorPanel> {
+        Rc::new_cyclic(|this: &Weak<RaptorPanel>| {
+            let container: Weak<dyn Run3dmodButtonContainer> = this.clone();
+            // Field initializers, in declaration order.
+            let pnl_root = SpacedPanel::get_instance_void();
+            let pnl_input = JComponent::new_panel();
+            let btn_open_stack =
+                Run3dmodButton::get_3dmod_instance_string_run_3dmod_button_container(
+                    Some("Open Stack in 3dmod"),
+                    Some(container.clone()),
+                );
+            let ltf_mark = LabeledTextField::new_field_type_string(
                 FieldType::Integer,
-                "Unbinned Bead diameter (in pixels): ",
-            ),
-            rb_input_preali: RadioButton::new_in_group(
-                "Run against the coarse aligned stack",
-                bg_input.clone(),
-            ),
-            rb_input_raw: RadioButton::new_in_group("Run against the raw stack", bg_input.clone()),
-            bg_input,
-            btn_raptor: MultiLineButton::new_with_label(Some(RUN_RAPTOR_LABEL)),
-            btn_open_raptor_result: MultiLineButton::new_with_label(Some(
-                "Open RAPTOR Model in 3dmod",
-            )),
-            btn_use_raptor_result: MultiLineButton::new_with_label(Some(USE_RAPTOR_RESULT_LABEL)),
-            axis_id,
-            dialog_type,
-            raptor_deferred_result_button: false,
-            action_listener_registered: false,
-            last_context_popup: None,
-        };
-        // Swing `AbstractButton` defaults its action command to its text.  The
-        // generic `MultiLineButton` boundary has no native event model, so retain
-        // that source-visible default here for this panel's listener dispatch.
-        result
-            .btn_open_stack
-            .set_action_command(Some("Open Stack in 3dmod"));
-        result.btn_raptor.set_action_command(Some(RUN_RAPTOR_LABEL));
-        result
-            .btn_open_raptor_result
-            .set_action_command(Some("Open RAPTOR Model in 3dmod"));
-        result
-            .btn_use_raptor_result
-            .set_action_command(Some(USE_RAPTOR_RESULT_LABEL));
-        result
+                Some(&format!("{MARK_LABEL}: ")),
+            );
+            let ltf_diam = LabeledTextField::new_field_type_string(
+                FieldType::Integer,
+                Some(&format!("{DIAM_LABEL} (in pixels): ")),
+            );
+            let bg_input = ButtonGroup::new();
+            let rb_input_preali = RadioButton::new_string_button_group(
+                Some("Run against the coarse aligned stack"),
+                Some(&bg_input),
+            );
+            let rb_input_raw = RadioButton::new_string_button_group(
+                Some("Run against the raw stack"),
+                Some(&bg_input),
+            );
+            let btn_open_raptor_result =
+                Run3dmodButton::get_3dmod_instance_string_run_3dmod_button_container(
+                    Some("Open RAPTOR Model in 3dmod"),
+                    Some(container.clone()),
+                );
+            // Java `new RaptorPanelActionListener(this)`: its `actionPerformed`
+            // calls `adaptee.action(event.getActionCommand(), null, null)`.
+            let adaptee = this.clone();
+            let action_listener: ActionListener = Rc::new(move |event: &ActionEvent| {
+                let Some(adaptee) = adaptee.upgrade() else {
+                    return;
+                };
+                adaptee.action(event.get_action_command().unwrap_or(""), None, None);
+            });
+
+            // Constructor body.
+            let display_factory = manager.get_process_result_display_factory(axis_id);
+            // Java casts `(Run3dmodButton) displayFactory.getRaptor()` and
+            // `(MultiLineButton) displayFactory.getUseRaptor()`; the factory
+            // returns the concrete buttons.
+            let btn_raptor = display_factory.get_raptor();
+            let btn_use_raptor_result = display_factory.get_use_raptor();
+            RaptorPanel {
+                pnl_root,
+                pnl_input,
+                btn_open_stack,
+                ltf_mark,
+                ltf_diam,
+                bg_input,
+                rb_input_preali,
+                rb_input_raw,
+                btn_raptor,
+                btn_open_raptor_result,
+                btn_use_raptor_result,
+                action_listener,
+                axis_id,
+                manager,
+                dialog_type,
+                this: this.clone(),
+            }
+        })
     }
 
     /// Java static `getInstance(ApplicationManager, AxisID, DialogType)`.
-    pub fn get_instance(axis_id: AxisID, dialog_type: DialogType) -> Self {
-        let mut instance = Self::new(axis_id, dialog_type);
+    pub fn get_instance(
+        manager: &'static ApplicationManager,
+        axis_id: AxisID,
+        dialog_type: DialogType,
+    ) -> Rc<RaptorPanel> {
+        let instance = RaptorPanel::new(manager, axis_id, dialog_type);
         instance.create_panel();
         instance.add_listeners();
         instance.set_tool_tip_text();
         instance
     }
 
-    /// Java private `addListeners`.
-    pub fn add_listeners(&mut self) {
-        self.pnl_root.mouse_listener_count += 1;
-        self.btn_open_stack.add_action_listener();
-        self.btn_raptor.add_action_listener();
-        self.btn_open_raptor_result.add_action_listener();
-        self.btn_use_raptor_result.add_action_listener();
-        self.action_listener_registered = true;
+    /// Java private `addListeners()`.
+    fn add_listeners(&self) {
+        let context_menu: Weak<dyn ContextMenu> = self.this.clone();
+        self.pnl_root
+            .add_mouse_listener(GenericMouseAdapter::new(context_menu));
+        self.btn_open_stack
+            .add_action_listener(self.action_listener.clone());
+        self.btn_raptor
+            .add_action_listener(self.action_listener.clone());
+        self.btn_open_raptor_result
+            .add_action_listener(self.action_listener.clone());
+        self.btn_use_raptor_result
+            .add_action_listener(self.action_listener.clone());
     }
 
-    /// Java `popUpContextMenu(MouseEvent)`.
-    pub fn pop_up_context_menu(&mut self, mouse_event: MouseEvent) {
-        let man_page_label = ["Raptor".into(), "Beadtrack".into(), "3dmod".into()];
-        let man_page = [
-            "raptor.html".into(),
-            "beadtrack.html".into(),
-            "3dmod.html".into(),
-        ];
-        let log_file_label = ["Track".into()];
-        let log_file = [format!("track{}.log", self.axis_id.get_extension())];
-        self.last_context_popup = ContextPopup::new_log_files(
-            mouse_event,
-            Some("UsingRaptor"),
-            TOMO_GUIDE,
-            &man_page_label,
-            &man_page,
-            &log_file_label,
-            &log_file,
-            self.axis_id,
-            None,
-        )
-        .ok();
+    /// Java private `createPanel()`.
+    fn create_panel(&self) {
+        self.pnl_root.set_box_layout(Y_AXIS);
+        self.pnl_root
+            .set_border(&EtchedBorder::new(Some(RUN_RAPTOR_LABEL)).get_border());
+        // Box.CENTER_ALIGNMENT
+        self.pnl_root.set_alignment_x(0.5);
+        self.pnl_root.add_j_panel(&self.pnl_input);
+        self.pnl_root
+            .add_component(&self.btn_open_stack.get_component());
+        self.pnl_root.add_container(&self.ltf_mark.get_container());
+        self.pnl_root.add_container(&self.ltf_diam.get_container());
+        let pnl_raptor_buttons = SpacedPanel::get_instance_void();
+        self.pnl_root.add_spaced_panel(&pnl_raptor_buttons);
+        // RAPTOR input source panel
+        // Swing layout: pnlInput BoxLayout Y_AXIS, etched border, CENTER_ALIGNMENT.
+        self.pnl_input.add(&self.rb_input_preali.get_component());
+        self.pnl_input.add(&self.rb_input_raw.get_component());
+        // RAPTOR button panel
+        pnl_raptor_buttons.set_box_layout(X_AXIS);
+        pnl_raptor_buttons.add_component(&self.btn_raptor.get_component());
+        pnl_raptor_buttons.add_component(&self.btn_open_raptor_result.get_component());
+        pnl_raptor_buttons.add_component(&self.btn_use_raptor_result.get_component());
+        // set initial values
+        self.rb_input_preali.set_selected_boolean(true);
+        // Swing layout: btnOpenStack.setAlignmentX(Box.CENTER_ALIGNMENT).
+        // raptor button
+        let container: Weak<dyn Run3dmodButtonContainer> = self.this.clone();
+        self.btn_raptor.set_container(Some(container));
+        let deferred: Rc<dyn Deferred3dmodButton> = self.btn_open_raptor_result.clone();
+        self.btn_raptor
+            .set_deferred_3dmod_button_deferred_3dmod_button(Some(deferred));
     }
 
-    /// Java private `createPanel`.
-    pub fn create_panel(&mut self) {
-        self.pnl_root.root_box_layout_y_axis = true;
-        self.pnl_root.root_border_title = Some(RUN_RAPTOR_LABEL.into());
-        self.pnl_root.root_component_order = vec![
-            "pnlInput".into(),
-            "btnOpenStack".into(),
-            "ltfMark".into(),
-            "ltfDiam".into(),
-            "pnlRaptorButtons".into(),
-        ];
-        self.pnl_root.input_box_layout_y_axis = true;
-        self.pnl_root.input_border_etched = true;
-        self.pnl_root.input_component_order = vec!["rbInputPreali".into(), "rbInputRaw".into()];
-        self.pnl_root.raptor_buttons_box_layout_x_axis = true;
-        self.pnl_root.raptor_buttons_component_order = vec![
-            "btnRaptor".into(),
-            "btnOpenRaptorResult".into(),
-            "btnUseRaptorResult".into(),
-        ];
-        self.rb_input_preali.set_selected(true);
-        self.btn_open_stack.set_alignment_x(0.5);
-        self.raptor_deferred_result_button = true;
+    /// Java package-private `done()`.
+    pub fn done(&self) {
+        self.btn_raptor
+            .remove_action_listener(&self.action_listener);
+        self.btn_open_raptor_result
+            .remove_action_listener(&self.action_listener);
+        self.btn_use_raptor_result
+            .remove_action_listener(&self.action_listener);
     }
 
-    /// Java `done`.
-    pub fn done(&mut self) {
-        self.btn_raptor.remove_action_listener();
-        self.btn_open_raptor_result.remove_action_listener();
-        self.btn_use_raptor_result.remove_action_listener();
-    }
-
-    /// Java `setBeadtrackParams(BeadtrackParam)`.
-    pub fn set_beadtrack_params<P: RaptorBeadtrackParam>(&mut self, beadtrack_params: &P) {
-        if let Some(bead_diameter) = beadtrack_params.bead_diameter() {
-            self.ltf_diam.set_text_number(bead_diameter.round() as i64);
+    /// Java package-private `setBeadtrackParams(BeadtrackParam)`.
+    pub fn set_beadtrack_params(&self, beadtrack_params: &BeadtrackParam) {
+        if beadtrack_params.is_bead_diameter_set() {
+            self.ltf_diam.set_text_long(utilities::java_lang_math_round(
+                beadtrack_params.get_bead_diameter().get_double(),
+            ));
         }
     }
 
-    /// Java `getParameters(RunraptorParam, boolean)`.
-    pub fn get_parameters<P: RaptorRunraptorParam, M: RaptorPanelApplicationManager>(
-        &mut self,
-        param: &mut P,
+    /// Java package-private `getParameters(RunraptorParam, boolean)`.
+    pub fn get_parameters_runraptor_param_boolean(
+        &self,
+        param: &mut RunraptorParam,
         do_validation: bool,
-        manager: &mut M,
     ) -> bool {
-        param.set_use_raw_stack(self.rb_input_raw.is_selected());
-        let mark = match self.ltf_mark.get_text_validated(do_validation) {
-            Ok(mark) => mark,
-            Err(FieldValidationFailedException(_)) => return false,
-        };
-        if let Some(error_message) = param.set_mark(mark) {
-            manager.open_message_dialog(
-                format!("Error in {MARK_LABEL}: {error_message}"),
-                "Entry Error",
-                self.axis_id,
+        // Java try { ... } catch (FieldValidationFailedException e) { return false; }
+        let result = (|| -> Result<bool, FieldValidationFailedException> {
+            param.set_use_raw_stack(self.rb_input_raw.is_selected());
+            // `getText(boolean)` may return null; `EtomoNumber.set(null)` and
+            // `set("")` both make the number null, so "" stands in for null.
+            let error_message = param.set_mark(
+                self.ltf_mark
+                    .get_text_boolean(do_validation)?
+                    .as_deref()
+                    .unwrap_or(""),
             );
-            return false;
-        }
-        let diameter = match self.ltf_diam.get_text_validated(do_validation) {
-            Ok(diameter) => diameter,
-            Err(FieldValidationFailedException(_)) => return false,
-        };
-        if let Some(error_message) = param.set_diam(diameter, self.rb_input_preali.is_selected()) {
-            manager.open_message_dialog(
-                format!("Error in {DIAM_LABEL}: {error_message}"),
-                "Entry Error",
-                self.axis_id,
+            if let Some(error_message) = error_message {
+                let manager: &'static dyn BaseManager = self.manager;
+                ui_harness::with(|harness| {
+                    harness.open_message_dialog_base_manager_string_string_axis_id(
+                        Some(manager),
+                        &format!("Error in {MARK_LABEL}: {error_message}"),
+                        "Entry Error",
+                        Some(self.axis_id),
+                    )
+                });
+                return Ok(false);
+            }
+            let error_message = param.set_diam(
+                self.ltf_diam
+                    .get_text_boolean(do_validation)?
+                    .as_deref()
+                    .unwrap_or(""),
+                self.rb_input_preali.is_selected(),
             );
-            return false;
-        }
-        true
+            if let Some(error_message) = error_message {
+                let manager: &'static dyn BaseManager = self.manager;
+                ui_harness::with(|harness| {
+                    harness.open_message_dialog_base_manager_string_string_axis_id(
+                        Some(manager),
+                        &format!("Error in {DIAM_LABEL}: {error_message}"),
+                        "Entry Error",
+                        Some(self.axis_id),
+                    )
+                });
+                return Ok(false);
+            }
+            Ok(true)
+        })();
+        result.unwrap_or(false)
     }
 
-    /// Java `getParameters(MetaData)`.
-    pub fn get_metadata_parameters<M: RaptorMetaData>(&self, meta_data: &mut M) {
+    /// Java package-private `getParameters(MetaData)`.
+    pub fn get_parameters_meta_data(&self, meta_data: &MetaData) {
         if self.axis_id != AxisID::Second {
             meta_data.set_track_raptor_use_raw_stack(self.rb_input_raw.is_selected());
-            meta_data.set_track_raptor_mark(self.ltf_mark.get_text());
-            meta_data.set_track_raptor_diam(self.ltf_diam.get_text());
+            meta_data.set_track_raptor_mark(self.ltf_mark.get_text_void().as_deref());
+            meta_data.set_track_raptor_diam(self.ltf_diam.get_text_void().as_deref());
         }
     }
 
-    /// Java `setParameters(ConstMetaData)`.
-    pub fn set_parameters<M: RaptorMetaData, A: RaptorPanelApplicationManager>(
-        &mut self,
-        meta_data: &M,
-        manager: &A,
-    ) {
+    /// Java package-private `setParameters(ConstMetaData)`.
+    pub fn set_parameters(&self, meta_data: &dyn ConstMetaData) {
         if self.axis_id != AxisID::Second {
-            if meta_data.track_raptor_use_raw_stack() {
-                self.rb_input_raw.set_selected(true);
+            if meta_data.get_track_raptor_use_raw_stack() {
+                self.rb_input_raw.set_selected_boolean(true);
             } else {
-                self.rb_input_preali.set_selected(true);
+                self.rb_input_preali.set_selected_boolean(true);
             }
-            self.ltf_mark.set_text(&meta_data.track_raptor_mark());
-            if let Some(diameter) = meta_data.track_raptor_diam() {
-                self.ltf_diam.set_text(&diameter);
+            self.ltf_mark
+                .set_text_string(Some(&meta_data.get_track_raptor_mark()));
+            let diam = meta_data.get_track_raptor_diam();
+            if !diam.is_null() {
+                self.ltf_diam.set_text_const_etomo_number(Some(&*diam));
             }
         }
-        if manager.view_type() == ViewType::Montage {
-            self.rb_input_preali.set_selected(true);
+        if self.manager.get_meta_data().get_view_type() == ViewType::Montage {
+            self.rb_input_preali.set_selected_boolean(true);
             self.rb_input_raw.set_enabled(false);
+            // pnlInput.setVisible(false);
         }
     }
 
-    /// Java `action(String, Deferred3dmodButton, Run3dmodMenuOptions)`.
-    pub fn action<M: RaptorPanelApplicationManager>(
-        &mut self,
-        command: &str,
-        deferred_3dmod_button: Option<&Deferred3dmodButton>,
-        run_3dmod_menu_options: Option<Run3dmodMenuOptions>,
-        manager: &mut M,
-    ) {
-        if self.btn_open_stack.get_action_command() == Some(command) {
-            if self.rb_input_raw.is_selected() {
-                manager.imod_raw_stack(self.axis_id, run_3dmod_menu_options);
-            } else {
-                manager.imod_coarse_align(self.axis_id, run_3dmod_menu_options, None, false);
-            }
-        } else if self.btn_raptor.get_action_command() == Some(command) {
-            manager.runraptor(
-                &self.btn_raptor,
-                None,
-                deferred_3dmod_button,
-                run_3dmod_menu_options,
-                DialogType::FiducialModel,
-                self.axis_id,
-            );
-        } else if self.btn_open_raptor_result.get_action_command() == Some(command) {
-            manager.imod_runraptor_result(self.axis_id, run_3dmod_menu_options);
-        } else if self.btn_use_raptor_result.get_action_command() == Some(command) {
-            manager.use_runraptor_result(
-                &self.btn_use_raptor_result,
-                self.axis_id,
-                DialogType::FiducialModel,
-            );
-        }
+    /// Java package-private `getComponent()`.
+    pub fn get_component(&self) -> Rc<JComponent> {
+        self.pnl_root.get_container()
     }
 
-    /// Java `getComponent`; concrete component is a GUI boundary.
-    pub fn get_component(&self) -> &RaptorPanelLayout {
-        &self.pnl_root
+    /// Java package-private `setVisible(boolean)`.
+    pub fn set_visible(&self, visible: bool) {
+        self.pnl_root.set_visible(visible);
     }
 
-    /// Java `setVisible(boolean)`.
-    pub fn set_visible(&mut self, visible: bool) {
-        self.pnl_root.root_visible = visible;
-    }
-
-    /// Java private `setToolTipText`.
-    pub fn set_tool_tip_text(&mut self) {
+    /// Java private `setToolTipText()`.
+    fn set_tool_tip_text(&self) {
         self.rb_input_preali
-            .set_tool_tip_text(Some("Run RAPTOR against the coarsely aligned stack."));
+            .set_tool_tip_text_string(Some("Run RAPTOR against the coarsely aligned stack."));
         self.rb_input_raw
-            .set_tool_tip_text(Some("Run RAPTOR against the raw stack."));
+            .set_tool_tip_text_string(Some("Run RAPTOR against the raw stack."));
         self.btn_open_stack
             .set_tool_tip_text(Some("Opens the file that RAPTOR will be run against."));
         self.ltf_mark
@@ -375,120 +366,85 @@ impl RaptorPanel {
         self.btn_use_raptor_result.set_tool_tip_text(Some(
             "Copies the model generated by RAPTOR to the .fid file.",
         ));
-        self.pnl_root.tooltip_initialized = true;
-    }
-
-    /// Java inner `RaptorPanelActionListener.actionPerformed(ActionEvent)`.
-    pub fn action_performed<M: RaptorPanelApplicationManager>(
-        &mut self,
-        command: &str,
-        manager: &mut M,
-    ) {
-        self.action(command, None, None, manager);
     }
 }
 
-#[cfg(test)]
-mod tests {
-    use super::*;
+impl ContextMenu for RaptorPanel {
+    /// Java `popUpContextMenu(MouseEvent)`: right mouse button context menu.
+    fn pop_up_context_menu(&self, mouse_event: &MouseEvent) {
+        let man_pagelabel: Vec<String> = ["Raptor", "Beadtrack", "3dmod"]
+            .iter()
+            .map(|label| label.to_string())
+            .collect();
+        let man_page: Vec<String> = ["raptor.html", "beadtrack.html", "3dmod.html"]
+            .iter()
+            .map(|page| page.to_string())
+            .collect();
 
-    #[derive(Default)]
-    struct Param {
-        raw: bool,
-        mark: String,
-        diam: String,
-    }
-    impl RaptorRunraptorParam for Param {
-        fn set_use_raw_stack(&mut self, value: bool) {
-            self.raw = value;
+        let log_file_label: Vec<String> = vec!["Track".to_string()];
+        let mut log_file: Vec<String> = vec![String::new(); 1];
+        log_file[0] = format!("track{}.log", self.axis_id.get_extension());
+
+        let manager: &'static dyn BaseManager = self.manager;
+        // Java `new ContextPopup(...)`; its constructor throws
+        // IllegalArgumentException on mismatched array lengths, which these
+        // arrays cannot have.
+        if let Err(message) = ContextPopup::new_component_mouse_event_string_string_string_array_string_array_string_array_string_array_base_manager_axis_id(
+            &self.pnl_root.get_container(),
+            mouse_event,
+            Some("UsingRaptor"),
+            Some(context_popup::TOMO_GUIDE),
+            &man_pagelabel,
+            &man_page,
+            Some(log_file_label.as_slice()),
+            Some(log_file.as_slice()),
+            manager,
+            self.axis_id,
+        ) {
+            eprintln!("java.lang.IllegalArgumentException: {message}");
         }
-        fn set_mark(&mut self, value: String) -> Option<String> {
-            self.mark = value;
-            None
-        }
-        fn set_diam(&mut self, value: String, _: bool) -> Option<String> {
-            self.diam = value;
-            None
-        }
     }
-    struct Manager {
-        calls: Vec<&'static str>,
-        view: ViewType,
-    }
-    impl Default for Manager {
-        fn default() -> Self {
-            Self {
-                calls: Vec::new(),
-                view: ViewType::SingleView,
+}
+
+impl Run3dmodButtonContainer for RaptorPanel {
+    /// Java `action(String, Deferred3dmodButton, Run3dmodMenuOptions)`.
+    ///
+    /// The action listener passes a null `Run3dmodMenuOptions`; the manager
+    /// takes the options by value, and a default instance (every option off)
+    /// is what the 3dmod layer makes of null (`ImodProcess` tests each option
+    /// only on a non-null object).
+    fn action(
+        &self,
+        command: &str,
+        deferred_3dmod_button: Option<Rc<dyn Deferred3dmodButton>>,
+        run_3dmod_menu_options: Option<Run3dmodMenuOptions>,
+    ) {
+        let menu_options = run_3dmod_menu_options.unwrap_or_default();
+        if Some(command) == self.btn_open_stack.get_action_command().as_deref() {
+            if self.rb_input_raw.is_selected() {
+                self.manager.imod_raw_stack(self.axis_id, menu_options);
+            } else {
+                self.manager
+                    .imod_coarse_align(self.axis_id, menu_options, None, false);
             }
+        } else if Some(command) == self.btn_raptor.get_action_command().as_deref() {
+            self.manager.runraptor(
+                Some(self.btn_raptor.clone() as Rc<dyn ProcessResultDisplay>),
+                None,
+                deferred_3dmod_button,
+                run_3dmod_menu_options,
+                DialogType::FiducialModel,
+                self.axis_id,
+            );
+        } else if Some(command) == self.btn_open_raptor_result.get_action_command().as_deref() {
+            self.manager
+                .imod_runraptor_result(self.axis_id, run_3dmod_menu_options);
+        } else if Some(command) == self.btn_use_raptor_result.get_action_command().as_deref() {
+            self.manager.use_runraptor_result(
+                Some(self.btn_use_raptor_result.clone() as Rc<dyn ProcessResultDisplay>),
+                self.axis_id,
+                DialogType::FiducialModel,
+            );
         }
-    }
-    impl RaptorPanelApplicationManager for Manager {
-        fn view_type(&self) -> ViewType {
-            self.view
-        }
-        fn imod_raw_stack(&mut self, _: AxisID, _: Option<Run3dmodMenuOptions>) {
-            self.calls.push("raw");
-        }
-        fn imod_coarse_align(
-            &mut self,
-            _: AxisID,
-            _: Option<Run3dmodMenuOptions>,
-            _: Option<&str>,
-            _: bool,
-        ) {
-            self.calls.push("coarse");
-        }
-        fn runraptor(
-            &mut self,
-            _: &MultiLineButton,
-            _: Option<&str>,
-            _: Option<&Deferred3dmodButton>,
-            _: Option<Run3dmodMenuOptions>,
-            _: DialogType,
-            _: AxisID,
-        ) {
-            self.calls.push("raptor");
-        }
-        fn imod_runraptor_result(&mut self, _: AxisID, _: Option<Run3dmodMenuOptions>) {
-            self.calls.push("result");
-        }
-        fn use_runraptor_result(&mut self, _: &MultiLineButton, _: AxisID, _: DialogType) {
-            self.calls.push("use");
-        }
-        fn open_message_dialog(&mut self, _: String, _: &str, _: AxisID) {
-            self.calls.push("message");
-        }
-    }
-    #[test]
-    fn create_panel_retains_source_initial_selection_and_layout() {
-        let panel = RaptorPanel::get_instance(AxisID::First, DialogType::FiducialModel);
-        assert!(panel.rb_input_preali.is_selected());
-        assert!(panel.raptor_deferred_result_button);
-        assert_eq!(panel.pnl_root.root_component_order.len(), 5);
-    }
-    #[test]
-    fn parameters_validate_and_transfer_in_source_order() {
-        let mut panel = RaptorPanel::get_instance(AxisID::First, DialogType::FiducialModel);
-        panel.ltf_mark.set_text("12");
-        panel.ltf_diam.set_text("10");
-        let mut param = Param::default();
-        let mut manager = Manager::default();
-        assert!(panel.get_parameters(&mut param, true, &mut manager));
-        assert_eq!((param.mark.as_str(), param.diam.as_str()), ("12", "10"));
-    }
-    #[test]
-    fn action_dispatches_all_source_commands() {
-        let mut panel = RaptorPanel::get_instance(AxisID::First, DialogType::FiducialModel);
-        let mut manager = Manager::default();
-        for command in [
-            "Open Stack in 3dmod",
-            RUN_RAPTOR_LABEL,
-            "Open RAPTOR Model in 3dmod",
-            USE_RAPTOR_RESULT_LABEL,
-        ] {
-            panel.action(command, None, None, &mut manager);
-        }
-        assert_eq!(manager.calls, ["coarse", "raptor", "result", "use"]);
     }
 }

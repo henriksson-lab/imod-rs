@@ -16,7 +16,7 @@
 use super::const_etomo_number::java_lang_string_trim;
 use super::const_etomo_version::ConstEtomoVersion;
 use super::etomo_number::EtomoNumber;
-use crate::imod::etomo::storage::storable::Storable;
+use crate::imod::etomo::storage::storable::StorableValue;
 use crate::imod::etomo::util::utilities::{EMPTY_PATTERN, java_lang_string_split};
 use regex::Regex;
 use std::collections::BTreeMap;
@@ -386,6 +386,43 @@ impl EtomoVersion {
         self.section_list.is_numeric()
     }
 
+    /// Java `lt(String)`.
+    pub fn lt_string(&self, version: Option<&str>) -> bool {
+        self.lt(Some(&EtomoVersion::get_default_instance_with_version(
+            version,
+        )))
+    }
+
+    /// Java `ge(String)`.
+    pub fn ge_string(&self, version: Option<&str>) -> bool {
+        self.ge(Some(&EtomoVersion::get_default_instance_with_version(
+            version,
+        )))
+    }
+
+    /// Java `ge(EtomoVersion)`.  Returns true if greater or equal to the parameter.
+    pub fn ge(&self, version: Option<&EtomoVersion>) -> bool {
+        // treat null as the earliest version
+        let Some(version) = version.filter(|version| !version.is_null()) else {
+            return true;
+        };
+        if self.is_null() {
+            return false;
+        }
+        let length = std::cmp::min(self.section_list.size(), version.section_list.size());
+        // loop until a section is not equal then corresponding version section
+        for i in 0..length {
+            if self.section_list.gt(&version.section_list, i) {
+                return true;
+            }
+            if self.section_list.lt(&version.section_list, i) {
+                return false;
+            }
+        }
+        // equal so far - longer one is greater then
+        self.section_list.size() >= version.section_list.size()
+    }
+
     /// Java `le(String)`.
     pub fn le_string(&self, version: Option<&str>) -> bool {
         self.le(Some(&EtomoVersion::get_default_instance_with_version(
@@ -586,7 +623,7 @@ impl ConstEtomoVersion for EtomoVersion {
 
 /// Java `store(Properties)`, `store(Properties, String)`, `load(Properties)` and
 /// `load(Properties, String)`, declared by `Storable`.
-impl Storable for EtomoVersion {
+impl StorableValue for EtomoVersion {
     /// Java `store(Properties)`.
     fn store(&self, props: &mut BTreeMap<String, String>) {
         let key = match &self.key {

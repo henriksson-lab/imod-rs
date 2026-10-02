@@ -10,7 +10,7 @@
 //! `IMOD_RS_ETOMO_PROBE` to dump the table again for a fresh comparison.
 use imod_rs::imod::etomo::base_manager::{BaseManager, BaseManagerBase};
 use imod_rs::imod::etomo::logic::converter;
-use imod_rs::imod::etomo::storage::storable::Storable;
+use imod_rs::imod::etomo::storage::storable::{Storable, StorableValue};
 use imod_rs::imod::etomo::r#type::axis_id::AxisID;
 use imod_rs::imod::etomo::r#type::axis_type::AxisType;
 use imod_rs::imod::etomo::r#type::base_meta_data::{BaseMetaData, BaseMetaDataBase};
@@ -76,10 +76,10 @@ impl Storable for TestMetaData {
         self.base()
             .store_with_created_prepend(properties, prepend.as_deref());
     }
-    fn load(&mut self, properties: &BTreeMap<String, String>) {
+    fn load(&self, properties: &BTreeMap<String, String>) {
         self.load_with_prepend(properties, "");
     }
-    fn load_with_prepend(&mut self, properties: &BTreeMap<String, String>, prepend: &str) {
+    fn load_with_prepend(&self, properties: &BTreeMap<String, String>, prepend: &str) {
         let created = self.create_prepend(prepend);
         if self
             .base()
@@ -96,15 +96,6 @@ struct TestManager {
     base: BaseManagerBase,
 }
 
-impl imod_rs::imod::etomo::ui::browsing_directory::BrowsingDirectory for TestManager {
-    fn get_browsing_dir(&self) -> Option<std::path::PathBuf> {
-        BaseManager::get_browsing_dir(self)
-    }
-    fn set_browsing_dir(&self, file: Option<&std::path::Path>) {
-        BaseManager::set_browsing_dir(self, file)
-    }
-}
-
 impl BaseManager for TestManager {
     fn base(&self) -> &BaseManagerBase {
         &self.base
@@ -119,16 +110,22 @@ impl BaseManager for TestManager {
     fn get_base_meta_data(&self) -> Option<&dyn BaseMetaData> {
         None
     }
-    fn get_main_panel(&self) -> Option<Infallible> {
+    fn get_main_panel(
+        &self,
+    ) -> Option<std::rc::Rc<dyn imod_rs::imod::etomo::ui::swing::main_panel::MainPanelVirtual>>
+    {
         None
     }
-    fn get_process_manager(&self) -> Option<Infallible> {
+    fn get_process_manager(
+        &self,
+    ) -> Option<&'static imod_rs::imod::etomo::process::base_process_manager::BaseProcessManager>
+    {
         None
     }
     fn get_storables_with_offset(
         &self,
         _offset: i32,
-    ) -> Option<Vec<Box<dyn imod_rs::imod::etomo::storage::storable::Storable>>> {
+    ) -> Option<Vec<Option<&'static dyn imod_rs::imod::etomo::storage::storable::Storable>>> {
         None
     }
     fn get_name(&self) -> Option<String> {

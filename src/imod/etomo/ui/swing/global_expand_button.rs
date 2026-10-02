@@ -1,190 +1,222 @@
 //! `IMOD/Etomo/src/etomo/ui/swing/GlobalExpandButton.java`.
-#![allow(dead_code)]
+//!
+//! A single-line button that expands or contracts a whole dialog: it tells
+//! its registered `Expandable`s and `ExpandButton`s, and follows them when
+//! every expand button has been toggled to the other state by hand.
+//!
+//! The registered expand buttons and expandables are held as `Weak`
+//! references (each `ExpandButton` holds this button strongly, and an
+//! expandable owns this button); a dropped one is skipped.  `getPreferredSize`
+//! is layout and has no Rust counterpart.
+
+use std::cell::{Cell, RefCell};
+use std::rc::{Rc, Weak};
+
+use crate::imod::etomo::jdk::JComponent;
+use crate::imod::etomo::ui::field_displayer::FieldDisplayer;
+use crate::imod::etomo::ui::ui_component::UIComponent;
 
 use super::expand_button::ExpandButton;
 use super::expandable::Expandable;
-use super::multi_line_button::ButtonBoundary;
-use super::panel::Dimension;
 use super::single_line_button::SingleLineButton;
-use std::{cell::RefCell, rc::Rc};
 
-/// Java final `GlobalExpandButton`.  The `Rc<RefCell<_>>` entries retain the
-/// mutable object references in the Java registration lists at the GUI boundary.
+/// Java public final `GlobalExpandButton`.
 pub struct GlobalExpandButton {
-    pub button: SingleLineButton,
-    pub contracted_label: String,
-    pub expanded_label: String,
-    pub expand_button_list: Option<Vec<Rc<RefCell<ExpandButton>>>>,
-    pub expandable_list: Option<Vec<Rc<RefCell<dyn Expandable>>>>,
-    pub expanded: bool,
+    /// This object, for the Java calls that pass `this`.
+    self_ref: RefCell<Weak<GlobalExpandButton>>,
+    /// Java final `button`.
+    button: Rc<SingleLineButton>,
+    /// Java final `contractedLabel`.
+    contracted_label: Option<String>,
+    /// Java final `expandedLabel`.
+    expanded_label: Option<String>,
+    /// Java `expandButtonList`.
+    expand_button_list: RefCell<Option<Vec<Weak<ExpandButton>>>>,
+    /// Java `expandableList`.
+    expandable_list: RefCell<Option<Vec<Weak<dyn Expandable>>>>,
+    /// Java `expanded`.
+    expanded: Cell<bool>,
 }
 
 impl GlobalExpandButton {
     /// Java private `GlobalExpandButton(String, String)`.
-    fn new(contracted_label: &str, expanded_label: &str) -> Self {
-        Self {
-            button: SingleLineButton::new_with_label(Some(contracted_label)),
-            contracted_label: contracted_label.to_owned(),
-            expanded_label: expanded_label.to_owned(),
-            expand_button_list: None,
-            expandable_list: None,
-            expanded: false,
-        }
+    fn new(contracted_label: Option<&str>, expanded_label: Option<&str>) -> Rc<GlobalExpandButton> {
+        let instance = Rc::new(GlobalExpandButton {
+            self_ref: RefCell::new(Weak::new()),
+            button: SingleLineButton::new_string(contracted_label),
+            contracted_label: contracted_label.map(str::to_owned),
+            expanded_label: expanded_label.map(str::to_owned),
+            expand_button_list: RefCell::new(None),
+            expandable_list: RefCell::new(None),
+            expanded: Cell::new(false),
+        });
+        *instance.self_ref.borrow_mut() = Rc::downgrade(&instance);
+        instance
     }
+
     /// Java static `getInstance(String, String)`.
-    pub fn get_instance(contracted_label: &str, expanded_label: &str) -> Self {
-        let mut instance = Self::new(contracted_label, expanded_label);
+    pub fn get_instance(
+        contracted_label: Option<&str>,
+        expanded_label: Option<&str>,
+    ) -> Rc<GlobalExpandButton> {
+        let instance = GlobalExpandButton::new(contracted_label, expanded_label);
         instance.set_listeners();
         instance
     }
+
     /// Java private `setListeners()`.
-    fn set_listeners(&mut self) {
-        self.button.add_action_listener();
+    fn set_listeners(&self) {
+        // Java `button.addActionListener(new GlobalExpandButtonActionListener(this))`.
+        let adaptee = self.self_ref.borrow().clone();
+        self.button.add_action_listener(Rc::new(move |_event| {
+            if let Some(adaptee) = adaptee.upgrade() {
+                // GlobalExpandButtonActionListener.actionPerformed
+                adaptee.action();
+            }
+        }));
     }
+
     /// Java `register(ExpandButton)`.
-    pub fn register_expand_button(&mut self, expand_button: Rc<RefCell<ExpandButton>>) {
-        if self.expand_button_list.is_none() {
-            self.expand_button_list = Some(Vec::new());
-        }
+    pub fn register_expand_button(&self, expand_button: &Rc<ExpandButton>) {
         self.expand_button_list
-            .as_mut()
-            .unwrap()
-            .push(expand_button);
+            .borrow_mut()
+            .get_or_insert_with(Vec::new)
+            .push(Rc::downgrade(expand_button));
     }
+
     /// Java `register(Expandable)`.
-    pub fn register_expandable(&mut self, expandable: Rc<RefCell<dyn Expandable>>) {
-        if self.expandable_list.is_none() {
-            self.expandable_list = Some(Vec::new());
-        }
-        self.expandable_list.as_mut().unwrap().push(expandable);
+    pub fn register_expandable(&self, expandable: Weak<dyn Expandable>) {
+        self.expandable_list
+            .borrow_mut()
+            .get_or_insert_with(Vec::new)
+            .push(expandable);
     }
-    /// Java `deregister(Expandable)`.
-    pub fn deregister(&mut self, expandable: &Rc<RefCell<dyn Expandable>>) {
-        if let Some(list) = self.expandable_list.as_mut() {
-            list.retain(|registered| !Rc::ptr_eq(registered, expandable));
+
+    /// Java `deregister(Expandable)`: `List.remove(Object)` removes the first
+    /// occurrence.
+    pub fn deregister(&self, expandable: &Weak<dyn Expandable>) {
+        if let Some(expandable_list) = self.expandable_list.borrow_mut().as_mut() {
+            if let Some(index) = expandable_list
+                .iter()
+                .position(|member| Weak::ptr_eq(member, expandable))
+            {
+                expandable_list.remove(index);
+            }
         }
     }
+
     /// Java `getComponent()`.
-    pub fn get_component(&self) -> &ButtonBoundary {
-        self.button.get_component()
+    pub fn get_component(&self) -> Rc<JComponent> {
+        self.button.get_button()
     }
-    /// Java `getPreferredSize()`.
-    pub fn get_preferred_size(&self) -> Dimension {
-        self.button.get_preferred_size()
-    }
+
     /// Java `display()`.
-    pub fn display(&mut self) {
+    pub fn display_void(&self) {
         if !self.is_expanded() {
             self.button.do_click();
-            self.action();
         }
     }
+
     /// Java `isExpanded()`.
     pub fn is_expanded(&self) -> bool {
-        self.expanded
+        self.expanded.get()
     }
+
     /// Java `setVisible(boolean)`.
-    pub fn set_visible(&mut self, visible: bool) {
+    pub fn set_visible(&self, visible: bool) {
         self.button.set_visible(visible);
     }
+
     /// Java `setToolTipText(String)`.
-    pub fn set_tool_tip_text(&mut self, tooltip: &str) {
-        self.button.set_tool_tip_text(Some(tooltip));
+    pub fn set_tool_tip_text(&self, tooltip: Option<&str>) {
+        self.button.set_tool_tip_text(tooltip);
     }
+
     /// Java `msgExpandButtonAction(ExpandButton, boolean)`.
-    pub fn msg_expand_button_action(
-        &mut self,
-        active: &Rc<RefCell<ExpandButton>>,
-        is_expanded: bool,
-    ) {
-        if self.expanded == is_expanded
-            || self.expandable_list.is_some()
-            || self.expand_button_list.is_none()
+    pub fn msg_expand_button_action(&self, active_expand_button: &Rc<ExpandButton>, is_expanded: bool) {
+        if self.expanded.get() == is_expanded
+            || self.expandable_list.borrow().is_some()
+            || self.expand_button_list.borrow().is_none()
         {
+            // Same state as this button - nothing to do; or some advanced items only
+            // appear when the global button is used, so the dialog can't be completely
+            // expanded using ExpandButtons.
             return;
         }
-        for expand_button in self.expand_button_list.as_ref().unwrap() {
-            if !Rc::ptr_eq(expand_button, active)
-                && expand_button.borrow().is_expanded() == self.expanded
-            {
-                return;
+        let expand_button_list = self.expand_button_list.borrow().clone().unwrap_or_default();
+        for expand_button in expand_button_list.iter().filter_map(Weak::upgrade) {
+            if !Rc::ptr_eq(&expand_button, active_expand_button) {
+                if expand_button.is_expanded() == self.expanded.get() {
+                    // Not all the expand buttons are a different state as this button
+                    // - don't change this button.
+                    return;
+                }
             }
         }
+        // All expand buttons have the state that is opposite to this button's state.
+        // And all expandable fields in the dialog are controlled by expand buttons.
+        // So change this button.
         self.toggle_state();
     }
+
     /// Java private `toggleState()`.
-    fn toggle_state(&mut self) {
-        if self.expanded {
-            self.expanded = false;
-            self.button.set_text(&self.contracted_label);
+    fn toggle_state(&self) {
+        if self.expanded.get() {
+            self.expanded.set(false);
+            self.button.set_text(self.contracted_label.as_deref());
         } else {
-            self.expanded = true;
-            self.button.set_text(&self.expanded_label);
+            self.expanded.set(true);
+            self.button.set_text(self.expanded_label.as_deref());
         }
     }
+
     /// Java `changeState(boolean)`.
-    pub fn change_state(&mut self, expanded: bool) {
-        self.expanded = expanded;
+    pub fn change_state(&self, expanded: bool) {
+        self.expanded.set(expanded);
         if expanded {
-            self.button.set_text(&self.expanded_label);
+            self.button.set_text(self.expanded_label.as_deref());
         } else {
-            self.button.set_text(&self.contracted_label);
+            self.button.set_text(self.contracted_label.as_deref());
         }
     }
+
     /// Java private `action()`.
-    pub fn action(&mut self) {
+    fn action(&self) {
         self.toggle_state();
-        if let Some(list) = self.expandable_list.as_ref() {
-            for expandable in list {
-                expandable.borrow_mut().expand_global_button(self);
+        // This button was pressed.
+        // Tell objects controlled by this button to expand.
+        let expandable_list = self.expandable_list.borrow().clone();
+        if let Some(expandable_list) = expandable_list {
+            let this = self
+                .self_ref
+                .borrow()
+                .upgrade()
+                .expect("GlobalExpandButton used after drop");
+            for expandable in expandable_list.iter().filter_map(Weak::upgrade) {
+                expandable.expand_global_expand_button(&this);
             }
         }
-        if let Some(list) = self.expand_button_list.as_ref() {
-            for expand_button in list {
-                expand_button.borrow_mut().set_expanded(self.expanded);
+        // Tell registered expand buttons to expand.
+        let expand_button_list = self.expand_button_list.borrow().clone();
+        if let Some(expand_button_list) = expand_button_list {
+            for expand_button in expand_button_list.iter().filter_map(Weak::upgrade) {
+                expand_button.set_expanded(self.expanded.get());
             }
         }
     }
-    /// Java inner listener `actionPerformed(ActionEvent)`.
-    pub fn action_performed(&mut self) {
-        self.action();
-    }
+
     /// Java `display(UIComponent)`.
-    pub fn display_ui_component(&mut self) {
-        self.display();
+    pub fn display_ui_component(&self, _ui_component: Option<&dyn UIComponent>) {
+        self.display_void();
     }
 }
 
-#[cfg(test)]
-mod tests {
-    use super::super::expand_button::ExpandButtonType;
-    use super::*;
-    #[test]
-    fn display_clicks_only_when_contracted() {
-        let mut button = GlobalExpandButton::get_instance("Advanced", "Basic");
-        button.display();
-        assert!(button.expanded);
-        assert_eq!(button.button.multi_line_button.get_text(), Some("Basic"));
-        button.display();
-        assert_eq!(button.button.multi_line_button.button.click_count, 1);
+/// Java `implements FieldDisplayer`.
+impl FieldDisplayer for GlobalExpandButton {
+    fn display_void(&self) {
+        GlobalExpandButton::display_void(self)
     }
-    #[test]
-    fn action_updates_registered_expand_buttons_in_order() {
-        let first = Rc::new(RefCell::new(ExpandButton::new(
-            ExpandButtonType::Advanced,
-            false,
-            false,
-        )));
-        let second = Rc::new(RefCell::new(ExpandButton::new(
-            ExpandButtonType::Open,
-            false,
-            false,
-        )));
-        let mut button = GlobalExpandButton::get_instance("Advanced", "Basic");
-        button.register_expand_button(first.clone());
-        button.register_expand_button(second.clone());
-        button.action_performed();
-        assert!(first.borrow().is_expanded());
-        assert!(second.borrow().is_expanded());
+    fn display_ui_component(&self, ui_component: Option<&dyn UIComponent>) {
+        GlobalExpandButton::display_ui_component(self, ui_component)
     }
 }

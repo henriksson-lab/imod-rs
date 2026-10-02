@@ -17,7 +17,6 @@
 //! some path and later reads is an `Option`, and reading it as `None` is the
 //! source's uncaught `NameError`.
 
-use super::batchruntomo::py_str_float;
 use super::comchanger::{Change, modify_for_change_list, process_change_options};
 use super::copytomocoms::path_join;
 use super::imodpy::{
@@ -25,9 +24,10 @@ use super::imodpy::{
     auto_patch_number, call_own_program, dataset_filename, default_com_extension,
     exit_from_imod_error, find_root_axis_and_extensions, get_imod_version, get_montage_size,
     get_mrc, get_mrc_size, get_naming_style, make_backup_file, map_type_extension_to_style,
-    option_value, os_path_splitext, patch_size_from_entry, prnstr, read_text_file, run_cmd,
-    set_root_and_extension, write_text_file,
+    option_value, os_path_splitext, patch_size_from_entry, prnstr, py_int_floordiv, py_round,
+    read_text_file, run_cmd, set_root_and_extension, write_text_file,
 };
+use super::imodpy::{py_fixed, py_float, py_int, py_str_float};
 use super::pip::{
     exit_error, pip_get_boolean, pip_get_err_no, pip_get_float, pip_get_integer, pip_get_string,
     pip_get_two_integers, pip_read_or_parse_options,
@@ -101,7 +101,7 @@ fn py_crash(message: &str) -> ! {
     let _ = std::io::stdout().flush();
     eprintln!("Traceback (most recent call last):");
     eprintln!("{message}");
-    std::process::exit(1)
+    crate::imod::libcfshr::b3dutil::exit(1)
 }
 
 /// Matches `readTiltOptions` (`setupcombine:22`): read needed values from one
@@ -232,7 +232,7 @@ pub fn get_series_size_and_angle(
                 let mut failed = false;
                 for ind in 0..tiltlines.len() {
                     // `float()` strips surrounding whitespace
-                    let Ok(tilt) = tiltlines[ind].trim().parse::<f64>() else {
+                    let Some(tilt) = py_float(&tiltlines[ind]) else {
                         failed = true;
                         break;
                     };
@@ -256,7 +256,7 @@ pub fn get_series_size_and_angle(
         if let Some(transform) = rot_result.transforms.get(middle) {
             let field = format_f(f64::from(transform.theta), 8, 2);
             if field.starts_with(' ') {
-                if let Ok(value) = field.trim().parse::<f64>() {
+                if let Some(value) = py_float(&field) {
                     angle = Some(-value);
                 }
             }
@@ -274,7 +274,9 @@ pub fn get_series_size_and_angle(
     if xpix_stk == 0. {
         py_crash("ZeroDivisionError: float division by zero");
     }
-    let binning = (xpix_rec / xpix_stk).round_ties_even() as i64;
+    // Header pixel sizes: finite for any file IMOD writes (`getmrc` divides the
+    // cell size by the sampling); a NaN/inf header value would make Python raise
+    let binning = py_round(xpix_rec / xpix_stk) as i64;
 
     // If it is montage, get the size, forget it if it fails
     if Path::new(&plname).exists() {
@@ -284,8 +286,8 @@ pub fn get_series_size_and_angle(
             if binning == 0 {
                 py_crash("ZeroDivisionError: integer division or modulo by zero");
             }
-            xsize = nx_stk.div_euclid(binning);
-            ysize = ny_stk.div_euclid(binning);
+            xsize = py_int_floordiv(nx_stk, binning);
+            ysize = py_int_floordiv(ny_stk, binning);
         }
     }
     // Otherwise, we have the size already
@@ -293,8 +295,8 @@ pub fn get_series_size_and_angle(
         if binning == 0 {
             py_crash("ZeroDivisionError: integer division or modulo by zero");
         }
-        xsize = nx_stk.div_euclid(binning);
-        ysize = ny_stk.div_euclid(binning);
+        xsize = py_int_floordiv(nx_stk, binning);
+        ysize = py_int_floordiv(ny_stk, binning);
     }
 
     (Some(xsize), Some(ysize), angle)
@@ -1091,7 +1093,10 @@ pub fn setupcombine(arguments: &[OsString]) -> i32 {
     // If either angle is there and either stack size, add angle, then stack sizes
     if recons_centered && (a_angle_true || b_angle_true) && (nx_astack_true || nx_bstack_true) {
         if nx_astack_true || nx_bstack_true {
-            sedcom.push(format!("/^FlipYZMes/a/AxisRotationAngle\t{axis_angle:.2}/"));
+            sedcom.push(format!(
+                "/^FlipYZMes/a/AxisRotationAngle\t{}/",
+                py_fixed(axis_angle, 0, 2)
+            ));
         }
         if nx_astack_true {
             sedcom.push(format!(
@@ -1279,9 +1284,9 @@ pub fn setupcombine(arguments: &[OsString]) -> i32 {
         let Some(field) = fields.get(index) else {
             py_crash("IndexError: list index out of range");
         };
-        match field.parse::<i64>() {
-            Ok(value) => value,
-            Err(_) => py_crash(&format!(
+        match py_int(field) {
+            Some(value) => value,
+            None => py_crash(&format!(
                 "ValueError: invalid literal for int() with base 10: '{field}'"
             )),
         }

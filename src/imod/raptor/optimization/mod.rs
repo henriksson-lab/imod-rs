@@ -1,10 +1,13 @@
-//! Translation of `IMOD/raptor/optimization`.
+//! Translation units from `IMOD/raptor/optimization`.
 
 pub mod contour;
 pub mod estimation3d;
-pub mod estimation3d_data;
+pub mod estimation3ddata;
 pub mod prob_data;
+#[path = "SFMdata.rs"]
 pub mod sfm_data;
+#[path = "SFMestimationWithBA.rs"]
 pub mod sfm_estimation_with_ba;
 pub mod std_qp;
-pub mod std_qp_data;
+#[path = "STDQPdata.rs"]
+pub mod stdqp_data;

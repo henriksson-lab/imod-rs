@@ -11,6 +11,9 @@
 # the blanking shifts; t1.seed/t1.seed2 the
 # native point2model seed (one object; beads split over two objects) with one point
 # per bead on the zero-tilt view; t1.dupseed two points on one view (error path).
+# cases/skipedge.in (SkipViews 1-10, two local areas, two rounds) reaches the
+# mResMean overrun (BUGS.md, beadtrack, 2026-09-27); native matches the defined
+# behaviour on it, so it is not in defined.list.
 # Each case is the PIP input in cases/<case>.in, run as `beadtrack -StandardInput`
 # in its own directory with stdout captured through a pipe, at OMP_NUM_THREADS=1;
 # the exit status goes to golden/<case>.rc, stdout to golden/<case>.out and output

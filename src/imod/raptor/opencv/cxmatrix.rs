@@ -1,482 +1,76 @@
-//! Safe numerical core for `IMOD/raptor/opencv/cxmatrix.cpp`.
-use super::cxutils::{CvMatrix, CvUtilsError};
+//! Translation of `IMOD/raptor/opencv/cxmatrix.cpp` (the parts RAPTOR
+//! reaches): `cvTranspose` of `CV_64FC1` into a separate matrix and
+//! `cvSolve` with `CV_SVD`.
 
-/// C `cvSolve`/`cvInvert` method selectors.
+use super::cxerror::{CV_STS_BAD_ARG, CV_STS_UNMATCHED_SIZES, cv_error};
+use super::cxsvd::{CV_SVD_U_T, CV_SVD_V_T, cv_svbksb, cv_svd};
+use super::cxtypes::*;
+
+/// `CV_LU`.
 pub const CV_LU: i32 = 0;
+/// `CV_SVD`.
 pub const CV_SVD: i32 = 1;
+/// `CV_SVD_SYM`.
 pub const CV_SVD_SYM: i32 = 2;
 
-/// C `cvSetIdentity` for an owned scalar matrix.
-pub fn cv_set_identity(matrix: &mut CvMatrix<f64>, value: f64) {
-    matrix.data.fill(0.);
-    for i in 0..matrix.rows.min(matrix.cols) {
-        matrix.data[i * matrix.cols + i] = value;
-    }
-}
-/// C `cvTrace`.
-pub fn cv_trace(matrix: &CvMatrix<f64>) -> f64 {
-    (0..matrix.rows.min(matrix.cols))
-        .map(|i| matrix.data[i * matrix.cols + i])
-        .sum()
-}
-/// C `cvTranspose`; source permits in-place square transpose.
-pub fn cv_transpose(
-    source: &CvMatrix<f64>,
-    destination: &mut CvMatrix<f64>,
-) -> Result<(), CvUtilsError> {
-    if destination.rows != source.cols || destination.cols != source.rows {
-        return Err(CvUtilsError::UnmatchedSizes);
-    }
-    for y in 0..source.rows {
-        for x in 0..source.cols {
-            destination.data[x * destination.cols + y] = source.data[y * source.cols + x];
-        }
-    }
-    Ok(())
-}
-/// C LU determinant path in `cvDet`.
-pub fn cv_det(matrix: &CvMatrix<f64>) -> Result<f64, CvUtilsError> {
-    if matrix.rows != matrix.cols {
-        return Err(CvUtilsError::BadSize);
-    }
-    let n = matrix.rows;
-    let mut a = matrix.data.clone();
-    let mut sign = 1.;
-    let mut determinant = 1.;
-    for k in 0..n {
-        let pivot = (k..n)
-            .max_by(|&i, &j| a[i * n + k].abs().partial_cmp(&a[j * n + k].abs()).unwrap())
-            .unwrap();
-        if a[pivot * n + k] == 0. {
-            return Ok(0.);
-        }
-        if pivot != k {
-            for c in 0..n {
-                a.swap(k * n + c, pivot * n + c);
-            }
-            sign = -sign;
-        }
-        let p = a[k * n + k];
-        determinant *= p;
-        for i in k + 1..n {
-            let scale = a[i * n + k] / p;
-            for j in k + 1..n {
-                a[i * n + j] -= scale * a[k * n + j];
-            }
-        }
-    }
-    Ok(sign * determinant)
-}
-/// C LU `cvSolve` path, replacing source in-place buffers with owned pivots.
-pub fn cv_solve(
-    a: &CvMatrix<f64>,
-    b: &CvMatrix<f64>,
-    x: &mut CvMatrix<f64>,
-) -> Result<(), CvUtilsError> {
-    if a.rows != a.cols || b.rows != a.rows || x.rows != b.rows || x.cols != b.cols {
-        return Err(CvUtilsError::UnmatchedSizes);
-    }
-    let n = a.rows;
-    let mut lu = a.data.clone();
-    let mut rhs = b.data.clone();
-    for k in 0..n {
-        let p = (k..n)
-            .max_by(|&i, &j| {
-                lu[i * n + k]
-                    .abs()
-                    .partial_cmp(&lu[j * n + k].abs())
-                    .unwrap()
-            })
-            .unwrap();
-        if lu[p * n + k] == 0. {
-            return Err(CvUtilsError::BadArgument);
-        }
-        if p != k {
-            for j in 0..n {
-                lu.swap(k * n + j, p * n + j);
-            }
-            for j in 0..b.cols {
-                rhs.swap(k * b.cols + j, p * b.cols + j);
-            }
-        }
-        for i in k + 1..n {
-            let f = lu[i * n + k] / lu[k * n + k];
-            lu[i * n + k] = f;
-            for j in k + 1..n {
-                lu[i * n + j] -= f * lu[k * n + j];
-            }
-            for j in 0..b.cols {
-                rhs[i * b.cols + j] -= f * rhs[k * b.cols + j];
-            }
-        }
-    }
-    for i in (0..n).rev() {
-        for j in 0..b.cols {
-            let mut v = rhs[i * b.cols + j];
-            for k in i + 1..n {
-                v -= lu[i * n + k] * x.data[k * x.cols + j];
-            }
-            x.data[i * x.cols + j] = v / lu[i * n + i];
-        }
-    }
-    Ok(())
-}
-
-/// SVD/pseudoinverse route of C `cvSolve`, including rectangular systems.
-pub fn cv_solve_svd(
-    a: &CvMatrix<f64>,
-    b: &CvMatrix<f64>,
-    x: &mut CvMatrix<f64>,
-) -> Result<(), CvUtilsError> {
-    if b.rows != a.rows || x.rows != a.cols || x.cols != b.cols {
-        return Err(CvUtilsError::UnmatchedSizes);
-    }
-    let mut inverse = CvMatrix::new(a.cols, a.rows, vec![0.; a.cols * a.rows])?;
-    cv_invert_svd(a, &mut inverse)?;
-    for row in 0..x.rows {
-        for column in 0..x.cols {
-            x.data[row * x.cols + column] = (0..a.rows)
-                .map(|inner| {
-                    inverse.data[row * inverse.cols + inner] * b.data[inner * b.cols + column]
-                })
-                .sum();
-        }
-    }
-    Ok(())
-}
-
-/// Public C `cvSolve` method selector.
-pub fn cv_solve_with_method(
-    a: &CvMatrix<f64>,
-    b: &CvMatrix<f64>,
-    x: &mut CvMatrix<f64>,
-    method: i32,
-) -> Result<(), CvUtilsError> {
-    match method {
-        CV_LU => cv_solve(a, b, x),
-        CV_SVD => cv_solve_svd(a, b, x),
-        CV_SVD_SYM if a.rows == a.cols => cv_solve_svd(a, b, x),
-        CV_SVD_SYM => Err(CvUtilsError::BadSize),
-        _ => Err(CvUtilsError::BadArgument),
-    }
-}
-/// C `cvInvert` LU route.
-pub fn cv_invert(
-    source: &CvMatrix<f64>,
-    destination: &mut CvMatrix<f64>,
-) -> Result<f64, CvUtilsError> {
-    if source.rows != source.cols
-        || destination.rows != source.rows
-        || destination.cols != source.cols
-    {
-        return Err(CvUtilsError::UnmatchedSizes);
-    }
-    let n = source.rows;
-    let mut identity = CvMatrix::new(
-        n,
-        n,
-        (0..n * n)
-            .map(|i| if i / n == i % n { 1. } else { 0. })
-            .collect(),
-    )?;
-    cv_solve(source, &identity, destination)?;
-    let d = cv_det(source)?;
-    identity.data.clear();
-    Ok(d)
-}
-/// C `cvCrossProduct`.
-pub fn cv_cross_product(a: [f64; 3], b: [f64; 3]) -> [f64; 3] {
-    [
-        a[1] * b[2] - a[2] * b[1],
-        a[2] * b[0] - a[0] * b[2],
-        a[0] * b[1] - a[1] * b[0],
-    ]
-}
-/// C `CV_SVD` / `CV_SVD_SYM` pseudoinverse route of `cvInvert`.
-pub fn cv_invert_svd(
-    source: &CvMatrix<f64>,
-    destination: &mut CvMatrix<f64>,
-) -> Result<f64, CvUtilsError> {
-    if destination.rows != source.cols || destination.cols != source.rows {
-        return Err(CvUtilsError::UnmatchedSizes);
-    }
-    let mut gram = CvMatrix::new(
-        source.cols,
-        source.cols,
-        vec![0.; source.cols * source.cols],
-    )?;
-    for i in 0..source.cols {
-        for j in 0..source.cols {
-            for k in 0..source.rows {
-                gram.data[i * gram.cols + j] +=
-                    source.data[k * source.cols + i] * source.data[k * source.cols + j];
-            }
-        }
-    }
-    let (mut values, vectors) = icv_symmetric_eigen(&gram)?;
-    let threshold = values.iter().copied().fold(0_f64, f64::max)
-        * f64::EPSILON
-        * source.rows.max(source.cols) as f64;
-    for value in &mut values {
-        *value = if *value > threshold { 1. / *value } else { 0. };
-    }
-    // A⁺ = V · diag(1 / eigenvalues(AᵀA)) · Vᵀ · Aᵀ.  `destination`
-    // is n-by-m for an m-by-n source, so its column indexes source rows,
-    // never eigenvector rows.
-    for row in 0..destination.rows {
-        for column in 0..destination.cols {
-            let mut result = 0.;
-            for eigen in 0..source.cols {
-                let projected: f64 = (0..source.cols)
-                    .map(|feature| {
-                        vectors.data[feature * vectors.cols + eigen]
-                            * source.data[column * source.cols + feature]
-                    })
-                    .sum();
-                result += vectors.data[row * vectors.cols + eigen] * values[eigen] * projected;
-            }
-            destination.data[row * destination.cols + column] = result;
-        }
-    }
-    Ok(threshold)
-}
-
-/// Public C `cvInvert` method selector.  Its return value is the LU
-/// determinant or SVD threshold, just as the source API returns a method-
-/// specific scalar diagnostic.
-pub fn cv_invert_with_method(
-    source: &CvMatrix<f64>,
-    destination: &mut CvMatrix<f64>,
-    method: i32,
-) -> Result<f64, CvUtilsError> {
-    match method {
-        CV_LU => cv_invert(source, destination),
-        CV_SVD => cv_invert_svd(source, destination),
-        CV_SVD_SYM if source.rows == source.cols => cv_invert_svd(source, destination),
-        CV_SVD_SYM => Err(CvUtilsError::BadSize),
-        _ => Err(CvUtilsError::BadArgument),
-    }
-}
-/// C PCA flags.
-pub const CV_PCA_DATA_AS_ROW: i32 = 0;
-pub const CV_PCA_DATA_AS_COL: i32 = 1;
-pub const CV_PCA_USE_AVG: i32 = 2;
-/// Owned result of C `cvCalcPCA`.
-#[derive(Clone, Debug, PartialEq)]
-pub struct CvPca {
-    pub average: Vec<f64>,
-    pub eigenvalues: Vec<f64>,
-    pub eigenvectors: CvMatrix<f64>,
-    pub data_as_columns: bool,
-}
-/// C `cvCalcPCA`; covariance is scaled by the number of input vectors as in the source.
-pub fn cv_calc_pca(
-    data: &CvMatrix<f64>,
-    component_count: usize,
-    flags: i32,
-    provided_average: Option<&[f64]>,
-) -> Result<CvPca, CvUtilsError> {
-    let columns = flags & CV_PCA_DATA_AS_COL != 0;
-    let (len, count) = if columns {
-        (data.rows, data.cols)
-    } else {
-        (data.cols, data.rows)
-    };
-    if component_count > len.min(count) {
-        return Err(CvUtilsError::BadSize);
-    }
-    let mut average = provided_average.map_or(vec![0.; len], ToOwned::to_owned);
-    if average.len() != len {
-        return Err(CvUtilsError::BadSize);
-    }
-    if flags & CV_PCA_USE_AVG == 0 {
-        for vector in 0..count {
-            for feature in 0..len {
-                average[feature] += if columns {
-                    data.data[feature * data.cols + vector]
-                } else {
-                    data.data[vector * data.cols + feature]
-                };
-            }
-        }
-        for value in &mut average {
-            *value /= count as f64;
-        }
-    }
-    let mut covariance = CvMatrix::new(len, len, vec![0.; len * len])?;
-    for i in 0..len {
-        for j in 0..len {
-            for vector in 0..count {
-                let a = if columns {
-                    data.data[i * data.cols + vector]
-                } else {
-                    data.data[vector * data.cols + i]
-                } - average[i];
-                let b = if columns {
-                    data.data[j * data.cols + vector]
-                } else {
-                    data.data[vector * data.cols + j]
-                } - average[j];
-                covariance.data[i * len + j] += a * b / count as f64;
-            }
-        }
-    }
-    let (mut eigenvalues, all_vectors) = icv_symmetric_eigen(&covariance)?;
-    let mut order: (Vec<_>) = (0..len).collect();
-    order.sort_by(|&a, &b| eigenvalues[b].partial_cmp(&eigenvalues[a]).unwrap());
-    let mut vectors = CvMatrix::new(component_count, len, vec![0.; component_count * len])?;
-    let mut values = Vec::with_capacity(component_count);
-    for (row, &index) in order.iter().take(component_count).enumerate() {
-        values.push(eigenvalues[index]);
-        for col in 0..len {
-            vectors.data[row * len + col] = all_vectors.data[col * len + index];
-        }
-    }
-    eigenvalues.clear();
-    Ok(CvPca {
-        average,
-        eigenvalues: values,
-        eigenvectors: vectors,
-        data_as_columns: columns,
-    })
-}
-/// C `cvProjectPCA` for row-oriented vectors.
-pub fn cv_project_pca(
-    data: &CvMatrix<f64>,
-    pca: &CvPca,
-    result: &mut CvMatrix<f64>,
-) -> Result<(), CvUtilsError> {
-    if pca.data_as_columns
-        || data.cols != pca.average.len()
-        || result.rows != data.rows
-        || result.cols > pca.eigenvectors.rows
-    {
-        return Err(CvUtilsError::UnmatchedSizes);
-    }
-    for row in 0..data.rows {
-        for component in 0..result.cols {
-            let mut value = 0.;
-            for col in 0..data.cols {
-                value += (data.data[row * data.cols + col] - pca.average[col])
-                    * pca.eigenvectors.data[component * pca.eigenvectors.cols + col];
-            }
-            result.data[row * result.cols + component] = value;
-        }
-    }
-    Ok(())
-}
-/// C `cvBackProjectPCA` for row-oriented vectors.
-pub fn cv_back_project_pca(
-    projection: &CvMatrix<f64>,
-    pca: &CvPca,
-    result: &mut CvMatrix<f64>,
-) -> Result<(), CvUtilsError> {
-    if pca.data_as_columns
-        || projection.cols > pca.eigenvectors.rows
-        || result.rows != projection.rows
-        || result.cols != pca.average.len()
-    {
-        return Err(CvUtilsError::UnmatchedSizes);
-    }
-    for row in 0..result.rows {
-        for col in 0..result.cols {
-            let mut value = pca.average[col];
-            for component in 0..projection.cols {
-                value += projection.data[row * projection.cols + component]
-                    * pca.eigenvectors.data[component * pca.eigenvectors.cols + col];
-            }
-            result.data[row * result.cols + col] = value;
-        }
-    }
-    Ok(())
-}
-/// Source SVD/covariance calls reduce to a symmetric eigensolve. Eigenvectors are columns.
-fn icv_symmetric_eigen(matrix: &CvMatrix<f64>) -> Result<(Vec<f64>, CvMatrix<f64>), CvUtilsError> {
-    if matrix.rows != matrix.cols {
-        return Err(CvUtilsError::BadSize);
-    }
-    let n = matrix.rows;
-    let mut a = matrix.data.clone();
-    let mut vectors = CvMatrix::new(
-        n,
-        n,
-        (0..n * n)
-            .map(|i| if i / n == i % n { 1. } else { 0. })
-            .collect(),
-    )?;
-    for _ in 0..n * n * 32 {
-        let (mut p, mut q, mut largest) = (0, 0, 0.);
-        for i in 0..n {
-            for j in i + 1..n {
-                if a[i * n + j].abs() > largest {
-                    largest = a[i * n + j].abs();
-                    p = i;
-                    q = j;
-                }
-            }
-        }
-        if largest <= f64::EPSILON {
-            break;
-        }
-        let angle = 0.5 * (2. * a[p * n + q]).atan2(a[q * n + q] - a[p * n + p]);
-        let (c, s) = (angle.cos(), angle.sin());
-        for i in 0..n {
-            let ap = a[i * n + p];
-            let aq = a[i * n + q];
-            a[i * n + p] = c * ap - s * aq;
-            a[i * n + q] = s * ap + c * aq;
-        }
-        for i in 0..n {
-            let ap = a[p * n + i];
-            let aq = a[q * n + i];
-            a[p * n + i] = c * ap - s * aq;
-            a[q * n + i] = s * ap + c * aq;
-            let vp = vectors.data[i * n + p];
-            let vq = vectors.data[i * n + q];
-            vectors.data[i * n + p] = c * vp - s * vq;
-            vectors.data[i * n + q] = s * vp + c * vq;
-        }
-    }
-    Ok(((0..n).map(|i| a[i * n + i]).collect(), vectors))
-}
-#[cfg(test)]
-mod tests {
-    use super::*;
-    #[test]
-    fn det_solve_transpose_and_cross() {
-        let a = CvMatrix::new(2, 2, vec![4., 7., 2., 6.]).unwrap();
-        assert_eq!(cv_det(&a), Ok(10.));
-        let b = CvMatrix::new(2, 1, vec![1., 0.]).unwrap();
-        let mut x = CvMatrix::new(2, 1, vec![0.; 2]).unwrap();
-        cv_solve(&a, &b, &mut x).unwrap();
-        assert!((x.data[0] - 0.6).abs() < 1.0e-12);
-        assert!((x.data[1] + 0.2).abs() < 1.0e-12);
-        assert_eq!(cv_cross_product([1., 0., 0.], [0., 1., 0.]), [0., 0., 1.]);
-    }
-    #[test]
-    fn pca_projects_and_backprojects_rows() {
-        let data = CvMatrix::new(3, 2, vec![1., 0., 2., 0., 3., 0.]).unwrap();
-        let pca = cv_calc_pca(&data, 1, CV_PCA_DATA_AS_ROW, None).unwrap();
-        assert!(pca.eigenvalues[0] > 0.);
-        let mut projection = CvMatrix::new(3, 1, vec![0.; 3]).unwrap();
-        cv_project_pca(&data, &pca, &mut projection).unwrap();
-        let mut restored = CvMatrix::new(3, 2, vec![0.; 6]).unwrap();
-        cv_back_project_pca(&projection, &pca, &mut restored).unwrap();
-        for (i, v) in data.data.iter().enumerate() {
-            assert!((restored.data[i] - v).abs() < 1e-8);
-        }
-    }
-
-    #[test]
-    fn method_dispatch_supports_rectangular_svd_solves() {
-        let a = CvMatrix::new(2, 1, vec![1., 2.]).unwrap();
-        let b = CvMatrix::new(2, 1, vec![3., 6.]).unwrap();
-        let mut x = CvMatrix::new(1, 1, vec![0.]).unwrap();
-        cv_solve_with_method(&a, &b, &mut x, CV_SVD).unwrap();
-        assert!((x.data[0] - 3.).abs() < 1e-12);
-        assert_eq!(
-            cv_solve_with_method(&a, &b, &mut x, CV_SVD_SYM),
-            Err(CvUtilsError::BadSize)
+/// `cvTranspose(src, dst)` (`cxmatrix.cpp:441`) into a different matrix:
+/// `icvTranspose_32s_C2R`, which moves each 8-byte element as a pair of
+/// `int`s (a bit copy).  The in-place routes are not reached.
+pub fn cv_transpose(src: CvMatRef<'_>, dst: &mut CvMat) {
+    let size = src.get_size();
+    if size.width != dst.rows || size.height != dst.cols {
+        cv_error(
+            CV_STS_UNMATCHED_SIZES,
+            "cvTranspose",
+            "",
+            "cxmatrix.cpp",
+            490,
         );
     }
+
+    for i in 0..size.height {
+        for j in 0..size.width {
+            let k = dst.index(j, i);
+            dst.data[k] = src.elem(i, j);
+        }
+    }
+}
+
+/// `cvSolve(A, b, x, method)` (`cxmatrix.cpp:1122`).  RAPTOR solves with
+/// `CV_SVD` only (its one `CV_LU` call is commented out), so the LU route is
+/// not reached.  Returns the C's `result` (1).
+pub fn cv_solve(a: CvMatRef<'_>, b: CvMatRef<'_>, x: &mut CvMat, method: i32) -> i32 {
+    let result = 1;
+
+    if method == CV_SVD || method == CV_SVD_SYM {
+        let n = a.rows.min(a.cols);
+
+        if method == CV_SVD_SYM && a.rows != a.cols {
+            cv_error(
+                -201,
+                "cvSolve",
+                "CV_SVD_SYM method is used for non-square matrix",
+                "cxmatrix.cpp",
+                1148,
+            );
+        }
+        assert!(method == CV_SVD, "cvSolve: CV_SVD_SYM is not reached");
+
+        let mut u = CvMat::create(n, a.rows, a.type_);
+        let mut v = CvMat::create(n, a.cols, a.type_);
+        let mut w = CvMat::create(n, 1, a.type_);
+        cv_svd(a, &mut w, &mut u, &mut v, CV_SVD_U_T + CV_SVD_V_T);
+        cv_svbksb(&w, &u, &v, Some(b), x, CV_SVD_U_T + CV_SVD_V_T);
+        return result;
+    } else if method != CV_LU {
+        cv_error(
+            CV_STS_BAD_ARG,
+            "cvSolve",
+            "Unknown inversion method",
+            "cxmatrix.cpp",
+            1158,
+        );
+    }
+
+    panic!("cvSolve: the CV_LU route is not reached from RAPTOR");
 }

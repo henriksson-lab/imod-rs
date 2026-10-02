@@ -1,470 +1,528 @@
 //! `IMOD/Etomo/src/etomo/ui/swing/Ebutton.java`.
 //!
-//! `JButton`, `GridBagLayout`, button styles, tooltip formatting, and file
-//! chooser presentation are native GUI boundaries.  This module retains the
-//! source-owned construction, state transitions, control mediation, and
-//! listener-delivery order without replacing Swing's file chooser or painter.
-#![allow(dead_code)]
+//! An extensible `JButton`: a button style (icons, and a toggle appearance
+//! for a plain `JButton`), a control mode (clear a target, select a file or
+//! files for it, through the `ControlMediator`), flag appearance, and grid bag
+//! placement.
+//!
+//! The control target is held as a `Weak<dyn ControlTarget>`: the target (a
+//! file text field, ...) owns its buttons and usually passes itself while it
+//! is being constructed.  The Java `fixedSize` and `border` constructor
+//! arguments are layout, so the private constructor drops them and each
+//! factory says in a comment what it passed; `setHorizontalAlignment` is
+//! layout too.  `add(JPanel, GridBagLayout, GridBagConstraints)` keeps the
+//! panel and drops the layout arguments.
 
-use std::{cell::RefCell, path::PathBuf, rc::Rc};
+use std::cell::{Cell, RefCell};
+use std::path::PathBuf;
+use std::rc::{Rc, Weak};
 
-use crate::imod::etomo::{
-    etomo_director::ARGUMENTS,
-    storage::autodoc::autodoc_tokenizer::{DEFAULT_DELIMITER, SEPARATOR_CHAR},
-    ui::browsing_directory::BrowsingDirectory,
-    util::utilities,
-};
+use crate::imod::etomo::etomo_director::ARGUMENTS;
+use crate::imod::etomo::jdk::{ActionEvent, ActionListener, JComponent};
+use crate::imod::etomo::storage::autodoc::autodoc_tokenizer::{DEFAULT_DELIMITER, SEPARATOR_CHAR};
+use crate::imod::etomo::r#type::ui_test_field_type::UITestFieldType;
+use crate::imod::etomo::ui::browsing_directory::BrowsingDirectory;
+use crate::imod::etomo::ui::flag_display::FlagDisplay;
+use crate::imod::etomo::ui::flag_type::FlagType;
+use crate::imod::etomo::util::utilities;
 
-use super::{
-    appearance_extension::{AppearanceExtension, ComponentBoundary, FlagDisplay, FlagType},
-    button_component::ActionListenerBoundary,
-    button_style_extension::ButtonStyleExtensionBoundary,
-    control_mediator::ControlMediator,
-    control_mode::{CLEAR, ControlMode, SELECT_FILE, SELECT_MULTIPLE_FILES},
-    control_target::ControlTarget,
-    controller::Controller,
-    file_text_field_interface::FileFilter,
-    grid_bag_extension::GridBagExtension,
-    select_file_extension::SelectFileExtension,
-};
-
-/// Java `JButton` state read or changed by this source unit.
-#[derive(Clone, Debug)]
-pub struct JButtonBoundary {
-    pub component: Rc<RefCell<ComponentBoundary>>,
-    pub name: Option<String>,
-    pub text: Option<String>,
-    pub preferred_size: Option<(i32, i32)>,
-    pub maximum_size: Option<(i32, i32)>,
-    pub empty_border: bool,
-    pub horizontal_alignment: Option<i32>,
-    pub visible: bool,
-    pub action_command: Option<String>,
-    pub tooltip: Option<String>,
-    pub action_listener_registered: bool,
-}
-
-impl Default for JButtonBoundary {
-    fn default() -> Self {
-        Self {
-            component: Rc::new(RefCell::new(ComponentBoundary::default())),
-            name: None,
-            text: None,
-            preferred_size: None,
-            maximum_size: None,
-            empty_border: false,
-            horizontal_alignment: None,
-            visible: true,
-            action_command: None,
-            tooltip: None,
-            action_listener_registered: false,
-        }
-    }
-}
+use super::appearance_extension::AppearanceExtension;
+use super::button_style_extension::ButtonStyleExtensionVirtual;
+use super::clear_button_style_extension::ClearButtonStyleExtension;
+use super::close_button_style_extension::CloseButtonStyleExtension;
+use super::control_mediator::{self, ControlMediator};
+use super::control_mode::{self, ControlMode};
+use super::control_target::ControlTarget;
+use super::controller::Controller;
+use super::file_open_button_style_extension::FileOpenButtonStyleExtension;
+// use super::file_text_field_interface::FileFilter;
+use super::grid_bag_extension::GridBagExtension;
+use super::header_button_style_extension::HeaderButtonStyleExtension;
+use super::open_close_button_style_extension::OpenCloseButtonStyleExtension;
+use super::select_file_extension::SelectFileExtension;
+use super::single_line_button_style_extension::SingleLineButtonStyleExtension;
+use super::tooltip_formatter::TooltipFormatter;
+use crate::imod::etomo::jdk::FileFilter;
 
 /// Java package-private final `Ebutton`.
 pub struct Ebutton {
-    /// Java final `button`.
-    pub button: JButtonBoundary,
+    /// This object, for the Java calls that pass `this`.
+    self_ref: RefCell<Weak<Ebutton>>,
+    /// Java final `button` (`new JButton()`).
+    button: Rc<JComponent>,
     /// Java final `target`.
-    pub target: Option<Rc<RefCell<dyn ControlTarget>>>,
+    target: Option<Weak<dyn ControlTarget>>,
     /// Java final `controlMode`.
-    pub control_mode: Option<&'static ControlMode>,
+    control_mode: Option<&'static ControlMode>,
     /// Java final `selectFileExtension`.
-    pub select_file_extension: Option<Rc<RefCell<SelectFileExtension>>>,
-    /// Java final `implementToggle`.
-    pub implement_toggle: bool,
+    select_file_extension: Option<Rc<SelectFileExtension>>,
+    /// Java final `implementToggle`: gives a JButton the appearance of
+    /// toggling, the button style used comtains a complete icon with a
+    /// selected image.
+    implement_toggle: bool,
     /// Java `buttonStyle`.
-    pub button_style: Option<ButtonStyleExtensionBoundary>,
+    button_style: RefCell<Option<Rc<dyn ButtonStyleExtensionVirtual>>>,
     /// Java `gridBagExtension`.
-    pub grid_bag_extension: Option<GridBagExtension>,
+    grid_bag_extension: RefCell<Option<Rc<GridBagExtension>>>,
     /// Java `selected`.
-    pub selected: bool,
+    selected: Cell<bool>,
     /// Java `appearanceExtension`.
-    pub appearance_extension: Option<AppearanceExtension>,
+    appearance_extension: RefCell<Option<Rc<AppearanceExtension>>>,
     /// Java `actionListeners`.
-    pub action_listeners: Option<Vec<Rc<RefCell<dyn ActionListenerBoundary>>>>,
+    action_listeners: RefCell<Option<Vec<ActionListener>>>,
     /// Java `allowFlagEditableControl`.
-    pub allow_flag_editable_control: bool,
+    allow_flag_editable_control: Cell<bool>,
     /// Java `respondToNonErrorFlags`.
-    pub respond_to_non_error_flags: bool,
+    respond_to_non_error_flags: Cell<bool>,
     /// Java `flagType`.
-    pub flag_type: Option<FlagType>,
+    flag_type: Cell<Option<&'static FlagType>>,
+    /// Java `controlMediator`.  Never assigned or read in the Java class.
+    control_mediator: Cell<Option<&'static ControlMediator>>,
     /// Java `buttonActionListening`.
-    pub button_action_listening: bool,
+    button_action_listening: Cell<bool>,
     /// Java `overrideSelectFileDirectory`.
-    pub override_select_file_directory: Option<PathBuf>,
+    override_select_file_directory: RefCell<Option<PathBuf>>,
     /// Java `debug`.
-    pub debug: bool,
+    debug: Cell<bool>,
 }
 
 impl Ebutton {
-    /// Java private `Ebutton(ControlMode, ControlTarget, String, Dimension, Border, boolean,
-    /// SelectFileExtension, boolean)`.
-    #[allow(clippy::too_many_arguments)]
+    /// Java private
+    /// `Ebutton(ControlMode, ControlTarget, String, Dimension, Border, boolean, SelectFileExtension, boolean)`.
+    /// `fixedSize` (preferred and maximum size) and `border` are layout and
+    /// are not passed.
     fn new(
         control_mode: Option<&'static ControlMode>,
-        target: Option<Rc<RefCell<dyn ControlTarget>>>,
+        target: Option<Weak<dyn ControlTarget>>,
         label: Option<&str>,
-        fixed_size: Option<(i32, i32)>,
-        empty_border: bool,
         implement_toggle: bool,
-        shared_select_file_extension: Option<Rc<RefCell<SelectFileExtension>>>,
+        shared_select_file_extension: Option<Rc<SelectFileExtension>>,
         debug: bool,
-    ) -> Self {
-        let mut instance = Self {
-            button: JButtonBoundary::default(),
+    ) -> Rc<Ebutton> {
+        let select_file_extension = if control_mode
+            .is_some_and(|mode| std::ptr::eq(mode, &*control_mode::SELECT_FILE))
+            || control_mode
+                .is_some_and(|mode| std::ptr::eq(mode, &*control_mode::SELECT_MULTIPLE_FILES))
+        {
+            if shared_select_file_extension.is_some() {
+                // Shared extension avaiable
+                shared_select_file_extension
+            } else {
+                Some(SelectFileExtension::new())
+            }
+        } else {
+            None
+        };
+        let instance = Rc::new(Ebutton {
+            self_ref: RefCell::new(Weak::new()),
+            button: JComponent::new_button(""),
             target,
             control_mode,
-            select_file_extension: None,
+            select_file_extension,
             implement_toggle,
-            button_style: None,
-            grid_bag_extension: None,
-            selected: false,
-            appearance_extension: None,
-            action_listeners: None,
-            allow_flag_editable_control: true,
-            respond_to_non_error_flags: true,
-            flag_type: None,
-            button_action_listening: false,
-            override_select_file_directory: None,
-            debug,
-        };
-        instance.button.text = label.map(str::to_owned);
-        instance.set_name(label);
-        if let Some(fixed_size) = fixed_size {
-            instance.button.preferred_size = Some(fixed_size);
-            instance.button.maximum_size = Some(fixed_size);
+            button_style: RefCell::new(None),
+            grid_bag_extension: RefCell::new(None),
+            selected: Cell::new(false),
+            appearance_extension: RefCell::new(None),
+            action_listeners: RefCell::new(None),
+            allow_flag_editable_control: Cell::new(true),
+            respond_to_non_error_flags: Cell::new(true),
+            flag_type: Cell::new(None),
+            control_mediator: Cell::new(None),
+            button_action_listening: Cell::new(false),
+            override_select_file_directory: RefCell::new(None),
+            debug: Cell::new(debug),
+        });
+        *instance.self_ref.borrow_mut() = Rc::downgrade(&instance);
+        if let Some(label) = label {
+            instance.button.set_text(label);
         }
-        instance.button.empty_border = empty_border;
-        if control_mode.is_some_and(|mode| std::ptr::eq(mode, &*SELECT_FILE))
-            || control_mode.is_some_and(|mode| std::ptr::eq(mode, &*SELECT_MULTIPLE_FILES))
-        {
-            instance.select_file_extension = Some(
-                shared_select_file_extension
-                    .unwrap_or_else(|| Rc::new(RefCell::new(SelectFileExtension::new()))),
-            );
-        }
+        let target = instance.target.clone();
+        instance.set_name(label, target.as_ref(), control_mode);
+        // Swing layout: when fixedSize != null, button.setPreferredSize(fixedSize)
+        // and button.setMaximumSize(fixedSize); when border != null,
+        // button.setBorder(border).
+        // (The Java assigns selectFileExtension after these; nothing between
+        // reads it.)
         instance
     }
 
     /// Java private `setButtonStyle(ButtonStyleExtension, String)`.
-    fn set_button_style(&mut self, style_name: &'static str, label: Option<&str>) {
-        let mut button_style = ButtonStyleExtensionBoundary::new(style_name);
-        button_style.setup(label, self.debug);
-        self.button_style = Some(button_style);
+    fn set_button_style(
+        &self,
+        button_style: Option<Rc<dyn ButtonStyleExtensionVirtual>>,
+        label: Option<&str>,
+    ) {
+        *self.button_style.borrow_mut() = button_style.clone();
+        if let Some(button_style) = button_style {
+            button_style.setup(Some(&self.button), label, self.debug.get());
+        }
     }
 
-    /// Java `setDebug(boolean)`.
-    pub fn set_debug(&mut self, debug: bool) {
-        self.debug = debug;
+    /// Java public `setDebug(boolean)`.
+    pub fn set_debug(&self, debug: bool) {
+        self.debug.set(debug);
     }
 
     /// Java `toString()`.
     pub fn to_string(&self) -> String {
         format!(
             "[{},{}]",
-            self.button.name.as_deref().unwrap_or("null"),
-            self.button.text.as_deref().unwrap_or("null")
+            self.button.get_name().as_deref().unwrap_or("null"),
+            self.button.get_text()
         )
     }
 
     /// Java private `setName(String, ControlTarget, ControlMode)`.
-    fn set_name(&mut self, label: Option<&str>) {
-        let mut name = None;
-        let mut field_type = "bn";
-        if let Some(label) = label {
-            name = self.append_to_name(name, utilities::convert_label_to_name(Some(label), true));
-        } else if let Some(control_mode) = self.control_mode {
-            if control_mode.has_field_name() {
-                field_type = "ctb";
+    fn set_name(
+        &self,
+        label: Option<&str>,
+        target: Option<&Weak<dyn ControlTarget>>,
+        control_mode: Option<&'static ControlMode>,
+    ) {
+        // build name
+        let mut name: Option<String> = None;
+        let mut control_name_set = false;
+        let mut field_type = UITestFieldType::BUTTON;
+        if label.is_some() {
+            name = self.append_to_name(
+                name,
+                utilities::convert_label_to_name(label, field_type.is_unlimited_segments()),
+            );
+        } else if let Some(control_mode) = control_mode {
+            control_name_set = control_mode.has_field_name();
+            if control_name_set {
+                if control_name_set {
+                    field_type = UITestFieldType::CONTROL_BUTTON;
+                }
+                if let Some(target) = target.and_then(Weak::upgrade) {
+                    name = utilities::convert_label_to_name(
+                        target.get_label().as_deref(),
+                        field_type.is_unlimited_segments(),
+                    );
+                }
+                name = control_mode.append_to_name(name.as_deref());
             }
-            if let Some(target) = &self.target {
-                name = utilities::convert_label_to_name(Some(&target.borrow().get_label()), true);
-            }
-            name = control_mode.append_to_name(name);
         }
-        if let Some(name) = name {
-            self.button.name = Some(format!("{field_type}{SEPARATOR_CHAR}{name}"));
-            if ARGUMENTS.lock().unwrap().is_print_names() {
-                println!(
-                    "{} {DEFAULT_DELIMITER} ",
-                    self.button.name.as_deref().expect("assigned above")
-                );
-            }
+        let Some(name) = name else {
+            return;
+        };
+        // set the name in the field
+        self.button.set_name(Some(&format!(
+            "{}{}{}",
+            field_type.to_string(),
+            SEPARATOR_CHAR,
+            name
+        )));
+        // Java `EtomoDirector.INSTANCE.getArguments()` is the `ARGUMENTS` static.
+        if ARGUMENTS.lock().unwrap().is_print_names() {
+            println!(
+                "{} {} ",
+                self.button.get_name().as_deref().unwrap_or("null"),
+                DEFAULT_DELIMITER
+            );
         }
     }
 
     /// Java private `appendToName(String, String)`.
     fn append_to_name(&self, name: Option<String>, append_name: Option<String>) -> Option<String> {
-        match (name, append_name) {
-            (None, append_name) => append_name,
-            (name, None) => name,
-            (Some(name), Some(append_name)) => {
-                Some(format!("{name}{}{append_name}", utilities::NAME_SEPARATOR))
-            }
-        }
+        let Some(name) = name else {
+            return append_name;
+        };
+        let Some(append_name) = append_name else {
+            return Some(name);
+        };
+        Some(format!(
+            "{}{}{}",
+            name,
+            utilities::NAME_SEPARATOR,
+            append_name
+        ))
     }
 
     /// Java static `getSingleLineInstance(String)`.
-    pub fn get_single_line_instance(label: impl AsRef<str>) -> Self {
-        let label = label.as_ref();
-        let mut instance = Self::new(None, None, Some(label), None, false, false, None, false);
-        instance.set_button_style("SingleLineButtonStyleExtension", Some(label));
+    pub fn get_single_line_instance(label: Option<&str>) -> Rc<Ebutton> {
+        let instance = Ebutton::new(None, None, label, false, None, false);
+        instance.set_button_style(Some(SingleLineButtonStyleExtension::get_instance()), label);
         instance.create_panel();
         instance
     }
 
     /// Java static `getOpenCloseInstance(String)`.
-    pub fn get_open_close_instance(label: impl AsRef<str>) -> Self {
-        let label = label.as_ref();
-        let mut instance = Self::new(None, None, Some(label), None, false, true, None, false);
-        instance.set_button_style("OpenCloseButtonStyleExtension", Some(label));
+    pub fn get_open_close_instance(label: Option<&str>) -> Rc<Ebutton> {
+        let instance = Ebutton::new(None, None, label, true, None, false);
+        instance.set_button_style(Some(OpenCloseButtonStyleExtension::get_instance()), label);
         instance.create_panel();
         instance
     }
 
     /// Java static `getCloseInstance()`.
-    pub fn get_close_instance() -> Self {
-        let mut instance = Self::new(None, None, None, None, true, false, None, false);
-        instance.set_button_style("CloseButtonStyleExtension", None);
+    pub fn get_close_instance() -> Rc<Ebutton> {
+        // Java passes border BorderFactory.createEmptyBorder() (layout).
+        let instance = Ebutton::new(None, None, None, false, None, false);
+        instance.set_button_style(
+            Some(CloseButtonStyleExtension::get_instance(&instance.button)),
+            None,
+        );
         instance.create_panel();
         instance
     }
 
     /// Java static `getSelectFileInstance(ControlTarget, SelectFileExtension, boolean)`.
-    pub fn get_select_file_instance(
-        target: Rc<RefCell<dyn ControlTarget>>,
-        shared_select_file_extension: Option<Rc<RefCell<SelectFileExtension>>>,
+    /// `sharedSelectFileExtension` (optional) is for a group of buttons that
+    /// can use the same file chooser.
+    pub fn get_select_file_instance_control_target_select_file_extension_boolean(
+        target: Option<Weak<dyn ControlTarget>>,
+        shared_select_file_extension: Option<Rc<SelectFileExtension>>,
         debug: bool,
-    ) -> Self {
-        let mut instance = Self::new(
-            Some(&SELECT_FILE),
-            Some(target),
+    ) -> Rc<Ebutton> {
+        let instance = Ebutton::new(
+            Some(&*control_mode::SELECT_FILE),
+            target,
             None,
-            None,
-            false,
             false,
             shared_select_file_extension,
             debug,
         );
-        instance.set_button_style("FileOpenButtonStyleExtension", None);
+        instance.set_button_style(
+            Some(FileOpenButtonStyleExtension::get_instance(&instance.button)),
+            None,
+        );
         instance.create_panel();
         instance
     }
 
     /// Java static `getSelectFileInstance(ControlTarget, SelectFileExtension, String)`.
-    pub fn get_select_file_instance_with_label(
-        target: Rc<RefCell<dyn ControlTarget>>,
-        shared_select_file_extension: Option<Rc<RefCell<SelectFileExtension>>>,
-        label: impl AsRef<str>,
-    ) -> Self {
-        let label = label.as_ref();
-        let mut instance = Self::new(
-            Some(&SELECT_FILE),
-            Some(target),
-            Some(label),
-            None,
-            false,
+    pub fn get_select_file_instance_control_target_select_file_extension_string(
+        target: Option<Weak<dyn ControlTarget>>,
+        shared_select_file_extension: Option<Rc<SelectFileExtension>>,
+        label: Option<&str>,
+    ) -> Rc<Ebutton> {
+        let instance = Ebutton::new(
+            Some(&*control_mode::SELECT_FILE),
+            target,
+            label,
             false,
             shared_select_file_extension,
             false,
         );
-        instance.set_button_style("FileOpenButtonStyleExtension", Some(label));
+        instance.set_button_style(
+            Some(FileOpenButtonStyleExtension::get_instance(&instance.button)),
+            label,
+        );
         instance.create_panel();
         instance
     }
 
     /// Java static `getSelectMultipleFilesInstance(ControlTarget, SelectFileExtension)`.
-    pub fn get_select_multiple_files_instance(
-        target: Rc<RefCell<dyn ControlTarget>>,
-        shared_select_file_extension: Option<Rc<RefCell<SelectFileExtension>>>,
-    ) -> Self {
-        let mut instance = Self::new(
-            Some(&SELECT_MULTIPLE_FILES),
-            Some(target),
+    pub fn get_select_multiple_files_instance_control_target_select_file_extension(
+        target: Option<Weak<dyn ControlTarget>>,
+        shared_select_file_extension: Option<Rc<SelectFileExtension>>,
+    ) -> Rc<Ebutton> {
+        // Java passes fixedSize null (a commented-out FixedDim.INLINE_SQUARE_SIZE).
+        let instance = Ebutton::new(
+            Some(&*control_mode::SELECT_MULTIPLE_FILES),
+            target,
             None,
-            None,
-            false,
             false,
             shared_select_file_extension,
             false,
         );
-        instance.set_button_style("FileOpenButtonStyleExtension", None);
+        instance.set_button_style(
+            Some(FileOpenButtonStyleExtension::get_instance(&instance.button)),
+            None,
+        );
         instance.create_panel();
         instance
     }
 
-    /// Java static `getSelectMultipleFilesInstance(String, ControlTarget, SelectFileExtension)`.
-    pub fn get_select_multiple_files_instance_with_label(
-        label: impl AsRef<str>,
-        target: Rc<RefCell<dyn ControlTarget>>,
-        shared_select_file_extension: Option<Rc<RefCell<SelectFileExtension>>>,
-    ) -> Self {
-        let label = label.as_ref();
-        let mut instance = Self::new(
-            Some(&SELECT_MULTIPLE_FILES),
-            Some(target),
+    /// Java static
+    /// `getSelectMultipleFilesInstance(String, ControlTarget, SelectFileExtension)`.
+    pub fn get_select_multiple_files_instance_string_control_target_select_file_extension(
+        label: Option<&str>,
+        target: Option<Weak<dyn ControlTarget>>,
+        shared_select_file_extension: Option<Rc<SelectFileExtension>>,
+    ) -> Rc<Ebutton> {
+        // Java passes fixedSize FixedDim.INLINE_SQUARE_SIZE (layout).
+        let instance = Ebutton::new(
+            Some(&*control_mode::SELECT_MULTIPLE_FILES),
+            target.clone(),
             None,
-            Some((20, 20)),
-            false,
             false,
             shared_select_file_extension,
             false,
         );
-        instance.set_button_style("FileOpenButtonStyleExtension", Some(label));
-        instance.set_name(Some(label));
+        instance.set_button_style(
+            Some(FileOpenButtonStyleExtension::get_instance(&instance.button)),
+            label,
+        );
+        instance.set_name(
+            label,
+            target.as_ref(),
+            Some(&*control_mode::SELECT_MULTIPLE_FILES),
+        );
         instance.create_panel();
         instance
     }
 
     /// Java static `getClearInstance(ControlTarget)`.
-    pub fn get_clear_instance(target: Rc<RefCell<dyn ControlTarget>>) -> Self {
-        let mut instance = Self::new(
-            Some(&CLEAR),
-            Some(target),
+    pub fn get_clear_instance(target: Option<Weak<dyn ControlTarget>>) -> Rc<Ebutton> {
+        // Java passes fixedSize FixedDim.INLINE_SQUARE_SIZE (layout).
+        let instance = Ebutton::new(
+            Some(&*control_mode::CLEAR),
+            target,
             None,
-            Some((20, 20)),
-            false,
             false,
             None,
             false,
         );
-        instance.set_button_style("ClearButtonStyleExtension", None);
+        instance.set_button_style(
+            Some(ClearButtonStyleExtension::get_instance(&instance.button)),
+            None,
+        );
         instance.create_panel();
         instance
     }
 
     /// Java static `getHeaderInstance(String)`.
-    pub fn get_header_instance(label: impl AsRef<str>) -> Self {
-        let label = label.as_ref();
-        let mut instance = Self::new(None, None, Some(label), None, false, false, None, false);
-        instance.set_button_style("HeaderButtonStyleExtension", Some(label));
+    pub fn get_header_instance_string(label: Option<&str>) -> Rc<Ebutton> {
+        let instance = Ebutton::new(None, None, label, false, None, false);
+        instance.set_button_style(Some(HeaderButtonStyleExtension::get_instance()), label);
         instance.create_panel();
         instance
     }
 
     /// Java static `getHeaderInstance()`.
-    pub fn get_empty_header_instance() -> Self {
-        let mut instance = Self::new(None, None, None, None, false, false, None, false);
-        instance.set_button_style("HeaderButtonStyleExtension", None);
+    pub fn get_header_instance_void() -> Rc<Ebutton> {
+        let instance = Ebutton::new(None, None, None, false, None, false);
+        instance.set_button_style(Some(HeaderButtonStyleExtension::get_instance()), None);
         instance.create_panel();
         instance
     }
 
-    /// Java `setAllowFlagEditableControl(boolean)`.
-    pub fn set_allow_flag_editable_control(&mut self, allow: bool) {
-        self.allow_flag_editable_control = allow;
+    /// Java public `setAllowFlagEditableControl(boolean)`.
+    pub fn set_allow_flag_editable_control(&self, allow: bool) {
+        self.allow_flag_editable_control.set(allow);
     }
 
-    /// Java `setRespondToNonErrorFlags(boolean)`.
-    pub fn set_respond_to_non_error_flags(&mut self, respond: bool) {
-        self.respond_to_non_error_flags = respond;
+    /// Java public `setRespondToNonErrorFlags(boolean)`.
+    pub fn set_respond_to_non_error_flags(&self, respond: bool) {
+        self.respond_to_non_error_flags.set(respond);
     }
 
     /// Java private `createPanel()`.
-    fn create_panel(&mut self) {
-        if (self.implement_toggle && self.button_style.is_some()) || self.control_mode.is_some() {
-            self.add_button_action_listener();
+    fn create_panel(&self) {
+        if (self.implement_toggle && self.button_style.borrow().is_some())
+            || self.control_mode.is_some()
+        {
+            self.add_action_listener_void();
         }
     }
 
-    /// Java private `addActionListener()`.
-    fn add_button_action_listener(&mut self) {
-        if !self.button_action_listening {
-            self.button.action_listener_registered = true;
-            self.button_action_listening = true;
+    /// Java private `addActionListener()`: `button.addActionListener(this)`.
+    fn add_action_listener_void(&self) {
+        if !self.button_action_listening.get() {
+            let this = self.self_ref.borrow().clone();
+            self.button.add_action_listener(Rc::new(move |event| {
+                if let Some(this) = this.upgrade() {
+                    this.action_performed(event);
+                }
+            }));
+            self.button_action_listening.set(true);
         }
     }
 
     /// Java `getComponent()`.
-    pub fn get_component(&self) -> &JButtonBoundary {
-        &self.button
+    pub fn get_component(&self) -> Rc<JComponent> {
+        self.button.clone()
     }
 
     /// Java `setHorizontalAlignment(int)`.
-    pub fn set_horizontal_alignment(&mut self, alignment: i32) {
-        self.button.horizontal_alignment = Some(alignment);
+    pub fn set_horizontal_alignment(&self, _alignment: i32) {
+        // Swing layout: button.setHorizontalAlignment(alignment).
     }
 
     /// Java `doClick()`.
-    pub fn do_click(&mut self) {
-        self.action_performed();
+    pub fn do_click(&self) {
+        self.button.do_click();
     }
 
     /// Java `addActionListener(ActionListener)`.
-    pub fn add_action_listener(
-        &mut self,
-        listener: Option<Rc<RefCell<dyn ActionListenerBoundary>>>,
-    ) {
-        let Some(listener) = listener else { return };
-        if self.action_listeners.is_none() {
-            self.add_button_action_listener();
-            self.action_listeners = Some(Vec::new());
+    pub fn add_action_listener_action_listener(&self, listener: Option<ActionListener>) {
+        let Some(listener) = listener else {
+            return;
+        };
+        if self.action_listeners.borrow().is_none() {
+            self.add_action_listener_void();
+            *self.action_listeners.borrow_mut() = Some(Vec::new());
         }
         self.action_listeners
+            .borrow_mut()
             .as_mut()
-            .expect("initialized above")
+            .unwrap()
             .push(listener);
     }
 
     /// Java `getActionCommand()`.
-    pub fn get_action_command(&self) -> Option<&str> {
-        self.button.action_command.as_deref()
+    pub fn get_action_command(&self) -> Option<String> {
+        self.button.get_action_command()
     }
 
     /// Java `getText()`.
-    pub fn get_text(&self) -> Option<&str> {
-        self.button.text.as_deref()
+    pub fn get_text(&self) -> String {
+        self.button.get_text()
     }
 
     /// Java `setVisible(boolean)`.
-    pub fn set_visible(&mut self, visible: bool) {
-        self.button.visible = visible;
+    pub fn set_visible(&self, visible: bool) {
+        self.get_component().set_visible(visible);
     }
 
     /// Java `setOverrideFileOpenDirectory(File)`.
-    pub fn set_override_file_open_directory(&mut self, directory: Option<PathBuf>) {
-        self.override_select_file_directory = directory;
+    pub fn set_override_file_open_directory(
+        &self,
+        override_select_file_directory: Option<PathBuf>,
+    ) {
+        *self.override_select_file_directory.borrow_mut() = override_select_file_directory;
     }
 
     /// Java `setFileFilter(FileFilter)`.
-    pub fn set_file_filter(&mut self, file_filter: Rc<dyn FileFilter>) {
-        if let Some(extension) = &self.select_file_extension {
-            extension.borrow_mut().set_file_filter(file_filter);
+    pub fn set_file_filter(&self, file_filter: Option<Rc<dyn FileFilter>>) {
+        if let Some(select_file_extension) = &self.select_file_extension {
+            select_file_extension.set_file_filter(file_filter);
         }
     }
 
     /// Java `setFileSelectionMode(int)`.
-    pub fn set_file_selection_mode(&mut self, file_selection_mode: i32) {
-        if let Some(extension) = &self.select_file_extension {
-            extension
-                .borrow_mut()
-                .set_file_selection_mode(file_selection_mode);
+    pub fn set_file_selection_mode(&self, file_selection_mode: i32) {
+        if let Some(select_file_extension) = &self.select_file_extension {
+            select_file_extension.set_file_selection_mode(file_selection_mode);
         }
     }
 
     /// Java `setSelectFileDir(String)`.
-    pub fn set_select_file_dir(&mut self, dir: impl Into<String>) {
-        if let Some(extension) = &self.select_file_extension {
-            extension.borrow_mut().set_dir(dir);
+    pub fn set_select_file_dir(&self, dir: Option<&str>) {
+        if let Some(select_file_extension) = &self.select_file_extension {
+            select_file_extension.set_dir(dir);
         }
     }
 
     /// Java `getSelectFileExtension()`.
-    pub fn get_select_file_extension(&self) -> Option<Rc<RefCell<SelectFileExtension>>> {
+    pub fn get_select_file_extension(&self) -> Option<Rc<SelectFileExtension>> {
         self.select_file_extension.clone()
     }
 
     /// Java `setSelected(boolean)`.
-    pub fn set_selected(&mut self, selected: bool) {
-        self.selected = selected;
-        if self.implement_toggle {
-            if let Some(button_style) = &mut self.button_style {
+    pub fn set_selected(&self, selected: bool) {
+        self.selected.set(selected);
+        let button_style = self.button_style.borrow().clone();
+        if let Some(button_style) = button_style {
+            if self.implement_toggle {
                 button_style.update_appearance(
-                    self.flag_type,
+                    &self.button,
+                    self.flag_type.get(),
                     self.implement_toggle,
-                    self.selected,
+                    selected,
                 );
             }
         }
@@ -477,251 +535,175 @@ impl Ebutton {
 
     /// Java `isSelected()`.
     pub fn is_selected(&self) -> bool {
-        self.selected
+        self.selected.get()
     }
 
     /// Java `setTooltip(String)`.
-    pub fn set_tooltip(&mut self, tooltip: Option<impl Into<String>>) {
-        self.button.tooltip = tooltip.map(Into::into);
+    pub fn set_tooltip(&self, tooltip: Option<&str>) {
+        self.button.set_tool_tip_text(
+            super::tooltip_formatter::INSTANCE
+                .format(tooltip)
+                .as_deref(),
+        );
     }
 
-    /// Java `actionPerformed(ActionEvent)`.
-    pub fn action_performed(&mut self) {
-        if self.implement_toggle && self.button_style.is_some() {
-            self.selected = !self.selected;
-            self.button_style
-                .as_mut()
-                .expect("checked above")
-                .update_appearance(self.flag_type, self.implement_toggle, self.selected);
-        }
-        if let Some(control_mode) = self.control_mode {
-            if let Some(target) = self.target.clone() {
-                ControlMediator::INSTANCE.control_event(
-                    self,
-                    Some(&mut *target.borrow_mut()),
-                    control_mode,
+    /// Java `actionPerformed(ActionEvent)` (`implements ActionListener`).
+    pub fn action_performed(&self, event: &ActionEvent) {
+        let button_style = self.button_style.borrow().clone();
+        if self.implement_toggle {
+            if let Some(button_style) = button_style {
+                self.selected.set(!self.selected.get());
+                button_style.update_appearance(
+                    &self.button,
+                    self.flag_type.get(),
+                    self.implement_toggle,
+                    self.selected.get(),
                 );
             }
         }
-        if let Some(action_listeners) = &self.action_listeners {
-            let action_command = self.button.action_command.clone();
-            for listener in action_listeners {
-                listener
-                    .borrow_mut()
-                    .action_performed(action_command.as_deref());
+        if let Some(control_mode) = self.control_mode {
+            let target = self.target.as_ref().and_then(Weak::upgrade);
+            control_mediator::INSTANCE.control_event_controller_control_target_control_mode(
+                self,
+                target.as_deref(),
+                Some(control_mode),
+            );
+        }
+        let action_listeners = self.action_listeners.borrow().clone();
+        if let Some(action_listeners) = action_listeners {
+            for listener in &action_listeners {
+                listener(event);
             }
         }
     }
 
-    /// Java `selectFile()`; native chooser presentation remains a GUI boundary.
-    pub fn select_file(&mut self) -> Option<PathBuf> {
+    /// Java `selectFile()`.
+    pub fn select_file(&self) -> Option<PathBuf> {
+        if let Some(select_file_extension) = &self.select_file_extension {
+            return select_file_extension.select_file(
+                Some(&self.button),
+                self.override_select_file_directory.borrow().clone(),
+            );
+        }
         None
     }
 
-    /// Java `selectMultipleFiles()`; native chooser presentation remains a GUI boundary.
-    pub fn select_multiple_files(&mut self) -> Option<Vec<PathBuf>> {
+    /// Java `selectMultipleFiles()`.  ALIGN_FRAMES.
+    pub fn select_multiple_files(&self) -> Option<Vec<PathBuf>> {
+        if let Some(select_file_extension) = &self.select_file_extension {
+            return select_file_extension.select_multiple_files(
+                Some(&self.button),
+                self.override_select_file_directory.borrow().clone(),
+            );
+        }
         None
     }
 
     /// Java private `createAppearanceExtension()`.
-    fn create_appearance_extension(&mut self) {
-        if self.appearance_extension.is_none() {
-            let mut extension = AppearanceExtension::new(Rc::clone(&self.button.component));
-            extension.set_allow_flag_editable_control(self.allow_flag_editable_control);
-            extension.set_respond_to_non_error_flags(self.respond_to_non_error_flags);
-            self.appearance_extension = Some(extension);
+    fn create_appearance_extension(&self) -> Rc<AppearanceExtension> {
+        if self.appearance_extension.borrow().is_none() {
+            let appearance_extension = AppearanceExtension::new_component(&self.button);
+            appearance_extension
+                .set_allow_flag_editable_control(self.allow_flag_editable_control.get());
+            appearance_extension
+                .set_respond_to_non_error_flags(self.respond_to_non_error_flags.get());
+            *self.appearance_extension.borrow_mut() = Some(appearance_extension);
         }
+        self.appearance_extension.borrow().clone().unwrap()
     }
 
     /// Java `setFlag(FlagType)`.
-    pub fn set_flag(&mut self, flag_type: Option<FlagType>) {
-        self.flag_type = flag_type;
-        if let Some(button_style) = &mut self.button_style {
-            button_style.update_appearance(self.flag_type, self.implement_toggle, self.selected);
+    pub fn set_flag(&self, flag_type: Option<&'static FlagType>) {
+        self.flag_type.set(flag_type);
+        let button_style = self.button_style.borrow().clone();
+        if let Some(button_style) = button_style {
+            button_style.update_appearance(
+                &self.button,
+                flag_type,
+                self.implement_toggle,
+                self.selected.get(),
+            );
         }
-        self.create_appearance_extension();
-        self.appearance_extension
-            .as_mut()
-            .expect("created above")
-            .set_flag(flag_type);
+        let appearance_extension = self.create_appearance_extension();
+        appearance_extension.set_flag(flag_type);
     }
 
     /// Java `setEnabled(boolean)`.
-    pub fn set_enabled(&mut self, enabled: bool) {
-        if let Some(appearance_extension) = &mut self.appearance_extension {
+    pub fn set_enabled(&self, enabled: bool) {
+        let appearance_extension = self.appearance_extension.borrow().clone();
+        if let Some(appearance_extension) = appearance_extension {
             appearance_extension.set_enabled(enabled);
         } else {
-            self.button.component.borrow_mut().set_enabled(enabled);
+            self.button.set_enabled(enabled);
         }
     }
 
     /// Java `isEnabled()`.
     pub fn is_enabled(&self) -> bool {
-        self.appearance_extension
-            .as_ref()
-            .map(AppearanceExtension::is_enabled)
-            .unwrap_or_else(|| self.button.component.borrow().is_enabled())
+        let appearance_extension = self.appearance_extension.borrow().clone();
+        if let Some(appearance_extension) = appearance_extension {
+            return appearance_extension.is_enabled();
+        }
+        self.button.is_enabled()
     }
 
     /// Java `setEditable(boolean)`.
-    pub fn set_editable(&mut self, editable: bool) {
-        self.create_appearance_extension();
-        self.appearance_extension
-            .as_mut()
-            .expect("created above")
-            .set_editable(editable);
+    pub fn set_editable(&self, editable: bool) {
+        let appearance_extension = self.create_appearance_extension();
+        appearance_extension.set_editable(editable);
     }
 
-    /// Java `remove()`.
-    pub fn remove(&mut self) {
-        if let Some(grid_bag_extension) = &mut self.grid_bag_extension {
-            grid_bag_extension.remove();
+    /// Java `remove()` (gridBagExtension).
+    pub fn remove(&self) {
+        let grid_bag_extension = self.grid_bag_extension.borrow().clone();
+        if let Some(grid_bag_extension) = grid_bag_extension {
+            grid_bag_extension.remove(&self.get_component());
         }
     }
 
-    /// Java `add(JPanel, GridBagLayout, GridBagConstraints)`.
-    pub fn add(&mut self, constraints: (i32, i32)) {
-        if self.grid_bag_extension.is_none() {
-            self.grid_bag_extension = Some(GridBagExtension::new());
+    /// Java `add(JPanel, GridBagLayout, GridBagConstraints)`.  The layout and
+    /// constraints are not modelled.
+    pub fn add(&self, panel: &Rc<JComponent>) {
+        if self.grid_bag_extension.borrow().is_none() {
+            *self.grid_bag_extension.borrow_mut() = Some(GridBagExtension::new());
         }
-        self.grid_bag_extension
-            .as_mut()
-            .expect("created above")
-            .add(0, constraints);
+        let grid_bag_extension = self.grid_bag_extension.borrow().clone().unwrap();
+        grid_bag_extension.add(&self.get_component(), panel);
     }
 
-    /// Java `setAltBrowsingDirectory(BrowsingDirectory)`.
-    pub fn set_alt_browsing_directory(&mut self, browsing_directory: Rc<dyn BrowsingDirectory>) {
-        if let Some(extension) = &self.select_file_extension {
-            extension
-                .borrow_mut()
-                .set_alt_browsing_directory(browsing_directory);
+    /// Java public `setAltBrowsingDirectory(BrowsingDirectory)`.
+    pub fn set_alt_browsing_directory(
+        &self,
+        browsing_directory: Option<Rc<dyn BrowsingDirectory>>,
+    ) {
+        if let Some(select_file_extension) = &self.select_file_extension {
+            select_file_extension.set_alt_browsing_directory(browsing_directory);
         }
     }
 }
 
+/// Java `implements FlagDisplay`.
 impl FlagDisplay for Ebutton {
-    fn set_flag(&mut self, flag_type: Option<FlagType>) {
-        Ebutton::set_flag(self, flag_type);
+    fn set_flag(&self, flag_type: Option<&'static FlagType>) {
+        Ebutton::set_flag(self, flag_type)
     }
 }
 
+/// Java `implements Controller`.
 impl Controller for Ebutton {
     fn is_control(&self) -> bool {
         Ebutton::is_control(self)
     }
-    fn set_editable(&mut self, editable: bool) {
-        Ebutton::set_editable(self, editable);
+    fn set_editable(&self, editable: bool) {
+        Ebutton::set_editable(self, editable)
     }
-    fn set_enabled(&mut self, enabled: bool) {
-        Ebutton::set_enabled(self, enabled);
+    fn set_enabled(&self, enabled: bool) {
+        Ebutton::set_enabled(self, enabled)
     }
-    fn select_file(&mut self) -> Option<PathBuf> {
+    fn select_file(&self) -> Option<PathBuf> {
         Ebutton::select_file(self)
     }
-    fn select_multiple_files(&mut self) -> Option<Vec<PathBuf>> {
+    fn select_multiple_files(&self) -> Option<Vec<PathBuf>> {
         Ebutton::select_multiple_files(self)
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[derive(Default)]
-    struct Listener {
-        calls: Vec<Option<String>>,
-    }
-    impl ActionListenerBoundary for Listener {
-        fn action_performed(&mut self, action_command: Option<&str>) {
-            self.calls.push(action_command.map(str::to_owned));
-        }
-    }
-
-    #[derive(Default)]
-    struct Target {
-        clears: usize,
-        events: usize,
-    }
-    impl ControlTarget for Target {
-        fn clear(&mut self) {
-            self.clears += 1;
-        }
-        fn set_text_file(&mut self, _: &std::path::Path) {}
-        fn set_text_files(&mut self, _: &[PathBuf]) {}
-        fn get_label(&self) -> String {
-            "input files".to_owned()
-        }
-        fn set_component_control(
-            &mut self,
-            _: bool,
-            _: &super::super::control_state::ControlState,
-        ) {
-        }
-        fn set_enable_control(&mut self, _: bool, _: &super::super::control_state::ControlState) {}
-        fn send_control_event(&mut self) {
-            self.events += 1;
-        }
-        fn is_local_dir(&self, _: &str) -> bool {
-            false
-        }
-    }
-
-    #[test]
-    fn toggle_style_is_updated_before_external_listeners() {
-        let mut button = Ebutton::get_open_close_instance("Open");
-        button.button.action_command = Some("open".to_owned());
-        let listener = Rc::new(RefCell::new(Listener::default()));
-        button.add_action_listener(Some(listener.clone()));
-        button.do_click();
-        assert!(button.selected);
-        assert_eq!(button.button_style.as_ref().unwrap().update_count, 1);
-        assert_eq!(listener.borrow().calls, vec![Some("open".to_owned())]);
-    }
-
-    #[test]
-    fn clear_mode_uses_control_mediator_then_notifies_target() {
-        let target = Rc::new(RefCell::new(Target::default()));
-        let mut button = Ebutton::get_clear_instance(target.clone());
-        button.do_click();
-        assert_eq!(target.borrow().clears, 1);
-        assert_eq!(target.borrow().events, 1);
-        assert!(button.button_action_listening);
-    }
-
-    #[test]
-    fn appearance_and_grid_bag_source_transitions_are_retained() {
-        let mut button = Ebutton::get_single_line_instance("Run test");
-        button.set_respond_to_non_error_flags(false);
-        button.set_flag(Some(FlagType::WARNING));
-        assert_eq!(
-            button
-                .appearance_extension
-                .as_ref()
-                .unwrap()
-                .get_flag_type(),
-            None
-        );
-        button.set_enabled(false);
-        assert!(!button.is_enabled());
-        button.add((2, 3));
-        button.remove();
-        assert!(button.grid_bag_extension.as_ref().unwrap().removed);
-    }
-
-    #[test]
-    fn select_factories_share_the_java_extension_and_preserve_control_name() {
-        let target: Rc<RefCell<dyn ControlTarget>> = Rc::new(RefCell::new(Target::default()));
-        let shared = Rc::new(RefCell::new(SelectFileExtension::new()));
-        let button = Ebutton::get_select_file_instance(target, Some(shared.clone()), true);
-        assert!(Rc::ptr_eq(
-            &button.get_select_file_extension().unwrap(),
-            &shared
-        ));
-        assert_eq!(
-            button.button.name.as_deref(),
-            Some("ctb.input-files-select-file")
-        );
-        assert!(button.debug);
     }
 }

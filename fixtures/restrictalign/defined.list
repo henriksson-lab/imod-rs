@@ -1,0 +1,4 @@
+# Cases whose output an upstream-bug fix changes (BUGS.md, restrictalign)
+b1_cv	-cross with one fiducial: native NameError (robustOrig undefined)
+noimage	missing image file: native leaves #ImageSizeXandY commented (XnadY typo)
+noimage_views	as noimage, with -views

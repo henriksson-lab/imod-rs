@@ -1,0 +1,376 @@
+# imod-rs native golden manifest for fixtures/runraptor; see fixtures/README.md.
+# Regenerate with fixtures/regen-golden.sh runraptor; do not edit by hand.
+text 118 defined/raw_blank.out
+RAPTOR results for this run will be in raptor1
+The model that will load on the coarse aligned stack is:
+ts_raptor.fid
+
+text 2 defined/raw_blank.rc
+0
+
+sha256 9f379119b4ae070e21b3fb0a76af1cc2f707c468285524ddfc5dbe566dbb8bbf 973 defined/raw_blank/raptor1%IMOD%ts.fid.txt
+text 133 defined/raw_blank/raptor1%align%ts_RAPTOR.log
+RAPTOR stub called with:
+[-exec]
+[RAPTOR_BIN]
+[-path]
+[.]
+[-inp]
+[ts.st]
+[-track]
+[-out]
+[raptor1]
+[-diam]
+[11]
+[-mark]
+[20]
+[ts.st]
+
+sha256 424b102eda9a355d5e606994e6fa9dcb3768d1990c5815b06b1de751ed58234a 1192 defined/raw_blank/ts_raptor.fid
+text 118 defined/raw_mrc.out
+RAPTOR results for this run will be in raptor1
+The model that will load on the coarse aligned stack is:
+ts_raptor.fid
+
+text 2 defined/raw_mrc.rc
+0
+
+sha256 9f379119b4ae070e21b3fb0a76af1cc2f707c468285524ddfc5dbe566dbb8bbf 973 defined/raw_mrc/raptor1%IMOD%ts.fid.txt
+text 135 defined/raw_mrc/raptor1%align%ts_RAPTOR.log
+RAPTOR stub called with:
+[-exec]
+[RAPTOR_BIN]
+[-path]
+[.]
+[-inp]
+[ts.mrc]
+[-track]
+[-out]
+[raptor1]
+[-diam]
+[11]
+[-mark]
+[20]
+[ts.mrc]
+
+sha256 424b102eda9a355d5e606994e6fa9dcb3768d1990c5815b06b1de751ed58234a 1192 defined/raw_mrc/ts_raptor.fid
+text 118 golden/again.out
+RAPTOR results for this run will be in raptor2
+The model that will load on the coarse aligned stack is:
+ts_raptor.fid
+
+text 2 golden/again.rc
+0
+
+sha256 9f379119b4ae070e21b3fb0a76af1cc2f707c468285524ddfc5dbe566dbb8bbf 973 golden/again/raptor2%IMOD%ts.fid.txt
+text 141 golden/again/raptor2%align%ts_RAPTOR.log
+RAPTOR stub called with:
+[-exec]
+[RAPTOR_BIN]
+[-path]
+[.]
+[-inp]
+[ts.preali]
+[-track]
+[-out]
+[raptor2]
+[-diam]
+[11]
+[-mark]
+[20]
+[ts.preali]
+
+sha256 c5117baa987b61c502a968b695e47434ff01fa505a15e2db95f5415433c68b15 1030 golden/again/ts_raptor.fid
+text 4 golden/again/ts_raptor.fid~
+old
+
+text 163 golden/err_nobin.out
+ERROR: runraptor - RAPTOR_BINdoes not exist.   You need to leave RAPTOR_BIN undefined to use the RAPTOR in IMOD, or define it with the path to a RAPTOR executable
+
+text 2 golden/err_nobin.rc
+1
+
+text 86 golden/err_noinput.out
+ERROR: runraptor - The input file none.preali does not exist in the current directory
+
+text 2 golden/err_noinput.rc
+1
+
+text 92 golden/err_nomark.out
+ERROR: runraptor - You must enter options with a diameter in pixels and a number of markers
+
+text 2 golden/err_nomark.rc
+1
+
+text 84 golden/err_noprexg.out
+ERROR: runraptor - Should be run on a raw stack only after running coarse alignment
+
+text 2 golden/err_noprexg.rc
+1
+
+text 285 golden/err_raptor.out
+RAPTOR results for this run will be in raptor1
+ERROR: stub RAPTOR could not track fail.preali
+ERROR: stub RAPTOR failed
+ERROR: runraptor - "RAPTOR_BIN/RAPTOR" -exec "RAPTOR_BIN" -path . -inp fail.preali -track -out raptor1 "-diam" "11" "-mark" "20" "fail.preali": exited with status 3
+
+text 2 golden/err_raptor.rc
+1
+
+text 192 golden/err_raptor/raptor1%align%fail_RAPTOR.log
+RAPTOR stub called with:
+[-exec]
+[RAPTOR_BIN]
+[-path]
+[.]
+[-inp]
+[fail.preali]
+[-track]
+[-out]
+[raptor1]
+[-diam]
+[11]
+[-mark]
+[20]
+[fail.preali]
+ERROR: stub RAPTOR could not track fail.preali
+
+text 66 golden/err_subdir.out
+ERROR: runraptor - You must run this script in the data directory
+
+text 2 golden/err_subdir.rc
+1
+
+text 237 golden/err_xfmodel.out
+RAPTOR results for this run will be in raptor1
+ERROR: XFMODEL - OPENING OR READING DISTORTION FILE
+ERROR: runraptor - xfmodel -xf ts.prexg -distort nothere.idf -binning 2 -gradient nothere.grad ts.PID ts_raptor.fid: exited with status 1
+
+text 2 golden/err_xfmodel.rc
+1
+
+sha256 9f379119b4ae070e21b3fb0a76af1cc2f707c468285524ddfc5dbe566dbb8bbf 973 golden/err_xfmodel/raptor1%IMOD%ts.fid.txt
+text 133 golden/err_xfmodel/raptor1%align%ts_RAPTOR.log
+RAPTOR stub called with:
+[-exec]
+[RAPTOR_BIN]
+[-path]
+[.]
+[-inp]
+[ts.st]
+[-track]
+[-out]
+[raptor1]
+[-diam]
+[11]
+[-mark]
+[20]
+[ts.st]
+
+sha256 c5117baa987b61c502a968b695e47434ff01fa505a15e2db95f5415433c68b15 1030 golden/err_xfmodel/ts.PID
+text 237 golden/err_xfmodel_cmd.out
+RAPTOR results for this run will be in raptor1
+ERROR: XFMODEL - OPENING OR READING DISTORTION FILE
+ERROR: runraptor - xfmodel -xf ts.prexg -distort nothere.idf -binning 2 -gradient nothere.grad ts.PID ts_raptor.fid: exited with status 1
+
+text 2 golden/err_xfmodel_cmd.rc
+1
+
+sha256 9f379119b4ae070e21b3fb0a76af1cc2f707c468285524ddfc5dbe566dbb8bbf 973 golden/err_xfmodel_cmd/raptor1%IMOD%ts.fid.txt
+text 133 golden/err_xfmodel_cmd/raptor1%align%ts_RAPTOR.log
+RAPTOR stub called with:
+[-exec]
+[RAPTOR_BIN]
+[-path]
+[.]
+[-inp]
+[ts.st]
+[-track]
+[-out]
+[raptor1]
+[-diam]
+[11]
+[-mark]
+[20]
+[ts.st]
+
+sha256 c5117baa987b61c502a968b695e47434ff01fa505a15e2db95f5415433c68b15 1030 golden/err_xfmodel_cmd/ts.PID
+text 118 golden/pid.out
+RAPTOR results for this run will be in raptor1
+The model that will load on the coarse aligned stack is:
+ts_raptor.fid
+
+text 2 golden/pid.rc
+0
+
+sha256 9f379119b4ae070e21b3fb0a76af1cc2f707c468285524ddfc5dbe566dbb8bbf 973 golden/pid/raptor1%IMOD%ts.fid.txt
+text 141 golden/pid/raptor1%align%ts_RAPTOR.log
+RAPTOR stub called with:
+[-exec]
+[RAPTOR_BIN]
+[-path]
+[.]
+[-inp]
+[ts.preali]
+[-track]
+[-out]
+[raptor1]
+[-diam]
+[11]
+[-mark]
+[20]
+[ts.preali]
+
+sha256 c5117baa987b61c502a968b695e47434ff01fa505a15e2db95f5415433c68b15 1030 golden/pid/ts_raptor.fid
+text 118 golden/preali.out
+RAPTOR results for this run will be in raptor1
+The model that will load on the coarse aligned stack is:
+ts_raptor.fid
+
+text 2 golden/preali.rc
+0
+
+sha256 9f379119b4ae070e21b3fb0a76af1cc2f707c468285524ddfc5dbe566dbb8bbf 973 golden/preali/raptor1%IMOD%ts.fid.txt
+text 153 golden/preali/raptor1%align%ts_RAPTOR.log
+RAPTOR stub called with:
+[-exec]
+[RAPTOR_BIN]
+[-path]
+[.]
+[-inp]
+[ts.preali]
+[-track]
+[-out]
+[raptor1]
+[-diam]
+[11]
+[-mark]
+[20]
+[-seed]
+[1]
+[ts.preali]
+
+sha256 c5117baa987b61c502a968b695e47434ff01fa505a15e2db95f5415433c68b15 1030 golden/preali/ts_raptor.fid
+text 118 golden/preali_mrc.out
+RAPTOR results for this run will be in raptor1
+The model that will load on the coarse aligned stack is:
+ts_raptor.fid
+
+text 2 golden/preali_mrc.rc
+0
+
+sha256 9f379119b4ae070e21b3fb0a76af1cc2f707c468285524ddfc5dbe566dbb8bbf 973 golden/preali_mrc/raptor1%IMOD%ts.fid.txt
+text 156 golden/preali_mrc/raptor1%align%ts_RAPTOR.log
+RAPTOR stub called with:
+[-exec]
+[RAPTOR_BIN]
+[-path]
+[.]
+[-inp]
+[ts_preali.mrc]
+[-track]
+[-out]
+[raptor1]
+[-diameter]
+[11]
+[-markers]
+[20]
+[ts_preali.mrc]
+
+sha256 c5117baa987b61c502a968b695e47434ff01fa505a15e2db95f5415433c68b15 1030 golden/preali_mrc/ts_raptor.fid
+text 118 golden/raw_cmd.out
+RAPTOR results for this run will be in raptor1
+The model that will load on the coarse aligned stack is:
+ts_raptor.fid
+
+text 2 golden/raw_cmd.rc
+0
+
+sha256 9f379119b4ae070e21b3fb0a76af1cc2f707c468285524ddfc5dbe566dbb8bbf 973 golden/raw_cmd/raptor1%IMOD%ts.fid.txt
+text 133 golden/raw_cmd/raptor1%align%ts_RAPTOR.log
+RAPTOR stub called with:
+[-exec]
+[RAPTOR_BIN]
+[-path]
+[.]
+[-inp]
+[ts.st]
+[-track]
+[-out]
+[raptor1]
+[-diam]
+[11]
+[-mark]
+[20]
+[ts.st]
+
+sha256 424b102eda9a355d5e606994e6fa9dcb3768d1990c5815b06b1de751ed58234a 1192 golden/raw_cmd/ts_raptor.fid
+text 118 golden/raw_st.out
+RAPTOR results for this run will be in raptor1
+The model that will load on the coarse aligned stack is:
+ts_raptor.fid
+
+text 2 golden/raw_st.rc
+0
+
+sha256 9f379119b4ae070e21b3fb0a76af1cc2f707c468285524ddfc5dbe566dbb8bbf 973 golden/raw_st/raptor1%IMOD%ts.fid.txt
+text 133 golden/raw_st/raptor1%align%ts_RAPTOR.log
+RAPTOR stub called with:
+[-exec]
+[RAPTOR_BIN]
+[-path]
+[.]
+[-inp]
+[ts.st]
+[-track]
+[-out]
+[raptor1]
+[-diam]
+[11]
+[-mark]
+[20]
+[ts.st]
+
+sha256 424b102eda9a355d5e606994e6fa9dcb3768d1990c5815b06b1de751ed58234a 1192 golden/raw_st/ts_raptor.fid
+text 118 golden/raw_std.out
+RAPTOR results for this run will be in raptor1
+The model that will load on the coarse aligned stack is:
+ts_raptor.fid
+
+text 2 golden/raw_std.rc
+0
+
+sha256 9f379119b4ae070e21b3fb0a76af1cc2f707c468285524ddfc5dbe566dbb8bbf 973 golden/raw_std/raptor1%IMOD%ts.fid.txt
+text 133 golden/raw_std/raptor1%align%ts_RAPTOR.log
+RAPTOR stub called with:
+[-exec]
+[RAPTOR_BIN]
+[-path]
+[.]
+[-inp]
+[ts.st]
+[-track]
+[-out]
+[raptor1]
+[-diam]
+[11]
+[-mark]
+[20]
+[ts.st]
+
+sha256 424b102eda9a355d5e606994e6fa9dcb3768d1990c5815b06b1de751ed58234a 1192 golden/raw_std/ts_raptor.fid
+text 477 golden/usage.out
+Usage: runraptor [options] image_stack
+   Runs RAPTOR on the given image_stack, which may be a raw stack or preali file
+   Options other than -P[ID] for a PID are RAPTOR options and MUST include:
+     -diam #  Bead diameter in pixels
+     -mark #  Number of markers to track
+
+   This script takes care of adding -exec, -path, -input, -track, and -output
+       options.
+   It must be run inside the data directory where files are located.
+   Coarse alignment must be run first
+
+text 2 golden/usage.rc
+1
+

@@ -1,0 +1,36 @@
+#!/bin/sh
+# Stand-in for RAPTOR in the runraptor goldens (fixtures/make-runraptor-goldens.sh,
+# tests/runraptor_cli.rs): it does what runraptor relies on RAPTOR for and
+# nothing else.  From -inp and -out it takes RAPTOR's basename (the input name
+# up to its last dot, less a trailing _preali; IMOD/raptor/main.cpp:176-181),
+# writes <out>/align/<base>_RAPTOR.log recording the arguments it was given
+# (the -exec directory written as RAPTOR_BIN), and copies stub.fid.txt, real
+# RAPTOR output for the TS_01 test stack, to <out>/IMOD/<base>.fid.txt.  An
+# input whose name contains "fail" makes it log an ERROR line, print one, and
+# exit 3 instead.
+here=$(dirname "$0")
+out=; inp=; prev=
+for a in "$@"; do
+  case $prev in
+    -out) out=$a ;;
+    -inp) inp=$a ;;
+  esac
+  prev=$a
+done
+base=${inp%.*}
+base=${base%_preali}
+mkdir -p "$out/IMOD" "$out/align"
+log=$out/align/${base}_RAPTOR.log
+echo "RAPTOR stub called with:" > "$log"
+for a in "$@"; do
+  [ "$a" = "$here" ] || [ "$a" = "$RAPTOR_BIN" ] && a=RAPTOR_BIN
+  printf '[%s]\n' "$a" >> "$log"
+done
+case $inp in
+  *fail*)
+    echo "ERROR: stub RAPTOR could not track $inp" >> "$log"
+    echo "ERROR: stub RAPTOR failed"
+    exit 3 ;;
+esac
+cp "$here/stub.fid.txt" "$out/IMOD/$base.fid.txt"
+echo "stub RAPTOR done"

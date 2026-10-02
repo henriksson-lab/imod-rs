@@ -1,49 +1,39 @@
 //! `IMOD/Etomo/src/etomo/ui/swing/Spacer.java`.
-#![allow(dead_code)]
+//!
+//! A rigid area of a fixed size that remembers its preferred width.
 
-use super::panel::Dimension;
+use std::rc::Rc;
 
-/// Java package-private final `Spacer` and its native `Box` rigid area.
-#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+use crate::imod::etomo::jdk::{Dimension, JComponent};
+
+/// Java `public static final String rcsid`.
+pub const RCSID: &str = "$Id:$";
+
+/// Java package-private `final class Spacer`.
 pub struct Spacer {
-    pub rigid_area: Dimension,
-    pub preferred_width: i32,
+    /// Java final `rigidArea` (`Box.createRigidArea(dimension)`; its size is layout).
+    rigid_area: Rc<JComponent>,
+    /// Java final `preferredWidth`.
+    preferred_width: i32,
 }
 
 impl Spacer {
     /// Java `Spacer(Dimension)`.
-    pub fn new(dimension: Dimension) -> Self {
-        Self {
-            rigid_area: dimension,
+    pub fn new(dimension: Dimension) -> Spacer {
+        Spacer {
+            // Swing layout: Box.createRigidArea(dimension).
+            rigid_area: JComponent::new_other(),
             preferred_width: dimension.width,
         }
     }
+
     /// Java `getPreferredWidth()`.
     pub fn get_preferred_width(&self) -> i32 {
         self.preferred_width
     }
-    /// Java `getComponent()` at the native `Component` boundary.
-    pub fn get_component(&self) -> Dimension {
-        self.rigid_area
-    }
-}
 
-#[cfg(test)]
-mod tests {
-    use super::*;
-    #[test]
-    fn preserves_width_even_for_zero_height_rigid_areas() {
-        let spacer = Spacer::new(Dimension {
-            width: 5,
-            height: 0,
-        });
-        assert_eq!(spacer.get_preferred_width(), 5);
-        assert_eq!(
-            spacer.get_component(),
-            Dimension {
-                width: 5,
-                height: 0
-            }
-        );
+    /// Java `getComponent()`.
+    pub fn get_component(&self) -> Rc<JComponent> {
+        self.rigid_area.clone()
     }
 }

@@ -1,220 +1,355 @@
 //! `IMOD/Etomo/src/etomo/ui/swing/SpinnerEfield.java`.
-#![allow(dead_code)]
-use super::appearance_extension::{AppearanceExtension, ComponentBoundary};
-use crate::imod::etomo::storage::autodoc::autodoc_tokenizer::SEPARATOR_CHAR;
-use crate::imod::etomo::util::utilities;
+//!
+//! An integer `JSpinner` field, optionally labeled, that can be made ineditable and
+//! whose minimum follows a changeable maximum.
+//!
+//! The spinner's `SpinnerNumberModel` lives in the `JComponent` (`jdk.rs`); the
+//! Java's `model` field is that model, read with `get_spinner_model` and written back
+//! with `set_spinner_model` (which, like the Swing model, fires the spinner's change
+//! listeners - only called here when the Swing setter would have changed something).
+//! Focus events and sizes are not modelled.
+
 use std::cell::RefCell;
 use std::rc::Rc;
-/// Java package-private final `SpinnerEfield`.
+
+use super::appearance_extension::AppearanceExtension;
+use crate::imod::etomo::etomo_director::ARGUMENTS;
+use crate::imod::etomo::jdk::{ChangeListener, FocusListener, JComponent, SpinnerNumberModel};
+use crate::imod::etomo::logic::converter;
+use crate::imod::etomo::storage::autodoc::autodoc_tokenizer::{DEFAULT_DELIMITER, SEPARATOR_CHAR};
+use crate::imod::etomo::r#type::ui_test_field_type::UITestFieldType;
+use crate::imod::etomo::util::utilities;
+
+/// Java package-private `final class SpinnerEfield`.
 pub struct SpinnerEfield {
-    pub value: i32,
-    pub minimum: i32,
-    pub maximum: i32,
-    pub default_value: i32,
-    pub default_minimum: i32,
-    pub label: Option<String>,
-    pub root_panel: bool,
-    pub spinner_name: Option<String>,
-    pub spinner_enabled: bool,
-    pub label_enabled: bool,
-    pub spinner_visible: bool,
-    pub root_visible: bool,
-    pub preferred_width: Option<i32>,
-    pub change_listener_count: usize,
-    pub focus_listener_count: usize,
-    pub appearance_extension: Option<AppearanceExtension>,
-    pub component_boundary: Rc<RefCell<ComponentBoundary>>,
-    pub identity: usize,
+    /// Java final `spinner`.
+    spinner: Rc<JComponent>,
+    /// Java final `pnlRoot` (null without a label).
+    pnl_root: Option<Rc<JComponent>>,
+    /// Java final `jLabel` (null without a label).
+    j_label: Option<Rc<JComponent>>,
+    /// Java final `defaultValue`.
+    default_value: Option<i32>,
+    /// Java final `defaultMinimum`.
+    default_minimum: Option<i32>,
+    /// Java `appearanceExtension`.
+    appearance_extension: RefCell<Option<Rc<AppearanceExtension>>>,
 }
+
 impl SpinnerEfield {
-    /// Java private `SpinnerEfield(String,int,int,int)`.
-    fn new(label: Option<&str>, value: i32, minimum: i32, maximum: i32) -> Self {
-        let component_boundary = Rc::new(RefCell::new(ComponentBoundary::default()));
-        let mut value_out = Self {
-            value,
-            minimum,
-            maximum,
-            default_value: value,
-            default_minimum: minimum,
-            label: label.map(str::to_owned),
-            root_panel: label.is_some(),
-            spinner_name: None,
-            spinner_enabled: true,
-            label_enabled: true,
-            spinner_visible: true,
-            root_visible: true,
-            preferred_width: None,
-            change_listener_count: 0,
-            focus_listener_count: 0,
-            appearance_extension: None,
-            component_boundary,
-            identity: 0,
+    /// Java private `SpinnerEfield(String, int, int, int)`.
+    fn new(label: Option<&str>, value: i32, minimum: i32, maximum: i32) -> SpinnerEfield {
+        // model = new SpinnerNumberModel(value, minimum, maximum, 1)
+        let model = SpinnerNumberModel::new_int(value, minimum, maximum, 1);
+        let spinner = JComponent::new_spinner(model);
+        // defaultValue = (Integer) spinner.getValue()
+        let default_value = Some(spinner.get_spinner_value() as i32);
+        // defaultMinimum = (Integer) model.getMinimum()
+        let default_minimum = spinner
+            .get_spinner_model()
+            .and_then(|model| model.minimum)
+            .map(|minimum| minimum as i32);
+        let (j_label, pnl_root) = if let Some(label) = label {
+            (
+                Some(JComponent::new_label(label)),
+                Some(JComponent::new_panel()),
+            )
+        } else {
+            (None, None)
         };
-        value_out.identity = (&value_out as *const Self) as usize;
-        value_out.set_name();
-        value_out
-    }
-    /// Java `getInstance(String,int,int,int)`.
-    pub fn get_instance(label: Option<&str>, value: i32, minimum: i32, maximum: i32) -> Self {
-        let mut instance = Self::new(label, value, minimum, maximum);
-        instance.create_panel();
+        let instance = SpinnerEfield {
+            spinner,
+            pnl_root,
+            j_label,
+            default_value,
+            default_minimum,
+            appearance_extension: RefCell::new(None),
+        };
+        if label.is_some() {
+            instance.set_name();
+        }
         instance
     }
-    /// Java `createPanel()`.
-    fn create_panel(&mut self) {
-        if self.root_panel {}
+
+    /// Java static `getInstance(String, int, int, int)`.
+    pub fn get_instance(
+        label: Option<&str>,
+        value: i32,
+        minimum: i32,
+        maximum: i32,
+    ) -> Rc<SpinnerEfield> {
+        let instance = SpinnerEfield::new(label, value, minimum, maximum);
+        instance.create_panel();
+        Rc::new(instance)
     }
-    /// Java `getComponent()` represented by its source return branch.
-    pub fn get_component_is_root_panel(&self) -> bool {
-        self.root_panel
-    }
-    /// Java `setName()`.
-    fn set_name(&mut self) {
-        if let Some(label) = &self.label {
-            self.spinner_name = utilities::convert_label_to_name(Some(label), true)
-                .map(|name| format!("sp{SEPARATOR_CHAR}{name}"));
+
+    /// Java private `createPanel()`.
+    fn create_panel(&self) {
+        if let Some(pnl_root) = &self.pnl_root {
+            // Swing layout: pnlRoot.setLayout(new BoxLayout(pnlRoot, BoxLayout.X_AXIS)).
+            pnl_root.add(self.j_label.as_ref().unwrap());
+            pnl_root.add(&self.spinner);
         }
     }
-    /// Java `addChangeListener(ChangeListener)`.
-    pub fn add_change_listener(&mut self) {
-        self.change_listener_count += 1;
-    }
-    /// Java `addFocusListener(FocusListener)`.
-    pub fn add_focus_listener(&mut self) {
-        self.focus_listener_count += 1;
-    }
-    /// Java `equalsSource(EventObject)` represented by source identity.
-    pub fn equals_source(&self, source_identity: Option<usize>) -> bool {
-        source_identity == Some(self.identity)
-    }
-    /// Java `setMaximum(Integer)`.
-    pub fn set_maximum(&mut self, maximum: Option<i32>) {
-        if let Some(maximum) = maximum {
-            self.maximum = maximum;
+
+    /// Java `getComponent()`.
+    pub fn get_component(&self) -> Rc<JComponent> {
+        if let Some(pnl_root) = &self.pnl_root {
+            return pnl_root.clone();
         }
+        self.spinner.clone()
     }
-    /// Java `adjustToMaximum()`.
-    pub fn adjust_to_maximum(&mut self) {
-        if self.value > self.maximum {
-            self.value = self.maximum;
-        }
-        if self.minimum > self.maximum {
-            self.minimum = if self.default_minimum <= self.maximum {
-                self.default_minimum
-            } else {
-                self.maximum
-            };
-        } else if self.minimum != self.default_minimum
-            && self.default_minimum <= self.maximum
-            && self.default_minimum <= self.value
-        {
-            self.minimum = self.default_minimum;
-        }
-        if self.value < self.minimum {
-            self.value = self.minimum;
-        }
-    }
-    /// Java `setText(Number)`.
-    pub fn set_text_number(&mut self, number: i32) {
-        self.value = number;
-    }
-    /// Java `setText(String)`.
-    pub fn set_text(&mut self, string: Option<&str>) {
-        let value = string.map_or(Some(self.default_value), |string| {
-            string.trim().parse().ok()
-        });
-        if let Some(value) = value {
-            if value >= self.minimum && value <= self.maximum {
-                self.value = value;
+
+    /// Java private `setName()`.
+    fn set_name(&self) {
+        let Some(j_label) = &self.j_label else {
+            return;
+        };
+        let field_type = UITestFieldType::SPINNER;
+        let name = utilities::convert_label_to_name(
+            Some(&j_label.get_text()),
+            field_type.is_unlimited_segments(),
+        );
+        if let Some(name) = name {
+            self.spinner
+                .set_name(Some(&format!("{}{}{}", field_type, SEPARATOR_CHAR, name)));
+            if ARGUMENTS.lock().unwrap().is_print_names() {
+                println!(
+                    "{} {} ",
+                    self.spinner.get_name().as_deref().unwrap_or("null"),
+                    DEFAULT_DELIMITER
+                );
             }
         }
     }
-    /// Java `getText()`.
-    pub fn get_text(&self) -> String {
-        self.value.to_string()
+
+    /// Java `addChangeListener(ChangeListener)`.
+    pub fn add_change_listener(&self, listener: ChangeListener) {
+        self.spinner.add_change_listener(listener);
     }
-    /// Java `createAppearanceExtension()`.
-    fn create_appearance_extension(&mut self) {
-        if self.appearance_extension.is_none() {
-            let mut extension = AppearanceExtension::new(self.component_boundary.clone());
-            extension.set_allow_foreground_change_on_error(false);
-            self.appearance_extension = Some(extension);
+
+    /// Java `addFocusListener(FocusListener)`.
+    pub fn add_focus_listener(&self, listener: FocusListener) {
+        self.spinner.add_focus_listener(listener);
+    }
+
+    /// Java `equalsSource(EventObject)`, given the event's `getSource()`.
+    pub fn equals_source(&self, event_source: Option<&Rc<JComponent>>) -> bool {
+        if let Some(source) = event_source {
+            // System.out.println("A:spinner:" + ((Object) spinner).toString() + ",source:"
+            // + event.getSource().toString());
+            return Rc::ptr_eq(&self.spinner, source);
+        }
+        false
+    }
+
+    /// Java public `setMaximum(Integer)`.  Set maximum.  Make sure that value and
+    /// minimum are less then or equal to maximum.
+    pub fn set_maximum(&self, maximum: Option<i32>) {
+        if let Some(maximum) = maximum {
+            // model.setMaximum(maximum)
+            if let Some(mut model) = self.spinner.get_spinner_model() {
+                if model.maximum != Some(maximum as f64) {
+                    model.maximum = Some(maximum as f64);
+                    self.spinner.set_spinner_model(model);
+                }
+            }
         }
     }
-    /// Java `setEnabled(boolean)`.
-    pub fn set_enabled(&mut self, enabled: bool) {
-        if let Some(extension) = &mut self.appearance_extension {
-            extension.set_enabled(enabled);
-            self.spinner_enabled = extension.is_enabled();
+
+    /// Java public `adjustToMaximum()`.  Adjust value and minimum so that: minimum <=
+    /// value <= maximum.  If minimum has to be changed, prefer defaultMinimum.
+    pub fn adjust_to_maximum(&self) {
+        let Some(maximum) = self
+            .spinner
+            .get_spinner_model()
+            .and_then(|model| model.maximum)
+            .map(|maximum| maximum as i32)
+        else {
+            return;
+        };
+        // Ensure that value <= maximum.
+        let mut value: Option<i32> = Some(self.spinner.get_spinner_value() as i32);
+        if value.is_some_and(|value| value > maximum) {
+            // model.setValue(maximum): the model sets the value without a range check and
+            // fires a change when it differs.
+            if let Some(mut model) = self.spinner.get_spinner_model() {
+                if model.value != maximum as f64 {
+                    model.value = maximum as f64;
+                    self.spinner.set_spinner_model(model);
+                }
+            }
+            value = Some(maximum);
+        }
+        let Some(mut minimum) = self
+            .spinner
+            .get_spinner_model()
+            .and_then(|model| model.minimum)
+            .map(|minimum| minimum as i32)
+        else {
+            return;
+        };
+        // Ensure that minimum <= maximum.
+        if minimum > maximum {
+            // Set minimum back to it's original value if possible.
+            if let Some(default_minimum) = self.default_minimum.filter(|m| *m <= maximum) {
+                // model.setMinimum(default_minimum): fires a change when the minimum differs.
+                if let Some(mut model) = self.spinner.get_spinner_model() {
+                    if model.minimum != Some(default_minimum as f64) {
+                        model.minimum = Some(default_minimum as f64);
+                        self.spinner.set_spinner_model(model);
+                    }
+                }
+                minimum = default_minimum;
+            } else {
+                // model.setMinimum(maximum): fires a change when the minimum differs.
+                if let Some(mut model) = self.spinner.get_spinner_model() {
+                    if model.minimum != Some(maximum as f64) {
+                        model.minimum = Some(maximum as f64);
+                        self.spinner.set_spinner_model(model);
+                    }
+                }
+                minimum = maximum;
+            }
         } else {
-            self.spinner_enabled = enabled;
-            self.component_boundary.borrow_mut().enabled = enabled;
+            // If minimum was changed in the past, set it back to it's original value if
+            // possible. Don't do an equivalence comparison between Integers as this will
+            // compare addresses rather then integer values.
+            // Make this change only if it wouldn't force value to change.
+            if let Some(default_minimum) = self.default_minimum {
+                if minimum != default_minimum
+                    && default_minimum <= maximum
+                    && value.is_some_and(|value| default_minimum <= value)
+                {
+                    // model.setMinimum(default_minimum): fires a change when the minimum differs.
+                    if let Some(mut model) = self.spinner.get_spinner_model() {
+                        if model.minimum != Some(default_minimum as f64) {
+                            model.minimum = Some(default_minimum as f64);
+                            self.spinner.set_spinner_model(model);
+                        }
+                    }
+                    minimum = default_minimum;
+                }
+            }
         }
-        if self.label.is_some() {
-            self.label_enabled = self.is_enabled();
+        // Ensure that minimum <= value.
+        // (Java unboxes `value` here; it cannot be null, since it was read from the
+        // spinner's Integer value.)
+        if value.is_some_and(|value| value < minimum) {
+            // model.setValue(minimum): the model sets the value without a range check and
+            // fires a change when it differs.
+            if let Some(mut model) = self.spinner.get_spinner_model() {
+                if model.value != minimum as f64 {
+                    model.value = minimum as f64;
+                    self.spinner.set_spinner_model(model);
+                }
+            }
         }
     }
-    /// Java `isEnabled()`.
+
+    /// Java public `setText(Number)`.
+    pub fn set_text_number(&self, number: f64) {
+        self.spinner.set_spinner_value(number);
+    }
+
+    /// Java `setText(String)`.
+    pub fn set_text_string(&self, string: Option<&str>) {
+        // If string is null, then reset the field to the value it was created with.
+        let value = if string.is_none() {
+            self.default_value
+        } else {
+            converter::to_integer_with_round(string, false)
+        };
+        let Some(value) = value else {
+            // Invalid string
+            return;
+        };
+        // spinner.setValue(value); the IllegalArgumentException the Java catches is
+        // thrown only for a non-Number value, which an Integer never is.
+        self.spinner.set_spinner_value(value as f64);
+    }
+
+    /// Java public `getText()`: `Integer.toString` of the value.
+    pub fn get_text(&self) -> String {
+        (self.spinner.get_spinner_value() as i32).to_string()
+    }
+
+    // appearanceExtension
+
+    /// Java private `createAppearanceExtension()`.
+    fn create_appearance_extension(&self) {
+        if self.appearance_extension.borrow().is_none() {
+            let appearance_extension = AppearanceExtension::new_component(&self.spinner);
+            appearance_extension.set_allow_foreground_change_on_error(false);
+            *self.appearance_extension.borrow_mut() = Some(appearance_extension);
+        }
+    }
+
+    /// Java `setEnabled(boolean)`.
+    pub fn set_enabled(&self, enabled: bool) {
+        let appearance_extension = self.appearance_extension.borrow().clone();
+        match appearance_extension {
+            None => self.spinner.set_enabled(enabled),
+            Some(appearance_extension) => appearance_extension.set_enabled(enabled),
+        }
+        if let Some(j_label) = &self.j_label {
+            j_label.set_enabled(self.is_enabled());
+        }
+    }
+
+    /// Java public `isEnabled()`.
     pub fn is_enabled(&self) -> bool {
-        self.appearance_extension
-            .as_ref()
-            .map_or(self.spinner_enabled, AppearanceExtension::is_enabled)
+        let appearance_extension = self.appearance_extension.borrow().clone();
+        match appearance_extension {
+            None => self.spinner.is_enabled(),
+            Some(appearance_extension) => appearance_extension.is_enabled(),
+        }
     }
-    /// Java `setPreferredWidth(int)`.
-    pub fn set_preferred_width(&mut self, width: i32) {
-        self.preferred_width = Some(width);
+
+    /// Java `setPreferredWidth(int)`.  Set the preferred text field width in pixels.
+    pub fn set_preferred_width(&self, _width: i32) {
+        // Swing layout: dim = spinner.getPreferredSize(); dim.width = width *
+        // (int) Math.round(UIParameters.getInstance().getFontSizeAdjustment());
+        // spinner.setPreferredSize(dim); spinner.setMaximumSize(dim).
     }
+
     /// Java `setEditable(boolean)`.
-    pub fn set_editable(&mut self, editable: bool) {
-        if editable && self.appearance_extension.is_none() {
+    pub fn set_editable(&self, editable: bool) {
+        // Always starts as editable. AppearanceExtension is necessary for making it
+        // ineditable.
+        if editable && self.appearance_extension.borrow().is_none() {
             return;
         }
         self.create_appearance_extension();
-        self.appearance_extension
-            .as_mut()
-            .unwrap()
-            .set_editable(editable);
+        let appearance_extension = self.appearance_extension.borrow().clone().unwrap();
+        appearance_extension.set_editable(editable);
     }
+
     /// Java `isVisible()`.
     pub fn is_visible(&self) -> bool {
-        if self.root_panel {
-            self.root_visible
-        } else {
-            self.spinner_visible
+        if let Some(pnl_root) = &self.pnl_root {
+            return pnl_root.is_visible();
         }
+        self.spinner.is_visible()
     }
+
     /// Java `setVisible(boolean)`.
-    pub fn set_visible(&mut self, visible: bool) {
-        if self.root_panel {
-            self.root_visible = visible;
+    pub fn set_visible(&self, visible: bool) {
+        if let Some(pnl_root) = &self.pnl_root {
+            pnl_root.set_visible(visible);
         } else {
-            self.spinner_visible = visible;
+            self.spinner.set_visible(visible);
         }
     }
+
     /// Java `isEditable()`.
     pub fn is_editable(&self) -> bool {
-        self.appearance_extension
-            .as_ref()
-            .map_or(true, AppearanceExtension::is_editable)
-    }
-}
-#[cfg(test)]
-mod tests {
-    use super::*;
-    #[test]
-    fn maximum_adjustment_restores_default_minimum_when_possible() {
-        let mut field = SpinnerEfield::get_instance(Some("Number"), 8, 2, 10);
-        field.minimum = 7;
-        field.set_maximum(Some(9));
-        field.adjust_to_maximum();
-        assert_eq!(field.minimum, 2);
-    }
-    #[test]
-    fn editable_creation_is_lazy() {
-        let mut field = SpinnerEfield::get_instance(None, 1, 0, 4);
-        field.set_editable(true);
-        assert!(field.appearance_extension.is_none());
-        field.set_editable(false);
-        assert!(!field.is_editable());
+        // Always starts as editable. AppearanceExtension is necessary for making it
+        // ineditable.
+        let appearance_extension = self.appearance_extension.borrow().clone();
+        match appearance_extension {
+            None => true,
+            Some(appearance_extension) => appearance_extension.is_editable(),
+        }
     }
 }

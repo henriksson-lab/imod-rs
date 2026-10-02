@@ -114,7 +114,7 @@ impl SerialSectionsManager {
 
     /// Java override `initializeUIParameters(String, AxisID)`.
     pub fn initialize_ui_parameters_from_name(
-        &self,
+        &'static self,
         param_file_name: Option<&str>,
         axis_id: Option<AxisID>,
     ) {
@@ -411,26 +411,41 @@ impl BaseManager for SerialSectionsManager {
         Some(InterfaceType::SerialSections)
     }
     /// Java `getMainPanel`.
-    fn get_main_panel(&self) -> Option<Infallible> {
-        *self.main_panel.lock().unwrap()
+    fn get_main_panel(
+        &self,
+    ) -> Option<std::rc::Rc<dyn crate::imod::etomo::ui::swing::main_panel::MainPanelVirtual>> {
+        match *self.main_panel.lock().unwrap() {
+            None => None,
+            Some(main_panel) => match main_panel {},
+        }
     }
     /// Java `getProcessManager`.
-    fn get_process_manager(&self) -> Option<Infallible> {
-        self.process_mgr
+    fn get_process_manager(
+        &self,
+    ) -> Option<&'static crate::imod::etomo::process::base_process_manager::BaseProcessManager>
+    {
+        // TODO(unit): this manager's process manager is not constructed yet.
+        None
     }
     /// Java override `startNextProcess`.
     // TODO(unit): ProcessSeries, ProcessResultDisplay, ProcessDisplay, UIComponent.
     fn start_next_process(
-        &self,
-        ui_component: Option<Infallible>,
-        axis_id: Option<AxisID>,
-        process: Option<Infallible>,
-        process_result_display: Option<Infallible>,
-        process_series: Option<Infallible>,
-        dialog_type: Option<Infallible>,
-        display: Option<Infallible>,
+        &'static self,
+        ui_component: Option<std::rc::Rc<dyn crate::imod::etomo::ui::UiComponent>>,
+        axis_id: AxisID,
+        process: &crate::imod::etomo::process_series::Process,
+        process_result_display: Option<
+            crate::imod::etomo::process::process_interface::ProcessResultDisplayRef,
+        >,
+        process_series: &crate::imod::etomo::process_series::ProcessSeriesHandle,
+        dialog_type: Option<DialogType>,
+        display: Option<
+            std::rc::Rc<dyn crate::imod::etomo::ui::swing::process_display::ProcessDisplay>,
+        >,
     ) -> bool {
-        let _ = (
+        // TODO(unit): this manager's own `startNextProcess` tasks are not translated
+        // yet; the base class's run first, as the Java override's `super` call does.
+        self.start_next_process_super(
             ui_component,
             axis_id,
             process,
@@ -438,11 +453,13 @@ impl BaseManager for SerialSectionsManager {
             process_series,
             dialog_type,
             display,
-        );
-        false
+        )
     }
     /// Java `getAutoAlignmentMetaData`.
-    fn get_auto_alignment_meta_data(&self) -> Option<Infallible> {
+    fn get_auto_alignment_meta_data(
+        &self,
+    ) -> Option<&'static crate::imod::etomo::r#type::auto_alignment_meta_data::AutoAlignmentMetaData>
+    {
         None
     }
     /// Java `updateMetaData`.
@@ -456,23 +473,23 @@ impl BaseManager for SerialSectionsManager {
         false
     }
     /// Java `getStorables(int)`.
-    fn get_storables_with_offset(&self, offset: i32) -> Option<Vec<Box<dyn Storable>>> {
+    fn get_storables_with_offset(&self, offset: i32) -> Option<Vec<Option<&'static dyn Storable>>> {
         let _ = offset;
         None
     }
     /// Java `exitProgram`.
-    fn exit_program(&self, axis_id: Option<AxisID>) -> bool {
+    fn exit_program(&'static self, axis_id: Option<AxisID>) -> bool {
         if self.exit_program_super(axis_id) {
             self.end_threads();
-            self.save_param_file();
+            let _ = self.save_param_file();
             true
         } else {
             false
         }
     }
     /// Java `save`.
-    fn save(&self) -> bool {
-        self.save_super() && self.save_serial_sections_dialog(false)
+    fn save(&'static self) -> Result<bool, crate::imod::etomo::storage::log_file::LogFileError> {
+        Ok(self.save_super()? && self.save_serial_sections_dialog(false))
     }
     /// Java `getName`.
     fn get_name(&self) -> Option<String> {

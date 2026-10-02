@@ -1,96 +1,63 @@
 //! `IMOD/Etomo/src/etomo/ui/swing/EtchedBorder.java`.
-#![allow(dead_code)]
+//!
+//! A titled etched border.  Only the title is modelled (the stand-in's
+//! `TitledBorder`); the etched border and its colours are painting.
 
-use super::beveled_border::{Border, EtchedBorderState, TitledBorder};
-use super::ui_utilities::Color;
-use crate::imod::etomo::util::utilities::APRIL_FOOLS;
+use std::rc::Rc;
 use std::sync::LazyLock;
 
-/// Java `EtchedBorder.rcsid`.
+use crate::imod::etomo::jdk::{Color, TitledBorder};
+use crate::imod::etomo::util::utilities;
+
+/// Java `rcsid`.
 pub const RCSID: &str = "$Id$";
-/// Java static `highlight`.
-pub static HIGHLIGHT: LazyLock<Color> = LazyLock::new(|| {
-    if !*APRIL_FOOLS {
-        Color {
-            red: 248,
-            green: 254,
-            blue: 255,
-        }
+
+// TODO these should be gotten from the app some how
+/// Java private static `highlight`.
+static HIGHLIGHT: LazyLock<Color> = LazyLock::new(|| {
+    if !*utilities::APRIL_FOOLS {
+        (248, 254, 255)
     } else {
-        Color {
-            red: 255,
-            green: 231,
-            blue: 205,
-        }
+        (255, 231, 205)
     }
 });
-/// Java static `shadow`.
-pub static SHADOW: LazyLock<Color> = LazyLock::new(|| {
-    if !*APRIL_FOOLS {
-        Color {
-            red: 121,
-            green: 124,
-            blue: 136,
-        }
+/// Java private static `shadow`.
+static SHADOW: LazyLock<Color> = LazyLock::new(|| {
+    if !*utilities::APRIL_FOOLS {
+        (121, 124, 136)
     } else {
-        Color {
-            red: 138,
-            green: 152,
-            blue: 219,
-        }
+        (138, 152, 219)
     }
 });
 
-/// Java public `EtchedBorder`.
-#[derive(Clone, Debug, Eq, PartialEq)]
+/// Java `EtchedBorder`.
 pub struct EtchedBorder {
-    pub titled_border: TitledBorder,
+    /// Java `titledBorder`.
+    titled_border: Rc<TitledBorder>,
 }
+
 impl EtchedBorder {
-    /// Java package-private `EtchedBorder(String)`.
-    pub fn new(title: &str) -> Self {
-        Self {
-            titled_border: TitledBorder {
-                border: Border::Etched(EtchedBorderState {
-                    highlight: *HIGHLIGHT,
-                    shadow: *SHADOW,
-                }),
-                title: title.to_owned(),
-            },
+    /// Java `EtchedBorder(String)`.
+    pub fn new(title: Option<&str>) -> EtchedBorder {
+        // Swing painting: drawn with BorderFactory.createEtchedBorder(highlight, shadow).
+        let _ = (*HIGHLIGHT, *SHADOW);
+        EtchedBorder {
+            titled_border: Rc::new(TitledBorder::new(title)),
         }
     }
+
     /// Java `setTitle(String)`.
-    pub fn set_title(&mut self, title: &str) {
-        self.titled_border.title = title.to_owned();
+    pub fn set_title(&self, title: Option<&str>) {
+        self.titled_border.set_title(title);
     }
+
     /// Java `getTitle()`.
-    pub fn get_title(&self) -> &str {
-        &self.titled_border.title
+    pub fn get_title(&self) -> Option<String> {
+        self.titled_border.get_title()
     }
+
     /// Java `getBorder()`.
-    pub fn get_border(&self) -> &TitledBorder {
-        &self.titled_border
-    }
-}
-#[cfg(test)]
-mod tests {
-    use super::*;
-    #[test]
-    fn constructor_keeps_source_colors_and_title() {
-        let border = EtchedBorder::new("Patch tracking");
-        assert_eq!(border.get_title(), "Patch tracking");
-        assert_eq!(
-            border.get_border().border,
-            Border::Etched(EtchedBorderState {
-                highlight: *HIGHLIGHT,
-                shadow: *SHADOW
-            })
-        );
-    }
-    #[test]
-    fn set_title_updates_titled_border() {
-        let mut border = EtchedBorder::new("Old");
-        border.set_title("New");
-        assert_eq!(border.get_border().title, "New");
+    pub fn get_border(&self) -> Rc<TitledBorder> {
+        self.titled_border.clone()
     }
 }

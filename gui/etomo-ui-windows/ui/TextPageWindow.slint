@@ -42,6 +42,8 @@ export component TextPageWindowWindow inherits Window {
     // `setTitle(file.getName())` — `:106` — or `setTitle(fileName)` — `:112`.
     in property <string> title-text: "xcorr.log";
     in property <int> font-size-pt: 12;
+    // Rust-only wiring (`ui/swing/slint_bridge.rs`): the editor pane's text.
+    in property <string> page-text: "tiltxcorr\n Version 5.2.17\n\n Entering Tiltxcorr\n\n View  1 shifts:   0.00   0.00\n View  2 shifts:  -1.23   0.44\n";
     title: root.title-text;
     // `setSize(currentFontSize * 625 / 12, currentFontSize * 800 / 12)` —
     // `:100`.  At Metal's 12pt default that is 625 x 800.
@@ -50,5 +52,6 @@ export component TextPageWindowWindow inherits Window {
     background: EtomoStyle.background;
     TextPageWindow {
         font-size-pt: root.font-size-pt;
+        page-text: root.page-text;
     }
 }

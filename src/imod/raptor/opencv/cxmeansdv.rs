@@ -1,157 +1,84 @@
-//! Owned generic translation of `IMOD/raptor/opencv/cxmeansdv.cpp`.
+//! Translation of `IMOD/raptor/opencv/cxmeansdv.cpp` (the parts RAPTOR
+//! reaches): `cvAvgSdv` of a one-channel `IPL_DEPTH_32F` image without a
+//! mask or COI (the template in `cvMatchTemplate`), through
+//! `icvMean_StdDev_32f_C1R`.
 //!
-//! Its C macro/table families differ only in scalar depth, channel count,
-//! masking, and COI.  `cv_avg_sdv` expresses every generated kernel with
-//! checked owned matrices while retaining the source's population deviation
-//! calculation and zero result for an empty mask.
+//! `icvInitMean_StdDevRTable` and its sibling tables collapse to the one
+//! kernel.
 
-use super::cxerror::CvStatus;
-use super::cxmean::CvScalar;
-use super::cxminmaxloc::{CvMask, CvMatrix};
+use super::cxtypes::*;
 
-/// Scalar depths supported by the source's `Mean_StdDev` dispatch tables.
-pub trait CvMeanSdvValue: Copy {
-    fn to_mean_sdv_f64(self) -> f64;
+/// `icvMean_StdDev_32f_C1R` (`ICV_DEF_MEAN_SDV_FUNC_2D( 32f, 1, float,
+/// double, double, double )`, `cxmeansdv.cpp:416`).  `step` in elements.
+fn icv_mean_std_dev_32f_c1r(src: &[f32], step: usize, size: CvSize, mean: &mut f64, sdv: &mut f64) {
+    let mut s0 = 0f64;
+    let mut sq0 = 0f64;
+    let pix = size.width * size.height;
+    let len = size.width as usize;
+    let mut o = 0usize;
+
+    for _ in 0..size.height {
+        let mut x = 0usize;
+        // ICV_MEAN_SDV_COI_CASE( double, double, CV_SQR, len, 1 )
+        while x + 4 <= len {
+            let mut t0 = src[o + x] as f64;
+            let mut t1 = src[o + x + 1] as f64;
+
+            s0 += t0 + t1;
+            sq0 += t0 * t0 + t1 * t1;
+
+            t0 = src[o + x + 2] as f64;
+            t1 = src[o + x + 3] as f64;
+
+            s0 += t0 + t1;
+            sq0 += t0 * t0 + t1 * t1;
+            x += 4;
+        }
+
+        while x < len {
+            let t0 = src[o + x] as f64;
+
+            s0 += t0;
+            sq0 += t0 * t0;
+            x += 1;
+        }
+        o += step;
+    }
+
+    // ICV_MEAN_SDV_EXIT_C1( s, sq )
+    let scale = if pix != 0 { 1. / pix as f64 } else { 0. };
+    let mut tmp = scale * s0;
+    *mean = tmp;
+    tmp = scale * sq0 - tmp * tmp;
+    *sdv = (if tmp < 0. { 0. } else { tmp }).sqrt();
 }
 
-macro_rules! impl_mean_sdv_value {
-    ($($type:ty),+ $(,)?) => {
-        $(
-            impl CvMeanSdvValue for $type {
-                fn to_mean_sdv_f64(self) -> f64 { self as f64 }
-            }
-        )+
-    };
-}
+/// `cvAvgSdv( const CvArr* img, CvScalar* _mean, CvScalar* _sdv, const
+/// void* mask )` (`cxmeansdv.cpp:676`) for a one-channel `IPL_DEPTH_32F`
+/// image and no mask: returns (`mean`, `sdv`).
+pub fn cv_avg_sdv(img: &IplImage) -> (CvScalar, CvScalar) {
+    let mut mean = CvScalar::default();
+    let mut sdv = CvScalar::default();
 
-impl_mean_sdv_value!(u8, u16, i16, i32, f32, f64);
-
-/// C `cvAvgSdv` plus every macro-generated `icvMean_StdDev_*` kernel.
-///
-/// `coi` selects C's one-based channel of interest. Without it, the original
-/// supports at most four channels because `CvScalar` has four lanes.
-pub fn cv_avg_sdv<T: CvMeanSdvValue>(
-    matrix: &CvMatrix<T>,
-    mask: Option<&CvMask>,
-    coi: Option<usize>,
-) -> Result<(CvScalar, CvScalar), CvStatus> {
-    if coi.is_none() && matrix.channels > 4 {
-        return Err(CvStatus::sts_out_of_range);
-    }
-    let selected_channel = match coi {
-        Some(channel) if channel == 0 || channel > matrix.channels => {
-            return Err(CvStatus::sts_bad_arg);
-        }
-        Some(channel) => Some(channel - 1),
-        None => None,
-    };
-    if let Some(mask) = mask {
-        if mask.rows != matrix.rows || mask.columns != matrix.columns {
-            return Err(CvStatus::sts_unmatched_sizes);
-        }
-        if mask.row_stride < matrix.columns
-            || mask.values.len() < (matrix.rows - 1) * mask.row_stride + matrix.columns
-        {
-            return Err(CvStatus::sts_bad_mask);
-        }
+    // `cvGetMat` of the image: a one-row image, or one whose `widthStep` is
+    // `width*4`, is continuous.
+    let mut size = img.get_size();
+    let min_step = if img.height <= 1 { 0 } else { img.width * 4 };
+    let step = if img.height <= 1 { 0 } else { img.width_step };
+    let mut mat_step = (img.width_step / 4) as usize;
+    if step == min_step {
+        size.width *= size.height;
+        size.height = 1;
+        mat_step = 0;
     }
 
-    let channels = if selected_channel.is_some() {
-        1
-    } else {
-        matrix.channels
-    };
-    let mut sum = [0.0; 4];
-    let mut square_sum = [0.0; 4];
-    let mut pixels = 0usize;
-    for row in 0..matrix.rows {
-        for column in 0..matrix.columns {
-            if mask.is_some_and(|mask| mask.values[row * mask.row_stride + column] == 0) {
-                continue;
-            }
-            pixels += 1;
-            let start = row * matrix.row_stride + column * matrix.channels;
-            for output_channel in 0..channels {
-                let input_channel = selected_channel.unwrap_or(output_channel);
-                let value = matrix.values[start + input_channel].to_mean_sdv_f64();
-                sum[output_channel] += value;
-                square_sum[output_channel] += value * value;
-            }
-        }
-    }
+    icv_mean_std_dev_32f_c1r(
+        &img.image_data,
+        mat_step,
+        size,
+        &mut mean.val[0],
+        &mut sdv.val[0],
+    );
 
-    let scale = if pixels == 0 {
-        0.0
-    } else {
-        1.0 / pixels as f64
-    };
-    let mut mean = CvScalar { values: [0.0; 4] };
-    let mut standard_deviation = CvScalar { values: [0.0; 4] };
-    for channel in 0..channels {
-        mean.values[channel] = sum[channel] * scale;
-        standard_deviation.values[channel] = (square_sum[channel] * scale
-            - mean.values[channel] * mean.values[channel])
-            .max(0.0)
-            .sqrt();
-    }
-    Ok((mean, standard_deviation))
-}
-
-#[cfg(test)]
-mod tests {
-    use super::cv_avg_sdv;
-    use crate::imod::raptor::opencv::cxerror::CvStatus;
-    use crate::imod::raptor::opencv::cxminmaxloc::{CvMask, CvMatrix};
-
-    #[test]
-    fn computes_population_mean_and_deviation_per_channel_with_stride() {
-        let matrix = CvMatrix::new(2, 2, 2, 5, vec![1_i16, 2, 3, 4, 99, 5, 6, 7, 8, 99]).unwrap();
-        let (mean, sdv) = cv_avg_sdv(&matrix, None, None).unwrap();
-        assert_eq!(mean.values, [4.0, 5.0, 0.0, 0.0]);
-        assert!((sdv.values[0] - (5.0_f64).sqrt()).abs() < 1e-12);
-        assert!((sdv.values[1] - (5.0_f64).sqrt()).abs() < 1e-12);
-    }
-
-    #[test]
-    fn mask_and_coi_follow_source_selection_rules() {
-        let matrix =
-            CvMatrix::new(2, 2, 3, 6, vec![1_u8, 10, 3, 2, 20, 4, 5, 30, 7, 6, 40, 8]).unwrap();
-        let mask = CvMask::new(2, 2, 2, vec![1, 0, 1, 0]).unwrap();
-        let (mean, sdv) = cv_avg_sdv(&matrix, Some(&mask), Some(2)).unwrap();
-        assert_eq!(mean.values, [20.0, 0.0, 0.0, 0.0]);
-        assert_eq!(sdv.values, [10.0, 0.0, 0.0, 0.0]);
-    }
-
-    #[test]
-    fn empty_mask_and_invalid_channel_paths_match_c_results() {
-        let matrix = CvMatrix::new(1, 2, 1, 2, vec![3_f32, 7.0]).unwrap();
-        let mask = CvMask::new(1, 2, 2, vec![0, 0]).unwrap();
-        let (mean, sdv) = cv_avg_sdv(&matrix, Some(&mask), None).unwrap();
-        assert_eq!(mean.values, [0.0; 4]);
-        assert_eq!(sdv.values, [0.0; 4]);
-        assert_eq!(
-            cv_avg_sdv(&matrix, None, Some(2)),
-            Err(CvStatus::sts_bad_arg)
-        );
-    }
-
-    #[test]
-    fn mask_dimensions_must_match_the_input_matrix() {
-        let matrix = CvMatrix::new(2, 2, 1, 2, vec![1_i16, 2, 3, 4]).unwrap();
-        let mask = CvMask::new(1, 4, 4, vec![1, 1, 1, 1]).unwrap();
-        assert_eq!(
-            cv_avg_sdv(&matrix, Some(&mask), None),
-            Err(CvStatus::sts_unmatched_sizes)
-        );
-    }
-
-    #[test]
-    fn rejects_more_than_four_channels_without_coi() {
-        let matrix = CvMatrix::new(1, 1, 5, 5, vec![1_i32; 5]).unwrap();
-        assert_eq!(
-            cv_avg_sdv(&matrix, None, None),
-            Err(CvStatus::sts_out_of_range)
-        );
-        assert_eq!(cv_avg_sdv(&matrix, None, Some(5)).unwrap().0.values[0], 1.0);
-    }
+    (mean, sdv)
 }

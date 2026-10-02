@@ -1,0 +1,9 @@
+# Cases whose expectation is in defined/ (make-imodfindbeads-goldens.sh defined): an upstream-bug
+# fix (BUGS.md, imodfindbeads) changes their output: extractDiameter's fit now uses every ring it
+# collects (adjust: the adjusted bead size; verbose: also the first ring's gradient, uninitialised
+# in native), the reference comparison skips the boundary object itself (refbound), and
+# fillInByTiltFits no longer reads a stale indMin / empty VEC_MINIMUM (fill: native SIGSEGV, 139).
+adjust
+fill
+refbound
+verbose

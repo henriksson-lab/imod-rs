@@ -8,7 +8,7 @@
 #![allow(dead_code)]
 
 use crate::imod::etomo::base_manager::BaseManager;
-use crate::imod::etomo::storage::storable::Storable;
+use crate::imod::etomo::storage::storable::StorableValue;
 use crate::imod::etomo::r#type::axis_id::AxisID;
 use crate::imod::etomo::r#type::debug_level::DebugLevel;
 use crate::imod::etomo::r#type::dialog_type::DialogType;
@@ -108,10 +108,10 @@ impl ProcessData {
     pub fn get_managed_instance(
         axis_id: Option<AxisID>,
         manager: Option<&'static dyn BaseManager>,
-        process_name: ProcessName,
+        process_name: Option<ProcessName>,
     ) -> Self {
         let mut data = Self::new(axis_id, manager);
-        data.process_name = Some(process_name);
+        data.process_name = process_name;
         data.do_not_load = true;
         data
     }
@@ -148,8 +148,16 @@ impl ProcessData {
         )
     }
     /// Java package-private `setDisplayKey`.
-    pub fn set_display_key(&mut self, process_result_display: Option<Infallible>) {
-        let _ = process_result_display;
+    pub fn set_display_key(
+        &mut self,
+        process_result_display: Option<
+            &dyn crate::imod::etomo::r#type::process_result_display::ProcessResultDisplay,
+        >,
+    ) {
+        if let Some(process_result_display) = process_result_display {
+            self.display_id = process_result_display.get_display_id();
+            self.factory_id = process_result_display.get_factory_id();
+        }
     }
     /// Java package-private `setDialogType`.
     pub fn set_dialog_type(&mut self, input: Option<DialogType>) {
@@ -160,8 +168,15 @@ impl ProcessData {
         self.dialog_type
     }
     /// Java package-private `setLastProcess`.
-    pub fn set_last_process(&mut self, process_series: Option<Infallible>, resumable: bool) {
-        let _ = (process_series, resumable);
+    pub fn set_last_process(
+        &mut self,
+        process_series: &crate::imod::etomo::process_series::ProcessSeries,
+        resumable: bool,
+    ) {
+        if process_series.will_process_list_be_dropped() && resumable {
+            eprintln!("WARNING:  Not compatible with ProcessSeries.processList.");
+        }
+        self.last_process = process_series.get_last_process();
     }
     /// Java `getLastProcess`.
     pub fn get_last_process(&self) -> Option<String> {
@@ -547,7 +562,7 @@ impl ProcessData {
     }
 }
 
-impl Storable for ProcessData {
+impl StorableValue for ProcessData {
     fn store(&self, properties: &mut BTreeMap<String, String>) {
         self.store_properties(properties);
     }

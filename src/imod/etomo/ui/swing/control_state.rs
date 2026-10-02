@@ -1,82 +1,83 @@
 //! `IMOD/Etomo/src/etomo/ui/swing/ControlState.java`.
 //!
-//! This source unit is a stateful `ControlMode`.  It only describes which
-//! control presentation the Swing boundary must apply; it does not render or
-//! mutate a GUI component itself.
-#![allow(dead_code)]
+//! `final class ControlState extends ControlMode`: the `ControlMode` part is the
+//! embedded `base`, reached through `Deref`.  The constructor is effectively
+//! private to this file (its `DisplayType` argument is a private nested class),
+//! so `OVERRIDE` and `ENABLE` are the only instances there are; `ControlMediator`
+//! relies on that for its `instanceof ControlState` test.
 
 use std::ops::Deref;
 use std::sync::LazyLock;
 
+use super::control_mode::ControlMode;
 use crate::imod::etomo::ui::shared_strings;
 
-use super::control_mode::ControlMode;
+/// Java `static ControlState OVERRIDE =
+/// new ControlState("override", SharedStrings.OVERRIDE_TEXT, DisplayType.OVERRIDE)`.
+pub static OVERRIDE: LazyLock<ControlState> = LazyLock::new(|| {
+    ControlState::new(
+        Some("override"),
+        Some(shared_strings::OVERRIDE_TEXT),
+        DisplayType::Override,
+    )
+});
 
-/// Java private static final `ControlState.DisplayType`.
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+/// Java `static ControlState ENABLE = new ControlState("enable", null, DisplayType.ENABLE)`.
+pub static ENABLE: LazyLock<ControlState> =
+    LazyLock::new(|| ControlState::new(Some("enable"), None, DisplayType::Enable));
+
+/// Java `private static final class DisplayType` with its two instances
+/// `OVERRIDE` and `ENABLE`, compared by identity.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum DisplayType {
     Override,
     Enable,
 }
 
-/// Java package-private `ControlState extends ControlMode`.
-#[derive(Clone, Debug, Eq, PartialEq)]
-pub(crate) struct ControlState {
-    control_mode: ControlMode,
+/// Java `final class ControlState extends ControlMode`.
+#[derive(Debug)]
+pub struct ControlState {
+    base: ControlMode,
+    /// Java `private final String controlString`.
     control_string: Option<String>,
+    /// Java `private final DisplayType displayType`.
     display_type: DisplayType,
+}
+
+impl Deref for ControlState {
+    type Target = ControlMode;
+    fn deref(&self) -> &ControlMode {
+        &self.base
+    }
 }
 
 impl ControlState {
     /// Java package-private `ControlState(String, String, DisplayType)`.
-    pub(crate) fn new(
-        field_name: Option<String>,
-        control_string: Option<String>,
+    fn new(
+        field_name: Option<&str>,
+        control_string: Option<&str>,
         display_type: DisplayType,
-    ) -> Self {
-        Self {
-            control_mode: ControlMode::new(field_name),
-            control_string,
+    ) -> ControlState {
+        ControlState {
+            base: ControlMode::new(field_name),
+            control_string: control_string.map(str::to_owned),
             display_type,
         }
     }
 
-    /// Java `isComponentDisplay()`.
-    pub(crate) fn is_component_display(&self) -> bool {
+    /// Java package-private `isComponentDisplay()`.
+    pub fn is_component_display(&self) -> bool {
         self.display_type == DisplayType::Override
     }
 
-    /// Java `isEnableDisplay()`.
-    pub(crate) fn is_enable_display(&self) -> bool {
+    /// Java package-private `isEnableDisplay()`.
+    pub fn is_enable_display(&self) -> bool {
         self.display_type == DisplayType::Enable
     }
 
-    /// Java `getControlString()`.
-    pub(crate) fn get_control_string(&self) -> Option<&str> {
+    /// Java package-private `getControlString()`.
+    pub fn get_control_string(&self) -> Option<&str> {
         self.control_string.as_deref()
-    }
-
-    /// Java package-private static `ControlState.OVERRIDE`.
-    pub(crate) const OVERRIDE: LazyLock<Self> = LazyLock::new(|| {
-        Self::new(
-            Some("override".to_owned()),
-            Some(shared_strings::OVERRIDE_TEXT.to_owned()),
-            DisplayType::Override,
-        )
-    });
-
-    /// Java package-private static `ControlState.ENABLE`.
-    pub(crate) const ENABLE: LazyLock<Self> =
-        LazyLock::new(|| Self::new(Some("enable".to_owned()), None, DisplayType::Enable));
-}
-
-/// Preserve the Java `extends ControlMode` relationship without duplicating
-/// inherited `ControlMode` methods in this source unit.
-impl Deref for ControlState {
-    type Target = ControlMode;
-
-    fn deref(&self) -> &Self::Target {
-        &self.control_mode
     }
 }
 
@@ -85,31 +86,12 @@ mod tests {
     use super::*;
 
     #[test]
-    fn override_state_keeps_its_control_mode_and_override_display() {
-        assert_eq!(ControlState::OVERRIDE.get_field_name(), Some("override"));
-        assert_eq!(ControlState::OVERRIDE.to_string(), Some("override"));
-        assert!(ControlState::OVERRIDE.has_field_name());
-        assert!(ControlState::OVERRIDE.is_component_display());
-        assert!(!ControlState::OVERRIDE.is_enable_display());
-        assert_eq!(
-            ControlState::OVERRIDE.get_control_string(),
-            Some(shared_strings::OVERRIDE_TEXT)
-        );
-    }
-
-    #[test]
-    fn enable_state_keeps_java_null_control_string_and_enable_display() {
-        assert_eq!(ControlState::ENABLE.get_field_name(), Some("enable"));
-        assert!(!ControlState::ENABLE.is_component_display());
-        assert!(ControlState::ENABLE.is_enable_display());
-        assert_eq!(ControlState::ENABLE.get_control_string(), None);
-    }
-
-    #[test]
-    fn constructor_preserves_nullable_control_string_separately_from_field_name() {
-        let state = ControlState::new(None, Some("control".to_owned()), DisplayType::Enable);
-        assert_eq!(state.get_field_name(), None);
-        assert_eq!(state.get_control_string(), Some("control"));
-        assert!(state.is_enable_display());
+    fn the_two_states() {
+        assert!(OVERRIDE.is_component_display());
+        assert!(!OVERRIDE.is_enable_display());
+        assert_eq!(OVERRIDE.get_control_string(), Some(">OVERRIDE<"));
+        assert_eq!(OVERRIDE.get_field_name(), Some("override"));
+        assert!(ENABLE.is_enable_display());
+        assert_eq!(ENABLE.get_control_string(), None);
     }
 }

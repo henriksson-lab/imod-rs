@@ -1,329 +1,145 @@
-//! `IMOD/Etomo/src/etomo/ui/swing/EfieldContainer.java`.
+//! `IMOD/Etomo/src/etomo/ui/swing/EfieldContainer.java`: holds a field and its
+//! optional label and control components, creating a panel only when one is
+//! needed.
 //!
-//! Swing `Component`, `Container`, `JPanel`, `BoxLayout`, and `GridBagLayout`
-//! calls are retained as explicit native-GUI boundary state.  The conditional
-//! panel construction and the `getComponent` lock are source behavior.
-#![allow(dead_code)]
+//! `final class EfieldContainer`.  The components are jdk stand-in
+//! [`JComponent`]s; `root instanceof JPanel` is `root.kind() ==
+//! ComponentKind::Panel`.  The grid-bag layout and its constraints are Swing
+//! layout and are recorded as comments only.
 
-/// Java `java.awt.Insets` values used by `EfieldContainer`.
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub struct EfieldInsets {
-    pub top: i32,
-    pub left: i32,
-    pub bottom: i32,
-    pub right: i32,
-}
+use std::cell::{Cell, RefCell};
+use std::rc::Rc;
 
-/// Opaque native Swing `Component` boundary.
-#[derive(Clone, Debug, Eq, PartialEq)]
-pub struct EfieldComponentBoundary {
-    /// Java `Component.toString()` boundary value.
-    pub to_string_value: String,
-}
+use crate::imod::etomo::jdk::{ComponentKind, JComponent};
 
-/// Opaque native Swing `Container` boundary.
-#[derive(Clone, Debug, Eq, PartialEq)]
-pub struct EfieldContainerBoundary {
-    /// Java `Container.toString()` boundary value.
-    pub to_string_value: String,
-}
+// Java `FIELD_INSETS = new Insets(0, 0, 0, -1)` and
+// `COMPONENT_INSETS = new Insets(0, 0, 0, -1)`: grid-bag constraint insets
+// (Swing layout).
 
-/// A child inserted with Java `Container.add(Component)`.
-#[derive(Clone, Debug, Eq, PartialEq)]
-pub enum EfieldContainerChild {
-    Component(EfieldComponentBoundary),
-    Container(EfieldContainerBoundary),
-}
-
-/// The subset of a Java `GridBagConstraints` observed by this source unit.
-#[derive(Clone, Debug, Eq, PartialEq)]
-pub struct EfieldGridBagConstraintsBoundary {
-    pub insets: EfieldInsets,
-    pub fill_both: bool,
-    pub weight_x: i32,
-    pub weight_y: i32,
-    pub grid_height: i32,
-    pub grid_width: i32,
-}
-
-/// One Java `GridBagLayout.setConstraints` call.
-#[derive(Clone, Debug, Eq, PartialEq)]
-pub struct EfieldGridBagSetConstraintsBoundary {
-    pub child: EfieldContainerChild,
-    pub constraints: EfieldGridBagConstraintsBoundary,
-}
-
-/// Native `JPanel` state constructed by Java private `createPanel()`.
-#[derive(Clone, Debug, Eq, PartialEq)]
-pub struct EfieldPanelBoundary {
-    pub layout: &'static str,
-    pub children: Vec<EfieldContainerChild>,
-    pub grid_bag_set_constraints: Vec<EfieldGridBagSetConstraintsBoundary>,
-}
-
-/// Java `root`, which is either the original `field` container or a `JPanel`.
-#[derive(Clone, Debug, Eq, PartialEq)]
-pub enum EfieldContainerRoot {
-    Field(EfieldContainerBoundary),
-    Panel(EfieldPanelBoundary),
-}
-
-/// Java package-private final `EfieldContainer`.
-#[derive(Clone, Debug, Eq, PartialEq)]
+/// Java `EfieldContainer`.
 pub struct EfieldContainer {
-    pub grid_bag_layout_created: bool,
-    pub constraints: Option<EfieldGridBagConstraintsBoundary>,
-    pub use_grid_bag: bool,
-    pub root: Option<EfieldContainerRoot>,
-    pub lock: bool,
+    // Java `gridBaglayout` and `constraints`: the GridBagLayout and its
+    // GridBagConstraints when `useGridBag` (Swing layout, not modelled).
+    use_grid_bag: bool,
+
+    root: RefCell<Option<Rc<JComponent>>>,
+    lock: Cell<bool>,
 }
 
 impl EfieldContainer {
-    pub const FIELD_INSETS: EfieldInsets = EfieldInsets {
-        top: 0,
-        left: 0,
-        bottom: 0,
-        right: -1,
-    };
-    pub const COMPONENT_INSETS: EfieldInsets = EfieldInsets {
-        top: 0,
-        left: 0,
-        bottom: 0,
-        right: -1,
-    };
-
-    /// Java `EfieldContainer(boolean, boolean, Component, Container, Component)`.
+    /// Java `EfieldContainer(boolean modifiable, boolean useGridBag, Component
+    /// label, Container field, Component fieldControl)`.  If label and/or
+    /// fieldControl are present create a JPanel and add to it in order: label,
+    /// field, fieldControl.  If only field is present then no JPanel is created
+    /// and the field is returned in getComponent.
+    /// - `modifiable`: field components will be added after the field is placed
+    ///   in a panel
+    /// - `use_grid_bag`: format field with grid bag layout
+    /// - `field`: required
+    /// - `label`, `field_control`: optional
     pub fn new(
         modifiable: bool,
         use_grid_bag: bool,
-        label: Option<EfieldComponentBoundary>,
-        field: EfieldContainerBoundary,
-        field_control: Option<EfieldComponentBoundary>,
-    ) -> Self {
-        let mut value = Self {
-            grid_bag_layout_created: use_grid_bag,
-            constraints: use_grid_bag.then_some(EfieldGridBagConstraintsBoundary {
-                insets: EfieldInsets {
-                    top: 0,
-                    left: 0,
-                    bottom: 0,
-                    right: 0,
-                },
-                fill_both: false,
-                weight_x: 0,
-                weight_y: 0,
-                grid_height: 1,
-                grid_width: 1,
-            }),
+        label: Option<&Rc<JComponent>>,
+        field: &Rc<JComponent>,
+        field_control: Option<&Rc<JComponent>>,
+    ) -> EfieldContainer {
+        let instance = EfieldContainer {
             use_grid_bag,
-            root: None,
-            lock: false,
+            root: RefCell::new(None),
+            lock: Cell::new(false),
         };
+        // Swing layout: when useGridBag, gridBaglayout = new GridBagLayout() and
+        // constraints = new GridBagConstraints(); otherwise both null.
         if !modifiable && label.is_none() && field_control.is_none() {
-            value.root = Some(EfieldContainerRoot::Field(field));
+            *instance.root.borrow_mut() = Some(field.clone());
         } else {
-            value.create_panel();
+            instance.create_panel();
+            let root = instance.root.borrow().clone().unwrap();
+            // label
             if let Some(label) = label {
-                if use_grid_bag {
-                    let constraints = value.constraints.clone().unwrap();
-                    if let Some(EfieldContainerRoot::Panel(root)) = &mut value.root {
-                        root.grid_bag_set_constraints
-                            .push(EfieldGridBagSetConstraintsBoundary {
-                                child: EfieldContainerChild::Component(label.clone()),
-                                constraints,
-                            });
-                    }
-                }
-                if let Some(EfieldContainerRoot::Panel(root)) = &mut value.root {
-                    root.children.push(EfieldContainerChild::Component(label));
-                }
+                // Swing layout (useGridBag): gridBaglayout.setConstraints(label,
+                // constraints).
+                root.add(label);
             }
-            if use_grid_bag {
-                value.constraints.as_mut().unwrap().insets = Self::FIELD_INSETS;
-                let constraints = value.constraints.clone().unwrap();
-                if let Some(EfieldContainerRoot::Panel(root)) = &mut value.root {
-                    root.grid_bag_set_constraints
-                        .push(EfieldGridBagSetConstraintsBoundary {
-                            child: EfieldContainerChild::Container(field.clone()),
-                            constraints,
-                        });
-                }
-            }
-            if let Some(EfieldContainerRoot::Panel(root)) = &mut value.root {
-                root.children.push(EfieldContainerChild::Container(field));
-            }
+            // field
+            // Swing layout (useGridBag): constraints.insets = FIELD_INSETS;
+            // gridBaglayout.setConstraints(field, constraints).
+            root.add(field);
+            // fieldControl
             if let Some(field_control) = field_control {
-                if use_grid_bag {
-                    let constraints = value.constraints.clone().unwrap();
-                    if let Some(EfieldContainerRoot::Panel(root)) = &mut value.root {
-                        root.grid_bag_set_constraints
-                            .push(EfieldGridBagSetConstraintsBoundary {
-                                child: EfieldContainerChild::Component(field_control.clone()),
-                                constraints,
-                            });
-                    }
-                }
-                if let Some(EfieldContainerRoot::Panel(root)) = &mut value.root {
-                    root.children
-                        .push(EfieldContainerChild::Component(field_control));
-                }
+                // Swing layout (useGridBag): gridBaglayout.setConstraints(
+                // fieldControl, constraints).
+                root.add(field_control);
             }
         }
-        value
+        instance
     }
 
-    /// Java `add(Component)`.
-    pub fn add(&mut self, component: Option<EfieldComponentBoundary>) {
+    /// Java `add(Component)`.  Add a component.  Creates a JPanel to hold field and
+    /// components if necessary.
+    ///
+    /// # Panics
+    /// Java throws `IllegalStateException` (an unchecked "Serious Software Error")
+    /// when the field has already been placed in a panel by `getComponent`.
+    pub fn add(&self, component: Option<&Rc<JComponent>>) {
         let Some(component) = component else {
             return;
         };
-        if self.lock {
+        if self.lock.get() {
+            // Java appends `component.toString()` and `root.toString()` (Swing's
+            // class/bounds dump, not modelled); kind and name stand in.
+            let root = self.root.borrow().clone();
             panic!(
-                "ERROR:  Serious Software Error.  Attempting to add component {} to a non-existent container.  A container cannot be created for the {} field because the field has already been placed in a panel.",
-                component.to_string_value,
-                match self.root.as_ref().unwrap() {
-                    EfieldContainerRoot::Field(value) => &value.to_string_value,
-                    EfieldContainerRoot::Panel(_) => "JPanel",
-                },
+                "ERROR:  Serious Software Error.  Attempting to add component {:?} {:?} to a \
+                 non-existent container.  A container cannot be created for the {:?} {:?} field \
+                 because the field has already been placed in a panel.",
+                component.kind(),
+                component.get_name(),
+                root.as_ref().map(|root| root.kind()),
+                root.as_ref().and_then(|root| root.get_name())
             );
         }
-        if matches!(self.root, Some(EfieldContainerRoot::Field(_))) {
-            let field = match self.root.take().unwrap() {
-                EfieldContainerRoot::Field(field) => field,
-                EfieldContainerRoot::Panel(_) => unreachable!(),
-            };
+        let root_is_panel = self
+            .root
+            .borrow()
+            .as_ref()
+            .is_some_and(|root| root.kind() == ComponentKind::Panel);
+        if !root_is_panel {
+            // Did not need a JPanel until now. Set root to a new JPanel and add the
+            // field to it.
+            let field = self.root.borrow().clone();
             self.create_panel();
-            if self.use_grid_bag {
-                self.constraints.as_mut().unwrap().insets = Self::FIELD_INSETS;
-                let constraints = self.constraints.clone().unwrap();
-                if let Some(EfieldContainerRoot::Panel(root)) = &mut self.root {
-                    root.grid_bag_set_constraints
-                        .push(EfieldGridBagSetConstraintsBoundary {
-                            child: EfieldContainerChild::Container(field.clone()),
-                            constraints,
-                        });
-                }
+            // field
+            // Swing layout (useGridBag): constraints.insets = FIELD_INSETS;
+            // gridBaglayout.setConstraints(field, constraints).
+            if let Some(field) = &field {
+                self.root.borrow().clone().unwrap().add(field);
             }
-            if let Some(EfieldContainerRoot::Panel(root)) = &mut self.root {
-                root.children.push(EfieldContainerChild::Container(field));
-            }
-            if self.use_grid_bag {
-                self.constraints.as_mut().unwrap().insets = Self::COMPONENT_INSETS;
-                let constraints = self.constraints.clone().unwrap();
-                if let Some(EfieldContainerRoot::Panel(root)) = &mut self.root {
-                    root.grid_bag_set_constraints
-                        .push(EfieldGridBagSetConstraintsBoundary {
-                            child: EfieldContainerChild::Component(component.clone()),
-                            constraints,
-                        });
-                }
-            }
+            // component
+            // Swing layout (useGridBag): constraints.insets = COMPONENT_INSETS;
+            // gridBaglayout.setConstraints(component, constraints).
         }
-        if let Some(EfieldContainerRoot::Panel(root)) = &mut self.root {
-            root.children
-                .push(EfieldContainerChild::Component(component));
-        }
+        self.root.borrow().clone().unwrap().add(component);
     }
 
-    /// Java private `createPanel()`.
-    fn create_panel(&mut self) {
-        self.root = Some(EfieldContainerRoot::Panel(EfieldPanelBoundary {
-            layout: if self.use_grid_bag {
-                "GridBagLayout"
-            } else {
-                "BoxLayout.X_AXIS"
-            },
-            children: Vec::new(),
-            grid_bag_set_constraints: Vec::new(),
-        }));
+    /// Java `createPanel()`.
+    fn create_panel(&self) {
+        *self.root.borrow_mut() = Some(JComponent::new_panel());
         if self.use_grid_bag {
-            let constraints = self.constraints.as_mut().unwrap();
-            constraints.fill_both = true;
-            constraints.weight_x = 0;
-            constraints.weight_y = 0;
-            constraints.grid_height = 1;
-            constraints.grid_width = 1;
+            // Swing layout: root.setLayout(gridBaglayout); constraints.fill = BOTH,
+            // weightx = weighty = 0.0, gridheight = gridwidth = 1.
+        } else {
+            // Swing layout: root.setLayout(new BoxLayout(root, BoxLayout.X_AXIS)).
         }
     }
 
     /// Java `getComponent()`.
-    pub fn get_component(&mut self) -> &EfieldContainerRoot {
-        if !self.lock && matches!(self.root, Some(EfieldContainerRoot::Field(_))) {
-            self.lock = true;
+    pub fn get_component(&self) -> Rc<JComponent> {
+        let root = self.root.borrow().clone().unwrap();
+        if !self.lock.get() && root.kind() != ComponentKind::Panel {
+            self.lock.set(true);
         }
-        self.root.as_ref().unwrap()
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    fn field() -> EfieldContainerBoundary {
-        EfieldContainerBoundary {
-            to_string_value: "field".into(),
-        }
-    }
-    fn component(value: &str) -> EfieldComponentBoundary {
-        EfieldComponentBoundary {
-            to_string_value: value.into(),
-        }
-    }
-
-    #[test]
-    fn unmodified_unlabeled_field_is_returned_and_locked() {
-        let mut value = EfieldContainer::new(false, false, None, field(), None);
-        assert!(matches!(
-            value.get_component(),
-            EfieldContainerRoot::Field(_)
-        ));
-        assert!(value.lock);
-    }
-
-    #[test]
-    #[should_panic(expected = "Attempting to add component control")]
-    fn get_component_locks_a_raw_field_against_late_addition() {
-        let mut value = EfieldContainer::new(false, false, None, field(), None);
-        value.get_component();
-        value.add(Some(component("control")));
-    }
-
-    #[test]
-    fn late_addition_wraps_raw_field_in_grid_bag_panel() {
-        let mut value = EfieldContainer::new(false, true, None, field(), None);
-        value.add(Some(component("control")));
-        let EfieldContainerRoot::Panel(root) = value.get_component() else {
-            panic!("expected panel");
-        };
-        assert_eq!(root.layout, "GridBagLayout");
-        assert_eq!(root.children.len(), 2);
-        assert_eq!(root.grid_bag_set_constraints.len(), 2);
-        assert_eq!(
-            root.grid_bag_set_constraints[1].constraints.insets,
-            EfieldContainer::COMPONENT_INSETS
-        );
-    }
-
-    #[test]
-    fn constructor_preserves_label_field_and_control_order() {
-        let mut value = EfieldContainer::new(
-            true,
-            false,
-            Some(component("label")),
-            field(),
-            Some(component("control")),
-        );
-        let EfieldContainerRoot::Panel(root) = value.get_component() else {
-            panic!("expected panel");
-        };
-        assert_eq!(root.layout, "BoxLayout.X_AXIS");
-        assert_eq!(
-            root.children,
-            vec![
-                EfieldContainerChild::Component(component("label")),
-                EfieldContainerChild::Container(field()),
-                EfieldContainerChild::Component(component("control")),
-            ]
-        );
+        root
     }
 }

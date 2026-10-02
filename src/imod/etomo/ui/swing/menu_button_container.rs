@@ -1,12 +1,14 @@
 //! `IMOD/Etomo/src/etomo/ui/swing/MenuButtonContainer.java`.
-#![allow(dead_code)]
 
-use super::menu_button::ActionElement;
+use std::rc::Rc;
 
-/// Java `MenuButtonContainer`.  The caller owns the concrete mutable receiver,
-/// so this trait passes the source command and element across an explicit GUI
-/// boundary rather than retaining an invalid Rust borrow.
+use crate::imod::etomo::r#type::action_element::ActionElement;
+
+/// Java `rcsid`.
+pub const RCSID: &str = "$Id$";
+
+/// Java package-private `interface MenuButtonContainer`.
 pub trait MenuButtonContainer {
     /// Java `action(String, ActionElement)`.
-    fn action(&mut self, command: &str, action_element: &ActionElement);
+    fn action(&self, command: Option<&str>, action_element: &Rc<dyn ActionElement>);
 }

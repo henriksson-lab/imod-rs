@@ -1,407 +1,295 @@
 //! `IMOD/Etomo/src/etomo/ui/swing/EERSuperResZSumPaddingPanel.java`.
 //!
-//! Swing construction and autodoc I/O remain explicit presentation/storage
-//! boundaries.  This source unit retains the EER super-resolution and mutually
-//! exclusive z-summing choice, exact bounds, parameter transfer, and header
-//! expansion routing.
-#![allow(dead_code)]
+//! Java `final class EERSuperResZSumPaddingPanel implements Expandable,
+//! ActionListener`: the "Reading EER Files" panel of the Align Frames tool
+//! (`AlignFramesPanel`), which sets alignframes' `EERSuperResZSumPadding`
+//! option.  An EDT object (`ui.md`): created as `Rc<Self>` by
+//! [`EERSuperResZSumPaddingPanel::get_instance`]; every method takes `&self`.
+//! The panel is its own `ActionListener`; that listener is a closure holding a
+//! weak reference.
 
-use std::cell::RefCell;
-use std::rc::Rc;
+use std::rc::{Rc, Weak};
 
-use crate::imod::etomo::r#type::{axis_id::AxisID, dialog_type::DialogType};
+use super::abstract_radio_button_model::AbstractRadioButtonModel;
+use super::etomo_button_group::EtomoButtonGroup;
+use super::expand_button::ExpandButton;
+use super::expandable::Expandable;
+use super::global_expand_button::GlobalExpandButton;
+use super::label::Label;
+use super::panel_header::PanelHeader;
+use super::radio_button::{RadioButton, RadioButtonModel};
+use super::radio_button_interface::EnumeratedTypeRef;
+use super::radio_ebutton::RadioEbutton;
+use super::spinner::Spinner;
+use super::ui_harness;
+use crate::imod::etomo::base_manager::BaseManager;
+use crate::imod::etomo::comscript::align_frames_param::{self, AlignFramesParam};
+use crate::imod::etomo::jdk::{ActionEvent, ActionListener, ButtonGroup, ButtonModel, JComponent};
+use crate::imod::etomo::storage::autodoc::autodoc::Autodoc;
+use crate::imod::etomo::storage::autodoc::autodoc_factory;
+use crate::imod::etomo::storage::autodoc::read_only_autodoc::ReadOnlyAutodoc;
+use crate::imod::etomo::storage::autodoc::read_only_section::ReadOnlySection;
+use crate::imod::etomo::storage::log_file::LogFileError;
+use crate::imod::etomo::r#type::axis_id::AxisID;
+use crate::imod::etomo::r#type::const_etomo_number::ConstEtomoNumber;
+use crate::imod::etomo::r#type::dialog_type::DialogType;
+use crate::imod::etomo::r#type::eer_super_res::EERSuperRes;
+use crate::imod::etomo::r#type::enumerated_type::EnumeratedType;
+use crate::imod::etomo::r#type::etomo_autodoc;
+use crate::imod::etomo::r#type::etomo_number::EtomoNumber;
 
-use super::{
-    panel_header::{ExpandButton, Expandable, PanelHeader},
-    radio_button::{EnumeratedTypeBoundary, RadioButton, RadioButtonGroup},
-    spinner::Spinner,
-};
+/// Java private static final `EER_Z_SUM_FRAMES_MIN`.
+const EER_Z_SUM_FRAMES_MIN: i32 = 2;
+/// Java private static final `EER_Z_SUM_FRAMES_MAX`.
+const EER_Z_SUM_FRAMES_MAX: i32 = 100;
+/// Java private static final `EER_Z_SUM_SETS_MIN`.
+const EER_Z_SUM_SETS_MIN: i32 = 1;
+/// Java private static final `EER_Z_SUM_SETS_MAX`.
+const EER_Z_SUM_SETS_MAX: i32 = 1000;
 
-pub const EER_Z_SUM_FRAMES_MIN: i32 = 2;
-pub const EER_Z_SUM_FRAMES_MAX: i32 = 100;
-pub const EER_Z_SUM_SETS_MIN: i32 = 1;
-pub const EER_Z_SUM_SETS_MAX: i32 = 1000;
-pub const EER_Z_SUM_SETS_DEFAULT: i32 = 1;
-pub const EER_SUPER_RES_Z_SUM_PADDING_KEY: &str = "EERSuperResZSumPadding";
-
-/// Java `EERSuperRes` values used by this panel.
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub enum EerSuperRes {
-    None,
-    TwoX,
-    FourX,
+/// Java `final class EERSuperResZSumPaddingPanel`.
+pub struct EERSuperResZSumPaddingPanel {
+    /// Java private final `pnlRoot = new JPanel()`.
+    pnl_root: Rc<JComponent>,
+    /// Java private final `pnlBody = new JPanel()`.
+    pnl_body: Rc<JComponent>,
+    /// Java private final `lSuperRes = new Label("Frame size to read in:")`.
+    l_super_res: Rc<Label>,
+    /// Java private final `bgSuperRes = new ButtonGroup()`.
+    bg_super_res: Rc<ButtonGroup>,
+    /// Java private final `rbSuperResNone`.
+    rb_super_res_none: Rc<RadioButton>,
+    /// Java private final `rbSuperRes2x`.
+    rb_super_res_2x: Rc<RadioButton>,
+    /// Java private final `rbSuperRes4x`.
+    rb_super_res_4x: Rc<RadioButton>,
+    /// Java private final `bgZSum = new EtomoButtonGroup()`.
+    #[allow(dead_code)]
+    bg_z_sum: Rc<EtomoButtonGroup>,
+    /// Java private final `rbZSumFrames`.
+    rb_z_sum_frames: Rc<RadioEbutton>,
+    /// Java private final `spZSumFrames`.
+    sp_z_sum_frames: Rc<Spinner>,
+    /// Java private final `lZSumFrames = new Label("images to align")`.
+    l_z_sum_frames: Rc<Label>,
+    /// Java private final `rbZSumSets`.
+    rb_z_sum_sets: Rc<RadioEbutton>,
+    /// Java private final `spZSumSets`.
+    sp_z_sum_sets: Rc<Spinner>,
+    /// Java private final `lZSumSets = new Label("frames")`.
+    l_z_sum_sets: Rc<Label>,
+    /// Java private final `manager`.
+    manager: &'static dyn BaseManager,
+    /// Java private final `axisID`.
+    axis_id: AxisID,
+    /// Java private final `header`.
+    header: Rc<PanelHeader>,
+    /// Rust-only: Java `this` as the `ActionListener` it registers.
+    action_listener: ActionListener,
 }
 
-impl EerSuperRes {
-    pub const DEFAULT: Self = Self::TwoX;
-
-    pub fn get_instance(value: Option<i32>) -> Option<Self> {
-        match value {
-            Some(0) => Some(Self::None),
-            Some(1) => Some(Self::TwoX),
-            Some(2) => Some(Self::FourX),
-            _ => None,
-        }
-    }
-    pub fn get_value(self) -> i32 {
-        match self {
-            Self::None => 0,
-            Self::TwoX => 1,
-            Self::FourX => 2,
-        }
-    }
-    pub fn get_label(self) -> &'static str {
-        match self {
-            Self::None => "4K",
-            Self::TwoX => "8K",
-            Self::FourX => "16K",
-        }
-    }
-    pub fn get_tooltip(self) -> &'static str {
-        match self {
-            Self::None => "Read in frames for processing with anti-aliased reduction to 4K by 4K.",
-            Self::TwoX => "Read in frames for processing with anti-aliased reduction to 8K by 8K.",
-            Self::FourX => "Read in 16K frames at full 4x super-resolution.",
-        }
-    }
-}
-
-/// Java private static `EERZSum`.
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub enum EerZSum {
-    Frames,
-    Sets,
-}
-
-impl EerZSum {
-    pub const DEFAULT: Self = Self::Frames;
-    /// Java `isDefault()`.
-    pub fn is_default(self) -> bool {
-        self == Self::DEFAULT
-    }
-    pub fn radio_enum_value_name(self) -> &'static str {
-        match self {
-            Self::Frames => "framesradio",
-            Self::Sets => "setsradio",
-        }
-    }
-    pub fn spinner_enum_value_name(self) -> &'static str {
-        match self {
-            Self::Frames => "framesspin",
-            Self::Sets => "setsspin",
-        }
-    }
-    pub fn get_label(self) -> &'static str {
-        match self {
-            Self::Frames => "Sum frames to make",
-            Self::Sets => "Sum successive sets of",
-        }
-    }
-}
-
-/// Java `toString()`.
-impl std::fmt::Display for EerZSum {
-    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        formatter.write_str(self.radio_enum_value_name())
-    }
-}
-
-/// Java `AlignFramesParam` calls made by this source unit.
-pub trait EerSuperResZSumPaddingParameters {
-    fn get_eer_super_res(&self) -> Option<i32>;
-    fn is_eer_z_sum_frames_set(&self) -> bool;
-    fn get_eer_z_sum_frames(&self) -> i32;
-    fn get_eer_z_sum_sets(&self) -> i32;
-    fn set_eer_super_res(&mut self, value: i32);
-    fn set_eer_z_sum_frames(&mut self, value: i32);
-    fn set_eer_z_sum_sets(&mut self, value: i32);
-}
-
-/// Small source-facing form of the `AlignFramesParam` EER fields.
-#[derive(Clone, Debug, Default, Eq, PartialEq)]
-pub struct AlignFramesEerParameters {
-    pub eer_super_res: Option<i32>,
-    pub eer_z_sum_frames: Option<i32>,
-    pub eer_z_sum_sets: i32,
-}
-
-impl EerSuperResZSumPaddingParameters for AlignFramesEerParameters {
-    fn get_eer_super_res(&self) -> Option<i32> {
-        self.eer_super_res
-    }
-    fn is_eer_z_sum_frames_set(&self) -> bool {
-        self.eer_z_sum_frames.is_some()
-    }
-    fn get_eer_z_sum_frames(&self) -> i32 {
-        self.eer_z_sum_frames.unwrap_or_default()
-    }
-    fn get_eer_z_sum_sets(&self) -> i32 {
-        self.eer_z_sum_sets
-    }
-    fn set_eer_super_res(&mut self, value: i32) {
-        self.eer_super_res = Some(value);
-    }
-    fn set_eer_z_sum_frames(&mut self, value: i32) {
-        self.eer_z_sum_frames = Some(value);
-    }
-    fn set_eer_z_sum_sets(&mut self, value: i32) {
-        self.eer_z_sum_sets = value;
-        self.eer_z_sum_frames = None;
-    }
-}
-
-/// Direct Java `UIHarness.INSTANCE.pack(axisID, manager)` boundary.
-pub trait EerSuperResZSumPaddingManager {
-    fn pack(&mut self, axis_id: AxisID);
-}
-
-/// Swing label state kept at the presentation boundary.
-#[derive(Clone, Debug, Eq, PartialEq)]
-pub struct Label {
-    pub text: String,
-    pub enabled: bool,
-    pub tooltip: Option<String>,
-}
-impl Label {
-    pub fn new(text: impl Into<String>) -> Self {
-        Self {
-            text: text.into(),
-            enabled: true,
-            tooltip: None,
-        }
-    }
-    pub fn set_enabled(&mut self, enabled: bool) {
-        self.enabled = enabled;
-    }
-    pub fn set_tooltip_text(&mut self, tooltip: Option<&str>) {
-        self.tooltip = tooltip.map(str::to_owned);
-    }
-}
-
-/// Java `JPanel` construction and ordered `BoxLayout` children.
-#[derive(Clone, Debug, Default, Eq, PartialEq)]
-pub struct EerSuperResZSumPaddingPanelLayout {
-    pub root_box_layout_y_axis: bool,
-    pub root_etched_border: bool,
-    pub body_box_layout_y_axis: bool,
-    pub body_visible: bool,
-    pub root_component_order: Vec<String>,
-    pub body_component_order: Vec<String>,
-    pub super_res_component_order: Vec<String>,
-    pub z_sum_frames_component_order: Vec<String>,
-    pub z_sum_sets_component_order: Vec<String>,
-}
-
-/// Java final `EERSuperResZSumPaddingPanel`.
-pub struct EerSuperResZSumPaddingPanel {
-    pub pnl_root: EerSuperResZSumPaddingPanelLayout,
-    pub l_super_res: Label,
-    pub rb_super_res_none: RadioButton,
-    pub rb_super_res_2x: RadioButton,
-    pub rb_super_res_4x: RadioButton,
-    pub rb_z_sum_frames: RadioButton,
-    pub sp_z_sum_frames: Spinner,
-    pub l_z_sum_frames: Label,
-    pub rb_z_sum_sets: RadioButton,
-    pub sp_z_sum_sets: Spinner,
-    pub l_z_sum_sets: Label,
-    pub axis_id: AxisID,
-    pub header: PanelHeader,
-    pub listeners_added: bool,
-    pub tooltip_autodoc_available: bool,
-}
-
-impl EerSuperResZSumPaddingPanel {
-    /// Java private constructor.
-    pub fn new(axis_id: AxisID, dialog_type: DialogType, eer_z_sum_frames_default: i32) -> Self {
-        let super_res_group = Rc::new(RefCell::new(RadioButtonGroup::new()));
-        let z_sum_group = Rc::new(RefCell::new(RadioButtonGroup::new()));
-        Self {
-            pnl_root: EerSuperResZSumPaddingPanelLayout {
-                body_visible: true,
-                ..Default::default()
-            },
-            l_super_res: Label::new("Frame size to read in:"),
-            rb_super_res_none: RadioButton::new_with_enumerated_type(
-                None,
-                EnumeratedTypeBoundary {
-                    label: EerSuperRes::None.get_label().into(),
-                    default: false,
-                    value: Some(EerSuperRes::None.get_value().to_string()),
-                },
-                Some(super_res_group.clone()),
-            ),
-            rb_super_res_2x: RadioButton::new_with_enumerated_type(
-                None,
-                EnumeratedTypeBoundary {
-                    label: EerSuperRes::TwoX.get_label().into(),
-                    default: true,
-                    value: Some(EerSuperRes::TwoX.get_value().to_string()),
-                },
-                Some(super_res_group.clone()),
-            ),
-            rb_super_res_4x: RadioButton::new_with_enumerated_type(
-                None,
-                EnumeratedTypeBoundary {
-                    label: EerSuperRes::FourX.get_label().into(),
-                    default: false,
-                    value: Some(EerSuperRes::FourX.get_value().to_string()),
-                },
-                Some(super_res_group),
-            ),
-            rb_z_sum_frames: RadioButton::new_with_enumerated_type(
-                Some(EerZSum::Frames.get_label().into()),
-                EnumeratedTypeBoundary {
-                    label: EerZSum::Frames.get_label().into(),
-                    default: true,
-                    value: None,
-                },
-                Some(z_sum_group.clone()),
-            ),
-            sp_z_sum_frames: Spinner::get_instance(
-                EerZSum::Frames.get_label(),
-                eer_z_sum_frames_default,
-                EER_Z_SUM_FRAMES_MIN,
-                EER_Z_SUM_FRAMES_MAX,
-                1,
-            ),
-            l_z_sum_frames: Label::new("images to align"),
-            rb_z_sum_sets: RadioButton::new_with_enumerated_type(
-                Some(EerZSum::Sets.get_label().into()),
-                EnumeratedTypeBoundary {
-                    label: EerZSum::Sets.get_label().into(),
-                    default: false,
-                    value: None,
-                },
-                Some(z_sum_group),
-            ),
-            sp_z_sum_sets: Spinner::get_instance(
-                EerZSum::Sets.get_label(),
-                EER_Z_SUM_SETS_DEFAULT,
-                EER_Z_SUM_SETS_MIN,
-                EER_Z_SUM_SETS_MAX,
-                1,
-            ),
-            l_z_sum_sets: Label::new("frames"),
-            axis_id,
-            header: PanelHeader::new(
-                "Reading EER Files",
-                false,
-                false,
-                dialog_type,
-                true,
-                false,
-                true,
-                false,
-                true,
-            ),
-            listeners_added: false,
-            tooltip_autodoc_available: false,
-        }
-    }
-
-    /// Java static `getInstance`; the autodoc acquisition is retained as an
-    /// explicit caller-provided storage boundary.
-    pub fn get_instance(
+impl EERSuperResZSumPaddingPanel {
+    /// Java private constructor `EERSuperResZSumPaddingPanel(BaseManager, AxisID,
+    /// DialogType)`, with the field initializers.
+    fn new(
+        manager: &'static dyn BaseManager,
         axis_id: AxisID,
         dialog_type: DialogType,
-        eer_z_sum_frames_default: i32,
-        autodoc_available: bool,
-    ) -> Self {
-        let mut instance = Self::new(axis_id, dialog_type, eer_z_sum_frames_default);
+    ) -> Rc<EERSuperResZSumPaddingPanel> {
+        Rc::new_cyclic(|self_ref: &Weak<EERSuperResZSumPaddingPanel>| {
+            let bg_super_res = ButtonGroup::new();
+            let rb_super_res_none = RadioButton::new_enumerated_type_button_group(
+                EnumeratedTypeRef::new(EERSuperRes::NONE),
+                Some(&bg_super_res),
+            );
+            let rb_super_res_2x = RadioButton::new_enumerated_type_button_group(
+                EnumeratedTypeRef::new(EERSuperRes::TWO_X),
+                Some(&bg_super_res),
+            );
+            let rb_super_res_4x = RadioButton::new_enumerated_type_button_group(
+                EnumeratedTypeRef::new(EERSuperRes::FOUR_X),
+                Some(&bg_super_res),
+            );
+            let bg_z_sum = EtomoButtonGroup::new();
+            let rb_z_sum_frames = RadioEbutton::get_enum_instance(
+                Some(EnumeratedTypeRef::new(EERZSum::FRAMES)),
+                Some(&bg_z_sum),
+            );
+            // Java `AlignFramesParam.getEERZSumFramesDefault()` is an Integer that is
+            // never null here (unboxed to the int parameter).
+            let sp_z_sum_frames = Spinner::get_instance_string_int_int_int(
+                EERZSum::FRAMES.get_label().as_deref(),
+                AlignFramesParam::get_eer_z_sum_frames_default().unwrap_or_default(),
+                EER_Z_SUM_FRAMES_MIN,
+                EER_Z_SUM_FRAMES_MAX,
+            );
+            let l_z_sum_frames = Label::new_string(Some("images to align"));
+            let rb_z_sum_sets = RadioEbutton::get_enum_instance(
+                Some(EnumeratedTypeRef::new(EERZSum::SETS)),
+                Some(&bg_z_sum),
+            );
+            let sp_z_sum_sets = Spinner::get_instance_string_int_int_int(
+                EERZSum::SETS.get_label().as_deref(),
+                align_frames_param::EER_Z_SUM_SETS_DEFAULT,
+                EER_Z_SUM_SETS_MIN,
+                EER_Z_SUM_SETS_MAX,
+            );
+            let l_z_sum_sets = Label::new_string(Some("frames"));
+            // Constructor body.
+            let expandable: Weak<dyn Expandable> = self_ref.clone();
+            let header = PanelHeader::get_instance(
+                Some("Reading EER Files"),
+                Some(expandable),
+                Some(dialog_type),
+            );
+            let adaptee = self_ref.clone();
+            let action_listener: ActionListener = Rc::new(move |event: &ActionEvent| {
+                if let Some(adaptee) = adaptee.upgrade() {
+                    adaptee.action_performed(event);
+                }
+            });
+            EERSuperResZSumPaddingPanel {
+                pnl_root: JComponent::new_panel(),
+                pnl_body: JComponent::new_panel(),
+                l_super_res: Label::new_string(Some("Frame size to read in:")),
+                bg_super_res,
+                rb_super_res_none,
+                rb_super_res_2x,
+                rb_super_res_4x,
+                bg_z_sum,
+                rb_z_sum_frames,
+                sp_z_sum_frames,
+                l_z_sum_frames,
+                rb_z_sum_sets,
+                sp_z_sum_sets,
+                l_z_sum_sets,
+                manager,
+                axis_id,
+                header,
+                action_listener,
+            }
+        })
+    }
+
+    /// Java package-private static `getInstance(BaseManager, AxisID, DialogType)`.
+    pub fn get_instance(
+        manager: &'static dyn BaseManager,
+        axis_id: AxisID,
+        dialog_type: DialogType,
+    ) -> Rc<EERSuperResZSumPaddingPanel> {
+        let instance = EERSuperResZSumPaddingPanel::new(manager, axis_id, dialog_type);
         instance.create_panel();
-        instance.set_tooltips(autodoc_available, None, None);
+        instance.set_tootips();
         instance.add_listeners();
         instance
     }
 
-    /// Java private `createPanel`.
-    pub fn create_panel(&mut self) {
-        self.header.btn_open_close.as_mut().unwrap().update(false);
-        self.pnl_root.root_box_layout_y_axis = true;
-        self.pnl_root.root_etched_border = true;
-        self.pnl_root.body_box_layout_y_axis = true;
-        self.pnl_root.root_component_order = vec!["header".into(), "pnlBody".into()];
-        self.pnl_root.body_component_order = vec![
-            "pnlSuperRes".into(),
-            "pnlZSumFrames".into(),
-            "verticalStrut(2)".into(),
-            "pnlZSumSets".into(),
-            "verticalStrut(2)".into(),
-        ];
-        self.pnl_root.super_res_component_order = vec![
-            "horizontalStrut(2)".into(),
-            "lSuperRes".into(),
-            "rbSuperResNone".into(),
-            "rbSuperRes2x".into(),
-            "rbSuperRes4x".into(),
-        ];
-        self.pnl_root.z_sum_frames_component_order = vec![
-            "rbZSumFrames".into(),
-            "spZSumFrames".into(),
-            "horizontalStrut(3)".into(),
-            "lZSumFrames".into(),
-            "horizontalStrut(2)".into(),
-        ];
-        self.pnl_root.z_sum_sets_component_order = vec![
-            "rbZSumSets".into(),
-            "spZSumSets".into(),
-            "horizontalStrut(3)".into(),
-            "lZSumSets".into(),
-            "horizontalStrut(2)".into(),
-        ];
+    /// Java private `createPanel()`.
+    fn create_panel(&self) {
+        // panels
+        let pnl_super_res = JComponent::new_panel();
+        let pnl_z_sum_frames = JComponent::new_panel();
+        let pnl_z_sum_sets = JComponent::new_panel();
+        // init
+        self.header.set_open(false);
+        // Root
+        // Swing layout: pnlRoot BoxLayout Y_AXIS.
+        // Swing painting: pnlRoot.setBorder(BorderFactory.createEtchedBorder())
+        // (untitled).
+        self.pnl_root.add(&self.header.get_component());
+        self.pnl_root.add(&self.pnl_body);
+        // Body
+        // Swing layout: pnlBody BoxLayout Y_AXIS; vertical struts (2) after the
+        // two ZSum rows.
+        self.pnl_body.add(&pnl_super_res);
+        self.pnl_body.add(&pnl_z_sum_frames);
+        self.pnl_body.add(&pnl_z_sum_sets);
+        // SuperRes
+        // Swing layout: pnlSuperRes BoxLayout X_AXIS; horizontal strut (2) first.
+        pnl_super_res.add(&self.l_super_res.get_component());
+        pnl_super_res.add(&self.rb_super_res_none.get_component());
+        pnl_super_res.add(&self.rb_super_res_2x.get_component());
+        pnl_super_res.add(&self.rb_super_res_4x.get_component());
+        // ZSumFrames
+        // Swing layout: pnlZSumFrames BoxLayout X_AXIS; horizontal struts (3)
+        // before the label and (2) after it.
+        pnl_z_sum_frames.add(&self.rb_z_sum_frames.get_component());
+        pnl_z_sum_frames.add(&self.sp_z_sum_frames.get_component());
+        pnl_z_sum_frames.add(&self.l_z_sum_frames.get_component());
+        // ZSumSets
+        // Swing layout: pnlZSumSets BoxLayout X_AXIS; horizontal struts (3)
+        // before the label and (2) after it.
+        pnl_z_sum_sets.add(&self.rb_z_sum_sets.get_component());
+        pnl_z_sum_sets.add(&self.sp_z_sum_sets.get_component());
+        pnl_z_sum_sets.add(&self.l_z_sum_sets.get_component());
+
         self.update_display();
     }
-    /// Java `getComponent` boundary.
-    pub fn get_component(&self) -> &EerSuperResZSumPaddingPanelLayout {
-        &self.pnl_root
+
+    /// Java public `getComponent()`.
+    pub fn get_component(&self) -> Rc<JComponent> {
+        self.pnl_root.clone()
     }
-    /// Java `addListeners`.
-    pub fn add_listeners(&mut self) {
-        self.rb_z_sum_frames.add_action_listener();
-        self.rb_z_sum_sets.add_action_listener();
-        self.listeners_added = true;
+
+    /// Java package-private `addListeners()`.
+    fn add_listeners(&self) {
+        self.rb_z_sum_frames
+            .add_action_listener(self.action_listener.clone());
+        self.rb_z_sum_sets
+            .add_action_listener(self.action_listener.clone());
     }
+
     /// Java `actionPerformed(ActionEvent)`.
-    pub fn action_performed(&mut self) {
+    pub fn action_performed(&self, _event: &ActionEvent) {
         self.update_display();
     }
-    /// Java private `updateDisplay`.
-    pub fn update_display(&mut self) {
+
+    /// Java private `updateDisplay()`.
+    fn update_display(&self) {
         let z_sum_frames = self.rb_z_sum_frames.is_selected();
         self.sp_z_sum_frames.set_enabled(z_sum_frames);
-        self.l_z_sum_frames.set_enabled(z_sum_frames);
+        self.l_z_sum_frames
+            .get_component()
+            .set_enabled(z_sum_frames);
         let z_sum_sets = self.rb_z_sum_sets.is_selected();
         self.sp_z_sum_sets.set_enabled(z_sum_sets);
-        self.l_z_sum_sets.set_enabled(z_sum_sets);
+        self.l_z_sum_sets.get_component().set_enabled(z_sum_sets);
     }
-    /// Java `setParameters(AlignFramesParam)`.
-    pub fn set_parameters<P: EerSuperResZSumPaddingParameters>(&mut self, param: &P) {
-        match EerSuperRes::get_instance(param.get_eer_super_res()) {
-            Some(EerSuperRes::None) => self.rb_super_res_none.set_selected(true),
-            Some(EerSuperRes::TwoX) => self.rb_super_res_2x.set_selected(true),
-            Some(EerSuperRes::FourX) => self.rb_super_res_4x.set_selected(true),
-            None => {}
+
+    /// Java package-private `setParameters(AlignFramesParam)`.
+    pub fn set_parameters(&self, param: &AlignFramesParam) {
+        let eer_super_res = EERSuperRes::get_instance(Some(param.get_eer_super_res()));
+        if eer_super_res == Some(EERSuperRes::NONE) {
+            self.rb_super_res_none.set_selected_boolean(true);
+        } else if eer_super_res == Some(EERSuperRes::TWO_X) {
+            self.rb_super_res_2x.set_selected_boolean(true);
+        } else if eer_super_res == Some(EERSuperRes::FOUR_X) {
+            self.rb_super_res_4x.set_selected_boolean(true);
         }
         if param.is_eer_z_sum_frames_set() {
             self.rb_z_sum_frames.set_selected(true);
-            self.sp_z_sum_frames.set_value(param.get_eer_z_sum_frames());
+            self.sp_z_sum_frames
+                .set_value_int(param.get_eer_z_sum_frames());
         } else {
             self.rb_z_sum_sets.set_selected(true);
-            self.sp_z_sum_sets.set_value(param.get_eer_z_sum_sets());
+            self.sp_z_sum_sets.set_value_int(param.get_eer_z_sum_sets());
         }
         self.update_display();
     }
-    /// Java `getParameters(AlignFramesParam)`.
-    pub fn get_parameters<P: EerSuperResZSumPaddingParameters>(&self, param: &mut P) {
-        for (button, value) in [
-            (&self.rb_super_res_none, EerSuperRes::None),
-            (&self.rb_super_res_2x, EerSuperRes::TwoX),
-            (&self.rb_super_res_4x, EerSuperRes::FourX),
-        ] {
-            if button.is_selected() {
-                param.set_eer_super_res(value.get_value());
-                break;
+
+    /// Java package-private `getParameters(AlignFramesParam)`.
+    pub fn get_parameters(&self, param: &mut AlignFramesParam) {
+        // Java `(RadioButton.RadioButtonModel) bgSuperRes.getSelection()`.
+        let model = self
+            .bg_super_res
+            .get_selection()
+            .and_then(|button| button.get_model());
+        if let Some(model) = model {
+            if let Some(model) = model.as_any().downcast_ref::<RadioButtonModel>() {
+                let super_res = AbstractRadioButtonModel::get_enumerated_type(model);
+                if let Some(super_res) = super_res {
+                    param.set_eer_super_res(Some(&super_res.get_value()));
+                }
             }
         }
         if self.rb_z_sum_frames.is_selected() {
@@ -410,107 +298,162 @@ impl EerSuperResZSumPaddingPanel {
             param.set_eer_z_sum_sets(self.sp_z_sum_sets.get_int_value());
         }
     }
-    /// Java `Expandable.expand(ExpandButton)`.
-    pub fn expand<M: EerSuperResZSumPaddingManager>(
-        &mut self,
-        button: &ExpandButton,
-        manager: &mut M,
-    ) {
-        if self.header.equals_open_close(button) {
-            self.pnl_root.body_visible = button.is_expanded();
-        }
-        manager.pack(self.axis_id);
-    }
-    /// Java `Expandable.expand(GlobalExpandButton)`, intentionally empty.
-    pub fn expand_global_button(&mut self) {}
-    /// Java private `setTootips`, with concrete autodoc extraction at the
-    /// storage boundary and resulting strings passed directly here.
-    pub fn set_tooltips(
-        &mut self,
-        autodoc_available: bool,
-        frames_tooltip: Option<&str>,
-        sets_tooltip: Option<&str>,
-    ) {
-        self.tooltip_autodoc_available = autodoc_available;
-        if autodoc_available {
-            self.rb_super_res_none
-                .set_tool_tip_text(Some(EerSuperRes::None.get_tooltip()));
-            self.rb_super_res_2x
-                .set_tool_tip_text(Some(EerSuperRes::TwoX.get_tooltip()));
-            self.rb_super_res_4x
-                .set_tool_tip_text(Some(EerSuperRes::FourX.get_tooltip()));
-            self.rb_z_sum_frames.set_tool_tip_text(frames_tooltip);
-            self.sp_z_sum_frames.set_tool_tip_text(frames_tooltip);
-            self.l_z_sum_frames.set_tooltip_text(frames_tooltip);
-            self.rb_z_sum_sets.set_tool_tip_text(sets_tooltip);
-            self.sp_z_sum_sets.set_tool_tip_text(sets_tooltip);
-            self.l_z_sum_sets.set_tooltip_text(sets_tooltip);
-        }
-    }
-}
 
-impl Expandable for EerSuperResZSumPaddingPanel {
-    fn expand_expand_button(&mut self, button: &ExpandButton) {
-        if self.header.equals_open_close(button) {
-            self.pnl_root.body_visible = button.is_expanded();
+    /// Java private `setTootips()` (the source's spelling).
+    fn set_tootips(&self) {
+        let mut autodoc: *const dyn ReadOnlyAutodoc = std::ptr::null::<Autodoc>();
+        // Java passes a null AxisID; ALIGN_FRAMES is not a per-axis autodoc, so
+        // `AxisID::Only` stands in for it.
+        // SAFETY: the factory keeps every autodoc it returns (and its sections)
+        // for the life of the process.
+        match unsafe {
+            autodoc_factory::get_instance(
+                Some(self.manager),
+                Some(autodoc_factory::ALIGN_FRAMES),
+                AxisID::Only,
+                false,
+            )
+        } {
+            Ok(instance) => autodoc = instance as *const Autodoc,
+            // catch (final LockException except) {}
+            Err(LogFileError::Lock(_)) => {}
+            // catch (final LogFileException | IOException except):
+            // except.printStackTrace().
+            Err(except) => eprintln!("{except}"),
         }
-    }
-    fn expand_global_button(&mut self, _: &super::process_dialog::GlobalExpandButton) {
-        self.expand_global_button();
-    }
-}
+        if autodoc.is_null() {
+            return;
+        }
+        // SAFETY: see above.
+        let autodoc: &dyn ReadOnlyAutodoc = unsafe { &*autodoc };
+        self.rb_super_res_none
+            .set_tool_tip_text_string(Some(&EERSuperRes::NONE.get_tooltip()));
+        self.rb_super_res_2x
+            .set_tool_tip_text_string(Some(&EERSuperRes::TWO_X.get_tooltip()));
+        self.rb_super_res_4x
+            .set_tool_tip_text_string(Some(&EERSuperRes::FOUR_X.get_tooltip()));
 
-#[cfg(test)]
-mod tests {
-    use super::*;
-    #[derive(Default)]
-    struct Manager {
-        packed: Vec<AxisID>,
-    }
-    impl EerSuperResZSumPaddingManager for Manager {
-        fn pack(&mut self, axis_id: AxisID) {
-            self.packed.push(axis_id);
-        }
-    }
-    #[test]
-    fn source_default_and_z_sum_choice_drive_dependent_controls() {
-        let mut panel =
-            EerSuperResZSumPaddingPanel::get_instance(AxisID::Only, DialogType::Tools, 7, false);
-        assert!(EerZSum::Frames.is_default());
-        assert!(!EerZSum::Sets.is_default());
-        assert_eq!(EerZSum::Sets.to_string(), "setsradio");
-        assert!(panel.rb_super_res_2x.is_selected());
-        assert!(panel.sp_z_sum_frames.is_enabled());
-        panel.rb_z_sum_sets.set_selected(true);
-        panel.action_performed();
-        assert!(!panel.sp_z_sum_frames.is_enabled());
-        assert!(panel.sp_z_sum_sets.is_enabled());
-    }
-    #[test]
-    fn source_parameter_round_trip_keeps_super_res_and_selected_z_sum() {
-        let mut panel =
-            EerSuperResZSumPaddingPanel::get_instance(AxisID::Only, DialogType::Tools, 7, false);
-        let input = AlignFramesEerParameters {
-            eer_super_res: Some(2),
-            eer_z_sum_frames: None,
-            eer_z_sum_sets: 42,
+        let autodoc_name = autodoc.get_autodoc_name();
+        // SAFETY: see above.
+        let section = unsafe {
+            autodoc.get_section(
+                Some(etomo_autodoc::FIELD_SECTION_NAME),
+                Some(align_frames_param::EER_SUPER_RES_Z_SUM_PADDING_KEY),
+            )
         };
-        panel.set_parameters(&input);
-        let mut output = AlignFramesEerParameters::default();
-        panel.get_parameters(&mut output);
-        assert_eq!(output.eer_super_res, Some(2));
-        assert_eq!(output.eer_z_sum_frames, None);
-        assert_eq!(output.eer_z_sum_sets, 42);
+        // Upstream bug fixed in translation (EERSuperResZSumPaddingPanel.java:217):
+        // with no EERSuperResZSumPadding section in the autodoc, Java's
+        // `RadioEbutton.setTooltip(String, ReadOnlySection)` dereferences the null
+        // section; the radio button tooltips are left unset instead.  (The
+        // `EtomoAutodoc.getTooltip` calls already answer null for a null section.)
+        let section: Option<&dyn ReadOnlySection> = if section.is_null() {
+            None
+        } else {
+            // SAFETY: see above.
+            Some(unsafe { &*section })
+        };
+
+        if let Some(section) = section {
+            self.rb_z_sum_frames
+                .set_tooltip_string_read_only_section(Some(autodoc_factory::ALIGN_FRAMES), section);
+        }
+        let mut tooltip = section.and_then(|section| {
+            etomo_autodoc::get_tooltip_enum_value_name(
+                Some(&autodoc_name),
+                section,
+                Some(EERZSum::FRAMES.spinner_enum_value_name),
+            )
+        });
+        self.sp_z_sum_frames.set_tool_tip_text(tooltip.as_deref());
+        self.l_z_sum_frames
+            .get_component()
+            .set_tool_tip_text(tooltip.as_deref());
+
+        if let Some(section) = section {
+            self.rb_z_sum_sets
+                .set_tooltip_string_read_only_section(Some(autodoc_factory::ALIGN_FRAMES), section);
+        }
+        tooltip = section.and_then(|section| {
+            etomo_autodoc::get_tooltip_enum_value_name(
+                Some(&autodoc_name),
+                section,
+                Some(EERZSum::SETS.spinner_enum_value_name),
+            )
+        });
+        self.sp_z_sum_sets.set_tool_tip_text(tooltip.as_deref());
+        self.l_z_sum_sets
+            .get_component()
+            .set_tool_tip_text(tooltip.as_deref());
     }
-    #[test]
-    fn source_open_close_expansion_changes_body_and_packs() {
-        let mut panel =
-            EerSuperResZSumPaddingPanel::get_instance(AxisID::Only, DialogType::Tools, 7, false);
-        let mut button = panel.header.btn_open_close.clone().unwrap();
-        button.update(true);
-        let mut manager = Manager::default();
-        panel.expand(&button, &mut manager);
-        assert!(panel.pnl_root.body_visible);
-        assert_eq!(manager.packed, vec![AxisID::Only]);
+}
+
+impl Expandable for EERSuperResZSumPaddingPanel {
+    /// Java `expand(ExpandButton)`.
+    fn expand_expand_button(&self, button: &Rc<ExpandButton>) {
+        if self.header.equals_open_close(button) {
+            self.pnl_body.set_visible(button.is_expanded());
+        }
+        let manager = self.manager;
+        ui_harness::with(|harness| {
+            harness.pack_axis_id_base_manager(Some(self.axis_id), Some(manager))
+        });
+    }
+
+    /// Java `expand(GlobalExpandButton)`: empty.
+    fn expand_global_expand_button(&self, _button: &Rc<GlobalExpandButton>) {}
+}
+
+/// Java private static nested class `EERZSum implements EnumeratedType`.
+#[derive(Clone, Copy, Debug, PartialEq)]
+struct EERZSum {
+    /// Java private final `radioEnumValueName`.
+    radio_enum_value_name: &'static str,
+    /// Java private final `spinnerEnumValueName`.
+    spinner_enum_value_name: &'static str,
+    /// Java private final `label`.
+    label: &'static str,
+}
+
+impl EERZSum {
+    /// Java `FRAMES = new EERZSum("framesradio", "framesspin", "Sum frames to
+    /// make")`.
+    const FRAMES: EERZSum = EERZSum {
+        radio_enum_value_name: "framesradio",
+        spinner_enum_value_name: "framesspin",
+        label: "Sum frames to make",
+    };
+    /// Java `SETS = new EERZSum("setsradio", "setsspin", "Sum successive sets
+    /// of")`.
+    const SETS: EERZSum = EERZSum {
+        radio_enum_value_name: "setsradio",
+        spinner_enum_value_name: "setsspin",
+        label: "Sum successive sets of",
+    };
+    /// Java `DEFAULT = FRAMES`.
+    const DEFAULT: EERZSum = EERZSum::FRAMES;
+}
+
+/// Java `toString()`: `radioEnumValueName`.
+impl std::fmt::Display for EERZSum {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(self.radio_enum_value_name)
+    }
+}
+
+impl EnumeratedType for EERZSum {
+    /// Java `isDefault()`.
+    fn is_default(&self) -> bool {
+        *self == EERZSum::DEFAULT
+    }
+
+    /// Java `getValue()`: null.  The trait returns a number by value; an unset
+    /// `EtomoNumber` (the null number) stands for Java's null.
+    fn get_value(&self) -> ConstEtomoNumber {
+        EtomoNumber::new().base
+    }
+
+    /// Java `getLabel()`.
+    fn get_label(&self) -> Option<String> {
+        Some(self.label.to_string())
     }
 }

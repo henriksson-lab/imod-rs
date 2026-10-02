@@ -199,18 +199,15 @@ pub fn get_tooltip_enum_value_name(
 }
 
 /// Java `getTooltip(ReadOnlyAutodoc, String)`.
-///
-/// # Safety
-/// `autodoc` must be null or point to a live `ReadOnlyAutodoc`.
-pub unsafe fn get_tooltip(
-    autodoc: *const dyn ReadOnlyAutodoc,
+pub fn get_tooltip(
+    autodoc: Option<&dyn ReadOnlyAutodoc>,
     field_name: Option<&str>,
 ) -> Option<String> {
-    if autodoc.is_null() || field_name.is_none() {
+    let (Some(autodoc), Some(_)) = (autodoc, field_name) else {
         return None;
-    }
-    let autodoc: &dyn ReadOnlyAutodoc = unsafe { &*autodoc };
-    let section = autodoc.get_section(Some(FIELD_SECTION_NAME), field_name);
+    };
+    // SAFETY: the autodoc owns its sections for as long as the reference lives.
+    let section = unsafe { autodoc.get_section(Some(FIELD_SECTION_NAME), field_name) };
     if section.is_null() {
         if DEBUG.load(Ordering::Relaxed) {
             println!("EtomoAutodoc.getTooltip:section is null");
@@ -225,18 +222,15 @@ pub unsafe fn get_tooltip(
 }
 
 /// Java `getUnformattedTooltip(ReadOnlyAutodoc, String)`.
-///
-/// # Safety
-/// See `get_tooltip`.
-pub unsafe fn get_unformatted_tooltip(
-    autodoc: *const dyn ReadOnlyAutodoc,
+pub fn get_unformatted_tooltip(
+    autodoc: Option<&dyn ReadOnlyAutodoc>,
     field_name: Option<&str>,
 ) -> Option<String> {
-    if autodoc.is_null() || field_name.is_none() {
+    let (Some(autodoc), Some(_)) = (autodoc, field_name) else {
         return None;
-    }
-    let autodoc: &dyn ReadOnlyAutodoc = unsafe { &*autodoc };
-    let section = autodoc.get_section(Some(FIELD_SECTION_NAME), field_name);
+    };
+    // SAFETY: the autodoc owns its sections for as long as the reference lives.
+    let section = unsafe { autodoc.get_section(Some(FIELD_SECTION_NAME), field_name) };
     if section.is_null() {
         if DEBUG.load(Ordering::Relaxed) {
             println!("EtomoAutodoc.getTooltip:section is null");
@@ -251,18 +245,15 @@ pub unsafe fn get_unformatted_tooltip(
 }
 
 /// Java `getSourceTooltipString(ReadOnlyAutodoc, String)`.
-///
-/// # Safety
-/// See `get_tooltip`.
-pub unsafe fn get_source_tooltip_string_autodoc(
-    autodoc: *const dyn ReadOnlyAutodoc,
+pub fn get_source_tooltip_string_autodoc(
+    autodoc: Option<&dyn ReadOnlyAutodoc>,
     field_name: Option<&str>,
 ) -> Option<String> {
-    if autodoc.is_null() || field_name.is_none() {
+    let (Some(autodoc), Some(_)) = (autodoc, field_name) else {
         return None;
-    }
-    let autodoc: &dyn ReadOnlyAutodoc = unsafe { &*autodoc };
-    let section = autodoc.get_section(Some(FIELD_SECTION_NAME), field_name);
+    };
+    // SAFETY: the autodoc owns its sections for as long as the reference lives.
+    let section = unsafe { autodoc.get_section(Some(FIELD_SECTION_NAME), field_name) };
     if section.is_null() {
         if DEBUG.load(Ordering::Relaxed) {
             println!("EtomoAutodoc.getSourceTooltipString:section is null");
@@ -273,19 +264,16 @@ pub unsafe fn get_source_tooltip_string_autodoc(
 }
 
 /// Java `getTooltip(ReadOnlyAutodoc, String, boolean)`.
-///
-/// # Safety
-/// See `get_tooltip`.
-pub unsafe fn get_tooltip_autodoc_add_source(
-    autodoc: *const dyn ReadOnlyAutodoc,
+pub fn get_tooltip_autodoc_add_source(
+    autodoc: Option<&dyn ReadOnlyAutodoc>,
     field_name: Option<&str>,
     add_source: bool,
 ) -> Option<String> {
-    if autodoc.is_null() || field_name.is_none() {
+    let (Some(autodoc), Some(_)) = (autodoc, field_name) else {
         return None;
-    }
-    let autodoc: &dyn ReadOnlyAutodoc = unsafe { &*autodoc };
-    let section = autodoc.get_section(Some(FIELD_SECTION_NAME), field_name);
+    };
+    // SAFETY: the autodoc owns its sections for as long as the reference lives.
+    let section = unsafe { autodoc.get_section(Some(FIELD_SECTION_NAME), field_name) };
     if section.is_null() {
         if DEBUG.load(Ordering::Relaxed) {
             println!("EtomoAutodoc.getTooltip:section is null");

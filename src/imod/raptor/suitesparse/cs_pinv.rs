@@ -1,11 +1,13 @@
 //! Translation of `IMOD/raptor/suitesparse/cs_pinv.c`.
 
-/// C `cs_pinv`: returns the inverse of a permutation, or `None` for identity/invalid input.
-pub fn cs_pinv(permutation: Option<&[usize]>) -> Option<Vec<usize>> {
-    let permutation = permutation?;
-    let mut inverse = vec![0; permutation.len()];
-    for (index, &value) in permutation.iter().enumerate() {
-        *inverse.get_mut(value)? = index;
+use super::cs_malloc::cs_malloc;
+
+/// `cs_pinv(p, n)`: pinv = p', or p = pinv'.  p = NULL denotes identity.
+pub fn cs_pinv(p: Option<&[i32]>, n: i32) -> Option<Vec<i32>> {
+    let p = p?;
+    let mut pinv: Vec<i32> = cs_malloc(n);
+    for k in 0..n {
+        pinv[p[k as usize] as usize] = k; // invert the permutation
     }
-    Some(inverse)
+    Some(pinv)
 }

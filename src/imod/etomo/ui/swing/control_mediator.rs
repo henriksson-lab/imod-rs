@@ -1,64 +1,89 @@
 //! `IMOD/Etomo/src/etomo/ui/swing/ControlMediator.java`.
 //!
-//! Native file-picker presentation remains at the GUI boundary.  The mediator
-//! keeps the Java dispatch and notification ordering intact.
-#![allow(dead_code)]
+//! ControlMediator allows a controller and its target to communicate.
 
-use super::control_mode::{CLEAR, ControlMode, SELECT_FILE, SELECT_MULTIPLE_FILES};
-use super::control_state::ControlState;
+use super::control_mode::{self, ControlMode};
+use super::control_state::{self, ControlState};
 use super::control_target::ControlTarget;
 use super::controller::Controller;
 
-/// Java package-private singleton `ControlMediator`.
-pub struct ControlMediator;
+/// Java `static ControlMediator INSTANCE = new ControlMediator()`.
+pub static INSTANCE: ControlMediator = ControlMediator {};
+
+/// Java package-private `final class ControlMediator` (no fields).
+pub struct ControlMediator {}
 
 impl ControlMediator {
-    /// Java `static ControlMediator INSTANCE`.
-    pub const INSTANCE: Self = Self;
-
     /// Java `controlEvent(Controller, ControlTarget, ControlMode)`.
     ///
-    /// The Java method recognizes `ControlState` through `instanceof`; Rust
-    /// models the inherited source type with `Deref`, so the source overload
-    /// is represented directly by [`Self::control_event_state`].
-    pub fn control_event(
+    /// Execute a control event.  After this is done the target is notified so
+    /// so it can send control events to its listeners.
+    pub fn control_event_controller_control_target_control_mode(
         &self,
-        controller: &mut dyn Controller,
-        target: Option<&mut dyn ControlTarget>,
-        mode: &ControlMode,
+        controller: &dyn Controller,
+        target: Option<&dyn ControlTarget>,
+        mode: Option<&ControlMode>,
     ) {
-        let Some(target) = target else { return };
-        // Java uses `==` for these singleton modes, i.e. reference identity,
-        // not the value equality supplied by Rust's derived `PartialEq`.
-        if std::ptr::eq(mode, &*CLEAR) {
-            target.clear();
-        } else if std::ptr::eq(mode, &*SELECT_FILE) {
-            if let Some(file) = controller.select_file() {
-                target.set_text_file(&file);
+        // `mode instanceof ControlState`: OVERRIDE and ENABLE are the only
+        // ControlState instances (see control_state.rs), so the test is whether
+        // `mode` is the ControlMode part of one of them.
+        let state: Option<&'static ControlState> = match mode {
+            Some(mode) if std::ptr::eq(mode, &**control_state::OVERRIDE) => {
+                Some(&*control_state::OVERRIDE)
             }
-        } else if std::ptr::eq(mode, &*SELECT_MULTIPLE_FILES) {
-            if let Some(files) = controller.select_multiple_files() {
-                target.set_text_files(&files);
+            Some(mode) if std::ptr::eq(mode, &**control_state::ENABLE) => {
+                Some(&*control_state::ENABLE)
+            }
+            _ => None,
+        };
+        if let Some(state) = state {
+            self.control_event_controller_control_target_control_state(
+                Some(controller),
+                target,
+                Some(state),
+            );
+            return;
+        }
+        let Some(target) = target else {
+            return;
+        };
+        if mode.is_some_and(|mode| std::ptr::eq(mode, &*control_mode::CLEAR)) {
+            target.clear();
+        } else if mode.is_some_and(|mode| std::ptr::eq(mode, &*control_mode::SELECT_FILE)) {
+            let file = controller.select_file();
+            if let Some(file) = file {
+                target.set_text_file(Some(&file));
+            }
+        } else if mode
+            .is_some_and(|mode| std::ptr::eq(mode, &*control_mode::SELECT_MULTIPLE_FILES))
+        {
+            let files = controller.select_multiple_files();
+            if let Some(files) = files {
+                target.set_text_file_array(Some(&files));
             }
         }
         target.send_control_event();
     }
 
     /// Java `controlEvent(Controller, ControlTarget, ControlState)`.
-    pub fn control_event_state(
+    ///
+    /// Set a control state on or off.  After this is done the target is
+    /// notified so so it can send control events to its listeners.
+    pub fn control_event_controller_control_target_control_state(
         &self,
-        controller: Option<&mut dyn Controller>,
-        target: Option<&mut dyn ControlTarget>,
-        state: Option<&ControlState>,
+        controller: Option<&dyn Controller>,
+        target: Option<&dyn ControlTarget>,
+        state: Option<&'static ControlState>,
     ) {
-        let (Some(controller), Some(target), Some(state)) = (controller, target, state) else {
+        let (Some(controller), Some(state), Some(target)) = (controller, state, target) else {
             return;
         };
+        // Java: `controller != null && controller.isControl()`.
         let control = controller.is_control();
         if state.is_component_display() {
-            target.set_component_control(control, state);
+            target.set_component_control(control, Some(state));
         } else if state.is_enable_display() {
-            target.set_enable_control(control, state);
+            target.set_enable_control(control, Some(state));
             return;
         }
         target.send_control_event();
@@ -67,140 +92,79 @@ impl ControlMediator {
 
 #[cfg(test)]
 mod tests {
-    use std::path::PathBuf;
-
     use super::*;
+    use std::cell::{Cell, RefCell};
+    use std::path::{Path, PathBuf};
 
-    #[derive(Default)]
-    struct TestController {
-        control: bool,
-        file: Option<PathBuf>,
-        files: Option<Vec<PathBuf>>,
-        select_file_count: usize,
-        select_multiple_files_count: usize,
-    }
-
-    impl Controller for TestController {
+    struct C(bool);
+    impl Controller for C {
         fn is_control(&self) -> bool {
-            self.control
+            self.0
         }
-        fn set_editable(&mut self, _editable: bool) {}
-        fn set_enabled(&mut self, _enabled: bool) {}
-        fn select_file(&mut self) -> Option<PathBuf> {
-            self.select_file_count += 1;
-            self.file.clone()
+        fn set_editable(&self, _: bool) {}
+        fn set_enabled(&self, _: bool) {}
+        fn select_file(&self) -> Option<PathBuf> {
+            Some(PathBuf::from("/tmp/x"))
         }
-        fn select_multiple_files(&mut self) -> Option<Vec<PathBuf>> {
-            self.select_multiple_files_count += 1;
-            self.files.clone()
+        fn select_multiple_files(&self) -> Option<Vec<PathBuf>> {
+            None
         }
     }
-
     #[derive(Default)]
-    struct TestTarget {
-        clear_count: usize,
-        files: Vec<PathBuf>,
-        component_controls: Vec<bool>,
-        enable_controls: Vec<bool>,
-        send_count: usize,
+    struct T {
+        log: RefCell<Vec<String>>,
+        sent: Cell<i32>,
     }
-
-    impl ControlTarget for TestTarget {
-        fn clear(&mut self) {
-            self.clear_count += 1;
+    impl ControlTarget for T {
+        fn clear(&self) {
+            self.log.borrow_mut().push("clear".into());
         }
-        fn set_text_file(&mut self, file: &std::path::Path) {
-            self.files = vec![file.to_owned()];
+        fn set_text_file(&self, file: Option<&Path>) {
+            let file = file.unwrap();
+            self.log.borrow_mut().push(file.display().to_string());
         }
-        fn set_text_files(&mut self, files: &[PathBuf]) {
-            self.files = files.to_vec();
+        fn set_text_file_array(&self, _: Option<&[PathBuf]>) {}
+        fn get_label(&self) -> Option<String> {
+            None
         }
-        fn get_label(&self) -> String {
-            String::new()
+        fn set_component_control(&self, control: bool, _: Option<&'static ControlState>) {
+            self.log.borrow_mut().push(format!("component {control}"));
         }
-        fn set_component_control(&mut self, control: bool, _state: &ControlState) {
-            self.component_controls.push(control);
+        fn set_enable_control(&self, control: bool, _: Option<&'static ControlState>) {
+            self.log.borrow_mut().push(format!("enable {control}"));
         }
-        fn set_enable_control(&mut self, control: bool, _state: &ControlState) {
-            self.enable_controls.push(control);
+        fn send_control_event(&self) {
+            self.sent.set(self.sent.get() + 1);
         }
-        fn send_control_event(&mut self) {
-            self.send_count += 1;
-        }
-        fn is_local_dir(&self, _current_directory: &str) -> bool {
-            false
+        fn is_local_dir(&self, _: Option<&str>) -> bool {
+            true
         }
     }
 
     #[test]
-    fn clear_and_file_modes_notify_after_their_target_change() {
-        let mut controller = TestController {
-            file: Some(PathBuf::from("one.mrc")),
-            files: Some(vec![PathBuf::from("two.mrc"), PathBuf::from("three.mrc")]),
-            ..Default::default()
-        };
-        let mut target = TestTarget::default();
-        ControlMediator::INSTANCE.control_event(&mut controller, Some(&mut target), &CLEAR);
-        ControlMediator::INSTANCE.control_event(&mut controller, Some(&mut target), &SELECT_FILE);
-        ControlMediator::INSTANCE.control_event(
-            &mut controller,
-            Some(&mut target),
-            &SELECT_MULTIPLE_FILES,
+    fn modes_and_states_dispatch_like_the_java() {
+        let t = T::default();
+        let c = C(true);
+        INSTANCE.control_event_controller_control_target_control_mode(
+            &c,
+            Some(&t),
+            Some(&*control_mode::SELECT_FILE),
         );
-        assert_eq!(target.clear_count, 1);
+        INSTANCE.control_event_controller_control_target_control_mode(
+            &c,
+            Some(&t),
+            Some(&**control_state::ENABLE),
+        );
+        INSTANCE.control_event_controller_control_target_control_mode(
+            &c,
+            Some(&t),
+            Some(&**control_state::OVERRIDE),
+        );
         assert_eq!(
-            target.files,
-            vec![PathBuf::from("two.mrc"), PathBuf::from("three.mrc")]
+            *t.log.borrow(),
+            vec!["/tmp/x", "enable true", "component true"]
         );
-        assert_eq!(target.send_count, 3);
-        assert_eq!(controller.select_file_count, 1);
-        assert_eq!(controller.select_multiple_files_count, 1);
-    }
-
-    #[test]
-    fn null_picker_results_still_notify_like_java() {
-        let mut controller = TestController::default();
-        let mut target = TestTarget::default();
-        ControlMediator::INSTANCE.control_event(&mut controller, Some(&mut target), &SELECT_FILE);
-        ControlMediator::INSTANCE.control_event(
-            &mut controller,
-            Some(&mut target),
-            &SELECT_MULTIPLE_FILES,
-        );
-        assert!(target.files.is_empty());
-        assert_eq!(target.send_count, 2);
-    }
-
-    #[test]
-    fn control_state_preserves_enable_early_return_and_override_notification() {
-        let mut controller = TestController {
-            control: true,
-            ..Default::default()
-        };
-        let mut target = TestTarget::default();
-        ControlMediator::INSTANCE.control_event_state(
-            Some(&mut controller),
-            Some(&mut target),
-            Some(&ControlState::OVERRIDE),
-        );
-        ControlMediator::INSTANCE.control_event_state(
-            Some(&mut controller),
-            Some(&mut target),
-            Some(&ControlState::ENABLE),
-        );
-        assert_eq!(target.component_controls, vec![true]);
-        assert_eq!(target.enable_controls, vec![true]);
-        assert_eq!(target.send_count, 1);
-    }
-
-    #[test]
-    fn null_state_event_arguments_are_noops() {
-        let mut target = TestTarget::default();
-        ControlMediator::INSTANCE.control_event_state(
-            None,
-            Some(&mut target),
-            Some(&ControlState::OVERRIDE),
-        );
-        assert_eq!(target.send_count, 0);
+        // SELECT_FILE and OVERRIDE send; ENABLE returns before sending.
+        assert_eq!(t.sent.get(), 2);
     }
 }

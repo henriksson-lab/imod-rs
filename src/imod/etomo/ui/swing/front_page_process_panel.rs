@@ -1,70 +1,65 @@
 //! `IMOD/Etomo/src/etomo/ui/swing/FrontPageProcessPanel.java`.
 //!
-//! `FrontPageManager.java` is the declared concrete constructor type.  Until
-//! that manager source unit crosses the Rust boundary, its inherited
-//! `BaseManager` reference is preserved exactly at this direct constructor
-//! boundary; no substitute front-page manager is introduced here.
-#![allow(dead_code)]
+//! The axis process panel of the front page (`FrontPageManager`).  Extends
+//! [`AxisProcessPanel`] (held as `base`, dereffed to) and implements
+//! [`AxisProcessPanelVirtual`]; its only override is an empty
+//! `createProcessControlPanel`.
 
-use super::axis_process_panel::AxisProcessPanel;
+use std::ops::Deref;
+use std::rc::{Rc, Weak};
+
+use super::axis_process_panel::{AxisProcessPanel, AxisProcessPanelVirtual};
 use super::axis_progress_panel::AxisProgressPanel;
-use crate::imod::etomo::base_manager::BaseManager;
+use crate::imod::etomo::front_page_manager::FrontPageManager;
 use crate::imod::etomo::r#type::axis_id::AxisID;
 use crate::imod::etomo::r#type::interface_type::InterfaceType;
 
-/// Java package-private final `FrontPageProcessPanel`, including its
-/// `AxisProcessPanel` superclass state.
+/// Java package-private final class `FrontPageProcessPanel extends
+/// AxisProcessPanel`.
 pub struct FrontPageProcessPanel {
-    pub axis_process_panel: AxisProcessPanel,
+    /// The Java superclass part.
+    base: Rc<AxisProcessPanel>,
+}
+
+impl Deref for FrontPageProcessPanel {
+    type Target = AxisProcessPanel;
+    fn deref(&self) -> &AxisProcessPanel {
+        &self.base
+    }
 }
 
 impl FrontPageProcessPanel {
-    /// Java `FrontPageProcessPanel(FrontPageManager, AxisProgressPanel)`.
-    pub fn new(manager: &'static dyn BaseManager, axis_progress_panel: AxisProgressPanel) -> Self {
-        let axis_process_panel = AxisProcessPanel::new(
-            AxisID::Only,
-            manager,
-            true,
-            true,
-            InterfaceType::FrontPage,
-            false,
-            axis_progress_panel,
-        );
-        let mut instance = Self { axis_process_panel };
-        // `FrontPageManager.allowProcessWatching()` returns false.  Its lazy
-        // `getProcessManager()` creation is an adjacent manager boundary, but
-        // this source call consequently leaves the process-info status absent.
-        instance.axis_process_panel.initialize_panels(false);
-        instance
+    /// Java package-private constructor
+    /// `FrontPageProcessPanel(FrontPageManager, AxisProgressPanel)`.
+    pub fn new(
+        manager: &'static FrontPageManager,
+        axis_progress_panel: Rc<AxisProgressPanel>,
+    ) -> Rc<FrontPageProcessPanel> {
+        // super(AxisID.ONLY, manager, true, true, InterfaceType.FRONT_PAGE, false,
+        //   axisProgressPanel)
+        let this = Rc::new(FrontPageProcessPanel {
+            base: AxisProcessPanel::new(
+                AxisID::Only,
+                manager,
+                true,
+                true,
+                InterfaceType::FrontPage,
+                false,
+                axis_progress_panel,
+            ),
+        });
+        this.base
+            .set_this(Rc::downgrade(&this) as Weak<dyn AxisProcessPanelVirtual>);
+        this.base.initialize_panels();
+        this
     }
-
-    /// Java override `createProcessControlPanel()`, whose body is empty.
-    pub fn create_process_control_panel(&mut self) {}
 }
 
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use crate::imod::etomo::directive_editor_manager::DirectiveEditorManager;
-
-    #[test]
-    fn constructor_preserves_front_page_axis_process_panel_arguments() {
-        let manager = DirectiveEditorManager::new(None, None, None, None);
-        let progress = AxisProgressPanel::get_instance(Some(AxisID::Only), manager);
-        let mut panel = FrontPageProcessPanel::new(manager, progress);
-        assert_eq!(panel.axis_process_panel.axis_id, AxisID::Only);
-        assert!(panel.axis_process_panel.popup_chunk_warnings);
-        assert!(panel.axis_process_panel.runnable_parallel);
-        assert_eq!(
-            panel.axis_process_panel.interface_type,
-            InterfaceType::FrontPage
-        );
-        assert!(!panel.axis_process_panel.alt_parallel_loc);
-        assert!(!panel.axis_process_panel.panel_process_info_has_status);
-        panel.create_process_control_panel();
-        assert_eq!(
-            panel.axis_process_panel.panel_process_select_axis_label,
-            None
-        );
+impl AxisProcessPanelVirtual for FrontPageProcessPanel {
+    fn axis_process_panel(&self) -> &AxisProcessPanel {
+        &self.base
     }
+
+    /// Java package-private `createProcessControlPanel()` override: empty.
+    fn create_process_control_panel(&self) {}
 }

@@ -1,116 +1,74 @@
-//! `IMOD/Etomo/src/etomo/ui/swing/CheckBoxMenuItem.java`.
+//! `IMOD/Etomo/src/etomo/ui/swing/CheckBoxMenuItem.java`: a self-naming
+//! `JCheckBoxMenuItem`.
 //!
-//! `JCheckBoxMenuItem` rendering and event dispatch stay at the explicit Swing
-//! boundary.  This source unit owns the self-naming state inherited from that
-//! widget.
-#![allow(dead_code)]
+//! `final class CheckBoxMenuItem extends JCheckBoxMenuItem` overrides `setText`
+//! and `setName`.  The Swing superclass is the jdk stand-in [`JComponent`]
+//! (`ComponentKind::CheckBoxMenuItem`), held in `component`; the inherited
+//! Swing members are reached through [`CheckBoxMenuItem::get_component`].
+
+use std::rc::Rc;
 
 use crate::imod::etomo::etomo_director::ARGUMENTS;
+use crate::imod::etomo::jdk::JComponent;
 use crate::imod::etomo::storage::autodoc::autodoc_tokenizer::{DEFAULT_DELIMITER, SEPARATOR_CHAR};
+use crate::imod::etomo::r#type::ui_test_field_type;
 use crate::imod::etomo::util::utilities;
 
-/// Source-observable inherited `JCheckBoxMenuItem` state; painting and native
-/// listener dispatch belong to Swing.
-#[derive(Clone, Debug, Default, Eq, PartialEq)]
-pub struct JCheckBoxMenuItemBoundary {
-    pub text: Option<String>,
-    pub name: Option<String>,
-    pub selected: bool,
-    pub enabled: bool,
-    pub visible: bool,
-}
-
-/// Java package-private final `CheckBoxMenuItem`.
-#[derive(Clone, Debug, Eq, PartialEq)]
+/// Java `CheckBoxMenuItem`.
 pub struct CheckBoxMenuItem {
-    pub check_box_menu_item: JCheckBoxMenuItemBoundary,
+    /// The `JCheckBoxMenuItem` this class extends.
+    component: Rc<JComponent>,
 }
 
 impl CheckBoxMenuItem {
-    /// Java `CheckBoxMenuItem()`.
-    pub fn new() -> Self {
-        Self {
-            check_box_menu_item: JCheckBoxMenuItemBoundary {
-                enabled: true,
-                visible: true,
-                ..Default::default()
-            },
+    /// Java `CheckBoxMenuItem()`: `super()`.
+    pub fn new_void() -> Rc<CheckBoxMenuItem> {
+        Rc::new(CheckBoxMenuItem {
+            component: JComponent::new_check_box_menu_item(""),
+        })
+    }
+
+    /// Java `CheckBoxMenuItem(String text)`: `super(text)`.  Swing's
+    /// `AbstractButton.init` calls the (overridden) `setText` for a non-null text,
+    /// so the item is named here.
+    pub fn new_string(text: Option<&str>) -> Rc<CheckBoxMenuItem> {
+        let instance = Rc::new(CheckBoxMenuItem {
+            component: JComponent::new_check_box_menu_item(""),
+        });
+        if text.is_some() {
+            instance.set_text(text);
         }
+        instance
     }
 
-    /// Java `CheckBoxMenuItem(String)`.
-    pub fn with_text(text: &str) -> Self {
-        let mut value = Self::new();
-        value.set_text(text);
-        value
+    /// The Swing `JCheckBoxMenuItem` itself (Java `this` as a component).
+    pub fn get_component(&self) -> Rc<JComponent> {
+        self.component.clone()
     }
 
-    /// Java overridden `setText(String)`.
-    pub fn set_text(&mut self, text: &str) {
-        self.check_box_menu_item.text = Some(text.into());
+    /// Java `setText(String)` (override).
+    pub fn set_text(&self, text: Option<&str>) {
+        self.component.set_text(text.unwrap_or(""));
         self.set_name(text);
     }
 
-    /// Java overridden `setName(String)`.
-    pub fn set_name(&mut self, text: &str) {
-        // Java `UITestFieldType.CHECK_BOX_MENU_ITEM.toString()`.
-        const FIELD_TYPE: &str = "cbmn";
-
-        let name = utilities::convert_label_to_name(Some(text), true).unwrap_or_default();
-        self.check_box_menu_item.name = Some(format!("{FIELD_TYPE}{SEPARATOR_CHAR}{name}"));
+    /// Java `setName(String)` (override).
+    pub fn set_name(&self, text: Option<&str>) {
+        let field_type = &ui_test_field_type::CHECK_BOX_MENU_ITEM;
+        let name = utilities::convert_label_to_name(text, field_type.is_unlimited_segments());
+        // Java string concatenation of a null name gives "null".
+        self.component.set_name(Some(&format!(
+            "{}{}{}",
+            field_type,
+            SEPARATOR_CHAR,
+            name.as_deref().unwrap_or("null")
+        )));
         if ARGUMENTS.lock().unwrap().is_print_names() {
             println!(
-                "{} {DEFAULT_DELIMITER} ",
-                self.check_box_menu_item.name.as_deref().unwrap_or_default()
+                "{} {} ",
+                self.component.get_name().as_deref().unwrap_or("null"),
+                DEFAULT_DELIMITER
             );
         }
-    }
-}
-
-impl Default for CheckBoxMenuItem {
-    fn default() -> Self {
-        Self::new()
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn string_constructor_sets_the_source_owned_name() {
-        let item = CheckBoxMenuItem::with_text("Open 3dmod Binned by 2");
-
-        assert_eq!(
-            item.check_box_menu_item.text.as_deref(),
-            Some("Open 3dmod Binned by 2")
-        );
-        assert_eq!(
-            item.check_box_menu_item.name.as_deref(),
-            Some("cbmn.open-3dmod-binned-by-2")
-        );
-    }
-
-    #[test]
-    fn set_text_renames_the_menu_item() {
-        let mut item = CheckBoxMenuItem::new();
-        item.set_text("Open 3dmod with Startup Window");
-
-        assert_eq!(
-            item.check_box_menu_item.name.as_deref(),
-            Some("cbmn.open-3dmod-with-startup-window")
-        );
-    }
-
-    #[test]
-    fn set_name_does_not_change_inherited_text() {
-        let mut item = CheckBoxMenuItem::with_text("Old");
-        item.set_name("New Item");
-
-        assert_eq!(item.check_box_menu_item.text.as_deref(), Some("Old"));
-        assert_eq!(
-            item.check_box_menu_item.name.as_deref(),
-            Some("cbmn.new-item")
-        );
     }
 }

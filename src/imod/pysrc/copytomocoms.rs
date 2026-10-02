@@ -24,7 +24,7 @@
 //! voltage, Cs, defocus and `reversed` entries, which may be a number, a
 //! directive's string, or `None` -- are [`PyVal`]s.
 
-use super::batchruntomo::{PyVal, py_str_float};
+use super::batchruntomo::PyVal;
 use super::comchanger::{
     Change, get_setupset_value, modify_for_change_list, process_change_options,
 };
@@ -33,9 +33,10 @@ use super::imodpy::{
     allowed_raw_stack_extensions, call_own_program, com_extension_from_option, dataset_filename,
     default_naming_style, exit_from_imod_error, get_image_format, get_imod_version, get_mrc,
     get_naming_style, header_in_process, make_backup_file, make_current_dir_writable, option_value,
-    prnstr, read_text_file, run_cmd, run_goodframe, set_root_and_extension,
-    standard_type_extensions, write_text_file,
+    prnstr, py_int_of_float, py_true_div, read_text_file, run_cmd, run_goodframe,
+    set_root_and_extension, standard_type_extensions, write_text_file,
 };
+use super::imodpy::{py_fixed, py_float, py_int, py_round, py_str_float};
 use super::pip::{
     exit_error, pip_get_boolean, pip_get_err_no, pip_get_float, pip_get_integer, pip_get_string,
     pip_get_two_floats, pip_read_or_parse_options,
@@ -184,7 +185,7 @@ pub fn is_file_from_fei(progname: &str, filename: &str) -> (bool, f64) {
         if l.contains("Pixel size in nanometers") && l.contains("from mdoc") {
             let lsplit = l.split_whitespace().collect::<Vec<_>>();
             if lsplit.len() >= 6 && lsplit[4] == "=" {
-                if let Ok(value) = lsplit[5].parse::<f64>() {
+                if let Some(value) = py_float(lsplit[5]) {
                     pixel = value * 10.;
                 }
             }
@@ -207,7 +208,7 @@ pub fn angles_pass_through(g: &Globals, inc_test: f64) -> (bool, bool, bool) {
         _ => {
             eprintln!("Traceback (most recent call last):");
             eprintln!("TypeError: 'str' object cannot be interpreted as an integer");
-            std::process::exit(1)
+            crate::imod::libcfshr::b3dutil::exit(1)
         }
     };
     for ind in 1..zsize {
@@ -463,8 +464,8 @@ pub fn copytomocoms(arguments: &[OsString]) -> i32 {
     if let Ok(value) = std::env::var("TEST_NAMING_STYLE")
         && !value.is_empty()
     {
-        if let Ok(style) = value.trim().parse::<i32>() {
-            env_name_style = style;
+        if let Some(style) = py_int(&value) {
+            env_name_style = style as i32;
             if env_name_style >= 0 && (env_name_style as usize) < standard_type_extensions().len() {
                 file_type_ext = standard_type_extensions()[env_name_style as usize].clone();
             } else {
@@ -597,9 +598,9 @@ pub fn copytomocoms(arguments: &[OsString]) -> i32 {
             None => PyVal::None,
         };
         if voltage.truthy() {
-            voltage = match voltage.text().trim().parse::<i64>() {
-                Ok(value) => PyVal::Int(value),
-                Err(_) => converting_error("voltage", "integer"),
+            voltage = match py_int(&voltage.text()) {
+                Some(value) => PyVal::Int(value),
+                None => converting_error("voltage", "integer"),
             };
         }
     }
@@ -614,9 +615,9 @@ pub fn copytomocoms(arguments: &[OsString]) -> i32 {
             None => PyVal::None,
         };
         if spherab.truthy() {
-            spherab = match spherab.text().trim().parse::<f64>() {
-                Ok(value) => PyVal::Float(value),
-                Err(_) => converting_error("Cs", "float"),
+            spherab = match py_float(&spherab.text()) {
+                Some(value) => PyVal::Float(value),
+                None => converting_error("Cs", "float"),
             };
         }
     }
@@ -629,12 +630,12 @@ pub fn copytomocoms(arguments: &[OsString]) -> i32 {
         defocsub = "ExpectedDefocus";
     } else {
         defocus = match get_setupset_value(&copy_arg_list, "copyarg", "defocus") {
-            Some(text) => match text.trim().parse::<f64>() {
-                Ok(value) => {
+            Some(text) => match py_float(&text) {
+                Some(value) => {
                     defocsub = "ExpectedDefocus";
                     PyVal::Float(value)
                 }
-                Err(_) => converting_error("defocus", "float"),
+                None => converting_error("defocus", "float"),
             },
             None => PyVal::None,
         };
@@ -643,9 +644,9 @@ pub fn copytomocoms(arguments: &[OsString]) -> i32 {
     let mut half_float_opt = pip_get_integer("HalfFloatModeOutput", 0).unwrap_or(0);
     if pip_get_err_no() != 0 {
         if let Some(half_str) = get_setupset_value(&copy_arg_list, "copyarg", "halffloat") {
-            half_float_opt = match half_str.trim().parse::<i32>() {
-                Ok(value) => value,
-                Err(_) => converting_error("halffloat", "integer"),
+            half_float_opt = match py_int(&half_str) {
+                Some(value) => value as i32,
+                None => converting_error("halffloat", "integer"),
             };
         }
     }
@@ -830,7 +831,8 @@ pub fn copytomocoms(arguments: &[OsString]) -> i32 {
     }
 
     // Bead size in pixels, and radius for centroid
-    let beadsize = beadnm / pixsize;
+    // `copytomocoms:478`: an entered pixel size of 0 raises ZeroDivisionError
+    let beadsize = py_true_div(beadnm, pixsize);
     let beadrad = 0.5 * (beadsize + 3.);
     let mut eraserad = if beadrad < 3. {
         1.1
@@ -854,7 +856,9 @@ pub fn copytomocoms(arguments: &[OsString]) -> i32 {
     if 32. > box_real {
         box_real = 32.;
     }
-    let boxsize = 512.min(2 * (box_real / 2.) as i32);
+    // `int(boxReal / 2)` raises for an infinite or NaN bead size (entered as
+    // `inf`/`nan`); `box_real` is at least 32 otherwise
+    let boxsize = 512.min(2 * py_int_of_float(box_real / 2.) as i32);
 
     // See if tracking parameters need to be scaled for bead size
     let mut track_scale_seds: Vec<String> = Vec::new();
@@ -899,7 +903,10 @@ pub fn copytomocoms(arguments: &[OsString]) -> i32 {
             if let Some(OptionValue::Floats(crit)) =
                 option_value(&track_lines, option, 2, false, 1, None, None)
             {
-                track_scale_seds.push(format!("/^{option}/s/[ \t].*/\t{:.2}/", scaling * crit[0]));
+                track_scale_seds.push(format!(
+                    "/^{option}/s/[ \t].*/\t{}/",
+                    py_fixed(scaling * crit[0], 0, 2)
+                ));
             }
         }
 
@@ -908,9 +915,9 @@ pub fn copytomocoms(arguments: &[OsString]) -> i32 {
             && del_crit_arr.len() > 1
         {
             track_scale_seds.push(format!(
-                "/^{dca_opt}/s/[ \t].*/\t{:.3},{:.2}/",
-                scaling * del_crit_arr[0],
-                del_crit_arr[1]
+                "/^{dca_opt}/s/[ \t].*/\t{},{}/",
+                py_fixed(scaling * del_crit_arr[0], 0, 3),
+                py_fixed(del_crit_arr[1], 0, 2)
             ));
         }
     }
@@ -928,7 +935,7 @@ pub fn copytomocoms(arguments: &[OsString]) -> i32 {
     let name_error = |name: &str| -> ! {
         eprintln!("Traceback (most recent call last):");
         eprintln!("NameError: name '{name}' is not defined");
-        std::process::exit(1)
+        crate::imod::libcfshr::b3dutil::exit(1)
     };
 
     // LOOP ON THE AXES
@@ -1118,14 +1125,14 @@ pub fn copytomocoms(arguments: &[OsString]) -> i32 {
                                 let lsplit = line[ind + 1..].split_whitespace().collect::<Vec<_>>();
                                 if lsplit.len() > 1 {
                                     let to_int = |text: &str| -> i32 {
-                                        match text.parse::<i32>() {
-                                            Ok(value) => value,
-                                            Err(_) => {
+                                        match py_int(text) {
+                                            Some(value) => value as i32,
+                                            None => {
                                                 eprintln!("Traceback (most recent call last):");
                                                 eprintln!(
                                                     "ValueError: invalid literal for int() with base 10: '{text}'"
                                                 );
-                                                std::process::exit(1)
+                                                crate::imod::libcfshr::b3dutil::exit(1)
                                             }
                                         }
                                     };
@@ -1136,9 +1143,9 @@ pub fn copytomocoms(arguments: &[OsString]) -> i32 {
                                         // stores the string (`copytomocoms:657`) and
                                         // `anglesPassThrough`'s `range(1, zsize)` then
                                         // raises TypeError; this stores the integer.
-                                        g.zsize = match lsplit[2].parse::<i64>() {
-                                            Ok(value) => PyVal::Int(value),
-                                            Err(_) => PyVal::Str(lsplit[2].to_owned()),
+                                        g.zsize = match py_int(lsplit[2]) {
+                                            Some(value) => PyVal::Int(value),
+                                            None => PyVal::Str(lsplit[2].to_owned()),
                                         };
                                     }
                                     break;
@@ -1279,8 +1286,8 @@ pub fn copytomocoms(arguments: &[OsString]) -> i32 {
                 if angle_list[ind].trim().is_empty() {
                     continue;
                 }
-                match angle_list[ind].trim().parse::<f64>() {
-                    Ok(f_angle) => {
+                match py_float(&angle_list[ind]) {
+                    Some(f_angle) => {
                         // `min()`/`max()` keep the first of equal values
                         if f_angle < min_angle {
                             min_angle = f_angle;
@@ -1289,7 +1296,7 @@ pub fn copytomocoms(arguments: &[OsString]) -> i32 {
                             max_angle = f_angle;
                         }
                     }
-                    Err(_) => exit_error(&format!(
+                    None => exit_error(&format!(
                         "Converting {} to float from {tiltspec}",
                         angle_list[ind]
                     )),
@@ -1301,12 +1308,15 @@ pub fn copytomocoms(arguments: &[OsString]) -> i32 {
             }
             if max_angle - min_angle < 0.001 {
                 exit_error(&format!(
-                    "The tilt angles in {tiltspec} are all {max_angle:.2}"
+                    "The tilt angles in {tiltspec} are all {}",
+                    py_fixed(max_angle, 0, 2)
                 ));
             }
             if max_angle - min_angle < 1.001 {
                 exit_error(&format!(
-                    "The tilt angles in {tiltspec} only range from {min_angle:.2} to {max_angle:.2}"
+                    "The tilt angles in {tiltspec} only range from {} to {}",
+                    py_fixed(min_angle, 0, 2),
+                    py_fixed(max_angle, 0, 2)
                 ));
             }
         }
@@ -1322,7 +1332,10 @@ pub fn copytomocoms(arguments: &[OsString]) -> i32 {
                     .map(str::to_owned)
                     .collect();
             } else if firstinc != 0 {
-                let num_fake = (2. * g.first / increm).abs().round_ties_even() as i64;
+                // `2. * first / increm` raises ZeroDivisionError for a zero
+                // increment (`-firstinc 10,0`), and `int(round())` raises for a
+                // NaN or infinite result; Rust would loop to i64::MAX instead
+                let num_fake = py_int_of_float(py_round(py_true_div(2. * g.first, increm).abs()));
                 for ind in 0..num_fake {
                     angle_list.push(py_str_float(g.first + ind as f64 * increm));
                 }
@@ -1345,9 +1358,9 @@ pub fn copytomocoms(arguments: &[OsString]) -> i32 {
                 // Convert the numbers and find the one closest to defined angle and the mean
                 // tilt interval in the neighborhood
                 for ind in 0..angle_list.len() {
-                    let f_angle = match angle_list[ind].trim().parse::<f64>() {
-                        Ok(value) => value,
-                        Err(_) => exit_error(&format!(
+                    let f_angle = match py_float(&angle_list[ind]) {
+                        Some(value) => value,
+                        None => exit_error(&format!(
                             "Converting {} to float from {tiltspec}",
                             angle_list[ind]
                         )),
@@ -1594,7 +1607,8 @@ pub fn copytomocoms(arguments: &[OsString]) -> i32 {
 
                     if !is_fei && meandens < 0. {
                         warning(&format!(
-                            "{stackname} has a negative mean density ({meandens:.1}) and you may need\n   a logarithm offset when running Tilt"
+                            "{stackname} has a negative mean density ({}) and you may need\n   a logarithm offset when running Tilt",
+                            py_fixed(meandens, 0, 1)
                         ));
                     }
                 }
@@ -1880,7 +1894,7 @@ pub fn copytomocoms(arguments: &[OsString]) -> i32 {
             format!("/^RotationAngle/s/[ \t].*/\t{}/", py_str_float(axisangle)),
             format!("/^#*SkipViews.*/s//SkipViews\t{excludelist}/"),
             format!("/^#*{wipeskip}/d"),
-            format!("/^BeadDiameter/s/[ \t].*/\t{beadsize:.2}/"),
+            format!("/^BeadDiameter/s/[ \t].*/\t{}/", py_fixed(beadsize, 0, 2)),
             format!("/^BoxSizeXandY/s/[ \t].*/\t{boxsize},{boxsize}/"),
             format!("s/{wipepl}//"),
         ]);
@@ -1915,7 +1929,7 @@ pub fn copytomocoms(arguments: &[OsString]) -> i32 {
             {
                 eprintln!("Traceback (most recent call last):");
                 eprintln!("{error}");
-                std::process::exit(1);
+                crate::imod::libcfshr::b3dutil::exit(1);
             }
         }
 
@@ -2149,12 +2163,8 @@ pub fn copytomocoms(arguments: &[OsString]) -> i32 {
             if rows.len() < 3 {
                 exit_error("Wrong number of lines from running clip stat on 3 images");
             }
-            let rounded = |value: f64| -> Option<f64> {
-                c_format("%9.4f", &[CArg::Dbl(value)])
-                    .trim()
-                    .parse::<f64>()
-                    .ok()
-            };
+            let rounded =
+                |value: f64| -> Option<f64> { py_float(&c_format("%9.4f", &[CArg::Dbl(value)])) };
             for &(mean, sd) in &rows[..3] {
                 match (rounded(mean), rounded(sd)) {
                     (Some(mean), Some(sd)) => {
@@ -2200,7 +2210,7 @@ pub fn copytomocoms(arguments: &[OsString]) -> i32 {
                 // divided by 5000; this converts it as `float()` would.
                 if line.starts_with("SCALE") {
                     let lsplit: Vec<&str> = line.split_whitespace().collect();
-                    if let Some(Ok(new_scale)) = lsplit.get(2).map(|t| t.parse::<f64>()) {
+                    if let Some(Some(new_scale)) = lsplit.get(2).map(|t| py_float(t)) {
                         if new_scale < 3. {
                             div_scale = 1.;
                         }
@@ -2221,6 +2231,9 @@ pub fn copytomocoms(arguments: &[OsString]) -> i32 {
                 if sd_avg != 0. {
                     scale *= 150. / sd_avg;
                 }
+                // finite: `tiltscale` is a positive table entry, `div_scale` is 1
+                // or 5000, and `sd_avg` is a nonzero `%9.4f`-rounded SD, so
+                // `scale` is positive and finite and `math.log10` cannot raise
                 let num_dig = 0.max((2.31 - scale.log10()).floor() as i32) as usize;
                 tiltscale_text = format!("{scale:.num_dig$}");
             }
@@ -2238,7 +2251,7 @@ pub fn copytomocoms(arguments: &[OsString]) -> i32 {
         if sd_avg > 0. {
             sedcom.extend(sed_del_and_add(
                 "ReferenceSDofScaling",
-                &format!("{sd_avg:.4}"),
+                &py_fixed(sd_avg, 0, 4),
                 "SCALE",
                 '/',
             ));
@@ -2258,6 +2271,7 @@ pub fn copytomocoms(arguments: &[OsString]) -> i32 {
 
         // get indent in Y where 3/4 of the X extent has data after rotation
         // but limit it to 1/4 of Y extent
+        // finite: an integer image size times the tangent of a constant angle
         let mut rotindent = (0.25 * fullx as f64 * (indentangle * 3.14159 / 180.).tan()) as i32;
         rotindent = rotindent.min(fully.div_euclid(4));
 
@@ -2271,6 +2285,7 @@ pub fn copytomocoms(arguments: &[OsString]) -> i32 {
         if fully > BORDERSTEP2 {
             border = MINBORDER2 + (fully - BORDERSTEP2).div_euclid(BORDERFAC);
         }
+        // finite: an integer border times a constant
         border = (border as f64 * CCDBORDERFAC) as i32;
         border = border.max(rotindent);
         border = (fully.div_euclid(4) - 1).min(border);

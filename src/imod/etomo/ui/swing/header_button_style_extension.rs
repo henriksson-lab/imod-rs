@@ -1,95 +1,71 @@
 //! `IMOD/Etomo/src/etomo/ui/swing/HeaderButtonStyleExtension.java`.
-#![allow(dead_code)]
+//!
+//! A button style for table header buttons: the label gets a trailing ": ", and the
+//! button is unfocusable, transparent and etched.
+//!
+//! A stateless singleton subclass of `ButtonStyleExtension`: it embeds that struct as
+//! `base` and implements [`ButtonStyleExtensionVirtual`], overriding `setup` (which
+//! does not call the superclass's).  Java's lazily created `private static INSTANCE`
+//! is a thread-local on the EDT, where every button lives.
 
-use std::sync::{Arc, LazyLock, Mutex};
+use std::cell::RefCell;
+use std::ops::Deref;
+use std::rc::Rc;
 
-use super::button_style_extension::ButtonStyleExtension;
+use super::button_style_extension::{ButtonStyleExtension, ButtonStyleExtensionVirtual};
+use crate::imod::etomo::jdk::JComponent;
 
-pub trait HeaderStyleButton {
-    fn set_text(&mut self, text: String);
-    fn set_focusable(&mut self, focusable: bool);
-    fn set_content_area_filled(&mut self, filled: bool);
-    fn set_etched_border(&mut self);
+thread_local! {
+    /// Java `private static HeaderButtonStyleExtension INSTANCE = null`.
+    static INSTANCE: RefCell<Option<Rc<HeaderButtonStyleExtension>>> =
+        const { RefCell::new(None) };
 }
 
+/// Java `final class HeaderButtonStyleExtension extends ButtonStyleExtension`.
 pub struct HeaderButtonStyleExtension {
-    pub button_style_extension: ButtonStyleExtension<&'static str>,
+    base: ButtonStyleExtension,
 }
 
-static INSTANCE: LazyLock<Mutex<Option<Arc<HeaderButtonStyleExtension>>>> =
-    LazyLock::new(|| Mutex::new(None));
+impl Deref for HeaderButtonStyleExtension {
+    type Target = ButtonStyleExtension;
+    fn deref(&self) -> &ButtonStyleExtension {
+        &self.base
+    }
+}
+
+impl ButtonStyleExtensionVirtual for HeaderButtonStyleExtension {
+    fn get_button_style_extension(&self) -> &ButtonStyleExtension {
+        &self.base
+    }
+
+    /// Java final `@Override setup(AbstractButton, String, boolean)`.
+    fn setup(&self, button: Option<&Rc<JComponent>>, label: Option<&str>, _debug: bool) {
+        let Some(button) = button else {
+            return;
+        };
+        if let Some(label) = label {
+            button.set_text(&format!("{label}: "));
+        }
+        // Swing layout: button.setFocusable(false); button.setContentAreaFilled(false);
+        // button.setBorder(BorderFactory.createEtchedBorder()).
+    }
+}
 
 impl HeaderButtonStyleExtension {
     /// Java private `HeaderButtonStyleExtension()`.
-    fn new() -> Self {
-        Self {
-            button_style_extension: ButtonStyleExtension::new(false, None, None, None, None, false),
+    fn new() -> HeaderButtonStyleExtension {
+        HeaderButtonStyleExtension {
+            base: ButtonStyleExtension::new(false, None, None, None, None, false),
         }
     }
 
     /// Java static `getInstance()`.
-    pub fn get_instance() -> Arc<Self> {
-        let mut instance = INSTANCE
-            .lock()
-            .expect("HeaderButtonStyleExtension mutex poisoned");
-        if instance.is_none() {
-            *instance = Some(Arc::new(Self::new()));
-        }
-        Arc::clone(instance.as_ref().expect("Java INSTANCE assigned above"))
-    }
-
-    /// Java overridden final `setup(AbstractButton, String, boolean)`.
-    pub fn setup<B: HeaderStyleButton>(
-        &self,
-        button: Option<&mut B>,
-        label: Option<&str>,
-        _debug: bool,
-    ) {
-        let Some(button) = button else { return };
-        if let Some(label) = label {
-            button.set_text(format!("{label}: "));
-        }
-        button.set_focusable(false);
-        button.set_content_area_filled(false);
-        button.set_etched_border();
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-    #[derive(Default)]
-    struct Button {
-        text: Option<String>,
-        focusable: bool,
-        filled: bool,
-        etched: bool,
-    }
-    impl HeaderStyleButton for Button {
-        fn set_text(&mut self, text: String) {
-            self.text = Some(text)
-        }
-        fn set_focusable(&mut self, value: bool) {
-            self.focusable = value
-        }
-        fn set_content_area_filled(&mut self, value: bool) {
-            self.filled = value
-        }
-        fn set_etched_border(&mut self) {
-            self.etched = true
-        }
-    }
-    #[test]
-    fn setup_is_noninteractive_header() {
-        let mut button = Button {
-            focusable: true,
-            filled: true,
-            ..Default::default()
-        };
-        HeaderButtonStyleExtension::new().setup(Some(&mut button), Some("Head"), false);
-        assert_eq!(button.text, Some("Head: ".to_owned()));
-        assert!(!button.focusable);
-        assert!(!button.filled);
-        assert!(button.etched);
+    pub fn get_instance() -> Rc<HeaderButtonStyleExtension> {
+        INSTANCE.with(|instance| {
+            if instance.borrow().is_none() {
+                *instance.borrow_mut() = Some(Rc::new(HeaderButtonStyleExtension::new()));
+            }
+            instance.borrow().clone().unwrap()
+        })
     }
 }

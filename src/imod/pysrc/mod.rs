@@ -21,6 +21,7 @@ pub mod pip;
 pub mod prochunks;
 pub mod pysed;
 pub mod restrictalign;
+pub mod runraptor;
 pub mod setupcombine;
 pub mod sirtsetup;
 pub mod splitcombine;

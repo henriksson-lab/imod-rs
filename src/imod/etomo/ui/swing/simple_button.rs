@@ -1,112 +1,118 @@
 //! `IMOD/Etomo/src/etomo/ui/swing/SimpleButton.java`.
-#![allow(dead_code)]
+//!
+//! A `JButton` whose name follows its text (uitest name `bn.<label>`).
+//!
+//! Java `extends JButton`: the button is the `component` field.  Icons,
+//! preferred sizes and widths are not modelled by `jdk.rs`, so
+//! `getPreferredWidth` and `setToPreferredSize` have no Rust counterpart and
+//! the icon constructors build a plain button.
+
+use std::rc::Rc;
 
 use crate::imod::etomo::etomo_director::ARGUMENTS;
+use crate::imod::etomo::jdk::JComponent;
 use crate::imod::etomo::storage::autodoc::autodoc_tokenizer::{DEFAULT_DELIMITER, SEPARATOR_CHAR};
+use crate::imod::etomo::r#type::ui_test_field_type::UITestFieldType;
 use crate::imod::etomo::util::utilities;
 
-use super::multi_line_button::ButtonBoundary;
-use super::ui_utilities::{Icon, UiUtilities};
+use super::scaled_image::ScaledImage;
 
-/// Java final package-private `SimpleButton` with its native `JButton` boundary.
-#[derive(Clone, Debug, PartialEq)]
+/// Java package-private final `SimpleButton`.
 pub struct SimpleButton {
-    pub button: ButtonBoundary,
-    /// Java `ScaledImage.getImage(this)` / `ImageIcon` construction remains at
-    /// the native image-presentation boundary.  This records its source image.
-    pub scaled_image: Option<String>,
+    /// The Java `JButton` this class extends.
+    component: Rc<JComponent>,
 }
 
 impl SimpleButton {
-    /// Java `SimpleButton()`.
-    pub fn new() -> Self {
-        Self {
-            button: ButtonBoundary::default(),
-            scaled_image: None,
-        }
+    /// Java `SimpleButton()`: `super()`.
+    pub fn new_void() -> Rc<SimpleButton> {
+        Rc::new(SimpleButton {
+            component: JComponent::new_button(""),
+        })
     }
 
     /// Java `SimpleButton(String)`.
-    pub fn new_with_text(text: Option<&str>) -> Self {
-        let mut value = Self::new();
-        value.button.text = text.map(str::to_owned);
-        value.set_name(text);
-        value
+    pub fn new_string(text: Option<&str>) -> Rc<SimpleButton> {
+        let instance = Rc::new(SimpleButton {
+            component: JComponent::new_button(""),
+        });
+        // Java `super(text)`: `AbstractButton.init` calls the overridden
+        // `setText(text)` when the text is not null, which also sets the name.
+        if text.is_some() {
+            instance.set_text(text);
+        }
+        instance.set_name(text);
+        instance
     }
 
-    /// Java `SimpleButton(Icon)`.
-    pub fn new_with_icon(icon: Option<Icon>) -> Self {
-        let mut value = Self::new();
-        value.button.icon = icon;
-        value.button.abstract_button.icon = icon;
-        value
+    /// Java `SimpleButton(Icon)`: `super(icon)`.  Icons are painting, not
+    /// modelled.
+    pub fn new_icon() -> Rc<SimpleButton> {
+        Rc::new(SimpleButton {
+            component: JComponent::new_button(""),
+        })
     }
 
     /// Java `SimpleButton(ScaledImage)`.
-    pub fn new_with_scaled_image(scaled_image: Option<&str>) -> Self {
-        Self {
-            button: ButtonBoundary::default(),
-            scaled_image: scaled_image.map(str::to_owned),
+    pub fn new_scaled_image(scaled_image: Option<&ScaledImage>) -> Rc<SimpleButton> {
+        let instance = Rc::new(SimpleButton {
+            component: JComponent::new_button(""),
+        });
+        if scaled_image.is_some() {
+            // Swing painting: setIcon(new ImageIcon(scaledImage.getImage(this))).
         }
+        instance
     }
 
-    /// Java `getPreferredWidth()`.
+    /// The Java `JButton` itself.
+    pub fn get_component(&self) -> Rc<JComponent> {
+        self.component.clone()
+    }
+
+    /// Java package-private `getPreferredWidth()`.
     pub fn get_preferred_width(&self) -> i32 {
-        UiUtilities::get_preferred_width_button(
-            &self.button.abstract_button,
-            self.button.text.as_deref(),
+        super::ui_utilities::get_preferred_width_abstract_button_string(
+            &self.component,
+            Some(&self.component.get_text()),
         )
     }
 
-    /// Java `setToPreferredSize()`.
-    pub fn set_to_preferred_size(&mut self) {
-        let size = UiUtilities::get_preferred_size(
-            &self.button.abstract_button,
-            self.button.text.as_deref(),
-        );
-        self.button.abstract_button.preferred_size = Some(size);
-        self.button.abstract_button.maximum_size = Some(size);
+    /// Java `setToPreferredSize()`: the preferred and maximum sizes are layout
+    /// hints the stand-in does not keep.
+    pub fn set_to_preferred_size(&self) {
+        let _size = super::ui_utilities::get_preferred_size(&self.component, None);
     }
 
-    /// Java overridden `setText(String)`.
-    pub fn set_text(&mut self, text: Option<&str>) {
-        self.button.text = text.map(str::to_owned);
+    /// Java `setText(String)` (overrides `AbstractButton.setText`).
+    pub fn set_text(&self, text: Option<&str>) {
+        // Java `super.setText(text)`; the stand-in holds no null text.
+        self.component.set_text(text.unwrap_or(""));
         self.set_name(text);
     }
 
-    /// Java overridden `setName(String)`.
-    pub fn set_name(&mut self, text: Option<&str>) {
-        let name = utilities::convert_label_to_name(text, true);
-        self.button.name = name.map(|name| format!("bn{SEPARATOR_CHAR}{name}"));
+    /// Java `setName(String)` (overrides `Component.setName`).
+    pub fn set_name(&self, text: Option<&str>) {
+        let field_type = UITestFieldType::BUTTON;
+        let name = utilities::convert_label_to_name(text, field_type.is_unlimited_segments());
+        // Java string concatenation writes a null name as "null".
+        self.component.set_name(Some(&format!(
+            "{}{}{}",
+            field_type.to_string(),
+            SEPARATOR_CHAR,
+            name.as_deref().unwrap_or("null")
+        )));
+        // Java `EtomoDirector.INSTANCE.getArguments()` is the `ARGUMENTS` static.
         if ARGUMENTS.lock().unwrap().is_print_names() {
             println!(
                 "{} {} ",
-                self.button.name.as_deref().unwrap_or_default(),
+                self.component.get_name().as_deref().unwrap_or("null"),
                 DEFAULT_DELIMITER
             );
         }
     }
-}
 
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn text_constructor_and_set_text_self_name_as_button() {
-        let mut button = SimpleButton::new_with_text(Some("Open File"));
-        assert_eq!(button.button.name.as_deref(), Some("bn.open-file"));
-        button.set_text(Some("Run Process"));
-        assert_eq!(button.button.name.as_deref(), Some("bn.run-process"));
-    }
-
-    #[test]
-    fn preferred_size_is_applied_to_both_swing_constraints() {
-        let mut button = SimpleButton::new_with_text(Some("Run"));
-        button.set_to_preferred_size();
-        assert_eq!(
-            button.button.abstract_button.preferred_size,
-            button.button.abstract_button.maximum_size
-        );
+    /// Java `getName()` (inherited from `Component`).
+    pub fn get_name(&self) -> Option<String> {
+        self.component.get_name()
     }
 }

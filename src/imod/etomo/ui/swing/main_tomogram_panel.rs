@@ -1,133 +1,70 @@
 //! `IMOD/Etomo/src/etomo/ui/swing/MainTomogramPanel.java`.
 //!
-//! Java inheritance is represented by the owned `main_panel` superclass
-//! state.  `ApplicationManager`, `UIHarness`, `SetupDialogExpert`, and
-//! `ProcessTrack` remain explicit direct boundaries, rather than being
-//! replaced with alternate GUI or process-management implementations.
-#![allow(dead_code)]
+//! The main panel of the reconstruction interface (`ApplicationManager`):
+//! one or two `TomogramProcessPanel`s, or the setup dialog.  Extends
+//! [`MainPanel`] (held as `base`, dereffed to) and implements
+//! [`MainPanelVirtual`].
 
-use super::axis_process_panel::AxisProcessPanel;
-use super::axis_progress_panel::AxisProgressPanel;
-use super::main_panel::MainPanel;
-use super::tomogram_process_panel::TomogramProcessPanel;
 use crate::imod::etomo::base_manager::BaseManager;
+use std::cell::RefCell;
+use std::ops::Deref;
+use std::rc::{Rc, Weak};
+
+use super::abstract_parallel_dialog::AbstractParallelDialog;
+use super::axis_process_panel::AxisProcessPanelVirtual;
+use super::axis_progress_panel::AxisProgressPanel;
+use super::main_panel::{MainPanel, MainPanelVirtual};
+use super::setup_dialog_expert::SetupDialogExpert;
+use super::tomogram_process_panel::TomogramProcessPanel;
+use super::ui_harness;
+use crate::imod::etomo::application_manager::ApplicationManager;
+use crate::imod::etomo::jdk::{FileFilter, JComponent};
 use crate::imod::etomo::process::process_state::ProcessState;
 use crate::imod::etomo::storage::etomo_file_filter::EtomoFileFilter;
 use crate::imod::etomo::r#type::axis_id::AxisID;
 use crate::imod::etomo::r#type::axis_type::AxisType;
 use crate::imod::etomo::r#type::dialog_type::DialogType;
+use crate::imod::etomo::r#type::process_end_state::ProcessEndState;
+use crate::imod::etomo::r#type::process_track::ProcessTrack;
+use crate::imod::etomo::ui::field_validation_failed_exception::FieldValidationFailedException;
 
-/// Direct `ProcessTrack` calls made by `updateAllProcessingStates`.
-pub trait MainTomogramPanelProcessTrack {
-    fn get_pre_processing_state(&self, axis_id: AxisID) -> ProcessState;
-    fn get_coarse_alignment_state(&self, axis_id: AxisID) -> ProcessState;
-    fn get_fiducial_model_state(&self, axis_id: AxisID) -> ProcessState;
-    fn get_fine_alignment_state(&self, axis_id: AxisID) -> ProcessState;
-    fn get_tomogram_positioning_state(&self, axis_id: AxisID) -> ProcessState;
-    fn get_final_aligned_stack_state(&self, axis_id: AxisID) -> ProcessState;
-    fn get_tomogram_generation_state(&self, axis_id: AxisID) -> ProcessState;
-    fn get_tomogram_combination_state(&self) -> ProcessState;
-    fn get_post_processing_state(&self) -> ProcessState;
-    fn get_clean_up_state(&self) -> ProcessState;
-}
-
-/// Direct `UIHarness.pack` calls in this source unit.
-pub trait MainTomogramPanelUiHarness {
-    fn pack(&mut self, manager: &'static dyn BaseManager);
-    fn pack_force(&mut self, force: bool, manager: &'static dyn BaseManager);
-}
-
-/// Direct `SetupDialogExpert.getContainer` call in `openSetupPanel`.
-pub trait MainTomogramPanelSetupDialogExpert {
-    fn get_container(&self) -> String;
-}
-
-/// Direct `ApplicationManager.setCurrentDialogType` call in
-/// `showBlankProcess`.
-pub trait MainTomogramPanelApplicationManager {
-    fn set_current_dialog_type(&mut self, dialog_type: Option<DialogType>, axis_id: AxisID);
-}
-
-/// Java `MainTomogramPanel`, including its `MainPanel` superclass state.
+/// Java public class `MainTomogramPanel extends MainPanel`.
 pub struct MainTomogramPanel {
-    pub main_panel: MainPanel,
-    pub axis_panel_a: Option<TomogramProcessPanel>,
-    pub axis_panel_b: Option<TomogramProcessPanel>,
-    /// Native `panelCenter` has heterogeneous Swing children.  This preserves
-    /// the source child placed there by `openSetupPanel`.
-    pub panel_center_setup_container: Option<String>,
-    /// Java `revalidate()` presentation-boundary calls.
-    pub revalidate_count: u64,
-    /// `compactDisplay` is read from `EtomoDirector.INSTANCE` by the child
-    /// constructor; it remains an explicit global-boundary input here.
-    pub compact_display: bool,
+    /// The Java superclass part.
+    base: Rc<MainPanel>,
+    /// Java `(ApplicationManager) manager`, the constructor's argument.
+    application_manager: &'static ApplicationManager,
+    axis_panel_a: RefCell<Option<Rc<TomogramProcessPanel>>>,
+    axis_panel_b: RefCell<Option<Rc<TomogramProcessPanel>>>,
+}
+
+impl Deref for MainTomogramPanel {
+    type Target = MainPanel;
+    fn deref(&self) -> &MainPanel {
+        &self.base
+    }
 }
 
 impl MainTomogramPanel {
-    /// `MainTomogramPanel(ApplicationManager)`.
-    pub fn new(manager: &'static dyn BaseManager, compact_display: bool) -> Self {
-        Self {
-            main_panel: MainPanel::new(manager),
-            axis_panel_a: None,
-            axis_panel_b: None,
-            panel_center_setup_container: None,
-            revalidate_count: 0,
-            compact_display,
-        }
+    /// Java constructor `MainTomogramPanel(ApplicationManager)`.
+    pub fn new(app_manager: &'static ApplicationManager) -> Rc<MainTomogramPanel> {
+        let this = Rc::new(MainTomogramPanel {
+            base: MainPanel::new(app_manager),
+            application_manager: app_manager,
+            axis_panel_a: RefCell::new(None),
+            axis_panel_b: RefCell::new(None),
+        });
+        this.base
+            .set_this(Rc::downgrade(&this) as Weak<dyn MainPanelVirtual>);
+        this
     }
 
-    /// Java override `getDataFileFilter()`.
-    pub fn get_data_file_filter(&self) -> EtomoFileFilter {
-        EtomoFileFilter
-    }
-
-    /// Java override `saveDisplayState()`.
-    pub fn save_display_state(&mut self) {
-        if let Some(axis_panel_a) = &mut self.axis_panel_a {
-            axis_panel_a.axis_process_panel.save_display_state();
-        }
-        if let Some(axis_panel_b) = &mut self.axis_panel_b {
-            axis_panel_b.axis_process_panel.save_display_state();
-        }
-    }
-
-    /// Java override `showAxisA()`.
-    pub fn show_axis_a<U: MainTomogramPanelUiHarness>(&mut self, ui_harness: &mut U) {
-        if self.main_panel.is_showing_setup() || self.main_panel.axis_type == AxisType::SingleAxis {
-            ui_harness.pack_force(true, self.main_panel.manager);
-        } else if let Some(axis_panel_a) = &mut self.axis_panel_a {
-            axis_panel_a.show_axis_a();
-            self.main_panel.show_axis_a();
-        }
-    }
-
-    /// Java override `showAxisB()`.
-    pub fn show_axis_b(&mut self) {
-        self.axis_panel_b
-            .as_mut()
-            .expect("MainTomogramPanel.showAxisB requires axisPanelB")
-            .show_axis_b();
-        self.main_panel.show_axis_b();
-    }
-
-    /// Java override `showBothAxis()`.
-    pub fn show_both_axis(&mut self) -> Option<i32> {
-        self.axis_panel_b
-            .as_mut()
-            .expect("MainTomogramPanel.showBothAxis requires axisPanelB")
-            .show_axis_b();
-        self.main_panel.show_both_axis()
-    }
-
-    /// `updateAllProcessingStates(ProcessTrack)`.
-    pub fn update_all_processing_states<T: MainTomogramPanelProcessTrack>(
-        &mut self,
-        process_track: &T,
-    ) {
-        if self.axis_panel_a.is_none() {
+    /// Java `updateAllProcessingStates(ProcessTrack)`.  Update the state of all
+    /// the process control panels.
+    pub fn update_all_processing_states(&self, process_track: &ProcessTrack) {
+        let Some(axis_panel_a) = self.axis_panel_a.borrow().clone() else {
             return;
-        }
-        let axis_panel_a = self.axis_panel_a.as_mut().unwrap();
+        };
         axis_panel_a.set_pre_proc_state(process_track.get_pre_processing_state(AxisID::Only));
         axis_panel_a.set_coarse_align_state(process_track.get_coarse_alignment_state(AxisID::Only));
         axis_panel_a.set_fiducial_model_state(process_track.get_fiducial_model_state(AxisID::Only));
@@ -142,453 +79,388 @@ impl MainTomogramPanel {
             process_track.get_tomogram_generation_state(AxisID::Only),
         );
         axis_panel_a.set_tomogram_combination_state(process_track.get_tomogram_combination_state());
-        if self.main_panel.manager.is_dual_axis() {
-            let axis_panel_b = self.axis_panel_b.as_mut().expect(
-                "MainTomogramPanel.updateAllProcessingStates requires axisPanelB for dual axis",
-            );
-            axis_panel_b.set_pre_proc_state(process_track.get_pre_processing_state(AxisID::Second));
-            axis_panel_b
-                .set_coarse_align_state(process_track.get_coarse_alignment_state(AxisID::Second));
-            axis_panel_b
-                .set_fiducial_model_state(process_track.get_fiducial_model_state(AxisID::Second));
-            axis_panel_b
-                .set_fine_alignment_state(process_track.get_fine_alignment_state(AxisID::Second));
-            axis_panel_b.set_tomogram_positioning_state(
-                process_track.get_tomogram_positioning_state(AxisID::Second),
-            );
-            axis_panel_b.set_final_aligned_stack_state(
-                process_track.get_final_aligned_stack_state(AxisID::Second),
-            );
-            axis_panel_b.set_tomogram_generation_state(
-                process_track.get_tomogram_generation_state(AxisID::Second),
-            );
+        if self.base.manager.is_dual_axis() {
+            // Upstream: axisPanelB is dereferenced unchecked in the Java.
+            if let Some(axis_panel_b) = self.axis_panel_b.borrow().clone() {
+                axis_panel_b
+                    .set_pre_proc_state(process_track.get_pre_processing_state(AxisID::Second));
+                axis_panel_b.set_coarse_align_state(
+                    process_track.get_coarse_alignment_state(AxisID::Second),
+                );
+                axis_panel_b.set_fiducial_model_state(
+                    process_track.get_fiducial_model_state(AxisID::Second),
+                );
+                axis_panel_b.set_fine_alignment_state(
+                    process_track.get_fine_alignment_state(AxisID::Second),
+                );
+                axis_panel_b.set_tomogram_positioning_state(
+                    process_track.get_tomogram_positioning_state(AxisID::Second),
+                );
+                axis_panel_b.set_final_aligned_stack_state(
+                    process_track.get_final_aligned_stack_state(AxisID::Second),
+                );
+                axis_panel_b.set_tomogram_generation_state(
+                    process_track.get_tomogram_generation_state(AxisID::Second),
+                );
+            }
         }
-        let axis_panel_a = self.axis_panel_a.as_mut().unwrap();
         axis_panel_a.set_post_processing_state(process_track.get_post_processing_state());
         axis_panel_a.set_clean_up_state(process_track.get_clean_up_state());
     }
 
-    /// Java override `showProcessingPanel(AxisType)` plus its direct
-    /// `MainPanel.showProcessingPanel` superclass call.
-    pub fn show_processing_panel(&mut self, axis_type: AxisType) {
-        self.main_panel.set_showing_setup(false);
-        self.reset_axis_panels();
-        self.main_panel.axis_type = axis_type;
-        self.main_panel.panel_center.clear();
-        if axis_type == AxisType::SingleAxis {
-            let axis_id = AxisID::Only;
-            self.create_axis_panel_a(
-                axis_id,
-                AxisProgressPanel::get_instance(Some(axis_id), self.main_panel.manager),
-            );
-            self.main_panel.scroll_a = Some(super::scroll_panel::ScrollPanel::new());
-            self.main_panel.scroll_pane_a = Some(0);
-            self.add_axis_panel_a();
-            self.main_panel.panel_center.push(axis_id);
-        } else {
-            let axis_id = AxisID::First;
-            self.create_axis_panel_a(
-                axis_id,
-                AxisProgressPanel::get_instance(Some(axis_id), self.main_panel.manager),
-            );
-            self.main_panel.scroll_a = Some(super::scroll_panel::ScrollPanel::new());
-            self.main_panel.scroll_pane_a = Some(0);
-            self.add_axis_panel_a();
-            let axis_id = AxisID::Second;
-            self.create_axis_panel_b(AxisProgressPanel::get_instance(
-                Some(axis_id),
-                self.main_panel.manager,
-            ));
-            self.main_panel.scroll_b = Some(super::scroll_panel::ScrollPanel::new());
-            self.main_panel.scroll_pane_b = Some(0);
-            self.add_axis_panel_b();
-            self.main_panel.show_axis_a();
+    /// Java `openSetupPanel(SetupDialogExpert)`.  Open the setup panel.
+    pub fn open_setup_panel(&self, setup_dialog_expert: &SetupDialogExpert) {
+        self.base.set_showing_setup(true);
+        self.base.panel_center.remove_all();
+        let container: Rc<JComponent> = setup_dialog_expert.get_container();
+        self.base.panel_center.add(&container);
+        // Swing layout: revalidate().
+        ui_harness::INSTANCE.with(|harness| harness.pack_base_manager(Some(self.base.manager)));
+    }
+
+    /// Java `selectButton(AxisID, String)`.  Set the specified button as
+    /// selected.
+    pub fn select_button(&self, axis_id: AxisID, name: &str) {
+        // Upstream: the Java dereferences mapAxis's result unchecked.
+        if let Some(axis_panel) = self.map_axis(axis_id) {
+            axis_panel.select_button(name);
         }
     }
 
-    /// `openSetupPanel(SetupDialogExpert)`.
-    pub fn open_setup_panel<
-        U: MainTomogramPanelUiHarness,
-        S: MainTomogramPanelSetupDialogExpert,
-    >(
-        &mut self,
-        setup_dialog_expert: &S,
-        ui_harness: &mut U,
-    ) {
-        self.main_panel.set_showing_setup(true);
-        self.main_panel.panel_center.clear();
-        self.panel_center_setup_container = Some(setup_dialog_expert.get_container());
-        self.revalidate_count += 1;
-        ui_harness.pack(self.main_panel.manager);
-    }
-
-    /// `selectButton(AxisID, String)`.
-    pub fn select_button(&mut self, axis_id: AxisID, name: &str) {
-        self.map_axis(axis_id).select_button(name);
-    }
-
-    /// `setState(ProcessState, AxisID, AbstractParallelDialog)` after the
-    /// dialog's direct `getDialogType` boundary has supplied `dialog_type`.
-    pub fn set_state_parallel_dialog(
-        &mut self,
+    /// Java final `setState(ProcessState, AxisID, DialogType)`.
+    pub fn set_state_process_state_axis_id_dialog_type(
+        &self,
         process_state: ProcessState,
         axis_id: AxisID,
         dialog_type: DialogType,
     ) {
-        self.set_state(process_state, axis_id, dialog_type);
-    }
-
-    /// `setState(ProcessState, AxisID, DialogType)`.
-    pub fn set_state(
-        &mut self,
-        process_state: ProcessState,
-        axis_id: AxisID,
-        dialog_type: DialogType,
-    ) {
-        match dialog_type {
-            DialogType::CleanUp => self.set_clean_up_state(process_state),
-            DialogType::CoarseAlignment => self.set_coarse_align_state(process_state, axis_id),
-            DialogType::FiducialModel => self.set_fiducial_model_state(process_state, axis_id),
-            DialogType::FineAlignment => self.set_fine_alignment_state(process_state, axis_id),
-            DialogType::PostProcessing => self.set_post_processing_state(process_state),
-            DialogType::PreProcessing => self.set_pre_processing_state(process_state, axis_id),
-            DialogType::TomogramCombination => self.set_tomogram_combination_state(process_state),
-            DialogType::FinalAlignedStack => {
-                self.set_final_aligned_stack_state(process_state, axis_id)
-            }
-            DialogType::TomogramGeneration => {
-                self.set_tomogram_generation_state(process_state, axis_id)
-            }
-            DialogType::TomogramPositioning => {
-                self.set_tomogram_positioning_state(process_state, axis_id)
-            }
-            _ => {}
+        if dialog_type == DialogType::CleanUp {
+            self.set_clean_up_state(process_state);
+        } else if dialog_type == DialogType::CoarseAlignment {
+            self.set_coarse_align_state(process_state, axis_id);
+        } else if dialog_type == DialogType::FiducialModel {
+            self.set_fiducial_model_state(process_state, axis_id);
+        } else if dialog_type == DialogType::FineAlignment {
+            self.set_fine_alignment_state(process_state, axis_id);
+        } else if dialog_type == DialogType::PostProcessing {
+            self.set_post_processing_state(process_state);
+        } else if dialog_type == DialogType::PreProcessing {
+            self.set_pre_processing_state(process_state, axis_id);
+        } else if dialog_type == DialogType::TomogramCombination {
+            self.set_tomogram_combination_state(process_state);
+        } else if dialog_type == DialogType::FinalAlignedStack {
+            self.set_final_aligned_stack_state(process_state, axis_id);
+        } else if dialog_type == DialogType::TomogramGeneration {
+            self.set_tomogram_generation_state(process_state, axis_id);
+        } else if dialog_type == DialogType::TomogramPositioning {
+            self.set_tomogram_positioning_state(process_state, axis_id);
         }
     }
 
-    /// `setPreProcessingState(ProcessState, AxisID)`.
-    pub fn set_pre_processing_state(&mut self, state: ProcessState, axis_id: AxisID) {
-        self.map_axis(axis_id).set_pre_proc_state(state);
-    }
-    /// `setCoarseAlignState(ProcessState, AxisID)`.
-    pub fn set_coarse_align_state(&mut self, state: ProcessState, axis_id: AxisID) {
-        self.map_axis(axis_id).set_coarse_align_state(state);
-    }
-    /// `setFiducialModelState(ProcessState, AxisID)`.
-    pub fn set_fiducial_model_state(&mut self, state: ProcessState, axis_id: AxisID) {
-        self.map_axis(axis_id).set_fiducial_model_state(state);
-    }
-    /// `setFineAlignmentState(ProcessState, AxisID)`.
-    pub fn set_fine_alignment_state(&mut self, state: ProcessState, axis_id: AxisID) {
-        self.map_axis(axis_id).set_fine_alignment_state(state);
-    }
-    /// `setTomogramPositioningState(ProcessState, AxisID)`.
-    pub fn set_tomogram_positioning_state(&mut self, state: ProcessState, axis_id: AxisID) {
-        self.map_axis(axis_id).set_tomogram_positioning_state(state);
-    }
-    /// `setFinalAlignedStackState(ProcessState, AxisID)`.
-    pub fn set_final_aligned_stack_state(&mut self, state: ProcessState, axis_id: AxisID) {
-        self.map_axis(axis_id).set_final_aligned_stack_state(state);
-    }
-    /// `setTomogramGenerationState(ProcessState, AxisID)`.
-    pub fn set_tomogram_generation_state(&mut self, state: ProcessState, axis_id: AxisID) {
-        self.map_axis(axis_id).set_tomogram_generation_state(state);
-    }
-    /// `setTomogramCombinationState(ProcessState)`.
-    pub fn set_tomogram_combination_state(&mut self, state: ProcessState) {
-        self.axis_panel_a
-            .as_mut()
-            .expect("MainTomogramPanel requires axisPanelA")
-            .set_tomogram_combination_state(state);
-    }
-    /// `setPostProcessingState(ProcessState)`.
-    pub fn set_post_processing_state(&mut self, state: ProcessState) {
-        self.axis_panel_a
-            .as_mut()
-            .expect("MainTomogramPanel requires axisPanelA")
-            .set_post_processing_state(state);
-    }
-    /// `setCleanUpState(ProcessState)`.
-    pub fn set_clean_up_state(&mut self, state: ProcessState) {
-        self.axis_panel_a
-            .as_mut()
-            .expect("MainTomogramPanel requires axisPanelA")
-            .set_clean_up_state(state);
+    // In the following per-process setters the Java dereferences mapAxis's
+    // result (or axisPanelA) unchecked; a null panel is skipped here.
+
+    /// Java `setPreProcessingState(ProcessState, AxisID)`.
+    pub fn set_pre_processing_state(&self, state: ProcessState, axis_id: AxisID) {
+        let axis_panel = self.map_axis(axis_id);
+        if let Some(axis_panel) = axis_panel {
+            axis_panel.set_pre_proc_state(state);
+        }
     }
 
-    /// `getCPUsSelectedInt(AxisID, boolean)`.
+    /// Java `setCoarseAlignState(ProcessState, AxisID)`.
+    pub fn set_coarse_align_state(&self, state: ProcessState, axis_id: AxisID) {
+        let axis_panel = self.map_axis(axis_id);
+        if let Some(axis_panel) = axis_panel {
+            axis_panel.set_coarse_align_state(state);
+        }
+    }
+
+    /// Java `setFiducialModelState(ProcessState, AxisID)`.
+    pub fn set_fiducial_model_state(&self, state: ProcessState, axis_id: AxisID) {
+        let axis_panel = self.map_axis(axis_id);
+        if let Some(axis_panel) = axis_panel {
+            axis_panel.set_fiducial_model_state(state);
+        }
+    }
+
+    /// Java `setFineAlignmentState(ProcessState, AxisID)`.
+    pub fn set_fine_alignment_state(&self, state: ProcessState, axis_id: AxisID) {
+        let axis_panel = self.map_axis(axis_id);
+        if let Some(axis_panel) = axis_panel {
+            axis_panel.set_fine_alignment_state(state);
+        }
+    }
+
+    /// Java `setTomogramPositioningState(ProcessState, AxisID)`.
+    pub fn set_tomogram_positioning_state(&self, state: ProcessState, axis_id: AxisID) {
+        let axis_panel = self.map_axis(axis_id);
+        if let Some(axis_panel) = axis_panel {
+            axis_panel.set_tomogram_positioning_state(state);
+        }
+    }
+
+    /// Java `setFinalAlignedStackState(ProcessState, AxisID)`.
+    pub fn set_final_aligned_stack_state(&self, state: ProcessState, axis_id: AxisID) {
+        let axis_panel = self.map_axis(axis_id);
+        if let Some(axis_panel) = axis_panel {
+            axis_panel.set_final_aligned_stack_state(state);
+        }
+    }
+
+    /// Java `setTomogramGenerationState(ProcessState, AxisID)`.
+    pub fn set_tomogram_generation_state(&self, state: ProcessState, axis_id: AxisID) {
+        let axis_panel = self.map_axis(axis_id);
+        if let Some(axis_panel) = axis_panel {
+            axis_panel.set_tomogram_generation_state(state);
+        }
+    }
+
+    /// Java `setTomogramCombinationState(ProcessState)`.
+    pub fn set_tomogram_combination_state(&self, state: ProcessState) {
+        if let Some(axis_panel_a) = self.axis_panel_a.borrow().clone() {
+            axis_panel_a.set_tomogram_combination_state(state);
+        }
+    }
+
+    /// Java `setPostProcessingState(ProcessState)`.
+    pub fn set_post_processing_state(&self, state: ProcessState) {
+        if let Some(axis_panel_a) = self.axis_panel_a.borrow().clone() {
+            axis_panel_a.set_post_processing_state(state);
+        }
+    }
+
+    /// Java `setCleanUpState(ProcessState)`.
+    pub fn set_clean_up_state(&self, state: ProcessState) {
+        if let Some(axis_panel_a) = self.axis_panel_a.borrow().clone() {
+            axis_panel_a.set_clean_up_state(state);
+        }
+    }
+
+    /// Java `getCPUsSelectedInt(AxisID, boolean)`.
     pub fn get_cpus_selected_int(
         &self,
         axis_id: AxisID,
         do_validation: bool,
-    ) -> Result<i32, String> {
+    ) -> Result<i32, FieldValidationFailedException> {
         if axis_id == AxisID::Second {
-            return self.axis_panel_b.as_ref().map_or(Ok(0), |panel| {
-                panel
-                    .axis_process_panel
-                    .get_cpus_selected_int(do_validation)
-            });
+            if let Some(axis_panel_b) = self.axis_panel_b.borrow().clone() {
+                return axis_panel_b.get_cpus_selected_int(do_validation);
+            }
+            return Ok(0);
         }
-        self.axis_panel_a.as_ref().map_or(Ok(0), |panel| {
-            panel
-                .axis_process_panel
-                .get_cpus_selected_int(do_validation)
-        })
+        if let Some(axis_panel_a) = self.axis_panel_a.borrow().clone() {
+            return axis_panel_a.get_cpus_selected_int(do_validation);
+        }
+        Ok(0)
     }
 
-    /// Java override `createAxisPanelA(AxisID, AxisProgressPanel)`.
-    pub fn create_axis_panel_a(&mut self, axis_id: AxisID, axis_progress_panel: AxisProgressPanel) {
-        self.axis_panel_a = Some(TomogramProcessPanel::new(
-            self.main_panel.manager,
-            axis_id,
-            axis_progress_panel,
-            self.compact_display,
-        ));
-    }
-    /// Java override `createAxisPanelB(AxisProgressPanel)`.
-    pub fn create_axis_panel_b(&mut self, axis_progress_panel: AxisProgressPanel) {
-        self.axis_panel_b = Some(TomogramProcessPanel::new(
-            self.main_panel.manager,
-            AxisID::Second,
-            axis_progress_panel,
-            self.compact_display,
-        ));
-    }
-    /// Java override `resetAxisPanels()`.
-    pub fn reset_axis_panels(&mut self) {
-        self.axis_panel_a = None;
-        self.axis_panel_b = None;
-    }
-    /// Java override `addAxisPanelA()`.
-    pub fn add_axis_panel_a(&mut self) {
-        let _ = self
-            .axis_panel_a
-            .as_ref()
-            .expect("MainTomogramPanel requires axisPanelA")
-            .axis_process_panel
-            .get_container();
-    }
-    /// Java override `addAxisPanelB()`.
-    pub fn add_axis_panel_b(&mut self) {
-        let _ = self
-            .axis_panel_b
-            .as_ref()
-            .expect("MainTomogramPanel requires axisPanelB")
-            .axis_process_panel
-            .get_container();
-    }
-    /// Java override `isAxisPanelANull()`.
-    pub fn is_axis_panel_a_null(&self) -> bool {
-        self.axis_panel_a.is_none()
-    }
-    /// Java override `isAxisPanelBNull()`.
-    pub fn is_axis_panel_b_null(&self) -> bool {
-        self.axis_panel_b.is_none()
-    }
-    /// Java override `getAxisPanelA()`.
-    pub fn get_axis_panel_a(&mut self) -> Option<&mut AxisProcessPanel> {
-        self.axis_panel_a
-            .as_mut()
-            .map(|panel| &mut panel.axis_process_panel)
-    }
-    /// Java override `getAxisPanelB()`.
-    pub fn get_axis_panel_b(&mut self) -> Option<&mut AxisProcessPanel> {
-        self.axis_panel_b
-            .as_mut()
-            .map(|panel| &mut panel.axis_process_panel)
-    }
-    /// Java override `hideAxisPanelA()`.
-    pub fn hide_axis_panel_a(&mut self) -> bool {
-        self.axis_panel_a
-            .as_mut()
-            .expect("MainTomogramPanel requires axisPanelA")
-            .axis_process_panel
-            .hide()
-    }
-    /// Java override `hideAxisPanelB()`.
-    pub fn hide_axis_panel_b(&mut self) -> bool {
-        self.axis_panel_b
-            .as_mut()
-            .expect("MainTomogramPanel requires axisPanelB")
-            .axis_process_panel
-            .hide()
-    }
-    /// Java override `showAxisPanelA()`.
-    pub fn show_axis_panel_a(&mut self) {
-        self.axis_panel_a
-            .as_mut()
-            .expect("MainTomogramPanel requires axisPanelA")
-            .axis_process_panel
-            .show();
-    }
-    /// Java override `showAxisPanelB()`.
-    pub fn show_axis_panel_b(&mut self) {
-        self.axis_panel_b
-            .as_mut()
-            .expect("MainTomogramPanel requires axisPanelB")
-            .axis_process_panel
-            .show();
-    }
-
-    /// Java override `showBlankProcess(AxisID)`.
-    pub fn show_blank_process<M: MainTomogramPanelApplicationManager>(
-        &mut self,
-        application_manager: &mut M,
-        axis_id: AxisID,
-    ) {
-        application_manager.set_current_dialog_type(None, axis_id);
-        self.map_base_axis_process_panel(axis_id)
-            .erase_dialog_panel();
-    }
-
-    /// Java private `mapAxis(AxisID)`.
-    fn map_axis(&mut self, axis_id: AxisID) -> &mut TomogramProcessPanel {
+    /// Java private `mapAxis(AxisID)`.  Convenience function to return a
+    /// reference to the correct AxisProcessPanel.
+    fn map_axis(&self, axis_id: AxisID) -> Option<Rc<TomogramProcessPanel>> {
         if axis_id == AxisID::Second {
-            self.axis_panel_b
-                .as_mut()
-                .expect("MainTomogramPanel.mapAxis requires axisPanelB")
-        } else {
-            self.axis_panel_a
-                .as_mut()
-                .expect("MainTomogramPanel.mapAxis requires axisPanelA")
+            return self.axis_panel_b.borrow().clone();
         }
-    }
-    /// Java override `mapBaseAxisProcessPanel(AxisID)`.
-    pub fn map_base_axis_process_panel(&mut self, axis_id: AxisID) -> &mut AxisProcessPanel {
-        &mut self.map_axis(axis_id).axis_process_panel
-    }
-    /// Java override `mapAxisProgressPanel(AxisID)`.
-    pub fn map_axis_progress_panel(&mut self, axis_id: AxisID) -> &mut AxisProgressPanel {
-        &mut self
-            .map_axis(axis_id)
-            .axis_process_panel
-            .axis_progress_panel
-    }
-    /// Java override `stopProgressBar(AxisID, ProcessEndState, String)`.
-    pub fn stop_progress_bar(
-        &mut self,
-        axis_id: AxisID,
-        process_end_state: &str,
-        status_string: Option<&str>,
-    ) {
-        self.main_panel
-            .stop_progress_bar(axis_id, process_end_state, status_string);
+        self.axis_panel_a.borrow().clone()
     }
 }
 
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use crate::imod::etomo::directive_editor_manager::DirectiveEditorManager;
+impl MainPanelVirtual for MainTomogramPanel {
+    fn main_panel(&self) -> &MainPanel {
+        &self.base
+    }
 
-    struct Harness {
-        packs: Vec<bool>,
+    /// Java `getDataFileFilter()`.
+    fn get_data_file_filter(&self) -> Option<Rc<dyn FileFilter>> {
+        Some(Rc::new(EtomoFileFilter))
     }
-    impl MainTomogramPanelUiHarness for Harness {
-        fn pack(&mut self, _: &'static dyn BaseManager) {
-            self.packs.push(false);
+
+    /// Java `saveDisplayState()`.
+    fn save_display_state(&self) {
+        if let Some(axis_panel_a) = self.axis_panel_a.borrow().clone() {
+            axis_panel_a.save_display_state();
         }
-        fn pack_force(&mut self, force: bool, _: &'static dyn BaseManager) {
-            self.packs.push(force);
-        }
-    }
-    struct Setup;
-    impl MainTomogramPanelSetupDialogExpert for Setup {
-        fn get_container(&self) -> String {
-            "setup-container".into()
-        }
-    }
-    struct Application {
-        current: Option<(Option<DialogType>, AxisID)>,
-    }
-    impl MainTomogramPanelApplicationManager for Application {
-        fn set_current_dialog_type(&mut self, dialog_type: Option<DialogType>, axis_id: AxisID) {
-            self.current = Some((dialog_type, axis_id));
+        if let Some(axis_panel_b) = self.axis_panel_b.borrow().clone() {
+            axis_panel_b.save_display_state();
         }
     }
 
-    fn panel() -> MainTomogramPanel {
-        MainTomogramPanel::new(DirectiveEditorManager::new(None, None, None, None), false)
+    /// Java `showAxisA()` override.
+    fn show_axis_a(&self) {
+        if self.base.is_showing_setup() || self.base.axis_type.get() == AxisType::SingleAxis {
+            ui_harness::INSTANCE
+                .with(|harness| harness.pack_boolean_base_manager(true, Some(self.base.manager)));
+        } else if let Some(axis_panel_a) = self.axis_panel_a.borrow().clone() {
+            axis_panel_a.show_axis_a_void();
+            self.base.show_axis_a_super();
+        }
     }
 
-    #[test]
-    fn processing_panels_follow_single_and_dual_axis_source_construction() {
-        let mut panel = panel();
-        panel.show_processing_panel(AxisType::SingleAxis);
-        assert_eq!(
-            panel
-                .axis_panel_a
-                .as_ref()
-                .unwrap()
-                .axis_process_panel
-                .axis_id,
-            AxisID::Only
-        );
-        assert!(panel.axis_panel_b.is_none());
-        panel.show_processing_panel(AxisType::DualAxis);
-        assert_eq!(
-            panel
-                .axis_panel_a
-                .as_ref()
-                .unwrap()
-                .axis_process_panel
-                .axis_id,
-            AxisID::First
-        );
-        assert_eq!(
-            panel
-                .axis_panel_b
-                .as_ref()
-                .unwrap()
-                .axis_process_panel
-                .axis_id,
-            AxisID::Second
-        );
+    /// Java `showAxisB()` override.
+    fn show_axis_b(&self) {
+        // Upstream: axisPanelB is dereferenced unchecked in the Java.
+        if let Some(axis_panel_b) = self.axis_panel_b.borrow().clone() {
+            axis_panel_b.show_axis_b_void();
+        }
+        self.base.show_axis_b_super();
     }
 
-    #[test]
-    fn setup_and_blank_process_preserve_manager_and_presentation_boundaries() {
-        let mut panel = panel();
-        let mut harness = Harness { packs: vec![] };
-        panel.open_setup_panel(&Setup, &mut harness);
-        assert!(panel.main_panel.is_showing_setup());
-        assert_eq!(
-            panel.panel_center_setup_container.as_deref(),
-            Some("setup-container")
-        );
-        assert_eq!(harness.packs, vec![false]);
-        panel.show_processing_panel(AxisType::SingleAxis);
-        let mut application = Application {
-            current: Some((Some(DialogType::CleanUp), AxisID::Only)),
-        };
-        panel.show_blank_process(&mut application, AxisID::Only);
-        assert_eq!(application.current, Some((None, AxisID::Only)));
-        assert!(
-            panel
-                .axis_panel_a
-                .unwrap()
-                .axis_process_panel
-                .panel_dialog
-                .is_none()
+    /// Java `showBothAxis()` override.
+    fn show_both_axis(&self) -> Option<Rc<JComponent>> {
+        // Upstream: axisPanelB is dereferenced unchecked in the Java.
+        if let Some(axis_panel_b) = self.axis_panel_b.borrow().clone() {
+            axis_panel_b.show_axis_b_void();
+        }
+        self.base.show_both_axis_super()
+    }
+
+    /// Java `showProcessingPanel(AxisType)` override.
+    fn show_processing_panel(&self, axis_type: AxisType) {
+        self.base.set_showing_setup(false);
+        self.base.show_processing_panel_super(axis_type);
+    }
+
+    /// Java final `setState(ProcessState, AxisID, AbstractParallelDialog)`.
+    fn set_state(
+        &self,
+        process_state: ProcessState,
+        axis_id: AxisID,
+        parallel_dialog: &dyn AbstractParallelDialog,
+    ) {
+        self.set_state_process_state_axis_id_dialog_type(
+            process_state,
+            axis_id,
+            parallel_dialog.get_dialog_type(),
         );
     }
 
-    #[test]
-    fn state_dispatches_to_the_matching_tomogram_control() {
-        let mut panel = panel();
-        panel.show_processing_panel(AxisType::SingleAxis);
-        panel.set_state(
-            ProcessState::Complete,
-            AxisID::Only,
-            DialogType::FineAlignment,
+    /// Java `createAxisPanelA(AxisID, AxisProgressPanel)`.
+    fn create_axis_panel_a(&self, axis_id: AxisID, axis_progress_panel: Rc<AxisProgressPanel>) {
+        let panel =
+            TomogramProcessPanel::new(self.application_manager, axis_id, axis_progress_panel);
+        *self.axis_panel_a.borrow_mut() = Some(panel);
+    }
+
+    /// Java `createAxisPanelB(AxisProgressPanel)`.
+    fn create_axis_panel_b(&self, axis_progress_panel: Rc<AxisProgressPanel>) {
+        let panel = TomogramProcessPanel::new(
+            self.application_manager,
+            AxisID::Second,
+            axis_progress_panel,
         );
-        assert_eq!(
-            panel
-                .axis_panel_a
-                .unwrap()
-                .proc_ctl_fine_alignment
-                .selected_state,
-            2
-        );
+        *self.axis_panel_b.borrow_mut() = Some(panel);
+    }
+
+    /// Java `resetAxisPanels()`.
+    fn reset_axis_panels(&self) {
+        *self.axis_panel_a.borrow_mut() = None;
+        *self.axis_panel_b.borrow_mut() = None;
+    }
+
+    /// Java `addAxisPanelA()`.
+    fn add_axis_panel_a(&self) {
+        let axis_panel_a = self.axis_panel_a.borrow().clone();
+        if let (Some(scroll_a), Some(axis_panel_a)) = (self.base.get_scroll_a(), axis_panel_a) {
+            scroll_a.add(&axis_panel_a.get_container());
+        }
+    }
+
+    /// Java `addAxisPanelB()`.
+    fn add_axis_panel_b(&self) {
+        let axis_panel_b = self.axis_panel_b.borrow().clone();
+        if let (Some(scroll_b), Some(axis_panel_b)) = (self.base.get_scroll_b(), axis_panel_b) {
+            scroll_b.add(&axis_panel_b.get_container());
+        }
+    }
+
+    /// Java `isAxisPanelANull()`.
+    fn is_axis_panel_a_null(&self) -> bool {
+        self.axis_panel_a.borrow().is_none()
+    }
+
+    /// Java `isAxisPanelBNull()`.
+    fn is_axis_panel_b_null(&self) -> bool {
+        self.axis_panel_b.borrow().is_none()
+    }
+
+    /// Java `getAxisPanelA()`.
+    fn get_axis_panel_a(&self) -> Option<Rc<dyn AxisProcessPanelVirtual>> {
+        self.axis_panel_a
+            .borrow()
+            .clone()
+            .map(|panel| panel as Rc<dyn AxisProcessPanelVirtual>)
+    }
+
+    /// Java `getAxisPanelB()`.
+    fn get_axis_panel_b(&self) -> Option<Rc<dyn AxisProcessPanelVirtual>> {
+        self.axis_panel_b
+            .borrow()
+            .clone()
+            .map(|panel| panel as Rc<dyn AxisProcessPanelVirtual>)
+    }
+
+    /// Java `hideAxisPanelA()`.
+    fn hide_axis_panel_a(&self) -> bool {
+        self.axis_panel_a
+            .borrow()
+            .clone()
+            .is_some_and(|panel| panel.hide())
+    }
+
+    /// Java `hideAxisPanelB()`.
+    fn hide_axis_panel_b(&self) -> bool {
+        self.axis_panel_b
+            .borrow()
+            .clone()
+            .is_some_and(|panel| panel.hide())
+    }
+
+    /// Java `showAxisPanelA()`.
+    fn show_axis_panel_a(&self) {
+        if let Some(panel) = self.axis_panel_a.borrow().clone() {
+            panel.show();
+        }
+    }
+
+    /// Java `showAxisPanelB()`.
+    fn show_axis_panel_b(&self) {
+        if let Some(panel) = self.axis_panel_b.borrow().clone() {
+            panel.show();
+        }
+    }
+
+    /// Java `showBlankProcess(AxisID)` override.  Show a blank processing
+    /// panel.
+    fn show_blank_process(&self, axis_id: AxisID) {
+        // Java `((ApplicationManager) manager).setCurrentDialogType(null, axisID)`.
+        self.application_manager
+            .set_current_dialog_type(None, Some(axis_id));
+        self.base.show_blank_process_super(axis_id);
+    }
+
+    /// Java `mapBaseAxisProcessPanel(AxisID)`.
+    fn map_base_axis_process_panel(
+        &self,
+        axis_id: AxisID,
+    ) -> Option<Rc<dyn AxisProcessPanelVirtual>> {
+        self.map_axis(axis_id)
+            .map(|panel| panel as Rc<dyn AxisProcessPanelVirtual>)
+    }
+
+    /// Java `mapAxisProgressPanel(AxisID)`.
+    fn map_axis_progress_panel(&self, axis_id: AxisID) -> Option<Rc<AxisProgressPanel>> {
+        Some(self.base.get_progress_panel(axis_id))
+    }
+
+    /// Java `stopProgressBar(AxisID, ProcessEndState, String)` override (calls
+    /// the superclass body).
+    fn stop_progress_bar_axis_id_process_end_state_string(
+        &self,
+        axis_id: AxisID,
+        process_end_state: Option<ProcessEndState>,
+        status_string: Option<&str>,
+    ) {
+        self.base
+            .stop_progress_bar_super(axis_id, process_end_state, status_string);
     }
 }

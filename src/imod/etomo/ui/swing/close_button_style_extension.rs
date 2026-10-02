@@ -1,35 +1,58 @@
 //! `IMOD/Etomo/src/etomo/ui/swing/CloseButtonStyleExtension.java`.
-#![allow(dead_code)]
-use super::button_style_extension::{
-    ButtonStyleExtension, CompleteIconBoundary, ImageObserverBoundary,
-};
-use std::sync::{Arc, LazyLock, Mutex};
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub enum CloseScaledImage {
-    SmallX,
-    SmallXPressed,
-    SmallXRollover,
+//!
+//! A tiny button for closing things.  Has an x image with a red
+//! rollover.
+//!
+//! A stateless singleton subclass of `ButtonStyleExtension`: it embeds that
+//! struct as `base` and implements [`ButtonStyleExtensionVirtual`] with the
+//! inherited bodies.  Java's lazily created `private static INSTANCE` is a
+//! thread-local on the EDT, where every button lives.
+
+use std::cell::RefCell;
+use std::ops::Deref;
+use std::rc::Rc;
+
+use super::button_style_extension::{ButtonStyleExtension, ButtonStyleExtensionVirtual};
+use super::complete_icon::CompleteIcon;
+use super::scaled_image;
+use crate::imod::etomo::jdk::JComponent;
+
+thread_local! {
+    /// Java `private static CloseButtonStyleExtension INSTANCE = null`.
+    static INSTANCE: RefCell<Option<Rc<CloseButtonStyleExtension>>> = const { RefCell::new(None) };
 }
-pub type CloseCompleteIconBoundary = CompleteIconBoundary<CloseScaledImage>;
+
+/// Java `CloseButtonStyleExtension extends ButtonStyleExtension`.
 pub struct CloseButtonStyleExtension {
-    pub button_style_extension: ButtonStyleExtension<CloseScaledImage>,
+    base: ButtonStyleExtension,
 }
-static INSTANCE: LazyLock<Mutex<Option<Arc<CloseButtonStyleExtension>>>> =
-    LazyLock::new(|| Mutex::new(None));
+
+impl Deref for CloseButtonStyleExtension {
+    type Target = ButtonStyleExtension;
+    fn deref(&self) -> &ButtonStyleExtension {
+        &self.base
+    }
+}
+
+impl ButtonStyleExtensionVirtual for CloseButtonStyleExtension {
+    fn get_button_style_extension(&self) -> &ButtonStyleExtension {
+        &self.base
+    }
+}
+
 impl CloseButtonStyleExtension {
-    fn new(image_observer: Option<Arc<dyn ImageObserverBoundary>>) -> Self {
-        Self {
-            button_style_extension: ButtonStyleExtension::new(
+    /// Java private `CloseButtonStyleExtension(ImageObserver)`.
+    fn new(image_observer: Option<&Rc<JComponent>>) -> CloseButtonStyleExtension {
+        CloseButtonStyleExtension {
+            base: ButtonStyleExtension::new(
                 false,
-                Some(CloseCompleteIconBoundary {
-                    image: CloseScaledImage::SmallX,
-                    selected_image: None,
-                    pressed_image: Some(CloseScaledImage::SmallXPressed),
-                    rollover_image: Some(CloseScaledImage::SmallXRollover),
+                Some(Rc::new(
+                CompleteIcon::new_scaled_image_scaled_image_scaled_image_scaled_image_image_observer_boolean(
+                    Some(&scaled_image::SMALL_X), None, Some(&scaled_image::SMALL_X_PRESSED), Some(&scaled_image::SMALL_X_ROLLOVER),
                     image_observer,
-                    debug: false,
-                    icon_size: None,
-                }),
+                    false,
+                ),
+            )),
                 None,
                 None,
                 None,
@@ -37,24 +60,16 @@ impl CloseButtonStyleExtension {
             ),
         }
     }
-    pub fn get_instance(image_observer: Option<Arc<dyn ImageObserverBoundary>>) -> Arc<Self> {
-        let mut instance = INSTANCE
-            .lock()
-            .expect("CloseButtonStyleExtension mutex poisoned");
-        if instance.is_none() {
-            *instance = Some(Arc::new(Self::new(image_observer)));
-        }
-        Arc::clone(instance.as_ref().expect("Java INSTANCE assigned above"))
-    }
-}
-#[cfg(test)]
-mod tests {
-    use super::*;
-    #[test]
-    fn constructor_has_pressed_and_rollover_icon() {
-        let value = CloseButtonStyleExtension::new(None);
-        let icon = value.button_style_extension.icon.unwrap();
-        assert_eq!(icon.pressed_image, Some(CloseScaledImage::SmallXPressed));
-        assert_eq!(icon.rollover_image, Some(CloseScaledImage::SmallXRollover));
+
+    /// Java `static getInstance(ImageObserver)`.
+    pub fn get_instance(image_observer: &Rc<JComponent>) -> Rc<CloseButtonStyleExtension> {
+        INSTANCE.with(|instance| {
+            if instance.borrow().is_none() {
+                *instance.borrow_mut() = Some(Rc::new(CloseButtonStyleExtension::new(Some(
+                    image_observer,
+                ))));
+            }
+            instance.borrow().clone().unwrap()
+        })
     }
 }

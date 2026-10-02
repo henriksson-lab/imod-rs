@@ -1,99 +1,86 @@
 //! `IMOD/Etomo/src/etomo/ui/swing/ClearButtonStyleExtension.java`.
-#![allow(dead_code)]
-use super::button_style_extension::{
-    ButtonStyleExtension, CompleteIconBoundary, ImageObserverBoundary,
-};
-use std::sync::{Arc, LazyLock, Mutex};
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub enum ClearScaledImage {
-    Clear,
-    ClearBlue,
-    ClearRed,
+//!
+//! An extension which gives a button an eraser icon.
+//!
+//! A stateless singleton subclass of `ButtonStyleExtension`: it embeds that
+//! struct as `base` and implements [`ButtonStyleExtensionVirtual`] with the
+//! inherited bodies.  Java's lazily created `private static INSTANCE` is a
+//! thread-local on the EDT, where every button lives.
+
+use std::cell::RefCell;
+use std::ops::Deref;
+use std::rc::Rc;
+
+use super::button_style_extension::{ButtonStyleExtension, ButtonStyleExtensionVirtual};
+use super::complete_icon::CompleteIcon;
+use super::scaled_image;
+use crate::imod::etomo::jdk::JComponent;
+
+thread_local! {
+    /// Java `private static ClearButtonStyleExtension INSTANCE = null`.
+    static INSTANCE: RefCell<Option<Rc<ClearButtonStyleExtension>>> = const { RefCell::new(None) };
 }
-pub type ClearCompleteIconBoundary = CompleteIconBoundary<ClearScaledImage>;
+
+/// Java `ClearButtonStyleExtension extends ButtonStyleExtension`.
 pub struct ClearButtonStyleExtension {
-    pub button_style_extension: ButtonStyleExtension<ClearScaledImage>,
+    base: ButtonStyleExtension,
 }
-static INSTANCE: LazyLock<Mutex<Option<Arc<ClearButtonStyleExtension>>>> =
-    LazyLock::new(|| Mutex::new(None));
+
+impl Deref for ClearButtonStyleExtension {
+    type Target = ButtonStyleExtension;
+    fn deref(&self) -> &ButtonStyleExtension {
+        &self.base
+    }
+}
+
+impl ButtonStyleExtensionVirtual for ClearButtonStyleExtension {
+    fn get_button_style_extension(&self) -> &ButtonStyleExtension {
+        &self.base
+    }
+}
+
 impl ClearButtonStyleExtension {
     /// Java private `ClearButtonStyleExtension(ImageObserver)`.
-    fn new(image_observer: Option<Arc<dyn ImageObserverBoundary>>) -> Self {
-        Self {
-            button_style_extension: ButtonStyleExtension::new(
+    fn new(image_observer: Option<&Rc<JComponent>>) -> ClearButtonStyleExtension {
+        ClearButtonStyleExtension {
+            base: ButtonStyleExtension::new(
                 false,
-                Some(ClearCompleteIconBoundary {
-                    image: ClearScaledImage::Clear,
-                    selected_image: None,
-                    pressed_image: None,
-                    rollover_image: None,
-                    image_observer: image_observer.clone(),
-                    debug: false,
-                    icon_size: None,
-                }),
-                Some(ClearCompleteIconBoundary {
-                    image: ClearScaledImage::ClearBlue,
-                    selected_image: None,
-                    pressed_image: None,
-                    rollover_image: None,
-                    image_observer: image_observer.clone(),
-                    debug: false,
-                    icon_size: None,
-                }),
-                Some(ClearCompleteIconBoundary {
-                    image: ClearScaledImage::ClearRed,
-                    selected_image: None,
-                    pressed_image: None,
-                    rollover_image: None,
+                Some(Rc::new(
+                CompleteIcon::new_scaled_image_scaled_image_scaled_image_scaled_image_image_observer_boolean(
+                    Some(&scaled_image::CLEAR), None, None, None,
                     image_observer,
-                    debug: false,
-                    icon_size: None,
-                }),
+                    false,
+                ),
+            )),
+                Some(Rc::new(
+                CompleteIcon::new_scaled_image_scaled_image_scaled_image_scaled_image_image_observer_boolean(
+                    Some(&scaled_image::CLEAR_BLUE), None, None, None,
+                    image_observer,
+                    false,
+                ),
+            )),
+                Some(Rc::new(
+                CompleteIcon::new_scaled_image_scaled_image_scaled_image_scaled_image_image_observer_boolean(
+                    Some(&scaled_image::CLEAR_RED), None, None, None,
+                    image_observer,
+                    false,
+                ),
+            )),
                 None,
                 true,
             ),
         }
     }
-    /// Java static `getInstance(ImageObserver)`.
-    pub fn get_instance(image_observer: Option<Arc<dyn ImageObserverBoundary>>) -> Arc<Self> {
-        let mut instance = INSTANCE
-            .lock()
-            .expect("ClearButtonStyleExtension mutex poisoned");
-        if instance.is_none() {
-            *instance = Some(Arc::new(Self::new(image_observer)));
-        }
-        Arc::clone(instance.as_ref().expect("Java INSTANCE assigned above"))
-    }
-}
-#[cfg(test)]
-mod tests {
-    use super::*;
-    struct Observer;
-    impl ImageObserverBoundary for Observer {}
-    #[test]
-    fn constructor_has_clear_states() {
-        let value = ClearButtonStyleExtension::new(Some(Arc::new(Observer)));
-        assert_eq!(
-            value.button_style_extension.icon.as_ref().unwrap().image,
-            ClearScaledImage::Clear
-        );
-        assert_eq!(
-            value
-                .button_style_extension
-                .template_icon
-                .as_ref()
-                .unwrap()
-                .image,
-            ClearScaledImage::ClearBlue
-        );
-        assert_eq!(
-            value
-                .button_style_extension
-                .error_icon
-                .as_ref()
-                .unwrap()
-                .image,
-            ClearScaledImage::ClearRed
-        );
+
+    /// Java `static getInstance(ImageObserver)`.
+    pub fn get_instance(image_observer: &Rc<JComponent>) -> Rc<ClearButtonStyleExtension> {
+        INSTANCE.with(|instance| {
+            if instance.borrow().is_none() {
+                *instance.borrow_mut() = Some(Rc::new(ClearButtonStyleExtension::new(Some(
+                    image_observer,
+                ))));
+            }
+            instance.borrow().clone().unwrap()
+        })
     }
 }

@@ -1,145 +1,152 @@
-//! `IMOD/Etomo/src/etomo/ui/swing/LabeledSpinner.java`.
+//! `IMOD/Etomo/src/etomo/ui/swing/LabeledSpinner.java`: a label and an integer
+//! spinner in one panel, usable as a text `Field`.
 //!
-//! The `JPanel`, `JLabel`, `JSpinner`, `SpinnerNumberModel`, formatted editor,
-//! and its Swing listeners are a GUI boundary.  This module retains every piece
-//! of source-owned state and the source's control, naming, range, checkpoint,
-//! tooltip, and field-highlight rules, so a native GUI adapter has one direct
-//! place to attach those components.
-#![allow(dead_code)]
+//! `final class LabeledSpinner implements TextFieldInterface, ChangeListener,
+//! FocusListener`.  The `JPanel`, `JLabel` and `JSpinner` are jdk stand-in
+//! [`JComponent`]s; the spinner's `SpinnerNumberModel` lives inside the spinner
+//! component.
+
+use std::cell::{Cell, RefCell};
+use std::rc::{Rc, Weak};
 
 use crate::imod::etomo::etomo_director::ARGUMENTS;
-use crate::imod::etomo::storage::autodoc::autodoc_tokenizer::SEPARATOR_CHAR;
-use crate::imod::etomo::r#type::const_etomo_number::{ConstEtomoNumber, INTEGER_NULL_VALUE};
-use crate::imod::etomo::ui::swing::labeled_text_field::{
-    BACKGROUND, BLACK, FIELD_HIGHLIGHT, TextFieldSetting,
+use crate::imod::etomo::jdk::{
+    ChangeEvent, ChangeListener, FocusEvent, FocusListener, JComponent, SpinnerNumberModel,
 };
-use crate::imod::etomo::ui::swing::panel::Dimension;
-use crate::imod::etomo::ui::swing::ui_utilities::Color;
+use crate::imod::etomo::logic::autodoc_attribute_retriever;
+use crate::imod::etomo::storage::autodoc::autodoc_tokenizer::{DEFAULT_DELIMITER, SEPARATOR_CHAR};
+use crate::imod::etomo::storage::directive_def::DirectiveDef;
+use crate::imod::etomo::r#type::const_etomo_number::{
+    ConstEtomoNumber, INTEGER_NULL_VALUE, Number, Type, java_lang_string_matches_whitespace,
+};
+use crate::imod::etomo::r#type::etomo_number::EtomoNumber;
+use crate::imod::etomo::r#type::ui_test_field_type;
+use crate::imod::etomo::ui::field::Field;
+use crate::imod::etomo::ui::field_displayer::FieldDisplayer;
+use crate::imod::etomo::ui::field_setting_interface::FieldSettingInterface;
+use crate::imod::etomo::ui::field_validation_failed_exception::FieldValidationFailedException;
+use crate::imod::etomo::ui::swing::colors;
+use crate::imod::etomo::ui::swing::tooltip_formatter;
+use crate::imod::etomo::ui::text_field_interface::TextFieldInterface;
+use crate::imod::etomo::ui::text_field_setting::TextFieldSetting;
 use crate::imod::etomo::util::utilities;
 
-/// The source `SpinnerNumberModel` values retained at the native Swing boundary.
-#[derive(Clone, Debug, Eq, PartialEq)]
-pub struct SpinnerNumberModel {
-    pub value: i32,
-    pub minimum: i32,
-    pub maximum: i32,
-    pub step_size: i32,
-}
+/// `java.awt.Color` as the jdk stand-in carries it (RGB).
+type Rgb = (u8, u8, u8);
 
-/// Java package-private final `LabeledSpinner`.
-#[derive(Clone, Debug)]
+/// Java `LabeledSpinner`.
 pub struct LabeledSpinner {
-    /// Java `defaultValue`, which is final and is used for null input.
-    pub default_value: i32,
-    /// Java `model`, `minimum`, and `maximum`.
-    pub model: SpinnerNumberModel,
-    pub minimum: i32,
-    pub maximum: i32,
-    pub orig_label_foreground: Option<Color>,
-    pub orig_text_foreground: Option<Color>,
-    /// Java `DirectiveDef` and `AutodocAttributeRetriever` are storage boundaries.
-    pub directive_default_value: Option<String>,
-    pub backup: Option<TextFieldSetting>,
-    pub default_value_setting: Option<TextFieldSetting>,
-    pub checkpoint: Option<TextFieldSetting>,
-    pub field_highlight: Option<TextFieldSetting>,
-    pub enabled: bool,
-    pub editable: bool,
-    pub unformatted_tooltip: Option<String>,
-    /// State of Java `panel`, `label`, spinner, and `JFormattedTextField`.
-    pub panel_visible: bool,
-    pub panel_maximum_size: Option<Dimension>,
-    pub panel_alignment_x: f32,
-    pub label: String,
-    pub label_enabled: bool,
-    pub label_foreground: Color,
-    pub spinner_name: String,
-    pub spinner_enabled: bool,
-    pub spinner_preferred_size: Option<Dimension>,
-    pub spinner_maximum_size: Option<Dimension>,
-    pub spinner_foreground: Color,
-    pub text_background: Color,
-    pub tooltip: Option<String>,
-    /// Actual listener registration is Swing-specific; retain each attachment count.
-    pub change_listener_count: usize,
-    pub focus_listener_count: usize,
-    pub mouse_listener_count: usize,
+    /// Java `this`, for `spinner.addChangeListener(this)`.
+    this: Weak<LabeledSpinner>,
+    panel: Rc<JComponent>,
+    label: Rc<JComponent>,
+    spinner: Rc<JComponent>,
+
+    default_value: i32,
+    // Java field `model`: the spinner's `SpinnerNumberModel`, held by the jdk
+    // spinner component (`get_spinner_model` / `set_spinner_model`).
+    minimum: Cell<i32>,
+    maximum: Cell<i32>,
+
+    /// Java `origLabelForeground` / `origTextForeground`: outer `None` is Java
+    /// null; the inner value is what `getForeground()` returned (the jdk's
+    /// `None` is the look-and-feel default, a real colour in Swing, so Java's
+    /// `Color.BLACK` fallback never applies).
+    orig_label_foreground: Cell<Option<Option<Rgb>>>,
+    orig_text_foreground: Cell<Option<Option<Rgb>>>,
+    directive_def: Cell<Option<DirectiveDef>>,
+    backup: RefCell<Option<TextFieldSetting>>,
+    default_value_setting: RefCell<Option<TextFieldSetting>>,
+    checkpoint: RefCell<Option<TextFieldSetting>>,
+    field_highlight: RefCell<Option<TextFieldSetting>>,
+    enabled: Cell<bool>,
+    editable: Cell<bool>,
+    unformatted_tooltip: RefCell<Option<String>>,
 }
 
 impl LabeledSpinner {
-    /// Java private `LabeledSpinner(String,int,int,int,int,int,int)`.
-    #[allow(clippy::too_many_arguments)]
-    pub fn new(
-        spin_label: &str,
+    /// Java `LabeledSpinner(String spinLabel, int value, int minimum, int maximum,
+    /// int stepSize, int defaultValue, int hgap)`.
+    fn new(
+        spin_label: Option<&str>,
         value: i32,
         minimum: i32,
         maximum: i32,
         step_size: i32,
         default_value: i32,
         hgap: i32,
-    ) -> Self {
-        let name = utilities::convert_label_to_name(Some(spin_label), true).unwrap_or_default();
-        let spinner_name = format!("sp{SEPARATOR_CHAR}{name}");
-        if ARGUMENTS.lock().unwrap().is_print_names() {
-            println!("{spinner_name} = ");
-        }
-        // Java asks AWT for the maximum width and font heights.  Those values are
-        // native-widget state; the source's height rule is represented by the
-        // conventional unscaled one-font unit here.
-        let maximum_size = Dimension {
-            width: i32::MAX,
-            height: 2,
-        };
-        let _ = hgap; // Java adds a rigid area only when this is positive.
-        Self {
+    ) -> Rc<LabeledSpinner> {
+        let instance = Rc::new_cyclic(|this| LabeledSpinner {
+            this: this.clone(),
+            panel: JComponent::new_panel(),
+            label: JComponent::new_label(""),
+            // `new JSpinner()`: Swing's default model is
+            // `new SpinnerNumberModel()` (Integer 0, no bounds, step 1).
+            spinner: JComponent::new_spinner(SpinnerNumberModel {
+                value: 0.0,
+                minimum: None,
+                maximum: None,
+                step_size: 1.0,
+                integer: true,
+            }),
             default_value,
-            model: SpinnerNumberModel {
-                value,
-                minimum,
-                maximum,
-                step_size,
-            },
-            minimum,
-            maximum,
-            orig_label_foreground: None,
-            orig_text_foreground: None,
-            directive_default_value: None,
-            backup: None,
-            default_value_setting: None,
-            checkpoint: None,
-            field_highlight: None,
-            enabled: true,
-            editable: true,
-            unformatted_tooltip: None,
-            panel_visible: true,
-            panel_maximum_size: None,
-            panel_alignment_x: 0.5,
-            label: spin_label.to_owned(),
-            label_enabled: true,
-            label_foreground: BLACK,
-            spinner_name,
-            spinner_enabled: true,
-            spinner_preferred_size: None,
-            spinner_maximum_size: Some(maximum_size),
-            spinner_foreground: BLACK,
-            text_background: BACKGROUND,
-            tooltip: None,
-            change_listener_count: 0,
-            focus_listener_count: 0,
-            mouse_listener_count: 0,
+            minimum: Cell::new(minimum),
+            maximum: Cell::new(maximum),
+            orig_label_foreground: Cell::new(None),
+            orig_text_foreground: Cell::new(None),
+            directive_def: Cell::new(None),
+            backup: RefCell::new(None),
+            default_value_setting: RefCell::new(None),
+            checkpoint: RefCell::new(None),
+            field_highlight: RefCell::new(None),
+            enabled: Cell::new(true),
+            editable: Cell::new(true),
+            unformatted_tooltip: RefCell::new(None),
+        });
+        let model = SpinnerNumberModel::new_int(value, minimum, maximum, step_size);
+        // set name
+        let field_type = &ui_test_field_type::SPINNER;
+        let name = utilities::convert_label_to_name(spin_label, field_type.is_unlimited_segments());
+        // Java string concatenation of a null name gives "null".
+        instance.spinner.set_name(Some(&format!(
+            "{}{}{}",
+            field_type,
+            SEPARATOR_CHAR,
+            name.as_deref().unwrap_or("null")
+        )));
+        if ARGUMENTS.lock().unwrap().is_print_names() {
+            println!(
+                "{} {} ",
+                instance.spinner.get_name().as_deref().unwrap_or("null"),
+                DEFAULT_DELIMITER
+            );
         }
+        // set label
+        instance.label.set_text(spin_label.unwrap_or(""));
+        // Swing layout: panel.setLayout(new BoxLayout(panel, BoxLayout.X_AXIS)).
+        instance.panel.add(&instance.label);
+        if hgap > 0 {
+            // Swing layout: panel.add(Box.createRigidArea(new Dimension(hgap, 0))).
+        }
+        instance.panel.add(&instance.spinner);
+        instance.spinner.set_spinner_model(model);
+        // Swing layout: set the maximum height of the text field box to twice the
+        // font size (of the label if larger, else of the spinner) since it is not
+        // set by default - spinner.setMaximumSize(maxSize).
+        instance
     }
 
-    /// Java `getDefaultedInstance`.
+    /// Java `getDefaultedInstance(String, int value, int minimum, int maximum,
+    /// int stepSize, int defaultValue)`.
     pub fn get_defaulted_instance(
-        spin_label: &str,
+        spin_label: Option<&str>,
         value: i32,
         minimum: i32,
         maximum: i32,
         step_size: i32,
         default_value: i32,
-    ) -> Self {
-        Self::new(
+    ) -> Rc<LabeledSpinner> {
+        LabeledSpinner::new(
             spin_label,
             value,
             minimum,
@@ -150,463 +157,857 @@ impl LabeledSpinner {
         )
     }
 
-    /// Java five-argument `getInstance`.
-    pub fn get_instance(
-        spin_label: &str,
+    /// Java `getInstance(String, int value, int minimum, int maximum, int stepSize)`.
+    pub fn get_instance_string_int_int_int_int(
+        spin_label: Option<&str>,
         value: i32,
         minimum: i32,
         maximum: i32,
         step_size: i32,
-    ) -> Self {
-        Self::new(spin_label, value, minimum, maximum, step_size, value, 0)
+    ) -> Rc<LabeledSpinner> {
+        LabeledSpinner::new(spin_label, value, minimum, maximum, step_size, value, 0)
     }
 
-    /// Java six-argument `getInstance`.
-    pub fn get_instance_with_gap(
-        spin_label: &str,
+    /// Java `getInstance(String, int value, int minimum, int maximum, int stepSize,
+    /// int hgap)`.
+    pub fn get_instance_string_int_int_int_int_int(
+        spin_label: Option<&str>,
         value: i32,
         minimum: i32,
         maximum: i32,
         step_size: i32,
         hgap: i32,
-    ) -> Self {
-        Self::new(spin_label, value, minimum, maximum, step_size, value, hgap)
+    ) -> Rc<LabeledSpinner> {
+        LabeledSpinner::new(spin_label, value, minimum, maximum, step_size, value, hgap)
     }
 
-    pub fn get_name(&self) -> &str {
-        &self.spinner_name
+    /// Java `getName()`.
+    pub fn get_name(&self) -> Option<String> {
+        self.spinner.get_name()
     }
+
+    /// Java `isText()`.
     pub fn is_text(&self) -> bool {
         true
     }
+
+    /// Java `isBoolean()`.
     pub fn is_boolean(&self) -> bool {
         false
     }
+
+    /// Java `isDebug()`.
     pub fn is_debug(&self) -> bool {
         ARGUMENTS.lock().unwrap().is_debug()
     }
+
+    /// Java `equalsSelectedStringValue(String)`.  Not true value is implemented so
+    /// all non-empty values are true.
     pub fn equals_selected_string_value(&self, value: Option<&str>) -> bool {
         value.is_some_and(|value| !value.is_empty())
     }
 
-    /// Java `setMax`.
-    pub fn set_max(&mut self, max: i32) {
-        self.maximum = max;
-        self.model.maximum = max;
-    }
-    /// Java `setModel`.
-    pub fn set_model(&mut self, value: i32, minimum: i32, maximum: i32, step_size: i32) {
-        self.minimum = minimum;
-        self.maximum = maximum;
-        self.model = SpinnerNumberModel {
-            value,
-            minimum,
-            maximum,
-            step_size,
-        };
-    }
-    /// Java `getContainer`; the returned Swing panel is this boundary object.
-    pub fn get_container(&self) -> &Self {
-        self
-    }
-    pub fn get_label(&self) -> &str {
-        &self.label
-    }
-    pub fn get_description(&self) -> String {
-        self.get_quoted_label()
-    }
-    pub fn get_quoted_label(&self) -> String {
-        utilities::quote_label(Some(&self.label)).unwrap_or_default()
+    /// Java `setMax(int)`.
+    pub fn set_max(&self, max: i32) {
+        self.maximum.set(max);
+        // model.setMaximum((Integer) max)
+        if let Some(mut model) = self.spinner.get_spinner_model() {
+            model.maximum = Some(max as f64);
+            self.spinner.set_spinner_model(model);
+        }
     }
 
-    pub fn checkpoint(&mut self) {
-        self.checkpoint = Some(TextFieldSetting {
-            field_type: crate::imod::etomo::ui::field_type::FieldType::Integer,
-            value: Some(self.get_text()),
-        });
+    /// Java `setModel(int value, int minimum, int maximum, int stepSize)`.
+    pub fn set_model(&self, value: i32, minimum: i32, maximum: i32, step_size: i32) {
+        self.minimum.set(minimum);
+        self.maximum.set(maximum);
+        let model = SpinnerNumberModel::new_int(value, minimum, maximum, step_size);
+        self.spinner.set_spinner_model(model);
     }
-    pub fn get_checkpoint(&self) -> Option<&TextFieldSetting> {
-        self.checkpoint.as_ref()
+
+    /// Java `getContainer()`.
+    pub fn get_container(&self) -> Rc<JComponent> {
+        self.panel.clone()
     }
-    pub fn set_checkpoint(&mut self, input: Option<&TextFieldSetting>) {
-        if self.checkpoint.is_none() && input.is_some_and(TextFieldSetting::is_set) {
-            self.checkpoint = Some(TextFieldSetting::new(
-                crate::imod::etomo::ui::field_type::FieldType::Integer,
-            ));
+
+    /// Java `getLabel()`.
+    pub fn get_label(&self) -> Option<String> {
+        Some(self.label.get_text())
+    }
+
+    /// Java `getDescription()`.
+    pub fn get_description(&self) -> Option<String> {
+        self.get_quoted_label()
+    }
+
+    /// Java `getQuotedLabel()`.
+    pub fn get_quoted_label(&self) -> Option<String> {
+        utilities::quote_label(self.get_label().as_deref())
+    }
+
+    /// Java `checkpoint()`.
+    pub fn checkpoint(&self) {
+        let text = self.get_text_void();
+        let mut checkpoint = self.checkpoint.borrow_mut();
+        if checkpoint.is_none() {
+            *checkpoint = Some(TextFieldSetting::new_type(Type::Integer));
         }
-        if let Some(checkpoint) = self.checkpoint.as_mut() {
+        checkpoint.as_mut().unwrap().set_string(text.as_deref());
+    }
+
+    /// Java `getCheckpoint()`.  (A copy: the live setting cannot be lent out of
+    /// its cell.)
+    pub fn get_checkpoint(&self) -> Option<TextFieldSetting> {
+        self.checkpoint.borrow().clone()
+    }
+
+    /// Java `setCheckpoint(FieldSettingInterface)`.
+    pub fn set_checkpoint(&self, input: Option<&dyn FieldSettingInterface>) {
+        let mut checkpoint = self.checkpoint.borrow_mut();
+        if checkpoint.is_none() && input.is_some_and(|input| input.is_set() && input.is_text()) {
+            *checkpoint = Some(TextFieldSetting::new_type(Type::Integer));
+        }
+        if let Some(checkpoint) = checkpoint.as_mut() {
             checkpoint.copy(input);
         }
     }
-    pub fn backup(&mut self) {
-        self.backup = Some(TextFieldSetting {
-            field_type: crate::imod::etomo::ui::field_type::FieldType::Integer,
-            value: Some(self.get_value().to_string()),
-        });
+
+    /// Java `backup()`.
+    pub fn backup(&self) {
+        let value = self.get_value();
+        let mut backup = self.backup.borrow_mut();
+        if backup.is_none() {
+            *backup = Some(TextFieldSetting::new_type(Type::Integer));
+        }
+        backup.as_mut().unwrap().set_number(Some(value));
     }
-    /// Java `setDirectiveDef`; lookup is retained as storage-boundary input.
-    pub fn set_directive_default_value(&mut self, value: Option<String>) {
-        self.directive_default_value = value;
+
+    /// Java `setDirectiveDef(DirectiveDef)`.
+    pub fn set_directive_def(&self, directive_def: Option<DirectiveDef>) {
+        self.directive_def.set(directive_def);
     }
-    pub fn get_directive_default_value(&self) -> Option<&str> {
-        self.directive_default_value.as_deref()
+
+    /// Java `getDirectiveDef()`.
+    pub fn get_directive_def(&self) -> Option<DirectiveDef> {
+        self.directive_def.get()
     }
-    pub fn equals_default_value(&self) -> bool {
+
+    /// Java `equalsDefaultValue()`.
+    pub fn equals_default_value_void(&self) -> bool {
+        let text = self.get_text_void();
         self.default_value_setting
+            .borrow()
             .as_ref()
-            .is_some_and(|value| value.is_set() && value.equals(&self.get_text()))
+            .is_some_and(|setting| setting.is_set() && setting.equals_string(text.as_deref()))
     }
-    pub fn equals_default_value_string(&self, value: &str) -> bool {
+
+    /// Java `equalsDefaultValue(String)`.
+    pub fn equals_default_value_string(&self, value: Option<&str>) -> bool {
         self.default_value_setting
+            .borrow()
             .as_ref()
-            .is_some_and(|setting| setting.is_set() && setting.equals(value))
+            .is_some_and(|setting| setting.is_set() && setting.equals_string(value))
     }
-    pub fn use_default_value(&mut self) {
-        if self.directive_default_value.is_none() {
-            if let Some(value) = self.default_value_setting.as_mut() {
-                value.reset();
+
+    /// Java `useDefaultValue()`.
+    pub fn use_default_value(&self) {
+        let Some(directive_def) = self.directive_def.get() else {
+            if let Some(setting) = self.default_value_setting.borrow_mut().as_mut() {
+                if setting.is_set() {
+                    setting.reset();
+                }
             }
             return;
+        };
+        // only search for default value once
+        if self.default_value_setting.borrow().is_none() {
+            let mut setting = TextFieldSetting::new_type(Type::Integer);
+            let value =
+                autodoc_attribute_retriever::INSTANCE.get_default_value(Some(directive_def));
+            if let Some(value) = value {
+                // if default value has been found, set it in the field setting
+                setting.set_string(Some(&value));
+            }
+            *self.default_value_setting.borrow_mut() = Some(setting);
         }
-        if self.default_value_setting.is_none() {
-            self.default_value_setting = Some(TextFieldSetting {
-                field_type: crate::imod::etomo::ui::field_type::FieldType::Integer,
-                value: self.directive_default_value.clone(),
-            });
-        }
-        if let Some(value) = self
-            .default_value_setting
-            .as_ref()
-            .and_then(TextFieldSetting::get_value)
-            .map(str::to_owned)
-        {
-            self.set_text(&value);
+        let value = {
+            let setting = self.default_value_setting.borrow();
+            let setting = setting.as_ref().unwrap();
+            setting.is_set().then(|| setting.get_value())
+        };
+        if let Some(value) = value {
+            self.set_text(value.as_deref());
         }
     }
-    pub fn restore_from_backup(&mut self) {
-        if let Some(value) = self.backup.as_mut().and_then(|value| value.value.take()) {
-            self.set_value_string(Some(&value));
+
+    /// Java `restoreFromBackup()`.  If the field was backed up, make the backup
+    /// value the displayed value, and turn off the back up.
+    pub fn restore_from_backup(&self) {
+        let value = match self.backup.borrow().as_ref() {
+            Some(backup) if backup.is_set() => backup.get_value(),
+            _ => return,
+        };
+        self.set_value_string(value.as_deref());
+        if let Some(backup) = self.backup.borrow_mut().as_mut() {
+            backup.reset();
         }
     }
-    pub fn clear(&mut self) {
-        self.model.value = self.minimum;
+
+    /// Java `clear()`.
+    pub fn clear(&self) {
+        self.spinner.set_spinner_value(self.minimum.get() as f64);
     }
-    pub fn set_value_field(&mut self, input: Option<&str>) {
+
+    /// Java `setValue(Field)`.
+    pub fn set_value_field(&self, input: Option<&dyn Field>) {
         match input {
             None => self.clear(),
-            Some(value) => self.set_text(value),
+            Some(input) => self.set_text(input.get_text_void().as_deref()),
         }
     }
+
+    /// Java `isSelected()`.
     pub fn is_selected(&self) -> bool {
         false
     }
+
+    /// Java `isEmpty()`.
     pub fn is_empty(&self) -> bool {
-        self.get_text().chars().all(|c| c.is_ascii_whitespace())
+        let text = self.get_text_void();
+        text.as_deref()
+            .is_none_or(java_lang_string_matches_whitespace)
     }
+
+    /// Java `isRequired()`.
     pub fn is_required(&self) -> bool {
         false
     }
-    /// Java exposes no Spinner validation; `FieldDisplayer` is therefore not reached.
-    pub fn get_text_validated(&self, _do_validation: bool) -> String {
-        self.get_text()
+
+    /// Java `getText(boolean doValidation, FieldDisplayer)`.  No validation
+    /// available for spinner.
+    pub fn get_text_boolean_field_displayer(
+        &self,
+        do_validation: bool,
+        field_displayer1: Option<&dyn FieldDisplayer>,
+    ) -> Result<Option<String>, FieldValidationFailedException> {
+        self.get_text_boolean_field_displayer_field_displayer(do_validation, field_displayer1, None)
     }
-    pub fn get_text(&self) -> String {
-        self.get_value().to_string()
+
+    /// Java `getText(boolean doValidation, FieldDisplayer, FieldDisplayer)`.
+    pub fn get_text_boolean_field_displayer_field_displayer(
+        &self,
+        do_validation: bool,
+        field_displayer1: Option<&dyn FieldDisplayer>,
+        field_displayer2: Option<&dyn FieldDisplayer>,
+    ) -> Result<Option<String>, FieldValidationFailedException> {
+        let _ = (do_validation, field_displayer1, field_displayer2);
+        Ok(Some(self.get_value().to_string()))
     }
+
+    /// Java `getText()`.
+    pub fn get_text_void(&self) -> Option<String> {
+        Some(self.get_value().to_string())
+    }
+
+    /// Java `isFieldHighlightSet()`.
     pub fn is_field_highlight_set(&self) -> bool {
         self.field_highlight
+            .borrow()
             .as_ref()
-            .is_some_and(TextFieldSetting::is_set)
+            .is_some_and(|field_highlight| field_highlight.is_set())
     }
-    pub fn equals_field_highlight(&self) -> bool {
+
+    /// Java `equalsFieldHighlight()`.
+    pub fn equals_field_highlight_void(&self) -> bool {
+        let text = self.get_text_void();
         self.field_highlight
+            .borrow()
             .as_ref()
-            .is_some_and(|value| value.equals(&self.get_text()))
+            .is_some_and(|field_highlight| field_highlight.equals_string(text.as_deref()))
     }
-    pub fn equals_field_highlight_string(&self, value: &str) -> bool {
+
+    /// Java `equalsFieldHighlight(String)`.
+    pub fn equals_field_highlight_string(&self, value: Option<&str>) -> bool {
         self.field_highlight
+            .borrow()
             .as_ref()
-            .is_some_and(|setting| setting.equals(value))
+            .is_some_and(|field_highlight| field_highlight.equals_string(value))
     }
-    pub fn set_field_highlight(&mut self, value: Option<&str>) {
-        if self.field_highlight.is_none() && value.is_some() {
-            self.field_highlight = Some(TextFieldSetting::new(
-                crate::imod::etomo::ui::field_type::FieldType::Integer,
-            ));
-            self.change_listener_count += 1;
-            self.focus_listener_count += 1;
+
+    /// Java `setFieldHighlight(String)`.  Creates and sets the field highlight.
+    pub fn set_field_highlight_string(&self, value: Option<&str>) {
+        if self.field_highlight.borrow().is_none() && value.is_some() {
+            *self.field_highlight.borrow_mut() = Some(TextFieldSetting::new_type(Type::Integer));
+            // spinner.addChangeListener(this)
+            let this = self.this.clone();
+            let listener: ChangeListener = Rc::new(move |event: &ChangeEvent| {
+                if let Some(this) = this.upgrade() {
+                    this.state_changed(event);
+                }
+            });
+            self.spinner.add_change_listener(listener);
+            // spinner.addFocusListener(this)
+            let this = self.this.clone();
+            let listener: FocusListener = Rc::new(move |event: &FocusEvent| {
+                if let Some(this) = this.upgrade() {
+                    if event.gained {
+                        this.focus_gained();
+                    } else {
+                        this.focus_lost();
+                    }
+                }
+            });
+            self.spinner.add_focus_listener(listener);
         }
-        if let Some(field_highlight) = self.field_highlight.as_mut() {
-            field_highlight.value = value.map(str::to_owned);
-        }
-        self.update_field_highlight();
-    }
-    pub fn clear_field_highlight(&mut self) {
-        if self
-            .field_highlight
-            .as_ref()
-            .is_some_and(TextFieldSetting::is_set)
-        {
-            self.field_highlight.as_mut().unwrap().reset();
+        // Upstream bug fixed (LabeledSpinner.java:354-362): with no field highlight
+        // yet and a null value the Java calls `fieldHighlight.set(value)` on null and
+        // throws a NullPointerException.  Nothing is set in that case here.
+        let exists = match self.field_highlight.borrow_mut().as_mut() {
+            Some(field_highlight) => {
+                field_highlight.set_string(value);
+                true
+            }
+            None => false,
+        };
+        if exists {
             self.update_field_highlight();
         }
     }
-    pub fn get_field_highlight(&self) -> Option<&TextFieldSetting> {
-        self.field_highlight.as_ref()
+
+    /// Java `setFieldHighlight(boolean)`.
+    pub fn set_field_highlight_boolean(&self, value: bool) {
+        let _ = value;
     }
-    pub fn set_field_highlight_setting(&mut self, input: Option<&TextFieldSetting>) {
-        if self.field_highlight.is_none() && input.is_some_and(TextFieldSetting::is_set) {
-            self.field_highlight = Some(TextFieldSetting::new(
-                crate::imod::etomo::ui::field_type::FieldType::Integer,
-            ));
-            self.change_listener_count += 1;
-            self.focus_listener_count += 1;
+
+    /// Java `clearFieldHighlight()`.
+    pub fn clear_field_highlight(&self) {
+        let cleared = match self.field_highlight.borrow_mut().as_mut() {
+            Some(field_highlight) if field_highlight.is_set() => {
+                field_highlight.reset();
+                true
+            }
+            _ => false,
+        };
+        if cleared {
+            self.update_field_highlight();
         }
-        if let Some(field_highlight) = self.field_highlight.as_mut() {
-            field_highlight.copy(input);
+    }
+
+    /// Java `getFieldHighlight()`.  (A copy; see `get_checkpoint`.)
+    pub fn get_field_highlight(&self) -> Option<TextFieldSetting> {
+        self.field_highlight.borrow().clone()
+    }
+
+    /// Java `setFieldHighlight(FieldSettingInterface)`.
+    pub fn set_field_highlight_field_setting_interface(
+        &self,
+        input: Option<&dyn FieldSettingInterface>,
+    ) {
+        if self.field_highlight.borrow().is_none()
+            && input.is_some_and(|input| input.is_set() && input.is_text())
+        {
+            *self.field_highlight.borrow_mut() = Some(TextFieldSetting::new_type(Type::Integer));
+            // spinner.addChangeListener(this)
+            let this = self.this.clone();
+            let listener: ChangeListener = Rc::new(move |event: &ChangeEvent| {
+                if let Some(this) = this.upgrade() {
+                    this.state_changed(event);
+                }
+            });
+            self.spinner.add_change_listener(listener);
+            // spinner.addFocusListener(this)
+            let this = self.this.clone();
+            let listener: FocusListener = Rc::new(move |event: &FocusEvent| {
+                if let Some(this) = this.upgrade() {
+                    if event.gained {
+                        this.focus_gained();
+                    } else {
+                        this.focus_lost();
+                    }
+                }
+            });
+            self.spinner.add_focus_listener(listener);
+        }
+        let exists = match self.field_highlight.borrow_mut().as_mut() {
+            Some(field_highlight) => {
+                field_highlight.copy(input);
+                true
+            }
+            None => false,
+        };
+        if exists {
+            self.update_field_highlight();
+        }
+    }
+
+    /// Java `clearFieldHighlightValue()`.
+    pub fn clear_field_highlight_value(&self) {
+        // Upstream bug fixed (LabeledSpinner.java:400-403): the Java resets
+        // `fieldHighlight` unguarded and throws a NullPointerException when no
+        // field highlight was ever set; there is nothing to clear then.
+        if let Some(field_highlight) = self.field_highlight.borrow_mut().as_mut() {
+            field_highlight.reset();
         }
         self.update_field_highlight();
     }
-    pub fn clear_field_highlight_value(&mut self) {
-        self.field_highlight
-            .as_mut()
-            .expect("Java fieldHighlight.reset() null dereference")
-            .reset();
+
+    /// Java `stateChanged(ChangeEvent)`.
+    pub fn state_changed(&self, e: &ChangeEvent) {
+        let _ = e;
         self.update_field_highlight();
     }
-    /// Java `stateChanged` and `focusLost` share this action.
-    pub fn update_field_highlight(&mut self) {
-        if self.field_highlight.is_none() || !self.is_enabled() {
+
+    /// Java `focusGained(FocusEvent)`.
+    pub fn focus_gained(&self) {}
+
+    /// Java `focusLost(FocusEvent)`.
+    pub fn focus_lost(&self) {
+        self.update_field_highlight();
+    }
+
+    /// Java `updateFieldHighlight()`.  If the field highlight is in use, use the
+    /// field highlight color on the foreground of the text field if the value of
+    /// the text field equals the field highlight value.  Save the original
+    /// foreground.  Otherwise restore the original foreground.  Assumes that
+    /// field highlight is not used when the field is disabled.
+    pub fn update_field_highlight(&self) {
+        // To avoid constantly updating the foreground color, assuming that
+        // fieldHighlight is never reassigned to null
+        if self.field_highlight.borrow().is_none() || !self.is_enabled() {
             return;
         }
-        let highlighted = self
+        let value = self.get_value();
+        let matches = self
             .field_highlight
+            .borrow()
             .as_ref()
-            .is_some_and(|value| value.is_set() && value.equals(&self.get_value().to_string()));
-        if highlighted {
-            if self.orig_text_foreground.is_none() {
-                self.orig_text_foreground = Some(self.spinner_foreground);
+            .is_some_and(|field_highlight| {
+                field_highlight.is_set() && field_highlight.equals_number(Some(value))
+            });
+        if matches {
+            // save the original color
+            if self.orig_text_foreground.get().is_none() {
+                self.orig_text_foreground
+                    .set(Some(self.spinner.get_foreground()));
             }
-            if self.orig_label_foreground.is_none() {
-                self.orig_label_foreground = Some(self.label_foreground);
+            if self.orig_label_foreground.get().is_none() {
+                self.orig_label_foreground
+                    .set(Some(self.label.get_foreground()));
             }
-            self.label_foreground = FIELD_HIGHLIGHT;
-            self.spinner_foreground = FIELD_HIGHLIGHT;
+            self.label.set_foreground(Some(colors::FIELD_HIGHLIGHT));
+            self.spinner.set_foreground(Some(colors::FIELD_HIGHLIGHT));
         } else {
-            if let Some(color) = self.orig_text_foreground {
-                self.spinner_foreground = color;
+            if let Some(orig_text_foreground) = self.orig_text_foreground.get() {
+                self.spinner.set_foreground(orig_text_foreground);
             }
-            if let Some(color) = self.orig_label_foreground {
-                self.label_foreground = color;
+            if let Some(orig_label_foreground) = self.orig_label_foreground.get() {
+                self.label.set_foreground(orig_label_foreground);
             }
         }
     }
-    pub fn reset_to_checkpoint(&mut self) {
-        if let Some(value) = self
-            .checkpoint
-            .as_ref()
-            .and_then(TextFieldSetting::get_value)
-            .map(str::to_owned)
-        {
-            self.set_text(&value);
-        }
+
+    /// Java `resetToCheckpoint()`.  Resets to checkpointValue if checkpointValue
+    /// has been set.  Otherwise has no effect.
+    pub fn reset_to_checkpoint(&self) {
+        let value = match self.checkpoint.borrow().as_ref() {
+            Some(checkpoint) if checkpoint.is_set() => checkpoint.get_value(),
+            _ => return,
+        };
+        self.set_text(value.as_deref());
     }
+
+    /// Java `isDifferentFromCheckpoint(boolean alwaysCheck)`: check for difference
+    /// even when the field is disabled or invisible.
     pub fn is_different_from_checkpoint(&self, always_check: bool) -> bool {
         if !always_check && (!self.is_enabled() || !self.is_visible()) {
             return false;
         }
+        let value = self.get_value();
         self.checkpoint
+            .borrow()
             .as_ref()
-            .is_none_or(|checkpoint| !checkpoint.equals(&self.get_value().to_string()))
+            .is_none_or(|checkpoint| !checkpoint.equals_number(Some(value)))
     }
-    pub fn get_value(&self) -> i32 {
-        self.model.value
-    }
-    pub fn is_in_range(&self, number: Option<&ConstEtomoNumber>) -> bool {
-        let Some(number) = number else {
-            return true;
-        };
-        number.is_null()
-            || (number.ge_long(self.minimum as i64)
-                && (self.maximum <= self.minimum || number.le_int(self.maximum)))
-    }
-    pub fn set_value_const_etomo_number(&mut self, value: &ConstEtomoNumber) {
-        if value.is_null() {
-            self.model.value = self.default_value;
+
+    /// Java `getValue()`: the spinner's value (an `Integer`, the model being
+    /// built from `int`s).
+    pub fn get_value(&self) -> Number {
+        let value = self.spinner.get_spinner_value();
+        if self
+            .spinner
+            .get_spinner_model()
+            .is_none_or(|model| model.integer)
+        {
+            Number::Integer(value as i32)
         } else {
-            self.model.value = value.get_number().int_value();
+            Number::Double(value)
         }
     }
-    pub fn set_text(&mut self, value: &str) {
-        self.set_value_string(Some(value));
+
+    /// Java `isInRange(ConstEtomoNumber)`: true if value empty or >= min and <= max
+    /// (if max set).
+    pub fn is_in_range(&self, number: Option<&ConstEtomoNumber>) -> bool {
+        let Some(number) = number.filter(|number| !number.is_null()) else {
+            return true;
+        };
+        // `number.ge(minimum)` resolves to `ge(long)`; `number.le(maximum)` to
+        // `le(int)`.
+        number.ge_long(self.minimum.get() as i64)
+            && (self.maximum.get() <= self.minimum.get() || number.le_int(self.maximum.get()))
     }
-    pub fn set_value_string(&mut self, value: Option<&str>) {
-        let value = value.filter(|value| !value.chars().all(|c| c.is_ascii_whitespace()));
-        self.model.value = value
-            .and_then(|value| value.parse::<i32>().ok())
-            .unwrap_or(self.default_value);
+
+    /// Java `setValue(ConstEtomoNumber)`.
+    pub fn set_value_const_etomo_number(&self, value: &ConstEtomoNumber) {
+        if value.is_null() {
+            self.spinner.set_spinner_value(self.default_value as f64);
+        } else {
+            self.spinner
+                .set_spinner_value(value.get_number().double_value());
+        }
     }
-    pub fn set_value_string_nonempty(&mut self, value: Option<&str>, nonempty: bool) {
+
+    /// Java `setText(String)`.
+    pub fn set_text(&self, value: Option<&str>) {
+        self.set_value_string(value);
+    }
+
+    /// Java `setValue(String)`.
+    pub fn set_value_string(&self, value: Option<&str>) {
+        match value {
+            Some(value) if !java_lang_string_matches_whitespace(value) => {
+                let mut number = EtomoNumber::new();
+                number.set_string(Some(value));
+                self.set_value_const_etomo_number(&number);
+            }
+            _ => self.spinner.set_spinner_value(self.default_value as f64),
+        }
+    }
+
+    /// Java `setValue(String, boolean nonempty)`.
+    pub fn set_value_string_boolean(&self, value: Option<&str>, nonempty: bool) {
         if !nonempty || value.is_some_and(|value| !value.is_empty()) {
             self.set_value_string(value);
         }
     }
-    pub fn set_value_int(&mut self, value: i32) {
-        self.model.value = if value == INTEGER_NULL_VALUE {
-            self.default_value
+
+    /// Java `setValue(boolean)`.
+    pub fn set_value_boolean(&self, value: bool) {
+        let _ = value;
+    }
+
+    /// Java `setValue(int)`.
+    pub fn set_value_int(&self, value: i32) {
+        if value == INTEGER_NULL_VALUE {
+            self.spinner.set_spinner_value(self.default_value as f64);
         } else {
-            value
-        };
+            self.spinner.set_spinner_value(value as f64);
+        }
     }
-    pub fn set_enabled(&mut self, enabled: bool) {
-        self.enabled = enabled;
-        self.spinner_enabled = enabled && self.editable;
-        self.label_enabled = enabled && self.editable;
-        if enabled && self.editable {
+
+    /// Java `setEnabled(boolean)`.
+    pub fn set_enabled(&self, enabled: bool) {
+        self.enabled.set(enabled);
+        // Only visually enabled if both enabled and editable
+        self.spinner.set_enabled(enabled && self.editable.get());
+        self.label.set_enabled(enabled && self.editable.get());
+        if enabled && self.editable.get() {
             self.update_field_highlight();
         }
     }
-    pub fn set_editable(&mut self, editable: bool) {
-        self.editable = editable;
-        if self.enabled {
-            self.spinner_enabled = editable;
+
+    /// Java `setEditable(boolean)`.
+    pub fn set_editable(&self, editable: bool) {
+        self.editable.set(editable);
+        // Editable has no visible effect if the button is disabled.
+        if self.enabled.get() {
+            // leave the label enabled for uneditable
+            self.spinner.set_enabled(editable);
         }
-        if self.enabled && editable {
+        if self.enabled.get() && editable {
             self.update_field_highlight();
         }
     }
+
+    /// Java `isEnabled()`.
     pub fn is_enabled(&self) -> bool {
-        self.enabled
+        self.enabled.get()
     }
+
+    /// Java `isVisible()`.
     pub fn is_visible(&self) -> bool {
-        self.panel_visible
+        self.panel.is_visible()
     }
-    pub fn set_visible(&mut self, visible: bool) {
-        self.panel_visible = visible;
+
+    /// Java `setVisible(boolean)`.
+    pub fn set_visible(&self, is_visible: bool) {
+        self.panel.set_visible(is_visible);
     }
-    pub fn set_highlight(&mut self, highlight: bool) {
-        self.text_background = if highlight {
-            Color {
-                red: 255,
-                green: 255,
-                blue: 0,
-            }
-        } else {
-            BACKGROUND
-        };
+
+    /// Java `setHighlight(boolean)`.
+    pub fn set_highlight(&self, highlight: bool) {
+        // Swing painting: the spinner editor's text field background becomes
+        // Colors.HIGHLIGHT_BACKGROUND when highlighting, else Colors.BACKGROUND
+        // (backgrounds and the editor's internal text field are not modelled).
+        let _ = highlight;
     }
-    pub fn set_text_preferred_size(&mut self, size: Dimension) {
-        self.spinner_preferred_size = Some(size);
+
+    // Java `getTextField()`: the spinner editor's internal `JFormattedTextField`
+    // (not modelled by the jdk stand-in).
+
+    /// Java `setTextPreferredSize(Dimension)`.  Set the absolute preferred size of
+    /// the text field.
+    pub fn set_text_preferred_size(&self) {
+        // Swing layout: spinner.setPreferredSize(size).
     }
-    pub fn set_text_maximum_size(&mut self, size: Dimension) {
-        self.spinner_maximum_size = Some(size);
+
+    /// Java `setTextMaxmimumSize(Dimension)`.  Set the absolute maximum size of the
+    /// text field.
+    pub fn set_text_maxmimum_size(&self) {
+        // Swing layout: spinner.setMaximumSize(size).
     }
-    pub fn set_preferred_width(&mut self, width: i32, font_size_adjustment: f32) {
-        let mut size = self.spinner_preferred_size.unwrap_or_default();
-        size.width = (width as f32 * font_size_adjustment).round() as i32;
-        self.spinner_preferred_size = Some(size);
-        self.spinner_maximum_size = Some(size);
+
+    /// Java `setPreferredWidth(int)`.
+    pub fn set_preferred_width(&self, width: i32) {
+        // Swing layout: the spinner's preferred and maximum width become
+        // width * round(UIParameters.getFontSizeAdjustment()).
+        let _ = width;
     }
-    pub fn set_maximum_size(&mut self, size: Dimension) {
-        self.panel_maximum_size = Some(size);
+
+    /// Java `setMaximumSize(Dimension)`.  Set the absolute maximum size of the
+    /// panel.
+    pub fn set_maximum_size(&self) {
+        // Swing layout: panel.setMaximumSize(size).
     }
-    pub fn get_label_preferred_size(&self) -> Dimension {
-        Dimension {
-            width: self.label.chars().count() as i32,
-            height: 1,
-        }
+
+    // Java `getLabelPreferredSize()`: `label.getPreferredSize()` (Swing layout,
+    // not modelled).
+
+    /// Java `setAlignmentX(float)`.
+    pub fn set_alignment_x(&self, alignment: f32) {
+        // Swing layout: panel.setAlignmentX(alignment).
+        let _ = alignment;
     }
-    pub fn set_alignment_x(&mut self, alignment: f32) {
-        self.panel_alignment_x = alignment;
+
+    /// Java `setUnformattedTooltip(String)`.
+    pub fn set_unformatted_tooltip(&self, text: Option<&str>) -> Option<String> {
+        *self.unformatted_tooltip.borrow_mut() = text.map(str::to_owned);
+        self.unformatted_tooltip.borrow().clone()
     }
-    pub fn set_unformatted_tooltip(&mut self, text: &str) -> String {
-        self.unformatted_tooltip = Some(text.to_owned());
-        text.to_owned()
-    }
+
+    /// Java `hasUnformattedTooltip()`.
     pub fn has_unformatted_tooltip(&self) -> bool {
-        self.unformatted_tooltip.is_some()
+        self.unformatted_tooltip.borrow().is_some()
     }
-    /// Java `TooltipFormatter` is a separate UI boundary; all three input segments are preserved.
+
+    /// Java `useUnformattedTooltip(String, String)` (`synchronized`; EDT-only
+    /// here).  Use unformattedTooltip to build a tooltip, and then delete
+    /// unformattedTooltip.
     pub fn use_unformatted_tooltip(
-        &mut self,
+        &self,
         param_descr: Option<&str>,
         directive_descr: Option<&str>,
     ) {
-        let tooltip = [
-            self.unformatted_tooltip.take(),
-            param_descr.map(str::to_owned),
-            directive_descr.map(str::to_owned),
-        ]
-        .into_iter()
-        .flatten()
-        .collect::<Vec<_>>()
-        .join(" ");
-        self.set_tool_tip_text(Some(&tooltip));
+        let unformatted_tooltip = self.unformatted_tooltip.borrow().clone();
+        self.set_tool_tip_text(
+            tooltip_formatter::INSTANCE
+                .build_tooltip(unformatted_tooltip.as_deref(), param_descr, directive_descr)
+                .as_deref(),
+        );
+        *self.unformatted_tooltip.borrow_mut() = None;
     }
-    pub fn set_tool_tip_text(&mut self, text: Option<&str>) {
-        self.tooltip = text.map(str::to_owned);
+
+    /// Java `setToolTipText(String)`.
+    pub fn set_tool_tip_text(&self, text: Option<&str>) {
+        let tooltip = tooltip_formatter::INSTANCE.format(text);
+        self.panel.set_tool_tip_text(tooltip.as_deref());
+        self.spinner.set_tool_tip_text(tooltip.as_deref());
+        // getTextField().setToolTipText(tooltip): the editor's internal text field
+        // is not modelled.
+        self.label.set_tool_tip_text(tooltip.as_deref());
     }
-    pub fn set_tooltip(&mut self, tooltip: Option<&str>) {
-        if let Some(tooltip) = tooltip {
-            self.tooltip = Some(tooltip.to_owned());
+
+    /// Java `setTooltip(Field)`.
+    pub fn set_tooltip(&self, field: Option<&dyn Field>) {
+        if let Some(field) = field {
+            let tooltip = field.get_tooltip();
+            self.panel.set_tool_tip_text(tooltip.as_deref());
+            self.spinner.set_tool_tip_text(tooltip.as_deref());
+            // getTextField().setToolTipText(tooltip): not modelled.
+            self.label.set_tool_tip_text(tooltip.as_deref());
         }
     }
-    pub fn get_tooltip(&self) -> Option<&str> {
-        self.tooltip.as_deref()
-    }
-    pub fn add_mouse_listener(&mut self) {
-        self.mouse_listener_count += 3;
-    }
-    pub fn add_change_listener(&mut self) {
-        self.change_listener_count += 1;
+
+    /// Java `getTooltip()`.
+    pub fn get_tooltip(&self) -> Option<String> {
+        self.spinner.get_tool_tip_text()
     }
 
-    /// Java `focusGained`; it intentionally has no source side effect.
-    #[allow(non_snake_case)]
-    pub fn focusGained(&mut self) {}
+    // Java `addMouseListener(MouseListener)`: adds the listener to the panel, label
+    // and spinner; mouse events are not modelled by the jdk stand-in.
 
-    /// Java private `getTextField`.  The native spinner owns its editable text
-    /// state directly, so this is its read boundary rather than a Swing editor.
-    #[allow(non_snake_case)]
-    pub fn getTextField(&self) -> &Self {
-        self
+    /// Java `addChangeListener(ChangeListener)`.
+    pub fn add_change_listener(&self, listener: ChangeListener) {
+        self.spinner.add_change_listener(listener);
     }
 }
 
-#[cfg(test)]
-mod tests {
-    use super::*;
+// ---- interface bindings (each forwards to the method above) ----
 
-    #[test]
-    fn source_name_defaults_ranges_and_nulls_are_preserved() {
-        let mut spinner = LabeledSpinner::get_defaulted_instance("Pixel size", 3, 1, 9, 2, 4);
-        assert_eq!(spinner.get_name(), "sp.pixel-size");
-        spinner.set_value_string(Some("\t"));
-        assert_eq!(spinner.get_value(), 4);
-        spinner.clear();
-        assert_eq!(spinner.get_value(), 1);
-        assert!(spinner.is_in_range(None));
-        spinner.set_max(2);
-        assert_eq!(spinner.model.maximum, 2);
+impl Field for LabeledSpinner {
+    fn is_debug(&self) -> bool {
+        LabeledSpinner::is_debug(self)
     }
-
-    #[test]
-    fn highlight_checkpoint_backup_and_control_rules_match_source() {
-        let mut spinner = LabeledSpinner::get_instance("Count", 2, 0, 8, 1);
-        spinner.set_field_highlight(Some("2"));
-        assert_eq!(spinner.spinner_foreground, FIELD_HIGHLIGHT);
-        spinner.set_value_int(3);
-        spinner.update_field_highlight();
-        assert_eq!(spinner.spinner_foreground, BLACK);
-        spinner.checkpoint();
-        spinner.backup();
-        spinner.set_value_int(5);
-        assert!(spinner.is_different_from_checkpoint(true));
-        spinner.restore_from_backup();
-        assert_eq!(spinner.get_value(), 3);
-        spinner.set_editable(false);
-        assert!(spinner.is_enabled());
-        assert!(!spinner.spinner_enabled);
-        assert!(spinner.label_enabled);
+    fn get_name(&self) -> Option<String> {
+        LabeledSpinner::get_name(self)
+    }
+    fn is_boolean(&self) -> bool {
+        LabeledSpinner::is_boolean(self)
+    }
+    fn is_text(&self) -> bool {
+        LabeledSpinner::is_text(self)
+    }
+    fn get_quoted_label(&self) -> Option<String> {
+        LabeledSpinner::get_quoted_label(self)
+    }
+    fn is_enabled(&self) -> bool {
+        LabeledSpinner::is_enabled(self)
+    }
+    fn clear(&self) {
+        LabeledSpinner::clear(self)
+    }
+    fn set_value_field(&self, from: Option<&dyn Field>) {
+        LabeledSpinner::set_value_field(self, from)
+    }
+    fn set_value_string(&self, text: Option<&str>) {
+        LabeledSpinner::set_value_string(self, text)
+    }
+    fn set_value_boolean(&self, bool_: bool) {
+        LabeledSpinner::set_value_boolean(self, bool_)
+    }
+    fn is_empty(&self) -> bool {
+        LabeledSpinner::is_empty(self)
+    }
+    fn is_selected(&self) -> bool {
+        LabeledSpinner::is_selected(self)
+    }
+    fn is_required(&self) -> bool {
+        LabeledSpinner::is_required(self)
+    }
+    fn get_text_void(&self) -> Option<String> {
+        LabeledSpinner::get_text_void(self)
+    }
+    fn get_text_boolean_field_displayer(
+        &self,
+        do_validation: bool,
+        field_displayer1: Option<Rc<dyn FieldDisplayer>>,
+    ) -> Result<Option<String>, FieldValidationFailedException> {
+        LabeledSpinner::get_text_boolean_field_displayer(
+            self,
+            do_validation,
+            field_displayer1.as_deref(),
+        )
+    }
+    fn get_text_boolean_field_displayer_field_displayer(
+        &self,
+        do_validation: bool,
+        field_displayer1: Option<Rc<dyn FieldDisplayer>>,
+        field_displayer2: Option<Rc<dyn FieldDisplayer>>,
+    ) -> Result<Option<String>, FieldValidationFailedException> {
+        LabeledSpinner::get_text_boolean_field_displayer_field_displayer(
+            self,
+            do_validation,
+            field_displayer1.as_deref(),
+            field_displayer2.as_deref(),
+        )
+    }
+    fn get_directive_def(&self) -> Option<DirectiveDef> {
+        LabeledSpinner::get_directive_def(self)
+    }
+    fn use_default_value(&self) {
+        LabeledSpinner::use_default_value(self)
+    }
+    fn equals_default_value_void(&self) -> bool {
+        LabeledSpinner::equals_default_value_void(self)
+    }
+    fn equals_default_value_string(&self, value: Option<&str>) -> bool {
+        LabeledSpinner::equals_default_value_string(self, value)
+    }
+    fn backup(&self) {
+        LabeledSpinner::backup(self)
+    }
+    fn restore_from_backup(&self) {
+        LabeledSpinner::restore_from_backup(self)
+    }
+    fn checkpoint(&self) {
+        LabeledSpinner::checkpoint(self)
+    }
+    fn set_checkpoint(&self, input: Option<&dyn FieldSettingInterface>) {
+        LabeledSpinner::set_checkpoint(self, input)
+    }
+    fn get_checkpoint(&self) -> Option<Rc<dyn FieldSettingInterface>> {
+        LabeledSpinner::get_checkpoint(self)
+            .map(|setting| Box::new(setting) as Box<dyn FieldSettingInterface>)
+            .map(Rc::from)
+    }
+    fn is_different_from_checkpoint(&self, always_check: bool) -> bool {
+        LabeledSpinner::is_different_from_checkpoint(self, always_check)
+    }
+    fn is_field_highlight_set(&self) -> bool {
+        LabeledSpinner::is_field_highlight_set(self)
+    }
+    fn clear_field_highlight(&self) {
+        LabeledSpinner::clear_field_highlight(self)
+    }
+    fn set_field_highlight_field_setting_interface(
+        &self,
+        input: Option<&dyn FieldSettingInterface>,
+    ) {
+        LabeledSpinner::set_field_highlight_field_setting_interface(self, input)
+    }
+    fn set_field_highlight_string(&self, input: Option<&str>) {
+        LabeledSpinner::set_field_highlight_string(self, input)
+    }
+    fn set_field_highlight_boolean(&self, input: bool) {
+        LabeledSpinner::set_field_highlight_boolean(self, input)
+    }
+    fn get_field_highlight(&self) -> Option<Rc<dyn FieldSettingInterface>> {
+        LabeledSpinner::get_field_highlight(self)
+            .map(|setting| Box::new(setting) as Box<dyn FieldSettingInterface>)
+            .map(Rc::from)
+    }
+    fn equals_field_highlight_void(&self) -> bool {
+        LabeledSpinner::equals_field_highlight_void(self)
+    }
+    fn equals_field_highlight_string(&self, value: Option<&str>) -> bool {
+        LabeledSpinner::equals_field_highlight_string(self, value)
+    }
+    fn set_tool_tip_text(&self, tooltip: Option<&str>) {
+        LabeledSpinner::set_tool_tip_text(self, tooltip)
+    }
+    fn set_tooltip(&self, field: Option<&dyn Field>) {
+        LabeledSpinner::set_tooltip(self, field)
+    }
+    fn get_tooltip(&self) -> Option<String> {
+        LabeledSpinner::get_tooltip(self)
+    }
+    fn equals_selected_string_value(&self, value: Option<&str>) -> bool {
+        LabeledSpinner::equals_selected_string_value(self, value)
+    }
+    fn set_directive_def(&self, directive_def: Option<DirectiveDef>) {
+        LabeledSpinner::set_directive_def(self, directive_def)
+    }
+    fn get_description(&self) -> String {
+        LabeledSpinner::get_description(self).unwrap_or_else(|| "null".to_owned())
+    }
+    fn set_unformatted_tooltip(&self, text: Option<&str>) -> Option<String> {
+        LabeledSpinner::set_unformatted_tooltip(self, text)
+    }
+    fn has_unformatted_tooltip(&self) -> bool {
+        LabeledSpinner::has_unformatted_tooltip(self)
+    }
+    fn use_unformatted_tooltip(&self, param_descr: Option<&str>, directive_descr: Option<&str>) {
+        LabeledSpinner::use_unformatted_tooltip(self, param_descr, directive_descr)
     }
 }
+
+impl TextFieldInterface for LabeledSpinner {}

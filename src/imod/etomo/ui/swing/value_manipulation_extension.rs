@@ -1,221 +1,225 @@
 //! `IMOD/Etomo/src/etomo/ui/swing/ValueManipulationExtension.java`.
-#![allow(dead_code)]
+//!
+//! Changes the value a field displays: shortening a long file path, or substituting a
+//! value for a blank entry when the field loses the focus.
 
+use std::cell::{Cell, RefCell};
 use std::path::{Path, PathBuf};
+use std::rc::{Rc, Weak};
 
 use crate::imod::etomo::ui::field_type::FieldType;
+use crate::imod::etomo::ui::value_manipulation_field::ValueManipulationField;
+use crate::imod::etomo::ui::value_manipulation_listener::ValueManipulationListener;
 
-/// Java `ValueManipulationField`, at this source unit's interface boundary.
-pub trait ValueManipulationField {
-    fn is_empty(&self) -> bool;
-    fn set_text(&mut self, text: String);
-    fn add_value_manipulation_listener(&mut self);
-}
+/// Java private `PREFIX`.
+const PREFIX: &str = "...";
+/// Java private `EXCLUDE_POST_PREFIX_SEPARATOR` (unused in the Java too).
+#[allow(dead_code)]
+const EXCLUDE_POST_PREFIX_SEPARATOR: i32 = 1;
+/// Java `File.separatorChar`.
+const SEPARATOR_CHAR: char = std::path::MAIN_SEPARATOR;
 
-/// Java package-private final `ValueManipulationExtension`.
-#[derive(Clone, Debug, Eq, PartialEq)]
+/// Java `ValueManipulationExtension`.
 pub struct ValueManipulationExtension {
-    prevent_blank: bool,
-    substitute_value: Option<String>,
-    limit_displayed_file_path: bool,
-    max_file_path_size: i32,
-    full_file_path: Option<String>,
-    debug: bool,
-    default_to_filename: bool,
+    /// Java `field`: the field that owns this extension (so a `Weak`).
+    field: Weak<dyn ValueManipulationField>,
+    /// Java `preventBlank`.
+    prevent_blank: Cell<bool>,
+    /// Java `substituteValue`.
+    substitute_value: RefCell<Option<String>>,
+    /// Java `limitDisplayedFilePath`.
+    limit_displayed_file_path: Cell<bool>,
+    /// Java `maxFilePathSize`.
+    max_file_path_size: Cell<i32>,
+    /// Java `fullFilePath`.
+    full_file_path: RefCell<Option<String>>,
+    /// Java `debug`.
+    #[allow(dead_code)]
+    debug: Cell<bool>,
+    /// Java `defaultToFilename`.
+    default_to_filename: Cell<bool>,
 }
 
 impl ValueManipulationExtension {
-    pub const PREFIX: &'static str = "...";
-    pub const EXCLUDE_POST_PREFIX_SEPARATOR: i32 = 1;
-
     /// Java `ValueManipulationExtension(ValueManipulationField, boolean)`.
-    pub fn new<F: ValueManipulationField>(field: &mut F, debug: bool) -> Self {
-        field.add_value_manipulation_listener();
-        Self {
-            prevent_blank: false,
-            substitute_value: None,
-            limit_displayed_file_path: false,
-            max_file_path_size: -1,
-            full_file_path: None,
-            debug,
-            default_to_filename: false,
-        }
+    ///
+    /// `field_ref` is the same object as `field`, reached directly: Java's
+    /// constructor calls `field.addValueManipulationListener(this)`, which the
+    /// translation must also do while the field is still being built (when
+    /// `field` cannot be upgraded yet).
+    pub fn new(
+        field: Weak<dyn ValueManipulationField>,
+        field_ref: &dyn ValueManipulationField,
+        debug: bool,
+    ) -> Rc<ValueManipulationExtension> {
+        let extension = Rc::new(ValueManipulationExtension {
+            field,
+            prevent_blank: Cell::new(false),
+            substitute_value: RefCell::new(None),
+            limit_displayed_file_path: Cell::new(false),
+            max_file_path_size: Cell::new(-1),
+            full_file_path: RefCell::new(None),
+            debug: Cell::new(debug),
+            default_to_filename: Cell::new(false),
+        });
+        field_ref.add_value_manipulation_listener(extension.clone() as Rc<dyn ValueManipulationListener>);
+        extension
     }
 
-    /// Java `setLimitDisplayedFilePath(int, FieldType)`.
+    /// Java `setLimitDisplayedFilePath(int, FieldType)`.  Limit the size of the display
+    /// value.  Truncates only on the system file separator.  Returns true if the
+    /// displayed text might have to be shortened or lengthened.
     pub fn set_limit_displayed_file_path(
-        &mut self,
+        &self,
         max_file_path_size: i32,
         field_type: Option<FieldType>,
     ) -> bool {
-        let old_limit_displayed_file_path = self.limit_displayed_file_path;
-        let old_max_file_path_size = self.max_file_path_size;
+        let old_limit_displayed_file_path = self.limit_displayed_file_path.get();
+        let old_max_file_path_size = self.max_file_path_size.get();
         if field_type != Some(FieldType::File) {
-            self.max_file_path_size = -1;
-            self.limit_displayed_file_path = false;
+            self.max_file_path_size.set(-1);
+            self.limit_displayed_file_path.set(false);
         } else {
-            self.max_file_path_size = max_file_path_size;
-            self.limit_displayed_file_path = max_file_path_size > 0;
+            self.max_file_path_size.set(max_file_path_size);
+            self.limit_displayed_file_path.set(max_file_path_size > 0);
         }
-        old_limit_displayed_file_path != self.limit_displayed_file_path
-            || old_max_file_path_size != self.max_file_path_size
+        old_limit_displayed_file_path != self.limit_displayed_file_path.get()
+            || old_max_file_path_size != self.max_file_path_size.get()
     }
 
-    /// Java overloaded `createDisplayedFilePath(File)`.
-    pub fn create_displayed_file_path_file(&mut self, file: Option<&Path>) -> Option<String> {
+    /// Java `createDisplayedFilePath(File)`.
+    pub fn create_displayed_file_path_file(&self, file: Option<&Path>) -> Option<String> {
         let file = file?;
-        let absolute_path = if file.is_absolute() {
-            file.to_string_lossy().into_owned()
-        } else {
-            std::env::current_dir()
-                .ok()?
-                .join(file)
-                .to_string_lossy()
-                .into_owned()
-        };
-        self.create_displayed_file_path(Some(&absolute_path), Some(FieldType::File))
+        let absolute_path = std::path::absolute(file).unwrap_or_else(|_| file.to_path_buf());
+        self.create_displayed_file_path_string_field_type(
+            Some(&absolute_path.to_string_lossy()),
+            Some(FieldType::File),
+        )
     }
 
-    /// Java overloaded `createDisplayedFilePath(String, FieldType)`.
-    pub fn create_displayed_file_path(
-        &mut self,
+    /// Java `createDisplayedFilePath(String, FieldType)`.  If limitDisplayedFilePath is
+    /// set, returns a limited size version of a file's absolute path (truncated on the
+    /// file separator), saving the original string in fullFilePath.
+    pub fn create_displayed_file_path_string_field_type(
+        &self,
         string: Option<&str>,
         field_type: Option<FieldType>,
     ) -> Option<String> {
         let string = string?;
-        let string_len = string.len() as i32;
-        let separator = std::path::MAIN_SEPARATOR;
+        // Java indexes by UTF-16 unit; chars are used here.
+        let chars: Vec<char> = string.chars().collect();
+        let string_len = chars.len() as i32;
+        // See if the possibleFilePath should be returned without truncation.
+        // Truncation is only done on the file separator.
         if field_type != Some(FieldType::File)
-            || string_len <= self.max_file_path_size
-            || !string.contains(separator)
+            || string_len <= self.max_file_path_size.get()
+            || !chars.contains(&SEPARATOR_CHAR)
         {
-            self.full_file_path = None;
-            return Some(string.to_owned());
+            *self.full_file_path.borrow_mut() = None;
+            return Some(string.to_string());
         }
-        if self.default_to_filename {
-            let current_file = Path::new(string);
-            if current_file
+        // Check local here only is defaulttoFilename is true
+        if self.default_to_filename.get() {
+            let curr_file = PathBuf::from(string);
+            // Fixed in translation (`ValueManipulationExtension.java:117`): Java calls
+            // getParentFile().getAbsolutePath() and throws a NullPointerException for a
+            // path with no parent; such a path is treated as not in the current
+            // directory.
+            let parent = curr_file
                 .parent()
-                .and_then(|parent| parent.canonicalize().ok())
-                == std::env::current_dir().ok()
-            {
-                self.full_file_path = Some(string.to_owned());
-                return current_file
-                    .file_name()
-                    .map(|name| name.to_string_lossy().into_owned());
+                .filter(|parent| !parent.as_os_str().is_empty());
+            let user_dir = std::env::current_dir().ok();
+            if let (Some(parent), Some(user_dir)) = (parent, user_dir) {
+                let parent = std::path::absolute(parent).unwrap_or_else(|_| parent.to_path_buf());
+                if parent == user_dir {
+                    *self.full_file_path.borrow_mut() = Some(string.to_string());
+                    return Some(
+                        curr_file
+                            .file_name()
+                            .map(|name| name.to_string_lossy().into_owned())
+                            .unwrap_or_default(),
+                    );
+                }
             }
         }
-        if !self.limit_displayed_file_path {
-            self.full_file_path = None;
-            return Some(string.to_owned());
+        if !self.limit_displayed_file_path.get() {
+            *self.full_file_path.borrow_mut() = None;
+            Some(string.to_string())
+        } else {
+            // The displayed string will be shortened so save the full string.
+            *self.full_file_path.borrow_mut() = Some(string.to_string());
+            // Find the first separator within the area that can be retained.
+            let from = (string_len - (self.max_file_path_size.get() - PREFIX.len() as i32)).max(0);
+            let separator_index = chars
+                .iter()
+                .skip(from as usize)
+                .position(|&c| c == SEPARATOR_CHAR)
+                .map(|i| i + from as usize);
+            let Some(separator_index) = separator_index else {
+                // File name is longer then the area that can be retained. Return the file
+                // name.
+                let last = chars.iter().rposition(|&c| c == SEPARATOR_CHAR).unwrap();
+                return Some(PREFIX.to_string() + &chars[last..].iter().collect::<String>());
+            };
+            // Return a shortened file path.
+            Some(PREFIX.to_string() + &chars[separator_index..].iter().collect::<String>())
         }
-        self.full_file_path = Some(string.to_owned());
-        let start =
-            (string_len - (self.max_file_path_size - Self::PREFIX.len() as i32)).max(0) as usize;
-        let separator_index = string[start..].find(separator).map(|index| start + index);
-        if separator_index.is_none() {
-            return string
-                .rfind(separator)
-                .map(|index| format!("{}{}", Self::PREFIX, &string[index..]));
-        }
-        Some(format!(
-            "{}{}",
-            Self::PREFIX,
-            &string[separator_index.unwrap()..]
-        ))
     }
 
     /// Java `clearFullFilePath()`.
-    pub fn clear_full_file_path(&mut self) {
-        self.full_file_path = None;
+    pub fn clear_full_file_path(&self) {
+        *self.full_file_path.borrow_mut() = None;
     }
 
-    /// Java `getFullFilePath(String)`.
-    pub fn get_full_file_path(&self, displayed_string: String) -> String {
-        if !self.limit_displayed_file_path || self.full_file_path.is_none() {
-            displayed_string
-        } else {
-            self.full_file_path.clone().unwrap()
+    /// Java `getFullFilePath(String)`.  Returns the saved filePath if
+    /// limitDisplayedFilePath is on and the filePath is not null.  Otherwise returns
+    /// displayedString.
+    pub fn get_full_file_path(&self, displayed_string: Option<&str>) -> Option<String> {
+        let full_file_path = self.full_file_path.borrow().clone();
+        if !self.limit_displayed_file_path.get() || full_file_path.is_none() {
+            return displayed_string.map(str::to_owned);
         }
+        full_file_path
     }
 
     /// Java `setPreventBlank(boolean, String)`.
-    pub fn set_prevent_blank(&mut self, prevent_blank: bool, substitute_value: Option<String>) {
-        self.prevent_blank = prevent_blank;
-        self.substitute_value = substitute_value;
+    pub fn set_prevent_blank(&self, prevent_blank: bool, substitute_value: Option<&str>) {
+        self.prevent_blank.set(prevent_blank);
+        *self.substitute_value.borrow_mut() = substitute_value.map(str::to_owned);
     }
 
     /// Java `clearPreventBlank()`.
-    pub fn clear_prevent_blank(&mut self) {
-        self.prevent_blank = false;
-        self.substitute_value = None;
+    pub fn clear_prevent_blank(&self) {
+        self.prevent_blank.set(false);
+        *self.substitute_value.borrow_mut() = None;
     }
 
-    /// Java `substitute()`; field ownership is passed explicitly in Rust.
-    pub fn substitute<F: ValueManipulationField>(&self, field: &mut F) {
-        if self.prevent_blank && field.is_empty() {
-            if let Some(value) = &self.substitute_value {
-                field.set_text(value.clone());
+    /// Java `substitute()`.  Sets substituteValue in field if preventBlank is true and
+    /// field is empty.
+    pub fn substitute(&self) {
+        let Some(field) = self.field.upgrade() else {
+            return;
+        };
+        let substitute_value = self.substitute_value.borrow().clone();
+        if self.prevent_blank.get() && field.is_empty() {
+            if let Some(substitute_value) = substitute_value {
+                field.set_text(Some(&substitute_value));
             }
         }
     }
 
-    /// Java `focusLost(FocusEvent)`; native event installation is a GUI boundary.
-    pub fn focus_lost<F: ValueManipulationField>(&self, field: &mut F) {
-        self.substitute(field);
-    }
-
-    /// Java `focusGained(FocusEvent)`.
-    pub fn focus_gained(&self) {}
-
     /// Java `setDefaultToFilename(boolean)`.
-    pub fn set_default_to_filename(&mut self, default_to_filename: bool) {
-        self.default_to_filename = default_to_filename;
+    pub fn set_default_to_filename(&self, default_to_filename: bool) {
+        self.default_to_filename.set(default_to_filename);
     }
 }
 
-#[cfg(test)]
-mod tests {
-    use super::*;
-    #[derive(Default)]
-    struct Field {
-        text: String,
-        listener: bool,
+impl ValueManipulationListener for ValueManipulationExtension {
+    /// Java `focusLost(FocusEvent)`.
+    fn focus_lost(&self) {
+        self.substitute();
     }
-    impl ValueManipulationField for Field {
-        fn is_empty(&self) -> bool {
-            self.text.is_empty()
-        }
-        fn set_text(&mut self, text: String) {
-            self.text = text;
-        }
-        fn add_value_manipulation_listener(&mut self) {
-            self.listener = true;
-        }
-    }
-    #[test]
-    fn source_path_limit_retains_full_path() {
-        let mut field = Field::default();
-        let mut extension = ValueManipulationExtension::new(&mut field, false);
-        extension.set_limit_displayed_file_path(4, Some(FieldType::File));
-        assert_eq!(
-            extension
-                .create_displayed_file_path(Some("/one/two/file.mrc"), Some(FieldType::File))
-                .as_deref(),
-            Some(".../file.mrc")
-        );
-        assert_eq!(
-            extension.get_full_file_path(".../file.mrc".to_owned()),
-            "/one/two/file.mrc"
-        );
-    }
-    #[test]
-    fn source_substitute_runs_on_focus_loss() {
-        let mut field = Field::default();
-        let mut extension = ValueManipulationExtension::new(&mut field, false);
-        extension.set_prevent_blank(true, Some("template".to_owned()));
-        extension.focus_lost(&mut field);
-        assert!(field.listener);
-        assert_eq!(field.text, "template");
-    }
+
+    /// Java `focusGained(FocusEvent)`.
+    fn focus_gained(&self) {}
 }

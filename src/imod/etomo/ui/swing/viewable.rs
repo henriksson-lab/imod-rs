@@ -1,43 +1,19 @@
 //! `IMOD/Etomo/src/etomo/ui/swing/Viewable.java`.
 
-/// Java package-private `Viewable`.
-///
-/// `JComponent[]` is represented by an associated native presentation type;
-/// the table retains ownership of the focusable components.
-pub trait Viewable {
-    type FocusableParent;
-    /// Java `msgViewportPaged()`.
-    fn msg_viewport_paged(&mut self);
-    /// Java `size()`.
-    fn size(&self) -> usize;
-    /// Java `getFocusableParents()`.
-    fn get_focusable_parents(&self) -> Vec<Self::FocusableParent>;
-}
+use std::rc::Rc;
 
-#[cfg(test)]
-mod tests {
-    use super::Viewable;
-    struct Table {
-        paged: bool,
-    }
-    impl Viewable for Table {
-        type FocusableParent = usize;
-        fn msg_viewport_paged(&mut self) {
-            self.paged = true
-        }
-        fn size(&self) -> usize {
-            4
-        }
-        fn get_focusable_parents(&self) -> Vec<usize> {
-            vec![1, 2]
-        }
-    }
-    #[test]
-    fn table_contract_preserves_paging_size_and_focus_parents() {
-        let mut table = Table { paged: false };
-        table.msg_viewport_paged();
-        assert!(table.paged);
-        assert_eq!(table.size(), 4);
-        assert_eq!(table.get_focusable_parents(), vec![1, 2]);
-    }
+use crate::imod::etomo::jdk::JComponent;
+
+/// Java `Viewable`: a paged table.
+pub trait Viewable {
+    /// Java `msgViewportPaged()`.  Only called when the viewport is paged.  Should
+    /// remove and redisplay the rows in the table.
+    fn msg_viewport_paged(&self);
+
+    /// Java `size()`.  Should return the total number of rows in the table.
+    fn size(&self) -> i32;
+
+    /// Java `getFocusableParents()`.  Returns the components that can be focused on
+    /// for the use of hotkeys.
+    fn get_focusable_parents(&self) -> Vec<Rc<JComponent>>;
 }

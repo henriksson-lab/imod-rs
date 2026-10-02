@@ -1,359 +1,339 @@
 //! `IMOD/Etomo/src/etomo/ui/swing/CheckBoxEfield.java`.
 //!
-//! `JCheckBox`, Swing action dispatch, and tooltip formatting are GUI-boundary
-//! services.  This unit retains the Java object's state transitions, generated
-//! test name, and enable-control mediation.
-#![allow(dead_code)]
+//! A `JCheckBox` field that can act as a controller: with a control mode (the enable
+//! control instance) every selection and enable change sends a control event to its
+//! target through the `ControlMediator`.
+//!
+//! The control target is held as a `Weak<dyn ControlTarget>`, as in `Ebutton`: the
+//! target field and this check box are owned by the same panel.
 
 use std::cell::RefCell;
 use std::path::PathBuf;
-use std::rc::Rc;
+use std::rc::{Rc, Weak};
 
+use super::appearance_extension::AppearanceExtension;
+use super::control_mediator;
+use super::control_mode::ControlMode;
+use super::control_state;
+use super::control_target::ControlTarget;
+use super::controller::Controller;
+use super::swing_component::SwingComponent;
+use super::tooltip_formatter;
 use crate::imod::etomo::etomo_director::ARGUMENTS;
+use crate::imod::etomo::jdk::{ActionEvent, ActionListener, JComponent};
 use crate::imod::etomo::storage::autodoc::autodoc_tokenizer::{DEFAULT_DELIMITER, SEPARATOR_CHAR};
-use crate::imod::etomo::ui::swing::appearance_extension::{AppearanceExtension, ComponentBoundary};
+use crate::imod::etomo::r#type::ui_test_field_type::UITestFieldType;
+use crate::imod::etomo::ui::ui_component::UIComponent;
 use crate::imod::etomo::util::utilities;
 
-/// Java `ControlMode`, represented by the field name used in UI test names.
-#[derive(Clone, Debug, Eq, PartialEq)]
-pub enum ControlMode {
-    Enable,
-}
-
-impl ControlMode {
-    /// Java `getFieldName()`.
-    pub fn get_field_name(&self) -> &'static str {
-        match self {
-            Self::Enable => "enable",
-        }
-    }
-}
-
-/// Java `ControlTarget`; file-selection operations remain an explicit GUI boundary.
-pub trait ControlTarget {
-    fn clear(&mut self);
-    fn set_text_file(&mut self, file: PathBuf);
-    fn set_text_files(&mut self, files: Vec<PathBuf>);
-    fn get_label(&self) -> Option<String>;
-    fn set_component_control(&mut self, control: bool);
-    fn set_enable_control(&mut self, control: bool);
-    fn send_control_event(&mut self);
-    fn is_local_dir(&self, current_directory: Option<&str>) -> bool;
-}
-
-/// Source-visible `JCheckBox` state.  Native rendering and listener dispatch
-/// are intentionally represented at the Swing boundary.
-#[derive(Clone, Debug)]
-pub struct JCheckBoxBoundary {
-    pub text: Option<String>,
-    pub name: Option<String>,
-    pub selected: bool,
-    pub visible: bool,
-    pub tooltip: Option<String>,
-    pub action_command: Option<String>,
-    pub action_listener_count: usize,
-    pub component: Rc<RefCell<ComponentBoundary>>,
-}
-
-impl Default for JCheckBoxBoundary {
-    fn default() -> Self {
-        Self {
-            text: None,
-            name: None,
-            selected: false,
-            visible: true,
-            tooltip: None,
-            action_command: None,
-            action_listener_count: 0,
-            component: Rc::new(RefCell::new(ComponentBoundary::default())),
-        }
-    }
-}
-
-/// Java package-private `CheckBoxEfield`.
+/// Java package-private `final class CheckBoxEfield implements ActionListener,
+/// Controller, UIComponent, SwingComponent`.
 pub struct CheckBoxEfield {
-    pub check_box: JCheckBoxBoundary,
-    control_target: Option<Rc<RefCell<dyn ControlTarget>>>,
-    control_mode: Option<ControlMode>,
-    appearance_extension: Option<AppearanceExtension>,
+    /// This object, for `checkBox.addActionListener(this)`.
+    self_ref: RefCell<Weak<CheckBoxEfield>>,
+    /// Java final `checkBox`.
+    check_box: Rc<JComponent>,
+    /// Java final `controlTarget`.
+    control_target: Option<Weak<dyn ControlTarget>>,
+    /// Java final `controlMode`.
+    control_mode: Option<&'static ControlMode>,
+    /// Java `appearanceExtension`.
+    appearance_extension: RefCell<Option<Rc<AppearanceExtension>>>,
 }
 
 impl CheckBoxEfield {
     /// Java private `CheckBoxEfield(String, ControlMode, ControlTarget)`.
     fn new(
-        mut label: Option<String>,
-        control_mode: Option<ControlMode>,
-        control_target: Option<Rc<RefCell<dyn ControlTarget>>>,
-    ) -> Self {
+        label: Option<&str>,
+        control_mode: Option<&'static ControlMode>,
+        control_target: Option<Weak<dyn ControlTarget>>,
+    ) -> Rc<CheckBoxEfield> {
+        let mut label: Option<String> = label.map(str::to_owned);
         if label.is_none() {
-            if let Some(target) = &control_target {
-                label = target.borrow().get_label();
+            // Java: `controlTarget != null` (a dropped target counts as null).
+            if let Some(target) = control_target.as_ref().and_then(Weak::upgrade) {
+                label = target.get_label();
             }
         }
         if label.is_none() {
-            if let Some(control_mode) = &control_mode {
-                label = Some(control_mode.get_field_name().to_owned());
+            if let Some(control_mode) = control_mode {
+                label = control_mode.get_field_name().map(str::to_owned);
             }
         }
-        let mut value = Self {
-            check_box: JCheckBoxBoundary {
-                text: label.clone(),
-                ..Default::default()
-            },
+        let instance = Rc::new(CheckBoxEfield {
+            self_ref: RefCell::new(Weak::new()),
+            check_box: JComponent::new_check_box(label.as_deref().unwrap_or("")),
             control_target,
             control_mode,
-            appearance_extension: None,
-        };
-        value.set_name(label.as_deref());
-        value
+            appearance_extension: RefCell::new(None),
+        });
+        *instance.self_ref.borrow_mut() = Rc::downgrade(&instance);
+        instance.set_name(
+            label.as_deref(),
+            instance.control_target.as_ref(),
+            control_mode,
+        );
+        instance
     }
 
-    /// Java `getInstance(String)`.
-    pub fn get_instance(label: impl Into<String>) -> Self {
-        Self::new(Some(label.into()), None, None)
+    /// Java static `getInstance(String)`.
+    pub fn get_instance(label: Option<&str>) -> Rc<CheckBoxEfield> {
+        CheckBoxEfield::new(label, None, None)
     }
 
-    /// Java `getEnableControlInstance(ControlTarget)`.
-    pub fn get_enable_control_instance(control_target: Rc<RefCell<dyn ControlTarget>>) -> Self {
-        let mut value = Self::new(None, Some(ControlMode::Enable), Some(control_target));
-        value.add_listeners();
-        value
+    /// Java static `getEnableControlInstance(ControlTarget)`.
+    pub fn get_enable_control_instance(
+        control_target: Option<Weak<dyn ControlTarget>>,
+    ) -> Rc<CheckBoxEfield> {
+        let instance = CheckBoxEfield::new(None, Some(&**control_state::ENABLE), control_target);
+        instance.add_listeners();
+        instance
     }
 
     /// Java `setText(String)`.
-    pub fn set_text(&mut self, label: impl Into<String>) {
-        let label = label.into();
-        self.check_box.text = Some(label.clone());
-        self.set_name(Some(&label));
+    pub fn set_text(&self, label: Option<&str>) {
+        self.check_box.set_text(label.unwrap_or(""));
+        self.set_name(label, self.control_target.as_ref(), self.control_mode);
     }
 
     /// Java private `setName(String, ControlTarget, ControlMode)`.
-    fn set_name(&mut self, label: Option<&str>) {
-        let mut name = None;
-        if let Some(label) = label {
-            name = self.append_to_name(name, utilities::convert_label_to_name(Some(label), true));
+    fn set_name(
+        &self,
+        label: Option<&str>,
+        target: Option<&Weak<dyn ControlTarget>>,
+        control_mode: Option<&'static ControlMode>,
+    ) {
+        let field_type = UITestFieldType::CHECK_BOX;
+        // build name
+        let mut name: Option<String> = None;
+        let unlimited_segments = field_type.is_unlimited_segments();
+        if label.is_some() {
+            name = self.append_to_name(
+                name,
+                utilities::convert_label_to_name(label, unlimited_segments),
+            );
         } else {
-            if let Some(target) = &self.control_target {
-                name =
-                    utilities::convert_label_to_name(target.borrow().get_label().as_deref(), true);
+            if let Some(target) = target.and_then(Weak::upgrade) {
+                name = utilities::convert_label_to_name(
+                    target.get_label().as_deref(),
+                    unlimited_segments,
+                );
             }
-            if let Some(control_mode) = &self.control_mode {
-                name = self.append_to_name(name, Some(control_mode.get_field_name().to_owned()));
+            if let Some(control_mode) = control_mode {
+                name = self.append_to_name(name, control_mode.get_field_name().map(str::to_owned));
             }
         }
-        let Some(name) = name else { return };
-        self.check_box.name = Some(format!("cb{SEPARATOR_CHAR}{name}"));
+        let Some(name) = name else {
+            return;
+        };
+        self.check_box
+            .set_name(Some(&format!("{}{}{}", field_type, SEPARATOR_CHAR, name)));
         if ARGUMENTS.lock().unwrap().is_print_names() {
             println!(
-                "{} {DEFAULT_DELIMITER} ",
-                self.check_box.name.as_deref().unwrap()
+                "{} {} ",
+                self.check_box.get_name().as_deref().unwrap_or("null"),
+                DEFAULT_DELIMITER
             );
         }
     }
 
     /// Java private `appendToName(String, String)`.
     fn append_to_name(&self, name: Option<String>, append_name: Option<String>) -> Option<String> {
-        match (name, append_name) {
-            (None, append_name) => append_name,
-            (name, None) => name,
-            (Some(name), Some(append_name)) => {
-                Some(format!("{name}{}{append_name}", utilities::NAME_SEPARATOR))
-            }
-        }
+        let Some(name) = name else {
+            return append_name;
+        };
+        let Some(append_name) = append_name else {
+            return Some(name);
+        };
+        Some(format!(
+            "{}{}{}",
+            name,
+            utilities::NAME_SEPARATOR,
+            append_name
+        ))
     }
 
-    /// Java `getUIComponent()`.
-    pub fn get_ui_component(&self) -> &Self {
-        self
-    }
-
-    /// Java `getComponent()`; this boundary object is the JCheckBox component.
-    pub fn get_component(&self) -> &JCheckBoxBoundary {
-        &self.check_box
+    /// Java `@Override getComponent()`.
+    pub fn get_component(&self) -> Rc<JComponent> {
+        self.check_box.clone()
     }
 
     /// Java private `addListeners()`.
-    fn add_listeners(&mut self) {
+    fn add_listeners(&self) {
         if self.control_mode.is_some() {
-            self.check_box.action_listener_count += 1;
+            // checkBox.addActionListener(this)
+            let this = self.self_ref.borrow().clone();
+            self.check_box.add_action_listener(Rc::new(move |event| {
+                if let Some(this) = this.upgrade() {
+                    this.action_performed(event);
+                }
+            }));
         }
     }
 
-    /// Java `addActionListener(ActionListener)`; callback ownership remains with Swing.
-    pub fn add_action_listener(&mut self) {
-        self.check_box.action_listener_count += 1;
+    /// Java `addActionListener(ActionListener)`.
+    pub fn add_action_listener(&self, listener: ActionListener) {
+        self.check_box.add_action_listener(listener);
     }
 
-    /// Java `actionPerformed(ActionEvent)`.
-    pub fn action_performed(&mut self) {
-        if self.control_mode.is_some() {
-            self.control_event();
+    // controlMediator
+
+    /// Java `@Override actionPerformed(ActionEvent)`.
+    pub fn action_performed(&self, _event: &ActionEvent) {
+        if let Some(control_mode) = self.control_mode {
+            let target = self.control_target.as_ref().and_then(Weak::upgrade);
+            control_mediator::INSTANCE.control_event_controller_control_target_control_mode(
+                self,
+                target.as_deref(),
+                Some(control_mode),
+            );
         }
     }
 
-    /// Java `isControl()`.
+    /// Java `@Override isControl()`.
     pub fn is_control(&self) -> bool {
         self.is_selected() && self.is_enabled()
     }
 
-    /// Java `selectFile()`.
+    /// Java `@Override selectFile()`.
     pub fn select_file(&self) -> Option<PathBuf> {
         None
     }
 
-    /// Java `setEditable(boolean)`.
-    pub fn set_editable(&mut self, editable: bool) {
+    // AppearanceExtension
+
+    /// Java `@Override setEditable(boolean)`.
+    pub fn set_editable(&self, editable: bool) {
         self.create_appearance_extension();
-        self.appearance_extension
-            .as_mut()
-            .unwrap()
-            .set_editable(editable);
+        let appearance_extension = self.appearance_extension.borrow().clone().unwrap();
+        appearance_extension.set_editable(editable);
     }
 
     /// Java private `createAppearanceExtension()`.
-    fn create_appearance_extension(&mut self) {
-        if self.appearance_extension.is_none() {
-            self.appearance_extension =
-                Some(AppearanceExtension::new(self.check_box.component.clone()));
+    fn create_appearance_extension(&self) {
+        if self.appearance_extension.borrow().is_none() {
+            *self.appearance_extension.borrow_mut() =
+                Some(AppearanceExtension::new_component(&self.check_box));
         }
     }
 
     /// Java `isSelected()`.
     pub fn is_selected(&self) -> bool {
-        self.check_box.selected
+        self.check_box.is_selected()
     }
 
-    /// Java `setEnabled(boolean)`.
-    pub fn set_enabled(&mut self, enabled: bool) {
-        if let Some(appearance_extension) = &mut self.appearance_extension {
+    /// Java `@Override setEnabled(boolean)`.
+    pub fn set_enabled(&self, enabled: bool) {
+        let appearance_extension = self.appearance_extension.borrow().clone();
+        if let Some(appearance_extension) = appearance_extension {
             appearance_extension.set_enabled(enabled);
         } else {
-            self.check_box.component.borrow_mut().set_enabled(enabled);
+            self.check_box.set_enabled(enabled);
         }
-        if self.control_mode.is_some() {
-            self.control_event();
+        if let Some(control_mode) = self.control_mode {
+            let target = self.control_target.as_ref().and_then(Weak::upgrade);
+            control_mediator::INSTANCE.control_event_controller_control_target_control_mode(
+                self,
+                target.as_deref(),
+                Some(control_mode),
+            );
         }
     }
 
     /// Java `clear()`.
-    pub fn clear(&mut self) {
+    pub fn clear(&self) {
         self.set_selected(false);
     }
 
     /// Java `setVisible(boolean)`.
-    pub fn set_visible(&mut self, visible: bool) {
-        self.check_box.visible = visible;
+    pub fn set_visible(&self, visible: bool) {
+        self.get_component().set_visible(visible);
     }
 
     /// Java `isVisible()`.
     pub fn is_visible(&self) -> bool {
-        self.check_box.visible
+        self.get_component().is_visible()
     }
 
     /// Java `isEnabled()`.
     pub fn is_enabled(&self) -> bool {
-        self.appearance_extension.as_ref().map_or_else(
-            || self.check_box.component.borrow().is_enabled(),
-            AppearanceExtension::is_enabled,
-        )
+        let appearance_extension = self.appearance_extension.borrow().clone();
+        if let Some(appearance_extension) = appearance_extension {
+            return appearance_extension.is_enabled();
+        }
+        self.check_box.is_enabled()
     }
 
     /// Java `isEditable()`.
     pub fn is_editable(&self) -> bool {
-        self.appearance_extension
-            .as_ref()
-            .map_or(true, AppearanceExtension::is_editable)
+        let appearance_extension = self.appearance_extension.borrow().clone();
+        if let Some(appearance_extension) = appearance_extension {
+            return appearance_extension.is_editable();
+        }
+        true
     }
 
-    /// Java `setTooltip(String)`; `TooltipFormatter` remains a GUI boundary.
-    pub fn set_tooltip(&mut self, text: impl Into<String>) {
-        self.check_box.tooltip = Some(text.into());
+    /// Java `setTooltip(String)`.
+    pub fn set_tooltip(&self, text: Option<&str>) {
+        self.check_box
+            .set_tool_tip_text(tooltip_formatter::INSTANCE.format(text).as_deref());
     }
 
     /// Java `getActionCommand()`.
-    pub fn get_action_command(&self) -> Option<&str> {
-        self.check_box.action_command.as_deref()
+    pub fn get_action_command(&self) -> Option<String> {
+        self.check_box.get_action_command()
     }
 
     /// Java `setSelected(boolean)`.
-    pub fn set_selected(&mut self, selected: bool) {
-        self.check_box.selected = selected;
-        if self.control_mode.is_some() {
-            self.control_event();
+    pub fn set_selected(&self, selected: bool) {
+        self.check_box.set_selected(selected);
+        if let Some(control_mode) = self.control_mode {
+            let target = self.control_target.as_ref().and_then(Weak::upgrade);
+            control_mediator::INSTANCE.control_event_controller_control_target_control_mode(
+                self,
+                target.as_deref(),
+                Some(control_mode),
+            );
         }
     }
 
-    /// Java `selectMultipleFiles()`.
-    pub fn select_multiple_files(&self) -> Vec<PathBuf> {
-        Vec::new()
-    }
-
-    /// Java `ControlMediator.controlEvent(Controller, ControlTarget, ControlState.ENABLE)`.
-    fn control_event(&mut self) {
-        if let Some(target) = &self.control_target {
-            target.borrow_mut().set_enable_control(self.is_control());
-        }
+    /// Java `@Override selectMultipleFiles()`.
+    pub fn select_multiple_files(&self) -> Option<Vec<PathBuf>> {
+        // TODO Auto-generated method stub
+        None
     }
 }
 
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[derive(Default)]
-    struct Target {
-        label: Option<String>,
-        enabled_control: Option<bool>,
+impl Controller for CheckBoxEfield {
+    fn is_control(&self) -> bool {
+        CheckBoxEfield::is_control(self)
     }
-    impl ControlTarget for Target {
-        fn clear(&mut self) {}
-        fn set_text_file(&mut self, _: PathBuf) {}
-        fn set_text_files(&mut self, _: Vec<PathBuf>) {}
-        fn get_label(&self) -> Option<String> {
-            self.label.clone()
-        }
-        fn set_component_control(&mut self, _: bool) {}
-        fn set_enable_control(&mut self, value: bool) {
-            self.enabled_control = Some(value);
-        }
-        fn send_control_event(&mut self) {}
-        fn is_local_dir(&self, _: Option<&str>) -> bool {
-            false
-        }
+    fn set_editable(&self, editable: bool) {
+        CheckBoxEfield::set_editable(self, editable)
     }
-
-    #[test]
-    fn ordinary_instance_sets_source_ui_test_name() {
-        let value = CheckBoxEfield::get_instance("Apply dose weighting");
-        assert_eq!(
-            value.check_box.name.as_deref(),
-            Some("cb.apply-dose-weighting")
-        );
-        assert!(value.is_enabled());
+    fn set_enabled(&self, enabled: bool) {
+        CheckBoxEfield::set_enabled(self, enabled)
     }
-
-    #[test]
-    fn enable_control_uses_target_label_and_selection_and_enabled_state() {
-        let target = Rc::new(RefCell::new(Target {
-            label: Some("Use CTF".into()),
-            ..Default::default()
-        }));
-        let mut value = CheckBoxEfield::get_enable_control_instance(target.clone());
-        assert_eq!(value.check_box.name.as_deref(), Some("cb.use-ctf"));
-        value.set_selected(true);
-        assert_eq!(target.borrow().enabled_control, Some(true));
-        value.set_enabled(false);
-        assert_eq!(target.borrow().enabled_control, Some(false));
+    fn select_file(&self) -> Option<PathBuf> {
+        CheckBoxEfield::select_file(self)
     }
+    fn select_multiple_files(&self) -> Option<Vec<PathBuf>> {
+        CheckBoxEfield::select_multiple_files(self)
+    }
+}
 
-    #[test]
-    fn appearance_extension_preserves_editability_and_visibility() {
-        let mut value = CheckBoxEfield::get_instance("Check");
-        value.set_editable(false);
-        assert!(!value.is_editable());
-        value.set_visible(false);
-        assert!(!value.is_visible());
-        value.clear();
-        assert!(!value.is_selected());
+impl UIComponent for CheckBoxEfield {
+    /// Java `@Override getUIComponent()`.
+    fn get_ui_component(&self) -> &dyn SwingComponent {
+        self
+    }
+    fn get_component(&self) -> Rc<JComponent> {
+        CheckBoxEfield::get_component(self)
+    }
+}
+
+impl SwingComponent for CheckBoxEfield {
+    fn get_component(&self) -> Rc<JComponent> {
+        CheckBoxEfield::get_component(self)
     }
 }

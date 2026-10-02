@@ -1,0 +1,23 @@
+OutputSeedModel seed.mod
+ImageSizeXandY 1024 1024
+BordersInXandY 32 32
+BeadSize 21.2
+MiddleZvalue 17
+CandidateModel cand.mod
+TrackedModel t0.mod
+ElongationFile e0.txt
+SeedZvalue 16
+SurfaceFile s0.txt
+TrackedModel t1.mod
+ElongationFile e1.txt
+SeedZvalue 17
+SurfaceFile s1.txt
+TrackedModel t2.mod
+ElongationFile e2.txt
+SeedZvalue 18
+SurfaceFile s2.txt
+TwoSurfaces
+RotationAngle -90.0
+HighestTiltAngle 51.0
+TargetNumberOfBeads 40
+WeightsForScore 1.,1.,0.5896,0.5896

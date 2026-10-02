@@ -18,6 +18,19 @@
 #   B        scratch root (default /big/henriksson/realbench/snarbench, ~12 GB)
 #   RSBIN    imod-rs binary (copied before use)
 #   REF      native reference build
+#   SELFCHECK  regex of cases where each side is also compared with ITSELF
+#            (previous rep vs last rep; needs REPS >= 2), default '^batchruntomo'
+#            -- separates run-to-run variation (native beadtrack, RAPTOR's
+#            clock seed) from translation differences
+#   PARITYREPS  runs per side in MODE=parity (default 1; 2 for a self-check)
+#   NATIVE_SUBST  "prog=/path/to/binary ..." -- programs the native side runs
+#            from elsewhere instead of the reference build: native sources
+#            rebuilt with a BUGS.md fix, to attribute a parity difference to
+#            that fix (see BENCHMARK.md "Attributing the differences").  The
+#            row's note then says "nat+subst"; it is not stock native IMOD.
+#   RAPTOR_SEED    if set, RAPTOR runs with `-seed N` on both sides (through a
+#            RAPTOR_BIN wrapper; batchruntomo/runraptor have no seed option, so
+#            this is a parity diagnostic, not a SNARTomo command line)
 #
 # Output: one table row per case and thread setting --
 #   wall (median), CPU = perf task-clock of the whole process tree (median), max RSS (max over runs), ratios
@@ -59,13 +72,26 @@ NTI=$B/natimod; rm -rf $NTI; mkdir -p $NTI/bin
 ln -s $REF/pysrc $NTI/pylib
 for d in flib/image flib/model flib/tilt flib/tiltalign flib/beadtrack flib/blend \
          flib/distort imodutil clip mrc qttools/mrc2tif qttools/processchunks pysrc \
-         scripts; do
+         scripts raptor; do
   for f in $REF/$d/*; do
     n=$(basename $f)
     [ -f $f ] && [ -x $f ] && [[ $n != *.* ]] && [ ! -e $NTI/bin/$n ] && ln -s $f $NTI/bin/$n
   done
 done
 ln -s $REF/com $NTI/com; ln -s $REF/com $RSI/com
+# RAPTOR (batchruntomo trackingMethod 2 -> runraptor -> $IMOD_DIR/bin/RAPTOR,
+# which runs MarkersCorrespond from the same directory).
+for sub in $NATIVE_SUBST; do
+  [ -x "${sub#*=}" ] || { echo "NATIVE_SUBST: ${sub#*=} not executable" >&2; exit 1; }
+  ln -sfn "${sub#*=}" $NTI/bin/${sub%%=*}; echo "NOTE: native side runs ${sub%%=*} from ${sub#*=}" >&2
+done
+if [ -n "$RAPTOR_SEED" ]; then
+  for I in $NTI $RSI; do
+    mkdir -p $I/rapseed; ln -sfn $(readlink $I/bin/MarkersCorrespond || echo $I/bin/MarkersCorrespond) $I/rapseed/MarkersCorrespond
+    printf '#!/bin/sh\nexec %s "$@" -seed %s\n' $I/bin/RAPTOR $RAPTOR_SEED > $I/rapseed/RAPTOR; chmod +x $I/rapseed/RAPTOR
+  done
+  echo "NOTE: RAPTOR runs with -seed $RAPTOR_SEED on both sides" >&2
+fi
 # vmstopy (the .com -> Python converter processchunks/submfg use) is an
 # external process boundary in the translation too; the Rust side gets the
 # native script and the pylib it imports.  Nothing else on that side is native.
@@ -103,15 +129,20 @@ done
 # Commands SNARTomo needs that the translation does not have fall back to
 # native on the Rust side, and are reported (none expected).
 for c in header newstack alterheader binvol mrc2tif clip tif2mrc trimvol convertmod \
-         imodinfo wmod2imod imodjoin submfg batchruntomo; do
+         imodinfo wmod2imod imodjoin submfg batchruntomo \
+         autofidseed imodfindbeads imodmop clipmodel point2model sortbeadsurfs pickbestseed \
+         beadtrack restrictalign imodchopconts runraptor RAPTOR MarkersCorrespond xfmodel; do
   [ -e $RSI/bin/$c ] || echo "WARNING: imod-rs has no '$c'" >&2
 done
 
 side_env() { # side -> env assignments
+  local rb=""
   if [ $1 = rs ]; then
-    echo "PATH=$RSI/bin:/usr/bin:/bin IMOD_DIR=$RSI AUTODOC_DIR=$REF/autodoc"
+    [ -n "$RAPTOR_SEED" ] && rb=" RAPTOR_BIN=$RSI/rapseed"
+    echo "PATH=$RSI/bin:/usr/bin:/bin IMOD_DIR=$RSI AUTODOC_DIR=$REF/autodoc$rb"
   else
-    echo "PATH=$NTI/bin:/usr/bin:/bin IMOD_DIR=$NTI AUTODOC_DIR=$REF/autodoc LD_LIBRARY_PATH=$REF/buildlib"
+    [ -n "$RAPTOR_SEED" ] && rb=" RAPTOR_BIN=$NTI/rapseed"
+    echo "PATH=$NTI/bin:/usr/bin:/bin IMOD_DIR=$NTI AUTODOC_DIR=$REF/autodoc LD_LIBRARY_PATH=$REF/buildlib$rb"
   fi
 }
 nat() { env -u LD_LIBRARY_PATH $(side_env nat) "$@"; }
@@ -168,6 +199,7 @@ PY
   [ -f TS_01_ctfstack_center.mrcs ] || \
     nat clip resize -2d -ox 136 -oy 136 TS_01_ctfstack.mrcs TS_01_ctfstack_center.mrcs >/dev/null
   write_directive > snartomo.adoc
+  for m in fid patch raptor; do write_directive $m > snartomo_$m.adoc; done
   # batchruntomo, native, full run: the reconstruction and com files the
   # post-reconstruction cases use.
   if [ ! -f brt/TS_01_newstack_full_rec.mrc ]; then
@@ -212,14 +244,25 @@ PY
 # A SNARTomo-style batch directive.  SNARTomo copies the user's directive and
 # sets setupset.copyarg.pixel to apix/10 nm (update_adoc,
 # snartomo-shared.bash:2095-2150); the rest is what an eTomo batch template
-# for a single-axis cryo tilt series holds.  TS_01 has no seeded gold, and
-# autofidseed/imodchopconts are not translated yet, so alignment is
-# FIDUCIALLESS (runtime.Fiducials.any.fiducialless = 1): cross-correlation
-# prealignment only.  THICKNESS is in unbinned pixels (1600 = 189 nm -> 200
-# at bin 8).  Binning 8 = SNARTOMO_BINNING's default
-# (snartomo.bashrc.template:66): 4096 -> 512.
+# for a single-axis cryo tilt series holds.  THICKNESS is in unbinned pixels
+# (1600 = 189 nm -> 200 at bin 8).  Binning 8 = SNARTOMO_BINNING's default
+# (snartomo.bashrc.template:66): 4096 -> 512.  The coarse aligned stack
+# (prenewst) is binned 4, 1024 x 1024: that is where tracking happens.
+#   write_directive          FIDUCIALLESS (runtime.Fiducials.any.fiducialless
+#                            = 1): cross-correlation prealignment only
+#   write_directive fid      autofidseed seeding + beadtrack (trackingMethod 0,
+#                            seedingMethod 1 = auto-seeding, IMOD
+#                            com/directives.csv:79-80), then tiltalign
+#   write_directive patch    patch tracking (trackingMethod 1): tiltxcorr
+#                            xcorr_pt, imodchopconts into 2 pieces
+#   write_directive raptor   RAPTOR (trackingMethod 2) through runraptor on the
+#                            coarse aligned stack, 30 markers
+# The gold size (10 nm = 21 px at bin 4) is what autofidseed/beadtrack/RAPTOR
+# look for; TS_01 has gold.  The per-mode lines follow
+# /big/henriksson/realbench/brtmissing/pipe/run_brt.sh.
 write_directive() {
-  cat <<'EOF'
+  local base=1; [ -n "$1" ] && base=0
+  awk -v keep=$base 'keep || !/fiducialless/' <<'EOF'
 setupset.copyarg.dual = 0
 setupset.copyarg.pixel=0.1179
 setupset.copyarg.gold = 10
@@ -240,6 +283,31 @@ runtime.Reconstruction.any.useSirt = 0
 runtime.Postprocess.any.doTrimvol = 1
 runtime.Trimvol.any.reorient = 2
 EOF
+  case $1 in
+    fid) cat <<'EOF'
+runtime.Fiducials.any.trackingMethod = 0
+runtime.Fiducials.any.seedingMethod = 1
+comparam.autofidseed.autofidseed.TargetNumberOfBeads = 25
+comparam.autofidseed.autofidseed.TwoSurfaces = 1
+comparam.autofidseed.autofidseed.AdjustSizes = 1
+comparam.track.beadtrack.RoundsOfTracking = 2
+EOF
+    ;;
+    patch) cat <<'EOF'
+runtime.Fiducials.any.trackingMethod = 1
+comparam.xcorr_pt.tiltxcorr.SizeOfPatchesXandY = 200,200
+comparam.xcorr_pt.tiltxcorr.OverlapOfPatchesXandY = 0.33,0.33
+comparam.xcorr_pt.tiltxcorr.IterateCorrelations = 1
+runtime.PatchTracking.any.contourPieces = 2
+EOF
+    ;;
+    raptor) cat <<'EOF'
+runtime.Fiducials.any.trackingMethod = 2
+runtime.RAPTOR.any.useAlignedStack = 1
+runtime.RAPTOR.any.numberOfMarkers = 30
+EOF
+    ;;
+  esac
 }
 
 # ------------------------------------------------------------------- cases
@@ -270,6 +338,11 @@ mrc2tif_ctf|TS_01_ctfstack_center.mrcs|mkdir -p thumbs && mrc2tif -j TS_01_ctfst
 header_stack|TS_01_newstack.mrc|header TS_01_newstack.mrc|stdout
 # wrapper_etomo (snartomo-shared.bash:4083), no laudiseron/ruotnocon: one full run
 batchruntomo|cp:TS_01_newstack.mrc TS_01_newstack.rawtlt cp:snartomo.adoc|batchruntomo $BRT|TS_01_newstack.mrc TS_01_newstack.prexf TS_01_newstack.prexg TS_01_newstack.xf TS_01_newstack.tlt TS_01_newstack_ali.mrc TS_01_newstack_full_rec.mrc TS_01_newstack_rec.mrc
+# the same run with a user directive that tracks fiducials (SNARTomo --batch_directive):
+# autofidseed + beadtrack, patch tracking + imodchopconts, RAPTOR.  Every file the run writes.
+batchruntomo_fid|cp:TS_01_newstack.mrc TS_01_newstack.rawtlt cp:snartomo_fid.adoc|batchruntomo ${BRT/snartomo.adoc/snartomo_fid.adoc}|*
+batchruntomo_patch|cp:TS_01_newstack.mrc TS_01_newstack.rawtlt cp:snartomo_patch.adoc|batchruntomo ${BRT/snartomo.adoc/snartomo_patch.adoc}|*
+batchruntomo_raptor|cp:TS_01_newstack.mrc TS_01_newstack.rawtlt cp:snartomo_raptor.adoc|batchruntomo ${BRT/snartomo.adoc/snartomo_raptor.adoc}|*
 # ruotnocon_wrapper (snartomo-shared.bash:4460-4509)
 convertmod_fid|TS_01_newstack.fid|convertmod TS_01_newstack.fid wimp.txt|wimp.txt
 imodinfo_a|TS_01_newstack.fid|imodinfo -a TS_01_newstack.fid|stdout
@@ -339,6 +412,8 @@ R=$B/results/$STAMP; mkdir -p $R
 {
   echo "# bench_snartomo $STAMP host=$(hostname) cores=$(nproc) imod-rs=$RSHASH ($(cd $REPO && git rev-parse --short HEAD)+worktree)"
   echo "# load at start: $(cut -d' ' -f1-3 /proc/loadavg)"
+  [ -n "$NATIVE_SUBST" ] && echo "# NATIVE_SUBST (native side is NOT stock): $NATIVE_SUBST"
+  [ -n "$RAPTOR_SEED" ] && echo "# RAPTOR_SEED=$RAPTOR_SEED (RAPTOR -seed on both sides)"
 } | tee $R/table.txt
 printf "%-18s %-7s %-6s %8s %8s %7s %8s %8s %7s %8s %8s %6s %s\n" CASE THREADS PARITY nat_s rs_s WALL natCPU rsCPU CPU natMB rsMB RSS NOTE | tee -a $R/table.txt
 
@@ -348,11 +423,15 @@ while IFS='|' read -r name inputs cmd outs; do
   [ -n "$SKIP" ] && [[ $name =~ $SKIP ]] && continue
   for th in $THREADS; do
     nd=$B/run/$name/$th/nat; rd=$B/run/$name/$th/rs
-    reps=$REPS; [[ $MODE == parity ]] && reps=1
+    reps=$REPS; [[ $MODE == parity ]] && reps=${PARITYREPS:-1}
     for side in nat rs; do eval "W_$side=; C_$side=; M_$side=0; RC_$side="; done
+    self=""; [[ $reps -ge 2 && $name =~ ${SELFCHECK:-^batchruntomo} ]] && self=1
+    rm -rf $B/run/$name/$th/nat.prev $B/run/$name/$th/rs.prev
     for i in $(seq $reps); do
       for side in nat rs; do
-        d=$B/run/$name/$th/$side; rm -rf $d; mkdir -p $d
+        d=$B/run/$name/$th/$side
+        if [[ -n $self && $i -eq $reps && -d $d ]]; then mv $d $d.prev; else rm -rf $d; fi
+        mkdir -p $d
         stage $d $inputs; sleep 1; touch $d/.stage; sleep 1
         read t m c rc < <(run_once $side $th $d "$cmd")
         echo -e "$name\t$th\t$side\t$i\t$t\t$c\t$m\t$rc" >> $R/runs.tsv
@@ -387,6 +466,14 @@ while IFS='|' read -r name inputs cmd outs; do
     printf "%-18s %-7s %-6s %8s %8s %7s %8s %8s %7s %8.1f %8.1f %6s %s\n" "$name" "$th" "$verdict" \
       "$nw" "$rw" "$sp" "$nc" "$rc_" "$cpr" $(awk -v v=$M_nat 'BEGIN{print v/1024}') \
       $(awk -v v=$M_rs 'BEGIN{print v/1024}') "$rr" "$( [ $verdict = IDENT ] || echo "${note:0:120}")$precise" | tee -a $R/table.txt
+    if [ -n "$self" ]; then
+      # each side against itself (previous rep vs last): run-to-run variation
+      for side in nat rs; do
+        d=$B/run/$name/$th/$side; ps_=$(compare $d.prev $d "$outs")
+        echo -e "$name\t$th\tSELF-$side:${ps_%%$'\t'*}\t${ps_#*$'\t'}" >> $R/parity.tsv
+        echo "#   $name $th $side-vs-$side: ${ps_%%$'\t'*} ${ps_#*$'\t'}" | cut -c1-200 | tee -a $R/table.txt
+      done
+    fi
   done
 done <<< "$CASES"
 echo "# load at end: $(cut -d' ' -f1-3 /proc/loadavg)" | tee -a $R/table.txt

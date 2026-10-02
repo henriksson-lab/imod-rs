@@ -1,0 +1,16 @@
+# name	args
+afs	-text o.txt -values 1 -flipyz 0 -pick 8,300 -input xyz.mod -output o.mod
+subarea	-subarea 400 xyz.mod o.mod
+#full	plain	xyz.mod o.mod
+already	-already sorted.mod o.mod
+check	-check sorted.mod o.mod
+checkwrong	-check xyz.mod o.mod
+one	-one -xaxis 5 -invert xyz.mod o.mod
+sizes	-aligned 1100,1080 -xtrim 10,900 -ytrim 20,1000 -prebin 2 -recbin 4 -rescale xyz.mod o.mod
+majority	-majority -outlier 1.5 -values 2 xyz.mod o.mod
+setparam	-set 1,30 -set 13,0 xyz.mod o.mod
+flipped	xyzf.mod o.mod
+flipxtilt	-xaxis 3 xyzf.mod o.mod
+subpick	-subarea 300 -pick 5,100 xyz.mod o.mod
+badparam	-set 99,1 xyz.mod o.mod
+noinput	-

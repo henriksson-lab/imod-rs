@@ -1070,3 +1070,82 @@ mod tests {
         std::fs::remove_file(path).unwrap();
     }
 }
+
+/// The Java `add` overloads that go through `MessageBuilder.add(...)`
+/// (`ProcessMessages.java:676-824`, `:1979-2162`): each message is rated and
+/// stored in the list for `messageType`; `header` goes in front of the first
+/// message stored.
+impl ProcessMessages {
+    fn builder_add(&mut self, ty: MessageType, header: Option<&str>, messages: Vec<String>) {
+        let mut header = header.map(str::to_owned);
+        for message in messages {
+            if MessageRating::rate(&message) == MessageRating::Drop {
+                continue;
+            }
+            let this_header = header.take();
+            self.store(ty, ty.list_type(), this_header.as_deref(), message, false, true);
+        }
+    }
+
+    /// Java `add(MessageType, String)`.
+    pub fn add_message(&mut self, ty: MessageType, input: impl Into<String>) {
+        self.builder_add(ty, None, vec![input.into()]);
+    }
+
+    /// Java `add(MessageType)`: adds an empty message.
+    pub fn add_empty(&mut self, ty: MessageType) {
+        self.builder_add(ty, None, vec![String::new()]);
+    }
+
+    /// Java `add(MessageType, String header, String[] input)`.
+    pub fn add_array(&mut self, ty: MessageType, header: &str, input: Option<&[String]>) {
+        if let Some(input) = input {
+            self.builder_add(ty, Some(header), input.to_vec());
+        }
+    }
+
+    /// Java `add(MessageType, String header, ProcessMessages)`.
+    pub fn add_from(&mut self, ty: MessageType, header: &str, from: Option<&ProcessMessages>) {
+        if let Some(from) = from {
+            let list: Vec<String> = from
+                .list(ty.list_type())
+                .map(|list| list.iter().cloned().collect())
+                .unwrap_or_default();
+            self.builder_add(ty, Some(header), list);
+        }
+    }
+
+    /// Java `add(MessageType, MessageType fromType, String header, ProcessMessages)`.
+    pub fn add_from_type(
+        &mut self,
+        ty: MessageType,
+        from_type: MessageType,
+        header: &str,
+        from: Option<&ProcessMessages>,
+    ) {
+        if let Some(from) = from {
+            let list: Vec<String> = from
+                .list(from_type.list_type())
+                .map(|list| list.iter().cloned().collect())
+                .unwrap_or_default();
+            self.builder_add(ty, Some(header), list);
+        }
+    }
+
+    /// Java `print()`: prints the error, warning and info lists to standard
+    /// error, only when eTomo runs with `--debug`.
+    pub fn print_all(&self) {
+        if !crate::imod::etomo::etomo_director::ARGUMENTS
+            .lock()
+            .unwrap()
+            .is_debug()
+        {
+            return;
+        }
+        for ty in [MessageType::Error, MessageType::Warning, MessageType::Info] {
+            if let Some(text) = self.print(ty) {
+                eprintln!("{text}");
+            }
+        }
+    }
+}

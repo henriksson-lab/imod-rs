@@ -9,6 +9,7 @@ pub mod findcontrast;
 pub mod fixboundaries;
 pub mod header;
 pub mod matchvol;
+pub mod montagesize;
 pub mod newstack;
 pub mod rotmatwarp;
 pub mod rotmatwarpsubs;

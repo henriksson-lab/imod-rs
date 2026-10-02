@@ -24,7 +24,7 @@ pub fn ps_report_err(error: String) -> String {
     if PYSED_RETURN_ON_ERR.load(Ordering::SeqCst) {
         return error;
     }
-    std::process::exit(1)
+    crate::imod::libcfshr::b3dutil::exit(1)
 }
 
 /// Matches `swapParenCompile` (`IMOD/pysrc/pysed.py:22`).
@@ -62,7 +62,7 @@ pub fn swap_paren_compile(pattern: &str, flags: bool) -> Regex {
         Ok(regex) => regex,
         Err(error) => {
             eprintln!("re.error: {error}");
-            std::process::exit(1)
+            crate::imod::libcfshr::b3dutil::exit(1)
         }
     }
 }
@@ -82,7 +82,7 @@ fn re_sub_template(template: &str, pattern: &Regex) -> String {
     let mut index = 0;
     fn invalid(message: String) -> ! {
         eprintln!("re.error: {message}");
-        std::process::exit(1)
+        crate::imod::libcfshr::b3dutil::exit(1)
     }
     while index < chars.len() {
         let c = chars[index];

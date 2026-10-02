@@ -15,7 +15,6 @@ use crate::imod::etomo::base_manager::BaseManager;
 use crate::imod::etomo::r#type::axis_id::AxisID;
 use crate::imod::etomo::r#type::axis_type::AxisType;
 use crate::imod::etomo::r#type::directive_file_type::{DirectiveFileType, NUM};
-use crate::imod::etomo::ui::swing::directive_editor_dialog::DirectiveEditorBuilder as DirectiveEditorBuilderBoundary;
 use crate::imod::etomo::ui::swing::directive_section_panel::{
     Directive as UiDirective, DirectiveDescrSection, DirectiveMap as UiDirectiveMap,
 };
@@ -616,34 +615,6 @@ impl DirectiveEditorBuilder {
     }
 }
 
-impl DirectiveEditorBuilderBoundary for DirectiveEditorBuilder {
-    fn get_file_type_exists(&self) -> [bool; NUM as usize] {
-        self.get_file_type_exists()
-    }
-
-    fn get_section_array(&self) -> Vec<DirectiveDescrSection> {
-        self.get_section_array()
-    }
-
-    fn get_directive_map(&self) -> UiDirectiveMap {
-        UiDirectiveMap {
-            directives: self
-                .directive_map
-                .iter()
-                .map(|(key, _)| (key.clone(), UiDirective { name: key.clone() }))
-                .collect(),
-        }
-    }
-
-    fn get_default_save_location(&self) -> Option<PathBuf> {
-        self.get_default_save_location()
-    }
-
-    fn get_dropped_directives(&self) -> Vec<String> {
-        self.get_dropped_directives()
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -667,16 +638,23 @@ mod tests {
         ) -> Option<&dyn crate::imod::etomo::r#type::base_meta_data::BaseMetaData> {
             None
         }
-        fn get_main_panel(&self) -> Option<std::convert::Infallible> {
+        fn get_main_panel(
+            &self,
+        ) -> Option<std::rc::Rc<dyn crate::imod::etomo::ui::swing::main_panel::MainPanelVirtual>>
+        {
             None
         }
-        fn get_process_manager(&self) -> Option<std::convert::Infallible> {
+        fn get_process_manager(
+            &self,
+        ) -> Option<&'static crate::imod::etomo::process::base_process_manager::BaseProcessManager>
+        {
             None
         }
         fn get_storables_with_offset(
             &self,
             _offset: i32,
-        ) -> Option<Vec<Box<dyn crate::imod::etomo::storage::storable::Storable>>> {
+        ) -> Option<Vec<Option<&'static dyn crate::imod::etomo::storage::storable::Storable>>>
+        {
             None
         }
         fn get_name(&self) -> Option<String> {

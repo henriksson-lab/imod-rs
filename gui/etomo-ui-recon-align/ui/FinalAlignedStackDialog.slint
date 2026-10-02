@@ -85,7 +85,7 @@ export component FinalAlignedStackDialog inherits VerticalLayout {
                                 spacing: EtomoStyle.gap;
                                 alignment: start;
                                 CheckBox { text: "Correct for X axis tilt of"; }
-                                TextField { text: ""; enabled: false; field-width: 70px; }
+                                TextField { label: "Correct for X axis tilt of"; text: ""; enabled: false; field-width: 70px; }
                                 Text { text: " (takes much longer)"; vertical-alignment: center; }
                             }
                             // `pnlScaleByCtfPower`
@@ -93,7 +93,7 @@ export component FinalAlignedStackDialog inherits VerticalLayout {
                                 spacing: EtomoStyle.gap;
                                 alignment: start;
                                 CheckBox { text: "Scale by CTF to the power:"; }
-                                TextField { text: ""; enabled: false; field-width: 70px; }
+                                TextField { label: "Scale by CTF to the power:"; text: ""; enabled: false; field-width: 70px; }
                             }
                             LabeledTextField { label: "Defocus tolerance (nm): "; text: ""; label-width: 260px; }
                             LabeledTextField { label: "Minimum zero spacing in strip FFTs:"; text: ""; label-width: 260px; }
@@ -140,7 +140,8 @@ export component FinalAlignedStackDialog inherits VerticalLayout {
                                 HorizontalLayout {
                                     spacing: EtomoStyle.gap;
                                     LabeledTextField { label: "MTF file: "; text: ""; label-width: 220px; }
-                                    SimpleButton { }
+                                    // `btnMtfFile.setName(MTF_FILE_LABEL)`.
+                                    SimpleButton { name-label: "MTF file: "; }
                                 }
                                 // `inversePanel`
                                 HorizontalLayout {
@@ -159,7 +160,7 @@ export component FinalAlignedStackDialog inherits VerticalLayout {
                                 spacing: EtomoStyle.gap;
                                 alignment: start;
                                 CheckBox { text: "No dose file; use fixed dose per image: "; }
-                                TextField { text: ""; field-width: 70px; }
+                                TextField { label: "No dose file; use fixed dose per image: "; text: ""; field-width: 70px; }
                                 Text { text: " e/sq A"; vertical-alignment: center; }
                             }
                             // `pnlGlueTypeOfDoseFile` centres `pnlTypeOfDoseFile`.

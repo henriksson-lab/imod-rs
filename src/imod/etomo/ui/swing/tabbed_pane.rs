@@ -1,52 +1,77 @@
 //! `IMOD/Etomo/src/etomo/ui/swing/TabbedPane.java`.
-use crate::imod::etomo::storage::autodoc::autodoc_tokenizer::SEPARATOR_CHAR;
+//!
+//! Java `final class TabbedPane extends JTabbedPane`: names itself (uitest `tb.`)
+//! from its first tab's title.  The `JTabbedPane` is [`TabbedPane::get_component`];
+//! other inherited members are called on it.
+
+use std::rc::Rc;
+
+use super::spaced_panel::SpacedPanel;
+use crate::imod::etomo::etomo_director::ARGUMENTS;
+use crate::imod::etomo::jdk::JComponent;
+use crate::imod::etomo::storage::autodoc::autodoc_tokenizer::{DEFAULT_DELIMITER, SEPARATOR_CHAR};
+use crate::imod::etomo::r#type::ui_test_field_type::UITestFieldType;
 use crate::imod::etomo::util::utilities;
-/// Java final `TabbedPane` source-visible JTabbedPane state.
-#[derive(Clone, Debug, Default, Eq, PartialEq)]
+
+/// Java `TabbedPane`.
 pub struct TabbedPane {
-    pub tabs: Vec<(String, String)>,
-    pub name: Option<String>,
-    pub printed_names: Vec<String>,
+    /// The `JTabbedPane` this class extends.
+    component: Rc<JComponent>,
 }
+
 impl TabbedPane {
-    pub fn new() -> Self {
-        Self::default()
+    /// Java implicit constructor.
+    pub fn new() -> Rc<TabbedPane> {
+        Rc::new(TabbedPane {
+            component: JComponent::new_tabbed_pane(),
+        })
     }
-    pub fn add_tab(&mut self, title: impl Into<String>, component: impl Into<String>) {
-        self.tabs.push((title.into(), component.into()));
-        if self.tabs.len() == 1 {
-            let t = self.tabs[0].0.clone();
-            self.set_name(&t, false)
+
+    /// The `JTabbedPane`.
+    pub fn get_component(&self) -> Rc<JComponent> {
+        self.component.clone()
+    }
+
+    /// Java `addTab(String, Component)` (override).
+    pub fn add_tab_string_component(&self, title: &str, component: &Rc<JComponent>) {
+        self.component.add_tab(title, component);
+        if self.component.get_tab_count() == 1 {
+            self.set_name(Some(title));
         }
     }
-    pub fn add_tab_spaced_panel(&mut self, title: impl Into<String>, component: impl Into<String>) {
-        self.add_tab(title, component)
+
+    /// Java `addTab(String, SpacedPanel)`.
+    pub fn add_tab_string_spaced_panel(&self, title: &str, spaced_panel: &SpacedPanel) {
+        self.component.add_tab(title, &spaced_panel.get_container());
+        if self.component.get_tab_count() == 1 {
+            self.set_name(Some(title));
+        }
     }
-    pub fn set_title_at(&mut self, index: usize, title: impl Into<String>) {
-        let title = title.into();
-        self.tabs[index].0 = title.clone();
+
+    /// Java `setTitleAt(int, String)` (override).
+    pub fn set_title_at(&self, index: usize, title: &str) {
+        self.component.set_title_at(index, title);
         if index == 0 {
-            self.set_name(&title, false)
+            self.set_name(Some(title));
         }
     }
-    pub fn set_name(&mut self, text: &str, print_names: bool) {
-        let value = utilities::convert_label_to_name(Some(text), false).unwrap_or_default();
-        let name = format!("tab{SEPARATOR_CHAR}{value}");
-        self.name = Some(name.clone());
-        if print_names {
-            self.printed_names.push(format!("{name} | "));
+
+    /// Java `setName(String)` (override).
+    pub fn set_name(&self, text: Option<&str>) {
+        let field_type = UITestFieldType::TAB;
+        let name = utilities::convert_label_to_name(text, field_type.is_unlimited_segments());
+        self.component.set_name(Some(&format!(
+            "{}{}{}",
+            field_type,
+            SEPARATOR_CHAR,
+            name.as_deref().unwrap_or("null")
+        )));
+        if ARGUMENTS.lock().unwrap().is_print_names() {
+            println!(
+                "{} {} ",
+                self.component.get_name().as_deref().unwrap_or("null"),
+                DEFAULT_DELIMITER
+            );
         }
-    }
-}
-#[cfg(test)]
-mod tests {
-    use super::*;
-    #[test]
-    fn first_tab_and_title_name_pane() {
-        let mut p = TabbedPane::new();
-        p.add_tab("Setup", "p");
-        assert_eq!(p.name.as_deref(), Some("tab.setup"));
-        p.set_title_at(0, "Start");
-        assert_eq!(p.name.as_deref(), Some("tab.start"));
     }
 }

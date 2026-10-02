@@ -54,8 +54,8 @@ pub fn findsirtdiffs(arguments: &[OsString]) -> i32 {
         for l in &lines {
             if l.contains("diff rec mean") {
                 lspl = l.split_whitespace().map(str::to_owned).collect();
-                let int = |text: &str| text.trim().parse::<i64>().ok();
-                let float = |text: &str| text.trim().parse::<f64>().ok();
+                let int = |text: &str| super::imodpy::py_int(text);
+                let float = |text: &str| super::imodpy::py_float(text);
                 let parsed = (|| {
                     Some((
                         int(lspl.get(1)?.trim_end_matches(','))?,

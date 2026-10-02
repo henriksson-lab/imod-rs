@@ -1,0 +1,146 @@
+# imod-rs native golden manifest for fixtures/imodmop; see fixtures/README.md.
+# Regenerate with fixtures/regen-golden.sh imodmop; do not edit by hand.
+sha256 dd23b6a075804abf286de78a33a7251069bf8b6ce9ef8e8bc5defbb988cf41e8 51024 golden/allsec.mrc
+text 2 golden/allsec.rc
+0
+
+text 101 golden/allsec.stdout
+Painting section 0 Painting section 1 Painting section 2 Painting section 3 Painting section 4 
+
+sha256 7ceba0adf66a6716187558a375d6af21d5ffac14147ca2806babc537f6be94c3 41524 golden/border.mrc
+text 2 golden/border.rc
+0
+
+text 101 golden/border.stdout
+Painting section 0 Painting section 1 Painting section 2 Painting section 3 Painting section 4 
+
+sha256 4b4c946075a472d12b0c4f6bdcca3529c95abdc8027a8c52aa101f6ec14750d7 51024 golden/closed.mrc
+text 2 golden/closed.rc
+0
+
+text 101 golden/closed.stdout
+Painting section 0 Painting section 1 Painting section 2 Painting section 3 Painting section 4 
+
+sha256 fbadb36cbbe5de93f5209a604d48456699c55aab38262bde51ef86abb868bba2 151024 golden/color.mrc
+text 2 golden/color.rc
+0
+
+text 101 golden/color.stdout
+Painting section 0 Painting section 1 Painting section 2 Painting section 3 Painting section 4 
+
+sha256 cc1e2b1c0babd590edeca4072d0671696d5120a0e5edf74547e2313c8ad1077e 51024 golden/fast.mrc
+text 2 golden/fast.rc
+0
+
+text 101 golden/fast.stdout
+Painting section 0 Painting section 1 Painting section 2 Painting section 3 Painting section 4 
+
+sha256 7ba93e1667d7f1124ceecc312f697b9b5764907de38fee2266f3caf4c41404b6 51024 golden/invert.mrc
+text 2 golden/invert.rc
+0
+
+text 101 golden/invert.stdout
+Painting section 0 Painting section 1 Painting section 2 Painting section 3 Painting section 4 
+
+sha256 a59244c6012bf5c671484e9c68d14594dff1bb516f19668761dd889211c34570 51024 golden/labellist.mrc
+text 2 golden/labellist.rc
+0
+
+text 101 golden/labellist.stdout
+Painting section 0 Painting section 1 Painting section 2 Painting section 3 Painting section 4 
+
+sha256 cbd355832f6c58f9e5daeabf9532e2f0cac97b77cc218b07f57aa827c37148a8 101024 golden/labels.mrc
+text 2 golden/labels.rc
+0
+
+text 101 golden/labels.stdout
+Painting section 0 Painting section 1 Painting section 2 Painting section 3 Painting section 4 
+
+sha256 b1f8db6d5c623eeb413cdd6f7c3fa052369f29c07696a955ad9244c3445c3ceb 74296 golden/mode2.mrc
+text 2 golden/mode2.rc
+0
+
+text 61 golden/mode2.stdout
+Painting section 1 Painting section 2 Painting section 3 
+
+text 2 golden/nofile.rc
+1
+
+text 44 golden/nofile.stdout
+ERROR: imodmop - Could not open missing.mrc
+
+sha256 6893c51f15b4fd12c5a87e3c8421ffba22cdd314ea51f5dc782cdfd6916b8c5e 201024 golden/padin.mrc
+text 2 golden/padin.rc
+0
+
+text 101 golden/padin.stdout
+Painting section 0 Painting section 1 Painting section 2 Painting section 3 Painting section 4 
+
+sha256 08c5ad415d1a403268180d20a7e175014361fdc7596d95f0f98c3879ac80f279 51024 golden/padtaper.mrc
+text 2 golden/padtaper.rc
+0
+
+text 101 golden/padtaper.stdout
+Painting section 0 Painting section 1 Painting section 2 Painting section 3 Painting section 4 
+
+sha256 34e49bf29a3cdf7996f2eec9d7b1e9e86057442a1604c550c361494a2bd40954 31024 golden/project.mrc
+text 2 golden/project.rc
+0
+
+sha256 bb465c3308b818042878a1d97d2a3ec65b03674b8e7d55bed8eb78f70730ce16 1348 golden/project.stdout
+sha256 79f1e8ef17587317413eec218aa070034271314ac5396a699135f7f493f8f771 51024 golden/reverse.mrc
+text 2 golden/reverse.rc
+0
+
+text 101 golden/reverse.stdout
+Painting section 0 Painting section 1 Painting section 2 Painting section 3 Painting section 4 
+
+text 2 golden/scat23.rc
+1
+
+text 50 golden/scat23.stdout
+ERROR: imodmop - You can not enter both -2 and -3
+
+sha256 04c3ffabd9af6a0f0eff97ebc23ecd8083f288a4db671ef6c1821ee8dcc83c11 51024 golden/scat2d.mrc
+text 2 golden/scat2d.rc
+0
+
+text 101 golden/scat2d.stdout
+Painting section 0 Painting section 1 Painting section 2 Painting section 3 Painting section 4 
+
+sha256 ca289642c818f1b14305cc7d8b9a15b23f18c86133243712478ae62da6f69629 51024 golden/scat3d.mrc
+text 2 golden/scat3d.rc
+0
+
+text 101 golden/scat3d.stdout
+Painting section 0 Painting section 1 Painting section 2 Painting section 3 Painting section 4 
+
+sha256 77d32bbc448df5baeed528aa781226108379acf894c1cb557e87c91d16c18211 51024 golden/tube3d.mrc
+text 2 golden/tube3d.rc
+0
+
+text 101 golden/tube3d.stdout
+Painting section 0 Painting section 1 Painting section 2 Painting section 3 Painting section 4 
+
+sha256 7c69640812862d9610528ccc1fa27298bd0aa71a00c6862f9d72b44e2bdbc0e1 31024 golden/tubeplanar.mrc
+text 2 golden/tubeplanar.rc
+0
+
+text 61 golden/tubeplanar.stdout
+Painting section 1 Painting section 2 Painting section 3 
+
+text 2 golden/twofiles.rc
+3
+
+text 174 golden/twofiles.stdout
+imodmop Version 5.2.17 Sep 19 2026 00:48:39
+Copyright (C) 1994-2025 by the Regents of the University of Colorado
+Usage: imodmop [options] model_file input_image output_image
+
+sha256 163226b6361fc11751bf900f05b319347c8ae7793116886e377685a6a4612d36 51024 golden/ztaper.mrc
+text 2 golden/ztaper.rc
+0
+
+text 101 golden/ztaper.stdout
+Painting section 0 Painting section 1 Painting section 2 Painting section 3 Painting section 4 
+

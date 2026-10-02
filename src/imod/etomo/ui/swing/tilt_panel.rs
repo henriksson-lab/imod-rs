@@ -1,287 +1,368 @@
 //! `IMOD/Etomo/src/etomo/ui/swing/TiltPanel.java`.
 //!
-//! Java inheritance is represented by the owned `abstract_tilt_panel` field.
-//! The Swing `JPanel`, `ContextPopup`, and `ApplicationManager` remain direct
-//! presentation/application boundaries; this unit preserves every state change
-//! and call argument made by `TiltPanel.java` instead of supplying a different
-//! reconstruction policy.
-#![allow(dead_code)]
+//! Java `public class TiltPanel extends AbstractTiltPanel`: the back
+//! projection (tilt.com) panel of the Tomogram Generation dialog.  An EDT
+//! object created as `Rc<Self>` by [`TiltPanel::get_instance`]; every method
+//! takes `&self`.  The `AbstractTiltPanel` superclass is the embedded `base`
+//! (reached through `Deref`); the abstract and overridden members are
+//! [`AbstractTiltPanelVirtual`], and the interfaces the superclass implements
+//! (`Expandable`, `TrialTiltParent`, `Run3dmodButtonContainer`,
+//! `TiltDisplay`, `RadialParent`) are implemented here on the subclass object
+//! (Java's `this`), delegating to the superclass bodies or this class's
+//! overrides.
 
-use super::abstract_tilt_panel::AbstractTiltPanel;
+use std::ops::Deref;
+use std::rc::{Rc, Weak};
+
+use super::abstract_tilt_panel::{AbstractTiltPanel, AbstractTiltPanelVirtual};
+use super::context_popup::{self, ContextPopup};
+use super::deferred_3dmod_button::Deferred3dmodButton;
+use super::expand_button::ExpandButton;
+use super::expandable::Expandable;
+use super::global_expand_button::GlobalExpandButton;
+use super::process_display::ProcessDisplay;
+use super::radial_parent::RadialParent;
+use super::run_3dmod_button_container::Run3dmodButtonContainer;
+use super::tilt_display::{TiltDisplay, TiltDisplayException};
+use super::tomogram_generation_parent::TomogramGenerationParent;
+use super::trial_tilt_parent::TrialTiltParent;
+use super::ui_utilities;
+use crate::imod::etomo::application_manager::ApplicationManager;
+use crate::imod::etomo::base_manager::BaseManager;
+use crate::imod::etomo::comscript::splittilt_param::SplittiltParam;
+use crate::imod::etomo::comscript::tilt_param::TiltParam;
+use crate::imod::etomo::jdk::{JComponent, MouseEvent};
 use crate::imod::etomo::process::imod_process::Run3dmodMenuOptions;
 use crate::imod::etomo::r#type::axis_id::AxisID;
 use crate::imod::etomo::r#type::dialog_type::DialogType;
+use crate::imod::etomo::r#type::panel_id::PanelId;
+use crate::imod::etomo::r#type::process_result_display::ProcessResultDisplayHandle;
 use crate::imod::etomo::r#type::processing_method::ProcessingMethod;
 
-/// Java `PanelId.TILT`.
-pub const PANEL_ID_TILT: &str = "Tilt";
-/// Java `BoxLayout.Y_AXIS`.
-pub const Y_AXIS: i32 = 1;
-/// Java `Component.CENTER_ALIGNMENT`.
-pub const CENTER_ALIGNMENT: f32 = 0.5;
-/// Java `ContextPopup.TOMO_GUIDE`.
-pub const TOMO_GUIDE: &str = "TOMO_GUIDE";
-
-/// Direct source dependency `ProcessResultDisplay`.
-#[derive(Clone, Debug, Default, Eq, PartialEq)]
-pub struct ProcessResultDisplay;
-
-/// Direct source dependency `Deferred3dmodButton`.
-#[derive(Clone, Debug, Default, Eq, PartialEq)]
-pub struct Deferred3dmodButton;
-
-/// Direct source dependency `MouseEvent`; a native event is intentionally not
-/// invented here because `TiltPanel` only passes it to `ContextPopup`.
-#[derive(Clone, Debug, Default, Eq, PartialEq)]
-pub struct MouseEvent {
-    pub x: i32,
-    pub y: i32,
-    pub popup_trigger: bool,
-}
-
-/// Source-visible `JPanel` state of `pnlTiltPanelRoot`.
-#[derive(Clone, Debug, PartialEq)]
-pub struct TiltPanelRoot {
-    pub box_layout_axis: i32,
-    pub y_space_before_abstract_root: bool,
-    pub abstract_root_added: bool,
-    pub alignment_x: f32,
-}
-
-impl Default for TiltPanelRoot {
-    fn default() -> Self {
-        Self {
-            box_layout_axis: Y_AXIS,
-            y_space_before_abstract_root: false,
-            abstract_root_added: false,
-            alignment_x: CENTER_ALIGNMENT,
-        }
-    }
-}
-
-/// Exact `ContextPopup` construction inputs retained at its unported GUI boundary.
-#[derive(Clone, Debug, Eq, PartialEq)]
-pub struct TiltContextPopup {
-    pub anchor: String,
-    pub mouse_event: MouseEvent,
-    pub guide: &'static str,
-    pub man_page_label: [String; 2],
-    pub man_page: [String; 2],
-    pub log_file_label: [String; 1],
-    pub log_file: [String; 1],
-    pub axis_id: AxisID,
-}
-
-/// The two `ApplicationManager` calls made only by this Java source unit.
-pub trait TiltPanelApplicationManager {
-    fn tilt_action(
-        &mut self,
-        process_result_display: &ProcessResultDisplay,
-        deferred_3dmod_button: &Deferred3dmodButton,
-        run_3dmod_menu_options: Run3dmodMenuOptions,
-        axis_id: AxisID,
-        dialog_type: DialogType,
-        tilt_processing_method: ProcessingMethod,
-    );
-
-    fn imod_full_volume(&mut self, axis_id: AxisID, run_3dmod_menu_options: Run3dmodMenuOptions);
-}
-
-/// Java `TiltPanel`, composed with its Java superclass.
+/// Java `public class TiltPanel extends AbstractTiltPanel /*implements
+/// ResumeObserver */`.
 pub struct TiltPanel {
-    pub abstract_tilt_panel: AbstractTiltPanel,
-    pub pnl_tilt_panel_root: TiltPanelRoot,
-    pub last_context_popup: Option<TiltContextPopup>,
-    pub root_tooltip_set: bool,
+    /// The `AbstractTiltPanel` superclass.
+    base: AbstractTiltPanel,
+    /// Java private final `pnlTiltPanelRoot = new JPanel()`.
+    pnl_tilt_panel_root: Rc<JComponent>,
+}
+
+impl Deref for TiltPanel {
+    type Target = AbstractTiltPanel;
+    fn deref(&self) -> &AbstractTiltPanel {
+        &self.base
+    }
 }
 
 impl TiltPanel {
-    /// Java protected `TiltPanel(ApplicationManager, AxisID, DialogType,
-    /// GlobalExpandButton, PanelId, TomogramGenerationParent)` constructor.
-    /// The manager/global button/parent are direct dependencies already owned by
-    /// their caller/source units; the superclass retains their local state.
-    pub fn new(axis_id: AxisID, dialog_type: DialogType, panel_id: impl Into<String>) -> Self {
-        Self {
-            abstract_tilt_panel: AbstractTiltPanel::new(axis_id, dialog_type, panel_id, false),
-            pnl_tilt_panel_root: TiltPanelRoot::default(),
-            last_context_popup: None,
-            root_tooltip_set: false,
-        }
+    /// Java protected constructor `TiltPanel(ApplicationManager, AxisID,
+    /// DialogType, GlobalExpandButton, PanelId, TomogramGenerationParent)`.
+    fn new(
+        manager: &'static ApplicationManager,
+        axis_id: AxisID,
+        dialog_type: DialogType,
+        global_advanced_button: &Rc<GlobalExpandButton>,
+        panel_id: PanelId,
+        parent: Weak<dyn TomogramGenerationParent>,
+    ) -> Rc<TiltPanel> {
+        Rc::new_cyclic(|this: &Weak<TiltPanel>| {
+            // super(manager, axisID, dialogType, globalAdvancedButton, panelId, false,
+            // parent)
+            let base = AbstractTiltPanel::new(
+                manager,
+                axis_id,
+                dialog_type,
+                Some(global_advanced_button),
+                panel_id,
+                false,
+                parent,
+                this,
+            );
+            // Field initializer.
+            let pnl_tilt_panel_root = JComponent::new_panel();
+            TiltPanel {
+                base,
+                pnl_tilt_panel_root,
+            }
+        })
     }
 
-    /// Java static `getInstance(...)`.
-    pub fn get_instance(axis_id: AxisID, dialog_type: DialogType) -> Self {
-        let mut instance = Self::new(axis_id, dialog_type, PANEL_ID_TILT);
+    /// Java package-private static `getInstance(ApplicationManager, AxisID,
+    /// DialogType, GlobalExpandButton, TomogramGenerationParent)`.
+    pub fn get_instance(
+        manager: &'static ApplicationManager,
+        axis_id: AxisID,
+        dialog_type: DialogType,
+        global_advanced_button: &Rc<GlobalExpandButton>,
+        parent: Weak<dyn TomogramGenerationParent>,
+    ) -> Rc<TiltPanel> {
+        let instance = TiltPanel::new(
+            manager,
+            axis_id,
+            dialog_type,
+            global_advanced_button,
+            PanelId::Tilt,
+            parent,
+        );
         instance.create_panel();
         instance.set_tool_tip_text();
         instance.add_listeners();
         instance
     }
 
-    /// Java override `addListeners`.
-    pub fn add_listeners(&mut self) {
-        self.abstract_tilt_panel.add_listeners();
-        if self.abstract_tilt_panel.listen_for_field_changes {
-            // Empty Java branch: subclasses with field listeners set this flag.
-        }
+    /// Java protected final override `addListeners()`.
+    pub fn add_listeners(&self) {
+        self.base.add_listeners();
+        // If the child class has field listeners, it must set listenForFieldChanges to
+        // true. Otherwise changes in these fields will be ignored.
+        if self.base.listen_for_field_changes {}
     }
 
-    /// Java override `createPanel`.
-    pub fn create_panel(&mut self) {
-        self.abstract_tilt_panel.create_panel();
-        self.pnl_tilt_panel_root.box_layout_axis = Y_AXIS;
-        self.pnl_tilt_panel_root.y_space_before_abstract_root = true;
-        self.pnl_tilt_panel_root.abstract_root_added = self.abstract_tilt_panel.get_root();
-        self.pnl_tilt_panel_root.alignment_x = CENTER_ALIGNMENT;
+    /// Java protected final override `createPanel()`.
+    pub fn create_panel(&self) {
+        self.base.create_panel();
+        // Swing layout: pnlTiltPanelRoot.setLayout(new BoxLayout(pnlTiltPanelRoot,
+        // BoxLayout.Y_AXIS)).
+        // `super.getRoot()`: the superclass body.
+        ui_utilities::add_with_y_space(&self.pnl_tilt_panel_root, &self.base.get_root());
+        // Component.CENTER_ALIGNMENT
+        ui_utilities::align_components_x(&self.pnl_tilt_panel_root, 0.5);
     }
 
-    /// Java override `getRoot`.
-    pub fn get_root(&self) -> &TiltPanelRoot {
-        &self.pnl_tilt_panel_root
+    /// Java final override `getRoot()`.
+    pub fn get_root(&self) -> Rc<JComponent> {
+        self.pnl_tilt_panel_root.clone()
     }
 
-    /// Java deprecated `allowTiltComSave`.
+    /// Java public final override `@Deprecated allowTiltComSave()` (8/3/2018
+    /// See TiltDisplay).
     pub fn allow_tilt_com_save(&self) -> bool {
         true
     }
 
-    /// Java deprecated `isResume`.
+    /// Java public final `@Deprecated isResume()` (9/13/2018 See
+    /// TiltDisplay).
     pub fn is_resume(&self) -> bool {
         false
     }
 
-    /// Java deprecated `msgResumeChanged(boolean)`.
-    pub fn msg_resume_changed(&mut self, _resume: bool) {}
+    /// Java public final `@Deprecated msgResumeChanged(boolean)` (8/6/18
+    /// Saving tilt.com no longer effects SIRT resume - Bug# 2098, comment 10);
+    /// empty.
+    pub fn msg_resume_changed(&self, _resume: bool) {}
 
-    /// Java override `updateDisplay`; Z shift is an advanced field in this subclass.
-    pub fn update_display(&mut self) {
-        self.abstract_tilt_panel.update_display();
-        self.abstract_tilt_panel.ltf_z_shift.visible = self.abstract_tilt_panel.is_advanced();
+    /// Java protected override `updateDisplay()`.  Z shift is an advanced
+    /// field.
+    pub fn update_display(&self) {
+        self.base.update_display_super();
+        let advanced = self.base.is_advanced();
+        self.base.ltf_z_shift.set_visible(advanced);
     }
 
-    /// Java override `setAdvancedFieldDisplayer`.  `null` for the first Java
-    /// displayer is retained as `None`; the native control adapter is its direct boundary.
-    pub fn set_advanced_field_displayer(&mut self) {
-        self.abstract_tilt_panel.set_advanced_field_displayer();
+    /// Java protected override `setAdvancedFieldDisplayer()`.
+    pub fn set_advanced_field_displayer(&self) {
+        self.base.set_advanced_field_displayer_super();
+        self.base
+            .ltf_z_shift
+            .set_overridable_field_displayers(None, self.base.advanced_field_displayer.clone());
     }
 
-    /// Java override `tiltAction`.
-    pub fn tilt_action<M: TiltPanelApplicationManager>(
-        &mut self,
-        manager: &mut M,
-        process_result_display: &ProcessResultDisplay,
-        deferred_3dmod_button: &Deferred3dmodButton,
-        run_3dmod_menu_options: Run3dmodMenuOptions,
+    /// Java package-private final `popUpContextMenu(String, Component,
+    /// MouseEvent)`.
+    pub fn pop_up_context_menu(
+        &self,
+        anchor: Option<&str>,
+        root_panel: &Rc<JComponent>,
+        mouse_event: &MouseEvent,
+    ) {
+        let man_pagelabel: Vec<String> = vec!["Tilt".to_string(), "3dmod".to_string()];
+        let man_page: Vec<String> = vec!["tilt.html".to_string(), "3dmod.html".to_string()];
+        let log_file_label: Vec<String> = vec!["Tilt".to_string()];
+        let mut log_file: Vec<String> = vec![String::new(); 1];
+        log_file[0] = format!("tilt{}.log", self.base.axis_id.get_extension());
+        let manager: &'static dyn BaseManager = self.base.manager;
+        // Java `ContextPopup contextPopup = new ContextPopup(...)`; the Java
+        // constructor's IllegalArgumentException (mismatched arrays) cannot
+        // occur with these literal arrays.
+        let _context_popup = ContextPopup::new_component_mouse_event_string_string_string_array_string_array_string_array_string_array_base_manager_axis_id(
+            root_panel,
+            mouse_event,
+            anchor,
+            Some(context_popup::TOMO_GUIDE),
+            &man_pagelabel,
+            &man_page,
+            Some(&log_file_label),
+            Some(&log_file),
+            manager,
+            self.base.axis_id,
+        );
+    }
+
+    /// Java protected final override `setToolTipText()`.
+    pub fn set_tool_tip_text(&self) {
+        self.base.set_tool_tip_text();
+    }
+}
+
+impl AbstractTiltPanelVirtual for TiltPanel {
+    fn abstract_tilt_panel(&self) -> &AbstractTiltPanel {
+        &self.base
+    }
+
+    /// Java package-private final override `tiltAction(ProcessResultDisplay,
+    /// Deferred3dmodButton, Run3dmodMenuOptions, ProcessingMethod)`.
+    fn tilt_action(
+        &self,
+        process_result_display: Option<ProcessResultDisplayHandle>,
+        deferred_3dmod_button: Option<Rc<dyn Deferred3dmodButton>>,
+        run_3dmod_menu_options: Option<Run3dmodMenuOptions>,
         tilt_processing_method: ProcessingMethod,
     ) {
-        manager.tilt_action(
+        // `manager.tiltAction(processResultDisplay, null, deferred3dmodButton,
+        // run3dmodMenuOptions, this, axisID, dialogType, tiltProcessingMethod)`.
+        // The manager takes the menu options by value; Java's null (a listener
+        // action) is the empty options.
+        self.base.manager.tilt_action(
             process_result_display,
+            None,
             deferred_3dmod_button,
-            run_3dmod_menu_options,
-            self.abstract_tilt_panel.axis_id,
-            self.abstract_tilt_panel.dialog_type,
+            run_3dmod_menu_options.unwrap_or_default(),
+            Some(self as &dyn TiltDisplay),
+            self.base.axis_id,
+            self.base.dialog_type,
             tilt_processing_method,
         );
     }
 
-    /// Java override `imodTomogramAction`.
-    pub fn imod_tomogram_action<M: TiltPanelApplicationManager>(
-        &mut self,
-        manager: &mut M,
-        _deferred_3dmod_button: &Deferred3dmodButton,
-        run_3dmod_menu_options: Run3dmodMenuOptions,
+    /// Java package-private final override `imodTomogramAction(
+    /// Deferred3dmodButton, Run3dmodMenuOptions)`.
+    fn imod_tomogram_action(
+        &self,
+        _deferred_3dmod_button: Option<Rc<dyn Deferred3dmodButton>>,
+        run_3dmod_menu_options: Option<Run3dmodMenuOptions>,
     ) {
-        manager.imod_full_volume(self.abstract_tilt_panel.axis_id, run_3dmod_menu_options);
+        self.base.manager.imod_full_volume(
+            self.base.axis_id,
+            run_3dmod_menu_options.unwrap_or_default(),
+        );
     }
 
-    /// Java `popUpContextMenu(String, Component, MouseEvent)`.
-    pub fn pop_up_context_menu(&mut self, anchor: impl Into<String>, mouse_event: MouseEvent) {
-        self.last_context_popup = Some(TiltContextPopup {
-            anchor: anchor.into(),
-            mouse_event,
-            guide: TOMO_GUIDE,
-            man_page_label: ["Tilt".into(), "3dmod".into()],
-            man_page: ["tilt.html".into(), "3dmod.html".into()],
-            log_file_label: ["Tilt".into()],
-            log_file: [format!(
-                "tilt{}.log",
-                self.abstract_tilt_panel.axis_id.get_extension()
-            )],
-            axis_id: self.abstract_tilt_panel.axis_id,
-        });
+    /// Java protected override `updateDisplay()`.
+    fn update_display(&self) {
+        TiltPanel::update_display(self);
     }
 
-    /// Java override `setToolTipText`.
-    pub fn set_tool_tip_text(&mut self) {
-        self.root_tooltip_set = true;
+    /// Java protected override `setAdvancedFieldDisplayer()`.
+    fn set_advanced_field_displayer(&self) {
+        TiltPanel::set_advanced_field_displayer(self);
     }
 }
 
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[derive(Default)]
-    struct Manager {
-        tilt: Option<(AxisID, DialogType, ProcessingMethod)>,
-        imod: Option<AxisID>,
-    }
-    impl TiltPanelApplicationManager for Manager {
-        fn tilt_action(
-            &mut self,
-            _display: &ProcessResultDisplay,
-            _button: &Deferred3dmodButton,
-            _options: Run3dmodMenuOptions,
-            axis_id: AxisID,
-            dialog_type: DialogType,
-            method: ProcessingMethod,
-        ) {
-            self.tilt = Some((axis_id, dialog_type, method));
-        }
-        fn imod_full_volume(&mut self, axis_id: AxisID, _options: Run3dmodMenuOptions) {
-            self.imod = Some(axis_id);
-        }
+impl Expandable for TiltPanel {
+    /// Java inherited public final `expand(ExpandButton)`.
+    fn expand_expand_button(&self, button: &Rc<ExpandButton>) {
+        self.base.expand_expand_button(button);
     }
 
-    #[test]
-    fn get_instance_follows_source_creation_order() {
-        let panel = TiltPanel::get_instance(AxisID::First, DialogType::TomogramGeneration);
-        assert!(panel.pnl_tilt_panel_root.abstract_root_added);
-        assert!(panel.pnl_tilt_panel_root.y_space_before_abstract_root);
-        assert!(panel.root_tooltip_set);
-        assert_eq!(panel.abstract_tilt_panel.btn_tilt.listener_count, 1);
+    /// Java inherited public final `expand(GlobalExpandButton)`.
+    fn expand_global_expand_button(&self, button: &Rc<GlobalExpandButton>) {
+        self.base.expand_global_expand_button(button);
+    }
+}
+
+impl RadialParent for TiltPanel {
+    /// Java inherited public final `isMultifilt()`.
+    fn is_multifilt(&self) -> bool {
+        self.base.is_multifilt()
     }
 
-    #[test]
-    fn subclass_z_shift_and_context_popup_follow_source() {
-        let mut panel = TiltPanel::get_instance(AxisID::Second, DialogType::TomogramGeneration);
-        panel.abstract_tilt_panel.header_advanced = false;
-        panel.update_display();
-        assert!(!panel.abstract_tilt_panel.ltf_z_shift.visible);
-        panel.pop_up_context_menu("tilt", MouseEvent::default());
-        assert_eq!(
-            panel.last_context_popup.unwrap().log_file,
-            ["tiltb.log".to_string()]
-        );
+    /// Java inherited public final `isCtf3d()`.
+    fn is_ctf3d(&self) -> bool {
+        self.base.is_ctf3d()
     }
 
-    #[test]
-    fn manager_actions_keep_the_java_arguments() {
-        let mut panel = TiltPanel::get_instance(AxisID::Only, DialogType::TomogramGeneration);
-        let mut manager = Manager::default();
-        panel.tilt_action(
-            &mut manager,
-            &ProcessResultDisplay,
-            &Deferred3dmodButton,
-            Run3dmodMenuOptions::default(),
-            ProcessingMethod::LocalCpu,
-        );
-        panel.imod_tomogram_action(
-            &mut manager,
-            &Deferred3dmodButton,
-            Run3dmodMenuOptions::default(),
-        );
-        assert_eq!(manager.tilt.unwrap().2, ProcessingMethod::LocalCpu);
-        assert_eq!(manager.imod, Some(AxisID::Only));
+    /// Java inherited `isAdvanced()`.
+    fn is_advanced(&self) -> bool {
+        self.base.is_advanced()
+    }
+}
+
+impl TrialTiltParent for TiltPanel {
+    /// Java inherited `getParameters(TiltParam, boolean)`.
+    fn get_parameters_tilt_param_boolean(
+        &self,
+        tilt_param: &mut TiltParam,
+        do_validation: bool,
+    ) -> Result<bool, TiltDisplayException> {
+        self.base
+            .get_parameters_tilt_param_boolean(tilt_param, do_validation)
+    }
+
+    /// Java inherited `getParameters(SplittiltParam, boolean)`.
+    fn get_parameters_splittilt_param_boolean(
+        &self,
+        param: &mut SplittiltParam,
+        do_validation: bool,
+    ) -> bool {
+        self.base
+            .get_parameters_splittilt_param_boolean(param, do_validation)
+    }
+
+    /// Java inherited `getProcessingMethod()`.
+    fn get_processing_method(&self) -> ProcessingMethod {
+        self.base.get_processing_method()
+    }
+}
+
+impl Run3dmodButtonContainer for TiltPanel {
+    /// Java inherited public final `action(String, Deferred3dmodButton,
+    /// Run3dmodMenuOptions)`.
+    fn action(
+        &self,
+        action_command: &str,
+        deferred_3dmod_button: Option<Rc<dyn Deferred3dmodButton>>,
+        run_3dmod_menu_options: Option<Run3dmodMenuOptions>,
+    ) {
+        self.base
+            .action_string_deferred_3dmod_button_run_3dmod_menu_options(
+                action_command,
+                deferred_3dmod_button,
+                run_3dmod_menu_options,
+            );
+    }
+}
+
+impl ProcessDisplay for TiltPanel {
+    fn as_tilt_display(&self) -> Option<&dyn super::tilt_display::TiltDisplay> {
+        Some(self)
+    }
+}
+
+impl TiltDisplay for TiltPanel {
+    /// Java inherited `getParameters(TiltParam, boolean)`.
+    fn get_parameters(
+        &self,
+        param: &mut TiltParam,
+        do_validation: bool,
+    ) -> Result<bool, TiltDisplayException> {
+        self.base
+            .get_parameters_tilt_param_boolean(param, do_validation)
+    }
+
+    /// Java inherited `getParameters(SplittiltParam, boolean)`.
+    fn get_parameters_splittilt(&self, param: &mut SplittiltParam, do_validation: bool) -> bool {
+        self.base
+            .get_parameters_splittilt_param_boolean(param, do_validation)
+    }
+
+    /// Java public final override `@Deprecated allowTiltComSave()`.
+    fn allow_tilt_com_save(&self) -> bool {
+        TiltPanel::allow_tilt_com_save(self)
+    }
+
+    /// Java inherited `setDebug(boolean)`.
+    fn set_debug(&self, debug: bool) {
+        self.base.set_debug(debug);
     }
 }

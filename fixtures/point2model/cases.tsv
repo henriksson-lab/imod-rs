@@ -1,0 +1,28 @@
+afs	-values -1 -sphere 11 afs.xyzpt o.mod
+plain	c3.txt o.mod
+open	-open -number 4 c3.txt o.mod
+scat	-scat -circle 5 -symbol 4 c3.txt o.mod
+planar	-planar -zero c3.txt o.mod
+c5full	-width 3 -thick 2 -color 255,0,0 -color 0,128,255 -name first -name second c5.txt o.mod
+comma	comma.txt o.mod
+labels	-labels 6 -font 14 lab.txt o.mod
+times	-times t.txt o.mod
+sizes	-sizes -values 1 -default -sphere 11 szv.txt o.mod
+vals	-values 1 -flags 3 szv.txt o.mod
+skip	-skip 2 -zcoord skip.txt o.mod
+nonl	nonl.txt o.mod
+image	-image img.mrc c3.txt o.mod
+pixel	-pixel 2,3,4 -origin 10,20,30 -modpix 1.5 -zscale 2 c3.txt o.mod
+volume	-volume 400,500,60 c3.txt o.mod
+objonly	-object -planar c5.txt o.mod
+#full	c5	c5.txt o.mod
+err_noin	-
+err_nofile	missing.txt o.mod
+err_openscat	-open -scat c3.txt o.mod
+err_number	-number 3 c5.txt o.mod
+err_short	one.txt o.mod
+err_count	bad.txt o.mod
+err_obj	badobj.txt o.mod
+err_imgpix	-image img.mrc -pixel 1,1,1 c3.txt o.mod
+#full	err_planar	-planar c5.txt o.mod
+#full	err_neg	-number -2 c3.txt o.mod

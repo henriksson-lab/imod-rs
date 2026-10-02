@@ -94,7 +94,11 @@ const MONTHS: [&[u8; 3]; 12] = [
 /// `mrcfiles.c`'s `mrc_head_label` formats it (`" %d-%b-%y  %H:%M:%S"`).
 fn is_label_stamp(w: &[u8]) -> bool {
     let d = |k: usize| w[k].is_ascii_digit();
-    d(0) && d(1)
+    // The day and hour are `%2d`-style: days 1-9 print as ` 1-Oct-26`, so a
+    // leading blank is part of the stamp (the tests failed on every 1st-9th
+    // of a month until this accepted it).
+    let d_or_blank = |k: usize| w[k].is_ascii_digit() || w[k] == b' ';
+    d_or_blank(0) && d(1)
         && w[2] == b'-'
         && MONTHS.iter().any(|m| &w[3..6] == &m[..])
         && w[6] == b'-'
@@ -102,7 +106,7 @@ fn is_label_stamp(w: &[u8]) -> bool {
         && d(8)
         && w[9] == b' '
         && w[10] == b' '
-        && d(11)
+        && d_or_blank(11)
         && d(12)
         && w[13] == b':'
         && d(14)

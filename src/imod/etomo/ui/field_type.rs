@@ -7,6 +7,7 @@
 //! than stored.
 #![allow(dead_code)]
 
+use crate::imod::etomo::storage::directive_value_type::DirectiveValueType;
 use crate::imod::etomo::r#type::const_etomo_number::Type;
 use crate::imod::etomo::r#type::validation_type::ValidationType;
 
@@ -137,11 +138,34 @@ impl FieldType {
     }
 
     /// Java `getInstance(DirectiveValueType)`.
-    pub fn get_instance(value_type: Option<std::convert::Infallible>) -> Option<FieldType> {
-        // TODO(unit): needs etomo/storage/DirectiveValueType.java - the parameter's
-        // declared type; the body is a chain of identity tests against its ten
-        // singletons.
-        let _ = value_type;
+    pub fn get_instance(value_type: Option<DirectiveValueType>) -> Option<FieldType> {
+        if value_type == Some(DirectiveValueType::Boolean) {
+            return None;
+        }
+        if value_type == Some(DirectiveValueType::FloatingPoint) {
+            return Some(FieldType::FloatingPoint);
+        }
+        if value_type == Some(DirectiveValueType::FloatingPointPair) {
+            return Some(FieldType::FloatingPointPair);
+        }
+        if value_type == Some(DirectiveValueType::Integer) {
+            return Some(FieldType::Integer);
+        }
+        if value_type == Some(DirectiveValueType::IntegerPair) {
+            return Some(FieldType::IntegerPair);
+        }
+        if value_type == Some(DirectiveValueType::List) {
+            return Some(FieldType::IntegerList);
+        }
+        if value_type == Some(DirectiveValueType::String) {
+            return Some(FieldType::String);
+        }
+        if value_type == Some(DirectiveValueType::Unknown) {
+            return Some(FieldType::String);
+        }
+        if value_type == Some(DirectiveValueType::File) {
+            return Some(FieldType::File);
+        }
         None
     }
 

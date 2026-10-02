@@ -218,6 +218,31 @@ impl LogFile {
         LogFile::get_instance_stress_test(Some(&dir.join(file_name)), false, emergency_monitor)
     }
 
+    /// Java `getInstance(BaseManager, AxisID, FileType, EmergencyMonitor)`
+    /// (LogFile.java:216).
+    ///
+    /// Fixed in translation (BUGS.md): Java's `if (monitor == null && manager !=
+    /// null) ... else monitor = new EmergencyMonitor(...)` discards a monitor the
+    /// caller passed in.  A passed monitor is now kept; a new one is made only when
+    /// there is neither a monitor nor a manager.
+    pub fn get_instance_manager_file_type(
+        manager: Option<&'static dyn crate::imod::etomo::base_manager::BaseManager>,
+        axis_id: Option<AxisID>,
+        file_type: &crate::imod::etomo::r#type::file_type::FileType,
+        emergency_monitor: Option<Arc<EmergencyMonitor>>,
+    ) -> Result<Arc<Handle>, LogFileError> {
+        let emergency_monitor = match (emergency_monitor, manager) {
+            (Some(emergency_monitor), _) => emergency_monitor,
+            (None, Some(manager)) => manager.get_emergency_monitor(axis_id),
+            (None, None) => Arc::new(EmergencyMonitor::new(manager, axis_id)),
+        };
+        LogFile::get_instance_stress_test(
+            file_type.get_file(manager, axis_id).as_deref(),
+            false,
+            Some(emergency_monitor),
+        )
+    }
+
     /// Java `getInstance(File, EmergencyMonitor)`.
     pub fn get_instance_file(
         file: Option<&std::path::Path>,
@@ -1567,22 +1592,15 @@ impl LogFile {
                 Some(self),
             )));
         }
-        // `properties.load(inputStream)`: ISO-8859-1 lines, `#` and `!` comments, and a
-        // `=`, `:` or whitespace separator, as etomo/storage/parameter_store.rs reads
-        // them.
-        let mut input = String::new();
-        input_stream.as_mut().unwrap().read_to_string(&mut input)?;
-        for line in input.lines() {
-            let line = line.trim_start();
-            if line.starts_with('#') || line.starts_with('!') || line.is_empty() {
-                continue;
-            }
-            if let Some((key, value)) = line.split_once('=') {
-                properties.insert(key.trim().to_owned(), value.trim().to_owned());
-            } else if let Some((key, value)) = line.split_once(':') {
-                properties.insert(key.trim().to_owned(), value.trim().to_owned());
-            }
-        }
+        // `properties.load(inputStream)`.
+        let mut input = Vec::new();
+        input_stream.as_mut().unwrap().read_to_end(&mut input)?;
+        utilities::java_util_properties_load(&input, properties).map_err(|message| {
+            LogFileError::Io(std::io::Error::new(
+                std::io::ErrorKind::InvalidData,
+                format!("java.lang.IllegalArgumentException: {}", message),
+            ))
+        })?;
         Ok(())
     }
 
@@ -1606,20 +1624,8 @@ impl LogFile {
         // storage type to the C time API.
         let date =
             utilities::java_util_date_to_string(utilities::java_lang_system_current_time_millis());
-        let mut output = String::new();
-        output.push('#');
-        output.push_str(&date);
-        output.push('\n');
-        for (key, value) in properties {
-            output.push_str(key);
-            output.push('=');
-            output.push_str(value);
-            output.push('\n');
-        }
-        output_stream
-            .as_mut()
-            .unwrap()
-            .write_all(output.as_bytes())?;
+        let output = utilities::java_util_properties_store(properties, &date);
+        output_stream.as_mut().unwrap().write_all(&output)?;
         Ok(())
     }
 

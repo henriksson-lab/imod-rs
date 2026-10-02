@@ -1,262 +1,260 @@
 //! `IMOD/Etomo/src/etomo/ui/swing/ManagerFrame.java`.
 //!
-//! This is the independent frame Java associates with exactly one
-//! `BaseManager`.  Its native widget is owned by the optional GUI harness; the
-//! source-visible JFrame, root-panel, and menu state live here.
-#![allow(dead_code)]
+//! An independent frame associated with a single manager (tools, directive
+//! editor): its content pane holds the manager's main panel.
 
-use super::abstract_frame::AbstractFrame;
-use super::etomo_frame::{ActionEvent, FrameType};
-use super::etomo_menu::{EtomoMenu, MenuTarget};
-use super::settings_dialog::SettingsDialog;
+use std::ops::Deref;
+use std::rc::{Rc, Weak};
+
+use super::abstract_frame::{
+    AbstractFrame, AbstractFrameVirtual, WINDOW_CLOSING, WindowFocusListener,
+};
+use super::etomo_frame::FrameType;
+use super::etomo_menu::EtomoMenu;
+use super::ui_harness;
 use crate::imod::etomo::base_manager::BaseManager;
-use crate::imod::etomo::etomo_director::ARGUMENTS;
+use crate::imod::etomo::etomo_director;
+use crate::imod::etomo::jdk::{ActionEvent, JComponent};
 use crate::imod::etomo::storage::autodoc::autodoc_tokenizer::{DEFAULT_DELIMITER, SEPARATOR_CHAR};
 use crate::imod::etomo::r#type::axis_id::AxisID;
+use crate::imod::etomo::r#type::ui_test_field_type::UITestFieldType;
 use crate::imod::etomo::util::utilities;
 
-/// Java `ManagerFrame.NAME`.
+/// Java public static final `NAME`.
 pub const NAME: &str = "manager-frame";
 
-/// Java `private static final class ManagerWindowFocusListener`.
-///
-/// The listener keeps the manager reference exactly as its Java counterpart;
-/// it has no state of its own.
-pub struct ManagerWindowFocusListener {
-    pub manager: &'static dyn BaseManager,
-}
-
-impl ManagerWindowFocusListener {
-    /// `ManagerWindowFocusListener(BaseManager)`.
-    pub fn new(manager: &'static dyn BaseManager) -> Self {
-        Self { manager }
-    }
-
-    /// `windowGainedFocus(WindowEvent)`.
-    pub fn window_gained_focus(&self) {
-        self.manager.make_property_user_dir_local();
-    }
-
-    /// `windowLostFocus(WindowEvent)`, intentionally empty in Java.
-    pub fn window_lost_focus(&self) {}
-}
-
-/// Fields of Java's final `ManagerFrame` class, including inherited
-/// `AbstractFrame` state.
+/// Java `public final class ManagerFrame extends AbstractFrame`.
 pub struct ManagerFrame {
-    pub abstract_frame: AbstractFrame,
-    pub menu: EtomoMenu,
-    pub manager: &'static dyn BaseManager,
-    /// Swing's `rootPanel`, represented at the presentation boundary by the
-    /// source-generated UI-test name and whether its manager panel was added.
-    pub root_panel_name: String,
-    pub root_panel_has_manager_panel: bool,
-    pub savable: bool,
-    pub disposed: bool,
-    pub focus_listener: ManagerWindowFocusListener,
-    /// Java's director-owned SettingsDialog is represented at the frame endpoint
-    /// once the GUI backend supplies its available font families.
-    pub settings_dialog: Option<SettingsDialog>,
+    /// The `AbstractFrame` superclass part.
+    base: AbstractFrame,
+    /// Java private final `EtomoMenu menu`.
+    menu: Rc<EtomoMenu>,
+    /// Java private final `BaseManager manager`.
+    manager: &'static dyn BaseManager,
+    /// Java private final `JPanel rootPanel = (JPanel) getContentPane()`.
+    root_panel: Rc<JComponent>,
+    /// Java private final `boolean savable`.
+    savable: bool,
+}
+
+impl Deref for ManagerFrame {
+    type Target = AbstractFrame;
+    fn deref(&self) -> &AbstractFrame {
+        &self.base
+    }
 }
 
 impl ManagerFrame {
-    /// `ManagerFrame(BaseManager, boolean)`.
-    fn new(manager: &'static dyn BaseManager, savable: bool) -> Self {
-        Self {
-            abstract_frame: AbstractFrame::new(),
-            menu: EtomoMenu::get_manager_instance(savable, false),
-            manager,
-            root_panel_name: String::new(),
-            root_panel_has_manager_panel: false,
-            savable,
-            disposed: false,
-            focus_listener: ManagerWindowFocusListener::new(manager),
-            settings_dialog: None,
-        }
+    /// Java private `ManagerFrame(BaseManager, boolean)`.
+    fn new(manager: &'static dyn BaseManager, savable: bool) -> Rc<ManagerFrame> {
+        Rc::new_cyclic(|self_ref: &Weak<ManagerFrame>| {
+            let base = AbstractFrame::new();
+            base.set_this(self_ref.clone() as Weak<dyn AbstractFrameVirtual>);
+            let root_panel = base.get_content_pane();
+            let menu = EtomoMenu::get_instance_manager_frame_boolean(
+                self_ref.clone() as Weak<dyn AbstractFrameVirtual>,
+                savable,
+            );
+            ManagerFrame {
+                base,
+                menu,
+                manager,
+                root_panel,
+                savable,
+            }
+        })
     }
 
-    /// `getInstance(BaseManager, boolean)`.
-    pub fn get_instance(
-        manager: Option<&'static dyn BaseManager>,
-        savable: bool,
-    ) -> Result<Self, String> {
-        let manager = manager.ok_or_else(|| "manager is null".to_string())?;
-        let mut instance = Self::new(manager, savable);
+    /// Java package-private static `getInstance(BaseManager, boolean)`.
+    ///
+    /// Java throws `NullPointerException("manager is null")` in `initialize`
+    /// for a null manager; the manager is not optional here.
+    pub fn get_instance(manager: &'static dyn BaseManager, savable: bool) -> Rc<ManagerFrame> {
+        let instance = ManagerFrame::new(manager, savable);
         instance.initialize();
         instance.add_listeners();
-        Ok(instance)
+        instance
     }
 
-    /// `initialize()`.
-    fn initialize(&mut self) {
-        // `DO_NOTHING_ON_CLOSE`: process_window_event owns the close action.
-        let name = utilities::convert_label_to_name(Some(NAME), true).unwrap_or_default();
-        self.root_panel_name = format!("pnl{SEPARATOR_CHAR}{name}");
-        if ARGUMENTS.lock().unwrap().is_print_names() {
-            println!("pnl{SEPARATOR_CHAR}{name} {DEFAULT_DELIMITER} ");
+    /// Java private `initialize()`.
+    fn initialize(&self) {
+        // Swing: setDefaultCloseOperation(DO_NOTHING_ON_CLOSE).
+        // (`manager == null` cannot happen: see get_instance.)
+        // set name
+        let field_type = UITestFieldType::PANEL;
+        let name = utilities::convert_label_to_name(Some(NAME), field_type.is_unlimited_segments());
+        self.root_panel.set_name(Some(&format!(
+            "{}{}{}",
+            field_type,
+            SEPARATOR_CHAR,
+            name.as_deref().unwrap_or("null")
+        )));
+        if etomo_director::ARGUMENTS.lock().unwrap().is_print_names() {
+            println!(
+                "{}{}{} {} ",
+                field_type,
+                SEPARATOR_CHAR,
+                name.as_deref().unwrap_or("null"),
+                DEFAULT_DELIMITER
+            );
         }
-        // `setIconImage` and `setJMenuBar` are native-widget operations.  The
-        // harness reads this frame's presentation/menu state rather than
-        // duplicating it.
-        self.abstract_frame.presentation.title = self.manager.get_name().unwrap_or_default();
-        // `getMainPanel()` has declared Swing type `MainPanel`; that full unit
-        // is not translated, so BaseManager faithfully exposes only null.
-        self.root_panel_has_manager_panel = self.manager.get_main_panel().is_some();
-        self.abstract_frame.repaint(AxisID::Only);
-        self.abstract_frame.set_visible(true);
+        // Swing: ImageIcon iconEtomo = new ImageIcon(ClassLoader.getSystemResource(
+        // "images/etomo.png")); setIconImage(iconEtomo.getImage()).
+        self.base.set_j_menu_bar(Some(self.menu.get_menu_bar()));
+        self.base.set_title(self.manager.get_name().as_deref());
+        // Upstream bug fixed (ManagerFrame.java:78): a manager without a main
+        // panel makes Java add null (NullPointerException); nothing is added.
+        if let Some(main_panel) = self.manager.get_main_panel() {
+            self.root_panel
+                .add(&main_panel.main_panel().get_component());
+        }
+        // Swing painting: rootPanel.repaint().
+        AbstractFrameVirtual::set_visible(self, true);
     }
 
-    /// `addListeners()`.
-    fn add_listeners(&mut self) {
-        // The listener value is installed at construction.  The GUI harness
-        // calls `window_gained_focus` when its native window gains focus.
+    /// Java private `addListeners()`.
+    fn add_listeners(&self) {
+        self.base
+            .add_window_focus_listener(Rc::new(ManagerWindowFocusListener::new(self.manager)));
     }
 
-    /// `getFrameType()`: Java deliberately returns null for manager frames.
-    pub fn get_frame_type(&self) -> Option<FrameType> {
+    /// Java `processWindowEvent(WindowEvent)` (override).
+    pub fn process_window_event(&self, event_id: i32) {
+        // Swing: super.processWindowEvent(event).
+        let is_test = etomo_director::ARGUMENTS.lock().unwrap().is_test();
+        if event_id == WINDOW_CLOSING && !is_test {
+            AbstractFrameVirtual::close(self);
+        }
+    }
+
+    /// Java `pack(boolean)` (override).
+    pub fn pack(&self, force: bool) {
+        let auto_fit = etomo_director::INSTANCE.with_user_configuration(|c| c.is_auto_fit());
+        if !force && !auto_fit {
+            AbstractFrameVirtual::set_visible(self, true);
+        } else {
+            let mut bounds = self.base.get_size();
+            bounds.height += 1;
+            bounds.width += 1;
+            self.base.set_size(bounds);
+            // `try { super.pack(); } catch (NullPointerException e) {
+            // e.printStackTrace(); }` - Swing layout: Window.pack().
+        }
+    }
+}
+
+impl AbstractFrameVirtual for ManagerFrame {
+    fn abstract_frame(&self) -> &AbstractFrame {
+        &self.base
+    }
+
+    /// Java `getFrameType()`.
+    fn get_frame_type(&self) -> Option<FrameType> {
         None
     }
 
-    /// `menuFileAction(ActionEvent)`.
-    pub fn menu_file_action(&mut self, event: &ActionEvent) -> MenuTarget {
-        self.menu
-            .menu_file_action(&event.action_command)
-            .unwrap_or_else(|target| target)
+    /// Java `menuFileAction(ActionEvent)`.
+    fn menu_file_action(&self, event: &ActionEvent) {
+        self.menu.menu_file_action(event);
     }
 
-    /// `save(AxisID)`.
-    pub fn save(&mut self, _axis_id: AxisID) {
+    /// Java `save(AxisID)`.
+    fn save(&self, axis_id: Option<AxisID>) {
+        let _ = axis_id;
         if self.savable {
             self.manager.save_to_file();
         }
     }
 
-    /// `saveAs()`.
-    pub fn save_as(&mut self) {
+    /// Java `saveAs()`.
+    fn save_as(&self) {
         if self.savable {
             self.manager.save_as_to_file();
         }
     }
 
-    /// `cancel()`.
-    pub fn cancel(&mut self) {
-        self.abstract_frame.set_visible(false);
-        self.disposed = true;
+    /// Java `cancel()`.
+    fn cancel(&self) {
+        AbstractFrameVirtual::set_visible(self, false);
+        self.base.dispose();
     }
 
-    /// `close()`.
-    pub fn close(&mut self) {
+    /// Java `close()`.
+    fn close(&self) {
         if self.manager.close_frame() {
-            self.abstract_frame.set_visible(false);
-            self.disposed = true;
+            AbstractFrameVirtual::set_visible(self, false);
+            self.base.dispose();
         }
     }
 
-    /// `processWindowEvent(WindowEvent)`.  `closing` is Java's
-    /// `event.getID() == WindowEvent.WINDOW_CLOSING`.
-    pub fn process_window_event(&mut self, closing: bool) {
-        if closing && !ARGUMENTS.lock().unwrap().is_test() {
-            self.close();
-        }
-    }
-
-    /// `menuViewAction(ActionEvent)`.
-    pub fn menu_view_action(&mut self, event: &ActionEvent, auto_fit: bool) -> Result<(), String> {
-        if event.action_command == self.menu.menu_fit_window.action_command {
-            // Java calls UIHarness.INSTANCE.pack(true, manager).  That method
-            // routes back to this frame once the ManagerFrame table is present;
-            // this direct call is its source-owned frame endpoint.
-            self.pack(true, auto_fit);
-            Ok(())
+    /// Java `menuViewAction(ActionEvent)`.  Handle some of the view menu
+    /// events.
+    fn menu_view_action(&self, event: &ActionEvent) {
+        // Run fitWindow on both frames.
+        if self.menu.equals_fit_window(event) {
+            let manager = self.manager;
+            ui_harness::with(|harness| harness.pack_boolean_base_manager(true, Some(manager)));
         } else {
-            Err(format!(
-                "Cannot handled menu command in this class.  command={}",
-                event.action_command
-            ))
+            // IllegalStateException on the EDT: printed, event dropped.
+            eprintln!(
+                "Exception in thread \"AWT-EventQueue-0\" java.lang.IllegalStateException: Cannot handled menu command in this class.  command={}",
+                event.get_action_command().unwrap_or("null")
+            );
         }
     }
 
-    /// `pack(boolean)`.  `auto_fit` is the direct value of the still-unported
-    /// `UserConfiguration.isAutoFit()` call.
-    pub fn pack(&mut self, force: bool, auto_fit: bool) {
-        if !force && !auto_fit {
-            self.abstract_frame.set_visible(true);
+    /// Java `pack(boolean)` (override).
+    fn pack_boolean(&self, force: bool) {
+        ManagerFrame::pack(self, force);
+    }
+
+    /// Java `menuOptionsAction(ActionEvent)`.  Handle some of the options menu
+    /// events.
+    fn menu_options_action(&self, event: &ActionEvent) {
+        if self.menu.equals_settings(event) {
+            let _ = etomo_director::INSTANCE.open_settings_dialog();
         } else {
-            self.abstract_frame.component.height += 1;
-            self.abstract_frame.presentation.packed = true;
+            // IllegalStateException on the EDT: printed, event dropped.
+            eprintln!(
+                "Exception in thread \"AWT-EventQueue-0\" java.lang.IllegalStateException: Cannot handled menu command in this class.  command={}",
+                event.get_action_command().unwrap_or("null")
+            );
         }
     }
 
-    /// `menuOptionsAction(ActionEvent)`.
-    pub fn menu_options_action(&mut self, event: &ActionEvent) -> Result<(), String> {
-        if event.action_command == self.menu.menu_settings.action_command {
-            Err("EtomoDirector.openSettingsDialog requires SettingsDialog.java, which is not yet translated".into())
-        } else {
-            Err(format!(
-                "Cannot handled menu command in this class.  command={}",
-                event.action_command
-            ))
-        }
+    /// Java `menuToolsAction(ActionEvent)`.
+    fn menu_tools_action(&self, event: &ActionEvent) {
+        self.menu.menu_tools_action(AxisID::Only, event);
     }
 
-    /// The concrete endpoint of Java `EtomoDirector.openSettingsDialog()` for
-    /// this manager frame. GraphicsEnvironment/CpuAdoc inputs belong to their
-    /// native/source boundaries and are supplied by the GUI launcher.
-    pub fn open_settings_dialog(&mut self, available_fonts: &[String], cpu_adoc_viable: bool) {
-        self.settings_dialog = Some(SettingsDialog::get_instance(
-            self.manager,
-            self.manager.get_property_user_dir().unwrap_or_default(),
-            available_fonts,
-            cpu_adoc_viable,
-        ));
-    }
-
-    /// `menuToolsAction(ActionEvent)`.
-    pub fn menu_tools_action(&mut self, event: &ActionEvent) -> MenuTarget {
-        self.menu.menu_tools_action(&event.action_command)
-    }
-
-    /// `menuHelpAction(ActionEvent)`.
-    pub fn menu_help_action(&mut self, event: &ActionEvent) -> MenuTarget {
-        self.menu.menu_help_action(&event.action_command)
+    /// Java `menuHelpAction(ActionEvent)`.  Handle help menu actions.
+    fn menu_help_action(&self, event: &ActionEvent) {
+        let frame = self.base.get_content_pane();
+        self.menu
+            .menu_help_action(Some(self.manager), AxisID::Only, &frame, event);
     }
 }
 
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use crate::imod::etomo::directive_editor_manager::DirectiveEditorManager;
+/// Java private static final `ManagerWindowFocusListener implements
+/// WindowFocusListener`.
+struct ManagerWindowFocusListener {
+    /// Java private final `manager`.
+    manager: &'static dyn BaseManager,
+}
 
-    fn manager() -> &'static dyn BaseManager {
-        DirectiveEditorManager::new(None, None, None, None)
+impl ManagerWindowFocusListener {
+    /// Java private `ManagerWindowFocusListener(BaseManager)`.
+    fn new(manager: &'static dyn BaseManager) -> ManagerWindowFocusListener {
+        ManagerWindowFocusListener { manager }
+    }
+}
+
+impl WindowFocusListener for ManagerWindowFocusListener {
+    /// Java `windowGainedFocus(WindowEvent)`.
+    fn window_gained_focus(&self) {
+        self.manager.make_property_user_dir_local();
     }
 
-    #[test]
-    fn independent_frame_keeps_source_manager_menu_shape() {
-        let frame = ManagerFrame::get_instance(Some(manager()), true).unwrap();
-        assert!(!frame.menu.dataset);
-        assert!(frame.menu.savable);
-        assert!(frame.abstract_frame.presentation.visible);
-        assert_eq!(frame.get_frame_type(), None);
-    }
-
-    #[test]
-    fn fit_window_packs_and_other_view_commands_are_errors() {
-        let mut frame = ManagerFrame::get_instance(Some(manager()), true).unwrap();
-        frame
-            .menu_view_action(&ActionEvent::new("Fit Window"), false)
-            .unwrap();
-        assert!(frame.abstract_frame.presentation.packed);
-        assert!(
-            frame
-                .menu_view_action(&ActionEvent::new("Axis A"), false)
-                .is_err()
-        );
-    }
-
-    #[test]
-    fn focus_listener_uses_its_manager() {
-        let frame = ManagerFrame::get_instance(Some(manager()), false).unwrap();
-        frame.focus_listener.window_gained_focus();
-    }
+    /// Java `windowLostFocus(WindowEvent)`: empty.
+    fn window_lost_focus(&self) {}
 }

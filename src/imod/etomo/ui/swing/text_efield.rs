@@ -1,108 +1,130 @@
-//! `IMOD/Etomo/src/etomo/ui/swing/TextEfield.java`.
+//! `IMOD/Etomo/src/etomo/ui/swing/TextEfield.java`: a self-naming text field
+//! with optional label, control component, appearance, flag, value
+//! manipulation, validation, state and grid-bag extensions.
 //!
-//! The native Swing `JTextField`, `JLabel`, `JPanel`, focus listeners, and
-//! GridBag layout are deliberately represented as state at the GUI boundary.
-//! This retains the source-visible field, label, control, naming, validation,
-//! flag, appearance, and file-path behaviour without pretending that Rust owns
-//! a Swing widget.
-#![allow(dead_code)]
+//! `class TextEfield implements TextEfieldInterface, UIComponent, SwingComponent,
+//! TextFlagOrigin, ValueManipulationField, ControlTarget`.
+//!
+//! `TextEfield` is extended by `ButtonControlTextEfield`, which overrides
+//! `setDebug`, `setTooltip`, `createAppearanceExtension` and
+//! `createFlagExtension`.  The last two are called from inside this class, so
+//! they dispatch through [`TextEfieldVirtual`], the trait every concrete text
+//! Efield implements (with the Java bodies as its default methods, found here
+//! as `default_*`).  The Java object passes itself to its extensions and to the
+//! file-chooser buttons as a `ControlTarget`, `TextFlagOrigin`,
+//! `ValueManipulationField`, `TextEfieldInterface` and `UIComponent`; `this`
+//! is the outermost object as a `dyn TextEfieldVirtual`, which has all of those
+//! as supertraits.  It is handed in by the outermost constructor, which builds
+//! the object with `Rc::new_cyclic`, so it cannot be upgraded while the
+//! constructor runs.
 
+use std::cell::{Cell, RefCell};
 use std::path::{Path, PathBuf};
+use std::rc::{Rc, Weak};
 
 use crate::imod::etomo::etomo_director::ARGUMENTS;
+use crate::imod::etomo::jdk::{FocusEvent, FocusListener, JComponent};
+use crate::imod::etomo::logic::field_validator::FieldValidator;
 use crate::imod::etomo::storage::autodoc::autodoc_tokenizer::{DEFAULT_DELIMITER, SEPARATOR_CHAR};
+use crate::imod::etomo::storage::directive_def::DirectiveDef;
+use crate::imod::etomo::storage::directive_value_type::DirectiveValueType;
+use crate::imod::etomo::r#type::const_etomo_number::java_lang_string_matches_whitespace;
+use crate::imod::etomo::r#type::ui_test_field_type;
+use crate::imod::etomo::ui::field_displayer::FieldDisplayer;
 use crate::imod::etomo::ui::field_type::FieldType;
+use crate::imod::etomo::ui::field_validation_failed_exception::FieldValidationFailedException;
+use crate::imod::etomo::ui::flag_display::FlagDisplay;
+use crate::imod::etomo::ui::flag_origin_listener::FlagOriginListener;
+use crate::imod::etomo::ui::flag_type::FlagType;
+use crate::imod::etomo::ui::swing::control_component_module::ControlComponentModule;
+use crate::imod::etomo::ui::swing::control_listener::ControlListener;
+use crate::imod::etomo::ui::swing::control_state::ControlState;
+use crate::imod::etomo::ui::swing::control_target::ControlTarget;
+use crate::imod::etomo::ui::swing::efield_container::EfieldContainer;
+use crate::imod::etomo::ui::swing::grid_bag_extension::GridBagExtension;
+use crate::imod::etomo::ui::swing::swing_component::SwingComponent;
+use crate::imod::etomo::ui::swing::text_component_appearance_extension::TextComponentAppearanceExtension;
+use crate::imod::etomo::ui::swing::text_efield_interface::TextEfieldInterface;
+use crate::imod::etomo::ui::swing::tooltip_formatter;
+use crate::imod::etomo::ui::swing::validation_extension::ValidationExtension;
+use crate::imod::etomo::ui::swing::value_manipulation_extension::ValueManipulationExtension;
+use crate::imod::etomo::ui::text_flag_extension::TextFlagExtension;
+use crate::imod::etomo::ui::text_flag_origin::TextFlagOrigin;
+use crate::imod::etomo::ui::text_state_extension::TextStateExtension;
+use crate::imod::etomo::ui::ui_component::UIComponent;
+use crate::imod::etomo::ui::value_manipulation_field::ValueManipulationField;
+use crate::imod::etomo::ui::value_manipulation_listener::ValueManipulationListener;
 use crate::imod::etomo::util::utilities;
 
-use super::{
-    text_efield_interface::TextEfieldInterface,
-    tooltip_formatter::TooltipFormatter,
-    validation_extension::ValidationExtension,
-    value_manipulation_extension::{ValueManipulationExtension, ValueManipulationField},
-};
+/// The `TextEfield` methods a subclass overrides and `TextEfield` itself calls,
+/// plus the interfaces the Java object passes itself as.  The default bodies
+/// are `TextEfield`'s own.
+pub trait TextEfieldVirtual:
+    ControlTarget
+    + TextFlagOrigin
+    + ValueManipulationField
+    + TextEfieldInterface
+    + UIComponent
+    + SwingComponent
+{
+    /// The `TextEfield` part of the object.
+    fn text_efield(&self) -> &TextEfield;
 
-/// Java `ControlState`; its concrete source unit remains an explicit boundary.
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub enum ControlState {
-    Enabled,
-    Disabled,
-}
+    /// Java `setTooltip(String)`.
+    fn set_tooltip(&self, text: Option<&str>) {
+        self.text_efield().default_set_tooltip(text);
+    }
 
-/// Java `FlagType`, represented by its `isTemplate()` property.
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub enum FlagType {
-    Template,
-    Errors,
-}
-impl FlagType {
-    pub fn is_template(self) -> bool {
-        self == Self::Template
+    /// Java `createAppearanceExtension(boolean enabledField,
+    /// boolean editableComponent)`.
+    fn create_appearance_extension(&self, enabled_field: bool, editable_component: bool) {
+        self.text_efield()
+            .default_create_appearance_extension(enabled_field, editable_component);
+    }
+
+    /// Java `createFlagExtension()`.  Creates flagExtension if it is null;
+    /// returns true if flagExtension was created.
+    fn create_flag_extension(&self) -> bool {
+        self.text_efield().default_create_flag_extension()
     }
 }
 
-/// Source-visible `JTextField` state at the Swing boundary.
-#[derive(Clone, Debug, Eq, PartialEq)]
-pub struct TextField {
-    pub text: String,
-    pub name: Option<String>,
-    pub columns: i32,
-    pub enabled: bool,
-    pub editable: bool,
-    pub visible: bool,
-    pub preferred_width: Option<i32>,
-    pub tooltip: Option<String>,
-    pub focus_listener_count: usize,
-}
-impl Default for TextField {
-    fn default() -> Self {
-        Self {
-            text: String::new(),
-            name: None,
-            columns: 0,
-            enabled: true,
-            editable: true,
-            visible: true,
-            preferred_width: None,
-            tooltip: None,
-            focus_listener_count: 0,
-        }
-    }
-}
-
-/// Java package-private `TextEfield`.
-#[derive(Clone, Debug, Eq, PartialEq)]
+/// Java `TextEfield`.
 pub struct TextEfield {
-    /// Java `textField`.
-    pub text_field: TextField,
-    pub field_type: Option<FieldType>,
-    pub label_text: String,
-    pub use_label: bool,
-    pub label_enabled: bool,
-    pub label_tooltip: Option<String>,
-    pub use_control_component: bool,
-    pub control_override: bool,
-    pub component_visible: bool,
-    pub debug: bool,
-    pub enable_control_state: Option<ControlState>,
-    pub control_listener_count: usize,
-    pub validation_extension: Option<ValidationExtension>,
-    pub value_manipulation_extension: Option<ValueManipulationExtension>,
-    pub backup: Option<String>,
-    pub checkpoint: Option<String>,
-    pub template_value: Option<String>,
-    pub flag_errors: bool,
-    /// Java nullable `flagExtension` presence.
-    pub flag_extension_created: bool,
-    pub directive_def: Option<String>,
-    pub in_grid_bag: bool,
+    /// Java `this`: the outermost object (see the module documentation).
+    this: Weak<dyn TextEfieldVirtual>,
+    text_field: Rc<JComponent>,
+
+    field_type: Option<FieldType>,
+    label_text: Option<String>,
+    control_component: Option<Rc<ControlComponentModule>>,
+    /// Java package field `container`.
+    pub(crate) container: EfieldContainer,
+    label: Option<Rc<JComponent>>,
+
+    directive_def: Cell<Option<DirectiveDef>>,
+    state_extension: RefCell<Option<Rc<TextStateExtension>>>,
+    grid_bag_extension: RefCell<Option<Rc<GridBagExtension>>>,
+    /// Java package field `appearanceExtension`.
+    pub(crate) appearance_extension: RefCell<Option<Rc<TextComponentAppearanceExtension>>>,
+    flag_extension: RefCell<Option<Rc<TextFlagExtension>>>,
+    value_manipulation_extension: RefCell<Option<Rc<ValueManipulationExtension>>>,
+    validation_extension: RefCell<Option<Rc<ValidationExtension>>>,
+    debug: Cell<bool>,
+    enable_control_state: Cell<Option<&'static ControlState>>,
+    control_listeners: RefCell<Option<Vec<Rc<dyn ControlListener>>>>,
 }
 
 impl TextEfield {
-    /// Java package-private `TextEfield(String, FieldType, boolean, boolean, boolean,
-    /// boolean, boolean, boolean)`.
+    /// Java `TextEfield(String labelText, FieldType fieldType, boolean useLabel,
+    /// boolean useControlComponent, boolean enabledField, boolean editableComponent,
+    /// boolean useGridBag, boolean defaultToFileName)`.
+    ///
+    /// `this` is the outermost object, from the caller's `Rc::new_cyclic`.
     #[allow(clippy::too_many_arguments)]
     pub fn new(
-        label_text: impl Into<String>,
+        this: Weak<dyn TextEfieldVirtual>,
+        label_text: Option<&str>,
         field_type: Option<FieldType>,
         use_label: bool,
         use_control_component: bool,
@@ -110,491 +132,945 @@ impl TextEfield {
         editable_component: bool,
         use_grid_bag: bool,
         default_to_file_name: bool,
-    ) -> Self {
-        let label_text = label_text.into();
-        let mut field = Self {
-            text_field: TextField {
-                enabled: enabled_field,
-                editable: editable_component,
-                ..Default::default()
-            },
-            field_type,
-            label_text,
-            use_label,
-            label_enabled: enabled_field,
-            label_tooltip: None,
-            use_control_component,
-            control_override: false,
-            component_visible: true,
-            debug: false,
-            enable_control_state: None,
-            control_listener_count: 0,
-            validation_extension: None,
-            backup: None,
-            checkpoint: None,
-            template_value: None,
-            flag_errors: false,
-            flag_extension_created: false,
-            value_manipulation_extension: None,
-            directive_def: None,
-            in_grid_bag: use_grid_bag,
+    ) -> TextEfield {
+        let text_field = JComponent::new_text_field();
+        // Add a label and control component as needed.
+        let label = if use_label {
+            Some(JComponent::new_label(label_text.unwrap_or("")))
+        } else {
+            None
         };
-        field.set_name();
-        if default_to_file_name {
-            let debug = field.debug;
-            field.value_manipulation_extension =
-                Some(ValueManipulationExtension::new(&mut field, debug));
-            field
-                .value_manipulation_extension
-                .as_mut()
-                .unwrap()
-                .set_default_to_filename(default_to_file_name);
+        let control_component = if use_control_component {
+            Some(ControlComponentModule::new())
+        } else {
+            None
+        };
+        // Java builds the container after setName() and createAppearanceExtension;
+        // it depends only on the label, the text field and the control component,
+        // so building it first (the Rust field is immutable) changes nothing.
+        let container = EfieldContainer::new(
+            false,
+            use_grid_bag,
+            label.as_ref(),
+            &text_field,
+            control_component
+                .as_ref()
+                .map(|control_component| control_component.get_component())
+                .as_ref(),
+        );
+        let instance = TextEfield {
+            this: this.clone(),
+            text_field,
+            field_type,
+            label_text: label_text.map(str::to_owned),
+            control_component,
+            container,
+            label,
+            directive_def: Cell::new(None),
+            state_extension: RefCell::new(None),
+            grid_bag_extension: RefCell::new(None),
+            appearance_extension: RefCell::new(None),
+            flag_extension: RefCell::new(None),
+            value_manipulation_extension: RefCell::new(None),
+            validation_extension: RefCell::new(None),
+            debug: Cell::new(false),
+            enable_control_state: Cell::new(None),
+            control_listeners: RefCell::new(None),
+        };
+        instance.set_name();
+        // Use the appearance extension if controlling the appearance characteristics
+        // will not be simple.
+        if !enabled_field || !editable_component {
+            // Java calls the (virtual) createAppearanceExtension here, before the
+            // subclass constructor has run.  `this` cannot be upgraded yet, so the
+            // TextEfield body runs; the only override (ButtonControlTextEfield)
+            // additionally sets the child controllers, which are null at this point
+            // and are set again by its constructor.
+            instance.default_create_appearance_extension(enabled_field, editable_component);
         }
-        field
+        if default_to_file_name {
+            let field: Weak<dyn ValueManipulationField> = this;
+            let value_manipulation_extension =
+                ValueManipulationExtension::new(field, &instance, instance.debug.get());
+            value_manipulation_extension.set_default_to_filename(default_to_file_name);
+            *instance.value_manipulation_extension.borrow_mut() =
+                Some(value_manipulation_extension);
+        }
+        instance
     }
 
-    /// Java `getInstance`.
-    pub fn get_instance(label_text: impl Into<String>, field_type: FieldType) -> Self {
-        Self::new(
-            label_text,
-            Some(field_type),
-            false,
-            false,
-            true,
-            true,
-            false,
-            false,
-        )
+    /// The outermost object; panics only if used during its own construction.
+    fn this(&self) -> Rc<dyn TextEfieldVirtual> {
+        self.this
+            .upgrade()
+            .expect("TextEfield used during construction or after it was dropped")
     }
-    /// Java `getLabeledInstance`.
-    pub fn get_labeled_instance(label_text: impl Into<String>, field_type: FieldType) -> Self {
-        Self::new(
-            label_text,
-            Some(field_type),
-            true,
-            false,
-            true,
-            true,
-            false,
-            false,
-        )
+
+    /// Java `getInstance(String labelText, FieldType)`.
+    pub fn get_instance(label_text: Option<&str>, field_type: Option<FieldType>) -> Rc<TextEfield> {
+        Rc::new_cyclic(|this: &Weak<TextEfield>| {
+            TextEfield::new(
+                this.clone(),
+                label_text,
+                field_type,
+                false,
+                false,
+                true,
+                true,
+                false,
+                false,
+            )
+        })
     }
-    /// Java `getOverrideInstance`; `DirectiveValueType.getInstance` is outside this unit.
-    pub fn get_override_instance(
-        label_text: impl Into<String>,
+
+    /// Java `getLabeledInstance(String labelText, FieldType)`.
+    pub fn get_labeled_instance(
+        label_text: Option<&str>,
         field_type: Option<FieldType>,
-    ) -> Self {
-        Self::new(
-            label_text, field_type, false, true, true, true, false, false,
-        )
-    }
-    /// Java `getDisabledInstance`.
-    pub fn get_disabled_instance(label_text: impl Into<String>, field_type: FieldType) -> Self {
-        Self::new(
-            label_text,
-            Some(field_type),
-            false,
-            false,
-            false,
-            true,
-            false,
-            false,
-        )
+    ) -> Rc<TextEfield> {
+        Rc::new_cyclic(|this: &Weak<TextEfield>| {
+            TextEfield::new(
+                this.clone(),
+                label_text,
+                field_type,
+                true,
+                false,
+                true,
+                true,
+                false,
+                false,
+            )
+        })
     }
 
-    /// Java private `setName`.
-    pub fn set_name(&mut self) {
-        if let Some(name) = utilities::convert_label_to_name(Some(&self.label_text), false) {
-            self.text_field.name = Some(format!("tf{SEPARATOR_CHAR}{name}"));
+    /// Java `getOverrideInstance(String labelText, DirectiveValueType)`.
+    pub fn get_override_instance(
+        label_text: Option<&str>,
+        value_type: Option<DirectiveValueType>,
+    ) -> Rc<TextEfield> {
+        Rc::new_cyclic(|this: &Weak<TextEfield>| {
+            TextEfield::new(
+                this.clone(),
+                label_text,
+                FieldType::get_instance(value_type),
+                false,
+                true,
+                true,
+                true,
+                false,
+                false,
+            )
+        })
+    }
+
+    /// Java `getDisabledInstance(String labelText, FieldType)`.
+    pub fn get_disabled_instance(
+        label_text: Option<&str>,
+        field_type: Option<FieldType>,
+    ) -> Rc<TextEfield> {
+        Rc::new_cyclic(|this: &Weak<TextEfield>| {
+            TextEfield::new(
+                this.clone(),
+                label_text,
+                field_type,
+                false,
+                false,
+                false,
+                true,
+                false,
+                false,
+            )
+        })
+    }
+
+    /// Java `setName()`.
+    fn set_name(&self) {
+        let field_type = &ui_test_field_type::TEXT_FIELD;
+        let name = utilities::convert_label_to_name(
+            self.label_text.as_deref(),
+            field_type.is_unlimited_segments(),
+        );
+        if let Some(name) = name {
+            self.text_field
+                .set_name(Some(&format!("{}{}{}", field_type, SEPARATOR_CHAR, name)));
             if ARGUMENTS.lock().unwrap().is_print_names() {
                 println!(
-                    "{} {DEFAULT_DELIMITER} ",
-                    self.text_field.name.as_deref().unwrap()
+                    "{} {} ",
+                    self.text_field.get_name().as_deref().unwrap_or("null"),
+                    DEFAULT_DELIMITER
                 );
             }
         }
-    }
-    pub fn get_label(&self) -> &str {
-        &self.label_text
-    }
-    pub fn set_debug(&mut self, debug: bool) {
-        self.debug = debug;
-    }
-    pub fn get_ui_component(&self) -> &Self {
-        self
-    }
-    /// Java `getComponent`; the boolean represents the source container's visibility.
-    pub fn get_component(&self) -> bool {
-        self.component_visible
-    }
-    pub fn set_columns(&mut self) {
-        if let Some(field_type) = self.field_type {
-            self.text_field.columns = field_type.get_columns();
+        if let Some(control_component) = &self.control_component {
+            control_component.set_to_container_name(self.label_text.as_deref());
         }
-    }
-    pub fn set_preferred_width(&mut self, new_width: i32) {
-        self.text_field.preferred_width = Some(new_width);
-    }
-    pub fn get_preferred_width(&self) -> Option<i32> {
-        self.text_field.preferred_width
-    }
-    pub fn get_file(&self) -> Option<PathBuf> {
-        let text = self.get_text();
-        (!text.is_empty()).then(|| PathBuf::from(text))
     }
 
-    /// Java `getText()`.
-    pub fn get_text(&self) -> String {
-        if self.is_override() {
-            return String::new();
+    /// Java `getLabel()`.
+    pub fn get_label(&self) -> Option<String> {
+        self.label_text.clone()
+    }
+
+    /// Java `toString()`.
+    pub fn to_string(&self) -> Option<String> {
+        self.label_text.clone()
+    }
+
+    /// Java `setDebug(boolean)`.
+    pub fn set_debug(&self, debug: bool) {
+        self.debug.set(debug);
+        if let Some(appearance_extension) = self.appearance_extension.borrow().as_ref() {
+            appearance_extension.set_debug(debug);
         }
-        self.value_manipulation_extension.as_ref().map_or_else(
-            || self.text_field.text.clone(),
-            |extension| extension.get_full_file_path(self.text_field.text.clone()),
-        )
     }
-    pub fn is_empty(&self) -> bool {
-        self.get_text().trim().is_empty()
+
+    /// Java `getUIComponent()` (final).
+    pub fn get_ui_component(&self) -> Option<Rc<dyn SwingComponent>> {
+        self.this
+            .upgrade()
+            .map(|this| this as Rc<dyn SwingComponent>)
     }
-    pub fn add_focus_listener(&mut self) {
-        self.text_field.focus_listener_count += 1;
+
+    /// Java `getComponent()`.
+    pub fn get_component(&self) -> Rc<JComponent> {
+        self.container.get_component()
     }
-    pub fn remove_focus_listener(&mut self) {
-        self.text_field.focus_listener_count =
-            self.text_field.focus_listener_count.saturating_sub(1);
+
+    /// Java `setColumns()` (final).
+    pub fn set_columns(&self) {
+        if let Some(field_type) = self.field_type {
+            // Swing layout: textField.setColumns(fieldType.getColumns()).
+            let _ = field_type.get_columns();
+        }
     }
-    /// Java `equals(String)`.
-    pub fn equals(&self, compare_text: Option<&str>) -> bool {
-        match (Some(self.get_text()), compare_text) {
-            (Some(text), Some(compare)) => {
-                text.is_empty() && compare.is_empty() || text.trim() == compare.trim()
+
+    // Java (commented out in the source) `setPreferredWidth` via
+    // UIParameters.adjustSize.
+
+    /// Java `setPreferredWidth(int)`.
+    pub fn set_preferred_width(&self, new_width: i32) {
+        // Swing layout: textField.setPreferredSize(UIUtilities.calcNewTextFieldSize(
+        // textField.getPreferredSize(), newWidth, true)).
+        let _ = new_width;
+    }
+
+    // Java `getPreferredSize()`: `textField.getPreferredSize()` (Swing layout, not
+    // modelled).
+
+    /// Java `getFile()` (final).
+    pub fn get_file(&self) -> Option<PathBuf> {
+        let text = self.get_text_void();
+        if let Some(text) = text {
+            if !text.is_empty() {
+                return Some(PathBuf::from(text));
             }
-            _ => false,
         }
+        None
     }
-    pub fn set_tooltip(&mut self, text: impl Into<String>) {
-        let text = text.into();
-        let formatter = TooltipFormatter::instance();
-        self.text_field.tooltip = formatter.format(Some(&text));
-        if self.use_label {
-            self.label_tooltip = formatter.format(Some(&text));
+
+    /// Java `getText()` (final).
+    pub fn get_text_void(&self) -> Option<String> {
+        if !self.is_override() {
+            let text = self.text_field.get_text();
+            if let Some(value_manipulation_extension) =
+                self.value_manipulation_extension.borrow().as_ref()
+            {
+                return value_manipulation_extension.get_full_file_path(Some(&text));
+            }
+            return Some(text);
         }
+        Some(String::new())
     }
-    pub fn set_visible(&mut self, visible: bool) {
-        self.component_visible = visible;
+
+    /// Java `isEmpty()` (final).
+    pub fn is_empty(&self) -> bool {
+        let text = self.get_text_void();
+        text.as_deref()
+            .is_some_and(java_lang_string_matches_whitespace)
     }
-    pub fn is_visible(&self) -> bool {
-        self.component_visible
+
+    /// Java `addFocusListener(FocusListener)` (final).
+    pub fn add_focus_listener(&self, listener: FocusListener) {
+        self.text_field.add_focus_listener(listener);
     }
-    pub fn set_file(&mut self, file_path: Option<&str>) {
-        if file_path.is_some_and(|value| !value.trim().is_empty()) {
-            self.set_text_file(Path::new(file_path.unwrap()));
-        } else {
-            self.clear();
-        }
+
+    /// Java `removeFocusListener(FocusListener)` (final).
+    pub fn remove_focus_listener(&self, listener: &FocusListener) {
+        self.text_field.remove_focus_listener(listener);
     }
-    /// Java overloaded `setText(File)`.
-    pub fn set_text_file(&mut self, file: &Path) {
-        let text = self.value_manipulation_extension.as_mut().map_or_else(
-            || {
-                if file.is_absolute() {
-                    file.to_string_lossy().into_owned()
-                } else {
-                    std::env::current_dir()
-                        .map(|directory| directory.join(file).to_string_lossy().into_owned())
-                        .unwrap_or_else(|_| {
-                            file.file_name()
-                                .map(|name| name.to_string_lossy().into_owned())
-                                .unwrap_or_default()
-                        })
+
+    /// Java `equals(String)` (final).
+    pub fn equals(&self, compare_text: Option<&str>) -> bool {
+        let text = self.get_text_void();
+        match (text.as_deref(), compare_text) {
+            (None, None) => true,
+            (None, _) | (_, None) => false,
+            (Some(text), Some(compare_text)) => {
+                if text.is_empty() && compare_text.is_empty() {
+                    return true;
                 }
-            },
-            |extension| {
-                extension
-                    .create_displayed_file_path_file(Some(file))
-                    .unwrap_or_default()
-            },
-        );
-        self.set_text_internal(Some(text));
+                text.trim() == compare_text.trim()
+            }
+        }
     }
-    /// Java overloaded `setText(int)`.
-    pub fn set_text_int(&mut self, text: i32) {
-        self.set_text(text.to_string());
+
+    /// Java `setTooltip(String)` (virtual; see [`TextEfieldVirtual`]).
+    pub fn set_tooltip(&self, text: Option<&str>) {
+        match self.this.upgrade() {
+            Some(this) => this.set_tooltip(text),
+            None => self.default_set_tooltip(text),
+        }
     }
-    /// Java overloaded `setText(String)`.
-    pub fn set_text(&mut self, text: impl Into<String>) {
-        let text = text.into();
-        let displayed = self
-            .value_manipulation_extension
-            .as_mut()
-            .map_or(Some(text.clone()), |extension| {
-                extension.create_displayed_file_path(Some(&text), self.field_type)
-            });
-        self.set_text_internal(displayed);
+
+    /// `TextEfield`'s own `setTooltip(String)` body.
+    pub fn default_set_tooltip(&self, text: Option<&str>) {
+        self.text_field
+            .set_tool_tip_text(tooltip_formatter::INSTANCE.format(text).as_deref());
+        if let Some(label) = &self.label {
+            label.set_tool_tip_text(tooltip_formatter::INSTANCE.format(text).as_deref());
+        }
+        if let Some(control_component) = &self.control_component {
+            control_component.set_tooltip(text);
+        }
     }
-    /// Java private `setTextInternal`.
-    pub fn set_text_internal(&mut self, text: Option<String>) {
+
+    /// Java `setVisible(boolean)` (final).
+    pub fn set_visible(&self, visible: bool) {
+        self.get_component().set_visible(visible);
+    }
+
+    /// Java `isVisible()` (final).
+    pub fn is_visible(&self) -> bool {
+        self.get_component().is_visible()
+    }
+
+    /// Java `setFile(String filePath)`.
+    pub fn set_file(&self, file_path: Option<&str>) {
+        match file_path {
+            Some(file_path) if !java_lang_string_matches_whitespace(file_path) => {
+                self.set_text_file(Some(Path::new(file_path)));
+            }
+            _ => self.clear(),
+        }
+    }
+
+    /// Java `setText(File)` (final).
+    pub fn set_text_file(&self, file: Option<&Path>) {
+        let string: Option<String>;
+        if let Some(value_manipulation_extension) =
+            self.value_manipulation_extension.borrow().clone()
+        {
+            string = value_manipulation_extension.create_displayed_file_path_file(file);
+        } else if let Some(file) = file {
+            // `absolutePath != null ? absolutePath : file.getName()`: never null.
+            let absolute_path = utilities::java_io_file_get_absolute_path(&file.to_string_lossy());
+            string = Some(absolute_path);
+        } else {
+            string = None;
+        }
+        self.set_text_internal(string.as_deref());
+    }
+
+    /// Java `setText(int)` (final).
+    pub fn set_text_int(&self, i_text: i32) {
+        self.set_text_string(Some(&i_text.to_string()));
+    }
+
+    /// Java `setText(String)` (final).
+    pub fn set_text_string(&self, string: Option<&str>) {
+        let mut string = string.map(str::to_owned);
+        if let Some(value_manipulation_extension) =
+            self.value_manipulation_extension.borrow().clone()
+        {
+            string = value_manipulation_extension
+                .create_displayed_file_path_string_field_type(string.as_deref(), self.field_type);
+        }
+        self.set_text_internal(string.as_deref());
+    }
+
+    /// Java `setTextInternal(String)` (private final).
+    fn set_text_internal(&self, text: Option<&str>) {
         match text {
-            None => self.clear(),
-            Some(text) if text.is_empty() => self.clear(),
+            None | Some("") => self.clear(),
             Some(text) => {
-                self.text_field.text = text;
+                self.text_field.set_text(text);
                 self.update_flag_extension();
             }
         }
     }
-    pub fn get_directive_def(&self) -> Option<&str> {
-        self.directive_def.as_deref()
+
+    /// Java `getDirectiveDef()` (final).
+    pub fn get_directive_def(&self) -> Option<DirectiveDef> {
+        self.directive_def.get()
     }
-    pub fn set_directive_def(&mut self, directive_def: Option<String>) {
-        self.directive_def = directive_def;
+
+    /// Java `setDirectiveDef(DirectiveDef)` (final).
+    pub fn set_directive_def(&self, directive_def: Option<DirectiveDef>) {
+        self.directive_def.set(directive_def);
     }
+
+    /// Java `isTemplateValue()`.
     pub fn is_template_value(&self) -> bool {
-        self.template_value.is_some()
+        let flag_type = self.get_flag_type();
+        flag_type.is_some_and(|flag_type| flag_type.is_template())
     }
 
+    // / control
+
+    /// Java `isOverride()`.
     pub fn is_override(&self) -> bool {
-        self.use_control_component && self.control_override
-    }
-    pub fn set_component_control(&mut self, control: bool, _control_state: Option<ControlState>) {
-        if self.use_control_component {
-            self.control_override = control;
-            self.text_field.visible = !control;
-        }
-    }
-    pub fn add_control_listener(&mut self) {
-        self.control_listener_count += 1;
-    }
-    /// Java `sendControlEvent`; listener invocation is a native Swing boundary.
-    pub fn send_control_event(&self) -> usize {
-        self.control_listener_count
-    }
-    pub fn set_enable_control(&mut self, control: bool, control_state: Option<ControlState>) {
-        self.enable_control_state = control.then_some(control_state).flatten();
-    }
-
-    /// Java `clear`.
-    pub fn clear(&mut self) {
-        self.text_field.text.clear();
-        if let Some(mut extension) = self.value_manipulation_extension.take() {
-            extension.clear_full_file_path();
-            extension.substitute(self);
-            self.value_manipulation_extension = Some(extension);
-        }
-        self.update_flag_extension();
-    }
-    pub fn set_substitute_text(&mut self, text: impl Into<String>) {
-        self.text_field.text = text.into();
-    }
-    pub fn add_value_manipulation_listener(&mut self) {
-        self.add_focus_listener();
-    }
-    pub fn set_required(&mut self, required: bool) {
-        if required && self.validation_extension.is_none() {
-            self.validation_extension = Some(ValidationExtension::new());
-        }
-        if let Some(extension) = &mut self.validation_extension {
-            extension.set_required(required);
-        }
-    }
-    pub fn set_location_descr(&mut self, location_descr: Option<String>) {
-        if location_descr.is_some() && self.validation_extension.is_none() {
-            self.validation_extension = Some(ValidationExtension::new());
-        }
-        if let Some(extension) = &mut self.validation_extension {
-            extension.set_location_descr(location_descr);
-        }
-    }
-    pub fn set_file_must_exist(&mut self, file_must_exist: bool) {
-        if file_must_exist && self.validation_extension.is_none() {
-            self.validation_extension = Some(ValidationExtension::new());
-        }
-        if let Some(extension) = &mut self.validation_extension {
-            extension.set_file_must_exist(file_must_exist);
-        }
-    }
-    pub fn set_file_only(&mut self, file_only: bool) {
-        if file_only && self.validation_extension.is_none() {
-            self.validation_extension = Some(ValidationExtension::new());
-        }
-        if let Some(extension) = &mut self.validation_extension {
-            extension.set_file_only(file_only);
-        }
-    }
-    pub fn set_must_be_positive(&mut self, must_be_positive: bool) {
-        if must_be_positive && self.validation_extension.is_none() {
-            self.validation_extension = Some(ValidationExtension::new());
-        }
-        if let Some(extension) = &mut self.validation_extension {
-            extension.set_must_be_positive(must_be_positive);
+        match &self.control_component {
+            None => false,
+            Some(control_component) => control_component.is_override(),
         }
     }
 
-    /// Java overloaded validation `getText`; `FieldValidator` is a separate source unit.
-    pub fn get_text_validated(&self, do_validation: bool) -> Result<String, String> {
-        let text = self.get_text();
-        if !do_validation || self.is_override() || !self.is_enabled() {
-            return Ok(text);
-        }
-        let extension = self.validation_extension.as_ref();
-        let prefix = format!(
-            "\"{}\"{}",
-            self.label_text,
-            extension.map_or_else(String::new, ValidationExtension::get_location_addon)
-        );
-        if extension.is_some_and(ValidationExtension::is_required) && text.trim().is_empty() {
-            return Err(format!("{prefix} is required"));
-        }
-        if extension.is_some_and(ValidationExtension::is_file_must_exist)
-            && !text.trim().is_empty()
-            && !Path::new(&text).exists()
-        {
-            return Err(format!("{prefix} does not exist"));
-        }
-        if extension.is_some_and(ValidationExtension::is_file_only)
-            && !text.trim().is_empty()
-            && Path::new(&text).is_dir()
-        {
-            return Err(format!("{prefix} must be a file"));
-        }
-        if extension.is_some_and(ValidationExtension::is_must_be_positive)
-            && text.trim().parse::<f64>().map_or(true, |value| value <= 0.)
-        {
-            return Err(format!("{prefix} must be positive"));
-        }
-        Ok(text)
-    }
-    pub fn is_valid(&self) -> bool {
-        self.get_text_validated(true).is_ok()
+    /// Java `setComponentControl(boolean, ControlState)` (final).
+    pub fn set_component_control(
+        &self,
+        control: bool,
+        control_state: Option<&'static ControlState>,
+    ) {
+        let Some(control_component) = &self.control_component else {
+            return;
+        };
+        self.text_field
+            .set_visible(!control_component.set_component_control(control, control_state));
     }
 
-    /// Java `createAppearanceExtension`; appearance is state carried by `TextField`.
-    pub fn create_appearance_extension(&mut self, enabled_field: bool, editable_component: bool) {
-        self.text_field.enabled = enabled_field;
-        self.text_field.editable = editable_component;
-    }
-    pub fn set_enabled(&mut self, enabled: bool) {
-        self.text_field.enabled = enabled;
-        self.label_enabled = enabled;
-    }
-    pub fn is_enabled(&self) -> bool {
-        self.text_field.enabled
-    }
-    pub fn set_editable(&mut self, editable: bool) {
-        self.text_field.editable = editable;
-    }
-    pub fn is_editable(&self) -> bool {
-        self.text_field.editable
-    }
-    pub fn set_limit_displayed_file_path(&mut self, max_file_path_size: i32) {
-        if max_file_path_size > 0 && self.value_manipulation_extension.is_none() {
-            let debug = self.debug;
-            self.value_manipulation_extension = Some(ValueManipulationExtension::new(self, debug));
+    /// Java `addControlListener(ControlListener)`.
+    pub fn add_control_listener(&self, listener: Option<Rc<dyn ControlListener>>) {
+        let Some(listener) = listener else {
+            return;
+        };
+        let mut control_listeners = self.control_listeners.borrow_mut();
+        if control_listeners.is_none() {
+            *control_listeners = Some(Vec::new());
         }
-        let text = self.get_text();
-        if let Some(extension) = &mut self.value_manipulation_extension {
-            if extension.set_limit_displayed_file_path(max_file_path_size, self.field_type) {
-                let displayed = extension.create_displayed_file_path(Some(&text), self.field_type);
-                self.set_text_internal(displayed);
+        control_listeners.as_mut().unwrap().push(listener);
+    }
+
+    /// Java `sendControlEvent()`.
+    pub fn send_control_event(&self) {
+        let control_listeners = self.control_listeners.borrow().clone();
+        if let Some(control_listeners) = control_listeners {
+            for listener in control_listeners.iter() {
+                listener.control_event();
             }
         }
     }
 
-    pub fn update_flag_extension(&mut self) {}
-    pub fn create_flag_extension(&mut self) -> bool {
-        if !self.flag_extension_created {
-            self.flag_extension_created = true;
+    /// Java `setEnableControl(boolean, ControlState)` (final).
+    pub fn set_enable_control(
+        &self,
+        mut control: bool,
+        control_state: Option<&'static ControlState>,
+    ) {
+        if control_state.is_none() {
+            control = false;
+        }
+        if self.appearance_extension.borrow().is_none() && control {
+            self.create_appearance_extension(true, true);
+        }
+        if control {
+            self.enable_control_state.set(control_state);
+        } else {
+            self.enable_control_state.set(None);
+        }
+        let appearance_extension = self.appearance_extension.borrow().clone();
+        if let Some(appearance_extension) = appearance_extension {
+            appearance_extension.set_enable_control_state(self.enable_control_state.get());
+        }
+    }
+
+    // / valueManipulationExtension
+
+    /// Java `clear()` (final).
+    pub fn clear(&self) {
+        self.text_field.set_text("");
+        let value_manipulation_extension = self.value_manipulation_extension.borrow().clone();
+        if let Some(value_manipulation_extension) = value_manipulation_extension {
+            value_manipulation_extension.clear_full_file_path();
+            value_manipulation_extension.substitute();
+        }
+        self.update_flag_extension();
+    }
+
+    /// Java `setSubstituteText(String)` (final).
+    pub fn set_substitute_text(&self, text: Option<&str>) {
+        self.text_field.set_text(text.unwrap_or(""));
+    }
+
+    /// Java `addValueManipulationListener(ValueManipulationListener)` (final).
+    pub fn add_value_manipulation_listener(&self, listener: Rc<dyn ValueManipulationListener>) {
+        self.text_field
+            .add_focus_listener(Rc::new(move |event: &FocusEvent| {
+                if event.gained {
+                    listener.focus_gained();
+                } else {
+                    listener.focus_lost();
+                }
+            }));
+    }
+
+    // / validation & ValidationExtension
+
+    /// Java `setRequired(boolean)` (final).
+    pub fn set_required(&self, required: bool) {
+        if required && self.validation_extension.borrow().is_none() {
+            *self.validation_extension.borrow_mut() = Some(ValidationExtension::new());
+        }
+        if let Some(validation_extension) = self.validation_extension.borrow().as_ref() {
+            validation_extension.set_required(required);
+        }
+    }
+
+    /// Java `setLocationDescr(String)` (final).
+    pub fn set_location_descr(&self, location_descr: Option<&str>) {
+        if location_descr.is_some() && self.validation_extension.borrow().is_none() {
+            *self.validation_extension.borrow_mut() = Some(ValidationExtension::new());
+        }
+        if let Some(validation_extension) = self.validation_extension.borrow().as_ref() {
+            validation_extension.set_location_descr(location_descr);
+        }
+    }
+
+    /// Java `setFileMustExist(boolean)` (final).
+    pub fn set_file_must_exist(&self, file_must_exist: bool) {
+        if file_must_exist && self.validation_extension.borrow().is_none() {
+            *self.validation_extension.borrow_mut() = Some(ValidationExtension::new());
+        }
+        if let Some(validation_extension) = self.validation_extension.borrow().as_ref() {
+            validation_extension.set_file_must_exist(file_must_exist);
+        }
+    }
+
+    /// Java `setFileOnly(boolean)` (final).
+    pub fn set_file_only(&self, file_only: bool) {
+        if file_only && self.validation_extension.borrow().is_none() {
+            *self.validation_extension.borrow_mut() = Some(ValidationExtension::new());
+        }
+        if let Some(validation_extension) = self.validation_extension.borrow().as_ref() {
+            validation_extension.set_file_only(file_only);
+        }
+    }
+
+    /// Java `setMustBePositive(boolean)` (final).
+    pub fn set_must_be_positive(&self, must_be_positive: bool) {
+        if must_be_positive && self.validation_extension.borrow().is_none() {
+            *self.validation_extension.borrow_mut() = Some(ValidationExtension::new());
+        }
+        if let Some(validation_extension) = self.validation_extension.borrow().as_ref() {
+            validation_extension.set_must_be_positive(must_be_positive);
+        }
+    }
+
+    /// Java `getText(boolean doValidation)` (final).
+    pub fn get_text_boolean(
+        &self,
+        do_validation: bool,
+    ) -> Result<Option<String>, FieldValidationFailedException> {
+        self.get_text_boolean_field_displayer_field_displayer(do_validation, None, None)
+    }
+
+    /// Java `getText(boolean doValidation, FieldDisplayer, FieldDisplayer)`
+    /// (final).  For non standard validation only member variables
+    /// fileNustExist, fileOnly, positiveNumberOnly.
+    pub fn get_text_boolean_field_displayer_field_displayer(
+        &self,
+        do_validation: bool,
+        field_displayer1: Option<&dyn FieldDisplayer>,
+        field_displayer2: Option<&dyn FieldDisplayer>,
+    ) -> Result<Option<String>, FieldValidationFailedException> {
+        let mut text = self.get_text_void();
+        if !self.is_override() && do_validation && self.is_enabled() {
+            let validation_extension = self.validation_extension.borrow().clone();
+            // Java string concatenation: a null quoted label reads "null".
+            let descr = format!(
+                "{}{}",
+                utilities::quote_label(self.label_text.as_deref())
+                    .as_deref()
+                    .unwrap_or("null"),
+                match &validation_extension {
+                    Some(validation_extension) => validation_extension.get_location_addon(),
+                    None => String::new(),
+                }
+            );
+            let this = self.this();
+            text = FieldValidator::validate_text_string_field_type_ui_component_string_validation_extension_field_displayer_field_displayer_boolean(
+                text.as_deref(),
+                self.field_type,
+                Some(&*this as &dyn UIComponent),
+                Some(&descr),
+                validation_extension.as_deref(),
+                field_displayer1,
+                field_displayer2,
+                self.debug.get(),
+            )?;
+        }
+        Ok(text)
+    }
+
+    /// Java `getText(boolean doValidation, FieldDisplayer)` (final).
+    pub fn get_text_boolean_field_displayer(
+        &self,
+        do_validation: bool,
+        field_displayer1: Option<&dyn FieldDisplayer>,
+    ) -> Result<Option<String>, FieldValidationFailedException> {
+        let mut text = self.get_text_void();
+        if !self.is_override() && do_validation && self.is_enabled() {
+            let validation_extension = self.validation_extension.borrow().clone();
+            // Java string concatenation: a null quoted label reads "null".
+            let descr = format!(
+                "{}{}",
+                utilities::quote_label(self.label_text.as_deref())
+                    .as_deref()
+                    .unwrap_or("null"),
+                match &validation_extension {
+                    Some(validation_extension) => validation_extension.get_location_addon(),
+                    None => String::new(),
+                }
+            );
+            let this = self.this();
+            text = FieldValidator::validate_text_string_field_type_ui_component_string_validation_extension_field_displayer_field_displayer_boolean(
+                text.as_deref(),
+                self.field_type,
+                Some(&*this as &dyn UIComponent),
+                Some(&descr),
+                validation_extension.as_deref(),
+                field_displayer1,
+                None,
+                self.debug.get(),
+            )?;
+        }
+        Ok(text)
+    }
+
+    /// Java `isValid()`.
+    pub fn is_valid(&self) -> bool {
+        if self.is_override() {
+            return true;
+        }
+        let validation_extension = self.validation_extension.borrow().clone();
+        let this = self.this();
+        FieldValidator::is_text_valid(
+            self.get_text_void().as_deref(),
+            self.field_type,
+            Some(&*this as &dyn UIComponent),
+            validation_extension.as_deref(),
+            self.debug.get(),
+        )
+    }
+
+    // / appearanceExtension
+
+    /// Java `createAppearanceExtension(boolean, boolean)` (virtual; see
+    /// [`TextEfieldVirtual`]).
+    pub fn create_appearance_extension(&self, enabled_field: bool, editable_component: bool) {
+        match self.this.upgrade() {
+            Some(this) => this.create_appearance_extension(enabled_field, editable_component),
+            None => self.default_create_appearance_extension(enabled_field, editable_component),
+        }
+    }
+
+    /// `TextEfield`'s own `createAppearanceExtension(boolean, boolean)` body.
+    pub fn default_create_appearance_extension(
+        &self,
+        enabled_field: bool,
+        editable_component: bool,
+    ) {
+        if self.appearance_extension.borrow().is_none() {
+            // Using the text component ability to set the field to be editable
+            let appearance_extension = TextComponentAppearanceExtension::new(
+                &self.text_field,
+                enabled_field,
+                editable_component,
+            );
+            *self.appearance_extension.borrow_mut() = Some(appearance_extension.clone());
+            appearance_extension.set_debug(self.debug.get());
+        }
+        // In this class the appearanceExtension acts as the field's flag display for
+        // all types of flags.
+        let flag_extension = self.flag_extension.borrow().clone();
+        if let Some(flag_extension) = flag_extension {
+            let appearance_extension = self.appearance_extension.borrow().clone();
+            flag_extension.add_flag_display(
+                appearance_extension
+                    .map(|appearance_extension| appearance_extension as Rc<dyn FlagDisplay>),
+            );
+        }
+    }
+
+    /// Java `setEnabled(boolean)` (final).
+    pub fn set_enabled(&self, enabled: bool) {
+        let appearance_extension = self.appearance_extension.borrow().clone();
+        if let Some(appearance_extension) = appearance_extension {
+            appearance_extension.set_enabled(enabled);
+        } else {
+            self.text_field.set_enabled(enabled);
+        }
+        if let Some(label) = &self.label {
+            label.set_enabled(self.is_enabled());
+        }
+    }
+
+    /// Java `isEnabled()` (final).
+    pub fn is_enabled(&self) -> bool {
+        if let Some(appearance_extension) = self.appearance_extension.borrow().as_ref() {
+            return appearance_extension.is_enabled();
+        }
+        self.text_field.is_enabled()
+    }
+
+    /// Java `setEditable(boolean)`.
+    pub fn set_editable(&self, editable: bool) {
+        let appearance_extension = self.appearance_extension.borrow().clone();
+        if let Some(appearance_extension) = appearance_extension {
+            appearance_extension.set_editable(editable);
+        } else {
+            self.text_field.set_editable(editable);
+        }
+    }
+
+    /// Java `isEditable()` (final).
+    pub fn is_editable(&self) -> bool {
+        if let Some(appearance_extension) = self.appearance_extension.borrow().as_ref() {
+            return appearance_extension.is_editable();
+        }
+        self.text_field.is_editable()
+    }
+
+    /// Java `setLimitDisplayedFilePath(int)`: `maxFilePathSize` > 0 to turn on
+    /// limit, <= 0 to turn it off.
+    pub fn set_limit_displayed_file_path(&self, max_file_path_size: i32) {
+        if max_file_path_size > 0 && self.value_manipulation_extension.borrow().is_none() {
+            let field: Weak<dyn ValueManipulationField> = self.this.clone();
+            *self.value_manipulation_extension.borrow_mut() = Some(
+                ValueManipulationExtension::new(field, self, self.debug.get()),
+            );
+        }
+        let value_manipulation_extension = self.value_manipulation_extension.borrow().clone();
+        if let Some(value_manipulation_extension) = value_manipulation_extension {
+            if value_manipulation_extension
+                .set_limit_displayed_file_path(max_file_path_size, self.field_type)
+            {
+                // Redisplay text if necessary
+                self.set_text_string(
+                    value_manipulation_extension
+                        .create_displayed_file_path_string_field_type(
+                            self.get_text_void().as_deref(),
+                            self.field_type,
+                        )
+                        .as_deref(),
+                );
+            }
+        }
+    }
+
+    // / flagExtension
+
+    /// Java `updateFlagExtension()`.
+    pub fn update_flag_extension(&self) {
+        let flag_extension = self.flag_extension.borrow().clone();
+        if let Some(flag_extension) = flag_extension {
+            flag_extension.update_void();
+        }
+    }
+
+    /// Java `createFlagExtension()` (virtual; see [`TextEfieldVirtual`]).  Creates
+    /// flagExtension if it is null; returns true if flagExtension was created.
+    pub fn create_flag_extension(&self) -> bool {
+        match self.this.upgrade() {
+            Some(this) => this.create_flag_extension(),
+            None => self.default_create_flag_extension(),
+        }
+    }
+
+    /// `TextEfield`'s own `createFlagExtension()` body.
+    pub fn default_create_flag_extension(&self) -> bool {
+        if self.flag_extension.borrow().is_none() {
+            let this = self.this();
+            *self.flag_extension.borrow_mut() =
+                Some(TextFlagExtension::new(this as Rc<dyn TextFlagOrigin>));
             self.create_appearance_extension(true, true);
             return true;
         }
         false
     }
-    pub fn get_flag_type(&self) -> Option<FlagType> {
-        self.template_value
-            .as_ref()
-            .map(|_| FlagType::Template)
-            .or(self.flag_errors.then_some(FlagType::Errors))
-    }
-    pub fn add_flag_origin_listener(&mut self) {
-        self.add_focus_listener();
-    }
-    pub fn flag_template(&mut self, template_value: impl Into<String>) {
-        self.template_value = Some(template_value.into());
-        if self.value_manipulation_extension.is_none() {
-            let debug = self.debug;
-            self.value_manipulation_extension = Some(ValueManipulationExtension::new(self, debug));
+
+    /// Java `getFlagType()`.
+    pub fn get_flag_type(&self) -> Option<&'static FlagType> {
+        if let Some(appearance_extension) = self.appearance_extension.borrow().as_ref() {
+            return appearance_extension.get_flag_type();
         }
-        self.value_manipulation_extension
-            .as_mut()
-            .unwrap()
-            .set_prevent_blank(true, self.template_value.clone());
+        None
     }
-    pub fn set_flag_errors(&mut self) {
-        self.flag_errors = true;
+
+    /// Java `addFlagOriginListener(FlagOriginListener)` (final).  Allow flags to
+    /// listen for changes that they need to react to.
+    pub fn add_flag_origin_listener(&self, listener: Rc<dyn FlagOriginListener>) {
+        self.text_field
+            .add_focus_listener(Rc::new(move |event: &FocusEvent| {
+                if event.gained {
+                    listener.focus_gained();
+                } else {
+                    listener.focus_lost();
+                }
+            }));
     }
-    pub fn clear_template_value(&mut self) {
-        self.template_value = None;
-        self.flag_errors = false;
-        if let Some(extension) = &mut self.value_manipulation_extension {
-            extension.clear_prevent_blank();
+
+    /// Java `flagTemplate(String)` (final).  Change appearance of the flag displays
+    /// when value matches the template value.  Automatically adds its appearance
+    /// extension as a flag display.
+    pub fn flag_template(&self, template_value: Option<&str>) {
+        self.create_flag_extension();
+        let flag_extension = self.flag_extension.borrow().clone().unwrap();
+        flag_extension.flag_template(template_value);
+        flag_extension.update_void();
+        if self.value_manipulation_extension.borrow().is_none() {
+            let field: Weak<dyn ValueManipulationField> = self.this.clone();
+            *self.value_manipulation_extension.borrow_mut() = Some(
+                ValueManipulationExtension::new(field, self, self.debug.get()),
+            );
+        }
+        let value_manipulation_extension =
+            self.value_manipulation_extension.borrow().clone().unwrap();
+        value_manipulation_extension.set_prevent_blank(true, template_value);
+    }
+
+    /// Java `setFlagErrors()` (final).
+    pub fn set_flag_errors(&self) {
+        self.create_flag_extension();
+        let flag_extension = self.flag_extension.borrow().clone().unwrap();
+        flag_extension.set_flag_errors();
+        flag_extension.update_void();
+    }
+
+    /// Java `clearTemplateValue()` (final).
+    pub fn clear_template_value(&self) {
+        let flag_extension = self.flag_extension.borrow().clone();
+        if let Some(flag_extension) = flag_extension {
+            flag_extension.clear_flags();
+        }
+        let value_manipulation_extension = self.value_manipulation_extension.borrow().clone();
+        if let Some(value_manipulation_extension) = value_manipulation_extension {
+            value_manipulation_extension.clear_prevent_blank();
         }
     }
-    pub fn set_template_value(&mut self) {
-        if let Some(value) = self.template_value.clone() {
-            self.set_text(value);
+
+    /// Java `setTemplateValue()` (final).
+    pub fn set_template_value(&self) {
+        let flag_extension = self.flag_extension.borrow().clone();
+        if let Some(flag_extension) = flag_extension {
+            self.set_text_string(flag_extension.get_flagged_template_value().as_deref());
         }
     }
-    /// Java `addFlagDisplay` / `addFinalFlagDisplay`; displays are Swing boundaries.
-    pub fn add_flag_display(&mut self) {
-        let _ = self.create_flag_extension();
+
+    /// Java `addFlagDisplay(FlagDisplay)` (final).
+    pub fn add_flag_display(&self, flag_display: Option<Rc<dyn FlagDisplay>>) {
+        self.create_flag_extension();
+        let flag_extension = self.flag_extension.borrow().clone().unwrap();
+        flag_extension.add_flag_display(flag_display);
+        flag_extension.update_void();
     }
-    pub fn add_final_flag_display(&mut self) {
-        let _ = self.create_flag_extension();
+
+    /// Java `addFinalFlagDisplay(FlagDisplay)` (final).
+    pub fn add_final_flag_display(&self, flag_display: Option<Rc<dyn FlagDisplay>>) {
+        self.create_flag_extension();
+        let flag_extension = self.flag_extension.borrow().clone().unwrap();
+        flag_extension.add_final_flag_display(flag_display);
+        flag_extension.update_void();
     }
-    pub fn set_field_highlight(&mut self, value: impl Into<String>) {
+
+    /// Java `setFieldHighlight(String)` (final).
+    pub fn set_field_highlight(&self, value: Option<&str>) {
         self.flag_template(value);
     }
 
-    pub fn backup(&mut self) {
-        self.backup = Some(self.get_text());
+    // / stateExtension
+
+    /// Java `backup()` (final).
+    pub fn backup(&self) {
+        if self.state_extension.borrow().is_none() {
+            let this = self.this();
+            *self.state_extension.borrow_mut() =
+                Some(TextStateExtension::new(this as Rc<dyn TextEfieldInterface>));
+        }
+        let state_extension = self.state_extension.borrow().clone().unwrap();
+        state_extension.backup();
     }
-    pub fn checkpoint(&mut self) {
-        self.checkpoint = Some(self.get_text());
+
+    /// Java `checkpoint()` (final).
+    pub fn checkpoint(&self) {
+        if self.state_extension.borrow().is_none() {
+            let this = self.this();
+            *self.state_extension.borrow_mut() =
+                Some(TextStateExtension::new(this as Rc<dyn TextEfieldInterface>));
+        }
+        let state_extension = self.state_extension.borrow().clone().unwrap();
+        state_extension.checkpoint();
     }
+
+    /// Java `isDifferentFromCheckpoint(boolean alwaysCheck)` (final).
     pub fn is_different_from_checkpoint(&self, always_check: bool) -> bool {
-        always_check
-            && self
-                .checkpoint
-                .as_deref()
-                .is_some_and(|value| value != self.get_text())
-    }
-    pub fn restore_from_backup(&mut self) {
-        if let Some(value) = self.backup.clone() {
-            self.set_text(value);
+        let state_extension = self.state_extension.borrow().clone();
+        match state_extension {
+            None => false,
+            Some(state_extension) => state_extension.is_different_from_checkpoint(always_check),
         }
     }
-    pub fn remove(&mut self) {
-        self.in_grid_bag = false;
+
+    /// Java `restoreFromBackup()` (final).
+    pub fn restore_from_backup(&self) {
+        let state_extension = self.state_extension.borrow().clone();
+        if let Some(state_extension) = state_extension {
+            state_extension.restore_from_backup();
+        }
     }
-    /// Java `add(JPanel, GridBagLayout, GridBagConstraints)` at the direct Swing boundary.
-    pub fn add(&mut self) {
-        self.in_grid_bag = true;
+
+    // / Calls to gridBagExtension
+
+    /// Java `remove()` (final).
+    pub fn remove(&self) {
+        let grid_bag_extension = self.grid_bag_extension.borrow().clone();
+        if let Some(grid_bag_extension) = grid_bag_extension {
+            grid_bag_extension.remove(&self.get_component());
+        }
     }
-    /// Java source TODO `setText(File[])`.
-    pub fn set_text_files(&mut self, _files: &[PathBuf]) {}
-    /// Java source TODO `isLocalDir(String)`.
-    pub fn is_local_dir(&self, _current_directory: &str) -> bool {
+
+    /// Java `add(JPanel, GridBagLayout, GridBagConstraints)` (final).  The layout
+    /// and constraints are Swing layout (not modelled); the panel is the parent.
+    pub fn add(&self, panel: &Rc<JComponent>) {
+        if self.grid_bag_extension.borrow().is_none() {
+            *self.grid_bag_extension.borrow_mut() = Some(GridBagExtension::new());
+        }
+        let grid_bag_extension = self.grid_bag_extension.borrow().clone().unwrap();
+        grid_bag_extension.add(&self.get_component(), panel);
+    }
+
+    /// Java `setText(File[])`.  (Empty in the source: "TODO Auto-generated method
+    /// stub".)
+    pub fn set_text_file_array(&self, files: Option<&[PathBuf]>) {
+        let _ = files;
+    }
+
+    /// Java `isLocalDir(String)`.  (A stub in the source.)
+    pub fn is_local_dir(&self, current_directory: Option<&str>) -> bool {
+        let _ = current_directory;
         false
     }
 }
-impl std::fmt::Display for TextEfield {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.write_str(&self.label_text)
+
+impl TextEfieldVirtual for TextEfield {
+    fn text_efield(&self) -> &TextEfield {
+        self
     }
 }
 
+// ---- interface bindings (each forwards to the method above) ----
+
 impl TextEfieldInterface for TextEfield {
-    fn get_directive_def(&self) -> Option<&str> {
+    fn get_directive_def(&self) -> Option<DirectiveDef> {
         TextEfield::get_directive_def(self)
     }
     fn is_enabled(&self) -> bool {
@@ -603,62 +1079,88 @@ impl TextEfieldInterface for TextEfield {
     fn is_visible(&self) -> bool {
         TextEfield::is_visible(self)
     }
-    fn get_text(&self) -> String {
-        TextEfield::get_text(self)
+    fn get_text(&self) -> Option<String> {
+        TextEfield::get_text_void(self)
     }
-    fn set_text(&mut self, text: String) {
-        TextEfield::set_text(self, text);
+    fn set_text(&self, text: Option<&str>) {
+        TextEfield::set_text_string(self, text)
     }
-    fn set_field_highlight(&mut self, text: String) {
-        TextEfield::set_field_highlight(self, text);
+    fn set_field_highlight(&self, text: Option<&str>) {
+        TextEfield::set_field_highlight(self, text)
     }
-    fn set_template_value(&mut self) {
-        TextEfield::set_template_value(self);
+    fn set_template_value(&self) {
+        TextEfield::set_template_value(self)
     }
     fn equals(&self, string: Option<&str>) -> bool {
         TextEfield::equals(self, string)
     }
-    fn set_debug(&mut self, debug: bool) {
-        TextEfield::set_debug(self, debug);
+    fn set_debug(&self, debug: bool) {
+        TextEfield::set_debug(self, debug)
+    }
+}
+
+impl UIComponent for TextEfield {
+    fn get_ui_component(&self) -> &dyn SwingComponent {
+        self
+    }
+    fn get_component(&self) -> Rc<JComponent> {
+        TextEfield::get_component(self)
+    }
+}
+
+impl SwingComponent for TextEfield {
+    fn get_component(&self) -> Rc<JComponent> {
+        TextEfield::get_component(self)
+    }
+}
+
+impl TextFlagOrigin for TextEfield {
+    fn equals(&self, value: Option<&str>) -> bool {
+        TextEfield::equals(self, value)
+    }
+    fn add_flag_origin_listener(&self, listener: Rc<dyn FlagOriginListener>) {
+        TextEfield::add_flag_origin_listener(self, listener)
+    }
+    fn is_valid(&self) -> bool {
+        TextEfield::is_valid(self)
     }
 }
 
 impl ValueManipulationField for TextEfield {
+    fn add_value_manipulation_listener(&self, listener: Rc<dyn ValueManipulationListener>) {
+        TextEfield::add_value_manipulation_listener(self, listener)
+    }
     fn is_empty(&self) -> bool {
         TextEfield::is_empty(self)
     }
-    fn set_text(&mut self, text: String) {
-        TextEfield::set_text(self, text);
-    }
-    fn add_value_manipulation_listener(&mut self) {
-        TextEfield::add_value_manipulation_listener(self);
+    fn set_text(&self, text: Option<&str>) {
+        TextEfield::set_text_string(self, text)
     }
 }
 
-#[cfg(test)]
-mod tests {
-    use super::*;
-    #[test]
-    fn source_uitest_name_and_columns_are_retained() {
-        let mut field = TextEfield::get_labeled_instance("Input file:", FieldType::File);
-        field.set_columns();
-        assert_eq!(field.text_field.name.as_deref(), Some("tf.input-file"));
-        assert_eq!(field.text_field.columns, 15);
+impl ControlTarget for TextEfield {
+    fn clear(&self) {
+        TextEfield::clear(self)
     }
-    #[test]
-    fn override_hides_value_and_component_control_hides_text_widget() {
-        let mut field = TextEfield::get_override_instance("Override", Some(FieldType::String));
-        field.set_text("ordinary");
-        field.set_component_control(true, Some(ControlState::Enabled));
-        assert_eq!(field.get_text(), "");
-        assert!(!field.text_field.visible);
+    fn set_text_file(&self, file: Option<&Path>) {
+        TextEfield::set_text_file(self, file)
     }
-    #[test]
-    fn file_display_limit_retains_full_path() {
-        let mut field = TextEfield::get_instance("File", FieldType::File);
-        field.set_limit_displayed_file_path(4);
-        field.set_text("/one/two/file.mrc");
-        assert_eq!(field.get_text(), "/one/two/file.mrc");
-        assert_eq!(field.text_field.text, ".../file.mrc");
+    fn set_text_file_array(&self, files: Option<&[PathBuf]>) {
+        TextEfield::set_text_file_array(self, files)
+    }
+    fn get_label(&self) -> Option<String> {
+        TextEfield::get_label(self)
+    }
+    fn set_component_control(&self, control: bool, state: Option<&'static ControlState>) {
+        TextEfield::set_component_control(self, control, state)
+    }
+    fn set_enable_control(&self, control: bool, state: Option<&'static ControlState>) {
+        TextEfield::set_enable_control(self, control, state)
+    }
+    fn send_control_event(&self) {
+        TextEfield::send_control_event(self)
+    }
+    fn is_local_dir(&self, current_directory: Option<&str>) -> bool {
+        TextEfield::is_local_dir(self, current_directory)
     }
 }

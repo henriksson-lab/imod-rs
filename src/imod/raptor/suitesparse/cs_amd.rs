@@ -1,465 +1,462 @@
 //! Translation of `IMOD/raptor/suitesparse/cs_amd.c`.
+//!
+//! The workspace `W` (eight arrays of `n+1` ints: `len`, `nv`, `next`,
+//! `head`, `elen`, `degree`, `w`, `hhead`) is eight `Vec`s; `last` uses the
+//! result array `P` as workspace, as in C.
 
-use super::Cs;
+use super::cs::{Cs, cs_csc, cs_flip, cs_max, cs_min};
 use super::cs_add::cs_add;
+use super::cs_fkeep::cs_fkeep;
+use super::cs_malloc::cs_malloc;
 use super::cs_multiply::cs_multiply;
+use super::cs_tdfs::cs_tdfs;
 use super::cs_transpose::cs_transpose;
+use super::cs_util::{cs_idone, cs_sprealloc};
 
-fn flip(value: i64) -> i64 {
-    -value - 2
-}
-
-/// C `cs_wclear`: clear AMD element marks before the mark counter wraps.
-fn cs_wclear(mark: i64, lemax: i64, workspace: &mut [i64], count: usize) -> i64 {
-    if mark < 2 || mark.checked_add(lemax).is_none_or(|value| value < 0) {
-        for value in &mut workspace[..count] {
-            if *value != 0 {
-                *value = 1;
+/// `cs_wclear(mark, lemax, w, n)` (static): clear w.
+fn cs_wclear(mut mark: i32, lemax: i32, w: &mut [i32], n: i32) -> i32 {
+    if mark < 2 || mark.wrapping_add(lemax) < 0 {
+        for k in 0..n as usize {
+            if w[k] != 0 {
+                w[k] = 1;
             }
         }
-        2
-    } else {
-        mark
+        mark = 2;
     }
+    mark // at this point, w [0..n-1] < mark holds
 }
 
-/// C `cs_diag`: retain an entry only when it is off the diagonal.
-fn cs_diag(row: usize, column: usize, _value: f64) -> bool {
-    row != column
+/// `cs_diag(i, j, aij, other)` (static): keep off-diagonal entries; drop
+/// diagonal entries.
+fn cs_diag(i: i32, j: i32, _aij: f64) -> i32 {
+    (i != j) as i32
 }
 
-/// C `cs_amd`: approximate minimum-degree ordering.
-///
-/// Order 1 builds `A + A'`, order 2 uses the LU normal-equation graph, and
-/// order 3 uses the QR normal-equation graph.  Like C CSparse, order zero is
-/// represented by no permutation and therefore returns `None`.
-pub fn cs_amd(order: i32, matrix: &Cs) -> Option<Vec<usize>> {
-    if !matrix.is_csc() || !(1..=3).contains(&order) {
+/// `cs_amd(order, A)`: p = amd(A+A') if symmetric is true, or amd(A'A)
+/// otherwise.  order 0:natural, 1:Chol, 2:LU, 3:QR.
+pub fn cs_amd(order: i32, a: &Cs) -> Option<Vec<i32>> {
+    let mut lemax = 0i32;
+    let mut mindeg = 0i32;
+    let mut nel = 0i32;
+    // --- Construct matrix C ---
+    if !cs_csc(a) || order <= 0 || order > 3 {
         return None;
     }
-    let n = matrix.columns;
-    if n == 0 {
-        return Some(Vec::new());
-    }
-    let mut transpose = cs_transpose(matrix, false)?;
-    let mut graph = if order == 1 && matrix.rows == n {
-        cs_add(matrix, &transpose, 0.0, 0.0)?
-    } else if order == 2 {
-        let dense = n
-            .saturating_sub(2)
-            .min((10.0 * (n as f64).sqrt()).max(16.0) as usize);
-        let mut write = 0;
-        for column in 0..transpose.columns {
-            let start = transpose.column_pointers[column];
-            let end = transpose.column_pointers[column + 1];
-            transpose.column_pointers[column] = write;
-            if end - start > dense {
-                continue;
-            }
-            for index in start..end {
-                transpose.row_indices[write] = transpose.row_indices[index];
-                write += 1;
-            }
-        }
-        transpose.column_pointers[transpose.columns] = write;
-        transpose.row_indices.truncate(write);
-        transpose.values.truncate(write);
-        transpose.nzmax = write;
-        let second_transpose = cs_transpose(&transpose, false)?;
-        cs_multiply(&transpose, &second_transpose)?
+    let mut at = cs_transpose(a, 0)?; // compute A'
+    let m = a.m;
+    let n = a.n;
+    // `CS_MAX (16, 10 * sqrt ((double) n))` is a double, truncated on
+    // assignment to the int `dense`.
+    let dense_d = if 16.0 > 10.0 * (n as f64).sqrt() {
+        16.0
     } else {
-        cs_multiply(&transpose, matrix)?
+        10.0 * (n as f64).sqrt()
     };
-    // `cs_diag` / `cs_fkeep`: AMD uses only off-diagonal graph edges.
-    let mut retained = 0;
-    for column in 0..graph.columns {
-        let start = graph.column_pointers[column];
-        let end = graph.column_pointers[column + 1];
-        graph.column_pointers[column] = retained;
-        for entry in start..end {
-            if cs_diag(graph.row_indices[entry], column, graph.values[entry]) {
-                graph.row_indices[retained] = graph.row_indices[entry];
-                retained += 1;
+    let mut dense = dense_d as i32; // find dense threshold
+    dense = cs_min(n - 2, dense);
+    let c = if order == 1 && n == m {
+        cs_add(a, &at, 0.0, 0.0) // C = A+A'
+    } else if order == 2 {
+        // drop dense columns from AT
+        let mut p2 = 0i32;
+        for j in 0..m as usize {
+            let mut p = at.p[j]; // column j of AT starts here
+            at.p[j] = p2; // new column j starts here
+            if at.p[j + 1] - p > dense {
+                continue; // skip dense col j
+            }
+            while p < at.p[j + 1] {
+                at.i[p2 as usize] = at.i[p as usize];
+                p2 += 1;
+                p += 1;
             }
         }
+        at.p[m as usize] = p2; // finalize AT
+        let a2 = cs_transpose(&at, 0); // A2 = AT'
+        match a2 {
+            Some(a2) => cs_multiply(&at, &a2), // C=A'*A with no dense rows
+            None => None,
+        }
+    } else {
+        cs_multiply(&at, a) // C=A'*A
+    };
+    drop(at);
+    let mut c = c?;
+    cs_fkeep(&mut c, &cs_diag); // drop diagonal entries
+    let mut cnz = c.p[n as usize];
+    let mut pp: Vec<i32> = cs_malloc(n + 1); // allocate result
+    let nu1 = (n + 1) as usize;
+    let mut len: Vec<i32> = vec![0; nu1];
+    let mut nv: Vec<i32> = vec![0; nu1];
+    let mut next: Vec<i32> = vec![0; nu1];
+    let mut head: Vec<i32> = vec![0; nu1];
+    let mut elen: Vec<i32> = vec![0; nu1];
+    let mut degree: Vec<i32> = vec![0; nu1];
+    let mut w: Vec<i32> = vec![0; nu1];
+    let mut hhead: Vec<i32> = vec![0; nu1];
+    let t = cnz + cnz / 5 + 2 * n; // add elbow room to C
+    if cs_sprealloc(&mut c, t) == 0 {
+        return cs_idone(pp, 0);
     }
-    graph.column_pointers[n] = retained;
-    graph.row_indices.truncate(retained);
-    graph.values.truncate(retained);
-    graph.nzmax = retained;
-
-    let mut cp: Vec<i64> = graph
-        .column_pointers
-        .iter()
-        .map(|&value| value as i64)
-        .collect();
-    let mut ci: Vec<i64> = graph
-        .row_indices
-        .iter()
-        .map(|&value| value as i64)
-        .collect();
-    let cnz = ci.len();
-    let elbow = cnz.checked_add(cnz / 5)?.checked_add(2 * n)?;
-    ci.resize(elbow, 0);
-    let mut result = vec![-1_i64; n + 1];
-    let mut work = vec![0_i64; 8 * (n + 1)];
-    let (len, rest) = work.split_at_mut(n + 1);
-    let (nv, rest) = rest.split_at_mut(n + 1);
-    let (next, rest) = rest.split_at_mut(n + 1);
-    let (head, rest) = rest.split_at_mut(n + 1);
-    let (elen, rest) = rest.split_at_mut(n + 1);
-    let (degree, rest) = rest.split_at_mut(n + 1);
-    let (w, hhead) = rest.split_at_mut(n + 1);
-    let mut last = vec![-1_i64; n + 1];
-    let mut current_nz = cnz;
-    let mut lemax = 0_i64;
-    let mut nel = 0_i64;
-    let mut mark = cs_wclear(0, 0, w, n);
-    for node in 0..=n {
-        head[node] = -1;
-        next[node] = -1;
-        hhead[node] = -1;
-        last[node] = -1;
-        nv[node] = 1;
-        w[node] = 1;
-        elen[node] = 0;
-        degree[node] = if node < n { cp[node + 1] - cp[node] } else { 0 };
-        len[node] = degree[node];
+    let last = &mut pp; // use P as workspace for last
+    // --- Initialize quotient graph ---
+    for k in 0..n as usize {
+        len[k] = c.p[k + 1] - c.p[k];
     }
-    elen[n] = -2;
-    cp[n] = -1;
-    w[n] = 0;
-    let dense = (n.saturating_sub(2)).min((10.0 * (n as f64).sqrt()).max(16.0) as usize) as i64;
-    for node in 0..n {
-        let d = degree[node];
+    len[n as usize] = 0;
+    let nzmax = c.nzmax;
+    let cp = &mut c.p;
+    let ci = &mut c.i;
+    for i in 0..=n as usize {
+        head[i] = -1; // degree list i is empty
+        last[i] = -1;
+        next[i] = -1;
+        hhead[i] = -1; // hash list i is empty
+        nv[i] = 1; // node i is just one node
+        w[i] = 1; // node i is alive
+        elen[i] = 0; // Ek of node i is empty
+        degree[i] = len[i]; // degree of node i
+    }
+    let mut mark = cs_wclear(0, 0, &mut w, n); // clear w
+    elen[n as usize] = -2; // n is a dead element
+    cp[n as usize] = -1; // n is a root of assembly tree
+    w[n as usize] = 0; // n is a dead element
+    // --- Initialize degree lists ---
+    for i in 0..n {
+        let iu = i as usize;
+        let d = degree[iu];
         if d == 0 {
-            elen[node] = -2;
+            // node i is empty
+            elen[iu] = -2; // element i is dead
             nel += 1;
-            cp[node] = -1;
-            w[node] = 0;
+            cp[iu] = -1; // i is a root of assembly tree
+            w[iu] = 0;
         } else if d > dense {
-            nv[node] = 0;
-            elen[node] = -1;
+            // node i is dense
+            nv[iu] = 0; // absorb i into element n
+            elen[iu] = -1; // node i is dead
             nel += 1;
-            cp[node] = flip(n as i64);
-            nv[n] += 1;
+            cp[iu] = cs_flip(n);
+            nv[n as usize] += 1;
         } else {
-            let d = d as usize;
-            if head[d] != -1 {
-                last[head[d] as usize] = node as i64;
+            if head[d as usize] != -1 {
+                last[head[d as usize] as usize] = i;
             }
-            next[node] = head[d];
-            head[d] = node as i64;
+            next[iu] = head[d as usize]; // put node i in degree list d
+            head[d as usize] = i;
         }
     }
-    let mut minimum_degree = 0usize;
-    while nel < n as i64 {
-        while minimum_degree < n && head[minimum_degree] == -1 {
-            minimum_degree += 1;
+    while nel < n {
+        // while (selecting pivots) do
+        // --- Select node of minimum approximate degree ---
+        let mut k = -1i32;
+        while mindeg < n && {
+            k = head[mindeg as usize];
+            k == -1
+        } {
+            mindeg += 1;
         }
-        if minimum_degree == n {
-            return None;
+        let ku = k as usize;
+        if next[ku] != -1 {
+            last[next[ku] as usize] = -1;
         }
-        let mut k = head[minimum_degree] as usize;
-        if next[k] != -1 {
-            last[next[k] as usize] = -1;
-        }
-        head[minimum_degree] = next[k];
-        let elenk = elen[k];
-        let mut nvk = nv[k];
-        nel += nvk;
-        if elenk > 0 && current_nz + minimum_degree >= ci.len() {
-            for node in 0..n {
-                let pointer = cp[node];
-                if pointer >= 0 {
-                    let pointer = pointer as usize;
-                    cp[node] = ci[pointer];
-                    ci[pointer] = flip(node as i64);
+        head[mindeg as usize] = next[ku]; // remove k from degree list
+        let elenk = elen[ku]; // elenk = |Ek|
+        let mut nvk = nv[ku]; // # of nodes k represents
+        nel += nvk; // nv[k] nodes of A eliminated
+        // --- Garbage collection ---
+        if elenk > 0 && cnz + mindeg >= nzmax {
+            for j in 0..n as usize {
+                let p = cp[j];
+                if p >= 0 {
+                    // j is a live node or element
+                    cp[j] = ci[p as usize]; // save first entry of object
+                    ci[p as usize] = cs_flip(j as i32); // first entry is now CS_FLIP(j)
                 }
             }
-            let mut destination = 0;
-            let mut source = 0;
-            while source < current_nz {
-                let node = flip(ci[source]);
-                source += 1;
-                if node >= 0 {
-                    let node = node as usize;
-                    ci[destination] = cp[node];
-                    destination += 1;
-                    cp[node] = (destination - 1) as i64;
-                    for _ in 0..len[node] - 1 {
-                        ci[destination] = ci[source];
-                        destination += 1;
-                        source += 1;
+            let mut q = 0i32;
+            let mut p = 0i32;
+            while p < cnz {
+                // scan all of memory
+                let j = cs_flip(ci[p as usize]);
+                p += 1;
+                if j >= 0 {
+                    // found object j
+                    ci[q as usize] = cp[j as usize]; // restore first entry of object
+                    cp[j as usize] = q; // new pointer to object j
+                    q += 1;
+                    for _k3 in 0..len[j as usize] - 1 {
+                        ci[q as usize] = ci[p as usize];
+                        q += 1;
+                        p += 1;
                     }
                 }
             }
-            current_nz = destination;
+            cnz = q; // Ci [cnz...nzmax-1] now free
         }
-        let mut dk = 0_i64;
-        nv[k] = -nvk;
-        let mut pointer = cp[k] as usize;
-        let pk1 = if elenk == 0 { pointer } else { current_nz };
+        // --- Construct new element ---
+        let mut dk = 0i32;
+        nv[ku] = -nvk; // flag k as in Lk
+        let mut p = cp[ku];
+        let pk1 = if elenk == 0 { p } else { cnz }; // do in place if elen[k] == 0
         let mut pk2 = pk1;
-        for part in 1..=(elenk + 1) as usize {
-            let (element, mut element_pointer, length) = if part > elenk as usize {
-                (k, pointer, len[k] - elenk)
+        for k1 in 1..=elenk + 1 {
+            let e;
+            let mut pj;
+            let ln;
+            if k1 > elenk {
+                e = k; // search the nodes in k
+                pj = p; // list of nodes starts at Ci[pj]
+                ln = len[ku] - elenk; // length of list of nodes in k
             } else {
-                let element = ci[pointer] as usize;
-                pointer += 1;
-                (element, cp[element] as usize, len[element])
-            };
-            for _ in 0..length {
-                let node = ci[element_pointer] as usize;
-                element_pointer += 1;
-                let node_weight = nv[node];
-                if node_weight <= 0 {
-                    continue;
+                e = ci[p as usize]; // search the nodes in e
+                p += 1;
+                pj = cp[e as usize];
+                ln = len[e as usize]; // length of list of nodes in e
+            }
+            for _k2 in 1..=ln {
+                let i = ci[pj as usize];
+                pj += 1;
+                let iu = i as usize;
+                let nvi = nv[iu];
+                if nvi <= 0 {
+                    continue; // node i dead, or seen
                 }
-                dk += node_weight;
-                nv[node] = -node_weight;
-                ci[pk2] = node as i64;
+                dk += nvi; // degree[Lk] += size of node i
+                nv[iu] = -nvi; // negate nv[i] to denote i in Lk
+                ci[pk2 as usize] = i; // place i in Lk
                 pk2 += 1;
-                if next[node] != -1 {
-                    last[next[node] as usize] = last[node];
+                if next[iu] != -1 {
+                    last[next[iu] as usize] = last[iu];
                 }
-                if last[node] != -1 {
-                    next[last[node] as usize] = next[node];
+                if last[iu] != -1 {
+                    // remove i from degree list
+                    next[last[iu] as usize] = next[iu];
                 } else {
-                    head[degree[node] as usize] = next[node];
+                    head[degree[iu] as usize] = next[iu];
                 }
             }
-            if element != k {
-                cp[element] = flip(k as i64);
-                w[element] = 0;
+            if e != k {
+                cp[e as usize] = cs_flip(k); // absorb e into k
+                w[e as usize] = 0; // e is now a dead element
             }
         }
         if elenk != 0 {
-            current_nz = pk2;
+            cnz = pk2; // Ci [cnz...nzmax] is free
         }
-        degree[k] = dk;
-        cp[k] = pk1 as i64;
-        len[k] = (pk2 - pk1) as i64;
-        elen[k] = -2;
-        mark = cs_wclear(mark, lemax, w, n);
+        degree[ku] = dk; // external degree of k - |Lk\i|
+        cp[ku] = pk1; // element k is in Ci[pk1..pk2-1]
+        len[ku] = pk2 - pk1;
+        elen[ku] = -2; // k is now an element
+        // --- Find set differences ---
+        mark = cs_wclear(mark, lemax, &mut w, n); // clear w if necessary
         for pk in pk1..pk2 {
-            let node = ci[pk] as usize;
-            let element_length = elen[node];
-            if element_length <= 0 {
-                continue;
+            // scan 1: find |Le\Lk|
+            let i = ci[pk as usize] as usize;
+            let eln = elen[i];
+            if eln <= 0 {
+                continue; // skip if elen[i] empty
             }
-            let node_weight = -nv[node];
-            let weighted_mark = mark - node_weight;
-            let stop = cp[node] + element_length;
-            for position in cp[node]..stop {
-                let element = ci[position as usize] as usize;
-                if w[element] >= mark {
-                    w[element] -= node_weight;
-                } else if w[element] != 0 {
-                    w[element] = degree[element] + weighted_mark;
+            let nvi = -nv[i]; // nv [i] was negated
+            let wnvi = mark - nvi;
+            let mut p = cp[i];
+            while p <= cp[i] + eln - 1 {
+                // scan Ei
+                let e = ci[p as usize] as usize;
+                if w[e] >= mark {
+                    w[e] -= nvi; // decrement |Le\Lk|
+                } else if w[e] != 0 {
+                    // ensure e is a live element
+                    w[e] = degree[e] + wnvi; // 1st time e seen in scan 1
                 }
+                p += 1;
             }
         }
+        // --- Degree update ---
         for pk in pk1..pk2 {
-            let node = ci[pk] as usize;
-            let p1 = cp[node] as usize;
-            let p2 = (cp[node] + elen[node] - 1) as usize;
+            // scan2: degree update
+            let i = ci[pk as usize] as usize; // consider node i in Lk
+            let p1 = cp[i];
+            let p2 = p1 + elen[i] - 1;
             let mut pn = p1;
-            let mut hash = 0_i64;
-            let mut d = 0_i64;
-            for position in p1..=p2 {
-                let element = ci[position] as usize;
-                if w[element] != 0 {
-                    let external_degree = w[element] - mark;
-                    if external_degree > 0 {
-                        d += external_degree;
-                        ci[pn] = element as i64;
+            let mut h: u32 = 0;
+            let mut d = 0i32;
+            let mut p = p1;
+            while p <= p2 {
+                // scan Ei
+                let e = ci[p as usize];
+                if w[e as usize] != 0 {
+                    // e is an unabsorbed element
+                    let dext = w[e as usize] - mark; // dext = |Le\Lk|
+                    if dext > 0 {
+                        d += dext; // sum up the set differences
+                        ci[pn as usize] = e; // keep e in Ei
                         pn += 1;
-                        hash += element as i64;
+                        h = h.wrapping_add(e as u32); // compute the hash of node i
                     } else {
-                        cp[element] = flip(k as i64);
-                        w[element] = 0;
+                        cp[e as usize] = cs_flip(k); // aggressive absorb. e->k
+                        w[e as usize] = 0; // e is a dead element
                     }
                 }
+                p += 1;
             }
-            elen[node] = (pn - p1 + 1) as i64;
+            elen[i] = pn - p1 + 1; // elen[i] = |Ei|
             let p3 = pn;
-            let p4 = p1 + len[node] as usize;
-            for position in (p2 + 1)..p4 {
-                let neighbor = ci[position] as usize;
-                let neighbor_weight = nv[neighbor];
-                if neighbor_weight <= 0 {
-                    continue;
+            let p4 = p1 + len[i];
+            let mut p = p2 + 1;
+            while p < p4 {
+                // prune edges in Ai
+                let j = ci[p as usize];
+                p += 1;
+                let nvj = nv[j as usize];
+                if nvj <= 0 {
+                    continue; // node j dead or in Lk
                 }
-                d += neighbor_weight;
-                ci[pn] = neighbor as i64;
+                d += nvj; // degree(i) += |j|
+                ci[pn as usize] = j; // place j in node list of i
                 pn += 1;
-                hash += neighbor as i64;
+                h = h.wrapping_add(j as u32); // compute hash for node i
             }
             if d == 0 {
-                cp[node] = flip(k as i64);
-                let node_weight = -nv[node];
-                dk -= node_weight;
-                nvk += node_weight;
-                nel += node_weight;
-                nv[node] = 0;
-                elen[node] = -1;
+                // check for mass elimination
+                cp[i] = cs_flip(k); // absorb i into k
+                let nvi = -nv[i];
+                dk -= nvi; // |Lk| -= |i|
+                nvk += nvi; // |k| += nv[i]
+                nel += nvi;
+                nv[i] = 0;
+                elen[i] = -1; // node i is dead
             } else {
-                degree[node] = degree[node].min(d);
-                ci[pn] = ci[p3];
-                ci[p3] = ci[p1];
-                ci[p1] = k as i64;
-                len[node] = (pn - p1 + 1) as i64;
-                let hash = (hash as usize) % n;
-                next[node] = hhead[hash];
-                hhead[hash] = node as i64;
-                last[node] = hash as i64;
+                degree[i] = cs_min(degree[i], d); // update degree(i)
+                ci[pn as usize] = ci[p3 as usize]; // move first node to end
+                ci[p3 as usize] = ci[p1 as usize]; // move 1st el. to end of Ei
+                ci[p1 as usize] = k; // add k as 1st element in of Ei
+                len[i] = pn - p1 + 1; // new len of adj. list of node i
+                h %= n as u32; // finalize hash of i
+                next[i] = hhead[h as usize]; // place i in hash bucket
+                hhead[h as usize] = i as i32;
+                last[i] = h as i32; // save hash of i in last[i]
             }
-        }
-        degree[k] = dk;
-        lemax = lemax.max(dk);
-        mark = cs_wclear(mark.checked_add(lemax)?, lemax, w, n);
+        } // scan2 is done
+        degree[ku] = dk; // finalize |Lk|
+        lemax = cs_max(lemax, dk);
+        mark = cs_wclear(mark + lemax, lemax, &mut w, n); // clear w
+        // --- Supernode detection ---
         for pk in pk1..pk2 {
-            let mut node = ci[pk] as usize;
-            if nv[node] >= 0 {
-                continue;
+            let i = ci[pk as usize];
+            if nv[i as usize] >= 0 {
+                continue; // skip if i is dead
             }
-            let hash = last[node] as usize;
-            node = hhead[hash] as usize;
-            hhead[hash] = -1;
-            while node != usize::MAX && next[node] != -1 {
-                let length = len[node];
-                let element_length = elen[node];
-                for position in (cp[node] + 1)..=(cp[node] + length - 1) {
-                    w[ci[position as usize] as usize] = mark;
+            let h = last[i as usize] as u32; // scan hash bucket of node i
+            let mut i = hhead[h as usize];
+            hhead[h as usize] = -1; // hash bucket will be empty
+            while i != -1 && next[i as usize] != -1 {
+                let iu = i as usize;
+                let ln = len[iu];
+                let eln = elen[iu];
+                let mut p = cp[iu] + 1;
+                while p <= cp[iu] + ln - 1 {
+                    w[ci[p as usize] as usize] = mark;
+                    p += 1;
                 }
-                let mut previous = node;
-                let mut candidate = next[node];
-                while candidate != -1 {
-                    let candidate_index = candidate as usize;
-                    let mut equal =
-                        len[candidate_index] == length && elen[candidate_index] == element_length;
-                    for position in (cp[candidate_index] + 1)..=(cp[candidate_index] + length - 1) {
-                        if equal && w[ci[position as usize] as usize] != mark {
-                            equal = false;
+                let mut jlast = i;
+                let mut j = next[iu];
+                while j != -1 {
+                    // compare i with all j
+                    let ju = j as usize;
+                    let mut ok = (len[ju] == ln) && (elen[ju] == eln);
+                    let mut p = cp[ju] + 1;
+                    while ok && p <= cp[ju] + ln - 1 {
+                        if w[ci[p as usize] as usize] != mark {
+                            ok = false; // compare i and j
                         }
+                        p += 1;
                     }
-                    if equal {
-                        cp[candidate_index] = flip(node as i64);
-                        nv[node] += nv[candidate_index];
-                        nv[candidate_index] = 0;
-                        elen[candidate_index] = -1;
-                        candidate = next[candidate_index];
-                        next[previous] = candidate;
+                    if ok {
+                        // i and j are identical
+                        cp[ju] = cs_flip(i); // absorb j into i
+                        nv[iu] += nv[ju];
+                        nv[ju] = 0;
+                        elen[ju] = -1; // node j is dead
+                        j = next[ju]; // delete j from hash bucket
+                        next[jlast as usize] = j;
                     } else {
-                        previous = candidate_index;
-                        candidate = next[candidate_index];
+                        jlast = j; // j and i are different
+                        j = next[ju];
                     }
                 }
-                mark = mark.checked_add(1)?;
-                node = next[node].try_into().unwrap_or(usize::MAX);
+                i = next[iu];
+                mark += 1;
             }
         }
-        let mut write = pk1;
+        // --- Finalize new element ---
+        let mut p = pk1;
         for pk in pk1..pk2 {
-            let node = ci[pk] as usize;
-            let node_weight = -nv[node];
-            if node_weight <= 0 {
-                continue;
+            // finalize Lk
+            let i = ci[pk as usize];
+            let iu = i as usize;
+            let nvi = -nv[iu];
+            if nvi <= 0 {
+                continue; // skip if i is dead
             }
-            nv[node] = node_weight;
-            let d = (degree[node] + dk - node_weight).min(n as i64 - nel - node_weight);
+            nv[iu] = nvi; // restore nv[i]
+            let mut d = degree[iu] + dk - nvi; // compute external degree(i)
+            d = cs_min(d, n - nel - nvi);
             if head[d as usize] != -1 {
-                last[head[d as usize] as usize] = node as i64;
+                last[head[d as usize] as usize] = i;
             }
-            next[node] = head[d as usize];
-            last[node] = -1;
-            head[d as usize] = node as i64;
-            minimum_degree = minimum_degree.min(d as usize);
-            degree[node] = d;
-            ci[write] = node as i64;
-            write += 1;
+            next[iu] = head[d as usize]; // put i back in degree list
+            last[iu] = -1;
+            head[d as usize] = i;
+            mindeg = cs_min(mindeg, d); // find new minimum degree
+            degree[iu] = d;
+            ci[p as usize] = i; // place i in Lk
+            p += 1;
         }
-        nv[k] = nvk;
-        len[k] = (write - pk1) as i64;
-        if len[k] == 0 {
-            cp[k] = -1;
-            w[k] = 0;
+        nv[ku] = nvk; // # nodes absorbed into k
+        len[ku] = p - pk1;
+        if len[ku] == 0 {
+            // length of adj list of element k
+            cp[ku] = -1; // k is a root of the tree
+            w[ku] = 0; // k is now a dead element
         }
         if elenk != 0 {
-            current_nz = write;
+            cnz = p; // free unused space in Lk
         }
     }
-    for node in 0..n {
-        cp[node] = flip(cp[node]);
+    // --- Postordering ---
+    for i in 0..n as usize {
+        cp[i] = cs_flip(cp[i]); // fix assembly tree
     }
-    head.fill(-1);
-    for node in (0..=n).rev() {
-        if nv[node] <= 0 {
-            let parent = cp[node] as usize;
-            next[node] = head[parent];
-            head[parent] = node as i64;
+    for j in 0..=n as usize {
+        head[j] = -1;
+    }
+    let mut j = n;
+    while j >= 0 {
+        // place unordered nodes in lists
+        let ju = j as usize;
+        if nv[ju] <= 0 {
+            next[ju] = head[cp[ju] as usize]; // place j in list of its parent
+            head[cp[ju] as usize] = j;
+        }
+        j -= 1;
+    }
+    let mut e = n;
+    while e >= 0 {
+        // place elements in lists
+        let eu = e as usize;
+        if nv[eu] > 0 && cp[eu] != -1 {
+            next[eu] = head[cp[eu] as usize]; // place e in list of its parent
+            head[cp[eu] as usize] = e;
+        }
+        e -= 1;
+    }
+    let mut k = 0i32;
+    for i in 0..=n {
+        // postorder the assembly tree
+        if cp[i as usize] == -1 {
+            k = cs_tdfs(i, k, &mut head, &next, last, &mut w);
         }
     }
-    for element in (0..=n).rev() {
-        if nv[element] > 0 && cp[element] != -1 {
-            let parent = cp[element] as usize;
-            next[element] = head[parent];
-            head[parent] = element as i64;
-        }
-    }
-    let mut out = Vec::with_capacity(n);
-    let mut stack = Vec::new();
-    for root in 0..=n {
-        if cp[root] != -1 {
-            continue;
-        }
-        stack.push((root, head[root]));
-        while let Some((node, child)) = stack.pop() {
-            if child == -1 {
-                if node < n {
-                    out.push(node);
-                }
-            } else {
-                stack.push((node, next[child as usize]));
-                stack.push((child as usize, head[child as usize]));
-            }
-        }
-    }
-    (out.len() == n).then_some(out)
-}
-
-#[cfg(test)]
-mod tests {
-    use super::{cs_amd, cs_diag, cs_wclear};
-    use crate::imod::raptor::suitesparse::Cs;
-
-    #[test]
-    fn amd_returns_a_permutation_for_each_supported_graph() {
-        let matrix = Cs {
-            nzmax: 7,
-            rows: 3,
-            columns: 3,
-            column_pointers: vec![0, 2, 5, 7],
-            row_indices: vec![0, 1, 0, 1, 2, 1, 2],
-            values: vec![1.0; 7],
-            nz: -1,
-        };
-        for order in 1..=3 {
-            let mut permutation = cs_amd(order, &matrix).unwrap();
-            permutation.sort_unstable();
-            assert_eq!(permutation, vec![0, 1, 2]);
-        }
-        assert_eq!(cs_amd(0, &matrix), None);
-    }
-
-    #[test]
-    fn amd_mark_clear_and_diagonal_filter_follow_c_helpers() {
-        let mut marks = [0, 5, -4];
-        assert_eq!(cs_wclear(0, 0, &mut marks, 3), 2);
-        assert_eq!(marks, [0, 1, 1]);
-        assert_eq!(cs_wclear(5, 3, &mut marks, 3), 5);
-        assert!(cs_diag(0, 1, 4.0));
-        assert!(!cs_diag(1, 1, 4.0));
-    }
+    cs_idone(pp, 1)
 }

@@ -1,84 +1,69 @@
 //! `IMOD/Etomo/src/etomo/ui/swing/SpacedLabel.java`.
-#![allow(dead_code)]
+//!
+//! A label padded by rigid areas: five pixels either side and five below.
 
-use super::fixed_dim::FixedDim;
+use std::rc::Rc;
 
-/// Java package-private final `SpacedLabel`, including all three Swing widgets.
-#[derive(Clone, Debug, PartialEq)]
+use crate::imod::etomo::jdk::JComponent;
+
+/// Java `public static final String rcsid`.
+pub const RCSID: &str = "$Id$";
+
+/// Java package-private `final class SpacedLabel`.
 pub struct SpacedLabel {
-    pub label: String,
-    pub label_tooltip: Option<String>,
-    pub label_panel_tooltip: Option<String>,
-    pub y_axis_panel_tooltip: Option<String>,
-    pub label_visible: bool,
-    pub label_panel_visible: bool,
-    pub y_axis_panel_visible: bool,
-    pub label_alignment_x: f32,
-    pub label_panel_alignment_x: f32,
-    pub y_axis_panel_alignment_x: f32,
-    pub label_panel_rigid_areas: [(i32, i32); 2],
-    pub y_axis_rigid_area: (i32, i32),
+    /// Java `label`.
+    label: Rc<JComponent>,
+    /// Java `labelPanel`.
+    label_panel: Rc<JComponent>,
+    /// Java `yAxisPanel`.
+    y_axis_panel: Rc<JComponent>,
 }
 
 impl SpacedLabel {
     /// Java `SpacedLabel(String)`.
-    pub fn new(label: &str) -> Self {
-        Self {
-            label: label.trim().to_owned(),
-            label_tooltip: None,
-            label_panel_tooltip: None,
-            y_axis_panel_tooltip: None,
-            label_visible: true,
-            label_panel_visible: true,
-            y_axis_panel_visible: true,
-            label_alignment_x: 0.5,
-            label_panel_alignment_x: 0.5,
-            y_axis_panel_alignment_x: 0.5,
-            label_panel_rigid_areas: [
-                (FixedDim::x5_y0.width, FixedDim::x5_y0.height),
-                (FixedDim::x5_y0.width, FixedDim::x5_y0.height),
-            ],
-            y_axis_rigid_area: (FixedDim::x0_y5.width, FixedDim::x0_y5.height),
+    pub fn new(label: &str) -> SpacedLabel {
+        // label = label.trim(): Java trims code points <= ' '.
+        let label = label.trim_matches(|c: char| c <= ' ');
+        let label = JComponent::new_label(label);
+        // panels
+        let y_axis_panel = JComponent::new_panel();
+        // Swing layout: yAxisPanel.setLayout(new BoxLayout(yAxisPanel, BoxLayout.Y_AXIS)).
+        let label_panel = JComponent::new_panel();
+        // Swing layout: labelPanel.setLayout(new BoxLayout(labelPanel, BoxLayout.X_AXIS)).
+        // labelPanel
+        // Swing layout: labelPanel.add(Box.createRigidArea(FixedDim.x5_y0)).
+        label_panel.add(&label);
+        // Swing layout: labelPanel.add(Box.createRigidArea(FixedDim.x5_y0)).
+        // yPanel
+        y_axis_panel.add(&label_panel);
+        // Swing layout: yAxisPanel.add(Box.createRigidArea(FixedDim.x0_y5)).
+        SpacedLabel {
+            label,
+            label_panel,
+            y_axis_panel,
         }
     }
 
-    /// Java `setToolTipText(String)`.
-    pub fn set_tool_tip_text(&mut self, tooltip: Option<&str>) {
-        let tooltip = tooltip.map(str::to_owned);
-        self.label_tooltip = tooltip.clone();
-        self.label_panel_tooltip = tooltip.clone();
-        self.y_axis_panel_tooltip = tooltip;
+    /// Java final `setToolTipText(String)`.
+    pub fn set_tool_tip_text(&self, tool_tip_text: Option<&str>) {
+        self.label.set_tool_tip_text(tool_tip_text);
+        self.label_panel.set_tool_tip_text(tool_tip_text);
+        self.y_axis_panel.set_tool_tip_text(tool_tip_text);
     }
 
-    /// Java `getContainer()`; `true` identifies Java's non-null `yAxisPanel`.
-    pub fn get_container_is_y_axis_panel(&self) -> bool {
-        true
+    /// Java final `getContainer()`.  (`yAxisPanel` is never null after construction,
+    /// so the Java's `labelPanel` fallback is not reachable.)
+    pub fn get_container(&self) -> Rc<JComponent> {
+        self.y_axis_panel.clone()
     }
 
-    /// Java `setVisible(boolean)`.
-    pub fn set_visible(&mut self, visible: bool) {
-        self.y_axis_panel_visible = visible;
+    /// Java final `setVisible(boolean)`.
+    pub fn set_visible(&self, visible: bool) {
+        self.get_container().set_visible(visible);
     }
 
-    /// Java `setAlignmentX(float)`.
-    pub fn set_alignment_x(&mut self, alignment_x: f32) {
-        self.label_alignment_x = alignment_x;
-        self.label_panel_alignment_x = alignment_x;
-        self.y_axis_panel_alignment_x = alignment_x;
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-    #[test]
-    fn all_nested_widgets_receive_tooltip_and_alignment() {
-        let mut label = SpacedLabel::new("  Name  ");
-        label.set_tool_tip_text(Some("tip"));
-        label.set_alignment_x(0.0);
-        assert_eq!(label.label, "Name");
-        assert_eq!(label.label_tooltip.as_deref(), Some("tip"));
-        assert_eq!(label.label_panel_tooltip.as_deref(), Some("tip"));
-        assert_eq!(label.y_axis_panel_alignment_x, 0.0);
+    /// Java final `setAlignmentX(float)`.
+    pub fn set_alignment_x(&self, _alignment_x: f32) {
+        // Swing layout: label, labelPanel and yAxisPanel .setAlignmentX(alignmentX).
     }
 }

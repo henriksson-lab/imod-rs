@@ -72,3 +72,13 @@ mod tests {
         );
     }
 }
+
+impl crate::imod::etomo::jdk::FileFilter for DataFileFilter {
+    fn accept(&self, file: &std::path::Path) -> bool {
+        DataFileFilter::accept(self, file)
+    }
+
+    fn get_description(&self) -> Option<String> {
+        Some(DataFileFilter::get_description(self).to_string())
+    }
+}

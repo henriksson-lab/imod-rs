@@ -1,5 +1,19 @@
 //! `IMOD/Etomo/src/etomo/ui/swing/LogInterface.java`.
-#![allow(dead_code)]
+//!
+//! An interface for anything that can act as a log display.  Used by classes
+//! that have messages to log.  Also used by `EtomoLogger`, which is a utility
+//! for `LogInterface` classes.
+//!
+//! Implementers are EDT objects (`Rc`, `&self` methods): `LogWindow` is a Swing
+//! frame, and `EtomoLogger` calls back into it from `AppendLater.run()` on the
+//! event dispatch thread.
+//!
+//! The `etomo.storage.FileReader`, `etomo.storage.FileWriter` and
+//! `etomo.storage.Loggable` interfaces this one names, and the
+//! `javax.swing.text.BadLocationException` it throws, are declared here as
+//! the boundaries the rest of the translation already imports.
+// TODO(unit): needs etomo/storage/FileReader.java, etomo/storage/FileWriter.java and
+// etomo/storage/Loggable.java - their own modules; the traits below stand for them.
 
 use std::cell::RefCell;
 use std::path::Path;
@@ -14,7 +28,7 @@ pub struct BadLocationException {
     pub message: String,
 }
 
-/// Direct declared-type boundary for `etomo.storage.FileReader`.
+/// Declared-type boundary for `etomo.storage.FileReader`.
 pub trait FileReader {
     /// Java `isReadable()`.
     fn is_readable(&self) -> bool;
@@ -22,7 +36,7 @@ pub trait FileReader {
     fn read_line(&mut self) -> Option<String>;
 }
 
-/// Direct declared-type boundary for `etomo.storage.FileWriter`.
+/// Declared-type boundary for `etomo.storage.FileWriter`.
 pub trait FileWriter {
     /// Java `append(String)`.
     fn append(&mut self, string: &str) -> bool;
@@ -32,7 +46,7 @@ pub trait FileWriter {
     fn get_prev_line_end_offset(&self) -> Result<usize, BadLocationException>;
 }
 
-/// Direct declared-type boundary for `etomo.storage.Loggable`.
+/// Declared-type boundary for `etomo.storage.Loggable`.
 pub trait Loggable {
     /// Java `getName()`.
     fn get_name(&self) -> String;
@@ -40,7 +54,8 @@ pub trait Loggable {
     fn get_log_message(&self) -> Result<Vec<Option<String>>, LoggableException>;
 }
 
-/// The three exceptions Java's `EtomoLogger.logMessage(Loggable, AxisID)` catches.
+/// The three exceptions `Loggable.getLogMessage()` throws
+/// (`LogFileException`, `IOException`, `LockException`).
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum LoggableException {
     LogFile(String),
@@ -48,73 +63,96 @@ pub enum LoggableException {
     Lock(String),
 }
 
-/// Java reference to a `FileReader` passed through the Swing event queue.
+/// A Java reference to a `FileReader`.
 pub type FileReaderRef = Rc<RefCell<dyn FileReader>>;
-/// Java reference to a `FileWriter` passed through the Swing event queue.
+/// A Java reference to a `FileWriter`.
 pub type FileWriterRef = Rc<RefCell<dyn FileWriter>>;
 
-/// Java `LogInterface`.
+/// Java `public interface LogInterface`.
 pub trait LogInterface {
     /// Java `getManager()`.
     fn get_manager(&self) -> Option<&'static dyn BaseManager>;
+
     /// Java `getAxisID()`.
     fn get_axis_id(&self) -> Option<AxisID>;
+
     /// Java `logMessage(String, AxisID, String[], String)`.
-    fn log_message_array(
-        &mut self,
+    fn log_message_string_axis_id_string_array_string(
+        &self,
         title: Option<&str>,
         axis_id: Option<AxisID>,
-        message: Option<&[Option<String>]>,
+        message: Option<&[String]>,
         msg_id: Option<&str>,
     ) -> bool;
+
     /// Java `logMessage(String, AxisID, ArrayList<String>)`.
-    fn log_message_list(
-        &mut self,
+    fn log_message_string_axis_id_array_list(
+        &self,
         title: Option<&str>,
         axis_id: Option<AxisID>,
-        message: Option<&[Option<String>]>,
+        message: Option<&[String]>,
     );
+
     /// Java `logMessage(AxisID, ArrayList<String>)`.
-    fn log_message_axis_list(
-        &mut self,
-        axis_id: Option<AxisID>,
-        message: Option<&[Option<String>]>,
-    );
+    fn log_message_axis_id_array_list(&self, axis_id: Option<AxisID>, message: Option<&[String]>);
+
     /// Java `logMessage(Loggable, AxisID)`.
-    fn log_message_loggable(&mut self, loggable: Option<&dyn Loggable>, axis_id: Option<AxisID>);
+    fn log_message_loggable_axis_id(
+        &self,
+        loggable: Option<&dyn Loggable>,
+        axis_id: Option<AxisID>,
+    );
+
     /// Java `logMessage(String, AxisID)`.
-    fn log_message_title_axis(&mut self, title: Option<&str>, axis_id: Option<AxisID>);
+    fn log_message_string_axis_id(&self, title: Option<&str>, axis_id: Option<AxisID>);
+
     /// Java `logMessage(String)`.
-    fn log_message(&mut self, message: Option<&str>);
+    fn log_message_string(&self, message: Option<&str>);
+
     /// Java `logMessage(String, boolean, boolean, FileWriter)`.
-    fn log_message_secondary(
-        &mut self,
+    fn log_message_string_boolean_boolean_file_writer(
+        &self,
         message: Option<&str>,
         timestamp: bool,
         newline: bool,
         secondary_log: Option<FileWriterRef>,
     );
+
     /// Java `logMessage(File, FileWriter)`.
-    fn log_message_file(&mut self, file: Option<&Path>, secondary_log: Option<FileWriterRef>);
+    fn log_message_file_file_writer(
+        &self,
+        file: Option<&Path>,
+        secondary_log: Option<FileWriterRef>,
+    );
+
     /// Java `logMessage(File, boolean, FileWriter)`.
-    fn log_message_file_newline(
-        &mut self,
+    fn log_message_file_boolean_file_writer(
+        &self,
         file: Option<&Path>,
         newline: bool,
         secondary_log: Option<FileWriterRef>,
     );
+
     /// Java `logMessagePrimaryLog(FileReader)`.
-    fn log_message_primary_log(&mut self, reader: Option<FileReaderRef>);
+    fn log_message_primary_log(&self, reader: Option<FileReaderRef>);
+
     /// Java `save()`.
-    fn save(&mut self);
+    fn save(&self);
+
     /// Java `setAllowPrimaryLogging(boolean)`.
-    fn set_allow_primary_logging(&mut self, input: bool);
+    fn set_allow_primary_logging(&self, input: bool);
+
     /// Java `isAllowPrimaryLogging()`.
     fn is_allow_primary_logging(&self) -> bool;
+
+    // Functions used by EtomoLogger
+
     /// Java `append(String)`.
-    fn append(&mut self, line: &str);
+    fn append(&self, line: &str);
+
     /// Java `msgChanged()`.
-    fn msg_changed(&mut self);
-    /// Java `getPrevLineEndOffset()`.
+    fn msg_changed(&self);
+
+    /// Java `getPrevLineEndOffset() throws BadLocationException`.
     fn get_prev_line_end_offset(&self) -> Result<usize, BadLocationException>;
 }

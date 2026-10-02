@@ -12,7 +12,7 @@
 
 use super::imodpy::{
     ImodpyError, add_imod_bin_ignore_sighup, get_mrc_size, make_backup_file, os_path_splitext,
-    pass_on_key_interrupt, print_pid, prnstr, read_text_file, run_cmd, write_text_file,
+    pass_on_key_interrupt, print_pid, prnstr, py_fixed, read_text_file, run_cmd, write_text_file,
 };
 use super::pip::{
     exit_error, pip_get_boolean, pip_get_in_out_file, pip_get_integer, pip_get_string,
@@ -20,7 +20,7 @@ use super::pip::{
 };
 use super::tiltmatch::{
     KEY_INTERRUPT, clean_exit_error, cleanup, get_temp_components, get_temp_names, key_interrupt,
-    py_fixed, search_pairs,
+    search_pairs,
 };
 use std::ffi::OsString;
 use std::io::Write as _;
@@ -66,7 +66,7 @@ pub fn matchrotpairs(arguments: &[OsString]) -> i32 {
         let _ = std::io::stdout().flush();
         eprintln!("Traceback (most recent call last):");
         eprintln!("{message}");
-        std::process::exit(1)
+        crate::imod::libcfshr::b3dutil::exit(1)
     };
 
     // Fallbacks from ../manpages/autodoc2man 3 1 matchrotpairs

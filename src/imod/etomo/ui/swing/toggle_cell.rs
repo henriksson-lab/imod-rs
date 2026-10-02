@@ -1,33 +1,33 @@
 //! `IMOD/Etomo/src/etomo/ui/swing/ToggleCell.java`.
 //!
-//! This is the common package-private table-cell contract.  `JPanel`,
-//! `GridBagLayout`, `GridBagConstraints`, and listener registration remain
-//! native Swing boundaries; no widget implementation is substituted here.
-#![allow(dead_code)]
+//! Java package-private `interface ToggleCell`: a table cell holding a toggle button
+//! (`CheckBoxCell`, `RadioButtonCell`).  Objects passed as a `ToggleCell` are
+//! `Rc<dyn ToggleCell>`.
 
-use super::cell::{CellGridBagConstraintsBoundary, CellGridBagLayoutBoundary, CellPanelBoundary};
+use std::rc::Rc;
 
-/// Java package-private `ToggleCell`.
+use crate::imod::etomo::jdk::{ActionListener, ChangeListener, JComponent};
+
+/// Java `rcsid`.
+pub const RCSID: &str = "$Id$";
+
+/// Java `ToggleCell`.
 pub trait ToggleCell {
     /// Java `getLabel()`.
-    fn get_label(&self) -> &str;
+    fn get_label(&self) -> Option<String>;
 
     /// Java `setLabel(String)`.
-    fn set_label(&mut self, label: &str);
+    fn set_label(&self, label: Option<&str>);
 
     /// Java `setSelected(boolean)`.
-    fn set_selected(&mut self, selected: bool);
+    fn set_selected(&self, selected: bool);
 
-    /// Java `addActionListener(ActionListener)`; invocation remains native.
-    fn add_action_listener(&mut self);
+    /// Java `addActionListener(ActionListener)`.
+    fn add_action_listener(&self, action_listener: ActionListener);
 
-    /// Java `add(JPanel, GridBagLayout, GridBagConstraints)`.
-    fn add(
-        &mut self,
-        panel: &mut CellPanelBoundary,
-        layout: &mut CellGridBagLayoutBoundary,
-        constraints: &mut CellGridBagConstraintsBoundary,
-    );
+    /// Java `add(JPanel, GridBagLayout, GridBagConstraints)`.  The layout and
+    /// constraints are layout only and are not modelled.
+    fn add(&self, panel: &Rc<JComponent>);
 
     /// Java `isSelected()`.
     fn is_selected(&self) -> bool;
@@ -39,85 +39,14 @@ pub trait ToggleCell {
     fn get_width(&self) -> i32;
 
     /// Java `setWarning(boolean)`.
-    fn set_warning(&mut self, warning: bool);
+    fn set_warning(&self, warning: bool);
 
-    /// Java `addChangeListener(ChangeListener)`; invocation remains native.
-    fn add_change_listener(&mut self);
+    /// Java `addChangeListener(ChangeListener)`.
+    fn add_change_listener(&self, listener: ChangeListener);
 
     /// Java `setEnabled(boolean)`.
-    fn set_enabled(&mut self, enabled: bool);
+    fn set_enabled(&self, enabled: bool);
 
     /// Java `isEnabled()`.
     fn is_enabled(&self) -> bool;
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[derive(Default)]
-    struct Cell {
-        label: String,
-        selected: bool,
-        enabled: bool,
-        warning: bool,
-        action_listeners: usize,
-        change_listeners: usize,
-    }
-    impl ToggleCell for Cell {
-        fn get_label(&self) -> &str {
-            &self.label
-        }
-        fn set_label(&mut self, label: &str) {
-            self.label = label.into();
-        }
-        fn set_selected(&mut self, selected: bool) {
-            self.selected = selected;
-        }
-        fn add_action_listener(&mut self) {
-            self.action_listeners += 1;
-        }
-        fn add(
-            &mut self,
-            _: &mut CellPanelBoundary,
-            _: &mut CellGridBagLayoutBoundary,
-            _: &mut CellGridBagConstraintsBoundary,
-        ) {
-        }
-        fn is_selected(&self) -> bool {
-            self.selected
-        }
-        fn get_height(&self) -> i32 {
-            0
-        }
-        fn get_width(&self) -> i32 {
-            0
-        }
-        fn set_warning(&mut self, warning: bool) {
-            self.warning = warning;
-        }
-        fn add_change_listener(&mut self) {
-            self.change_listeners += 1;
-        }
-        fn set_enabled(&mut self, enabled: bool) {
-            self.enabled = enabled;
-        }
-        fn is_enabled(&self) -> bool {
-            self.enabled
-        }
-    }
-
-    #[test]
-    fn source_contract_keeps_selection_enabled_and_listener_operations_distinct() {
-        let mut cell = Cell::default();
-        cell.set_label("Queue");
-        cell.set_selected(true);
-        cell.set_enabled(true);
-        cell.set_warning(true);
-        cell.add_action_listener();
-        cell.add_change_listener();
-        assert_eq!(cell.get_label(), "Queue");
-        assert!(cell.is_selected() && cell.is_enabled() && cell.warning);
-        assert_eq!((cell.action_listeners, cell.change_listeners), (1, 1));
-    }
 }

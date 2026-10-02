@@ -4,10 +4,10 @@
 //! [`collectmmm`], translated statement by statement.  Values are Python
 //! floats (doubles) and are formatted with `str` ([`py_str_float`]).
 
-use super::batchruntomo::py_str_float;
 use super::imodpy::{
     add_imod_bin_ignore_sighup, exit_from_imod_error, prnstr, read_text_file, run_cmd,
 };
+use super::imodpy::{py_float, py_int, py_str_float};
 use super::pip::{exit_error, set_exit_prefix};
 use std::ffi::OsString;
 use std::io::Write as _;
@@ -56,14 +56,14 @@ Usage: collectmmm tag rootname #_of_logs image_file [starting_#] [logdir]
     // `int()` strips surrounding whitespace before converting
     let numlogs: i64;
     let mut startnum: i64 = 1;
-    match argv[3].trim().parse::<i64>() {
-        Ok(value) => numlogs = value,
-        Err(_) => exit_error("Converting number of logs or number of first file to an integer"),
+    match py_int(&argv[3]) {
+        Some(value) => numlogs = value,
+        None => exit_error("Converting number of logs or number of first file to an integer"),
     }
     if argv.len() > 5 {
-        match argv[5].trim().parse::<i64>() {
-            Ok(value) => startnum = value,
-            Err(_) => exit_error("Converting number of logs or number of first file to an integer"),
+        match py_int(&argv[5]) {
+            Some(value) => startnum = value,
+            None => exit_error("Converting number of logs or number of first file to an integer"),
         }
     }
     if argv.len() > 6 {
@@ -102,9 +102,9 @@ Usage: collectmmm tag rootname #_of_logs image_file [starting_#] [logdir]
         // Convert values to float
         let mut logmmm: Vec<f64> = Vec::new();
         for v in &vsplit {
-            match v.parse::<f64>() {
-                Ok(value) => logmmm.push(value),
-                Err(_) => exit_error(&format!("Converting {v} in {thislog} to a numeric value")),
+            match py_float(v) {
+                Some(value) => logmmm.push(value),
+                None => exit_error(&format!("Converting {v} in {thislog} to a numeric value")),
             }
         }
 

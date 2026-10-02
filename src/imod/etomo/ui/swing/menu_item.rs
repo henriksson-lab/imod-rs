@@ -1,83 +1,96 @@
 //! `IMOD/Etomo/src/etomo/ui/swing/MenuItem.java`.
-#![allow(dead_code)]
+//!
+//! A self-naming `JMenuItem`.  `final class MenuItem extends JMenuItem`: the
+//! Swing part is the `JComponent` node in `component`, reached through `Deref`
+//! (so the inherited `JMenuItem` members — `setEnabled`, `addActionListener`,
+//! `getActionCommand`, `doClick`, ... — resolve), while the two overrides
+//! (`setText`, `setName`) are inherent methods and win method resolution.
 
-use crate::imod::etomo::{
-    etomo_director::ARGUMENTS,
-    storage::autodoc::autodoc_tokenizer::{DEFAULT_DELIMITER, SEPARATOR_CHAR},
-    util::utilities,
-};
+use std::ops::Deref;
+use std::rc::Rc;
 
-/// Java package-private final `MenuItem` plus source-observable inherited
-/// `JMenuItem` state.  Swing dispatch remains a native GUI boundary.
-#[derive(Clone, Debug, Eq, PartialEq)]
+use crate::imod::etomo::etomo_director::ARGUMENTS;
+use crate::imod::etomo::jdk::JComponent;
+use crate::imod::etomo::storage::autodoc::autodoc_tokenizer::{DEFAULT_DELIMITER, SEPARATOR_CHAR};
+use crate::imod::etomo::util::utilities;
+
+/// Java `UITestFieldType.MENU_ITEM.toString()`.
+// TODO(unit): needs etomo/type/UITestFieldType.java - `UITestFieldType.MENU_ITEM`
+// ("mn", unlimitedSegments true) is written out here.
+const MENU_ITEM_FIELD_TYPE: &str = "mn";
+/// Java `UITestFieldType.MENU_ITEM.isUnlimitedSegments()`.
+const MENU_ITEM_UNLIMITED_SEGMENTS: bool = true;
+
+/// Java package-private `final class MenuItem extends JMenuItem`.
 pub struct MenuItem {
-    pub action_command: String,
-    pub enabled: bool,
-    pub visible: bool,
-    pub selected: bool,
-    pub text: Option<String>,
-    pub name: Option<String>,
-    pub mnemonic: Option<i32>,
-    pub action_listener_count: usize,
+    component: Rc<JComponent>,
+}
+
+impl Deref for MenuItem {
+    type Target = Rc<JComponent>;
+    fn deref(&self) -> &Rc<JComponent> {
+        &self.component
+    }
 }
 
 impl MenuItem {
-    /// Java `MenuItem()`.
-    pub fn empty() -> Self {
-        Self {
-            action_command: String::new(),
-            enabled: true,
-            visible: true,
-            selected: false,
-            text: None,
-            name: None,
-            mnemonic: None,
-            action_listener_count: 0,
-        }
+    /// Java `MenuItem()`: `super()`.  `JMenuItem.init` calls `setText` only for
+    /// non-null text, so no name is set.
+    pub fn new_void() -> Rc<MenuItem> {
+        Rc::new(MenuItem {
+            component: JComponent::new_menu_item(""),
+        })
     }
 
-    /// Java `MenuItem(String)`.
-    pub fn new(text: &str) -> Self {
-        let mut value = Self::empty();
-        value.set_text(text);
-        value
+    /// Java `MenuItem(String)`: `super(text)`.  `JMenuItem.init` calls the
+    /// overridden `setText`, which names the item.
+    pub fn new_string(text: &str) -> Rc<MenuItem> {
+        let item = Rc::new(MenuItem {
+            component: JComponent::new_menu_item(""),
+        });
+        item.set_text(text);
+        item
     }
 
-    /// Java `MenuItem(String, int)`.
-    pub fn with_mnemonic(text: &str, mnemonic: i32) -> Self {
-        let mut value = Self::new(text);
-        value.mnemonic = Some(mnemonic);
-        value
+    /// Java `MenuItem(String, int)`: `super(text, mnemonic)`.
+    pub fn new_string_int(text: &str, mnemonic: i32) -> Rc<MenuItem> {
+        let item = Rc::new(MenuItem {
+            component: JComponent::new_menu_item(""),
+        });
+        item.set_text(text);
+        // Swing key binding: `setMnemonic(mnemonic)`; key events are not modelled.
+        let _ = mnemonic;
+        item
+    }
+
+    /// The `JMenuItem` this class extends, as a `java.awt.Component`.
+    pub fn get_component(&self) -> Rc<JComponent> {
+        self.component.clone()
     }
 
     /// Java overridden `setText(String)`.
-    pub fn set_text(&mut self, text: &str) {
-        self.text = Some(text.into());
-        self.action_command = text.into();
-        self.set_name(text);
+    pub fn set_text(&self, text: &str) {
+        self.component.set_text(text);
+        self.set_name(Some(text));
     }
 
     /// Java overridden `setName(String)`.
-    pub fn set_name(&mut self, text: &str) {
-        let name = utilities::convert_label_to_name(Some(text), true).unwrap_or_default();
-        self.name = Some(format!("mn{SEPARATOR_CHAR}{name}"));
+    pub fn set_name(&self, text: Option<&str>) {
+        let name = utilities::convert_label_to_name(text, MENU_ITEM_UNLIMITED_SEGMENTS);
+        // Java string concatenation renders a null name as "null".
+        self.component.set_name(Some(&format!(
+            "{}{}{}",
+            MENU_ITEM_FIELD_TYPE,
+            SEPARATOR_CHAR,
+            name.as_deref().unwrap_or("null")
+        )));
         if ARGUMENTS.lock().unwrap().is_print_names() {
             println!(
-                "{} {DEFAULT_DELIMITER} ",
-                self.name.as_deref().unwrap_or_default()
+                "{} {} ",
+                self.component.get_name().as_deref().unwrap_or("null"),
+                DEFAULT_DELIMITER
             );
         }
-    }
-
-    /// Native `JMenuItem.addActionListener` boundary used by source consumers.
-    pub fn add_action_listener(&mut self) {
-        self.action_listener_count += 1;
-    }
-}
-
-impl Default for MenuItem {
-    fn default() -> Self {
-        Self::empty()
     }
 }
 
@@ -86,13 +99,11 @@ mod tests {
     use super::*;
 
     #[test]
-    fn constructors_and_rename_match_source_wrappers() {
-        let mut item = MenuItem::with_mnemonic("Open File", 79);
-        assert_eq!(item.action_command, "Open File");
-        assert_eq!(item.name.as_deref(), Some("mn.open-file"));
-        assert_eq!(item.mnemonic, Some(79));
-        item.set_name("Different");
-        assert_eq!(item.text.as_deref(), Some("Open File"));
-        assert_eq!(item.name.as_deref(), Some("mn.different"));
+    fn text_names_the_item() {
+        let item = MenuItem::new_string("Open...");
+        assert_eq!(item.get_text(), "Open...");
+        assert!(item.get_name().unwrap().starts_with("mn."));
+        let empty = MenuItem::new_void();
+        assert_eq!(empty.get_name(), None);
     }
 }

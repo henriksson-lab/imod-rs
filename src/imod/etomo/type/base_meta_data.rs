@@ -27,7 +27,7 @@ use super::image_output_format::ImageOutputFormat;
 use super::imod_version;
 use super::string_property::StringProperty;
 use crate::imod::etomo::base_manager::BaseManager;
-use crate::imod::etomo::storage::storable::Storable;
+use crate::imod::etomo::storage::storable::{Storable, StorableValue};
 use crate::imod::etomo::ui::log_properties::LogProperties;
 use std::collections::BTreeMap;
 use std::sync::Mutex;
@@ -461,6 +461,18 @@ pub trait BaseMetaData: Storable {
     /// Java abstract package-private `getGroupKey`.
     fn get_group_key(&self) -> Option<String>;
 
+    /// Java `getOrigRawImageStackExtension`, virtual: `MetaData` overrides it.
+    /// The base returns the default; an override may return null.
+    fn get_orig_raw_image_stack_extension(&self) -> Option<&'static Extension> {
+        Some(self.base().get_orig_raw_image_stack_extension())
+    }
+
+    /// Java `getRawImageStackExtension`, virtual: `MetaData` overrides it.  The
+    /// base returns the default; an override may return null.
+    fn get_raw_image_stack_extension(&self) -> Option<&'static Extension> {
+        Some(self.base().get_raw_image_stack_extension())
+    }
+
     /// Java package-private `createPrepend`.
     fn create_prepend(&self, prepend: &str) -> Option<String> {
         if prepend.is_empty() {
@@ -608,11 +620,13 @@ impl BaseMetaDataBase {
             .unwrap()
             .store_with_prepend(Some(props), Some(prepend));
         if let Some(log_properties) = self.log_properties {
-            let _ = log_properties;
-            // `logProperties.store(props, prepend)`; `LogProperties.store` takes
-            // `&mut self` in the Rust trait because Java's implementor
-            // (`etomo/ui/swing/LogWindow.java`) mutates while storing, and the field is
-            // a shared reference, so this call is made by the implementor.
+            // The implementor (`LogWindow`) is an event-dispatch-thread object
+            // that reads its frame's state; the stores and loads of a data file
+            // run on the EDT.  Off it (never in the source's flow) the log
+            // window's keys are left as they are.
+            if crate::imod::etomo::util::event_queue::is_dispatch_thread() {
+                log_properties.store(props, Some(prepend));
+            }
         }
     }
 
@@ -678,8 +692,10 @@ impl BaseMetaDataBase {
             .unwrap()
             .load_with_prepend(Some(&mut props_copy), Some(prepend));
         if let Some(log_properties) = self.log_properties {
-            let _ = log_properties;
-            // `logProperties.load(props, prepend)`; see `store_with_created_prepend`.
+            // See `store_with_created_prepend`.
+            if crate::imod::etomo::util::event_queue::is_dispatch_thread() {
+                log_properties.load(props, Some(prepend));
+            }
         }
         // If canCorrectImageFilenameStyle is false, then correcting imageFilenameStyle
         // may require the child load function to be run beforehand.  It is the child

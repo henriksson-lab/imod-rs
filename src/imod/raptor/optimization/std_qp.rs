@@ -1,628 +1,799 @@
-//! Safe, owned translation of the matrix-facing groups in
-//! `IMOD/raptor/optimization/std_qp.{h,cpp}`.
+//! Translation of `IMOD/raptor/optimization/std_qp.h` and `std_qp.cpp`: the
+//! log-barrier interior-point QP (`std_qp`) and LP (`LPsolver`) solvers and
+//! their dense/sparse matrix utilities.
+//!
+//! OpenCV calls whose source and destination are the same matrix in C++
+//! (`cvConvertScale(x, x, ..)`, `cvSub(b, w, w)`, `cvScaleAdd(dx, t2, x,
+//! x)`) take a copy of the aliased source first; OpenCV's element loops read
+//! each source element before writing it, so the result is the same.
+//! The two `print` overloads (debug output behind comments) are not reached.
 
-use super::prob_data::SparseMatrix;
-use super::std_qp_data::{Matrix, StdQpData};
+use super::stdqp_data::StdQpData;
+use crate::imod::cxx_stream::cout;
+use crate::imod::raptor::main_classes::constants::SPARSE_MATRIX_ZERO_VAL;
+use crate::imod::raptor::opencv::cxarithm::{cv_add, cv_sub};
+use crate::imod::raptor::opencv::cxconvert::cv_convert_scale;
+use crate::imod::raptor::opencv::cxmatmul::{cv_dot_product, cv_scale_add};
+use crate::imod::raptor::opencv::cxtypes::{CV_64FC1, CvMat, CvScalar};
+use crate::imod::raptor::suitesparse::cs::Cs;
+use crate::imod::raptor::suitesparse::cs_add::cs_add;
+use crate::imod::raptor::suitesparse::cs_cholsol::cs_cholsol;
+use crate::imod::raptor::suitesparse::cs_compress::cs_compress;
+use crate::imod::raptor::suitesparse::cs_droptol::cs_droptol;
+use crate::imod::raptor::suitesparse::cs_entry::cs_entry;
+use crate::imod::raptor::suitesparse::cs_gaxpy::cs_gaxpy;
+use crate::imod::raptor::suitesparse::cs_multiply::cs_multiply;
+use crate::imod::raptor::suitesparse::cs_transpose::cs_transpose;
+use crate::imod::raptor::suitesparse::cs_util::cs_spalloc;
 
-/// Safe owned translation of `std_qp`.
-///
-/// The source's `prob*` branches use block elimination solely to factor the
-/// Newton system efficiently.  This version builds that same positive-definite
-/// system densely, so it retains the barrier objective and line-search logic
-/// without SuiteSparse or OpenCV ownership.
-pub fn std_qp(
-    quadratic: &SparseMatrix,
-    cost: &SparseMatrix,
-    constraints: &SparseMatrix,
-    bounds: &Matrix<f64>,
-    initial: &Matrix<f64>,
-    _m: usize,
-    _t: usize,
-    option: &str,
-) -> StdQpData<f64> {
-    let mut result = StdQpData {
-        answer_mat: Some(initial.clone()),
-        ..StdQpData::new()
-    };
-    if !matches!(option, "prob" | "probV" | "probU")
-        || quadratic.nz != -1
-        || cost.nz != -1
-        || constraints.nz != -1
-        || initial.columns != 1
-        || bounds.columns != 1
-        || quadratic.rows != initial.rows
-        || quadratic.columns != initial.rows
-        || cost.rows != initial.rows
-        || cost.columns != 1
-        || constraints.columns != initial.rows
-        || constraints.rows != bounds.rows
-    {
-        return result;
-    }
-    let n = initial.rows;
-    let mut x = initial.values.clone();
-    let multiply = |matrix: &SparseMatrix, vector: &[f64]| -> Vec<f64> {
-        let mut answer = vec![0.; matrix.rows];
-        for column in 0..matrix.columns {
-            for entry in matrix.column_or_triplet_offsets[column]
-                ..matrix.column_or_triplet_offsets[column + 1]
-            {
-                answer[matrix.row_indices[entry]] += matrix.values[entry] * vector[column];
-            }
-        }
-        answer
-    };
-    let mut slack = bounds
-        .values
-        .iter()
-        .zip(multiply(constraints, &x))
-        .map(|(b, ax)| b - ax)
-        .collect::<Vec<_>>();
-    if let Some(minimum) = slack.iter().copied().reduce(f64::min) {
-        if minimum < 0. {
-            result.exit_flag = 2;
-            result.gap = -minimum;
-            return result;
-        }
-    }
-    let tolerance = if option == "prob" { 1e-3 } else { 1e-4 };
-    let mut barrier = 0.1;
-    let mut iterations = 1;
-    let mut q_dense = vec![0.; n * n];
-    for column in 0..n {
-        for entry in quadratic.column_or_triplet_offsets[column]
-            ..quadratic.column_or_triplet_offsets[column + 1]
-        {
-            q_dense[quadratic.row_indices[entry] * n + column] += quadratic.values[entry];
-        }
-    }
-    let mut c = vec![0.; n];
-    for entry in cost.column_or_triplet_offsets[0]..cost.column_or_triplet_offsets[1] {
-        c[cost.row_indices[entry]] += cost.values[entry];
-    }
-    let mut exit = false;
-    while n as f64 / barrier > tolerance && !exit && iterations < 200 {
-        barrier *= 10.;
-        for _ in 0..20 {
-            iterations += 1;
-            result.num_itrs = iterations;
-            let qx = multiply(quadratic, &x);
-            let mut gradient = (0..n).map(|i| barrier * (qx[i] + c[i])).collect::<Vec<_>>();
-            let mut hessian = q_dense.iter().map(|v| v * barrier).collect::<Vec<_>>();
-            for row in 0..constraints.rows {
-                let inverse = 1. / slack[row];
-                let mut a = vec![0.; n];
-                for column in 0..n {
-                    for entry in constraints.column_or_triplet_offsets[column]
-                        ..constraints.column_or_triplet_offsets[column + 1]
-                    {
-                        if constraints.row_indices[entry] == row {
-                            a[column] += constraints.values[entry];
-                        }
-                    }
-                }
-                for i in 0..n {
-                    gradient[i] += a[i] * inverse;
-                    for j in 0..n {
-                        hessian[i * n + j] += a[i] * a[j] * inverse * inverse;
-                    }
-                }
-            }
-            let mut system = vec![0.; n * (n + 1)];
-            for row in 0..n {
-                system[row * (n + 1)..row * (n + 1) + n]
-                    .copy_from_slice(&hessian[row * n..(row + 1) * n]);
-                system[row * (n + 1) + n] = -gradient[row];
-            }
-            let mut singular = false;
-            for pivot in 0..n {
-                let best = (pivot..n)
-                    .max_by(|&a, &b| {
-                        system[a * (n + 1) + pivot]
-                            .abs()
-                            .total_cmp(&system[b * (n + 1) + pivot].abs())
-                    })
-                    .unwrap();
-                if system[best * (n + 1) + pivot].abs() <= f64::MIN_POSITIVE {
-                    singular = true;
-                    break;
-                }
-                for column in pivot..=n {
-                    system.swap(pivot * (n + 1) + column, best * (n + 1) + column);
-                }
-                let divisor = system[pivot * (n + 1) + pivot];
-                for column in pivot..=n {
-                    system[pivot * (n + 1) + column] /= divisor;
-                }
-                for row in 0..n {
-                    if row != pivot {
-                        let factor = system[row * (n + 1) + pivot];
-                        for column in pivot..=n {
-                            system[row * (n + 1) + column] -=
-                                factor * system[pivot * (n + 1) + column];
-                        }
-                    }
-                }
-            }
-            if singular {
-                exit = true;
-                break;
-            }
-            let direction = (0..n)
-                .map(|row| system[row * (n + 1) + n])
-                .collect::<Vec<_>>();
-            let decrement = direction
-                .iter()
-                .zip(&gradient)
-                .map(|(a, b)| a * b)
-                .sum::<f64>();
-            if decrement.abs() < 1e-3 {
-                break;
-            }
-            let objective = |point: &[f64], point_slack: &[f64]| -> f64 {
-                let qpoint = multiply(quadratic, point);
-                0.5 * barrier * point.iter().zip(qpoint).map(|(a, b)| a * b).sum::<f64>()
-                    + barrier * point.iter().zip(&c).map(|(a, b)| a * b).sum::<f64>()
-                    - point_slack.iter().map(|v| v.ln()).sum::<f64>()
-            };
-            let current_objective = objective(&x, &slack);
-            let mut step = 1.;
-            loop {
-                let candidate = x
-                    .iter()
-                    .zip(&direction)
-                    .map(|(v, d)| v + step * d)
-                    .collect::<Vec<_>>();
-                let candidate_slack = bounds
-                    .values
-                    .iter()
-                    .zip(multiply(constraints, &candidate))
-                    .map(|(b, ax)| b - ax)
-                    .collect::<Vec<_>>();
-                if candidate_slack.iter().all(|v| *v > 0.)
-                    && objective(&candidate, &candidate_slack)
-                        <= current_objective + 0.25 * step * decrement
-                {
-                    x = candidate;
-                    slack = candidate_slack;
-                    break;
-                }
-                step *= 0.5;
-                if step < 1e-11 {
-                    exit = true;
-                    break;
-                }
-            }
-            if exit {
-                break;
-            }
-            let lambda2 = direction
-                .iter()
-                .enumerate()
-                .map(|(i, a)| {
-                    a * hessian[i * n..(i + 1) * n]
-                        .iter()
-                        .zip(&direction)
-                        .map(|(b, c)| b * c)
-                        .sum::<f64>()
-                })
-                .sum::<f64>();
-            if lambda2 < 1e-3 {
-                break;
-            }
-        }
-    }
-    result.answer_mat = Some(Matrix::new(n, 1, x));
+/// `ZeroMat(int x, int y)` (`std_qp.cpp:20`).
+pub fn zero_mat(x: i32, y: i32) -> CvMat {
+    let mut result = CvMat::create(x, y, CV_64FC1);
+    result.set_zero();
     result
 }
 
-/// C++ `ZeroMat`.
-pub fn zero_mat(rows: usize, columns: usize) -> Matrix<f64> {
-    Matrix::new(rows, columns, vec![0.0; rows * columns])
-}
-
-/// C++ `MinElem`.
-pub fn min_elem(matrix: &Matrix<f64>) -> Option<f64> {
-    matrix.values.iter().copied().reduce(f64::min)
-}
-
-/// C++ `Combinedx1dx2`.
-pub fn combined_x1_dx2(first: &Matrix<f64>, second: &Matrix<f64>) -> Option<Matrix<f64>> {
-    if first.columns != second.columns {
-        return None;
-    }
-    let mut values = first.values.clone();
-    values.extend_from_slice(&second.values);
-    Some(Matrix::new(first.rows + second.rows, first.columns, values))
-}
-
-/// C++ `sumLog`.
-pub fn sum_log(matrix: &Matrix<f64>) -> Option<f64> {
-    (matrix.columns == 1).then(|| matrix.values.iter().map(|value| value.ln()).sum())
-}
-
-/// C++ `GetSubMatrix(const cs *, ...)` with inclusive source bounds.
-pub fn get_sub_matrix(
-    matrix: &SparseMatrix,
-    row_start: usize,
-    row_end: usize,
-    column_start: usize,
-    column_end: usize,
-) -> Option<SparseMatrix> {
-    if matrix.nz != -1
-        || row_start > row_end
-        || column_start > column_end
-        || row_end >= matrix.rows
-        || column_end >= matrix.columns
-    {
-        return None;
-    }
-    let rows = row_end - row_start + 1;
-    let columns = column_end - column_start + 1;
-    let mut offsets = Vec::with_capacity(columns + 1);
-    let mut row_indices = Vec::new();
-    let mut values = Vec::new();
-    offsets.push(0);
-    for source_column in column_start..=column_end {
-        for entry in matrix.column_or_triplet_offsets[source_column]
-            ..matrix.column_or_triplet_offsets[source_column + 1]
-        {
-            let row = matrix.row_indices[entry];
-            if (row_start..=row_end).contains(&row) {
-                row_indices.push(row - row_start);
-                values.push(matrix.values[entry]);
-            }
-        }
-        offsets.push(row_indices.len());
-    }
-    Some(SparseMatrix::new(
-        rows,
-        columns,
-        row_indices.len(),
-        -1,
-        offsets,
-        row_indices,
-        values,
-    ))
-}
-
-/// C++ `GetSubMatrixDiag(const cs *, ...)` with inclusive source bounds.
-pub fn get_sub_matrix_diag(
-    matrix: &SparseMatrix,
-    row_start: usize,
-    row_end: usize,
-    column_start: usize,
-    column_end: usize,
-) -> Option<Vec<f64>> {
-    let submatrix = get_sub_matrix(matrix, row_start, row_end, column_start, column_end)?;
-    if submatrix.rows != submatrix.columns {
-        return None;
-    }
-    let mut diagonal = vec![0.0; submatrix.rows];
-    for column in 0..submatrix.columns {
-        for entry in submatrix.column_or_triplet_offsets[column]
-            ..submatrix.column_or_triplet_offsets[column + 1]
-        {
-            if submatrix.row_indices[entry] == column {
-                diagonal[column] = submatrix.values[entry];
+/// `MinElem(CvMat* mat)` (`std_qp.cpp:28`).
+pub fn min_elem(mat: &CvMat) -> f64 {
+    let mut min = mat.get_real_2d(0, 0);
+    for i in 0..mat.get_size().height {
+        for j in 0..mat.get_size().width {
+            if mat.get_real_2d(i, j) < min {
+                min = mat.get_real_2d(i, j);
             }
         }
     }
-    Some(diagonal)
+    min
 }
 
-/// C++ `GetSubMatrix(..., CvMat *)` with inclusive source bounds.
-pub fn get_sub_matrix_dense(
-    matrix: &Matrix<f64>,
-    row_start: usize,
-    row_end: usize,
-    column_start: usize,
-    column_end: usize,
-) -> Option<Matrix<f64>> {
-    if row_start > row_end
-        || column_start > column_end
-        || row_end >= matrix.rows
-        || column_end >= matrix.columns
-    {
-        return None;
-    }
-    let rows = row_end - row_start + 1;
-    let columns = column_end - column_start + 1;
-    let mut values = Vec::with_capacity(rows * columns);
-    for row in row_start..=row_end {
-        values.extend_from_slice(
-            &matrix.values
-                [row * matrix.columns + column_start..row * matrix.columns + column_end + 1],
-        );
-    }
-    Some(Matrix::new(rows, columns, values))
-}
-
-/// C++ `SparseDenseMult`.
-pub fn sparse_dense_mult(matrix: &SparseMatrix, dense: &Matrix<f64>) -> Option<Matrix<f64>> {
-    if matrix.nz != -1 || matrix.columns != dense.rows {
-        return None;
-    }
-    let mut result = zero_mat(matrix.rows, dense.columns);
-    for column in 0..matrix.columns {
-        for entry in
-            matrix.column_or_triplet_offsets[column]..matrix.column_or_triplet_offsets[column + 1]
-        {
-            for dense_column in 0..dense.columns {
-                result.values[matrix.row_indices[entry] * dense.columns + dense_column] +=
-                    matrix.values[entry] * dense.values[column * dense.columns + dense_column];
-            }
+/// `Combinedx1dx2(CvMat* dx1, CvMat* dx2)` (`std_qp.cpp:42`).
+pub fn combinedx1dx2(dx1: &CvMat, dx2: &CvMat) -> CvMat {
+    assert!(dx1.get_size().width == dx2.get_size().width);
+    let width = dx2.get_size().width;
+    let height = dx1.get_size().height + dx2.get_size().height;
+    let mut result = CvMat::create(height, width, CV_64FC1);
+    for i in 0..dx1.get_size().height {
+        for j in 0..dx1.get_size().width {
+            result.set_real_2d(i, j, dx1.get_real_2d(i, j));
         }
     }
-    Some(result)
-}
-
-/// C++ `dotProduct`.
-pub fn dot_product(dense: &Matrix<f64>, sparse: &SparseMatrix) -> Option<f64> {
-    if dense.columns != 1 || sparse.nz != -1 || sparse.columns != 1 || sparse.rows != dense.rows {
-        return None;
-    }
-    Some(
-        (sparse.column_or_triplet_offsets[0]..sparse.column_or_triplet_offsets[1])
-            .map(|entry| dense.values[sparse.row_indices[entry]] * sparse.values[entry])
-            .sum(),
-    )
-}
-
-/// C++ `print(CvMat *, ostream &)`, returned as owned text.
-pub fn print_matrix(matrix: &Matrix<f64>) -> String {
-    let mut output = String::new();
-    for row in matrix.values.chunks(matrix.columns) {
-        for value in row {
-            output.push_str(&format!("{value}  "));
+    for i in 0..dx2.get_size().height {
+        for j in 0..dx2.get_size().width {
+            result.set_real_2d(i + dx1.get_size().height, j, dx2.get_real_2d(i, j));
         }
-        output.push('\n');
     }
-    output.push('\n');
-    output
+    result
 }
 
-/// C++ `print(cs *, ostream &)`, returned as owned text.
-pub fn print_sparse(matrix: &SparseMatrix) -> Option<String> {
-    if matrix.nz != -1 {
-        return None;
+/// `sumLog(CvMat* mat)` (`std_qp.cpp:67`).
+pub fn sum_log(mat: &CvMat) -> f64 {
+    assert!(mat.get_size().width == 1);
+    let mut answer = 0.0f64;
+    for i in 0..mat.get_size().height {
+        for j in 0..mat.get_size().width {
+            let mut elem = mat.get_real_2d(i, j);
+            elem = elem.ln();
+            answer += elem;
+        }
     }
-    let mut output = String::new();
-    for column in 0..matrix.columns {
-        for entry in
-            matrix.column_or_triplet_offsets[column]..matrix.column_or_triplet_offsets[column + 1]
-        {
-            output.push_str(&format!(
-                "{} {column} {}\n",
-                matrix.row_indices[entry], matrix.values[entry]
+    answer
+}
+
+/// `std_qp(cs* _Q, cs* _c, cs* _A, CvMat* b, CvMat* x0, int M, int T, string
+/// option)` (`std_qp.cpp:85`).
+#[allow(clippy::too_many_arguments)]
+pub fn std_qp(
+    q_in: &Cs,
+    c_in: &Cs,
+    a_in: &Cs,
+    b: &CvMat,
+    x0: &CvMat,
+    m: i32,
+    t_: i32,
+    option: &str,
+) -> StdQpData {
+    // make sure sparse matrices are column compress format
+    let q_owned;
+    let q: &Cs = if q_in.nz != -1 {
+        q_owned = cs_compress(q_in).expect("std_qp: cs_compress Q");
+        &q_owned
+    } else {
+        q_in
+    };
+    let c_owned;
+    let c: &Cs = if c_in.nz != -1 {
+        c_owned = cs_compress(c_in).expect("std_qp: cs_compress c");
+        &c_owned
+    } else {
+        c_in
+    };
+    let a_owned;
+    let a: &Cs = if a_in.nz != -1 {
+        a_owned = cs_compress(a_in).expect("std_qp: cs_compress A");
+        &a_owned
+    } else {
+        a_in
+    };
+
+    // initialize result struct
+    let mut the_result = StdQpData::new();
+
+    // initialize constants
+    let mut answer_mat = x0.clone_mat();
+    let alpha = 0.25f64;
+    let beta = 0.5f64;
+    let mut tol1 = 1e-3f64;
+    let tol2 = 1e-3f64;
+    let newton_maxiters = 20;
+    let qp_maxiters = 200;
+    let mut exit_flag = 0;
+    let mu = 10.0f64;
+    let mut t = 1.0 / mu;
+    let n = answer_mat.get_size().height as f64;
+    let mut iters = 1;
+
+    let mut b_ax = b.clone_mat();
+    let src = b_ax.clone();
+    cv_convert_scale(src.view(), &mut b_ax, -1.0, 0.0);
+    cs_gaxpy(a, &answer_mat.data, &mut b_ax.data);
+    let src = b_ax.clone();
+    cv_convert_scale(src.view(), &mut b_ax, -1.0, 0.0);
+
+    let min_value = min_elem(&b_ax);
+
+    // check unfeasible starting point
+    if min_value < 0.0 {
+        if option != "probU" {
+            cout(&format!(
+                "WARNING: Infeasible starting point for QP solving {}\n",
+                option
             ));
         }
+        the_result.answer_mat = Some(answer_mat);
+        the_result.exit_flag = 2;
+        the_result.gap = -1.0 * min_value;
+        return the_result;
     }
-    Some(output)
-}
 
-/// C++ `LPsolver`, using owned dense Newton systems in place of SuiteSparse's
-/// temporary factorization objects.  `x0` is updated in place as in source.
-pub fn lp_solver(
-    cost: &SparseMatrix,
-    constraints: &SparseMatrix,
-    bounds: &Matrix<f64>,
-    x0: &mut Matrix<f64>,
-) -> Option<()> {
-    if cost.nz != -1
-        || constraints.nz != -1
-        || bounds.columns != 1
-        || x0.columns != 1
-        || cost.columns != 1
-        || cost.rows != x0.rows
-        || constraints.columns != x0.rows
-        || constraints.rows != bounds.rows
-    {
-        return None;
-    }
-    let mut slack = bounds.values.clone();
-    let product = sparse_dense_mult(constraints, x0)?;
-    for (value, product) in slack.iter_mut().zip(product.values) {
-        *value -= product;
-    }
-    if min_elem(&Matrix::new(slack.len(), 1, slack.clone()))? < 0.0 {
-        return None;
-    }
-    let mut barrier = 0.1;
-    let mut iterations = 1;
-    while x0.rows as f64 / barrier > 1.0e-3 && iterations < 200 {
-        barrier *= 10.0;
-        for _ in 0..20 {
-            iterations += 1;
-            let mut gradient = vec![0.0; x0.rows];
-            for entry in cost.column_or_triplet_offsets[0]..cost.column_or_triplet_offsets[1] {
-                gradient[cost.row_indices[entry]] = cost.values[entry] * barrier;
+    while (n / t > tol1) && (exit_flag == 0) && (iters < qp_maxiters) {
+        t *= mu;
+
+        for _iter in 1..=newton_maxiters {
+            iters += 1;
+            the_result.num_itrs = iters;
+
+            // compute gradient and Hessian
+            let bh = b_ax.get_size().height;
+            let mut tt = cs_spalloc(bh, bh, bh, 1, 1);
+            for ii in 0..bh {
+                cs_entry(&mut tt, ii, ii, 1.0 / (b_ax.get_real_2d(ii, 0)));
             }
-            let mut hessian = vec![0.0; x0.rows * x0.rows];
-            for constraint_row in 0..constraints.rows {
-                let inverse = 1.0 / slack[constraint_row];
-                let mut row = vec![0.0; x0.rows];
-                for column in 0..constraints.columns {
-                    for entry in constraints.column_or_triplet_offsets[column]
-                        ..constraints.column_or_triplet_offsets[column + 1]
-                    {
-                        if constraints.row_indices[entry] == constraint_row {
-                            row[column] += constraints.values[entry];
-                            gradient[column] += constraints.values[entry] * inverse;
-                        }
-                    }
-                }
-                for left in 0..x0.rows {
-                    for right in 0..x0.rows {
-                        hessian[left * x0.rows + right] +=
-                            row[left] * row[right] * inverse * inverse;
-                    }
-                }
+            let diag_m = cs_compress(&tt).unwrap();
+            drop(tt);
+
+            let tt = cs_multiply(&diag_m, a).unwrap();
+            drop(diag_m);
+            let aux_op = cs_transpose(&tt, 1).unwrap();
+            let aux_op2 = cs_multiply(&aux_op, &tt).unwrap();
+            let mut h = cs_add(&aux_op2, q, 1.0, t).unwrap();
+            drop(tt);
+            drop(aux_op);
+            drop(aux_op2);
+            // drop small entries
+            cs_droptol(&mut h, SPARSE_MATRIX_ZERO_VAL);
+
+            let mut g = CvMat::create(h.m, 1, CV_64FC1);
+            g.set_zero();
+            cs_gaxpy(q, &answer_mat.data, &mut g.data);
+            let aux_c = [1.0f64];
+            cs_gaxpy(c, &aux_c, &mut g.data);
+            for ii in 0..g.rows as usize {
+                g.data[ii] *= t;
             }
-            let mut augmented = vec![0.0; x0.rows * (x0.rows + 1)];
-            for row in 0..x0.rows {
-                augmented[row * (x0.rows + 1)..row * (x0.rows + 1) + x0.rows]
-                    .copy_from_slice(&hessian[row * x0.rows..(row + 1) * x0.rows]);
-                augmented[row * (x0.rows + 1) + x0.rows] = -gradient[row];
+
+            let mut b_ax_inv: Vec<f64> = vec![0.0; a.m as usize];
+            for ii in 0..a.m {
+                b_ax_inv[ii as usize] = 1.0 / b_ax.get_real_2d(ii, 0);
             }
-            for pivot in 0..x0.rows {
-                let best = (pivot..x0.rows).max_by(|&left, &right| {
-                    augmented[left * (x0.rows + 1) + pivot]
-                        .abs()
-                        .total_cmp(&augmented[right * (x0.rows + 1) + pivot].abs())
-                })?;
-                if augmented[best * (x0.rows + 1) + pivot].abs() <= f64::MIN_POSITIVE {
-                    return None;
-                }
-                for column in pivot..=x0.rows {
-                    augmented.swap(
-                        pivot * (x0.rows + 1) + column,
-                        best * (x0.rows + 1) + column,
-                    );
-                }
-                let divisor = augmented[pivot * (x0.rows + 1) + pivot];
-                for column in pivot..=x0.rows {
-                    augmented[pivot * (x0.rows + 1) + column] /= divisor;
-                }
-                for row in 0..x0.rows {
-                    if row != pivot {
-                        let factor = augmented[row * (x0.rows + 1) + pivot];
-                        for column in pivot..=x0.rows {
-                            augmented[row * (x0.rows + 1) + column] -=
-                                factor * augmented[pivot * (x0.rows + 1) + column];
-                        }
-                    }
-                }
+
+            let tt = cs_transpose(a, 1).unwrap();
+            cs_gaxpy(&tt, &b_ax_inv, &mut g.data);
+            drop(tt);
+            drop(b_ax_inv);
+
+            let cc: Cs;
+            let r: Cs;
+            let d1: Vec<f64>;
+            let d2: Vec<f64>;
+            let d3: Vec<f64>;
+            let g1: CvMat;
+            let mut g2: CvMat;
+            let dsize: i32;
+
+            if option == "prob" {
+                cc = get_sub_matrix(&h, 0, 2 * t_ + 3 * m - 1, 0, 2 * t_ + 3 * m - 1);
+                r = get_sub_matrix(&h, 2 * t_ + 3 * m, h.m - 1, 0, 2 * t_ + 3 * m - 1);
+                d1 = get_sub_matrix_diag(
+                    &h,
+                    2 * t_ + 3 * m,
+                    2 * t_ + 3 * m + 2 * t_ * m - 1,
+                    2 * t_ + 3 * m,
+                    2 * t_ + 3 * m + 2 * t_ * m - 1,
+                );
+                d2 = get_sub_matrix_diag(
+                    &h,
+                    2 * t_ + 3 * m,
+                    2 * t_ + 3 * m + 2 * t_ * m - 1,
+                    2 * t_ + 3 * m + 2 * t_ * m,
+                    h.n - 1,
+                );
+                d3 = get_sub_matrix_diag(
+                    &h,
+                    2 * t_ + 3 * m + 2 * t_ * m,
+                    h.m - 1,
+                    2 * t_ + 3 * m + 2 * t_ * m,
+                    h.n - 1,
+                );
+                g1 = get_sub_matrix_dense(0, 2 * t_ + 3 * m - 1, 0, 0, &g);
+                g2 = get_sub_matrix_dense(2 * t_ + 3 * m, g.get_size().height - 1, 0, 0, &g);
+                dsize = 2 * t_ * m;
+            } else if option == "probV" {
+                cc = get_sub_matrix(&h, 0, 2, 0, 2);
+                r = get_sub_matrix(&h, 3, h.m - 1, 0, 2);
+                d1 = get_sub_matrix_diag(&h, 3, 2 * t_ + 2, 3, 2 * t_ + 2);
+                d2 = get_sub_matrix_diag(&h, 3, 2 * t_ + 2, 3 + 2 * t_, h.n - 1);
+                d3 = get_sub_matrix_diag(&h, 3 + 2 * t_, h.m - 1, 3 + 2 * t_, h.n - 1);
+                g1 = get_sub_matrix_dense(0, 2, 0, 0, &g);
+                g2 = get_sub_matrix_dense(3, g.get_size().height - 1, 0, 0, &g);
+                tol1 = 1e-4;
+                dsize = 2 * t_;
+            } else if option == "probU" {
+                cc = get_sub_matrix(&h, 0, 3, 0, 3);
+                r = get_sub_matrix(&h, 4, h.m - 1, 0, 3);
+                d1 = get_sub_matrix_diag(&h, 4, 4 + m - 1, 4, 4 + m - 1);
+                d2 = get_sub_matrix_diag(&h, 4, 4 + m - 1, 4 + m, h.n - 1);
+                d3 = get_sub_matrix_diag(&h, 4 + m, h.m - 1, 4 + m, h.n - 1);
+                g1 = get_sub_matrix_dense(0, 3, 0, 0, &g);
+                g2 = get_sub_matrix_dense(4, g.get_size().height - 1, 0, 0, &g);
+                tol1 = 1e-4;
+                dsize = m;
+            } else {
+                cout("Unknown option for std_qp");
+                the_result.answer_mat = Some(answer_mat);
+                return the_result;
             }
-            let direction: Vec<f64> = (0..x0.rows)
-                .map(|row| augmented[row * (x0.rows + 1) + x0.rows])
-                .collect();
-            let decrement: f64 = direction.iter().zip(&gradient).map(|(a, b)| a * b).sum();
-            if decrement.abs() < 1.0e-3 {
+
+            let mut aux1: Vec<f64> = vec![0.0; dsize as usize];
+            for ii in 0..dsize as usize {
+                aux1[ii] = d1[ii] * d3[ii] - d2[ii] * d2[ii];
+            }
+
+            let mut tt = cs_spalloc(dsize + dsize, dsize + dsize, 4 * dsize, 1, 1);
+            for ii in 0..dsize {
+                let iu = ii as usize;
+                cs_entry(&mut tt, ii, ii, d3[iu] / aux1[iu]);
+                cs_entry(&mut tt, ii + dsize, ii + dsize, d1[iu] / aux1[iu]);
+                cs_entry(&mut tt, ii, ii + dsize, -d2[iu] / aux1[iu]);
+                cs_entry(&mut tt, ii + dsize, ii, -d2[iu] / aux1[iu]);
+            }
+            let dinv = cs_compress(&tt).unwrap();
+            drop(tt);
+            drop(d1);
+            drop(d2);
+            drop(d3);
+            drop(aux1);
+
+            let tt = cs_transpose(&r, 1).unwrap();
+            let aux = cs_multiply(&tt, &dinv).unwrap();
+            drop(tt);
+
+            // aux=D1.*D3-D2.^2;
+            // Dinv=[spdiags(D3./aux,0,l,l) -spdiags(D2./aux,0,l,l);-spdiags(D2./aux,0,l,l) spdiags(D1./aux,0,l,l)];
+            // aux=R'*Dinv;
+            // dx1=(C-aux*R)\(-g1+aux*g2);
+            // dx2=-Dinv*(g2+R*dx1);
+            let tt = cs_multiply(&aux, &r).unwrap();
+            let dense_a = cs_add(&cc, &tt, 1.0, -1.0).unwrap();
+            drop(tt);
+            drop(cc);
+
+            let mut dense_b = CvMat::create(aux.m, 1, CV_64FC1);
+            dense_b.set_zero();
+            cs_gaxpy(&aux, &g2.data, &mut dense_b.data);
+            let src = dense_b.clone();
+            cv_sub(src.view(), g1.view(), &mut dense_b);
+
+            // solving system using sparse Cholesky decomposition; the flag
+            // is not used
+            cs_cholsol(1, &dense_a, &mut dense_b.data);
+            let dx1 = dense_b.clone_mat();
+            drop(aux);
+            drop(dense_a);
+            drop(dense_b);
+
+            // dx2 = -Dinv*(g2+R*dx1)
+            cs_gaxpy(&r, &dx1.data, &mut g2.data);
+            let src = g2.clone();
+            cv_convert_scale(src.view(), &mut g2, -1.0, 0.0);
+            let mut dx2 = zero_mat(g2.rows, g2.cols);
+            cs_gaxpy(&dinv, &g2.data, &mut dx2.data);
+
+            drop(dinv);
+            drop(r);
+            drop(g2);
+            drop(g1);
+
+            // dx = [dx1;dx2]
+            let dx = combinedx1dx2(&dx1, &dx2);
+            drop(dx1);
+            drop(dx2);
+
+            let mut t2 = 1.0f64;
+
+            // forcing A*x <= b
+            let mut xdx = CvMat::create(dx.get_size().height, dx.get_size().width, CV_64FC1);
+            cv_add(answer_mat.view(), dx.view(), &mut xdx);
+            let mut while_loop_test = sparse_dense_mult(a, &xdx);
+            drop(xdx);
+            let src = while_loop_test.clone();
+            cv_sub(b.view(), src.view(), &mut while_loop_test);
+            let mut min_value2 = min_elem(&while_loop_test);
+
+            let mut adx = zero_mat(a.m, dx.cols);
+            cs_gaxpy(a, &dx.data, &mut adx.data);
+            while min_value2 <= 0.0 {
+                t2 = beta * t2;
+                if t2 < 1e-11 {
+                    exit_flag = 1;
+                    break;
+                }
+                let src = while_loop_test.clone();
+                cv_scale_add(
+                    adx.view(),
+                    CvScalar::new((1.0 - beta) * t2 / beta, 0.0, 0.0, 0.0),
+                    src.view(),
+                    &mut while_loop_test,
+                );
+                min_value2 = min_elem(&while_loop_test);
+            }
+            drop(adx);
+            drop(while_loop_test);
+
+            // backtracking line search
+            // 0.5*t*(x+t2*dx)'*Q*(x+t2*dx)
+            let mut xt2dx = CvMat::create(dx.get_size().height, dx.get_size().width, CV_64FC1);
+            cv_scale_add(
+                dx.view(),
+                CvScalar::new(t2, 0.0, 0.0, 0.0),
+                answer_mat.view(),
+                &mut xt2dx,
+            );
+            let mut qxt2dx = zero_mat(q.m, 1);
+            cs_gaxpy(q, &xt2dx.data, &mut qxt2dx.data);
+
+            let mut thexdx_qxdx = 0.5 * t * cv_dot_product(qxt2dx.view(), xt2dx.view());
+            drop(qxt2dx);
+
+            // 0.5*t*x'*Q*x
+            let qxt2dx = sparse_dense_mult(q, &answer_mat);
+            let thet05x_qx = 0.5 * t * cv_dot_product(answer_mat.view(), qxt2dx.view());
+            drop(qxt2dx);
+
+            // t*c'*(x+t2*dx)
+            let mut thetctxt2dx = t * (dot_product(&xt2dx, c));
+
+            // t*c'*x
+            let thetctx = t * (dot_product(&answer_mat, c));
+
+            // b-A*(x+t2*dx)
+            let mut b_axt2dx = b.clone_mat();
+            let src = b_axt2dx.clone();
+            cv_convert_scale(src.view(), &mut b_axt2dx, -1.0, 0.0);
+            cs_gaxpy(a, &xt2dx.data, &mut b_axt2dx.data);
+            let src = b_axt2dx.clone();
+            cv_convert_scale(src.view(), &mut b_axt2dx, -1.0, 0.0);
+            drop(xt2dx);
+            // sum log
+            let mut sl_b_axt2dx = sum_log(&b_axt2dx);
+            let sl_b_ax = sum_log(&b_ax);
+            drop(b_axt2dx);
+
+            // alpha*t2*g'*dx
+            let mut theat2g_tdx = alpha * t2 * cv_dot_product(g.view(), dx.view());
+
+            // backtracking search
+            while (thexdx_qxdx + thetctxt2dx - sl_b_axt2dx)
+                > (thet05x_qx + thetctx - sl_b_ax + theat2g_tdx)
+            {
+                t2 *= beta;
+                if t2 < 1e-11 {
+                    exit_flag = 1;
+                    break;
+                }
+
+                // check
+                // 0.5*t*(x+t2*dx)'*Q*(x+t2*dx)
+                let mut xt2dx = CvMat::create(dx.get_size().height, dx.get_size().width, CV_64FC1);
+                cv_scale_add(
+                    dx.view(),
+                    CvScalar::new(t2, 0.0, 0.0, 0.0),
+                    answer_mat.view(),
+                    &mut xt2dx,
+                );
+                let mut qxt2dx = zero_mat(q.m, xt2dx.cols);
+                cs_gaxpy(q, &xt2dx.data, &mut qxt2dx.data);
+
+                thexdx_qxdx = 0.5 * t * cv_dot_product(qxt2dx.view(), xt2dx.view());
+                drop(qxt2dx);
+
+                thetctxt2dx = t * (dot_product(&xt2dx, c));
+
+                let src = xt2dx.clone();
+                cv_convert_scale(src.view(), &mut xt2dx, -1.0, 0.0);
+                let mut b_axt2dx = b.clone_mat();
+                cs_gaxpy(a, &xt2dx.data, &mut b_axt2dx.data);
+
+                // sum log
+                sl_b_axt2dx = sum_log(&b_axt2dx);
+                drop(b_axt2dx);
+                drop(xt2dx);
+
+                // alpha*t2*g'*dx
+                theat2g_tdx = alpha * t2 * cv_dot_product(g.view(), dx.view());
+            }
+
+            let mut hdx = zero_mat(h.m, 1);
+            cs_gaxpy(&h, &dx.data, &mut hdx.data);
+            let lambda2 = cv_dot_product(dx.view(), hdx.view());
+            drop(hdx);
+            drop(h);
+            drop(g);
+            if (lambda2 < tol2) || (exit_flag == 1) {
+                drop(dx);
                 break;
             }
-            let mut step = 1.0;
-            loop {
-                let candidate: Vec<f64> = x0
-                    .values
-                    .iter()
-                    .zip(&direction)
-                    .map(|(x, dx)| x + step * dx)
-                    .collect();
-                let constraint_value =
-                    sparse_dense_mult(constraints, &Matrix::new(x0.rows, 1, candidate.clone()))?;
-                let candidate_slack: Vec<f64> = bounds
-                    .values
-                    .iter()
-                    .zip(constraint_value.values)
-                    .map(|(b, ax)| b - ax)
-                    .collect();
-                if candidate_slack.iter().all(|value| *value > 0.0) {
-                    let candidate_objective = barrier
-                        * dot_product(&Matrix::new(x0.rows, 1, candidate), cost)?
-                        - sum_log(&Matrix::new(candidate_slack.len(), 1, candidate_slack))?;
-                    let current_objective = barrier * dot_product(x0, cost)?
-                        - sum_log(&Matrix::new(slack.len(), 1, slack.clone()))?;
-                    if candidate_objective <= current_objective + 0.25 * step * decrement {
-                        break;
-                    }
-                }
-                step *= 0.5;
-                if step < 1.0e-11 {
-                    return Some(());
-                }
-            }
-            for (value, direction) in x0.values.iter_mut().zip(direction) {
-                *value += step * direction;
-            }
-            let updated = sparse_dense_mult(constraints, x0)?;
-            for ((value, bound), product) in
-                slack.iter_mut().zip(&bounds.values).zip(updated.values)
-            {
-                *value = bound - product;
+
+            let src = answer_mat.clone();
+            cv_scale_add(
+                dx.view(),
+                CvScalar::new(t2, 0.0, 0.0, 0.0),
+                src.view(),
+                &mut answer_mat,
+            );
+            drop(dx);
+            // update bAx
+            b_ax = b.clone_mat();
+            let src = b_ax.clone();
+            cv_convert_scale(src.view(), &mut b_ax, -1.0, 0.0);
+            cs_gaxpy(a, &answer_mat.data, &mut b_ax.data);
+            let src = b_ax.clone();
+            cv_convert_scale(src.view(), &mut b_ax, -1.0, 0.0);
+        }
+    }
+
+    the_result.answer_mat = Some(answer_mat);
+    the_result
+}
+
+/// `GetSubMatrix(const cs* A, int xs, int xe, int ys, int ye)`
+/// (`std_qp.cpp:682`).
+pub fn get_sub_matrix(a: &Cs, xs: i32, xe: i32, ys: i32, ye: i32) -> Cs {
+    let xsize = xe - xs + 1; // +1 for inclusive bounds
+    let ysize = ye - ys + 1;
+    let mut t = cs_spalloc(xsize, ysize, a.nzmax, 1, 1);
+    let ax = a.x.as_ref().expect("GetSubMatrix values");
+
+    // cs sparse uses column compress data structure
+    for j in ys..=ye {
+        for row_p in a.p[j as usize]..a.p[j as usize + 1] {
+            let aux_row = a.i[row_p as usize];
+            if aux_row >= xs && aux_row <= xe {
+                cs_entry(&mut t, aux_row - xs, j - ys, ax[row_p as usize]);
             }
         }
     }
-    Some(())
+    cs_compress(&t).unwrap()
 }
 
-#[cfg(test)]
-mod tests {
-    use super::*;
+/// `GetSubMatrixDiag(const cs* A, int xs, int xe, int ys, int ye)`
+/// (`std_qp.cpp:704`): extract just the main diagonal.  Fixed in
+/// translation (BUGS.md): the C++ `new double[xsize]` leaves an entry whose
+/// diagonal element is absent from `A` uninitialised; it is 0 here.
+pub fn get_sub_matrix_diag(a: &Cs, xs: i32, xe: i32, ys: i32, ye: i32) -> Vec<f64> {
+    let xsize = xe - xs + 1; // +1 for inclusive bounds
+    let ysize = ye - ys + 1;
 
-    #[test]
-    fn dense_source_operations_preserve_row_major_values() {
-        let first = Matrix::new(1, 2, vec![1.0, 2.0]);
-        let second = Matrix::new(2, 2, vec![3.0, 4.0, 5.0, 6.0]);
-        assert_eq!(
-            combined_x1_dx2(&first, &second).unwrap().values,
-            vec![1., 2., 3., 4., 5., 6.]
-        );
-        assert_eq!(
-            get_sub_matrix_dense(&second, 0, 1, 1, 1).unwrap().values,
-            vec![4., 6.]
-        );
-        assert_eq!(
-            sum_log(&Matrix::new(2, 1, vec![1.0, std::f64::consts::E])),
-            Some(1.0)
-        );
+    assert!(xsize == ysize);
+    let mut result: Vec<f64> = vec![0.0; xsize as usize];
+    let ax = a.x.as_ref().expect("GetSubMatrixDiag values");
+
+    // cs sparse uses column compress data structure
+    for j in ys..=ye {
+        for row_p in a.p[j as usize]..a.p[j as usize + 1] {
+            if a.i[row_p as usize] - xs == j - ys {
+                result[(j - ys) as usize] = ax[row_p as usize];
+            }
+        }
+    }
+    result
+}
+
+/// `GetSubMatrix(int xs, int xe, int ys, int ye, CvMat* dense)`
+/// (`std_qp.cpp:724`).
+pub fn get_sub_matrix_dense(xs: i32, xe: i32, ys: i32, ye: i32, dense: &CvMat) -> CvMat {
+    let xsize = xe - xs + 1; // +1 for inclusive bounds
+    let ysize = ye - ys + 1;
+    let mut result = CvMat::create(xsize, ysize, CV_64FC1);
+
+    for i in xs..=xe {
+        for j in ys..=ye {
+            result.set_real_2d(i - xs, j - ys, dense.get_real_2d(i, j));
+        }
+    }
+    result
+}
+
+/// `SparseDenseMult(cs* S, CvMat* dense)` (`std_qp.cpp:742`): sparse x dense
+/// returns a dense matrix.
+pub fn sparse_dense_mult(s: &Cs, dense: &CvMat) -> CvMat {
+    assert!(s.n == dense.get_size().height);
+    let mut result = zero_mat(s.m, dense.get_size().width);
+
+    let n = s.n;
+    let ap = &s.p;
+    let ai = &s.i;
+    let ax = s.x.as_ref().expect("SparseDenseMult values");
+    let dense_data = &dense.data;
+    let n_cols = result.cols as usize;
+    let result_data = &mut result.data;
+    for cc in 0..n_cols {
+        for j in 0..n as usize {
+            for p in ap[j]..ap[j + 1] {
+                let p = p as usize;
+                result_data[n_cols * ai[p] as usize + cc] += ax[p] * dense_data[n_cols * j + cc];
+            }
+        }
+    }
+    result
+}
+
+/// `dotProduct(CvMat* dense, cs* sparse)` (`std_qp.cpp:769`).
+pub fn dot_product(dense: &CvMat, sparse: &Cs) -> f64 {
+    let mut result = 0.0f64;
+    assert!(dense.get_size().width == 1);
+    assert!(sparse.n == 1);
+    assert!(sparse.nz == -1); // sparse matrix has to be in compressed form
+    let sx = sparse.x.as_ref().expect("dotProduct values");
+    for jj in 0..sparse.p[1] as usize {
+        result += dense.data[sparse.i[jj] as usize] * sx[jj];
+    }
+    result
+}
+
+/// `LPsolver(cs* _c, cs* _A, CvMat* b, CvMat* x0)` (`std_qp.cpp:830`):
+/// solves LP optimization problems (min c'*x subject to Ax<=b) with the
+/// log-barrier method and Newton steps; the result is returned in `x0`.
+///
+/// Fixed in translation (BUGS.md): the source ends with
+/// `memcpy(x0->data.db, xHat->data.db, sizeof(CV_64FC1)*xHat->rows)`, where
+/// `CV_64FC1` is an `int` constant, so only 4 bytes per row -- the first
+/// half of the vector, and for a 3-row problem half of `x0[1]` -- are copied
+/// back.  Every row is copied here.
+pub fn lp_solver(c_in: &Cs, a_in: &Cs, b: &CvMat, x0: &mut CvMat) {
+    // make sure sparse matrices are column compress format
+    let c_owned;
+    let c: &Cs = if c_in.nz != -1 {
+        c_owned = cs_compress(c_in).expect("LPsolver: cs_compress c");
+        &c_owned
+    } else {
+        c_in
+    };
+    let a_owned;
+    let a: &Cs = if a_in.nz != -1 {
+        a_owned = cs_compress(a_in).expect("LPsolver: cs_compress A");
+        &a_owned
+    } else {
+        a_in
+    };
+
+    // final result returned. Initialize it
+    let mut x_hat = x0.clone_mat();
+
+    let alpha = 0.25f64;
+    let beta = 0.5f64;
+    let tol1 = 1e-3f64;
+    let tol2 = 1e-3f64;
+    let newton_maxiters = 20;
+    let qp_maxiters = 200;
+    let mut exit_flag = 0;
+    let mu = 10.0f64;
+    let mut t = 1.0 / mu;
+    let n = x0.get_size().height as f64;
+    let mut iters = 1;
+
+    let mut b_ax = b.clone_mat();
+    let src = b_ax.clone();
+    cv_convert_scale(src.view(), &mut b_ax, -1.0, 0.0);
+    cs_gaxpy(a, &x_hat.data, &mut b_ax.data);
+    let src = b_ax.clone();
+    cv_convert_scale(src.view(), &mut b_ax, -1.0, 0.0);
+
+    let min_value = min_elem(&b_ax);
+
+    // check unfeasible starting point
+    if min_value < 0.0 {
+        cout("Infeasible starting point for LP\n");
     }
 
-    #[test]
-    fn sparse_source_operations_use_compressed_columns() {
-        let sparse = SparseMatrix::new(3, 2, 3, -1, vec![0, 2, 3], vec![0, 2, 1], vec![2., 4., 3.]);
-        assert_eq!(
-            sparse_dense_mult(&sparse, &Matrix::new(2, 1, vec![5., 7.]))
-                .unwrap()
-                .values,
-            vec![10., 21., 20.]
-        );
-        assert_eq!(
-            get_sub_matrix_diag(&sparse, 0, 1, 0, 1).unwrap(),
-            vec![2., 3.]
-        );
-        assert_eq!(
-            dot_product(
-                &Matrix::new(3, 1, vec![2., 3., 4.]),
-                &SparseMatrix::new(3, 1, 2, -1, vec![0, 2], vec![0, 2], vec![5., 6.])
-            ),
-            Some(34.)
-        );
-        assert_eq!(print_sparse(&sparse).unwrap(), "0 0 2\n2 0 4\n1 1 3\n");
+    while (n / t > tol1) && (exit_flag == 0) && (iters < qp_maxiters) {
+        t *= mu;
+
+        for _iter in 1..=newton_maxiters {
+            iters += 1;
+
+            // compute gradient and Hessian
+            let bh = b_ax.get_size().height;
+            let mut tt = cs_spalloc(bh, bh, bh, 1, 1);
+            for ii in 0..bh {
+                cs_entry(&mut tt, ii, ii, 1.0 / (b_ax.get_real_2d(ii, 0)));
+            }
+            let diag_m = cs_compress(&tt).unwrap();
+            drop(tt);
+
+            let tt = cs_multiply(&diag_m, a).unwrap();
+            drop(diag_m);
+            let aux_op = cs_transpose(&tt, 1).unwrap();
+            let mut h = cs_multiply(&aux_op, &tt).unwrap();
+            drop(tt);
+            drop(aux_op);
+            // drop small entries
+            cs_droptol(&mut h, SPARSE_MATRIX_ZERO_VAL);
+
+            let mut g = CvMat::create(h.m, 1, CV_64FC1);
+            g.set_zero();
+            let cx = c.x.as_ref().expect("LPsolver c values");
+            for cc in c.p[0]..c.p[1] {
+                g.data[c.i[cc as usize] as usize] = cx[cc as usize] * t;
+            }
+
+            let mut b_ax_inv: Vec<f64> = vec![0.0; a.m as usize];
+            for ii in 0..a.m {
+                b_ax_inv[ii as usize] = 1.0 / b_ax.get_real_2d(ii, 0);
+            }
+
+            let tt = cs_transpose(a, 1).unwrap();
+            cs_gaxpy(&tt, &b_ax_inv, &mut g.data);
+            drop(tt);
+            drop(b_ax_inv);
+
+            // dx = -H\g, computed using cholesky
+            let mut dx = CvMat::create(g.rows, g.cols, CV_64FC1);
+            cv_convert_scale(g.view(), &mut dx, -1.0, 0.0);
+            cs_cholsol(1, &h, &mut dx.data);
+
+            let mut t2 = 1.0f64;
+
+            // forcing A*x <= b
+            let mut xdx = CvMat::create(dx.get_size().height, dx.get_size().width, CV_64FC1);
+            cv_add(x_hat.view(), dx.view(), &mut xdx);
+            let mut while_loop_test = sparse_dense_mult(a, &xdx);
+            drop(xdx);
+            let src = while_loop_test.clone();
+            cv_sub(b.view(), src.view(), &mut while_loop_test);
+            let mut min_value2 = min_elem(&while_loop_test);
+
+            let mut adx = zero_mat(a.m, dx.cols);
+            cs_gaxpy(a, &dx.data, &mut adx.data);
+            while min_value2 <= 0.0 {
+                t2 = beta * t2;
+                if t2 < 1e-11 {
+                    exit_flag = 1;
+                    break;
+                }
+                let src = while_loop_test.clone();
+                cv_scale_add(
+                    adx.view(),
+                    CvScalar::new((1.0 - beta) * t2 / beta, 0.0, 0.0, 0.0),
+                    src.view(),
+                    &mut while_loop_test,
+                );
+                min_value2 = min_elem(&while_loop_test);
+            }
+            drop(adx);
+            drop(while_loop_test);
+
+            // backtracking line search
+            let mut xt2dx = CvMat::create(dx.get_size().height, dx.get_size().width, CV_64FC1);
+            cv_scale_add(
+                dx.view(),
+                CvScalar::new(t2, 0.0, 0.0, 0.0),
+                x_hat.view(),
+                &mut xt2dx,
+            );
+
+            // t*c'*(x+t2*dx)
+            let mut thetctxt2dx = t * (dot_product(&xt2dx, c));
+
+            // t*c'*x
+            let thetctx = t * (dot_product(&x_hat, c));
+
+            // b-A*(x+t2*dx)
+            let mut b_axt2dx = b.clone_mat();
+            let src = b_axt2dx.clone();
+            cv_convert_scale(src.view(), &mut b_axt2dx, -1.0, 0.0);
+            cs_gaxpy(a, &xt2dx.data, &mut b_axt2dx.data);
+            let src = b_axt2dx.clone();
+            cv_convert_scale(src.view(), &mut b_axt2dx, -1.0, 0.0);
+            drop(xt2dx);
+            // sum log
+            let mut sl_b_axt2dx = sum_log(&b_axt2dx);
+            let sl_b_ax = sum_log(&b_ax);
+            drop(b_axt2dx);
+
+            // alpha*t2*g'*dx
+            let mut theat2g_tdx = alpha * t2 * cv_dot_product(g.view(), dx.view());
+
+            // backtracking search
+            while (thetctxt2dx - sl_b_axt2dx) > (thetctx - sl_b_ax + theat2g_tdx) {
+                t2 *= beta;
+                if t2 < 1e-11 {
+                    exit_flag = 1;
+                    break;
+                }
+
+                let mut xt2dx = CvMat::create(dx.get_size().height, dx.get_size().width, CV_64FC1);
+                cv_scale_add(
+                    dx.view(),
+                    CvScalar::new(t2, 0.0, 0.0, 0.0),
+                    x_hat.view(),
+                    &mut xt2dx,
+                );
+
+                // t*c'*(x+t2*dx)
+                thetctxt2dx = t * (dot_product(&xt2dx, c));
+
+                let src = xt2dx.clone();
+                cv_convert_scale(src.view(), &mut xt2dx, -1.0, 0.0);
+                let mut b_axt2dx = b.clone_mat();
+                cs_gaxpy(a, &xt2dx.data, &mut b_axt2dx.data);
+
+                // sum log
+                sl_b_axt2dx = sum_log(&b_axt2dx);
+                drop(b_axt2dx);
+                drop(xt2dx);
+                // alpha*t2*g'*dx
+                theat2g_tdx = alpha * t2 * cv_dot_product(g.view(), dx.view());
+            }
+
+            let mut hdx = zero_mat(h.m, 1);
+            cs_gaxpy(&h, &dx.data, &mut hdx.data);
+            let lambda2 = cv_dot_product(dx.view(), hdx.view());
+            drop(hdx);
+            drop(h);
+            drop(g);
+            if (lambda2 < tol2) || (exit_flag == 1) {
+                drop(dx);
+                break;
+            }
+
+            let src = x_hat.clone();
+            cv_scale_add(
+                dx.view(),
+                CvScalar::new(t2, 0.0, 0.0, 0.0),
+                src.view(),
+                &mut x_hat,
+            );
+            drop(dx);
+            // update bAx
+            b_ax = b.clone_mat();
+            let src = b_ax.clone();
+            cv_convert_scale(src.view(), &mut b_ax, -1.0, 0.0);
+            cs_gaxpy(a, &x_hat.data, &mut b_ax.data);
+            let src = b_ax.clone();
+            cv_convert_scale(src.view(), &mut b_ax, -1.0, 0.0);
+        }
     }
 
-    #[test]
-    fn lp_solver_finds_the_barrier_solution_for_a_bounded_linear_cost() {
-        let cost = SparseMatrix::new(1, 1, 1, -1, vec![0, 1], vec![0], vec![-1.0]);
-        let constraints = SparseMatrix::new(2, 1, 2, -1, vec![0, 2], vec![0, 1], vec![1.0, -1.0]);
-        let mut point = Matrix::new(1, 1, vec![0.0]);
-        lp_solver(
-            &cost,
-            &constraints,
-            &Matrix::new(2, 1, vec![1.0, 1.0]),
-            &mut point,
-        )
-        .unwrap();
-        assert!((point.values[0] - 1.0).abs() < 2.0e-3, "{point:?}");
-    }
-
-    #[test]
-    fn std_qp_finds_the_constrained_quadratic_minimum() {
-        // min 1/2 x^2 - 2x, subject to -1 < x < 1: x tends to 1.
-        let quadratic = SparseMatrix::new(1, 1, 1, -1, vec![0, 1], vec![0], vec![1.]);
-        let cost = SparseMatrix::new(1, 1, 1, -1, vec![0, 1], vec![0], vec![-2.]);
-        let constraints = SparseMatrix::new(2, 1, 2, -1, vec![0, 2], vec![0, 1], vec![1., -1.]);
-        let result = std_qp(
-            &quadratic,
-            &cost,
-            &constraints,
-            &Matrix::new(2, 1, vec![1., 1.]),
-            &Matrix::new(1, 1, vec![0.]),
-            0,
-            0,
-            "probU",
-        );
-        assert_eq!(result.exit_flag, 0);
-        assert!((result.answer_mat.unwrap().values[0] - 1.).abs() < 2e-3);
-    }
+    let rows = x_hat.rows as usize;
+    x0.data[..rows].copy_from_slice(&x_hat.data[..rows]);
 }

@@ -1,785 +1,726 @@
 //! `IMOD/Etomo/src/etomo/ui/swing/PostProcessingDialog.java`.
 //!
-//! The Java source owns the five-panel tab coordinator. Native tab widgets,
-//! its processing mediator, UIHarness and comscript/filesystem calls remain
-//! explicit source boundaries.
-#![allow(dead_code)]
+//! Java `public final class PostProcessingDialog extends ProcessDialog
+//! implements ContextMenu, ProcessInterface`: the Post Processing dialog -
+//! a tabbed pane with the Trim vol, Flatten, Reduce/filt vol, Alt Stack and
+//! (single axis, non-montage datasets) Subtomograms tabs.  Only the selected
+//! tab's root panel holds its panel; `changeTab` moves it.
+//!
+//! An EDT object (`ui.md`): created as `Rc<Self>` by
+//! [`PostProcessingDialog::get_instance`]; every method takes `&self`.  The
+//! `ProcessDialog` superclass is the embedded `base` (reached through
+//! `Deref`), and the overridden `done()` is `ProcessDialogVirtual::done`.
+//! The listener class `TabChangeListener` is a closure holding a weak
+//! reference to the dialog; the static inner class `Tab` is the enum [`Tab`].
+//!
+//! **Construction order.**  The Java constructor hands `this` (as the
+//! `ProcessInterface`) to `SubtomogramsPanel` and `AltStackPanel`, and
+//! `AltStackPanel`'s constructor registers it with the mediator.  So the
+//! dialog is put in its `Rc` first (with the `ProcessDialog` part and the
+//! field-initialised members), and the constructor-body members are then
+//! created in the Java order and stored in `OnceCell`s; after `get_instance`
+//! returns they are always set (Java `final`).
 
-use super::{
-    alt_stack_panel::{
-        AltStackMetaDataBoundary, AltStackPanel, AltStackTiltParamBoundary,
-        AltTomoSetupParamBoundary,
-    },
-    check_box::CheckBox,
-    context_menu::{ContextMenu, MouseEvent},
-    flatten_volume_panel::{FlattenVolumeMetaData, FlattenVolumePanel, WarpVolParamBoundary},
-    process_dialog::ProcessDialogApplicationManager,
-    process_interface::ProcessInterface,
-    squeeze_vol_panel::{
-        ConstReduceFiltVolParam, ConstSqueezevolParamBoundary, MakecomfileParamBoundary,
-        SqueezeVolMetaDataBoundary, SqueezeVolPanel, SqueezeVolPanelApplicationManager,
-    },
-    subtomograms_panel::{
-        ConstSubtomogramsMetaData, SubtomoSetupParam, SubtomogramsMetaData, SubtomogramsPanel,
-        SubtomogramsPanelManager,
-    },
-    trimvol_panel::{
-        ReconScreenStateBoundary, TrimvolInputFileState, TrimvolMetaDataBoundary, TrimvolPanel,
-        TrimvolParamBoundary,
-    },
-};
-use crate::imod::etomo::r#type::{
-    axis_id::AxisID, dialog_type::DialogType, processing_method::ProcessingMethod,
-};
-use crate::imod::etomo::ui::{
-    queue_table_event::QueueTableEvent, queue_table_listener::QueueTableListener,
-};
+use std::cell::{Cell, OnceCell};
+use std::ops::Deref;
+use std::rc::{Rc, Weak};
 
-/// Java inner `Tab`, preserving its source tab index values.
-#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+use super::alt_stack_display::AltStackDisplay;
+use super::alt_stack_panel::AltStackPanel;
+use super::beveled_border::BeveledBorder;
+use super::button_component::ButtonComponent;
+use super::context_menu::ContextMenu;
+use super::flatten_volume_panel::FlattenVolumePanel;
+use super::flatten_warp_display::FlattenWarpDisplay;
+use super::process_dialog::{ProcessDialog, ProcessDialogVirtual};
+use super::process_interface::ProcessInterface;
+use super::reduce_filt_vol_display::ReduceFiltVolDisplay;
+use super::squeeze_vol_panel::SqueezeVolPanel;
+use super::subtomo_setup_display::SubtomoSetupDisplay;
+use super::subtomograms_panel::SubtomogramsPanel;
+use super::tabbed_pane::TabbedPane;
+use super::tool_panel::ToolPanel;
+use super::trimvol_display::TrimvolDisplay;
+use super::trimvol_panel::TrimvolPanel;
+use super::ui_harness;
+use super::warp_vol_display::WarpVolDisplay;
+use crate::imod::etomo::application_manager::ApplicationManager;
+use crate::imod::etomo::base_manager::BaseManager;
+use crate::imod::etomo::comscript::const_squeezevol_param::ConstSqueezevolParam;
+use crate::imod::etomo::comscript::const_warp_vol_param::ConstWarpVolParam;
+use crate::imod::etomo::comscript::makecomfile_param::MakecomfileParam;
+use crate::imod::etomo::comscript::reduce_filt_vol_param::ReduceFiltVolParam;
+use crate::imod::etomo::comscript::subtomo_setup_param::SubtomoSetupParam;
+use crate::imod::etomo::comscript::tilt_param::TiltParam;
+use crate::imod::etomo::comscript::trimvol_param::TrimvolParam;
+use crate::imod::etomo::comscript::warp_vol_param::WarpVolParam;
+use crate::imod::etomo::jdk::{ChangeEvent, JComponent, MouseEvent};
+use crate::imod::etomo::logic::trimvol_input_file_state::TrimvolInputFileState;
+use crate::imod::etomo::process::base_process_manager::BaseProcessManager;
+use crate::imod::etomo::processing_method_mediator::ProcessingMethodMediator;
+use crate::imod::etomo::r#type::axis_id::AxisID;
+use crate::imod::etomo::r#type::axis_type::AxisType;
+use crate::imod::etomo::r#type::const_etomo_number::ConstEtomoNumber;
+use crate::imod::etomo::r#type::const_meta_data::ConstMetaData;
+use crate::imod::etomo::r#type::dialog_type::DialogType;
+use crate::imod::etomo::r#type::file_type;
+use crate::imod::etomo::r#type::meta_data::MetaData;
+use crate::imod::etomo::r#type::processing_method::ProcessingMethod;
+use crate::imod::etomo::r#type::recon_screen_state::ReconScreenState;
+use crate::imod::etomo::r#type::view_type::ViewType;
+use crate::imod::etomo::ui::queue_table_event::QueueTableEvent;
+use crate::imod::etomo::ui::queue_table_listener::QueueTableListener;
+use crate::imod::etomo::util::utilities;
+
+/// Java public static final `rcsid`.
+pub const RCSID: &str = "$Id$";
+
+/// Java package-private static final inner class `Tab` (an index into the
+/// tabbed pane).
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum Tab {
-    #[default]
+    /// Java private static final `TRIM_VOL = new Tab(0)`.
     TrimVol,
+    /// Java private static final `FLATTEN = new Tab(1)`.
     Flatten,
+    /// Java private static final `SQUEEZE_VOL = new Tab(2)`.
     SqueezeVol,
+    /// Java private static final `ALT_STACK = new Tab(3)`.
     AltStack,
+    /// Java private static final `SUBTOMOGRAMS = new Tab(4)`.
     Subtomograms,
 }
 
 impl Tab {
-    /// Java `Tab.getInstance(int)`.
-    pub fn get_instance(index: i32) -> Self {
-        match index {
-            1 => Self::Flatten,
-            2 => Self::SqueezeVol,
-            3 => Self::AltStack,
-            4 => Self::Subtomograms,
-            _ => Self::TrimVol,
-        }
-    }
+    /// Java static final `DEFAULT = TRIM_VOL`.
+    pub const DEFAULT: Tab = Tab::TrimVol;
 
-    /// Java `Tab.toInt()`.
-    pub fn to_int(self) -> i32 {
+    /// Java private final field `index`.
+    fn index(self) -> i32 {
         match self {
-            Self::TrimVol => 0,
-            Self::Flatten => 1,
-            Self::SqueezeVol => 2,
-            Self::AltStack => 3,
-            Self::Subtomograms => 4,
+            Tab::TrimVol => 0,
+            Tab::Flatten => 1,
+            Tab::SqueezeVol => 2,
+            Tab::AltStack => 3,
+            Tab::Subtomograms => 4,
         }
     }
-}
 
-/// Direct `ApplicationManager`/mediator/FileType/comscript operations used by
-/// this unit. No filesystem or scheduler substitute is fabricated here.
-pub trait PostProcessingDialogManager:
-    ProcessDialogApplicationManager + SubtomogramsPanelManager
-{
-    fn is_dual_axis(&self) -> bool;
-    fn is_montage(&self) -> bool;
-    fn rootname_even_exists(&self) -> bool;
-    fn rootname_odd_exists(&self) -> bool;
-    fn register_processing_method(&mut self, method: ProcessingMethod);
-    fn set_processing_method(&mut self, method: ProcessingMethod);
-    fn add_queue_listener_on_switch_dialog(&mut self);
-    fn move_sub_frame(&mut self);
-    fn done_post_processing(&mut self);
-    fn load_alt_tomo_setup(&mut self, retry: bool) -> bool;
-    fn touch_alt_tomo_setup_comscript(&mut self);
-    fn get_alt_tomo_setup_param(&self) -> AltTomoSetupParamBoundary;
-    fn gold_eraser_com_file_exists(&self) -> (bool, bool, bool);
-    fn eraser_log_file_exists(&self) -> (bool, bool, bool);
-    fn ctf_correction_log_file_exists(&self) -> (bool, bool, bool);
-    fn gold_eraser_log_file_exists(&self) -> (bool, bool, bool);
-    fn mtf_filter_log_file_exists(&self) -> (bool, bool, bool);
-}
-
-/// The source-observable `TabbedPane` attachment and listener state.
-#[derive(Clone, Debug, Eq, PartialEq)]
-pub struct PostProcessingTabbedPane {
-    pub labels: Vec<&'static str>,
-    pub selected_index: i32,
-    pub attached_panel: Vec<Option<Tab>>,
-    pub mouse_listener_present: bool,
-    pub change_listener_present: bool,
-}
-
-/// Java private static `TabChangeListener`.  The Java listener retains its
-/// enclosing dialog; Rust passes that same source owner at its GUI callback
-/// boundary rather than introducing shared mutable ownership.
-#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
-pub struct TabChangeListener;
-
-impl TabChangeListener {
-    /// Java private `TabChangeListener(PostProcessingDialog)`.
-    pub fn new() -> Self {
-        Self
+    /// Java private static `getInstance(int)`.
+    fn get_instance(index: i32) -> Tab {
+        if index == Tab::TrimVol.index() {
+            return Tab::TrimVol;
+        }
+        if index == Tab::Flatten.index() {
+            return Tab::Flatten;
+        }
+        if index == Tab::SqueezeVol.index() {
+            return Tab::SqueezeVol;
+        }
+        if index == Tab::Subtomograms.index() {
+            return Tab::Subtomograms;
+        }
+        if index == Tab::AltStack.index() {
+            return Tab::AltStack;
+        }
+        Tab::DEFAULT
     }
 
-    /// Java `stateChanged(ChangeEvent)`.
-    pub fn state_changed<M: PostProcessingDialogManager>(
-        &self,
-        adaptee: &mut PostProcessingDialog,
-        manager: &mut M,
-    ) {
-        adaptee.change_tab(manager);
+    /// Java private `toInt()`.
+    fn to_int(self) -> i32 {
+        self.index()
     }
 }
 
-/// The fields of Java `MetaData` reached by this coordinator, grouped by the
-/// translated child-panel boundaries plus the source-owned current tab.
-#[derive(Clone, Debug, Default, Eq, PartialEq)]
-pub struct PostProcessingMetaDataBoundary {
-    pub trimvol: TrimvolMetaDataBoundary,
-    pub flatten: FlattenVolumeMetaData,
-    pub squeeze_vol: SqueezeVolMetaDataBoundary,
-    pub alt_stack: AltStackMetaDataBoundary,
-    pub subtomo_reorientation_type_none: bool,
-    pub subtomo_reorientation_type_flipped: bool,
-    pub subtomo_reorientation_type_rotated: bool,
-    pub subtomo_make_volume_stacks: bool,
-    pub subtomo_make_volume_stacks_value: i32,
-    pub subtomo_new_aligned_binning: i32,
-    pub subtomo_fourier_reduce_by_factor: i32,
-    pub subtomo_extent_of_z_levels_in_nm: String,
-    pub post_cur_tab: Option<i32>,
-}
-
-impl ConstSubtomogramsMetaData for PostProcessingMetaDataBoundary {
-    fn subtomo_reorientation_type_none(&self) -> bool {
-        self.subtomo_reorientation_type_none
-    }
-    fn subtomo_reorientation_type_flipped(&self) -> bool {
-        self.subtomo_reorientation_type_flipped
-    }
-    fn subtomo_reorientation_type_rotated(&self) -> bool {
-        self.subtomo_reorientation_type_rotated
-    }
-    fn subtomo_make_volume_stacks(&self) -> bool {
-        self.subtomo_make_volume_stacks
-    }
-    fn subtomo_make_volume_stacks_value(&self) -> i32 {
-        self.subtomo_make_volume_stacks_value
-    }
-    fn subtomo_new_aligned_binning(&self) -> i32 {
-        self.subtomo_new_aligned_binning
-    }
-    fn subtomo_fourier_reduce_by_factor(&self) -> i32 {
-        self.subtomo_fourier_reduce_by_factor
-    }
-    fn subtomo_extent_of_z_levels_in_nm(&self) -> String {
-        self.subtomo_extent_of_z_levels_in_nm.clone()
-    }
-}
-
-impl SubtomogramsMetaData for PostProcessingMetaDataBoundary {
-    fn set_subtomo_reorientation_type_none(&mut self, value: bool) {
-        self.subtomo_reorientation_type_none = value;
-    }
-    fn set_subtomo_reorientation_type_flipped(&mut self, value: bool) {
-        self.subtomo_reorientation_type_flipped = value;
-    }
-    fn set_subtomo_reorientation_type_rotated(&mut self, value: bool) {
-        self.subtomo_reorientation_type_rotated = value;
-    }
-    fn set_subtomo_make_volume_stacks(&mut self, value: i32) {
-        self.subtomo_make_volume_stacks_value = value;
-    }
-    fn set_subtomo_new_aligned_binning(&mut self, value: i32) {
-        self.subtomo_new_aligned_binning = value;
-    }
-    fn set_subtomo_fourier_reduce_by_factor(&mut self, value: i32) {
-        self.subtomo_fourier_reduce_by_factor = value;
-    }
-    fn set_subtomo_extent_of_z_levels_in_nm(&mut self, value: String) {
-        self.subtomo_extent_of_z_levels_in_nm = value;
-    }
-}
-
-/// Java `PostProcessingDialog` fields. `None` for `subtomograms_panel` is the
-/// source's explicit dual-axis/montage branch.
+/// Java `public final class PostProcessingDialog extends ProcessDialog
+/// implements ContextMenu, ProcessInterface`.
 pub struct PostProcessingDialog {
-    pub axis_id: AxisID,
-    pub dialog_type: DialogType,
-    pub trimvol_panel: TrimvolPanel,
-    pub flatten_volume_panel: FlattenVolumePanel,
-    pub squeeze_vol_panel: SqueezeVolPanel,
-    pub subtomograms_panel: Option<SubtomogramsPanel>,
-    pub alt_stack_panel: AltStackPanel,
-    pub tabbed_pane: PostProcessingTabbedPane,
-    pub cur_tab: Tab,
-    pub open_alt_stack_first_time: bool,
-    pub displayed: bool,
-    pub root_box_layout_y_axis: bool,
-    pub root_border_title: &'static str,
-    pub execute_button_text: &'static str,
-    /// Java's active Subtomograms `setUseQueueCheckBox` direct component boundary.
-    pub queue_checkbox_installed: bool,
+    /// The `ProcessDialog` superclass.
+    base: Rc<ProcessDialog>,
+    /// Rust-only: Java `this` (the mediator's ProcessInterface).
+    self_ref: Weak<PostProcessingDialog>,
+
+    /// Java private final `trimvolPanel`.
+    trimvol_panel: OnceCell<Rc<TrimvolPanel>>,
+
+    /// Java private final `tabbedPane = new TabbedPane()`.
+    tabbed_pane: Rc<TabbedPane>,
+
+    /// Java private `curTab = Tab.DEFAULT`.
+    cur_tab: Cell<Tab>,
+    /// Java private final `flattenVolumePanel`.
+    flatten_volume_panel: OnceCell<Rc<FlattenVolumePanel>>,
+    /// Java private final `squeezeVolPanel`.
+    squeeze_vol_panel: OnceCell<Rc<SqueezeVolPanel>>,
+    /// Java private final `subtomogramsPanel`; the inner `None` is Java null
+    /// (dual axis or montage datasets).
+    subtomograms_panel: OnceCell<Option<Rc<SubtomogramsPanel>>>,
+    /// Java private final `altStackPanel`.
+    alt_stack_panel: OnceCell<Rc<AltStackPanel>>,
+    /// Java private final `mediator` (null until the end of the constructor).
+    mediator: OnceCell<Rc<ProcessingMethodMediator>>,
+    /// Java package-private `openAltStackFirstTime = true`.
+    open_alt_stack_first_time: Cell<bool>,
+}
+
+impl Deref for PostProcessingDialog {
+    type Target = ProcessDialog;
+    fn deref(&self) -> &ProcessDialog {
+        &self.base
+    }
 }
 
 impl PostProcessingDialog {
-    /// Java private `PostProcessingDialog(ApplicationManager, boolean)`.
-    pub fn new<M: PostProcessingDialogManager>(
-        manager: &mut M,
+    /// Java private constructor `PostProcessingDialog(ApplicationManager,
+    /// boolean)`.
+    fn new(
+        app_mgr: &'static ApplicationManager,
         trimvol_input_file_missing: bool,
-    ) -> Self {
-        let axis_id = AxisID::Only;
-        let dialog_type = DialogType::PostProcessing;
-        let subtomograms_panel = (!manager.is_dual_axis() && !manager.is_montage())
-            .then(|| SubtomogramsPanel::get_instance(manager, axis_id, dialog_type));
-        let mut result = Self {
+    ) -> Rc<PostProcessingDialog> {
+        // super(appMgr, AxisID.ONLY, DialogType.POST_PROCESSING)
+        let base = ProcessDialog::new_application_manager_axis_id_dialog_type(
+            app_mgr,
+            AxisID::Only,
+            DialogType::PostProcessing,
+        );
+        // Field initializers.
+        let instance =
+            Rc::new_cyclic(
+                |self_ref: &Weak<PostProcessingDialog>| PostProcessingDialog {
+                    base,
+                    self_ref: self_ref.clone(),
+                    trimvol_panel: OnceCell::new(),
+                    tabbed_pane: TabbedPane::new(),
+                    cur_tab: Cell::new(Tab::DEFAULT),
+                    flatten_volume_panel: OnceCell::new(),
+                    squeeze_vol_panel: OnceCell::new(),
+                    subtomograms_panel: OnceCell::new(),
+                    alt_stack_panel: OnceCell::new(),
+                    mediator: OnceCell::new(),
+                    open_alt_stack_first_time: Cell::new(true),
+                },
+            );
+        // Java `this` as the ProcessDialog subclass (for the virtual `done()`).
+        let this: Weak<dyn ProcessDialogVirtual> =
+            Rc::downgrade(&instance) as Weak<dyn ProcessDialogVirtual>;
+        instance.base.set_this(this);
+        let process_interface: Weak<dyn ProcessInterface> =
+            Rc::downgrade(&instance) as Weak<dyn ProcessInterface>;
+        let axis_id = instance.base.axis_id;
+        let dialog_type = instance.base.dialog_type;
+        // Constructor body.
+        let flatten_volume_panel =
+            FlattenVolumePanel::get_post_instance(app_mgr, axis_id, dialog_type);
+        let _ = instance.flatten_volume_panel.set(flatten_volume_panel);
+        let squeeze_vol_panel = SqueezeVolPanel::get_instance(app_mgr, axis_id, dialog_type);
+        let _ = instance.squeeze_vol_panel.set(squeeze_vol_panel);
+        if app_mgr.is_dual_axis() || app_mgr.get_view_type() == ViewType::Montage {
+            let _ = instance.subtomograms_panel.set(None);
+        } else {
+            let subtomograms_panel = SubtomogramsPanel::get_instance(
+                app_mgr,
+                axis_id,
+                dialog_type,
+                process_interface.clone(),
+                &instance.base.btn_advanced,
+            );
+            subtomograms_panel.update_advanced(instance.base.is_advanced());
+            let _ = instance.subtomograms_panel.set(Some(subtomograms_panel));
+        }
+        let alt_stack_panel =
+            AltStackPanel::get_instance(app_mgr, axis_id, dialog_type, process_interface);
+        let _ = instance.alt_stack_panel.set(alt_stack_panel);
+        // Swing layout: rootPanel.setLayout(new BoxLayout(rootPanel,
+        // BoxLayout.Y_AXIS)).
+        instance
+            .base
+            .root_panel
+            .set_border(&BeveledBorder::new(Some("Post Processing")).get_border());
+        let root_panel = instance.base.root_panel.get_component();
+        root_panel.add(&instance.tabbed_pane.get_component());
+        let trimvol_panel = TrimvolPanel::new(
+            instance.base.application_manager,
             axis_id,
             dialog_type,
-            trimvol_panel: TrimvolPanel::new(axis_id, dialog_type, trimvol_input_file_missing),
-            flatten_volume_panel: FlattenVolumePanel::get_post_instance(
-                axis_id,
-                dialog_type,
-                super::multi_line_button::MultiLineButton::new_with_label(Some("Flatten")),
-                super::multi_line_button::MultiLineButton::new_with_label(Some("Run Flattenwarp")),
-            ),
-            squeeze_vol_panel: SqueezeVolPanel::get_instance(axis_id, dialog_type),
-            subtomograms_panel,
-            alt_stack_panel: AltStackPanel::get_instance(
-                axis_id,
-                dialog_type,
-                manager.is_dual_axis(),
-                manager.rootname_even_exists(),
-                manager.rootname_odd_exists(),
-                Default::default(),
-            ),
-            tabbed_pane: PostProcessingTabbedPane {
-                labels: vec!["Trim vol", "Flatten", "Reduce/filt vol", "Alt Stack"],
-                selected_index: Tab::TrimVol.to_int(),
-                attached_panel: vec![Some(Tab::TrimVol), None, None, None],
-                mouse_listener_present: false,
-                change_listener_present: false,
-            },
-            cur_tab: Tab::TrimVol,
-            open_alt_stack_first_time: true,
-            displayed: true,
-            root_box_layout_y_axis: true,
-            root_border_title: "Post Processing",
-            execute_button_text: "Done",
-            queue_checkbox_installed: false,
-        };
-        if result.subtomograms_panel.is_some() {
-            result.tabbed_pane.labels.push("Subtomograms");
-            result.tabbed_pane.attached_panel.push(None);
+            trimvol_input_file_missing,
+        );
+        let _ = instance.trimvol_panel.set(trimvol_panel);
+        let trimvol_root = JComponent::new_panel();
+        instance
+            .tabbed_pane
+            .add_tab_string_component("Trim vol", &trimvol_root);
+        trimvol_root.add(&instance.trimvol_panel().get_container());
+        let flatten_root = JComponent::new_panel();
+        instance
+            .tabbed_pane
+            .add_tab_string_component("Flatten", &flatten_root);
+        let squeeze_root = JComponent::new_panel();
+        instance
+            .tabbed_pane
+            .add_tab_string_component("Reduce/filt vol", &squeeze_root);
+        let alt_stack_root = JComponent::new_panel();
+        instance
+            .tabbed_pane
+            .add_tab_string_component("Alt Stack", &alt_stack_root);
+        if instance.subtomograms_panel().is_some() {
+            let subtomograms_root = JComponent::new_panel();
+            instance
+                .tabbed_pane
+                .add_tab_string_component("Subtomograms", &subtomograms_root);
         }
-        manager.register_processing_method(result.get_processing_method());
-        manager.set_processing_method(result.get_processing_method());
-        result
-    }
-
-    /// Java static `getInstance(ApplicationManager, boolean)`.
-    pub fn get_instance<M: PostProcessingDialogManager>(
-        manager: &mut M,
-        trimvol_input_file_missing: bool,
-    ) -> Self {
-        let mut instance = Self::new(manager, trimvol_input_file_missing);
-        instance.add_listeners();
-        instance.tabbed_pane.selected_index = Tab::TrimVol.to_int();
+        instance.base.add_exit_buttons();
+        instance.base.btn_execute.set_text(Some("Done"));
+        // The mediator exists on the event dispatch thread, where dialogs are built.
+        if let Some(mediator) = app_mgr.get_processing_method_mediator(Some(axis_id)) {
+            let _ = instance.mediator.set(mediator.clone());
+            let this_process_interface: Rc<dyn ProcessInterface> = instance.clone();
+            mediator.register_process_interface(this_process_interface.clone());
+            mediator.set_method_process_interface_processing_method(
+                &this_process_interface,
+                ProcessInterface::get_processing_method(&*instance),
+            );
+        }
         instance
     }
 
-    /// Java private `addListeners()`.
-    pub fn add_listeners(&mut self) {
-        self.tabbed_pane.mouse_listener_present = true;
-        self.tabbed_pane.change_listener_present = true;
+    /// Java public static `getInstance(ApplicationManager, boolean)`.
+    pub fn get_instance(
+        manager: &'static ApplicationManager,
+        trimvol_input_file_missing: bool,
+    ) -> Rc<PostProcessingDialog> {
+        let instance = PostProcessingDialog::new(manager, trimvol_input_file_missing);
+        instance.add_listeners();
+        instance
+            .tabbed_pane
+            .get_component()
+            .set_selected_tab(Tab::DEFAULT.to_int());
+        instance
     }
 
-    /// Java private `changeTab(ConstEtomoNumber)`; `None` represents null/isNull.
-    pub fn change_tab_index<M: PostProcessingDialogManager>(
-        &mut self,
-        manager: &mut M,
-        index: Option<i32>,
-    ) {
-        if let Some(index) = index {
-            self.tabbed_pane.selected_index = index;
-            self.change_tab(manager);
+    /// Rust-only: the Java `final` field `trimvolPanel`.
+    fn trimvol_panel(&self) -> &Rc<TrimvolPanel> {
+        self.trimvol_panel.get().expect("set by the constructor")
+    }
+
+    /// Rust-only: the Java `final` field `flattenVolumePanel`.
+    fn flatten_volume_panel(&self) -> &Rc<FlattenVolumePanel> {
+        self.flatten_volume_panel
+            .get()
+            .expect("set by the constructor")
+    }
+
+    /// Rust-only: the Java `final` field `squeezeVolPanel`.
+    fn squeeze_vol_panel(&self) -> &Rc<SqueezeVolPanel> {
+        self.squeeze_vol_panel
+            .get()
+            .expect("set by the constructor")
+    }
+
+    /// Rust-only: the Java `final` field `subtomogramsPanel`; `None` is Java
+    /// null.
+    fn subtomograms_panel(&self) -> Option<&Rc<SubtomogramsPanel>> {
+        self.subtomograms_panel.get().and_then(Option::as_ref)
+    }
+
+    /// Rust-only: the Java `final` field `altStackPanel`.
+    fn alt_stack_panel(&self) -> &Rc<AltStackPanel> {
+        self.alt_stack_panel.get().expect("set by the constructor")
+    }
+
+    /// Java private `addListeners()`.
+    fn add_listeners(self: &Rc<Self>) {
+        // Mouse adapter for context menu
+        // Swing mouse: rootPanel.addMouseListener(mouseAdapter) and
+        // tabbedPane.addMouseListener(mouseAdapter) with `new
+        // GenericMouseAdapter(this)`.  Mouse events are not modelled; the
+        // adapter's only effect is to call popUpContextMenu on a right-button
+        // press, which a driver calls directly.
+        // Java `new TabChangeListener(this)`.
+        let adaptee = Rc::downgrade(self);
+        self.tabbed_pane
+            .get_component()
+            .add_change_listener(Rc::new(move |_event: &ChangeEvent| {
+                if let Some(adaptee) = adaptee.upgrade() {
+                    adaptee.change_tab_void();
+                }
+            }));
+    }
+
+    /// Java private `changeTab(ConstEtomoNumber)`.
+    fn change_tab_const_etomo_number(&self, index: Option<&ConstEtomoNumber>) {
+        let Some(index) = index else {
+            return;
+        };
+        if index.is_null() {
+            return;
         }
+        self.tabbed_pane
+            .get_component()
+            .set_selected_tab(index.get_int());
+        self.change_tab_void();
     }
 
     /// Java private `changeTab()`.
-    pub fn change_tab<M: PostProcessingDialogManager>(&mut self, manager: &mut M) {
-        if let Some(slot) = self
-            .tabbed_pane
-            .attached_panel
-            .get_mut(self.cur_tab.to_int() as usize)
-        {
-            *slot = None;
+    fn change_tab_void(&self) {
+        let tabbed_pane = self.tabbed_pane.get_component();
+        if let Some(cur) = tabbed_pane.get_component_at(self.cur_tab.get().to_int() as usize) {
+            cur.remove_all();
         }
-        self.cur_tab = Tab::get_instance(self.tabbed_pane.selected_index);
-        if self.cur_tab == Tab::AltStack && self.open_alt_stack_first_time {
-            self.create_alt_tomo_setup_com_file(manager);
+        self.cur_tab
+            .set(Tab::get_instance(tabbed_pane.get_selected_tab()));
+        // `tabbedPane.getSelectedComponent()`.
+        let panel = tabbed_pane.get_component_at(tabbed_pane.get_selected_tab() as usize);
+        if let Some(panel) = &panel {
+            let cur_tab = self.cur_tab.get();
+            if cur_tab == Tab::TrimVol {
+                panel.add(&self.trimvol_panel().get_container());
+            } else if cur_tab == Tab::Flatten {
+                panel.add(&ToolPanel::get_component(&**self.flatten_volume_panel()));
+            } else if cur_tab == Tab::SqueezeVol {
+                panel.add(&self.squeeze_vol_panel().get_component());
+            } else if cur_tab == Tab::AltStack {
+                if self.open_alt_stack_first_time.get() {
+                    self.create_alt_tomo_setup_com_file();
+                }
+                panel.add(&self.alt_stack_panel().get_component());
+                self.alt_stack_panel().check_if_files_exist();
+            } else if cur_tab == Tab::Subtomograms {
+                // The Subtomograms tab only exists when the panel does.
+                if let Some(subtomograms_panel) = self.subtomograms_panel() {
+                    panel.add(&subtomograms_panel.get_component());
+                }
+                if let Some(mediator) = self.mediator.get() {
+                    mediator.add_queue_listener_on_switch_dialog();
+                }
+            }
         }
-        if self.cur_tab == Tab::Subtomograms && self.subtomograms_panel.is_some() {
-            manager.add_queue_listener_on_switch_dialog();
-        }
-        if let Some(slot) = self
-            .tabbed_pane
-            .attached_panel
-            .get_mut(self.cur_tab.to_int() as usize)
-        {
-            *slot = Some(self.cur_tab);
-        }
-        if self.cur_tab == Tab::AltStack {
-            self.alt_stack_panel.check_if_files_exist(
-                manager.gold_eraser_com_file_exists(),
-                manager.eraser_log_file_exists(),
-                manager.ctf_correction_log_file_exists(),
-                manager.gold_eraser_log_file_exists(),
-                manager.mtf_filter_log_file_exists(),
+
+        if let (Some(mediator), Some(this)) = (self.mediator.get(), self.self_ref.upgrade()) {
+            let this: Rc<dyn ProcessInterface> = this;
+            mediator.set_method_process_interface_processing_method(
+                &this,
+                ProcessInterface::get_processing_method(self),
             );
         }
-        manager.set_processing_method(self.get_processing_method());
-        SubtomogramsPanelManager::pack(manager, self.axis_id);
-        manager.move_sub_frame();
+        let manager: &'static dyn BaseManager = self.base.application_manager;
+        let axis_id = self.base.axis_id;
+        ui_harness::with(|harness| {
+            harness.pack_axis_id_base_manager(Some(axis_id), Some(manager));
+            harness.move_sub_frame();
+        });
     }
 
-    /// Java `setParameters(ConstSqueezevolParam)`; the second argument is the
-    /// source `ApplicationManager.isSqueezevolFlipped()` boundary.
-    pub fn set_parameters_squeezevol(
-        &mut self,
-        param: &ConstSqueezevolParamBoundary,
-        squeezevol_flipped: bool,
+    /// Java public `setParameters(ConstSqueezevolParam)`.  Set the panel values
+    /// with the specified parameters.
+    pub fn set_parameters_const_squeezevol_param(
+        &self,
+        squeezevol_param: &dyn ConstSqueezevolParam,
     ) {
-        self.squeeze_vol_panel
-            .set_parameters_squeezevol(param, squeezevol_flipped);
+        self.squeeze_vol_panel()
+            .set_parameters_const_squeezevol_param(squeezevol_param);
     }
 
-    /// Java `setParameters(ReduceFiltVolParam, boolean, boolean)`.  MRC pixel
-    /// count and input orientation remain the direct image-metadata boundary.
-    pub fn set_parameters_reduce_filt_vol<P: ConstReduceFiltVolParam>(
-        &mut self,
-        param: &P,
+    /// Java public `setParameters(ReduceFiltVolParam, boolean, boolean)`.
+    pub fn set_parameters_reduce_filt_vol_param_boolean_boolean(
+        &self,
+        reduce_filt_vol_param: &ReduceFiltVolParam,
         dialog_not_exists: bool,
         com_file_exists: bool,
-        trim_vol_pixel_area: usize,
-        input_flipped: bool,
     ) {
-        self.squeeze_vol_panel.set_parameters_reduce_filt_vol(
-            param,
-            dialog_not_exists,
-            com_file_exists,
-            trim_vol_pixel_area,
-            input_flipped,
-        );
+        self.squeeze_vol_panel()
+            .set_parameters_reduce_filt_vol_param_boolean_boolean(
+                reduce_filt_vol_param,
+                dialog_not_exists,
+                com_file_exists,
+            );
     }
 
-    /// Java `setParameters(ReconScreenState)`.
-    pub fn set_parameters_recon_screen_state(&mut self, state: &ReconScreenStateBoundary) {
-        self.trimvol_panel.set_parameters_recon_screen_state(state);
-        self.squeeze_vol_panel
-            .set_parameters_screen_state(state.screen_state.clone());
+    /// Java public `setParameters(ReconScreenState)`.
+    pub fn set_parameters_recon_screen_state(&self, screen_state: &ReconScreenState) {
+        self.trimvol_panel()
+            .set_parameters_recon_screen_state(screen_state);
+        self.squeeze_vol_panel()
+            .set_parameters_recon_screen_state(screen_state);
     }
 
-    /// Java `setParameters(SubtomoSetupParam)`.
-    pub fn set_parameters_subtomo_setup<P: SubtomoSetupParam>(&mut self, param: &P) {
-        if let Some(panel) = &mut self.subtomograms_panel {
-            panel.set_parameters(param);
+    /// Java public `setParameters(SubtomoSetupParam)`.
+    pub fn set_parameters_subtomo_setup_param(&self, param: &SubtomoSetupParam) {
+        // Upstream bug fixed in translation (PostProcessingDialog.java:178): Java
+        // dereferences a null `subtomogramsPanel` (dual axis or montage) and
+        // throws NullPointerException.  The manager only calls this for the
+        // datasets that have the panel; with no panel the call does nothing.
+        if let Some(subtomograms_panel) = self.subtomograms_panel() {
+            subtomograms_panel.set_parameters_subtomo_setup_param(param);
         }
     }
 
-    /// Java `initParameters(TrimvolParam)`.
-    pub fn init_parameters(&mut self, param: &TrimvolParamBoundary) {
-        self.trimvol_panel.init_parameters(param);
+    /// Java public `setParameters(TiltParam, boolean)`.
+    pub fn set_parameters_tilt_param_boolean(&self, param: &TiltParam, initialize: bool) {
+        self.alt_stack_panel()
+            .set_parameters_const_tilt_param_boolean(param, initialize);
     }
 
-    /// Java `setParameters(ConstMetaData, boolean)`.
-    pub fn set_parameters_metadata<M: PostProcessingDialogManager>(
-        &mut self,
-        manager: &mut M,
-        metadata: &PostProcessingMetaDataBoundary,
+    /// Java public `initParameters(TrimvolParam)`.  The param is `&mut`
+    /// because `RubberbandPanel.initScaleParameters` reads it through
+    /// `TrimvolParam.getScaleXYParam()`, which hands out the mutable member.
+    pub fn init_parameters(&self, param: &mut TrimvolParam) {
+        self.trimvol_panel().init_parameters(param);
+    }
+
+    /// Java public `setParameters(ConstMetaData, boolean)`.
+    pub fn set_parameters_const_meta_data_boolean(
+        &self,
+        meta_data: &dyn ConstMetaData,
         dialog_exists: bool,
     ) {
-        self.trimvol_panel
-            .set_parameters(&metadata.trimvol, dialog_exists);
-        self.flatten_volume_panel
-            .set_parameters_metadata(&metadata.flatten);
-        self.squeeze_vol_panel
-            .set_parameters_meta_data(&metadata.squeeze_vol);
-        if let Some(panel) = &mut self.subtomograms_panel {
-            panel.set_parameters_metadata(metadata);
+        self.trimvol_panel()
+            .set_parameters_const_meta_data_boolean(meta_data, dialog_exists);
+        self.flatten_volume_panel()
+            .set_parameters_const_meta_data(meta_data);
+        self.squeeze_vol_panel()
+            .set_parameters_const_meta_data(meta_data);
+        if let Some(subtomograms_panel) = self.subtomograms_panel() {
+            subtomograms_panel.set_parameters_const_meta_data(meta_data);
         }
-        self.alt_stack_panel
-            .set_parameters_metadata(&metadata.alt_stack);
-        self.change_tab_index(manager, metadata.post_cur_tab);
+        self.alt_stack_panel()
+            .set_parameters_const_meta_data(meta_data);
+        let post_cur_tab = meta_data.get_post_cur_tab();
+        self.change_tab_const_etomo_number(Some(&*post_cur_tab));
     }
 
-    /// Java `getParameters(MetaData)`.
-    pub fn get_parameters_metadata(&mut self, metadata: &mut PostProcessingMetaDataBoundary) {
-        self.trimvol_panel.get_parameters(&mut metadata.trimvol);
-        self.flatten_volume_panel
-            .get_parameters_metadata(&mut metadata.flatten);
-        self.squeeze_vol_panel
-            .get_parameters_meta_data(&mut metadata.squeeze_vol);
-        if let Some(panel) = &self.subtomograms_panel {
-            panel.get_parameters_metadata(metadata);
+    /// Java public `getFlattenWarpDisplay()`.
+    pub fn get_flatten_warp_display(&self) -> Rc<dyn FlattenWarpDisplay> {
+        self.flatten_volume_panel().get_flatten_warp_display()
+    }
+
+    /// Java public `getTrimvolDisplay()`.
+    pub fn get_trimvol_display(&self) -> Rc<dyn TrimvolDisplay> {
+        self.trimvol_panel().clone()
+    }
+
+    /// Java public `getSubtomoSetupDisplay()`: `subtomogramsPanel
+    /// .getSubtomoSetupDisplay()`, which is the panel itself.  `None` where
+    /// Java would dereference a null `subtomogramsPanel` (dual axis or
+    /// montage; the manager does not call it then).
+    pub fn get_subtomo_setup_display(&self) -> Option<Rc<dyn SubtomoSetupDisplay>> {
+        self.subtomograms_panel()
+            .map(|subtomograms_panel| subtomograms_panel.clone() as Rc<dyn SubtomoSetupDisplay>)
+    }
+
+    /// Java public `getAltStackDisplay()`.
+    pub fn get_alt_stack_display(&self) -> Rc<dyn AltStackDisplay> {
+        self.alt_stack_panel().get_alt_stack_display()
+    }
+
+    /// Java public `getReduceFiltVolDisplay()`.
+    pub fn get_reduce_filt_vol_display(&self) -> Rc<dyn ReduceFiltVolDisplay> {
+        self.squeeze_vol_panel().get_reduce_filt_vol_display()
+    }
+
+    /// Java public `setStartupWarnings(TrimvolInputFileState)`.
+    pub fn set_startup_warnings(&self, input_file_state: &TrimvolInputFileState) -> bool {
+        self.trimvol_panel().set_startup_warnings(input_file_state)
+    }
+
+    /// Java public `getParameters(MetaData)`.
+    pub fn get_parameters_meta_data(&self, meta_data: &MetaData) {
+        self.trimvol_panel().get_parameters_meta_data(meta_data);
+        self.flatten_volume_panel()
+            .get_parameters_meta_data(meta_data);
+        self.squeeze_vol_panel().get_parameters_meta_data(meta_data);
+        if let Some(subtomograms_panel) = self.subtomograms_panel() {
+            subtomograms_panel.get_parameters_meta_data(meta_data);
         }
-        self.alt_stack_panel
-            .get_parameters_metadata(&mut metadata.alt_stack);
-        metadata.post_cur_tab = Some(self.cur_tab.to_int());
+        if let Err(e) = self.alt_stack_panel().get_parameters_meta_data(meta_data) {
+            // TODO Auto-generated catch block
+            // e.printStackTrace();
+            eprintln!("{e:?}");
+        }
+        meta_data.set_post_cur_tab(self.cur_tab.get().index());
     }
 
-    /// Java `getParametersForTrimvol(MetaData)`.
-    pub fn get_parameters_for_trimvol(&self, metadata: &mut TrimvolMetaDataBoundary) {
-        self.trimvol_panel.get_parameters_for_trimvol(metadata);
+    /// Java public `getParametersForTrimvol(MetaData)`.
+    pub fn get_parameters_for_trimvol(&self, meta_data: &MetaData) {
+        self.trimvol_panel().get_parameters_for_trimvol(meta_data);
     }
 
-    /// Java `setParameters(ConstWarpVolParam)`.
-    pub fn set_parameters_warp_vol(&mut self, param: &WarpVolParamBoundary) {
-        self.flatten_volume_panel.set_parameters_warp_vol(param);
-    }
-
-    /// Java `getParameters(WarpVolParam, boolean)`.
-    pub fn get_parameters_warp_vol<M: super::flatten_volume_panel::FlattenVolumePanelManager>(
+    /// Java public `getParameters(WarpVolParam, boolean)`.
+    pub fn get_parameters_warp_vol_param_boolean(
         &self,
-        param: &mut WarpVolParamBoundary,
+        param: &mut WarpVolParam,
         do_validation: bool,
-        manager: &mut M,
     ) -> bool {
-        self.flatten_volume_panel
-            .get_parameters_warp_vol(param, do_validation, manager)
+        WarpVolDisplay::get_parameters(&**self.flatten_volume_panel(), param, do_validation)
     }
 
-    /// Java `getParameters(MakecomfileParam, boolean)`.
-    pub fn get_parameters_makecomfile<M: SqueezeVolPanelApplicationManager>(
+    /// Java public `setParameters(ConstWarpVolParam)`.
+    pub fn set_parameters_const_warp_vol_param(&self, param: &dyn ConstWarpVolParam) {
+        self.flatten_volume_panel()
+            .set_parameters_const_warp_vol_param(param);
+    }
+
+    /// Java public `getParameters(MakecomfileParam, boolean)`.
+    pub fn get_parameters_makecomfile_param_boolean(
         &self,
-        param: &mut MakecomfileParamBoundary,
+        make_com_file_param: &mut MakecomfileParam,
         do_validation: bool,
-        manager: &M,
     ) -> bool {
-        self.squeeze_vol_panel
-            .get_parameters_makecomfile(param, do_validation, manager)
+        self.squeeze_vol_panel()
+            .get_parameters_makecomfile_param_boolean(make_com_file_param, do_validation)
     }
 
-    /// Java `setParameters(TiltParam, boolean)`.
-    pub fn set_parameters_tilt(&mut self, param: &AltStackTiltParamBoundary, initialize: bool) {
-        self.alt_stack_panel.set_parameters_tilt(param, initialize);
-    }
-
-    /// Java `getFlattenWarpDisplay()`.
-    pub fn get_flatten_warp_display(&mut self) -> &mut FlattenVolumePanel {
-        &mut self.flatten_volume_panel
-    }
-
-    /// Java `getTrimvolDisplay()`.
-    pub fn get_trimvol_display(&self) -> &TrimvolPanel {
-        &self.trimvol_panel
-    }
-
-    /// Java `getSubtomoSetupDisplay()`; `None` retains the source's explicit
-    /// dual-axis/montage null branch.
-    pub fn get_subtomo_setup_display(&self) -> Option<&SubtomogramsPanel> {
-        self.subtomograms_panel.as_ref()
-    }
-
-    /// Java `getAltStackDisplay()`.
-    pub fn get_alt_stack_display(&self) -> &AltStackPanel {
-        self.alt_stack_panel.get_alt_stack_display()
-    }
-
-    /// Java `getReduceFiltVolDisplay()`.
-    pub fn get_reduce_filt_vol_display(&mut self) -> &mut SqueezeVolPanel {
-        self.squeeze_vol_panel.get_reduce_filt_vol_display()
-    }
-
-    /// Java `setStartupWarnings(TrimvolInputFileState)`.
-    pub fn set_startup_warnings(&mut self, state: TrimvolInputFileState) -> bool {
-        self.trimvol_panel.set_startup_warnings(state)
-    }
-
-    /// Java `getParameters(TrimvolParam, boolean)`; `output_format` is the
-    /// source MetaData image-output-format boundary.
-    pub fn get_parameters_trimvol(
-        &mut self,
-        param: &mut TrimvolParamBoundary,
+    /// Java public `getParameters(TrimvolParam, boolean)`.  Get the trimvol
+    /// parameter values from the panel.
+    pub fn get_parameters_trimvol_param_boolean(
+        &self,
+        trimvol_param: &mut TrimvolParam,
         do_validation: bool,
-        output_format: Option<String>,
     ) -> bool {
-        self.trimvol_panel
-            .get_parameters_trimvol(param, do_validation, output_format)
-    }
-
-    /// Java override `done()`.
-    pub fn done<M: PostProcessingDialogManager>(&mut self, manager: &mut M) {
-        manager.done_post_processing();
-        self.squeeze_vol_panel.done();
-        self.trimvol_panel.done();
-        self.flatten_volume_panel.done();
-        self.displayed = false;
-    }
-
-    /// Java `getProcessingMethod()`.
-    pub fn get_processing_method(&self) -> ProcessingMethod {
-        if self.cur_tab == Tab::Subtomograms {
-            if let Some(panel) = &self.subtomograms_panel {
-                return match panel.get_processing_method() {
-                    1 => ProcessingMethod::PpGpu,
-                    _ => ProcessingMethod::PpCpu,
-                };
-            }
-        }
-        if self.cur_tab == Tab::AltStack {
-            return self
-                .alt_stack_panel
-                .get_processing_method()
-                .unwrap_or(ProcessingMethod::LocalCpu);
-        }
-        ProcessingMethod::LocalCpu
-    }
-
-    /// Java `getSecondaryProcessingMethod()`, whose source body returns null.
-    pub fn get_secondary_processing_method(&self) -> Option<ProcessingMethod> {
-        None
-    }
-
-    /// Java `lockProcessingMethod(boolean)`, whose source body is empty.
-    pub fn lock_processing_method(&mut self, _lock: bool) {}
-
-    /// Java `setMethod(ProcessingMethod)`.
-    pub fn set_method<M: PostProcessingDialogManager>(
-        &mut self,
-        manager: &mut M,
-        method: ProcessingMethod,
-    ) {
-        manager.set_processing_method(method);
-    }
-
-    /// Java `updateGpu(boolean)`.
-    pub fn update_gpu(&mut self, disable: bool) {
-        if self.cur_tab == Tab::Subtomograms {
-            if let Some(panel) = &mut self.subtomograms_panel {
-                panel.update_gpu(disable);
-            }
-        } else if self.cur_tab == Tab::AltStack {
-            self.alt_stack_panel.update_gpu(disable);
-        }
-    }
-
-    /// Java `isUseGpu()`.
-    pub fn is_use_gpu(&self) -> bool {
-        self.cur_tab == Tab::Subtomograms
-            && self
-                .subtomograms_panel
-                .as_ref()
-                .is_some_and(SubtomogramsPanel::is_use_gpu)
-    }
-
-    /// Java `setUseQueueCheckBox(ButtonComponent)`.
-    pub fn set_use_queue_check_box(&mut self, _use_queue_checkbox: Option<CheckBox>) {
-        if self.cur_tab == Tab::Subtomograms {
-            if let Some(panel) = &mut self.subtomograms_panel {
-                panel.set_use_queue_check_box();
-                self.queue_checkbox_installed = true;
-            }
-        }
+        self.trimvol_panel()
+            .get_parameters_trimvol_param_boolean(trimvol_param, do_validation)
     }
 
     /// Java private `createAltTomoSetupComFile()`.
-    pub fn create_alt_tomo_setup_com_file<M: PostProcessingDialogManager>(
-        &mut self,
-        manager: &mut M,
-    ) {
-        if !manager.load_alt_tomo_setup(false) {
-            manager.touch_alt_tomo_setup_comscript();
-            manager.load_alt_tomo_setup(true);
+    fn create_alt_tomo_setup_com_file(&self) {
+        let application_manager = self.base.application_manager;
+        let manager: &'static dyn BaseManager = application_manager;
+        let loaded = application_manager
+            .get_com_script_manager()
+            .load_alt_tomo_setup(AxisID::Only, false);
+        if !loaded {
+            // `FileType.ALT_TOMO_SETUP_COMSCRIPT.getFile(applicationManager, null,
+            // AxisType.SINGLE_AXIS, AxisID.ONLY, propertyUserDir)
+            // .getAbsolutePath()`; FileType builds the file for this fixed
+            // name, so the result is not null.
+            let file = file_type::CLASS
+                .alt_tomo_setup_comscript
+                .get_file_with_property_user_dir(
+                    Some(manager),
+                    None,
+                    Some(AxisType::SingleAxis),
+                    Some(AxisID::Only),
+                    application_manager.get_property_user_dir().as_deref(),
+                )
+                .unwrap_or_default();
+            BaseProcessManager::touch(
+                &utilities::java_io_file_get_absolute_path(&file.to_string_lossy()),
+                Some(manager),
+            );
+            application_manager
+                .get_com_script_manager()
+                .load_alt_tomo_setup(AxisID::Only, true);
         }
-        let param = manager.get_alt_tomo_setup_param();
-        self.alt_stack_panel.set_parameters(&param);
-        self.open_alt_stack_first_time = false;
+        let alt_tomo_setup_param = application_manager
+            .get_com_script_manager()
+            .get_alt_tomo_setup_param(AxisID::Only);
+        self.alt_stack_panel()
+            .set_parameters_alt_tomo_setup_param(&alt_tomo_setup_param);
+        self.open_alt_stack_first_time.set(false);
     }
 }
 
 impl ContextMenu for PostProcessingDialog {
-    /// Java `popUpContextMenu(MouseEvent)`, whose source body is empty.
-    fn pop_up_context_menu(&mut self, _mouse_event: MouseEvent) {}
+    /// Java public override `popUpContextMenu(MouseEvent)`.  Right mouse button
+    /// context menu; empty.
+    fn pop_up_context_menu(&self, _mouse_event: &MouseEvent) {}
+}
+
+impl ProcessDialogVirtual for PostProcessingDialog {
+    fn process_dialog(&self) -> &ProcessDialog {
+        &self.base
+    }
+
+    /// Java package-private override `done()`.
+    fn done(&self) {
+        self.base.application_manager.done_post_processing();
+        self.squeeze_vol_panel().done();
+        self.trimvol_panel().done();
+        self.flatten_volume_panel().done();
+        self.base.set_displayed(false);
+    }
 }
 
 impl QueueTableListener for PostProcessingDialog {
-    /// Java inherited queue listener boundary; no direct source handling here.
-    fn queue_table_event_action(&mut self, _event: QueueTableEvent) {}
+    /// Java `queueTableEventAction(QueueTableEvent)`, inherited from
+    /// `ProcessDialog` (empty).
+    fn queue_table_event_action(&self, event: &QueueTableEvent) {
+        self.base.queue_table_event_action(event);
+    }
 }
 
 impl ProcessInterface for PostProcessingDialog {
-    type QueueCheckBox = CheckBox;
-
-    fn update_gpu(&mut self, disable_gpu: bool) {
-        PostProcessingDialog::update_gpu(self, disable_gpu);
+    /// Java public override `updateGpu(boolean)`.
+    fn update_gpu(&self, disable: bool) {
+        if self.cur_tab.get() == Tab::Subtomograms {
+            if let Some(subtomograms_panel) = self.subtomograms_panel() {
+                subtomograms_panel.update_gpu(disable);
+            }
+        } else if self.cur_tab.get() == Tab::AltStack {
+            ProcessInterface::update_gpu(&**self.alt_stack_panel(), disable);
+        }
     }
+
+    /// Java public override `getProcessingMethod()`.
     fn get_processing_method(&self) -> ProcessingMethod {
-        PostProcessingDialog::get_processing_method(self)
+        if self.cur_tab.get() == Tab::Subtomograms {
+            // curTab is SUBTOMOGRAMS only when the tab (and so the panel)
+            // exists.
+            if let Some(subtomograms_panel) = self.subtomograms_panel() {
+                return subtomograms_panel.get_processing_method();
+            }
+        } else if self.cur_tab.get() == Tab::AltStack {
+            return ProcessInterface::get_processing_method(&**self.alt_stack_panel());
+        }
+        ProcessingMethod::LocalCpu
     }
+
+    /// Java public override `getSecondaryProcessingMethod()`; returns null.
     fn get_secondary_processing_method(&self) -> Option<ProcessingMethod> {
-        PostProcessingDialog::get_secondary_processing_method(self)
+        // TODO Auto-generated method stub
+        None
     }
-    fn lock_processing_method(&mut self, lock: bool) {
-        PostProcessingDialog::lock_processing_method(self, lock);
+
+    /// Java public override `lockProcessingMethod(boolean)`; empty.
+    fn lock_processing_method(&self, _lock: bool) {
+        // TODO Auto-generated method stub
     }
-    /// The Java implementation only forwards to its mediator if it is non-null;
-    /// callers with a concrete manager use the inherent source method above.
-    fn set_method(&mut self, _processing_method: ProcessingMethod) {}
+
+    /// Java public override `setMethod(ProcessingMethod)`.
+    fn set_method(&self, processing_method: ProcessingMethod) {
+        if let (Some(mediator), Some(this)) = (self.mediator.get(), self.self_ref.upgrade()) {
+            let this: Rc<dyn ProcessInterface> = this;
+            mediator.set_method_process_interface_processing_method(&this, processing_method);
+        }
+    }
+
+    /// Java public override `isUseGpu()`.
     fn is_use_gpu(&self) -> bool {
-        PostProcessingDialog::is_use_gpu(self)
-    }
-    fn set_use_queue_check_box(&mut self, use_queue_checkbox: Option<Self::QueueCheckBox>) {
-        PostProcessingDialog::set_use_queue_check_box(self, use_queue_checkbox);
-    }
-    fn add_queue_table_listener(&mut self, _listener: &mut dyn QueueTableListener) {}
-    fn remove_queue_table_listener(&mut self, _listener: &mut dyn QueueTableListener) {}
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use std::path::{Path, PathBuf};
-
-    #[derive(Default)]
-    struct Manager {
-        dual_axis: bool,
-        calls: Vec<String>,
+        if self.cur_tab.get() == Tab::Subtomograms {
+            if let Some(subtomograms_panel) = self.subtomograms_panel() {
+                return subtomograms_panel.is_use_gpu();
+            }
+        }
+        false
     }
 
-    impl ProcessDialogApplicationManager for Manager {
-        fn is_advanced(&self, _dialog_type: DialogType, _axis_id: AxisID) -> bool {
-            false
+    /// Java public override `setUseQueueCheckBox(ButtonComponent)`.
+    fn set_use_queue_check_box(&self, use_queue_check_box: Option<Rc<dyn ButtonComponent>>) {
+        if self.cur_tab.get() == Tab::Subtomograms {
+            if let Some(subtomograms_panel) = self.subtomograms_panel() {
+                subtomograms_panel.set_use_queue_check_box(use_queue_check_box);
+            }
         }
     }
 
-    impl SubtomogramsPanelManager for Manager {
-        fn property_user_dir(&self) -> PathBuf {
-            PathBuf::from(".")
-        }
-        fn total_gpus(&self, _axis: AxisID) -> i32 {
-            0
-        }
-        fn output_processchunks_exists(&self, _axis: AxisID, _directory: &Path) -> bool {
-            false
-        }
-        fn confirm_existing_output(&mut self, _axis: AxisID) -> bool {
-            true
-        }
-        fn subtomo_setup(&mut self, _axis: AxisID, _dialog: DialogType, _method: i32) {}
-        fn open_files_in_imod(&mut self, _axis: AxisID, _names: Vec<String>, _subdir: PathBuf) {}
-        fn pack(&mut self, _axis: AxisID) {
-            self.calls.push("pack".into());
-        }
+    /// Java `addQueueTableListener(QueueTableListener)`, inherited from
+    /// `ProcessDialog` (empty).
+    fn add_queue_table_listener(&self, listener: Rc<dyn QueueTableListener>) {
+        self.base.add_queue_table_listener(listener);
     }
 
-    impl PostProcessingDialogManager for Manager {
-        fn is_dual_axis(&self) -> bool {
-            self.dual_axis
-        }
-        fn is_montage(&self) -> bool {
-            false
-        }
-        fn rootname_even_exists(&self) -> bool {
-            false
-        }
-        fn rootname_odd_exists(&self) -> bool {
-            false
-        }
-        fn register_processing_method(&mut self, _method: ProcessingMethod) {
-            self.calls.push("register".into());
-        }
-        fn set_processing_method(&mut self, _method: ProcessingMethod) {
-            self.calls.push("set-method".into());
-        }
-        fn add_queue_listener_on_switch_dialog(&mut self) {
-            self.calls.push("queue".into());
-        }
-        fn move_sub_frame(&mut self) {
-            self.calls.push("move".into());
-        }
-        fn done_post_processing(&mut self) {
-            self.calls.push("done".into());
-        }
-        fn load_alt_tomo_setup(&mut self, retry: bool) -> bool {
-            self.calls
-                .push(if retry { "alt-load-retry" } else { "alt-load" }.into());
-            true
-        }
-        fn touch_alt_tomo_setup_comscript(&mut self) {
-            self.calls.push("alt-touch".into());
-        }
-        fn get_alt_tomo_setup_param(&self) -> AltTomoSetupParamBoundary {
-            AltTomoSetupParamBoundary::default()
-        }
-        fn gold_eraser_com_file_exists(&self) -> (bool, bool, bool) {
-            (false, false, false)
-        }
-        fn eraser_log_file_exists(&self) -> (bool, bool, bool) {
-            (false, false, false)
-        }
-        fn ctf_correction_log_file_exists(&self) -> (bool, bool, bool) {
-            (false, false, false)
-        }
-        fn gold_eraser_log_file_exists(&self) -> (bool, bool, bool) {
-            (false, false, false)
-        }
-        fn mtf_filter_log_file_exists(&self) -> (bool, bool, bool) {
-            (false, false, false)
-        }
-    }
-
-    #[test]
-    fn single_axis_creates_subtomograms_and_alt_stack_is_lazy() {
-        let mut manager = Manager::default();
-        let mut dialog = PostProcessingDialog::get_instance(&mut manager, false);
-        assert!(dialog.subtomograms_panel.is_some());
-        assert_eq!(dialog.tabbed_pane.labels.len(), 5);
-        assert!(dialog.tabbed_pane.change_listener_present);
-        dialog.change_tab_index(&mut manager, Some(Tab::AltStack.to_int()));
-        assert!(!dialog.open_alt_stack_first_time);
-        assert_eq!(
-            manager.calls,
-            [
-                "register",
-                "set-method",
-                "alt-load",
-                "set-method",
-                "pack",
-                "move"
-            ]
-        );
-    }
-
-    #[test]
-    fn dual_axis_uses_source_null_subtomograms_branch() {
-        let mut manager = Manager {
-            dual_axis: true,
-            ..Default::default()
-        };
-        let dialog = PostProcessingDialog::get_instance(&mut manager, false);
-        assert!(dialog.subtomograms_panel.is_none());
-        assert_eq!(dialog.tabbed_pane.labels.len(), 4);
-    }
-
-    #[test]
-    fn subtomogram_metadata_and_processing_method_follow_active_source_tab() {
-        let mut manager = Manager::default();
-        let mut dialog = PostProcessingDialog::get_instance(&mut manager, false);
-        let metadata = PostProcessingMetaDataBoundary {
-            subtomo_reorientation_type_flipped: true,
-            subtomo_make_volume_stacks: true,
-            subtomo_make_volume_stacks_value: 25,
-            subtomo_new_aligned_binning: 2,
-            subtomo_fourier_reduce_by_factor: 3,
-            subtomo_extent_of_z_levels_in_nm: "12".into(),
-            ..Default::default()
-        };
-        dialog.set_parameters_metadata(&mut manager, &metadata, true);
-        let panel = dialog.subtomograms_panel.as_mut().unwrap();
-        assert!(panel.rb_reorientation_type_flipped.is_selected());
-        panel.subtomo_setup_cpu_gpu_panel.cpus_only = false;
-        panel.subtomo_setup_cpu_gpu_panel.gpu_recon_ctf = true;
-        dialog.cur_tab = Tab::Subtomograms;
-        assert_eq!(dialog.get_processing_method(), ProcessingMethod::PpGpu);
-
-        let mut written = PostProcessingMetaDataBoundary::default();
-        dialog.get_parameters_metadata(&mut written);
-        assert!(written.subtomo_reorientation_type_flipped);
-        assert_eq!(written.subtomo_make_volume_stacks_value, 25);
+    /// Java `removeQueueTableListener(QueueTableListener)`, inherited from
+    /// `ProcessDialog` (empty).
+    fn remove_queue_table_listener(&self, listener: &Rc<dyn QueueTableListener>) {
+        self.base.remove_queue_table_listener(listener);
     }
 }

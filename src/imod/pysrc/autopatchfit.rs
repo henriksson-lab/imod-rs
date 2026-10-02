@@ -9,7 +9,7 @@
 use super::imodpy::{
     OptionValue, add_imod_bin_ignore_sighup, auto_patch_number, default_com_extension,
     find_root_axis_and_extensions, make_backup_file, option_value, patch_size_from_entry, prnstr,
-    read_text_file, run_cmd, write_text_file,
+    py_float, py_raise, py_true_div, read_text_file, run_cmd, write_text_file,
 };
 use super::pip::{
     exit_error, pip_get_boolean, pip_get_integer, pip_get_string, pip_read_or_parse_options,
@@ -249,9 +249,15 @@ pub fn autopatchfit(arguments: &[OsString]) -> i32 {
         } else {
             // If no size match, target steps of 1.25, round number of steps up so the steps
             // will be no bigger than ~1.3
-            let max_factor = (nx_final as f64 / nx_curr as f64)
-                .max(ny_final as f64 / ny_curr as f64)
-                .max(nz_final as f64 / nz_curr as f64);
+            // outside any `try`: a zero current patch size raises ZeroDivisionError
+            // and a zero final size makes `math.log` raise ValueError, both uncaught;
+            // otherwise the logarithm and the quotient are finite
+            let max_factor = py_true_div(nx_final as f64, nx_curr as f64)
+                .max(py_true_div(ny_final as f64, ny_curr as f64))
+                .max(py_true_div(nz_final as f64, nz_curr as f64));
+            if max_factor <= 0. {
+                py_raise("ValueError: math domain error");
+            }
             num_steps = 1i64.max((max_factor.ln() / 1.25f64.ln() + 0.75) as i64);
             step_factor = (max_factor.ln() / num_steps as f64).exp();
             max_trials = num_steps + 1;
@@ -422,7 +428,7 @@ pub fn autopatchfit(arguments: &[OsString]) -> i32 {
                         let replaced = line.replace(',', " ");
                         for token in replaced.split_whitespace() {
                             if token.contains('.') {
-                                if token.parse::<f64>().is_ok() {
+                                if py_float(token).is_some() {
                                     if line.contains("has") {
                                         warp_res = token.to_owned();
                                     } else {
@@ -436,7 +442,7 @@ pub fn autopatchfit(arguments: &[OsString]) -> i32 {
                 }
 
                 let _ = std::io::stdout().flush();
-                std::process::exit(0);
+                crate::imod::libcfshr::b3dutil::exit(0);
             }
             Err(_) => {
                 let log_lines =

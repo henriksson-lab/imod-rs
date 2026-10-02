@@ -1,0 +1,2348 @@
+# imod-rs native golden manifest for fixtures/sirtsetup; see fixtures/README.md.
+# Regenerate with fixtures/regen-golden.sh sirtsetup; do not edit by hand.
+text 170 golden/basic.files
+tilt.com
+tilt_for_sirt.com
+tilt_sirt-001-sync.com
+tilt_sirt-002.com
+tilt_sirt-003-sync.com
+tilt_sirt-bound.info
+tilt_sirt-finish.com
+tilt_sirt.com
+ts.ali
+ts.tlt
+ts.xtilt
+
+text 128 golden/basic.out
+Doing SIRT internally in the Tilt program
+4 command files created and ready to run with:
+  processchunks machine_list tilt_sirt
+
+text 2 golden/basic.rc
+0
+
+text 322 golden/basic/tilt_for_sirt.com
+# Command file to run Tilt
+#
+$tilt -StandardInput
+InputProjections ts.ali
+OutputFile ts.rec
+IMAGEBINNED 1
+TILTFILE ts.tlt
+XTILTFILE ts.xtilt
+THICKNESS 30
+RADIAL .35 .035
+FalloffIsTrueSigma 1
+XAXISTILT 0.
+LOG 0
+SCALE 0 1000
+PERPENDICULAR
+MODE 2
+FULLIMAGE 64 48
+SUBSETSTART 0 0
+AdjustOrigin 1
+$if (-e ./savework) ./savework
+
+text 425 golden/basic/tilt_sirt-001-sync.com
+$setenv IMOD_OUTPUT_FORMAT MRC
+# Command file to run Tilt
+#
+$tilt -StandardInput
+InputProjections ts.ali
+OutputFile ts.srec03
+IMAGEBINNED 1
+TILTFILE ts.tlt
+XTILTFILE ts.xtilt
+THICKNESS 30
+SLICE -1 -1
+TOTALSLICES 0 47
+RADIAL   0.400 0.050
+MASK  2
+FlatFilterFraction  1.000000
+SIRTIterations   3
+StartingIteration  1
+XAXISTILT 0.
+LOG 0
+SCALE 0 1000
+PERPENDICULAR
+MODE   2
+FULLIMAGE 64 48
+SUBSETSTART   0 0
+AdjustOrigin 1
+$sync
+
+text 464 golden/basic/tilt_sirt-002.com
+$sync
+$setenv IMOD_OUTPUT_FORMAT MRC
+# Command file to run Tilt
+#
+$tilt -StandardInput
+InputProjections ts.ali
+OutputFile ts.srec03
+IMAGEBINNED 1
+TILTFILE ts.tlt
+XTILTFILE ts.xtilt
+THICKNESS 30
+SLICE 0 47
+#
+TOTALSLICES 0 47
+BoundaryInfoFile tilt_sirt-bound.info
+RADIAL   0.400 0.050
+MASK  2
+FlatFilterFraction  1.000000
+SIRTIterations   3
+StartingIteration  1
+XAXISTILT 0.
+LOG 0
+SCALE 0 1000
+PERPENDICULAR
+MODE   2
+FULLIMAGE 64 48
+SUBSETSTART   0 0
+AdjustOrigin 1
+
+text 142 golden/basic/tilt_sirt-003-sync.com
+$fixboundaries "ts.srec03" "tilt_sirt-bound.info"
+$collectmmm pixels= "tilt_sirt" 1 "ts.srec03" 2
+$b3dremove -g "ts-[0-9][0-9][0-9]*.rbound" 
+
+text 37 golden/basic/tilt_sirt-bound.info
+1 0 64 29 1
+ts-002.rbound
+-1 0 -1 -1
+
+text 58 golden/basic/tilt_sirt-finish.com
+$findsirtdiffs tilt_sirt
+$b3dremove -g tilt_sirt-[0-9]*.*
+
+text 402 golden/basic/tilt_sirt.com
+# Command file to run Tilt
+#
+$tilt -StandardInput
+InputProjections ts.ali
+OutputFile ts.srec03
+IMAGEBINNED 1
+TILTFILE ts.tlt
+XTILTFILE ts.xtilt
+THICKNESS 30
+SLICE  0 47
+RADIAL   0.400 0.050
+MASK  2
+FlatFilterFraction  1.000000
+SIRTIterations   3
+StartingIteration  1
+XAXISTILT 0.
+LOG 0
+SCALE 0 1000
+PERPENDICULAR
+MODE   2
+FULLIMAGE 64 48
+SUBSETSTART   0 0
+AdjustOrigin 1
+$if (-e ./savework) ./savework
+
+text 32 golden/err_both.files
+tilt.com
+ts.ali
+ts.tlt
+ts.xtilt
+
+text 79 golden/err_both.out
+ERROR: sirtsetup - You cannot enter both StartFromZero and ResumeFromIteration
+
+text 2 golden/err_both.rc
+1
+
+text 32 golden/err_leave.files
+tilt.com
+ts.ali
+ts.tlt
+ts.xtilt
+
+text 109 golden/err_leave.out
+ERROR: sirtsetup - A value on the list to retain (20) is outside the range of iterations being done (1 to 3)
+
+text 2 golden/err_leave.rc
+1
+
+text 0 golden/err_nocom.files
+
+text 59 golden/err_nocom.out
+ERROR: sirtsetup - Command file nothere.com does not exist
+
+text 2 golden/err_nocom.rc
+1
+
+text 32 golden/err_resume.files
+tilt.com
+ts.ali
+ts.tlt
+ts.xtilt
+
+text 85 golden/err_resume.out
+ERROR: sirtsetup - There is no "srec" file for the iteration you want to resume from
+
+text 2 golden/err_resume.rc
+1
+
+text 32 golden/err_subarea.files
+tilt.com
+ts.ali
+ts.tlt
+ts.xtilt
+
+text 76 golden/err_subarea.out
+ERROR: sirtsetup - Subarea size must be smaller than the aligned stack size
+
+text 2 golden/err_subarea.rc
+1
+
+text 94 golden/gpu.files
+tilt.com
+tilt_for_sirt.com
+tilt_sirt-001-sync.com
+tilt_sirt-finish.com
+ts.ali
+ts.tlt
+ts.xtilt
+
+text 159 golden/gpu.out
+Doing SIRT internally in the Tilt program
+2 command files created and ready to run with:
+  processchunks machine_list tilt_sirt
+Or with:
+  subm tilt_sirt*.com
+
+text 2 golden/gpu.rc
+0
+
+text 331 golden/gpu/tilt_for_sirt.com
+# Command file to run Tilt
+#
+$tilt -StandardInput
+InputProjections ts.ali
+OutputFile ts.rec
+IMAGEBINNED 1
+TILTFILE ts.tlt
+XTILTFILE ts.xtilt
+THICKNESS 30
+RADIAL .35 .035
+FalloffIsTrueSigma 1
+XAXISTILT 0.
+LOG 0
+SCALE 0 1000
+PERPENDICULAR
+MODE 2
+UseGPU 0
+FULLIMAGE 64 48
+SUBSETSTART 0 0
+AdjustOrigin 1
+$if (-e ./savework) ./savework
+
+text 411 golden/gpu/tilt_sirt-001-sync.com
+# Command file to run Tilt
+#
+$tilt -StandardInput
+InputProjections ts.ali
+OutputFile ts.srec02
+IMAGEBINNED 1
+TILTFILE ts.tlt
+XTILTFILE ts.xtilt
+THICKNESS 30
+SLICE  0 47
+RADIAL   0.400 0.050
+MASK  2
+FlatFilterFraction  1.000000
+SIRTIterations   2
+StartingIteration  1
+XAXISTILT 0.
+LOG 0
+SCALE 0 1000
+PERPENDICULAR
+MODE   2
+UseGPU 0
+FULLIMAGE 64 48
+SUBSETSTART   0 0
+AdjustOrigin 1
+$if (-e ./savework) ./savework
+
+text 58 golden/gpu/tilt_sirt-finish.com
+$findsirtdiffs tilt_sirt
+$b3dremove -g tilt_sirt-[0-9]*.*
+
+text 321 golden/leave_scale.files
+tilt.com
+tilt_for_sirt.com
+tilt_sirt-001-sync.com
+tilt_sirt-002.com
+tilt_sirt-003-sync.com
+tilt_sirt-004-sync.com
+tilt_sirt-005.com
+tilt_sirt-006-sync.com
+tilt_sirt-007-sync.com
+tilt_sirt-008-sync.com
+tilt_sirt-009.com
+tilt_sirt-010-sync.com
+tilt_sirt-bound.info
+tilt_sirt-finish.com
+tilt_sirt.com
+ts.ali
+ts.tlt
+ts.xtilt
+
+text 129 golden/leave_scale.out
+Doing SIRT internally in the Tilt program
+12 command files created and ready to run with:
+  processchunks machine_list tilt_sirt
+
+text 2 golden/leave_scale.rc
+0
+
+text 322 golden/leave_scale/tilt_for_sirt.com
+# Command file to run Tilt
+#
+$tilt -StandardInput
+InputProjections ts.ali
+OutputFile ts.rec
+IMAGEBINNED 1
+TILTFILE ts.tlt
+XTILTFILE ts.xtilt
+THICKNESS 30
+RADIAL .35 .035
+FalloffIsTrueSigma 1
+XAXISTILT 0.
+LOG 0
+SCALE 0 1000
+PERPENDICULAR
+MODE 2
+FULLIMAGE 64 48
+SUBSETSTART 0 0
+AdjustOrigin 1
+$if (-e ./savework) ./savework
+
+text 425 golden/leave_scale/tilt_sirt-001-sync.com
+$setenv IMOD_OUTPUT_FORMAT MRC
+# Command file to run Tilt
+#
+$tilt -StandardInput
+InputProjections ts.ali
+OutputFile ts.srec03
+IMAGEBINNED 1
+TILTFILE ts.tlt
+XTILTFILE ts.xtilt
+THICKNESS 30
+SLICE -1 -1
+TOTALSLICES 0 47
+RADIAL   0.400 0.050
+MASK  2
+FlatFilterFraction  1.000000
+SIRTIterations   3
+StartingIteration  1
+XAXISTILT 0.
+LOG 0
+SCALE 0 1000
+PERPENDICULAR
+MODE   2
+FULLIMAGE 64 48
+SUBSETSTART   0 0
+AdjustOrigin 1
+$sync
+
+text 464 golden/leave_scale/tilt_sirt-002.com
+$sync
+$setenv IMOD_OUTPUT_FORMAT MRC
+# Command file to run Tilt
+#
+$tilt -StandardInput
+InputProjections ts.ali
+OutputFile ts.srec03
+IMAGEBINNED 1
+TILTFILE ts.tlt
+XTILTFILE ts.xtilt
+THICKNESS 30
+SLICE 0 47
+#
+TOTALSLICES 0 47
+BoundaryInfoFile tilt_sirt-bound.info
+RADIAL   0.400 0.050
+MASK  2
+FlatFilterFraction  1.000000
+SIRTIterations   3
+StartingIteration  1
+XAXISTILT 0.
+LOG 0
+SCALE 0 1000
+PERPENDICULAR
+MODE   2
+FULLIMAGE 64 48
+SUBSETSTART   0 0
+AdjustOrigin 1
+
+text 86 golden/leave_scale/tilt_sirt-003-sync.com
+$b3dremove ts.sint03
+$newstack -mode 1 -scale 0.000000,100.000000 ts.srec03 ts.sint03
+
+text 422 golden/leave_scale/tilt_sirt-004-sync.com
+$setenv IMOD_OUTPUT_FORMAT MRC
+# Command file to run Tilt
+#
+$tilt -StandardInput
+InputProjections ts.ali
+OutputFile ts.srec05
+IMAGEBINNED 1
+TILTFILE ts.tlt
+XTILTFILE ts.xtilt
+THICKNESS 30
+SLICE -1 -1
+TOTALSLICES 0 47
+RecFileToReproj  ts.srec03
+RADIAL   0.400 0.050
+MASK  2
+SIRTIterations  2
+StartingIteration  3
+XAXISTILT 0.
+LOG 0
+SCALE 0 1000
+PERPENDICULAR
+MODE   2
+FULLIMAGE 64 48
+SUBSETSTART   0 0
+AdjustOrigin 1
+$sync
+
+text 461 golden/leave_scale/tilt_sirt-005.com
+$sync
+$setenv IMOD_OUTPUT_FORMAT MRC
+# Command file to run Tilt
+#
+$tilt -StandardInput
+InputProjections ts.ali
+OutputFile ts.srec05
+IMAGEBINNED 1
+TILTFILE ts.tlt
+XTILTFILE ts.xtilt
+THICKNESS 30
+SLICE 0 47
+#
+TOTALSLICES 0 47
+BoundaryInfoFile tilt_sirt-bound.info
+RecFileToReproj  ts.srec03
+RADIAL   0.400 0.050
+MASK  2
+SIRTIterations  2
+StartingIteration  3
+XAXISTILT 0.
+LOG 0
+SCALE 0 1000
+PERPENDICULAR
+MODE   2
+FULLIMAGE 64 48
+SUBSETSTART   0 0
+AdjustOrigin 1
+
+text 142 golden/leave_scale/tilt_sirt-006-sync.com
+$fixboundaries "ts.srec05" "tilt_sirt-bound.info"
+$collectmmm pixels= "tilt_sirt" 1 "ts.srec05" 5
+$b3dremove -g "ts-[0-9][0-9][0-9]*.rbound" 
+
+text 125 golden/leave_scale/tilt_sirt-007-sync.com
+$if (-e ts.sint03) b3dremove ts.srec03
+$b3dremove ts.sint05
+$newstack -mode 1 -scale 0.000000,100.000000 ts.srec05 ts.sint05
+
+text 422 golden/leave_scale/tilt_sirt-008-sync.com
+$setenv IMOD_OUTPUT_FORMAT MRC
+# Command file to run Tilt
+#
+$tilt -StandardInput
+InputProjections ts.ali
+OutputFile ts.srec08
+IMAGEBINNED 1
+TILTFILE ts.tlt
+XTILTFILE ts.xtilt
+THICKNESS 30
+SLICE -1 -1
+TOTALSLICES 0 47
+RecFileToReproj  ts.srec05
+RADIAL   0.400 0.050
+MASK  2
+SIRTIterations  3
+StartingIteration  5
+XAXISTILT 0.
+LOG 0
+SCALE 0 1000
+PERPENDICULAR
+MODE   2
+FULLIMAGE 64 48
+SUBSETSTART   0 0
+AdjustOrigin 1
+$sync
+
+text 461 golden/leave_scale/tilt_sirt-009.com
+$sync
+$setenv IMOD_OUTPUT_FORMAT MRC
+# Command file to run Tilt
+#
+$tilt -StandardInput
+InputProjections ts.ali
+OutputFile ts.srec08
+IMAGEBINNED 1
+TILTFILE ts.tlt
+XTILTFILE ts.xtilt
+THICKNESS 30
+SLICE 0 47
+#
+TOTALSLICES 0 47
+BoundaryInfoFile tilt_sirt-bound.info
+RecFileToReproj  ts.srec05
+RADIAL   0.400 0.050
+MASK  2
+SIRTIterations  3
+StartingIteration  5
+XAXISTILT 0.
+LOG 0
+SCALE 0 1000
+PERPENDICULAR
+MODE   2
+FULLIMAGE 64 48
+SUBSETSTART   0 0
+AdjustOrigin 1
+
+text 142 golden/leave_scale/tilt_sirt-010-sync.com
+$fixboundaries "ts.srec08" "tilt_sirt-bound.info"
+$collectmmm pixels= "tilt_sirt" 1 "ts.srec08" 9
+$b3dremove -g "ts-[0-9][0-9][0-9]*.rbound" 
+
+text 37 golden/leave_scale/tilt_sirt-bound.info
+1 0 64 29 1
+ts-009.rbound
+-1 0 -1 -1
+
+text 183 golden/leave_scale/tilt_sirt-finish.com
+$if (-e ts.sint05) b3dremove ts.srec05
+$b3dremove ts.sint08
+$newstack -mode 1 -scale 0.000000,100.000000 ts.srec08 ts.sint08
+$findsirtdiffs tilt_sirt
+$b3dremove -g tilt_sirt-[0-9]*.*
+
+text 399 golden/leave_scale/tilt_sirt.com
+# Command file to run Tilt
+#
+$tilt -StandardInput
+InputProjections ts.ali
+OutputFile ts.srec08
+IMAGEBINNED 1
+TILTFILE ts.tlt
+XTILTFILE ts.xtilt
+THICKNESS 30
+SLICE  0 47
+RecFileToReproj  ts.srec05
+RADIAL   0.400 0.050
+MASK  2
+SIRTIterations  3
+StartingIteration  5
+XAXISTILT 0.
+LOG 0
+SCALE 0 1000
+PERPENDICULAR
+MODE   2
+FULLIMAGE 64 48
+SUBSETSTART   0 0
+AdjustOrigin 1
+$if (-e ./savework) ./savework
+
+text 426 golden/local.files
+tilt.com
+tilt_for_sirt.com
+tilt_sirt-001-sync.com
+tilt_sirt-002-sync.com
+tilt_sirt-003.com
+tilt_sirt-004-sync.com
+tilt_sirt-005.com
+tilt_sirt-006-sync.com
+tilt_sirt-007-sync.com
+tilt_sirt-008.com
+tilt_sirt-009-sync.com
+tilt_sirt-010-sync.com
+tilt_sirt-011.com
+tilt_sirt-012-sync.com
+tilt_sirt-013-sync.com
+tilt_sirt-014.com
+tilt_sirt-015-sync.com
+tilt_sirt-bound.info
+tilt_sirt-finish.com
+tilt_sirt.com
+ts.ali
+ts.tlt
+ts.xtilt
+
+text 87 golden/local.out
+16 command files created and ready to run with:
+  processchunks machine_list tilt_sirt
+
+text 2 golden/local.rc
+0
+
+text 330 golden/local/tilt_for_sirt.com
+# Command file to run Tilt
+#
+$tilt -StandardInput
+InputProjections ts.ali
+OutputFile ts.rec
+IMAGEBINNED 1
+TILTFILE ts.tlt
+XTILTFILE ts.xtilt
+THICKNESS 30
+RADIAL .35 .035
+FalloffIsTrueSigma 1
+LOCALFILE tslocal.xf
+LOG 0
+SCALE 0 1000
+PERPENDICULAR
+MODE 2
+FULLIMAGE 64 48
+SUBSETSTART 0 0
+AdjustOrigin 1
+$if (-e ./savework) ./savework
+
+text 74 golden/local/tilt_sirt-001-sync.com
+$b3dremove ts.alilog10
+$densnorm -log 0.000000 -ignore ts.ali ts.alilog10
+
+text 394 golden/local/tilt_sirt-002-sync.com
+$setenv IMOD_OUTPUT_FORMAT MRC
+# Command file to run Tilt
+#
+$tilt -StandardInput
+InputProjections ts.alilog10
+OutputFile ts.srec00
+IMAGEBINNED 1
+TILTFILE ts.tlt
+XTILTFILE ts.xtilt
+THICKNESS 30
+SLICE -1 -1
+TOTALSLICES 0 47
+RADIAL   0.400 0.050
+MASK  2
+FlatFilterFraction  1.000000
+LOCALFILE tslocal.xf
+SCALE  0.0 0.2
+PERPENDICULAR
+MODE   2
+FULLIMAGE 64 48
+SUBSETSTART   0 0
+AdjustOrigin 1
+$sync
+
+text 433 golden/local/tilt_sirt-003.com
+$sync
+$setenv IMOD_OUTPUT_FORMAT MRC
+# Command file to run Tilt
+#
+$tilt -StandardInput
+InputProjections ts.alilog10
+OutputFile ts.srec00
+IMAGEBINNED 1
+TILTFILE ts.tlt
+XTILTFILE ts.xtilt
+THICKNESS 30
+SLICE 0 47
+#
+TOTALSLICES 0 47
+BoundaryInfoFile tilt_sirt-bound.info
+RADIAL   0.400 0.050
+MASK  2
+FlatFilterFraction  1.000000
+LOCALFILE tslocal.xf
+SCALE  0.0 0.2
+PERPENDICULAR
+MODE   2
+FULLIMAGE 64 48
+SUBSETSTART   0 0
+AdjustOrigin 1
+
+text 142 golden/local/tilt_sirt-004-sync.com
+$fixboundaries "ts.srec00" "tilt_sirt-bound.info"
+$collectmmm pixels= "tilt_sirt" 1 "ts.srec00" 3
+$b3dremove -g "ts-[0-9][0-9][0-9]*.rbound" 
+
+text 420 golden/local/tilt_sirt-005.com
+$sync
+$setenv IMOD_OUTPUT_FORMAT MRC
+# Command file to run Tilt
+#
+$tilt -StandardInput
+InputProjections ts.alilog10
+OutputFile ts-005.diff
+IMAGEBINNED 1
+TILTFILE ts.tlt
+XTILTFILE ts.xtilt
+THICKNESS 30
+ZMinAndMax 0 47
+#
+SLICE  0 47
+RecFileToReproj  ts.srec00
+RADIAL   0.400 0.050
+ViewsToReproj  0
+SIRTSubtraction
+LOCALFILE tslocal.xf
+SCALE  0.0 0.2
+PERPENDICULAR
+MODE   2
+FULLIMAGE 64 48
+SUBSETSTART   0 0
+AdjustOrigin 1
+
+text 129 golden/local/tilt_sirt-006-sync.com
+$assemblevol -StandardInput
+OutputFile ts.diff
+NumberOfFilesInY 1
+InputFile ts-005.diff
+$b3dremove -g "ts-[0-9][0-9][0-9]*.diff"
+
+text 449 golden/local/tilt_sirt-007-sync.com
+$setenv IMOD_OUTPUT_FORMAT MRC
+# Command file to run Tilt
+#
+$tilt -StandardInput
+InputProjections ts.diff
+OutputFile ts.srec01
+IMAGEBINNED 1
+TILTFILE ts.tlt
+XTILTFILE ts.xtilt
+THICKNESS 30
+SLICE -1 -1
+TOTALSLICES 0 47
+RADIAL   0.400 0.050
+MASK  2
+FlatFilterFraction  2
+BaseRecFile  ts.srec00
+StartingIteration  1
+SubtractFromBase   -1
+LOCALFILE tslocal.xf
+SCALE  0.0 0.2
+PERPENDICULAR
+MODE   2
+FULLIMAGE 64 48
+SUBSETSTART   0 0
+AdjustOrigin 1
+$sync
+
+text 488 golden/local/tilt_sirt-008.com
+$sync
+$setenv IMOD_OUTPUT_FORMAT MRC
+# Command file to run Tilt
+#
+$tilt -StandardInput
+InputProjections ts.diff
+OutputFile ts.srec01
+IMAGEBINNED 1
+TILTFILE ts.tlt
+XTILTFILE ts.xtilt
+THICKNESS 30
+SLICE 0 47
+#
+TOTALSLICES 0 47
+BoundaryInfoFile tilt_sirt-bound.info
+RADIAL   0.400 0.050
+MASK  2
+FlatFilterFraction  2
+BaseRecFile  ts.srec00
+StartingIteration  1
+SubtractFromBase   -1
+LOCALFILE tslocal.xf
+SCALE  0.0 0.2
+PERPENDICULAR
+MODE   2
+FULLIMAGE 64 48
+SUBSETSTART   0 0
+AdjustOrigin 1
+
+text 142 golden/local/tilt_sirt-009-sync.com
+$fixboundaries "ts.srec01" "tilt_sirt-bound.info"
+$collectmmm pixels= "tilt_sirt" 1 "ts.srec01" 8
+$b3dremove -g "ts-[0-9][0-9][0-9]*.rbound" 
+
+text 51 golden/local/tilt_sirt-010-sync.com
+$b3dremove ts.diff ts.srec00~
+$b3dremove ts.srec00
+
+text 420 golden/local/tilt_sirt-011.com
+$sync
+$setenv IMOD_OUTPUT_FORMAT MRC
+# Command file to run Tilt
+#
+$tilt -StandardInput
+InputProjections ts.alilog10
+OutputFile ts-011.diff
+IMAGEBINNED 1
+TILTFILE ts.tlt
+XTILTFILE ts.xtilt
+THICKNESS 30
+ZMinAndMax 0 47
+#
+SLICE  0 47
+RecFileToReproj  ts.srec01
+RADIAL   0.400 0.050
+ViewsToReproj  0
+SIRTSubtraction
+LOCALFILE tslocal.xf
+SCALE  0.0 0.2
+PERPENDICULAR
+MODE   2
+FULLIMAGE 64 48
+SUBSETSTART   0 0
+AdjustOrigin 1
+
+text 129 golden/local/tilt_sirt-012-sync.com
+$assemblevol -StandardInput
+OutputFile ts.diff
+NumberOfFilesInY 1
+InputFile ts-011.diff
+$b3dremove -g "ts-[0-9][0-9][0-9]*.diff"
+
+text 449 golden/local/tilt_sirt-013-sync.com
+$setenv IMOD_OUTPUT_FORMAT MRC
+# Command file to run Tilt
+#
+$tilt -StandardInput
+InputProjections ts.diff
+OutputFile ts.srec02
+IMAGEBINNED 1
+TILTFILE ts.tlt
+XTILTFILE ts.xtilt
+THICKNESS 30
+SLICE -1 -1
+TOTALSLICES 0 47
+RADIAL   0.400 0.050
+MASK  2
+FlatFilterFraction  2
+BaseRecFile  ts.srec01
+StartingIteration  2
+SubtractFromBase   -1
+LOCALFILE tslocal.xf
+SCALE  0.0 0.2
+PERPENDICULAR
+MODE   2
+FULLIMAGE 64 48
+SUBSETSTART   0 0
+AdjustOrigin 1
+$sync
+
+text 488 golden/local/tilt_sirt-014.com
+$sync
+$setenv IMOD_OUTPUT_FORMAT MRC
+# Command file to run Tilt
+#
+$tilt -StandardInput
+InputProjections ts.diff
+OutputFile ts.srec02
+IMAGEBINNED 1
+TILTFILE ts.tlt
+XTILTFILE ts.xtilt
+THICKNESS 30
+SLICE 0 47
+#
+TOTALSLICES 0 47
+BoundaryInfoFile tilt_sirt-bound.info
+RADIAL   0.400 0.050
+MASK  2
+FlatFilterFraction  2
+BaseRecFile  ts.srec01
+StartingIteration  2
+SubtractFromBase   -1
+LOCALFILE tslocal.xf
+SCALE  0.0 0.2
+PERPENDICULAR
+MODE   2
+FULLIMAGE 64 48
+SUBSETSTART   0 0
+AdjustOrigin 1
+
+text 143 golden/local/tilt_sirt-015-sync.com
+$fixboundaries "ts.srec02" "tilt_sirt-bound.info"
+$collectmmm pixels= "tilt_sirt" 1 "ts.srec02" 14
+$b3dremove -g "ts-[0-9][0-9][0-9]*.rbound" 
+
+text 37 golden/local/tilt_sirt-bound.info
+1 0 64 29 1
+ts-014.rbound
+-1 0 -1 -1
+
+text 109 golden/local/tilt_sirt-finish.com
+$b3dremove ts.diff ts.srec01~
+$b3dremove ts.srec01
+$findsirtdiffs tilt_sirt
+$b3dremove -g tilt_sirt-[0-9]*.*
+
+text 426 golden/local/tilt_sirt.com
+# Command file to run Tilt
+#
+$tilt -StandardInput
+InputProjections ts.diff
+OutputFile ts.srec02
+IMAGEBINNED 1
+TILTFILE ts.tlt
+XTILTFILE ts.xtilt
+THICKNESS 30
+SLICE  0 47
+RADIAL   0.400 0.050
+MASK  2
+FlatFilterFraction  2
+BaseRecFile  ts.srec01
+StartingIteration  2
+SubtractFromBase   -1
+LOCALFILE tslocal.xf
+SCALE  0.0 0.2
+PERPENDICULAR
+MODE   2
+FULLIMAGE 64 48
+SUBSETSTART   0 0
+AdjustOrigin 1
+$if (-e ./savework) ./savework
+
+text 232 golden/local_sub_test.files
+tilt.com
+tilt_for_sirt.com
+tilt_sirt-001-sync.com
+tilt_sirt-002-sync.com
+tilt_sirt-003-sync.com
+tilt_sirt-004-sync.com
+tilt_sirt-005-sync.com
+tilt_sirt-006-sync.com
+tilt_sirt-007-sync.com
+tilt_sirt-finish.com
+ts.ali
+ts.tlt
+ts.xtilt
+
+text 117 golden/local_sub_test.out
+8 command files created and ready to run with:
+  processchunks machine_list tilt_sirt
+Or with:
+  subm tilt_sirt*.com
+
+text 2 golden/local_sub_test.rc
+0
+
+text 330 golden/local_sub_test/tilt_for_sirt.com
+# Command file to run Tilt
+#
+$tilt -StandardInput
+InputProjections ts.ali
+OutputFile ts.rec
+IMAGEBINNED 1
+TILTFILE ts.tlt
+XTILTFILE ts.xtilt
+THICKNESS 30
+RADIAL .35 .035
+FalloffIsTrueSigma 1
+LOCALFILE tslocal.xf
+LOG 0
+SCALE 0 1000
+PERPENDICULAR
+MODE 2
+FULLIMAGE 64 48
+SUBSETSTART 0 0
+AdjustOrigin 1
+$if (-e ./savework) ./savework
+
+text 157 golden/local_sub_test/tilt_sirt-001-sync.com
+$b3dremove ts_sub.ali
+$newstack -size 32,32 -off 0,0 ts.ali ts_sub.ali
+$b3dremove ts_sub.alilog10
+$densnorm -log 0.000000 -ignore ts_sub.ali ts_sub.alilog10
+
+text 380 golden/local_sub_test/tilt_sirt-002-sync.com
+# Command file to run Tilt
+#
+$tilt -StandardInput
+InputProjections ts_sub.alilog10
+OutputFile ts_sub.srec00
+IMAGEBINNED 1
+TILTFILE ts.tlt
+XTILTFILE ts.xtilt
+THICKNESS 30
+SLICE  0 31
+RADIAL   0.400 0.050
+MASK  2
+FlatFilterFraction  1.000000
+LOCALFILE tslocal.xf
+SCALE  0.0 0.2
+PERPENDICULAR
+MODE   2
+FULLIMAGE 64 48
+SUBSETSTART   16 8
+AdjustOrigin 1
+$if (-e ./savework) ./savework
+
+text 405 golden/local_sub_test/tilt_sirt-003-sync.com
+# Command file to run Tilt
+#
+$tilt -StandardInput
+InputProjections ts_sub.alilog10
+OutputFile ts_sub.diff
+IMAGEBINNED 1
+TILTFILE ts.tlt
+XTILTFILE ts.xtilt
+THICKNESS 30
+SLICE  0 31
+RecFileToReproj  ts_sub.srec00
+RADIAL   0.400 0.050
+ViewsToReproj  0
+SIRTSubtraction
+LOCALFILE tslocal.xf
+SCALE  0.0 0.2
+PERPENDICULAR
+MODE   2
+FULLIMAGE 64 48
+SUBSETSTART   16 8
+AdjustOrigin 1
+$if (-e ./savework) ./savework
+
+text 439 golden/local_sub_test/tilt_sirt-004-sync.com
+# Command file to run Tilt
+#
+$tilt -StandardInput
+InputProjections ts_sub.diff
+OutputFile ts_sub.srec01
+IMAGEBINNED 1
+TILTFILE ts.tlt
+XTILTFILE ts.xtilt
+THICKNESS 30
+SLICE  0 31
+RADIAL   0.400 0.050
+MASK  2
+FlatFilterFraction  2
+BaseRecFile  ts_sub.srec00
+StartingIteration  1
+SubtractFromBase   -1
+LOCALFILE tslocal.xf
+SCALE  0.0 0.2
+PERPENDICULAR
+MODE   2
+FULLIMAGE 64 48
+SUBSETSTART   16 8
+AdjustOrigin 1
+$if (-e ./savework) ./savework
+
+text 52 golden/local_sub_test/tilt_sirt-005-sync.com
+$b3dremove  ts_sub.srec00~
+$b3dremove ts_sub.srec00
+
+text 405 golden/local_sub_test/tilt_sirt-006-sync.com
+# Command file to run Tilt
+#
+$tilt -StandardInput
+InputProjections ts_sub.alilog10
+OutputFile ts_sub.diff
+IMAGEBINNED 1
+TILTFILE ts.tlt
+XTILTFILE ts.xtilt
+THICKNESS 30
+SLICE  0 31
+RecFileToReproj  ts_sub.srec01
+RADIAL   0.400 0.050
+ViewsToReproj  0
+SIRTSubtraction
+LOCALFILE tslocal.xf
+SCALE  0.0 0.2
+PERPENDICULAR
+MODE   2
+FULLIMAGE 64 48
+SUBSETSTART   16 8
+AdjustOrigin 1
+$if (-e ./savework) ./savework
+
+text 439 golden/local_sub_test/tilt_sirt-007-sync.com
+# Command file to run Tilt
+#
+$tilt -StandardInput
+InputProjections ts_sub.diff
+OutputFile ts_sub.srec02
+IMAGEBINNED 1
+TILTFILE ts.tlt
+XTILTFILE ts.xtilt
+THICKNESS 30
+SLICE  0 31
+RADIAL   0.400 0.050
+MASK  2
+FlatFilterFraction  2
+BaseRecFile  ts_sub.srec01
+StartingIteration  2
+SubtractFromBase   -1
+LOCALFILE tslocal.xf
+SCALE  0.0 0.2
+PERPENDICULAR
+MODE   2
+FULLIMAGE 64 48
+SUBSETSTART   16 8
+AdjustOrigin 1
+$if (-e ./savework) ./savework
+
+text 110 golden/local_sub_test/tilt_sirt-finish.com
+$b3dremove  ts_sub.srec01~
+$b3dremove ts_sub.srec01
+$findsirtdiffs tilt_sirt
+$b3dremove -g tilt_sirt-[0-9]*.*
+
+text 117 golden/one_proc.files
+tilt.com
+tilt_for_sirt.com
+tilt_sirt-001-sync.com
+tilt_sirt-002-sync.com
+tilt_sirt-finish.com
+ts.ali
+ts.tlt
+ts.xtilt
+
+text 159 golden/one_proc.out
+Doing SIRT internally in the Tilt program
+3 command files created and ready to run with:
+  processchunks machine_list tilt_sirt
+Or with:
+  subm tilt_sirt*.com
+
+text 2 golden/one_proc.rc
+0
+
+text 322 golden/one_proc/tilt_for_sirt.com
+# Command file to run Tilt
+#
+$tilt -StandardInput
+InputProjections ts.ali
+OutputFile ts.rec
+IMAGEBINNED 1
+TILTFILE ts.tlt
+XTILTFILE ts.xtilt
+THICKNESS 30
+RADIAL .35 .035
+FalloffIsTrueSigma 1
+XAXISTILT 0.
+LOG 0
+SCALE 0 1000
+PERPENDICULAR
+MODE 2
+FULLIMAGE 64 48
+SUBSETSTART 0 0
+AdjustOrigin 1
+$if (-e ./savework) ./savework
+
+text 402 golden/one_proc/tilt_sirt-001-sync.com
+# Command file to run Tilt
+#
+$tilt -StandardInput
+InputProjections ts.ali
+OutputFile ts.srec02
+IMAGEBINNED 1
+TILTFILE ts.tlt
+XTILTFILE ts.xtilt
+THICKNESS 30
+SLICE  0 47
+RADIAL   0.400 0.050
+MASK  2
+FlatFilterFraction  1.000000
+SIRTIterations   2
+StartingIteration  1
+XAXISTILT 0.
+LOG 0
+SCALE 0 1000
+PERPENDICULAR
+MODE   2
+FULLIMAGE 64 48
+SUBSETSTART   0 0
+AdjustOrigin 1
+$if (-e ./savework) ./savework
+
+text 399 golden/one_proc/tilt_sirt-002-sync.com
+# Command file to run Tilt
+#
+$tilt -StandardInput
+InputProjections ts.ali
+OutputFile ts.srec04
+IMAGEBINNED 1
+TILTFILE ts.tlt
+XTILTFILE ts.xtilt
+THICKNESS 30
+SLICE  0 47
+RecFileToReproj  ts.srec02
+RADIAL   0.400 0.050
+MASK  2
+SIRTIterations  2
+StartingIteration  2
+XAXISTILT 0.
+LOG 0
+SCALE 0 1000
+PERPENDICULAR
+MODE   2
+FULLIMAGE 64 48
+SUBSETSTART   0 0
+AdjustOrigin 1
+$if (-e ./savework) ./savework
+
+text 58 golden/one_proc/tilt_sirt-finish.com
+$findsirtdiffs tilt_sirt
+$b3dremove -g tilt_sirt-[0-9]*.*
+
+text 133 golden/resume_clean.files
+tilt.com
+tilt_for_sirt.com
+tilt_sirt-001-sync.com
+tilt_sirt-finish.com
+ts.ali
+ts.sint04
+ts.srec03
+ts.srec05
+ts.tlt
+ts.vsr05
+ts.xtilt
+
+text 197 golden/resume_clean.out
+Starting from last reconstruction # 5
+Doing SIRT internally in the Tilt program
+2 command files created and ready to run with:
+  processchunks machine_list tilt_sirt
+Or with:
+  subm tilt_sirt*.com
+
+text 2 golden/resume_clean.rc
+0
+
+text 322 golden/resume_clean/tilt_for_sirt.com
+# Command file to run Tilt
+#
+$tilt -StandardInput
+InputProjections ts.ali
+OutputFile ts.rec
+IMAGEBINNED 1
+TILTFILE ts.tlt
+XTILTFILE ts.xtilt
+THICKNESS 30
+RADIAL .35 .035
+FalloffIsTrueSigma 1
+XAXISTILT 0.
+LOG 0
+SCALE 0 1000
+PERPENDICULAR
+MODE 2
+FULLIMAGE 64 48
+SUBSETSTART 0 0
+AdjustOrigin 1
+$if (-e ./savework) ./savework
+
+text 399 golden/resume_clean/tilt_sirt-001-sync.com
+# Command file to run Tilt
+#
+$tilt -StandardInput
+InputProjections ts.ali
+OutputFile ts.srec07
+IMAGEBINNED 1
+TILTFILE ts.tlt
+XTILTFILE ts.xtilt
+THICKNESS 30
+SLICE  0 47
+RecFileToReproj  ts.srec05
+RADIAL   0.400 0.050
+MASK  2
+SIRTIterations  2
+StartingIteration  5
+XAXISTILT 0.
+LOG 0
+SCALE 0 1000
+PERPENDICULAR
+MODE   2
+FULLIMAGE 64 48
+SUBSETSTART   0 0
+AdjustOrigin 1
+$if (-e ./savework) ./savework
+
+text 58 golden/resume_clean/tilt_sirt-finish.com
+$findsirtdiffs tilt_sirt
+$b3dremove -g tilt_sirt-[0-9]*.*
+
+text 296 golden/resume_iter.files
+tilt.com
+tilt_for_sirt.com
+tilt_sirt-001-sync.com
+tilt_sirt-002.com
+tilt_sirt-003-sync.com
+tilt_sirt-004-sync.com
+tilt_sirt-005-sync.com
+tilt_sirt-006.com
+tilt_sirt-007-sync.com
+tilt_sirt-bound.info
+tilt_sirt-finish.com
+tilt_sirt.com
+ts.ali
+ts.sint04
+ts.srec03
+ts.srec05
+ts.tlt
+ts.vsr05
+ts.xtilt
+
+text 128 golden/resume_iter.out
+Doing SIRT internally in the Tilt program
+8 command files created and ready to run with:
+  processchunks machine_list tilt_sirt
+
+text 2 golden/resume_iter.rc
+0
+
+text 322 golden/resume_iter/tilt_for_sirt.com
+# Command file to run Tilt
+#
+$tilt -StandardInput
+InputProjections ts.ali
+OutputFile ts.rec
+IMAGEBINNED 1
+TILTFILE ts.tlt
+XTILTFILE ts.xtilt
+THICKNESS 30
+RADIAL .35 .035
+FalloffIsTrueSigma 1
+XAXISTILT 0.
+LOG 0
+SCALE 0 1000
+PERPENDICULAR
+MODE 2
+FULLIMAGE 64 48
+SUBSETSTART 0 0
+AdjustOrigin 1
+$if (-e ./savework) ./savework
+
+text 422 golden/resume_iter/tilt_sirt-001-sync.com
+$setenv IMOD_OUTPUT_FORMAT MRC
+# Command file to run Tilt
+#
+$tilt -StandardInput
+InputProjections ts.ali
+OutputFile ts.srec06
+IMAGEBINNED 1
+TILTFILE ts.tlt
+XTILTFILE ts.xtilt
+THICKNESS 30
+SLICE -1 -1
+TOTALSLICES 0 47
+RecFileToReproj  ts.srec03
+RADIAL   0.400 0.050
+MASK  2
+SIRTIterations  3
+StartingIteration  3
+XAXISTILT 0.
+LOG 0
+SCALE 0 1000
+PERPENDICULAR
+MODE   2
+FULLIMAGE 64 48
+SUBSETSTART   0 0
+AdjustOrigin 1
+$sync
+
+text 461 golden/resume_iter/tilt_sirt-002.com
+$sync
+$setenv IMOD_OUTPUT_FORMAT MRC
+# Command file to run Tilt
+#
+$tilt -StandardInput
+InputProjections ts.ali
+OutputFile ts.srec06
+IMAGEBINNED 1
+TILTFILE ts.tlt
+XTILTFILE ts.xtilt
+THICKNESS 30
+SLICE 0 47
+#
+TOTALSLICES 0 47
+BoundaryInfoFile tilt_sirt-bound.info
+RecFileToReproj  ts.srec03
+RADIAL   0.400 0.050
+MASK  2
+SIRTIterations  3
+StartingIteration  3
+XAXISTILT 0.
+LOG 0
+SCALE 0 1000
+PERPENDICULAR
+MODE   2
+FULLIMAGE 64 48
+SUBSETSTART   0 0
+AdjustOrigin 1
+
+text 142 golden/resume_iter/tilt_sirt-003-sync.com
+$fixboundaries "ts.srec06" "tilt_sirt-bound.info"
+$collectmmm pixels= "tilt_sirt" 1 "ts.srec06" 2
+$b3dremove -g "ts-[0-9][0-9][0-9]*.rbound" 
+
+text 92 golden/resume_iter/tilt_sirt-004-sync.com
+$if (-e ts.strm03) b3dremove ts.srec03
+$b3dremove ts.strm06
+$trimvol -f ts.srec06 ts.strm06
+
+text 422 golden/resume_iter/tilt_sirt-005-sync.com
+$setenv IMOD_OUTPUT_FORMAT MRC
+# Command file to run Tilt
+#
+$tilt -StandardInput
+InputProjections ts.ali
+OutputFile ts.srec07
+IMAGEBINNED 1
+TILTFILE ts.tlt
+XTILTFILE ts.xtilt
+THICKNESS 30
+SLICE -1 -1
+TOTALSLICES 0 47
+RecFileToReproj  ts.srec06
+RADIAL   0.400 0.050
+MASK  2
+SIRTIterations  1
+StartingIteration  6
+XAXISTILT 0.
+LOG 0
+SCALE 0 1000
+PERPENDICULAR
+MODE   2
+FULLIMAGE 64 48
+SUBSETSTART   0 0
+AdjustOrigin 1
+$sync
+
+text 461 golden/resume_iter/tilt_sirt-006.com
+$sync
+$setenv IMOD_OUTPUT_FORMAT MRC
+# Command file to run Tilt
+#
+$tilt -StandardInput
+InputProjections ts.ali
+OutputFile ts.srec07
+IMAGEBINNED 1
+TILTFILE ts.tlt
+XTILTFILE ts.xtilt
+THICKNESS 30
+SLICE 0 47
+#
+TOTALSLICES 0 47
+BoundaryInfoFile tilt_sirt-bound.info
+RecFileToReproj  ts.srec06
+RADIAL   0.400 0.050
+MASK  2
+SIRTIterations  1
+StartingIteration  6
+XAXISTILT 0.
+LOG 0
+SCALE 0 1000
+PERPENDICULAR
+MODE   2
+FULLIMAGE 64 48
+SUBSETSTART   0 0
+AdjustOrigin 1
+
+text 142 golden/resume_iter/tilt_sirt-007-sync.com
+$fixboundaries "ts.srec07" "tilt_sirt-bound.info"
+$collectmmm pixels= "tilt_sirt" 1 "ts.srec07" 6
+$b3dremove -g "ts-[0-9][0-9][0-9]*.rbound" 
+
+text 37 golden/resume_iter/tilt_sirt-bound.info
+1 0 64 29 1
+ts-006.rbound
+-1 0 -1 -1
+
+text 150 golden/resume_iter/tilt_sirt-finish.com
+$if (-e ts.strm06) b3dremove ts.srec06
+$b3dremove ts.strm07
+$trimvol -f ts.srec07 ts.strm07
+$findsirtdiffs tilt_sirt
+$b3dremove -g tilt_sirt-[0-9]*.*
+
+text 399 golden/resume_iter/tilt_sirt.com
+# Command file to run Tilt
+#
+$tilt -StandardInput
+InputProjections ts.ali
+OutputFile ts.srec07
+IMAGEBINNED 1
+TILTFILE ts.tlt
+XTILTFILE ts.xtilt
+THICKNESS 30
+SLICE  0 47
+RecFileToReproj  ts.srec06
+RADIAL   0.400 0.050
+MASK  2
+SIRTIterations  1
+StartingIteration  6
+XAXISTILT 0.
+LOG 0
+SCALE 0 1000
+PERPENDICULAR
+MODE   2
+FULLIMAGE 64 48
+SUBSETSTART   0 0
+AdjustOrigin 1
+$if (-e ./savework) ./savework
+
+text 193 golden/subarea.files
+tilt.com
+tilt_for_sirt.com
+tilt_sirt-001-sync.com
+tilt_sirt-002-sync.com
+tilt_sirt-003.com
+tilt_sirt-004-sync.com
+tilt_sirt-bound.info
+tilt_sirt-finish.com
+tilt_sirt.com
+ts.ali
+ts.tlt
+ts.xtilt
+
+text 128 golden/subarea.out
+Doing SIRT internally in the Tilt program
+5 command files created and ready to run with:
+  processchunks machine_list tilt_sirt
+
+text 2 golden/subarea.rc
+0
+
+text 322 golden/subarea/tilt_for_sirt.com
+# Command file to run Tilt
+#
+$tilt -StandardInput
+InputProjections ts.ali
+OutputFile ts.rec
+IMAGEBINNED 1
+TILTFILE ts.tlt
+XTILTFILE ts.xtilt
+THICKNESS 30
+RADIAL .35 .035
+FalloffIsTrueSigma 1
+XAXISTILT 0.
+LOG 0
+SCALE 0 1000
+PERPENDICULAR
+MODE 2
+FULLIMAGE 64 48
+SUBSETSTART 0 0
+AdjustOrigin 1
+$if (-e ./savework) ./savework
+
+text 71 golden/subarea/tilt_sirt-001-sync.com
+$b3dremove ts_sub.ali
+$newstack -size 40,30 -off 0,2 ts.ali ts_sub.ali
+
+text 452 golden/subarea/tilt_sirt-002-sync.com
+$setenv IMOD_OUTPUT_FORMAT MRC
+# Command file to run Tilt
+#
+$tilt -StandardInput
+InputProjections ts_sub.ali
+OutputFile ts_sub.srec03
+IMAGEBINNED 1
+TILTFILE ts.tlt
+XTILTFILE ts.xtilt
+THICKNESS 30
+SLICE -1 -1
+TOTALSLICES 0 29
+RADIAL   0.300 0.050
+MASK  2
+FlatFilterFraction  0.500000
+SIRTIterations   3
+StartingIteration  1
+ConstrainSign  1
+XAXISTILT 0.
+LOG 0
+SCALE 0 1000
+PERPENDICULAR
+MODE   1
+FULLIMAGE 64 48
+SUBSETSTART   12 11
+AdjustOrigin 1
+$sync
+
+text 491 golden/subarea/tilt_sirt-003.com
+$sync
+$setenv IMOD_OUTPUT_FORMAT MRC
+# Command file to run Tilt
+#
+$tilt -StandardInput
+InputProjections ts_sub.ali
+OutputFile ts_sub.srec03
+IMAGEBINNED 1
+TILTFILE ts.tlt
+XTILTFILE ts.xtilt
+THICKNESS 30
+SLICE 0 29
+#
+TOTALSLICES 0 29
+BoundaryInfoFile tilt_sirt-bound.info
+RADIAL   0.300 0.050
+MASK  2
+FlatFilterFraction  0.500000
+SIRTIterations   3
+StartingIteration  1
+ConstrainSign  1
+XAXISTILT 0.
+LOG 0
+SCALE 0 1000
+PERPENDICULAR
+MODE   1
+FULLIMAGE 64 48
+SUBSETSTART   12 11
+AdjustOrigin 1
+
+text 154 golden/subarea/tilt_sirt-004-sync.com
+$fixboundaries "ts_sub.srec03" "tilt_sirt-bound.info"
+$collectmmm pixels= "tilt_sirt" 1 "ts_sub.srec03" 3
+$b3dremove -g "ts_sub-[0-9][0-9][0-9]*.rbound" 
+
+text 41 golden/subarea/tilt_sirt-bound.info
+1 0 40 26 1
+ts_sub-003.rbound
+-1 0 -1 -1
+
+text 58 golden/subarea/tilt_sirt-finish.com
+$findsirtdiffs tilt_sirt
+$b3dremove -g tilt_sirt-[0-9]*.*
+
+text 429 golden/subarea/tilt_sirt.com
+# Command file to run Tilt
+#
+$tilt -StandardInput
+InputProjections ts_sub.ali
+OutputFile ts_sub.srec03
+IMAGEBINNED 1
+TILTFILE ts.tlt
+XTILTFILE ts.xtilt
+THICKNESS 30
+SLICE  0 29
+RADIAL   0.300 0.050
+MASK  2
+FlatFilterFraction  0.500000
+SIRTIterations   3
+StartingIteration  1
+ConstrainSign  1
+XAXISTILT 0.
+LOG 0
+SCALE 0 1000
+PERPENDICULAR
+MODE   1
+FULLIMAGE 64 48
+SUBSETSTART   12 11
+AdjustOrigin 1
+$if (-e ./savework) ./savework
+
+text 126 golden/trim_chunks.files
+tilt.com
+tilt_for_sirt.com
+tilt_sirt-001.com
+tilt_sirt-002-sync.com
+tilt_sirt-finish.com
+tilt_sirt.com
+ts.ali
+ts.tlt
+ts.xtilt
+
+text 128 golden/trim_chunks.out
+Doing SIRT internally in the Tilt program
+3 command files created and ready to run with:
+  processchunks machine_list tilt_sirt
+
+text 2 golden/trim_chunks.rc
+0
+
+text 322 golden/trim_chunks/tilt_for_sirt.com
+# Command file to run Tilt
+#
+$tilt -StandardInput
+InputProjections ts.ali
+OutputFile ts.rec
+IMAGEBINNED 1
+TILTFILE ts.tlt
+XTILTFILE ts.xtilt
+THICKNESS 30
+RADIAL .35 .035
+FalloffIsTrueSigma 1
+XAXISTILT 0.
+LOG 0
+SCALE 0 1000
+PERPENDICULAR
+MODE 2
+FULLIMAGE 64 48
+SUBSETSTART 0 0
+AdjustOrigin 1
+$if (-e ./savework) ./savework
+
+text 413 golden/trim_chunks/tilt_sirt-001.com
+$sync
+$setenv IMOD_OUTPUT_FORMAT MRC
+# Command file to run Tilt
+#
+$tilt -StandardInput
+InputProjections ts.ali
+OutputFile ts-001.srec02
+IMAGEBINNED 1
+TILTFILE ts.tlt
+XTILTFILE ts.xtilt
+THICKNESS 30
+SLICE 0 47
+#
+RADIAL   0.400 0.050
+MASK  2
+FlatFilterFraction  1.000000
+SIRTIterations   2
+StartingIteration  1
+XAXISTILT 0.
+LOG 0
+SCALE 0 1000
+PERPENDICULAR
+MODE   2
+FULLIMAGE 64 48
+SUBSETSTART   0 0
+AdjustOrigin 1
+
+text 113 golden/trim_chunks/tilt_sirt-002-sync.com
+$newstack -StandardInput
+OutputFile ts.srec02
+InputFile ts-001.srec02
+$b3dremove -g "ts-[0-9][0-9][0-9]*.srec02"
+
+text 112 golden/trim_chunks/tilt_sirt-finish.com
+$b3dremove ts.strm02
+$trimvol -rx ts.srec02 ts.strm02
+$findsirtdiffs tilt_sirt
+$b3dremove -g tilt_sirt-[0-9]*.*
+
+text 402 golden/trim_chunks/tilt_sirt.com
+# Command file to run Tilt
+#
+$tilt -StandardInput
+InputProjections ts.ali
+OutputFile ts.srec02
+IMAGEBINNED 1
+TILTFILE ts.tlt
+XTILTFILE ts.xtilt
+THICKNESS 30
+SLICE  0 47
+RADIAL   0.400 0.050
+MASK  2
+FlatFilterFraction  1.000000
+SIRTIterations   2
+StartingIteration  1
+XAXISTILT 0.
+LOG 0
+SCALE 0 1000
+PERPENDICULAR
+MODE   2
+FULLIMAGE 64 48
+SUBSETSTART   0 0
+AdjustOrigin 1
+$if (-e ./savework) ./savework
+
+text 212 golden/vert_resume.files
+tilt.com
+tilt_for_sirt.com
+tilt_sirt-001-sync.com
+tilt_sirt-002.com
+tilt_sirt-003-sync.com
+tilt_sirt-bound.info
+tilt_sirt-finish.com
+tilt_sirt-vsbound.info
+tilt_sirt.com
+ts.ali
+ts.srec12
+ts.tlt
+ts.vsr12
+ts.xtilt
+
+text 167 golden/vert_resume.out
+Starting from last reconstruction # 12
+Doing SIRT internally in the Tilt program
+4 command files created and ready to run with:
+  processchunks machine_list tilt_sirt
+
+text 2 golden/vert_resume.rc
+0
+
+text 323 golden/vert_resume/tilt_for_sirt.com
+# Command file to run Tilt
+#
+$tilt -StandardInput
+InputProjections ts.ali
+OutputFile ts.rec
+IMAGEBINNED 1
+TILTFILE ts.tlt
+XTILTFILE ts.xtilt
+THICKNESS 30
+RADIAL .35 .035
+FalloffIsTrueSigma 1
+XAXISTILT 3.5
+LOG 0
+SCALE 0 1000
+PERPENDICULAR
+MODE 2
+FULLIMAGE 64 48
+SUBSETSTART 0 0
+AdjustOrigin 1
+$if (-e ./savework) ./savework
+
+text 470 golden/vert_resume/tilt_sirt-001-sync.com
+$setenv IMOD_OUTPUT_FORMAT MRC
+# Command file to run Tilt
+#
+$tilt -StandardInput
+InputProjections ts.ali
+OutputFile ts.srec15
+IMAGEBINNED 1
+TILTFILE ts.tlt
+XTILTFILE ts.xtilt
+THICKNESS 30
+SLICE -1 -1
+TOTALSLICES 0 47
+RecFileToReproj  ts.vsr12
+RADIAL   0.400 0.050
+MASK  2
+SIRTIterations  3
+StartingIteration  12
+VertForSIRTInput
+VertSliceOutputFile  ts.vsr15
+XAXISTILT 3.5
+LOG 0
+SCALE 0 1000
+PERPENDICULAR
+MODE   2
+FULLIMAGE 64 48
+SUBSETSTART   0 0
+AdjustOrigin 1
+$sync
+
+sha256 8939541a1f45e7915cb545ed1fbf363c2cfb19352f7f4bd1b794c99a8a48c745 549 golden/vert_resume/tilt_sirt-002.com
+text 237 golden/vert_resume/tilt_sirt-003-sync.com
+$fixboundaries "ts.srec15" "tilt_sirt-bound.info"
+$fixboundaries "ts.vsr15" "tilt_sirt-vsbound.info"
+$collectmmm pixels= "tilt_sirt" 1 "ts.srec15" 2
+$b3dremove -g "ts-[0-9][0-9][0-9]*.rbound" 
+$b3dremove -g "ts-[0-9][0-9][0-9]*.vsbound"
+
+text 37 golden/vert_resume/tilt_sirt-bound.info
+1 0 64 29 1
+ts-002.rbound
+-1 0 -1 -1
+
+text 58 golden/vert_resume/tilt_sirt-finish.com
+$findsirtdiffs tilt_sirt
+$b3dremove -g tilt_sirt-[0-9]*.*
+
+text 38 golden/vert_resume/tilt_sirt-vsbound.info
+1 0 64 29 1
+ts-002.vsbound
+-1 0 -1 -1
+
+text 447 golden/vert_resume/tilt_sirt.com
+# Command file to run Tilt
+#
+$tilt -StandardInput
+InputProjections ts.ali
+OutputFile ts.srec15
+IMAGEBINNED 1
+TILTFILE ts.tlt
+XTILTFILE ts.xtilt
+THICKNESS 30
+SLICE  0 47
+RecFileToReproj  ts.vsr12
+RADIAL   0.400 0.050
+MASK  2
+SIRTIterations  3
+StartingIteration  12
+VertForSIRTInput
+VertSliceOutputFile  ts.vsr15
+XAXISTILT 3.5
+LOG 0
+SCALE 0 1000
+PERPENDICULAR
+MODE   2
+FULLIMAGE 64 48
+SUBSETSTART   0 0
+AdjustOrigin 1
+$if (-e ./savework) ./savework
+
+text 94 golden/vert_skip.files
+tilt.com
+tilt_for_sirt.com
+tilt_sirt-001-sync.com
+tilt_sirt-finish.com
+ts.ali
+ts.tlt
+ts.xtilt
+
+text 159 golden/vert_skip.out
+Doing SIRT internally in the Tilt program
+2 command files created and ready to run with:
+  processchunks machine_list tilt_sirt
+Or with:
+  subm tilt_sirt*.com
+
+text 2 golden/vert_skip.rc
+0
+
+text 323 golden/vert_skip/tilt_for_sirt.com
+# Command file to run Tilt
+#
+$tilt -StandardInput
+InputProjections ts.ali
+OutputFile ts.rec
+IMAGEBINNED 1
+TILTFILE ts.tlt
+XTILTFILE ts.xtilt
+THICKNESS 30
+RADIAL .35 .035
+FalloffIsTrueSigma 1
+XAXISTILT 3.5
+LOG 0
+SCALE 0 1000
+PERPENDICULAR
+MODE 2
+FULLIMAGE 64 48
+SUBSETSTART 0 0
+AdjustOrigin 1
+$if (-e ./savework) ./savework
+
+text 403 golden/vert_skip/tilt_sirt-001-sync.com
+# Command file to run Tilt
+#
+$tilt -StandardInput
+InputProjections ts.ali
+OutputFile ts.srec02
+IMAGEBINNED 1
+TILTFILE ts.tlt
+XTILTFILE ts.xtilt
+THICKNESS 30
+SLICE  0 47
+RADIAL   0.400 0.050
+MASK  2
+FlatFilterFraction  1.000000
+SIRTIterations   2
+StartingIteration  1
+XAXISTILT 3.5
+LOG 0
+SCALE 0 1000
+PERPENDICULAR
+MODE   2
+FULLIMAGE 64 48
+SUBSETSTART   0 0
+AdjustOrigin 1
+$if (-e ./savework) ./savework
+
+text 58 golden/vert_skip/tilt_sirt-finish.com
+$findsirtdiffs tilt_sirt
+$b3dremove -g tilt_sirt-[0-9]*.*
+
+text 495 golden/xtilt_vary.files
+tilt.com
+tilt_for_sirt.com
+tilt_sirt-001-sync.com
+tilt_sirt-002-sync.com
+tilt_sirt-003.com
+tilt_sirt-004-sync.com
+tilt_sirt-005-sync.com
+tilt_sirt-006.com
+tilt_sirt-007-sync.com
+tilt_sirt-008-sync.com
+tilt_sirt-009.com
+tilt_sirt-010-sync.com
+tilt_sirt-011-sync.com
+tilt_sirt-012-sync.com
+tilt_sirt-013.com
+tilt_sirt-014-sync.com
+tilt_sirt-015-sync.com
+tilt_sirt-016.com
+tilt_sirt-017-sync.com
+tilt_sirt-bound.info
+tilt_sirt-finish.com
+tilt_sirt-rpbound.info
+tilt_sirt.com
+ts.ali
+ts.tlt
+ts.xtilt
+
+text 87 golden/xtilt_vary.out
+18 command files created and ready to run with:
+  processchunks machine_list tilt_sirt
+
+text 2 golden/xtilt_vary.rc
+0
+
+text 322 golden/xtilt_vary/tilt_for_sirt.com
+# Command file to run Tilt
+#
+$tilt -StandardInput
+InputProjections ts.ali
+OutputFile ts.rec
+IMAGEBINNED 1
+TILTFILE ts.tlt
+XTILTFILE ts.xtilt
+THICKNESS 30
+RADIAL .35 .035
+FalloffIsTrueSigma 1
+XAXISTILT 0.
+LOG 0
+SCALE 0 1000
+PERPENDICULAR
+MODE 2
+FULLIMAGE 64 48
+SUBSETSTART 0 0
+AdjustOrigin 1
+$if (-e ./savework) ./savework
+
+text 74 golden/xtilt_vary/tilt_sirt-001-sync.com
+$b3dremove ts.alilog10
+$densnorm -log 0.000000 -ignore ts.ali ts.alilog10
+
+text 386 golden/xtilt_vary/tilt_sirt-002-sync.com
+$setenv IMOD_OUTPUT_FORMAT MRC
+# Command file to run Tilt
+#
+$tilt -StandardInput
+InputProjections ts.alilog10
+OutputFile ts.srec00
+IMAGEBINNED 1
+TILTFILE ts.tlt
+XTILTFILE ts.xtilt
+THICKNESS 30
+SLICE -1 -1
+TOTALSLICES 0 47
+RADIAL   0.400 0.050
+MASK  2
+FlatFilterFraction  1.000000
+XAXISTILT 0.
+SCALE  0.0 0.2
+PERPENDICULAR
+MODE   2
+FULLIMAGE 64 48
+SUBSETSTART   0 0
+AdjustOrigin 1
+$sync
+
+text 425 golden/xtilt_vary/tilt_sirt-003.com
+$sync
+$setenv IMOD_OUTPUT_FORMAT MRC
+# Command file to run Tilt
+#
+$tilt -StandardInput
+InputProjections ts.alilog10
+OutputFile ts.srec00
+IMAGEBINNED 1
+TILTFILE ts.tlt
+XTILTFILE ts.xtilt
+THICKNESS 30
+SLICE 0 47
+#
+TOTALSLICES 0 47
+BoundaryInfoFile tilt_sirt-bound.info
+RADIAL   0.400 0.050
+MASK  2
+FlatFilterFraction  1.000000
+XAXISTILT 0.
+SCALE  0.0 0.2
+PERPENDICULAR
+MODE   2
+FULLIMAGE 64 48
+SUBSETSTART   0 0
+AdjustOrigin 1
+
+text 142 golden/xtilt_vary/tilt_sirt-004-sync.com
+$fixboundaries "ts.srec00" "tilt_sirt-bound.info"
+$collectmmm pixels= "tilt_sirt" 1 "ts.srec00" 3
+$b3dremove -g "ts-[0-9][0-9][0-9]*.rbound" 
+
+text 424 golden/xtilt_vary/tilt_sirt-005-sync.com
+$setenv IMOD_OUTPUT_FORMAT MRC
+# Command file to run Tilt
+#
+$tilt -StandardInput
+InputProjections ts.alilog10
+OutputFile ts.diff
+IMAGEBINNED 1
+TILTFILE ts.tlt
+XTILTFILE ts.xtilt
+THICKNESS 30
+ZMinAndMax -1 -1
+TOTALSLICES 0 47
+SLICE  0 47
+RecFileToReproj  ts.srec00
+RADIAL   0.400 0.050
+ViewsToReproj  0
+SIRTSubtraction
+XAXISTILT 0.
+SCALE  0.0 0.2
+PERPENDICULAR
+MODE   2
+FULLIMAGE 64 48
+SUBSETSTART   0 0
+AdjustOrigin 1
+$sync
+
+text 465 golden/xtilt_vary/tilt_sirt-006.com
+$sync
+$setenv IMOD_OUTPUT_FORMAT MRC
+# Command file to run Tilt
+#
+$tilt -StandardInput
+InputProjections ts.alilog10
+OutputFile ts.diff
+IMAGEBINNED 1
+TILTFILE ts.tlt
+XTILTFILE ts.xtilt
+THICKNESS 30
+ZMinAndMax 0 47
+#
+TOTALSLICES 0 47
+BoundaryInfoFile tilt_sirt-rpbound.info
+SLICE  0 47
+RecFileToReproj  ts.srec00
+RADIAL   0.400 0.050
+ViewsToReproj  0
+SIRTSubtraction
+XAXISTILT 0.
+SCALE  0.0 0.2
+PERPENDICULAR
+MODE   2
+FULLIMAGE 64 48
+SUBSETSTART   0 0
+AdjustOrigin 1
+
+text 140 golden/xtilt_vary/tilt_sirt-007-sync.com
+$fixboundaries "ts.diff" "tilt_sirt-rpbound.info"
+$collectmmm pixels= "tilt_sirt" 1 "ts.diff" 6
+$b3dremove -g "ts-[0-9][0-9][0-9]*.rbound" 
+
+text 441 golden/xtilt_vary/tilt_sirt-008-sync.com
+$setenv IMOD_OUTPUT_FORMAT MRC
+# Command file to run Tilt
+#
+$tilt -StandardInput
+InputProjections ts.diff
+OutputFile ts.srec01
+IMAGEBINNED 1
+TILTFILE ts.tlt
+XTILTFILE ts.xtilt
+THICKNESS 30
+SLICE -1 -1
+TOTALSLICES 0 47
+RADIAL   0.400 0.050
+MASK  2
+FlatFilterFraction  2
+BaseRecFile  ts.srec00
+StartingIteration  1
+SubtractFromBase   -1
+XAXISTILT 0.
+SCALE  0.0 0.2
+PERPENDICULAR
+MODE   2
+FULLIMAGE 64 48
+SUBSETSTART   0 0
+AdjustOrigin 1
+$sync
+
+text 480 golden/xtilt_vary/tilt_sirt-009.com
+$sync
+$setenv IMOD_OUTPUT_FORMAT MRC
+# Command file to run Tilt
+#
+$tilt -StandardInput
+InputProjections ts.diff
+OutputFile ts.srec01
+IMAGEBINNED 1
+TILTFILE ts.tlt
+XTILTFILE ts.xtilt
+THICKNESS 30
+SLICE 0 47
+#
+TOTALSLICES 0 47
+BoundaryInfoFile tilt_sirt-bound.info
+RADIAL   0.400 0.050
+MASK  2
+FlatFilterFraction  2
+BaseRecFile  ts.srec00
+StartingIteration  1
+SubtractFromBase   -1
+XAXISTILT 0.
+SCALE  0.0 0.2
+PERPENDICULAR
+MODE   2
+FULLIMAGE 64 48
+SUBSETSTART   0 0
+AdjustOrigin 1
+
+text 142 golden/xtilt_vary/tilt_sirt-010-sync.com
+$fixboundaries "ts.srec01" "tilt_sirt-bound.info"
+$collectmmm pixels= "tilt_sirt" 1 "ts.srec01" 9
+$b3dremove -g "ts-[0-9][0-9][0-9]*.rbound" 
+
+text 51 golden/xtilt_vary/tilt_sirt-011-sync.com
+$b3dremove ts.diff ts.srec00~
+$b3dremove ts.srec00
+
+text 424 golden/xtilt_vary/tilt_sirt-012-sync.com
+$setenv IMOD_OUTPUT_FORMAT MRC
+# Command file to run Tilt
+#
+$tilt -StandardInput
+InputProjections ts.alilog10
+OutputFile ts.diff
+IMAGEBINNED 1
+TILTFILE ts.tlt
+XTILTFILE ts.xtilt
+THICKNESS 30
+ZMinAndMax -1 -1
+TOTALSLICES 0 47
+SLICE  0 47
+RecFileToReproj  ts.srec01
+RADIAL   0.400 0.050
+ViewsToReproj  0
+SIRTSubtraction
+XAXISTILT 0.
+SCALE  0.0 0.2
+PERPENDICULAR
+MODE   2
+FULLIMAGE 64 48
+SUBSETSTART   0 0
+AdjustOrigin 1
+$sync
+
+text 465 golden/xtilt_vary/tilt_sirt-013.com
+$sync
+$setenv IMOD_OUTPUT_FORMAT MRC
+# Command file to run Tilt
+#
+$tilt -StandardInput
+InputProjections ts.alilog10
+OutputFile ts.diff
+IMAGEBINNED 1
+TILTFILE ts.tlt
+XTILTFILE ts.xtilt
+THICKNESS 30
+ZMinAndMax 0 47
+#
+TOTALSLICES 0 47
+BoundaryInfoFile tilt_sirt-rpbound.info
+SLICE  0 47
+RecFileToReproj  ts.srec01
+RADIAL   0.400 0.050
+ViewsToReproj  0
+SIRTSubtraction
+XAXISTILT 0.
+SCALE  0.0 0.2
+PERPENDICULAR
+MODE   2
+FULLIMAGE 64 48
+SUBSETSTART   0 0
+AdjustOrigin 1
+
+text 141 golden/xtilt_vary/tilt_sirt-014-sync.com
+$fixboundaries "ts.diff" "tilt_sirt-rpbound.info"
+$collectmmm pixels= "tilt_sirt" 1 "ts.diff" 13
+$b3dremove -g "ts-[0-9][0-9][0-9]*.rbound" 
+
+text 441 golden/xtilt_vary/tilt_sirt-015-sync.com
+$setenv IMOD_OUTPUT_FORMAT MRC
+# Command file to run Tilt
+#
+$tilt -StandardInput
+InputProjections ts.diff
+OutputFile ts.srec02
+IMAGEBINNED 1
+TILTFILE ts.tlt
+XTILTFILE ts.xtilt
+THICKNESS 30
+SLICE -1 -1
+TOTALSLICES 0 47
+RADIAL   0.400 0.050
+MASK  2
+FlatFilterFraction  2
+BaseRecFile  ts.srec01
+StartingIteration  2
+SubtractFromBase   -1
+XAXISTILT 0.
+SCALE  0.0 0.2
+PERPENDICULAR
+MODE   2
+FULLIMAGE 64 48
+SUBSETSTART   0 0
+AdjustOrigin 1
+$sync
+
+text 480 golden/xtilt_vary/tilt_sirt-016.com
+$sync
+$setenv IMOD_OUTPUT_FORMAT MRC
+# Command file to run Tilt
+#
+$tilt -StandardInput
+InputProjections ts.diff
+OutputFile ts.srec02
+IMAGEBINNED 1
+TILTFILE ts.tlt
+XTILTFILE ts.xtilt
+THICKNESS 30
+SLICE 0 47
+#
+TOTALSLICES 0 47
+BoundaryInfoFile tilt_sirt-bound.info
+RADIAL   0.400 0.050
+MASK  2
+FlatFilterFraction  2
+BaseRecFile  ts.srec01
+StartingIteration  2
+SubtractFromBase   -1
+XAXISTILT 0.
+SCALE  0.0 0.2
+PERPENDICULAR
+MODE   2
+FULLIMAGE 64 48
+SUBSETSTART   0 0
+AdjustOrigin 1
+
+text 143 golden/xtilt_vary/tilt_sirt-017-sync.com
+$fixboundaries "ts.srec02" "tilt_sirt-bound.info"
+$collectmmm pixels= "tilt_sirt" 1 "ts.srec02" 16
+$b3dremove -g "ts-[0-9][0-9][0-9]*.rbound" 
+
+text 37 golden/xtilt_vary/tilt_sirt-bound.info
+1 0 64 29 1
+ts-016.rbound
+-1 0 -1 -1
+
+text 109 golden/xtilt_vary/tilt_sirt-finish.com
+$b3dremove ts.diff ts.srec01~
+$b3dremove ts.srec01
+$findsirtdiffs tilt_sirt
+$b3dremove -g tilt_sirt-[0-9]*.*
+
+text 38 golden/xtilt_vary/tilt_sirt-rpbound.info
+1 1 64 25 1
+ts-013.rbound
+-1 -1 -1 -1
+
+text 418 golden/xtilt_vary/tilt_sirt.com
+# Command file to run Tilt
+#
+$tilt -StandardInput
+InputProjections ts.diff
+OutputFile ts.srec02
+IMAGEBINNED 1
+TILTFILE ts.tlt
+XTILTFILE ts.xtilt
+THICKNESS 30
+SLICE  0 47
+RADIAL   0.400 0.050
+MASK  2
+FlatFilterFraction  2
+BaseRecFile  ts.srec01
+StartingIteration  2
+SubtractFromBase   -1
+XAXISTILT 0.
+SCALE  0.0 0.2
+PERPENDICULAR
+MODE   2
+FULLIMAGE 64 48
+SUBSETSTART   0 0
+AdjustOrigin 1
+$if (-e ./savework) ./savework
+

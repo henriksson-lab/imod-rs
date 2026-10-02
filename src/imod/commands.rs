@@ -157,8 +157,11 @@ pub const COMMANDS: &[Command] = &[
     ),
     cmd("echo2", echo2, true),
     cmd("etomo", etomo, false),
+    cmd("etomodriver", etomodriver, false),
     #[cfg(feature = "gui")]
     cmd("etomo-gui", etomo_gui, false),
+    #[cfg(feature = "gui")]
+    cmd("etomo-popup", etomo_popup, false),
     cmd("header", crate::imod::flib::image::header::header, true),
     cmd(
         "imodchopconts",
@@ -190,6 +193,11 @@ pub const COMMANDS: &[Command] = &[
         true,
     ),
     cmd("midas", midas, false),
+    cmd(
+        "montagesize",
+        crate::imod::flib::image::montagesize::montagesize,
+        true,
+    ),
     cmd("manageshrmem", manageshrmem, false),
     cmd(
         "mrc2tif",
@@ -227,6 +235,9 @@ pub const COMMANDS: &[Command] = &[
     ),
     cmd("processchunks", processchunks, false),
     cmd("restrictalign", restrictalign, false),
+    cmd("runraptor", runraptor, false),
+    cmd("RAPTOR", raptor, true),
+    cmd("MarkersCorrespond", markers_correspond, true),
     cmd("setupcombine", setupcombine, false),
     cmd(
         "solvematch",
@@ -488,15 +499,29 @@ fn echo2() {
     exit(crate::imod::imodutil::echo2::echo2(&program_args()))
 }
 
+fn etomodriver() {
+    let arguments = program_args().into_iter().skip(1).collect::<Vec<_>>();
+    exit(crate::imod::etomo::driver::etomodriver(&arguments))
+}
+
 fn etomo() {
     exit(crate::imod::pysrc::etomo::etomo(&program_args_os()))
+}
+
+/// Rust-only: the modal popup dialog `etomo-gui` shows in a child process
+/// (`ui/swing/slint_bridge.rs`).
+#[cfg(feature = "gui")]
+fn etomo_popup() {
+    let arguments = program_args().into_iter().skip(1).collect::<Vec<_>>();
+    exit(crate::imod::etomo::ui::swing::slint_bridge::etomo_popup(
+        &arguments,
+    ))
 }
 
 #[cfg(feature = "gui")]
 fn etomo_gui() {
     let arguments = program_args().into_iter().skip(1).collect::<Vec<_>>();
-    let mut director = crate::imod::etomo::etomo_director::EtomoDirector::new();
-    if let Err(error) = director.main_gui(&arguments) {
+    if let Err(error) = crate::imod::etomo::etomo_director::EtomoDirector::main_gui(&arguments) {
         eprintln!("{error}");
         exit(1);
     }
@@ -665,6 +690,18 @@ fn restrictalign() {
     exit(crate::imod::pysrc::restrictalign::restrictalign(
         &program_args_os(),
     ))
+}
+
+fn raptor() {
+    exit(crate::imod::raptor::main::main())
+}
+
+fn markers_correspond() {
+    exit(crate::imod::raptor::correspondence::markers_correspond_main_test::main(&program_args()))
+}
+
+fn runraptor() {
+    exit(crate::imod::pysrc::runraptor::runraptor(&program_args_os()))
 }
 
 fn autopatchfit() {

@@ -1,28 +1,26 @@
 //! Translation of `IMOD/raptor/suitesparse/cs_ltsolve.c`.
 
-use super::Cs;
+use super::cs::{Cs, cs_csc};
 
-/// C `cs_ltsolve`: solves `L'*x=b` in place for a CSC lower-triangular matrix.
-pub fn cs_ltsolve(matrix: &Cs, values: &mut [f64]) -> bool {
-    if !matrix.is_csc()
-        || values.len() < matrix.columns
-        || matrix.column_pointers.len() < matrix.columns + 1
-    {
-        return false;
+/// `cs_ltsolve(L, x)`: solve L'x=b where x and b are dense.  x=b on input,
+/// solution on output.
+pub fn cs_ltsolve(l: &Cs, x: &mut [f64]) -> i32 {
+    if !cs_csc(l) {
+        return 0;
     }
-    for column in (0..matrix.columns).rev() {
-        let diagonal = matrix.column_pointers[column];
-        if diagonal >= matrix.values.len() || matrix.values[diagonal] == 0.0 {
-            return false;
+    let n = l.n;
+    let lp = &l.p;
+    let li = &l.i;
+    let lx = l.x.as_ref().expect("cs_ltsolve values");
+    let mut j = n - 1;
+    while j >= 0 {
+        let ju = j as usize;
+        for p in lp[ju] + 1..lp[ju + 1] {
+            let p = p as usize;
+            x[ju] -= lx[p] * x[li[p] as usize];
         }
-        for entry in diagonal + 1..matrix.column_pointers[column + 1] {
-            let row = matrix.row_indices[entry];
-            if row >= values.len() {
-                return false;
-            }
-            values[column] -= matrix.values[entry] * values[row];
-        }
-        values[column] /= matrix.values[diagonal];
+        x[ju] /= lx[lp[ju] as usize];
+        j -= 1;
     }
-    true
+    1
 }

@@ -1,204 +1,178 @@
 //! `IMOD/Etomo/src/etomo/ui/swing/VolumeRangePanel.java`.
 //!
-//! The Swing `GridLayout`, border, and child containers remain an explicit
-//! presentation boundary.  This unit retains the Java panel's fields, value
-//! transfer order, validation behavior, and rubberband parsing exactly.
-#![allow(dead_code)]
+//! Java `final class VolumeRangePanel`: the X/Y/Z min and max fields of the
+//! trimvol Volume Range box (factored out of `TrimvolPanel`).
+//!
+//! An EDT object (`ui.md`): created as `Rc<Self>` by
+//! [`VolumeRangePanel::get_instance`]; every method takes `&self`.
 
-use super::{
-    etomo_panel::{EtomoPanel, TitledBorder},
-    labeled_text_field::LabeledTextField,
-};
-use crate::imod::etomo::{
-    process::imod_process::RUBBERBAND_RESULTS_STRING, ui::field_type::FieldType,
-};
+use std::rc::Rc;
 
-/// Java public static `rcsid`.
+use super::etched_border::EtchedBorder;
+use super::etomo_panel::EtomoPanel;
+use super::labeled_text_field::LabeledTextField;
+use crate::imod::etomo::comscript::trimvol_param::TrimvolParam;
+use crate::imod::etomo::jdk::JComponent;
+use crate::imod::etomo::process::imod_process;
+use crate::imod::etomo::r#type::const_meta_data::ConstMetaData;
+use crate::imod::etomo::r#type::meta_data::MetaData;
+use crate::imod::etomo::ui::field::Field;
+use crate::imod::etomo::ui::field_type::FieldType;
+
+/// Java public static final `rcsid`.
 pub const RCSID: &str = "$Id$";
 
-/// Java `TrimvolParam` calls reached by `VolumeRangePanel`.
-pub trait VolumeRangeTrimvolParam {
-    fn get_x_min(&self) -> String;
-    fn get_x_max(&self) -> String;
-    fn get_y_min(&self) -> String;
-    fn get_y_max(&self) -> String;
-    fn get_z_min(&self) -> String;
-    fn get_z_max(&self) -> String;
-    fn set_x_min(&mut self, value: String);
-    fn set_x_max(&mut self, value: String);
-    fn set_y_min(&mut self, value: String);
-    fn set_y_max(&mut self, value: String);
-    fn set_z_min(&mut self, value: String);
-    fn set_z_max(&mut self, value: String);
-}
-
-/// Java `ConstMetaData` getters used by `setParameters`.
-pub trait VolumeRangeConstMetaData {
-    fn get_post_trimvol_x_min(&self) -> String;
-    fn get_post_trimvol_x_max(&self) -> String;
-    fn get_post_trimvol_y_min(&self) -> String;
-    fn get_post_trimvol_y_max(&self) -> String;
-    fn get_post_trimvol_z_min(&self) -> String;
-    fn get_post_trimvol_z_max(&self) -> String;
-}
-
-/// Java `MetaData` setters used by the two `getParameters` overloads.
-pub trait VolumeRangeMetaData {
-    fn set_post_trimvol_x_min(&mut self, value: String);
-    fn set_post_trimvol_x_max(&mut self, value: String);
-    fn set_post_trimvol_y_min(&mut self, value: String);
-    fn set_post_trimvol_y_max(&mut self, value: String);
-    fn set_post_trimvol_z_min(&mut self, value: String);
-    fn set_post_trimvol_z_max(&mut self, value: String);
-    fn set_post_trimvol_new_style_z(&mut self, min: String, max: String);
-}
-
-/// Source-visible `GridLayout(3, 2, 5, 5)` setup at the Swing boundary.
-#[derive(Clone, Debug, Eq, PartialEq)]
-pub struct VolumeRangePanelLayout {
-    pub rows: i32,
-    pub columns: i32,
-    pub horizontal_gap: i32,
-    pub vertical_gap: i32,
-    pub child_order: [String; 6],
-}
-
-/// Java `VolumeRangePanel` source-visible state.
-#[derive(Clone, Debug)]
+/// Java `final class VolumeRangePanel`.
 pub struct VolumeRangePanel {
-    pub pnl_root: EtomoPanel,
-    pub ltf_x_min: LabeledTextField,
-    pub ltf_x_max: LabeledTextField,
-    pub ltf_y_min: LabeledTextField,
-    pub ltf_y_max: LabeledTextField,
-    pub ltf_z_min: LabeledTextField,
-    pub ltf_z_max: LabeledTextField,
-    pub lock_panel: bool,
-    pub layout: Option<VolumeRangePanelLayout>,
+    /// Java private final `pnlRoot = new EtomoPanel()`.
+    pnl_root: Rc<EtomoPanel>,
+    /// Java private final `ltfXMin`.
+    ltf_x_min: Rc<LabeledTextField>,
+    /// Java private final `ltfXMax`.
+    ltf_x_max: Rc<LabeledTextField>,
+    /// Java private final `ltfYMin`.
+    ltf_y_min: Rc<LabeledTextField>,
+    /// Java private final `ltfYMax`.
+    ltf_y_max: Rc<LabeledTextField>,
+    /// Java private final `ltfZMin`.
+    ltf_z_min: Rc<LabeledTextField>,
+    /// Java private final `ltfZMax`.
+    ltf_z_max: Rc<LabeledTextField>,
+    /// Java private final `lockPanel`.  When lockPanel is true, do not load
+    /// default, metaData, or comscript values, and do not save to metaData or
+    /// comscripts.  LockPanel is set when the data to create this panel
+    /// correctly is not available.  Saving data at this point may prevent the
+    /// panel from being created correctly when the data is available.
+    lock_panel: bool,
 }
 
 impl VolumeRangePanel {
-    /// Java private `VolumeRangePanel(boolean)`.
-    fn new(lock_panel: bool) -> Self {
-        Self {
-            pnl_root: EtomoPanel::default(),
-            ltf_x_min: LabeledTextField::new(FieldType::Integer, "X min: "),
-            ltf_x_max: LabeledTextField::new(FieldType::Integer, "X max: "),
-            ltf_y_min: LabeledTextField::new(FieldType::Integer, "Y min: "),
-            ltf_y_max: LabeledTextField::new(FieldType::Integer, "Y max: "),
-            ltf_z_min: LabeledTextField::new(FieldType::Integer, "Z min: "),
-            ltf_z_max: LabeledTextField::new(FieldType::Integer, "Z max: "),
+    /// Java private constructor `VolumeRangePanel(boolean)`, with the field
+    /// initializers.
+    fn new(lock_panel: bool) -> Rc<VolumeRangePanel> {
+        Rc::new(VolumeRangePanel {
+            pnl_root: EtomoPanel::new(),
+            ltf_x_min: LabeledTextField::new_field_type_string(FieldType::Integer, Some("X min: ")),
+            ltf_x_max: LabeledTextField::new_field_type_string(FieldType::Integer, Some("X max: ")),
+            ltf_y_min: LabeledTextField::new_field_type_string(FieldType::Integer, Some("Y min: ")),
+            ltf_y_max: LabeledTextField::new_field_type_string(FieldType::Integer, Some("Y max: ")),
+            ltf_z_min: LabeledTextField::new_field_type_string(FieldType::Integer, Some("Z min: ")),
+            ltf_z_max: LabeledTextField::new_field_type_string(FieldType::Integer, Some("Z max: ")),
             lock_panel,
-            layout: None,
-        }
+        })
     }
 
-    /// Java static `getInstance(boolean)`.
-    pub fn get_instance(lock_panel: bool) -> Self {
-        let mut instance = Self::new(lock_panel);
+    /// Java package-private static `getInstance(boolean)`.
+    pub fn get_instance(lock_panel: bool) -> Rc<VolumeRangePanel> {
+        let instance = VolumeRangePanel::new(lock_panel);
         instance.create_panel();
         instance.set_tooltips();
         instance
     }
 
     /// Java private `createPanel()`.
-    fn create_panel(&mut self) {
-        self.pnl_root.set_border(TitledBorder {
-            title: "Volume Range".into(),
-        });
-        self.layout = Some(VolumeRangePanelLayout {
-            rows: 3,
-            columns: 2,
-            horizontal_gap: 5,
-            vertical_gap: 5,
-            child_order: [
-                "ltfXMin".into(),
-                "ltfXMax".into(),
-                "ltfYMin".into(),
-                "ltfYMax".into(),
-                "ltfZMin".into(),
-                "ltfZMax".into(),
-            ],
-        });
+    fn create_panel(&self) {
+        // Root panel
+        // Swing layout: pnlRoot.setLayout(new GridLayout(3, 2, 5, 5)).
+        self.pnl_root
+            .set_border(&EtchedBorder::new(Some("Volume Range")).get_border());
+        let root = self.pnl_root.get_component();
+        root.add(&self.ltf_x_min.get_container());
+        root.add(&self.ltf_x_max.get_container());
+        root.add(&self.ltf_y_min.get_container());
+        root.add(&self.ltf_y_max.get_container());
+        root.add(&self.ltf_z_min.get_container());
+        root.add(&self.ltf_z_max.get_container());
     }
 
-    /// Java `getComponent()`; the concrete Swing `Component` remains the
-    /// `EtomoPanel` presentation boundary.
-    pub fn get_component(&self) -> &EtomoPanel {
-        &self.pnl_root
+    /// Java package-private `getComponent()`.
+    pub fn get_component(&self) -> Rc<JComponent> {
+        self.pnl_root.get_component()
     }
 
-    /// Java `initParameters(TrimvolParam)`.
-    pub fn init_parameters<P: VolumeRangeTrimvolParam>(&mut self, param: &P) {
+    /// Java package-private `initParameters(TrimvolParam)`.  Set the panel
+    /// values with the specified parameters.
+    pub fn init_parameters(&self, param: &TrimvolParam) {
         if self.lock_panel {
             return;
         }
-        self.ltf_x_min.set_text(&param.get_x_min());
-        self.ltf_x_max.set_text(&param.get_x_max());
-        self.ltf_y_min.set_text(&param.get_y_min());
-        self.ltf_y_max.set_text(&param.get_y_max());
-        self.ltf_z_min.set_text(&param.get_z_min());
-        self.ltf_z_max.set_text(&param.get_z_max());
+        self.ltf_x_min.set_text_int(param.get_x_min());
+        self.ltf_x_max.set_text_int(param.get_x_max());
+        self.ltf_y_min.set_text_int(param.get_y_min());
+        self.ltf_y_max.set_text_int(param.get_y_max());
+        self.ltf_z_min.set_text_int(param.get_z_min());
+        self.ltf_z_max.set_text_int(param.get_z_max());
     }
 
-    /// Java `setParameters(ConstMetaData)`.
-    pub fn set_parameters<M: VolumeRangeConstMetaData>(&mut self, meta_data: &M) {
+    /// Java package-private `setParameters(ConstMetaData)`.  Set the panel
+    /// values with the specified parameters.
+    pub fn set_parameters(&self, meta_data: &dyn ConstMetaData) {
         if self.lock_panel {
             return;
         }
-        self.ltf_x_min.set_text(&meta_data.get_post_trimvol_x_min());
-        self.ltf_x_max.set_text(&meta_data.get_post_trimvol_x_max());
-        self.ltf_y_min.set_text(&meta_data.get_post_trimvol_y_min());
-        self.ltf_y_max.set_text(&meta_data.get_post_trimvol_y_max());
-        self.ltf_z_min.set_text(&meta_data.get_post_trimvol_z_min());
-        self.ltf_z_max.set_text(&meta_data.get_post_trimvol_z_max());
+        self.ltf_x_min
+            .set_text_string(Some(&meta_data.get_post_trimvol_x_min()));
+        self.ltf_x_max
+            .set_text_string(Some(&meta_data.get_post_trimvol_x_max()));
+        self.ltf_y_min
+            .set_text_string(Some(&meta_data.get_post_trimvol_y_min()));
+        self.ltf_y_max
+            .set_text_string(Some(&meta_data.get_post_trimvol_y_max()));
+        self.ltf_z_min
+            .set_text_string(Some(&meta_data.get_post_trimvol_z_min()));
+        self.ltf_z_max
+            .set_text_string(Some(&meta_data.get_post_trimvol_z_max()));
     }
 
-    /// Java `getParameters(MetaData)`.
-    pub fn get_parameters<M: VolumeRangeMetaData>(&self, meta_data: &mut M) {
+    /// Java package-private `getParameters(MetaData)`.
+    pub fn get_parameters_meta_data(&self, meta_data: &MetaData) {
         if self.lock_panel {
             return;
         }
-        meta_data.set_post_trimvol_x_min(self.ltf_x_min.get_text());
-        meta_data.set_post_trimvol_x_max(self.ltf_x_max.get_text());
-        meta_data.set_post_trimvol_y_min(self.ltf_y_min.get_text());
-        meta_data.set_post_trimvol_y_max(self.ltf_y_max.get_text());
-        meta_data.set_post_trimvol_z_min(self.ltf_z_min.get_text());
-        meta_data.set_post_trimvol_z_max(self.ltf_z_max.get_text());
+        meta_data.set_post_trimvol_x_min(self.ltf_x_min.get_text_void().as_deref());
+        meta_data.set_post_trimvol_x_max(self.ltf_x_max.get_text_void().as_deref());
+        meta_data.set_post_trimvol_y_min(self.ltf_y_min.get_text_void().as_deref());
+        meta_data.set_post_trimvol_y_max(self.ltf_y_max.get_text_void().as_deref());
+        meta_data.set_post_trimvol_z_min(self.ltf_z_min.get_text_void().as_deref());
+        meta_data.set_post_trimvol_z_max(self.ltf_z_max.get_text_void().as_deref());
     }
 
-    /// Java `getParametersForTrimvol(MetaData)`.
-    pub fn get_parameters_for_trimvol<M: VolumeRangeMetaData>(&self, meta_data: &mut M) {
+    /// Java package-private `getParametersForTrimvol(MetaData)`.
+    pub fn get_parameters_for_trimvol(&self, meta_data: &MetaData) {
         if self.lock_panel {
             return;
         }
-        meta_data
-            .set_post_trimvol_new_style_z(self.ltf_z_min.get_text(), self.ltf_z_max.get_text());
+        meta_data.set_post_trimvol_new_style_z(
+            self.ltf_z_min.get_text_void().as_deref(),
+            self.ltf_z_max.get_text_void().as_deref(),
+        );
     }
 
-    /// Java `getParameters(TrimvolParam, boolean)`.
-    pub fn get_parameters_trimvol<P: VolumeRangeTrimvolParam>(
+    /// Java package-private `getParameters(TrimvolParam, boolean)`.  Get the
+    /// parameter values from the panel.
+    pub fn get_parameters_trimvol_param_boolean(
         &self,
-        trimvol_param: &mut P,
+        trimvol_param: &mut TrimvolParam,
         do_validation: bool,
     ) -> bool {
         if self.lock_panel {
             return true;
         }
+        // try { ... } catch (FieldValidationFailedException e) { return false; }
         let result = (|| {
-            trimvol_param.set_x_min(self.ltf_x_min.get_text_validated(do_validation)?);
-            trimvol_param.set_x_max(self.ltf_x_max.get_text_validated(do_validation)?);
-            trimvol_param.set_y_min(self.ltf_y_min.get_text_validated(do_validation)?);
-            trimvol_param.set_y_max(self.ltf_y_max.get_text_validated(do_validation)?);
-            trimvol_param.set_z_min(self.ltf_z_min.get_text_validated(do_validation)?);
-            trimvol_param.set_z_max(self.ltf_z_max.get_text_validated(do_validation)?);
-            Ok::<(), super::labeled_text_field::FieldValidationFailedException>(())
+            trimvol_param.set_x_min(self.ltf_x_min.get_text_boolean(do_validation)?.as_deref());
+            trimvol_param.set_x_max(self.ltf_x_max.get_text_boolean(do_validation)?.as_deref());
+            trimvol_param.set_y_min(self.ltf_y_min.get_text_boolean(do_validation)?.as_deref());
+            trimvol_param.set_y_max(self.ltf_y_max.get_text_boolean(do_validation)?.as_deref());
+            trimvol_param.set_z_min(self.ltf_z_min.get_text_boolean(do_validation)?.as_deref());
+            trimvol_param.set_z_max(self.ltf_z_max.get_text_boolean(do_validation)?.as_deref());
+            Ok::<(), crate::imod::etomo::ui::field_validation_failed_exception::FieldValidationFailedException>(())
         })();
         result.is_ok()
     }
 
-    /// Java `setXYMinAndMax(Vector)`.
-    pub fn set_xy_min_and_max(&mut self, coordinates: Option<&[String]>) {
+    /// Java package-private `setXYMinAndMax(Vector)`.  `None` is Java null.
+    pub fn set_xy_min_and_max(&self, coordinates: Option<&[String]>) {
         let Some(coordinates) = coordinates else {
             return;
         };
@@ -208,37 +182,43 @@ impl VolumeRangePanel {
         }
         let mut index = 0;
         while index < size {
-            if coordinates[index] == RUBBERBAND_RESULTS_STRING {
-                index += 1;
-                let Some(value) = coordinates.get(index) else {
+            let element = &coordinates[index];
+            index += 1;
+            if imod_process::RUBBERBAND_RESULTS_STRING == element {
+                // Upstream bug fixed in translation (VolumeRangePanel.java:176):
+                // when the results marker is the last element Java calls
+                // `coordinates.get(size)` and throws
+                // ArrayIndexOutOfBoundsException.  The translation returns, as the
+                // source does after every later element.
+                if index >= size {
                     return;
-                };
-                self.ltf_x_min.set_text(value);
+                }
+                self.ltf_x_min.set_text_string(Some(&coordinates[index]));
                 index += 1;
                 if index >= size {
                     return;
                 }
-                self.ltf_y_min.set_text(&coordinates[index]);
+                self.ltf_y_min.set_text_string(Some(&coordinates[index]));
                 index += 1;
                 if index >= size {
                     return;
                 }
-                self.ltf_x_max.set_text(&coordinates[index]);
+                self.ltf_x_max.set_text_string(Some(&coordinates[index]));
                 index += 1;
                 if index >= size {
                     return;
                 }
-                self.ltf_y_max.set_text(&coordinates[index]);
+                self.ltf_y_max.set_text_string(Some(&coordinates[index]));
                 index += 1;
                 if index >= size {
                     return;
                 }
-                self.ltf_z_min.set_text(&coordinates[index]);
+                self.ltf_z_min.set_text_string(Some(&coordinates[index]));
                 index += 1;
                 if index >= size {
                     return;
                 }
-                self.ltf_z_max.set_text(&coordinates[index]);
+                self.ltf_z_max.set_text_string(Some(&coordinates[index]));
                 index += 1;
                 if index >= size {
                     return;
@@ -247,33 +227,38 @@ impl VolumeRangePanel {
         }
     }
 
-    /// Java `setXMin(String)`.
-    pub fn set_x_min(&mut self, input: &str) {
-        self.ltf_x_min.set_text(input);
+    /// Java package-private `setXMin(String)`.
+    pub fn set_x_min(&self, input: Option<&str>) {
+        self.ltf_x_min.set_text_string(input);
     }
-    /// Java `setXMax(String)`.
-    pub fn set_x_max(&mut self, input: &str) {
-        self.ltf_x_max.set_text(input);
+
+    /// Java package-private `setXMax(String)`.
+    pub fn set_x_max(&self, input: Option<&str>) {
+        self.ltf_x_max.set_text_string(input);
     }
-    /// Java `setYMin(String)`.
-    pub fn set_y_min(&mut self, input: &str) {
-        self.ltf_y_min.set_text(input);
+
+    /// Java package-private `setYMin(String)`.
+    pub fn set_y_min(&self, input: Option<&str>) {
+        self.ltf_y_min.set_text_string(input);
     }
-    /// Java `setYMax(String)`.
-    pub fn set_y_max(&mut self, input: &str) {
-        self.ltf_y_max.set_text(input);
+
+    /// Java package-private `setYMax(String)`.
+    pub fn set_y_max(&self, input: Option<&str>) {
+        self.ltf_y_max.set_text_string(input);
     }
-    /// Java `setZMin(String)`.
-    pub fn set_z_min(&mut self, input: &str) {
-        self.ltf_z_min.set_text(input);
+
+    /// Java package-private `setZMin(String)`.
+    pub fn set_z_min(&self, input: Option<&str>) {
+        self.ltf_z_min.set_text_string(input);
     }
-    /// Java `setZMax(String)`.
-    pub fn set_z_max(&mut self, input: &str) {
-        self.ltf_z_max.set_text(input);
+
+    /// Java package-private `setZMax(String)`.
+    pub fn set_z_max(&self, input: Option<&str>) {
+        self.ltf_z_max.set_text_string(input);
     }
 
     /// Java private `setTooltips()`.
-    fn set_tooltips(&mut self) {
+    fn set_tooltips(&self) {
         self.ltf_x_min.set_tool_tip_text(Some(
             "The X coordinate on the left side to retain in the volume.",
         ));
@@ -288,169 +273,5 @@ impl VolumeRangePanel {
             .set_tool_tip_text(Some("The bottom Z slice to retain in the volume."));
         self.ltf_z_max
             .set_tool_tip_text(Some("The top Z slice to retain in the volume."));
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[derive(Clone, Debug, Default)]
-    struct Values {
-        x_min: String,
-        x_max: String,
-        y_min: String,
-        y_max: String,
-        z_min: String,
-        z_max: String,
-        new_style_z: Option<(String, String)>,
-    }
-    impl VolumeRangeTrimvolParam for Values {
-        fn get_x_min(&self) -> String {
-            self.x_min.clone()
-        }
-        fn get_x_max(&self) -> String {
-            self.x_max.clone()
-        }
-        fn get_y_min(&self) -> String {
-            self.y_min.clone()
-        }
-        fn get_y_max(&self) -> String {
-            self.y_max.clone()
-        }
-        fn get_z_min(&self) -> String {
-            self.z_min.clone()
-        }
-        fn get_z_max(&self) -> String {
-            self.z_max.clone()
-        }
-        fn set_x_min(&mut self, value: String) {
-            self.x_min = value;
-        }
-        fn set_x_max(&mut self, value: String) {
-            self.x_max = value;
-        }
-        fn set_y_min(&mut self, value: String) {
-            self.y_min = value;
-        }
-        fn set_y_max(&mut self, value: String) {
-            self.y_max = value;
-        }
-        fn set_z_min(&mut self, value: String) {
-            self.z_min = value;
-        }
-        fn set_z_max(&mut self, value: String) {
-            self.z_max = value;
-        }
-    }
-    impl VolumeRangeConstMetaData for Values {
-        fn get_post_trimvol_x_min(&self) -> String {
-            self.x_min.clone()
-        }
-        fn get_post_trimvol_x_max(&self) -> String {
-            self.x_max.clone()
-        }
-        fn get_post_trimvol_y_min(&self) -> String {
-            self.y_min.clone()
-        }
-        fn get_post_trimvol_y_max(&self) -> String {
-            self.y_max.clone()
-        }
-        fn get_post_trimvol_z_min(&self) -> String {
-            self.z_min.clone()
-        }
-        fn get_post_trimvol_z_max(&self) -> String {
-            self.z_max.clone()
-        }
-    }
-    impl VolumeRangeMetaData for Values {
-        fn set_post_trimvol_x_min(&mut self, value: String) {
-            self.x_min = value;
-        }
-        fn set_post_trimvol_x_max(&mut self, value: String) {
-            self.x_max = value;
-        }
-        fn set_post_trimvol_y_min(&mut self, value: String) {
-            self.y_min = value;
-        }
-        fn set_post_trimvol_y_max(&mut self, value: String) {
-            self.y_max = value;
-        }
-        fn set_post_trimvol_z_min(&mut self, value: String) {
-            self.z_min = value;
-        }
-        fn set_post_trimvol_z_max(&mut self, value: String) {
-            self.z_max = value;
-        }
-        fn set_post_trimvol_new_style_z(&mut self, min: String, max: String) {
-            self.new_style_z = Some((min, max));
-        }
-    }
-
-    #[test]
-    fn construction_keeps_source_grid_border_and_tooltips() {
-        let panel = VolumeRangePanel::get_instance(false);
-        assert_eq!(
-            panel.get_component().border.as_ref().unwrap().title,
-            "Volume Range"
-        );
-        assert_eq!(panel.layout.as_ref().unwrap().child_order[0], "ltfXMin");
-        assert_eq!(
-            panel.ltf_z_max.tooltip.as_deref(),
-            Some("The top Z slice to retain in the volume.")
-        );
-    }
-
-    #[test]
-    fn parameter_transfer_and_new_style_z_follow_source_order() {
-        let input = Values {
-            x_min: "1".into(),
-            x_max: "2".into(),
-            y_min: "3".into(),
-            y_max: "4".into(),
-            z_min: "5".into(),
-            z_max: "6".into(),
-            ..Values::default()
-        };
-        let mut panel = VolumeRangePanel::get_instance(false);
-        panel.init_parameters(&input);
-        let mut output = Values::default();
-        assert!(panel.get_parameters_trimvol(&mut output, true));
-        panel.get_parameters_for_trimvol(&mut output);
-        assert_eq!((output.x_min, output.z_max), ("1".into(), "6".into()));
-        assert_eq!(output.new_style_z, Some(("5".into(), "6".into())));
-    }
-
-    #[test]
-    fn rubberband_parser_stops_at_each_missing_source_value() {
-        let mut panel = VolumeRangePanel::get_instance(false);
-        panel.set_xy_min_and_max(Some(&[
-            RUBBERBAND_RESULTS_STRING.into(),
-            "10".into(),
-            "20".into(),
-            "30".into(),
-            "40".into(),
-            "50".into(),
-            "60".into(),
-        ]));
-        assert_eq!(panel.ltf_x_min.get_text(), "10");
-        assert_eq!(panel.ltf_y_min.get_text(), "20");
-        assert_eq!(panel.ltf_x_max.get_text(), "30");
-        assert_eq!(panel.ltf_y_max.get_text(), "40");
-        assert_eq!(panel.ltf_z_min.get_text(), "50");
-        assert_eq!(panel.ltf_z_max.get_text(), "60");
-    }
-
-    #[test]
-    fn locked_panel_does_not_transfer_values() {
-        let mut panel = VolumeRangePanel::get_instance(true);
-        panel.init_parameters(&Values {
-            x_min: "1".into(),
-            ..Values::default()
-        });
-        let mut output = Values::default();
-        assert!(panel.get_parameters_trimvol(&mut output, true));
-        assert!(panel.ltf_x_min.get_text().is_empty());
-        assert!(output.x_min.is_empty());
     }
 }

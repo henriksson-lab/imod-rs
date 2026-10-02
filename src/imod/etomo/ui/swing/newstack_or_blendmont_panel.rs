@@ -1,356 +1,366 @@
 //! `IMOD/Etomo/src/etomo/ui/swing/NewstackOrBlendmontPanel.java`.
 //!
-//! Swing components and the parameter/com-script implementations remain their
-//! direct boundaries.  This unit keeps the panel's source-owned control,
-//! listener, parameter, advanced-state, and packing state so subclasses retain
-//! the same call sequence as eTomo.
-#![allow(dead_code)]
+//! The abstract base of `NewstackPanel` and `BlendmontPanel` (the full aligned
+//! stack panels of the final aligned stack dialog).
+//!
+//! **Representation.**  A subclass embeds this struct as its `base` field
+//! (reached through `Deref`) and implements [`NewstackOrBlendmontPanelVirtual`]
+//! for the members Java leaves abstract.  Java passes `this` (the subclass
+//! object) as the `Expandable` of the panel header and as the
+//! `Run3dmodButtonContainer` of the two buttons, so a subclass also implements
+//! `Expandable` by delegating to `base.expand_*` and `Run3dmodButtonContainer`
+//! with its `action` override; the trait bounds below say so.
+//!
+//! Java calls the abstract `getHeaderTitle()` from this constructor
+//! (NewstackOrBlendmontPanel.java:83), before the subclass object exists.  A
+//! Rust object cannot dispatch to itself before it is built, so the subclass
+//! passes the value its override returns (both overrides return a constant:
+//! `"Newstack"`, `"Blendmont"`).
 
+use std::cell::RefCell;
+use std::io;
+use std::rc::{Rc, Weak};
+
+use super::blendmont_display::{BlendmontDisplay, BlendmontDisplayException};
+use super::deferred_3dmod_button::Deferred3dmodButton;
+use super::expand_button::ExpandButton;
+use super::expandable::Expandable;
 use super::fiducialess_params::FiducialessParams;
-pub use super::global_expand_button::GlobalExpandButton;
-use super::multi_line_button::MultiLineButton;
+use super::global_expand_button::GlobalExpandButton;
 use super::newstack_and_blendmont_param_panel::NewstackAndBlendmontParamPanel;
-use super::panel_header::{ExpandButton, PanelHeaderState};
+use super::newstack_display::{NewstackDisplay, NewstackDisplayException};
+use super::panel_header::PanelHeader;
+use super::run_3dmod_button::Run3dmodButton;
+use super::run_3dmod_button_container::Run3dmodButtonContainer;
+use super::spaced_panel::SpacedPanel;
+use super::ui_harness;
+use crate::imod::etomo::application_manager::ApplicationManager;
+use crate::imod::etomo::comscript::blendmont_param::BlendmontParam;
+use crate::imod::etomo::comscript::const_newst_param::ConstNewstParam;
+use crate::imod::etomo::comscript::fortran_input_syntax_exception::FortranInputSyntaxException;
+use crate::imod::etomo::comscript::newst_param::NewstParam;
+use crate::imod::etomo::jdk::{ActionEvent, ActionListener, JComponent};
 use crate::imod::etomo::r#type::axis_id::AxisID;
+use crate::imod::etomo::r#type::const_meta_data::ConstMetaData;
 use crate::imod::etomo::r#type::dialog_type::DialogType;
+use crate::imod::etomo::r#type::meta_data::MetaData;
+use crate::imod::etomo::r#type::process_result_display::ProcessResultDisplayHandle;
+use crate::imod::etomo::r#type::recon_screen_state::ReconScreenState;
 
+/// Java `static final String RUN_BUTTON_LABEL`.
 pub const RUN_BUTTON_LABEL: &str = "Create Full Aligned Stack";
-pub const VIEW_FULL_ALIGNED_STACK_LABEL: &str = "View Full Aligned Stack";
-pub const CREATE_FULL_ALIGNED_STACK_TOOLTIP: &str =
-    "Generate the complete aligned stack for input into the tilt process.";
-pub const VIEW_FULL_ALIGNED_STACK_TOOLTIP: &str = "Open the complete aligned stack in 3dmod";
 
-/// Java `ConstNewstParam` / `NewstParam` boundary values.
-#[derive(Clone, Debug, Default, PartialEq)]
-pub struct NewstParam {
-    pub values: Vec<String>,
-    pub bin_by_factor: Option<i32>,
-    pub linear_interpolation: bool,
-    pub antialias_filter: Option<f64>,
-    pub size_to_output_in_x_and_y: Option<String>,
+/// The members `NewstackOrBlendmontPanel` declares abstract and calls on
+/// `this`: `getHeaderTitle()` and `action(String, Deferred3dmodButton,
+/// Run3dmodMenuOptions)` (the latter is `Run3dmodButtonContainer.action`).
+pub trait NewstackOrBlendmontPanelVirtual: Run3dmodButtonContainer + Expandable {
+    /// Java `abstract String getHeaderTitle()` (NewstackOrBlendmontPanel.java:91).
+    fn get_header_title(&self) -> String;
 }
 
-/// Java `BlendmontParam` boundary values.
-#[derive(Clone, Debug, Default, PartialEq)]
-pub struct BlendmontParam {
-    pub values: Vec<String>,
-    pub bin_by_factor: Option<i32>,
-    pub linear_interpolation: bool,
-    pub size_to_output_in_x_and_y: Option<String>,
-    pub fiducialess: bool,
-}
-
-/// Java `ConstMetaData` / `MetaData` boundary values.
-#[derive(Clone, Debug, PartialEq)]
-pub struct MetaData {
-    pub values: Vec<String>,
-    /// Java `stack3dFindBinning`, indexed by `AxisID`.
-    pub stack_3d_find_binning: [Option<i32>; 3],
-    pub stack_binning: [i32; 3],
-    pub size_to_output_in_x_and_y: [String; 3],
-    pub antialias_filter: [Option<f64>; 3],
-    pub ctf3d_setup_slab_thickness_in_nm_set: bool,
-}
-
-impl Default for MetaData {
-    fn default() -> Self {
-        Self {
-            values: Vec::new(),
-            stack_3d_find_binning: [None; 3],
-            stack_binning: [1; 3],
-            size_to_output_in_x_and_y: std::array::from_fn(|_| String::new()),
-            antialias_filter: [None; 3],
-            ctf3d_setup_slab_thickness_in_nm_set: false,
-        }
-    }
-}
-
-impl MetaData {
-    /// Java `setStack3dFindBinning`.
-    pub fn set_stack_3d_find_binning(&mut self, axis_id: AxisID, binning: i32) {
-        self.stack_3d_find_binning[axis_id.get_axis_of_extension() as usize] = Some(binning);
-    }
-
-    /// Java `isStack3dFindBinningSet`.
-    pub fn is_stack_3d_find_binning_set(&self, axis_id: AxisID) -> bool {
-        self.stack_3d_find_binning[axis_id.get_axis_of_extension() as usize].is_some()
-    }
-
-    /// Java `getStack3dFindBinning`.
-    pub fn get_stack_3d_find_binning(&self, axis_id: AxisID) -> i32 {
-        self.stack_3d_find_binning[axis_id.get_axis_of_extension() as usize]
-            .expect("stack3dFindBinning must be set before getStack3dFindBinning")
-    }
-}
-
-/// Java `ReconScreenState` members accessed by this source unit.
-#[derive(Clone, Debug, Default, Eq, PartialEq)]
-pub struct ReconScreenState {
-    pub newst_header_state: PanelHeaderState,
-    pub button_state: bool,
-}
-
-/// Source-visible `JPanel` state of `pnlRoot` and its insertion order.
-#[derive(Clone, Debug, PartialEq)]
-pub struct NewstackPanelRoot {
-    pub box_layout_y_axis: bool,
-    pub alignment_x: f32,
-    pub etched_border: bool,
-    pub header_added: bool,
-    pub body_added: bool,
-    pub visible: bool,
-}
-
-impl Default for NewstackPanelRoot {
-    fn default() -> Self {
-        Self {
-            box_layout_y_axis: false,
-            alignment_x: 0.0,
-            etched_border: false,
-            header_added: false,
-            body_added: false,
-            visible: true,
-        }
-    }
-}
-
-/// Complete local state of Java `NewstackOrBlendmontPanel`.
-#[derive(Clone, Debug, PartialEq)]
+/// Java `abstract class NewstackOrBlendmontPanel implements
+/// Run3dmodButtonContainer, Expandable, NewstackDisplay, BlendmontDisplay`.
 pub struct NewstackOrBlendmontPanel {
-    pub pnl_root: NewstackPanelRoot,
-    pub header_title: String,
-    pub header_state: PanelHeaderState,
-    pub pnl_body_contains_parameter_panel: bool,
-    pub pnl_buttons_box_layout_x_axis: bool,
-    pub pnl_buttons_contains_run: bool,
-    pub pnl_buttons_contains_3dmod_full: bool,
-    pub btn_3dmod_full: MultiLineButton,
-    pub newstack_and_blendmont_param_panel: NewstackAndBlendmontParamPanel,
-    pub btn_run_process: MultiLineButton,
+    pnl_root: Rc<JComponent>,
+
+    /// Java `actionListener` (a `NewstackOrBlendmontPanelActionListener`).
+    action_listener: ActionListener,
+    header: Option<Rc<PanelHeader>>,
+    pnl_body: Rc<SpacedPanel>,
+    btn_3dmod_full: Rc<Run3dmodButton>,
+
+    newstack_and_blendmont_param_panel: Rc<NewstackAndBlendmontParamPanel>,
+    btn_run_process: Rc<Run3dmodButton>,
     pub axis_id: AxisID,
+    pub manager: &'static ApplicationManager,
     pub dialog_type: DialogType,
-    pub action_listener_present: bool,
-    pub deferred_3dmod_button_set: bool,
-    pub packed_count: u32,
+    /// The subclass object (Java `this`).
+    pub this: RefCell<Weak<dyn NewstackOrBlendmontPanelVirtual>>,
 }
 
 impl NewstackOrBlendmontPanel {
-    /// Java package-private constructor.  The `ApplicationManager` and Swing
-    /// `PanelHeader` construction are direct owner boundaries; all values read
-    /// or subsequently changed here are retained locally.
-    pub fn new(axis_id: AxisID, dialog_type: DialogType, header_title: impl Into<String>) -> Self {
-        let header_title = header_title.into();
-        let mut btn_3dmod_full = MultiLineButton::get_toggle_button_instance_with_label(Some(
-            VIEW_FULL_ALIGNED_STACK_LABEL,
-        ));
-        btn_3dmod_full.set_action_command(Some(VIEW_FULL_ALIGNED_STACK_LABEL));
-        let mut btn_run_process =
-            MultiLineButton::get_toggle_button_instance_with_label(Some(RUN_BUTTON_LABEL));
-        btn_run_process.set_action_command(Some(RUN_BUTTON_LABEL));
-        Self {
-            pnl_root: NewstackPanelRoot::default(),
-            header_title,
-            header_state: PanelHeaderState::default(),
-            pnl_body_contains_parameter_panel: false,
-            pnl_buttons_box_layout_x_axis: false,
-            pnl_buttons_contains_run: false,
-            pnl_buttons_contains_3dmod_full: false,
+    /// Java `NewstackOrBlendmontPanel(ApplicationManager, AxisID, DialogType,
+    /// GlobalExpandButton)` (NewstackOrBlendmontPanel.java:78-89).  `this` is
+    /// the subclass being built (`Rc::new_cyclic`'s weak), `header_title` the
+    /// value of its `getHeaderTitle()`.
+    pub fn new(
+        manager: &'static ApplicationManager,
+        axis_id: AxisID,
+        dialog_type: DialogType,
+        global_advanced_button: &Rc<GlobalExpandButton>,
+        this: Weak<dyn NewstackOrBlendmontPanelVirtual>,
+        header_title: &str,
+    ) -> NewstackOrBlendmontPanel {
+        // Field initializers (NewstackOrBlendmontPanel.java:63-70).
+        let pnl_root = JComponent::new_panel();
+        // Java `new NewstackOrBlendmontPanelActionListener(this)`; the class is
+        // at NewstackOrBlendmontPanel.java:257-270.  `adaptee.action` is the
+        // subclass override.
+        let adaptee = this.clone();
+        let action_listener: ActionListener = Rc::new(move |event: &ActionEvent| {
+            let Some(adaptee) = adaptee.upgrade() else {
+                return;
+            };
+            adaptee.action(event.get_action_command().unwrap_or(""), None, None);
+        });
+        let pnl_body = SpacedPanel::get_instance_void();
+        let container: Weak<dyn Run3dmodButtonContainer> = this.clone();
+        let btn_3dmod_full = Run3dmodButton::get_3dmod_instance_string_run_3dmod_button_container(
+            Some("View Full Aligned Stack"),
+            Some(container),
+        );
+
+        // Constructor body.
+        let expandable: Weak<dyn Expandable> = this.clone();
+        let header = PanelHeader::get_advanced_basic_only_instance(
+            Some(header_title),
+            Some(expandable),
+            Some(dialog_type),
+            Some(global_advanced_button.clone()),
+            false,
+        );
+        let newstack_and_blendmont_param_panel =
+            NewstackAndBlendmontParamPanel::get_instance(manager, axis_id, dialog_type);
+        let btn_run_process = manager
+            .get_process_result_display_factory(axis_id)
+            .get_full_aligned_stack();
+        NewstackOrBlendmontPanel {
+            pnl_root,
+            action_listener,
+            header: Some(header),
+            pnl_body,
             btn_3dmod_full,
-            newstack_and_blendmont_param_panel: NewstackAndBlendmontParamPanel::new(
-                axis_id,
-                dialog_type,
-                crate::imod::etomo::r#type::view_type::ViewType::SingleView,
-            ),
+            newstack_and_blendmont_param_panel,
             btn_run_process,
             axis_id,
+            manager,
             dialog_type,
-            action_listener_present: false,
-            deferred_3dmod_button_set: false,
-            packed_count: 0,
+            this: RefCell::new(this),
         }
     }
 
-    /// Java `addListeners`.
-    pub fn add_listeners(&mut self) {
-        self.btn_run_process.add_action_listener();
-        self.btn_3dmod_full.add_action_listener();
-        self.action_listener_present = true;
-    }
-
-    /// Java `getComponent`.
-    pub fn get_component(&self) -> &NewstackPanelRoot {
-        &self.pnl_root
-    }
-
-    /// Java `createPanel`.
-    pub fn create_panel(&mut self) {
-        self.deferred_3dmod_button_set = true;
-        self.pnl_root.box_layout_y_axis = true;
-        self.pnl_root.alignment_x = 0.5;
-        self.pnl_root.etched_border = true;
-        self.pnl_root.header_added = true;
-        self.pnl_root.body_added = true;
-        self.pnl_body_contains_parameter_panel = true;
-        self.pnl_buttons_box_layout_x_axis = true;
-        self.pnl_buttons_contains_run = true;
-        self.pnl_buttons_contains_3dmod_full = true;
-    }
-
-    /// Java `isFiducialess`.
-    pub fn is_fiducialess(&self) -> bool {
-        self.newstack_and_blendmont_param_panel.is_fiducialess()
-    }
-
-    /// Java private `setVisible(boolean)`.
-    pub fn set_visible(&mut self, visible: bool) {
-        self.pnl_root.visible = visible;
-    }
-
-    /// Java `done`.
-    pub fn done(&mut self) {
-        self.action_listener_present = false;
-        self.btn_run_process.button.action_listener_count = 0;
-        self.btn_3dmod_full.button.action_listener_count = 0;
-    }
-
-    /// Java `getFiducialessParams`.
-    pub fn get_fiducialess_params(&self) -> &dyn FiducialessParams {
-        &self.newstack_and_blendmont_param_panel
-    }
-
-    /// Java `setParameters(ReconScreenState)`.
-    pub fn set_recon_screen_state(&mut self, screen_state: &ReconScreenState) {
-        self.header_state = screen_state.newst_header_state.clone();
+    /// Java `addListeners()` (NewstackOrBlendmontPanel.java:93-96).
+    pub fn add_listeners(&self) {
         self.btn_run_process
-            .set_button_state(screen_state.button_state);
+            .add_action_listener(self.action_listener.clone());
+        self.btn_3dmod_full
+            .add_action_listener(self.action_listener.clone());
     }
 
-    /// Java `getParameters(ReconScreenState)`.
-    pub fn get_recon_screen_state(&self, screen_state: &mut ReconScreenState) {
-        screen_state.newst_header_state = self.header_state.clone();
-        screen_state.button_state = self.btn_run_process.get_button_state();
+    /// Java `getComponent()` (NewstackOrBlendmontPanel.java:98-100).
+    pub fn get_component(&self) -> Rc<JComponent> {
+        self.pnl_root.clone()
     }
 
-    /// Java `setParameters(ConstNewstParam)`.
-    pub fn set_newst_parameters(&mut self, newst_param: &NewstParam) {
-        self.newstack_and_blendmont_param_panel
-            .set_newst_parameters(newst_param);
+    /// Java `createPanel()` (NewstackOrBlendmontPanel.java:102-123).
+    pub fn create_panel(&self) {
+        // Initialize
+        let container: Weak<dyn Run3dmodButtonContainer> = self.this.borrow().clone();
+        self.btn_run_process.set_container(Some(container));
+        self.btn_run_process
+            .set_deferred_3dmod_button_deferred_3dmod_button(Some(
+                self.btn_3dmod_full.clone() as Rc<dyn Deferred3dmodButton>
+            ));
+        // Local panels
+        let pnl_buttons = SpacedPanel::get_instance_void();
+        // Root panel
+        // Swing layout: pnlRoot BoxLayout Y_AXIS, center aligned, untitled
+        // etched border.
+        self.pnl_root
+            .add(&self.header.as_ref().unwrap().get_container());
+        self.pnl_root.add(&self.pnl_body.get_container());
+        // Swing layout: left align pnlRoot's components.
+        // Body Panel
+        // Swing layout: pnlBody.setBoxLayout(BoxLayout.Y_AXIS).
+        self.pnl_body
+            .add_component(&self.newstack_and_blendmont_param_panel.get_component());
+        self.pnl_body.add_spaced_panel(&pnl_buttons);
+        // Button panel
+        // Swing layout: pnlButtons.setBoxLayout(BoxLayout.X_AXIS).
+        pnl_buttons.add_component(&self.btn_run_process.get_component());
+        pnl_buttons.add_component(&self.btn_3dmod_full.get_component());
     }
 
-    /// Java `getParameters(NewstParam, boolean)`.
-    pub fn get_newst_parameters(&self, newst_param: &mut NewstParam, do_validation: bool) -> bool {
-        self.newstack_and_blendmont_param_panel
-            .get_newst_parameters(newst_param, do_validation)
+    /// Java private `setVisible(boolean)` (NewstackOrBlendmontPanel.java:130-132).
+    fn set_visible(&self, visible: bool) {
+        self.pnl_root.set_visible(visible);
     }
 
-    /// Java `setParameters(BlendmontParam)`.
-    pub fn set_blendmont_parameters(&mut self, param: &BlendmontParam) {
-        self.newstack_and_blendmont_param_panel
-            .set_blendmont_parameters(param);
+    /// Java `done()` (NewstackOrBlendmontPanel.java:134-136).
+    pub fn done(&self) {
+        self.btn_run_process
+            .remove_action_listener(&self.action_listener);
     }
 
-    /// Java `getParameters(BlendmontParam, boolean)`.
-    pub fn get_blendmont_parameters(
+    /// Java `getFiducialessParams()` (NewstackOrBlendmontPanel.java:138-140).
+    pub fn get_fiducialess_params(&self) -> Rc<dyn FiducialessParams> {
+        self.newstack_and_blendmont_param_panel.clone()
+    }
+
+    /// Java `final setParameters(ReconScreenState)` (NewstackOrBlendmontPanel.java:142-146).
+    pub fn set_parameters_recon_screen_state(&self, screen_state: &ReconScreenState) {
+        self.header
+            .as_ref()
+            .unwrap()
+            .set_state(Some(screen_state.get_newst_header_state()));
+        self.btn_run_process.set_button_state(
+            screen_state.get_button_state(self.btn_run_process.get_button_state_key().as_deref()),
+        );
+    }
+
+    /// Java `final getParameters(ReconScreenState)` (NewstackOrBlendmontPanel.java:148-150).
+    pub fn get_parameters_recon_screen_state(&self, screen_state: &ReconScreenState) {
+        self.header
+            .as_ref()
+            .unwrap()
+            .get_state(Some(screen_state.get_newst_header_state()));
+    }
+
+    /// Java `getParameters(MetaData) throws FortranInputSyntaxException`
+    /// (NewstackOrBlendmontPanel.java:183-185).  The Metadata values that are
+    /// from the setup dialog should not be overrided by this dialog unless the
+    /// Metadata values are empty.  Must save data from the two instances under
+    /// separate keys.
+    pub fn get_parameters_meta_data(
         &self,
-        param: &mut BlendmontParam,
-        do_validation: bool,
-    ) -> bool {
+        meta_data: &MetaData,
+    ) -> Result<(), FortranInputSyntaxException> {
         self.newstack_and_blendmont_param_panel
-            .get_blendmont_parameters(param, do_validation)
+            .get_parameters_meta_data(meta_data)
     }
 
-    /// Java `getParameters(MetaData)`.
-    pub fn get_meta_data_parameters(&self, meta_data: &mut MetaData) {
+    /// Java `setParameters(ConstMetaData)` (NewstackOrBlendmontPanel.java:191-193).
+    /// Must save data from the two instances under separate keys.
+    pub fn set_parameters_const_meta_data(&self, meta_data: &dyn ConstMetaData) {
         self.newstack_and_blendmont_param_panel
-            .get_meta_data_parameters(meta_data);
+            .set_parameters_const_meta_data(meta_data);
     }
 
-    /// Java `setParameters(ConstMetaData)`.
-    pub fn set_meta_data_parameters(&mut self, meta_data: &MetaData) {
-        self.newstack_and_blendmont_param_panel
-            .set_meta_data_parameters(meta_data);
-    }
-
-    /// Java `setFiducialessAlignment`.
-    pub fn set_fiducialess_alignment(&mut self, input: bool) {
+    /// Java `setFiducialessAlignment(boolean)` (NewstackOrBlendmontPanel.java:195-197).
+    pub fn set_fiducialess_alignment(&self, input: bool) {
         self.newstack_and_blendmont_param_panel
             .set_fiducialess_alignment(input);
     }
 
-    /// Java `setImageRotation`.
-    pub fn set_image_rotation(&mut self, input: impl Into<String>) {
+    /// Java `setImageRotation(String)` (NewstackOrBlendmontPanel.java:199-201).
+    pub fn set_image_rotation(&self, input: Option<&str>) {
         self.newstack_and_blendmont_param_panel
             .set_image_rotation(input);
     }
 
-    /// Java `validate`.
-    pub fn validate(&self) -> bool {
-        true
+    /// Java `getRunProcessButtonActionCommand()` (NewstackOrBlendmontPanel.java:208-210).
+    pub fn get_run_process_button_action_command(&self) -> Option<String> {
+        self.btn_run_process.get_action_command()
     }
 
-    /// Java `getRunProcessButtonActionCommand`.
-    pub fn get_run_process_button_action_command(&self) -> &str {
-        self.btn_run_process
-            .get_action_command()
-            .unwrap_or_default()
+    /// Java `get3dmodFullButtonActionCommand()` (NewstackOrBlendmontPanel.java:212-214).
+    pub fn get3dmod_full_button_action_command(&self) -> Option<String> {
+        self.btn_3dmod_full.get_action_command()
     }
 
-    /// Java `get3dmodFullButtonActionCommand`.
-    pub fn get_3dmod_full_button_action_command(&self) -> &str {
-        self.btn_3dmod_full.get_action_command().unwrap_or_default()
+    /// Java `getRunProcessResultDisplay()` (NewstackOrBlendmontPanel.java:216-218).
+    pub fn get_run_process_result_display(&self) -> ProcessResultDisplayHandle {
+        self.btn_run_process.clone()
     }
 
-    /// Java `getRunProcessResultDisplay`.
-    pub fn get_run_process_result_display(&self) -> &MultiLineButton {
-        &self.btn_run_process
-    }
+    /// Java `expand(GlobalExpandButton)` (NewstackOrBlendmontPanel.java:234-235).
+    /// A subclass's `Expandable` implementation delegates here.
+    pub fn expand_global_expand_button(&self, _button: &Rc<GlobalExpandButton>) {}
 
-    /// Java `expand(GlobalExpandButton)`, deliberately empty.
-    pub fn expand_global(&mut self, _button: &GlobalExpandButton) {}
-
-    /// Java `expand(ExpandButton)`, including the `UIHarness.pack` boundary.
-    pub fn expand(&mut self, button: &ExpandButton) {
-        if button.button_type == super::panel_header::ExpandButtonType::Advanced {
-            self.newstack_and_blendmont_param_panel
-                .update_advanced(button.is_expanded());
+    /// Java `expand(ExpandButton)` (NewstackOrBlendmontPanel.java:237-245).
+    /// A subclass's `Expandable` implementation delegates here.
+    pub fn expand_expand_button(&self, button: &Rc<ExpandButton>) {
+        if let Some(header) = &self.header {
+            if header.equals_advanced_basic(button) {
+                self.newstack_and_blendmont_param_panel
+                    .update_advanced(button.is_expanded());
+            }
         }
-        self.packed_count += 1;
+        ui_harness::INSTANCE.with(|harness| {
+            harness.pack_axis_id_base_manager(Some(self.axis_id), Some(self.manager))
+        });
     }
 
-    /// Java `updateAdvanced`.
-    pub fn update_advanced(&mut self, advanced: bool) {
+    /// Java `updateAdvanced(boolean)` (NewstackOrBlendmontPanel.java:247-249).
+    pub fn update_advanced(&self, advanced: bool) {
         self.newstack_and_blendmont_param_panel
             .update_advanced(advanced);
     }
 
-    /// Java `setToolTipText`.
-    pub fn set_tool_tip_text(&mut self) {
-        self.btn_run_process
-            .set_tool_tip_text(Some(CREATE_FULL_ALIGNED_STACK_TOOLTIP));
+    /// Java `setToolTipText()` (NewstackOrBlendmontPanel.java:251-255).
+    pub fn set_tool_tip_text(&self) {
+        self.btn_run_process.set_tool_tip_text(Some(
+            &*("Generate the complete aligned stack for input into the ".to_string()
+                + "tilt process."),
+        ));
         self.btn_3dmod_full
-            .set_tool_tip_text(Some(VIEW_FULL_ALIGNED_STACK_TOOLTIP));
+            .set_tool_tip_text(Some("Open the complete aligned stack in 3dmod"));
     }
+}
 
-    /// Java private listener `actionPerformed`, reduced only to its exact
-    /// source arguments; subclass action dispatch is its owner boundary.
-    pub fn action_performed<'a>(
+impl NewstackDisplay for NewstackOrBlendmontPanel {
+    /// Java `final getParameters(NewstParam, boolean) throws
+    /// FortranInputSyntaxException, InvalidParameterException, IOException`
+    /// (NewstackOrBlendmontPanel.java:157-162).  Copy the newstack parameters
+    /// from the GUI to the NewstParam object.
+    fn get_parameters(
         &self,
-        action_command: &'a str,
-    ) -> (&'a str, Option<()>, Option<()>) {
-        (action_command, None, None)
+        newst_param: &mut NewstParam,
+        do_validation: bool,
+    ) -> Result<bool, NewstackDisplayException> {
+        self.newstack_and_blendmont_param_panel
+            .get_parameters_newst_param_boolean(newst_param, do_validation)
+    }
+
+    /// Java `final setParameters(ConstNewstParam)` (NewstackOrBlendmontPanel.java:152-155).
+    fn set_parameters(&self, newst_param: &dyn ConstNewstParam) {
+        self.newstack_and_blendmont_param_panel
+            .set_parameters_const_newst_param(newst_param);
+    }
+
+    /// Java `validate()` (NewstackOrBlendmontPanel.java:203-206).
+    fn validate(&self) -> bool {
+        true
+    }
+
+    /// Java `isFiducialess()` (NewstackOrBlendmontPanel.java:125-128).
+    fn is_fiducialess(&self) -> bool {
+        self.newstack_and_blendmont_param_panel.is_fiducialess()
     }
 }
 
-/// Source-shaped overload adapter; concrete parameter variants remain the
-/// panel's typed `*_parameters` methods above.
-pub struct NewstackOrBlendmontPanelParameters;
-impl NewstackOrBlendmontPanelParameters {
-    #[allow(non_snake_case)]
-    pub fn setParameters(panel: &mut NewstackOrBlendmontPanel, state: &ReconScreenState) {
-        panel.set_recon_screen_state(state);
+impl BlendmontDisplay for NewstackOrBlendmontPanel {
+    /// Java `final getParameters(BlendmontParam, boolean) throws
+    /// FortranInputSyntaxException, InvalidParameterException, IOException`
+    /// (NewstackOrBlendmontPanel.java:169-174).  Copy the newstack parameters
+    /// from the GUI to the NewstParam object.
+    fn get_parameters(
+        &self,
+        param: &mut BlendmontParam,
+        do_validation: bool,
+    ) -> Result<bool, BlendmontDisplayException> {
+        self.newstack_and_blendmont_param_panel
+            .get_parameters_blendmont_param_boolean(param, do_validation)
     }
-    #[allow(non_snake_case)]
-    pub fn getParameters(panel: &NewstackOrBlendmontPanel, state: &mut ReconScreenState) {
-        panel.get_recon_screen_state(state);
+
+    /// Java `final setParameters(BlendmontParam)` (NewstackOrBlendmontPanel.java:164-167).
+    fn set_parameters(&self, param: &BlendmontParam) {
+        self.newstack_and_blendmont_param_panel
+            .set_parameters_blendmont_param(param);
+    }
+
+    /// Java `validate()` (NewstackOrBlendmontPanel.java:203-206).
+    fn validate(&self) -> bool {
+        true
+    }
+
+    /// Java `isFiducialess()` (NewstackOrBlendmontPanel.java:125-128).
+    fn is_fiducialess(&self) -> bool {
+        self.newstack_and_blendmont_param_panel.is_fiducialess()
     }
 }
+
+// Keep `io` referenced for the exception types' documentation: both display
+// traits' exception enums carry `io::Error` for Java's `IOException`.
+#[allow(unused_imports)]
+use io as _;

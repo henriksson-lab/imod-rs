@@ -46,7 +46,6 @@ use crate::imod::etomo::r#type::etomo_number::EtomoNumber;
 use crate::imod::etomo::r#type::extension;
 use crate::imod::etomo::r#type::file_type::FileType;
 use crate::imod::etomo::r#type::process_name::ProcessName;
-use crate::imod::etomo::ui::swing::ui_utilities::{Container, UiUtilities};
 use crate::imod::etomo::util::environment_variable;
 use crate::imod::etomo::util::mrc_header::MRCHeader;
 
@@ -54,13 +53,73 @@ use crate::imod::etomo::util::mrc_header::MRCHeader;
 // JDK members the source uses.
 // ---------------------------------------------------------------------------
 
-/// Native UI-boundary form of Java `printComponents(StringBuilder, Container)`.
-///
-/// The native component tree owns its diagnostic representation; this facade keeps
-/// callers of `Utilities` on that one implementation instead of recreating Swing's
-/// `Container` traversal.
-pub fn print_components(container: &Container) {
-    UiUtilities::print_components(container);
+/// Java `printComponents(StringBuilder, Container)` (Utilities.java:698), over the
+/// Swing stand-in's component tree.  Every print is under `DEBUG`, as in Java.
+pub fn print_components(
+    prepend: Option<&mut String>,
+    container: &std::rc::Rc<crate::imod::etomo::jdk::JComponent>,
+) {
+    use crate::imod::etomo::jdk::ComponentKind;
+    let mut own = String::new();
+    let prepend = match prepend {
+        Some(prepend) => prepend,
+        None => {
+            if *DEBUG {
+                eprintln!("container:");
+            }
+            &mut own
+        }
+    };
+    prepend.push('>');
+    let kind = container.kind();
+    let is_button = matches!(
+        kind,
+        ComponentKind::Button
+            | ComponentKind::ToggleButton
+            | ComponentKind::CheckBox
+            | ComponentKind::RadioButton
+            | ComponentKind::MenuItem
+            | ComponentKind::CheckBoxMenuItem
+            | ComponentKind::Menu
+    );
+    if is_button && *DEBUG {
+        eprintln!(
+            "{}{},selected:{}",
+            prepend,
+            container.get_text(),
+            container.is_selected()
+        );
+    }
+    if kind == ComponentKind::ComboBox {
+        // The combo items are strings, never containers, so the Java's recursion
+        // into the selected item and selected objects does not apply.
+        if *DEBUG {
+            eprintln!(
+                "{}{}",
+                prepend,
+                container
+                    .get_selected_item()
+                    .unwrap_or_else(|| "null".to_owned())
+            );
+        }
+    }
+    if *DEBUG {
+        match kind {
+            ComponentKind::Label | ComponentKind::TextField | ComponentKind::TextArea => {
+                eprintln!("{}{}", prepend, container.get_text())
+            }
+            ComponentKind::ProgressBar => eprintln!(
+                "{}{}",
+                prepend,
+                container.get_string().unwrap_or_else(|| "null".to_owned())
+            ),
+            ComponentKind::Spinner => eprintln!("{}{}", prepend, container.get_spinner_value()),
+            _ => {}
+        }
+    }
+    for child in container.get_components() {
+        print_components(Some(prepend), &child);
+    }
 }
 
 /// `java.io.File`'s `UnixFileSystem.normalize(String)`: collapse runs of `/` into one
@@ -163,6 +222,256 @@ pub fn java_lang_system_current_time_millis() -> i64 {
         Ok(duration) => duration.as_millis() as i64,
         Err(_) => 0,
     }
+}
+
+/// `java.util.Properties.load(InputStream)` (JDK `Properties.load0` with its
+/// `LineReader` and `loadConvert`): ISO-8859-1 bytes, natural lines joined by
+/// a trailing odd backslash, `#`/`!` comment lines, the key ended by the first
+/// unescaped `=`, `:` or blank, then blanks and one `=`/`:` skipped, and the
+/// `\uXXXX`, `\t`, `\n`, `\r`, `\f` and `\x` escapes undone in key and value.
+/// A malformed `\u` escape is an `IllegalArgumentException` in the JDK; it is
+/// returned as `Err`.
+pub fn java_util_properties_load(
+    input: &[u8],
+    properties: &mut std::collections::BTreeMap<String, String>,
+) -> Result<(), String> {
+    let chars: Vec<char> = input.iter().map(|&b| b as char).collect();
+    let is_blank = |c: char| c == ' ' || c == '\t' || c == '\x0c';
+    // LineReader.readLine: one logical line at a time, leading blanks of each
+    // natural line removed, comment lines and blank lines skipped.
+    let mut pos = 0usize;
+    let load_convert = |input: &[char]| -> Result<String, String> {
+        let mut out = String::new();
+        let mut i = 0;
+        while i < input.len() {
+            let mut a = input[i];
+            i += 1;
+            if a == '\\' {
+                if i >= input.len() {
+                    // A trailing lone backslash is dropped by the JDK (the
+                    // LineReader only leaves one at the end of the input).
+                    break;
+                }
+                a = input[i];
+                i += 1;
+                if a == 'u' {
+                    let mut value: u32 = 0;
+                    for _ in 0..4 {
+                        let Some(&c) = input.get(i) else {
+                            return Err("Malformed \\uxxxx encoding.".to_owned());
+                        };
+                        i += 1;
+                        let digit = c
+                            .to_digit(16)
+                            .ok_or_else(|| "Malformed \\uxxxx encoding.".to_owned())?;
+                        value = (value << 4) + digit;
+                    }
+                    out.push(char::from_u32(value).unwrap_or('\u{fffd}'));
+                } else {
+                    out.push(match a {
+                        't' => '\t',
+                        'r' => '\r',
+                        'n' => '\n',
+                        'f' => '\x0c',
+                        other => other,
+                    });
+                }
+            } else {
+                out.push(a);
+            }
+        }
+        Ok(out)
+    };
+    loop {
+        // Read one logical line into `line`.
+        let mut line: Vec<char> = Vec::new();
+        let mut skip_white_space = true;
+        let mut is_comment_line = false;
+        let mut is_new_line = true;
+        let mut appended_line_begin = false;
+        let mut preceding_backslash = false;
+        let mut skip_lf = false;
+        let mut got_line = false;
+        while pos < chars.len() {
+            let c = chars[pos];
+            pos += 1;
+            if skip_lf {
+                skip_lf = false;
+                if c == '\n' {
+                    continue;
+                }
+            }
+            if skip_white_space {
+                if is_blank(c) {
+                    continue;
+                }
+                if !appended_line_begin && (c == '\r' || c == '\n') {
+                    continue;
+                }
+                skip_white_space = false;
+                appended_line_begin = false;
+            }
+            if is_new_line {
+                is_new_line = false;
+                if c == '#' || c == '!' {
+                    is_comment_line = true;
+                    continue;
+                }
+            }
+            if c != '\n' && c != '\r' {
+                line.push(c);
+                // flip the preceding backslash flag
+                if c == '\\' {
+                    preceding_backslash = !preceding_backslash;
+                } else {
+                    preceding_backslash = false;
+                }
+            } else {
+                // reached EOL
+                if is_comment_line || line.is_empty() {
+                    is_comment_line = false;
+                    is_new_line = true;
+                    skip_white_space = true;
+                    line.clear();
+                    if c == '\r' {
+                        skip_lf = true;
+                    }
+                    continue;
+                }
+                if preceding_backslash {
+                    line.pop();
+                    // skip the leading whitespace characters in following line
+                    skip_white_space = true;
+                    appended_line_begin = true;
+                    preceding_backslash = false;
+                    if c == '\r' {
+                        skip_lf = true;
+                    }
+                } else {
+                    got_line = true;
+                    break;
+                }
+            }
+        }
+        if !got_line {
+            // End of input: a last line without a terminator counts unless it is
+            // a comment or empty.
+            if line.is_empty() || is_comment_line {
+                return Ok(());
+            }
+            if preceding_backslash {
+                line.pop();
+            }
+        }
+        // Properties.load0: split key and value.
+        let limit = line.len();
+        let mut key_len = 0;
+        let mut value_start = limit;
+        let mut has_sep = false;
+        let mut preceding_backslash = false;
+        while key_len < limit {
+            let c = line[key_len];
+            // need check if escaped.
+            if (c == '=' || c == ':') && !preceding_backslash {
+                value_start = key_len + 1;
+                has_sep = true;
+                break;
+            } else if is_blank(c) && !preceding_backslash {
+                value_start = key_len + 1;
+                break;
+            }
+            if c == '\\' {
+                preceding_backslash = !preceding_backslash;
+            } else {
+                preceding_backslash = false;
+            }
+            key_len += 1;
+        }
+        while value_start < limit {
+            let c = line[value_start];
+            if !is_blank(c) {
+                if !has_sep && (c == '=' || c == ':') {
+                    has_sep = true;
+                } else {
+                    break;
+                }
+            }
+            value_start += 1;
+        }
+        let key = load_convert(&line[..key_len])?;
+        let value = load_convert(&line[value_start.min(limit)..limit])?;
+        properties.insert(key, value);
+        if !got_line {
+            return Ok(());
+        }
+    }
+}
+
+/// `java.util.Properties.store(OutputStream, null)` (JDK `store0` with
+/// `saveConvert`): a `#` line with `new Date().toString()`, then one
+/// `key=value` line per entry (in the map's order, the sorted order eTomo's
+/// data files show), with blanks, `\t \n \r \f`, `= : # !` and backslashes
+/// escaped (a blank in a value only when it leads) and every character
+/// outside `0x20..0x7e` written as `\uXXXX`.  Returns the ISO-8859-1 bytes.
+pub fn java_util_properties_store(
+    properties: &std::collections::BTreeMap<String, String>,
+    date: &str,
+) -> Vec<u8> {
+    let save_convert = |the_string: &str, escape_space: bool| -> String {
+        let mut out = String::new();
+        for (x, a_char) in the_string.chars().enumerate() {
+            // Handle common case first, selecting largest block that
+            // avoids the specials below
+            if (a_char as u32) > 61 && (a_char as u32) < 127 {
+                if a_char == '\\' {
+                    out.push_str("\\\\");
+                    continue;
+                }
+                out.push(a_char);
+                continue;
+            }
+            match a_char {
+                ' ' => {
+                    if x == 0 || escape_space {
+                        out.push('\\');
+                    }
+                    out.push(' ');
+                }
+                '\t' => out.push_str("\\t"),
+                '\n' => out.push_str("\\n"),
+                '\r' => out.push_str("\\r"),
+                '\x0c' => out.push_str("\\f"),
+                '=' | ':' | '#' | '!' => {
+                    out.push('\\');
+                    out.push(a_char);
+                }
+                _ => {
+                    if (a_char as u32) < 0x0020 || (a_char as u32) > 0x007e {
+                        // A supplementary character is two UTF-16 units in Java.
+                        let mut units = [0u16; 2];
+                        for unit in a_char.encode_utf16(&mut units) {
+                            out.push_str(&format!("\\u{:04X}", unit));
+                        }
+                    } else {
+                        out.push(a_char);
+                    }
+                }
+            }
+        }
+        out
+    };
+    let mut output = String::new();
+    output.push('#');
+    output.push_str(date);
+    output.push('\n');
+    for (key, value) in properties {
+        output.push_str(&save_convert(key, true));
+        output.push('=');
+        output.push_str(&save_convert(value, false));
+        output.push('\n');
+    }
+    // Every character is ASCII after the conversion.
+    output.into_bytes()
 }
 
 /// `java.util.Date.toString()`: `EEE MMM dd HH:mm:ss zzz yyyy` with the English day and
@@ -564,6 +873,17 @@ static SET_JAVA1_5: AtomicBool = AtomicBool::new(false);
 static START_TIME: AtomicI64 = AtomicI64::new(0);
 /// Java `python3`.
 static PYTHON3: Mutex<Option<bool>> = Mutex::new(None);
+/// Java static `isPython3()`.
+pub fn is_python3() -> bool {
+    let mut python3 = PYTHON3.lock().unwrap();
+    if python3.is_none() {
+        *python3 = Some(
+            crate::imod::etomo::process::base_process_manager::BaseProcessManager::is_python3(),
+        );
+    }
+    python3.unwrap()
+}
+
 /// Java `java7`.
 static JAVA7: Mutex<Option<bool>> = Mutex::new(None);
 
@@ -1283,12 +1603,6 @@ pub fn get_number_elements(text: Option<&str>) -> i32 {
     array.len() as i32
 }
 
-// Boundary: Java `printComponents(StringBuilder, Container)` walks a Swing
-// `java.awt.Container` and prints `AbstractButton`, `JComboBox`, `JFileChooser`,
-// `JInternalFrame`, `JLabel`, `JProgressBar`, `JSpinner` and `JTextComponent` state.
-// No etomo unit blocks it - the blocker is javax.swing itself, which the crate does not
-// have and which CLAUDE.md puts out of scope, so the member is left untranslated.
-
 /// Java `canWrap`.  Returns false if wrap would return the original string.  It is not
 /// required to call this.
 pub fn can_wrap(
@@ -1648,15 +1962,6 @@ pub fn get_file(property_user_dir: &str, filename: Option<&str>) -> std::path::P
         }
     }
     std::path::PathBuf::from(java_io_file_new(property_user_dir, filename))
-}
-
-/// Native process-boundary form of Java `isValidStack(File, BaseManager, AxisID)`.
-///
-/// The Rust frontend supplies the output of IMOD's `header` command for `file`; the
-/// translated `MRCHeader` parser makes the same validity decision as Java's
-/// `header.read(manager)` without coupling this utility to a GUI process manager.
-pub fn is_valid_stack(header: &mut MRCHeader, stdout: &[String], stderr: &[String]) -> bool {
-    header.read(stdout, stderr).is_ok()
 }
 
 /// Java `backupFile(File)`.
@@ -2747,7 +3052,7 @@ pub fn is_mac_os() -> bool {
 
 /// `java.lang.System.getProperty("os.name")`.  The JVM fills this from `uname`; the
 /// values `isWindowsOS` and `isMacOS` look for are "Windows *" and "Mac OS X".
-fn java_lang_system_get_property_os_name() -> &'static str {
+pub fn java_lang_system_get_property_os_name() -> &'static str {
     match std::env::consts::OS {
         "linux" => "Linux",
         "macos" => "Mac OS X",
@@ -3346,21 +3651,35 @@ mod tests {
         );
         let header = MRCHeader::get_instance(Some(&path), None).unwrap();
         let stdout = vec![format!(
-            " Pixel spacing units value {x_spacing} {x_spacing} {x_spacing}"
+            " Pixel spacing (Angstroms)..................  {x_spacing} {x_spacing} {x_spacing}"
         )];
-        assert!(header.borrow_mut().read(&stdout, &[]).unwrap());
+        assert!(header.borrow_mut().parse_std_output(None, &stdout).unwrap());
         header
+    }
+
+    #[test]
+    fn java_properties_escape_and_unescape_as_the_jdk() {
+        let mut props = std::collections::BTreeMap::new();
+        props.insert("ProcessData.a.StartTime".to_owned(), "15:33:1".to_owned());
+        props.insert("a key".to_owned(), " lead=x#\u{e9}".to_owned());
+        let bytes = java_util_properties_store(&props, "DATE");
+        assert_eq!(
+            String::from_utf8(bytes.clone()).unwrap(),
+            "#DATE\nProcessData.a.StartTime=15\\:33\\:1\na\\ key=\\ lead\\=x\\#\\u00E9\n"
+        );
+        let mut back = std::collections::BTreeMap::new();
+        java_util_properties_load(&bytes, &mut back).unwrap();
+        assert_eq!(back, props);
+        let mut cont = std::collections::BTreeMap::new();
+        java_util_properties_load(b"  ! c\nk1 : v\\\n   w\nk2\n", &mut cont).unwrap();
+        assert_eq!(cont.get("k1").map(String::as_str), Some("vw"));
+        assert_eq!(cont.get("k2").map(String::as_str), Some(""));
     }
 
     #[test]
     fn stack_helpers_preserve_header_validation_and_binning() {
         let valid = parsed_header(1.0);
-        assert!(is_valid_stack(
-            &mut valid.borrow_mut(),
-            &[" Pixel spacing units value 1 1 1".to_string()],
-            &[]
-        ));
-        assert!(!is_valid_stack(&mut valid.borrow_mut(), &[], &[]));
+        assert_eq!(valid.borrow().get_x_pixel_spacing(), 1.0);
         let raw = parsed_header(1.0);
         let twice_binned = parsed_header(2.0);
         let sub_binned = parsed_header(0.5);
@@ -3426,4 +3745,217 @@ mod tests {
             java_text_simple_date_format_mmmdd_hhmmss(millis - 987)
         );
     }
+}
+
+/// Java `timestamp(String, String, ComScript, String)`: print timestamp in
+/// error log.
+pub fn timestamp_com_script(
+    process: Option<&str>,
+    command: Option<&str>,
+    container: Option<&crate::imod::etomo::comscript::com_script::ComScript>,
+    status: Option<&str>,
+) {
+    timestamp_full(
+        process,
+        command,
+        container.map(|container| container.get_name()).as_deref(),
+        status,
+    );
+}
+
+/// Java `getFile(BaseManager, boolean mustExist, AxisID, String extension,
+/// String fileDescription)`.
+pub fn get_file_must_exist_extension(
+    manager: &'static dyn BaseManager,
+    must_exist: bool,
+    axis_id: AxisID,
+    extension: &str,
+    file_description: &str,
+) -> Option<std::path::PathBuf> {
+    let file = std::path::PathBuf::from(java_io_file_new(
+        &manager
+            .get_property_user_dir()
+            .unwrap_or_else(|| "null".to_owned()),
+        &(manager.get_name().unwrap_or_else(|| "null".to_owned())
+            + &axis_id.get_extension()
+            + extension),
+    ));
+    if !file.exists() && must_exist {
+        crate::imod::etomo::ui::swing::ui_harness::post_message_dialog(
+            Some(manager),
+            format!(
+                "The {file_description} file: {} doesn't exist.",
+                java_io_file_get_absolute_path(&file.to_string_lossy())
+            ),
+            "Missing File".to_owned(),
+            Some(axis_id),
+        );
+        return None;
+    }
+    Some(file)
+}
+
+/// Java `getFile(BaseManager, boolean mustExist, AxisID, FileType, String
+/// fileDescription)`.
+pub fn get_file_must_exist_file_type(
+    manager: &'static dyn BaseManager,
+    must_exist: bool,
+    axis_id: AxisID,
+    file_type: &crate::imod::etomo::r#type::file_type::FileType,
+    file_description: &str,
+) -> Option<std::path::PathBuf> {
+    let file = file_type
+        .get_file(Some(manager), Some(axis_id))
+        .unwrap_or_else(|| std::path::PathBuf::from("null"));
+    if !file.exists() && must_exist {
+        crate::imod::etomo::ui::swing::ui_harness::post_message_dialog(
+            Some(manager),
+            format!(
+                "The {file_description} file: {} doesn't exist.",
+                java_io_file_get_absolute_path(&file.to_string_lossy())
+            ),
+            "Missing File".to_owned(),
+            Some(axis_id),
+        );
+        return None;
+    }
+    Some(file)
+}
+
+/// Java `getStackBinning(BaseManager, AxisID, FileType)`: the binning from the
+/// stack's pixel spacing and the raw stack's (default 1).
+pub fn get_stack_binning_for_file_type(
+    manager: &'static dyn BaseManager,
+    axis_id: AxisID,
+    stack_file_type: &std::sync::Arc<crate::imod::etomo::r#type::file_type::FileType>,
+) -> i32 {
+    let stack_header =
+        MRCHeader::get_instance_from_file_type(manager, Some(axis_id), stack_file_type);
+    let rawstack_header = MRCHeader::get_instance_from_file_type(
+        manager,
+        Some(axis_id),
+        &crate::imod::etomo::r#type::file_type::CLASS.raw_stack,
+    );
+    let (Some(stack_header), Some(rawstack_header)) = (stack_header, rawstack_header) else {
+        return 1;
+    };
+    match rawstack_header.borrow_mut().read_with_manager(manager) {
+        Ok(true) => {}
+        Ok(false) => return 1,
+        Err(e) => {
+            // missing file
+            eprintln!("{e}");
+            return 1;
+        }
+    }
+    match stack_header.borrow_mut().read_with_manager(manager) {
+        Ok(true) => {}
+        Ok(false) => return 1,
+        Err(e) => {
+            eprintln!("{e}");
+            return 1;
+        }
+    }
+    get_stack_binning(&rawstack_header.borrow(), &stack_header.borrow())
+}
+
+/// `java.io.File.canRead()`: the file exists and this process may read it.
+pub fn java_io_file_can_read(pathname: &str) -> bool {
+    let Ok(path) = std::ffi::CString::new(pathname) else {
+        return false;
+    };
+    // SAFETY: `path` is a valid NUL-terminated string.
+    unsafe { libc::access(path.as_ptr(), libc::R_OK) == 0 }
+}
+
+/// `java.io.File.canWrite()`: the file exists and this process may write it.
+pub fn java_io_file_can_write(pathname: &str) -> bool {
+    let Ok(path) = std::ffi::CString::new(pathname) else {
+        return false;
+    };
+    // SAFETY: `path` is a valid NUL-terminated string.
+    unsafe { libc::access(path.as_ptr(), libc::W_OK) == 0 }
+}
+
+/// Java `isValidStack(File, BaseManager, AxisID)`.  Returns false if MRCHeader
+/// throws an exception when it reads file.
+///
+/// Runs `header` through `MRCHeader.read(BaseManager)`.
+pub fn is_valid_stack_file(
+    file: &std::path::Path,
+    manager: &'static dyn BaseManager,
+    axis_id: Option<AxisID>,
+) -> bool {
+    let header = MRCHeader::get_instance_in_dir(
+        manager.get_property_user_dir().as_deref(),
+        Some(&java_io_file_get_name(&file.to_string_lossy())),
+        axis_id,
+    );
+    let mut valid_mrc_file = false;
+    // `MRCHeader.getInstance` never returns null in the source.
+    let Some(header) = header else {
+        return valid_mrc_file;
+    };
+    match header.borrow_mut().read_with_manager(manager) {
+        Ok(_) => valid_mrc_file = true,
+        // catch (InvalidParameterException e) / catch (IOException e):
+        // e.printStackTrace()
+        Err(e) => eprintln!("{e}"),
+    }
+    valid_mrc_file
+}
+
+/// Java `getStackBinning(BaseManager, AxisID, FileType, boolean)`.  Function
+/// calculates the binning from the stack's pixel spacing and the raw stack's
+/// pixel spacing.  Returns the binning (default 1).  `Err` carries the message
+/// of the `InvalidParameterException` or `IOException` rethrown when
+/// `throw_exception` is true.  Called by `CcdEraserBeadsPanel`.
+pub fn get_stack_binning_for_file_type_boolean(
+    manager: &'static dyn BaseManager,
+    axis_id: AxisID,
+    stack_file_type: &std::sync::Arc<FileType>,
+    throw_exception: bool,
+) -> Result<i32, String> {
+    let stack_header =
+        MRCHeader::get_instance_from_file_type(manager, Some(axis_id), stack_file_type);
+    let rawstack_header = MRCHeader::get_instance_from_file_type(
+        manager,
+        Some(axis_id),
+        &crate::imod::etomo::r#type::file_type::CLASS.raw_stack,
+    );
+    // `MRCHeader.getInstance` never returns null in the source.
+    let (Some(stack_header), Some(rawstack_header)) = (stack_header, rawstack_header) else {
+        return Ok(1);
+    };
+    // `if (!rawstackHeader.read(manager) || !stackHeader.read(manager)) return 1;`
+    let read = match rawstack_header.borrow_mut().read_with_manager(manager) {
+        Ok(false) => Ok(false),
+        Ok(true) => stack_header.borrow_mut().read_with_manager(manager),
+        Err(e) => Err(e),
+    };
+    match read {
+        Ok(true) => {}
+        Ok(false) => return Ok(1),
+        // catch (InvalidParameterException e) / catch (IOException e); the source
+        // prints the stack trace of the former only (missing file).  Both carry
+        // the same message here.
+        Err(e) => {
+            if throw_exception {
+                return Err(e);
+            }
+            eprintln!("{e}");
+            return Ok(1);
+        }
+    }
+    let mut binning: i32 = 1;
+    let rawstack_x_pixel_spacing = rawstack_header.borrow().get_x_pixel_spacing();
+    if rawstack_x_pixel_spacing > 0.0 {
+        binning = java_lang_math_round(
+            stack_header.borrow().get_x_pixel_spacing() / rawstack_x_pixel_spacing,
+        ) as i32;
+    }
+    if binning != 1 && binning < 1 {
+        return Ok(1);
+    }
+    Ok(binning)
 }

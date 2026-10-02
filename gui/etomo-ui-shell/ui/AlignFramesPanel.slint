@@ -413,7 +413,7 @@ export component AlignFramesPanel inherits VerticalLayout {
                             RadioButton { text: ""; selected: false; enabled: false; }
                             // spRotationAndFlip: default 0, range 0..7,
                             // maximum width 50 (`:899`).
-                            Spinner { text: "0"; enabled: false; }
+                            Spinner { label: "Reference rotation and flip"; text: "0"; enabled: false; }
                             // cmbRotationAndFlipTranslation:
                             // ComboBox.getUnlabeledInstance(...), filled from
                             // `rotationAndFlipStringList` (`:422-425`) and set
@@ -452,7 +452,7 @@ export component AlignFramesPanel inherits VerticalLayout {
                         RadioButton { text: "Above"; selected: false; }
                         // tfTruncateAboveInputCounts: preferred width 100,
                         // disabled (`:1146`).
-                        TextField { text: ""; width: 100px; enabled: false; }
+                        TextField { label: "Above#1"; text: ""; width: 100px; enabled: false; }
                         Rectangle { width: 2px; }
                         Label { text: "input counts"; }
                     }
@@ -460,7 +460,7 @@ export component AlignFramesPanel inherits VerticalLayout {
                     HorizontalLayout {
                         alignment: start;
                         RadioButton { text: "Above"; selected: false; }
-                        TextField { text: ""; width: 100px; enabled: false; }
+                        TextField { label: "Above#2"; text: ""; width: 100px; enabled: false; }
                         Rectangle { width: 2px; }
                         Label { text: "SDs from mean"; }
                     }
@@ -483,7 +483,7 @@ export component AlignFramesPanel inherits VerticalLayout {
                         RadioButton { text: "Fit to sets of"; selected: false; }
                         // spPairwiseFrames: default 7, range 7..99, maximum
                         // width 50 (`:568`); disabled (`:1148`).
-                        Spinner { text: "7"; enabled: false; }
+                        Spinner { label: "Fit to sets of"; text: "7"; enabled: false; }
                         Label { text: " frames "; }
                     }
                     RadioButton {
@@ -502,7 +502,7 @@ export component AlignFramesPanel inherits VerticalLayout {
                         alignment: start;
                         RadioButton { text: "Reduce by"; selected: false; }
                         // spReduceBy: default 4, range 1..16, maximum width 50.
-                        Spinner { text: "4"; enabled: false; }
+                        Spinner { label: "Reduce by"; text: "4"; enabled: false; }
                     }
                     // `pnlTargetAlignSize`: X_AXIS.
                     HorizontalLayout {
@@ -510,7 +510,7 @@ export component AlignFramesPanel inherits VerticalLayout {
                         RadioButton { text: "Reduce to about"; selected: false; }
                         // spTargetAlignSize: default 1250, range 250..4000
                         // step 50, maximum width 70.
-                        Spinner { text: "1250"; box-width: 70px; enabled: false; }
+                        Spinner { label: "Reduce to about"; text: "1250"; box-width: 70px; enabled: false; }
                         // `UIUtilities.isFontLessThanDefaultSize()` branch
                         // (`:598-600`): rigid FixedDim.x2_y0.
                         if root.font-less-than-default: Rectangle { width: 2px; }
@@ -526,7 +526,7 @@ export component AlignFramesPanel inherits VerticalLayout {
                         RadioButton { text: "Test multiple binnings:"; selected: false; }
                         // tfTestBinnings: preferred width 300, disabled
                         // (`:1151`).
-                        TextField { text: ""; width: 300px; enabled: false; }
+                        TextField { label: "Test multiple binnings:"; text: ""; width: 300px; enabled: false; }
                     }
                 }
 
@@ -569,7 +569,7 @@ export component AlignFramesPanel inherits VerticalLayout {
                     CheckBox { text: "Group frames by"; checked: false; }
                     // spGroupFrames: default 2, range 2..20, maximum width 50;
                     // disabled (`:1154`).
-                    Spinner { text: "2"; enabled: false; }
+                    Spinner { label: "Group frames by"; text: "2"; enabled: false; }
                 }
 
                 // ---- `pnlRefinement` (`:631-655`) ----
@@ -585,7 +585,7 @@ export component AlignFramesPanel inherits VerticalLayout {
                         // spRefineAlignment: default 5, range 1..16 (min from
                         // REFINE_ALIGNMENT_SPINNER_MIN, max from
                         // ALIGN_AND_SUM_BINNING_SPINNER_MAX), maximum width 50.
-                        Spinner { text: "5"; enabled: true; }
+                        Spinner { label: "Refine alignment with up to"; text: "5"; enabled: true; }
                         Label { text: " iterations "; }
                     }
                     // `pnlRefineWithGroupSums`: X_AXIS, hidden by
@@ -628,7 +628,7 @@ export component AlignFramesPanel inherits VerticalLayout {
                     }
                     // spMinForSplineSmoothing: default 20, range 10..30,
                     // maximum width 50.
-                    Spinner { text: "20"; enabled: true; }
+                    Spinner { label: "Spline smoothing of shifts if more than"; text: "20"; enabled: true; }
                     Label { text: " frames "; }
                 }
 
@@ -679,7 +679,7 @@ export component AlignFramesPanel inherits VerticalLayout {
                                 selected: true;
                                 enabled: false;
                             }
-                            TextField { text: ""; width: 100px; enabled: false; }
+                            TextField { label: "Dose weighting with fixed dose/image of "; text: ""; width: 100px; enabled: false; }
                             Rectangle { width: 2px; }
                             Label { text: "e/A2"; enabled: false; }
                             Rectangle { width: 2px; }
@@ -725,7 +725,7 @@ export component AlignFramesPanel inherits VerticalLayout {
                     RadioButton { text: "Factor:"; selected: false; }
                     // tfScalingOfSumFactor: preferred width 100, disabled
                     // (`:1190`).
-                    TextField { text: ""; width: 100px; enabled: false; }
+                    TextField { label: "Scale output by Factor:"; text: ""; width: 100px; enabled: false; }
                 }
 
                 // ---- `pnlModeToOutout` (`:707-711`) ----
@@ -749,7 +749,7 @@ export component AlignFramesPanel inherits VerticalLayout {
                     RadioButton { text: ""; selected: false; }
                     // spSumRotationAndFlip: default 0, range 0..7, maximum
                     // width 50; disabled (`:1191`).
-                    Spinner { text: "0"; enabled: false; }
+                    Spinner { label: "Rotation/flip for output "; text: "0"; enabled: false; }
                     Rectangle { width: 5px; }
                     // cmbSumRotationAndFlipTranslation: unlabeled, maximum
                     // width 180, filled from `rotationAndFlipStringList` and

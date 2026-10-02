@@ -82,9 +82,12 @@ mod tests {
     #[test]
     fn source_factories_preserve_data_event_kinds() {
         assert_eq!(
-            QueueTableDataEvent::get_queue_selected_instance(QueueMode::Node, Some("12".into())),
+            QueueTableDataEvent::get_queue_selected_instance(
+                QueueMode::QueueWithSingleCpu,
+                Some("12".into())
+            ),
             QueueTableEvent::QueueSelected {
-                queue_mode: QueueMode::Node,
+                queue_mode: QueueMode::QueueWithSingleCpu,
                 maximum: Some("12".into()),
             }
         );

@@ -4,7 +4,6 @@
 //! the command's standard input.  Keeping blocks typed lets managers inspect
 //! and schedule them without passing a shell string around.
 
-use crate::imod::etomo::process::system_program::ProcessCommand;
 use std::fs;
 use std::io;
 use std::path::{Path, PathBuf};
@@ -122,23 +121,6 @@ impl ComScriptFile {
     }
     pub fn save(&self, path: impl AsRef<Path>) -> io::Result<()> {
         fs::write(path, self.to_text())
-    }
-    /// Convert each COM block into an argv-based command.  No shell is used;
-    /// the block's remaining source lines are sent through standard input.
-    pub fn process_commands(&self) -> Vec<(String, ProcessCommand)> {
-        self.blocks
-            .iter()
-            .enumerate()
-            .map(|(index, block)| {
-                let mut command = ProcessCommand::new(&block.program)
-                    .args(block.args.iter().cloned())
-                    .stdin_lines(block.stdin.iter().cloned());
-                if let Some(path) = self.path.as_ref().and_then(|path| path.parent()) {
-                    command = command.current_dir(path);
-                }
-                (format!("{}:{}", block.program, index + 1), command)
-            })
-            .collect()
     }
 }
 

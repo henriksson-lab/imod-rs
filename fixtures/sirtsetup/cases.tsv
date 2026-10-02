@@ -1,0 +1,19 @@
+# name	inputs (src:dst from inputs/)	env	arguments
+basic	tilt.com:tilt.com ts.ali:ts.ali ts.tlt:ts.tlt ts.xtilt:ts.xtilt	-	-co tilt.com -it 3
+one_proc	tilt.com:tilt.com ts.ali:ts.ali ts.tlt:ts.tlt ts.xtilt:ts.xtilt	-	-co tilt.com -it 4 -nu 1 -le 2,4
+leave_scale	tilt.com:tilt.com ts.ali:ts.ali ts.tlt:ts.tlt ts.xtilt:ts.xtilt	-	-co tilt.com -nu 4 -le 3,5,8 -sc 0,100
+trim_chunks	tilt.com:tilt.com ts.ali:ts.ali ts.tlt:ts.tlt ts.xtilt:ts.xtilt	-	tilt.com -nu 2 -it 2 -tr -rx -ch -st
+subarea	tilt.com:tilt.com ts.ali:ts.ali ts.tlt:ts.tlt ts.xtilt:ts.xtilt	-	tilt.com -nu 3 -it 3 -su 40,30 -yo 2 -mo 1 -rd 0.3,0.05 -fl 0.5 -cs -bo 1024 -ra 3
+resume_clean	tilt.com:tilt.com ts.ali:ts.ali ts.tlt:ts.tlt ts.xtilt:ts.xtilt rec.mrc:ts.srec03 rec.mrc:ts.srec05 rec.mrc:ts.vsr05 rec.mrc:ts.sint04	-	-co tilt.com -nu 1 -it 2 -cl
+resume_iter	tilt.com:tilt.com ts.ali:ts.ali ts.tlt:ts.tlt ts.xtilt:ts.xtilt rec.mrc:ts.srec03 rec.mrc:ts.srec05 rec.mrc:ts.vsr05 rec.mrc:ts.sint04	-	-co tilt.com -nu 2 -re 3 -le 6,7 -tr -f
+vert_resume	xtilt.com:tilt.com ts.ali:ts.ali ts.tlt:ts.tlt ts.xtilt:ts.xtilt rec.mrc:ts.srec12 rec.mrc:ts.vsr12	-	-co tilt.com -nu 2 -it 3
+vert_skip	xtilt.com:tilt.com ts.ali:ts.ali ts.tlt:ts.tlt ts.xtilt:ts.xtilt	-	-co tilt.com -nu 1 -it 2 -sk -st
+local	local.com:tilt.com ts.ali:ts.ali ts.tlt:ts.tlt ts.xtilt:ts.xtilt	-	-co tilt.com -nu 2 -it 2 -pc
+local_sub_test	local.com:tilt.com ts.ali:ts.ali ts.tlt:ts.tlt ts.xtilt:ts.xtilt	-	-co tilt.com -nu 1 -it 2 -su 32,32 -te 1
+xtilt_vary	tilt.com:tilt.com ts.ali:ts.ali ts.tlt:ts.tlt xtvar.xtilt:ts.xtilt	-	-co tilt.com -nu 2 -it 2
+gpu	gpu.com:tilt.com ts.ali:ts.ali ts.tlt:ts.tlt ts.xtilt:ts.xtilt	-	-co tilt.com -it 2 -st
+err_both	tilt.com:tilt.com ts.ali:ts.ali ts.tlt:ts.tlt ts.xtilt:ts.xtilt	-	-co tilt.com -st -re 3
+err_nocom	-	-	-co nothere.com
+err_leave	tilt.com:tilt.com ts.ali:ts.ali ts.tlt:ts.tlt ts.xtilt:ts.xtilt	-	-co tilt.com -le 20 -it 3 -st
+err_subarea	tilt.com:tilt.com ts.ali:ts.ali ts.tlt:ts.tlt ts.xtilt:ts.xtilt	-	-co tilt.com -su 200,10
+err_resume	tilt.com:tilt.com ts.ali:ts.ali ts.tlt:ts.tlt ts.xtilt:ts.xtilt	-	-co tilt.com -re 4

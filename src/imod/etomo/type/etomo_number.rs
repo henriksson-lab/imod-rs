@@ -11,7 +11,7 @@ use super::const_etomo_number::{
     ConstEtomoNumber, Number, Type, java_lang_string_matches_whitespace,
 };
 use crate::imod::etomo::comscript::fortran_input_string::FortranInputString;
-use crate::imod::etomo::storage::storable::Storable;
+use crate::imod::etomo::storage::storable::StorableValue;
 
 /// Java `EtomoNumber`.
 #[derive(Clone, Debug)]
@@ -486,7 +486,7 @@ impl EtomoNumber {
 /// Java `EtomoNumber implements Storable` (through `ConstEtomoNumber`): `store` and
 /// `store(prepend)` are inherited from the superclass, `load` and `load(prepend)` are
 /// declared here.
-impl Storable for EtomoNumber {
+impl StorableValue for EtomoNumber {
     fn store(&self, properties: &mut BTreeMap<String, String>) {
         self.base.store(properties);
     }

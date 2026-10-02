@@ -885,3 +885,85 @@ text 2 golden/g4_transpose.rc
 0
 
 sha256 41a7b3fadad6cda9f21f30938c01b5c0d711524b98377676bf0cf3c0b2d55c5b 8102 golden/g4_transpose.stdout
+sha256 fcdae9d61428ba5d4bf2b51983312b665340a60a476e17405afead33a7bcc00e 1520 golden/pt6_trackgroup_cv.pt6.3dmod
+sha256 a527795efb56dca0e4a942245ca8f5b5f9708e58602b5a3ee1e75fdf484ffd79 18077 golden/pt6_trackgroup_cv.pt6.resid
+text 280 golden/pt6_trackgroup_cv.pt6.tlt
+ -50.52
+ -47.94
+ -45.36
+ -42.79
+ -40.21
+ -37.47
+ -34.73
+ -31.99
+ -29.25
+ -26.51
+ -23.01
+ -19.51
+ -16.00
+ -12.50
+  -9.00
+  -6.37
+  -3.75
+  -1.12
+   1.50
+   4.13
+   6.76
+   9.22
+  11.67
+  14.13
+  16.59
+  19.05
+  21.51
+  25.06
+  28.62
+  32.17
+  35.73
+  39.28
+  41.25
+  43.22
+  45.19
+
+sha256 6cb3e1fff1f38b5bc89e3a8dce684b617e0c2f9dc33e229340f99ff64ddd0772 2555 golden/pt6_trackgroup_cv.pt6.xf
+text 280 golden/pt6_trackgroup_cv.pt6.xtilt
+   0.00
+   0.00
+   0.00
+   0.00
+   0.00
+   0.00
+   0.00
+   0.00
+   0.00
+   0.00
+   0.00
+   0.00
+   0.00
+   0.00
+   0.00
+   0.00
+   0.00
+   0.00
+   0.00
+   0.00
+   0.00
+   0.00
+   0.00
+   0.00
+   0.00
+   0.00
+   0.00
+   0.00
+   0.00
+   0.00
+   0.00
+   0.00
+   0.00
+   0.00
+   0.00
+
+sha256 f84c152e6c20d9aa38b13953bb522be96391e29729e22dfb83179322ea6e86e0 1491 golden/pt6_trackgroup_cv.pt6fid.xyz
+text 2 golden/pt6_trackgroup_cv.rc
+0
+
+sha256 d2fb866efb7e9223b8948bcd4269cd1570cca9519506d5c510f7899f1c301921 11455 golden/pt6_trackgroup_cv.stdout

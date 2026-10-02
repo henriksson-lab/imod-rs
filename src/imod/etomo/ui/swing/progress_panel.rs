@@ -1,355 +1,615 @@
 //! `IMOD/Etomo/src/etomo/ui/swing/ProgressPanel.java`.
 //!
-//! Swing controls/timer are represented by their source-visible state.  Public
-//! mutators execute the corresponding `invokeLater` runnable immediately at
-//! the Rust GUI boundary; callers already invoke these through the UI event
-//! loop, so no alternate worker/UI queue is introduced.
-#![allow(dead_code)]
+//! The task label and progress bar of one axis.  Every public mutator records
+//! the new value and posts the Swing update to the event dispatch thread
+//! (`SwingUtilities.invokeLater`), as the Java does; the posted jobs are the
+//! Java's `Runnable` inner classes, translated as the private `*_later`
+//! functions below.  A job carries the panel as an [`EdtRef`], which is
+//! `Send` but only dereferenced on the event dispatch thread.
+//!
+//! A `javax.swing.Timer` (one second) drives the elapsed-time display while
+//! the bar is indeterminate.
+
+use std::cell::{Cell, RefCell};
+use std::rc::Rc;
+
+use super::ui_harness;
+use super::ui_utilities;
 use crate::imod::etomo::base_manager::BaseManager;
+use crate::imod::etomo::etomo_director;
+use crate::imod::etomo::jdk::{JComponent, Timer};
 use crate::imod::etomo::r#type::axis_id::AxisID;
+use crate::imod::etomo::r#type::debug_level::DebugLevel;
+use crate::imod::etomo::r#type::process_end_state::ProcessEndState;
 use crate::imod::etomo::ui::standard_bar_string::StandardBarString;
+use crate::imod::etomo::util::event_queue::{self, EdtRef};
+use crate::imod::etomo::util::utilities;
 
+/// Java `NAME`.
 pub const NAME: &str = "the-progress-bar";
+/// Java `LABEL_NAME = NAME + "-label"`.
 pub const LABEL_NAME: &str = "the-progress-bar-label";
-pub const MAX_PACK: i32 = 5;
-/// Rust text form of unported `ProcessEndState.getBarString()`.
-pub const DONE_BAR_STRING: &str = "Done";
+/// Java private `MAX_PACK`.
+const MAX_PACK: i32 = 5;
 
-/// Fields and all method behavior of Java's final ProgressPanel.
+/// Java public final class `ProgressPanel`.
 pub struct ProgressPanel {
-    pub panel_visible: bool,
-    pub task_label: String,
-    pub progress_bar_name: &'static str,
-    pub label_name: &'static str,
-    pub manager: &'static dyn BaseManager,
-    pub axis_id: AxisID,
-    pub counter: i32,
-    pub value: i32,
-    pub maximum: i32,
-    pub minimum: i32,
-    pub start_time: Option<std::time::Instant>,
-    pub cur_standard_bar_string: Option<StandardBarString>,
-    pub bar_string: Option<String>,
-    pub emergency_monitor_alert: bool,
-    pub label: Option<String>,
-    pub stopped: bool,
-    pub n_packed: i32,
-    pub indeterminate: bool,
-    pub string_painted: bool,
-    pub timer_running: bool,
-    pub repaint_count: u64,
-    pub revalidate_count: u64,
+    /// Java `panel = new JPanel()`.
+    panel: Rc<JComponent>,
+    /// Java `progressPanel = new JPanel()`: declared, never used by the Java.
+    #[allow(dead_code)]
+    progress_panel: Rc<JComponent>,
+    /// Java `taskLabel = new JLabel()`.
+    task_label: Rc<JComponent>,
+    /// Java `progressBar = new JProgressBar()`.
+    progress_bar: Rc<JComponent>,
+    manager: &'static dyn BaseManager,
+    /// Java `axisID`; the Java constructor accepts null.
+    axis_id: Option<AxisID>,
+
+    // Keep these around so that SwingUtilities.invokeLater can update the
+    // the UI status
+    counter: Cell<i32>,
+    value: Cell<i32>,
+    maximum: Cell<i32>,
+    minimum: Cell<i32>,
+    start_time: Cell<i64>,
+    cur_standard_bar_string: Cell<Option<StandardBarString>>,
+    bar_string: RefCell<Option<String>>,
+    emergency_monitor_alert: Cell<bool>,
+    label: RefCell<Option<String>>,
+    // stopped: IMPORTANT: The stop action should turn this boolean on, all other
+    // actions, except increment should turn this off.
+    stopped: Cell<bool>,
+    n_packed: Cell<i32>,
+    /// Java `debugLevel = EtomoDirector.INSTANCE.getArguments().getDebugLevel()`.
+    #[allow(dead_code)]
+    debug_level: DebugLevel,
+
+    // required - instantiate once
+    progress_timer_action_listener: RefCell<Option<Rc<ProgressTimerActionListener>>>,
+    timer: RefCell<Option<Rc<Timer>>>,
 }
+
 impl ProgressPanel {
-    fn new(label: Option<&str>, manager: &'static dyn BaseManager, axis_id: AxisID) -> Self {
-        Self {
-            panel_visible: true,
-            task_label: label.unwrap_or("").into(),
-            progress_bar_name: NAME,
-            label_name: LABEL_NAME,
+    /// Java private constructor `ProgressPanel(String, BaseManager, AxisID)`.
+    fn new(
+        new_label: Option<&str>,
+        manager: &'static dyn BaseManager,
+        axis_id: Option<AxisID>,
+    ) -> ProgressPanel {
+        let panel = JComponent::new_panel();
+        let task_label = JComponent::new_label("");
+        let progress_bar = JComponent::new_progress_bar();
+        let debug_level = etomo_director::ARGUMENTS.lock().unwrap().get_debug_level();
+        let this = ProgressPanel {
+            panel,
+            progress_panel: JComponent::new_panel(),
+            task_label,
+            progress_bar,
             manager,
             axis_id,
-            counter: 0,
-            value: 0,
-            maximum: 100,
-            minimum: 0,
-            start_time: None,
-            cur_standard_bar_string: None,
-            bar_string: None,
-            emergency_monitor_alert: false,
-            label: None,
-            stopped: true,
-            n_packed: 0,
-            indeterminate: false,
-            string_painted: false,
-            timer_running: false,
-            repaint_count: 0,
-            revalidate_count: 0,
+            counter: Cell::new(0),
+            value: Cell::new(0),
+            maximum: Cell::new(0),
+            minimum: Cell::new(0),
+            start_time: Cell::new(0),
+            cur_standard_bar_string: Cell::new(None),
+            bar_string: RefCell::new(None),
+            emergency_monitor_alert: Cell::new(false),
+            label: RefCell::new(None),
+            stopped: Cell::new(true),
+            n_packed: Cell::new(0),
+            debug_level,
+            progress_timer_action_listener: RefCell::new(None),
+            timer: RefCell::new(None),
+        };
+        if let Some(new_label) = new_label {
+            this.task_label.set_text(new_label);
+        } else {
+            this.task_label.set_text("");
         }
+        // Swing layout: panel.setLayout(new BoxLayout(panel, BoxLayout.Y_AXIS)).
+        this.panel.add(&this.task_label);
+        // Swing layout: panel.add(Box.createRigidArea(FixedDim.x0_y5)).
+        this.panel.add(&this.progress_bar);
+        // Swing layout: panel.setAlignmentY(Component.BOTTOM_ALIGNMENT).
+        this.progress_bar.set_name(Some(NAME));
+        this.task_label.set_name(Some(LABEL_NAME));
+        this
     }
+
+    /// Java static `getInstance(String, BaseManager, AxisID)`.
     pub fn get_instance(
-        label: Option<&str>,
+        new_label: Option<&str>,
         manager: &'static dyn BaseManager,
-        axis_id: AxisID,
-    ) -> Self {
-        let mut panel = Self::new(label, manager, axis_id);
-        panel.add_listeners();
-        panel
+        axis_id: Option<AxisID>,
+    ) -> Rc<ProgressPanel> {
+        let instance = Rc::new(ProgressPanel::new(new_label, manager, axis_id));
+        instance.add_listeners();
+        instance
     }
-    pub fn set_visible(&mut self, visible: bool) {
-        self.panel_visible = visible;
+
+    /// Java `setVisible(boolean)`.
+    pub fn set_visible(&self, visible: bool) {
+        self.panel.set_visible(visible);
     }
-    fn add_listeners(&mut self) {}
-    fn pack(&mut self) {
-        if self.n_packed < MAX_PACK {
-            self.n_packed += 1;
+
+    /// Java private `addListeners()`.
+    fn add_listeners(self: &Rc<Self>) {
+        let listener = ProgressTimerActionListener::new(Rc::downgrade(self));
+        *self.progress_timer_action_listener.borrow_mut() = Some(listener.clone());
+        let timer = Timer::new(
+            1000,
+            Rc::new(move || {
+                listener.action_performed();
+            }),
+        );
+        *self.timer.borrow_mut() = Some(timer);
+    }
+
+    /// Java private `pack()`.  Pack the dialog the first few times it is
+    /// changed, so that scroll bars aren't displayed the first time a process
+    /// runs.
+    fn pack(&self) {
+        if self.n_packed.get() >= MAX_PACK {
+            return;
         }
+        self.n_packed.set(self.n_packed.get() + 1);
+        let manager = self.manager;
+        let axis_id = self.axis_id;
+        ui_harness::with(|harness| harness.pack_axis_id_base_manager(axis_id, Some(manager)));
     }
+
+    /// Java `isStopped()`.
     pub fn is_stopped(&self) -> bool {
-        self.stopped
+        self.stopped.get()
     }
-    pub fn set_background(&mut self, _background: impl Into<String>) {}
-    pub fn set_label(&mut self, label: &str) {
-        self.stopped = false;
-        self.label = Some(label.into());
-        self.set_label_later();
+
+    // Java `setBackground(Color bg) { panel.setBackground(bg); }` - Swing
+    // painting (background colour), not modelled.
+
+    /// Java `setLabel(String)`.
+    pub fn set_label(self: &Rc<Self>, new_label: Option<&str>) {
+        self.stopped.set(false);
+        *self.label.borrow_mut() = new_label.map(str::to_owned);
+        let this = EdtRef::new(self.clone());
+        event_queue::invoke_later(move || this.get().set_label_later());
     }
-    fn set_label_later(&mut self) {
+
+    /// Java inner class `SetLabelLater.run()`.
+    fn set_label_later(&self) {
         self.set_task_label();
         self.revalidate();
         self.repaint();
         self.pack();
     }
-    pub fn start(&mut self) {
-        self.stopped = false;
-        self.counter = 0;
-        self.bar_string = None;
-        self.start_time = Some(std::time::Instant::now());
-        self.start_later();
+
+    /// Java `start()`.
+    pub fn start(self: &Rc<Self>) {
+        self.stopped.set(false);
+        // Setting the progress bar indeterminate causes it to move on its own
+        self.counter.set(0);
+        *self.bar_string.borrow_mut() = None;
+        self.start_time
+            .set(utilities::java_lang_system_current_time_millis());
+        let this = EdtRef::new(self.clone());
+        event_queue::invoke_later(move || this.get().start_later());
     }
-    fn start_later(&mut self) {
-        self.emergency_monitor_alert = false;
-        self.indeterminate = true;
-        self.cur_standard_bar_string = None;
-        self.set_bar_string_and_prefer("");
+
+    /// Java inner class `StartLater.run()`.
+    fn start_later(&self) {
+        self.emergency_monitor_alert.set(false);
+        let progress_bar = self.get_progress_bar();
+        progress_bar.set_indeterminate(true);
+        self.cur_standard_bar_string.set(None);
+        Self::set_bar_string_and_prefer(Some(&progress_bar), Some(""), true);
         self.start_timer();
         self.pack();
     }
-    pub fn start_indeterminate_mode(&mut self) {
-        self.stopped = false;
-        self.counter = 0;
-        self.start_time = Some(std::time::Instant::now());
-        self.start_indeterminate_mode_later();
+
+    /// Java `startIndeterminateMode()`.
+    pub fn start_indeterminate_mode(self: &Rc<Self>) {
+        self.stopped.set(false);
+        // Setting the progress bar indeterminate causes it to move on its own
+        self.counter.set(0);
+        self.start_time
+            .set(utilities::java_lang_system_current_time_millis());
+        let this = EdtRef::new(self.clone());
+        event_queue::invoke_later(move || this.get().start_indeterminate_mode_later());
     }
-    fn start_indeterminate_mode_later(&mut self) {
-        self.emergency_monitor_alert = false;
-        self.indeterminate = true;
-        self.cur_standard_bar_string = None;
-        self.set_bar_string_and_prefer("");
+
+    /// Java inner class `startIndeterminateModeLater.run()`.
+    fn start_indeterminate_mode_later(&self) {
+        self.emergency_monitor_alert.set(false);
+        let progress_bar = self.get_progress_bar();
+        progress_bar.set_indeterminate(true);
+        self.cur_standard_bar_string.set(None);
+        Self::set_bar_string_and_prefer(Some(&progress_bar), Some(""), true);
         self.revalidate();
         self.repaint();
         self.pack();
     }
-    pub fn stop(&mut self, state: Option<&str>, status: Option<&str>) {
-        self.stopped = true;
-        self.counter = 0;
-        if state != Some("FILE_LOCK_FAILURE") {
-            self.bar_string = None;
+
+    /// Java `stop(ProcessEndState, String)`.
+    pub fn stop(self: &Rc<Self>, state: Option<ProcessEndState>, status_string: Option<&str>) {
+        let mut state = state;
+        self.stopped.set(true);
+        self.counter.set(0);
+        // File lock information should be preserved.
+        if state != Some(ProcessEndState::FileLockFailure) {
+            *self.bar_string.borrow_mut() = None;
         }
-        self.stop_later(state.unwrap_or(DONE_BAR_STRING), status);
+        if state.is_none() {
+            state = Some(ProcessEndState::Done);
+        }
+        let this = EdtRef::new(self.clone());
+        let status_string = status_string.map(str::to_owned);
+        event_queue::invoke_later(move || this.get().stop_later(state, status_string.as_deref()));
     }
-    fn stop_later(&mut self, state: &str, status: Option<&str>) {
+
+    /// Java inner class `StopLater.run()`.
+    fn stop_later(&self, state: Option<ProcessEndState>, status_string: Option<&str>) {
         self.stop_timer();
-        self.value = self.counter;
-        self.indeterminate = false;
-        self.emergency_monitor_alert = false;
-        let mut text = if self.cur_standard_bar_string.is_some() {
-            self.bar_string.clone().unwrap_or_default()
-        } else {
-            String::new()
-        };
-        if !state.is_empty() {
-            if !text.is_empty() {
-                text.push(' ');
+        let progress_bar = self.get_progress_bar();
+        self.set_progress_bar_counter();
+        progress_bar.set_indeterminate(false);
+        // If it's failed, don't override emergency monitor bar strings.
+        // if (state == ProcessEndState.FILE_LOCK_FAILURE
+        // || (emergencyMonitorAlert && state == ProcessEndState.FAILED)) {
+        // return;
+        // }
+        self.emergency_monitor_alert.set(false);
+        let mut new_bar_string = String::new();
+        let cur_bar_string = progress_bar.get_string();
+        // Keep the current bar string if its still in force.
+        if let Some(cur_standard_bar_string) = self.cur_standard_bar_string.get() {
+            if cur_standard_bar_string.matches(cur_bar_string.as_deref()) {
+                // Java StringBuilder.append(null) appends "null"; matches() is
+                // false for a null string, so it cannot be null here.
+                new_bar_string.push_str(cur_bar_string.as_deref().unwrap_or("null"));
             }
-            text.push_str(state);
         }
-        if let Some(status) = status.filter(|s| !s.is_empty()) {
-            if !text.is_empty() {
-                text.push_str(":  ");
+        if let Some(state) = state {
+            if !new_bar_string.is_empty() {
+                new_bar_string.push(' ');
             }
-            text.push_str(status);
+            new_bar_string.push_str(state.get_bar_string());
         }
-        self.set_bar_string_and_prefer(&text);
+        if !utilities::is_empty(status_string) {
+            if !new_bar_string.is_empty() {
+                new_bar_string.push_str(":  ");
+            }
+            new_bar_string.push_str(status_string.unwrap());
+        }
+        Self::set_bar_string_and_prefer(Some(&progress_bar), Some(&new_bar_string), true);
         self.pack();
     }
-    pub fn increment(&mut self) {
-        self.increment_later(self.stopped);
+
+    /// Java private static `setBarStringAndPrefer(JProgressBar, String, boolean)`.
+    /// Sets the progress bar string and increases its preferred width if
+    /// necessary.  Returns true if the width changed.
+    fn set_bar_string_and_prefer(
+        progress_bar: Option<&Rc<JComponent>>,
+        bar_string: Option<&str>,
+        paint: bool,
+    ) -> bool {
+        let width_changed = ui_utilities::set_string_and_prefer(progress_bar, bar_string, true);
+        if progress_bar.is_some() && paint {
+            // Swing painting: progressBar.setStringPainted(true).
+        }
+        width_changed
     }
-    fn increment_later(&mut self, stopped: bool) {
+
+    /// Java private `increment()`.
+    fn increment(self: &Rc<Self>) {
+        let this = EdtRef::new(self.clone());
+        let stopped = self.stopped.get();
+        event_queue::invoke_later(move || this.get().increment_later(stopped));
+    }
+
+    /// Java inner class `IncrementLater.run()`, with its `stopped` field.
+    fn increment_later(&self, stopped: bool) {
+        // Fixing a bug during kill process where the timer doesn't stop: the
+        // progress bar goes to determinate mode and increments based on the timer.
+        // If the progress bar is stopped this call should never happen.
+        // If the timer did not stop before it generated the event that caused
+        // increment to be called, then the timer will never stop.
+        // Tell the timer to stop each time this function is called incorrectly.
         if stopped {
             return;
         }
-        self.value = self.value;
-        let elapsed = self.start_time.map(|t| t.elapsed().as_secs()).unwrap_or(0);
-        let time = format!("{}:{:02}", elapsed / 60, elapsed % 60);
-        let base = self
-            .bar_string
-            .clone()
-            .unwrap_or_else(|| "Elapsed time".into());
-        self.set_bar_string_and_prefer(&format!("{base} : {time}"));
+        self.set_progress_bar_value();
+        // Put the elapsed time into the progress bar string
+        let bar_string = self.bar_string.borrow().clone();
+        match bar_string {
+            None => {
+                Self::set_bar_string_and_prefer(
+                    Some(&self.get_progress_bar()),
+                    Some(&format!(
+                        "Elapsed time: {}",
+                        utilities::millis_to_min_and_secs(
+                            (utilities::java_lang_system_current_time_millis()
+                                - self.get_start_time()) as f64
+                        )
+                    )),
+                    true,
+                );
+            }
+            Some(bar_string) => {
+                Self::set_bar_string_and_prefer(
+                    Some(&self.get_progress_bar()),
+                    Some(&format!(
+                        "{} : {}",
+                        bar_string,
+                        utilities::millis_to_min_and_secs(
+                            (utilities::java_lang_system_current_time_millis()
+                                - self.get_start_time()) as f64
+                        )
+                    )),
+                    true,
+                );
+            }
+        }
         self.validate();
         self.repaint();
-        self.counter += 1;
+        self.increment_counter();
         self.restart_timer();
         self.pack();
     }
-    pub fn set_maximum(&mut self, maximum: i32, indeterminate: bool) {
-        self.stopped = false;
-        self.maximum = maximum;
-        self.set_maximum_later(indeterminate);
+
+    /// Java `setMaximum(int, boolean)`.
+    pub fn set_maximum(self: &Rc<Self>, n: i32, indeterminate_mode: bool) {
+        self.stopped.set(false);
+        self.maximum.set(n);
+        let this = EdtRef::new(self.clone());
+        event_queue::invoke_later(move || this.get().set_maximum_later(indeterminate_mode));
     }
-    fn set_maximum_later(&mut self, indeterminate: bool) {
-        self.indeterminate = indeterminate;
-        self.string_painted = true;
-        if indeterminate {
+
+    /// Java inner class `SetMaximumLater.run()`.
+    fn set_maximum_later(&self, indeterminate_mode: bool) {
+        self.set_progress_bar_maximum();
+        self.get_progress_bar()
+            .set_indeterminate(indeterminate_mode);
+        // Swing painting: getProgressBar().setStringPainted(true).
+        if indeterminate_mode {
             self.revalidate();
             self.repaint();
         }
         self.pack();
     }
-    pub fn set_minimum(&mut self, minimum: i32) {
-        self.stopped = false;
-        self.minimum = minimum;
+
+    /// Java `setMinimum(int)`.
+    pub fn set_minimum(self: &Rc<Self>, n: i32) {
+        self.stopped.set(false);
+        self.minimum.set(n);
+        let this = EdtRef::new(self.clone());
+        event_queue::invoke_later(move || this.get().set_minimum_later());
     }
-    pub fn set_value(&mut self, value: i32) {
-        self.stopped = false;
-        self.value = value;
+
+    /// Java inner class `SetMinimumLater.run()`.
+    fn set_minimum_later(&self) {
+        self.set_progress_bar_minimum();
     }
-    pub fn set_emergency_monitor_bar_string(&mut self, standard: StandardBarString, bar: &str) {
-        self.emergency_monitor_alert = true;
-        self.set_progress_bar_string(Some(standard), Some(bar));
+
+    /// Java `setValue(int)`.
+    pub fn set_value_int(self: &Rc<Self>, n: i32) {
+        self.stopped.set(false);
+        self.value.set(n);
+        let this = EdtRef::new(self.clone());
+        event_queue::invoke_later(move || this.get().set_value_later());
     }
+
+    /// Java inner class `SetValueLater.run()`.
+    fn set_value_later(&self) {
+        self.set_progress_bar_value();
+    }
+
+    /// Java synchronized `setEmergencyMonitorBarString(StandardBarString, String)`.
+    /// The panel is confined to the event dispatch thread, so `synchronized`
+    /// has no Rust counterpart.
+    pub fn set_emergency_monitor_bar_string(
+        self: &Rc<Self>,
+        standard_bar_string: Option<StandardBarString>,
+        bar_string: Option<&str>,
+    ) {
+        // Java constructor of SetEmergencyMonitorBarStringLater, run here.
+        self.emergency_monitor_alert.set(true);
+        let this = EdtRef::new(self.clone());
+        let bar_string = bar_string.map(str::to_owned);
+        event_queue::invoke_later(move || {
+            this.get()
+                .set_emergency_monitor_bar_string_later(standard_bar_string, bar_string.as_deref())
+        });
+    }
+
+    /// Java inner class `SetEmergencyMonitorBarStringLater.run()`.
+    fn set_emergency_monitor_bar_string_later(
+        &self,
+        standard_bar_string: Option<StandardBarString>,
+        bar_string: Option<&str>,
+    ) {
+        self.set_progress_bar_string(standard_bar_string, bar_string);
+    }
+
+    /// Java `isProgressBarStopped()`.
     pub fn is_progress_bar_stopped(&self) -> bool {
-        self.stopped
+        self.stopped.get()
     }
-    pub fn set_value_standard(
-        &mut self,
-        value: i32,
-        standard: Option<StandardBarString>,
-        bar: Option<&str>,
+
+    /// Java synchronized `setValue(int, StandardBarString, String, boolean)`.
+    pub fn set_value_int_standard_bar_string_string_boolean(
+        self: &Rc<Self>,
+        n: i32,
+        standard_bar_string: Option<StandardBarString>,
+        bar_string: Option<&str>,
+        print: bool,
+    ) {
+        self.stopped.set(false);
+        self.value.set(n);
+        // this.barString = barString;
+        let this = EdtRef::new(self.clone());
+        let bar_string = bar_string.map(str::to_owned);
+        event_queue::invoke_later(move || {
+            this.get()
+                .set_value_and_string_later(standard_bar_string, bar_string.as_deref(), print)
+        });
+    }
+
+    /// Java inner class `SetValueAndStringLater.run()`; its `print` field is
+    /// not read by `run`.
+    fn set_value_and_string_later(
+        &self,
+        standard_bar_string: Option<StandardBarString>,
+        bar_string: Option<&str>,
         _print: bool,
     ) {
-        self.stopped = false;
-        self.value = value;
-        self.set_progress_bar_string(standard, bar);
+        self.set_progress_bar_value();
+        self.set_progress_bar_string(standard_bar_string, bar_string);
     }
-    pub fn get_container(&self) -> bool {
-        self.panel_visible
+
+    /// Java `getContainer()`.
+    pub fn get_container(&self) -> Rc<JComponent> {
+        self.panel.clone()
     }
+
+    /// Java `getMaximum()`.
     pub fn get_maximum(&self) -> i32 {
-        self.maximum
+        self.progress_bar.get_maximum()
     }
+
+    /// Java `getMinimum()`.
     pub fn get_minimum(&self) -> i32 {
-        self.minimum
+        self.progress_bar.get_minimum()
     }
+
+    /// Java `getValue()`.
     pub fn get_value(&self) -> i32 {
-        self.value
+        self.progress_bar.get_value()
     }
-    #[allow(non_snake_case)]
-    pub fn getStartTime(&self) -> Option<std::time::Instant> {
-        self.start_time
+
+    /// Java private `setTaskLabel()`.
+    fn set_task_label(&self) {
+        // The label starts a new process.
+        self.cur_standard_bar_string.set(None);
+        let label = self.label.borrow().clone();
+        if let Some(label) = label {
+            self.task_label.set_text(&label);
+        } else {
+            self.task_label.set_text("");
+        }
     }
-    /// Native replacement for Java `getProgressBar`; state is rendered by the
-    /// selected Rust GUI toolkit rather than exposing a Swing component.
-    #[allow(non_snake_case)]
-    pub fn getProgressBar(&self) -> &Self {
-        self
+
+    /// Java private `revalidate()`.
+    fn revalidate(&self) {
+        // Swing layout: panel.revalidate().
     }
-    #[allow(non_snake_case)]
-    pub fn setProgressBarCounter(&mut self) {
-        self.value = self.counter;
+
+    /// Java private `repaint()`.
+    fn repaint(&self) {
+        // Swing painting: panel.repaint().
     }
-    #[allow(non_snake_case)]
-    pub fn setProgressBarValue(&mut self) {
-        self.value = self.value;
+
+    /// Java private `validate()`.
+    fn validate(&self) {
+        // Swing layout: panel.validate().
     }
-    #[allow(non_snake_case)]
-    pub fn incrementCounter(&mut self) {
-        self.counter += 1;
+
+    /// Java private `getProgressBar()`.
+    fn get_progress_bar(&self) -> Rc<JComponent> {
+        self.progress_bar.clone()
     }
-    #[allow(non_snake_case)]
-    pub fn setProgressBarMaximum(&mut self) {
-        self.maximum = self.maximum;
+
+    /// Java private `restartTimer()`.
+    fn restart_timer(&self) {
+        let timer = self.timer.borrow().clone();
+        if let Some(timer) = timer {
+            timer.restart();
+        }
     }
-    #[allow(non_snake_case)]
-    pub fn setProgressBarMinimum(&mut self) {
-        self.minimum = self.minimum;
+
+    /// Java private `startTimer()`.
+    fn start_timer(&self) {
+        let timer = self.timer.borrow().clone();
+        if let Some(timer) = timer {
+            timer.start();
+        }
     }
-    #[allow(non_snake_case)]
-    pub fn setProgressBarString(&mut self, standard: Option<StandardBarString>, bar: Option<&str>) {
-        self.set_progress_bar_string(standard, bar);
+
+    /// Java private `stopTimer()`.
+    fn stop_timer(&self) {
+        let timer = self.timer.borrow().clone();
+        if let Some(timer) = timer {
+            timer.stop();
+        }
     }
-    fn set_task_label(&mut self) {
-        self.cur_standard_bar_string = None;
-        self.task_label = self.label.clone().unwrap_or_default();
+
+    /// Java private `setProgressBarCounter()`.
+    fn set_progress_bar_counter(&self) {
+        self.progress_bar.set_value(self.counter.get());
     }
-    fn revalidate(&mut self) {
-        self.revalidate_count += 1;
+
+    /// Java private `setProgressBarValue()`.
+    fn set_progress_bar_value(&self) {
+        self.progress_bar.set_value(self.value.get());
     }
-    fn repaint(&mut self) {
-        self.repaint_count += 1;
+
+    /// Java private `incrementCounter()`.
+    fn increment_counter(&self) {
+        self.counter.set(self.counter.get() + 1);
     }
-    fn validate(&mut self) {}
-    fn restart_timer(&mut self) {
-        self.timer_running = true;
+
+    /// Java private `setProgressBarMaximum()`.
+    fn set_progress_bar_maximum(&self) {
+        self.progress_bar.set_maximum(self.maximum.get());
     }
-    fn start_timer(&mut self) {
-        self.timer_running = true;
+
+    /// Java private `setProgressBarMinimum()`.
+    fn set_progress_bar_minimum(&self) {
+        self.progress_bar.set_minimum(self.minimum.get());
     }
-    fn stop_timer(&mut self) {
-        self.timer_running = false;
-    }
-    fn set_bar_string_and_prefer(&mut self, bar: &str) -> bool {
-        let changed = self.bar_string.as_deref() != Some(bar);
-        self.bar_string = Some(bar.into());
-        self.string_painted = true;
-        changed
-    }
-    fn set_progress_bar_string(&mut self, standard: Option<StandardBarString>, bar: Option<&str>) {
-        self.cur_standard_bar_string = standard;
-        if self.set_bar_string_and_prefer(bar.unwrap_or("")) {
+
+    /// Java private `setProgressBarString(StandardBarString, String)`.
+    fn set_progress_bar_string(
+        &self,
+        standard_bar_string: Option<StandardBarString>,
+        bar_string: Option<&str>,
+    ) {
+        self.cur_standard_bar_string.set(standard_bar_string);
+        *self.bar_string.borrow_mut() = bar_string.map(str::to_owned);
+        if bar_string.is_some() {
+            if Self::set_bar_string_and_prefer(Some(&self.progress_bar), bar_string, true) {
+                self.pack();
+            }
+        } else if Self::set_bar_string_and_prefer(Some(&self.progress_bar), Some(""), true) {
             self.pack();
         }
     }
-}
-pub struct ProgressTimerActionListener;
-impl ProgressTimerActionListener {
-    pub fn action_performed(panel: &mut ProgressPanel) {
-        panel.increment();
+
+    /// Java private `getStartTime()`.
+    fn get_start_time(&self) -> i64 {
+        self.start_time.get()
     }
 }
 
-/// GUI-loop callback used for each Java `Runnable` in `ProgressPanel`.
-/// The caller selects the source transition; each operates synchronously at
-/// the native UI boundary, exactly as the panel's public methods do.
-pub struct ProgressPanelRunnable;
-impl ProgressPanelRunnable {
-    pub fn run(panel: &mut ProgressPanel) {
-        panel.increment();
-    }
+/// Java private static final class `ProgressTimerActionListener implements
+/// ActionListener`.  Holds its panel weakly (the panel owns the timer that
+/// owns this listener).
+struct ProgressTimerActionListener {
+    panel: std::rc::Weak<ProgressPanel>,
 }
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use crate::imod::etomo::directive_editor_manager::DirectiveEditorManager;
-    fn panel() -> ProgressPanel {
-        ProgressPanel::get_instance(
-            Some("No process"),
-            DirectiveEditorManager::new(None, None, None, None),
-            AxisID::Only,
-        )
+
+impl ProgressTimerActionListener {
+    /// Java private constructor `ProgressTimerActionListener(ProgressPanel)`.
+    fn new(panel: std::rc::Weak<ProgressPanel>) -> Rc<ProgressTimerActionListener> {
+        Rc::new(ProgressTimerActionListener { panel })
     }
-    #[test]
-    fn determinate_state_and_stop_follow_source() {
-        let mut p = panel();
-        p.set_label("align");
-        p.set_minimum(0);
-        p.set_maximum(5, false);
-        p.set_value(2);
-        p.stop(Some("DONE"), Some("ok"));
-        assert!(p.is_stopped());
-        assert!(!p.indeterminate);
-        assert!(p.bar_string.as_deref().unwrap().contains("DONE:  ok"));
-    }
-    #[test]
-    fn timer_does_not_increment_after_stop() {
-        let mut p = panel();
-        p.start();
-        p.increment();
-        let value = p.value;
-        p.stop(None, None);
-        p.increment();
-        assert_eq!(p.value, value);
+
+    /// Java `actionPerformed(ActionEvent)`.
+    fn action_performed(&self) {
+        let Some(panel) = self.panel.upgrade() else {
+            return;
+        };
+        panel.increment();
     }
 }

@@ -1,576 +1,560 @@
 //! `IMOD/Etomo/src/etomo/ui/swing/AlignmentEstimationDialog.java`.
 //!
-//! Swing construction and `ApplicationManager` process calls stay at explicit
-//! boundaries.  This unit retains the dialog-owned layout, button/action state,
-//! tiltalign delegation, log-tab selection, and action routing.
-#![allow(dead_code)]
+//! Java `public final class AlignmentEstimationDialog extends ProcessDialog
+//! implements ContextMenu, Run3dmodButtonContainer`: the Fine Alignment
+//! dialog.  An EDT object: created as `Rc<Self>` by
+//! [`AlignmentEstimationDialog::new`]; every method takes `&self`; the
+//! `ProcessDialog` superclass is the embedded `base` (reached through
+//! `Deref`), and the overridden `done()` is `ProcessDialogVirtual::done`.  The
+//! inner listener class `AlignmentEstimationActionListner` is a closure holding
+//! a weak reference to the dialog.
 
-use std::path::Path;
+use std::ops::Deref;
+use std::rc::{Rc, Weak};
 
+use super::beveled_border::BeveledBorder;
+use super::context_menu::ContextMenu;
+use super::context_popup::ContextPopup;
+use super::deferred_3dmod_button::Deferred3dmodButton;
+use super::etomo_panel::EtomoPanel;
+use super::generic_mouse_adapter::GenericMouseAdapter;
+use super::multi_line_button::MultiLineButton;
+use super::process_dialog::{ProcessDialog, ProcessDialogVirtual};
+use super::run_3dmod_button::Run3dmodButton;
+use super::run_3dmod_button_container::Run3dmodButtonContainer;
+use super::spaced_panel::{SpacedPanel, X_AXIS};
+use super::tiltalign_panel::{TiltalignPanel, TiltalignParamsException};
+use super::ui_harness;
+use crate::imod::etomo::application_manager::ApplicationManager;
+use crate::imod::etomo::base_manager::BaseManager;
 use crate::imod::etomo::comscript::fortran_input_syntax_exception::FortranInputSyntaxException;
+use crate::imod::etomo::comscript::makecomfile_param::MakecomfileParam;
+use crate::imod::etomo::comscript::restrictalign_param::RestrictalignParam;
+use crate::imod::etomo::comscript::tiltalign_param::TiltalignParam;
+use crate::imod::etomo::comscript::tomodataplots_param::Task;
+use crate::imod::etomo::jdk::{ActionEvent, ActionListener, JComponent, MouseEvent, MouseListener};
 use crate::imod::etomo::process::imod_process::{BeadFixerMode, Run3dmodMenuOptions};
 use crate::imod::etomo::r#type::axis_id::AxisID;
+use crate::imod::etomo::r#type::base_screen_state::BaseScreenState;
+use crate::imod::etomo::r#type::dialog_type::DialogType;
+use crate::imod::etomo::r#type::file_type;
+use crate::imod::etomo::r#type::meta_data::MetaData;
+use crate::imod::etomo::r#type::process_result_display::ProcessResultDisplayHandle;
 
-use super::context_popup::{ContextPopup, GraphTask, MouseEvent};
-use super::deferred_3dmod_button::Deferred3dmodButton;
-use super::multi_line_button::MultiLineButton;
-use super::tiltalign_panel::{TiltalignPanel, TiltalignParameter};
-
-pub const FINE_ALIGNMENT_BORDER: &str = "Fine Alignment";
-pub const COMPUTE_ALIGNMENT: &str = "Compute Alignment";
-pub const VIEW_EDIT_FIDUCIAL_MODEL: &str = "View/Edit Fiducial Model";
-pub const VIEW_3D_MODEL: &str = "View 3D Model";
-pub const VIEW_RESIDUAL_VECTORS: &str = "View Residual Vectors";
-
-/// The one `FileType` singleton passed by this source unit.  Resolving its
-/// filename remains in `FileType.java`/the manager boundary.
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub enum AlignmentEstimationFileType {
-    Fiducial3dModel,
-}
-
-/// Direct `ApplicationManager` calls made by `AlignmentEstimationDialog`.
-pub trait AlignmentEstimationDialogApplicationManager {
-    fn fine_alignment(&mut self, axis_id: AxisID, button: &MultiLineButton);
-    fn imod_view_model(&mut self, axis_id: AxisID, file_type: AlignmentEstimationFileType);
-    fn imod_fix_fiducials(
-        &mut self,
-        axis_id: AxisID,
-        options: Option<Run3dmodMenuOptions>,
-        mode: BeadFixerMode,
-    );
-    fn imod_view_residuals(&mut self, axis_id: AxisID, options: Option<Run3dmodMenuOptions>);
-    fn done_alignment_estimation_dialog(&mut self, axis_id: AxisID);
-    fn pack(&mut self, axis_id: AxisID);
-}
-
-/// The constructor's two direct `ApplicationManager` queries.  Keeping this
-/// separate avoids pretending that the dialog owns the process-result factory.
-pub trait AlignmentEstimationDialogFactory {
-    fn get_compute_alignment(&self, axis_id: AxisID) -> MultiLineButton;
-    fn is_advanced_fine_alignment(&self, axis_id: AxisID) -> bool;
-}
-
-/// `BaseScreenState` subset delegated unchanged to `TiltalignPanel`.
-pub trait AlignmentEstimationScreenState: TiltalignParameter {}
-impl<T: TiltalignParameter> AlignmentEstimationScreenState for T {}
-/// Java `ConstMetaData` and `MetaData` at this dialog's boundary.
-pub trait AlignmentEstimationMetaData: TiltalignParameter {}
-impl<T: TiltalignParameter> AlignmentEstimationMetaData for T {}
-/// Java `RestrictalignParam`, `TiltalignParam`, and `MakecomfileParam` boundary.
-pub trait AlignmentEstimationParameter: TiltalignParameter {}
-impl<T: TiltalignParameter> AlignmentEstimationParameter for T {}
-
-/// Java's two `Run3dmodButton`s at the viewer boundary.
-#[derive(Clone, Debug, Eq, PartialEq)]
-pub struct Run3dmodButton {
-    pub label: String,
-    pub action_command: String,
-    pub tooltip: Option<String>,
-    pub action_listener_count: usize,
-}
-impl Run3dmodButton {
-    pub fn get_3dmod_instance(label: &str) -> Self {
-        Self {
-            label: label.into(),
-            action_command: label.into(),
-            tooltip: None,
-            action_listener_count: 0,
-        }
-    }
-    pub fn add_action_listener(&mut self) {
-        self.action_listener_count += 1;
-    }
-    pub fn remove_action_listener(&mut self) {
-        self.action_listener_count = self.action_listener_count.saturating_sub(1);
-    }
-    pub fn set_tool_tip_text(&mut self, text: &str) {
-        self.tooltip = Some(text.into());
-    }
-}
-
-/// Source-owned JPanel / BoxLayout construction state.
-#[derive(Clone, Debug, Default, Eq, PartialEq)]
-pub struct AlignmentEstimationDialogLayout {
-    pub panel_button_box_layout_y_axis: bool,
-    pub alignment_panel_box_layout_y_axis: bool,
-    pub alignment_panel_border: Option<String>,
-    pub root_panel_box_layout_y_axis: bool,
-    pub root_panel_order: Vec<String>,
-    pub panel_button_order: Vec<String>,
-    pub top_button_order: Vec<String>,
-    pub bottom_button_order: Vec<String>,
-    pub alignment_panel_order: Vec<String>,
-    /// Java constructs this JScrollPane but adds `pnlAlignEst` directly.
-    pub scroll_pane_created: bool,
-    pub scroll_pane_viewport_view: Option<String>,
-    pub mouse_listener_count: usize,
-}
-
-/// Java final `AlignmentEstimationDialog` state.
+/// Java `public final class AlignmentEstimationDialog extends ProcessDialog
+/// implements ContextMenu, Run3dmodButtonContainer`.
 pub struct AlignmentEstimationDialog {
-    pub axis_id: AxisID,
-    pub pnl_tiltalign: TiltalignPanel,
-    pub layout: AlignmentEstimationDialogLayout,
-    pub btn_compute_alignment: MultiLineButton,
-    pub btn_imod: Run3dmodButton,
-    pub btn_view_3d_model: MultiLineButton,
-    pub btn_view_residuals: Run3dmodButton,
-    pub action_listener_present: bool,
-    pub patch_tracking: bool,
-    pub advanced: bool,
-    pub displayed: bool,
-    pub execute_button_text: String,
-    pub context_popup: Option<ContextPopup>,
+    /// The `ProcessDialog` superclass.
+    base: Rc<ProcessDialog>,
+    /// Java private `pnlAlignEst = new EtomoPanel()`.
+    pnl_align_est: Rc<EtomoPanel>,
+    /// Java private `border = new BeveledBorder("Fine Alignment")`.
+    border: BeveledBorder,
+    /// Java private `pnlTiltalign`.
+    pnl_tiltalign: Rc<TiltalignPanel>,
+    /// Java private `panelButton = new JPanel()`.
+    panel_button: Rc<JComponent>,
+    /// Java private final `btnComputeAlignment`.
+    btn_compute_alignment: Rc<MultiLineButton>,
+    /// Java private `btnImod`.
+    btn_imod: Rc<Run3dmodButton>,
+    /// Java private `btnView3DModel`.
+    btn_view_3d_model: Rc<MultiLineButton>,
+    /// Java private `btnViewResiduals`.
+    btn_view_residuals: Rc<Run3dmodButton>,
+    /// Java private final `actionListener` (an
+    /// `AlignmentEstimationActionListner`).
+    action_listener: ActionListener,
+
+    /// Java private `patchTracking = false`.
+    patch_tracking: std::cell::Cell<bool>,
+}
+
+impl Deref for AlignmentEstimationDialog {
+    type Target = ProcessDialog;
+    fn deref(&self) -> &ProcessDialog {
+        &self.base
+    }
 }
 
 impl AlignmentEstimationDialog {
-    /// Java constructor.  The process-result factory is represented by its returned
-    /// `btnComputeAlignment`, preserving factory ownership outside this dialog.
+    /// Java public constructor `AlignmentEstimationDialog(ApplicationManager,
+    /// AxisID)`.
     pub fn new(
+        app_mgr: &'static ApplicationManager,
         axis_id: AxisID,
-        mut btn_compute_alignment: MultiLineButton,
-        advanced: bool,
-    ) -> Self {
-        btn_compute_alignment.set_text(COMPUTE_ALIGNMENT);
-        if btn_compute_alignment.get_action_command().is_none() {
-            btn_compute_alignment.set_action_command(Some(COMPUTE_ALIGNMENT));
-        }
-        let mut dialog = Self {
-            axis_id,
-            pnl_tiltalign: TiltalignPanel::get_instance(axis_id),
-            layout: AlignmentEstimationDialogLayout {
-                panel_button_box_layout_y_axis: true,
-                alignment_panel_box_layout_y_axis: true,
-                alignment_panel_border: Some(FINE_ALIGNMENT_BORDER.into()),
-                root_panel_box_layout_y_axis: true,
-                root_panel_order: vec!["pnlAlignEst".into(), "exitButtons".into()],
-                panel_button_order: vec![
-                    "topButtonPanel".into(),
-                    "rigidArea(x0,y10)".into(),
-                    "bottomButtonPanel".into(),
-                ],
-                top_button_order: vec!["btnComputeAlignment".into(), "btnImod".into()],
-                bottom_button_order: vec!["btnView3DModel".into(), "btnViewResiduals".into()],
-                alignment_panel_order: vec![
-                    "pnlTiltalign".into(),
-                    "rigidArea(x5,y0)".into(),
-                    "panelButton".into(),
-                ],
-                scroll_pane_created: true,
-                scroll_pane_viewport_view: Some("pnlAlignEst".into()),
-                mouse_listener_count: 2,
-            },
-            btn_compute_alignment,
-            btn_imod: Run3dmodButton::get_3dmod_instance(VIEW_EDIT_FIDUCIAL_MODEL),
-            btn_view_3d_model: MultiLineButton::new_with_label(Some(VIEW_3D_MODEL)),
-            btn_view_residuals: Run3dmodButton::get_3dmod_instance(VIEW_RESIDUAL_VECTORS),
-            action_listener_present: true,
-            patch_tracking: false,
-            advanced,
-            displayed: true,
-            execute_button_text: "Done".into(),
-            context_popup: None,
-        };
+    ) -> Rc<AlignmentEstimationDialog> {
+        let dialog = Rc::new_cyclic(|this: &Weak<AlignmentEstimationDialog>| {
+            // super(appMgr, axisID, DialogType.FINE_ALIGNMENT)
+            let base = ProcessDialog::new_application_manager_axis_id_dialog_type(
+                app_mgr,
+                axis_id,
+                DialogType::FineAlignment,
+            );
+            let container: Weak<dyn Run3dmodButtonContainer> = this.clone();
+            // Field initializers, in declaration order.
+            let pnl_align_est = EtomoPanel::new();
+            let border = BeveledBorder::new(Some("Fine Alignment"));
+            let panel_button = JComponent::new_panel();
+            let btn_imod = Run3dmodButton::get_3dmod_instance_string_run_3dmod_button_container(
+                Some("View/Edit Fiducial Model"),
+                Some(container.clone()),
+            );
+            let btn_view_3d_model = MultiLineButton::new_string(Some("View 3D Model"));
+            let btn_view_residuals =
+                Run3dmodButton::get_3dmod_instance_string_run_3dmod_button_container(
+                    Some("View Residual Vectors"),
+                    Some(container.clone()),
+                );
+
+            // Constructor body.
+            // Java casts `(MultiLineButton) ...getComputeAlignment()`; the
+            // factory returns the concrete button.
+            let btn_compute_alignment = app_mgr
+                .get_process_result_display_factory(axis_id)
+                .get_compute_alignment();
+            let pnl_tiltalign = TiltalignPanel::get_instance(axis_id, app_mgr, &base.btn_advanced);
+            base.btn_execute.set_text(Some("Done"));
+
+            // Create the first tiltalign panel
+            // Swing layout: panelButton BoxLayout Y_AXIS.
+
+            let top_button_panel = SpacedPanel::get_instance_void();
+            top_button_panel.set_box_layout(X_AXIS);
+            top_button_panel.add_multi_line_button(&btn_compute_alignment);
+            top_button_panel.add_multi_line_button(&btn_imod);
+            panel_button.add(&top_button_panel.get_container());
+            // Swing layout: panelButton.add(Box.createRigidArea(FixedDim.x0_y10)).
+            let bottom_button_panel = SpacedPanel::get_instance_void();
+            bottom_button_panel.set_box_layout(X_AXIS);
+            bottom_button_panel.add_multi_line_button(&btn_view_3d_model);
+            // panelButton.add(Box.createRigidArea(FixedDim.x10_y0));
+            bottom_button_panel.add_multi_line_button(&btn_view_residuals);
+            panel_button.add(&bottom_button_panel.get_container());
+
+            // Swing layout: pnlAlignEst BoxLayout Y_AXIS.
+            pnl_align_est.set_border(&border.get_border());
+
+            let align_est = pnl_align_est.get_component();
+            align_est.add(&pnl_tiltalign.get_container());
+            // Swing layout: pnlAlignEst.add(Box.createRigidArea(FixedDim.x5_y0)).
+            align_est.add(&panel_button);
+
+            // Construct the main panel from the alignment panel and exist buttons
+            // Swing layout: rootPanel BoxLayout Y_AXIS.
+            // Java `new JScrollPane(pnlAlignEst)` is never used: the next statement
+            // moves pnlAlignEst out of its viewport into rootPanel.
+            let _scroll_pane = JComponent::new_scroll_pane(Some(&align_est));
+            // rootPanel.add(pnlAlignEst, BorderLayout.CENTER)
+            base.root_panel.get_component().add(&align_est);
+            base.add_exit_buttons();
+
+            // Bind the action listeners to the buttons
+            // Java `actionListener = new AlignmentEstimationActionListner(this)`:
+            // its `actionPerformed` calls `adaptee.action(event.getActionCommand(),
+            // null, null)`.
+            let adaptee = this.clone();
+            let action_listener: ActionListener = Rc::new(move |event: &ActionEvent| {
+                let Some(adaptee) = adaptee.upgrade() else {
+                    return;
+                };
+                adaptee.action(event.get_action_command().unwrap_or(""), None, None);
+            });
+
+            AlignmentEstimationDialog {
+                base,
+                pnl_align_est,
+                border,
+                pnl_tiltalign,
+                panel_button,
+                btn_compute_alignment,
+                btn_imod,
+                btn_view_3d_model,
+                btn_view_residuals,
+                action_listener,
+                patch_tracking: std::cell::Cell::new(false),
+            }
+        });
+        // Java `this` as the ProcessDialog subclass (for the virtual `done()`).
+        let this: Weak<dyn ProcessDialogVirtual> =
+            Rc::downgrade(&dialog) as Weak<dyn ProcessDialogVirtual>;
+        dialog.base.set_this(this);
+
+        // The rest of the Java constructor, which needs the constructed dialog.
+        dialog
+            .btn_compute_alignment
+            .add_action_listener(dialog.action_listener.clone());
         dialog
             .btn_view_3d_model
-            .set_action_command(Some(VIEW_3D_MODEL));
-        dialog.btn_compute_alignment.add_action_listener();
-        dialog.btn_view_3d_model.add_action_listener();
-        dialog.btn_view_residuals.add_action_listener();
-        dialog.btn_imod.add_action_listener();
-        dialog.pnl_tiltalign.update_advanced(dialog.advanced);
+            .add_action_listener(dialog.action_listener.clone());
+        dialog
+            .btn_view_residuals
+            .add_action_listener(dialog.action_listener.clone());
+        dialog
+            .btn_imod
+            .add_action_listener(dialog.action_listener.clone());
+
+        // Mouse adapter for context menu
+        let context_menu: Weak<dyn ContextMenu> = Rc::downgrade(&dialog) as Weak<dyn ContextMenu>;
+        let mouse_adapter: Rc<dyn MouseListener> = GenericMouseAdapter::new(context_menu);
+        dialog
+            .root_panel
+            .get_component()
+            .add_mouse_listener(mouse_adapter.clone());
+        dialog
+            .pnl_tiltalign
+            .get_container()
+            .add_mouse_listener(mouse_adapter);
+
+        // Set the default advanced state
+        dialog.update_advanced();
         dialog.pnl_tiltalign.set_first_tab();
         dialog.set_tool_tip_text();
         dialog
     }
 
-    /// Source constructor including the `ApplicationManager` factory and
-    /// `UIHarness.INSTANCE.pack` boundary invoked by `updateAdvanced`.
-    pub fn get_instance<
-        M: AlignmentEstimationDialogApplicationManager + AlignmentEstimationDialogFactory,
-    >(
-        manager: &mut M,
-        axis_id: AxisID,
-    ) -> Self {
-        let button = manager.get_compute_alignment(axis_id);
-        let advanced = manager.is_advanced_fine_alignment(axis_id);
-        let mut dialog = Self::new(axis_id, button, advanced);
-        dialog.update_advanced(manager);
-        dialog
+    /// Java `setParameters(BaseScreenState)`.
+    pub fn set_parameters_base_screen_state(&self, screen_state: &BaseScreenState) {
+        self.pnl_tiltalign
+            .set_parameters_base_screen_state(screen_state);
     }
 
-    pub fn set_parameters<P: AlignmentEstimationScreenState>(&mut self, screen_state: &P) {
-        self.pnl_tiltalign.set_parameters(screen_state);
-    }
     /// Java `getParameters(RestrictalignParam, boolean)`.
-    pub fn get_restrictalign_parameters<P: AlignmentEstimationParameter>(
-        &mut self,
-        param: &mut P,
+    pub fn get_parameters_restrictalign_param_boolean(
+        &self,
+        param: &mut RestrictalignParam,
         do_validation: bool,
     ) -> bool {
         self.pnl_tiltalign
-            .get_parameters(param, do_validation)
-            .unwrap_or(false)
+            .get_parameters_restrictalign_param_boolean(param, do_validation)
     }
-    pub fn set_patch_tracking(&mut self, input: bool) {
-        self.patch_tracking = input;
+
+    /// Java `setPatchTracking(boolean)`.
+    pub fn set_patch_tracking(&self, input: bool) {
+        self.patch_tracking.set(input);
         self.pnl_tiltalign.set_patch_tracking(input);
     }
-    pub fn set_surfaces_to_analyze(&mut self, surfaces_to_analyze: i32) {
+
+    /// Java `setSurfacesToAnalyze(int)`.
+    pub fn set_surfaces_to_analyze(&self, surfaces_to_analyze: i32) {
         self.pnl_tiltalign
             .set_surfaces_to_analyze(surfaces_to_analyze);
     }
-    pub fn get_parameters<P: AlignmentEstimationScreenState>(&mut self, screen_state: &mut P) {
-        let _ = self.pnl_tiltalign.get_parameters(screen_state, false);
+
+    /// Java `getParameters(BaseScreenState)`.
+    pub fn get_parameters_base_screen_state(&self, screen_state: &BaseScreenState) {
+        self.pnl_tiltalign
+            .get_parameters_base_screen_state(screen_state);
     }
-    pub fn set_default_parameters(&mut self) {
+
+    /// Java `setDefaultParameters()`.
+    pub fn set_default_parameters(&self) {
         self.pnl_tiltalign.set_default_parameters();
     }
-    pub fn set_metadata_parameters<P: AlignmentEstimationMetaData>(&mut self, meta_data: &P) {
-        self.pnl_tiltalign.set_parameters(meta_data);
+
+    /// Java `setParameters(ConstMetaData)`.  `TiltalignPanel.setParameters`
+    /// takes the concrete metadata in the translation.
+    pub fn set_parameters_const_meta_data(&self, meta_data: &MetaData) {
+        self.pnl_tiltalign.set_parameters_const_meta_data(meta_data);
     }
-    pub fn get_metadata_parameters<P: AlignmentEstimationMetaData>(&mut self, meta_data: &mut P) {
-        let _ = self.pnl_tiltalign.get_parameters(meta_data, false);
+
+    /// Java `getParameters(MetaData)`.
+    pub fn get_parameters_meta_data(&self, meta_data: &MetaData) {
+        self.pnl_tiltalign.get_parameters_meta_data(meta_data);
     }
-    pub fn set_tiltalign_params<P: AlignmentEstimationParameter>(&mut self, param: &P) {
-        self.pnl_tiltalign.set_parameters(param);
-    }
-    pub fn set_restrictalign_params<P: AlignmentEstimationParameter>(&mut self, param: &P) {
-        self.pnl_tiltalign.set_parameters(param);
-    }
-    pub fn get_tiltalign_params<P: AlignmentEstimationParameter>(
-        &mut self,
-        param: &mut P,
-        do_validation: bool,
-    ) -> Result<bool, FortranInputSyntaxException> {
+
+    /// Java `setTiltalignParams(TiltalignParam)`.
+    pub fn set_tiltalign_params(&self, tiltalign_param: &TiltalignParam) {
         self.pnl_tiltalign
-            .get_parameters(param, do_validation)
-            .map_err(|except| {
-                FortranInputSyntaxException::new(&format!(
+            .set_parameters_const_tiltalign_param(tiltalign_param);
+    }
+
+    /// Java `setRestrictalignParams(RestrictalignParam)`.
+    pub fn set_restrictalign_params(&self, restrictalign_param: &RestrictalignParam) {
+        self.pnl_tiltalign
+            .set_parameters_restrictalign_param(restrictalign_param);
+    }
+
+    /// Java `getTiltalignParams(TiltalignParam, boolean) throws
+    /// FortranInputSyntaxException`.
+    ///
+    /// The panel's unchecked `NumberFormatException` is not caught by the Java
+    /// and propagates; it is passed through unchanged here.
+    pub fn get_tiltalign_params(
+        &self,
+        tiltalign_param: &mut TiltalignParam,
+        do_validation: bool,
+    ) -> Result<bool, TiltalignParamsException> {
+        match self
+            .pnl_tiltalign
+            .get_parameters_tiltalign_param_boolean(tiltalign_param, do_validation)
+        {
+            Ok(result) => {
+                if !result {
+                    return Ok(false);
+                }
+            }
+            Err(TiltalignParamsException::FortranInputSyntaxException(except)) => {
+                let message = format!(
                     "Axis: {}{}",
                     self.axis_id.get_extension(),
-                    except
-                ))
-            })
+                    except.get_message().unwrap_or("null")
+                );
+                return Err(TiltalignParamsException::FortranInputSyntaxException(
+                    FortranInputSyntaxException::new(&message),
+                ));
+            }
+            Err(except) => return Err(except),
+        }
+        Ok(true)
     }
+
     /// Java `getParameters(MakecomfileParam, boolean)`.
-    pub fn get_makecomfile_parameters<P: AlignmentEstimationParameter>(
-        &mut self,
-        param: &mut P,
+    pub fn get_parameters_makecomfile_param_boolean(
+        &self,
+        param: &mut MakecomfileParam,
         do_validation: bool,
     ) -> bool {
-        self.pnl_tiltalign
-            .get_parameters(param, do_validation)
-            .unwrap_or(false)
+        if !self
+            .pnl_tiltalign
+            .get_parameters_makecomfile_param_boolean(param, do_validation)
+        {
+            return false;
+        }
+        true
     }
-    pub fn is_valid(&mut self) -> bool {
+
+    /// Java `isValid()`.
+    pub fn is_valid(&self) -> bool {
         self.pnl_tiltalign.is_valid()
     }
 
-    /// Java private `addLogFileTab`.
+    /// Java private `addLogFileTab(String, String, List<String>, List<String>)`.
+    /// Adds a log file to logFileList and labelList, if the log file is not
+    /// empty.
     fn add_log_file_tab(
         &self,
         log_file_name: &str,
         label: &str,
         log_file_list: &mut Vec<String>,
         label_list: &mut Vec<String>,
-        user_dir: &Path,
     ) {
         let name = format!("{}{}.log", log_file_name, self.axis_id.get_extension());
-        if user_dir
-            .join(&name)
-            .metadata()
-            .map(|metadata| metadata.len() > 10)
-            .unwrap_or(false)
-        {
+        // Java `new File(applicationManager.getPropertyUserDir(), name)`: a null
+        // parent is the name alone; `File.length()` is 0 for a missing file.
+        let log = match self.application_manager.get_property_user_dir() {
+            Some(user_dir) => std::path::Path::new(&user_dir).join(&name),
+            None => std::path::PathBuf::from(&name),
+        };
+        let length = std::fs::metadata(&log).map(|m| m.len()).unwrap_or(0);
+        if length > 10 {
             log_file_list.push(name);
-            label_list.push(label.into());
+            label_list.push(label.to_string());
         }
     }
 
-    /// Java `popUpContextMenu`; `ContextPopup` retains the native popup boundary.
-    pub fn pop_up_context_menu(
-        &mut self,
-        mouse_event: MouseEvent,
-        user_dir: &Path,
-    ) -> Result<(), String> {
-        let man_page_label = vec!["Tiltalign".into(), "Restrict Align".into(), "3dmod".into()];
-        let man_page = vec![
-            "tiltalign.html".into(),
-            "restrictalign.html".into(),
-            "3dmod.html".into(),
-        ];
-        let window_label = if self.axis_id == AxisID::Only {
-            "Align".into()
-        } else {
-            format!("Align Axis:{}", self.axis_id.get_extension())
-        };
-        let mut log_file_set = Vec::new();
-        let mut align_labels = Vec::new();
-        for (name, label) in [
-            ("taRobust", "Robust"),
-            ("taError", "Errors"),
-            ("taSolution", "Solution"),
-            ("taAngles", "Surface Angles"),
-            ("taLocals", "Locals"),
-            ("taResiduals", "Large Residual"),
-            ("taMappings", "Mappings"),
-            ("taCoordinates", "Coordinates"),
-            ("taBeamtilt", "Beam Tilt"),
-            ("align", "Complete Log"),
-        ] {
-            self.add_log_file_tab(name, label, &mut log_file_set, &mut align_labels, user_dir);
+    /// Java private `updateAdvanced()`.  This is a separate function so it can
+    /// be called at initialization time as well as from the button action
+    /// above.
+    fn update_advanced(&self) {
+        self.pnl_tiltalign.update_advanced(self.is_advanced());
+        let manager: &'static dyn BaseManager = self.application_manager;
+        ui_harness::with(|harness| {
+            harness.pack_axis_id_base_manager(Some(self.axis_id), Some(manager))
+        });
+    }
+
+    /// Java private `setToolTipText()`.  Initialize the tooltip text for the
+    /// axis panel objects.
+    fn set_tool_tip_text(&self) {
+        self.btn_compute_alignment
+            .set_tool_tip_text(Some("Run Tiltalign with current parameters."));
+        self.btn_imod
+            .set_tool_tip_text(Some("View fiducial model on the image stack in 3dmod."));
+        self.btn_view_3d_model.set_tool_tip_text(Some(
+            "View model of solved 3D locations of fiducial points in 3dmodv.",
+        ));
+        self.btn_view_residuals.set_tool_tip_text(Some(
+            "Show model of residual vectors (exaggerated 10x) on the image stack.",
+        ));
+    }
+}
+
+impl ProcessDialogVirtual for AlignmentEstimationDialog {
+    fn process_dialog(&self) -> &ProcessDialog {
+        &self.base
+    }
+
+    /// Java `done()`.
+    fn done(&self) {
+        self.application_manager
+            .done_alignment_estimation_dialog(self.axis_id);
+        self.btn_compute_alignment
+            .remove_action_listener(&self.action_listener);
+        self.set_displayed(false);
+    }
+}
+
+impl ContextMenu for AlignmentEstimationDialog {
+    /// Java `popUpContextMenu(MouseEvent)`: right mouse button context menu.
+    fn pop_up_context_menu(&self, mouse_event: &MouseEvent) {
+        let man_pagelabel: Vec<String> = ["Tiltalign", "Restrict Align", "3dmod"]
+            .iter()
+            .map(|s| s.to_string())
+            .collect();
+        let man_page: Vec<String> = ["tiltalign.html", "restrictalign.html", "3dmod.html"]
+            .iter()
+            .map(|s| s.to_string())
+            .collect();
+        let mut log_file_set_window_label: Vec<String> = vec!["Align".to_string()];
+        let log_file_label: Vec<String> = vec!["Restrict Align".to_string()];
+        let log_file: Vec<String> =
+            vec![format!("restrictalign{}.log", self.axis_id.get_extension())];
+
+        if self.axis_id != AxisID::Only {
+            log_file_set_window_label[0] = format!("Align Axis:{}", self.axis_id.get_extension());
         }
+        let align_command_name = log_file_set_window_label[0].clone();
+        // Add tabs
+        let mut log_file_set_list: Vec<String> = Vec::new();
+        let mut align_labels: Vec<String> = Vec::new();
+        self.add_log_file_tab(
+            "taRobust",
+            "Robust",
+            &mut log_file_set_list,
+            &mut align_labels,
+        );
+        self.add_log_file_tab(
+            "taError",
+            "Errors",
+            &mut log_file_set_list,
+            &mut align_labels,
+        );
+        self.add_log_file_tab(
+            "taSolution",
+            "Solution",
+            &mut log_file_set_list,
+            &mut align_labels,
+        );
+        self.add_log_file_tab(
+            "taAngles",
+            "Surface Angles",
+            &mut log_file_set_list,
+            &mut align_labels,
+        );
+        self.add_log_file_tab(
+            "taLocals",
+            "Locals",
+            &mut log_file_set_list,
+            &mut align_labels,
+        );
+        self.add_log_file_tab(
+            "taResiduals",
+            "Large Residual",
+            &mut log_file_set_list,
+            &mut align_labels,
+        );
+        self.add_log_file_tab(
+            "taMappings",
+            "Mappings",
+            &mut log_file_set_list,
+            &mut align_labels,
+        );
+        self.add_log_file_tab(
+            "taCoordinates",
+            "Coordinates",
+            &mut log_file_set_list,
+            &mut align_labels,
+        );
+        self.add_log_file_tab(
+            "taBeamtilt",
+            "Beam Tilt",
+            &mut log_file_set_list,
+            &mut align_labels,
+        );
+        self.add_log_file_tab(
+            "align",
+            "Complete Log",
+            &mut log_file_set_list,
+            &mut align_labels,
+        );
+
+        // Java `Vector logFileSet` / `logFileSetLabel`, one array each.
+        let log_file_set: Vec<Vec<String>> = vec![log_file_set_list];
+        let log_file_set_label: Vec<Vec<String>> = vec![align_labels];
+
         let graph = [
-            "Plot rotation",
-            "Plot delta tilt and skew",
-            "Plot magnification",
-            "Plot X-stretch (dmag)",
-            "Plot global mean residual",
-            "Plot average of local mean residual",
-        ]
-        .into_iter()
-        .map(|description| GraphTask {
-            description: description.into(),
-            available: true,
-            input_file: None,
-        })
-        .collect::<Vec<_>>();
-        self.context_popup = Some(ContextPopup::new_tabbed_log_files(
+            Task::Rotation,
+            Task::TiltSkew,
+            Task::Mag,
+            Task::Xstretch,
+            Task::Resid,
+            Task::AverResid,
+        ];
+
+        // Java `new ContextPopup(...)`; its constructor throws
+        // IllegalArgumentException on mismatched lengths, which these arrays
+        // cannot have.
+        if let Err(message) = ContextPopup::new_component_mouse_event_string_string_array_string_array_string_array_vector_vector_string_array_string_array_task_array_file_array_application_manager_string_axis_id(
+            &self.root_panel.get_component(),
             mouse_event,
             Some("FINAL ALIGNMENT"),
-            &man_page_label,
+            &man_pagelabel,
             &man_page,
-            &[window_label.clone()],
-            &[align_labels],
-            &[log_file_set],
-            &["Restrict Align".into()],
-            &[format!("restrictalign{}.log", self.axis_id.get_extension())],
-            &graph,
-            Some(&window_label),
+            &log_file_set_window_label,
+            &log_file_set_label,
+            &log_file_set,
+            Some(log_file_label.as_slice()),
+            Some(log_file.as_slice()),
+            Some(&graph[..]),
+            None,
+            self.application_manager,
+            &align_command_name,
             self.axis_id,
-        )?);
-        Ok(())
+        ) {
+            eprintln!("java.lang.IllegalArgumentException: {message}");
+        }
     }
-    pub fn done<M: AlignmentEstimationDialogApplicationManager>(&mut self, manager: &mut M) {
-        manager.done_alignment_estimation_dialog(self.axis_id);
-        self.btn_compute_alignment.remove_action_listener();
-        self.displayed = false;
-    }
-    /// Java private `updateAdvanced`.
-    pub fn update_advanced<M: AlignmentEstimationDialogApplicationManager>(
-        &mut self,
-        manager: &mut M,
-    ) {
-        self.pnl_tiltalign.update_advanced(self.advanced);
-        manager.pack(self.axis_id);
-    }
-    pub fn action<M: AlignmentEstimationDialogApplicationManager>(
-        &mut self,
-        manager: &mut M,
+}
+
+impl Run3dmodButtonContainer for AlignmentEstimationDialog {
+    /// Java `action(String, Deferred3dmodButton, Run3dmodMenuOptions)`: event
+    /// handler for panel buttons.
+    ///
+    /// The action listener passes a null `Run3dmodMenuOptions`; the manager
+    /// takes the options by value, and a default instance (every option off)
+    /// is what the 3dmod layer makes of null.
+    fn action(
+        &self,
         command: &str,
-        _deferred_3dmod_button: Option<&mut dyn Deferred3dmodButton>,
-        options: Option<Run3dmodMenuOptions>,
+        _deferred_3dmod_button: Option<Rc<dyn Deferred3dmodButton>>,
+        run_3dmod_menu_options: Option<Run3dmodMenuOptions>,
     ) {
-        if self.btn_compute_alignment.get_action_command() == Some(command) {
-            manager.fine_alignment(self.axis_id, &self.btn_compute_alignment);
-        } else if self.btn_view_3d_model.get_action_command() == Some(command) {
-            manager.imod_view_model(self.axis_id, AlignmentEstimationFileType::Fiducial3dModel);
-        } else if self.btn_imod.action_command == command {
-            manager.imod_fix_fiducials(
+        let menu_options = run_3dmod_menu_options.unwrap_or_default();
+        if Some(command) == self.btn_compute_alignment.get_action_command().as_deref() {
+            self.application_manager.fine_alignment(
                 self.axis_id,
-                options,
-                if self.patch_tracking {
+                Some(self.btn_compute_alignment.clone() as ProcessResultDisplayHandle),
+                None,
+            );
+        } else if Some(command) == self.btn_view_3d_model.get_action_command().as_deref() {
+            self.application_manager
+                .imod_view_model(self.axis_id, &file_type::CLASS.fiducial_3d_model);
+        } else if Some(command) == self.btn_imod.get_action_command().as_deref() {
+            self.application_manager.imod_fix_fiducials(
+                self.axis_id,
+                menu_options,
+                None,
+                if self.patch_tracking.get() {
                     BeadFixerMode::PatchTrackingResidualMode
                 } else {
                     BeadFixerMode::ResidualMode
                 },
+                None,
             );
-        } else if self.btn_view_residuals.action_command == command {
-            manager.imod_view_residuals(self.axis_id, options);
+        } else if Some(command) == self.btn_view_residuals.get_action_command().as_deref() {
+            self.application_manager
+                .imod_view_residuals(self.axis_id, menu_options);
         }
-    }
-    fn set_tool_tip_text(&mut self) {
-        self.btn_compute_alignment
-            .set_tool_tip_text(Some("Run Tiltalign with current parameters."));
-        self.btn_imod
-            .set_tool_tip_text("View fiducial model on the image stack in 3dmod.");
-        self.btn_view_3d_model.set_tool_tip_text(Some(
-            "View model of solved 3D locations of fiducial points in 3dmodv.",
-        ));
-        self.btn_view_residuals.set_tool_tip_text(
-            "Show model of residual vectors (exaggerated 10x) on the image stack.",
-        );
-    }
-}
-
-/// Java private `AlignmentEstimationActionListner`.
-pub struct AlignmentEstimationActionListener;
-impl AlignmentEstimationActionListener {
-    pub fn action_performed<M: AlignmentEstimationDialogApplicationManager>(
-        dialog: &mut AlignmentEstimationDialog,
-        manager: &mut M,
-        action_command: &str,
-    ) {
-        dialog.action(manager, action_command, None, None);
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::super::tiltalign_panel::TiltalignPanelParameters;
-    use super::*;
-    #[derive(Default)]
-    struct Manager {
-        calls: Vec<String>,
-    }
-    impl AlignmentEstimationDialogApplicationManager for Manager {
-        fn fine_alignment(&mut self, axis: AxisID, _: &MultiLineButton) {
-            self.calls.push(format!("fine{}", axis.get_extension()));
-        }
-        fn imod_view_model(&mut self, _: AxisID, file_type: AlignmentEstimationFileType) {
-            self.calls.push(format!("model{:?}", file_type));
-        }
-        fn imod_fix_fiducials(
-            &mut self,
-            _: AxisID,
-            _: Option<Run3dmodMenuOptions>,
-            mode: BeadFixerMode,
-        ) {
-            self.calls.push(format!("fix{:?}", mode));
-        }
-        fn imod_view_residuals(&mut self, _: AxisID, _: Option<Run3dmodMenuOptions>) {
-            self.calls.push("residuals".into());
-        }
-        fn done_alignment_estimation_dialog(&mut self, _: AxisID) {
-            self.calls.push("done".into());
-        }
-        fn pack(&mut self, _: AxisID) {
-            self.calls.push("pack".into());
-        }
-    }
-    impl AlignmentEstimationDialogFactory for Manager {
-        fn get_compute_alignment(&self, _axis_id: AxisID) -> MultiLineButton {
-            MultiLineButton::new_with_label(Some(COMPUTE_ALIGNMENT))
-        }
-        fn is_advanced_fine_alignment(&self, _axis_id: AxisID) -> bool {
-            true
-        }
-    }
-    #[test]
-    fn constructor_preserves_layout_tooltips_and_tiltalign_initialization() {
-        let dialog = AlignmentEstimationDialog::new(
-            AxisID::First,
-            MultiLineButton::new_with_label(Some(COMPUTE_ALIGNMENT)),
-            true,
-        );
-        assert_eq!(
-            dialog.layout.alignment_panel_border.as_deref(),
-            Some(FINE_ALIGNMENT_BORDER)
-        );
-        assert_eq!(dialog.pnl_tiltalign.current_tab.index(), 0);
-        assert!(dialog.pnl_tiltalign.advanced);
-        assert!(
-            dialog
-                .btn_imod
-                .tooltip
-                .as_ref()
-                .unwrap()
-                .contains("fiducial")
-        );
-        assert!(dialog.layout.scroll_pane_created);
-        assert_eq!(
-            dialog.layout.alignment_panel_order,
-            ["pnlTiltalign", "rigidArea(x5,y0)", "panelButton"]
-        );
-    }
-    #[test]
-    fn source_constructor_uses_factory_advanced_state_and_packs() {
-        let mut manager = Manager::default();
-        let dialog = AlignmentEstimationDialog::get_instance(&mut manager, AxisID::First);
-        assert!(dialog.advanced);
-        assert!(dialog.pnl_tiltalign.advanced);
-        assert_eq!(manager.calls, ["pack"]);
-    }
-    #[test]
-    fn actions_preserve_source_routes_and_patch_tracking_mode() {
-        let mut dialog = AlignmentEstimationDialog::new(
-            AxisID::Only,
-            MultiLineButton::new_with_label(Some(COMPUTE_ALIGNMENT)),
-            false,
-        );
-        let mut manager = Manager::default();
-        for command in [
-            COMPUTE_ALIGNMENT,
-            VIEW_3D_MODEL,
-            VIEW_EDIT_FIDUCIAL_MODEL,
-            VIEW_RESIDUAL_VECTORS,
-        ] {
-            dialog.action(&mut manager, command, None, None);
-        }
-        dialog.set_patch_tracking(true);
-        dialog.action(&mut manager, VIEW_EDIT_FIDUCIAL_MODEL, None, None);
-        assert_eq!(
-            manager.calls,
-            [
-                "fine",
-                "modelFiducial3dModel",
-                "fixResidualMode",
-                "residuals",
-                "fixPatchTrackingResidualMode"
-            ]
-        );
-    }
-    #[test]
-    fn tiltalign_parameter_delegation_and_done_are_retained() {
-        let mut dialog = AlignmentEstimationDialog::new(
-            AxisID::Second,
-            MultiLineButton::new_with_label(Some(COMPUTE_ALIGNMENT)),
-            false,
-        );
-        let mut params = TiltalignPanelParameters::default();
-        params
-            .values
-            .insert("residual_report_criterion".into(), "0".into());
-        dialog.set_tiltalign_params(&params);
-        assert_eq!(dialog.pnl_tiltalign.ltf_residual_threshold.get_text(), "0");
-        let mut manager = Manager::default();
-        dialog.update_advanced(&mut manager);
-        dialog.done(&mut manager);
-        assert!(!dialog.displayed);
-        assert_eq!(dialog.btn_compute_alignment.button.action_listener_count, 0);
-        assert_eq!(manager.calls, ["pack", "done"]);
-    }
-    #[test]
-    fn context_popup_preserves_axis_window_label_graph_tasks_and_empty_log_filtering() {
-        let mut dialog = AlignmentEstimationDialog::new(
-            AxisID::Second,
-            MultiLineButton::new_with_label(Some(COMPUTE_ALIGNMENT)),
-            false,
-        );
-        dialog
-            .pop_up_context_menu(
-                MouseEvent::default(),
-                Path::new("/definitely-not-a-log-dir"),
-            )
-            .unwrap();
-        let popup = dialog.context_popup.as_ref().unwrap();
-        assert_eq!(
-            popup.log_file_set_window_label.as_ref().unwrap(),
-            &["Align Axis:b"]
-        );
-        assert_eq!(
-            popup.log_file_set.as_ref().unwrap(),
-            &[Vec::<String>::new()]
-        );
-        assert_eq!(
-            popup.graph_task.as_ref().unwrap()[0].description,
-            "Plot rotation"
-        );
-        assert_eq!(
-            popup.update_log_command_name.as_deref(),
-            Some("Align Axis:b")
-        );
     }
 }

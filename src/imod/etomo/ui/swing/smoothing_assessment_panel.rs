@@ -1,458 +1,515 @@
 //! `IMOD/Etomo/src/etomo/ui/swing/SmoothingAssessmentPanel.java`.
 //!
-//! Swing construction plus `ApplicationManager`, `ToolsManager`, `UIHarness`,
-//! and autodoc loading are direct boundaries.  The panel retains the source's
-//! field/default, parameter routing, validation order, and panel-id action
-//! dispatch without creating a second flattenwarp controller.
-#![allow(dead_code)]
+//! Java `final class SmoothingAssessmentPanel implements FlattenWarpDisplay,
+//! Run3dmodButtonContainer`: the Smoothing Assessment box of the Flatten
+//! panel (Post Processing dialog, and the Tools flatten tool) - a list of
+//! smoothing factors and the buttons that run flattenwarp with them and open
+//! the resulting model.
+//!
+//! An EDT object (`ui.md`): created as `Rc<Self>` by
+//! [`SmoothingAssessmentPanel::get_post_instance`] /
+//! [`SmoothingAssessmentPanel::get_tools_instance`]; every method takes
+//! `&self`.  The listener class `SmoothingAssessmentActionListener` is a
+//! closure holding a weak reference to the panel.  The parent
+//! (`FlattenVolumePanel`, which owns this panel) is held weakly.
 
-use crate::imod::etomo::process::imod_process::Run3dmodMenuOptions;
-use crate::imod::etomo::r#type::axis_id::AxisID;
-use crate::imod::etomo::r#type::dialog_type::DialogType;
-use crate::imod::etomo::ui::field_type::FieldType;
+use std::rc::{Rc, Weak};
 
-use super::labeled_text_field::{FieldValidationFailedException, LabeledTextField};
-use super::multi_line_button::MultiLineButton;
+use super::deferred_3dmod_button::Deferred3dmodButton;
+use super::etched_border::EtchedBorder;
+use super::flatten_volume_panel;
+use super::flatten_warp_display::FlattenWarpDisplay;
+use super::labeled_text_field::LabeledTextField;
+use super::run_3dmod_button::Run3dmodButton;
+use super::run_3dmod_button_container::Run3dmodButtonContainer;
 use super::smoothing_assessment_parent::SmoothingAssessmentParent;
-use super::tilt_panel::Deferred3dmodButton;
+use super::spaced_panel::{self, SpacedPanel};
+use super::ui_harness;
+use crate::imod::etomo::application_manager::ApplicationManager;
+use crate::imod::etomo::base_manager::BaseManager;
+use crate::imod::etomo::comscript::flatten_warp_param::{self, FlattenWarpParam};
+use crate::imod::etomo::jdk::{ActionEvent, ActionListener, JComponent};
+use crate::imod::etomo::process::imod_process::Run3dmodMenuOptions;
+use crate::imod::etomo::storage::autodoc::autodoc::Autodoc;
+use crate::imod::etomo::storage::autodoc::autodoc_factory;
+use crate::imod::etomo::storage::autodoc::read_only_autodoc::ReadOnlyAutodoc;
+use crate::imod::etomo::storage::log_file::LogFileError;
+use crate::imod::etomo::tools_manager::ToolsManager;
+use crate::imod::etomo::r#type::axis_id::AxisID;
+use crate::imod::etomo::r#type::const_meta_data::ConstMetaData;
+use crate::imod::etomo::r#type::dialog_type::DialogType;
+use crate::imod::etomo::r#type::etomo_autodoc;
+use crate::imod::etomo::r#type::file_key::FileKey;
+use crate::imod::etomo::r#type::file_type;
+use crate::imod::etomo::r#type::meta_data::MetaData;
+use crate::imod::etomo::r#type::panel_id::PanelId;
+use crate::imod::etomo::r#type::process_result_display::ProcessResultDisplayHandle;
+use crate::imod::etomo::ui::field::Field;
+use crate::imod::etomo::ui::field_type::FieldType;
+use crate::imod::etomo::ui::field_validation_failed_exception::FieldValidationFailedException;
 
-pub const LAMBDA_FOR_SMOOTHING_LABEL: &str = "Smoothing factors to try";
+/// Java public static final `rcsid`.
+pub const RCSID: &str = "$Id$";
+
+/// Java private static final `LAMBDA_FOR_SMOOTHING_LABEL`.
+const LAMBDA_FOR_SMOOTHING_LABEL: &str = "Smoothing factors to try";
+/// Java static final `FLATTEN_WARP_LABEL`.
 pub const FLATTEN_WARP_LABEL: &str = "Run Flattenwarp to Assess Smoothing";
-pub const LAMBDA_FOR_SMOOTHING_ASSESSMENT_DEFAULT: &str = "1,1.5,2,2.5,3";
-pub const SMOOTHING_ASSESSMENT_OUTPUT_MODEL: &str = "_checkflat.mod";
 
-/// Java `PanelId.POST_FLATTEN_VOLUME` and `PanelId.TOOLS_FLATTEN_VOLUME`.
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub enum SmoothingAssessmentPanelId {
-    PostFlattenVolume,
-    ToolsFlattenVolume,
+/// Java `final class SmoothingAssessmentPanel`.
+pub struct SmoothingAssessmentPanel {
+    /// Java private final `pnlRoot = SpacedPanel.getInstance()`.
+    pnl_root: Rc<SpacedPanel>,
+    /// Java private final `ltfLambdaForSmoothing`.
+    ltf_lambda_for_smoothing: Rc<LabeledTextField>,
+    /// Java private final `btn3dmod = Run3dmodButton.get3dmodInstance("Open
+    /// Assessment in 3dmod", this, FileType.SMOOTHING_ASSESSMENT_OUTPUT_MODEL)`.
+    btn_3dmod: Rc<Run3dmodButton>,
+    /// Java private final `actionListener = new
+    /// SmoothingAssessmentActionListener(this)`.
+    action_listener: ActionListener,
+
+    /// Java private final `btnFlattenWarp`.
+    btn_flatten_warp: Rc<Run3dmodButton>,
+    /// Java private final `manager`.
+    manager: &'static dyn BaseManager,
+    /// Java private final `applicationManager`; null for the tools instance.
+    application_manager: Option<&'static ApplicationManager>,
+    /// Java private final `toolsManager`; null for the post-processing
+    /// instance.
+    tools_manager: Option<&'static ToolsManager>,
+    /// Java private final `axisID`.
+    axis_id: AxisID,
+    /// Java private final `parent` (the owning panel, held weakly).
+    parent: Weak<dyn SmoothingAssessmentParent>,
+    /// Java private final `dialogType`.
+    dialog_type: DialogType,
+    /// Java private final `panelId`.
+    panel_id: PanelId,
 }
 
-/// The `FlattenWarpParam` methods used by this source unit.  Its command-line
-/// construction belongs to `FlattenWarpParam.java`, still an explicit comscript boundary.
-pub trait SmoothingAssessmentFlattenWarpParam {
-    fn set_lambda_for_smoothing(&mut self, value: String) -> Option<String>;
-    fn set_middle_contour_file(&mut self, value: String);
-    fn set_one_surface(&mut self, value: bool);
-    fn set_warp_spacing_x(&mut self, value: String) -> Option<String>;
-    fn set_warp_spacing_y(&mut self, value: String) -> Option<String>;
-}
-
-/// `ConstMetaData` and `MetaData` calls made by this source unit.
-pub trait SmoothingAssessmentConstMetaData {
-    fn is_lambda_for_smoothing_list_empty(&self) -> bool;
-    fn lambda_for_smoothing_list(&self) -> String;
-}
-pub trait SmoothingAssessmentMetaData {
-    fn set_lambda_for_smoothing_list(&mut self, value: String);
-}
-
-/// The common direct calls made by `ApplicationManager` and `ToolsManager`.
-/// The selected manager is determined solely by `panel_id`, as in Java.
-pub trait SmoothingAssessmentManager {
-    fn flatten_warp(
-        &mut self,
-        button: &MultiLineButton,
-        deferred_3dmod_button: Option<&Deferred3dmodButton>,
-        options: Option<Run3dmodMenuOptions>,
-        dialog_type: DialogType,
-        axis_id: AxisID,
-    );
-    fn imod_view_model(&mut self, axis_id: AxisID, file_name: &str);
-    fn open_message_dialog(&mut self, message: String, title: &str, axis_id: AxisID);
-}
-
-/// Source-visible Swing layout/listener state.
-#[derive(Clone, Debug, Default, Eq, PartialEq)]
-pub struct SmoothingAssessmentPanelLayout {
-    pub root_box_layout_y_axis: bool,
-    pub root_border_title: Option<String>,
-    pub root_component_order: Vec<String>,
-    pub buttons_box_layout_x_axis: bool,
-    pub buttons_component_order: Vec<String>,
-    pub flatten_warp_deferred_3dmod_button: bool,
-    pub action_listener_registered: bool,
-}
-
-/// Java final `SmoothingAssessmentPanel`.
-pub struct SmoothingAssessmentPanel<P: SmoothingAssessmentParent> {
-    pub pnl_root: SmoothingAssessmentPanelLayout,
-    pub ltf_lambda_for_smoothing: LabeledTextField,
-    pub btn_3dmod: MultiLineButton,
-    pub btn_flatten_warp: MultiLineButton,
-    pub axis_id: AxisID,
-    pub parent: P,
-    pub dialog_type: DialogType,
-    pub panel_id: SmoothingAssessmentPanelId,
-    /// `AutodocFactory`/`EtomoAutodoc.getTooltip` result at the direct storage boundary.
-    pub flatten_warp_autodoc_tooltip: Option<String>,
-}
-
-impl<P: SmoothingAssessmentParent> SmoothingAssessmentPanel<P> {
-    /// Java private `SmoothingAssessmentPanel(ApplicationManager, ...)` constructor.
-    pub fn new_post(
+impl SmoothingAssessmentPanel {
+    /// The field initializers shared by both Java constructors.  Returns the
+    /// `Rc`; `btn_flatten_warp` comes from `make_btn_flatten_warp`, which is
+    /// the only statement the two constructors do differently.
+    #[allow(clippy::too_many_arguments)]
+    fn new_fields(
+        manager: &'static dyn BaseManager,
+        application_manager: Option<&'static ApplicationManager>,
+        tools_manager: Option<&'static ToolsManager>,
         axis_id: AxisID,
         dialog_type: DialogType,
-        parent: P,
-        flatten_warp_button: MultiLineButton,
-    ) -> Self {
-        Self::new(
-            axis_id,
-            dialog_type,
-            parent,
-            SmoothingAssessmentPanelId::PostFlattenVolume,
-            flatten_warp_button,
-        )
-    }
-
-    /// Java private `SmoothingAssessmentPanel(ToolsManager, ...)` constructor.
-    pub fn new_tools(axis_id: AxisID, dialog_type: DialogType, parent: P) -> Self {
-        Self::new(
-            axis_id,
-            dialog_type,
-            parent,
-            SmoothingAssessmentPanelId::ToolsFlattenVolume,
-            MultiLineButton::new_with_label(Some(FLATTEN_WARP_LABEL)),
-        )
-    }
-
-    fn new(
-        axis_id: AxisID,
-        dialog_type: DialogType,
-        parent: P,
-        panel_id: SmoothingAssessmentPanelId,
-        mut btn_flatten_warp: MultiLineButton,
-    ) -> Self {
-        btn_flatten_warp.set_action_command(Some(FLATTEN_WARP_LABEL));
-        let mut btn_3dmod = MultiLineButton::new_with_label(Some("Open Assessment in 3dmod"));
-        btn_3dmod.set_action_command(Some("Open Assessment in 3dmod"));
-        Self {
-            pnl_root: SmoothingAssessmentPanelLayout::default(),
-            ltf_lambda_for_smoothing: LabeledTextField::new(
+        panel_id: PanelId,
+        parent: Weak<dyn SmoothingAssessmentParent>,
+        make_btn_flatten_warp: impl FnOnce(Weak<dyn Run3dmodButtonContainer>) -> Rc<Run3dmodButton>,
+    ) -> Rc<SmoothingAssessmentPanel> {
+        let instance = Rc::new_cyclic(|self_ref: &Weak<SmoothingAssessmentPanel>| {
+            let container: Weak<dyn Run3dmodButtonContainer> = self_ref.clone();
+            // Field initializers.
+            let pnl_root = SpacedPanel::get_instance_void();
+            let ltf_lambda_for_smoothing = LabeledTextField::new_field_type_string(
                 FieldType::FloatingPointArray,
-                &format!("{LAMBDA_FOR_SMOOTHING_LABEL}: "),
-            ),
-            btn_3dmod,
-            btn_flatten_warp,
+                Some(&format!("{LAMBDA_FOR_SMOOTHING_LABEL}: ")),
+            );
+            let smoothing_key: &FileKey = &file_type::CLASS.smoothing_assessment_output_model;
+            let btn_3dmod =
+                Run3dmodButton::get_3dmod_instance_string_run_3dmod_button_container_file_key(
+                    Some("Open Assessment in 3dmod"),
+                    Some(container.clone()),
+                    Some(smoothing_key.clone()),
+                );
+            // Java `new SmoothingAssessmentActionListener(this)`.
+            let adaptee = self_ref.clone();
+            let action_listener: ActionListener = Rc::new(move |event: &ActionEvent| {
+                if let Some(adaptee) = adaptee.upgrade() {
+                    adaptee.action(event.get_action_command().unwrap_or(""), None, None);
+                }
+            });
+            // Constructor body.
+            let btn_flatten_warp = make_btn_flatten_warp(container.clone());
+            // btnFlattenWarp.setContainer(this);
+            btn_flatten_warp.set_container(Some(container));
+            SmoothingAssessmentPanel {
+                pnl_root,
+                ltf_lambda_for_smoothing,
+                btn_3dmod,
+                action_listener,
+                btn_flatten_warp,
+                manager,
+                application_manager,
+                tools_manager,
+                axis_id,
+                parent,
+                dialog_type,
+                panel_id,
+            }
+        });
+        instance
+    }
+
+    /// Java private constructor `SmoothingAssessmentPanel(ApplicationManager,
+    /// AxisID, DialogType, PanelId, SmoothingAssessmentParent)`.
+    fn new_application_manager_axis_id_dialog_type_panel_id_smoothing_assessment_parent(
+        manager: &'static ApplicationManager,
+        axis_id: AxisID,
+        dialog_type: DialogType,
+        panel_id: PanelId,
+        parent: Weak<dyn SmoothingAssessmentParent>,
+    ) -> Rc<SmoothingAssessmentPanel> {
+        SmoothingAssessmentPanel::new_fields(
+            manager,
+            Some(manager),
+            None,
             axis_id,
-            parent,
             dialog_type,
             panel_id,
-            flatten_warp_autodoc_tooltip: None,
-        }
+            parent,
+            // btnFlattenWarp = (Run3dmodButton) manager
+            //   .getProcessResultDisplayFactory(axisID).getSmoothingAssessment();
+            |_container| {
+                manager
+                    .get_process_result_display_factory(axis_id)
+                    .get_smoothing_assessment()
+            },
+        )
     }
 
-    /// Java static `getPostInstance`.
-    pub fn get_post_instance(
+    /// Java private constructor `SmoothingAssessmentPanel(ToolsManager,
+    /// AxisID, DialogType, PanelId, SmoothingAssessmentParent)`.
+    fn new_tools_manager_axis_id_dialog_type_panel_id_smoothing_assessment_parent(
+        manager: &'static ToolsManager,
         axis_id: AxisID,
         dialog_type: DialogType,
-        parent: P,
-        flatten_warp_button: MultiLineButton,
-    ) -> Self {
-        let mut instance = Self::new_post(axis_id, dialog_type, parent, flatten_warp_button);
+        panel_id: PanelId,
+        parent: Weak<dyn SmoothingAssessmentParent>,
+    ) -> Rc<SmoothingAssessmentPanel> {
+        SmoothingAssessmentPanel::new_fields(
+            manager,
+            None,
+            Some(manager),
+            axis_id,
+            dialog_type,
+            panel_id,
+            parent,
+            // btnFlattenWarp = Run3dmodButton.getDeferred3dmodInstance(
+            //   FLATTEN_WARP_LABEL, this);
+            |container| {
+                Run3dmodButton::get_deferred_3dmod_instance_string_run_3dmod_button_container(
+                    Some(FLATTEN_WARP_LABEL),
+                    Some(container),
+                )
+            },
+        )
+    }
+
+    /// Java package-private static `getPostInstance(ApplicationManager, AxisID,
+    /// DialogType, PanelId, SmoothingAssessmentParent)`.
+    pub fn get_post_instance(
+        manager: &'static ApplicationManager,
+        axis_id: AxisID,
+        dialog_type: DialogType,
+        panel_id: PanelId,
+        parent: Weak<dyn SmoothingAssessmentParent>,
+    ) -> Rc<SmoothingAssessmentPanel> {
+        let instance =
+            SmoothingAssessmentPanel::new_application_manager_axis_id_dialog_type_panel_id_smoothing_assessment_parent(
+                manager,
+                axis_id,
+                dialog_type,
+                panel_id,
+                parent,
+            );
         instance.create_panel();
         instance.set_tooltips();
         instance.add_listeners();
         instance
     }
 
-    /// Java static `getToolsInstance`.
-    pub fn get_tools_instance(axis_id: AxisID, dialog_type: DialogType, parent: P) -> Self {
-        let mut instance = Self::new_tools(axis_id, dialog_type, parent);
+    /// Java package-private static `getToolsInstance(ToolsManager, AxisID,
+    /// DialogType, PanelId, SmoothingAssessmentParent)`.
+    pub fn get_tools_instance(
+        manager: &'static ToolsManager,
+        axis_id: AxisID,
+        dialog_type: DialogType,
+        panel_id: PanelId,
+        parent: Weak<dyn SmoothingAssessmentParent>,
+    ) -> Rc<SmoothingAssessmentPanel> {
+        let instance =
+            SmoothingAssessmentPanel::new_tools_manager_axis_id_dialog_type_panel_id_smoothing_assessment_parent(
+                manager,
+                axis_id,
+                dialog_type,
+                panel_id,
+                parent,
+            );
         instance.create_panel();
         instance.set_tooltips();
         instance.add_listeners();
         instance
     }
 
-    /// Java private `addListeners`.
-    pub fn add_listeners(&mut self) {
-        self.btn_flatten_warp.add_action_listener();
-        self.btn_3dmod.add_action_listener();
-        self.pnl_root.action_listener_registered = true;
+    /// Java private `addListeners()`.
+    fn add_listeners(&self) {
+        self.btn_flatten_warp
+            .add_action_listener(self.action_listener.clone());
+        self.btn_3dmod
+            .add_action_listener(self.action_listener.clone());
     }
 
-    /// Java `done`.
-    pub fn done(&mut self) {
-        self.btn_flatten_warp.remove_action_listener();
+    /// Java package-private `done()`.
+    pub fn done(&self) {
+        self.btn_flatten_warp
+            .remove_action_listener(&self.action_listener);
     }
 
-    /// Java private `createPanel`.
-    pub fn create_panel(&mut self) {
-        self.pnl_root.flatten_warp_deferred_3dmod_button = true;
-        self.ltf_lambda_for_smoothing
-            .set_text(LAMBDA_FOR_SMOOTHING_ASSESSMENT_DEFAULT);
-        self.pnl_root.root_box_layout_y_axis = true;
-        self.pnl_root.root_border_title = Some("Smoothing Assessment".into());
-        self.pnl_root.root_component_order = vec![
-            "ltfLambdaForSmoothing".into(),
-            "FixedDim.x0_y5".into(),
-            "pnlButtons".into(),
-        ];
-        self.pnl_root.buttons_box_layout_x_axis = true;
-        self.pnl_root.buttons_component_order = vec![
-            "btnFlattenWarp".into(),
-            "FixedDim.x5_y0".into(),
-            "btn3dmod".into(),
-        ];
+    /// Java private `createPanel()`.
+    fn create_panel(self: &Rc<Self>) {
+        // initialize
+        let container: Weak<dyn Run3dmodButtonContainer> = Rc::downgrade(self) as Weak<_>;
+        self.btn_flatten_warp.set_container(Some(container));
+        self.btn_flatten_warp
+            .set_deferred_3dmod_button_deferred_3dmod_button(Some(
+                self.btn_3dmod.clone() as Rc<dyn Deferred3dmodButton>
+            ));
+        self.ltf_lambda_for_smoothing.set_text_string(Some(
+            flatten_warp_param::LAMBDA_FOR_SMOOTHING_ASSESSMENT_DEFAULT,
+        ));
+        // Local panels
+        let pnl_buttons = JComponent::new_panel();
+        // root panel
+        self.pnl_root.set_box_layout(spaced_panel::Y_AXIS);
+        self.pnl_root
+            .set_border(&EtchedBorder::new(Some("Smoothing Assessment")).get_border());
+        self.pnl_root
+            .add_container(&self.ltf_lambda_for_smoothing.get_container());
+        // Swing layout: pnlRoot.add(Box.createRigidArea(FixedDim.x0_y5)) (a
+        // rigid area through SpacedPanel.add(Component); its spacing is layout).
+        self.pnl_root.add_j_panel(&pnl_buttons);
+        // Buttons panel
+        // Swing layout: pnlButtons.setLayout(new BoxLayout(pnlButtons,
+        // BoxLayout.X_AXIS)).
+        pnl_buttons.add(&self.btn_flatten_warp.get_component());
+        // Swing layout: pnlButtons.add(Box.createRigidArea(FixedDim.x5_y0)).
+        pnl_buttons.add(&self.btn_3dmod.get_component());
     }
 
-    /// Java `setParameters(ConstMetaData)`.
-    pub fn set_parameters<M: SmoothingAssessmentConstMetaData>(&mut self, meta_data: &M) {
+    /// Java package-private `getComponent()`.
+    pub fn get_component(&self) -> Rc<JComponent> {
+        self.pnl_root.get_container()
+    }
+
+    /// Java package-private `setParameters(ConstMetaData)`.
+    pub fn set_parameters(&self, meta_data: &dyn ConstMetaData) {
         if !meta_data.is_lambda_for_smoothing_list_empty() {
             self.ltf_lambda_for_smoothing
-                .set_text(&meta_data.lambda_for_smoothing_list());
+                .set_text_string(Some(&meta_data.get_lambda_for_smoothing_list()));
         }
     }
 
-    /// Java `getParameters(MetaData)`.
-    pub fn get_parameters_meta<M: SmoothingAssessmentMetaData>(&self, meta_data: &mut M) {
-        meta_data.set_lambda_for_smoothing_list(self.ltf_lambda_for_smoothing.get_text());
+    /// Java package-private `getParameters(MetaData)`.
+    pub fn get_parameters_meta_data(&self, meta_data: &MetaData) {
+        meta_data.set_lambda_for_smoothing_list(
+            self.ltf_lambda_for_smoothing.get_text_void().as_deref(),
+        );
     }
 
-    /// Java private `validateFlattenWarp`.
-    pub fn validate_flatten_warp<M: SmoothingAssessmentManager>(&self, manager: &mut M) -> bool {
+    /// Java private `validateFlattenWarp()`.
+    fn validate_flatten_warp(&self) -> bool {
         if self.ltf_lambda_for_smoothing.is_empty() {
-            manager.open_message_dialog(
-                format!("{LAMBDA_FOR_SMOOTHING_LABEL} is required."),
-                "Entry Error",
-                self.axis_id,
-            );
+            ui_harness::with(|harness| {
+                harness.open_message_dialog_base_manager_string_string_axis_id(
+                    Some(self.manager),
+                    &format!("{LAMBDA_FOR_SMOOTHING_LABEL} is required."),
+                    "Entry Error",
+                    Some(self.axis_id),
+                )
+            });
             return false;
         }
         true
     }
 
-    /// Java `getParameters(FlattenWarpParam, boolean)`.
-    pub fn get_parameters<F: SmoothingAssessmentFlattenWarpParam, M: SmoothingAssessmentManager>(
-        &self,
-        param: &mut F,
-        do_validation: bool,
-        manager: &mut M,
-        smoothing_assessment_output_model: &str,
-    ) -> bool {
-        let lambda_for_smoothing = match self
-            .ltf_lambda_for_smoothing
-            .get_text_validated(do_validation)
-        {
-            Ok(value) => value,
-            Err(_) => return false,
-        };
-        if let Some(error_message) = param.set_lambda_for_smoothing(lambda_for_smoothing) {
-            manager.open_message_dialog(
-                format!("Error in {LAMBDA_FOR_SMOOTHING_LABEL}:  {error_message}"),
-                "Entry Error",
-                self.axis_id,
-            );
-            return false;
-        }
-        param.set_middle_contour_file(smoothing_assessment_output_model.into());
-        param.set_one_surface(self.parent.is_one_surface());
-        let warp_spacing_x = match self.parent.get_warp_spacing_x(do_validation) {
-            Ok(value) => value,
-            Err(_) => return false,
-        };
-        if let Some(error_message) = param.set_warp_spacing_x(warp_spacing_x) {
-            manager.open_message_dialog(
-                format!("Error in Warp spacing X:  {error_message}"),
-                "Entry Error",
-                self.axis_id,
-            );
-            return false;
-        }
-        let warp_spacing_y = match self.parent.get_warp_spacing_y(do_validation) {
-            Ok(value) => value,
-            Err(_) => return false,
-        };
-        if let Some(error_message) = param.set_warp_spacing_y(warp_spacing_y) {
-            manager.open_message_dialog(
-                format!("Error in Warp spacing Y:  {error_message}"),
-                "Entry Error",
-                self.axis_id,
-            );
-            return false;
-        }
-        true
-    }
-
-    /// Java `action(String, Deferred3dmodButton, Run3dmodMenuOptions)`.
-    pub fn action<M: SmoothingAssessmentManager>(
-        &self,
-        command: &str,
-        deferred_3dmod_button: Option<&Deferred3dmodButton>,
-        options: Option<Run3dmodMenuOptions>,
-        manager: &mut M,
-    ) {
-        let flatten_warp_command = self
-            .btn_flatten_warp
-            .get_action_command()
-            .unwrap_or_default();
-        let btn_3dmod_command = self.btn_3dmod.get_action_command().unwrap_or_default();
-        match self.panel_id {
-            SmoothingAssessmentPanelId::PostFlattenVolume
-            | SmoothingAssessmentPanelId::ToolsFlattenVolume
-                if command == flatten_warp_command =>
-            {
-                if self.validate_flatten_warp(manager) {
-                    manager.flatten_warp(
-                        &self.btn_flatten_warp,
-                        deferred_3dmod_button,
-                        options,
-                        self.dialog_type,
-                        self.axis_id,
-                    );
-                }
-            }
-            SmoothingAssessmentPanelId::PostFlattenVolume
-            | SmoothingAssessmentPanelId::ToolsFlattenVolume
-                if command == btn_3dmod_command =>
-            {
-                manager.imod_view_model(self.axis_id, SMOOTHING_ASSESSMENT_OUTPUT_MODEL);
-            }
-            _ => panic!("Unknown command {command}"),
-        }
-    }
-
-    #[allow(non_snake_case)]
-    /// Native-name adapter for the Java listener's `actionPerformed`.
-    pub fn actionPerformed<M: SmoothingAssessmentManager>(&self, command: &str, manager: &mut M) {
-        self.action(command, None, None, manager);
-    }
-
-    /// Java `setTooltips`.  Autodoc retrieval is external; if its source string
-    /// is supplied through the retained boundary field, preserve Java's concatenation.
-    pub fn set_tooltips(&mut self) {
+    /// Java package-private `setTooltips()`.
+    pub fn set_tooltips(&self) {
         self.btn_flatten_warp
             .set_tool_tip_text(Some("Run flattenwarp with different smoothing factors."));
         self.btn_3dmod
             .set_tool_tip_text(Some("Open model created by flattenwarp."));
-        if let Some(autodoc_tooltip) = &self.flatten_warp_autodoc_tooltip {
+        // Java `ReadOnlyAutodoc autodoc = null;` then the try/catch.
+        let mut autodoc: *const dyn ReadOnlyAutodoc = std::ptr::null::<Autodoc>();
+        match unsafe {
+            autodoc_factory::get_instance(
+                Some(self.manager),
+                Some(autodoc_factory::FLATTEN_WARP),
+                self.axis_id,
+                false,
+            )
+        } {
+            Ok(instance) => autodoc = instance as *const Autodoc,
+            // `catch (final LockException except) {}`.
+            Err(LogFileError::Lock(_)) => {}
+            // `catch (final LogFileException | IOException except)`:
+            // `except.printStackTrace()`.
+            Err(except) => eprintln!("{}", except),
+        }
+        // SAFETY: `autodoc` is null or an autodoc the factory keeps for the life
+        // of the process.
+        let autodoc: Option<&dyn ReadOnlyAutodoc> = if autodoc.is_null() {
+            None
+        } else {
+            Some(unsafe { &*autodoc })
+        };
+        if autodoc.is_some() {
             self.ltf_lambda_for_smoothing
                 .set_tool_tip_text(Some(&format!(
-                    "A list of different LambdaForSmoothing values.  {autodoc_tooltip}"
+                    "A list of different LambdaForSmoothing values.  {}",
+                    etomo_autodoc::get_tooltip(
+                        autodoc,
+                        Some(flatten_warp_param::LAMBDA_FOR_SMOOTHING_OPTION)
+                    )
+                    .as_deref()
+                    .unwrap_or("null")
                 )));
         }
     }
 }
 
-#[cfg(test)]
-mod tests {
-    use super::*;
+impl FlattenWarpDisplay for SmoothingAssessmentPanel {
+    /// Java public `getParameters(FlattenWarpParam, boolean)`.
+    fn get_parameters(&self, param: &mut FlattenWarpParam, do_validation: bool) -> bool {
+        // try { ... } catch (FieldValidationFailedException e) { return false; }
+        let result = (|| -> Result<bool, FieldValidationFailedException> {
+            let mut error_message = param.set_lambda_for_smoothing(
+                self.ltf_lambda_for_smoothing
+                    .get_text_boolean(do_validation)?
+                    .as_deref(),
+            );
+            if let Some(message) = &error_message {
+                ui_harness::with(|harness| {
+                    harness.open_message_dialog_base_manager_string_string_axis_id(
+                        Some(self.manager),
+                        &format!("Error in {LAMBDA_FOR_SMOOTHING_LABEL}:  {message}"),
+                        "Entry Error",
+                        Some(self.axis_id),
+                    )
+                });
+                return Ok(false);
+            }
+            param.set_middle_contour_file(
+                file_type::CLASS
+                    .smoothing_assessment_output_model
+                    .get_file_name(Some(self.manager), Some(self.axis_id))
+                    .as_deref(),
+            );
+            // Rust-only: the parent is held weakly; it owns this panel, so it is
+            // always alive while the panel is used.
+            let Some(parent) = self.parent.upgrade() else {
+                return Ok(false);
+            };
+            param.set_one_surface(parent.is_one_surface());
+            error_message =
+                param.set_warp_spacing_x(parent.get_warp_spacing_x(do_validation)?.as_deref());
+            if let Some(message) = &error_message {
+                ui_harness::with(|harness| {
+                    harness.open_message_dialog_base_manager_string_string_axis_id(
+                        Some(self.manager),
+                        &format!(
+                            "Error in {}:  {message}",
+                            flatten_volume_panel::WARP_SPACING_X_LABEL
+                        ),
+                        "Entry Error",
+                        Some(self.axis_id),
+                    )
+                });
+                return Ok(false);
+            }
+            error_message =
+                param.set_warp_spacing_y(parent.get_warp_spacing_y(do_validation)?.as_deref());
+            if let Some(message) = &error_message {
+                ui_harness::with(|harness| {
+                    harness.open_message_dialog_base_manager_string_string_axis_id(
+                        Some(self.manager),
+                        &format!(
+                            "Error in {}:  {message}",
+                            flatten_volume_panel::WARP_SPACING_Y_LABEL
+                        ),
+                        "Entry Error",
+                        Some(self.axis_id),
+                    )
+                });
+                return Ok(false);
+            }
+            Ok(true)
+        })();
+        result.unwrap_or(false)
+    }
+}
 
-    #[derive(Default)]
-    struct Parent {
-        one_surface: bool,
-        x: String,
-        y: String,
-    }
-    impl SmoothingAssessmentParent for Parent {
-        fn is_one_surface(&self) -> bool {
-            self.one_surface
+impl Run3dmodButtonContainer for SmoothingAssessmentPanel {
+    /// Java public `action(String, Deferred3dmodButton, Run3dmodMenuOptions)`.
+    fn action(
+        &self,
+        command: &str,
+        deferred_3dmod_button: Option<Rc<dyn Deferred3dmodButton>>,
+        run_3dmod_menu_options: Option<Run3dmodMenuOptions>,
+    ) {
+        if self.panel_id == PanelId::PostFlattenVolume {
+            if Some(command) == self.btn_flatten_warp.get_action_command().as_deref() {
+                if self.validate_flatten_warp() {
+                    if let Some(application_manager) = self.application_manager {
+                        // Java passes a null Run3dmodMenuOptions from the action
+                        // listener; ImodState.open replaces null with a new
+                        // Run3dmodMenuOptions(), which is the default value.
+                        application_manager.flatten_warp(
+                            Some(self.btn_flatten_warp.clone() as ProcessResultDisplayHandle),
+                            None,
+                            deferred_3dmod_button,
+                            run_3dmod_menu_options.unwrap_or_default(),
+                            self.dialog_type,
+                            self.axis_id,
+                            self,
+                        );
+                    }
+                }
+            } else if Some(command) == self.btn_3dmod.get_action_command().as_deref() {
+                if let Some(application_manager) = self.application_manager {
+                    application_manager.imod_view_model(
+                        self.axis_id,
+                        &file_type::CLASS.smoothing_assessment_output_model,
+                    );
+                }
+            } else {
+                // Java throws `IllegalStateException("Unknown command " +
+                // command)`, which Swing reports on the EDT and survives.  The
+                // translation reports it and returns.
+                eprintln!("java.lang.IllegalStateException: Unknown command {command}");
+            }
+        } else if self.panel_id == PanelId::ToolsFlattenVolume {
+            if Some(command) == self.btn_flatten_warp.get_action_command().as_deref() {
+                if self.validate_flatten_warp() {
+                    if let Some(tools_manager) = self.tools_manager {
+                        tools_manager.flatten_warp(
+                            Some(self.btn_flatten_warp.clone() as ProcessResultDisplayHandle),
+                            None,
+                            deferred_3dmod_button,
+                            run_3dmod_menu_options,
+                            Some(self.dialog_type),
+                            self.axis_id,
+                            self,
+                        );
+                    }
+                }
+            } else if Some(command) == self.btn_3dmod.get_action_command().as_deref() {
+                if let Some(tools_manager) = self.tools_manager {
+                    tools_manager.imod_view_model(
+                        self.axis_id,
+                        &file_type::CLASS.smoothing_assessment_output_model,
+                    );
+                }
+            } else {
+                // Java throws `IllegalStateException`; see above.
+                eprintln!("java.lang.IllegalStateException: Unknown command {command}");
+            }
         }
-        fn get_warp_spacing_x(&self, _: bool) -> Result<String, FieldValidationFailedException> {
-            Ok(self.x.clone())
-        }
-        fn get_warp_spacing_y(&self, _: bool) -> Result<String, FieldValidationFailedException> {
-            Ok(self.y.clone())
-        }
-    }
-    #[derive(Default)]
-    struct Param {
-        lambda: String,
-        middle: String,
-        one: bool,
-        x: String,
-        y: String,
-    }
-    impl SmoothingAssessmentFlattenWarpParam for Param {
-        fn set_lambda_for_smoothing(&mut self, value: String) -> Option<String> {
-            self.lambda = value;
-            None
-        }
-        fn set_middle_contour_file(&mut self, value: String) {
-            self.middle = value
-        }
-        fn set_one_surface(&mut self, value: bool) {
-            self.one = value
-        }
-        fn set_warp_spacing_x(&mut self, value: String) -> Option<String> {
-            self.x = value;
-            None
-        }
-        fn set_warp_spacing_y(&mut self, value: String) -> Option<String> {
-            self.y = value;
-            None
-        }
-    }
-    #[derive(Default)]
-    struct Manager {
-        flatten: usize,
-        model: usize,
-        messages: Vec<String>,
-    }
-    impl SmoothingAssessmentManager for Manager {
-        fn flatten_warp(
-            &mut self,
-            _: &MultiLineButton,
-            _: Option<&Deferred3dmodButton>,
-            _: Option<Run3dmodMenuOptions>,
-            _: DialogType,
-            _: AxisID,
-        ) {
-            self.flatten += 1
-        }
-        fn imod_view_model(&mut self, _: AxisID, _: &str) {
-            self.model += 1
-        }
-        fn open_message_dialog(&mut self, message: String, _: &str, _: AxisID) {
-            self.messages.push(message)
-        }
-    }
-    fn panel() -> SmoothingAssessmentPanel<Parent> {
-        SmoothingAssessmentPanel::get_tools_instance(
-            AxisID::Only,
-            DialogType::PostProcessing,
-            Parent {
-                one_surface: true,
-                x: "4".into(),
-                y: "5".into(),
-            },
-        )
-    }
-
-    #[test]
-    fn construction_preserves_default_layout_and_listeners() {
-        let panel = panel();
-        assert_eq!(
-            panel.ltf_lambda_for_smoothing.get_text(),
-            LAMBDA_FOR_SMOOTHING_ASSESSMENT_DEFAULT
-        );
-        assert!(panel.pnl_root.flatten_warp_deferred_3dmod_button);
-        assert_eq!(panel.pnl_root.root_component_order.len(), 3);
-        assert_eq!(panel.btn_flatten_warp.button.action_listener_count, 1);
-    }
-    #[test]
-    fn parameters_follow_source_order() {
-        let panel = panel();
-        let mut param = Param::default();
-        let mut manager = Manager::default();
-        assert!(panel.get_parameters(&mut param, true, &mut manager, "dataseta_checkflat.mod"));
-        assert_eq!(param.lambda, LAMBDA_FOR_SMOOTHING_ASSESSMENT_DEFAULT);
-        assert_eq!(param.middle, "dataseta_checkflat.mod");
-        assert!(param.one);
-        assert_eq!((param.x.as_str(), param.y.as_str()), ("4", "5"));
-    }
-    #[test]
-    fn action_rejects_blank_then_routes_each_known_command() {
-        let mut panel = panel();
-        let mut manager = Manager::default();
-        panel.ltf_lambda_for_smoothing.set_text(" ");
-        panel.action(FLATTEN_WARP_LABEL, None, None, &mut manager);
-        assert_eq!(manager.flatten, 0);
-        assert_eq!(manager.messages.len(), 1);
-        panel.ltf_lambda_for_smoothing.set_text("1");
-        panel.action(FLATTEN_WARP_LABEL, None, None, &mut manager);
-        panel.action("Open Assessment in 3dmod", None, None, &mut manager);
-        assert_eq!((manager.flatten, manager.model), (1, 1));
     }
 }

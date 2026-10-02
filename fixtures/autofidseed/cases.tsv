@@ -1,0 +1,12 @@
+# name	first run (resume cases; - for none)	arguments (single quotes group words)
+basic	-	-track track.com -number 8 -two
+views3	-	-track track.com -number 5 -views 3 -adjust -spacing 0.9 -leave
+density	-	-track track.com -density 600 -boundary bound.mod -elongated 1 -lower 3 -pick '-weights 1,1,0.8,0.8' -border 10,12
+exclude	-	-track track.com -number 6 -boundary bound.mod -exclude -find '-threshold 0.3' -two -subarea 60
+resume	-track track.com -number 8 -two	-track track.com -number 8 -two -drop 1 -ignore 2 -ratio 1.0 -output resumed.seed
+remove	-track track.com -number 8	-track track.com -remove -1
+justshifts	-	-track track.com -justshifts 6 -number 6
+err_target	-	-track track.com
+err_views	-	-track track.com -number 5 -views 9
+err_drop	-	-track track.com -number 5 -drop 1
+err_bound	-	-track track.com -number 5 -boundary none.mod

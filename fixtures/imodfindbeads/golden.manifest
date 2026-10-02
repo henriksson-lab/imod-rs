@@ -1,0 +1,153 @@
+# imod-rs native golden manifest for fixtures/imodfindbeads; see fixtures/README.md.
+# Regenerate with fixtures/regen-golden.sh imodfindbeads; do not edit by hand.
+sha256 854a460c305e20fd6190d065b9de7f03250b57e0f84cb287a2f3184c81dd3dd6 1418 defined/adjust.out
+text 2 defined/adjust.rc
+0
+
+sha256 06c2fdc7f6804dd43ff3ddff5a379af9e934bca7581f3514954740b858c6652e 3452 defined/adjust/o.mod
+sha256 132a1f870c00eff4d548232318d7fd61eb20a3e3309651d27c8e60c947378a26 1029 defined/fill.out
+text 2 defined/fill.rc
+0
+
+sha256 dd1c43b9dc2235aea28bd1c4a85435b3c7056a5542447d4ac7ca0d6988cb1e65 8236 defined/fill/o.mod
+sha256 66f0dcdb95c1518b24a58242b6ca7cf4cfbbc7d358d125738464d2aec46e991b 1098 defined/refbound.out
+text 2 defined/refbound.rc
+0
+
+sha256 82b1cfb7b3ecab694c61c6bc2043e193f076f029f15640fcd8130cd7e3217793 7808 defined/refbound/o.mod
+sha256 a67cdc64927975a68d36190af95bf13a50356947e65a830c3179e6593595c8b5 1723 defined/verbose.out
+text 2 defined/verbose.rc
+0
+
+sha256 82b1cfb7b3ecab694c61c6bc2043e193f076f029f15640fcd8130cd7e3217793 7808 defined/verbose/o.mod
+sha256 b8e6d21a1ac0ce721a46615aae4a1996f8d64eb2ac3484f7674a1253c9bda1dc 946 golden/add.out
+text 2 golden/add.rc
+0
+
+sha256 efa204edc74f37484dcaad37b3d6de1765260972ca025aad5d80b894c8282d6b 8032 golden/add/o.mod
+sha256 837f66dac71c739ed767becb68ec8b1687f9a0593679b069cb34d8e67b1256ba 568 golden/area.out
+text 2 golden/area.rc
+0
+
+sha256 0b252ee805df2b7e519ff4ce36ba8dea4af4234b750f191b4f4a3849a304e50b 5608 golden/area/o.mod
+sha256 3f8072a51a749b1cd759c1b7254b13217ca72e16ec37a2463d9d498da54dcc9e 876 golden/basic.out
+text 2 golden/basic.rc
+0
+
+sha256 82b1cfb7b3ecab694c61c6bc2043e193f076f029f15640fcd8130cd7e3217793 7808 golden/basic/o.mod
+sha256 6dcf7fc2527e0dfda721daaf87fb5bfcfb5d42bb8820d65f094b6efeaa18e1fa 746 golden/center0.out
+text 2 golden/center0.rc
+0
+
+sha256 e410654f39bfed10d2a4066f289ff5a3ed54c3c78f0e6aa342412aaf0abd061b 308224 golden/center0/f.mrc
+sha256 990e9750c21828759119537ad6f4d458a1b3d1a028702413db00c53499288e35 7808 golden/center0/o.mod
+sha256 1eb7bdefeb6fae5f1c4a041a69044eb865f35cf44f25a2b4176047d701b97b5e 1390 golden/dump.out
+text 2 golden/dump.rc
+0
+
+sha256 785b1f763fa8cecbe8582dde8258094fdf538724c1dcee71bc743cc0f57d5c0d 1983360 golden/dump/h.txt
+sha256 82b1cfb7b3ecab694c61c6bc2043e193f076f029f15640fcd8130cd7e3217793 7808 golden/dump/o.mod
+text 54 golden/e_binning.out
+ERROR: imodfindbeads - Binning entry must be positive
+
+text 2 golden/e_binning.rc
+1
+
+text 80 golden/e_maxsec.out
+ERROR: imodfindbeads - Maximum number of sections per analysis must be positive
+
+text 2 golden/e_maxsec.rc
+1
+
+text 53 golden/e_noinput.out
+ERROR: imodfindbeads - No input image file specified
+
+text 2 golden/e_noinput.rc
+1
+
+text 50 golden/e_nosize.out
+ERROR: imodfindbeads - You must enter a bead size
+
+text 2 golden/e_nosize.rc
+1
+
+text 66 golden/e_query.out
+ERROR: imodfindbeads - You must enter an area model to use -query
+
+text 2 golden/e_query.rc
+1
+
+text 51 golden/e_section.out
+ERROR: imodfindbeads - Section # 5 is out of range
+
+text 2 golden/e_section.rc
+1
+
+sha256 3f8072a51a749b1cd759c1b7254b13217ca72e16ec37a2463d9d498da54dcc9e 876 golden/filtered.out
+text 2 golden/filtered.rc
+0
+
+sha256 adb217af48189ef78493fbbb08ea020b280100ca32a4c9f52ce4adaa6fa403bc 308224 golden/filtered/f.mrc
+sha256 82b1cfb7b3ecab694c61c6bc2043e193f076f029f15640fcd8130cd7e3217793 7808 golden/filtered/o.mod
+sha256 384dd6aef480f7f708009ca12ec6b864d2574830dc55d9f2c30d6b5344c04421 876 golden/kernel.out
+text 2 golden/kernel.rc
+0
+
+sha256 8ef48b8ffeea7b9410e9f5781e4daeb91a122d7df3408b3b238353f81561fe64 4156 golden/kernel/o.mod
+sha256 7e14cd3f0784e8684ace0b36cb0c9998d336b3d727c69992aa206d80115c291e 740 golden/light.out
+text 2 golden/light.rc
+0
+
+sha256 bba8a7416151413f2f397a2a6e7b3639c8e1b242c3ea3738f6e28bef8736565e 636 golden/light/o.mod
+sha256 176f8197d91cb23eb093390ee91edb21a9655908d30e5259db6d79d3072668c7 1415 golden/maxsec.out
+text 2 golden/maxsec.rc
+0
+
+sha256 ebfb3c84e4fb3ffc6fcb28577e404eaf97b09612d3b84dd52a0cc82e2eaeaade 6712 golden/maxsec/o.mod
+sha256 57ecbe13b6f0c9ce3e403cb84dfa5f4dcaa400d7bac831b7e13971e1c58341a0 744 golden/nonopt.out
+text 2 golden/nonopt.rc
+0
+
+sha256 9bed623f19453654b463e719a17de24864bfd10891a95451c7d956a478690479 2968 golden/nonopt/o.mod
+text 328 golden/onepass.out
+Scaling down by 1.00 for Sobel filter; box size = 28, scaled size = 28
+
+Analyzing group of sections starting with 0, ending with 2
+Dips found in 2 groups based on bkg mean, means 115.14 to 120.43
+242 peaks found. 76 eliminated as too weak, 1 too close, 165 remaining
+129 peaks above threshold of 0.500 are being stored in model
+
+text 2 golden/onepass.rc
+0
+
+sha256 4eb85729691405ced27c49d939f044bb8ed943953ab163691fe3e35ac0adf15b 6224 golden/onepass/o.mod
+sha256 ae25bfe36fdd5dc4f5d5312f9930839fedf3d1809204bb9239b0980c2604588a 876 golden/prexf.out
+text 2 golden/prexf.rc
+0
+
+sha256 82b1cfb7b3ecab694c61c6bc2043e193f076f029f15640fcd8130cd7e3217793 7808 golden/prexf/o.mod
+text 46 golden/query.out
+Area (megapixels) included in analysis = 0.006
+text 2 golden/query.rc
+0
+
+text 46 golden/queryexcl.out
+Area (megapixels) included in analysis = 0.014
+text 2 golden/queryexcl.rc
+0
+
+sha256 7285e72ca52e818e5187c261a1bdd393b19fc23219dead2b956d645c7b757e6b 1094 golden/ref.out
+text 2 golden/ref.rc
+0
+
+sha256 82b1cfb7b3ecab694c61c6bc2043e193f076f029f15640fcd8130cd7e3217793 7808 golden/ref/o.mod
+sha256 6978d7f64f6ec8f74844673d973650c4c548a467287bb63463145cdefa093f6d 1017 golden/replace.out
+text 2 golden/replace.rc
+0
+
+sha256 7bd2e0ab4186b024a47916358a0c04b750f25316a320205d7a3cfd34805c81f7 8032 golden/replace/o.mod
+sha256 c09929effd3fb8fbe9ec8ccc8518f071088516aaf71743a385a411b4ccd4a78e 702 golden/thrnum.out
+text 2 golden/thrnum.rc
+0
+
+sha256 b9c87926a0b8bc0c81158c2b49b6a98a54032dc8ddbd7d641c6a15499b52f9e1 3584 golden/thrnum/o.mod

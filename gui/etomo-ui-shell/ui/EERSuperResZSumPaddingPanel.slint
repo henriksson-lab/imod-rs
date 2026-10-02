@@ -87,6 +87,7 @@ export component EERSuperResZSumPaddingPanel inherits VerticalLayout {
                     selected: root.z-sum-frames-selected;
                 }
                 Spinner {
+                    label: "Sum frames to make";
                     text: "12";
                     enabled: root.z-sum-frames-selected;
                 }
@@ -110,6 +111,7 @@ export component EERSuperResZSumPaddingPanel inherits VerticalLayout {
                     selected: !root.z-sum-frames-selected;
                 }
                 Spinner {
+                    label: "Sum successive sets of";
                     text: "10";
                     enabled: !root.z-sum-frames-selected;
                 }

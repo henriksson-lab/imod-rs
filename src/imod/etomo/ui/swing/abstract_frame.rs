@@ -1,858 +1,1381 @@
 //! `IMOD/Etomo/src/etomo/ui/swing/AbstractFrame.java`.
 //!
-//! Swing's `JFrame`, `JOptionPane`, and `JDialog` do not have a hidden Rust
-//! replacement here.  This unit owns the source-visible frame and popup state;
-//! the optional Slint `UIHarness` is the presentation boundary.  In particular,
-//! a dialog for which the harness has supplied no answer returns Swing's
-//! `CLOSED_OPTION`, rather than fabricating a Yes/No response.
-#![allow(dead_code)]
+//! The base of eTomo's top-level windows (`MainFrame`, `SubFrame`,
+//! `ManagerFrame`).  It standardises every popup message and question dialog:
+//! all of them end in `showOptionDialog`, which logs the message, picks the
+//! icon, names the popup for uitest (`printName`) and shows a modal
+//! `JOptionPane`.
+//!
+//! The `JFrame` itself is modelled only by the state the translation reads
+//! back: its content pane (the root of the frame's component tree, searched by
+//! name), title, visibility, displayability, location and size, its menu bar,
+//! and its window-focus listeners.  Layout, painting and icons are not
+//! modelled (see `jdk.rs`); those statements are kept as `// Swing layout:`
+//! comments.
+//!
+//! The modal `JOptionPane` is replaced by the Rust-only presentation hook in
+//! `ui_harness.rs` ([`ui_harness::present_popup`]): the dialog request carries
+//! everything the Java pane was built from (title, wrapped message lines,
+//! button labels, message and option type, initial value and the uitest
+//! popup name), and the answer is the index of the button pressed, or
+//! `CLOSED_OPTION`, exactly what the Java pane's value reduces to.
 
-use super::etomo_frame::{ActionEvent, FramePresentation, FrameType};
-use super::etomo_menu::MenuTarget;
+use std::cell::{Cell, RefCell};
+use std::rc::{Rc, Weak};
+
+use super::etomo_frame::FrameType;
+use super::swing_component::SwingComponent;
+use super::ui_harness::{self, PopupAnswer, PopupRequest};
 use crate::imod::etomo::base_manager::BaseManager;
-use crate::imod::etomo::etomo_director::ARGUMENTS;
+use crate::imod::etomo::etomo_director;
+use crate::imod::etomo::jdk::{ActionEvent, Dimension, JComponent, Point};
 use crate::imod::etomo::logic::popup_tool;
-use crate::imod::etomo::process::process_messages::{MessageType, ProcessMessages};
+use crate::imod::etomo::process::process_messages::{self, ProcessMessages};
 use crate::imod::etomo::storage::autodoc::autodoc_tokenizer::{DEFAULT_DELIMITER, SEPARATOR_CHAR};
 use crate::imod::etomo::r#type::axis_id::AxisID;
+use crate::imod::etomo::r#type::ui_test_field_type::UITestFieldType;
+use crate::imod::etomo::ui::ui_component::UIComponent;
 use crate::imod::etomo::util::utilities;
 
-pub const OK: &str = "OK";
-pub const ETOMO_QUESTION: &str = "Etomo question";
-pub const YES: &str = "Yes";
-pub const NO: &str = "No";
-pub const CANCEL: &str = "Cancel";
-pub const YES_NO_LABEL_ARRAY: [&str; 2] = [YES, NO];
-pub const NO_INDEX: usize = 1;
-pub const OK_LABEL_ARRAY: [&str; 1] = [OK];
-pub const DELETE_NO_LABEL_ARRAY: [&str; 2] = ["Delete", NO];
-pub const DELETE_OPTION: i32 = 0; // JOptionPane.YES_OPTION
-pub const YES_NO_CANCEL_LABEL_ARRAY: [&str; 3] = [YES, NO, CANCEL];
+// `javax.swing.JOptionPane` constants used by this class and its callers.
+// TODO(unit): jdk.rs has no JOptionPane; these are the JDK's values.
+/// `JOptionPane.DEFAULT_OPTION`.
 pub const DEFAULT_OPTION: i32 = -1;
+/// `JOptionPane.YES_NO_OPTION`.
 pub const YES_NO_OPTION: i32 = 0;
+/// `JOptionPane.YES_NO_CANCEL_OPTION`.
 pub const YES_NO_CANCEL_OPTION: i32 = 1;
-pub const ERROR_MESSAGE: i32 = 0;
-pub const INFORMATION_MESSAGE: i32 = 1;
-pub const WARNING_MESSAGE: i32 = 2;
-pub const QUESTION_MESSAGE: i32 = 3;
+/// `JOptionPane.OK_CANCEL_OPTION`.
+pub const OK_CANCEL_OPTION: i32 = 2;
+/// `JOptionPane.YES_OPTION`.
+pub const YES_OPTION: i32 = 0;
+/// `JOptionPane.NO_OPTION`.
+pub const NO_OPTION: i32 = 1;
+/// `JOptionPane.CANCEL_OPTION`.
+pub const CANCEL_OPTION: i32 = 2;
+/// `JOptionPane.OK_OPTION`.
+pub const OK_OPTION: i32 = 0;
+/// `JOptionPane.CLOSED_OPTION`.
 pub const CLOSED_OPTION: i32 = -1;
+/// `JOptionPane.ERROR_MESSAGE`.
+pub const ERROR_MESSAGE: i32 = 0;
+/// `JOptionPane.INFORMATION_MESSAGE`.
+pub const INFORMATION_MESSAGE: i32 = 1;
+/// `JOptionPane.WARNING_MESSAGE`.
+pub const WARNING_MESSAGE: i32 = 2;
+/// `JOptionPane.QUESTION_MESSAGE`.
+pub const QUESTION_MESSAGE: i32 = 3;
+/// `JOptionPane.PLAIN_MESSAGE`.
+pub const PLAIN_MESSAGE: i32 = -1;
 
-/// Source-used `Component` fields.  A GUI backend owns the real native widget.
-#[derive(Clone, Debug, Default, Eq, PartialEq)]
-pub struct ComponentState {
-    pub height: i32,
-    pub location: (i32, i32),
-    pub orientation_left_to_right: bool,
+/// `java.awt.event.WindowEvent.WINDOW_CLOSING`.
+pub const WINDOW_CLOSING: i32 = 201;
+
+/// Java private static final `OK`.
+const OK: &str = "OK";
+/// Java private static final `ETOMO_QUESTION`.
+const ETOMO_QUESTION: &str = "Etomo question";
+/// Java private static final `YES`.
+const YES: &str = "Yes";
+/// Java private static final `NO`.
+const NO: &str = "No";
+/// Java private static final `CANCEL`.
+const CANCEL: &str = "Cancel";
+/// Java private static final `YES_NO_LABEL_ARRAY`.
+const YES_NO_LABEL_ARRAY: [&str; 2] = [YES, NO];
+/// Java private static final `NO_INDEX`.
+const NO_INDEX: usize = 1;
+/// Java private static final `OK_LABEL_ARRAY`.
+const OK_LABEL_ARRAY: [&str; 1] = [OK];
+/// Java private static final `DELETE_NO_LABEL_ARRAY`.
+const DELETE_NO_LABEL_ARRAY: [&str; 2] = ["Delete", NO];
+/// Java public static final `DELETE_OPTION`.
+pub const DELETE_OPTION: i32 = YES_OPTION;
+/// Java private static final `YES_NO_CANCEL_LABEL_ARRAY`.
+const YES_NO_CANCEL_LABEL_ARRAY: [&str; 3] = [YES, NO, CANCEL];
+
+/// Java `PRINT_NAMES = EtomoDirector.INSTANCE.getArguments().isPrintNames()`,
+/// read when used (the Java static is read once at class initialisation,
+/// after the arguments are parsed).
+fn print_names() -> bool {
+    etomo_director::ARGUMENTS.lock().unwrap().is_print_names()
 }
 
-/// The complete information `JOptionPane` passes to its presentation boundary.
-#[derive(Clone, Debug, Eq, PartialEq)]
-pub struct OptionDialog {
-    pub axis_id: Option<AxisID>,
-    pub parent: Option<ComponentState>,
-    pub message: Vec<String>,
-    pub title: Option<String>,
-    pub option_type: i32,
-    pub message_type: i32,
-    pub initial_value: Option<String>,
-    pub override_defaults: bool,
-    pub options: Option<Vec<String>>,
-    pub modal: Option<bool>,
-    pub location: Option<(i32, i32)>,
+/// Java `WindowFocusListener`: the frame's focus events.  Rust-only stand-in
+/// for the AWT listener interface (`jdk.rs` models no window events).
+pub trait WindowFocusListener {
+    /// Java `windowGainedFocus(WindowEvent)`.
+    fn window_gained_focus(&self);
+    /// Java `windowLostFocus(WindowEvent)`.
+    fn window_lost_focus(&self);
 }
 
-/// The Rust equivalent of the abstract Java hooks in `AbstractFrame`.
-///
-/// The returned `MenuTarget` makes the Java callback's downstream manager or
-/// dialog boundary explicit.  `EtomoFrame` implements this trait by forwarding
-/// into its existing source-named menu methods.
-pub trait AbstractFrameActions {
-    fn menu_file_action(&mut self, action_event: &ActionEvent) -> MenuTarget;
-    fn menu_tools_action(&mut self, action_event: &ActionEvent) -> MenuTarget;
-    fn menu_view_action(&mut self, action_event: &ActionEvent) -> Result<(), String>;
-    fn menu_options_action(&mut self, action_event: &ActionEvent) -> Result<(), String>;
-    fn menu_help_action(&mut self, action_event: &ActionEvent) -> MenuTarget;
-    fn get_frame_type(&self) -> FrameType;
-    fn cancel(&mut self);
-    fn save(&mut self, axis_id: AxisID) -> Result<(), String>;
-    fn save_as(&mut self) -> Result<(), String>;
-    fn close(&mut self);
-}
+/// The members `AbstractFrame` declares abstract, or declares and a subclass
+/// overrides, dispatched through the subclass object.  Every default method
+/// holds the `AbstractFrame` body.
+pub trait AbstractFrameVirtual {
+    /// The `AbstractFrame` part of the object.
+    fn abstract_frame(&self) -> &AbstractFrame;
 
-/// Fields and implemented methods of Java's abstract `AbstractFrame`.
-#[derive(Clone, Debug)]
-pub struct AbstractFrame {
-    pub verbose: bool,
-    pub presentation: FramePresentation,
-    pub component: ComponentState,
-    pub last_dialog: Option<OptionDialog>,
-    /// The next response contributed by the real UI test/backend.  `None` is
-    /// the source-equivalent closed dialog, never a guessed answer.
-    pub dialog_response: Option<i32>,
-}
+    /// Java abstract `menuFileAction(ActionEvent)`.
+    fn menu_file_action(&self, action_event: &ActionEvent);
+    /// Java abstract `menuToolsAction(ActionEvent)`.
+    fn menu_tools_action(&self, action_event: &ActionEvent);
+    /// Java abstract `menuViewAction(ActionEvent)`.
+    fn menu_view_action(&self, action_event: &ActionEvent);
+    /// Java abstract `menuOptionsAction(ActionEvent)`.
+    fn menu_options_action(&self, action_event: &ActionEvent);
+    /// Java abstract `menuHelpAction(ActionEvent)`.
+    fn menu_help_action(&self, action_event: &ActionEvent);
+    /// Java abstract `getFrameType()`.  `ManagerFrame` returns null.
+    fn get_frame_type(&self) -> Option<FrameType>;
+    /// Java abstract `cancel()`.
+    fn cancel(&self);
+    /// Java abstract `save(AxisID)`.
+    fn save(&self, axis_id: Option<AxisID>);
+    /// Java abstract `saveAs()`.
+    fn save_as(&self);
+    /// Java abstract `close()`.
+    fn close(&self);
 
-impl AbstractFrame {
-    /// Java field initialisers plus `JFrame()`.
-    pub fn new() -> Self {
-        Self {
-            verbose: false,
-            presentation: FramePresentation::default(),
-            component: ComponentState {
-                orientation_left_to_right: true,
-                ..Default::default()
-            },
-            last_dialog: None,
-            dialog_response: None,
+    /// Java `setVisible(boolean)` (overrides `Window.setVisible`).
+    fn set_visible(&self, visible: bool) {
+        let frame = self.abstract_frame();
+        if visible {
+            let director = &*etomo_director::INSTANCE;
+            let frame_type = self.get_frame_type();
+            let location = frame_type.and_then(|frame_type| {
+                director.with_user_configuration(|user_configuration| {
+                    if user_configuration.is_last_location_set(frame_type) {
+                        Some((
+                            user_configuration.get_last_location_x(frame_type),
+                            user_configuration.get_last_location_y(frame_type),
+                        ))
+                    } else {
+                        None
+                    }
+                })
+            });
+            if !director.get_arguments().is_ignore_loc()
+                && let Some((x, y)) = location
+            {
+                frame.set_location(x, y);
+            }
         }
+        frame.set_visible_super(visible);
     }
 
-    /// `getUIComponent`.
-    pub fn get_ui_component(&self) -> &Self {
-        self
+    /// Java package-private `getAxisID()`.
+    fn get_axis_id(&self) -> Option<AxisID> {
+        Some(AxisID::Only)
     }
-    /// `getComponent`.
-    pub fn get_component(&self) -> &ComponentState {
-        &self.component
-    }
-    /// `setVisible(boolean)`.  UserConfiguration's persisted-location query is
-    /// an explicit boundary until `UserConfiguration.java` is translated.
-    pub fn set_visible(&mut self, visible: bool) {
-        self.presentation.visible = visible;
-    }
-    /// `setVerbose`.
-    pub fn set_verbose(&mut self, verbose: bool) {
-        self.verbose = verbose;
-    }
-    /// `getAxisID`.
-    pub fn get_axis_id(&self) -> AxisID {
-        AxisID::Only
-    }
-    /// `pack(boolean)`.
-    pub fn pack_force(&mut self, force: bool, auto_fit: bool) {
+
+    /// Java package-private `pack(boolean)`.
+    fn pack_boolean(&self, force: bool) {
+        let auto_fit = etomo_director::INSTANCE.with_user_configuration(|c| c.is_auto_fit());
         if !force && !auto_fit {
             self.set_visible(true);
         } else {
-            self.presentation.packed = true;
+            let frame = self.abstract_frame();
+            let mut bounds = frame.get_size();
+            bounds.height += 1;
+            bounds.width += 1;
+            frame.set_size(bounds);
+            // `try { super.pack(); } catch (NullPointerException e) {
+            // e.printStackTrace(); }` - Swing layout: Window.pack().
         }
     }
-    /// `repaint(AxisID)`.
-    pub fn repaint(&mut self, _axis_id: AxisID) {
-        self.presentation.repaint_count += 1;
-    }
-    /// `pack(AxisID)`.
-    pub fn pack_axis(&mut self, _axis_id: AxisID) {
-        self.presentation.packed = true;
-    }
-    /// `pack(AxisID, boolean)`.
-    pub fn pack_axis_force(&mut self, _axis_id: AxisID, force: bool, auto_fit: bool) {
-        self.pack_force(force, auto_fit);
-    }
-    /// `repaintWindow`.
-    pub fn repaint_window(&mut self) {
-        self.repaint_container();
-        self.presentation.repaint_count += 1;
-    }
-    /// `repaintContainer(Container)`.  Native child traversal belongs to Slint.
-    pub fn repaint_container(&mut self) {
-        self.presentation.repaint_count += 1;
-    }
-    /// `menuFileMRUListAction(ActionEvent)` is intentionally empty in Java.
-    pub fn menu_file_mru_list_action(&self, _event: &ActionEvent) {}
 
-    /// Java overload `openInfoMessageDialog(... String, String[], ProcessMessages, ...)`.
-    pub fn open_info_message_dialog_factory(
-        &mut self,
-        manager: Option<&dyn BaseManager>,
-        parent: Option<ComponentState>,
+    /// Java package-private `repaint(AxisID)`.
+    fn repaint(&self, axis_id: Option<AxisID>) {
+        let _ = axis_id;
+        // Swing painting: repaint().
+    }
+
+    /// Java package-private `pack(AxisID)`.
+    fn pack_axis_id(&self, axis_id: Option<AxisID>) {
+        let _ = axis_id;
+        self.pack_void();
+    }
+
+    /// Java package-private `pack(AxisID, boolean)`.
+    fn pack_axis_id_boolean(&self, axis_id: Option<AxisID>, force: bool) {
+        let _ = axis_id;
+        self.pack_boolean(force);
+    }
+
+    /// Java `Window.pack()`, which `EtomoFrame` overrides.  In a frame that
+    /// does not override it, it is Swing layout only.
+    fn pack_void(&self) {
+        // Swing layout: Window.pack().
+    }
+
+    /// Java package-private `menuFileMRUListAction(ActionEvent)`: empty.
+    fn menu_file_mru_list_action(&self, event: &ActionEvent) {
+        let _ = event;
+    }
+
+    // --- display* functions (EtomoFrame overrides some of them) ---
+
+    /// Java `displayMessage(BaseManager, String, String, AxisID)`.  Open a
+    /// message dialog.
+    fn display_message_base_manager_string_string_axis_id(
+        &self,
+        manager: Option<&'static dyn BaseManager>,
+        message: Option<&str>,
+        title: Option<&str>,
+        axis_id: Option<AxisID>,
+    ) {
+        self.abstract_frame()
+            .open_message_dialog_base_manager_axis_id_string_string(
+                manager, axis_id, message, title,
+            );
+    }
+
+    /// Java `displayMessage(BaseManager, Component, String, String, AxisID)`.
+    fn display_message_base_manager_component_string_string_axis_id(
+        &self,
+        manager: Option<&'static dyn BaseManager>,
+        parent_component: Option<&Rc<JComponent>>,
+        message: Option<&str>,
+        title: Option<&str>,
+        axis_id: Option<AxisID>,
+    ) {
+        self.abstract_frame()
+            .open_message_dialog_base_manager_component_axis_id_string_string(
+                manager,
+                parent_component,
+                axis_id,
+                message,
+                title,
+            );
+    }
+
+    /// Java `displayYesNoMessage(BaseManager, Component, String, AxisID)`.
+    fn display_yes_no_message_base_manager_component_string_axis_id(
+        &self,
+        manager: Option<&'static dyn BaseManager>,
+        parent_component: Option<&Rc<JComponent>>,
+        message: Option<&str>,
+        axis_id: Option<AxisID>,
+    ) -> bool {
+        self.abstract_frame()
+            .open_yes_no_dialog_base_manager_component_axis_id_string(
+                manager,
+                parent_component,
+                axis_id,
+                message,
+            )
+    }
+
+    /// Java `displayWarningMessage(BaseManager, Component, String, String,
+    /// AxisID)`.
+    fn display_warning_message_base_manager_component_string_string_axis_id(
+        &self,
+        manager: Option<&'static dyn BaseManager>,
+        parent_component: Option<&Rc<JComponent>>,
+        message: Option<&str>,
+        title: Option<&str>,
+        axis_id: Option<AxisID>,
+    ) {
+        self.abstract_frame()
+            .open_warning_message_dialog_base_manager_component_axis_id_string_string(
+                manager,
+                parent_component,
+                axis_id,
+                message,
+                title,
+            );
+    }
+
+    /// Java `displayMessage(BaseManager, Component, String[], String, AxisID)`.
+    fn display_message_base_manager_component_string_array_string_axis_id(
+        &self,
+        manager: Option<&'static dyn BaseManager>,
+        parent_component: Option<&Rc<JComponent>>,
+        message: &[String],
+        title: Option<&str>,
+        axis_id: Option<AxisID>,
+    ) {
+        self.abstract_frame()
+            .open_message_dialog_base_manager_component_axis_id_string_array_string(
+                manager,
+                parent_component,
+                axis_id,
+                message,
+                title,
+            );
+    }
+
+    /// Java `displayMessage(BaseManager, String, String)`.  Open a message
+    /// dialog.
+    fn display_message_base_manager_string_string(
+        &self,
+        manager: Option<&'static dyn BaseManager>,
+        message: Option<&str>,
+        title: Option<&str>,
+    ) {
+        self.abstract_frame()
+            .open_message_dialog_base_manager_axis_id_string_string(
+                manager,
+                Some(AxisID::Only),
+                message,
+                title,
+            );
+    }
+
+    /// Java `displayInfoMessage(BaseManager, Component, String, String,
+    /// AxisID)`.
+    fn display_info_message(
+        &self,
+        manager: Option<&'static dyn BaseManager>,
+        parent_component: Option<&Rc<JComponent>>,
+        message: Option<&str>,
+        title: Option<&str>,
+        axis_id: Option<AxisID>,
+    ) {
+        self.abstract_frame()
+            .open_info_message_dialog_base_manager_component_axis_id_string_string(
+                manager,
+                parent_component,
+                axis_id,
+                message,
+                title,
+            );
+    }
+
+    /// Java `displayYesNoCancelMessage(BaseManager, String, AxisID)`.
+    fn display_yes_no_cancel_message(
+        &self,
+        manager: Option<&'static dyn BaseManager>,
+        message: Option<&str>,
+        axis_id: Option<AxisID>,
+    ) -> i32 {
+        self.abstract_frame()
+            .open_yes_no_cancel_dialog_base_manager_axis_id_string(manager, axis_id, message)
+    }
+
+    /// Java `displayYesNoMessage(BaseManager, String[], AxisID)`.
+    fn display_yes_no_message_base_manager_string_array_axis_id(
+        &self,
+        manager: Option<&'static dyn BaseManager>,
+        message: &[String],
+        axis_id: Option<AxisID>,
+    ) -> bool {
+        self.abstract_frame()
+            .open_yes_no_dialog_base_manager_axis_id_string_array(manager, axis_id, message)
+    }
+
+    /// Java `displayYesNoMessage(BaseManager, String, AxisID)`.
+    fn display_yes_no_message_base_manager_string_axis_id(
+        &self,
+        manager: Option<&'static dyn BaseManager>,
+        message: Option<&str>,
+        axis_id: Option<AxisID>,
+    ) -> bool {
+        self.abstract_frame()
+            .open_yes_no_dialog_base_manager_axis_id_string(manager, axis_id, message)
+    }
+
+    /// Java `openYesNoDialogWithDefaultNo(BaseManager, String, String,
+    /// AxisID)`.
+    fn open_yes_no_dialog_with_default_no(
+        &self,
+        manager: Option<&'static dyn BaseManager>,
+        message: Option<&str>,
+        title: Option<&str>,
+        axis_id: Option<AxisID>,
+    ) -> bool {
+        self.abstract_frame()
+            .open_yes_no_dialog_base_manager_axis_id_string_string_int_boolean(
+                manager, axis_id, message, title, NO_INDEX, true,
+            )
+    }
+
+    /// Java `displayDeleteMessage(BaseManager, String[], AxisID)`.
+    fn display_delete_message(
+        &self,
+        manager: Option<&'static dyn BaseManager>,
+        message: &[String],
+        axis_id: Option<AxisID>,
+    ) -> bool {
+        self.abstract_frame()
+            .open_delete_dialog_base_manager_axis_id_string_array(manager, axis_id, message)
+    }
+
+    /// Java `displayMessage(BaseManager, String[], String, AxisID)`.  Open a
+    /// message dialog.
+    fn display_message_base_manager_string_array_string_axis_id(
+        &self,
+        manager: Option<&'static dyn BaseManager>,
+        message: &[String],
+        title: Option<&str>,
+        axis_id: Option<AxisID>,
+    ) {
+        self.abstract_frame()
+            .open_message_dialog_base_manager_axis_id_string_array_string(
+                manager, axis_id, message, title,
+            );
+    }
+
+    /// Java `displayErrorMessage(BaseManager, ProcessMessages, String,
+    /// AxisID)`.
+    fn display_error_message(
+        &self,
+        manager: Option<&'static dyn BaseManager>,
+        process_messages: &ProcessMessages,
+        title: Option<&str>,
+        axis_id: Option<AxisID>,
+    ) {
+        self.abstract_frame()
+            .open_error_message_dialog_base_manager_axis_id_process_messages_string(
+                manager,
+                axis_id,
+                process_messages,
+                title,
+            );
+    }
+
+    /// Java `displayMessage(BaseManager, ProcessMessages, String, AxisID)`.
+    fn display_message_base_manager_process_messages_string_axis_id(
+        &self,
+        manager: Option<&'static dyn BaseManager>,
+        process_messages: &ProcessMessages,
+        title: Option<&str>,
+        axis_id: Option<AxisID>,
+    ) {
+        self.abstract_frame()
+            .open_message_dialog_base_manager_axis_id_process_messages_string(
+                manager,
+                axis_id,
+                process_messages,
+                title,
+            );
+    }
+
+    /// Java `displayYesNoWarningDialog(BaseManager, String, AxisID)`.
+    fn display_yes_no_warning_dialog(
+        &self,
+        manager: Option<&'static dyn BaseManager>,
+        message: Option<&str>,
+        axis_id: Option<AxisID>,
+    ) -> bool {
+        self.abstract_frame()
+            .open_yes_no_warning_dialog_base_manager_axis_id_string(manager, axis_id, message)
+    }
+
+    /// Java `displayWarningMessage(BaseManager, ProcessMessages, String,
+    /// AxisID)`.
+    fn display_warning_message_base_manager_process_messages_string_axis_id(
+        &self,
+        manager: Option<&'static dyn BaseManager>,
+        process_messages: &ProcessMessages,
+        title: Option<&str>,
+        axis_id: Option<AxisID>,
+    ) {
+        self.abstract_frame()
+            .open_warning_message_dialog_base_manager_axis_id_process_messages_string(
+                manager,
+                axis_id,
+                process_messages,
+                title,
+            );
+    }
+}
+
+/// Java package-private `abstract class AbstractFrame extends JFrame
+/// implements UIComponent, SwingComponent`.
+pub struct AbstractFrame {
+    /// Java `private boolean verbose = false`.
+    verbose: Cell<bool>,
+
+    // --- the JFrame state this translation models ---
+    /// `JFrame.getContentPane()`: the root of the frame's component tree.
+    content_pane: Rc<JComponent>,
+    /// `Frame.setTitle` / `getTitle`.
+    title: RefCell<String>,
+    /// `Window.isVisible`.
+    frame_visible: Cell<bool>,
+    /// `Component.isDisplayable`: true from construction until `dispose()`.
+    displayable: Cell<bool>,
+    /// `Component.getLocation` / `setLocation`.
+    location: Cell<Point>,
+    /// `Component.getSize` / `setBounds`.
+    size: Cell<Dimension>,
+    /// `JFrame.setJMenuBar`.
+    j_menu_bar: RefCell<Option<Rc<JComponent>>>,
+    /// `Window.addWindowFocusListener`.
+    window_focus_listeners: RefCell<Vec<Rc<dyn WindowFocusListener>>>,
+
+    /// The subclass object, for virtual dispatch (Java `this`).
+    this: RefCell<Weak<dyn AbstractFrameVirtual>>,
+}
+
+/// Placeholder type for an unset `this`.
+struct NoSubclass;
+
+impl AbstractFrameVirtual for NoSubclass {
+    fn abstract_frame(&self) -> &AbstractFrame {
+        unreachable!("AbstractFrame used before its subclass was installed")
+    }
+    fn menu_file_action(&self, _action_event: &ActionEvent) {}
+    fn menu_tools_action(&self, _action_event: &ActionEvent) {}
+    fn menu_view_action(&self, _action_event: &ActionEvent) {}
+    fn menu_options_action(&self, _action_event: &ActionEvent) {}
+    fn menu_help_action(&self, _action_event: &ActionEvent) {}
+    fn get_frame_type(&self) -> Option<FrameType> {
+        None
+    }
+    fn cancel(&self) {}
+    fn save(&self, _axis_id: Option<AxisID>) {}
+    fn save_as(&self) {}
+    fn close(&self) {}
+}
+
+impl AbstractFrame {
+    /// Java implicit constructor (`JFrame()`): a new, not yet visible frame
+    /// with an empty content pane.  The subclass must call
+    /// [`AbstractFrame::set_this`] once it has been created.
+    pub fn new() -> AbstractFrame {
+        let content_pane = JComponent::new_panel();
+        // A JFrame is created invisible.
+        content_pane.set_visible(false);
+        AbstractFrame {
+            verbose: Cell::new(false),
+            content_pane,
+            title: RefCell::new(String::new()),
+            frame_visible: Cell::new(false),
+            displayable: Cell::new(true),
+            location: Cell::new(Point { x: 0, y: 0 }),
+            size: Cell::new(Dimension {
+                width: 0,
+                height: 0,
+            }),
+            j_menu_bar: RefCell::new(None),
+            window_focus_listeners: RefCell::new(Vec::new()),
+            this: RefCell::new(Weak::<NoSubclass>::new() as Weak<dyn AbstractFrameVirtual>),
+        }
+    }
+
+    /// Installs the subclass object for virtual dispatch (Rust-only).
+    pub fn set_this(&self, this: Weak<dyn AbstractFrameVirtual>) {
+        *self.this.borrow_mut() = this;
+    }
+
+    /// The subclass object as a `Weak` (Java `this`).
+    pub fn this_weak(&self) -> Weak<dyn AbstractFrameVirtual> {
+        self.this.borrow().clone()
+    }
+
+    /// The subclass object (Java `this` seen through a virtual call).
+    pub fn this(&self) -> Option<Rc<dyn AbstractFrameVirtual>> {
+        self.this.borrow().upgrade()
+    }
+
+    // --- javax.swing.JFrame / java.awt.Window members ---
+
+    /// Java `JFrame.getContentPane()`.
+    pub fn get_content_pane(&self) -> Rc<JComponent> {
+        self.content_pane.clone()
+    }
+
+    /// Java `Frame.setTitle(String)`.
+    pub fn set_title(&self, title: Option<&str>) {
+        *self.title.borrow_mut() = title.unwrap_or("").to_owned();
+    }
+
+    /// Java `Frame.getTitle()`.
+    pub fn get_title(&self) -> String {
+        self.title.borrow().clone()
+    }
+
+    /// Java `super.setVisible(boolean)` (`Window.setVisible`).  The content
+    /// pane mirrors the frame's visibility so that a component search limited
+    /// to showing components skips a hidden frame, as `isShowing` does.
+    pub fn set_visible_super(&self, visible: bool) {
+        self.frame_visible.set(visible);
+        self.content_pane.set_visible(visible);
+        if visible {
+            self.displayable.set(true);
+        }
+    }
+
+    /// Java `Window.isVisible()`.
+    pub fn is_visible(&self) -> bool {
+        self.frame_visible.get()
+    }
+
+    /// Java `Component.isDisplayable()`.
+    pub fn is_displayable(&self) -> bool {
+        self.displayable.get()
+    }
+
+    /// Java `Window.dispose()`.
+    pub fn dispose(&self) {
+        self.frame_visible.set(false);
+        self.content_pane.set_visible(false);
+        self.displayable.set(false);
+    }
+
+    /// Java `Component.setLocation(int, int)`.
+    pub fn set_location(&self, x: i32, y: i32) {
+        self.location.set(Point { x, y });
+    }
+
+    /// Java `Component.getLocation()`.
+    pub fn get_location(&self) -> Point {
+        self.location.get()
+    }
+
+    /// Java `Component.getSize()`.
+    pub fn get_size(&self) -> Dimension {
+        self.size.get()
+    }
+
+    /// Java `Component.setBounds(Rectangle)`, size part.
+    pub fn set_size(&self, size: Dimension) {
+        self.size.set(size);
+    }
+
+    /// Java `JFrame.setJMenuBar(JMenuBar)`.
+    pub fn set_j_menu_bar(&self, menu_bar: Option<Rc<JComponent>>) {
+        *self.j_menu_bar.borrow_mut() = menu_bar;
+    }
+
+    /// Java `JFrame.getJMenuBar()`.
+    pub fn get_j_menu_bar(&self) -> Option<Rc<JComponent>> {
+        self.j_menu_bar.borrow().clone()
+    }
+
+    /// Java `Window.toFront()`.
+    pub fn to_front(&self) {
+        // Swing window stacking: toFront().
+    }
+
+    /// Java `Container.doLayout()`.
+    pub fn do_layout(&self) {
+        // Swing layout: doLayout().
+    }
+
+    /// Java `Container.validate()`.
+    pub fn validate(&self) {
+        // Swing layout: validate().
+    }
+
+    /// Java `Window.addWindowFocusListener(WindowFocusListener)`.
+    pub fn add_window_focus_listener(&self, listener: Rc<dyn WindowFocusListener>) {
+        self.window_focus_listeners.borrow_mut().push(listener);
+    }
+
+    /// Delivers a window focus event to the focus listeners, as AWT does when
+    /// the frame gains or loses focus (Rust-only entry point for the
+    /// presentation layer).
+    pub fn process_window_focus_event(&self, gained: bool) {
+        let listeners: Vec<_> = self.window_focus_listeners.borrow().clone();
+        for listener in listeners {
+            if gained {
+                listener.window_gained_focus();
+            } else {
+                listener.window_lost_focus();
+            }
+        }
+    }
+
+    // --- AbstractFrame ---
+
+    /// Java final `setVerbose(boolean)`.
+    pub fn set_verbose(&self, verbose: bool) {
+        self.verbose.set(verbose);
+    }
+
+    /// Java package-private `repaintWindow()`.
+    pub fn repaint_window(&self) {
+        self.repaint_container(&self.content_pane);
+        // Swing painting: this.repaint().
+    }
+
+    /// Java private `repaintContainer(Container)`.
+    fn repaint_container(&self, container: &Rc<JComponent>) {
+        let comps = container.get_components();
+        for comp in &comps {
+            // Every Swing component is a Container.
+            self.repaint_container(comp);
+            // Swing painting: comps[i].repaint().
+        }
+    }
+
+    // Standardize default dialogs.
+
+    /// Java `openInfoMessageDialog(BaseManager, Component, AxisID, String,
+    /// String[], ProcessMessages, String, Boolean)`.
+    #[allow(clippy::too_many_arguments)]
+    pub fn open_info_message_dialog_base_manager_component_axis_id_string_string_array_process_messages_string_boolean(
+        &self,
+        manager: Option<&'static dyn BaseManager>,
+        parent_component: Option<&Rc<JComponent>>,
         axis_id: Option<AxisID>,
         message: Option<&str>,
         message_array: Option<&[String]>,
+        process_messages: Option<&ProcessMessages>,
         title: Option<&str>,
         modal: Option<bool>,
-    ) -> i32 {
-        self.show_option_pane_factory(
+    ) {
+        self.show_option_pane_base_manager_component_axis_id_string_string_array_process_messages_message_type_string_int_boolean(
             manager,
-            parent,
+            parent_component,
             axis_id,
             message,
             message_array,
+            process_messages,
+            Some(process_messages::MessageType::Info),
             title,
             INFORMATION_MESSAGE,
             modal,
-        )
+        );
     }
-    /// Java overload `openMessageDialog(... String, String[], ProcessMessages, ...)`.
-    pub fn open_message_dialog_factory(
-        &mut self,
-        manager: Option<&dyn BaseManager>,
-        parent: Option<ComponentState>,
+
+    /// Java `openMessageDialog(BaseManager, Component, AxisID, String,
+    /// String[], ProcessMessages, String, Boolean)`.
+    #[allow(clippy::too_many_arguments)]
+    pub fn open_message_dialog_base_manager_component_axis_id_string_string_array_process_messages_string_boolean(
+        &self,
+        manager: Option<&'static dyn BaseManager>,
+        parent_component: Option<&Rc<JComponent>>,
         axis_id: Option<AxisID>,
         message: Option<&str>,
         message_array: Option<&[String]>,
+        process_messages: Option<&ProcessMessages>,
         title: Option<&str>,
         modal: Option<bool>,
-    ) -> i32 {
-        self.show_option_pane_factory(
+    ) {
+        self.show_option_pane_base_manager_component_axis_id_string_string_array_process_messages_message_type_string_int_boolean(
             manager,
-            parent,
+            parent_component,
             axis_id,
             message,
             message_array,
+            process_messages,
+            None,
             title,
             ERROR_MESSAGE,
             modal,
-        )
+        );
     }
-    /// Java overload `openWarningMessageDialog(... String, String[], ProcessMessages, ...)`.
-    pub fn open_warning_message_dialog_factory(
-        &mut self,
-        manager: Option<&dyn BaseManager>,
-        parent: Option<ComponentState>,
+
+    /// Java `openWarningMessageDialog(BaseManager, Component, AxisID, String,
+    /// String[], ProcessMessages, String, Boolean)`.
+    #[allow(clippy::too_many_arguments)]
+    pub fn open_warning_message_dialog_base_manager_component_axis_id_string_string_array_process_messages_string_boolean(
+        &self,
+        manager: Option<&'static dyn BaseManager>,
+        parent_component: Option<&Rc<JComponent>>,
         axis_id: Option<AxisID>,
         message: Option<&str>,
         message_array: Option<&[String]>,
+        process_messages: Option<&ProcessMessages>,
         title: Option<&str>,
         modal: Option<bool>,
-    ) -> i32 {
-        self.show_option_pane_factory(
+    ) {
+        self.show_option_pane_base_manager_component_axis_id_string_string_array_process_messages_message_type_string_int_boolean(
             manager,
-            parent,
+            parent_component,
             axis_id,
             message,
             message_array,
+            process_messages,
+            Some(process_messages::MessageType::Warning),
             title,
             WARNING_MESSAGE,
             modal,
-        )
+        );
     }
-    /// Java overload `openErrorMessageDialog(... String, String[], ProcessMessages, ...)`.
-    pub fn open_error_message_dialog_factory(
-        &mut self,
-        manager: Option<&dyn BaseManager>,
-        parent: Option<ComponentState>,
+
+    /// Java `openErrorMessageDialog(BaseManager, Component, AxisID, String,
+    /// String[], ProcessMessages, String, Boolean)`.
+    #[allow(clippy::too_many_arguments)]
+    pub fn open_error_message_dialog_base_manager_component_axis_id_string_string_array_process_messages_string_boolean(
+        &self,
+        manager: Option<&'static dyn BaseManager>,
+        parent_component: Option<&Rc<JComponent>>,
         axis_id: Option<AxisID>,
         message: Option<&str>,
         message_array: Option<&[String]>,
+        process_messages: Option<&ProcessMessages>,
         title: Option<&str>,
         modal: Option<bool>,
-    ) -> i32 {
-        self.show_option_pane_factory(
+    ) {
+        self.show_option_pane_base_manager_component_axis_id_string_string_array_process_messages_message_type_string_int_boolean(
             manager,
-            parent,
+            parent_component,
             axis_id,
             message,
             message_array,
+            process_messages,
+            Some(process_messages::MessageType::Error),
             title,
             ERROR_MESSAGE,
             modal,
-        )
+        );
     }
-    /// `showOptionPane(... wrapFactory ...)`; ProcessMessages is an unported
-    /// process unit, so no invented surrogate can enter this source branch.
-    pub fn show_option_pane_factory(
-        &mut self,
-        manager: Option<&dyn BaseManager>,
-        parent: Option<ComponentState>,
+
+    /// Java private `showOptionPane(BaseManager, Component, AxisID, String,
+    /// String[], ProcessMessages, ProcessMessages.MessageType, String, int,
+    /// Boolean)`.
+    #[allow(clippy::too_many_arguments)]
+    fn show_option_pane_base_manager_component_axis_id_string_string_array_process_messages_message_type_string_int_boolean(
+        &self,
+        manager: Option<&'static dyn BaseManager>,
+        parent_component: Option<&Rc<JComponent>>,
         axis_id: Option<AxisID>,
         message: Option<&str>,
         message_array: Option<&[String]>,
+        process_messages: Option<&ProcessMessages>,
+        process_message_type: Option<process_messages::MessageType>,
         title: Option<&str>,
         message_type: i32,
         modal: Option<bool>,
-    ) -> i32 {
-        let Some(wrapped) = self.wrap_factory(message, message_array) else {
-            return CLOSED_OPTION;
-        };
-        self.show_option_pane_parent(
-            manager,
-            parent,
-            axis_id,
-            &wrapped,
-            title,
-            message_type,
-            modal,
-        )
-    }
-    /// `openYesNoDialog(... String, String[], ...)`.
-    pub fn open_yes_no_dialog_factory(
-        &mut self,
-        manager: Option<&dyn BaseManager>,
-        parent: Option<ComponentState>,
-        axis_id: Option<AxisID>,
-        message: Option<&str>,
-        message_array: Option<&[String]>,
-        title: Option<&str>,
-        initial_value: Option<&str>,
-    ) -> i32 {
-        self.show_option_confirm_pane_factory(
-            manager,
-            parent,
-            axis_id,
+    ) {
+        let ok_labels: Vec<String> = OK_LABEL_ARRAY.iter().map(|s| s.to_string()).collect();
+        let wrapped = self.wrap_factory(
             message,
             message_array,
-            title,
-            YES_NO_OPTION,
-            None,
-            initial_value,
-            &YES_NO_LABEL_ARRAY,
-        )
-    }
-    /// `openYesNoCancelDialog(... String, String[], ...)`.
-    pub fn open_yes_no_cancel_dialog_factory(
-        &mut self,
-        manager: Option<&dyn BaseManager>,
-        parent: Option<ComponentState>,
-        axis_id: Option<AxisID>,
-        message: Option<&str>,
-        message_array: Option<&[String]>,
-        title: Option<&str>,
-        initial_value: Option<&str>,
-    ) -> i32 {
-        self.show_option_confirm_pane_factory(
-            manager,
-            parent,
-            axis_id,
-            message,
-            message_array,
-            title,
-            YES_NO_CANCEL_OPTION,
-            None,
-            initial_value,
-            &YES_NO_CANCEL_LABEL_ARRAY,
-        )
-    }
-    /// `openDeleteDialog(... String, String[], ...)`.
-    pub fn open_delete_dialog_factory(
-        &mut self,
-        manager: Option<&dyn BaseManager>,
-        parent: Option<ComponentState>,
-        axis_id: Option<AxisID>,
-        message: Option<&str>,
-        message_array: Option<&[String]>,
-        title: Option<&str>,
-        initial_value: Option<&str>,
-    ) -> i32 {
-        self.show_option_confirm_pane_factory(
-            manager,
-            parent,
-            axis_id,
-            message,
-            message_array,
-            title.or(Some("Delete File?")),
-            DEFAULT_OPTION,
-            None,
-            initial_value,
-            &DELETE_NO_LABEL_ARRAY,
-        )
-    }
-    /// `openYesNoWarningDialog(... String, String[], ...)`.
-    pub fn open_yes_no_warning_dialog_factory(
-        &mut self,
-        manager: Option<&dyn BaseManager>,
-        parent: Option<ComponentState>,
-        axis_id: Option<AxisID>,
-        message: Option<&str>,
-        message_array: Option<&[String]>,
-        title: Option<&str>,
-        initial_value: Option<&str>,
-    ) -> i32 {
-        self.show_option_confirm_pane_factory(
-            manager,
-            parent,
-            axis_id,
-            message,
-            message_array,
-            title.or(Some("Etomo Warning")),
-            YES_NO_OPTION,
-            Some(WARNING_MESSAGE),
-            initial_value.or(Some(YES_NO_LABEL_ARRAY[NO_INDEX])),
-            &YES_NO_LABEL_ARRAY,
-        )
-    }
-    /// `showOptionConfirmPane(... Component ...)`.
-    pub fn show_option_confirm_pane_factory(
-        &mut self,
-        manager: Option<&dyn BaseManager>,
-        parent: Option<ComponentState>,
-        axis_id: Option<AxisID>,
-        message: Option<&str>,
-        message_array: Option<&[String]>,
-        title: Option<&str>,
-        option_type: i32,
-        message_type: Option<i32>,
-        initial_value: Option<&str>,
-        options: &[&str],
-    ) -> i32 {
-        let Some(wrapped) = self.wrap_factory(message, message_array) else {
-            return CLOSED_OPTION;
-        };
-        self.show_option_pane_parent_full(
-            manager,
-            parent,
-            axis_id,
-            &wrapped,
-            title.or(Some(ETOMO_QUESTION)),
-            option_type,
-            message_type.unwrap_or(QUESTION_MESSAGE),
-            initial_value,
-            true,
-            options,
-            None,
-        )
-    }
-
-    /// `displayMessage(BaseManager, String, String, AxisID)`.
-    pub fn display_message(
-        &mut self,
-        manager: Option<&dyn BaseManager>,
-        message: &str,
-        title: Option<&str>,
-        axis_id: AxisID,
-    ) {
-        self.open_message_dialog(manager, axis_id, message, title);
-    }
-    /// `displayMessage(BaseManager, Component, String, String, AxisID)`.
-    pub fn display_message_parent(
-        &mut self,
-        manager: Option<&dyn BaseManager>,
-        parent: ComponentState,
-        message: &str,
-        title: Option<&str>,
-        axis_id: Option<AxisID>,
-    ) {
-        self.open_message_dialog_parent(manager, Some(parent), axis_id, message, title);
-    }
-    /// `displayYesNoMessage(BaseManager, Component, String, AxisID)`.
-    pub fn display_yes_no_message_parent(
-        &mut self,
-        manager: Option<&dyn BaseManager>,
-        parent: ComponentState,
-        message: &str,
-        axis_id: Option<AxisID>,
-    ) -> bool {
-        self.open_yes_no_dialog_parent(manager, Some(parent), axis_id, message)
-    }
-    /// `displayWarningMessage(BaseManager, Component, String, String, AxisID)`.
-    pub fn display_warning_message_parent(
-        &mut self,
-        manager: Option<&dyn BaseManager>,
-        parent: ComponentState,
-        message: &str,
-        title: Option<&str>,
-        axis_id: Option<AxisID>,
-    ) {
-        self.open_warning_message_dialog_parent(manager, Some(parent), axis_id, message, title);
-    }
-    /// `displayMessage(BaseManager, Component, String[], String, AxisID)`.
-    pub fn display_message_lines_parent(
-        &mut self,
-        manager: Option<&dyn BaseManager>,
-        parent: ComponentState,
-        message: &[String],
-        title: Option<&str>,
-        axis_id: Option<AxisID>,
-    ) {
-        self.open_message_dialog_lines_parent(manager, Some(parent), axis_id, message, title);
-    }
-    /// `displayMessage(BaseManager, String, String)`.
-    pub fn display_message_only(
-        &mut self,
-        manager: Option<&dyn BaseManager>,
-        message: &str,
-        title: Option<&str>,
-    ) {
-        self.open_message_dialog(manager, AxisID::Only, message, title);
-    }
-    /// `displayInfoMessage`.
-    pub fn display_info_message(
-        &mut self,
-        manager: Option<&dyn BaseManager>,
-        parent: ComponentState,
-        message: &str,
-        title: Option<&str>,
-        axis_id: Option<AxisID>,
-    ) {
-        self.open_info_message_dialog(manager, Some(parent), axis_id, message, title);
-    }
-    /// `displayYesNoCancelMessage`.
-    pub fn display_yes_no_cancel_message(
-        &mut self,
-        manager: Option<&dyn BaseManager>,
-        message: &str,
-        axis_id: AxisID,
-    ) -> i32 {
-        self.open_yes_no_cancel_dialog(manager, axis_id, message)
-    }
-    /// `displayYesNoMessage(BaseManager, String[], AxisID)`.
-    pub fn display_yes_no_message_lines(
-        &mut self,
-        manager: Option<&dyn BaseManager>,
-        message: &[String],
-        axis_id: AxisID,
-    ) -> bool {
-        self.open_yes_no_dialog_lines(manager, axis_id, message)
-    }
-    /// `displayYesNoMessage(BaseManager, String, AxisID)`.
-    pub fn display_yes_no_message(
-        &mut self,
-        manager: Option<&dyn BaseManager>,
-        message: &str,
-        axis_id: AxisID,
-    ) -> bool {
-        self.open_yes_no_dialog(manager, axis_id, message)
-    }
-    /// `openYesNoDialogWithDefaultNo`.
-    pub fn open_yes_no_dialog_with_default_no(
-        &mut self,
-        manager: Option<&dyn BaseManager>,
-        message: &str,
-        title: Option<&str>,
-        axis_id: AxisID,
-    ) -> bool {
-        self.open_yes_no_dialog_default(manager, axis_id, message, title, NO_INDEX, true)
-    }
-    /// `displayDeleteMessage`.
-    pub fn display_delete_message(
-        &mut self,
-        manager: Option<&dyn BaseManager>,
-        message: &[String],
-        axis_id: AxisID,
-    ) -> bool {
-        self.open_delete_dialog(manager, axis_id, message)
-    }
-    /// `displayMessage(BaseManager, String[], String, AxisID)`.
-    pub fn display_message_lines(
-        &mut self,
-        manager: Option<&dyn BaseManager>,
-        message: &[String],
-        title: Option<&str>,
-        axis_id: AxisID,
-    ) {
-        self.open_message_dialog_lines(manager, axis_id, message, title);
-    }
-    /// Java `displayErrorMessage(BaseManager, ProcessMessages, String, AxisID)`.
-    pub fn display_error_message_process_messages(
-        &mut self,
-        manager: Option<&dyn BaseManager>,
-        process_messages: &ProcessMessages,
-        title: Option<&str>,
-        axis_id: AxisID,
-    ) {
-        self.open_error_message_dialog_process_messages(manager, axis_id, process_messages, title);
-    }
-    /// Java `displayMessage(BaseManager, ProcessMessages, String, AxisID)`.
-    pub fn display_message_process_messages(
-        &mut self,
-        manager: Option<&dyn BaseManager>,
-        process_messages: &ProcessMessages,
-        title: Option<&str>,
-        axis_id: AxisID,
-    ) {
-        self.open_message_dialog_process_messages(manager, axis_id, process_messages, title);
-    }
-    /// `displayYesNoWarningDialog`.
-    pub fn display_yes_no_warning_dialog(
-        &mut self,
-        manager: Option<&dyn BaseManager>,
-        message: &str,
-        axis_id: AxisID,
-    ) -> bool {
-        self.open_yes_no_warning_dialog(manager, axis_id, message)
-    }
-    /// Java `displayWarningMessage(BaseManager, ProcessMessages, String, AxisID)`.
-    pub fn display_warning_message_process_messages(
-        &mut self,
-        manager: Option<&dyn BaseManager>,
-        process_messages: &ProcessMessages,
-        title: Option<&str>,
-        axis_id: AxisID,
-    ) {
-        self.open_warning_message_dialog_process_messages(
-            manager,
-            axis_id,
             process_messages,
+            process_message_type,
+        );
+        self.show_option_pane_base_manager_component_axis_id_string_array_string_int_int_object_boolean_string_array_boolean(
+            manager,
+            parent_component,
+            axis_id,
+            wrapped,
             title,
+            DEFAULT_OPTION,
+            message_type,
+            None,
+            false,
+            Some(&ok_labels),
+            modal,
         );
     }
 
-    /// `openMessageDialog(BaseManager, AxisID, String, String)`.
-    pub fn open_message_dialog(
-        &mut self,
-        manager: Option<&dyn BaseManager>,
-        axis_id: AxisID,
-        message: &str,
-        title: Option<&str>,
-    ) {
-        let wrapped = self.wrap(message);
-        self.show_option_pane(manager, axis_id, &wrapped, title, ERROR_MESSAGE);
-    }
-    /// `openMessageDialog(BaseManager, Component, AxisID, String, String)`.
-    pub fn open_message_dialog_parent(
-        &mut self,
-        manager: Option<&dyn BaseManager>,
-        parent: Option<ComponentState>,
+    // Standardize question dialogs.
+
+    /// Java `openYesNoDialog(BaseManager, Component, AxisID, String, String[],
+    /// String, String)`.
+    #[allow(clippy::too_many_arguments)]
+    pub fn open_yes_no_dialog_base_manager_component_axis_id_string_string_array_string_string(
+        &self,
+        manager: Option<&'static dyn BaseManager>,
+        parent_component: Option<&Rc<JComponent>>,
         axis_id: Option<AxisID>,
-        message: &str,
+        message: Option<&str>,
+        message_array: Option<&[String]>,
+        title: Option<&str>,
+        initial_value: Option<&str>,
+    ) -> Option<i32> {
+        let labels: Vec<String> = YES_NO_LABEL_ARRAY.iter().map(|s| s.to_string()).collect();
+        Some(self.show_option_confirm_pane_base_manager_component_axis_id_string_string_array_string_integer_integer_string_string_array(
+            manager,
+            parent_component,
+            axis_id,
+            message,
+            message_array,
+            title,
+            Some(YES_NO_OPTION),
+            None,
+            initial_value,
+            Some(&labels),
+        ))
+    }
+
+    /// Java `openYesNoCancelDialog(BaseManager, Component, AxisID, String,
+    /// String[], String, String)`.
+    #[allow(clippy::too_many_arguments)]
+    pub fn open_yes_no_cancel_dialog_base_manager_component_axis_id_string_string_array_string_string(
+        &self,
+        manager: Option<&'static dyn BaseManager>,
+        parent_component: Option<&Rc<JComponent>>,
+        axis_id: Option<AxisID>,
+        message: Option<&str>,
+        message_array: Option<&[String]>,
+        title: Option<&str>,
+        initial_value: Option<&str>,
+    ) -> i32 {
+        let labels: Vec<String> = YES_NO_CANCEL_LABEL_ARRAY
+            .iter()
+            .map(|s| s.to_string())
+            .collect();
+        self.show_option_confirm_pane_base_manager_component_axis_id_string_string_array_string_integer_integer_string_string_array(
+            manager,
+            parent_component,
+            axis_id,
+            message,
+            message_array,
+            title,
+            Some(YES_NO_CANCEL_OPTION),
+            None,
+            initial_value,
+            Some(&labels),
+        )
+    }
+
+    /// Java `openDeleteDialog(BaseManager, Component, AxisID, String,
+    /// String[], String, String)`.
+    #[allow(clippy::too_many_arguments)]
+    pub fn open_delete_dialog_base_manager_component_axis_id_string_string_array_string_string(
+        &self,
+        manager: Option<&'static dyn BaseManager>,
+        parent_component: Option<&Rc<JComponent>>,
+        axis_id: Option<AxisID>,
+        message: Option<&str>,
+        message_array: Option<&[String]>,
+        title: Option<&str>,
+        initial_value: Option<&str>,
+    ) -> i32 {
+        let labels: Vec<String> = DELETE_NO_LABEL_ARRAY
+            .iter()
+            .map(|s| s.to_string())
+            .collect();
+        self.show_option_confirm_pane_base_manager_component_axis_id_string_string_array_string_integer_integer_string_string_array(
+            manager,
+            parent_component,
+            axis_id,
+            message,
+            message_array,
+            Some(title.unwrap_or("Delete File?")),
+            None,
+            None,
+            initial_value,
+            Some(&labels),
+        )
+    }
+
+    /// Java `openYesNoWarningDialog(BaseManager, Component, AxisID, String,
+    /// String[], String, String)`.
+    #[allow(clippy::too_many_arguments)]
+    pub fn open_yes_no_warning_dialog_base_manager_component_axis_id_string_string_array_string_string(
+        &self,
+        manager: Option<&'static dyn BaseManager>,
+        parent_component: Option<&Rc<JComponent>>,
+        axis_id: Option<AxisID>,
+        message: Option<&str>,
+        message_array: Option<&[String]>,
+        title: Option<&str>,
+        initial_value: Option<&str>,
+    ) -> i32 {
+        let labels: Vec<String> = YES_NO_LABEL_ARRAY.iter().map(|s| s.to_string()).collect();
+        self.show_option_confirm_pane_base_manager_component_axis_id_string_string_array_string_integer_integer_string_string_array(
+            manager,
+            parent_component,
+            axis_id,
+            message,
+            message_array,
+            Some(title.unwrap_or("Etomo Warning")),
+            Some(YES_NO_OPTION),
+            Some(WARNING_MESSAGE),
+            Some(initial_value.unwrap_or(YES_NO_LABEL_ARRAY[NO_INDEX])),
+            Some(&labels),
+        )
+    }
+
+    /// Java private `showOptionConfirmPane(BaseManager, Component, AxisID,
+    /// String, String[], String, Integer, Integer, String, String[])`.
+    #[allow(clippy::too_many_arguments)]
+    fn show_option_confirm_pane_base_manager_component_axis_id_string_string_array_string_integer_integer_string_string_array(
+        &self,
+        manager: Option<&'static dyn BaseManager>,
+        parent_component: Option<&Rc<JComponent>>,
+        axis_id: Option<AxisID>,
+        message: Option<&str>,
+        message_array: Option<&[String]>,
+        title: Option<&str>,
+        option_type: Option<i32>,
+        message_type: Option<i32>,
+        initial_value: Option<&str>,
+        option_strings: Option<&[String]>,
+    ) -> i32 {
+        let wrapped = self.wrap_factory(message, message_array, None, None);
+        self.show_option_pane_base_manager_component_axis_id_string_array_string_int_int_object_boolean_string_array_boolean(
+            manager,
+            parent_component,
+            axis_id,
+            wrapped,
+            Some(title.unwrap_or(ETOMO_QUESTION)),
+            option_type.unwrap_or(DEFAULT_OPTION),
+            message_type.unwrap_or(QUESTION_MESSAGE),
+            initial_value,
+            option_strings.is_some(),
+            option_strings,
+            None,
+        )
+    }
+
+    //
+
+    // The `display*` members are virtual (see `AbstractFrameVirtual`); the
+    // remaining `AbstractFrame` members follow.
+
+    /// Java `openMessageDialog(BaseManager, AxisID, String, String)`.  Open a
+    /// message dialog with a wrapped message with the dataset appended.
+    pub fn open_message_dialog_base_manager_axis_id_string_string(
+        &self,
+        manager: Option<&'static dyn BaseManager>,
+        axis_id: Option<AxisID>,
+        message: Option<&str>,
         title: Option<&str>,
     ) {
-        let wrapped = self.wrap(message);
-        self.show_option_pane_parent(
+        let wrapped = self.wrap_string(message);
+        self.show_option_pane_base_manager_axis_id_string_array_string_int(
             manager,
-            parent,
             axis_id,
-            &wrapped,
+            wrapped,
+            title,
+            ERROR_MESSAGE,
+        );
+    }
+
+    /// Java `openMessageDialog(BaseManager, Component, AxisID, String,
+    /// String)`.
+    pub fn open_message_dialog_base_manager_component_axis_id_string_string(
+        &self,
+        manager: Option<&'static dyn BaseManager>,
+        parent_component: Option<&Rc<JComponent>>,
+        axis_id: Option<AxisID>,
+        message: Option<&str>,
+        title: Option<&str>,
+    ) {
+        let wrapped = self.wrap_string(message);
+        self.show_option_pane_base_manager_component_axis_id_string_array_string_int_boolean(
+            manager,
+            parent_component,
+            axis_id,
+            wrapped,
             title,
             ERROR_MESSAGE,
             None,
         );
     }
-    /// `openYesNoDialog(BaseManager, Component, AxisID, String)`.
-    pub fn open_yes_no_dialog_parent(
-        &mut self,
-        manager: Option<&dyn BaseManager>,
-        parent: Option<ComponentState>,
+
+    /// Java `openYesNoDialog(BaseManager, Component, AxisID, String)`.  Open a
+    /// Yes or No question dialog.
+    pub fn open_yes_no_dialog_base_manager_component_axis_id_string(
+        &self,
+        manager: Option<&'static dyn BaseManager>,
+        parent_component: Option<&Rc<JComponent>>,
         axis_id: Option<AxisID>,
-        message: &str,
+        message: Option<&str>,
     ) -> bool {
-        let wrapped = self.wrap(message);
-        self.show_option_confirm_pane_parent(
-            manager,
-            parent,
-            axis_id,
-            &wrapped,
-            Some(ETOMO_QUESTION),
-            YES_NO_OPTION,
-            &YES_NO_LABEL_ARRAY,
-        ) == DELETE_OPTION
+        let labels: Vec<String> = YES_NO_LABEL_ARRAY.iter().map(|s| s.to_string()).collect();
+        let wrapped = self.wrap_string(message);
+        let result = self
+            .show_option_confirm_pane_base_manager_component_axis_id_string_array_string_int_string_array(
+                manager,
+                parent_component,
+                axis_id,
+                wrapped,
+                Some(ETOMO_QUESTION),
+                YES_NO_OPTION,
+                Some(&labels),
+            );
+        result == YES_OPTION
     }
-    /// `openWarningMessageDialog(BaseManager, Component, AxisID, String, String)`.
-    pub fn open_warning_message_dialog_parent(
-        &mut self,
-        manager: Option<&dyn BaseManager>,
-        parent: Option<ComponentState>,
+
+    /// Java `openWarningMessageDialog(BaseManager, Component, AxisID, String,
+    /// String)`.
+    pub fn open_warning_message_dialog_base_manager_component_axis_id_string_string(
+        &self,
+        manager: Option<&'static dyn BaseManager>,
+        parentc_component: Option<&Rc<JComponent>>,
         axis_id: Option<AxisID>,
-        message: &str,
+        message: Option<&str>,
         title: Option<&str>,
     ) {
-        let wrapped = self.wrap(message);
-        self.show_option_pane_parent(
+        let wrapped = self.wrap_string(message);
+        self.show_option_pane_base_manager_component_axis_id_string_array_string_int_boolean(
             manager,
-            parent,
+            parentc_component,
             axis_id,
-            &wrapped,
+            wrapped,
             title,
             WARNING_MESSAGE,
             None,
         );
     }
-    /// `openMessageDialog(BaseManager, Component, AxisID, String[], String)`.
-    pub fn open_message_dialog_lines_parent(
-        &mut self,
-        manager: Option<&dyn BaseManager>,
-        parent: Option<ComponentState>,
+
+    /// Java `openMessageDialog(BaseManager, Component, AxisID, String[],
+    /// String)`.
+    pub fn open_message_dialog_base_manager_component_axis_id_string_array_string(
+        &self,
+        manager: Option<&'static dyn BaseManager>,
+        parentc_component: Option<&Rc<JComponent>>,
         axis_id: Option<AxisID>,
         message: &[String],
         title: Option<&str>,
     ) {
-        let wrapped = self.wrap_lines(message);
-        self.show_option_pane_parent(
+        let wrapped = self.wrap_string_array(message);
+        self.show_option_pane_base_manager_component_axis_id_string_array_string_int_boolean(
             manager,
-            parent,
+            parentc_component,
             axis_id,
-            &wrapped,
+            wrapped,
             title,
             ERROR_MESSAGE,
             None,
         );
     }
-    /// Java `openWarningMessageDialog(BaseManager, AxisID, ProcessMessages, String)`.
-    pub fn open_warning_message_dialog_process_messages(
-        &mut self,
-        manager: Option<&dyn BaseManager>,
-        axis_id: AxisID,
+
+    /// Java `openWarningMessageDialog(BaseManager, AxisID, ProcessMessages,
+    /// String)`.
+    pub fn open_warning_message_dialog_base_manager_axis_id_process_messages_string(
+        &self,
+        manager: Option<&'static dyn BaseManager>,
+        axis_id: Option<AxisID>,
         process_messages: &ProcessMessages,
         title: Option<&str>,
     ) {
         let wrapped = self.wrap_warning(process_messages);
-        self.show_option_pane(manager, axis_id, &wrapped, title, ERROR_MESSAGE);
+        // ERROR_MESSAGE as the source passes it; showOptionDialog switches the
+        // icon to a warning when the title or text says "warning".
+        self.show_option_pane_base_manager_axis_id_string_array_string_int(
+            manager,
+            axis_id,
+            wrapped,
+            title,
+            ERROR_MESSAGE,
+        );
     }
-    /// Java `openErrorMessageDialog(BaseManager, AxisID, ProcessMessages, String)`.
-    pub fn open_error_message_dialog_process_messages(
-        &mut self,
-        manager: Option<&dyn BaseManager>,
-        axis_id: AxisID,
+
+    /// Java `openErrorMessageDialog(BaseManager, AxisID, ProcessMessages,
+    /// String)`.
+    pub fn open_error_message_dialog_base_manager_axis_id_process_messages_string(
+        &self,
+        manager: Option<&'static dyn BaseManager>,
+        axis_id: Option<AxisID>,
         process_messages: &ProcessMessages,
         title: Option<&str>,
     ) {
         let wrapped = self.wrap_error(process_messages);
-        self.show_option_pane(manager, axis_id, &wrapped, title, ERROR_MESSAGE);
+        self.show_option_pane_base_manager_axis_id_string_array_string_int(
+            manager,
+            axis_id,
+            wrapped,
+            title,
+            ERROR_MESSAGE,
+        );
     }
+
     /// Java `openMessageDialog(BaseManager, AxisID, ProcessMessages, String)`.
-    pub fn open_message_dialog_process_messages(
-        &mut self,
-        manager: Option<&dyn BaseManager>,
-        axis_id: AxisID,
+    pub fn open_message_dialog_base_manager_axis_id_process_messages_string(
+        &self,
+        manager: Option<&'static dyn BaseManager>,
+        axis_id: Option<AxisID>,
         process_messages: &ProcessMessages,
         title: Option<&str>,
     ) {
         let wrapped = self.wrap_messages_process_messages(process_messages);
-        self.show_option_pane(manager, axis_id, &wrapped, title, ERROR_MESSAGE);
-    }
-    /// `openYesNoWarningDialog`.
-    pub fn open_yes_no_warning_dialog(
-        &mut self,
-        manager: Option<&dyn BaseManager>,
-        axis_id: AxisID,
-        message: &str,
-    ) -> bool {
-        let wrapped = self.wrap(message);
-        self.show_option_pane_full(
+        self.show_option_pane_base_manager_axis_id_string_array_string_int(
             manager,
             axis_id,
-            &wrapped,
-            Some("Etomo Warning"),
-            YES_NO_OPTION,
-            WARNING_MESSAGE,
-            Some(YES_NO_LABEL_ARRAY[NO_INDEX]),
-            false,
-            &YES_NO_LABEL_ARRAY,
-        ) == DELETE_OPTION
+            wrapped,
+            title,
+            ERROR_MESSAGE,
+        );
     }
-    /// `openYesNoDialog(BaseManager, AxisID, String)`.
-    pub fn open_yes_no_dialog(
-        &mut self,
-        manager: Option<&dyn BaseManager>,
-        axis_id: AxisID,
-        message: &str,
+
+    /// Java `openYesNoWarningDialog(BaseManager, AxisID, String)`.
+    pub fn open_yes_no_warning_dialog_base_manager_axis_id_string(
+        &self,
+        manager: Option<&'static dyn BaseManager>,
+        axis_id: Option<AxisID>,
+        message: Option<&str>,
     ) -> bool {
-        let wrapped = self.wrap(message);
-        self.show_option_confirm_pane(
-            manager,
-            axis_id,
-            &wrapped,
-            Some(ETOMO_QUESTION),
-            YES_NO_OPTION,
-            &YES_NO_LABEL_ARRAY,
-        ) == DELETE_OPTION
+        let labels: Vec<String> = YES_NO_LABEL_ARRAY.iter().map(|s| s.to_string()).collect();
+        let wrapped = self.wrap_string(message);
+        let result = self
+            .show_option_pane_base_manager_axis_id_string_array_string_int_int_object_boolean_string_array(
+                manager,
+                axis_id,
+                wrapped,
+                Some("Etomo Warning"),
+                YES_NO_OPTION,
+                WARNING_MESSAGE,
+                Some(YES_NO_LABEL_ARRAY[NO_INDEX]),
+                false,
+                Some(&labels),
+            );
+        result == 0
     }
-    /// `openYesNoDialog(BaseManager, AxisID, String, String, int, boolean)`.
-    pub fn open_yes_no_dialog_default(
-        &mut self,
-        manager: Option<&dyn BaseManager>,
-        axis_id: AxisID,
-        message: &str,
+
+    /// Java `openYesNoDialog(BaseManager, AxisID, String)`.  Open a Yes or No
+    /// question dialog.
+    pub fn open_yes_no_dialog_base_manager_axis_id_string(
+        &self,
+        manager: Option<&'static dyn BaseManager>,
+        axis_id: Option<AxisID>,
+        message: Option<&str>,
+    ) -> bool {
+        let labels: Vec<String> = YES_NO_LABEL_ARRAY.iter().map(|s| s.to_string()).collect();
+        let wrapped = self.wrap_string(message);
+        let result = self
+            .show_option_confirm_pane_base_manager_axis_id_string_array_string_int_string_array(
+                manager,
+                axis_id,
+                wrapped,
+                Some(ETOMO_QUESTION),
+                YES_NO_OPTION,
+                Some(&labels),
+            );
+        result == YES_OPTION
+    }
+
+    /// Java `openYesNoDialog(BaseManager, AxisID, String, String, int,
+    /// boolean)`.  Open a Yes or No question dialog.  Control which option is
+    /// the default.
+    pub fn open_yes_no_dialog_base_manager_axis_id_string_string_int_boolean(
+        &self,
+        manager: Option<&'static dyn BaseManager>,
+        axis_id: Option<AxisID>,
+        message: Option<&str>,
         title: Option<&str>,
         initial_value_index: usize,
         override_default_labels: bool,
     ) -> bool {
-        let wrapped = self.wrap(message);
-        self.show_option_confirm_pane_default(
-            manager,
-            axis_id,
-            &wrapped,
-            title,
-            YES_NO_OPTION,
-            YES_NO_LABEL_ARRAY[initial_value_index],
-            override_default_labels,
-            &YES_NO_LABEL_ARRAY,
-        ) == DELETE_OPTION
+        let labels: Vec<String> = YES_NO_LABEL_ARRAY.iter().map(|s| s.to_string()).collect();
+        let wrapped = self.wrap_string(message);
+        let result = self
+            .show_option_confirm_pane_base_manager_axis_id_string_array_string_int_string_boolean_string_array(
+                manager,
+                axis_id,
+                wrapped,
+                title,
+                YES_NO_OPTION,
+                Some(YES_NO_LABEL_ARRAY[initial_value_index]),
+                override_default_labels,
+                Some(&labels),
+            );
+        result == YES_OPTION
     }
-    /// `openDeleteDialog(BaseManager, AxisID, String[])`.
-    pub fn open_delete_dialog(
-        &mut self,
-        manager: Option<&dyn BaseManager>,
-        axis_id: AxisID,
-        message: &[String],
-    ) -> bool {
-        let wrapped = self.wrap_lines(message);
-        self.show_option_pane_full(
-            manager,
-            axis_id,
-            &wrapped,
-            Some("Delete File?"),
-            DEFAULT_OPTION,
-            QUESTION_MESSAGE,
-            None,
-            true,
-            &DELETE_NO_LABEL_ARRAY,
-        ) == DELETE_OPTION
-    }
-    /// `openYesNoDialog(BaseManager, AxisID, String[])`.
-    pub fn open_yes_no_dialog_lines(
-        &mut self,
-        manager: Option<&dyn BaseManager>,
-        axis_id: AxisID,
-        message: &[String],
-    ) -> bool {
-        let wrapped = self.wrap_lines(message);
-        self.show_option_confirm_pane(
-            manager,
-            axis_id,
-            &wrapped,
-            Some(ETOMO_QUESTION),
-            YES_NO_OPTION,
-            &YES_NO_LABEL_ARRAY,
-        ) == DELETE_OPTION
-    }
-    /// `openInfoMessageDialog(BaseManager, Component, AxisID, String, String)`.
-    pub fn open_info_message_dialog(
-        &mut self,
-        manager: Option<&dyn BaseManager>,
-        parent: Option<ComponentState>,
+
+    /// Java `openDeleteDialog(BaseManager, AxisID, String[])`.  Open a Yes or
+    /// No question dialog.
+    pub fn open_delete_dialog_base_manager_axis_id_string_array(
+        &self,
+        manager: Option<&'static dyn BaseManager>,
         axis_id: Option<AxisID>,
-        message: &str,
+        message: &[String],
+    ) -> bool {
+        let labels: Vec<String> = vec!["Delete".to_owned(), NO.to_owned()];
+        let wrapped = self.wrap_string_array(message);
+        let result = self
+            .show_option_pane_base_manager_axis_id_string_array_string_int_int_object_boolean_string_array(
+                manager,
+                axis_id,
+                wrapped,
+                Some("Delete File?"),
+                DEFAULT_OPTION,
+                QUESTION_MESSAGE,
+                None,
+                true,
+                Some(&labels),
+            );
+        result == 0
+    }
+
+    /// Java `openYesNoDialog(BaseManager, AxisID, String[])`.  Open a Yes or No
+    /// question dialog.
+    pub fn open_yes_no_dialog_base_manager_axis_id_string_array(
+        &self,
+        manager: Option<&'static dyn BaseManager>,
+        axis_id: Option<AxisID>,
+        message: &[String],
+    ) -> bool {
+        let labels: Vec<String> = YES_NO_LABEL_ARRAY.iter().map(|s| s.to_string()).collect();
+        let wrapped = self.wrap_string_array(message);
+        let result = self
+            .show_option_confirm_pane_base_manager_axis_id_string_array_string_int_string_array(
+                manager,
+                axis_id,
+                wrapped,
+                Some(ETOMO_QUESTION),
+                YES_NO_OPTION,
+                Some(&labels),
+            );
+        result == YES_OPTION
+    }
+
+    /// Java `openInfoMessageDialog(BaseManager, Component, AxisID, String,
+    /// String)`.
+    pub fn open_info_message_dialog_base_manager_component_axis_id_string_string(
+        &self,
+        manager: Option<&'static dyn BaseManager>,
+        parent_component: Option<&Rc<JComponent>>,
+        axis_id: Option<AxisID>,
+        message: Option<&str>,
         title: Option<&str>,
     ) {
-        let wrapped = self.wrap(message);
-        self.show_option_pane_parent(
+        let wrapped = self.wrap_string(message);
+        self.show_option_pane_base_manager_component_axis_id_string_array_string_int_boolean(
             manager,
-            parent,
+            parent_component,
             axis_id,
-            &wrapped,
+            wrapped,
             title,
             INFORMATION_MESSAGE,
             None,
         );
     }
-    /// `openMessageDialog(BaseManager, AxisID, String[], String)`.
-    pub fn open_message_dialog_lines(
-        &mut self,
-        manager: Option<&dyn BaseManager>,
-        axis_id: AxisID,
+
+    /// Java `openMessageDialog(BaseManager, AxisID, String[], String)`.  Open
+    /// a message dialog.
+    pub fn open_message_dialog_base_manager_axis_id_string_array_string(
+        &self,
+        manager: Option<&'static dyn BaseManager>,
+        axis_id: Option<AxisID>,
         message: &[String],
         title: Option<&str>,
     ) {
-        let wrapped = self.wrap_lines(message);
-        self.show_option_pane(manager, axis_id, &wrapped, title, ERROR_MESSAGE);
-    }
-    /// `openYesNoCancelDialog(BaseManager, AxisID, String)`.
-    pub fn open_yes_no_cancel_dialog(
-        &mut self,
-        manager: Option<&dyn BaseManager>,
-        axis_id: AxisID,
-        message: &str,
-    ) -> i32 {
-        let wrapped = self.wrap(message);
-        self.show_option_confirm_pane(
+        let wrapped = self.wrap_string_array(message);
+        self.show_option_pane_base_manager_axis_id_string_array_string_int(
             manager,
             axis_id,
-            &wrapped,
+            wrapped,
+            title,
+            ERROR_MESSAGE,
+        );
+    }
+
+    /// Java `openYesNoCancelDialog(BaseManager, AxisID, String)`.  Open a Yes,
+    /// No or Cancel question dialog; returns the state of the user's
+    /// selection.
+    pub fn open_yes_no_cancel_dialog_base_manager_axis_id_string(
+        &self,
+        manager: Option<&'static dyn BaseManager>,
+        axis_id: Option<AxisID>,
+        message: Option<&str>,
+    ) -> i32 {
+        let labels: Vec<String> = vec![YES.to_owned(), NO.to_owned(), CANCEL.to_owned()];
+        let wrapped = self.wrap_string(message);
+        self.show_option_confirm_pane_base_manager_axis_id_string_array_string_int_string_array(
+            manager,
+            axis_id,
+            wrapped,
             Some(ETOMO_QUESTION),
             YES_NO_CANCEL_OPTION,
-            &YES_NO_CANCEL_LABEL_ARRAY,
+            Some(&labels),
         )
     }
-    /// `showOptionConfirmPane(BaseManager, AxisID, String[], String, int, String[])`.
-    pub fn show_option_confirm_pane(
-        &mut self,
-        manager: Option<&dyn BaseManager>,
-        axis_id: AxisID,
-        message: &[String],
+
+    /// Java private `showOptionConfirmPane(BaseManager, AxisID, String[],
+    /// String, int, String[])`.
+    fn show_option_confirm_pane_base_manager_axis_id_string_array_string_int_string_array(
+        &self,
+        manager: Option<&'static dyn BaseManager>,
+        axis_id: Option<AxisID>,
+        message: Option<Vec<String>>,
         title: Option<&str>,
         option_type: i32,
-        option_strings: &[&str],
+        option_strings: Option<&[String]>,
     ) -> i32 {
-        self.show_option_pane_full(
+        self.show_option_pane_base_manager_axis_id_string_array_string_int_int_object_boolean_string_array(
             manager,
             axis_id,
             message,
@@ -864,117 +1387,162 @@ impl AbstractFrame {
             option_strings,
         )
     }
-    /// `showOptionConfirmPane(BaseManager, AxisID, String[], String, int, String, boolean, String[])`.
-    pub fn show_option_confirm_pane_default(
-        &mut self,
-        manager: Option<&dyn BaseManager>,
-        axis_id: AxisID,
-        message: &[String],
+
+    /// Java private `showOptionConfirmPane(BaseManager, AxisID, String[],
+    /// String, int, String, boolean, String[])`.
+    #[allow(clippy::too_many_arguments)]
+    fn show_option_confirm_pane_base_manager_axis_id_string_array_string_int_string_boolean_string_array(
+        &self,
+        manager: Option<&'static dyn BaseManager>,
+        axis_id: Option<AxisID>,
+        message: Option<Vec<String>>,
         title: Option<&str>,
         option_type: i32,
-        initial_value: &str,
+        initial_value: Option<&str>,
         override_default_labels: bool,
-        option_strings: &[&str],
+        option_strings: Option<&[String]>,
     ) -> i32 {
-        self.show_option_pane_full(
+        self.show_option_pane_base_manager_axis_id_string_array_string_int_int_object_boolean_string_array(
             manager,
             axis_id,
             message,
             title,
             option_type,
             QUESTION_MESSAGE,
-            Some(initial_value),
+            initial_value,
             override_default_labels,
             option_strings,
         )
     }
-    /// `wrapFactory`; ProcessMessages branch remains a named source boundary.
-    pub fn wrap_factory(
+
+    /// Java private `wrapFactory(String, String[], ProcessMessages,
+    /// ProcessMessages.MessageType)`.
+    fn wrap_factory(
         &self,
         message: Option<&str>,
         message_array: Option<&[String]>,
+        process_messages: Option<&ProcessMessages>,
+        process_message_type: Option<process_messages::MessageType>,
     ) -> Option<Vec<String>> {
-        if let Some(message) = message {
-            Some(self.wrap(message))
+        if message.is_some() {
+            return self.wrap_string(message);
+        }
+        if let Some(message_array) = message_array {
+            return self.wrap_string_array(message_array);
+        }
+        if let Some(process_messages) = process_messages {
+            self.wrap_messages_process_messages_message_type(process_messages, process_message_type)
         } else {
-            message_array.map(|m| self.wrap_lines(m))
+            // new Exception("Failed popup.  No message").printStackTrace()
+            eprintln!("java.lang.Exception: Failed popup.  No message");
+            None
         }
     }
-    /// Java `wrapMessages(ProcessMessages, MessageType)`.
-    pub fn wrap_messages_process_messages_type(
+
+    /// Java private final `wrapMessages(ProcessMessages,
+    /// ProcessMessages.MessageType)`.
+    fn wrap_messages_process_messages_message_type(
         &self,
         process_messages: &ProcessMessages,
-        process_message_type: Option<MessageType>,
-    ) -> Vec<String> {
-        match process_message_type {
-            Some(message_type) => {
-                (0..process_messages.size(message_type)).fold(Vec::new(), |lines, i| {
-                    popup_tool::wrap_message(process_messages.get(message_type, i), Some(lines))
-                })
-            }
-            None => self.wrap_messages_process_messages(process_messages),
+        process_message_type: Option<process_messages::MessageType>,
+    ) -> Option<Vec<String>> {
+        let Some(process_message_type) = process_message_type else {
+            return self.wrap_messages_process_messages(process_messages);
+        };
+        let mut message_array: Option<Vec<String>> = None;
+        for i in 0..process_messages.size(process_message_type) {
+            message_array = Some(popup_tool::wrap_message(
+                process_messages.get(process_message_type, i),
+                message_array,
+            ));
         }
+        self.to_string_array(message_array)
     }
-    /// Java `wrapWarning(ProcessMessages)`.
-    pub fn wrap_warning(&self, process_messages: &ProcessMessages) -> Vec<String> {
-        self.wrap_messages_process_messages_type(process_messages, Some(MessageType::Warning))
+
+    /// Java private final `wrapWarning(ProcessMessages)`.
+    fn wrap_warning(&self, process_messages: &ProcessMessages) -> Option<Vec<String>> {
+        let mut message_array: Option<Vec<String>> = None;
+        for i in 0..process_messages.size(process_messages::MessageType::Warning) {
+            message_array = Some(popup_tool::wrap_message(
+                process_messages.get(process_messages::MessageType::Warning, i),
+                message_array,
+            ));
+        }
+        self.to_string_array(message_array)
     }
-    /// Java `wrapError(ProcessMessages)`.
-    pub fn wrap_error(&self, process_messages: &ProcessMessages) -> Vec<String> {
-        self.wrap_messages_process_messages_type(process_messages, Some(MessageType::Error))
+
+    /// Java private final `wrapError(ProcessMessages)`.  Add the current
+    /// dataset name to the message and wrap.
+    fn wrap_error(&self, process_messages: &ProcessMessages) -> Option<Vec<String>> {
+        let mut message_array: Option<Vec<String>> = None;
+        for i in 0..process_messages.size(process_messages::MessageType::Error) {
+            message_array = Some(popup_tool::wrap_message(
+                process_messages.get(process_messages::MessageType::Error, i),
+                message_array,
+            ));
+        }
+        self.to_string_array(message_array)
     }
-    /// Java `wrapMessages(ProcessMessages)`.  Java places an empty line after each
-    /// non-empty message category.
-    pub fn wrap_messages_process_messages(
+
+    /// Java private final `wrapMessages(ProcessMessages)`.  Add the current
+    /// dataset name to the message and wrap.
+    fn wrap_messages_process_messages(
         &self,
         process_messages: &ProcessMessages,
-    ) -> Vec<String> {
-        let mut lines = Vec::new();
-        for message_type in [
-            MessageType::Error,
-            MessageType::ChunkError,
-            MessageType::Warning,
-            MessageType::ChunkWarning,
-            MessageType::Info,
-        ] {
-            let before = lines.len();
-            for i in 0..process_messages.size(message_type) {
-                lines =
-                    popup_tool::wrap_message(process_messages.get(message_type, i), Some(lines));
+    ) -> Option<Vec<String>> {
+        let mut message_array: Option<Vec<String>> = None;
+        let mut list_type_iterator = process_messages.list_type_iterator();
+        while list_type_iterator.has_next() {
+            let list_type = list_type_iterator.next();
+            if let Some(iterator) = list_type.and_then(|lt| process_messages.iterator(lt)) {
+                for message in iterator {
+                    message_array = Some(popup_tool::wrap_message(
+                        Some(message.as_str()),
+                        message_array,
+                    ));
+                }
             }
-            if lines.len() > before {
-                lines.push(String::new());
-            }
+            message_array = Some(popup_tool::linefeed(message_array));
         }
-        lines
+        self.to_string_array(message_array)
     }
-    /// `wrap(String)`.
-    pub fn wrap(&self, message: &str) -> Vec<String> {
-        popup_tool::wrap_message(Some(message), None)
+
+    /// Java private `wrap(String)`.  Add the current dataset name to the
+    /// message and wrap.
+    fn wrap_string(&self, message: Option<&str>) -> Option<Vec<String>> {
+        let message_array = popup_tool::wrap_message(message, None);
+        self.to_string_array(Some(message_array))
     }
-    /// `wrap(String[])`.
-    pub fn wrap_lines(&self, message: &[String]) -> Vec<String> {
-        message
-            .iter()
-            .fold(None, |array, line| {
-                Some(popup_tool::wrap_message(Some(line), array))
-            })
-            .unwrap_or_default()
+
+    /// Java private `wrap(String[])`.  Add the current dataset name to the
+    /// message and wrap.
+    fn wrap_string_array(&self, message: &[String]) -> Option<Vec<String>> {
+        let mut message_array: Option<Vec<String>> = None;
+        for item in message {
+            message_array = Some(popup_tool::wrap_message(Some(item.as_str()), message_array));
+        }
+        self.to_string_array(message_array)
     }
-    /// `toStringArray(ArrayList)`.
-    pub fn to_string_array(&self, array_list: Option<Vec<String>>) -> Option<Vec<String>> {
+
+    /// Java private final `toStringArray(ArrayList)`.
+    fn to_string_array(&self, array_list: Option<Vec<String>>) -> Option<Vec<String>> {
+        // Java copies the one-element list into a new array; both arms return
+        // the list's elements.
         array_list
     }
-    /// `showOptionPane(BaseManager, AxisID, String[], String, int)`.
-    pub fn show_option_pane(
-        &mut self,
-        manager: Option<&dyn BaseManager>,
-        axis_id: AxisID,
-        message: &[String],
+
+    /// Java private `showOptionPane(BaseManager, AxisID, String[], String,
+    /// int)`.
+    fn show_option_pane_base_manager_axis_id_string_array_string_int(
+        &self,
+        manager: Option<&'static dyn BaseManager>,
+        axis_id: Option<AxisID>,
+        message: Option<Vec<String>>,
         title: Option<&str>,
         message_type: i32,
     ) {
-        let _ = self.show_option_pane_full(
+        let ok_labels: Vec<String> = OK_LABEL_ARRAY.iter().map(|s| s.to_string()).collect();
+        self.show_option_pane_base_manager_axis_id_string_array_string_int_int_object_boolean_string_array(
             manager,
             axis_id,
             message,
@@ -983,23 +1551,27 @@ impl AbstractFrame {
             message_type,
             None,
             false,
-            &OK_LABEL_ARRAY,
+            Some(&ok_labels),
         );
     }
-    /// `showOptionPane(BaseManager, Component, AxisID, String[], String, int, Boolean)`.
-    pub fn show_option_pane_parent(
-        &mut self,
-        manager: Option<&dyn BaseManager>,
-        parent: Option<ComponentState>,
+
+    /// Java private `showOptionPane(BaseManager, Component, AxisID, String[],
+    /// String, int, Boolean)`.
+    #[allow(clippy::too_many_arguments)]
+    fn show_option_pane_base_manager_component_axis_id_string_array_string_int_boolean(
+        &self,
+        manager: Option<&'static dyn BaseManager>,
+        parent_component: Option<&Rc<JComponent>>,
         axis_id: Option<AxisID>,
-        message: &[String],
+        message: Option<Vec<String>>,
         title: Option<&str>,
         message_type: i32,
         modal: Option<bool>,
-    ) -> i32 {
-        self.show_option_pane_parent_full(
+    ) {
+        let ok_labels: Vec<String> = OK_LABEL_ARRAY.iter().map(|s| s.to_string()).collect();
+        self.show_option_pane_base_manager_component_axis_id_string_array_string_int_int_object_boolean_string_array_boolean(
             manager,
-            parent,
+            parent_component,
             axis_id,
             message,
             title,
@@ -1007,24 +1579,27 @@ impl AbstractFrame {
             message_type,
             None,
             false,
-            &OK_LABEL_ARRAY,
+            Some(&ok_labels),
             modal,
-        )
+        );
     }
-    /// `showOptionConfirmPane(BaseManager, Component, AxisID, String[], String, int, String[])`.
-    pub fn show_option_confirm_pane_parent(
-        &mut self,
-        manager: Option<&dyn BaseManager>,
-        parent: Option<ComponentState>,
+
+    /// Java private `showOptionConfirmPane(BaseManager, Component, AxisID,
+    /// String[], String, int, String[])`.
+    #[allow(clippy::too_many_arguments)]
+    fn show_option_confirm_pane_base_manager_component_axis_id_string_array_string_int_string_array(
+        &self,
+        manager: Option<&'static dyn BaseManager>,
+        parent_component: Option<&Rc<JComponent>>,
         axis_id: Option<AxisID>,
-        message: &[String],
+        message: Option<Vec<String>>,
         title: Option<&str>,
         option_type: i32,
-        options: &[&str],
+        option_strings: Option<&[String]>,
     ) -> i32 {
-        self.show_option_pane_parent_full(
+        self.show_option_pane_base_manager_component_axis_id_string_array_string_int_int_object_boolean_string_array_boolean(
             manager,
-            parent,
+            parent_component,
             axis_id,
             message,
             title,
@@ -1032,161 +1607,236 @@ impl AbstractFrame {
             QUESTION_MESSAGE,
             None,
             false,
-            options,
+            option_strings,
             None,
         )
     }
-    /// `showOptionPane(BaseManager, AxisID, ...)`.
-    pub fn show_option_pane_full(
-        &mut self,
-        manager: Option<&dyn BaseManager>,
-        axis_id: AxisID,
-        message: &[String],
-        title: Option<&str>,
-        option_type: i32,
-        message_type: i32,
-        initial_value: Option<&str>,
-        override_defaults: bool,
-        options: &[&str],
-    ) -> i32 {
-        self.show_option_dialog(
-            manager,
-            Some(axis_id),
-            None,
-            message,
-            title,
-            option_type,
-            message_type,
-            initial_value,
-            override_defaults,
-            Some(options),
-            None,
-        )
-    }
-    /// `showOptionPane(BaseManager, Component, AxisID, ...)`.
-    pub fn show_option_pane_parent_full(
-        &mut self,
-        manager: Option<&dyn BaseManager>,
-        parent: Option<ComponentState>,
+
+    /// Java private `showOptionPane(BaseManager, AxisID, String[], String,
+    /// int, int, Object, boolean, String[])`.
+    #[allow(clippy::too_many_arguments)]
+    fn show_option_pane_base_manager_axis_id_string_array_string_int_int_object_boolean_string_array(
+        &self,
+        manager: Option<&'static dyn BaseManager>,
         axis_id: Option<AxisID>,
-        message: &[String],
+        message: Option<Vec<String>>,
         title: Option<&str>,
         option_type: i32,
         message_type: i32,
         initial_value: Option<&str>,
-        override_defaults: bool,
-        options: &[&str],
-        modal: Option<bool>,
+        override_default_labels: bool,
+        option_labels: Option<&[String]>,
     ) -> i32 {
-        self.show_option_dialog(
+        // `this` (the frame) is the parent component.
+        let this_component = self.content_pane.clone();
+        let result = self.show_option_dialog(
             manager,
             axis_id,
-            parent,
+            Some(&this_component),
             message,
             title,
             option_type,
             message_type,
             initial_value,
-            override_defaults,
-            Some(options),
-            modal,
-        )
+            override_default_labels,
+            option_labels,
+            None,
+        );
+        result
     }
-    /// `showOptionDialog`.
-    pub fn show_option_dialog(
-        &mut self,
-        manager: Option<&dyn BaseManager>,
+
+    /// Java private `showOptionPane(BaseManager, Component, AxisID, String[],
+    /// String, int, int, Object, boolean, String[], Boolean)`.
+    #[allow(clippy::too_many_arguments)]
+    fn show_option_pane_base_manager_component_axis_id_string_array_string_int_int_object_boolean_string_array_boolean(
+        &self,
+        manager: Option<&'static dyn BaseManager>,
+        parent_component: Option<&Rc<JComponent>>,
         axis_id: Option<AxisID>,
-        parent: Option<ComponentState>,
-        message: &[String],
+        message: Option<Vec<String>>,
+        title: Option<&str>,
+        option_type: i32,
+        message_type: i32,
+        initial_value: Option<&str>,
+        override_default_labels: bool,
+        option_strings: Option<&[String]>,
+        modal: Option<bool>,
+    ) -> i32 {
+        let result = self.show_option_dialog(
+            manager,
+            axis_id,
+            parent_component,
+            message,
+            title,
+            option_type,
+            message_type,
+            initial_value,
+            override_default_labels,
+            option_strings,
+            modal,
+        );
+        result
+    }
+
+    /// Java private `showOptionDialog(BaseManager, AxisID, Component,
+    /// String[], String, int, int, Icon, Object, boolean, String[], Boolean)`.
+    /// Shows all pop up message dialogs.  The `Icon` parameter is always null
+    /// in the source and is not modelled.
+    ///
+    /// The modal `JOptionPane` is shown through
+    /// [`ui_harness::present_popup`]; its answer is the index of the button
+    /// pressed among the buttons the pane displays, or `CLOSED_OPTION`.
+    #[allow(clippy::too_many_arguments)]
+    fn show_option_dialog(
+        &self,
+        manager: Option<&'static dyn BaseManager>,
+        axis_id: Option<AxisID>,
+        parent_component: Option<&Rc<JComponent>>,
+        message: Option<Vec<String>>,
         title: Option<&str>,
         option_type: i32,
         mut message_type: i32,
         initial_value: Option<&str>,
         override_defaults: bool,
-        options: Option<&[&str]>,
+        options: Option<&[String]>,
         modal: Option<bool>,
     ) -> i32 {
-        if message.is_empty() {
+        let _ = modal;
+        let Some(message) = message else {
             return CLOSED_OPTION;
-        }
+        };
         if let Some(manager) = manager {
-            manager.log_message_array(Some(message), title, None, axis_id);
+            manager.log_message_array(Some(message.as_slice()), title, None, axis_id);
         } else {
             eprintln!(
                 "{}\n{} - {} axis:",
                 utilities::get_date_time_stamp(),
                 title.unwrap_or("null"),
-                axis_id.map_or("null", |a| a.get_key())
+                axis_id.map_or_else(|| "null".to_owned(), |axis_id| axis_id.to_string())
             );
-            for line in message {
-                eprintln!("{line}");
+            for line in &message {
+                eprintln!("{}", line);
             }
         }
+        // Change the message icon to match the message.
+        // (`icon == null` always holds.)
         if message_type == ERROR_MESSAGE {
-            let title_lc = title.unwrap_or("").to_ascii_lowercase();
-            let error = title_lc.contains("error")
-                || message
-                    .iter()
-                    .take(3)
-                    .any(|m| m.to_ascii_lowercase().contains("error:"));
-            let warning = title_lc.contains("warning")
-                || message
-                    .iter()
-                    .take(3)
-                    .any(|m| m.to_ascii_lowercase().contains("warning:"));
-            if !error && warning {
-                message_type = WARNING_MESSAGE;
+            let mut error_message = false;
+            let mut warning_message = false;
+            if let Some(title) = title {
+                let lc_title = title.to_lowercase();
+                // Change the icon if the message contains "warning", and does not
+                // contain "error".
+                if lc_title.contains("error") {
+                    error_message = true;
+                } else if lc_title.contains("warning") {
+                    warning_message = true;
+                }
+                if !error_message {
+                    // Check the first three lines of the message.
+                    for line in message.iter().take(3) {
+                        let lc_message = line.to_lowercase();
+                        if lc_message.contains("error:") {
+                            error_message = true;
+                            break;
+                        }
+                        if lc_message.contains("warning:") {
+                            warning_message = true;
+                        }
+                    }
+                }
+                if !error_message && warning_message {
+                    message_type = WARNING_MESSAGE;
+                }
             }
         }
-        let location = parent.as_ref().and_then(|p| {
-            if axis_id.is_none() {
-                Some((p.location.0, (p.location.1 - (p.height / 2 + 20)).max(0)))
-            } else {
-                None
-            }
-        });
-        let option_strings = if override_defaults {
-            options.map(|v| v.iter().map(|s| (*s).to_string()).collect())
+        // Decide whether to pass an array of button labels (to override the
+        // defaults) or null.  Without an override the pane shows the look and
+        // feel's default buttons for the option type.
+        let buttons: Vec<String> = if override_defaults && options.is_some() {
+            options.unwrap().to_vec()
         } else {
-            None
+            match option_type {
+                YES_NO_OPTION => vec![YES.to_owned(), NO.to_owned()],
+                YES_NO_CANCEL_OPTION => vec![YES.to_owned(), NO.to_owned(), CANCEL.to_owned()],
+                OK_CANCEL_OPTION => vec![OK.to_owned(), CANCEL.to_owned()],
+                _ => vec![OK.to_owned()],
+            }
         };
-        self.last_dialog = Some(OptionDialog {
-            axis_id,
-            parent,
-            message: message.to_vec(),
-            title: title.map(str::to_string),
+        // Swing: pane.setInitialValue(initialValue); pane.setComponentOrientation(...);
+        // JDialog dialog = pane.createDialog(parentComponent, title).
+        // A popup with a parent component and no axis is most likely connected
+        // to a field.
+        if parent_component.is_some() && axis_id.is_none() {
+            // Swing layout: dialog location adjusted with
+            // PopupTool.adjustLocationY(location.y, parentComponent.getHeight(),
+            // dialog.getHeight()).
+        }
+        // Swing focus: pane.selectInitialValue().
+        let name = utilities::convert_label_to_name(title, true);
+        // pane.setName(name): carried by the request.
+        self.print_name(name.as_deref(), options, title, Some(&message));
+        let request = PopupRequest {
+            name: name.clone(),
+            title: title.map(str::to_owned),
+            message: message.clone(),
+            options: buttons.clone(),
             option_type,
             message_type,
-            initial_value: initial_value.map(str::to_string),
-            override_defaults,
-            options: option_strings,
-            modal,
-            location,
-        });
-        self.print_name(
-            utilities::convert_label_to_name(title, true).as_deref(),
-            options,
-            title,
-            message,
-        );
-        self.dialog_response.take().unwrap_or(CLOSED_OPTION)
+            initial_value: initial_value.map(str::to_owned),
+            axis_id,
+            parent_component: parent_component.cloned(),
+        };
+        // dialog.setVisible(true); dialog.dispose(); Object selectedValue =
+        // pane.getValue();
+        let answer = ui_harness::present_popup(&request);
+        let selected = match answer {
+            PopupAnswer::Closed => return CLOSED_OPTION,
+            PopupAnswer::Selected(index) => index,
+        };
+        // If a null array of options was passed, pane returns an integer: the
+        // index of the default button.  If an array of options was passed, pane
+        // returns the label of the button selected, which is matched against the
+        // options; both reduce to the index of the button pressed.
+        if selected < buttons.len() {
+            if !override_defaults || options.is_none() {
+                return selected as i32;
+            }
+            let options = options.unwrap();
+            for (counter, option) in options.iter().enumerate() {
+                if *option == buttons[selected] {
+                    return counter as i32;
+                }
+            }
+        }
+        CLOSED_OPTION
     }
-    /// `printName`.
-    pub fn print_name(
+
+    /// Java private synchronized final `printName(String, String[], String,
+    /// String[])`.
+    fn print_name(
         &self,
         name: Option<&str>,
-        options: Option<&[&str]>,
+        options: Option<&[String]>,
         title: Option<&str>,
-        message: &[String],
+        message: Option<&[String]>,
     ) {
-        if ARGUMENTS.lock().unwrap().is_print_names() {
-            if let Some(options) = options.filter(|options| !options.is_empty()) {
-                let mut buffer = format!(
-                    "popup{SEPARATOR_CHAR}{} {DEFAULT_DELIMITER} ",
-                    name.unwrap_or("null")
-                );
+        if print_names() {
+            // print popup name/value pair
+            let mut buffer = format!(
+                "{}{}{} {} ",
+                UITestFieldType::POPUP,
+                SEPARATOR_CHAR,
+                name.unwrap_or("null"),
+                DEFAULT_DELIMITER
+            );
+            // if there are options, then print a popup name/value pair
+            if let Some(options) = options
+                && !options.is_empty()
+            {
                 let mut appended = false;
+                // Starts at 1, as the source does (the first option is not
+                // listed).
                 for option in options.iter().skip(1) {
                     if appended {
                         buffer.push(',');
@@ -1194,13 +1844,17 @@ impl AbstractFrame {
                     buffer.push_str(option);
                     appended = true;
                 }
-                println!("{buffer}");
+                println!("{}", buffer);
             }
         }
-        if self.verbose {
-            eprintln!("Popup:\n{}", title.unwrap_or("null"));
-            for line in message {
-                eprintln!("{line}");
+        if self.verbose.get() {
+            // if verbose then print the popup title and message
+            eprintln!("Popup:");
+            eprintln!("{}", title.unwrap_or("null"));
+            if let Some(message) = message {
+                for line in message {
+                    eprintln!("{}", line);
+                }
             }
         }
     }
@@ -1208,70 +1862,26 @@ impl AbstractFrame {
 
 impl Default for AbstractFrame {
     fn default() -> Self {
-        Self::new()
+        AbstractFrame::new()
     }
 }
 
-impl AbstractFrameActions for super::etomo_frame::EtomoFrame {
-    fn menu_file_action(&mut self, event: &ActionEvent) -> MenuTarget {
-        super::etomo_frame::EtomoFrame::menu_file_action(self, event)
-    }
-    fn menu_tools_action(&mut self, event: &ActionEvent) -> MenuTarget {
-        super::etomo_frame::EtomoFrame::menu_tools_action(self, event)
-    }
-    fn menu_view_action(&mut self, event: &ActionEvent) -> Result<(), String> {
-        super::etomo_frame::EtomoFrame::menu_view_action(self, event)
-    }
-    fn menu_options_action(&mut self, event: &ActionEvent) -> Result<(), String> {
-        super::etomo_frame::EtomoFrame::menu_options_action(self, event)
-    }
-    fn menu_help_action(&mut self, event: &ActionEvent) -> MenuTarget {
-        super::etomo_frame::EtomoFrame::menu_help_action(self, event)
-    }
-    fn get_frame_type(&self) -> FrameType {
-        super::etomo_frame::EtomoFrame::get_frame_type(self).unwrap_or(FrameType::Main)
-    }
-    fn cancel(&mut self) {
-        super::etomo_frame::EtomoFrame::cancel(self)
-    }
-    fn save(&mut self, axis_id: AxisID) -> Result<(), String> {
-        super::etomo_frame::EtomoFrame::save(self, axis_id)
-    }
-    fn save_as(&mut self) -> Result<(), String> {
-        super::etomo_frame::EtomoFrame::save_as(self)
-    }
-    fn close(&mut self) {
-        super::etomo_frame::EtomoFrame::close(self)
+impl SwingComponent for AbstractFrame {
+    /// Java `getComponent()`: the frame itself; its content pane stands for
+    /// it as a component.
+    fn get_component(&self) -> Rc<JComponent> {
+        self.content_pane.clone()
     }
 }
 
-#[cfg(test)]
-mod tests {
-    use super::*;
-    #[test]
-    fn wrap_matches_popup_tool_width_and_comma_rule() {
-        let f = AbstractFrame::new();
-        assert_eq!(f.wrap("a\n\n"), vec!["a"]);
-        let line = format!("{} tail", "x".repeat(60));
-        assert_eq!(f.wrap(&line), vec!["x".repeat(60), " tail".into()]);
+impl UIComponent for AbstractFrame {
+    /// Java `getUIComponent()`.
+    fn get_ui_component(&self) -> &dyn SwingComponent {
+        self
     }
-    #[test]
-    fn dialog_is_closed_without_gui_answer_and_classifies_warning() {
-        let mut f = AbstractFrame::new();
-        f.open_message_dialog(None, AxisID::Only, "warning: check", Some("message"));
-        assert_eq!(
-            f.last_dialog.as_ref().unwrap().message_type,
-            WARNING_MESSAGE
-        );
-        f.dialog_response = Some(DELETE_OPTION);
-        assert!(f.open_yes_no_dialog(None, AxisID::Only, "continue?"));
-    }
-    #[test]
-    fn etomo_frame_trait_forwards_menu_listener_path() {
-        let mut frame = super::super::etomo_frame::EtomoFrame::new();
-        assert_eq!(
-            AbstractFrameActions::menu_file_action(&mut frame, &ActionEvent::new("Save")),
-            MenuTarget::Save
-        );
+
+    /// Java `getComponent()`.
+    fn get_component(&self) -> Rc<JComponent> {
+        self.content_pane.clone()
     }
 }

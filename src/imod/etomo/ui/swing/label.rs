@@ -1,91 +1,99 @@
 //! `IMOD/Etomo/src/etomo/ui/swing/Label.java`.
-#![allow(dead_code)]
+//!
+//! Java `final class Label extends JLabel`: the `JLabel` is [`Label::get_component`];
+//! inherited `JLabel` members are called on it.
+
+use std::cell::Cell;
+use std::rc::Rc;
 
 use crate::imod::etomo::etomo_director::ARGUMENTS;
+use crate::imod::etomo::jdk::JComponent;
+use crate::imod::etomo::r#type::ui_test_field_type;
 use crate::imod::etomo::storage::autodoc::autodoc_tokenizer::{DEFAULT_DELIMITER, SEPARATOR_CHAR};
 use crate::imod::etomo::util::utilities;
 
-/// Java package-private final `Label` and its native `JLabel` state.
-#[derive(Clone, Debug, Default, Eq, PartialEq)]
+/// Java `Label`.
 pub struct Label {
-    pub debug: bool,
-    pub name: String,
-    pub text: Option<String>,
-    pub visible: bool,
+    /// The `JLabel` this class extends.
+    component: Rc<JComponent>,
+    /// Java `debug`.
+    debug: Cell<bool>,
 }
 
 impl Label {
     /// Java private `Label()`.
-    fn empty() -> Self {
-        Self {
-            visible: true,
-            ..Self::default()
-        }
+    fn new_void() -> Rc<Label> {
+        Rc::new(Label {
+            component: JComponent::new_label(""),
+            debug: Cell::new(false),
+        })
     }
 
     /// Java `Label(String)`.
-    pub fn new(text: Option<&str>) -> Self {
-        let mut value = Self::empty();
-        if let Some(text) = text {
-            value.set_name(Some(text));
+    pub fn new_string(text: Option<&str>) -> Rc<Label> {
+        let label = Label::new_void();
+        if text.is_some() {
+            label.set_name(text);
         }
-        value.text = text.map(str::to_owned);
-        value
+        // Java `setText(text)`; the stand-in's text is never null.
+        label.component.set_text(text.unwrap_or(""));
+        label
     }
 
     /// Java `Label(String, String)`.
-    pub fn new_with_name(name: Option<&str>, text: Option<&str>) -> Self {
-        let mut value = Self::empty();
-        if let Some(name) = name {
-            value.set_name(Some(name));
+    pub fn new_string_string(name: Option<&str>, text: Option<&str>) -> Rc<Label> {
+        let label = Label::new_void();
+        if name.is_some() {
+            label.set_name(name);
         }
-        value.text = text.map(str::to_owned);
-        value
+        label.component.set_text(text.unwrap_or(""));
+        label
     }
 
     /// Java static `getNamedInstance(String)`.
-    pub fn get_named_instance(name: Option<&str>) -> Self {
-        let mut value = Self::empty();
-        if let Some(name) = name {
-            value.set_name(Some(name));
+    pub fn get_named_instance(name: Option<&str>) -> Rc<Label> {
+        let instance = Label::new_void();
+        if name.is_some() {
+            instance.set_name(name);
         }
-        value
+        instance
+    }
+
+    /// The `JLabel` this class extends.
+    pub fn get_component(&self) -> Rc<JComponent> {
+        self.component.clone()
     }
 
     /// Java `setDebug(boolean)`.
-    pub fn set_debug(&mut self, debug: bool) {
-        self.debug = debug;
+    pub fn set_debug(&self, debug: bool) {
+        self.debug.set(debug);
     }
 
-    /// Java `setVisible(boolean)`.
-    pub fn set_visible(&mut self, visible: bool) {
-        self.visible = visible;
+    /// Java `setVisible(boolean)` (override that only calls super).
+    pub fn set_visible(&self, visible: bool) {
+        self.component.set_visible(visible);
     }
 
-    /// Java `setName(String)`.
-    pub fn set_name(&mut self, name: Option<&str>) {
+    /// Java `setName(String)` (override).
+    pub fn set_name(&self, name: Option<&str>) {
         let Some(name) = name else {
-            self.name.clear();
+            self.component.set_name(Some(""));
             return;
         };
-        let Some(name) = utilities::convert_label_to_name(Some(name), true) else {
+        let field_type = &ui_test_field_type::LABEL;
+        // build name
+        let Some(name) = utilities::convert_label_to_name(Some(name), field_type.is_unlimited_segments())
+        else {
             return;
         };
-        self.name = format!("label{SEPARATOR_CHAR}{name}");
-        if ARGUMENTS.lock().expect("arguments lock").is_print_names() {
-            println!("{} {} ", self.name, DEFAULT_DELIMITER);
+        self.component
+            .set_name(Some(&format!("{}{}{}", field_type, SEPARATOR_CHAR, name)));
+        if ARGUMENTS.lock().unwrap().is_print_names() {
+            println!(
+                "{} {} ",
+                self.component.get_name().as_deref().unwrap_or("null"),
+                DEFAULT_DELIMITER
+            );
         }
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-    #[test]
-    fn name_and_text_follow_the_distinct_constructor_arguments() {
-        let label = Label::new_with_name(Some("Rate:"), Some("Visible rate"));
-        assert_eq!(label.name, "label.rate");
-        assert_eq!(label.text.as_deref(), Some("Visible rate"));
-        assert_eq!(Label::get_named_instance(None).name, "");
     }
 }

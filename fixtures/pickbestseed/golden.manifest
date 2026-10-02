@@ -1,0 +1,195 @@
+# imod-rs native golden manifest for fixtures/pickbestseed; see fixtures/README.md.
+# Regenerate with fixtures/regen-golden.sh pickbestseed; do not edit by hand.
+text 584 defined/base.out
+Total area = 0.92 megapixels
+75 candidate points, including 28 clustered and 8 elongated   [PBS1]
+6 candidates excluded by outlier scores (5 clustered or elongated)
+Phase 1: total points accepted = 17  -  on bottom = 6 , on top = 11
+Phase 2: total points accepted = 28  -  on bottom = 8 , on top = 20
+Phase 3: total points accepted = 38  -  on bottom = 8 , on top = 30
+Phase 4: total points accepted = 38  -  on bottom = 8 , on top = 30
+Final:   total points accepted = 38  -  on bottom = 8 , on top = 30   [PBS2]
+Number in candidate model surfaces:   39   1   1   2   28   0   1   3
+
+text 2 defined/base.rc
+0
+
+sha256 a7245b62ace4ad5cf8e16e195cbd6642d5a7cdc36279cbb08d5985aacf3b78fc 3236 defined/base/cand.mod
+sha256 9aed7ecebf82c9be10dd76d7b5d9335e62d06f0e95553a2595b2bd6ea4bb834d 2232 defined/base/seed.mod
+sha256 13fbc41c50a30e193aeb2d5552f62300921b53c85b161d7717323b2916f51f29 2232 defined/base/seed.mod~
+sha256 9540fc3f6168cd7be2e3ac9542cb922af3a4d7329fbaf054fc83b141b18545a8 584 defined/bound.out
+text 2 defined/bound.rc
+0
+
+sha256 a7245b62ace4ad5cf8e16e195cbd6642d5a7cdc36279cbb08d5985aacf3b78fc 3236 defined/bound/cand.mod
+sha256 2fbb52e4dbccf6c21a414655cd3ba7cca5f3ee1920dd6e7c40f5fcb4194485fe 2188 defined/bound/seed.mod
+sha256 13fbc41c50a30e193aeb2d5552f62300921b53c85b161d7717323b2916f51f29 2232 defined/bound/seed.mod~
+sha256 df56cc23a7d4f4533f4ac517b2e08b88aba586dff6946e373a70c4ad722275fe 669 defined/boundcount.out
+text 2 defined/boundcount.rc
+0
+
+sha256 a7245b62ace4ad5cf8e16e195cbd6642d5a7cdc36279cbb08d5985aacf3b78fc 3236 defined/boundcount/cand.mod
+sha256 9aed7ecebf82c9be10dd76d7b5d9335e62d06f0e95553a2595b2bd6ea4bb834d 2232 defined/boundcount/seed.mod
+sha256 13fbc41c50a30e193aeb2d5552f62300921b53c85b161d7717323b2916f51f29 2232 defined/boundcount/seed.mod~
+sha256 49cf2316d9054d704feb96fa2f8e1d5bfc92b07a0a5d22280066cb836f10bd9d 861 defined/clusters.out
+text 2 defined/clusters.rc
+0
+
+sha256 a7245b62ace4ad5cf8e16e195cbd6642d5a7cdc36279cbb08d5985aacf3b78fc 3236 defined/clusters/cand.mod
+sha256 4b807c700d4a2e730b1026f3ed75c589f6ea48132dd6aaee32f8c552d68899a7 3316 defined/clusters/seed.mod
+sha256 13fbc41c50a30e193aeb2d5552f62300921b53c85b161d7717323b2916f51f29 2232 defined/clusters/seed.mod~
+sha256 e0cde4f48df74b0bc554cab1e203e34ed306aa3671eeb1f17c115c81fb4b9397 687 defined/control.out
+text 2 defined/control.rc
+0
+
+sha256 f830e69e59c98094adc319a53ba9e6625470d5200dc395b539f3fd814177cf34 3236 defined/control/cand.mod
+sha256 23b6ed34768ada1be753bba4b3f3bea80310ab8fafa8f0d936a5c62bc34ad711 2188 defined/control/seed.mod
+sha256 13fbc41c50a30e193aeb2d5552f62300921b53c85b161d7717323b2916f51f29 2232 defined/control/seed.mod~
+sha256 2c270a2551dde669f5fb56311e2fc29fd3823b40c30c8e0ee76c54daee674bca 606 defined/control17.out
+text 2 defined/control17.rc
+0
+
+sha256 797a7b6d17d93464bd1982daaf8ae9c0eef4f317cdb986907c49670f848430f5 3236 defined/control17/cand.mod
+sha256 9aed7ecebf82c9be10dd76d7b5d9335e62d06f0e95553a2595b2bd6ea4bb834d 2232 defined/control17/seed.mod
+sha256 13fbc41c50a30e193aeb2d5552f62300921b53c85b161d7717323b2916f51f29 2232 defined/control17/seed.mod~
+sha256 6fcbea0c851ca4214b3f60d59362762dbefb886d72f88fc259a39580602af66c 584 defined/dens.out
+text 2 defined/dens.rc
+0
+
+sha256 a7245b62ace4ad5cf8e16e195cbd6642d5a7cdc36279cbb08d5985aacf3b78fc 3236 defined/dens/cand.mod
+sha256 b436e67d7068764f328fbf01c152fc14fae027805d85a489405811fb9790a577 31815 defined/dens/dplot-2-0-1.dat
+sha256 866bbe0939af4d788ead4570787019f199e70447f5b0672bfaf753126b66accb 31856 defined/dens/dplot-2-0-2.dat
+sha256 866bbe0939af4d788ead4570787019f199e70447f5b0672bfaf753126b66accb 31856 defined/dens/dplot-2-0-3.dat
+sha256 d2136650c03940828699feae0bb38725eadd70790a9b95f68204aff55f4b0715 31908 defined/dens/dplot-2-0-4.dat
+sha256 e8d0c41b14a149298ddde5fd640392bfbe0d6092ce21c1232843998a2bc424fc 32255 defined/dens/dplot-2-1-5.dat
+sha256 c380b5b8dd4886a5a353f39a3dcfde7b421ea4aee6501f33f8e1dc5ff60abca4 32425 defined/dens/dplot-2-1-6.dat
+sha256 c380b5b8dd4886a5a353f39a3dcfde7b421ea4aee6501f33f8e1dc5ff60abca4 32425 defined/dens/dplot-2-1-7.dat
+sha256 0ff81a7abc72ebb671e42ad93d5a82ac072a919e693e57340241fae9130bee80 32443 defined/dens/dplot-2-1-8.dat
+sha256 0688b7840fb1fda6773b48537fb9b4abb653101521e23dcef9d71c6e74aaa5ff 32272 defined/dens/dplot-3-1-1.dat
+sha256 a4ed2067aad6a62704eaaf6cecbafda3f2d4ffa36489e878d405581796fc97cc 32288 defined/dens/dplot-3-1-2.dat
+sha256 a4ed2067aad6a62704eaaf6cecbafda3f2d4ffa36489e878d405581796fc97cc 32288 defined/dens/dplot-3-1-3.dat
+sha256 ba948b1003f2b9f161dacdec6d62ba07021a55ead7eb2d2b3f1a22d9a8387123 32339 defined/dens/dplot-3-1-4.dat
+sha256 059f41f7e8b703e6d4704a4da1dbaf03d59cfb0d3f1781ed9e381a7b77345558 31908 defined/dens/dplot-4-0-1.dat
+sha256 059f41f7e8b703e6d4704a4da1dbaf03d59cfb0d3f1781ed9e381a7b77345558 31908 defined/dens/dplot-4-0-2.dat
+sha256 79eeffa9c2c802df527b2d7374f4c9cff5c536a95fb83666dc68e0a83fcd5c78 32373 defined/dens/dplot-4-1-3.dat
+sha256 79eeffa9c2c802df527b2d7374f4c9cff5c536a95fb83666dc68e0a83fcd5c78 32373 defined/dens/dplot-4-1-4.dat
+sha256 9aed7ecebf82c9be10dd76d7b5d9335e62d06f0e95553a2595b2bd6ea4bb834d 2232 defined/dens/seed.mod
+sha256 13fbc41c50a30e193aeb2d5552f62300921b53c85b161d7717323b2916f51f29 2232 defined/dens/seed.mod~
+sha256 9fb9ff3723cedc283f44d753671a2152b328532fc75179743d6345eb9ce0fe76 654 defined/density.out
+text 2 defined/density.rc
+0
+
+sha256 a7245b62ace4ad5cf8e16e195cbd6642d5a7cdc36279cbb08d5985aacf3b78fc 3236 defined/density/cand.mod
+sha256 92ed0f0d4120d23760714146f4a16c2a437a1150d0de90f0691ef8eac0fd0fc2 2804 defined/density/seed.mod
+sha256 13fbc41c50a30e193aeb2d5552f62300921b53c85b161d7717323b2916f51f29 2232 defined/density/seed.mod~
+sha256 77390d3f3f565cdc129708f77401bdb8c80334156c75a6dc3b744009ebd6142a 584 defined/err_elong.out
+text 2 defined/err_elong.rc
+0
+
+sha256 72808899db16f69ddc102dd5aa98f8cb6419e23c73b71f723b7f71971031cb6b 3172 defined/err_elong/cand.mod
+sha256 a03f3b1d286804c54d1fe89f80e5743676af39c469d55ef90146c8f31ac02fdb 2232 defined/err_elong/seed.mod
+sha256 13fbc41c50a30e193aeb2d5552f62300921b53c85b161d7717323b2916f51f29 2232 defined/err_elong/seed.mod~
+sha256 bb2d0ae6d9dc497056f75457974549ce2e54265dce31dbb83e7b62e940dfe2a7 584 defined/ignore1.out
+text 2 defined/ignore1.rc
+0
+
+sha256 c05e6047b9ef1325670a3687ca1723078fd06d2fdef2728fc3b914db2cf6217d 3236 defined/ignore1/cand.mod
+sha256 35a1b1e88f01f94b269b3c7e3cbc24be44048563622130565e2e48778ebf043c 2276 defined/ignore1/seed.mod
+sha256 13fbc41c50a30e193aeb2d5552f62300921b53c85b161d7717323b2916f51f29 2232 defined/ignore1/seed.mod~
+sha256 8ae5f60a1dacc4064e475bac20080363718327b7f929716bdd2f1b29dc8694e5 584 defined/nobeef.out
+text 2 defined/nobeef.rc
+0
+
+sha256 a7245b62ace4ad5cf8e16e195cbd6642d5a7cdc36279cbb08d5985aacf3b78fc 3236 defined/nobeef/cand.mod
+sha256 35ecc6539bef0d3ab1cdcb090809a7fd6a10a06b00ab2e55c14b200eb112549a 1792 defined/nobeef/seed.mod
+sha256 13fbc41c50a30e193aeb2d5552f62300921b53c85b161d7717323b2916f51f29 2232 defined/nobeef/seed.mod~
+sha256 fcd229a1754c9b9710e119b9df49d6b10674592486f441ed882c140f21346367 584 defined/noseedz.out
+text 2 defined/noseedz.rc
+0
+
+sha256 22b4dd0b83465123c8cfe9b15f659f8068c339ae29f358bef976826d4523be85 3236 defined/noseedz/cand.mod
+sha256 c667ebbb5e32fee5856a72af3d6298645f97a247a0a4b6ab0a3cb33bbf4f42c5 2188 defined/noseedz/seed.mod
+sha256 13fbc41c50a30e193aeb2d5552f62300921b53c85b161d7717323b2916f51f29 2232 defined/noseedz/seed.mod~
+sha256 ee34775735b6de2a106fa4fa7ccb1765013ad5e3e166c89eadd0b4f9273ea965 792 defined/oldclust.out
+text 2 defined/oldclust.rc
+0
+
+sha256 a7245b62ace4ad5cf8e16e195cbd6642d5a7cdc36279cbb08d5985aacf3b78fc 3236 defined/oldclust/cand.mod
+sha256 eec7710550be3f9ecc0ee379e19aeb8b376f9ef2e7b6c85eec32721385cbf8bf 2980 defined/oldclust/seed.mod
+sha256 13fbc41c50a30e193aeb2d5552f62300921b53c85b161d7717323b2916f51f29 2232 defined/oldclust/seed.mod~
+sha256 77b7b43c6d19ad6365392c3d745163b724e591ccde84d2f3163b6dcab37bec90 583 defined/twomod.out
+text 2 defined/twomod.rc
+0
+
+sha256 52c596253fd607e90d117450b2281c0c9627839c497425f58e08d230c018e3a5 3236 defined/twomod/cand.mod
+sha256 df245062ce409a986c4efb73cf10eca63c6de51dc5893f2f936a3579506c0bb5 2232 defined/twomod/seed.mod
+sha256 13fbc41c50a30e193aeb2d5552f62300921b53c85b161d7717323b2916f51f29 2232 defined/twomod/seed.mod~
+sha256 158f41d394d36d39e4c48b96eb29dfe6a08ec287d986a87eb5ae5f5fcf5a0314 23475 defined/verbose.out
+text 2 defined/verbose.rc
+0
+
+sha256 a7245b62ace4ad5cf8e16e195cbd6642d5a7cdc36279cbb08d5985aacf3b78fc 3236 defined/verbose/cand.mod
+sha256 9aed7ecebf82c9be10dd76d7b5d9335e62d06f0e95553a2595b2bd6ea4bb834d 2232 defined/verbose/seed.mod
+sha256 13fbc41c50a30e193aeb2d5552f62300921b53c85b161d7717323b2916f51f29 2232 defined/verbose/seed.mod~
+sha256 f7985532b23690eefda4e1514a82eb4cc6d0d934a06b3ca7d8b9276a79bb36a9 584 golden/append.out
+text 2 golden/append.rc
+0
+
+sha256 a7245b62ace4ad5cf8e16e195cbd6642d5a7cdc36279cbb08d5985aacf3b78fc 3236 golden/append/cand.mod
+sha256 13fbc41c50a30e193aeb2d5552f62300921b53c85b161d7717323b2916f51f29 2232 golden/append/seed.mod
+sha256 13fbc41c50a30e193aeb2d5552f62300921b53c85b161d7717323b2916f51f29 2232 golden/append/seed.mod~
+sha256 c72541cd04005e06202e470bb3dca8ce77830c719390886d9a09a86cbf430d2e 584 golden/boundex.out
+text 2 golden/boundex.rc
+0
+
+sha256 a7245b62ace4ad5cf8e16e195cbd6642d5a7cdc36279cbb08d5985aacf3b78fc 3236 golden/boundex/cand.mod
+sha256 94791a57061a8c67dd2635e15aa3934451e814b57c44402f288ad3db1397d9b6 2012 golden/boundex/seed.mod
+sha256 13fbc41c50a30e193aeb2d5552f62300921b53c85b161d7717323b2916f51f29 2232 golden/boundex/seed.mod~
+text 98 golden/err_badco.out
+Total area = 0.92 megapixels
+ERROR: pickbestseed - Contour number (999) out of range in badco.txt
+
+text 2 golden/err_badco.rc
+1
+
+text 73 golden/err_both.out
+ERROR: pickbestseed - Target number or density must be entered, not both
+
+text 2 golden/err_both.rc
+1
+
+text 85 golden/err_clustelong.out
+ERROR: pickbestseed - You cannot enter both -elongated and -cluster with a value > 1
+
+text 2 golden/err_clustelong.rc
+1
+
+text 132 golden/err_nosurf.out
+Total area = 0.92 megapixels
+ERROR: pickbestseed - Surface information must be provided for at least one model if -twosurf is given
+
+text 2 golden/err_nosurf.rc
+1
+
+text 104 golden/err_weights.out
+ERROR: pickbestseed - 4 values expected but only 3 values found in value entry:  WeightsForScore  1,1,1
+
+text 2 golden/err_weights.rc
+1
+
+text 388 golden/onesurf.out
+Total area = 0.92 megapixels
+75 candidate points, including 34 clustered and 7 elongated   [PBS1]
+6 candidates excluded by outlier scores (6 clustered or elongated)
+Phase 1: total points accepted = 19
+Phase 2: total points accepted = 34
+Phase 4: total points accepted = 34
+Final:   total points accepted = 34   [PBS2]
+Number in candidate model surfaces:   34   1   0   2   34   0   1   3
+
+text 2 golden/onesurf.rc
+0
+
+sha256 939fb7fce6f24c84bd9c076e3dc7af7a179544a3125e61377678c7175d5395b7 3236 golden/onesurf/cand.mod
+sha256 47ee8091788e46ee749803e75c8129b6421d7bfa9f10f9d4523bf97b9cf9f523 2044 golden/onesurf/seed.mod
+sha256 13fbc41c50a30e193aeb2d5552f62300921b53c85b161d7717323b2916f51f29 2232 golden/onesurf/seed.mod~

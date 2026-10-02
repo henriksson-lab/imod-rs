@@ -12,12 +12,24 @@
 #         (the Qt/libjpeg encoder boundary is a Rust crate in imod-rs;
 #         RUST_NATIVE_BACKENDS_PLAN.md), with the decoded max/mean difference
 #   text  date stamps, .tmp.<pid> names, "Shell/Python PID" masked
-# Verdicts, worst first: MISSING, DIFF, JPEG, PIXEL, IDENT.
+# File names: a file one side wrote under a name with a PID or a time in it
+# (5+ digits: autofidseed.dir/afs<pid>.*, etomo_err_<date>-<hhmmss>.log) is
+# paired with the other side's file of the same name pattern, when that
+# pairing is unique, and compared under the native name.
+#         also (for batchruntomo's logs): times of day, "in N.NN sec",
+#         "in MM:SS.S",
+#         eTomo's etomo_err_<stamp>.log name, and the two run directories
+#   gzip  decompressed, then compared as above (archiveorig's _xray.mrc.gz
+#         carries its own mtime)
+#   ORDER a text file with the same masked lines in a different order
+#         (diagnostics interleave differently; CLAUDE.md: message order is
+#         not an acceptance criterion)
+# Verdicts, worst first: MISSING, DIFF, JPEG, PIXEL, ORDER, IDENT.
 import os, re, struct, sys
 import numpy as np
 
 nd, rd = sys.argv[1], sys.argv[2]
-rank = {'IDENT': 0, 'PIXEL': 1, 'JPEG': 2, 'DIFF': 3, 'MISSING': 4}
+rank = {'IDENT': 0, 'ORDER': 1, 'PIXEL': 2, 'JPEG': 3, 'DIFF': 4, 'MISSING': 5}
 jp = [0, 0, 0.0, 0]  # jpeg files re-encoded differently: count, max|d|, sum mean|d|, identical count
 worst, out = 'IDENT', []
 
@@ -45,11 +57,18 @@ def mask_model(b):
         x[p + 32:p + 44] = b'\0' * 12
     return bytes(x)
 
-STAMP = re.compile(rb'\d\d-[A-Z][a-z][a-z]-\d\d +\d\d:\d\d:\d\d')
+STAMP = re.compile(rb'[ \d]\d-[A-Z][a-z][a-z]-\d\d +\d\d:\d\d:\d\d')
 TMPPID = re.compile(rb'\.tmp\.\d+')
 PID = re.compile(rb'(Shell|Python) PID: *\d+')
+TOD = re.compile(rb'\b\d\d:\d\d:\d\d\b')
+SECS = re.compile(rb'in (\d+\.\d+ sec|\d+:\d\d\.\d)')
+ERRLOG = re.compile(rb'etomo_err_[A-Za-z0-9-]+\.log')
+DIRS = [(os.path.abspath(nd).encode(), b'<rundir>'), (os.path.abspath(rd).encode(), b'<rundir>')]
 def text_mask(a):
-    return PID.sub(b'PID', TMPPID.sub(b'.tmp.<pid>', STAMP.sub(b'<stamp>', a)))
+    a = PID.sub(b'PID', TMPPID.sub(b'.tmp.<pid>', STAMP.sub(b'<stamp>', a)))
+    a = ERRLOG.sub(b'etomo_err_<stamp>.log', SECS.sub(b'in <t> sec', TOD.sub(b'<time>', a)))
+    for d, r in DIRS: a = a.replace(d, r)
+    return a
 
 def same_stream(pa, pb, off):
     with open(pa, 'rb') as A, open(pb, 'rb') as Bf:
@@ -73,8 +92,20 @@ def mrc_diff(pa, pb, ha):
         n += int((d != 0).sum()); m = max(m, float(np.nanmax(d)) if d.size else 0)
     return '%d of %d voxels differ, max|d| %.4g' % (n, a.size, m)
 
-for f in sys.argv[3:]:
-    pn, pr = os.path.join(nd, f), os.path.join(rd, f)
+args = sys.argv[3:]
+canon = lambda f: re.sub(r'\d{5,}', '#', f)
+only_n = {}; only_r = {}
+for f in args:
+    en, er = os.path.exists(os.path.join(nd, f)), os.path.exists(os.path.join(rd, f))
+    if en and not er: only_n.setdefault(canon(f), []).append(f)
+    if er and not en: only_r.setdefault(canon(f), []).append(f)
+rsname, drop = {}, set()
+for c, fs in only_n.items():
+    if len(fs) == 1 and len(only_r.get(c, [])) == 1:
+        rsname[fs[0]] = only_r[c][0]; drop.add(only_r[c][0])
+for f in args:
+    if f in drop: continue
+    pn, pr = os.path.join(nd, f), os.path.join(rd, rsname.get(f, f))
     if not os.path.exists(pn) and not os.path.exists(pr):
         out.append('%s:neither-wrote' % f); bump('MISSING'); continue
     if not os.path.exists(pn): out.append('%s:native-missing' % f); bump('MISSING'); continue
@@ -82,6 +113,13 @@ for f in sys.argv[3:]:
     sa, sb = os.path.getsize(pn), os.path.getsize(pr)
     with open(pn, 'rb') as A, open(pr, 'rb') as Bf:
         ha, hb = A.read(1024), Bf.read(1024)
+    if ha[:2] == b'\x1f\x8b' and hb[:2] == b'\x1f\x8b':
+        import gzip
+        a, b = gzip.decompress(open(pn, 'rb').read()), gzip.decompress(open(pr, 'rb').read())
+        if len(a) >= 1024 and a[208:212] in (b'MAP ', b'MAP\x00'):
+            a, b = mask_mrc(a[:1024]) + a[1024:], mask_mrc(b[:1024]) + b[1024:]
+        if a == b: out.append('%s:IDENT' % f); continue
+        out.append('%s:DIFF(gzip content)' % f); bump('DIFF'); continue
     if len(ha) == 1024 and ha[208:212] in (b'MAP ', b'MAP\x00'):
         if sa != sb:
             out.append('%s:DIFF(size %d vs %d)' % (f, sa, sb)); bump('DIFF'); continue
@@ -111,11 +149,13 @@ for f in sys.argv[3:]:
         out.append('%s:DIFF(model)' % f); bump('DIFF'); continue
     if a == b or text_mask(a) == text_mask(b): out.append('%s:IDENT' % f); continue
     la, lb = text_mask(a).split(b'\n'), text_mask(b).split(b'\n')
+    if sorted(x for x in la if x.strip()) == sorted(x for x in lb if x.strip()):
+        out.append('%s:ORDER' % f); bump('ORDER'); continue
     nl = sum(1 for x, y in zip(la, lb) if x != y) + abs(len(la) - len(lb))
     out.append('%s:DIFF(%d lines)' % (f, nl)); bump('DIFF')
 
 if jp[0]:
     out.append('%d JPEGs encoded differently (decoded max|d| %d, mean|d| %.3f)'
                % (jp[0], jp[1], jp[2] / jp[0]))
-out = [o for o in out if not o.endswith(':IDENT')] or ['all %d IDENT' % (len(sys.argv) - 3)]
+out = [o for o in out if not o.endswith(':IDENT')] or ['all %d IDENT' % (len(args) - len(drop))]
 print(worst + '\t' + ' '.join(out))

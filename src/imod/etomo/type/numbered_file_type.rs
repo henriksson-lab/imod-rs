@@ -127,8 +127,7 @@ impl NumberedFileType {
     }
 
     /// Java `getFile(BaseManager, String, Number)`.  The `numeric1` parameter is the
-    /// already-formatted number; see the note on `Variable::to_formatted_string` in
-    /// `etomo/type/file_type.rs` for why the `Number` transfer is left out.
+    /// Java `Number` as its `toString()`.
     pub fn get_file(
         &self,
         manager: Option<&'static dyn BaseManager>,

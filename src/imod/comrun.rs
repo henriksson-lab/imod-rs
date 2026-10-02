@@ -885,50 +885,6 @@ fn parse_number(text: &str) -> Option<Value> {
     clean.parse::<f64>().ok().map(Value::Float)
 }
 
-/// Python `repr(float)`: the shortest round-tripping digits, in exponent
-/// form when the decimal exponent is below -4 or at least 16.
-fn float_repr(value: f64) -> String {
-    if value.is_nan() {
-        return "nan".to_owned();
-    }
-    if value.is_infinite() {
-        return if value > 0.0 { "inf" } else { "-inf" }.to_owned();
-    }
-    let sci = format!("{value:e}");
-    let (mantissa, exponent) = sci.split_once('e').unwrap();
-    let exponent: i32 = exponent.parse().unwrap();
-    let negative = mantissa.starts_with('-');
-    let digits: String = mantissa.chars().filter(|c| c.is_ascii_digit()).collect();
-    let sign = if negative { "-" } else { "" };
-    if exponent < -4 || exponent >= 16 {
-        let mut m = digits[..1].to_owned();
-        if digits.len() > 1 {
-            m += ".";
-            m += &digits[1..];
-        }
-        return format!(
-            "{sign}{m}e{}{:02}",
-            if exponent < 0 { '-' } else { '+' },
-            exponent.abs()
-        );
-    }
-    let point = exponent + 1;
-    if point <= 0 {
-        format!("{sign}0.{}{digits}", "0".repeat((-point) as usize))
-    } else if point as usize >= digits.len() {
-        format!(
-            "{sign}{digits}{}.0",
-            "0".repeat(point as usize - digits.len())
-        )
-    } else {
-        format!(
-            "{sign}{}.{}",
-            &digits[..point as usize],
-            &digits[point as usize..]
-        )
-    }
-}
-
 impl Value {
     /// Python `str(value)`.
     fn to_str(&self) -> String {
@@ -936,7 +892,7 @@ impl Value {
             Value::None => "None".to_owned(),
             Value::Bool(b) => if *b { "True" } else { "False" }.to_owned(),
             Value::Int(i) => i.to_string(),
-            Value::Float(f) => float_repr(*f),
+            Value::Float(f) => imodpy::py_str_float(*f),
             Value::Str(s) => s.clone(),
             Value::List(items) => {
                 let parts: Vec<String> = items
@@ -1675,11 +1631,14 @@ pub fn runcom() {
              -n #  will set niceness of job to #\n    \
              -P will print the process ID to standard error, as the vmstopy\n       \
              script does (processchunks reads it to kill the job)\n    \
-             -s will leave standard error of programs out of the log\n"
+             -s will leave standard error of programs out of the log\n    \
+             -S will run the script vmstopy wrote, read from standard input,\n       \
+             instead of a command file (eTomo's `python -u` step)\n"
         );
         let _ = std::io::stdout().flush();
     };
     let mut options = ComOptions::default();
+    let mut script_on_stdin = false;
     let mut ind = 1;
     let fail = |message: &str| -> ! {
         print!("ERROR: runcom - {message}\n");
@@ -1704,14 +1663,15 @@ pub fn runcom() {
             "-k" => options.vmstopy.keep_backslash = true,
             "-t" => options.vmstopy.test = true,
             "-s" => options.stderr_to_log = false,
+            "-S" => script_on_stdin = true,
             // `imodNice(n)` in the vmstopy script: this process is the job
             "-n" => {
                 let text = value();
-                match text.trim().parse::<i32>() {
-                    Ok(nice) => unsafe {
+                match imodpy::py_int(&text).and_then(|nice| i32::try_from(nice).ok()) {
+                    Some(nice) => unsafe {
                         libc::nice(nice);
                     },
-                    Err(_) => fail("Converting \"nice\" value to integer"),
+                    None => fail("Converting \"nice\" value to integer"),
                 }
             }
             // `printPID(True)` in the vmstopy script
@@ -1738,6 +1698,28 @@ pub fn runcom() {
             _ => fail(&format!("Unrecognized argument {option}")),
         }
         ind += 1;
+    }
+    if script_on_stdin {
+        // The script `ComScriptProcess.execPython` pipes into `python -u`: the
+        // log is the one it backs up and opens (`makeBackupFile('<log>')`).
+        let mut script = String::new();
+        let _ = std::io::Read::read_to_string(&mut std::io::stdin(), &mut script);
+        let log = script
+            .lines()
+            .find_map(|line| {
+                line.strip_prefix("makeBackupFile('")
+                    .and_then(|rest| rest.strip_suffix("')"))
+            })
+            .map(PathBuf::from);
+        let Some(log) = log else {
+            fail("No log file in the script on standard input")
+        };
+        let result = run_script(&script, &log, &options);
+        if let Some(error) = &result.error {
+            print!("{error}\n");
+            let _ = std::io::stdout().flush();
+        }
+        crate::imod::libcfshr::b3dutil::exit(result.status)
     }
     if ind >= argv.len() || argv.len() - ind > 2 {
         usage();

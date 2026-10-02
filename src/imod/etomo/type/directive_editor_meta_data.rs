@@ -5,7 +5,7 @@ use super::axis_type::AxisType;
 use super::base_meta_data::{BaseMetaData, BaseMetaDataBase};
 use super::directive_file_type::DirectiveFileType;
 use crate::imod::etomo::base_manager::BaseManager;
-use crate::imod::etomo::storage::storable::Storable;
+use crate::imod::etomo::storage::storable::{Storable, StorableValue};
 use crate::imod::etomo::ui::log_properties::LogProperties;
 use std::collections::BTreeMap;
 use std::path::Path;
@@ -75,7 +75,7 @@ impl Storable for DirectiveEditorMetaData {
     }
 
     /// Java inherited `BaseMetaData.load(Properties)`.
-    fn load(&mut self, properties: &BTreeMap<String, String>) {
+    fn load(&self, properties: &BTreeMap<String, String>) {
         if self
             .base
             .load_with_created_prepend(properties, self.get_group_key().as_deref())
@@ -85,7 +85,7 @@ impl Storable for DirectiveEditorMetaData {
     }
 
     /// Java inherited `BaseMetaData.load(Properties, String)`.
-    fn load_with_prepend(&mut self, properties: &BTreeMap<String, String>, prepend: &str) {
+    fn load_with_prepend(&self, properties: &BTreeMap<String, String>, prepend: &str) {
         if self
             .base
             .load_with_created_prepend(properties, self.create_prepend(prepend).as_deref())

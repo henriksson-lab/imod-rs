@@ -1,0 +1,24 @@
+# name	args
+tubeplanar	-tube 1 -diam 6 -fv 100 -zmin 1,3 -planar op.mod img.mrc o.mrc
+tube3d	-tube 1,2 -diam 5,7 op.mod img.mrc o.mrc
+closed	cl.mod img.mrc o.mrc
+invert	-invert -objects 1,2 cl.mod img.mrc o.mrc
+reverse	-reverse -thresh 60 -fv 20 cl.mod img.mrc o.mrc
+#full	mask	-mask 200 -fv 10 cl.mod img.mrc o.mrc
+labels	-label / -objects 1,2 -mode 1 cl.mod img.mrc o.mrc
+labellist	-label 5,9,11 -retain cl.mod img.mrc o.mrc
+mode2	-mode 2 -xminmax 10,80 -yminmax 5,90 -zminmax 1,3 cl.mod img.mrc o.mrc
+padtaper	-pad 3 -taper 1 cl.mod img.mrc o.mrc
+padin	-pad -3 -taper 2 -mode 2 cl.mod img.mrc o.mrc
+ztaper	-ztaper -pad -2 -taper 1 -objects 1 cl.mod img.mrc o.mrc
+allsec	-allsec 2 -objects 2 cl.mod img.mrc o.mrc
+scat2d	-2dscat -border 3 scs.mod img.mrc o.mrc
+scat3d	-3dscat -pad 2 -taper 1 scs.mod img.mrc o.mrc
+color	-color -fc 1,0.5,0.25 -fv 50 cl.mod img.mrc o.mrc
+border	-border 5 -tube 1 op.mod img.mrc o.mrc
+fast	-fast cl.mod img.mrc o.mrc
+project	-project -30,30,30 -tube 1 op.mod img.mrc o.mrc
+scat23	-2dscat -3dscat scs.mod img.mrc o.mrc
+#full	badlim	-xminmax 50,20 cl.mod img.mrc o.mrc
+twofiles	cl.mod img.mrc
+nofile	cl.mod missing.mrc o.mrc

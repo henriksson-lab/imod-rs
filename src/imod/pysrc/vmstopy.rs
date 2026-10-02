@@ -24,7 +24,7 @@
 //! * `line.split()[0]` (`vmstopy:549`) raises `IndexError` on a command line
 //!   that is empty after the `$`; the empty command is kept instead.
 
-use super::imodpy::prnstr;
+use super::imodpy::{prnstr, py_float};
 use regex::Regex;
 use std::ffi::OsString;
 use std::io::Write;
@@ -243,16 +243,9 @@ pub fn vmstopy(arguments: &[OsString]) -> i32 {
                 argind += 1;
                 // int(): surrounding whitespace, a sign and underscores
                 // between digits are accepted
-                let text = argv[argind].trim();
-                let digits = text.strip_prefix(['+', '-']).unwrap_or(text);
-                let valid = !digits.is_empty()
-                    && digits.chars().all(|c| c.is_ascii_digit() || c == '_')
-                    && !digits.starts_with('_')
-                    && !digits.ends_with('_')
-                    && !digits.contains("__");
-                match text.replace('_', "").parse::<i64>() {
-                    Ok(value) if valid => options.nice_val = Some(value),
-                    _ => {
+                match super::imodpy::py_int(&argv[argind]) {
+                    Some(value) => options.nice_val = Some(value),
+                    None => {
                         prnstr(
                             "ERROR: vmstopy - Converting \"nice\" value to integer",
                             "\n",
@@ -752,7 +745,7 @@ pub fn convert(
         if set_match.is_match(&line) {
             let setcom = set_match.replace_all(&line, ">${1}${2}").into_owned();
             let mut value = set_match.replace_all(&line, "${3}").into_owned();
-            let numeric = python_float(&value).is_some();
+            let numeric = py_float(&value).is_some();
             if !value.contains('"') && !value.contains('\'') && !numeric {
                 value = format!("'{value}'");
                 if need_pid {
@@ -1014,35 +1007,4 @@ pub fn convert(
     p("  closeExit(1)");
     p("closeExit(0)");
     Ok(())
-}
-
-/// Python's `float(text)`: the value, or `None` where it raises
-/// `ValueError`.  Surrounding whitespace, a sign, `inf`/`infinity`/`nan` in
-/// any case, and single underscores between digits are accepted.
-pub fn python_float(text: &str) -> Option<f64> {
-    let text = text.trim_matches(|c: char| c.is_whitespace());
-    let unsigned = text.strip_prefix(['+', '-']).unwrap_or(text);
-    let lower = unsigned.to_ascii_lowercase();
-    if lower == "inf" || lower == "infinity" || lower == "nan" {
-        return text.parse::<f64>().ok();
-    }
-    if unsigned.is_empty()
-        || !unsigned
-            .chars()
-            .all(|c| c.is_ascii_digit() || matches!(c, '.' | 'e' | 'E' | '+' | '-' | '_'))
-    {
-        return None;
-    }
-    // underscores only between two digits
-    let chars: Vec<char> = text.chars().collect();
-    for (i, &c) in chars.iter().enumerate() {
-        if c == '_'
-            && !(i > 0
-                && chars[i - 1].is_ascii_digit()
-                && chars.get(i + 1).is_some_and(|next| next.is_ascii_digit()))
-        {
-            return None;
-        }
-    }
-    text.replace('_', "").parse::<f64>().ok()
 }

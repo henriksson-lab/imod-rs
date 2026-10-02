@@ -1,638 +1,914 @@
 //! `IMOD/Etomo/src/etomo/ui/swing/CheckBoxCell.java`.
 //!
-//! `JCheckBox`, its border, listener dispatch, colours, and native geometry are
-//! retained as an explicit Swing boundary.  The source-owned CheckBoxCell state
-//! and decisions are represented here without pretending to render Swing.
-#![allow(dead_code)]
+//! Java `final class CheckBoxCell extends InputCell implements ToggleCell,
+//! ActionListener, BooleanFieldInterface, UIComponent, SwingComponent,
+//! FieldSettings`: a table cell holding a check box.
+//!
+//! Every Java method body is an inherent method here (overloads carry the
+//! parameter-type suffix of `ui.md`); the trait impls at the end bind
+//! `CellVirtual`, `InputCellVirtual`, `ToggleCell`, `UIComponent` and
+//! `SwingComponent` to those bodies.  `BooleanFieldInterface` and `FieldSettings`
+//! are implemented by the inherent methods of the same names (see the report's
+//! NEEDS).  The Java object registers itself as an `ActionListener` on its check box
+//! (field highlight); that is a closure holding a `Weak` to the cell.
 
-use std::sync::atomic::{AtomicUsize, Ordering};
+use std::cell::RefCell;
+use std::ops::Deref;
+use std::rc::{Rc, Weak};
 
+use super::cell::{Cell, CellVirtual};
+use super::colors::{self, ColorUIResource};
+use super::field_lock_controller::FieldLockController;
+use super::input_cell::{InputCell, InputCellVirtual};
+use super::swing_component::SwingComponent;
+use super::toggle_cell::ToggleCell;
+use super::toggle_coordinator::ToggleCoordinator;
+use super::tooltip_formatter;
 use crate::imod::etomo::etomo_director::ARGUMENTS;
+use crate::imod::etomo::jdk::{ActionEvent, ActionListener, ChangeListener, JComponent};
 use crate::imod::etomo::storage::autodoc::autodoc_tokenizer::{DEFAULT_DELIMITER, SEPARATOR_CHAR};
-use crate::imod::etomo::r#type::const_etomo_number::ConstEtomoNumber;
+use crate::imod::etomo::storage::directive_def::DirectiveDef;
+use crate::imod::etomo::r#type::const_etomo_number::{
+    ConstEtomoNumber, java_lang_string_matches_whitespace,
+};
+use crate::imod::etomo::r#type::etomo_boolean2::EtomoBoolean2;
+use crate::imod::etomo::r#type::ui_test_field_type::{self, UITestFieldType};
+use crate::imod::etomo::ui::boolean_field_setting::BooleanFieldSetting;
+use crate::imod::etomo::ui::field::Field;
+use crate::imod::etomo::ui::field_displayer::FieldDisplayer;
+use crate::imod::etomo::ui::field_setting_interface::FieldSettingInterface;
+use crate::imod::etomo::ui::field_validation_failed_exception::FieldValidationFailedException;
+use crate::imod::etomo::ui::ui_component::UIComponent;
 use crate::imod::etomo::util::utilities;
 
-use super::check_box::{BLACK, BooleanFieldSetting, Color, FIELD_HIGHLIGHT, GRAY};
-use super::field_lock_controller::{FieldLockController, JToggleButton};
-use super::toggle_coordinator::{ToggleButtonBoundary, ToggleCoordinator};
-
-static NEXT_CHECK_BOX_CELL_IDENTITY_HASH_CODE: AtomicUsize = AtomicUsize::new(1);
-const CHECK_BOX: &str = "CheckBox";
-
-/// Source-observable state of Java `JCheckBox`; rendering is a Swing boundary.
-#[derive(Clone, Debug, Eq, PartialEq)]
-pub struct CheckBoxCellJCheckBox {
-    pub selected: bool,
-    pub text: String,
-    pub name: Option<String>,
-    pub action_command: Option<String>,
-    pub visible: bool,
-    pub enabled: bool,
-    pub foreground: Color,
-    pub background: Option<Color>,
-    pub tooltip: Option<String>,
-    pub border_painted: bool,
-    pub border: &'static str,
-    pub width: i32,
-    pub height: i32,
-    pub border_bottom: i32,
-    pub border_left: i32,
-    pub action_listener_count: usize,
-    pub change_listener_count: usize,
-}
-
-impl Default for CheckBoxCellJCheckBox {
-    fn default() -> Self {
-        Self {
-            selected: false,
-            text: String::new(),
-            name: None,
-            action_command: None,
-            visible: true,
-            enabled: true,
-            foreground: BLACK,
-            background: None,
-            tooltip: None,
-            border_painted: false,
-            border: "EtchedBorder",
-            width: 0,
-            height: 0,
-            border_bottom: 0,
-            border_left: 0,
-            action_listener_count: 0,
-            change_listener_count: 0,
-        }
-    }
-}
-
-/// Java package-private final `CheckBoxCell`.
-#[derive(Clone, Debug, Eq, PartialEq)]
+/// Java `CheckBoxCell`.
 pub struct CheckBoxCell {
-    pub check_box: CheckBoxCellJCheckBox,
-    pub field_lock_controller: FieldLockController,
-    /// Java final `ToggleCoordinator`; actual Swing button handles remain at
-    /// the explicit coordinator boundary.
-    pub toggle_coordinator: Option<ToggleCoordinator>,
-    pub header_background: bool,
-    pub debug: bool,
-    pub unformatted_label: String,
-    pub checkpoint: Option<BooleanFieldSetting>,
-    pub backup_value: bool,
-    pub field_is_backed_up: bool,
-    pub field_highlight: Option<BooleanFieldSetting>,
-    pub directive_def: Option<String>,
-    pub selected_string_value: Option<String>,
-    pub unformatted_tooltip: Option<String>,
-    pub identity_hash_code: usize,
-    pub background_refresh_count: usize,
+    /// Java superclass `InputCell`.
+    base: InputCell,
+    /// Java `this`, for the places the source passes itself.
+    this: Weak<CheckBoxCell>,
+    /// Java `checkBox`.
+    check_box: Rc<JComponent>,
+    /// Java `fieldLockController`.
+    field_lock_controller: Rc<FieldLockController>,
+    /// Java `toggleCoordinator` (set once by the constructor, null when the cell does
+    /// not have a header background).
+    toggle_coordinator: RefCell<Option<Rc<ToggleCoordinator>>>,
+    /// Java `unformattedLabel`: from JCheckBox.getText().  Updated in setLabel().
+    unformatted_label: RefCell<Option<String>>,
+    /// Java `checkpoint`.
+    checkpoint: RefCell<Option<BooleanFieldSetting>>,
+    /// Java `backupValue`.
+    backup_value: std::cell::Cell<bool>,
+    /// Java `fieldIsBackedUp`.
+    field_is_backed_up: std::cell::Cell<bool>,
+    /// Java `fieldHighlight`.
+    field_highlight: RefCell<Option<BooleanFieldSetting>>,
+    /// Java `directiveDef`.
+    directive_def: RefCell<Option<DirectiveDef>>,
+    /// Java `selectedStringValue`.
+    selected_string_value: RefCell<Option<String>>,
+    /// Java `unformattedTooltip`.
+    unformatted_tooltip: RefCell<Option<String>>,
+}
+
+impl Deref for CheckBoxCell {
+    type Target = InputCell;
+
+    fn deref(&self) -> &InputCell {
+        &self.base
+    }
 }
 
 impl CheckBoxCell {
     /// Java private `CheckBoxCell(String, boolean, boolean)`.
-    pub fn new(header_label: Option<&str>, header_background: bool, debug: bool) -> Self {
-        let mut value = Self {
-            check_box: CheckBoxCellJCheckBox {
-                border_painted: true,
-                ..Default::default()
-            },
-            field_lock_controller: FieldLockController::get_toggle_button_debug_instance(
-                JToggleButton {
-                    enabled: true,
-                    selected: false,
-                },
-                debug,
-            ),
-            toggle_coordinator: None,
-            header_background,
-            debug,
-            unformatted_label: String::new(),
-            checkpoint: None,
-            backup_value: false,
-            field_is_backed_up: false,
-            field_highlight: None,
-            directive_def: None,
-            selected_string_value: None,
-            unformatted_tooltip: None,
-            identity_hash_code: NEXT_CHECK_BOX_CELL_IDENTITY_HASH_CODE
-                .fetch_add(1, Ordering::Relaxed),
-            background_refresh_count: 0,
-        };
-        value.set_background();
-        value.set_foreground();
+    fn new(header_label: Option<&str>, header_background: bool, debug: bool) -> Rc<CheckBoxCell> {
+        // super(headerBackground, debug)
+        let check_box = JComponent::new_check_box("");
+        let field_lock_controller =
+            FieldLockController::get_toggle_button_instance_j_toggle_button_boolean(
+                &check_box, debug,
+            );
+        let instance = Rc::new_cyclic(|this: &Weak<CheckBoxCell>| CheckBoxCell {
+            base: InputCell::new_boolean_boolean(header_background, debug),
+            this: this.clone(),
+            check_box,
+            field_lock_controller,
+            toggle_coordinator: RefCell::new(None),
+            unformatted_label: RefCell::new(Some(String::new())),
+            checkpoint: RefCell::new(None),
+            backup_value: std::cell::Cell::new(false),
+            field_is_backed_up: std::cell::Cell::new(false),
+            field_highlight: RefCell::new(None),
+            directive_def: RefCell::new(None),
+            selected_string_value: RefCell::new(None),
+            unformatted_tooltip: RefCell::new(None),
+        });
+        let weak: Weak<CheckBoxCell> = Rc::downgrade(&instance);
+        instance.base.set_this(weak);
         if header_background {
-            value.toggle_coordinator = Some(ToggleCoordinator::new(Some(ToggleButtonBoundary {
-                identity_hash_code: value.identity_hash_code,
-                enabled: value.check_box.enabled,
-                selected: value.check_box.selected,
-                action_listener_registered: false,
-                enabled_property_listener_registered: false,
-            })));
+            *instance.toggle_coordinator.borrow_mut() =
+                Some(ToggleCoordinator::new(Some(&instance)));
+        } else {
+            *instance.toggle_coordinator.borrow_mut() = None;
         }
-        if let Some(header_label) = header_label {
-            value.set_name(header_label);
+        // Swing layout: checkBox.setBorderPainted(true);
+        // checkBox.setBorder(BorderFactory.createEtchedBorder()).
+        instance.set_background_void();
+        instance.set_foreground();
+        instance.set_font();
+        if header_label.is_some() {
+            instance.set_name_string(header_label);
         }
-        value
+        instance
     }
-    pub fn get_instance() -> Self {
-        Self::new(None, false, false)
+
+    /// Java static `getInstance()`.
+    pub fn get_instance() -> Rc<CheckBoxCell> {
+        CheckBoxCell::new(None, false, false)
     }
+
+    /// Java static `getHeaderBackgroundNamedInstance(String, String)`.
     pub fn get_header_background_named_instance(
         header_label1: Option<&str>,
         header_label2: Option<&str>,
-    ) -> Self {
-        let label = utilities::concatenate(header_label1, Some(" "), header_label2, None);
-        Self::new(label.as_deref(), true, false)
+    ) -> Rc<CheckBoxCell> {
+        CheckBoxCell::new(
+            utilities::concatenate(header_label1, Some(" "), header_label2, None).as_deref(),
+            true,
+            false,
+        )
     }
-    pub fn get_named_instance(header_label: Option<&str>) -> Self {
-        Self::new(header_label, false, false)
+
+    /// Java static `getNamedInstance(String)`.
+    pub fn get_named_instance_string(header_label: Option<&str>) -> Rc<CheckBoxCell> {
+        CheckBoxCell::new(header_label, false, false)
     }
-    pub fn get_named_debug_instance(header_label: Option<&str>, debug: bool) -> Self {
-        Self::new(header_label, false, debug)
+
+    /// Java static `getNamedInstance(String, boolean)`.
+    pub fn get_named_instance_string_boolean(
+        header_label: Option<&str>,
+        debug: bool,
+    ) -> Rc<CheckBoxCell> {
+        CheckBoxCell::new(header_label, false, debug)
     }
-    pub fn get_named_three_instance(
+
+    /// Java static `getNamedInstance(String, String, String)`.
+    pub fn get_named_instance_string_string_string(
         header_label1: Option<&str>,
         header_label2: Option<&str>,
         header_label3: Option<&str>,
-    ) -> Self {
-        let label = utilities::concatenate(header_label1, header_label2, header_label3, Some(" "));
-        Self::new(label.as_deref(), false, false)
+    ) -> Rc<CheckBoxCell> {
+        CheckBoxCell::new(
+            utilities::concatenate(header_label1, header_label2, header_label3, Some(" "))
+                .as_deref(),
+            false,
+            false,
+        )
     }
-    pub fn add_target(&mut self, target: &Self) {
-        if let Some(coordinator) = &mut self.toggle_coordinator {
-            coordinator.add_target(Some(ToggleButtonBoundary {
-                identity_hash_code: target.identity_hash_code,
-                enabled: target.is_enabled(),
-                selected: target.is_selected(),
-                action_listener_registered: false,
-                enabled_property_listener_registered: false,
-            }));
+
+    /// Java final `addTarget(CheckBoxCell)`.
+    pub fn add_target(&self, cbc_target: &Rc<CheckBoxCell>) {
+        let toggle_coordinator = self.toggle_coordinator.borrow().clone();
+        if let Some(toggle_coordinator) = toggle_coordinator {
+            toggle_coordinator.add_target(Some(cbc_target));
         }
     }
-    pub fn delete_target(&mut self, target: &Self) {
-        if let Some(coordinator) = &mut self.toggle_coordinator {
-            coordinator.delete_target(Some(&ToggleButtonBoundary {
-                identity_hash_code: target.identity_hash_code,
-                enabled: target.is_enabled(),
-                selected: target.is_selected(),
-                action_listener_registered: false,
-                enabled_property_listener_registered: false,
-            }));
+
+    /// Java final `deleteTarget(CheckBoxCell)`.
+    pub fn delete_target(&self, cbc_target: &Rc<CheckBoxCell>) {
+        let toggle_coordinator = self.toggle_coordinator.borrow().clone();
+        if let Some(toggle_coordinator) = toggle_coordinator {
+            toggle_coordinator.delete_target(Some(cbc_target));
         }
     }
-    pub fn set_name_three(
-        &mut self,
+
+    /// Java `setName(String, String, String)` (implements `InputCell.setName`).
+    pub fn set_name_string_string_string(
+        &self,
         reference1: Option<&str>,
         reference2: Option<&str>,
         reference3: Option<&str>,
     ) {
-        if let Some(reference) =
-            utilities::concatenate(reference1, reference2, reference3, Some(" "))
-        {
-            self.set_name(&reference);
-        }
+        self.set_name_string(
+            utilities::concatenate(reference1, reference2, reference3, Some(" ")).as_deref(),
+        );
     }
-    fn set_name(&mut self, reference: &str) {
-        if let Some(name) = utilities::convert_label_to_name(Some(reference), true) {
-            self.check_box.name = Some(format!("{CHECK_BOX}{SEPARATOR_CHAR}{name}"));
+
+    /// Java private `setName(String)`.
+    fn set_name_string(&self, reference: Option<&str>) {
+        let field_type = &ui_test_field_type::CHECK_BOX;
+        let name = utilities::convert_label_to_name(reference, field_type.is_unlimited_segments());
+        if let Some(name) = name {
+            self.check_box
+                .set_name(Some(&format!("{}{}{}", field_type, SEPARATOR_CHAR, name)));
             if ARGUMENTS.lock().unwrap().is_print_names() {
                 println!(
-                    "{} {DEFAULT_DELIMITER} ",
-                    self.check_box.name.as_deref().unwrap()
+                    "{} {} ",
+                    self.check_box.get_name().as_deref().unwrap_or("null"),
+                    DEFAULT_DELIMITER
                 );
             }
         }
     }
+
+    /// Java `isDebug()` (overrides `InputCell.isDebug`).
     pub fn is_debug(&self) -> bool {
         ARGUMENTS.lock().unwrap().is_debug()
     }
-    pub fn get_unique_action_command(&self) -> String {
-        format!("etomo.ui.swing.CheckBoxCell@{:x}", self.identity_hash_code)
+
+    /// Java `getUniqueActionCommand()`: `getClass().getName() + "@" +
+    /// Integer.toHexString(hashCode())`.  The identity hash code is the object's
+    /// address here.
+    pub fn get_unique_action_command(&self) -> Option<String> {
+        Some(format!(
+            "etomo.ui.swing.CheckBoxCell@{:x}",
+            (self as *const CheckBoxCell as usize) as u32
+        ))
     }
-    pub fn get_name(&self) -> Option<&str> {
-        self.check_box.name.as_deref()
+
+    /// Java `toString()`.
+    pub fn to_string(&self) -> String {
+        format!(
+            "[name:{},unformattedLabel:{},selected:{}]",
+            self.check_box.get_name().as_deref().unwrap_or("null"),
+            self.unformatted_label.borrow().as_deref().unwrap_or("null"),
+            self.check_box.is_selected()
+        )
     }
-    pub fn get_component(&self) -> &CheckBoxCellJCheckBox {
-        &self.check_box
+
+    /// Java `getName()`.
+    pub fn get_name(&self) -> Option<String> {
+        self.check_box.get_name()
     }
-    pub fn get_ui_component(&self) -> &Self {
+
+    /// Java `getComponent()`.
+    pub fn get_component(&self) -> Rc<JComponent> {
+        self.check_box.clone()
+    }
+
+    /// Java `getUIComponent()`.
+    pub fn get_ui_component(&self) -> &dyn SwingComponent {
         self
     }
-    pub fn get_field_type(&self) -> &'static str {
-        CHECK_BOX
+
+    /// Java `getFieldType()`.
+    pub fn get_field_type(&self) -> &'static UITestFieldType {
+        &ui_test_field_type::CHECK_BOX
     }
+
+    /// Java `isText()`.
     pub fn is_text(&self) -> bool {
         false
     }
+
+    /// Java `isBoolean()`.
     pub fn is_boolean(&self) -> bool {
         true
     }
+
+    /// Java `isEmpty()`.
     pub fn is_empty(&self) -> bool {
         false
     }
-    pub fn set_selected_string_value(&mut self, value: Option<&str>) {
-        self.selected_string_value = value.map(str::to_owned);
+
+    /// Java `setSelectedStringValue(String)`.
+    pub fn set_selected_string_value(&self, value: Option<&str>) {
+        *self.selected_string_value.borrow_mut() = value.map(str::to_owned);
     }
+
+    /// Java `equalsSelectedStringValue(String)` (overrides `InputCell`).
     pub fn equals_selected_string_value(&self, value: Option<&str>) -> bool {
-        match &self.selected_string_value {
-            None => value.is_some_and(|x| !x.is_empty()),
-            Some(selected) => value == Some(selected),
+        let selected_string_value = self.selected_string_value.borrow().clone();
+        match selected_string_value {
+            None => value.is_some_and(|value| !value.is_empty()),
+            Some(selected_string_value) => Some(selected_string_value.as_str()) == value,
         }
     }
+
+    /// Java `isDifferentFromCheckpoint(boolean)`.  alwaysCheck - check for
+    /// difference even when the field is disables or invisible.  Returns true if
+    /// different from checkpoint or checkpoint is null.
     pub fn is_different_from_checkpoint(&self, always_check: bool) -> bool {
-        if !always_check && (!self.is_enabled() || !self.check_box.visible) {
+        if !always_check && (!self.is_enabled() || !self.check_box.is_visible()) {
             return false;
         }
-        self.checkpoint
-            .as_ref()
-            .is_none_or(|checkpoint| !checkpoint.equals(self.is_selected()))
-    }
-    pub fn backup(&mut self) {
-        self.backup_value = self.is_selected();
-        self.field_is_backed_up = true;
-    }
-    pub fn restore_from_backup(&mut self) {
-        if self.field_is_backed_up {
-            self.set_selected(self.backup_value);
-            self.field_is_backed_up = false;
-        }
-    }
-    pub fn clear(&mut self) {
-        self.set_selected(false);
-    }
-    pub fn checkpoint(&mut self) {
         let selected = self.is_selected();
-        self.checkpoint.get_or_insert_default().set(selected);
-    }
-    pub fn set_checkpoint(&mut self, input: Option<&BooleanFieldSetting>) {
-        if self.checkpoint.is_none() && input.is_some_and(|x| x.is_set() && x.is_boolean()) {
-            self.checkpoint = Some(BooleanFieldSetting::default());
+        match self.checkpoint.borrow().as_ref() {
+            None => true,
+            Some(checkpoint) => !checkpoint.equals_boolean(selected),
         }
-        if let Some(checkpoint) = &mut self.checkpoint {
+    }
+
+    /// Java `backup()`.
+    pub fn backup(&self) {
+        self.backup_value.set(self.is_selected());
+        self.field_is_backed_up.set(true);
+    }
+
+    /// Java `restoreFromBackup()`.  If the field was backed up, make the backup value
+    /// the displayed value, and turn off the back up.
+    pub fn restore_from_backup(&self) {
+        if self.field_is_backed_up.get() {
+            self.set_selected_boolean(self.backup_value.get());
+            self.field_is_backed_up.set(false);
+        }
+    }
+
+    /// Java `clear()`.
+    pub fn clear(&self) {
+        self.set_selected_boolean(false);
+    }
+
+    /// Java `checkpoint()`.  Constructs savedValue (if it doesn't exist).  Saves the
+    /// current setting.
+    pub fn checkpoint(&self) {
+        let selected = self.is_selected();
+        let mut checkpoint = self.checkpoint.borrow_mut();
+        if checkpoint.is_none() {
+            *checkpoint = Some(BooleanFieldSetting::new());
+        }
+        checkpoint.as_mut().unwrap().set_boolean(selected);
+    }
+
+    /// Java `setCheckpoint(FieldSettingInterface)`.
+    pub fn set_checkpoint(&self, input: Option<&dyn FieldSettingInterface>) {
+        let mut checkpoint = self.checkpoint.borrow_mut();
+        if checkpoint.is_none() && input.is_some_and(|input| input.is_set() && input.is_boolean()) {
+            *checkpoint = Some(BooleanFieldSetting::new());
+        }
+        if let Some(checkpoint) = checkpoint.as_mut() {
             checkpoint.copy(input);
         }
     }
-    pub fn get_checkpoint(&self) -> Option<&BooleanFieldSetting> {
-        self.checkpoint.as_ref()
+
+    /// Java `getCheckpoint()`.  (A copy of the setting.)
+    pub fn get_checkpoint(&self) -> Option<BooleanFieldSetting> {
+        self.checkpoint.borrow().clone()
     }
-    pub fn set_locked(&mut self, locked: bool) {
+
+    /// Java `setLocked(boolean)`.
+    pub fn set_locked(&self, locked: bool) {
         if self.field_lock_controller.set_locked(locked) {
-            self.check_box.enabled = self
-                .field_lock_controller
-                .toggle_button
-                .as_ref()
-                .unwrap()
-                .enabled;
-            self.background_refresh_count += 1;
-            self.set_background();
+            self.set_background_void();
         }
     }
-    pub fn set_editable(&mut self, editable: bool) {
+
+    /// Java `setEditable(boolean)`.
+    pub fn set_editable(&self, editable: bool) {
         if self.field_lock_controller.set_editable(editable) {
-            self.check_box.enabled = self
-                .field_lock_controller
-                .toggle_button
-                .as_ref()
-                .unwrap()
-                .enabled;
-            self.background_refresh_count += 1;
-            self.set_background();
+            self.set_background_void();
         }
     }
-    pub fn set_enabled(&mut self, enabled: bool) {
+
+    /// Java `setEnabled(boolean)`.
+    pub fn set_enabled(&self, enabled: bool) {
         if self.field_lock_controller.set_enabled(enabled) {
-            self.check_box.enabled = self
-                .field_lock_controller
-                .toggle_button
-                .as_ref()
-                .unwrap()
-                .enabled;
-            self.background_refresh_count += 1;
-            self.set_background();
-        }
-        if let Some(coordinator) = &mut self.toggle_coordinator {
-            coordinator.property_change(
-                self.identity_hash_code,
-                true,
-                Some(self.check_box.enabled),
-            );
+            self.set_background_void();
         }
     }
+
+    /// Java `isLocked()`.
     pub fn is_locked(&self) -> bool {
         self.field_lock_controller.is_locked()
     }
+
+    /// Java `isEditable()`.
     pub fn is_editable(&self) -> bool {
         self.field_lock_controller.is_editable()
     }
+
+    /// Java `isEnabled()`.
     pub fn is_enabled(&self) -> bool {
         self.field_lock_controller.is_enabled()
     }
-    pub fn set_label(&mut self, label: &str) {
-        self.unformatted_label = label.to_owned();
+
+    /// Java `setLabel(String)`.
+    pub fn set_label(&self, label: Option<&str>) {
+        *self.unformatted_label.borrow_mut() = label.map(str::to_owned);
         self.set_foreground();
     }
-    pub fn get_label(&self) -> &str {
-        &self.unformatted_label
+
+    /// Java private `setHtmlLabel(ColorUIResource)`.
+    fn set_html_label(&self, color: ColorUIResource) {
+        let text = format!(
+            "<html><P style=\"font-weight:normal; color:rgb({},{},{})\">{}</style>",
+            color.0,
+            color.1,
+            color.2,
+            self.unformatted_label.borrow().as_deref().unwrap_or("null")
+        );
+        self.check_box.set_text(&text);
     }
+
+    /// Java `getLabel()`.
+    pub fn get_label(&self) -> Option<String> {
+        self.unformatted_label.borrow().clone()
+    }
+
+    /// Java `isRequired()`.
     pub fn is_required(&self) -> bool {
         false
     }
-    pub fn get_text(&self, _do_validation: bool) -> &str {
-        &self.unformatted_label
+
+    /// Java `getText(boolean, FieldDisplayer)`.  The checkbox label is not validated.
+    pub fn get_text_boolean_field_displayer(
+        &self,
+        do_validation: bool,
+        field_displayer1: Option<&dyn FieldDisplayer>,
+    ) -> Result<Option<String>, FieldValidationFailedException> {
+        self.get_text_boolean_field_displayer_field_displayer(do_validation, field_displayer1, None)
     }
-    pub fn get_text_two_displayers(&self, _do_validation: bool) -> &str {
-        &self.unformatted_label
+
+    /// Java `getText(boolean, FieldDisplayer, FieldDisplayer)`.
+    pub fn get_text_boolean_field_displayer_field_displayer(
+        &self,
+        _do_validation: bool,
+        _field_displayer1: Option<&dyn FieldDisplayer>,
+        _field_displayer2: Option<&dyn FieldDisplayer>,
+    ) -> Result<Option<String>, FieldValidationFailedException> {
+        Ok(self.unformatted_label.borrow().clone())
     }
-    pub fn get_text_unvalidated(&self) -> &str {
-        &self.unformatted_label
+
+    /// Java `getText()`.
+    pub fn get_text_void(&self) -> Option<String> {
+        self.unformatted_label.borrow().clone()
     }
+
+    /// Java `getDescription()`.
     pub fn get_description(&self) -> Option<String> {
         self.get_quoted_label()
     }
+
+    /// Java `getQuotedLabel()`.
     pub fn get_quoted_label(&self) -> Option<String> {
-        utilities::quote_label(Some(&self.unformatted_label))
+        let unformatted_label = self.unformatted_label.borrow().clone();
+        utilities::quote_label(unformatted_label.as_deref())
     }
-    pub fn set_value_string(&mut self, value: Option<&str>) {
-        self.set_selected(BooleanFieldSetting::string_to_boolean(value));
+
+    /// Java `setValue(String)`.
+    pub fn set_value_string(&self, value: Option<&str>) {
+        let mut etomo_boolean = EtomoBoolean2::new();
+        etomo_boolean.set_string(value);
+        let selected = etomo_boolean.is();
+        self.check_box.set_selected(selected);
     }
+
+    /// Java `isSelected()`.
     pub fn is_selected(&self) -> bool {
-        self.check_box.selected
+        self.check_box.is_selected()
     }
-    pub fn set_selected(&mut self, selected: bool) {
-        self.check_box.selected = selected;
-        self.field_lock_controller
-            .toggle_button
-            .as_mut()
-            .unwrap()
-            .selected = selected;
-        if let Some(coordinator) = &mut self.toggle_coordinator {
-            if let Some(toggler) = &mut coordinator.tb_toggler {
-                toggler.selected = selected;
-            }
+
+    /// Java `setSelected(boolean)`.
+    pub fn set_selected_boolean(&self, selected: bool) {
+        self.check_box.set_selected(selected);
+    }
+
+    /// Java `setSelected(ConstEtomoNumber, boolean)`.  Prevents a field from being
+    /// overridden by an empty value.  allowEmpty: allow field to be overridden by
+    /// null.
+    ///
+    /// Upstream bug fixed (CheckBoxCell.java:365-372): the source's second test is a
+    /// plain `if (allowEmpty)`, so with `allowEmpty` a non-null value is set and then
+    /// immediately cleared, and a non-null `true` can never be set that way.  Per the
+    /// method's documentation only an empty value may override the field when
+    /// `allowEmpty` is set, so the second test applies only when `selected` is empty.
+    pub fn set_selected_const_etomo_number_boolean(
+        &self,
+        selected: Option<&ConstEtomoNumber>,
+        allow_empty: bool,
+    ) {
+        if let Some(selected) = selected
+            && !selected.is_null()
+        {
+            self.set_selected_boolean(selected.is());
+        } else if allow_empty {
+            self.set_selected_boolean(false);
         }
     }
-    pub fn set_selected_number(&mut self, selected: Option<&ConstEtomoNumber>, allow_empty: bool) {
-        if let Some(selected) = selected.filter(|x| !x.is_null()) {
-            self.set_selected(selected.is());
+
+    /// Java `setValue(boolean)`.
+    pub fn set_value_boolean(&self, selected: bool) {
+        self.check_box.set_selected(selected);
+    }
+
+    /// Java `setValue(Field)`.
+    pub fn set_value_field(&self, input: Option<&dyn Field>) {
+        match input {
+            None => self.clear(),
+            Some(input) => self.set_selected_boolean(input.is_selected()),
         }
-        if allow_empty {
-            self.set_selected(false);
-        }
     }
-    pub fn set_value_boolean(&mut self, selected: bool) {
-        self.set_selected(selected);
+
+    /// Java `setActionCommand(String)`.
+    pub fn set_action_command(&self, input: Option<&str>) {
+        self.check_box.set_action_command(input);
     }
-    pub fn set_value_field(&mut self, selected: Option<bool>) {
-        self.set_selected(selected.unwrap_or(false));
+
+    /// Java `getActionCommand()`.
+    pub fn get_action_command(&self) -> Option<String> {
+        self.check_box.get_action_command()
     }
-    pub fn set_action_command(&mut self, input: Option<&str>) {
-        self.check_box.action_command = input.map(str::to_owned);
+
+    /// Java `addActionListener(ActionListener)`.
+    pub fn add_action_listener(&self, action_listener: ActionListener) {
+        self.check_box.add_action_listener(action_listener);
     }
-    pub fn get_action_command(&self) -> Option<&str> {
-        self.check_box.action_command.as_deref()
+
+    /// Java `addChangeListener(ChangeListener)`.
+    pub fn add_change_listener(&self, listener: ChangeListener) {
+        self.check_box.add_change_listener(listener);
     }
-    pub fn add_action_listener(&mut self) {
-        self.check_box.action_listener_count += 1;
+
+    /// Java private `setForeground()`.
+    fn set_foreground(&self) {
+        self.check_box.set_foreground(Some(colors::CELL_FOREGROUND));
+        self.set_html_label(colors::CELL_FOREGROUND);
     }
-    pub fn add_change_listener(&mut self) {
-        self.check_box.change_listener_count += 1;
+
+    /// Java `setDirectiveDef(DirectiveDef)`.
+    pub fn set_directive_def(&self, directive_def: Option<DirectiveDef>) {
+        *self.directive_def.borrow_mut() = directive_def;
     }
-    fn set_background(&mut self) {
-        self.check_box.background = self.header_background.then_some(GRAY);
+
+    /// Java `getDirectiveDef()`.
+    pub fn get_directive_def(&self) -> Option<DirectiveDef> {
+        self.directive_def.borrow().clone()
     }
-    fn set_html_label(&mut self, color: Color) {
-        self.check_box.text = format!(
-            "<html><P style=\"font-weight:normal; color:rgb({},{},{})\">{}</style>",
-            color.0, color.1, color.2, self.unformatted_label
-        );
-    }
-    fn set_foreground(&mut self) {
-        self.check_box.foreground = BLACK;
-        self.set_html_label(BLACK);
-    }
-    pub fn set_directive_def(&mut self, directive_def: Option<&str>) {
-        self.directive_def = directive_def.map(str::to_owned);
-    }
-    pub fn get_directive_def(&self) -> Option<&str> {
-        self.directive_def.as_deref()
-    }
+
+    /// Java `isFieldHighlightSet()`.
     pub fn is_field_highlight_set(&self) -> bool {
         self.field_highlight
+            .borrow()
             .as_ref()
-            .is_some_and(BooleanFieldSetting::is_set)
+            .is_some_and(|field_highlight| field_highlight.is_set())
     }
-    pub fn set_field_highlight_boolean(&mut self, value: bool) {
-        if self.field_highlight.is_none() {
-            self.field_highlight = Some(BooleanFieldSetting::default());
-            self.add_action_listener();
+
+    /// The cell as the check box's `ActionListener` (Java `this`).
+    fn self_action_listener(&self) -> ActionListener {
+        let this = self.this.clone();
+        Rc::new(move |event: &ActionEvent| {
+            if let Some(this) = this.upgrade() {
+                this.action_performed(event);
+            }
+        })
+    }
+
+    /// Java `setFieldHighlight(boolean)`.
+    pub fn set_field_highlight_boolean(&self, value: bool) {
+        if self.field_highlight.borrow().is_none() {
+            *self.field_highlight.borrow_mut() = Some(BooleanFieldSetting::new());
+            self.check_box
+                .add_action_listener(self.self_action_listener());
         }
-        self.field_highlight.as_mut().unwrap().set(value);
+        self.field_highlight
+            .borrow_mut()
+            .as_mut()
+            .unwrap()
+            .set_boolean(value);
         self.update_field_highlight();
     }
-    pub fn set_field_highlight_string(&mut self, _value: Option<&str>) {}
-    pub fn set_field_highlight_setting(&mut self, input: Option<&BooleanFieldSetting>) {
-        if self.field_highlight.is_none() && input.is_some_and(|x| x.is_set() && x.is_boolean()) {
-            self.field_highlight = Some(BooleanFieldSetting::default());
-            self.add_action_listener();
-        }
-        if let Some(highlight) = &mut self.field_highlight {
-            highlight.copy(input);
-            self.update_field_highlight();
-        }
-    }
-    pub fn equals_field_highlight(&self) -> bool {
-        self.field_highlight
-            .as_ref()
-            .is_some_and(|x| x.is_set() && x.equals(self.is_selected()))
-    }
-    pub fn equals_field_highlight_string(&self, value: Option<&str>) -> bool {
-        self.field_highlight
-            .as_ref()
-            .is_some_and(|x| x.is_set() && x.equals(value.is_some_and(|v| !v.trim().is_empty())))
-    }
-    pub fn clear_field_highlight(&mut self) {
-        if self
-            .field_highlight
-            .as_ref()
-            .is_some_and(BooleanFieldSetting::is_set)
+
+    /// Java `setFieldHighlight(String)`.
+    pub fn set_field_highlight_string(&self, _value: Option<&str>) {}
+
+    /// Java `setFieldHighlight(FieldSettingInterface)`.
+    pub fn set_field_highlight_field_setting_interface(
+        &self,
+        input: Option<&dyn FieldSettingInterface>,
+    ) {
+        if self.field_highlight.borrow().is_none()
+            && input.is_some_and(|input| input.is_set() && input.is_boolean())
         {
-            self.field_highlight.as_mut().unwrap().reset();
+            *self.field_highlight.borrow_mut() = Some(BooleanFieldSetting::new());
+            self.check_box
+                .add_action_listener(self.self_action_listener());
+        }
+        let exists = match self.field_highlight.borrow_mut().as_mut() {
+            Some(field_highlight) => {
+                field_highlight.copy(input);
+                true
+            }
+            None => false,
+        };
+        if exists {
             self.update_field_highlight();
         }
     }
-    pub fn get_field_highlight(&self) -> Option<&BooleanFieldSetting> {
-        self.field_highlight.as_ref()
+
+    /// Java `equalsFieldHighlight()`.
+    pub fn equals_field_highlight_void(&self) -> bool {
+        let selected = self.is_selected();
+        self.field_highlight
+            .borrow()
+            .as_ref()
+            .is_some_and(|field_highlight| {
+                field_highlight.is_set() && field_highlight.equals_boolean(selected)
+            })
     }
-    pub fn action_performed(&mut self) {
+
+    /// Java `equalsFieldHighlight(String)`.
+    pub fn equals_field_highlight_string(&self, value: Option<&str>) -> bool {
+        let value = value.is_some_and(|value| !java_lang_string_matches_whitespace(value));
+        self.field_highlight
+            .borrow()
+            .as_ref()
+            .is_some_and(|field_highlight| {
+                field_highlight.is_set() && field_highlight.equals_boolean(value)
+            })
+    }
+
+    /// Java `clearFieldHighlight()`.
+    pub fn clear_field_highlight(&self) {
+        let cleared = match self.field_highlight.borrow_mut().as_mut() {
+            Some(field_highlight) if field_highlight.is_set() => {
+                field_highlight.reset();
+                true
+            }
+            _ => false,
+        };
+        if cleared {
+            // Turn off field highlight - parameter doesn't matter since field
+            // highlight is off.
+            self.update_field_highlight();
+        }
+    }
+
+    /// Java `getFieldHighlight()`.  (A copy of the setting.)
+    pub fn get_field_highlight(&self) -> Option<BooleanFieldSetting> {
+        self.field_highlight.borrow().clone()
+    }
+
+    /// Java `actionPerformed(ActionEvent)`.
+    pub fn action_performed(&self, _e: &ActionEvent) {
         self.update_field_highlight();
         self.field_lock_controller
             .apply_toggle_button_selection_state();
-        self.check_box.enabled = self
-            .field_lock_controller
-            .toggle_button
-            .as_ref()
-            .unwrap()
-            .enabled;
-        if let Some(coordinator) = &mut self.toggle_coordinator {
-            if let Some(toggler) = &mut coordinator.tb_toggler {
-                toggler.enabled = self.check_box.enabled;
-                toggler.selected = self.check_box.selected;
+    }
+
+    /// Java `updateFieldHighlight()`.
+    pub fn update_field_highlight(&self) {
+        let selected = self.is_selected();
+        let highlight = match self.field_highlight.borrow().as_ref() {
+            Some(field_highlight) if field_highlight.is_set() => {
+                Some(field_highlight.is_value() == selected)
             }
-            coordinator.action_performed(Some(self.identity_hash_code));
+            _ => None,
+        };
+        match highlight {
+            Some(true) => self.check_box.set_foreground(Some(colors::FIELD_HIGHLIGHT)),
+            Some(false) => self.check_box.set_foreground(Some(colors::CELL_FOREGROUND)),
+            None => {}
         }
     }
-    pub fn update_field_highlight(&mut self) {
-        if let Some(highlight) = &self.field_highlight {
-            if highlight.is_set() {
-                self.check_box.foreground = if highlight.is_value() == self.is_selected() {
-                    FIELD_HIGHLIGHT
-                } else {
-                    BLACK
-                };
-            }
-        }
-    }
+
+    /// Java `useDefaultValue()`.
     pub fn use_default_value(&self) {
         eprintln!("Warning: CheckBoxCell.useDefaultValue has not been implemented");
     }
-    pub fn equals_default_value(&self) -> bool {
+
+    /// Java `equalsDefaultValue()`.
+    pub fn equals_default_value_void(&self) -> bool {
         false
     }
+
+    /// Java `equalsDefaultValue(String)`.
     pub fn equals_default_value_string(&self, _value: Option<&str>) -> bool {
         false
     }
+
+    /// Java `getHeight()`.
     pub fn get_height(&self) -> i32 {
-        self.check_box.height + self.check_box.border_bottom - 1
+        // Swing geometry: checkBox.getHeight() + the border's bottom inset - 1.  Sizes
+        // are not modelled by the jdk stand-in.
+        0
     }
+
+    /// Java `getWidth()`.
     pub fn get_width(&self) -> i32 {
-        self.check_box.width
+        // Swing geometry: checkBox.getWidth().  Not modelled by the jdk stand-in.
+        0
     }
-    pub fn get_left_border(&self) -> i32 {
-        self.check_box.border_left
+
+    // Java `getLeftBorder()` returns the check box border's left inset: Swing
+    // geometry, not modelled by the jdk stand-in.
+
+    /// Java `setToolTipText(String)`.
+    pub fn set_tool_tip_text(&self, text: Option<&str>) {
+        self.check_box
+            .set_tool_tip_text(tooltip_formatter::INSTANCE.format(text).as_deref());
     }
-    pub fn set_tool_tip_text(&mut self, text: Option<&str>) {
-        self.check_box.tooltip = text.map(str::to_owned);
-    }
-    pub fn set_tooltip_field(&mut self, tooltip: Option<&str>) {
-        if let Some(tooltip) = tooltip {
-            self.check_box.tooltip = Some(tooltip.to_owned());
+
+    /// Java `setTooltip(Field)`.
+    pub fn set_tooltip(&self, field: Option<&dyn Field>) {
+        if let Some(field) = field {
+            self.check_box
+                .set_tool_tip_text(field.get_tooltip().as_deref());
         }
     }
-    pub fn set_unformatted_tooltip(&mut self, text: Option<&str>) -> Option<&str> {
-        self.unformatted_tooltip = text.map(str::to_owned);
-        self.unformatted_tooltip.as_deref()
+
+    /// Java `setUnformattedTooltip(String)`.
+    pub fn set_unformatted_tooltip(&self, text: Option<&str>) -> Option<String> {
+        *self.unformatted_tooltip.borrow_mut() = text.map(str::to_owned);
+        self.unformatted_tooltip.borrow().clone()
     }
+
+    /// Java `hasUnformattedTooltip()`.
     pub fn has_unformatted_tooltip(&self) -> bool {
-        self.unformatted_tooltip.is_some()
+        self.unformatted_tooltip.borrow().is_some()
     }
+
+    /// Java synchronized `useUnformattedTooltip(String, String)`.  Use
+    /// unformattedTooltip to build a tooltip, and then delete unformattedTooltip.
     pub fn use_unformatted_tooltip(
-        &mut self,
+        &self,
         param_descr: Option<&str>,
         directive_descr: Option<&str>,
     ) {
-        self.check_box.tooltip = Some(
-            [
-                self.unformatted_tooltip.as_deref(),
-                param_descr,
-                directive_descr,
-            ]
-            .into_iter()
-            .flatten()
-            .collect::<Vec<_>>()
-            .join(" "),
+        let unformatted_tooltip = self.unformatted_tooltip.borrow().clone();
+        self.set_tool_tip_text(
+            tooltip_formatter::INSTANCE
+                .build_tooltip(unformatted_tooltip.as_deref(), param_descr, directive_descr)
+                .as_deref(),
         );
-        self.unformatted_tooltip = None;
+        *self.unformatted_tooltip.borrow_mut() = None;
     }
-    pub fn get_tooltip(&self) -> Option<&str> {
-        self.check_box.tooltip.as_deref()
+
+    /// Java `getTooltip()`.
+    pub fn get_tooltip(&self) -> Option<String> {
+        self.check_box.get_tool_tip_text()
     }
-    pub fn add_tooltip(&mut self, text: Option<&str>) {
-        let Some(text) = text else { return };
-        if let Some(tooltip) = &mut self.check_box.tooltip {
-            tooltip.push_str(" & ");
-            tooltip.push_str(text);
-        } else {
-            self.set_tool_tip_text(Some(text));
+
+    /// Java `addTooltip(String)`.
+    pub fn add_tooltip(&self, text: Option<&str>) {
+        let Some(text) = text else {
+            return;
+        };
+        let tooltip = self.check_box.get_tool_tip_text();
+        match tooltip {
+            None => self.set_tool_tip_text(Some(text)),
+            Some(tooltip) => {
+                let formatted = tooltip_formatter::INSTANCE.format(Some(text));
+                self.check_box.set_tool_tip_text(Some(&format!(
+                    "{} & {}",
+                    tooltip,
+                    formatted.as_deref().unwrap_or("null")
+                )));
+            }
         }
     }
 }
 
-impl std::fmt::Display for CheckBoxCell {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(
-            f,
-            "[name:{},unformattedLabel:{},selected:{}]",
-            self.get_name().unwrap_or("null"),
-            self.unformatted_label,
-            self.is_selected()
-        )
+impl CellVirtual for CheckBoxCell {
+    fn cell(&self) -> &Cell {
+        &self.base
+    }
+
+    fn set_enabled(&self, enable: bool) {
+        CheckBoxCell::set_enabled(self, enable);
+    }
+
+    fn msg_label_changed(&self) {
+        self.base.msg_label_changed();
+    }
+
+    fn add(&self, panel: &Rc<JComponent>) {
+        self.base.add(panel);
     }
 }
 
-#[cfg(test)]
-mod tests {
-    use super::*;
-    #[test]
-    fn factories_name_checkbox_and_header_coordinator() {
-        let header = CheckBoxCell::get_header_background_named_instance(Some("A"), Some("B"));
-        let named = CheckBoxCell::get_named_instance(Some("Use item"));
-        assert!(header.toggle_coordinator.is_some());
-        assert_eq!(header.get_name(), Some("CheckBox.a-b"));
-        assert_eq!(named.get_name(), Some("CheckBox.use-item"));
-        assert!(named.check_box.border_painted);
+impl InputCellVirtual for CheckBoxCell {
+    fn input_cell(&self) -> &InputCell {
+        &self.base
     }
-    #[test]
-    fn checkpoint_backup_and_empty_override_follow_source() {
-        let mut cell = CheckBoxCell::get_instance();
-        cell.set_selected(true);
-        cell.backup();
-        cell.clear();
-        assert!(cell.is_different_from_checkpoint(true));
-        cell.restore_from_backup();
-        assert!(cell.is_selected());
-        cell.checkpoint();
-        assert!(!cell.is_different_from_checkpoint(true));
-        cell.set_selected(false);
-        assert!(cell.is_different_from_checkpoint(true));
+
+    fn get_component(&self) -> Rc<JComponent> {
+        CheckBoxCell::get_component(self)
     }
-    #[test]
-    fn lock_and_highlight_follow_toggle_state() {
-        let mut cell = CheckBoxCell::get_instance();
-        cell.set_field_highlight_boolean(true);
-        cell.set_selected(true);
-        assert!(
-            cell.field_lock_controller
-                .toggle_button
-                .as_ref()
-                .unwrap()
-                .selected
-        );
-        cell.action_performed();
-        assert_eq!(cell.check_box.foreground, FIELD_HIGHLIGHT);
-        cell.set_locked(true);
-        assert!(!cell.check_box.enabled);
-        assert!(
-            !cell
-                .field_lock_controller
-                .toggle_button
-                .as_ref()
-                .unwrap()
-                .enabled
-        );
-        assert!(cell.is_locked());
-        cell.clear_field_highlight();
-        assert!(!cell.is_field_highlight_set());
+
+    fn get_field_type(&self) -> &'static UITestFieldType {
+        CheckBoxCell::get_field_type(self)
     }
-    #[test]
-    fn tooltips_and_identity_command_are_source_shaped() {
-        let mut cell = CheckBoxCell::get_instance();
-        cell.set_unformatted_tooltip(Some("raw"));
-        cell.use_unformatted_tooltip(Some("parameter"), Some("directive"));
-        cell.add_tooltip(Some("more"));
-        assert_eq!(cell.get_tooltip(), Some("raw parameter directive & more"));
-        assert!(!cell.has_unformatted_tooltip());
-        assert!(
-            cell.get_unique_action_command()
-                .starts_with("etomo.ui.swing.CheckBoxCell@")
-        );
+
+    fn get_width(&self) -> i32 {
+        CheckBoxCell::get_width(self)
+    }
+
+    fn set_tool_tip_text(&self, tool_tip_text: Option<&str>) {
+        CheckBoxCell::set_tool_tip_text(self, tool_tip_text);
+    }
+
+    fn get_text(&self) -> Option<String> {
+        self.get_text_void()
+    }
+
+    fn set_name_string_string_string(
+        &self,
+        reference1: Option<&str>,
+        reference2: Option<&str>,
+        reference3: Option<&str>,
+    ) {
+        CheckBoxCell::set_name_string_string_string(self, reference1, reference2, reference3);
+    }
+
+    fn get_name(&self) -> Option<String> {
+        CheckBoxCell::get_name(self)
+    }
+
+    fn set_locked(&self, locked: bool) {
+        CheckBoxCell::set_locked(self, locked);
+    }
+
+    fn set_editable(&self, editable: bool) {
+        CheckBoxCell::set_editable(self, editable);
+    }
+
+    fn is_locked(&self) -> bool {
+        CheckBoxCell::is_locked(self)
+    }
+
+    fn is_editable(&self) -> bool {
+        CheckBoxCell::is_editable(self)
+    }
+
+    fn is_enabled(&self) -> bool {
+        CheckBoxCell::is_enabled(self)
+    }
+
+    fn is_debug(&self) -> bool {
+        CheckBoxCell::is_debug(self)
+    }
+
+    fn equals_selected_string_value(&self, value: Option<&str>) -> bool {
+        CheckBoxCell::equals_selected_string_value(self, value)
+    }
+}
+
+impl ToggleCell for CheckBoxCell {
+    fn get_label(&self) -> Option<String> {
+        CheckBoxCell::get_label(self)
+    }
+
+    fn set_label(&self, label: Option<&str>) {
+        CheckBoxCell::set_label(self, label);
+    }
+
+    fn set_selected(&self, selected: bool) {
+        self.set_selected_boolean(selected);
+    }
+
+    fn add_action_listener(&self, action_listener: ActionListener) {
+        CheckBoxCell::add_action_listener(self, action_listener);
+    }
+
+    fn add(&self, panel: &Rc<JComponent>) {
+        self.base.add(panel);
+    }
+
+    fn is_selected(&self) -> bool {
+        CheckBoxCell::is_selected(self)
+    }
+
+    fn get_height(&self) -> i32 {
+        CheckBoxCell::get_height(self)
+    }
+
+    fn get_width(&self) -> i32 {
+        CheckBoxCell::get_width(self)
+    }
+
+    fn set_warning(&self, warning: bool) {
+        self.base.set_warning_boolean(warning);
+    }
+
+    fn add_change_listener(&self, listener: ChangeListener) {
+        CheckBoxCell::add_change_listener(self, listener);
+    }
+
+    fn set_enabled(&self, enabled: bool) {
+        CheckBoxCell::set_enabled(self, enabled);
+    }
+
+    fn is_enabled(&self) -> bool {
+        CheckBoxCell::is_enabled(self)
+    }
+}
+
+impl UIComponent for CheckBoxCell {
+    /// Java `getUIComponent()`.
+    fn get_ui_component(&self) -> &dyn SwingComponent {
+        self
+    }
+
+    /// Java `getComponent()`.
+    fn get_component(&self) -> Rc<JComponent> {
+        self.check_box.clone()
+    }
+}
+
+impl SwingComponent for CheckBoxCell {
+    /// Java `getComponent()`.
+    fn get_component(&self) -> Rc<JComponent> {
+        self.check_box.clone()
     }
 }

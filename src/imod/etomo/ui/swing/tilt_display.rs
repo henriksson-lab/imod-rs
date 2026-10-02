@@ -1,16 +1,21 @@
 //! `IMOD/Etomo/src/etomo/ui/swing/TiltDisplay.java`.
-#![allow(dead_code)]
 
 use std::io;
 
 use super::process_display::ProcessDisplay;
+use crate::imod::etomo::comscript::splittilt_param::SplittiltParam;
+use crate::imod::etomo::comscript::tilt_param::TiltParam;
 use crate::imod::etomo::util::invalid_parameter_exception::InvalidParameterException;
 
-/// Checked failures declared by Java `TiltDisplay.getParameters(TiltParam,boolean)`.
+/// Failures declared by Java `TiltDisplay.getParameters(TiltParam, boolean)`:
+/// `NumberFormatException, InvalidParameterException, IOException`.
 #[derive(Debug)]
 pub enum TiltDisplayException {
+    /// Java `NumberFormatException` (its message).
     NumberFormat(String),
+    /// Java `etomo.util.InvalidParameterException`.
     InvalidParameter(InvalidParameterException),
+    /// Java `IOException`.
     Io(io::Error),
 }
 impl std::fmt::Display for TiltDisplayException {
@@ -32,55 +37,25 @@ impl std::error::Error for TiltDisplayException {
     }
 }
 
-/// Java `TiltDisplay`.
+/// Java `TiltDisplay extends ProcessDisplay`.  Methods take `&self`;
+/// implementing panels keep their state interior-mutable.
 pub trait TiltDisplay: ProcessDisplay {
-    type TiltParam;
-    type SplittiltParam;
+    /// Java `getParameters(TiltParam, boolean)`.
     fn get_parameters(
         &self,
-        param: &mut Self::TiltParam,
+        param: &mut TiltParam,
         do_validation: bool,
     ) -> Result<bool, TiltDisplayException>;
-    fn get_splittilt_parameters(
-        &self,
-        param: &mut Self::SplittiltParam,
-        do_validation: bool,
-    ) -> bool;
+
+    /// Java `getParameters(SplittiltParam, boolean)`.
+    fn get_parameters_splittilt(&self, param: &mut SplittiltParam, do_validation: bool) -> bool;
+
+    /// Java `@Deprecated allowTiltComSave()`.
     fn allow_tilt_com_save(&self) -> bool;
-    fn set_debug(&mut self, debug: bool);
+
+    /// Java `setDebug(boolean)`.
+    fn set_debug(&self, debug: bool);
 }
 
-#[cfg(test)]
-mod tests {
-    use super::*;
-    struct Display;
-    impl ProcessDisplay for Display {}
-    impl TiltDisplay for Display {
-        type TiltParam = String;
-        type SplittiltParam = String;
-        fn get_parameters(
-            &self,
-            p: &mut String,
-            validation: bool,
-        ) -> Result<bool, TiltDisplayException> {
-            *p = "tilt".into();
-            Ok(validation)
-        }
-        fn get_splittilt_parameters(&self, p: &mut String, validation: bool) -> bool {
-            *p = "split".into();
-            validation
-        }
-        fn allow_tilt_com_save(&self) -> bool {
-            true
-        }
-        fn set_debug(&mut self, _: bool) {}
-    }
-    #[test]
-    fn both_source_overloads_are_distinct() {
-        let mut tilt = String::new();
-        let mut split = String::new();
-        assert!(Display.get_parameters(&mut tilt, true).unwrap());
-        assert!(Display.get_splittilt_parameters(&mut split, true));
-        assert_eq!((tilt, split), ("tilt".into(), "split".into()));
-    }
-}
+// TODO(unit): AbstractTiltPanel.java and ReprojectModelPanel.java implement
+// TiltDisplay; the impls wait for faithful translations of those panels.

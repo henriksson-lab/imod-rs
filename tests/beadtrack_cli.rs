@@ -14,6 +14,15 @@
 //! (including the degenerate-fit NaN position that makes native fail reading
 //! the image, reached by `base` and `elong`).
 //!
+//! `skipedge` is the regression case for `BUGS.md`, "`beadtrack`: `mResMean`
+//! overrun by the view sequence number": `SkipViews 1-10` makes the zero-tilt
+//! view the first tracked one, so both sequences of a pass visit it and the
+//! view sequence number passes `limResid`; with two local areas and two rounds
+//! `tiltAli` is then handed the row past the end (without the fix our build
+//! panics in `tiltali.rs`).  Native writes and reads past its allocation there
+//! but, on this input, gives the same output as the defined behaviour in three
+//! runs out of three, so its golden is native's.
+//!
 //! **Defined, not native, goldens** (`BUGS.md` "`beadtrack` `beadtrack.cpp`",
 //! fixed in translation 2026-09-26): `base` and `elong` (a NaN position is in
 //! no piece, so the run completes where native fails reading the image, exit

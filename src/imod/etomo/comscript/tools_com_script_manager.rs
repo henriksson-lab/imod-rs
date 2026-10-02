@@ -1,162 +1,228 @@
 //! `IMOD/Etomo/src/etomo/comscript/ToolsComScriptManager.java`.
 //!
-//! `ComScript`, `ComScriptUtil`, `WarpVolParam`, and `AlignFramesParam` are
-//! declared in source units that have not yet crossed the translation frontier.
-//! Their fields retain Java's initial `null` representation rather than inventing a
-//! second comscript parser or parameter model in this coordinator.
-#![allow(dead_code)]
+//! Description: Stores and manages comscripts (for the Tools interface).
+//!
+//! **Java `null` axis.**  The align-frames members pass a null `AxisID` to
+//! `ComScriptUtil`; the Tools interface is single axis and the translated
+//! `ComScriptUtil` takes an axis by value, so they pass `AxisID::Only`.
 
-use std::convert::Infallible;
+use std::cell::RefCell;
 use std::path::Path;
-use std::sync::Mutex;
 
-use crate::imod::etomo::comscript::com_script_file::ComScriptFile;
+use crate::imod::etomo::util::event_queue::ReentrantLock;
+
+use crate::imod::etomo::comscript::align_frames_param::{self, AlignFramesParam};
+use crate::imod::etomo::comscript::com_script::ComScript;
+use crate::imod::etomo::comscript::com_script_util::ComScriptUtil;
+use crate::imod::etomo::comscript::warp_vol_param::{self, WarpVolParam};
 use crate::imod::etomo::tools_manager::ToolsManager;
 use crate::imod::etomo::r#type::axis_id::AxisID;
+use crate::imod::etomo::r#type::file_type;
 
-/// Java final `ToolsComScriptManager`.
+/// Java `public final class ToolsComScriptManager`.
 pub struct ToolsComScriptManager {
-    /// Java final `manager`.
+    /// Java private final `manager`.
     manager: &'static ToolsManager,
-    /// Java `scriptFlatten`, initially null.
-    script_flatten: Mutex<Option<Infallible>>,
-    /// Java `scriptAlignFramesInput`, initially null.
-    script_align_frames_input: Mutex<Option<Infallible>>,
-    /// Java `scriptAlignFramesOutput`, initially null.
-    script_align_frames_output: Mutex<Option<Infallible>>,
-    /// Typed COM documents used by the translated manager workflow.  The
-    /// parameter objects can be layered on these documents as they land.
-    flatten_document: Mutex<Option<ComScriptFile>>,
-    align_frames_input_document: Mutex<Option<ComScriptFile>>,
-    align_frames_output_document: Mutex<Option<ComScriptFile>>,
+    /// Java private `scriptFlatten`, initially null.  A `ComScript` holds
+    /// `Rc`s and is not `Send`; it is only reached while `lock` is held.
+    script_flatten: RefCell<Option<ComScript>>,
+    /// Java private `scriptAlignFramesInput`, initially null.
+    script_align_frames_input: RefCell<Option<ComScript>>,
+    /// Java private `scriptAlignFramesOutput`, initially null.
+    script_align_frames_output: RefCell<Option<ComScript>>,
+    /// Java's unguarded field access, made exclusive: the same re-entrant lock the
+    /// reconstruction `ComScriptManager` is reached through.
+    lock: ReentrantLock,
 }
+
+// SAFETY: the three `ComScript` cells (the only non-`Send` state) are touched
+// only while the calling thread holds `lock`, so no two threads reach their
+// `Rc`s at once, and every `Rc` a script creates stays inside it.
+unsafe impl Send for ToolsComScriptManager {}
+unsafe impl Sync for ToolsComScriptManager {}
 
 impl ToolsComScriptManager {
     /// Java `ToolsComScriptManager(ToolsManager)`.
     pub fn new(manager: &'static ToolsManager) -> Self {
         Self {
             manager,
-            script_flatten: Mutex::new(None),
-            script_align_frames_input: Mutex::new(None),
-            script_align_frames_output: Mutex::new(None),
-            flatten_document: Mutex::new(None),
-            align_frames_input_document: Mutex::new(None),
-            align_frames_output_document: Mutex::new(None),
+            script_flatten: RefCell::new(None),
+            script_align_frames_input: RefCell::new(None),
+            script_align_frames_output: RefCell::new(None),
+            lock: ReentrantLock::new(),
         }
     }
 
     /// Java `loadFlatten(AxisID)`.
     pub fn load_flatten(&self, axis_id: AxisID) {
-        let _ = (self.manager, axis_id);
-        // TODO(unit): ComScriptUtil.java and ComScript.java.
-        *self.script_flatten.lock().unwrap() = None;
+        let _lock = self.lock.lock();
+        let script = ComScriptUtil::load_com_script_file_type(
+            self.manager,
+            &file_type::CLASS.flatten_tool_comscript,
+            axis_id,
+            true,
+            false,
+            false,
+        );
+        *self.script_flatten.borrow_mut() = script;
     }
 
     /// Java `loadAlignFramesInput(File, boolean)`.
     pub fn load_align_frames_input(&self, com_file: &Path, required: bool) -> bool {
-        let _ = (self.manager, required);
-        *self.align_frames_input_document.lock().unwrap() = ComScriptFile::load(com_file).ok();
-        *self.script_align_frames_input.lock().unwrap() = None;
-        self.align_frames_input_document.lock().unwrap().is_some()
+        let _lock = self.lock.lock();
+        let parent = com_file
+            .parent()
+            .map(|parent| parent.to_string_lossy().into_owned());
+        let name = com_file
+            .file_name()
+            .map(|name| name.to_string_lossy().into_owned());
+        let script = ComScriptUtil::load_com_script(
+            self.manager,
+            parent.as_deref(),
+            name.as_deref(),
+            AxisID::Only,
+            true,
+            required,
+            false,
+            false,
+        );
+        *self.script_align_frames_input.borrow_mut() = script;
+        self.script_align_frames_input.borrow().is_some()
     }
+
+    // public boolean loadAlignFramesOutput(File comFile, boolean required) {
+    // scriptAlignFramesOutput = ComScriptUtil.loadComScript(manager,
+    // comFile.getAbsolutePath(), null, true, required, false, false);
+    // return scriptAlignFramesOutput != null;
+    // }
 
     /// Java `loadAlignFramesOutput(File, boolean)`.
     pub fn load_align_frames_output(&self, com_file: &Path, required: bool) -> bool {
-        let _ = (self.manager, required);
-        *self.align_frames_output_document.lock().unwrap() = ComScriptFile::load(com_file).ok();
-        *self.script_align_frames_output.lock().unwrap() = None;
-        self.align_frames_output_document.lock().unwrap().is_some()
+        let _lock = self.lock.lock();
+        let parent = com_file
+            .parent()
+            .map(|parent| parent.to_string_lossy().into_owned());
+        let name = com_file
+            .file_name()
+            .map(|name| name.to_string_lossy().into_owned());
+        let script = ComScriptUtil::load_com_script(
+            self.manager,
+            parent.as_deref(),
+            name.as_deref(),
+            AxisID::Only,
+            true,
+            required,
+            false,
+            false,
+        );
+        *self.script_align_frames_output.borrow_mut() = script;
+        self.script_align_frames_output.borrow().is_some()
     }
 
     /// Java `resetAlignFramesOutput()`.
     pub fn reset_align_frames_output(&self) {
-        *self.script_align_frames_output.lock().unwrap() = None;
-        *self.align_frames_output_document.lock().unwrap() = None;
-    }
-
-    pub fn align_frames_input_document(&self) -> Option<ComScriptFile> {
-        self.align_frames_input_document.lock().unwrap().clone()
-    }
-    pub fn align_frames_output_document(&self) -> Option<ComScriptFile> {
-        self.align_frames_output_document.lock().unwrap().clone()
+        let _lock = self.lock.lock();
+        *self.script_align_frames_output.borrow_mut() = None;
     }
 
     /// Java `isWarpVolParamInFlatten(AxisID)`.
+    ///
+    /// Fixed in translation: `loadComScript` returns null when the com file cannot
+    /// be parsed, and Java's `.isCommandLoaded()` then throws NullPointerException;
+    /// a script that did not load answers false (as in `ComScriptManager`).
     pub fn is_warp_vol_param_in_flatten(&self, axis_id: AxisID) -> bool {
-        let _ = (self.manager, axis_id);
-        // TODO(unit): ComScriptUtil.loadComScript and ComScript.isCommandLoaded.
-        false
+        match ComScriptUtil::load_com_script_file_type(
+            self.manager,
+            &file_type::CLASS.flatten_tool_comscript,
+            axis_id,
+            true,
+            false,
+            false,
+        ) {
+            None => false,
+            Some(com_script) => com_script.is_command_loaded(),
+        }
     }
 
     /// Java `getWarpVolParamFromFlatten(AxisID)`.
-    pub fn get_warp_vol_param_from_flatten(&self, axis_id: AxisID) -> Option<Infallible> {
-        let _ = (
+    pub fn get_warp_vol_param_from_flatten(&self, axis_id: AxisID) -> WarpVolParam {
+        // Initialize a WarpVolParam object from the com script command
+        // object
+        let _lock = self.lock.lock();
+        let mut param = WarpVolParam::new(self.manager, axis_id, Some(warp_vol_param::Mode::Tools));
+        ComScriptUtil::initialize(
             self.manager,
+            &mut param,
+            self.script_flatten.borrow_mut().as_mut(),
+            warp_vol_param::COMMAND,
             axis_id,
-            self.script_flatten.lock().unwrap().is_some(),
+            false,
+            false,
+            true,
         );
-        // TODO(unit): WarpVolParam.java and ComScriptUtil.initialize.
-        None
+        param
     }
 
     /// Java `getAlignFramesInputParam()`.
-    pub fn get_align_frames_input_param(&self) -> Option<Infallible> {
-        let _ = (
+    pub fn get_align_frames_input_param(&self) -> AlignFramesParam {
+        let _lock = self.lock.lock();
+        let mut param = AlignFramesParam::new(self.manager, None);
+        ComScriptUtil::initialize(
             self.manager,
-            self.script_align_frames_input.lock().unwrap().is_some(),
+            &mut param,
+            self.script_align_frames_input.borrow_mut().as_mut(),
+            align_frames_param::COMMAND,
+            AxisID::Only,
+            false,
+            false,
+            true,
         );
-        // TODO(unit): AlignFramesParam.java and ComScriptUtil.initialize.
-        None
+        param
     }
 
     /// Java `getAlignFramesOutputParam(String)`.
-    pub fn get_align_frames_output_param(&self, com_filename: Option<&str>) -> Option<Infallible> {
-        let _ = (
+    pub fn get_align_frames_output_param(&self, com_filename: Option<&str>) -> AlignFramesParam {
+        let _lock = self.lock.lock();
+        let mut param = AlignFramesParam::new(self.manager, com_filename);
+        ComScriptUtil::initialize(
             self.manager,
-            com_filename,
-            self.script_align_frames_output.lock().unwrap().is_some(),
+            &mut param,
+            self.script_align_frames_output.borrow_mut().as_mut(),
+            align_frames_param::COMMAND,
+            AxisID::Only,
+            false,
+            false,
+            true,
         );
-        // TODO(unit): AlignFramesParam.java and ComScriptUtil.initialize.
-        None
+        param
     }
 
     /// Java `saveFlatten(WarpVolParam, AxisID)`.
-    pub fn save_flatten(&self, param: Option<Infallible>, axis_id: AxisID) {
-        let _ = (
+    /// Save the WarpVolParam command to the flatten com script.
+    pub fn save_flatten(&self, param: &WarpVolParam, axis_id: AxisID) {
+        let _lock = self.lock.lock();
+        ComScriptUtil::modify_command(
             self.manager,
+            self.script_flatten.borrow_mut().as_mut(),
             param,
+            warp_vol_param::COMMAND,
             axis_id,
-            self.script_flatten.lock().unwrap().is_some(),
+            true,
+            false,
         );
-        // TODO(unit): ComScriptUtil.modifyCommand and WarpVolParam.java.
     }
 
     /// Java `saveAlignFramesOutput(AlignFramesParam)`.
-    pub fn save_align_frames_output(&self, param: Option<Infallible>) {
-        let _ = (
+    pub fn save_align_frames_output(&self, param: &AlignFramesParam) {
+        let _lock = self.lock.lock();
+        ComScriptUtil::modify_command(
             self.manager,
+            self.script_align_frames_output.borrow_mut().as_mut(),
             param,
-            self.script_align_frames_output.lock().unwrap().is_some(),
-        );
-        // TODO(unit): ComScriptUtil.modifyCommand and AlignFramesParam.java.
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use crate::imod::etomo::ui::swing::etomo_menu::ToolType;
-
-    #[test]
-    fn reset_align_frames_output_retains_java_null_state() {
-        let manager = ToolsManager::new(ToolType::AlignFrames);
-        let manager = ToolsComScriptManager::new(manager);
-        assert!(!manager.load_align_frames_output(Path::new("alignframes.com"), false));
-        manager.reset_align_frames_output();
-        assert!(
-            manager
-                .get_align_frames_output_param(Some("alignframes.com"))
-                .is_none()
+            align_frames_param::COMMAND,
+            AxisID::Only,
+            true,
+            false,
         );
     }
 }

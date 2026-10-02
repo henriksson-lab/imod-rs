@@ -1,0 +1,110 @@
+# imod-rs native golden manifest for fixtures/imodchopconts; see fixtures/README.md.
+# Regenerate with fixtures/regen-golden.sh imodchopconts; do not edit by hand.
+text 2 golden/badlist.rc
+1
+
+text 58 golden/badlist.stdout
+ERROR: imodchopconts - Bad entry in list of objects to do
+
+text 2 golden/colorlen.rc
+1
+
+text 94 golden/colorlen.stdout
+ERROR: imodchopconts - You cannot enter -length, -number, -overlap, or -surfaces with -colors
+
+sha256 a5e6e0e5491c220f83172582d6be0d13c51f2dc99b0e604dfab14b9031110f26 4876 golden/colorobj.mod
+text 2 golden/colorobj.rc
+0
+
+text 60 golden/colorobj.stdout
+Number of contours in selected objects changed from 7 to 17
+
+sha256 43f07542451abeff5e5da4ec466d1aa54a4cf3efefa624ffe5c330a47b908aae 4088 golden/colorobj1.mod
+text 2 golden/colorobj1.rc
+0
+
+text 60 golden/colorobj1.stdout
+Number of contours in selected objects changed from 4 to 10
+
+sha256 811374da0bb0f26b8d8a9175c24c06e89f114fc5015d712c9663489676dbb207 3864 golden/colorsurf.mod
+text 2 golden/colorsurf.rc
+0
+
+text 60 golden/colorsurf.stdout
+Number of contours in selected objects changed from 7 to 17
+
+sha256 98553f340fab048d34a8215791a80dabe42c21f1de2588b4e4b9f3afb3d46f84 3516 golden/default.mod
+text 2 golden/default.rc
+0
+
+text 59 golden/default.stdout
+Number of contours in selected objects changed from 7 to 7
+
+text 2 golden/lapbig.rc
+1
+
+text 75 golden/lapbig.stdout
+ERROR: imodchopconts - Contour length must be greater than the overlap + 1
+
+sha256 02151c1121bcf1932a147d2467a388869e659d84babeb1062d9ffee7e86cdbbd 7092 golden/length.mod
+text 2 golden/length.rc
+0
+
+text 60 golden/length.stdout
+Number of contours in selected objects changed from 7 to 36
+
+text 2 golden/neglap.rc
+1
+
+text 94 golden/neglap.stdout
+ERROR: imodchopconts - Contour overlap cannot be negative, other than -1 to enforce 0 overlap
+
+text 2 golden/nomodel.rc
+1
+
+text 50 golden/nomodel.stdout
+ERROR: imodchopconts - Reading model nonexist.mod
+
+sha256 667722f05bae8aefd525396bb0ff6019e31fe612a8b98789da345b1a9b8f9c33 5732 golden/number.mod
+text 2 golden/number.rc
+0
+
+text 118 golden/number.stdout
+Maximum contour length = 35, length for new contours = 18
+Number of contours in selected objects changed from 7 to 18
+
+text 2 golden/numlen.rc
+1
+
+text 93 golden/numlen.stdout
+ERROR: imodchopconts - You cannot enter both -number and -length with a value greater than 0
+
+sha256 d15e96c4b5b4730a34b3fc4d9f8b85aab894e569956256f7f3caa3de263cb21f 4812 golden/objects.mod
+text 2 golden/objects.rc
+0
+
+text 60 golden/objects.stdout
+Number of contours in selected objects changed from 3 to 12
+
+sha256 27f903dff531ebc4f8a31281539c9651fcbb88a8778f41ebf23145e95652bee7 5300 golden/patchdefault.mod
+text 2 golden/patchdefault.rc
+0
+
+text 60 golden/patchdefault.stdout
+Number of contours in selected objects changed from 7 to 18
+
+sha256 f14e0593fc9663dbcafe30f11a54d2b3a6d75b94bee0360ff41ac96d9bd71af3 6600 golden/surfaces.mod
+text 2 golden/surfaces.rc
+0
+
+text 60 golden/surfaces.stdout
+Number of contours in selected objects changed from 7 to 29
+
+sha256 a6a67caff567a70fb93fe086563b11b195ebb2d82b6912dc03ab6b7865170b36 4692 golden/zerolap.mod
+text 2 golden/zerolap.rc
+0
+
+text 117 golden/zerolap.stdout
+Maximum contour length = 35, length for new contours = 8
+Number of contours in selected objects changed from 7 to 29
+

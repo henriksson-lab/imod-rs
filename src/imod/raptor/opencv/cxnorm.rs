@@ -1,246 +1,88 @@
-//! Owned generic translation of `IMOD/raptor/opencv/cxnorm.cpp`.
+//! Translation of `IMOD/raptor/opencv/cxnorm.cpp` (the parts RAPTOR
+//! reaches): `cvNorm` of the difference of two `CV_64FC1` matrices without
+//! a mask, which RAPTOR calls with `CV_L1` only.
 //!
-//! The C source expands raw-pointer kernels for every supported scalar depth,
-//! norm kind, mask state, difference state, and COI.  The generic operation
-//! below is the equivalent dispatch without C function tables or byte casts.
+//! `icvInitNormTabs` (the dispatch tables) collapses to the one kernel.
 
-use super::cxerror::CvStatus;
-use super::cxminmaxloc::{CvMask, CvMatrix};
+use super::cxerror::{CV_STS_BAD_FLAG, CV_STS_UNMATCHED_SIZES, cv_error};
+use super::cxtypes::*;
 
-/// C `CV_C`, `CV_L1`, and `CV_L2` norm kinds.
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub enum CvNormKind {
-    C,
-    L1,
-    L2,
+/// `CV_C`.
+pub const CV_C: i32 = 1;
+/// `CV_L1`.
+pub const CV_L1: i32 = 2;
+/// `CV_L2`.
+pub const CV_L2: i32 = 4;
+/// `CV_RELATIVE`.
+const CV_RELATIVE: i32 = 8;
+/// `CV_DIFF`.
+const CV_DIFF: i32 = 16;
+
+/// `icvNormDiff_L1_64f_C1R` (`ICV_DEF_NORM_FUNC_ALL_L1( 64f, fabs, fabs,
+/// NOHINT, NOHINT, double, double, double, INT_MAX )`,
+/// `ICV_DEF_NORM_DIFF_NOHINT_FUNC_2D`): `norm += fabs(src1[x] - src2[x])`
+/// in element order (the four-way unrolled body updates `norm` in the same
+/// sequence).  `step1`/`step2` in elements.
+fn icv_norm_diff_l1_64f_c1r(
+    src1: &[f64],
+    step1: usize,
+    src2: &[f64],
+    step2: usize,
+    size: CvSize,
+) -> f64 {
+    let mut norm = 0f64;
+    let (mut o1, mut o2) = (0usize, 0usize);
+    for _ in 0..size.height {
+        for x in 0..size.width as usize {
+            let t0 = (src1[o1 + x] - src2[o2 + x]).abs();
+            norm += t0;
+        }
+        o1 += step1;
+        o2 += step2;
+    }
+    norm
 }
 
-impl CvNormKind {
-    /// Decodes C `CV_*` flags, including the ignored `CV_DIFF` bit.
-    pub fn from_c_flags(flags: i32) -> Result<(Self, bool), CvStatus> {
-        let relative = flags & 8 != 0;
-        match flags & 7 {
-            1 => Ok((Self::C, relative)),
-            2 => Ok((Self::L1, relative)),
-            4 => Ok((Self::L2, relative)),
-            _ => Err(CvStatus::sts_bad_flag),
+/// `cvNorm(imgA, imgB, normType, NULL)` (`cxnorm.cpp:965`), the "light
+/// variant" for two `CV_64FC1` matrices and `normType` `CV_L1` (the only
+/// form RAPTOR calls): `mat1` is `imgB` and `mat2` is `imgA`, and the
+/// result is `icvNormDiff_L1_64f_C1R( mat1, mat2 )`.
+pub fn cv_norm(img_a: CvMatRef<'_>, img_b: Option<CvMatRef<'_>>, norm_type: i32) -> f64 {
+    let img_b = img_b.expect("cvNorm: RAPTOR always passes two arrays");
+    let mat1 = img_b;
+    let mat2 = img_a;
+
+    let mut norm_type = norm_type;
+    let is_relative = (norm_type & CV_RELATIVE) != 0;
+    norm_type &= !CV_RELATIVE;
+
+    match norm_type {
+        CV_C | CV_L1 | CV_L2 => norm_type = (norm_type & 7) >> 1,
+        t if t == CV_C | CV_DIFF || t == CV_L1 | CV_DIFF || t == CV_L2 | CV_DIFF => {
+            norm_type = (norm_type & 7) >> 1
         }
+        _ => cv_error(CV_STS_BAD_FLAG, "cvNorm", "", "cxnorm.cpp", 1006),
     }
-}
+    assert!(
+        norm_type == 1 && !is_relative,
+        "cvNorm: RAPTOR reaches CV_L1 only"
+    );
 
-/// Scalar depths accepted by the source's norm dispatch tables.
-pub trait CvNormValue: Copy {
-    fn to_norm_f64(self) -> f64;
-}
-
-macro_rules! impl_norm_value {
-    ($($type:ty),+ $(,)?) => {
-        $(
-            impl CvNormValue for $type {
-                fn to_norm_f64(self) -> f64 { self as f64 }
-            }
-        )+
-    };
-}
-
-impl_norm_value!(u8, u16, i16, i32, f32, f64);
-
-/// C `cvNorm` plus the source's generated `icvNorm*` and `icvNormDiff*`
-/// kernel families.
-///
-/// `second` activates difference norms. For relative difference norms, as in
-/// C, the denominator is the norm of `second` (the public `imgB` argument).
-/// `coi` is a one-based selected channel; a mask on a multi-channel matrix
-/// requires it, matching `cvNorm`'s C validation.
-pub fn cv_norm<T: CvNormValue>(
-    first: &CvMatrix<T>,
-    second: Option<&CvMatrix<T>>,
-    kind: CvNormKind,
-    relative: bool,
-    mask: Option<&CvMask>,
-    coi: Option<usize>,
-) -> Result<f64, CvStatus> {
-    if let Some(second) = second {
-        if first.rows != second.rows || first.columns != second.columns {
-            return Err(CvStatus::sts_unmatched_sizes);
-        }
-        if first.channels != second.channels {
-            return Err(CvStatus::sts_unmatched_formats);
-        }
-    }
-    let selected_channel = match coi {
-        Some(channel) if channel == 0 || channel > first.channels => {
-            return Err(CvStatus::bad_coi);
-        }
-        Some(channel) => Some(channel - 1),
-        None => None,
-    };
-    if mask.is_some() && first.channels > 1 && selected_channel.is_none() {
-        return Err(CvStatus::sts_bad_arg);
-    }
-    if let Some(mask) = mask {
-        if mask.rows != first.rows || mask.columns != first.columns {
-            return Err(CvStatus::sts_unmatched_sizes);
-        }
-        if mask.row_stride < first.columns
-            || mask.values.len() < (first.rows - 1) * mask.row_stride + first.columns
-        {
-            return Err(CvStatus::sts_bad_mask);
-        }
+    if mat1.rows != mat2.rows || mat1.cols != mat2.cols {
+        cv_error(CV_STS_UNMATCHED_SIZES, "cvNorm", "", "cxnorm.cpp", 1016);
     }
 
-    let mut base: f64 = 0.0;
-    let mut difference: f64 = 0.0;
-    let channels = if selected_channel.is_some() {
-        1
+    let mut size = mat1.get_size();
+    let (mat1_step, mat2_step);
+    if cv_is_mat_cont(mat1.type_ & mat2.type_) {
+        size.width *= size.height;
+        size.height = 1;
+        mat1_step = 0;
+        mat2_step = 0;
     } else {
-        first.channels
-    };
-    for row in 0..first.rows {
-        for column in 0..first.columns {
-            if mask.is_some_and(|mask| mask.values[row * mask.row_stride + column] == 0) {
-                continue;
-            }
-            let first_start = row * first.row_stride + column * first.channels;
-            let second_start =
-                second.map(|matrix| row * matrix.row_stride + column * matrix.channels);
-            for output_channel in 0..channels {
-                let channel = selected_channel.unwrap_or(output_channel);
-                let first_value = first.values[first_start + channel].to_norm_f64();
-                let second_value = second
-                    .map(|matrix| matrix.values[second_start.unwrap() + channel].to_norm_f64())
-                    .unwrap_or(0.0);
-                let base_value = if second.is_some() {
-                    second_value
-                } else {
-                    first_value
-                };
-                let difference_value = first_value - second_value;
-                match kind {
-                    CvNormKind::C => {
-                        base = base.max(base_value.abs());
-                        if second.is_some() {
-                            difference = difference.max(difference_value.abs());
-                        }
-                    }
-                    CvNormKind::L1 => {
-                        base += base_value.abs();
-                        if second.is_some() {
-                            difference += difference_value.abs();
-                        }
-                    }
-                    CvNormKind::L2 => {
-                        base += base_value * base_value;
-                        if second.is_some() {
-                            difference += difference_value * difference_value;
-                        }
-                    }
-                }
-            }
-        }
-    }
-    if kind == CvNormKind::L2 {
-        base = base.sqrt();
-        difference = difference.sqrt();
-    }
-    if second.is_none() {
-        return Ok(base);
-    }
-    if relative {
-        Ok(difference / (base + f64::EPSILON))
-    } else {
-        Ok(difference)
-    }
-}
-
-/// C-signature convenience boundary for `cvNorm`: decode `CV_C`, `CV_L1`,
-/// `CV_L2`, `CV_DIFF_*`, and `CV_RELATIVE_*` flags before executing the
-/// owned, bounds-checked implementation.
-pub fn cv_norm_with_flags<T: CvNormValue>(
-    first: &CvMatrix<T>,
-    second: Option<&CvMatrix<T>>,
-    flags: i32,
-    mask: Option<&CvMask>,
-    coi: Option<usize>,
-) -> Result<f64, CvStatus> {
-    let (kind, relative) = CvNormKind::from_c_flags(flags)?;
-    cv_norm(first, second, kind, relative, mask, coi)
-}
-
-#[cfg(test)]
-mod tests {
-    use super::{CvNormKind, cv_norm, cv_norm_with_flags};
-    use crate::imod::raptor::opencv::cxerror::CvStatus;
-    use crate::imod::raptor::opencv::cxminmaxloc::{CvMask, CvMatrix};
-
-    #[test]
-    fn norm_kinds_match_source_single_array_kernels() {
-        let matrix = CvMatrix::new(1, 3, 1, 3, vec![-3_i16, 4, -12]).unwrap();
-        assert_eq!(
-            cv_norm(&matrix, None, CvNormKind::C, false, None, None).unwrap(),
-            12.0
-        );
-        assert_eq!(
-            cv_norm(&matrix, None, CvNormKind::L1, false, None, None).unwrap(),
-            19.0
-        );
-        assert_eq!(
-            cv_norm(&matrix, None, CvNormKind::L2, false, None, None).unwrap(),
-            13.0
-        );
+        mat1_step = (mat1.step / 8) as usize;
+        mat2_step = (mat2.step / 8) as usize;
     }
 
-    #[test]
-    fn relative_difference_uses_public_second_array_as_denominator() {
-        let first = CvMatrix::new(1, 2, 1, 2, vec![4_f64, 8.0]).unwrap();
-        let second = CvMatrix::new(1, 2, 1, 2, vec![2_f64, 4.0]).unwrap();
-        let result = cv_norm(&first, Some(&second), CvNormKind::L2, true, None, None).unwrap();
-        assert!((result - 1.0).abs() < 1e-14);
-    }
-
-    #[test]
-    fn mask_requires_coi_for_multichannel_and_uses_selected_strided_channel() {
-        let matrix =
-            CvMatrix::new(2, 2, 2, 5, vec![1_u8, 10, 2, 20, 99, 3, 30, 4, 40, 99]).unwrap();
-        let mask = CvMask::new(2, 2, 2, vec![1, 0, 0, 1]).unwrap();
-        assert_eq!(
-            cv_norm(&matrix, None, CvNormKind::L1, false, Some(&mask), None),
-            Err(CvStatus::sts_bad_arg)
-        );
-        assert_eq!(
-            cv_norm(&matrix, None, CvNormKind::L1, false, Some(&mask), Some(2)).unwrap(),
-            50.0
-        );
-    }
-
-    #[test]
-    fn c_flags_and_shape_errors_follow_source_validation() {
-        assert_eq!(CvNormKind::from_c_flags(4 | 8), Ok((CvNormKind::L2, true)));
-        assert_eq!(
-            CvNormKind::from_c_flags(16 | 2),
-            Ok((CvNormKind::L1, false))
-        );
-        assert_eq!(CvNormKind::from_c_flags(0), Err(CvStatus::sts_bad_flag));
-        let first = CvMatrix::new(1, 1, 1, 1, vec![1_i32]).unwrap();
-        let second = CvMatrix::new(1, 2, 1, 2, vec![1_i32, 2]).unwrap();
-        assert_eq!(
-            cv_norm(&first, Some(&second), CvNormKind::C, false, None, None),
-            Err(CvStatus::sts_unmatched_sizes)
-        );
-        let mask = CvMask::new(1, 2, 2, vec![1, 1]).unwrap();
-        assert_eq!(
-            cv_norm(&first, None, CvNormKind::C, false, Some(&mask), None),
-            Err(CvStatus::sts_unmatched_sizes)
-        );
-    }
-
-    #[test]
-    fn flag_boundary_accepts_c_diff_aliases() {
-        let first = CvMatrix::new(1, 1, 1, 1, vec![5_f64]).unwrap();
-        let second = CvMatrix::new(1, 1, 1, 1, vec![2_f64]).unwrap();
-        assert_eq!(
-            cv_norm_with_flags(&first, Some(&second), 16 | 1, None, None).unwrap(),
-            3.0
-        );
-    }
+    icv_norm_diff_l1_64f_c1r(mat1.data, mat1_step, mat2.data, mat2_step, size)
 }

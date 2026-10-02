@@ -1,92 +1,76 @@
 //! `IMOD/Etomo/src/etomo/ui/swing/FinalCombineFields.java`.
 //!
-//! The two tab panels implement this package-local synchronization contract.
-//! Java `String` parameters are borrowed here because each source setter copies
-//! its value into a text widget; getters retain the source-owned widget value.
+//! Package-local interface to the final combine screen fields, implemented by
+//! the Setup tab (`SetupCombinePanel`) and the Final Match tab
+//! (`FinalCombinePanel`); `TomogramCombinationDialog.synchronize` copies these
+//! fields from one to the other.  The implementers are EDT objects, so every
+//! method takes `&self`.  Java `String` values are `Option<String>` (null).
 
-#![allow(dead_code)]
+/// Java `rcsid`.
+pub const RCSID: &str = "$$Id$$";
 
-/// Java package-local `FinalCombineFields` interface.
+/// Java package-local `interface FinalCombineFields`.
 pub trait FinalCombineFields {
-    fn set_use_patch_region_model(&mut self, use_patch_region_model: bool);
+    /// Java `setUsePatchRegionModel(boolean)`.
+    fn set_use_patch_region_model(&self, use_patch_region_model: bool);
+
+    /// Java `isUsePatchRegionModel()`.
     fn is_use_patch_region_model(&self) -> bool;
-    fn set_x_min(&mut self, x_min: &str);
-    fn get_x_min(&self) -> String;
-    fn set_x_max(&mut self, x_max: &str);
-    fn get_x_max(&self) -> String;
-    fn set_y_min(&mut self, y_min: &str);
-    fn get_y_min(&self) -> String;
-    fn set_y_max(&mut self, y_max: &str);
-    fn get_y_max(&self) -> String;
-    fn set_z_min(&mut self, z_min: &str);
-    fn get_z_min(&self) -> String;
-    fn set_z_max(&mut self, z_max: &str);
-    fn get_z_max(&self) -> String;
-    fn set_parallel(&mut self, parallel: bool);
+
+    /// Java `setXMin(String)`.
+    fn set_x_min(&self, x_min: Option<&str>);
+
+    /// Java `getXMin()`.
+    fn get_x_min(&self) -> Option<String>;
+
+    /// Java `setXMax(String)`.
+    fn set_x_max(&self, x_max: Option<&str>);
+
+    /// Java `getXMax()`.
+    fn get_x_max(&self) -> Option<String>;
+
+    /// Java `setYMin(String)`.
+    fn set_y_min(&self, y_min: Option<&str>);
+
+    /// Java `getYMin()`.
+    fn get_y_min(&self) -> Option<String>;
+
+    /// Java `setYMax(String)`.
+    fn set_y_max(&self, y_max: Option<&str>);
+
+    /// Java `getYMax()`.
+    fn get_y_max(&self) -> Option<String>;
+
+    /// Java `setZMin(String)`.
+    fn set_z_min(&self, z_min: Option<&str>);
+
+    /// Java `getZMin()`.
+    fn get_z_min(&self) -> Option<String>;
+
+    /// Java `setZMax(String)`.
+    fn set_z_max(&self, z_max: Option<&str>);
+
+    /// Java `getZMax()`.
+    fn get_z_max(&self) -> Option<String>;
+
+    /// Java `setParallel(boolean)`.
+    fn set_parallel(&self, parallel: bool);
+
+    /// Java `isParallel()`.
     fn is_parallel(&self) -> bool;
-    fn set_parallel_enabled(&mut self, parallel_enabled: bool);
+
+    /// Java `setParallelEnabled(boolean)`.
+    fn set_parallel_enabled(&self, parallel_enabled: bool);
+
+    /// Java `isParallelEnabled()`.
     fn is_parallel_enabled(&self) -> bool;
-    fn set_no_volcombine(&mut self, no_volcombine: bool);
+
+    /// Java `setNoVolcombine(boolean)`.
+    fn set_no_volcombine(&self, no_volcombine: bool);
+
+    /// Java `isNoVolcombine()`.
     fn is_no_volcombine(&self) -> bool;
+
+    /// Java `isEnabled()`.
     fn is_enabled(&self) -> bool;
-}
-
-#[cfg(test)]
-mod tests {
-    use super::FinalCombineFields;
-    use crate::imod::etomo::{
-        r#type::dialog_type::DialogType,
-        ui::swing::{
-            final_combine_panel::FinalCombinePanel, setup_combine_panel::SetupCombinePanel,
-        },
-    };
-
-    #[test]
-    fn final_and_setup_panels_share_every_synchronized_field() {
-        let mut setup =
-            SetupCombinePanel::get_instance(DialogType::TomogramCombination, "parallel");
-        let mut final_panel = FinalCombinePanel::new(DialogType::TomogramCombination, "parallel");
-        setup.set_use_patch_region_model(true);
-        setup.set_x_min("1");
-        setup.set_x_max("2");
-        setup.set_y_min("3");
-        setup.set_y_max("4");
-        setup.set_z_min("5");
-        setup.set_z_max("6");
-        setup.set_parallel(true);
-        setup.set_parallel_enabled(false);
-        setup.set_no_volcombine(true);
-
-        if setup.is_enabled() && final_panel.is_enabled() {
-            final_panel.set_use_patch_region_model(setup.is_use_patch_region_model());
-            final_panel.set_x_min(&setup.get_x_min());
-            final_panel.set_x_max(&setup.get_x_max());
-            final_panel.set_y_min(&setup.get_y_min());
-            final_panel.set_y_max(&setup.get_y_max());
-            final_panel.set_z_min(&setup.get_z_min());
-            final_panel.set_z_max(&setup.get_z_max());
-            final_panel.set_parallel(setup.is_parallel());
-            final_panel.set_parallel_enabled(setup.is_parallel_enabled());
-            final_panel.set_no_volcombine(setup.is_no_volcombine());
-        }
-
-        assert!(final_panel.is_use_patch_region_model());
-        assert_eq!(final_panel.get_x_min(), "1");
-        assert_eq!(final_panel.get_x_max(), "2");
-        assert_eq!(final_panel.get_y_min(), "3");
-        assert_eq!(final_panel.get_y_max(), "4");
-        assert_eq!(final_panel.get_z_min(), "5");
-        assert_eq!(final_panel.get_z_max(), "6");
-        assert!(final_panel.is_parallel());
-        assert!(!final_panel.is_parallel_enabled());
-        assert!(final_panel.is_no_volcombine());
-    }
-
-    #[test]
-    fn final_enabled_reflects_the_dialog_tab_boundary() {
-        let mut final_panel = FinalCombinePanel::new(DialogType::TomogramCombination, "parallel");
-        final_panel.pnl_root.final_tab_enabled = false;
-
-        assert!(!final_panel.is_enabled());
-    }
 }

@@ -9,11 +9,13 @@
 //! the divisor is positive), `round()` rounds half to even, `int()` of a
 //! float truncates toward zero, and every float is a double.
 
+use super::imodpy;
 use super::imodpy::{
     OptionValue, add_imod_bin_ignore_sighup, clean_chunk_files, complete_and_check_com_file,
     dataset_filename, exit_from_imod_error, find_root_axis_and_extensions, get_mrc_size,
     get_naming_style, option_value, os_path_splitext, parallel_boundary_size, prnstr,
-    read_text_file, set_root_and_extension, standard_type_extensions, write_text_file,
+    py_int_floordiv, py_int_of_float, py_round, py_true_div, read_text_file,
+    set_root_and_extension, standard_type_extensions, write_text_file,
 };
 use super::pip::{
     exit_error, pip_get_boolean, pip_get_err_no, pip_get_float, pip_get_in_out_file,
@@ -248,11 +250,11 @@ pub fn splittilt(arguments: &[OsString]) -> i32 {
         let xtlines =
             read_text_file(&xtilt_file, Some("X-tilt file"), false, None).unwrap_or_default();
         let py_float = |text: &str| -> f64 {
-            match text.trim().parse::<f64>() {
-                Ok(value) => value,
-                Err(_) => {
+            match imodpy::py_float(text) {
+                Some(value) => value,
+                None => {
                     eprintln!("ValueError: could not convert string to float: '{text}'");
-                    std::process::exit(1)
+                    crate::imod::libcfshr::b3dutil::exit(1)
                 }
             }
         };
@@ -312,7 +314,7 @@ pub fn splittilt(arguments: &[OsString]) -> i32 {
     // not; the source then fails on `os.path.splitext(None)`.
     let Some(recfile) = recfile else {
         eprintln!("TypeError: expected str, bytes or os.PathLike object, not NoneType");
-        std::process::exit(1)
+        crate::imod::libcfshr::b3dutil::exit(1)
     };
 
     let fullimage_true = fullimage.as_ref().is_some_and(|values| !values.is_empty());
@@ -337,9 +339,18 @@ pub fn splittilt(arguments: &[OsString]) -> i32 {
         );
     }
 
+    // Python's `a // b` on ints and `a / b` on floats raise ZeroDivisionError
+    // for a zero divisor, and `int(x)` / `int(round(x))` / `math.floor(x)` of a
+    // float raise for NaN or infinity (IMAGEBINNED 0, `-n 0`, `-penalty 1`, a
+    // zero width, entries and X-tilt values Python's `float()` reads as
+    // `inf`/`nan`); none is caught, so each is a traceback and exit status 1.
+    let floordiv = |a: i32, b: i32| py_int_floordiv(i64::from(a), i64::from(b)) as i32;
+    let float_div = py_true_div;
+    let int_of = |value: f64| py_int_of_float(value) as i32;
+
     // Divide thickness by the binning for computations
     let thickness = match thick_arr.as_ref().filter(|values| !values.is_empty()) {
-        Some(values) => (expanded_fac * values[0] as f64 / binval as f64).floor() as i32,
+        Some(values) => int_of(float_div(expanded_fac * values[0] as f64, binval as f64).floor()),
         None => exit_error("Command file has no THICKNESS entry"),
     };
 
@@ -392,25 +403,23 @@ pub fn splittilt(arguments: &[OsString]) -> i32 {
     let mut numslices = 0;
     if let Some(values) = fullimage.as_ref().filter(|values| !values.is_empty()) {
         firstslice = 0;
-        numslices = (values[1] + binval - 1).div_euclid(binval);
+        numslices = floordiv(values[1] + binval - 1, binval);
     }
 
     if let Some(values) = slices.as_ref().filter(|values| !values.is_empty()) {
-        firstslice =
-            ((expanded_fac * values[0] as f64).round_ties_even() as i32).div_euclid(binval);
-        numslices = ((expanded_fac * values[1] as f64).round_ties_even() as i32).div_euclid(binval)
-            + 1
-            - firstslice;
+        firstslice = floordiv(int_of(py_round(expanded_fac * values[0] as f64)), binval);
+        numslices =
+            floordiv(int_of(py_round(expanded_fac * values[1] as f64)), binval) + 1 - firstslice;
     }
 
     // Get the width before possibly changing binval
     let widthnum = match width_arr.as_ref().filter(|values| !values.is_empty()) {
-        Some(values) => ((expanded_fac * values[0] as f64).floor() as i32).div_euclid(binval),
+        Some(values) => floordiv(int_of((expanded_fac * values[0] as f64).floor()), binval),
         None => match fullimage.as_ref() {
-            Some(values) => values[0].div_euclid(binval),
+            Some(values) => floordiv(values[0], binval),
             None => {
                 eprintln!("TypeError: 'NoneType' object is not subscriptable");
-                std::process::exit(1)
+                crate::imod::libcfshr::b3dutil::exit(1)
             }
         },
     };
@@ -437,7 +446,7 @@ pub fn splittilt(arguments: &[OsString]) -> i32 {
     }
 
     // Start with target size, make sure bigger than minimum
-    let mut slabsize = minslices.max(numslices.div_euclid(targetslabs));
+    let mut slabsize = minslices.max(floordiv(numslices, targetslabs));
 
     if vert_possible && xaxistilt != 0. {
         // If no locals or Z factors and X axis tilt, go for maximum # of slabs
@@ -447,17 +456,20 @@ pub fn splittilt(arguments: &[OsString]) -> i32 {
         let extrathick = (thickness as f64 * (0.01745329 * xaxistilt).sin()).abs();
         let mut extranum = 0;
         while nslabs >= minslabs {
-            slabsize = minslices.max(numslices.div_euclid(nslabs));
+            slabsize = minslices.max(floordiv(numslices, nslabs));
             nslabs -= 1;
 
             // Get percent of extra slices required
-            extranum = (100. * (slabsize as f64 + extrathick) / slabsize as f64) as i32;
+            extranum = int_of(float_div(
+                100. * (slabsize as f64 + extrathick),
+                slabsize as f64,
+            ));
             if extranum <= maxextrapct {
                 break;
             }
         }
 
-        let pennum = (100. * penalty) as i32;
+        let pennum = int_of(100. * penalty);
 
         // If extra is less than penalty, proceed
         // Otherwise, drop to old-style tilting unless vertical specified
@@ -468,20 +480,23 @@ pub fn splittilt(arguments: &[OsString]) -> i32 {
                 // If vertical specified, compute optimum size that just breaks
                 // even with penalty for old-style tilting, but limit it
                 // However, in this case allow it to go down to one chunk per processor
-                slabsize = (extrathick / (penalty - 1.)) as i32;
-                let maxsize = numslices.div_euclid(numproc);
+                slabsize = int_of(float_div(extrathick, penalty - 1.));
+                let maxsize = floordiv(numslices, numproc);
                 slabsize = minslices.max(maxsize.min(slabsize));
             }
         }
     }
 
-    let numslabs = 1.max((numslices + slabsize.div_euclid(2)).div_euclid(slabsize));
+    let numslabs = 1.max(floordiv(
+        numslices + py_int_floordiv(i64::from(slabsize), 2) as i32,
+        slabsize,
+    ));
     let slabsize = numslices.div_euclid(numslabs);
     let remainder = numslices.rem_euclid(numslabs);
 
     // Now that slab size is known, get # of bound lines
     //
-    let mut boundlines = (boundpixels + widthnum - 1).div_euclid(widthnum);
+    let mut boundlines = floordiv(boundpixels + widthnum - 1, widthnum);
     if reproj != 0 {
         boundlines = boundlines.min(slabsize.div_euclid(2) + 1);
     } else if slabsize == 1 {

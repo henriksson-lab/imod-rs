@@ -1,15 +1,37 @@
 //! `IMOD/Etomo/src/etomo/ui/swing/TextEfieldInterface.java`.
-#![allow(dead_code)]
+//!
+//! The public interface of a text Efield (implemented by `TextEfield` and the
+//! other text Efields), used by `etomo.ui.TextStateExtension` and the directive
+//! code.  Implementers are EDT objects (`Rc`, `&self` methods).
 
-/// Java public `TextEfieldInterface`.
+use crate::imod::etomo::storage::directive_def::DirectiveDef;
+
+/// Java `TextEfieldInterface`.
 pub trait TextEfieldInterface {
-    fn get_directive_def(&self) -> Option<&str>;
+    /// Java `getDirectiveDef()`.
+    fn get_directive_def(&self) -> Option<DirectiveDef>;
+
+    /// Java `isEnabled()`.
     fn is_enabled(&self) -> bool;
+
+    /// Java `isVisible()`.
     fn is_visible(&self) -> bool;
-    fn get_text(&self) -> String;
-    fn set_text(&mut self, text: String);
-    fn set_field_highlight(&mut self, text: String);
-    fn set_template_value(&mut self);
+
+    /// Java `getText()`.
+    fn get_text(&self) -> Option<String>;
+
+    /// Java `setText(String)`.
+    fn set_text(&self, text: Option<&str>);
+
+    /// Java `setFieldHighlight(String)`.
+    fn set_field_highlight(&self, text: Option<&str>);
+
+    /// Java `setTemplateValue()`.
+    fn set_template_value(&self);
+
+    /// Java `equals(String)`.
     fn equals(&self, string: Option<&str>) -> bool;
-    fn set_debug(&mut self, debug: bool);
+
+    /// Java `setDebug(boolean)`.
+    fn set_debug(&self, debug: bool);
 }

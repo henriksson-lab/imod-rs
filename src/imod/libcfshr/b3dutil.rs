@@ -2534,6 +2534,53 @@ pub fn b3dsrand(seed: &i32) {
     }
     state.initialized = true;
 }
+/// The C library's `rand()`: glibc's TYPE_3 `random_r` step over the same
+/// process state [`b3drand`] draws from (in C `b3drand` is `rand()` scaled),
+/// returning `val >> 1` in `0..=RAND_MAX`.
+pub fn rand() -> i32 {
+    let mut state = B3D_RAND_STATE.lock().expect("b3d random state poisoned");
+    if !state.initialized {
+        let mut word = 1_i32;
+        state.words[0] = word;
+        for entry in &mut state.words[1..] {
+            let hi = word / 127_773;
+            let lo = word % 127_773;
+            word = 16_807 * lo - 2_836 * hi;
+            if word < 0 {
+                word += 2_147_483_647;
+            }
+            *entry = word;
+        }
+        state.front = 3;
+        state.rear = 0;
+        for _ in 0..310 {
+            let front = state.front;
+            let rear = state.rear;
+            let value = (state.words[front] as u32).wrapping_add(state.words[rear] as u32);
+            state.words[front] = value as i32;
+            state.front = (state.front + 1) % state.words.len();
+            state.rear = (state.rear + 1) % state.words.len();
+        }
+        state.initialized = true;
+    }
+    let front = state.front;
+    let rear = state.rear;
+    let value = (state.words[front] as u32).wrapping_add(state.words[rear] as u32);
+    state.words[front] = value as i32;
+    state.front = (state.front + 1) % state.words.len();
+    state.rear = (state.rear + 1) % state.words.len();
+    (value >> 1) as i32
+}
+
+/// The C library's `RAND_MAX`.
+pub const RAND_MAX: i32 = 2_147_483_647;
+
+/// The C library's `srand(seed)`: glibc `srandom_r` takes the `unsigned`
+/// seed as an `int32_t`, exactly as [`b3dsrand`] seeds.
+pub fn srand(seed: u32) {
+    b3dsrand(&(seed as i32));
+}
+
 /// Matches C `b3dran` (`b3dutil.c:1776`). Fortran wrapper.
 pub fn b3dran(seed: &i32) -> f32 {
     let reseed = {

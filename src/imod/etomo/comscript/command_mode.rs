@@ -5,7 +5,14 @@
 //! library for every `Display` implementation.
 
 /// Java `CommandMode`.
-pub trait CommandMode: std::fmt::Display {}
+pub trait CommandMode: std::fmt::Display + std::any::Any {}
+
+/// Java `command.getCommandMode() == SomeParam.Mode.X`: modes are enum
+/// singletons compared by identity, which is the same concrete type and value.
+pub fn equals_mode<M: CommandMode + PartialEq>(mode: Option<&dyn CommandMode>, other: &M) -> bool {
+    mode.and_then(|mode| (mode as &dyn std::any::Any).downcast_ref::<M>())
+        .is_some_and(|mode| mode == other)
+}
 
 #[cfg(test)]
 mod tests {

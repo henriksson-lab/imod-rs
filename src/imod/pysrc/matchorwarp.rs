@@ -18,12 +18,12 @@
 //! floats are doubles and `'{}'.format`/`str` of one is its `repr`
 //! ([`py_str_float`]).
 
-use super::batchruntomo::py_str_float;
 use super::imodpy::{
     ImodpyError, OptionValue, add_imod_bin_ignore_sighup, call_own_program, cleanup_files,
     complete_and_check_com_file, exit_from_imod_error, get_err_strings, get_last_exit_status,
     get_mrc_size, option_value, os_path_splitext, prnstr, read_text_file, run_cmd,
 };
+use super::imodpy::{py_fixed, py_float, py_str_float};
 use super::pip::{
     exit_error, pip_get_boolean, pip_get_err_no, pip_get_float, pip_get_in_out_file,
     pip_get_integer, pip_get_string, pip_get_three_floats, pip_read_or_parse_options,
@@ -117,11 +117,11 @@ pub fn run_findwarp(
             .map(str::to_owned)
             .collect();
         let last = lim_split.last().cloned().unwrap_or_default();
-        let Ok(highest) = last.trim().parse::<f64>() else {
+        let Some(highest) = py_float(&last) else {
             let _ = std::io::stdout().flush();
             eprintln!("Traceback (most recent call last):");
             eprintln!("ValueError: could not convert string to float: '{last}'");
-            std::process::exit(1);
+            crate::imod::libcfshr::b3dutil::exit(1);
         };
         lim_split.push(py_str_float(highest * 1.25));
         lim_split.push(py_str_float(highest * 1.5));
@@ -185,7 +185,7 @@ pub fn run_findwarp(
                     if !field.starts_with(' ') {
                         continue;
                     }
-                    if let Ok(val) = field.trim().parse::<f64>() {
+                    if let Some(val) = py_float(&field) {
                         if mean == 0. {
                             mean = val;
                         } else if maxr == 0. {
@@ -218,7 +218,7 @@ pub fn run_findwarp(
             return Ok(savestat);
         }
         let _ = std::io::stdout().flush();
-        std::process::exit(1);
+        crate::imod::libcfshr::b3dutil::exit(1);
     }
     if !vectormodel.is_empty() {
         prnstr(" ", "\n", false);
@@ -243,7 +243,7 @@ pub fn run_findwarp(
             let _ = std::io::stdout().flush();
             eprintln!("Traceback (most recent call last):");
             eprintln!("IndexError: list index out of range");
-            std::process::exit(1)
+            crate::imod::libcfshr::b3dutil::exit(1)
         };
         if iter_ind >= g.mean_resids.len() || iter_ind >= g.max_resids.len() || iter_ind < 1 {
             index_error();
@@ -253,8 +253,9 @@ pub fn run_findwarp(
         if mean_resids[0] != 0. && (mean_resids[iter_ind] > mean_resids[0] * g.mean_stop_crit) {
             stop = true;
             mess = format!(
-                "mean residual ({:.3}) is higher than on the first iteration ({:.3})",
-                mean_resids[iter_ind], mean_resids[0]
+                "mean residual ({}) is higher than on the first iteration ({})",
+                py_fixed(mean_resids[iter_ind], 0, 3),
+                py_fixed(mean_resids[0], 0, 3)
             );
         } else if (mean_resids[iter_ind - 1] != 0.
             && (mean_resids[iter_ind] > mean_resids[iter_ind - 1] * g.mean_stop_crit))
@@ -263,11 +264,11 @@ pub fn run_findwarp(
         {
             stop = true;
             mess = format!(
-                "mean or max residual increased too much (from {:.3}, {:.3} to {:.3}, {:.3})",
-                mean_resids[iter_ind - 1],
-                mean_resids[iter_ind],
-                max_resids[iter_ind - 1],
-                max_resids[iter_ind]
+                "mean or max residual increased too much (from {}, {} to {}, {})",
+                py_fixed(mean_resids[iter_ind - 1], 0, 3),
+                py_fixed(mean_resids[iter_ind], 0, 3),
+                py_fixed(max_resids[iter_ind - 1], 0, 3),
+                py_fixed(max_resids[iter_ind], 0, 3)
             );
         } else if mean_resids[iter_ind - 1] != 0.
             && mean_resids[iter_ind] > mean_resids[iter_ind - 1] * g.counting_mean_crit
@@ -278,10 +279,10 @@ pub fn run_findwarp(
                     index_error();
                 }
                 mess = format!(
-                    "mean residual increased on two successive iterations ({:.3} -> {:.3} -> {:.3})",
-                    mean_resids[iter_ind - 2],
-                    mean_resids[iter_ind - 1],
-                    mean_resids[iter_ind]
+                    "mean residual increased on two successive iterations ({} -> {} -> {})",
+                    py_fixed(mean_resids[iter_ind - 2], 0, 3),
+                    py_fixed(mean_resids[iter_ind - 1], 0, 3),
+                    py_fixed(mean_resids[iter_ind], 0, 3)
                 );
             } else {
                 // Fixed in translation (BUGS.md): `matchorwarp:115` sets
@@ -303,7 +304,7 @@ pub fn run_findwarp(
             prnstr(&format!(" because {mess}"), "\n", false);
             prnstr("", "\n", false);
             let _ = std::io::stdout().flush();
-            std::process::exit(0);
+            crate::imod::libcfshr::b3dutil::exit(0);
         }
     }
 
@@ -313,7 +314,7 @@ pub fn run_findwarp(
         if g.trial != 0 {
             prnstr("MATCHORWARP: Findwarp found a good warping", "\n", false);
             let _ = std::io::stdout().flush();
-            std::process::exit(0);
+            crate::imod::libcfshr::b3dutil::exit(0);
         }
 
         prnstr(
@@ -619,7 +620,7 @@ pub fn matchorwarp(arguments: &[OsString]) -> i32 {
         // Look for status 2 specifically, it is the code used when above the limit
         if savestat != 0 && savestat != 2 {
             let _ = std::io::stdout().flush();
-            std::process::exit(1);
+            crate::imod::libcfshr::b3dutil::exit(1);
         }
 
         // If exiting either because of success or because warp is being skipped,
@@ -648,7 +649,7 @@ pub fn matchorwarp(arguments: &[OsString]) -> i32 {
                     false,
                 );
                 let _ = std::io::stdout().flush();
-                std::process::exit(0);
+                crate::imod::libcfshr::b3dutil::exit(0);
             }
 
             // If refinematch did not have error exit, run matchvol
@@ -673,7 +674,7 @@ pub fn matchorwarp(arguments: &[OsString]) -> i32 {
                 &[],
             )?;
             let _ = std::io::stdout().flush();
-            std::process::exit(0);
+            crate::imod::libcfshr::b3dutil::exit(0);
         }
 
         // If there is an error exit from refinematch, run findwarp as long as warplimit not 0
@@ -688,7 +689,7 @@ pub fn matchorwarp(arguments: &[OsString]) -> i32 {
                 false,
             );
             let _ = std::io::stdout().flush();
-            std::process::exit(1);
+            crate::imod::libcfshr::b3dutil::exit(1);
         }
 
         prnstr(" ", "\n", false);
@@ -715,7 +716,7 @@ pub fn matchorwarp(arguments: &[OsString]) -> i32 {
         }
         if num_iterations < 2 {
             let _ = std::io::stdout().flush();
-            std::process::exit(0);
+            crate::imod::libcfshr::b3dutil::exit(0);
         }
         Ok(())
     })();

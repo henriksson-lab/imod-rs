@@ -28,6 +28,7 @@
 //! traceback line on stderr and exits with status 1, as the interpreter does
 //! (see [`python_uncaught`]).
 
+use super::imodpy::{py_float, py_int};
 use std::ffi::OsString;
 use std::fs::File;
 use std::io::{BufRead, BufReader, Write};
@@ -139,7 +140,7 @@ fn python_uncaught(exception: &str) -> ! {
     let _ = std::io::stdout().flush();
     eprintln!("Traceback (most recent call last):");
     eprintln!("{exception}");
-    std::process::exit(1)
+    crate::imod::libcfshr::b3dutil::exit(1)
 }
 
 /// Python runtime: `str.isspace` for one character.  Rust's
@@ -157,63 +158,6 @@ fn python_slice(characters: &[char], start: usize, end: usize) -> String {
         return String::new();
     }
     characters[start..end].iter().collect()
-}
-
-/// Python runtime: builtin `int(s)` on a string (base 10).  Surrounding
-/// white space is stripped, a sign is accepted, and single underscores may
-/// separate digits.  Python ints are unbounded; values beyond `i128` are
-/// rejected here and larger-than-`i64` values wrap -- a documented limit,
-/// not source behaviour.  Non-ASCII decimal digits, which Python accepts,
-/// are not.
-fn python_int(text: &str) -> Option<i64> {
-    let text = text.trim_matches(python_isspace);
-    let (sign, digits) = match text.as_bytes().first() {
-        Some(b'+') => ("", &text[1..]),
-        Some(b'-') => ("-", &text[1..]),
-        _ => ("", text),
-    };
-    let bytes = digits.as_bytes();
-    if bytes.is_empty() || !bytes[0].is_ascii_digit() || !bytes[bytes.len() - 1].is_ascii_digit() {
-        return None;
-    }
-    let mut cleaned = String::from(sign);
-    for (index, &byte) in bytes.iter().enumerate() {
-        if byte == b'_' {
-            if !bytes[index - 1].is_ascii_digit() || !bytes[index + 1].is_ascii_digit() {
-                return None;
-            }
-        } else if byte.is_ascii_digit() {
-            cleaned.push(byte as char);
-        } else {
-            return None;
-        }
-    }
-    cleaned.parse::<i128>().ok().map(|value| value as i64)
-}
-
-/// Python runtime: builtin `float(s)`.  Surrounding white space is
-/// stripped and single underscores between digits are accepted; the rest
-/// (sign, `inf`/`infinity`/`nan` in any case, exponent, leading or trailing
-/// `.`) is what Rust's `f64` parser also accepts.  Hexadecimal is rejected by
-/// both.
-fn python_float(text: &str) -> Option<f64> {
-    let text = text.trim_matches(python_isspace);
-    let bytes = text.as_bytes();
-    let mut cleaned = String::new();
-    for (index, &byte) in bytes.iter().enumerate() {
-        if byte == b'_' {
-            if index == 0
-                || index + 1 >= bytes.len()
-                || !bytes[index - 1].is_ascii_digit()
-                || !bytes[index + 1].is_ascii_digit()
-            {
-                return None;
-            }
-        } else {
-            cleaned.push(byte as char);
-        }
-    }
-    cleaned.parse::<f64>().ok()
 }
 
 /// Python runtime: a text-mode file object as `pip.py` uses it --
@@ -968,7 +912,7 @@ pub fn pip_print_entries() {
     if S_PRINT_ENTRIES.load(Relaxed) < 0 {
         S_PRINT_ENTRIES.store(0, Relaxed);
         if let Ok(val) = std::env::var(PRINTENTRY_VARIABLE) {
-            S_PRINT_ENTRIES.store(python_int(&val).map_or(0, |value| value as i32), Relaxed);
+            S_PRINT_ENTRIES.store(py_int(&val).map_or(0, |value| value as i32), Relaxed);
         }
     }
     if S_PRINT_ENTRIES.load(Relaxed) == 0 {
@@ -1046,7 +990,7 @@ pub fn pip_set_error(err_string: &str) -> i32 {
         }
         print!("{exit_prefix}{error_string}\n");
         let _ = std::io::stdout().flush();
-        std::process::exit(1);
+        crate::imod::libcfshr::b3dutil::exit(1);
     }
 
     0
@@ -1056,7 +1000,7 @@ pub fn pip_set_error(err_string: &str) -> i32 {
 pub fn exit_error(error_mess: &str) -> ! {
     pip_set_error(error_mess);
     let _ = std::io::stdout().flush();
-    std::process::exit(1)
+    crate::imod::libcfshr::b3dutil::exit(1)
 }
 
 /// Matches `PipNumberOfEntries` (`IMOD/pysrc/pip.py:685`).
@@ -1547,7 +1491,7 @@ pub fn pip_read_or_parse_options(
     if matches!(help, Ok(value) if value != 0) || num_opt_args + num_non_opt_args < min_args {
         pip_print_help(prog_name, 0, num_in_files, num_out_files);
         let _ = std::io::stdout().flush();
-        std::process::exit(0);
+        crate::imod::libcfshr::b3dutil::exit(0);
     }
 
     if ierr == 0 {
@@ -1947,9 +1891,9 @@ pub fn pip_get_line_of_values(
         // convert number in a try block
         let text = python_slice(&str_ptr, 0, end_ptr);
         let converted = if val_type == PIP_INTEGER {
-            python_int(&text).map(|value| int_array.push(value))
+            py_int(&text).map(|value| int_array.push(value))
         } else {
-            python_float(&text).map(|value| float_array.push(value))
+            py_float(&text).map(|value| float_array.push(value))
         };
         if converted.is_none() {
             let temp_str = format!("Illegal character in value entry:  {option}  {full_str}");

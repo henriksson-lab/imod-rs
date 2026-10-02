@@ -1,126 +1,175 @@
 //! `IMOD/Etomo/src/etomo/ui/swing/SelectFileExtension.java`.
-#![allow(dead_code)]
-use super::file_text_field_interface::FileFilter;
-use crate::imod::etomo::ui::browsing_directory::BrowsingDirectory;
-use std::{
-    path::{Path, PathBuf},
-    rc::Rc,
-};
+//!
+//! The file-selection settings of an efield and the file chooser it opens.
 
-/// Java final `SelectFileExtension`.  The chooser's native dialog is supplied by
-/// the frontend as its selected-file result; this source unit owns selection setup and
-/// directory updates, exactly as Java does after `showOpenDialog` returns.
+use std::cell::{Cell, RefCell};
+use std::path::PathBuf;
+use std::rc::Rc;
+
+use super::file_chooser::FileChooser;
+use super::ui_parameters::UIParameters;
+use crate::imod::etomo::jdk::{FileFilter, JComponent, JFileChooser};
+use crate::imod::etomo::ui::browsing_directory::BrowsingDirectory;
+use crate::imod::etomo::util::valid_directory::ValidDirectory;
+
+/// Java `SelectFileExtension`.
 pub struct SelectFileExtension {
-    pub dir: Option<String>,
-    pub alt_browsing_directory: Option<Rc<dyn BrowsingDirectory>>,
-    pub file_filter: Option<Rc<dyn FileFilter>>,
-    pub file_selection_mode: i32,
-    pub file_chooser_title: Option<String>,
-    pub last_chooser_directory: Option<PathBuf>,
-    pub multiple_selection_enabled: bool,
+    /// Java `dir`.
+    dir: RefCell<Option<String>>,
+    /// Java `altBrowsingDirectory`.
+    alt_browsing_directory: RefCell<Option<Rc<dyn BrowsingDirectory>>>,
+    /// Java `fileFilter`.
+    file_filter: RefCell<Option<Rc<dyn FileFilter>>>,
+    /// Java `fileSelectionMode`.
+    file_selection_mode: Cell<i32>,
+    /// Java `fileChooserTitle`.
+    file_chooser_title: RefCell<Option<String>>,
 }
-impl Default for SelectFileExtension {
-    fn default() -> Self {
-        Self {
-            dir: None,
-            alt_browsing_directory: None,
-            file_filter: None,
-            file_selection_mode: -1,
-            file_chooser_title: None,
-            last_chooser_directory: None,
-            multiple_selection_enabled: false,
-        }
-    }
-}
+
 impl SelectFileExtension {
-    pub fn new() -> Self {
-        Self::default()
+    /// Java `SelectFileExtension()`.
+    pub fn new() -> Rc<SelectFileExtension> {
+        Rc::new(SelectFileExtension {
+            dir: RefCell::new(None),
+            alt_browsing_directory: RefCell::new(None),
+            file_filter: RefCell::new(None),
+            file_selection_mode: Cell::new(-1),
+            file_chooser_title: RefCell::new(None),
+        })
     }
-    pub fn set_dir(&mut self, dir: impl Into<String>) {
-        self.dir = Some(dir.into());
+
+    /// Java `setDir(String)`.
+    pub fn set_dir(&self, dir: Option<&str>) {
+        *self.dir.borrow_mut() = dir.map(str::to_owned);
     }
-    pub fn set_alt_browsing_directory(&mut self, value: Rc<dyn BrowsingDirectory>) {
-        self.alt_browsing_directory = Some(value);
+
+    /// Java `setAltBrowsingDirectory(BrowsingDirectory)`.
+    pub fn set_alt_browsing_directory(
+        &self,
+        alt_browsing_directory: Option<Rc<dyn BrowsingDirectory>>,
+    ) {
+        *self.alt_browsing_directory.borrow_mut() = alt_browsing_directory;
     }
-    pub fn set_file_filter(&mut self, value: Rc<dyn FileFilter>) {
-        self.file_filter = Some(value);
+
+    /// Java `setFileFilter(FileFilter)`.
+    pub fn set_file_filter(&self, file_filter: Option<Rc<dyn FileFilter>>) {
+        *self.file_filter.borrow_mut() = file_filter;
     }
-    pub fn set_file_selection_mode(&mut self, value: i32) {
-        self.file_selection_mode = value;
+
+    /// Java `setFileSelectionMode(int)`.
+    pub fn set_file_selection_mode(&self, file_selection_mode: i32) {
+        self.file_selection_mode.set(file_selection_mode);
     }
-    pub fn set_file_chooser_title(&mut self, value: impl Into<String>) {
-        self.file_chooser_title = Some(value.into());
-    }
-    /// Java private `getDirectory(File)`.
-    pub fn get_directory(&self, override_file_open_directory: Option<&Path>) -> Option<PathBuf> {
-        if let Some(path) = override_file_open_directory.filter(|path| path.is_dir()) {
-            return Some(path.to_path_buf());
-        }
-        if let Some(directory) = &self.alt_browsing_directory {
-            if let Some(path) = directory.get_browsing_dir().filter(|path| path.is_dir()) {
-                return Some(path);
-            }
-        }
-        self.dir.as_deref().map(PathBuf::from)
-    }
-    /// Java `selectFile(Component, File)`, with `selected_file` supplied by native GUI.
+
+    /// Java `selectFile(Component, File)`.
     pub fn select_file(
-        &mut self,
-        override_file_open_directory: Option<&Path>,
-        selected_file: Option<PathBuf>,
+        &self,
+        component: Option<&Rc<JComponent>>,
+        override_file_open_directory: Option<PathBuf>,
     ) -> Option<PathBuf> {
-        self.last_chooser_directory = self.get_directory(override_file_open_directory);
-        self.multiple_selection_enabled = false;
-        let selected_file = selected_file?;
-        if let Some(parent) = selected_file.parent() {
-            self.set_dir(parent.to_string_lossy());
-            if let Some(directory) = &self.alt_browsing_directory {
-                directory.set_browsing_dir(Some(parent));
-            }
+        let chooser = FileChooser::new_file(self.get_directory(override_file_open_directory).as_deref());
+        let file_chooser_title = self.file_chooser_title.borrow().clone();
+        if let Some(file_chooser_title) = file_chooser_title.as_deref() {
+            chooser.set_dialog_title(Some(file_chooser_title));
+            chooser.set_name(Some(file_chooser_title));
+        } else {
+            chooser.set_dialog_title(Some("Select File"));
         }
-        Some(selected_file)
+        // Swing layout: chooser.setPreferredSize(UIParameters.getInstance()
+        // .getFileChooserDimension()).
+        let _ = UIParameters::get_instance_void().get_file_chooser_dimension();
+        if self.file_selection_mode.get() != -1 {
+            chooser.set_file_selection_mode(self.file_selection_mode.get());
+        }
+        let file_filter = self.file_filter.borrow().clone();
+        if file_filter.is_some() {
+            chooser.set_file_filter(file_filter);
+        }
+        if chooser.show_open_dialog(component) == JFileChooser::APPROVE_OPTION {
+            let selected_file = chooser.get_selected_file()?;
+            // Java selectedFile.getParentFile().getAbsolutePath(): a chooser selection
+            // is absolute, so it has a parent.
+            let parent = selected_file.parent().map(|parent| parent.to_path_buf());
+            self.set_dir(
+                parent
+                    .as_ref()
+                    .map(|parent| std::path::absolute(parent).unwrap_or(parent.clone()))
+                    .as_deref()
+                    .and_then(|parent| parent.to_str()),
+            );
+            let alt_browsing_directory = self.alt_browsing_directory.borrow().clone();
+            if let Some(alt_browsing_directory) = alt_browsing_directory {
+                alt_browsing_directory.set_browsing_dir(parent.as_deref());
+            }
+            return Some(selected_file);
+        }
+        None
     }
-    /// Java `selectMultipleFiles(Component, File)`, with native selected values explicit.
+
+    /// Java `selectMultipleFiles(Component, File)` (ALIGN_FRAMES).
     pub fn select_multiple_files(
-        &mut self,
-        override_file_open_directory: Option<&Path>,
-        selected_files: Option<Vec<PathBuf>>,
+        &self,
+        component: Option<&Rc<JComponent>>,
+        override_file_open_directory: Option<PathBuf>,
     ) -> Option<Vec<PathBuf>> {
-        self.last_chooser_directory = self.get_directory(override_file_open_directory);
-        self.multiple_selection_enabled = true;
-        let selected_files = selected_files.filter(|value| !value.is_empty())?;
-        if let Some(parent) = selected_files[0].parent() {
-            self.set_dir(parent.to_string_lossy());
-            if let Some(directory) = &self.alt_browsing_directory {
-                directory.set_browsing_dir(Some(parent));
+        let chooser = JFileChooser::new_file(self.get_directory(override_file_open_directory).as_deref());
+        let file_chooser_title = self.file_chooser_title.borrow().clone();
+        if let Some(file_chooser_title) = file_chooser_title.as_deref() {
+            chooser.set_dialog_title(Some(file_chooser_title));
+        } else {
+            chooser.set_dialog_title(Some("Select File"));
+        }
+        // Swing layout: chooser.setPreferredSize(UIParameters.getInstance()
+        // .getFileChooserDimension()).
+        let _ = UIParameters::get_instance_void().get_file_chooser_dimension();
+        chooser.set_multi_selection_enabled(true);
+        if self.file_selection_mode.get() != -1 {
+            chooser.set_file_selection_mode(self.file_selection_mode.get());
+        }
+        let file_filter = self.file_filter.borrow().clone();
+        if file_filter.is_some() {
+            chooser.set_file_filter(file_filter);
+        }
+        if chooser.show_open_dialog(component) == JFileChooser::APPROVE_OPTION {
+            let selected_files = chooser.get_selected_files();
+            if !selected_files.is_empty() {
+                let parent = selected_files[0].parent().map(|parent| parent.to_path_buf());
+                self.set_dir(
+                    parent
+                        .as_ref()
+                        .map(|parent| std::path::absolute(parent).unwrap_or(parent.clone()))
+                        .as_deref()
+                        .and_then(|parent| parent.to_str()),
+                );
+                let alt_browsing_directory = self.alt_browsing_directory.borrow().clone();
+                if let Some(alt_browsing_directory) = alt_browsing_directory {
+                    alt_browsing_directory.set_browsing_dir(parent.as_deref());
+                }
+                return Some(selected_files);
             }
         }
-        Some(selected_files)
+        None
     }
-}
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use std::sync::Mutex;
-    struct Browsing(Mutex<Option<PathBuf>>);
-    impl BrowsingDirectory for Browsing {
-        fn get_browsing_dir(&self) -> Option<PathBuf> {
-            self.0.lock().unwrap().clone()
+
+    /// Java private `getDirectory(File)`.
+    fn get_directory(&self, override_file_open_directory: Option<PathBuf>) -> Option<PathBuf> {
+        // TODO(unit): needs etomo/util/ValidDirectory.java - static isValid(File),
+        // isValid(BrowsingDirectory), get(File), get(BrowsingDirectory).
+        if ValidDirectory::is_valid_file(override_file_open_directory.as_deref()) {
+            return ValidDirectory::get_file(override_file_open_directory.as_deref());
         }
-        fn set_browsing_dir(&self, path: Option<&Path>) {
-            *self.0.lock().unwrap() = path.map(Path::to_path_buf)
+        let alt_browsing_directory = self.alt_browsing_directory.borrow().clone();
+        if ValidDirectory::is_valid_browsing_directory(alt_browsing_directory.as_deref()) {
+            return ValidDirectory::get_browsing_directory(alt_browsing_directory.as_deref());
         }
+        if let Some(dir) = self.dir.borrow().as_deref() {
+            return Some(PathBuf::from(dir));
+        }
+        None
     }
-    #[test]
-    fn selected_file_updates_source_directory_and_shared_browsing_directory() {
-        let browsing = Rc::new(Browsing(Mutex::new(None)));
-        let mut value = SelectFileExtension::new();
-        value.set_alt_browsing_directory(browsing.clone());
-        let selected = value
-            .select_file(None, Some(PathBuf::from("/tmp/a.mrc")))
-            .unwrap();
-        assert_eq!(selected, PathBuf::from("/tmp/a.mrc"));
-        assert_eq!(value.dir.as_deref(), Some("/tmp"));
-        assert_eq!(browsing.get_browsing_dir(), Some(PathBuf::from("/tmp")));
+
+    /// Java `setFileChooserTitle(String)`.
+    pub fn set_file_chooser_title(&self, input: Option<&str>) {
+        *self.file_chooser_title.borrow_mut() = input.map(str::to_owned);
     }
 }

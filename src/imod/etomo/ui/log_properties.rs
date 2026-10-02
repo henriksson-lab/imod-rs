@@ -16,5 +16,6 @@ pub trait LogProperties {
     fn store(&self, props: &mut BTreeMap<String, String>, prepend: Option<&str>);
 
     /// Java `load(Properties, String)`.
-    fn load(&mut self, props: &BTreeMap<String, String>, prepend: Option<&str>);
+    /// (`&self`: the implementor, `LogWindow`, is a shared EDT object.)
+    fn load(&self, props: &BTreeMap<String, String>, prepend: Option<&str>);
 }

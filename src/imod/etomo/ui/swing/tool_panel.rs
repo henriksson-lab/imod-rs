@@ -1,7 +1,18 @@
 //! `IMOD/Etomo/src/etomo/ui/swing/ToolPanel.java`.
 //!
-//! Its one source signature is identical to `SwingComponent.java`, so this
-//! source-unit name re-exports the canonical Rust interface.
-#![allow(dead_code)]
+//! Java package-private `interface ToolPanel`: a panel the Tools dialog
+//! (`ToolsDialog`) can show.  Implemented by `FlattenVolumePanel`,
+//! `GpuTiltTestPanel` and `AlignFramesPanel`.
 
-pub use super::swing_component::SwingComponent as ToolPanel;
+use std::rc::Rc;
+
+use crate::imod::etomo::jdk::JComponent;
+
+/// Java public static final `rcsid`.
+pub const RCSID: &str = "$Id:$";
+
+/// Java `interface ToolPanel`.
+pub trait ToolPanel {
+    /// Java `Component getComponent()`.
+    fn get_component(&self) -> Rc<JComponent>;
+}

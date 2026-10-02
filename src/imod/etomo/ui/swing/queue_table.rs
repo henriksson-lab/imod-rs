@@ -1,544 +1,524 @@
 //! `IMOD/Etomo/src/etomo/ui/swing/QueueTable.java`.
 //!
-//! `Network`, `Node`, `CpuAdoc`, `ButtonGroup`, and queue command parameters
-//! are explicit boundaries.  The queue-specific selection and event decisions
-//! remain in this source unit over the common `ProcessorTable` mechanics.
-#![allow(dead_code)]
+//! Java `final class QueueTable extends ProcessorTable`: the processor table
+//! that lists cluster queues.  The superclass is embedded as `base` (with
+//! `Deref`), the abstract and overridden members are [`ProcessorTableVirtual`],
+//! and the inherited interfaces are bound with `processor_table_interfaces!`.
+//! Construction follows `ProcessorTable`'s split (see `processor_table.rs`):
+//! allocate, connect `this`, then run [`ProcessorTable::construct`].
 
 use std::cell::RefCell;
-use std::collections::BTreeSet;
-use std::rc::Rc;
+use std::collections::HashMap;
+use std::ops::Deref;
+use std::rc::{Rc, Weak};
+use std::sync::Arc;
 
+use super::parallel_panel::ParallelPanel;
+use super::processor_table::{ProcessorTable, ProcessorTableVirtual};
+use super::processor_table_row::ProcessorTableRow;
+use super::ui_harness;
+use crate::imod::etomo::base_manager::BaseManager;
+use crate::imod::etomo::comscript::batchruntomo_param::BatchruntomoParam;
+use crate::imod::etomo::comscript::intermittent_command::IntermittentCommand;
+use crate::imod::etomo::comscript::processchunks_param::ProcesschunksParam;
+use crate::imod::etomo::comscript::queuechunk_param::QueuechunkParam;
+use crate::imod::etomo::jdk::{ActionEvent, ButtonGroup};
+use crate::imod::etomo::logic::processor_table_state::ProcessorTableState;
+use crate::imod::etomo::logic::processor_type::ProcessorType;
+use crate::imod::etomo::storage::cpu_adoc;
+use crate::imod::etomo::storage::network::Network;
+use crate::imod::etomo::storage::node::Node;
+use crate::imod::etomo::r#type::axis_id::AxisID;
+use crate::imod::etomo::r#type::const_etomo_version::ConstEtomoVersion;
+use crate::imod::etomo::r#type::interface_type::InterfaceType;
 use crate::imod::etomo::r#type::processing_method::ProcessingMethod;
+use crate::imod::etomo::r#type::queue_mode::QueueMode;
+use crate::imod::etomo::r#type::queue_type::QueueType;
+use crate::imod::etomo::ui::expander::Expander;
 use crate::imod::etomo::ui::queue_table_event::QueueTableEvent;
 use crate::imod::etomo::ui::queue_table_listener::QueueTableListener;
 
-use super::processor_table::{ProcessorTable, ProcessorTableHooks, ProcessorTableRow};
-use super::processor_table_row::{
-    BatchruntomoParameters, ProcesschunksParameters, ProcessorNode, QueueMode, QueueType,
-};
-
+/// Java private static final `PREPEND`.
 const PREPEND: &str = ".Queue";
+/// Java package-private static final `NUMBER_JOBS_LABEL1`.
 pub const NUMBER_JOBS_LABEL1: &str = "# Jobs";
 
-/// Java Swing `ButtonGroup` boundary, allocated by `getSize` for queue rows.
-#[derive(Clone, Debug, Default, Eq, PartialEq)]
-pub struct ButtonGroupBoundary {
-    pub members: Vec<String>,
-}
-
-/// Java `QueuechunkParam.getLoadInstance(computer,axisID,manager)` boundary.
-#[derive(Clone, Debug, Eq, PartialEq)]
-pub struct QueuechunkParamBoundary {
-    pub computer: String,
-}
-
-/// Values retained from `Network` and `CpuAdoc` for QueueTable's abstract
-/// ProcessorTable calls.
-#[derive(Clone, Debug, Default, PartialEq)]
-pub struct QueueTableHooks {
-    pub group_key: String,
-    pub queues: Vec<ProcessorNode>,
-    pub dual_selection_queue_table: bool,
-    pub load_units_count: usize,
-}
-
-impl ProcessorTableHooks for QueueTableHooks {
-    /// Java `getSize`; ButtonGroup allocation is owned by `QueueTable::get_size`
-    /// because the common-table hook is immutable in Rust.
-    fn get_size(&self) -> usize {
-        self.queues.len()
-    }
-
-    /// Java `getNode(int)` after `Network.getQueue`.
-    fn get_node(&self, index: usize) -> Option<String> {
-        self.queues.get(index).map(|node| node.name.clone())
-    }
-
-    /// Java `createProcessorTableRow` after `Node.getCpus` and `CpuAdoc` lookup.
-    fn create_processor_table_row(
-        &self,
-        node: &str,
-        num_rows_in_table: usize,
-    ) -> ProcessorTableRow {
-        let node = self
-            .queues
-            .iter()
-            .find(|queue| queue.name == node)
-            .cloned()
-            .unwrap_or_else(|| ProcessorNode {
-                name: node.into(),
-                ..ProcessorNode::default()
-            });
-        ProcessorTableRow::get_queue_instance(
-            node,
-            self.dual_selection_queue_table,
-            self.load_units_count.max(1),
-            num_rows_in_table,
-        )
-    }
-
-    /// Java `getHeader1ComputerText`.
-    fn get_header1_computer_text(&self) -> String {
-        "Queue".into()
-    }
-
-    /// Java `getIntermittentCommand`.
-    fn get_intermittent_command(&self, computer: &str) -> Option<String> {
-        Some(computer.into())
-    }
-
-    /// Java `isExcludeNode`.
-    fn is_exclude_node(&self, node: &str) -> bool {
-        self.queues
-            .iter()
-            .find(|queue| queue.name == node)
-            .is_some_and(|queue| {
-                self.dual_selection_queue_table
-                    && queue.queue_mode == QueueMode::Invalid
-                    && !queue.secondary_queue
-            })
-    }
-
-    /// Java `isNiceable`.
-    fn is_niceable(&self) -> bool {
-        true
-    }
-
-    /// Java `getStorePrepend`.
-    fn get_store_prepend(&self) -> String {
-        format!("{}{}", self.group_key, PREPEND)
-    }
-
-    /// Java `getLoadPrepend`.
-    fn get_load_prepend(&self, _: &str) -> String {
-        self.get_store_prepend()
-    }
-
-    /// Java `initRow` has an empty body.
-    fn init_row(&self, _: &mut ProcessorTableRow) {}
-
-    fn is_queue_table(&self) -> bool {
-        true
-    }
-    fn is_cpu_table(&self) -> bool {
-        false
-    }
-    fn is_gpu_table(&self) -> bool {
-        false
-    }
-    fn get_no_cpus_selected_error_message(&self) -> String {
-        "A queue must be selected.".into()
-    }
-}
-
-/// Java `QueueTable`; the Rc/RefCell listener handles are the ownership-safe
-/// equivalent of Java's retained `ArrayList<QueueTableListener>` references.
+/// Java `final class QueueTable extends ProcessorTable`.
 pub struct QueueTable {
-    pub table: ProcessorTable<QueueTableHooks>,
-    pub dual_selection_queue_table: bool,
-    pub button_group: Option<ButtonGroupBoundary>,
-    pub secondary_button_group: Option<ButtonGroupBoundary>,
-    pub queue_table_listener_array: Vec<Rc<RefCell<dyn QueueTableListener>>>,
-    /// Java `parent.isCbUseGpu()` boundary read by `enableGpuQueueRows`.
-    pub cb_use_gpu: bool,
-    /// Java UIHarness modal-message boundary in validated queue selection.
-    pub validation_message: Option<(String, String)>,
+    /// The `ProcessorTable` superclass.
+    base: ProcessorTable,
+    /// Java private final `dualSelectionQueueTable`.
+    dual_selection_queue_table: bool,
+    /// Java private `buttonGroup = null`.
+    button_group: RefCell<Option<Rc<ButtonGroup>>>,
+    /// Java private `secondaryButtonGroup = null`.
+    secondary_button_group: RefCell<Option<Rc<ButtonGroup>>>,
+    /// Java private `queueTableListenerArray = null`.
+    queue_table_listener_array: RefCell<Option<Vec<Rc<dyn QueueTableListener>>>>,
+}
+
+impl Deref for QueueTable {
+    type Target = ProcessorTable;
+    fn deref(&self) -> &ProcessorTable {
+        &self.base
+    }
 }
 
 impl QueueTable {
-    /// Java constructor.  Manager/parent/AxisID/Expander/interface arguments are
-    /// represented by their direct Network/CpuAdoc/ParallelPanel boundary values.
+    /// Java `QueueTable(BaseManager, ParallelPanel, AxisID, boolean runnable,
+    /// Expander moreLess, InterfaceType)`.
     pub fn new(
-        group_key: impl Into<String>,
-        queues: Vec<ProcessorNode>,
-        dual_selection_queue_table: bool,
-        load_units_count: usize,
-        displayed_fields: BTreeSet<String>,
+        manager: &'static dyn BaseManager,
+        parent: Weak<ParallelPanel>,
+        axis_id: AxisID,
         runnable: bool,
-        no_load: bool,
-    ) -> Self {
-        Self {
-            table: ProcessorTable::new(
-                QueueTableHooks {
-                    group_key: group_key.into(),
-                    queues,
-                    dual_selection_queue_table,
-                    load_units_count,
-                },
-                displayed_fields,
-                true,
-                runnable,
-                no_load,
-            ),
-            dual_selection_queue_table,
-            button_group: None,
-            secondary_button_group: None,
-            queue_table_listener_array: Vec::new(),
-            cb_use_gpu: false,
-            validation_message: None,
-        }
+        more_less: Option<Rc<dyn Expander>>,
+        interface_type: InterfaceType,
+    ) -> Rc<QueueTable> {
+        // super(manager, parent, axisID, true, runnable, moreLess, interfaceType);
+        // dualSelectionQueueTable = manager.isDualSelectionQueueTable();
+        // (The superclass constructor calls no method that reads
+        // dualSelectionQueueTable; `getSize` is only called by `createTable`.)
+        let instance = Rc::new(QueueTable {
+            base: ProcessorTable::new(manager, parent, axis_id, runnable),
+            dual_selection_queue_table: manager.is_dual_selection_queue_table(),
+            button_group: RefCell::new(None),
+            secondary_button_group: RefCell::new(None),
+            queue_table_listener_array: RefCell::new(None),
+        });
+        let this = Rc::downgrade(&instance) as Weak<dyn ProcessorTableVirtual>;
+        instance.base.set_this(this);
+        // displayQueues is true.
+        instance.base.construct(true, more_less, interface_type);
+        instance
     }
 
-    /// Java `getProcessorType`.
-    pub fn get_processor_type(&self) -> &'static str {
-        "QUEUE"
+    /// Java `@Override getProcessorType()`.
+    pub fn get_processor_type(&self) -> ProcessorType {
+        ProcessorType::Queue
     }
 
-    /// Java `getStorePrepend`.
+    /// Java `@Override getStorePrepend()`.
     pub fn get_store_prepend(&self) -> String {
-        self.table.hooks.get_store_prepend()
+        format!("{}{}", self.base.get_group_key(), PREPEND)
     }
 
-    /// Java `getLoadPrepend`.
-    pub fn get_load_prepend(&self, version: &str) -> String {
-        self.table.hooks.get_load_prepend(version)
+    /// Java `@Override getLoadPrepend(ConstEtomoVersion)`.
+    pub fn get_load_prepend(&self, _version: &dyn ConstEtomoVersion) -> String {
+        format!("{}{}", self.base.get_group_key(), PREPEND)
     }
 
-    /// Java `getSize`, including the ButtonGroup initialization side effect.
-    pub fn get_size(&mut self) -> usize {
-        self.button_group = Some(ButtonGroupBoundary::default());
+    /// Java `@Override getSize()`.
+    pub fn get_size(&self) -> i32 {
+        *self.button_group.borrow_mut() = Some(ButtonGroup::new());
         if self.dual_selection_queue_table {
-            self.secondary_button_group = Some(ButtonGroupBoundary::default());
+            *self.secondary_button_group.borrow_mut() = Some(ButtonGroup::new());
         }
-        self.table.hooks.queues.len()
+        Network::get_num_queues()
     }
 
-    /// Java `getNode(int)` after the Network boundary.
-    pub fn get_node(&self, index: usize) -> Option<&ProcessorNode> {
-        self.table.hooks.queues.get(index)
+    /// Java `@Override getNode(int)`.
+    pub fn get_node(&self, index: i32) -> Option<Arc<Node>> {
+        Network::get_queue_by_index(index)
     }
 
-    /// Java `createProcessorTableRow`.
+    /// Java `@Override createProcessorTableRow(ProcessorTable, Node, int,
+    /// ProcessorTableState)`.
     pub fn create_processor_table_row(
         &self,
-        node: &ProcessorNode,
-        num_rows_in_table: usize,
-    ) -> ProcessorTableRow {
+        processor_table: &Rc<dyn ProcessorTableVirtual>,
+        node: &Node,
+        num_rows_in_table: i32,
+        table_state: &Rc<ProcessorTableState>,
+    ) -> Rc<ProcessorTableRow> {
+        let cpus = node.get_cpus();
+        let mut i_cpus = 0;
+        // Java `cpus != null`: Node.getCpus() never returns null in the
+        // translation.
+        if !cpus.is_null() {
+            i_cpus = cpus.get_int();
+        }
+        let button_group = self.button_group.borrow().clone();
+        let secondary_button_group = self.secondary_button_group.borrow().clone();
         ProcessorTableRow::get_queue_instance(
-            node.clone(),
+            processor_table,
+            node,
+            i_cpus,
             self.dual_selection_queue_table,
-            self.table.hooks.load_units_count.max(1),
+            button_group.as_ref(),
+            secondary_button_group.as_ref(),
+            1.max(cpu_adoc::INSTANCE.get_load_units_array().len() as i32),
             num_rows_in_table,
+            table_state,
         )
     }
 
-    /// Java `createTable`, with its pre-build ButtonGroup initialization.
-    pub fn create_table(&mut self) {
-        self.get_size();
-        self.table.create_table();
-        if let Some(group) = &mut self.button_group {
-            group.members = self
-                .table
-                .row_list
-                .list
-                .iter()
-                .map(|row| row.computer.clone())
-                .collect();
-        }
-        if let Some(group) = &mut self.secondary_button_group {
-            group.members = self
-                .table
-                .row_list
-                .list
-                .iter()
-                .filter(|row| row.has_secondary_queue)
-                .map(|row| row.computer.clone())
-                .collect();
-        }
-    }
-
-    /// Java `enableGpuQueueRows`.
-    pub fn enable_gpu_queue_rows(&mut self) {
+    /// Java public `@Override enableGpuQueueRows()`.
+    pub fn enable_gpu_queue_rows(&self) {
+        // The dual selection queue table cannot use the simple isUseGpu
+        // functionality.
         if self.dual_selection_queue_table {
             return;
         }
-        let queues: Vec<(String, bool)> = self
-            .table
-            .hooks
-            .queues
-            .iter()
-            .map(|queue| (queue.name.clone(), queue.is_gpu))
-            .collect();
-        for (name, is_gpu) in queues {
-            self.table.enable_queue_row(
-                &name,
-                if is_gpu {
-                    self.cb_use_gpu
+        let mut i = 0;
+        while i < self.get_size() {
+            // Java `getNode(i)` is non-null for every index below getSize().
+            if let Some(curr_node) = self.get_node(i) {
+                // When 'Use the GPU' is on, queues without a GPU should be
+                // disabled.  When 'Use the GPU' is off, queues with a GPU should
+                // be disabled.
+                let is_cb_use_gpu = self
+                    .base
+                    .parent
+                    .upgrade()
+                    .is_some_and(|parent| parent.is_cb_use_gpu());
+                // Java `Network.getQueue(currNode.getName()).isGpu()`: the queue
+                // is the node just read by name.
+                let is_gpu = Network::get_queue(Some(curr_node.get_name()))
+                    .is_some_and(|queue| queue.is_gpu());
+                if !is_gpu {
+                    self.base
+                        .enable_queue_row(Some(curr_node.get_name()), !is_cb_use_gpu);
                 } else {
-                    !self.cb_use_gpu
-                },
-            );
+                    self.base
+                        .enable_queue_row(Some(curr_node.get_name()), is_cb_use_gpu);
+                }
+            }
+            i += 1;
         }
     }
 
-    /// Java `actionPerformed(ActionEvent)`.
-    pub fn action_performed(&mut self, event_present: bool) {
-        if event_present {
-            self.enable_gpu_queue_rows();
-        }
+    /// Java public `@Override actionPerformed(ActionEvent)`.
+    pub fn action_performed(&self, _event: &ActionEvent) {
+        // Java `if (event != null)`: an event is always passed.
+        // Assuming this is a GPU event because that's the only event this class
+        // listens to.
+        self.enable_gpu_queue_rows();
     }
 
-    /// Java `addQueueTableListener`.
-    pub fn add_queue_table_listener(&mut self, listener: Rc<RefCell<dyn QueueTableListener>>) {
-        self.queue_table_listener_array.push(listener);
-        let index = self.table.get_first_selected_index();
-        let event = self.table.row_list.get_mut(index).and_then(|row| {
+    /// Java `@Override addQueueTableListener(QueueTableListener)`.
+    pub fn add_queue_table_listener(&self, listener: Rc<dyn QueueTableListener>) {
+        self.queue_table_listener_array
+            .borrow_mut()
+            .get_or_insert_with(Vec::new)
+            .push(listener);
+        // Since listeners can be added at any time, send the status to each new
+        // listener.
+        if let Some(row) = self.base.get_first_selected_row() {
             row.queue_selected_action();
-            row.queue_selected_event
-                .as_ref()
-                .map(|(queue_mode, maximum)| QueueTableEvent::QueueSelected {
-                    queue_mode: *queue_mode,
-                    maximum: Some(maximum.clone()),
-                })
-        });
-        if let Some(event) = event {
-            self.send_queue_table_event(event);
         }
     }
 
-    /// Java `queueTableEventAction`.
-    pub fn queue_table_event_action(&mut self, event: QueueTableEvent) {
-        match &event {
+    /// Java `@Override queueTableEventAction(QueueTableEvent)`.
+    pub fn queue_table_event_action(&self, event: &QueueTableEvent) {
+        // `event instanceof QueueTableDataEvent`: the data-bearing variants.
+        match event {
             QueueTableEvent::NumberJobsChanged(jobs) => {
-                if let Some(row) = self.table.get_first_selected_row() {
-                    if row.get_queue_mode() == QueueMode::Node {
-                        let index = self.table.get_first_selected_index();
-                        if let Some(row) = self.table.row_list.get_mut(index) {
-                            row.set_cpus_selected(jobs);
-                        }
+                if let Some(row) = self.base.get_first_selected_row() {
+                    let queue_mode = row.get_queue_mode();
+                    if queue_mode == Some(QueueMode::NodeWithGpu)
+                        || queue_mode == Some(QueueMode::NodeWithoutGpu)
+                    {
+                        row.set_cpus_selected(Some(jobs.as_str()));
                     }
                 }
             }
             QueueTableEvent::OnlyQueueType(queue_type) => {
-                self.set_header1_number_cpus_title(*queue_type);
+                self.set_header1_number_cpus_title(Some(*queue_type));
             }
             _ => {}
         }
-        self.table.queue_table_event_action(event);
+        self.base.queue_table_event_action_super(event);
     }
 
-    /// Java `setHeader1NumberCPUsTitle(QueueType)`.
-    pub fn set_header1_number_cpus_title(&mut self, queue_type: QueueType) {
-        if matches!(queue_type, QueueType::Node | QueueType::NodeWithoutGpu) {
-            self.table
-                .set_header1_number_cpus_title_to(NUMBER_JOBS_LABEL1);
+    /// Java `setHeader1NumberCPUsTitle(QueueType)`.  (Not overloaded in this
+    /// class; the superclass's overloads are `set_header1_number_cpus_title_void`
+    /// and `set_header1_number_cpus_title_string`.)
+    pub fn set_header1_number_cpus_title(&self, queue_type: Option<QueueType>) {
+        if queue_type == Some(QueueType::Node) || queue_type == Some(QueueType::NodeWithoutGpu) {
+            self.base
+                .set_header1_number_cpus_title_string(Some(NUMBER_JOBS_LABEL1));
         } else {
-            self.table.set_header1_number_cpus_title();
+            self.base.set_header1_number_cpus_title_void();
         }
     }
 
-    /// Java `sendQueueTableEvent`.
-    pub fn send_queue_table_event(&mut self, event: QueueTableEvent) {
-        for listener in &self.queue_table_listener_array {
-            listener
-                .borrow_mut()
-                .queue_table_event_action(event.clone());
+    /// Java `@Override sendQueueTableEvent(QueueTableEvent)`.
+    pub fn send_queue_table_event(&self, event: &QueueTableEvent) {
+        // Iterate over a copy: a listener may change the list.
+        let listeners = self.queue_table_listener_array.borrow().clone();
+        let Some(listeners) = listeners else {
+            return;
+        };
+        for listener in listeners {
+            listener.queue_table_event_action(event);
         }
-        self.table.send_queue_table_event(event);
     }
 
-    /// Java `removeQueueTableListener`.
-    pub fn remove_queue_table_listener(&mut self, listener: &Rc<RefCell<dyn QueueTableListener>>) {
-        self.queue_table_listener_array
-            .retain(|candidate| !Rc::ptr_eq(candidate, listener));
+    /// Java `@Override removeQueueTableListener(QueueTableListener)`.
+    pub fn remove_queue_table_listener(&self, listener: &Rc<dyn QueueTableListener>) {
+        if let Some(array) = self.queue_table_listener_array.borrow_mut().as_mut() {
+            // ArrayList.remove(Object): the first equal element.
+            if let Some(index) = array.iter().position(|item| Rc::ptr_eq(item, listener)) {
+                array.remove(index);
+            }
+        }
     }
 
-    /// Java `getHeader1ComputerText`.
-    pub fn get_header1_computer_text(&self) -> &'static str {
-        "Queue"
+    /// Java `@Override getHeader1ComputerText()`.
+    pub fn get_header1_computer_text(&self) -> Option<String> {
+        Some("Queue".to_string())
     }
 
-    /// Java `getNoCpusSelectedErrorMessage`.
-    pub fn get_no_cpus_selected_error_message(&self) -> &'static str {
-        "A queue must be selected."
+    /// Java `@Override getNoCpusSelectedErrorMessage()`.
+    pub fn get_no_cpus_selected_error_message(&self) -> Option<String> {
+        Some("A queue must be selected.".to_string())
     }
 
-    /// Java `useUsersColumn`.
+    /// Java `useUsersColumn()`.
     pub fn use_users_column(&self) -> bool {
         false
     }
 
-    /// Java `isQueueTable`.
+    /// Java `@Override isQueueTable()`.
     pub fn is_queue_table(&self) -> bool {
         true
     }
 
-    /// Java `isCpuTable`.
+    /// Java `@Override isCpuTable()`.
     pub fn is_cpu_table(&self) -> bool {
         false
     }
 
-    /// Java `isGpuTable`.
+    /// Java `@Override isGpuTable()`.
     pub fn is_gpu_table(&self) -> bool {
         false
     }
 
-    /// Java `getParameters(ProcesschunksParam)`.
-    pub fn get_processchunks_parameters(&self, param: &mut ProcesschunksParameters) {
-        if !self.table.is_secondary() {
-            param.queue = self.table.get_first_selected_computer().map(str::to_owned);
-            if let Some(row) = self.table.get_first_selected_secondary_queue_row() {
-                row.get_secondary_processchunks_parameters(param, true);
+    /// Java `@Override getParameters(ProcesschunksParam)`.
+    pub fn get_parameters_processchunks_param(&self, param: &ProcesschunksParam) {
+        // Avoid loading parameters if this is a secondary table. Only some GPU
+        // parameters can be loaded from the secondary table.
+        if !self.base.is_secondary() {
+            let queue = self.base.get_first_selected_computer();
+            let node = Network::get_queue(queue.as_deref());
+            if let Some(node) = &node {
+                node.get_parameters_processchunks(param);
+            }
+            param.set_queue(queue.as_deref());
+            // Set secondary queue values
+            let node = self.base.get_selected_secondary_queue_node();
+            if let Some(node) = &node {
+                node.get_secondary_parameters_processchunks(param);
             } else {
-                param.secondary_number = None;
+                param.reset_secondary_queue();
+            }
+            let row = self.base.get_first_selected_secondary_queue_row();
+            if let Some(row) = &row {
+                row.get_secondary_parameters_processchunks_param(param);
+            } else {
+                param.reset_secondary_queue();
             }
         }
-        for row in &self.table.row_list.list {
-            row.get_processchunks_parameters(param, false, self.table.is_secondary(), true, false);
-        }
+        self.base.get_parameters_processchunks_param_super(param);
     }
 
-    /// Java `getParameters(ProcessingMethod,BatchruntomoParam,boolean)`.
-    pub fn get_parameters(
-        &mut self,
-        method: ProcessingMethod,
-        param: &mut BatchruntomoParameters,
+    /// Java `@Override getParameters(ProcessingMethod, BatchruntomoParam,
+    /// boolean)`.
+    pub fn get_parameters_processing_method_batchruntomo_param_boolean(
+        &self,
+        method: Option<ProcessingMethod>,
+        param: &mut BatchruntomoParam,
         do_validation: bool,
     ) -> bool {
-        if method == ProcessingMethod::PpCpu {
-            param.cpu_machines.clear();
-            self.get_batchruntomo_parameters(param);
-        } else if method == ProcessingMethod::Queue {
-            self.get_batchruntomo_parameters(param);
-            if !self.table.is_secondary()
-                && self.table.get_first_selected_computer().is_none()
-                && do_validation
-            {
-                self.validation_message =
-                    Some(("Please select a queue".into(), "No Queue Selected".into()));
-                return false;
+        if method == Some(ProcessingMethod::PpCpu) {
+            param.reset_cpu_machine_list();
+            self.get_parameters_batchruntomo_param(param);
+        } else if method == Some(ProcessingMethod::Queue) {
+            self.get_parameters_batchruntomo_param(param);
+            // Avoid loading parameters if this is a secondary table. Only some GPU
+            // parameters can be loaded from the secondary table.
+            if !self.base.is_secondary() {
+                let queue = self.base.get_first_selected_computer();
+                if queue.is_none() && do_validation {
+                    ui_harness::with(|harness| {
+                        harness.open_message_dialog_base_manager_string_string(
+                            Some(self.base.manager),
+                            "Please select a queue",
+                            "No Queue Selected",
+                        )
+                    });
+                    return false;
+                }
+                let node = Network::get_queue(queue.as_deref());
+                if let Some(node) = &node {
+                    node.get_parameters_batchruntomo(param);
+                }
             }
         }
         true
     }
 
-    /// Java `getParameters(BatchruntomoParam)`.
-    pub fn get_batchruntomo_parameters(&self, param: &mut BatchruntomoParameters) {
-        if let Some(row) = self.table.get_first_selected_row() {
-            row.get_batchruntomo_parameters(param, true, false, false);
+    /// Java `@Override getParameters(BatchruntomoParam)`.  Only one row can be
+    /// selected as the primary queue.
+    pub fn get_parameters_batchruntomo_param(&self, param: &mut BatchruntomoParam) {
+        let row = self.base.get_first_selected_row();
+        if let Some(row) = &row {
+            row.get_parameters_batchruntomo_param(param);
         }
-        if let Some(row) = self.table.get_first_selected_secondary_queue_row() {
-            row.get_secondary_batchruntomo_parameters(param, true);
+        // Set secondary queue values
+        let row = self.base.get_first_selected_secondary_queue_row();
+        if let Some(row) = &row {
+            row.get_secondary_parameters_batchruntomo_param(param);
         } else {
-            param.max_gpu_jobs_on_queue = None;
+            param.reset_secondary_queue();
+        }
+        let node = self.base.get_selected_secondary_queue_node();
+        if let Some(node) = &node {
+            node.get_secondary_parameters_batchruntomo(param);
+        } else {
+            param.reset_secondary_queue();
         }
     }
 
-    /// Java `getIntermittentCommand`.
-    pub fn get_intermittent_command(&self, computer: impl Into<String>) -> QueuechunkParamBoundary {
-        QueuechunkParamBoundary {
-            computer: computer.into(),
+    /// Java `@Override getIntermittentCommand(String)`.
+    pub fn get_intermittent_command_string(
+        &self,
+        computer: Option<&str>,
+    ) -> Arc<dyn IntermittentCommand> {
+        Arc::new(QueuechunkParam::get_load_instance(
+            computer,
+            self.base.axis_id,
+            self.base.manager,
+        )) as Arc<dyn IntermittentCommand>
+    }
+
+    /// Java `@Override isExcludeNode(Node)`.
+    pub fn is_exclude_node(&self, node: &Node) -> bool {
+        // Java `if (node == null) return false;`: a node is always passed.
+        if self.dual_selection_queue_table
+            && node.get_queue_mode() == QueueMode::Invalid
+            && !node.is_secondary_queue()
+        {
+            return true;
         }
+        false
     }
 
-    /// Java `isExcludeNode`.
-    pub fn is_exclude_node(&self, node: &ProcessorNode) -> bool {
-        self.dual_selection_queue_table
-            && node.queue_mode == QueueMode::Invalid
-            && !node.secondary_queue
-    }
-
-    /// Java `isNiceable`.
+    /// Java `@Override isNiceable()`.
     pub fn is_niceable(&self) -> bool {
         true
     }
 
-    /// Java `initRow` has an empty body.
-    pub fn init_row(&self, _: &mut ProcessorTableRow) {}
+    /// Java `@Override initRow(ProcessorTableRow)` (empty).
+    pub fn init_row(&self, _row: &Rc<ProcessorTableRow>) {}
 }
 
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[derive(Default)]
-    struct Listener {
-        events: Vec<QueueTableEvent>,
+impl ProcessorTableVirtual for QueueTable {
+    fn processor_table(&self) -> &ProcessorTable {
+        &self.base
     }
-    impl QueueTableListener for Listener {
-        fn queue_table_event_action(&mut self, event: QueueTableEvent) {
-            self.events.push(event);
-        }
+    fn get_size(&self) -> i32 {
+        QueueTable::get_size(self)
     }
-
-    fn queue(name: &str, is_gpu: bool, mode: QueueMode) -> ProcessorNode {
-        ProcessorNode {
-            name: name.into(),
-            num_cpus: 8,
-            is_gpu,
-            queue_mode: mode,
-            ..ProcessorNode::default()
-        }
+    fn get_node(&self, index: i32) -> Option<Arc<Node>> {
+        QueueTable::get_node(self, index)
     }
-
-    #[test]
-    fn source_identity_groups_and_gpu_enablement_are_preserved() {
-        let mut table = QueueTable::new(
-            "group",
-            vec![
-                queue("cpu", false, QueueMode::Queue),
-                queue("gpu", true, QueueMode::Queue),
-            ],
-            false,
-            0,
-            BTreeSet::new(),
-            true,
-            true,
-        );
-        assert_eq!(table.get_processor_type(), "QUEUE");
-        assert_eq!(table.get_store_prepend(), "group.Queue");
-        assert_eq!(table.get_load_prepend("0.0"), "group.Queue");
-        table.create_table();
-        assert_eq!(table.button_group.as_ref().unwrap().members, ["cpu", "gpu"]);
-        table.cb_use_gpu = true;
-        table.action_performed(true);
-        assert!(!table.table.get_row("cpu").unwrap().selection_enabled);
-        assert!(table.table.get_row("gpu").unwrap().selection_enabled);
+    fn create_processor_table_row(
+        &self,
+        processor_table: &Rc<dyn ProcessorTableVirtual>,
+        node: &Node,
+        num_rows_in_table: i32,
+        table_state: &Rc<ProcessorTableState>,
+    ) -> Rc<ProcessorTableRow> {
+        QueueTable::create_processor_table_row(
+            self,
+            processor_table,
+            node,
+            num_rows_in_table,
+            table_state,
+        )
     }
-
-    #[test]
-    fn data_events_update_jobs_header_rows_and_listener_dispatch() {
-        let mut table = QueueTable::new(
-            "",
-            vec![queue("node", false, QueueMode::Node)],
-            true,
-            1,
-            BTreeSet::new(),
-            true,
-            true,
-        );
-        table.create_table();
-        table.queue_table_event_action(QueueTableEvent::NumberJobsChanged("6".into()));
-        assert_eq!(table.table.get_row("node").unwrap().cpus_selected, 6);
-        table.queue_table_event_action(QueueTableEvent::OnlyQueueType(QueueType::Node));
-        assert_eq!(table.table.header1_number_cpus, NUMBER_JOBS_LABEL1);
-        let listener = Rc::new(RefCell::new(Listener::default()));
-        table.add_queue_table_listener(listener.clone());
-        table.send_queue_table_event(QueueTableEvent::Displayed);
-        assert_eq!(
-            listener.borrow().events,
-            vec![
-                QueueTableEvent::QueueSelected {
-                    queue_mode: QueueMode::Node,
-                    maximum: Some("8".into()),
-                },
-                QueueTableEvent::Displayed,
-            ]
-        );
+    fn get_header1_computer_text(&self) -> Option<String> {
+        QueueTable::get_header1_computer_text(self)
     }
-
-    #[test]
-    fn queue_validation_and_secondary_boundary_follow_source() {
-        let mut table = QueueTable::new("", vec![], false, 1, BTreeSet::new(), true, true);
-        let mut params = BatchruntomoParameters::default();
-        assert!(!table.get_parameters(ProcessingMethod::Queue, &mut params, true));
-        assert_eq!(
-            table.validation_message,
-            Some(("Please select a queue".into(), "No Queue Selected".into()))
-        );
-        let mut chunks = ProcesschunksParameters::default();
-        table.get_processchunks_parameters(&mut chunks);
-        assert_eq!(chunks.secondary_number, None);
+    fn get_intermittent_command_string(
+        &self,
+        computer: Option<&str>,
+    ) -> Arc<dyn IntermittentCommand> {
+        QueueTable::get_intermittent_command_string(self, computer)
+    }
+    fn is_exclude_node(&self, node: &Node) -> bool {
+        QueueTable::is_exclude_node(self, node)
+    }
+    fn is_niceable(&self) -> bool {
+        QueueTable::is_niceable(self)
+    }
+    fn get_store_prepend(&self) -> String {
+        QueueTable::get_store_prepend(self)
+    }
+    fn get_load_prepend(&self, version: &dyn ConstEtomoVersion) -> String {
+        QueueTable::get_load_prepend(self, version)
+    }
+    fn init_row(&self, row: &Rc<ProcessorTableRow>) {
+        QueueTable::init_row(self, row)
+    }
+    fn get_no_cpus_selected_error_message(&self) -> Option<String> {
+        QueueTable::get_no_cpus_selected_error_message(self)
+    }
+    fn is_queue_table(&self) -> bool {
+        QueueTable::is_queue_table(self)
+    }
+    fn is_cpu_table(&self) -> bool {
+        QueueTable::is_cpu_table(self)
+    }
+    fn is_gpu_table(&self) -> bool {
+        QueueTable::is_gpu_table(self)
+    }
+    fn get_parameters_processing_method_batchruntomo_param_boolean(
+        &self,
+        method: Option<ProcessingMethod>,
+        param: &mut BatchruntomoParam,
+        do_validation: bool,
+    ) -> bool {
+        QueueTable::get_parameters_processing_method_batchruntomo_param_boolean(
+            self,
+            method,
+            param,
+            do_validation,
+        )
+    }
+    fn get_processor_type(&self) -> ProcessorType {
+        QueueTable::get_processor_type(self)
+    }
+    fn get_parameters_processchunks_param(&self, param: &ProcesschunksParam) {
+        QueueTable::get_parameters_processchunks_param(self, param)
+    }
+    fn get_parameters_batchruntomo_param(&self, param: &mut BatchruntomoParam) {
+        QueueTable::get_parameters_batchruntomo_param(self, param)
+    }
+    fn get_machine_map(&self, param: &BatchruntomoParam) -> Option<HashMap<String, String>> {
+        // Not overridden by QueueTable.
+        self.base.get_machine_map_super(param)
+    }
+    fn action_performed_virtual(&self, event: &ActionEvent) {
+        QueueTable::action_performed(self, event)
+    }
+    fn add_queue_table_listener(&self, listener: Rc<dyn QueueTableListener>) {
+        QueueTable::add_queue_table_listener(self, listener)
+    }
+    fn send_queue_table_event(&self, event: &QueueTableEvent) {
+        QueueTable::send_queue_table_event(self, event)
+    }
+    fn remove_queue_table_listener(&self, listener: &Rc<dyn QueueTableListener>) {
+        QueueTable::remove_queue_table_listener(self, listener)
+    }
+    fn queue_table_event_action(&self, event: &QueueTableEvent) {
+        QueueTable::queue_table_event_action(self, event)
+    }
+    fn enable_gpu_queue_rows(&self) {
+        QueueTable::enable_gpu_queue_rows(self)
     }
 }
+
+crate::processor_table_interfaces!(QueueTable);

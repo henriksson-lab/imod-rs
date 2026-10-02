@@ -1,676 +1,592 @@
 //! `IMOD/Etomo/src/etomo/ui/swing/Beads3dFindPanel.java`.
 //!
-//! The four child Swing panels and `ApplicationManager` are intentionally
-//! explicit boundaries.  This module retains the source unit's panel ordering,
-//! parameter routing, display selection, and the `tilt3dFindAction` process
-//! decision without making a second workflow controller.
-#![allow(dead_code)]
+//! Java `final class Beads3dFindPanel implements
+//! NewstackOrBlendmont3dFindParent, Tilt3dFindParent, Expandable`: panel to
+//! use findbeads3d to find all the beads in an existing or newly created
+//! aligned stack which is used to generate a tomogram.  An EDT object:
+//! created as `Rc<Self>` by [`Beads3dFindPanel::get_instance`]; every method
+//! takes `&self`.
+//!
+//! The Java field `newstackOrBlendmont3dFindPanel` has the abstract type
+//! `NewstackOrBlendmont3dFindPanel` and is cast to the concrete subclass where
+//! the Java casts it; here it is [`NewstackOrBlendmont3dFindPanelRef`], one
+//! variant per concrete class, which derefs to the shared superclass part.
 
+use std::io;
+use std::ops::Deref;
+use std::rc::{Rc, Weak};
+
+use crate::imod::etomo::application_manager::ApplicationManager;
+use crate::imod::etomo::base_manager::BaseManager;
+use crate::imod::etomo::comscript::blendmont_param::BlendmontParam;
+use crate::imod::etomo::comscript::const_find_beads3d_param::ConstFindBeads3dParam;
+use crate::imod::etomo::comscript::const_tilt_param::ConstTiltParam;
+use crate::imod::etomo::comscript::const_tiltalign_param::ConstTiltalignParam;
+use crate::imod::etomo::comscript::fortran_input_syntax_exception::FortranInputSyntaxException;
+use crate::imod::etomo::comscript::newst_param::NewstParam;
+use crate::imod::etomo::jdk::JComponent;
 use crate::imod::etomo::process::imod_process::Run3dmodMenuOptions;
+use crate::imod::etomo::process_series::ProcessSeries;
 use crate::imod::etomo::r#type::axis_id::AxisID;
+use crate::imod::etomo::r#type::const_meta_data::ConstMetaData;
 use crate::imod::etomo::r#type::dialog_type::DialogType;
+use crate::imod::etomo::r#type::file_type;
+use crate::imod::etomo::r#type::meta_data::MetaData;
+use crate::imod::etomo::r#type::process_name::ProcessName;
+use crate::imod::etomo::r#type::process_result_display::ProcessResultDisplayHandle;
 use crate::imod::etomo::r#type::processing_method::ProcessingMethod;
+use crate::imod::etomo::r#type::recon_screen_state::ReconScreenState;
+use crate::imod::etomo::r#type::tomogram_state::TomogramState;
 use crate::imod::etomo::r#type::view_type::ViewType;
 
-use super::newstack_or_blendmont_3d_find_parent::NewstackOrBlendmont3dFindParent;
-pub use super::newstack_or_blendmont_panel::MetaData;
-use super::newstack_or_blendmont_panel::{
-    BlendmontParam, GlobalExpandButton, NewstParam, ReconScreenState,
+use super::blendmont_3d_find_panel::Blendmont3dFindPanel;
+use super::blendmont_display::BlendmontDisplay;
+use super::deferred_3dmod_button::Deferred3dmodButton;
+use super::erase_gold_panel::EraseGoldPanel;
+use super::expand_button::ExpandButton;
+use super::expandable::Expandable;
+use super::final_aligned_stack_dialog;
+use super::find_beads3d_display::FindBeads3dDisplay;
+use super::find_beads3d_panel::FindBeads3dPanel;
+use super::global_expand_button::GlobalExpandButton;
+use super::newstack_3d_find_panel::Newstack3dFindPanel;
+use super::newstack_display::NewstackDisplay;
+use super::newstack_or_blendmont_3d_find_panel::{
+    NewstackOrBlendmont3dFindPanel, NewstackOrBlendmont3dFindPanelVirtual,
 };
-use super::panel_header::{ExpandButton, Expandable, PanelHeader, PanelHeaderState};
+use super::newstack_or_blendmont_3d_find_parent::NewstackOrBlendmont3dFindParent;
+use super::newstack_or_blendmont_panel;
+use super::panel_header::PanelHeader;
+use super::process_display::ProcessDisplay;
+use super::reproject_model_panel::ReprojectModelPanel;
+use super::spaced_panel::SpacedPanel;
+use super::tilt_display::TiltDisplay;
+use super::tilt3d_find_panel::Tilt3dFindPanel;
+use super::tilt3d_find_parent::Tilt3dFindParent;
+use super::tomogram_generation_parent::TomogramGenerationParent;
+use super::ui_harness;
 
-/// Java `ConstTiltParam`, `ConstFindBeads3dParam`, `ConstTiltalignParam`, and
-/// `TomogramState` boundaries owned by the still-separate child source units.
-#[derive(Clone, Debug, Default, Eq, PartialEq)]
-pub struct TiltParam;
-#[derive(Clone, Debug, Default, Eq, PartialEq)]
-pub struct FindBeads3dParam;
-#[derive(Clone, Debug, Default, Eq, PartialEq)]
-pub struct TiltalignParam;
-#[derive(Clone, Debug, Default, Eq, PartialEq)]
-pub struct TomogramState;
-
-/// Java `ProcessResultDisplay` and `Deferred3dmodButton` action boundaries.
-#[derive(Clone, Debug, Default, Eq, PartialEq)]
-pub struct ProcessResultDisplay;
-#[derive(Clone, Debug, Default, Eq, PartialEq)]
-pub struct Deferred3dmodButton;
-
-/// Java `NewstackDisplay`, `BlendmontDisplay`, and `TiltDisplay` boundaries
-/// returned by this source unit.  `FindBeads3dDisplay` is the canonical
-/// interface in its own source module; this panel's `F` is its implementation.
-#[derive(Clone, Debug, Default, Eq, PartialEq)]
-pub struct NewstackDisplay;
-#[derive(Clone, Debug, Default, Eq, PartialEq)]
-pub struct BlendmontDisplay;
-#[derive(Clone, Debug, Default, Eq, PartialEq)]
-pub struct TiltDisplay;
-
-/// State the source receives from `ReconScreenState` beyond its translated
-/// common stack fields.
-#[derive(Clone, Debug, Default, Eq, PartialEq)]
-pub struct Beads3dFindScreenState {
-    pub stack_align_and_tilt_header_state: PanelHeaderState,
-    pub find_beads_parameter_set_count: u32,
-    pub reproject_model_parameter_set_count: u32,
+/// The Java field type `NewstackOrBlendmont3dFindPanel` (abstract): the
+/// concrete instance the constructor chose.
+#[derive(Clone)]
+pub enum NewstackOrBlendmont3dFindPanelRef {
+    /// A `Newstack3dFindPanel` (non-montage).
+    Newstack(Rc<Newstack3dFindPanel>),
+    /// A `Blendmont3dFindPanel` (montage).
+    Blendmont(Rc<Blendmont3dFindPanel>),
 }
 
-/// Abstract `NewstackOrBlendmont3dFindPanel` methods invoked by this Java source unit.
-/// The concrete abstract-base state is in `newstack_or_blendmont_3d_find_panel`.
-pub trait NewstackOrBlendmont3dFindPanelDisplay {
-    fn get_binning(&self) -> i32;
-    fn get_3dmod_button(&self) -> Deferred3dmodButton;
-    fn initialize(&mut self);
-    fn validate(&self) -> bool;
-    fn get_parameters(&mut self, meta_data: &mut MetaData);
-    fn set_parameters_meta_data(&mut self, meta_data: &MetaData);
-    fn set_parameters_blendmont(&mut self, param: &BlendmontParam);
-    fn set_parameters_newst(&mut self, param: &NewstParam);
+impl Deref for NewstackOrBlendmont3dFindPanelRef {
+    type Target = NewstackOrBlendmont3dFindPanel;
+    fn deref(&self) -> &NewstackOrBlendmont3dFindPanel {
+        match self {
+            Self::Newstack(panel) => panel,
+            Self::Blendmont(panel) => panel,
+        }
+    }
+}
+
+impl NewstackOrBlendmont3dFindPanelRef {
+    /// Java virtual `runProcess(ProcessResultDisplay, ProcessSeries,
+    /// Run3dmodMenuOptions)`, dispatched to the subclass.
     fn run_process(
-        &mut self,
-        process_result_display: &ProcessResultDisplay,
-        process_series: &mut ProcessSeries,
+        &self,
+        process_result_display: Option<ProcessResultDisplayHandle>,
+        process_series: Option<crate::imod::etomo::process_series::ProcessSeriesHandle>,
         run_3dmod_menu_options: Option<Run3dmodMenuOptions>,
-    );
-}
-
-/// `Tilt3dFindPanel` methods invoked by this Java source unit.
-pub trait Tilt3dFindPanel {
-    fn reregister_processing_method_mediator(&mut self);
-    fn get_processing_method(&self) -> ProcessingMethod;
-    fn done(&mut self);
-    fn set_state(&mut self, state: &TomogramState, meta_data: &MetaData);
-    fn set_parameters_tilt(&mut self, param: &TiltParam, initialize: bool);
-    fn set_parameters_tiltalign(&mut self, param: &TiltalignParam, initialize: bool);
-    fn set_override_parameters(&mut self, meta_data: &MetaData);
-    fn get_parameters(&mut self, meta_data: &mut MetaData);
-    fn set_parameters_meta_data(&mut self, meta_data: &MetaData);
-    fn tilt_3d_find_action(
-        &mut self,
-        process_result_display: &ProcessResultDisplay,
-        deferred_3dmod_button: Option<&Deferred3dmodButton>,
-        run_3dmod_menu_options: Option<Run3dmodMenuOptions>,
-    );
-}
-
-/// `FindBeads3dPanel` methods invoked by this Java source unit.
-pub trait FindBeads3dPanel {
-    fn done(&mut self);
-    fn update_advanced(&mut self, advanced: bool);
-    fn is_advanced(&self) -> bool;
-    fn get_bead_size(&self) -> String;
-    fn set_parameters(&mut self, param: &FindBeads3dParam, initialize: bool);
-    fn set_parameters_screen_state(&mut self, screen_state: &Beads3dFindScreenState);
-    fn get_parameters_screen_state(&mut self, screen_state: &mut Beads3dFindScreenState);
-}
-
-/// `ReprojectModelPanel` methods invoked by this Java source unit.
-pub trait ReprojectModelPanel {
-    fn done(&mut self);
-    fn set_parameters_screen_state(&mut self, screen_state: &Beads3dFindScreenState);
-}
-
-/// Direct `ApplicationManager` calls made by `Beads3dFindPanel.java`.
-pub trait Beads3dFindPanelApplicationManager {
-    fn view_type(&self) -> ViewType;
-    fn aligned_stack_exists(&self, axis_id: AxisID) -> bool;
-    fn equals_binning(&self, axis_id: AxisID, binning: i32) -> bool;
-    fn set_stack_using_newst_or_blend_3d_find_output(&mut self, axis_id: AxisID, value: bool);
-    fn pack(&mut self, axis_id: AxisID);
-    fn open_missing_aligned_stack_message(&mut self, axis_id: AxisID);
-}
-
-/// Java `ProcessSeries` state constructed when aligned-stack generation must
-/// precede `tilt_3dfind`.
-#[derive(Clone, Debug, Eq, PartialEq)]
-pub struct ProcessSeries {
-    pub axis_id: AxisID,
-    pub dialog_type: DialogType,
-    pub next_process: Option<(String, ProcessingMethod)>,
-    pub callback_name: String,
-}
-
-impl ProcessSeries {
-    /// Java `new ProcessSeries(..., tilt3dFindPanel, "tilt3dFindAction")`.
-    pub fn new(axis_id: AxisID, dialog_type: DialogType) -> Self {
-        Self {
-            axis_id,
-            dialog_type,
-            next_process: None,
-            callback_name: "tilt3dFindAction".into(),
-        }
-    }
-
-    /// Java `setNextProcess(ProcessName.TILT_3D_FIND.toString(), method)`.
-    pub fn set_next_process(&mut self, processing_method: ProcessingMethod) {
-        self.next_process = Some(("tilt_3dfind".into(), processing_method));
-    }
-}
-
-/// Source-visible Swing layout created by `createPanel`.
-#[derive(Clone, Debug, Default, Eq, PartialEq)]
-pub struct Beads3dFindPanelLayout {
-    pub root_box_layout_y_axis: bool,
-    pub root_component_order: Vec<String>,
-    pub generate_tomogram_box_layout_y_axis: bool,
-    pub generate_tomogram_etched_border: bool,
-    pub generate_tomogram_component_order: Vec<String>,
-    pub generate_tomogram_body_box_layout_y_axis: bool,
-    pub generate_tomogram_body_component_order: Vec<String>,
-    pub generate_tomogram_body_visible: bool,
-    pub root_visible: bool,
-}
-
-/// Java final `Beads3dFindPanel`; child panels are generic so their translated
-/// units can replace these direct interfaces without an adapter layer.
-pub struct Beads3dFindPanel<N, T, F, R> {
-    pub pnl_root: Beads3dFindPanelLayout,
-    pub newstack_or_blendmont_3d_find_panel: N,
-    pub tilt_3d_find_panel: T,
-    pub find_beads_3d_panel: F,
-    pub reproject_model_panel: R,
-    pub axis_id: AxisID,
-    pub dialog_type: DialogType,
-    pub header: PanelHeader,
-    pub view_type: ViewType,
-}
-
-impl<N, T, F, R> Beads3dFindPanel<N, T, F, R>
-where
-    N: NewstackOrBlendmont3dFindPanelDisplay,
-    T: Tilt3dFindPanel,
-    F: FindBeads3dPanel,
-    R: ReprojectModelPanel,
-{
-    /// Java constructor.  Child factory selection is an owner boundary; the
-    /// selected child object and source `ViewType` are stored unchanged.
-    pub fn new(
-        newstack_or_blendmont_3d_find_panel: N,
-        tilt_3d_find_panel: T,
-        find_beads_3d_panel: F,
-        reproject_model_panel: R,
-        axis_id: AxisID,
-        dialog_type: DialogType,
-        view_type: ViewType,
-        _global_advanced_button: &GlobalExpandButton,
-    ) -> Self {
-        Self {
-            pnl_root: Beads3dFindPanelLayout {
-                root_visible: true,
-                ..Default::default()
-            },
-            newstack_or_blendmont_3d_find_panel,
-            tilt_3d_find_panel,
-            find_beads_3d_panel,
-            reproject_model_panel,
-            axis_id,
-            dialog_type,
-            header: PanelHeader::new(
-                "Align Stack and Create Tomogram",
-                false,
-                false,
-                dialog_type,
-                true,
-                false,
-                true,
-                false,
-                true,
+    ) {
+        match self {
+            Self::Newstack(panel) => NewstackOrBlendmont3dFindPanelVirtual::run_process(
+                &**panel,
+                process_result_display,
+                process_series,
+                run_3dmod_menu_options,
             ),
-            view_type,
+            Self::Blendmont(panel) => NewstackOrBlendmont3dFindPanelVirtual::run_process(
+                &**panel,
+                process_result_display,
+                process_series,
+                run_3dmod_menu_options,
+            ),
         }
     }
+}
 
-    /// Java static `getInstance` after its caller has selected the source child
-    /// factory (`Blendmont3dFindPanel` for MONTAGE, otherwise `Newstack3dFindPanel`).
-    pub fn get_instance(
-        newstack_or_blendmont_3d_find_panel: N,
-        tilt_3d_find_panel: T,
-        find_beads_3d_panel: F,
-        reproject_model_panel: R,
+/// Java `final class Beads3dFindPanel`.
+pub struct Beads3dFindPanel {
+    /// Java private final `pnlRoot = SpacedPanel.getInstance()`.
+    pnl_root: Rc<SpacedPanel>,
+    /// Java private final `pnlGenerateTomogramBody = new JPanel()`.
+    pnl_generate_tomogram_body: Rc<JComponent>,
+    /// Java private final `newstackOrBlendmont3dFindPanel`.
+    newstack_or_blendmont_3d_find_panel: NewstackOrBlendmont3dFindPanelRef,
+    /// Java private final `tilt3dFindPanel`.
+    tilt3d_find_panel: Rc<Tilt3dFindPanel>,
+    /// Java private final `findBeads3dPanel`.
+    find_beads3d_panel: Rc<FindBeads3dPanel>,
+    /// Java private final `reprojectModelPanel`.
+    reproject_model_panel: Rc<ReprojectModelPanel>,
+    /// Java private final `manager`.
+    manager: &'static ApplicationManager,
+    /// Java private final `axisID`.
+    axis_id: AxisID,
+    /// Java private final `dialogType`.
+    dialog_type: DialogType,
+    /// Java private final `header`.
+    header: Rc<PanelHeader>,
+    /// Java private final `parent` (held weakly: the parent owns this panel).
+    parent: Weak<EraseGoldPanel>,
+}
+
+impl Beads3dFindPanel {
+    /// Java package-private constructor `Beads3dFindPanel(ApplicationManager,
+    /// EraseGoldPanel, AxisID, DialogType, GlobalExpandButton)`.
+    fn new(
+        manager: &'static ApplicationManager,
+        parent: Weak<EraseGoldPanel>,
         axis_id: AxisID,
         dialog_type: DialogType,
-        view_type: ViewType,
-        global_advanced_button: &GlobalExpandButton,
-    ) -> Self {
-        let mut instance = Self::new(
-            newstack_or_blendmont_3d_find_panel,
-            tilt_3d_find_panel,
-            find_beads_3d_panel,
-            reproject_model_panel,
+        global_advanced_button: &Rc<GlobalExpandButton>,
+    ) -> Rc<Beads3dFindPanel> {
+        Rc::new_cyclic(|this: &Weak<Beads3dFindPanel>| {
+            // Field initializers.
+            let pnl_root = SpacedPanel::get_instance_void();
+            let pnl_generate_tomogram_body = JComponent::new_panel();
+            // Constructor body.
+            let expandable: Weak<dyn Expandable> = this.clone();
+            let header = PanelHeader::get_instance(
+                Some("Align Stack and Create Tomogram"),
+                Some(expandable),
+                Some(dialog_type),
+            );
+            let nob_parent: Weak<dyn NewstackOrBlendmont3dFindParent> = this.clone();
+            let newstack_or_blendmont_3d_find_panel = if manager.get_meta_data().get_view_type()
+                == ViewType::Montage
+            {
+                NewstackOrBlendmont3dFindPanelRef::Blendmont(Blendmont3dFindPanel::get_instance(
+                    manager,
+                    axis_id,
+                    dialog_type,
+                    nob_parent.clone(),
+                ))
+            } else {
+                NewstackOrBlendmont3dFindPanelRef::Newstack(Newstack3dFindPanel::get_instance(
+                    manager,
+                    axis_id,
+                    dialog_type,
+                    nob_parent.clone(),
+                ))
+            };
+            let tilt3d_find_parent: Weak<dyn Tilt3dFindParent> = this.clone();
+            let tilt3d_find_panel = Tilt3dFindPanel::get_instance(
+                manager,
+                axis_id,
+                dialog_type,
+                tilt3d_find_parent,
+                Some(newstack_or_blendmont_3d_find_panel.get3dmod_button()),
+            );
+            let find_beads3d_panel = FindBeads3dPanel::get_instance(
+                manager,
+                nob_parent,
+                axis_id,
+                dialog_type,
+                global_advanced_button,
+            );
+            let reproject_model_panel =
+                ReprojectModelPanel::get_instance(manager, axis_id, dialog_type);
+            Beads3dFindPanel {
+                pnl_root,
+                pnl_generate_tomogram_body,
+                newstack_or_blendmont_3d_find_panel,
+                tilt3d_find_panel,
+                find_beads3d_panel,
+                reproject_model_panel,
+                manager,
+                axis_id,
+                dialog_type,
+                header,
+                parent,
+            }
+        })
+    }
+
+    /// Java static `getInstance(ApplicationManager, EraseGoldPanel, AxisID,
+    /// DialogType, GlobalExpandButton)`.
+    pub fn get_instance(
+        manager: &'static ApplicationManager,
+        parent: Weak<EraseGoldPanel>,
+        axis_id: AxisID,
+        dialog_type: DialogType,
+        global_advanced_button: &Rc<GlobalExpandButton>,
+    ) -> Rc<Beads3dFindPanel> {
+        let instance = Beads3dFindPanel::new(
+            manager,
+            parent,
             axis_id,
             dialog_type,
-            view_type,
             global_advanced_button,
         );
         instance.create_panel();
         instance
     }
 
-    /// Java `reregisterProcessingMethodMediator`.
-    pub fn reregister_processing_method_mediator(&mut self) {
-        self.tilt_3d_find_panel
+    /// Java `reregisterProcessingMethodMediator()`.
+    pub fn reregister_processing_method_mediator(&self) {
+        self.tilt3d_find_panel
             .reregister_processing_method_mediator();
     }
-    /// Java `getProcessingMethod`.
+
+    /// Java `getProcessingMethod()`.
     pub fn get_processing_method(&self) -> ProcessingMethod {
-        self.tilt_3d_find_panel.get_processing_method()
+        self.tilt3d_find_panel.get_processing_method()
     }
-    /// Java `done`.
-    pub fn done(&mut self) {
-        self.tilt_3d_find_panel.done();
-        self.find_beads_3d_panel.done();
+
+    /// Java `done()`.
+    pub fn done(&self) {
+        self.tilt3d_find_panel.done();
+        self.find_beads3d_panel.done();
         self.reproject_model_panel.done();
     }
-    /// Java `updateAdvanced`.
-    pub fn update_advanced(&mut self, advanced: bool) {
-        self.find_beads_3d_panel.update_advanced(advanced);
+
+    /// Java `updateAdvanced(boolean)`.
+    pub fn update_advanced(&self, advanced: bool) {
+        self.find_beads3d_panel.update_advanced(advanced);
     }
-    /// Java `expand(GlobalExpandButton)`, intentionally empty.
-    pub fn expand_global_button(&mut self) {}
-    /// Java `expand(ExpandButton)`.
-    pub fn expand_expand_button<M: Beads3dFindPanelApplicationManager>(
-        &mut self,
-        button: &ExpandButton,
-        manager: &mut M,
-    ) {
-        if self.header.equals_open_close(button) {
-            self.pnl_root.generate_tomogram_body_visible = button.is_expanded();
-        }
-        manager.pack(self.axis_id);
+
+    /// Java private `createPanel()`.
+    fn create_panel(&self) {
+        // Local panels
+        let pnl_generate_tomogram = JComponent::new_panel();
+        // Root panel
+        // Swing layout: pnlRoot.setBoxLayout(BoxLayout.Y_AXIS).
+        self.pnl_root.add_j_panel(&pnl_generate_tomogram);
+        self.pnl_root
+            .add_component(&self.find_beads3d_panel.get_component());
+        self.pnl_root
+            .add_component(&self.reproject_model_panel.get_component());
+        // Generate tomogram panel
+        // Swing layout: pnlGenerateTomogram BoxLayout Y_AXIS, untitled etched
+        // border.
+        pnl_generate_tomogram.add(&self.header.get_container());
+        pnl_generate_tomogram.add(&self.pnl_generate_tomogram_body);
+        // Generate tomogram body panel
+        // Swing layout: pnlGenerateTomogramBody BoxLayout Y_AXIS.
+        self.pnl_generate_tomogram_body
+            .add(&self.newstack_or_blendmont_3d_find_panel.get_component());
+        self.pnl_generate_tomogram_body
+            .add(&self.tilt3d_find_panel.get_root());
     }
-    /// Java `createPanel`.
-    pub fn create_panel(&mut self) {
-        self.pnl_root.root_box_layout_y_axis = true;
-        self.pnl_root.root_component_order = vec![
-            "pnlGenerateTomogram".into(),
-            "findBeads3dPanel".into(),
-            "reprojectModelPanel".into(),
-        ];
-        self.pnl_root.generate_tomogram_box_layout_y_axis = true;
-        self.pnl_root.generate_tomogram_etched_border = true;
-        self.pnl_root.generate_tomogram_component_order =
-            vec!["header".into(), "pnlGenerateTomogramBody".into()];
-        self.pnl_root.generate_tomogram_body_box_layout_y_axis = true;
-        self.pnl_root.generate_tomogram_body_component_order = vec![
-            "newstackOrBlendmont3dFindPanel".into(),
-            "tilt3dFindPanel".into(),
-        ];
+
+    /// Java `getComponent()`.
+    pub fn get_component(&self) -> Rc<JComponent> {
+        self.pnl_root.get_container()
     }
-    /// Java `getComponent`.
-    pub fn get_component(&self) -> &Beads3dFindPanelLayout {
-        &self.pnl_root
-    }
-    /// Java `isAdvanced`.
+
+    /// Java `isAdvanced()`.
     pub fn is_advanced(&self) -> bool {
-        self.find_beads_3d_panel.is_advanced()
+        self.find_beads3d_panel.is_advanced()
     }
-    /// Java `isMultifilt`.
-    pub fn is_multifilt(&self) -> bool {
-        false
+
+    /// Java `getNewstack3dFindDisplay()`.
+    pub fn get_newstack3d_find_display(&self) -> Option<Rc<dyn NewstackDisplay>> {
+        if self.manager.get_meta_data().get_view_type() != ViewType::Montage {
+            // (NewstackDisplay) newstackOrBlendmont3dFindPanel
+            if let NewstackOrBlendmont3dFindPanelRef::Newstack(panel) =
+                &self.newstack_or_blendmont_3d_find_panel
+            {
+                return Some(panel.clone() as Rc<dyn NewstackDisplay>);
+            }
+        }
+        None
     }
-    /// Java `isCtf3d`.
-    pub fn is_ctf_3d(&self) -> bool {
-        false
+
+    /// Java `getBlendmont3dFindDisplay()`.
+    pub fn get_blendmont3d_find_display(&self) -> Option<Rc<dyn BlendmontDisplay>> {
+        if self.manager.get_meta_data().get_view_type() == ViewType::Montage {
+            // (BlendmontDisplay) newstackOrBlendmont3dFindPanel
+            if let NewstackOrBlendmont3dFindPanelRef::Blendmont(panel) =
+                &self.newstack_or_blendmont_3d_find_panel
+            {
+                return Some(panel.clone() as Rc<dyn BlendmontDisplay>);
+            }
+        }
+        None
     }
-    /// Java `isBackProjection`.
-    pub fn is_back_projection(&self) -> bool {
-        true
+
+    /// Java `getTilt3dFindDisplay()`.
+    pub fn get_tilt3d_find_display(&self) -> Option<Rc<dyn TiltDisplay>> {
+        Some(self.tilt3d_find_panel.clone() as Rc<dyn TiltDisplay>)
     }
-    /// Java `isMethodPlugin`.
-    pub fn is_method_plugin(&self) -> bool {
-        false
+
+    /// Java `getFindBeads3dDisplay()`.
+    pub fn get_find_beads3d_display(&self) -> Option<Rc<dyn FindBeads3dDisplay>> {
+        Some(self.find_beads3d_panel.clone() as Rc<dyn FindBeads3dDisplay>)
     }
-    /// Java `isSirt`.
-    pub fn is_sirt(&self) -> bool {
-        false
+
+    /// Java `setTiltState(TomogramState, ConstMetaData)`.
+    pub fn set_tilt_state(&self, state: &TomogramState, meta_data: &dyn ConstMetaData) {
+        self.tilt3d_find_panel.set_state(state, meta_data);
     }
-    /// Java `getNewstack3dFindDisplay`; typed display ownership remains child-panel boundary.
-    pub fn get_newstack_3d_find_display(&self) -> Option<&N> {
-        (self.view_type != ViewType::Montage).then_some(&self.newstack_or_blendmont_3d_find_panel)
+
+    /// Java `setParameters(ConstTiltParam, boolean) throws
+    /// FileNotFoundException, IOException`.
+    pub fn set_parameters_const_tilt_param_boolean(
+        &self,
+        param: &dyn ConstTiltParam,
+        initialize: bool,
+    ) -> Result<(), io::Error> {
+        self.tilt3d_find_panel
+            .set_parameters_const_tilt_param_boolean(param, initialize);
+        Ok(())
     }
-    /// Java `getBlendmont3dFindDisplay`; typed display ownership remains child-panel boundary.
-    pub fn get_blendmont_3d_find_display(&self) -> Option<&N> {
-        (self.view_type == ViewType::Montage).then_some(&self.newstack_or_blendmont_3d_find_panel)
-    }
-    /// Java `getTilt3dFindDisplay`.
-    pub fn get_tilt_3d_find_display(&self) -> &T {
-        &self.tilt_3d_find_panel
-    }
-    /// Java `getFindBeads3dDisplay`.
-    pub fn get_find_beads_3d_display(&self) -> &F {
-        &self.find_beads_3d_panel
-    }
-    /// Java `setTiltState`.
-    pub fn set_tilt_state(&mut self, state: &TomogramState, meta_data: &MetaData) {
-        self.tilt_3d_find_panel.set_state(state, meta_data);
-    }
-    /// Java `setParameters(ConstTiltParam, boolean)`.
-    pub fn set_parameters_tilt(&mut self, param: &TiltParam, initialize: bool) {
-        self.tilt_3d_find_panel
-            .set_parameters_tilt(param, initialize);
-    }
+
     /// Java `setParameters(ConstFindBeads3dParam, boolean)`.
-    pub fn set_parameters_find_beads_3d(&mut self, param: &FindBeads3dParam, initialize: bool) {
-        self.find_beads_3d_panel.set_parameters(param, initialize);
+    pub fn set_parameters_const_find_beads3d_param_boolean(
+        &self,
+        param: &dyn ConstFindBeads3dParam,
+        initialize: bool,
+    ) {
+        self.find_beads3d_panel
+            .set_parameters_const_find_beads3d_param_boolean(param, initialize);
     }
-    /// Java `initialize`.
-    pub fn initialize(&mut self) {
+
+    /// Java `initialize()`.
+    pub fn initialize(&self) {
         self.newstack_or_blendmont_3d_find_panel.initialize();
     }
+
     /// Java `setParameters(ConstTiltalignParam, boolean)`.
-    pub fn set_parameters_tiltalign(&mut self, param: &TiltalignParam, initialize: bool) {
-        self.tilt_3d_find_panel
-            .set_parameters_tiltalign(param, initialize);
+    pub fn set_parameters_const_tiltalign_param_boolean(
+        &self,
+        param: &ConstTiltalignParam,
+        initialize: bool,
+    ) {
+        self.tilt3d_find_panel
+            .set_parameters_const_tiltalign_param_boolean(param, initialize);
     }
-    /// Java `setOverrideParameters`.
-    pub fn set_override_parameters(&mut self, meta_data: &MetaData) {
-        self.tilt_3d_find_panel.set_override_parameters(meta_data);
+
+    /// Java `setOverrideParameters(ConstMetaData)`.
+    pub fn set_override_parameters(&self, meta_data: &dyn ConstMetaData) {
+        self.tilt3d_find_panel.set_override_parameters(meta_data);
     }
+
     /// Java `setParameters(ReconScreenState)`.
-    pub fn set_parameters_screen_state(&mut self, screen_state: &Beads3dFindScreenState) {
+    pub fn set_parameters_recon_screen_state(&self, screen_state: &ReconScreenState) {
         self.header
-            .set_state(Some(&screen_state.stack_align_and_tilt_header_state));
-        self.find_beads_3d_panel
-            .set_parameters_screen_state(screen_state);
-        self.reproject_model_panel
-            .set_parameters_screen_state(screen_state);
+            .set_state(Some(screen_state.get_stack_align_and_tilt_header_state()));
+        self.find_beads3d_panel
+            .set_parameters_recon_screen_state(screen_state);
+        self.reproject_model_panel.set_parameters(screen_state);
     }
+
     /// Java `getParameters(ReconScreenState)`.
-    pub fn get_parameters_screen_state(&mut self, screen_state: &mut Beads3dFindScreenState) {
+    pub fn get_parameters_recon_screen_state(&self, screen_state: &ReconScreenState) {
         self.header
-            .get_state(Some(&mut screen_state.stack_align_and_tilt_header_state));
-        self.find_beads_3d_panel
-            .get_parameters_screen_state(screen_state);
+            .get_state(Some(screen_state.get_stack_align_and_tilt_header_state()));
+        self.find_beads3d_panel
+            .get_parameters_recon_screen_state(screen_state);
     }
+
     /// Java `setParameters(BlendmontParam)`.
-    pub fn set_parameters_blendmont(&mut self, param: &BlendmontParam) {
-        if self.view_type == ViewType::Montage {
-            self.newstack_or_blendmont_3d_find_panel
-                .set_parameters_blendmont(param);
+    pub fn set_parameters_blendmont_param(&self, param: &BlendmontParam) {
+        if self.manager.get_meta_data().get_view_type() == ViewType::Montage {
+            // ((Blendmont3dFindPanel) newstackOrBlendmont3dFindPanel).setParameters(param)
+            if let NewstackOrBlendmont3dFindPanelRef::Blendmont(panel) =
+                &self.newstack_or_blendmont_3d_find_panel
+            {
+                BlendmontDisplay::set_parameters(&**panel, param);
+            }
         }
     }
+
     /// Java `setParameters(NewstParam)`.
-    pub fn set_parameters_newst(&mut self, param: &NewstParam) {
-        if self.view_type != ViewType::Montage {
-            self.newstack_or_blendmont_3d_find_panel
-                .set_parameters_newst(param);
+    pub fn set_parameters_newst_param(&self, param: &NewstParam) {
+        if self.manager.get_meta_data().get_view_type() != ViewType::Montage {
+            // ((Newstack3dFindPanel) newstackOrBlendmont3dFindPanel).setParameters(param)
+            if let NewstackOrBlendmont3dFindPanelRef::Newstack(panel) =
+                &self.newstack_or_blendmont_3d_find_panel
+            {
+                NewstackDisplay::set_parameters(&**panel, param);
+            }
         }
     }
-    /// Java `setVisible`.
-    pub fn set_visible(&mut self, visible: bool) {
-        self.pnl_root.root_visible = visible;
+
+    /// Java `setVisible(boolean)`.
+    pub fn set_visible(&self, visible: bool) {
+        self.pnl_root.set_visible(visible);
     }
-    /// Java `validate`.
+
+    /// Java `validate()`.
     pub fn validate(&self) -> bool {
-        self.newstack_or_blendmont_3d_find_panel.validate()
+        NewstackOrBlendmont3dFindPanel::validate(&self.newstack_or_blendmont_3d_find_panel)
     }
-    /// Java `getParameters(MetaData)`.
-    pub fn get_parameters_meta_data(&mut self, meta_data: &mut MetaData) {
-        self.newstack_or_blendmont_3d_find_panel
-            .get_parameters(meta_data);
-        self.tilt_3d_find_panel.get_parameters(meta_data);
+
+    /// Java `getParameters(MetaData) throws FortranInputSyntaxException`.
+    pub fn get_parameters_meta_data(
+        &self,
+        meta_data: &MetaData,
+    ) -> Result<(), FortranInputSyntaxException> {
+        NewstackOrBlendmont3dFindPanel::get_parameters(
+            &self.newstack_or_blendmont_3d_find_panel,
+            meta_data,
+        );
+        self.tilt3d_find_panel.get_parameters_meta_data(meta_data)?;
+        Ok(())
     }
+
     /// Java `setParameters(ConstMetaData)`.
-    pub fn set_parameters_meta_data(&mut self, meta_data: &MetaData) {
-        self.newstack_or_blendmont_3d_find_panel
-            .set_parameters_meta_data(meta_data);
-        self.tilt_3d_find_panel.set_parameters_meta_data(meta_data);
+    pub fn set_parameters_const_meta_data(&self, meta_data: &dyn ConstMetaData) {
+        NewstackOrBlendmont3dFindPanel::set_parameters(
+            &self.newstack_or_blendmont_3d_find_panel,
+            meta_data,
+        );
+        self.tilt3d_find_panel
+            .set_parameters_const_meta_data(meta_data);
     }
-    /// Java `getBeadSize`.
+
+    /// Java override `getBeadSize()` (NewstackOrBlendmont3dFindParent).
     pub fn get_bead_size(&self) -> String {
-        self.find_beads_3d_panel.get_bead_size()
+        self.find_beads3d_panel.get_bead_size()
     }
-    /// Java `isFiducialess` delegated to `EraseGoldPanel`.
-    pub fn is_fiducialess<P: NewstackOrBlendmont3dFindParent>(&self, parent: &P) -> bool {
-        parent.is_fiducialess()
+
+    /// Java override `isFiducialess()` (NewstackOrBlendmont3dFindParent).
+    pub fn is_fiducialess(&self) -> bool {
+        // Java dereferences `parent` unconditionally; the parent owns this panel.
+        self.parent
+            .upgrade()
+            .is_some_and(|parent| parent.is_fiducialess())
     }
-    /// Java `tilt3dFindAction`.
-    pub fn tilt_3d_find_action<
-        M: Beads3dFindPanelApplicationManager,
-        P: NewstackOrBlendmont3dFindParent,
-    >(
-        &mut self,
-        manager: &mut M,
-        parent: &P,
-        process_result_display: &ProcessResultDisplay,
-        deferred_3dmod_button: Option<&Deferred3dmodButton>,
+}
+
+impl Expandable for Beads3dFindPanel {
+    /// Java override `expand(GlobalExpandButton)`: empty.
+    fn expand_global_expand_button(&self, _button: &Rc<GlobalExpandButton>) {}
+
+    /// Java override `expand(ExpandButton)`.
+    fn expand_expand_button(&self, button: &Rc<ExpandButton>) {
+        if self.header.equals_open_close(button) {
+            self.pnl_generate_tomogram_body
+                .set_visible(button.is_expanded());
+        }
+        let manager: &'static dyn BaseManager = self.manager;
+        ui_harness::INSTANCE
+            .with(|harness| harness.pack_axis_id_base_manager(Some(self.axis_id), Some(manager)));
+    }
+}
+
+impl TomogramGenerationParent for Beads3dFindPanel {
+    /// Java override `isMultifilt()`.
+    fn is_multifilt(&self) -> bool {
+        false
+    }
+
+    /// Java override `isCtf3d()`.
+    fn is_ctf3d(&self) -> bool {
+        false
+    }
+
+    /// Java override `isBackProjection()`.
+    fn is_back_projection(&self) -> bool {
+        true
+    }
+
+    /// Java override `isMethodPlugin()`.
+    fn is_method_plugin(&self) -> bool {
+        false
+    }
+
+    /// Java override `isSirt()`.
+    fn is_sirt(&self) -> bool {
+        false
+    }
+}
+
+impl NewstackOrBlendmont3dFindParent for Beads3dFindPanel {
+    /// Java override `getBeadSize()`.
+    fn get_bead_size(&self) -> String {
+        Beads3dFindPanel::get_bead_size(self)
+    }
+
+    /// Java override `isFiducialess()`.
+    fn is_fiducialess(&self) -> bool {
+        Beads3dFindPanel::is_fiducialess(self)
+    }
+}
+
+impl Tilt3dFindParent for Beads3dFindPanel {
+    /// Java override `tilt3dFindAction(ProcessResultDisplay,
+    /// Deferred3dmodButton, Run3dmodMenuOptions, ProcessingMethod)`.
+    fn tilt3d_find_action(
+        &self,
+        process_result_display: Option<ProcessResultDisplayHandle>,
+        deferred_3dmod_button: Option<Rc<dyn Deferred3dmodButton>>,
         run_3dmod_menu_options: Option<Run3dmodMenuOptions>,
         tiltp_processing_method: ProcessingMethod,
     ) {
-        if !manager.aligned_stack_exists(self.axis_id) && self.is_fiducialess(parent) {
-            manager.open_missing_aligned_stack_message(self.axis_id);
+        let manager: &'static dyn BaseManager = self.manager;
+        let aligned_stack = &file_type::CLASS.aligned_stack;
+        // The parent (this class) is responsible for running tilt_3dfind because it
+        // may have to run newst/blend_3dfind first.
+        // Validate to make sure that the binned bead size in pixels is not too
+        // small.
+        if !aligned_stack.exists(Some(manager), Some(self.axis_id))
+            && Beads3dFindPanel::is_fiducialess(self)
+        {
+            // 3D find can't handle a missing _ali file in a fiducialess dataset.
+            ui_harness::INSTANCE.with(|harness| {
+                harness.open_message_dialog_base_manager_string_string_axis_id(
+                    Some(manager),
+                    &format!(
+                        "Please go to the {} tab and press {}.",
+                        final_aligned_stack_dialog::FINAL_ALIGNED_STACK_TAB_LABEL,
+                        newstack_or_blendmont_panel::RUN_BUTTON_LABEL
+                    ),
+                    "Please Build Aligned Stack",
+                    Some(self.axis_id),
+                )
+            });
             return;
         }
         if !self.validate() {
             return;
         }
-        if !manager.aligned_stack_exists(self.axis_id)
-            || !manager.equals_binning(
+        // If the full aligned stack does not exist, or the binning of the full
+        // aligned stack is different from the binning requested here, run
+        // newst/blend_3dfind.com and then run tilt_3dfind.
+        if !aligned_stack.exists(Some(manager), Some(self.axis_id))
+            || !self.manager.equals_binning(
                 self.axis_id,
                 self.newstack_or_blendmont_3d_find_panel.get_binning(),
+                aligned_stack,
             )
         {
-            let mut process_series = ProcessSeries::new(self.axis_id, self.dialog_type);
-            process_series.set_next_process(tiltp_processing_method);
+            let process_display: Rc<dyn ProcessDisplay> = self.tilt3d_find_panel.clone();
+            let process_series = ProcessSeries::new_with_process_display(
+                manager,
+                self.axis_id,
+                Some(self.dialog_type),
+                Some(process_display),
+                Some("tilt3dFindAction"),
+            );
+            process_series.borrow_mut().set_next_process(
+                Some(&ProcessName::TILT_3D_FIND.to_string()),
+                Some(tiltp_processing_method),
+            );
             self.newstack_or_blendmont_3d_find_panel.run_process(
                 process_result_display,
-                &mut process_series,
+                Some(process_series),
                 run_3dmod_menu_options,
             );
         } else {
-            manager.set_stack_using_newst_or_blend_3d_find_output(self.axis_id, false);
-            self.tilt_3d_find_panel.tilt_3d_find_action(
+            self.manager
+                .get_state()
+                .set_stack_using_newst_or_blend_3d_find_output(self.axis_id, false);
+            // Just run tilt_3dfind.
+            self.tilt3d_find_panel.tilt3d_find_action(
                 process_result_display,
                 deferred_3dmod_button,
                 run_3dmod_menu_options,
             );
         }
-    }
-}
-
-impl<N, T, F, R> Expandable for Beads3dFindPanel<N, T, F, R>
-where
-    N: NewstackOrBlendmont3dFindPanelDisplay,
-    T: Tilt3dFindPanel,
-    F: FindBeads3dPanel,
-    R: ReprojectModelPanel,
-{
-    fn expand_expand_button(&mut self, _button: &ExpandButton) {}
-    fn expand_global_button(&mut self, _: &super::process_dialog::GlobalExpandButton) {}
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-    #[derive(Default)]
-    struct Newstack {
-        binning: i32,
-        valid: bool,
-        runs: Vec<ProcessSeries>,
-        initialized: bool,
-    }
-    impl NewstackOrBlendmont3dFindPanelDisplay for Newstack {
-        fn get_binning(&self) -> i32 {
-            self.binning
-        }
-        fn get_3dmod_button(&self) -> Deferred3dmodButton {
-            Deferred3dmodButton
-        }
-        fn initialize(&mut self) {
-            self.initialized = true
-        }
-        fn validate(&self) -> bool {
-            self.valid
-        }
-        fn get_parameters(&mut self, _: &mut MetaData) {}
-        fn set_parameters_meta_data(&mut self, _: &MetaData) {}
-        fn set_parameters_blendmont(&mut self, _: &BlendmontParam) {}
-        fn set_parameters_newst(&mut self, _: &NewstParam) {}
-        fn run_process(
-            &mut self,
-            _: &ProcessResultDisplay,
-            p: &mut ProcessSeries,
-            _: Option<Run3dmodMenuOptions>,
-        ) {
-            self.runs.push(p.clone())
-        }
-    }
-    #[derive(Default)]
-    struct Tilt {
-        runs: u32,
-    }
-    impl Tilt3dFindPanel for Tilt {
-        fn reregister_processing_method_mediator(&mut self) {}
-        fn get_processing_method(&self) -> ProcessingMethod {
-            ProcessingMethod::LocalCpu
-        }
-        fn done(&mut self) {}
-        fn set_state(&mut self, _: &TomogramState, _: &MetaData) {}
-        fn set_parameters_tilt(&mut self, _: &TiltParam, _: bool) {}
-        fn set_parameters_tiltalign(&mut self, _: &TiltalignParam, _: bool) {}
-        fn set_override_parameters(&mut self, _: &MetaData) {}
-        fn get_parameters(&mut self, _: &mut MetaData) {}
-        fn set_parameters_meta_data(&mut self, _: &MetaData) {}
-        fn tilt_3d_find_action(
-            &mut self,
-            _: &ProcessResultDisplay,
-            _: Option<&Deferred3dmodButton>,
-            _: Option<Run3dmodMenuOptions>,
-        ) {
-            self.runs += 1
-        }
-    }
-    #[derive(Default)]
-    struct Find {
-        advanced: bool,
-    }
-    impl FindBeads3dPanel for Find {
-        fn done(&mut self) {}
-        fn update_advanced(&mut self, a: bool) {
-            self.advanced = a
-        }
-        fn is_advanced(&self) -> bool {
-            self.advanced
-        }
-        fn get_bead_size(&self) -> String {
-            "10".into()
-        }
-        fn set_parameters(&mut self, _: &FindBeads3dParam, _: bool) {}
-        fn set_parameters_screen_state(&mut self, _: &Beads3dFindScreenState) {}
-        fn get_parameters_screen_state(&mut self, _: &mut Beads3dFindScreenState) {}
-    }
-    #[derive(Default)]
-    struct Reproject;
-    impl ReprojectModelPanel for Reproject {
-        fn done(&mut self) {}
-        fn set_parameters_screen_state(&mut self, _: &Beads3dFindScreenState) {}
-    }
-    #[derive(Default)]
-    struct Manager {
-        exists: bool,
-        matching: bool,
-        missing: u32,
-        reset: u32,
-    }
-    impl Beads3dFindPanelApplicationManager for Manager {
-        fn view_type(&self) -> ViewType {
-            ViewType::SingleView
-        }
-        fn aligned_stack_exists(&self, _: AxisID) -> bool {
-            self.exists
-        }
-        fn equals_binning(&self, _: AxisID, _: i32) -> bool {
-            self.matching
-        }
-        fn set_stack_using_newst_or_blend_3d_find_output(&mut self, _: AxisID, _: bool) {
-            self.reset += 1
-        }
-        fn pack(&mut self, _: AxisID) {}
-        fn open_missing_aligned_stack_message(&mut self, _: AxisID) {
-            self.missing += 1
-        }
-    }
-    struct Parent(bool);
-    impl NewstackOrBlendmont3dFindParent for Parent {
-        fn get_bead_size(&self) -> String {
-            String::new()
-        }
-        fn is_fiducialess(&self) -> bool {
-            self.0
-        }
-    }
-    fn panel(valid: bool) -> Beads3dFindPanel<Newstack, Tilt, Find, Reproject> {
-        Beads3dFindPanel::get_instance(
-            Newstack {
-                binning: 2,
-                valid,
-                ..Default::default()
-            },
-            Tilt::default(),
-            Find::default(),
-            Reproject,
-            AxisID::First,
-            DialogType::FinalAlignedStack,
-            ViewType::SingleView,
-            &GlobalExpandButton::get_instance("Advanced", "Basic"),
-        )
-    }
-    #[test]
-    fn source_panel_order_and_constants_are_preserved() {
-        let panel = panel(true);
-        assert_eq!(
-            panel.pnl_root.root_component_order,
-            [
-                "pnlGenerateTomogram",
-                "findBeads3dPanel",
-                "reprojectModelPanel"
-            ]
-        );
-        assert!(panel.is_back_projection());
-        assert!(!panel.is_sirt());
-    }
-    #[test]
-    fn missing_fiducialess_aligned_stack_shows_message_before_validation() {
-        let mut panel = panel(false);
-        let mut manager = Manager::default();
-        panel.tilt_3d_find_action(
-            &mut manager,
-            &Parent(true),
-            &ProcessResultDisplay,
-            None,
-            None,
-            ProcessingMethod::Queue,
-        );
-        assert_eq!(manager.missing, 1);
-        assert!(panel.newstack_or_blendmont_3d_find_panel.runs.is_empty());
-    }
-    #[test]
-    fn action_runs_stack_first_only_when_stack_is_missing_or_binning_differs() {
-        let mut panel = panel(true);
-        let mut manager = Manager::default();
-        panel.tilt_3d_find_action(
-            &mut manager,
-            &Parent(false),
-            &ProcessResultDisplay,
-            None,
-            None,
-            ProcessingMethod::Queue,
-        );
-        assert_eq!(
-            panel.newstack_or_blendmont_3d_find_panel.runs[0].next_process,
-            Some(("tilt_3dfind".into(), ProcessingMethod::Queue))
-        );
-        manager.exists = true;
-        manager.matching = true;
-        panel.tilt_3d_find_action(
-            &mut manager,
-            &Parent(false),
-            &ProcessResultDisplay,
-            None,
-            None,
-            ProcessingMethod::Queue,
-        );
-        assert_eq!(manager.reset, 1);
-        assert_eq!(panel.tilt_3d_find_panel.runs, 1);
     }
 }

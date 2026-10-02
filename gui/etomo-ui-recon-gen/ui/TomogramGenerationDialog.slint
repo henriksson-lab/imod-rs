@@ -45,14 +45,14 @@ export component RadialPanelTilt inherits EtchedBorder {
             alignment: start;
             spacing: EtomoStyle.gap;
             RadioButton { text: "Use SIRT-like filter equivalent to: "; }
-            TextField { text: ""; enabled: false; }
+            TextField { label: "Use SIRT-like filter equivalent to: "; text: ""; enabled: false; }
             Text { text: " iterations"; vertical-alignment: center; }
         }
         HorizontalLayout {
             alignment: start;
             spacing: EtomoStyle.gap;
             RadioButton { text: "Use 'exact filter' functions with 'object size' of: "; }
-            TextField { text: ""; enabled: false; }
+            TextField { label: "Use 'exact filter' functions with 'object size' of: "; text: ""; enabled: false; }
         }
     }
     EtchedBorder {
@@ -68,7 +68,7 @@ export component RadialPanelTilt inherits EtchedBorder {
             alignment: start;
             spacing: EtomoStyle.gap;
             RadioButton { text: "Hamming-like filter (as in tomo3d) starting from: "; }
-            TextField { text: ""; enabled: false; }
+            TextField { label: "Hamming-like filter (as in tomo3d) starting from: "; text: ""; enabled: false; }
         }
     }
 }
@@ -122,7 +122,7 @@ export component TiltPanel inherits EtchedBorder {
         alignment: start;
         spacing: EtomoStyle.gap;
         CheckBox { text: "Take logarithm of densities with offset: "; }
-        TextField { text: ""; enabled: false; }
+        TextField { label: "Take logarithm of densities with offset: "; text: ""; enabled: false; }
     }
     HorizontalLayout {
         alignment: start;
@@ -167,7 +167,7 @@ export component TiltPanel inherits EtchedBorder {
             alignment: start;
             spacing: EtomoStyle.gap;
             CheckBox { text: "Super-sample by"; }
-            Spinner { text: "2"; enabled: false; }
+            Spinner { label: "Super-sample by"; text: "2"; enabled: false; }
             Rectangle { width: 5px; }
             CheckBox { text: "Super-sample input also"; enabled: false; }
         }
@@ -203,26 +203,26 @@ export component MultifiltPanel inherits VerticalLayout {
                 alignment: start;
                 spacing: EtomoStyle.gap;
                 RadioButton { text: "SIRT-like filter with iterations:"; selected: true; }
-                TextField { text: ""; }
+                TextField { label: "SIRT-like filter with iterations:"; text: ""; }
             }
             HorizontalLayout {
                 alignment: start;
                 spacing: EtomoStyle.gap;
                 RadioButton { text: "'Exact filter' function with 'object sizes':"; }
-                TextField { text: ""; enabled: false; }
+                TextField { label: "'Exact filter' function with 'object sizes':"; text: ""; enabled: false; }
             }
             HorizontalLayout {
                 alignment: start;
                 spacing: EtomoStyle.gap;
                 RadioButton { text: "Standard Gaussian with cutoffs:"; }
-                TextField { width: 108px; text: ""; enabled: false; }
+                TextField { label: "Standard Gaussian with cutoffs:"; width: 108px; text: ""; enabled: false; }
                 LabeledTextField { label: " falloffs:"; label-width: 70px; text: ""; enabled: false; }
             }
             HorizontalLayout {
                 alignment: start;
                 spacing: EtomoStyle.gap;
                 RadioButton { text: "Hamming-like filter with start frequencies:"; }
-                TextField { text: ""; enabled: false; }
+                TextField { label: "Hamming-like filter with start frequencies:"; text: ""; enabled: false; }
             }
         }
         EtchedBorder {
@@ -305,7 +305,7 @@ export component SirtPanel inherits VerticalLayout {
                     alignment: start;
                     spacing: EtomoStyle.gap;
                     RadioButton { text: "Go back, resume from iteration:"; enabled: false; }
-                    ComboBox { label: ""; text: ""; box-width: 80px; enabled: false; }
+                    ComboBox { label: ""; name: "Go back, resume from iteration:"; text: ""; box-width: 80px; enabled: false; }
                 }
             }
         }

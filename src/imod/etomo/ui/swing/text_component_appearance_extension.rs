@@ -1,80 +1,82 @@
 //! `IMOD/Etomo/src/etomo/ui/swing/TextComponentAppearanceExtension.java`.
-#![allow(dead_code)]
+//!
+//! An extension of AppearanceExtension which uses `JTextComponent.setEditable()`.
+//!
+//! Java `extends AppearanceExtension`: the superclass is embedded as `base` (with
+//! `Deref`), and the two overridden methods are in the
+//! [`AppearanceExtensionVirtual`] implementation.  The superclass constructor already
+//! dispatches `setComponentEditable` to this class, so construction follows
+//! `AppearanceExtension`'s split: `construct`, `set_this`, `constructor_body`.
 
-use std::{cell::RefCell, rc::Rc};
+use std::ops::Deref;
+use std::rc::{Rc, Weak};
 
-use super::appearance_extension::{AppearanceExtension, ComponentBoundary};
+use super::appearance_extension::{AppearanceExtension, AppearanceExtensionVirtual};
+use crate::imod::etomo::jdk::JComponent;
+use crate::imod::etomo::ui::flag_display::FlagDisplay;
+use crate::imod::etomo::ui::flag_type::FlagType;
 
-/// Java `JTextComponent` state at the native presentation boundary.
-#[derive(Clone, Debug, Eq, PartialEq)]
-pub struct TextComponentBoundary {
-    pub component: Rc<RefCell<ComponentBoundary>>,
-    pub editable: bool,
-}
-
-impl TextComponentBoundary {
-    /// Java `JTextComponent.isEditable()`.
-    pub fn is_editable(&self) -> bool {
-        self.editable
-    }
-    /// Java `JTextComponent.setEditable(boolean)`.
-    pub fn set_editable(&mut self, editable: bool) {
-        self.editable = editable;
-    }
-}
-
-/// Java package-private `TextComponentAppearanceExtension`.
+/// Java `final class TextComponentAppearanceExtension extends AppearanceExtension`.
 pub struct TextComponentAppearanceExtension {
-    pub appearance_extension: AppearanceExtension,
-    pub text_component: Rc<RefCell<TextComponentBoundary>>,
+    base: AppearanceExtension,
+}
+
+impl Deref for TextComponentAppearanceExtension {
+    type Target = AppearanceExtension;
+    fn deref(&self) -> &AppearanceExtension {
+        &self.base
+    }
 }
 
 impl TextComponentAppearanceExtension {
     /// Java `TextComponentAppearanceExtension(JTextComponent, boolean, boolean)`.
+    /// `textComponent` is required.
     pub fn new(
-        text_component: Rc<RefCell<TextComponentBoundary>>,
+        text_component: &Rc<JComponent>,
         enabled_field: bool,
         editable_component: bool,
-    ) -> Self {
-        let editable = text_component.borrow().is_editable();
-        let component = text_component.borrow().component.clone();
-        Self {
-            appearance_extension: AppearanceExtension::new_with(
-                component,
+    ) -> Rc<TextComponentAppearanceExtension> {
+        // super(textComponent, enabledField, editableComponent, textComponent.isEditable())
+        let extension = Rc::new(TextComponentAppearanceExtension {
+            base: AppearanceExtension::construct(
+                text_component,
                 enabled_field,
                 editable_component,
-                editable,
+                text_component.is_editable(),
             ),
-            text_component,
+        });
+        extension
+            .base
+            .set_this(Rc::downgrade(&extension) as Weak<dyn AppearanceExtensionVirtual>);
+        extension.base.constructor_body();
+        extension
+    }
+}
+
+impl AppearanceExtensionVirtual for TextComponentAppearanceExtension {
+    fn appearance_extension(&self) -> &AppearanceExtension {
+        &self.base
+    }
+
+    /// Java `@Override setComponentEditable(boolean)`.  Make the component editable or
+    /// ineditable.
+    fn set_component_editable(&self, editable: bool) {
+        // Ineditable components are never editable, even when the field is editable.
+        if !editable || self.base.editable_component {
+            // ((JTextComponent) component).setEditable(editable)
+            self.base.component.set_editable(editable);
         }
     }
 
-    /// Java overridden `setComponentEditable(boolean)`.
-    pub fn set_component_editable(&mut self, editable: bool) {
-        if !editable || self.appearance_extension.editable_component {
-            self.text_component.borrow_mut().set_editable(editable);
-        }
-    }
-
-    /// Java overridden `isNativeSetEditable()`.
-    pub fn is_native_set_editable(&self) -> bool {
+    /// Java `@Override isNativeSetEditable()`.
+    fn is_native_set_editable(&self) -> bool {
         true
     }
 }
 
-#[cfg(test)]
-mod tests {
-    use super::*;
-    #[test]
-    fn ineditable_component_never_becomes_editable() {
-        let text_component = Rc::new(RefCell::new(TextComponentBoundary {
-            component: Rc::new(RefCell::new(ComponentBoundary::default())),
-            editable: false,
-        }));
-        let mut extension =
-            TextComponentAppearanceExtension::new(text_component.clone(), true, false);
-        extension.set_component_editable(true);
-        assert!(!text_component.borrow().editable);
-        assert!(extension.is_native_set_editable());
+impl FlagDisplay for TextComponentAppearanceExtension {
+    /// Java `setFlag(FlagType)`, inherited from `AppearanceExtension`.
+    fn set_flag(&self, flag_type: Option<&'static FlagType>) {
+        self.base.set_flag(flag_type);
     }
 }

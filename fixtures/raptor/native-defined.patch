@@ -1,0 +1,59 @@
+--- a/correspondence/correspondence.cpp
++++ b/correspondence/correspondence.cpp
+@@ -50,7 +50,7 @@
+         cout<<"ERROR:file "<<cfg_filename<<" could not be opened at correspondenceRegions(...)"<<endl;
+         exit(-1);
+     }
+-    out << M << endl;
++    out << "PLACEHOLDER_M" << endl;
+     out << " 3" << endl;
+     out << " 8" << endl;
+     out << " 7" << endl;
+@@ -127,6 +127,16 @@
+         out << (float)dmax << endl;
+     }
+     out.close();
++    {
++        // PATCH (defined behaviour): first line is the final M
++        ifstream fin(cfg_filename.c_str());
++        stringstream buf; buf << fin.rdbuf(); fin.close();
++        string txt = buf.str();
++        size_t nl = txt.find('\n');
++        stringstream mm; mm << M;
++        txt = mm.str() + txt.substr(nl);
++        ofstream fout(cfg_filename.c_str()); fout << txt; fout.close();
++    }
+ 
+ 	#if  defined(_WIN32) || defined(WIN32) || defined(__WIN32__)
+     string mrkr_filename = outputDir + "temp\\" + idxStr + "FFcorrespondence.mrkr";
+--- a/optimization/STDQPdata.cpp
++++ b/optimization/STDQPdata.cpp
+@@ -15,6 +15,7 @@
+ STDQPdata::STDQPdata()
+ {
+     answerMat=NULL;
++    numItrs=0; exit_flag=0; gap=0;
+ }
+ 
+ STDQPdata::~STDQPdata()
+--- a/optimization/std_qp.cpp
++++ b/optimization/std_qp.cpp
+@@ -1139,7 +1139,7 @@
+     //ofstream outxhat("xHat_qp.txt");
+     //print(xHat,outxhat);
+     //outxhat.close();
+-    memcpy(x0->data.db,xHat->data.db,sizeof(CV_64FC1)*xHat->rows);
++    memcpy(x0->data.db,xHat->data.db,sizeof(double)*xHat->rows);
+     cvReleaseMat(&xHat);
+     cvReleaseMat(&bAx);
+ }
+--- a/trajectory/trajectory.cpp
++++ b/trajectory/trajectory.cpp
+@@ -169,6 +169,7 @@
+             {
+                 trajectory ans;
+                 Point2D* cur = frames->at(i).p.at(j);
++                ans.p.push_back(cur);
+                 unsigned int prevJump = 0;
+                 unsigned int nextJump = 1;
+                 while (true)

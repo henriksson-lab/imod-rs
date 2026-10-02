@@ -1,642 +1,1353 @@
-//! `IMOD/Etomo/src/etomo/ui/swing/RadioButton.java`.
+//! `IMOD/Etomo/src/etomo/ui/swing/RadioButton.java`: a self-naming radio button.
 //!
-//! Swing's `JRadioButton`, `ButtonGroup`, button model, listener dispatch, and
-//! painting are kept at the GUI boundary.  The source-owned selection,
-//! lock/editability, naming, checkpoint, highlight, and tooltip state remain
-//! explicit here.
-#![allow(dead_code)]
+//! `public final class RadioButton implements RadioButtonInterface,
+//! BooleanFieldInterface, ItemListener, UIComponent, SwingComponent,
+//! ButtonComponent`.
+//!
+//! The wrapped `JRadioButton` is a jdk stand-in [`JComponent`] whose button
+//! model is a [`RadioButtonModel`] (the Java nested class) reporting back
+//! through [`RadioButtonInterface`].  The Java object registers itself as an
+//! `ItemListener` on every member of its group for the field highlight; that is
+//! one closure, kept in `self_item_listener`.
+//!
+//! Every Java method body is an inherent method here (overloads carry the
+//! parameter-type suffix of `ui.md`); the interface impls at the end bind the
+//! interfaces' methods to those bodies.
 
-use std::cell::RefCell;
-use std::rc::Rc;
+use std::any::Any;
+use std::cell::{Cell, RefCell};
+use std::fmt;
+use std::rc::{Rc, Weak};
 
 use crate::imod::etomo::etomo_director::ARGUMENTS;
-use crate::imod::etomo::storage::autodoc::autodoc_tokenizer::{DEFAULT_DELIMITER, SEPARATOR_CHAR};
-use crate::imod::etomo::ui::swing::button_component::{ActionListenerBoundary, ButtonComponent};
-use crate::imod::etomo::ui::swing::check_box::{
-    BLACK, BooleanFieldSetting, Color, FIELD_HIGHLIGHT,
+use crate::imod::etomo::jdk::{
+    ActionListener, ButtonGroup, ButtonModel, ChangeListener, ItemEvent, ItemListener, JComponent,
 };
+use crate::imod::etomo::logic::autodoc_attribute_retriever;
+use crate::imod::etomo::storage::autodoc::autodoc_tokenizer::{DEFAULT_DELIMITER, SEPARATOR_CHAR};
+use crate::imod::etomo::storage::autodoc::read_only_section::ReadOnlySection;
+use crate::imod::etomo::storage::directive_def::DirectiveDef;
+use crate::imod::etomo::r#type::const_etomo_number::{
+    ConstEtomoNumber, java_lang_string_matches_whitespace,
+};
+use crate::imod::etomo::r#type::etomo_autodoc;
+use crate::imod::etomo::r#type::ui_test_field_type;
+use crate::imod::etomo::ui::boolean_field_interface::BooleanFieldInterface;
+use crate::imod::etomo::ui::boolean_field_setting::BooleanFieldSetting;
+use crate::imod::etomo::ui::field::Field;
+use crate::imod::etomo::ui::field_displayer::FieldDisplayer;
+use crate::imod::etomo::ui::field_setting_interface::FieldSettingInterface;
+use crate::imod::etomo::ui::field_validation_failed_exception::FieldValidationFailedException;
+use crate::imod::etomo::ui::swing::abstract_radio_button_model::AbstractRadioButtonModel;
+use crate::imod::etomo::ui::swing::button_component::ButtonComponent;
+use crate::imod::etomo::ui::swing::colors;
+use crate::imod::etomo::ui::swing::field_lock_controller::FieldLockController;
+use crate::imod::etomo::ui::swing::radio_button_interface::{
+    EnumeratedTypeRef, RadioButtonInterface,
+};
+use crate::imod::etomo::ui::swing::swing_component::SwingComponent;
+use crate::imod::etomo::ui::swing::tooltip_formatter;
+use crate::imod::etomo::ui::ui_component::UIComponent;
 use crate::imod::etomo::util::utilities;
 
-/// Source information obtained through Java `EnumeratedType`.
-#[derive(Clone, Debug, Eq, PartialEq)]
-pub struct EnumeratedTypeBoundary {
-    pub label: String,
-    pub default: bool,
-    pub value: Option<String>,
-}
+/// `java.awt.Color` as the jdk stand-in carries it (RGB).
+type Rgb = (u8, u8, u8);
 
-/// Java `ButtonGroup` selection boundary.
-#[derive(Clone, Debug, Default)]
-pub struct RadioButtonGroup {
-    next_id: usize,
-    selected_id: Option<usize>,
-}
-
-impl RadioButtonGroup {
-    pub fn new() -> Self {
-        Self::default()
-    }
-    fn add(&mut self) -> usize {
-        let id = self.next_id;
-        self.next_id += 1;
-        id
-    }
-    fn set_selected(&mut self, id: usize, selected: bool) {
-        if selected {
-            self.selected_id = Some(id);
-        } else if self.selected_id == Some(id) {
-            // Java ButtonGroup does not deselect its selected button.
-        }
-    }
-    fn is_selected(&self, id: usize, fallback: bool) -> bool {
-        self.selected_id
-            .map_or(fallback, |selected_id| selected_id == id)
-    }
-}
-
-/// Source-observable state of the wrapped `JRadioButton`.
-#[derive(Clone, Debug, PartialEq)]
-pub struct JRadioButtonBoundary {
-    pub selected: bool,
-    pub text: String,
-    pub name: Option<String>,
-    pub action_command: Option<String>,
-    pub visible: bool,
-    pub enabled: bool,
-    pub focusable: bool,
-    pub foreground: Option<Color>,
-    pub tooltip: Option<String>,
-    pub border_painted: bool,
-    pub alignment_x: f32,
-    pub preferred_size: Option<(i32, i32)>,
-}
-
-impl JRadioButtonBoundary {
-    fn new(text: String) -> Self {
-        Self {
-            selected: false,
-            text,
-            name: None,
-            action_command: None,
-            visible: true,
-            enabled: true,
-            focusable: false,
-            foreground: Some(BLACK),
-            tooltip: None,
-            border_painted: true,
-            alignment_x: 0.5,
-            preferred_size: None,
-        }
-    }
-}
-
-/// Java `RadioButton` with direct Swing operations represented as boundary state.
-#[derive(Clone, Debug)]
+/// Java `RadioButton`.
 pub struct RadioButton {
-    pub radio_button: JRadioButtonBoundary,
-    pub enumerated_type: Option<EnumeratedTypeBoundary>,
-    pub group: Option<Rc<RefCell<RadioButtonGroup>>>,
-    group_id: Option<usize>,
-    debug: bool,
-    orig_foreground: Option<Color>,
-    directive_def: Option<String>,
-    backup: Option<BooleanFieldSetting>,
-    checkpoint: Option<BooleanFieldSetting>,
-    default_value: Option<BooleanFieldSetting>,
-    field_highlight: Option<BooleanFieldSetting>,
-    selected_string_value: Option<String>,
-    unformatted_tooltip: Option<String>,
-    enabled: bool,
-    editable: bool,
-    locked: bool,
-    item_listener_count: usize,
-    action_listener_count: usize,
-    change_listener_count: usize,
-    selected_message_count: usize,
+    /// Java `this`, for the places the source passes itself.
+    this: Weak<RadioButton>,
+    radio_button: Rc<JComponent>,
+    enumerated_type: Option<EnumeratedTypeRef>,
+    group: Option<Rc<ButtonGroup>>,
+    field_lock_controller: Rc<FieldLockController>,
+    /// The Java object as an `ItemListener` (created on first use).
+    self_item_listener: RefCell<Option<ItemListener>>,
+
+    debug: Cell<bool>,
+    /// Java `origForeground`: outer `None` is Java null; the inner value is
+    /// what `getForeground()` returned (the jdk's `None` is the look-and-feel
+    /// default, which Swing reports as a non-null colour, so Java's
+    /// `Color.black` fallback never applies).
+    orig_foreground: Cell<Option<Option<Rgb>>>,
+    directive_def: Cell<Option<DirectiveDef>>,
+    backup: RefCell<Option<BooleanFieldSetting>>,
+    checkpoint: RefCell<Option<BooleanFieldSetting>>,
+    default_value: RefCell<Option<BooleanFieldSetting>>,
+    field_highlight: RefCell<Option<BooleanFieldSetting>>,
+    // Directive value associated with this instance being selected.
+    selected_string_value: RefCell<Option<String>>,
+    unformatted_tooltip: RefCell<Option<String>>,
 }
 
 impl RadioButton {
-    /// Java `RadioButton(String)`.
-    pub fn new(text: impl Into<String>) -> Self {
-        Self::new_full(Some(text.into()), None, None, None)
+    /// Java `RadioButton(String text)`.
+    pub fn new_string(text: Option<&str>) -> Rc<RadioButton> {
+        Self::new_string_enumerated_type_button_group_radio_button_model(text, None, None, None)
     }
-    /// Java `RadioButton(String, String)`.
-    pub fn new_with_tf_label(text: impl Into<String>, tf_label: impl Into<String>) -> Self {
-        Self::new_full(Some(text.into()), Some(tf_label.into()), None, None)
+
+    /// Java `RadioButton(String text, String tflabel)`.
+    pub fn new_string_string(text: Option<&str>, tflabel: Option<&str>) -> Rc<RadioButton> {
+        Self::new_string_string_enumerated_type_button_group_radio_button_model(
+            text, tflabel, None, None, None,
+        )
     }
-    /// Java `RadioButton(String, ButtonGroup)`.
-    pub fn new_in_group(text: impl Into<String>, group: Rc<RefCell<RadioButtonGroup>>) -> Self {
-        Self::new_full(Some(text.into()), None, Some(group), None)
+
+    /// Java `RadioButton(String text, ButtonGroup group)`.
+    pub fn new_string_button_group(
+        text: Option<&str>,
+        group: Option<&Rc<ButtonGroup>>,
+    ) -> Rc<RadioButton> {
+        Self::new_string_enumerated_type_button_group_radio_button_model(text, None, group, None)
     }
-    /// Java enumerated-type constructors after extracting the interface boundary.
-    pub fn new_with_enumerated_type(
-        text: Option<String>,
-        enumerated_type: EnumeratedTypeBoundary,
-        group: Option<Rc<RefCell<RadioButtonGroup>>>,
-    ) -> Self {
-        let text = text.or_else(|| Some(enumerated_type.label.clone()));
-        Self::new_full(text, None, group, Some(enumerated_type))
+
+    /// Java `RadioButton(String text, String tflabel, ButtonGroup group)`.
+    pub fn new_string_string_button_group(
+        text: Option<&str>,
+        tflabel: Option<&str>,
+        group: Option<&Rc<ButtonGroup>>,
+    ) -> Rc<RadioButton> {
+        Self::new_string_string_enumerated_type_button_group_radio_button_model(
+            text, tflabel, None, group, None,
+        )
     }
-    /// Shared body of all Java constructors; model construction is a Swing boundary.
-    pub fn new_full(
-        text: Option<String>,
-        name_reference: Option<String>,
-        group: Option<Rc<RefCell<RadioButtonGroup>>>,
-        enumerated_type: Option<EnumeratedTypeBoundary>,
-    ) -> Self {
-        let text = text
-            .or_else(|| enumerated_type.as_ref().map(|value| value.label.clone()))
-            .unwrap_or_default();
-        let group_id = group.as_ref().map(|group| group.borrow_mut().add());
-        let mut result = Self {
-            radio_button: JRadioButtonBoundary::new(text.clone()),
+
+    /// Java `RadioButton(String text, ButtonGroup group, RadioButtonModel model)`.
+    pub fn new_string_button_group_radio_button_model(
+        text: Option<&str>,
+        group: Option<&Rc<ButtonGroup>>,
+        model: Option<Rc<RadioButtonModel>>,
+    ) -> Rc<RadioButton> {
+        Self::new_string_enumerated_type_button_group_radio_button_model(text, None, group, model)
+    }
+
+    /// Java `RadioButton(ButtonGroup group)`.
+    pub fn new_button_group(group: Option<&Rc<ButtonGroup>>) -> Rc<RadioButton> {
+        Self::new_string_enumerated_type_button_group_radio_button_model(Some(""), None, group, None)
+    }
+
+    /// Java `RadioButton(String text, EnumeratedType enumeratedType)`.
+    pub fn new_string_enumerated_type(
+        text: Option<&str>,
+        enumerated_type: Option<EnumeratedTypeRef>,
+    ) -> Rc<RadioButton> {
+        Self::new_string_enumerated_type_button_group_radio_button_model(
+            text,
+            enumerated_type,
+            None,
+            None,
+        )
+    }
+
+    /// Java `RadioButton(String text, EnumeratedType enumeratedType, ButtonGroup group)`.
+    pub fn new_string_enumerated_type_button_group(
+        text: Option<&str>,
+        enumerated_type: Option<EnumeratedTypeRef>,
+        group: Option<&Rc<ButtonGroup>>,
+    ) -> Rc<RadioButton> {
+        Self::new_string_enumerated_type_button_group_radio_button_model(
+            text,
             enumerated_type,
             group,
-            group_id,
-            debug: false,
-            orig_foreground: None,
-            directive_def: None,
-            backup: None,
-            checkpoint: None,
-            default_value: None,
-            field_highlight: None,
-            selected_string_value: None,
-            unformatted_tooltip: None,
-            enabled: true,
-            editable: true,
-            locked: false,
-            item_listener_count: 0,
-            action_listener_count: 0,
-            change_listener_count: 0,
-            selected_message_count: 0,
-        };
-        result.set_name(name_reference.as_deref().unwrap_or(&text));
-        if let Some(enumerated_type) = result.enumerated_type.clone() {
-            if enumerated_type.default {
-                result.set_selected(true);
-            }
-            result.selected_string_value = enumerated_type.value;
+            None,
+        )
+    }
+
+    /// The field values every constructor starts from.
+    fn construct(
+        this: &Weak<RadioButton>,
+        radio_button: Rc<JComponent>,
+        field_lock_controller: Rc<FieldLockController>,
+        enumerated_type: Option<EnumeratedTypeRef>,
+        group: Option<Rc<ButtonGroup>>,
+    ) -> RadioButton {
+        RadioButton {
+            this: this.clone(),
+            radio_button,
+            enumerated_type,
+            group,
+            field_lock_controller,
+            self_item_listener: RefCell::new(None),
+            debug: Cell::new(false),
+            orig_foreground: Cell::new(None),
+            directive_def: Cell::new(None),
+            backup: RefCell::new(None),
+            checkpoint: RefCell::new(None),
+            default_value: RefCell::new(None),
+            field_highlight: RefCell::new(None),
+            selected_string_value: RefCell::new(None),
+            unformatted_tooltip: RefCell::new(None),
         }
-        result
     }
-    pub fn get_field(&self) -> &Self {
-        self
+
+    /// Java `RadioButton(String text, EnumeratedType enumeratedType, ButtonGroup group,
+    /// RadioButtonModel model)`.
+    pub fn new_string_enumerated_type_button_group_radio_button_model(
+        text: Option<&str>,
+        enumerated_type: Option<EnumeratedTypeRef>,
+        group: Option<&Rc<ButtonGroup>>,
+        model: Option<Rc<RadioButtonModel>>,
+    ) -> Rc<RadioButton> {
+        let mut text = text.map(str::to_owned);
+        if text.is_none() {
+            if let Some(enumerated_type) = &enumerated_type {
+                text = enumerated_type.get_label();
+            }
+        }
+        let instance = Rc::new_cyclic(|this: &Weak<RadioButton>| {
+            let radio_button = JComponent::new_radio_button(text.as_deref().unwrap_or(""));
+            let field_lock_controller = FieldLockController::get_toggle_button_instance_j_toggle_button(&radio_button);
+            // Swing focus: radioButton.setFocusable(false) (focus is not modelled).
+            let model = match model {
+                Some(model) => model,
+                None => {
+                    let button: Weak<dyn RadioButtonInterface> = this.clone();
+                    RadioButtonModel::new(Some(button))
+                }
+            };
+            radio_button.set_model(Some(model as Rc<dyn ButtonModel>));
+            RadioButton::construct(
+                this,
+                radio_button,
+                field_lock_controller,
+                enumerated_type.clone(),
+                group.cloned(),
+            )
+        });
+        instance.set_name(text.as_deref());
+        // this.enumeratedType = enumeratedType (set in construct).
+        if let Some(group) = group {
+            group.add(&instance.radio_button);
+        }
+        if let Some(enumerated_type) = &instance.enumerated_type {
+            // An enum-constructed radio button selects itself when its type is the
+            // default (RadioButton.java:114-116 and the three copies).
+            if enumerated_type.is_default() {
+                instance.radio_button.set_selected(true);
+            }
+            // Java: `if (number != null)`; the Rust `getValue` always returns one.
+            let number: ConstEtomoNumber = enumerated_type.get_value();
+            *instance.selected_string_value.borrow_mut() = Some(number.to_string());
+        }
+        instance
     }
+
+    /// Java `RadioButton(String text, String tflabel, EnumeratedType enumeratedType,
+    /// ButtonGroup group, RadioButtonModel model)`.
+    pub fn new_string_string_enumerated_type_button_group_radio_button_model(
+        text: Option<&str>,
+        tflabel: Option<&str>,
+        enumerated_type: Option<EnumeratedTypeRef>,
+        group: Option<&Rc<ButtonGroup>>,
+        model: Option<Rc<RadioButtonModel>>,
+    ) -> Rc<RadioButton> {
+        let mut text = text.map(str::to_owned);
+        if text.is_none() {
+            if let Some(enumerated_type) = &enumerated_type {
+                text = enumerated_type.get_label();
+            }
+        }
+        let instance = Rc::new_cyclic(|this: &Weak<RadioButton>| {
+            let radio_button = JComponent::new_radio_button(text.as_deref().unwrap_or(""));
+            let field_lock_controller = FieldLockController::get_toggle_button_instance_j_toggle_button(&radio_button);
+            // Swing focus: radioButton.setFocusable(false) (focus is not modelled).
+            let model = match model {
+                Some(model) => model,
+                None => {
+                    let button: Weak<dyn RadioButtonInterface> = this.clone();
+                    RadioButtonModel::new(Some(button))
+                }
+            };
+            radio_button.set_model(Some(model as Rc<dyn ButtonModel>));
+            RadioButton::construct(
+                this,
+                radio_button,
+                field_lock_controller,
+                enumerated_type.clone(),
+                group.cloned(),
+            )
+        });
+        instance.set_name(tflabel);
+        // this.enumeratedType = enumeratedType (set in construct).
+        if let Some(group) = group {
+            group.add(&instance.radio_button);
+        }
+        if let Some(enumerated_type) = &instance.enumerated_type {
+            // An enum-constructed radio button selects itself when its type is the
+            // default (RadioButton.java:114-116 and the three copies).
+            if enumerated_type.is_default() {
+                instance.radio_button.set_selected(true);
+            }
+            // Java: `if (number != null)`; the Rust `getValue` always returns one.
+            let number: ConstEtomoNumber = enumerated_type.get_value();
+            *instance.selected_string_value.borrow_mut() = Some(number.to_string());
+        }
+        instance
+    }
+
+    /// Java `RadioButton(EnumeratedType enumeratedType, ButtonGroup group)`.
+    pub fn new_enumerated_type_button_group(
+        enumerated_type: EnumeratedTypeRef,
+        group: Option<&Rc<ButtonGroup>>,
+    ) -> Rc<RadioButton> {
+        // Java string conversion of a null label gives "null".
+        let text = enumerated_type
+            .get_label()
+            .unwrap_or_else(|| "null".to_owned());
+        let instance = Rc::new_cyclic(|this: &Weak<RadioButton>| {
+            let radio_button = JComponent::new_radio_button(&text);
+            let field_lock_controller = FieldLockController::get_toggle_button_instance_j_toggle_button(&radio_button);
+            let button: Weak<dyn RadioButtonInterface> = this.clone();
+            radio_button.set_model(Some(RadioButtonModel::new(Some(button)) as Rc<dyn ButtonModel>));
+            RadioButton::construct(
+                this,
+                radio_button,
+                field_lock_controller,
+                Some(enumerated_type.clone()),
+                group.cloned(),
+            )
+        });
+        instance.set_name(Some(&text));
+        if let Some(group) = group {
+            group.add(&instance.radio_button);
+        }
+        if let Some(enumerated_type) = &instance.enumerated_type {
+            // An enum-constructed radio button selects itself when its type is the
+            // default (RadioButton.java:114-116 and the three copies).
+            if enumerated_type.is_default() {
+                instance.radio_button.set_selected(true);
+            }
+            // Java: `if (number != null)`; the Rust `getValue` always returns one.
+            let number: ConstEtomoNumber = enumerated_type.get_value();
+            *instance.selected_string_value.borrow_mut() = Some(number.to_string());
+        }
+        instance
+    }
+
+    /// Java `RadioButton(EnumeratedType enumeratedType, ButtonGroup group,
+    /// String addToLabel)`.
+    pub fn new_enumerated_type_button_group_string(
+        enumerated_type: EnumeratedTypeRef,
+        group: Option<&Rc<ButtonGroup>>,
+        add_to_label: Option<&str>,
+    ) -> Rc<RadioButton> {
+        let text = enumerated_type
+            .get_label()
+            .unwrap_or_else(|| "null".to_owned())
+            + add_to_label.unwrap_or("");
+        let instance = Rc::new_cyclic(|this: &Weak<RadioButton>| {
+            let radio_button = JComponent::new_radio_button(&text);
+            let field_lock_controller = FieldLockController::get_toggle_button_instance_j_toggle_button(&radio_button);
+            let button: Weak<dyn RadioButtonInterface> = this.clone();
+            radio_button.set_model(Some(RadioButtonModel::new(Some(button)) as Rc<dyn ButtonModel>));
+            RadioButton::construct(
+                this,
+                radio_button,
+                field_lock_controller,
+                Some(enumerated_type.clone()),
+                group.cloned(),
+            )
+        });
+        instance.set_name(Some(&text));
+        if let Some(group) = group {
+            group.add(&instance.radio_button);
+        }
+        if let Some(enumerated_type) = &instance.enumerated_type {
+            // An enum-constructed radio button selects itself when its type is the
+            // default (RadioButton.java:114-116 and the three copies).
+            if enumerated_type.is_default() {
+                instance.radio_button.set_selected(true);
+            }
+            // Java: `if (number != null)`; the Rust `getValue` always returns one.
+            let number: ConstEtomoNumber = enumerated_type.get_value();
+            *instance.selected_string_value.borrow_mut() = Some(number.to_string());
+        }
+        instance
+    }
+
+    /// Java `getField()`.
+    pub fn get_field(&self) -> Option<Rc<dyn Field>> {
+        self.this.upgrade().map(|this| this as Rc<dyn Field>)
+    }
+
+    /// Java `isBoolean()`.
     pub fn is_boolean(&self) -> bool {
         true
     }
+
+    /// Java `isDebug()`.
     pub fn is_debug(&self) -> bool {
-        self.debug || ARGUMENTS.lock().unwrap().is_debug()
+        self.debug.get() || ARGUMENTS.lock().unwrap().is_debug()
     }
+
+    /// Java `isText()`.
     pub fn is_text(&self) -> bool {
         false
     }
+
+    /// Java `isVisible()`.
     pub fn is_visible(&self) -> bool {
-        self.radio_button.visible
+        self.radio_button.is_visible()
     }
+
+    /// Java `equalsSelectedStringValue(String)`.
     pub fn equals_selected_string_value(&self, value: Option<&str>) -> bool {
-        self.selected_string_value.as_deref().map_or_else(
-            || value.is_some_and(|value| !value.is_empty()),
-            |selected| Some(selected) == value,
-        )
-    }
-    pub fn do_click(&mut self) {
-        self.set_selected(true);
-        self.item_state_changed();
-    }
-    pub fn checkpoint(&mut self) {
-        let selected = self.is_selected();
-        self.checkpoint.get_or_insert_default().set(selected);
-    }
-    pub fn checkpoint_value(&mut self, value: bool) {
-        self.checkpoint.get_or_insert_default().set(value);
-    }
-    pub fn get_checkpoint(&self) -> Option<&BooleanFieldSetting> {
-        self.checkpoint.as_ref()
-    }
-    pub fn set_checkpoint(&mut self, input: Option<&BooleanFieldSetting>) {
-        if self.checkpoint.is_none()
-            && input.is_some_and(|value| value.is_set() && value.is_boolean())
-        {
-            self.checkpoint = Some(BooleanFieldSetting::default());
+        match self.selected_string_value.borrow().as_deref() {
+            None => value.is_some_and(|value| !value.is_empty()),
+            Some(selected_string_value) => Some(selected_string_value) == value,
         }
-        if let Some(checkpoint) = &mut self.checkpoint {
+    }
+
+    /// Java `getCheckpoint()`.  (A copy: the live setting cannot be lent out of
+    /// its cell.)
+    pub fn get_checkpoint(&self) -> Option<Box<dyn FieldSettingInterface>> {
+        self.checkpoint
+            .borrow()
+            .as_ref()
+            .map(|checkpoint| Box::new(checkpoint.clone()) as Box<dyn FieldSettingInterface>)
+    }
+
+    /// Java `doClick()`.
+    pub fn do_click(&self) {
+        self.radio_button.do_click();
+    }
+
+    /// Java `checkpoint()`.
+    pub fn checkpoint_void(&self) {
+        let selected = self.is_selected();
+        let mut checkpoint = self.checkpoint.borrow_mut();
+        if checkpoint.is_none() {
+            *checkpoint = Some(BooleanFieldSetting::new());
+        }
+        checkpoint.as_mut().unwrap().set_boolean(selected);
+    }
+
+    /// Java `checkpoint(boolean)`.
+    pub fn checkpoint_boolean(&self, value: bool) {
+        let mut checkpoint = self.checkpoint.borrow_mut();
+        if checkpoint.is_none() {
+            *checkpoint = Some(BooleanFieldSetting::new());
+        }
+        checkpoint.as_mut().unwrap().set_boolean(value);
+    }
+
+    /// Java `setCheckpoint(FieldSettingInterface)`.
+    pub fn set_checkpoint(&self, input: Option<&dyn FieldSettingInterface>) {
+        let mut checkpoint = self.checkpoint.borrow_mut();
+        if checkpoint.is_none() && input.is_some_and(|input| input.is_set() && input.is_boolean()) {
+            *checkpoint = Some(BooleanFieldSetting::new());
+        }
+        if let Some(checkpoint) = checkpoint.as_mut() {
             checkpoint.copy(input);
         }
     }
-    pub fn backup(&mut self) {
+
+    /// Java `backup()`.
+    pub fn backup(&self) {
         let selected = self.is_selected();
-        self.backup.get_or_insert_default().set(selected);
+        let mut backup = self.backup.borrow_mut();
+        if backup.is_none() {
+            *backup = Some(BooleanFieldSetting::new());
+        }
+        backup.as_mut().unwrap().set_boolean(selected);
     }
-    pub fn restore_from_backup(&mut self) {
-        let value = self
-            .backup
-            .as_ref()
-            .filter(|backup| backup.is_set())
-            .map(BooleanFieldSetting::is_value);
-        if let Some(value) = value {
-            self.set_selected(value);
-            self.backup.as_mut().unwrap().reset();
+
+    /// Java `restoreFromBackup()`.  If the field was backed up, make the backup
+    /// value the displayed value if possible, and turn off the back up.  Its
+    /// impossible to turn off a radio button, so this only works if the
+    /// backupValue is true.  This relies on the other radio buttons in the group
+    /// also being backed up.
+    pub fn restore_from_backup(&self) {
+        let value = match self.backup.borrow().as_ref() {
+            Some(backup) if backup.is_set() => backup.is_value(),
+            _ => return,
+        };
+        self.set_selected_boolean(value);
+        if let Some(backup) = self.backup.borrow_mut().as_mut() {
+            backup.reset();
         }
     }
-    pub fn set_value(&mut self, input: Option<&Self>) {
-        if let Some(input) = input {
-            self.set_selected(input.is_selected());
+
+    /// Java `setValue(Field)`.
+    pub fn set_value_field(&self, input: Option<&dyn Field>) {
+        match input {
+            None => self.clear(),
+            Some(input) => self.set_selected_boolean(input.is_selected()),
         }
     }
-    pub fn set_value_string(&mut self, _value: Option<&str>) {}
-    pub fn set_value_boolean(&mut self, value: bool) {
-        self.set_selected(value);
+
+    /// Java `setValue(String)`.
+    pub fn set_value_string(&self, value: Option<&str>) {
+        let _ = value;
     }
-    /// Java `clear`: a selected `ButtonGroup` button cannot be cleared.
-    pub fn clear(&mut self) {}
-    pub fn set_directive_def(&mut self, directive_def: Option<&str>) {
-        self.directive_def = directive_def.map(str::to_owned);
+
+    /// Java `setValue(boolean)`.
+    pub fn set_value_boolean(&self, value: bool) {
+        self.set_selected_boolean(value);
     }
-    pub fn get_directive_def(&self) -> Option<&str> {
-        self.directive_def.as_deref()
+
+    /// Java `clear()`.  No way to clear a radio button.
+    pub fn clear(&self) {}
+
+    /// Java `setDirectiveDef(DirectiveDef)`.
+    pub fn set_directive_def(&self, directive_def: Option<DirectiveDef>) {
+        self.directive_def.set(directive_def);
     }
-    /// Java autodoc default lookup is supplied at the storage boundary.
-    pub fn use_default_value(&mut self, autodoc_default: Option<&str>) {
-        if self.directive_def.is_none() {
-            if let Some(default_value) = &mut self.default_value
-                && default_value.is_set()
-            {
-                default_value.reset();
+
+    /// Java `getDirectiveDef()`.
+    pub fn get_directive_def(&self) -> Option<DirectiveDef> {
+        self.directive_def.get()
+    }
+
+    /// Java `useDefaultValue()`.
+    pub fn use_default_value(&self) {
+        let Some(directive_def) = self.directive_def.get() else {
+            if let Some(default_value) = self.default_value.borrow_mut().as_mut() {
+                if default_value.is_set() {
+                    default_value.reset();
+                }
             }
             return;
-        }
-        if self.default_value.is_none() {
-            let mut value = BooleanFieldSetting::default();
-            if let Some(default_value) = autodoc_default {
-                value.set_string(Some(default_value));
+        };
+        // only search for default value once
+        if self.default_value.borrow().is_none() {
+            let mut default_value = BooleanFieldSetting::new();
+            let value = autodoc_attribute_retriever::INSTANCE.get_default_value(Some(directive_def));
+            if let Some(value) = value {
+                // if default value has been found, set it in the field setting
+                default_value.set_string(Some(&value));
             }
-            self.default_value = Some(value);
+            *self.default_value.borrow_mut() = Some(default_value);
         }
-        if let Some(default_value) = &self.default_value
-            && default_value.is_set()
-        {
-            self.set_selected(default_value.is_value());
+        let value = {
+            let default_value = self.default_value.borrow();
+            let default_value = default_value.as_ref().unwrap();
+            default_value.is_set().then(|| default_value.is_value())
+        };
+        if let Some(value) = value {
+            self.set_selected_boolean(value);
         }
     }
-    pub fn equals_default_value(&self) -> bool {
-        self.default_value
-            .as_ref()
-            .is_some_and(|value| value.equals(self.is_selected()))
-    }
-    pub fn equals_default_value_string(&self, value: Option<&str>) -> bool {
-        self.default_value.as_ref().is_some_and(|setting| {
-            setting.equals(value.is_some_and(|value| !value.trim().is_empty()))
+
+    /// Java `equalsDefaultValue()`.
+    pub fn equals_default_value_void(&self) -> bool {
+        let selected = self.is_selected();
+        self.default_value.borrow().as_ref().is_some_and(|default_value| {
+            default_value.is_set() && default_value.equals_boolean(selected)
         })
     }
+
+    /// Java `equalsDefaultValue(String)`.
+    pub fn equals_default_value_string(&self, value: Option<&str>) -> bool {
+        self.default_value.borrow().as_ref().is_some_and(|default_value| {
+            default_value.is_set()
+                && default_value.equals_boolean(
+                    value.is_some_and(|value| !java_lang_string_matches_whitespace(value)),
+                )
+        })
+    }
+
+    /// Java `equalsDefaultValue(boolean)`.
     pub fn equals_default_value_boolean(&self, input: bool) -> bool {
-        self.default_value
-            .as_ref()
-            .is_some_and(|value| value.equals(input))
+        self.default_value.borrow().as_ref().is_some_and(|default_value| {
+            default_value.is_set() && default_value.equals_boolean(input)
+        })
     }
+
+    /// Java `isCheckpointValue()`.
     pub fn is_checkpoint_value(&self) -> bool {
-        self.checkpoint
-            .as_ref()
-            .is_some_and(BooleanFieldSetting::is_value)
+        match self.checkpoint.borrow().as_ref() {
+            None => false,
+            Some(checkpoint) => checkpoint.is_value(),
+        }
     }
+
+    /// Java `isDifferentFromCheckpoint(boolean alwaysCheck)`: check for difference
+    /// even when the field is disabled or invisible.
     pub fn is_different_from_checkpoint(&self, always_check: bool) -> bool {
-        if !always_check && (!self.is_enabled() || !self.is_visible()) {
+        if !always_check && (!self.is_enabled() || !self.radio_button.is_visible()) {
             return false;
         }
+        let selected = self.is_selected();
         self.checkpoint
+            .borrow()
             .as_ref()
-            .is_none_or(|checkpoint| !checkpoint.equals(self.is_selected()))
+            .is_none_or(|checkpoint| !checkpoint.equals_boolean(selected))
     }
-    pub fn set_text(&mut self, text: impl Into<String>) {
-        self.radio_button.text = text.into();
-        self.set_name(&self.radio_button.text.clone());
+
+    /// Java `setText(String)`.
+    pub fn set_text(&self, text: Option<&str>) {
+        self.radio_button.set_text(text.unwrap_or(""));
+        self.set_name(text);
     }
-    pub fn get_text(&self) -> &str {
-        &self.radio_button.text
-    }
+
+    /// Java `getDescription()`.
     pub fn get_description(&self) -> Option<String> {
         self.get_quoted_label()
     }
+
+    /// Java `getQuotedLabel()`.
     pub fn get_quoted_label(&self) -> Option<String> {
-        utilities::quote_label(Some(self.get_text()))
+        utilities::quote_label(self.get_text_void().as_deref())
     }
-    pub fn set_border_painted(&mut self, painted: bool) {
-        self.radio_button.border_painted = painted;
+
+    /// Java `setBorderPainted(boolean)`.
+    pub fn set_border_painted(&self, b: bool) {
+        // Swing painting: radioButton.setBorderPainted(b).
+        let _ = b;
     }
-    /// Java `setBorder(Border)` is a native painting boundary; only presence is observable here.
-    pub fn set_border(&mut self, _border_present: bool) {}
-    pub fn set_foreground(&mut self, foreground: Color) {
-        self.radio_button.foreground = Some(foreground);
+
+    // Java `setBorder(Border)`, `getFont()`, `getWidth()`, `getHeight()`,
+    // `getBorder()` and `setPreferredSize(Dimension)`: Swing painting and layout
+    // accessors of the JRadioButton (borders, fonts, sizes are not modelled by
+    // the jdk stand-in), so they have no Rust counterpart.
+
+    /// Java `setForeground(Color)`.
+    pub fn set_foreground(&self, fg: Option<Rgb>) {
+        self.radio_button.set_foreground(fg);
     }
-    pub fn set_name(&mut self, reference: &str) {
-        if let Some(name) = utilities::convert_label_to_name(Some(reference), true) {
-            self.radio_button.name = Some(format!("rb{SEPARATOR_CHAR}{name}"));
+
+    /// Java `setName(String reference)`.
+    pub fn set_name(&self, reference: Option<&str>) {
+        let field_type = &ui_test_field_type::RADIO_BUTTON;
+        let name = utilities::convert_label_to_name(reference, field_type.is_unlimited_segments());
+        if let Some(name) = name {
+            self.radio_button
+                .set_name(Some(&format!("{}{}{}", field_type, SEPARATOR_CHAR, name)));
             if ARGUMENTS.lock().unwrap().is_print_names() {
                 println!(
-                    "{} {DEFAULT_DELIMITER} ",
-                    self.radio_button.name.as_deref().unwrap_or_default()
+                    "{} {} ",
+                    self.radio_button.get_name().as_deref().unwrap_or("null"),
+                    DEFAULT_DELIMITER
                 );
             }
         }
     }
-    pub fn get_name(&self) -> Option<&str> {
-        self.radio_button.name.as_deref()
+
+    /// Java `equals(EnumeratedType)`: reference identity of the enumerated type.
+    pub fn equals(&self, enumerated_type: Option<&EnumeratedTypeRef>) -> bool {
+        self.enumerated_type.as_ref() == enumerated_type
     }
-    pub fn equals_enumerated_type(&self, value: Option<&EnumeratedTypeBoundary>) -> bool {
-        self.enumerated_type.as_ref() == value
+
+    /// Java `setDebug(boolean)`.
+    pub fn set_debug(&self, input: bool) {
+        self.debug.set(input);
     }
-    pub fn set_debug(&mut self, input: bool) {
-        self.debug = input;
-    }
+
+    /// Java `isFieldHighlightSet()`.
     pub fn is_field_highlight_set(&self) -> bool {
         self.field_highlight
+            .borrow()
             .as_ref()
-            .is_some_and(BooleanFieldSetting::is_set)
+            .is_some_and(|field_highlight| field_highlight.is_set())
     }
-    pub fn set_field_highlight_setting(&mut self, input: Option<&BooleanFieldSetting>) {
-        if self.field_highlight.is_none()
-            && input.is_some_and(|value| value.is_set() && value.is_boolean())
+
+    /// Java `setFieldHighlight(FieldSettingInterface)`.
+    pub fn set_field_highlight_field_setting_interface(
+        &self,
+        input: Option<&dyn FieldSettingInterface>,
+    ) {
+        if self.field_highlight.borrow().is_none()
+            && input.is_some_and(|input| input.is_set() && input.is_boolean())
         {
-            self.field_highlight = Some(BooleanFieldSetting::default());
+            *self.field_highlight.borrow_mut() = Some(BooleanFieldSetting::new());
             self.add_field_highlight_action_listeners();
         }
-        if let Some(field_highlight) = &mut self.field_highlight {
-            field_highlight.copy(input);
+        let exists = match self.field_highlight.borrow_mut().as_mut() {
+            Some(field_highlight) => {
+                field_highlight.copy(input);
+                true
+            }
+            None => false,
+        };
+        if exists {
             self.update_field_highlight(self.is_selected());
         }
     }
-    /// Java group enumeration/listener registrations are represented by counts.
-    fn add_field_highlight_action_listeners(&mut self) {
-        self.item_listener_count = if self.group.is_some() {
-            1
-        } else {
-            self.item_listener_count.max(1)
-        };
+
+    /// The Java object as an `ItemListener`.
+    fn get_self_item_listener(&self) -> ItemListener {
+        if let Some(listener) = self.self_item_listener.borrow().as_ref() {
+            return listener.clone();
+        }
+        let this = self.this.clone();
+        let listener: ItemListener = Rc::new(move |event: &ItemEvent| {
+            if let Some(this) = this.upgrade() {
+                this.item_state_changed(event);
+            }
+        });
+        *self.self_item_listener.borrow_mut() = Some(listener.clone());
+        listener
     }
-    pub fn set_field_highlight(&mut self, value: bool) {
-        if self.field_highlight.is_none() {
-            self.field_highlight = Some(BooleanFieldSetting::default());
+
+    /// Java `addFieldHighlightActionListeners()`.
+    fn add_field_highlight_action_listeners(&self) {
+        // Radio buttons turn off when another button in the group is turned on. So
+        // listen to all of the radio buttons in the group.
+        let mut listener_added = false;
+        if let Some(group) = &self.group {
+            for element in group.get_elements() {
+                listener_added = true;
+                // enumeration.nextElement().addActionListener(this);
+                element.add_item_listener(self.get_self_item_listener());
+            }
+        }
+        if !listener_added {
+            // radioButton.addActionListener(this);
+            self.radio_button.add_item_listener(self.get_self_item_listener());
+        }
+    }
+
+    /// Java `setFieldHighlight(boolean)`.
+    pub fn set_field_highlight_boolean(&self, value: bool) {
+        if self.field_highlight.borrow().is_none() {
+            *self.field_highlight.borrow_mut() = Some(BooleanFieldSetting::new());
             self.add_field_highlight_action_listeners();
         }
-        self.field_highlight.as_mut().unwrap().set(value);
+        self.field_highlight
+            .borrow_mut()
+            .as_mut()
+            .unwrap()
+            .set_boolean(value);
         self.update_field_highlight(self.is_selected());
     }
-    pub fn set_field_highlight_string(&mut self, _value: Option<&str>) {}
-    pub fn clear_field_highlight(&mut self) {
-        if let Some(field_highlight) = &mut self.field_highlight
-            && field_highlight.is_set()
-        {
-            field_highlight.reset();
+
+    /// Java `setFieldHighlight(String)`.
+    pub fn set_field_highlight_string(&self, value: Option<&str>) {
+        let _ = value;
+    }
+
+    /// Java `clearFieldHighlight()`.
+    pub fn clear_field_highlight(&self) {
+        let cleared = match self.field_highlight.borrow_mut().as_mut() {
+            Some(field_highlight) if field_highlight.is_set() => {
+                field_highlight.reset();
+                true
+            }
+            _ => false,
+        };
+        if cleared {
+            // Turn off field highlight - parameter doesn't matter since field
+            // highlight is off.
             self.update_field_highlight(false);
         }
     }
-    pub fn get_field_highlight(&self) -> Option<&BooleanFieldSetting> {
-        self.field_highlight.as_ref()
-    }
-    pub fn equals_field_highlight(&self) -> bool {
+
+    /// Java `getFieldHighlight()`.  (A copy; see `get_checkpoint`.)
+    pub fn get_field_highlight(&self) -> Option<Box<dyn FieldSettingInterface>> {
         self.field_highlight
+            .borrow()
             .as_ref()
-            .is_some_and(|value| value.is_set() && value.equals(self.is_selected()))
+            .map(|setting| Box::new(setting.clone()) as Box<dyn FieldSettingInterface>)
     }
-    pub fn equals_field_highlight_string(&self, value: Option<&str>) -> bool {
-        self.field_highlight.as_ref().is_some_and(|setting| {
-            setting.is_set() && setting.equals(value.is_some_and(|value| !value.trim().is_empty()))
+
+    /// Java `equalsFieldHighlight()`.
+    pub fn equals_field_highlight_void(&self) -> bool {
+        let selected = self.is_selected();
+        self.field_highlight.borrow().as_ref().is_some_and(|field_highlight| {
+            field_highlight.is_set() && field_highlight.equals_boolean(selected)
         })
     }
+
+    /// Java `equalsFieldHighlight(String)`.
+    pub fn equals_field_highlight_string(&self, value: Option<&str>) -> bool {
+        self.field_highlight.borrow().as_ref().is_some_and(|field_highlight| {
+            field_highlight.is_set()
+                && field_highlight.equals_boolean(
+                    value.is_some_and(|value| !java_lang_string_matches_whitespace(value)),
+                )
+        })
+    }
+
+    /// Java `equalsFieldHighlight(boolean)`.
     pub fn equals_field_highlight_boolean(&self, input: bool) -> bool {
-        self.field_highlight
-            .as_ref()
-            .is_some_and(|value| value.is_set() && value.equals(input))
+        self.field_highlight.borrow().as_ref().is_some_and(|field_highlight| {
+            field_highlight.is_set() && field_highlight.equals_boolean(input)
+        })
     }
-    pub fn item_state_changed(&mut self) {
-        self.update_field_highlight(self.is_selected());
+
+    /// Java `itemStateChanged(ItemEvent)`.
+    pub fn item_state_changed(&self, item_event: &ItemEvent) {
+        let _ = item_event;
+        let mut selected;
+        // Radio buttons cannot be turned off directly. When another button in the
+        // group is clicked, this button will turn off if it was on. This response
+        // doesn't happen instantly, but its accurate to assume that this button is
+        // off when another button was clicked.
+        // if (!event.getActionCommand().equals(radioButton.getActionCommand())) {
+        selected = false;
+        // }
+        // else {
+        selected = self.is_selected();
+        // }
+        self.update_field_highlight(selected);
     }
-    pub fn update_field_highlight(&mut self, selected: bool) {
-        if self
-            .field_highlight
-            .as_ref()
-            .is_some_and(|value| value.is_set() && value.is_value() == selected)
-        {
-            if self.orig_foreground.is_none() {
-                self.orig_foreground = Some(self.radio_button.foreground.unwrap_or(BLACK));
-            }
-            self.radio_button.foreground = Some(FIELD_HIGHLIGHT);
-        } else if let Some(foreground) = self.orig_foreground {
-            self.radio_button.foreground = Some(foreground);
-        }
-    }
-    pub fn set_tool_tip_text(&mut self, text: Option<&str>) {
-        self.radio_button.tooltip = text.map(|text| format!("<html>{text}"));
-    }
-    pub fn set_unformatted_tooltip(&mut self, text: Option<&str>) -> Option<&str> {
-        self.unformatted_tooltip = text.map(str::to_owned);
-        self.unformatted_tooltip.as_deref()
-    }
-    pub fn has_unformatted_tooltip(&self) -> bool {
-        self.unformatted_tooltip.is_some()
-    }
-    pub fn use_unformatted_tooltip(
-        &mut self,
-        param_descr: Option<&str>,
-        directive_descr: Option<&str>,
-    ) {
-        let pieces = [
-            self.unformatted_tooltip.as_deref(),
-            param_descr,
-            directive_descr,
-        ]
-        .into_iter()
-        .flatten()
-        .collect::<Vec<_>>()
-        .join(" ");
-        self.set_tool_tip_text((!pieces.is_empty()).then_some(pieces.as_str()));
-        self.unformatted_tooltip = None;
-    }
-    pub fn set_tooltip(&mut self, field_tooltip: Option<&str>) {
-        self.radio_button.tooltip = field_tooltip.map(str::to_owned);
-    }
-    pub fn get_tooltip(&self) -> Option<&str> {
-        self.radio_button.tooltip.as_deref()
-    }
-    pub fn set_preformatted_tooltip(&mut self, tooltip: Option<&str>) {
-        self.radio_button.tooltip = tooltip.map(str::to_owned);
-    }
-    pub fn add_tooltip(&mut self, text: Option<&str>) {
-        let Some(text) = text else {
-            return;
-        };
-        self.radio_button.tooltip = Some(match self.radio_button.tooltip.take() {
-            Some(tooltip) => format!("{tooltip} & <html>{text}"),
-            None => format!("<html>{text}"),
+
+    /// Java `updateFieldHighlight(boolean isSelected)`.
+    pub fn update_field_highlight(&self, is_selected: bool) {
+        let matches = self.field_highlight.borrow().as_ref().is_some_and(|field_highlight| {
+            field_highlight.is_set() && field_highlight.is_value() == is_selected
         });
-    }
-    pub fn set_visible(&mut self, visible: bool) {
-        self.radio_button.visible = visible;
-    }
-    pub fn add_action_listener(&mut self) {
-        self.action_listener_count += 1;
-    }
-    pub fn remove_action_listener(&mut self) {
-        self.action_listener_count = self.action_listener_count.saturating_sub(1);
-    }
-    pub fn add_change_listener(&mut self) {
-        self.change_listener_count += 1;
-    }
-    pub fn set_selected(&mut self, selected: bool) {
-        self.radio_button.selected = selected;
-        if let (Some(group), Some(id)) = (&self.group, self.group_id) {
-            group.borrow_mut().set_selected(id, selected);
+        if matches {
+            if self.orig_foreground.get().is_none() {
+                self.orig_foreground
+                    .set(Some(self.radio_button.get_foreground()));
+            }
+            self.radio_button.set_foreground(Some(colors::FIELD_HIGHLIGHT));
+            return;
         }
-        self.msg_selected();
-        if self.field_highlight.is_some() {
+        if let Some(orig_foreground) = self.orig_foreground.get() {
+            self.radio_button.set_foreground(orig_foreground);
+        }
+    }
+
+    /// Java `setToolTipText(String autodocName, ReadOnlySection section)`.  Sets a
+    /// tooltip from a section using the enumeratedType, if it exists.
+    pub fn set_tool_tip_text_string_read_only_section(
+        &self,
+        autodoc_name: Option<&str>,
+        section: &dyn ReadOnlySection,
+    ) {
+        let text = match &self.enumerated_type {
+            None => etomo_autodoc::get_tooltip_add_source(autodoc_name, section, true),
+            Some(enumerated_type) => etomo_autodoc::get_tooltip_enum_value_name(
+                autodoc_name,
+                section,
+                Some(&enumerated_type.to_string()),
+            ),
+        };
+        self.set_tool_tip_text_string(text.as_deref());
+    }
+
+    /// Java `setToolTipText(String)`.
+    pub fn set_tool_tip_text_string(&self, text: Option<&str>) {
+        self.radio_button
+            .set_tool_tip_text(tooltip_formatter::INSTANCE.format(text).as_deref());
+    }
+
+    /// Java `setUnformattedTooltip(String)`.
+    pub fn set_unformatted_tooltip(&self, text: Option<&str>) -> Option<String> {
+        *self.unformatted_tooltip.borrow_mut() = text.map(str::to_owned);
+        self.unformatted_tooltip.borrow().clone()
+    }
+
+    /// Java `hasUnformattedTooltip()`.
+    pub fn has_unformatted_tooltip(&self) -> bool {
+        self.unformatted_tooltip.borrow().is_some()
+    }
+
+    /// Java `useUnformattedTooltip(String, String)` (`synchronized`; EDT-only
+    /// here).  Use unformattedTooltip to build a tooltip, and then delete
+    /// unformattedTooltip.
+    pub fn use_unformatted_tooltip(&self, param_descr: Option<&str>, directive_descr: Option<&str>) {
+        let unformatted_tooltip = self.unformatted_tooltip.borrow().clone();
+        self.set_tool_tip_text_string(
+            tooltip_formatter::INSTANCE
+                .build_tooltip(unformatted_tooltip.as_deref(), param_descr, directive_descr)
+                .as_deref(),
+        );
+        *self.unformatted_tooltip.borrow_mut() = None;
+    }
+
+    /// Java `setTooltip(Field)`.
+    pub fn set_tooltip(&self, field: Option<&dyn Field>) {
+        if let Some(field) = field {
+            self.radio_button.set_tool_tip_text(field.get_tooltip().as_deref());
+        }
+    }
+
+    /// Java `getTooltip()`.
+    pub fn get_tooltip(&self) -> Option<String> {
+        self.radio_button.get_tool_tip_text()
+    }
+
+    /// Java `setPreformattedTooltip(String)`.
+    pub fn set_preformatted_tooltip(&self, tooltip: Option<&str>) {
+        self.radio_button.set_tool_tip_text(tooltip);
+    }
+
+    /// Java `addTooltip(String)`.
+    pub fn add_tooltip(&self, text: Option<&str>) {
+        if text.is_none() {
+            return;
+        }
+        let tooltip = self.radio_button.get_tool_tip_text();
+        match tooltip {
+            None => self.set_tool_tip_text_string(text),
+            Some(tooltip) => self.radio_button.set_tool_tip_text(Some(&format!(
+                "{} & {}",
+                tooltip,
+                tooltip_formatter::INSTANCE
+                    .format(text)
+                    .as_deref()
+                    .unwrap_or("null")
+            ))),
+        }
+    }
+
+    /// Java `setVisible(boolean)`.
+    pub fn set_visible(&self, visible: bool) {
+        self.radio_button.set_visible(visible);
+    }
+
+    /// Java `addActionListener(ActionListener)`.
+    pub fn add_action_listener(&self, action_listener: ActionListener) {
+        self.radio_button.add_action_listener(action_listener);
+    }
+
+    /// Java `removeActionListener(ActionListener)`.
+    pub fn remove_action_listener(&self, action_listener: &ActionListener) {
+        self.radio_button.remove_action_listener(action_listener);
+    }
+
+    /// Java `addChangeListener(ChangeListener)`.
+    pub fn add_change_listener(&self, listener: ChangeListener) {
+        self.radio_button.add_change_listener(listener);
+    }
+
+    /// Java `setSelected(boolean)`.
+    pub fn set_selected_boolean(&self, selected: bool) {
+        self.radio_button.set_selected(selected);
+        if self.field_highlight.borrow().is_some() {
             self.update_field_highlight(self.is_selected());
         }
     }
-    pub fn is_selected(&self) -> bool {
-        match (&self.group, self.group_id) {
-            (Some(group), Some(id)) => group.borrow().is_selected(id, self.radio_button.selected),
-            _ => self.radio_button.selected,
+
+    /// Java `setSelected(ConstEtomoNumber, boolean allowEmpty)`.
+    pub fn set_selected_const_etomo_number_boolean(
+        &self,
+        selected: Option<&ConstEtomoNumber>,
+        allow_empty: bool,
+    ) {
+        if allow_empty || selected.is_some_and(|selected| !selected.is_null()) {
+            // Upstream bug fixed (RadioButton.java:664-668): with allowEmpty true and
+            // a null number the Java calls `selected.is()` and throws a
+            // NullPointerException.  A null number is left alone here.
+            if let Some(selected) = selected {
+                self.set_selected_boolean(selected.is());
+            }
         }
     }
-    pub fn msg_selected(&mut self) {
-        self.selected_message_count += 1;
+
+    /// Java `msgSelected()`.
+    pub fn msg_selected(&self) {}
+
+    /// Java `isSelected()`.
+    pub fn is_selected(&self) -> bool {
+        self.radio_button.is_selected()
     }
+
+    /// Java `isEmpty()`.
     pub fn is_empty(&self) -> bool {
         false
     }
-    pub fn set_preferred_size(&mut self, preferred_size: Option<(i32, i32)>) {
-        self.radio_button.preferred_size = preferred_size;
+
+    /// Java `getAbstractButton()`.
+    pub fn get_abstract_button(&self) -> Rc<JComponent> {
+        self.radio_button.clone()
     }
+
+    /// Java `isRequired()`.
     pub fn is_required(&self) -> bool {
         false
     }
-    pub fn get_enumerated_type(&self) -> Option<&EnumeratedTypeBoundary> {
-        self.enumerated_type.as_ref()
+
+    /// Java `getText(boolean doValidation, FieldDisplayer)`.  Returns button label.
+    /// No validation available.
+    pub fn get_text_boolean_field_displayer(
+        &self,
+        do_validation: bool,
+        field_displayer1: Option<&dyn FieldDisplayer>,
+    ) -> Result<Option<String>, FieldValidationFailedException> {
+        self.get_text_boolean_field_displayer_field_displayer(do_validation, field_displayer1, None)
     }
-    pub fn get_ui_component(&self) -> &Self {
-        self
+
+    /// Java `getText(boolean doValidation, FieldDisplayer, FieldDisplayer)`.
+    pub fn get_text_boolean_field_displayer_field_displayer(
+        &self,
+        do_validation: bool,
+        field_displayer1: Option<&dyn FieldDisplayer>,
+        field_displayer2: Option<&dyn FieldDisplayer>,
+    ) -> Result<Option<String>, FieldValidationFailedException> {
+        let _ = (do_validation, field_displayer1, field_displayer2);
+        Ok(Some(self.radio_button.get_text()))
     }
-    pub fn get_component(&self) -> &JRadioButtonBoundary {
-        &self.radio_button
+
+    /// Java `getText()`.
+    pub fn get_text_void(&self) -> Option<String> {
+        Some(self.radio_button.get_text())
     }
-    pub fn set_enabled(&mut self, enabled: bool) {
-        self.enabled = enabled;
-        self.radio_button.enabled = enabled && self.editable && !self.locked;
-        if self.radio_button.enabled {
+
+    /// Java `setModel(ButtonModel)`.
+    pub fn set_model(&self, new_model: Option<Rc<dyn ButtonModel>>) {
+        self.radio_button.set_model(new_model);
+    }
+
+    /// Java `getName()`.
+    pub fn get_name(&self) -> Option<String> {
+        self.radio_button.get_name()
+    }
+
+    /// Java `getEnumeratedType()`.
+    pub fn get_enumerated_type(&self) -> Option<EnumeratedTypeRef> {
+        self.enumerated_type.clone()
+    }
+
+    /// Java `getUIComponent()`.
+    pub fn get_ui_component(&self) -> Option<Rc<dyn SwingComponent>> {
+        self.this.upgrade().map(|this| this as Rc<dyn SwingComponent>)
+    }
+
+    /// Java `getComponent()`.
+    pub fn get_component(&self) -> Rc<JComponent> {
+        self.radio_button.clone()
+    }
+
+    /// Java `setEnabled(boolean)`.
+    pub fn set_enabled(&self, enabled: bool) {
+        self.field_lock_controller.set_enabled(enabled);
+        if self.is_enabled() && self.is_editable() && !self.is_locked() {
             self.update_field_highlight(self.is_selected());
         }
     }
-    pub fn set_locked(&mut self, locked: bool) {
-        self.locked = locked;
-        self.radio_button.enabled = self.enabled && self.editable && !locked;
-        if self.radio_button.enabled {
+
+    /// Java `setLocked(boolean)`.
+    pub fn set_locked(&self, locked: bool) {
+        self.field_lock_controller.set_locked(locked);
+        if self.is_enabled() && self.is_editable() && !self.is_locked() {
             self.update_field_highlight(self.is_selected());
         }
     }
-    pub fn set_editable(&mut self, editable: bool) {
-        self.editable = editable;
-        self.radio_button.enabled = self.enabled && editable && !self.locked;
-        if self.radio_button.enabled {
+
+    /// Java `setEditable(boolean)`.
+    pub fn set_editable(&self, editable: bool) {
+        self.field_lock_controller.set_editable(editable);
+        if self.is_enabled() && self.is_editable() && !self.is_locked() {
             self.update_field_highlight(self.is_selected());
         }
     }
+
+    /// Java `isEnabled()`.
     pub fn is_enabled(&self) -> bool {
-        self.enabled
+        self.field_lock_controller.is_enabled()
     }
+
+    /// Java `isEditable()`.
     pub fn is_editable(&self) -> bool {
-        self.editable
+        self.field_lock_controller.is_editable()
     }
+
+    /// Java `isLocked()`.
     pub fn is_locked(&self) -> bool {
-        self.locked
+        self.field_lock_controller.is_locked()
     }
-    pub fn get_action_command(&self) -> &str {
-        self.radio_button
-            .action_command
-            .as_deref()
-            .unwrap_or(self.get_text())
+
+    /// Java `getActionCommand()`.
+    pub fn get_action_command(&self) -> Option<String> {
+        self.radio_button.get_action_command()
     }
-    pub fn set_action_command(&mut self, action_command: Option<&str>) {
-        self.radio_button.action_command = action_command.map(str::to_owned);
+
+    /// Java `setAlignmentX(float)`.
+    pub fn set_alignment_x(&self, alignment_x: f32) {
+        // Swing layout: radioButton.setAlignmentX(alignmentX).
+        let _ = alignment_x;
     }
-    pub fn set_alignment_x(&mut self, alignment_x: f32) {
-        self.radio_button.alignment_x = alignment_x;
-    }
+
+    /// Java `getSelectedObjects()` (`AbstractButton.getSelectedObjects`: the
+    /// label when selected, else null).
     pub fn get_selected_objects(&self) -> Option<Vec<String>> {
-        self.is_selected().then(|| vec![self.get_text().to_owned()])
+        if !self.radio_button.is_selected() {
+            return None;
+        }
+        Some(vec![self.radio_button.get_text()])
     }
 }
 
-/// `RadioButton` is the other Java `ButtonComponent` implementation.
-impl ButtonComponent for RadioButton {
-    fn add_action_listener(&mut self, _listener: &mut dyn ActionListenerBoundary) {
-        RadioButton::add_action_listener(self);
+/// Java `toString()`.
+impl fmt::Display for RadioButton {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(
+            f,
+            "{}: {}",
+            self.radio_button.get_text(),
+            if self.radio_button.is_selected() {
+                "On"
+            } else {
+                "Off"
+            }
+        )
+    }
+}
+
+/// Java `RadioButton.RadioButtonModel`
+/// (`public static final class RadioButtonModel extends AbstractRadioButtonModel`).
+pub struct RadioButtonModel {
+    /// Java `radioButton`.  Weak: the button owns the component that owns this
+    /// model.
+    radio_button: Option<Weak<dyn RadioButtonInterface>>,
+}
+
+impl RadioButtonModel {
+    /// Java `RadioButtonModel(RadioButtonInterface)`.
+    pub fn new(radio_button: Option<Weak<dyn RadioButtonInterface>>) -> Rc<RadioButtonModel> {
+        // super();
+        Rc::new(RadioButtonModel { radio_button })
     }
 
-    fn is_selected(&self) -> bool {
-        RadioButton::is_selected(self)
+    /// Java `getButton()`.
+    pub fn get_button(&self) -> Option<Rc<dyn RadioButtonInterface>> {
+        self.radio_button.as_ref().and_then(Weak::upgrade)
     }
 
-    fn get_action_command(&self) -> Option<&str> {
-        Some(RadioButton::get_action_command(self))
+    /// Java `getField()`.
+    pub fn get_field(&self) -> Option<Rc<dyn Field>> {
+        // Java dereferences `radioButton` unguarded; a model without a (live)
+        // button answers null.
+        self.get_button().and_then(|radio_button| radio_button.get_field())
+    }
+}
+
+impl ButtonModel for RadioButtonModel {
+    /// Java `setSelected(boolean)`: `super.setSelected(selected)` has been done by
+    /// the component; then notify the button.
+    fn set_selected(&self, selected: bool) {
+        let _ = selected;
+        if let Some(radio_button) = self.get_button() {
+            radio_button.msg_selected();
+        }
     }
 
+    fn as_any(&self) -> &dyn Any {
+        self
+    }
+}
+
+impl AbstractRadioButtonModel for RadioButtonModel {
+    /// Java `getEnumeratedType()`.
+    fn get_enumerated_type(&self) -> Option<EnumeratedTypeRef> {
+        // Java dereferences `radioButton` unguarded; see `get_field`.
+        self.get_button()
+            .and_then(|radio_button| radio_button.get_enumerated_type())
+    }
+}
+
+// ---- interface bindings (each forwards to the method above) ----
+
+impl RadioButtonInterface for RadioButton {
+    fn msg_selected(&self) {
+        RadioButton::msg_selected(self)
+    }
+    fn get_enumerated_type(&self) -> Option<EnumeratedTypeRef> {
+        RadioButton::get_enumerated_type(self)
+    }
     fn is_enabled(&self) -> bool {
         RadioButton::is_enabled(self)
     }
+    fn get_field(&self) -> Option<Rc<dyn Field>> {
+        RadioButton::get_field(self)
+    }
 }
 
-impl std::fmt::Display for RadioButton {
-    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(
-            formatter,
-            "{}: {}",
-            self.get_text(),
-            if self.is_selected() { "On" } else { "Off" }
+impl Field for RadioButton {
+    fn is_debug(&self) -> bool {
+        RadioButton::is_debug(self)
+    }
+    fn get_name(&self) -> Option<String> {
+        RadioButton::get_name(self)
+    }
+    fn is_boolean(&self) -> bool {
+        RadioButton::is_boolean(self)
+    }
+    fn is_text(&self) -> bool {
+        RadioButton::is_text(self)
+    }
+    fn get_quoted_label(&self) -> Option<String> {
+        RadioButton::get_quoted_label(self)
+    }
+    fn is_enabled(&self) -> bool {
+        RadioButton::is_enabled(self)
+    }
+    fn clear(&self) {
+        RadioButton::clear(self)
+    }
+    fn set_value_field(&self, from: Option<&dyn Field>) {
+        RadioButton::set_value_field(self, from)
+    }
+    fn set_value_string(&self, text: Option<&str>) {
+        RadioButton::set_value_string(self, text)
+    }
+    fn set_value_boolean(&self, bool_: bool) {
+        RadioButton::set_value_boolean(self, bool_)
+    }
+    fn is_empty(&self) -> bool {
+        RadioButton::is_empty(self)
+    }
+    fn is_selected(&self) -> bool {
+        RadioButton::is_selected(self)
+    }
+    fn is_required(&self) -> bool {
+        RadioButton::is_required(self)
+    }
+    fn get_text_void(&self) -> Option<String> {
+        RadioButton::get_text_void(self)
+    }
+    fn get_text_boolean_field_displayer(
+        &self,
+        do_validation: bool,
+        field_displayer1: Option<Rc<dyn FieldDisplayer>>,
+    ) -> Result<Option<String>, FieldValidationFailedException> {
+        RadioButton::get_text_boolean_field_displayer(self, do_validation, field_displayer1.as_deref())
+    }
+    fn get_text_boolean_field_displayer_field_displayer(
+        &self,
+        do_validation: bool,
+        field_displayer1: Option<Rc<dyn FieldDisplayer>>,
+        field_displayer2: Option<Rc<dyn FieldDisplayer>>,
+    ) -> Result<Option<String>, FieldValidationFailedException> {
+        RadioButton::get_text_boolean_field_displayer_field_displayer(
+            self,
+            do_validation,
+            field_displayer1.as_deref(),
+            field_displayer2.as_deref(),
         )
+    }
+    fn get_directive_def(&self) -> Option<DirectiveDef> {
+        RadioButton::get_directive_def(self)
+    }
+    fn use_default_value(&self) {
+        RadioButton::use_default_value(self)
+    }
+    fn equals_default_value_void(&self) -> bool {
+        RadioButton::equals_default_value_void(self)
+    }
+    fn equals_default_value_string(&self, value: Option<&str>) -> bool {
+        RadioButton::equals_default_value_string(self, value)
+    }
+    fn backup(&self) {
+        RadioButton::backup(self)
+    }
+    fn restore_from_backup(&self) {
+        RadioButton::restore_from_backup(self)
+    }
+    fn checkpoint(&self) {
+        RadioButton::checkpoint_void(self)
+    }
+    fn set_checkpoint(&self, input: Option<&dyn FieldSettingInterface>) {
+        RadioButton::set_checkpoint(self, input)
+    }
+    fn get_checkpoint(&self) -> Option<Rc<dyn FieldSettingInterface>> {
+        RadioButton::get_checkpoint(self)
+            .map(Rc::from)
+    }
+    fn is_different_from_checkpoint(&self, always_check: bool) -> bool {
+        RadioButton::is_different_from_checkpoint(self, always_check)
+    }
+    fn is_field_highlight_set(&self) -> bool {
+        RadioButton::is_field_highlight_set(self)
+    }
+    fn clear_field_highlight(&self) {
+        RadioButton::clear_field_highlight(self)
+    }
+    fn set_field_highlight_field_setting_interface(&self, input: Option<&dyn FieldSettingInterface>) {
+        RadioButton::set_field_highlight_field_setting_interface(self, input)
+    }
+    fn set_field_highlight_string(&self, input: Option<&str>) {
+        RadioButton::set_field_highlight_string(self, input)
+    }
+    fn set_field_highlight_boolean(&self, input: bool) {
+        RadioButton::set_field_highlight_boolean(self, input)
+    }
+    fn get_field_highlight(&self) -> Option<Rc<dyn FieldSettingInterface>> {
+        RadioButton::get_field_highlight(self)
+            .map(Rc::from)
+    }
+    fn equals_field_highlight_void(&self) -> bool {
+        RadioButton::equals_field_highlight_void(self)
+    }
+    fn equals_field_highlight_string(&self, value: Option<&str>) -> bool {
+        RadioButton::equals_field_highlight_string(self, value)
+    }
+    fn set_tool_tip_text(&self, tooltip: Option<&str>) {
+        RadioButton::set_tool_tip_text_string(self, tooltip)
+    }
+    fn set_tooltip(&self, field: Option<&dyn Field>) {
+        RadioButton::set_tooltip(self, field)
+    }
+    fn get_tooltip(&self) -> Option<String> {
+        RadioButton::get_tooltip(self)
+    }
+    fn equals_selected_string_value(&self, value: Option<&str>) -> bool {
+        RadioButton::equals_selected_string_value(self, value)
+    }
+    fn set_directive_def(&self, directive_def: Option<DirectiveDef>) {
+        RadioButton::set_directive_def(self, directive_def)
+    }
+    fn get_description(&self) -> String {
+        RadioButton::get_description(self)
+            .unwrap_or_else(|| "null".to_owned())
+    }
+    fn set_unformatted_tooltip(&self, text: Option<&str>) -> Option<String> {
+        RadioButton::set_unformatted_tooltip(self, text)
+    }
+    fn has_unformatted_tooltip(&self) -> bool {
+        RadioButton::has_unformatted_tooltip(self)
+    }
+    fn use_unformatted_tooltip(&self, param_descr: Option<&str>, directive_descr: Option<&str>) {
+        RadioButton::use_unformatted_tooltip(self, param_descr, directive_descr)
+    }
+}
+
+impl BooleanFieldInterface for RadioButton {}
+
+impl UIComponent for RadioButton {
+    fn get_ui_component(&self) -> &dyn SwingComponent {
+        self
+    }
+    fn get_component(&self) -> Rc<JComponent> {
+        RadioButton::get_component(self)
+    }
+}
+
+impl SwingComponent for RadioButton {
+    fn get_component(&self) -> Rc<JComponent> {
+        RadioButton::get_component(self)
+    }
+}
+
+impl ButtonComponent for RadioButton {
+    fn add_action_listener(&self, listener: ActionListener) {
+        RadioButton::add_action_listener(self, listener)
+    }
+    fn is_selected(&self) -> bool {
+        RadioButton::is_selected(self)
+    }
+    fn get_action_command(&self) -> Option<String> {
+        RadioButton::get_action_command(self)
+    }
+    fn is_enabled(&self) -> bool {
+        RadioButton::is_enabled(self)
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::imod::etomo::r#type::mirror_in_x::MirrorInX;
 
     #[test]
-    fn source_uitest_name_and_group_selection_are_preserved() {
-        let group = Rc::new(RefCell::new(RadioButtonGroup::new()));
-        let mut one = RadioButton::new_in_group("One:", group.clone());
-        let mut two = RadioButton::new_in_group("Two:", group);
-        assert_eq!(one.get_name(), Some("rb.one"));
-        one.set_selected(true);
-        two.set_selected(true);
-        assert!(!one.is_selected());
-        assert!(two.is_selected());
-    }
-
-    #[test]
-    fn checkpoint_and_highlight_follow_source_visibility_and_lock_rules() {
-        let mut button = RadioButton::new("Choice");
-        button.checkpoint();
-        button.set_selected(true);
-        assert!(button.is_different_from_checkpoint(false));
-        button.set_visible(false);
-        assert!(!button.is_different_from_checkpoint(false));
-        button.set_visible(true);
-        button.set_field_highlight(true);
-        assert_eq!(button.radio_button.foreground, Some(FIELD_HIGHLIGHT));
-        button.set_locked(true);
-        assert!(!button.radio_button.enabled);
-    }
-
-    #[test]
-    fn default_and_tooltip_boundaries_preserve_values() {
-        let mut button = RadioButton::new("Choice");
-        button.set_directive_def(Some("flag"));
-        button.use_default_value(Some("true"));
-        assert!(button.is_selected());
-        assert!(button.equals_default_value());
-        button.set_unformatted_tooltip(Some("Tip"));
-        button.use_unformatted_tooltip(Some("parameter"), None);
-        assert!(button.get_tooltip().is_some());
-        assert!(!button.has_unformatted_tooltip());
+    fn enum_constructed_default_selects_itself() {
+        let group = ButtonGroup::new();
+        let always = RadioButton::new_enumerated_type_button_group(
+            EnumeratedTypeRef::new(MirrorInX::ALWAYS),
+            Some(&group),
+        );
+        let default = RadioButton::new_enumerated_type_button_group(
+            EnumeratedTypeRef::new(MirrorInX::DEFAULT),
+            Some(&group),
+        );
+        assert!(!always.is_selected());
+        assert!(default.is_selected());
+        assert!(default.equals(Some(&EnumeratedTypeRef::new(MirrorInX::ASSESS_BOTH))));
+        assert!(default.get_name().is_some_and(|name| name.starts_with("rb.")));
     }
 }

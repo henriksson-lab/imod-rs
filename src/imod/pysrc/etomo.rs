@@ -365,9 +365,9 @@ and put it on your command search path, or point IMOD_JAVADIR to it"
                     // `int()` ignores surrounding white space
                     let vals = lsplit
                         .iter()
-                        .map(|token| token.trim().parse::<i64>())
-                        .collect::<Result<Vec<_>, _>>();
-                    if let Ok(vals) = vals {
+                        .map(|token| super::imodpy::py_int(token))
+                        .collect::<Option<Vec<_>>>();
+                    if let Some(vals) = vals {
                         let _minor;
                         if vals[0] > 1 {
                             major = vals[0];

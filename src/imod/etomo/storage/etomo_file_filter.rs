@@ -37,3 +37,13 @@ mod tests {
         assert_eq!(filter.get_description(), "Etomo data file");
     }
 }
+
+impl crate::imod::etomo::jdk::FileFilter for EtomoFileFilter {
+    fn accept(&self, file: &std::path::Path) -> bool {
+        EtomoFileFilter::accept(self, file)
+    }
+
+    fn get_description(&self) -> Option<String> {
+        Some(EtomoFileFilter::get_description(self).to_string())
+    }
+}

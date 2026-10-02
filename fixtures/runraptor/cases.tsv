@@ -1,0 +1,19 @@
+# name<TAB>setup<TAB>arguments; setup is - or space-separated tokens: src:dst copies fixture src to dst, dir:d makes a directory, old:f writes a file, rbin:none points RAPTOR_BIN at a missing directory
+preali	stub.mrc:ts.preali	-diam 11 -mark 20 -seed 1 ts.preali
+preali_mrc	stub.mrc:ts_preali.mrc	-diameter 11 -markers 20 ts_preali.mrc
+raw_st	stub.mrc:ts.st stub.prexg:ts.prexg	-diam 11 -mark 20 ts.st
+raw_std	stub.mrc:ts.st stub.prexg:ts.prexg pn_std.com:prenewst.com	-diam 11 -mark 20 ts.st
+raw_cmd	stub.mrc:ts.st stub.prexg:ts.prexg pn_cmd.com:prenewsta.com	-diam 11 -mark 20 ts.st
+raw_mrc	stub.mrc:ts.mrc stub.prexg:ts.prexg	-diam 11 -mark 20 ts.mrc
+raw_blank	stub.mrc:ts.st stub.prexg:ts.prexg pn_blank.com:prenewst.com	-diam 11 -mark 20 ts.st
+again	stub.mrc:ts.preali dir:raptor1 old:ts_raptor.fid	-diam 11 -mark 20 ts.preali
+pid	stub.mrc:ts.preali	-PID -diam 11 -mark 20 ts.preali
+usage	stub.mrc:ts.preali	-diam 11 ts.preali
+err_nobin	stub.mrc:ts.preali rbin:none	-diam 11 -mark 20 ts.preali
+err_nomark	stub.mrc:ts.preali	-diam 11 -seed 1 ts.preali
+err_noinput	-	-diam 11 -mark 20 none.preali
+err_noprexg	stub.mrc:ts.st	-diam 11 -mark 20 ts.st
+err_subdir	-	-diam 11 -mark 20 sub/ts.preali
+err_raptor	stub.mrc:fail.preali	-diam 11 -mark 20 fail.preali
+err_xfmodel	stub.mrc:ts.st stub.prexg:ts.prexg pn_bad.com:prenewst.com	-diam 11 -mark 20 ts.st
+err_xfmodel_cmd	stub.mrc:ts.st stub.prexg:ts.prexg pn_badcmd.com:prenewsta.com	-diam 11 -mark 20 ts.st

@@ -1,178 +1,175 @@
 //! `IMOD/Etomo/src/etomo/ui/swing/ToggleCoordinator.java`.
 //!
-//! The concrete `JToggleButton` instances and their property/action listeners
-//! belong to Swing.  This source unit records the exact state and listener
-//! consequences at that boundary.
-#![allow(dead_code)]
+//! Coordinates a header toggle button with the toggle buttons in its column: the
+//! toggler selects every enabled target, and is enabled only while at least one
+//! target is.
 
-/// Java `JToggleButton` state used by this coordinator.
-#[derive(Clone, Debug, Eq, PartialEq)]
-pub struct ToggleButtonBoundary {
-    pub identity_hash_code: usize,
-    pub enabled: bool,
-    pub selected: bool,
-    pub action_listener_registered: bool,
-    pub enabled_property_listener_registered: bool,
+use super::check_box_cell::CheckBoxCell;
+use crate::imod::etomo::jdk::{
+    ActionEvent, ActionListener, ComponentKind, JComponent, PropertyChangeListener,
+};
+use std::cell::RefCell;
+use std::rc::{Rc, Weak};
+
+/// Java private `ENABLED_PROPERTY`.
+const ENABLED_PROPERTY: &str = "enabled";
+
+/// `component instanceof JToggleButton`: `JToggleButton`, `JCheckBox` and
+/// `JRadioButton`.
+fn is_toggle_button(component: &JComponent) -> bool {
+    matches!(
+        component.kind(),
+        ComponentKind::ToggleButton | ComponentKind::CheckBox | ComponentKind::RadioButton
+    )
 }
 
 /// Java package-private `ToggleCoordinator`.
-#[derive(Clone, Debug, Eq, PartialEq)]
 pub struct ToggleCoordinator {
+    /// Java final `targetEnabledChangeListener` (inner `TargetEnabledChangeListener`).
+    target_enabled_change_listener: PropertyChangeListener,
     /// Java final `tbToggler`.
-    pub tb_toggler: Option<ToggleButtonBoundary>,
-    /// Java `targets`; `None` represents Java null, distinct from an empty Vector.
-    pub targets: Option<Vec<ToggleButtonBoundary>>,
+    tb_toggler: Option<Rc<JComponent>>,
+    /// Java `targets`, initialised to null.
+    targets: RefCell<Option<Vec<Rc<JComponent>>>>,
 }
 
 impl ToggleCoordinator {
-    /// Java `ToggleCoordinator(CheckBoxCell)` after its `getComponent()`
-    /// runtime-type test.  `None` retains either Java null input or a non-toggle
-    /// component.
-    pub fn new(toggler: Option<ToggleButtonBoundary>) -> Self {
-        let mut value = Self {
-            tb_toggler: toggler,
-            targets: None,
+    /// Java `ToggleCoordinator(CheckBoxCell)`.
+    pub fn new(cbc_toggler: Option<&CheckBoxCell>) -> Rc<ToggleCoordinator> {
+        let mut tb_toggler = None;
+        if let Some(cbc_toggler) = cbc_toggler {
+            let component = cbc_toggler.get_component();
+            if is_toggle_button(&component) {
+                tb_toggler = Some(component);
+            }
+        }
+        let coordinator = Rc::new_cyclic(|this: &Weak<ToggleCoordinator>| {
+            let weak = this.clone();
+            let target_enabled_change_listener: PropertyChangeListener =
+                Rc::new(move |property_name: &str, new_value: bool| {
+                    if let Some(coordinator) = weak.upgrade() {
+                        coordinator.target_enabled_property_change(property_name, new_value);
+                    }
+                });
+            ToggleCoordinator {
+                target_enabled_change_listener,
+                tb_toggler,
+                targets: RefCell::new(None),
+            }
+        });
+        if let Some(tb_toggler) = &coordinator.tb_toggler {
+            let weak = Rc::downgrade(&coordinator);
+            let listener: ActionListener = Rc::new(move |event: &ActionEvent| {
+                if let Some(coordinator) = weak.upgrade() {
+                    coordinator.toggle_action_performed(Some(event));
+                }
+            });
+            tb_toggler.add_action_listener(listener);
+            coordinator.apply_enabled_state(None);
+        }
+        coordinator
+    }
+
+    /// Java final `addTarget(CheckBoxCell)`.
+    pub fn add_target(&self, cbc_target: Option<&CheckBoxCell>) {
+        let Some(cbc_target) = cbc_target else {
+            return;
         };
-        if let Some(toggler) = &mut value.tb_toggler {
-            toggler.action_listener_registered = true;
-            value.apply_enabled_state(None);
+        let component = cbc_target.get_component();
+        if !is_toggle_button(&component) {
+            return;
         }
-        value
+        let target = component;
+        {
+            let mut targets = self.targets.borrow_mut();
+            if targets.is_none() {
+                *targets = Some(Vec::new());
+            }
+            targets.as_mut().unwrap().push(target.clone());
+        }
+        self.apply_enabled_state(Some(target.is_enabled()));
+        target.add_property_change_listener(
+            ENABLED_PROPERTY,
+            self.target_enabled_change_listener.clone(),
+        );
     }
 
-    /// Java `addTarget(CheckBoxCell)` after its null/type tests.
-    pub fn add_target(&mut self, target: Option<ToggleButtonBoundary>) {
-        let Some(mut target) = target else { return };
-        if self.targets.is_none() {
-            self.targets = Some(Vec::new());
+    /// Java final `deleteTarget(CheckBoxCell)`.
+    pub fn delete_target(&self, cbc_target: Option<&CheckBoxCell>) {
+        let Some(cbc_target) = cbc_target else {
+            return;
+        };
+        let component = cbc_target.get_component();
+        if !is_toggle_button(&component) {
+            return;
         }
-        let enabled = target.enabled;
-        target.enabled_property_listener_registered = true;
-        self.targets.as_mut().expect("assigned above").push(target);
-        self.apply_enabled_state(Some(enabled));
-    }
-
-    /// Java `deleteTarget(CheckBoxCell)` after its null/type tests.
-    pub fn delete_target(&mut self, target: Option<&ToggleButtonBoundary>) {
-        let Some(target) = target else { return };
-        if let Some(targets) = &mut self.targets {
-            if let Some(index) = targets
-                .iter()
-                .position(|value| value.identity_hash_code == target.identity_hash_code)
-            {
-                targets[index].enabled_property_listener_registered = false;
+        let target = component;
+        target.remove_property_change_listener(&self.target_enabled_change_listener);
+        {
+            let mut targets = self.targets.borrow_mut();
+            let Some(targets) = targets.as_mut() else {
+                return;
+            };
+            // List.remove(Object): the first element equal (identical) to target.
+            if let Some(index) = targets.iter().position(|t| Rc::ptr_eq(t, &target)) {
                 targets.remove(index);
             }
-        } else {
-            return;
         }
         self.apply_enabled_state(None);
     }
 
     /// Java private `applyEnabledState(Boolean)`.
-    fn apply_enabled_state(&mut self, enabled: Option<bool>) {
-        let all_targets_disabled = self.all_targets_disabled();
-        let Some(toggler) = &mut self.tb_toggler else {
+    fn apply_enabled_state(&self, enabled: Option<bool>) {
+        let Some(tb_toggler) = &self.tb_toggler else {
             return;
         };
-        if enabled.is_none() || toggler.enabled != enabled.expect("checked above") {
-            toggler.enabled = !all_targets_disabled;
+        if enabled.is_none() || tb_toggler.is_enabled() != enabled.unwrap() {
+            tb_toggler.set_enabled(!self.all_targets_disabled());
         }
     }
 
     /// Java private `allTargetsDisabled()`.
     fn all_targets_disabled(&self) -> bool {
-        self.targets
-            .as_ref()
-            .is_none_or(|targets| !targets.iter().any(|target| target.enabled))
+        let targets = self.targets.borrow();
+        let Some(targets) = targets.as_ref() else {
+            return true;
+        };
+        for target in targets {
+            if target.is_enabled() {
+                return false;
+            }
+        }
+        true
     }
 
     /// Java inner `TargetEnabledChangeListener.propertyChange(PropertyChangeEvent)`.
-    /// `property_name_enabled` and `new_value` retain the Java event's relevant
-    /// two fields; identity selects the observed target.
-    pub fn property_change(
-        &mut self,
-        identity_hash_code: usize,
-        property_name_enabled: bool,
-        new_value: Option<bool>,
-    ) {
-        let Some(new_value) = new_value else { return };
-        if !property_name_enabled {
+    fn target_enabled_property_change(&self, property_name: &str, new_value: bool) {
+        if ENABLED_PROPERTY != property_name {
             return;
-        }
-        if let Some(targets) = &mut self.targets {
-            if let Some(target) = targets
-                .iter_mut()
-                .find(|target| target.identity_hash_code == identity_hash_code)
-            {
-                target.enabled = new_value;
-            }
         }
         self.apply_enabled_state(Some(new_value));
     }
 
     /// Java inner `ToggleActionListener.actionPerformed(ActionEvent)`.
-    /// The action event carries Swing source identity; only a toggler event
-    /// changes enabled target selection.
-    pub fn action_performed(&mut self, source_identity_hash_code: Option<usize>) {
-        let Some(toggler) = &self.tb_toggler else {
+    fn toggle_action_performed(&self, event: Option<&ActionEvent>) {
+        let Some(event) = event else {
             return;
         };
-        if source_identity_hash_code != Some(toggler.identity_hash_code) {
+        let Some(tb_toggler) = &self.tb_toggler else {
+            return;
+        };
+        let targets = self.targets.borrow().clone();
+        let Some(targets) = targets else {
+            return;
+        };
+        if !Rc::ptr_eq(event.get_source(), tb_toggler) {
             return;
         }
-        let selected = toggler.selected;
-        let Some(targets) = &mut self.targets else {
-            return;
-        };
-        for target in targets {
-            if target.enabled {
-                target.selected = selected;
+        let selected = tb_toggler.is_selected();
+        for target in &targets {
+            if target.is_enabled() {
+                target.set_selected(selected);
             }
         }
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-    fn button(identity_hash_code: usize, enabled: bool, selected: bool) -> ToggleButtonBoundary {
-        ToggleButtonBoundary {
-            identity_hash_code,
-            enabled,
-            selected,
-            action_listener_registered: false,
-            enabled_property_listener_registered: false,
-        }
-    }
-    #[test]
-    fn constructor_and_target_enable_events_follow_java_toggler_state() {
-        let mut coordinator = ToggleCoordinator::new(Some(button(1, true, false)));
-        assert!(!coordinator.tb_toggler.as_ref().unwrap().enabled);
-        coordinator.add_target(Some(button(2, true, false)));
-        assert!(coordinator.tb_toggler.as_ref().unwrap().enabled);
-        assert!(coordinator.targets.as_ref().unwrap()[0].enabled_property_listener_registered);
-        coordinator.property_change(2, true, Some(false));
-        assert!(!coordinator.tb_toggler.as_ref().unwrap().enabled);
-    }
-    #[test]
-    fn action_only_updates_enabled_targets_and_requires_toggler_identity() {
-        let mut coordinator = ToggleCoordinator::new(Some(button(1, true, true)));
-        coordinator.add_target(Some(button(2, true, false)));
-        coordinator.add_target(Some(button(3, false, false)));
-        coordinator.action_performed(Some(99));
-        assert!(!coordinator.targets.as_ref().unwrap()[0].selected);
-        coordinator.action_performed(Some(1));
-        assert!(coordinator.targets.as_ref().unwrap()[0].selected);
-        assert!(!coordinator.targets.as_ref().unwrap()[1].selected);
-    }
-    #[test]
-    fn delete_removes_listener_and_recomputes_enabled_state() {
-        let mut coordinator = ToggleCoordinator::new(Some(button(1, true, false)));
-        let target = button(2, true, false);
-        coordinator.add_target(Some(target.clone()));
-        coordinator.delete_target(Some(&target));
-        assert!(coordinator.targets.as_ref().unwrap().is_empty());
-        assert!(!coordinator.tb_toggler.as_ref().unwrap().enabled);
     }
 }

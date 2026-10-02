@@ -1,136 +1,74 @@
-//! Owned translation of `svlLogger.{h,cpp}`.
-use std::fs::OpenOptions;
-use std::io::Write;
-use std::sync::{Mutex, OnceLock};
-#[derive(Clone, Copy, Debug, Eq, Ord, PartialEq, PartialOrd)]
+//! Translation of `IMOD/raptor/lasik/svl/lib/base/svlLogger.h` and
+//! `svlLogger.cpp`, the parts `MarkersCorrespond` reaches.
+//!
+//! The log file (`svlLogger::_log`) is only opened by `initialize`, which the
+//! program never calls, and the four display callbacks are never set, so a
+//! message goes to `cerr` (fatal, error, warning) or `cout` (the rest).
+
+use crate::imod::cxx_stream::{cerr, cout};
+
+/// `svlLogLevel`.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
 pub enum SvlLogLevel {
     Fatal = 0,
-    Error = 1,
-    Warning = 2,
-    Message = 3,
-    Verbose = 4,
-    Debug = 5,
-}
-/// `svlLogger`, a lightweight facade over the source's process-global logger
-/// state.  Constructing it does not reset configuration, matching the C++
-/// constructor's no-op behavior.
-#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
-pub struct SvlLogger;
-
-/// `svlLogger::svlLogger` (`svlLogger.cpp:58`).
-pub fn svl_logger() -> SvlLogger {
-    SvlLogger
+    Error,
+    Warning,
+    Message,
+    Verbose,
+    Debug,
 }
 
-impl SvlLogger {
-    pub fn initialize(
-        self,
-        filename: Option<&str>,
-        overwrite: bool,
-        level: Option<SvlLogLevel>,
-    ) -> std::io::Result<()> {
-        initialize(filename, overwrite, level)
-    }
-    pub fn log_message(self, level: SvlLogLevel, message: &str) -> Result<(), String> {
-        log_message(level, message)
-    }
-}
-struct Logger {
-    level: SvlLogLevel,
-    path: Option<String>,
-}
-static LOGGER: OnceLock<Mutex<Logger>> = OnceLock::new();
-fn logger() -> &'static Mutex<Logger> {
-    LOGGER.get_or_init(|| {
-        Mutex::new(Logger {
-            level: SvlLogLevel::Message,
-            path: None,
-        })
-    })
-}
-pub fn set_log_level(level: SvlLogLevel) {
-    logger().lock().unwrap().level = level
-}
+/// `svlLogger::_logLevel` (`svlLogger.cpp:56`); only the configuration
+/// manager (not reached) changes it.
+const LOG_LEVEL: SvlLogLevel = SvlLogLevel::Message;
+
+/// `svlLogger::getLogLevel()`.
 pub fn get_log_level() -> SvlLogLevel {
-    logger().lock().unwrap().level
+    LOG_LEVEL
 }
-pub fn initialize(
-    filename: Option<&str>,
-    overwrite: bool,
-    level: Option<SvlLogLevel>,
-) -> std::io::Result<()> {
-    let mut state = logger().lock().unwrap();
-    if let Some(level) = level {
-        state.level = level;
+
+/// The `SVL_LOG(L, M)` macro (`svlLogger.h:46`): `msg` is the streamed
+/// message `M`; `file` and `line` are what `__FILE__`/`__LINE__` expand to at
+/// the call site, used only for a fatal message.
+pub fn svl_log(level: SvlLogLevel, file: &str, line: u32, msg: &str) {
+    if level > get_log_level() {
+        return;
     }
-    state.path = filename.filter(|s| !s.is_empty()).map(str::to_owned);
-    if let Some(path) = &state.path {
-        let mut file = OpenOptions::new()
-            .create(true)
-            .write(true)
-            .append(!overwrite)
-            .truncate(overwrite)
-            .open(path)?;
-        writeln!(file, "--- log opened --- ")?;
-    }
-    Ok(())
-}
-pub fn log_message(level: SvlLogLevel, message: &str) -> Result<(), String> {
-    let state = logger().lock().unwrap();
-    if level > state.level {
-        return Ok(());
-    }
-    let prefix = match level {
-        SvlLogLevel::Fatal => "-*-",
-        SvlLogLevel::Error => "-E-",
-        SvlLogLevel::Warning => "-W-",
-        SvlLogLevel::Debug => "-D-",
-        _ => "---",
-    };
-    if let Some(path) = &state.path {
-        let mut file = OpenOptions::new()
-            .append(true)
-            .open(path)
-            .map_err(|e| e.to_string())?;
-        writeln!(file, "{prefix} {message}").map_err(|e| e.to_string())?;
-    }
+    let mut s = String::new();
     if level == SvlLogLevel::Fatal {
-        Err(message.into())
-    } else {
-        Ok(())
+        s.push_str(&format!("({file}, {line}) "));
     }
+    s.push_str(msg);
+    log_message(level, &s);
 }
-pub fn set_configuration(name: &str, value: &str) -> Result<(), String> {
-    match name {
-        "logLevel" => {
-            let level = match value.to_ascii_uppercase().as_str() {
-                "ERROR" => SvlLogLevel::Error,
-                "WARNING" => SvlLogLevel::Warning,
-                "MESSAGE" => SvlLogLevel::Message,
-                "VERBOSE" => SvlLogLevel::Verbose,
-                "DEBUG" => SvlLogLevel::Debug,
-                _ => return Err("invalid configuration value for logLevel".into()),
-            };
-            set_log_level(level);
-            Ok(())
+
+/// `svlLogger::logMessage(level, msg)` (`svlLogger.cpp:95`).
+pub fn log_message(level: SvlLogLevel, msg: &str) {
+    if level > LOG_LEVEL {
+        return;
+    }
+
+    let mut prefix = *b"---";
+    match level {
+        SvlLogLevel::Fatal => prefix[1] = b'*',
+        SvlLogLevel::Error => prefix[1] = b'E',
+        SvlLogLevel::Warning => prefix[1] = b'W',
+        SvlLogLevel::Message => prefix[1] = b'-',
+        SvlLogLevel::Verbose => prefix[1] = b'-',
+        SvlLogLevel::Debug => prefix[1] = b'D',
+    }
+    let prefix = String::from_utf8_lossy(&prefix).into_owned();
+
+    match level {
+        SvlLogLevel::Fatal | SvlLogLevel::Error | SvlLogLevel::Warning => {
+            cerr(&format!("{prefix} {msg}\n"));
         }
-        "logFile" => initialize(Some(value), false, None).map_err(|e| e.to_string()),
-        _ => Err(format!("unknown configuration option {name}")),
+        _ => {
+            cout(&format!("{prefix} {msg}\n"));
+        }
     }
-}
-#[cfg(test)]
-mod tests {
-    use super::*;
-    #[test]
-    fn filter_and_config() {
-        set_log_level(SvlLogLevel::Warning);
-        assert!(log_message(SvlLogLevel::Debug, "x").is_ok());
-        assert!(set_configuration("logLevel", "debug").is_ok());
-        assert_eq!(get_log_level(), SvlLogLevel::Debug);
-        assert!(
-            svl_logger()
-                .log_message(SvlLogLevel::Message, "facade")
-                .is_ok()
-        );
+
+    if level == SvlLogLevel::Fatal {
+        std::process::abort();
     }
 }

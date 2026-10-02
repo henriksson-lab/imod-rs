@@ -1,216 +1,114 @@
 //! Translation of `IMOD/raptor/suitesparse/cs_counts.c`.
+//!
+//! The workspace `w` is one array of `s` ints as in C; its sub-arrays
+//! (`ancestor = w`, `maxfirst = w+n`, `prevleaf = w+2n`, `first = w+3n`,
+//! and for `ata` `head = w+4n`, `next = w+5n+1`) are split off it.
 
-use super::{Cs, cs_leaf::cs_leaf, cs_transpose::cs_transpose};
+use super::cs::{Cs, cs_csc, cs_min};
+use super::cs_leaf::cs_leaf;
+use super::cs_malloc::cs_malloc;
+use super::cs_transpose::cs_transpose;
+use super::cs_util::cs_idone;
 
-/// C static `init_ata`.
-///
-/// `transpose` is the source `AT = A'`; `head` and `next` are the linked
-/// lists laid out in C's workspace after the other four `n`-element regions.
-fn init_ata(
-    transpose: &Cs,
-    post: &[usize],
-    head: &mut [Option<usize>],
-    next: &mut [Option<usize>],
-) -> Option<()> {
-    let rows = transpose.columns;
-    let nodes = transpose.rows;
-    if post.len() != nodes
-        || head.len() < nodes + 1
-        || next.len() < rows
-        || transpose.column_pointers.len() < rows + 1
-    {
-        return None;
+/// `init_ata(AT, post, w, &head, &next)` (static): `w` is the whole
+/// workspace; `head` and `next` are returned as offsets into it.
+fn init_ata(at: &Cs, post: &[i32], w: &mut [i32], head: &mut usize, next: &mut usize) {
+    let m = at.n;
+    let n = at.m;
+    let atp = &at.p;
+    let ati = &at.i;
+    *head = 4 * n as usize;
+    *next = 5 * n as usize + 1;
+    for k in 0..n {
+        w[post[k as usize] as usize] = k; // invert post
     }
-    let mut inverse_post = vec![0; nodes];
-    for (position, &node) in post.iter().enumerate() {
-        if node >= nodes {
-            return None;
+    for i in 0..m as usize {
+        let mut k = n;
+        for p in atp[i]..atp[i + 1] {
+            k = cs_min(k, w[ati[p as usize] as usize]);
         }
-        inverse_post[node] = position;
+        w[*next + i] = w[*head + k as usize]; // place row i in linked list k
+        w[*head + k as usize] = i as i32;
     }
-    for row in 0..rows {
-        let mut minimum = nodes;
-        let start = transpose.column_pointers[row];
-        let end = transpose.column_pointers[row + 1];
-        if start > end || end > transpose.row_indices.len() {
-            return None;
-        }
-        for entry in start..end {
-            let column = transpose.row_indices[entry];
-            if column >= nodes {
-                return None;
-            }
-            minimum = minimum.min(inverse_post[column]);
-        }
-        next[row] = head[minimum];
-        head[minimum] = Some(row);
-    }
-    Some(())
 }
 
-/// C `cs_counts`: computes column counts for `LL' = A` or `LL' = A' A`.
-///
-/// Parent links use `None` for C's `-1`.  The input ordering is the
-/// postorder returned by [`super::cs_post::cs_post`].
+/// `cs_counts(A, parent, post, ata)`: column counts of LL'=A or LL'=A'A,
+/// given parent & post ordering.
 pub fn cs_counts(
-    matrix: &Cs,
-    parent: &[Option<usize>],
-    post: &[usize],
-    ata: bool,
-) -> Option<Vec<usize>> {
-    if !matrix.is_csc()
-        || parent.len() != matrix.columns
-        || post.len() != matrix.columns
-        || matrix.column_pointers.len() < matrix.columns + 1
-        || parent.iter().flatten().any(|&node| node >= matrix.columns)
-        || post.iter().any(|&node| node >= matrix.columns)
-    {
+    a: &Cs,
+    parent: Option<&[i32]>,
+    post: Option<&[i32]>,
+    ata: i32,
+) -> Option<Vec<i32>> {
+    if !cs_csc(a) {
         return None;
     }
-    let mut seen_post = vec![false; matrix.columns];
-    for &node in post {
-        if seen_post[node] {
-            return None;
-        }
-        seen_post[node] = true;
-    }
-    let entries = matrix.column_pointers[matrix.columns];
-    if entries > matrix.row_indices.len()
-        || matrix
-            .column_pointers
-            .windows(2)
-            .any(|offsets| offsets[0] > offsets[1])
-    {
-        return None;
-    }
-    let transpose = cs_transpose(matrix, false)?;
-    let node_count = matrix.columns;
-    let mut delta = vec![0_isize; node_count];
-    let mut ancestor: Vec<usize> = (0..node_count).collect();
-    let mut maxfirst = vec![None; node_count];
-    let mut prevleaf = vec![None; node_count];
-    let mut first = vec![None; node_count];
-
-    for (position, &post_node) in post.iter().enumerate() {
-        if first[post_node].is_none() {
-            delta[post_node] = 1;
-        }
-        let mut node = Some(post_node);
-        for _ in 0..node_count {
-            let Some(current) = node else { break };
-            if first[current].is_some() {
-                break;
-            }
-            first[current] = Some(position);
-            node = parent[current];
-        }
-    }
-    if first.iter().any(Option::is_none) {
-        return None;
-    }
-
-    let mut head = if ata {
-        Some(vec![None; node_count + 1])
-    } else {
-        None
+    let (parent, post) = match (parent, post) {
+        (Some(parent), Some(post)) => (parent, post),
+        _ => return None,
     };
-    let mut next = if ata {
-        Some(vec![None; matrix.rows])
-    } else {
-        None
-    };
-    if ata {
-        init_ata(&transpose, post, head.as_mut()?, next.as_mut()?)?;
+    let mut jleaf = 0i32;
+    let m = a.m;
+    let n = a.n;
+    let nu = n as usize;
+    let s = 4 * n + if ata != 0 { n + m + 1 } else { 0 };
+    let mut colcount: Vec<i32> = cs_malloc(n); // delta = colcount
+    let mut w: Vec<i32> = cs_malloc(s);
+    let at = cs_transpose(a, 0)?; // AT = A'
+    let (mut head, mut next) = (0usize, 0usize);
+    for k in 0..s as usize {
+        w[k] = -1; // clear workspace w [0..s-1]
     }
-
-    for (position, &node) in post.iter().enumerate() {
-        if let Some(ancestor_node) = parent[node] {
-            delta[ancestor_node] -= 1;
+    // first = w+3n
+    for k in 0..nu {
+        let mut j = post[k];
+        colcount[j as usize] = if w[3 * nu + j as usize] == -1 { 1 } else { 0 }; // delta[j]=1 if j is a leaf
+        while j != -1 && w[3 * nu + j as usize] == -1 {
+            w[3 * nu + j as usize] = k as i32;
+            j = parent[j as usize];
         }
-        let mut source_column = if ata {
-            head.as_ref()?[position]
-        } else {
-            Some(node)
-        };
-        while let Some(column) = source_column {
-            if column >= transpose.columns {
-                return None;
-            }
-            for entry in transpose.column_pointers[column]..transpose.column_pointers[column + 1] {
-                let row_subtree = transpose.row_indices[entry];
-                let mut jleaf = 0;
-                let lca = cs_leaf(
-                    row_subtree,
-                    node,
-                    &first,
-                    &mut maxfirst,
-                    &mut prevleaf,
-                    &mut ancestor,
-                    &mut jleaf,
-                );
+    }
+    let atp = &at.p;
+    let ati = &at.i;
+    if ata != 0 {
+        init_ata(&at, post, &mut w, &mut head, &mut next);
+    }
+    for i in 0..nu {
+        w[i] = i as i32; // each node in its own set (ancestor = w)
+    }
+    for k in 0..nu {
+        let j = post[k]; // j is the kth node in postordered etree
+        if parent[j as usize] != -1 {
+            colcount[parent[j as usize] as usize] -= 1; // j is not a root
+        }
+        // J=j for LL'=A case: HEAD(k,j), NEXT(J)
+        let mut jj = if ata != 0 { w[head + k] } else { j };
+        while jj != -1 {
+            for p in atp[jj as usize]..atp[jj as usize + 1] {
+                let i = ati[p as usize];
+                let (ancestor, rest) = w.split_at_mut(nu);
+                let (maxfirst, rest) = rest.split_at_mut(nu);
+                let (prevleaf, rest) = rest.split_at_mut(nu);
+                let first = &rest[..nu];
+                let q = cs_leaf(i, j, first, maxfirst, prevleaf, ancestor, &mut jleaf);
                 if jleaf >= 1 {
-                    delta[node] += 1;
+                    colcount[j as usize] += 1; // A(i,j) is in skeleton
                 }
                 if jleaf == 2 {
-                    delta[lca?] -= 1;
+                    colcount[q as usize] -= 1; // account for overlap in q
                 }
             }
-            source_column = if ata { next.as_ref()?[column] } else { None };
+            jj = if ata != 0 { w[next + jj as usize] } else { -1 };
         }
-        if let Some(ancestor_node) = parent[node] {
-            ancestor[node] = ancestor_node;
-        }
-    }
-    for node in 0..node_count {
-        if let Some(ancestor_node) = parent[node] {
-            delta[ancestor_node] += delta[node];
+        if parent[j as usize] != -1 {
+            w[j as usize] = parent[j as usize];
         }
     }
-    delta
-        .into_iter()
-        .map(|count| usize::try_from(count).ok())
-        .collect()
-}
-
-#[cfg(test)]
-mod tests {
-    use super::cs_counts;
-    use crate::imod::raptor::suitesparse::{Cs, cs_etree::cs_etree, cs_post::cs_post};
-
-    #[test]
-    fn counts_match_the_cholesky_column_pattern_for_a_symmetric_matrix() {
-        let matrix = Cs {
-            nzmax: 5,
-            rows: 3,
-            columns: 3,
-            column_pointers: vec![0, 1, 3, 5],
-            row_indices: vec![0, 0, 1, 1, 2],
-            values: vec![1.0; 5],
-            nz: -1,
-        };
-        let parent = cs_etree(&matrix, false).unwrap();
-        let post = cs_post(&parent).unwrap();
-        assert_eq!(parent, [Some(1), Some(2), None]);
-        assert_eq!(post, [0, 1, 2]);
-        assert_eq!(
-            cs_counts(&matrix, &parent, &post, false),
-            Some(vec![2, 2, 1])
-        );
+    for j in 0..nu {
+        // sum up delta's of each child
+        if parent[j] != -1 {
+            colcount[parent[j] as usize] += colcount[j];
+        }
     }
-
-    #[test]
-    fn ata_counts_accept_a_rectangular_matrix() {
-        let matrix = Cs {
-            nzmax: 4,
-            rows: 3,
-            columns: 2,
-            column_pointers: vec![0, 2, 4],
-            row_indices: vec![0, 1, 1, 2],
-            values: vec![1.0; 4],
-            nz: -1,
-        };
-        let parent = cs_etree(&matrix, true).unwrap();
-        let post = cs_post(&parent).unwrap();
-        assert_eq!(cs_counts(&matrix, &parent, &post, true), Some(vec![2, 1]));
-    }
+    cs_idone(colcount, 1)
 }

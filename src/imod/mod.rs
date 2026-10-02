@@ -1,5 +1,6 @@
 pub mod backends;
 pub mod c_sort;
+pub mod cxx_stream;
 pub mod clip;
 pub mod commands;
 pub mod comrun;

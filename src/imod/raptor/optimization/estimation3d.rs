@@ -1,326 +1,267 @@
-//! Safe translation of `IMOD/raptor/optimization/estimation3d.{h,cpp}`.
+//! Translation of `IMOD/raptor/optimization/estimation3d.h` and
+//! `estimation3d.cpp`: fit the 3D projection model for one in-plane
+//! rotation `alpha`.
 
 use super::contour::Contour;
-use super::estimation3d_data::Estimation3dData;
-use super::prob_data::{ProbData, SparseMatrix};
-use super::std_qp_data::{Matrix, StdQpData};
+use super::estimation3ddata::Estimation3dData;
+use super::prob_data::ProbData;
+use super::std_qp::{std_qp, zero_mat};
+use crate::imod::c_sort::std_sort;
+use crate::imod::libcfshr::b3dutil::{RAND_MAX, rand};
 use crate::imod::raptor::main_classes::constants::{MIN_WEIGHT, PI};
-use std::collections::BTreeMap;
+use crate::imod::raptor::opencv::cxarithm::{cv_mul, cv_sub};
+use crate::imod::raptor::opencv::cxmatmul::cv_mat_mul;
+use crate::imod::raptor::opencv::cxtypes::{CV_64FC1, CvMat};
+use crate::imod::raptor::suitesparse::cs_add::cs_add;
+use crate::imod::raptor::suitesparse::cs_compress::cs_compress;
+use crate::imod::raptor::suitesparse::cs_entry::cs_entry;
+use crate::imod::raptor::suitesparse::cs_util::cs_spalloc;
 
-/// C++ `CreateRandMat`, with caller-provided randomness instead of C's global
-/// `rand` state.
-pub fn create_rand_mat(
-    rows: usize,
-    columns: usize,
-    scale: f64,
-    shift: f64,
-    random: &mut impl FnMut() -> f64,
-) -> Matrix<f64> {
-    Matrix::new(
-        rows,
-        columns,
-        (0..rows * columns)
-            .map(|_| scale * random() + shift)
-            .collect(),
-    )
+/// `CreateRandMat(int x, int y, double scale, double shift)`
+/// (`estimation3d.cpp:21`): one `rand()` per element, row by row.
+pub fn create_rand_mat(x: i32, y: i32, scale: f64, shift: f64) -> CvMat {
+    let mut result = CvMat::create(x, y, CV_64FC1);
+    for i in 0..x {
+        for j in 0..y {
+            result.set_real_2d(i, j, scale * (rand() as f64 / RAND_MAX as f64) + shift);
+        }
+    }
+    result
 }
 
-/// C++ `repMat`.
-pub fn rep_mat(
-    matrix: &Matrix<f64>,
-    row_repetitions: usize,
-    column_repetitions: usize,
-) -> Matrix<f64> {
-    let rows = matrix.rows * row_repetitions;
-    let columns = matrix.columns * column_repetitions;
-    let mut values = vec![0.0; rows * columns];
-    for repeated_row in 0..row_repetitions {
-        for repeated_column in 0..column_repetitions {
-            for source_row in 0..matrix.rows {
-                for source_column in 0..matrix.columns {
-                    values[(repeated_row * matrix.rows + source_row) * columns
-                        + repeated_column * matrix.columns
-                        + source_column] =
-                        matrix.values[source_row * matrix.columns + source_column];
+/// `repMat(CvMat* mat, int m, int n)` (`estimation3d.cpp:35`).
+pub fn rep_mat(mat: &CvMat, m: i32, n: i32) -> CvMat {
+    let mut result = CvMat::create(
+        m * mat.get_size().height,
+        n * mat.get_size().width,
+        CV_64FC1,
+    );
+    for i in 0..m {
+        for j in 0..n {
+            for si in 0..mat.get_size().height {
+                for sj in 0..mat.get_size().width {
+                    result.set_real_2d(
+                        (i * mat.get_size().height) + si,
+                        (j * mat.get_size().width) + sj,
+                        mat.get_real_2d(si, sj),
+                    );
                 }
             }
         }
     }
-    Matrix::new(rows, columns, values)
+    result
 }
 
-/// C++ `estimation3D`.
+/// `estimation3D(contour& contour_x, contour& contour_y, double alpha,
+/// vector<double> tiltAngles, int W, int H, double percentile, probData*
+/// prob, CvMat* Wf, CvMat* Mf)` (`estimation3d.cpp:55`).  `W`, `H` and
+/// `contour_y` are not read by the source either.
 ///
-/// `solve` is the native replacement for the not-yet-translated `std_qp`
-/// source unit.  It receives the same fully populated problem state that the
-/// C++ function passes to `std_qp`; its answer is then processed exactly here.
-/// `None` represents malformed dimensions or missing source allocations.
+/// Kept as native (BUGS.md): the last block of the starting point is
+/// `buc + 2*(rand()/RAND_MAX) - 1`, an integer division that is 0 unless
+/// `rand()` returns `RAND_MAX`; the `rand()` call is still made.
+#[allow(clippy::too_many_arguments)]
 pub fn estimation_3d(
     contour_x: &Contour,
-    contour_y: &Contour,
+    _contour_y: &Contour,
     alpha: f64,
     tilt_angles: &[f64],
-    _width: i32,
-    _height: i32,
+    _w: i32,
+    _h: i32,
     percentile: f64,
-    probability: &mut ProbData,
-    weights: &Matrix<f64>,
-    measured: &Matrix<f64>,
-    random: &mut impl FnMut() -> f64,
-    solve: impl FnOnce(&ProbData, usize, usize) -> StdQpData<f64>,
-) -> Option<Estimation3dData> {
-    let views = contour_x.num_frames;
-    let markers = contour_x.num_trajectories;
-    if contour_y.num_frames != views
-        || contour_y.num_trajectories != markers
-        || tilt_angles.len() < views
-        || weights.rows != 2 * views
-        || weights.columns != markers
-        || measured.rows != 2 * views
-        || measured.columns != markers
+    prob: &mut ProbData,
+    wf: &CvMat,
+    mf: &CvMat,
+) -> Estimation3dData {
+    let t_ = contour_x.get_num_frame();
+    let m = contour_x.get_num_traj();
+
+    let mut the_estimate = Estimation3dData::with_size(t_, m);
+
+    // create 3d rotation matrix
+    let mut r = zero_mat(2 * t_, 3);
+    let mut i = 0;
+    while i < r.get_size().height {
+        r.set_real_2d(i, 0, 1.0);
+        i += 2;
+    }
+    let mut i = 1;
+    while i < r.get_size().height {
+        r.set_real_2d(
+            i,
+            1,
+            (tilt_angles[((i - 1) / 2) as usize] * PI / 180.0).cos(),
+        );
+        i += 2;
+    }
+    let mut i = 1;
+    while i < r.get_size().height {
+        r.set_real_2d(
+            i,
+            2,
+            (tilt_angles[((i - 1) / 2) as usize] * PI / 180.0).sin(),
+        );
+        i += 2;
+    }
+
+    let mut ralpha = zero_mat(2, 2);
+    ralpha.set_real_2d(0, 0, (alpha * PI / 180.0).cos());
+    ralpha.set_real_2d(0, 1, -(alpha * PI / 180.0).sin());
+    ralpha.set_real_2d(1, 0, (alpha * PI / 180.0).sin());
+    ralpha.set_real_2d(1, 1, (alpha * PI / 180.0).cos());
+
     {
-        return None;
-    }
-
-    let mut estimate = Estimation3dData::with_dimensions(views, markers);
-    let g = estimate.g.as_mut()?;
-    let alpha_radians = alpha * PI / 180.0;
-    for view in 0..views {
-        let tilt_radians = tilt_angles[view] * PI / 180.0;
-        let cosine_alpha = alpha_radians.cos();
-        let sine_alpha = alpha_radians.sin();
-        let cosine_tilt = tilt_radians.cos();
-        let sine_tilt = tilt_radians.sin();
-        g.values[2 * view * 3] = cosine_alpha;
-        g.values[2 * view * 3 + 1] = -sine_alpha * cosine_tilt;
-        g.values[2 * view * 3 + 2] = -sine_alpha * sine_tilt;
-        g.values[(2 * view + 1) * 3] = sine_alpha;
-        g.values[(2 * view + 1) * 3 + 1] = cosine_alpha * cosine_tilt;
-        g.values[(2 * view + 1) * 3 + 2] = cosine_alpha * sine_tilt;
-    }
-
-    let a = probability.a.as_mut()?;
-    if a.nz != -1
-        || a.column_or_triplet_offsets.len() != a.columns + 1
-        || a.columns < 2 * views + 3 * markers
-    {
-        return None;
-    }
-    for column in 2 * views..2 * views + 3 * markers {
-        let g_column = (column - 2 * views) % 3;
-        for entry in a.column_or_triplet_offsets[column]..a.column_or_triplet_offsets[column + 1] {
-            a.values[entry] *= g.values[(a.row_indices[entry] % (2 * views)) * 3 + g_column];
-        }
-    }
-
-    let x0_length = 4 * views * markers + 2 * views + 3 * markers;
-    probability.x0 = Some(create_rand_mat(x0_length, 1, 2.0, -1.0, random));
-    let bounds = probability.buc.as_ref()?;
-    if bounds.columns != 1 || bounds.rows < 2 * views * markers {
-        return None;
-    }
-    let x0 = probability.x0.as_mut()?;
-    for value in &mut x0.values[..2 * views] {
-        *value *= 10.0;
-    }
-    for value in
-        &mut x0.values[2 * views + 3 * markers..2 * views + 3 * markers + 2 * views * markers]
-    {
-        *value = random() * 3.0 + 100.0;
-    }
-    for (index, value) in x0.values[2 * views * markers + 3 * markers + 2 * views..]
-        .iter_mut()
-        .enumerate()
-    {
-        *value = bounds.values[index] + 2.0 * random() - 1.0;
-    }
-
-    let q = probability.q.as_ref()?;
-    if q.nz != -1 || q.column_or_triplet_offsets.len() != q.columns + 1 || q.rows != q.columns {
-        return None;
-    }
-    let mut columns: Vec<BTreeMap<usize, f64>> = (0..q.columns).map(|_| BTreeMap::new()).collect();
-    for (column, destination) in columns.iter_mut().enumerate() {
-        for entry in q.column_or_triplet_offsets[column]..q.column_or_triplet_offsets[column + 1] {
-            *destination.entry(q.row_indices[entry]).or_default() += q.values[entry];
-        }
-    }
-    for diagonal in 0..2 * views {
-        *columns[diagonal].entry(diagonal).or_default() += 1.0e-6;
-    }
-    let mut offsets = Vec::with_capacity(q.columns + 1);
-    let mut rows = Vec::new();
-    let mut values = Vec::new();
-    offsets.push(0);
-    for column in columns {
-        for (row, value) in column {
-            rows.push(row);
-            values.push(value);
-        }
-        offsets.push(rows.len());
-    }
-    probability.q = Some(SparseMatrix::new(
-        q.rows,
-        q.columns,
-        rows.len(),
-        -1,
-        offsets,
-        rows,
-        values,
-    ));
-
-    let result = solve(probability, markers, views);
-    if result.num_itrs > 200 {
-        estimate.resid_mean_perc = 1.0e6;
-        estimate.resid_mean = 1.0e6;
-        return Some(estimate);
-    }
-    let answer = result.answer_mat?;
-    if answer.columns != 1 || answer.rows < 2 * views + 3 * markers {
-        return None;
-    }
-    let t = estimate.t.as_mut()?;
-    t.values.copy_from_slice(&answer.values[..2 * views]);
-    let p = estimate.p.as_mut()?;
-    for marker in 0..markers {
-        p.values[marker] = answer.values[2 * views + 3 * marker];
-        p.values[markers + marker] = answer.values[2 * views + 3 * marker + 1];
-        p.values[2 * markers + marker] = answer.values[2 * views + 3 * marker + 2];
-    }
-
-    let mut residuals = Vec::new();
-    for view in 0..views {
-        for marker in 0..markers {
-            if weights.values[(2 * view) * markers + marker] > MIN_WEIGHT * 1.1 {
-                let projected_x = g.values[2 * view * 3] * p.values[marker]
-                    + g.values[2 * view * 3 + 1] * p.values[markers + marker]
-                    + g.values[2 * view * 3 + 2] * p.values[2 * markers + marker]
-                    + t.values[2 * view];
-                let projected_y = g.values[(2 * view + 1) * 3] * p.values[marker]
-                    + g.values[(2 * view + 1) * 3 + 1] * p.values[markers + marker]
-                    + g.values[(2 * view + 1) * 3 + 2] * p.values[2 * markers + marker]
-                    + t.values[2 * view + 1];
-                let dx = measured.values[(2 * view) * markers + marker] - projected_x;
-                let dy = measured.values[(2 * view + 1) * markers + marker] - projected_y;
-                residuals.push((dx * dx + dy * dy).sqrt());
+        let g = the_estimate.g.as_mut().unwrap();
+        for j in 0..t_ {
+            let mut ralpha_rsub = zero_mat(2, 3);
+            let rsub = r.get_rows(2 * j, 2 * j + 1 + 1, 1);
+            cv_mat_mul(ralpha.view(), rsub, &mut ralpha_rsub);
+            for kk in 0..3 {
+                g.set_real_2d(2 * j, kk, ralpha_rsub.get_real_2d(0, kk));
+                g.set_real_2d(2 * j + 1, kk, ralpha_rsub.get_real_2d(1, kk));
             }
         }
     }
-    residuals.sort_by(f64::total_cmp);
-    if residuals.is_empty() {
-        return Some(estimate);
-    }
-    let percentile_count =
-        ((residuals.len() as f64 * percentile).ceil() as usize).clamp(1, residuals.len());
-    let sum: f64 = residuals.iter().sum();
-    estimate.resid_mean_perc =
-        residuals[..percentile_count].iter().sum::<f64>() / percentile_count as f64;
-    estimate.resid_mean = sum / residuals.len() as f64;
-    Some(estimate)
-}
+    drop(r);
+    drop(ralpha);
 
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn random_and_repeat_matrix_functions_preserve_source_layout() {
-        let mut random = || 0.25;
-        assert_eq!(
-            create_rand_mat(1, 2, 2.0, -1.0, &mut random).values,
-            vec![-0.5; 2]
-        );
-        assert_eq!(
-            rep_mat(&Matrix::new(1, 2, vec![1.0, 2.0]), 2, 2),
-            Matrix::new(2, 4, vec![1.0, 2.0, 1.0, 2.0, 1.0, 2.0, 1.0, 2.0])
-        );
+    // updating parts of prob.a that require G
+    {
+        let g = the_estimate.g.as_ref().unwrap();
+        let a = prob.a.as_mut().unwrap();
+        let ax = a.x.as_mut().unwrap();
+        for j in 2 * t_..2 * t_ + 3 * m {
+            let col_g = (j - 2 * t_) % 3;
+            for ii in a.p[j as usize]..a.p[j as usize + 1] {
+                let ii = ii as usize;
+                ax[ii] *= g.get_real_2d(a.i[ii] % (2 * t_), col_g);
+            }
+        }
     }
 
-    #[test]
-    fn projection_fit_builds_g_regularizes_q_and_calculates_residuals() {
-        let empty = || SparseMatrix::new(9, 9, 0, -1, vec![0; 10], vec![], vec![]);
-        let mut probability = ProbData {
-            buc: Some(Matrix::new(2, 1, vec![0.0; 2])),
-            a: Some(SparseMatrix::new(2, 5, 0, -1, vec![0; 6], vec![], vec![])),
-            c: Some(empty()),
-            q: Some(empty()),
-            x0: None,
-        };
-        let mut random = || 0.5;
-        let estimate = estimation_3d(
-            &Contour::with_dimensions(1, 1, 1),
-            &Contour::with_dimensions(1, 1, 2),
-            0.0,
-            &[0.0],
-            0,
-            0,
-            0.7,
-            &mut probability,
-            &Matrix::new(2, 1, vec![1.0, 1.0]),
-            &Matrix::new(2, 1, vec![12.0, 25.0]),
-            &mut random,
-            |problem, markers, views| {
-                assert_eq!((markers, views), (1, 1));
-                assert_eq!(problem.x0.as_ref().unwrap().rows, 9);
-                assert_eq!(problem.q.as_ref().unwrap().values, vec![1.0e-6, 1.0e-6]);
-                StdQpData {
-                    answer_mat: Some(Matrix::new(
-                        9,
-                        1,
-                        vec![10.0, 20.0, 1.0, 2.0, 3.0, 0.0, 0.0, 0.0, 0.0],
-                    )),
-                    num_itrs: 1,
-                    exit_flag: 0,
-                    gap: 0.0,
-                }
-            },
-        )
-        .unwrap();
-        assert_eq!(
-            estimate.g.unwrap().values,
-            vec![1.0, 0.0, 0.0, 0.0, 1.0, 0.0]
-        );
-        assert_eq!(estimate.p.unwrap().values, vec![1.0, 2.0, 3.0]);
-        assert_eq!(
-            (estimate.resid_mean_perc, estimate.resid_mean),
-            (10.0_f64.sqrt(), 10.0_f64.sqrt())
-        );
+    let mut x0 = create_rand_mat(4 * t_ * m + 2 * t_ + 3 * m, 1, 2.0, -1.0);
+    // prob.x0=2*rand(4*T*M+2*T+3*M,1)-1;
+
+    for i in 0..2 * t_ {
+        let v = 10.0 * x0.get_real_2d(i, 0);
+        x0.set_real_2d(i, 0, v);
     }
 
-    #[test]
-    fn excessive_qp_iterations_preserve_source_failure_sentinel() {
-        let empty = || SparseMatrix::new(9, 9, 0, -1, vec![0; 10], vec![], vec![]);
-        let mut probability = ProbData {
-            buc: Some(Matrix::new(2, 1, vec![0.0; 2])),
-            a: Some(SparseMatrix::new(2, 5, 0, -1, vec![0; 6], vec![], vec![])),
-            c: Some(empty()),
-            q: Some(empty()),
-            x0: None,
-        };
-        let mut random = || 0.5;
-        let estimate = estimation_3d(
-            &Contour::with_dimensions(1, 1, 1),
-            &Contour::with_dimensions(1, 1, 2),
-            0.0,
-            &[0.0],
-            0,
-            0,
-            0.7,
-            &mut probability,
-            &Matrix::new(2, 1, vec![1.0; 2]),
-            &Matrix::new(2, 1, vec![0.0; 2]),
-            &mut random,
-            |_, _, _| StdQpData {
-                answer_mat: None,
-                num_itrs: 201,
-                exit_flag: 0,
-                gap: 0.0,
-            },
-        )
-        .unwrap();
-        assert_eq!(
-            (estimate.resid_mean_perc, estimate.resid_mean),
-            (1.0e6, 1.0e6)
-        );
+    for i in 2 * t_ + 3 * m..2 * t_ + 3 * m + 2 * t_ * m {
+        x0.set_real_2d(i, 0, (rand() as f64 / RAND_MAX as f64) * 3.0 + 100.0);
     }
+
+    {
+        let buc = prob.buc.as_ref().unwrap();
+        for i in 2 * t_ * m + 3 * m + 2 * t_..4 * t_ * m + 2 * t_ + 3 * m {
+            let q = 2 * (rand() / RAND_MAX);
+            x0.set_real_2d(
+                i,
+                0,
+                buc.get_real_2d(i - (2 * t_ * m + 3 * m + 2 * t_), 0) + q as f64 - 1.0,
+            );
+        }
+    }
+    prob.x0 = Some(x0);
+
+    // regularization on the translation parameter
+    {
+        let q = prob.q.as_ref().unwrap();
+        let mut tt = cs_spalloc(q.m, q.n, 2 * t_, 1, 1);
+        for kk in 0..2 * t_ {
+            cs_entry(&mut tt, kk, kk, 1e-6);
+        }
+        let ttt = cs_compress(&tt).unwrap();
+        let sum = cs_add(q, &ttt, 1.0, 1.0);
+        prob.q = sum;
+    }
+
+    // [xx,itersQP,exit_flag]
+    let the_result = std_qp(
+        prob.q.as_ref().unwrap(),
+        prob.c.as_ref().unwrap(),
+        prob.a.as_ref().unwrap(),
+        prob.buc.as_ref().unwrap(),
+        prob.x0.as_ref().unwrap(),
+        m,
+        t_,
+        "prob",
+    );
+
+    if the_result.num_itrs > 200 {
+        the_estimate.resid_mean_perc = 1e6;
+        the_estimate.resid_mean = 1e6;
+        return the_estimate;
+    }
+
+    let answer = the_result.answer_mat.as_ref().unwrap();
+    {
+        let t = the_estimate.t.as_mut().unwrap();
+        for i in 0..2 * t_ {
+            t.set_real_2d(i, 0, answer.get_real_2d(i, 0));
+        }
+    }
+    {
+        let p = the_estimate.p.as_mut().unwrap();
+        let mut i = 2 * t_;
+        let mut pos_p = 0;
+        while i < 2 * t_ + 3 * m {
+            p.set_real_2d(0, pos_p, answer.get_real_2d(i, 0));
+            p.set_real_2d(1, pos_p, answer.get_real_2d(i + 1, 0));
+            p.set_real_2d(2, pos_p, answer.get_real_2d(i + 2, 0));
+            i += 3;
+            pos_p += 1;
+        }
+    }
+
+    let g = the_estimate.g.as_ref().unwrap();
+    let p = the_estimate.p.as_ref().unwrap();
+    let mut gp = zero_mat(g.get_size().height, p.get_size().width);
+    cv_mat_mul(g.view(), p.view(), &mut gp);
+    let rept = rep_mat(the_estimate.t.as_ref().unwrap(), 1, m);
+
+    let mut mf_gp = zero_mat(mf.get_size().height, mf.get_size().width);
+    cv_sub(mf.view(), gp.view(), &mut mf_gp);
+    let mut mf_gprept = zero_mat(mf_gp.get_size().height, mf_gp.get_size().width);
+    cv_sub(mf_gp.view(), rept.view(), &mut mf_gprept);
+    let mut resid = zero_mat(mf_gprept.get_size().height, mf_gprept.get_size().width);
+    cv_mul(mf_gprept.view(), mf_gprept.view(), &mut resid, 1.0);
+    // resid=(Mf-G*P-repmat(t,[1,M])).^2;
+
+    drop(gp);
+    drop(rept);
+    drop(mf_gp);
+    drop(mf_gprept);
+
+    let mut resid_aux: Vec<f64> = Vec::new(); // we compute residual here
+    let mut i = 0;
+    while i < wf.get_size().height {
+        for j in 0..wf.get_size().width {
+            if wf.get_real_2d(i, j) > (MIN_WEIGHT * 1.1) {
+                resid_aux.push((resid.get_real_2d(i, j) + resid.get_real_2d(i + 1, j)).sqrt());
+            }
+        }
+        i += 2;
+    }
+    drop(resid);
+
+    std_sort(&mut resid_aux, &mut |a: &f64, b: &f64| a < b);
+
+    if resid_aux.is_empty() {
+        the_estimate.resid_mean = 0.0;
+        the_estimate.resid_mean_perc = 0.0;
+    } else {
+        let size = (resid_aux.len() as f64 * percentile).ceil() as i32;
+        let mut sum = 0.0f64;
+        for i in 0..size as usize {
+            sum += resid_aux[i];
+        }
+        the_estimate.resid_mean_perc = sum / size as f64;
+        for i in size as usize..resid_aux.len() {
+            sum += resid_aux[i];
+        }
+        the_estimate.resid_mean = sum / resid_aux.len() as f64;
+    }
+
+    the_estimate
 }

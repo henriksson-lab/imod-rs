@@ -1,532 +1,477 @@
 //! `IMOD/Etomo/src/etomo/ui/swing/EraseGoldPanel.java`.
 //!
-//! Swing construction, the concrete `ApplicationManager`, and the three
-//! subordinate panels are direct boundaries.  This unit retains the source
-//! panel's controls, ordering, selection/visibility invariant, parameter
-//! routing, and context-menu construction without inventing a second process
-//! controller.
-#![allow(dead_code)]
+//! Java `final class EraseGoldPanel implements ContextMenu`: the "Erase Gold"
+//! tab of the final aligned stack dialog.  It chooses the model creation
+//! method (existing fiducial model via `XfModelPanel`, or findbeads3d via
+//! `Beads3dFindPanel`) and holds the bead eraser (`CcdEraserBeadsPanel`).
+//!
+//! An EDT object (`Rc<Self>`, `&self` methods).  The inner listener class
+//! `EraseGoldPanelActionListener` is a closure holding a weak reference to the
+//! panel.  The parent dialog owns this panel, so the Java `parent` field is a
+//! `Weak<FinalAlignedStackDialog>`.
 
-use std::cell::RefCell;
-use std::rc::Rc;
+use std::rc::{Rc, Weak};
 
+use super::beads3d_find_panel::Beads3dFindPanel;
+use super::blendmont_display::BlendmontDisplay;
+use super::ccd_eraser_beads_panel::CcdEraserBeadsPanel;
+use super::ccd_eraser_display::CcdEraserDisplay;
+use super::context_menu::ContextMenu;
+use super::context_popup::{self, ContextPopup};
+use super::deferred_3dmod_button::Deferred3dmodButton;
+use super::etched_border::EtchedBorder;
+use super::final_aligned_stack_dialog::FinalAlignedStackDialog;
+use super::find_beads3d_display::FindBeads3dDisplay;
+use super::global_expand_button::GlobalExpandButton;
+use super::newstack_display::NewstackDisplay;
+use super::radio_button::RadioButton;
+use super::tilt_display::TiltDisplay;
+use super::ui_harness;
+use super::xf_model_panel::XfModelPanel;
+use crate::imod::etomo::application_manager::ApplicationManager;
+use crate::imod::etomo::base_manager::BaseManager;
+use crate::imod::etomo::comscript::blendmont_param::BlendmontParam;
+use crate::imod::etomo::comscript::const_ccd_eraser_param::ConstCCDEraserParam;
+use crate::imod::etomo::comscript::const_find_beads3d_param::ConstFindBeads3dParam;
+use crate::imod::etomo::comscript::const_tilt_param::ConstTiltParam;
+use crate::imod::etomo::comscript::const_tiltalign_param::ConstTiltalignParam;
+use crate::imod::etomo::comscript::fortran_input_syntax_exception::FortranInputSyntaxException;
+use crate::imod::etomo::comscript::newst_param::NewstParam;
+use crate::imod::etomo::jdk::{ActionEvent, ActionListener, ButtonGroup, JComponent, MouseEvent};
 use crate::imod::etomo::process::imod_process::Run3dmodMenuOptions;
 use crate::imod::etomo::r#type::axis_id::AxisID;
+use crate::imod::etomo::r#type::const_meta_data::ConstMetaData;
 use crate::imod::etomo::r#type::dialog_type::DialogType;
+use crate::imod::etomo::r#type::meta_data::MetaData;
+use crate::imod::etomo::r#type::recon_screen_state::ReconScreenState;
+use crate::imod::etomo::r#type::tomogram_state::TomogramState;
 use crate::imod::etomo::r#type::view_type::ViewType;
 
-use super::context_popup::{ContextPopup, MouseEvent, TOMO_GUIDE};
-use super::newstack_or_blendmont_panel::{
-    BlendmontParam, GlobalExpandButton, NewstParam, ReconScreenState,
-};
-use super::radio_button::{RadioButton, RadioButtonGroup};
-use super::tilt_panel::Deferred3dmodButton;
-
+/// Java package-private static final `ERASE_GOLD_TAB_LABEL`.
 pub const ERASE_GOLD_TAB_LABEL: &str = "Erase Gold";
 
-/// Boundary data shared by the Java `ConstMetaData` and `MetaData` calls made
-/// by this source unit.
-#[derive(Clone, Debug, Default)]
-pub struct EraseGoldMetaData {
-    pub erase_gold_model_use_fid: bool,
-}
-
-/// Opaque source parameter boundaries not otherwise owned by this panel.
-#[derive(Clone, Debug, Default, Eq, PartialEq)]
-pub struct TiltParam;
-#[derive(Clone, Debug, Default, Eq, PartialEq)]
-pub struct FindBeads3dParam;
-#[derive(Clone, Debug, Default, Eq, PartialEq)]
-pub struct TiltalignParam;
-#[derive(Clone, Debug, Default, Eq, PartialEq)]
-pub struct CCDEraserParam;
-#[derive(Clone, Debug, Default, Eq, PartialEq)]
-pub struct TomogramState;
-
-/// Display interfaces returned by Java subordinate panels.  They remain
-/// explicit boundaries until their owning display classes are translated.
-#[derive(Clone, Debug, Default, Eq, PartialEq)]
-pub struct BlendmontDisplay;
-#[derive(Clone, Debug, Default, Eq, PartialEq)]
-pub struct NewstackDisplay;
-#[derive(Clone, Debug, Default, Eq, PartialEq)]
-pub struct TiltDisplay;
-#[derive(Clone, Debug, Default, Eq, PartialEq)]
-pub struct FindBeads3dDisplay;
-
-/// The direct `ApplicationManager` methods called from `EraseGoldPanel.java`.
-pub trait EraseGoldPanelApplicationManager {
-    fn view_type(&self) -> ViewType;
-    fn pack(&mut self, axis_id: AxisID);
-}
-
-/// Java `FinalAlignedStackDialog.isFiducialess` boundary.
-pub trait FinalAlignedStackDialog {
-    fn is_fiducialess(&self) -> bool;
-}
-
-/// Source-visible state owned by Java `XfModelPanel` at this panel boundary.
-#[derive(Clone, Debug, Default, Eq, PartialEq)]
-pub struct XfModelPanel {
-    pub visible: bool,
-    pub done_count: u32,
-}
-
-impl XfModelPanel {
-    pub fn set_visible(&mut self, visible: bool) {
-        self.visible = visible;
-    }
-    pub fn done(&mut self) {
-        self.done_count += 1;
-    }
-}
-
-/// Source-visible state owned by Java `Beads3dFindPanel` at this panel boundary.
-#[derive(Clone, Debug, Default, Eq, PartialEq)]
-pub struct Beads3dFindPanel {
-    pub visible: bool,
-    pub advanced: bool,
-    pub initialized: bool,
-    pub done_count: u32,
-    pub reregister_processing_method_mediator_count: u32,
-    pub parameter_set_count: u32,
-    pub parameter_get_count: u32,
-    pub override_parameter_count: u32,
-    pub blendmont_3d_find_display: BlendmontDisplay,
-    pub newstack_3d_find_display: NewstackDisplay,
-    pub tilt_3d_find_display: TiltDisplay,
-    pub find_beads_3d_display: FindBeads3dDisplay,
-}
-
-impl Beads3dFindPanel {
-    pub fn reregister_processing_method_mediator(&mut self) {
-        self.reregister_processing_method_mediator_count += 1;
-    }
-    pub fn set_visible(&mut self, visible: bool) {
-        self.visible = visible;
-    }
-    pub fn update_advanced(&mut self, advanced: bool) {
-        self.advanced = advanced;
-    }
-    pub fn done(&mut self) {
-        self.done_count += 1;
-    }
-    pub fn initialize(&mut self) {
-        self.initialized = true;
-    }
-    pub fn get_blendmont_3d_find_display(&self) -> &BlendmontDisplay {
-        &self.blendmont_3d_find_display
-    }
-    pub fn get_newstack_3d_find_display(&self) -> &NewstackDisplay {
-        &self.newstack_3d_find_display
-    }
-    pub fn get_tilt_3d_find_display(&self) -> &TiltDisplay {
-        &self.tilt_3d_find_display
-    }
-    pub fn get_find_beads_3d_display(&self) -> &FindBeads3dDisplay {
-        &self.find_beads_3d_display
-    }
-}
-
-/// Source-visible state owned by Java `CcdEraserBeadsPanel` at this panel boundary.
-#[derive(Clone, Debug, Default, Eq, PartialEq)]
-pub struct CcdEraserBeadsPanel {
-    pub initialized: bool,
-    pub done_count: u32,
-    pub aligned_stack_binning_update_count: u32,
-    pub parameter_set_count: u32,
-    pub parameter_get_count: u32,
-}
-
-impl CcdEraserBeadsPanel {
-    pub fn initialize(&mut self) {
-        self.initialized = true;
-    }
-    pub fn done(&mut self) {
-        self.done_count += 1;
-    }
-    pub fn update_aligned_stack_binning(&mut self) {
-        self.aligned_stack_binning_update_count += 1;
-    }
-}
-
-/// Java `EraseGoldPanel` source-visible Swing layout state.
-#[derive(Clone, Debug, Default)]
-pub struct EraseGoldPanelLayout {
-    pub root_box_layout_y_axis: bool,
-    pub root_border: Option<String>,
-    pub root_component_order: Vec<String>,
-    pub model_box_layout_y_axis: bool,
-    pub model_border: Option<String>,
-    pub model_alignment_x: f32,
-    pub model_component_order: Vec<String>,
-    pub root_mouse_listener_count: usize,
-    pub context_popup: Option<ContextPopup>,
-}
-
-/// Java final `EraseGoldPanel`.
-#[derive(Clone, Debug)]
+/// Java `final class EraseGoldPanel implements ContextMenu`.
 pub struct EraseGoldPanel {
-    pub pnl_root: EraseGoldPanelLayout,
-    pub bg_model: Rc<RefCell<RadioButtonGroup>>,
-    pub rb_model_use_fid: RadioButton,
-    pub rb_model_use_find_beads_3d: RadioButton,
-    pub xf_model_panel: XfModelPanel,
-    pub beads_3d_find_panel: Beads3dFindPanel,
-    pub ccd_eraser_beads_panel: CcdEraserBeadsPanel,
-    pub axis_id: AxisID,
-    pub dialog_type: DialogType,
+    /// Java `this`.
+    this: Weak<EraseGoldPanel>,
+    /// Java private final `pnlRoot = new JPanel()`.
+    pnl_root: Rc<JComponent>,
+    /// Java private final `actionListener` (`EraseGoldPanelActionListener`).
+    action_listener: ActionListener,
+    /// Java private final `bgModel = new ButtonGroup()`.
+    bg_model: Rc<ButtonGroup>,
+    /// Java private final `rbModelUseFid`.
+    rb_model_use_fid: Rc<RadioButton>,
+    /// Java private final `rbModelUseFindBeads3d`.
+    rb_model_use_find_beads3d: Rc<RadioButton>,
+
+    /// Java private final `xfModelPanel`.
+    xf_model_panel: Rc<XfModelPanel>,
+    /// Java private final `beads3dFindPanel`.
+    beads3d_find_panel: Rc<Beads3dFindPanel>,
+    /// Java private final `ccdEraserBeadsPanel`.
+    ccd_eraser_beads_panel: Rc<CcdEraserBeadsPanel>,
+    /// Java private final `manager`.
+    manager: &'static ApplicationManager,
+    /// Java private final `axisID`.
+    axis_id: AxisID,
+    /// Java private final `dialogType`.
+    dialog_type: DialogType,
+    /// Java private final `parent` (the owning dialog; held weakly).
+    parent: Weak<FinalAlignedStackDialog>,
 }
 
 impl EraseGoldPanel {
-    /// Java private constructor `EraseGoldPanel(...)`.
-    pub fn new(
+    /// Java private constructor `EraseGoldPanel(ApplicationManager,
+    /// FinalAlignedStackDialog, AxisID, DialogType, GlobalExpandButton)`.
+    fn new(
+        manager: &'static ApplicationManager,
+        parent: Weak<FinalAlignedStackDialog>,
         axis_id: AxisID,
         dialog_type: DialogType,
-        _global_advanced_button: &GlobalExpandButton,
-    ) -> Self {
-        let bg_model = Rc::new(RefCell::new(RadioButtonGroup::new()));
-        let mut rb_model_use_fid =
-            RadioButton::new_in_group("Use the existing fiducial model", bg_model.clone());
-        rb_model_use_fid.radio_button.action_command =
-            Some("Use the existing fiducial model".into());
-        let mut rb_model_use_find_beads_3d =
-            RadioButton::new_in_group("Use findbeads3d", bg_model.clone());
-        rb_model_use_find_beads_3d.radio_button.action_command = Some("Use findbeads3d".into());
-        Self {
-            pnl_root: EraseGoldPanelLayout::default(),
-            bg_model: bg_model.clone(),
-            rb_model_use_fid,
-            rb_model_use_find_beads_3d,
-            xf_model_panel: XfModelPanel::default(),
-            beads_3d_find_panel: Beads3dFindPanel::default(),
-            ccd_eraser_beads_panel: CcdEraserBeadsPanel::default(),
-            axis_id,
-            dialog_type,
-        }
+        global_advanced_button: &Rc<GlobalExpandButton>,
+    ) -> Rc<EraseGoldPanel> {
+        Rc::new_cyclic(|this: &Weak<EraseGoldPanel>| {
+            // Field initializers, in declaration order.
+            let pnl_root = JComponent::new_panel();
+            // Java `new EraseGoldPanelActionListener(this)`.
+            let adaptee = this.clone();
+            let action_listener: ActionListener = Rc::new(move |event: &ActionEvent| {
+                let Some(adaptee) = adaptee.upgrade() else {
+                    return;
+                };
+                adaptee.action(event.get_action_command().unwrap_or(""), None, None);
+            });
+            let bg_model = ButtonGroup::new();
+            let rb_model_use_fid = RadioButton::new_string_button_group(
+                Some("Use the existing fiducial model"),
+                Some(&bg_model),
+            );
+            let rb_model_use_find_beads3d =
+                RadioButton::new_string_button_group(Some("Use findbeads3d"), Some(&bg_model));
+            // Constructor body.
+            // TODO(unit): needs etomo/ui/swing/XfModelPanel.java - the live
+            // xf_model_panel.rs is a generic state model; this assumes the faithful
+            // `get_instance(&'static ApplicationManager, AxisID, DialogType) ->
+            // Rc<XfModelPanel>`.
+            let xf_model_panel = XfModelPanel::get_instance(manager, axis_id, dialog_type);
+            let beads3d_find_panel = Beads3dFindPanel::get_instance(
+                manager,
+                this.clone(),
+                axis_id,
+                dialog_type,
+                global_advanced_button,
+            );
+            let ccd_eraser_beads_panel =
+                CcdEraserBeadsPanel::get_instance(manager, axis_id, dialog_type);
+            EraseGoldPanel {
+                this: this.clone(),
+                pnl_root,
+                action_listener,
+                bg_model,
+                rb_model_use_fid,
+                rb_model_use_find_beads3d,
+                xf_model_panel,
+                beads3d_find_panel,
+                ccd_eraser_beads_panel,
+                manager,
+                axis_id,
+                dialog_type,
+                parent,
+            }
+        })
     }
 
-    /// Java static `getInstance`.
+    /// Java static `getInstance(ApplicationManager, FinalAlignedStackDialog,
+    /// AxisID, DialogType, GlobalExpandButton)`.
     pub fn get_instance(
+        manager: &'static ApplicationManager,
+        parent: Weak<FinalAlignedStackDialog>,
         axis_id: AxisID,
         dialog_type: DialogType,
-        global_advanced_button: &GlobalExpandButton,
-    ) -> Self {
-        let mut instance = Self::new(axis_id, dialog_type, global_advanced_button);
+        global_advanced_button: &Rc<GlobalExpandButton>,
+    ) -> Rc<EraseGoldPanel> {
+        let instance = EraseGoldPanel::new(
+            manager,
+            parent,
+            axis_id,
+            dialog_type,
+            global_advanced_button,
+        );
         instance.create_panel();
         instance.add_listeners();
         instance.set_tool_tip_text();
         instance
     }
 
-    /// Java `addListeners`.
-    pub fn add_listeners(&mut self) {
-        self.pnl_root.root_mouse_listener_count += 1;
-        self.rb_model_use_fid.add_action_listener();
-        self.rb_model_use_find_beads_3d.add_action_listener();
+    /// Java private `addListeners()`.
+    fn add_listeners(&self) {
+        // Swing mouse: pnlRoot.addMouseListener(new GenericMouseAdapter(this)) -
+        // mouse events are not modelled by jdk.rs; popUpContextMenu is the
+        // `ContextMenu` implementation below.
+        self.rb_model_use_fid
+            .add_action_listener(self.action_listener.clone());
+        self.rb_model_use_find_beads3d
+            .add_action_listener(self.action_listener.clone());
     }
 
-    /// Java `reregisterProcessingMethodMediator`.
-    pub fn reregister_processing_method_mediator(&mut self) {
-        self.beads_3d_find_panel
+    /// Java package-private `reregisterProcessingMethodMediator()`.
+    pub fn reregister_processing_method_mediator(&self) {
+        self.beads3d_find_panel
             .reregister_processing_method_mediator();
     }
 
-    /// Java `popUpContextMenu`.
-    pub fn pop_up_context_menu<M: EraseGoldPanelApplicationManager>(
-        &mut self,
-        manager: &M,
-        mouse_event: MouseEvent,
-    ) {
-        let (align_manpage_label, align_manpage, align_logfile_label, align_logfile) =
-            if manager.view_type() == ViewType::Montage {
-                ("Blendmont", "blendmont", "Blend", "blend")
-            } else {
-                ("Newstack", "newstack", "Newst", "newst")
-            };
-        let man_page_label = vec![
-            align_manpage_label.into(),
-            "Tilt".into(),
-            "Findbeads3d".into(),
-            "CcdEraser".into(),
-            "3dmod".into(),
-        ];
-        let man_page = vec![
-            format!("{align_manpage}.html"),
-            "tilt.html".into(),
-            "findbeads3d.html".into(),
-            "ccderaser.html".into(),
-            "3dmod.html".into(),
-        ];
-        let log_file_label = vec![
-            format!("{align_logfile_label}_3dfind"),
-            "Tilt_3dfind".into(),
-            "Findbeads3d".into(),
-        ];
-        let extension = self.axis_id.get_extension();
-        let log_file = vec![
-            format!("{align_logfile}_3dfind{extension}.log"),
-            format!("tilt_3dfind{extension}.log"),
-            format!("findbeads3d{extension}.log"),
-        ];
-        self.pnl_root.context_popup = ContextPopup::new_log_files(
-            mouse_event,
-            Some("ErasingGold"),
-            TOMO_GUIDE,
-            &man_page_label,
-            &man_page,
-            &log_file_label,
-            &log_file,
-            self.axis_id,
-            None,
-        )
-        .ok();
+    // <p>updates done</p>
+
+    /// Java private `createPanel()`.
+    fn create_panel(&self) {
+        // Local panels
+        let pnl_model = JComponent::new_panel();
+        // Root panel
+        // Swing layout: pnlRoot BoxLayout Y_AXIS.
+        self.pnl_root.set_border_title(
+            EtchedBorder::new(Some("Bead Eraser"))
+                .get_border()
+                .get_title()
+                .as_deref(),
+        );
+        self.pnl_root.add(&pnl_model);
+        self.pnl_root.add(&self.xf_model_panel.get_component());
+        self.pnl_root.add(&self.beads3d_find_panel.get_component());
+        self.pnl_root
+            .add(&self.ccd_eraser_beads_panel.get_component());
+        // Model panel
+        // Swing layout: pnlModel BoxLayout Y_AXIS, Box.CENTER_ALIGNMENT.
+        pnl_model.set_border_title(
+            EtchedBorder::new(Some("Model Creation Method"))
+                .get_border()
+                .get_title()
+                .as_deref(),
+        );
+        pnl_model.add(&self.rb_model_use_fid.get_component());
+        pnl_model.add(&self.rb_model_use_find_beads3d.get_component());
     }
 
-    /// Java `createPanel`.
-    pub fn create_panel(&mut self) {
-        self.pnl_root.root_box_layout_y_axis = true;
-        self.pnl_root.root_border = Some("Bead Eraser".into());
-        self.pnl_root.root_component_order = vec![
-            "pnlModel".into(),
-            "xfModelPanel".into(),
-            "beads3dFindPanel".into(),
-            "ccdEraserBeadsPanel".into(),
-        ];
-        self.pnl_root.model_box_layout_y_axis = true;
-        self.pnl_root.model_border = Some("Model Creation Method".into());
-        self.pnl_root.model_alignment_x = 0.5;
-        self.pnl_root.model_component_order =
-            vec!["rbModelUseFid".into(), "rbModelUseFindBeads3d".into()];
-    }
-
-    /// Java `getComponent`, including its required binning update before return.
-    pub fn get_component(&mut self) -> &EraseGoldPanelLayout {
+    /// Java package-private `getComponent()`.
+    pub fn get_component(&self) -> Rc<JComponent> {
         self.update_aligned_stack_binning();
-        &self.pnl_root
+        self.pnl_root.clone()
     }
-    /// Java `isFiducialess`.
-    pub fn is_fiducialess<P: FinalAlignedStackDialog>(&self, parent: &P) -> bool {
-        parent.is_fiducialess()
+
+    /// Java package-private `isFiducialess()`.  The parent dialog owns this
+    /// panel, so it is alive whenever the panel is used; a dropped parent
+    /// answers false.
+    pub fn is_fiducialess(&self) -> bool {
+        match self.parent.upgrade() {
+            Some(parent) => parent.is_fiducialess(),
+            None => false,
+        }
     }
-    /// Java `initializeBeads`.
-    pub fn initialize_beads(&mut self) {
+
+    /// Java package-private `initializeBeads()`.
+    pub fn initialize_beads(&self) {
         self.ccd_eraser_beads_panel.initialize();
     }
-    /// Java `updateAdvanced`.
-    pub fn update_advanced(&mut self, advanced: bool) {
-        self.beads_3d_find_panel.update_advanced(advanced);
+
+    /// Java package-private `updateAdvanced(boolean)`.
+    pub fn update_advanced(&self, advanced: bool) {
+        self.beads3d_find_panel.update_advanced(advanced);
     }
-    /// Java `getBlendmont3dFindDisplay`.
-    pub fn get_blendmont_3d_find_display(&self) -> &BlendmontDisplay {
-        self.beads_3d_find_panel.get_blendmont_3d_find_display()
+
+    /// Java package-private `getBlendmont3dFindDisplay()`.
+    pub fn get_blendmont3d_find_display(&self) -> Option<Rc<dyn BlendmontDisplay>> {
+        self.beads3d_find_panel.get_blendmont3d_find_display()
     }
-    /// Java `getNewstack3dFindDisplay`.
-    pub fn get_newstack_3d_find_display(&self) -> &NewstackDisplay {
-        self.beads_3d_find_panel.get_newstack_3d_find_display()
+
+    /// Java package-private `getNewstack3dFindDisplay()`.
+    pub fn get_newstack3d_find_display(&self) -> Option<Rc<dyn NewstackDisplay>> {
+        self.beads3d_find_panel.get_newstack3d_find_display()
     }
-    /// Java `getTilt3dFindDisplay`.
-    pub fn get_tilt_3d_find_display(&self) -> &TiltDisplay {
-        self.beads_3d_find_panel.get_tilt_3d_find_display()
+
+    /// Java package-private `getTilt3dFindDisplay()`.
+    pub fn get_tilt3d_find_display(&self) -> Option<Rc<dyn TiltDisplay>> {
+        self.beads3d_find_panel.get_tilt3d_find_display()
     }
-    /// Java `getFindBeads3dDisplay`.
-    pub fn get_find_beads_3d_display(&self) -> &FindBeads3dDisplay {
-        self.beads_3d_find_panel.get_find_beads_3d_display()
+
+    /// Java package-private `getFindBeads3dDisplay()`.
+    pub fn get_find_beads3d_display(&self) -> Option<Rc<dyn FindBeads3dDisplay>> {
+        self.beads3d_find_panel.get_find_beads3d_display()
     }
-    /// Java `getCcdEraserBeadsDisplay`.
-    pub fn get_ccd_eraser_beads_display(&self) -> &CcdEraserBeadsPanel {
-        &self.ccd_eraser_beads_panel
+
+    /// Java package-private `getCcdEraserBeadsDisplay()`.
+    pub fn get_ccd_eraser_beads_display(&self) -> Option<Rc<dyn CcdEraserDisplay>> {
+        Some(self.ccd_eraser_beads_panel.clone())
     }
-    /// Java `done`.
-    pub fn done(&mut self) {
+
+    /// Java package-private `done()`.
+    pub fn done(&self) {
         self.xf_model_panel.done();
-        self.beads_3d_find_panel.done();
+        self.beads3d_find_panel.done();
         self.ccd_eraser_beads_panel.done();
     }
-    /// Java `updateAlignedStackBinning`.
-    pub fn update_aligned_stack_binning(&mut self) {
+
+    /// Java package-private `updateAlignedStackBinning()`.
+    pub fn update_aligned_stack_binning(&self) {
         self.ccd_eraser_beads_panel.update_aligned_stack_binning();
     }
 
-    /// Java `updateDisplay`.
-    pub fn update_display<M: EraseGoldPanelApplicationManager>(&mut self, manager: &mut M) {
+    /// Java private `updateDisplay()`.
+    fn update_display(&self) {
         let model_use_fid_is_selected = self.rb_model_use_fid.is_selected();
         self.xf_model_panel.set_visible(model_use_fid_is_selected);
-        self.beads_3d_find_panel
+        self.beads3d_find_panel
             .set_visible(!model_use_fid_is_selected);
-        manager.pack(self.axis_id);
+        let manager: &'static dyn BaseManager = self.manager;
+        ui_harness::INSTANCE
+            .with(|harness| harness.pack_axis_id_base_manager(Some(self.axis_id), Some(manager)));
     }
 
-    /// Java `getParameters(MetaData)`; validation is a direct subordinate-panel boundary.
-    pub fn get_parameters_meta_data(&mut self, meta_data: &mut EraseGoldMetaData) {
-        self.ccd_eraser_beads_panel.parameter_get_count += 1;
-        meta_data.erase_gold_model_use_fid = self.rb_model_use_fid.is_selected();
-        self.beads_3d_find_panel.parameter_get_count += 1;
+    /// Java package-private `getParameters(MetaData) throws
+    /// FortranInputSyntaxException`.
+    pub fn get_parameters_meta_data(
+        &self,
+        meta_data: &MetaData,
+    ) -> Result<(), FortranInputSyntaxException> {
+        self.ccd_eraser_beads_panel
+            .get_parameters_meta_data(meta_data)?;
+        meta_data.set_erase_gold_model_use_fid_boolean(
+            self.axis_id,
+            self.rb_model_use_fid.is_selected(),
+        );
+        self.beads3d_find_panel
+            .get_parameters_meta_data(meta_data)?;
+        Ok(())
     }
-    /// Java `setParameters(ReconScreenState)`.
-    pub fn set_parameters_recon_screen_state(&mut self, _screen_state: &ReconScreenState) {
-        self.beads_3d_find_panel.parameter_set_count += 1;
+
+    /// Java package-private `setParameters(ReconScreenState)`.
+    pub fn set_parameters_recon_screen_state(&self, screen_state: &ReconScreenState) {
+        self.beads3d_find_panel
+            .set_parameters_recon_screen_state(screen_state);
     }
-    /// Java `getParameters(ReconScreenState)`.
-    pub fn get_parameters_recon_screen_state(&mut self, _screen_state: &mut ReconScreenState) {
-        self.beads_3d_find_panel.parameter_get_count += 1;
+
+    /// Java package-private `getParameters(ReconScreenState)`.
+    pub fn get_parameters_recon_screen_state(&self, screen_state: &ReconScreenState) {
+        self.beads3d_find_panel
+            .get_parameters_recon_screen_state(screen_state);
     }
-    /// Java `setTiltState`.
-    pub fn set_tilt_state(&mut self, _state: &TomogramState, _meta_data: &EraseGoldMetaData) {
-        self.beads_3d_find_panel.parameter_set_count += 1;
+
+    /// Java package-private `setTiltState(TomogramState, ConstMetaData)`.
+    pub fn set_tilt_state(&self, state: &TomogramState, meta_data: &dyn ConstMetaData) {
+        self.beads3d_find_panel.set_tilt_state(state, meta_data);
     }
-    /// Java `setParameters(BlendmontParam)`.
-    pub fn set_parameters_blendmont(&mut self, _param: &BlendmontParam) {
-        self.beads_3d_find_panel.parameter_set_count += 1;
+
+    /// Java package-private `setParameters(BlendmontParam)`.
+    pub fn set_parameters_blendmont_param(&self, param: &BlendmontParam) {
+        self.beads3d_find_panel
+            .set_parameters_blendmont_param(param);
     }
-    /// Java `setParameters(NewstParam)`.
-    pub fn set_parameters_newst(&mut self, _param: &NewstParam) {
-        self.beads_3d_find_panel.parameter_set_count += 1;
+
+    /// Java package-private `setParameters(NewstParam)`.
+    pub fn set_parameters_newst_param(&self, param: &NewstParam) {
+        self.beads3d_find_panel.set_parameters_newst_param(param);
     }
-    /// Java `setParameters(ConstTiltParam, boolean)`.
-    pub fn set_parameters_tilt(&mut self, _param: &TiltParam, _initialize: bool) {
-        self.beads_3d_find_panel.parameter_set_count += 1;
+
+    /// Java package-private `setParameters(ConstTiltParam, boolean) throws
+    /// FileNotFoundException, IOException`.
+    pub fn set_parameters_const_tilt_param_boolean(
+        &self,
+        param: &dyn ConstTiltParam,
+        initialize: bool,
+    ) -> Result<(), std::io::Error> {
+        self.beads3d_find_panel
+            .set_parameters_const_tilt_param_boolean(param, initialize)
     }
-    /// Java `setParameters(ConstMetaData)`.
-    pub fn set_parameters_meta_data<M: EraseGoldPanelApplicationManager>(
-        &mut self,
-        manager: &mut M,
-        meta_data: &EraseGoldMetaData,
-    ) {
-        self.ccd_eraser_beads_panel.parameter_set_count += 1;
-        if meta_data.erase_gold_model_use_fid {
-            self.rb_model_use_fid.set_selected(true);
+
+    /// Java package-private `setParameters(ConstMetaData)`.
+    pub fn set_parameters_const_meta_data(&self, meta_data: &dyn ConstMetaData) {
+        self.ccd_eraser_beads_panel
+            .set_parameters_const_meta_data(meta_data);
+        if meta_data.get_erase_gold_model_use_fid(self.axis_id) {
+            self.rb_model_use_fid.set_selected_boolean(true);
         } else {
-            self.rb_model_use_find_beads_3d.set_selected(true);
+            self.rb_model_use_find_beads3d.set_selected_boolean(true);
         }
-        self.beads_3d_find_panel.parameter_set_count += 1;
-        self.update_display(manager);
-    }
-    /// Java `setParameters(ConstFindBeads3dParam, boolean)`.
-    pub fn set_parameters_find_beads_3d(&mut self, _param: &FindBeads3dParam, _initialize: bool) {
-        self.beads_3d_find_panel.parameter_set_count += 1;
-    }
-    /// Java `initialize`.
-    pub fn initialize(&mut self) {
-        self.beads_3d_find_panel.initialize();
-    }
-    /// Java `setParameters(ConstTiltalignParam, boolean)`.
-    pub fn set_parameters_tiltalign(&mut self, _param: &TiltalignParam, _initialize: bool) {
-        self.beads_3d_find_panel.parameter_set_count += 1;
-    }
-    /// Java `setParameters(ConstCCDEraserParam)`.
-    pub fn set_parameters_ccd_eraser(&mut self, _param: &CCDEraserParam) {
-        self.ccd_eraser_beads_panel.parameter_set_count += 1;
-    }
-    /// Java `setOverrideParameters`.
-    pub fn set_override_parameters(&mut self, _meta_data: &EraseGoldMetaData) {
-        self.beads_3d_find_panel.override_parameter_count += 1;
+        self.beads3d_find_panel
+            .set_parameters_const_meta_data(meta_data);
+        self.update_display();
     }
 
-    /// Java `action(String, Deferred3dmodButton, Run3dmodMenuOptions)`.
-    pub fn action<M: EraseGoldPanelApplicationManager>(
-        &mut self,
-        manager: &mut M,
+    /// Java package-private `setParameters(ConstFindBeads3dParam, boolean)`.
+    pub fn set_parameters_const_find_beads3d_param_boolean(
+        &self,
+        param: &dyn ConstFindBeads3dParam,
+        initialize: bool,
+    ) {
+        self.beads3d_find_panel
+            .set_parameters_const_find_beads3d_param_boolean(param, initialize);
+    }
+
+    /// Java package-private `initialize()`.
+    pub fn initialize(&self) {
+        self.beads3d_find_panel.initialize();
+    }
+
+    /// Java package-private `setParameters(ConstTiltalignParam, boolean)`.
+    pub fn set_parameters_const_tiltalign_param_boolean(
+        &self,
+        param: &ConstTiltalignParam,
+        initialize: bool,
+    ) {
+        self.beads3d_find_panel
+            .set_parameters_const_tiltalign_param_boolean(param, initialize);
+    }
+
+    /// Java package-private `setParameters(ConstCCDEraserParam)`.
+    pub fn set_parameters_const_ccd_eraser_param(&self, param: &ConstCCDEraserParam) {
+        self.ccd_eraser_beads_panel
+            .set_parameters_const_ccd_eraser_param(param);
+    }
+
+    /// Java package-private `setOverrideParameters(ConstMetaData)`.
+    pub fn set_override_parameters(&self, meta_data: &dyn ConstMetaData) {
+        self.beads3d_find_panel.set_override_parameters(meta_data);
+    }
+
+    /// Java private `action(String, Deferred3dmodButton, Run3dmodMenuOptions)`.
+    fn action(
+        &self,
         command: &str,
-        _deferred_3dmod_button: Option<&Deferred3dmodButton>,
+        _deferred_3dmod_button: Option<Rc<dyn Deferred3dmodButton>>,
         _run_3dmod_menu_options: Option<Run3dmodMenuOptions>,
     ) {
-        if Some(command) == self.rb_model_use_fid.radio_button.action_command.as_deref()
+        if Some(command) == self.rb_model_use_fid.get_action_command().as_deref()
             || Some(command)
                 == self
-                    .rb_model_use_find_beads_3d
-                    .radio_button
-                    .action_command
+                    .rb_model_use_find_beads3d
+                    .get_action_command()
                     .as_deref()
         {
-            self.update_display(manager);
+            self.update_display();
         }
     }
-    #[allow(non_snake_case)]
-    /// Native-name adapter for the Java listener's `actionPerformed`.
-    pub fn actionPerformed<M: EraseGoldPanelApplicationManager>(
-        &mut self,
-        manager: &mut M,
-        command: &str,
-    ) {
-        self.action(manager, command, None, None);
-    }
-    /// Java `setToolTipText`.
-    pub fn set_tool_tip_text(&mut self) {
+
+    /// Java private `setToolTipText()`.
+    fn set_tool_tip_text(&self) {
         self.rb_model_use_fid
-            .set_tool_tip_text(Some("Erase the fiducials selected in the fiducial model."));
-        self.rb_model_use_find_beads_3d
-            .set_tool_tip_text(Some("Find beads in tomogram and project positions."));
+            .set_tool_tip_text_string(Some("Erase the fiducials selected in the fiducial model."));
+        self.rb_model_use_find_beads3d
+            .set_tool_tip_text_string(Some("Find beads in tomogram and project positions."));
     }
 }
 
-#[cfg(test)]
-mod tests {
-    use super::*;
-    #[derive(Default)]
-    struct Manager {
-        view_type: Option<ViewType>,
-        packed: Vec<AxisID>,
-    }
-    impl EraseGoldPanelApplicationManager for Manager {
-        fn view_type(&self) -> ViewType {
-            self.view_type.unwrap_or(ViewType::SingleView)
+impl ContextMenu for EraseGoldPanel {
+    /// Java `popUpContextMenu(MouseEvent)`: right mouse button context menu.
+    fn pop_up_context_menu(&self, mouse_event: &MouseEvent) {
+        let align_manpage_label;
+        let align_manpage;
+        let align_logfile_label;
+        let align_logfile;
+        if self.manager.get_meta_data().get_view_type() == ViewType::Montage {
+            align_manpage_label = "Blendmont";
+            align_manpage = "blendmont";
+            align_logfile_label = "Blend";
+            align_logfile = "blend";
+        } else {
+            align_manpage_label = "Newstack";
+            align_manpage = "newstack";
+            align_logfile_label = "Newst";
+            align_logfile = "newst";
         }
-        fn pack(&mut self, axis_id: AxisID) {
-            self.packed.push(axis_id);
-        }
-    }
-    #[test]
-    fn source_creation_and_selection_visibility_are_preserved() {
-        let mut panel = EraseGoldPanel::get_instance(
-            AxisID::Second,
-            DialogType::FinalAlignedStack,
-            &GlobalExpandButton::get_instance("Advanced", "Basic"),
-        );
-        assert_eq!(
-            panel.pnl_root.root_component_order,
-            [
-                "pnlModel",
-                "xfModelPanel",
-                "beads3dFindPanel",
-                "ccdEraserBeadsPanel"
-            ]
-        );
-        assert_eq!(
-            panel.rb_model_use_fid.get_tooltip(),
-            Some("<html>Erase the fiducials selected in the fiducial model.")
-        );
-        let mut manager = Manager::default();
-        panel.set_parameters_meta_data(
-            &mut manager,
-            &EraseGoldMetaData {
-                erase_gold_model_use_fid: true,
-            },
-        );
-        assert!(panel.xf_model_panel.visible);
-        assert!(!panel.beads_3d_find_panel.visible);
-        assert_eq!(manager.packed, vec![AxisID::Second]);
-    }
-    #[test]
-    fn context_menu_uses_source_montage_names_and_axis_extension() {
-        let mut panel = EraseGoldPanel::get_instance(
-            AxisID::First,
-            DialogType::FinalAlignedStack,
-            &GlobalExpandButton::get_instance("Advanced", "Basic"),
-        );
-        let manager = Manager {
-            view_type: Some(ViewType::Montage),
-            ..Default::default()
-        };
-        panel.pop_up_context_menu(&manager, MouseEvent::default());
-        let popup = panel.pnl_root.context_popup.as_ref().unwrap();
-        assert_eq!(
-            popup.man_page_name.as_ref().unwrap()[0],
-            "blendmont.html#TOP"
-        );
-        assert_eq!(
-            popup.log_file_name.as_ref().unwrap()[0],
-            "blend_3dfinda.log"
+        let man_pagelabel: Vec<String> = vec![
+            align_manpage_label.to_string(),
+            "Tilt".to_string(),
+            "Findbeads3d".to_string(),
+            "CcdEraser".to_string(),
+            "3dmod".to_string(),
+        ];
+        let man_page: Vec<String> = vec![
+            format!("{align_manpage}.html"),
+            "tilt.html".to_string(),
+            "findbeads3d.html".to_string(),
+            "ccderaser.html".to_string(),
+            "3dmod.html".to_string(),
+        ];
+        let log_file_label: Vec<String> = vec![
+            format!("{align_logfile_label}_3dfind"),
+            "Tilt_3dfind".to_string(),
+            "Findbeads3d".to_string(),
+        ];
+        let mut log_file: Vec<String> = vec![String::new(); 3];
+        log_file[0] = format!("{align_logfile}_3dfind{}.log", self.axis_id.get_extension());
+        log_file[1] = format!("tilt_3dfind{}.log", self.axis_id.get_extension());
+        log_file[2] = format!("findbeads3d{}.log", self.axis_id.get_extension());
+        let manager: &'static dyn BaseManager = self.manager;
+        let _context_popup = ContextPopup::new_component_mouse_event_string_string_string_array_string_array_string_array_string_array_base_manager_axis_id(
+            &self.pnl_root,
+            mouse_event,
+            Some("ErasingGold"),
+            Some(context_popup::TOMO_GUIDE),
+            &man_pagelabel,
+            &man_page,
+            Some(&log_file_label),
+            Some(&log_file),
+            manager,
+            self.axis_id,
         );
     }
 }

@@ -1,784 +1,1382 @@
 //! `IMOD/Etomo/src/etomo/ui/swing/TiltxcorrPanel.java`.
 //!
-//! The Swing widgets, autodoc lookup, and `ApplicationManager` are presentation
-//! boundaries.  This unit retains the Java panel's field state, enablement,
-//! validation, parameter transfer, and action routing without replacing the
-//! application's process policy.
-#![allow(dead_code)]
+//! The tiltxcorr panel, used by the coarse alignment dialog (cross
+//! correlation) and the fiducial model dialog (patch tracking).
 
-use crate::imod::etomo::process::imod_process::Run3dmodMenuOptions;
-use crate::imod::etomo::r#type::axis_id::AxisID;
-use crate::imod::etomo::r#type::dialog_type::DialogType;
-use crate::imod::etomo::ui::field_type::FieldType;
-use std::collections::BTreeMap;
+use crate::imod::etomo::ui::field::Field;
+use std::cell::RefCell;
+use std::rc::{Rc, Weak};
 
 use super::check_box::CheckBox;
-use super::labeled_text_field::{FieldValidationFailedException, LabeledTextField};
+use super::check_text_field::CheckTextField;
+use super::context_menu::ContextMenu;
+use super::context_popup::{self, ContextPopup};
+use super::deferred_3dmod_button::Deferred3dmodButton;
+use super::etched_border::EtchedBorder;
+use super::expand_button::ExpandButton;
+use super::expandable::Expandable;
+use super::global_expand_button::GlobalExpandButton;
+use super::labeled_text_field::LabeledTextField;
+use super::multi_line_button::MultiLineButton;
+use super::panel_header::PanelHeader;
+use super::process_display::ProcessDisplay;
+use super::radio_button::RadioButton;
 use super::radio_text_field::RadioTextField;
+use super::run_3dmod_button::Run3dmodButton;
+use super::run_3dmod_button_container::Run3dmodButtonContainer;
+use super::spaced_panel::SpacedPanel;
+use super::spinner::Spinner;
+use super::tiltxcorr_display::TiltXcorrDisplay;
+use super::ui_expert_utilities::UIExpertUtilities;
+use super::ui_harness;
+use crate::imod::etomo::application_manager::ApplicationManager;
+use crate::imod::etomo::comscript::const_tiltxcorr_param::ConstTiltxcorrParam;
+use crate::imod::etomo::comscript::fortran_input_syntax_exception::FortranInputSyntaxException;
+use crate::imod::etomo::comscript::imodchopconts_param::{self, ImodchopcontsParam};
+use crate::imod::etomo::comscript::tiltxcorr_param::{self, TiltxcorrParam};
+use crate::imod::etomo::jdk::MouseEvent;
+use crate::imod::etomo::jdk::{ActionEvent, ActionListener, ButtonGroup, JComponent};
+use crate::imod::etomo::process::imod_process::Run3dmodMenuOptions;
+use crate::imod::etomo::storage::autodoc::autodoc::Autodoc;
+use crate::imod::etomo::storage::autodoc::autodoc_factory;
+use crate::imod::etomo::storage::autodoc::read_only_autodoc::ReadOnlyAutodoc;
+use crate::imod::etomo::storage::log_file::LogFileError;
+use crate::imod::etomo::r#type::axis_id::AxisID;
+use crate::imod::etomo::r#type::base_screen_state::BaseScreenState;
+use crate::imod::etomo::r#type::const_meta_data::ConstMetaData;
+use crate::imod::etomo::r#type::dialog_type::DialogType;
+use crate::imod::etomo::r#type::etomo_autodoc;
+use crate::imod::etomo::r#type::file_type;
+use crate::imod::etomo::r#type::meta_data::MetaData;
+use crate::imod::etomo::r#type::panel_id::PanelId;
+use crate::imod::etomo::r#type::process_name::ProcessName;
+use crate::imod::etomo::r#type::process_result_display::ProcessResultDisplayHandle;
+use crate::imod::etomo::ui::field_type::FieldType;
+use crate::imod::etomo::ui::field_validation_failed_exception::FieldValidationFailedException;
 
-pub const PANEL_ID_CROSS_CORRELATION: &str = "Cross Correlation";
-pub const PANEL_ID_PATCH_TRACKING: &str = "Patch Tracking";
-pub const ITERATE_CORRELATIONS_DEFAULT: i32 = 1;
-pub const ITERATE_CORRELATIONS_MIN: i32 = 0;
-pub const ITERATE_CORRELATIONS_MAX: i32 = 20;
-
-/// Java `PanelId` values used by this unit.
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub enum PanelId {
-    CrossCorrelation,
-    PatchTracking,
-}
-
-/// Java `CheckTextField` source-visible state used by `TiltxcorrPanel`.
-#[derive(Clone, Debug)]
-pub struct CheckTextField {
-    pub check_box: CheckBox,
-    pub field: LabeledTextField,
-}
-impl CheckTextField {
-    pub fn new(field_type: FieldType, label: &str) -> Self {
-        Self {
-            check_box: CheckBox::new_with_text(label),
-            field: LabeledTextField::new(field_type, label),
-        }
-    }
-    pub fn is_selected(&self) -> bool {
-        self.check_box.is_selected()
-    }
-    pub fn set_selected(&mut self, value: bool) {
-        self.check_box.set_selected(value);
-    }
-    pub fn set_text(&mut self, value: &str) {
-        self.field.set_text(value);
-    }
-    pub fn get_text(&self, validation: bool) -> Result<String, FieldValidationFailedException> {
-        self.field.get_text_validated(validation)
-    }
-    pub fn set_enabled(&mut self, value: bool) {
-        self.check_box.set_enabled(value);
-        self.field.set_enabled(value);
-    }
-    pub fn is_enabled(&self) -> bool {
-        self.field.is_enabled()
-    }
-}
-
-/// Java `Spinner` state needed by this unit.
-#[derive(Clone, Debug)]
-pub struct Spinner {
-    pub label: String,
-    pub value: i32,
-    pub minimum: i32,
-    pub maximum: i32,
-    pub tooltip: Option<String>,
-}
-impl Spinner {
-    pub fn new(label: &str, value: i32, minimum: i32, maximum: i32) -> Self {
-        Self {
-            label: label.into(),
-            value,
-            minimum,
-            maximum,
-            tooltip: None,
-        }
-    }
-    pub fn set_value(&mut self, value: i32) {
-        self.value = value;
-    }
-}
-
-/// Java `ImodchopcontsParam` calls made by this panel.
-pub trait ImodchopcontsParam {
-    fn minimum_overlap(&self) -> Option<String>;
-    fn length_of_pieces_is_null(&self) -> bool;
-    fn length_of_pieces_is_default(&self) -> bool;
-    fn length_of_pieces(&self) -> Option<String>;
-    fn set_minimum_overlap(&mut self, value: String);
-    fn set_length_of_pieces_default(&mut self);
-    fn set_length_of_pieces(&mut self, value: String);
-    fn reset_length_of_pieces(&mut self);
-}
-
-/// Java `TiltxcorrParam` calls made by `getParameters`.
-pub trait TiltxcorrParam {
-    fn set_value(&mut self, key: &str, value: String) -> Result<(), String>;
-    fn reset_value(&mut self, key: &str);
-    fn set_flag(&mut self, key: &str, value: bool);
-    fn set_iterate_correlations(&mut self, value: i32) -> Option<String>;
-}
-
-/// Java `ConstTiltxcorrParam` reads made by `setParameters`.
-pub trait ConstTiltxcorrParam {
-    fn value(&self, key: &str) -> Option<String>;
-    fn is_set(&self, key: &str) -> bool;
-    fn flag(&self, key: &str) -> bool;
-    fn iterate_correlations(&self) -> i32;
-}
-
-/// Java metadata reads/writes retained at the metadata boundary.
-pub trait TiltxcorrMetaData {
-    fn get_value(&self, key: &str, axis_id: AxisID) -> Option<String>;
-    fn is_set(&self, key: &str, axis_id: AxisID) -> bool;
-    fn set_value(&mut self, key: &str, axis_id: AxisID, value: String);
-    fn rotation_angle(&self, axis_id: AxisID) -> f64;
-    fn tilt_angle_spec(&self, axis_id: AxisID) -> String;
-}
-
-/// Java `BaseScreenState` calls made through this panel's `PanelHeader`.
-pub trait TiltxcorrScreenState {
-    fn get_button_state(&mut self, key: &str, default: bool) -> bool;
-    fn set_button_state(&mut self, key: &str, state: bool);
-}
-
-/// In-memory source-shaped `BaseScreenState` for native frontends and tests.
-#[derive(Clone, Debug, Default, Eq, PartialEq)]
-pub struct TiltxcorrPanelScreenState {
-    pub button_states: BTreeMap<String, bool>,
-}
-impl TiltxcorrScreenState for TiltxcorrPanelScreenState {
-    fn get_button_state(&mut self, key: &str, default: bool) -> bool {
-        self.button_states.get(key).copied().unwrap_or(default)
-    }
-    fn set_button_state(&mut self, key: &str, state: bool) {
-        self.button_states.insert(key.into(), state);
-    }
-}
-
-/// Direct `ApplicationManager` calls from `TiltxcorrPanel.java`.
-pub trait TiltxcorrPanelApplicationManager {
-    fn pre_cross_correlate(&mut self, axis_id: AxisID, dialog_type: DialogType);
-    fn tiltxcorr(
-        &mut self,
-        axis_id: AxisID,
-        dialog_type: DialogType,
-        run_tiltxcorr: bool,
-        length_of_pieces: bool,
-        options: Option<Run3dmodMenuOptions>,
-    );
-    fn imod_model(
-        &mut self,
-        image_file_type: &str,
-        model_file_type: &str,
-        axis_id: AxisID,
-        options: Option<Run3dmodMenuOptions>,
-    );
-    fn open_message_dialog(&mut self, message: String, title: &str, axis_id: AxisID);
-    fn meta_data(&self) -> &dyn TiltxcorrMetaData;
-}
-
-/// All Swing layout state directly set by `createPanel`.
-#[derive(Clone, Debug, Default, Eq, PartialEq)]
-pub struct TiltxcorrPanelLayout {
-    pub root_visible: bool,
-    pub body_visible: bool,
-    pub advanced_visible: bool,
-    pub advanced2_visible: bool,
-    pub angle_offset_visible: bool,
-    pub shift_limits_visible: bool,
-    pub mag_changes_visible: bool,
-    pub patch_layout_border: bool,
-    pub boundary_model_enabled: bool,
-    pub absolute_cosine_stretch_enabled: bool,
-    pub length_of_pieces_enabled: bool,
-    pub listener_count: usize,
-    pub tooltip_initialized: bool,
-}
-
-/// Complete Java `TiltxcorrPanel` field state.  Widget component hierarchy and
-/// listener registration remain native GUI boundaries represented by `layout`.
+/// Java `final class TiltxcorrPanel implements Expandable, TiltXcorrDisplay,
+/// Run3dmodButtonContainer, ContextMenu`.
 pub struct TiltxcorrPanel {
-    pub axis_id: AxisID,
-    pub dialog_type: DialogType,
-    pub panel_id: PanelId,
-    pub mag_changes_mode: bool,
-    pub layout: TiltxcorrPanelLayout,
-    pub cb_exclude_central_peak: CheckBox,
-    pub ltf_test_output: LabeledTextField,
-    pub ltf_filter_sigma1: LabeledTextField,
-    pub ltf_filter_radius2: LabeledTextField,
-    pub ltf_filter_sigma2: LabeledTextField,
-    pub ltf_trim: LabeledTextField,
-    pub ltf_x_min: LabeledTextField,
-    pub ltf_x_max: LabeledTextField,
-    pub ltf_y_min: LabeledTextField,
-    pub ltf_y_max: LabeledTextField,
-    pub ltf_pad_percent: LabeledTextField,
-    pub ltf_taper_percent: LabeledTextField,
-    pub cb_cumulative_correlation: CheckBox,
-    pub cb_absolute_cosine_stretch: CheckBox,
-    pub cb_no_cosine_stretch: CheckBox,
-    pub ltf_view_range: LabeledTextField,
-    pub ltf_angle_offset: LabeledTextField,
-    pub ltf_skip_views: LabeledTextField,
-    pub ltf_size_of_patches_x_and_y: LabeledTextField,
-    pub rtf_overlap_of_patches_x_and_y: RadioTextField,
-    pub rtf_number_of_patches_x_and_y: RadioTextField,
-    pub sp_iterate_correlations: Spinner,
-    pub ltf_shift_limits_x_and_y: LabeledTextField,
-    pub ctf_length_of_pieces_minimum_overlap: CheckTextField,
-    pub cb_boundary_model: CheckBox,
-    pub rb_length_of_pieces_default: bool,
-    pub rtf_length_of_pieces: RadioTextField,
-    pub ctf_mag_changes: Option<CheckTextField>,
-    pub skip_views: Option<String>,
-    pub last_context_popup: Option<String>,
-    pub actions_attached: bool,
-    pub header_open: bool,
-    pub header_advanced: bool,
+    /// Java `this`, handed to the manager as the `TiltXcorrDisplay`.
+    this: Weak<TiltxcorrPanel>,
+    pnl_root: Rc<SpacedPanel>,
+    pnl_body: Rc<JComponent>,
+    pnl_advanced: Rc<JComponent>,
+    pnl_advanced2: Rc<JComponent>,
+    pnl_x_min_and_max: Rc<JComponent>,
+    pnl_y_min_and_max: Rc<JComponent>,
+
+    cb_exclude_central_peak: Rc<CheckBox>,
+
+    ltf_test_output: Rc<LabeledTextField>,
+    ltf_filter_sigma1: Rc<LabeledTextField>,
+    ltf_filter_radius2: Rc<LabeledTextField>,
+    ltf_filter_sigma2: Rc<LabeledTextField>,
+    ltf_trim: Rc<LabeledTextField>,
+    ltf_x_min: Rc<LabeledTextField>,
+    ltf_x_max: Rc<LabeledTextField>,
+    ltf_y_min: Rc<LabeledTextField>,
+    ltf_y_max: Rc<LabeledTextField>,
+    ltf_pad_percent: Rc<LabeledTextField>,
+    ltf_taper_percent: Rc<LabeledTextField>,
+    cb_cumulative_correlation: Rc<CheckBox>,
+    cb_absolute_cosine_stretch: Rc<CheckBox>,
+    cb_no_cosine_stretch: Rc<CheckBox>,
+    ltf_view_range: Rc<LabeledTextField>,
+    ltf_angle_offset: Rc<LabeledTextField>,
+    /// Java `actionListener` (a `CrossCorrelationActionListener`).
+    action_listener: ActionListener,
+    ltf_skip_views: Rc<LabeledTextField>,
+
+    // Patch tracking
+    ltf_size_of_patches_x_and_y: Rc<LabeledTextField>,
+    bg_patch_layout: Rc<ButtonGroup>,
+    rtf_overlap_of_patches_x_and_y: Rc<RadioTextField>,
+    rtf_number_of_patches_x_and_y: Rc<RadioTextField>,
+    sp_iterate_correlations: Rc<Spinner>,
+    ltf_shift_limits_x_and_y: Rc<LabeledTextField>,
+    ctf_length_of_pieces_minimum_overlap: Rc<CheckTextField>,
+    cb_boundary_model: Rc<CheckBox>,
+    btn_3dmod_boundary_model: Rc<Run3dmodButton>,
+    bg_length_of_pieces: Rc<ButtonGroup>,
+    rb_length_of_pieces_default: Rc<RadioButton>,
+    rtf_length_of_pieces: Rc<RadioTextField>,
+
+    axis_id: AxisID,
+    dialog_type: DialogType,
+    /// Java `btnTiltxcorr`, declared `MultiLineButton`; the factory builds a
+    /// plain `MultiLineButton` for coarse alignment and a `Run3dmodButton` for
+    /// patch tracking, and returns null for any other dialog type.
+    btn_tiltxcorr: Option<ProcessResultDisplayHandle>,
+    /// `btnTiltxcorr` when the factory built a plain `MultiLineButton`.
+    btn_tiltxcorr_multi_line: Option<Rc<MultiLineButton>>,
+    /// `btnTiltxcorr` when the factory built a `Run3dmodButton`.
+    btn_tiltxcorr_run_3dmod: Option<Rc<Run3dmodButton>>,
+    /// Java `btnImodchopconts`, declared `MultiLineButton`; the factory builds a
+    /// `Run3dmodButton`.
+    btn_imodchopconts: Rc<Run3dmodButton>,
+    btn_3dmod_patch_tracking: Rc<Run3dmodButton>,
+    header: Rc<PanelHeader>,
+    application_manager: &'static ApplicationManager,
+    panel_id: PanelId,
+    /// Java `skipViews`, assigned nowhere but its declaration.
+    skip_views: RefCell<Option<String>>,
+    ctf_mag_changes: Option<Rc<CheckTextField>>,
+    mag_changes_mode: bool,
+
+    /// Java package-visible `contextMenu`.
+    pub context_menu: Option<Weak<dyn ContextMenu>>,
 }
 
 impl TiltxcorrPanel {
+    /// Java private constructor `TiltxcorrPanel(ApplicationManager, AxisID,
+    /// DialogType, GlobalExpandButton, PanelId, ContextMenu, boolean)`
+    /// (TiltxcorrPanel.java:137-162).
     fn new(
-        axis_id: AxisID,
+        application_manager: &'static ApplicationManager,
+        id: AxisID,
         dialog_type: DialogType,
+        global_advanced_button: &Rc<GlobalExpandButton>,
         panel_id: PanelId,
+        context_menu: Option<Weak<dyn ContextMenu>>,
         mag_changes_mode: bool,
-    ) -> Self {
-        Self {
-            axis_id,
-            dialog_type,
-            panel_id,
-            mag_changes_mode,
-            layout: TiltxcorrPanelLayout {
-                root_visible: true,
-                body_visible: true,
-                advanced_visible: true,
-                advanced2_visible: true,
-                angle_offset_visible: true,
-                shift_limits_visible: true,
-                mag_changes_visible: true,
-                ..Default::default()
-            },
-            cb_exclude_central_peak: CheckBox::new_with_text(
-                "Exclude central peak due to fixed pattern noise",
-            ),
-            ltf_test_output: LabeledTextField::new(FieldType::String, "Test output: "),
-            ltf_filter_sigma1: LabeledTextField::new(
+    ) -> Rc<TiltxcorrPanel> {
+        Rc::new_cyclic(|weak: &Weak<TiltxcorrPanel>| {
+            let container: Weak<dyn Run3dmodButtonContainer> = weak.clone();
+            // Field initializers (TiltxcorrPanel.java:51-135).
+            let pnl_root = SpacedPanel::get_instance_boolean(true);
+            let pnl_body = JComponent::new_panel();
+            let pnl_advanced = JComponent::new_panel();
+            let pnl_advanced2 = JComponent::new_panel();
+            let pnl_x_min_and_max = JComponent::new_panel();
+            let pnl_y_min_and_max = JComponent::new_panel();
+            let cb_exclude_central_peak =
+                CheckBox::new_string(Some("Exclude central peak due to fixed pattern noise"));
+            let ltf_test_output =
+                LabeledTextField::new_field_type_string(FieldType::String, Some("Test output: "));
+            let ltf_filter_sigma1 = LabeledTextField::new_field_type_string(
                 FieldType::FloatingPoint,
-                "Low frequency rolloff sigma: ",
-            ),
-            ltf_filter_radius2: LabeledTextField::new(
+                Some("Low frequency rolloff sigma: "),
+            );
+            let ltf_filter_radius2 = LabeledTextField::new_field_type_string(
                 FieldType::FloatingPoint,
-                "High frequency cutoff radius: ",
-            ),
-            ltf_filter_sigma2: LabeledTextField::new(
+                Some("High frequency cutoff radius: "),
+            );
+            let ltf_filter_sigma2 = LabeledTextField::new_field_type_string(
                 FieldType::FloatingPoint,
-                "High frequency rolloff sigma: ",
-            ),
-            ltf_trim: LabeledTextField::new(FieldType::IntegerPair, "Pixels to trim (x,y): "),
-            ltf_x_min: LabeledTextField::new(FieldType::Integer, "X axis min "),
-            ltf_x_max: LabeledTextField::new(FieldType::Integer, "Max "),
-            ltf_y_min: LabeledTextField::new(FieldType::Integer, "Y axis min "),
-            ltf_y_max: LabeledTextField::new(FieldType::Integer, "Max "),
-            ltf_pad_percent: LabeledTextField::new(FieldType::IntegerPair, "Pixels to pad (x,y): "),
-            ltf_taper_percent: LabeledTextField::new(
+                Some("High frequency rolloff sigma: "),
+            );
+            let ltf_trim = LabeledTextField::new_field_type_string(
                 FieldType::IntegerPair,
-                "Pixels to taper (x,y): ",
-            ),
-            cb_cumulative_correlation: CheckBox::new_with_text("Cumulative correlation"),
-            cb_absolute_cosine_stretch: CheckBox::new_with_text("Absolute Cosine Stretch"),
-            cb_no_cosine_stretch: CheckBox::new_with_text("No Cosine Stretch"),
-            ltf_view_range: LabeledTextField::new(
+                Some("Pixels to trim (x,y): "),
+            );
+            let ltf_x_min =
+                LabeledTextField::new_field_type_string(FieldType::Integer, Some("X axis min "));
+            let ltf_x_max =
+                LabeledTextField::new_field_type_string(FieldType::Integer, Some("Max "));
+            let ltf_y_min =
+                LabeledTextField::new_field_type_string(FieldType::Integer, Some("Y axis min "));
+            let ltf_y_max =
+                LabeledTextField::new_field_type_string(FieldType::Integer, Some("Max "));
+            let ltf_pad_percent = LabeledTextField::new_field_type_string(
                 FieldType::IntegerPair,
-                "View range (start,end): ",
-            ),
-            ltf_angle_offset: LabeledTextField::new(
+                Some("Pixels to pad (x,y): "),
+            );
+            let ltf_taper_percent = LabeledTextField::new_field_type_string(
+                FieldType::IntegerPair,
+                Some("Pixels to taper (x,y): "),
+            );
+            let cb_cumulative_correlation = CheckBox::new_string(Some("Cumulative correlation"));
+            let cb_absolute_cosine_stretch = CheckBox::new_string(Some("Absolute Cosine Stretch"));
+            let cb_no_cosine_stretch = CheckBox::new_string(Some("No Cosine Stretch"));
+            let ltf_view_range = LabeledTextField::new_field_type_string(
+                FieldType::IntegerPair,
+                Some("View range (start,end): "),
+            );
+            let ltf_angle_offset = LabeledTextField::new_field_type_string(
                 FieldType::FloatingPoint,
-                "Tilt angle offset: ",
-            ),
-            ltf_skip_views: LabeledTextField::new(FieldType::IntegerList, "Views to skip: "),
-            ltf_size_of_patches_x_and_y: LabeledTextField::new(
+                Some("Tilt angle offset: "),
+            );
+            // Java `new CrossCorrelationActionListener(this)`; the static nested
+            // class is at TiltxcorrPanel.java:738-749.
+            let adaptee = weak.clone();
+            let action_listener: ActionListener = Rc::new(move |event: &ActionEvent| {
+                let Some(adaptee) = adaptee.upgrade() else {
+                    return;
+                };
+                adaptee.action(event.get_action_command().unwrap_or(""), None, None);
+            });
+            let ltf_skip_views = LabeledTextField::new_field_type_string(
+                FieldType::IntegerList,
+                Some("Views to skip: "),
+            );
+
+            // Patch tracking
+            let ltf_size_of_patches_x_and_y = LabeledTextField::new_field_type_string(
                 FieldType::IntegerPair,
-                "Size of patches (X,Y): ",
-            ),
-            rtf_overlap_of_patches_x_and_y: RadioTextField::new(
-                FieldType::FloatingPointPair,
-                "Fractional overlap of patches (X,Y): ",
-            ),
-            rtf_number_of_patches_x_and_y: RadioTextField::new(
+                Some("Size of patches (X,Y): "),
+            );
+            let bg_patch_layout = ButtonGroup::new();
+            let rtf_overlap_of_patches_x_and_y =
+                RadioTextField::get_instance_field_type_string_button_group(
+                    FieldType::FloatingPointPair,
+                    Some("Fractional overlap of patches (X,Y): "),
+                    Some(&bg_patch_layout),
+                );
+            let rtf_number_of_patches_x_and_y =
+                RadioTextField::get_instance_field_type_string_button_group(
+                    FieldType::IntegerPair,
+                    Some("Number of patches (X,Y): "),
+                    Some(&bg_patch_layout),
+                );
+            let sp_iterate_correlations = Spinner::get_labeled_instance_string_int_int_int(
+                Some("Iterations to increase subpixel accuracy: "),
+                tiltxcorr_param::ITERATE_CORRELATIONS_DEFAULT,
+                tiltxcorr_param::ITERATE_CORRELATIONS_MIN,
+                tiltxcorr_param::ITERATE_CORRELATIONS_MAX,
+            );
+            let ltf_shift_limits_x_and_y = LabeledTextField::new_field_type_string(
                 FieldType::IntegerPair,
-                "Number of patches (X,Y): ",
-            ),
-            sp_iterate_correlations: Spinner::new(
-                "Iterations to increase subpixel accuracy: ",
-                ITERATE_CORRELATIONS_DEFAULT,
-                ITERATE_CORRELATIONS_MIN,
-                ITERATE_CORRELATIONS_MAX,
-            ),
-            ltf_shift_limits_x_and_y: LabeledTextField::new(
-                FieldType::IntegerPair,
-                "Limits on shifts from correlation (X,Y): ",
-            ),
-            ctf_length_of_pieces_minimum_overlap: CheckTextField::new(
+                Some("Limits on shifts from correlation (X,Y): "),
+            );
+            let ctf_length_of_pieces_minimum_overlap = CheckTextField::get_instance(
                 FieldType::Integer,
                 "Break contours into pieces with overlap: ",
-            ),
-            cb_boundary_model: CheckBox::new_with_text("Use boundary model"),
-            rb_length_of_pieces_default: true,
-            rtf_length_of_pieces: RadioTextField::new(FieldType::Integer, "Use length"),
-            ctf_mag_changes: (panel_id == PanelId::CrossCorrelation).then(|| {
-                CheckTextField::new(FieldType::IntegerList, "Find mag change at view(s):")
-            }),
-            skip_views: None,
-            last_context_popup: None,
-            actions_attached: false,
-            header_open: true,
-            header_advanced: true,
-        }
+            );
+            let cb_boundary_model = CheckBox::new_string(Some("Use boundary model"));
+            let btn_3dmod_boundary_model =
+                Run3dmodButton::get_3dmod_instance_string_run_3dmod_button_container(
+                    Some("Create Boundary Model"),
+                    Some(container.clone()),
+                );
+            let bg_length_of_pieces = ButtonGroup::new();
+            let rb_length_of_pieces_default = RadioButton::new_string_button_group(
+                Some("Use default length"),
+                Some(&bg_length_of_pieces),
+            );
+            let rtf_length_of_pieces = RadioTextField::get_instance_field_type_string_button_group(
+                FieldType::Integer,
+                Some("Use length"),
+                Some(&bg_length_of_pieces),
+            );
+            let btn_3dmod_patch_tracking =
+                Run3dmodButton::get_3dmod_instance_string_run_3dmod_button_container(
+                    Some("Open Tracked Patches"),
+                    Some(container.clone()),
+                );
+
+            // Constructor body (TiltxcorrPanel.java:140-161).
+            let expandable: Weak<dyn Expandable> = weak.clone();
+            let header =
+                PanelHeader::get_advanced_basic_instance_string_expandable_dialog_type_global_expand_button(
+                    Some("Tiltxcorr"),
+                    Some(expandable),
+                    Some(dialog_type),
+                    Some(global_advanced_button.clone()),
+                );
+
+            let factory = application_manager.get_process_result_display_factory(id);
+            let btn_tiltxcorr = factory.get_tiltxcorr(dialog_type);
+            // Java `(MultiLineButton) factory.getTiltxcorr(dialogType)`.
+            let btn_tiltxcorr_run_3dmod = btn_tiltxcorr
+                .clone()
+                .and_then(|button| button.as_any_rc().downcast::<Run3dmodButton>().ok());
+            let btn_tiltxcorr_multi_line = btn_tiltxcorr
+                .clone()
+                .and_then(|button| button.as_any_rc().downcast::<MultiLineButton>().ok());
+            let btn_imodchopconts = factory.get_imodchopconts();
+            let ctf_mag_changes;
+            if panel_id == PanelId::PatchTracking {
+                ctf_mag_changes = None;
+                // Java `((Run3dmodButton) btnTiltxcorr)`: for the fiducial model
+                // dialog the factory's tiltxcorr button is a Run3dmodButton.  A
+                // null button would be a NullPointerException here
+                // (TiltxcorrPanel.java:155); it is skipped.
+                if let Some(button) = &btn_tiltxcorr_run_3dmod {
+                    button.set_deferred_3dmod_button_deferred_3dmod_button(Some(
+                        btn_3dmod_patch_tracking.clone() as Rc<dyn Deferred3dmodButton>,
+                    ));
+                    button.set_container(Some(container.clone()));
+                }
+            } else {
+                ctf_mag_changes = Some(CheckTextField::get_instance(
+                    FieldType::IntegerList,
+                    "Find mag change at view(s):",
+                ));
+            }
+
+            TiltxcorrPanel {
+                this: weak.clone(),
+                pnl_root,
+                pnl_body,
+                pnl_advanced,
+                pnl_advanced2,
+                pnl_x_min_and_max,
+                pnl_y_min_and_max,
+                cb_exclude_central_peak,
+                ltf_test_output,
+                ltf_filter_sigma1,
+                ltf_filter_radius2,
+                ltf_filter_sigma2,
+                ltf_trim,
+                ltf_x_min,
+                ltf_x_max,
+                ltf_y_min,
+                ltf_y_max,
+                ltf_pad_percent,
+                ltf_taper_percent,
+                cb_cumulative_correlation,
+                cb_absolute_cosine_stretch,
+                cb_no_cosine_stretch,
+                ltf_view_range,
+                ltf_angle_offset,
+                action_listener,
+                ltf_skip_views,
+                ltf_size_of_patches_x_and_y,
+                bg_patch_layout,
+                rtf_overlap_of_patches_x_and_y,
+                rtf_number_of_patches_x_and_y,
+                sp_iterate_correlations,
+                ltf_shift_limits_x_and_y,
+                ctf_length_of_pieces_minimum_overlap,
+                cb_boundary_model,
+                btn_3dmod_boundary_model,
+                bg_length_of_pieces,
+                rb_length_of_pieces_default,
+                rtf_length_of_pieces,
+                axis_id: id,
+                dialog_type,
+                btn_tiltxcorr,
+                btn_tiltxcorr_multi_line,
+                btn_tiltxcorr_run_3dmod,
+                btn_imodchopconts,
+                btn_3dmod_patch_tracking,
+                header,
+                application_manager,
+                panel_id,
+                skip_views: RefCell::new(None),
+                ctf_mag_changes,
+                mag_changes_mode,
+                context_menu,
+            }
+        })
     }
+
+    /// Java `static getCrossCorrelationInstance(ApplicationManager, AxisID,
+    /// DialogType, GlobalExpandButton, ContextMenu, boolean)`
+    /// (TiltxcorrPanel.java:164-174).
     pub fn get_cross_correlation_instance(
-        axis_id: AxisID,
+        application_manager: &'static ApplicationManager,
+        id: AxisID,
         dialog_type: DialogType,
+        global_advanced_button: &Rc<GlobalExpandButton>,
+        context_menu: Option<Weak<dyn ContextMenu>>,
         mag_changes_mode: bool,
-    ) -> Self {
-        let mut value = Self::new(
-            axis_id,
+    ) -> Rc<TiltxcorrPanel> {
+        let instance = TiltxcorrPanel::new(
+            application_manager,
+            id,
             dialog_type,
+            global_advanced_button,
             PanelId::CrossCorrelation,
+            context_menu,
             mag_changes_mode,
         );
-        value.create_panel();
-        value.set_tool_tip_text();
-        value.add_listeners();
-        value
+        instance.create_panel();
+        instance.set_tool_tip_text();
+        instance.add_listeners();
+        instance
     }
-    pub fn get_patch_tracking_instance(axis_id: AxisID, dialog_type: DialogType) -> Self {
-        let mut value = Self::new(axis_id, dialog_type, PanelId::PatchTracking, false);
-        value.create_panel();
-        value.set_tool_tip_text();
-        value.add_listeners();
-        value
+
+    /// Java `static getPatchTrackingInstance(ApplicationManager, AxisID,
+    /// DialogType, GlobalExpandButton)` (TiltxcorrPanel.java:176-185).
+    pub fn get_patch_tracking_instance(
+        application_manager: &'static ApplicationManager,
+        id: AxisID,
+        dialog_type: DialogType,
+        global_advanced_button: &Rc<GlobalExpandButton>,
+    ) -> Rc<TiltxcorrPanel> {
+        let instance = TiltxcorrPanel::new(
+            application_manager,
+            id,
+            dialog_type,
+            global_advanced_button,
+            PanelId::PatchTracking,
+            None,
+            false,
+        );
+        instance.create_panel();
+        instance.set_tool_tip_text();
+        instance.add_listeners();
+        instance
     }
-    fn create_panel(&mut self) {
+
+    /// Java private `createPanel()` (TiltxcorrPanel.java:187-327).
+    fn create_panel(&self) {
+        // initialize
+        self.rb_length_of_pieces_default.set_selected_boolean(true);
+        self.rb_length_of_pieces_default.set_text(Some(
+            &("Use default length (".to_string()
+                + &ImodchopcontsParam::get_length_of_pieces_default(
+                    self.application_manager,
+                    self.axis_id,
+                    &file_type::CLASS.prealigned_stack,
+                )
+                + ")"),
+        ));
+        // root panel
+        // Swing layout: pnlRoot.setBoxLayout(BoxLayout.Y_AXIS).
+        // Construct the min and max subpanels
+        // Swing layout: pnlXMinAndMax BoxLayout X_AXIS.  Each
+        // `UIUtilities.addWithXSpace(p, c)` is `p.add(c)` plus a rigid area
+        // (UIUtilities.java:471-474); likewise addWithYSpace (:481-484).
+        self.pnl_x_min_and_max.add(&self.ltf_x_min.get_container());
+        self.pnl_x_min_and_max.add(&self.ltf_x_max.get_container());
+
+        // Swing layout: pnlYMinAndMax BoxLayout X_AXIS.
+        self.pnl_y_min_and_max.add(&self.ltf_y_min.get_container());
+        self.pnl_y_min_and_max.add(&self.ltf_y_max.get_container());
+        // advanced panel
+        // Swing layout: pnlAdvanced and pnlAdvanced2 BoxLayout Y_AXIS.
+        if self.panel_id == PanelId::CrossCorrelation {
+            // Construct the advanced panel
+            self.pnl_advanced
+                .add(&self.ltf_angle_offset.get_container());
+            self.pnl_advanced
+                .add(&self.ltf_filter_sigma1.get_container());
+            self.pnl_advanced
+                .add(&self.ltf_filter_radius2.get_container());
+            self.pnl_advanced
+                .add(&self.ltf_filter_sigma2.get_container());
+            self.pnl_advanced.add(&self.ltf_trim.get_container());
+            self.pnl_advanced.add(&self.pnl_x_min_and_max);
+            self.pnl_advanced.add(&self.pnl_y_min_and_max);
+            self.pnl_advanced.add(&self.ltf_pad_percent.get_container());
+            self.pnl_advanced
+                .add(&self.ltf_taper_percent.get_container());
+
+            self.pnl_advanced2
+                .add(&self.cb_cumulative_correlation.get_component());
+            self.pnl_advanced2
+                .add(&self.cb_absolute_cosine_stretch.get_component());
+            self.pnl_advanced2
+                .add(&self.cb_no_cosine_stretch.get_component());
+            self.pnl_advanced2
+                .add(&self.cb_exclude_central_peak.get_component());
+            self.pnl_advanced2
+                .add(&self.ltf_test_output.get_container());
+            self.pnl_advanced2.add(&self.ltf_view_range.get_container());
+            self.pnl_advanced2.add(&self.ltf_skip_views.get_container());
+
+            // Swing layout: pnlBody BoxLayout Y_AXIS; rigid area x0_y5.
+            self.pnl_body.add(&self.pnl_advanced);
+            if let Some(ctf_mag_changes) = &self.ctf_mag_changes {
+                self.pnl_body.add(&ctf_mag_changes.get_component());
+            }
+            self.pnl_body.add(&self.pnl_advanced2);
+            // Swing layout: rigid area x0_y5.
+            if let Some(btn_tiltxcorr) = self.btn_tiltxcorr_button() {
+                self.pnl_body.add(&btn_tiltxcorr.get_component());
+            }
+            // Swing layout: rigid area x0_y5; center align pnlBody's components,
+            // left align pnlAdvanced's and pnlAdvanced2's.
+
+            // Swing layout: pnlRoot untitled etched border.
+            self.pnl_root.add_panel_header(&self.header);
+            self.pnl_root.add_j_panel(&self.pnl_body);
+        } else if self.panel_id == PanelId::PatchTracking {
+            // initialize
+            self.rtf_overlap_of_patches_x_and_y
+                .set_text_string(Some(tiltxcorr_param::OVERLAP_OF_PATCHES_X_AND_Y_DEFAULT));
+            // Swing layout: ctfLengthOfPiecesMinimumOverlap.setTextPreferredWidth(30).
+            self.rtf_overlap_of_patches_x_and_y
+                .set_selected_boolean(true);
+            self.ltf_trim
+                .set_text_string(Some(&*TiltxcorrParam::get_borders_in_x_and_y_default(
+                    self.application_manager,
+                    self.axis_id,
+                    &file_type::CLASS.prealigned_stack,
+                )));
+            self.ltf_filter_sigma1
+                .set_text_string(Some(tiltxcorr_param::FILTER_SIGMA_1_DEFAULT));
+            self.ltf_filter_radius2
+                .set_text_string(Some(tiltxcorr_param::FILTER_RADIUS_2_DEFAULT));
+            self.ltf_filter_sigma2
+                .set_text_string(Some(tiltxcorr_param::FILTER_SIGMA_2_DEFAULT));
+            // local panels
+            let pnl_patch_layout = JComponent::new_panel();
+            let pnl_boundary_model = JComponent::new_panel();
+            let pnl_buttons = JComponent::new_panel();
+            let pnl_imodchopconts = JComponent::new_panel();
+            let pnl_length_of_pieces = JComponent::new_panel();
+            // root panel
+            self.pnl_root
+                .set_border(&EtchedBorder::new(Some("Patch Tracking")).get_border());
+            self.pnl_root
+                .add_container(&self.ltf_size_of_patches_x_and_y.get_container());
+            self.pnl_root.add_j_panel(&pnl_patch_layout);
+            self.pnl_root.add_j_panel(&pnl_boundary_model);
+            let pnl_iterate_correlations = JComponent::new_panel();
+            // Swing layout: pnlIterateCorrelations BoxLayout X_AXIS, center
+            // aligned, horizontal glue after the spinner.
+            pnl_iterate_correlations.add(&self.sp_iterate_correlations.get_container());
+            self.pnl_root.add_j_panel(&pnl_iterate_correlations);
+            self.pnl_root
+                .add_container(&self.ltf_shift_limits_x_and_y.get_container());
+            self.pnl_root.add_component(
+                &self
+                    .ctf_length_of_pieces_minimum_overlap
+                    .get_root_component(),
+            );
+            self.pnl_root.add_j_panel(&pnl_length_of_pieces);
+            self.pnl_root.add_labeled_text_field(&self.ltf_angle_offset);
+            self.pnl_root.add_j_panel(&self.pnl_advanced2);
+            self.pnl_root.add_labeled_text_field(&self.ltf_trim);
+            self.pnl_root.add_j_panel(&self.pnl_x_min_and_max);
+            self.pnl_root.add_j_panel(&self.pnl_y_min_and_max);
+            self.pnl_root.add_j_panel(&self.pnl_advanced);
+            self.pnl_root.add_j_panel(&pnl_buttons);
+            self.pnl_root.add_j_panel(&pnl_imodchopconts);
+            // patch layout panel
+            // Swing layout: pnlPatchLayout BoxLayout Y_AXIS.
+            // Java `pnlPatchLayout.setBorder(new EtchedBorder("Patch Layout").getBorder())`.
+            pnl_patch_layout.set_border_title(Some("Patch Layout"));
+            pnl_patch_layout.add(&self.rtf_overlap_of_patches_x_and_y.get_container());
+            pnl_patch_layout.add(&self.rtf_number_of_patches_x_and_y.get_container());
+            // boundary model panel
+            // Swing layout: pnlBoundaryModel BoxLayout X_AXIS with glue.
+            pnl_boundary_model.add(&self.cb_boundary_model.get_component());
+            pnl_boundary_model.add(&self.btn_3dmod_boundary_model.get_component());
+            // LengthOfPieces
+            // Swing layout: pnlLengthOfPieces BoxLayout X_AXIS; rigid area x10_y0.
+            pnl_length_of_pieces.add(&self.rb_length_of_pieces_default.get_component());
+            pnl_length_of_pieces.add(&self.rtf_length_of_pieces.get_container());
+            // advanced 2 panel
+            self.pnl_advanced2
+                .add(&self.ltf_filter_sigma1.get_container());
+            self.pnl_advanced2
+                .add(&self.ltf_filter_radius2.get_container());
+            self.pnl_advanced2
+                .add(&self.ltf_filter_sigma2.get_container());
+            // advanced panel
+            self.pnl_advanced.add(&self.ltf_pad_percent.get_container());
+            self.pnl_advanced
+                .add(&self.ltf_taper_percent.get_container());
+            self.pnl_advanced.add(&self.ltf_test_output.get_container());
+            self.pnl_advanced.add(&self.ltf_view_range.get_container());
+            self.pnl_advanced.add(&self.ltf_skip_views.get_container());
+            // button panel
+            // Swing layout: pnlButtons BoxLayout X_AXIS with glue.
+            if let Some(btn_tiltxcorr) = self.btn_tiltxcorr_button() {
+                pnl_buttons.add(&btn_tiltxcorr.get_component());
+            }
+            pnl_buttons.add(&self.btn_3dmod_patch_tracking.get_component());
+            // Imodchopconts
+            // Swing layout: pnlImodchopconts BoxLayout X_AXIS with glue.
+            pnl_imodchopconts.add(&self.btn_imodchopconts.get_component());
+            self.update_panel();
+        }
+    }
+
+    /// Java private `addListeners()` (TiltxcorrPanel.java:329-344).
+    fn add_listeners(&self) {
+        // `pnlRoot.addMouseListener(new GenericMouseAdapter(this))`: mouse events
+        // are not modelled.
+        let listener = &self.action_listener;
+        self.cb_cumulative_correlation
+            .add_action_listener(Some(listener.clone()));
+        self.cb_no_cosine_stretch
+            .add_action_listener(Some(listener.clone()));
+        if let Some(btn_tiltxcorr) = self.btn_tiltxcorr_button() {
+            btn_tiltxcorr.add_action_listener(listener.clone());
+        }
+        self.btn_3dmod_patch_tracking
+            .add_action_listener(listener.clone());
+        self.cb_boundary_model
+            .add_action_listener(Some(listener.clone()));
+        self.btn_3dmod_boundary_model
+            .add_action_listener(listener.clone());
+        if let Some(ctf_mag_changes) = &self.ctf_mag_changes {
+            ctf_mag_changes.add_action_listener(listener.clone());
+        }
+        self.btn_imodchopconts.add_action_listener(listener.clone());
+        self.ctf_length_of_pieces_minimum_overlap
+            .add_action_listener(listener.clone());
+    }
+
+    /// Java field `btnTiltxcorr` as its declared type `MultiLineButton`.  The
+    /// factory's button is one of two Rust types; a `Run3dmodButton` is a
+    /// `MultiLineButton` through its `base`.
+    fn btn_tiltxcorr_button(&self) -> Option<&MultiLineButton> {
+        if let Some(button) = &self.btn_tiltxcorr_run_3dmod {
+            return Some(&button.base);
+        }
+        self.btn_tiltxcorr_multi_line.as_deref()
+    }
+
+    /// Java `done()` (TiltxcorrPanel.java:372-375).
+    pub fn done(&self) {
+        // Java dereferences btnTiltxcorr unconditionally
+        // (TiltxcorrPanel.java:373), a NullPointerException when the factory
+        // returned null; fixed in translation by skipping a null button, as the
+        // rest of this class does.
+        if let Some(btn_tiltxcorr) = self.btn_tiltxcorr_button() {
+            btn_tiltxcorr.remove_action_listener(&self.action_listener);
+        }
+        self.btn_imodchopconts
+            .remove_action_listener(&self.action_listener);
+    }
+
+    /// Java `updateAdvanced(boolean)` (TiltxcorrPanel.java:377-388).
+    pub fn update_advanced(&self, state: bool) {
+        self.pnl_advanced.set_visible(state);
+        self.pnl_advanced2.set_visible(state);
         if self.panel_id == PanelId::PatchTracking {
-            self.rtf_overlap_of_patches_x_and_y.set_text("0.33,0.33");
-            self.rtf_overlap_of_patches_x_and_y.set_selected(true);
-            self.ltf_filter_sigma1.set_text("0.03");
-            self.ltf_filter_radius2.set_text("0.25");
-            self.ltf_filter_sigma2.set_text("0.05");
-            self.layout.patch_layout_border = true;
+            self.ltf_angle_offset.set_visible(state);
+            self.ltf_shift_limits_x_and_y.set_visible(state);
         }
-        self.update_panel();
-    }
-    fn add_listeners(&mut self) {
-        self.actions_attached = true;
-        self.layout.listener_count = if self.ctf_mag_changes.is_some() { 9 } else { 8 };
-    }
-    pub fn done(&mut self) {
-        self.actions_attached = false;
-    }
-    pub fn get_panel_id(&self) -> PanelId {
-        self.panel_id
-    }
-    pub fn pop_up_context_menu(&mut self) {
-        if self.panel_id == PanelId::PatchTracking {
-            self.last_context_popup = Some(format!(
-                "PatchTracking:xcorr_pt{}.log",
-                self.axis_id.get_extension()
-            ));
+        // If magChangesMode is true, then the mag changes fields are not advanced fields.
+        if !self.mag_changes_mode {
+            if let Some(ctf_mag_changes) = &self.ctf_mag_changes {
+                ctf_mag_changes.set_visible(state);
+            }
         }
     }
-    pub fn update_advanced(&mut self, state: bool) {
-        self.layout.advanced_visible = state;
-        self.layout.advanced2_visible = state;
-        if self.panel_id == PanelId::PatchTracking {
-            self.layout.angle_offset_visible = state;
-            self.layout.shift_limits_visible = state;
-        }
-        if !self.mag_changes_mode && self.ctf_mag_changes.is_some() {
-            self.layout.mag_changes_visible = state;
-        }
+
+    /// Java `getPanel()` (TiltxcorrPanel.java:407-409).
+    pub fn get_panel(&self) -> Rc<JComponent> {
+        self.pnl_root.get_container()
     }
-    pub fn expand_open_close(&mut self, expanded: bool) {
-        self.layout.body_visible = expanded;
-    }
-    pub fn expand_advanced_basic(&mut self, expanded: bool) {
-        self.header_advanced = expanded;
-        self.update_advanced(expanded);
-    }
-    /// Java overloaded `setParameters(BaseScreenState)`.
-    pub fn set_parameters_screen_state<S: TiltxcorrScreenState>(&mut self, screen_state: &mut S) {
-        self.header_open = screen_state.get_button_state("Tiltxcorr.openClose", true);
-        self.header_advanced = screen_state.get_button_state("Tiltxcorr.advancedBasic", true);
-        self.expand_open_close(self.header_open);
-        self.update_advanced(self.header_advanced);
-    }
-    /// Java overloaded `getParameters(BaseScreenState)`.
-    pub fn get_parameters_screen_state<S: TiltxcorrScreenState>(&self, screen_state: &mut S) {
-        screen_state.set_button_state("Tiltxcorr.openClose", self.header_open);
-        screen_state.set_button_state("Tiltxcorr.advancedBasic", self.header_advanced);
-    }
-    pub fn set_parameters_imodchopconts<P: ImodchopcontsParam>(&mut self, param: &P) {
+
+    /// Java `setParameters(ImodchopcontsParam)` (TiltxcorrPanel.java:411-427).
+    pub fn set_parameters_imodchopconts_param(&self, param: &ImodchopcontsParam) {
         if self.panel_id == PanelId::PatchTracking {
             self.ctf_length_of_pieces_minimum_overlap
-                .set_text(param.minimum_overlap().as_deref().unwrap_or_default());
-            let set = !param.length_of_pieces_is_null();
-            self.ctf_length_of_pieces_minimum_overlap.set_selected(set);
-            if set {
-                self.rb_length_of_pieces_default = param.length_of_pieces_is_default();
-                if !self.rb_length_of_pieces_default {
-                    self.rtf_length_of_pieces.set_selected(true);
+                .set_text_string(Some(&*param.get_minimum_overlap()));
+            let length_of_pieces_set = !param.is_length_of_pieces_null();
+            self.ctf_length_of_pieces_minimum_overlap
+                .set_selected_boolean(length_of_pieces_set);
+            if length_of_pieces_set {
+                if param.is_length_of_pieces_default() {
+                    self.rb_length_of_pieces_default.set_selected_boolean(true);
+                } else {
+                    self.rtf_length_of_pieces.set_selected_boolean(true);
                     self.rtf_length_of_pieces
-                        .set_text(param.length_of_pieces().as_deref().unwrap_or_default());
+                        .set_text_string(param.get_length_of_pieces().as_deref());
                 }
             }
             self.update_panel();
         }
     }
-    pub fn set_parameters_tiltxcorr<P: ConstTiltxcorrParam>(&mut self, param: &P) {
-        macro_rules! field {
-            ($field:ident, $key:literal) => {
-                if let Some(value) = param.value($key) {
-                    self.$field.set_text(&value);
-                }
-            };
+
+    /// Java `setParameters(ConstTiltxcorrParam)` (TiltxcorrPanel.java:432-481).
+    /// Set the field values for the panel from the ConstTiltxcorrParam object.
+    pub fn set_parameters_const_tiltxcorr_param(
+        &self,
+        tilt_xcorr_params: &dyn ConstTiltxcorrParam,
+    ) {
+        self.ltf_angle_offset
+            .set_text_string(Some(&*tilt_xcorr_params.get_angle_offset()));
+        // Avoid overriding the default
+        if tilt_xcorr_params.is_borders_in_x_and_y_set() {
+            self.ltf_trim
+                .set_text_string(Some(&*tilt_xcorr_params.get_borders_in_x_and_y()));
         }
-        field!(ltf_angle_offset, "AngleOffset");
-        if param.is_set("BordersInXandY") {
-            field!(ltf_trim, "BordersInXandY");
+        self.ltf_x_min
+            .set_text_string(Some(&*tilt_xcorr_params.get_x_min_string()));
+        self.ltf_x_max
+            .set_text_string(Some(&*tilt_xcorr_params.get_x_max_string()));
+        self.ltf_y_min
+            .set_text_string(Some(&*tilt_xcorr_params.get_y_min_string()));
+        self.ltf_y_max
+            .set_text_string(Some(&*tilt_xcorr_params.get_y_max_string()));
+        self.ltf_pad_percent
+            .set_text_string(Some(&*tilt_xcorr_params.get_pads_in_x_and_y_string()));
+        self.ltf_taper_percent
+            .set_text_string(Some(&*tilt_xcorr_params.get_taper_percent_string()));
+        self.ltf_test_output
+            .set_text_string(tilt_xcorr_params.get_test_output().as_deref());
+        self.ltf_view_range
+            .set_text_string(Some(&*tilt_xcorr_params.get_starting_ending_views()));
+        self.ltf_skip_views
+            .set_text_string(Some(&*tilt_xcorr_params.get_skip_views()));
+        if tilt_xcorr_params.is_filter_sigma1_set() {
+            self.ltf_filter_sigma1
+                .set_text_string(Some(&*tilt_xcorr_params.get_filter_sigma1_string()));
         }
-        field!(ltf_x_min, "XMin");
-        field!(ltf_x_max, "XMax");
-        field!(ltf_y_min, "YMin");
-        field!(ltf_y_max, "YMax");
-        field!(ltf_pad_percent, "PadsInXandY");
-        field!(ltf_taper_percent, "TaperPercent");
-        field!(ltf_test_output, "TestOutput");
-        field!(ltf_view_range, "StartingEndingViews");
-        field!(ltf_skip_views, "SkipViews");
-        if param.is_set("FilterSigma1") {
-            field!(ltf_filter_sigma1, "FilterSigma1");
+        if tilt_xcorr_params.is_filter_radius2_set() {
+            self.ltf_filter_radius2
+                .set_text_string(Some(&*tilt_xcorr_params.get_filter_radius2_string()));
         }
-        if param.is_set("FilterRadius2") {
-            field!(ltf_filter_radius2, "FilterRadius2");
-        }
-        if param.is_set("FilterSigma2") {
-            field!(ltf_filter_sigma2, "FilterSigma2");
+        if tilt_xcorr_params.is_filter_sigma2_set() {
+            self.ltf_filter_sigma2
+                .set_text_string(Some(&*tilt_xcorr_params.get_filter_sigma2_string()));
         }
         if self.panel_id == PanelId::CrossCorrelation {
             self.cb_exclude_central_peak
-                .set_selected(param.flag("ExcludeCentralPeak"));
+                .set_selected_boolean(tilt_xcorr_params.get_exclude_central_peak());
             self.cb_cumulative_correlation
-                .set_selected(param.flag("CumulativeCorrelation"));
+                .set_selected_boolean(tilt_xcorr_params.is_cumulative_correlation());
             self.cb_absolute_cosine_stretch
-                .set_selected(param.flag("AbsoluteCosineStretch"));
+                .set_selected_boolean(tilt_xcorr_params.is_absolute_cosine_stretch());
             self.cb_no_cosine_stretch
-                .set_selected(param.flag("NoCosineStretch"));
-        } else {
-            field!(ltf_size_of_patches_x_and_y, "SizeOfPatchesXAndY");
-            field!(ltf_shift_limits_x_and_y, "ShiftLimitsXAndY");
-            self.sp_iterate_correlations
-                .set_value(param.iterate_correlations());
-            self.cb_boundary_model
-                .set_selected(param.flag("BoundaryModel"));
-            if param.is_set("OverlapOfPatchesXAndY") {
-                self.rtf_overlap_of_patches_x_and_y.set_selected(true);
+                .set_selected_boolean(tilt_xcorr_params.is_no_cosine_stretch());
+        } else if self.panel_id == PanelId::PatchTracking {
+            self.ltf_size_of_patches_x_and_y
+                .set_text_string(Some(&*tilt_xcorr_params.get_size_of_patches_x_and_y()));
+            if tilt_xcorr_params.is_overlap_of_patches_x_and_y_set() {
                 self.rtf_overlap_of_patches_x_and_y
-                    .set_text(&param.value("OverlapOfPatchesXAndY").unwrap_or_default());
+                    .set_selected_boolean(true);
+                self.rtf_overlap_of_patches_x_and_y
+                    .set_text_string(Some(&*tilt_xcorr_params.get_overlap_of_patches_x_and_y()));
             }
-            if param.is_set("NumberOfPatchesXAndY") {
-                self.rtf_number_of_patches_x_and_y.set_selected(true);
+            if tilt_xcorr_params.is_number_of_patches_x_and_y_set() {
                 self.rtf_number_of_patches_x_and_y
-                    .set_text(&param.value("NumberOfPatchesXAndY").unwrap_or_default());
+                    .set_selected_boolean(true);
+                self.rtf_number_of_patches_x_and_y
+                    .set_text_string(Some(&*tilt_xcorr_params.get_number_of_patches_x_and_y()));
             }
+            self.sp_iterate_correlations
+                .set_value_int(tilt_xcorr_params.get_iterate_correlations());
+            self.ltf_shift_limits_x_and_y
+                .set_text_string(Some(&*tilt_xcorr_params.get_shift_limits_x_and_y()));
+            self.cb_boundary_model
+                .set_selected_boolean(tilt_xcorr_params.is_boundary_model_set());
         }
-        if let Some(mag) = &mut self.ctf_mag_changes {
-            mag.set_selected(param.flag("SearchMagChanges"));
-            mag.set_text(
-                param
-                    .value("ViewsWithMagChanges")
-                    .as_deref()
-                    .unwrap_or_default(),
-            );
+        if let Some(ctf_mag_changes) = &self.ctf_mag_changes {
+            ctf_mag_changes.set_selected_boolean(tilt_xcorr_params.is_search_mag_changes());
+            ctf_mag_changes.set_text_string(Some(&*tilt_xcorr_params.get_views_with_mag_changes()));
         }
         self.update_panel();
     }
-    pub fn set_parameters_meta_data<M: TiltxcorrMetaData>(&mut self, metadata: &M) {
+
+    /// Java `setParameters(ConstMetaData)` (TiltxcorrPanel.java:487-500).  Load
+    /// parameters which can be inactivated before loading from TiltxcorrParam.
+    pub fn set_parameters_const_meta_data(&self, meta_data: &dyn ConstMetaData) {
         if self.panel_id == PanelId::PatchTracking {
-            if metadata.is_set("TrackOverlapOfPatchesXAndY", self.axis_id) {
-                self.rtf_overlap_of_patches_x_and_y.set_text(
-                    metadata
-                        .get_value("TrackOverlapOfPatchesXAndY", self.axis_id)
-                        .as_deref()
-                        .unwrap_or_default(),
-                );
+            // Don't override defaults unless there is a value in meta data
+            if meta_data.is_track_overlap_of_patches_x_and_y_set(self.axis_id) {
+                self.rtf_overlap_of_patches_x_and_y.set_text_string(Some(
+                    &meta_data.get_track_overlap_of_patches_x_and_y(self.axis_id),
+                ));
             }
-            self.rtf_number_of_patches_x_and_y.set_text(
-                metadata
-                    .get_value("TrackNumberOfPatchesXAndY", self.axis_id)
-                    .as_deref()
-                    .unwrap_or_default(),
-            );
-            self.rtf_length_of_pieces.set_text(
-                metadata
-                    .get_value("LengthOfPieces", self.axis_id)
-                    .as_deref()
-                    .unwrap_or_default(),
-            );
+            self.rtf_number_of_patches_x_and_y.set_text_string(Some(
+                &meta_data.get_track_number_of_patches_x_and_y(self.axis_id),
+            ));
+            // Backwards compatibility
+            if meta_data.is_track_length_and_overlap_set(self.axis_id) {
+                self.ctf_length_of_pieces_minimum_overlap
+                    .set_text_string(Some(&*meta_data.get_minimum_overlap(self.axis_id)));
+            }
+            self.rtf_length_of_pieces
+                .set_text_string(Some(&*meta_data.get_length_of_pieces(self.axis_id)));
         }
     }
-    pub fn get_parameters_meta_data<M: TiltxcorrMetaData>(&self, metadata: &mut M) {
+
+    /// Java `getParameters(MetaData)` (TiltxcorrPanel.java:506-515).  Save
+    /// parameters which can be inactivated to meta data.
+    pub fn get_parameters_meta_data(&self, meta_data: &MetaData) {
         if self.panel_id == PanelId::PatchTracking {
-            metadata.set_value(
-                "TrackOverlapOfPatchesXAndY",
+            meta_data.set_track_overlap_of_patches_x_and_y(
                 self.axis_id,
-                self.rtf_overlap_of_patches_x_and_y.get_text_unvalidated(),
+                self.rtf_overlap_of_patches_x_and_y
+                    .get_text_void()
+                    .as_deref(),
             );
-            metadata.set_value(
-                "TrackNumberOfPatchesXAndY",
+            meta_data.set_track_number_of_patches_x_and_y(
                 self.axis_id,
-                self.rtf_number_of_patches_x_and_y.get_text_unvalidated(),
+                self.rtf_number_of_patches_x_and_y
+                    .get_text_void()
+                    .as_deref(),
             );
-            metadata.set_value(
-                "LengthOfPieces",
+            meta_data.set_length_of_pieces(
                 self.axis_id,
-                self.rtf_length_of_pieces.get_text_unvalidated(),
+                self.rtf_length_of_pieces.get_text_void().as_deref(),
             );
+            // MinimumOverlap does not have to be saved because it can be placed in the
+            // comscript even when it is disabled. It is in meta data for backwards
+            // compatibility, and is loaded from trackLengthAndOverlap.
         }
     }
-    pub fn get_parameters_imodchopconts<P: ImodchopcontsParam>(
-        &self,
-        param: &mut P,
-        validation: bool,
-    ) -> bool {
-        if self.panel_id != PanelId::PatchTracking {
-            return true;
-        }
-        let Ok(overlap) = self
-            .ctf_length_of_pieces_minimum_overlap
-            .get_text(validation)
-        else {
-            return false;
-        };
-        param.set_minimum_overlap(overlap);
-        if self.ctf_length_of_pieces_minimum_overlap.is_selected() {
-            if self.rb_length_of_pieces_default {
-                param.set_length_of_pieces_default();
-            } else {
-                let Ok(value) = self.rtf_length_of_pieces.get_text(validation) else {
-                    return false;
-                };
-                param.set_length_of_pieces(value);
-            }
+
+    /// Java `setParameters(BaseScreenState)` (TiltxcorrPanel.java:517-521).
+    pub fn set_parameters_base_screen_state(&self, screen_state: &BaseScreenState) {
+        // btnCrossCorrelate.setButtonState(screenState
+        // .getButtonState(btnCrossCorrelate.getButtonStateKey()));
+        self.header
+            .set_button_states_base_screen_state(Some(screen_state));
+    }
+
+    /// Java `getParameters(BaseScreenState)` (TiltxcorrPanel.java:523-525).
+    pub fn get_parameters_base_screen_state(&self, screen_state: &BaseScreenState) {
+        self.header.get_button_states(Some(screen_state));
+    }
+
+    /// Java `setVisible(boolean)` (TiltxcorrPanel.java:670-672).
+    pub fn set_visible(&self, state: bool) {
+        self.pnl_root.set_visible(state);
+    }
+
+    /// Java `updatePanel()` (TiltxcorrPanel.java:674-692).
+    pub fn update_panel(&self) {
+        if self.cb_cumulative_correlation.is_selected() && !self.cb_no_cosine_stretch.is_selected()
+        {
+            self.cb_absolute_cosine_stretch.set_enabled(true);
         } else {
-            param.reset_length_of_pieces();
+            self.cb_absolute_cosine_stretch.set_selected_boolean(false);
+            self.cb_absolute_cosine_stretch.set_enabled(false);
+        }
+        self.btn_3dmod_boundary_model
+            .set_enabled(self.cb_boundary_model.is_selected());
+        if let Some(ctf_mag_changes) = &self.ctf_mag_changes {
+            self.cb_cumulative_correlation
+                .set_enabled(!ctf_mag_changes.is_selected() || !ctf_mag_changes.is_enabled());
+            ctf_mag_changes.set_enabled(
+                !self.cb_cumulative_correlation.is_selected()
+                    || !self.cb_cumulative_correlation.is_enabled(),
+            );
+        }
+        let enable = self.ctf_length_of_pieces_minimum_overlap.is_selected();
+        self.rb_length_of_pieces_default.set_enabled(enable);
+        self.rtf_length_of_pieces.set_enabled(enable);
+    }
+
+    /// Java private `validate()` (TiltxcorrPanel.java:694-703).
+    fn validate(&self) -> bool {
+        if self.panel_id == PanelId::PatchTracking {
+            if self.ltf_size_of_patches_x_and_y.is_empty() {
+                ui_harness::INSTANCE.with(|harness| {
+                    harness.open_message_dialog_base_manager_string_string_axis_id(
+                        Some(self.application_manager),
+                        &(self.ltf_size_of_patches_x_and_y.get_label() + " is required."),
+                        "Entry Error",
+                        Some(self.axis_id),
+                    )
+                });
+                return false;
+            }
         }
         true
     }
-    pub fn get_parameters_tiltxcorr<P: TiltxcorrParam>(
-        &self,
-        param: &mut P,
-        validation: bool,
-        metadata: Option<&dyn TiltxcorrMetaData>,
-    ) -> Result<bool, String> {
-        let set = |p: &mut P, key: &str, field: &LabeledTextField| -> Result<(), String> {
-            p.set_value(
-                key,
-                field
-                    .get_text_validated(validation)
-                    .map_err(|e| e.to_string())?,
+
+    /// Java private `setToolTipText()` (TiltxcorrPanel.java:754-832).  Tooltip
+    /// string initialization.
+    fn set_tool_tip_text(&self) {
+        let mut text: Option<String>;
+        // Java `ReadOnlyAutodoc autodoc = null;` then the try/catch.
+        let mut autodoc: *const dyn ReadOnlyAutodoc = std::ptr::null::<Autodoc>();
+
+        match unsafe {
+            autodoc_factory::get_instance(
+                Some(self.application_manager),
+                Some(autodoc_factory::TILTXCORR),
+                self.axis_id,
+                false,
             )
+        } {
+            Ok(instance) => autodoc = instance as *const Autodoc,
+            // `catch (final LockException except) {}`.
+            Err(LogFileError::Lock(_)) => {}
+            // `catch (final LogFileException | IOException except)`:
+            // `except.printStackTrace()`.
+            Err(except) => eprintln!("{}", except),
+        }
+        // SAFETY: `autodoc` is null or an autodoc the factory keeps for the
+        // life of the process.
+        let autodoc: Option<&dyn ReadOnlyAutodoc> = if autodoc.is_null() {
+            None
+        } else {
+            Some(unsafe { &*autodoc })
         };
-        set(param, "TestOutput", &self.ltf_test_output)?;
-        if self.panel_id == PanelId::CrossCorrelation {
-            param.set_flag(
-                "ExcludeCentralPeak",
-                self.cb_exclude_central_peak.is_selected(),
+        let tooltip = |key: &str| etomo_autodoc::get_tooltip(autodoc, Some(key));
+        self.ltf_test_output
+            .set_tool_tip_text(tooltip("TestOutput").as_deref());
+        self.ltf_filter_sigma1
+            .set_tool_tip_text(tooltip(tiltxcorr_param::FILTER_SIGMA1_KEY).as_deref());
+        self.ltf_filter_radius2
+            .set_tool_tip_text(tooltip("FilterRadius2").as_deref());
+        self.ltf_filter_sigma2
+            .set_tool_tip_text(tooltip("FilterSigma2").as_deref());
+        self.ltf_trim
+            .set_tool_tip_text(tooltip("BordersInXandY").as_deref());
+        if let Some(ctf_mag_changes) = &self.ctf_mag_changes {
+            ctf_mag_changes.set_check_box_tool_tip_text(
+                tooltip(tiltxcorr_param::SEARCH_MAG_CHANGES_KEY).as_deref(),
             );
-        } else {
-            if let Some(error) = param.set_iterate_correlations(self.sp_iterate_correlations.value)
-            {
-                return Err(format!("{}: {error}", self.sp_iterate_correlations.label));
-            }
-            param.set_value("InputFile", "PREALIGNED_STACK".into())?;
-            param.set_value("OutputFile", "FIDUCIAL_PATCH_TRACKING_MODEL".into())?;
-            if self.cb_boundary_model.is_selected() {
-                param.set_value("BoundaryModel", "PATCH_TRACKING_BOUNDARY_MODEL".into())?;
-            } else {
-                param.reset_value("BoundaryModel");
-            }
-            if let Some(metadata) = metadata {
-                param.set_value("TiltAngleSpec", metadata.tilt_angle_spec(self.axis_id))?;
-                param.set_value(
-                    "RotationAngle",
-                    metadata.rotation_angle(self.axis_id).to_string(),
-                )?;
-            }
-        }
-        for (key, field) in [
-            ("AngleOffset", &self.ltf_angle_offset),
-            ("BordersInXandY", &self.ltf_trim),
-            ("XMin", &self.ltf_x_min),
-            ("XMax", &self.ltf_x_max),
-            ("YMin", &self.ltf_y_min),
-            ("YMax", &self.ltf_y_max),
-            ("PadsInXAndY", &self.ltf_pad_percent),
-            ("TapersInXAndY", &self.ltf_taper_percent),
-            ("StartingEndingViews", &self.ltf_view_range),
-            ("SkipViews", &self.ltf_skip_views),
-            ("FilterSigma1", &self.ltf_filter_sigma1),
-            ("FilterRadius2", &self.ltf_filter_radius2),
-            ("FilterSigma2", &self.ltf_filter_sigma2),
-        ] {
-            set(param, key, field)?;
-        }
-        if self.panel_id == PanelId::CrossCorrelation {
-            param.set_flag(
-                "CumulativeCorrelation",
-                self.cb_cumulative_correlation.is_selected(),
+            // Java sets the check box tooltip a second time here with the
+            // ViewsWithMagChanges text (TiltxcorrPanel.java:775-776), which
+            // overwrites the SearchMagChanges tooltip and leaves the field
+            // without one.  Fixed in translation: the ViewsWithMagChanges text
+            // goes on the field, as the pairing of keys to parts intends.
+            ctf_mag_changes.set_field_tool_tip_text(
+                tooltip(tiltxcorr_param::VIEWS_WITH_MAG_CHANGES_KEY).as_deref(),
             );
-            param.set_flag(
-                "AbsoluteCosineStretch",
-                self.cb_absolute_cosine_stretch.is_selected(),
-            );
-            param.set_flag("NoCosineStretch", self.cb_no_cosine_stretch.is_selected());
-        } else {
-            set(
-                param,
-                "SizeOfPatchesXAndY",
-                &self.ltf_size_of_patches_x_and_y,
-            )?;
-            if self.rtf_overlap_of_patches_x_and_y.is_selected() {
-                param.set_value(
-                    "OverlapOfPatchesXAndY",
-                    self.rtf_overlap_of_patches_x_and_y
-                        .get_text(validation)
-                        .map_err(|e| e.to_string())?,
-                )?;
-            } else {
-                param.reset_value("OverlapOfPatchesXAndY");
-            }
-            if self.rtf_number_of_patches_x_and_y.is_selected() {
-                param.set_value(
-                    "NumberOfPatchesXAndY",
-                    self.rtf_number_of_patches_x_and_y
-                        .get_text(validation)
-                        .map_err(|e| e.to_string())?,
-                )?;
-            } else {
-                param.reset_value("NumberOfPatchesXAndY");
-            }
-            set(param, "ShiftLimitsXAndY", &self.ltf_shift_limits_x_and_y)?;
-            param.set_value("PrealignmentTransformFile", "default".into())?;
-            param.set_value("ImagesAreBinned", "PREALIGNED_STACK".into())?;
         }
-        if let Some(mag) = &self.ctf_mag_changes {
-            param.set_flag("SearchMagChanges", mag.is_selected());
-            param.set_value(
-                "ViewsWithMagChanges",
-                mag.get_text(validation).map_err(|e| e.to_string())?,
-            )?;
+        text = tooltip("XMinAndMax");
+        if let Some(text) = &text {
+            self.pnl_x_min_and_max
+                .set_tool_tip_text(Some(text.as_str()));
+            self.ltf_x_min.set_tool_tip_text(Some(text.as_str()));
+            self.ltf_x_max.set_tool_tip_text(Some(text.as_str()));
         }
-        Ok(true)
-    }
-    pub fn set_visible(&mut self, state: bool) {
-        self.layout.root_visible = state;
-    }
-    pub fn update_panel(&mut self) {
-        let absolute = self.cb_cumulative_correlation.is_selected()
-            && !self.cb_no_cosine_stretch.is_selected();
-        self.cb_absolute_cosine_stretch.set_enabled(absolute);
-        if !absolute {
-            self.cb_absolute_cosine_stretch.set_selected(false);
+        text = tooltip("YMinAndMax");
+        if let Some(text) = &text {
+            self.pnl_y_min_and_max
+                .set_tool_tip_text(Some(text.as_str()));
+            self.ltf_y_min.set_tool_tip_text(Some(text.as_str()));
+            self.ltf_y_max.set_tool_tip_text(Some(text.as_str()));
         }
-        self.layout.absolute_cosine_stretch_enabled = absolute;
-        self.layout.boundary_model_enabled = self.cb_boundary_model.is_selected();
-        if let Some(mag) = &mut self.ctf_mag_changes {
-            let cumulative_enabled = !mag.is_selected() || !mag.is_enabled();
-            self.cb_cumulative_correlation
-                .set_enabled(cumulative_enabled);
-            mag.set_enabled(!self.cb_cumulative_correlation.is_selected() || !cumulative_enabled);
-        }
-        let enable = self.ctf_length_of_pieces_minimum_overlap.is_selected();
-        self.layout.length_of_pieces_enabled = enable;
-        self.rtf_length_of_pieces.set_enabled(enable);
-    }
-    pub fn validate(&self) -> Result<(), String> {
-        if self.panel_id == PanelId::PatchTracking && self.ltf_size_of_patches_x_and_y.is_empty() {
-            return Err(format!(
-                "{} is required.",
-                self.ltf_size_of_patches_x_and_y.get_label()
+        self.ltf_pad_percent
+            .set_tool_tip_text(tooltip("PadsInXandY").as_deref());
+        self.ltf_taper_percent
+            .set_tool_tip_text(tooltip("TapersInXandY").as_deref());
+        self.cb_cumulative_correlation
+            .set_tool_tip_text_string(tooltip("CumulativeCorrelation").as_deref());
+        self.cb_absolute_cosine_stretch
+            .set_tool_tip_text_string(tooltip("AbsoluteCosineStretch").as_deref());
+        self.cb_no_cosine_stretch
+            .set_tool_tip_text_string(tooltip("NoCosineStretch").as_deref());
+        self.ltf_view_range
+            .set_tool_tip_text(tooltip("StartingEndingViews").as_deref());
+        self.ltf_skip_views
+            .set_tool_tip_text(tooltip(tiltxcorr_param::SKIP_VIEWS_KEY).as_deref());
+        self.cb_exclude_central_peak
+            .set_tool_tip_text_string(tooltip("ExcludeCentralPeak").as_deref());
+        self.ltf_angle_offset
+            .set_tool_tip_text(tooltip("AngleOffset").as_deref());
+        if let Some(btn_tiltxcorr) = self.btn_tiltxcorr_button() {
+            btn_tiltxcorr.set_tool_tip_text(Some(
+                &*("Find alignment transformations between successive ".to_string()
+                    + "images by cross-correlation."),
             ));
         }
-        Ok(())
-    }
-    pub fn action<M: TiltxcorrPanelApplicationManager>(
-        &mut self,
-        manager: &mut M,
-        action_command: &str,
-        options: Option<Run3dmodMenuOptions>,
-    ) {
-        match action_command {
-            "Tiltxcorr" if self.panel_id == PanelId::CrossCorrelation => {
-                manager.pre_cross_correlate(self.axis_id, self.dialog_type)
-            }
-            "Tiltxcorr" | "Imodchopconts" => {
-                let run = action_command == "Tiltxcorr";
-                if !run || self.validate().is_ok() {
-                    manager.tiltxcorr(
-                        self.axis_id,
-                        self.dialog_type,
-                        run,
-                        self.ctf_length_of_pieces_minimum_overlap.is_selected(),
-                        options,
-                    );
-                }
-            }
-            "Open Tracked Patches" => {
-                manager.imod_model("PREALIGNED_STACK", "FIDUCIAL_MODEL", self.axis_id, options)
-            }
-            "Create Boundary Model" => manager.imod_model(
-                "PREALIGNED_STACK",
-                "PATCH_TRACKING_BOUNDARY_MODEL",
-                self.axis_id,
-                options,
-            ),
-            _ => self.update_panel(),
-        }
-    }
-
-    #[allow(non_snake_case)]
-    /// Native-name adapter for the Java listener's `actionPerformed`.
-    pub fn actionPerformed<M: TiltxcorrPanelApplicationManager>(
-        &mut self,
-        manager: &mut M,
-        action_command: &str,
-    ) {
-        self.action(manager, action_command, None);
-    }
-    fn set_tool_tip_text(&mut self) {
-        self.layout.tooltip_initialized = true;
+        self.btn_3dmod_patch_tracking.set_tool_tip_text(Some(
+            &*("Open the pre-aligned stack with the patch tracking ".to_string()
+                + "fiducial model."),
+        ));
+        self.ltf_size_of_patches_x_and_y
+            .set_tool_tip_text(tooltip(tiltxcorr_param::SIZE_OF_PATCHES_X_AND_Y_KEY).as_deref());
+        self.rtf_overlap_of_patches_x_and_y
+            .set_tool_tip_text(tooltip(tiltxcorr_param::OVERLAP_OF_PATCHES_X_AND_Y_KEY).as_deref());
+        self.rtf_number_of_patches_x_and_y
+            .set_tool_tip_text(tooltip(tiltxcorr_param::NUMBER_OF_PATCHES_X_AND_Y_KEY).as_deref());
+        self.sp_iterate_correlations
+            .set_tool_tip_text(tooltip(tiltxcorr_param::ITERATE_CORRELATIONS_KEY).as_deref());
+        self.ltf_shift_limits_x_and_y
+            .set_tool_tip_text(tooltip(tiltxcorr_param::SHIFT_LIMITS_X_AND_Y_KEY).as_deref());
+        let tooltip_text = tooltip(tiltxcorr_param::BOUNDARY_MODEL_KEY);
+        self.cb_boundary_model
+            .set_tool_tip_text_string(tooltip_text.as_deref());
+        self.btn_3dmod_boundary_model
+            .set_tool_tip_text(tooltip_text.as_deref());
+        self.ctf_length_of_pieces_minimum_overlap
+            .set_check_box_tool_tip_text(
+                tooltip(imodchopconts_param::LENGTH_OF_PIECES_KEY).as_deref(),
+            );
+        self.ctf_length_of_pieces_minimum_overlap
+            .set_field_tool_tip_text(tooltip(imodchopconts_param::MINIMUM_OVERLAP_KEY).as_deref());
+        self.rb_length_of_pieces_default.set_tool_tip_text_string(
+            tooltip(imodchopconts_param::LENGTH_OF_PIECES_KEY).as_deref(),
+        );
+        self.rtf_length_of_pieces
+            .set_tool_tip_text(tooltip(imodchopconts_param::LENGTH_OF_PIECES_KEY).as_deref());
+        self.btn_imodchopconts.set_tool_tip_text(Some(
+            "Changes the contour pieces without rerunning tiltaxcorr.",
+        ));
     }
 }
 
-#[cfg(test)]
-mod tests {
-    use super::*;
-    #[test]
-    fn patch_tracking_validation_and_enablement_follow_source() {
-        let mut p =
-            TiltxcorrPanel::get_patch_tracking_instance(AxisID::First, DialogType::FiducialModel);
-        assert!(p.validate().is_err());
-        p.ltf_size_of_patches_x_and_y.set_text("128,128");
-        assert!(p.validate().is_ok());
-        p.cb_cumulative_correlation.set_selected(true);
-        p.cb_no_cosine_stretch.set_selected(false);
-        p.update_panel();
-        assert!(p.layout.absolute_cosine_stretch_enabled);
-        p.cb_boundary_model.set_selected(true);
-        p.ctf_length_of_pieces_minimum_overlap.set_selected(true);
-        p.update_panel();
-        assert!(p.layout.boundary_model_enabled && p.layout.length_of_pieces_enabled);
+impl ProcessDisplay for TiltxcorrPanel {
+    fn as_tilt_xcorr_display(&self) -> Option<&dyn TiltXcorrDisplay> {
+        Some(self)
     }
-    #[test]
-    fn advanced_visibility_keeps_mag_change_exception() {
-        let mut p = TiltxcorrPanel::get_cross_correlation_instance(
-            AxisID::Only,
-            DialogType::CoarseAlignment,
-            true,
+}
+
+impl TiltXcorrDisplay for TiltxcorrPanel {
+    /// Java `getParameters(TiltxcorrParam, boolean) throws
+    /// FortranInputSyntaxException` (TiltxcorrPanel.java:556-668).  Get the
+    /// field values from the panel filling in the TiltxcorrParam object.
+    /// Returns false if there was a field error.
+    fn get_parameters(
+        &self,
+        tilt_xcorr_params: &mut TiltxcorrParam,
+        do_validation: bool,
+    ) -> Result<bool, FortranInputSyntaxException> {
+        // The outer `try { ... } catch (FieldValidationFailedException e) {
+        // return false; }`: `?` on a field is the throw, `Err` below the catch.
+        let outer = (|| -> Result<Result<bool, FortranInputSyntaxException>, FieldValidationFailedException> {
+            // A text field's text is never null.
+            tilt_xcorr_params.set_test_output(
+                &self
+                    .ltf_test_output
+                    .get_text_boolean(do_validation)?
+                    .unwrap_or_default(),
+            );
+            if self.panel_id == PanelId::CrossCorrelation {
+                tilt_xcorr_params
+                    .set_exclude_central_peak(self.cb_exclude_central_peak.is_selected());
+            } else if self.panel_id == PanelId::PatchTracking {
+                let error_message = tilt_xcorr_params
+                    .set_iterate_correlations(Some(self.sp_iterate_correlations.get_value()));
+                if let Some(error_message) = error_message {
+                    ui_harness::INSTANCE.with(|harness| {
+                        harness.open_message_dialog_base_manager_string_string_axis_id(
+                            Some(self.application_manager),
+                            &(self
+                                .sp_iterate_correlations
+                                .get_label()
+                                .unwrap_or_else(|| "null".to_string())
+                                + ": "
+                                + &error_message),
+                            "Entry Error",
+                            Some(self.axis_id),
+                        )
+                    });
+                    return Ok(Ok(false));
+                }
+                tilt_xcorr_params.set_input_file(
+                    file_type::CLASS
+                        .prealigned_stack
+                        .get_file_name(Some(self.application_manager), Some(self.axis_id))
+                        .as_deref(),
+                );
+                tilt_xcorr_params.set_output_file(
+                    file_type::CLASS
+                        .fiducial_patch_tracking_model
+                        .get_file_name(Some(self.application_manager), Some(self.axis_id))
+                        .as_deref(),
+                );
+                if self.cb_boundary_model.is_selected() {
+                    tilt_xcorr_params.set_boundary_model(
+                        file_type::CLASS
+                            .patch_tracking_boundary_model
+                            .get_file_name(Some(self.application_manager), Some(self.axis_id))
+                            .as_deref(),
+                    );
+                } else {
+                    tilt_xcorr_params.reset_boundary_model();
+                }
+                let meta_data = self.application_manager.get_meta_data();
+                let tilt_angle_spec = meta_data.get_tilt_angle_spec(self.axis_id);
+                tilt_xcorr_params.set_tilt_angle_spec(&tilt_angle_spec);
+                tilt_xcorr_params
+                    .set_rotation_angle(meta_data.get_image_rotation(self.axis_id).get_double());
+            }
+            let mut current_param = String::from("unknown");
+            // The inner `try { ... } catch (FortranInputSyntaxException except)`:
+            // `Ok(Err(except))` is the throw, `Ok(Ok(Some(false)))` an early
+            // `return false`, `Ok(Ok(None))` falling out of the try block.
+            //
+            // `ParamUtilities` setters that parse a number return `Err(String)`
+            // for Java's unchecked NumberFormatException, which Java does not
+            // catch here: it escapes getParameters and aborts the Swing action
+            // with a stack trace.  Fixed in translation: the exception is
+            // reported on standard error and getParameters returns false (a
+            // field error), so the caller stops as it does for a bad field.
+            let inner = (|| -> Result<Result<Option<bool>, FortranInputSyntaxException>, FieldValidationFailedException> {
+                current_param = self.ltf_angle_offset.get_label();
+                tilt_xcorr_params
+                    .set_angle_offset(self.ltf_angle_offset.get_text_boolean(do_validation)?.as_deref());
+                current_param = self.ltf_trim.get_label();
+                if let Err(except) = tilt_xcorr_params
+                    .set_borders_in_x_and_y(self.ltf_trim.get_text_boolean(do_validation)?.as_deref())
+                {
+                    return Ok(Err(except));
+                }
+                current_param = "X".to_string() + &self.ltf_x_min.get_label();
+                if let Err(number_format_exception) =
+                    tilt_xcorr_params.set_x_min(self.ltf_x_min.get_text_boolean(do_validation)?.as_deref())
+                {
+                    eprintln!("java.lang.NumberFormatException: {}", number_format_exception);
+                    return Ok(Ok(Some(false)));
+                }
+                current_param = "X".to_string() + &self.ltf_x_max.get_label();
+                if let Err(number_format_exception) =
+                    tilt_xcorr_params.set_x_max(self.ltf_x_max.get_text_boolean(do_validation)?.as_deref())
+                {
+                    eprintln!("java.lang.NumberFormatException: {}", number_format_exception);
+                    return Ok(Ok(Some(false)));
+                }
+                current_param = "Y".to_string() + &self.ltf_y_min.get_label();
+                if let Err(number_format_exception) =
+                    tilt_xcorr_params.set_y_min(self.ltf_y_min.get_text_boolean(do_validation)?.as_deref())
+                {
+                    eprintln!("java.lang.NumberFormatException: {}", number_format_exception);
+                    return Ok(Ok(Some(false)));
+                }
+                current_param = "Y".to_string() + &self.ltf_y_max.get_label();
+                if let Err(number_format_exception) =
+                    tilt_xcorr_params.set_y_max(self.ltf_y_max.get_text_boolean(do_validation)?.as_deref())
+                {
+                    eprintln!("java.lang.NumberFormatException: {}", number_format_exception);
+                    return Ok(Ok(Some(false)));
+                }
+                current_param = self.ltf_pad_percent.get_label();
+                if let Err(except) = tilt_xcorr_params
+                    .set_pads_in_x_and_y(self.ltf_pad_percent.get_text_boolean(do_validation)?.as_deref())
+                {
+                    return Ok(Err(except));
+                }
+                current_param = self.ltf_taper_percent.get_label();
+                if let Err(except) = tilt_xcorr_params.set_tapers_in_x_and_y(self.ltf_taper_percent.get_text_boolean(do_validation)?.as_deref()) {
+                    return Ok(Err(except));
+                }
+                current_param = self.ltf_view_range.get_label();
+                if let Err(except) = tilt_xcorr_params.set_starting_ending_views(self.ltf_view_range.get_text_boolean(do_validation)?.as_deref()) {
+                    return Ok(Err(except));
+                }
+                current_param = self.ltf_skip_views.get_label();
+                tilt_xcorr_params
+                    .set_skip_views(self.ltf_skip_views.get_text_boolean(do_validation)?.as_deref());
+                current_param = self.ltf_filter_sigma1.get_label();
+                tilt_xcorr_params
+                    .set_filter_sigma1(self.ltf_filter_sigma1.get_text_boolean(do_validation)?.as_deref());
+                current_param = self.ltf_filter_radius2.get_label();
+                tilt_xcorr_params.set_filter_radius2(self.ltf_filter_radius2.get_text_boolean(do_validation)?.as_deref());
+                current_param = self.ltf_filter_sigma2.get_label();
+                tilt_xcorr_params
+                    .set_filter_sigma2(self.ltf_filter_sigma2.get_text_boolean(do_validation)?.as_deref());
+                if self.panel_id == PanelId::CrossCorrelation {
+                    current_param = self.cb_cumulative_correlation.get_text_void().unwrap_or_else(|| "null".to_string());
+                    tilt_xcorr_params
+                        .set_cumulative_correlation(self.cb_cumulative_correlation.is_selected());
+                    current_param = self.cb_absolute_cosine_stretch.get_text_void().unwrap_or_else(|| "null".to_string());
+                    tilt_xcorr_params
+                        .set_absolute_cosine_stretch(self.cb_absolute_cosine_stretch.is_selected());
+                    current_param = self.cb_no_cosine_stretch.get_text_void().unwrap_or_else(|| "null".to_string());
+                    tilt_xcorr_params.set_no_cosine_stretch(self.cb_no_cosine_stretch.is_selected());
+                } else if self.panel_id == PanelId::PatchTracking {
+                    current_param = self.ltf_size_of_patches_x_and_y.get_label();
+                    match tilt_xcorr_params.set_size_of_patches_x_and_y(
+                        self.ltf_size_of_patches_x_and_y.get_text_boolean(do_validation)?.as_deref(),
+                        &self.ltf_size_of_patches_x_and_y.get_label(),
+                    ) {
+                        Err(except) => return Ok(Err(except)),
+                        Ok(false) => return Ok(Ok(Some(false))),
+                        Ok(true) => {}
+                    }
+                    current_param = self.rtf_overlap_of_patches_x_and_y.get_label().unwrap_or_else(|| "null".to_string());
+                    if self.rtf_overlap_of_patches_x_and_y.is_selected() {
+                        if let Err(except) = tilt_xcorr_params.set_overlap_of_patches_x_and_y(self.rtf_overlap_of_patches_x_and_y.get_text_boolean(do_validation)?.as_deref()) {
+                            return Ok(Err(except));
+                        }
+                    } else {
+                        tilt_xcorr_params.reset_overlap_of_patches_x_and_y();
+                    }
+                    current_param = self.rtf_number_of_patches_x_and_y.get_label().unwrap_or_else(|| "null".to_string());
+                    if self.rtf_number_of_patches_x_and_y.is_selected() {
+                        if let Err(except) = tilt_xcorr_params.set_number_of_patches_x_and_y(self.rtf_number_of_patches_x_and_y.get_text_boolean(do_validation)?.as_deref()) {
+                            return Ok(Err(except));
+                        }
+                    } else {
+                        tilt_xcorr_params.reset_number_of_patches_x_and_y();
+                    }
+                    current_param = self.ltf_shift_limits_x_and_y.get_label();
+                    if let Err(except) = tilt_xcorr_params.set_shift_limits_x_and_y(self.ltf_shift_limits_x_and_y.get_text_boolean(do_validation)?.as_deref()) {
+                        return Ok(Err(except));
+                    }
+                    tilt_xcorr_params.set_prealignment_transform_file_default();
+                    tilt_xcorr_params.set_images_are_binned(
+                        UIExpertUtilities::INSTANCE.get_stack_binning_base_manager_axis_id_file_type(
+                            self.application_manager,
+                            self.axis_id,
+                            &file_type::CLASS.prealigned_stack,
+                        ),
+                    );
+                }
+                if let Some(ctf_mag_changes) = &self.ctf_mag_changes {
+                    tilt_xcorr_params.set_search_mag_changes(ctf_mag_changes.is_selected());
+                    tilt_xcorr_params.set_views_with_mag_changes(ctf_mag_changes.get_text_boolean(do_validation)?.as_deref());
+                }
+                Ok(Ok(None))
+            })()?;
+            match inner {
+                Ok(Some(value)) => return Ok(Ok(value)),
+                Ok(None) => {}
+                Err(except) => {
+                    let message = current_param + except.get_message().unwrap_or("null");
+                    return Ok(Err(FortranInputSyntaxException::new(&message)));
+                }
+            }
+            Ok(Ok(true))
+        })();
+        match outer {
+            Ok(result) => result,
+            Err(_field_validation_failed_exception) => Ok(false),
+        }
+    }
+
+    /// Java `getPanelId()` (TiltxcorrPanel.java:368-370).
+    fn get_panel_id(&self) -> PanelId {
+        self.panel_id
+    }
+
+    /// Java `getParameters(ImodchopcontsParam, boolean)` (TiltxcorrPanel.java:527-550).
+    fn get_parameters_imodchopconts(
+        &self,
+        param: &mut ImodchopcontsParam,
+        do_validation: bool,
+    ) -> bool {
+        let result = (|| -> Result<(), FieldValidationFailedException> {
+            if self.panel_id == PanelId::PatchTracking {
+                param.set_minimum_overlap(
+                    self.ctf_length_of_pieces_minimum_overlap
+                        .get_text_boolean(do_validation)?
+                        .as_deref(),
+                );
+                if self.ctf_length_of_pieces_minimum_overlap.is_selected() {
+                    if self.rb_length_of_pieces_default.is_selected() {
+                        param.set_length_of_pieces_default();
+                    } else {
+                        param.set_length_of_pieces(
+                            self.rtf_length_of_pieces
+                                .get_text_boolean(do_validation)?
+                                .as_deref(),
+                        );
+                    }
+                } else {
+                    param.reset_length_of_pieces();
+                }
+            }
+            Ok(())
+        })();
+        result.is_ok()
+    }
+}
+
+impl Expandable for TiltxcorrPanel {
+    /// Java `expand(GlobalExpandButton)` (TiltxcorrPanel.java:393-394).  All
+    /// expansion is done through the header.
+    fn expand_global_expand_button(&self, _button: &Rc<GlobalExpandButton>) {}
+
+    /// Java `expand(ExpandButton)` (TiltxcorrPanel.java:396-405).
+    fn expand_expand_button(&self, button: &Rc<ExpandButton>) {
+        if self.header.equals_open_close(button) {
+            self.pnl_body.set_visible(button.is_expanded());
+        } else if self.header.equals_advanced_basic(button) {
+            self.update_advanced(button.is_expanded());
+        }
+        ui_harness::INSTANCE.with(|harness| {
+            harness.pack_axis_id_base_manager(Some(self.axis_id), Some(self.application_manager))
+        });
+    }
+}
+
+impl Run3dmodButtonContainer for TiltxcorrPanel {
+    /// Java `action(String, Deferred3dmodButton, Run3dmodMenuOptions)`
+    /// (TiltxcorrPanel.java:705-736).
+    fn action(
+        &self,
+        action_command: &str,
+        deferred3dmod_button: Option<Rc<dyn Deferred3dmodButton>>,
+        run3dmod_menu_options: Option<Run3dmodMenuOptions>,
+    ) {
+        let run_tiltxcorr = match self.btn_tiltxcorr_button() {
+            Some(btn_tiltxcorr) => {
+                Some(action_command) == btn_tiltxcorr.get_action_command().as_deref()
+            }
+            None => false,
+        };
+        if run_tiltxcorr && self.panel_id == PanelId::CrossCorrelation {
+            self.application_manager.pre_cross_correlate(
+                self.axis_id,
+                self.btn_tiltxcorr.clone(),
+                None,
+                self.dialog_type,
+                self.this.upgrade().expect("TiltxcorrPanel dropped") as Rc<dyn TiltXcorrDisplay>,
+            );
+        } else if (run_tiltxcorr && self.panel_id == PanelId::PatchTracking)
+            || Some(action_command) == self.btn_imodchopconts.get_action_command().as_deref()
+        {
+            // The validations do not cover imodchopconts fields
+            if run_tiltxcorr && !self.validate() {
+                return;
+            }
+            self.application_manager.tiltxcorr(
+                self.axis_id,
+                if run_tiltxcorr {
+                    self.btn_tiltxcorr.clone()
+                } else {
+                    Some(self.btn_imodchopconts.clone() as ProcessResultDisplayHandle)
+                },
+                deferred3dmod_button,
+                run3dmod_menu_options.unwrap_or_default(),
+                None,
+                Some(self.dialog_type),
+                self,
+                false,
+                ProcessName::XCORR_PT, /*was: FileType.PATCH_TRACKING_COMSCRIPT*/
+                run_tiltxcorr,
+                self.ctf_length_of_pieces_minimum_overlap.is_selected(),
+            );
+        } else if Some(action_command)
+            == self
+                .btn_3dmod_patch_tracking
+                .get_action_command()
+                .as_deref()
+        {
+            self.application_manager.imod_model(
+                &file_type::CLASS.prealigned_stack,
+                &file_type::CLASS.fiducial_model,
+                self.axis_id,
+                run3dmod_menu_options.unwrap_or_default(),
+                false,
+                true,
+            );
+        } else if Some(action_command)
+            == self
+                .btn_3dmod_boundary_model
+                .get_action_command()
+                .as_deref()
+        {
+            self.application_manager.imod_model(
+                &file_type::CLASS.prealigned_stack,
+                &file_type::CLASS.patch_tracking_boundary_model,
+                self.axis_id,
+                run3dmod_menu_options.unwrap_or_default(),
+                false,
+                true,
+            );
+        } else {
+            self.update_panel();
+        }
+    }
+}
+
+impl ContextMenu for TiltxcorrPanel {
+    /// Java `popUpContextMenu(MouseEvent)` (TiltxcorrPanel.java:349-365).  Right
+    /// mouse button context menu.
+    fn pop_up_context_menu(&self, mouse_event: &MouseEvent) {
+        if self.panel_id != PanelId::PatchTracking {
+            if let Some(context_menu) = self.context_menu.as_ref().and_then(Weak::upgrade) {
+                context_menu.pop_up_context_menu(mouse_event);
+            }
+            return;
+        }
+        let man_pagelabel = [
+            "Tiltxcorr".to_string(),
+            "Imodchopconts".to_string(),
+            "3dmod".to_string(),
+        ];
+        let man_page = [
+            "tiltxcorr.html".to_string(),
+            "imodchopconts.html".to_string(),
+            "3dmod.html".to_string(),
+        ];
+
+        let log_file_label = ["Xcorr_pt".to_string()];
+        let log_file = ["xcorr_pt".to_string() + &self.axis_id.get_extension() + ".log"];
+        let _context_popup = ContextPopup::new_component_mouse_event_string_string_string_array_string_array_string_array_string_array_base_manager_axis_id(
+            &self.pnl_root.get_container(),
+            mouse_event,
+            Some("PatchTracking"),
+            Some(context_popup::TOMO_GUIDE),
+            &man_pagelabel,
+            &man_page,
+            Some(&log_file_label[..]),
+            Some(&log_file[..]),
+            self.application_manager,
+            self.axis_id,
         );
-        p.update_advanced(false);
-        assert!(!p.layout.advanced_visible);
-        assert!(p.layout.mag_changes_visible);
     }
 }

@@ -1,0 +1,16 @@
+default	col.mod o.mod
+length	-len 10 col.mod o.mod
+patchdefault	-len -1 -overlap 2 col.mod o.mod
+zerolap	-number 4 -overlap -1 col.mod o.mod
+number	-number 2 -overlap 2 col.mod o.mod
+surfaces	-len 12 -surfaces col.mod o.mod
+objects	-len 10 -objects 2 col.mod o.mod
+colorsurf	-colors 1 col.mod o.mod
+colorobj	-colors 2 col.mod o.mod
+colorobj1	-colors 2 -objects 1 col.mod o.mod
+colorlen	-colors 1 -len 5 col.mod o.mod
+lapbig	-len 3 -overlap 4 col.mod o.mod
+numlen	-len 5 -number 2 col.mod o.mod
+neglap	-len 8 -overlap -3 col.mod o.mod
+badlist	-objects 1-x col.mod o.mod
+nomodel	nonexist.mod o.mod

@@ -24,7 +24,7 @@ use crate::imod::flib::image::findcontrast::{
     FindcontrastParams, findcontrast_compute, findcontrast_report_lines,
 };
 use crate::imod::flib::subrs::hvem::parse_input_params;
-use crate::imod::pysrc::batchruntomo::py_str_float;
+use crate::imod::pysrc::imodpy::py_str_float;
 use crate::imod::pysrc::imodpy::{
     add_imod_bin_ignore_sighup, call_own_program, exit_from_imod_error, fmtstr, get_mrc_size,
     print_pid, prnstr, run_cmd_in_process,
@@ -402,6 +402,7 @@ pub fn trimvol(arguments: &[OsString]) -> i32 {
     // If given target mean/SD, find the scaling factors
     if meansd != 0 {
         if sxarg.is_empty() {
+            // finite: fractions of integer image sizes
             xsmin = (0.1 * f64::from(nx)) as i32;
             xsmax = (0.9 * f64::from(nx)) as i32;
         }
@@ -494,12 +495,10 @@ pub fn trimvol(arguments: &[OsString]) -> i32 {
         // (never, for `Gw.d` output) leaves `contout` empty, as the script's
         // `except` did.
         if let (Ok(multfac), Ok(sdfac)) = (
-            densmatch_g_edit(result.scale_fac, 14, 6)
-                .trim()
-                .parse::<f64>(),
-            densmatch_g_edit(result.add_fac, 14, 6)
-                .trim()
-                .parse::<f64>(),
+            crate::imod::pysrc::imodpy::py_float(&densmatch_g_edit(result.scale_fac, 14, 6))
+                .ok_or(()),
+            crate::imod::pysrc::imodpy::py_float(&densmatch_g_edit(result.add_fac, 14, 6))
+                .ok_or(()),
         ) {
             if if_mode == 0 {
                 mode = 0;

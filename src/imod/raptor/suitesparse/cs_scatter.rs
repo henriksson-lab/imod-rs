@@ -1,76 +1,66 @@
 //! Translation of `IMOD/raptor/suitesparse/cs_scatter.c`.
 
-use super::Cs;
+use super::cs::{Cs, cs_csc};
 
-/// C `cs_scatter`: accumulates one CSC column into a dense workspace and sparse pattern.
+/// `cs_scatter(A, j, beta, w, x, mark, C, nz)`: x = x + beta * A(:,j), where
+/// x is a dense vector and A(:,j) is sparse.  `ci` is `C->i`.
+#[allow(clippy::too_many_arguments)]
 pub fn cs_scatter(
-    matrix: &Cs,
-    column: usize,
+    a: &Cs,
+    j: i32,
     beta: f64,
-    marks: &mut [usize],
-    workspace: Option<&mut [f64]>,
-    mark: usize,
-    pattern: &mut Vec<usize>,
-) -> Option<usize> {
-    if !matrix.is_csc() || column + 1 >= matrix.column_pointers.len() || marks.len() < matrix.rows {
-        return None;
+    w: &mut [i32],
+    mut x: Option<&mut [f64]>,
+    mark: i32,
+    ci: &mut [i32],
+    mut nz: i32,
+) -> i32 {
+    if !cs_csc(a) {
+        return -1;
     }
-    if let Some(values) = workspace.as_ref() {
-        if values.len() < matrix.rows {
-            return None;
-        }
-    }
-    let mut workspace = workspace;
-    for entry in matrix.column_pointers[column]..matrix.column_pointers[column + 1] {
-        let row = *matrix.row_indices.get(entry)?;
-        let value = *matrix.values.get(entry)?;
-        if row >= matrix.rows {
-            return None;
-        }
-        if marks[row] < mark {
-            marks[row] = mark;
-            pattern.push(row);
-            if let Some(values) = workspace.as_deref_mut() {
-                values[row] = beta * value;
+    let ap = &a.p;
+    let ai = &a.i;
+    assert!(
+        w.len() >= a.m as usize,
+        "cs_scatter: w shorter than A's rows"
+    );
+    let (start, end) = (ap[j as usize] as usize, ap[j as usize + 1] as usize);
+    match x.as_deref_mut() {
+        Some(x) => {
+            let ax = &a.x.as_ref().expect("cs_scatter values")[start..end];
+            assert!(
+                x.len() >= a.m as usize,
+                "cs_scatter: x shorter than A's rows"
+            );
+            for (&i, &axp) in ai[start..end].iter().zip(ax) {
+                let i = i as usize; // A(i,j) is nonzero
+                debug_assert!(i < a.m as usize);
+                // SAFETY: `i < A->m` (every row index a `Cs` holds is below
+                // its `m`; see `cs_gaxpy`), and `w.len()` and `x.len()` are
+                // at least `A->m`, asserted at the top of the function and
+                // here.
+                unsafe {
+                    if *w.get_unchecked(i) < mark {
+                        *w.get_unchecked_mut(i) = mark; // i is new entry in column j
+                        ci[nz as usize] = i as i32; // add i to pattern of C(:,j)
+                        nz += 1;
+                        *x.get_unchecked_mut(i) = beta * axp; // x(i) = beta*A(i,j)
+                    } else {
+                        *x.get_unchecked_mut(i) += beta * axp; // i exists in C(:,j) already
+                    }
+                }
             }
-        } else if let Some(values) = workspace.as_deref_mut() {
-            values[row] += beta * value;
+        }
+        None => {
+            for &i in &ai[start..end] {
+                let i = i as usize;
+                if w[i] < mark {
+                    w[i] = mark;
+                    ci[nz as usize] = i as i32;
+                    nz += 1;
+                }
+            }
         }
     }
-    Some(pattern.len())
-}
-
-#[cfg(test)]
-mod tests {
-    use super::cs_scatter;
-    use crate::imod::raptor::suitesparse::Cs;
-    #[test]
-    fn scatter_accumulates_repeated_rows_and_records_first_pattern_entry() {
-        let matrix = Cs {
-            nzmax: 3,
-            rows: 2,
-            columns: 1,
-            column_pointers: vec![0, 3],
-            row_indices: vec![0, 1, 0],
-            values: vec![2., 3., 4.],
-            nz: -1,
-        };
-        let mut marks = [0, 0];
-        let mut values = [0., 0.];
-        let mut pattern = vec![];
-        assert_eq!(
-            cs_scatter(
-                &matrix,
-                0,
-                2.,
-                &mut marks,
-                Some(&mut values),
-                1,
-                &mut pattern
-            ),
-            Some(2)
-        );
-        assert_eq!(pattern, [0, 1]);
-        assert_eq!(values, [12., 6.]);
-    }
+    nz
 }

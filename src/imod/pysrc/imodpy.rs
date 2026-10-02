@@ -1461,14 +1461,13 @@ pub fn get_mrc(file: &str, do_all: bool, angle_line_values: bool) -> Result<MrcI
         }
     };
     let py_int = |text: &str| -> Result<i32, ImodpyError> {
-        text.trim()
-            .parse::<i32>()
-            .map_err(|_| raise(format!("invalid literal for int() with base 10: '{text}'")))
+        crate::imod::pysrc::imodpy::py_int(text)
+            .and_then(|value| i32::try_from(value).ok())
+            .ok_or_else(|| raise(format!("invalid literal for int() with base 10: '{text}'")))
     };
     let py_float = |text: &str| -> Result<f64, ImodpyError> {
-        text.trim()
-            .parse::<f64>()
-            .map_err(|_| raise(format!("could not convert string to float: '{text}'")))
+        crate::imod::pysrc::imodpy::py_float(text)
+            .ok_or_else(|| raise(format!("could not convert string to float: '{text}'")))
     };
     if angle_line_values {
         let mut retval: [Option<f64>; 5] = [None; 5];
@@ -1500,9 +1499,11 @@ pub fn get_mrc(file: &str, do_all: bool, angle_line_values: bool) -> Result<MrcI
                             // Python's `float()`/`int()` strip surrounding
                             // whitespace, including the line's newline.
                             let converted = if types[key_ind] != 0 {
-                                tokens[ind + 1].trim().parse::<f64>().ok()
+                                crate::imod::pysrc::imodpy::py_float(&tokens[ind + 1])
                             } else {
-                                tokens[ind + 1].trim().parse::<i32>().ok().map(f64::from)
+                                crate::imod::pysrc::imodpy::py_int(&tokens[ind + 1])
+                                    .and_then(|value| i32::try_from(value).ok())
+                                    .map(f64::from)
                             };
                             match converted {
                                 Some(value) => retval[key_ind] = Some(value),
@@ -1638,14 +1639,14 @@ pub fn get_mrc_pixel(file: &str) -> Result<f64, ImodpyError> {
                     "header {file}: pixel sizes not interpretable"
                 )));
             }
-            pixel = lsplit[0].parse::<f64>().map_err(|_| conversion_error())?;
+            pixel = py_float(lsplit[0]).ok_or_else(conversion_error)?;
         }
 
         if line.contains("size in nanometers =") {
             let ind = line.find('=').unwrap() + 1;
             let lsplit: Vec<&str> = line[ind..].split_whitespace().collect();
             if !lsplit.is_empty() {
-                pixel = 10. * lsplit[0].parse::<f64>().map_err(|_| conversion_error())?;
+                pixel = 10. * py_float(lsplit[0]).ok_or_else(conversion_error)?;
             }
         }
     }
@@ -1685,9 +1686,9 @@ pub fn get_montage_size(
             .collect();
         let lsplit: Vec<&str> = rest.split_whitespace().collect();
         problem = "Uninterpretable output on line with NZ:";
-        let raw_xsize = lsplit.first()?.parse::<i32>().ok()?;
-        let raw_ysize = lsplit.get(1)?.parse::<i32>().ok()?;
-        let zsize = lsplit.get(2)?.parse::<i32>().ok()?;
+        let raw_xsize = i32::try_from(py_int(lsplit.first()?)?).ok()?;
+        let raw_ysize = i32::try_from(py_int(lsplit.get(1)?)?).ok()?;
+        let zsize = i32::try_from(py_int(lsplit.get(2)?)?).ok()?;
         Some((raw_xsize, raw_ysize, zsize))
     })();
     match parsed {
@@ -1715,8 +1716,8 @@ pub fn run_goodframe(nx: i32, ny: i32) -> (i32, i32) {
     let parsed: Option<(i32, i32)> = (|| {
         let goodout = goodout?;
         let gsplit: Vec<&str> = goodout.last()?.split_whitespace().collect();
-        let gfnx = gsplit.first()?.parse::<i32>().ok()?;
-        let gfny = gsplit.get(1)?.parse::<i32>().ok()?;
+        let gfnx = i32::try_from(py_int(gsplit.first()?)?).ok()?;
+        let gfny = i32::try_from(py_int(gsplit.get(1)?)?).ok()?;
         Some((gfnx, gfny))
     })();
     parsed.unwrap_or((-2, -2))
@@ -1917,9 +1918,9 @@ pub fn option_value(
                 if value_type == 1 {
                     let mut values = Vec::new();
                     for val in &splits[..num_conv] {
-                        match val.parse::<i32>() {
-                            Ok(value) => values.push(value),
-                            Err(_) => {
+                        match py_int(val).and_then(|value| i32::try_from(value).ok()) {
+                            Some(value) => values.push(value),
+                            None => {
                                 prnstr(
                                     &format!(
                                         "WARNING: optionValue - Bad character in numeric entry in: {line}"
@@ -1935,9 +1936,9 @@ pub fn option_value(
                 } else {
                     let mut values = Vec::new();
                     for val in &splits[..num_conv] {
-                        match val.parse::<f64>() {
-                            Ok(value) => values.push(value),
-                            Err(_) => {
+                        match py_float(val) {
+                            Some(value) => values.push(value),
+                            None => {
                                 prnstr(
                                     &format!(
                                         "WARNING: optionValue - Bad character in numeric entry in: {line}"
@@ -2071,8 +2072,8 @@ pub fn clean_chunk_files(rootname: &str, log_only: bool) {
 
 /// Matches `balancedGroupLimits` (`IMOD/pysrc/imodpy.py:1792`).
 pub fn balanced_group_limits(total: i32, groups: i32, group_index: i32) -> (i32, i32) {
-    let base = total / groups;
-    let remainder = total % groups;
+    let base = py_int_floordiv(total as i64, groups as i64) as i32;
+    let remainder = py_int_mod(total as i64, groups as i64) as i32;
     let start = group_index * base + group_index.min(remainder);
     let end = (group_index + 1) * base + (group_index + 1).min(remainder) - 1;
     (start, end)
@@ -2477,6 +2478,8 @@ pub fn os_path_splitext(path: &str) -> (String, String) {
 /// underscores may separate digits.  `None` is the ValueError.  Values past
 /// `i64` (Python ints are unbounded) are also `None`.
 pub fn py_int(text: &str) -> Option<i64> {
+    // `int()`/`float()` strip Unicode whitespace but, unlike `str.strip`,
+    // not U+001C..U+001F (checked with python3), which is Rust's `trim`
     let trimmed = text.trim();
     let (negative, digits) = match trimmed.as_bytes().first() {
         Some(b'-') => (true, &trimmed[1..]),
@@ -2496,6 +2499,308 @@ pub fn py_int(text: &str) -> Option<i64> {
     }
     let value = cleaned.parse::<i64>().ok()?;
     Some(if negative { -value } else { value })
+}
+
+/// Rust-only: Python's builtin `float(str)` (CPython `PyOS_string_to_double`
+/// behind `float_from_string`): surrounding whitespace is ignored; `inf`,
+/// `infinity` and `nan` in any case, with an optional sign; otherwise
+/// `[sign] (digits [. [digits]] | . digits) [(e|E) [sign] digits]`, where a
+/// single `_` may separate two digits.  `None` is the ValueError.  Rust's
+/// `str::parse::<f64>` rejects the whitespace and the underscores and accepts
+/// forms Python does not.
+pub fn py_float(text: &str) -> Option<f64> {
+    // `int()`/`float()` strip Unicode whitespace but, unlike `str.strip`,
+    // not U+001C..U+001F (checked with python3), which is Rust's `trim`
+    let trimmed = text.trim();
+    let bytes = trimmed.as_bytes();
+    let mut pos = 0;
+    let negative = match bytes.first() {
+        Some(b'-') => {
+            pos = 1;
+            true
+        }
+        Some(b'+') => {
+            pos = 1;
+            false
+        }
+        _ => false,
+    };
+    let lower = trimmed[pos..].to_ascii_lowercase();
+    if lower == "inf" || lower == "infinity" {
+        return Some(if negative {
+            f64::NEG_INFINITY
+        } else {
+            f64::INFINITY
+        });
+    }
+    if lower == "nan" {
+        return Some(if negative { -f64::NAN } else { f64::NAN });
+    }
+    // One run of digits with single underscores between digits; returns
+    // the count of digits taken.
+    let digit_run = |pos: &mut usize, cleaned: &mut String| -> Option<usize> {
+        let mut count = 0;
+        while *pos < bytes.len() {
+            let byte = bytes[*pos];
+            if byte.is_ascii_digit() {
+                cleaned.push(byte as char);
+                count += 1;
+                *pos += 1;
+            } else if byte == b'_'
+                && count > 0
+                && *pos + 1 < bytes.len()
+                && bytes[*pos + 1].is_ascii_digit()
+            {
+                *pos += 1;
+            } else if byte == b'_' {
+                return None;
+            } else {
+                break;
+            }
+        }
+        Some(count)
+    };
+    let mut cleaned = String::new();
+    if negative {
+        cleaned.push('-');
+    }
+    let int_digits = digit_run(&mut pos, &mut cleaned)?;
+    let mut frac_digits = 0;
+    if pos < bytes.len() && bytes[pos] == b'.' {
+        cleaned.push('.');
+        pos += 1;
+        frac_digits = digit_run(&mut pos, &mut cleaned)?;
+    }
+    if int_digits + frac_digits == 0 {
+        return None;
+    }
+    if pos < bytes.len() && (bytes[pos] == b'e' || bytes[pos] == b'E') {
+        cleaned.push('e');
+        pos += 1;
+        if pos < bytes.len() && (bytes[pos] == b'+' || bytes[pos] == b'-') {
+            cleaned.push(bytes[pos] as char);
+            pos += 1;
+        }
+        if digit_run(&mut pos, &mut cleaned)? == 0 {
+            return None;
+        }
+    }
+    if pos != bytes.len() {
+        return None;
+    }
+    cleaned.parse::<f64>().ok()
+}
+
+/// Rust-only: an uncaught Python exception -- the interpreter prints the
+/// traceback, ending in the `Type: message` line, on standard error and
+/// exits with status 1.  Only that last line is reproduced.
+pub fn py_raise(exception: &str) -> ! {
+    eprintln!("{exception}");
+    crate::imod::libcfshr::b3dutil::exit(1)
+}
+
+/// Rust-only: Python's `int(x)` (or `int(round(x))` after [`py_round`]) of a
+/// float, as the exception it raises when the script does not catch it:
+/// `ValueError` for NaN, `OverflowError` for an infinity.  Rust's `as`
+/// saturates instead.  A finite value truncates toward zero as `as` does
+/// (Python ints are unbounded; values past `i64` saturate here).
+pub fn py_try_int_of_float(value: f64) -> Result<i64, String> {
+    if value.is_nan() {
+        Err("ValueError: cannot convert float NaN to integer".to_owned())
+    } else if value.is_infinite() {
+        Err("OverflowError: cannot convert float infinity to integer".to_owned())
+    } else {
+        Ok(value as i64)
+    }
+}
+
+/// Rust-only: [`py_try_int_of_float`] where the exception is uncaught.
+pub fn py_int_of_float(value: f64) -> i64 {
+    py_try_int_of_float(value).unwrap_or_else(|exception| py_raise(&exception))
+}
+
+/// Rust-only: Python's true division `a / b` of numbers, raising
+/// `ZeroDivisionError` (uncaught) for a zero divisor where Rust gives an
+/// infinity or NaN.
+pub fn py_true_div(a: f64, b: f64) -> f64 {
+    if b == 0.0 {
+        py_raise("ZeroDivisionError: float division by zero");
+    }
+    a / b
+}
+
+/// Rust-only: Python's `'%W.Pf' % x` / `'{:W.Pf}'.format(x)` of a float,
+/// right-aligned in `width`.  Rust's `{:.P}` agrees except that it spells a
+/// NaN `NaN` where Python writes `nan` (for either sign of NaN); `inf` and
+/// `-inf` are the same in both.
+pub fn py_fixed(value: f64, width: usize, precision: usize) -> String {
+    let text = if value.is_nan() {
+        "nan".to_owned()
+    } else if value.is_infinite() {
+        if value < 0. { "-inf" } else { "inf" }.to_owned()
+    } else {
+        format!("{value:.precision$}")
+    };
+    format!("{text:>width$}")
+}
+
+/// Rust-only: Python's builtin `round(number)` on a float (`float.__round__`
+/// with no `ndigits`), which rounds a half to the even integer: `round(2.5)`
+/// is 2 and `round(-0.5)` is 0.  Rust's `f64::round` rounds a half away from
+/// zero.  The result is returned as a float; the scripts wrap it in `int()`.
+/// Python raises for NaN and infinity where this returns them unchanged.
+pub fn py_round(value: f64) -> f64 {
+    value.round_ties_even()
+}
+
+/// Rust-only: Python's builtin `round(number, ndigits)` on a float for
+/// `ndigits >= 0` (`float.__round__`, `double_round` in CPython's
+/// `floatobject.c`): the exact binary value is rounded half to even to
+/// `ndigits` decimals (`_Py_dg_dtoa` mode 3) and that decimal is read back
+/// (`_Py_dg_strtod`).  So `round(2.675, 2)` is 2.67 (the double is below the
+/// tie) and `round(-62.055, 2)` is -62.05, where scaling by 100 and rounding
+/// gives -62.06.  Rust's `{:.N}` formats the exact value with the same
+/// half-even rule.  Zero, NaN and infinity come back unchanged, as in CPython,
+/// and so does any value when `ndigits` exceeds CPython's `NDIGITS_MAX` (323).
+pub fn py_round_ndigits(value: f64, ndigits: i32) -> f64 {
+    assert!(
+        ndigits >= 0,
+        "py_round_ndigits: negative ndigits not used by the scripts"
+    );
+    if ndigits > 323 || value == 0.0 || !value.is_finite() {
+        return value;
+    }
+    format!("{:.*}", ndigits as usize, value)
+        .parse::<f64>()
+        .unwrap_or(value)
+}
+
+/// Rust-only: Python's `a // b` on ints, which floors (`-7 // 2` is -4 and
+/// `7 // -2` is -4).  Rust's `/` truncates toward zero, and `div_euclid`
+/// matches Python only for a positive divisor.  A zero divisor raises
+/// `ZeroDivisionError` (uncaught), as in Python.
+pub fn py_int_floordiv(a: i64, b: i64) -> i64 {
+    if b == 0 {
+        py_raise("ZeroDivisionError: integer division or modulo by zero");
+    }
+    let quotient = a / b;
+    if (a % b != 0) && ((a < 0) != (b < 0)) {
+        quotient - 1
+    } else {
+        quotient
+    }
+}
+
+/// Rust-only: Python's `a % b` on ints, whose result takes the divisor's
+/// sign (`-7 % 2` is 1, `7 % -2` is -1).  Rust's `%` takes the dividend's,
+/// and `rem_euclid` is never negative.
+pub fn py_int_mod(a: i64, b: i64) -> i64 {
+    if b == 0 {
+        py_raise("ZeroDivisionError: integer modulo by zero");
+    }
+    let remainder = a % b;
+    if remainder != 0 && ((remainder < 0) != (b < 0)) {
+        remainder + b
+    } else {
+        remainder
+    }
+}
+
+/// Rust-only: Python's `a % b` on floats (`float_rem` in CPython's
+/// `floatobject.c`): `fmod`, moved to the divisor's sign, with a zero result
+/// carrying the divisor's sign.
+pub fn py_float_mod(a: f64, b: f64) -> f64 {
+    if b == 0.0 {
+        py_raise("ZeroDivisionError: float modulo by zero");
+    }
+    let mut remainder = a % b;
+    if remainder != 0.0 {
+        if (b < 0.0) != (remainder < 0.0) {
+            remainder += b;
+        }
+    } else {
+        remainder = 0.0_f64.copysign(b);
+    }
+    remainder
+}
+
+/// Rust-only: Python's `a // b` on floats (`float_floor_div` /
+/// `_float_div_mod` in CPython's `floatobject.c`).  It is computed from
+/// `fmod`, not as `floor(a / b)`, and the two differ: `1 // 0.1` is 9.0 in
+/// Python while `(1.0 / 0.1).floor()` is 10.0.
+pub fn py_float_floordiv(a: f64, b: f64) -> f64 {
+    if b == 0.0 {
+        py_raise("ZeroDivisionError: float floor division by zero");
+    }
+    let remainder = a % b;
+    let mut div = (a - remainder) / b;
+    if remainder != 0.0 && (b < 0.0) != (remainder < 0.0) {
+        div -= 1.0;
+    }
+    if div != 0.0 {
+        let mut floordiv = div.floor();
+        if div - floordiv > 0.5 {
+            floordiv += 1.0;
+        }
+        floordiv
+    } else {
+        0.0_f64.copysign(a / b)
+    }
+}
+
+/// Rust-only: `repr(float)` / `str(float)` (Python 3, `float_repr_style`
+/// `'short'`): the shortest decimal that round-trips, `.0` forced on an
+/// integral value in positional form, and exponent form outside
+/// `1e-4 ..= 1e16` (where an integral mantissa stays bare, `1e-05`).
+///
+/// Two formatters that both produce "the shortest round-tripping decimal"
+/// still differ when two equally short decimals both round-trip: CPython's
+/// `_Py_dg_dtoa` mode 0 takes the one nearest the exact value, rounding a
+/// half to even, while Rust's `{:e}` does not (`811212085039910.25` is
+/// `811212085039910.2` in Python and `...910.3` from `{}`).  So the digit
+/// count comes from `{:e}` and the digits from `{:.*e}`, which rounds the
+/// exact value half to even at that count.  Rust's `{}` also prints `1` for
+/// `1.0` and never uses exponent form, so a string built by a script with
+/// `str()` or `'{}'.format()` needs this.
+pub fn py_str_float(value: f64) -> String {
+    if value.is_nan() {
+        return "nan".to_owned();
+    }
+    if value.is_infinite() {
+        return if value < 0.0 {
+            "-inf".to_owned()
+        } else {
+            "inf".to_owned()
+        };
+    }
+    let shortest = format!("{value:e}");
+    let num_digits = shortest
+        .split_once('e')
+        .map_or(shortest.as_str(), |(mantissa, _)| mantissa)
+        .chars()
+        .filter(|c| c.is_ascii_digit())
+        .count();
+    let scientific = format!("{:.*e}", num_digits.saturating_sub(1), value);
+    let (mantissa, exponent_text) = scientific
+        .split_once('e')
+        .unwrap_or((scientific.as_str(), "0"));
+    let exponent: i32 = exponent_text.parse().unwrap_or(0);
+    if exponent < -4 || exponent >= 16 {
+        // `repr` keeps an integral mantissa bare: `1e-05`, `1e+16`
+        let sign = if exponent < 0 { '-' } else { '+' };
+        return format!("{mantissa}e{sign}{:02}", exponent.abs());
+    }
+    let sign = if mantissa.starts_with('-') { "-" } else { "" };
+    let digits: String = mantissa.chars().filter(|c| c.is_ascii_digit()).collect();
+    if exponent < 0 {
+        return format!("{sign}0.{}{digits}", "0".repeat((-exponent - 1) as usize));
+    }
+    let int_len = exponent as usize + 1;
+    if digits.len() <= int_len {
+        format!("{sign}{digits}{}.0", "0".repeat(int_len - digits.len()))
+    } else {
+        format!("{sign}{}.{}", &digits[..int_len], &digits[int_len..])
+    }
 }
 
 /// Rust-only stand-in for Python's `os.path.normpath` (`posixpath.py`):
@@ -2831,7 +3136,7 @@ pub fn exit_from_imod_error(program_name: &str) -> ! {
         "\n",
         true,
     );
-    std::process::exit(1)
+    crate::imod::libcfshr::b3dutil::exit(1)
 }
 
 /// Matches `parselist` (`IMOD/pysrc/imodpy.py:994`).
@@ -2955,7 +3260,7 @@ pub fn new_psutil_api(version: &str) -> bool {
     version
         .split('.')
         .next()
-        .and_then(|part| part.parse::<i32>().ok())
+        .and_then(py_int)
         .is_some_and(|major| major > 1)
 }
 
@@ -3264,10 +3569,10 @@ pub fn patch_size_from_entry(patch_entry: &str) -> (i32, i32, i32, i32) {
     // sends to setupcombine relies on
     let values = patch_entry
         .split(',')
-        .map(|value| value.trim().parse::<i32>())
-        .collect::<Result<Vec<_>, _>>();
+        .map(|value| py_int(value).and_then(|value| i32::try_from(value).ok()))
+        .collect::<Option<Vec<_>>>();
     match values {
-        Ok(values) if values.len() == 3 => (values[0], values[1], values[2], 0),
+        Some(values) if values.len() == 3 => (values[0], values[1], values[2], 0),
         _ => (0, 0, 0, 1),
     }
 }
@@ -3282,16 +3587,14 @@ pub fn auto_patch_number(
 ) -> i32 {
     let mut delta = [80, 40][density_index];
     if if_z {
-        delta = delta.min(3 * size / 4).min([30, 20][density_index]);
+        delta = delta
+            .min(py_int_floordiv(3 * size as i64, 4) as i32)
+            .min([30, 20][density_index]);
     }
-    let value = (upper - lower - size) as f64 / delta as f64 + 1.0;
-    let floor = value.floor();
-    let fraction = value - floor;
-    if fraction > 0.5 || (fraction == 0.5 && (floor as i32) % 2 != 0) {
-        floor as i32 + 1
-    } else {
-        floor as i32
-    }
+    // A Z size under 2 makes `delta` 0: Python raises ZeroDivisionError, which
+    // no caller catches.  Otherwise the quotient is finite: integer operands
+    // over a nonzero integer.
+    py_round(py_true_div((upper - lower - size) as f64, delta as f64) + 1.0) as i32
 }
 
 /// Matches `parallelBoundarySize` (`IMOD/pysrc/imodpy.py:1629`).
@@ -3313,6 +3616,7 @@ pub fn elapsed_time_components(start_time: f64) -> (i32, i32, i32) {
         .unwrap_or_default()
         .as_secs_f64()
         - start_time;
+    // finite: a difference of two wall-clock times
     let minutes = (used / 60.0) as i32;
     let seconds_float = used - 60.0 * minutes as f64;
     let seconds = seconds_float as i32;
@@ -3361,7 +3665,102 @@ pub fn write_finish_and_message(
 
 #[cfg(test)]
 mod tests {
-    use super::{OptionValue, option_value, parse_list};
+    use super::{
+        OptionValue, option_value, parse_list, py_float_floordiv, py_float_mod, py_int_floordiv,
+        py_int_mod, py_round, py_round_ndigits, py_str_float,
+    };
+    use super::{py_fixed, py_float, py_int, py_try_int_of_float};
+
+    #[test]
+    fn python_int_of_float_raises_like_cpython() {
+        assert_eq!(py_try_int_of_float(-2.7), Ok(-2));
+        assert_eq!(
+            py_try_int_of_float(f64::NAN),
+            Err("ValueError: cannot convert float NaN to integer".to_owned())
+        );
+        assert_eq!(
+            py_try_int_of_float(f64::NEG_INFINITY),
+            Err("OverflowError: cannot convert float infinity to integer".to_owned())
+        );
+    }
+
+    /// `float()`/`int()`/`'%W.Pf'` as CPython 3 gives them (`python3 -c`).
+    #[test]
+    fn python_float_int_and_fixed_match_cpython() {
+        assert_eq!(py_float(" 1.5\n"), Some(1.5));
+        assert_eq!(py_float("1_000.000_1e-0_3"), Some(1.0000001));
+        assert_eq!(py_float("5."), Some(5.0));
+        assert_eq!(py_float(".5"), Some(0.5));
+        assert_eq!(py_float("-Infinity"), Some(f64::NEG_INFINITY));
+        assert!(py_float("+NaN").is_some_and(f64::is_nan));
+        for bad in [
+            "1__0", "_1", "1_", "1._5", ".", "e5", "1e", "0x10", "1 2", "infinit", "\u{1c}7",
+        ] {
+            assert_eq!(py_float(bad), None, "{bad:?}");
+        }
+        assert_eq!(py_int(" 4\n"), Some(4));
+        assert_eq!(py_int("1_0"), Some(10));
+        assert_eq!(py_int("1.0"), None);
+        assert_eq!(py_fixed(f64::NAN, 8, 3), "     nan");
+        assert_eq!(py_fixed(-f64::NAN, 0, 2), "nan");
+        assert_eq!(py_fixed(f64::NEG_INFINITY, 0, 1), "-inf");
+        assert_eq!(py_fixed(-0.0, 0, 3), "-0.000");
+        assert_eq!(py_fixed(2.675, 6, 2), "  2.67");
+    }
+
+    /// Expected values are CPython 3's (`python3 -c`), at the ties where the
+    /// Rust builtins differ.
+    #[test]
+    fn python_round_matches_cpython_at_ties() {
+        assert_eq!(py_round(12.5), 12.);
+        assert_eq!(py_round(2.5), 2.);
+        assert_eq!(py_round(3.5), 4.);
+        assert_eq!(py_round(-0.5), 0.);
+        // `round(x, 2)` rounds the exact binary value: scaling by 100 first
+        // gave -62.06 and 3024.58
+        assert_eq!(py_round_ndigits(-62.055, 2), -62.05);
+        assert_eq!(py_round_ndigits(3024.585, 2), 3024.59);
+        assert_eq!(py_round_ndigits(56327.395, 2), 56327.39);
+        assert_eq!(py_round_ndigits(2.675, 2), 2.67);
+        assert_eq!(py_round_ndigits(0.125, 2), 0.12);
+        assert_eq!(py_round_ndigits(1.0005, 3), 1.0);
+    }
+
+    #[test]
+    fn python_float_str_matches_cpython_repr() {
+        let cases = [
+            (1.0, "1.0"),
+            (-0.0, "-0.0"),
+            (0.1 + 0.2, "0.30000000000000004"),
+            (1e16, "1e+16"),
+            (1.5e16, "1.5e+16"),
+            (9999999999999998.0, "9999999999999998.0"),
+            (1e-5, "1e-05"),
+            (0.0001, "0.0001"),
+            (123.456, "123.456"),
+            // two equally short decimals round-trip; CPython takes the even one
+            (811212085039910.25, "811212085039910.2"),
+            (1573626427739.15625, "1573626427739.1562"),
+            (f64::NAN, "nan"),
+            (f64::NEG_INFINITY, "-inf"),
+        ];
+        for (value, text) in cases {
+            assert_eq!(py_str_float(value), text, "{value:e}");
+        }
+    }
+
+    #[test]
+    fn python_floor_division_and_modulo() {
+        assert_eq!(py_int_floordiv(-7, 2), -4);
+        assert_eq!(py_int_floordiv(7, -2), -4);
+        assert_eq!(py_int_floordiv(1021, -2), -511);
+        assert_eq!(py_int_mod(-7, 2), 1);
+        assert_eq!(py_int_mod(7, -2), -1);
+        assert_eq!(py_float_floordiv(1.0, 0.1), 9.0);
+        assert_eq!(py_float_floordiv(-7.5, 2.0), -4.0);
+        assert_eq!(py_float_mod(-7.5, 2.0), 0.5);
+        assert_eq!(py_float_mod(7.5, -2.0), -0.5);
+    }
 
     #[test]
     fn parses_forward_backward_and_negative_ranges() {

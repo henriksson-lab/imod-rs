@@ -24,9 +24,10 @@ use super::imodpy::{
     cleanup_files, com_extension_from_option, dataset_filename, default_naming_style,
     elapsed_time_components, get_err_strings, get_montage_size, get_mrc, get_mrc_pixel,
     get_mrc_size, get_naming_style, header_in_process, imod_abs_path, is_file_newer,
-    make_backup_file, option_value, parse_list, print_pid, prnstr, read_text_file, run_cmd,
-    run_goodframe, set_output_format_if_needed, set_root_and_extension, standard_type_extensions,
-    write_text_file,
+    make_backup_file, option_value, parse_list, print_pid, prnstr, py_fixed, py_float, py_int,
+    py_int_floordiv, py_int_of_float, py_round, py_round_ndigits, py_str_float, py_true_div,
+    read_text_file, run_cmd, run_goodframe, set_output_format_if_needed, set_root_and_extension,
+    standard_type_extensions, write_text_file,
 };
 use super::pip::{
     pip_forbid_comments, pip_get_boolean, pip_get_err_no, pip_get_float, pip_get_integer,
@@ -97,6 +98,7 @@ impl PyVal {
     pub fn int(&self) -> i64 {
         match self {
             PyVal::Int(value) => *value,
+            // finite: `int()` is only asked of INT_VALUE directives, which parse to Int
             PyVal::Float(value) => *value as i64,
             _ => 0,
         }
@@ -117,44 +119,6 @@ impl PyVal {
             PyVal::Str(value) => value.as_str(),
             _ => "",
         }
-    }
-}
-
-/// `repr(float)` / `str(float)`: the shortest decimal that round-trips, with
-/// `.0` forced on an integral value in positional form and exponent form
-/// outside `1e-4 ..= 1e16` (where an integral mantissa stays bare, `1e-05`).
-///
-/// Rust's `{}` prints `1` for `1.0f64` and never uses exponent form, so a
-/// string built by the script with `str()` or `'{}'.format()` needs this.
-pub fn py_str_float(value: f64) -> String {
-    if value.is_nan() {
-        return "nan".to_owned();
-    }
-    if value.is_infinite() {
-        return if value < 0.0 {
-            "-inf".to_owned()
-        } else {
-            "inf".to_owned()
-        };
-    }
-    let scientific = format!("{value:e}");
-    let exponent: i32 = scientific
-        .split_once('e')
-        .and_then(|(_, exponent)| exponent.parse().ok())
-        .unwrap_or(0);
-    if exponent < -4 || exponent >= 16 {
-        // `repr` keeps an integral mantissa bare: `1e-05`, `1e+16`
-        let (mantissa, _) = scientific
-            .split_once('e')
-            .unwrap_or((scientific.as_str(), "0"));
-        let sign = if exponent < 0 { '-' } else { '+' };
-        return format!("{mantissa}e{sign}{:02}", exponent.abs());
-    }
-    let plain = format!("{value}");
-    if plain.contains('.') {
-        plain
-    } else {
-        format!("{plain}.0")
     }
 }
 
@@ -673,7 +637,7 @@ impl Brt {
     fn exit_error(&self, error_mess: &str) -> ! {
         pip_set_error(error_mess);
         let _ = std::io::stdout().flush();
-        std::process::exit(1)
+        crate::imod::libcfshr::b3dutil::exit(1)
     }
 }
 
@@ -797,7 +761,7 @@ impl Brt {
             self.final_ret_val += 1;
         }
         if self.exit_on_error != 0 {
-            std::process::exit(1);
+            crate::imod::libcfshr::b3dutil::exit(1);
         }
     }
 
@@ -810,7 +774,9 @@ impl Brt {
             if ind == num - 1 {
                 line = "ERROR: ".to_owned() + &line;
             }
-            self.prn_log(&line, "", false);
+            // `prnLog(l, end = '')`: the Python strings keep their `\n`, while
+            // `get_err_strings` returns them without line endings
+            self.prn_log(&line, "\n", false);
         }
         if let Some(abort_text) = abort_text.filter(|text| !text.is_empty()) {
             self.abort_set(abort_text);
@@ -965,14 +931,14 @@ impl Brt {
                         return PyVal::None;
                     }
                     if val_type == INT_VALUE {
-                        return match vsplit[0].parse::<i64>() {
-                            Ok(value) => PyVal::Int(value),
-                            Err(_) => PyVal::None,
+                        return match py_int(&vsplit[0]) {
+                            Some(value) => PyVal::Int(value),
+                            None => PyVal::None,
                         };
                     }
-                    return match vsplit[0].parse::<f64>() {
-                        Ok(value) => PyVal::Float(value),
-                        Err(_) => PyVal::None,
+                    return match py_float(&vsplit[0]) {
+                        Some(value) => PyVal::Float(value),
+                        None => PyVal::None,
                     };
                 }
             }
@@ -1601,12 +1567,13 @@ impl Brt {
             let mut max_entered = 1 - pip_get_err_no();
             if let Ok(value) = std::env::var(max_env_var) {
                 if !value.is_empty() {
-                    match value.parse::<i32>() {
-                        Ok(parsed) => {
+                    // Python `int()`: surrounding whitespace and digit underscores allowed
+                    match py_int(&value).and_then(|value| i32::try_from(value).ok()) {
+                        Some(parsed) => {
                             max_jobs = parsed;
                             max_entered = 1;
                         }
-                        Err(_) => {
+                        None => {
                             self.exit_error(&format!(
                                 "Converting environment variable {max_env_var} to integer"
                             ));
@@ -1634,12 +1601,13 @@ impl Brt {
                 if envar == "None" {
                     per_job = 0;
                 } else {
-                    match envar.parse::<i32>() {
-                        Ok(value) => {
+                    // Python `int()`: surrounding whitespace and digit underscores allowed
+                    match py_int(&envar).and_then(|value| i32::try_from(value).ok()) {
+                        Some(value) => {
                             per_job = value;
                             entered = 1;
                         }
-                        Err(_) => {
+                        None => {
                             self.exit_error(&format!(
                                 "Environment variable {env_var} must be an integer"
                             ));
@@ -2233,14 +2201,14 @@ impl Brt {
                 return PyVal::None;
             }
             if val_type == INT_VALUE {
-                match value.parse::<i64>() {
-                    Ok(numval) => PyVal::Int(numval),
-                    Err(_) => PyVal::Str("ERROR".to_owned()),
+                match py_int(&value) {
+                    Some(numval) => PyVal::Int(numval),
+                    None => PyVal::Str("ERROR".to_owned()),
                 }
             } else {
-                match value.parse::<f64>() {
-                    Ok(numval) => PyVal::Float(numval),
-                    Err(_) => PyVal::Str("ERROR".to_owned()),
+                match py_float(&value) {
+                    Some(numval) => PyVal::Float(numval),
+                    None => PyVal::Str("ERROR".to_owned()),
                 }
             }
         } else {
@@ -2342,10 +2310,10 @@ impl Brt {
             self.data_name,
             py_str_float(1. / self.coarse_binning as f64),
             py_str_float(
-                (panx as i64 - self.raw_xsize.div_euclid(self.coarse_binning)) as f64 / 2.
+                (panx as i64 - py_int_floordiv(self.raw_xsize, self.coarse_binning)) as f64 / 2.
             ),
             py_str_float(
-                (pany as i64 - self.raw_ysize.div_euclid(self.coarse_binning)) as f64 / 2.
+                (pany as i64 - py_int_floordiv(self.raw_ysize, self.coarse_binning)) as f64 / 2.
             ),
             model_in,
             model_out
@@ -2374,9 +2342,9 @@ impl Brt {
             }
             self.prn_log(&format!("{message}   [brt5]"), "\n", false);
             if !self.parallel_root.is_empty() {
-                std::process::exit(1);
+                crate::imod::libcfshr::b3dutil::exit(1);
             } else {
-                std::process::exit(0);
+                crate::imod::libcfshr::b3dutil::exit(0);
             }
         }
         if action == "F" {
@@ -2620,6 +2588,7 @@ impl Brt {
                         self.my_gpu_list += line.trim_end_matches(['\r', '\n']);
                     }
 
+                    // finite: a difference of two clock readings
                     let elapsed = (py_time() - start_time) as i64;
                     let count = alloc_lines.len();
                     let list = self.my_gpu_list.clone();
@@ -2645,8 +2614,11 @@ impl Brt {
                     for line in &err_strings {
                         if line.contains("[GPA1]") {
                             let nowt = py_time();
-                            if nowt - last_warn > warn_interval {
-                                let minutes = ((nowt - start_time) / 60.).round() as i64;
+                            // `(nowt - lastWarn).seconds` and `(nowt - startTime).seconds`
+                            // are whole seconds (`batchruntomo:1233-1235`)
+                            if (nowt - last_warn).floor() > warn_interval {
+                                // finite: a difference of two clock readings
+                                let minutes = py_round((nowt - start_time).floor() / 60.) as i64;
                                 self.warning(
                                     &[format!(
                                         "Have not been able to get a GPU allocation for {minutes} minutes"
@@ -2810,13 +2782,9 @@ impl Brt {
             None => return Err(()),
         };
         if val_type == INT_VALUE {
-            return line[ind..]
-                .trim()
-                .parse::<i64>()
-                .map(|value| value as f64)
-                .map_err(|_| ());
+            return py_int(&line[ind..]).map(|value| value as f64).ok_or(());
         }
-        line[ind..].trim().parse::<f64>().map_err(|_| ())
+        py_float(&line[ind..]).ok_or(())
     }
 
     /// `analyzeAlignLog` (`IMOD/pysrc/batchruntomo:1330`).
@@ -2864,6 +2832,7 @@ impl Brt {
                 // There can be one or three of these entries, so the second one replaces
                 // numBot and the third one gives numTop
                 let num = match self.get_one_value_after_token(line, '=', INT_VALUE) {
+                    // finite: an INT_VALUE token comes back from `py_int`
                     Ok(value) => value as i64,
                     Err(()) => {
                         self.abort_set("Error extracting information from align log");
@@ -3049,18 +3018,18 @@ impl Brt {
                                 let mut ok = true;
                                 for ind in 0..lsplit.len().saturating_sub(2) {
                                     if lsplit[ind] == "from" && lsplit[ind + 1] == "view" {
-                                        match lsplit[ind + 2].parse::<i64>() {
-                                            Ok(value) => from_view = value,
-                                            Err(_) => {
+                                        match py_int(&lsplit[ind + 2]) {
+                                            Some(value) => from_view = value,
+                                            None => {
                                                 ok = false;
                                                 break;
                                             }
                                         }
                                     }
                                     if lsplit[ind] == "to" && lsplit[ind + 1] == "view" {
-                                        match lsplit[ind + 2].parse::<i64>() {
-                                            Ok(value) => to_view = value,
-                                            Err(_) => {
+                                        match py_int(&lsplit[ind + 2]) {
+                                            Some(value) => to_view = value,
+                                            None => {
                                                 ok = false;
                                                 break;
                                             }
@@ -3219,8 +3188,8 @@ impl Brt {
                         let parsed = lsplit
                             .len()
                             .checked_sub(2)
-                            .and_then(|index| lsplit[index].parse::<i64>().ok())
-                            .zip(lsplit.last().and_then(|value| value.parse::<i64>().ok()));
+                            .and_then(|index| py_int(&lsplit[index]))
+                            .zip(lsplit.last().and_then(|value| py_int(value)));
                         match parsed {
                             Some((first, second)) => {
                                 top_bots[2 * ind] = first;
@@ -3273,7 +3242,7 @@ impl Brt {
             for ind in 0..4 {
                 if line.contains(tags[ind]) {
                     let lsplit: Vec<&str> = line.split_whitespace().collect();
-                    let parsed = lsplit.last().and_then(|value| value.parse::<f64>().ok());
+                    let parsed = lsplit.last().and_then(|value| py_float(value));
                     match parsed {
                         Some(value) => {
                             if ind != 0 {
@@ -3283,9 +3252,9 @@ impl Brt {
                                         if lsplit[word].contains("Original:")
                                             && word + 1 < lsplit.len()
                                         {
-                                            match lsplit[word + 1].parse::<f64>() {
-                                                Ok(value) => original[ind] = value,
-                                                Err(_) => {
+                                            match py_float(&lsplit[word + 1]) {
+                                                Some(value) => original[ind] = value,
+                                                None => {
                                                     let tag = tags[ind].replace(" -", "");
                                                     self.abort_set(&format!(
                                                         "Error converting tomopitch output of {tag} to a number"
@@ -3296,11 +3265,7 @@ impl Brt {
                                         }
                                     }
                                 }
-                            } else if lsplit
-                                .last()
-                                .and_then(|value| value.parse::<i64>().ok())
-                                .is_some()
-                            {
+                            } else if lsplit.last().and_then(|value| py_int(value)).is_some() {
                                 angle_arr[ind] = value.trunc();
                             } else {
                                 let tag = tags[ind].replace(" -", "");
@@ -3332,7 +3297,7 @@ impl Brt {
                         ind.and_then(|ind| line[ind + 3..].find("to").map(|at| at + ind + 3));
                     match ind
                         .zip(to_ind)
-                        .and_then(|(ind, to_ind)| line[ind + 3..to_ind].trim().parse::<f64>().ok())
+                        .and_then(|(ind, to_ind)| py_float(&line[ind + 3..to_ind]))
                     {
                         Some(value) => untilted[2] = value,
                         None => {
@@ -3347,12 +3312,10 @@ impl Brt {
                     let lsplit: Vec<&str> = line.split_whitespace().collect();
                     let ind = line.find("shift of");
                     let to_ind = ind.and_then(|ind| line[ind..].find(';').map(|at| at + ind));
-                    let values = lsplit
-                        .last()
-                        .and_then(|value| value.parse::<i64>().ok())
-                        .zip(ind.zip(to_ind).and_then(|(ind, to_ind)| {
-                            line[ind + 8..to_ind].trim().parse::<f64>().ok()
-                        }));
+                    let values = lsplit.last().and_then(|value| py_int(value)).zip(
+                        ind.zip(to_ind)
+                            .and_then(|(ind, to_ind)| py_float(&line[ind + 8..to_ind])),
+                    );
                     match values {
                         Some((first, second)) => {
                             untilted[0] = first as f64;
@@ -3501,6 +3464,7 @@ impl Brt {
         let reach_points = [0., 5., 6., 7., DETECT_3D_STEP_NUM, 13., 14.];
         if reach_points.contains(&step) && self.need_step(step) {
             let text = if step.fract() == 0.0 {
+                // finite: `fract()` of an infinity or NaN is NaN, not 0
                 format!("{}", step as i64)
             } else {
                 py_str_float(step)
@@ -3522,6 +3486,7 @@ impl Brt {
         };
         let good_ret = if run_after { 0 } else { -1 };
         let step_text = if step.fract() == 0.0 {
+            // finite: `fract()` of an infinity or NaN is NaN, not 0
             format!("{}", step as i64)
         } else {
             py_str_float(step)
@@ -3908,13 +3873,13 @@ impl Brt {
                         .0
                         .clone();
                     if !ftext.is_empty() {
-                        match ftext.parse::<f64>() {
-                            Ok(value) => match which {
+                        match py_float(&ftext) {
+                            Some(value) => match which {
                                 0 => self.pixel_size = value,
                                 1 => self.fid_size_nm = Some(value),
                                 _ => self.defocus = value,
                             },
-                            Err(_) => {
+                            None => {
                                 self.abort_set(&format!(
                                     "Error converting the string \"{ftext}\" for directive {dir_key} to float in {} file",
                                     source[ind_dir]
@@ -4329,7 +4294,7 @@ impl Brt {
                 break;
             }
             let lsplit: Vec<&str> = line.split_whitespace().collect();
-            match lsplit.last().and_then(|value| value.parse::<f64>().ok()) {
+            match lsplit.last().and_then(|value| py_float(value)) {
                 Some(value) => sds.push(value),
                 None => {
                     self.abort_set(
@@ -4417,10 +4382,10 @@ impl Brt {
                     let values = lsplit
                         .get(1)
                         .map(|value| value.replace(':', ""))
-                        .and_then(|value| value.parse::<i64>().ok())
-                        .zip(lsplit.get(4).and_then(|value| value.parse::<f64>().ok()))
-                        .zip(lsplit.get(6).and_then(|value| value.parse::<f64>().ok()))
-                        .zip(lsplit.last().and_then(|value| value.parse::<f64>().ok()));
+                        .and_then(|value| py_int(&value))
+                        .zip(lsplit.get(4).and_then(|value| py_float(value)))
+                        .zip(lsplit.get(6).and_then(|value| py_float(value)))
+                        .zip(lsplit.last().and_then(|value| py_float(value)));
                     match values {
                         Some((((zval, low_peak), high_peak), fraction)) => {
                             if low_peak < dark_ratio * high_peak && fraction > dark_fraction {
@@ -4594,8 +4559,11 @@ impl Brt {
         if self.write_text_file_report_err(
             &rotfile,
             &[format!(
-                "{cosrot:.6} {sinrot:.6} {:.6} {cosrot:.6} 0. 0.",
-                -sinrot
+                "{} {} {} {} 0. 0.",
+                py_fixed(cosrot, 0, 6),
+                py_fixed(sinrot, 0, 6),
+                py_fixed(-sinrot, 0, 6),
+                py_fixed(cosrot, 0, 6)
             )],
         ) != 0
         {
@@ -4782,7 +4750,9 @@ impl Brt {
             let total = self.total_del_tilt;
             self.warning(
                 &[format!(
-                    "Patch tracking not being iterated: tilt angle adjustment by {total:.1} is above the limit of {max_tilt_adjust:.1}"
+                    "Patch tracking not being iterated: tilt angle adjustment by {} is above the limit of {}",
+                    py_fixed(total, 0, 1),
+                    py_fixed(max_tilt_adjust, 0, 1)
                 )],
                 true,
             );
@@ -4798,7 +4768,7 @@ impl Brt {
         let mut max_angle = 0.;
         for line in &lines {
             let lsplit: Vec<&str> = line.split_whitespace().collect();
-            match lsplit.first().and_then(|value| value.parse::<f64>().ok()) {
+            match lsplit.first().and_then(|value| py_float(value)) {
                 Some(value) => {
                     max_angle = f64::max(max_angle, (value + self.total_del_tilt).abs());
                 }
@@ -4810,7 +4780,10 @@ impl Brt {
             let total = self.total_del_tilt;
             self.warning(
                 &[format!(
-                    "Patch tracking not being iterated: tilt angle adjustment by {total:.1} would make the highest angle be {max_angle:.1}, above the limit of {max_adjusted_angle:.1}"
+                    "Patch tracking not being iterated: tilt angle adjustment by {} would make the highest angle be {}, above the limit of {}",
+                    py_fixed(total, 0, 1),
+                    py_fixed(max_angle, 0, 1),
+                    py_fixed(max_adjusted_angle, 0, 1)
                 )],
                 true,
             );
@@ -5012,14 +4985,16 @@ impl Brt {
                 )
                 .truthy()
             {
+                // `int(round(x))`: Python 3's `round` takes a tie to even and
+                // raises on a NaN/infinite size; `coarseBinning` is never 0
                 (
                     dataset_filename(".preali", None, None),
-                    (self.fid_size_pix / self.coarse_binning as f64).round() as i64,
+                    py_int_of_float(py_round(self.fid_size_pix / self.coarse_binning as f64)),
                 )
             } else {
                 (
                     self.data_name.clone() + &self.stack_extension,
-                    self.fid_size_pix.round() as i64,
+                    py_int_of_float(py_round(self.fid_size_pix)),
                 )
             };
 
@@ -5276,12 +5251,12 @@ impl Brt {
         ));
         edfcom.extend(self.edf_del_and_add(
             &format!("{}.align.AxisZShift", self.axis_edf_let),
-            &py_str_float(py_round(z_shift_value, 2)),
+            &py_str_float(py_round_ndigits(z_shift_value, 2)),
             '/',
         ));
         edfcom.extend(self.edf_del_and_add(
             &format!("{}.align.AngleOffset", self.axis_edf_let),
-            &py_str_float(py_round(angle_value, 3)),
+            &py_str_float(py_round_ndigits(angle_value, 3)),
             '/',
         ));
         self.modify_edf_lines(&edfcom)
@@ -5478,19 +5453,6 @@ impl Brt {
         }
         (retval, no_robust)
     }
-}
-
-/// Python's `round(value, digits)`: round half to even at that many decimals.
-fn py_round(value: f64, digits: i32) -> f64 {
-    let scale = 10f64.powi(digits);
-    let scaled = value * scale;
-    let rounded = scaled.round();
-    let result = if (scaled - scaled.trunc()).abs() == 0.5 && rounded % 2.0 != 0.0 {
-        rounded - scaled.signum()
-    } else {
-        rounded
-    };
-    result / scale
 }
 
 impl Brt {
@@ -5716,6 +5678,7 @@ impl Brt {
         self.fid_thickness = angle_arr[2];
         self.fid_inc_shift = angle_arr[3];
         self.recon_thickness = angle_arr[5];
+        // finite: `parseAlignLog` stores integer counts in [6] and [7]
         let mut num_bot = angle_arr[6] as i64;
         let mut num_top = angle_arr[7] as i64;
         let mut total_fid;
@@ -5987,6 +5950,7 @@ impl Brt {
             self.fid_thickness = angle_arr[2];
             self.fid_inc_shift = angle_arr[3];
             self.recon_thickness = angle_arr[5];
+            // finite: `parseAlignLog` stores integer counts in [6] and [7]
             num_bot = angle_arr[6] as i64;
             num_top = angle_arr[7] as i64;
             let _ = (&mut total_fid, &mut min_on_surf, num_bot, num_top);
@@ -6002,8 +5966,7 @@ impl Brt {
                     self.prn_log("", "\n", false);
                     let lsplit: Vec<&str> = line[colon_ind + 1..].split_whitespace().collect();
                     self.final_align_resid = 0.;
-                    if let Some(value) = lsplit.first().and_then(|value| value.parse::<f64>().ok())
-                    {
+                    if let Some(value) = lsplit.first().and_then(|value| py_float(value)) {
                         self.final_align_resid = value;
                     }
                     break;
@@ -6085,8 +6048,8 @@ impl Brt {
             let splits: Vec<&str> = replaced.split_whitespace().collect();
             let parsed = splits
                 .first()
-                .and_then(|value| value.parse::<i64>().ok())
-                .zip(splits.get(1).and_then(|value| value.parse::<i64>().ok()));
+                .and_then(|value| py_int(value))
+                .zip(splits.get(1).and_then(|value| py_int(value)));
             match parsed {
                 Some((x, y)) => {
                     self.ali_xunbinned = x;
@@ -6164,10 +6127,14 @@ impl Brt {
                 "SizeToOutputInXandY",
                 &format!(
                     "{},{}",
-                    (self.expand_factor * self.ali_xunbinned.div_euclid(self.ali_binning) as f64)
-                        as i64,
-                    (self.expand_factor * self.ali_yunbinned.div_euclid(self.ali_binning) as f64)
-                        as i64
+                    py_int_of_float(
+                        self.expand_factor
+                            * py_int_floordiv(self.ali_xunbinned, self.ali_binning) as f64
+                    ),
+                    py_int_of_float(
+                        self.expand_factor
+                            * py_int_floordiv(self.ali_yunbinned, self.ali_binning) as f64
+                    )
                 ),
                 '/',
             )];
@@ -6436,9 +6403,9 @@ impl Brt {
             if !binning_directive.truthy() {
                 // desired reduction is expFac * fidSize / optimal
                 // actual reduction will be binning / expFac so binning is expFac * desired
-                binning = (self.expand_factor.powi(2) * self.fid_size_pix
-                    / FB3D_OPTIMAL_BINNED_SIZE)
-                    .round() as i64;
+                binning = py_int_of_float(py_round(
+                    self.expand_factor.powi(2) * self.fid_size_pix / FB3D_OPTIMAL_BINNED_SIZE,
+                ));
                 if binning > 1
                     && self.expand_factor.powi(2) * self.fid_size_pix / (binning as f64)
                         < FB3D_MIN_BINNED_SIZE
@@ -6459,10 +6426,14 @@ impl Brt {
                     comlines.push(format!(
                         "OneParameterChange {COM_PREFIX}newst_3dfind{}.newstack.SizeToOutputInXandY={},{}",
                         self.axis_let,
-                        ((self.ali_xunbinned as f64 * self.expand_factor) as i64)
-                            .div_euclid(binning),
-                        ((self.ali_yunbinned as f64 * self.expand_factor) as i64)
-                            .div_euclid(binning)
+                        py_int_floordiv(
+                            py_int_of_float(self.ali_xunbinned as f64 * self.expand_factor),
+                            binning
+                        ),
+                        py_int_floordiv(
+                            py_int_of_float(self.ali_yunbinned as f64 * self.expand_factor),
+                            binning
+                        )
                     ));
                 }
                 comlines.extend(self.later_com_directives(0));
@@ -6491,11 +6462,14 @@ impl Brt {
             // use fid alignment if two surfaces, otherwise there needs to be a directive
             if !thickness_directive.truthy() {
                 if self.num_surfaces > 1 {
-                    let use_size = f64::max(15., self.fid_size_nm.unwrap_or(0.))
-                        / (self.pixel_size / self.expand_factor);
+                    let use_size = py_true_div(
+                        f64::max(15., self.fid_size_nm.unwrap_or(0.)),
+                        py_true_div(self.pixel_size, self.expand_factor),
+                    );
                     thickness = 2
-                        * (((1.1 * self.fid_thickness + 6. * use_size).round() as i64 + 1)
-                            .div_euclid(2));
+                        * ((py_int_of_float(py_round(1.1 * self.fid_thickness + 6. * use_size))
+                            + 1)
+                        .div_euclid(2));
                 } else {
                     self.abort_set(
                         "A GoldErasing.thickness directive must be supplied for 3D gold finding",
@@ -6860,12 +6834,14 @@ impl Brt {
                     return 1;
                 }
                 if err == 0 {
+                    // finite: `parseTomopitchLog` takes [0] from `int()` of the log
                     thickness = angle_arr[0] as i64;
                     self.xtilt_needed = angle_arr[1];
                 }
                 // Or use the align thickness if no positioning available
                 else if self.recon_thickness != 0. {
-                    thickness = 2 * ((self.recon_thickness.round() as i64 + 1).div_euclid(2));
+                    thickness =
+                        2 * ((py_int_of_float(py_round(self.recon_thickness)) + 1).div_euclid(2));
                 }
 
                 // In either case, add the extra thickness if defined
@@ -7015,9 +6991,9 @@ impl Brt {
                 sedcom.push(sed_modify(
                     "SCALE",
                     &format!(
-                        "{} {:.3}",
+                        "{} {}",
                         py_str_float(values[0] as f64),
-                        values[1] / 5000.
+                        py_fixed(values[1] / 5000., 0, 3)
                     ),
                     '/',
                 ));
@@ -7550,17 +7526,17 @@ impl Brt {
 
         let mut edfcom = self.edf_del_and_add(
             &format!("{}.sample.AngleOffset", self.axis_edf_let),
-            &py_str_float(py_round(angle_offset_orig, 3)),
+            &py_str_float(py_round_ndigits(angle_offset_orig, 3)),
             '/',
         );
         edfcom.extend(self.edf_del_and_add(
             &format!("{}.sample.AxisZShift", self.axis_edf_let),
-            &py_str_float(py_round(z_shift_orig, 2)),
+            &py_str_float(py_round_ndigits(z_shift_orig, 2)),
             '/',
         ));
         edfcom.extend(self.edf_del_and_add(
             &format!("{}.sample.XAXISTILT", self.axis_edf_let),
-            &py_str_float(py_round(xtilt_orig, 3)),
+            &py_str_float(py_round_ndigits(xtilt_orig, 3)),
             '/',
         ));
         edfcom.extend(self.edf_del_and_add(
@@ -7639,6 +7615,7 @@ impl Brt {
         if err < 0 {
             return 1;
         }
+        // finite: `parseTomopitchLog` takes [0] from `int()` of the log
         let thickness = angle_arr[0] as i64;
         let xtilt = angle_arr[1];
         let offset = angle_arr[2];
@@ -7655,7 +7632,10 @@ impl Brt {
         // Write tilt.com with the X-axis tilt and shift/angle offset for fidless
         self.prn_log(
             &format!(
-                "Positioning gave thickness {thickness}, X-axis tilt {xtilt:.2}, angle offset {offset:.2}, Z shift {z_shift:.1}"
+                "Positioning gave thickness {thickness}, X-axis tilt {}, angle offset {}, Z shift {}",
+                py_fixed(xtilt, 0, 2),
+                py_fixed(offset, 0, 2),
+                py_fixed(z_shift, 0, 1)
             ),
             "\n",
             false,
@@ -7955,6 +7935,7 @@ impl Brt {
             self.fid_thickness = angle_arr[2];
             self.fid_inc_shift = angle_arr[3];
             self.recon_thickness = angle_arr[5];
+            // finite: `parseAlignLog` stores integer counts in [6] and [7]
             let num_bot = angle_arr[6] as i64;
             let num_top = angle_arr[7] as i64;
             let mut mess = String::new();
@@ -8219,7 +8200,7 @@ impl Brt {
                 for line in &log_lines {
                     if line.contains("may need to set thickness") {
                         let lsplit: Vec<&str> = line.split_whitespace().collect();
-                        let new_thick = match lsplit.last().and_then(|v| v.parse::<i64>().ok()) {
+                        let new_thick = match lsplit.last().and_then(|v| py_int(v)) {
                             Some(value) => value,
                             None => {
                                 self.abort_set(
@@ -8306,9 +8287,9 @@ impl Brt {
                     let mut ok = lsplit.len() >= 3;
                     if ok {
                         for ind in 0..3 {
-                            match lsplit[lsplit.len() - 3 + ind].parse::<i64>() {
-                                Ok(value) => values.push(value),
-                                Err(_) => {
+                            match py_int(&lsplit[lsplit.len() - 3 + ind]) {
+                                Some(value) => values.push(value),
+                                None => {
                                     ok = false;
                                     break;
                                 }
@@ -8324,7 +8305,7 @@ impl Brt {
                 }
                 if line.contains("CenterShiftLimit") && line.contains("avoid stopping") {
                     let lsplit: Vec<&str> = line.split_whitespace().collect();
-                    if let Some(value) = lsplit.last().and_then(|v| v.parse::<i64>().ok()) {
+                    if let Some(value) = lsplit.last().and_then(|v| py_int(v)) {
                         shift_limit = value;
                     }
                 }
@@ -8659,9 +8640,9 @@ impl Brt {
                     low_lim = 4;
                 }
                 let value = val.float();
-                let mut computed = value.round() as i64;
+                let mut computed = py_int_of_float(py_round(value));
                 if computed <= 1 {
-                    computed = (value * base as f64).round() as i64;
+                    computed = py_int_of_float(py_round(value * base as f64));
                 }
                 if (sizes_scales.len() < 6
                     && (value < 0.02 || computed < low_lim || computed > base))
@@ -8893,10 +8874,12 @@ impl Brt {
         if self.test_directive_value(&binning, "reducefiltvol.ReductionFactor", "float") != 0 {
             return 1;
         }
+        // `binning = 1` is a Python int, which `str()` prints as `1`, not `1.0`
+        // (`batchruntomo:4666-4667`, `:4677`)
         let binning = if binning.is_none() {
-            1.
+            "1".to_owned()
         } else {
-            binning.float()
+            py_str_float(binning.float())
         };
         let com_file = format!("reducefiltvol{}", self.com_ext);
         let rec_file = dataset_filename(".rec", None, None);
@@ -8908,7 +8891,7 @@ impl Brt {
         let mut comlines = vec![
             format!("RootNameOfDataFiles {}", self.data_name),
             format!("InputFile {rec_file}"),
-            format!("BinningOfImages {}", py_str_float(binning)),
+            format!("BinningOfImages {binning}"),
         ];
         comlines.push(format!(
             "OneParameterChange {COM_PREFIX}reducefiltvol.reducefiltvol.SetupChunksIfMemoryError=1"
@@ -9185,7 +9168,7 @@ impl Brt {
                 if !comp_list1.is_empty() {
                     let last = &comp_list1[comp_list1.len() - 1];
                     next_num = match last.rfind('.') {
-                        Some(index) => last[index + 1..].parse::<i64>().unwrap_or(0) + 1,
+                        Some(index) => py_int(&last[index + 1..]).unwrap_or(0) + 1,
                         None => 1,
                     };
                 }
@@ -9430,8 +9413,8 @@ impl Brt {
                     );
                     let comfile = format!("xcorr_pt{}", self.axis_com);
                     let mess = format!(
-                        "Running patch tracking again with angle offset of {:.1}",
-                        self.total_del_tilt
+                        "Running patch tracking again with angle offset of {}",
+                        py_fixed(self.total_del_tilt, 0, 1)
                     );
                     if self.modify_write_and_run_com(&comfile, &sedcom, None, &mess, false) != 0 {
                         return 1;
@@ -9588,7 +9571,7 @@ pub fn batchruntomo(arguments: &[OsString]) -> i32 {
             // `sys.stdout.write(prefix + " IMOD_DIR is not defined!\n")`
             print!("{PREFIX} IMOD_DIR is not defined!\n");
             let _ = std::io::stdout().flush();
-            std::process::exit(1);
+            crate::imod::libcfshr::b3dutil::exit(1);
         }
     }
 
@@ -9653,7 +9636,7 @@ pub fn batchruntomo(arguments: &[OsString]) -> i32 {
             let name = brt.set_name.clone() + "b.";
             brt.check_rename_stack(&name);
         }
-        std::process::exit(0);
+        crate::imod::libcfshr::b3dutil::exit(0);
     }
 
     // Get current directory
@@ -9842,8 +9825,8 @@ pub fn batchruntomo(arguments: &[OsString]) -> i32 {
     if !brt.cpu_list.is_empty() {
         brt.local_cpu_limit = 0;
         brt.first_cpu_limit = 0;
-        match brt.cpu_list.trim().parse::<i64>() {
-            Ok(parallel_cpu) => {
+        match py_int(brt.cpu_list.trim()) {
+            Some(parallel_cpu) => {
                 brt.parallel_cpu = parallel_cpu;
                 brt.local_cpu_limit = parallel_cpu;
                 brt.first_cpu_limit = parallel_cpu;
@@ -9854,7 +9837,7 @@ pub fn batchruntomo(arguments: &[OsString]) -> i32 {
                     );
                 }
             }
-            Err(_) => {
+            None => {
                 let cpu_list = brt.cpu_list.clone();
                 for machine in cpu_list.split(',') {
                     let replaced = machine.replace('#', ":");
@@ -9866,8 +9849,8 @@ pub fn batchruntomo(arguments: &[OsString]) -> i32 {
                     if msplit.len() < 2 {
                         num_cpu = 1;
                     } else {
-                        match msplit[1].parse::<i64>() {
-                            Ok(value) => {
+                        match py_int(&msplit[1]) {
+                            Some(value) => {
                                 num_cpu = value;
                                 if num_cpu < 1 {
                                     let message = format!(
@@ -9876,7 +9859,7 @@ pub fn batchruntomo(arguments: &[OsString]) -> i32 {
                                     brt.exit_error(&message);
                                 }
                             }
-                            Err(_) => {
+                            None => {
                                 let message = format!(
                                     "Failed to convert value after : or # to integer in {machine}"
                                 );
@@ -9918,9 +9901,9 @@ pub fn batchruntomo(arguments: &[OsString]) -> i32 {
         brt.first_cpu_limit = brt.cores_per_cluster_job as i64;
         brt.top_cpu_limit = brt.cores_per_cluster_job as i64;
     } else if let Ok(temp) = std::env::var("MULTI_PROC_THREAD_LIMIT") {
-        match temp.parse::<i64>() {
-            Ok(value) => brt.local_limit = value,
-            Err(_) => {
+        match py_int(&temp) {
+            Some(value) => brt.local_limit = value,
+            None => {
                 let message =
                     format!("Converting MULTI_PROC_THREAD_LIMIT value of {temp} to an integer");
                 brt.exit_error(&message);
@@ -10006,14 +9989,14 @@ pub fn batchruntomo(arguments: &[OsString]) -> i32 {
         if !brt.queue_command.is_empty() {
             brt.exit_error("You cannot enter a GPU machine list with a queue command");
         }
-        match brt.gpu_list.trim().parse::<i64>() {
-            Ok(value) => {
+        match py_int(brt.gpu_list.trim()) {
+            Some(value) => {
                 brt.use_gpu = value;
                 if brt.use_gpu != 1 {
                     brt.exit_error("The entry for a GPU list must be 1 to use just the local GPU");
                 }
             }
-            Err(_) => {
+            None => {
                 if brt.cores_per_cluster_job != 0 {
                     brt.exit_error(
                         "With cores per node specified, an entry for the GPU machine list must be a single positive number",
@@ -10177,7 +10160,7 @@ pub fn batchruntomo(arguments: &[OsString]) -> i32 {
                 "\n",
                 false,
             );
-            std::process::exit(0);
+            crate::imod::libcfshr::b3dutil::exit(0);
         }
 
         let _ = std::env::set_current_dir(&brt.starting_dir);
@@ -10665,7 +10648,7 @@ pub fn batchruntomo(arguments: &[OsString]) -> i32 {
 
         brt.report_reached_step(0.);
         if let Some(fid_size_nm) = brt.fid_size_nm.filter(|value| *value != 0.) {
-            brt.fid_size_pix = fid_size_nm / brt.pixel_size;
+            brt.fid_size_pix = py_true_div(fid_size_nm, brt.pixel_size);
         }
         let mut axis_failed = false;
 
@@ -10765,7 +10748,7 @@ pub fn batchruntomo(arguments: &[OsString]) -> i32 {
                 format!("Completed dataset {}", brt.set_name)
             };
             if brt.ending_step < FINAL_STEP_NUM {
-                let end_print = brt.ending_step.round() as i64;
+                let end_print = py_int_of_float(py_round(brt.ending_step));
                 if (end_print as f64 - brt.ending_step).abs() > 0.005 {
                     message += &format!(" through step {}", py_str_float(brt.ending_step));
                 } else {
@@ -10825,7 +10808,7 @@ pub fn batchruntomo(arguments: &[OsString]) -> i32 {
     }
     prnstr(&mess, "\n", false);
     let _ = std::io::stdout().flush();
-    std::process::exit(0);
+    crate::imod::libcfshr::b3dutil::exit(0);
 }
 
 /// `platform.node()` / `socket.gethostname()`.

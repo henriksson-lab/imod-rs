@@ -13,12 +13,15 @@
 //! Python floats (doubles); `'{}'.format` of one is its `repr`
 //! ([`py_str_float`]); `round()` rounds half to even.
 
-use super::batchruntomo::py_str_float;
 use super::imodpy::{
     add_imod_bin_ignore_sighup, call_own_program, cleanup_files, dataset_filename,
     exit_from_imod_error, find_root_axis_and_extensions, get_mrc_size, get_naming_style,
     make_backup_file, prnstr, read_text_file, run_cmd, set_root_and_extension,
     standard_type_extensions, write_text_file,
+};
+use super::imodpy::{
+    py_fixed, py_float, py_int, py_int_of_float, py_raise, py_round, py_str_float, py_true_div,
+    py_try_int_of_float,
 };
 use super::pip::{
     exit_error, pip_get_boolean, pip_get_float, pip_get_in_out_file, pip_get_integer,
@@ -83,7 +86,7 @@ pub fn dualvolmatch(arguments: &[OsString]) -> i32 {
         let _ = std::io::stdout().flush();
         eprintln!("Traceback (most recent call last):");
         eprintln!("{message}");
-        std::process::exit(1)
+        crate::imod::libcfshr::b3dutil::exit(1)
     };
 
     // Fallbacks from ../manpages/autodoc2man 3 1 dualvolmatch
@@ -175,7 +178,9 @@ pub fn dualvolmatch(arguments: &[OsString]) -> i32 {
     if tilt_max < 0. || tilt_interval <= 0. {
         exit_error("Both maximum tilt angle and step size should be positive");
     }
-    let mut num_steps = (2. * tilt_max / tilt_interval).round_ties_even() as i64 + 1;
+    // `int(round(...))` outside the script's `try`: a NaN or infinite entry
+    // (which passes the checks above) raises uncaught
+    let mut num_steps = py_int_of_float(py_round(2. * tilt_max / tilt_interval)) + 1;
     if num_steps < 3 {
         exit_error("The tilt interval must not be bigger than the maximum tilt angle");
     }
@@ -244,10 +249,8 @@ pub fn dualvolmatch(arguments: &[OsString]) -> i32 {
                 .map(Option::unwrap_or_default)
                 .map_err(|_| PyExc::Imodpy)
         };
-        let float =
-            |text: &str| -> Result<f64, PyExc> { text.parse::<f64>().map_err(|_| PyExc::Value) };
-        let int =
-            |text: &str| -> Result<i64, PyExc> { text.parse::<i64>().map_err(|_| PyExc::Value) };
+        let float = |text: &str| -> Result<f64, PyExc> { py_float(text).ok_or(PyExc::Value) };
+        let int = |text: &str| -> Result<i64, PyExc> { py_int(text).ok_or(PyExc::Value) };
         let at = |fields: &[&str], index: isize| -> Result<String, PyExc> {
             let index = if index < 0 {
                 fields.len() as isize + index
@@ -298,8 +301,11 @@ pub fn dualvolmatch(arguments: &[OsString]) -> i32 {
                 let end = tilt_start[ind] + (num_steps - 1) as f64 * tilt_interval;
                 prnstr(
                     &format!(
-                        "Making reprojection {}: {start:.1} to {end:.1} at {tilt_interval:.1} degrees",
-                        bin_proj[ind]
+                        "Making reprojection {}: {start_fx} to {end_fx} at {tilt_interval_fx} degrees",
+                        bin_proj[ind],
+                        start_fx = py_fixed(start, 0, 1),
+                        end_fx = py_fixed(end, 0, 1),
+                        tilt_interval_fx = py_fixed(tilt_interval, 0, 1)
                     ),
                     "\n",
                     false,
@@ -360,9 +366,11 @@ pub fn dualvolmatch(arguments: &[OsString]) -> i32 {
                     best_tilt_b = Some(tb);
                     prnstr(
                         &format!(
-                            "Tilt angles of best pair: {} {ta:.1}  {} {tb:.1}",
+                            "Tilt angles of best pair: {} {ta_fx}  {} {tb_fx}",
                             asrc.to_uppercase(),
-                            bsrc.to_uppercase()
+                            bsrc.to_uppercase(),
+                            ta_fx = py_fixed(ta, 0, 1),
+                            tb_fx = py_fixed(tb, 0, 1)
                         ),
                         "\n",
                         false,
@@ -378,9 +386,11 @@ pub fn dualvolmatch(arguments: &[OsString]) -> i32 {
                     interp_tilt_b = Some(tb);
                     prnstr(
                         &format!(
-                            "Interpolated tilt angles: {} {ta:.1}  {} {tb:.1}",
+                            "Interpolated tilt angles: {} {ta_fx}  {} {tb_fx}",
                             asrc.to_uppercase(),
-                            bsrc.to_uppercase()
+                            bsrc.to_uppercase(),
+                            ta_fx = py_fixed(ta, 0, 1),
+                            tb_fx = py_fixed(tb, 0, 1)
                         ),
                         "\n",
                         false,
@@ -556,9 +566,27 @@ pub fn dualvolmatch(arguments: &[OsString]) -> i32 {
 
         // Write it to file with '{:10.6f} {:10.6f} {:10.6f} {:10.3f}'
         let lines = vec![
-            format!("{a11:10.6} {a12:10.6} {a13:10.6} {dx:10.3}"),
-            format!("{a21:10.6} {a22:10.6} {a23:10.6} {dy:10.3}"),
-            format!("{a31:10.6} {a32:10.6} {a33:10.6} {dz:10.3}"),
+            format!(
+                "{a11_fx} {a12_fx} {a13_fx} {dx_fx}",
+                a11_fx = py_fixed(a11, 10, 6),
+                a12_fx = py_fixed(a12, 10, 6),
+                a13_fx = py_fixed(a13, 10, 6),
+                dx_fx = py_fixed(dx, 10, 3)
+            ),
+            format!(
+                "{a21_fx} {a22_fx} {a23_fx} {dy_fx}",
+                a21_fx = py_fixed(a21, 10, 6),
+                a22_fx = py_fixed(a22, 10, 6),
+                a23_fx = py_fixed(a23, 10, 6),
+                dy_fx = py_fixed(dy, 10, 3)
+            ),
+            format!(
+                "{a31_fx} {a32_fx} {a33_fx} {dz_fx}",
+                a31_fx = py_fixed(a31, 10, 6),
+                a32_fx = py_fixed(a32, 10, 6),
+                a33_fx = py_fixed(a33, 10, 6),
+                dz_fx = py_fixed(dz, 10, 3)
+            ),
         ];
         let _ = write_text_file(&init3d_file, &lines, false);
 
@@ -593,17 +621,16 @@ pub fn dualvolmatch(arguments: &[OsString]) -> i32 {
             .div_euclid(3)
             .min(range_z.div_euclid(3))
             .min(512i64.div_euclid(binning));
-        if patch_size == 0 {
-            uncaught("ZeroDivisionError: float division by zero");
-        }
-        let num_patch_x = 3i64.max(
-            ((3. * range_x as f64 + patch_size as f64) / (2. * patch_size as f64)).round_ties_even()
-                as i64,
-        );
-        let num_patch_z = 3i64.max(
-            ((3. * range_z as f64 + patch_size as f64) / (2. * patch_size as f64)).round_ties_even()
-                as i64,
-        );
+        // a zero patch size raises ZeroDivisionError, which the `try` does not
+        // catch; otherwise the quotient is finite (integer operands)
+        let num_patch_x = 3i64.max(py_round(py_true_div(
+            3. * range_x as f64 + patch_size as f64,
+            2. * patch_size as f64,
+        )) as i64);
+        let num_patch_z = 3i64.max(py_round(py_true_div(
+            3. * range_z as f64 + patch_size as f64,
+            2. * patch_size as f64,
+        )) as i64);
         let border = 24 + 12 * nx_bin_a.min(nz_bin_a).div_euclid(1000);
         let cscom_base = vec![
             format!("ReferenceFile {}", bin_recs[0]),
@@ -696,7 +723,8 @@ pub fn dualvolmatch(arguments: &[OsString]) -> i32 {
             // BRT is using 'implies a center' as a tag
             prnstr(
                 &format!(
-                    "The residual for the center patch implies a center shift in Z of {shift:.1}"
+                    "The residual for the center patch implies a center shift in Z of {shift_fx}",
+                    shift_fx = py_fixed(shift, 0, 1)
                 ),
                 "\n",
                 false,
@@ -706,8 +734,19 @@ pub fn dualvolmatch(arguments: &[OsString]) -> i32 {
         let Some(cen_shift) = cen_shift else {
             uncaught("NameError: name 'cenShift' is not defined");
         };
-        let round_cen = cen_shift.round_ties_even() as i64;
-        let round_abs_cen = cen_shift.abs().round_ties_even() as i64;
+        // inside the `try`: `int()` of a NaN is the `except ValueError` arm, of
+        // an infinity an uncaught OverflowError
+        let int_in_try = |value: f64| -> Result<i64, PyExc> {
+            py_try_int_of_float(value).or_else(|exception| {
+                if exception.starts_with("ValueError") {
+                    Err(PyExc::Value)
+                } else {
+                    py_raise(&exception)
+                }
+            })
+        };
+        let round_cen = int_in_try(py_round(cen_shift))?;
+        let round_abs_cen = int_in_try(py_round(cen_shift.abs()))?;
         let Some(mean_resid) = mean_resid else {
             uncaught("NameError: name 'meanResid' is not defined");
         };
@@ -726,7 +765,10 @@ pub fn dualvolmatch(arguments: &[OsString]) -> i32 {
 
             // BRT is using 'unbinned mean residual' and 'Falling back' as tags
             prnstr(
-                &format!("The unbinned mean residual is {mean_resid:.2} which is above the limit"),
+                &format!(
+                    "The unbinned mean residual is {mean_resid_fx} which is above the limit",
+                    mean_resid_fx = py_fixed(mean_resid, 0, 2)
+                ),
                 "\n",
                 false,
             );
@@ -755,16 +797,25 @@ pub fn dualvolmatch(arguments: &[OsString]) -> i32 {
             let binf = binning as f64;
             let lines = vec![
                 format!(
-                    "{a11:10.6} {a12:10.6} {a13:10.6} {:10.3}",
-                    binf * dx + float(&at(&lsplit, 3)?)?
+                    "{a11_fx} {a12_fx} {a13_fx} {}",
+                    py_fixed(binf * dx + float(&at(&lsplit, 3)?)?, 10, 3),
+                    a11_fx = py_fixed(a11, 10, 6),
+                    a12_fx = py_fixed(a12, 10, 6),
+                    a13_fx = py_fixed(a13, 10, 6)
                 ),
                 format!(
-                    "{a21:10.6} {a22:10.6} {a23:10.6} {:10.3}",
-                    binf * dy + float(&at(&lsplit, 4)?)?
+                    "{a21_fx} {a22_fx} {a23_fx} {}",
+                    py_fixed(binf * dy + float(&at(&lsplit, 4)?)?, 10, 3),
+                    a21_fx = py_fixed(a21, 10, 6),
+                    a22_fx = py_fixed(a22, 10, 6),
+                    a23_fx = py_fixed(a23, 10, 6)
                 ),
                 format!(
-                    "{a31:10.6} {a32:10.6} {a33:10.6} {:10.3}",
-                    binf * dz + float(&at(&lsplit, 5)?)?
+                    "{a31_fx} {a32_fx} {a33_fx} {}",
+                    py_fixed(binf * dz + float(&at(&lsplit, 5)?)?, 10, 3),
+                    a31_fx = py_fixed(a31, 10, 6),
+                    a32_fx = py_fixed(a32, 10, 6),
+                    a33_fx = py_fixed(a33, 10, 6)
                 ),
             ];
             make_backup_file(&solve_file);
@@ -792,7 +843,10 @@ pub fn dualvolmatch(arguments: &[OsString]) -> i32 {
             }
         } else if cen_shift.abs() > max_cen_shift {
             prnstr(
-                &format!("The unbinned mean residual is {mean_resid:.2}"),
+                &format!(
+                    "The unbinned mean residual is {mean_resid_fx}",
+                    mean_resid_fx = py_fixed(mean_resid, 0, 2)
+                ),
                 "\n",
                 false,
             );
@@ -851,7 +905,7 @@ pub fn dualvolmatch(arguments: &[OsString]) -> i32 {
 
         cleanup(test_mode, &clean_list);
         let _ = std::io::stdout().flush();
-        std::process::exit(0);
+        crate::imod::libcfshr::b3dutil::exit(0);
     })();
 
     match result {

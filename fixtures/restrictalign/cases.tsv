@@ -1,0 +1,39 @@
+b8_nocv	b8.fid	-	-align align.com -order 1,4,3,2,5 -verbose
+b8_noorder	b8.fid	-	align.com
+#full	b8_skipbeam	b8.fid	-	-align align.com -order 2,1 -skipbeam
+b3_nocv	b3.fid	-	-align align.com -verbose
+b3_cv	b3.fid	-	-align align.com -cross 1 -verbose
+b1_nocv	b1.fid	-	-align align.com
+b1_cv	b1.fid	-	-align align.com -cross 1
+b25_norestr	b25.fid	-	-align align.com
+b25_cv	b25.fid	-	-align align.com -cross 1 -verbose
+b25_robust	b25.fid	/^LocalAlignments/iRobustFitting\t1	-align align.com -cross 1 -verbose
+b25_local3	b25.fid	s/^LocalAlignments\t0/LocalAlignments\t1/	-align align.com -cross 1 -local 3 -verbose
+#full	b25_local1	b25.fid	s/^LocalAlignments\t0/LocalAlignments\t1/	-align align.com -cross 1 -local 1 -verbose
+#full	b25_local4	b25.fid	s/^LocalAlignments\t0/LocalAlignments\t1/	-align align.com -cross 1 -local 4
+b25_onestep2	b25.fid	-	-align align.com -cross 1 -onestep 2 -verbose
+#full	b25_onestep3	b25.fid	-	-align align.com -cross 1 -onestep 3
+#full	b25_onestep0	b25.fid	-	-align align.com -cross 1 -onestep 0
+b25_permute	b25.fid	-	-align align.com -cross 1 -permute 3,4,5
+#full	b25_cvorder	b25.fid	-	-align align.com -cross 1 -cvorder 4,3 -verbose
+#full	b25_cross2	b25.fid	-	-align align.com -cross 2
+#full	b25_trial	b25.fid	-	-align align.com -cross 1 -trial
+b25_fids	b25.fid	-	-align align.com -fiducials 25 -views 35 -target 9
+b25_distort	b25.fid	s/^XStretchOption\t0/XStretchOption\t3/;s/^SkewOption\t0/SkewOption\t3/;s/^XTiltOption\t0/XTiltOption\t4/;s/^XTiltDefaultGrouping\t2000/XTiltDefaultGrouping\t10/;s/^BeamTiltOption\t0/BeamTiltOption\t2/;/^LocalAlignments/iProjectionStretch\t1	-align align.com -cross 1 -verbose
+#full	b25_alltilt	b25.fid	s/^TiltOption\t5/TiltOption\t2/	-align align.com -cross 1 -onestep 2
+#full	b8_distort_nocv	b8.fid	s/^XStretchOption\t0/XStretchOption\t3/;s/^SkewOption\t0/SkewOption\t3/;s/^XTiltOption\t0/XTiltOption\t4/;s/^TiltOption\t5/TiltOption\t2/;/^LocalAlignments/iProjectionStretch\t1	-align align.com -verbose -order 1,4,3,2,5
+pt_cv	pt.fid	-	-align align.com -cross 1 -verbose
+pt_nocv	pt.fid	-	-align align.com -order 1,4,3,2,5 -verbose -target 9
+noimage	b8.fid	s/^ImageFile\tstub.mrc/ImageFile\tnone.mrc/	-align align.com -order 1,4,3,2,5
+#full	noimage_views	b8.fid	s/^ImageFile\tstub.mrc/ImageFile\tnone.mrc/	-align align.com -order 1,4,3,2,5 -views 35
+rotwarn	b25.fid	s/^RotationAngle\t-90.0/RotationAngle\t0./	-align align.com -cross 1
+#full	err_nocom	b8.fid	-	-verbose
+err_badorder	b8.fid	-	-align align.com -order 1,1
+#full	err_range	b8.fid	-	-align align.com -cross 1 -cvorder 7
+err_permnocv	b8.fid	-	-align align.com -permute 3,4
+#full	err_permstep	b8.fid	-	-align align.com -cross 1 -permute 3,4 -onestep 1
+err_noloc	b25.fid	-	-align align.com -cross 1 -local 1
+#full	err_views0	b8.fid	-	-align align.com -views 0
+#full	err_nofile	b8.fid	-	-align nothere.com
+err_nomodel	none.fid	-	-align align.com
+err_local_fewbeads	b8.fid	s/^LocalAlignments\t0/LocalAlignments\t1/	-align align.com -cross 1 -local 2

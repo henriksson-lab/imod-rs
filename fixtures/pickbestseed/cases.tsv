@@ -1,0 +1,27 @@
+# name	stdin lines dropped from base.in (prefixes, comma-separated)	lines added (';'-separated)
+base	-	-
+onesurf	SurfaceFile,TwoSurfaces	-
+density	TargetNumberOfBeads	TargetDensityOfBeads 60;LowerTargetForClustered 70;ClusteredPointsAllowed 1
+verbose	-	VerboseOutput 2
+clusters	TargetNumberOfBeads	TargetNumberOfBeads 70;ClusteredPointsAllowed 1;ElongatedPointsAllowed 3;PhaseOutput
+oldclust	TargetNumberOfBeads	TargetNumberOfBeads 70;ClusteredPointsAllowed 3;LowerTargetForClustered 60
+nobeef	-	LimitMajorityToTarget
+control	-	ControlValue 4,3;ControlValue 1,0.4;ControlValue 7,1.2;ControlValue 13,0.9;ControlValue 99,1
+control17	-	ControlValue 17,3
+append	TargetNumberOfBeads	TargetNumberOfBeads 60;AppendToSeedModel
+bound	-	BoundaryModel bound.mod
+boundex	-	BoundaryModel bound.mod;ExcludeInsideAreas 1
+boundcount	-	BoundaryModel bound.mod;BoundaryForCounting 1
+dens	-	DensityOutputRootname dplot
+noseedz	SeedZvalue,MiddleZvalue	MiddleZvalue 20
+twomod	TrackedModel t2,ElongationFile e2,SeedZvalue 18,SurfaceFile s2	-
+ignore1	SurfaceFile s1	-
+#full	noweight	WeightsForScore	-
+err_both	-	TargetDensityOfBeads 40
+err_weights	WeightsForScore	WeightsForScore 1,1,1
+err_elong	ElongationFile e2	-
+err_clustelong	-	ClusteredPointsAllowed 2;ElongatedPointsAllowed 1
+err_nosurf	SurfaceFile	-
+err_badco	ElongationFile e0	ElongationFile badco.txt
+#full	err_mid	MiddleZvalue	-
+#full	err_seedz	SeedZvalue 18	-

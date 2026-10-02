@@ -1,0 +1,28 @@
+# name	arguments (run in a copy of fixtures/imodfindbeads; - for none)
+basic	-input fb.mrc -output o.mod -size 8 -store -1 -guess 20 -fallback 7,60
+nonopt	fb.mrc o.mod -size 8 -sections 0,2 -spacing 0.85 -store -1
+adjust	-input fb.mrc -output o.mod -size 8 -adjust -store -1 -guess 20
+prexf	-input fb.mrc -output o.mod -size 8 -prexf fb.prexg -imagebinned 2 -store -1
+kernel	-input fb.mrc -output o.mod -size 8 -kernel 0.5 -linear 1 -store -0.5
+light	-input fb.mrc -output o.mod -size 8 -light -store 0
+area	-input fb.mrc -output o.mod -size 8 -area area.mod -exclude -store 0.3
+query	-input fb.mrc -area area.mod -query 1
+queryexcl	-input fb.mrc -area area.mod -exclude -query 0
+filtered	-input fb.mrc -output o.mod -size 8 -filtered f.mrc -store -1
+center0	-input fb.mrc -output o.mod -size 8 -filtered f.mrc -center 0 -store -1
+maxsec	-input fb.mrc -output o.mod -size 8 -maxsec 2 -remake -store -1
+thrnum	-input fb.mrc -output o.mod -size 8 -threshold 30 -measure 2 -annulus 0.5 -bkgd 2 -peakmin 0.05 -store -1
+onepass	-input fb.mrc -output o.mod -size 8 -threshold 0 -measure 0 -store 0.5
+dump	-input fb.mrc -output o.mod -size 8 -dump h.txt -store -1
+add	-input fb.mrc -output o.mod -size 8 -add add.mod -store -1
+replace	-input fb.mrc -output o.mod -size 8 -add add.mod -replace 1 -tiltfile fb.tlt -store -1
+fill	-input fb.mrc -output o.mod -size 8 -add add.mod -tiltfile fb.tlt -fill 2 -store -1
+ref	-input fb.mrc -output o.mod -size 8 -ref ref.mod -store -1
+refbound	-input fb.mrc -output o.mod -size 8 -ref ref.mod -boundary 1 -store -1
+verbose	-input fb.mrc -output o.mod -size 8 -verbose x -store -1
+e_nosize	-input fb.mrc -output o.mod -spacing 1
+e_noinput	-output o.mod -size 8 -spacing 1
+e_section	-input fb.mrc -output o.mod -size 8 -sections 5
+e_query	-input fb.mrc -output o.mod -query 0
+e_binning	-input fb.mrc -output o.mod -size 8 -prexf fb.prexg -imagebinned 0
+e_maxsec	-input fb.mrc -output o.mod -size 8 -maxsec 0

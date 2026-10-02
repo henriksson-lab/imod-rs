@@ -124,6 +124,11 @@ text 2 golden/skip.rc
 0
 
 sha256 5622b090ca4d61aa6aae1863f507f519ba516471bcf9b9e0b1ac2953fd7d25a8 1964 golden/skip/t1.fid
+sha256 9c5eb59744e62adc47c802b492ba9d5654c725fcb435abe29436a4f14eacd944 4010 golden/skipedge.out
+text 2 golden/skipedge.rc
+0
+
+sha256 6b20a90463934d4941814ba7524a281e3f7d07ab3000c94aa5112999f0f76488 1592 golden/skipedge/t1.fid
 sha256 c9fab8316f8a75ea9a5ed91b2439d4c29cf60bc29f0c8af8d13b2399f33170f0 14186 golden/snap.out
 text 2 golden/snap.rc
 0

@@ -276,7 +276,7 @@ impl SearchCollection {
                     Some(cur_image_filename_style),
                     self.manager
                         .and_then(|manager| manager.get_base_meta_data())
-                        .map(|meta_data| meta_data.base().get_raw_image_stack_extension()),
+                        .and_then(|meta_data| meta_data.get_raw_image_stack_extension()),
                 );
                 let regex = match regex {
                     None => continue,

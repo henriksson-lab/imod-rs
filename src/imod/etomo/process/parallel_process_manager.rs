@@ -28,7 +28,7 @@ impl ParallelProcessManager {
             // `BaseProcessManager` still has an unported `BaseManager` reference
             // representation.  The concrete manager is retained in this unit's own
             // source field, exactly as Java does.
-            base: BaseProcessManager::new(None),
+            base: BaseProcessManager::new(manager),
             manager,
         }
     }
@@ -75,7 +75,7 @@ impl ParallelProcessManager {
 
     /// Java override `postProcess(BackgroundProcess)`.
     pub fn post_process_background(&self, process: Option<Infallible>) {
-        self.base.post_process_background(None);
+        // TODO(unit): `super.postProcess(process)` once this manager installs its hooks.
         let _ = process;
         // TODO(unit): BackgroundProcess.java, CommandDetails.java,
         // AnisotropicDiffusionParam.java, ChunksetupParam.java, and
@@ -93,7 +93,7 @@ impl ParallelProcessManager {
     pub fn post_process_detached(&self, process: Option<Infallible>) {
         // Source order matters: BaseProcessManager saves processchunks resume data
         // before this manager examines the detached command.
-        self.base.post_process_detached(None);
+        // TODO(unit): `super.postProcess(process)` once this manager installs its hooks.
         let _ = process;
         // TODO(unit): DetachedProcess.java, Command.java, CommandDetails.java,
         // AnisotropicDiffusionParam.java, and ParallelState.java.  For a PROCESSCHUNKS
@@ -109,20 +109,26 @@ mod tests {
 
     #[test]
     fn retains_the_parallel_manager_reference() {
-        let manager = ParallelManager::new();
-        let process_manager = ParallelProcessManager::new(manager);
-        assert!(std::ptr::eq(process_manager.get_manager(), manager));
-        assert!(std::ptr::eq(
-            manager.parallel_process_manager().get_manager(),
-            manager
-        ));
+        // Managers live on the event dispatch thread, as in Java.
+        crate::imod::etomo::util::event_queue::invoke_and_wait(|| {
+            let manager = ParallelManager::new();
+            let process_manager = ParallelProcessManager::new(manager);
+            assert!(std::ptr::eq(process_manager.get_manager(), manager));
+            assert!(std::ptr::eq(
+                manager.parallel_process_manager().get_manager(),
+                manager
+            ));
+        });
     }
 
     #[test]
     fn unavailable_process_types_do_not_report_started_processes() {
-        let process_manager = ParallelProcessManager::new(ParallelManager::new());
-        assert_eq!(process_manager.trim_volume(None, None), None);
-        assert_eq!(process_manager.anisotropic_diffusion(None, None), None);
-        assert_eq!(process_manager.chunksetup(None, None), None);
+        // Managers live on the event dispatch thread, as in Java.
+        crate::imod::etomo::util::event_queue::invoke_and_wait(|| {
+            let process_manager = ParallelProcessManager::new(ParallelManager::new());
+            assert_eq!(process_manager.trim_volume(None, None), None);
+            assert_eq!(process_manager.anisotropic_diffusion(None, None), None);
+            assert_eq!(process_manager.chunksetup(None, None), None);
+        });
     }
 }

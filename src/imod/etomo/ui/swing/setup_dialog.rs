@@ -1,1243 +1,2498 @@
 //! `IMOD/Etomo/src/etomo/ui/swing/SetupDialog.java`.
-#![allow(dead_code)]
-use super::context_menu::{ContextMenu, MouseEvent};
+//!
+//! Description: Setup dialog for tomogram reconstruction.
+//!
+//! Java `final class SetupDialog extends ProcessDialog implements ContextMenu,
+//! Run3dmodButtonContainer, Expandable, SetupReconInterface, FocusListener,
+//! ControlListener, ActionListener`.  Following the translation's inheritance
+//! convention the `ProcessDialog` superclass is embedded as `base` (with
+//! `Deref`), and the methods `ProcessDialog` calls back into (`done`,
+//! `buttonExecuteAction`) are this class's `ProcessDialogVirtual` impl.  The
+//! dialog is an event-dispatch-thread object: it is created as `Rc<Self>`
+//! (with `Rc::new_cyclic`, because field initialisers hand `this` to the
+//! `Run3dmodButton`s), every method takes `&self`, and its mutable fields are
+//! `Cell`/`RefCell`s borrowed only for one statement.
+//!
+//! The dialog holds its `SetupDialogExpert` as a `Weak`: the expert owns the
+//! dialog, and the Java's two-way reference would otherwise be an `Rc` cycle.
+//!
+//! Layout, sizes, fonts, borders other than titles, and mouse/focus plumbing
+//! are not modelled (see `jdk.rs`); each such Java statement is a
+//! `// Swing layout:` comment in place.
+
+use crate::imod::etomo::application_manager::ApplicationManager;
+use crate::imod::etomo::base_manager::BaseManager;
+use crate::imod::etomo::comscript::copy_tomo_coms;
+use crate::imod::etomo::comscript::exclude_views_param::ExcludeViewsParam;
+use crate::imod::etomo::jdk::MouseEvent;
+use crate::imod::etomo::jdk::{ActionEvent, ButtonGroup, FocusEvent, JComponent};
+use crate::imod::etomo::logic::dataset_tool;
+use crate::imod::etomo::logic::validation_set::ValidationSet;
+use crate::imod::etomo::process::imod_process::Run3dmodMenuOptions;
+use crate::imod::etomo::storage::directive_def::DirectiveDef;
 use crate::imod::etomo::r#type::axis_id::AxisID;
 use crate::imod::etomo::r#type::axis_type::AxisType;
+use crate::imod::etomo::r#type::base_meta_data::BaseMetaData;
+use crate::imod::etomo::r#type::const_etomo_number::{
+    java_lang_double_to_string, java_lang_string_matches_whitespace, java_lang_string_trim,
+};
+use crate::imod::etomo::r#type::const_meta_data::ConstMetaData;
+use crate::imod::etomo::r#type::data_file_type::DataFileType;
 use crate::imod::etomo::r#type::dialog_type::DialogType;
+use crate::imod::etomo::r#type::extension::{EXTENSION_DIVIDER, Extension};
+use crate::imod::etomo::r#type::file_type;
+use crate::imod::etomo::r#type::image_filename_style::ImageFilenameStyle;
+use crate::imod::etomo::r#type::tilt_angle_spec::TiltAngleSpec;
+use crate::imod::etomo::r#type::user_configuration::UserConfiguration;
+use crate::imod::etomo::ui::field::Field;
+use crate::imod::etomo::ui::field_type::FieldType;
+use crate::imod::etomo::ui::field_validation_failed_exception::FieldValidationFailedException;
+use crate::imod::etomo::ui::setup_recon_interface::{
+    DirectiveFileCollectionHandle, SetupReconInterface,
+};
+use crate::imod::etomo::ui::swing::axis_progress_panel::AxisProgressPanel;
+use crate::imod::etomo::ui::swing::beveled_border::BeveledBorder;
+use crate::imod::etomo::ui::swing::button_control_text_efield::ButtonControlTextEfield;
+use crate::imod::etomo::ui::swing::check_box::CheckBox;
+use crate::imod::etomo::ui::swing::context_menu::ContextMenu;
+use crate::imod::etomo::ui::swing::context_popup::ContextPopup;
+use crate::imod::etomo::ui::swing::control_listener::ControlListener;
+use crate::imod::etomo::ui::swing::deferred_3dmod_button::Deferred3dmodButton;
+use crate::imod::etomo::ui::swing::etched_border::EtchedBorder;
+use crate::imod::etomo::ui::swing::etomo_panel::EtomoPanel;
+use crate::imod::etomo::ui::swing::expand_button::ExpandButton;
+use crate::imod::etomo::ui::swing::expandable::Expandable;
+use crate::imod::etomo::ui::swing::file_chooser::{self, FileChooser};
+use crate::imod::etomo::ui::swing::file_text_field::FileTextField;
+use crate::imod::etomo::ui::swing::file_text_field_interface::FileTextFieldInterface;
+use crate::imod::etomo::ui::swing::generic_mouse_adapter::GenericMouseAdapter;
+use crate::imod::etomo::ui::swing::global_expand_button::GlobalExpandButton;
+use crate::imod::etomo::ui::swing::label::Label;
+use crate::imod::etomo::ui::swing::labeled_text_field::LabeledTextField;
+use crate::imod::etomo::ui::swing::multi_line_button::MultiLineButton;
+use crate::imod::etomo::ui::swing::process_control_panel;
+use crate::imod::etomo::ui::swing::process_dialog::{ProcessDialog, ProcessDialogVirtual};
+use crate::imod::etomo::ui::swing::radio_button::RadioButton;
+use crate::imod::etomo::ui::swing::run_3dmod_button::Run3dmodButton;
+use crate::imod::etomo::ui::swing::run_3dmod_button_container::Run3dmodButtonContainer;
+use crate::imod::etomo::ui::swing::setup_dialog_expert::SetupDialogExpert;
+use crate::imod::etomo::ui::swing::template_panel::TemplatePanel;
+use crate::imod::etomo::ui::swing::text_field::TextField;
+use crate::imod::etomo::ui::swing::tilt_angle_panel::TiltAnglePanel;
+use crate::imod::etomo::ui::swing::ui_harness;
+use crate::imod::etomo::util::utilities;
+use std::cell::{Cell, RefCell};
+use std::ops::Deref;
+use std::path::{Path, PathBuf};
+use std::rc::{Rc, Weak};
+use std::sync::Arc;
+
+// private static final String RAW_IMAGE_STACK_LABEL = "Raw Image Stack: ";
+/// Java package-private static final `FIDUCIAL_DIAMETER_LABEL`.
 pub const FIDUCIAL_DIAMETER_LABEL: &str = "Fiducial diameter (nm): ";
+/// Java package-private static final `AXIS_TYPE_LABEL`.
 pub const AXIS_TYPE_LABEL: &str = "Axis Type";
+/// Java package-private static final `FRAME_TYPE_LABEL`.
 pub const FRAME_TYPE_LABEL: &str = "Frame Type";
+/// Java package-private static final `SINGLE_AXIS_LABEL`.
 pub const SINGLE_AXIS_LABEL: &str = "Single axis";
+/// Java package-private static final `MONTAGE_LABEL`.
 pub const MONTAGE_LABEL: &str = "Montage";
+/// Java package-private static final `SINGLE_FRAME_LABEL`.
 pub const SINGLE_FRAME_LABEL: &str = "Single frame";
-pub const VIEW_RAW_STACK_LABEL: &str = "View Raw Image Stack";
-pub const BACKUP_DIRECTORY_LABEL: &str = "Backup directory: ";
-pub const REMOVE_EXCLUDE_VIEW_MSG: &str = "Excluded views have been removed";
-/// Direct `DirectiveFileCollection` values read by Java `updateTemplateValues`.
-#[derive(Clone, Debug, Default, Eq, PartialEq)]
-pub struct SetupDialogDirectiveFileCollection {
-    pub dual: Option<bool>,
-    pub montage: Option<bool>,
-    pub pixel_size: Option<String>,
-    pub twodir_a: Option<String>,
-    pub twodir_b: Option<String>,
-    pub dose_sym_a: Option<String>,
-    pub dose_sym_b: Option<String>,
-    pub fiducial_diameter: Option<String>,
-    pub image_rotation: Option<String>,
-    pub half_float_mode_output: Option<i32>,
-    pub distortion_file: Option<String>,
-    pub binning: Option<String>,
-    pub mag_gradient_file: Option<String>,
-    pub adjusted_focus_a: Option<bool>,
-    pub adjusted_focus_b: Option<bool>,
-    pub remove_excluded_views: Option<bool>,
-    pub delete_old_files: Option<bool>,
+/// Java private final (instance, not static) `BACKUP_DIRECTORY_LABEL`; a
+/// constant string either way.
+const BACKUP_DIRECTORY_LABEL: &str = "Backup directory: ";
+/// Java private static final `TWODIR_LABEL_1` (unused in the Java).
+#[allow(dead_code)]
+const TWODIR_LABEL_1: &str = "Series was bidirectional from ";
+/// Java private static final `TWODIR_LABEL_2`.
+const TWODIR_LABEL_2: &str = " degrees";
+/// Java private static final `VIEW_RAW_STACK_LABEL`.
+const VIEW_RAW_STACK_LABEL: &str = "View Raw Image Stack";
+/// Java private static final `REMOVE_EXCLUDE_VIEW_MSG`.
+const REMOVE_EXCLUDE_VIEW_MSG: &str = "Excluded views have been removed";
+
+/// Java `final class SetupDialog`.
+pub struct SetupDialog {
+    /// Java superclass `ProcessDialog`.
+    base: Rc<ProcessDialog>,
+    /// Java private final `pnlDataParameters`.
+    pnl_data_parameters: Rc<JComponent>,
+    // Dataset GUI objects
+    /// Java private final `pnlDataset`.
+    pnl_dataset: Rc<JComponent>,
+    /// Java private final `bctfRawImageStack`.
+    bctf_raw_image_stack: Rc<ButtonControlTextEfield>,
+    /// Java private final `ftfBackupDirectory`.
+    ftf_backup_directory: Rc<FileTextField>,
+    // Data type GUI objects
+    /// Java private final `pnlPerAxisInfo`.
+    pnl_per_axis_info: Rc<JComponent>,
+    /// Java private final `pnlAxisInfoA`.
+    pnl_axis_info_a: Rc<EtomoPanel>,
+    /// Java private final `pnlDataType`.
+    pnl_data_type: Rc<EtomoPanel>,
+    /// Java private final `pnlAxisType`.
+    pnl_axis_type: Rc<EtomoPanel>,
+    /// Java private final `rbSingleAxis`.
+    rb_single_axis: Rc<RadioButton>,
+    /// Java private final `rbDualAxis`.
+    rb_dual_axis: Rc<RadioButton>,
+    /// Java private final `pnlViewType`.
+    pnl_view_type: Rc<EtomoPanel>,
+    /// Java private final `rbSingleView`.
+    rb_single_view: Rc<RadioButton>,
+    /// Java private final `rbMontage`.
+    rb_montage: Rc<RadioButton>,
+    /// Java private final `btnViewRawStackA`.
+    btn_view_raw_stack_a: Rc<Run3dmodButton>,
+    /// Java private final `btnViewRawStackB`.
+    btn_view_raw_stack_b: Rc<Run3dmodButton>,
+    // Image parameter objects
+    /// Java private final `pnlImageParams`.
+    pnl_image_params: Rc<JComponent>,
+    /// Java private final `btnScanHeader`.
+    btn_scan_header: Rc<MultiLineButton>,
+    /// Java private final `pnlImageRows`.
+    pnl_image_rows: Rc<JComponent>,
+    /// Java private final `pnlStackInfo`.
+    pnl_stack_info: Rc<JComponent>,
+    /// Java private final `ltfPixelSize`.
+    ltf_pixel_size: Rc<LabeledTextField>,
+    /// Java private final `ltfFiducialDiameter`.
+    ltf_fiducial_diameter: Rc<LabeledTextField>,
+    /// Java private final `ltfImageRotation`.
+    ltf_image_rotation: Rc<LabeledTextField>,
+    /// Java private final `pnlDistortionInfo`.
+    pnl_distortion_info: Rc<JComponent>,
+    /// Java private final `ftfDistortionFile`.
+    ftf_distortion_file: Rc<FileTextField>,
+    /// Java private final `ltfBinning`.
+    ltf_binning: Rc<LabeledTextField>,
+    /// Java private final `pnlMagGradientInfo`.
+    pnl_mag_gradient_info: Rc<JComponent>,
+    /// Java private final `ftfMagGradientFile`.
+    ftf_mag_gradient_file: Rc<FileTextField>,
+    /// Java private final `cbParallelProcess`.
+    cb_parallel_process: Rc<CheckBox>,
+    /// Java private final `cbGpuProcessing`.
+    cb_gpu_processing: Rc<CheckBox>,
+    // Tilt angle GUI objects
+    /// Java private final `ltfExcludeListA`.
+    ltf_exclude_list_a: Rc<LabeledTextField>,
+    /// Java private final `pnlAdjustedFocusA`.
+    pnl_adjusted_focus_a: Rc<JComponent>,
+    /// Java private final `cbAdjustedFocusA`.
+    cb_adjusted_focus_a: Rc<CheckBox>,
+    /// Java private final `borderAxisInfoB`.
+    border_axis_info_b: Rc<BeveledBorder>,
+    /// Java private final `ltfExcludeListB`.
+    ltf_exclude_list_b: Rc<LabeledTextField>,
+    /// Java private final `pnlAdjustedFocusB`.
+    pnl_adjusted_focus_b: Rc<JComponent>,
+    /// Java private final `cbAdjustedFocusB`.
+    cb_adjusted_focus_b: Rc<CheckBox>,
+    /// Java private final `cbTfTwodir`.
+    cb_tf_twodir: Rc<CheckBox>,
+    /// Java private (non-final, never reassigned) `bgTfTwoDir`.
+    #[allow(dead_code)]
+    bg_tf_two_dir: Rc<ButtonGroup>,
+    /// Java private final `rbBidirectional`.
+    rb_bidirectional: Rc<RadioButton>,
+    /// Java private final `rbDoseSymmetric`.
+    rb_dose_symmetric: Rc<RadioButton>,
+    /// Java private final `tfTwodir`.
+    tf_twodir: Rc<TextField>,
+    /// Java private final `tfDoseSym`.
+    tf_dose_sym: Rc<TextField>,
+    /// Java private final `cbTfBtwodir`.
+    cb_tf_btwodir: Rc<CheckBox>,
+    /// Java private (non-final, never reassigned) `bgTfBtwoDir`.
+    #[allow(dead_code)]
+    bg_tf_btwo_dir: Rc<ButtonGroup>,
+    /// Java private final `rbBBidirectional`.
+    rb_b_bidirectional: Rc<RadioButton>,
+    /// Java private final `rbBDoseSymmetric`.
+    rb_b_dose_symmetric: Rc<RadioButton>,
+    /// Java private final `tfBtwodir`.
+    tf_btwodir: Rc<TextField>,
+    /// Java private final `tfBDoseSym`.
+    tf_b_dose_sym: Rc<TextField>,
+    /// Java private final `lTwodirfrom`.
+    l_twodirfrom: Rc<JComponent>,
+    /// Java private final `lBtwodirfrom`.
+    l_btwodirfrom: Rc<JComponent>,
+    /// Java private final `lTwodir`.
+    l_twodir: Rc<JComponent>,
+    /// Java private final `lBtwodir`.
+    l_btwodir: Rc<JComponent>,
+    /// Java private final `cbRemoveExcludedViews`.
+    cb_remove_excluded_views: Rc<CheckBox>,
+    /// Java private final `cbDeleteOldFiles`.
+    cb_delete_old_files: Rc<CheckBox>,
+    /// Java private final `lRemoveExcludeViewsMsgA`.
+    l_remove_exclude_views_msg_a: Rc<JComponent>,
+    /// Java private final `lRemoveExcludeViewsMsgB`.
+    l_remove_exclude_views_msg_b: Rc<JComponent>,
+    // HalfFloatModeOutput
+    /// Java private final `lHalfFloatModeOutput` (declared `JLabel`, built as
+    /// a `Label`).
+    l_half_float_mode_output: Rc<Label>,
+    /// Java private final `cbHalfFloatModeOutput`.
+    cb_half_float_mode_output: Rc<CheckBox>,
+    /// Java private final `cbHalfFloatModeOutputIfFloat`.
+    cb_half_float_mode_output_if_float: Rc<CheckBox>,
+    /// Java private final `lHalfFloatModeOutputActive` (declared `JLabel`,
+    /// built as a `Label`).
+    l_half_float_mode_output_active: Rc<Label>,
+
+    /// Java private final `expert`.  Weak: the expert owns this dialog.
+    expert: Weak<SetupDialogExpert>,
+    /// Java private final `calibrationAvailable`.
+    calibration_available: bool,
+    /// Java private final `listener`.
+    listener: Rc<SetupDialogActionListener>,
+    /// Java private final `templatePanel`.
+    template_panel: Rc<TemplatePanel>,
+    /// Java private final `progressPanel`.
+    progress_panel: Rc<AxisProgressPanel>,
+    /// Java private final `tiltAnglesA`.
+    tilt_angles_a: Rc<TiltAnglePanel>,
+    /// Java private final `tiltAnglesB`.
+    tilt_angles_b: Rc<TiltAnglePanel>,
+
+    /// Java private `directiveFileCollection` (never read or written after its
+    /// initialiser in the Java).
+    #[allow(dead_code)]
+    directive_file_collection: RefCell<Option<DirectiveFileCollectionHandle>>,
+    /// Java private `excludeViewsSucceededA`.
+    exclude_views_succeeded_a: Cell<bool>,
+    /// Java private `excludeViewsSucceededB`.
+    exclude_views_succeeded_b: Cell<bool>,
+    /// Rust-only: Java's `this`, handed to listeners and to the expandable
+    /// registration.
+    this: Weak<SetupDialog>,
 }
-/// Java private static `BackupDirectoryActionListener`.
-pub struct BackupDirectoryActionListener;
-impl BackupDirectoryActionListener {
-    pub fn action_performed<E: SetupDialogExpert>(
-        dialog: &mut SetupDialog<E>,
-        selected_file: Option<String>,
-    ) {
-        dialog.backup_directory_action(selected_file);
+
+impl Deref for SetupDialog {
+    type Target = ProcessDialog;
+
+    fn deref(&self) -> &ProcessDialog {
+        &self.base
     }
 }
-/// Java private static `DistortionFileActionListener`.
-pub struct DistortionFileActionListener;
-impl DistortionFileActionListener {
-    pub fn action_performed<E: SetupDialogExpert>(
-        dialog: &mut SetupDialog<E>,
-        selected_file: Option<String>,
-    ) {
-        dialog.distortion_file_action(selected_file);
-    }
-}
-/// Java private static `MagGradientFileActionListener`.
-pub struct MagGradientFileActionListener;
-impl MagGradientFileActionListener {
-    pub fn action_performed<E: SetupDialogExpert>(
-        dialog: &mut SetupDialog<E>,
-        selected_file: Option<String>,
-    ) {
-        dialog.mag_gradient_file_action(selected_file);
-    }
-}
-/// Java private static `ViewRawStackAActionListener`.
-pub struct ViewRawStackAActionListener;
-impl ViewRawStackAActionListener {
-    pub fn action_performed<E: SetupDialogExpert>(
-        dialog: &SetupDialog<E>,
-    ) -> Option<(String, AxisID)> {
-        dialog.view_raw_stack_a()
-    }
-}
-/// Java private static `ViewRawStackBActionListener`.
-pub struct ViewRawStackBActionListener;
-impl ViewRawStackBActionListener {
-    pub fn action_performed<E: SetupDialogExpert>(
-        dialog: &SetupDialog<E>,
-    ) -> Option<(String, AxisID)> {
-        dialog.view_raw_stack_b()
-    }
-}
-/// Java private static `SetupDialogActionListener`; template action execution is a
-/// direct `SetupDialogExpert` boundary and the command remains unchanged.
-pub struct SetupDialogActionListener;
-impl SetupDialogActionListener {
-    pub fn action_performed(action_command: String) -> String {
-        action_command
-    }
-}
-/// Canonical Java `SetupDialogExpert` boundary.
-pub use super::setup_dialog_expert::SetupDialogExpert;
-/// Java final `SetupDialog`: Swing widgets/filesystem/template collaborators remain boundaries.
-pub struct SetupDialog<E: SetupDialogExpert> {
-    pub expert: E,
-    pub raw_image_stack: String,
-    pub backup_directory: String,
-    pub single_axis: bool,
-    pub dual_axis: bool,
-    pub single_view: bool,
-    pub montage: bool,
-    pub pixel_size: String,
-    pub fiducial_diameter: String,
-    pub image_rotation: String,
-    pub distortion_file: String,
-    pub binning: String,
-    pub mag_gradient_file: String,
-    pub parallel_process: bool,
-    pub gpu_processing: bool,
-    pub gpu_processing_enabled: bool,
-    pub exclude_list_a: String,
-    pub exclude_list_b: String,
-    pub adjusted_focus_a: bool,
-    pub adjusted_focus_b: bool,
-    pub remove_excluded_views: bool,
-    pub delete_old_files: bool,
-    pub remove_exclude_views_msg_a: String,
-    pub remove_exclude_views_msg_b: String,
-    pub exclude_views_succeeded_a: bool,
-    pub exclude_views_succeeded_b: bool,
-    pub displayed: bool,
-    pub axis_id: AxisID,
-    pub dialog_type: DialogType,
-    pub calibration_available: bool,
-    pub root_panel_y_axis: bool,
-    pub raw_image_stack_files_only: bool,
-    pub raw_image_stack_absolute_path: bool,
-    pub raw_image_stack_display_limit: usize,
-    pub dataset_panel_created: bool,
-    pub data_type_panel_created: bool,
-    pub per_axis_info_panel_created: bool,
-    pub progress_panel_visible: bool,
-    pub advanced_button_present: bool,
-    pub exit_buttons_added: bool,
-    pub listeners_added: bool,
-    pub axis_b_panel_visible: bool,
-    pub half_float_mode_output_enabled: bool,
-    pub half_float_mode_output: bool,
-    pub half_float_mode_output_if_float: bool,
-    pub half_float_mode_output_active_visible: bool,
-    pub view_raw_stack_a_command: String,
-    pub view_raw_stack_b_command: String,
-    pub context_menu_event: Option<MouseEvent>,
-    pub execute_enabled: bool,
-    pub cancel_enabled: bool,
-    pub twodir_a_selected: bool,
-    pub twodir_b_selected: bool,
-    pub dose_sym_a_selected: bool,
-    pub dose_sym_b_selected: bool,
-    pub twodir_a: String,
-    pub twodir_b: String,
-    pub dose_sym_a: String,
-    pub dose_sym_b: String,
-    pub exclude_list_a_enabled: bool,
-    pub exclude_list_b_enabled: bool,
-    pub adjusted_focus_a_enabled: bool,
-    pub adjusted_focus_b_enabled: bool,
-    pub view_raw_stack_a_enabled: bool,
-    pub view_raw_stack_b_enabled: bool,
-    pub twodir_a_enabled: bool,
-    pub twodir_b_enabled: bool,
-    pub dose_sym_a_enabled: bool,
-    pub dose_sym_b_enabled: bool,
-    pub distortion_file_visible: bool,
-    pub binning_visible: bool,
-    pub mag_gradient_info_visible: bool,
-    pub raw_image_stack_field_tooltip: String,
-    pub raw_image_stack_button_tooltip: String,
-    pub backup_directory_field_tooltip: String,
-    pub backup_directory_button_tooltip: String,
-    pub scan_header_tooltip: String,
-    pub directive_file_collection: Option<SetupDialogDirectiveFileCollection>,
-    pub tooltip_assignments: Vec<(String, String)>,
-}
-impl<E: SetupDialogExpert> SetupDialog<E> {
+
+impl SetupDialog {
     /// Java private `SetupDialog(SetupDialogExpert, ApplicationManager, AxisID,
-    /// DialogType, boolean, ValidationSet, AxisProgressPanel)`.  Manager, template,
-    /// tilt-angle, progress, and Swing component construction remain their direct
-    /// source boundaries; all construction decisions made by this unit are retained.
-    pub fn new_with_construction(
-        expert: E,
+    /// DialogType, boolean, ValidationSet, AxisProgressPanel)`: construct the
+    /// setup dialog.
+    ///
+    /// Java runs `super(...)`, then the field initialisers in declaration
+    /// order, then the body; the statements of the body that only assign
+    /// fields run inside `Rc::new_cyclic` in their Java order, and the rest of
+    /// the body runs right after, on the finished `Rc`, also in Java order.
+    #[allow(clippy::too_many_arguments)]
+    fn new(
+        expert: &Rc<SetupDialogExpert>,
+        manager: &'static ApplicationManager,
         axis_id: AxisID,
         dialog_type: DialogType,
         calibration_available: bool,
-        half_float_mode_output_enabled: bool,
-    ) -> Self {
-        let mut dialog = Self::new(expert);
-        dialog.axis_id = axis_id;
-        dialog.dialog_type = dialog_type;
-        dialog.calibration_available = calibration_available;
-        dialog.half_float_mode_output_enabled = half_float_mode_output_enabled;
-        dialog.root_panel_y_axis = true;
-        dialog.raw_image_stack_files_only = true;
-        dialog.raw_image_stack_absolute_path = true;
-        dialog.raw_image_stack_display_limit = 50;
-        dialog.view_raw_stack_a_command =
-            format!("{}{}", VIEW_RAW_STACK_LABEL, AxisID::First.get_extension());
-        dialog.view_raw_stack_b_command =
-            format!("{}{}", VIEW_RAW_STACK_LABEL, AxisID::Second.get_extension());
-        dialog.create_dataset_panel();
-        dialog.create_data_type_panel();
-        dialog.create_per_axis_info_panel();
-        dialog.advanced_button_present = !calibration_available;
-        dialog.exit_buttons_added = true;
-        dialog.update_display(false, false);
-        dialog
+        binning_validation_set: Arc<ValidationSet>,
+        progress_panel: Rc<AxisProgressPanel>,
+    ) -> Rc<SetupDialog> {
+        let instance = Rc::new_cyclic(|this: &Weak<SetupDialog>| {
+            let base = ProcessDialog::new_application_manager_axis_id_dialog_type_boolean(
+                manager,
+                axis_id,
+                dialog_type,
+                false,
+            );
+            // Field initialisers.
+            let pnl_data_parameters = JComponent::new_panel();
+            let pnl_dataset = JComponent::new_panel();
+            let bctf_raw_image_stack = ButtonControlTextEfield::get_labeled_file_instance_string(
+                Some("Raw Image Stack: "),
+            );
+            let ftf_backup_directory = FileTextField::new(BACKUP_DIRECTORY_LABEL);
+            let pnl_per_axis_info = JComponent::new_panel();
+            let pnl_axis_info_a = EtomoPanel::new();
+            let pnl_data_type = EtomoPanel::new();
+            let pnl_axis_type = EtomoPanel::new();
+            let rb_single_axis = RadioButton::new_string(Some(SINGLE_AXIS_LABEL));
+            let rb_dual_axis = RadioButton::new_string(Some("Dual axis"));
+            let pnl_view_type = EtomoPanel::new();
+            let rb_single_view = RadioButton::new_string(Some(SINGLE_FRAME_LABEL));
+            let rb_montage = RadioButton::new_string(Some(MONTAGE_LABEL));
+            let container: Weak<dyn Run3dmodButtonContainer> = this.clone();
+            let btn_view_raw_stack_a =
+                Run3dmodButton::get_3dmod_instance_string_run_3dmod_button_container(
+                    Some(VIEW_RAW_STACK_LABEL),
+                    Some(container.clone()),
+                );
+            let btn_view_raw_stack_b =
+                Run3dmodButton::get_3dmod_instance_string_run_3dmod_button_container(
+                    Some(VIEW_RAW_STACK_LABEL),
+                    Some(container),
+                );
+            let pnl_image_params = JComponent::new_panel();
+            let btn_scan_header = MultiLineButton::new_string(Some("Scan Header"));
+            let pnl_image_rows = JComponent::new_panel();
+            let pnl_stack_info = JComponent::new_panel();
+            let ltf_pixel_size = LabeledTextField::new_field_type_string(
+                FieldType::FloatingPoint,
+                Some("Pixel size (nm): "),
+            );
+            let ltf_fiducial_diameter = LabeledTextField::new_field_type_string(
+                FieldType::FloatingPoint,
+                Some(FIDUCIAL_DIAMETER_LABEL),
+            );
+            let ltf_image_rotation = LabeledTextField::new_field_type_string(
+                FieldType::FloatingPoint,
+                Some("Image rotation (degrees): "),
+            );
+            let pnl_distortion_info = JComponent::new_panel();
+            let ftf_distortion_file = FileTextField::new("Image distortion field file: ");
+            let ltf_binning = LabeledTextField::new_field_type_string(
+                FieldType::FloatingPoint,
+                Some("Binning: "),
+            );
+            let pnl_mag_gradient_info = JComponent::new_panel();
+            let ftf_mag_gradient_file = FileTextField::new("Mag gradients correction: ");
+            let cb_parallel_process = CheckBox::new_string(Some("Parallel Processing"));
+            let cb_gpu_processing = CheckBox::new_string(Some("Graphics card processing"));
+            let ltf_exclude_list_a = LabeledTextField::new_field_type_string(
+                FieldType::IntegerList,
+                Some("Exclude views: "),
+            );
+            let pnl_adjusted_focus_a = JComponent::new_panel();
+            let cb_adjusted_focus_a =
+                CheckBox::new_string(Some("Focus was adjusted between montage frames"));
+            let border_axis_info_b = Rc::new(BeveledBorder::new(Some("Axis B: ")));
+            let ltf_exclude_list_b = LabeledTextField::new_field_type_string(
+                FieldType::IntegerList,
+                Some("Exclude views: "),
+            );
+            let pnl_adjusted_focus_b = JComponent::new_panel();
+            let cb_adjusted_focus_b =
+                CheckBox::new_string(Some("Focus was adjusted between montage frames"));
+            let cb_tf_twodir = CheckBox::new_string(Some("Series was"));
+            let bg_tf_two_dir = ButtonGroup::new();
+            let rb_bidirectional =
+                RadioButton::new_string_button_group(Some("bidirectional"), Some(&bg_tf_two_dir));
+            let rb_dose_symmetric =
+                RadioButton::new_string_button_group(Some("dose-symmetric"), Some(&bg_tf_two_dir));
+            let tf_twodir = TextField::new(FieldType::FloatingPoint, Some("bidirectional"), None);
+            let tf_dose_sym =
+                TextField::new(FieldType::FloatingPoint, Some("dose-symmetric"), None);
+            let cb_tf_btwodir = CheckBox::new_string(Some("Series was"));
+            let bg_tf_btwo_dir = ButtonGroup::new();
+            let rb_b_bidirectional =
+                RadioButton::new_string_button_group(Some("bidirectional"), Some(&bg_tf_btwo_dir));
+            let rb_b_dose_symmetric =
+                RadioButton::new_string_button_group(Some("dose-symmetric"), Some(&bg_tf_btwo_dir));
+            let tf_btwodir = TextField::new(FieldType::FloatingPoint, Some("bidirectional"), None);
+            let tf_b_dose_sym =
+                TextField::new(FieldType::FloatingPoint, Some("b-dose-symmetric"), None);
+            let l_twodirfrom = JComponent::new_label("from");
+            let l_btwodirfrom = JComponent::new_label("from");
+            let l_twodir = JComponent::new_label(TWODIR_LABEL_2);
+            let l_btwodir = JComponent::new_label(TWODIR_LABEL_2);
+            let cb_remove_excluded_views = CheckBox::new_string(Some("Remove excluded views"));
+            let cb_delete_old_files = CheckBox::new_string(Some("Delete original files"));
+            let l_remove_exclude_views_msg_a = JComponent::new_label("");
+            let l_remove_exclude_views_msg_b = JComponent::new_label("");
+            // HalfFloatModeOutput
+            let l_half_float_mode_output = Label::new_string(Some("Output as half-size floats: "));
+            let cb_half_float_mode_output = CheckBox::new_string(Some("Unconditionally"));
+            let cb_half_float_mode_output_if_float =
+                CheckBox::new_string(Some("Only if raw stack is floating point"));
+            let l_half_float_mode_output_active = Label::new_string(Some("Using half-size floats"));
+
+            // Constructor body: the field assignments.
+            let tilt_angles_a = expert
+                .get_tilt_angles_panel_expert(AxisID::First)
+                .get_panel();
+            tilt_angles_a.set_parent(this.clone());
+            let tilt_angles_b = expert
+                .get_tilt_angles_panel_expert(AxisID::Second)
+                .get_panel();
+            tilt_angles_b.set_parent(this.clone());
+            ltf_binning.set_validation_set(Some(&*binning_validation_set));
+            let listener = Rc::new(SetupDialogActionListener::new(Rc::downgrade(expert)));
+            let template_listener = listener.clone();
+            let template_panel = TemplatePanel::get_instance(
+                manager,
+                axis_id,
+                Rc::new(move |event: &ActionEvent| template_listener.action_performed(event)),
+                Some("Templates"),
+                None,
+                false,
+            );
+            // progressPanel = AxisProgressPanel.getInstance(axisID, manager);
+            SetupDialog {
+                base,
+                pnl_data_parameters,
+                pnl_dataset,
+                bctf_raw_image_stack,
+                ftf_backup_directory,
+                pnl_per_axis_info,
+                pnl_axis_info_a,
+                pnl_data_type,
+                pnl_axis_type,
+                rb_single_axis,
+                rb_dual_axis,
+                pnl_view_type,
+                rb_single_view,
+                rb_montage,
+                btn_view_raw_stack_a,
+                btn_view_raw_stack_b,
+                pnl_image_params,
+                btn_scan_header,
+                pnl_image_rows,
+                pnl_stack_info,
+                ltf_pixel_size,
+                ltf_fiducial_diameter,
+                ltf_image_rotation,
+                pnl_distortion_info,
+                ftf_distortion_file,
+                ltf_binning,
+                pnl_mag_gradient_info,
+                ftf_mag_gradient_file,
+                cb_parallel_process,
+                cb_gpu_processing,
+                ltf_exclude_list_a,
+                pnl_adjusted_focus_a,
+                cb_adjusted_focus_a,
+                border_axis_info_b,
+                ltf_exclude_list_b,
+                pnl_adjusted_focus_b,
+                cb_adjusted_focus_b,
+                cb_tf_twodir,
+                bg_tf_two_dir,
+                rb_bidirectional,
+                rb_dose_symmetric,
+                tf_twodir,
+                tf_dose_sym,
+                cb_tf_btwodir,
+                bg_tf_btwo_dir,
+                rb_b_bidirectional,
+                rb_b_dose_symmetric,
+                tf_btwodir,
+                tf_b_dose_sym,
+                l_twodirfrom,
+                l_btwodirfrom,
+                l_twodir,
+                l_btwodir,
+                cb_remove_excluded_views,
+                cb_delete_old_files,
+                l_remove_exclude_views_msg_a,
+                l_remove_exclude_views_msg_b,
+                l_half_float_mode_output,
+                cb_half_float_mode_output,
+                cb_half_float_mode_output_if_float,
+                l_half_float_mode_output_active,
+                expert: Rc::downgrade(expert),
+                calibration_available,
+                listener,
+                template_panel,
+                progress_panel,
+                tilt_angles_a,
+                tilt_angles_b,
+                directive_file_collection: RefCell::new(None),
+                exclude_views_succeeded_a: Cell::new(false),
+                exclude_views_succeeded_b: Cell::new(false),
+                this: this.clone(),
+            }
+        });
+        // The superclass dispatches `done` / `buttonExecuteAction` to this
+        // subclass.
+        instance
+            .base
+            .set_this(Rc::downgrade(&instance) as Weak<dyn ProcessDialogVirtual>);
+
+        // Constructor body, continued.
+        instance.progress_panel.set_visible(false);
+        // Swing layout: rootPanel BoxLayout Y_AXIS.
+        instance
+            .bctf_raw_image_stack
+            .set_file_selection_mode(file_chooser::FILES_ONLY);
+        let expert_dataset_dir = expert.get_dataset_dir();
+        instance
+            .bctf_raw_image_stack
+            .set_select_file_dir(expert_dataset_dir.as_deref());
+        // Defaults to absolute path
+        let base_manager: &'static dyn BaseManager = manager;
+        instance.bctf_raw_image_stack.set_file_filter(Some(Rc::new(
+            crate::imod::etomo::storage::stack_file_filter::StackFileFilter::get_instance(
+                Some(base_manager),
+                false,
+            ),
+        )
+            as Rc<dyn crate::imod::etomo::jdk::FileFilter>));
+        instance
+            .bctf_raw_image_stack
+            .set_limit_displayed_file_path(50);
+        instance.create_dataset_panel();
+        instance.create_data_type_panel();
+        instance.create_per_axis_info_panel();
+        instance
+            .btn_view_raw_stack_a
+            .set_action_command(Some(&format!(
+                "{}{}",
+                VIEW_RAW_STACK_LABEL,
+                AxisID::First.get_extension()
+            )));
+        instance
+            .btn_view_raw_stack_b
+            .set_action_command(Some(&format!(
+                "{}{}",
+                VIEW_RAW_STACK_LABEL,
+                AxisID::Second.get_extension()
+            )));
+        instance.btn_execute.set_text(Some("Create Com Scripts"));
+
+        if calibration_available {
+            // There are no advanced settings for this dialog, remove the
+            // advanced button
+            instance
+                .pnl_exit_buttons
+                .remove(&instance.btn_advanced.get_component());
+        }
+
+        // Add the panes to the dialog box
+        let root_panel = instance.root_panel.get_component();
+        root_panel.add(&instance.pnl_data_parameters);
+        // Swing layout: vertical glue, rigid area x0_y10.
+        root_panel.add(&instance.pnl_per_axis_info);
+        // Swing layout: vertical glue.
+        instance.add_exit_buttons();
+        // Swing layout: UIUtilities.alignComponentsX(rootPanel, CENTER_ALIGNMENT).
+
+        // Resize the standard panel buttons
+        // Swing layout: UIUtilities.setButtonSizeAll(pnlExitButtons, button dimension).
+        if !calibration_available {
+            instance.update_advanced(instance.btn_advanced.is_expanded());
+            instance
+                .btn_advanced
+                .register_expandable(Rc::downgrade(&instance) as Weak<dyn Expandable>);
+        }
+        // Calcute the necessary window size
+        instance.pack_axis();
+        instance
     }
 
-    /// Java static `getInstance`.
+    /// Java package-private static `getInstance(SetupDialogExpert,
+    /// ApplicationManager, AxisID, DialogType, boolean, ValidationSet,
+    /// AxisProgressPanel)`.
+    #[allow(clippy::too_many_arguments)]
     pub fn get_instance(
-        expert: E,
+        expert: &Rc<SetupDialogExpert>,
+        manger: &'static ApplicationManager,
         axis_id: AxisID,
         dialog_type: DialogType,
         calibration_available: bool,
-        half_float_mode_output_enabled: bool,
-    ) -> Self {
-        let mut instance = Self::new_with_construction(
+        binning_validation_set: Arc<ValidationSet>,
+        progress_panel: Rc<AxisProgressPanel>,
+    ) -> Rc<SetupDialog> {
+        let instance = SetupDialog::new(
             expert,
+            manger,
             axis_id,
             dialog_type,
             calibration_available,
-            half_float_mode_output_enabled,
+            binning_validation_set,
+            progress_panel,
         );
         instance.add_listeners();
         instance
     }
 
-    pub fn new(expert: E) -> Self {
-        Self {
-            expert,
-            raw_image_stack: String::new(),
-            backup_directory: String::new(),
-            single_axis: true,
-            dual_axis: false,
-            single_view: true,
-            montage: false,
-            pixel_size: String::new(),
-            fiducial_diameter: String::new(),
-            image_rotation: String::new(),
-            distortion_file: String::new(),
-            binning: String::new(),
-            mag_gradient_file: String::new(),
-            parallel_process: false,
-            gpu_processing: false,
-            gpu_processing_enabled: false,
-            exclude_list_a: String::new(),
-            exclude_list_b: String::new(),
-            adjusted_focus_a: false,
-            adjusted_focus_b: false,
-            remove_excluded_views: false,
-            delete_old_files: false,
-            remove_exclude_views_msg_a: String::new(),
-            remove_exclude_views_msg_b: String::new(),
-            exclude_views_succeeded_a: false,
-            exclude_views_succeeded_b: false,
-            displayed: true,
-            axis_id: AxisID::First,
-            dialog_type: DialogType::SetupRecon,
-            calibration_available: false,
-            root_panel_y_axis: false,
-            raw_image_stack_files_only: false,
-            raw_image_stack_absolute_path: false,
-            raw_image_stack_display_limit: 0,
-            dataset_panel_created: false,
-            data_type_panel_created: false,
-            per_axis_info_panel_created: false,
-            progress_panel_visible: false,
-            advanced_button_present: true,
-            exit_buttons_added: false,
-            listeners_added: false,
-            axis_b_panel_visible: true,
-            half_float_mode_output_enabled: false,
-            half_float_mode_output: false,
-            half_float_mode_output_if_float: false,
-            half_float_mode_output_active_visible: false,
-            view_raw_stack_a_command: String::new(),
-            view_raw_stack_b_command: String::new(),
-            context_menu_event: None,
-            execute_enabled: true,
-            cancel_enabled: true,
-            twodir_a_selected: false,
-            twodir_b_selected: false,
-            dose_sym_a_selected: false,
-            dose_sym_b_selected: false,
-            twodir_a: String::new(),
-            twodir_b: String::new(),
-            dose_sym_a: String::new(),
-            dose_sym_b: String::new(),
-            exclude_list_a_enabled: true,
-            exclude_list_b_enabled: true,
-            adjusted_focus_a_enabled: false,
-            adjusted_focus_b_enabled: false,
-            view_raw_stack_a_enabled: true,
-            view_raw_stack_b_enabled: true,
-            twodir_a_enabled: false,
-            twodir_b_enabled: false,
-            dose_sym_a_enabled: false,
-            dose_sym_b_enabled: false,
-            distortion_file_visible: false,
-            binning_visible: false,
-            mag_gradient_info_visible: false,
-            raw_image_stack_field_tooltip: String::new(),
-            raw_image_stack_button_tooltip: String::new(),
-            backup_directory_field_tooltip: String::new(),
-            backup_directory_button_tooltip: String::new(),
-            scan_header_tooltip: String::new(),
-            directive_file_collection: None,
-            tooltip_assignments: Vec::new(),
+    /// Java `UIHarness.INSTANCE.pack(axisID, applicationManager)`.
+    fn pack_axis(&self) {
+        let manager: &'static dyn BaseManager = self.application_manager;
+        let axis_id = self.axis_id;
+        ui_harness::INSTANCE
+            .with(|harness| harness.pack_axis_id_base_manager(Some(axis_id), Some(manager)));
+    }
+
+    /// Java `UIHarness.INSTANCE.pack(applicationManager)`.
+    fn pack(&self) {
+        let manager: &'static dyn BaseManager = self.application_manager;
+        ui_harness::INSTANCE.with(|harness| harness.pack_base_manager(Some(manager)));
+    }
+
+    fn expert(&self) -> Option<Rc<SetupDialogExpert>> {
+        self.expert.upgrade()
+    }
+
+    /// Java package-private `msgSetupReconFailed()`.
+    pub fn msg_setup_recon_failed(&self) {
+        if self.exclude_views_succeeded_a.get() || self.exclude_views_succeeded_b.get() {
+            // `openInfoMessageDialog(manager, cbRemoveExcludedViews, ...)`: the
+            // component only places the popup.
+            ui_harness::open_info_message_dialog_from_process(
+                Some(self.application_manager as &'static dyn BaseManager),
+                "Excludeviews has run successfully.  Views have been removed.",
+                "Views Excluded",
+                None,
+            );
         }
-    }
-
-    /// Java private `createDatasetPanel`.
-    pub fn create_dataset_panel(&mut self) {
-        self.dataset_panel_created = true;
-    }
-
-    /// Java private `createDataTypePanel`.
-    pub fn create_data_type_panel(&mut self) {
-        self.data_type_panel_created = true;
-        self.half_float_mode_output_active_visible = false;
-    }
-
-    /// Java private `createPerAxisInfoPanel`.
-    pub fn create_per_axis_info_panel(&mut self) {
-        self.per_axis_info_panel_created = true;
-        self.adjusted_focus_a = false;
-        self.adjusted_focus_b = false;
-        self.update_display(false, false);
-    }
-
-    /// Java private `addListeners`.
-    pub fn add_listeners(&mut self) {
-        self.listeners_added = true;
-    }
-
-    /// Java `popUpContextMenu(MouseEvent)`.
-    pub fn pop_up_context_menu(&mut self, mouse_event: MouseEvent) {
-        self.context_menu_event = Some(mouse_event);
-    }
-
-    /// Java `updateDisplay(boolean, boolean)` subset owned by the constructor-created
-    /// controls; concrete tilt-angle and process-panel painting remain boundaries.
-    pub fn update_display(&mut self, process_running: bool, process_done: bool) {
-        self.half_float_mode_output_active_visible = self.half_float_mode_output_enabled
-            && (self.half_float_mode_output || self.half_float_mode_output_if_float);
-        self.delete_old_files = self.remove_excluded_views && !process_running;
-        let enabled = if process_running {
-            false
-        } else {
-            process_done || self.displayed
-        };
-        self.execute_enabled = enabled;
-        self.cancel_enabled = enabled;
-        self.adjusted_focus_a_enabled = self.montage;
-        self.adjusted_focus_b_enabled = self.dual_axis && self.montage;
-        self.axis_b_panel_visible = self.dual_axis;
-        self.twodir_a_enabled = self.twodir_a_selected;
-        self.dose_sym_a_enabled = self.twodir_a_selected;
-        if self.dual_axis {
-            self.twodir_b_enabled = self.twodir_b_selected;
-            self.dose_sym_b_enabled = self.twodir_b_selected;
-        }
-    }
-    pub fn get_raw_image_stack(&self) -> &str {
-        &self.raw_image_stack
-    }
-    /// Java private `isRemoveExcludedViews`.
-    pub fn is_remove_excluded_views(&self) -> bool {
-        self.remove_excluded_views
-    }
-    pub fn get_dataset_name(&self) -> String {
-        let n = self.raw_image_stack.trim().rsplit('/').next().unwrap_or("");
-        let n = n.rsplit_once('.').map_or(n, |(x, _)| x);
-        n.strip_suffix(&AxisID::First.get_extension())
-            .or_else(|| n.strip_suffix(&AxisID::Second.get_extension()))
-            .unwrap_or(n)
-            .into()
-    }
-    /// Java package-private `getDirectory`.
-    pub fn get_directory(&self) -> Option<String> {
-        self.raw_image_stack
-            .rsplit_once('/')
-            .map(|(directory, _)| directory.into())
-    }
-    pub fn done(&mut self) {
-        let d = self.raw_image_stack.rsplit_once('/').map(|(d, _)| d);
-        self.expert
-            .done_setup_dialog(self.remove_excluded_views, d, self.dual_axis);
-        self.displayed = false
-    }
-    pub fn msg_setup_recon_failed(&mut self) {
-        self.expert.setup_recon_failed();
         self.update_display(false, true);
     }
-    pub fn set_raw_image_stack(&mut self, input: &str) {
-        self.raw_image_stack = input.into()
-    }
-    pub fn set_parallel_process(&mut self, input: bool) {
-        self.parallel_process = input
-    }
-    pub fn set_gpu_processing_enabled(&mut self, input: bool) {
-        self.gpu_processing_enabled = input
-    }
-    pub fn set_gpu_processing(&mut self, input: bool) {
-        self.gpu_processing = input
-    }
-    pub fn set_binning(&mut self, input: impl Into<String>) {
-        self.binning = input.into();
-    }
-    /// Java `setHalfFloatModeOutput(Integer)`; CopyTomoComs values are 1 and 2.
-    pub fn set_half_float_mode_output(&mut self, input: Option<i32>) {
-        self.half_float_mode_output = input == Some(1);
-        self.half_float_mode_output_if_float = input == Some(2);
-        self.update_display(false, false);
+
+    /// Java private `isRemoveExcludedViews()`.
+    fn is_remove_excluded_views(&self) -> bool {
+        self.cb_remove_excluded_views.is_enabled() && self.cb_remove_excluded_views.is_selected()
     }
 
-    /// Java `showProgressPanel`.
-    pub fn show_progress_panel(&mut self) {
-        self.progress_panel_visible = true;
+    /// Java package-private `showProgressPanel()`.
+    pub fn show_progress_panel(&self) {
+        self.progress_panel.set_visible(true);
         self.update_display(true, false);
     }
 
-    /// Java `buttonExecuteAction`; dataset validation is the direct `DatasetTool`
-    /// boundary and is supplied by the caller.
-    pub fn button_execute_action(&self, dataset_name_valid: bool) -> bool {
-        dataset_name_valid
-    }
+    /// Java package-private `updateDisplay(boolean, boolean)`: enable/disable
+    /// fields.  `process_done` is set when a process from this dialog has
+    /// completed.
+    pub fn update_display(&self, process_running: bool, process_done: bool) {
+        let is_float_mode_input = || {
+            self.expert()
+                .is_some_and(|expert| expert.is_float_mode_input())
+        };
+        self.l_half_float_mode_output_active.set_visible(
+            self.l_half_float_mode_output.get_component().is_enabled()
+                && (self.cb_half_float_mode_output.is_selected()
+                    || (self.cb_half_float_mode_output_if_float.is_selected()
+                        && is_float_mode_input())),
+        );
 
-    /// Java `actionPerformed(ActionEvent)` for the two mutually-exclusive half-float
-    /// controls. `loadHeader` stays at the `SetupDialogExpert` boundary.
-    pub fn action_performed(&mut self, action_command: Option<&str>) {
-        if action_command == Some("halfFloatModeOutput")
-            && self.half_float_mode_output
-            && self.half_float_mode_output_if_float
-        {
-            self.half_float_mode_output_if_float = false;
-        } else if action_command == Some("halfFloatModeOutputIfFloat")
-            && self.half_float_mode_output_if_float
-        {
-            self.half_float_mode_output = false;
+        self.cb_delete_old_files
+            .set_enabled(self.cb_remove_excluded_views.is_selected());
+        let enabled;
+        if process_running {
+            enabled = false;
+        } else if process_done {
+            enabled = true;
+        } else {
+            enabled = self.progress_panel.is_stopped();
         }
-        self.update_display(false, false);
+        self.btn_execute.set_enabled(enabled);
+        self.btn_cancel.set_enabled(enabled);
+        self.tilt_angles_a.update_display();
+        self.tilt_angles_b.update_display();
+        // AxisA
+        self.rb_bidirectional
+            .set_enabled(self.cb_tf_twodir.is_selected());
+        self.rb_dose_symmetric
+            .set_enabled(self.cb_tf_twodir.is_selected());
+        self.tf_twodir
+            .set_enabled(self.cb_tf_twodir.is_selected() && self.rb_bidirectional.is_selected());
+        self.tf_twodir
+            .set_visible(self.rb_bidirectional.is_selected());
+        self.tf_dose_sym
+            .set_enabled(self.cb_tf_twodir.is_selected() && self.rb_dose_symmetric.is_selected());
+        self.tf_dose_sym
+            .set_visible(self.rb_dose_symmetric.is_selected());
+        self.l_twodir.set_enabled(self.cb_tf_twodir.is_selected());
+        self.l_twodirfrom
+            .set_enabled(self.cb_tf_twodir.is_selected());
+        // AxisB
+        if self.rb_dual_axis.is_selected() {
+            self.rb_b_bidirectional
+                .set_enabled(self.cb_tf_btwodir.is_selected());
+            self.rb_b_dose_symmetric
+                .set_enabled(self.cb_tf_btwodir.is_selected());
+            self.tf_btwodir.set_enabled(
+                self.cb_tf_btwodir.is_selected() && self.rb_b_bidirectional.is_selected(),
+            );
+            self.tf_btwodir
+                .set_visible(self.rb_b_bidirectional.is_selected());
+            self.tf_b_dose_sym.set_enabled(
+                self.cb_tf_btwodir.is_selected() && self.rb_b_dose_symmetric.is_selected(),
+            );
+            self.tf_b_dose_sym
+                .set_visible(self.rb_b_dose_symmetric.is_selected());
+            self.l_btwodir.set_enabled(self.cb_tf_btwodir.is_selected());
+            self.l_btwodirfrom
+                .set_enabled(self.cb_tf_btwodir.is_selected());
+        }
+
+        self.pack();
     }
 
-    /// Java `action(String, Deferred3dmodButton, Run3dmodMenuOptions)`.  The
-    /// returned source call arguments cross to the still-native 3dmod launcher.
-    pub fn action(&self, action_command: &str) -> Option<(String, AxisID)> {
-        let raw_image_stack = self.raw_image_stack.trim();
+    /// Java package-private `getDatasetName()`: derive the dataset name from
+    /// whatever is in ftfDataset (which make be a file name, a file with path,
+    /// or a dataset name).
+    pub fn get_dataset_name(&self) -> Option<String> {
+        let dataset = self.bctf_raw_image_stack.get_text_void()?;
+        let dataset = java_lang_string_trim(&dataset).to_owned();
+        if java_lang_string_matches_whitespace(&dataset) {
+            return None;
+        }
+        let mut dataset_name: Vec<char> =
+            utilities::java_io_file_get_name(&dataset).chars().collect();
+        // Remove the extension.
+        let index = dataset_name.iter().rposition(|&c| c == '.');
+        if let Some(index) = index
+            && index > 1
+        {
+            dataset_name.truncate(index);
+        }
+        let length = dataset_name.len();
+        let mut dataset_name: String = dataset_name.into_iter().collect();
+        // Check for and remove axis extension.
+        let axis_extension_len = AxisID::get_extension_length() as usize;
+        // Upstream bug fixed in translation (SetupDialog.java:392-394): the
+        // source's parentheses close around the first `endsWith` only, so
+        // `dual && long enough && endsWith(a) || endsWith(b)` strips a
+        // trailing "b" from a single-axis name, and from a name no longer than
+        // the axis extension.  The test here is the one the parentheses and
+        // `DatasetTool.getDatasetName` show was meant: dual axis, long enough,
+        // and ending in either axis extension.
+        if self.rb_dual_axis.is_selected()
+            && length > axis_extension_len
+            && (dataset_name.ends_with(&AxisID::First.get_extension())
+                || dataset_name.ends_with(&AxisID::Second.get_extension()))
+        {
+            dataset_name = dataset_name
+                .chars()
+                .take(length - axis_extension_len)
+                .collect();
+        }
+        Some(dataset_name)
+    }
+
+    /// Java package-private `getDirectory()`: the parent of the raw image
+    /// stack's path (`File.getParentFile()`), or null.
+    pub fn get_directory(&self) -> Option<String> {
+        let raw_image_stack = self.bctf_raw_image_stack.get_text_void()?;
         if raw_image_stack.is_empty() {
             return None;
         }
-        let extension = raw_image_stack
-            .rsplit_once('.')
-            .map(|(_, extension)| extension)?;
-        if action_command == self.view_raw_stack_a_command {
-            Some((format!(".{extension}"), AxisID::First))
-        } else if action_command == self.view_raw_stack_b_command {
-            Some((format!(".{extension}"), AxisID::Second))
-        } else {
-            None
-        }
+        utilities::java_io_file_get_parent(&raw_image_stack)
     }
 
-    pub fn focus_gained(&self) {}
-    pub fn focus_lost(&mut self) {
-        self.control_event(false, false);
-    }
-
-    /// Java `controlEvent`; filesystem discovery of existing excludeviews info files
-    /// remains a direct file-system boundary represented by its two results.
-    pub fn control_event(
-        &mut self,
-        exclude_views_info_a_exists: bool,
-        exclude_views_info_b_exists: bool,
-    ) {
-        self.update_display(false, false);
-        if self.raw_image_stack.is_empty() {
-            self.remove_exclude_views_msg_a.clear();
-            self.remove_exclude_views_msg_b.clear();
+    /// Java `@Override actionPerformed(ActionEvent)` (ActionListener, for the
+    /// two half-float check boxes).
+    pub fn action_performed(&self, event: Option<&ActionEvent>) {
+        let Some(event) = event else {
             return;
-        }
-        self.remove_exclude_views_msg_a = if exclude_views_info_a_exists {
-            REMOVE_EXCLUDE_VIEW_MSG.into()
-        } else {
-            String::new()
         };
-        self.remove_exclude_views_msg_b = if self.dual_axis && exclude_views_info_b_exists {
-            REMOVE_EXCLUDE_VIEW_MSG.into()
-        } else {
-            String::new()
-        };
-        self.update_display(false, false);
-    }
-
-    /// Java `getParameters(ExcludeViewsParam, AxisID, boolean, boolean)` direct
-    /// parameter values.
-    pub fn get_parameters_exclude_views(&self, axis_id: AxisID) -> (String, bool, bool) {
-        let stack_name = self.get_dataset_name();
-        (
-            format!("{}{}", stack_name, axis_id.get_extension()),
-            self.montage,
-            self.delete_old_files && self.remove_excluded_views,
-        )
-    }
-
-    /// Java `checkpoint` boundary marker for all source controls.
-    pub fn checkpoint(&self) {}
-
-    pub fn get_directive_file_collection(&self) -> Option<&SetupDialogDirectiveFileCollection> {
-        self.directive_file_collection.as_ref()
-    }
-    /// Java `setParameters(UserConfiguration)`.
-    pub fn set_parameters_user_configuration(&mut self, remove_excluded_views: bool) {
-        self.remove_excluded_views = remove_excluded_views;
-        self.update_display(false, false);
-    }
-    /// Java `updateTemplateValues` with every directive value copied in source order.
-    pub fn update_template_values(&mut self, directives: SetupDialogDirectiveFileCollection) {
-        if let Some(dual) = directives.dual {
-            self.set_dual_axis(dual);
-            if !dual {
-                self.set_single_axis(true);
+        let action_command = event.get_action_command();
+        if let Some(action_command) = action_command {
+            // The two halfFloatModeOutput check box are exclusive like radio
+            // buttons
+            if Some(action_command)
+                == self
+                    .cb_half_float_mode_output
+                    .get_action_command()
+                    .as_deref()
+                && self.cb_half_float_mode_output.is_selected()
+                && self.cb_half_float_mode_output_if_float.is_selected()
+            {
+                self.cb_half_float_mode_output_if_float
+                    .set_selected_boolean(false);
+            } else if Some(action_command)
+                == self
+                    .cb_half_float_mode_output_if_float
+                    .get_action_command()
+                    .as_deref()
+                && self.cb_half_float_mode_output_if_float.is_selected()
+            {
+                if let Some(expert) = self.expert() {
+                    expert.load_header();
+                }
+                if self.cb_half_float_mode_output.is_selected() {
+                    self.cb_half_float_mode_output.set_selected_boolean(false);
+                }
             }
         }
-        if let Some(montage) = directives.montage {
-            self.set_montage(montage);
-            if !montage {
-                self.set_single_view(true);
-            }
-        }
-        if let Some(pixel_size) = &directives.pixel_size {
-            self.pixel_size = pixel_size.clone();
-        }
-        let twodir_a = directives.twodir_a.clone();
-        if let Some(value) = &twodir_a {
-            self.set_twodir(AxisID::First, value);
-        }
-        if let Some(value) = &directives.twodir_b {
-            self.set_twodir(AxisID::Second, value);
-        } else if let Some(value) = &twodir_a {
-            self.set_twodir(AxisID::Second, value);
-        }
-        let dose_sym_a = directives.dose_sym_a.clone();
-        if let Some(_value) = &dose_sym_a {
-            // Java's source assigns twodirA rather than doseSymA to tfDoseSym.
-            self.set_dose_sym(AxisID::First, twodir_a.clone().unwrap_or_default());
-        }
-        if let Some(value) = &directives.dose_sym_b {
-            self.set_dose_sym(AxisID::Second, value);
-        } else if let Some(value) = &dose_sym_a {
-            self.set_dose_sym(AxisID::Second, value);
-        }
-        if let Some(value) = &directives.fiducial_diameter {
-            self.fiducial_diameter = value.clone();
-        }
-        if let Some(value) = &directives.image_rotation {
-            self.image_rotation = value.clone();
-        }
-        match directives.half_float_mode_output {
-            Some(1) => self.half_float_mode_output = true,
-            Some(2) => self.half_float_mode_output_if_float = true,
-            _ => {}
-        }
-        if let Some(value) = &directives.distortion_file {
-            self.distortion_file = value.clone();
-        }
-        if let Some(value) = &directives.binning {
-            self.binning = value.clone();
-        }
-        if let Some(value) = &directives.mag_gradient_file {
-            self.mag_gradient_file = value.clone();
-        }
-        if let Some(value) = directives.adjusted_focus_a {
-            self.adjusted_focus_a = value;
-        }
-        if let Some(value) = directives.adjusted_focus_b {
-            self.adjusted_focus_b = value;
-        }
-        if let Some(value) = directives.remove_excluded_views {
-            self.remove_excluded_views = value;
-        }
-        if let Some(value) = directives.delete_old_files {
-            self.delete_old_files = value;
-        }
-        self.directive_file_collection = Some(directives);
         self.update_display(false, false);
     }
-    pub fn view_raw_stack_a(&self) -> Option<(String, AxisID)> {
-        self.action(&self.view_raw_stack_a_command)
+
+    /// Java `@Override focusGained(FocusEvent)`: listening only to the dataset
+    /// focus.  Need to see if the dataset has changed.
+    pub fn focus_gained(&self) {}
+
+    /// Java `@Override focusLost(FocusEvent)`: listening only to the dataset
+    /// focus.  Find out if the dataset has changed.
+    pub fn focus_lost(&self) {
+        self.control_event();
     }
-    pub fn view_raw_stack_b(&self) -> Option<(String, AxisID)> {
-        self.action(&self.view_raw_stack_b_command)
-    }
-    pub fn set_backup_directory(&mut self, input: impl Into<String>) {
-        self.backup_directory = input.into();
-    }
-    pub fn set_distortion_file(&mut self, input: impl Into<String>) {
-        self.distortion_file = input.into();
-    }
-    pub fn set_mag_gradient_file(&mut self, input: impl Into<String>) {
-        self.mag_gradient_file = input.into();
-    }
-    pub fn set_adjusted_focus(&mut self, axis_id: AxisID, input: bool) {
+
+    /// Java package-private `isRemoveExcludeViewsMsg(AxisID)`.
+    pub fn is_remove_exclude_views_msg(&self, axis_id: AxisID) -> bool {
         if axis_id == AxisID::Second {
-            self.adjusted_focus_b = input;
-        } else {
-            self.adjusted_focus_a = input;
+            return self.l_remove_exclude_views_msg_b.get_text() != "";
         }
-    }
-    pub fn set_axis_type_tooltip(&mut self, tooltip: impl Into<String>) {
-        self.tooltip_assignments
-            .push(("axisType".into(), tooltip.into()));
-    }
-    pub fn set_distortion_file_tooltip(&mut self, tooltip: impl Into<String>) {
-        self.tooltip_assignments
-            .push(("distortionFile".into(), tooltip.into()));
-    }
-    pub fn set_view_type_tooltip(&mut self, tooltip: impl Into<String>) {
-        self.tooltip_assignments
-            .push(("viewType".into(), tooltip.into()));
-    }
-    pub fn set_pixel_size_tooltip(&mut self, tooltip: impl Into<String>) {
-        self.tooltip_assignments
-            .push(("pixelSize".into(), tooltip.into()));
-    }
-    pub fn set_fiducial_diameter_tooltip(&mut self, tooltip: impl Into<String>) {
-        self.tooltip_assignments
-            .push(("fiducialDiameter".into(), tooltip.into()));
-    }
-    pub fn set_image_rotation_tooltip(&mut self, tooltip: impl Into<String>) {
-        self.tooltip_assignments
-            .push(("imageRotation".into(), tooltip.into()));
-    }
-    pub fn set_half_float_mode_output_tooltip(
-        &mut self,
-        tooltip: impl Into<String>,
-        if_float_tooltip: impl Into<String>,
-    ) {
-        self.tooltip_assignments
-            .push(("halfFloatModeOutput".into(), tooltip.into()));
-        self.tooltip_assignments
-            .push(("halfFloatModeOutputIfFloat".into(), if_float_tooltip.into()));
-    }
-    pub fn set_binning_tooltip(&mut self, tooltip: impl Into<String>) {
-        self.tooltip_assignments
-            .push(("binning".into(), tooltip.into()));
-    }
-    pub fn set_view_raw_stack_tooltip(&mut self, tooltip: impl Into<String>) {
-        let tooltip = tooltip.into();
-        self.tooltip_assignments
-            .push(("viewRawStackA".into(), tooltip.clone()));
-        self.tooltip_assignments
-            .push(("viewRawStackB".into(), tooltip));
-    }
-    pub fn set_adjusted_focus_tooltip(&mut self, tooltip: impl Into<String>) {
-        self.tooltip_assignments
-            .push(("adjustedFocus".into(), tooltip.into()));
-    }
-    pub fn set_exclude_list_tooltip(&mut self, tooltip: impl Into<String>) {
-        self.tooltip_assignments
-            .push(("excludeList".into(), tooltip.into()));
-    }
-    pub fn set_twodir_tooltip(&mut self) {
-        self.tooltip_assignments.push((
-            "twodir".into(),
-            "Tilt series was bidirectional or dose-symmetric from the given starting angle".into(),
-        ));
-    }
-    pub fn set_execute_tooltip(&mut self, tooltip: impl Into<String>) {
-        self.tooltip_assignments
-            .push(("execute".into(), tooltip.into()));
-    }
-    pub fn set_parallel_process_tooltip(&mut self, tooltip: impl Into<String>) {
-        self.tooltip_assignments
-            .push(("parallelProcess".into(), tooltip.into()));
-    }
-    pub fn set_gpu_processing_tooltip(&mut self, tooltip: impl Into<String>) {
-        self.tooltip_assignments
-            .push(("gpuProcessing".into(), tooltip.into()));
-    }
-    pub fn set_mag_gradient_file_tooltip(&mut self, tooltip: impl Into<String>) {
-        self.tooltip_assignments
-            .push(("magGradientFile".into(), tooltip.into()));
-    }
-    pub fn set_tooltips(&mut self) {
-        self.tooltip_assignments.push((
-            "removeExcludedViews".into(),
-            "Make a new stack with excluded views removed before running copytomocoms".into(),
-        ));
-        self.tooltip_assignments.push(("deleteOldFiles".into(), "delete original file and keep excluded views, which can be used to restore the original file.".into()));
+        self.l_remove_exclude_views_msg_a.get_text() != ""
     }
 
-    pub fn is_single_axis_selected(&self) -> bool {
-        self.single_axis
+    /// Java package-private `setParameters(UserConfiguration)`.
+    pub fn set_parameters(&self, user_config: &UserConfiguration) {
+        self.template_panel
+            .set_parameters_user_configuration(user_config);
+        self.cb_remove_excluded_views
+            .set_selected_boolean(user_config.is_remove_excluded_views());
+        self.update_display(false, false);
     }
-    pub fn is_single_view_selected(&self) -> bool {
-        self.single_view
+
+    /// Java package-private `checkpoint()`.
+    pub fn checkpoint(&self) {
+        self.bctf_raw_image_stack.checkpoint();
+        self.ftf_backup_directory.checkpoint();
+        self.rb_single_axis.checkpoint_void();
+        self.rb_dual_axis.checkpoint_void();
+        self.rb_single_view.checkpoint_void();
+        self.rb_montage.checkpoint_void();
+        self.ltf_pixel_size.checkpoint_void();
+        self.ltf_fiducial_diameter.checkpoint_void();
+        self.ltf_image_rotation.checkpoint_void();
+        self.cb_half_float_mode_output.checkpoint_void();
+        self.cb_half_float_mode_output_if_float.checkpoint_void();
+        self.ftf_distortion_file.checkpoint();
+        self.ltf_binning.checkpoint_void();
+        self.ftf_mag_gradient_file.checkpoint();
+        self.cb_parallel_process.checkpoint_void();
+        self.cb_gpu_processing.checkpoint_void();
+        self.ltf_exclude_list_a.checkpoint_void();
+        self.cb_adjusted_focus_a.checkpoint_void();
+        self.ltf_exclude_list_b.checkpoint_void();
+        self.cb_adjusted_focus_b.checkpoint_void();
+        self.tf_twodir.checkpoint_void();
+        self.tf_dose_sym.checkpoint_void();
+        self.tf_btwodir.checkpoint_void();
+        self.tf_b_dose_sym.checkpoint_void();
     }
-    pub fn is_dual_axis_selected(&self) -> bool {
-        self.dual_axis
+
+    /// Java package-private `updateTemplateValues()`.
+    pub fn update_template_values(&self) {
+        // The template panel always holds a collection in the Java (it is
+        // dereferenced unchecked); with none there is nothing to apply.
+        let Some(directive_file_collection) = self.template_panel.get_directive_file_collection()
+        else {
+            return;
+        };
+        let dfc = directive_file_collection.borrow();
+        // Handle dual differently because the dual is the default.
+        if dfc.contains(Some(DirectiveDef::DUAL)) {
+            if dfc.is_value(Some(DirectiveDef::DUAL)) {
+                self.rb_dual_axis.set_selected_boolean(true);
+            } else {
+                self.rb_single_axis.set_selected_boolean(true);
+            }
+        }
+        if dfc.contains(Some(DirectiveDef::MONTAGE)) {
+            if dfc.is_value(Some(DirectiveDef::MONTAGE)) {
+                self.rb_montage.set_selected_boolean(true);
+            } else {
+                self.rb_single_view.set_selected_boolean(true);
+            }
+        }
+        if dfc.contains(Some(DirectiveDef::PIXEL)) {
+            self.ltf_pixel_size
+                .set_text_string(dfc.get_pixel_size(false).as_deref());
+        }
+        let twodir_a_set;
+        let mut twodir_a: Option<String> = None;
+        twodir_a_set = dfc.is_twodir(Some(AxisID::First));
+        if twodir_a_set {
+            self.cb_tf_twodir.set_selected_boolean(true);
+            twodir_a = dfc.get_twodir(Some(AxisID::First), false);
+            self.tf_twodir.set_text_string(twodir_a.as_deref());
+        }
+        if dfc.is_twodir(Some(AxisID::Second)) {
+            self.cb_tf_btwodir.set_selected_boolean(true);
+            self.tf_btwodir
+                .set_text_string(dfc.get_twodir(Some(AxisID::Second), false).as_deref());
+        } else if twodir_a_set {
+            // Use the twodir for axis B.
+            self.cb_tf_btwodir.set_selected_boolean(true);
+            self.tf_btwodir.set_text_string(twodir_a.as_deref());
+        }
+        let dose_sym_a_set;
+        let mut dose_sym_a: Option<String> = None;
+        dose_sym_a_set = dfc.is_dose_sym(Some(AxisID::First));
+        if dose_sym_a_set {
+            self.cb_tf_twodir.set_selected_boolean(true);
+            dose_sym_a = dfc.get_dose_sym(Some(AxisID::First), false);
+            // Upstream bug fixed in translation (SetupDialog.java:602): the
+            // source sets the dose-symmetric starting angle to `twodirA`, the
+            // bidirectional value read above (null unless axis A is also
+            // bidirectional), instead of the `doseSymA` it has just read.  The
+            // dose-symmetric value is used.
+            self.tf_dose_sym.set_text_string(dose_sym_a.as_deref());
+        }
+        if dfc.is_dose_sym(Some(AxisID::Second)) {
+            self.cb_tf_btwodir.set_selected_boolean(true);
+            self.tf_b_dose_sym
+                .set_text_string(dfc.get_dose_sym(Some(AxisID::Second), false).as_deref());
+        } else if dose_sym_a_set {
+            // Use the twodir for axis A.
+            self.cb_tf_btwodir.set_selected_boolean(true);
+            self.tf_b_dose_sym.set_text_string(dose_sym_a.as_deref());
+        }
+        if dfc.contains(Some(DirectiveDef::GOLD)) {
+            self.ltf_fiducial_diameter
+                .set_text_string(dfc.get_fiducial_diameter(false).as_deref());
+        }
+        if dfc.contains(Some(DirectiveDef::ROTATION)) {
+            self.ltf_image_rotation.set_text_string(
+                dfc.get_image_rotation(Some(AxisID::First), false)
+                    .as_deref(),
+            );
+        }
+        if dfc.contains(Some(DirectiveDef::HALF_FLOAT)) {
+            let half_float_mode_output = dfc.get_half_float_mode_output();
+            if Some(copy_tomo_coms::HALF_FLOAT) == half_float_mode_output {
+                self.cb_half_float_mode_output.set_selected_boolean(true);
+            } else if Some(copy_tomo_coms::HALF_FLOAT_IF_FLOAT) == half_float_mode_output {
+                self.cb_half_float_mode_output_if_float
+                    .set_selected_boolean(true);
+            }
+        }
+        if let Some(expert) = self.expert() {
+            expert.update_tilt_angle_panel_template_values(&dfc);
+        }
+        if dfc.contains(Some(DirectiveDef::DISTORT)) {
+            self.ftf_distortion_file
+                .set_text_string(dfc.get_distortion_file().as_deref());
+        }
+        if dfc.contains(Some(DirectiveDef::BINNING)) {
+            self.ltf_binning
+                .set_text_string(dfc.get_binning().as_deref());
+        }
+        if dfc.contains(Some(DirectiveDef::GRADIENT)) {
+            self.ftf_mag_gradient_file
+                .set_text_string(dfc.get_mag_gradient_file().as_deref());
+        }
+        if dfc.contains_axis(Some(DirectiveDef::FOCUS), Some(AxisID::First)) {
+            self.cb_adjusted_focus_a
+                .set_selected_boolean(dfc.is_adjusted_focus_selected(Some(AxisID::First)));
+        }
+        if dfc.contains_axis(Some(DirectiveDef::FOCUS), Some(AxisID::Second)) {
+            self.cb_adjusted_focus_b
+                .set_selected_boolean(dfc.is_adjusted_focus_selected(Some(AxisID::Second)));
+        }
+        if dfc.contains(Some(DirectiveDef::REMOVE_EXCLUDED_VIEWS)) {
+            self.cb_remove_excluded_views.set_selected_boolean(
+                dfc.is_value_template(Some(DirectiveDef::REMOVE_EXCLUDED_VIEWS), true),
+            );
+        }
+        if dfc.contains(Some(DirectiveDef::DELETE_OLD_FILES)) {
+            self.cb_delete_old_files.set_selected_boolean(
+                dfc.is_value_template(Some(DirectiveDef::DELETE_OLD_FILES), true),
+            );
+        }
+        drop(dfc);
+        if let Some(expert) = self.expert() {
+            expert.set_tilt_angle_panel_enabled(AxisID::Second, self.rb_dual_axis.is_selected());
+        }
+        self.update_display(false, false);
     }
+
+    /// Java private `viewRawStackA()`.
+    fn view_raw_stack_a(&self) {
+        self.action(
+            self.btn_view_raw_stack_a
+                .get_action_command()
+                .as_deref()
+                .unwrap_or_default(),
+            None,
+            None,
+        );
+    }
+
+    /// Java private `viewRawStackB()`.
+    fn view_raw_stack_b(&self) {
+        self.action(
+            self.btn_view_raw_stack_b
+                .get_action_command()
+                .as_deref()
+                .unwrap_or_default(),
+            None,
+            None,
+        );
+    }
+
+    /// Java package-private `setRawImageStack(String)`.
+    pub fn set_raw_image_stack(&self, input: Option<&str>) {
+        self.bctf_raw_image_stack.set_text_string(input);
+    }
+
+    /// Java package-private `setParallelProcess(boolean)`.
+    pub fn set_parallel_process(&self, input: bool) {
+        self.cb_parallel_process.set_selected_boolean(input);
+    }
+
+    /// Java package-private `setGpuProcessingEnabled(boolean)`.
+    pub fn set_gpu_processing_enabled(&self, input: bool) {
+        self.cb_gpu_processing.set_enabled(input);
+    }
+
+    /// Java package-private `setGpuProcessing(boolean)`.
+    pub fn set_gpu_processing(&self, input: bool) {
+        self.cb_gpu_processing.set_selected_boolean(input);
+    }
+
+    /// Java package-private `setBackupDirectory(String)`.
+    pub fn set_backup_directory(&self, input: Option<&str>) {
+        self.ftf_backup_directory.set_text_string(input);
+    }
+
+    /// Java package-private `setDistortionFile(String)`.
+    pub fn set_distortion_file(&self, input: Option<&str>) {
+        self.ftf_distortion_file.set_text_string(input);
+    }
+
+    /// Java package-private `setMagGradientFile(String)`.
+    pub fn set_mag_gradient_file(&self, input: Option<&str>) {
+        self.ftf_mag_gradient_file.set_text_string(input);
+    }
+
+    /// Java package-private `setAdjustedFocus(AxisID, boolean)`.
+    pub fn set_adjusted_focus(&self, axis_id: AxisID, input: bool) {
+        if axis_id == AxisID::Second {
+            self.cb_adjusted_focus_b.set_selected_boolean(input);
+        } else {
+            self.cb_adjusted_focus_a.set_selected_boolean(input);
+        }
+    }
+
+    /// Java package-private `setAxisTypeTooltip(String)`.
+    pub fn set_axis_type_tooltip(&self, tooltip: &str) {
+        self.pnl_axis_type
+            .get_component()
+            .set_tool_tip_text(Some(tooltip));
+        self.rb_single_axis.set_tool_tip_text_string(Some(tooltip));
+        self.rb_dual_axis.set_tool_tip_text_string(Some(tooltip));
+    }
+
+    /// Java package-private `setDistortionFileTooltip(String)`.
+    pub fn set_distortion_file_tooltip(&self, tooltip: &str) {
+        self.ftf_distortion_file
+            .set_field_tool_tip_text(Some(tooltip));
+        self.ftf_distortion_file
+            .set_button_tool_tip_text(Some(tooltip));
+    }
+
+    /// Java package-private `setViewTypeTooltip(String)`.
+    pub fn set_view_type_tooltip(&self, tooltip: &str) {
+        self.pnl_view_type
+            .get_component()
+            .set_tool_tip_text(Some(tooltip));
+        self.rb_single_view.set_tool_tip_text_string(Some(tooltip));
+        self.rb_montage.set_tool_tip_text_string(Some(tooltip));
+    }
+
+    /// Java package-private `setPixelSizeTooltip(String)`.
+    pub fn set_pixel_size_tooltip(&self, tooltip: &str) {
+        self.ltf_pixel_size.set_tool_tip_text(Some(tooltip));
+    }
+
+    /// Java package-private `setFiducialDiameterTooltip(String)`.
+    pub fn set_fiducial_diameter_tooltip(&self, tooltip: &str) {
+        self.ltf_fiducial_diameter.set_tool_tip_text(Some(tooltip));
+    }
+
+    /// Java package-private `setImageRotationTooltip(String)`.
+    pub fn set_image_rotation_tooltip(&self, tooltip: &str) {
+        self.ltf_image_rotation.set_tool_tip_text(Some(tooltip));
+    }
+
+    /// Java package-private `setHalfFloatModeOutputTooltip(String, String)`.
+    pub fn set_half_float_mode_output_tooltip(&self, tooltip: &str, if_float_tooltip: &str) {
+        self.cb_half_float_mode_output
+            .set_tool_tip_text_string(Some(tooltip));
+        self.cb_half_float_mode_output_if_float
+            .set_tool_tip_text_string(Some(if_float_tooltip));
+    }
+
+    /// Java package-private `setBinningTooltip(String)`.
+    pub fn set_binning_tooltip(&self, tooltip: &str) {
+        self.ltf_binning.set_tool_tip_text(Some(tooltip));
+    }
+
+    /// Java package-private `setViewRawStackTooltip(String)`.
+    pub fn set_view_raw_stack_tooltip(&self, tooltip: &str) {
+        self.btn_view_raw_stack_a.set_tool_tip_text(Some(tooltip));
+        self.btn_view_raw_stack_b.set_tool_tip_text(Some(tooltip));
+    }
+
+    /// Java package-private `setAdjustedFocusTooltip(String)`.
+    pub fn set_adjusted_focus_tooltip(&self, tooltip: &str) {
+        self.cb_adjusted_focus_a
+            .set_tool_tip_text_string(Some(tooltip));
+        self.cb_adjusted_focus_b
+            .set_tool_tip_text_string(Some(tooltip));
+    }
+
+    /// Java package-private `setExcludeListTooltip(String)`.
+    pub fn set_exclude_list_tooltip(&self, tooltip: &str) {
+        self.ltf_exclude_list_a.set_tool_tip_text(Some(tooltip));
+        self.ltf_exclude_list_b.set_tool_tip_text(Some(tooltip));
+    }
+
+    /// Java package-private `setTwodirTooltip()`.
+    pub fn set_twodir_tooltip(&self) {
+        self.cb_tf_twodir.set_tool_tip_text_string(Some(
+            "Tilt series was bidirectional or dose-symmetric from the given starting angle",
+        ));
+        self.cb_tf_btwodir.set_tool_tip_text_string(Some(
+            "Tilt series was bidirectional or dose-symmetric from the given starting angle",
+        ));
+        self.rb_bidirectional
+            .set_tool_tip_text_string(Some("Select this option for a bidirectional tilt series"));
+        self.rb_b_bidirectional
+            .set_tool_tip_text_string(Some("Select this option for a bidirectional tilt series"));
+        self.rb_dose_symmetric
+            .set_tool_tip_text_string(Some("Select this option for dose-symmetric series"));
+        self.rb_b_dose_symmetric
+            .set_tool_tip_text_string(Some("Select this option for dose-symmetric series"));
+        self.tf_twodir.set_tool_tip_text(Some(
+            "Starting angle of the tilt series; the break in the series \
+             is assumed to be after the first image in the stack at that angle.",
+        ));
+        self.tf_btwodir.set_tool_tip_text(Some(
+            "Starting angle of the tilt series; the break in the series \
+             is assumed to be after the first image in the stack at that angle.",
+        ));
+        self.tf_dose_sym
+            .set_tool_tip_text(Some("Starting angle of the tilt series"));
+        self.tf_b_dose_sym
+            .set_tool_tip_text(Some("Starting angle of the tilt series"));
+    }
+
+    /// Java package-private `setExecuteTooltip(String)`.
+    pub fn set_execute_tooltip(&self, tooltip: &str) {
+        self.btn_execute.set_tool_tip_text(Some(tooltip));
+    }
+
+    /// Java package-private `setParallelProcessTooltip(String)`.
+    pub fn set_parallel_process_tooltip(&self, tooltip: &str) {
+        self.cb_parallel_process
+            .set_tool_tip_text_string(Some(tooltip));
+    }
+
+    /// Java package-private `setGpuProcessingTooltip(String)`.
+    pub fn set_gpu_processing_tooltip(&self, tooltip: &str) {
+        self.cb_gpu_processing
+            .set_tool_tip_text_string(Some(tooltip));
+    }
+
+    /// Java package-private `setMagGradientFileTooltip(String)`.
+    pub fn set_mag_gradient_file_tooltip(&self, tooltip: &str) {
+        self.ftf_mag_gradient_file
+            .set_field_tool_tip_text(Some(tooltip));
+        self.ftf_mag_gradient_file
+            .set_button_tool_tip_text(Some(tooltip));
+    }
+
+    /// Java package-private `setTooltips()`.
+    pub fn set_tooltips(&self) {
+        self.cb_remove_excluded_views.set_tool_tip_text_string(Some(
+            "Make a new stack with excluded views removed before running copytomocoms",
+        ));
+        self.cb_delete_old_files.set_tool_tip_text_string(Some(
+            "delete original file and keep excluded views, which can be used to restore the \
+             original file.",
+        ));
+        self.template_panel.set_scope_tooltip(Some(
+            "Select the first system-wide template file from which parameters will be set.",
+        ));
+        self.template_panel.set_system_tooltip(Some(
+            "Select the second system-wide template file from which parameters will be set.",
+        ));
+        self.template_panel.set_user_tooltip(Some(
+            "Select a personal template file from which parameters will be set.",
+        ));
+    }
+
+    /// Java package-private `setSingleAxis(boolean)`.
+    pub fn set_single_axis(&self, input: bool) {
+        self.rb_single_axis.set_selected_boolean(input);
+    }
+
+    /// Java package-private `getAxisType()`.
     pub fn get_axis_type(&self) -> AxisType {
-        if self.dual_axis {
+        if self.rb_dual_axis.is_selected() {
             AxisType::DualAxis
         } else {
             AxisType::SingleAxis
         }
     }
-    pub fn set_single_axis(&mut self, input: bool) {
-        self.single_axis = input;
-        if input {
-            self.dual_axis = false;
-        }
-    }
-    pub fn set_dual_axis(&mut self, input: bool) {
-        self.dual_axis = input;
-        if input {
-            self.single_axis = false;
-        }
-        self.update_display(false, false);
-    }
-    pub fn set_single_view(&mut self, input: bool) {
-        self.single_view = input;
-        if input {
-            self.montage = false;
-        }
-        self.update_display(false, false);
-    }
-    pub fn set_montage(&mut self, input: bool) {
-        self.montage = input;
-        if input {
-            self.single_view = false;
-        }
-        self.update_display(false, false);
-    }
-    pub fn set_pixel_size(&mut self, input: f64) {
-        self.pixel_size = input.to_string();
-    }
-    pub fn set_fiducial_diameter(&mut self, input: f64) {
-        self.fiducial_diameter = input.to_string();
-    }
-    pub fn set_image_rotation(&mut self, input: impl ToString) {
-        self.image_rotation = input.to_string();
-    }
-    pub fn get_binning(&self, _do_validation: bool) -> String {
-        self.binning.clone()
-    }
-    pub fn get_exclude_list(&self, axis_id: AxisID, _do_validation: bool) -> String {
-        if axis_id == AxisID::Second {
-            self.exclude_list_b.clone()
-        } else {
-            self.exclude_list_a.clone()
-        }
-    }
-    pub fn set_exclude_list(&mut self, axis_id: AxisID, input: impl Into<String>) {
-        if axis_id == AxisID::Second {
-            self.exclude_list_b = input.into();
-        } else {
-            self.exclude_list_a = input.into();
-        }
-    }
-    pub fn get_twodir(&self, axis_id: AxisID, _do_validation: bool) -> String {
-        if axis_id == AxisID::Second {
-            self.twodir_b.clone()
-        } else {
-            self.twodir_a.clone()
-        }
-    }
-    pub fn is_twodir(&self, axis_id: AxisID) -> bool {
-        if axis_id == AxisID::Second {
-            self.twodir_b_selected && !self.dose_sym_b_selected
-        } else {
-            self.twodir_a_selected && !self.dose_sym_a_selected
-        }
-    }
-    pub fn set_twodir(&mut self, axis_id: AxisID, input: impl Into<String>) {
-        if axis_id == AxisID::Second {
-            self.twodir_b_selected = true;
-            self.dose_sym_b_selected = false;
-            self.twodir_b = input.into();
-        } else {
-            self.twodir_a_selected = true;
-            self.dose_sym_a_selected = false;
-            self.twodir_a = input.into();
-        }
-        self.update_display(false, false);
-    }
-    /// Java overload `setTwodir(AxisID, boolean)`.
-    pub fn set_twodir_selected(&mut self, axis_id: AxisID, selected: bool) {
-        if axis_id == AxisID::Second {
-            self.twodir_b_selected = selected;
-            self.dose_sym_b_selected = false;
-        } else {
-            self.twodir_a_selected = selected;
-            self.dose_sym_a_selected = false;
-        }
-        self.update_display(false, false);
-    }
-    /// Java overload `setTwodir(AxisID, double)`.
-    pub fn set_twodir_double(&mut self, axis_id: AxisID, input: f64) {
-        self.set_twodir(axis_id, input.to_string());
-    }
-    pub fn set_dose_sym(&mut self, axis_id: AxisID, input: impl Into<String>) {
-        if axis_id == AxisID::Second {
-            self.twodir_b_selected = true;
-            self.dose_sym_b_selected = true;
-            self.dose_sym_b = input.into();
-        } else {
-            self.twodir_a_selected = true;
-            self.dose_sym_a_selected = true;
-            self.dose_sym_a = input.into();
-        }
-        self.update_display(false, false);
-    }
-    /// Java overload `setDoseSym(AxisID, boolean)`.
-    pub fn set_dose_sym_selected(&mut self, axis_id: AxisID, selected: bool) {
-        if axis_id == AxisID::Second {
-            self.twodir_b_selected = selected;
-            self.dose_sym_b_selected = selected;
-        } else {
-            self.twodir_a_selected = selected;
-            self.dose_sym_a_selected = selected;
-        }
-        self.update_display(false, false);
-    }
-    /// Java overload `setDoseSym(AxisID, double)`.
-    pub fn set_dose_sym_double(&mut self, axis_id: AxisID, input: f64) {
-        self.set_dose_sym(axis_id, input.to_string());
-    }
-    pub fn set_exclude_list_enabled(&mut self, axis_id: AxisID, enable: bool) {
-        if axis_id == AxisID::Second {
-            self.exclude_list_b_enabled = enable;
-        } else {
-            self.exclude_list_a_enabled = enable;
-        }
-    }
-    pub fn set_twodir_enabled(&mut self, axis_id: AxisID, enable: bool) {
-        if axis_id == AxisID::Second {
-            self.twodir_b_enabled = enable;
-        } else {
-            self.twodir_a_enabled = enable;
-        }
-    }
-    pub fn set_dose_sym_enabled(&mut self, axis_id: AxisID, enable: bool) {
-        if axis_id == AxisID::Second {
-            self.dose_sym_b_enabled = enable;
-        } else {
-            self.dose_sym_a_enabled = enable;
-        }
-    }
-    pub fn set_view_raw_stack_enabled(&mut self, axis_id: AxisID, enable: bool) {
-        if axis_id == AxisID::Second {
-            self.view_raw_stack_b_enabled = enable;
-        } else {
-            self.view_raw_stack_a_enabled = enable;
-        }
-    }
-    /// Java `initTiltAngleFields`; the tilt-angle panel call stays at its direct boundary.
-    pub fn init_tilt_angle_fields(&self, _axis_id: AxisID) {}
-    /// Java deprecated `getDataset`.
-    pub fn get_dataset(&self) -> &str {
-        self.get_raw_image_stack()
-    }
-    /// Java `getTiltAngleFields`; direct tilt-angle-panel result.
-    pub fn get_tilt_angle_fields(&self, panel_result: bool) -> bool {
-        panel_result
-    }
-    pub fn get_views_to_skip(&self, axis_id: AxisID, _do_validation: bool) -> Option<String> {
-        Some(self.get_exclude_list(axis_id, false))
-    }
-    pub fn get_backup_directory(&self) -> String {
-        self.backup_directory.clone()
-    }
-    pub fn get_distortion_file(&self) -> String {
-        self.distortion_file.clone()
-    }
-    pub fn get_mag_gradient_file(&self) -> String {
-        self.mag_gradient_file.clone()
-    }
-    pub fn is_parallel_process_selected(&self, _property_user_dir: &str) -> bool {
-        self.parallel_process
-    }
-    pub fn is_gpu_processing_selected(&self, _property_user_dir: &str) -> bool {
-        self.gpu_processing
-    }
-    pub fn is_adjusted_focus_selected(&self, axis_id: AxisID) -> bool {
-        if axis_id == AxisID::Second {
-            self.adjusted_focus_b
-        } else {
-            self.adjusted_focus_a
-        }
-    }
-    pub fn get_pixel_size(&self, _do_validation: bool) -> String {
-        self.pixel_size.clone()
-    }
-    pub fn get_half_float_mode_output(&self) -> Option<i32> {
-        if self.half_float_mode_output {
-            Some(1)
-        } else if self.half_float_mode_output_if_float {
-            Some(2)
-        } else {
-            None
-        }
-    }
-    pub fn get_fiducial_diameter(&self, _do_validation: bool) -> String {
-        self.fiducial_diameter.clone()
-    }
-    /// Java `validateTiltAngle`; result from the direct tilt-angle boundary.
-    pub fn validate_tilt_angle(&self, panel_result: bool) -> bool {
-        panel_result
-    }
-    pub fn get_image_rotation(&self, _axis_id: AxisID, _do_validation: bool) -> String {
-        self.image_rotation.clone()
+
+    /// Java package-private `setDualAxis(boolean)`.
+    pub fn set_dual_axis(&self, input: bool) {
+        self.rb_dual_axis.set_selected_boolean(input);
     }
 
-    pub fn equals_single_axis_action_command(&self, action_command: &str) -> bool {
-        action_command == SINGLE_AXIS_LABEL
+    /// Java package-private `setFiducialDiameter(double)`.
+    pub fn set_fiducial_diameter(&self, input: f64) {
+        self.ltf_fiducial_diameter.set_text_double(input);
     }
-    pub fn equals_dual_axis_action_command(&self, action_command: &str) -> bool {
-        action_command == "Dual axis"
+
+    /// Java package-private `setImageRotation(double)`.  The class also has
+    /// `setImageRotation(String)` (`SetupReconInterface`), so both carry
+    /// their parameter type.
+    pub fn set_image_rotation_double(&self, input: f64) {
+        self.ltf_image_rotation.set_text_double(input);
     }
-    pub fn equals_single_view_action_command(&self, action_command: &str) -> bool {
-        action_command == SINGLE_FRAME_LABEL
-    }
-    pub fn set_adjusted_focus_enabled(&mut self, axis_id: AxisID, enable: bool) {
+
+    /// Java package-private `setExcludeList(AxisID, String)`.
+    pub fn set_exclude_list(&self, axis_id: AxisID, input: Option<&str>) {
         if axis_id == AxisID::Second {
-            self.adjusted_focus_b_enabled = enable;
+            self.ltf_exclude_list_b.set_text_string(input);
         } else {
-            self.adjusted_focus_a_enabled = enable;
+            self.ltf_exclude_list_a.set_text_string(input);
         }
     }
+
+    /// Java package-private `setTwodir(AxisID, boolean)`.
+    pub fn set_twodir_axis_id_boolean(&self, axis_id: AxisID, selected: bool) {
+        if axis_id == AxisID::Second {
+            self.cb_tf_btwodir.set_selected_boolean(selected);
+            self.rb_b_bidirectional.set_selected_boolean(selected);
+        } else {
+            self.cb_tf_twodir.set_selected_boolean(selected);
+            self.rb_bidirectional.set_selected_boolean(selected);
+        }
+        self.update_display(false, false);
+    }
+
+    /// Java package-private `setTwodir(AxisID, String)`.
+    pub fn set_twodir_axis_id_string(&self, axis_id: AxisID, input: Option<&str>) {
+        if axis_id == AxisID::Second {
+            self.tf_btwodir.set_text_string(input);
+        } else {
+            self.tf_twodir.set_text_string(input);
+        }
+    }
+
+    /// Java package-private `setDoseSym(AxisID, String)`.
+    pub fn set_dose_sym_axis_id_string(&self, axis_id: AxisID, input: Option<&str>) {
+        if axis_id == AxisID::Second {
+            self.tf_b_dose_sym.set_text_string(input);
+        } else {
+            self.tf_dose_sym.set_text_string(input);
+        }
+    }
+
+    /// Java package-private `setDoseSym(AxisID, boolean)`.
+    pub fn set_dose_sym_axis_id_boolean(&self, axis_id: AxisID, selected: bool) {
+        if axis_id == AxisID::Second {
+            self.cb_tf_btwodir.set_selected_boolean(selected);
+            self.rb_b_dose_symmetric.set_selected_boolean(selected);
+        } else {
+            self.cb_tf_twodir.set_selected_boolean(selected);
+            self.rb_dose_symmetric.set_selected_boolean(selected);
+        }
+        self.update_display(false, false);
+    }
+
+    /// Java public `setTwodir(AxisID, double)` (`SetupReconInterface`).
+    pub fn set_twodir_axis_id_double(&self, axis_id: AxisID, input: f64) {
+        if axis_id == AxisID::Second {
+            self.cb_tf_btwodir.set_selected_boolean(true);
+            self.rb_b_bidirectional.set_selected_boolean(true);
+            self.tf_btwodir
+                .set_text_string(Some(&java_lang_double_to_string(input)));
+        } else {
+            self.cb_tf_twodir.set_selected_boolean(true);
+            self.rb_bidirectional.set_selected_boolean(true);
+            self.tf_twodir
+                .set_text_string(Some(&java_lang_double_to_string(input)));
+        }
+        self.update_display(false, false);
+    }
+
+    /// Java package-private `setExcludeListEnabled(AxisID, boolean)`.
+    pub fn set_exclude_list_enabled(&self, axis_id: AxisID, enable: bool) {
+        if axis_id == AxisID::Second {
+            self.ltf_exclude_list_b.set_enabled(enable);
+        } else {
+            self.ltf_exclude_list_a.set_enabled(enable);
+        }
+    }
+
+    /// Java package-private `setTwodirEnabled(AxisID, boolean)`.
+    pub fn set_twodir_enabled(&self, axis_id: AxisID, enable: bool) {
+        if axis_id == AxisID::Second {
+            self.cb_tf_btwodir.set_enabled(enable);
+            self.rb_b_bidirectional.set_enabled(enable);
+            self.l_btwodirfrom.set_enabled(enable);
+            self.tf_btwodir.set_enabled(enable);
+            self.l_btwodir.set_enabled(enable);
+        } else {
+            self.cb_tf_twodir.set_enabled(enable);
+            self.rb_bidirectional.set_enabled(enable);
+            self.l_twodirfrom.set_enabled(enable);
+            self.tf_twodir.set_enabled(enable);
+            self.l_twodir.set_enabled(enable);
+        }
+    }
+
+    /// Java package-private `setDoseSymEnabled(AxisID, boolean)`.
+    pub fn set_dose_sym_enabled(&self, axis_id: AxisID, enable: bool) {
+        if axis_id == AxisID::Second {
+            self.rb_b_dose_symmetric.set_enabled(enable);
+            self.tf_b_dose_sym.set_enabled(enable);
+        } else {
+            self.rb_dose_symmetric.set_enabled(enable);
+            self.tf_dose_sym.set_enabled(enable);
+        }
+    }
+
+    /// Java package-private `setViewRawStackEnabled(AxisID, boolean)`.
+    pub fn set_view_raw_stack_enabled(&self, axis_id: AxisID, enable: bool) {
+        if axis_id == AxisID::Second {
+            self.btn_view_raw_stack_b.set_enabled(enable);
+        } else {
+            self.btn_view_raw_stack_a.set_enabled(enable);
+        }
+    }
+
+    /// Java package-private `setSingleView(boolean)`.
+    pub fn set_single_view(&self, input: bool) {
+        self.rb_single_view.set_selected_boolean(input);
+    }
+
+    /// Java package-private `setMontage(boolean)`.
+    pub fn set_montage(&self, input: bool) {
+        self.rb_montage.set_selected_boolean(input);
+    }
+
+    /// Java package-private `getViewsToSkip(AxisID, boolean)`.
+    pub fn get_views_to_skip(&self, axis_id: AxisID, do_validation: bool) -> Option<String> {
+        let result = if axis_id == AxisID::Second {
+            self.ltf_exclude_list_b.get_text_boolean(do_validation)
+        } else {
+            self.ltf_exclude_list_a.get_text_boolean(do_validation)
+        };
+        match result {
+            Ok(text) => text,
+            // catch (final FieldValidationFailedException e)
+            Err(_) => None,
+        }
+    }
+
+    /// Java package-private `equalsSingleAxisActionCommand(String)`.
+    pub fn equals_single_axis_action_command(&self, action_command: &str) -> bool {
+        Some(action_command) == self.rb_single_axis.get_action_command().as_deref()
+    }
+
+    /// Java package-private `equalsDualAxisActionCommand(String)`.
+    pub fn equals_dual_axis_action_command(&self, action_command: &str) -> bool {
+        Some(action_command) == self.rb_dual_axis.get_action_command().as_deref()
+    }
+
+    /// Java package-private `equalsSingleViewActionCommand(String)`.
+    pub fn equals_single_view_action_command(&self, action_command: &str) -> bool {
+        Some(action_command) == self.rb_single_view.get_action_command().as_deref()
+    }
+
+    /// Java package-private `setAdjustedFocusEnabled(AxisID, boolean)`.
+    pub fn set_adjusted_focus_enabled(&self, axis_id: AxisID, enable: bool) {
+        if axis_id == AxisID::Second {
+            self.cb_adjusted_focus_b.set_enabled(enable);
+        } else {
+            self.cb_adjusted_focus_a.set_enabled(enable);
+        }
+    }
+
+    /// Java package-private `equalsMontageActionCommand(String)`.
     pub fn equals_montage_action_command(&self, action_command: &str) -> bool {
-        action_command == MONTAGE_LABEL
+        Some(action_command) == self.rb_montage.get_action_command().as_deref()
     }
+
+    /// Java package-private `equalsScanHeaderActionCommand(String)`.
     pub fn equals_scan_header_action_command(&self, action_command: &str) -> bool {
-        action_command == "Scan Header"
+        Some(action_command) == self.btn_scan_header.get_action_command().as_deref()
     }
-    /// Java `equalsTemplateActionCommand`; template-panel dispatch is retained at
-    /// its canonical panel boundary, so its comparison result crosses this method.
-    pub fn equals_template_action_command(&self, template_panel_matches: bool) -> bool {
-        template_panel_matches
+
+    /// Java package-private `equalsTemplateActionCommand(String)`.
+    pub fn equals_template_action_command(&self, action_command: &str) -> bool {
+        self.template_panel
+            .equals_action_command(Some(action_command))
     }
-    /// Java `expand(GlobalExpandButton)`.
-    pub fn expand_global(&mut self, expanded: bool) {
-        self.update_advanced(expanded);
-    }
-    pub fn expand(&self) {}
-    /// Java `updateAdvanced(boolean)`.
-    pub fn update_advanced(&mut self, advanced: bool) {
+
+    /// Java package-private `updateAdvanced(boolean)`.
+    pub fn update_advanced(&self, advanced: bool) {
+        // `pnlDistortionInfo == null` can never be true (a final field); only
+        // `calibrationAvailable` is tested.
         if self.calibration_available {
             return;
         }
-        self.distortion_file_visible = advanced;
-        self.binning_visible = advanced;
-        self.mag_gradient_info_visible = advanced;
+        self.ftf_distortion_file.set_visible(advanced);
+        self.ltf_binning.set_visible(advanced);
+        self.pnl_mag_gradient_info.set_visible(advanced);
     }
-    /// Java `setMagGradientInfoVisible`; the Java method intentionally has no body.
-    pub fn set_mag_gradient_info_visible(&mut self, _visible: bool) {}
-    /// Java `getFile`; native chooser execution is an explicit GUI boundary. The
-    /// chosen path is passed back as `selected_file`.
-    pub fn get_file(&self, selected_file: Option<String>) -> Option<String> {
-        selected_file
+
+    /// Java package-private `setMagGradientInfoVisible(boolean)` (empty in the
+    /// Java).
+    pub fn set_mag_gradient_info_visible(&self, _visible: bool) {}
+
+    /// Java package-private `getFile(String, FileFilter, int)`: runs a file
+    /// chooser in `dir` and returns the chosen file, or null.
+    pub fn get_file(
+        &self,
+        dir: Option<&str>,
+        file_filter: Option<Rc<dyn crate::imod::etomo::jdk::FileFilter>>,
+        selection_mode: i32,
+    ) -> Option<PathBuf> {
+        let chooser = FileChooser::new_base_manager_string(
+            Some(self.application_manager as &'static dyn BaseManager),
+            dir,
+        );
+        if let Some(file_filter) = file_filter {
+            chooser.set_file_filter(Some(file_filter));
+        }
+        // Swing layout: chooser.setPreferredSize(FixedDim.fileChooser).
+        chooser.set_file_selection_mode(selection_mode);
+        let return_val = chooser.show_open_dialog(Some(&self.root_panel.get_component()));
+        if return_val == file_chooser::APPROVE_OPTION {
+            return chooser.get_selected_file();
+        }
+        None
     }
-    pub fn backup_directory_action(&mut self, selected_file: Option<String>) {
-        if let Some(file) = self.get_file(selected_file) {
-            self.backup_directory = file;
+
+    /// Java package-private `backupDirectoryAction()`.
+    pub fn backup_directory_action(&self) {
+        // try { ... } catch (final Exception excep) { excep.printStackTrace(); }
+        let current_backup_directory = self
+            .expert()
+            .and_then(|expert| expert.get_current_backup_directory());
+        let file = self.get_file(
+            current_backup_directory.as_deref(),
+            None,
+            file_chooser::DIRECTORIES_ONLY,
+        );
+        if let Some(file) = file {
+            // `File.getCanonicalPath` throws `IOException`, caught above.
+            match std::fs::canonicalize(&file) {
+                Ok(canonical_path) => self
+                    .ftf_backup_directory
+                    .set_text_string(Some(&canonical_path.to_string_lossy())),
+                Err(excep) => eprintln!("{excep}"),
+            }
         }
     }
-    pub fn distortion_file_action(&mut self, selected_file: Option<String>) {
-        if let Some(file) = self.get_file(selected_file) {
-            self.distortion_file = file;
+
+    /// Java package-private `distortionFileAction()`.
+    pub fn distortion_file_action(&self) {
+        // try { ... } catch (final Exception excep) { excep.printStackTrace(); }
+        let distortion_dir = crate::imod::etomo::logic::config_tool::get_distortion_dir(
+            self.application_manager,
+            self.ftf_distortion_file.get_file().as_deref(),
+        );
+        let file = self.get_file(
+            distortion_dir.as_deref(),
+            Some(Rc::new(
+                crate::imod::etomo::storage::distortion_file_filter::DistortionFileFilter::new(),
+            ) as Rc<dyn crate::imod::etomo::jdk::FileFilter>),
+            file_chooser::FILES_ONLY,
+        );
+        if let Some(file) = file {
+            self.ftf_distortion_file.set_text_string(Some(
+                &utilities::java_io_file_get_absolute_path(&file.to_string_lossy()),
+            ));
         }
     }
-    pub fn mag_gradient_file_action(&mut self, selected_file: Option<String>) {
-        if let Some(file) = self.get_file(selected_file) {
-            self.mag_gradient_file = file;
+
+    /// Java package-private `magGradientFileAction()`: lets the user choose
+    /// the mag gradients correction file.
+    pub fn mag_gradient_file_action(&self) {
+        // try { ... } catch (final Exception excep) { excep.printStackTrace(); }
+        let current_mag_gradient_dir = self
+            .expert()
+            .and_then(|expert| expert.get_current_mag_gradient_dir());
+        let file = self.get_file(
+            current_mag_gradient_dir.as_deref(),
+            Some(Rc::new(
+                crate::imod::etomo::storage::mag_gradient_file_filter::MagGradientFileFilter::new(),
+            ) as Rc<dyn crate::imod::etomo::jdk::FileFilter>),
+            file_chooser::FILES_ONLY,
+        );
+        if let Some(file) = file {
+            self.ftf_mag_gradient_file.set_text_string(Some(
+                &utilities::java_io_file_get_absolute_path(&file.to_string_lossy()),
+            ));
         }
     }
-    pub fn set_raw_image_stack_tooltip(
-        &mut self,
-        field_tooltip: impl Into<String>,
-        button_tooltip: impl Into<String>,
+
+    /// Java package-private `setRawImageStackTooltip(String, String)`.
+    pub fn set_raw_image_stack_tooltip(&self, field_tooltip: &str, button_tooltip: &str) {
+        self.bctf_raw_image_stack
+            .set_tooltip_string_string(Some(field_tooltip), Some(button_tooltip));
+    }
+
+    /// Java package-private `setBackupDirectoryTooltip(String, String)`.
+    pub fn set_backup_directory_tooltip(&self, field_tooltip: &str, button_tooltip: &str) {
+        self.ftf_backup_directory
+            .set_field_tool_tip_text(Some(field_tooltip));
+        self.ftf_backup_directory
+            .set_button_tool_tip_text(Some(button_tooltip));
+    }
+
+    /// Java package-private `setScanHeaderTooltip(String)`.
+    pub fn set_scan_header_tooltip(&self, tooltip: &str) {
+        self.btn_scan_header.set_tool_tip_text(Some(tooltip));
+    }
+
+    /// Java private `addListeners()`.
+    fn add_listeners(&self) {
+        // Mouse adapter for context menu
+        // Swing layout: rootPanel.addMouseListener(new GenericMouseAdapter(this)) -
+        // mouse events are not modelled; the context menu is
+        // `ContextMenu::pop_up_context_menu`.
+        let _ = GenericMouseAdapter::new;
+        let this = self.this.clone();
+        // BackupDirectoryActionListener
+        self.ftf_backup_directory
+            .add_action_listener(Rc::new(move |_event: &ActionEvent| {
+                if let Some(adaptee) = this.upgrade() {
+                    adaptee.backup_directory_action();
+                }
+            }));
+        let this = self.this.clone();
+        // DistortionFileActionListener
+        self.ftf_distortion_file
+            .add_action_listener(Rc::new(move |_event: &ActionEvent| {
+                if let Some(adaptee) = this.upgrade() {
+                    adaptee.distortion_file_action();
+                }
+            }));
+        let this = self.this.clone();
+        // MagGradientFileActionListener
+        self.ftf_mag_gradient_file
+            .add_action_listener(Rc::new(move |_event: &ActionEvent| {
+                if let Some(adaptee) = this.upgrade() {
+                    adaptee.mag_gradient_file_action();
+                }
+            }));
+        let this = self.this.clone();
+        // ViewRawStackAActionListener
+        self.btn_view_raw_stack_a
+            .add_action_listener(Rc::new(move |_event: &ActionEvent| {
+                if let Some(adaptee) = this.upgrade() {
+                    adaptee.view_raw_stack_a();
+                }
+            }));
+        let this = self.this.clone();
+        // ViewRawStackBActionListener
+        self.btn_view_raw_stack_b
+            .add_action_listener(Rc::new(move |_event: &ActionEvent| {
+                if let Some(adaptee) = this.upgrade() {
+                    adaptee.view_raw_stack_b();
+                }
+            }));
+        // `listener` (SetupDialogActionListener) on the radio buttons, the scan
+        // header button and the check boxes.
+        let listener = &self.listener;
+        self.rb_single_axis
+            .add_action_listener(listener.as_action_listener());
+        self.rb_dual_axis
+            .add_action_listener(listener.as_action_listener());
+        self.rb_single_view
+            .add_action_listener(listener.as_action_listener());
+        self.rb_montage
+            .add_action_listener(listener.as_action_listener());
+        self.btn_scan_header
+            .add_action_listener(listener.as_action_listener());
+        self.cb_remove_excluded_views
+            .add_action_listener(Some(listener.as_action_listener()));
+        self.bctf_raw_image_stack.add_control_listener(
+            self.this
+                .upgrade()
+                .map(|this| this as Rc<dyn ControlListener>),
+        );
+        let this = self.this.clone();
+        self.bctf_raw_image_stack
+            .add_focus_listener(Rc::new(move |event: &FocusEvent| {
+                if let Some(this) = this.upgrade() {
+                    if event.gained {
+                        this.focus_gained();
+                    } else {
+                        this.focus_lost();
+                    }
+                }
+            }));
+        self.cb_tf_twodir
+            .add_action_listener(Some(listener.as_action_listener()));
+        self.cb_tf_btwodir
+            .add_action_listener(Some(listener.as_action_listener()));
+        self.rb_bidirectional
+            .add_action_listener(listener.as_action_listener());
+        self.rb_b_bidirectional
+            .add_action_listener(listener.as_action_listener());
+        self.rb_dose_symmetric
+            .add_action_listener(listener.as_action_listener());
+        self.rb_b_dose_symmetric
+            .add_action_listener(listener.as_action_listener());
+        // `addActionListener(this)` for the two half-float check boxes.
+        let this = self.this.clone();
+        self.cb_half_float_mode_output
+            .add_action_listener(Some(Rc::new(move |event: &ActionEvent| {
+                if let Some(this) = this.upgrade() {
+                    this.action_performed(Some(event));
+                }
+            })));
+        let this = self.this.clone();
+        self.cb_half_float_mode_output_if_float
+            .add_action_listener(Some(Rc::new(move |event: &ActionEvent| {
+                if let Some(this) = this.upgrade() {
+                    this.action_performed(Some(event));
+                }
+            })));
+    }
+
+    /// Java private `createDatasetPanel()`.
+    fn create_dataset_panel(&self) {
+        // Swing layout: pnlDataset BoxLayout X_AXIS.
+
+        // Bind the buttons to their adapters
+
+        // Add the GUI objects to the pnl
+        // Swing layout: rigid area x5_y0.
+
+        self.pnl_dataset
+            .add(&self.bctf_raw_image_stack.get_component());
+        // Swing layout: rigid area x10_y0.
+
+        self.pnl_dataset
+            .add(&self.ftf_backup_directory.get_container());
+        // Swing layout: rigid area x5_y0.
+    }
+
+    /// Java private `createDataTypePanel()`.
+    fn create_data_type_panel(&self) {
+        let pnl_row2 = JComponent::new_panel();
+        let pnl_remove_excluded_views = JComponent::new_panel();
+        let pnl_half_float_mode_output = JComponent::new_panel();
+        // init
+        // Swing layout: ftfDistortionFile / ftfMagGradientFile
+        // setTextPreferredWidth(505).
+        // Datatype subpnls: DataSource AxisType Viewtype
+        // Swing layout: dimDataTypePref = 150 x 80 scaled by the font size
+        // adjustment.
+
+        let enable_half_float_mode_output = self
+            .application_manager
+            .get_meta_data()
+            .get_image_filename_style()
+            != ImageFilenameStyle::Hdf;
+        self.l_half_float_mode_output
+            .get_component()
+            .set_enabled(enable_half_float_mode_output);
+        self.cb_half_float_mode_output
+            .set_enabled(enable_half_float_mode_output);
+        self.cb_half_float_mode_output_if_float
+            .set_enabled(enable_half_float_mode_output);
+        self.l_half_float_mode_output_active
+            .get_component()
+            .set_foreground(Some(process_control_panel::COLOR_COMPLETE));
+        self.l_half_float_mode_output_active.set_visible(false);
+
+        let bg_axis_type = ButtonGroup::new();
+        bg_axis_type.add(&self.rb_single_axis.get_abstract_button());
+        bg_axis_type.add(&self.rb_dual_axis.get_abstract_button());
+        // Swing layout: pnlAxisType BoxLayout Y_AXIS, preferred size dimDataTypePref.
+        self.pnl_axis_type
+            .set_border(&EtchedBorder::new(Some(AXIS_TYPE_LABEL)).get_border());
+        let pnl_axis_type = self.pnl_axis_type.get_component();
+        pnl_axis_type.add(&self.rb_single_axis.get_component());
+        pnl_axis_type.add(&self.rb_dual_axis.get_component());
+        let bg_view_type = ButtonGroup::new();
+        bg_view_type.add(&self.rb_single_view.get_abstract_button());
+        bg_view_type.add(&self.rb_montage.get_abstract_button());
+        // Swing layout: pnlViewType BoxLayout Y_AXIS, preferred size dimDataTypePref.
+        self.pnl_view_type
+            .set_border(&EtchedBorder::new(Some(FRAME_TYPE_LABEL)).get_border());
+        let pnl_view_type = self.pnl_view_type.get_component();
+        pnl_view_type.add(&self.rb_single_view.get_component());
+        pnl_view_type.add(&self.rb_montage.get_component());
+
+        // Datatype panel
+        // Swing layout: pnlDataType BoxLayout X_AXIS.
+        self.pnl_data_type
+            .set_border(&EtchedBorder::new(Some("Data Type")).get_border());
+        let pnl_data_type = self.pnl_data_type.get_component();
+        pnl_data_type.add(&pnl_axis_type);
+        // Swing layout: horizontal glue.
+        pnl_data_type.add(&pnl_view_type);
+        // Swing layout: horizontal glue.
+
+        // Pixel & Alignment panel
+        // Swing layout: ltfPixelSize.setColumns(8).
+        self.ltf_pixel_size.set_required(true);
+        // Swing layout: ltfFiducialDiameter.setColumns(5), ltfImageRotation.setColumns(5).
+        // ltfBinning.setTextMaxmimumSize(UIParameters.getInstance().getSpinnerDimension());
+
+        // Swing layout: pnlStackInfo BoxLayout X_AXIS; btnScanHeader
+        // setAlignmentY(CENTER_ALIGNMENT); rigid area x5_y0, horizontal glue.
+        self.pnl_stack_info
+            .add(&self.btn_scan_header.get_component());
+        // Swing layout: rigid areas x10_y0, x10_y0.
+        self.pnl_stack_info
+            .add(&self.ltf_pixel_size.get_container());
+        // Swing layout: rigid area x10_y0, horizontal glue.
+        self.pnl_stack_info
+            .add(&self.ltf_fiducial_diameter.get_container());
+        // Swing layout: rigid area x10_y0, horizontal glue.
+        self.pnl_stack_info
+            .add(&self.ltf_image_rotation.get_container());
+        // Swing layout: rigid area x10_y0, horizontal glue, rigid area x5_y0.
+
+        // Swing layout: pnlDistortionInfo BoxLayout X_AXIS; rigid area x10_y0.
+        self.pnl_distortion_info
+            .add(&self.ftf_distortion_file.get_container());
+        // Swing layout: rigid area x10_y0.
+        self.pnl_distortion_info
+            .add(&self.ltf_binning.get_container());
+        // Swing layout: rigid area x5_y0.
+
+        // Swing layout: pnlMagGradientInfo BoxLayout X_AXIS; rigid area x10_y0.
+        self.pnl_mag_gradient_info
+            .add(&self.ftf_mag_gradient_file.get_container());
+        // Swing layout: rigid area x119_y0.
+
+        let pnl_parallel_process = JComponent::new_panel();
+        // Swing layout: pnlParallelProcess BoxLayout X_AXIS; rigid area x5_y0.
+        pnl_parallel_process.add(&self.cb_parallel_process.get_component());
+        // Swing layout: rigid area x15_y0.
+        pnl_parallel_process.add(&self.cb_gpu_processing.get_component());
+
+        // Swing layout: pnlImageRows BoxLayout Y_AXIS.
+        self.pnl_image_rows.add(&self.pnl_stack_info);
+        // Swing layout: rigid area x0_y15.
+        self.pnl_image_rows.add(&pnl_half_float_mode_output);
+        // Swing layout: rigid area x0_y15.
+        self.pnl_image_rows.add(&pnl_parallel_process);
+        // Swing layout: rigid area x0_y5.
+        self.pnl_image_rows.add(&self.pnl_distortion_info);
+        // Swing layout: rigid area x0_y5.
+        self.pnl_image_rows.add(&self.pnl_mag_gradient_info);
+        self.pnl_image_rows.add(&pnl_remove_excluded_views);
+        // Swing layout: UIUtilities.alignComponentsX(pnlImageRows, LEFT_ALIGNMENT).
+
+        // HalfFloatModeOutput
+        // Swing layout: pnlHalfFloatModeOutput BoxLayout X_AXIS; horizontal strut 8.
+        pnl_half_float_mode_output.add(&self.l_half_float_mode_output.get_component());
+        // Swing layout: horizontal strut 2.
+        pnl_half_float_mode_output.add(&self.cb_half_float_mode_output.get_component());
+        // Swing layout: horizontal strut 9.
+        pnl_half_float_mode_output.add(&self.cb_half_float_mode_output_if_float.get_component());
+        // Swing layout: horizontal strut 14.
+        pnl_half_float_mode_output.add(&self.l_half_float_mode_output_active.get_component());
+
+        // Swing layout: pnlImageRows setAlignmentY(CENTER_ALIGNMENT);
+        // pnlImageParams BoxLayout X_AXIS.
+
+        self.pnl_image_params.add(&self.pnl_image_rows);
+        // Swing layout: horizontal glue, rigid area x5_y0.
+
+        // Swing layout: pnlRow2 BoxLayout X_AXIS.
+        pnl_row2.add(&self.template_panel.get_component());
+        // Swing layout: rigid area x2_y0.
+        pnl_row2.add(&pnl_data_type);
+
+        // Create Data Parameters panel
+        // Swing layout: pnlDataParameters BoxLayout Y_AXIS.
+        self.pnl_data_parameters
+            .add(&self.progress_panel.get_component());
+        // Swing layout: rigid area x0_y10.
+        self.pnl_data_parameters.add(&self.pnl_dataset);
+        // Swing layout: rigid area x0_y10.
+        self.pnl_data_parameters.add(&pnl_row2);
+        // Swing layout: rigid area x0_y10.
+        self.pnl_data_parameters.add(&self.pnl_image_params);
+        // Swing layout: rigid area x0_y10.
+
+        // RemoveExcludedViews
+        // Swing layout: pnlRemoveExcludedViews BoxLayout X_AXIS.
+        pnl_remove_excluded_views.add(&self.cb_remove_excluded_views.get_component());
+        // Swing layout: rigid area x10_y0.
+        pnl_remove_excluded_views.add(&self.cb_delete_old_files.get_component());
+    }
+
+    /// Java private `createPerAxisInfoPanel()`.
+    fn create_per_axis_info_panel(&self) {
+        // constructors
+        let pnl_twodir = JComponent::new_panel();
+        let pnl_btwodir = JComponent::new_panel();
+        // init
+        self.ltf_fiducial_diameter.set_required(true);
+        self.tf_twodir.set_columns_void();
+        self.tf_twodir.set_required(true);
+        self.tf_twodir.set_enabled(false);
+        self.tf_dose_sym.set_columns_void();
+        self.tf_dose_sym.set_required(true);
+        self.tf_dose_sym.set_enabled(false);
+        self.tf_btwodir.set_columns_void();
+        self.tf_btwodir.set_required(true);
+        self.tf_btwodir.set_enabled(false);
+        self.tf_b_dose_sym.set_columns_void();
+        self.tf_b_dose_sym.set_required(true);
+        self.tf_b_dose_sym.set_enabled(false);
+        self.cb_tf_twodir.set_selected_boolean(false);
+        self.cb_tf_btwodir.set_selected_boolean(false);
+        self.rb_bidirectional.set_selected_boolean(true);
+        self.rb_bidirectional.set_enabled(false);
+        self.rb_b_bidirectional.set_selected_boolean(true);
+        self.rb_b_bidirectional.set_enabled(false);
+        self.rb_dose_symmetric.set_enabled(false);
+        self.rb_dose_symmetric.set_selected_boolean(false);
+        self.rb_b_dose_symmetric.set_enabled(false);
+        self.rb_b_dose_symmetric.set_selected_boolean(false);
+        self.tf_dose_sym.set_visible(false);
+        self.tf_b_dose_sym.set_visible(false);
+        self.l_remove_exclude_views_msg_a
+            .set_foreground(Some(process_control_panel::COLOR_COMPLETE));
+        self.l_remove_exclude_views_msg_b
+            .set_foreground(Some(process_control_panel::COLOR_COMPLETE));
+        // Tilt angle specification panels
+        self.pnl_axis_info_a
+            .set_border(&BeveledBorder::new(Some("Axis A: ")).get_border());
+        // Swing layout: pnlAxisInfoA BoxLayout Y_AXIS; ltfExcludeListA,
+        // btnViewRawStackA and lRemoveExcludeViewsMsgA
+        // setAlignmentX(CENTER_ALIGNMENT).
+
+        let pnl_axis_info_a = self.pnl_axis_info_a.get_component();
+        pnl_axis_info_a.add(&self.tilt_angles_a.get_component());
+        // Swing layout: rigid area x0_y5.
+        pnl_axis_info_a.add(&pnl_twodir);
+        // Swing layout: rigid area x0_y3.
+        pnl_axis_info_a.add(&self.ltf_exclude_list_a.get_container());
+        pnl_axis_info_a.add(&self.l_remove_exclude_views_msg_a);
+        // Swing layout: rigid area x0_y10.
+        pnl_axis_info_a.add(&self.btn_view_raw_stack_a.get_component());
+        // Add adjusted focus checkbox
+        // Swing layout: pnlAdjustedFocusA BoxLayout X_AXIS, setAlignmentX(CENTER_ALIGNMENT).
+        self.pnl_adjusted_focus_a
+            .add(&self.cb_adjusted_focus_a.get_component());
+        // Swing layout: horizontal glue; cbAdjustedFocusA setAlignmentX(RIGHT_ALIGNMENT).
+        self.cb_adjusted_focus_a.set_enabled(false);
+        pnl_axis_info_a.add(&self.pnl_adjusted_focus_a);
+
+        let pnl_axis_info_b_panel = EtomoPanel::new();
+        pnl_axis_info_b_panel.set_border(&self.border_axis_info_b.get_border());
+        // Swing layout: pnlAxisInfoB BoxLayout Y_AXIS; ltfExcludeListB,
+        // btnViewRawStackB and lRemoveExcludeViewsMsgB
+        // setAlignmentX(CENTER_ALIGNMENT).
+        let pnl_axis_info_b = pnl_axis_info_b_panel.get_component();
+        pnl_axis_info_b.add(&self.tilt_angles_b.get_component());
+        // Swing layout: rigid area x0_y5.
+        pnl_axis_info_b.add(&pnl_btwodir);
+        // Swing layout: rigid area x0_y3.
+        pnl_axis_info_b.add(&self.ltf_exclude_list_b.get_container());
+        pnl_axis_info_b.add(&self.l_remove_exclude_views_msg_b);
+        // Swing layout: rigid area x0_y10.
+        pnl_axis_info_b.add(&self.btn_view_raw_stack_b.get_component());
+        // Swing layout: cbAdjustedFocusB setAlignmentX(RIGHT_ALIGNMENT).
+        // Add adjusted focus checkbox
+        // Swing layout: pnlAdjustedFocusB BoxLayout X_AXIS, setAlignmentX(CENTER_ALIGNMENT).
+        self.pnl_adjusted_focus_b
+            .add(&self.cb_adjusted_focus_b.get_component());
+        // Swing layout: horizontal glue; cbAdjustedFocusB setAlignmentX(RIGHT_ALIGNMENT).
+        self.cb_adjusted_focus_b.set_enabled(false);
+        pnl_axis_info_b.add(&self.pnl_adjusted_focus_b);
+
+        // Swing layout: pnlPerAxisInfo BoxLayout X_AXIS.
+        self.pnl_per_axis_info.add(&pnl_axis_info_a);
+        self.pnl_per_axis_info.add(&pnl_axis_info_b);
+        // twodir
+        // Swing layout: pnlTwodir BoxLayout X_AXIS.
+        pnl_twodir.add(&self.cb_tf_twodir.get_component());
+        pnl_twodir.add(&self.rb_bidirectional.get_component());
+        pnl_twodir.add(&self.rb_dose_symmetric.get_component());
+        // Swing layout: rigid area x10_y0.
+        pnl_twodir.add(&self.l_twodirfrom);
+        // Swing layout: rigid area x5_y0.
+        pnl_twodir.add(&self.tf_twodir.get_component());
+        pnl_twodir.add(&self.tf_dose_sym.get_component());
+        pnl_twodir.add(&self.l_twodir);
+        // Swing layout: pnlBtwodir BoxLayout X_AXIS.
+        pnl_btwodir.add(&self.cb_tf_btwodir.get_component());
+        pnl_btwodir.add(&self.rb_b_bidirectional.get_component());
+        pnl_btwodir.add(&self.rb_b_dose_symmetric.get_component());
+        // Swing layout: rigid area x10_y0.
+        pnl_btwodir.add(&self.l_btwodirfrom);
+        // Swing layout: rigid area x5_y0.
+        pnl_btwodir.add(&self.tf_btwodir.get_component());
+        pnl_btwodir.add(&self.tf_b_dose_sym.get_component());
+        pnl_btwodir.add(&self.l_btwodir);
+
+        self.update_display(false, false);
+    }
+}
+
+/// Java private static final `SetupDialogActionListener implements
+/// TemplateActionListener` (an `ActionListener`).
+pub struct SetupDialogActionListener {
+    /// Java private final `adaptee`.  Weak: the expert owns the dialog that
+    /// owns this listener.
+    adaptee: Weak<SetupDialogExpert>,
+}
+
+impl SetupDialogActionListener {
+    /// Java private `SetupDialogActionListener(SetupDialogExpert)`.
+    fn new(adaptee: Weak<SetupDialogExpert>) -> SetupDialogActionListener {
+        SetupDialogActionListener { adaptee }
+    }
+
+    /// Java `@Override actionPerformed(ActionEvent)`.
+    pub fn action_performed(&self, event: &ActionEvent) {
+        let Some(adaptee) = self.adaptee.upgrade() else {
+            return;
+        };
+        adaptee.action(event.get_action_command().unwrap_or_default());
+    }
+
+    /// Rust-only: this one listener object registered on a component, as the
+    /// Java registers the same instance on many (`jdk::ActionListener` is a
+    /// closure).
+    fn as_action_listener(self: &Rc<Self>) -> crate::imod::etomo::jdk::ActionListener {
+        let listener = self.clone();
+        Rc::new(move |event: &ActionEvent| listener.action_performed(event))
+    }
+}
+
+impl ProcessDialogVirtual for SetupDialog {
+    /// Rust-only: the `ProcessDialog` part of this dialog.
+    fn process_dialog(&self) -> &ProcessDialog {
+        &self.base
+    }
+
+    /// Java `@Override done()`.
+    fn done(&self) {
+        let mut dataset_dir_string: Option<String> = None;
+        let dataset_dir = self.bctf_raw_image_stack.get_file();
+        if let Some(dataset_dir) = dataset_dir {
+            dataset_dir_string = utilities::java_io_file_get_parent(&dataset_dir.to_string_lossy());
+        }
+        let remove_excluded_views = self.is_remove_excluded_views();
+        self.exclude_views_succeeded_a.set(false);
+        self.exclude_views_succeeded_b.set(false);
+
+        self.application_manager.done_setup_dialog(
+            remove_excluded_views,
+            remove_excluded_views,
+            dataset_dir_string.as_deref(),
+            self.rb_dual_axis.is_selected(),
+            Some(self.progress_panel.clone()),
+        );
+    }
+
+    /// Java `@Override buttonExecuteAction()`.
+    fn button_execute_action(&self) -> bool {
+        // Java `getText().indexOf(...)` would throw on null; a null text is
+        // treated as empty.
+        let raw_image_stack = self
+            .bctf_raw_image_stack
+            .get_text_void()
+            .unwrap_or_default();
+        let axis_type = self.expert().and_then(|expert| expert.get_axis_type());
+        if raw_image_stack.contains(std::path::MAIN_SEPARATOR) {
+            let file = self.bctf_raw_image_stack.get_file();
+            if !dataset_tool::validate_dataset_name_input_file(
+                self.application_manager,
+                AxisID::Only,
+                file.as_deref(),
+                DataFileType::Recon,
+                axis_type,
+            ) {
+                return false;
+            }
+        } else {
+            let dataset_name = self
+                .bctf_raw_image_stack
+                .get_text_void()
+                .unwrap_or_default();
+            let property_user_dir = self
+                .expert()
+                .and_then(|expert| expert.get_property_user_dir());
+            // `getBaseMetaData().getRawImageStackExtension().toString()`.
+            // Upstream bug fixed in translation (SetupDialog.java:425): the
+            // source throws a NullPointerException when no raw image stack
+            // extension is set.  A name cannot end with an extension that is
+            // not set, so the entry is treated as a dataset name.
+            // The base metadata of an ApplicationManager is its `MetaData`,
+            // whose `getRawImageStackExtension` override is the one Java
+            // dispatches to.
+            let raw_image_stack_extension = self
+                .application_manager
+                .get_meta_data()
+                .get_raw_image_stack_extension()
+                .map(|extension| extension.to_string());
+            let is_dataset_name = !raw_image_stack_extension
+                .is_some_and(|extension| dataset_name.ends_with(&extension));
+            // `new File(expert.getPropertyUserDir())`: a null directory would
+            // throw in `new File`; "null" is used as Java string conversion
+            // would print it.
+            let directory = property_user_dir.unwrap_or_else(|| "null".to_owned());
+            if !dataset_tool::validate_dataset_name(
+                self.application_manager,
+                None,
+                AxisID::Only,
+                Path::new(&directory),
+                Some(dataset_name.as_str()),
+                DataFileType::Recon,
+                axis_type,
+                is_dataset_name,
+            ) {
+                return false;
+            }
+        }
+        self.base.button_execute_action_super()
+    }
+}
+
+impl ContextMenu for SetupDialog {
+    /// Java `@Override popUpContextMenu(MouseEvent)`: right mouse button
+    /// context menu.
+    fn pop_up_context_menu(&self, mouse_event: &MouseEvent) {
+        let _context_popup = ContextPopup::new_component_mouse_event_string_base_manager_axis_id(
+            &self.root_panel.get_component(),
+            mouse_event,
+            Some("INITIAL STEPS"),
+            self.application_manager,
+            self.axis_id,
+        );
+    }
+}
+
+impl Run3dmodButtonContainer for SetupDialog {
+    /// Java `@Override action(String, Deferred3dmodButton, Run3dmodMenuOptions)`.
+    fn action(
+        &self,
+        action_command: &str,
+        _deferred_3dmod_button: Option<Rc<dyn Deferred3dmodButton>>,
+        run_3dmod_menu_options: Option<Run3dmodMenuOptions>,
     ) {
-        self.raw_image_stack_field_tooltip = field_tooltip.into();
-        self.raw_image_stack_button_tooltip = button_tooltip.into();
-    }
-    pub fn set_backup_directory_tooltip(
-        &mut self,
-        field_tooltip: impl Into<String>,
-        button_tooltip: impl Into<String>,
-    ) {
-        self.backup_directory_field_tooltip = field_tooltip.into();
-        self.backup_directory_button_tooltip = button_tooltip.into();
-    }
-    pub fn set_scan_header_tooltip(&mut self, tooltip: impl Into<String>) {
-        self.scan_header_tooltip = tooltip.into();
-    }
-    /// Java `getDoseSym(AxisID, boolean)`.
-    pub fn get_dose_sym(&self, axis_id: AxisID, _do_validation: bool) -> String {
-        if axis_id == AxisID::Second {
-            self.dose_sym_b.clone()
-        } else {
-            self.dose_sym_a.clone()
+        let raw_image_stack = self
+            .bctf_raw_image_stack
+            .get_text_void()
+            .unwrap_or_default();
+        if raw_image_stack.is_empty() {
+            ui_harness::open_message_dialog_from_process(
+                Some(self.application_manager as &'static dyn BaseManager),
+                "Raw image stack has not been entered",
+                "Raw Image Stack",
+                Some(AxisID::Only),
+            );
+            return;
         }
-    }
-    pub fn is_dose_sym(&self, axis_id: AxisID) -> bool {
-        if axis_id == AxisID::Second {
-            self.twodir_b_selected && self.dose_sym_b_selected
-        } else {
-            self.twodir_a_selected && self.dose_sym_a_selected
-        }
-    }
-    pub fn is_remove_exclude_views_msg(&self, axis: AxisID) -> bool {
-        if axis == AxisID::Second {
-            !self.remove_exclude_views_msg_b.is_empty()
-        } else {
-            !self.remove_exclude_views_msg_a.is_empty()
-        }
-    }
-    pub fn msg_exclude_views_succeeded(&mut self, axis: AxisID) {
-        if axis == AxisID::Second {
-            self.exclude_views_succeeded_b = true;
-            self.exclude_list_b.clear();
-            self.remove_exclude_views_msg_b = "Excluded views have been removed".into()
-        } else {
-            self.exclude_views_succeeded_a = true;
-            self.exclude_list_a.clear();
-            self.remove_exclude_views_msg_a = "Excluded views have been removed".into()
+        let Some(extension) = Extension::get_instance(&raw_image_stack) else {
+            return;
+        };
+        let file_extension = format!("{EXTENSION_DIVIDER}{extension}");
+        let Some(expert) = self.expert() else {
+            return;
+        };
+        if self.btn_view_raw_stack_a.get_action_command().as_deref() == Some(action_command) {
+            expert.view_raw_stack(&file_extension, AxisID::First, run_3dmod_menu_options);
+        } else if self.btn_view_raw_stack_b.get_action_command().as_deref() == Some(action_command)
+        {
+            expert.view_raw_stack(&file_extension, AxisID::Second, run_3dmod_menu_options);
         }
     }
 }
 
-impl<E: SetupDialogExpert> ContextMenu for SetupDialog<E> {
-    fn pop_up_context_menu(&mut self, mouse_event: MouseEvent) {
-        SetupDialog::pop_up_context_menu(self, mouse_event);
+impl Expandable for SetupDialog {
+    /// Java `@Override expand(ExpandButton)` (empty).
+    fn expand_expand_button(&self, _button: &Rc<ExpandButton>) {}
+
+    /// Java `@Override expand(GlobalExpandButton)`.
+    fn expand_global_expand_button(&self, button: &Rc<GlobalExpandButton>) {
+        self.update_advanced(button.is_expanded());
+        self.pack_axis();
     }
 }
 
-#[cfg(test)]
-mod tests {
-    use super::*;
-    #[derive(Default)]
-    struct E;
-    impl SetupDialogExpert for E {
-        fn done_setup_dialog(&mut self, _: bool, _: Option<&str>, _: bool) {}
-        fn setup_recon_failed(&mut self) {}
-    }
-    #[test]
-    fn derives_dataset_root() {
-        let mut d = SetupDialog::new(E);
-        d.set_raw_image_stack("/tmp/dataa.mrc");
-        assert_eq!(d.get_dataset_name(), "data");
-    }
-
-    #[test]
-    fn get_instance_retains_constructor_panel_and_listener_sequence() {
-        let dialog =
-            SetupDialog::get_instance(E, AxisID::First, DialogType::SetupRecon, true, false);
-        assert!(dialog.root_panel_y_axis);
-        assert!(dialog.dataset_panel_created);
-        assert!(dialog.data_type_panel_created);
-        assert!(dialog.per_axis_info_panel_created);
-        assert!(dialog.listeners_added);
-        assert!(!dialog.advanced_button_present);
-        assert_eq!(dialog.raw_image_stack_display_limit, 50);
-    }
-
-    #[test]
-    fn construction_assigns_axis_specific_raw_stack_commands() {
-        let dialog = SetupDialog::new_with_construction(
-            E,
-            AxisID::First,
-            DialogType::SetupRecon,
-            false,
-            true,
+impl ControlListener for SetupDialog {
+    /// Java `@Override controlEvent()`.
+    fn control_event(&self) {
+        self.update_display(false, false);
+        let Some(raw_image_stack) = self.bctf_raw_image_stack.get_file() else {
+            self.l_remove_exclude_views_msg_a.set_text("");
+            self.l_remove_exclude_views_msg_b.set_text("");
+            return;
+        };
+        let raw_image_stack = raw_image_stack.to_string_lossy().into_owned();
+        let dual_axis = self.rb_dual_axis.is_selected();
+        let dataset_name = dataset_tool::get_dataset_name(
+            Some(utilities::java_io_file_get_name(&raw_image_stack).as_str()),
+            dual_axis,
         );
-        assert_eq!(dialog.view_raw_stack_a_command, "View Raw Image Stacka");
-        assert_eq!(dialog.view_raw_stack_b_command, "View Raw Image Stackb");
-        assert!(dialog.advanced_button_present);
+        let mut axis_id = AxisID::Only;
+        if dual_axis {
+            axis_id = AxisID::First;
+        }
+        let file_name_filter =
+            crate::imod::etomo::storage::exclude_views_info_file_name_filter::ExcludeViewsInfoFileNameFilter::new(
+                dataset_name.as_deref(),
+            );
+        file_name_filter.set_axis_id(axis_id);
+        // `File dir = rawImageStack.getParentFile(); dir.list(fileNameFilter)`.
+        // Upstream bug fixed in translation (SetupDialog.java:513-514): a raw
+        // image stack path with no parent directory makes `dir` null and
+        // `dir.list` throw a NullPointerException; such a path has no directory
+        // to search, so no previous excludeviews run is found (as when
+        // `File.list` returns null).
+        let dir = utilities::java_io_file_get_parent(&raw_image_stack);
+        let list = |filter: &crate::imod::etomo::storage::exclude_views_info_file_name_filter::ExcludeViewsInfoFileNameFilter| -> Option<Vec<String>> {
+            let dir = dir.as_deref()?;
+            let entries = std::fs::read_dir(dir).ok()?;
+            Some(
+                entries
+                    .filter_map(|entry| entry.ok())
+                    .map(|entry| entry.file_name().to_string_lossy().into_owned())
+                    .filter(|name| filter.accept(Path::new(dir), Some(name.as_str())))
+                    .collect(),
+            )
+        };
+        let file_name_list = list(&file_name_filter);
+        if file_name_list.is_some_and(|file_name_list| !file_name_list.is_empty()) {
+            // Excludeviews was run for this dataset name previously.
+            self.l_remove_exclude_views_msg_a
+                .set_text(REMOVE_EXCLUDE_VIEW_MSG);
+        } else {
+            self.l_remove_exclude_views_msg_a.set_text("");
+        }
+        if dual_axis {
+            file_name_filter.set_axis_id(AxisID::Second);
+            let file_name_list = list(&file_name_filter);
+            if file_name_list.is_some_and(|file_name_list| !file_name_list.is_empty()) {
+                // Excludeviews was run for this dataset name previously.
+                self.l_remove_exclude_views_msg_b
+                    .set_text(REMOVE_EXCLUDE_VIEW_MSG);
+            } else {
+                self.l_remove_exclude_views_msg_b.set_text("");
+            }
+        }
+        if self.cb_half_float_mode_output_if_float.is_selected() {
+            if let Some(expert) = self.expert() {
+                expert.load_header();
+            }
+        }
+        self.update_display(false, false);
+        // `UIHarness.INSTANCE.pack(axisID, applicationManager)` with the local
+        // `axisID` computed above, which shadows the field.
+        let manager: &'static dyn BaseManager = self.application_manager;
+        ui_harness::INSTANCE
+            .with(|harness| harness.pack_axis_id_base_manager(Some(axis_id), Some(manager)));
+    }
+}
+
+impl SetupReconInterface for SetupDialog {
+    /// Java `@Override setBinning(String)`.
+    fn set_binning(&self, input: Option<&str>) {
+        self.ltf_binning.set_text_string(input);
     }
 
-    #[test]
-    fn action_routes_raw_stack_extension_to_matching_axis_button() {
-        let mut dialog =
-            SetupDialog::get_instance(E, AxisID::First, DialogType::SetupRecon, false, true);
-        dialog.set_raw_image_stack("/data/seriesa.mrc");
-        assert_eq!(
-            dialog.action(&dialog.view_raw_stack_a_command),
-            Some((".mrc".into(), AxisID::First))
+    /// Java `@Override setImageRotation(String)`.
+    fn set_image_rotation(&self, input: Option<&str>) {
+        self.ltf_image_rotation.set_text_string(input);
+    }
+
+    /// Java `@Override setPixelSize(double)`.
+    fn set_pixel_size(&self, input: f64) {
+        self.ltf_pixel_size.set_text_double(input);
+    }
+
+    /// Java `@Override setHalfFloatModeOutput(Integer)`.  The Java compares
+    /// the `Integer`s with `==` (reference identity); both constants are small
+    /// autoboxed values from the `Integer` cache, so identity is value
+    /// equality.
+    fn set_half_float_mode_output(&self, input: Option<i32>) {
+        if Some(copy_tomo_coms::HALF_FLOAT) == input {
+            self.cb_half_float_mode_output.set_selected_boolean(true);
+        } else if Some(copy_tomo_coms::HALF_FLOAT_IF_FLOAT) == input {
+            self.cb_half_float_mode_output_if_float
+                .set_selected_boolean(true);
+        }
+    }
+
+    /// Java `@Override getDataset()` (deprecated 4/8/2019, replaced by
+    /// getRawImageStack).
+    #[allow(deprecated)]
+    fn get_dataset(&self) -> Option<String> {
+        self.get_raw_image_stack()
+    }
+
+    /// Java `@Override getRawImageStack()`.
+    fn get_raw_image_stack(&self) -> Option<String> {
+        self.bctf_raw_image_stack.get_text_void()
+    }
+
+    /// Java `@Override isDualAxisSelected()`.
+    fn is_dual_axis_selected(&self) -> bool {
+        self.rb_dual_axis.is_selected()
+    }
+
+    /// Java `@Override getDistortionFile()`.
+    fn get_distortion_file(&self) -> Option<String> {
+        self.ftf_distortion_file.get_text()
+    }
+
+    /// Java `@Override getMagGradientFile()`.
+    fn get_mag_gradient_file(&self) -> Option<String> {
+        self.ftf_mag_gradient_file.get_text()
+    }
+
+    /// Java `@Override validateTiltAngle(AxisID, String)`.
+    fn validate_tilt_angle(&self, axis_id: AxisID, error_title: &str) -> bool {
+        self.expert()
+            .is_some_and(|expert| expert.validate_tilt_angle(axis_id, error_title))
+    }
+
+    /// Java `@Override isSingleViewSelected()`.
+    fn is_single_view_selected(&self) -> bool {
+        self.rb_single_view.is_selected()
+    }
+
+    /// Java `@Override getBackupDirectory()`.
+    fn get_backup_directory(&self) -> Option<String> {
+        self.ftf_backup_directory.get_text()
+    }
+
+    /// Java `@Override getBinning(boolean)`.
+    fn get_binning(
+        &self,
+        do_validation: bool,
+    ) -> Result<Option<String>, FieldValidationFailedException> {
+        self.ltf_binning.get_text_boolean(do_validation)
+    }
+
+    /// Java `@Override getExcludeList(AxisID, boolean)`.
+    fn get_exclude_list(
+        &self,
+        axis_id: AxisID,
+        do_validation: bool,
+    ) -> Result<Option<String>, FieldValidationFailedException> {
+        if axis_id == AxisID::Second {
+            return self.ltf_exclude_list_b.get_text_boolean(do_validation);
+        }
+        self.ltf_exclude_list_a.get_text_boolean(do_validation)
+    }
+
+    /// Java `@Override getTwodir(AxisID, boolean)`.
+    fn get_twodir(
+        &self,
+        axis_id: AxisID,
+        do_validation: bool,
+    ) -> Result<Option<String>, FieldValidationFailedException> {
+        if axis_id == AxisID::Second {
+            return self.tf_btwodir.get_text_boolean(do_validation);
+        }
+        self.tf_twodir.get_text_boolean(do_validation)
+    }
+
+    /// Java `@Override isTwodir(AxisID)`.
+    fn is_twodir(&self, axis_id: AxisID) -> bool {
+        if axis_id == AxisID::Second {
+            return self.cb_tf_btwodir.is_selected() && self.rb_b_bidirectional.is_selected();
+        }
+        self.cb_tf_twodir.is_selected() && self.rb_bidirectional.is_selected()
+    }
+
+    /// Java `@Override setTwodir(AxisID, double)`.
+    fn set_twodir(&self, axis_id: AxisID, input: f64) {
+        self.set_twodir_axis_id_double(axis_id, input);
+    }
+
+    /// Java `@Override getFiducialDiameter(boolean)`.
+    fn get_fiducial_diameter(
+        &self,
+        do_validation: bool,
+    ) -> Result<Option<String>, FieldValidationFailedException> {
+        self.ltf_fiducial_diameter.get_text_boolean(do_validation)
+    }
+
+    /// Java `@Override getImageRotation(AxisID, boolean)`; `axisID` has no
+    /// effect.
+    fn get_image_rotation(
+        &self,
+        _axis_id: AxisID,
+        do_validation: bool,
+    ) -> Result<Option<String>, FieldValidationFailedException> {
+        self.ltf_image_rotation.get_text_boolean(do_validation)
+    }
+
+    /// Java `@Override getPixelSize(boolean)`.
+    fn get_pixel_size(
+        &self,
+        do_validation: bool,
+    ) -> Result<Option<String>, FieldValidationFailedException> {
+        self.ltf_pixel_size.get_text_boolean(do_validation)
+    }
+
+    /// Java `@Override getHalfFloatModeOutput()`.
+    fn get_half_float_mode_output(&self) -> Option<i32> {
+        if self.cb_half_float_mode_output.is_selected() {
+            return Some(copy_tomo_coms::HALF_FLOAT);
+        }
+        if self.cb_half_float_mode_output_if_float.is_selected() {
+            return Some(copy_tomo_coms::HALF_FLOAT_IF_FLOAT);
+        }
+        None
+    }
+
+    /// Java `@Override isAdjustedFocusSelected(AxisID)`.
+    fn is_adjusted_focus_selected(&self, axis_id: AxisID) -> bool {
+        if axis_id == AxisID::Second {
+            return self.cb_adjusted_focus_b.is_selected();
+        }
+        self.cb_adjusted_focus_a.is_selected()
+    }
+
+    /// Java `@Override isSingleAxisSelected()`.
+    fn is_single_axis_selected(&self) -> bool {
+        self.rb_single_axis.is_selected()
+    }
+
+    /// Java `@Override isGpuProcessingSelected(String)`.
+    fn is_gpu_processing_selected(&self, _property_user_dir: Option<&str>) -> bool {
+        self.cb_gpu_processing.is_selected()
+    }
+
+    /// Java `@Override isParallelProcessSelected(String)`.
+    fn is_parallel_process_selected(&self, _property_user_dir: Option<&str>) -> bool {
+        self.cb_parallel_process.is_selected()
+    }
+
+    /// Java `@Override getTiltAngleFields(AxisID, TiltAngleSpec, boolean)`.
+    fn get_tilt_angle_fields(
+        &self,
+        axis_id: AxisID,
+        tilt_angle_spec: &mut TiltAngleSpec,
+        do_validation: bool,
+    ) -> Result<bool, String> {
+        match self.expert() {
+            Some(expert) => expert.get_tilt_angle_fields(axis_id, tilt_angle_spec, do_validation),
+            None => Ok(false),
+        }
+    }
+
+    /// Java `@Override getDirectiveFileCollection()`.
+    fn get_directive_file_collection(&self) -> Option<DirectiveFileCollectionHandle> {
+        self.template_panel.get_directive_file_collection()
+    }
+
+    /// Java `@Override initTiltAngleFields(AxisID, TiltAngleSpec,
+    /// UserConfiguration)`.
+    fn init_tilt_angle_fields(
+        &self,
+        axis_id: AxisID,
+        tilt_angle_spec: &TiltAngleSpec,
+        user_configuration: &UserConfiguration,
+    ) {
+        if let Some(expert) = self.expert() {
+            expert.set_tilt_angle_fields(axis_id, tilt_angle_spec, user_configuration);
+        }
+    }
+
+    /// Java `@Override getParameters(ExcludeViewsParam, AxisID, boolean,
+    /// boolean)`.
+    fn get_parameters(
+        &self,
+        param: &mut ExcludeViewsParam,
+        axis_id: AxisID,
+        _dual_axis: bool,
+        _do_validation: bool,
+    ) -> bool {
+        let raw_image_stack = self.bctf_raw_image_stack.get_file();
+        if let Some(raw_image_stack) = raw_image_stack {
+            let dual = self.rb_dual_axis.is_selected();
+            let root_name = dataset_tool::get_dataset_name(
+                Some(&utilities::java_io_file_get_name(
+                    &raw_image_stack.to_string_lossy(),
+                )),
+                dual,
+            );
+            if root_name.is_some() {
+                param.set_stack_name(
+                    file_type::CLASS
+                        .raw_stack
+                        .get_file_name(
+                            Some(self.application_manager as &'static dyn BaseManager),
+                            Some(axis_id),
+                        )
+                        .as_deref(),
+                );
+            }
+        }
+        param.set_montaged_images(self.rb_montage.is_selected());
+        param.set_delete_old_files(
+            self.cb_delete_old_files.is_enabled() && self.cb_delete_old_files.is_selected(),
         );
-        assert_eq!(dialog.action("other"), None);
+        true
     }
 
-    #[test]
-    fn half_float_controls_are_exclusive_and_display_state_tracks_selection() {
-        let mut dialog =
-            SetupDialog::get_instance(E, AxisID::First, DialogType::SetupRecon, false, true);
-        dialog.half_float_mode_output = true;
-        dialog.half_float_mode_output_if_float = true;
-        dialog.action_performed(Some("halfFloatModeOutput"));
-        assert!(!dialog.half_float_mode_output_if_float);
-        assert!(dialog.half_float_mode_output_active_visible);
-        assert_eq!(dialog.get_half_float_mode_output(), Some(1));
+    /// Java `@Override msgExcludeViewsSucceeded(AxisID, boolean, boolean)`.
+    fn msg_exclude_views_succeeded(
+        &self,
+        axis_id: AxisID,
+        process_running: bool,
+        process_done: bool,
+    ) {
+        if axis_id == AxisID::Second {
+            self.exclude_views_succeeded_b.set(true);
+            self.ltf_exclude_list_b.set_text_string(Some(""));
+            self.l_remove_exclude_views_msg_b
+                .set_text(REMOVE_EXCLUDE_VIEW_MSG);
+            self.tilt_angles_b.msg_exclude_views_succeeded();
+            if self.ltf_exclude_list_a.is_empty() {
+                self.cb_remove_excluded_views.set_selected_boolean(false);
+            }
+        } else {
+            self.exclude_views_succeeded_a.set(true);
+            self.ltf_exclude_list_a.set_text_string(Some(""));
+            self.l_remove_exclude_views_msg_a
+                .set_text(REMOVE_EXCLUDE_VIEW_MSG);
+            self.tilt_angles_a.msg_exclude_views_succeeded();
+            if !self.ltf_exclude_list_b.is_enabled() || self.ltf_exclude_list_b.is_empty() {
+                self.cb_remove_excluded_views.set_selected_boolean(false);
+            }
+        }
+        self.update_display(process_running, process_done);
     }
 
-    #[test]
-    fn twodir_and_dose_symmetric_state_are_axis_specific() {
-        let mut dialog = SetupDialog::new(E);
-        dialog.set_twodir(AxisID::First, "-60");
-        dialog.set_dose_sym(AxisID::Second, "-45");
-        assert!(dialog.is_twodir(AxisID::First));
-        assert!(!dialog.is_twodir(AxisID::Second));
-        assert_eq!(dialog.get_twodir(AxisID::First, true), "-60");
-        assert_eq!(dialog.dose_sym_b, "-45");
+    /// Java `@Override getDoseSym(AxisID, boolean)`.
+    fn get_dose_sym(
+        &self,
+        axis_id: AxisID,
+        do_validation: bool,
+    ) -> Result<Option<String>, FieldValidationFailedException> {
+        if axis_id == AxisID::Second {
+            return self.tf_b_dose_sym.get_text_boolean(do_validation);
+        }
+        self.tf_dose_sym.get_text_boolean(do_validation)
     }
 
-    #[test]
-    fn advanced_state_tracks_exact_source_fields_except_with_calibration() {
-        let mut dialog = SetupDialog::new_with_construction(
-            E,
-            AxisID::First,
-            DialogType::SetupRecon,
-            false,
-            true,
-        );
-        dialog.update_advanced(true);
-        assert!(dialog.distortion_file_visible);
-        assert!(dialog.binning_visible);
-        assert!(dialog.mag_gradient_info_visible);
-        let mut calibration = SetupDialog::new_with_construction(
-            E,
-            AxisID::First,
-            DialogType::SetupRecon,
-            true,
-            true,
-        );
-        calibration.update_advanced(true);
-        assert!(!calibration.distortion_file_visible);
+    /// Java `@Override isDoseSym(AxisID)`.
+    fn is_dose_sym(&self, axis_id: AxisID) -> bool {
+        if axis_id == AxisID::Second {
+            return self.cb_tf_btwodir.is_selected() && self.rb_b_dose_symmetric.is_selected();
+        }
+        self.cb_tf_twodir.is_selected() && self.rb_dose_symmetric.is_selected()
     }
 
-    #[test]
-    fn file_actions_and_tooltips_only_retain_selected_boundary_values() {
-        let mut dialog = SetupDialog::new(E);
-        dialog.backup_directory_action(Some("/data/backup".into()));
-        dialog.distortion_file_action(None);
-        dialog.mag_gradient_file_action(Some("/data/mag.grad".into()));
-        dialog.set_raw_image_stack_tooltip("field", "button");
-        assert_eq!(dialog.backup_directory, "/data/backup");
-        assert!(dialog.distortion_file.is_empty());
-        assert_eq!(dialog.mag_gradient_file, "/data/mag.grad");
-        assert_eq!(dialog.raw_image_stack_button_tooltip, "button");
-    }
-
-    #[test]
-    fn template_values_copy_axis_a_twodir_to_missing_axis_b_and_preserve_source_dose_bug() {
-        let mut dialog = SetupDialog::new(E);
-        dialog.update_template_values(SetupDialogDirectiveFileCollection {
-            dual: Some(true),
-            montage: Some(true),
-            twodir_a: Some("-60".into()),
-            dose_sym_a: Some("-50".into()),
-            pixel_size: Some("1.2".into()),
-            ..Default::default()
-        });
-        assert!(dialog.dual_axis);
-        assert!(dialog.montage);
-        assert_eq!(dialog.twodir_b, "-60");
-        // The original assigns twodirA to tfDoseSym rather than doseSymA.
-        assert_eq!(dialog.dose_sym_a, "-60");
-        assert_eq!(dialog.dose_sym_b, "-50");
-        assert_eq!(dialog.pixel_size, "1.2");
-    }
-
-    #[test]
-    fn user_configuration_and_tooltips_drive_source_visible_values() {
-        let mut dialog = SetupDialog::new(E);
-        dialog.set_parameters_user_configuration(true);
-        dialog.set_axis_type_tooltip("axis");
-        dialog.set_view_raw_stack_tooltip("view");
-        dialog.set_tooltips();
-        assert!(dialog.remove_excluded_views);
-        assert_eq!(
-            dialog.tooltip_assignments[0],
-            ("axisType".into(), "axis".into())
-        );
-        assert!(
-            dialog
-                .tooltip_assignments
-                .iter()
-                .any(|(name, _)| name == "removeExcludedViews")
-        );
-    }
-
-    #[test]
-    fn overload_state_and_axis_enablement_do_not_change_source_selections() {
-        let mut dialog = SetupDialog::new(E);
-        dialog.set_twodir_double(AxisID::First, -55.0);
-        dialog.set_dose_sym_selected(AxisID::Second, true);
-        dialog.set_twodir_enabled(AxisID::First, false);
-        dialog.set_view_raw_stack_enabled(AxisID::Second, false);
-        assert_eq!(dialog.get_twodir(AxisID::First, true), "-55");
-        assert!(dialog.is_twodir(AxisID::First));
-        assert!(dialog.is_dose_sym(AxisID::Second));
-        assert!(!dialog.twodir_a_enabled);
-        assert!(!dialog.view_raw_stack_b_enabled);
-    }
-
-    #[test]
-    fn dataset_and_directory_accessors_match_source_contracts() {
-        let mut dialog = SetupDialog::new(E);
-        dialog.set_raw_image_stack("/work/dataset.mrc");
-        assert_eq!(dialog.get_dataset(), "/work/dataset.mrc");
-        assert_eq!(dialog.get_directory().as_deref(), Some("/work"));
-        dialog.set_exclude_list(AxisID::Second, "1,3");
-        assert_eq!(
-            dialog.get_views_to_skip(AxisID::Second, true).as_deref(),
-            Some("1,3")
-        );
-        assert!(dialog.get_tilt_angle_fields(true));
-        assert!(!dialog.validate_tilt_angle(false));
-    }
-
-    #[test]
-    fn source_listener_adapters_dispatch_their_exact_dialog_methods() {
-        let mut dialog =
-            SetupDialog::get_instance(E, AxisID::First, DialogType::SetupRecon, false, true);
-        BackupDirectoryActionListener::action_performed(&mut dialog, Some("/backup".into()));
-        dialog.set_raw_image_stack("/images/stack.mrc");
-        assert_eq!(dialog.backup_directory, "/backup");
-        assert_eq!(
-            ViewRawStackAActionListener::action_performed(&dialog),
-            Some((".mrc".into(), AxisID::First))
-        );
-        dialog.set_dual_axis(true);
-        assert_eq!(dialog.get_axis_type(), AxisType::DualAxis);
-        assert_eq!(
-            SetupDialogActionListener::action_performed("scan".into()),
-            "scan"
-        );
+    /// Java `@Override setDoseSym(AxisID, double)`.
+    fn set_dose_sym(&self, axis_id: AxisID, input: f64) {
+        if axis_id == AxisID::Second {
+            self.cb_tf_btwodir.set_selected_boolean(true);
+            self.rb_b_dose_symmetric.set_selected_boolean(true);
+            self.tf_b_dose_sym
+                .set_text_string(Some(&java_lang_double_to_string(input)));
+        } else {
+            self.cb_tf_twodir.set_selected_boolean(true);
+            self.rb_dose_symmetric.set_selected_boolean(true);
+            self.tf_dose_sym
+                .set_text_string(Some(&java_lang_double_to_string(input)));
+        }
+        self.update_display(false, false);
     }
 }

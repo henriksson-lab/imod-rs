@@ -37,7 +37,7 @@ component CalcPanel inherits HorizontalLayout {
         label-width: 60px;
     }
     Text { text: "Total:"; vertical-alignment: center; }
-    TextField { text: root.total; enabled: root.enabled; field-width: 70px; }
+    TextField { label: "Total:"; text: root.total; enabled: root.enabled; field-width: 70px; }
 }
 
 export component TomogramPositioningDialog inherits VerticalLayout {
@@ -66,7 +66,7 @@ export component TomogramPositioningDialog inherits VerticalLayout {
                 spacing: EtomoStyle.gap;
                 alignment: start;
                 CheckBox { text: "Sample has gold beads of size:"; enabled: false; }
-                TextField { text: "10.0"; enabled: false; field-width: 70px; }
+                TextField { label: "Sample has gold beads of size:"; text: "10.0"; enabled: false; field-width: 70px; }
                 Text { text: " pixels"; vertical-alignment: center; color: EtomoStyle.disabled-text; }
             }
             LabeledTextField { label: "Positioning tomogram thickness: "; text: "1200"; label-width: 210px; }

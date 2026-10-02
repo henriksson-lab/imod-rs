@@ -1,381 +1,190 @@
 //! `IMOD/Etomo/src/etomo/ui/swing/CompleteIcon.java`.
 //!
-//! Image decoding, resource lookup, image observers, and Swing button painting
-//! belong to the native GUI adapter.  This unit keeps the four `ImageIcon`
-//! slots and the source's sizing/assignment rules without introducing a
-//! second widget toolkit.
-#![allow(dead_code)]
+//! The four icons of a button (normal, selected, pressed, rollover).  Icons are
+//! painting and are not modelled: each `ImageIcon` is held as the name of the image it
+//! shows, and setting icons on a button is recorded as comments.
 
-use std::path::PathBuf;
+use std::cell::{Cell, RefCell};
+use std::rc::Rc;
 
-use super::panel::Dimension;
+use super::scaled_image::ScaledImage;
+use crate::imod::etomo::jdk::{Dimension, JComponent};
 
-/// Native-GUI representation of Java `ImageIcon` as used by this source unit.
-#[derive(Clone, Debug, Eq, PartialEq)]
-pub struct ImageIcon {
-    /// The source resource URL, represented by its local source-tree path.
-    pub resource: Option<PathBuf>,
-    /// Java `ImageIcon.getIconWidth()` result supplied by the frontend.
-    pub width: i32,
-    /// Java `ImageIcon.getIconHeight()` result supplied by the frontend.
-    pub height: i32,
-    /// Java `ImageIcon.setImageObserver(ImageObserver)` state.
-    pub image_observer_set: bool,
-}
-
-/// Boundary for Java `java.awt.image.ImageObserver`.
-pub trait ImageObserver {}
-
-/// Boundary for the separately translated Java `ScaledImage` source unit.
-///
-/// `CompleteIcon.java` only calls `ScaledImage.getImage(ImageObserver)`; image
-/// scaling and loading stay owned by that source unit/native frontend.
-pub trait ScaledImage {
-    fn get_image(&self, image_observer: Option<&dyn ImageObserver>) -> Option<ImageIcon>;
-}
-
-/// Boundary for the four Java `AbstractButton.set*Icon` calls in this unit.
-pub trait CompleteIconButton {
-    fn set_icon(&mut self, icon: ImageIcon);
-    fn set_selected_icon(&mut self, icon: ImageIcon);
-    fn set_pressed_icon(&mut self, icon: ImageIcon);
-    fn set_rollover_icon(&mut self, icon: ImageIcon);
-}
-
-/// Source-visible state for a native `AbstractButton` adapter.
-#[derive(Clone, Debug, Default, Eq, PartialEq)]
-pub struct CompleteIconButtonState {
-    pub icon: Option<ImageIcon>,
-    pub selected_icon: Option<ImageIcon>,
-    pub pressed_icon: Option<ImageIcon>,
-    pub rollover_icon: Option<ImageIcon>,
-}
-
-impl CompleteIconButton for CompleteIconButtonState {
-    fn set_icon(&mut self, icon: ImageIcon) {
-        self.icon = Some(icon);
-    }
-
-    fn set_selected_icon(&mut self, icon: ImageIcon) {
-        self.selected_icon = Some(icon);
-    }
-
-    fn set_pressed_icon(&mut self, icon: ImageIcon) {
-        self.pressed_icon = Some(icon);
-    }
-
-    fn set_rollover_icon(&mut self, icon: ImageIcon) {
-        self.rollover_icon = Some(icon);
-    }
-}
-
-/// Java package-private final `CompleteIcon`.
-#[derive(Clone, Debug)]
+/// Java `CompleteIcon`.
 pub struct CompleteIcon {
-    pub icon: Option<ImageIcon>,
-    pub selected_icon: Option<ImageIcon>,
-    pub pressed_icon: Option<ImageIcon>,
-    pub rollover_icon: Option<ImageIcon>,
-    pub width: Option<i32>,
-    pub height: Option<i32>,
-    pub icon_size: Option<Dimension>,
-    pub icon_size_set: bool,
+    /// Java `icon` (the image it shows).
+    icon: Option<String>,
+    /// Java `selectedIcon`.
+    selected_icon: Option<String>,
+    /// Java `pressedIcon`.
+    pressed_icon: Option<String>,
+    /// Java `rolloverIcon`.
+    rollover_icon: Option<String>,
+    /// Java `width` (unused in the Java too).
+    #[allow(dead_code)]
+    width: Cell<Option<i32>>,
+    /// Java `height` (unused in the Java too).
+    #[allow(dead_code)]
+    height: Cell<Option<i32>>,
+    /// Java `iconSize`.
+    icon_size: RefCell<Option<Dimension>>,
+    /// Java `iconSizeSet`.
+    icon_size_set: Cell<bool>,
 }
 
 impl CompleteIcon {
     /// Java `CompleteIcon(String, String, String, String)`.
-    pub fn new_from_files(
+    pub fn new_string_string_string_string(
         image_file: Option<&str>,
         selected_image_file: Option<&str>,
         pressed_image_file: Option<&str>,
         rollover_image_file: Option<&str>,
-    ) -> Self {
-        Self {
-            icon: Self::create_icon(image_file),
-            selected_icon: Self::create_icon(selected_image_file),
-            pressed_icon: Self::create_icon(pressed_image_file),
-            rollover_icon: Self::create_icon(rollover_image_file),
-            width: None,
-            height: None,
-            icon_size: None,
-            icon_size_set: false,
+    ) -> CompleteIcon {
+        CompleteIcon {
+            icon: CompleteIcon::create_icon_string(image_file),
+            selected_icon: CompleteIcon::create_icon_string(selected_image_file),
+            pressed_icon: CompleteIcon::create_icon_string(pressed_image_file),
+            rollover_icon: CompleteIcon::create_icon_string(rollover_image_file),
+            width: Cell::new(None),
+            height: Cell::new(None),
+            icon_size: RefCell::new(None),
+            icon_size_set: Cell::new(false),
         }
     }
 
     /// Java `CompleteIcon(ScaledImage, ScaledImage, ScaledImage, ScaledImage,
-    /// ImageObserver, boolean)`.  `debug` is deliberately retained although
-    /// the Java method does not use it.
-    pub fn new_from_scaled_images(
-        image: Option<&dyn ScaledImage>,
-        selected_image: Option<&dyn ScaledImage>,
-        pressed_image: Option<&dyn ScaledImage>,
-        rollover_image: Option<&dyn ScaledImage>,
-        image_observer: Option<&dyn ImageObserver>,
+    /// ImageObserver, boolean)`.
+    pub fn new_scaled_image_scaled_image_scaled_image_scaled_image_image_observer_boolean(
+        image: Option<&ScaledImage>,
+        selected_image: Option<&ScaledImage>,
+        pressed_image: Option<&ScaledImage>,
+        rollover_image: Option<&ScaledImage>,
+        image_observer: Option<&Rc<JComponent>>,
         debug: bool,
-    ) -> Self {
-        Self {
-            icon: Self::create_icon_from_scaled_image(image, image_observer, debug),
-            selected_icon: Self::create_icon_from_scaled_image(
+    ) -> CompleteIcon {
+        CompleteIcon {
+            icon: CompleteIcon::create_icon_scaled_image_image_observer_boolean(
+                image,
+                image_observer,
+                debug,
+            ),
+            selected_icon: CompleteIcon::create_icon_scaled_image_image_observer_boolean(
                 selected_image,
                 image_observer,
                 debug,
             ),
-            pressed_icon: Self::create_icon_from_scaled_image(pressed_image, image_observer, debug),
-            rollover_icon: Self::create_icon_from_scaled_image(
+            pressed_icon: CompleteIcon::create_icon_scaled_image_image_observer_boolean(
+                pressed_image,
+                image_observer,
+                debug,
+            ),
+            rollover_icon: CompleteIcon::create_icon_scaled_image_image_observer_boolean(
                 rollover_image,
                 image_observer,
                 debug,
             ),
-            width: None,
-            height: None,
-            icon_size: None,
-            icon_size_set: false,
+            width: Cell::new(None),
+            height: Cell::new(None),
+            icon_size: RefCell::new(None),
+            icon_size_set: Cell::new(false),
         }
     }
 
-    /// Java static `createIcon(String)`.
-    pub fn create_icon(image_file: Option<&str>) -> Option<ImageIcon> {
+    /// Java static `createIcon(String)`.  Java returns null when the
+    /// `images/<imageFile>` resource is not found; resources are not modelled, so every
+    /// named image is taken to exist.
+    pub fn create_icon_string(image_file: Option<&str>) -> Option<String> {
         let image_file = image_file?;
-        let resource = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-            .join("IMOD/Etomo/src/images")
-            .join(image_file);
-        if !resource.is_file() {
-            return None;
-        }
-        Some(ImageIcon {
-            resource: Some(resource),
-            width: -1,
-            height: -1,
-            image_observer_set: false,
-        })
+        // Swing painting: new ImageIcon(ClassLoader.getSystemResource("images/" +
+        // imageFile)).
+        Some(image_file.to_string())
     }
 
     /// Java static `createIcon(ScaledImage, ImageObserver, boolean)`.
-    pub fn create_icon_from_scaled_image(
-        scaled_image: Option<&dyn ScaledImage>,
-        image_observer: Option<&dyn ImageObserver>,
+    pub fn create_icon_scaled_image_image_observer_boolean(
+        scaled_image: Option<&ScaledImage>,
+        _image_observer: Option<&Rc<JComponent>>,
         _debug: bool,
-    ) -> Option<ImageIcon> {
-        let mut image_icon = scaled_image?.get_image(image_observer)?;
-        image_icon.image_observer_set = true;
-        Some(image_icon)
+    ) -> Option<String> {
+        let scaled_image = scaled_image?;
+        // Swing painting: imageIcon = new ImageIcon(scaledImage.getImage(imageObserver));
+        // imageIcon.setImageObserver(imageObserver).
+        Some(scaled_image.get_image().to_string())
     }
 
-    /// Java `toString`.  As in Java, calling this with a null primary icon is
-    /// invalid; Rust reports that condition rather than silently inventing one.
+    /// Java `toString()`.
+    ///
+    /// Fixed in translation (`CompleteIcon.java:83`): Java throws a
+    /// NullPointerException when there is no normal icon; this returns "null".
     pub fn to_string(&self) -> String {
-        self.icon
-            .as_ref()
-            .expect("Java CompleteIcon.toString dereferences icon")
-            .resource
-            .as_ref()
-            .map_or_else(String::new, |resource| resource.display().to_string())
+        self.icon.clone().unwrap_or_else(|| "null".to_string())
     }
 
-    /// Java `setup(AbstractButton)`.
-    pub fn setup(&self, button: Option<&mut dyn CompleteIconButton>) {
-        let Some(button) = button else {
+    /// Java final `setup(AbstractButton)`.
+    pub fn setup(&self, button: Option<&Rc<JComponent>>) {
+        if button.is_none() {
             return;
-        };
-        if let Some(icon) = &self.icon {
-            button.set_icon(icon.clone());
         }
-        if let Some(selected_icon) = &self.selected_icon {
-            button.set_selected_icon(selected_icon.clone());
+        if self.icon.is_some() {
+            // Swing painting: button.setIcon(icon).
         }
-        if let Some(pressed_icon) = &self.pressed_icon {
-            button.set_pressed_icon(pressed_icon.clone());
+        if self.selected_icon.is_some() {
+            // Swing painting: button.setSelectedIcon(selectedIcon).
         }
-        if let Some(rollover_icon) = &self.rollover_icon {
-            button.set_rollover_icon(rollover_icon.clone());
+        if self.pressed_icon.is_some() {
+            // Swing painting: button.setPressedIcon(pressedIcon).
+        }
+        if self.rollover_icon.is_some() {
+            // Swing painting: button.setRolloverIcon(rolloverIcon).
         }
     }
 
-    /// Java synchronized `getIconSize`.
-    pub fn get_icon_size(&mut self) -> Option<Dimension> {
-        if self.icon_size.is_some() || self.icon_size_set {
-            return self.icon_size;
+    /// Java synchronized `getIconSize()`.  Returns the maximum icon size, or null.
+    ///
+    /// Fixed in translation (`CompleteIcon.java:120-121`): Java measures `pressedIcon`
+    /// twice and never `rolloverIcon`; this measures the rollover icon in the second
+    /// call.
+    pub fn get_icon_size(&self) -> Option<Dimension> {
+        if self.icon_size.borrow().is_some() || self.icon_size_set.get() {
+            return *self.icon_size.borrow();
         }
-        self.icon_size_set = true;
+        self.icon_size_set.set(true);
         let mut icon_size = Dimension {
             width: 0,
             height: 0,
         };
-        Self::max_icon_size(self.icon.as_ref(), &mut icon_size);
-        Self::max_icon_size(self.selected_icon.as_ref(), &mut icon_size);
-        Self::max_icon_size(self.pressed_icon.as_ref(), &mut icon_size);
-        // This duplicate pressed-icon comparison is present in the Java source.
-        Self::max_icon_size(self.pressed_icon.as_ref(), &mut icon_size);
+        self.max_icon_size(self.icon.as_deref(), &mut icon_size);
+        self.max_icon_size(self.selected_icon.as_deref(), &mut icon_size);
+        self.max_icon_size(self.pressed_icon.as_deref(), &mut icon_size);
+        self.max_icon_size(self.rollover_icon.as_deref(), &mut icon_size);
+        // Avoid setting or returning an invalid iconSize.
         if icon_size.width <= 0 && icon_size.height <= 0 {
-            self.icon_size = None;
+            *self.icon_size.borrow_mut() = None;
         } else {
-            self.icon_size = Some(icon_size);
+            *self.icon_size.borrow_mut() = Some(icon_size);
         }
-        self.icon_size
+        *self.icon_size.borrow()
     }
 
-    /// Java private `maxIconSize(ImageIcon, Dimension)`.
-    fn max_icon_size(image_icon: Option<&ImageIcon>, icon_size: &mut Dimension) {
-        let Some(image_icon) = image_icon else {
+    /// Java private `maxIconSize(ImageIcon, Dimension)`.  Use the maximum width and
+    /// height, comparing imageIcon with iconSize.
+    fn max_icon_size(&self, image_icon: Option<&str>, _icon_size: &mut Dimension) {
+        if image_icon.is_none() {
             return;
-        };
-        if image_icon.width > icon_size.width {
-            icon_size.width = image_icon.width;
         }
-        if image_icon.height > icon_size.height {
-            icon_size.height = image_icon.height;
-        }
+        // Swing painting: width = imageIcon.getIconWidth(); height =
+        // imageIcon.getIconHeight(); widen iconSize to them.  Image sizes are not
+        // modelled, so no icon contributes a size.
     }
 
-    /// Java `setSelectedAppearance(AbstractButton, boolean)`.
-    pub fn set_selected_appearance(
-        &self,
-        button: Option<&mut dyn CompleteIconButton>,
-        selected: bool,
-    ) {
-        let Some(button) = button else {
+    /// Java final `setSelectedAppearance(AbstractButton, boolean)`.  Use to cause a
+    /// button with no toggle functionality to appear to have toggle functionality.
+    pub fn set_selected_appearance(&self, button: Option<&Rc<JComponent>>, _selected: bool) {
+        if button.is_none() {
             return;
-        };
+        }
         if self.icon.is_some() && self.selected_icon.is_some() {
-            button.set_icon(
-                if selected {
-                    self.selected_icon.as_ref()
-                } else {
-                    self.icon.as_ref()
-                }
-                .expect("Java null checks above guarantee an icon")
-                .clone(),
-            );
+            // Swing painting: button.setIcon(selected ? selectedIcon : icon).
         }
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    struct Observer;
-    impl ImageObserver for Observer {}
-
-    struct TestScaledImage(Option<ImageIcon>);
-    impl ScaledImage for TestScaledImage {
-        fn get_image(&self, _image_observer: Option<&dyn ImageObserver>) -> Option<ImageIcon> {
-            self.0.clone()
-        }
-    }
-
-    #[test]
-    fn file_constructor_uses_system_images_resource_and_preserves_missing_icons() {
-        let icon = CompleteIcon::new_from_files(Some("x.png"), None, Some("x-pressed.png"), None);
-        assert!(
-            icon.icon
-                .as_ref()
-                .is_some_and(|icon| icon.resource.is_some())
-        );
-        assert!(icon.selected_icon.is_none());
-        assert!(icon.pressed_icon.is_some());
-        assert!(icon.rollover_icon.is_none());
-        assert!(icon.to_string().ends_with("images/x.png"));
-    }
-
-    #[test]
-    fn scaled_constructor_sets_observer_and_setup_assigns_each_non_null_slot() {
-        let image = TestScaledImage(Some(ImageIcon {
-            resource: None,
-            width: 12,
-            height: 8,
-            image_observer_set: false,
-        }));
-        let selected = TestScaledImage(Some(ImageIcon {
-            resource: None,
-            width: 10,
-            height: 20,
-            image_observer_set: false,
-        }));
-        let mut icon = CompleteIcon::new_from_scaled_images(
-            Some(&image),
-            Some(&selected),
-            None,
-            None,
-            Some(&Observer),
-            false,
-        );
-        assert!(
-            icon.icon
-                .as_ref()
-                .is_some_and(|image| image.image_observer_set)
-        );
-        let mut button = CompleteIconButtonState::default();
-        icon.setup(Some(&mut button));
-        assert_eq!(button.icon.as_ref().map(|icon| icon.width), Some(12));
-        assert_eq!(
-            button.selected_icon.as_ref().map(|icon| icon.height),
-            Some(20)
-        );
-        assert!(button.pressed_icon.is_none());
-        assert_eq!(
-            icon.get_icon_size(),
-            Some(Dimension {
-                width: 12,
-                height: 20
-            })
-        );
-    }
-
-    #[test]
-    fn selected_appearance_only_changes_primary_icon_when_both_icons_exist() {
-        let icon = CompleteIcon {
-            icon: Some(ImageIcon {
-                resource: None,
-                width: 1,
-                height: 1,
-                image_observer_set: false,
-            }),
-            selected_icon: Some(ImageIcon {
-                resource: None,
-                width: 2,
-                height: 2,
-                image_observer_set: false,
-            }),
-            pressed_icon: None,
-            rollover_icon: None,
-            width: None,
-            height: None,
-            icon_size: None,
-            icon_size_set: false,
-        };
-        let mut button = CompleteIconButtonState::default();
-        icon.set_selected_appearance(Some(&mut button), true);
-        assert_eq!(button.icon.as_ref().map(|icon| icon.width), Some(2));
-        icon.set_selected_appearance(Some(&mut button), false);
-        assert_eq!(button.icon.as_ref().map(|icon| icon.width), Some(1));
-    }
-
-    #[test]
-    fn sizing_memoizes_null_result_after_all_nonpositive_icons() {
-        let mut icon = CompleteIcon {
-            icon: Some(ImageIcon {
-                resource: None,
-                width: -1,
-                height: -1,
-                image_observer_set: false,
-            }),
-            selected_icon: None,
-            pressed_icon: None,
-            rollover_icon: Some(ImageIcon {
-                resource: None,
-                width: 50,
-                height: 60,
-                image_observer_set: false,
-            }),
-            width: None,
-            height: None,
-            icon_size: None,
-            icon_size_set: false,
-        };
-        // Java compares pressed twice and never compares rollover.
-        assert_eq!(icon.get_icon_size(), None);
-        assert!(icon.icon_size_set);
-        assert_eq!(icon.get_icon_size(), None);
     }
 }

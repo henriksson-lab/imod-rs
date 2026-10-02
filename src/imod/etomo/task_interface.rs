@@ -4,7 +4,7 @@
 #![allow(dead_code)]
 
 /// Java `TaskInterface`.
-pub trait TaskInterface {
+pub trait TaskInterface: std::any::Any {
     /// Java `okToDrop`.  If true, then the user will be warned if they exit before the
     /// task is started.
     fn ok_to_drop(&self) -> bool;

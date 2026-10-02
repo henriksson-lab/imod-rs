@@ -275,11 +275,33 @@ impl FortranInputString {
         self.n_params
     }
 
-    // TODO(unit): needs etomo/comscript/ComScriptCommand.java and
-    // etomo/comscript/ParamUtilities.java - both Java `updateScriptParameter` overloads
-    // (FortranInputString.java:299-308) forward to
-    // `ParamUtilities.updateScriptParameter(ComScriptCommand, key, this, ...)`, and
-    // neither of those units has a Rust module.
+    /// Java package-private `updateScriptParameter(ComScriptCommand)`.
+    pub(crate) fn update_script_parameter(
+        &self,
+        script_command: &mut super::com_script_command::ComScriptCommand,
+    ) {
+        super::param_utilities::update_script_parameter_fortran_input_string(
+            script_command,
+            self.key.as_deref(),
+            self,
+        );
+    }
+
+    /// Java package-private `updateScriptParameter(ComScriptCommand, boolean, boolean)`.
+    pub(crate) fn update_script_parameter_format(
+        &self,
+        script_command: &mut super::com_script_command::ComScriptCommand,
+        default_is_blank: bool,
+        strip_value_ends_char: bool,
+    ) {
+        super::param_utilities::update_script_parameter_fortran_input_string_format(
+            script_command,
+            self.key.as_deref(),
+            self,
+            default_is_blank,
+            strip_value_ends_char,
+        );
+    }
 
     /// Java `setDivider`.
     pub(crate) fn set_divider(&mut self, divider: char) {
@@ -291,10 +313,23 @@ impl FortranInputString {
         self.divider = DEFAULT_DIVIDER;
     }
 
-    // TODO(unit): needs etomo/comscript/ComScriptCommand.java and
-    // etomo/comscript/InvalidParameterException.java - Java
-    // `validateAndSet(ComScriptCommand)` (FortranInputString.java:318-326) reads
-    // `scriptCommand.hasKeyword(key)` and `scriptCommand.getValue(key)`.
+    /// Java package-private `validateAndSet(ComScriptCommand)`.  Its two checked
+    /// exceptions are carried by `ParseComScriptError`; the `IllegalStateException`
+    /// for a null key is a panic, as an unchecked exception is in Java.
+    pub(crate) fn validate_and_set_com_script(
+        &mut self,
+        script_command: &super::com_script_command::ComScriptCommand,
+    ) -> Result<(), super::command_param::ParseComScriptError> {
+        let key = match self.key.clone() {
+            None => panic!("java.lang.IllegalStateException: key == null"),
+            Some(key) => key,
+        };
+        if script_command.has_keyword(Some(&key))? {
+            let value = script_command.get_value(Some(&key))?;
+            self.validate_and_set(value.as_deref())?;
+        }
+        Ok(())
+    }
 
     /// Java `validateAndSet(String, String)`.  Concatenates newValues1 and newValues2.
     /// Instance must be large enough to hold newValue1 and newValue2.  It is isn't, then

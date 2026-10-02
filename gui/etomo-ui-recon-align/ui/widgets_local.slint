@@ -2,7 +2,9 @@
 // does not carry.  Each component is named after the Swing class it stands for
 // in `IMOD/Etomo/src/etomo/ui/swing`.
 
-import { EtomoStyle, CheckBox, RadioButton } from "../../etomo-ui-common/ui/widgets.slint";
+import {
+    EtomoStyle, EtomoBridge, CheckBox, RadioButton, BridgedTextBox, BridgedButton,
+} from "../../etomo-ui-common/ui/widgets.slint";
 
 // `EtchedBorder` (`EtchedBorder.java`): a `TitledBorder` around
 // `BorderFactory.createEtchedBorder()`.  Swing draws the title inline in the
@@ -26,22 +28,13 @@ export component EtchedBorder inherits Rectangle {
 }
 
 // `TextField` (`TextField.java`): a bare entry box with no label of its own.
-export component TextField inherits Rectangle {
-    in property <string> text;
-    in property <bool> enabled: true;
+// `label` is the Java `reference` it is named from ("tf." + the converted
+// reference); it is not drawn.
+export component TextField inherits BridgedTextBox {
     in property <bool> editable: true;
     in property <length> field-width: 90px;
+    kind: "tf";
     width: root.field-width;
-    height: EtomoStyle.field-height;
-    background: root.editable ? EtomoStyle.field-background : EtomoStyle.panel;
-    border-width: 1px;
-    border-color: EtomoStyle.border;
-    Text {
-        x: 3px;
-        text: root.text;
-        vertical-alignment: center;
-        color: root.enabled ? EtomoStyle.text : EtomoStyle.disabled-text;
-    }
 }
 
 // `RadioTextField` (`RadioTextField.java`): a radio button followed by the
@@ -59,7 +52,9 @@ export component RadioTextField inherits HorizontalLayout {
         selected: root.selected;
         enabled: root.enabled;
     }
+    // `new TextField(fieldType, label, locationDescr)`: named from the label.
     TextField {
+        label: root.label;
         text: root.text;
         enabled: root.enabled;
         field-width: root.field-width;
@@ -81,7 +76,9 @@ export component CheckTextField inherits HorizontalLayout {
         checked: root.checked;
         enabled: root.enabled;
     }
+    // `setLabel`: the text field is named from the label too.
     TextField {
+        label: root.label;
         text: root.text;
         enabled: root.enabled;
         field-width: root.field-width;
@@ -102,13 +99,13 @@ export component CheckBoxSpinner inherits HorizontalLayout {
         checked: root.checked;
         enabled: root.enabled;
     }
-    Rectangle {
+    // `Spinner.getInstance(checkBox.getText())`: "sp." + the label.
+    BridgedTextBox {
         width: 40px;
-        height: EtomoStyle.field-height;
-        background: EtomoStyle.field-background;
-        border-width: 1px;
-        border-color: EtomoStyle.border;
-        Text { x: 3px; text: root.text; vertical-alignment: center; }
+        kind: "sp";
+        label: root.label;
+        text: root.text;
+        enabled: root.enabled;
     }
     Rectangle {
         width: 14px;
@@ -117,8 +114,16 @@ export component CheckBoxSpinner inherits HorizontalLayout {
         border-width: 1px;
         border-color: EtomoStyle.border;
         VerticalLayout {
-            Text { text: "^"; horizontal-alignment: center; }
-            Text { text: "v"; horizontal-alignment: center; }
+            Text {
+                text: "^";
+                horizontal-alignment: center;
+                TouchArea { clicked => { EtomoBridge.toggled("sp", root.label, true); } }
+            }
+            Text {
+                text: "v";
+                horizontal-alignment: center;
+                TouchArea { clicked => { EtomoBridge.toggled("sp", root.label, false); } }
+            }
         }
     }
 }
@@ -129,6 +134,11 @@ export component CheckBoxSpinner inherits HorizontalLayout {
 export component SimpleButton inherits Rectangle {
     in property <string> text: "...";
     in property <bool> enabled: true;
+    // Wired: the label of the text field this chooser button belongs to
+    // (bridge kind "fbn"), or the label the Java names the button itself from
+    // (`SimpleButton.setName(label)`, "bn." + the label).
+    in property <string> field-label;
+    in property <string> name-label;
     width: 24px;
     height: EtomoStyle.field-height;
     background: EtomoStyle.panel;
@@ -139,6 +149,16 @@ export component SimpleButton inherits Rectangle {
         horizontal-alignment: center;
         vertical-alignment: center;
         color: root.enabled ? EtomoStyle.text : EtomoStyle.disabled-text;
+    }
+    if root.field-label != "": BridgedButton {
+        kind: "fbn";
+        label: root.field-label;
+        default-enabled: root.enabled;
+    }
+    if root.name-label != "": BridgedButton {
+        kind: "bn";
+        label: root.name-label;
+        default-enabled: root.enabled;
     }
 }
 
@@ -158,31 +178,42 @@ export component FileTextField inherits HorizontalLayout {
         color: root.enabled ? EtomoStyle.text : EtomoStyle.disabled-text;
         font-size: EtomoStyle.font-size-pt * 1px;
     }
-    Rectangle {
-        height: EtomoStyle.field-height;
-        background: EtomoStyle.field-background;
-        border-width: 1px;
-        border-color: EtomoStyle.border;
-        Text { x: 3px; text: root.text; vertical-alignment: center; }
+    BridgedTextBox {
+        kind: "tf";
+        label: root.label;
+        text: root.text;
+        enabled: root.enabled;
     }
-    SimpleButton { }
+    SimpleButton { field-label: root.label; enabled: root.enabled; }
 }
 
 // `SingleLineButton` (`SingleLineButton.java`): the narrow, single-line button
-// used for the exit row and for `Run Cross-Validation`.
+// used for the exit row and for `Run Cross-Validation`.  Named "bn." + its
+// label (`setName(getUnformattedLabel())`); `labels` lists every label the
+// button can carry ("Advanced|Basic"), and the shown text is the Swing
+// button's.
 export component SingleLineButton inherits Rectangle {
     in property <string> text;
     in property <bool> enabled: true;
+    in property <string> labels: root.text;
+    property <string> shown-text: EtomoBridge.wired
+        ? EtomoBridge.text-value("bn", root.labels, root.text, EtomoBridge.generation)
+        : root.text;
     height: EtomoStyle.field-height;
     background: EtomoStyle.panel;
     border-width: 2px;
     border-color: EtomoStyle.border;
     Text {
-        text: root.text;
+        text: root.shown-text;
         horizontal-alignment: center;
         vertical-alignment: center;
-        color: root.enabled ? EtomoStyle.text : EtomoStyle.disabled-text;
+        color: area.shown-enabled ? EtomoStyle.text : EtomoStyle.disabled-text;
         font-weight: 700;
+    }
+    area := BridgedButton {
+        kind: "bn";
+        label: root.labels;
+        default-enabled: root.enabled;
     }
 }
 
@@ -204,7 +235,7 @@ export component ExitButtons inherits HorizontalLayout {
     if root.use-postpone: Rectangle { }
     SingleLineButton { text: root.execute-text; width: 90px; }
     Rectangle { }
-    SingleLineButton { text: root.advanced-text; width: 90px; }
+    SingleLineButton { text: root.advanced-text; labels: "Advanced|Basic"; width: 90px; }
     Rectangle { }
 }
 
@@ -226,7 +257,9 @@ export component TextEfield inherits HorizontalLayout {
         color: root.enabled ? EtomoStyle.text : EtomoStyle.disabled-text;
         font-size: EtomoStyle.font-size-pt * 1px;
     }
+    // `TextEfield.setName`: "tf." + the label.
     TextField {
+        label: root.label;
         text: root.text;
         enabled: root.enabled;
         field-width: root.field-width;

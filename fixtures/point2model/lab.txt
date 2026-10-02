@@ -1,0 +1,6 @@
+1 1 74.23 83.64 0  label 1-0 here
+1 1 1.79 77.99 1  label 1-1 here
+1 1 36.25 57.27 2  label 1-2 here
+1 2 0.90 4.63 0  label 2-0 here
+1 2 17.91 94.56 1  label 2-1 here
+1 2 19.46 74.82 2  label 2-2 here

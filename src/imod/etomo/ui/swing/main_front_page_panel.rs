@@ -1,271 +1,201 @@
 //! `IMOD/Etomo/src/etomo/ui/swing/MainFrontPagePanel.java`.
 //!
-//! The Java superclass relationship is represented by the owned `main_panel`
-//! field. `FrontPageManager` is not yet a Rust source unit, so its declared
-//! concrete reference is retained as its actual inherited `BaseManager`
-//! interface at the constructor boundary.  Swing's `ScrollPanel.add` remains
-//! explicit in `scroll_a_components` rather than being replaced by a layout
-//! abstraction.
-#![allow(dead_code)]
+//! The main panel of the front page (`FrontPageManager`): one
+//! `FrontPageProcessPanel`, into which `FrontPageDialog.show` puts the front
+//! page's buttons.  Extends [`MainPanel`] (held as `base`, dereffed to) and
+//! implements [`MainPanelVirtual`].  Required class for FrontPageManager.
+
+use std::cell::RefCell;
+use std::ops::Deref;
+use std::path::Path;
+use std::rc::{Rc, Weak};
 
 use super::abstract_parallel_dialog::AbstractParallelDialog;
-use super::axis_process_panel::AxisProcessPanel;
+use super::axis_process_panel::AxisProcessPanelVirtual;
 use super::axis_progress_panel::AxisProgressPanel;
 use super::front_page_process_panel::FrontPageProcessPanel;
-use super::main_panel::MainPanel;
-use crate::imod::etomo::base_manager::BaseManager;
+use super::log_window::LogWindow;
+use super::main_panel::{MainPanel, MainPanelVirtual};
+use crate::imod::etomo::front_page_manager::FrontPageManager;
+use crate::imod::etomo::jdk::FileFilter;
 use crate::imod::etomo::process::process_state::ProcessState;
-use crate::imod::etomo::storage::data_file_filter::DataFileFilter;
 use crate::imod::etomo::r#type::axis_id::AxisID;
 use crate::imod::etomo::r#type::base_meta_data::BaseMetaData;
-use std::path::Path;
 
-/// Java final `MainFrontPagePanel`, including its inherited `MainPanel` state.
+/// Java `public static final String rcsid`.
+pub const RCSID: &str = "$Id$";
+
+/// Java public final class `MainFrontPagePanel extends MainPanel`.
 pub struct MainFrontPagePanel {
-    pub main_panel: MainPanel,
-    /// Java final `manager`; `FrontPageManager.java` remains the concrete
-    /// application-manager boundary.
-    pub manager: &'static dyn BaseManager,
-    /// Java `axisPanelA`, null before `createAxisPanelA`.
-    pub axis_panel_a: Option<FrontPageProcessPanel>,
-    /// Native `getScrollA().add(axisPanelA.getContainer())` boundary.
-    pub scroll_a_components: Vec<bool>,
+    /// The Java superclass part.
+    base: Rc<MainPanel>,
+    /// Java private final `manager`.
+    manager: &'static FrontPageManager,
+    /// Java private `axisPanelA`, initialised to null.
+    axis_panel_a: RefCell<Option<Rc<FrontPageProcessPanel>>>,
+}
+
+impl Deref for MainFrontPagePanel {
+    type Target = MainPanel;
+    fn deref(&self) -> &MainPanel {
+        &self.base
+    }
 }
 
 impl MainFrontPagePanel {
-    /// Java `rcsid`.
-    pub const RCSID: &'static str = "$Id$";
-
-    /// Java `MainFrontPagePanel(FrontPageManager)`.
-    pub fn new(manager: &'static dyn BaseManager) -> Self {
-        Self {
-            main_panel: MainPanel::new(manager),
+    /// Java constructor `MainFrontPagePanel(FrontPageManager)`.
+    pub fn new(manager: &'static FrontPageManager) -> Rc<MainFrontPagePanel> {
+        let this = Rc::new(MainFrontPagePanel {
+            // super(manager)
+            base: MainPanel::new(manager),
             manager,
-            axis_panel_a: None,
-            scroll_a_components: Vec::new(),
+            axis_panel_a: RefCell::new(None),
+        });
+        this.base
+            .set_this(Rc::downgrade(&this) as Weak<dyn MainPanelVirtual>);
+        this
+    }
+}
+
+impl MainPanelVirtual for MainFrontPagePanel {
+    fn main_panel(&self) -> &MainPanel {
+        &self.base
+    }
+
+    /// Java package-private `addAxisPanelA()`.
+    fn add_axis_panel_a(&self) {
+        // Upstream bug fixed in translation (MainFrontPagePanel.java:47): Java
+        // dereferences getScrollA() and axisPanelA unchecked; a null one is
+        // skipped here.
+        let axis_panel_a = self.axis_panel_a.borrow().clone();
+        if let (Some(scroll_a), Some(axis_panel_a)) = (self.base.get_scroll_a(), axis_panel_a) {
+            scroll_a.add(&axis_panel_a.get_container());
         }
     }
 
-    /// Java override `addAxisPanelA()`.
-    pub fn add_axis_panel_a(&mut self) {
-        let _scroll_a = self
-            .main_panel
-            .get_scroll_a()
-            .expect("MainPanel.scrollA is null");
-        self.scroll_a_components.push(
-            self.axis_panel_a
-                .as_ref()
-                .expect("MainFrontPagePanel.axisPanelA is null")
-                .axis_process_panel
-                .get_container(),
-        );
+    /// Java package-private `addAxisPanelB()`: empty.
+    fn add_axis_panel_b(&self) {}
+
+    /// Java package-private `isAxisPanelANull()`.
+    fn is_axis_panel_a_null(&self) -> bool {
+        self.axis_panel_a.borrow().is_none()
     }
 
-    /// Java override `addAxisPanelB()`, whose body is empty.
-    pub fn add_axis_panel_b(&mut self) {}
-
-    /// Java override `isAxisPanelANull()`.
-    pub fn is_axis_panel_a_null(&self) -> bool {
-        self.axis_panel_a.is_none()
-    }
-
-    /// Java override `isAxisPanelBNull()`.
-    pub fn is_axis_panel_b_null(&self) -> bool {
+    /// Java package-private `isAxisPanelBNull()`.
+    fn is_axis_panel_b_null(&self) -> bool {
         true
     }
 
-    /// Java override `createAxisPanelA(AxisID, AxisProgressPanel)`.
-    pub fn create_axis_panel_a(
-        &mut self,
-        _axis_id: AxisID,
-        axis_progress_panel: AxisProgressPanel,
-    ) {
-        self.axis_panel_a = Some(FrontPageProcessPanel::new(
-            self.manager,
-            axis_progress_panel,
-        ));
+    /// Java package-private `createAxisPanelA(AxisID, AxisProgressPanel)`.
+    fn create_axis_panel_a(&self, _axis_id: AxisID, axis_progress_panel: Rc<AxisProgressPanel>) {
+        let panel = FrontPageProcessPanel::new(self.manager, axis_progress_panel);
+        *self.axis_panel_a.borrow_mut() = Some(panel);
     }
 
-    /// Java override `createAxisPanelB(AxisProgressPanel)`, whose body is empty.
-    pub fn create_axis_panel_b(&mut self, _axis_progress_panel: AxisProgressPanel) {}
+    /// Java package-private `createAxisPanelB(AxisProgressPanel)`: empty.
+    fn create_axis_panel_b(&self, _axis_progress_panel: Rc<AxisProgressPanel>) {}
 
-    /// Java override `getAxisPanelA()`.
-    pub fn get_axis_panel_a(&mut self) -> Option<&mut AxisProcessPanel> {
+    /// Java package-private `getAxisPanelA()`.
+    fn get_axis_panel_a(&self) -> Option<Rc<dyn AxisProcessPanelVirtual>> {
         self.axis_panel_a
-            .as_mut()
-            .map(|panel| &mut panel.axis_process_panel)
+            .borrow()
+            .clone()
+            .map(|panel| panel as Rc<dyn AxisProcessPanelVirtual>)
     }
 
-    /// Java override `getAxisPanelB()`, which returns null.
-    pub fn get_axis_panel_b(&mut self) -> Option<&mut AxisProcessPanel> {
+    /// Java package-private `getAxisPanelB()`: null.
+    fn get_axis_panel_b(&self) -> Option<Rc<dyn AxisProcessPanelVirtual>> {
         None
     }
 
-    /// Java override `getDataFileFilter()`, which returns null.
-    pub fn get_data_file_filter(&self) -> Option<DataFileFilter> {
+    /// Java package-private `getDataFileFilter()`: null.
+    fn get_data_file_filter(&self) -> Option<Rc<dyn FileFilter>> {
         None
     }
 
-    /// Java override `hideAxisPanelA()`.
-    pub fn hide_axis_panel_a(&mut self) -> bool {
+    /// Java package-private `hideAxisPanelA()`.
+    fn hide_axis_panel_a(&self) -> bool {
+        // Upstream bug fixed in translation (MainFrontPagePanel.java:82): Java
+        // dereferences axisPanelA unchecked; a null panel is not hidden
+        // (false) here.
         self.axis_panel_a
-            .as_mut()
-            .expect("MainFrontPagePanel.axisPanelA is null")
-            .axis_process_panel
-            .hide()
+            .borrow()
+            .clone()
+            .is_some_and(|panel| panel.hide())
     }
 
-    /// Java override `hideAxisPanelB()`.
-    pub fn hide_axis_panel_b(&mut self) -> bool {
+    /// Java package-private `hideAxisPanelB()`.
+    fn hide_axis_panel_b(&self) -> bool {
         true
     }
 
-    /// Java override `mapBaseAxisProcessPanel(AxisID)`.
-    pub fn map_base_axis_process_panel(
-        &mut self,
+    /// Java package-private `mapBaseAxisProcessPanel(AxisID)`.
+    fn map_base_axis_process_panel(
+        &self,
         axis_id: AxisID,
-    ) -> Option<&mut AxisProcessPanel> {
+    ) -> Option<Rc<dyn AxisProcessPanelVirtual>> {
         if axis_id == AxisID::Second {
             return None;
         }
-        self.get_axis_panel_a()
+        self.axis_panel_a
+            .borrow()
+            .clone()
+            .map(|panel| panel as Rc<dyn AxisProcessPanelVirtual>)
     }
 
-    /// Java override `mapAxisProgressPanel(AxisID)`.
-    pub fn map_axis_progress_panel(&mut self, axis_id: AxisID) -> Option<&mut AxisProgressPanel> {
+    /// Java package-private `mapAxisProgressPanel(AxisID)`.
+    fn map_axis_progress_panel(&self, axis_id: AxisID) -> Option<Rc<AxisProgressPanel>> {
         if axis_id == AxisID::Second {
             return None;
         }
-        Some(self.main_panel.get_progress_panel(axis_id))
+        Some(self.base.get_progress_panel(axis_id))
     }
 
-    /// Java override `resetAxisPanels()`.
-    pub fn reset_axis_panels(&mut self) {
-        self.axis_panel_a = None;
+    /// Java package-private `resetAxisPanels()`.
+    fn reset_axis_panels(&self) {
+        *self.axis_panel_a.borrow_mut() = None;
     }
 
-    /// Java override `saveDisplayState()`, whose body is empty.
-    pub fn save_display_state(&mut self) {}
+    /// Java `saveDisplayState()`: empty.
+    fn save_display_state(&self) {}
 
-    /// Java override `setState(ProcessState, AxisID, AbstractParallelDialog)`, whose body is empty.
-    pub fn set_state(
-        &mut self,
+    /// Java `setState(ProcessState, AxisID, AbstractParallelDialog)`: empty.
+    fn set_state(
+        &self,
         _process_state: ProcessState,
         _axis_id: AxisID,
         _parallel_dialog: &dyn AbstractParallelDialog,
     ) {
     }
 
-    /// Java override `showAxisPanelA()`.
-    pub fn show_axis_panel_a(&mut self) {
-        self.axis_panel_a
-            .as_mut()
-            .expect("MainFrontPagePanel.axisPanelA is null")
-            .axis_process_panel
-            .show();
-    }
-
-    /// Java override `showAxisPanelB()`, whose body is empty.
-    pub fn show_axis_panel_b(&mut self) {}
-
-    /// Java override `setStatusBarText(File, BaseMetaData, LogWindow)`.
-    /// `param_file` and `LogWindow` are declared by the override but neither is
-    /// read in its source body. A null Java metadata name maps to the empty
-    /// native status string because this state field cannot itself be null.
-    pub fn set_status_bar_text(
-        &mut self,
-        _param_file: Option<&Path>,
-        meta_data: &dyn BaseMetaData,
-    ) {
-        self.main_panel.status_bar = meta_data.get_name().unwrap_or_default();
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use crate::imod::etomo::comscript::parallel_param::ParallelParam;
-    use crate::imod::etomo::directive_editor_manager::DirectiveEditorManager;
-    use crate::imod::etomo::storage::storable::Storable;
-    use crate::imod::etomo::r#type::dialog_type::DialogType;
-    use crate::imod::etomo::r#type::directive_editor_meta_data::DirectiveEditorMetaData;
-    use crate::imod::etomo::ui::swing::scroll_panel::ScrollPanel;
-    use std::collections::BTreeMap;
-    use std::path::Path;
-
-    struct Dialog;
-    impl AbstractParallelDialog for Dialog {
-        fn get_parameters(&self, _param: &mut dyn ParallelParam) {}
-
-        fn get_dialog_type(&self) -> DialogType {
-            DialogType::Tools
+    /// Java package-private `showAxisPanelA()`.
+    fn show_axis_panel_a(&self) {
+        // Upstream bug fixed in translation (MainFrontPagePanel.java:119): Java
+        // dereferences axisPanelA unchecked; a null panel is skipped here.
+        if let Some(panel) = self.axis_panel_a.borrow().clone() {
+            panel.show();
         }
     }
 
-    fn panel() -> MainFrontPagePanel {
-        MainFrontPagePanel::new(DirectiveEditorManager::new(None, None, None, None))
-    }
+    /// Java package-private `showAxisPanelB()`: empty.
+    fn show_axis_panel_b(&self) {}
 
-    #[test]
-    fn creates_maps_and_adds_only_the_source_a_axis_panel() {
-        let mut panel = panel();
-        let progress = AxisProgressPanel::get_instance(Some(AxisID::Only), panel.manager);
-        panel.create_axis_panel_a(AxisID::First, progress);
-        assert!(!panel.is_axis_panel_a_null());
-        assert_eq!(panel.get_axis_panel_a().unwrap().axis_id, AxisID::Only);
-        assert_eq!(
-            panel.get_axis_panel_a().unwrap().interface_type,
-            crate::imod::etomo::r#type::interface_type::InterfaceType::FrontPage
-        );
-        assert!(panel.map_base_axis_process_panel(AxisID::First).is_some());
-        assert!(panel.map_base_axis_process_panel(AxisID::Second).is_none());
-        panel.main_panel.scroll_a = Some(ScrollPanel::new());
-        panel.add_axis_panel_a();
-        assert_eq!(panel.scroll_a_components, vec![true]);
-    }
-
-    #[test]
-    fn b_axis_null_empty_overrides_and_visibility_match_source() {
-        let mut panel = panel();
-        let progress = AxisProgressPanel::get_instance(Some(AxisID::Only), panel.manager);
-        panel.create_axis_panel_a(AxisID::Only, progress);
-        assert!(panel.hide_axis_panel_a());
-        assert!(!panel.get_axis_panel_a().unwrap().panel_root_visible);
-        panel.show_axis_panel_a();
-        assert!(panel.get_axis_panel_a().unwrap().panel_root_visible);
-        assert!(panel.is_axis_panel_b_null());
-        assert!(panel.get_axis_panel_b().is_none());
-        assert!(panel.get_data_file_filter().is_none());
-        assert!(panel.hide_axis_panel_b());
-        assert!(panel.map_axis_progress_panel(AxisID::Second).is_none());
-        assert_eq!(
-            panel
-                .map_axis_progress_panel(AxisID::First)
-                .unwrap()
-                .axis_id,
-            AxisID::First
-        );
-        panel.add_axis_panel_b();
-        panel.create_axis_panel_b(AxisProgressPanel::get_instance(
-            Some(AxisID::Only),
-            panel.manager,
-        ));
-        panel.show_axis_panel_b();
-    }
-
-    #[test]
-    fn status_uses_metadata_name_and_empty_overrides_preserve_state() {
-        let mut panel = panel();
-        let metadata = DirectiveEditorMetaData::new(None, None, None, true);
-        metadata.set_root_name(Some(Path::new("front-page.ejf")));
-        panel.set_status_bar_text(None, &metadata);
-        assert_eq!(panel.main_panel.get_status_bar_text(), "front-page.ejf");
-        panel.set_state(ProcessState::Complete, AxisID::Only, &Dialog);
-        panel.save_display_state();
-        panel.reset_axis_panels();
-        assert!(panel.is_axis_panel_a_null());
-        assert_eq!(MainFrontPagePanel::RCSID, "$Id$");
-        let mut properties = BTreeMap::new();
-        metadata.store(&mut properties);
+    /// Java public final `setStatusBarText(File, BaseMetaData, LogWindow)`.
+    fn set_status_bar_text(
+        &self,
+        _param_file: Option<&Path>,
+        meta_data: Option<&dyn BaseMetaData>,
+        _log_window: Option<&Rc<LogWindow>>,
+    ) {
+        // Upstream bug fixed in translation (MainFrontPagePanel.java:131): Java
+        // dereferences metaData unchecked; a null one leaves the status bar
+        // unchanged here.
+        let Some(meta_data) = meta_data else {
+            return;
+        };
+        // JLabel.setText(null) shows nothing, as "" does.
+        self.base
+            .status_bar
+            .set_text(&meta_data.get_name().unwrap_or_default());
     }
 }

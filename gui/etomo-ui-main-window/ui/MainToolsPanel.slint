@@ -21,6 +21,9 @@ import { ToolsProcessPanel } from "ToolsProcessPanel.slint";
 export component MainToolsPanel inherits Rectangle {
     in property <string> status-bar-text: "No data set loaded";
     in property <color> panel-background: Colors.background-tools;
+    // Rust-only wiring: false when the main window draws the progress panel
+    // in the dialog column (`MainFrameWindow`).
+    in property <bool> show-status-panel: true;
     background: EtomoStyle.background;
     MainPanel {
         width: 100%;
@@ -30,6 +33,7 @@ export component MainToolsPanel inherits Rectangle {
         // `addAxisPanelA()`: `getScrollA().add(axisPanelA.getContainer())`.
         ToolsProcessPanel {
             panel-background: root.panel-background;
+            show-status-panel: root.show-status-panel;
         }
         // `createAxisPanelB` has an empty body and `getAxisPanelB()` returns
         // null, so there is no B column to draw.

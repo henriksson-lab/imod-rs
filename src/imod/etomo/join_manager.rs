@@ -33,6 +33,7 @@ use crate::imod::etomo::r#type::axis_id::AxisID;
 use crate::imod::etomo::r#type::base_meta_data::BaseMetaData;
 use crate::imod::etomo::r#type::dialog_type::DialogType;
 use crate::imod::etomo::r#type::interface_type::InterfaceType;
+use crate::imod::etomo::r#type::join_state::JoinState;
 
 /// Java `JoinManager`.
 pub struct JoinManager {
@@ -61,9 +62,8 @@ pub struct JoinManager {
     // TODO(unit): needs etomo/process/JoinProcessManager.java - the field's declared
     // type.
     process_mgr: Option<Infallible>,
-    /// Java private field `state`.
-    // TODO(unit): needs etomo/type/JoinState.java - the field's declared type.
-    state: Option<Infallible>,
+    /// Java private field `state`, set by `createState`.
+    state: std::sync::Mutex<Option<&'static JoinState>>,
     /// Java private field `startJoinParam`, which defaults to null.
     // TODO(unit): needs etomo/comscript/StartJoinParam.java - the field's declared type.
     start_join_param: Option<Infallible>,
@@ -85,6 +85,11 @@ pub struct JoinManager {
 /// allocation is unreachable the moment the constructor returns.
 static INSTANCES: std::sync::Mutex<Vec<&'static JoinManager>> = std::sync::Mutex::new(Vec::new());
 
+/// Owns every `JoinState` `createState` builds, for the same reason as `INSTANCES`:
+/// Java's manager field keeps it for the run, and the translation hands out
+/// `&'static JoinState`.
+static STATE_ROOTS: std::sync::Mutex<Vec<&'static JoinState>> = std::sync::Mutex::new(Vec::new());
+
 impl JoinManager {
     /// Java package-private `JoinManager(String, AxisID)`.  Java's managers are created
     /// by `EtomoDirector` and live for the run, so the allocation is leaked; `super()`
@@ -99,7 +104,7 @@ impl JoinManager {
             main_panel: None,
             meta_data: None,
             process_mgr: None,
-            state: None,
+            state: std::sync::Mutex::new(None),
             start_join_param: None,
             screen_state: None,
             debug: std::sync::Mutex::new(false),
@@ -108,11 +113,13 @@ impl JoinManager {
         INSTANCES.lock().unwrap().push(instance);
         // Java `super()`.
         instance.base_manager();
-        // TODO(unit): needs etomo/type/JoinMetaData.java,
-        // etomo/process/JoinProcessManager.java, etomo/process/BaseImodManager.java,
-        // etomo/ui/swing/MainJoinPanel.java and etomo/comscript/JoinComscriptManager.java
-        // - the rest of the constructor builds `metaData`, calls `createState()`, builds
-        // `processMgr`, calls `initializeUIParameters(paramFileName, axisID)`, and on a
+        // TODO(unit): needs etomo/type/JoinMetaData.java - the constructor builds
+        // `metaData = new JoinMetaData(this, logWindow)` here.
+        instance.create_state();
+        // TODO(unit): needs etomo/process/JoinProcessManager.java,
+        // etomo/process/BaseImodManager.java, etomo/ui/swing/MainJoinPanel.java and
+        // etomo/comscript/JoinComscriptManager.java - the rest of the constructor builds
+        // `processMgr = new JoinProcessManager(this, state)`, calls `initializeUIParameters(paramFileName, axisID)`, and on a
         // loaded param file calls `imodManager.setMetaData(metaData)` and
         // `mainPanel.setStatusBarText(paramFile, metaData, logWindow)`; when not
         // headless it calls `openJoinDialog()` and `setMode()`, and it ends by building
@@ -436,15 +443,18 @@ impl JoinManager {
         self.meta_data
     }
 
-    /// Java package-private `createState`.
-    // TODO(unit): needs etomo/type/JoinState.java - the body is
-    // `state = new JoinState(this)`.
-    pub(crate) fn create_state(&self) {}
+    /// Java package-private `createState`.  The state lives for the run, so the
+    /// allocation is leaked and rooted in `STATE_ROOTS`.
+    pub(crate) fn create_state(&'static self) {
+        let state: &'static JoinState = Box::leak(Box::new(JoinState::new(self)));
+        STATE_ROOTS.lock().unwrap().push(state);
+        *self.state.lock().unwrap() = Some(state);
+    }
 
-    /// Java `getState`.
-    // TODO(unit): needs etomo/type/ConstJoinState.java - the return type.
-    pub fn get_state(&self) -> Option<Infallible> {
-        self.state
+    /// Java `getState`, declared `ConstJoinState`.  The constructor calls
+    /// `createState`, so the field is set for every constructed manager.
+    pub fn get_state(&self) -> &'static JoinState {
+        self.state.lock().unwrap().expect("state")
     }
 
     /// Java `newStartJoinParam`.
@@ -498,12 +508,14 @@ impl BaseManager for JoinManager {
     }
 
     /// Java `saveParamFile`.
-    fn save_param_file(&self) -> bool {
-        let retval = self.save_param_file_super();
+    fn save_param_file(
+        &'static self,
+    ) -> Result<bool, crate::imod::etomo::storage::log_file::LogFileError> {
+        let retval = self.save_param_file_super()?;
         if retval {
             self.end_setup_mode();
         }
-        retval
+        Ok(retval)
     }
 
     /// Java `setParamFile()`.
@@ -520,11 +532,11 @@ impl BaseManager for JoinManager {
     /// Java `getFocusComponent`.
     // TODO(unit): needs etomo/ui/swing/JoinDialog.java - the body is
     // `joinDialog.getFocusComponent()`, and `java.awt.Component` is the return type.
-    fn get_focus_component(&self) -> Option<Infallible> {
-        if self.join_dialog.is_none() {
-            return None;
+    fn get_focus_component(&self) -> Option<std::rc::Rc<crate::imod::etomo::jdk::JComponent>> {
+        match self.join_dialog {
+            None => None,
+            Some(join_dialog) => match join_dialog {},
         }
-        self.join_dialog
     }
 
     /// Java package-private `paramString`.
@@ -579,16 +591,22 @@ impl BaseManager for JoinManager {
     // etomo/ui/UIComponent.java - the body dispatches on the process name to
     // `remapmodel`, `xfmodel`, `xftoxg`, `finishjoin` and `refineJoin`.
     fn start_next_process(
-        &self,
-        ui_component: Option<Infallible>,
-        axis_id: Option<AxisID>,
-        process: Option<Infallible>,
-        process_result_display: Option<Infallible>,
-        process_series: Option<Infallible>,
-        dialog_type: Option<Infallible>,
-        display: Option<Infallible>,
+        &'static self,
+        ui_component: Option<std::rc::Rc<dyn crate::imod::etomo::ui::UiComponent>>,
+        axis_id: AxisID,
+        process: &crate::imod::etomo::process_series::Process,
+        process_result_display: Option<
+            crate::imod::etomo::process::process_interface::ProcessResultDisplayRef,
+        >,
+        process_series: &crate::imod::etomo::process_series::ProcessSeriesHandle,
+        dialog_type: Option<DialogType>,
+        display: Option<
+            std::rc::Rc<dyn crate::imod::etomo::ui::swing::process_display::ProcessDisplay>,
+        >,
     ) -> bool {
-        let _ = (
+        // TODO(unit): this manager's own `startNextProcess` tasks are not translated
+        // yet; the base class's run first, as the Java override's `super` call does.
+        self.start_next_process_super(
             ui_component,
             axis_id,
             process,
@@ -596,8 +614,7 @@ impl BaseManager for JoinManager {
             process_series,
             dialog_type,
             display,
-        );
-        false
+        )
     }
 
     /// Java `getBaseMetaData`.
@@ -609,20 +626,31 @@ impl BaseManager for JoinManager {
 
     /// Java `getMainPanel`.
     // TODO(unit): needs etomo/ui/swing/MainJoinPanel.java - the body returns `mainPanel`.
-    fn get_main_panel(&self) -> Option<Infallible> {
-        self.main_panel
+    fn get_main_panel(
+        &self,
+    ) -> Option<std::rc::Rc<dyn crate::imod::etomo::ui::swing::main_panel::MainPanelVirtual>> {
+        match self.main_panel {
+            None => None,
+            Some(main_panel) => match main_panel {},
+        }
     }
 
     /// Java `getBaseState`.
-    // TODO(unit): needs etomo/type/JoinState.java - the body returns `state`.
-    fn get_base_state(&self) -> Option<Infallible> {
-        self.state
+    // TODO(unit): needs etomo/type/JoinState.java held by this manager - the body
+    // returns `state` (`etomo/type/join_state.rs`), which this struct does not hold yet.
+    fn get_base_state(
+        &self,
+    ) -> Option<&'static dyn crate::imod::etomo::r#type::base_state::BaseState> {
+        None
     }
 
     /// Java package-private `getAutoAlignmentMetaData`.
     // TODO(unit): needs etomo/type/JoinMetaData.java - the body is
     // `metaData.getAutoAlignmentMetaData()`.
-    fn get_auto_alignment_meta_data(&self) -> Option<Infallible> {
+    fn get_auto_alignment_meta_data(
+        &self,
+    ) -> Option<&'static crate::imod::etomo::r#type::auto_alignment_meta_data::AutoAlignmentMetaData>
+    {
         None
     }
 
@@ -651,15 +679,19 @@ impl BaseManager for JoinManager {
     /// Java `getProcessManager`.
     // TODO(unit): needs etomo/process/JoinProcessManager.java - the body returns
     // `processMgr`.
-    fn get_process_manager(&self) -> Option<Infallible> {
-        self.process_mgr
+    fn get_process_manager(
+        &self,
+    ) -> Option<&'static crate::imod::etomo::process::base_process_manager::BaseProcessManager>
+    {
+        // TODO(unit): this manager's process manager is not constructed yet.
+        None
     }
 
     /// Java package-private `getStorables(int)`.
     // TODO(unit): needs etomo/type/JoinMetaData.java, etomo/type/JoinState.java and
     // etomo/type/JoinScreenState.java - the array the source fills is
     // `{ metaData, state, screenState }` at the given offset.
-    fn get_storables_with_offset(&self, offset: i32) -> Option<Vec<Box<dyn Storable>>> {
+    fn get_storables_with_offset(&self, offset: i32) -> Option<Vec<Option<&'static dyn Storable>>> {
         let _ = offset;
         None
     }
@@ -667,14 +699,14 @@ impl BaseManager for JoinManager {
     /// Java `exitProgram`.
     // TODO(unit): needs etomo/ui/swing/JoinDialog.java - the body calls
     // `super.exitProgram(axisID)` and then saves the dialog's state.
-    fn exit_program(&self, axis_id: Option<AxisID>) -> bool {
+    fn exit_program(&'static self, axis_id: Option<AxisID>) -> bool {
         self.exit_program_super(axis_id)
     }
 
     /// Java `save`.
     // TODO(unit): needs etomo/ui/swing/JoinDialog.java - the body calls `super.save()`
     // and then `joinDialog.getParameters(...)`/`saveParamFile()`.
-    fn save(&self) -> bool {
+    fn save(&'static self) -> Result<bool, crate::imod::etomo::storage::log_file::LogFileError> {
         self.save_super()
     }
 

@@ -70,7 +70,7 @@ fn msort_with_tmp<T: Copy>(b: &mut [T], t: &mut [T], compar: &mut dyn FnMut(&T, 
 /// being a strict weak order to stop before the ends of the range, and with a
 /// NaN they need not.  Where libstdc++ would then read outside the array
 /// (undefined behaviour, nothing to reproduce), these stop at the range end.
-pub fn std_sort<T: Copy>(v: &mut [T], less: &mut dyn FnMut(&T, &T) -> bool) {
+pub fn std_sort<T: Copy, F: FnMut(&T, &T) -> bool + ?Sized>(v: &mut [T], less: &mut F) {
     let n = v.len();
     if n == 0 {
         return;
@@ -82,12 +82,12 @@ pub fn std_sort<T: Copy>(v: &mut [T], less: &mut dyn FnMut(&T, &T) -> bool) {
 }
 
 /// `std::__introsort_loop`.
-fn introsort_loop<T: Copy>(
+fn introsort_loop<T: Copy, F: FnMut(&T, &T) -> bool + ?Sized>(
     v: &mut [T],
     first: usize,
     mut last: usize,
     mut depth_limit: usize,
-    less: &mut dyn FnMut(&T, &T) -> bool,
+    less: &mut F,
 ) {
     while last - first > 16 {
         if depth_limit == 0 {
@@ -105,11 +105,11 @@ fn introsort_loop<T: Copy>(
 }
 
 /// `std::__unguarded_partition_pivot`.
-fn unguarded_partition_pivot<T: Copy>(
+fn unguarded_partition_pivot<T: Copy, F: FnMut(&T, &T) -> bool + ?Sized>(
     v: &mut [T],
     first: usize,
     last: usize,
-    less: &mut dyn FnMut(&T, &T) -> bool,
+    less: &mut F,
 ) -> usize {
     let mid = first + (last - first) / 2;
     move_median_to_first(v, first, first + 1, mid, last - 1, less);
@@ -117,13 +117,13 @@ fn unguarded_partition_pivot<T: Copy>(
 }
 
 /// `std::__move_median_to_first`.
-fn move_median_to_first<T: Copy>(
+fn move_median_to_first<T: Copy, F: FnMut(&T, &T) -> bool + ?Sized>(
     v: &mut [T],
     result: usize,
     a: usize,
     b: usize,
     c: usize,
-    less: &mut dyn FnMut(&T, &T) -> bool,
+    less: &mut F,
 ) {
     if less(&v[a], &v[b]) {
         if less(&v[b], &v[c]) {
@@ -144,12 +144,12 @@ fn move_median_to_first<T: Copy>(
 
 /// `std::__unguarded_partition`; the pivot is the element at `pivot`, compared
 /// in place (the partition never moves it).
-fn unguarded_partition<T: Copy>(
+fn unguarded_partition<T: Copy, F: FnMut(&T, &T) -> bool + ?Sized>(
     v: &mut [T],
     mut first: usize,
     mut last: usize,
     pivot: usize,
-    less: &mut dyn FnMut(&T, &T) -> bool,
+    less: &mut F,
 ) -> usize {
     let end = v.len();
     loop {
@@ -169,11 +169,11 @@ fn unguarded_partition<T: Copy>(
 }
 
 /// `std::__final_insertion_sort`.
-fn final_insertion_sort<T: Copy>(
+fn final_insertion_sort<T: Copy, F: FnMut(&T, &T) -> bool + ?Sized>(
     v: &mut [T],
     first: usize,
     last: usize,
-    less: &mut dyn FnMut(&T, &T) -> bool,
+    less: &mut F,
 ) {
     if last - first > 16 {
         insertion_sort(v, first, first + 16, less);
@@ -187,11 +187,11 @@ fn final_insertion_sort<T: Copy>(
 }
 
 /// `std::__insertion_sort`.
-fn insertion_sort<T: Copy>(
+fn insertion_sort<T: Copy, F: FnMut(&T, &T) -> bool + ?Sized>(
     v: &mut [T],
     first: usize,
     last: usize,
-    less: &mut dyn FnMut(&T, &T) -> bool,
+    less: &mut F,
 ) {
     if first == last {
         return;
@@ -208,10 +208,10 @@ fn insertion_sort<T: Copy>(
 }
 
 /// `std::__unguarded_linear_insert`.
-fn unguarded_linear_insert<T: Copy>(
+fn unguarded_linear_insert<T: Copy, F: FnMut(&T, &T) -> bool + ?Sized>(
     v: &mut [T],
     mut last: usize,
-    less: &mut dyn FnMut(&T, &T) -> bool,
+    less: &mut F,
 ) {
     let val = v[last];
     while last > 0 && less(&val, &v[last - 1]) {
@@ -222,11 +222,11 @@ fn unguarded_linear_insert<T: Copy>(
 }
 
 /// `std::__make_heap` over `[first, last)`.
-fn make_heap<T: Copy>(
+fn make_heap<T: Copy, F: FnMut(&T, &T) -> bool + ?Sized>(
     v: &mut [T],
     first: usize,
     last: usize,
-    less: &mut dyn FnMut(&T, &T) -> bool,
+    less: &mut F,
 ) {
     if last - first < 2 {
         return;
@@ -245,11 +245,11 @@ fn make_heap<T: Copy>(
 
 /// `std::__sort_heap` over `[first, last)`, with `std::__pop_heap` inlined as
 /// the source's `__pop_heap(__first, __last, __last)`.
-fn sort_heap<T: Copy>(
+fn sort_heap<T: Copy, F: FnMut(&T, &T) -> bool + ?Sized>(
     v: &mut [T],
     first: usize,
     mut last: usize,
-    less: &mut dyn FnMut(&T, &T) -> bool,
+    less: &mut F,
 ) {
     while last - first > 1 {
         last -= 1;
@@ -260,13 +260,13 @@ fn sort_heap<T: Copy>(
 }
 
 /// `std::__adjust_heap` followed by its `std::__push_heap`.
-fn adjust_heap<T: Copy>(
+fn adjust_heap<T: Copy, F: FnMut(&T, &T) -> bool + ?Sized>(
     v: &mut [T],
     first: usize,
     mut hole_index: usize,
     len: usize,
     value: T,
-    less: &mut dyn FnMut(&T, &T) -> bool,
+    less: &mut F,
 ) {
     let top_index = hole_index;
     let mut second_child = hole_index;
@@ -291,4 +291,71 @@ fn adjust_heap<T: Copy>(
         parent = (hole_index.wrapping_sub(1)) / 2;
     }
     v[first + hole_index] = value;
+}
+
+/// libstdc++ 11 `std::list<T>::sort(comp)` (`bits/list.tcc`), over the
+/// list's elements in order: the bottom-up merge sort with a `__carry` list
+/// and 64 `__tmp` bucket lists, where `x.merge(y)` keeps `x`'s element when
+/// `comp(y, x)` is false (so the sort is stable).  `less` is the predicate
+/// (`operator<` for the default overload).  With a strict weak order every
+/// stable sort agrees; with one that is not (a NaN among doubles) the
+/// result is this algorithm's, which is why it is reproduced rather than
+/// substituted.
+pub fn list_sort<T: Copy>(v: &mut Vec<T>, less: &mut dyn FnMut(&T, &T) -> bool) {
+    // Do nothing if the list has length 0 or 1.
+    if v.len() < 2 {
+        return;
+    }
+    // `list::merge(__x)`: merge `x` into `this`.
+    fn merge<T: Copy>(this: Vec<T>, x: Vec<T>, less: &mut dyn FnMut(&T, &T) -> bool) -> Vec<T> {
+        let mut out = Vec::with_capacity(this.len() + x.len());
+        let (mut i, mut j) = (0, 0);
+        while i < this.len() && j < x.len() {
+            if less(&x[j], &this[i]) {
+                out.push(x[j]);
+                j += 1;
+            } else {
+                out.push(this[i]);
+                i += 1;
+            }
+        }
+        out.extend_from_slice(&this[i..]);
+        out.extend_from_slice(&x[j..]);
+        out
+    }
+    let mut input: std::collections::VecDeque<T> = v.drain(..).collect();
+    let mut tmp: Vec<Vec<T>> = Vec::new();
+    // `__fill`: the number of bucket lists in use.
+    let mut fill = 0usize;
+    loop {
+        // `__carry.splice(__carry.begin(), *this, begin())`
+        let mut carry = vec![input.pop_front().unwrap()];
+        let mut counter = 0usize;
+        while counter != fill && !tmp[counter].is_empty() {
+            // `__counter->merge(__carry); __carry.swap(*__counter);`
+            let bucket = std::mem::take(&mut tmp[counter]);
+            carry = merge(bucket, carry, less);
+            counter += 1;
+        }
+        // `__carry.swap(*__counter)`
+        if counter == tmp.len() {
+            tmp.push(Vec::new());
+        }
+        std::mem::swap(&mut carry, &mut tmp[counter]);
+        if counter == fill {
+            fill += 1;
+        }
+        if input.is_empty() {
+            break;
+        }
+    }
+    // `for (__counter = __tmp + 1; __counter != __fill; ++__counter)
+    //    __counter->merge(*(__counter - 1));`
+    for counter in 1..fill {
+        let prev = std::mem::take(&mut tmp[counter - 1]);
+        let cur = std::mem::take(&mut tmp[counter]);
+        tmp[counter] = merge(cur, prev, less);
+    }
+    // `swap(*(__fill - 1))`
+    *v = std::mem::take(&mut tmp[fill - 1]);
 }

@@ -1,313 +1,289 @@
 //! `IMOD/Etomo/src/etomo/ui/swing/CleanupPanel.java`.
 //!
-//! The Java file chooser and `ApplicationManager` message-dialog dispatch are
-//! retained as explicit frontend/application boundaries.  The filesystem walk,
-//! deletion order, filter construction decisions, and button routing are the
-//! source unit's own logic and run here.
-#![allow(dead_code)]
+//! Java `final class CleanupPanel`: the Intermediate File Cleanup box of the
+//! Clean Up dialog - an embedded file chooser listing the dataset's
+//! intermediate files, the directory size, and the Delete Selected / Rescan
+//! Directory buttons.
+//!
+//! An EDT object (`ui.md`): created as `Rc<Self>` by
+//! [`CleanupPanel::get_instance`]; every method takes `&self`.  The listener
+//! class `ButtonActonListener` is a closure holding a weak reference to the
+//! panel.
 
-use std::fs;
 use std::path::{Path, PathBuf};
+use std::rc::Rc;
 
+use super::etched_border::EtchedBorder;
+use super::etomo_panel::EtomoPanel;
+use super::file_chooser;
+use super::multi_line_button::MultiLineButton;
+use super::tooltip_formatter;
+use super::ui_harness;
+use crate::imod::etomo::application_manager::ApplicationManager;
+use crate::imod::etomo::base_manager::BaseManager;
+use crate::imod::etomo::jdk::{ActionEvent, ActionListener, FileFilter, JComponent, JFileChooser};
+// TODO(unit): needs etomo/storage/FileFilterCollection.java - the chooser's
+// combined filter.
+use crate::imod::etomo::storage::file_filter_collection::FileFilterCollection;
+// TODO(unit): needs etomo/storage/IntermediateFileFilter.java - the intermediate
+// file filter.
+use crate::imod::etomo::storage::intermediate_file_filter::IntermediateFileFilter;
+// TODO(unit): needs etomo/storage/SirtOutputFileFilter.java - the SIRT output
+// file filter (already called by sirt_panel.rs the same way).
+use crate::imod::etomo::storage::sirt_output_file_filter::SirtOutputFileFilter;
 use crate::imod::etomo::r#type::axis_id::AxisID;
 use crate::imod::etomo::r#type::axis_type::AxisType;
-use crate::imod::etomo::r#type::image_filename_style::ImageFilenameStyle;
+use crate::imod::etomo::r#type::const_meta_data::ConstMetaData;
+use crate::imod::etomo::r#type::file_type;
 use crate::imod::etomo::util::utilities;
 
-use super::etomo_panel::{EtomoPanel, TitledBorder};
-use super::multi_line_button::MultiLineButton;
+/// Java public static final `rcsid`.
+pub const RCSID: &str = "$Id$";
 
-/// Direct `ApplicationManager`, `MetaData`, `FileType`, and `UIHarness`
-/// operations performed by this source unit.
-pub trait CleanupApplicationManager {
-    fn property_user_dir(&self) -> &Path;
-    fn dataset_name(&self) -> &str;
-    fn image_filename_style(&self) -> ImageFilenameStyle;
-    fn axis_type(&self) -> AxisType;
-    fn trim_vol_output_file_name(&self, axis_id: AxisID) -> String;
-    fn open_message_dialog(&mut self, message: String, title: &str, axis_id: AxisID);
-}
-
-/// Java `FileFilterCollection`, `IntermediateFileFilter`, and
-/// `SirtOutputFileFilter` state as installed in `JFileChooser`.
-#[derive(Clone, Debug, Eq, PartialEq)]
-pub struct CleanupFileFilterCollection {
-    pub dataset_name: String,
-    pub image_filename_style: ImageFilenameStyle,
-    pub accept_pretrimmed_tomograms: bool,
-    pub sirt_axes: Vec<AxisID>,
-    pub sirt_filter_arguments: (bool, bool, bool),
-}
-
-/// State at the direct Swing `JFileChooser` boundary.
-#[derive(Clone, Debug, Eq, PartialEq)]
-pub struct FileChooserBoundary {
-    pub custom_dialog: bool,
-    pub multi_selection_enabled: bool,
-    pub control_buttons_shown: bool,
-    pub current_directory: PathBuf,
-    pub selected_files: Vec<PathBuf>,
-    pub selected_file: Option<PathBuf>,
-    pub tooltip: Option<String>,
-    pub rescan_count: usize,
-    pub file_filter_collection: CleanupFileFilterCollection,
-}
-
-/// Java final `CleanupPanel` state.
-#[derive(Clone, Debug, PartialEq)]
+/// Java `final class CleanupPanel`.
 pub struct CleanupPanel {
-    pub pnl_cleanup: EtomoPanel,
-    pub instructions: String,
-    pub button_component_order: Vec<&'static str>,
-    pub btn_delete: MultiLineButton,
-    pub btn_rescan_dir: MultiLineButton,
-    pub file_chooser: FileChooserBoundary,
-    pub dir_size_label: String,
-    pub listeners_attached: bool,
+    /// Java private final `pnlCleanup = new EtomoPanel()`.
+    pnl_cleanup: Rc<EtomoPanel>,
+    /// Java private final `instructions`.
+    instructions: Rc<JComponent>,
+    /// Java private final `pnlButton = new JPanel()`.
+    pnl_button: Rc<JComponent>,
+    /// Java private final `btnDelete`.
+    btn_delete: Rc<MultiLineButton>,
+    /// Java private final `btnRescanDir`.
+    btn_rescan_dir: Rc<MultiLineButton>,
+    /// Java private final `fileChooser = new JFileChooser()`.
+    file_chooser: Rc<JFileChooser>,
+    /// Java private final `lDirSize = new JLabel()`.
+    l_dir_size: Rc<JComponent>,
+    /// Java private final `applicationManager`.
+    application_manager: &'static ApplicationManager,
 }
 
 impl CleanupPanel {
-    /// Java private `CleanupPanel(ApplicationManager)` constructor.
-    pub fn new<M: CleanupApplicationManager>(application_manager: &M) -> Self {
-        let property_user_dir = application_manager.property_user_dir();
-        let trimmed_tomogram =
-            property_user_dir.join(application_manager.trim_vol_output_file_name(AxisID::Only));
-        let axis_type = application_manager.axis_type();
-        let mut pnl_cleanup = EtomoPanel::default();
-        pnl_cleanup.set_border(TitledBorder {
-            title: "Intermediate File Cleanup".to_owned(),
+    /// Java private constructor `CleanupPanel(ApplicationManager)`, with the
+    /// field initializers.
+    fn new(app_mgr: &'static ApplicationManager) -> Rc<CleanupPanel> {
+        let manager: &'static dyn BaseManager = app_mgr;
+        let this = Rc::new(CleanupPanel {
+            pnl_cleanup: EtomoPanel::new(),
+            instructions: JComponent::new_label(
+                "Select files to be deleted then press the \"Delete Selected\" button. Ctrl-A selects all displayed files.",
+            ),
+            pnl_button: JComponent::new_panel(),
+            btn_delete: MultiLineButton::new_string(Some("Delete Selected")),
+            btn_rescan_dir: MultiLineButton::new_string(Some("Rescan Directory")),
+            // Java `new JFileChooser()`: the stand-in is the eTomo FileChooser.
+            file_chooser: JFileChooser::new_void(),
+            l_dir_size: JComponent::new_label(""),
+            application_manager: app_mgr,
         });
-        let mut panel = Self {
-            pnl_cleanup,
-            instructions: "Select files to be deleted then press the \"Delete Selected\" button. Ctrl-A selects all displayed files.".to_owned(),
-            button_component_order: vec!["horizontal-glue", "delete", "horizontal-glue", "rescan-directory", "horizontal-glue"],
-            btn_delete: MultiLineButton::new_with_label(Some("Delete Selected")),
-            btn_rescan_dir: MultiLineButton::new_with_label(Some("Rescan Directory")),
-            file_chooser: FileChooserBoundary {
-                custom_dialog: true,
-                multi_selection_enabled: true,
-                control_buttons_shown: false,
-                current_directory: property_user_dir.to_path_buf(),
-                selected_files: Vec::new(),
-                selected_file: None,
-                tooltip: None,
-                rescan_count: 0,
-                file_filter_collection: CleanupFileFilterCollection {
-                    dataset_name: application_manager.dataset_name().to_owned(),
-                    image_filename_style: application_manager.image_filename_style(),
-                    accept_pretrimmed_tomograms: trimmed_tomogram.exists(),
-                    sirt_axes: if axis_type == AxisType::DualAxis {
-                        vec![AxisID::First, AxisID::Second]
-                    } else {
-                        vec![AxisID::Only]
-                    },
-                    sirt_filter_arguments: (true, true, true),
-                },
-            },
-            dir_size_label: String::new(),
-            listeners_attached: false,
-        };
-        panel.set_tool_tip_text();
-        panel
+        // Create the filechooser
+        let meta_data = this.application_manager.get_meta_data();
+        let dataset_name = meta_data.get_dataset_name();
+        // Collect the file filters
+        let file_filter_collection = FileFilterCollection::new();
+        let image_filename_style = ConstMetaData::get_image_filename_style(meta_data);
+        let intermediate_file_filter =
+            IntermediateFileFilter::get_instance(app_mgr, Some(&dataset_name));
+        let trimmed_tomogram = Path::new(
+            &this
+                .application_manager
+                .get_property_user_dir()
+                .unwrap_or_else(|| "null".to_string()),
+        )
+        .join(
+            file_type::CLASS
+                .trim_vol_output
+                .get_file_name(Some(manager), Some(AxisID::Only))
+                .unwrap_or_else(|| "null".to_string()), /*was: datasetName + ".rec"*/
+        );
+        if trimmed_tomogram.exists() {
+            intermediate_file_filter.set_accept_pretrimmed_tomograms();
+        }
+        file_filter_collection.add_file_filter(intermediate_file_filter as Rc<dyn FileFilter>);
+        if ConstMetaData::get_axis_type(app_mgr.get_meta_data()) == AxisType::DualAxis {
+            file_filter_collection.add_file_filter(SirtOutputFileFilter::get_instance(
+                manager,
+                Some(image_filename_style),
+                AxisID::First,
+                true,
+                true,
+                true,
+            ) as Rc<dyn FileFilter>);
+            file_filter_collection.add_file_filter(SirtOutputFileFilter::get_instance(
+                manager,
+                Some(image_filename_style),
+                AxisID::Second,
+                true,
+                true,
+                true,
+            ) as Rc<dyn FileFilter>);
+        } else {
+            file_filter_collection.add_file_filter(SirtOutputFileFilter::get_instance(
+                manager,
+                Some(image_filename_style),
+                AxisID::Only,
+                true,
+                true,
+                true,
+            ) as Rc<dyn FileFilter>);
+        }
+        // Setup the file chooser
+        this.file_chooser
+            .set_dialog_type(file_chooser::CUSTOM_DIALOG);
+        this.file_chooser
+            .set_file_filter(Some(file_filter_collection as Rc<dyn FileFilter>));
+        this.file_chooser.set_multi_selection_enabled(true);
+        this.file_chooser.set_control_buttons_are_shown(false);
+        this.file_chooser.set_current_directory(Some(Path::new(
+            &this
+                .application_manager
+                .get_property_user_dir()
+                .unwrap_or_else(|| "null".to_string()),
+        )));
+
+        // Swing layout: pnlCleanup.setLayout(new BoxLayout(pnlCleanup,
+        // BoxLayout.Y_AXIS)).
+        this.pnl_cleanup
+            .set_border(&EtchedBorder::new(Some("Intermediate File Cleanup")).get_border());
+        // Swing layout: instructions.setAlignmentX(Component.CENTER_ALIGNMENT).
+        let pnl_cleanup = this.pnl_cleanup.get_component();
+        pnl_cleanup.add(&this.instructions);
+        // Swing layout: pnlCleanup.add(Box.createRigidArea(FixedDim.x0_y5)).
+        // Swing layout: lDirSize.setAlignmentX(Component.CENTER_ALIGNMENT).
+        pnl_cleanup.add(&this.l_dir_size);
+        // Swing layout: pnlCleanup.add(Box.createRigidArea(FixedDim.x0_y10)).
+        pnl_cleanup.add(&this.file_chooser.get_component());
+
+        // Swing layout: pnlButton X_AXIS BoxLayout, horizontal glue around and
+        // between the buttons.
+        this.pnl_button.add(&this.btn_delete.get_component());
+        this.pnl_button.add(&this.btn_rescan_dir.get_component());
+        // Swing layout: pnlCleanup.add(Box.createRigidArea(FixedDim.x0_y10)).
+        pnl_cleanup.add(&this.pnl_button);
+        // Swing layout: pnlCleanup.add(Box.createRigidArea(FixedDim.x0_y10)).
+        this.set_tool_tip_text();
+        this
     }
 
-    /// Java static `getInstance(ApplicationManager)`.
-    pub fn get_instance<M: CleanupApplicationManager>(application_manager: &M) -> Self {
-        let mut instance = Self::new(application_manager);
+    /// Java package-private static `getInstance(ApplicationManager)`.
+    pub fn get_instance(manager: &'static ApplicationManager) -> Rc<CleanupPanel> {
+        let instance = CleanupPanel::new(manager);
         instance.set_dir_size();
         instance.add_listeners();
         instance
     }
 
-    /// Java `getContainer()`; native layout installation is the GUI boundary.
-    pub fn get_container(&self) -> &EtomoPanel {
-        &self.pnl_cleanup
+    /// Java package-private `getContainer()`.
+    pub fn get_container(&self) -> Rc<JComponent> {
+        self.pnl_cleanup.get_component()
     }
 
     /// Java private `addListeners()`.
-    pub fn add_listeners(&mut self) {
-        self.btn_delete.add_action_listener();
-        self.btn_rescan_dir.add_action_listener();
-        self.listeners_attached = true;
+    fn add_listeners(self: &Rc<Self>) {
+        // Java `new ButtonActonListener(this)`.
+        let listenee = Rc::downgrade(self);
+        let button_action_listener: ActionListener = Rc::new(move |event: &ActionEvent| {
+            if let Some(listenee) = listenee.upgrade() {
+                listenee.button_action(event);
+            }
+        });
+        self.btn_delete
+            .add_action_listener(button_action_listener.clone());
+        self.btn_rescan_dir
+            .add_action_listener(button_action_listener);
     }
 
     /// Java private `setDirSize()`.
-    pub fn set_dir_size(&mut self) {
-        let mut dir_size = 0_u64;
-        if let Ok(file_list) = fs::read_dir(&self.file_chooser.current_directory) {
-            for file in file_list.flatten() {
-                if let Ok(file_type) = file.file_type() {
-                    if file_type.is_file() {
-                        if let Ok(metadata) = file.metadata() {
-                            dir_size += metadata.len();
-                        }
-                    }
+    fn set_dir_size(&self) {
+        // `new File(propertyUserDir).listFiles()`: null when the directory
+        // cannot be read.
+        let file_list: Option<Vec<PathBuf>> = std::fs::read_dir(
+            self.application_manager
+                .get_property_user_dir()
+                .unwrap_or_else(|| "null".to_string()),
+        )
+        .ok()
+        .map(|entries| {
+            entries
+                .filter_map(|entry| entry.ok())
+                .map(|entry| entry.path())
+                .collect()
+        });
+        let mut dir_size: i64 = 0;
+        if let Some(file_list) = &file_list {
+            for file in file_list {
+                if file.is_file() {
+                    // `File.length()`: 0 when unavailable.
+                    dir_size += std::fs::metadata(file)
+                        .map(|metadata| metadata.len() as i64)
+                        .unwrap_or(0);
                 }
             }
         }
-        self.dir_size_label = format!("Directory size (MB): {}", dir_size / 1_000_000);
+        self.l_dir_size
+            .set_text(&format!("Directory size (MB): {}", dir_size / 1000000));
     }
 
     /// Java private `deleteSelected()`.
-    pub fn delete_selected<M: CleanupApplicationManager>(&mut self, application_manager: &mut M) {
+    fn delete_selected(&self) {
         let mut deleted_all = true;
-        for file in &self.file_chooser.selected_files {
-            if fs::remove_file(file).is_err() {
+        let delete_list = self.file_chooser.get_selected_files();
+        for file in &delete_list {
+            // `File.delete()` removes a file or an empty directory.
+            let deleted = if file.is_dir() {
+                std::fs::remove_dir(file).is_ok()
+            } else {
+                std::fs::remove_file(file).is_ok()
+            };
+            if !deleted {
                 deleted_all = false;
             }
         }
-        self.file_chooser.rescan_count += 1;
-        self.file_chooser.selected_file = Some(PathBuf::new());
+        // if (deletedAll) {
+        self.file_chooser.rescan_current_directory();
+        self.file_chooser.set_selected_file(Some(Path::new("")));
         if !deleted_all {
-            let mut message = "Unable to delete file(s).  Check file permissions.".to_owned();
+            let mut message = String::from("Unable to delete file(s).  Check file permissions.");
             if utilities::is_windows_os() {
                 message.push_str("\nIf the files are open in 3dmod, close 3dmod.");
             }
-            application_manager.open_message_dialog(
-                message,
-                "Unable to delete intermediate file",
-                AxisID::Only,
-            );
+            let manager: &'static dyn BaseManager = self.application_manager;
+            ui_harness::with(|harness| {
+                harness.open_message_dialog_base_manager_string_string_axis_id(
+                    Some(manager),
+                    &message,
+                    "Unable to delete intermediate file",
+                    Some(AxisID::Only),
+                )
+            });
         }
         self.set_dir_size();
     }
 
-    /// Java protected `buttonAction(ActionEvent)`.
-    pub fn button_action<M: CleanupApplicationManager>(
-        &mut self,
-        action_command: Option<&str>,
-        application_manager: &mut M,
-    ) {
-        if action_command == self.btn_delete.get_action_command() {
-            self.delete_selected(application_manager);
+    /// Java private `buttonAction(ActionEvent)`.
+    fn button_action(&self, event: &ActionEvent) {
+        if event.get_action_command() == self.btn_delete.get_action_command().as_deref() {
+            self.delete_selected();
         }
-        if action_command == self.btn_rescan_dir.get_action_command() {
-            self.file_chooser.rescan_count += 1;
+        if event.get_action_command() == self.btn_rescan_dir.get_action_command().as_deref() {
+            self.file_chooser.rescan_current_directory();
         }
     }
 
-    /// Java private `setToolTipText()`.
-    pub fn set_tool_tip_text(&mut self) {
-        self.file_chooser.tooltip =
-            Some("The list of files in this text box will be deleted.".to_owned());
+    /// Java private `setToolTipText()`.  Initialize the tooltip text.
+    fn set_tool_tip_text(&self) {
+        self.file_chooser.set_tool_tip_text(
+            tooltip_formatter::INSTANCE
+                .format(Some("The list of files in this text box will be deleted."))
+                .as_deref(),
+        );
         self.btn_delete.set_tool_tip_text(Some(
             "Delete the files listed in the \"File name\" text box.",
         ));
         self.btn_rescan_dir.set_tool_tip_text(Some(
             "Read the directory again to update the list in the file selection box.",
         ));
-    }
-}
-
-/// Java private static final `ButtonActonListener`.  Event delivery remains at
-/// the frontend boundary; its body is `CleanupPanel.buttonAction`.
-#[derive(Clone, Debug, Default, Eq, PartialEq)]
-pub struct ButtonActonListener;
-
-impl ButtonActonListener {
-    /// Java `ButtonActonListener(CleanupPanel)`.
-    pub fn new() -> Self {
-        Self
-    }
-
-    /// Java `actionPerformed(ActionEvent)`.
-    pub fn action_performed<M: CleanupApplicationManager>(
-        &self,
-        listenee: &mut CleanupPanel,
-        action_command: Option<&str>,
-        application_manager: &mut M,
-    ) {
-        listenee.button_action(action_command, application_manager);
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use std::time::{SystemTime, UNIX_EPOCH};
-
-    struct Manager {
-        directory: PathBuf,
-        axis_type: AxisType,
-        dialogs: Vec<(String, String, AxisID)>,
-    }
-
-    impl CleanupApplicationManager for Manager {
-        fn property_user_dir(&self) -> &Path {
-            &self.directory
-        }
-        fn dataset_name(&self) -> &str {
-            "set"
-        }
-        fn image_filename_style(&self) -> ImageFilenameStyle {
-            ImageFilenameStyle::Mrc
-        }
-        fn axis_type(&self) -> AxisType {
-            self.axis_type
-        }
-        fn trim_vol_output_file_name(&self, _: AxisID) -> String {
-            "trim.rec".into()
-        }
-        fn open_message_dialog(&mut self, message: String, title: &str, axis: AxisID) {
-            self.dialogs.push((message, title.into(), axis));
-        }
-    }
-
-    #[test]
-    fn get_instance_constructs_single_axis_filters_and_directory_size() {
-        let directory = std::env::temp_dir().join(format!(
-            "imod-cleanup-{}",
-            SystemTime::now()
-                .duration_since(UNIX_EPOCH)
-                .unwrap()
-                .as_nanos()
-        ));
-        fs::create_dir_all(&directory).unwrap();
-        fs::write(directory.join("a"), vec![0_u8; 1_000_001]).unwrap();
-        let manager = Manager {
-            directory: directory.clone(),
-            axis_type: AxisType::SingleAxis,
-            dialogs: vec![],
-        };
-        let panel = CleanupPanel::get_instance(&manager);
-        assert_eq!(
-            panel.file_chooser.file_filter_collection.sirt_axes,
-            vec![AxisID::Only]
-        );
-        assert_eq!(panel.dir_size_label, "Directory size (MB): 1");
-        assert!(panel.listeners_attached);
-        fs::remove_dir_all(directory).unwrap();
-    }
-
-    #[test]
-    fn delete_selected_rescans_clears_selection_and_reports_failure() {
-        let directory = std::env::temp_dir().join(format!(
-            "imod-cleanup-{}",
-            SystemTime::now()
-                .duration_since(UNIX_EPOCH)
-                .unwrap()
-                .as_nanos()
-        ));
-        fs::create_dir_all(&directory).unwrap();
-        let remove = directory.join("remove");
-        fs::write(&remove, b"x").unwrap();
-        let missing = directory.join("missing");
-        let mut manager = Manager {
-            directory: directory.clone(),
-            axis_type: AxisType::DualAxis,
-            dialogs: vec![],
-        };
-        let mut panel = CleanupPanel::get_instance(&manager);
-        panel.file_chooser.selected_files = vec![remove.clone(), missing];
-        panel.delete_selected(&mut manager);
-        assert!(!remove.exists());
-        assert_eq!(panel.file_chooser.rescan_count, 1);
-        assert_eq!(panel.file_chooser.selected_file, Some(PathBuf::new()));
-        assert_eq!(manager.dialogs.len(), 1);
-        assert_eq!(
-            panel.file_chooser.file_filter_collection.sirt_axes,
-            vec![AxisID::First, AxisID::Second]
-        );
-        fs::remove_dir_all(directory).unwrap();
     }
 }

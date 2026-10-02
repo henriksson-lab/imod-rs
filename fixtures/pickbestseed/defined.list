@@ -1,0 +1,25 @@
+# Cases whose expectation is in defined/ (make-pickbestseed-goldens.sh defined): an upstream-bug
+# fix (BUGS.md, pickbestseed, 2026-09-27) changes their output.  addPointsInGaps searched domains
+# 0..numNeighbors (not the candidate's neighbours) for accepted points and kept only the last
+# "too close" verdict; computeAreaFracs weighted rings by (2*ring + delr)*delr instead of the
+# annulus area (2*ring + 1)*delr^2 -- these change the gap-filling picks, hence seed.mod and the
+# phase counts.  dens also: the density plot's grid points outside the area were malloc residue
+# (defined 0).  control17: -control 17 read the never-filled wsums array (native hangs).
+# err_elong: a track with no points left imin stale and read past an empty contour (native
+# segfaults); such a track is given no domain.
+base
+density
+verbose
+clusters
+oldclust
+nobeef
+control
+control17
+bound
+boundcount
+dens
+noseedz
+twomod
+ignore1
+noweight
+err_elong

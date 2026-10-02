@@ -1,717 +1,238 @@
-//! Owned translation of `IMOD/raptor/lasik/svl/lib/pgm/svlFactorOperations.{h,cpp}`.
+//! Translation of `IMOD/raptor/lasik/svl/lib/pgm/svlFactorOperations.h` and
+//! `svlFactorOperations.cpp`, the parts `MarkersCorrespond` reaches: the
+//! product, marginalisation and normalisation operations and the atomic
+//! operation that chains them, with `CACHE_INDEX_MAPPING` true and
+//! `USE_SHARED_INDEX_CACHE` false (`svlFactorOperations.cpp:91-92`).
+//!
+//! The C++ operations hold `svlFactor*` into the inference engine's factor
+//! lists; here they hold [`FactorPtr`]s to the same factors.  With the shared
+//! index cache off, `svlFactorIndexCache::find` returns a fresh copy of each
+//! mapping behind an `svlSmartPointer`, so a mapping is simply an owned
+//! `Vec<i32>`.  The virtual `svlFactorOperation` hierarchy is the
+//! [`SvlFactorOperation`] enum.
 
-use std::collections::BTreeSet;
+use std::cell::RefCell;
+use std::rc::Rc;
 
 use super::svl_factor::SvlFactor;
+use crate::imod::raptor::lasik::svl::lib::base::svl_logger::{SvlLogLevel, svl_log};
 
-/// C++ `svlFactorIndexCache`, whose shared-pointer values are naturally owned
-/// vectors in Rust.
-#[derive(Clone, Debug, Default)]
-pub struct SvlFactorIndexCache {
-    cache: Vec<Vec<usize>>,
-}
+/// A C++ `svlFactor*` held by an operation or the inference engine.
+pub type FactorPtr = Rc<RefCell<SvlFactor>>;
 
-impl SvlFactorIndexCache {
-    pub fn new() -> Self {
-        Self::default()
-    }
-    pub fn clear(&mut self) {
-        self.cache.clear();
-    }
-    pub fn find(&mut self, index: &[usize], use_shared_index_cache: bool) -> Vec<usize> {
-        if !use_shared_index_cache {
-            return index.to_vec();
-        }
-        if let Some(existing) = self
-            .cache
-            .iter()
-            .find(|existing| existing.as_slice() == index)
-        {
-            return existing.clone();
-        }
-        self.cache.push(index.to_vec());
-        index.to_vec()
+/// `SVL_ASSERT(C)` for this unit.
+fn svl_assert(cond: bool, line: u32, text: &str) {
+    if !cond {
+        svl_log(SvlLogLevel::Fatal, "svlFactorOperations.cpp", line, text);
     }
 }
 
-/// Safe replacement for C++ `svlFactorOperation`'s static mapping state.
-/// A caller owns this planner, which avoids the original global mutable cache.
-#[derive(Clone, Debug, Default)]
-pub struct SvlFactorOperation {
-    pub config: SvlFactorOperationsConfig,
-    index_cache: SvlFactorIndexCache,
-}
-impl SvlFactorOperation {
-    pub fn new(config: SvlFactorOperationsConfig) -> Self {
-        Self {
-            config,
-            index_cache: SvlFactorIndexCache::new(),
-        }
-    }
-    pub fn clear_index_cache(&mut self) {
-        self.index_cache.clear();
-    }
-    pub fn index_ref(&mut self, mapping: &[usize]) -> Vec<usize> {
-        self.index_cache
-            .find(mapping, self.config.use_shared_index_cache)
-    }
-
-    /// Select the exact mapping representation used by
-    /// `svlFactorBinaryOp::initialize` and `svlFactorNAryOp::initialize`.
-    /// `cacheIndexMapping` uses `target.mapFrom(source)` (one index for each
-    /// target cell); the alternate source branch stores `source.strideMapping`
-    /// (one increment for each target variable).  Both are consumed by the
-    /// respective C++ execute fast paths, so retaining the distinction matters
-    /// even though the checked Rust operation functions compute assignments
-    /// directly.
-    pub fn mapping_for(
-        &mut self,
-        target: &SvlFactor,
-        source: &SvlFactor,
-    ) -> Result<Vec<usize>, String> {
-        let mapping = if self.config.cache_index_mapping {
-            target
-                .map_from(source)
-                .ok_or_else(|| "unable to map factor onto target".to_owned())?
-        } else {
-            source
-                .stride_mapping(&target.variables)
-                .into_iter()
-                .map(|stride| {
-                    usize::try_from(stride).map_err(|_| "negative factor stride".to_owned())
-                })
-                .collect::<Result<Vec<_>, _>>()?
-        };
-        Ok(self.index_ref(&mapping))
-    }
-}
-
-/// C++ `svlFactorBinaryOp` initialization expressed without retained pointers.
-#[derive(Clone, Debug)]
-pub struct SvlFactorBinaryOp {
-    pub first: SvlFactor,
-    pub second: SvlFactor,
-    pub first_mapping: Vec<usize>,
-    pub second_mapping: Vec<usize>,
-}
-impl SvlFactorBinaryOp {
-    pub fn new(
-        target: &mut SvlFactor,
-        first: SvlFactor,
-        second: SvlFactor,
-        operation: &mut SvlFactorOperation,
-    ) -> Result<Self, String> {
-        initialize_target(target, &[&first, &second])?;
-        let first_mapping = operation.mapping_for(target, &first)?;
-        let second_mapping = operation.mapping_for(target, &second)?;
-        Ok(Self {
-            first,
-            second,
-            first_mapping,
-            second_mapping,
-        })
-    }
-    pub fn check_target(&self, target: &SvlFactor) -> bool {
-        [&self.first, &self.second].iter().all(|factor| {
-            factor
-                .variables
-                .iter()
-                .enumerate()
-                .all(|(i, variable)| target.var_cardinality(*variable) == Some(factor.cards[i]))
-        })
-    }
-}
-
-/// C++ `svlFactorNAryOp` initialization and cached mappings.
-#[derive(Clone, Debug)]
-pub struct SvlFactorNAryOp {
-    pub factors: Vec<SvlFactor>,
-    pub mappings: Vec<Vec<usize>>,
-}
-impl SvlFactorNAryOp {
-    pub fn new(
-        target: &mut SvlFactor,
-        factors: Vec<SvlFactor>,
-        operation: &mut SvlFactorOperation,
-    ) -> Result<Self, String> {
-        if factors.is_empty() {
-            return Err("n-ary operation requires a factor".into());
-        }
-        initialize_target(target, &factors.iter().collect::<Vec<_>>())?;
-        let mappings = factors
-            .iter()
-            .map(|factor| operation.mapping_for(target, factor))
-            .collect::<Result<Vec<_>, _>>()?;
-        Ok(Self { factors, mappings })
-    }
-    pub fn check_target(&self, target: &SvlFactor) -> bool {
-        self.factors.iter().all(|factor| {
-            factor
-                .variables
-                .iter()
-                .enumerate()
-                .all(|(i, variable)| target.var_cardinality(*variable) == Some(factor.cards[i]))
-        })
-    }
-}
-
-/// Configuration retained from `svlFactorOperation` and its config module.
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub struct SvlFactorOperationsConfig {
-    pub cache_index_mapping: bool,
-    pub use_shared_index_cache: bool,
-}
-impl Default for SvlFactorOperationsConfig {
-    fn default() -> Self {
-        Self {
-            cache_index_mapping: true,
-            use_shared_index_cache: false,
-        }
-    }
-}
-impl SvlFactorOperationsConfig {
-    pub const NAME: &'static str = "svlPGM.svlFactorOperations";
-    pub fn usage(self) -> String {
-        format!(
-            "      cacheIndexMapping :: default: {}\n      useSharedIndexCache :: default: {}\n",
-            self.cache_index_mapping, self.use_shared_index_cache
-        )
-    }
-    pub fn set_configuration(&mut self, name: &str, value: &str) -> Result<(), &'static str> {
-        let value = value.eq_ignore_ascii_case("true") || value == "1";
-        match name {
-            "cacheIndexMapping" => self.cache_index_mapping = value,
-            "useSharedIndexCache" => self.use_shared_index_cache = value,
-            _ => return Err("unrecognized configuration option for svlPGM.svlFactorOperations"),
-        }
-        Ok(())
-    }
-}
-
-fn target_value(
-    source: &SvlFactor,
-    target: &SvlFactor,
-    target_index: usize,
-) -> Result<f64, String> {
-    if source.empty() {
-        return Ok(1.0);
-    }
-    let assignment = target
-        .assignment_of(target_index)
-        .ok_or("invalid target factor index")?;
-    let mut source_assignment = Vec::with_capacity(source.num_vars());
-    for variable in &source.variables {
-        let position = target
-            .variables
-            .iter()
-            .position(|candidate| candidate == variable)
-            .ok_or("target missing factor variable")?;
-        source_assignment.push(assignment[position]);
-    }
-    Ok(source.data[source
-        .index_of(&source_assignment)
-        .ok_or("invalid factor mapping")?])
-}
-
-fn initialize_target(target: &mut SvlFactor, factors: &[&SvlFactor]) -> Result<(), String> {
-    if target.empty() {
-        for factor in factors {
-            target.add_factor_variables(factor)?;
-        }
-    }
-    for factor in factors {
-        for (position, variable) in factor.variables.iter().enumerate() {
-            if target.var_cardinality(*variable) != Some(factor.cards[position]) {
-                return Err("factor target variables or cardinalities differ".into());
-            }
-        }
-    }
-    Ok(())
-}
-
-/// `svlFactorCopyOp::execute`.
-pub fn factor_copy(target: &mut SvlFactor, source: &SvlFactor) -> Result<(), String> {
-    if target.empty() {
-        *target = source.clone();
-    }
-    if target.variables != source.variables || target.cards != source.cards {
-        return Err("factor target variables or cardinalities differ".into());
-    }
-    target.data.copy_from_slice(&source.data);
-    Ok(())
-}
-
-/// `svlFactorProductOp::execute` for the source's binary and n-ary constructors.
-pub fn factor_product(target: &mut SvlFactor, factors: &[&SvlFactor]) -> Result<(), String> {
-    if factors.is_empty() {
-        return Err("product requires a factor".into());
-    }
-    initialize_target(target, factors)?;
-    for index in 0..target.size() {
-        let mut value = 1.0;
-        for factor in factors {
-            if !factor.empty() {
-                value *= target_value(factor, target, index)?;
-            }
-        }
-        target.data[index] = value;
-    }
-    Ok(())
-}
-
-/// `svlFactorDivideOp::execute`; source numerator zero produces zero even for
-/// a zero denominator.
-pub fn factor_divide(
-    target: &mut SvlFactor,
-    numerator: &SvlFactor,
-    denominator: &SvlFactor,
-) -> Result<(), String> {
-    initialize_target(target, &[numerator, denominator])?;
-    for index in 0..target.size() {
-        let value = target_value(numerator, target, index)?;
-        target.data[index] = if value == 0.0 {
-            0.0
-        } else {
-            value / target_value(denominator, target, index)?
-        };
-    }
-    Ok(())
-}
-
-/// `svlFactorAdditionOp::execute` for binary and n-ary factors.
-pub fn factor_addition(target: &mut SvlFactor, factors: &[&SvlFactor]) -> Result<(), String> {
-    if factors.is_empty() {
-        return Err("addition requires a factor".into());
-    }
-    initialize_target(target, factors)?;
-    for index in 0..target.size() {
-        let mut value = 0.0;
-        for factor in factors {
-            if !factor.empty() {
-                value += target_value(factor, target, index)?;
-            }
-        }
-        target.data[index] = value;
-    }
-    Ok(())
-}
-
-/// `svlFactorSubtractOp::execute`.
-pub fn factor_subtract(
-    target: &mut SvlFactor,
-    first: &SvlFactor,
-    second: &SvlFactor,
-) -> Result<(), String> {
-    initialize_target(target, &[first, second])?;
-    for index in 0..target.size() {
-        target.data[index] = match (first.empty(), second.empty()) {
-            (true, true) => 0.0,
-            (true, false) => -target_value(second, target, index)?,
-            (false, true) => target_value(first, target, index)?,
-            (false, false) => {
-                target_value(first, target, index)? - target_value(second, target, index)?
-            }
-        };
-    }
-    Ok(())
-}
-
-/// `svlFactorWeightedSumOp::execute`.
-pub fn factor_weighted_sum(
-    target: &mut SvlFactor,
-    first: &SvlFactor,
-    second: &SvlFactor,
-    first_weight: f64,
-    second_weight: f64,
-) -> Result<(), String> {
-    initialize_target(target, &[first, second])?;
-    for index in 0..target.size() {
-        target.data[index] = match (first.empty(), second.empty()) {
-            (true, true) => 0.0,
-            (true, false) => second_weight * target_value(second, target, index)?,
-            (false, true) => first_weight * target_value(first, target, index)?,
-            (false, false) => {
-                first_weight * target_value(first, target, index)?
-                    + second_weight * target_value(second, target, index)?
-            }
-        };
-    }
-    Ok(())
-}
-
-/// `svlFactorMarginalizeOp::execute`. `eliminated` is the source constructor's
-/// variable/set argument; an empty set retains the already configured target.
-pub fn factor_marginalize(
-    target: &mut SvlFactor,
-    source: &SvlFactor,
-    eliminated: &BTreeSet<i32>,
-) -> Result<(), String> {
-    if target.empty() {
-        for (position, &variable) in source.variables.iter().enumerate() {
-            if !eliminated.contains(&variable) {
-                target.add_variable(variable, source.cards[position])?;
-            }
-        }
-    }
-    target.fill(0.0);
-    for (source_index, &value) in source.data.iter().enumerate() {
-        let assignment = source
-            .assignment_of(source_index)
-            .ok_or("invalid source factor index")?;
-        let target_assignment: Vec<_> = target
-            .variables
-            .iter()
-            .map(|variable| {
-                assignment[source
-                    .variables
-                    .iter()
-                    .position(|candidate| candidate == variable)
-                    .expect("target variable comes from source")]
-            })
-            .collect();
-        let target_index = target
-            .index_of(&target_assignment)
-            .ok_or("invalid target factor index")?;
-        target.data[target_index] += value;
-    }
-    Ok(())
-}
-
-/// `svlFactorMaximizeOp::execute`.
-pub fn factor_maximize(
-    target: &mut SvlFactor,
-    source: &SvlFactor,
-    eliminated: &BTreeSet<i32>,
-) -> Result<(), String> {
-    if target.empty() {
-        for (position, &variable) in source.variables.iter().enumerate() {
-            if !eliminated.contains(&variable) {
-                target.add_variable(variable, source.cards[position])?;
-            }
-        }
-    }
-    if target.empty() {
-        return Ok(());
-    }
-    target.fill(-f64::MAX);
-    for (source_index, &value) in source.data.iter().enumerate() {
-        let assignment = source
-            .assignment_of(source_index)
-            .ok_or("invalid source factor index")?;
-        let target_assignment: Vec<_> = target
-            .variables
-            .iter()
-            .map(|variable| {
-                assignment[source
-                    .variables
-                    .iter()
-                    .position(|candidate| candidate == variable)
-                    .expect("target variable comes from source")]
-            })
-            .collect();
-        let target_index = target
-            .index_of(&target_assignment)
-            .ok_or("invalid target factor index")?;
-        if target.data[target_index] < value {
-            target.data[target_index] = value;
-        }
-    }
-    Ok(())
-}
-
-/// `svlFactorNormalizeOp::execute`.
-pub fn factor_normalize(target: &mut SvlFactor) {
-    if target.empty() {
-        return;
-    }
-    let total: f64 = target.data.iter().sum();
-    if total > 0.0 {
-        if total != 1.0 {
-            target.scale(1.0 / total);
-        }
-    } else {
-        target.fill(1.0 / target.size() as f64);
-    }
-}
-
-/// `svlFactorLogNormalizeOp::execute`.
-pub fn factor_log_normalize(target: &mut SvlFactor) {
-    if target.empty() {
-        return;
-    }
-    let maximum = target.data.iter().copied().fold(-f64::MAX, f64::max);
-    for value in &mut target.data {
-        *value -= maximum;
-    }
-}
-
-/// Rust's replacement for the C++ virtual `svlFactorOperation` hierarchy.
-/// Operations own snapshots of their source factors, so they can safely be
-/// scheduled and reused without the pointer lifetime contract of the C++ API.
-pub trait FactorOperation {
-    fn execute(&self, target: &mut SvlFactor) -> Result<(), String>;
-}
-
-#[derive(Clone, Debug)]
-pub struct SvlFactorCopyOp {
-    source: SvlFactor,
-}
-impl SvlFactorCopyOp {
-    pub fn new(source: SvlFactor) -> Self {
-        Self { source }
-    }
-}
-impl FactorOperation for SvlFactorCopyOp {
-    fn execute(&self, target: &mut SvlFactor) -> Result<(), String> {
-        factor_copy(target, &self.source)
-    }
-}
-
-#[derive(Clone, Debug)]
+/// `class svlFactorProductOp` (an `svlFactorNAryOp`).
+#[derive(Debug)]
 pub struct SvlFactorProductOp {
-    sources: Vec<SvlFactor>,
+    target: FactorPtr,
+    factors: Vec<FactorPtr>,
+    mappings: Vec<Vec<i32>>,
 }
+
 impl SvlFactorProductOp {
-    pub fn new(sources: Vec<SvlFactor>) -> Self {
-        Self { sources }
-    }
-}
-impl FactorOperation for SvlFactorProductOp {
-    fn execute(&self, target: &mut SvlFactor) -> Result<(), String> {
-        factor_product(target, &self.sources.iter().collect::<Vec<_>>())
-    }
-}
+    /// `svlFactorProductOp(svlFactor* target, const vector<const svlFactor*>&
+    /// A)` (`svlFactorOperations.cpp:371`), through
+    /// `svlFactorNAryOp(target, A)` (`:209`) and its `initialize()` (`:236`).
+    pub fn new(target: &FactorPtr, a: &[FactorPtr]) -> SvlFactorProductOp {
+        svl_assert(!a.is_empty(), 213, "!A.empty()");
+        let mut op = SvlFactorProductOp {
+            target: Rc::clone(target),
+            factors: a.to_vec(),
+            mappings: Vec::new(),
+        };
 
-#[derive(Clone, Debug)]
-pub struct SvlFactorDivideOp {
-    numerator: SvlFactor,
-    denominator: SvlFactor,
-}
-impl SvlFactorDivideOp {
-    pub fn new(numerator: SvlFactor, denominator: SvlFactor) -> Self {
-        Self {
-            numerator,
-            denominator,
+        // add variables and check domains match
+        {
+            let mut t = op.target.borrow_mut();
+            if t.empty() {
+                for f in &op.factors {
+                    t.add_variables_of(&f.borrow());
+                }
+            } else {
+                // `SVL_ASSERT(checkTarget())`: the engine builds every
+                // product into an empty intermediate factor.
+                unreachable!("svlFactorNAryOp::initialize on a non-empty target");
+            }
+        }
+
+        // create mappings
+        op.mappings = op
+            .factors
+            .iter()
+            .map(|f| op.target.borrow().map_from(&f.borrow()))
+            .collect();
+        op
+    }
+
+    /// `svlFactorProductOp::execute()` (`svlFactorOperations.cpp:389`).
+    pub fn execute(&self) {
+        let target = self.target.borrow();
+        let size = target.size() as usize;
+        let mut t = target.storage().unwrap().borrow_mut();
+        let f0 = self.factors[0].borrow();
+        if f0.empty() {
+            t.fill(1.0, size as i32);
+        } else {
+            let d0 = f0.storage().unwrap().borrow();
+            let m0 = &self.mappings[0];
+            for i in 0..size {
+                t.data[i] = d0.data[m0[i] as usize];
+            }
+        }
+
+        for k in 1..self.factors.len() {
+            let fk = self.factors[k].borrow();
+            if fk.empty() {
+                continue;
+            }
+            let dk = fk.storage().unwrap().borrow();
+            let mk = &self.mappings[k];
+            for i in 0..size {
+                t.data[i] *= dk.data[mk[i] as usize];
+            }
         }
     }
 }
-impl FactorOperation for SvlFactorDivideOp {
-    fn execute(&self, target: &mut SvlFactor) -> Result<(), String> {
-        factor_divide(target, &self.numerator, &self.denominator)
-    }
-}
 
-#[derive(Clone, Debug)]
-pub struct SvlFactorAdditionOp {
-    sources: Vec<SvlFactor>,
-}
-impl SvlFactorAdditionOp {
-    pub fn new(sources: Vec<SvlFactor>) -> Self {
-        Self { sources }
-    }
-}
-impl FactorOperation for SvlFactorAdditionOp {
-    fn execute(&self, target: &mut SvlFactor) -> Result<(), String> {
-        factor_addition(target, &self.sources.iter().collect::<Vec<_>>())
-    }
-}
-
-#[derive(Clone, Debug)]
-pub struct SvlFactorSubtractOp {
-    first: SvlFactor,
-    second: SvlFactor,
-}
-impl SvlFactorSubtractOp {
-    pub fn new(first: SvlFactor, second: SvlFactor) -> Self {
-        Self { first, second }
-    }
-}
-impl FactorOperation for SvlFactorSubtractOp {
-    fn execute(&self, target: &mut SvlFactor) -> Result<(), String> {
-        factor_subtract(target, &self.first, &self.second)
-    }
-}
-
-#[derive(Clone, Debug)]
-pub struct SvlFactorWeightedSumOp {
-    first: SvlFactor,
-    second: SvlFactor,
-    first_weight: f64,
-    second_weight: f64,
-}
-impl SvlFactorWeightedSumOp {
-    pub fn new(first: SvlFactor, second: SvlFactor, first_weight: f64, second_weight: f64) -> Self {
-        Self {
-            first,
-            second,
-            first_weight,
-            second_weight,
-        }
-    }
-}
-impl FactorOperation for SvlFactorWeightedSumOp {
-    fn execute(&self, target: &mut SvlFactor) -> Result<(), String> {
-        factor_weighted_sum(
-            target,
-            &self.first,
-            &self.second,
-            self.first_weight,
-            self.second_weight,
-        )
-    }
-}
-
-#[derive(Clone, Debug)]
+/// `class svlFactorMarginalizeOp`: sums `A` onto the target's variables.
+#[derive(Debug)]
 pub struct SvlFactorMarginalizeOp {
-    source: SvlFactor,
-    eliminated: BTreeSet<i32>,
+    target: FactorPtr,
+    a: FactorPtr,
+    mapping_a: Vec<i32>,
 }
+
 impl SvlFactorMarginalizeOp {
-    pub fn new(source: SvlFactor, eliminated: BTreeSet<i32>) -> Self {
-        Self { source, eliminated }
+    /// `svlFactorMarginalizeOp(svlFactor* target, const svlFactor* A)`
+    /// (`svlFactorOperations.cpp:907`); `checkTarget()` is `true`.
+    pub fn new(target: &FactorPtr, a: &FactorPtr) -> SvlFactorMarginalizeOp {
+        let mapping_a = target.borrow().map_onto(&a.borrow());
+        SvlFactorMarginalizeOp {
+            target: Rc::clone(target),
+            a: Rc::clone(a),
+            mapping_a,
+        }
     }
-    pub fn one(source: SvlFactor, variable: i32) -> Self {
-        Self::new(source, BTreeSet::from([variable]))
-    }
-}
-impl FactorOperation for SvlFactorMarginalizeOp {
-    fn execute(&self, target: &mut SvlFactor) -> Result<(), String> {
-        factor_marginalize(target, &self.source, &self.eliminated)
+
+    /// `svlFactorMarginalizeOp::execute()` (`svlFactorOperations.cpp:987`).
+    pub fn execute(&self) {
+        self.target.borrow_mut().fill(0.0);
+
+        let target = self.target.borrow();
+        let mut t = target.storage().unwrap().borrow_mut();
+        let a = self.a.borrow();
+        let da = a.storage().unwrap().borrow();
+        for i in 0..self.mapping_a.len() {
+            t.data[self.mapping_a[i] as usize] += da.data[i];
+        }
     }
 }
 
-#[derive(Clone, Debug)]
-pub struct SvlFactorMaximizeOp {
-    source: SvlFactor,
-    eliminated: BTreeSet<i32>,
+/// `class svlFactorNormalizeOp`.
+#[derive(Debug)]
+pub struct SvlFactorNormalizeOp {
+    target: FactorPtr,
 }
-impl SvlFactorMaximizeOp {
-    pub fn new(source: SvlFactor, eliminated: BTreeSet<i32>) -> Self {
-        Self { source, eliminated }
+
+impl SvlFactorNormalizeOp {
+    /// `svlFactorNormalizeOp(svlFactor* target)` (`svlFactorOperations.cpp:1155`).
+    pub fn new(target: &FactorPtr) -> SvlFactorNormalizeOp {
+        SvlFactorNormalizeOp {
+            target: Rc::clone(target),
+        }
     }
-    pub fn one(source: SvlFactor, variable: i32) -> Self {
-        Self::new(source, BTreeSet::from([variable]))
-    }
-}
-impl FactorOperation for SvlFactorMaximizeOp {
-    fn execute(&self, target: &mut SvlFactor) -> Result<(), String> {
-        factor_maximize(target, &self.source, &self.eliminated)
+
+    /// `svlFactorNormalizeOp::execute()` (`svlFactorOperations.cpp:1166`).
+    pub fn execute(&self) {
+        let mut target = self.target.borrow_mut();
+        if target.empty() {
+            return;
+        }
+
+        let size = target.size() as usize;
+        let mut total = 0.0f64;
+        {
+            let t = target.storage().unwrap().borrow();
+            for i in 0..size {
+                total += t.data[i];
+            }
+        }
+        if total > 0.0 {
+            if total != 1.0 {
+                let inv_total = 1.0 / total;
+                let mut t = target.storage().unwrap().borrow_mut();
+                for i in 0..size {
+                    t.data[i] *= inv_total;
+                }
+            }
+        } else {
+            target.fill(1.0 / size as f64);
+        }
     }
 }
 
-#[derive(Clone, Copy, Debug, Default)]
-pub struct SvlFactorNormalizeOp;
-impl FactorOperation for SvlFactorNormalizeOp {
-    fn execute(&self, target: &mut SvlFactor) -> Result<(), String> {
-        factor_normalize(target);
-        Ok(())
+/// The reached members of the `svlFactorOperation` hierarchy.
+#[derive(Debug)]
+pub enum SvlFactorOperation {
+    Product(SvlFactorProductOp),
+    Marginalize(SvlFactorMarginalizeOp),
+    Normalize(SvlFactorNormalizeOp),
+}
+
+impl SvlFactorOperation {
+    /// `svlFactorOperation::target()` (`svlFactorOperations.h:93`).
+    pub fn target(&self) -> &FactorPtr {
+        match self {
+            SvlFactorOperation::Product(op) => &op.target,
+            SvlFactorOperation::Marginalize(op) => &op.target,
+            SvlFactorOperation::Normalize(op) => &op.target,
+        }
+    }
+
+    /// The virtual `execute()`.
+    pub fn execute(&self) {
+        match self {
+            SvlFactorOperation::Product(op) => op.execute(),
+            SvlFactorOperation::Marginalize(op) => op.execute(),
+            SvlFactorOperation::Normalize(op) => op.execute(),
+        }
     }
 }
 
-#[derive(Clone, Copy, Debug, Default)]
-pub struct SvlFactorLogNormalizeOp;
-impl FactorOperation for SvlFactorLogNormalizeOp {
-    fn execute(&self, target: &mut SvlFactor) -> Result<(), String> {
-        factor_log_normalize(target);
-        Ok(())
-    }
-}
-
-/// Equivalent of C++ `svlFactorAtomicOp`: runs queued owned computations.
-#[derive(Default)]
+/// `class svlFactorAtomicOp`: a list of operations executed in order.
+#[derive(Debug)]
 pub struct SvlFactorAtomicOp {
-    operations: Vec<Box<dyn FactorOperation>>,
+    target: FactorPtr,
+    computations: Vec<SvlFactorOperation>,
 }
+
 impl SvlFactorAtomicOp {
-    pub fn new(operation: impl FactorOperation + 'static) -> Self {
-        Self {
-            operations: vec![Box::new(operation)],
+    /// `svlFactorAtomicOp(const vector<svlFactorOperation*>& ops)`
+    /// (`svlFactorOperations.cpp:284`).
+    pub fn new(ops: Vec<SvlFactorOperation>) -> SvlFactorAtomicOp {
+        svl_assert(!ops.is_empty(), 287, "!_computations.empty()");
+        let target = Rc::clone(ops.last().unwrap().target());
+        SvlFactorAtomicOp {
+            target,
+            computations: ops,
         }
     }
-    pub fn from_operations(operations: Vec<Box<dyn FactorOperation>>) -> Self {
-        Self { operations }
+
+    /// `target()`.
+    pub fn target(&self) -> &FactorPtr {
+        &self.target
     }
-    pub fn add_operation(&mut self, operation: impl FactorOperation + 'static) {
-        self.operations.push(Box::new(operation));
-    }
-}
-impl FactorOperation for SvlFactorAtomicOp {
-    fn execute(&self, target: &mut SvlFactor) -> Result<(), String> {
-        for operation in &self.operations {
-            operation.execute(target)?;
+
+    /// `svlFactorAtomicOp::execute()` (`svlFactorOperations.cpp:303`).
+    pub fn execute(&self) {
+        for c in &self.computations {
+            c.execute();
         }
-        Ok(())
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-    #[test]
-    fn product_divide_and_weighted_operations_match_source_rules() {
-        let first = SvlFactor::from_parts(vec![1], vec![2], Some(vec![2., 0.])).unwrap();
-        let second = SvlFactor::from_parts(vec![2], vec![2], Some(vec![3., 5.])).unwrap();
-        let mut target = SvlFactor::new();
-        factor_product(&mut target, &[&first, &second]).unwrap();
-        assert_eq!(target.data, vec![6., 0., 10., 0.]);
-        let mut quotient = SvlFactor::new();
-        factor_divide(&mut quotient, &first, &second).unwrap();
-        assert_eq!(quotient.data, vec![2. / 3., 0., 2. / 5., 0.]);
-        factor_weighted_sum(&mut target, &first, &second, 2., 3.).unwrap();
-        assert_eq!(target.data, vec![13., 9., 19., 15.]);
-    }
-    #[test]
-    fn reductions_and_normalizers_cover_source_operations() {
-        let source =
-            SvlFactor::from_parts(vec![1, 2], vec![2, 2], Some(vec![1., 4., 3., 2.])).unwrap();
-        let mut sum = SvlFactor::new();
-        factor_marginalize(&mut sum, &source, &BTreeSet::from([2])).unwrap();
-        assert_eq!(sum.data, vec![4., 6.]);
-        let mut maximum = SvlFactor::new();
-        factor_maximize(&mut maximum, &source, &BTreeSet::from([2])).unwrap();
-        assert_eq!(maximum.data, vec![3., 4.]);
-        factor_normalize(&mut sum);
-        assert!((sum.data[0] - 0.4).abs() < f64::EPSILON);
-        assert!((sum.data[1] - 0.6).abs() < f64::EPSILON);
-        factor_log_normalize(&mut maximum);
-        assert_eq!(maximum.data, vec![-1., 0.]);
-    }
-    #[test]
-    fn owned_operations_and_atomic_schedule_have_no_pointer_lifetime_contract() {
-        let source = SvlFactor::from_parts(vec![7], vec![2], Some(vec![2., 4.])).unwrap();
-        let mut target = SvlFactor::new();
-        let mut operations = SvlFactorAtomicOp::new(SvlFactorCopyOp::new(source));
-        operations.add_operation(SvlFactorNormalizeOp);
-        operations.execute(&mut target).unwrap();
-        assert_eq!(target.data, vec![1. / 3., 2. / 3.]);
-    }
-
-    #[test]
-    fn constructor_retains_native_cell_or_stride_mapping_configuration() {
-        let first = SvlFactor::from_parts(vec![1], vec![2], Some(vec![2., 3.])).unwrap();
-        let second = SvlFactor::from_parts(vec![2], vec![3], Some(vec![4., 5., 6.])).unwrap();
-
-        let mut cached_target = SvlFactor::new();
-        let mut cached = SvlFactorOperation::new(SvlFactorOperationsConfig::default());
-        let cached_op = SvlFactorBinaryOp::new(
-            &mut cached_target,
-            first.clone(),
-            second.clone(),
-            &mut cached,
-        )
-        .unwrap();
-        // `mapFrom`: a source index for every target assignment.
-        assert_eq!(cached_op.first_mapping, vec![0, 1, 0, 1, 0, 1]);
-        assert_eq!(cached_op.second_mapping, vec![0, 0, 1, 1, 2, 2]);
-
-        let mut stride_target = SvlFactor::new();
-        let mut stride_config = SvlFactorOperationsConfig::default();
-        stride_config.cache_index_mapping = false;
-        let mut stride = SvlFactorOperation::new(stride_config);
-        let stride_op =
-            SvlFactorBinaryOp::new(&mut stride_target, first, second, &mut stride).unwrap();
-        // `strideMapping(target.vars())`: one increment per target variable.
-        assert_eq!(stride_op.first_mapping, vec![1, 0]);
-        assert_eq!(stride_op.second_mapping, vec![0, 1]);
     }
 }

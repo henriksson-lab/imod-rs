@@ -1,0 +1,777 @@
+# imod-rs native golden manifest for fixtures/autofidseed; see fixtures/README.md.
+# Regenerate with fixtures/regen-golden.sh autofidseed; do not edit by hand.
+text 823 golden/basic.files
+autofidseed.dir/afsPID.0.elong
+autofidseed.dir/afsPID.0.sortmod
+autofidseed.dir/afsPID.0.track
+autofidseed.dir/afsPID.0.xyzmod
+autofidseed.dir/afsPID.1.elong
+autofidseed.dir/afsPID.1.sortmod
+autofidseed.dir/afsPID.1.track
+autofidseed.dir/afsPID.1.xyzmod
+autofidseed.dir/afsPID.2.elong
+autofidseed.dir/afsPID.2.sortmod
+autofidseed.dir/afsPID.2.track
+autofidseed.dir/afsPID.2.xyzmod
+autofidseed.dir/afsPID.3.elong
+autofidseed.dir/afsPID.3.sortmod
+autofidseed.dir/afsPID.3.track
+autofidseed.dir/afsPID.3.xyzmod
+autofidseed.dir/afsPID.4.elong
+autofidseed.dir/afsPID.4.sortmod
+autofidseed.dir/afsPID.4.track
+autofidseed.dir/afsPID.4.xyzmod
+autofidseed.dir/afsPID.pkmod
+autofidseed.dir/afsPID.pkmod~
+autofidseed.dir/clusterElong.mod
+autofidseed.dir/track.com
+autofidseed.info
+bound.mod
+small.rawtlt
+small.seed
+small.st
+track.com
+
+text 3862 golden/basic.out
+RUNNING IMODFINDBEADS on views 5, 6, and 7
+ 
+Scaling down by 1.33 for Sobel filter; box size = 38, scaled size = 28
+
+Analyzing group of sections starting with 4, ending with 6
+Dips found in 2 groups based on bkg mean, means 107.87 to 111.26
+Pass 1: 202 peaks found. 157 eliminated as too weak, 1 too close, 44 remaining
+Histogram smoothed with H = 0.200 has dip at 0.297, peaks at 0.067 and 0.626
+Histogram smoothed with H = 0.050 has lowest dip at 0.433
+Threshold for averaging set to 0.481
+Diameter of average bead at zero-crossing = 10.03
+Dips found in 2 groups based on bkg mean, means 107.87 to 111.39
+Pass 2: 389 peaks found. 339 eliminated as too weak, 7 too close, 43 remaining
+Histogram smoothed with H = 0.200 has dip at 0.279, peaks at 0.061 and 0.563
+Histogram smoothed with H = 0.050 has lowest dip at 0.414
+21 peaks are above histogram dip at 0.414
+21 total peaks being stored in model down to value of 0.464
+ 
+REDOING IMODFINDBEADS with more views to try to get more points
+RUNNING IMODFINDBEADS on views 4, 5, 6, 7, and 8
+ 
+Scaling down by 1.33 for Sobel filter; box size = 38, scaled size = 28
+
+Analyzing group of sections starting with 3, ending with 7
+Dips found in 3 groups based on bkg mean, means 106.76 to 111.93
+Pass 1: 354 peaks found. 296 eliminated as too weak, 1 too close, 57 remaining
+Histogram smoothed with H = 0.200 has dip at 0.233, peaks at 0.064 and 0.435
+Histogram smoothed with H = 0.050 has lowest dip at 0.300
+Threshold for averaging set to 0.334
+Diameter of average bead at zero-crossing = 10.02
+Dips found in 3 groups based on bkg mean, means 106.83 to 111.92
+Pass 2: 636 peaks found. 547 eliminated as too weak, 12 too close, 77 remaining
+Histogram smoothed with H = 0.200 has dip at 0.275, peaks at 0.065 and 0.535
+Histogram smoothed with H = 0.050 has lowest dip at 0.383
+35 peaks are above histogram dip at 0.383
+35 total peaks being stored in model down to value of 0.433
+ 
+RUNNING BEADTRACK with seed from view 4
+RUNNING BEADTRACK with seed from view 5
+RUNNING BEADTRACK with seed from view 6
+RUNNING BEADTRACK with seed from view 7
+RUNNING BEADTRACK with seed from view 8
+ Analyzing entire area; no subarea size fits the constraints
+Group 1 has     5 points
+Group 2 has     1 points
+
+ FORMATTED  new  file opened: autofidseed.dir/afs1171500.0.surf
+ Analyzing entire area; no subarea size fits the constraints
+Group 1 has     3 points
+Group 2 has     3 points
+
+ FORMATTED  new  file opened: autofidseed.dir/afs1171500.1.surf
+ Analyzing entire area; no subarea size fits the constraints
+Group 1 has     5 points
+Group 2 has     1 points
+
+ FORMATTED  new  file opened: autofidseed.dir/afs1171500.2.surf
+ Analyzing entire area; no subarea size fits the constraints
+Group 1 has     4 points
+Group 2 has     1 points
+
+ FORMATTED  new  file opened: autofidseed.dir/afs1171500.3.surf
+ Analyzing entire area; no subarea size fits the constraints
+Group 1 has     2 points
+Group 2 has     3 points
+
+ FORMATTED  new  file opened: autofidseed.dir/afs1171500.4.surf
+ 
+RUNNING SORTBEADSURFS with XYZ positions from view 4
+ 
+RUNNING SORTBEADSURFS with XYZ positions from view 5
+ 
+RUNNING SORTBEADSURFS with XYZ positions from view 6
+ 
+RUNNING SORTBEADSURFS with XYZ positions from view 7
+ 
+RUNNING SORTBEADSURFS with XYZ positions from view 8
+ 
+RUNNING PICKBESTSEED
+ 
+Total area = 0.01 megapixels
+6 candidate points, including 0 clustered and 0 elongated   [PBS1]
+Phase 1: total points accepted = 3  -  on bottom = 2 , on top = 1
+Phase 2: total points accepted = 6  -  on bottom = 4 , on top = 2
+Phase 3: total points accepted = 6  -  on bottom = 4 , on top = 2
+Phase 4: total points accepted = 6  -  on bottom = 4 , on top = 2
+Final:   total points accepted = 6  -  on bottom = 4 , on top = 2   [PBS2]
+Number in candidate model surfaces:   6   0   0   0   0   0   0   0
+Some temporary files left as autofidseed.dir/afs1171500.*
+
+text 2 golden/basic.rc
+0
+
+sha256 98b389eb2530b63d7660c4f0a98d5b487e5e74563502179cef8233695e201ed0 700 golden/basic/autofidseed.dir/afsPID.0.elong
+sha256 df212a792bf670074d202f6f8bbc6e3cf78a021b469cd2c6ac7cbceace599c9a 844 golden/basic/autofidseed.dir/afsPID.0.sortmod
+sha256 1126911b53756808ab51fb2f91c8ce97f722ddf0a6866ec8454f3bbb4eddb0c5 2136 golden/basic/autofidseed.dir/afsPID.0.track
+sha256 1f3608138e871e1355a1902feb67337b883a97eb3a73f6f430a15e805b0070d8 752 golden/basic/autofidseed.dir/afsPID.0.xyzmod
+sha256 d05ba867f6bf44e4c9ad1fd843f057761f027df73b40050d392ef90887d3b027 700 golden/basic/autofidseed.dir/afsPID.1.elong
+sha256 411b59eaa8676025a4727714bede530040bbd9203f680615fb37d4cf436f9b16 844 golden/basic/autofidseed.dir/afsPID.1.sortmod
+sha256 0ae0e9be15fae828064b111947a28ea57a2b513945883bfc4b33dc9884b82c90 2136 golden/basic/autofidseed.dir/afsPID.1.track
+sha256 9b8af07d5bea2ed13c495427227b115a565a51a4a15ed5eddfbcb9eb8287af16 892 golden/basic/autofidseed.dir/afsPID.1.xyzmod
+sha256 d7f692c9e6e676d2efb444132054f38e4c6c3009fc38736fd993b95a1007513d 700 golden/basic/autofidseed.dir/afsPID.2.elong
+sha256 330db32025d5a50b85f563b2ec4dceb0749a8321fcb7b7cb22ae94ad914bacc5 844 golden/basic/autofidseed.dir/afsPID.2.sortmod
+sha256 5a638a46069d3fc641cd99182e104b57807b45a9d1ace964890b4bb39b044756 2148 golden/basic/autofidseed.dir/afsPID.2.track
+sha256 4bc4ca4d0086b25f6739d65d8d2d69e5c7f93a8ca14e042b858097c3e942c447 1032 golden/basic/autofidseed.dir/afsPID.2.xyzmod
+sha256 4087861a85cad9377aaa7a9e4b5027fee38b331eba978884f213020b3b931e04 700 golden/basic/autofidseed.dir/afsPID.3.elong
+sha256 696b314a6ef45149ba51c57573b1539f18ebb2d4976aa2052c03184cd31a7cae 812 golden/basic/autofidseed.dir/afsPID.3.sortmod
+sha256 c03546f88545d367c1c003cf187f9b3e102e575c67f3b17bcd9e8ba6f298f815 2112 golden/basic/autofidseed.dir/afsPID.3.track
+sha256 bca1b32a874b0e40e7f9badaab8a2c2ec9645beb4569093c11b8a6137bcff0e5 1128 golden/basic/autofidseed.dir/afsPID.3.xyzmod
+sha256 5e65f665d4f9ed44918736ea59deac5f868b6219bd2cdf3d2651f7606d312818 700 golden/basic/autofidseed.dir/afsPID.4.elong
+sha256 f6f6f254dd00d145bafb790d219bbad6884abc5d987a254ffcf0221cc7e289e3 812 golden/basic/autofidseed.dir/afsPID.4.sortmod
+sha256 83c3a14565a41fe7618363bac094be9ddfd8f5309720bc103192020e3272b912 2112 golden/basic/autofidseed.dir/afsPID.4.track
+sha256 16c73ef3f0223bde1e1e24c3fbd1d6635beac07780f6ba608595b9146886cb1f 1268 golden/basic/autofidseed.dir/afsPID.4.xyzmod
+sha256 0308dcef4bf319193f2378444028f5767d1843591bf217cfa884802525478f0a 2088 golden/basic/autofidseed.dir/afsPID.pkmod
+sha256 f571e867c7ee78d8805ebd2b39b8b9882c3bebe4a5a2252c421ad4351ad4a3d4 1472 golden/basic/autofidseed.dir/afsPID.pkmod~
+sha256 fafbaaee7bd23ad6c5e1b5fa639b5bf6a16a9de1b1fdd804298e0bb116573099 1028 golden/basic/autofidseed.dir/clusterElong.mod
+sha256 32bd50ebbc5beaaae625877a507e8606ed5b1b4d3c2bd2405a015e03990f06d7 1893 golden/basic/autofidseed.dir/track.com
+text 212 golden/basic/autofidseed.info
+PID 1171500.
+TrackCom track.com
+TrackTime 1790492632
+ImageTime 1790492632
+BeadSize 10.6
+MinGuess 2
+PeakFraction 1.0
+Spacing 0.85
+TwoSurf 1
+NumPeaks 35
+NumViews 5
+ViewsEntered 0
+ZeroShiftsFrac 0.2
+AdjustSizes 0 0
+
+sha256 ecc7706975486c27ebcd85008419496c69dcd79cacda2a866ecdaeb926bcc8a8 824 golden/basic/small.seed
+text 498 golden/density.files
+autofidseed.dir/afsPID.0.elong
+autofidseed.dir/afsPID.0.track
+autofidseed.dir/afsPID.1.elong
+autofidseed.dir/afsPID.1.track
+autofidseed.dir/afsPID.2.elong
+autofidseed.dir/afsPID.2.track
+autofidseed.dir/afsPID.3.elong
+autofidseed.dir/afsPID.3.track
+autofidseed.dir/afsPID.4.elong
+autofidseed.dir/afsPID.4.track
+autofidseed.dir/afsPID.pkmod
+autofidseed.dir/afsPID.pkmod~
+autofidseed.dir/clusterElong.mod
+autofidseed.dir/track.com
+autofidseed.info
+bound.mod
+small.rawtlt
+small.seed
+small.st
+track.com
+
+text 2286 golden/density.out
+RUNNING IMODFINDBEADS on views 5, 6, and 7
+ 
+Scaling down by 1.33 for Sobel filter; box size = 38, scaled size = 28
+
+Analyzing group of sections starting with 4, ending with 6
+Pass 1: 77 peaks found. 49 eliminated as too weak, 1 too close, 27 remaining
+Histogram smoothed with H = 0.200 has dip at 0.320, peaks at 0.071 and 0.619
+Histogram smoothed with H = 0.050 has lowest dip at 0.449
+Threshold for averaging set to 0.491
+Diameter of average bead at zero-crossing = 9.98
+Pass 2: 174 peaks found. 138 eliminated as too weak, 2 too close, 34 remaining
+Histogram smoothed with H = 0.200 has dip at 0.327, peaks at 0.069 and 0.632
+Histogram smoothed with H = 0.050 has lowest dip at 0.471
+15 peaks are above histogram dip at 0.471
+15 total peaks being stored in model down to value of 0.521
+ 
+REDOING IMODFINDBEADS with more views to try to get more points
+RUNNING IMODFINDBEADS on views 4, 5, 6, 7, and 8
+ 
+Scaling down by 1.33 for Sobel filter; box size = 38, scaled size = 28
+
+Analyzing group of sections starting with 3, ending with 7
+Pass 1: 140 peaks found. 91 eliminated as too weak, 3 too close, 46 remaining
+Histogram smoothed with H = 0.200 has dip at 0.275, peaks at 0.067 and 0.620
+Histogram smoothed with H = 0.050 has lowest dip at 0.448
+Threshold for averaging set to 0.491
+Diameter of average bead at zero-crossing = 9.99
+Pass 2: 268 peaks found. 211 eliminated as too weak, 7 too close, 50 remaining
+Histogram smoothed with H = 0.200 has dip at 0.281, peaks at 0.069 and 0.629
+Histogram smoothed with H = 0.050 has lowest dip at 0.367
+25 peaks are above histogram dip at 0.367
+25 total peaks being stored in model down to value of 0.417
+ 
+RUNNING BEADTRACK with seed from view 4
+RUNNING BEADTRACK with seed from view 5
+RUNNING BEADTRACK with seed from view 6
+RUNNING BEADTRACK with seed from view 7
+RUNNING BEADTRACK with seed from view 8
+ 
+RUNNING PICKBESTSEED
+ 
+Total area = 0.01 megapixels
+5 candidate points, including 2 clustered and 0 elongated   [PBS1]
+Phase 1: total points accepted = 1
+Phase 2: total points accepted = 3
+Phase 4: total points accepted = 3
+Phase 5: total points accepted = 3
+Final:   total points accepted = 3   [PBS2]
+Number in candidate model surfaces:   3   0   0   0   2   0   0   0
+Some temporary files left as autofidseed.dir/afs1172781.*
+
+text 2 golden/density.rc
+0
+
+text 500 golden/density/autofidseed.dir/afsPID.0.elong
+  1      1      0.2368     0.9351     0.9163     0.1693     1.7835     1.4246     0.4043    2656.00
+  1      2      0.2315     0.8354     0.8015     0.1321     1.2157     1.2143     0.0578    2433.51
+  1      3      0.3407     1.1097     0.9781     0.3857     1.6446     1.2663     0.3799    2536.84
+  1      4      0.2991     1.1748     1.0693     0.2164     1.1803     1.1129     0.0546    1887.49
+  1      5      0.4398     0.9450     0.9419     0.1106     1.3904     1.3941     0.0308    2688.98
+
+sha256 83e8f817715e082f68fbb5ebb5fb356cdd752bfa65fb70591eaef383d7c4f6ef 1768 golden/density/autofidseed.dir/afsPID.0.track
+text 500 golden/density/autofidseed.dir/afsPID.1.elong
+  1      6      0.4787     1.0049     0.9589     0.1571     1.8522     1.4209     0.4267    2815.51
+  1      7      0.3311     0.8903     0.8398     0.1399     1.2302     1.1829     0.0792    2428.38
+  1      8      0.3256     1.0276     0.9679     0.2619     1.6220     1.2510     0.3835    2711.08
+  1      9      0.3325     1.0412     1.0329     0.2097     1.1534     1.1084     0.0607    2068.18
+  1     10      0.2462     1.0359     0.9869     0.1368     1.4304     1.4443     0.0368    2666.62
+
+sha256 735814542f8da2c24b8df2ddea974250e296017341851928b711517c5aaa37a7 1768 golden/density/autofidseed.dir/afsPID.1.track
+text 500 golden/density/autofidseed.dir/afsPID.2.elong
+  1     11      0.4269     0.9360     0.8937     0.1466     1.8385     1.4209     0.4294    2812.70
+  1     12      0.2609     0.8589     0.7817     0.1088     1.2110     1.2066     0.0490    2596.32
+  1     13      0.3823     0.9514     0.8881     0.2465     1.6003     1.2357     0.3868    2726.88
+  1     14      0.2705     0.9925     0.9616     0.1852     1.1974     1.1367     0.0498    2071.47
+  1     15      0.1540     1.2611     1.3231     0.2909     1.4049     1.4043     0.0417    2114.99
+
+sha256 723edeaa3d841fbf3826aafe1ba4bea7f45705742eb9c5504925dd90ed737147 1768 golden/density/autofidseed.dir/afsPID.2.track
+text 500 golden/density/autofidseed.dir/afsPID.3.elong
+  1     16      0.4156     0.9776     0.9387     0.1582     1.8141     1.3703     0.4341    2826.07
+  1     17      0.2718     0.9085     0.8212     0.1286     1.2095     1.1926     0.0472    2601.26
+  1     18      0.3701     0.8652     0.8313     0.1326     1.6002     1.2326     0.3682    3005.01
+  1     19      0.2472     1.2246     1.0554     0.2539     1.1564     1.1149     0.0491    1935.45
+  1     20      0.2759     1.0241     0.9650     0.1694     1.4074     1.4195     0.0301    2764.67
+
+sha256 70f3a152b636557185d43e873bbb5056285ffc5a32023f072c7e023db84257f8 1768 golden/density/autofidseed.dir/afsPID.3.track
+text 500 golden/density/autofidseed.dir/afsPID.4.elong
+  1     21      0.3823     1.0430     0.9888     0.1523     1.8195     1.4209     0.4323    2676.54
+  1     22      0.2943     0.9392     0.8645     0.1590     1.1815     1.1168     0.0510    2506.61
+  1     23      0.3188     0.9244     0.9609     0.1251     1.5911     1.2383     0.3697    3039.15
+  1     24      0.3377     1.0764     1.0818     0.3517     1.1682     1.1149     0.0501    2297.49
+  1     25      0.2015     1.0170     0.9767     0.1079     1.4090     1.4273     0.0304    2897.18
+
+sha256 3cd91e6f791df19b97a639e79198b3d11bcbb7eb6036dbd970838d05fd5ead8e 1768 golden/density/autofidseed.dir/afsPID.4.track
+sha256 57ed072d5602b373b1dba8f848f8509ea2335db494f51123723213471d19e734 1648 golden/density/autofidseed.dir/afsPID.pkmod
+sha256 28991aef27c202d20db3a2a4c58d122c0775af8fe09ee3d784ba1a0fd2a425c3 1208 golden/density/autofidseed.dir/afsPID.pkmod~
+sha256 002864819088e3a2d402507f113fc40fe58e9a9fe06d40fc9a46a76711155512 996 golden/density/autofidseed.dir/clusterElong.mod
+sha256 32bd50ebbc5beaaae625877a507e8606ed5b1b4d3c2bd2405a015e03990f06d7 1893 golden/density/autofidseed.dir/track.com
+text 253 golden/density/autofidseed.info
+PID 1172781.
+TrackCom track.com
+TrackTime 1790492637
+ImageTime 1790492637
+BeadSize 10.6
+MinGuess 1
+PeakFraction 1.0
+Spacing 0.85
+TwoSurf 0
+NumPeaks 25
+NumViews 5
+ViewsEntered 0
+ZeroShiftsFrac 0.2
+AdjustSizes 0 0
+BoundFile bound.mod
+BoundTime 1790492637
+
+sha256 cfb9868344beb70d0a4a8a79facc24c6c90f67b38ed7d21a4f7ea30863fc220c 680 golden/density/small.seed
+text 42 golden/err_bound.files
+bound.mod
+small.rawtlt
+small.st
+track.com
+
+text 60 golden/err_bound.out
+ERROR: autofidseed - Boundary model none.mod does not exist
+
+text 2 golden/err_bound.rc
+1
+
+text 42 golden/err_drop.files
+bound.mod
+small.rawtlt
+small.st
+track.com
+
+text 99 golden/err_drop.out
+ERROR: autofidseed - You cannot list tracks to drop or ignore unless resuming with existing tracks
+
+text 2 golden/err_drop.rc
+1
+
+text 42 golden/err_target.files
+bound.mod
+small.rawtlt
+small.st
+track.com
+
+text 3462 golden/err_target.out
+Usage: autofidseed [Options]
+Options can be abbreviated, current short name abbreviations are in parentheses
+Options:
+ -track (-tr)  OR  -TrackCommandFile   File
+    Command file for running Beadtrack
+ -append (-ap)  OR  -AppendToSeedModel
+    Read in existing output seed model and add points to it
+ -guess (-g)  OR  -MinGuessNumBeads   Int
+    A guess for the minimum number of beads present
+ -spacing (-sp)  OR  -MinSpacing   Float
+    Minimum spacing between peaks as fraction of bead size (default 0.85)
+ -size (-si)  OR  -BeadSize   Float
+    Diameter of beads in images to track, in pixels
+ -adjust (-ad)  OR  -AdjustSizes
+    Change size-based parameters using measured size of averaged bead
+ -peak (-pe)  OR  -PeakStorageFraction   Float
+    Fraction of peaks above histogram dip to store in model (default 1.0)
+ -find (-f)  OR  -FindBeadOptions   String
+    One or more options to pass to ImodFindBeads
+ -views (-v)  OR  -NumberOfSeedViews   Int
+    Number of views at which to find seed points for tracking beads
+ -shifts (-sh)  OR  -ShiftsNearZeroFraction   Float
+    Fraction of box size at which to supply shifts near zero tilt to Beadtrack
+ -justshifts (-j)  OR  -JustFindShiftsNearZero   Int
+    Estimated number of beads for just finding the shifts near zero tilt
+ -boundary (-bou)  OR  -BoundaryModel   File
+    Model containing contours enclosing areas in which to find or exclude
+    beads
+ -exclude (-ex)  OR  -ExcludeInsideAreas
+    Use the boundary model to exclude regions from analysis
+ -border (-bor)  OR  -BordersInXandY   2 ints
+    Number of pixels to exclude near each edge in X and in Y
+ -two (-tw)  OR  -TwoSurfaces
+    Try to find an equal number of beads on two surfaces
+ -number (-n)  OR  -TargetNumberOfBeads   Int
+    Desired total number of beads to choose for final seed model
+ -density (-de)  OR  -TargetDensityOfBeads   Float
+    Desired density of beads in final seed model per binned 1K x 1K area
+ -ratio (-ra)  OR  -MaxMajorToMinorRatio   Float
+    Maximum ratio between beads on majority and minority surface
+ -elongated (-el)  OR  -ElongatedPointsAllowed   Int
+    1-3 to include elongated beads
+ -cluster (-c)  OR  -ClusteredPointsAllowed   Int
+    1 to include beads near others, 2-4 to include elongated beads also
+ -lower (-lo)  OR  -LowerTargetForClustered   Float
+    Include clustered/elongated points only if # is still below this target
+ -subarea (-su)  OR  -SubareaSize   Int
+    Size of subareas for Sortbeadsurfs analysis of two surfaces
+ -sort (-so)  OR  -SortAreasMinNumAndSize   2 ints
+    Minimum bead number and area size for having Sortbeadsurfs pick subareas
+ -ignore (-ig)  OR  -IgnoreSurfaceData   List
+    List of tracked models (numbered from 1) with bad top/bottom information
+ -drop (-dr)  OR  -DropTracks   List
+    List of tracked models (numbered from 1) to drop from the analysis
+ -pick (-pi)  OR  -PickSeedOptions   String
+    One or more options to pass to Pickbestseed
+ -remove (-re)  OR  -RemoveTempFiles   Int
+    Clean up temporary files from previous run and go on (1) or exit (-1)
+ -output (-o)  OR  -OutputSeedModel   File
+    Alternative path and name for output file for the seed model
+ -info (-in)  OR  -InfoFile   File
+    Alternative path and name for info file
+ -tempdir (-te)  OR  -TemporaryDirectory   File
+    Path for temporary directory
+ -leave (-le)  OR  -LeaveTempFiles
+    Leave temporary files in temporary directory
+ -help (-h)  OR  -usage
+    Print help output
+
+text 2 golden/err_target.rc
+0
+
+text 42 golden/err_views.files
+bound.mod
+small.rawtlt
+small.st
+track.com
+
+text 81 golden/err_views.out
+ERROR: autofidseed - The number of views to use as seeds must be between 3 and 7
+
+text 2 golden/err_views.rc
+1
+
+text 42 golden/exclude.files
+bound.mod
+small.rawtlt
+small.st
+track.com
+
+text 1656 golden/exclude.out
+RUNNING IMODFINDBEADS on views 5, 6, and 7
+ 
+Scaling down by 1.33 for Sobel filter; box size = 38, scaled size = 28
+
+Analyzing group of sections starting with 4, ending with 6
+Pass 1: 125 peaks found. 119 eliminated as too weak, 0 too close, 6 remaining
+Diameter of average bead at zero-crossing = 10.17
+Pass 2: 231 peaks found. 225 eliminated as too weak, 0 too close, 6 remaining
+Histogram smoothed with H = 0.141 has dip at 0.856, peaks at 0.728 and 0.864
+Histogram smoothed with H = 0.050 has lowest dip at 0.814
+3 peaks are above histogram dip at 0.814
+3 total peaks being stored in model down to value of 0.864
+ 
+REDOING IMODFINDBEADS with more views to try to get more points
+RUNNING IMODFINDBEADS on views 3, 4, 5, 6, 7, 8, and 9
+ 
+Scaling down by 1.33 for Sobel filter; box size = 38, scaled size = 28
+
+Analyzing group of sections starting with 2, ending with 8
+Dips found in 3 groups based on bkg mean, means 107.34 to 112.28
+Pass 1: 300 peaks found. 248 eliminated as too weak, 8 too close, 44 remaining
+Diameter of average bead at zero-crossing = 10.08
+Dips found in 3 groups based on bkg mean, means 107.57 to 112.41
+Pass 2: 528 peaks found. 512 eliminated as too weak, 0 too close, 16 remaining
+Failed to find dip in histogram, using fallback threshold for storing points
+16 84 total peaks being stored in model down to value of 0.051
+ 
+RUNNING BEADTRACK with seed from view 3
+ERROR: autofidseed - Running point2model with XYZ data from view 3
+ERROR: point2model - Reading beginning of file
+ERROR: autofidseed - point2model -values -1 -sphere 6 "autofidseed.dir/afs1173155.0.xyzpt" "autofidseed.dir/afs1173155.0.xyzmod": exited with status 1
+
+text 2 golden/exclude.rc
+1
+
+text 88 golden/justshifts.files
+autofidseed.dir/afsPID.pkmod
+autofidseed.info
+bound.mod
+small.rawtlt
+small.st
+track.com
+
+text 983 golden/justshifts.out
+RUNNING IMODFINDBEADS on views 5, 6, and 7
+ 
+Scaling down by 1.33 for Sobel filter; box size = 38, scaled size = 28
+
+Analyzing group of sections starting with 4, ending with 6
+Dips found in 2 groups based on bkg mean, means 107.87 to 111.26
+Pass 1: 202 peaks found. 157 eliminated as too weak, 1 too close, 44 remaining
+Histogram smoothed with H = 0.200 has dip at 0.297, peaks at 0.067 and 0.626
+Histogram smoothed with H = 0.050 has lowest dip at 0.433
+Threshold for averaging set to 0.481
+Diameter of average bead at zero-crossing = 10.03
+Dips found in 2 groups based on bkg mean, means 107.87 to 111.39
+Pass 2: 389 peaks found. 339 eliminated as too weak, 7 too close, 43 remaining
+Histogram smoothed with H = 0.200 has dip at 0.279, peaks at 0.061 and 0.563
+Histogram smoothed with H = 0.050 has lowest dip at 0.414
+21 peaks are above histogram dip at 0.414
+21 total peaks being stored in model down to value of 0.464
+ 
+Some temporary files left as autofidseed.dir/afs1174218.*
+
+text 2 golden/justshifts.rc
+0
+
+sha256 f571e867c7ee78d8805ebd2b39b8b9882c3bebe4a5a2252c421ad4351ad4a3d4 1472 golden/justshifts/autofidseed.dir/afsPID.pkmod
+text 13 golden/justshifts/autofidseed.info
+PID 1174218.
+
+text 70 golden/remove.files
+autofidseed.info
+bound.mod
+small.rawtlt
+small.seed
+small.st
+track.com
+
+text 0 golden/remove.out
+
+text 2 golden/remove.rc
+0
+
+text 212 golden/remove/autofidseed.info
+PID 1173863.
+TrackCom track.com
+TrackTime 1790492643
+ImageTime 1790492643
+BeadSize 10.6
+MinGuess 2
+PeakFraction 1.0
+Spacing 0.85
+TwoSurf 0
+NumPeaks 35
+NumViews 5
+ViewsEntered 0
+ZeroShiftsFrac 0.2
+AdjustSizes 0 0
+
+sha256 2b6fc03529e27a7f718bb7fccccd3a09e35669bd1cd5e43d07cf372c90550d0e 680 golden/remove/small.seed
+text 986 golden/resume.files
+autofidseed.dir/afsPID.0.elong
+autofidseed.dir/afsPID.0.sortmod
+autofidseed.dir/afsPID.0.track
+autofidseed.dir/afsPID.0.xyzmod
+autofidseed.dir/afsPID.1.elong
+autofidseed.dir/afsPID.1.sortmod
+autofidseed.dir/afsPID.1.track
+autofidseed.dir/afsPID.1.xyzmod
+autofidseed.dir/afsPID.2.elong
+autofidseed.dir/afsPID.2.sortmod
+autofidseed.dir/afsPID.2.sortmod~
+autofidseed.dir/afsPID.2.track
+autofidseed.dir/afsPID.2.xyzmod
+autofidseed.dir/afsPID.3.elong
+autofidseed.dir/afsPID.3.sortmod
+autofidseed.dir/afsPID.3.sortmod~
+autofidseed.dir/afsPID.3.track
+autofidseed.dir/afsPID.3.xyzmod
+autofidseed.dir/afsPID.4.elong
+autofidseed.dir/afsPID.4.sortmod
+autofidseed.dir/afsPID.4.sortmod~
+autofidseed.dir/afsPID.4.track
+autofidseed.dir/afsPID.4.xyzmod
+autofidseed.dir/afsPID.pkmod
+autofidseed.dir/afsPID.pkmod~
+autofidseed.dir/clusterElong.mod
+autofidseed.dir/clusterElong.mod~
+autofidseed.dir/track.com
+autofidseed.info
+bound.mod
+resumed.seed
+resumed.seed~
+small.rawtlt
+small.seed
+small.st
+track.com
+
+text 1860 golden/resume.out
+ Analyzing entire area; no subarea size fits the constraints
+Group 1 has     5 points
+Group 2 has     1 points
+
+ FORMATTED  new  file opened: autofidseed.dir/afs1173546.2.surf
+ Analyzing entire area; no subarea size fits the constraints
+Group 1 has     4 points
+Group 2 has     1 points
+
+ FORMATTED  new  file opened: autofidseed.dir/afs1173546.3.surf
+ Analyzing entire area; no subarea size fits the constraints
+Group 1 has     2 points
+Group 2 has     3 points
+
+ FORMATTED  new  file opened: autofidseed.dir/afs1173546.4.surf
+Total area = 0.01 megapixels
+6 candidate points, including 0 clustered and 1 elongated   [PBS1]
+1 candidates excluded by outlier scores (1 clustered or elongated)
+Phase 1: total points accepted = 2  -  on bottom = 1 , on top = 1
+Phase 2: total points accepted = 3  -  on bottom = 2 , on top = 1
+Final:   total points accepted = 3  -  on bottom = 2 , on top = 1   [PBS2]
+Number in candidate model surfaces:   5   0   1   0   0   0   0   0
+ 
+RUNNING SORTBEADSURFS with XYZ positions from view 6
+ 
+RUNNING SORTBEADSURFS with XYZ positions from view 7
+ 
+RUNNING SORTBEADSURFS with XYZ positions from view 8
+ 
+RUNNING PICKBESTSEED
+ 
+Total area = 0.01 megapixels
+6 candidate points, including 0 clustered and 1 elongated   [PBS1]
+1 candidates excluded by outlier scores (1 clustered or elongated)
+Phase 1: total points accepted = 3  -  on bottom = 2 , on top = 1
+Phase 2: total points accepted = 4  -  on bottom = 3 , on top = 1
+Phase 3: total points accepted = 5  -  on bottom = 4 , on top = 1
+Phase 4: total points accepted = 5  -  on bottom = 4 , on top = 1
+Final:   total points accepted = 5  -  on bottom = 4 , on top = 1   [PBS2]
+Number in candidate model surfaces:   5   0   1   0   0   0   0   0
+ 
+The ratio between surfaces is too high; running again with lower target
+ 
+Some temporary files left as autofidseed.dir/afs1173292.*
+
+text 2 golden/resume.rc
+0
+
+sha256 98b389eb2530b63d7660c4f0a98d5b487e5e74563502179cef8233695e201ed0 700 golden/resume/autofidseed.dir/afsPID.0.elong
+sha256 df212a792bf670074d202f6f8bbc6e3cf78a021b469cd2c6ac7cbceace599c9a 844 golden/resume/autofidseed.dir/afsPID.0.sortmod
+sha256 1126911b53756808ab51fb2f91c8ce97f722ddf0a6866ec8454f3bbb4eddb0c5 2136 golden/resume/autofidseed.dir/afsPID.0.track
+sha256 1f3608138e871e1355a1902feb67337b883a97eb3a73f6f430a15e805b0070d8 752 golden/resume/autofidseed.dir/afsPID.0.xyzmod
+sha256 d05ba867f6bf44e4c9ad1fd843f057761f027df73b40050d392ef90887d3b027 700 golden/resume/autofidseed.dir/afsPID.1.elong
+sha256 411b59eaa8676025a4727714bede530040bbd9203f680615fb37d4cf436f9b16 844 golden/resume/autofidseed.dir/afsPID.1.sortmod
+sha256 0ae0e9be15fae828064b111947a28ea57a2b513945883bfc4b33dc9884b82c90 2136 golden/resume/autofidseed.dir/afsPID.1.track
+sha256 9b8af07d5bea2ed13c495427227b115a565a51a4a15ed5eddfbcb9eb8287af16 892 golden/resume/autofidseed.dir/afsPID.1.xyzmod
+sha256 d7f692c9e6e676d2efb444132054f38e4c6c3009fc38736fd993b95a1007513d 700 golden/resume/autofidseed.dir/afsPID.2.elong
+sha256 330db32025d5a50b85f563b2ec4dceb0749a8321fcb7b7cb22ae94ad914bacc5 844 golden/resume/autofidseed.dir/afsPID.2.sortmod
+sha256 330db32025d5a50b85f563b2ec4dceb0749a8321fcb7b7cb22ae94ad914bacc5 844 golden/resume/autofidseed.dir/afsPID.2.sortmod~
+sha256 5a638a46069d3fc641cd99182e104b57807b45a9d1ace964890b4bb39b044756 2148 golden/resume/autofidseed.dir/afsPID.2.track
+sha256 4bc4ca4d0086b25f6739d65d8d2d69e5c7f93a8ca14e042b858097c3e942c447 1032 golden/resume/autofidseed.dir/afsPID.2.xyzmod
+sha256 4087861a85cad9377aaa7a9e4b5027fee38b331eba978884f213020b3b931e04 700 golden/resume/autofidseed.dir/afsPID.3.elong
+sha256 696b314a6ef45149ba51c57573b1539f18ebb2d4976aa2052c03184cd31a7cae 812 golden/resume/autofidseed.dir/afsPID.3.sortmod
+sha256 696b314a6ef45149ba51c57573b1539f18ebb2d4976aa2052c03184cd31a7cae 812 golden/resume/autofidseed.dir/afsPID.3.sortmod~
+sha256 c03546f88545d367c1c003cf187f9b3e102e575c67f3b17bcd9e8ba6f298f815 2112 golden/resume/autofidseed.dir/afsPID.3.track
+sha256 bca1b32a874b0e40e7f9badaab8a2c2ec9645beb4569093c11b8a6137bcff0e5 1128 golden/resume/autofidseed.dir/afsPID.3.xyzmod
+sha256 5e65f665d4f9ed44918736ea59deac5f868b6219bd2cdf3d2651f7606d312818 700 golden/resume/autofidseed.dir/afsPID.4.elong
+sha256 f6f6f254dd00d145bafb790d219bbad6884abc5d987a254ffcf0221cc7e289e3 812 golden/resume/autofidseed.dir/afsPID.4.sortmod
+sha256 f6f6f254dd00d145bafb790d219bbad6884abc5d987a254ffcf0221cc7e289e3 812 golden/resume/autofidseed.dir/afsPID.4.sortmod~
+sha256 83c3a14565a41fe7618363bac094be9ddfd8f5309720bc103192020e3272b912 2112 golden/resume/autofidseed.dir/afsPID.4.track
+sha256 16c73ef3f0223bde1e1e24c3fbd1d6635beac07780f6ba608595b9146886cb1f 1268 golden/resume/autofidseed.dir/afsPID.4.xyzmod
+sha256 0308dcef4bf319193f2378444028f5767d1843591bf217cfa884802525478f0a 2088 golden/resume/autofidseed.dir/afsPID.pkmod
+sha256 f571e867c7ee78d8805ebd2b39b8b9882c3bebe4a5a2252c421ad4351ad4a3d4 1472 golden/resume/autofidseed.dir/afsPID.pkmod~
+sha256 599301693b31bd1c995ae47ff24777aa3b26a0e170640915fe4b78d65479fe0d 1028 golden/resume/autofidseed.dir/clusterElong.mod
+sha256 599301693b31bd1c995ae47ff24777aa3b26a0e170640915fe4b78d65479fe0d 1028 golden/resume/autofidseed.dir/clusterElong.mod~
+sha256 32bd50ebbc5beaaae625877a507e8606ed5b1b4d3c2bd2405a015e03990f06d7 1893 golden/resume/autofidseed.dir/track.com
+text 212 golden/resume/autofidseed.info
+PID 1173292.
+TrackCom track.com
+TrackTime 1790492640
+ImageTime 1790492640
+BeadSize 10.6
+MinGuess 2
+PeakFraction 1.0
+Spacing 0.85
+TwoSurf 1
+NumPeaks 35
+NumViews 5
+ViewsEntered 0
+ZeroShiftsFrac 0.2
+AdjustSizes 0 0
+
+sha256 82584156e587e15b513ac9f2baad11b9787b852f24b5f8c0fd1a2952112c89f9 692 golden/resume/resumed.seed
+sha256 9df9ccec5f629b6fb486aa489e6b7e78c3852005921da7599a990bc33cf6b22e 780 golden/resume/resumed.seed~
+sha256 ecc7706975486c27ebcd85008419496c69dcd79cacda2a866ecdaeb926bcc8a8 824 golden/resume/small.seed
+text 540 golden/views3.files
+autofidseed.dir/afsPID.0.elong
+autofidseed.dir/afsPID.0.seed
+autofidseed.dir/afsPID.0.track
+autofidseed.dir/afsPID.1.elong
+autofidseed.dir/afsPID.1.seed
+autofidseed.dir/afsPID.1.track
+autofidseed.dir/afsPID.2.elong
+autofidseed.dir/afsPID.2.seed
+autofidseed.dir/afsPID.2.track
+autofidseed.dir/afsPID.mop
+autofidseed.dir/afsPID.moptrim
+autofidseed.dir/afsPID.mopxf
+autofidseed.dir/afsPID.pkmod
+autofidseed.dir/clusterElong.mod
+autofidseed.dir/track.com
+autofidseed.info
+bound.mod
+small.rawtlt
+small.seed
+small.st
+track.com
+track_adjusted.com
+
+text 2250 golden/views3.out
+RUNNING IMODFINDBEADS on views 5, 6, and 7
+ 
+Scaling down by 1.33 for Sobel filter; box size = 38, scaled size = 28
+
+Analyzing group of sections starting with 4, ending with 6
+Dips found in 2 groups based on bkg mean, means 107.87 to 111.26
+Pass 1: 202 peaks found. 157 eliminated as too weak, 1 too close, 44 remaining
+Histogram smoothed with H = 0.200 has dip at 0.297, peaks at 0.067 and 0.626
+Histogram smoothed with H = 0.050 has lowest dip at 0.433
+Threshold for averaging set to 0.481
+Diameter of average bead at zero-crossing = 10.03
+Adjusted parameters based on a new bead size of 10.03
+Scaling down by 1.25 for Sobel filter; box size = 36, scaled size = 28
+Adding another pass because size changed more than 5%
+Dips found in 2 groups based on bkg mean, means 108.01 to 111.72
+Pass 2: 451 peaks found. 385 eliminated as too weak, 9 too close, 57 remaining
+Histogram smoothed with H = 0.200 has dip at 0.326, peaks at 0.066 and 0.655
+Histogram smoothed with H = 0.050 has lowest dip at 0.473
+Threshold for averaging set to 0.518
+Diameter of average bead at zero-crossing = 10.06
+Adjusted parameters based on a new bead size of 10.06
+Scaling down by 1.26 for Sobel filter; box size = 36, scaled size = 28
+Dips found in 2 groups based on bkg mean, means 108.1 to 111.65
+Pass 3: 423 peaks found. 355 eliminated as too weak, 7 too close, 61 remaining
+Histogram smoothed with H = 0.200 has dip at 0.327, peaks at 0.064 and 0.655
+Histogram smoothed with H = 0.050 has lowest dip at 0.471
+21 peaks are above histogram dip at 0.471
+21 total peaks being stored in model down to value of 0.521
+ 
+Tracking parameters adjusted for new unbinned bead size of 10.06   [AFS1]
+RUNNING BEADTRACK with seed from view 5
+RUNNING BEADTRACK with seed from view 6
+RUNNING BEADTRACK with seed from view 7
+ 
+RUNNING PICKBESTSEED
+ 
+Total area = 0.01 megapixels
+6 candidate points, including 2 clustered and 1 elongated   [PBS1]
+1 candidates excluded by outlier scores (1 clustered or elongated)
+Phase 1: total points accepted = 1
+Phase 2: total points accepted = 3
+Phase 4: total points accepted = 3
+Final:   total points accepted = 3   [PBS2]
+Number in candidate model surfaces:   3   0   0   1   2   0   0   0
+All temporary files left as autofidseed.dir/afs1172358.*
+
+text 2 golden/views3.rc
+0
+
+sha256 177310752578c080c5448ee0ff31d0e57b0c6eeb6b3c541dbbae97713acc8b68 700 golden/views3/autofidseed.dir/afsPID.0.elong
+sha256 760909994195741765a53fe13fae7a2be4c74068a9c6bd507037f73641dd913f 1304 golden/views3/autofidseed.dir/afsPID.0.seed
+sha256 75d01c8e8f57d0dd0582bbc109ab1e4d772d1a5d3ad35f9cef0e74f2541be095 1676 golden/views3/autofidseed.dir/afsPID.0.track
+sha256 219178e0efc97c6eea448a1382f63588cc1cdb512281a74b35b1f0aef5ff9626 700 golden/views3/autofidseed.dir/afsPID.1.elong
+sha256 82f446b2c623b9cb06e4832a844d8b6f01de2fedce6f93df6545e9923efe287a 1304 golden/views3/autofidseed.dir/afsPID.1.seed
+sha256 5d154997380c642fbb928bb0b25ae947ea571fefb27fc2444cd9e9311d83c143 1652 golden/views3/autofidseed.dir/afsPID.1.track
+sha256 d33d4524271c63e691aa107571d6ac603599a3acb6d374f38e16ed5725717af8 700 golden/views3/autofidseed.dir/afsPID.2.elong
+sha256 8ca1733fbc53e7fa2f5a999818608fb624b7fdf4034c9fe8e32bdd8b9c03d45c 1304 golden/views3/autofidseed.dir/afsPID.2.seed
+sha256 e898e88fc330a70cde9b9a095b1d810cd9ed05aeb54f808620a0a5de71538fab 1652 golden/views3/autofidseed.dir/afsPID.2.track
+sha256 04ffef62d95ec69c51afd407ac20cdd5a24a179ba239f9c419583d4df7ebe497 50176 golden/views3/autofidseed.dir/afsPID.mop
+sha256 f0a0d4b0742f538e062abe34d788cdffbbf57a71a4ee58a424bd9ad2995f910a 50176 golden/views3/autofidseed.dir/afsPID.moptrim
+text 219 golden/views3/autofidseed.dir/afsPID.mopxf
+   1.0000000   0.0000000   0.0000000   1.0000000       0.000       0.000
+   1.0000000   0.0000000   0.0000000   1.0000000      -0.210      -1.921
+   1.0000000   0.0000000   0.0000000   1.0000000      -0.047      -2.081
+
+sha256 0e849baa5392d6ddda2739513eba9353296335087177cff4f5b2cd65325ea672 1472 golden/views3/autofidseed.dir/afsPID.pkmod
+sha256 2ecbc3420a422174fd93ae73b6ea04c1591ed951bb09b9f0072a5f342e0572bc 1028 golden/views3/autofidseed.dir/clusterElong.mod
+sha256 32bd50ebbc5beaaae625877a507e8606ed5b1b4d3c2bd2405a015e03990f06d7 1893 golden/views3/autofidseed.dir/track.com
+text 215 golden/views3/autofidseed.info
+PID 1172358.
+TrackCom track.com
+TrackTime 1790492635
+ImageTime 1790492635
+BeadSize 10.6
+MinGuess 1
+PeakFraction 1.0
+Spacing 0.9
+TwoSurf 0
+NumPeaks 21
+NumViews 3
+ViewsEntered 1
+ZeroShiftsFrac 0.2
+AdjustSizes 1 10.06
+
+sha256 d46016d279d4fc09dafa56c5e654c2dc50bcb2969cd293b1e5163aef00f5b247 680 golden/views3/small.seed
+sha256 29736ab12db861025cefcbf4be8e0d6e441729d598708fb6df5e3c5346af8697 1894 golden/views3/track_adjusted.com

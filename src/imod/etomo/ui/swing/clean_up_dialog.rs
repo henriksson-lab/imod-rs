@@ -1,412 +1,239 @@
 //! `IMOD/Etomo/src/etomo/ui/swing/CleanUpDialog.java`.
 //!
-//! Swing label/component construction and `UIHarness` packing remain direct GUI
-//! boundaries.  This unit owns the source dialog state, archive-label decisions,
-//! action-command routing, and context-popup construction.
-#![allow(dead_code)]
+//! Java `public class CleanUpDialog extends ProcessDialog implements
+//! ContextMenu`: the Clean Up dialog - archive the original stack(s) and
+//! delete intermediate files (`CleanupPanel`).
+//!
+//! An EDT object (`ui.md`): created as `Rc<Self>` by [`CleanUpDialog::new`];
+//! every method takes `&self`.  The `ProcessDialog` superclass is the embedded
+//! `base` (reached through `Deref`) and the overridden `done()` is
+//! `ProcessDialogVirtual::done`.  The listener class `ButtonActionListener` is
+//! a closure holding a weak reference to the dialog.
 
-use super::{
-    beveled_border::BeveledBorder,
-    cleanup_panel::{CleanupApplicationManager, CleanupPanel},
-    context_menu::ContextMenu,
-    context_popup::{ContextPopup, MouseEvent},
-    etomo_frame::ActionEvent,
-    multi_line_button::MultiLineButton,
-    process_dialog::{ProcessDialog, ProcessDialogApplicationManager},
-};
-use crate::imod::etomo::process_series::ProcessSeries;
-use crate::imod::etomo::r#type::{axis_id::AxisID, axis_type::AxisType, dialog_type::DialogType};
+use std::cell::OnceCell;
+use std::ops::Deref;
+use std::rc::{Rc, Weak};
 
-/// Source-visible state sent to Java `JLabel` at the Swing boundary.
-#[derive(Clone, Debug, PartialEq)]
-pub struct ArchiveInfoLabel {
-    pub text: String,
-    pub visible: bool,
-    pub alignment_x: f32,
+use super::beveled_border::BeveledBorder;
+use super::cleanup_panel::CleanupPanel;
+use super::context_menu::ContextMenu;
+use super::context_popup::{self, ContextPopup};
+use super::multi_line_button::MultiLineButton;
+use super::process_dialog::{ProcessDialog, ProcessDialogVirtual};
+use super::ui_harness;
+use crate::imod::etomo::application_manager::ApplicationManager;
+use crate::imod::etomo::base_manager::BaseManager;
+use crate::imod::etomo::jdk::{ActionEvent, ActionListener, JComponent, MouseEvent};
+use crate::imod::etomo::r#type::axis_id::AxisID;
+use crate::imod::etomo::r#type::axis_type::AxisType;
+use crate::imod::etomo::r#type::const_meta_data::ConstMetaData;
+use crate::imod::etomo::r#type::dialog_type::DialogType;
+
+/// Java public static final `rcsid`.
+pub const RCSID: &str = "$Id$";
+
+/// Java `public class CleanUpDialog extends ProcessDialog implements
+/// ContextMenu`.
+pub struct CleanUpDialog {
+    /// The `ProcessDialog` superclass.
+    base: Rc<ProcessDialog>,
+
+    /// Java private `cleanupPanel` (set by the constructor).
+    cleanup_panel: OnceCell<Rc<CleanupPanel>>,
+    /// Java private `btnArchiveStack = new MultiLineButton()`.
+    btn_archive_stack: Rc<MultiLineButton>,
+    /// Java private `archiveInfoA = new JLabel()`.
+    archive_info_a: Rc<JComponent>,
+    /// Java private `archiveInfoB = new JLabel()`.
+    archive_info_b: Rc<JComponent>,
+
+    /// Java private `axisType`.
+    axis_type: AxisType,
 }
 
-impl Default for ArchiveInfoLabel {
-    fn default() -> Self {
-        Self {
-            text: String::new(),
-            visible: true,
-            alignment_x: 0.5,
-        }
+impl Deref for CleanUpDialog {
+    type Target = ProcessDialog;
+    fn deref(&self) -> &ProcessDialog {
+        &self.base
     }
 }
 
-/// Direct `ApplicationManager` and `UIHarness.INSTANCE.pack` operations used by
-/// `CleanUpDialog`.  The concrete manager and GUI toolkit stay outside this unit.
-pub trait CleanUpDialogApplicationManager:
-    CleanupApplicationManager + ProcessDialogApplicationManager
-{
-    fn archive_info(&self, axis_id: AxisID) -> Option<String>;
-    fn done_clean_up(&mut self);
-    fn archive_original_stack(
-        &mut self,
-        process_series: Option<ProcessSeries>,
-        dialog_type: DialogType,
-    );
-    fn pack(&mut self, axis_id: AxisID);
-}
-
-/// Java `CleanUpDialog` fields and methods.  `process_dialog` is the direct
-/// superclass state; `root_border` records its `BeveledBorder` presentation
-/// boundary because `EtomoPanel` only has the narrower translated titled-border
-/// representation.
-pub struct CleanUpDialog<'a> {
-    pub process_dialog: ProcessDialog<'a>,
-    pub cleanup_panel: CleanupPanel,
-    pub btn_archive_stack: Option<MultiLineButton>,
-    pub archive_info_a: ArchiveInfoLabel,
-    pub archive_info_b: ArchiveInfoLabel,
-    pub axis_type: AxisType,
-    pub root_panel_box_layout_y_axis: bool,
-    pub root_border: BeveledBorder,
-    pub root_component_order: Vec<&'static str>,
-    pub advanced_button_visible: bool,
-    pub mouse_adapter_present: bool,
-    pub context_popup: Option<ContextPopup>,
-}
-
-impl<'a> CleanUpDialog<'a> {
-    /// Java `CleanUpDialog(ApplicationManager)`.
-    pub fn new<M: CleanUpDialogApplicationManager>(application_manager: &'a M) -> Self {
-        let axis_type = application_manager.axis_type();
-        let mut process_dialog = ProcessDialog::new(
-            application_manager,
+impl CleanUpDialog {
+    /// Java public constructor `CleanUpDialog(ApplicationManager)`.
+    pub fn new(app_mgr: &'static ApplicationManager) -> Rc<CleanUpDialog> {
+        // super(appMgr, AxisID.ONLY, DialogType.CLEAN_UP)
+        let base = ProcessDialog::new_application_manager_axis_id_dialog_type(
+            app_mgr,
             AxisID::Only,
             DialogType::CleanUp,
-            Box::new(|| {}),
         );
-        process_dialog.add_exit_buttons();
-        process_dialog.btn_execute.set_text("Done");
-        let mut btn_archive_stack = MultiLineButton::new();
-        let mut archive_info_b = ArchiveInfoLabel::default();
-        if axis_type == AxisType::DualAxis {
-            btn_archive_stack.set_text("Archive Original Stacks");
+        // Field initializers, then this.axisType =
+        // appMgr.getBaseMetaData().getAxisType() (the base meta data of an
+        // ApplicationManager is its MetaData).
+        let instance = Rc::new(CleanUpDialog {
+            base,
+            cleanup_panel: OnceCell::new(),
+            btn_archive_stack: MultiLineButton::new_void(),
+            archive_info_a: JComponent::new_label(""),
+            archive_info_b: JComponent::new_label(""),
+            axis_type: ConstMetaData::get_axis_type(app_mgr.get_meta_data()),
+        });
+        // Java `this` as the ProcessDialog subclass (for the virtual `done()`).
+        let this: Weak<dyn ProcessDialogVirtual> =
+            Rc::downgrade(&instance) as Weak<dyn ProcessDialogVirtual>;
+        instance.base.set_this(this);
+        // Constructor body.
+        // Swing layout: rootPanel.setLayout(new BoxLayout(rootPanel,
+        // BoxLayout.Y_AXIS)).
+        instance
+            .base
+            .root_panel
+            .set_border(&BeveledBorder::new(Some("Clean Up")).get_border());
+        // String stackFileName;  (unused)
+        // Add archive original stack button
+        if instance.axis_type == AxisType::DualAxis {
+            instance
+                .btn_archive_stack
+                .set_text(Some("Archive Original Stacks"));
         } else {
-            btn_archive_stack.set_text("Archive Original Stack");
-            archive_info_b.visible = false;
+            instance
+                .btn_archive_stack
+                .set_text(Some("Archive Original Stack"));
+            instance.archive_info_b.set_visible(false);
         }
-        btn_archive_stack.add_action_listener();
-        btn_archive_stack.set_alignment_x(0.5);
-        let mut dialog = Self {
-            process_dialog,
-            cleanup_panel: CleanupPanel::get_instance(application_manager),
-            btn_archive_stack: Some(btn_archive_stack),
-            archive_info_a: ArchiveInfoLabel::default(),
-            archive_info_b,
-            axis_type,
-            root_panel_box_layout_y_axis: true,
-            root_border: BeveledBorder::new("Clean Up"),
-            root_component_order: vec![
-                "archive-stack-button",
-                "archive-info-a",
-                "archive-info-b",
-                "cleanup-panel",
-                "exit-buttons",
-            ],
-            advanced_button_visible: false,
-            mouse_adapter_present: true,
-            context_popup: None,
-        };
-        dialog.set_archive_fields(application_manager);
-        dialog.process_dialog.btn_advanced.set_visible(false);
-        dialog.set_tool_tip_text();
-        dialog
+        instance.set_archive_fields();
+        // Java `new ButtonActionListener(this)`.
+        let adaptee = Rc::downgrade(&instance);
+        let listener: ActionListener = Rc::new(move |event: &ActionEvent| {
+            if let Some(adaptee) = adaptee.upgrade() {
+                adaptee.button_action(event);
+            }
+        });
+        instance.btn_archive_stack.add_action_listener(listener);
+        // Swing layout: btnArchiveStack, archiveInfoA and archiveInfoB
+        // setAlignmentX(Component.CENTER_ALIGNMENT).
+        let root_panel = instance.base.root_panel.get_component();
+        root_panel.add(&instance.btn_archive_stack.get_component());
+        root_panel.add(&instance.archive_info_a);
+        root_panel.add(&instance.archive_info_b);
+
+        let cleanup_panel = CleanupPanel::get_instance(instance.base.application_manager);
+        root_panel.add(&cleanup_panel.get_container());
+        let _ = instance.cleanup_panel.set(cleanup_panel);
+        instance.base.add_exit_buttons();
+        instance.base.btn_advanced.set_visible(false);
+        instance.base.btn_execute.set_text(Some("Done"));
+
+        // Mouse adapter for context menu
+        // Swing mouse: rootPanel.addMouseListener(new GenericMouseAdapter(this)).
+        // Mouse events are not modelled; the adapter's only effect is to call
+        // popUpContextMenu on a right-button press, which a driver calls
+        // directly.
+        instance.set_tool_tip_text();
+        instance
     }
 
-    /// Java `updateArchiveDisplay(boolean)`.
-    pub fn update_archive_display(&mut self, original_stacks_exist: bool) {
-        let Some(btn_archive_stack) = &mut self.btn_archive_stack else {
-            return;
-        };
-        btn_archive_stack.set_enabled(original_stacks_exist);
+    /// Java public final `updateArchiveDisplay(boolean)`.
+    pub fn update_archive_display(&self, original_stacks_exist: bool) {
+        // `if (btnArchiveStack == null) return;`: never null.
+        self.btn_archive_stack.set_enabled(original_stacks_exist);
     }
 
-    /// Java `setArchiveFields()`.
-    pub fn set_archive_fields<M: CleanUpDialogApplicationManager>(
-        &mut self,
-        application_manager: &M,
-    ) {
+    /// Java public `setArchiveFields()`.  Set the status of the archive
+    /// information labels.
+    pub fn set_archive_fields(&self) {
         let archive_info_text = "To restore original stack, run:  archiveorig -r ";
+        let mut stack_file_name: Option<String>;
+        // if archiveorig has been run, put information about restoring the
+        // originals on the screen.
         if self.axis_type == AxisType::DualAxis {
-            if let Some(stack_file_name) = application_manager.archive_info(AxisID::First) {
-                self.archive_info_a.text = format!("{archive_info_text}{stack_file_name}");
-                self.archive_info_a.visible = true;
+            stack_file_name = self
+                .base
+                .application_manager
+                .get_archive_info(AxisID::First);
+            if let Some(name) = &stack_file_name {
+                self.archive_info_a
+                    .set_text(&format!("{archive_info_text}{name}"));
+                self.archive_info_a.set_visible(true);
             } else {
-                self.archive_info_a.visible = false;
+                self.archive_info_a.set_visible(false);
             }
-            if let Some(stack_file_name) = application_manager.archive_info(AxisID::Second) {
-                self.archive_info_b.text = format!("{archive_info_text}{stack_file_name}");
-                self.archive_info_b.visible = true;
+            stack_file_name = self
+                .base
+                .application_manager
+                .get_archive_info(AxisID::Second);
+            if let Some(name) = &stack_file_name {
+                self.archive_info_b
+                    .set_text(&format!("{archive_info_text}{name}"));
+                self.archive_info_b.set_visible(true);
             } else {
-                self.archive_info_b.visible = false;
+                self.archive_info_b.set_visible(false);
             }
-        } else if let Some(stack_file_name) = application_manager.archive_info(AxisID::Only) {
-            self.archive_info_a.text =
-                format!("To restore original stack run:  archiveorig -r {stack_file_name}");
-            self.archive_info_a.visible = true;
         } else {
-            self.archive_info_a.visible = false;
+            stack_file_name = self.base.application_manager.get_archive_info(AxisID::Only);
+            if let Some(name) = &stack_file_name {
+                self.archive_info_a.set_text(&format!(
+                    "To restore original stack run:  archiveorig -r {name}"
+                ));
+                self.archive_info_a.set_visible(true);
+            } else {
+                self.archive_info_a.set_visible(false);
+            }
+        }
+        let _ = stack_file_name;
+    }
+
+    /// Java package-private `buttonAction(ActionEvent)`.
+    pub fn button_action(&self, event: &ActionEvent) {
+        let command = event.get_action_command();
+        // Java `command.equals(btnArchiveStack.getText())`.
+        if command.is_some() && command == self.btn_archive_stack.get_text().as_deref() {
+            self.base
+                .application_manager
+                .archive_original_stack_process_series_dialog_type(None, self.base.dialog_type);
         }
     }
 
-    /// Java `popUpContextMenu(MouseEvent)`.
-    pub fn pop_up_context_menu(&mut self, mouse_event: MouseEvent) {
-        self.context_popup = Some(ContextPopup::new_guide(
-            mouse_event,
-            Some("Cleaning Up"),
-            super::context_popup::TOMO_GUIDE,
-            self.process_dialog.axis_id,
+    /// Java private `setToolTipText()`.  Initialize the tooltip text.
+    fn set_tool_tip_text(&self) {
+        self.btn_archive_stack.set_tool_tip_text(Some(
+            "Run archiveorig.  Archiveorig creates a _xray.mrc.gz file, which contains the \
+             difference between the .mrc file and the _orig.mrc  file.  If archiveorig \
+             succeeds, then you can delete the _orig.mrc file.  To restore _orig.mrc, go to \
+             the directory containing the _xray.mrc.gz file and run \"archiveorig -r\" on the \
+             .mrc file.",
         ));
     }
+}
 
-    /// Java override `done()`.
-    pub fn done<M: CleanUpDialogApplicationManager>(&mut self, application_manager: &mut M) {
-        application_manager.done_clean_up();
-        self.process_dialog.set_displayed(false);
-        application_manager.pack(self.process_dialog.axis_id);
+impl ProcessDialogVirtual for CleanUpDialog {
+    fn process_dialog(&self) -> &ProcessDialog {
+        &self.base
     }
 
-    /// Java `buttonAction(ActionEvent)`.
-    pub fn button_action<M: CleanUpDialogApplicationManager>(
-        &mut self,
-        event: &ActionEvent,
-        application_manager: &mut M,
-    ) {
-        if self
-            .btn_archive_stack
-            .as_ref()
-            .and_then(MultiLineButton::get_text)
-            .is_some_and(|text| event.action_command == text)
-        {
-            application_manager.archive_original_stack(None, self.process_dialog.dialog_type);
-        }
-    }
-
-    /// Java private `setToolTipText()`.
-    pub fn set_tool_tip_text(&mut self) {
-        if let Some(btn_archive_stack) = &mut self.btn_archive_stack {
-            btn_archive_stack.set_tool_tip_text(Some(
-                "Run archiveorig.  Archiveorig creates a _xray.mrc.gz file, which contains the difference between the .mrc file and the _orig.mrc  file.  If archiveorig succeeds, then you can delete the _orig.mrc file.  To restore _orig.mrc, go to the directory containing the _xray.mrc.gz file and run \"archiveorig -r\" on the .mrc file.",
-            ));
-        }
+    /// Java package-private override `done()`.
+    fn done(&self) {
+        self.base.application_manager.done_clean_up();
+        self.base.set_displayed(false);
+        let manager: &'static dyn BaseManager = self.base.application_manager;
+        let axis_id = self.base.axis_id;
+        ui_harness::with(|harness| harness.pack_axis_id_base_manager(Some(axis_id), Some(manager)));
     }
 }
 
-impl ContextMenu for CleanUpDialog<'_> {
-    /// Java `ContextMenu.popUpContextMenu(MouseEvent)`.
-    fn pop_up_context_menu(&mut self, mouse_event: MouseEvent) {
-        CleanUpDialog::pop_up_context_menu(self, mouse_event);
-    }
-}
-
-/// Java private `ButtonActionListener`; frontend event delivery remains a GUI
-/// boundary and delegates only to `CleanUpDialog.buttonAction`.
-#[derive(Clone, Debug, Default, Eq, PartialEq)]
-pub struct ButtonActionListener;
-
-impl ButtonActionListener {
-    /// Java `ButtonActionListener(CleanUpDialog)`.
-    pub fn new() -> Self {
-        Self
-    }
-
-    /// Java `actionPerformed(ActionEvent)`.
-    pub fn action_performed<M: CleanUpDialogApplicationManager>(
-        &self,
-        adaptee: &mut CleanUpDialog<'_>,
-        event: &ActionEvent,
-        application_manager: &mut M,
-    ) {
-        adaptee.button_action(event, application_manager);
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use std::path::Path;
-    use std::sync::Mutex;
-    use std::sync::atomic::{AtomicUsize, Ordering};
-
-    use super::*;
-    use crate::imod::etomo::r#type::image_filename_style::ImageFilenameStyle;
-
-    struct Manager {
-        axis_type: AxisType,
-        archive: [Option<String>; 3],
-        // Atomics and `Mutex` rather than `Cell`/`RefCell`: `INSTANCES` below has to
-        // be a process-global root, and a `static` demands `Sync`.
-        done: AtomicUsize,
-        archive_calls: AtomicUsize,
-        packed: Mutex<Option<AxisID>>,
-        messages: Mutex<Vec<String>>,
-    }
-    impl ProcessDialogApplicationManager for Manager {
-        fn is_advanced(&self, _: DialogType, _: AxisID) -> bool {
-            false
-        }
-    }
-    impl CleanupApplicationManager for Manager {
-        fn property_user_dir(&self) -> &Path {
-            Path::new("/definitely-not-an-imod-dataset")
-        }
-        fn dataset_name(&self) -> &str {
-            "set"
-        }
-        fn image_filename_style(&self) -> ImageFilenameStyle {
-            ImageFilenameStyle::Mrc
-        }
-        fn axis_type(&self) -> AxisType {
-            self.axis_type
-        }
-        fn trim_vol_output_file_name(&self, _: AxisID) -> String {
-            "trim.mrc".into()
-        }
-        fn open_message_dialog(&mut self, message: String, _: &str, _: AxisID) {
-            self.messages.lock().unwrap().push(message);
-        }
-    }
-    impl CleanUpDialogApplicationManager for Manager {
-        fn archive_info(&self, axis_id: AxisID) -> Option<String> {
-            self.archive[axis_id as usize].clone()
-        }
-        fn done_clean_up(&mut self) {
-            self.done.fetch_add(1, Ordering::Relaxed);
-        }
-        fn archive_original_stack(&mut self, _: Option<ProcessSeries>, _: DialogType) {
-            self.archive_calls.fetch_add(1, Ordering::Relaxed);
-        }
-        fn pack(&mut self, axis_id: AxisID) {
-            *self.packed.lock().unwrap() = Some(axis_id);
-        }
-    }
-    /// Roots the leaked test managers so they stay reachable, the way
-    /// `EtomoDirector.managerList` roots the real ones.  A `thread_local!` will not
-    /// do: the test harness runs each test on its own thread and the TLS is
-    /// destroyed when that thread ends, which drops the root again.
-    static INSTANCES: std::sync::Mutex<Vec<&'static Manager>> = std::sync::Mutex::new(Vec::new());
-
-    fn leak_manager(manager: Manager) -> &'static Manager {
-        let manager: &'static Manager = Box::leak(Box::new(manager));
-        INSTANCES.lock().unwrap().push(manager);
-        manager
-    }
-
-    fn manager(axis_type: AxisType) -> Manager {
-        Manager {
-            axis_type,
-            archive: [None, Some("seta.st".into()), Some("setb.st".into())],
-            done: AtomicUsize::new(0),
-            archive_calls: AtomicUsize::new(0),
-            packed: Mutex::new(None),
-            messages: Mutex::new(Vec::new()),
-        }
-    }
-
-    #[test]
-    fn dual_axis_constructor_preserves_archive_labels_and_dialog_structure() {
-        let manager = manager(AxisType::DualAxis);
-        let dialog = CleanUpDialog::new(&manager);
-        assert_eq!(
-            dialog.btn_archive_stack.as_ref().unwrap().get_text(),
-            Some("Archive Original Stacks")
-        );
-        assert_eq!(
-            dialog.archive_info_a.text,
-            "To restore original stack, run:  archiveorig -r seta.st"
-        );
-        assert_eq!(
-            dialog.archive_info_b.text,
-            "To restore original stack, run:  archiveorig -r setb.st"
-        );
-        assert!(dialog.archive_info_a.visible && dialog.archive_info_b.visible);
-        assert!(!dialog.process_dialog.btn_advanced.expanded);
-        assert!(!dialog.advanced_button_visible);
-        assert!(!dialog.process_dialog.btn_advanced.get_component().visible);
-        assert_eq!(dialog.process_dialog.root_panel.children.len(), 3);
-        assert_eq!(
-            dialog
-                .process_dialog
-                .btn_execute
-                .multi_line_button
-                .get_text(),
-            Some("Done")
-        );
-        assert_eq!(dialog.root_border.get_border().title, "Clean Up");
-    }
-
-    #[test]
-    fn single_axis_source_wording_and_missing_archive_visibility_are_exact() {
-        let manager = manager(AxisType::SingleAxis);
-        let dialog = CleanUpDialog::new(&manager);
-        assert_eq!(
-            dialog.btn_archive_stack.as_ref().unwrap().get_text(),
-            Some("Archive Original Stack")
-        );
-        assert!(!dialog.archive_info_a.visible);
-        assert!(!dialog.archive_info_b.visible);
-    }
-
-    #[test]
-    fn archive_action_done_and_context_popup_follow_source_dispatch() {
-        let mut action_manager = manager(AxisType::SingleAxis);
-        let manager_ref: &'static Manager = leak_manager(manager(AxisType::SingleAxis));
-        let mut dialog = CleanUpDialog::new(manager_ref);
-        dialog.update_archive_display(false);
-        assert!(!dialog.btn_archive_stack.as_ref().unwrap().is_enabled());
-        dialog.button_action(
-            &ActionEvent::new("Archive Original Stack"),
-            &mut action_manager,
-        );
-        dialog.button_action(&ActionEvent::new("unrelated"), &mut action_manager);
-        assert_eq!(action_manager.archive_calls.load(Ordering::Relaxed), 1);
-        dialog.done(&mut action_manager);
-        assert_eq!(action_manager.done.load(Ordering::Relaxed), 1);
-        assert!(!dialog.process_dialog.is_displayed());
-        assert_eq!(*action_manager.packed.lock().unwrap(), Some(AxisID::Only));
-        dialog.pop_up_context_menu(MouseEvent {
-            x: 2,
-            y: 3,
-            right_mouse_button: false,
-        });
-        let popup = dialog.context_popup.unwrap();
-        assert_eq!(popup.anchor.as_deref(), Some("Cleaning Up"));
-        assert_eq!(
-            popup.guide_to_anchor.as_deref(),
-            Some(super::super::context_popup::TOMO_GUIDE)
-        );
-    }
-
-    #[test]
-    fn button_action_listener_delegates_the_archive_button_action() {
-        let mut action_manager = manager(AxisType::DualAxis);
-        let manager_ref: &'static Manager = leak_manager(manager(AxisType::DualAxis));
-        let mut dialog = CleanUpDialog::new(manager_ref);
-
-        ButtonActionListener::new().action_performed(
-            &mut dialog,
-            &ActionEvent::new("Archive Original Stacks"),
-            &mut action_manager,
-        );
-
-        assert_eq!(action_manager.archive_calls.load(Ordering::Relaxed), 1);
-    }
-
-    #[test]
-    fn context_menu_interface_forwards_the_exact_mouse_event() {
-        let manager_ref: &'static Manager = leak_manager(manager(AxisType::SingleAxis));
-        let mut dialog = CleanUpDialog::new(manager_ref);
-        let event = MouseEvent {
-            x: 13,
-            y: 17,
-            right_mouse_button: true,
-        };
-
-        ContextMenu::pop_up_context_menu(&mut dialog, event);
-
-        assert_eq!(dialog.context_popup.as_ref().unwrap().mouse_event, event);
+impl ContextMenu for CleanUpDialog {
+    /// Java public `popUpContextMenu(MouseEvent)`.  Right mouse button context
+    /// menu.
+    fn pop_up_context_menu(&self, mouse_event: &MouseEvent) {
+        let manager: &'static dyn BaseManager = self.base.application_manager;
+        let _context_popup =
+            ContextPopup::new_component_mouse_event_string_string_base_manager_axis_id(
+                &self.base.root_panel.get_component(),
+                mouse_event,
+                Some("Cleaning Up"),
+                Some(context_popup::TOMO_GUIDE),
+                manager,
+                self.base.axis_id,
+            );
     }
 }

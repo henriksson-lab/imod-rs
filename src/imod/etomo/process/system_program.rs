@@ -1,559 +1,901 @@
-//! Rust-native execution and line IPC for eTomo's `SystemProgram` family.
+//! `IMOD/Etomo/src/etomo/process/SystemProgram.java` and
+//! `IMOD/Etomo/src/etomo/process/BackgroundSystemProgram.java`.
 //!
-//! Java used a collection of `SystemProgram`, `InteractiveSystemProgram`, and
-//! reader threads.  This one owner keeps the same important contract: child
-//! standard input is a command channel and stdout/stderr are independently
-//! observable line streams.  Higher-level managers decide what each command
-//! means; this module never shell-interprets an argument.
-
-use std::ffi::OsString;
-use std::io::{self, BufRead, BufReader, Read, Write};
-use std::path::{Path, PathBuf};
-use std::process::{Child, ChildStdin, Command, ExitStatus, Stdio};
-use std::sync::mpsc::{self, Receiver, RecvTimeoutError};
-use std::time::Duration;
+//! SystemProgram provides a class to execute programs under the host
+//! operating system.  The class provides access to stdin, stdout and stderr
+//! streams and implements the Runnable interface so that it can be threaded.
+//!
+//! **Shape.**  The Java object is shared between the thread running `run`
+//! and the threads polling it (`ParsePID`, the process monitors, the
+//! manager), so every mutable field sits behind its own lock and every method
+//! takes `&self`; callers hold it in an `Arc`.  The two output buffers are
+//! `Arc<Mutex<OutputBufferManager>>`, the reader threads' shared lists.
+//!
+//! `BackgroundSystemProgram` overrides only `waitForProcess` and
+//! `getProcessExitValue`; it is the [`SystemProgram::background`]
+//! constructor, which records the `DetachedProcessMonitor` those overrides
+//! consult.
+//!
+//! **The `Runtime.exec` boundary.**  [`runtime_exec`] stands in for the JDK's
+//! `Runtime.getRuntime().exec(cmdarray, envp, dir)`, including its `PATH`
+//! lookup, and is where this crate's single `imod` binary replaces the
+//! per-program executables of an IMOD installation: a command array naming
+//! one of our commands (directly, as `$IMOD_DIR/bin/<name>`, or as
+//! `python [-u] <path>/<name>` for a translated Python script) runs our
+//! binary with `argv[0]` set to the command's link name, which is how the
+//! launcher dispatches (`CLAUDE.md`, "Source mirroring").  The `vmstopy`
+//! script that `ComScriptProcess` pipes into `python -u` runs through our
+//! command-file runner (`runcom -P -S`).  Everything else is started as the
+//! Java starts it.
 
 use super::output_buffer_manager::OutputBufferManager;
 use super::process_messages::ProcessMessages;
+use crate::imod::etomo::base_manager::BaseManager;
+use crate::imod::etomo::etomo_director;
+use crate::imod::etomo::r#type::axis_id::AxisID;
+use crate::imod::etomo::r#type::debug_level::DebugLevel;
+use crate::imod::etomo::r#type::etomo_number::EtomoNumber;
+use crate::imod::etomo::ui::swing::ui_harness;
+use crate::imod::etomo::util::utilities;
+use std::io::{BufRead, BufReader, Write};
+use std::path::{Path, PathBuf};
+use std::process::{Child, ChildStdin, Stdio};
+use std::sync::atomic::{AtomicBool, AtomicI32, Ordering};
+use std::sync::{Arc, Mutex, OnceLock};
+use std::time::SystemTime;
 
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub struct ProcessCommand {
-    pub program: OsString,
-    pub args: Vec<OsString>,
-    pub working_directory: Option<PathBuf>,
-    /// Lines supplied to a COM-style `-StandardInput` process after launch.
-    pub stdin: Vec<String>,
-    /// Java `acceptInputWhileRunning`.  Batch/COM children receive EOF after
-    /// their configured input; interactive children explicitly retain stdin.
-    pub accept_input_while_running: bool,
+/// What `BackgroundSystemProgram` consults in its two overrides; the
+/// `DetachedProcessMonitor` methods it calls.
+pub trait BackgroundWait: Send + Sync {
+    /// `DetachedProcessMonitor.isProcessRunning`.
+    fn is_process_running(&self) -> bool;
+    /// `ProcessMonitor.getProcessEndState` is `ProcessEndState.DONE`.
+    fn is_process_end_state_done(&self) -> bool;
 }
 
-impl ProcessCommand {
-    pub fn new(program: impl Into<OsString>) -> Self {
-        Self {
-            program: program.into(),
-            args: Vec::new(),
-            working_directory: None,
-            stdin: Vec::new(),
-            accept_input_while_running: false,
-        }
-    }
-    pub fn args<I, S>(mut self, args: I) -> Self
-    where
-        I: IntoIterator<Item = S>,
-        S: Into<OsString>,
-    {
-        self.args = args.into_iter().map(Into::into).collect();
-        self
-    }
-    pub fn current_dir(mut self, path: impl AsRef<Path>) -> Self {
-        self.working_directory = Some(path.as_ref().to_owned());
-        self
-    }
-    pub fn stdin_lines<I, S>(mut self, lines: I) -> Self
-    where
-        I: IntoIterator<Item = S>,
-        S: Into<String>,
-    {
-        self.stdin = lines.into_iter().map(Into::into).collect();
-        self
-    }
-    /// Java `setStdInput`, before this immutable launch description is spawned.
-    pub fn set_std_input<I, S>(&mut self, lines: I)
-    where
-        I: IntoIterator<Item = S>,
-        S: Into<String>,
-    {
-        self.stdin = lines.into_iter().map(Into::into).collect();
-    }
-    /// Java `getStdInput`.
-    pub fn get_std_input(&self) -> &[String] {
-        &self.stdin
-    }
-    /// Java `setWorkingDirectory`, before spawn.
-    pub fn set_working_directory(&mut self, path: impl AsRef<Path>) {
-        self.working_directory = Some(path.as_ref().to_owned());
-    }
-    pub fn keep_stdin_open(mut self) -> Self {
-        self.accept_input_while_running = true;
-        self
-    }
-    /// Java `changeParameter`; invalid indices leave the command untouched.
-    pub fn change_parameter(&mut self, parameter: impl Into<OsString>, index: usize) -> bool {
-        let Some(argument) = self.args.get_mut(index) else {
-            return false;
-        };
-        *argument = parameter.into();
-        true
-    }
-    pub fn command_line(&self) -> String {
-        std::iter::once(&self.program)
-            .chain(self.args.iter())
-            .map(|part| part.to_string_lossy())
-            .collect::<Vec<_>>()
-            .join(" ")
-    }
-}
-
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub enum ProcessStream {
-    Stdout,
-    Stderr,
-}
-
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub struct ProcessLine {
-    pub stream: ProcessStream,
-    pub line: String,
-}
-
-/// A running local process plus nonblocking output collection.
+/// Java `SystemProgram`.
 pub struct SystemProgram {
-    command: ProcessCommand,
-    child: Child,
-    stdin: Option<ChildStdin>,
-    lines: Receiver<ProcessLine>,
-    exit_status: Option<ExitStatus>,
-    stdout: Vec<String>,
-    stderr: Vec<String>,
-    /// Source `OutputBufferManager` ownership for monitors that consume a
-    /// stream independently of the durable transcript below.
-    stdout_buffer: OutputBufferManager,
-    stderr_buffer: OutputBufferManager,
-    collect_output: bool,
-    /// Java `SystemProgram.processMessages`: raw streams remain available,
-    /// while parsed error/warning/success state travels with the child.
-    process_messages: ProcessMessages,
+    property_user_dir: Option<String>,
+    manager: Option<&'static dyn BaseManager>,
+    command_array: Mutex<Option<Vec<String>>>,
+    axis_id: AxisID,
+    process_messages: Mutex<ProcessMessages>,
+    debug: Mutex<DebugLevel>,
+    exit_value: AtomicI32,
+    std_input: Mutex<Option<Vec<String>>>,
+    stdout: Mutex<Option<Arc<Mutex<OutputBufferManager>>>>,
+    stderr: Mutex<Option<Arc<Mutex<OutputBufferManager>>>>,
+    working_directory: Mutex<Option<PathBuf>>,
+    exception_message: Mutex<String>,
+    started: AtomicBool,
+    done: AtomicBool,
+    run_timestamp: Mutex<Option<SystemTime>>,
+    /// Java `cmdInputStream` / `cmdInBuffer`.
+    cmd_in_buffer: Mutex<Option<ChildStdin>>,
+    accept_input_while_running: AtomicBool,
+    command_line: Mutex<Option<String>>,
+    /// Java `process`: the child's id, which `destroy` signals.
+    process: Mutex<Option<u32>>,
+    collect_output: AtomicBool,
+    command_action: Mutex<Option<String>>,
+    /// `BackgroundSystemProgram.monitor`; `None` for a plain `SystemProgram`.
+    background_monitor: Option<Arc<dyn BackgroundWait>>,
 }
 
-fn collect_lines<R: Read + Send + 'static>(
-    reader: R,
-    stream: ProcessStream,
-    sender: mpsc::Sender<ProcessLine>,
-) {
-    std::thread::spawn(move || {
-        for line in BufReader::new(reader).lines() {
-            match line {
-                Ok(line) => {
-                    if sender
-                        .send(ProcessLine {
-                            stream: stream.clone(),
-                            line,
-                        })
-                        .is_err()
-                    {
-                        break;
-                    }
-                }
-                Err(_) => break,
+/// `SystemProgram(BaseManager, String, List<String>, AxisID)` and the other
+/// constructors differ only in which `ProcessMessages` factory they call.
+#[derive(Clone, Copy, Debug)]
+pub enum MessagesKind {
+    /// `ProcessMessages.getInstance(manager, axisID)`.
+    Instance,
+    /// `ProcessMessages.getInstance(manager, axisID, allowMultiLineLog)`.
+    InstanceAllowMultiLineLog(bool),
+    /// `ProcessMessages.getMultiLineInstance(manager, axisID)`.
+    MultiLine,
+    /// `ProcessMessages.getMultiLineInstance(manager, axisID, allowMultiLineLog)`.
+    MultiLineAllowMultiLineLog(bool),
+    /// `ProcessMessages.getMultiLineInstance(manager, axisID, multilineWarning,
+    /// multilineInfo, logInfoMessages)`.
+    MultiLineWarningInfo(bool, bool, bool),
+}
+
+impl MessagesKind {
+    fn build(self) -> ProcessMessages {
+        match self {
+            MessagesKind::Instance => ProcessMessages::get_instance(),
+            MessagesKind::InstanceAllowMultiLineLog(allow) => ProcessMessages::new(
+                false, false, None, None, false, false, false, None, None, false, allow, true,
+                false,
+            ),
+            MessagesKind::MultiLine => ProcessMessages::get_multi_line_instance(),
+            MessagesKind::MultiLineAllowMultiLineLog(allow) => ProcessMessages::new(
+                true, false, None, None, false, false, false, None, None, false, allow, true, false,
+            ),
+            MessagesKind::MultiLineWarningInfo(warning, info, log_info) => {
+                ProcessMessages::get_multi_line_instance_with_options(warning, info, log_info)
             }
         }
-    });
+    }
 }
 
 impl SystemProgram {
-    pub fn spawn(command: &ProcessCommand) -> io::Result<Self> {
-        let mut child_command = Command::new(&command.program);
-        child_command
-            .args(&command.args)
-            .stdin(Stdio::piped())
-            .stdout(Stdio::piped())
-            .stderr(Stdio::piped());
-        if let Some(path) = &command.working_directory {
-            child_command.current_dir(path);
+    /// The common body of every Java constructor.
+    pub fn new(
+        manager: Option<&'static dyn BaseManager>,
+        property_user_dir: Option<String>,
+        command_array: Option<Vec<String>>,
+        axis_id: AxisID,
+        messages: MessagesKind,
+    ) -> SystemProgram {
+        SystemProgram {
+            property_user_dir,
+            manager,
+            command_array: Mutex::new(command_array),
+            axis_id,
+            process_messages: Mutex::new(messages.build()),
+            debug: Mutex::new(etomo_director::ARGUMENTS.lock().unwrap().get_debug_level()),
+            exit_value: AtomicI32::new(i32::MIN),
+            std_input: Mutex::new(None),
+            stdout: Mutex::new(None),
+            stderr: Mutex::new(None),
+            working_directory: Mutex::new(None),
+            exception_message: Mutex::new(String::new()),
+            started: AtomicBool::new(false),
+            done: AtomicBool::new(false),
+            run_timestamp: Mutex::new(None),
+            cmd_in_buffer: Mutex::new(None),
+            accept_input_while_running: AtomicBool::new(false),
+            command_line: Mutex::new(None),
+            process: Mutex::new(None),
+            collect_output: AtomicBool::new(true),
+            command_action: Mutex::new(None),
+            background_monitor: None,
         }
-        let mut child = child_command.spawn()?;
-        let stdin = child.stdin.take();
-        let stdout = child.stdout.take();
-        let stderr = child.stderr.take();
-        let (sender, lines) = mpsc::channel();
-        if let Some(stdout) = stdout {
-            collect_lines(stdout, ProcessStream::Stdout, sender.clone());
-        }
-        if let Some(stderr) = stderr {
-            collect_lines(stderr, ProcessStream::Stderr, sender.clone());
-        }
-        drop(sender);
-        let mut program = Self {
-            command: command.clone(),
-            child,
-            stdin,
-            lines,
-            exit_status: None,
-            stdout: vec![],
-            stderr: vec![],
-            stdout_buffer: Self::new_output_buffer_manager(),
-            stderr_buffer: Self::new_error_buffer_manager(),
-            collect_output: true,
-            process_messages: ProcessMessages::get_instance(),
-        };
-        for line in &command.stdin {
-            program.send_line(line)?;
-        }
-        if !command.accept_input_while_running {
-            program.close_stdin();
-        }
-        Ok(program)
     }
 
-    /// Java static `getMultiLineInstance`: retain the normal child ownership
-    /// but use the parser configuration that joins multi-line process output.
-    pub fn get_multi_line_instance(command: &ProcessCommand) -> io::Result<Self> {
-        let mut program = Self::spawn(command)?;
-        program.process_messages = ProcessMessages::get_multi_line_instance();
-        Ok(program)
+    /// Java `SystemProgram(BaseManager, String, String[], AxisID)`.
+    pub fn new_array(
+        manager: Option<&'static dyn BaseManager>,
+        property_user_dir: Option<String>,
+        cmd_array: Option<Vec<String>>,
+        axis_id: AxisID,
+    ) -> SystemProgram {
+        SystemProgram::new(
+            manager,
+            property_user_dir,
+            cmd_array,
+            axis_id,
+            MessagesKind::Instance,
+        )
     }
 
-    /// Java private `newOutputBufferManager`.
-    fn new_output_buffer_manager() -> OutputBufferManager {
-        OutputBufferManager::new()
+    /// Java static `getMultiLineInstance(BaseManager, String, String[], AxisID)`:
+    /// `new SystemProgram(manager, propertyUserDir, cmdArray, axisID, true, false)`.
+    pub fn get_multi_line_instance(
+        manager: Option<&'static dyn BaseManager>,
+        property_user_dir: Option<String>,
+        cmd_array: Option<Vec<String>>,
+        axis_id: AxisID,
+    ) -> SystemProgram {
+        SystemProgram::new(
+            manager,
+            property_user_dir,
+            cmd_array,
+            axis_id,
+            MessagesKind::MultiLineAllowMultiLineLog(false),
+        )
     }
 
-    /// Java private `newErrorBufferManager`.
-    fn new_error_buffer_manager() -> OutputBufferManager {
-        OutputBufferManager::new()
+    /// Java `BackgroundSystemProgram(BaseManager, String[], DetachedProcessMonitor,
+    /// AxisID)`: `super(manager, manager.getPropertyUserDir(), command, axisID)`.
+    pub fn background(
+        manager: &'static dyn BaseManager,
+        command: Option<Vec<String>>,
+        monitor: Arc<dyn BackgroundWait>,
+        axis_id: AxisID,
+    ) -> SystemProgram {
+        let mut program = SystemProgram::new_array(
+            Some(manager),
+            manager.get_property_user_dir(),
+            command,
+            axis_id,
+        );
+        program.background_monitor = Some(monitor);
+        program
     }
 
-    pub fn pid(&self) -> u32 {
-        self.child.id()
-    }
-    pub fn command(&self) -> &ProcessCommand {
-        &self.command
-    }
-    pub fn get_working_directory(&self) -> Option<&Path> {
-        self.command.working_directory.as_deref()
-    }
-    /// The launch-time Java `getStdInput` value remains observable after the
-    /// child starts; live input is supplied through `send_line`.
-    pub fn get_std_input(&self) -> &[String] {
-        self.command.get_std_input()
-    }
-    pub fn get_command_line(&self) -> String {
-        self.command.command_line()
-    }
-    pub fn get_exit_value(&self) -> Option<i32> {
-        self.exit_status.and_then(|status| status.code())
-    }
-    pub fn is_started(&self) -> bool {
-        true
-    }
-    pub fn is_done(&self) -> bool {
-        self.exit_status.is_some()
-    }
-    pub fn send_line(&mut self, line: &str) -> io::Result<()> {
-        let stdin = self
-            .stdin
-            .as_mut()
-            .ok_or_else(|| io::Error::new(io::ErrorKind::BrokenPipe, "process stdin is closed"))?;
-        stdin.write_all(line.as_bytes())?;
-        stdin.write_all(b"\n")?;
-        stdin.flush()
-    }
-    /// Java `setStdInput(null)`: closing the pipe signals EOF to an interactive child.
-    pub fn close_stdin(&mut self) {
-        self.stdin = None;
-    }
-    pub fn drain_lines(&mut self) -> Vec<ProcessLine> {
-        let mut output: Vec<_> = self.lines.try_iter().collect();
-        // Once the child has exited, let the two short-lived reader threads
-        // flush their final partial lines instead of making callers race EOF.
-        if self.exit_status.is_some() {
-            loop {
-                match self.lines.recv_timeout(Duration::from_millis(20)) {
-                    Ok(line) => output.push(line),
-                    Err(RecvTimeoutError::Disconnected) | Err(RecvTimeoutError::Timeout) => break,
-                }
-            }
+    /// Java `changeParameter`.
+    pub fn change_parameter(&self, parameter: Option<&str>, index: i32) {
+        let mut command_array = self.command_array.lock().unwrap();
+        if let (Some(parameter), Some(command_array)) = (parameter, command_array.as_mut())
+            && index >= 0
+            && command_array.len() as i32 > index
+        {
+            command_array[index as usize] = parameter.to_owned();
+            *self.command_line.lock().unwrap() = None;
         }
-        for line in &output {
-            match &line.stream {
-                ProcessStream::Stdout => {
-                    self.stdout.push(line.line.clone());
-                    self.stdout_buffer.add(line.line.clone());
-                }
-                ProcessStream::Stderr => {
-                    self.stderr.push(line.line.clone());
-                    self.stderr_buffer.add(line.line.clone());
-                }
-            }
-            self.process_messages.add_process_output(&line.line);
-        }
-        output
     }
-    /// Java `getStdOutput`; callers may drain live messages and still retrieve
-    /// the complete process transcript after completion.
-    pub fn get_std_output(&self) -> &[String] {
-        &self.stdout
+
+    /// Java `setDebug`.
+    pub fn set_debug(&self, debug_level: DebugLevel) {
+        *self.debug.lock().unwrap() = debug_level;
     }
-    /// Java `getStdError`.
-    pub fn get_std_error(&self) -> &[String] {
-        &self.stderr
+
+    /// Java `setStdInput`.
+    pub fn set_std_input(&self, program_input: Option<Vec<String>>) {
+        *self.std_input.lock().unwrap() = program_input;
     }
-    /// Java `getStdOutputString`.
-    pub fn get_std_output_string(&self) -> String {
-        self.stdout.join("\n")
+
+    /// Java `getStdInput`.
+    pub fn get_std_input(&self) -> Option<Vec<String>> {
+        self.std_input.lock().unwrap().clone()
     }
-    /// Java `getStdErrorString`.
-    pub fn get_std_error_string(&self) -> String {
-        self.stderr.join("\n")
-    }
-    /// Output-buffer monitor registration for a source `SystemProgram`
-    /// stdout consumer.  The first caller receives output accumulated before
-    /// registration; later callers receive only subsequently drained lines.
-    pub fn get_std_output_for_listener(&mut self, listener_key: impl Into<String>) -> Vec<String> {
-        self.stdout_buffer.get_for_listener(listener_key)
-    }
-    /// Output-buffer monitor registration for stderr.
-    pub fn get_std_error_for_listener(&mut self, listener_key: impl Into<String>) -> Vec<String> {
-        self.stderr_buffer.get_for_listener(listener_key)
-    }
-    /// Java `OutputBufferManager.dropListener` for both owned streams.
-    pub fn drop_output_listener(&mut self, listener_key: &str) {
-        self.stdout_buffer.drop_listener(listener_key);
-        self.stderr_buffer.drop_listener(listener_key);
-    }
-    /// Intermittent monitors can consume and discard output without changing
-    /// the durable `getStdOutput`/`getStdError` transcript.
-    pub fn set_collect_stream_output(&mut self, collect_output: bool) {
-        self.collect_output = collect_output;
-        self.stdout_buffer.set_collect_output(collect_output);
-        self.stderr_buffer.set_collect_output(collect_output);
-    }
-    /// Java `setCollectOutput`.
-    pub fn set_collect_output(&mut self, collect_output: bool) {
-        self.set_collect_stream_output(collect_output);
-    }
+
     /// Java `clearStdError`.
-    pub fn clear_std_error(&mut self) {
-        self.stderr_buffer.clear();
+    pub fn clear_std_error(&self) {
+        if let Some(stderr) = self.stderr.lock().unwrap().as_ref() {
+            stderr.lock().unwrap().clear();
+        }
     }
-    /// Java `getProcessMessages`.
-    pub fn get_process_messages(&self) -> &ProcessMessages {
-        &self.process_messages
+
+    /// Java `getStdError(Object listenerKey)`.
+    pub fn get_std_error_listener(&self, listener_key: &str) -> Option<Vec<String>> {
+        let stderr = self.stderr.lock().unwrap().clone()?;
+        let lines = stderr.lock().unwrap().get_for_listener(listener_key);
+        Some(lines)
     }
-    pub fn get_process_messages_mut(&mut self) -> &mut ProcessMessages {
-        &mut self.process_messages
+
+    /// Java `getStdOutput(Object listenerKey)`.
+    pub fn get_std_output_listener(&self, listener_key: &str) -> Option<Vec<String>> {
+        let stdout = self.stdout.lock().unwrap().clone()?;
+        let lines = stdout.lock().unwrap().get_for_listener(listener_key);
+        Some(lines)
     }
-    /// Java `setMessagePrependTag`, forwarded to the child-owned parser before
-    /// future stream records are drained.
-    pub fn set_message_prepend_tag(&mut self, tag: Option<&str>) {
-        self.process_messages.set_message_prepend_tag(tag);
+
+    /// Java `dropStdOutputListener`.
+    pub fn drop_std_output_listener(&self, listener_key: &str) {
+        if let Some(stdout) = self.stdout.lock().unwrap().as_ref() {
+            stdout.lock().unwrap().drop_listener(listener_key);
+        }
     }
-    /// Java `setDebug`; stream collection remains deterministic, while parser
-    /// diagnostics gain the configured debug behavior.
-    pub fn set_debug(&mut self, debug: bool) {
-        self.process_messages.set_debug(debug);
-        self.stdout_buffer.set_debug(debug);
-        self.stderr_buffer.set_debug(debug);
+
+    /// Java `setCurrentStdInput`.
+    pub fn set_current_std_input(&self, input: &str) -> std::io::Result<()> {
+        let mut cmd_in_buffer = self.cmd_in_buffer.lock().unwrap();
+        if let Some(cmd_in_buffer) = cmd_in_buffer.as_mut() {
+            cmd_in_buffer.write_all(input.as_bytes())?;
+            cmd_in_buffer.write_all(b"\n")?;
+            cmd_in_buffer.flush()?;
+        }
+        Ok(())
     }
+
+    /// Java `setWorkingDirectory`.
+    pub fn set_working_directory(&self, working_directory: Option<PathBuf>) {
+        *self.working_directory.lock().unwrap() = working_directory;
+    }
+
+    /// Java `run`: execute the command.
+    pub fn run(&self) {
+        let debug = *self.debug.lock().unwrap();
+        let mut max_debug_print = 0;
+        if debug.is_on() {
+            max_debug_print = 5;
+            if debug.is_extra_verbose() {
+                max_debug_print = 1000;
+            } else if debug.is_verbose() {
+                max_debug_print = 15;
+            } else if debug.is_extra() {
+                max_debug_print = 10;
+            }
+        }
+        let command_array = self.command_array.lock().unwrap().clone();
+        let std_input = self.std_input.lock().unwrap().clone();
+        let mut print_command = false;
+        if let Some(command_array) = &command_array
+            && debug.is_on()
+            && !command_array.is_empty()
+            && (debug.is_verbose()
+                || (command_array[0] != "env"
+                    && command_array[0] != "ssh"
+                    && command_array[0] != "ps"))
+        {
+            print_command = true;
+            eprintln!();
+            for command in command_array {
+                eprintln!("  {command}");
+            }
+        }
+        self.started.store(true, Ordering::SeqCst);
+        if debug.is_on()
+            && let Some(working_directory) = self.working_directory.lock().unwrap().as_ref()
+        {
+            eprintln!(
+                "SystemProgram: working directory: {}",
+                utilities::java_io_file_get_absolute_path(&working_directory.to_string_lossy())
+            );
+        }
+        // Setup the Process object and run the command
+        *self.process.lock().unwrap() = None;
+        let result: std::io::Result<()> = (|| {
+            {
+                let mut working_directory = self.working_directory.lock().unwrap();
+                if working_directory.is_none()
+                    && let Some(property_user_dir) = &self.property_user_dir
+                    && !property_user_dir.chars().all(char::is_whitespace)
+                {
+                    *working_directory = Some(PathBuf::from(property_user_dir));
+                }
+            }
+            // timestamp
+            let mut timestamp_string = String::new();
+            let Some(command_array) = &command_array else {
+                self.exit_value.store(1204, Ordering::SeqCst); // bug# 1204
+                return Ok(());
+            };
+            for command in command_array.iter().take(2) {
+                timestamp_string.push_str(&format!("{command} "));
+            }
+            if print_command {
+                utilities::timestamp_command_status(
+                    Some(&timestamp_string),
+                    Some(utilities::STARTED_STATUS),
+                );
+            }
+            *self.run_timestamp.lock().unwrap() = Some(SystemTime::now());
+
+            *self.command_action.lock().unwrap() =
+                utilities::get_command_action_array(Some(command_array), std_input.as_deref());
+            let working_directory = self.working_directory.lock().unwrap().clone();
+            let mut process = runtime_exec(
+                command_array,
+                std_input.as_deref(),
+                working_directory.as_deref(),
+            )?;
+            *self.process.lock().unwrap() = Some(process.id());
+            std::thread::sleep(std::time::Duration::from_millis(100));
+            if debug.is_extra() {
+                eprintln!("returned, process started");
+            }
+            // Create a buffered writer to handle the stdin, stdout and stderr
+            // streams of the process
+            let mut cmd_in = process.stdin.take();
+
+            // Set up a reader thread to keep the stdout buffers of the process empty
+            let stdout = self.new_output_buffer_manager(debug);
+            *self.stdout.lock().unwrap() = Some(Arc::clone(&stdout));
+            let stdout_reader_thread = spawn_reader(process.stdout.take(), Arc::clone(&stdout));
+            // Set up a reader thread to keep the stdout buffers of the process empty
+            let stderr = self.new_output_buffer_manager(debug);
+            *self.stderr.lock().unwrap() = Some(Arc::clone(&stderr));
+            let stderr_reader_thread = spawn_reader(process.stderr.take(), Arc::clone(&stderr));
+
+            // Write out to the program's stdin pipe each line of the
+            // stdInput array if it is not null
+            if let (Some(std_input), Some(cmd_in)) = (&std_input, cmd_in.as_mut()) {
+                for line in std_input {
+                    let _ = cmd_in.write_all(line.as_bytes());
+                    let _ = cmd_in.write_all(b"\n");
+                    let _ = cmd_in.flush();
+                }
+            }
+            if !self.accept_input_while_running.load(Ordering::SeqCst) {
+                drop(cmd_in.take());
+            } else {
+                *self.cmd_in_buffer.lock().unwrap() = cmd_in.take();
+            }
+            if let Some(std_input) = &std_input
+                && !std_input.is_empty()
+                && debug.is_on()
+            {
+                eprintln!("SystemProgram stdin: {} line(s)", std_input.len());
+                for line in std_input.iter().take(max_debug_print) {
+                    eprintln!("{line}");
+                }
+                if max_debug_print > 0 && std_input.len() > max_debug_print {
+                    eprintln!("...");
+                }
+            }
+
+            // Wait for the process to exit
+            let command_action = self.command_action.lock().unwrap().clone();
+            if debug.is_verbose()
+                && let Some(command_action) = &command_action
+            {
+                eprint!("SystemProgram: {command_action}: Waiting for process to end...");
+            }
+            self.wait_for_process();
+            let status = process.wait();
+            if print_command {
+                utilities::timestamp_command_status(
+                    Some(&timestamp_string),
+                    Some(utilities::FINISHED_STATUS),
+                );
+            }
+            // Inform the output manager threads that the process is done
+            stdout.lock().unwrap().set_process_done(true);
+            stderr.lock().unwrap().set_process_done(true);
+
+            let exit_value = self.get_process_exit_value(status);
+            self.exit_value.store(exit_value, Ordering::SeqCst);
+            if exit_value == 0 {
+                if let Some(msg) = utilities::get_command_action_message(command_action.as_deref())
+                {
+                    eprintln!("{msg}");
+                }
+            } else if debug.is_on() {
+                eprintln!("SystemProgram exit value: {exit_value}");
+            }
+
+            // Wait for the manager threads to complete.  Java joins with a
+            // one-second limit; the readers end at the child's end of file.
+            let _ = stderr_reader_thread.map(|thread| thread.join());
+            let _ = stdout_reader_thread.map(|thread| thread.join());
+
+            let size = stdout.lock().unwrap().size();
+            if size > 0
+                && debug.is_verbose()
+                && let Some(command_action) = &command_action
+            {
+                eprintln!("\nSystemProgram: {command_action}: stdout: {size} line(s):");
+                let stdout = stdout.lock().unwrap();
+                for i in 0..size.min(max_debug_print) {
+                    eprintln!("{}", stdout.get_line(i).unwrap_or(""));
+                }
+                if max_debug_print > 0 && size > max_debug_print {
+                    eprintln!("...");
+                }
+                eprintln!();
+            }
+            let size = stderr.lock().unwrap().size();
+            if size > 0 {
+                let mut printed = false;
+                if debug.is_verbose()
+                    && let Some(command_action) = &command_action
+                {
+                    eprintln!("SystemProgram: {command_action}: stderr: {size} line(s):");
+                    printed = true;
+                    let stderr = stderr.lock().unwrap();
+                    for i in 0..size.min(max_debug_print) {
+                        eprintln!("{}", stderr.get_line(i).unwrap_or(""));
+                    }
+                    if max_debug_print > 0 && size > max_debug_print {
+                        eprintln!("...");
+                    }
+                }
+                if printed {
+                    eprintln!();
+                }
+            }
+            Ok(())
+        })();
+        if let Err(except) = result {
+            eprintln!("{}", self.get_command_line());
+            // Java's IOException message from `Runtime.exec`: `Cannot run program
+            // "<name>" (in directory "<dir>"): error=<errno>, <strerror>`.
+            let command_array = self.command_array.lock().unwrap().clone();
+            let program = command_array
+                .as_ref()
+                .and_then(|array| array.first().cloned())
+                .unwrap_or_default();
+            let exception_message = format!(
+                "Cannot run program \"{program}\": error={}, {}",
+                except.raw_os_error().unwrap_or(0),
+                except
+            );
+            eprintln!("{exception_message}");
+            *self.exception_message.lock().unwrap() = exception_message.clone();
+            let error_tag = "error=";
+            if exception_message.contains("Cannot run program \"tcsh\"") {
+                ui_harness::post_message_dialog(
+                    self.manager,
+                    exception_message.clone(),
+                    "System Error".to_owned(),
+                    None,
+                );
+            } else if exception_message.contains("Cannot run program \"python\"") {
+                ui_harness::post_message_dialog(
+                    self.manager,
+                    format!(
+                        "Unable to run python.  Please see the IMOD Users Guide.\n{exception_message}"
+                    ),
+                    "System Error".to_owned(),
+                    None,
+                );
+            } else if exception_message.contains("not found") {
+                // Unable to pop up an error message. This exception may cause
+                // dialog.setVisible to lock up.
+                eprintln!("ERROR: Unable to run command.\n{exception_message}");
+                self.exit_value.store(-3, Ordering::SeqCst);
+                self.done.store(true, Ordering::SeqCst);
+                return;
+            } else if exception_message.contains(error_tag) {
+                self.exit_value.store(1, Ordering::SeqCst);
+                // Get the error number from the exception message
+                let array: Vec<&str> = exception_message.split_whitespace().collect();
+                for word in array.iter().rev() {
+                    if word.contains(error_tag) {
+                        let error_array: Vec<&str> = word.split('=').map(str::trim).collect();
+                        if error_array.len() > 1 {
+                            let mut n = EtomoNumber::new();
+                            n.set_string(Some(error_array[1].trim_end_matches(',')));
+                            if n.is_valid() {
+                                self.exit_value.store(n.get_int(), Ordering::SeqCst);
+                            }
+                        }
+                    }
+                }
+                // Add extra documentation for too many open files (error 24).
+                ui_harness::post_message_dialog(
+                    self.manager,
+                    format!(
+                        "Unable to run command{}.\n{exception_message}",
+                        if exception_message.contains("Too many open files") {
+                            format!(":\n{}", self.get_command_line())
+                        } else {
+                            String::new()
+                        }
+                    ),
+                    "System Error".to_owned(),
+                    None,
+                );
+            }
+        }
+        {
+            let mut process_messages = self.process_messages.lock().unwrap();
+            if let Some(stdout) = self.stdout.lock().unwrap().as_ref() {
+                process_messages.add_process_output_lines(None, stdout.lock().unwrap().get_lines());
+            }
+            if let Some(stderr) = self.stderr.lock().unwrap().as_ref() {
+                process_messages.add_process_output_lines(None, stderr.lock().unwrap().get_lines());
+            }
+            if !debug.is_on() {
+                process_messages.print_all();
+            }
+        }
+        // close standard input if it wasn't closed before
+        if self.accept_input_while_running.load(Ordering::SeqCst) {
+            drop(self.cmd_in_buffer.lock().unwrap().take());
+        }
+        // Set the done flag for the thread
+        self.done.store(true, Ordering::SeqCst);
+    }
+
+    /// Java `destroy`: `Process.destroy()` sends `SIGTERM`.
+    pub fn destroy(&self) {
+        let Some(pid) = *self.process.lock().unwrap() else {
+            return;
+        };
+        // SAFETY: signalling a child this program started.
+        unsafe {
+            libc::kill(pid as libc::pid_t, libc::SIGTERM);
+        }
+    }
+
+    /// Java private `newOutputBufferManager` / `newErrorBufferManager`.
+    fn new_output_buffer_manager(&self, debug: DebugLevel) -> Arc<Mutex<OutputBufferManager>> {
+        let mut buffer_manager = OutputBufferManager::new();
+        buffer_manager.set_debug(debug.is_extra_verbose());
+        buffer_manager.set_collect_output(self.collect_output.load(Ordering::SeqCst));
+        Arc::new(Mutex::new(buffer_manager))
+    }
+
+    /// Java `setCollectOutput`.
+    pub fn set_collect_output(&self, input: bool) {
+        self.collect_output.store(input, Ordering::SeqCst);
+    }
+
+    /// Java `waitForProcess`: empty in `SystemProgram`; `BackgroundSystemProgram`
+    /// uses the process monitor to wait for a background process to finish.
+    fn wait_for_process(&self) {
+        if let Some(monitor) = &self.background_monitor {
+            // wait until process is finished
+            while monitor.is_process_running() {
+                std::thread::sleep(std::time::Duration::from_millis(100));
+            }
+        }
+    }
+
+    /// Java `getProcessExitValue`.
+    fn get_process_exit_value(&self, status: std::io::Result<std::process::ExitStatus>) -> i32 {
+        if let Some(monitor) = &self.background_monitor {
+            if monitor.is_process_running() {
+                panic!("getExitValue() called while process is running.");
+            }
+            if monitor.is_process_end_state_done() {
+                return 0;
+            }
+            return 1;
+        }
+        // `Process.exitValue()`: a child killed by a signal reports 128 + signal.
+        match status {
+            Ok(status) => status.code().unwrap_or_else(|| {
+                128 + std::os::unix::process::ExitStatusExt::signal(&status).unwrap_or(0)
+            }),
+            Err(_) => 1,
+        }
+    }
+
+    /// Java `getStdOutput()`.
+    pub fn get_std_output(&self) -> Option<Vec<String>> {
+        let stdout = self.stdout.lock().unwrap().clone()?;
+        let lines = stdout.lock().unwrap().get();
+        Some(lines)
+    }
+
+    /// Java `getStdError()`.
+    pub fn get_std_error(&self) -> Option<Vec<String>> {
+        let stderr = self.stderr.lock().unwrap().clone()?;
+        let lines = stderr.lock().unwrap().get();
+        Some(lines)
+    }
+
     /// Java `printStdError`.
     pub fn print_std_error(&self) {
         eprintln!("stderr:");
-        for line in &self.stderr {
-            eprintln!("{line}");
+        if let Some(stderr) = self.stderr.lock().unwrap().as_ref() {
+            stderr.lock().unwrap().print_to_err();
         }
     }
+
     /// Java `printStdOutput`.
     pub fn print_std_output(&self) {
         eprintln!("stdout:");
-        for line in &self.stdout {
-            eprintln!("{line}");
+        if let Some(stdout) = self.stdout.lock().unwrap().as_ref() {
+            stdout.lock().unwrap().print_to_err();
         }
     }
-    pub fn try_wait(&mut self) -> io::Result<Option<ExitStatus>> {
-        if let Some(status) = self.exit_status {
-            return Ok(Some(status));
+
+    /// Java `getStdErrorString`.
+    pub fn get_std_error_string(&self) -> Option<String> {
+        let std_error_array = self.get_std_error()?;
+        if std_error_array.is_empty() {
+            return None;
         }
-        if let Some(status) = self.child.try_wait()? {
-            self.exit_status = Some(status);
+        let mut builder = String::new();
+        for line in std_error_array {
+            builder.push_str(&(line + "\n"));
         }
-        Ok(self.exit_status)
+        Some(builder)
     }
-    pub fn wait(&mut self) -> io::Result<ExitStatus> {
-        if let Some(status) = self.exit_status {
-            return Ok(status);
+
+    /// Java `getStdOutputString`.
+    pub fn get_std_output_string(&self) -> Option<String> {
+        let array = self.get_std_output()?;
+        if array.is_empty() {
+            return None;
         }
-        let status = self.child.wait()?;
-        self.exit_status = Some(status);
-        Ok(status)
+        let mut builder = String::new();
+        for line in array {
+            builder.push_str(&(line + "\n"));
+        }
+        Some(builder)
     }
-    /// Wait and atomically collect the final stream records.  This is the
-    /// convenient terminal operation for managers that do not consume live
-    /// output, while [`Self::wait`] retains its existing explicit-drain
-    /// contract for interactive callers.
-    pub fn wait_and_drain(&mut self) -> io::Result<(ExitStatus, Vec<ProcessLine>)> {
-        let status = self.wait()?;
-        let lines = self.drain_lines();
-        Ok((status, lines))
+
+    /// Java `getWorkingDirectory`.
+    pub fn get_working_directory(&self) -> Option<String> {
+        match self.working_directory.lock().unwrap().as_ref() {
+            None => self.property_user_dir.clone(),
+            Some(working_directory) => Some(working_directory.to_string_lossy().into_owned()),
+        }
     }
-    pub fn kill(&mut self) -> io::Result<()> {
-        self.child.kill()
+
+    /// Java `getExitValue`.
+    pub fn get_exit_value(&self) -> i32 {
+        self.exit_value.load(Ordering::SeqCst)
     }
-    /// Send the POSIX stop signal used by eTomo's pausable local-process path.
-    /// Windows has no source-equivalent signal operation, so it reports that
-    /// the operation is unsupported instead of pretending the child paused.
-    pub fn pause(&mut self) -> io::Result<()> {
-        #[cfg(unix)]
-        unsafe {
-            if libc::kill(self.child.id() as i32, libc::SIGSTOP) == 0 {
-                Ok(())
-            } else {
-                Err(io::Error::last_os_error())
+
+    /// Java `setExitValue`.
+    pub fn set_exit_value(&self, value: i32) {
+        self.exit_value.store(value, Ordering::SeqCst);
+    }
+
+    /// Java `getCommandLine`.
+    pub fn get_command_line(&self) -> String {
+        let mut command_line = self.command_line.lock().unwrap();
+        if command_line.is_none() {
+            let mut buffer = String::new();
+            if let Some(command_array) = self.command_array.lock().unwrap().as_ref() {
+                for command in command_array {
+                    buffer.push_str(&format!("{command} "));
+                }
             }
+            *command_line = Some(buffer);
         }
-        #[cfg(not(unix))]
-        {
-            Err(io::Error::new(
-                io::ErrorKind::Unsupported,
-                "pausing a child process is unavailable on this platform",
-            ))
+        command_line.clone().unwrap()
+    }
+
+    /// Java `getCommandAction`.
+    pub fn get_command_action(&self) -> String {
+        match self.command_action.lock().unwrap().clone() {
+            None => self.get_command_line(),
+            Some(command_action) => command_action,
         }
     }
-    /// Resume a child previously paused by [`Self::pause`].
-    pub fn resume(&mut self) -> io::Result<()> {
-        #[cfg(unix)]
-        unsafe {
-            if libc::kill(self.child.id() as i32, libc::SIGCONT) == 0 {
-                Ok(())
-            } else {
-                Err(io::Error::last_os_error())
-            }
-        }
-        #[cfg(not(unix))]
-        {
-            Err(io::Error::new(
-                io::ErrorKind::Unsupported,
-                "resuming a child process is unavailable on this platform",
-            ))
-        }
+
+    /// Java `getAxisID`.
+    pub fn get_axis_id(&self) -> AxisID {
+        self.axis_id
+    }
+
+    /// Java `setMessagePrependTag`.
+    pub fn set_message_prepend_tag(&self, tag: Option<&str>) {
+        self.process_messages
+            .lock()
+            .unwrap()
+            .set_message_prepend_tag(tag);
+    }
+
+    /// Java `isStarted`.
+    pub fn is_started(&self) -> bool {
+        self.started.load(Ordering::SeqCst)
+    }
+
+    /// Java `isDone`.
+    pub fn is_done(&self) -> bool {
+        self.done.load(Ordering::SeqCst)
+    }
+
+    /// Java `getRunTimestamp`.
+    pub fn get_run_timestamp(&self) -> Option<SystemTime> {
+        *self.run_timestamp.lock().unwrap()
+    }
+
+    /// Java `getProcessMessages`.
+    pub fn get_process_messages(&self) -> std::sync::MutexGuard<'_, ProcessMessages> {
+        self.process_messages.lock().unwrap()
+    }
+
+    /// Java `setAcceptInputWhileRunning`.
+    pub fn set_accept_input_while_running(&self, accept_input_while_running: bool) {
+        self.accept_input_while_running
+            .store(accept_input_while_running, Ordering::SeqCst);
+    }
+
+    /// The command array (read by `BackgroundProcess` and the tests).
+    pub fn get_command_array(&self) -> Option<Vec<String>> {
+        self.command_array.lock().unwrap().clone()
     }
 }
 
-#[cfg(test)]
-mod tests {
-    use super::*;
-    #[test]
-    fn runs_without_a_shell_and_collects_both_streams() {
-        let command = ProcessCommand::new("sh").args(["-c", "printf out; printf err >&2"]);
-        let mut program = SystemProgram::spawn(&command).unwrap();
-        assert!(program.wait().unwrap().success());
-        let lines = program.drain_lines();
-        assert!(
-            lines
-                .iter()
-                .any(|line| line.stream == ProcessStream::Stdout && line.line == "out")
-        );
-        assert!(
-            lines
-                .iter()
-                .any(|line| line.stream == ProcessStream::Stderr && line.line == "err")
-        );
-        assert_eq!(program.get_std_output(), ["out"]);
-        assert_eq!(program.get_std_error_string(), "err");
-    }
+/// The reader thread of `OutputBufferManager.run`: add every line of the
+/// stream until end of file.
+fn spawn_reader<R: std::io::Read + Send + 'static>(
+    reader: Option<R>,
+    buffer: Arc<Mutex<OutputBufferManager>>,
+) -> Option<std::thread::JoinHandle<()>> {
+    let reader = reader?;
+    Some(std::thread::spawn(move || {
+        let mut reader = BufReader::new(reader);
+        let mut line = Vec::new();
+        loop {
+            line.clear();
+            match reader.read_until(b'\n', &mut line) {
+                Ok(0) | Err(_) => break,
+                Ok(_) => {
+                    // `BufferedReader.readLine` strips "\n", "\r\n" or "\r".
+                    if line.last() == Some(&b'\n') {
+                        line.pop();
+                    }
+                    if line.last() == Some(&b'\r') {
+                        line.pop();
+                    }
+                    buffer
+                        .lock()
+                        .unwrap()
+                        .add(String::from_utf8_lossy(&line).into_owned());
+                }
+            }
+        }
+    }))
+}
 
-    #[test]
-    fn batch_commands_close_stdin_but_interactive_commands_keep_it() {
-        let batch = ProcessCommand::new("sh").args(["-c", "read value || printf eof"]);
-        let mut program = SystemProgram::spawn(&batch).unwrap();
-        assert!(program.wait().unwrap().success());
-        program.drain_lines();
-        assert_eq!(program.get_std_output(), ["eof"]);
+/// The `imod` binary that runs our commands.  Defaults to this process's own
+/// executable when that is the `imod` launcher; the tests name the built
+/// binary with [`set_imod_executable`].
+static IMOD_EXECUTABLE: OnceLock<Option<PathBuf>> = OnceLock::new();
 
-        let interactive = ProcessCommand::new("sh")
-            .args(["-c", "read value; printf '%s' \"$value\""])
-            .keep_stdin_open();
-        let mut program = SystemProgram::spawn(&interactive).unwrap();
-        assert!(program.is_started());
-        assert!(!program.is_done());
-        program.send_line("live input").unwrap();
-        program.close_stdin();
-        assert!(program.wait().unwrap().success());
-        program.drain_lines();
-        assert_eq!(program.get_std_output(), ["live input"]);
-    }
+/// Names the `imod` binary [`runtime_exec`] runs our commands with.  Only the
+/// first call has an effect.
+pub fn set_imod_executable(path: PathBuf) {
+    let _ = IMOD_EXECUTABLE.set(Some(path));
+}
 
-    #[test]
-    fn command_metadata_is_mutable_and_observable() {
-        let mut command = ProcessCommand::new("echo").args(["old"]);
-        let working_directory = std::env::temp_dir();
-        assert!(command.change_parameter("new", 0));
-        assert!(!command.change_parameter("ignored", 2));
-        command.set_std_input(["first", "second"]);
-        command.set_working_directory(&working_directory);
-        assert_eq!(command.command_line(), "echo new");
-        assert_eq!(command.get_std_input(), ["first", "second"]);
-        let mut program = SystemProgram::spawn(&command).unwrap();
-        assert_eq!(program.get_command_line(), "echo new");
-        assert_eq!(program.get_std_input(), ["first", "second"]);
-        assert_eq!(
-            program.get_working_directory(),
-            Some(working_directory.as_path())
-        );
-        assert_eq!(program.get_exit_value(), None);
-        assert!(program.wait().unwrap().success());
-        assert_eq!(program.get_exit_value(), Some(0));
-    }
+/// Our `imod` binary, when this process is it.
+pub(crate) fn imod_executable() -> Option<&'static Path> {
+    IMOD_EXECUTABLE
+        .get_or_init(|| {
+            std::env::current_exe()
+                .ok()
+                .filter(|exe| exe.file_name().is_some_and(|base| base == "imod"))
+        })
+        .as_deref()
+}
 
-    #[test]
-    fn wait_and_drain_collects_complete_output() {
-        let command = ProcessCommand::new("sh").args(["-c", "printf out; printf err >&2"]);
-        let mut program = SystemProgram::spawn(&command).unwrap();
-        let (status, lines) = program.wait_and_drain().unwrap();
-        assert!(status.success());
-        assert_eq!(lines.len(), 2);
-        assert_eq!(program.get_std_output(), ["out"]);
-        assert_eq!(program.get_std_error(), ["err"]);
+/// The command array `runtime_exec` actually starts: our `imod` binary with
+/// `argv[0]` naming the command, or the array as given.  See the module
+/// comment.  Returns `(program, argv0, arguments)`.
+pub fn resolve_command_array(
+    command_array: &[String],
+    std_input: Option<&[String]>,
+) -> (PathBuf, Option<PathBuf>, Vec<String>) {
+    let unchanged = || {
+        (
+            PathBuf::from(&command_array[0]),
+            None,
+            command_array[1..].to_vec(),
+        )
+    };
+    let Some(imod) = imod_executable() else {
+        return unchanged();
+    };
+    let own = |name: &str, rest: &[String]| {
+        (
+            imod.to_path_buf(),
+            Some(imod.with_file_name(name)),
+            rest.to_vec(),
+        )
+    };
+    let is_ours = |path: &str| -> Option<String> {
+        let name = Path::new(path).file_name()?.to_str()?.to_owned();
+        let in_bin = !path.contains('/')
+            || std::env::var_os("IMOD_DIR")
+                .is_some_and(|dir| Path::new(path).parent() == Some(&Path::new(&dir).join("bin")));
+        (in_bin && crate::imod::commands::find(&name).is_some()).then_some(name)
+    };
+    let first = command_array[0].as_str();
+    if first == "python" || first == "python3" {
+        let mut index = 1;
+        if command_array.get(index).is_some_and(|arg| arg == "-u") {
+            index += 1;
+        }
+        match command_array.get(index) {
+            // `python -u` reading the script `vmstopy` wrote on its standard
+            // input (`ComScriptProcess.execPython`)
+            None if std_input
+                .and_then(|input| input.first())
+                .is_some_and(|line| line.starts_with("#!/usr/bin/env python")) =>
+            {
+                return own("runcom", &["-P".to_owned(), "-S".to_owned()]);
+            }
+            Some(script) => {
+                if let Some(name) = Path::new(script).file_name().and_then(|n| n.to_str())
+                    && crate::imod::commands::find(name).is_some()
+                {
+                    return own(name, &command_array[index + 1..]);
+                }
+            }
+            None => {}
+        }
+        return unchanged();
     }
+    if let Some(name) = is_ours(first) {
+        return own(&name, &command_array[1..]);
+    }
+    unchanged()
+}
 
-    #[test]
-    fn live_streams_share_the_source_output_buffer_listener_contract() {
-        let command = ProcessCommand::new("sh").args(["-c", "printf one; printf two >&2"]);
-        let mut program = SystemProgram::spawn(&command).unwrap();
-        program.wait_and_drain().unwrap();
-        assert_eq!(program.get_std_output_for_listener("primary"), ["one"]);
-        assert_eq!(program.get_std_error_for_listener("primary"), ["two"]);
-        assert!(program.get_std_output_for_listener("secondary").is_empty());
-        assert_eq!(program.get_std_output(), ["one"]);
-        assert_eq!(program.get_std_error(), ["two"]);
+/// `Runtime.getRuntime().exec(cmdarray, null, dir)`; see the module comment.
+pub fn runtime_exec(
+    command_array: &[String],
+    std_input: Option<&[String]>,
+    working_directory: Option<&Path>,
+) -> std::io::Result<Child> {
+    if command_array.is_empty() {
+        return Err(std::io::Error::other("Empty command"));
     }
-
-    #[test]
-    fn drained_child_streams_feed_typed_process_messages() {
-        let command = ProcessCommand::new("sh").args([
-            "-c",
-            "printf 'WARNING: recoverable\\n'; printf 'ERROR: failed\\n' >&2",
-        ]);
-        let mut program = SystemProgram::spawn(&command).unwrap();
-        program.wait_and_drain().unwrap();
-        assert_eq!(
-            program
-                .get_process_messages()
-                .get(super::super::process_messages::MessageType::Warning, 0),
-            Some("WARNING: recoverable")
-        );
-        assert_eq!(
-            program
-                .get_process_messages()
-                .get(super::super::process_messages::MessageType::Error, 0),
-            Some("ERROR: failed")
-        );
+    let (program, argv0, arguments) = resolve_command_array(command_array, std_input);
+    let mut process = std::process::Command::new(&program);
+    if let Some(argv0) = argv0 {
+        std::os::unix::process::CommandExt::arg0(&mut process, argv0);
     }
-
-    #[test]
-    fn child_parser_honors_configured_prepend_tag() {
-        let command = ProcessCommand::new("sh").args([
-            "-c",
-            "printf 'context: section 8\\nWARNING: missing data\\n'",
-        ]);
-        let mut program = SystemProgram::spawn(&command).unwrap();
-        program.set_message_prepend_tag(Some("context:"));
-        program.wait_and_drain().unwrap();
-        assert_eq!(
-            program
-                .get_process_messages()
-                .get(super::super::process_messages::MessageType::Warning, 0),
-            Some("context: section 8\nWARNING: missing data")
-        );
+    process
+        .args(arguments)
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped());
+    if let Some(working_directory) = working_directory {
+        process.current_dir(working_directory);
     }
+    process.spawn()
 }

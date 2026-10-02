@@ -1,13 +1,14 @@
 //! Translation of `IMOD/raptor/suitesparse/cs_dropzeros.c`.
-use super::Cs;
+
+use super::cs::Cs;
 use super::cs_fkeep::cs_fkeep;
 
-/// C static `cs_nonzero`.
-fn cs_nonzero(_i: usize, _j: usize, aij: f64) -> bool {
-    aij != 0.0
+/// `cs_nonzero(i, j, aij, other)` (static).
+fn cs_nonzero(_i: i32, _j: i32, aij: f64) -> i32 {
+    (aij != 0.0) as i32
 }
 
-/// C `cs_dropzeros`: retains all nonzero CSC entries.
-pub fn cs_dropzeros(matrix: &mut Cs) -> Option<usize> {
-    cs_fkeep(matrix, cs_nonzero)
+/// `cs_dropzeros(A)`: keep all nonzero entries.
+pub fn cs_dropzeros(a: &mut Cs) -> i32 {
+    cs_fkeep(a, &cs_nonzero)
 }

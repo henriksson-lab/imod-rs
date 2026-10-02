@@ -135,6 +135,18 @@ pub const FLG_CN_MASKING_LABEL: &str = "Masking during c<N> averaging";
 /// Java `USER_COMMANDS_LABEL`.
 pub const USER_COMMANDS_LABEL: &str = "User commands ";
 
-// TODO(unit): needs etomo/storage/CpuAdoc.java - `PARALLEL_PROCESSING_REQUIRED_MESSAGE`
-// concatenates `CpuAdoc.FILE_NAME` and `CpuAdoc.MAN_PAGE` around
-// `ProcessName.MAN.toString()`, and those two constants have no module yet.
+/// Java `PARALLEL_PROCESSING_REQUIRED_MESSAGE`.  It concatenates `CpuAdoc.FILE_NAME`,
+/// `ProcessName.MAN.toString()` and `CpuAdoc.MAN_PAGE`, which are computed, so it is a
+/// lazily built `String` rather than a `const`.
+pub static PARALLEL_PROCESSING_REQUIRED_MESSAGE: std::sync::LazyLock<String> =
+    std::sync::LazyLock::new(|| {
+        "This process can only be run with parallel processing.  Please enable parallel "
+            .to_string()
+            + "processing in the Settings dialog, or create a "
+            + crate::imod::etomo::storage::cpu_adoc::FILE_NAME.as_str()
+            + " file in the calibration directory.\nFor more information, run the following "
+            + "from the command line: "
+            + &crate::imod::etomo::r#type::process_name::ProcessName::MAN.to_string()
+            + " "
+            + crate::imod::etomo::storage::cpu_adoc::MAN_PAGE.as_str()
+    });

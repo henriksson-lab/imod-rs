@@ -30,6 +30,15 @@
 //! reference solution by `1e-11` relative is still invisible in every native
 //! output; `1e-9` is the first level that shows.  So the tolerance is a margin,
 //! not a mask: any difference that reaches it is a defect to investigate.
+//!
+//! `pt6_trackgroup_cv` is the regression case for `BUGS.md`, "`tiltalign`: the
+//! track-group median counts tracks it did not collect": a 31-contour patch
+//! tracking model with `WeightWholeTracks`, robust fitting and
+//! cross-validation, where a leave-out run leaves out every projection of a
+//! short track.  Its golden is not stock native (which reads stale values
+//! there and prints different robust leave-out errors) but the reference
+//! `tiltalign.cpp` rebuilt with only that fix (`fixtures/make-tiltalign-goldens.sh`,
+//! `FIXED_CASES`); our output is byte-identical to it, stdout and every file.
 
 mod common;
 

@@ -316,40 +316,124 @@ impl Variable {
         )
     }
 
-    /// Java `toFormattedString(Number)`.  Rust formatting supplies the same
-    /// fixed-width DecimalFormat patterns; the explicit half-up helper avoids
-    /// the platform's default tie-breaking rule.
-    pub fn to_formatted_string(&self, value: Option<f64>) -> Option<String> {
-        let value = value?;
-        if !self.is_numeric() || self.pad_to.is_none_or(|pad| pad < 1) {
-            return Some(value.to_string());
+    /// Java private `toFormattedString(Number)`.  `number` is Java's
+    /// `number.toString()` (the callers hold the `Number` as that string).  Uses
+    /// this variable's fieldType to convert the number to a string.  If the
+    /// number is floating point, then it will be rounded if fieldType is an
+    /// integer or its precision exceeds the format precision as specified by
+    /// padTo.
+    pub fn to_formatted_string(&self, number: Option<&str>) -> Option<String> {
+        let string = number?;
+        if (self.validation_type != ValidationType::Integer
+            && self.validation_type != ValidationType::FloatingPoint)
+            || self.pad_to.is_none_or(|pad_to| pad_to < 1)
+        {
+            return Some(string.to_owned());
         }
         if !self.round {
-            return Some(value.to_string());
+            // pad to 0.0 without rounding.
+            let formatted_float = crate::imod::etomo::logic::converter::to_double(Some(string));
+            return match formatted_float {
+                None => Some(string.to_owned()),
+                Some(formatted_float) => Some(
+                    crate::imod::etomo::r#type::const_etomo_number::java_lang_double_to_string(
+                        formatted_float,
+                    ),
+                ),
+            };
         }
-        let digits = self.pad_to.unwrap() as usize;
-        if self.is_integer() {
-            return Some(((value + 0.5).floor() as i64).to_string());
+        let pad_to = self.pad_to.unwrap() as usize;
+        // `number.doubleValue()`: the Number's own string is its value.
+        let double_value = string.parse::<f64>().unwrap_or(f64::NAN);
+        // `new DecimalFormat("0." + padTo zeros)` (floating point) or
+        // `new DecimalFormat(padTo zeros)` (integer): at least padTo integer
+        // digits for an integer, one integer digit and exactly padTo fraction
+        // digits for a float, no grouping.
+        // Workaround: DecimalFormat's rounding functionality is buggy.
+        if self.validation_type == ValidationType::Integer {
+            // Correct rounding: 1234.5 -> 1235, and 1234.4 -> 1234.
+            let rounded = utilities::java_lang_math_round(double_value);
+            let digits = rounded.unsigned_abs().to_string();
+            return Some(format!(
+                "{}{:0>width$}",
+                if rounded < 0 { "-" } else { "" },
+                digits,
+                width = pad_to
+            ));
         }
-        let scale = 10_f64.powi(digits as i32);
-        let rounded = if value >= 0.0 {
-            (value * scale + 0.5).floor()
+        // ValidationType.FLOATING_POINT
+        // Correct rounding: 1.2345 -> 1.235, and 1.2344 -> 1.234.
+        // `BigDecimal.valueOf(double)` is the exact decimal of
+        // `Double.toString(double)`; `setScale(padTo, HALF_UP)` rounds it.
+        let source = crate::imod::etomo::r#type::const_etomo_number::java_lang_double_to_string(
+            double_value,
+        );
+        if double_value.is_nan() || double_value.is_infinite() {
+            // BigDecimal.valueOf throws NumberFormatException; DecimalFormat is
+            // never reached.  The string itself is returned instead.
+            return Some(source);
+        }
+        let negative = source.starts_with('-');
+        let unsigned = source.trim_start_matches('-');
+        let (mantissa, exponent) = match unsigned.find(['E', 'e']) {
+            Some(at) => (
+                &unsigned[..at],
+                unsigned[at + 1..].parse::<i32>().unwrap_or(0),
+            ),
+            None => (unsigned, 0),
+        };
+        let (int_part, frac_part) = mantissa.split_once('.').unwrap_or((mantissa, ""));
+        let mut digits: Vec<u8> = int_part
+            .bytes()
+            .chain(frac_part.bytes())
+            .map(|b| b - b'0')
+            .collect();
+        // Position of the decimal point within `digits`.
+        let mut point = int_part.len() as i32 + exponent;
+        while point < 1 {
+            digits.insert(0, 0);
+            point += 1;
+        }
+        while (digits.len() as i32) < point + pad_to as i32 + 1 {
+            digits.push(0);
+        }
+        let keep = point as usize + pad_to;
+        let round_up = digits[keep] >= 5;
+        digits.truncate(keep);
+        if round_up {
+            let mut i = keep;
+            loop {
+                if i == 0 {
+                    digits.insert(0, 1);
+                    point += 1;
+                    break;
+                }
+                i -= 1;
+                if digits[i] == 9 {
+                    digits[i] = 0;
+                } else {
+                    digits[i] += 1;
+                    break;
+                }
+            }
+        }
+        let point = point as usize;
+        let mut int_digits: String = digits[..point].iter().map(|d| (b'0' + d) as char).collect();
+        let trimmed = int_digits.trim_start_matches('0');
+        int_digits = if trimmed.is_empty() {
+            "0".to_owned()
         } else {
-            (value * scale - 0.5).ceil()
-        } / scale;
-        Some(format!("{rounded:.digits$}"))
+            trimmed.to_owned()
+        };
+        let frac_digits: String = digits[point..].iter().map(|d| (b'0' + d) as char).collect();
+        let is_zero = int_digits == "0" && frac_digits.bytes().all(|b| b == b'0');
+        Some(format!(
+            "{}{}.{}",
+            if negative && !is_zero { "-" } else { "" },
+            int_digits,
+            frac_digits
+        ))
     }
-
-    // Formerly untranslated: Java's private `toFormattedString(Number)` builds a
-    // `java.text.DecimalFormat` pattern at run time and rounds through
-    // `java.math.BigDecimal.setScale(RoundingMode.HALF_UP)`.  Its `Converter.toDouble`
-    // call is now translated (`etomo::logic::converter::to_double`), but no model of
-    // DecimalFormat with an arbitrary pattern exists -
-    // `utilities::java_text_decimal_format_three_fraction_digits` covers only the one
-    // fixed pattern it was written for.  The blocker is a JDK class, not an etomo
-    // source unit, so this carries no TODO(unit) marker.  `getFileNameFromPattern`
-    // calls it to turn `numeric1`/`numeric2` into `formattedNumeric1`/
-    // `formattedNumeric2`, so that transfer is left out there too.
 
     /// Java `isNumeric`.
     fn is_numeric(&self) -> bool {
@@ -379,23 +463,43 @@ pub struct VariableTestTool;
 impl VariableTestTool {
     #[allow(non_snake_case)]
     pub fn toOneDigitIntegerFormattedString(value: Option<f64>) -> Option<String> {
-        Variable::one_digit_integer().to_formatted_string(value)
+        Variable::one_digit_integer().to_formatted_string(
+            value
+                .map(crate::imod::etomo::r#type::const_etomo_number::java_lang_double_to_string)
+                .as_deref(),
+        )
     }
     #[allow(non_snake_case)]
     pub fn toTwoDigitIntegerFormattedString(value: Option<f64>) -> Option<String> {
-        Variable::two_digit_integer().to_formatted_string(value)
+        Variable::two_digit_integer().to_formatted_string(
+            value
+                .map(crate::imod::etomo::r#type::const_etomo_number::java_lang_double_to_string)
+                .as_deref(),
+        )
     }
     #[allow(non_snake_case)]
     pub fn toFloatFormattedString(value: Option<f64>) -> Option<String> {
-        Variable::float().to_formatted_string(value)
+        Variable::float().to_formatted_string(
+            value
+                .map(crate::imod::etomo::r#type::const_etomo_number::java_lang_double_to_string)
+                .as_deref(),
+        )
     }
     #[allow(non_snake_case)]
     pub fn toPrecisionThreeFloatFormattedString(value: Option<f64>) -> Option<String> {
-        Variable::precision_three_float().to_formatted_string(value)
+        Variable::precision_three_float().to_formatted_string(
+            value
+                .map(crate::imod::etomo::r#type::const_etomo_number::java_lang_double_to_string)
+                .as_deref(),
+        )
     }
     #[allow(non_snake_case)]
     pub fn toPrecisionThreeFractionFormattedString(value: Option<f64>) -> Option<String> {
-        Variable::precision_three_fraction().to_formatted_string(value)
+        Variable::precision_three_fraction().to_formatted_string(
+            value
+                .map(crate::imod::etomo::r#type::const_etomo_number::java_lang_double_to_string)
+                .as_deref(),
+        )
     }
 }
 
@@ -3138,11 +3242,76 @@ impl FileType {
         None
     }
 
-    // TODO(unit): needs etomo/BaseManager.java and etomo/type/BaseMetaData.java - Java
-    // `getInstance(BaseManager, AxisID, boolean, boolean, String)` (deprecated) builds
-    // its fixed pattern from `manager.getBaseMetaData().getName()` and its axis type
-    // from `manager.getBaseMetaData().getAxisType()`.  The `equals` overload it calls,
-    // `equals(AxisType, String, boolean, boolean, String, String)`, is translated below.
+    /// Java `getInstance(BaseManager, AxisID, boolean, boolean, String)` (deprecated).
+    /// Get a `FileType` instance from a file name.
+    ///
+    /// Upstream bug fixed in translation (FileType.java:1436-1454): a manager whose
+    /// `getBaseMetaData()` is null throws `NullPointerException`; here such a manager
+    /// matches no file type (returns `None`).
+    pub fn get_instance_from_manager(
+        manager: Option<&'static dyn BaseManager>,
+        axis_id: AxisID,
+        uses_dataset: bool,
+        uses_axis_id: bool,
+        file_name: Option<&str>,
+    ) -> Option<Arc<FileType>> {
+        let file_name = file_name?;
+        // Create a pattern for the dataset + axis, or for the axis by itself
+        let mut fixed_pattern = String::new();
+        let mut axis_pattern = String::new();
+        let axis_extension = axis_id.get_extension();
+        if uses_dataset && manager.is_some() {
+            let name = manager
+                .unwrap()
+                .get_base_meta_data()?
+                .get_name()
+                .unwrap_or("null".to_string());
+            // If the dataset is part of the file name, then there is a fixed pattern
+            if uses_axis_id {
+                fixed_pattern = java_util_regex_pattern_quote(&(name + &axis_extension));
+            } else {
+                fixed_pattern = java_util_regex_pattern_quote(&name);
+            }
+            // Eliminate file names that should start with the dataset but don't.
+            if !java_lang_string_matches(file_name, &(fixed_pattern.clone() + ".*")) {
+                return None;
+            }
+        } else if uses_axis_id && !(axis_extension == "") {
+            // If the dataset is not part of the file name, there is no fixed pattern, but
+            // the axis is part of the file name, so add it to axisPattern.
+            axis_pattern = java_util_regex_pattern_quote(&axis_extension);
+        }
+        // Java touches `FileType` here, which runs the class's static initialisers and
+        // so fills `namedFileTypeList`; forcing `CLASS` is that initialisation.
+        LazyLock::force(&CLASS);
+        let list = NAMED_FILE_TYPE_LIST.lock().unwrap();
+        let mut axis_type = None;
+        if let Some(manager) = manager {
+            axis_type = Some(manager.get_base_meta_data()?.base().get_axis_type());
+        }
+        for file_type in list.iter() {
+            // Ignore child file types. Return a file type that equals patterns and
+            // booleans.
+            if file_type
+                .parent_file_type
+                .lock()
+                .unwrap()
+                .upgrade()
+                .is_none()
+                && file_type.equals_file_name(
+                    axis_type,
+                    file_name,
+                    uses_dataset,
+                    uses_axis_id,
+                    &fixed_pattern,
+                    &axis_pattern,
+                )
+            {
+                return Some(file_type.clone());
+            }
+        }
+        None
+    }
 
     /// Java `equals(AxisType, String, boolean, boolean, String, String)` (deprecated
     /// 2/2/2019).  Returns true if the file name can be matched to the fixedPattern,
@@ -3481,9 +3650,8 @@ impl FileType {
     /// Pass in either manager, metaData, or rootName and axisType.  If manager is null,
     /// pass in propertyUserDir and fileSubdirectoryName if necessary.
     ///
-    /// The `numeric1`/`numeric2` parameters are the already-formatted strings; see the
-    /// note on `Variable::to_formatted_string` above for why the `Number` transfer is
-    /// left out.
+    /// The `numeric1`/`numeric2` parameters are the Java `Number`s as their
+    /// `toString()`; `getFileNameFromPattern` formats them.
     #[allow(clippy::too_many_arguments)]
     pub fn get_file_full(
         &self,
@@ -3572,8 +3740,6 @@ impl FileType {
         // subdirectory below the dataset location, or in the dataset.
         if let Some(in_imod_subdirectory) = &self.in_imod_subdirectory {
             let imod_directory = etomo_director::INSTANCE
-                .lock()
-                .unwrap()
                 .get_imod_directory()
                 .map(|dir| dir.to_string_lossy().to_string());
             return Some(std::path::PathBuf::from(java_io_file_get_absolute_path(
@@ -3636,11 +3802,7 @@ impl FileType {
         }
         let mut dir = property_user_dir_string.clone();
         if property_user_dir_string.is_none() {
-            dir = etomo_director::INSTANCE
-                .lock()
-                .unwrap()
-                .original_user_dir
-                .clone();
+            dir = etomo_director::INSTANCE.get_original_user_dir();
         }
         Some(std::path::PathBuf::from(java_io_file_get_absolute_path(
             &utilities::java_io_file_new(&dir.unwrap_or("null".to_string()), &file_name),
@@ -3686,11 +3848,7 @@ impl FileType {
             }
         }
         if directory_name.is_none() {
-            directory_name = etomo_director::INSTANCE
-                .lock()
-                .unwrap()
-                .original_user_dir
-                .clone();
+            directory_name = etomo_director::INSTANCE.get_original_user_dir();
         }
         Some(std::path::PathBuf::from(
             directory_name.unwrap_or("null".to_string()),
@@ -3978,15 +4136,14 @@ impl FileType {
             let image_file_meta_data;
             match meta_data {
                 Some(meta_data) => {
-                    orig_raw_image_stack_extension = Extension::get_instance(
-                        &meta_data
-                            .base()
-                            .get_orig_raw_image_stack_extension()
-                            .to_string(),
-                    );
+                    // `metaData.getOrigRawImageStackExtension().toString()`: a
+                    // null extension (an unrecognised stored one) would throw a
+                    // NullPointerException; it is passed on as null instead.
+                    orig_raw_image_stack_extension = meta_data
+                        .get_orig_raw_image_stack_extension()
+                        .and_then(|extension| Extension::get_instance(&extension.to_string()));
                     image_filename_style = Some(meta_data.base().get_image_filename_style());
-                    raw_image_stack_extension =
-                        Some(meta_data.base().get_raw_image_stack_extension());
+                    raw_image_stack_extension = meta_data.get_raw_image_stack_extension();
                 }
                 None => {
                     orig_raw_image_stack_extension = None;
@@ -4002,7 +4159,9 @@ impl FileType {
                 axis_type,
                 axis_id,
                 formatted_numeric1,
+                numeric1,
                 formatted_numeric2,
+                numeric2,
                 orig_raw_image_stack_extension,
                 image_filename_style,
                 raw_image_stack_extension,
@@ -4180,7 +4339,9 @@ impl FileType {
         mut axis_type: Option<AxisType>,
         axis_id: Option<AxisID>,
         formatted_numeric1: Option<&str>,
+        numeric1: Option<&str>,
         formatted_numeric2: Option<&str>,
+        numeric2: Option<&str>,
         orig_raw_image_stack_extension: Option<&Extension>,
         image_filename_style: Option<super::image_filename_style::ImageFilenameStyle>,
         raw_stack_extenson: Option<&Extension>,
@@ -4194,6 +4355,51 @@ impl FileType {
         if self.single_axis_file_name_pattern.is_some() && axis_type == Some(AxisType::SingleAxis) {
             pattern_axis_type = Some(AxisType::SingleAxis);
         }
+        // Transfer numeric1 to formattedNumeric1 (ignore numeric1 if formattedNumeric1 is
+        // already set).
+        let mut formatted_numeric1: Option<String> = formatted_numeric1.map(str::to_owned);
+        let mut formatted_numeric2: Option<String> = formatted_numeric2.map(str::to_owned);
+        let mut numeric1_index: i32 = -1;
+        if formatted_numeric1.is_none() && numeric1.is_some() {
+            // Convert numeric1 to a string with a format corresponding to the first
+            // numeric variable. Place the resulting string into formattedNumeric1.
+            if let Some(pattern) = self.select_pattern(pattern_axis_type) {
+                // Using the first numeric variable to do the conversion.
+                for (i, element) in pattern.iter().enumerate() {
+                    if let PatternElement::Variable(variable) = element
+                        && variable.is_numeric()
+                    {
+                        numeric1_index = i as i32;
+                        formatted_numeric1 = variable.to_formatted_string(numeric1);
+                        break;
+                    }
+                }
+            }
+        }
+        // Transfer numeric2 to formattedNumeric2 (ignore numeric2 if formattedNumeric2 is
+        // already set).
+        if formatted_numeric2.is_none() && numeric2.is_some() {
+            // Convert numeric2 to a string with a format corresponding to the second
+            // numeric variable. Place the resulting string into formattedNumeric2.
+            if let Some(pattern) = self.select_pattern(pattern_axis_type) {
+                // Using the second numeric variable to do the conversion.
+                let start = if numeric1_index != -1 {
+                    (numeric1_index + 1) as usize
+                } else {
+                    0
+                };
+                for element in pattern.iter().skip(start) {
+                    if let PatternElement::Variable(variable) = element
+                        && variable.is_numeric()
+                    {
+                        formatted_numeric2 = variable.to_formatted_string(numeric2);
+                        break;
+                    }
+                }
+            }
+        }
+        let formatted_numeric1 = formatted_numeric1.as_deref();
+        let formatted_numeric2 = formatted_numeric2.as_deref();
         let mut builder = FileNameBuilder::new(
             false,
             None,
@@ -4375,6 +4581,8 @@ impl FileType {
                 root_name,
                 axis_type,
                 axis_id,
+                None,
+                None,
                 None,
                 None,
                 None,

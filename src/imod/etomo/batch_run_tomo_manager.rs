@@ -155,7 +155,7 @@ impl BatchRunTomoManager {
     }
 
     /// Java private `openProcessingPanel`.
-    fn open_processing_panel(&self) {
+    fn open_processing_panel(&'static self) {
         self.set_panel();
     }
     /// Java `openBatchRunTomoDialog`.
@@ -183,7 +183,7 @@ impl BatchRunTomoManager {
     }
     /// Java `tomosetexts(File)`.
     pub fn tomosetexts_in_dir(
-        &self,
+        &'static self,
         dir: Option<&Path>,
     ) -> Option<crate::imod::etomo::process::tomosetexts_output::TomosetextsOutput> {
         let _ = dir;
@@ -420,13 +420,22 @@ impl BaseManager for BatchRunTomoManager {
     ) -> Option<&dyn crate::imod::etomo::r#type::base_meta_data::BaseMetaData> {
         None
     }
-    fn get_main_panel(&self) -> Option<Infallible> {
-        self.main_panel
+    fn get_main_panel(
+        &self,
+    ) -> Option<std::rc::Rc<dyn crate::imod::etomo::ui::swing::main_panel::MainPanelVirtual>> {
+        match self.main_panel {
+            None => None,
+            Some(main_panel) => match main_panel {},
+        }
     }
-    fn get_process_manager(&self) -> Option<Infallible> {
-        self.process_mgr
+    fn get_process_manager(
+        &self,
+    ) -> Option<&'static crate::imod::etomo::process::base_process_manager::BaseProcessManager>
+    {
+        // TODO(unit): this manager's process manager is not constructed yet.
+        None
     }
-    fn get_storables_with_offset(&self, offset: i32) -> Option<Vec<Box<dyn Storable>>> {
+    fn get_storables_with_offset(&self, offset: i32) -> Option<Vec<Option<&'static dyn Storable>>> {
         let _ = offset;
         None
     }
@@ -446,36 +455,54 @@ impl BaseManager for BatchRunTomoManager {
         true
     }
     /// Java `getMessagesArray`.
-    fn get_messages_array(&self) -> Option<Infallible> {
+    fn get_messages_array(
+        &self,
+    ) -> Option<
+        std::sync::Arc<
+            std::sync::Mutex<Vec<crate::imod::etomo::process::process_messages::ProcessMessages>>,
+        >,
+    > {
         None
     }
     /// Java `exitProgram(AxisID)`.
-    fn exit_program(&self, axis_id: Option<AxisID>) -> bool {
+    fn exit_program(&'static self, axis_id: Option<AxisID>) -> bool {
         self.exit_program_super(axis_id)
     }
     /// Java `pack`.
     fn pack(&self) {}
     /// Java `getBaseScreenState(AxisID)`.
-    fn get_base_screen_state(&self, axis_id: Option<AxisID>) -> Option<Infallible> {
+    fn get_base_screen_state(
+        &self,
+        axis_id: Option<AxisID>,
+    ) -> Option<&'static crate::imod::etomo::r#type::base_screen_state::BaseScreenState> {
         let _ = axis_id;
-        self.screen_state
+        match self.screen_state {
+            None => None,
+            Some(screen_state) => match screen_state {},
+        }
     }
     /// Java `save`.
-    fn save(&self) -> bool {
+    fn save(&'static self) -> Result<bool, crate::imod::etomo::storage::log_file::LogFileError> {
         self.save_super()
     }
     /// Java `startNextProcess(...)`.
     fn start_next_process(
-        &self,
-        ui_component: Option<Infallible>,
-        axis_id: Option<AxisID>,
-        process: Option<Infallible>,
-        process_result_display: Option<Infallible>,
-        process_series: Option<Infallible>,
-        dialog_type: Option<Infallible>,
-        display: Option<Infallible>,
+        &'static self,
+        ui_component: Option<std::rc::Rc<dyn crate::imod::etomo::ui::UiComponent>>,
+        axis_id: AxisID,
+        process: &crate::imod::etomo::process_series::Process,
+        process_result_display: Option<
+            crate::imod::etomo::process::process_interface::ProcessResultDisplayRef,
+        >,
+        process_series: &crate::imod::etomo::process_series::ProcessSeriesHandle,
+        dialog_type: Option<crate::imod::etomo::r#type::dialog_type::DialogType>,
+        display: Option<
+            std::rc::Rc<dyn crate::imod::etomo::ui::swing::process_display::ProcessDisplay>,
+        >,
     ) -> bool {
-        let _ = (
+        // TODO(unit): this manager's own `startNextProcess` tasks are not translated
+        // yet; the base class's run first, as the Java override's `super` call does.
+        self.start_next_process_super(
             ui_component,
             axis_id,
             process,
@@ -483,28 +510,31 @@ impl BaseManager for BatchRunTomoManager {
             process_series,
             dialog_type,
             display,
-        );
-        false
+        )
     }
     /// Java `sendEvent(AxisID, ProcessName, ProcessEndState, boolean)`.
     fn send_event(
         &self,
         axis_id: Option<AxisID>,
-        process_name: Option<Infallible>,
-        process_end_state: Option<Infallible>,
+        process_name: Option<crate::imod::etomo::r#type::process_name::ProcessName>,
+        process_end_state: Option<crate::imod::etomo::r#type::process_end_state::ProcessEndState>,
         failed: bool,
     ) {
         let _ = (axis_id, process_name, process_end_state, failed);
     }
     /// Java `updateProcessChunks(...)`.
     fn update_process_chunks(
-        &self,
+        &'static self,
         axis_id: Option<AxisID>,
-        param: Option<Infallible>,
+        param: Option<crate::imod::etomo::comscript::processchunks_param::ProcesschunksParam>,
         root_name: Option<&str>,
-        subcommand_details: Option<Infallible>,
-        dialog_type: Option<Infallible>,
-    ) -> Option<Infallible> {
+        subcommand_details: Option<
+            std::sync::Arc<
+                dyn crate::imod::etomo::comscript::command_details::CommandDetails + Send + Sync,
+            >,
+        >,
+        dialog_type: Option<crate::imod::etomo::r#type::dialog_type::DialogType>,
+    ) -> Option<crate::imod::etomo::comscript::processchunks_param::ProcesschunksParam> {
         let _ = (axis_id, param, root_name, subcommand_details, dialog_type);
         None
     }
@@ -515,11 +545,21 @@ impl BaseManager for BatchRunTomoManager {
     }
     /// Java `reconnect(ProcessData, AxisID, boolean, List<ProcessMessages>)`.
     fn reconnect(
-        &self,
-        process_data: Option<Infallible>,
+        &'static self,
+        process_data: Option<
+            std::sync::Arc<
+                std::sync::Mutex<crate::imod::etomo::process::process_data::ProcessData>,
+            >,
+        >,
         axis_id: Option<AxisID>,
         multi_line_messages: bool,
-        messages_array: Option<Infallible>,
+        messages_array: Option<
+            std::sync::Arc<
+                std::sync::Mutex<
+                    Vec<crate::imod::etomo::process::process_messages::ProcessMessages>,
+                >,
+            >,
+        >,
     ) -> bool {
         let _ = (process_data, multi_line_messages, messages_array);
         if self.is_reconnect_run(axis_id) {
@@ -530,8 +570,12 @@ impl BaseManager for BatchRunTomoManager {
     }
     /// Java `reconnectToDifferentHost(ProcessData, AxisID)`.
     fn reconnect_to_different_host(
-        &self,
-        process_data: Option<Infallible>,
+        &'static self,
+        process_data: Option<
+            &std::sync::Arc<
+                std::sync::Mutex<crate::imod::etomo::process::process_data::ProcessData>,
+            >,
+        >,
         axis_id: Option<AxisID>,
     ) -> bool {
         let _ = (process_data, axis_id);

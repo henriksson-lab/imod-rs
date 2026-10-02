@@ -1,0 +1,1789 @@
+# imod-rs native golden manifest for fixtures/restrictalign; see fixtures/README.md.
+# Regenerate with fixtures/regen-golden.sh restrictalign; do not edit by hand.
+text 232 defined/b1_cv.out
+restrictalign: Changed align.com to achieve measured/unknown ratio of ~1.0
+Turned off solving for rotation
+Turned off solving for tilt angle
+Turned off solving for magnification
+Rerunning the alignment with the final file    [rsa1]
+
+text 2 defined/b1_cv.rc
+0
+
+sha256 8fc311d9a6712a9124fb1fdf96d985169a41e2ec65577f2cc965b4ce0ff1bf18 2681 defined/b1_cv/align.com
+sha256 c1a51c5bd546b61ae017a31989d993a2c83b2773fa9c2c4260478b0923e6200d 2682 defined/b1_cv/align.com~
+sha256 a2b76dca0f42e0b8a0c777fc65491fd2d384a4b17022ac300509a645220ebde0 9091 defined/b1_cv/align.log
+sha256 8f215bdb01ae72090033dde3599c4322ec2ab0652eb19e0167196ed46b17488f 480 defined/b1_cv/ts.3dmod
+sha256 3ad30717a1846aba0d8d0c9c2fec5bdc1637c853eb0cd53cf913dc904180b644 1487 defined/b1_cv/ts.resid
+sha256 75e6dbb73f140badac973bbbb105218774140d125a2956cc78c9a31f389f4cf0 1988 defined/b1_cv/ts.resmod
+text 280 defined/b1_cv/ts.tlt
+ -51.00
+ -48.00
+ -45.00
+ -42.00
+ -39.00
+ -36.00
+ -33.00
+ -30.00
+ -27.00
+ -24.00
+ -21.00
+ -18.00
+ -15.00
+ -12.00
+  -9.00
+  -6.00
+  -3.00
+   0.00
+   3.00
+   6.00
+   9.00
+  12.00
+  15.00
+  18.00
+  21.00
+  24.00
+  27.00
+  30.00
+  33.00
+  36.00
+  39.00
+  42.00
+  45.00
+  48.00
+  51.00
+
+sha256 a4ae33e5e1259d1c0354a989e65eab5804f1ddde0b48182ddaf8b8476a0efde5 2555 defined/b1_cv/ts.tltxf
+sha256 a4ae33e5e1259d1c0354a989e65eab5804f1ddde0b48182ddaf8b8476a0efde5 2555 defined/b1_cv/ts.xf
+text 280 defined/b1_cv/ts.xtilt
+   0.00
+   0.00
+   0.00
+   0.00
+   0.00
+   0.00
+   0.00
+   0.00
+   0.00
+   0.00
+   0.00
+   0.00
+   0.00
+   0.00
+   0.00
+   0.00
+   0.00
+   0.00
+   0.00
+   0.00
+   0.00
+   0.00
+   0.00
+   0.00
+   0.00
+   0.00
+   0.00
+   0.00
+   0.00
+   0.00
+   0.00
+   0.00
+   0.00
+   0.00
+   0.00
+
+text 280 defined/b1_cv/ts_fid.tlt
+ -51.00
+ -48.00
+ -45.00
+ -42.00
+ -39.00
+ -36.00
+ -33.00
+ -30.00
+ -27.00
+ -24.00
+ -21.00
+ -18.00
+ -15.00
+ -12.00
+  -9.00
+  -6.00
+  -3.00
+   0.00
+   3.00
+   6.00
+   9.00
+  12.00
+  15.00
+  18.00
+  21.00
+  24.00
+  27.00
+  30.00
+  33.00
+  36.00
+  39.00
+  42.00
+  45.00
+  48.00
+  51.00
+
+sha256 a4ae33e5e1259d1c0354a989e65eab5804f1ddde0b48182ddaf8b8476a0efde5 2555 defined/b1_cv/ts_fid.xf
+sha256 f16e59e1a2a1343e9eeae836f868f9bc2659ffc901efd1e35eb22c0a8a42dfbe 888 defined/b1_cv/ts_nogaps.fid
+text 81 defined/b1_cv/tsfid.xyz
+   1    305.91    414.82     21.96      1    1 Pix:     1.00000 Dim:   512   512
+
+text 112 defined/noimage.out
+restrictalign: Changed align.com to achieve measured/unknown ratio of ~3.7
+Turned on grouping of rotations to 5
+
+text 2 defined/noimage.rc
+0
+
+sha256 89f0318505334ea98eac847fc711643ecd1657342528577aa811779cf65bf074 2661 defined/noimage/align.com
+sha256 d5601c24276615f79536f0ccdf4e5842b2f273f7dfb9b7742724bd47ed7e1df1 2682 defined/noimage/align.com~
+text 178 golden/b1_nocv.out
+restrictalign: Changed align.com to achieve measured/unknown ratio of ~1.0
+Turned off solving for rotation
+Turned off solving for tilt angle
+Turned off solving for magnification
+
+text 2 golden/b1_nocv.rc
+0
+
+sha256 8fc311d9a6712a9124fb1fdf96d985169a41e2ec65577f2cc965b4ce0ff1bf18 2681 golden/b1_nocv/align.com
+sha256 c1a51c5bd546b61ae017a31989d993a2c83b2773fa9c2c4260478b0923e6200d 2682 golden/b1_nocv/align.com~
+sha256 69424084d98be0d8c2adff81e46259ae74e61df6f235bd3b7c2a6bac99b681ad 901 golden/b25_cv.out
+text 2 golden/b25_cv.rc
+0
+
+sha256 0424e98c14bdcdf1e2a32beebca376e55805461c6ccf0ea058b88c8842238a4e 2683 golden/b25_cv/align.com
+sha256 a0f0fcbc1a40f38d4c11e3e7e457fb9891ebf5b2c321cdc4ed83e18089c01a5f 2684 golden/b25_cv/align.com~
+sha256 e2e10ca799e38e7e6b70ffeaa39365bc34f12601ba2b6ba4de6a92b3588f4484 11150 golden/b25_cv/align.log
+sha256 70d69119ff986acfef328c85cae3e5531284fa65f996b78082ca6436106b55ce 1248 golden/b25_cv/ts.3dmod
+sha256 70d69119ff986acfef328c85cae3e5531284fa65f996b78082ca6436106b55ce 1248 golden/b25_cv/ts.3dmod~
+sha256 f2490cc04ecbb18da44bc10fecf08ef307ae395747c2d0e2de4439174a4f8d40 34919 golden/b25_cv/ts.resid
+sha256 f2490cc04ecbb18da44bc10fecf08ef307ae395747c2d0e2de4439174a4f8d40 34919 golden/b25_cv/ts.resid~
+sha256 dc649c1130b902a7f218b6b2ae944d4daf76f58338dc96daa4276358257db564 37012 golden/b25_cv/ts.resmod
+text 280 golden/b25_cv/ts.tlt
+ -51.00
+ -48.00
+ -45.00
+ -42.00
+ -39.00
+ -36.00
+ -33.00
+ -30.00
+ -27.00
+ -24.00
+ -21.00
+ -18.00
+ -15.00
+ -12.00
+  -9.00
+  -6.00
+  -3.00
+   0.00
+   3.00
+   6.00
+   9.00
+  12.00
+  15.00
+  18.00
+  21.00
+  24.00
+  27.00
+  30.00
+  33.00
+  36.00
+  39.00
+  42.00
+  45.00
+  48.00
+  51.00
+
+sha256 966bcf3d251a314718630287d7f5c11b48927d5b721424760f800e5bd243d322 2555 golden/b25_cv/ts.tltxf
+sha256 966bcf3d251a314718630287d7f5c11b48927d5b721424760f800e5bd243d322 2555 golden/b25_cv/ts.tltxf~
+text 280 golden/b25_cv/ts.tlt~
+ -51.00
+ -48.00
+ -45.00
+ -42.00
+ -39.00
+ -36.00
+ -33.00
+ -30.00
+ -27.00
+ -24.00
+ -21.00
+ -18.00
+ -15.00
+ -12.00
+  -9.00
+  -6.00
+  -3.00
+   0.00
+   3.00
+   6.00
+   9.00
+  12.00
+  15.00
+  18.00
+  21.00
+  24.00
+  27.00
+  30.00
+  33.00
+  36.00
+  39.00
+  42.00
+  45.00
+  48.00
+  51.00
+
+sha256 966bcf3d251a314718630287d7f5c11b48927d5b721424760f800e5bd243d322 2555 golden/b25_cv/ts.xf
+text 280 golden/b25_cv/ts.xtilt
+   0.00
+   0.00
+   0.00
+   0.00
+   0.00
+   0.00
+   0.00
+   0.00
+   0.00
+   0.00
+   0.00
+   0.00
+   0.00
+   0.00
+   0.00
+   0.00
+   0.00
+   0.00
+   0.00
+   0.00
+   0.00
+   0.00
+   0.00
+   0.00
+   0.00
+   0.00
+   0.00
+   0.00
+   0.00
+   0.00
+   0.00
+   0.00
+   0.00
+   0.00
+   0.00
+
+text 280 golden/b25_cv/ts.xtilt~
+   0.00
+   0.00
+   0.00
+   0.00
+   0.00
+   0.00
+   0.00
+   0.00
+   0.00
+   0.00
+   0.00
+   0.00
+   0.00
+   0.00
+   0.00
+   0.00
+   0.00
+   0.00
+   0.00
+   0.00
+   0.00
+   0.00
+   0.00
+   0.00
+   0.00
+   0.00
+   0.00
+   0.00
+   0.00
+   0.00
+   0.00
+   0.00
+   0.00
+   0.00
+   0.00
+
+text 280 golden/b25_cv/ts_fid.tlt
+ -51.00
+ -48.00
+ -45.00
+ -42.00
+ -39.00
+ -36.00
+ -33.00
+ -30.00
+ -27.00
+ -24.00
+ -21.00
+ -18.00
+ -15.00
+ -12.00
+  -9.00
+  -6.00
+  -3.00
+   0.00
+   3.00
+   6.00
+   9.00
+  12.00
+  15.00
+  18.00
+  21.00
+  24.00
+  27.00
+  30.00
+  33.00
+  36.00
+  39.00
+  42.00
+  45.00
+  48.00
+  51.00
+
+sha256 966bcf3d251a314718630287d7f5c11b48927d5b721424760f800e5bd243d322 2555 golden/b25_cv/ts_fid.xf
+sha256 655edee3b22df1406b2124fd762a39a55977eb75ef28171c297029ce047100e7 11448 golden/b25_cv/ts_nogaps.fid
+sha256 655edee3b22df1406b2124fd762a39a55977eb75ef28171c297029ce047100e7 11448 golden/b25_cv/ts_nogaps.fid~
+sha256 14b16d86a16317c6320689439152b97ba22054b9737303c5ee93c9bbf56892cb 1209 golden/b25_cv/tsfid.xyz
+sha256 14b16d86a16317c6320689439152b97ba22054b9737303c5ee93c9bbf56892cb 1209 golden/b25_cv/tsfid.xyz~
+sha256 aee8189bfb306a232118757593dc00afd549dd529647995aee73174cfe75b3ab 4710 golden/b25_distort.out
+text 2 golden/b25_distort.rc
+0
+
+sha256 9cc5b09c1a1f15f23a23ff89075f69501b40095b994bf0f470d25e662fa39bd9 2701 golden/b25_distort/align.com
+sha256 7c203ecc83dc7eed2937cb3ce4dfc8640c0c0bfa79f47617d9885087b350bc1b 2702 golden/b25_distort/align.com~
+sha256 fd82b697a7b9bf33000ac7117d96dc6d20b57e41784bbe544588368f436655a0 11747 golden/b25_distort/align.log
+sha256 d34aee9db788f03e4fbbabf9943e2fc439adcfd9f2b962c041108a54dd349b4a 1248 golden/b25_distort/ts.3dmod
+sha256 4d66de62758335a2bccb1fbe947160792762d03f889bebfa987bae7881082947 1248 golden/b25_distort/ts.3dmod~
+sha256 f98be791691934e588ab0adf87d83d9ca66d9280e1cde9c0d9b92d5b587dcf3d 34919 golden/b25_distort/ts.resid
+sha256 d57e05521beb3b0b17bbea63861d3dbbe54f13eb741566ad91413a2413cbd905 34919 golden/b25_distort/ts.resid~
+sha256 0c9d950def58a9c47b1b18688784c5a175252c405bce44f6f5e06c5b69640c89 37012 golden/b25_distort/ts.resmod
+text 280 golden/b25_distort/ts.tlt
+ -51.00
+ -48.00
+ -45.00
+ -42.00
+ -39.00
+ -36.00
+ -33.00
+ -30.00
+ -27.00
+ -24.00
+ -21.00
+ -18.00
+ -15.00
+ -12.00
+  -9.00
+  -6.00
+  -3.00
+   0.00
+   3.00
+   6.00
+   9.00
+  12.00
+  15.00
+  18.00
+  21.00
+  24.00
+  27.00
+  30.00
+  33.00
+  36.00
+  39.00
+  42.00
+  45.00
+  48.00
+  51.00
+
+sha256 21baacc2b3990b70e2b216cd5571fba8f0eb551758a35038676f57bfc9a2ba88 2555 golden/b25_distort/ts.tltxf
+sha256 eb39f4db1732da43aa36c6ee335719988bcfb14542bb4098f6f77c550cf2702d 2555 golden/b25_distort/ts.tltxf~
+text 280 golden/b25_distort/ts.tlt~
+ -51.00
+ -48.00
+ -45.00
+ -42.00
+ -39.00
+ -36.00
+ -33.00
+ -30.00
+ -27.00
+ -24.00
+ -21.00
+ -18.00
+ -15.00
+ -12.00
+  -9.00
+  -6.00
+  -3.00
+   0.00
+   3.00
+   6.00
+   9.00
+  12.00
+  15.00
+  18.00
+  21.00
+  24.00
+  27.00
+  30.00
+  33.00
+  36.00
+  39.00
+  42.00
+  45.00
+  48.00
+  51.00
+
+sha256 21baacc2b3990b70e2b216cd5571fba8f0eb551758a35038676f57bfc9a2ba88 2555 golden/b25_distort/ts.xf
+text 280 golden/b25_distort/ts.xtilt
+   0.00
+   0.00
+   0.00
+   0.00
+   0.00
+   0.00
+   0.00
+   0.00
+   0.00
+   0.00
+   0.00
+   0.00
+   0.00
+   0.00
+   0.00
+   0.00
+   0.00
+   0.00
+   0.00
+   0.00
+   0.00
+   0.00
+   0.00
+   0.00
+   0.00
+   0.00
+   0.00
+   0.00
+   0.00
+   0.00
+   0.00
+   0.00
+   0.00
+   0.00
+   0.00
+
+text 280 golden/b25_distort/ts.xtilt~
+   0.00
+   0.00
+   0.00
+   0.00
+   0.00
+   0.00
+   0.00
+   0.00
+   0.00
+   0.00
+   0.00
+   0.00
+   0.00
+   0.00
+   0.00
+   0.00
+   0.00
+   0.00
+   0.00
+   0.00
+   0.00
+   0.00
+   0.00
+   0.00
+   0.00
+   0.00
+   0.00
+   0.00
+   0.00
+   0.00
+   0.00
+   0.00
+   0.00
+   0.00
+   0.00
+
+text 280 golden/b25_distort/ts_fid.tlt
+ -51.00
+ -48.00
+ -45.00
+ -42.00
+ -39.00
+ -36.00
+ -33.00
+ -30.00
+ -27.00
+ -24.00
+ -21.00
+ -18.00
+ -15.00
+ -12.00
+  -9.00
+  -6.00
+  -3.00
+   0.00
+   3.00
+   6.00
+   9.00
+  12.00
+  15.00
+  18.00
+  21.00
+  24.00
+  27.00
+  30.00
+  33.00
+  36.00
+  39.00
+  42.00
+  45.00
+  48.00
+  51.00
+
+sha256 21baacc2b3990b70e2b216cd5571fba8f0eb551758a35038676f57bfc9a2ba88 2555 golden/b25_distort/ts_fid.xf
+sha256 04222f7f5fbc01768402e39e3b27943b1c47ec9974b9d4f832d0bef82c6950a2 11448 golden/b25_distort/ts_nogaps.fid
+sha256 6c59e531d8c635d61dbde31aab8acae1e1d204e2793ea4735ce6ddb9d0989a19 11448 golden/b25_distort/ts_nogaps.fid~
+sha256 c3319045b9829e40cc528b168e36bc1e13a17c0898421a3753cde96fad9cef11 1209 golden/b25_distort/tsfid.xyz
+sha256 ea69d3261f467f58308a1ad25087eb86b73ac464609f987a45c2effa03efa884 1209 golden/b25_distort/tsfid.xyz~
+text 112 golden/b25_fids.out
+restrictalign: Changed align.com to achieve measured/unknown ratio of ~9.2
+Turned on grouping of rotations to 5
+
+text 2 golden/b25_fids.rc
+0
+
+sha256 33fd9bcf61eb116e3f4e8438d994f03e9c0ade3d51c71576911d17a189243df0 2683 golden/b25_fids/align.com
+sha256 a0f0fcbc1a40f38d4c11e3e7e457fb9891ebf5b2c321cdc4ed83e18089c01a5f 2684 golden/b25_fids/align.com~
+sha256 3b7d0c752bcb1d36d59f634f5264966d2eaf69d49c73ebc684c046e2cea675c9 1700 golden/b25_local3.out
+text 2 golden/b25_local3.rc
+0
+
+sha256 46b3ce84e034ee0aa6be20aff791b34cac2c063c13d9743550db703d57a076cd 2683 golden/b25_local3/align.com
+sha256 a4dfdf0bcdd4ea20ed87d8cf2d94a26025a5aafdef78ff8007d0b6d442e9780c 2684 golden/b25_local3/align.com~
+sha256 78efb40f2afd378c4ef3a6403193ea0c3ce6ed080e66f61f1b619483035bb01b 28092 golden/b25_local3/align.log
+sha256 1998dc2472431ea3c36553ebdbd6c2256e4ec774cac1e0f5c5c9eb44e89e937a 1248 golden/b25_local3/ts.3dmod
+sha256 1998dc2472431ea3c36553ebdbd6c2256e4ec774cac1e0f5c5c9eb44e89e937a 1248 golden/b25_local3/ts.3dmod~
+sha256 851becf96b756eae2ffdba72f596f718649a7cd8982ed50d742b83464bd5d613 34919 golden/b25_local3/ts.resid
+sha256 851becf96b756eae2ffdba72f596f718649a7cd8982ed50d742b83464bd5d613 34919 golden/b25_local3/ts.resid~
+sha256 d10cfddcaabf45845e25ae414b15e96f11b306d491d9a1bc912a26982162e065 37012 golden/b25_local3/ts.resmod
+text 280 golden/b25_local3/ts.tlt
+ -51.03
+ -48.02
+ -45.01
+ -42.00
+ -38.98
+ -35.99
+ -32.99
+ -29.99
+ -27.00
+ -24.00
+ -21.00
+ -18.00
+ -15.00
+ -12.00
+  -9.00
+  -6.00
+  -2.99
+   0.01
+   3.01
+   6.02
+   9.02
+  12.04
+  15.06
+  18.08
+  21.10
+  24.12
+  27.14
+  30.11
+  33.07
+  36.04
+  39.00
+  41.97
+  45.02
+  48.08
+  51.13
+
+sha256 081b1e44500db841af00f80015939ddc34566f85bb2654e0545d8210803c01c1 2555 golden/b25_local3/ts.tltxf
+sha256 081b1e44500db841af00f80015939ddc34566f85bb2654e0545d8210803c01c1 2555 golden/b25_local3/ts.tltxf~
+text 280 golden/b25_local3/ts.tlt~
+ -51.03
+ -48.02
+ -45.01
+ -42.00
+ -38.98
+ -35.99
+ -32.99
+ -29.99
+ -27.00
+ -24.00
+ -21.00
+ -18.00
+ -15.00
+ -12.00
+  -9.00
+  -6.00
+  -2.99
+   0.01
+   3.01
+   6.02
+   9.02
+  12.04
+  15.06
+  18.08
+  21.10
+  24.12
+  27.14
+  30.11
+  33.07
+  36.04
+  39.00
+  41.97
+  45.02
+  48.08
+  51.13
+
+sha256 70fc629d9efd4609c87e77bcd284602f10f4701bc2f502e40f799449986963f1 2555 golden/b25_local3/ts.xf
+text 280 golden/b25_local3/ts.xtilt
+   0.00
+   0.00
+   0.00
+   0.00
+   0.00
+   0.00
+   0.00
+   0.00
+   0.00
+   0.00
+   0.00
+   0.00
+   0.00
+   0.00
+   0.00
+   0.00
+   0.00
+   0.00
+   0.00
+   0.00
+   0.00
+   0.00
+   0.00
+   0.00
+   0.00
+   0.00
+   0.00
+   0.00
+   0.00
+   0.00
+   0.00
+   0.00
+   0.00
+   0.00
+   0.00
+
+text 280 golden/b25_local3/ts.xtilt~
+   0.00
+   0.00
+   0.00
+   0.00
+   0.00
+   0.00
+   0.00
+   0.00
+   0.00
+   0.00
+   0.00
+   0.00
+   0.00
+   0.00
+   0.00
+   0.00
+   0.00
+   0.00
+   0.00
+   0.00
+   0.00
+   0.00
+   0.00
+   0.00
+   0.00
+   0.00
+   0.00
+   0.00
+   0.00
+   0.00
+   0.00
+   0.00
+   0.00
+   0.00
+   0.00
+
+text 280 golden/b25_local3/ts_fid.tlt
+ -51.03
+ -48.02
+ -45.01
+ -42.00
+ -38.98
+ -35.99
+ -32.99
+ -29.99
+ -27.00
+ -24.00
+ -21.00
+ -18.00
+ -15.00
+ -12.00
+  -9.00
+  -6.00
+  -2.99
+   0.01
+   3.01
+   6.02
+   9.02
+  12.04
+  15.06
+  18.08
+  21.10
+  24.12
+  27.14
+  30.11
+  33.07
+  36.04
+  39.00
+  41.97
+  45.02
+  48.08
+  51.13
+
+sha256 70fc629d9efd4609c87e77bcd284602f10f4701bc2f502e40f799449986963f1 2555 golden/b25_local3/ts_fid.xf
+sha256 d5035ad869fdbfc82a805be5541eaa5126c2f947ad3855f89347c801c5c115fe 11448 golden/b25_local3/ts_nogaps.fid
+sha256 d5035ad869fdbfc82a805be5541eaa5126c2f947ad3855f89347c801c5c115fe 11448 golden/b25_local3/ts_nogaps.fid~
+sha256 7b3b0ba8853d8e03132a2938bf9185adac87ea7429ab938d2010cd68b3494a90 1209 golden/b25_local3/tsfid.xyz
+sha256 7b3b0ba8853d8e03132a2938bf9185adac87ea7429ab938d2010cd68b3494a90 1209 golden/b25_local3/tsfid.xyz~
+sha256 708b8034f9efd621d9ea83a903948025a15faa3c511bcfffabbe04ccba93c7d3 11275 golden/b25_local3/tslocal.xf
+sha256 708b8034f9efd621d9ea83a903948025a15faa3c511bcfffabbe04ccba93c7d3 11275 golden/b25_local3/tslocal.xf~
+text 51 golden/b25_norestr.out
+restrictalign: No restriction of parameters needed
+
+text 2 golden/b25_norestr.rc
+0
+
+sha256 6c6913fb10b31e4b1d79566c0de2855bbe8688fba46c4f49b0352497d5f3c6ec 973 golden/b25_onestep2.out
+text 2 golden/b25_onestep2.rc
+0
+
+sha256 0424e98c14bdcdf1e2a32beebca376e55805461c6ccf0ea058b88c8842238a4e 2683 golden/b25_onestep2/align.com
+sha256 a0f0fcbc1a40f38d4c11e3e7e457fb9891ebf5b2c321cdc4ed83e18089c01a5f 2684 golden/b25_onestep2/align.com~
+sha256 e2e10ca799e38e7e6b70ffeaa39365bc34f12601ba2b6ba4de6a92b3588f4484 11150 golden/b25_onestep2/align.log
+sha256 70d69119ff986acfef328c85cae3e5531284fa65f996b78082ca6436106b55ce 1248 golden/b25_onestep2/ts.3dmod
+sha256 70d69119ff986acfef328c85cae3e5531284fa65f996b78082ca6436106b55ce 1248 golden/b25_onestep2/ts.3dmod~
+sha256 f2490cc04ecbb18da44bc10fecf08ef307ae395747c2d0e2de4439174a4f8d40 34919 golden/b25_onestep2/ts.resid
+sha256 f2490cc04ecbb18da44bc10fecf08ef307ae395747c2d0e2de4439174a4f8d40 34919 golden/b25_onestep2/ts.resid~
+sha256 dc649c1130b902a7f218b6b2ae944d4daf76f58338dc96daa4276358257db564 37012 golden/b25_onestep2/ts.resmod
+text 280 golden/b25_onestep2/ts.tlt
+ -51.00
+ -48.00
+ -45.00
+ -42.00
+ -39.00
+ -36.00
+ -33.00
+ -30.00
+ -27.00
+ -24.00
+ -21.00
+ -18.00
+ -15.00
+ -12.00
+  -9.00
+  -6.00
+  -3.00
+   0.00
+   3.00
+   6.00
+   9.00
+  12.00
+  15.00
+  18.00
+  21.00
+  24.00
+  27.00
+  30.00
+  33.00
+  36.00
+  39.00
+  42.00
+  45.00
+  48.00
+  51.00
+
+sha256 966bcf3d251a314718630287d7f5c11b48927d5b721424760f800e5bd243d322 2555 golden/b25_onestep2/ts.tltxf
+sha256 966bcf3d251a314718630287d7f5c11b48927d5b721424760f800e5bd243d322 2555 golden/b25_onestep2/ts.tltxf~
+text 280 golden/b25_onestep2/ts.tlt~
+ -51.00
+ -48.00
+ -45.00
+ -42.00
+ -39.00
+ -36.00
+ -33.00
+ -30.00
+ -27.00
+ -24.00
+ -21.00
+ -18.00
+ -15.00
+ -12.00
+  -9.00
+  -6.00
+  -3.00
+   0.00
+   3.00
+   6.00
+   9.00
+  12.00
+  15.00
+  18.00
+  21.00
+  24.00
+  27.00
+  30.00
+  33.00
+  36.00
+  39.00
+  42.00
+  45.00
+  48.00
+  51.00
+
+sha256 966bcf3d251a314718630287d7f5c11b48927d5b721424760f800e5bd243d322 2555 golden/b25_onestep2/ts.xf
+text 280 golden/b25_onestep2/ts.xtilt
+   0.00
+   0.00
+   0.00
+   0.00
+   0.00
+   0.00
+   0.00
+   0.00
+   0.00
+   0.00
+   0.00
+   0.00
+   0.00
+   0.00
+   0.00
+   0.00
+   0.00
+   0.00
+   0.00
+   0.00
+   0.00
+   0.00
+   0.00
+   0.00
+   0.00
+   0.00
+   0.00
+   0.00
+   0.00
+   0.00
+   0.00
+   0.00
+   0.00
+   0.00
+   0.00
+
+text 280 golden/b25_onestep2/ts.xtilt~
+   0.00
+   0.00
+   0.00
+   0.00
+   0.00
+   0.00
+   0.00
+   0.00
+   0.00
+   0.00
+   0.00
+   0.00
+   0.00
+   0.00
+   0.00
+   0.00
+   0.00
+   0.00
+   0.00
+   0.00
+   0.00
+   0.00
+   0.00
+   0.00
+   0.00
+   0.00
+   0.00
+   0.00
+   0.00
+   0.00
+   0.00
+   0.00
+   0.00
+   0.00
+   0.00
+
+text 280 golden/b25_onestep2/ts_fid.tlt
+ -51.00
+ -48.00
+ -45.00
+ -42.00
+ -39.00
+ -36.00
+ -33.00
+ -30.00
+ -27.00
+ -24.00
+ -21.00
+ -18.00
+ -15.00
+ -12.00
+  -9.00
+  -6.00
+  -3.00
+   0.00
+   3.00
+   6.00
+   9.00
+  12.00
+  15.00
+  18.00
+  21.00
+  24.00
+  27.00
+  30.00
+  33.00
+  36.00
+  39.00
+  42.00
+  45.00
+  48.00
+  51.00
+
+sha256 966bcf3d251a314718630287d7f5c11b48927d5b721424760f800e5bd243d322 2555 golden/b25_onestep2/ts_fid.xf
+sha256 655edee3b22df1406b2124fd762a39a55977eb75ef28171c297029ce047100e7 11448 golden/b25_onestep2/ts_nogaps.fid
+sha256 655edee3b22df1406b2124fd762a39a55977eb75ef28171c297029ce047100e7 11448 golden/b25_onestep2/ts_nogaps.fid~
+sha256 14b16d86a16317c6320689439152b97ba22054b9737303c5ee93c9bbf56892cb 1209 golden/b25_onestep2/tsfid.xyz
+sha256 14b16d86a16317c6320689439152b97ba22054b9737303c5ee93c9bbf56892cb 1209 golden/b25_onestep2/tsfid.xyz~
+sha256 529e8d5c1ab03920d87416e14d597dcb6c4fc9f1b3875b128396e3050579336c 1186 golden/b25_permute.out
+text 2 golden/b25_permute.rc
+0
+
+sha256 0424e98c14bdcdf1e2a32beebca376e55805461c6ccf0ea058b88c8842238a4e 2683 golden/b25_permute/align.com
+sha256 a0f0fcbc1a40f38d4c11e3e7e457fb9891ebf5b2c321cdc4ed83e18089c01a5f 2684 golden/b25_permute/align.com~
+sha256 e2e10ca799e38e7e6b70ffeaa39365bc34f12601ba2b6ba4de6a92b3588f4484 11150 golden/b25_permute/align.log
+sha256 70d69119ff986acfef328c85cae3e5531284fa65f996b78082ca6436106b55ce 1248 golden/b25_permute/ts.3dmod
+sha256 70d69119ff986acfef328c85cae3e5531284fa65f996b78082ca6436106b55ce 1248 golden/b25_permute/ts.3dmod~
+sha256 f2490cc04ecbb18da44bc10fecf08ef307ae395747c2d0e2de4439174a4f8d40 34919 golden/b25_permute/ts.resid
+sha256 f2490cc04ecbb18da44bc10fecf08ef307ae395747c2d0e2de4439174a4f8d40 34919 golden/b25_permute/ts.resid~
+sha256 dc649c1130b902a7f218b6b2ae944d4daf76f58338dc96daa4276358257db564 37012 golden/b25_permute/ts.resmod
+text 280 golden/b25_permute/ts.tlt
+ -51.00
+ -48.00
+ -45.00
+ -42.00
+ -39.00
+ -36.00
+ -33.00
+ -30.00
+ -27.00
+ -24.00
+ -21.00
+ -18.00
+ -15.00
+ -12.00
+  -9.00
+  -6.00
+  -3.00
+   0.00
+   3.00
+   6.00
+   9.00
+  12.00
+  15.00
+  18.00
+  21.00
+  24.00
+  27.00
+  30.00
+  33.00
+  36.00
+  39.00
+  42.00
+  45.00
+  48.00
+  51.00
+
+sha256 966bcf3d251a314718630287d7f5c11b48927d5b721424760f800e5bd243d322 2555 golden/b25_permute/ts.tltxf
+sha256 966bcf3d251a314718630287d7f5c11b48927d5b721424760f800e5bd243d322 2555 golden/b25_permute/ts.tltxf~
+text 280 golden/b25_permute/ts.tlt~
+ -51.00
+ -48.00
+ -45.00
+ -42.00
+ -39.00
+ -36.00
+ -33.00
+ -30.00
+ -27.00
+ -24.00
+ -21.00
+ -18.00
+ -15.00
+ -12.00
+  -9.00
+  -6.00
+  -3.00
+   0.00
+   3.00
+   6.00
+   9.00
+  12.00
+  15.00
+  18.00
+  21.00
+  24.00
+  27.00
+  30.00
+  33.00
+  36.00
+  39.00
+  42.00
+  45.00
+  48.00
+  51.00
+
+sha256 966bcf3d251a314718630287d7f5c11b48927d5b721424760f800e5bd243d322 2555 golden/b25_permute/ts.xf
+text 280 golden/b25_permute/ts.xtilt
+   0.00
+   0.00
+   0.00
+   0.00
+   0.00
+   0.00
+   0.00
+   0.00
+   0.00
+   0.00
+   0.00
+   0.00
+   0.00
+   0.00
+   0.00
+   0.00
+   0.00
+   0.00
+   0.00
+   0.00
+   0.00
+   0.00
+   0.00
+   0.00
+   0.00
+   0.00
+   0.00
+   0.00
+   0.00
+   0.00
+   0.00
+   0.00
+   0.00
+   0.00
+   0.00
+
+text 280 golden/b25_permute/ts.xtilt~
+   0.00
+   0.00
+   0.00
+   0.00
+   0.00
+   0.00
+   0.00
+   0.00
+   0.00
+   0.00
+   0.00
+   0.00
+   0.00
+   0.00
+   0.00
+   0.00
+   0.00
+   0.00
+   0.00
+   0.00
+   0.00
+   0.00
+   0.00
+   0.00
+   0.00
+   0.00
+   0.00
+   0.00
+   0.00
+   0.00
+   0.00
+   0.00
+   0.00
+   0.00
+   0.00
+
+text 280 golden/b25_permute/ts_fid.tlt
+ -51.00
+ -48.00
+ -45.00
+ -42.00
+ -39.00
+ -36.00
+ -33.00
+ -30.00
+ -27.00
+ -24.00
+ -21.00
+ -18.00
+ -15.00
+ -12.00
+  -9.00
+  -6.00
+  -3.00
+   0.00
+   3.00
+   6.00
+   9.00
+  12.00
+  15.00
+  18.00
+  21.00
+  24.00
+  27.00
+  30.00
+  33.00
+  36.00
+  39.00
+  42.00
+  45.00
+  48.00
+  51.00
+
+sha256 966bcf3d251a314718630287d7f5c11b48927d5b721424760f800e5bd243d322 2555 golden/b25_permute/ts_fid.xf
+sha256 655edee3b22df1406b2124fd762a39a55977eb75ef28171c297029ce047100e7 11448 golden/b25_permute/ts_nogaps.fid
+sha256 655edee3b22df1406b2124fd762a39a55977eb75ef28171c297029ce047100e7 11448 golden/b25_permute/ts_nogaps.fid~
+sha256 14b16d86a16317c6320689439152b97ba22054b9737303c5ee93c9bbf56892cb 1209 golden/b25_permute/tsfid.xyz
+sha256 14b16d86a16317c6320689439152b97ba22054b9737303c5ee93c9bbf56892cb 1209 golden/b25_permute/tsfid.xyz~
+sha256 fa59d65b78cbacfcda9b05c14a260fad36f548ffc435f7d190bd66f61d300418 1203 golden/b25_robust.out
+text 2 golden/b25_robust.rc
+0
+
+sha256 761e2a030fe24af9cab1de0a4f45a0749f3a200a4615f079a7ccf1c69bbf8806 2699 golden/b25_robust/align.com
+sha256 8841228d7adb53a2acd4ab67b228e107e01c15cce245d70127ebab5a44ea281a 2700 golden/b25_robust/align.com~
+sha256 927d1ce5dda7d7eb83caadb9ca1d8fd36aa984e0f6bd512efdfa70a108812556 11170 golden/b25_robust/align.log
+sha256 70d69119ff986acfef328c85cae3e5531284fa65f996b78082ca6436106b55ce 1248 golden/b25_robust/ts.3dmod
+sha256 0ab96444319d15950624b683d118d762700bd8ceda7f44526455836ebfe68fa5 1248 golden/b25_robust/ts.3dmod~
+sha256 f2490cc04ecbb18da44bc10fecf08ef307ae395747c2d0e2de4439174a4f8d40 34919 golden/b25_robust/ts.resid
+sha256 82fda62f3d279eb4e0a4225a75487a85d7003102bf70f62260bcf30489130591 34919 golden/b25_robust/ts.resid~
+sha256 dc649c1130b902a7f218b6b2ae944d4daf76f58338dc96daa4276358257db564 37012 golden/b25_robust/ts.resmod
+text 280 golden/b25_robust/ts.tlt
+ -51.00
+ -48.00
+ -45.00
+ -42.00
+ -39.00
+ -36.00
+ -33.00
+ -30.00
+ -27.00
+ -24.00
+ -21.00
+ -18.00
+ -15.00
+ -12.00
+  -9.00
+  -6.00
+  -3.00
+   0.00
+   3.00
+   6.00
+   9.00
+  12.00
+  15.00
+  18.00
+  21.00
+  24.00
+  27.00
+  30.00
+  33.00
+  36.00
+  39.00
+  42.00
+  45.00
+  48.00
+  51.00
+
+sha256 966bcf3d251a314718630287d7f5c11b48927d5b721424760f800e5bd243d322 2555 golden/b25_robust/ts.tltxf
+sha256 abd9bfcd1525edcc9e38fac4d25a671f250f04d59feb08a2f42ca97138415edd 2555 golden/b25_robust/ts.tltxf~
+text 280 golden/b25_robust/ts.tlt~
+ -51.00
+ -48.00
+ -45.00
+ -42.00
+ -39.00
+ -36.00
+ -33.00
+ -30.00
+ -27.00
+ -24.00
+ -21.00
+ -18.00
+ -15.00
+ -12.00
+  -9.00
+  -6.00
+  -3.00
+   0.00
+   3.00
+   6.00
+   9.00
+  12.00
+  15.00
+  18.00
+  21.00
+  24.00
+  27.00
+  30.00
+  33.00
+  36.00
+  39.00
+  42.00
+  45.00
+  48.00
+  51.00
+
+sha256 966bcf3d251a314718630287d7f5c11b48927d5b721424760f800e5bd243d322 2555 golden/b25_robust/ts.xf
+text 280 golden/b25_robust/ts.xtilt
+   0.00
+   0.00
+   0.00
+   0.00
+   0.00
+   0.00
+   0.00
+   0.00
+   0.00
+   0.00
+   0.00
+   0.00
+   0.00
+   0.00
+   0.00
+   0.00
+   0.00
+   0.00
+   0.00
+   0.00
+   0.00
+   0.00
+   0.00
+   0.00
+   0.00
+   0.00
+   0.00
+   0.00
+   0.00
+   0.00
+   0.00
+   0.00
+   0.00
+   0.00
+   0.00
+
+text 280 golden/b25_robust/ts.xtilt~
+   0.00
+   0.00
+   0.00
+   0.00
+   0.00
+   0.00
+   0.00
+   0.00
+   0.00
+   0.00
+   0.00
+   0.00
+   0.00
+   0.00
+   0.00
+   0.00
+   0.00
+   0.00
+   0.00
+   0.00
+   0.00
+   0.00
+   0.00
+   0.00
+   0.00
+   0.00
+   0.00
+   0.00
+   0.00
+   0.00
+   0.00
+   0.00
+   0.00
+   0.00
+   0.00
+
+text 280 golden/b25_robust/ts_fid.tlt
+ -51.00
+ -48.00
+ -45.00
+ -42.00
+ -39.00
+ -36.00
+ -33.00
+ -30.00
+ -27.00
+ -24.00
+ -21.00
+ -18.00
+ -15.00
+ -12.00
+  -9.00
+  -6.00
+  -3.00
+   0.00
+   3.00
+   6.00
+   9.00
+  12.00
+  15.00
+  18.00
+  21.00
+  24.00
+  27.00
+  30.00
+  33.00
+  36.00
+  39.00
+  42.00
+  45.00
+  48.00
+  51.00
+
+sha256 966bcf3d251a314718630287d7f5c11b48927d5b721424760f800e5bd243d322 2555 golden/b25_robust/ts_fid.xf
+sha256 655edee3b22df1406b2124fd762a39a55977eb75ef28171c297029ce047100e7 11448 golden/b25_robust/ts_nogaps.fid
+sha256 2da89f95f96928db0d5f2a087065bd4c05385cdba0132bb4e62cca06062b87e5 11448 golden/b25_robust/ts_nogaps.fid~
+sha256 14b16d86a16317c6320689439152b97ba22054b9737303c5ee93c9bbf56892cb 1209 golden/b25_robust/tsfid.xyz
+sha256 74714298c661d5f025b5834768193710bd05e6e4824ec2fc2ced1d755ff77cd8 1209 golden/b25_robust/tsfid.xyz~
+sha256 baae9e336e1e0277949da51966a38dce9ba914fe67937c0a34f38787311c3f0f 755 golden/b3_cv.out
+text 2 golden/b3_cv.rc
+0
+
+sha256 e2e722d9a12a0c640f55bdddc1d0c5629cadda6067a90cfe9ad3222ab2522789 2681 golden/b3_cv/align.com
+sha256 195f8e98014b3d7b303f67eedbaa38f36ced2e4a711c444f69206c576b534519 2682 golden/b3_cv/align.com~
+sha256 64830d11636912bc71b64e9cf7cd2a2c620930f58ccc003e253672c760727f62 9365 golden/b3_cv/align.log
+sha256 7cf3e59e7c14cf4f3c87dd57fb9ba7ac9f7eb3783b15f6b9e62adc834ed244f0 544 golden/b3_cv/ts.3dmod
+sha256 7cf3e59e7c14cf4f3c87dd57fb9ba7ac9f7eb3783b15f6b9e62adc834ed244f0 544 golden/b3_cv/ts.3dmod~
+sha256 5be4ee9f68284c693a1523adb1fb63193bca280f3971b5880277f8de7a1e11be 4427 golden/b3_cv/ts.resid
+sha256 5be4ee9f68284c693a1523adb1fb63193bca280f3971b5880277f8de7a1e11be 4427 golden/b3_cv/ts.resid~
+sha256 80f87422d49a7597d699f250afd985e9e6bbcc66a2af91cabccbb71ccf5cd590 5068 golden/b3_cv/ts.resmod
+text 280 golden/b3_cv/ts.tlt
+ -51.00
+ -48.00
+ -45.00
+ -42.00
+ -39.00
+ -36.00
+ -33.00
+ -30.00
+ -27.00
+ -24.00
+ -21.00
+ -18.00
+ -15.00
+ -12.00
+  -9.00
+  -6.00
+  -3.00
+   0.00
+   3.00
+   6.00
+   9.00
+  12.00
+  15.00
+  18.00
+  21.00
+  24.00
+  27.00
+  30.00
+  33.00
+  36.00
+  39.00
+  42.00
+  45.00
+  48.00
+  51.00
+
+sha256 f5869932f10eacc830d2e688b5618d5d0e83394d03dd4ff40c2f5d105375cf11 2555 golden/b3_cv/ts.tltxf
+sha256 f5869932f10eacc830d2e688b5618d5d0e83394d03dd4ff40c2f5d105375cf11 2555 golden/b3_cv/ts.tltxf~
+text 280 golden/b3_cv/ts.tlt~
+ -51.00
+ -48.00
+ -45.00
+ -42.00
+ -39.00
+ -36.00
+ -33.00
+ -30.00
+ -27.00
+ -24.00
+ -21.00
+ -18.00
+ -15.00
+ -12.00
+  -9.00
+  -6.00
+  -3.00
+   0.00
+   3.00
+   6.00
+   9.00
+  12.00
+  15.00
+  18.00
+  21.00
+  24.00
+  27.00
+  30.00
+  33.00
+  36.00
+  39.00
+  42.00
+  45.00
+  48.00
+  51.00
+
+sha256 f5869932f10eacc830d2e688b5618d5d0e83394d03dd4ff40c2f5d105375cf11 2555 golden/b3_cv/ts.xf
+text 280 golden/b3_cv/ts.xtilt
+   0.00
+   0.00
+   0.00
+   0.00
+   0.00
+   0.00
+   0.00
+   0.00
+   0.00
+   0.00
+   0.00
+   0.00
+   0.00
+   0.00
+   0.00
+   0.00
+   0.00
+   0.00
+   0.00
+   0.00
+   0.00
+   0.00
+   0.00
+   0.00
+   0.00
+   0.00
+   0.00
+   0.00
+   0.00
+   0.00
+   0.00
+   0.00
+   0.00
+   0.00
+   0.00
+
+text 280 golden/b3_cv/ts.xtilt~
+   0.00
+   0.00
+   0.00
+   0.00
+   0.00
+   0.00
+   0.00
+   0.00
+   0.00
+   0.00
+   0.00
+   0.00
+   0.00
+   0.00
+   0.00
+   0.00
+   0.00
+   0.00
+   0.00
+   0.00
+   0.00
+   0.00
+   0.00
+   0.00
+   0.00
+   0.00
+   0.00
+   0.00
+   0.00
+   0.00
+   0.00
+   0.00
+   0.00
+   0.00
+   0.00
+
+text 280 golden/b3_cv/ts_fid.tlt
+ -51.00
+ -48.00
+ -45.00
+ -42.00
+ -39.00
+ -36.00
+ -33.00
+ -30.00
+ -27.00
+ -24.00
+ -21.00
+ -18.00
+ -15.00
+ -12.00
+  -9.00
+  -6.00
+  -3.00
+   0.00
+   3.00
+   6.00
+   9.00
+  12.00
+  15.00
+  18.00
+  21.00
+  24.00
+  27.00
+  30.00
+  33.00
+  36.00
+  39.00
+  42.00
+  45.00
+  48.00
+  51.00
+
+sha256 f5869932f10eacc830d2e688b5618d5d0e83394d03dd4ff40c2f5d105375cf11 2555 golden/b3_cv/ts_fid.xf
+sha256 7e30b285680dcaf8597d7cbb18bed06ed0d88eafc3cb37863ec11e6bd1fb4e5f 1768 golden/b3_cv/ts_nogaps.fid
+sha256 7e30b285680dcaf8597d7cbb18bed06ed0d88eafc3cb37863ec11e6bd1fb4e5f 1768 golden/b3_cv/ts_nogaps.fid~
+text 175 golden/b3_cv/tsfid.xyz
+   1    306.29    414.82     21.96      1    1 Pix:     1.00000 Dim:   512   512
+   2    146.32    176.00     29.71      1    2
+   3     58.28    384.47     23.85      1    3
+
+text 175 golden/b3_cv/tsfid.xyz~
+   1    306.29    414.82     21.96      1    1 Pix:     1.00000 Dim:   512   512
+   2    146.32    176.00     29.71      1    2
+   3     58.28    384.47     23.85      1    3
+
+text 297 golden/b3_nocv.out
+3 beads, 105 total points, 3.0 average points per view
+Original estimated ratio of measurements to unknowns: 1.39
+restrictalign: Changed align.com to achieve measured/unknown ratio of ~2.8
+Switched to solving for one rotation
+Turned off solving for tilt angle
+Turned off solving for magnification
+
+text 2 golden/b3_nocv.rc
+0
+
+sha256 1899d1a93c2d483638703e85849a1fb313b74322e7c0fd05558cd745fca17e32 2682 golden/b3_nocv/align.com
+sha256 195f8e98014b3d7b303f67eedbaa38f36ced2e4a711c444f69206c576b534519 2682 golden/b3_nocv/align.com~
+text 226 golden/b8_nocv.out
+8 beads, 255 total points, 7.3 average points per view
+Original estimated ratio of measurements to unknowns: 3.07
+restrictalign: Changed align.com to achieve measured/unknown ratio of ~3.7
+Turned on grouping of rotations to 5
+
+text 2 golden/b8_nocv.rc
+0
+
+sha256 a86e91f3cc8fb0c909e92c1467f3c537e7e6e3dc9abb692f68f575dd45775b4f 2681 golden/b8_nocv/align.com
+sha256 9cd32e0c87f9a37efee446f5b46689ff3085492408d0c163d4530be050249b28 2682 golden/b8_nocv/align.com~
+text 112 golden/b8_noorder.out
+restrictalign: Changed align.com to achieve measured/unknown ratio of ~3.7
+Turned on grouping of rotations to 5
+
+text 2 golden/b8_noorder.rc
+0
+
+sha256 a86e91f3cc8fb0c909e92c1467f3c537e7e6e3dc9abb692f68f575dd45775b4f 2681 golden/b8_noorder/align.com
+sha256 9cd32e0c87f9a37efee446f5b46689ff3085492408d0c163d4530be050249b28 2682 golden/b8_noorder/align.com~
+text 73 golden/err_badorder.out
+ERROR: restrictalign - Restriction 1 is in the order list more than once
+
+text 2 golden/err_badorder.rc
+1
+
+text 92 golden/err_local_fewbeads.out
+ERROR: restrictalign - There are not enough beads to evaluate areas by requiring more beads
+
+text 2 golden/err_local_fewbeads.rc
+1
+
+text 71 golden/err_noloc.out
+ERROR: restrictalign - Local alignments must be turned on to test them
+
+text 2 golden/err_noloc.rc
+1
+
+text 106 golden/err_nomodel.out
+ERROR: restrictalign - The number of fiducials was not entered and the model file none.fid does not exist
+
+text 2 golden/err_nomodel.rc
+1
+
+text 75 golden/err_permnocv.out
+ERROR: restrictalign - Permutations can be done only with cross-validation
+
+text 2 golden/err_permnocv.rc
+1
+
+text 422 golden/pt_cv.out
+64 full tracks, 1800 unique points, 51.4 average points per view
+Original estimated ratio of measurements to unknowns: 10.78
+WARNING: Tiltalign failed with error with initial values:
+   (error): tiltalign - End of file reached after reading 41 tilt angles, expected 41
+tiltalign -StandardInput: exited with status 1
+-2.0000: error with initial valuesERROR: restrictalign - Tiltalign failed on runs with initial parameters
+
+text 2 golden/pt_cv.rc
+1
+
+text 0 golden/pt_cv/ts.tlt
+
+text 0 golden/pt_cv/ts.tltxf
+
+text 0 golden/pt_cv/ts.xtilt
+
+text 176 golden/pt_nocv.out
+64 full tracks, 1800 unique points, 51.4 average points per view
+Original estimated ratio of measurements to unknowns: 10.78
+restrictalign: No restriction of parameters needed
+
+text 2 golden/pt_nocv.rc
+0
+
+text 124 golden/rotwarn.out
+ERROR: restrictalign - Fix the initial rotation angle as suggested by that warning before trying to optimize the parameters
+
+text 2 golden/rotwarn.rc
+1
+
+sha256 6378c31197f6c053bdefe394d1b84fe361bf4bdf6a6b486d203be29e0cb84858 1248 golden/rotwarn/ts.3dmod
+sha256 1391505f3dd82d3e30c7b49f6462cc935c6f445c862c5d3749992c5ca65a9fe5 34919 golden/rotwarn/ts.resid
+text 280 golden/rotwarn/ts.tlt
+  31.93
+  30.11
+  28.28
+  26.46
+  24.63
+  19.96
+  15.28
+  10.60
+   5.92
+   1.24
+  -0.81
+  -2.86
+  -4.90
+  -6.95
+  -9.00
+   4.50
+  17.99
+  31.49
+  44.98
+  58.48
+  71.97
+  70.15
+  68.33
+  66.51
+  64.69
+  62.86
+  61.04
+  56.27
+  51.50
+  46.74
+  41.97
+  37.20
+  35.09
+  32.98
+  30.87
+
+sha256 3e908d38b75e9565cc3e41819a71fad2a9bc468c24ac22ffbe61a6c59a22b339 2555 golden/rotwarn/ts.tltxf
+text 280 golden/rotwarn/ts.xtilt
+   0.00
+   0.00
+   0.00
+   0.00
+   0.00
+   0.00
+   0.00
+   0.00
+   0.00
+   0.00
+   0.00
+   0.00
+   0.00
+   0.00
+   0.00
+   0.00
+   0.00
+   0.00
+   0.00
+   0.00
+   0.00
+   0.00
+   0.00
+   0.00
+   0.00
+   0.00
+   0.00
+   0.00
+   0.00
+   0.00
+   0.00
+   0.00
+   0.00
+   0.00
+   0.00
+
+sha256 facfd2000b7b593c641e8cfec521a6ba5d7006746c7c0b2c094b43a116b801b2 11448 golden/rotwarn/ts_nogaps.fid
+sha256 ac6ef7748a9e926e91d881e2ab82581d8f7ca88325cf2e199ccd67e42fcdbb1b 1209 golden/rotwarn/tsfid.xyz

@@ -1,43 +1,34 @@
 //! Translation of `IMOD/raptor/suitesparse/cs_compress.c`.
-use super::Cs;
 
-/// C `cs_compress`: converts triplet storage to compressed-column storage.
-pub fn cs_compress(triplet: &Cs) -> Option<Cs> {
-    if !triplet.is_triplet() || triplet.nz < 0 {
+use super::cs::{Cs, cs_triplet};
+use super::cs_cumsum::cs_cumsum;
+use super::cs_malloc::cs_calloc;
+use super::cs_util::{cs_done, cs_spalloc};
+
+/// `cs_compress(T)`: C = compressed-column form of a triplet matrix T.
+pub fn cs_compress(t: &Cs) -> Option<Cs> {
+    if !cs_triplet(t) {
         return None;
     }
-    let entries = triplet.nz as usize;
-    if entries > triplet.column_pointers.len()
-        || entries > triplet.row_indices.len()
-        || entries > triplet.values.len()
-    {
-        return None;
+    let m = t.m;
+    let n = t.n;
+    let ti = &t.i;
+    let tj = &t.p;
+    let tx = t.x.as_ref();
+    let nz = t.nz;
+    let mut c = cs_spalloc(m, n, nz, tx.is_some() as i32, 0);
+    let mut w: Vec<i32> = cs_calloc(n);
+    for k in 0..nz as usize {
+        w[tj[k] as usize] += 1; // column counts
     }
-    let mut counts = vec![0_usize; triplet.columns];
-    for &column in &triplet.column_pointers[..entries] {
-        *counts.get_mut(column)? += 1;
+    cs_cumsum(&mut c.p, &mut w, n); // column pointers
+    for k in 0..nz as usize {
+        let p = w[tj[k] as usize] as usize; // A(i,j) is the pth entry in C
+        w[tj[k] as usize] += 1;
+        c.i[p] = ti[k];
+        if let (Some(cx), Some(tx)) = (c.x.as_mut(), tx) {
+            cx[p] = tx[k];
+        }
     }
-    let mut pointers = vec![0; triplet.columns + 1];
-    for column in 0..triplet.columns {
-        pointers[column + 1] = pointers[column] + counts[column];
-    }
-    let mut insertion = pointers[..triplet.columns].to_vec();
-    let mut rows = vec![0; entries];
-    let mut values = vec![0.0; entries];
-    for entry in 0..entries {
-        let column = triplet.column_pointers[entry];
-        let target = insertion[column];
-        rows[target] = triplet.row_indices[entry];
-        values[target] = triplet.values[entry];
-        insertion[column] += 1;
-    }
-    Some(Cs {
-        nzmax: entries,
-        rows: triplet.rows,
-        columns: triplet.columns,
-        column_pointers: pointers,
-        row_indices: rows,
-        values,
-        nz: -1,
-    })
+    cs_done(c, 1)
 }

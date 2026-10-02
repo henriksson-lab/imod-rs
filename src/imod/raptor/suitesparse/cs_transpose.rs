@@ -1,44 +1,42 @@
 //! Translation of `IMOD/raptor/suitesparse/cs_transpose.c`.
-use super::Cs;
 
-/// C `cs_transpose`: transposes a CSC matrix, retaining values when requested.
-pub fn cs_transpose(matrix: &Cs, retain_values: bool) -> Option<Cs> {
-    if !matrix.is_csc() || matrix.column_pointers.len() < matrix.columns + 1 {
+use super::cs::{Cs, cs_csc};
+use super::cs_cumsum::cs_cumsum;
+use super::cs_malloc::cs_calloc;
+use super::cs_util::{cs_done, cs_spalloc};
+
+/// `cs_transpose(A, values)`: C = A'.
+pub fn cs_transpose(a: &Cs, values: i32) -> Option<Cs> {
+    if !cs_csc(a) {
         return None;
     }
-    let entries = *matrix.column_pointers.get(matrix.columns)?;
-    if entries > matrix.row_indices.len() || (retain_values && entries > matrix.values.len()) {
-        return None;
+    let m = a.m;
+    let n = a.n;
+    let ap = &a.p;
+    let ai = &a.i;
+    let ax = a.x.as_ref();
+    let mut c = cs_spalloc(
+        n,
+        m,
+        ap[n as usize],
+        (values != 0 && ax.is_some()) as i32,
+        0,
+    );
+    let mut w: Vec<i32> = cs_calloc(m);
+    for p in 0..ap[n as usize] as usize {
+        w[ai[p] as usize] += 1; // row counts
     }
-    let mut counts = vec![0_usize; matrix.rows];
-    for &row in &matrix.row_indices[..entries] {
-        *counts.get_mut(row)? += 1;
-    }
-    let mut pointers = vec![0; matrix.rows + 1];
-    for column in 0..matrix.rows {
-        pointers[column + 1] = pointers[column] + counts[column];
-    }
-    let mut insertion = pointers[..matrix.rows].to_vec();
-    let mut rows = vec![0; entries];
-    let mut values = vec![0.0; entries];
-    for column in 0..matrix.columns {
-        for entry in matrix.column_pointers[column]..matrix.column_pointers[column + 1] {
-            let row = matrix.row_indices[entry];
-            let target = insertion[row];
-            rows[target] = column;
-            if retain_values {
-                values[target] = matrix.values[entry];
+    cs_cumsum(&mut c.p, &mut w, m); // row pointers
+    for j in 0..n {
+        for p in ap[j as usize]..ap[j as usize + 1] {
+            let p = p as usize;
+            let q = w[ai[p] as usize] as usize; // place A(i,j) as entry C(j,i)
+            w[ai[p] as usize] += 1;
+            c.i[q] = j;
+            if let Some(cx) = c.x.as_mut() {
+                cx[q] = ax.unwrap()[p];
             }
-            insertion[row] += 1;
         }
     }
-    Some(Cs {
-        nzmax: entries,
-        rows: matrix.columns,
-        columns: matrix.rows,
-        column_pointers: pointers,
-        row_indices: rows,
-        values,
-        nz: -1,
-    })
+    cs_done(c, 1)
 }

@@ -1,738 +1,517 @@
 //! `IMOD/Etomo/src/etomo/ui/swing/WindowSwitch.java`.
 //!
-//! This unit intentionally owns only window-menu/tab state.  Java calls
-//! `EtomoDirector.INSTANCE.setCurrentManager` and obtains close listeners from
-//! `UIHarness`; their Rust equivalents are callback boundaries supplied by the
-//! director once its manager list is fully translated.  No manager action is
-//! invented here.
+//! Keeps the main frame's Window menu and its tabbed pane (one tab per open
+//! manager, each with a close button) in step.  With one manager the main
+//! frame shows its main panel directly; with several it shows the tabbed pane
+//! with the selected manager's main panel on the selected tab.
 
 use std::cell::RefCell;
-use std::rc::Rc;
+use std::rc::{Rc, Weak};
 
+use super::check_box_menu_item::CheckBoxMenuItem;
+use super::ebutton::Ebutton;
+use super::main_panel::MainPanelVirtual;
+use super::menu::Menu;
+use super::tabbed_pane::TabbedPane;
+use super::ui_harness;
+use crate::imod::etomo::base_manager::BaseManager;
+use crate::imod::etomo::etomo_director;
+use crate::imod::etomo::jdk::{
+    ActionEvent, ActionListener, ChangeEvent, ChangeListener, JComponent,
+};
 use crate::imod::etomo::r#type::axis_id::AxisID;
 use crate::imod::etomo::util::unique_hashed_array::UniqueHashedArray;
 use crate::imod::etomo::util::unique_key::UniqueKey;
 
+/// Java private static final `menuItemDividerChar`.
 const MENU_ITEM_DIVIDER_CHAR: char = ':';
+/// Java private static final `menuItemDivider = menuItemDividerChar + " "`.
 const MENU_ITEM_DIVIDER: &str = ": ";
 
-/// The `BaseManager.getMainPanel()` boundary used by Java `WindowSwitch.add`.
-pub trait WindowManager<P> {
-    /// Java `BaseManager.getMainPanel()`.
-    fn get_main_panel(&mut self) -> Option<P>;
+/// Java `public class WindowSwitch`.
+pub struct WindowSwitch {
+    /// Java private `Menu menu = new Menu("Window")`.
+    menu: Rc<Menu>,
+    /// Java private `UniqueHashedArray<TabItems> tabList = null`.
+    tab_list: RefCell<Option<UniqueHashedArray<Rc<TabItems>>>>,
+    /// Java private `TabbedPane tabbedPane = null`.
+    tabbed_pane: RefCell<Option<Rc<TabbedPane>>>,
+    /// Java private `MenuActionListener menuActionListener`.
+    menu_action_listener: ActionListener,
+    /// Java private `TabChangeListener tabChangeListener`.
+    tab_change_listener: ChangeListener,
 }
 
-/// The `MainPanel.saveDisplayState()` boundary used by Java `setTabs`.
-pub trait WindowMainPanel {
-    /// Java `MainPanel.saveDisplayState()`.
-    fn save_display_state(&mut self);
-}
+impl WindowSwitch {
+    /// Java package-private `WindowSwitch()`.
+    pub fn new() -> Rc<WindowSwitch> {
+        Rc::new_cyclic(|self_ref: &Weak<WindowSwitch>| {
+            // MenuActionListener
+            let adaptee = self_ref.clone();
+            let menu_action_listener: ActionListener = Rc::new(move |event: &ActionEvent| {
+                if let Some(adaptee) = adaptee.upgrade() {
+                    adaptee.menu_action(event);
+                }
+            });
+            // TabChangeListener
+            let adaptee = self_ref.clone();
+            let tab_change_listener: ChangeListener = Rc::new(move |event: &ChangeEvent| {
+                if let Some(adaptee) = adaptee.upgrade() {
+                    adaptee.tab_changed(event);
+                }
+            });
+            WindowSwitch {
+                menu: Menu::new("Window"),
+                tab_list: RefCell::new(None),
+                tabbed_pane: RefCell::new(None),
+                menu_action_listener,
+                tab_change_listener,
+            }
+        })
+    }
 
-/// Java `Menu` state as used by this source unit.
-#[derive(Debug)]
-pub struct Menu {
-    name: String,
-    items: Vec<Rc<RefCell<CheckBoxMenuItem>>>,
-}
-
-impl Menu {
-    /// Java `new Menu("Window")`.
-    fn new(name: String) -> Self {
-        Self {
-            name,
-            items: Vec::new(),
+    /// Java package-private `add(BaseManager, AxisID, UniqueKey)`.  Add a
+    /// controller: add a menu item to the menu list, add the controller's
+    /// mainPanel to the mainPanelList, add the menu item to the menu.
+    pub fn add(
+        &self,
+        manager: Option<&'static dyn BaseManager>,
+        axis_id: Option<AxisID>,
+        manager_key: Option<&UniqueKey>,
+    ) {
+        let Some(manager_key) = manager_key else {
+            return;
+        };
+        if self.tab_list.borrow().is_none() {
+            *self.tab_list.borrow_mut() = Some(UniqueHashedArray::new());
+            *self.tabbed_pane.borrow_mut() = Some(TabbedPane::new());
+        }
+        let menu_item = CheckBoxMenuItem::new_void();
+        menu_item
+            .get_component()
+            .add_action_listener(self.menu_action_listener.clone());
+        let index = self
+            .tab_list
+            .borrow()
+            .as_ref()
+            .map_or(0, |list| list.size());
+        menu_item.set_text(Some(&format!(
+            "{}{}{}",
+            index + 1,
+            MENU_ITEM_DIVIDER,
+            manager_key.get_name()
+        )));
+        menu_item.get_component().set_visible(true);
+        self.menu.add(&menu_item.get_component());
+        // Upstream bug fixed (WindowSwitch.java:131): Java calls
+        // manager.getMainPanel() on a null manager (NullPointerException); the
+        // tab gets no main panel then.
+        let main_panel = manager.and_then(|manager| manager.get_main_panel());
+        let close_button = self.create_close_button(axis_id, manager_key);
+        let tab_items = Rc::new(TabItems::new(menu_item, main_panel, close_button));
+        if let Some(tab_list) = self.tab_list.borrow_mut().as_mut() {
+            let _ = tab_list.add(manager_key.clone(), tab_items);
         }
     }
 
-    /// Java `add(JCheckBoxMenuItem)`.
-    fn add(&mut self, item: Rc<RefCell<CheckBoxMenuItem>>) {
-        self.items.push(item);
+    /// Java package-private `rename(UniqueKey, UniqueKey)`.  Rename a window.
+    /// Change the menu item, rekey the menuList and the mainPanelList.
+    pub fn rename(&self, old_manager_key: Option<&UniqueKey>, new_manager_key: Option<&UniqueKey>) {
+        let (Some(old_manager_key), Some(new_manager_key)) = (old_manager_key, new_manager_key)
+        else {
+            return;
+        };
+        if self.tab_list.borrow().is_none() {
+            return;
+        }
+        let tab_items = self
+            .tab_list
+            .borrow()
+            .as_ref()
+            .and_then(|list| list.get(old_manager_key).cloned());
+        let Some(tab_items) = tab_items else {
+            return;
+        };
+        let menu_item = tab_items.get_menu_item();
+        let index = self
+            .tab_list
+            .borrow()
+            .as_ref()
+            .and_then(|list| list.get_index(old_manager_key));
+        let index = index.map_or(-1, |index| index as i64);
+        menu_item.set_text(Some(&format!(
+            "{}{}{}",
+            index + 1,
+            MENU_ITEM_DIVIDER,
+            new_manager_key.get_name()
+        )));
+        let size = {
+            let mut tab_list = self.tab_list.borrow_mut();
+            let tab_list = tab_list.as_mut().unwrap();
+            tab_list.rekey(old_manager_key, new_manager_key.clone());
+            tab_list.size()
+        };
+        let tabbed_pane = self.tabbed_pane.borrow().clone();
+        if size > 1
+            && let Some(tabbed_pane) = tabbed_pane
+            && index >= 0
+            && tabbed_pane.get_component().get_tab_count() as i64 > index
+        {
+            tabbed_pane.set_title_at(index as usize, new_manager_key.get_name());
+        }
+        let _ = etomo_director::INSTANCE.set_current_manager_unique_key(Some(new_manager_key));
     }
 
-    /// Java `remove(JCheckBoxMenuItem)`.
-    fn remove(&mut self, item: &Rc<RefCell<CheckBoxMenuItem>>) {
-        self.items
-            .retain(|stored_item| !Rc::ptr_eq(stored_item, item));
+    /// Java package-private `remove(UniqueKey)`.  Remove a window.  Removes the
+    /// associated menuItem from the menu and from menuList, and the associated
+    /// mainPanel from mainPanelList.
+    pub fn remove(&self, manager_key: Option<&UniqueKey>) {
+        let Some(manager_key) = manager_key else {
+            return;
+        };
+        if self.tab_list.borrow().is_none() {
+            return;
+        }
+        let tab_items = self
+            .tab_list
+            .borrow()
+            .as_ref()
+            .and_then(|list| list.get(manager_key).cloned());
+        let Some(tab_items) = tab_items else {
+            return;
+        };
+        let menu_item = tab_items.get_menu_item();
+        let _index = self
+            .tab_list
+            .borrow()
+            .as_ref()
+            .and_then(|list| list.get_index(manager_key));
+        self.menu.remove(&menu_item.get_component());
+        if let Some(tab_list) = self.tab_list.borrow_mut().as_mut() {
+            tab_list.remove(manager_key);
+        }
+        self.renumber_menu();
     }
 
-    /// Read-only Rust view of Java `Menu` for the Slint menu boundary.
-    pub fn name(&self) -> &str {
-        &self.name
-    }
-
-    /// Read-only Rust view of the Java `Menu` items.
-    pub fn items(&self) -> &[Rc<RefCell<CheckBoxMenuItem>>] {
-        &self.items
-    }
-}
-
-/// Java `JCheckBoxMenuItem` fields used by `WindowSwitch`.
-#[derive(Debug, Default)]
-pub struct CheckBoxMenuItem {
-    text: String,
-    visible: bool,
-    selected: bool,
-}
-
-impl CheckBoxMenuItem {
-    /// Java `new CheckBoxMenuItem()`.
-    fn new() -> Self {
-        Self::default()
-    }
-
-    /// Java `setText`.
-    fn set_text(&mut self, text: String) {
-        self.text = text;
-    }
-
-    /// Java `getText`.
-    fn get_text(&self) -> &str {
-        &self.text
-    }
-
-    /// Java `setVisible`.
-    fn set_visible(&mut self, visible: bool) {
-        self.visible = visible;
-    }
-
-    /// Java `setSelected`.
-    fn set_selected(&mut self, selected: bool) {
-        self.selected = selected;
-    }
-
-    /// Slint read boundary for Java `getText`.
-    pub fn text(&self) -> &str {
-        self.get_text()
-    }
-
-    /// Slint read boundary for Java `isVisible`.
-    pub fn visible(&self) -> bool {
-        self.visible
-    }
-
-    /// Slint read boundary for Java `isSelected`.
-    pub fn selected(&self) -> bool {
-        self.selected
-    }
-}
-
-/// Java `Ebutton` close instance and the listener arguments supplied by
-/// `WindowSwitch.createCloseButton`.
-#[derive(Clone, Debug)]
-pub struct CloseButton {
-    axis_id: AxisID,
-    manager_key: UniqueKey,
-}
-
-impl CloseButton {
-    /// Java `Ebutton.getCloseInstance()` plus the listener creation in
-    /// `WindowSwitch.createCloseButton`.
-    fn get_close_instance(axis_id: AxisID, manager_key: UniqueKey) -> Self {
-        Self {
-            axis_id,
-            manager_key,
+    /// Java private `renumberMenu()`.  Renumbers the menu's displayed text.
+    /// Used when a window is removed.
+    fn renumber_menu(&self) {
+        let size = match self.tab_list.borrow().as_ref() {
+            None => return,
+            Some(tab_list) => tab_list.size(),
+        };
+        for i in 0..size {
+            let tab_items = self
+                .tab_list
+                .borrow()
+                .as_ref()
+                .and_then(|list| list.get_at(i).cloned());
+            let Some(tab_items) = tab_items else {
+                continue;
+            };
+            let menu_item = tab_items.get_menu_item();
+            let text = menu_item.get_component().get_text();
+            // text.substring(text.indexOf(menuItemDividerChar)): the whole text
+            // when there is no divider is Java's substring(-1), which throws;
+            // every item's text is built with the divider.
+            let rest = text
+                .find(MENU_ITEM_DIVIDER_CHAR)
+                .map_or(text.as_str(), |position| &text[position..]);
+            menu_item.set_text(Some(&format!("{}{}", i + 1, rest)));
         }
     }
 
-    /// Java `UIHarness.getCloseActionListener(axisID, managerKey)` arguments.
-    pub fn action_arguments(&self) -> (AxisID, &UniqueKey) {
-        (self.axis_id, &self.manager_key)
-    }
-}
-
-/// Java `TabbedPane` state used by `WindowSwitch`.
-#[derive(Debug, Default)]
-pub struct TabbedPane {
-    tabs: Vec<Tab>,
-    selected_index: Option<usize>,
-    change_listener_installed: bool,
-}
-
-/// One Java `TabbedPane.addTab` entry.
-#[derive(Debug)]
-pub struct Tab {
-    title: String,
-    contains_main_panel: bool,
-    close_button: CloseButton,
-}
-
-impl TabbedPane {
-    /// Java `new TabbedPane()`.
-    fn new() -> Self {
-        Self::default()
+    /// Java package-private `getMenu()`.  Returns the menu.
+    pub fn get_menu(&self) -> Rc<Menu> {
+        self.menu.clone()
     }
 
-    /// Java `getSelectedIndex()`.
-    fn get_selected_index(&self) -> Option<usize> {
-        self.selected_index
+    /// Java package-private `getPanel(UniqueKey)`.  Returns the mainPanel
+    /// associated with key, if there is only one window.  For multiple
+    /// windows, returns a tabbed pane, with the mainPanel on the selected tab.
+    pub fn get_panel(&self, manager_key: Option<&UniqueKey>) -> Option<Rc<JComponent>> {
+        let size = self
+            .tab_list
+            .borrow()
+            .as_ref()
+            .map_or(0, |list| list.size());
+        let Some(manager_key) = manager_key else {
+            return None;
+        };
+        if self.tab_list.borrow().is_none() || size == 0 {
+            return None;
+        }
+        if size == 1 {
+            let tab_items = self
+                .tab_list
+                .borrow()
+                .as_ref()
+                .and_then(|list| list.get(manager_key).cloned());
+            let tab_items = tab_items?;
+            return tab_items
+                .get_main_panel()
+                .map(|panel| panel.main_panel().get_component());
+        }
+        let index = self
+            .tab_list
+            .borrow()
+            .as_ref()
+            .and_then(|list| list.get_index(manager_key))
+            .map_or(-1, |index| index as i32);
+        self.set_tabs(index, manager_key);
+        self.tabbed_pane
+            .borrow()
+            .as_ref()
+            .map(|tabbed_pane| tabbed_pane.get_component())
     }
 
-    /// Java `removeChangeListener(tabChangeListener)`.
-    fn remove_change_listener(&mut self) {
-        self.change_listener_installed = false;
+    /// Java package-private `selectWindow(UniqueKey, boolean)`.  Allows the
+    /// program to select a window.
+    pub fn select_window(&self, manager_key: Option<&UniqueKey>, new_window: bool) {
+        let _ = new_window;
+        let Some(manager_key) = manager_key else {
+            return;
+        };
+        let index = match self.tab_list.borrow().as_ref() {
+            None => return,
+            Some(tab_list) => tab_list
+                .get_index(manager_key)
+                .map_or(-1, |index| index as i32),
+        };
+        self.select_menu_item(index);
     }
 
-    /// Java `removeAll()`.
-    fn remove_all(&mut self) {
-        self.tabs.clear();
-        self.selected_index = None;
+    /// Java private `selectMenuItem(int)`.  Selects a menu item at index.
+    /// Unselects all other menu items.  Index starts from zero.
+    fn select_menu_item(&self, index: i32) {
+        let size = match self.tab_list.borrow().as_ref() {
+            None => return,
+            Some(tab_list) => tab_list.size(),
+        };
+        for i in 0..size {
+            let tab_items = self
+                .tab_list
+                .borrow()
+                .as_ref()
+                .and_then(|list| list.get_at(i).cloned());
+            let Some(tab_items) = tab_items else {
+                continue;
+            };
+            let menu_item = tab_items.get_menu_item().get_component();
+            if i as i32 == index {
+                menu_item.set_selected(true);
+            } else {
+                menu_item.set_selected(false);
+            }
+        }
     }
 
-    /// Java `addTab(String, Component)` plus `setTabComponentAt`.
-    fn add_tab(&mut self, title: String, contains_main_panel: bool, close_button: CloseButton) {
-        self.tabs.push(Tab {
-            title,
-            contains_main_panel,
-            close_button,
+    /// Java private `setTabs(int, UniqueKey)`.  Sets up the tabbed pane:
+    /// remove the change listener (it responds to changes caused by the
+    /// program), remove everything on the pane, add the tabs placing the
+    /// selected mainPanel on the associated tab, select the selected tab, and
+    /// add the change listener back.
+    fn set_tabs(&self, selected_tab_index: i32, manager_key: &UniqueKey) {
+        let _ = manager_key;
+        let size = match self.tab_list.borrow().as_ref() {
+            None => return,
+            Some(tab_list) => tab_list.size(),
+        };
+        let Some(tabbed_pane) = self.tabbed_pane.borrow().clone() else {
+            return;
+        };
+        let pane = tabbed_pane.get_component();
+        // The MainPanel can't always measure its display state accurately when
+        // it is displayed on a tab.  Saving the display state allow MainPanel to
+        // display correctly when it is brought up again.
+        let old_index = pane.get_selected_tab();
+        if old_index != -1 {
+            let tab_items = self
+                .tab_list
+                .borrow()
+                .as_ref()
+                .and_then(|list| list.get_at(old_index as usize).cloned());
+            if let Some(tab_items) = tab_items {
+                let old_main_panel = tab_items.get_main_panel();
+                if let Some(old_main_panel) = old_main_panel {
+                    old_main_panel.main_panel().save_display_state();
+                }
+            }
+        }
+        pane.remove_change_listener(&self.tab_change_listener);
+        pane.remove_all();
+        if size < 2 {
+            return;
+        }
+        for i in 0..size {
+            let tab_items = self
+                .tab_list
+                .borrow()
+                .as_ref()
+                .and_then(|list| list.get_at(i).cloned());
+            let Some(tab_items) = tab_items else {
+                continue;
+            };
+            let text = tab_items.get_menu_item().get_component().get_text();
+            let tab_name = text
+                .find(MENU_ITEM_DIVIDER)
+                .map_or(text.as_str(), |position| {
+                    &text[position + MENU_ITEM_DIVIDER.len()..]
+                })
+                .to_owned();
+            if i as i32 == selected_tab_index {
+                match tab_items.get_main_panel() {
+                    Some(main_panel) => tabbed_pane.add_tab_string_component(
+                        &tab_name,
+                        &main_panel.main_panel().get_component(),
+                    ),
+                    // A tab with a null component: jdk.rs tabs are children, so
+                    // an empty panel stands for the missing main panel.
+                    None => {
+                        tabbed_pane.add_tab_string_component(&tab_name, &JComponent::new_panel())
+                    }
+                }
+                self.add_close_button_to_tab(&tab_items.get_close_button(), &tab_name, i);
+            } else {
+                let place_holder = JComponent::new_label("");
+                place_holder.set_visible(false);
+                tabbed_pane.add_tab_string_component(&tab_name, &place_holder);
+                self.add_close_button_to_tab(&tab_items.get_close_button(), &tab_name, i);
+            }
+        }
+        pane.set_selected_tab(selected_tab_index);
+        pane.add_change_listener(self.tab_change_listener.clone());
+    }
+
+    /// Java private `createCloseButton(AxisID, UniqueKey)`.  If it doesn't
+    /// already exist, create a close button and add an action listener.
+    fn create_close_button(&self, axis_id: Option<AxisID>, manager_key: &UniqueKey) -> Rc<Ebutton> {
+        let tab_items = self
+            .tab_list
+            .borrow()
+            .as_ref()
+            .and_then(|list| list.get(manager_key).cloned());
+        let mut btn_close = None;
+        if let Some(tab_items) = tab_items {
+            btn_close = Some(tab_items.get_close_button());
+        }
+        match btn_close {
+            Some(btn_close) => btn_close,
+            None => {
+                let btn_close = Ebutton::get_close_instance();
+                let close_action_listener = ui_harness::with(|harness| {
+                    harness.get_close_action_listener(axis_id, manager_key.clone())
+                });
+                let listener: ActionListener = Rc::new(move |event: &ActionEvent| {
+                    close_action_listener.action_performed(event)
+                });
+                btn_close.add_action_listener_action_listener(Some(listener));
+                btn_close
+            }
+        }
+    }
+
+    /// Java private `addCloseButtonToTab(Ebutton, String, int)`.
+    fn add_close_button_to_tab(&self, btn_close: &Rc<Ebutton>, name: &str, tab_index: usize) {
+        let pnl_tab = JComponent::new_panel();
+        // Swing layout: new JPanel(new GridBagLayout()); pnlTab.setOpaque(false).
+        let lbl_title = JComponent::new_label(name);
+        //
+        // Swing layout: GridBagConstraints gridx 0, gridy 0, weightx 1.
+        pnl_tab.add(&lbl_title);
+        // Swing layout: gbc.gridx++; pnlTab.add(Box.createRigidArea(FixedDim.x25_y0)).
+        // Swing layout: gbc.gridx++; gbc.weightx = 0.
+        pnl_tab.add(&btn_close.get_component());
+        //
+        if let Some(tabbed_pane) = self.tabbed_pane.borrow().as_ref() {
+            tabbed_pane
+                .get_component()
+                .set_tab_component_at(tab_index, &pnl_tab);
+        }
+    }
+
+    /// Java package-private `menuAction(ActionEvent)`.  Open the specified
+    /// window when the user chooses a window menu item.
+    pub fn menu_action(&self, event: &ActionEvent) {
+        let menu_choice = event.get_action_command().unwrap_or("");
+        let number = menu_choice
+            .find(MENU_ITEM_DIVIDER_CHAR)
+            .and_then(|position| menu_choice[..position].parse::<i32>().ok());
+        // Upstream bug fixed (WindowSwitch.java:397): Java's parseInt/substring
+        // throw on a command without a number; the event is ignored instead.
+        let Some(number) = number else {
+            return;
+        };
+        let new_index = number - 1;
+        self.select_menu_item(new_index);
+        let key = self.tab_list.borrow().as_ref().and_then(|list| {
+            usize::try_from(new_index)
+                .ok()
+                .and_then(|i| list.get_key(i).cloned())
         });
+        let _ = etomo_director::INSTANCE.set_current_manager_unique_key(key.as_ref());
     }
 
-    /// Java `setSelectedIndex(int)`.
-    fn set_selected_index(&mut self, selected_index: usize) {
-        self.selected_index = Some(selected_index);
-    }
-
-    /// Java `addChangeListener(tabChangeListener)`.
-    fn add_change_listener(&mut self) {
-        self.change_listener_installed = true;
-    }
-
-    /// Slint read boundary for Java `getTabCount`/`getTitleAt`.
-    pub fn tabs(&self) -> &[Tab] {
-        &self.tabs
-    }
-
-    /// Slint read boundary for Java `getSelectedIndex`.
-    pub fn selected_index(&self) -> Option<usize> {
-        self.get_selected_index()
-    }
-}
-
-impl Tab {
-    /// Java `setTitleAt` state.
-    pub fn title(&self) -> &str {
-        &self.title
-    }
-
-    /// Whether Java `setTabs` installed a `MainPanel` rather than its hidden
-    /// `JLabel` placeholder.
-    pub fn contains_main_panel(&self) -> bool {
-        self.contains_main_panel
-    }
-
-    /// Java tab close component.
-    pub fn close_button(&self) -> &CloseButton {
-        &self.close_button
+    /// Java package-private `tabChanged(ChangeEvent)`.  Open the specified
+    /// window when the user chooses a tab.
+    pub fn tab_changed(&self, event: &ChangeEvent) {
+        let _ = event;
+        let new_index = self
+            .tabbed_pane
+            .borrow()
+            .as_ref()
+            .map_or(-1, |tabbed_pane| {
+                tabbed_pane.get_component().get_selected_tab()
+            });
+        self.select_menu_item(new_index);
+        // Upstream bug fixed (WindowSwitch.java:408): getKey(-1) throws in
+        // Java when no tab is selected; a null key is passed instead, which
+        // setCurrentManager ignores.
+        let key = self.tab_list.borrow().as_ref().and_then(|list| {
+            usize::try_from(new_index)
+                .ok()
+                .and_then(|i| list.get_key(i).cloned())
+        });
+        let _ = etomo_director::INSTANCE.set_current_manager_unique_key(key.as_ref());
     }
 }
 
-/// Java `WindowSwitch.TabItems`.
-#[derive(Debug)]
-pub struct TabItems<P> {
-    menu_item: Rc<RefCell<CheckBoxMenuItem>>,
-    main_panel: P,
-    close_button: CloseButton,
+/// Java private static final `TabItems`.
+struct TabItems {
+    /// Java private final `JCheckBoxMenuItem menuItem`.
+    menu_item: Rc<CheckBoxMenuItem>,
+    /// Java private final `MainPanel mainPanel`.
+    main_panel: Option<Rc<dyn MainPanelVirtual>>,
+    /// Java private final `Ebutton closeButton`.
+    close_button: Rc<Ebutton>,
 }
 
-impl<P> TabItems<P> {
+impl TabItems {
     /// Java `TabItems(JCheckBoxMenuItem, MainPanel, Ebutton)`.
     fn new(
-        menu_item: Rc<RefCell<CheckBoxMenuItem>>,
-        main_panel: P,
-        close_button: CloseButton,
-    ) -> Self {
-        Self {
+        menu_item: Rc<CheckBoxMenuItem>,
+        main_panel: Option<Rc<dyn MainPanelVirtual>>,
+        close_button: Rc<Ebutton>,
+    ) -> TabItems {
+        TabItems {
             menu_item,
             main_panel,
             close_button,
         }
     }
 
-    /// Java `getMenuItem()`.
-    fn get_menu_item(&self) -> &Rc<RefCell<CheckBoxMenuItem>> {
-        &self.menu_item
+    /// Java private `getMenuItem()`.
+    fn get_menu_item(&self) -> Rc<CheckBoxMenuItem> {
+        self.menu_item.clone()
     }
 
-    /// Java `getMainPanel()`.
-    fn get_main_panel(&self) -> &P {
-        &self.main_panel
+    /// Java private `getMainPanel()`.
+    fn get_main_panel(&self) -> Option<Rc<dyn MainPanelVirtual>> {
+        self.main_panel.clone()
     }
 
-    /// Mutable Rust form of Java `getMainPanel` required by
-    /// `MainPanel.saveDisplayState()`.
-    fn get_main_panel_mut(&mut self) -> &mut P {
-        &mut self.main_panel
-    }
-
-    /// Java `getCloseButton()`.
-    fn get_close_button(&self) -> &CloseButton {
-        &self.close_button
-    }
-}
-
-/// The component returned by Java `WindowSwitch.getPanel`.
-#[derive(Debug)]
-pub enum WindowPanel<'a, P> {
-    /// Java returns `tabItems.getMainPanel()` for one window.
-    MainPanel(&'a P),
-    /// Java returns its one `TabbedPane` for two or more windows.
-    TabbedPane(&'a TabbedPane),
-}
-
-/// Java `WindowSwitch`.
-pub struct WindowSwitch<P: WindowMainPanel> {
-    menu: Menu,
-    tab_list: Option<UniqueHashedArray<TabItems<P>>>,
-    tabbed_pane: Option<TabbedPane>,
-    set_current_manager: Option<Box<dyn FnMut(UniqueKey)>>,
-}
-
-impl<P: WindowMainPanel> WindowSwitch<P> {
-    /// Java `WindowSwitch()`.
-    pub fn new() -> Self {
-        Self {
-            menu: Menu::new("Window".to_owned()),
-            tab_list: None,
-            tabbed_pane: None,
-            set_current_manager: None,
-        }
-    }
-
-    /// Installs the direct Rust endpoint for Java
-    /// `EtomoDirector.INSTANCE.setCurrentManager`.  The endpoint is supplied
-    /// by the translated director; it is not a replacement manager action.
-    pub fn set_current_manager_listener(&mut self, listener: Box<dyn FnMut(UniqueKey)>) {
-        self.set_current_manager = Some(listener);
-    }
-
-    /// Java `add(BaseManager, AxisID, UniqueKey)`.
-    pub fn add<M: WindowManager<P>>(
-        &mut self,
-        manager: &mut M,
-        axis_id: AxisID,
-        manager_key: Option<UniqueKey>,
-    ) {
-        let Some(manager_key) = manager_key else {
-            return;
-        };
-        if self.tab_list.is_none() {
-            self.tab_list = Some(UniqueHashedArray::new());
-            self.tabbed_pane = Some(TabbedPane::new());
-        }
-        let Some(main_panel) = manager.get_main_panel() else {
-            return;
-        };
-        let menu_item = Rc::new(RefCell::new(CheckBoxMenuItem::new()));
-        let index = self.tab_list.as_ref().map_or(0, UniqueHashedArray::size);
-        menu_item.borrow_mut().set_text(format!(
-            "{}{}{}",
-            index + 1,
-            MENU_ITEM_DIVIDER,
-            manager_key.get_name()
-        ));
-        menu_item.borrow_mut().set_visible(true);
-        self.menu.add(Rc::clone(&menu_item));
-        let close_button = self.create_close_button(axis_id, manager_key.clone());
-        let _ = self
-            .tab_list
-            .as_mut()
-            .expect("WindowSwitch.add initializes tab_list")
-            .add(
-                manager_key,
-                TabItems::new(menu_item, main_panel, close_button),
-            );
-    }
-
-    /// Java `rename(UniqueKey, UniqueKey)`.
-    pub fn rename(
-        &mut self,
-        old_manager_key: Option<&UniqueKey>,
-        new_manager_key: Option<UniqueKey>,
-    ) {
-        let (Some(old_manager_key), Some(new_manager_key), Some(tab_list)) =
-            (old_manager_key, new_manager_key, self.tab_list.as_mut())
-        else {
-            return;
-        };
-        let Some(index) = tab_list.get_index(old_manager_key) else {
-            return;
-        };
-        let Some(tab_items) = tab_list.get(old_manager_key) else {
-            return;
-        };
-        tab_items.get_menu_item().borrow_mut().set_text(format!(
-            "{}{}{}",
-            index + 1,
-            MENU_ITEM_DIVIDER,
-            new_manager_key.get_name()
-        ));
-        let _ = tab_list.rekey(old_manager_key, new_manager_key.clone());
-        if tab_list.size() > 1
-            && self
-                .tabbed_pane
-                .as_ref()
-                .is_some_and(|tabbed_pane| tabbed_pane.tabs.len() > index)
-        {
-            self.tabbed_pane.as_mut().expect("checked above").tabs[index].title =
-                new_manager_key.get_name().to_owned();
-        }
-        if let Some(listener) = &mut self.set_current_manager {
-            listener(new_manager_key);
-        }
-    }
-
-    /// Java `remove(UniqueKey)`.
-    pub fn remove(&mut self, manager_key: Option<&UniqueKey>) {
-        let (Some(manager_key), Some(tab_list)) = (manager_key, self.tab_list.as_mut()) else {
-            return;
-        };
-        let Some(tab_items) = tab_list.get(manager_key) else {
-            return;
-        };
-        let menu_item = Rc::clone(tab_items.get_menu_item());
-        self.menu.remove(&menu_item);
-        tab_list.remove(manager_key);
-        self.renumber_menu();
-    }
-
-    /// Java private `renumberMenu()`.
-    fn renumber_menu(&mut self) {
-        let Some(tab_list) = self.tab_list.as_ref() else {
-            return;
-        };
-        for index in 0..tab_list.size() {
-            let Some(tab_items) = tab_list.get_at(index) else {
-                continue;
-            };
-            let menu_item = tab_items.get_menu_item();
-            let text = menu_item.borrow().get_text().to_owned();
-            let Some(divider_index) = text.find(MENU_ITEM_DIVIDER_CHAR) else {
-                continue;
-            };
-            menu_item
-                .borrow_mut()
-                .set_text(format!("{}{}", index + 1, &text[divider_index..]));
-        }
-    }
-
-    /// Java `getMenu()`.
-    pub fn get_menu(&self) -> &Menu {
-        &self.menu
-    }
-
-    /// Java `getPanel(UniqueKey)`.
-    pub fn get_panel(&mut self, manager_key: Option<&UniqueKey>) -> Option<WindowPanel<'_, P>> {
-        let manager_key = manager_key?;
-        let size = self.tab_list.as_ref()?.size();
-        if size == 0 {
-            return None;
-        }
-        if size == 1 {
-            return self
-                .tab_list
-                .as_ref()?
-                .get(manager_key)
-                .map(|tab_items| WindowPanel::MainPanel(tab_items.get_main_panel()));
-        }
-        let selected_tab_index = self.tab_list.as_ref()?.get_index(manager_key)?;
-        self.set_tabs(selected_tab_index, manager_key);
-        self.tabbed_pane.as_ref().map(WindowPanel::TabbedPane)
-    }
-
-    /// Java `selectWindow(UniqueKey, boolean)`.
-    pub fn select_window(&mut self, manager_key: Option<&UniqueKey>, _new_window: bool) {
-        let Some(manager_key) = manager_key else {
-            return;
-        };
-        let Some(index) = self
-            .tab_list
-            .as_ref()
-            .and_then(|tab_list| tab_list.get_index(manager_key))
-        else {
-            return;
-        };
-        self.select_menu_item(index);
-    }
-
-    /// Java private `selectMenuItem(int)`.
-    fn select_menu_item(&mut self, index: usize) {
-        let Some(tab_list) = self.tab_list.as_ref() else {
-            return;
-        };
-        for item_index in 0..tab_list.size() {
-            let Some(tab_items) = tab_list.get_at(item_index) else {
-                continue;
-            };
-            tab_items
-                .get_menu_item()
-                .borrow_mut()
-                .set_selected(item_index == index);
-        }
-    }
-
-    /// Java private `setTabs(int, UniqueKey)`.
-    fn set_tabs(&mut self, selected_tab_index: usize, _manager_key: &UniqueKey) {
-        let old_index = self
-            .tabbed_pane
-            .as_ref()
-            .and_then(TabbedPane::get_selected_index);
-        let (tab_count, tabs) = {
-            let Some(tab_list) = self.tab_list.as_mut() else {
-                return;
-            };
-            if let Some(old_index) = old_index
-                && let Some(tab_items) = tab_list.get_at_mut(old_index)
-            {
-                tab_items.get_main_panel_mut().save_display_state();
-            }
-            let mut tabs = Vec::new();
-            for index in 0..tab_list.size() {
-                let Some(tab_items) = tab_list.get_at(index) else {
-                    continue;
-                };
-                let text = tab_items.get_menu_item().borrow().get_text().to_owned();
-                let Some(divider_index) = text.find(MENU_ITEM_DIVIDER) else {
-                    continue;
-                };
-                tabs.push((
-                    index,
-                    text[divider_index + MENU_ITEM_DIVIDER.len()..].to_owned(),
-                    tab_items.get_close_button().clone(),
-                ));
-            }
-            (tab_list.size(), tabs)
-        };
-        if let Some(tabbed_pane) = self.tabbed_pane.as_mut() {
-            tabbed_pane.remove_change_listener();
-            tabbed_pane.remove_all();
-            if tab_count < 2 {
-                return;
-            }
-            for (index, tab_name, close_button) in &tabs {
-                tabbed_pane.add_tab(
-                    tab_name.clone(),
-                    *index == selected_tab_index,
-                    close_button.clone(),
-                );
-            }
-            tabbed_pane.set_selected_index(selected_tab_index);
-            tabbed_pane.add_change_listener();
-        }
-        for (index, tab_name, close_button) in &tabs {
-            self.add_close_button_to_tab(close_button, tab_name, *index);
-        }
-    }
-
-    /// Java private `createCloseButton(AxisID, UniqueKey)`.
-    fn create_close_button(&mut self, axis_id: AxisID, manager_key: UniqueKey) -> CloseButton {
-        if let Some(tab_items) = self
-            .tab_list
-            .as_ref()
-            .and_then(|tab_list| tab_list.get(&manager_key))
-        {
-            return tab_items.get_close_button().clone();
-        }
-        CloseButton::get_close_instance(axis_id, manager_key)
-    }
-
-    /// Java private `addCloseButtonToTab(Ebutton, String, int)`.
-    fn add_close_button_to_tab(
-        &mut self,
-        _close_button: &CloseButton,
-        _name: &str,
-        _tab_index: usize,
-    ) {
-        // The structural result is stored by `TabbedPane.add_tab`: a title,
-        // `FixedDim.x25_y0` equivalent in the Slint renderer, and the same
-        // close-button object.  Swing's GridBagConstraints themselves have no
-        // retained model outside that component tree.
-    }
-
-    /// Java `menuAction(ActionEvent)`.
-    pub fn menu_action(&mut self, action_command: &str) {
-        let Some(divider_index) = action_command.find(MENU_ITEM_DIVIDER_CHAR) else {
-            return;
-        };
-        let Ok(menu_number) = action_command[..divider_index].parse::<usize>() else {
-            return;
-        };
-        let Some(new_index) = menu_number.checked_sub(1) else {
-            return;
-        };
-        let Some(manager_key) = self
-            .tab_list
-            .as_ref()
-            .and_then(|tab_list| tab_list.get_key(new_index))
-            .cloned()
-        else {
-            return;
-        };
-        self.select_menu_item(new_index);
-        if let Some(listener) = &mut self.set_current_manager {
-            listener(manager_key);
-        }
-    }
-
-    /// Rust callback endpoint for Java `MenuActionListener.actionPerformed`.
-    ///
-    /// The native menu frontend passes the selected item's action command;
-    /// keeping this adapter preserves the Java listener boundary while the
-    /// actual transition remains in `menu_action`.
-    #[allow(non_snake_case)]
-    pub fn actionPerformed(&mut self, action_command: &str) {
-        self.menu_action(action_command);
-    }
-
-    /// Java `tabChanged(ChangeEvent)`.
-    pub fn tab_changed(&mut self, new_index: Option<usize>) {
-        let Some(new_index) = new_index else {
-            return;
-        };
-        let Some(manager_key) = self
-            .tab_list
-            .as_ref()
-            .and_then(|tab_list| tab_list.get_key(new_index))
-            .cloned()
-        else {
-            return;
-        };
-        self.select_menu_item(new_index);
-        if let Some(listener) = &mut self.set_current_manager {
-            listener(manager_key);
-        }
-    }
-
-    /// Rust callback endpoint for Java `TabChangeListener.stateChanged`.
-    ///
-    /// Slint supplies the currently selected tab index directly instead of a
-    /// Swing `ChangeEvent`.
-    #[allow(non_snake_case)]
-    pub fn stateChanged(&mut self, new_index: Option<usize>) {
-        self.tab_changed(new_index);
-    }
-}
-
-impl<P: WindowMainPanel> Default for WindowSwitch<P> {
-    fn default() -> Self {
-        Self::new()
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use std::cell::RefCell;
-    use std::rc::Rc;
-
-    use super::{WindowMainPanel, WindowManager, WindowPanel, WindowSwitch};
-    use crate::imod::etomo::r#type::axis_id::AxisID;
-    use crate::imod::etomo::util::unique_hashed_array::UniqueHashedArray;
-
-    #[derive(Debug)]
-    struct Panel(usize);
-
-    impl WindowMainPanel for Panel {
-        fn save_display_state(&mut self) {
-            self.0 += 1;
-        }
-    }
-
-    struct Manager(Option<Panel>);
-
-    impl WindowManager<Panel> for Manager {
-        fn get_main_panel(&mut self) -> Option<Panel> {
-            self.0.take()
-        }
-    }
-
-    #[test]
-    fn tabs_follow_ordered_keys_and_keep_only_the_selected_panel() {
-        let mut keys = UniqueHashedArray::<()>::new();
-        let first = keys.add_with_name("one.edf".to_owned(), ());
-        let second = keys.add_with_name("two.edf".to_owned(), ());
-        let mut window_switch = WindowSwitch::new();
-        window_switch.add(
-            &mut Manager(Some(Panel(0))),
-            AxisID::Only,
-            Some(first.clone()),
-        );
-        window_switch.add(
-            &mut Manager(Some(Panel(0))),
-            AxisID::Only,
-            Some(second.clone()),
-        );
-        let Some(WindowPanel::TabbedPane(tabs)) = window_switch.get_panel(Some(&second)) else {
-            panic!("two windows must use TabbedPane");
-        };
-        assert_eq!(tabs.tabs().len(), 2);
-        assert!(!tabs.tabs()[0].contains_main_panel());
-        assert!(tabs.tabs()[1].contains_main_panel());
-        assert_eq!(tabs.selected_index(), Some(1));
-        assert_eq!(
-            window_switch.get_menu().items()[1].borrow().text(),
-            "2: two.edf"
-        );
-    }
-
-    #[test]
-    fn remove_renumbers_menu_items() {
-        let mut keys = UniqueHashedArray::<()>::new();
-        let first = keys.add_with_name("one.edf".to_owned(), ());
-        let second = keys.add_with_name("two.edf".to_owned(), ());
-        let mut window_switch = WindowSwitch::new();
-        window_switch.add(
-            &mut Manager(Some(Panel(0))),
-            AxisID::Only,
-            Some(first.clone()),
-        );
-        window_switch.add(
-            &mut Manager(Some(Panel(0))),
-            AxisID::Only,
-            Some(second.clone()),
-        );
-        window_switch.remove(Some(&first));
-        assert_eq!(
-            window_switch.get_menu().items()[0].borrow().text(),
-            "1: two.edf"
-        );
-    }
-
-    #[test]
-    fn source_rename_menu_and_tab_paths_select_the_director_key() {
-        let mut keys = UniqueHashedArray::<()>::new();
-        let first = keys.add_with_name("one.edf".to_owned(), ());
-        let second = keys.add_with_name("two.edf".to_owned(), ());
-        let renamed = keys.add_with_name("two-renamed.edf".to_owned(), ());
-        let selected = Rc::new(RefCell::new(Vec::new()));
-        let mut window_switch = WindowSwitch::new();
-        let selected_listener = Rc::clone(&selected);
-        window_switch.set_current_manager_listener(Box::new(move |key| {
-            selected_listener
-                .borrow_mut()
-                .push(key.get_name().to_owned());
-        }));
-        window_switch.add(
-            &mut Manager(Some(Panel(0))),
-            AxisID::Only,
-            Some(first.clone()),
-        );
-        window_switch.add(
-            &mut Manager(Some(Panel(0))),
-            AxisID::Second,
-            Some(second.clone()),
-        );
-
-        window_switch.rename(Some(&second), Some(renamed.clone()));
-        window_switch.menu_action("1: one.edf");
-        window_switch.tab_changed(Some(1));
-
-        assert_eq!(
-            selected.borrow().as_slice(),
-            ["two-renamed.edf", "one.edf", "two-renamed.edf"]
-        );
-        assert_eq!(
-            window_switch.get_menu().items()[1].borrow().text(),
-            "2: two-renamed.edf"
-        );
-        assert!(window_switch.get_menu().items()[1].borrow().selected());
+    /// Java private `getCloseButton()`.
+    fn get_close_button(&self) -> Rc<Ebutton> {
+        self.close_button.clone()
     }
 }

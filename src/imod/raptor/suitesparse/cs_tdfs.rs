@@ -1,47 +1,29 @@
 //! Translation of `IMOD/raptor/suitesparse/cs_tdfs.c`.
 
-/// C `cs_tdfs`: depth-first postorder of a child-list tree rooted at `root`.
+/// `cs_tdfs(j, k, head, next, post, stack)`: depth-first search and
+/// postorder of a tree rooted at node j.
 pub fn cs_tdfs(
-    root: usize,
-    start: usize,
-    heads: &mut [Option<usize>],
-    next: &[Option<usize>],
-    postorder: &mut Vec<usize>,
-) -> Option<usize> {
-    if root >= heads.len() || start > postorder.len() {
-        return None;
-    }
-    let mut stack = vec![root];
-    let mut index = start;
-    while let Some(node) = stack.last().copied() {
-        if node >= heads.len() {
-            return None;
-        }
-        if let Some(child) = heads[node] {
-            heads[node] = *next.get(child)?;
-            stack.push(child);
+    j: i32,
+    mut k: i32,
+    head: &mut [i32],
+    next: &[i32],
+    post: &mut [i32],
+    stack: &mut [i32],
+) -> i32 {
+    let mut top = 0i32;
+    stack[0] = j; // place j on the stack
+    while top >= 0 {
+        let p = stack[top as usize]; // p = top of stack
+        let i = head[p as usize]; // i = youngest child of p
+        if i == -1 {
+            top -= 1; // p has no unordered children left
+            post[k as usize] = p; // node p is the kth postordered node
+            k += 1;
         } else {
-            stack.pop();
-            if index == postorder.len() {
-                postorder.push(node);
-            } else {
-                *postorder.get_mut(index)? = node;
-            }
-            index += 1;
+            head[p as usize] = next[i as usize]; // remove i from children of p
+            top += 1;
+            stack[top as usize] = i; // start dfs on child node i
         }
     }
-    Some(index)
-}
-
-#[cfg(test)]
-mod tests {
-    use super::cs_tdfs;
-    #[test]
-    fn tdfs_consumes_child_lists_in_source_order() {
-        let mut heads = [Some(1), Some(2), None];
-        let next = [None, None, None];
-        let mut post = vec![];
-        assert_eq!(cs_tdfs(0, 0, &mut heads, &next, &mut post), Some(3));
-        assert_eq!(post, [2, 1, 0]);
-    }
+    k
 }

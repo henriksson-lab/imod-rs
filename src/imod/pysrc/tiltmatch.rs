@@ -23,11 +23,11 @@
 //! with the traceback's last line on standard error and status 1, as the
 //! interpreter does.
 
-use super::batchruntomo::py_str_float;
 use super::imodpy::{
     ImodpyError, call_own_program, cleanup_files, exit_from_imod_error, get_err_strings, glob_glob,
     imod_temp_dir, prnstr, py_int, read_text_file, run_cmd, write_text_file,
 };
+use super::imodpy::{py_fixed, py_float, py_str_float};
 use super::pip::{exit_error, pip_get_boolean, pip_get_integer, pip_get_two_floats};
 use crate::imod::flib::image::xfsimplex::{xfsimplex_final_line, xfsimplex_recording};
 use std::cell::RefCell;
@@ -94,7 +94,7 @@ fn uncaught(message: &str) -> ! {
     let _ = std::io::stdout().flush();
     eprintln!("Traceback (most recent call last):");
     eprintln!("{message}");
-    std::process::exit(1)
+    crate::imod::libcfshr::b3dutil::exit(1)
 }
 
 /// Matches `cleanup` (`tiltmatch.py:44`).
@@ -223,37 +223,6 @@ fn py_min(a: f64, b: f64) -> f64 {
     if b < a { b } else { a }
 }
 
-/// Rust-only: `'{:W.Pf}'.format(x)` of a Python float (`nan`/`inf` spelled
-/// as Python spells them).
-pub fn py_fixed(value: f64, width: usize, precision: usize) -> String {
-    let text = if value.is_nan() {
-        "nan".to_owned()
-    } else if value.is_infinite() {
-        if value < 0. { "-inf" } else { "inf" }.to_owned()
-    } else {
-        format!("{value:.precision$}")
-    };
-    format!("{text:>width$}")
-}
-
-/// Rust-only: `float(text)`; `None` is the ValueError.
-fn py_float(text: &str) -> Option<f64> {
-    let trimmed = text.trim();
-    let lower = trimmed.to_ascii_lowercase();
-    let body = lower.trim_start_matches(['+', '-']);
-    if body == "nan" || body == "inf" || body == "infinity" {
-        return trimmed.parse::<f64>().ok();
-    }
-    if trimmed.is_empty()
-        || !trimmed
-            .chars()
-            .all(|c| c.is_ascii_digit() || matches!(c, '+' | '-' | '.' | 'e' | 'E'))
-    {
-        return None;
-    }
-    trimmed.parse::<f64>().ok()
-}
-
 /// Rust-only: the `except KeyboardInterrupt` arm of `searchPairs`.
 struct Interrupted;
 
@@ -334,6 +303,7 @@ pub fn search_pairs(
     // Set the binning needed to get image size to 512 or less unless the size is
     // bigger than 4K, in which case bin to 1024.  Limit binning to 4 between 2048
     // and 4096.  Set limits on X/Y in search
+    // finite: integer image sizes
     let size = ((nxa * nya) as f64).sqrt().floor() as i64;
     let mut limit = 512;
     if size >= 4096 {
@@ -347,6 +317,7 @@ pub fn search_pairs(
     let ylimit = nyb.div_euclid(XY_LIMIT_FRAC);
 
     // Control the binning in tiltxcorr since speed is more important than high precision
+    // finite: size is an integer
     let xcorr_binning = 12.min(1.max((size as f64 / 900.).round_ties_even() as i64));
 
     // Relax the filter above binning of 5, where antialiasing will be applied

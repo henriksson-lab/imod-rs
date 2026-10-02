@@ -1,483 +1,586 @@
-//! Owned translation of `svlFactor.{h,cpp}`.
+//! Translation of `IMOD/raptor/lasik/svl/lib/pgm/svlFactor.h` and
+//! `svlFactor.cpp`, the parts `MarkersCorrespond` reaches.
+//!
+//! A factor's table lives in an `svlFactorStorage` that several factors may
+//! share (the message-passing engine gives all its intermediate factors one
+//! shared scratch table).  The C++ `svlFactorStorage*` is an
+//! `Rc<RefCell<SvlFactorStorage>>` here: a factor that owns its table holds
+//! the only reference, a shared table is cloned between factors exactly
+//! where the C++ copies the pointer, and `delete` of an owned table is
+//! `Drop`.  `operator[]` is [`SvlFactor::get`]/[`SvlFactor::set`].
 
-pub const FACTOR_TOLERANCE: f64 = 1.0e-9;
-#[derive(Clone, Debug, Default, PartialEq)]
+use std::cell::RefCell;
+use std::collections::BTreeMap;
+use std::rc::Rc;
+
+use crate::imod::raptor::lasik::svl::lib::base::svl_logger::{SvlLogLevel, svl_log};
+
+/// The `SVL_ASSERT(C)` macro (`svlLogger.h:51`): a fatal log (which aborts)
+/// when `cond` is false.  `text` is the stringised condition.
+fn svl_assert(cond: bool, line: u32, text: &str) {
+    if !cond {
+        svl_log(SvlLogLevel::Fatal, "svlFactor.cpp", line, text);
+    }
+}
+
+/// `svlFactor::_tol` (`svlFactor.cpp:50`).
+pub const TOL: f64 = 1.0e-9;
+
+/// `class svlFactorStorage` (`svlFactor.h:169`).
+#[derive(Clone, Debug)]
 pub struct SvlFactorStorage {
-    pub shared: bool,
+    /// Shared factor.
+    b_shared: bool,
+    /// Amount of memory allocated.
+    data_size: i32,
+    /// Memory allocation (`new double[]`, uninitialised in C++; zero here
+    /// until written).
     pub data: Vec<f64>,
 }
 
-/// `svlFactorStorage::svlFactorStorage` (`svlFactor.cpp:1004`).
-pub fn svl_factor_storage(size: usize, shared: bool) -> SvlFactorStorage {
-    SvlFactorStorage::new(size, shared)
-}
 impl SvlFactorStorage {
-    pub fn new(size: usize, shared: bool) -> Self {
-        Self {
-            shared,
-            data: vec![0.; size],
+    /// `svlFactorStorage(int nSize, bool bShared)` (`svlFactor.cpp:1004`).
+    pub fn new(n_size: i32, b_shared: bool) -> SvlFactorStorage {
+        let mut s = SvlFactorStorage {
+            b_shared,
+            data_size: 0,
+            data: Vec::new(),
+        };
+        s.reserve(n_size);
+        s
+    }
+
+    /// `isShared()`.
+    pub fn is_shared(&self) -> bool {
+        self.b_shared
+    }
+
+    /// `reserve(nSize)` (`svlFactor.cpp:1020`): grow the allocation, keeping
+    /// the first `_dataSize` entries.
+    pub fn reserve(&mut self, n_size: i32) {
+        if self.data_size < n_size {
+            self.data.resize(n_size as usize, 0.0);
+            self.data_size = n_size;
         }
     }
-    pub fn reserve(&mut self, size: usize) {
-        self.data.resize(size, 0.)
+
+    /// `fill(v, nSize)` (`svlFactor.cpp:1054`).
+    pub fn fill(&mut self, v: f64, n_size: i32) {
+        let mut n_size = n_size;
+        if n_size < 0 {
+            n_size = self.data_size;
+        }
+        self.reserve(n_size);
+        for x in &mut self.data[..n_size as usize] {
+            *x = v;
+        }
     }
-    pub fn zero(&mut self, size: Option<usize>) {
-        let size = size.unwrap_or(self.data.len());
-        self.data[..size].fill(0.)
-    }
-    pub fn fill(&mut self, value: f64, size: Option<usize>) {
-        let size = size.unwrap_or(self.data.len());
-        self.data[..size].fill(value)
-    }
-    pub fn copy(&mut self, values: &[f64], size: Option<usize>) {
-        let n = size.unwrap_or(values.len());
-        self.reserve(n);
-        self.data[..n].copy_from_slice(&values[..n])
+
+    /// `copy(const svlFactorStorage* p, int nSize)` (`svlFactor.cpp:1082`).
+    pub fn copy(&mut self, p: &SvlFactorStorage, n_size: i32) {
+        svl_assert(
+            p.data_size >= n_size,
+            1084,
+            "(p != NULL) && (p->_dataSize >= nSize)",
+        );
+        let mut n_size = n_size;
+        if n_size < 0 {
+            n_size = self.data_size;
+        }
+        self.reserve(n_size);
+        let n = n_size as usize;
+        self.data[..n].copy_from_slice(&p.data[..n]);
     }
 }
-#[derive(Clone, Debug, Default, PartialEq)]
+
+/// A C++ `svlFactorStorage*`.
+pub type StorageRef = Rc<RefCell<SvlFactorStorage>>;
+
+/// `class svlFactor` (`svlFactor.h:62`).
+#[derive(Debug)]
 pub struct SvlFactor {
-    pub variables: Vec<i32>,
-    pub cards: Vec<usize>,
-    pub stride: Vec<usize>,
-    pub data: Vec<f64>,
-}
-
-/// `svlFactor::svlFactor()` (`svlFactor.cpp:77`).
-pub fn svl_factor() -> SvlFactor {
-    SvlFactor::new()
-}
-
-/// `svlFactor::svlFactor(int v, int d)` (`svlFactor.cpp:84`).
-pub fn svl_factor_with_variable(variable: i32, cardinality: usize) -> Result<SvlFactor, String> {
-    SvlFactor::with_variable(variable, cardinality)
-}
-
-/// `svlFactor::svlFactor(const vector<int>&, const vector<int>&)`
-/// (`svlFactor.cpp:92`).
-pub fn svl_factor_with_variables(
+    /// List of variables in factor (by index).
     variables: Vec<i32>,
-    cards: Vec<usize>,
-) -> Result<SvlFactor, String> {
-    SvlFactor::with_variables(variables, cards)
+    /// Index of variable in factor (by var).
+    var_index: BTreeMap<i32, i32>,
+    /// Cardinality of each variable (by index).
+    cards: Vec<i32>,
+    /// Stride of variable in table (by index).
+    stride: Vec<i32>,
+    /// Total size of factor.
+    n_size: i32,
+    data: Option<StorageRef>,
 }
 
-/// `svlFactor::svlFactor(const svlFactor&)` (`svlFactor.cpp:101`).
-pub fn svl_factor_copy(factor: &SvlFactor) -> SvlFactor {
-    factor.clone()
+impl Default for SvlFactor {
+    fn default() -> SvlFactor {
+        SvlFactor::new()
+    }
 }
-impl SvlFactor {
-    pub fn new() -> Self {
-        Self::default()
-    }
-    pub fn with_variable(variable: i32, card: usize) -> Result<Self, String> {
-        Self::with_variables(vec![variable], vec![card])
-    }
-    pub fn with_variables(variables: Vec<i32>, cards: Vec<usize>) -> Result<Self, String> {
-        let mut result = Self::new();
-        result.add_variables(&variables, &cards)?;
-        Ok(result)
-    }
-    pub fn from_parts(
-        variables: Vec<i32>,
-        cards: Vec<usize>,
-        data: Option<Vec<f64>>,
-    ) -> Result<Self, String> {
-        let mut result = Self::with_variables(variables, cards)?;
-        if let Some(data) = data {
-            if data.len() != result.data.len() {
-                return Err("factor data size mismatch".into());
+
+/// `svlFactor(const svlFactor& phi)` (`svlFactor.cpp:101`): a shared table is
+/// shared with the copy, an owned one is copied.
+impl Clone for SvlFactor {
+    fn clone(&self) -> SvlFactor {
+        let mut data = None;
+        if let Some(d) = &self.data {
+            if d.borrow().is_shared() {
+                data = Some(Rc::clone(d));
+            } else {
+                let mut storage = SvlFactorStorage::new(self.n_size, false);
+                let n = storage.data_size;
+                storage.copy(&d.borrow(), n);
+                data = Some(Rc::new(RefCell::new(storage)));
             }
-            result.data = data;
         }
-        Ok(result)
+        SvlFactor {
+            variables: self.variables.clone(),
+            var_index: self.var_index.clone(),
+            cards: self.cards.clone(),
+            stride: self.stride.clone(),
+            n_size: self.n_size,
+            data,
+        }
     }
+}
+
+impl SvlFactor {
+    /// `svlFactor()` (`svlFactor.cpp:77`).
+    pub fn new() -> SvlFactor {
+        SvlFactor {
+            variables: Vec::new(),
+            var_index: BTreeMap::new(),
+            cards: Vec::new(),
+            stride: Vec::new(),
+            n_size: 0,
+            data: None,
+        }
+    }
+
+    /// `svlFactor(svlFactorStorage* sharedStorage)` (`svlFactor.cpp:168`).
+    pub fn with_shared_storage(shared_storage: &StorageRef) -> SvlFactor {
+        svl_assert(
+            shared_storage.borrow().is_shared(),
+            173,
+            "(sharedStorage != NULL) && (sharedStorage->isShared())",
+        );
+        let mut f = SvlFactor::new();
+        f.data = Some(Rc::clone(shared_storage));
+        f
+    }
+
+    /// `empty()`.
     pub fn empty(&self) -> bool {
         self.variables.is_empty()
     }
-    pub fn size(&self) -> usize {
-        self.data.len()
+
+    /// `size()`.
+    pub fn size(&self) -> i32 {
+        self.n_size
     }
-    pub fn num_vars(&self) -> usize {
-        self.variables.len()
+
+    /// `numVars()`.
+    pub fn num_vars(&self) -> i32 {
+        self.variables.len() as i32
     }
+
+    /// `cards()`.
+    pub fn cards(&self) -> &[i32] {
+        &self.cards
+    }
+
+    /// `hasVariable(v)`.
     pub fn has_variable(&self, v: i32) -> bool {
-        self.variables.contains(&v)
+        self.var_index.contains_key(&v)
     }
-    pub fn variable_id(&self, index: usize) -> Option<i32> {
-        self.variables.get(index).copied()
-    }
-    pub fn var_cardinality(&self, v: i32) -> Option<usize> {
-        self.variables
-            .iter()
-            .position(|&x| x == v)
-            .map(|i| self.cards[i])
-    }
-    pub fn add_variable(&mut self, v: i32, d: usize) -> Result<usize, String> {
-        self.add_variables(&[v], &[d])
-    }
-    pub fn add_variables(&mut self, vars: &[i32], cards: &[usize]) -> Result<usize, String> {
-        if vars.len() != cards.len()
-            || cards.iter().any(|&d| d == 0)
-            || vars.iter().any(|v| self.has_variable(*v))
-        {
-            return Err("invalid factor variable".into());
-        }
-        for (&v, &d) in vars.iter().zip(cards) {
-            let old_size = self.data.len();
-            self.variables.push(v);
-            self.cards.push(d);
-            self.stride.push(if self.stride.is_empty() {
-                1
-            } else {
-                self.data.len()
-            });
-            let next = if self.data.is_empty() {
-                d
-            } else {
-                self.data.len() * d
-            };
-            self.data = if old_size == 0 {
-                vec![1.; next]
-            } else {
-                (0..next).map(|i| self.data[i % old_size]).collect()
-            };
-        }
-        Ok(self.data.len())
-    }
-    pub fn add_factor_variables(&mut self, other: &Self) -> Result<usize, String> {
-        let vars: Vec<_> = other
-            .variables
-            .iter()
-            .enumerate()
-            .filter_map(|(i, &v)| (!self.has_variable(v)).then_some((v, other.cards[i])))
-            .collect();
-        self.add_variables(
-            &vars.iter().map(|x| x.0).collect::<Vec<_>>(),
-            &vars.iter().map(|x| x.1).collect::<Vec<_>>(),
-        )
-    }
-    pub fn index_of(&self, assignment: &[usize]) -> Option<usize> {
-        if assignment.len() != self.cards.len()
-            || assignment.iter().zip(&self.cards).any(|(&v, &c)| v >= c)
-        {
-            None
-        } else {
-            Some(
-                assignment
-                    .iter()
-                    .zip(&self.stride)
-                    .map(|(&v, &s)| v * s)
-                    .sum(),
-            )
+
+    /// `isShared()` (`svlFactor.h:230`).
+    pub fn is_shared(&self) -> bool {
+        match &self.data {
+            None => false,
+            Some(d) => d.borrow().is_shared(),
         }
     }
-    pub fn index_of_variable(&self, var: i32, val: usize, index: usize) -> Option<usize> {
-        let i = self.variables.iter().position(|&v| v == var)?;
-        if val >= self.cards[i] || index >= self.size() {
-            return None;
+
+    /// The table (`_data`); `None` for a factor with no storage.
+    pub fn storage(&self) -> Option<&StorageRef> {
+        self.data.as_ref()
+    }
+
+    /// `operator[](index) const`.
+    pub fn get(&self, index: usize) -> f64 {
+        self.data.as_ref().unwrap().borrow().data[index]
+    }
+
+    /// `operator[](index) = value`.
+    pub fn set(&mut self, index: usize, value: f64) {
+        self.data.as_ref().unwrap().borrow_mut().data[index] = value;
+    }
+
+    /// `addVariable(v, d)` (`svlFactor.cpp:208`).
+    pub fn add_variable(&mut self, v: i32, d: i32) -> i32 {
+        let vvec = vec![v];
+        let dvec = vec![d];
+        self.add_variables(&vvec, &dvec)
+    }
+
+    /// `addVariables(const vector<int>& v, const vector<int>& d)`
+    /// (`svlFactor.cpp:215`).
+    pub fn add_variables(&mut self, v: &[i32], d: &[i32]) -> i32 {
+        svl_assert(v.len() == d.len(), 217, "v.size() == d.size()");
+
+        let old_size = self.n_size;
+        for i in 0..v.len() {
+            svl_assert(d[i] >= 1, 221, "d[i] >= 1");
+            svl_assert(!self.has_variable(v[i]), 222, "!hasVariable(v[i])");
+
+            self.variables.push(v[i]);
+            self.var_index.insert(v[i], self.variables.len() as i32 - 1);
+            self.cards.push(d[i]);
+            self.stride
+                .push(if self.n_size == 0 { 1 } else { self.n_size });
+            self.n_size = *self.stride.last().unwrap() * d[i];
         }
-        let old = index / self.stride[i] % self.cards[i];
-        usize::try_from(index as isize + (val as isize - old as isize) * self.stride[i] as isize)
-            .ok()
-    }
-    pub fn value_of(&self, var: i32, index: usize) -> Option<usize> {
-        let i = self.variables.iter().position(|&v| v == var)?;
-        Some(index / self.stride[i] % self.cards[i])
-    }
-    pub fn assignment_of(&self, index: usize) -> Option<Vec<usize>> {
-        (index < self.size()).then(|| {
-            self.cards
-                .iter()
-                .enumerate()
-                .map(|(i, &c)| index / self.stride[i] % c)
-                .collect()
-        })
-    }
-    pub fn index_of_max(&self) -> Option<usize> {
-        self.data
-            .iter()
-            .enumerate()
-            .max_by(|a, b| a.1.total_cmp(b.1))
-            .map(|x| x.0)
-    }
-    pub fn index_of_min(&self) -> Option<usize> {
-        self.data
-            .iter()
-            .enumerate()
-            .min_by(|a, b| a.1.total_cmp(b.1))
-            .map(|x| x.0)
-    }
-    pub fn initialize(&mut self) -> &mut Self {
-        self.fill(1.)
-    }
-    pub fn fill(&mut self, value: f64) -> &mut Self {
-        self.data.fill(value);
-        self
-    }
-    pub fn scale(&mut self, value: f64) -> &mut Self {
-        for x in &mut self.data {
-            *x *= value;
+
+        if old_size == self.n_size {
+            return self.n_size;
         }
-        self
-    }
-    pub fn offset(&mut self, value: f64) -> &mut Self {
-        for x in &mut self.data {
-            *x += value;
-        }
-        self
-    }
-    pub fn normalize(&mut self) -> &mut Self {
-        let total: f64 = self.data.iter().sum();
-        if total > 0. {
-            self.scale(1. / total);
-        } else if !self.data.is_empty() {
-            self.fill(1. / self.size() as f64);
-        }
-        self
-    }
-    fn remove_variable(&mut self, index: usize, mode: impl Fn(f64, f64) -> f64, initial: f64) {
-        let stride = self.stride[index];
-        let card = self.cards[index];
-        let new_size = self.size() / card;
-        let mut result = vec![initial; new_size];
-        for out in 0..new_size {
-            let base = (out / stride) * stride * card + out % stride;
-            for value in 0..card {
-                result[out] = mode(result[out], self.data[base + value * stride]);
+
+        match &self.data {
+            None => {
+                self.data = Some(Rc::new(RefCell::new(SvlFactorStorage::new(
+                    self.n_size,
+                    false,
+                ))));
+                self.initialize();
             }
-        }
-        self.variables.remove(index);
-        self.cards.remove(index);
-        self.data = result;
-        self.stride = (0..self.cards.len())
-            .map(|i| self.cards[..i].iter().product::<usize>().max(1))
-            .collect();
-    }
-    pub fn marginalize(&mut self, var: i32) -> Result<&mut Self, String> {
-        let index = self
-            .variables
-            .iter()
-            .position(|&v| v == var)
-            .ok_or("unknown factor variable")?;
-        if self.num_vars() == 1 {
-            *self = Self::new()
-        } else {
-            self.remove_variable(index, |a, b| a + b, 0.)
-        }
-        Ok(self)
-    }
-    pub fn maximize(&mut self, var: i32) -> Result<&mut Self, String> {
-        let index = self
-            .variables
-            .iter()
-            .position(|&v| v == var)
-            .ok_or("unknown factor variable")?;
-        if self.num_vars() == 1 {
-            *self = Self::new()
-        } else {
-            self.remove_variable(index, f64::max, -f64::MAX)
-        }
-        Ok(self)
-    }
-    pub fn reduce(&mut self, var: i32, val: usize) -> Result<&mut Self, String> {
-        let index = self
-            .variables
-            .iter()
-            .position(|&v| v == var)
-            .ok_or("unknown factor variable")?;
-        if val >= self.cards[index] {
-            return Err("invalid factor value".into());
-        }
-        if self.num_vars() == 1 {
-            *self = Self::new()
-        } else {
-            let stride = self.stride[index];
-            let card = self.cards[index];
-            let mut result = Vec::with_capacity(self.size() / card);
-            for out in 0..self.size() / card {
-                let base = (out / stride) * stride * card + out % stride;
-                result.push(self.data[base + val * stride]);
-            }
-            self.variables.remove(index);
-            self.cards.remove(index);
-            self.data = result;
-            self.stride = (0..self.cards.len())
-                .map(|i| self.cards[..i].iter().product::<usize>().max(1))
-                .collect();
-        }
-        Ok(self)
-    }
-    fn combine(&mut self, other: &Self, op: impl Fn(f64, f64) -> f64) -> Result<(), String> {
-        if other.empty() {
-            return Ok(());
-        }
-        if self.empty() {
-            *self = other.clone();
-            if op(2., 3.) != 6. {
-                for x in &mut self.data {
-                    *x = op(0., *x)
+            Some(d) if d.borrow().is_shared() => {
+                let n_size = self.n_size;
+                d.borrow_mut().reserve(n_size);
+                // replicate table
+                if old_size != 0 {
+                    let mut storage = d.borrow_mut();
+                    let mut i = old_size;
+                    while i < n_size {
+                        let (head, rest) = storage.data.split_at_mut(i as usize);
+                        rest[..old_size as usize].copy_from_slice(&head[..old_size as usize]);
+                        i += old_size;
+                    }
+                } else {
+                    self.initialize();
                 }
             }
-            return Ok(());
-        }
-        for (i, &v) in other.variables.iter().enumerate() {
-            if let Some(c) = self.var_cardinality(v) {
-                if c != other.cards[i] {
-                    return Err("factor cardinality mismatch".into());
+            Some(d) => {
+                let mut new_data = SvlFactorStorage::new(self.n_size, false);
+                // replicate table
+                svl_assert(old_size != 0, 257, "oldSize != 0");
+                {
+                    let old = d.borrow();
+                    let mut i = 0;
+                    while i < self.n_size {
+                        new_data.data[i as usize..(i + old_size) as usize]
+                            .copy_from_slice(&old.data[..old_size as usize]);
+                        i += old_size;
+                    }
                 }
+                self.data = Some(Rc::new(RefCell::new(new_data)));
+            }
+        }
+
+        self.n_size
+    }
+
+    /// `addVariables(const svlFactor& phi)` (`svlFactor.cpp:268`).
+    pub fn add_variables_of(&mut self, phi: &SvlFactor) -> i32 {
+        let mut vvec = Vec::new();
+        let mut dvec = Vec::new();
+
+        for i in 0..phi.variables.len() {
+            let v = phi.variables[i];
+            if self.has_variable(v) {
+                svl_assert(
+                    self.cards[self.var_index[&v] as usize] == phi.cards[i],
+                    276,
+                    "_cards[_varIndex.find(v)->second] == phi._cards[i]",
+                );
+                continue;
+            }
+            vvec.push(v);
+            dvec.push(phi.cards[i]);
+        }
+
+        self.add_variables(&vvec, &dvec)
+    }
+
+    /// `indexOf(var, val, indx)` (`svlFactor.h:234`).
+    fn index_of(&self, var: i32, val: i32, indx: i32) -> i32 {
+        let vi = self.var_index[&var] as usize;
+        let mut val = val;
+        let mut indx = indx;
+        val -= (indx / self.stride[vi]) % self.cards[vi];
+        indx += val * self.stride[vi];
+        indx
+    }
+
+    /// `valueOf(var, indx)` (`svlFactor.h:270`).
+    fn value_of(&self, var: i32, indx: i32) -> i32 {
+        let vi = self.var_index[&var] as usize;
+        (indx / self.stride[vi]) % self.cards[vi]
+    }
+
+    /// `initialize()` (`svlFactor.cpp:311`).
+    pub fn initialize(&mut self) -> &mut SvlFactor {
+        self.fill(1.0)
+    }
+
+    /// `fill(alpha)` (`svlFactor.cpp:316`).
+    pub fn fill(&mut self, alpha: f64) -> &mut SvlFactor {
+        match &self.data {
+            None => return self,
+            Some(d) => d.borrow_mut().fill(alpha, self.n_size),
+        }
+        self
+    }
+
+    /// `normalize()` (`svlFactor.cpp:345`).
+    pub fn normalize(&mut self) -> &mut SvlFactor {
+        let Some(d) = &self.data else {
+            return self;
+        };
+        let n = self.n_size as usize;
+        let mut storage = d.borrow_mut();
+        let mut total = 0.0f64;
+        for i in 0..n {
+            total += storage.data[i];
+        }
+        if total > 0.0 {
+            if total != 1.0 {
+                let inv_total = 1.0 / total;
+                for i in 0..n {
+                    storage.data[i] *= inv_total;
+                }
+            }
+        } else {
+            storage.fill(1.0 / n as f64, n as i32);
+        }
+        drop(storage);
+        self
+    }
+
+    /// `product(const svlFactor& phi)` (`svlFactor.cpp:557`).
+    pub fn product(&mut self, phi: &SvlFactor) -> &mut SvlFactor {
+        let mut index: i32;
+
+        // singleton factor
+        if phi.n_size == 0 {
+            return self;
+        } else if self.n_size == 0 {
+            self.assign(phi);
+            return self;
+        }
+
+        // check variables are the correct size and add missing to this
+        for i in 0..phi.variables.len() {
+            if self.has_variable(phi.variables[i]) {
+                index = self.var_index[&phi.variables[i]];
+                svl_assert(
+                    self.cards[index as usize] == phi.cards[i],
+                    579,
+                    "_cards[index] == phi._cards[i]",
+                );
             } else {
-                self.add_variable(v, other.cards[i])?;
+                // replicates factor entries to all values of new variable
+                self.add_variable(phi.variables[i], phi.cards[i]);
             }
         }
-        for index in 0..self.size() {
-            let mut other_index = 0;
-            for (i, &v) in other.variables.iter().enumerate() {
-                other_index += self.value_of(v, index).unwrap() * other.stride[i];
+
+        let phi_data = phi.data.as_ref().unwrap().borrow();
+        let mut data = self.data.as_ref().unwrap().borrow_mut();
+
+        // special case for multiplying by a single variable factor
+        if phi.variables.len() == 1 {
+            index = self.var_index[&phi.variables[0]];
+            let stride = self.stride[index as usize];
+            let mut i = 0i32;
+            for k in 0..self.n_size {
+                data.data[k as usize] *= phi_data.data[i as usize];
+                if k % stride == stride - 1 {
+                    i = (i + 1) % phi.n_size;
+                }
             }
-            self.data[index] = op(self.data[index], other.data[other_index]);
+            drop(data);
+            drop(phi_data);
+            return self;
         }
-        Ok(())
+
+        // full factor multiplication
+        for k in 0..self.n_size {
+            let mut k_phi = 0;
+            for &var in &phi.variables {
+                let value = self.value_of(var, k);
+                k_phi = phi.index_of(var, value, k_phi);
+            }
+            data.data[k as usize] *= phi_data.data[k_phi as usize];
+        }
+        drop(data);
+        drop(phi_data);
+        self
     }
-    pub fn product(&mut self, other: &Self) -> Result<&mut Self, String> {
-        self.combine(other, |a, b| a * b)?;
-        Ok(self)
-    }
-    pub fn divide(&mut self, other: &Self) -> Result<&mut Self, String> {
-        self.combine(other, |a, b| a / b)?;
-        Ok(self)
-    }
-    pub fn add(&mut self, other: &Self) -> Result<&mut Self, String> {
-        self.combine(other, |a, b| a + b)?;
-        Ok(self)
-    }
-    pub fn subtract(&mut self, other: &Self) -> Result<&mut Self, String> {
-        self.combine(other, |a, b| a - b)?;
-        Ok(self)
-    }
-    pub fn data_compare(&self, other: &Self) -> bool {
-        self.data.len() == other.data.len()
-            && self
-                .data
-                .iter()
-                .zip(&other.data)
-                .all(|(a, b)| (a - b).abs() <= FACTOR_TOLERANCE)
-    }
-    pub fn data_compare_and_copy(&mut self, other: &Self) -> bool {
-        let same = self.data_compare(other);
-        *self = other.clone();
-        same
-    }
-    pub fn equivalent(&self, other: &Self) -> bool {
-        if self.size() != other.size() || self.variables.len() != other.variables.len() {
+
+    /// `dataCompare(const svlFactor& phi)` (`svlFactor.cpp:816`), the
+    /// unrolled arm the source compiles.
+    pub fn data_compare(&self, phi: &SvlFactor) -> bool {
+        if phi.n_size != self.n_size {
             return false;
         }
-        for (i, &v) in self.variables.iter().enumerate() {
-            if other.var_cardinality(v) != Some(self.cards[i]) {
+        let p = self.data.as_ref().unwrap().borrow();
+        let q = phi.data.as_ref().unwrap().borrow();
+        let mut k = 0usize;
+        let mut i = self.n_size / 2;
+        while i != 0 {
+            if (p.data[k] - q.data[k]).abs() > TOL || (p.data[k + 1] - q.data[k + 1]).abs() > TOL {
                 return false;
             }
+            i -= 1;
+            k += 2;
         }
-        (0..self.size()).all(|i| {
-            let a = self.assignment_of(i).unwrap();
-            let b: Vec<_> = other
-                .variables
-                .iter()
-                .map(|v| a[self.variables.iter().position(|x| x == v).unwrap()])
-                .collect();
-            (self.data[i] - other.data[other.index_of(&b).unwrap()]).abs() <= FACTOR_TOLERANCE
-        })
+        (self.n_size % 2 == 0) || ((p.data[k] - q.data[k]).abs() <= TOL)
     }
-    pub fn map_from(&self, other: &Self) -> Option<Vec<usize>> {
-        if self.empty() || other.empty() {
-            return Some(vec![0; self.size()]);
+
+    /// `operator=(const svlFactor& phi)` (`svlFactor.cpp:896`).
+    pub fn assign(&mut self, phi: &SvlFactor) -> &mut SvlFactor {
+        let same = match (&self.data, &phi.data) {
+            (None, None) => true,
+            (Some(a), Some(b)) => Rc::ptr_eq(a, b),
+            _ => false,
+        };
+        if same {
+            // Really want to check (*this == phi), but check on data is
+            // much quicker. Also works for _data == NULL
+            return self;
         }
-        (0..self.size())
-            .map(|i| {
-                let assignment = self.assignment_of(i)?;
-                let mapped: Vec<_> = other
-                    .variables
-                    .iter()
-                    .map(|v| assignment[self.variables.iter().position(|x| x == v).unwrap()])
-                    .collect();
-                other.index_of(&mapped)
-            })
-            .collect()
-    }
-    pub fn stride_mapping(&self, vars: &[i32]) -> Vec<isize> {
-        vars.iter()
-            .map(|v| {
-                self.variables
-                    .iter()
-                    .position(|x| x == v)
-                    .map(|i| self.stride[i] as isize)
-                    .unwrap_or(0)
-            })
-            .collect()
-    }
-    pub fn write(&self, indent: usize) -> String {
-        let p = " ".repeat(indent);
-        if self.empty() {
-            return format!("{p}<Factor>\n{p}</Factor>\n");
+
+        if let Some(d) = &self.data {
+            if self.n_size != phi.n_size {
+                if d.borrow().is_shared() {
+                    d.borrow_mut().reserve(phi.n_size);
+                } else {
+                    self.data = None;
+                }
+            }
         }
-        format!(
-            "{p}<Factor>\n{p}  <Vars>\n   {p} {}\n{p}  </Vars>\n{p}  <Cards>\n   {p} {}\n{p}  </Cards>\n{p}  <Data>\n{}{}{p}  </Data>\n{p}</Factor>\n",
-            self.variables
-                .iter()
-                .map(ToString::to_string)
-                .collect::<Vec<_>>()
-                .join(" "),
-            self.cards
-                .iter()
-                .map(ToString::to_string)
-                .collect::<Vec<_>>()
-                .join(" "),
+
+        self.n_size = phi.n_size;
+        self.variables = phi.variables.clone();
+        self.var_index = phi.var_index.clone();
+        self.cards = phi.cards.clone();
+        self.stride = phi.stride.clone();
+
+        if let Some(pd) = &phi.data {
+            if self.data.is_none() {
+                self.data = Some(Rc::new(RefCell::new(SvlFactorStorage::new(
+                    self.n_size,
+                    false,
+                ))));
+            }
             self.data
-                .iter()
-                .map(|x| format!("{p}    {x}\n"))
-                .collect::<String>(),
-            ""
-        )
-    }
-}
-#[cfg(test)]
-mod tests {
-    use super::*;
-    #[test]
-    fn factor_product_and_marginalize() {
-        let mut a = SvlFactor::from_parts(vec![1], vec![2], Some(vec![2., 3.])).unwrap();
-        let b = SvlFactor::from_parts(vec![2], vec![2], Some(vec![5., 7.])).unwrap();
-        a.product(&b).unwrap();
-        assert_eq!(a.data, vec![10., 15., 14., 21.]);
-        a.marginalize(2).unwrap();
-        assert_eq!(a.data, vec![24., 36.]);
-    }
-    #[test]
-    fn factor_index_and_reduction() {
-        let mut f = SvlFactor::from_parts(
-            vec![1, 2],
-            vec![2, 3],
-            Some((0..6).map(|x| x as f64).collect()),
-        )
-        .unwrap();
-        assert_eq!(f.index_of(&[1, 2]), Some(5));
-        f.reduce(2, 1).unwrap();
-        assert_eq!(f.data, vec![2., 3.]);
-    }
-    #[test]
-    fn source_factor_factories_construct_and_copy_owned_tables() {
-        assert!(svl_factor().empty());
-        let factor = svl_factor_with_variable(7, 3).unwrap();
-        assert_eq!(factor.data, [1., 1., 1.]);
-        let copied = svl_factor_copy(&factor);
-        assert_eq!(copied, factor);
-        assert_eq!(
-            svl_factor_with_variables(vec![1, 2], vec![2, 3])
+                .as_ref()
                 .unwrap()
-                .size(),
-            6
-        );
-        let mut storage = svl_factor_storage(2, true);
-        storage.fill(4., None);
-        assert_eq!(storage.data, [4., 4.]);
+                .borrow_mut()
+                .copy(&pd.borrow(), self.n_size);
+        }
+
+        self
+    }
+
+    /// `mapFrom(const svlFactor& phi)` (`svlFactor.cpp:929`): for each entry
+    /// of this factor, the index of the entry of `phi` with the same
+    /// assignment to `phi`'s variables.
+    pub fn map_from(&self, phi: &SvlFactor) -> Vec<i32> {
+        if phi.empty() || self.empty() {
+            return vec![0; self.size() as usize];
+        }
+
+        let mut mapping = vec![0i32; self.size() as usize];
+
+        // special case for speed
+        if phi.num_vars() == 1 {
+            svl_assert(
+                self.has_variable(phi.variables[0]),
+                939,
+                "hasVariable(phi._variables[0])",
+            );
+            let vi = self.var_index[&phi.variables[0]] as usize;
+            let stride = self.stride[vi] as usize;
+            let mut it = 0usize;
+            while it != mapping.len() {
+                for k_phi in 0..self.cards[vi] {
+                    mapping[it..it + stride].fill(k_phi);
+                    it += stride;
+                }
+            }
+            return mapping;
+        }
+
+        if self.num_vars() == 1 {
+            let v = phi.var_index.get(&self.variables[0]);
+            svl_assert(v.is_some(), 952, "v != phi._varIndex.end()");
+            let phi_stride = phi.stride[*v.unwrap() as usize];
+            let mut k_phi = 0;
+            for m in mapping.iter_mut() {
+                *m = k_phi;
+                k_phi += phi_stride;
+            }
+            return mapping;
+        }
+
+        // slower case
+        let mut assignment = vec![0i32; self.num_vars() as usize];
+        let phi_stride = phi.stride_mapping(&self.variables);
+
+        let mut k_phi = 0;
+        for k in 0..self.size() as usize {
+            svl_assert(
+                (k_phi >= 0) && (k_phi < phi.size()),
+                968,
+                "(kPhi >= 0) && (kPhi < phi.size())",
+            );
+            mapping[k] = k_phi;
+            assignment[0] += 1;
+            k_phi += phi_stride[0];
+            for i in 1..self.num_vars() as usize {
+                if assignment[i - 1] < self.cards[i - 1] {
+                    break;
+                }
+                assignment[i - 1] = 0;
+                assignment[i] += 1;
+                k_phi += phi_stride[i];
+            }
+        }
+
+        mapping
+    }
+
+    /// `mapOnto(const svlFactor& phi)` (`svlFactor.h:161`).
+    pub fn map_onto(&self, phi: &SvlFactor) -> Vec<i32> {
+        phi.map_from(self)
+    }
+
+    /// `strideMapping(const vector<int>& vars)` (`svlFactor.cpp:984`).
+    fn stride_mapping(&self, vars: &[i32]) -> Vec<i32> {
+        let mut stride_map = vec![0i32; vars.len()];
+        let mut last_v: Option<i32> = None;
+        for i in 0..vars.len() {
+            let v = self.var_index.get(&vars[i]).copied();
+            if let Some(vi) = v {
+                stride_map[i] = self.stride[vi as usize];
+            }
+            if let Some(li) = last_v {
+                stride_map[i] -= self.cards[li as usize] * self.stride[li as usize];
+            }
+            last_v = v;
+        }
+
+        stride_map
     }
 }

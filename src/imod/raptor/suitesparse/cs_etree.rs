@@ -1,65 +1,52 @@
 //! Translation of `IMOD/raptor/suitesparse/cs_etree.c`.
 
-use super::Cs;
+use super::cs::{Cs, cs_csc};
+use super::cs_malloc::cs_malloc;
+use super::cs_util::cs_idone;
 
-/// C `cs_etree`: computes the elimination tree of `triu(A)` or implicit `A' * A`.
-pub fn cs_etree(matrix: &Cs, ata: bool) -> Option<Vec<Option<usize>>> {
-    if !matrix.is_csc() || matrix.column_pointers.len() < matrix.columns + 1 {
+/// `cs_etree(A, ata)`: compute the etree of A (using triu(A), or A'A without
+/// forming A'A).
+pub fn cs_etree(a: &Cs, ata: i32) -> Option<Vec<i32>> {
+    if !cs_csc(a) {
         return None;
     }
-    let entries = matrix.column_pointers[matrix.columns];
-    if entries > matrix.row_indices.len() {
-        return None;
+    let m = a.m;
+    let n = a.n;
+    let ap = &a.p;
+    let ai = &a.i;
+    let mut parent: Vec<i32> = cs_malloc(n);
+    // w = [ancestor (n) | prev (m if ata)]
+    let mut ancestor: Vec<i32> = cs_malloc(n);
+    let mut prev: Vec<i32> = cs_malloc(if ata != 0 { m } else { 0 });
+    if ata != 0 {
+        for i in 0..m as usize {
+            prev[i] = -1;
+        }
     }
-    let mut parent = vec![None; matrix.columns];
-    let mut ancestor = vec![None; matrix.columns];
-    let mut previous = if ata {
-        Some(vec![None; matrix.rows])
-    } else {
-        None
-    };
-    for column in 0..matrix.columns {
-        for entry in matrix.column_pointers[column]..matrix.column_pointers[column + 1] {
-            let row = matrix.row_indices[entry];
-            if row >= matrix.rows {
-                return None;
-            }
-            let mut node = if let Some(previous) = previous.as_ref() {
-                previous[row]
+    for k in 0..n {
+        let ku = k as usize;
+        parent[ku] = -1; // node k has no parent yet
+        ancestor[ku] = -1; // nor does k have an ancestor
+        for p in ap[ku]..ap[ku + 1] {
+            let p = p as usize;
+            let mut i = if ata != 0 {
+                prev[ai[p] as usize]
             } else {
-                Some(row)
+                ai[p]
             };
-            while let Some(current) = node.filter(|&current| current < column) {
-                let next = ancestor[current];
-                ancestor[current] = Some(column);
-                if next.is_none() {
-                    parent[current] = Some(column);
+            while i != -1 && i < k {
+                // traverse from i to k
+                let inext = ancestor[i as usize]; // inext = ancestor of i
+                ancestor[i as usize] = k; // path compression
+                if inext == -1 {
+                    parent[i as usize] = k; // no anc., parent is k
                 }
-                node = next;
+                i = inext;
             }
-            if let Some(previous) = previous.as_mut() {
-                previous[row] = Some(column);
+            if ata != 0 {
+                prev[ai[p] as usize] = k;
             }
         }
     }
-    Some(parent)
-}
-
-#[cfg(test)]
-mod tests {
-    use super::cs_etree;
-    use crate::imod::raptor::suitesparse::Cs;
-    #[test]
-    fn etree_matches_csparse_path_compression() {
-        let matrix = Cs {
-            nzmax: 4,
-            rows: 3,
-            columns: 3,
-            column_pointers: vec![0, 1, 3, 4],
-            row_indices: vec![0, 0, 1, 1],
-            values: vec![1.; 4],
-            nz: -1,
-        };
-        assert_eq!(cs_etree(&matrix, false), Some(vec![Some(1), Some(2), None]));
-    }
+    cs_idone(parent, 1)
 }

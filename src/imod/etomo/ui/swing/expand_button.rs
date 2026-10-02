@@ -1,386 +1,589 @@
 //! `IMOD/Etomo/src/etomo/ui/swing/ExpandButton.java`.
 //!
-//! `SingleLineButton`, `JPanel`, `GridBagLayout`, and action-listener
-//! installation are retained as direct native-Swing boundaries.  This unit
-//! keeps the Java button state, text, tooltip, naming, and event order.
-#![allow(dead_code)]
+//! A small single-line HTML button that toggles between an expanded and a
+//! contracted state ("<"/">", "A"/"B", "-"/"+") and tells its `Expandable`s
+//! (and an optional `GlobalExpandButton`) when it changes.
+//!
+//! Java `extends SingleLineButton`: the superclass is field `base` (deref);
+//! see `multi_line_button.rs` for the object model.  The expandables are held
+//! as `Weak<dyn Expandable>` (they own the button and usually pass themselves
+//! while being constructed); the global expand button is held strongly and
+//! holds this button weakly.
+//!
+//! Not modelled: the bevel border and the square size set in the
+//! constructor, and `getPreferredWidth()` (the `TableComponent` member), which
+//! are layout.  `add(JPanel, GridBagLayout, GridBagConstraints)` keeps the
+//! panel and drops the layout arguments.
 
-use super::expandable::Expandable;
-use super::process_dialog::GlobalExpandButton;
-use crate::imod::etomo::storage::autodoc::autodoc_tokenizer::SEPARATOR_CHAR;
+use std::cell::{Cell, RefCell};
+use std::ops::Deref;
+use std::rc::{Rc, Weak};
+
+use crate::imod::etomo::etomo_director::ARGUMENTS;
+use crate::imod::etomo::jdk::JComponent;
 use crate::imod::etomo::r#type::dialog_type::DialogType;
+use crate::imod::etomo::r#type::ui_test_field_type::UITestFieldType;
+use crate::imod::etomo::storage::autodoc::autodoc_tokenizer::{DEFAULT_DELIMITER, SEPARATOR_CHAR};
+use crate::imod::etomo::ui::expander::Expander;
+use crate::imod::etomo::ui::ui_component::UIComponent;
 use crate::imod::etomo::util::utilities;
 
-const DEFAULT_TYPE: ExpandButtonType = ExpandButtonType::More;
+use super::expandable::Expandable;
+use super::global_expand_button::GlobalExpandButton;
+use super::multi_line_button::{MultiLineButton, MultiLineButtonVirtual};
+use super::single_line_button::SingleLineButton;
+use super::swing_component::SwingComponent;
 
-/// Java static inner `ExpandButton.Type`.
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub enum ExpandButtonType {
-    More,
-    Advanced,
-    Open,
-}
-
-impl ExpandButtonType {
-    /// Java `Type.getUnformattedText(boolean)`.
-    pub fn get_unformatted_text(self, expanded: bool) -> &'static str {
-        match (self, expanded) {
-            (Self::More, true) => "<",
-            (Self::More, false) => ">",
-            (Self::Advanced, true) => "B",
-            (Self::Advanced, false) => "A",
-            (Self::Open, true) => "-",
-            (Self::Open, false) => "+",
-        }
-    }
-
-    /// Java `Type.getState(boolean)`.
-    pub fn get_state(self, expanded: bool) -> &'static str {
-        match (self, expanded) {
-            (Self::More, true) => "more",
-            (Self::More, false) => "less",
-            (Self::Advanced, true) => "advanced",
-            (Self::Advanced, false) => "basic",
-            (Self::Open, true) => "open",
-            (Self::Open, false) => "closed",
-        }
-    }
-
-    /// Java `Type.getExpandedState()`.
-    pub fn get_expanded_state(self) -> &'static str {
-        self.get_state(true)
-    }
-
-    /// Java `Type.getContractedState()`.
-    pub fn get_contracted_state(self) -> &'static str {
-        self.get_state(false)
-    }
-
-    /// Java `Type.getSymbol(boolean)`.
-    pub fn get_symbol(self, expanded: bool) -> &'static str {
-        match (self, expanded) {
-            (Self::More, true) => "<html>&lt",
-            (Self::More, false) => "<html>&gt",
-            _ => self.get_unformatted_text(expanded),
-        }
-    }
-
-    /// Java `Type.getToolTip(boolean)`.
-    pub fn get_tool_tip(self, expanded: bool) -> &'static str {
-        match (self, expanded) {
-            (Self::More, true) => "Show less.",
-            (Self::More, false) => "Show more.",
-            (Self::Advanced, true) => "Show basic options.",
-            (Self::Advanced, false) => "Show all options.",
-            (Self::Open, true) => "Close panel.",
-            (Self::Open, false) => "Open panel.",
-        }
-    }
-
-    /// Java `Type.equals(AbstractButton, String)` at the Swing text boundary.
-    pub fn equals(button_text: Option<&str>, input: Option<&str>) -> bool {
-        let (Some(button_text), Some(input)) = (button_text, input) else {
-            return false;
-        };
-        let text = utilities::strip_html_tags(Some(button_text));
-        let Some(text) = text else { return false };
-        let symbol = match text.as_str() {
-            "&lt" => "<",
-            "&gt" => ">",
-            "B" | "A" | "-" | "+" => text.as_str(),
-            _ => return false,
-        };
-        symbol == input
-    }
-}
-
-/// Java `ExpandButton`, including its explicit native-Swing boundary state.
-#[derive(Clone, Debug, Eq, PartialEq)]
+/// Java public final `ExpandButton`.
 pub struct ExpandButton {
-    pub button_type: ExpandButtonType,
-    pub expanded: bool,
-    pub name: String,
-    pub state_key: Option<String>,
-    pub global_expand_button_present: bool,
-    pub expandable1_present: bool,
-    pub expandable2_present: bool,
-    pub text: String,
-    pub tool_tip_text: String,
-    pub manual_name: bool,
-    pub action_listener_present: bool,
-    pub raised_bevel_border: bool,
-    pub container_present: bool,
-    pub original_process_result_display_state: Option<bool>,
-    pub debug: bool,
+    /// Java superclass `SingleLineButton`.
+    pub base: SingleLineButton,
+    /// This object, for the Java calls that pass `this`.
+    self_ref: RefCell<Weak<ExpandButton>>,
+    /// Java final `type`.
+    type_: &'static Type,
+    /// Java final `expandable1`.
+    expandable1: Option<Weak<dyn Expandable>>,
+    /// Java final `expandable2`.
+    expandable2: Option<Weak<dyn Expandable>>,
+    /// Java final `globalExpandButton`.
+    global_expand_button: Option<Rc<GlobalExpandButton>>,
+    /// Java `expanded`.
+    expanded: Cell<bool>,
+    /// Java `jpanelContainer`.
+    jpanel_container: RefCell<Option<Rc<JComponent>>>,
+    /// Java `debug`.  Unused in the Java class.
+    debug: Cell<bool>,
+}
+
+impl Deref for ExpandButton {
+    type Target = SingleLineButton;
+    fn deref(&self) -> &SingleLineButton {
+        &self.base
+    }
+}
+
+impl MultiLineButtonVirtual for ExpandButton {
+    fn get_multi_line_button(&self) -> &MultiLineButton {
+        &self.base.base
+    }
+    // Inherited from SingleLineButton.
+    fn new_button(&self) -> Rc<JComponent> {
+        SingleLineButton::new_button(&self.base)
+    }
+    fn setup_button(&self, set_minimum_size: bool) {
+        SingleLineButton::setup_button(&self.base, set_minimum_size)
+    }
+    fn set_text_label(&self, text: Option<&str>) {
+        SingleLineButton::set_text_label(&self.base, text)
+    }
+    // Overridden here.
+    fn set_name(&self, associated_label: Option<&str>) {
+        ExpandButton::set_name(self, associated_label)
+    }
+    fn create_button_state_key(&self, dialog_type: Option<DialogType>) -> Option<String> {
+        ExpandButton::create_button_state_key(self, dialog_type)
+    }
+    fn get_button_state(&self) -> bool {
+        ExpandButton::get_button_state(self)
+    }
+    fn set_button_state(&self, state: bool) {
+        ExpandButton::set_button_state(self, state)
+    }
 }
 
 impl ExpandButton {
-    /// Java first `getInstance(Expandable, Type)` overload.
-    pub fn get_instance(
-        expandable: Option<&dyn Expandable>,
-        button_type: Option<ExpandButtonType>,
-    ) -> Self {
-        Self::new_with_owners(
-            expandable.is_some(),
-            false,
-            button_type.unwrap_or(DEFAULT_TYPE),
-            false,
-            false,
+    /// Java private static final `DEFAULT_TYPE`.
+    const DEFAULT_TYPE: &'static Type = &Type::MORE;
+
+    /// Java static `getInstance(Expandable, ExpandButton.Type)`.
+    pub fn get_instance_expandable_type(
+        expandable: Option<Weak<dyn Expandable>>,
+        type_: Option<&'static Type>,
+    ) -> Rc<ExpandButton> {
+        let type_ = type_.unwrap_or(Self::DEFAULT_TYPE);
+        ExpandButton::new_expandable_expandable_type_global_expand_button(
+            expandable, None, type_, None,
         )
     }
 
-    /// Java second `getInstance(Expandable, Expandable, Type)` overload.
-    pub fn get_instance_two(
-        expandable1: Option<&dyn Expandable>,
-        expandable2: Option<&dyn Expandable>,
-        button_type: Option<ExpandButtonType>,
-    ) -> Self {
-        Self::new_with_owners(
-            expandable1.is_some(),
-            expandable2.is_some(),
-            button_type.unwrap_or(DEFAULT_TYPE),
-            false,
-            false,
+    /// Java static `getInstance(Expandable, Expandable, ExpandButton.Type)`.
+    pub fn get_instance_expandable_expandable_type(
+        expandable1: Option<Weak<dyn Expandable>>,
+        expandable2: Option<Weak<dyn Expandable>>,
+        type_: Option<&'static Type>,
+    ) -> Rc<ExpandButton> {
+        let type_ = type_.unwrap_or(Self::DEFAULT_TYPE);
+        ExpandButton::new_expandable_expandable_type_global_expand_button(
+            expandable1,
+            expandable2,
+            type_,
+            None,
         )
     }
 
-    /// Java first `getGlobalInstance` overload.
-    pub fn get_global_instance(
-        expandable: Option<&dyn Expandable>,
-        button_type: Option<ExpandButtonType>,
-        global_expand_button: Option<&GlobalExpandButton>,
-    ) -> Self {
-        Self::new_with_owners(
-            expandable.is_some(),
-            false,
-            button_type.unwrap_or(DEFAULT_TYPE),
-            false,
-            global_expand_button.is_some(),
+    /// Java static `getGlobalInstance(Expandable, ExpandButton.Type, GlobalExpandButton)`.
+    pub fn get_global_instance_expandable_type_global_expand_button(
+        expandable1: Option<Weak<dyn Expandable>>,
+        type_: Option<&'static Type>,
+        global_expand_button: Option<Rc<GlobalExpandButton>>,
+    ) -> Rc<ExpandButton> {
+        let type_ = type_.unwrap_or(Self::DEFAULT_TYPE);
+        ExpandButton::new_expandable_expandable_type_global_expand_button(
+            expandable1,
+            None,
+            type_,
+            global_expand_button,
         )
     }
 
-    /// Java second `getGlobalInstance` overload.
-    pub fn get_global_instance_two(
-        expandable1: Option<&dyn Expandable>,
-        expandable2: Option<&dyn Expandable>,
-        button_type: Option<ExpandButtonType>,
-        global_expand_button: Option<&GlobalExpandButton>,
-    ) -> Self {
-        Self::new_with_owners(
-            expandable1.is_some(),
-            expandable2.is_some(),
-            button_type.unwrap_or(DEFAULT_TYPE),
-            false,
-            global_expand_button.is_some(),
+    /// Java static
+    /// `getGlobalInstance(Expandable, Expandable, ExpandButton.Type, GlobalExpandButton)`.
+    pub fn get_global_instance_expandable_expandable_type_global_expand_button(
+        expandable1: Option<Weak<dyn Expandable>>,
+        expandable2: Option<Weak<dyn Expandable>>,
+        type_: Option<&'static Type>,
+        global_expand_button: Option<Rc<GlobalExpandButton>>,
+    ) -> Rc<ExpandButton> {
+        let type_ = type_.unwrap_or(Self::DEFAULT_TYPE);
+        ExpandButton::new_expandable_expandable_type_global_expand_button(
+            expandable1,
+            expandable2,
+            type_,
+            global_expand_button,
         )
     }
 
-    /// Java `getExpandedInstance`.
+    /// Java static `getExpandedInstance(Expandable, Expandable, ExpandButton.Type)`.
     pub fn get_expanded_instance(
-        expandable1: Option<&dyn Expandable>,
-        expandable2: Option<&dyn Expandable>,
-        button_type: Option<ExpandButtonType>,
-    ) -> Self {
-        Self::new_with_owners(
-            expandable1.is_some(),
-            expandable2.is_some(),
-            button_type.unwrap_or(DEFAULT_TYPE),
+        expandable1: Option<Weak<dyn Expandable>>,
+        expandable2: Option<Weak<dyn Expandable>>,
+        type_: Option<&'static Type>,
+    ) -> Rc<ExpandButton> {
+        let type_ = type_.unwrap_or(Self::DEFAULT_TYPE);
+        ExpandButton::new_expandable_expandable_type_boolean_global_expand_button(
+            expandable1,
+            expandable2,
+            type_,
             true,
-            false,
+            None,
         )
     }
 
-    /// Java private constructor result, used by `PanelHeader` too.
-    pub fn new(
-        button_type: ExpandButtonType,
-        expanded: bool,
-        global_expand_button_present: bool,
-    ) -> Self {
-        Self::new_with_owners(
+    /// Java private `ExpandButton(Expandable, Expandable, Type, GlobalExpandButton)`.
+    fn new_expandable_expandable_type_global_expand_button(
+        expandable1: Option<Weak<dyn Expandable>>,
+        expandable2: Option<Weak<dyn Expandable>>,
+        type_: &'static Type,
+        global_expand_button: Option<Rc<GlobalExpandButton>>,
+    ) -> Rc<ExpandButton> {
+        ExpandButton::new_expandable_expandable_type_boolean_global_expand_button(
+            expandable1,
+            expandable2,
+            type_,
             false,
-            false,
-            button_type,
-            expanded,
-            global_expand_button_present,
+            global_expand_button,
         )
     }
 
-    /// Java private five-argument constructor, with non-owning Rust event endpoints.
-    pub fn new_with_owners(
-        expandable1_present: bool,
-        expandable2_present: bool,
-        button_type: ExpandButtonType,
+    /// Java private
+    /// `ExpandButton(Expandable, Expandable, Type, boolean, GlobalExpandButton)`.
+    fn new_expandable_expandable_type_boolean_global_expand_button(
+        expandable1: Option<Weak<dyn Expandable>>,
+        expandable2: Option<Weak<dyn Expandable>>,
+        type_: &'static Type,
         expanded: bool,
-        global_expand_button_present: bool,
-    ) -> Self {
-        Self {
-            button_type,
-            expanded,
-            name: String::new(),
-            state_key: None,
-            global_expand_button_present,
-            expandable1_present,
-            expandable2_present,
-            text: button_type.get_symbol(expanded).to_string(),
-            tool_tip_text: button_type.get_tool_tip(expanded).to_string(),
-            manual_name: true,
-            action_listener_present: true,
-            raised_bevel_border: true,
-            container_present: false,
-            original_process_result_display_state: None,
-            debug: false,
+        global_expand_button: Option<Rc<GlobalExpandButton>>,
+    ) -> Rc<ExpandButton> {
+        // The final fields are in place before `super(...)` runs here; the
+        // overridden methods `super` calls (`setName`) do not read them.
+        let instance = Rc::new(ExpandButton {
+            base: SingleLineButton::new_fields(None, false, None, true),
+            self_ref: RefCell::new(Weak::new()),
+            type_,
+            expandable1,
+            expandable2,
+            global_expand_button,
+            expanded: Cell::new(expanded),
+            jpanel_container: RefCell::new(None),
+            debug: Cell::new(false),
+        });
+        *instance.self_ref.borrow_mut() = Rc::downgrade(&instance);
+        // Java `super(null, false, null, true)`.
+        MultiLineButton::construct(&instance, false);
+        instance.base.constructor_body(None, true);
+        // Registor with the global expand button, if it exists.
+        if let Some(global_expand_button) = &instance.global_expand_button {
+            global_expand_button.register_expand_button(&instance);
         }
+        instance.set_manual_name();
+        instance.set_text(Some(type_.get_symbol(expanded)));
+        instance.set_tool_tip_text(Some(type_.get_tool_tip(expanded)));
+        // Java `addActionListener(new ExpandButtonActionListener(this))`.
+        let adaptee = Rc::downgrade(&instance);
+        instance.add_action_listener(Rc::new(move |_event| {
+            if let Some(adaptee) = adaptee.upgrade() {
+                // ExpandButtonActionListener.actionPerformed
+                adaptee.button_action();
+            }
+        }));
+        // Swing layout: setBorder(BorderFactory.createBevelBorder(BevelBorder.RAISED));
+        // size = getPreferredSize(), widened to a square; setSize(size).
+        instance
     }
 
-    /// Java static `equals(AbstractButton, String)`.
-    pub fn equals_text(button_text: Option<&str>, input: Option<&str>) -> bool {
-        ExpandButtonType::equals(button_text, input)
+    /// This object as an `Rc` (Java `this` passed to another object).
+    fn this(&self) -> Rc<ExpandButton> {
+        self.self_ref
+            .borrow()
+            .upgrade()
+            .expect("ExpandButton used before construction or after drop")
     }
 
-    /// Java overridden `setName(String)`.
-    pub fn set_name(&mut self, associated_label: &str) {
-        self.name = format!(
-            "mb{SEPARATOR_CHAR}{}",
-            utilities::convert_label_to_name(Some(associated_label), true).unwrap_or_default()
+    /// Java public static `equals(AbstractButton, String)`.
+    pub fn equals_abstract_button_string(
+        button: Option<&Rc<JComponent>>,
+        input: Option<&str>,
+    ) -> bool {
+        Type::equals(button, input)
+    }
+
+    /// Java `setName(String)` (overrides `MultiLineButton.setName`).
+    pub fn set_name(&self, associated_label: Option<&str>) {
+        let field_type = UITestFieldType::MINI_BUTTON;
+        let name = utilities::convert_label_to_name(
+            associated_label,
+            field_type.is_unlimited_segments(),
         );
+        // Java string concatenation writes a null name as "null".
+        self.get_button().set_name(Some(&format!(
+            "{}{}{}",
+            field_type.to_string(),
+            SEPARATOR_CHAR,
+            name.as_deref().unwrap_or("null")
+        )));
+        // Java `EtomoDirector.INSTANCE.getArguments()` is the `ARGUMENTS` static.
+        if ARGUMENTS.lock().unwrap().is_print_names() {
+            println!(
+                "{} {} ",
+                self.get_name().as_deref().unwrap_or("null"),
+                DEFAULT_DELIMITER
+            );
+        }
     }
 
     /// Java `isExpanded()`.
     pub fn is_expanded(&self) -> bool {
-        self.expanded
+        self.expanded.get()
     }
 
-    /// Java overridden `createButtonStateKey(DialogType)`.
-    pub fn create_button_state_key(&mut self, dialog_type: DialogType) -> String {
+    /// Java `createButtonStateKey(DialogType)` (overrides
+    /// `MultiLineButton.createButtonStateKey`).
+    pub fn create_button_state_key(&self, dialog_type: Option<DialogType>) -> Option<String> {
+        // Upstream bug fixed (ExpandButton.java, createButtonStateKey): Java
+        // dereferences `dialogType` unconditionally and throws
+        // NullPointerException for null.  No key can be made without a dialog
+        // type, so null gives null and the state key is left unchanged.
+        let dialog_type = dialog_type?;
         let state_key = format!(
             "{}.{}.{}",
             dialog_type.get_storable_name(),
-            self.name,
-            self.button_type.get_expanded_state()
+            self.get_name().as_deref().unwrap_or("null"),
+            self.type_.get_expanded_state()
         );
-        self.state_key = Some(state_key.clone());
-        state_key
+        self.set_state_key(Some(state_key.clone()));
+        Some(state_key)
     }
 
-    /// Java overridden `getButtonState()`.
+    /// Java `getButtonState()` (overrides `MultiLineButton.getButtonState`).
     pub fn get_button_state(&self) -> bool {
         self.is_expanded()
     }
 
-    /// Java `setButtonState(boolean)`.
-    pub fn set_button_state(&mut self, state: bool) {
-        self.original_process_result_display_state = Some(state);
+    /// Java `setButtonState(boolean)` (overrides `MultiLineButton.setButtonState`).
+    pub fn set_button_state(&self, state: bool) {
+        self.set_original_process_result_display_state(state);
         self.set_expanded(state);
     }
 
-    /// Java package-private `getState()`.
-    pub fn get_state(&self) -> String {
-        self.button_type.get_state(self.expanded).to_string()
+    /// Java `getState()`.
+    pub fn get_state(&self) -> &'static str {
+        self.type_.get_state(self.expanded.get())
     }
 
-    /// Java package-private `setState(String)`.
-    pub fn set_state(&mut self, state: Option<&str>) -> bool {
-        let Some(state) = state else { return false };
-        if state == self.button_type.get_expanded_state() && !self.expanded {
+    /// Java `setState(String)`.
+    pub fn set_state(&self, state: Option<&str>) {
+        let Some(state) = state else {
+            return;
+        };
+        if state == self.type_.get_expanded_state() && !self.expanded.get() {
             self.set_expanded(true);
-            return true;
-        }
-        if state == self.button_type.get_contracted_state() && self.expanded {
+        } else if state == self.type_.get_contracted_state() && self.expanded.get() {
             self.set_expanded(false);
-            return true;
         }
-        false
     }
 
-    /// Java `getPreferredWidth()` at the native preferred-size boundary.
-    pub fn get_preferred_width(&self) -> usize {
-        self.button_type.get_unformatted_text(self.expanded).len()
-    }
-
-    /// Java `add(JPanel, GridBagLayout, GridBagConstraints)` boundary.
-    pub fn add(&mut self) {
-        self.container_present = true;
+    /// Java `add(JPanel, GridBagLayout, GridBagConstraints)`.  The layout and
+    /// constraints are not modelled.
+    pub fn add(&self, panel: &Rc<JComponent>) {
+        // Swing layout: weightx 0 for this component's constraints, restored after.
+        panel.add(&self.get_button());
+        *self.jpanel_container.borrow_mut() = Some(panel.clone());
     }
 
     /// Java `remove()`.
-    pub fn remove(&mut self) {
-        self.container_present = false;
+    pub fn remove(&self) {
+        let jpanel_container = self.jpanel_container.borrow_mut().take();
+        if let Some(jpanel_container) = jpanel_container {
+            jpanel_container.remove(&self.get_button());
+        }
     }
 
-    /// Java identity `equals(ExpandButton)`; Rust callers preserve identity by
-    /// comparing the address of the owning source field.
-    pub fn equals(&self, that: &Self) -> bool {
-        std::ptr::eq(self, that)
+    /// Java public `equals(ExpandButton)`: `equals((Object) that)`, identity.
+    pub fn equals_expand_button(&self, that: Option<&ExpandButton>) -> bool {
+        that.is_some_and(|that| std::ptr::eq(self, that))
     }
 
-    /// Java `setExpanded(boolean)`: force its subsequent action even unchanged.
-    pub fn set_expanded(&mut self, expanded: bool) {
-        if self.expanded == expanded {
-            self.expanded = !expanded;
+    /// Java `setExpanded(boolean)`.
+    pub fn set_expanded(&self, expanded: bool) {
+        // prevent buttonAction from ignoring an unchanged button value
+        if self.expanded.get() == expanded {
+            self.expanded.set(!expanded);
         }
         self.button_action();
     }
 
-    /// Java `update(boolean)`, deliberately without owner notification.
-    pub fn update(&mut self, expanded: bool) {
-        if self.expanded == expanded {
+    /// Java `update(boolean)`.
+    pub fn update(&self, expanded: bool) {
+        if self.expanded.get() == expanded {
+            // Nothing to update
             return;
         }
-        self.expanded = expanded;
-        self.text = self.button_type.get_symbol(expanded).to_string();
-        self.tool_tip_text = self.button_type.get_tool_tip(expanded).to_string();
+        self.expanded.set(expanded);
+        self.set_text(Some(self.type_.get_symbol(expanded)));
+        self.set_tool_tip_text(Some(self.type_.get_tool_tip(expanded)));
     }
 
-    /// Java private `buttonAction()`; owner/global dispatch stays at the
-    /// explicit Rust GUI boundary because Java's retained callback objects are
-    /// incompatible with safe self-referential Rust ownership.
-    pub fn button_action(&mut self) {
-        self.expanded = !self.expanded;
-        self.text = self.button_type.get_symbol(self.expanded).to_string();
-        self.tool_tip_text = self.button_type.get_tool_tip(self.expanded).to_string();
+    /// Java private `buttonAction()`.
+    fn button_action(&self) {
+        self.expanded.set(!self.expanded.get());
+        let expanded = self.expanded.get();
+        self.set_text(Some(self.type_.get_symbol(expanded)));
+        self.set_tool_tip_text(Some(self.type_.get_tool_tip(expanded)));
+        let this = self.this();
+        if let Some(expandable1) = self.expandable1.as_ref().and_then(Weak::upgrade) {
+            expandable1.expand_expand_button(&this);
+        }
+        if let Some(expandable2) = self.expandable2.as_ref().and_then(Weak::upgrade) {
+            expandable2.expand_expand_button(&this);
+        }
+        // Tell global expand button about this action.
+        if let Some(global_expand_button) = &self.global_expand_button {
+            global_expand_button.msg_expand_button_action(&this, self.expanded.get());
+        }
+    }
+}
+
+/// Java `implements Expander`.
+impl Expander for ExpandButton {
+    fn is_expanded(&self) -> bool {
+        ExpandButton::is_expanded(self)
+    }
+}
+
+/// Java `SwingComponent.getComponent()`, inherited from `MultiLineButton`.
+impl SwingComponent for ExpandButton {
+    fn get_component(&self) -> Rc<JComponent> {
+        self.base.base.get_component()
+    }
+}
+
+/// Java `UIComponent`, inherited from `MultiLineButton`.
+impl UIComponent for ExpandButton {
+    fn get_ui_component(&self) -> &dyn SwingComponent {
+        self
+    }
+    fn get_component(&self) -> Rc<JComponent> {
+        self.base.base.get_component()
+    }
+}
+
+/// Java static final nested class `ExpandButton.Type`.  The instances are the
+/// associated constants [`Type::MORE`], [`Type::ADVANCED`] and
+/// [`Type::OPEN`], used as `&'static Type`; Java compares them by identity,
+/// which the derived equality over all fields reproduces for these three.
+#[derive(Debug, PartialEq, Eq)]
+pub struct Type {
+    /// Java final `expandedState`.  Backwards compatibility issue:
+    /// expandedState is a key in the .edf file.
+    expanded_state: &'static str,
+    /// Java final `expandedSymbol`.
+    expanded_symbol: &'static str,
+    /// Java final `expandedToolTip`.
+    expanded_tool_tip: &'static str,
+    /// Java final `contractedState`.
+    contracted_state: &'static str,
+    /// Java final `contractedSymbol`.
+    contracted_symbol: &'static str,
+    /// Java final `contractedToolTip`.
+    contracted_tool_tip: &'static str,
+}
+
+/// Java `Type.HTML_TAG`.
+const HTML_TAG: &str = "<html>";
+/// Java `Type.MORE_EXPANDED_TEXT`.
+const MORE_EXPANDED_TEXT: &str = "&lt";
+/// Java `Type.MORE_EXPANDED_SYMBOL`.
+const MORE_EXPANDED_SYMBOL: &str = "<";
+/// Java `Type.MORE_CONTRACTED_TEXT`.
+const MORE_CONTRACTED_TEXT: &str = "&gt";
+/// Java `Type.MORE_CONTRACTED_SYMBOL`.
+const MORE_CONTRACTED_SYMBOL: &str = ">";
+/// Java `Type.ADVANCED_EXPANDED_SYMBOL`.
+const ADVANCED_EXPANDED_SYMBOL: &str = "B";
+/// Java `Type.ADVANCED_CONTRACTED_SYMBOL`.
+const ADVANCED_CONTRACTED_SYMBOL: &str = "A";
+/// Java `Type.OPEN_EXPANDED_SYMBOL`.
+const OPEN_EXPANDED_SYMBOL: &str = "-";
+/// Java `Type.OPEN_CONTRACTED_SYMBOL`.
+const OPEN_CONTRACTED_SYMBOL: &str = "+";
+
+impl Type {
+    /// Java `Type.MORE`.
+    pub const MORE: Type = Type::new(
+        "more",
+        // HTML_TAG + MORE_EXPANDED_TEXT
+        "<html>&lt",
+        "Show less.",
+        "less",
+        // HTML_TAG + MORE_CONTRACTED_TEXT
+        "<html>&gt",
+        "Show more.",
+    );
+    /// Java `Type.ADVANCED`.
+    pub const ADVANCED: Type = Type::new(
+        "advanced",
+        ADVANCED_EXPANDED_SYMBOL,
+        "Show basic options.",
+        "basic",
+        ADVANCED_CONTRACTED_SYMBOL,
+        "Show all options.",
+    );
+    /// Java `Type.OPEN`.
+    pub const OPEN: Type = Type::new(
+        "open",
+        OPEN_EXPANDED_SYMBOL,
+        "Close panel.",
+        "closed",
+        OPEN_CONTRACTED_SYMBOL,
+        "Open panel.",
+    );
+
+    /// Java private `Type(String, String, String, String, String, String)`.
+    const fn new(
+        expanded_state: &'static str,
+        expanded_symbol: &'static str,
+        expanded_tool_tip: &'static str,
+        contracted_state: &'static str,
+        contracted_symbol: &'static str,
+        contracted_tool_tip: &'static str,
+    ) -> Type {
+        Type {
+            expanded_state,
+            expanded_symbol,
+            expanded_tool_tip,
+            contracted_state,
+            contracted_symbol,
+            contracted_tool_tip,
+        }
     }
 
-    /// Java `ExpandButtonActionListener.actionPerformed(ActionEvent)`.
-    pub fn action_performed(&mut self) {
-        self.button_action();
+    /// Java public static `equals(AbstractButton, String)`.
+    pub fn equals(button: Option<&Rc<JComponent>>, input: Option<&str>) -> bool {
+        let (Some(button), Some(input)) = (button, input) else {
+            return false;
+        };
+        // String html stuff off the label.
+        let Some(text) = utilities::strip_html_tags(Some(&button.get_text())) else {
+            return false;
+        };
+        let mut symbol: Option<&str> = None;
+        if text == MORE_EXPANDED_TEXT {
+            symbol = Some(MORE_EXPANDED_SYMBOL);
+        } else if text == MORE_CONTRACTED_TEXT {
+            symbol = Some(MORE_CONTRACTED_SYMBOL);
+        } else if text == ADVANCED_EXPANDED_SYMBOL
+            || text == ADVANCED_CONTRACTED_SYMBOL
+            || text == OPEN_EXPANDED_SYMBOL
+            || text == OPEN_CONTRACTED_SYMBOL
+        {
+            symbol = Some(text.as_str());
+        }
+        let Some(symbol) = symbol else {
+            return false;
+        };
+        symbol == input
+    }
+
+    /// Java private `getUnformattedText(boolean)`.  Used only by the
+    /// (layout-only) `getPreferredWidth`.
+    fn get_unformatted_text(&self, expanded: bool) -> &'static str {
+        if *self == Type::MORE {
+            if expanded {
+                return MORE_EXPANDED_SYMBOL;
+            }
+            return MORE_CONTRACTED_SYMBOL;
+        }
+        if expanded {
+            return self.expanded_symbol;
+        }
+        self.contracted_symbol
+    }
+
+    /// Java private `getState(boolean)`.
+    fn get_state(&self, expanded: bool) -> &'static str {
+        if expanded {
+            return self.expanded_state;
+        }
+        self.contracted_state
+    }
+
+    /// Java private `getExpandedState()`.
+    fn get_expanded_state(&self) -> &'static str {
+        self.expanded_state
+    }
+
+    /// Java private `getContractedState()`.
+    fn get_contracted_state(&self) -> &'static str {
+        self.contracted_state
+    }
+
+    /// Java private `getSymbol(boolean)`.
+    fn get_symbol(&self, expanded: bool) -> &'static str {
+        if expanded {
+            return self.expanded_symbol;
+        }
+        self.contracted_symbol
+    }
+
+    /// Java private `getToolTip(boolean)`.
+    fn get_tool_tip(&self, expanded: bool) -> &'static str {
+        if expanded {
+            return self.expanded_tool_tip;
+        }
+        self.contracted_tool_tip
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::imod::etomo::r#type::dialog_type::DialogType;
 
     #[test]
-    fn type_text_state_and_tooltip_match_java() {
-        assert_eq!(ExpandButtonType::More.get_symbol(true), "<html>&lt");
-        assert_eq!(ExpandButtonType::More.get_unformatted_text(false), ">");
-        assert_eq!(ExpandButtonType::Advanced.get_state(false), "basic");
-        assert_eq!(ExpandButtonType::Open.get_tool_tip(true), "Close panel.");
-        assert!(ExpandButton::equals_text(Some("<html>&lt"), Some("<")));
-    }
-
-    #[test]
-    fn expanded_forces_action_and_update_does_not() {
-        let mut button = ExpandButton::new(ExpandButtonType::More, false, false);
-        button.set_expanded(false);
-        assert!(!button.expanded);
-        assert_eq!(button.text, "<html>&gt");
-        button.update(true);
-        assert!(button.expanded);
-        assert_eq!(button.text, "<html>&lt");
-    }
-
-    #[test]
-    fn state_name_and_storage_key_follow_source() {
-        let mut button = ExpandButton::new(ExpandButtonType::Advanced, false, false);
-        button.set_name("Tilt alignment");
-        assert_eq!(button.name, "mb.tilt-alignment");
-        assert!(button.set_state(Some("advanced")));
-        assert_eq!(button.get_state(), "advanced");
-        assert_eq!(
-            button.create_button_state_key(DialogType::FineAlignment),
-            "FineAlign.mb.tilt-alignment.advanced"
-        );
+    fn more_type_concatenates_the_html_tag() {
+        assert_eq!(Type::MORE.expanded_symbol, format!("{HTML_TAG}{MORE_EXPANDED_TEXT}"));
+        assert_eq!(Type::MORE.contracted_symbol, format!("{HTML_TAG}{MORE_CONTRACTED_TEXT}"));
+        assert_eq!(Type::MORE.get_unformatted_text(true), "<");
+        assert_eq!(Type::OPEN.get_state(false), "closed");
     }
 }

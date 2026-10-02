@@ -1,134 +1,206 @@
 //! `IMOD/Etomo/src/etomo/ui/swing/ProcessControlPanel.java`.
-//! `SimpleToggleButton` and `ColoredStateText` retain their source-visible
-//! control state at the native Swing boundary.
-#![allow(dead_code)]
+//!
+//! One process button of the tomogram process panel: a toggle button whose
+//! label shows the process name and, below it, the process state ("Not
+//! Started", "In Progress", "Complete") in the state's colour.
+//!
+//! `java.awt.Color` is represented as the RGB triple the Swing stand-in
+//! (`jdk.rs`) uses for foreground colours.
+
+use std::cell::RefCell;
+use std::rc::Rc;
+
+use super::colored_state_text::ColoredStateText;
+use super::generic_mouse_adapter::GenericMouseAdapter;
 use super::simple_toggle_button::SimpleToggleButton;
-use super::tooltip_formatter::TooltipFormatter;
-use super::ui_utilities::Color;
+use super::tooltip_formatter;
+use crate::imod::etomo::etomo_director;
+use crate::imod::etomo::jdk::{ActionListener, JComponent};
 use crate::imod::etomo::process::process_state::ProcessState;
 use crate::imod::etomo::r#type::dialog_type::DialogType;
-pub const TEXT_STATES: [&str; 3] = ["Not Started", "In Progress", "Complete"];
+
+// Java `static Dimension dimPanelProcess = FixedDim.processPanel;` - Swing
+// layout (a size), not modelled.
+
+/// Java `static String[] textStates`.
+pub static TEXT_STATES: [&str; 3] = ["Not Started", "In Progress", "Complete"];
+/// Java `colorNotStarted = new Color(0.75f, 0.0f, 0.0f)`; `Color(float...)`
+/// stores `(int)(v * 255 + 0.5)`.
 pub const COLOR_NOT_STARTED: (u8, u8, u8) = (191, 0, 0);
+/// Java `colorInProgress = new Color(0.75f, 0.0f, 0.75f)`.
 pub const COLOR_IN_PROGRESS: (u8, u8, u8) = (191, 0, 191);
+// static Color colorComplete = new Color(0.0f, 0.75f, 0.0f);
+/// Java `colorComplete = new Color(0, 153, 0)`.
 pub const COLOR_COMPLETE: (u8, u8, u8) = (0, 153, 0);
-pub const COLOR_STATE: [(u8, u8, u8); 3] = [COLOR_NOT_STARTED, COLOR_IN_PROGRESS, COLOR_COMPLETE];
+/// Java `static Color[] colorState`.
+pub static COLOR_STATE: [(u8, u8, u8); 3] = [COLOR_NOT_STARTED, COLOR_IN_PROGRESS, COLOR_COMPLETE];
+
+/// Java public class `ProcessControlPanel`.
 pub struct ProcessControlPanel {
-    pub command: String,
-    pub dialog_type: DialogType,
-    pub compact_display: bool,
-    pub selected_state: usize,
-    pub button_run: SimpleToggleButton,
-    pub panel_root_tooltip: Option<String>,
+    /// Java `command`.
+    command: String,
+    /// Java `panelRoot = new JPanel()`.
+    panel_root: Rc<JComponent>,
+    /// Java `buttonRun = new SimpleToggleButton()`.
+    button_run: Rc<SimpleToggleButton>,
+    /// Java `panelState`: declared and never assigned in the Java.
+    #[allow(dead_code)]
+    panel_state: Option<Rc<JComponent>>,
+    /// Java `highlightState`; stays null when its construction throws.
+    highlight_state: RefCell<Option<ColoredStateText>>,
+    /// Java `dialogType`.
+    dialog_type: DialogType,
 }
+
 impl ProcessControlPanel {
-    pub fn new(dialog_type: DialogType, compact_display: bool) -> Self {
+    /// Java `ProcessControlPanel(DialogType)`.
+    pub fn new(dialog_type: DialogType) -> Rc<ProcessControlPanel> {
+        let compact_display = etomo_director::INSTANCE.with_user_configuration(|c| c.get_compact_display());
         let command = if compact_display {
             dialog_type.get_compact_label()
         } else {
             dialog_type.to_string()
         };
-        let mut panel = Self {
-            command,
-            dialog_type,
-            compact_display,
-            selected_state: 0,
-            button_run: {
-                let mut button = SimpleToggleButton::new();
-                button.button.action_command = Some(dialog_type.to_string());
-                button
-            },
-            panel_root_tooltip: None,
+        let panel_root = JComponent::new_panel();
+        // Swing layout: panelRoot.setLayout(new BoxLayout(panelRoot, BoxLayout.Y_AXIS)).
+
+        let mut highlight_state: Option<ColoredStateText> = None;
+        let created = if compact_display {
+            Ok(ColoredStateText::new_color_array(&COLOR_STATE))
+        } else {
+            ColoredStateText::new_string_array_color_array(&TEXT_STATES, &COLOR_STATE)
         };
-        panel.update_label();
-        panel
+        let result = match created {
+            Ok(state) => {
+                highlight_state = Some(state);
+                highlight_state.as_mut().unwrap().set_selected(0)
+            }
+            Err(e) => Err(e),
+        };
+        if let Err(e) = result {
+            // e.printStackTrace()
+            eprintln!("{e}");
+            eprintln!("Unable to create or set highlightState object");
+            eprintln!("{}", e.get_message());
+        }
+
+        let button_run = SimpleToggleButton::new_void();
+        let this = Rc::new(ProcessControlPanel {
+            command,
+            panel_root,
+            button_run,
+            panel_state: None,
+            highlight_state: RefCell::new(highlight_state),
+            dialog_type,
+        });
+        this.panel_root.add(&this.button_run.get_component());
+        this.button_run
+            .get_component()
+            .set_action_command(Some(&dialog_type.to_string()));
+        this.update_label();
+        this
     }
+
+    /// Java `getCommand()`.
     pub fn get_command(&self) -> String {
         self.dialog_type.to_string()
     }
+
+    /// Java `getDialogType()`.
     pub fn get_dialog_type(&self) -> DialogType {
         self.dialog_type
     }
-    pub fn set_button_action_listener(&mut self) {
-        self.button_run.button.action_listener_count += 1;
+
+    /// Java `setButtonActionListener(ActionListener)`.
+    pub fn set_button_action_listener(&self, action_listener: ActionListener) {
+        self.button_run
+            .get_component()
+            .add_action_listener(action_listener);
     }
-    pub fn get_container(&self) -> bool {
-        true
+
+    /// Java `getContainer()`.
+    pub fn get_container(&self) -> Rc<JComponent> {
+        self.panel_root.clone()
     }
-    pub fn set_state(&mut self, state: ProcessState) {
-        self.selected_state = match state {
-            ProcessState::NotStarted => 0,
-            ProcessState::InProgress => 1,
-            ProcessState::Complete => 2,
+
+    /// Java `setState(ProcessState)`.
+    pub fn set_state(&self, state: ProcessState) {
+        let result = {
+            let mut highlight_state = self.highlight_state.borrow_mut();
+            // Upstream bug fixed in translation (ProcessControlPanel.java:128-138):
+            // when the constructor's ColoredStateText creation threw, highlightState
+            // is null and the Java throws a NullPointerException here.  The
+            // translation skips the selection instead (unreachable with the
+            // source's constant arrays, which always agree in length).
+            match highlight_state.as_mut() {
+                None => Ok(()),
+                Some(highlight_state) => {
+                    let mut result = Ok(());
+                    if state == ProcessState::NotStarted {
+                        result = highlight_state.set_selected(0);
+                    }
+                    if result.is_ok() && state == ProcessState::InProgress {
+                        result = highlight_state.set_selected(1);
+                    }
+                    if result.is_ok() && state == ProcessState::Complete {
+                        result = highlight_state.set_selected(2);
+                    }
+                    result
+                }
+            }
         };
+        if let Err(e) = result {
+            // e.printStackTrace()
+            eprintln!("{e}");
+            eprintln!("Unable to set highlightState object");
+            eprintln!("{}", e.get_message());
+        }
         self.update_label();
     }
-    pub fn set_selected(&mut self, state: bool) {
-        self.button_run.button.selected = state;
+
+    /// Java `setSelected(boolean)`.  Set the selected state of the button.
+    pub fn set_selected(&self, state: bool) {
+        self.button_run.get_component().set_selected(state);
     }
-    fn update_label(&mut self) {
-        let state = if self.compact_display {
-            ""
-        } else {
-            TEXT_STATES[self.selected_state]
+
+    /// Java private `updateLabel()`.
+    fn update_label(&self) {
+        // Upstream bug fixed in translation (ProcessControlPanel.java:160-167): a
+        // null highlightState (see `set_state`) throws a NullPointerException in
+        // the Java; here the label is built without the state line and the
+        // foreground is left unchanged.
+        let (highlight_text, highlight_color) = match self.highlight_state.borrow().as_ref() {
+            Some(highlight_state) => (
+                highlight_state.get_selected_text(),
+                Some(highlight_state.get_selected_color()),
+            ),
+            None => (None, None),
         };
-        self.button_run.set_text(Some(&if state.is_empty() {
-            format!("<HTML><CENTER>{}</CENTER>", self.command)
-        } else {
-            format!("<HTML><CENTER>{}<br>{}</CENTER>", self.command, state)
-        }));
-        let color = COLOR_STATE[self.selected_state];
-        self.button_run.button.foreground = Some(Color {
-            red: color.0 as i32,
-            green: color.1 as i32,
-            blue: color.2 as i32,
-        });
+        let mut text = format!("<HTML><CENTER>{}", self.command);
+        if let Some(highlight_text) = highlight_text {
+            text.push_str(&format!("<br>{highlight_text}"));
+        }
+        self.button_run.set_text(&format!("{text}</CENTER>"));
+        if let Some(highlight_color) = highlight_color {
+            self.button_run
+                .get_component()
+                .set_foreground(highlight_color);
+        }
     }
-    pub fn add_mouse_listener(&mut self) {
-        self.button_run.button.mouse_listener_count += 1;
+
+    /// Java `addMouseListener(MouseListener)`.
+    pub fn add_mouse_listener(&self, listener: &Rc<GenericMouseAdapter>) {
+        let _ = listener;
+        // Swing mouse events (not modelled): panelRoot.addMouseListener(listener);
+        // buttonRun.addMouseListener(listener).
     }
-    pub fn set_tool_tip_text(&mut self, text: impl Into<String>) {
-        let text = text.into();
-        let tooltip = TooltipFormatter::instance().format(Some(&text));
-        self.panel_root_tooltip = tooltip.clone();
-        self.button_run.button.tooltip = tooltip;
-    }
-}
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use crate::imod::etomo::r#type::dialog_type::DialogType;
-    #[test]
-    fn state_controls_html_label_and_color() {
-        let mut p = ProcessControlPanel::new(DialogType::SetupRecon, false);
-        p.set_state(ProcessState::Complete);
-        assert!(
-            p.button_run
-                .button
-                .text
-                .as_deref()
-                .unwrap()
-                .contains("Complete")
-        );
-        assert_eq!(
-            p.button_run.button.foreground,
-            Some(Color {
-                red: 0,
-                green: 153,
-                blue: 0,
-            })
-        );
-    }
-    #[test]
-    fn compact_display_omits_state() {
-        let mut p = ProcessControlPanel::new(DialogType::SetupRecon, true);
-        p.set_state(ProcessState::InProgress);
-        assert!(
-            !p.button_run
-                .button
-                .text
-                .as_deref()
-                .unwrap()
-                .contains("In Progress")
-        );
+
+    /// Java `setToolTipText(String)`.
+    pub fn set_tool_tip_text(&self, text: &str) {
+        let tooltip = tooltip_formatter::INSTANCE.format(Some(text));
+        self.panel_root.set_tool_tip_text(tooltip.as_deref());
+        self.button_run
+            .get_component()
+            .set_tool_tip_text(tooltip.as_deref());
     }
 }

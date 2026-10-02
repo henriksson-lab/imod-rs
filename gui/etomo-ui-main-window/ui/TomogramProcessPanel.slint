@@ -26,6 +26,9 @@ export component TomogramProcessPanel inherits Rectangle {
     // button's label for `DialogType.getCompactLabel()` and turns
     // `axisButtonPanel` from `BoxLayout.X_AXIS` into `Y_AXIS` (`:446-450`).
     in property <bool> compact-display: false;
+    // Rust-only wiring: false when the main window draws the progress panel
+    // in the dialog column (`MainFrameWindow`).
+    in property <bool> show-status-panel: true;
     // `showAxisOnly()` (`:362-364`) and `showAxisA()` (`:366-381`) both call
     // `setBackground(Colors.getBackgroundA())`, and both run inside
     // `createProcessControlPanel` — for `AxisID.ONLY` and `AxisID.FIRST`
@@ -59,6 +62,7 @@ export component TomogramProcessPanel inherits Rectangle {
         axis-id: root.axis-id;
         panel-background: root.panel-background;
         alt-parallel-loc: false;
+        show-status-panel: root.show-status-panel;
 
         // `panelProcessSelect.add(Box.createRigidArea(FixedDim.x0_y5))` (`:443`).
         Rectangle { height: 5px; }

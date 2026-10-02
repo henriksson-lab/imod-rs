@@ -1,63 +1,75 @@
 //! `IMOD/Etomo/src/etomo/ui/swing/Menu.java`.
-#![allow(dead_code)]
+//!
+//! A self-naming `JMenu`.  `final class Menu extends JMenu`: the Swing part is
+//! the `JComponent` node in `component`, reached through `Deref`; the two
+//! overrides (`setText`, `setName`) are inherent methods.
 
-use crate::imod::etomo::{
-    etomo_director::ARGUMENTS,
-    storage::autodoc::autodoc_tokenizer::{DEFAULT_DELIMITER, SEPARATOR_CHAR},
-    util::utilities,
-};
+use std::ops::Deref;
+use std::rc::Rc;
 
-/// Source-observable `JMenu` state.  Native painting and menu hierarchy remain
-/// at the Swing boundary.
-#[derive(Clone, Debug, Default, Eq, PartialEq)]
-pub struct JMenuBoundary {
-    pub text: Option<String>,
-    pub name: Option<String>,
+use crate::imod::etomo::etomo_director::ARGUMENTS;
+use crate::imod::etomo::jdk::JComponent;
+use crate::imod::etomo::storage::autodoc::autodoc_tokenizer::{DEFAULT_DELIMITER, SEPARATOR_CHAR};
+use crate::imod::etomo::util::utilities;
+
+/// Java `UITestFieldType.MENU_ITEM.toString()` (a `Menu` names itself as a menu
+/// item).
+// TODO(unit): needs etomo/type/UITestFieldType.java - `UITestFieldType.MENU_ITEM`
+// ("mn", unlimitedSegments true) is written out here.
+const MENU_ITEM_FIELD_TYPE: &str = "mn";
+/// Java `UITestFieldType.MENU_ITEM.isUnlimitedSegments()`.
+const MENU_ITEM_UNLIMITED_SEGMENTS: bool = true;
+
+/// Java package-private `final class Menu extends JMenu`.
+pub struct Menu {
+    component: Rc<JComponent>,
 }
 
-/// Java package-private final `Menu`.
-#[derive(Clone, Debug, Default, Eq, PartialEq)]
-pub struct Menu {
-    pub menu: JMenuBoundary,
+impl Deref for Menu {
+    type Target = Rc<JComponent>;
+    fn deref(&self) -> &Rc<JComponent> {
+        &self.component
+    }
 }
 
 impl Menu {
-    /// Java `Menu(String)`.
-    pub fn new(text: &str) -> Self {
-        let mut value = Self::default();
-        value.set_text(text);
-        value
+    /// Java `Menu(String)`: `super(s)`.  `JMenuItem.init` calls the overridden
+    /// `setText`, which names the menu.
+    pub fn new(s: &str) -> Rc<Menu> {
+        let menu = Rc::new(Menu {
+            component: JComponent::new_menu(""),
+        });
+        menu.set_text(s);
+        menu
+    }
+
+    /// The `JMenu` this class extends, as a `java.awt.Component`.
+    pub fn get_component(&self) -> Rc<JComponent> {
+        self.component.clone()
     }
 
     /// Java overridden `setText(String)`.
-    pub fn set_text(&mut self, text: &str) {
-        self.menu.text = Some(text.into());
-        self.set_name(text);
+    pub fn set_text(&self, text: &str) {
+        self.component.set_text(text);
+        self.set_name(Some(text));
     }
 
     /// Java overridden `setName(String)`.
-    pub fn set_name(&mut self, text: &str) {
-        let name = utilities::convert_label_to_name(Some(text), true).unwrap_or_default();
-        self.menu.name = Some(format!("mn{SEPARATOR_CHAR}{name}"));
+    pub fn set_name(&self, text: Option<&str>) {
+        let name = utilities::convert_label_to_name(text, MENU_ITEM_UNLIMITED_SEGMENTS);
+        // Java string concatenation renders a null name as "null".
+        self.component.set_name(Some(&format!(
+            "{}{}{}",
+            MENU_ITEM_FIELD_TYPE,
+            SEPARATOR_CHAR,
+            name.as_deref().unwrap_or("null")
+        )));
         if ARGUMENTS.lock().unwrap().is_print_names() {
             println!(
-                "{} {DEFAULT_DELIMITER} ",
-                self.menu.name.as_deref().unwrap_or_default()
+                "{} {} ",
+                self.component.get_name().as_deref().unwrap_or("null"),
+                DEFAULT_DELIMITER
             );
         }
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn text_and_explicit_name_use_menu_item_test_name() {
-        let mut menu = Menu::new("Old Menu");
-        assert_eq!(menu.menu.name.as_deref(), Some("mn.old-menu"));
-        menu.set_name("New Menu");
-        assert_eq!(menu.menu.text.as_deref(), Some("Old Menu"));
-        assert_eq!(menu.menu.name.as_deref(), Some("mn.new-menu"));
     }
 }

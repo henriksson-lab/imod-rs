@@ -1,238 +1,346 @@
 //! `IMOD/Etomo/src/etomo/ui/swing/SqueezeVolPanel.java`.
 //!
-//! Swing construction, autodoc/MRC I/O, and concrete application-manager calls
-//! are frontend boundaries.  This unit keeps the source-owned state, parameter
-//! transfer, validation, enablement, and action routing explicit.
-#![allow(dead_code)]
+//! Java `final class SqueezeVolPanel implements Run3dmodButtonContainer,
+//! ContextMenu, ReduceFiltVolDisplay, FieldDisplayer`: the "Reduce/filt vol"
+//! tab of the Post Processing dialog (reducefiltvol: reduce the trimmed or
+//! flattened volume by a factor and/or filter it).
+//!
+//! An EDT object (`ui.md`): created as `Rc<Self>` by
+//! [`SqueezeVolPanel::get_instance`]; every method takes `&self`.  The
+//! listener class `SqueezeVolPanelActionListener` is a closure holding a weak
+//! reference to the panel.  The panel hands itself to its fields as their
+//! `FieldDisplayer` (`getText(doValidation, this)`); that `this` is
+//! `self_ref`, upgraded.
+//!
+//! The class's `setParameters`/`getParameters` overloads carry the
+//! parameter-type suffix; the `ReduceFiltVolDisplay` `getParameters` is the
+//! trait impl.
 
-use super::{
-    check_box::CheckBox,
-    labeled_text_field::{FieldValidationFailedException, LabeledTextField},
-    multi_line_button::{BaseScreenState, MultiLineButton},
-    radio_button::{RadioButton, RadioButtonGroup},
-    text_efield::TextEfield,
+use std::path::PathBuf;
+use std::rc::{Rc, Weak};
+
+use super::beveled_border::BeveledBorder;
+use super::check_box::CheckBox;
+use super::context_menu::ContextMenu;
+use super::context_popup::{self, ContextPopup};
+use super::deferred_3dmod_button::Deferred3dmodButton;
+use super::labeled_text_field::LabeledTextField;
+use super::radio_button::RadioButton;
+use super::reduce_filt_vol_display::ReduceFiltVolDisplay;
+use super::run_3dmod_button::Run3dmodButton;
+use super::run_3dmod_button_container::Run3dmodButtonContainer;
+use super::spaced_panel::{self, SpacedPanel};
+use super::text_field::TextField;
+use super::ui_harness;
+use crate::imod::etomo::application_manager::ApplicationManager;
+use crate::imod::etomo::base_manager::BaseManager;
+use crate::imod::etomo::comscript::const_squeezevol_param::ConstSqueezevolParam;
+use crate::imod::etomo::comscript::fortran_input_syntax_exception::FortranInputSyntaxException;
+use crate::imod::etomo::comscript::makecomfile_param::MakecomfileParam;
+use crate::imod::etomo::comscript::reduce_filt_vol_param::{self, ReduceFiltVolParam};
+use crate::imod::etomo::comscript::squeezevol_param;
+use crate::imod::etomo::jdk::{ActionEvent, ActionListener, ButtonGroup, JComponent, MouseEvent};
+use crate::imod::etomo::logic::converter;
+use crate::imod::etomo::process::imod_process::Run3dmodMenuOptions;
+use crate::imod::etomo::storage::autodoc::autodoc::Autodoc;
+use crate::imod::etomo::storage::autodoc::autodoc_factory;
+use crate::imod::etomo::storage::autodoc::read_only_autodoc::ReadOnlyAutodoc;
+use crate::imod::etomo::storage::log_file::LogFileError;
+use crate::imod::etomo::r#type::axis_id::AxisID;
+use crate::imod::etomo::r#type::const_etomo_number::{
+    ConstEtomoNumber, Number, java_lang_double_to_string,
 };
-use crate::imod::etomo::{
-    process::imod_process::Run3dmodMenuOptions,
-    r#type::{axis_id::AxisID, dialog_type::DialogType},
-    ui::field_type::FieldType,
-};
-use std::{cell::RefCell, rc::Rc};
+use crate::imod::etomo::r#type::const_meta_data::ConstMetaData;
+use crate::imod::etomo::r#type::dialog_type::DialogType;
+use crate::imod::etomo::r#type::etomo_autodoc;
+use crate::imod::etomo::r#type::file_type;
+use crate::imod::etomo::r#type::image_file_type::ImageFileType;
+use crate::imod::etomo::r#type::meta_data::MetaData;
+use crate::imod::etomo::r#type::process_result_display::ProcessResultDisplayHandle;
+use crate::imod::etomo::r#type::recon_screen_state::ReconScreenState;
+use crate::imod::etomo::ui::field::Field;
+use crate::imod::etomo::ui::field_displayer::FieldDisplayer;
+use crate::imod::etomo::ui::field_type::FieldType;
+use crate::imod::etomo::ui::field_validation_failed_exception::FieldValidationFailedException;
+use crate::imod::etomo::ui::ui_component::UIComponent;
+use crate::imod::etomo::util::mrc_header::MRCHeader;
 
-pub const USE_TRIM_VOL_OUTPUT_LABEL: &str = "Use the trimvol output";
-pub const USE_FLATTEN_OUTPUT_LABEL: &str = "Use the flatten output";
-pub const REDUCE_BY_OVERALL_FACTOR_LABEL: &str = "Reduce by overall factor (>=1)";
-pub const FACTOR_IN_Z_LABEL: &str = "Factor in Z ";
-pub const FILTER_NONE_LABEL: &str = "None";
-pub const FILTER_GAUSSIAN_LOW_PASS_LABEL: &str = "Gaussian low-pass";
-pub const FILTER_DECONVOLUTION_LABEL: &str = "Deconvolution";
-pub const LOW_PASS_CUTOFF_SIGMA_LABEL: &str = "Low pass cutoff and sigma (1/pixel) ";
-pub const DECONVOLUTION_STRENGTH_LABEL: &str = "Deconvolution strength ";
-pub const SNR_FALLOFF_LABEL: &str = "SNR falloff ";
-pub const HIGH_PASS_FILTER_CUTOFF_LABEL: &str = "High pass filter cutoff (fraction of Nyquist) ";
-pub const DEFOCUS_LABEL: &str = "Defocus (microns) ";
-pub const PHASE_SHIFT_LABEL: &str = "Phase shift (degrees) ";
-pub const DATA_MODE_OF_OUTPUT_LABEL: &str = "Data mode of output ";
-pub const BTN_IMOD_REDUCE_FILT_VOL_LABEL: &str = "Open Output Volume in 3dmod";
+/// Java private static final `USE_TRIM_VOL_OUTPUT_LABEL`.
+const USE_TRIM_VOL_OUTPUT_LABEL: &str = "Use the trimvol output";
+/// Java private static final `USE_FLATTEN_OUTPUT_LABEL`.
+const USE_FLATTEN_OUTPUT_LABEL: &str = "Use the flatten output";
+/// Java private static final `REDUCE_BY_OVERALL_FACTOR_LABEL`.
+const REDUCE_BY_OVERALL_FACTOR_LABEL: &str = "Reduce by overall factor (>=1)";
+/// Java private static final `FACTOR_IN_Z_LABEL`.
+const FACTOR_IN_Z_LABEL: &str = "Factor in Z ";
+/// Java private static final `FILTER_NONE_LABEL`.
+const FILTER_NONE_LABEL: &str = "None";
+/// Java private static final `FILTER_GAUSSIAN_LOW_PASS_LABEL`.
+const FILTER_GAUSSIAN_LOW_PASS_LABEL: &str = "Gaussian low-pass";
+/// Java private static final `FILTER_DECONVOLUTION_LABEL`.
+const FILTER_DECONVOLUTION_LABEL: &str = "Deconvolution";
+/// Java private static final `LOW_PASS_CUTOFF_SIGMA_LABEL`.
+const LOW_PASS_CUTOFF_SIGMA_LABEL: &str = "Low pass cutoff and sigma (1/pixel) ";
+/// Java private static final `DECONVOLUTION_STRENGTH_LABEL`.
+const DECONVOLUTION_STRENGTH_LABEL: &str = "Deconvolution strength ";
+/// Java private static final `SNR_FALLOFF_LABEL`.
+const SNR_FALLOFF_LABEL: &str = "SNR falloff ";
+/// Java private static final `HIGH_PASS_FILTER_CUTOFF_LABEL`.
+const HIGH_PASS_FILTER_CUTOFF_LABEL: &str = "High pass filter cutoff (fraction of Nyquist) ";
+/// Java private static final `DEOCUS_LABEL` (sic).
+const DEOCUS_LABEL: &str = "Defocus (microns) ";
+/// Java private static final `PHASE_SHIFT_LABEL`.
+const PHASE_SHIFT_LABEL: &str = "Phase shift (degrees) ";
+/// Java private static final `DATA_MODE_OF_OUTPUT_LABEL`.
+const DATA_MODE_OF_OUTPUT_LABEL: &str = "Data mode of output ";
+/// Java private static final `BTN_IMOD_REDUCE_FILT_VOL_LABEL`.
+const BTN_IMOD_REDUCE_FILT_VOL_LABEL: &str = "Open Output Volume in 3dmod";
 
-/// Direct Java `ReduceFiltVolParam` calls.
-pub trait ReduceFiltVolParam {
-    fn set_input_file(&mut self, file: String, flipped: bool);
-    fn set_reduction_factor(&mut self, value: String);
-    fn reset_reduction_factor(&mut self);
-    fn set_z_reduction_factor(&mut self, value: String);
-    fn reset_z_reduction_factor(&mut self);
-    fn set_low_pass_radius_sigma(&mut self, value: String, validation: bool) -> Option<String>;
-    fn reset_low_pass_radius_sigma(&mut self);
-    fn set_deconvolution_strength(&mut self, value: String);
-    fn reset_deconvolution_strength(&mut self);
-    fn set_snr_falloff(&mut self, value: String);
-    fn reset_snr_falloff(&mut self);
-    fn set_high_pass_nyquist(&mut self, value: String);
-    fn reset_high_pass_nyquist(&mut self);
-    fn set_defocus_in_microns(&mut self, value: String);
-    fn reset_defocus_in_microns(&mut self);
-    fn set_phase_shift(&mut self, value: String);
-    fn reset_phase_shift(&mut self);
-    fn set_mode_to_output(&mut self, value: String);
-    fn set_setup_chunks_if_memory_error(&mut self, value: bool);
-    fn set_output_file(&mut self, value: String);
-}
-/// Reads from Java `ConstReduceFiltVolParam`.
-pub trait ConstReduceFiltVolParam {
-    fn value(&self, key: &str) -> Option<String>;
-    fn is_set(&self, key: &str) -> bool;
-}
-#[derive(Clone, Debug, Default, Eq, PartialEq)]
-pub struct ConstSqueezevolParamBoundary {
-    pub reduction_factor_x: String,
-    pub reduction_factor_y: String,
-    pub reduction_factor_z: String,
-}
-#[derive(Clone, Debug, Default, Eq, PartialEq)]
-pub struct SqueezeVolMetaDataBoundary {
-    pub post_squeeze_vol_input_trim_vol: bool,
-    pub post_reduce_filt_vol_reduction_factor: String,
-    pub post_reduce_filt_vol_z_reduction_factor: String,
-    pub post_reduce_filt_vol_low_pass_radius_sigma: String,
-    pub post_reduce_filt_vol_deconvolution_strength: String,
-    pub post_reduce_filt_vol_snr_falloff: String,
-    pub post_reduce_filt_vol_high_pass_nyquist: String,
-    pub post_reduce_filt_vol_defocus_in_microns: String,
-    pub post_reduce_filt_vol_phase_shift: String,
-}
-#[derive(Clone, Debug, Default, Eq, PartialEq)]
-pub struct MakecomfileParamBoundary {
-    pub input_file: Option<String>,
-    pub reduction_factor: Option<String>,
-}
-
-/// The direct application-manager and FileType boundary used by this unit.
-pub trait SqueezeVolPanelApplicationManager {
-    fn is_squeezevol_flipped(&self) -> bool;
-    fn is_trimvol_flipped(&self) -> bool;
-    fn is_result_set_flatten_flipped(&self) -> bool;
-    fn is_flatten_flipped(&self) -> bool;
-    fn trim_vol_output_file_name(&self, axis_id: AxisID) -> String;
-    fn flatten_output_file_name(&self, axis_id: AxisID) -> String;
-    fn reduce_filt_vol_output_file_name(&self, axis_id: AxisID, reduction_factor: f64) -> String;
-    fn reduce_filt_vol(&mut self, options: Option<Run3dmodMenuOptions>, dialog_type: DialogType);
-    fn imod_reduced_filtered_volume(
-        &mut self,
-        options: Option<Run3dmodMenuOptions>,
-        axis_id: AxisID,
-        output_file: String,
-    );
-    fn open_message_dialog(&mut self, message: String, title: &str, axis_id: AxisID);
-}
-#[derive(Clone, Debug, Default, Eq, PartialEq)]
-pub struct SqueezeVolPanelLayout {
-    pub root_border: Option<String>,
-    pub root_component_order: Vec<&'static str>,
-    pub filtering_component_order: Vec<&'static str>,
-    pub button_component_order: Vec<&'static str>,
-    pub listener_count: usize,
-    pub tooltips_initialized: bool,
-    pub context_popup_title: Option<String>,
-}
-
-/// Java final `SqueezeVolPanel` field state.
-#[derive(Clone, Debug)]
+/// Java `final class SqueezeVolPanel`.
 pub struct SqueezeVolPanel {
-    pub pnl_root: SqueezeVolPanelLayout,
-    pub rb_input_file_trim_vol: RadioButton,
-    pub rb_input_file_flatten_warp: RadioButton,
-    pub cb_reduce_by_overall_factor: CheckBox,
-    pub tf_reduce_by_overall_factor: TextEfield,
-    pub ltf_factor_in_z: LabeledTextField,
-    pub rb_filtering_none: RadioButton,
-    pub rb_filtering_gaussian: RadioButton,
-    pub rb_filtering_deconvolution: RadioButton,
-    pub ltf_low_pass_cutoff_sigma: LabeledTextField,
-    pub ltf_deconvolution_strength: LabeledTextField,
-    pub ltf_snr_falloff: LabeledTextField,
-    pub ltf_high_pass_filter_cutoff: LabeledTextField,
-    pub ltf_defocus: LabeledTextField,
-    pub ltf_phase_shift: LabeledTextField,
-    pub ltf_data_mode_of_output: LabeledTextField,
-    pub btn_reduce_filt_vol: MultiLineButton,
-    pub btn_imod_reduce_filt_vol: MultiLineButton,
-    pub axis_id: AxisID,
-    pub dialog_type: DialogType,
+    /// Rust-only: Java `this` (the panel as its fields' FieldDisplayer, and
+    /// `getReduceFiltVolDisplay`).
+    self_ref: Weak<SqueezeVolPanel>,
+
+    /// Java private final `actionListener = new
+    /// SqueezeVolPanelActionListener(this)`.
+    action_listener: ActionListener,
+    /// Java private final `pnlRoot = SpacedPanel.getInstance()`.
+    pnl_root: Rc<SpacedPanel>,
+    /// Java private final `bgInputFile = new ButtonGroup()`.
+    bg_input_file: Rc<ButtonGroup>,
+    /// Java private final `rbInputFileTrimVol`.
+    rb_input_file_trim_vol: Rc<RadioButton>,
+    /// Java private final `rbInputFileFlattenWarp`.
+    rb_input_file_flatten_warp: Rc<RadioButton>,
+    /// Java private final `cbReduceByOverallFactor`.
+    cb_reduce_by_overall_factor: Rc<CheckBox>,
+    /// Java private final `tfReduceByOverallFactor`.
+    tf_reduce_by_overall_factor: Rc<TextField>,
+    /// Java private final `ltfFactorInZ`.
+    ltf_factor_in_z: Rc<LabeledTextField>,
+    /// Java private final `bgFiltering = new ButtonGroup()`.
+    bg_filtering: Rc<ButtonGroup>,
+    /// Java private final `rbFilteringNone`.
+    rb_filtering_none: Rc<RadioButton>,
+    /// Java private final `rbFilteringGaussian`.
+    rb_filtering_gaussian: Rc<RadioButton>,
+    /// Java private final `rbFilteringDeconvolution`.
+    rb_filtering_deconvolution: Rc<RadioButton>,
+    /// Java private final `ltfLowPassCutoffSigma`.
+    ltf_low_pass_cutoff_sigma: Rc<LabeledTextField>,
+    /// Java private final `ltfDeconvolutionStrength`.
+    ltf_deconvolution_strength: Rc<LabeledTextField>,
+    /// Java private final `ltfSNRFalloff`.
+    ltf_snr_falloff: Rc<LabeledTextField>,
+    /// Java private final `ltfHighPassFilterCutoff`.
+    ltf_high_pass_filter_cutoff: Rc<LabeledTextField>,
+    /// Java private final `ltfDefocus`.
+    ltf_defocus: Rc<LabeledTextField>,
+    /// Java private final `ltfPhaseShift`.
+    ltf_phase_shift: Rc<LabeledTextField>,
+    /// Java private final `ltfDataModeOfOutput`.
+    ltf_data_mode_of_output: Rc<LabeledTextField>,
+    /// Java private final `btnImodReduceFiltVol`.
+    btn_imod_reduce_filt_vol: Rc<Run3dmodButton>,
+
+    /// Java private final `btnReduceFiltVol`.
+    btn_reduce_filt_vol: Rc<Run3dmodButton>,
+    /// Java private final `manager`.
+    manager: &'static ApplicationManager,
+    /// Java private final `axisID`.
+    axis_id: AxisID,
+    /// Java private final `dialogType`.
+    dialog_type: DialogType,
 }
+
 impl SqueezeVolPanel {
-    pub fn new(axis_id: AxisID, dialog_type: DialogType) -> Self {
-        let input = Rc::new(RefCell::new(RadioButtonGroup::new()));
-        let filter = Rc::new(RefCell::new(RadioButtonGroup::new()));
-        Self {
-            pnl_root: SqueezeVolPanelLayout::default(),
-            rb_input_file_trim_vol: RadioButton::new_in_group(
-                USE_TRIM_VOL_OUTPUT_LABEL,
-                input.clone(),
-            ),
-            rb_input_file_flatten_warp: RadioButton::new_in_group(USE_FLATTEN_OUTPUT_LABEL, input),
-            cb_reduce_by_overall_factor: CheckBox::new_with_text(REDUCE_BY_OVERALL_FACTOR_LABEL),
-            tf_reduce_by_overall_factor: TextEfield::new(
-                REDUCE_BY_OVERALL_FACTOR_LABEL,
-                Some(FieldType::FloatingPoint),
-                true,
-                false,
-                true,
-                true,
-                false,
-                false,
-            ),
-            ltf_factor_in_z: LabeledTextField::new(FieldType::FloatingPoint, FACTOR_IN_Z_LABEL),
-            rb_filtering_none: RadioButton::new_in_group(FILTER_NONE_LABEL, filter.clone()),
-            rb_filtering_gaussian: RadioButton::new_in_group(
-                FILTER_GAUSSIAN_LOW_PASS_LABEL,
-                filter.clone(),
-            ),
-            rb_filtering_deconvolution: RadioButton::new_in_group(
-                FILTER_DECONVOLUTION_LABEL,
-                filter,
-            ),
-            ltf_low_pass_cutoff_sigma: LabeledTextField::new(
+    /// Java private constructor `SqueezeVolPanel(ApplicationManager, AxisID,
+    /// DialogType)`, with the field initializers.
+    fn new(
+        manager: &'static ApplicationManager,
+        axis_id: AxisID,
+        dialog_type: DialogType,
+    ) -> Rc<SqueezeVolPanel> {
+        let instance = Rc::new_cyclic(|self_ref: &Weak<SqueezeVolPanel>| {
+            // Field initializers.
+            // Java `new SqueezeVolPanelActionListener(this)`.
+            let adaptee = self_ref.clone();
+            let action_listener: ActionListener = Rc::new(move |event: &ActionEvent| {
+                if let Some(adaptee) = adaptee.upgrade() {
+                    adaptee.action(event.get_action_command().unwrap_or(""), None, None);
+                }
+            });
+            let pnl_root = SpacedPanel::get_instance_void();
+            let bg_input_file = ButtonGroup::new();
+            let rb_input_file_trim_vol = RadioButton::new_string_button_group(
+                Some(USE_TRIM_VOL_OUTPUT_LABEL),
+                Some(&bg_input_file),
+            );
+            let rb_input_file_flatten_warp = RadioButton::new_string_button_group(
+                Some(USE_FLATTEN_OUTPUT_LABEL),
+                Some(&bg_input_file),
+            );
+            let cb_reduce_by_overall_factor =
+                CheckBox::new_string(Some(REDUCE_BY_OVERALL_FACTOR_LABEL));
+            let tf_reduce_by_overall_factor = TextField::new(
+                FieldType::FloatingPoint,
+                Some(REDUCE_BY_OVERALL_FACTOR_LABEL),
+                None,
+            );
+            let ltf_factor_in_z = LabeledTextField::new_field_type_string(
+                FieldType::FloatingPoint,
+                Some(FACTOR_IN_Z_LABEL),
+            );
+            let bg_filtering = ButtonGroup::new();
+            let rb_filtering_none =
+                RadioButton::new_string_button_group(Some(FILTER_NONE_LABEL), Some(&bg_filtering));
+            let rb_filtering_gaussian = RadioButton::new_string_button_group(
+                Some(FILTER_GAUSSIAN_LOW_PASS_LABEL),
+                Some(&bg_filtering),
+            );
+            let rb_filtering_deconvolution = RadioButton::new_string_button_group(
+                Some(FILTER_DECONVOLUTION_LABEL),
+                Some(&bg_filtering),
+            );
+            let ltf_low_pass_cutoff_sigma = LabeledTextField::new_field_type_string(
                 FieldType::FloatingPointPair,
-                LOW_PASS_CUTOFF_SIGMA_LABEL,
-            ),
-            ltf_deconvolution_strength: LabeledTextField::new(
+                Some(LOW_PASS_CUTOFF_SIGMA_LABEL),
+            );
+            let ltf_deconvolution_strength = LabeledTextField::new_field_type_string(
                 FieldType::FloatingPoint,
-                DECONVOLUTION_STRENGTH_LABEL,
-            ),
-            ltf_snr_falloff: LabeledTextField::new(FieldType::FloatingPoint, SNR_FALLOFF_LABEL),
-            ltf_high_pass_filter_cutoff: LabeledTextField::new(
+                Some(DECONVOLUTION_STRENGTH_LABEL),
+            );
+            let ltf_snr_falloff = LabeledTextField::new_field_type_string(
                 FieldType::FloatingPoint,
-                HIGH_PASS_FILTER_CUTOFF_LABEL,
-            ),
-            ltf_defocus: LabeledTextField::new(FieldType::FloatingPoint, DEFOCUS_LABEL),
-            ltf_phase_shift: LabeledTextField::new(FieldType::FloatingPoint, PHASE_SHIFT_LABEL),
-            ltf_data_mode_of_output: LabeledTextField::new(
+                Some(SNR_FALLOFF_LABEL),
+            );
+            let ltf_high_pass_filter_cutoff = LabeledTextField::new_field_type_string(
                 FieldType::FloatingPoint,
-                DATA_MODE_OF_OUTPUT_LABEL,
-            ),
-            btn_reduce_filt_vol: MultiLineButton::new_with_label(Some("Reduce/Filter Volume")),
-            btn_imod_reduce_filt_vol: MultiLineButton::new_with_label(Some(
-                BTN_IMOD_REDUCE_FILT_VOL_LABEL,
-            )),
-            axis_id,
-            dialog_type,
-        }
+                Some(HIGH_PASS_FILTER_CUTOFF_LABEL),
+            );
+            let ltf_defocus = LabeledTextField::new_field_type_string(
+                FieldType::FloatingPoint,
+                Some(DEOCUS_LABEL),
+            );
+            let ltf_phase_shift = LabeledTextField::new_field_type_string(
+                FieldType::FloatingPoint,
+                Some(PHASE_SHIFT_LABEL),
+            );
+            let ltf_data_mode_of_output = LabeledTextField::new_field_type_string(
+                FieldType::FloatingPoint,
+                Some(DATA_MODE_OF_OUTPUT_LABEL),
+            );
+            let btn_imod_reduce_filt_vol =
+                Run3dmodButton::get_3dmod_instance_string_run_3dmod_button_container(
+                    Some(BTN_IMOD_REDUCE_FILT_VOL_LABEL),
+                    Some(self_ref.clone() as Weak<dyn Run3dmodButtonContainer>),
+                );
+            // Constructor body.
+            let btn_reduce_filt_vol = manager
+                .get_process_result_display_factory(axis_id)
+                .get_squeeze_volume();
+            SqueezeVolPanel {
+                self_ref: self_ref.clone(),
+                action_listener,
+                pnl_root,
+                bg_input_file,
+                rb_input_file_trim_vol,
+                rb_input_file_flatten_warp,
+                cb_reduce_by_overall_factor,
+                tf_reduce_by_overall_factor,
+                ltf_factor_in_z,
+                bg_filtering,
+                rb_filtering_none,
+                rb_filtering_gaussian,
+                rb_filtering_deconvolution,
+                ltf_low_pass_cutoff_sigma,
+                ltf_deconvolution_strength,
+                ltf_snr_falloff,
+                ltf_high_pass_filter_cutoff,
+                ltf_defocus,
+                ltf_phase_shift,
+                ltf_data_mode_of_output,
+                btn_imod_reduce_filt_vol,
+                btn_reduce_filt_vol,
+                manager,
+                axis_id,
+                dialog_type,
+            }
+        });
+        // The last statement of the Java constructor (it needs `this`).
+        instance.set_field_displayer();
+        instance
     }
-    pub fn get_instance(axis_id: AxisID, dialog_type: DialogType) -> Self {
-        let mut instance = Self::new(axis_id, dialog_type);
+
+    /// Java package-private static `getInstance(ApplicationManager, AxisID,
+    /// DialogType)`.
+    pub fn get_instance(
+        manager: &'static ApplicationManager,
+        axis_id: AxisID,
+        dialog_type: DialogType,
+    ) -> Rc<SqueezeVolPanel> {
+        let instance = SqueezeVolPanel::new(manager, axis_id, dialog_type);
         instance.create_panel();
         instance.set_tool_tip_text();
         instance.add_listeners();
         instance
     }
-    pub fn add_listeners(&mut self) {
-        self.rb_input_file_trim_vol.add_action_listener();
-        self.rb_input_file_flatten_warp.add_action_listener();
-        self.cb_reduce_by_overall_factor.add_action_listener();
-        self.ltf_factor_in_z.add_action_listener();
-        self.rb_filtering_none.add_action_listener();
-        self.rb_filtering_gaussian.add_action_listener();
-        self.rb_filtering_deconvolution.add_action_listener();
-        self.ltf_low_pass_cutoff_sigma.add_action_listener();
-        self.ltf_deconvolution_strength.add_action_listener();
-        self.ltf_snr_falloff.add_action_listener();
-        self.ltf_high_pass_filter_cutoff.add_action_listener();
-        self.ltf_defocus.add_action_listener();
-        self.ltf_phase_shift.add_action_listener();
-        self.ltf_data_mode_of_output.add_action_listener();
-        self.btn_reduce_filt_vol.add_action_listener();
-        self.btn_imod_reduce_filt_vol.add_action_listener();
-        self.pnl_root.listener_count = 17;
+
+    /// Rust-only: Java `this` as a `FieldDisplayer` (`None` only while the
+    /// panel is being dropped).
+    fn this_field_displayer(&self) -> Option<Rc<dyn FieldDisplayer>> {
+        self.self_ref
+            .upgrade()
+            .map(|this| this as Rc<dyn FieldDisplayer>)
     }
-    pub fn pop_up_context_menu(&mut self) {
-        self.pnl_root.context_popup_title = Some("Reducefilt".into());
+
+    /// Java private `addListeners()`.
+    fn add_listeners(&self) {
+        // Swing mouse: pnlRoot.addMouseListener(new GenericMouseAdapter(this)).
+        // Mouse events are not modelled; the adapter's only effect is to call
+        // popUpContextMenu on a right-button press, which a driver calls
+        // directly.
+        self.rb_input_file_trim_vol
+            .add_action_listener(self.action_listener.clone());
+        self.rb_input_file_flatten_warp
+            .add_action_listener(self.action_listener.clone());
+        self.cb_reduce_by_overall_factor
+            .add_action_listener(Some(self.action_listener.clone()));
+        self.ltf_factor_in_z
+            .add_action_listener(self.action_listener.clone());
+        self.rb_filtering_none
+            .add_action_listener(self.action_listener.clone());
+        self.rb_filtering_gaussian
+            .add_action_listener(self.action_listener.clone());
+        self.rb_filtering_deconvolution
+            .add_action_listener(self.action_listener.clone());
+        self.ltf_low_pass_cutoff_sigma
+            .add_action_listener(self.action_listener.clone());
+        self.ltf_deconvolution_strength
+            .add_action_listener(self.action_listener.clone());
+        self.ltf_snr_falloff
+            .add_action_listener(self.action_listener.clone());
+        self.ltf_high_pass_filter_cutoff
+            .add_action_listener(self.action_listener.clone());
+        self.ltf_defocus
+            .add_action_listener(self.action_listener.clone());
+        self.ltf_phase_shift
+            .add_action_listener(self.action_listener.clone());
+        self.ltf_data_mode_of_output
+            .add_action_listener(self.action_listener.clone());
+        self.btn_reduce_filt_vol
+            .add_action_listener(self.action_listener.clone());
+        self.btn_imod_reduce_filt_vol
+            .add_action_listener(self.action_listener.clone());
     }
-    pub fn create_panel(&mut self) {
-        self.rb_input_file_trim_vol.set_selected(true);
-        self.rb_filtering_none.set_selected(true);
+
+    /// Java private `createPanel()`.
+    fn create_panel(&self) {
+        self.rb_input_file_trim_vol.set_selected_boolean(true);
+        self.rb_filtering_none.set_selected_boolean(true);
         self.tf_reduce_by_overall_factor.set_preferred_width(70);
-        self.ltf_factor_in_z.set_preferred_width(70, None);
+        self.ltf_factor_in_z.set_preferred_width(70);
         self.ltf_low_pass_cutoff_sigma
             .set_number_must_be_positive(true);
         self.ltf_deconvolution_strength.set_required(true);
@@ -241,416 +349,827 @@ impl SqueezeVolPanel {
         self.ltf_snr_falloff.set_number_must_be_positive(true);
         self.ltf_high_pass_filter_cutoff
             .set_number_must_be_positive(true);
-        self.ltf_high_pass_filter_cutoff.set_minimum(0.0);
-        self.ltf_high_pass_filter_cutoff.set_maximum(1.0);
+        self.ltf_high_pass_filter_cutoff
+            .set_minimum(reduce_filt_vol_param::HIGH_PASS_NYQUIST_MIN);
+        self.ltf_high_pass_filter_cutoff
+            .set_maximum(reduce_filt_vol_param::HIGH_PASS_NYQUIST_MAX);
         self.ltf_defocus.set_number_must_be_positive(true);
-        self.pnl_root.root_border = Some("Reduce and/or Filter Volume".into());
-        self.pnl_root.root_component_order = vec![
-            "input-file",
-            "reduce-by-factor",
-            "filtering",
-            "data-mode",
-            "buttons",
-        ];
-        self.pnl_root.filtering_component_order = vec![
-            "radio-buttons",
-            "low-pass",
-            "deconvolution",
-            "high-pass",
-            "defocus",
-        ];
-        self.pnl_root.button_component_order =
-            vec!["reduce-filt-vol", "horizontal-glue", "imod-reduce-filt-vol"];
-        self.update_display(false);
+        // root panel
+        self.pnl_root.set_box_layout(spaced_panel::Y_AXIS);
+        self.pnl_root
+            .set_border(&BeveledBorder::new(Some("Reduce and/or Filter Volume")).get_border());
+        // Choose input file
+        let pnl_input_file = JComponent::new_panel();
+        // Swing layout: pnlInputFile Y_AXIS BoxLayout, CENTER_ALIGNMENT.
+        pnl_input_file.set_border_title(
+            BeveledBorder::new(Some("Set Input File"))
+                .get_border()
+                .get_title()
+                .as_deref(),
+        );
+        pnl_input_file.add(&self.rb_input_file_trim_vol.get_component());
+        pnl_input_file.add(&self.rb_input_file_flatten_warp.get_component());
+        self.pnl_root.add_j_panel(&pnl_input_file);
+        // Reduce by overall factor panel
+        let pnl_reduce_by_overall_factor = SpacedPanel::get_instance_void();
+        pnl_reduce_by_overall_factor.set_box_layout(spaced_panel::X_AXIS);
+        pnl_reduce_by_overall_factor
+            .add_component(&self.cb_reduce_by_overall_factor.get_component());
+        pnl_reduce_by_overall_factor.add_text_field(&self.tf_reduce_by_overall_factor);
+        // Swing layout: pnlReduceByOverallFactor.add(Box.createRigidArea(
+        // FixedDim.x10_y0)).
+        pnl_reduce_by_overall_factor.add_labeled_text_field(&self.ltf_factor_in_z);
+        self.pnl_root
+            .add_spaced_panel(&pnl_reduce_by_overall_factor);
+        // Filtering
+        let pnl_filtering = SpacedPanel::get_instance_void();
+        pnl_filtering.set_box_layout(spaced_panel::Y_AXIS);
+        pnl_filtering.set_border(&BeveledBorder::new(Some("Filtering")).get_border());
+        let pnl_filtering_radio_buttons = SpacedPanel::get_instance_void();
+        pnl_filtering_radio_buttons.set_box_layout(spaced_panel::X_AXIS);
+        pnl_filtering_radio_buttons.add_component(&self.rb_filtering_none.get_component());
+        pnl_filtering_radio_buttons.add_component(&self.rb_filtering_gaussian.get_component());
+        pnl_filtering_radio_buttons.add_component(&self.rb_filtering_deconvolution.get_component());
+        pnl_filtering.add_spaced_panel(&pnl_filtering_radio_buttons);
+        let pnl_low_pass_cutoff = SpacedPanel::get_instance_void();
+        pnl_low_pass_cutoff.set_box_layout(spaced_panel::X_AXIS);
+        pnl_low_pass_cutoff.add_labeled_text_field(&self.ltf_low_pass_cutoff_sigma);
+        pnl_filtering.add_spaced_panel(&pnl_low_pass_cutoff);
+        let pnl_deconvolution = SpacedPanel::get_instance_void();
+        pnl_deconvolution.set_box_layout(spaced_panel::X_AXIS);
+        pnl_deconvolution.add_labeled_text_field(&self.ltf_deconvolution_strength);
+        // Swing layout: pnlDeconvolution.add(Box.createRigidArea(FixedDim.x10_y0)).
+        pnl_deconvolution.add_labeled_text_field(&self.ltf_snr_falloff);
+        pnl_filtering.add_spaced_panel(&pnl_deconvolution);
+        let pnl_high_pass_filter = SpacedPanel::get_instance_void();
+        pnl_high_pass_filter.set_box_layout(spaced_panel::X_AXIS);
+        pnl_high_pass_filter.add_labeled_text_field(&self.ltf_high_pass_filter_cutoff);
+        pnl_filtering.add_spaced_panel(&pnl_high_pass_filter);
+        let pnl_defocus = SpacedPanel::get_instance_void();
+        pnl_defocus.set_box_layout(spaced_panel::X_AXIS);
+        pnl_defocus.add_labeled_text_field(&self.ltf_defocus);
+        // Swing layout: pnlDefocus.add(Box.createRigidArea(FixedDim.x10_y0)).
+        pnl_defocus.add_labeled_text_field(&self.ltf_phase_shift);
+        pnl_filtering.add_spaced_panel(&pnl_defocus);
+        self.pnl_root.add_spaced_panel(&pnl_filtering);
+        // Data mode of output panel
+        let pnl_data_mode_of_output = SpacedPanel::get_instance_void();
+        pnl_data_mode_of_output.set_box_layout(spaced_panel::X_AXIS);
+        pnl_data_mode_of_output.add_labeled_text_field(&self.ltf_data_mode_of_output);
+        self.pnl_root.add_spaced_panel(&pnl_data_mode_of_output);
+        // third component
+        let pnl_buttons = SpacedPanel::get_instance_void();
+        pnl_buttons.set_box_layout(spaced_panel::X_AXIS);
+        self.btn_reduce_filt_vol.set_container(Some(
+            self.self_ref.clone() as Weak<dyn Run3dmodButtonContainer>
+        ));
+        self.btn_reduce_filt_vol
+            .set_deferred_3dmod_button_deferred_3dmod_button(Some(
+                self.btn_imod_reduce_filt_vol.clone() as Rc<dyn Deferred3dmodButton>,
+            ));
+        pnl_buttons.add_multi_line_button(&self.btn_reduce_filt_vol);
+        pnl_buttons.add_horizontal_glue();
+        pnl_buttons.add_multi_line_button(&self.btn_imod_reduce_filt_vol);
+        self.pnl_root.add_spaced_panel(&pnl_buttons);
+
+        self.update_display();
     }
-    pub fn set_tool_tip_text(&mut self) {
+
+    /// Java private `setToolTipText()`.
+    fn set_tool_tip_text(&self) {
+        // Java `ReadOnlyAutodoc autodoc = null;` then the try/catch.
+        let mut autodoc: *const dyn ReadOnlyAutodoc = std::ptr::null::<Autodoc>();
+        // Java passes a null AxisID; `AutodocFactory.getInstance` takes the
+        // axis by value here (see NEEDS), and it is only used for the error
+        // message's frame.
+        let manager: &'static dyn BaseManager = self.manager;
+        match unsafe {
+            autodoc_factory::get_instance(
+                Some(manager),
+                Some(autodoc_factory::REDUCE_FILTER_VOLUME),
+                AxisID::Only,
+                false,
+            )
+        } {
+            Ok(instance) => autodoc = instance as *const Autodoc,
+            // `catch (final LockException except) {}`.
+            Err(LogFileError::Lock(_)) => {}
+            // `catch (final LogFileException | IOException except)`:
+            // `except.printStackTrace()`.
+            Err(except) => eprintln!("{}", except),
+        }
+        // SAFETY: `autodoc` is null or an autodoc the factory keeps for the life
+        // of the process.
+        let autodoc: Option<&dyn ReadOnlyAutodoc> = if autodoc.is_null() {
+            None
+        } else {
+            Some(unsafe { &*autodoc })
+        };
+        if let Some(read_only_autodoc) = autodoc {
+            let _autodoc_name = read_only_autodoc.get_autodoc_name();
+            self.rb_input_file_trim_vol.set_tool_tip_text_string(
+                etomo_autodoc::get_tooltip(autodoc, Some(reduce_filt_vol_param::INPUT_FILE))
+                    .as_deref(),
+            );
+            self.rb_input_file_flatten_warp.set_tool_tip_text_string(
+                etomo_autodoc::get_tooltip(autodoc, Some(reduce_filt_vol_param::INPUT_FILE))
+                    .as_deref(),
+            );
+            self.cb_reduce_by_overall_factor.set_tool_tip_text_string(
+                etomo_autodoc::get_tooltip(autodoc, Some(reduce_filt_vol_param::REDUCTION_FACTOR))
+                    .as_deref(),
+            );
+            self.tf_reduce_by_overall_factor.set_tool_tip_text(
+                etomo_autodoc::get_tooltip(autodoc, Some(reduce_filt_vol_param::REDUCTION_FACTOR))
+                    .as_deref(),
+            );
+            self.ltf_factor_in_z.set_tool_tip_text(
+                etomo_autodoc::get_tooltip(
+                    autodoc,
+                    Some(reduce_filt_vol_param::Z_REDUCTION_FACTOR),
+                )
+                .as_deref(),
+            );
+            self.ltf_low_pass_cutoff_sigma.set_tool_tip_text(
+                etomo_autodoc::get_tooltip(
+                    autodoc,
+                    Some(reduce_filt_vol_param::LOW_PASS_RADIUS_SIGMA),
+                )
+                .as_deref(),
+            );
+            self.ltf_deconvolution_strength.set_tool_tip_text(
+                etomo_autodoc::get_tooltip(
+                    autodoc,
+                    Some(reduce_filt_vol_param::DECONVOLUTION_STRENGTH),
+                )
+                .as_deref(),
+            );
+            self.ltf_snr_falloff.set_tool_tip_text(
+                etomo_autodoc::get_tooltip(autodoc, Some(reduce_filt_vol_param::SNR_FALLOFF))
+                    .as_deref(),
+            );
+            self.ltf_high_pass_filter_cutoff.set_tool_tip_text(
+                etomo_autodoc::get_tooltip(autodoc, Some(reduce_filt_vol_param::HIGH_PASS_NYQUIST))
+                    .as_deref(),
+            );
+            self.ltf_defocus.set_tool_tip_text(
+                etomo_autodoc::get_tooltip(
+                    autodoc,
+                    Some(reduce_filt_vol_param::DEFOCUS_IN_MICRONS),
+                )
+                .as_deref(),
+            );
+            self.ltf_phase_shift.set_tool_tip_text(
+                etomo_autodoc::get_tooltip(autodoc, Some(reduce_filt_vol_param::PHASE_SHIFT))
+                    .as_deref(),
+            );
+            self.ltf_data_mode_of_output.set_tool_tip_text(
+                etomo_autodoc::get_tooltip(autodoc, Some(reduce_filt_vol_param::MODE_TO_OUTPUT))
+                    .as_deref(),
+            );
+        }
         self.btn_reduce_filt_vol
             .set_tool_tip_text(Some("Run reducefiltvol on the input volume"));
         self.btn_imod_reduce_filt_vol
             .set_tool_tip_text(Some("View the reduced and/or filtered volume"));
-        self.pnl_root.tooltips_initialized = true;
     }
-    pub fn set_parameters_squeezevol(
-        &mut self,
-        param: &ConstSqueezevolParamBoundary,
-        squeezevol_flipped: bool,
+
+    /// Java package-private `setParameters(ConstSqueezevolParam)`.  Set the
+    /// panel values with the specified parameters.
+    pub fn set_parameters_const_squeezevol_param(
+        &self,
+        squeezevol_param: &dyn ConstSqueezevolParam,
     ) {
-        if param.reduction_factor_x != "1.25" {
+        // Ideally the Reduction Factor fields should be set from the values that
+        // were used to run squeezevol on the input file. But there was no
+        // squeezevol log, so it's very difficult to figure out whether this
+        // happened. The most practical thing to do is be right as often as
+        // possible.
+        //
+        // The default value (1.25) was always added, even if the original
+        // Squeezevol dialog was never opened - so we're ignoring them.
+        // Non-default values mean that the user at least opened the original
+        // Squeezevol dialog, so we're keeping them.
+        let mut reduction_factor: &ConstEtomoNumber = squeezevol_param.get_reduction_factor_x();
+        if !reduction_factor.equals_number(Some(Number::Float(
+            squeezevol_param::REDUCTION_FACTOR_DEFAULT,
+        ))) {
             self.tf_reduce_by_overall_factor
-                .set_text(param.reduction_factor_x.clone());
+                .set_text_string(Some(&reduction_factor.to_string()));
         }
-        let reduction = if squeezevol_flipped {
-            &param.reduction_factor_z
+        if self.manager.is_squeezevol_flipped() {
+            reduction_factor = squeezevol_param.get_reduction_factor_z();
         } else {
-            &param.reduction_factor_y
-        };
-        if reduction != "1.25" {
-            self.ltf_factor_in_z.set_text(reduction);
+            reduction_factor = squeezevol_param.get_reduction_factor_y();
+        }
+        if !reduction_factor.equals_number(Some(Number::Float(
+            squeezevol_param::REDUCTION_FACTOR_DEFAULT,
+        ))) {
+            self.ltf_factor_in_z
+                .set_text_const_etomo_number(Some(reduction_factor));
         }
     }
-    pub fn set_parameters_reduce_filt_vol<P: ConstReduceFiltVolParam>(
-        &mut self,
-        param: &P,
+
+    /// Java package-private `setParameters(ReduceFiltVolParam, boolean,
+    /// boolean)`.
+    pub fn set_parameters_reduce_filt_vol_param_boolean_boolean(
+        &self,
+        reduce_filt_vol_param: &ReduceFiltVolParam,
         dialog_not_exists: bool,
         com_file_exists: bool,
-        trim_vol_pixel_area: usize,
-        input_flipped: bool,
     ) {
-        let file_too_big = dialog_not_exists && trim_vol_pixel_area > 2_000_000;
-        if file_too_big {
-            self.cb_reduce_by_overall_factor.set_selected(true);
-        }
-        let reduction = param.is_set("reduction-factor");
-        let z_reduction = param.is_set("z-reduction-factor");
-        if reduction || z_reduction {
-            self.cb_reduce_by_overall_factor.set_selected(true);
-            if let Some(v) = param.value("reduction-factor") {
-                self.tf_reduce_by_overall_factor.set_text(v)
+        let mut file_too_big = false;
+        if dialog_not_exists {
+            let trim_vol_output_header = MRCHeader::get_instance_from_file_type(
+                self.manager,
+                Some(self.axis_id),
+                &file_type::CLASS.trim_vol_output,
+            );
+            // `MRCHeader.getInstance` never returns null in the source.
+            if let Some(trim_vol_output_header) = trim_vol_output_header {
+                // catch (IOException | InvalidParameterException e)
+                //   { e.printStackTrace(); }
+                let read = trim_vol_output_header
+                    .borrow_mut()
+                    .read_with_manager(self.manager);
+                if let Err(e) = read {
+                    eprintln!("{e}");
+                }
+                let n_rows = trim_vol_output_header.borrow().get_n_rows();
+                let n_columns = trim_vol_output_header.borrow().get_n_columns();
+                // Java `int * int` wraps; the product widens for the comparison.
+                if reduce_filt_vol_param::TRIM_VOL_OUTPUT_MIN_PIXEL_AREA
+                    < (n_rows.wrapping_mul(n_columns)) as f64
+                {
+                    self.cb_reduce_by_overall_factor.set_selected_boolean(true);
+                    file_too_big = true;
+                }
             }
-            if let Some(v) = param.value("z-reduction-factor") {
-                self.ltf_factor_in_z.set_text(&v)
+        }
+
+        let reduction_factor = reduce_filt_vol_param.is_reduction_factor();
+        let z_reduction_factor = reduce_filt_vol_param.is_z_reduction_factor();
+        if reduction_factor || z_reduction_factor {
+            self.cb_reduce_by_overall_factor.set_selected_boolean(true);
+            if reduction_factor {
+                self.tf_reduce_by_overall_factor
+                    .set_text_string(Some(&reduce_filt_vol_param.get_reduction_factor()));
+            }
+            if z_reduction_factor {
+                self.ltf_factor_in_z
+                    .set_text_string(Some(&reduce_filt_vol_param.get_z_reduction_factor()));
             }
         } else if com_file_exists {
-            self.cb_reduce_by_overall_factor.set_selected(false)
+            self.cb_reduce_by_overall_factor.set_selected_boolean(false);
         }
-        if let Some(v) = param.value("low-pass-radius-sigma") {
-            self.rb_filtering_gaussian.set_selected(true);
-            self.ltf_low_pass_cutoff_sigma.set_text(&v)
+
+        if reduce_filt_vol_param.is_low_pass_radius_sigma() {
+            self.rb_filtering_gaussian.set_selected_boolean(true);
+            self.ltf_low_pass_cutoff_sigma
+                .set_text_string(Some(&reduce_filt_vol_param.get_low_pass_radius_sigma()));
         }
-        if let Some(v) = param.value("deconvolution-strength") {
-            self.rb_filtering_deconvolution.set_selected(true);
-            self.ltf_deconvolution_strength.set_text(&v)
+        if reduce_filt_vol_param.is_deconvolution_strength() {
+            self.rb_filtering_deconvolution.set_selected_boolean(true);
+            self.ltf_deconvolution_strength
+                .set_text_string(Some(&reduce_filt_vol_param.get_deconvolution_strength()));
         }
-        for (key, field) in [
-            ("snr-falloff", &mut self.ltf_snr_falloff),
-            ("high-pass-nyquist", &mut self.ltf_high_pass_filter_cutoff),
-            ("defocus-in-microns", &mut self.ltf_defocus),
-            ("phase-shift", &mut self.ltf_phase_shift),
-            ("mode-to-output", &mut self.ltf_data_mode_of_output),
-        ] {
-            if let Some(v) = param.value(key) {
-                field.set_text(&v)
-            }
+        if reduce_filt_vol_param.is_snr_falloff() {
+            self.ltf_snr_falloff
+                .set_text_string(Some(&reduce_filt_vol_param.get_snr_falloff()));
         }
-        self.update_display(input_flipped);
+        if reduce_filt_vol_param.is_high_pass_nyquist() {
+            self.ltf_high_pass_filter_cutoff
+                .set_text_string(Some(&reduce_filt_vol_param.get_high_pass_nyquist()));
+        }
+        if reduce_filt_vol_param.is_defocus_in_microns() {
+            self.ltf_defocus
+                .set_text_string(Some(&reduce_filt_vol_param.get_defocus_in_microns()));
+        }
+        if reduce_filt_vol_param.is_phase_shift() {
+            self.ltf_phase_shift
+                .set_text_string(Some(&reduce_filt_vol_param.get_phase_shift()));
+        }
+        if reduce_filt_vol_param.is_mode_to_output() {
+            self.ltf_data_mode_of_output
+                .set_text_string(Some(&reduce_filt_vol_param.get_mode_to_output()));
+        }
+
+        self.update_display();
+
         if !com_file_exists && !file_too_big {
-            self.cb_reduce_by_overall_factor.set_selected(
-                !self.tf_reduce_by_overall_factor.is_empty()
-                    || (!self.ltf_factor_in_z.is_empty() && self.ltf_factor_in_z.is_enabled()),
-            );
+            if !self.tf_reduce_by_overall_factor.is_empty()
+                || (!self.ltf_factor_in_z.is_empty() && self.ltf_factor_in_z.is_enabled())
+            {
+                self.cb_reduce_by_overall_factor.set_selected_boolean(true);
+            } else {
+                self.cb_reduce_by_overall_factor.set_selected_boolean(false);
+            }
         }
-        self.update_display(input_flipped);
+
+        self.update_display();
     }
-    pub fn get_parameters_meta_data(&self, m: &mut SqueezeVolMetaDataBoundary) {
-        m.post_squeeze_vol_input_trim_vol = self.rb_input_file_trim_vol.is_selected();
-        m.post_reduce_filt_vol_reduction_factor = self.tf_reduce_by_overall_factor.get_text();
-        m.post_reduce_filt_vol_z_reduction_factor = self.ltf_factor_in_z.text.clone();
-        m.post_reduce_filt_vol_low_pass_radius_sigma = self.ltf_low_pass_cutoff_sigma.text.clone();
-        m.post_reduce_filt_vol_deconvolution_strength =
-            self.ltf_deconvolution_strength.text.clone();
-        m.post_reduce_filt_vol_snr_falloff = self.ltf_snr_falloff.text.clone();
-        m.post_reduce_filt_vol_high_pass_nyquist = self.ltf_high_pass_filter_cutoff.text.clone();
-        m.post_reduce_filt_vol_defocus_in_microns = self.ltf_defocus.text.clone();
-        m.post_reduce_filt_vol_phase_shift = self.ltf_phase_shift.text.clone();
+
+    /// Java package-private `getParameters(MetaData)`.
+    pub fn get_parameters_meta_data(&self, meta_data: &MetaData) {
+        meta_data.set_post_squeeze_vol_input_trim_vol(self.rb_input_file_trim_vol.is_selected());
+        meta_data.set_post_reduce_filt_vol_reduction_factor(
+            self.tf_reduce_by_overall_factor.get_text_void().as_deref(),
+        );
+        meta_data.set_post_reduce_filt_vol_z_reduction_factor(
+            self.ltf_factor_in_z.get_text_void().as_deref(),
+        );
+        meta_data.set_post_reduce_filt_vol_low_pass_radius_sigma(
+            self.ltf_low_pass_cutoff_sigma.get_text_void().as_deref(),
+        );
+        meta_data.set_post_reduce_filt_vol_deconvolution_strength(
+            self.ltf_deconvolution_strength.get_text_void().as_deref(),
+        );
+        meta_data
+            .set_post_reduce_filt_vol_snr_falloff(self.ltf_snr_falloff.get_text_void().as_deref());
+        meta_data.set_post_reduce_filt_vol_high_pass_nyquist(
+            self.ltf_high_pass_filter_cutoff.get_text_void().as_deref(),
+        );
+        meta_data.set_post_reduce_filt_vol_defocus_in_microns(
+            self.ltf_defocus.get_text_void().as_deref(),
+        );
+        meta_data
+            .set_post_reduce_filt_vol_phase_shift(self.ltf_phase_shift.get_text_void().as_deref());
     }
-    pub fn set_parameters_meta_data(&mut self, m: &SqueezeVolMetaDataBoundary) {
+
+    /// Java package-private `setParameters(ConstMetaData)`.
+    pub fn set_parameters_const_meta_data(&self, meta_data: &dyn ConstMetaData) {
+        // Backwards compatibility
         self.rb_input_file_trim_vol
-            .set_selected(m.post_squeeze_vol_input_trim_vol);
+            .set_selected_boolean(meta_data.is_post_squeeze_vol_input_trim_vol());
         if !self.rb_input_file_trim_vol.is_selected() {
-            self.rb_input_file_flatten_warp.set_selected(true)
+            self.rb_input_file_flatten_warp.set_selected_boolean(true);
         }
-        self.tf_reduce_by_overall_factor
-            .set_text(m.post_reduce_filt_vol_reduction_factor.clone());
-        self.ltf_factor_in_z
-            .set_text(&m.post_reduce_filt_vol_z_reduction_factor);
-        self.ltf_low_pass_cutoff_sigma
-            .set_text(&m.post_reduce_filt_vol_low_pass_radius_sigma);
-        self.ltf_deconvolution_strength
-            .set_text(&m.post_reduce_filt_vol_deconvolution_strength);
+        // Ignore the default values if reducefiltvol hasn't been run yet.
+        let reduce_filt_vol_was_run = file_type::CLASS
+            .reduce_filt_vol_log
+            .exists(Some(self.manager), Some(self.axis_id));
+        if meta_data.is_post_reduce_filt_vol_reduction_factor() {
+            let reduction_factor =
+                meta_data.get_post_reduce_filt_vol_reduction_factor_etomo_number();
+            // The source's `if (reduceFiltVolWasRun || !reductionFactor.equals(
+            // SqueezevolParam.REDUCTION_FACTOR_DEFAULT)) {}` has an empty body;
+            // the condition is still evaluated.
+            let _ = reduce_filt_vol_was_run
+                || !reduction_factor.equals_number(Some(Number::Float(
+                    squeezevol_param::REDUCTION_FACTOR_DEFAULT,
+                )));
+            self.tf_reduce_by_overall_factor
+                .set_text_string(Some(&reduction_factor.to_string()));
+        }
+        if meta_data.is_post_reduce_filt_vol_z_reduction_factor() {
+            let reduction_factor =
+                meta_data.get_post_reduce_filt_vol_z_reduction_factor_etomo_number();
+            // Empty `if` body in the source; see above.
+            let _ = reduce_filt_vol_was_run
+                || !reduction_factor.equals_number(Some(Number::Float(
+                    squeezevol_param::REDUCTION_FACTOR_DEFAULT,
+                )));
+            self.ltf_factor_in_z
+                .set_text_const_etomo_number(Some(&reduction_factor));
+        }
+        self.ltf_low_pass_cutoff_sigma.set_text_string(Some(
+            &meta_data.get_post_reduce_filt_vol_low_pass_radius_sigma(),
+        ));
+        self.ltf_deconvolution_strength.set_text_string(Some(
+            &meta_data.get_post_reduce_filt_vol_deconvolution_strength(),
+        ));
         self.ltf_snr_falloff
-            .set_text(&m.post_reduce_filt_vol_snr_falloff);
-        self.ltf_high_pass_filter_cutoff
-            .set_text(&m.post_reduce_filt_vol_high_pass_nyquist);
-        self.ltf_defocus
-            .set_text(&m.post_reduce_filt_vol_defocus_in_microns);
+            .set_text_string(Some(&meta_data.get_post_reduce_filt_vol_snr_falloff()));
+        self.ltf_high_pass_filter_cutoff.set_text_string(Some(
+            &meta_data.get_post_reduce_filt_vol_high_pass_nyquist(),
+        ));
+        self.ltf_defocus.set_text_string(Some(
+            &meta_data.get_post_reduce_filt_vol_defocus_in_microns(),
+        ));
         self.ltf_phase_shift
-            .set_text(&m.post_reduce_filt_vol_phase_shift);
+            .set_text_string(Some(&meta_data.get_post_reduce_filt_vol_phase_shift()));
     }
-    pub fn get_parameters_reduce_filt_vol<
-        P: ReduceFiltVolParam,
-        M: SqueezeVolPanelApplicationManager,
-    >(
+
+    /// Java package-private `setParameters(ReconScreenState)`.
+    pub fn set_parameters_recon_screen_state(&self, screen_state: &ReconScreenState) {
+        self.btn_reduce_filt_vol.set_button_state(
+            screen_state
+                .get_button_state(self.btn_reduce_filt_vol.get_button_state_key().as_deref()),
+        );
+    }
+
+    /// Java package-private `done()`.
+    pub fn done(&self) {
+        self.btn_reduce_filt_vol
+            .remove_action_listener(&self.action_listener);
+    }
+
+    /// Java package-private `getComponent()`.
+    pub fn get_component(&self) -> Rc<JComponent> {
+        self.pnl_root.get_container()
+    }
+
+    /// Java public `getParameters(MakecomfileParam, boolean)`.
+    pub fn get_parameters_makecomfile_param_boolean(
         &self,
-        param: &mut P,
+        param: &mut MakecomfileParam,
         do_validation: bool,
-        manager: &mut M,
     ) -> bool {
-        let flipped = self.is_input_file_flipped(manager);
-        let file = if self.rb_input_file_trim_vol.is_selected() {
-            manager.trim_vol_output_file_name(self.axis_id)
-        } else {
-            manager.flatten_output_file_name(self.axis_id)
-        };
-        param.set_input_file(file, flipped);
-        if self.cb_reduce_by_overall_factor.is_selected()
-            && !self.tf_reduce_by_overall_factor.is_empty()
-        {
-            match self
-                .tf_reduce_by_overall_factor
-                .get_text_validated(do_validation)
-            {
-                Ok(v) => param.set_reduction_factor(v),
-                Err(_) => return false,
-            }
-        } else {
-            param.reset_reduction_factor()
-        }
-        if self.ltf_factor_in_z.is_enabled() && !self.ltf_factor_in_z.is_empty() {
-            match self.ltf_factor_in_z.get_text_validated(do_validation) {
-                Ok(v) => param.set_z_reduction_factor(v),
-                Err(_) => return false,
-            }
-        } else {
-            param.reset_z_reduction_factor()
-        }
-        if self.ltf_low_pass_cutoff_sigma.is_enabled() && !self.ltf_low_pass_cutoff_sigma.is_empty()
-        {
-            let v = match self
-                .ltf_low_pass_cutoff_sigma
-                .get_text_validated(do_validation)
-            {
-                Ok(v) => v,
-                Err(_) => return false,
-            };
-            if let Some(error) = param.set_low_pass_radius_sigma(v, do_validation) {
-                manager.open_message_dialog(
-                    format!("\"{}\" {error}", LOW_PASS_CUTOFF_SIGMA_LABEL),
-                    "Syntax Error",
-                    self.axis_id,
+        let manager: &'static dyn BaseManager = self.manager;
+        // try { ... } catch (FieldValidationFailedException e)
+        //   { e.printStackTrace(); }
+        let result = (|| -> Result<(), FieldValidationFailedException> {
+            if self.rb_input_file_trim_vol.is_selected() {
+                param.set_input_file(
+                    file_type::CLASS
+                        .trim_vol_output
+                        .get_file_name(Some(manager), Some(self.axis_id))
+                        .as_deref(),
                 );
-                return false;
+            } else {
+                param.set_input_file(
+                    file_type::CLASS
+                        .flatten_output
+                        .get_file_name(Some(manager), Some(self.axis_id))
+                        .as_deref(),
+                );
             }
-        } else {
-            param.reset_low_pass_radius_sigma()
-        }
-        macro_rules! f {
-            ($field:ident,$set:ident,$reset:ident) => {
-                if self.$field.is_enabled() {
-                    match self.$field.get_text_validated(do_validation) {
-                        Ok(v) => param.$set(v),
-                        Err(_) => return false,
-                    }
-                } else {
-                    param.$reset()
-                }
-            };
-        }
-        f!(
-            ltf_deconvolution_strength,
-            set_deconvolution_strength,
-            reset_deconvolution_strength
-        );
-        f!(ltf_snr_falloff, set_snr_falloff, reset_snr_falloff);
-        f!(
-            ltf_high_pass_filter_cutoff,
-            set_high_pass_nyquist,
-            reset_high_pass_nyquist
-        );
-        f!(
-            ltf_defocus,
-            set_defocus_in_microns,
-            reset_defocus_in_microns
-        );
-        f!(ltf_phase_shift, set_phase_shift, reset_phase_shift);
-        match self
-            .ltf_data_mode_of_output
-            .get_text_validated(do_validation)
-        {
-            Ok(v) => param.set_mode_to_output(v),
-            Err(_) => return false,
-        };
-        param.set_setup_chunks_if_memory_error(true);
-        match self.get_output_filename(do_validation, manager) {
-            Ok(v) => param.set_output_file(v),
-            Err(_) => return false,
-        };
-        true
-    }
-    /// Java `setParameters(ReconScreenState)`.
-    pub fn set_parameters_screen_state(&mut self, screen_state: BaseScreenState) {
-        self.btn_reduce_filt_vol.set_screen_state(screen_state);
-    }
-    pub fn done(&mut self) {
-        self.pnl_root.listener_count = self.pnl_root.listener_count.saturating_sub(1)
-    }
-    pub fn get_component(&self) -> &SqueezeVolPanelLayout {
-        &self.pnl_root
-    }
-    pub fn action<M: SqueezeVolPanelApplicationManager>(
-        &mut self,
-        command: &str,
-        options: Option<Run3dmodMenuOptions>,
-        manager: &mut M,
-    ) {
-        if command == "Reduce/Filter Volume" {
-            manager.reduce_filt_vol(options, self.dialog_type)
-        } else if command == BTN_IMOD_REDUCE_FILT_VOL_LABEL {
-            if let Ok(file) = self.get_output_filename(false, manager) {
-                manager.imod_reduced_filtered_volume(options, self.axis_id, file)
-            }
-        }
-        let flipped = self.is_input_file_flipped(manager);
-        self.update_display(flipped)
-    }
-    #[allow(non_snake_case)]
-    /// Native-name adapter for the Java listener's `actionPerformed`.
-    pub fn actionPerformed<M: SqueezeVolPanelApplicationManager>(
-        &mut self,
-        command: &str,
-        manager: &mut M,
-    ) {
-        self.action(command, None, manager);
-    }
-    pub fn get_parameters_makecomfile<M: SqueezeVolPanelApplicationManager>(
-        &self,
-        param: &mut MakecomfileParamBoundary,
-        do_validation: bool,
-        manager: &M,
-    ) -> bool {
-        param.input_file = Some(if self.rb_input_file_trim_vol.is_selected() {
-            manager.trim_vol_output_file_name(self.axis_id)
-        } else {
-            manager.flatten_output_file_name(self.axis_id)
-        });
-        if self.cb_reduce_by_overall_factor.is_selected()
-            && !self.tf_reduce_by_overall_factor.is_empty()
-        {
-            if let Ok(v) = self
-                .tf_reduce_by_overall_factor
-                .get_text_validated(do_validation)
+            if self.cb_reduce_by_overall_factor.is_selected()
+                && !self.tf_reduce_by_overall_factor.is_empty()
             {
-                param.reduction_factor = Some(v)
+                param.set_reduction_factor(
+                    self.tf_reduce_by_overall_factor
+                        .get_text_boolean(do_validation)?
+                        .as_deref(),
+                );
             }
+            Ok(())
+        })();
+        if let Err(e) = result {
+            eprintln!("{e:?}");
         }
+
         true
     }
-    pub fn update_display(&mut self, input_flipped: bool) {
+
+    /// Java private `updateDisplay()`.
+    fn update_display(&self) {
         self.tf_reduce_by_overall_factor
             .set_enabled(self.cb_reduce_by_overall_factor.is_selected());
-        self.ltf_factor_in_z
-            .set_enabled(self.cb_reduce_by_overall_factor.is_selected() && input_flipped);
+        self.ltf_factor_in_z.set_enabled(
+            self.cb_reduce_by_overall_factor.is_selected() && self.is_input_file_flipped(),
+        );
         self.ltf_low_pass_cutoff_sigma
             .set_enabled(self.rb_filtering_gaussian.is_selected());
-        let d = self.rb_filtering_deconvolution.is_selected();
-        self.ltf_deconvolution_strength.set_enabled(d);
-        self.ltf_snr_falloff.set_enabled(d);
-        self.ltf_high_pass_filter_cutoff.set_enabled(d);
-        self.ltf_defocus.set_enabled(d);
-        self.ltf_phase_shift.set_enabled(d)
+        self.ltf_deconvolution_strength
+            .set_enabled(self.rb_filtering_deconvolution.is_selected());
+        self.ltf_snr_falloff
+            .set_enabled(self.rb_filtering_deconvolution.is_selected());
+        self.ltf_high_pass_filter_cutoff
+            .set_enabled(self.rb_filtering_deconvolution.is_selected());
+        self.ltf_defocus
+            .set_enabled(self.rb_filtering_deconvolution.is_selected());
+        self.ltf_phase_shift
+            .set_enabled(self.rb_filtering_deconvolution.is_selected());
     }
-    pub fn is_input_file_flipped<M: SqueezeVolPanelApplicationManager>(&self, m: &M) -> bool {
+
+    /// Java private `isInputFileFlipped()`.
+    fn is_input_file_flipped(&self) -> bool {
+        let mut flipped = true;
         if self.rb_input_file_trim_vol.is_selected() {
-            m.is_trimvol_flipped()
-        } else if m.is_result_set_flatten_flipped() && !m.is_flatten_flipped() {
-            false
-        } else {
-            true
+            flipped = self.manager.is_trimvol_flipped();
+        } else if self.manager.is_result_set_flatten_flipped() {
+            if !self.manager.is_flatten_flipped() {
+                flipped = false;
+            }
         }
+        flipped
     }
-    pub fn get_reduce_filt_vol_display(&mut self) -> &mut Self {
-        self
+
+    /// Java public `getReduceFiltVolDisplay()`: `this`.
+    pub fn get_reduce_filt_vol_display(&self) -> Rc<dyn ReduceFiltVolDisplay> {
+        self.self_ref
+            .upgrade()
+            .expect("SqueezeVolPanel used after it was dropped")
     }
-    pub fn get_output_filename<M: SqueezeVolPanelApplicationManager>(
+
+    /// Java package-private `getOutputFilename(boolean) throws
+    /// FieldValidationFailedException`.  `None` is Java null.
+    pub fn get_output_filename(
         &self,
         do_validation: bool,
-        m: &M,
-    ) -> Result<String, FieldValidationFailedException> {
-        let mut factor = 1.0;
+    ) -> Result<Option<String>, FieldValidationFailedException> {
+        let manager: &'static dyn BaseManager = self.manager;
+        // FileType.getFileName(BaseManager, AxisID, Number, Number): the Number
+        // is passed as Java's `Double.toString` of the value (see NEEDS).
+        let mut output_filename = file_type::CLASS
+            .reduce_filt_vol_output_file
+            .get_file_name_numeric(
+                Some(manager),
+                Some(self.axis_id),
+                Some(&java_lang_double_to_string(
+                    reduce_filt_vol_param::DEFAULT_REDUCTION_FACTOR_FOR_OUTPUT_FILE,
+                )),
+                None,
+            );
+        let mut db_reduction_factor: Option<f64> = Some(0.0);
         if self.tf_reduce_by_overall_factor.is_enabled()
             && !self.tf_reduce_by_overall_factor.is_empty()
         {
-            let v = self
+            let str_reduction_factor = self
                 .tf_reduce_by_overall_factor
-                .get_text_validated(do_validation)
-                .map_err(FieldValidationFailedException)?;
-            if let Ok(n) = v.parse() {
-                factor = n
+                .get_text_boolean_field_displayer(do_validation, self.this_field_displayer())?;
+            db_reduction_factor = converter::to_double(str_reduction_factor.as_deref());
+            if let Some(db_reduction_factor) = db_reduction_factor {
+                output_filename = file_type::CLASS
+                    .reduce_filt_vol_output_file
+                    .get_file_name_numeric(
+                        Some(manager),
+                        Some(self.axis_id),
+                        Some(&java_lang_double_to_string(db_reduction_factor)),
+                        None,
+                    );
             }
         }
-        Ok(m.reduce_filt_vol_output_file_name(self.axis_id, factor))
+        let _ = db_reduction_factor;
+        Ok(output_filename)
     }
-    pub fn display(&self) {}
-    pub fn display_ui_component(&self) {}
-    pub fn set_field_displayer(&mut self) {}
+
+    /// Java private `setFieldDisplayer()`.
+    fn set_field_displayer(&self) {
+        let this = self.this_field_displayer();
+        self.tf_reduce_by_overall_factor
+            .set_overridable_field_displayers(None, this.clone());
+        self.ltf_factor_in_z
+            .set_overridable_field_displayers(None, this.clone());
+        self.ltf_low_pass_cutoff_sigma
+            .set_overridable_field_displayers(None, this.clone());
+        self.ltf_deconvolution_strength
+            .set_overridable_field_displayers(None, this.clone());
+        self.ltf_snr_falloff
+            .set_overridable_field_displayers(None, this.clone());
+        self.ltf_high_pass_filter_cutoff
+            .set_overridable_field_displayers(None, this.clone());
+        self.ltf_defocus
+            .set_overridable_field_displayers(None, this.clone());
+        self.ltf_phase_shift
+            .set_overridable_field_displayers(None, this.clone());
+        self.ltf_data_mode_of_output
+            .set_overridable_field_displayers(None, this);
+    }
 }
-#[cfg(test)]
-mod tests {
-    use super::*;
-    #[derive(Default)]
-    struct Manager {
-        trim: bool,
-        calls: Vec<String>,
+
+impl ContextMenu for SqueezeVolPanel {
+    /// Java public `popUpContextMenu(MouseEvent)`.  Right mouse button context
+    /// menu.
+    fn pop_up_context_menu(&self, mouse_event: &MouseEvent) {
+        let man_pagelabel = ["Reducefiltvol".to_string()];
+        let man_page = ["reducefiltvol.html".to_string()];
+
+        let log_file_label = ["Reducefiltvol".to_string()];
+        let manager: &'static dyn BaseManager = self.manager;
+        let log_file = [file_type::CLASS
+            .reduce_filt_vol_log
+            .get_file_name(Some(manager), Some(self.axis_id))
+            .unwrap_or_else(|| "null".to_string())];
+
+        let _context_popup = ContextPopup::new_component_mouse_event_string_string_string_array_string_array_string_array_string_array_base_manager_axis_id(
+            &self.pnl_root.get_container(),
+            mouse_event,
+            Some("Reducefilt"),
+            Some(context_popup::TOMO_GUIDE),
+            &man_pagelabel,
+            &man_page,
+            Some(&log_file_label),
+            Some(&log_file),
+            manager,
+            self.axis_id,
+        );
     }
-    impl SqueezeVolPanelApplicationManager for Manager {
-        fn is_squeezevol_flipped(&self) -> bool {
-            false
-        }
-        fn is_trimvol_flipped(&self) -> bool {
-            self.trim
-        }
-        fn is_result_set_flatten_flipped(&self) -> bool {
-            false
-        }
-        fn is_flatten_flipped(&self) -> bool {
-            false
-        }
-        fn trim_vol_output_file_name(&self, _: AxisID) -> String {
-            "trim.rec".into()
-        }
-        fn flatten_output_file_name(&self, _: AxisID) -> String {
-            "flat.rec".into()
-        }
-        fn reduce_filt_vol_output_file_name(&self, _: AxisID, n: f64) -> String {
-            format!("reduce{n}.rec")
-        }
-        fn reduce_filt_vol(&mut self, _: Option<Run3dmodMenuOptions>, _: DialogType) {
-            self.calls.push("reduce".into())
-        }
-        fn imod_reduced_filtered_volume(
-            &mut self,
-            _: Option<Run3dmodMenuOptions>,
-            _: AxisID,
-            file: String,
-        ) {
-            self.calls.push(file)
-        }
-        fn open_message_dialog(&mut self, message: String, _: &str, _: AxisID) {
-            self.calls.push(message)
-        }
+}
+
+impl ReduceFiltVolDisplay for SqueezeVolPanel {
+    /// Java public `getParameters(ReduceFiltVolParam, boolean) throws
+    /// FortranInputSyntaxException`.
+    fn get_parameters(
+        &self,
+        param: &mut ReduceFiltVolParam,
+        do_validation: bool,
+    ) -> Result<bool, FortranInputSyntaxException> {
+        let manager: &'static dyn BaseManager = self.manager;
+        // try { ... } catch (final FieldValidationFailedException e)
+        //   { return false; }
+        let result = (|| -> Result<bool, FieldValidationFailedException> {
+            let mut bad_parameter = String::new();
+            let is_input_file_flipped = self.is_input_file_flipped();
+            if self.rb_input_file_trim_vol.is_selected() {
+                param.set_input_file(
+                    file_type::CLASS
+                        .trim_vol_output
+                        .get_file_name(Some(manager), Some(self.axis_id))
+                        .as_deref(),
+                    is_input_file_flipped,
+                );
+            } else {
+                param.set_input_file(
+                    file_type::CLASS
+                        .flatten_output
+                        .get_file_name(Some(manager), Some(self.axis_id))
+                        .as_deref(),
+                    is_input_file_flipped,
+                );
+            }
+            if self.cb_reduce_by_overall_factor.is_selected()
+                && !self.tf_reduce_by_overall_factor.is_empty()
+            {
+                param.set_reduction_factor(
+                    self.tf_reduce_by_overall_factor
+                        .get_text_boolean_field_displayer(
+                            do_validation,
+                            self.this_field_displayer(),
+                        )?
+                        .as_deref(),
+                );
+            } else {
+                param.reset_reduction_factor();
+            }
+            if self.ltf_factor_in_z.is_enabled() && !self.ltf_factor_in_z.is_empty() {
+                param.set_z_reduction_factor(
+                    self.ltf_factor_in_z
+                        .get_text_boolean_field_displayer(
+                            do_validation,
+                            self.this_field_displayer(),
+                        )?
+                        .as_deref(),
+                );
+            } else {
+                param.reset_z_reduction_factor();
+            }
+            if self.ltf_low_pass_cutoff_sigma.is_enabled()
+                && !self.ltf_low_pass_cutoff_sigma.is_empty()
+            {
+                if do_validation {
+                    bad_parameter = self
+                        .ltf_low_pass_cutoff_sigma
+                        .get_quoted_label()
+                        .unwrap_or_else(|| "null".to_string());
+                }
+                let ret_val = param.set_low_pass_radius_sigma(
+                    self.ltf_low_pass_cutoff_sigma
+                        .get_text_boolean_field_displayer(
+                            do_validation,
+                            self.this_field_displayer(),
+                        )?
+                        .as_deref(),
+                    do_validation,
+                );
+                if let Some(ret_val) = ret_val {
+                    let message = format!("{bad_parameter} {ret_val}");
+                    ui_harness::with(|harness| {
+                        harness.open_message_dialog_base_manager_string_string_axis_id(
+                            Some(manager),
+                            &message,
+                            "Syntax Error",
+                            Some(self.axis_id),
+                        )
+                    });
+                    return Ok(false);
+                }
+            } else {
+                param.reset_low_pass_radius_sigma();
+            }
+            if self.ltf_deconvolution_strength.is_enabled() {
+                param.set_deconvolution_strength(
+                    self.ltf_deconvolution_strength
+                        .get_text_boolean_field_displayer(
+                            do_validation,
+                            self.this_field_displayer(),
+                        )?
+                        .as_deref(),
+                );
+            } else {
+                param.reset_deconvolution_strength();
+            }
+            if self.ltf_snr_falloff.is_enabled() {
+                param.set_snr_falloff(
+                    self.ltf_snr_falloff
+                        .get_text_boolean_field_displayer(
+                            do_validation,
+                            self.this_field_displayer(),
+                        )?
+                        .as_deref(),
+                );
+            } else {
+                param.reset_snr_falloff();
+            }
+            if self.ltf_high_pass_filter_cutoff.is_enabled() {
+                param.set_high_pass_nyquist(
+                    self.ltf_high_pass_filter_cutoff
+                        .get_text_boolean_field_displayer(
+                            do_validation,
+                            self.this_field_displayer(),
+                        )?
+                        .as_deref(),
+                );
+            } else {
+                param.reset_high_pass_nyquist();
+            }
+            if self.ltf_defocus.is_enabled() {
+                param.set_defocus_in_microns(
+                    self.ltf_defocus
+                        .get_text_boolean_field_displayer(
+                            do_validation,
+                            self.this_field_displayer(),
+                        )?
+                        .as_deref(),
+                );
+            } else {
+                param.reset_defocus_in_microns();
+            }
+            if self.ltf_phase_shift.is_enabled() {
+                param.set_phase_shift(
+                    self.ltf_phase_shift
+                        .get_text_boolean_field_displayer(
+                            do_validation,
+                            self.this_field_displayer(),
+                        )?
+                        .as_deref(),
+                );
+            } else {
+                param.reset_phase_shift();
+            }
+            param.set_mode_to_output(
+                self.ltf_data_mode_of_output
+                    .get_text_boolean_field_displayer(do_validation, self.this_field_displayer())?
+                    .as_deref(),
+            );
+            param.set_setup_chunks_if_memory_error(true);
+            param.set_output_file(self.get_output_filename(do_validation)?.as_deref());
+            Ok(true)
+        })();
+        Ok(result.unwrap_or(false))
     }
-    #[test]
-    fn defaults() {
-        let p = SqueezeVolPanel::get_instance(AxisID::Only, DialogType::PostProcessing);
-        assert!(p.rb_input_file_trim_vol.is_selected());
-        assert!(p.rb_filtering_none.is_selected());
-        assert!(!p.ltf_factor_in_z.is_enabled());
-        assert_eq!(p.pnl_root.listener_count, 17)
+}
+
+impl Run3dmodButtonContainer for SqueezeVolPanel {
+    /// Java public `action(String, Deferred3dmodButton, Run3dmodMenuOptions)`.
+    fn action(
+        &self,
+        command: &str,
+        deferred_3dmod_button: Option<Rc<dyn Deferred3dmodButton>>,
+        run_3dmod_menu_options: Option<Run3dmodMenuOptions>,
+    ) {
+        if Some(command) == self.btn_reduce_filt_vol.get_action_command().as_deref() {
+            // The source computes `imageFileType` and does not use it.
+            let _image_file_type = if self.rb_input_file_trim_vol.is_selected() {
+                ImageFileType::TrimVolOutput
+            } else {
+                ImageFileType::FlattenOutput
+            };
+            self.manager.reduce_filt_vol(
+                Some(self.btn_reduce_filt_vol.clone() as ProcessResultDisplayHandle),
+                None,
+                deferred_3dmod_button,
+                run_3dmod_menu_options,
+                self.dialog_type,
+                self,
+            );
+        } else if Some(command)
+            == self
+                .btn_imod_reduce_filt_vol
+                .get_action_command()
+                .as_deref()
+        {
+            let mut output_file: Option<PathBuf> = None;
+            match self.get_output_filename(false) {
+                // Upstream bug fixed in translation (SqueezeVolPanel.java:560):
+                // `new File(null)` throws NullPointerException when FileType
+                // cannot build the output file name; the translation leaves
+                // `outputFile` null, so no 3dmod is opened.
+                Ok(output_filename) => output_file = output_filename.map(PathBuf::from),
+                // catch (FieldValidationFailedException e) { e.printStackTrace(); }
+                Err(e) => eprintln!("{e:?}"),
+            }
+            if let Some(output_file) = &output_file {
+                // Java passes a null Run3dmodMenuOptions from the action listener;
+                // ImodState.open replaces null with a new Run3dmodMenuOptions()
+                // (the default value).
+                self.manager.imod_reduced_filtered_volume(
+                    run_3dmod_menu_options.unwrap_or_default(),
+                    self.axis_id,
+                    Some(output_file.as_path()),
+                );
+            }
+        }
+
+        self.update_display();
     }
-    #[test]
-    fn output_name() {
-        let mut p = SqueezeVolPanel::get_instance(AxisID::Only, DialogType::PostProcessing);
-        let m = Manager::default();
-        p.cb_reduce_by_overall_factor.set_selected(true);
-        p.tf_reduce_by_overall_factor.set_text("2.5");
-        p.update_display(false);
-        assert_eq!(p.get_output_filename(true, &m).unwrap(), "reduce2.5.rec")
-    }
-    #[test]
-    fn actions() {
-        let mut p = SqueezeVolPanel::get_instance(AxisID::Only, DialogType::PostProcessing);
-        let mut m = Manager::default();
-        p.action("Reduce/Filter Volume", None, &mut m);
-        p.action(BTN_IMOD_REDUCE_FILT_VOL_LABEL, None, &mut m);
-        assert_eq!(m.calls, vec!["reduce", "reduce1.rec"])
-    }
+}
+
+impl FieldDisplayer for SqueezeVolPanel {
+    /// Java public `display()`; empty.
+    fn display_void(&self) {}
+
+    /// Java public `display(UIComponent)`; empty.
+    fn display_ui_component(&self, _ui_component: Option<&dyn UIComponent>) {}
 }

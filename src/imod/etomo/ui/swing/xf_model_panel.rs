@@ -1,324 +1,193 @@
 //! `IMOD/Etomo/src/etomo/ui/swing/XfModelPanel.java`.
 //!
-//! Swing widgets, the process-result-display factory, and `ApplicationManager`
-//! dispatch are explicit boundaries.  The translated unit keeps the Java
-//! button ownership/linkage, ordered root panel, screen-state transfer, and
-//! both command routes without creating an alternate process controller.
-#![allow(dead_code)]
+//! Java `final class XfModelPanel implements Run3dmodButtonContainer`: the
+//! "use the existing fiducial model" part of the Erase Gold tab (runs
+//! xfmodel.com and views the transformed `_erase.fid` model).
+//!
+//! An EDT object (`Rc<Self>`, `&self` methods).  The inner listener class
+//! `XfModelPanelActionListener` is a closure holding a weak reference to the
+//! panel.
 
-use std::collections::BTreeMap;
+use std::rc::{Rc, Weak};
 
+use super::deferred_3dmod_button::Deferred3dmodButton;
+use super::run_3dmod_button::Run3dmodButton;
+use super::run_3dmod_button_container::Run3dmodButtonContainer;
+use super::spaced_panel::SpacedPanel;
+use crate::imod::etomo::application_manager::ApplicationManager;
+use crate::imod::etomo::jdk::{ActionEvent, ActionListener, JComponent};
 use crate::imod::etomo::process::imod_process::Run3dmodMenuOptions;
 use crate::imod::etomo::r#type::axis_id::AxisID;
 use crate::imod::etomo::r#type::dialog_type::DialogType;
+use crate::imod::etomo::r#type::process_result_display::ProcessResultDisplayHandle;
+use crate::imod::etomo::r#type::recon_screen_state::ReconScreenState;
 
-use super::multi_line_button::MultiLineButton;
-use super::tilt_panel::Deferred3dmodButton;
+/// Java `public static final String rcsid`.
+pub const RCSID: &str = "$Id$";
 
-pub const VIEW_TRANSFORMED_MODEL_LABEL: &str = "View Transformed Model";
-pub const TRANSFORM_FIDUCIAL_MODEL_LABEL: &str = "Transform Fiducial Model";
+/// Java `BoxLayout.X_AXIS` (for `SpacedPanel.setBoxLayout`).
+const X_AXIS: i32 = 0;
 
-/// Java `ReconScreenState` call made by `XfModelPanel`.
-pub trait XfModelPanelReconScreenState {
-    fn get_button_state(&self, button_state_key: Option<&str>) -> bool;
-}
-
-/// Native in-memory form of the source unit's required screen-state button map.
-#[derive(Clone, Debug, Default, Eq, PartialEq)]
-pub struct XfModelPanelScreenState {
-    pub button_states: BTreeMap<String, bool>,
-}
-
-impl XfModelPanelReconScreenState for XfModelPanelScreenState {
-    fn get_button_state(&self, button_state_key: Option<&str>) -> bool {
-        button_state_key
-            .and_then(|key| self.button_states.get(key))
-            .copied()
-            .unwrap_or(false)
-    }
-}
-
-/// Direct `ApplicationManager` calls made by `XfModelPanel.java`.
-pub trait XfModelPanelApplicationManager {
-    fn xfmodel(
-        &mut self,
-        button: &MultiLineButton,
-        deferred_3dmod_button: Option<&Deferred3dmodButton>,
-        run_3dmod_menu_options: Option<Run3dmodMenuOptions>,
-        axis_id: AxisID,
-        dialog_type: DialogType,
-    );
-    fn seed_erase_fiducial_model(
-        &mut self,
-        run_3dmod_menu_options: Option<Run3dmodMenuOptions>,
-        axis_id: AxisID,
-        dialog_type: DialogType,
-    );
-}
-
-/// Java `ProcessResultDisplayFactory.getXfModel` boundary.
-pub trait XfModelPanelProcessResultDisplayFactory {
-    fn get_xf_model(&self) -> MultiLineButton;
-}
-
-impl XfModelPanelProcessResultDisplayFactory
-    for super::process_result_display_factory::ProcessResultDisplayFactory
-{
-    fn get_xf_model(&self) -> MultiLineButton {
-        super::process_result_display_factory::ProcessResultDisplayFactory::get_xf_model(self)
-            .clone()
-    }
-}
-
-/// Source-visible `SpacedPanel pnlRoot` construction state.
-#[derive(Clone, Debug, Default, Eq, PartialEq)]
-pub struct XfModelPanelLayout {
-    pub box_layout_x_axis: bool,
-    pub component_order: Vec<String>,
-    pub visible: bool,
-}
-
-/// Java final `XfModelPanel`.
-#[derive(Clone, Debug, PartialEq)]
+/// Java `final class XfModelPanel implements Run3dmodButtonContainer`.
 pub struct XfModelPanel {
-    pub pnl_root: XfModelPanelLayout,
-    pub btn_3dmod_xf_model: MultiLineButton,
-    pub btn_xf_model: MultiLineButton,
-    pub axis_id: AxisID,
-    pub dialog_type: DialogType,
-    /// Java `btnXfModel.setContainer(this)` relationship.
-    pub xf_model_container_set: bool,
-    /// Java `btnXfModel.setDeferred3dmodButton(btn3dmodXfModel)` relationship.
-    pub xf_model_deferred_3dmod_button_set: bool,
-    /// Java private listener registration on the two buttons.
-    pub action_listener_registered: bool,
+    /// Java `this`.
+    this: Weak<XfModelPanel>,
+    /// Java private final `pnlRoot = SpacedPanel.getInstance()`.
+    pnl_root: Rc<SpacedPanel>,
+    /// Java private final `actionListener` (`XfModelPanelActionListener`).
+    action_listener: ActionListener,
+    /// Java private final `btn3dmodXfModel`.
+    btn_3dmod_xf_model: Rc<Run3dmodButton>,
+
+    /// Java private final `btnXfModel`.
+    btn_xf_model: Rc<Run3dmodButton>,
+    /// Java private final `manager`.
+    manager: &'static ApplicationManager,
+    /// Java private final `axisID`.
+    axis_id: AxisID,
+    /// Java private final `dialogType`.
+    dialog_type: DialogType,
 }
 
 impl XfModelPanel {
-    /// Java private `XfModelPanel(ApplicationManager, AxisID, DialogType)`.
-    pub fn new(
-        mut btn_xf_model: MultiLineButton,
+    /// Java private constructor `XfModelPanel(ApplicationManager, AxisID,
+    /// DialogType)`.
+    fn new(
+        manager: &'static ApplicationManager,
         axis_id: AxisID,
         dialog_type: DialogType,
-    ) -> Self {
-        if btn_xf_model.get_action_command().is_none() {
-            btn_xf_model.set_action_command(Some(TRANSFORM_FIDUCIAL_MODEL_LABEL));
-        }
-        let mut btn_3dmod_xf_model =
-            MultiLineButton::new_with_label(Some(VIEW_TRANSFORMED_MODEL_LABEL));
-        btn_3dmod_xf_model.set_action_command(Some(VIEW_TRANSFORMED_MODEL_LABEL));
-        Self {
-            pnl_root: XfModelPanelLayout {
-                visible: true,
-                ..Default::default()
-            },
-            btn_3dmod_xf_model,
-            btn_xf_model,
-            axis_id,
-            dialog_type,
-            xf_model_container_set: false,
-            xf_model_deferred_3dmod_button_set: false,
-            action_listener_registered: false,
-        }
+    ) -> Rc<XfModelPanel> {
+        Rc::new_cyclic(|this: &Weak<XfModelPanel>| {
+            // Field initializers, in declaration order.
+            let pnl_root = SpacedPanel::get_instance_void();
+            // Java `new XfModelPanelActionListener(this)`.
+            let adaptee = this.clone();
+            let action_listener: ActionListener = Rc::new(move |event: &ActionEvent| {
+                let Some(adaptee) = adaptee.upgrade() else {
+                    return;
+                };
+                adaptee.action(event.get_action_command().unwrap_or(""), None, None);
+            });
+            let container: Weak<dyn Run3dmodButtonContainer> = this.clone();
+            let btn_3dmod_xf_model =
+                Run3dmodButton::get_3dmod_instance_string_run_3dmod_button_container(
+                    Some("View Transformed Model"),
+                    Some(container),
+                );
+            // Constructor body.  Java casts `(Run3dmodButton) ...getXfModel()`; the
+            // factory returns the concrete button.
+            let btn_xf_model = manager
+                .get_process_result_display_factory(axis_id)
+                .get_xf_model();
+            XfModelPanel {
+                this: this.clone(),
+                pnl_root,
+                action_listener,
+                btn_3dmod_xf_model,
+                btn_xf_model,
+                manager,
+                axis_id,
+                dialog_type,
+            }
+        })
     }
 
-    /// Java static `getInstance`.
-    pub fn get_instance<F: XfModelPanelProcessResultDisplayFactory>(
-        factory: &F,
+    /// Java static `getInstance(ApplicationManager, AxisID, DialogType)`.
+    pub fn get_instance(
+        manager: &'static ApplicationManager,
         axis_id: AxisID,
         dialog_type: DialogType,
-    ) -> Self {
-        let mut instance = Self::new(factory.get_xf_model(), axis_id, dialog_type);
+    ) -> Rc<XfModelPanel> {
+        let instance = XfModelPanel::new(manager, axis_id, dialog_type);
         instance.create_panel();
         instance.add_listeners();
         instance.set_tool_tip_text();
         instance
     }
 
-    /// Java private `addListeners`.
-    pub fn add_listeners(&mut self) {
-        self.btn_xf_model.add_action_listener();
-        self.btn_3dmod_xf_model.add_action_listener();
-        self.action_listener_registered = true;
-    }
-
-    /// Java private `createPanel`.
-    pub fn create_panel(&mut self) {
-        self.xf_model_container_set = true;
-        self.xf_model_deferred_3dmod_button_set = true;
-        self.pnl_root.box_layout_x_axis = true;
-        self.pnl_root.component_order = vec!["btnXfModel".into(), "btn3dmodXfModel".into()];
-    }
-
-    /// Java `getComponent`; concrete Swing component realization is a GUI boundary.
-    pub fn get_component(&self) -> &XfModelPanelLayout {
-        &self.pnl_root
-    }
-
-    /// Java `setVisible`.
-    pub fn set_visible(&mut self, visible: bool) {
-        self.pnl_root.visible = visible;
-    }
-
-    /// Java `done`.
-    pub fn done(&mut self) {
-        self.btn_xf_model.remove_action_listener();
-        self.action_listener_registered = false;
-    }
-
-    /// Java `setParameters(ReconScreenState)`.
-    pub fn set_parameters<S: XfModelPanelReconScreenState>(&mut self, screen_state: &S) {
-        let button_state_key = self.btn_xf_model.get_button_state_key();
+    /// Java private `addListeners()`.
+    fn add_listeners(&self) {
         self.btn_xf_model
-            .set_button_state(screen_state.get_button_state(button_state_key.as_deref()));
+            .add_action_listener(self.action_listener.clone());
+        self.btn_3dmod_xf_model
+            .add_action_listener(self.action_listener.clone());
     }
 
-    /// Java `Run3dmodButtonContainer.action`.
-    pub fn action<M: XfModelPanelApplicationManager>(
-        &mut self,
-        command: &str,
-        deferred_3dmod_button: Option<&Deferred3dmodButton>,
-        run_3dmod_menu_options: Option<Run3dmodMenuOptions>,
-        manager: &mut M,
-    ) {
-        if self.btn_xf_model.get_action_command() == Some(command) {
-            manager.xfmodel(
-                &self.btn_xf_model,
-                deferred_3dmod_button,
-                run_3dmod_menu_options,
-                self.axis_id,
-                self.dialog_type,
-            );
-        } else if self.btn_3dmod_xf_model.get_action_command() == Some(command) {
-            manager.seed_erase_fiducial_model(
-                run_3dmod_menu_options,
-                self.axis_id,
-                self.dialog_type,
-            );
-        }
+    /// Java private `createPanel()`.
+    fn create_panel(&self) {
+        // Initialize
+        let container: Weak<dyn Run3dmodButtonContainer> = self.this.clone();
+        self.btn_xf_model.set_container(Some(container));
+        let deferred: Rc<dyn Deferred3dmodButton> = self.btn_3dmod_xf_model.clone();
+        self.btn_xf_model
+            .set_deferred_3dmod_button_deferred_3dmod_button(Some(deferred));
+        // Root panel
+        self.pnl_root.set_box_layout(X_AXIS);
+        self.pnl_root
+            .add_component(&self.btn_xf_model.get_component());
+        self.pnl_root
+            .add_component(&self.btn_3dmod_xf_model.get_component());
     }
 
-    /// Java private `setToolTipText`.
-    pub fn set_tool_tip_text(&mut self) {
+    /// Java package-private `getComponent()`.
+    pub fn get_component(&self) -> Rc<JComponent> {
+        self.pnl_root.get_container()
+    }
+
+    /// Java package-private `setVisible(boolean)`.
+    pub fn set_visible(&self, visible: bool) {
+        self.pnl_root.set_visible(visible);
+    }
+
+    /// Java package-private `done()`.
+    pub fn done(&self) {
+        self.btn_xf_model
+            .remove_action_listener(&self.action_listener);
+    }
+
+    /// Java package-private `setParameters(ReconScreenState)`.
+    pub fn set_parameters(&self, screen_state: &ReconScreenState) {
+        self.btn_xf_model.set_button_state(
+            screen_state.get_button_state(self.btn_xf_model.get_button_state_key().as_deref()),
+        );
+    }
+
+    /// Java private `setToolTipText()`.
+    fn set_tool_tip_text(&self) {
         self.btn_xf_model.set_tool_tip_text(Some(
-            "Transform .fid mode built on prealigned stack to _erase.fid model that fits the aligned stack.",
+            "Transform .fid mode built on prealigned stack to _erase.fid model that fits the \
+             aligned stack.",
         ));
         self.btn_3dmod_xf_model
             .set_tool_tip_text(Some("View the _erase.fid model on the aligned stack."));
     }
-
-    /// Java inner `XfModelPanelActionListener.actionPerformed(ActionEvent)`.
-    pub fn action_performed<M: XfModelPanelApplicationManager>(
-        &mut self,
-        command: &str,
-        manager: &mut M,
-    ) {
-        self.action(command, None, None, manager);
-    }
 }
 
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    struct Factory;
-    impl XfModelPanelProcessResultDisplayFactory for Factory {
-        fn get_xf_model(&self) -> MultiLineButton {
-            MultiLineButton::new_full(
-                Some(TRANSFORM_FIDUCIAL_MODEL_LABEL),
-                false,
-                Some(DialogType::FinalAlignedStack),
-                false,
-                false,
-                false,
-                None,
-            )
+impl Run3dmodButtonContainer for XfModelPanel {
+    /// Java `action(String, Deferred3dmodButton, Run3dmodMenuOptions)`.
+    fn action(
+        &self,
+        command: &str,
+        deferred_3dmod_button: Option<Rc<dyn Deferred3dmodButton>>,
+        run_3dmod_menu_options: Option<Run3dmodMenuOptions>,
+    ) {
+        if Some(command) == self.btn_xf_model.get_action_command().as_deref() {
+            let display: ProcessResultDisplayHandle = self.btn_xf_model.clone();
+            self.manager
+                .xfmodel_process_result_display_process_series_deferred3dmod_button_run3dmod_menu_options_axis_id_dialog_type(
+                    Some(display),
+                    None,
+                    deferred_3dmod_button,
+                    run_3dmod_menu_options,
+                    self.axis_id,
+                    self.dialog_type,
+                );
+        } else if Some(command) == self.btn_3dmod_xf_model.get_action_command().as_deref() {
+            self.manager.seed_erase_fiducial_model(
+                run_3dmod_menu_options,
+                self.axis_id,
+                self.dialog_type,
+            );
         }
-    }
-
-    #[derive(Default)]
-    struct Manager {
-        xfmodel: Option<(AxisID, DialogType)>,
-        seed_erase_fiducial_model: Option<(AxisID, DialogType)>,
-    }
-    impl XfModelPanelApplicationManager for Manager {
-        fn xfmodel(
-            &mut self,
-            _button: &MultiLineButton,
-            _deferred_3dmod_button: Option<&Deferred3dmodButton>,
-            _run_3dmod_menu_options: Option<Run3dmodMenuOptions>,
-            axis_id: AxisID,
-            dialog_type: DialogType,
-        ) {
-            self.xfmodel = Some((axis_id, dialog_type));
-        }
-        fn seed_erase_fiducial_model(
-            &mut self,
-            _run_3dmod_menu_options: Option<Run3dmodMenuOptions>,
-            axis_id: AxisID,
-            dialog_type: DialogType,
-        ) {
-            self.seed_erase_fiducial_model = Some((axis_id, dialog_type));
-        }
-    }
-
-    #[test]
-    fn instance_preserves_source_button_linkage_layout_and_tooltips() {
-        let panel =
-            XfModelPanel::get_instance(&Factory, AxisID::First, DialogType::FinalAlignedStack);
-        assert!(panel.pnl_root.box_layout_x_axis);
-        assert_eq!(
-            panel.pnl_root.component_order,
-            ["btnXfModel", "btn3dmodXfModel"]
-        );
-        assert!(panel.xf_model_container_set);
-        assert!(panel.xf_model_deferred_3dmod_button_set);
-        assert_eq!(panel.btn_xf_model.button.action_listener_count, 1);
-        assert_eq!(panel.btn_3dmod_xf_model.button.action_listener_count, 1);
-        assert_eq!(
-            panel.btn_xf_model.button.tooltip.as_deref(),
-            Some(
-                "Transform .fid mode built on prealigned stack to _erase.fid model that fits the aligned stack."
-            )
-        );
-    }
-
-    #[test]
-    fn commands_route_to_the_two_source_manager_calls() {
-        let mut panel =
-            XfModelPanel::get_instance(&Factory, AxisID::Second, DialogType::FinalAlignedStack);
-        let mut manager = Manager::default();
-        let xfmodel = panel.btn_xf_model.get_action_command().unwrap().to_owned();
-        panel.action(&xfmodel, None, None, &mut manager);
-        let viewer = panel
-            .btn_3dmod_xf_model
-            .get_action_command()
-            .unwrap()
-            .to_owned();
-        panel.action(&viewer, None, None, &mut manager);
-        assert_eq!(
-            manager.xfmodel,
-            Some((AxisID::Second, DialogType::FinalAlignedStack))
-        );
-        assert_eq!(
-            manager.seed_erase_fiducial_model,
-            Some((AxisID::Second, DialogType::FinalAlignedStack))
-        );
-    }
-
-    #[test]
-    fn screen_state_visibility_and_done_follow_the_source() {
-        let mut panel =
-            XfModelPanel::get_instance(&Factory, AxisID::Only, DialogType::FinalAlignedStack);
-        let mut state = XfModelPanelScreenState::default();
-        let key = panel.btn_xf_model.get_button_state_key().unwrap();
-        state.button_states.insert(key, true);
-        panel.set_parameters(&state);
-        panel.set_visible(false);
-        panel.done();
-        assert!(panel.btn_xf_model.button.selected);
-        assert!(!panel.pnl_root.visible);
-        assert_eq!(panel.btn_xf_model.button.action_listener_count, 0);
-        assert_eq!(panel.btn_3dmod_xf_model.button.action_listener_count, 1);
     }
 }

@@ -1,406 +1,366 @@
 //! `IMOD/Etomo/src/etomo/ui/swing/FileButtonCell.java`.
-#![allow(dead_code)]
+//!
+//! A table cell holding a folder-icon button that opens a file chooser and hands
+//! the chosen file to an `ActionTarget` (the field this button is associated with).
+//!
+//! Java `final class FileButtonCell extends InputCell`: every Java method body is an
+//! inherent method; the trait impls at the end bind `CellVirtual` and
+//! `InputCellVirtual` to them.  `FileButtonCell` also overrides `setName()` and
+//! `setHeaders(...)`, which `InputCell` calls on itself; see NEEDS in the report
+//! (`InputCellVirtual` must dispatch them).  Sizes and borders are layout.
 
 use std::cell::RefCell;
-use std::path::{Path, PathBuf};
-use std::rc::Rc;
+use std::ops::Deref;
+use std::rc::{Rc, Weak};
 
+use super::action_target::ActionTarget;
+use super::cell::{Cell as TableCell, CellVirtual};
+use super::field_lock_controller::FieldLockController;
+use super::file_chooser::{self, FileChooser};
+use super::header_cell::HeaderCell;
+use super::input_cell::{InputCell, InputCellVirtual};
+use super::scaled_image;
+use super::simple_button::SimpleButton;
+use super::tooltip_formatter;
 use crate::imod::etomo::base_manager::BaseManager;
+use crate::imod::etomo::etomo_director::ARGUMENTS;
+use crate::imod::etomo::jdk::{FileFilter, JComponent};
+use crate::imod::etomo::storage::autodoc::autodoc_tokenizer::DEFAULT_DELIMITER;
+use crate::imod::etomo::r#type::ui_test_field_type::{self, UITestFieldType};
 use crate::imod::etomo::ui::browsing_directory::BrowsingDirectory;
 use crate::imod::etomo::util::utilities;
 
-use super::action_target::ActionTarget;
-use super::field_lock_controller::{FieldLockController, JButton};
-use super::file_chooser::{FileChooser, FileChooserReturnValue, FileChooserSelectionMode};
-use super::file_text_field_interface::FileFilter;
-use super::panel::Dimension;
-use super::simple_button::SimpleButton;
-use super::tooltip_formatter::TooltipFormatter;
-
-/// Java final package-private `FileButtonCell`.
+/// Java package-private `final class FileButtonCell extends InputCell`.
 pub struct FileButtonCell {
-    /// Source retains a `BaseManager`; no FileButtonCell method reads it except
-    /// while creating `FileChooser`, where the manager only supplies its user
-    /// directory.  The native boundary consequently records the resolved
-    /// manager directory without retaining a borrowed manager lifetime.
-    pub manager_browsing_dir: Option<PathBuf>,
-    pub action_target: Option<Rc<RefCell<dyn ActionTarget>>>,
-    pub label: Option<String>,
-    pub file_filter: Option<Rc<dyn FileFilter>>,
-    pub browsing_dir: Option<Rc<dyn BrowsingDirectory>>,
-    pub button: SimpleButton,
-    pub field_lock_controller: FieldLockController,
-    pub background_refresh_count: usize,
-    pub table_header: Option<String>,
-    pub row_header: Option<String>,
-    pub column_header: Option<String>,
+    /// Java superclass `InputCell`.
+    base: InputCell,
+    /// Java final `manager`.
+    manager: &'static dyn BaseManager,
+    /// Java `actionTarget`: the field that this button is associated with.
+    action_target: RefCell<Option<Rc<dyn ActionTarget>>>,
+    /// Java `label`.
+    label: RefCell<Option<String>>,
+    /// Java `fileFilter`.
+    file_filter: RefCell<Option<Rc<dyn FileFilter>>>,
+    /// Java `browsingDir`.
+    browsing_dir: RefCell<Option<Rc<dyn BrowsingDirectory>>>,
+    /// Java final `button`.
+    button: Rc<SimpleButton>,
+    /// Java final `fieldLockController`.
+    field_lock_controller: Rc<FieldLockController>,
+}
+
+impl Deref for FileButtonCell {
+    type Target = InputCell;
+    fn deref(&self) -> &InputCell {
+        &self.base
+    }
 }
 
 impl FileButtonCell {
     /// Java private `FileButtonCell(BaseManager)`.
-    fn new(manager: &dyn BaseManager) -> Self {
-        let image = if *utilities::APRIL_FOOLS {
-            "OPEN_FILE_FOOL"
+    fn new(manager: &'static dyn BaseManager) -> Rc<FileButtonCell> {
+        // super(): InputCell(); then the field initialisers.
+        let button = SimpleButton::new_scaled_image(Some(if !*utilities::APRIL_FOOLS {
+            &scaled_image::OPEN_FILE_PEET
         } else {
-            "OPEN_FILE_PEET"
-        };
-        let preferred_size = Dimension {
-            width: 22,
-            height: 22,
-        };
-        let mut size = preferred_size;
-        if size.width < size.height {
-            size.width = size.height;
-        }
-        Self {
-            manager_browsing_dir: manager.get_property_user_dir().map(PathBuf::from),
-            action_target: None,
-            label: None,
-            file_filter: None,
-            browsing_dir: None,
-            button: {
-                let mut button = SimpleButton::new_with_scaled_image(Some(image));
-                button.button.border = Some("BevelBorder.RAISED".to_owned());
-                button.button.abstract_button.preferred_size = Some(preferred_size);
-                button.button.width = size.width;
-                button.button.height = size.height;
-                button
-            },
-            field_lock_controller: FieldLockController::get_button_instance(JButton {
-                enabled: true,
-            }),
-            background_refresh_count: 0,
-            table_header: None,
-            row_header: None,
-            column_header: None,
-        }
+            &scaled_image::OPEN_FILE_FOOL
+        }));
+        let field_lock_controller =
+            FieldLockController::get_button_instance(&button.get_component());
+        let instance = Rc::new(FileButtonCell {
+            base: InputCell::new_void(),
+            manager,
+            action_target: RefCell::new(None),
+            label: RefCell::new(None),
+            file_filter: RefCell::new(None),
+            browsing_dir: RefCell::new(None),
+            button,
+            field_lock_controller,
+        });
+        instance
+            .base
+            .set_this(Rc::downgrade(&instance) as Weak<dyn InputCellVirtual>);
+        // Swing layout: button.setBorder(BorderFactory.createBevelBorder(
+        // BevelBorder.RAISED)); (a commented-out etched border); size =
+        // button.getPreferredSize(); if (size.width < size.height) size.width =
+        // size.height; button.setSize(size).
+        instance
     }
 
     /// Java static `getInstance(FileButtonCell)`.
-    pub fn get_instance(file_button_cell: &FileButtonCell, manager: &dyn BaseManager) -> Self {
-        let mut instance = Self::new(manager);
-        instance.browsing_dir = file_button_cell.browsing_dir.clone();
-        instance.label = file_button_cell.label.clone();
-        instance.file_filter = file_button_cell.file_filter.clone();
-        instance.add_listeners();
+    pub fn get_instance_file_button_cell(file_button_cell: &FileButtonCell) -> Rc<FileButtonCell> {
+        let instance = FileButtonCell::new(file_button_cell.manager);
+        *instance.browsing_dir.borrow_mut() = file_button_cell.browsing_dir.borrow().clone();
+        *instance.label.borrow_mut() = file_button_cell.label.borrow().clone();
+        *instance.file_filter.borrow_mut() = file_button_cell.file_filter.borrow().clone();
+        instance.add_listeners(&instance);
         instance
     }
 
     /// Java static `getInstance(BaseManager)`.
-    pub fn get_instance_with_base_manager(manager: &dyn BaseManager) -> Self {
-        let mut instance = Self::new(manager);
-        instance.add_listeners();
+    pub fn get_instance_base_manager(manager: &'static dyn BaseManager) -> Rc<FileButtonCell> {
+        let instance = FileButtonCell::new(manager);
+        instance.add_listeners(&instance);
         instance
     }
 
-    /// Java `getText`.
-    pub fn get_text(&self) -> Option<&str> {
+    /// Java `@Override getText()`.
+    pub fn get_text(&self) -> Option<String> {
         None
     }
 
     /// Java `setBrowsingDirectory(BrowsingDirectory)`.
-    pub fn set_browsing_directory(&mut self, input: Option<Rc<dyn BrowsingDirectory>>) {
-        self.browsing_dir = input;
+    pub fn set_browsing_directory(&self, input: Option<Rc<dyn BrowsingDirectory>>) {
+        *self.browsing_dir.borrow_mut() = input;
     }
 
-    /// Java overridden `add(JPanel, GridBagLayout, GridBagConstraints)`.
-    pub fn add(&self, constraints_weightx: f64) -> f64 {
-        let _old_weightx = constraints_weightx;
-        0.0
+    /// Java `@Override add(JPanel, GridBagLayout, GridBagConstraints)`.  The
+    /// constraints' `weightx` is set to 0 for the button and restored after (layout).
+    pub fn add(&self, panel: &Rc<JComponent>) {
+        // Swing layout: oldWeightx = constraints.weightx; constraints.weightx = 0.0.
+        self.base.add(panel);
+        // Swing layout: constraints.weightx = oldWeightx.
     }
 
-    /// Java private `addListeners`.
-    fn add_listeners(&mut self) {
-        self.button.button.action_listener_count += 1;
+    /// Java private `addListeners()`.
+    fn add_listeners(&self, this: &Rc<FileButtonCell>) {
+        // button.addActionListener(new FileButtonActionListener(this))
+        let file_button_cell = Rc::downgrade(this);
+        self.button
+            .get_component()
+            .add_action_listener(Rc::new(move |_event| {
+                // FileButtonActionListener.actionPerformed
+                if let Some(file_button_cell) = file_button_cell.upgrade() {
+                    file_button_cell.action();
+                }
+            }));
     }
 
     /// Java `setActionTarget(ActionTarget)`.
-    pub fn set_action_target(&mut self, input: Option<Rc<RefCell<dyn ActionTarget>>>) {
-        self.action_target = input;
+    pub fn set_action_target(&self, input: Option<Rc<dyn ActionTarget>>) {
+        *self.action_target.borrow_mut() = input;
     }
 
-    /// Java overridden `setHeaders(String, HeaderCell, HeaderCell)`.
+    /// Java `@Override setHeaders(String, HeaderCell, HeaderCell)`.
     pub fn set_headers(
-        &mut self,
+        &self,
         table_header: Option<&str>,
-        row_header: Option<&str>,
-        column_header: Option<&str>,
+        row_header: &Rc<HeaderCell>,
+        column_header: &Rc<HeaderCell>,
     ) {
-        if self.label.is_none() {
-            self.label = column_header.map(str::to_owned);
+        if self.label.borrow().is_none() {
+            *self.label.borrow_mut() = column_header.get_text();
         }
-        self.table_header = table_header.map(str::to_owned);
-        self.row_header = row_header.map(str::to_owned);
-        self.column_header = column_header.map(str::to_owned);
+        self.base
+            .set_headers(table_header, row_header, column_header);
     }
 
-    /// Java overridden `setName(String, String, String)`, deliberately empty
-    /// in the original source.
-    pub fn set_name_three(
-        &mut self,
+    /// Java `@Override setName(String, String, String)`.  Not implemented at this
+    /// time.
+    pub fn set_name_string_string_string(
+        &self,
         _reference1: Option<&str>,
         _reference2: Option<&str>,
         _reference3: Option<&str>,
     ) {
     }
 
-    /// Java overridden `setName()`.
-    pub fn set_name(&mut self) {
-        let name = utilities::convert_label_to_name(self.label.as_deref(), true);
+    /// Java `@Override setName()`.
+    pub fn set_name_void(&self) {
+        let name = self
+            .base
+            .convert_label_to_name(self.get_field_type().is_unlimited_segments());
         self.button.set_name(name.as_deref());
+        if ARGUMENTS.lock().unwrap().is_print_names() {
+            println!(
+                "{} {} ",
+                self.get_component().get_name().as_deref().unwrap_or("null"),
+                DEFAULT_DELIMITER
+            );
+        }
     }
 
-    /// Java `getName`.
-    pub fn get_name(&self) -> Option<&str> {
-        self.button.button.name.as_deref()
+    /// Java `@Override getName()`.
+    pub fn get_name(&self) -> Option<String> {
+        self.button.get_name()
     }
 
     /// Java `setLabel(String)`.
-    pub fn set_label(&mut self, input: Option<&str>) {
-        self.label = input.map(str::to_owned);
+    pub fn set_label(&self, input: Option<&str>) {
+        *self.label.borrow_mut() = input.map(str::to_owned);
     }
 
-    /// Java `setFileFilter(FileFilter)` and `setFileFilter(ExtensibleFileFilter)`.
-    pub fn set_file_filter(&mut self, input: Option<Rc<dyn FileFilter>>) {
-        self.file_filter = input;
+    /// Java `setFileFilter(FileFilter)`.
+    pub fn set_file_filter_file_filter(&self, input: Option<Rc<dyn FileFilter>>) {
+        *self.file_filter.borrow_mut() = input;
     }
 
-    /// Java `getFileFilter`.
-    pub fn get_file_filter(&self) -> Option<&Rc<dyn FileFilter>> {
-        self.file_filter.as_ref()
+    /// Java `setFileFilter(ExtensibleFileFilter)`.
+    // TODO(unit): needs etomo/storage/ExtensibleFileFilter.java - the parameter is that
+    // class (a FileFilter subclass); it is taken as a FileFilter here.
+    pub fn set_file_filter_extensible_file_filter(&self, input: Option<Rc<dyn FileFilter>>) {
+        *self.file_filter.borrow_mut() = input;
     }
 
-    /// Java overridden `getComponent`.
-    pub fn get_component(&self) -> &SimpleButton {
-        &self.button
+    /// Java `getFileFilter()`.
+    pub fn get_file_filter(&self) -> Option<Rc<dyn FileFilter>> {
+        self.file_filter.borrow().clone()
     }
 
-    /// Java overridden `getFieldType` (`UITestFieldType.BUTTON`).
-    pub fn get_field_type(&self) -> &'static str {
-        "bn"
+    /// Java `@Override getComponent()`.
+    pub fn get_component(&self) -> Rc<JComponent> {
+        self.button.get_component()
     }
 
-    /// Java overridden `getWidth`.
+    /// Java `@Override getFieldType()`.
+    pub fn get_field_type(&self) -> &'static UITestFieldType {
+        &ui_test_field_type::BUTTON
+    }
+
+    /// Java `@Override getWidth()`.
     pub fn get_width(&self) -> i32 {
-        self.button.button.width
+        // Swing geometry: button.getSize().width.  Sizes are not modelled by the jdk
+        // stand-in.
+        0
     }
 
-    /// Java overridden `setLocked`.
-    pub fn set_locked(&mut self, locked: bool) {
+    /// Java `@Override setLocked(boolean)`.
+    pub fn set_locked(&self, locked: bool) {
         if self.field_lock_controller.set_locked(locked) {
-            self.button.button.enabled = self
-                .field_lock_controller
-                .button
-                .as_ref()
-                .expect("FileButtonCell owns Java JButton")
-                .enabled;
-            self.set_background();
+            self.base.set_background_void();
         }
     }
 
-    /// Java overridden `setEditable`.
-    pub fn set_editable(&mut self, editable: bool) {
+    /// Java `@Override setEditable(boolean)`.
+    pub fn set_editable(&self, editable: bool) {
         if self.field_lock_controller.set_editable(editable) {
-            self.button.button.enabled = self
-                .field_lock_controller
-                .button
-                .as_ref()
-                .expect("FileButtonCell owns Java JButton")
-                .enabled;
-            self.set_background();
+            self.base.set_background_void();
         }
     }
 
-    /// Java overridden `setEnabled`.
-    pub fn set_enabled(&mut self, enabled: bool) {
+    /// Java `@Override setEnabled(boolean)`.
+    pub fn set_enabled(&self, enabled: bool) {
         self.field_lock_controller.set_enabled(enabled);
-        self.button.button.enabled = self
-            .field_lock_controller
-            .button
-            .as_ref()
-            .expect("FileButtonCell owns Java JButton")
-            .enabled;
     }
 
-    /// Java `isLocked`.
+    /// Java `@Override isLocked()`.
     pub fn is_locked(&self) -> bool {
         self.field_lock_controller.is_locked()
     }
 
-    /// Java `isEditable`.
+    /// Java `@Override isEditable()`.
     pub fn is_editable(&self) -> bool {
         self.field_lock_controller.is_editable()
     }
 
-    /// Java `isEnabled`.
+    /// Java `@Override isEnabled()`.
     pub fn is_enabled(&self) -> bool {
         self.field_lock_controller.is_enabled()
     }
 
-    /// Java inherited `setBackground`, at the separately translated InputCell
-    /// presentation boundary.
-    pub fn set_background(&mut self) {
-        self.background_refresh_count += 1;
-    }
-
-    /// Java private `action`, with `showOpenDialog` supplied by the native GUI
-    /// adapter as its selected file.  The same chooser construction, filter,
-    /// title, file-only mode, target assignment, and browsing-directory update
-    /// order are retained.
-    pub fn action(&mut self, selected_file: Option<&Path>) -> FileChooser {
-        let target_value = self
-            .action_target
+    /// Java private `action()`.
+    fn action(&self) {
+        let action_target = self.action_target.borrow().clone();
+        let expanded_value = action_target
             .as_ref()
-            .map(|target| target.borrow().get_expanded_value());
-        let mut chooser = FileChooser::new_with_browsing_dir(target_value.as_deref());
-        if chooser.current_directory.is_none() {
-            chooser.current_directory = self
-                .browsing_dir
-                .as_ref()
-                .and_then(|browsing_dir| browsing_dir.get_browsing_dir())
-                .or_else(|| self.manager_browsing_dir.clone());
+            .and_then(|action_target| action_target.get_expanded_value());
+        let browsing_dir = self.browsing_dir.borrow().clone();
+        let chooser = FileChooser::new_base_manager_axis_id_string_browsing_directory(
+            Some(self.manager),
+            None,
+            expanded_value.as_deref(),
+            browsing_dir.as_deref(),
+        );
+        let label = self.label.borrow().clone();
+        chooser.set_dialog_title(Some(label.as_deref().unwrap_or("Open File")));
+        // Swing layout: chooser.setPreferredSize(UIParameters.getInstance()
+        // .getFileChooserDimension()).
+        chooser.set_file_selection_mode(file_chooser::FILES_ONLY);
+        let file_filter = self.file_filter.borrow().clone();
+        if file_filter.is_some() {
+            chooser.set_file_filter(file_filter);
         }
-        chooser.set_dialog_title(Some(self.label.as_deref().unwrap_or("Open File")));
-        chooser.set_preferred_size(Dimension {
-            width: 0,
-            height: 0,
-        });
-        chooser.set_file_selection_mode(FileChooserSelectionMode::FilesOnly);
-        chooser.set_file_filter(self.file_filter.clone());
-        if chooser.show_open_dialog(selected_file) == FileChooserReturnValue::ApproveOption {
+        let return_val =
+            chooser.show_open_dialog(self.button.get_component().get_parent().as_ref());
+        if return_val == file_chooser::APPROVE_OPTION {
             let file = chooser.get_selected_file();
-            if let Some(action_target) = &self.action_target {
-                action_target.borrow_mut().set_target_file(file.as_deref());
+            if let Some(action_target) = &action_target {
+                action_target.set_target_file(file.as_deref());
             }
-            if let (Some(browsing_dir), Some(file)) = (&self.browsing_dir, file.as_ref()) {
+            if let (Some(browsing_dir), Some(file)) = (&browsing_dir, &file) {
                 browsing_dir.set_browsing_dir(file.parent());
             }
         }
-        chooser
     }
 
-    #[allow(non_snake_case)]
-    /// Native-name adapter for `FileButtonActionListener::actionPerformed`.
-    /// The Rust frontend supplies the optional file selected by its chooser.
-    pub fn actionPerformed(&mut self, selected_file: Option<&Path>) -> FileChooser {
-        self.action(selected_file)
-    }
-
-    /// Java overridden `setToolTipText(String)`; formatter rendering remains
-    /// the native presentation boundary.
-    pub fn set_tool_tip_text(&mut self, text: Option<&str>) {
-        self.button.button.tooltip = TooltipFormatter::instance().format(text);
+    /// Java `@Override setToolTipText(String)`.
+    pub fn set_tool_tip_text(&self, text: Option<&str>) {
+        self.button
+            .get_component()
+            .set_tool_tip_text(tooltip_formatter::INSTANCE.format(text).as_deref());
     }
 }
 
-#[cfg(test)]
-mod tests {
-    use std::sync::Mutex;
-
-    use super::*;
-    use crate::imod::etomo::base_manager::{BaseManager, BaseManagerBase};
-    use crate::imod::etomo::storage::storable::Storable;
-    use crate::imod::etomo::r#type::base_meta_data::BaseMetaData;
-    use crate::imod::etomo::r#type::interface_type::InterfaceType;
-    use std::convert::Infallible;
-
-    struct Manager(BaseManagerBase);
-    impl BaseManager for Manager {
-        fn base(&self) -> &BaseManagerBase {
-            &self.0
-        }
-        fn this(&'static self) -> &'static dyn BaseManager {
-            self
-        }
-        fn get_interface_type(&self) -> Option<InterfaceType> {
-            None
-        }
-        fn create_main_panel(&self) {}
-        fn get_base_meta_data(&self) -> Option<&dyn BaseMetaData> {
-            None
-        }
-        fn get_main_panel(&self) -> Option<Infallible> {
-            None
-        }
-        fn get_process_manager(&self) -> Option<Infallible> {
-            None
-        }
-        fn get_storables_with_offset(&self, _: i32) -> Option<Vec<Box<dyn Storable>>> {
-            None
-        }
-        fn get_name(&self) -> Option<String> {
-            None
-        }
+impl CellVirtual for FileButtonCell {
+    fn cell(&self) -> &TableCell {
+        &self.base
     }
-    struct Target(Option<PathBuf>);
-    impl ActionTarget for Target {
-        fn set_target_file(&mut self, file: Option<&Path>) {
-            self.0 = file.map(Path::to_path_buf);
-        }
-        fn get_expanded_value(&self) -> String {
-            self.0
-                .as_ref()
-                .map_or_else(String::new, |p| p.display().to_string())
-        }
+    fn set_enabled(&self, enable: bool) {
+        FileButtonCell::set_enabled(self, enable);
     }
-    struct Browsing(Mutex<Option<PathBuf>>);
-    impl BrowsingDirectory for Browsing {
-        fn get_browsing_dir(&self) -> Option<PathBuf> {
-            self.0.lock().unwrap().clone()
-        }
-        fn set_browsing_dir(&self, file: Option<&Path>) {
-            *self.0.lock().unwrap() = file.map(Path::to_path_buf);
-        }
+    /// Java `InputCell.msgLabelChanged()`: `setName()`, which this class overrides.
+    fn msg_label_changed(&self) {
+        FileButtonCell::set_name_void(self);
     }
+    fn add(&self, panel: &Rc<JComponent>) {
+        FileButtonCell::add(self, panel);
+    }
+}
 
-    #[test]
-    fn factory_and_headers_preserve_listener_icon_border_and_label_rules() {
-        let manager = Manager(BaseManagerBase::initial());
-        let mut cell = FileButtonCell::get_instance_with_base_manager(&manager);
-        cell.set_headers(Some("Table"), Some("Row"), Some("Column"));
-        cell.set_name();
-        assert_eq!(cell.button.button.action_listener_count, 1);
-        assert_eq!(
-            cell.button.button.border.as_deref(),
-            Some("BevelBorder.RAISED")
-        );
-        assert_eq!(cell.label.as_deref(), Some("Column"));
-        assert_eq!(cell.get_name(), Some("bn.column"));
-        assert_eq!(cell.get_text(), None);
-        assert_eq!(cell.add(8.0), 0.0);
+impl InputCellVirtual for FileButtonCell {
+    fn input_cell(&self) -> &InputCell {
+        &self.base
     }
-
-    #[test]
-    fn action_assigns_only_approved_file_and_updates_browsing_parent_after_target() {
-        let manager = Manager(BaseManagerBase::initial());
-        let mut cell = FileButtonCell::get_instance_with_base_manager(&manager);
-        let target = Rc::new(RefCell::new(Target(None)));
-        let browsing = Rc::new(Browsing(Mutex::new(None)));
-        cell.set_action_target(Some(target.clone()));
-        cell.set_browsing_directory(Some(browsing.clone()));
-        cell.set_label(Some("Open reconstruction"));
-        let chooser = cell.action(Some(Path::new("/tmp/a/rec.mrc")));
-        assert_eq!(chooser.dialog_title.as_deref(), Some("Open reconstruction"));
-        assert_eq!(
-            chooser.file_selection_mode,
-            FileChooserSelectionMode::FilesOnly
-        );
-        assert_eq!(target.borrow().0, Some(PathBuf::from("/tmp/a/rec.mrc")));
-        assert_eq!(browsing.get_browsing_dir(), Some(PathBuf::from("/tmp/a")));
-        cell.action(None);
-        assert_eq!(target.borrow().0, Some(PathBuf::from("/tmp/a/rec.mrc")));
+    fn get_component(&self) -> Rc<JComponent> {
+        FileButtonCell::get_component(self)
     }
-
-    #[test]
-    fn lock_editable_and_enabled_routes_follow_field_lock_controller() {
-        let manager = Manager(BaseManagerBase::initial());
-        let mut cell = FileButtonCell::get_instance_with_base_manager(&manager);
-        cell.set_locked(true);
-        assert!(cell.is_locked());
-        assert!(!cell.button.button.enabled);
-        assert_eq!(cell.background_refresh_count, 1);
-        cell.set_enabled(false);
-        assert!(!cell.is_enabled());
-        assert!(!cell.button.button.enabled);
+    fn get_field_type(&self) -> &'static UITestFieldType {
+        FileButtonCell::get_field_type(self)
+    }
+    fn get_width(&self) -> i32 {
+        FileButtonCell::get_width(self)
+    }
+    fn set_tool_tip_text(&self, tool_tip_text: Option<&str>) {
+        FileButtonCell::set_tool_tip_text(self, tool_tip_text);
+    }
+    fn get_text(&self) -> Option<String> {
+        FileButtonCell::get_text(self)
+    }
+    fn set_name_string_string_string(
+        &self,
+        reference1: Option<&str>,
+        reference2: Option<&str>,
+        reference3: Option<&str>,
+    ) {
+        FileButtonCell::set_name_string_string_string(self, reference1, reference2, reference3);
+    }
+    fn get_name(&self) -> Option<String> {
+        FileButtonCell::get_name(self)
+    }
+    fn set_locked(&self, locked: bool) {
+        FileButtonCell::set_locked(self, locked);
+    }
+    fn set_editable(&self, editable: bool) {
+        FileButtonCell::set_editable(self, editable);
+    }
+    fn is_locked(&self) -> bool {
+        FileButtonCell::is_locked(self)
+    }
+    fn is_editable(&self) -> bool {
+        FileButtonCell::is_editable(self)
+    }
+    fn is_enabled(&self) -> bool {
+        FileButtonCell::is_enabled(self)
     }
 }

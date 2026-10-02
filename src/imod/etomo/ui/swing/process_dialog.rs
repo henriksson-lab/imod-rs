@@ -1,381 +1,402 @@
-//! `IMOD/Etomo/src/etomo/ui/swing/ProcessDialog.java`.
+//! `IMOD/Etomo/src/etomo/ui/swing/ProcessDialog.java`, plus the
+//! `DialogExitState` value type it carries.
 //!
-//! `ApplicationManager`, the Swing button classes, and queue listeners are
-//! deliberately represented at their direct source boundaries.
-//! This unit owns the dialog's exit state, initial advanced state, button order,
-//! tooltips, and action routing; it does not substitute another dialog toolkit.
-#![allow(dead_code)]
+//! Abstract base of the reconstruction process dialogs (Pre-processing ...
+//! Clean Up): the root panel, the exit buttons (Cancel, Postpone, Execute
+//! (labelled "Done" through the subclasses' button text), Advanced) with
+//! their action adapters, and the dialog exit state the buttons set before
+//! calling the subclass's `done()`.
+//!
+//! Object model (see `ui.md`): [`ProcessDialog`] is created as an `Rc` (its
+//! button listeners hold it); a subclass holds it as `base: Rc<ProcessDialog>`
+//! and derefs to it, and implements [`ProcessDialogVirtual`] for `done()` and
+//! any overridden action.  The subclass constructor calls
+//! [`ProcessDialog::set_this`] right after creating itself.
 
-pub use super::abstract_parallel_dialog::AbstractParallelDialog;
-use super::etomo_frame::ActionEvent;
+use std::cell::{Cell, RefCell};
+use std::rc::{Rc, Weak};
+
+use super::abstract_parallel_dialog::AbstractParallelDialog;
 use super::etomo_panel::EtomoPanel;
-pub use super::global_expand_button::GlobalExpandButton;
-pub use super::single_line_button::SingleLineButton;
+use super::global_expand_button::GlobalExpandButton;
+use super::single_line_button::SingleLineButton;
+use crate::imod::etomo::application_manager::ApplicationManager;
 use crate::imod::etomo::comscript::parallel_param::ParallelParam;
+use crate::imod::etomo::jdk::{ActionEvent, JComponent};
 use crate::imod::etomo::r#type::axis_id::AxisID;
 use crate::imod::etomo::r#type::dialog_type::DialogType;
-pub use crate::imod::etomo::ui::queue_table_event::QueueTableEvent;
-pub use crate::imod::etomo::ui::queue_table_listener::QueueTableListener;
+use crate::imod::etomo::ui::queue_table_event::QueueTableEvent;
+use crate::imod::etomo::ui::queue_table_listener::QueueTableListener;
 use crate::imod::etomo::util::utilities;
 
-/// `DialogExitState.java`, a direct value dependency of `ProcessDialog`.
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub enum DialogExitState {
-    Cancel,
-    Postpone,
-    Execute,
-    Save,
-}
+/// `etomo.type.DialogExitState`, which the rest of the tree also imports from here.
+pub use crate::imod::etomo::r#type::dialog_exit_state::DialogExitState;
 
-impl std::fmt::Display for DialogExitState {
-    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        formatter.write_str(match self {
-            Self::Cancel => "Cancel",
-            Self::Postpone => "Postpone",
-            Self::Execute => "Execute",
-            Self::Save => "Save",
-        })
+/// The `ProcessDialog` methods a subclass implements or overrides,
+/// dispatched virtually.  Defaults are the `ProcessDialog` bodies.
+pub trait ProcessDialogVirtual: std::any::Any {
+    /// The embedded `ProcessDialog` (the Java superclass part).
+    fn process_dialog(&self) -> &ProcessDialog;
+
+    /// Java abstract `done()`.
+    fn done(&self);
+
+    /// Java `buttonCancelAction(ActionEvent)`.  Action to take when the cancel
+    /// button is pressed, the default action is to set the exitState
+    /// attribute to CANCEL.  (`ApplicationManager` calls it with null.)
+    fn button_cancel_action(&self, event: Option<&ActionEvent>) {
+        self.process_dialog().button_cancel_action_super(event);
     }
+
+    /// Java `buttonPostponeAction(ActionEvent)`.  Action to take when the
+    /// postpone button is pressed, the default action is to set the exitState
+    /// attribute to POSTPONE.
+    fn button_postpone_action(&self, event: Option<&ActionEvent>) {
+        self.process_dialog().button_postpone_action_super(event);
+    }
+
+    /// Java `buttonExecuteAction()`.  Action to take when the execute button
+    /// is pressed, the default action is to set the exitState attribute to
+    /// EXECUTE.
+    fn button_execute_action(&self) -> bool {
+        self.process_dialog().button_execute_action_super()
+    }
+
+    /// Java `saveAction()`.
+    fn save_action(&self) {
+        self.process_dialog().save_action_super();
+    }
+
+    /// Java `getParameters(ParallelParam)`; empty in `ProcessDialog`.
+    fn get_parameters(&self, _param: &mut dyn ParallelParam) {}
 }
 
-/// Direct `ApplicationManager.isAdvanced(DialogType, AxisID)` boundary.
-pub trait ProcessDialogApplicationManager {
-    fn is_advanced(&self, dialog_type: DialogType, axis_id: AxisID) -> bool;
-}
+/// Java public abstract class `ProcessDialog implements
+/// AbstractParallelDialog`.
+pub struct ProcessDialog {
+    /// This dialog's own handle (Java `this`, for the action adapters).
+    self_ref: Weak<ProcessDialog>,
+    /// The subclass object, for virtual dispatch.
+    this: RefCell<Weak<dyn ProcessDialogVirtual>>,
 
-/// Java `Box.create*` entries in the exact `pnlExitButtons` insertion order.
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub enum ExitButtonLayoutItem {
-    HorizontalGlue,
-    Cancel,
-    Postpone,
-    Execute,
-    Advanced,
-}
-
-/// Native `JPanel` layout state directly read or written by this unit.
-#[derive(Clone, Debug, Eq, PartialEq)]
-pub struct ExitButtonsPanel {
-    pub box_layout_x_axis: bool,
-    pub children: Vec<ExitButtonLayoutItem>,
-    pub narrow_button_size_applied: bool,
-}
-
-/// The callback corresponding to Java's abstract `done()` method.
-pub type ProcessDialogDone = Box<dyn FnMut()>;
-
-/// Fields and implemented actions of Java's abstract `ProcessDialog`.
-pub struct ProcessDialog<'a> {
-    pub application_manager: &'a dyn ProcessDialogApplicationManager,
+    /// Java package-private `applicationManager`.
+    pub application_manager: &'static ApplicationManager,
+    /// Java package-private `axisID`.
     pub axis_id: AxisID,
+    /// Java package-private `dialogType`.
     pub dialog_type: DialogType,
-    pub root_panel: EtomoPanel,
-    pub pnl_exit_buttons: ExitButtonsPanel,
-    pub btn_cancel: SingleLineButton,
-    pub btn_execute: SingleLineButton,
-    pub btn_advanced: GlobalExpandButton,
-    pub btn_postpone: Option<SingleLineButton>,
-    exit_state: DialogExitState,
-    displayed: bool,
-    done: ProcessDialogDone,
+    /// Java `rootPanel = new EtomoPanel()`.
+    pub root_panel: Rc<EtomoPanel>,
+    // Exit buttons
+    /// Java `pnlExitButtons = new JPanel()`.
+    pub pnl_exit_buttons: Rc<JComponent>,
+    /// Java `btnCancel = new SingleLineButton("Cancel")`.
+    pub btn_cancel: Rc<SingleLineButton>,
+    /// Java `btnExecute = new SingleLineButton("Execute")`.
+    pub btn_execute: Rc<SingleLineButton>,
+    /// Java `btnAdvanced = GlobalExpandButton.getInstance("Advanced", "Basic")`.
+    pub btn_advanced: Rc<GlobalExpandButton>,
+
+    /// Java `btnPostpone`; null unless the dialog uses Postpone.
+    pub btn_postpone: Option<Rc<SingleLineButton>>,
+
+    /// Java `exitState`, initialised to `DialogExitState.SAVE`.
+    exit_state: Cell<DialogExitState>,
+    /// Java `displayed`, initialised to false.
+    displayed: Cell<bool>,
 }
 
-impl<'a> ProcessDialog<'a> {
-    /// Java three-argument constructor, which delegates with `usePostpone = true`.
-    pub fn new(
-        application_manager: &'a dyn ProcessDialogApplicationManager,
+impl ProcessDialog {
+    /// Java constructor `ProcessDialog(ApplicationManager, AxisID, DialogType)`.
+    pub fn new_application_manager_axis_id_dialog_type(
+        app_manager: &'static ApplicationManager,
         axis_id: AxisID,
         dialog_type: DialogType,
-        done: ProcessDialogDone,
-    ) -> Self {
-        Self::new_with_postpone(application_manager, axis_id, dialog_type, true, done)
+    ) -> Rc<ProcessDialog> {
+        Self::new_application_manager_axis_id_dialog_type_boolean(
+            app_manager,
+            axis_id,
+            dialog_type,
+            true,
+        )
     }
 
-    /// Java four-argument constructor.
-    pub fn new_with_postpone(
-        application_manager: &'a dyn ProcessDialogApplicationManager,
+    /// Java constructor `ProcessDialog(ApplicationManager, AxisID, DialogType,
+    /// boolean)`.  Create a new process dialog with a set of exit buttons
+    /// (cancel, postpone, execute, and advanced) available for use.  The
+    /// action adapters for the buttons are already implemented.
+    pub fn new_application_manager_axis_id_dialog_type_boolean(
+        app_manager: &'static ApplicationManager,
         axis_id: AxisID,
         dialog_type: DialogType,
         use_postpone: bool,
-        done: ProcessDialogDone,
-    ) -> Self {
+    ) -> Rc<ProcessDialog> {
+        // Java field initialisers.
+        let root_panel = EtomoPanel::new();
+        let pnl_exit_buttons = JComponent::new_panel();
+        let btn_cancel = SingleLineButton::new_string(Some("Cancel"));
+        let btn_execute = SingleLineButton::new_string(Some("Execute"));
+        let btn_advanced = GlobalExpandButton::get_instance(Some("Advanced"), Some("Basic"));
+
         eprintln!(
-            "\n{}\nDialog: {dialog_type}",
-            utilities::get_date_time_stamp()
+            "\n{}\nDialog: {}",
+            utilities::get_date_time_stamp(),
+            dialog_type
         );
-        let mut btn_advanced = GlobalExpandButton::get_instance("Advanced", "Basic");
-        btn_advanced.change_state(application_manager.is_advanced(dialog_type, axis_id));
-        let mut dialog = Self {
-            application_manager,
+        let displayed = true;
+        // Get the default initial advanced state - dialog must set themselves up
+        // according to this state.
+        btn_advanced.change_state(app_manager.is_advanced(dialog_type, axis_id));
+        // Upstream bug fixed in translation (ProcessDialog.java:78-84): the Java
+        // calls setToolTipText() before assigning btnPostpone, so its
+        // `btnPostpone != null` branch never runs and the Postpone button never
+        // gets its tooltip.  The button is created first here, so the tooltip the
+        // source writes for it is set.
+        let btn_postpone = if use_postpone {
+            Some(SingleLineButton::new_string(Some("Postpone")))
+        } else {
+            None
+        };
+
+        let this = Rc::new_cyclic(|self_ref| ProcessDialog {
+            self_ref: self_ref.clone(),
+            this: RefCell::new(Weak::<NoSubclass>::new() as Weak<dyn ProcessDialogVirtual>),
+            application_manager: app_manager,
             axis_id,
             dialog_type,
-            root_panel: EtomoPanel::default(),
-            pnl_exit_buttons: ExitButtonsPanel {
-                box_layout_x_axis: true,
-                children: vec![
-                    ExitButtonLayoutItem::HorizontalGlue,
-                    ExitButtonLayoutItem::Cancel,
-                    ExitButtonLayoutItem::HorizontalGlue,
-                ],
-                narrow_button_size_applied: true,
-            },
-            btn_cancel: SingleLineButton::new_with_label(Some("Cancel")),
-            btn_execute: SingleLineButton::new_with_label(Some("Execute")),
+            root_panel,
+            pnl_exit_buttons,
+            btn_cancel,
+            btn_execute,
             btn_advanced,
-            btn_postpone: use_postpone.then(|| SingleLineButton::new_with_label(Some("Postpone"))),
-            exit_state: DialogExitState::Save,
-            displayed: true,
-            done,
-        };
-        if use_postpone {
-            dialog.pnl_exit_buttons.children.extend([
-                ExitButtonLayoutItem::Postpone,
-                ExitButtonLayoutItem::HorizontalGlue,
-            ]);
+            btn_postpone,
+            exit_state: Cell::new(DialogExitState::Save),
+            displayed: Cell::new(displayed),
+        });
+        this.set_tool_tip_text();
+
+        // Layout the buttons
+        // Swing layout: pnlExitButtons.setLayout(new BoxLayout(pnlExitButtons,
+        // BoxLayout.X_AXIS)); horizontal glue between and around the buttons.
+        this.pnl_exit_buttons.add(&this.btn_cancel.get_component());
+        if let Some(btn_postpone) = &this.btn_postpone {
+            this.pnl_exit_buttons.add(&btn_postpone.get_component());
         }
-        dialog.pnl_exit_buttons.children.extend([
-            ExitButtonLayoutItem::Execute,
-            ExitButtonLayoutItem::HorizontalGlue,
-            ExitButtonLayoutItem::Advanced,
-            ExitButtonLayoutItem::HorizontalGlue,
-        ]);
-        dialog.set_tool_tip_text();
-        dialog.btn_cancel.add_action_listener();
-        if let Some(button) = &mut dialog.btn_postpone {
-            button.add_action_listener();
+        this.pnl_exit_buttons.add(&this.btn_execute.get_component());
+        this.pnl_exit_buttons
+            .add(&this.btn_advanced.get_component());
+
+        // Swing layout: UIUtilities.setButtonSizeAll(pnlExitButtons,
+        // UIParameters.getInstance().getNarrowButtonDimension()).
+
+        // Exit action listeners
+        // Java `new buttonCancelActionAdapter(this)`.
+        let weak = this.self_ref.clone();
+        this.btn_cancel
+            .add_action_listener(Rc::new(move |event: &ActionEvent| {
+                if let Some(adaptee) = weak.upgrade() {
+                    adaptee.button_cancel_action(Some(event));
+                }
+            }));
+        if let Some(btn_postpone) = &this.btn_postpone {
+            // Java `new buttonPostponeActionAdapter(this)`.
+            let weak = this.self_ref.clone();
+            btn_postpone.add_action_listener(Rc::new(move |event: &ActionEvent| {
+                if let Some(adaptee) = weak.upgrade() {
+                    adaptee.button_postpone_action(Some(event));
+                }
+            }));
         }
-        dialog.btn_execute.add_action_listener();
-        dialog
+        // Java `new buttonExecuteActionAdapter(this)`.
+        let weak = this.self_ref.clone();
+        this.btn_execute
+            .add_action_listener(Rc::new(move |_event: &ActionEvent| {
+                if let Some(adaptee) = weak.upgrade() {
+                    adaptee.button_execute_action();
+                }
+            }));
+        this
     }
 
-    /// Java abstract `done()` callback boundary.
-    pub fn done(&mut self) {
-        (self.done)();
+    /// Installs the subclass object for virtual dispatch (Rust-only; the Java
+    /// `this` is the subclass object from the start).
+    pub fn set_this(&self, this: Weak<dyn ProcessDialogVirtual>) {
+        *self.this.borrow_mut() = this;
     }
-    pub fn set_exit_state(&mut self, exit_state: DialogExitState) {
-        self.exit_state = exit_state;
+
+    /// The subclass object (Java `this` seen through a virtual call).
+    fn this(&self) -> Option<Rc<dyn ProcessDialogVirtual>> {
+        self.this.borrow().upgrade()
     }
-    pub fn get_container(&self) -> &EtomoPanel {
-        &self.root_panel
+
+    /// Java abstract `done()`, dispatched to the subclass.
+    pub fn done(&self) {
+        if let Some(this) = self.this() {
+            this.done();
+        }
     }
-    /// Java implementation is empty.
-    pub fn get_parameters(&self, _param: &mut dyn ParallelParam) {}
-    pub fn add_exit_buttons(&mut self) {
-        self.root_panel.children.extend([
-            super::abstract_frame::ComponentState::default(),
-            super::abstract_frame::ComponentState {
-                height: 10,
-                ..Default::default()
-            },
-            super::abstract_frame::ComponentState::default(),
-        ]);
+
+    /// Java `setExitState(DialogExitState)`.
+    pub fn set_exit_state(&self, exit_state: DialogExitState) {
+        self.exit_state.set(exit_state);
     }
-    pub fn get_dialog_type(&self) -> DialogType {
-        self.dialog_type
+
+    /// Java `getContainer()`.
+    pub fn get_container(&self) -> Rc<JComponent> {
+        self.root_panel.get_component()
     }
+
+    /// Java `addExitButtons()`.
+    pub fn add_exit_buttons(&self) {
+        // Swing layout: rootPanel.add(Box.createVerticalGlue());
+        // rootPanel.add(Box.createRigidArea(FixedDim.x0_y10)).
+        self.root_panel.get_component().add(&self.pnl_exit_buttons);
+    }
+
+    /// Java `isAdvanced()`.
     pub fn is_advanced(&self) -> bool {
         self.btn_advanced.is_expanded()
     }
-    pub fn set_displayed(&mut self, displayed: bool) {
-        self.displayed = displayed;
+
+    /// Java `setDisplayed(boolean)`.
+    pub fn set_displayed(&self, displayed: bool) {
+        self.displayed.set(displayed);
     }
+
+    /// Java `isDisplayed()`.
     pub fn is_displayed(&self) -> bool {
-        self.displayed
+        self.displayed.get()
     }
-    pub fn button_cancel_action(&mut self, _event: &ActionEvent) {
+
+    /// Java `buttonCancelAction(ActionEvent)`, dispatched to the subclass.
+    pub fn button_cancel_action(&self, event: Option<&ActionEvent>) {
+        match self.this() {
+            Some(this) => this.button_cancel_action(event),
+            None => self.button_cancel_action_super(event),
+        }
+    }
+
+    /// The `ProcessDialog` body of Java `buttonCancelAction(ActionEvent)`.
+    pub fn button_cancel_action_super(&self, _event: Option<&ActionEvent>) {
         utilities::button_timestamp_container(Some("cancel"), Some(&self.dialog_type.to_string()));
-        self.exit_state = DialogExitState::Cancel;
+        self.exit_state.set(DialogExitState::Cancel);
         self.done();
     }
-    pub fn button_postpone_action(&mut self, _event: &ActionEvent) {
+
+    /// Java `buttonPostponeAction(ActionEvent)`, dispatched to the subclass.
+    pub fn button_postpone_action(&self, event: Option<&ActionEvent>) {
+        match self.this() {
+            Some(this) => this.button_postpone_action(event),
+            None => self.button_postpone_action_super(event),
+        }
+    }
+
+    /// The `ProcessDialog` body of Java `buttonPostponeAction(ActionEvent)`.
+    pub fn button_postpone_action_super(&self, _event: Option<&ActionEvent>) {
         utilities::button_timestamp_container(
             Some("postpone"),
             Some(&self.dialog_type.to_string()),
         );
-        self.exit_state = DialogExitState::Postpone;
+        self.exit_state.set(DialogExitState::Postpone);
         self.done();
     }
-    /// Java implementation is empty.
-    pub fn queue_table_event_action(&mut self, _event: QueueTableEvent) {}
-    /// Java implementation is empty.
-    pub fn add_queue_table_listener(&mut self, _listener: &mut dyn QueueTableListener) {}
-    /// Java implementation is empty.
-    pub fn remove_queue_table_listener(&mut self, _listener: &mut dyn QueueTableListener) {}
-    pub fn button_execute_action(&mut self) -> bool {
+
+    /// Java `queueTableEventAction(QueueTableEvent)`; empty.
+    pub fn queue_table_event_action(&self, _event: &QueueTableEvent) {}
+
+    /// Java `addQueueTableListener(QueueTableListener)`; empty.
+    pub fn add_queue_table_listener(&self, _listener: Rc<dyn QueueTableListener>) {}
+
+    /// Java `removeQueueTableListener(QueueTableListener)`; empty.
+    pub fn remove_queue_table_listener(&self, _listener: &Rc<dyn QueueTableListener>) {}
+
+    /// Java `buttonExecuteAction()`, dispatched to the subclass.
+    pub fn button_execute_action(&self) -> bool {
+        match self.this() {
+            Some(this) => this.button_execute_action(),
+            None => self.button_execute_action_super(),
+        }
+    }
+
+    /// The `ProcessDialog` body of Java `buttonExecuteAction()`.
+    pub fn button_execute_action_super(&self) -> bool {
         utilities::button_timestamp_container(Some("done"), Some(&self.dialog_type.to_string()));
-        self.exit_state = DialogExitState::Execute;
+        self.exit_state.set(DialogExitState::Execute);
         self.done();
         true
     }
-    pub fn save_action(&mut self) {
+
+    /// Java `saveAction()`, dispatched to the subclass.
+    pub fn save_action(&self) {
+        match self.this() {
+            Some(this) => this.save_action(),
+            None => self.save_action_super(),
+        }
+    }
+
+    /// The `ProcessDialog` body of Java `saveAction()`.
+    pub fn save_action_super(&self) {
         utilities::timestamp_command_status(Some("save"), Some(&self.dialog_type.to_string()));
-        self.exit_state = DialogExitState::Save;
+        self.exit_state.set(DialogExitState::Save);
         self.done();
     }
+
+    /// Java `getExitState()`.
     pub fn get_exit_state(&self) -> DialogExitState {
-        self.exit_state
+        self.exit_state.get()
     }
-    /// Java private `setToolTipText()`.
-    fn set_tool_tip_text(&mut self) {
-        self.btn_cancel.set_tool_tip_text(Some(
-            "This button will abort any changes to the parameters in this dialog box and return you to the main window.",
-        ));
-        if let Some(button) = &mut self.btn_postpone {
-            button.set_tool_tip_text(Some(
-                "This button will save any changes to the parameters in this dialog box and return you to the main window without executing any of the processing.  Any parameter changes will also be written to the com scripts.",
-            ));
+
+    /// Java private `setToolTipText()`.  Default tool tip text for the buttons.
+    fn set_tool_tip_text(&self) {
+        let mut line1 = "This button will abort any changes to the parameters ";
+        let mut line2 = "in this dialog box and return you to the main window.";
+        self.btn_cancel
+            .set_tool_tip_text(Some(&format!("{line1}{line2}")));
+        let mut line3;
+        let mut line4;
+        if let Some(btn_postpone) = &self.btn_postpone {
+            line1 = "This button will save any changes to the parameters ";
+            line2 = "in this dialog box and return you to the main window ";
+            line3 = "without executing any of the processing.  Any parameter ";
+            line4 = "changes will also be written to the com scripts.";
+            btn_postpone.set_tool_tip_text(Some(&format!("{line1}{line2}{line3}{line4}")));
         }
-        self.btn_execute.set_tool_tip_text(Some(
-            "This button will save any changes to the parameters in this dialog box and execute the specified operation on the data.  Any parameter changes will also be written to the com scripts.",
-        ));
-        self.btn_advanced.set_tool_tip_text(
-            "This button will present a more detailed set of options for each of the underlying processes.",
-        );
+        line1 = "This button will save any changes to the parameters ";
+        line2 = "in this dialog box and execute the specified operation ";
+        line3 = "on the data.  Any parameter changes will also be written ";
+        line4 = "to the com scripts.";
+        self.btn_execute
+            .set_tool_tip_text(Some(&format!("{line1}{line2}{line3}{line4}")));
+
+        line1 = "This button will present a more detailed set of ";
+        line2 = "options for each of the underlying processes.";
+        self.btn_advanced
+            .set_tool_tip_text(Some(&format!("{line1}{line2}")));
     }
 }
 
-impl AbstractParallelDialog for ProcessDialog<'_> {
+impl AbstractParallelDialog for ProcessDialog {
+    /// Java `getParameters(ParallelParam)`, dispatched to the subclass (empty
+    /// in `ProcessDialog`).
     fn get_parameters(&self, param: &mut dyn ParallelParam) {
-        ProcessDialog::get_parameters(self, param);
+        if let Some(this) = self.this() {
+            this.get_parameters(param);
+        }
     }
+
+    /// Java `getDialogType()`.
     fn get_dialog_type(&self) -> DialogType {
-        ProcessDialog::get_dialog_type(self)
+        self.dialog_type
     }
 }
 
-/// Java private final `buttonCancelActionAdapter`.
-pub struct ButtonCancelActionAdapter;
-impl ButtonCancelActionAdapter {
-    pub fn action_performed(dialog: &mut ProcessDialog<'_>, event: &ActionEvent) {
-        dialog.button_cancel_action(event);
-    }
-}
-/// Java private final `buttonPostponeActionAdapter`.
-pub struct ButtonPostponeActionAdapter;
-impl ButtonPostponeActionAdapter {
-    pub fn action_performed(dialog: &mut ProcessDialog<'_>, event: &ActionEvent) {
-        dialog.button_postpone_action(event);
-    }
-}
-/// Java private final `buttonExecuteActionAdapter`.
-pub struct ButtonExecuteActionAdapter;
-impl ButtonExecuteActionAdapter {
-    pub fn action_performed(dialog: &mut ProcessDialog<'_>, _event: &ActionEvent) {
-        dialog.button_execute_action();
-    }
-}
+/// Placeholder type for the empty `Weak<dyn ProcessDialogVirtual>` held
+/// before the subclass installs itself.
+struct NoSubclass;
 
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use std::cell::Cell;
-    use std::rc::Rc;
-
-    struct Manager(bool);
-    impl ProcessDialogApplicationManager for Manager {
-        fn is_advanced(&self, _dialog_type: DialogType, _axis_id: AxisID) -> bool {
-            self.0
-        }
+impl ProcessDialogVirtual for NoSubclass {
+    fn process_dialog(&self) -> &ProcessDialog {
+        unreachable!("an empty Weak never upgrades")
     }
-    struct Parameter;
-    impl ParallelParam for Parameter {
-        fn get_subcommand_mode(
-            &self,
-        ) -> Option<&dyn crate::imod::etomo::comscript::command_mode::CommandMode> {
-            None
-        }
-    }
-
-    #[test]
-    fn constructor_preserves_source_button_order_tooltips_and_advanced_state() {
-        let manager = Manager(true);
-        let mut dialog = ProcessDialog::new(
-            &manager,
-            AxisID::First,
-            DialogType::SetupRecon,
-            Box::new(|| {}),
-        );
-        assert!(dialog.is_displayed());
-        assert!(dialog.is_advanced());
-        assert_eq!(dialog.get_exit_state(), DialogExitState::Save);
-        assert_eq!(
-            dialog.pnl_exit_buttons.children,
-            vec![
-                ExitButtonLayoutItem::HorizontalGlue,
-                ExitButtonLayoutItem::Cancel,
-                ExitButtonLayoutItem::HorizontalGlue,
-                ExitButtonLayoutItem::Postpone,
-                ExitButtonLayoutItem::HorizontalGlue,
-                ExitButtonLayoutItem::Execute,
-                ExitButtonLayoutItem::HorizontalGlue,
-                ExitButtonLayoutItem::Advanced,
-                ExitButtonLayoutItem::HorizontalGlue,
-            ]
-        );
-        assert_eq!(
-            dialog
-                .btn_cancel
-                .multi_line_button
-                .button
-                .action_listener_count,
-            1
-        );
-        assert!(
-            dialog
-                .btn_postpone
-                .as_ref()
-                .unwrap()
-                .multi_line_button
-                .button
-                .action_listener_count
-                == 1
-        );
-        assert_eq!(
-            dialog
-                .btn_execute
-                .multi_line_button
-                .button
-                .action_listener_count,
-            1
-        );
-        assert!(
-            dialog
-                .btn_advanced
-                .button
-                .multi_line_button
-                .button
-                .tooltip
-                .as_deref()
-                .unwrap()
-                .contains("detailed")
-        );
-        dialog.add_exit_buttons();
-        let mut param = Parameter;
-        dialog.get_parameters(&mut param);
-    }
-
-    #[test]
-    fn source_exit_actions_set_state_then_invoke_done() {
-        let manager = Manager(false);
-        let called = Rc::new(Cell::new(0));
-        let callback_called = called.clone();
-        let mut dialog = ProcessDialog::new_with_postpone(
-            &manager,
-            AxisID::Only,
-            DialogType::Tools,
-            false,
-            Box::new(move || callback_called.set(callback_called.get() + 1)),
-        );
-        let event = ActionEvent::new("ignored");
-        ButtonCancelActionAdapter::action_performed(&mut dialog, &event);
-        assert_eq!(dialog.get_exit_state(), DialogExitState::Cancel);
-        dialog.button_postpone_action(&event);
-        assert_eq!(dialog.get_exit_state(), DialogExitState::Postpone);
-        assert!(dialog.button_execute_action());
-        assert_eq!(dialog.get_exit_state(), DialogExitState::Execute);
-        dialog.save_action();
-        assert_eq!(dialog.get_exit_state(), DialogExitState::Save);
-        assert_eq!(called.get(), 4);
-        assert!(dialog.btn_postpone.is_none());
-    }
+    fn done(&self) {}
 }

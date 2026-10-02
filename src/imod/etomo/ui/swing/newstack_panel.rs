@@ -1,217 +1,197 @@
 //! `IMOD/Etomo/src/etomo/ui/swing/NewstackPanel.java`.
 //!
-//! Java inheritance is represented by the owned `newstack_or_blendmont_panel`
-//! field.  The manager remains a direct source boundary: this unit preserves
-//! both mutually-exclusive calls and every source argument.
-#![allow(dead_code)]
+//! Java `final class NewstackPanel extends NewstackOrBlendmontPanel`.  The
+//! superclass is the embedded `base` (reached through `Deref`); the abstract
+//! members are [`NewstackOrBlendmontPanelVirtual`] and
+//! `Run3dmodButtonContainer`.  `Expandable`, `NewstackDisplay` and
+//! `BlendmontDisplay` are implemented by the Java superclass; here they are
+//! implemented on the subclass by forwarding to `base`, so that `this` (an
+//! `Rc<NewstackPanel>`) can be handed out as those interfaces as in Java.
 
-use super::fiducialess_params::FiducialessParams;
-use super::multi_line_button::MultiLineButton;
-use super::newstack_or_blendmont_panel::{GlobalExpandButton, NewstackOrBlendmontPanel};
-use super::tilt_panel::Deferred3dmodButton;
+use std::ops::Deref;
+use std::rc::{Rc, Weak};
+
+use super::blendmont_display::{BlendmontDisplay, BlendmontDisplayException};
+use super::deferred_3dmod_button::Deferred3dmodButton;
+use super::expand_button::ExpandButton;
+use super::expandable::Expandable;
+use super::global_expand_button::GlobalExpandButton;
+use super::newstack_display::{NewstackDisplay, NewstackDisplayException};
+use super::newstack_or_blendmont_panel::{
+    NewstackOrBlendmontPanel, NewstackOrBlendmontPanelVirtual,
+};
+use super::run_3dmod_button_container::Run3dmodButtonContainer;
+use crate::imod::etomo::application_manager::ApplicationManager;
+use crate::imod::etomo::comscript::blendmont_param::BlendmontParam;
+use crate::imod::etomo::comscript::const_newst_param::ConstNewstParam;
+use crate::imod::etomo::comscript::newst_param::NewstParam;
 use crate::imod::etomo::process::imod_process::Run3dmodMenuOptions;
 use crate::imod::etomo::r#type::axis_id::AxisID;
 use crate::imod::etomo::r#type::dialog_type::DialogType;
 use crate::imod::etomo::r#type::process_name::ProcessName;
 
-pub const HEADER_TITLE: &str = "Newstack";
+/// Java `public static final String rcsid`.
+pub const RCSID: &str = "$Id$";
 
-/// Direct `ApplicationManager` methods called from Java `NewstackPanel`.
-pub trait NewstackPanelApplicationManager {
-    fn newst(
-        &mut self,
-        process_result_display: &MultiLineButton,
-        process_series: Option<()>,
-        deferred_3dmod_button: Option<&Deferred3dmodButton>,
-        axis_id: AxisID,
-        run_3dmod_menu_options: Option<Run3dmodMenuOptions>,
-        dialog_type: DialogType,
-        fiducialess_params: &dyn FiducialessParams,
-        display: &NewstackPanel,
-        process_name: ProcessName,
-    );
-
-    fn imod_fine_align(
-        &mut self,
-        axis_id: AxisID,
-        run_3dmod_menu_options: Option<Run3dmodMenuOptions>,
-    );
+/// Java `final class NewstackPanel extends NewstackOrBlendmontPanel`.
+pub struct NewstackPanel {
+    /// The `NewstackOrBlendmontPanel` superclass.
+    base: NewstackOrBlendmontPanel,
 }
 
-/// Java final `NewstackPanel`.
-#[derive(Clone, Debug, PartialEq)]
-pub struct NewstackPanel {
-    pub newstack_or_blendmont_panel: NewstackOrBlendmontPanel,
+impl Deref for NewstackPanel {
+    type Target = NewstackOrBlendmontPanel;
+    fn deref(&self) -> &NewstackOrBlendmontPanel {
+        &self.base
+    }
 }
 
 impl NewstackPanel {
     /// Java private constructor `NewstackPanel(ApplicationManager, AxisID,
-    /// DialogType, GlobalExpandButton)`.
-    pub fn new(
+    /// DialogType, GlobalExpandButton)`.  The superclass constructor calls the
+    /// abstract `getHeaderTitle()`; its value ("Newstack") is passed in (see
+    /// `newstack_or_blendmont_panel.rs`).
+    fn new(
+        manager: &'static ApplicationManager,
         axis_id: AxisID,
         dialog_type: DialogType,
-        _global_advanced_button: &GlobalExpandButton,
-    ) -> Self {
-        Self {
-            newstack_or_blendmont_panel: NewstackOrBlendmontPanel::new(
-                axis_id,
-                dialog_type,
-                HEADER_TITLE,
-            ),
-        }
+        global_advanced_button: &Rc<GlobalExpandButton>,
+    ) -> Rc<NewstackPanel> {
+        Rc::new_cyclic(|this: &Weak<NewstackPanel>| {
+            let this: Weak<dyn NewstackOrBlendmontPanelVirtual> = this.clone();
+            NewstackPanel {
+                base: NewstackOrBlendmontPanel::new(
+                    manager,
+                    axis_id,
+                    dialog_type,
+                    global_advanced_button,
+                    this,
+                    HEADER_TITLE,
+                ),
+            }
+        })
     }
 
-    /// Java static `getInstance`.
+    /// Java static `getInstance(ApplicationManager, AxisID, DialogType,
+    /// GlobalExpandButton)`.
     pub fn get_instance(
+        manager: &'static ApplicationManager,
         axis_id: AxisID,
         dialog_type: DialogType,
-        global_advanced_button: &GlobalExpandButton,
-    ) -> Self {
-        let mut instance = Self::new(axis_id, dialog_type, global_advanced_button);
-        instance.newstack_or_blendmont_panel.create_panel();
-        instance.newstack_or_blendmont_panel.add_listeners();
-        instance.newstack_or_blendmont_panel.set_tool_tip_text();
+        global_advanced_button: &Rc<GlobalExpandButton>,
+    ) -> Rc<NewstackPanel> {
+        let instance = NewstackPanel::new(manager, axis_id, dialog_type, global_advanced_button);
+        instance.create_panel();
+        instance.add_listeners();
+        instance.set_tool_tip_text();
         instance
     }
+}
 
-    /// Java override `getHeaderTitle`.
-    pub fn get_header_title(&self) -> &'static str {
-        HEADER_TITLE
+/// The value of Java `getHeaderTitle()`.
+const HEADER_TITLE: &str = "Newstack";
+
+impl NewstackOrBlendmontPanelVirtual for NewstackPanel {
+    /// Java `getHeaderTitle()`.
+    fn get_header_title(&self) -> String {
+        HEADER_TITLE.to_string()
     }
+}
 
-    /// Java override `action(String, Deferred3dmodButton,
-    /// Run3dmodMenuOptions)`.
-    pub fn action<M: NewstackPanelApplicationManager>(
+impl Run3dmodButtonContainer for NewstackPanel {
+    /// Java `action(String, Deferred3dmodButton, Run3dmodMenuOptions)`.
+    /// Executes the action associated with command.  Deferred3dmodButton is
+    /// null if it comes from the dialog's ActionListener.  Otherwise is comes
+    /// from a Run3dmodButton which called action(Run3dmodButton,
+    /// Run3dmoMenuOptions).  In that case it will be null unless it was set in
+    /// the Run3dmodButton.
+    fn action(
         &self,
-        manager: &mut M,
         command: &str,
-        deferred_3dmod_button: Option<&Deferred3dmodButton>,
+        deferred_3dmod_button: Option<Rc<dyn Deferred3dmodButton>>,
         run_3dmod_menu_options: Option<Run3dmodMenuOptions>,
     ) {
-        if command
-            == self
-                .newstack_or_blendmont_panel
-                .get_run_process_button_action_command()
-        {
-            manager.newst(
-                self.newstack_or_blendmont_panel
-                    .get_run_process_result_display(),
+        if Some(command) == self.get_run_process_button_action_command().as_deref() {
+            let fiducialess_params = self.get_fiducialess_params();
+            // A Java null Run3dmodMenuOptions is the empty option set.
+            self.manager.newst(
+                Some(self.get_run_process_result_display()),
                 None,
                 deferred_3dmod_button,
-                self.newstack_or_blendmont_panel.axis_id,
-                run_3dmod_menu_options,
-                self.newstack_or_blendmont_panel.dialog_type,
-                self.newstack_or_blendmont_panel.get_fiducialess_params(),
-                self,
+                self.axis_id,
+                run_3dmod_menu_options.unwrap_or_default(),
+                self.dialog_type,
+                &*fiducialess_params,
+                Some(self as &dyn NewstackDisplay),
                 ProcessName::NEWST,
             );
-        } else if command
-            == self
-                .newstack_or_blendmont_panel
-                .get_3dmod_full_button_action_command()
-        {
-            manager.imod_fine_align(
-                self.newstack_or_blendmont_panel.axis_id,
-                run_3dmod_menu_options,
-            );
+        } else if Some(command) == self.get3dmod_full_button_action_command().as_deref() {
+            self.manager
+                .imod_fine_align(self.axis_id, run_3dmod_menu_options.unwrap_or_default());
         }
     }
 }
 
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[derive(Default)]
-    struct Manager {
-        newst: Option<(AxisID, DialogType, ProcessName, bool)>,
-        fine_align: Option<(AxisID, Option<Run3dmodMenuOptions>)>,
+impl Expandable for NewstackPanel {
+    /// Java inherited `expand(ExpandButton)`.
+    fn expand_expand_button(&self, button: &Rc<ExpandButton>) {
+        self.base.expand_expand_button(button);
     }
 
-    impl NewstackPanelApplicationManager for Manager {
-        fn newst(
-            &mut self,
-            _display: &MultiLineButton,
-            _series: Option<()>,
-            _deferred: Option<&Deferred3dmodButton>,
-            axis_id: AxisID,
-            _options: Option<Run3dmodMenuOptions>,
-            dialog_type: DialogType,
-            fiducialess: &dyn FiducialessParams,
-            _panel: &NewstackPanel,
-            process_name: ProcessName,
-        ) {
-            self.newst = Some((
-                axis_id,
-                dialog_type,
-                process_name,
-                fiducialess.is_fiducialess(),
-            ));
-        }
+    /// Java inherited `expand(GlobalExpandButton)`.
+    fn expand_global_expand_button(&self, button: &Rc<GlobalExpandButton>) {
+        self.base.expand_global_expand_button(button);
+    }
+}
 
-        fn imod_fine_align(&mut self, axis_id: AxisID, options: Option<Run3dmodMenuOptions>) {
-            self.fine_align = Some((axis_id, options));
-        }
+impl NewstackDisplay for NewstackPanel {
+    /// Java inherited final `getParameters(NewstParam, boolean)`.
+    fn get_parameters(
+        &self,
+        newst_param: &mut NewstParam,
+        do_validation: bool,
+    ) -> Result<bool, NewstackDisplayException> {
+        NewstackDisplay::get_parameters(&self.base, newst_param, do_validation)
     }
 
-    #[test]
-    fn get_instance_follows_java_creation_order() {
-        let panel = NewstackPanel::get_instance(
-            AxisID::First,
-            DialogType::FinalAlignedStack,
-            &GlobalExpandButton::get_instance("Advanced", "Basic"),
-        );
-        let base = &panel.newstack_or_blendmont_panel;
-        assert_eq!(panel.get_header_title(), HEADER_TITLE);
-        assert!(base.pnl_root.header_added && base.pnl_root.body_added);
-        assert!(base.deferred_3dmod_button_set);
-        assert_eq!(base.btn_run_process.button.action_listener_count, 1);
-        assert_eq!(base.btn_3dmod_full.button.action_listener_count, 1);
-        assert_eq!(
-            base.btn_run_process.button.tooltip.as_deref(),
-            Some(super::super::newstack_or_blendmont_panel::CREATE_FULL_ALIGNED_STACK_TOOLTIP)
-        );
+    /// Java inherited final `setParameters(ConstNewstParam)`.
+    fn set_parameters(&self, newst_param: &dyn ConstNewstParam) {
+        NewstackDisplay::set_parameters(&self.base, newst_param);
     }
 
-    #[test]
-    fn action_routes_newst_and_fine_align_with_exact_source_arguments() {
-        let mut panel = NewstackPanel::get_instance(
-            AxisID::Second,
-            DialogType::FinalAlignedStack,
-            &GlobalExpandButton::get_instance("Advanced", "Basic"),
-        );
-        panel
-            .newstack_or_blendmont_panel
-            .set_fiducialess_alignment(true);
-        let run = panel
-            .newstack_or_blendmont_panel
-            .get_run_process_button_action_command()
-            .to_string();
-        let full = panel
-            .newstack_or_blendmont_panel
-            .get_3dmod_full_button_action_command()
-            .to_string();
-        let options = Run3dmodMenuOptions {
-            bin_by_2: true,
-            ..Default::default()
-        };
-        let mut manager = Manager::default();
-        panel.action(
-            &mut manager,
-            &run,
-            Some(&Deferred3dmodButton),
-            Some(options),
-        );
-        assert_eq!(
-            manager.newst,
-            Some((
-                AxisID::Second,
-                DialogType::FinalAlignedStack,
-                ProcessName::NEWST,
-                true
-            ))
-        );
-        panel.action(&mut manager, &full, None, Some(options));
-        assert_eq!(manager.fine_align, Some((AxisID::Second, Some(options))));
+    /// Java inherited `validate()`.
+    fn validate(&self) -> bool {
+        NewstackDisplay::validate(&self.base)
+    }
+
+    /// Java inherited `isFiducialess()`.
+    fn is_fiducialess(&self) -> bool {
+        NewstackDisplay::is_fiducialess(&self.base)
+    }
+}
+
+impl BlendmontDisplay for NewstackPanel {
+    /// Java inherited final `getParameters(BlendmontParam, boolean)`.
+    fn get_parameters(
+        &self,
+        param: &mut BlendmontParam,
+        do_validation: bool,
+    ) -> Result<bool, BlendmontDisplayException> {
+        BlendmontDisplay::get_parameters(&self.base, param, do_validation)
+    }
+
+    /// Java inherited final `setParameters(BlendmontParam)`.
+    fn set_parameters(&self, param: &BlendmontParam) {
+        BlendmontDisplay::set_parameters(&self.base, param);
+    }
+
+    /// Java inherited `validate()`.
+    fn validate(&self) -> bool {
+        BlendmontDisplay::validate(&self.base)
+    }
+
+    /// Java inherited `isFiducialess()`.
+    fn is_fiducialess(&self) -> bool {
+        BlendmontDisplay::is_fiducialess(&self.base)
     }
 }

@@ -1,18 +1,16 @@
 //! Translation of `IMOD/raptor/suitesparse/cs_cumsum.c`.
 
-/// C `cs_cumsum`: cumulative counts, also replacing `counts` by the offsets.
-pub fn cs_cumsum(offsets: &mut [usize], counts: &mut [usize]) -> Option<f64> {
-    if offsets.len() != counts.len() + 1 {
-        return None;
+/// `cs_cumsum(p, c, n)`: p [0..n] = cumulative sum of c [0..n-1], and then
+/// copy p [0..n-1] into c.
+pub fn cs_cumsum(p: &mut [i32], c: &mut [i32], n: i32) -> f64 {
+    let mut nz = 0i32;
+    let mut nz2 = 0.0f64;
+    for i in 0..n as usize {
+        p[i] = nz;
+        nz += c[i];
+        nz2 += c[i] as f64; // also in double to avoid int overflow
+        c[i] = p[i];
     }
-    let mut total = 0_usize;
-    let mut as_float = 0.0;
-    for index in 0..counts.len() {
-        offsets[index] = total;
-        total = total.checked_add(counts[index])?;
-        as_float += counts[index] as f64;
-        counts[index] = offsets[index];
-    }
-    offsets[counts.len()] = total;
-    Some(as_float)
+    p[n as usize] = nz;
+    nz2
 }

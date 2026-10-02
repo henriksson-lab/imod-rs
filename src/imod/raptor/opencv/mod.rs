@@ -1,28 +1,19 @@
-//! Owned Rust translations of Raptor's bundled OpenCV compatibility sources.
+//! Translation units from `IMOD/raptor/opencv`: the parts of OpenCV 1.x that
+//! the RAPTOR program reaches (see `cxtypes.rs` for the element types).
+//! Everything else in these units is recorded in `DEAD_CODE.md`.
 
-pub mod cvaccum;
 pub mod cvsumpixels;
-pub mod cvtables;
 pub mod cvtemplmatch;
-pub mod cvutils;
-pub mod cxalloc;
 pub mod cxarithm;
 pub mod cxarray;
 pub mod cxconvert;
 pub mod cxcopy;
-pub mod cxdatastructs;
 pub mod cxdxt;
 pub mod cxerror;
-pub mod cxlut;
 pub mod cxmathfuncs;
 pub mod cxmatmul;
 pub mod cxmatrix;
-pub mod cxmean;
 pub mod cxmeansdv;
-pub mod cxminmaxloc;
 pub mod cxnorm;
-pub mod cxrand;
-pub mod cxsumpixels;
 pub mod cxsvd;
-pub mod cxtables;
-pub mod cxutils;
+pub mod cxtypes;

@@ -1,365 +1,287 @@
 //! `IMOD/Etomo/src/etomo/ui/swing/GpuTable.java`.
 //!
-//! The Java class inherits the common CPU computer-table behaviour and changes
-//! only the GPU-specific source methods below.  `Network`, `Node`,
-//! `BaseManager`, and comscript parameter classes remain direct boundaries;
-//! their values are represented by the explicit projections in this unit.
-#![allow(dead_code)]
+//! Child of CpuTable that makes a ProcessorTable display GPUs (bug# 1422).
+//!
+//! Java `final class GpuTable extends CpuTable`: the `CpuTable` is embedded as
+//! `base` (with `Deref`); the members GpuTable overrides are in its
+//! [`ProcessorTableVirtual`] implementation, and the ones it inherits forward to the
+//! `CpuTable` bodies.
 
-use std::collections::{BTreeMap, BTreeSet};
+use std::collections::HashMap;
+use std::ops::Deref;
+use std::rc::{Rc, Weak};
+use std::sync::Arc;
 
+use super::cpu_table::CpuTable;
+use super::parallel_panel::ParallelPanel;
+use super::processor_table::{ProcessorTable, ProcessorTableVirtual};
+use super::processor_table_row::ProcessorTableRow;
+use crate::imod::etomo::base_manager::BaseManager;
+use crate::imod::etomo::comscript::batchruntomo_param::BatchruntomoParam;
+use crate::imod::etomo::comscript::intermittent_command::IntermittentCommand;
+use crate::imod::etomo::comscript::processchunks_param::ProcesschunksParam;
+use crate::imod::etomo::logic::processor_table_state::ProcessorTableState;
+use crate::imod::etomo::logic::processor_type::ProcessorType;
+use crate::imod::etomo::storage::node::Node;
+use crate::imod::etomo::r#type::axis_id::AxisID;
+use crate::imod::etomo::r#type::const_etomo_version::ConstEtomoVersion;
+use crate::imod::etomo::r#type::interface_type::InterfaceType;
 use crate::imod::etomo::r#type::processing_method::ProcessingMethod;
+use crate::imod::etomo::ui::expander::Expander;
+use crate::imod::etomo::ui::swing::parallel_progress_display::ParallelProgressDisplay;
 
-use super::cpu_table::ProcessorType;
-use super::processor_table::{ProcessorTable, ProcessorTableHooks, ProcessorTableRow};
-use super::processor_table_row::{BatchruntomoParameters, ProcesschunksParameters, ProcessorNode};
-
+/// Java private static final `PREPEND`.
 const PREPEND: &str = ".Gpu";
+/// Java static final `NUMBER_CPUS_LABEL`.
 pub const NUMBER_CPUS_LABEL: &str = "# GPUs";
 
-/// Java `GpuTable` values supplied to inherited `ProcessorTable` methods.
-#[derive(Clone, Debug, Default, PartialEq)]
-pub struct GpuTableHooks {
-    pub group_key: String,
-    pub computers: Vec<ProcessorNode>,
-}
-
-impl ProcessorTableHooks for GpuTableHooks {
-    /// Java inherited `CpuTable.getSize`.
-    fn get_size(&self) -> usize {
-        self.computers.len()
-    }
-
-    /// Java inherited `CpuTable.getNode(int)` after `Network.getComputer`.
-    fn get_node(&self, index: usize) -> Option<String> {
-        self.computers.get(index).map(|node| node.name.clone())
-    }
-
-    /// Java `createProcessorTableRow`.
-    fn create_processor_table_row(
-        &self,
-        node: &str,
-        num_rows_in_table: usize,
-    ) -> ProcessorTableRow {
-        let mut node = self
-            .computers
-            .iter()
-            .find(|computer| computer.name == node)
-            .cloned()
-            .unwrap_or_else(|| ProcessorNode {
-                name: node.into(),
-                ..ProcessorNode::default()
-            });
-        // Java Node.getGpuNumber returns one for non-GPU nodes and for a GPU
-        // node without an explicit device array.
-        node.num_cpus = if node.is_gpu && !node.gpu_device_array.is_empty() {
-            node.gpu_device_array.len() as i32
-        } else {
-            1
-        };
-        ProcessorTableRow::get_computer_instance(node, num_rows_in_table)
-    }
-
-    /// Java `getHeader1ComputerText`.
-    fn get_header1_computer_text(&self) -> String {
-        "GPU".into()
-    }
-
-    /// Java inherited `CpuTable.getIntermittentCommand` boundary projection.
-    fn get_intermittent_command(&self, computer: &str) -> Option<String> {
-        Some(computer.into())
-    }
-
-    /// Java `isExcludeNode` after the `Node.isLocalHost` manager boundary.
-    fn is_exclude_node(&self, node: &str) -> bool {
-        self.computers
-            .iter()
-            .find(|computer| computer.name == node)
-            .is_none_or(|computer| {
-                !computer.is_gpu || (computer.is_gpu_local && !computer.is_local_host)
-            })
-    }
-
-    /// Java inherited `CpuTable.isNiceable`.
-    fn is_niceable(&self) -> bool {
-        true
-    }
-
-    /// Java `getStorePrepend`.
-    fn get_store_prepend(&self) -> String {
-        format!("{}{}", self.group_key, PREPEND)
-    }
-
-    /// Java `getLoadPrepend`.
-    fn get_load_prepend(&self, _: &str) -> String {
-        self.get_store_prepend()
-    }
-
-    /// Java `initRow`.
-    fn init_row(&self, row: &mut ProcessorTableRow) {
-        row.turn_off_load_warning();
-    }
-
-    fn is_queue_table(&self) -> bool {
-        false
-    }
-    fn is_cpu_table(&self) -> bool {
-        false
-    }
-    fn is_gpu_table(&self) -> bool {
-        true
-    }
-    fn get_no_cpus_selected_error_message(&self) -> String {
-        "At least one GPU must be selected.".into()
-    }
-}
-
-/// Java `GpuTable`.  `table` is the inherited `ProcessorTable` state.
+/// Java package-private `final class GpuTable extends CpuTable`.
 pub struct GpuTable {
-    pub table: ProcessorTable<GpuTableHooks>,
-    /// Java inherited `CpuTable.usersColumn` / `CpuAdoc.isUsersColumn` value.
-    pub users_column: bool,
-    /// Java `BaseManager.isAddGPUMachineToProcessChunks()` boundary.
-    pub add_gpu_machine_to_processchunks: bool,
+    base: CpuTable,
+}
+
+impl Deref for GpuTable {
+    type Target = CpuTable;
+    fn deref(&self) -> &CpuTable {
+        &self.base
+    }
 }
 
 impl GpuTable {
-    /// Java `GpuTable(BaseManager,ParallelPanel,AxisID,boolean,Expander,InterfaceType)`.
-    /// Manager/UI arguments are represented by their direct Network/CpuAdoc and
-    /// command-boundary values.
+    /// Java `GpuTable(BaseManager, ParallelPanel, AxisID, boolean runnable, Expander
+    /// moreLess, InterfaceType)`.
     pub fn new(
-        group_key: impl Into<String>,
-        computers: Vec<ProcessorNode>,
-        users_column: bool,
-        displayed_fields: BTreeSet<String>,
+        manager: &'static dyn BaseManager,
+        parent: Weak<ParallelPanel>,
+        axis_id: AxisID,
         runnable: bool,
-        no_load: bool,
-    ) -> Self {
-        let mut table = ProcessorTable::new(
-            GpuTableHooks {
-                group_key: group_key.into(),
-                computers,
-            },
-            displayed_fields,
-            false,
-            runnable,
-            no_load,
-        );
-        // ProcessorTable's Java constructor dynamically dispatches to
-        // GpuTable.getheader1NumberCPUsTitle while creating this header.
-        table.set_header1_number_cpus_title_to(NUMBER_CPUS_LABEL);
-        Self {
-            table,
-            users_column,
-            add_gpu_machine_to_processchunks: false,
-        }
+        more_less: Option<Rc<dyn Expander>>,
+        interface_type: InterfaceType,
+    ) -> Rc<GpuTable> {
+        // super(manager, parent, axisID, runnable, moreLess, interfaceType)
+        let instance = Rc::new(GpuTable {
+            base: CpuTable::new_fields(manager, parent, axis_id, runnable),
+        });
+        let this = Rc::downgrade(&instance) as Weak<dyn ProcessorTableVirtual>;
+        instance.processor_table().set_this(this);
+        // CpuTable passes displayQueues false.
+        instance
+            .processor_table()
+            .construct(false, more_less, interface_type);
+        instance
     }
 
-    /// Java `getProcessorType`.
+    /// Java `@Override getProcessorType()`.
     pub fn get_processor_type(&self) -> ProcessorType {
         ProcessorType::Gpu
     }
 
-    /// Java `isCpuTable`.
+    /// Java `@Override isCpuTable()`.
     pub fn is_cpu_table(&self) -> bool {
         false
     }
 
-    /// Java `isGpuTable`.
+    /// Java `@Override isGpuTable()`.
     pub fn is_gpu_table(&self) -> bool {
         true
     }
 
-    /// Java `getheader1NumberCPUsTitle`.
-    pub fn getheader1_number_cpus_title(&self) -> &'static str {
-        NUMBER_CPUS_LABEL
+    /// Java `@Override getheader1NumberCPUsTitle()`.
+    pub fn getheader1_number_cpus_title(&self) -> Option<String> {
+        Some(NUMBER_CPUS_LABEL.to_string())
     }
 
-    /// Java `getStorePrepend`.
+    /// Java `@Override getStorePrepend()`.
     pub fn get_store_prepend(&self) -> String {
-        self.table.hooks.get_store_prepend()
+        format!("{}{}", self.processor_table().get_group_key(), PREPEND)
     }
 
-    /// Java `getLoadPrepend(ConstEtomoVersion)`.
-    pub fn get_load_prepend(&self, version: &str) -> String {
-        self.table.hooks.get_load_prepend(version)
+    /// Java `@Override getLoadPrepend(ConstEtomoVersion)`.
+    pub fn get_load_prepend(&self, _version: &dyn ConstEtomoVersion) -> String {
+        format!("{}{}", self.processor_table().get_group_key(), PREPEND)
     }
 
-    /// Java `getHeader1ComputerText`.
-    pub fn get_header1_computer_text(&self) -> &'static str {
-        "GPU"
+    /// Java `@Override getHeader1ComputerText()`.
+    pub fn get_header1_computer_text(&self) -> Option<String> {
+        Some("GPU".to_string())
     }
 
-    /// Java `getNoCpusSelectedErrorMessage`.
-    pub fn get_no_cpus_selected_error_message(&self) -> &'static str {
-        "At least one GPU must be selected."
+    /// Java `@Override getNoCpusSelectedErrorMessage()`.
+    pub fn get_no_cpus_selected_error_message(&self) -> Option<String> {
+        Some("At least one GPU must be selected.".to_string())
     }
 
-    /// Java `isExcludeNode`.
-    pub fn is_exclude_node(&self, node: &ProcessorNode) -> bool {
-        !node.is_gpu || (node.is_gpu_local && !node.is_local_host)
-    }
-
-    /// Java `getMachineMap(BatchruntomoParam)`.
-    pub fn get_machine_map(&self, param: &BatchruntomoParameters) -> BTreeMap<String, String> {
-        param
-            .gpu_machines
-            .iter()
-            .map(|(name, number, _)| (name.clone(), number.to_string()))
-            .collect()
-    }
-
-    /// Java `getParameters(ProcesschunksParam)`.
-    pub fn get_processchunks_parameters(&self, param: &mut ProcesschunksParameters) {
-        if !self.table.is_secondary() {
-            param.gpu_processing = true;
+    /// Java `@Override isExcludeNode(Node)`.
+    pub fn is_exclude_node(&self, node: &Node) -> bool {
+        if !node.is_gpu() {
+            return true;
         }
-        if self.add_gpu_machine_to_processchunks {
-            param.gpu_machines.clear();
+        let table = self.processor_table();
+        if node.is_gpu_local()
+            && !node.is_local_host(
+                table.manager,
+                table.axis_id,
+                table.manager.get_property_user_dir().as_deref(),
+            )
+        {
+            return true;
         }
-        for row in &self.table.row_list.list {
-            row.get_processchunks_parameters(
-                param,
-                self.add_gpu_machine_to_processchunks,
-                self.table.is_secondary(),
-                false,
-                true,
-            );
-        }
+        false
     }
 
-    /// Java `getParameters(ProcessingMethod,BatchruntomoParam,boolean)`.
-    pub fn get_parameters(
+    /// Java `@Override getMachineMap(BatchruntomoParam)`.
+    pub fn get_machine_map(&self, param: &BatchruntomoParam) -> Option<HashMap<String, String>> {
+        param.get_gpu_machine_map()
+    }
+
+    /// Java `@Override getParameters(ProcesschunksParam)`.
+    pub fn get_parameters_processchunks_param(&self, param: &ProcesschunksParam) {
+        // Avoid loading parameters if this is a secondary table. Only some GPU
+        // parameters can be loaded from the secondary table.
+        if !ParallelProgressDisplay::is_secondary(self) {
+            param.set_gpu_processing(true);
+        }
+        // super.getParameters(param): CpuTable does not override it.
+        self.processor_table()
+            .get_parameters_processchunks_param_super(param);
+    }
+
+    /// Java `@Override getParameters(ProcessingMethod, BatchruntomoParam, boolean)`.
+    pub fn get_parameters_processing_method_batchruntomo_param_boolean(
         &self,
-        method: ProcessingMethod,
-        param: &mut BatchruntomoParameters,
-        _: bool,
+        method: Option<ProcessingMethod>,
+        param: &mut BatchruntomoParam,
+        _do_validation: bool,
     ) -> bool {
-        if method == ProcessingMethod::PpGpu {
-            param.gpu_machines.clear();
-            self.get_batchruntomo_parameters(param);
+        if method == Some(ProcessingMethod::PpGpu) {
+            param.reset_gpu_machine_list();
+            // getParameters(param): virtual.
+            self.processor_table()
+                .this()
+                .get_parameters_batchruntomo_param(param);
         }
         true
     }
 
-    /// Java inherited `ProcessorTable.getParameters(BatchruntomoParam)`.
-    pub fn get_batchruntomo_parameters(&self, param: &mut BatchruntomoParameters) {
-        for row in &self.table.row_list.list {
-            row.get_batchruntomo_parameters(param, false, false, true);
-        }
+    /// Java package-private `enableNumberColumn(Node)`.
+    pub fn enable_number_column(&self, node: &Node) -> bool {
+        // numberColumn is true if an number attribute is not defaulted to 1
+        // 1436 unnecessary column (was !isDefault and was always true)
+        node.get_gpu_number() > 1
     }
 
-    /// Java `enableNumberColumn`.
-    pub fn enable_number_column(&self, node: &ProcessorNode) -> bool {
-        node.is_gpu && node.gpu_device_array.len() > 1
-    }
-
-    /// Java `createProcessorTableRow`.
+    /// Java `@Override createProcessorTableRow(ProcessorTable, Node, int,
+    /// ProcessorTableState)`.
     pub fn create_processor_table_row(
         &self,
-        node: &ProcessorNode,
-        num_rows_in_table: usize,
-    ) -> ProcessorTableRow {
-        self.table
-            .hooks
-            .create_processor_table_row(&node.name, num_rows_in_table)
+        processor_table: &Rc<dyn ProcessorTableVirtual>,
+        node: &Node,
+        num_rows_in_table: i32,
+        table_state: &Rc<ProcessorTableState>,
+    ) -> Rc<ProcessorTableRow> {
+        ProcessorTableRow::get_computer_instance(
+            processor_table,
+            node,
+            node.get_gpu_number(),
+            num_rows_in_table,
+            table_state,
+        )
     }
 
-    /// Java `initRow`.
-    pub fn init_row(&self, row: &mut ProcessorTableRow) {
+    /// Java `@Override initRow(ProcessorTableRow)`.
+    pub fn init_row(&self, row: &Rc<ProcessorTableRow>) {
         row.turn_off_load_warning();
     }
 }
 
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    fn gpu(name: &str, devices: &[&str]) -> ProcessorNode {
-        ProcessorNode {
-            name: name.into(),
-            is_gpu: true,
-            gpu_device_array: devices.iter().map(|device| (*device).into()).collect(),
-            ..ProcessorNode::default()
-        }
+impl ProcessorTableVirtual for GpuTable {
+    fn processor_table(&self) -> &ProcessorTable {
+        self.base.processor_table()
     }
-
-    #[test]
-    fn gpu_identity_headers_and_storage_are_source_exact() {
-        let table = GpuTable::new("parallel", vec![], true, BTreeSet::new(), true, false);
-        assert_eq!(table.get_processor_type(), ProcessorType::Gpu);
-        assert!(!table.is_cpu_table());
-        assert!(table.is_gpu_table());
-        assert_eq!(table.getheader1_number_cpus_title(), "# GPUs");
-        assert_eq!(table.table.header1_number_cpus, "# GPUs");
-        assert_eq!(table.get_header1_computer_text(), "GPU");
-        assert_eq!(
-            table.get_no_cpus_selected_error_message(),
-            "At least one GPU must be selected."
-        );
-        assert_eq!(table.get_store_prepend(), "parallel.Gpu");
-        assert_eq!(table.get_load_prepend("1.0"), "parallel.Gpu");
+    // Inherited from CpuTable.
+    fn get_size(&self) -> i32 {
+        self.base.get_size()
     }
-
-    #[test]
-    fn only_available_gpu_nodes_are_created_and_their_gpu_count_is_used() {
-        let mut unavailable_local = gpu("remote-local", &["0"]);
-        unavailable_local.is_gpu_local = true;
-        let mut table = GpuTable::new(
-            "group",
-            vec![
-                ProcessorNode {
-                    name: "cpu-only".into(),
-                    ..ProcessorNode::default()
-                },
-                unavailable_local,
-                gpu("gpu-a", &["0", "1"]),
-            ],
-            false,
-            BTreeSet::new(),
-            true,
-            true,
-        );
-        table.table.create_table();
-        assert_eq!(table.table.row_list.list.len(), 1);
-        let row = &table.table.row_list.list[0];
-        assert_eq!(row.computer, "gpu-a");
-        assert_eq!(row.num_cpus, 2);
-        assert!(!row.load_warning);
-        assert!(table.enable_number_column(&gpu("gpu-a", &["0", "1"])));
-        assert!(!table.enable_number_column(&gpu("gpu-b", &["0"])));
+    fn get_node(&self, index: i32) -> Option<Arc<Node>> {
+        self.base.get_node(index)
     }
-
-    #[test]
-    fn gpu_parameters_follow_secondary_and_add_gpu_machine_rules() {
-        let mut table = GpuTable::new(
-            "group",
-            vec![gpu("gpu-a", &["0", "1"])],
-            false,
-            BTreeSet::new(),
-            true,
-            true,
-        );
-        table.table.create_table();
-        table.add_gpu_machine_to_processchunks = true;
-        let mut chunks = ProcesschunksParameters {
-            gpu_machines: vec![("old".into(), 1, vec![])],
-            ..ProcesschunksParameters::default()
-        };
-        table.get_processchunks_parameters(&mut chunks);
-        assert!(chunks.gpu_processing);
-        assert_eq!(
-            chunks.machine_names,
-            vec![("gpu-a".into(), 1, vec!["0".into(), "1".into()])]
-        );
-        assert_eq!(chunks.gpu_machines, chunks.machine_names);
-
-        let mut batch = BatchruntomoParameters {
-            gpu_machines: vec![("old".into(), 1, vec![])],
-            ..BatchruntomoParameters::default()
-        };
-        assert!(table.get_parameters(ProcessingMethod::PpGpu, &mut batch, true));
-        assert_eq!(batch.gpu_machines, chunks.machine_names);
-        assert_eq!(table.get_machine_map(&batch)["gpu-a"], "1");
+    fn get_intermittent_command_string(
+        &self,
+        computer: Option<&str>,
+    ) -> Arc<dyn IntermittentCommand> {
+        self.base.get_intermittent_command_string(computer)
+    }
+    fn is_niceable(&self) -> bool {
+        self.base.is_niceable()
+    }
+    fn is_queue_table(&self) -> bool {
+        self.base.is_queue_table()
+    }
+    // Overridden by GpuTable.
+    fn create_processor_table_row(
+        &self,
+        processor_table: &Rc<dyn ProcessorTableVirtual>,
+        node: &Node,
+        num_rows_in_table: i32,
+        table_state: &Rc<ProcessorTableState>,
+    ) -> Rc<ProcessorTableRow> {
+        GpuTable::create_processor_table_row(
+            self,
+            processor_table,
+            node,
+            num_rows_in_table,
+            table_state,
+        )
+    }
+    fn get_header1_computer_text(&self) -> Option<String> {
+        GpuTable::get_header1_computer_text(self)
+    }
+    fn is_exclude_node(&self, node: &Node) -> bool {
+        GpuTable::is_exclude_node(self, node)
+    }
+    fn get_store_prepend(&self) -> String {
+        GpuTable::get_store_prepend(self)
+    }
+    fn get_load_prepend(&self, version: &dyn ConstEtomoVersion) -> String {
+        GpuTable::get_load_prepend(self, version)
+    }
+    fn init_row(&self, row: &Rc<ProcessorTableRow>) {
+        GpuTable::init_row(self, row)
+    }
+    fn get_no_cpus_selected_error_message(&self) -> Option<String> {
+        GpuTable::get_no_cpus_selected_error_message(self)
+    }
+    fn is_cpu_table(&self) -> bool {
+        GpuTable::is_cpu_table(self)
+    }
+    fn is_gpu_table(&self) -> bool {
+        GpuTable::is_gpu_table(self)
+    }
+    fn get_parameters_processing_method_batchruntomo_param_boolean(
+        &self,
+        method: Option<ProcessingMethod>,
+        param: &mut BatchruntomoParam,
+        do_validation: bool,
+    ) -> bool {
+        GpuTable::get_parameters_processing_method_batchruntomo_param_boolean(
+            self,
+            method,
+            param,
+            do_validation,
+        )
+    }
+    fn get_processor_type(&self) -> ProcessorType {
+        GpuTable::get_processor_type(self)
+    }
+    fn getheader1_number_cpus_title(&self) -> Option<String> {
+        GpuTable::getheader1_number_cpus_title(self)
+    }
+    fn get_parameters_processchunks_param(&self, param: &ProcesschunksParam) {
+        GpuTable::get_parameters_processchunks_param(self, param)
+    }
+    fn get_machine_map(&self, param: &BatchruntomoParam) -> Option<HashMap<String, String>> {
+        GpuTable::get_machine_map(self, param)
     }
 }
+
+crate::processor_table_interfaces!(GpuTable);

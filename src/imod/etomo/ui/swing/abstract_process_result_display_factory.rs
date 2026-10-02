@@ -1,205 +1,268 @@
 //! `IMOD/Etomo/src/etomo/ui/swing/AbstractProcessResultDisplayFactory.java`.
 //!
-//! Java stores `ProcessResultDisplay` object links directly.  Rust display widgets are
-//! owned by their concrete factory fields, so the same singly linked list is represented
-//! by its ordered stable display IDs.  The concrete factory supplies its typed display
-//! fields when resolving an ID; no second set of display state is created here.
-#![allow(dead_code)]
+//! Description: A single direction link list of ProcessResultDisplays, which
+//! labels each display with an ID that must be unique to the dataset.
+//!
+//! The list is the displays' own `next` links (`ProcessResultDisplay.setNext`
+//! / `getNext`), exactly as in the Java; this struct holds only the head and
+//! the tail.  A concrete factory embeds it as field `base` and derefs to it.
+//! Factories and displays are event-dispatch-thread objects: every method
+//! takes `&self` and the list ends sit in `RefCell`s, borrowed only for the
+//! statement that reads or writes them.
 
-use super::multi_line_button::MultiLineButton;
+use crate::imod::etomo::process::process_result_display_factory_interface::ProcessResultDisplayFactoryInterface;
+use crate::imod::etomo::r#type::process_result_display::ProcessResultDisplayHandle;
+use std::cell::RefCell;
+use std::rc::Rc;
 
-/// Java `AbstractProcessResultDisplayFactory`.
-#[derive(Clone, Debug, Default, PartialEq, Eq)]
+/// Java `public abstract class AbstractProcessResultDisplayFactory implements
+/// ProcessResultDisplayFactoryInterface`.
 pub struct AbstractProcessResultDisplayFactory {
-    /// Java final `factoryID`.
-    pub factory_id: String,
-    /// Java `head`, represented by its stable display ID.
-    pub head: Option<i32>,
-    /// Java `tail`, represented by its stable display ID.
-    pub tail: Option<i32>,
-    /// Rust ownership-safe representation of Java's singly linked display list.
-    pub dependency_order: Vec<i32>,
+    /// Java private final `factoryID`.
+    ///
+    /// factoryID must be unique within the dataset. If there are multiple
+    /// instances of the same class of factory in the dataset (as in one for
+    /// each axis), they must have different IDs.
+    ///
+    /// The factory ID will be saved to files as process data, so it must be
+    /// the same each time etomo runs. However, because process data is
+    /// short-lived, this ID doesn't have to stable from version to version.
+    factory_id: String,
+    // Dependency list
+    /// Java private `head`.
+    head: RefCell<Option<ProcessResultDisplayHandle>>,
+    /// Java private `tail`.
+    tail: RefCell<Option<ProcessResultDisplayHandle>>,
 }
 
 impl AbstractProcessResultDisplayFactory {
-    /// Java protected constructor `AbstractProcessResultDisplayFactory(String)`.
-    pub fn new(factory_id: String) -> Self {
-        Self {
+    /// Java protected `AbstractProcessResultDisplayFactory(String)`.
+    pub fn new(factory_id: String) -> AbstractProcessResultDisplayFactory {
+        AbstractProcessResultDisplayFactory {
             factory_id,
-            head: None,
-            tail: None,
-            dependency_order: Vec::new(),
+            head: RefCell::new(None),
+            tail: RefCell::new(None),
         }
     }
 
     /// Java protected synchronized `addDependency(ProcessResultDisplay, int)`.
+    /// Adds display to this instance's link list.  Does not follow display's
+    /// links.  Sets the display's displayID and factoryID.
     ///
-    /// The caller owns each concrete display field.  `previous_display` is the Rust
-    /// ownership bridge for Java's stored `tail` object reference, so this method can
-    /// preserve the source `tail.setNext(display)` transition without duplicating widgets.
-    pub fn add_dependency(
-        &mut self,
-        display: Option<&mut MultiLineButton>,
-        display_id: i32,
-        previous_display: Option<&mut MultiLineButton>,
-    ) -> bool {
+    /// Java `synchronized`: the factory is used only on the event dispatch
+    /// thread, so there is nothing to lock.
+    pub fn add_dependency(&self, display: Option<&ProcessResultDisplayHandle>, display_id: i32) {
         let Some(display) = display else {
             eprintln!("Error: display is null");
-            return false;
+            // Thread.dumpStack(): no Rust counterpart for a Java stack dump.
+            return;
         };
 
-        display.set_id(display_id, Some(&self.factory_id));
-        if self.tail.is_some() {
-            if let Some(previous_display) = previous_display {
-                previous_display.set_next(true);
-            }
+        // Add display to the end of the linked list.
+        display.set_id(display_id, self.factory_id.clone());
+        let tail = self.tail.borrow().clone();
+        if let Some(tail) = tail {
+            tail.set_next(Some(display.clone()));
         }
-        self.tail = Some(display_id);
-        display.set_next(false);
-        if self.head.is_none() {
-            self.head = self.tail;
+        *self.tail.borrow_mut() = Some(display.clone());
+        display.set_next(None);
+        if self.head.borrow().is_none() {
+            // New list
+            let tail = self.tail.borrow().clone();
+            *self.head.borrow_mut() = tail;
         }
-        self.dependency_order.push(display_id);
-        true
     }
 
-    /// Java `getProcessResultDisplay(int, String)`.
-    pub fn get_process_result_display<'a>(
+    /// Java `getProcessResultDisplay(int, String)`
+    /// (`ProcessResultDisplayFactoryInterface`).
+    pub fn get_process_result_display(
         &self,
-        displays: impl IntoIterator<Item = &'a MultiLineButton>,
         display_id: i32,
-        factory_id: Option<&str>,
-    ) -> Option<&'a MultiLineButton> {
-        if self.head.is_none() {
+        factory_id: &str,
+    ) -> Option<ProcessResultDisplayHandle> {
+        // This link list represents the buttons that interact with each other
+        // in an interface - maybe fifty elements at most. There is no reason
+        // to do a faster search for such a small number of elements.
+        let head = self.head.borrow().clone();
+        let Some(head) = head else {
+            // DependencyID not found.
             return None;
-        }
-        let displays = displays.into_iter().collect::<Vec<_>>();
-        for linked_display_id in &self.dependency_order {
-            if *linked_display_id == display_id {
-                if let Some(display) = displays
-                    .iter()
-                    .copied()
-                    .find(|display| display.equals_id(*linked_display_id, factory_id))
-                {
-                    return Some(display);
-                }
+        };
+        let mut current = Some(head);
+        while let Some(display) = current {
+            if display.equals_id(display_id, factory_id) {
+                return Some(display);
             }
+            current = display.get_next();
         }
         None
     }
 
-    /// Java protected `reset()`.
-    pub fn reset(&mut self) {
-        self.head = None;
-        self.tail = None;
-        self.dependency_order.clear();
+    //
+    // Plugin functions
+
+    /// Java protected `reset()`: just deletes the link list.  For plugin
+    /// factories - if they have displays that need to be inserted in
+    /// different places in the manager's list.
+    pub fn reset(&self) {
+        *self.head.borrow_mut() = None;
+        *self.tail.borrow_mut() = None;
     }
 
-    /// Java `insertAfter(AbstractProcessResultDisplayFactory, ProcessResultDisplay)`.
+    /// Java `insertAfter(AbstractProcessResultDisplayFactory,
+    /// ProcessResultDisplay)`.  For plugin factories - allows the insertion of
+    /// a link list from another factory.  This allows plugin buttons to
+    /// interact with etomo button.  Assumes that the display ID has already
+    /// been set.  Replaces the factory ID.
     ///
-    /// `end_insert` and `factory_displays` are Rust ownership bridges for Java's
-    /// `startInsert.getNext()` and linked object traversal.  They let this method mutate
-    /// the real widgets rather than a duplicate representation.
+    /// `factory`: its list is inserted.  `start_insert`: element from the link
+    /// list starting from `this.head`; the list is inserted after it.
     pub fn insert_after(
-        &mut self,
-        factory: Option<&mut AbstractProcessResultDisplayFactory>,
-        start_insert: Option<&mut MultiLineButton>,
-        end_insert: Option<&mut MultiLineButton>,
-        factory_displays: &mut [&mut MultiLineButton],
-    ) -> bool {
+        &self,
+        factory: Option<&AbstractProcessResultDisplayFactory>,
+        start_insert: Option<&ProcessResultDisplayHandle>,
+    ) {
         let Some(factory) = factory else {
             eprintln!("Error: factory is null");
-            return false;
+            // Thread.dumpStack(): no Rust counterpart for a Java stack dump.
+            return;
         };
         let Some(start_insert) = start_insert else {
             eprintln!("Error: startInsert is null");
-            return false;
+            // Thread.dumpStack(): no Rust counterpart for a Java stack dump.
+            return;
         };
-        if factory.head.is_none() {
-            eprintln!("Warning: Factory does not contain a list");
-            return false;
+        let factory_head = factory.head.borrow().clone();
+        let Some(factory_head) = factory_head else {
+            // Java prints the factory's `Object.toString()`
+            // (`<class>@<hash>`); the class name and the factory ID stand in
+            // for it.
+            eprintln!(
+                "Warning: Factory, AbstractProcessResultDisplayFactory({}), does not contain a list",
+                factory.factory_id
+            );
+            // Thread.dumpStack(): no Rust counterpart for a Java stack dump.
+            return;
+        };
+        // Insert display
+        let end_insert = start_insert.get_next();
+        // Overrides the previous factory ID.
+        let mut current = factory_head;
+        current.set_factory_id(self.factory_id.clone());
+        start_insert.set_next(Some(current.clone()));
+        // Move to the end of display's link list
+        while let Some(next) = current.get_next() {
+            current = next;
+            current.set_factory_id(self.factory_id.clone());
         }
-        let Some(insert_index) = self
-            .dependency_order
-            .iter()
-            .position(|display_id| *display_id == start_insert.get_display_id())
-        else {
-            return false;
-        };
+        // Attach startInsert.next to the end of display's link list.
+        current.set_next(end_insert);
+    }
+}
 
-        for display in factory_displays.iter_mut() {
-            display.set_factory_id(Some(&self.factory_id));
-        }
-        start_insert.set_next(true);
-        if let Some(display) = factory_displays.last_mut() {
-            display.set_next(end_insert.is_some());
-        }
-        self.dependency_order.splice(
-            insert_index + 1..insert_index + 1,
-            factory.dependency_order.iter().copied(),
-        );
-        // Java intentionally does not update `tail` here.  Plugin factories reset their
-        // temporary list after insertion, and later additions retain the original source
-        // behavior even when insertion occurred after that list's tail.
-        true
+impl ProcessResultDisplayFactoryInterface for AbstractProcessResultDisplayFactory {
+    /// Java `@Override getProcessResultDisplay(int, String)`.
+    fn get_process_result_display(
+        &self,
+        display_id: i32,
+        factory_id: &str,
+    ) -> Option<ProcessResultDisplayHandle> {
+        AbstractProcessResultDisplayFactory::get_process_result_display(
+            self, display_id, factory_id,
+        )
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::imod::etomo::r#type::file_key::FileKey;
+    use crate::imod::etomo::r#type::process_end_state::ProcessEndState;
+    use crate::imod::etomo::r#type::process_result::ProcessResult;
+    use std::cell::Cell;
 
-    #[test]
-    fn add_dependency_labels_and_resolves_the_linked_displays() {
-        let mut factory = AbstractProcessResultDisplayFactory::new("factory".to_owned());
-        let mut first = MultiLineButton::new_with_label(Some("first"));
-        let mut second = MultiLineButton::new_with_label(Some("second"));
-        assert!(factory.add_dependency(Some(&mut first), 4, None));
-        assert!(factory.add_dependency(Some(&mut second), 9, Some(&mut first)));
-        assert_eq!(factory.head, Some(4));
-        assert_eq!(factory.tail, Some(9));
-        assert_eq!(factory.dependency_order, vec![4, 9]);
-        assert!(first.get_next());
-        assert!(!second.get_next());
-        assert_eq!(
-            factory
-                .get_process_result_display([&first, &second], 9, Some("factory"))
-                .unwrap()
-                .get_text(),
-            Some("second")
-        );
-        assert!(
-            factory
-                .get_process_result_display([&first, &second], 9, Some("other"))
-                .is_none()
-        );
+    /// A display holding only the link and ID state the factory touches.
+    #[derive(Default)]
+    struct Link {
+        next: RefCell<Option<ProcessResultDisplayHandle>>,
+        id: Cell<i32>,
+        factory: RefCell<String>,
+    }
+
+    impl crate::imod::etomo::r#type::process_result_display::ProcessResultDisplay for Link {
+        fn as_any_rc(self: Rc<Self>) -> Rc<dyn std::any::Any> {
+            self
+        }
+        fn get_output_image_file_key(&self) -> Option<FileKey> {
+            None
+        }
+        fn set_next(&self, display: Option<ProcessResultDisplayHandle>) {
+            *self.next.borrow_mut() = display;
+        }
+        fn set_use_global_dependency_list(&self, _input: bool) {}
+        fn get_next(&self) -> Option<ProcessResultDisplayHandle> {
+            self.next.borrow().clone()
+        }
+        fn set_debug(&self, _input: bool) {}
+        fn dump_state(&self) {}
+        fn get_original_state(&self) -> bool {
+            false
+        }
+        fn set_original_state(&self, _original_state: bool) {}
+        fn set_process_done(&self, _done: bool) {}
+        fn set_screen_state(
+            &self,
+            _screen_state: &'static crate::imod::etomo::r#type::base_screen_state::BaseScreenState,
+        ) {
+        }
+        fn msg_process_result(&self, _display_state: ProcessResult) {}
+        fn msg_process_end_state(&self, _end_state: ProcessEndState) {}
+        fn msg_process_starting(&self) {}
+        fn msg_process_succeeded(&self) {}
+        fn msg_process_failed(&self) {}
+        fn msg_process_failed_to_start(&self) {}
+        fn msg_secondary_process(&self) {}
+        fn add_dependent_display(&self, _dependent_display: ProcessResultDisplayHandle) {}
+        fn add_failure_display(&self, _failure_display: ProcessResultDisplayHandle) {}
+        fn add_success_display(&self, _success_display: ProcessResultDisplayHandle) {}
+        fn equals_id(&self, display_id: i32, factory_id: &str) -> bool {
+            self.id.get() == display_id && *self.factory.borrow() == factory_id
+        }
+        fn set_id(&self, display_id: i32, factory_id: String) {
+            self.id.set(display_id);
+            *self.factory.borrow_mut() = factory_id;
+        }
+        fn get_display_id(&self) -> i32 {
+            self.id.get()
+        }
+        fn get_factory_id(&self) -> Option<String> {
+            Some(self.factory.borrow().clone())
+        }
+        fn set_factory_id(&self, factory_id: String) {
+            *self.factory.borrow_mut() = factory_id;
+        }
+        fn get_button_state_key(&self) -> Option<String> {
+            None
+        }
     }
 
     #[test]
-    fn reset_and_insert_after_preserve_source_error_and_factory_id_paths() {
-        let mut main = AbstractProcessResultDisplayFactory::new("main".to_owned());
-        let mut first = MultiLineButton::new_with_label(Some("first"));
-        let mut last = MultiLineButton::new_with_label(Some("last"));
-        main.add_dependency(Some(&mut first), 1, None);
-        main.add_dependency(Some(&mut last), 2, Some(&mut first));
-        let mut plugin = AbstractProcessResultDisplayFactory::new("plugin".to_owned());
-        let mut plugin_display = MultiLineButton::new_with_label(Some("plugin"));
-        plugin.add_dependency(Some(&mut plugin_display), 7, None);
-        assert!(main.insert_after(
-            Some(&mut plugin),
-            Some(&mut first),
-            Some(&mut last),
-            &mut [&mut plugin_display]
+    fn list_links_ids_and_inserts_a_plugin_list() {
+        let main = AbstractProcessResultDisplayFactory::new("main".to_owned());
+        let first: ProcessResultDisplayHandle = Rc::new(Link::default());
+        let last: ProcessResultDisplayHandle = Rc::new(Link::default());
+        main.add_dependency(Some(&first), 0);
+        main.add_dependency(Some(&last), 1);
+        assert!(Rc::ptr_eq(
+            &main.get_process_result_display(1, "main").unwrap(),
+            &last
         ));
-        assert_eq!(main.dependency_order, vec![1, 7, 2]);
-        assert_eq!(main.tail, Some(2));
-        assert_eq!(plugin_display.get_factory_id(), Some("main"));
-        assert!(first.get_next());
-        assert!(plugin_display.get_next());
-        main.reset();
-        assert_eq!(main.head, None);
-        assert_eq!(main.tail, None);
-        assert!(main.dependency_order.is_empty());
-        assert!(!main.insert_after(None, Some(&mut first), None, &mut []));
+        let plugin = AbstractProcessResultDisplayFactory::new("plugin".to_owned());
+        let inserted: ProcessResultDisplayHandle = Rc::new(Link::default());
+        plugin.add_dependency(Some(&inserted), 7);
+        main.insert_after(Some(&plugin), Some(&first));
+        assert!(Rc::ptr_eq(&first.get_next().unwrap(), &inserted));
+        assert!(Rc::ptr_eq(&inserted.get_next().unwrap(), &last));
+        assert!(main.get_process_result_display(7, "main").is_some());
     }
 }

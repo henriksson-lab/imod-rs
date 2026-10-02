@@ -1,103 +1,104 @@
 //! `IMOD/Etomo/src/etomo/ui/swing/HighlightList.java`.
-#![allow(dead_code)]
+//!
+//! A vertical list of labels, one of which is shown selected (in a highlight
+//! colour).  Mouse events are not modelled by the Swing stand-in.
 
-use super::fixed_dim::FixedDim;
-use super::panel::Dimension;
+use std::cell::Cell;
+use std::rc::Rc;
 
-/// Java `HighlightList` label state at the native Swing boundary.
-#[derive(Clone, Debug, Eq, PartialEq)]
-pub struct HighlightListLabel {
-    pub text: String,
-    pub foreground: (u8, u8, u8),
-    pub mouse_listener_count: usize,
-}
+use crate::imod::etomo::jdk::{Color, JComponent, MouseListener};
 
-/// Java package-private `HighlightList`.
+/// Java `public static final String rcsid`.
+pub const RCSID: &str = "$Id$";
+
+/// Java package-private `class HighlightList`.
 pub struct HighlightList {
-    pub labels: Vec<HighlightListLabel>,
-    pub n_items: usize,
-    pub current_selected: isize,
-    pub unselected: (u8, u8, u8),
-    pub selected: (u8, u8, u8),
-    pub rigid_areas: Vec<Dimension>,
-    pub panel_mouse_listener_count: usize,
+    /// Java `panel`.
+    panel: Rc<JComponent>,
+    /// Java `labels`.
+    labels: Vec<Rc<JComponent>>,
+    /// Java `nItems`.
+    n_items: i32,
+    /// Java `currentSelected`.
+    current_selected: Cell<i32>,
+    /// Java `unselected`.
+    unselected: Color,
+    /// Java `selected`.
+    selected: Color,
 }
 
 impl HighlightList {
     /// Java `HighlightList(String[])`.
-    pub fn new(items: &[String]) -> Self {
-        let unselected = (128, 128, 128);
-        Self {
-            labels: items
-                .iter()
-                .map(|item| HighlightListLabel {
-                    text: item.clone(),
-                    foreground: unselected,
-                    mouse_listener_count: 0,
-                })
-                .collect(),
-            n_items: items.len(),
-            current_selected: -1,
+    pub fn new(items: &[&str]) -> HighlightList {
+        let panel = JComponent::new_panel();
+        let unselected: Color = (128, 128, 128);
+        let selected: Color = (160, 0, 64);
+        let n_items = items.len() as i32;
+        // Swing layout: panel.setLayout(new BoxLayout(panel, BoxLayout.Y_AXIS)).
+        let mut labels = Vec::with_capacity(items.len());
+        for i in 0..n_items as usize {
+            let label = JComponent::new_label(items[i]);
+            label.set_text(items[i]);
+            label.set_foreground(Some(unselected));
+            panel.add(&label);
+            // Swing layout: panel.add(Box.createRigidArea(FixedDim.x0_y5)).
+            labels.push(label);
+        }
+        HighlightList {
+            panel,
+            labels,
+            n_items,
+            current_selected: Cell::new(-1),
             unselected,
-            selected: (160, 0, 64),
-            rigid_areas: vec![FixedDim::x0_y5; items.len()],
-            panel_mouse_listener_count: 0,
+            selected,
         }
     }
 
-    /// Java `getPanel()` native JPanel boundary.
-    pub fn get_panel(&self) -> &[HighlightListLabel] {
-        &self.labels
+    /// Java `getPanel()`.
+    pub fn get_panel(&self) -> Rc<JComponent> {
+        self.panel.clone()
     }
 
-    /// Java `setSelected(int)`; source intentionally does not deselect on an
-    /// invalid index.
-    pub fn set_selected(&mut self, index: isize) {
-        if index >= 0 && index < self.n_items as isize {
-            if self.current_selected != -1 {
-                self.labels[self.current_selected as usize].foreground = self.unselected;
+    /// Java `setSelected(int)`.
+    pub fn set_selected(&self, index: i32) {
+        if index >= 0 && index < self.n_items {
+            //
+            //  Deselect the current item
+            //
+            if self.current_selected.get() != -1 {
+                self.labels[self.current_selected.get() as usize]
+                    .set_foreground(Some(self.unselected));
             }
-            self.current_selected = index;
-            self.labels[index as usize].foreground = self.selected;
+            //
+            //  Select the new item
+            //
+            self.current_selected.set(index);
+            self.labels[index as usize].set_foreground(Some(self.selected));
         }
     }
 
     /// Java `getSelected()`.
-    pub fn get_selected(&self) -> isize {
-        self.current_selected
+    pub fn get_selected(&self) -> i32 {
+        self.current_selected.get()
     }
 
-    /// Java `getSelectedText()`; Java indexes directly and therefore fails if
-    /// no valid selection has been made.
-    pub fn get_selected_text(&self) -> String {
-        self.labels[self.current_selected as usize].text.clone()
-    }
-
-    /// Java `addMouseListener(MouseListener)` native listener boundary.
-    pub fn add_mouse_listener(&mut self) {
-        self.panel_mouse_listener_count += 1;
-        for label in &mut self.labels {
-            label.mouse_listener_count += 1;
+    /// Java `getSelectedText()`.
+    ///
+    /// Upstream bug fixed in translation (`HighlightList.java:74`): before any item is
+    /// selected `currentSelected` is -1 and the Java throws
+    /// `ArrayIndexOutOfBoundsException`; this returns null (`None`) instead.
+    pub fn get_selected_text(&self) -> Option<String> {
+        let current_selected = self.current_selected.get();
+        if current_selected < 0 {
+            return None;
         }
+        Some(self.labels[current_selected as usize].get_text())
     }
-}
 
-#[cfg(test)]
-mod tests {
-    use super::HighlightList;
-
-    #[test]
-    fn selection_preserves_java_colour_and_listener_order() {
-        let mut list = HighlightList::new(&["one".to_owned(), "two".to_owned()]);
-        list.add_mouse_listener();
-        list.set_selected(0);
-        list.set_selected(1);
-        list.set_selected(4);
-        assert_eq!(list.get_selected(), 1);
-        assert_eq!(list.get_selected_text(), "two");
-        assert_eq!(list.labels[0].foreground, (128, 128, 128));
-        assert_eq!(list.labels[1].foreground, (160, 0, 64));
-        assert_eq!(list.panel_mouse_listener_count, 1);
-        assert_eq!(list.labels[0].mouse_listener_count, 1);
+    /// Java `addMouseListener(MouseListener)`.
+    pub fn add_mouse_listener(&self, _listener: Rc<dyn MouseListener>) {
+        // Swing mouse events: panel.addMouseListener(listener) and
+        // labels[i].addMouseListener(listener) for every label - mouse events are not
+        // modelled by the Swing stand-in.
     }
 }

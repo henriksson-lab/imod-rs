@@ -1,56 +1,35 @@
 //! Translation of `IMOD/raptor/suitesparse/cs_cholsol.c`.
 
-use super::Cs;
+use super::cs::{Cs, cs_csc};
 use super::cs_chol::cs_chol;
 use super::cs_ipvec::cs_ipvec;
 use super::cs_lsolve::cs_lsolve;
 use super::cs_ltsolve::cs_ltsolve;
+use super::cs_malloc::cs_malloc;
 use super::cs_pvec::cs_pvec;
 use super::cs_schol::cs_schol;
 
-/// C `cs_cholsol`: overwrites `right_hand_side` with the SPD solution `A\b`.
-pub fn cs_cholsol(order: i32, matrix: &Cs, right_hand_side: &mut [f64]) -> bool {
-    if !matrix.is_csc() || right_hand_side.len() < matrix.columns {
-        return false;
+/// `cs_cholsol(order, A, b)`: x=A\b where A is symmetric positive definite;
+/// b overwritten with solution.
+pub fn cs_cholsol(order: i32, a: &Cs, b: &mut [f64]) -> i32 {
+    if !cs_csc(a) {
+        return 0;
     }
-    let Some(symbolic) = cs_schol(order, matrix) else {
-        return false;
+    let n = a.n;
+    let s = cs_schol(order, a); // ordering and symbolic analysis
+    let nn = match s.as_ref() {
+        Some(s) => cs_chol(a, s), // numeric Cholesky factorization
+        None => None,
     };
-    let Some(numeric) = cs_chol(matrix, &symbolic) else {
-        return false;
-    };
-    let Some(factor) = numeric.l.as_ref() else {
-        return false;
-    };
-    let mut workspace = vec![0.0; matrix.columns];
-    if !cs_ipvec(symbolic.pinv.as_deref(), right_hand_side, &mut workspace)
-        || !cs_lsolve(factor, &mut workspace)
-        || !cs_ltsolve(factor, &mut workspace)
-        || !cs_pvec(symbolic.pinv.as_deref(), &workspace, right_hand_side)
-    {
-        return false;
+    let mut x: Vec<f64> = cs_malloc(n); // get workspace
+    let ok = (s.is_some() && nn.is_some()) as i32;
+    if ok != 0 {
+        let s = s.as_ref().unwrap();
+        let l = nn.as_ref().unwrap().l.as_ref().unwrap();
+        cs_ipvec(s.pinv.as_deref(), b, &mut x, n); // x = P*b
+        cs_lsolve(l, &mut x); // x = L\x
+        cs_ltsolve(l, &mut x); // x = L'\x
+        cs_pvec(s.pinv.as_deref(), &x, b, n); // b = P'*x
     }
-    true
-}
-
-#[cfg(test)]
-mod tests {
-    use super::cs_cholsol;
-    use crate::imod::raptor::suitesparse::Cs;
-    #[test]
-    fn cholsol_solves_a_positive_definite_system() {
-        let matrix = Cs {
-            nzmax: 3,
-            rows: 2,
-            columns: 2,
-            column_pointers: vec![0, 1, 3],
-            row_indices: vec![0, 0, 1],
-            values: vec![4., 1., 3.],
-            nz: -1,
-        };
-        let mut values = [6., 7.];
-        assert!(cs_cholsol(0, &matrix, &mut values));
-        assert!((values[0] - 1.0).abs() < 1.0e-12);
-        assert!((values[1] - 2.0).abs() < 1.0e-12);
-    }
+    ok
 }

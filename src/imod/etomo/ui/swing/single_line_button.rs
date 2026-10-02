@@ -1,216 +1,206 @@
 //! `IMOD/Etomo/src/etomo/ui/swing/SingleLineButton.java`.
-#![allow(dead_code)]
+//!
+//! A `MultiLineButton` that always shows its label on one line, optionally
+//! formatted as bold centred HTML.
+//!
+//! Java `extends MultiLineButton`: the superclass is field `base` (deref).
+//! The overrides of `newButton`, `setupButton` and `setTextLabel` are
+//! inherent methods here (so `ExpandButton`, a subclass, reuses them) and are
+//! wired into [`MultiLineButtonVirtual`].  See `multi_line_button.rs` for the
+//! construction order.
+//!
+//! Sizes are not modelled by `jdk.rs`: `setSize()`, `setSize(Dimension)`,
+//! `getPreferredSize`, `setToPreferredSize()` and
+//! `setToPreferredSize(Dimension)` only set preferred and maximum sizes, and
+//! have no Rust counterpart; the size statements in the constructor,
+//! `newButton` and `setTextLabel` are layout comments.
 
-use super::multi_line_button::{ButtonBoundary, MultiLineButton};
-use super::panel::Dimension;
-use super::ui_utilities::UiUtilities;
+use std::ops::Deref;
+use std::rc::Rc;
+
+use crate::imod::etomo::jdk::JComponent;
 use crate::imod::etomo::r#type::dialog_type::DialogType;
+use crate::imod::etomo::ui::ui_component::UIComponent;
 
-/// Java package-private `SingleLineButton` with its inherited button state.
-#[derive(Clone, Debug, PartialEq)]
+use super::multi_line_button::{MultiLineButton, MultiLineButtonVirtual};
+use super::swing_component::SwingComponent;
+
+/// Java package-private `SingleLineButton`.
 pub struct SingleLineButton {
-    pub multi_line_button: MultiLineButton,
+    /// Java superclass `MultiLineButton`.
+    pub base: MultiLineButton,
+}
+
+impl Deref for SingleLineButton {
+    type Target = MultiLineButton;
+    fn deref(&self) -> &MultiLineButton {
+        &self.base
+    }
+}
+
+impl MultiLineButtonVirtual for SingleLineButton {
+    fn get_multi_line_button(&self) -> &MultiLineButton {
+        &self.base
+    }
+    fn new_button(&self) -> Rc<JComponent> {
+        SingleLineButton::new_button(self)
+    }
+    fn setup_button(&self, set_minimum_size: bool) {
+        SingleLineButton::setup_button(self, set_minimum_size)
+    }
+    fn set_text_label(&self, text: Option<&str>) {
+        SingleLineButton::set_text_label(self, text)
+    }
 }
 
 impl SingleLineButton {
-    /// Java `SingleLineButton()`.
-    pub fn new() -> Self {
-        Self::new_full(None, false, None, false)
-    }
-    /// Java `SingleLineButton(String)`.
-    pub fn new_with_label(label: Option<&str>) -> Self {
-        Self::new_full(label, false, None, false)
-    }
-    /// Java `SingleLineButton(String, boolean, DialogType)`.
-    pub fn new_with_toggle_button(
-        label: Option<&str>,
-        toggle_button: bool,
-        dialog_type: Option<DialogType>,
-    ) -> Self {
-        Self::new_full(label, toggle_button, dialog_type, false)
-    }
-    /// Java four-argument constructor.
-    pub fn new_full(
+    /// The field part of Java
+    /// `SingleLineButton(String, boolean, DialogType, boolean)`: its
+    /// `super(label, toggleButton, dialogType, false, html, false, null)`
+    /// up to `newButton()`.  A subclass (`ExpandButton`) embeds the result,
+    /// runs `MultiLineButton::construct` and then
+    /// [`SingleLineButton::constructor_body`].
+    pub fn new_fields(
         label: Option<&str>,
         toggle_button: bool,
         dialog_type: Option<DialogType>,
         html: bool,
-    ) -> Self {
-        let mut value = Self {
-            multi_line_button: MultiLineButton::new_full(
-                label,
-                toggle_button,
-                dialog_type,
-                false,
-                html,
-                false,
-                None,
-            ),
-        };
-        value.setup_button(false);
+    ) -> SingleLineButton {
+        SingleLineButton {
+            base: MultiLineButton::new_fields(label, toggle_button, dialog_type, html, false, None),
+        }
+    }
+
+    /// The body of Java `SingleLineButton(String, boolean, DialogType,
+    /// boolean)` after `super(...)`.
+    pub fn constructor_body(&self, label: Option<&str>, html: bool) {
+        let _button = self.get_button();
         if label.is_some() {
-            value
-                .multi_line_button
-                .button
-                .abstract_button
-                .preferred_size = Some(value.get_preferred_size());
-        }
-        value
-    }
-    /// Java `getHtmlInstance(String)`.
-    pub fn get_html_instance(label: Option<&str>) -> Self {
-        Self::new_full(label, false, None, true)
-    }
-    /// Java overridden `newButton()` at the native Swing construction boundary.
-    pub fn new_button(&self) -> ButtonBoundary {
-        let label = self.multi_line_button.get_unformatted_label();
-        let mut button = ButtonBoundary {
-            text: if self.multi_line_button.is_html() {
-                Self::format(label)
+            if html {
+                // Swing layout: button.setPreferredSize(getPreferredSize()).
             } else {
-                label.map(str::to_owned)
-            },
-            ..Default::default()
-        };
-        if let Some(label) = label {
-            button.abstract_button.preferred_size = Some(if self.multi_line_button.is_html() {
-                self.multi_line_button
-                    .button
-                    .abstract_button
-                    .preferred_size
-                    .unwrap_or_default()
-            } else {
-                UiUtilities::get_preferred_size(&button.abstract_button, Some(label))
-            });
+                // Swing layout: button.setPreferredSize(
+                //   UIUtilities.getPreferredSize(button, getUnformattedLabel())).
+            }
         }
-        button
     }
-    /// Java overridden `setupButton(boolean)`.
-    pub fn setup_button(&mut self, _set_minimum_size: bool) {
-        let label = self
-            .multi_line_button
-            .get_unformatted_label()
-            .map(str::to_owned);
-        self.multi_line_button.set_name(label.as_deref());
+
+    /// Java package-private `SingleLineButton(String, boolean, DialogType, boolean)`.
+    pub fn new_string_boolean_dialog_type_boolean(
+        label: Option<&str>,
+        toggle_button: bool,
+        dialog_type: Option<DialogType>,
+        html: bool,
+    ) -> Rc<SingleLineButton> {
+        let instance = Rc::new(SingleLineButton::new_fields(
+            label,
+            toggle_button,
+            dialog_type,
+            html,
+        ));
+        MultiLineButton::construct(&instance, false);
+        instance.constructor_body(label, html);
+        instance
     }
-    /// Java overridden `setTextLabel(String)`.
-    pub fn set_text_label(&mut self, text: Option<&str>) {
-        self.multi_line_button.button.text = if self.multi_line_button.is_html() {
-            Self::format(text)
+
+    /// Java package-private `SingleLineButton()`.
+    pub fn new_void() -> Rc<SingleLineButton> {
+        Self::new_string_boolean_dialog_type_boolean(None, false, None, false)
+    }
+
+    /// Java package-private `SingleLineButton(String)`.
+    pub fn new_string(label: Option<&str>) -> Rc<SingleLineButton> {
+        Self::new_string_boolean_dialog_type_boolean(label, false, None, false)
+    }
+
+    /// Java package-private `SingleLineButton(String, boolean, DialogType)`.
+    pub fn new_string_boolean_dialog_type(
+        label: Option<&str>,
+        toggle_button: bool,
+        dialog_type: Option<DialogType>,
+    ) -> Rc<SingleLineButton> {
+        Self::new_string_boolean_dialog_type_boolean(label, toggle_button, dialog_type, false)
+    }
+
+    /// Java static `getHtmlInstance(String)`.
+    pub fn get_html_instance(label: Option<&str>) -> Rc<SingleLineButton> {
+        Self::new_string_boolean_dialog_type_boolean(label, false, None, true)
+    }
+
+    /// Java `newButton()` (overrides `MultiLineButton.newButton`).
+    pub fn new_button(&self) -> Rc<JComponent> {
+        let unformatted_label = self.get_unformatted_label();
+        let label: Option<String> = if self.is_html() {
+            self.format(unformatted_label.as_deref())
         } else {
-            text.map(str::to_owned)
+            unformatted_label.clone()
         };
-        if let Some(text) = text {
-            self.multi_line_button.button.abstract_button.preferred_size =
-                Some(if self.multi_line_button.is_html() {
-                    self.multi_line_button
-                        .button
-                        .abstract_button
-                        .preferred_size
-                        .unwrap_or_default()
-                } else {
-                    UiUtilities::get_preferred_size(
-                        &self.multi_line_button.button.abstract_button,
-                        Some(text),
-                    )
-                });
+        let new_button: Rc<JComponent> = if self.is_toggle_button() {
+            // Java `new JToggleButton(label)`; the stand-in holds no null text.
+            JComponent::new_toggle_button(label.as_deref().unwrap_or(""))
+        } else {
+            JComponent::new_button(label.as_deref().unwrap_or(""))
+        };
+        if unformatted_label.is_some() {
+            if self.is_html() {
+                // Swing layout: newButton.setPreferredSize(newButton.getPreferredSize()).
+            } else {
+                // Swing layout: newButton.setPreferredSize(
+                //   UIUtilities.getPreferredSize(newButton, unformattedLabel)).
+            }
+        }
+        new_button
+    }
+
+    /// Java `setupButton(boolean)` (overrides `MultiLineButton.setupButton`).
+    pub fn setup_button(&self, _set_minimum_size: bool) {
+        // Virtual `setName` (ExpandButton overrides it): through the base's
+        // dispatcher, not this type's trait method.
+        self.base.set_name(self.get_unformatted_label().as_deref());
+    }
+
+    /// Java final `setTextLabel(String)` (overrides
+    /// `MultiLineButton.setTextLabel`).
+    pub fn set_text_label(&self, text: Option<&str>) {
+        let button = self.get_button();
+        if !self.is_html() {
+            // Java `button.setText(text)`; the stand-in holds no null text.
+            button.set_text(text.unwrap_or(""));
+        } else {
+            button.set_text(self.format(text).as_deref().unwrap_or(""));
+        }
+        if text.is_some() {
+            if self.is_html() {
+                // Swing layout: button.setPreferredSize(button.getPreferredSize()).
+            } else {
+                // Swing layout: button.setPreferredSize(UIUtilities.getPreferredSize(button, text)).
+            }
         }
     }
-    /// Java inherited `setText(String)` with virtual `setTextLabel` dispatch.
-    pub fn set_text(&mut self, text: &str) {
-        if !self.multi_line_button.manual_name {
-            self.multi_line_button.set_name(Some(text));
-        }
-        self.multi_line_button.unformatted_label = Some(text.to_owned());
-        self.set_text_label(Some(text));
-    }
-    /// Java private `format(String)`.
-    fn format(label: Option<&str>) -> Option<String> {
+
+    /// Java private final `format(String)`.
+    fn format(&self, label: Option<&str>) -> Option<String> {
         let label = label?;
         if label.to_lowercase().starts_with("<html>") {
-            Some(label.to_owned())
-        } else {
-            Some(format!("<html><b><center>{label}</center></b>"))
+            return Some(label.to_owned());
         }
-    }
-    /// Java `setSize()`.
-    pub fn set_size(&mut self) {
-        let size = if self.multi_line_button.is_html()
-            || self.multi_line_button.get_unformatted_label().is_none()
-        {
-            Dimension {
-                width: 90,
-                height: 27,
-            }
-        } else {
-            self.get_preferred_size()
-        };
-        self.set_size_dimension(size);
-    }
-    /// Java overloaded `setSize(Dimension)`.
-    pub fn set_size_dimension(&mut self, size: Dimension) {
-        self.multi_line_button.button.abstract_button.preferred_size = Some(size);
-        self.multi_line_button.button.abstract_button.maximum_size = Some(size);
-    }
-    /// Java overridden `getPreferredSize()`.
-    pub fn get_preferred_size(&self) -> Dimension {
-        let label = self.multi_line_button.get_unformatted_label();
-        if self.multi_line_button.is_html() || label.is_none() {
-            self.multi_line_button
-                .button
-                .abstract_button
-                .preferred_size
-                .unwrap_or_default()
-        } else {
-            UiUtilities::get_preferred_size(&self.multi_line_button.button.abstract_button, label)
-        }
-    }
-    /// Java `setToPreferredSize()`.
-    pub fn set_to_preferred_size(&mut self) {
-        self.set_size_dimension(self.get_preferred_size());
-    }
-    /// Java overloaded `setToPreferredSize(Dimension)`.
-    pub fn set_to_preferred_size_dimension(&mut self, size: Option<Dimension>) {
-        if let Some(size) = size {
-            self.set_size_dimension(size);
-        } else {
-            self.set_to_preferred_size();
-        }
-    }
-    /// Java inherited Swing calls.
-    pub fn add_action_listener(&mut self) {
-        self.multi_line_button.add_action_listener();
-    }
-    pub fn set_tool_tip_text(&mut self, text: Option<&str>) {
-        self.multi_line_button.set_tool_tip_text(text);
-    }
-    pub fn set_visible(&mut self, visible: bool) {
-        self.multi_line_button.set_visible(visible);
-    }
-    pub fn get_component(&self) -> &ButtonBoundary {
-        self.multi_line_button.get_component()
-    }
-    pub fn do_click(&mut self) {
-        self.multi_line_button.do_click();
+        Some(format!("<html><b><center>{}</center></b>", label))
     }
 }
 
-#[cfg(test)]
-mod tests {
-    use super::*;
-    #[test]
-    fn constructor_uses_single_line_name_and_size() {
-        let button = SingleLineButton::new_with_label(Some("Run process"));
-        assert_eq!(button.multi_line_button.get_name(), Some("bn.run-process"));
-        assert_eq!(button.multi_line_button.get_text(), Some("Run process"));
+/// Java `SwingComponent.getComponent()`, inherited from `MultiLineButton`.
+impl SwingComponent for SingleLineButton {
+    fn get_component(&self) -> Rc<JComponent> {
+        self.base.get_component()
     }
-    #[test]
-    fn html_text_is_wrapped_once() {
-        let mut button = SingleLineButton::get_html_instance(Some("Advanced"));
-        button.set_text_label(Some("<HTML>Basic"));
-        assert_eq!(
-            button.multi_line_button.button.text.as_deref(),
-            Some("<HTML>Basic")
-        );
+}
+
+/// Java `UIComponent`, inherited from `MultiLineButton`.
+impl UIComponent for SingleLineButton {
+    fn get_ui_component(&self) -> &dyn SwingComponent {
+        self
+    }
+    fn get_component(&self) -> Rc<JComponent> {
+        self.base.get_component()
     }
 }

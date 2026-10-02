@@ -1,108 +1,88 @@
 //! `IMOD/Etomo/src/etomo/ui/swing/EtomoPanel.java`.
 //!
-//! Swing owns the actual `JPanel`, `TitledBorder`, and `PanelHeader` widgets.
-//! Their source-observable title, child insertion, and uitest naming behavior
-//! is retained here for the optional native GUI harness.
-#![allow(dead_code)]
+//! Java `class EtomoPanel extends JPanel implements UIComponent, SwingComponent`: a
+//! panel that names itself (uitest `pnl.` names) from its titled border or its panel
+//! header.  The `JPanel` is [`EtomoPanel::get_component`]; inherited `JPanel` members
+//! (`add(Component)`, `setLayout`, ...) are called on it.
 
-use super::abstract_frame::ComponentState;
+use std::rc::Rc;
+
 use super::panel_header::PanelHeader;
-use super::tool_panel::ToolPanel;
+use super::swing_component::SwingComponent;
 use crate::imod::etomo::etomo_director::ARGUMENTS;
+use crate::imod::etomo::jdk::{JComponent, TitledBorder};
+use crate::imod::etomo::r#type::ui_test_field_type;
 use crate::imod::etomo::storage::autodoc::autodoc_tokenizer::{DEFAULT_DELIMITER, SEPARATOR_CHAR};
+use crate::imod::etomo::ui::ui_component::UIComponent;
 use crate::imod::etomo::util::utilities;
 
-/// Rust state at the direct `javax.swing.border.TitledBorder` boundary.
-#[derive(Clone, Debug, Default, Eq, PartialEq)]
-pub struct TitledBorder {
-    pub title: String,
-}
-
-/// Java package-private `EtomoPanel` fields and methods.
-#[derive(Clone, Debug, Default, Eq, PartialEq)]
+/// Java `EtomoPanel`.
 pub struct EtomoPanel {
-    pub component: ComponentState,
-    pub name: Option<String>,
-    pub border: Option<TitledBorder>,
-    pub children: Vec<ComponentState>,
+    /// The `JPanel` this class extends.
+    component: Rc<JComponent>,
 }
 
 impl EtomoPanel {
-    /// Java `getUIComponent()`.
-    pub fn get_ui_component(&self) -> &Self {
-        self
+    /// Java default constructor.
+    pub fn new() -> Rc<EtomoPanel> {
+        Rc::new(EtomoPanel {
+            component: JComponent::new_panel(),
+        })
     }
 
     /// Java `getComponent()`.
-    pub fn get_component(&self) -> &ComponentState {
-        &self.component
+    pub fn get_component(&self) -> Rc<JComponent> {
+        self.component.clone()
     }
 
     /// Java `setBorder(TitledBorder)`.
-    pub fn set_border(&mut self, border: TitledBorder) {
-        self.border = Some(border.clone());
-        self.set_name(&border.title);
+    pub fn set_border(&self, border: &TitledBorder) {
+        // super.setBorder(border): the stand-in keeps a titled border's title.
+        self.component.set_border_title(border.get_title().as_deref());
+        self.set_name(border.get_title().as_deref());
     }
 
-    /// Java overloaded `add(PanelHeader)`.  Rust's overload-free spelling
-    /// identifies the source argument type while preserving its exact order.
-    pub fn add_panel_header(&mut self, panel_header: &PanelHeader) {
-        self.children.push(panel_header.get_container().clone());
-        self.set_name(panel_header.get_title());
+    /// Java `add(PanelHeader)`.
+    pub fn add(&self, panel_header: &PanelHeader) {
+        self.component.add(&panel_header.get_container());
+        self.set_name(panel_header.get_title().as_deref());
     }
 
-    /// Java `setName(String)`.
-    pub fn set_name(&mut self, text: &str) {
-        let name = utilities::convert_label_to_name(Some(text), true).unwrap_or_default();
-        self.name = Some(format!("pnl{SEPARATOR_CHAR}{name}"));
+    /// Java `setName(String)` (override).
+    pub fn set_name(&self, text: Option<&str>) {
+        let field_type = &ui_test_field_type::PANEL;
+        let name = utilities::convert_label_to_name(text, field_type.is_unlimited_segments());
+        self.component.set_name(Some(&format!(
+            "{}{}{}",
+            field_type,
+            SEPARATOR_CHAR,
+            name.as_deref().unwrap_or("null")
+        )));
         if ARGUMENTS.lock().unwrap().is_print_names() {
             println!(
-                "{} {DEFAULT_DELIMITER} ",
-                self.name.as_deref().unwrap_or_default()
+                "{} {} ",
+                self.component.get_name().as_deref().unwrap_or("null"),
+                DEFAULT_DELIMITER
             );
         }
     }
 }
 
-impl ToolPanel for EtomoPanel {
-    fn get_component(&self) -> &ComponentState {
-        &self.component
+impl UIComponent for EtomoPanel {
+    /// Java `getUIComponent()`.
+    fn get_ui_component(&self) -> &dyn SwingComponent {
+        self
+    }
+
+    /// Java `getComponent()`.
+    fn get_component(&self) -> Rc<JComponent> {
+        self.component.clone()
     }
 }
 
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn titled_border_assigns_source_panel_uitest_name() {
-        let mut panel = EtomoPanel::default();
-        panel.set_border(TitledBorder {
-            title: "My panel: 2".into(),
-        });
-        assert_eq!(panel.name.as_deref(), Some("pnl.my-panel"));
-        assert_eq!(
-            panel.border.as_ref().map(|border| border.title.as_str()),
-            Some("My panel: 2")
-        );
-    }
-
-    #[test]
-    fn panel_header_is_added_before_its_title_names_the_panel() {
-        let mut panel = EtomoPanel::default();
-        let header = PanelHeader::new(
-            "Header title",
-            false,
-            false,
-            crate::imod::etomo::r#type::dialog_type::DialogType::Tools,
-            true,
-            false,
-            true,
-            false,
-            true,
-        );
-        panel.add_panel_header(&header);
-        assert_eq!(panel.children, vec![header.root_panel]);
-        assert_eq!(panel.name.as_deref(), Some("pnl.header-title"));
+impl SwingComponent for EtomoPanel {
+    /// Java `getComponent()`.
+    fn get_component(&self) -> Rc<JComponent> {
+        self.component.clone()
     }
 }

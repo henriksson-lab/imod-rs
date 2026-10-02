@@ -63,18 +63,34 @@ impl EmergencyMonitor {
             None => return,
             Some(lock_exception) => lock_exception,
         };
-        let mut main_panel: Option<std::convert::Infallible> = None;
-        if self.manager.is_some() && !stack_trace.is_starting() {
-            // TODO(unit): needs etomo/ui/swing/MainPanel.java - `mainPanel =
-            // manager.getMainPanel()`.  `BaseManager.getMainPanel` returns that Swing
-            // class, so the translated abstract method can only produce `None`.
-            main_panel = self.manager.unwrap().get_main_panel();
+        // `mainPanel = manager.getMainPanel()` and the bar-string update are Swing
+        // work, done on the event dispatch thread; `true` when a main panel took it.
+        let mut shown = false;
+        if let Some(manager) = self.manager
+            && !stack_trace.is_starting()
+        {
+            let action = lock_exception.get_action();
+            let file_name = lock_exception.get_file_name();
+            let to_file_name = lock_exception.get_to_file_name();
+            let axis_id = self.axis_id.unwrap_or(AxisID::Only);
+            shown = crate::imod::etomo::util::event_queue::invoke_and_wait(move || {
+                let Some(main_panel) = manager.get_main_panel() else {
+                    return false;
+                };
+                main_panel
+                    .main_panel()
+                    .set_emergency_monitor_bar_string_standard_bar_string_string_string_boolean_boolean_axis_id(
+                        action,
+                        Some(&file_name),
+                        to_file_name.as_deref(),
+                        false,
+                        true,
+                        axis_id,
+                    );
+                true
+            });
         }
-        if main_panel.is_some() {
-            // TODO(unit): needs etomo/ui/swing/MainPanel.java -
-            // `mainPanel.setEmergencyMonitorBarString(lockException.getAction(),
-            // lockException.getFileName(), lockException.getToFileName(), false, true,
-            // axisID)`.
+        if shown {
         } else {
             eprintln!(
                 "\n{}\n",

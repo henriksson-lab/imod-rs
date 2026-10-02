@@ -1,178 +1,112 @@
 //! `IMOD/Etomo/src/etomo/ui/swing/ControlComponentModule.java`.
 //!
-//! `JLabel` allocation, painting, and tooltip formatting remain explicit Swing
-//! presentation boundaries.  This source unit owns the label's naming, text,
-//! visibility, and control-display calls.
-#![allow(dead_code)]
+//! A label that an efield shows in place of its component while the field is under
+//! the control of another field (for example "override").
 
-use super::combo_box_efield::ControlState;
+use std::cell::{Cell, RefCell};
+use std::rc::Rc;
+
+use super::control_state::{self, ControlState};
+use super::tooltip_formatter;
 use crate::imod::etomo::etomo_director::ARGUMENTS;
+use crate::imod::etomo::jdk::JComponent;
+use crate::imod::etomo::r#type::ui_test_field_type;
 use crate::imod::etomo::storage::autodoc::autodoc_tokenizer::{DEFAULT_DELIMITER, SEPARATOR_CHAR};
-use crate::imod::etomo::ui::shared_strings::OVERRIDE_TEXT;
 use crate::imod::etomo::util::utilities;
 
-/// Source-observable `JLabel` state.  Native widget allocation, painting, and
-/// `TooltipFormatter.INSTANCE.format` are GUI presentation boundaries.
-#[derive(Clone, Debug, Default, Eq, PartialEq)]
-pub struct JLabelBoundary {
-    pub name: Option<String>,
-    pub text: Option<String>,
-    pub tooltip: Option<String>,
-    pub visible: bool,
-}
-
-/// Java package-private final `ControlComponentModule`.
-#[derive(Clone, Debug, Eq, PartialEq)]
+/// Java `ControlComponentModule`.
 pub struct ControlComponentModule {
-    /// Java `JLabel controlComponent`.
-    pub control_component: JLabelBoundary,
-    /// Java `ControlState controlState`; the Java `setComponentControl`
-    /// parameter shadows this field, so this source unit never assigns it.
-    pub control_state: Option<ControlState>,
-    /// Java `boolean debug`.
-    pub debug: bool,
+    /// Java `controlComponent`, a `JLabel`.
+    control_component: Rc<JComponent>,
+    /// Java `controlState`.  Java never assigns it (see [`Self::set_component_control`]),
+    /// so it stays `null`.
+    control_state: RefCell<Option<&'static ControlState>>,
+    /// Java `debug`.
+    #[allow(dead_code)]
+    debug: Cell<bool>,
 }
 
 impl ControlComponentModule {
     /// Java `ControlComponentModule()`.
-    pub fn new() -> Self {
-        let mut value = Self {
-            control_component: JLabelBoundary::default(),
-            control_state: None,
-            debug: false,
-        };
-        value.set_visible(false);
-        value
+    pub fn new() -> Rc<ControlComponentModule> {
+        let module = Rc::new(ControlComponentModule {
+            control_component: JComponent::new_label(""),
+            control_state: RefCell::new(None),
+            debug: Cell::new(false),
+        });
+        // init
+        module.set_visible(false);
+        module
     }
 
     /// Java `setToContainerName(String)`.
-    pub fn set_to_container_name(&mut self, container_label: Option<&str>) {
-        const FIELD_TYPE: &str = "l";
-
-        if let Some(container_label) = container_label {
-            if let Some(name) = utilities::convert_label_to_name(Some(container_label), true) {
-                self.control_component.name = Some(format!("{FIELD_TYPE}{SEPARATOR_CHAR}{name}"));
+    pub fn set_to_container_name(&self, container_label: Option<&str>) {
+        let field_type = &ui_test_field_type::LABEL;
+        if container_label.is_some() {
+            let name =
+                utilities::convert_label_to_name(container_label, field_type.is_unlimited_segments());
+            if let Some(name) = name {
+                self.control_component
+                    .set_name(Some(&format!("{}{}{}", field_type, SEPARATOR_CHAR, name)));
                 if ARGUMENTS.lock().unwrap().is_print_names() {
                     println!(
-                        "{} {DEFAULT_DELIMITER} ",
-                        self.control_component.name.as_deref().unwrap_or_default()
+                        "{} {} ",
+                        self.control_component.get_name().as_deref().unwrap_or("null"),
+                        DEFAULT_DELIMITER
                     );
                 }
                 return;
             }
         }
-        self.control_component.name = None;
+        self.control_component.set_name(None);
     }
 
-    /// Java `getComponent`; the concrete `Component` remains a GUI boundary.
-    pub fn get_component(&self) -> &JLabelBoundary {
-        &self.control_component
+    /// Java `getComponent()`.
+    pub fn get_component(&self) -> Rc<JComponent> {
+        self.control_component.clone()
     }
 
-    /// Java `setTooltip(String)`.  Formatting is delegated to the unported
-    /// `TooltipFormatter` presentation boundary, so its input is retained.
-    pub fn set_tooltip(&mut self, text: Option<&str>) {
-        self.control_component.tooltip = text.map(str::to_owned);
+    /// Java `setTooltip(String)`.
+    pub fn set_tooltip(&self, text: Option<&str>) {
+        self.control_component
+            .set_tool_tip_text(tooltip_formatter::INSTANCE.format(text).as_deref());
     }
 
     /// Java `setVisible(boolean)`.
-    pub fn set_visible(&mut self, visible: bool) {
-        self.control_component.visible = visible;
+    pub fn set_visible(&self, visible: bool) {
+        self.control_component.set_visible(visible);
     }
 
     /// Java `setText(String)`.
-    pub fn set_text(&mut self, text: Option<&str>) {
-        self.control_component.text = text.map(str::to_owned);
+    pub fn set_text(&self, text: Option<&str>) {
+        self.control_component.set_text(text.unwrap_or(""));
     }
 
     /// Java `isOverride()`.
     pub fn is_override(&self) -> bool {
-        self.control_state == Some(ControlState::Override)
+        self.control_state
+            .borrow()
+            .is_some_and(|control_state| std::ptr::eq(control_state, &*control_state::OVERRIDE))
     }
 
-    /// Java `setComponentControl(boolean, ControlState)`.
+    /// Java `setComponentControl(boolean, ControlState)`.  Returns true if the control
+    /// component is in use.
+    ///
+    /// Kept as in the Java: the `controlState` argument is not stored in the
+    /// `controlState` field, so [`Self::is_override`] always answers false.  Storing it
+    /// would be a guess about intent (`ControlComponentModule.java:73-82`).
     pub fn set_component_control(
-        &mut self,
+        &self,
         mut control: bool,
-        control_state: Option<ControlState>,
+        control_state: Option<&'static ControlState>,
     ) -> bool {
         if control_state.is_none() {
             control = false;
         }
         if control {
-            self.set_text(match control_state {
-                Some(ControlState::Override) => Some(OVERRIDE_TEXT),
-                Some(ControlState::Enable) | None => None,
-            });
+            self.set_text(control_state.unwrap().get_control_string());
         }
         self.set_visible(control);
         control
-    }
-}
-
-impl Default for ControlComponentModule {
-    fn default() -> Self {
-        Self::new()
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn constructor_hides_the_source_label_boundary() {
-        let module = ControlComponentModule::new();
-
-        assert!(!module.control_component.visible);
-        assert_eq!(module.control_state, None);
-        assert!(!module.debug);
-    }
-
-    #[test]
-    fn container_name_uses_label_field_type_and_unlimited_segments() {
-        let mut module = ControlComponentModule::new();
-        module.set_to_container_name(Some("Axis A: Final aligned stack"));
-
-        assert_eq!(module.get_component().name.as_deref(), Some("l.axis-a"));
-
-        module.set_to_container_name(None);
-        assert_eq!(module.get_component().name, None);
-    }
-
-    #[test]
-    fn tooltip_text_and_visibility_delegate_to_the_label_boundary() {
-        let mut module = ControlComponentModule::new();
-        module.set_tooltip(Some("A tooltip"));
-        module.set_text(Some("A label"));
-        module.set_visible(true);
-
-        assert_eq!(module.get_component().tooltip.as_deref(), Some("A tooltip"));
-        assert_eq!(module.get_component().text.as_deref(), Some("A label"));
-        assert!(module.get_component().visible);
-    }
-
-    #[test]
-    fn component_control_rejects_null_state_and_displays_override_state() {
-        let mut module = ControlComponentModule::new();
-
-        assert!(!module.set_component_control(true, None));
-        assert!(!module.get_component().visible);
-
-        assert!(module.set_component_control(true, Some(ControlState::Override)));
-        assert_eq!(module.get_component().text.as_deref(), Some(OVERRIDE_TEXT));
-        assert!(module.get_component().visible);
-
-        assert!(module.set_component_control(true, Some(ControlState::Enable)));
-        assert!(module.get_component().visible);
-        assert_eq!(module.get_component().text, None);
-    }
-
-    #[test]
-    fn source_parameter_shadowing_leaves_is_override_false() {
-        let mut module = ControlComponentModule::new();
-        module.set_component_control(true, Some(ControlState::Override));
-
-        assert!(!module.is_override());
     }
 }

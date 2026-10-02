@@ -1,0 +1,167 @@
+# imod-rs native golden manifest for fixtures/point2model; see fixtures/README.md.
+# Regenerate with fixtures/regen-golden.sh point2model; do not edit by hand.
+sha256 a96e580a31a752e96aa94742f7af53c482a5d4613dc5508357890fe354b13638 3820 golden/afs.mod
+text 2 golden/afs.rc
+0
+
+text 53 golden/afs.stdout
+Model created with 1 objects, 80 contours, 73 points
+
+sha256 b7d67bbc87865cb56ed23ae1c8b42d108e1eb89a1f172adee990cb512d0e0a99 988 golden/c5full.mod
+text 2 golden/c5full.rc
+0
+
+text 52 golden/c5full.stdout
+Model created with 2 objects, 6 contours, 18 points
+
+sha256 413a888b9bde2236bba7d94b0d42e37545b6c8d2e1a3775fc3485e65de9c5248 988 golden/comma.mod
+text 2 golden/comma.rc
+0
+
+text 52 golden/comma.stdout
+Model created with 2 objects, 6 contours, 18 points
+
+text 2 golden/err_count.rc
+1
+
+text 68 golden/err_count.stdout
+ERROR: point2model - Every line should have 5 entries; line 2 has 4
+
+text 2 golden/err_imgpix.rc
+1
+
+text 75 golden/err_imgpix.stdout
+ERROR: point2model - You cannot use -image together with -pixel or -origin
+
+text 2 golden/err_nofile.rc
+1
+
+text 58 golden/err_nofile.stdout
+ERROR: point2model - Error opening input file missing.txt
+
+text 2 golden/err_noin.rc
+0
+
+sha256 954b482be150852401b9bcd1e71f2ef2e4b197827e6a9c78244b9649bbfef16b 3201 golden/err_noin.stdout
+text 2 golden/err_number.rc
+1
+
+text 94 golden/err_number.stdout
+ERROR: point2model - The point file has contour numbers and the -number option cannot be used
+
+text 2 golden/err_obj.rc
+1
+
+text 85 golden/err_obj.stdout
+ERROR: point2model - Illegal object or contour number (object 0, contour 1 at line 2
+
+text 2 golden/err_openscat.rc
+1
+
+text 63 golden/err_openscat.stdout
+ERROR: point2model - Only one of -open or -scat may be entered
+
+text 2 golden/err_short.rc
+1
+
+text 71 golden/err_short.stdout
+ERROR: point2model - There must be at least 2 values on the first line
+
+sha256 dbb7b5a4a803bae03ef8d8d755689e966fb31baeed999d9b51b295bd8ef6bdf6 692 golden/image.mod
+text 2 golden/image.rc
+0
+
+text 52 golden/image.stdout
+Model created with 1 objects, 1 contours, 12 points
+
+sha256 f6b7c81ad77a3d11c0231ff49647a7f45b757002c0f7c80abb99208bc3db000f 744 golden/labels.mod
+text 2 golden/labels.rc
+0
+
+text 51 golden/labels.stdout
+Model created with 1 objects, 2 contours, 6 points
+
+sha256 0473effca3c3854c5c55a65c70db647529ab40a963496bcce1a94d3da8b661ce 504 golden/nonl.mod
+text 2 golden/nonl.rc
+0
+
+text 51 golden/nonl.stdout
+Model created with 1 objects, 1 contours, 3 points
+
+sha256 db4705ce92d4cb90155fed478a5e032a8543c3c676067450fb1bc859dad2d6cd 1368 golden/objonly.mod
+text 2 golden/objonly.rc
+0
+
+text 53 golden/objonly.stdout
+Model created with 2 objects, 25 contours, 18 points
+
+sha256 f61bee11dd1b87731269b87f19c4895c29110615485d650c0a8bcd285986a7f6 652 golden/open.mod
+text 2 golden/open.rc
+0
+
+text 52 golden/open.stdout
+Model created with 1 objects, 3 contours, 12 points
+
+sha256 378fd09ca9803cf4e9214f32f02b219aee1596538369f3053e10825eaa8d5a03 692 golden/pixel.mod
+text 2 golden/pixel.rc
+0
+
+text 52 golden/pixel.stdout
+Model created with 1 objects, 1 contours, 12 points
+
+sha256 cf3eba802d2556177c852c5efa1d6ccdd91c472450c0e07c6b2db5bd2b6c6077 612 golden/plain.mod
+text 2 golden/plain.rc
+0
+
+text 52 golden/plain.stdout
+Model created with 1 objects, 1 contours, 12 points
+
+sha256 a5a9db9e07e199dd9acc6fb2bcc24465a9aaa5736475ed77f97d29da19076f90 652 golden/planar.mod
+text 2 golden/planar.rc
+0
+
+text 52 golden/planar.stdout
+Model created with 1 objects, 3 contours, 12 points
+
+sha256 187691724ff630b923cd6dd128b156001cf715876de2ff1a60911deaf8b01efd 612 golden/scat.mod
+text 2 golden/scat.rc
+0
+
+text 52 golden/scat.stdout
+Model created with 1 objects, 1 contours, 12 points
+
+sha256 96be8c044e8e4cd8396db2b7d542749ec82ca48ffe1d04258aa7a0df09d545b6 644 golden/sizes.mod
+text 2 golden/sizes.rc
+0
+
+text 51 golden/sizes.stdout
+Model created with 1 objects, 1 contours, 5 points
+
+sha256 d6fd613eb458b2171ba00203a8ca9773d77716d6fe04562b26ef070a67a82b2f 612 golden/skip.mod
+text 2 golden/skip.rc
+0
+
+text 52 golden/skip.stdout
+Model created with 1 objects, 1 contours, 12 points
+
+sha256 99a93b3c0af6f0d169d66fb1ab7c2a7ea5e8a026d6f7f86d0cd9637b2940f720 580 golden/times.mod
+text 2 golden/times.rc
+0
+
+text 51 golden/times.stdout
+Model created with 1 objects, 3 contours, 6 points
+
+sha256 3a11069ef15f0280d759c94396db465d99d7dbc51ea7eff8eafd5ed9f66d003d 616 golden/vals.mod
+text 2 golden/vals.rc
+0
+
+text 51 golden/vals.stdout
+Model created with 1 objects, 1 contours, 5 points
+
+sha256 9d62d7aa2b6d75e2a7cf4d7d313ce5e28bb38617fc759c5e5a6b2bf020c8300c 612 golden/volume.mod
+text 2 golden/volume.rc
+0
+
+text 52 golden/volume.stdout
+Model created with 1 objects, 1 contours, 12 points
+

@@ -7,7 +7,7 @@
 // through `ActionListener`.  The owning frame decides what a named action
 // means; these widgets neither launch processes nor mutate manager state.
 
-import { EtomoStyle } from "../../etomo-ui-common/ui/widgets.slint";
+import { EtomoStyle, EtomoBridge, BridgedButton } from "../../etomo-ui-common/ui/widgets.slint";
 
 // `Colors` (`Colors.java`): the per-interface panel backgrounds
 // `AxisProcessPanel.setBackground` is called with, and the process-state
@@ -60,8 +60,14 @@ export component SimpleButton inherits Rectangle {
         text: root.text;
         horizontal-alignment: center;
         vertical-alignment: center;
-        color: root.enabled ? EtomoStyle.text : EtomoStyle.disabled-text;
+        color: area.shown-enabled ? EtomoStyle.text : EtomoStyle.disabled-text;
         font-size: EtomoStyle.font-size-pt * 1px;
+    }
+    // Wired: `SimpleButton.setName(text)` names it "bn." + the label.
+    area := BridgedButton {
+        kind: "bn";
+        label: root.text;
+        default-enabled: root.enabled;
     }
 }
 
@@ -125,10 +131,22 @@ export component ProgressPanel inherits VerticalLayout {
     // `JProgressBar` starts indeterminate-off at value 0 (`stopped = true`,
     // `ProgressPanel.java:60`), so the bar is drawn empty.
     in property <float> fraction: 0.0;
+    // Wired: which of the showing progress panels this is ("#1" axis A or
+    // single, "#2" axis B), for the bridge's same-name lookup.
+    in property <string> occurrence: "#1";
+    property <string> shown-label: EtomoBridge.wired
+        ? EtomoBridge.text-value("raw", "the-progress-bar-label" + root.occurrence, root.label, EtomoBridge.generation)
+        : root.label;
+    property <string> shown-bar-string: EtomoBridge.wired
+        ? EtomoBridge.text-value("pb", "the-progress-bar" + root.occurrence, root.bar-string, EtomoBridge.generation)
+        : root.bar-string;
+    property <float> shown-fraction: EtomoBridge.wired
+        ? EtomoBridge.text-value("pbf", "the-progress-bar" + root.occurrence, root.fraction, EtomoBridge.generation).to-float()
+        : root.fraction;
     spacing: 0px;
     Text {
         // `taskLabel` (`ProgressPanel.java:42`), name `the-progress-bar-label`.
-        text: root.label;
+        text: root.shown-label;
         color: EtomoStyle.text;
         font-size: EtomoStyle.font-size-pt * 1px;
     }
@@ -143,12 +161,13 @@ export component ProgressPanel inherits VerticalLayout {
         Rectangle {
             x: 1px;
             y: 1px;
-            width: (parent.width - 2px) * root.fraction;
+            // Indeterminate (-1): a third of the bar.
+            width: (parent.width - 2px) * (root.shown-fraction < 0 ? 0.33 : root.shown-fraction);
             height: parent.height - 2px;
             background: #6c8ebf;
         }
         Text {
-            text: root.bar-string;
+            text: root.shown-bar-string;
             horizontal-alignment: center;
             vertical-alignment: center;
             font-size: EtomoStyle.font-size-pt * 1px;
@@ -206,17 +225,28 @@ export component ProcessControlPanel inherits Rectangle {
     // 2 "Complete".
     in property <int> state: 0;
     in property <bool> selected: false;
+    // Wired (`slint_bridge.rs`): the translated `ProcessControlPanel` button's
+    // state (kind "pcp": its `ColoredStateText` index) and its click.
+    property <int> shown-state: EtomoBridge.wired
+        ? EtomoBridge.text-value("pcp", root.label, root.state, EtomoBridge.generation).to-float()
+        : root.state;
+    property <bool> shown-selected: EtomoBridge.wired
+        ? EtomoBridge.bool-value("pcp", root.label, root.selected, EtomoBridge.generation)
+        : root.selected;
     height: 44px;
     background: transparent;
     SimpleToggleButton {
         width: 100%;
         height: 100%;
-        selected: root.selected;
+        selected: root.shown-selected;
         text: root.compact-display ? root.compact-label : root.label;
         second-line: root.compact-display ? ""
-            : (root.state == 0 ? "Not Started" : (root.state == 1 ? "In Progress" : "Complete"));
-        text-color: root.state == 0 ? Colors.state-not-started
-            : (root.state == 1 ? Colors.state-in-progress : Colors.state-complete);
+            : (root.shown-state == 0 ? "Not Started" : (root.shown-state == 1 ? "In Progress" : "Complete"));
+        text-color: root.shown-state == 0 ? Colors.state-not-started
+            : (root.shown-state == 1 ? Colors.state-in-progress : Colors.state-complete);
+    }
+    TouchArea {
+        clicked => { EtomoBridge.activated("pcp", root.label); }
     }
 }
 
@@ -231,6 +261,11 @@ export component MenuItem inherits Rectangle {
     in property <string> accelerator;
     in property <bool> enabled: true;
     in property <bool> visible-item: true;
+    // Wired: the enabled state of the translated `EtomoMenu` item with this
+    // text (bridge kind "mn").
+    property <bool> shown-enabled: EtomoBridge.wired
+        ? EtomoBridge.enabled-value("mn", root.text, root.enabled, EtomoBridge.generation)
+        : root.enabled;
     // The Java action command is normally the item text.  The Rust frame uses
     // a stable source-mapped command name instead, so labels can remain
     // presentation data while `UIHarness` receives an auditable event.
@@ -245,7 +280,7 @@ export component MenuItem inherits Rectangle {
         Text {
             text: root.text;
             vertical-alignment: center;
-            color: root.enabled ? EtomoStyle.text : EtomoStyle.disabled-text;
+            color: root.shown-enabled ? EtomoStyle.text : EtomoStyle.disabled-text;
             font-size: EtomoStyle.font-size-pt * 1px;
         }
         Rectangle { horizontal-stretch: 1; }
@@ -264,8 +299,10 @@ export component MenuItem inherits Rectangle {
     }
     TouchArea {
         clicked => {
-            if root.enabled && root.visible-item {
+            if root.shown-enabled && root.visible-item {
                 root.activated(root.command);
+                // Wired: click the translated menu item with this text.
+                EtomoBridge.activated("mn", root.text);
             }
         }
     }
@@ -307,6 +344,8 @@ export component CheckBoxMenuItem inherits Rectangle {
             if root.enabled {
                 root.checked = !root.checked;
                 root.activated(root.command, root.checked);
+                // Wired: toggle the translated check box menu item.
+                EtomoBridge.toggled("cbmn", root.text, root.checked);
             }
         }
     }
@@ -378,21 +417,28 @@ export component Menu inherits Rectangle {
                 }
             }
         }
-        // The drop-down body.  Slint refuses `@children` inside a conditional
-        // element, so a closed menu is collapsed to zero height and clipped
-        // rather than dropped from the tree.
-        Rectangle {
-            clip: true;
-            background: root.open ? EtomoStyle.panel : transparent;
-            border-width: root.open ? 1px : 0px;
-            border-color: EtomoStyle.border;
-            min-height: root.open ? body.preferred-height : 0px;
-            max-height: root.open ? body.preferred-height : 0px;
-            body := VerticalLayout {
-                padding: 2px;
-                alignment: start;
-                @children
-            }
+    }
+    // The drop-down body, below the header (to the right of a submenu's) and
+    // as wide as its items: it is outside the layout so it is not squeezed to
+    // the header's size.  Slint refuses `@children` inside a conditional
+    // element, so a closed menu's body is hidden rather than dropped from the
+    // tree.
+    Rectangle {
+        visible: root.open;
+        x: root.submenu ? root.width : 0px;
+        y: root.submenu ? 0px : 22px;
+        background: EtomoStyle.panel;
+        border-width: 1px;
+        border-color: EtomoStyle.border;
+        // Swing sizes a popup to its widest item; the items' text does not
+        // report a preferred width through `MenuItem`, so a fixed width that
+        // fits eTomo's longest labels stands in.
+        width: max(root.submenu ? 0px : root.width, body.preferred-width, 300px);
+        height: body.preferred-height;
+        body := VerticalLayout {
+            padding: 2px;
+            alignment: start;
+            @children
         }
     }
 }

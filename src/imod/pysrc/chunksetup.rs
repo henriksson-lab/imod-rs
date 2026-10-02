@@ -7,7 +7,7 @@
 use super::imodpy::{
     add_imod_bin_ignore_sighup, add_output_format_var_to_lines, call_own_program,
     clean_chunk_files, default_com_extension, exit_from_imod_error, map_type_extension_to_style,
-    os_path_splitext, prnstr, read_text_file, run_cmd, write_text_file,
+    os_path_splitext, prnstr, py_int, read_text_file, run_cmd, write_text_file,
 };
 use super::pip::{
     exit_error, pip_get_boolean, pip_get_err_no, pip_get_integer, pip_get_non_option_arg,
@@ -290,12 +290,8 @@ pub fn chunksetup(arguments: &[OsString]) -> i32 {
     if npl.len() < 3 {
         exit_error("First line of output from tomopieces does not have correct form");
     }
-    let (npiecex, npiecey, npiecez) = match (
-        npl[0].parse::<i32>(),
-        npl[1].parse::<i32>(),
-        npl[2].parse::<i32>(),
-    ) {
-        (Ok(x), Ok(y), Ok(z)) => (x, y, z),
+    let (npiecex, npiecey, npiecez) = match (py_int(npl[0]), py_int(npl[1]), py_int(npl[2])) {
+        (Some(x), Some(y), Some(z)) => (x as i32, y as i32, z as i32),
         _ => exit_error("First line of output from tomopieces does not have correct form"),
     };
     let npiecetot = npiecex * npiecey * npiecez;

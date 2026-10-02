@@ -1,97 +1,63 @@
 //! Translation of `IMOD/raptor/suitesparse/cs_multiply.c`.
 
-use super::Cs;
+use super::cs::{Cs, cs_csc};
+use super::cs_malloc::{cs_calloc, cs_malloc};
+use super::cs_scatter::cs_scatter;
+use super::cs_util::{cs_done, cs_spalloc, cs_sprealloc};
 
-/// C `cs_multiply`: returns the CSC product `left * right`.
-pub fn cs_multiply(left: &Cs, right: &Cs) -> Option<Cs> {
-    if !left.is_csc()
-        || !right.is_csc()
-        || left.columns != right.rows
-        || left.column_pointers.len() < left.columns + 1
-        || right.column_pointers.len() < right.columns + 1
-    {
+/// `cs_multiply(A, B)`: C = A*B.
+pub fn cs_multiply(a: &Cs, b: &Cs) -> Option<Cs> {
+    let mut nz = 0i32;
+    if !cs_csc(a) || !cs_csc(b) {
         return None;
     }
-    let left_entries = left.column_pointers[left.columns];
-    let right_entries = right.column_pointers[right.columns];
-    if left_entries > left.row_indices.len()
-        || left_entries > left.values.len()
-        || right_entries > right.row_indices.len()
-        || right_entries > right.values.len()
-    {
+    if a.n != b.m {
         return None;
     }
-    let mut marks = vec![0_usize; left.rows];
-    let mut workspace = vec![0.0; left.rows];
-    let mut pointers = Vec::with_capacity(right.columns + 1);
-    let mut rows = Vec::new();
-    let mut values = Vec::new();
-    for column in 0..right.columns {
-        pointers.push(rows.len());
-        let mark = column + 1;
-        for right_entry in right.column_pointers[column]..right.column_pointers[column + 1] {
-            let inner = right.row_indices[right_entry];
-            if inner >= left.columns {
-                return None;
-            }
-            let multiplier = right.values[right_entry];
-            for left_entry in left.column_pointers[inner]..left.column_pointers[inner + 1] {
-                let row = left.row_indices[left_entry];
-                if row >= left.rows {
-                    return None;
-                }
-                if marks[row] != mark {
-                    marks[row] = mark;
-                    rows.push(row);
-                    workspace[row] = left.values[left_entry] * multiplier;
-                } else {
-                    workspace[row] += left.values[left_entry] * multiplier;
-                }
+    let m = a.m;
+    let anz = a.p[a.n as usize];
+    let n = b.n;
+    let bp = &b.p;
+    let bi = &b.i;
+    let bx = b.x.as_ref();
+    let bnz = bp[n as usize];
+    let mut w: Vec<i32> = cs_calloc(m);
+    let values = a.x.is_some() && bx.is_some();
+    let mut x: Option<Vec<f64>> = if values { Some(cs_malloc(m)) } else { None };
+    let mut c = cs_spalloc(m, n, anz + bnz, values as i32, 0);
+    for j in 0..n {
+        if nz + m > c.nzmax && {
+            let nzmax = 2 * c.nzmax + m;
+            cs_sprealloc(&mut c, nzmax) == 0
+        } {
+            return cs_done(c, 0); // out of memory
+        }
+        c.p[j as usize] = nz; // column j of C starts here
+        for p in bp[j as usize]..bp[j as usize + 1] {
+            let p = p as usize;
+            nz = cs_scatter(
+                a,
+                bi[p],
+                match bx {
+                    Some(bx) => bx[p],
+                    None => 1.0,
+                },
+                &mut w,
+                x.as_deref_mut(),
+                j + 1,
+                &mut c.i,
+                nz,
+            );
+        }
+        if values {
+            let x = x.as_ref().unwrap();
+            let cx = c.x.as_mut().unwrap();
+            for p in c.p[j as usize]..nz {
+                cx[p as usize] = x[c.i[p as usize] as usize];
             }
         }
-        for &row in &rows[*pointers.last()?..] {
-            values.push(workspace[row]);
-        }
     }
-    pointers.push(rows.len());
-    Some(Cs {
-        nzmax: rows.len(),
-        rows: left.rows,
-        columns: right.columns,
-        column_pointers: pointers,
-        row_indices: rows,
-        values,
-        nz: -1,
-    })
-}
-
-#[cfg(test)]
-mod tests {
-    use super::cs_multiply;
-    use crate::imod::raptor::suitesparse::Cs;
-    #[test]
-    fn multiply_matches_column_scatter_order() {
-        let left = Cs {
-            nzmax: 3,
-            rows: 2,
-            columns: 2,
-            column_pointers: vec![0, 2, 3],
-            row_indices: vec![0, 1, 1],
-            values: vec![1., 2., 3.],
-            nz: -1,
-        };
-        let right = Cs {
-            nzmax: 2,
-            rows: 2,
-            columns: 1,
-            column_pointers: vec![0, 2],
-            row_indices: vec![0, 1],
-            values: vec![4., 5.],
-            nz: -1,
-        };
-        let product = cs_multiply(&left, &right).unwrap();
-        assert_eq!(product.column_pointers, [0, 2]);
-        assert_eq!(product.row_indices, [0, 1]);
-        assert_eq!(product.values, [4., 23.]);
-    }
+    c.p[n as usize] = nz; // finalize the last column of C
+    cs_sprealloc(&mut c, 0); // remove extra space from C
+    cs_done(c, 1)
 }

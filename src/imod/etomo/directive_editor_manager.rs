@@ -184,12 +184,16 @@ impl BaseManager for DirectiveEditorManager {
     }
 
     /// Java `createLogWindow`.
-    fn create_log_window(&self) -> Option<Infallible> {
+    fn create_log_window(
+        &'static self,
+    ) -> Option<std::rc::Rc<crate::imod::etomo::ui::swing::log_window::LogWindow>> {
         None
     }
 
     /// Java `getLogInterface`.
-    fn get_log_interface(&self) -> Option<Infallible> {
+    fn get_log_interface(
+        &self,
+    ) -> Option<std::rc::Rc<dyn crate::imod::etomo::ui::swing::log_interface::LogInterface>> {
         None
     }
 
@@ -210,12 +214,20 @@ impl BaseManager for DirectiveEditorManager {
     }
 
     /// Java `getMainPanel`.
-    fn get_main_panel(&self) -> Option<Infallible> {
-        self.main_panel
+    fn get_main_panel(
+        &self,
+    ) -> Option<std::rc::Rc<dyn crate::imod::etomo::ui::swing::main_panel::MainPanelVirtual>> {
+        match self.main_panel {
+            None => None,
+            Some(main_panel) => match main_panel {},
+        }
     }
 
     /// Java `getStorables(int)`.
-    fn get_storables_with_offset(&self, _offset: i32) -> Option<Vec<Box<dyn Storable>>> {
+    fn get_storables_with_offset(
+        &self,
+        _offset: i32,
+    ) -> Option<Vec<Option<&'static dyn Storable>>> {
         None
     }
 
@@ -225,7 +237,11 @@ impl BaseManager for DirectiveEditorManager {
     }
 
     /// Java `getProcessManager`.
-    fn get_process_manager(&self) -> Option<Infallible> {
+    fn get_process_manager(
+        &self,
+    ) -> Option<&'static crate::imod::etomo::process::base_process_manager::BaseProcessManager>
+    {
+        // TODO(unit): this manager's process manager is not constructed yet.
         None
     }
 
@@ -254,12 +270,12 @@ impl BaseManager for DirectiveEditorManager {
     }
 
     /// Java `exitProgram(AxisID)`.
-    fn exit_program(&self, axis_id: Option<AxisID>) -> bool {
+    fn exit_program(&'static self, axis_id: Option<AxisID>) -> bool {
         // The source catches Throwable around its superclass exit, endThreads, and
         // saveParamFile.  The translated super body does not throw.
         if self.exit_program_super(axis_id) {
             self.end_threads();
-            self.save_param_file();
+            let _ = self.save_param_file();
             return true;
         }
         false

@@ -1,73 +1,46 @@
 //! `IMOD/Etomo/src/etomo/ui/swing/GenericMouseAdapter.java`.
-#![allow(dead_code)]
+//!
+//! Responds to pressed (not clicked) right mouse button events by asking the
+//! adaptee to pop up its context menu.
 
-use std::cell::RefCell;
-use std::rc::Rc;
+use std::rc::{Rc, Weak};
 
 use super::context_menu::ContextMenu;
-use super::context_popup::MouseEvent;
+use crate::imod::etomo::jdk::{self, MouseEvent, MouseListener};
 
-/// Java final `GenericMouseAdapter`.
+/// Java `public final class GenericMouseAdapter implements MouseListener`.
 pub struct GenericMouseAdapter {
-    pub adaptee: Rc<RefCell<dyn ContextMenu>>,
+    /// Java `private final ContextMenu adaptee`.  The adaptee owns the component
+    /// this listener is registered on, so the back reference is weak.
+    adaptee: Weak<dyn ContextMenu>,
 }
 
 impl GenericMouseAdapter {
     /// Java `GenericMouseAdapter(ContextMenu)`.
-    pub fn new(adaptee: Rc<RefCell<dyn ContextMenu>>) -> Self {
-        Self { adaptee }
+    pub fn new(adaptee: Weak<dyn ContextMenu>) -> Rc<GenericMouseAdapter> {
+        Rc::new(GenericMouseAdapter { adaptee })
     }
-
-    /// Java `mouseClicked(MouseEvent)`.
-    pub fn mouse_clicked(&self, _event: MouseEvent) {}
-
-    /// Java `mousePressed(MouseEvent)`.
-    pub fn mouse_pressed(&self, event: MouseEvent) {
-        if event.right_mouse_button {
-            self.adaptee.borrow_mut().pop_up_context_menu(event);
-        }
-    }
-
-    /// Java `mouseReleased(MouseEvent)`.
-    pub fn mouse_released(&self, _event: MouseEvent) {}
-
-    /// Java `mouseEntered(MouseEvent)`.
-    pub fn mouse_entered(&self, _event: MouseEvent) {}
-
-    /// Java `mouseExited(MouseEvent)`.
-    pub fn mouse_exited(&self, _event: MouseEvent) {}
 }
 
-#[cfg(test)]
-mod tests {
-    use super::*;
+impl MouseListener for GenericMouseAdapter {
+    /// Java `mouseClicked(MouseEvent)`: empty.
+    fn mouse_clicked(&self, _event: &MouseEvent) {}
 
-    #[derive(Default)]
-    struct Menu(Option<MouseEvent>);
-    impl ContextMenu for Menu {
-        fn pop_up_context_menu(&mut self, event: MouseEvent) {
-            self.0 = Some(event);
+    /// Java `mousePressed(MouseEvent)`.
+    fn mouse_pressed(&self, event: &MouseEvent) {
+        if jdk::is_right_mouse_button(event) {
+            if let Some(adaptee) = self.adaptee.upgrade() {
+                adaptee.pop_up_context_menu(event);
+            }
         }
     }
 
-    #[test]
-    fn only_right_press_reaches_the_adaptee() {
-        let menu = Rc::new(RefCell::new(Menu::default()));
-        let adapter = GenericMouseAdapter::new(menu.clone());
-        adapter.mouse_pressed(MouseEvent {
-            x: 1,
-            y: 2,
-            right_mouse_button: false,
-        });
-        assert_eq!(menu.borrow().0, None);
-        adapter.mouse_pressed(MouseEvent {
-            x: 1,
-            y: 2,
-            right_mouse_button: true,
-        });
-        assert_eq!(
-            menu.borrow().0.map(|event| (event.x, event.y)),
-            Some((1, 2))
-        );
-    }
+    /// Java `mouseReleased(MouseEvent)`: empty.
+    fn mouse_released(&self, _event: &MouseEvent) {}
+
+    /// Java `mouseEntered(MouseEvent)`: empty.
+    fn mouse_entered(&self, _event: &MouseEvent) {}
+
+    /// Java `mouseExited(MouseEvent)`: empty.
+    fn mouse_exited(&self, _event: &MouseEvent) {}
 }

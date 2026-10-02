@@ -1,2 +1,3 @@
-//! Owned translation of `IMOD/raptor/trajectory/trajectory.{h,cpp}`.
+//! Translation units from `IMOD/raptor/trajectory`.
+
 pub mod trajectory;

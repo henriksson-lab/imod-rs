@@ -1,50 +1,41 @@
 //! `IMOD/Etomo/src/etomo/ui/swing/GridBagExtension.java`.
-#![allow(dead_code)]
+//!
+//! Remembers the panel a field was added to so that it can be removed again.  The
+//! `GridBagLayout` and `GridBagConstraints` parameters are layout only and are not
+//! modelled.
 
-/// Java final `GridBagExtension`; the component/panel/layout calls terminate at
-/// the native Swing boundary while this source-owned parent relationship remains.
-#[derive(Clone, Debug, Default, Eq, PartialEq)]
+use std::cell::RefCell;
+use std::rc::Rc;
+
+use crate::imod::etomo::jdk::JComponent;
+
+/// Java `GridBagExtension`.
 pub struct GridBagExtension {
-    pub parent: Option<usize>,
-    pub added: bool,
-    pub removed: bool,
-    pub constraints: Option<(i32, i32)>,
+    /// Java `parent`.
+    parent: RefCell<Option<Rc<JComponent>>>,
 }
 
 impl GridBagExtension {
-    /// Java package-private `GridBagExtension()`.
-    pub fn new() -> Self {
-        Self::default()
+    /// Java `GridBagExtension()`.
+    pub fn new() -> Rc<GridBagExtension> {
+        Rc::new(GridBagExtension {
+            parent: RefCell::new(None),
+        })
     }
 
     /// Java `add(Component, JPanel, GridBagLayout, GridBagConstraints)`.
-    pub fn add(&mut self, parent: usize, constraints: (i32, i32)) {
-        self.parent = Some(parent);
-        self.added = true;
-        self.removed = false;
-        self.constraints = Some(constraints);
+    pub fn add(&self, field: &Rc<JComponent>, panel: &Rc<JComponent>) {
+        // Swing layout: layout.setConstraints(field, constraints).
+        panel.add(field);
+        *self.parent.borrow_mut() = Some(panel.clone());
     }
 
     /// Java `remove(Component)`.
-    pub fn remove(&mut self) {
-        if self.parent.is_some() {
-            self.removed = true;
-            self.parent = None;
+    pub fn remove(&self, field: &Rc<JComponent>) {
+        let parent = self.parent.borrow().clone();
+        if let Some(parent) = parent {
+            parent.remove(field);
+            *self.parent.borrow_mut() = None;
         }
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-    #[test]
-    fn remove_only_removes_a_previously_added_parent() {
-        let mut extension = GridBagExtension::new();
-        extension.remove();
-        assert!(!extension.removed);
-        extension.add(7, (3, 4));
-        extension.remove();
-        assert!(extension.removed);
-        assert_eq!(extension.parent, None);
     }
 }

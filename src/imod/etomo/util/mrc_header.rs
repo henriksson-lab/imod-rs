@@ -2,12 +2,10 @@
 //!
 //! Reads and holds the header of an MRC file.
 //!
-//! **Frontier.**  `read(BaseManager)` runs `$IMOD_DIR/bin/header` through an
-//! `etomo.process.SystemProgram` and reports failures through
-//! `etomo.process.ProcessMessages` and `etomo.ui.swing.UIHarness`; none of those units
-//! has a module, and neither does `etomo.ApplicationManager` (which supplies the bin
-//! path) or `etomo.type.ImageOutputFormat` (the `imageOutputFormat` field's type).  The
-//! members that need them carry `TODO(unit)` markers below.  Everything that does not -
+//! `read(BaseManager)` ([`MRCHeader::read_with_manager`]) runs `$IMOD_DIR/bin/header`
+//! through an `etomo.process.SystemProgram` and parses its output with
+//! [`MRCHeader::read`].  The members that still need `etomo.ui.swing.UIHarness` carry
+//! `TODO(unit)` markers below.  Everything else -
 //! the n'ton table, the constants, the fields, `makeKey`, `pixelEquals`, every getter
 //! that does not return an `ImageOutputFormat`, `parseCommentData`, `paramString`,
 //! `toString`, and the whole nested `CommentData` class - is translated.
@@ -333,110 +331,332 @@ impl MRCHeader {
 
     // other functions
 
-    /// Parse one pixel-spacing field as Java `parsePixelSpacing` does after
-    /// the process/UI boundary has supplied header output.  Callers decide how
-    /// to present the returned invalid-value error in the native frontend.
-    #[allow(non_snake_case)]
-    pub fn parsePixelSpacing(
-        &self,
-        pixel_spacing: &mut EtomoNumber,
-        value: &str,
-    ) -> Result<(), String> {
-        pixel_spacing.set_string(Some(value));
-        let parsed = pixel_spacing.get_double();
-        if !pixel_spacing.is_valid() || parsed == -1.0 || parsed == 0.0 {
-            return Err(format!("Invalid pixel spacing: {value}"));
-        }
-        Ok(())
-    }
-
-    /// Native process boundary for Java `read(BaseManager)`.  The caller runs
-    /// IMOD's `header` command and supplies its stdout/stderr; this method owns
-    /// all source header parsing and state updates.
-    #[allow(non_snake_case)]
-    pub fn read(&mut self, stdout: &[String], stderr: &[String]) -> Result<bool, String> {
-        if !stderr.is_empty() {
-            return Err(format!("header returned an error:\n{}", stderr.join("\n")));
-        }
-        if stdout.is_empty() {
-            return Err("header returned no data".to_owned());
-        }
+    /// The output-parsing half of Java `synchronized read(BaseManager)`
+    /// (`MRCHeader.java:458-548`), from "boolean pixelsParsed = false" to the
+    /// end: parses the lines of `header`'s standard output and then handles
+    /// the FEI pixel size.  [`MRCHeader::read_with_manager`] runs the program
+    /// and calls this; the `Err` is the message of the `IOException` or
+    /// `NumberFormatException` the source throws.
+    pub fn parse_std_output(
+        &mut self,
+        manager: Option<&'static dyn BaseManager>,
+        std_output: &[String],
+    ) -> Result<bool, String> {
+        // java.util.regex `\s+`
+        let whitespace = Regex::new(r"[ \t\n\x0B\x0C\r]+").unwrap();
+        let filename = self.filename.clone();
+        let failed = || {
+            crate::imod::etomo::util::utilities::timestamp_full(
+                Some("read"),
+                Some("header"),
+                filename.as_deref(),
+                Some(crate::imod::etomo::util::utilities::FAILED_STATUS),
+            );
+        };
+        let java_trim = |s: &str| s.trim_matches(|c: char| c <= ' ').to_owned();
+        let parse_int = |token: &str| -> Result<i32, String> {
+            token
+                .parse::<i32>()
+                .map_err(|_| format!("For input string: \"{}\"", token))
+        };
         let mut pixels_parsed = false;
-        for line in stdout {
+        for line in std_output {
             if line.contains("This is an HDF file") {
                 self.image_output_format = ImageOutputFormat::Hdf;
                 continue;
             }
-            let trimmed = line.trim();
-            if trimmed.starts_with(SIZE_HEADER) {
-                let tokens: Vec<_> = trimmed.split_whitespace().collect();
-                if tokens.len() <= N_SECTIONS_INDEX as usize {
+            // Parse the size of the data
+            // Note the initial space in the string below
+            // Need to get brief header and regular header in the same way, so change
+            // so that the output is trimmed for this parse.
+            if java_trim(line).starts_with(SIZE_HEADER) {
+                let tokens = java_lang_string_split(&java_trim(line), &whitespace);
+                if self.debug {
+                    print!("tokens=");
+                    for token in &tokens {
+                        print!("{},", token);
+                    }
+                }
+                if tokens.len() < (N_SECTIONS_INDEX + 1) as usize {
+                    failed();
                     return Err("Header returned less than three parameters for image size".into());
                 }
-                self.n_columns = tokens[N_COLUMNS_INDEX as usize]
-                    .parse()
-                    .map_err(|_| "nColumns not set".to_owned())?;
-                self.n_rows = tokens[N_ROWS_INDEX as usize].parse().map_err(|_| {
-                    format!("nRows not set, token is {}", tokens[N_ROWS_INDEX as usize])
-                })?;
-                self.n_sections = tokens[N_SECTIONS_INDEX as usize].parse().map_err(|_| {
-                    format!(
-                        "nSections not set, token is {}",
-                        tokens[N_SECTIONS_INDEX as usize]
-                    )
-                })?;
+                // Integer.parseInt throws NumberFormatException, uncaught here.
+                self.n_columns = parse_int(&tokens[N_COLUMNS_INDEX as usize])?;
+                match parse_int(&tokens[N_ROWS_INDEX as usize]) {
+                    Ok(n_rows) => self.n_rows = n_rows,
+                    Err(_) => {
+                        self.n_rows = -1;
+                        failed();
+                        return Err(format!(
+                            "nRows not set, token is {}",
+                            tokens[N_ROWS_INDEX as usize]
+                        ));
+                    }
+                }
+                match parse_int(&tokens[N_SECTIONS_INDEX as usize]) {
+                    Ok(n_sections) => self.n_sections = n_sections,
+                    Err(e) => {
+                        // e.printStackTrace()
+                        eprintln!("java.lang.NumberFormatException: {}", e);
+                        self.n_sections = -1;
+                        failed();
+                        return Err(format!(
+                            "nSections not set, token is {}",
+                            tokens[N_SECTIONS_INDEX as usize]
+                        ));
+                    }
+                }
             }
+
+            // Parse the mode
             if line.starts_with(" Map mode") {
-                let tokens: Vec<_> = line.split_whitespace().collect();
+                // String.split("\\s+"): the leading blank gives an empty first token.
+                let tokens = java_lang_string_split(line, &whitespace);
                 if tokens.len() < 5 {
+                    failed();
                     return Err("Header returned less than one parameter for the mode".into());
                 }
-                self.mode = tokens[4].parse().map_err(|_| "mode not set".to_owned())?;
+                self.mode = parse_int(&tokens[4])?;
             }
+
+            // Parse the pixels size
             if line.starts_with(" Pixel spacing") {
-                let tokens: Vec<_> = line.split_whitespace().collect();
+                let tokens = java_lang_string_split(line, &whitespace);
                 if tokens.len() < 7 {
+                    failed();
                     return Err("Header returned less than three parameters for pixel size".into());
                 }
-                Self::parse_pixel_spacing_into(&mut self.x_pixel_size, tokens[4])?;
-                Self::parse_pixel_spacing_into(&mut self.y_pixel_size, tokens[5])?;
-                Self::parse_pixel_spacing_into(&mut self.z_pixel_size, tokens[6])?;
-                pixels_parsed = true;
+                // PixelsParsed will be set to true if there are no errors parsing
+                // "Pixel Spacing".
+                pixels_parsed = Self::parse_pixel_spacing(
+                    manager,
+                    &mut self.x_pixel_size,
+                    &tokens[4],
+                    true,
+                    self.filename.as_deref(),
+                    self.axis_id,
+                );
+                pixels_parsed = pixels_parsed
+                    && Self::parse_pixel_spacing(
+                        manager,
+                        &mut self.y_pixel_size,
+                        &tokens[5],
+                        !pixels_parsed,
+                        self.filename.as_deref(),
+                        self.axis_id,
+                    );
+                pixels_parsed = pixels_parsed
+                    && Self::parse_pixel_spacing(
+                        manager,
+                        &mut self.z_pixel_size,
+                        &tokens[6],
+                        !pixels_parsed,
+                        self.filename.as_deref(),
+                        self.axis_id,
+                    );
+
                 self.x_pixel_spacing = self.x_pixel_size.get_double();
                 self.y_pixel_spacing = self.y_pixel_size.get_double();
                 self.z_pixel_spacing = self.z_pixel_size.get_double();
             }
+
+            // Parse the rotation angle, binning, etc from the comment section
             self.parse_comment_data(line);
         }
-        let _ = pixels_parsed;
+        // Once the entire header is processed, handle pixel size issues.
+        //
+        // If the pixel sizes are default value scan, use the FEI pixel size in the
+        // comment section (if available).
+        if !self.fei_pixel_size.borrow().is_null()
+            && (self.pixel_equals(1.0) || self.pixel_equals(2.0) || self.pixel_equals(4.0))
+        {
+            // This was function parseFEIPixelSize:
+            let fei = self.fei_pixel_size.borrow().to_string();
+            if Self::parse_pixel_spacing(
+                manager,
+                &mut self.x_pixel_size,
+                &fei,
+                !pixels_parsed,
+                self.filename.as_deref(),
+                self.axis_id,
+            ) {
+                let x = self.x_pixel_size.get_double();
+                self.x_pixel_size.set_double(x * 10.0);
+            }
+            let x = self.x_pixel_size.base.clone();
+            self.y_pixel_size.set_const_etomo_number(Some(&x));
+            let y = self.y_pixel_size.base.clone();
+            self.z_pixel_size.set_const_etomo_number(Some(&y));
+        }
+
+        crate::imod::etomo::util::utilities::timestamp_full(
+            Some("read"),
+            Some("header"),
+            self.filename.as_deref(),
+            Some(crate::imod::etomo::util::utilities::FINISHED_STATUS),
+        );
         Ok(true)
     }
 
-    fn parse_pixel_spacing_into(
+    /// Java private `parsePixelSpacing(BaseManager, EtomoNumber, String,
+    /// boolean)`.  Parse pixel spacing (pixel size).  If there is an error, pop
+    /// up an error message, if requested.  The fields the Java reads from
+    /// `this` (`filename`, `axisID`) are passed in, since the pixel size being
+    /// set is itself a field.
+    fn parse_pixel_spacing(
+        manager: Option<&'static dyn BaseManager>,
         pixel_spacing: &mut EtomoNumber,
-        value: &str,
-    ) -> Result<(), String> {
-        pixel_spacing.set_string(Some(value));
-        let parsed = pixel_spacing.get_double();
-        if !pixel_spacing.is_valid() || parsed == -1.0 || parsed == 0.0 {
-            Err(format!("Invalid pixel spacing: {value}"))
-        } else {
-            Ok(())
+        s_pixel_spacing: &str,
+        popup_error_message: bool,
+        filename: Option<&str>,
+        axis_id: Option<AxisID>,
+    ) -> bool {
+        pixel_spacing.set_string(Some(s_pixel_spacing));
+        let d_pixel_spacing = pixel_spacing.get_double();
+        if !pixel_spacing.is_valid() || d_pixel_spacing == -1.0 || d_pixel_spacing == 0.0 {
+            if popup_error_message {
+                let message = format!(
+                    "Invalid pixel spacing:  {}.  Fix the mrc header in {} with alterheader.",
+                    s_pixel_spacing,
+                    filename.unwrap_or("null")
+                );
+                // UIHarness.INSTANCE.openMessageDialog: read() also runs on
+                // process monitor threads, where the call is posted to the EDT.
+                if crate::imod::etomo::util::event_queue::is_dispatch_thread() {
+                    crate::imod::etomo::ui::swing::ui_harness::with(|harness| {
+                        harness.open_message_dialog_base_manager_string_string_axis_id(
+                            manager,
+                            &message,
+                            "Header Error",
+                            axis_id,
+                        )
+                    });
+                } else {
+                    crate::imod::etomo::ui::swing::ui_harness::post_message_dialog(
+                        manager,
+                        message,
+                        "Header Error".to_owned(),
+                        axis_id,
+                    );
+                }
+            }
+            return false;
         }
+        true
     }
 
-    // TODO(unit): needs etomo/process/SystemProgram.java, etomo/process/ProcessMessages.java,
-    // etomo/ApplicationManager.java, etomo/BaseManager.java and
-    // etomo/ui/swing/UIHarness.java - Java `synchronized read(BaseManager)` runs
-    // `ApplicationManager.getIMODBinPath() + "header"` through a `SystemProgram`, reads
-    // its exit value, its `ProcessMessages` and its stdout/stderr, and then parses that
-    // output into the size, mode and pixel-spacing fields.  None of those five units has
-    // a module.  `parseCommentData`, which `read` calls once per output line, is
-    // translated below and is the part of the parse that does not need them.
+    /// Java `synchronized read(BaseManager)`: runs `ApplicationManager.getIMODBinPath()
+    /// + "header"` on the file through a `SystemProgram` and parses its output with
+    /// [`MRCHeader::read`].  `Err` carries the message of the `IOException` or
+    /// `InvalidParameterException` the source throws (callers catch both alike);
+    /// `Ok(false)` is the source's `return false` for a file that does not exist.
+    /// The `NumberFormatException`s of the size parse come back as `Err` too.
+    pub fn read_with_manager(&mut self, manager: &'static dyn BaseManager) -> Result<bool, String> {
+        let file = crate::imod::etomo::util::utilities::get_file(
+            self.file_location.as_deref().unwrap_or("null"),
+            self.filename.as_deref(),
+        );
+        if self
+            .filename
+            .as_deref()
+            // `filename.matches("\\s*")`: Java's `\s` is `[ \t\n\x0B\f\r]`
+            .is_none_or(|filename| {
+                filename
+                    .chars()
+                    .all(|c| matches!(c, ' ' | '\t' | '\n' | '\x0B' | '\x0C' | '\r'))
+            })
+            || file.is_dir()
+        {
+            return Err("No filename specified".to_owned());
+        }
+        if !file.exists() {
+            if *DEBUG {
+                eprintln!(
+                    "WARNING: attempting to read the header of {}, which doesn't exist.",
+                    java_io_file_get_absolute_path(&file.to_string_lossy())
+                );
+            }
+            return Ok(false);
+        }
+        // If the file hasn't changed, don't reread
+        if !self.modified_flag.is_modified_since_last_read() {
+            return Ok(true);
+        }
+        let filename = self.filename.clone();
+        crate::imod::etomo::util::utilities::timestamp_full(
+            Some("read"),
+            Some("header"),
+            filename.as_deref(),
+            Some(crate::imod::etomo::util::utilities::STARTED_STATUS),
+        );
 
-    // TODO(unit): needs etomo/ui/swing/UIHarness.java and etomo/BaseManager.java - Java
-    // private `parsePixelSpacing(BaseManager, EtomoNumber, String, boolean)` pops the
-    // failure up through `UIHarness.INSTANCE.openMessageDialog`.
+        // Run the header command on the filename, need to use a String[] here to
+        // prevent the Runtime from breaking up the command and arguments at spaces.
+        let command_array = vec![
+            format!(
+                "{}header",
+                crate::imod::etomo::base_manager::get_imod_bin_path()
+                    .unwrap_or_else(|| "null".to_owned())
+            ),
+            filename.clone().unwrap_or_else(|| "null".to_owned()),
+        ];
+        let header = crate::imod::etomo::process::system_program::SystemProgram::new_array(
+            Some(manager),
+            self.file_location.clone(),
+            Some(command_array),
+            // `SystemProgram` takes a non-null `AxisID`; the headers read here always
+            // carry one (`getInstance` is given the caller's axis).
+            self.axis_id.unwrap_or(AxisID::Only),
+        );
+        self.modified_flag.set_reading_now();
+        header.run();
+
+        let failed = || {
+            crate::imod::etomo::util::utilities::timestamp_full(
+                Some("read"),
+                Some("header"),
+                filename.as_deref(),
+                Some(crate::imod::etomo::util::utilities::FAILED_STATUS),
+            );
+        };
+        if header.get_exit_value() != 0 {
+            let messages = header.get_process_messages();
+            let error = crate::imod::etomo::process::process_messages::MessageType::Error;
+            if messages.size(error) > 0 {
+                let mut message = "header returned an error:\n".to_owned();
+                for i in 0..messages.size(error) {
+                    message = message + messages.get(error, i).unwrap_or("null") + "\n";
+                }
+                failed();
+                return Err(format!(
+                    "{}:{message}",
+                    filename.as_deref().unwrap_or("null")
+                ));
+            }
+        }
+        // Throw an exception if the file can not be read
+        let std_error = header.get_std_error().unwrap_or_default();
+        if !std_error.is_empty() {
+            let mut message = "header returned an error:\n".to_owned();
+            for line in &std_error {
+                message = message + line + "\n";
+            }
+            failed();
+            return Err(format!(
+                "{}:{message}",
+                filename.as_deref().unwrap_or("null")
+            ));
+        }
+
+        // Parse the output
+        let std_output = header.get_std_output().unwrap_or_default();
+        if std_output.is_empty() {
+            failed();
+            return Err("header returned no data".to_owned());
+        }
+        self.parse_std_output(Some(manager), &std_output)
+    }
 
     /// Java private `pixelEquals`.  Note that the source tests `yPixelSize` twice and
     /// never tests `zPixelSize`.

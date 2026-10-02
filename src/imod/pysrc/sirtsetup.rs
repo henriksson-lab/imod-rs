@@ -26,7 +26,6 @@
 //! the one-processor difference-reconstruction file was named with a fixed
 //! `.com` instead of the command file extension.
 
-use super::batchruntomo::py_str_float;
 use super::imodpy::{
     MrcInfo, OptionValue, add_imod_bin_ignore_sighup, clean_chunk_files,
     complete_and_check_com_file, convert_to_integer, dataset_filename, exit_from_imod_error,
@@ -34,6 +33,7 @@ use super::imodpy::{
     make_backup_file, option_value, os_path_splitext, parallel_boundary_size, parse_list, prnstr,
     read_text_file, run_cmd, set_root_and_extension,
 };
+use super::imodpy::{py_fixed, py_float, py_int, py_str_float};
 use super::pip::{
     exit_error, pip_get_boolean, pip_get_err_no, pip_get_float, pip_get_in_out_file,
     pip_get_integer, pip_get_string, pip_get_two_floats, pip_get_two_integers,
@@ -67,11 +67,11 @@ pub fn find_split_com_number(splitout: &[String], descrip: &str) -> i32 {
             if !numstr.is_empty() {
                 // `int(numstr)`: surrounding blanks are ignored; a ValueError
                 // would end the script with a traceback.
-                match numstr.trim().parse::<i32>() {
-                    Ok(value) => retval = value,
-                    Err(_) => {
+                match py_int(&numstr) {
+                    Some(value) => retval = value as i32,
+                    None => {
                         eprintln!("ValueError: invalid literal for int() with base 10: '{numstr}'");
-                        std::process::exit(1)
+                        crate::imod::libcfshr::b3dutil::exit(1)
                     }
                 }
             }
@@ -299,7 +299,11 @@ pub fn sirtsetup(arguments: &[OsString]) -> i32 {
     let (scale_min, scale_max) = pip_get_two_floats("ScaleToInteger", (0., 0.)).unwrap_or((0., 0.));
     let mut sc_min_max = String::new();
     if scale_min != 0. || scale_max != 0. {
-        sc_min_max = c_format("%f,%f", &[CArg::Dbl(scale_min), CArg::Dbl(scale_max)]);
+        sc_min_max = format!(
+            "{},{}",
+            py_fixed(scale_min, 0, 6),
+            py_fixed(scale_max, 0, 6)
+        );
     }
     let trimarg = pip_get_string("TrimvolOptions", "").unwrap_or_default();
     if !sc_min_max.is_empty() && !trimarg.is_empty() {
@@ -403,11 +407,11 @@ pub fn sirtsetup(arguments: &[OsString]) -> i32 {
             exit_error(&format!("The file of X-axis tilts, {xtilt_file}, is empty"));
         }
         let py_float = |text: &str| -> f64 {
-            match text.trim().parse::<f64>() {
-                Ok(value) => value,
-                Err(_) => {
+            match py_float(text) {
+                Some(value) => value,
+                None => {
                     eprintln!("ValueError: could not convert string to float: '{text}'");
-                    std::process::exit(1)
+                    crate::imod::libcfshr::b3dutil::exit(1)
                 }
             }
         };
@@ -529,7 +533,7 @@ pub fn sirtsetup(arguments: &[OsString]) -> i32 {
     // was not; the source then fails on `os.path.splitext(None)`.
     let Some(recfile) = recfile else {
         eprintln!("TypeError: expected str, bytes or os.PathLike object, not NoneType");
-        std::process::exit(1)
+        crate::imod::libcfshr::b3dutil::exit(1)
     };
 
     // Get the setname and pull off _rec for standard extension style
@@ -677,11 +681,11 @@ pub fn sirtsetup(arguments: &[OsString]) -> i32 {
                 }
                 let start = basename.chars().count();
                 let text: String = chars[start..lastchar].iter().collect();
-                let num = match text.trim().parse::<i32>() {
-                    Ok(value) => value,
-                    Err(_) => {
+                let num = match py_int(&text) {
+                    Some(value) => value as i32,
+                    None => {
                         eprintln!("ValueError: invalid literal for int() with base 10: '{text}'");
-                        std::process::exit(1)
+                        crate::imod::libcfshr::b3dutil::exit(1)
                     }
                 };
                 if num > lastnum || startfirst {
@@ -870,7 +874,7 @@ pub fn sirtsetup(arguments: &[OsString]) -> i32 {
                 writeln!(
                     comf,
                     "$densnorm -log {} -ignore {densin} {aliuse}",
-                    c_format("%f", &[CArg::Dbl(logbase.as_ref().unwrap()[0])])
+                    py_fixed(logbase.as_ref().unwrap()[0], 0, 6)
                 )?;
             }
         });
@@ -897,7 +901,7 @@ pub fn sirtsetup(arguments: &[OsString]) -> i32 {
     }
     let radial = format!(
         "/THICKNESS/a/RADIAL   {}/",
-        c_format("%.3f %.3f", &[CArg::Dbl(radius), CArg::Dbl(sigma)])
+        format!("{} {}", py_fixed(radius, 0, 3), py_fixed(sigma, 0, 3))
     );
     let run_pysed = |sedlist: &[String]| {
         let _ = pysed(
@@ -920,7 +924,7 @@ pub fn sirtsetup(arguments: &[OsString]) -> i32 {
             format!("/THICKNESS/a/MASK  {mask_size}/"),
             format!(
                 "/THICKNESS/a/FlatFilterFraction  {}/",
-                c_format("%f", &[CArg::Dbl(flatfrac)])
+                py_fixed(flatfrac, 0, 6)
             ),
         ]);
 

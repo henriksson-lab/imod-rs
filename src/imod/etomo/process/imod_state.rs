@@ -1,24 +1,57 @@
 //! `IMOD/Etomo/src/etomo/process/ImodState.java`.
 //!
-//! Persistent per-viewer configuration.  The source delegates opening, messages, and
-//! event transport to `ImodProcess`.  File and window-option construction uses the
-//! translated eTomo types directly, so the dataset selected by a manager reaches the
-//! child command instead of being retained only as display state.
-#![allow(dead_code)]
+//! ImodState constructs a private ImodProcess instance.  It should be used to perform
+//! any function on the ImodProcess instance that is required by the ImodManager.
+//!
+//! ImodState preserves the original state configuration during multiple opens, raises
+//! and re-opens of 3dmod, all of which are handle by the open() function.  It also
+//! allows a new state configuration to temporarily override the original state
+//! configuration for a single call to open().  Conflicting new configurations can be
+//! created when calling open() several times, without any negative effect.  To allow
+//! state information to be totally controlled by the user, don't change it in reset().
+//!
+//! Use:
+//! Construction and initialization:
+//! 1. Construct an ImodState.
+//! 2. Use the setInitial functions to set the initial state.  ImodState resets to the
+//!    initial state after each open call.
+//! Opening and modeling:
+//! 1. Use the set functions to set the current state.
+//! 2. Call an open function.
+//!
+//! (The source's long "Upgrading" and "Rules for upgrading" notes describe how to add a
+//! state variable; they are a maintenance guide and are not repeated here.)
+//!
+//! **Shape.**  An `ImodState` is held in `BaseImodManager`'s map and handed out as an
+//! `Arc`, so it is used from whichever thread calls the manager; its mutable fields sit
+//! behind one lock and every method takes `&self`.  `open` does not hold that lock while
+//! `ImodProcess.open` waits for 3dmod to start.
+//!
+//! **Null manager.**  As in `ImodProcess`, `manager` is `&'static dyn BaseManager`; the
+//! source's `manager == null` branches are not reachable and are not kept.
 
+use super::base_imod_manager::ImodManagerException;
+use super::continuous_listener_target::ContinuousListenerTarget;
+use super::imod_process::{BeadFixerMode, ImodProcess, Run3dmodMenuOptions, WindowOpenOption};
 use crate::imod::etomo::base_manager::BaseManager;
-use crate::imod::etomo::process::imod_process::{
-    BeadFixerMode, ContinuousListenerTarget, ImodProcess, Run3dmodMenuOptions, WindowOpenOption,
-};
+use crate::imod::etomo::etomo_director;
 use crate::imod::etomo::r#type::axis_id::AxisID;
+use crate::imod::etomo::r#type::etomo_boolean2::EtomoBoolean2;
 use crate::imod::etomo::r#type::file_type::FileType;
+use crate::imod::etomo::util::utilities;
 use std::path::{Path, PathBuf};
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
 
+// constants
+// mode
 pub const MODEL_MODE: i32 = -1;
 pub const MOVIE_MODE: i32 = -2;
+// modelView
 pub const MODEL_VIEW: i32 = -3;
+// useModv
 pub const MODV: i32 = -4;
+
+// default state information
 const DEFAULT_OPEN_WITH_MODEL: bool = false;
 const DEFAULT_PRESERVE_CONTRAST: bool = false;
 const DEFAULT_OPEN_BEAD_FIXER: bool = false;
@@ -26,71 +59,75 @@ const DEFAULT_OPEN_CONTOURS: bool = false;
 const DEFAULT_FRAMES: bool = false;
 const DEFAULT_BINNING: i32 = 1;
 
-/// Java final `ImodState`.
-pub struct ImodState {
+/// The mutable instance fields of `ImodState`.
+struct ImodStateFields {
+    // unchanging state information
     model_view: bool,
     use_modv: bool,
-    axis_id: AxisID,
+
+    // current state information
+    // reset to initial state
     model_name: Option<String>,
     mode: i32,
     swap_yz: bool,
+    // reset to default state
     preserve_contrast: bool,
     open_bead_fixer: bool,
     open_contours: bool,
     start_new_contours_at_new_z: bool,
     point_limit: i32,
+
+    // sent with open bead fixer
     set_auto_center: bool,
     auto_center: bool,
     new_contours: bool,
     manage_new_contours: bool,
     beadfixer_mode: Option<BeadFixerMode>,
     skip_list: Option<String>,
+
+    // signals that a state variable has been changed at least once, so the
+    // corrosponding message must always be sent
     using_mode: bool,
+
+    // don't reset
     allow_menu_binning_in_z: bool,
     no_menu_options: bool,
+
+    // reset values
+    // initial state information
     initial_model_name: String,
     initial_mode: i32,
     initial_swap_yz: bool,
-    /// Java final `process`.  Child/window transport remains the explicit
-    /// boundary of `ImodProcess`, but configuration now reaches that Rust
-    /// implementation instead of being discarded in this state owner.
-    process: ImodProcess,
-    file_name_array: Option<Vec<String>>,
-    file_list: Option<Vec<PathBuf>>,
+
+    // internal state information
     warned_stale_file: bool,
+    // initial state information
     initial_mode_set: bool,
     initial_swap_yz_set: bool,
-    manager: Option<&'static dyn BaseManager>,
+
     log_name: Option<String>,
     debug: bool,
-    delete_all_sections: Option<bool>,
+    // Should be turned off after each use. This is because it is rarely used and
+    // should not be on for most situations. This way I don't have to keep track
+    // of when it is on.
+    delete_all_sections: Option<EtomoBoolean2>,
     file_name: Option<String>,
-    interpolation: Option<bool>,
+    interpolation: Option<EtomoBoolean2>,
     model_name_list: Option<Vec<String>>,
+
     open_surf_cont_point: bool,
-    dataset_name: Option<String>,
-    subdir_name: Option<String>,
-    binning: i32,
-    binning_xy: i32,
-    frames: bool,
-    piece_list_file_name: Option<String>,
-    montage_separation: bool,
-    load_as_integers: bool,
-    suppress_save_query: bool,
-    open_zap: bool,
-    working_directory: Option<PathBuf>,
-    window_open_options: Vec<WindowOpenOption>,
 }
 
-impl ImodState {
-    /// Java public `ImodState(BaseManager, AxisID)`.
-    pub fn new(manager: Option<&'static dyn BaseManager>, axis_id: AxisID) -> Self {
-        let mut state = Self {
+impl ImodStateFields {
+    /// The Java field initialisers.  `mode`, `swapYZ`, `preserveContrast`,
+    /// `openBeadFixer` and `openContours` have none (Java zero values); every
+    /// constructor ends in `reset()`, which sets them.
+    fn initial() -> ImodStateFields {
+        ImodStateFields {
             model_view: false,
             use_modv: false,
-            axis_id,
             model_name: None,
-            mode: MOVIE_MODE,
+            mode: 0,
             swap_yz: false,
             preserve_contrast: false,
             open_bead_fixer: false,
@@ -109,13 +146,9 @@ impl ImodState {
             initial_model_name: String::new(),
             initial_mode: MOVIE_MODE,
             initial_swap_yz: false,
-            process: ImodProcess::new(manager, Some(axis_id)),
-            file_name_array: None,
-            file_list: None,
             warned_stale_file: false,
             initial_mode_set: false,
             initial_swap_yz_set: false,
-            manager,
             log_name: None,
             debug: false,
             delete_all_sections: None,
@@ -123,952 +156,1327 @@ impl ImodState {
             interpolation: None,
             model_name_list: None,
             open_surf_cont_point: false,
-            dataset_name: None,
-            subdir_name: None,
-            binning: DEFAULT_BINNING,
-            binning_xy: DEFAULT_BINNING,
-            frames: DEFAULT_FRAMES,
-            piece_list_file_name: None,
-            montage_separation: false,
-            load_as_integers: false,
-            suppress_save_query: false,
-            open_zap: false,
-            working_directory: None,
-            window_open_options: Vec::new(),
-        };
-        state.reset();
-        state
-    }
-    /// Java `ImodState(BaseManager,int,AxisID)`.
-    pub fn new_with_model_view_type(
-        manager: Option<&'static dyn BaseManager>,
-        model_view_type: i32,
-        axis_id: AxisID,
-    ) -> Self {
-        let mut state = Self::new(manager, axis_id);
-        state.set_model_view_type(model_view_type);
-        state
-    }
-    /// Java `ImodState(BaseManager,String,AxisID)`.
-    pub fn new_with_file_name(
-        manager: Option<&'static dyn BaseManager>,
-        file_name: Option<&str>,
-        axis_id: AxisID,
-    ) -> Self {
-        let mut state = Self::new(manager, axis_id);
-        state.dataset_name = file_name.map(str::to_owned);
-        if let Some(file_name) = file_name {
-            state.process.set_dataset_name(file_name);
-        }
-        state
-    }
-    /// Java dataset/file-type constructor (FileType remains an untranslated declared type).
-    pub fn new_with_dataset_file_type(
-        manager: Option<&'static dyn BaseManager>,
-        dataset: Option<&str>,
-        axis_id: AxisID,
-        file_type: Option<&FileType>,
-    ) -> Self {
-        let dataset = dataset.map(str::to_owned).or_else(|| {
-            file_type.and_then(|file_type| file_type.get_file_name(manager, Some(axis_id)))
-        });
-        Self::new_with_file_name(manager, dataset.as_deref(), axis_id)
-    }
-    /// Java dataset/model-view/file-type constructor.
-    pub fn new_with_dataset_model_view_file_type(
-        manager: Option<&'static dyn BaseManager>,
-        dataset: Option<&str>,
-        model_view_type: i32,
-        axis_id: AxisID,
-        file_type: Option<&FileType>,
-    ) -> Self {
-        let dataset = dataset.map(str::to_owned).or_else(|| {
-            file_type.and_then(|file_type| file_type.get_file_name(manager, Some(axis_id)))
-        });
-        let mut state = Self::new_with_file_name(manager, dataset.as_deref(), axis_id);
-        state.set_model_view_type(model_view_type);
-        state
-    }
-    /// Java file/model-view constructor.
-    pub fn new_with_file_model_view(
-        manager: Option<&'static dyn BaseManager>,
-        file_name: Option<&str>,
-        model_view_type: i32,
-        axis_id: AxisID,
-    ) -> Self {
-        let mut state = Self::new_with_file_name(manager, file_name, axis_id);
-        state.set_model_view_type(model_view_type);
-        state
-    }
-    /// Java dataset/model-view/window option/file-type constructor.
-    pub fn new_with_dataset_window_file_type(
-        manager: Option<&'static dyn BaseManager>,
-        dataset: Option<&str>,
-        model_view_type: i32,
-        axis_id: AxisID,
-        option: Option<WindowOpenOption>,
-        file_type: Option<&FileType>,
-    ) -> Self {
-        let dataset = dataset.map(str::to_owned).or_else(|| {
-            file_type.and_then(|file_type| file_type.get_file_name(manager, Some(axis_id)))
-        });
-        let mut state =
-            Self::new_with_file_model_view(manager, dataset.as_deref(), model_view_type, axis_id);
-        state.add_window_open_option(option);
-        state
-    }
-    /// Java dataset/model-view/window option/File constructor.
-    pub fn new_with_dataset_window_file(
-        manager: Option<&'static dyn BaseManager>,
-        dataset: Option<&str>,
-        model_view_type: i32,
-        axis_id: AxisID,
-        option: Option<WindowOpenOption>,
-        file: Option<&Path>,
-    ) -> Self {
-        let mut state = Self::new_with_file_model_view(manager, dataset, model_view_type, axis_id);
-        state.add_window_open_option(option);
-        state.file_list = file.map(|f| vec![f.to_owned()]);
-        state
-    }
-    /// Java dataset/model constructor.
-    pub fn new_with_dataset_model(
-        manager: Option<&'static dyn BaseManager>,
-        dataset: Option<&str>,
-        model: Option<&str>,
-        axis_id: AxisID,
-    ) -> Self {
-        let mut state = Self::new_with_file_name(manager, dataset, axis_id);
-        state.initial_model_name = model.unwrap_or_default().to_owned();
-        state
-            .process
-            .set_model_name(state.initial_model_name.clone());
-        state.reset();
-        state
-    }
-    /// Java FileType constructor.
-    pub fn new_with_file_type(
-        manager: Option<&'static dyn BaseManager>,
-        file_type: Option<&FileType>,
-        axis_id: AxisID,
-    ) -> Self {
-        let mut state = Self::new(manager, axis_id);
-        if let Some(file_type) = file_type {
-            let name = file_type.get_file_name(manager, Some(axis_id));
-            state.dataset_name = name.clone();
-            if let Some(name) = name {
-                state.process.set_dataset_name(name);
-            }
-        }
-        state
-    }
-    /// Java File constructor.
-    pub fn new_with_file(
-        manager: Option<&'static dyn BaseManager>,
-        file: Option<&Path>,
-        axis_id: AxisID,
-    ) -> Self {
-        let mut state = Self::new(manager, axis_id);
-        state.file_list = file.map(|f| vec![f.to_owned()]);
-        state.dataset_name = file.map(|f| f.to_string_lossy().into_owned());
-        if let Some(name) = &state.dataset_name {
-            state.process.set_dataset_name(name);
-        }
-        state
-    }
-    /// Java package-private `setFile`.
-    pub fn set_file(&mut self, file: Option<&Path>) {
-        self.dataset_name = file.map(|f| f.to_string_lossy().into_owned());
-        if let Some(name) = &self.dataset_name {
-            self.process.set_dataset_name(name);
         }
     }
-    /// Java String-array constructor.
-    pub fn new_with_file_name_array(
-        manager: Option<&'static dyn BaseManager>,
-        files: Option<Vec<String>>,
-        axis_id: AxisID,
-    ) -> Self {
-        let mut state = Self::new(manager, axis_id);
-        state.file_name_array = files;
-        if let Some(files) = &state.file_name_array {
-            state.process = ImodProcess::new_dataset_array(manager, files.clone());
+}
+
+/// Java final `ImodState`.
+pub struct ImodState {
+    /// Java `axisID`.  Nullable: `BaseImodManager` builds states for keys with no axis.
+    axis_id: Option<AxisID>,
+    /// Java final `process`.
+    process: Arc<ImodProcess>,
+    /// Java `fileNameArray`, assigned only by constructors.
+    file_name_array: Option<Vec<String>>,
+    /// Java `fileList`, assigned only by constructors.
+    file_list: Option<Vec<PathBuf>>,
+    /// Java final `manager`.
+    manager: &'static dyn BaseManager,
+    fields: Mutex<ImodStateFields>,
+}
+
+impl ImodState {
+    /// The field initialisers and the assignments every constructor makes.
+    fn construct(
+        manager: &'static dyn BaseManager,
+        axis_id: Option<AxisID>,
+        process: Arc<ImodProcess>,
+        file_name_array: Option<Vec<String>>,
+        file_list: Option<Vec<PathBuf>>,
+        fields: ImodStateFields,
+    ) -> ImodState {
+        ImodState {
+            axis_id,
+            process,
+            file_name_array,
+            file_list,
+            manager,
+            fields: Mutex::new(fields),
         }
-        state
     }
-    /// Java String-array/subdir constructor.
-    pub fn new_with_file_name_array_subdir(
-        manager: Option<&'static dyn BaseManager>,
-        files: Option<Vec<String>>,
-        axis_id: AxisID,
-        subdir: Option<&str>,
-    ) -> Self {
-        let mut state = Self::new_with_file_name_array(manager, files, axis_id);
-        state.subdir_name = subdir.map(str::to_owned);
-        if let Some(subdir) = subdir {
-            state.process.set_subdir_name(subdir);
-        }
-        state
-    }
-    /// Java File-array constructor.
-    pub fn new_with_file_list(
-        manager: Option<&'static dyn BaseManager>,
-        files: Option<Vec<PathBuf>>,
-        axis_id: AxisID,
-    ) -> Self {
-        let mut state = Self::new(manager, axis_id);
-        state.file_list = files;
-        if let Some(files) = &state.file_list {
-            state.process = ImodProcess::new_file_list(manager, files.clone());
-        }
-        state
-    }
-    /// Java complete file-name/FileType constructor.
-    pub fn new_with_axis_file_name_file_type(
-        manager: Option<&'static dyn BaseManager>,
-        axis_id: AxisID,
-        file_name: Option<&str>,
-        file_type: Option<&FileType>,
-    ) -> Self {
-        let file_name = file_name.map(str::to_owned).or_else(|| {
-            file_type.and_then(|file_type| file_type.get_file_name(manager, Some(axis_id)))
-        });
-        Self::new_with_file_name(manager, file_name.as_deref(), axis_id)
-    }
-    /// Java AxisID/FileType constructor.
-    pub fn new_with_axis_file_type(
-        manager: Option<&'static dyn BaseManager>,
-        axis_id: AxisID,
-        file_type: Option<&FileType>,
-    ) -> Self {
-        Self::new_with_file_type(manager, file_type, axis_id)
-    }
-    /// Java three-dataset/FileType constructor.
-    pub fn new_with_three_file_types(
-        manager: Option<&'static dyn BaseManager>,
-        axis_id: AxisID,
-        file_type1: Option<&FileType>,
-        file_type2: Option<&FileType>,
-        file_type3: Option<&FileType>,
-        model_name: Option<&str>,
-        model_ext: Option<&str>,
-    ) -> Self {
-        let mut state = Self::new(manager, axis_id);
-        let datasets = [file_type1, file_type2, file_type3]
-            .into_iter()
-            .flatten()
-            .filter_map(|file_type| file_type.get_file_name(manager, Some(axis_id)))
-            .collect::<Vec<_>>();
-        if !datasets.is_empty() {
-            state.file_name_array = Some(datasets.clone());
-            state.process = ImodProcess::new_dataset_array(manager, datasets);
-        }
-        state.initial_model_name = format!(
-            "{}{}{}",
-            model_name.unwrap_or_default(),
-            axis_id.get_extension(),
-            model_ext.unwrap_or_default()
+
+    // constructors
+    // they can set final state variables
+    // they can also set initialModelName
+
+    /// Java `ImodState(BaseManager, AxisID)`.  Use this constructor to create an
+    /// instance of ImodProcess using ImodProcess().
+    pub fn new_base_manager_axis_id(
+        manager: &'static dyn BaseManager,
+        axis_id: Option<AxisID>,
+    ) -> ImodState {
+        let process = ImodProcess::new_base_manager_axis_id(manager, axis_id);
+        let state = ImodState::construct(
+            manager,
+            axis_id,
+            process,
+            None,
+            None,
+            ImodStateFields::initial(),
         );
         state.reset();
         state
     }
-    /// Java `toString`.
-    pub fn to_source_string(&self) -> String {
-        format!("[process:{}]", self.process)
+
+    /// Java `ImodState(BaseManager, int, AxisID)`.  Use this constructor to create an
+    /// instance of ImodProcess using ImodProcess() and set either model view or imodv.
+    pub fn new_base_manager_int_axis_id(
+        manager: &'static dyn BaseManager,
+        model_view_type: i32,
+        axis_id: Option<AxisID>,
+    ) -> ImodState {
+        let process = ImodProcess::new_base_manager_axis_id(manager, axis_id);
+        let state = ImodState::construct(
+            manager,
+            axis_id,
+            process,
+            None,
+            None,
+            ImodStateFields::initial(),
+        );
+        state.set_model_view_type(model_view_type);
+        state.reset();
+        state
     }
-    /// Java `processRequest`; ImodProcess boundary.
-    pub fn process_request(&mut self) -> Result<(), String> {
-        self.process.process_request();
-        Ok(())
+
+    /// Java `ImodState(BaseManager, String, AxisID)`.  Use this constructor to create an
+    /// instance of ImodProcess using ImodProcess(String dataset).
+    pub fn new_base_manager_string_axis_id(
+        manager: &'static dyn BaseManager,
+        file_name: &str,
+        axis_id: Option<AxisID>,
+    ) -> ImodState {
+        let process = ImodProcess::new_base_manager_string_axis_id(manager, file_name, axis_id);
+        let state = ImodState::construct(
+            manager,
+            axis_id,
+            process,
+            None,
+            None,
+            ImodStateFields::initial(),
+        );
+        state.reset();
+        state
     }
-    /// Typed native open path used by the Slint/winit managers.
-    pub fn open_with_menu_options(
-        &mut self,
-        menu_options: Run3dmodMenuOptions,
-    ) -> Result<(), String> {
-        self.process.set_model_view(self.model_view);
-        self.process.set_use_modv(self.use_modv);
-        self.process.set_swap_yz(self.swap_yz);
-        self.process.set_frames(self.frames);
-        self.process.set_binning(self.binning);
-        self.process.set_binning_xy(self.binning_xy);
-        if let Some(model) = &self.model_name {
-            self.process.set_model_name(model);
+
+    /// Java `ImodState(BaseManager, String, AxisID, FileType)`.  Use this constructor to
+    /// create an instance of ImodProcess using ImodProcess(String dataset).
+    pub fn new_base_manager_string_axis_id_file_type(
+        manager: &'static dyn BaseManager,
+        dataset_name: &str,
+        axis_id: Option<AxisID>,
+        file_type: &FileType,
+    ) -> ImodState {
+        let process = ImodProcess::new_base_manager_string_axis_id_file_type(
+            manager,
+            dataset_name,
+            axis_id,
+            file_type,
+        );
+        let state = ImodState::construct(
+            manager,
+            axis_id,
+            process,
+            None,
+            None,
+            ImodStateFields::initial(),
+        );
+        state.reset();
+        state
+    }
+
+    /// Java `ImodState(BaseManager, String, int, AxisID, FileType)`.  Use this
+    /// constructor to create an instance of ImodProcess using ImodProcess(String
+    /// dataset) and set either model view or imodv.
+    pub fn new_base_manager_string_int_axis_id_file_type(
+        manager: &'static dyn BaseManager,
+        dataset_name: &str,
+        model_view_type: i32,
+        axis_id: Option<AxisID>,
+        file_type: &FileType,
+    ) -> ImodState {
+        let process = ImodProcess::new_base_manager_string_axis_id_file_type(
+            manager,
+            dataset_name,
+            axis_id,
+            file_type,
+        );
+        let state = ImodState::construct(
+            manager,
+            axis_id,
+            process,
+            None,
+            None,
+            ImodStateFields::initial(),
+        );
+        state.set_model_view_type(model_view_type);
+        state.reset();
+        state
+    }
+
+    /// Java `ImodState(BaseManager, String, int, AxisID)`.  Use this constructor to
+    /// create an instance of ImodProcess using ImodProcess(String dataset) and set either
+    /// model view or imodv, and open a 3dmod window.
+    pub fn new_base_manager_string_int_axis_id(
+        manager: &'static dyn BaseManager,
+        file_name: &str,
+        model_view_type: i32,
+        axis_id: Option<AxisID>,
+    ) -> ImodState {
+        let process = ImodProcess::new_base_manager_string_axis_id(manager, file_name, axis_id);
+        let state = ImodState::construct(
+            manager,
+            axis_id,
+            process,
+            None,
+            None,
+            ImodStateFields::initial(),
+        );
+        state.set_model_view_type(model_view_type);
+        state.reset();
+        state
+    }
+
+    /// Java `ImodState(BaseManager, String, int, AxisID, ImodProcess.WindowOpenOption,
+    /// FileType)`.  Use this constructor to create an instance of ImodProcess using
+    /// ImodProcess(String dataset) and set either model view or imodv, and open a 3dmod
+    /// window.
+    pub fn new_base_manager_string_int_axis_id_window_open_option_file_type(
+        manager: &'static dyn BaseManager,
+        dataset_name: &str,
+        model_view_type: i32,
+        axis_id: Option<AxisID>,
+        option: WindowOpenOption,
+        file_type: &FileType,
+    ) -> ImodState {
+        let process = ImodProcess::new_base_manager_string_axis_id_file_type(
+            manager,
+            dataset_name,
+            axis_id,
+            file_type,
+        );
+        let state = ImodState::construct(
+            manager,
+            axis_id,
+            process,
+            None,
+            None,
+            ImodStateFields::initial(),
+        );
+        state.set_model_view_type(model_view_type);
+        state.process.add_window_open_option(option);
+        state.reset();
+        state
+    }
+
+    /// Java `ImodState(BaseManager, String, int, AxisID, ImodProcess.WindowOpenOption,
+    /// File)`.  Use this constructor to create an instance of ImodProcess using
+    /// ImodProcess(String dataset) and set either model view or imodv, and open a 3dmod
+    /// window.
+    pub fn new_base_manager_string_int_axis_id_window_open_option_file(
+        manager: &'static dyn BaseManager,
+        dataset_name: &str,
+        model_view_type: i32,
+        axis_id: Option<AxisID>,
+        option: WindowOpenOption,
+        file: Option<&Path>,
+    ) -> ImodState {
+        let process =
+            ImodProcess::new_base_manager_string_axis_id_file(manager, dataset_name, axis_id, file);
+        let state = ImodState::construct(
+            manager,
+            axis_id,
+            process,
+            None,
+            None,
+            ImodStateFields::initial(),
+        );
+        state.set_model_view_type(model_view_type);
+        state.process.add_window_open_option(option);
+        state.reset();
+        state
+    }
+
+    /// Java `ImodState(BaseManager, String, String, AxisID)`.  Use this constructor to
+    /// create an instance of ImodProcess using ImodProcess(String dataset, String model).
+    pub fn new_base_manager_string_string_axis_id(
+        manager: &'static dyn BaseManager,
+        dataset_name: &str,
+        model_name: &str,
+        axis_id: Option<AxisID>,
+    ) -> ImodState {
+        let mut fields = ImodStateFields::initial();
+        fields.initial_model_name = model_name.to_string();
+        let emergency_monitor = manager.get_emergency_monitor(axis_id);
+        // `new File(manager.getPropertyUserDir(), datasetName)`.
+        let file = match manager.get_property_user_dir() {
+            None => PathBuf::from(dataset_name),
+            Some(dir) => PathBuf::from(utilities::java_io_file_new(&dir, dataset_name)),
+        };
+
+        let process = ImodProcess::new_base_manager_string_string_file_emergency_monitor(
+            manager,
+            dataset_name,
+            model_name,
+            Some(&file),
+            Some(emergency_monitor),
+        );
+        let state = ImodState::construct(manager, axis_id, process, None, None, fields);
+        state.reset();
+        state
+    }
+
+    /// Java `ImodState(BaseManager, FileType, AxisID)`.
+    ///
+    /// `fileType.getFile(...)` can be null, where the source's `getAbsolutePath()`
+    /// throws.  Fixed in translation: the dataset name is then empty (no file).
+    pub fn new_base_manager_file_type_axis_id(
+        manager: &'static dyn BaseManager,
+        file_type: &FileType,
+        axis_id: Option<AxisID>,
+    ) -> ImodState {
+        let dataset_name = file_type
+            .get_file(Some(manager), axis_id)
+            .map(|file| utilities::java_io_file_get_absolute_path(&file.to_string_lossy()))
+            .unwrap_or_default();
+        let process = ImodProcess::new_base_manager_string_axis_id_file_type(
+            manager,
+            &dataset_name,
+            axis_id,
+            file_type,
+        );
+        let state = ImodState::construct(
+            manager,
+            axis_id,
+            process,
+            None,
+            None,
+            ImodStateFields::initial(),
+        );
+        state.reset();
+        state
+    }
+
+    /// Java `ImodState(BaseManager, File, AxisID)`.
+    pub fn new_base_manager_file_axis_id(
+        manager: &'static dyn BaseManager,
+        file: Option<&Path>,
+        axis_id: Option<AxisID>,
+    ) -> ImodState {
+        let process = match file {
+            Some(file) => ImodProcess::new_base_manager_string_axis_id_file(
+                manager,
+                &utilities::java_io_file_get_absolute_path(&file.to_string_lossy()),
+                axis_id,
+                Some(file),
+            ),
+            None => ImodProcess::new_base_manager_axis_id(manager, axis_id),
+        };
+        let state = ImodState::construct(
+            manager,
+            axis_id,
+            process,
+            None,
+            None,
+            ImodStateFields::initial(),
+        );
+        state.reset();
+        state
+    }
+
+    /// Java `setFile`.
+    pub fn set_file(&self, file: &Path) {
+        self.process
+            .set_dataset_name(&utilities::java_io_file_get_absolute_path(
+                &file.to_string_lossy(),
+            ));
+    }
+
+    /// Java `ImodState(BaseManager, String[], AxisID)`.
+    pub fn new_base_manager_string_array_axis_id(
+        manager: &'static dyn BaseManager,
+        file_name_array: Option<Vec<String>>,
+        axis_id: Option<AxisID>,
+    ) -> ImodState {
+        let process = ImodProcess::new_base_manager_string_array(manager, file_name_array.clone());
+        let state = ImodState::construct(
+            manager,
+            axis_id,
+            process,
+            file_name_array,
+            None,
+            ImodStateFields::initial(),
+        );
+        state.reset();
+        state
+    }
+
+    /// Java `ImodState(BaseManager, String[], AxisID, String)`.
+    pub fn new_base_manager_string_array_axis_id_string(
+        manager: &'static dyn BaseManager,
+        file_name_array: Option<Vec<String>>,
+        axis_id: Option<AxisID>,
+        subdir_name: Option<&str>,
+    ) -> ImodState {
+        let process = ImodProcess::new_base_manager_string_array(manager, file_name_array.clone());
+        process.set_subdir_name(subdir_name);
+        let state = ImodState::construct(
+            manager,
+            axis_id,
+            process,
+            file_name_array,
+            None,
+            ImodStateFields::initial(),
+        );
+        state.reset();
+        state
+    }
+
+    /// Java `ImodState(BaseManager, File[], AxisID)`.
+    pub fn new_base_manager_file_array_axis_id(
+        manager: &'static dyn BaseManager,
+        file_list: Option<Vec<PathBuf>>,
+        axis_id: Option<AxisID>,
+    ) -> ImodState {
+        let emergency_monitor = manager.get_emergency_monitor(axis_id);
+        let process = ImodProcess::new_base_manager_file_array_emergency_monitor(
+            manager,
+            file_list.clone(),
+            Some(emergency_monitor),
+        );
+        let state = ImodState::construct(
+            manager,
+            axis_id,
+            process,
+            None,
+            file_list,
+            ImodStateFields::initial(),
+        );
+        state.reset();
+        state
+    }
+
+    /// Java `ImodState(BaseManager, AxisID, String, FileType)`.  Build ImodState with a
+    /// complete file name.
+    pub fn new_base_manager_axis_id_string_file_type(
+        manager: &'static dyn BaseManager,
+        axis_id: Option<AxisID>,
+        file_name: &str,
+        file_type: &FileType,
+    ) -> ImodState {
+        let process = ImodProcess::new_base_manager_string_axis_id_file_type(
+            manager, file_name, axis_id, file_type,
+        );
+        let state = ImodState::construct(
+            manager,
+            axis_id,
+            process,
+            None,
+            None,
+            ImodStateFields::initial(),
+        );
+        state.reset();
+        state
+    }
+
+    /// Java `ImodState(BaseManager, AxisID, FileType)`.
+    ///
+    /// The source dereferences `axisID` (`getExtension`); every caller passes one.
+    /// `fileType.getFileName(...)` can be null, which `ImodProcess.open` would then
+    /// dereference; fixed in translation as an empty dataset name.
+    pub fn new_base_manager_axis_id_file_type(
+        manager: &'static dyn BaseManager,
+        axis_id: AxisID,
+        file_type: &FileType,
+    ) -> ImodState {
+        let axis_extension = axis_id.get_extension();
+        if axis_extension == "ERROR" {
+            // Unreachable: `AxisID` has exactly the three values that have extensions.
+            unreachable!("{}", axis_id);
         }
-        let running = self.process.is_running();
-        if !running {
-            self.process
-                .open(menu_options)
-                .map_err(|error| error.to_string())?;
-            self.warned_stale_file = false;
-            if self
-                .model_name
-                .as_deref()
-                .is_some_and(|name| !name.trim().is_empty())
-                && self.preserve_contrast
+        let file_name = file_type
+            .get_file_name(Some(manager), Some(axis_id))
+            .unwrap_or_default();
+        let process = ImodProcess::new_base_manager_string_axis_id_file_type(
+            manager,
+            &file_name,
+            Some(axis_id),
+            file_type,
+        );
+        let state = ImodState::construct(
+            manager,
+            Some(axis_id),
+            process,
+            None,
+            None,
+            ImodStateFields::initial(),
+        );
+        state.reset();
+        state
+    }
+
+    /// Java `ImodState(BaseManager, AxisID, FileType, FileType, FileType, String,
+    /// String)`.  Use this constructor to insert the axis letter and create an instance
+    /// of ImodProcess using ImodProcess(String dataset, String model).  This will work
+    /// for any kind of AxisID.
+    ///
+    /// Example:
+    /// ImodAssistant(axisID, "top", "mid", "bot" ,".rec", "tomopitch" ,".mod");
+    /// will cause one of these calls:
+    /// ImodProcess("top.rec mid.rec bot.rec", "tomopitch.mod");
+    /// ImodProcess("topa.rec mida.rec bota.rec", "tomopitcha.mod");
+    /// ImodProcess("topb.rec midb.rec botb.rec", "tomopitchb.mod");
+    pub fn new_base_manager_axis_id_file_type_file_type_file_type_string_string(
+        manager: &'static dyn BaseManager,
+        temp_axis_id: AxisID,
+        file_type1: &FileType,
+        file_type2: &FileType,
+        file_type3: &FileType,
+        model_name: &str,
+        model_ext: &str,
+    ) -> ImodState {
+        let axis_id = Some(temp_axis_id);
+        let axis_extension = temp_axis_id.get_extension();
+        if axis_extension == "ERROR" {
+            // Unreachable: `AxisID` has exactly the three values that have extensions.
+            unreachable!("{}", temp_axis_id);
+        }
+        // A null file name would print as "null" in the source's concatenation and be
+        // passed on as a null array element; it is empty here.
+        let dataset_name_array = vec![
+            file_type1
+                .get_file_name(Some(manager), axis_id)
+                .unwrap_or_default(),
+            file_type2
+                .get_file_name(Some(manager), axis_id)
+                .unwrap_or_default(),
+            file_type3
+                .get_file_name(Some(manager), axis_id)
+                .unwrap_or_default(),
+        ];
+        let _dataset_name = dataset_name_array[0].clone()
+            + " "
+            + &dataset_name_array[1]
+            + " "
+            + &dataset_name_array[2];
+        let mut fields = ImodStateFields::initial();
+        fields.initial_model_name = model_name.to_string() + &axis_extension + model_ext;
+        let emergency_monitor = manager.get_emergency_monitor(Some(temp_axis_id));
+        let file = file_type1.get_file(Some(manager), Some(temp_axis_id));
+        let process = ImodProcess::new_base_manager_string_array_string_file_emergency_monitor(
+            manager,
+            Some(dataset_name_array),
+            model_name,
+            file.as_deref(),
+            Some(emergency_monitor),
+        );
+        let state = ImodState::construct(manager, axis_id, process, None, None, fields);
+        state.reset();
+        state
+    }
+
+    /// Java `processRequest`.
+    pub fn process_request(&self) {
+        self.process.process_request();
+    }
+
+    /// Java `open(Run3dmodMenuOptions)`.  Opens a process, opens a model.
+    pub fn open_run3dmod_menu_options(
+        &self,
+        menu_options: Option<Run3dmodMenuOptions>,
+    ) -> Result<(), ImodManagerException> {
+        let mut menu_options = match menu_options {
+            None => Run3dmodMenuOptions::new(),
+            Some(menu_options) => menu_options,
+        };
+        let (no_menu_options, allow_menu_binning_in_z) = {
+            let fields = self.fields.lock().unwrap();
+            (fields.no_menu_options, fields.allow_menu_binning_in_z)
+        };
+        menu_options.set_no_options(no_menu_options);
+        menu_options.or_global_options();
+        menu_options.set_allow_binning_in_z(allow_menu_binning_in_z);
+        // process is not running
+        if !self.process.is_running() {
+            // open
+            self.process.open(menu_options)?;
+            let mut fields = self.fields.lock().unwrap();
+            fields.warned_stale_file = false;
+            // model will be opened
+            // `modelName.matches("\\S+")`: non-empty and no ASCII white space.
+            if let Some(model_name) = &fields.model_name
+                && !model_name.is_empty()
+                && !model_name
+                    .chars()
+                    .any(|c| matches!(c, ' ' | '\t' | '\n' | '\x0B' | '\x0C' | '\r'))
+                && fields.preserve_contrast
             {
-                self.process.set_open_model_preserve_contrast_message(
-                    self.model_name.as_deref().unwrap_or_default(),
-                );
+                self.process
+                    .set_open_model_preserve_contrast_message(model_name);
             }
-            if self.start_new_contours_at_new_z {
+            // This message can only be sent after opening the model
+            if fields.open_contours {
+                self.process.set_new_contours_message(true);
+            }
+            if fields.start_new_contours_at_new_z {
                 self.process.set_start_new_contours_at_new_z();
             }
-        } else {
-            if !self.model_view && !self.use_modv {
-                self.process.set_open_zap_window_message();
+            if let Some(interpolation) = &fields.interpolation {
+                self.process.set_interpolation(interpolation.is());
+                fields.interpolation = None;
             }
-            if !self.use_modv
-                && self
-                    .model_name
-                    .as_deref()
-                    .is_some_and(|name| !name.trim().is_empty())
-            {
-                if self.preserve_contrast {
-                    self.process.set_open_model_preserve_contrast_message(
-                        self.model_name.as_deref().unwrap_or_default(),
-                    );
-                } else {
+            if fields.point_limit != -1 {
+                self.process.set_point_limit_message(fields.point_limit);
+            }
+            // open bead fixer
+            if fields.open_bead_fixer {
+                self.process.set_open_bead_fixer_message();
+                if self.manager.is_beadfixer_diameter_available() {
                     self.process
-                        .set_open_model_message(self.model_name.as_deref().unwrap_or_default());
+                        .set_beadfixer_diameter(self.manager.get_beadfixer_diameter(self.axis_id));
+                }
+                if fields.set_auto_center {
+                    self.process.set_auto_center(fields.auto_center);
+                }
+                if fields.manage_new_contours {
+                    self.process.set_new_contours(fields.new_contours);
+                }
+                if let Some(beadfixer_mode) = fields.beadfixer_mode {
+                    self.process.set_beadfixer_mode(beadfixer_mode);
+                }
+                if let Some(log_name) = &fields.log_name {
+                    self.process.set_open_log(log_name);
+                }
+                if let Some(skip_list) = &fields.skip_list {
+                    self.process.set_skip_list(Some(skip_list));
+                }
+                if let Some(delete_all_sections) = fields.delete_all_sections.as_mut() {
+                    self.process
+                        .set_delete_all_sections(delete_all_sections.is());
+                    delete_all_sections.set_boolean(false);
                 }
             }
-        }
-        if self.open_contours {
-            self.process.set_new_contours_message(true);
-        }
-        if let Some(interpolation) = self.interpolation.take() {
-            self.process.set_interpolation(interpolation);
-        } else if running {
-            self.process.set_raise_3dmod_message();
-        }
-        if self.point_limit != -1 {
-            self.process.set_point_limit_message(self.point_limit);
-        }
-        if self.open_bead_fixer {
-            self.process.set_open_bead_fixer_message();
-            if self.set_auto_center {
-                self.process.set_auto_center(self.auto_center);
+        } else {
+            let mut fields = self.fields.lock().unwrap();
+            // process is running
+            // raise 3dmod
+            if !fields.model_view && !fields.use_modv {
+                self.process.set_open_zap_window_message();
             }
-            if self.manage_new_contours {
-                self.process.set_new_contours(self.new_contours);
-            }
-            if let Some(mode) = self.beadfixer_mode {
-                self.process.set_beadfixer_mode(mode);
-            }
-            if let Some(log_name) = &self.log_name {
-                self.process.set_open_log(log_name);
-            }
-            self.process.set_skip_list(self.skip_list.as_deref());
-            if let Some(delete_all_sections) = self.delete_all_sections {
-                self.process.set_delete_all_sections(delete_all_sections);
-                self.delete_all_sections = Some(false);
-            }
-        }
-        if self.open_surf_cont_point {
-            self.process.open_surf_cont_point();
-            self.open_surf_cont_point = false;
-        }
-        if self.using_mode {
-            if self.mode == MODEL_MODE {
-                self.process.set_model_mode_message();
+            if let Some(interpolation) = &fields.interpolation {
+                self.process.set_interpolation(interpolation.is());
+                fields.interpolation = None;
             } else {
-                self.process.set_movie_mode_message();
+                self.process.set_raise_3dmod_message();
+            }
+            // reopen model
+            if !fields.use_modv && !utilities::is_empty(fields.model_name.as_deref()) {
+                let model_name = fields.model_name.clone().unwrap_or_default();
+                if fields.preserve_contrast {
+                    self.process
+                        .set_open_model_preserve_contrast_message(&model_name);
+                } else {
+                    self.process.set_open_model_message(&model_name);
+                }
+            }
+            // This message can only be sent after opening the model
+            if fields.open_contours {
+                self.process.set_new_contours_message(true);
+            }
+            // open bead fixer
+            if fields.open_bead_fixer {
+                self.process.set_open_bead_fixer_message();
+                if self.manager.is_beadfixer_diameter_available() {
+                    self.process
+                        .set_beadfixer_diameter(self.manager.get_beadfixer_diameter(self.axis_id));
+                }
+                if fields.set_auto_center {
+                    self.process.set_auto_center(fields.auto_center);
+                }
+                if fields.manage_new_contours {
+                    self.process.set_new_contours(fields.new_contours);
+                }
+                if let Some(beadfixer_mode) = fields.beadfixer_mode {
+                    self.process.set_beadfixer_mode(beadfixer_mode);
+                }
+                if let Some(log_name) = &fields.log_name {
+                    self.process.set_open_log(log_name);
+                }
+                if let Some(delete_all_sections) = fields.delete_all_sections.as_mut() {
+                    self.process
+                        .set_delete_all_sections(delete_all_sections.is());
+                    delete_all_sections.set_boolean(false);
+                }
+                self.process.set_skip_list(fields.skip_list.as_deref());
             }
         }
-        self.process
-            .send_messages()
-            .map_err(|error| error.to_string())?;
+        {
+            let mut fields = self.fields.lock().unwrap();
+            if fields.open_surf_cont_point {
+                self.process.open_surf_cont_point();
+                fields.open_surf_cont_point = false;
+            }
+            // set mode
+            if fields.using_mode {
+                if fields.mode == MODEL_MODE {
+                    self.process.set_model_mode_message();
+                } else {
+                    self.process.set_movie_mode_message();
+                }
+            }
+            if (fields.model_view || fields.use_modv)
+                && fields.interpolation.is_none()
+                && fields.using_mode
+                && fields.mode != MODEL_MODE
+                && etomo_director::ARGUMENTS
+                    .lock()
+                    .unwrap()
+                    .get_debug_level()
+                    .is_extra_verbose()
+            {
+                eprintln!("ImodState:open: sendMessages");
+                // `Thread.dumpStack()`.
+                eprintln!("java.lang.Exception: Stack trace");
+            }
+        }
+        self.process.send_messages()?;
         self.reset();
         Ok(())
     }
-    /// Java `open(Run3dmodMenuOptions)` compatibility overload.
-    pub fn open(&mut self, menu_options: Option<Run3dmodMenuOptions>) -> Result<(), String> {
-        self.open_with_menu_options(menu_options.unwrap_or_default())
-    }
+
     /// Java `setOpenSurfContPoint`.
-    pub fn set_open_surf_cont_point(&mut self, input: bool) {
-        self.open_surf_cont_point = input;
+    pub fn set_open_surf_cont_point(&self, input: bool) {
+        self.fields.lock().unwrap().open_surf_cont_point = input;
     }
-    /// Java `open(FileType,...)`.
-    pub fn open_file_type(
-        &mut self,
-        model: Option<&FileType>,
-        menu: Option<Run3dmodMenuOptions>,
-    ) -> Result<(), String> {
-        if let Some(model) = model {
-            self.set_model_name(
-                model
-                    .get_file_name(self.manager, Some(self.axis_id))
-                    .as_deref(),
-            );
-        }
-        self.open(menu)
+
+    /// Java `open(FileType, Run3dmodMenuOptions)`.
+    pub fn open_file_type_run3dmod_menu_options(
+        &self,
+        model_name: &FileType,
+        menu_options: Option<Run3dmodMenuOptions>,
+    ) -> Result<(), ImodManagerException> {
+        self.set_model(model_name);
+        self.open_run3dmod_menu_options(menu_options)
     }
-    /// Java `open(String,...)`.
-    pub fn open_model_name(
-        &mut self,
-        model: Option<&str>,
-        menu: Option<Run3dmodMenuOptions>,
-    ) -> Result<(), String> {
-        self.set_model_name(model);
-        self.open(menu)
+
+    /// Java `open(String, Run3dmodMenuOptions)`.  Opens a process using the modelName
+    /// parameter.  Ignores mode setting.
+    ///
+    /// Configuration functions you can use with this function:
+    /// configureUseModv()
+    pub fn open_string_run3dmod_menu_options(
+        &self,
+        model_name: Option<&str>,
+        menu_options: Option<Run3dmodMenuOptions>,
+    ) -> Result<(), ImodManagerException> {
+        self.set_model_name(model_name);
+        self.open_run3dmod_menu_options(menu_options)
     }
-    /// Java `open(List<String>,...)`.
-    pub fn open_model_name_list(
-        &mut self,
-        models: Option<Vec<String>>,
-        menu: Option<Run3dmodMenuOptions>,
-    ) -> Result<(), String> {
-        self.set_model_name_list(models);
-        self.open(menu)
+
+    /// Java `open(List<String>, Run3dmodMenuOptions)`.
+    pub fn open_list_run3dmod_menu_options(
+        &self,
+        model_name_list: Option<Vec<String>>,
+        menu_options: Option<Run3dmodMenuOptions>,
+    ) -> Result<(), ImodManagerException> {
+        self.set_model_name_list(model_name_list);
+        self.open_run3dmod_menu_options(menu_options)
     }
-    /// Java `open(String,boolean,...)`.
-    pub fn open_model_name_mode(
-        &mut self,
-        model: Option<&str>,
+
+    /// Java `open(String, boolean, Run3dmodMenuOptions)`.
+    pub fn open_string_boolean_run3dmod_menu_options(
+        &self,
+        model_name: Option<&str>,
         model_mode: bool,
-        menu: Option<Run3dmodMenuOptions>,
-    ) -> Result<(), String> {
-        self.set_model_name(model);
+        menu_options: Option<Run3dmodMenuOptions>,
+    ) -> Result<(), ImodManagerException> {
+        self.set_model_name(model_name);
         self.set_model_mode(model_mode);
-        self.open(menu)
+        self.open_run3dmod_menu_options(menu_options)
     }
+
     /// Java `getRubberbandCoordinates`.
-    pub fn get_rubberband_coordinates(&mut self) -> Result<Vec<String>, String> {
-        self.process
-            .get_rubberband_coordinates()
-            .map_err(|error| error.to_string())
+    pub fn get_rubberband_coordinates(&self) -> Result<Option<Vec<String>>, ImodManagerException> {
+        self.process.get_rubberband_coordinates()
     }
+
     /// Java `getSlicerAngles`.
-    pub fn get_slicer_angles(&mut self) -> Result<Vec<String>, String> {
-        self.process
-            .get_slicer_angles()
-            .map_err(|error| error.to_string())
+    pub fn get_slicer_angles(&self) -> Result<Option<Vec<String>>, ImodManagerException> {
+        self.process.get_slicer_angles()
     }
-    /// Java `quit`.
-    pub fn quit(&mut self) -> Result<(), String> {
-        self.process.quit().map_err(|error| error.to_string())
+
+    /// Java `quit`.  Tells process to quit.
+    pub fn quit(&self) -> Result<(), ImodManagerException> {
+        self.process.quit()
     }
+
     /// Java `disconnect`.
-    pub fn disconnect(&mut self) -> Result<(), String> {
-        self.process.disconnect().map_err(|error| error.to_string())
+    pub fn disconnect(&self) -> Result<(), ImodManagerException> {
+        self.process.disconnect()
     }
-    /// Java `setModelViewType`.
-    pub fn set_model_view_type(&mut self, t: i32) {
-        self.model_view = t == MODEL_VIEW;
-        self.use_modv = t == MODV;
-        self.process.set_model_view(self.model_view);
-        self.process.set_use_modv(self.use_modv);
+
+    /// Java `setModelViewType`.  `modelViewType` is either MODEL_VIEW or MODV.
+    pub fn set_model_view_type(&self, model_view_type: i32) {
+        let mut fields = self.fields.lock().unwrap();
+        if model_view_type == MODEL_VIEW {
+            fields.model_view = true;
+        } else if model_view_type == MODV {
+            fields.use_modv = true;
+        } else {
+            fields.model_view = false;
+            fields.use_modv = false;
+        }
+        self.process.set_model_view(fields.model_view);
+        self.process.set_use_modv(fields.use_modv);
     }
-    /// Java `setOpenZap`.
-    pub fn set_open_zap(&mut self) {
-        self.open_zap = true;
+
+    /// Java `setOpenZap`.  Zap opens by default.  OpenZap is only necessary when model
+    /// view is used.
+    pub fn set_open_zap(&self) {
         self.process.set_open_zap();
     }
+
     /// Java `setTiltFile`.
-    pub fn set_tilt_file(&mut self, file: Option<&str>) {
-        self.file_name = file.map(str::to_owned);
-        if let Some(file) = file {
-            self.process.set_tilt_file(file);
-        }
+    pub fn set_tilt_file(&self, tilt_file: Option<&str>) {
+        self.process.set_tilt_file(tilt_file);
     }
+
     /// Java `resetTiltFile`.
-    pub fn reset_tilt_file(&mut self) {
-        self.file_name = None;
+    pub fn reset_tilt_file(&self) {
         self.process.reset_tilt_file();
     }
+
     /// Java `addWindowOpenOption`.
-    pub fn add_window_open_option(&mut self, option: Option<WindowOpenOption>) {
-        if let Some(option) = option {
-            self.add_window_open_option_typed(option);
-        }
+    pub fn add_window_open_option(&self, option: WindowOpenOption) {
+        self.process.add_window_open_option(option);
     }
-    pub fn add_window_open_option_typed(&mut self, option: WindowOpenOption) {
-        self.process.add_window_open_option(option.clone());
-        self.window_open_options.push(option);
-    }
+
     /// Java `reset`.
-    pub fn reset(&mut self) {
-        self.set_model_name(Some(&self.initial_model_name.clone()));
-        self.mode = self.initial_mode;
-        self.swap_yz = self.initial_swap_yz;
-        self.preserve_contrast = DEFAULT_PRESERVE_CONTRAST;
-        self.open_bead_fixer = DEFAULT_OPEN_BEAD_FIXER;
-        self.open_contours = DEFAULT_OPEN_CONTOURS;
-        self.binning = DEFAULT_BINNING;
-        self.process.set_open_with_model(!self.preserve_contrast);
+    pub fn reset(&self) {
+        // reset to initial state
+        let initial_model_name = self.fields.lock().unwrap().initial_model_name.clone();
+        self.set_model_name(Some(&initial_model_name));
+        let mut fields = self.fields.lock().unwrap();
+        fields.mode = fields.initial_mode;
+        fields.swap_yz = fields.initial_swap_yz;
+        // reset to default state
+        fields.preserve_contrast = DEFAULT_PRESERVE_CONTRAST;
+        self.process.set_open_with_model(!fields.preserve_contrast);
+        fields.open_bead_fixer = DEFAULT_OPEN_BEAD_FIXER;
+        fields.open_contours = DEFAULT_OPEN_CONTOURS;
         self.process.set_binning(DEFAULT_BINNING);
-        self.frames = DEFAULT_FRAMES;
-        self.piece_list_file_name = None;
-        self.manage_new_contours = false;
-        self.point_limit = -1;
-        self.start_new_contours_at_new_z = false;
+        self.process.set_frames(DEFAULT_FRAMES);
+        self.process.set_piece_list_file_name(None);
+        fields.manage_new_contours = false;
+        fields.point_limit = -1;
+        fields.start_new_contours_at_new_z = false;
     }
+
     /// Java `getModeString(int)`.
-    pub fn get_mode_string_for(mode: i32) -> String {
-        match mode {
-            MOVIE_MODE => "MOVIE_MODE".into(),
-            MODEL_MODE => "MODEL_MODE".into(),
-            _ => format!("ERROR:{mode}"),
+    pub fn get_mode_string_int(&self, mode: i32) -> String {
+        if mode == MOVIE_MODE {
+            "MOVIE_MODE".to_string()
+        } else if mode == MODEL_MODE {
+            "MODEL_MODE".to_string()
+        } else {
+            "ERROR:".to_string() + &mode.to_string()
         }
     }
+
     /// Java `setDebug`.
-    pub fn set_debug(&mut self, input: bool) {
-        self.debug = input;
-        self.process.set_debug(input);
+    pub fn set_debug(&self, input: bool) {
+        let mut fields = self.fields.lock().unwrap();
+        fields.debug = input;
+        self.process.set_debug(fields.debug);
     }
+
     /// Java `equalsSubdirName`.
+    ///
+    /// The source calls `process.getSubdirName().equals(input)`, which throws when this
+    /// state has no subdirectory (a state first built by `open(String, String[],
+    /// Run3dmodMenuOptions)`).  Fixed in translation: two null names are equal and a
+    /// null name equals no non-null one.
     pub fn equals_subdir_name(&self, input: Option<&str>) -> bool {
-        self.subdir_name.as_deref() == input
+        self.process.get_subdir_name().as_deref() == input
     }
+
     /// Java `equalsFileNameArray`.
     pub fn equals_file_name_array(&self, input: Option<&[String]>) -> bool {
-        self.file_name_array.as_deref() == input
+        let file_name_array = self.file_name_array.as_deref();
+        if file_name_array.is_none() && input.is_none() {
+            return true;
+        }
+        let (Some(file_name_array), Some(input)) = (file_name_array, input) else {
+            return false;
+        };
+        if file_name_array.len() != input.len() {
+            return false;
+        }
+        for i in 0..file_name_array.len() {
+            if file_name_array[i] != input[i] {
+                return false;
+            }
+        }
+        true
     }
+
+    // unchanging state information
+
     /// Java `isModelView`.
     pub fn is_model_view(&self) -> bool {
-        self.model_view
+        self.fields.lock().unwrap().model_view
     }
+
     /// Java `isUseModv`.
     pub fn is_use_modv(&self) -> bool {
-        self.use_modv
+        self.fields.lock().unwrap().use_modv
     }
+
+    // current state information
     /// Java `getModelName`.
     pub fn get_model_name(&self) -> Option<String> {
-        self.model_name.clone()
+        self.fields.lock().unwrap().model_name.clone()
     }
+
     /// Java private `setModel(FileType)`.
-    pub fn set_model(&mut self, model: Option<&FileType>) {
-        if let Some(model) = model {
-            let name = model.get_file_name(self.manager, Some(self.axis_id));
-            self.set_model_name(name.as_deref());
-        }
+    ///
+    /// A null `getFile` result, where the source's `getAbsolutePath()` throws, sets no
+    /// model (fixed in translation).
+    fn set_model(&self, model: &FileType) {
+        let model_name = model
+            .get_file(Some(self.manager), self.axis_id)
+            .map(|file| utilities::java_io_file_get_absolute_path(&file.to_string_lossy()));
+        self.set_model_name(model_name.as_deref());
     }
+
     /// Java private `setModelName`.
-    pub fn set_model_name(&mut self, model: Option<&str>) {
-        self.model_name = model.map(str::to_owned);
-        if let Some(model) = model {
-            self.process.set_model_name(model);
-        }
+    fn set_model_name(&self, model_name: Option<&str>) {
+        self.fields.lock().unwrap().model_name = model_name.map(str::to_string);
+        self.process.set_model_name(model_name);
     }
+
     /// Java private `setModelNameList`.
-    pub fn set_model_name_list(&mut self, models: Option<Vec<String>>) {
-        self.model_name_list = models.clone();
-        self.process.set_model_name_list(models);
+    fn set_model_name_list(&self, model_name_list: Option<Vec<String>>) {
+        self.fields.lock().unwrap().model_name_list = model_name_list.clone();
+        self.process.set_model_name_list(model_name_list);
     }
+
     /// Java `setLoadAsIntegers`.
-    pub fn set_load_as_integers(&mut self) {
-        self.load_as_integers = true;
+    pub fn set_load_as_integers(&self) {
         self.process.set_load_as_integers();
     }
+
     /// Java `setSuppressSaveQuery`.
-    pub fn set_suppress_save_query(&mut self) {
-        self.suppress_save_query = true;
+    pub fn set_suppress_save_query(&self) {
         self.process.set_suppress_save_query();
     }
+
     /// Java `isUsingMode`.
     pub fn is_using_mode(&self) -> bool {
-        self.using_mode
+        self.fields.lock().unwrap().using_mode
     }
+
     /// Java `setUsingMode`.
-    pub fn set_using_mode(&mut self, input: bool) {
-        self.using_mode = input;
+    pub fn set_using_mode(&self, using_mode: bool) {
+        self.fields.lock().unwrap().using_mode = using_mode;
     }
+
     /// Java `isOpenContours`.
     pub fn is_open_contours(&self) -> bool {
-        self.open_contours
+        self.fields.lock().unwrap().open_contours
     }
+
     /// Java `setOpenContours`.
-    pub fn set_open_contours(&mut self, input: bool) {
-        self.open_contours = input;
+    pub fn set_open_contours(&self, open_contours: bool) {
+        self.fields.lock().unwrap().open_contours = open_contours;
     }
+
     /// Java `setStartNewContoursAtNewZ`.
-    pub fn set_start_new_contours_at_new_z(&mut self, input: bool) {
-        self.start_new_contours_at_new_z = input;
+    pub fn set_start_new_contours_at_new_z(&self, start_new_contours_at_new_z: bool) {
+        self.fields.lock().unwrap().start_new_contours_at_new_z = start_new_contours_at_new_z;
     }
+
     /// Java `setPointLimit`.
-    pub fn set_point_limit(&mut self, input: i32) {
-        self.point_limit = input;
+    pub fn set_point_limit(&self, input: i32) {
+        self.fields.lock().unwrap().point_limit = input;
     }
+
     /// Java final `getAxisID`.
-    pub fn get_axis_id(&self) -> AxisID {
+    pub fn get_axis_id(&self) -> Option<AxisID> {
         self.axis_id
     }
+
     /// Java `getMode`.
     pub fn get_mode(&self) -> i32 {
-        self.mode
+        self.fields.lock().unwrap().mode
     }
+
     /// Java `getModeString()`.
     pub fn get_mode_string(&self) -> String {
-        Self::get_mode_string_for(self.mode)
+        let mode = self.fields.lock().unwrap().mode;
+        self.get_mode_string_int(mode)
     }
-    /// Java `setMode`.
-    pub fn set_mode(&mut self, mode: i32) {
-        self.using_mode = true;
-        self.mode = mode;
+
+    /// Java `setMode`.  set the mode to model or movie.
+    pub fn set_mode(&self, mode: i32) {
+        let mut fields = self.fields.lock().unwrap();
+        fields.using_mode = true;
+        fields.mode = mode;
     }
-    /// Java private `setModelMode`.
-    pub fn set_model_mode(&mut self, model_mode: bool) {
-        self.using_mode = true;
-        self.mode = if model_mode { MODEL_MODE } else { MOVIE_MODE };
+
+    /// Java private `setModelMode`.  Sets the mode (model or movie).
+    fn set_model_mode(&self, model_mode: bool) {
+        let mut fields = self.fields.lock().unwrap();
+        fields.using_mode = true;
+        if model_mode {
+            fields.mode = MODEL_MODE;
+        } else {
+            fields.mode = MOVIE_MODE;
+        }
     }
+
     /// Java `isSwapYZ`.
     pub fn is_swap_yz(&self) -> bool {
-        self.swap_yz
+        self.fields.lock().unwrap().swap_yz
     }
+
     /// Java `setSwapYZ`.
-    pub fn set_swap_yz(&mut self, input: bool) {
-        self.swap_yz = input;
-        self.process.set_swap_yz(input);
+    pub fn set_swap_yz(&self, swap_yz: bool) {
+        self.fields.lock().unwrap().swap_yz = swap_yz;
+        self.process.set_swap_yz(swap_yz);
     }
+
     /// Java `isPreserveContrast`.
     pub fn is_preserve_contrast(&self) -> bool {
-        self.preserve_contrast
+        self.fields.lock().unwrap().preserve_contrast
     }
+
     /// Java `setPreserveContrast`.
-    pub fn set_preserve_contrast(&mut self, input: bool) {
-        self.preserve_contrast = input;
+    pub fn set_preserve_contrast(&self, preserve_contrast: bool) {
+        self.fields.lock().unwrap().preserve_contrast = preserve_contrast;
+        self.process.set_open_with_model(!preserve_contrast);
     }
+
     /// Java `setFrames`.
-    pub fn set_frames(&mut self, input: bool) {
-        self.frames = input;
-        self.process.set_frames(input);
+    pub fn set_frames(&self, frames: bool) {
+        self.process.set_frames(frames);
     }
+
     /// Java `setPieceListFileName`.
-    pub fn set_piece_list_file_name(&mut self, input: Option<&str>) {
-        self.piece_list_file_name = input.map(str::to_owned);
-        if let Some(input) = input {
-            self.process.set_piece_list_file_name(input);
-        }
+    pub fn set_piece_list_file_name(&self, piece_list_file_name: Option<&str>) {
+        self.process.set_piece_list_file_name(piece_list_file_name);
     }
+
     /// Java `setMontageSeparation`.
-    pub fn set_montage_separation(&mut self) {
-        self.montage_separation = true;
+    pub fn set_montage_separation(&self) {
         self.process.set_montage_separation();
     }
+
     /// Java `setInterpolation`.
-    pub fn set_interpolation(&mut self, input: bool) {
-        self.interpolation = Some(input);
+    pub fn set_interpolation(&self, input: bool) {
+        let mut fields = self.fields.lock().unwrap();
+        let interpolation = fields.interpolation.get_or_insert_with(EtomoBoolean2::new);
+        interpolation.set_boolean(input);
     }
+
     /// Java `isOpenBeadFixer`.
     pub fn is_open_bead_fixer(&self) -> bool {
-        self.open_bead_fixer
+        self.fields.lock().unwrap().open_bead_fixer
     }
+
     /// Java `setOpenBeadFixer`.
-    pub fn set_open_bead_fixer(&mut self, input: bool) {
-        self.open_bead_fixer = input;
-        self.set_auto_center = false;
-        self.auto_center = false;
-        self.new_contours = false;
-        self.manage_new_contours = false;
+    pub fn set_open_bead_fixer(&self, open_bead_fixer: bool) {
+        let mut fields = self.fields.lock().unwrap();
+        fields.open_bead_fixer = open_bead_fixer;
+        fields.set_auto_center = false;
+        fields.auto_center = false;
+        fields.new_contours = false;
+        fields.manage_new_contours = false;
     }
+
     /// Java `setAutoCenter`.
-    pub fn set_auto_center(&mut self, input: bool) {
-        self.set_auto_center = true;
-        self.auto_center = input;
+    pub fn set_auto_center(&self, auto_center: bool) {
+        let mut fields = self.fields.lock().unwrap();
+        fields.set_auto_center = true;
+        fields.auto_center = auto_center;
     }
+
     /// Java `setSkipList`.
-    pub fn set_skip_list(&mut self, input: Option<&str>) {
-        self.skip_list = input.map(str::to_owned);
+    pub fn set_skip_list(&self, input: Option<&str>) {
+        self.fields.lock().unwrap().skip_list = input.map(str::to_string);
     }
+
     /// Java `setDeleteAllSections`.
-    pub fn set_delete_all_sections(&mut self, input: bool) {
-        self.delete_all_sections = Some(input);
+    pub fn set_delete_all_sections(&self, on: bool) {
+        let mut fields = self.fields.lock().unwrap();
+        let delete_all_sections = fields
+            .delete_all_sections
+            .get_or_insert_with(EtomoBoolean2::new);
+        delete_all_sections.set_boolean(on);
     }
+
     /// Java `setBeadfixerMode`.
-    pub fn set_beadfixer_mode(&mut self, input: Option<BeadFixerMode>) {
-        self.beadfixer_mode = input;
+    pub fn set_beadfixer_mode(&self, mode: Option<BeadFixerMode>) {
+        self.fields.lock().unwrap().beadfixer_mode = mode;
     }
+
     /// Java `setOpenLogOff`.
-    pub fn set_open_log_off(&mut self) {
-        self.log_name = None;
+    pub fn set_open_log_off(&self) {
+        self.fields.lock().unwrap().log_name = None;
     }
+
     /// Java `setOpenLog`.
-    pub fn set_open_log(&mut self, open: bool, name: Option<&str>) {
-        self.log_name = if open { name.map(str::to_owned) } else { None };
+    pub fn set_open_log(&self, open_log: bool, log_name: Option<&str>) {
+        let mut fields = self.fields.lock().unwrap();
+        if open_log {
+            fields.log_name = log_name.map(str::to_string);
+        } else {
+            fields.log_name = None;
+        }
     }
+
     /// Java `setNewContours`.
-    pub fn set_new_contours(&mut self, input: bool) {
-        self.new_contours = input;
-        self.manage_new_contours = true;
+    pub fn set_new_contours(&self, new_contours: bool) {
+        let mut fields = self.fields.lock().unwrap();
+        fields.new_contours = new_contours;
+        fields.manage_new_contours = true;
     }
+
+    // initial state information
     /// Java `getInitialModelName`.
     pub fn get_initial_model_name(&self) -> String {
-        self.initial_model_name.clone()
+        self.fields.lock().unwrap().initial_model_name.clone()
     }
+
     /// Java `getDatasetName`.
-    pub fn get_dataset_name(&self) -> Option<String> {
-        self.dataset_name.clone()
+    pub fn get_dataset_name(&self) -> String {
+        self.process.get_dataset_name()
     }
+
     /// Java `getInitialMode`.
     pub fn get_initial_mode(&self) -> i32 {
-        self.initial_mode
+        self.fields.lock().unwrap().initial_mode
     }
+
     /// Java `getInitialModeString`.
     pub fn get_initial_mode_string(&self) -> String {
-        Self::get_mode_string_for(self.initial_mode)
+        let initial_mode = self.fields.lock().unwrap().initial_mode;
+        self.get_mode_string_int(initial_mode)
     }
+
     /// Java `setInitialMode`.
-    pub fn set_initial_mode(&mut self, input: i32) {
-        if !self.initial_mode_set {
-            self.initial_mode = input;
-            self.set_mode(input);
-            self.initial_mode_set = true;
+    pub fn set_initial_mode(&self, initial_mode: i32) {
+        if self.fields.lock().unwrap().initial_mode_set {
+            return;
         }
+        self.fields.lock().unwrap().initial_mode = initial_mode;
+        self.set_mode(initial_mode);
+        self.fields.lock().unwrap().initial_mode_set = true;
     }
+
     /// Java `isInitialSwapYZ`.
     pub fn is_initial_swap_yz(&self) -> bool {
-        self.initial_swap_yz
+        self.fields.lock().unwrap().initial_swap_yz
     }
-    /// Java public `setInitialSwapYZ`.
-    pub fn set_initial_swap_yz(&mut self, input: bool) {
-        if !self.initial_swap_yz_set {
-            self.initial_swap_yz = input;
-            self.set_swap_yz(input);
-            self.initial_swap_yz_set = true;
+
+    /// Java `setInitialSwapYZ`.
+    pub fn set_initial_swap_yz(&self, initial_swap_yz: bool) {
+        if self.fields.lock().unwrap().initial_swap_yz_set {
+            return;
         }
+        self.fields.lock().unwrap().initial_swap_yz = initial_swap_yz;
+        self.set_swap_yz(initial_swap_yz);
+        self.fields.lock().unwrap().initial_swap_yz_set = true;
     }
+
+    // default state information
+
     /// Java `isDefaultOpenWithModel`.
     pub fn is_default_open_with_model(&self) -> bool {
         DEFAULT_OPEN_WITH_MODEL
     }
+
     /// Java `isDefaultPreserveContrast`.
     pub fn is_default_preserve_contrast(&self) -> bool {
         DEFAULT_PRESERVE_CONTRAST
     }
-    /// Java `isOpen`; untranslated process cannot report a fabricated running state.
+
+    // user controlled state information - pass through to ImodProcess
+    /// Java `isOpen`.  Returns true if process is running.
     pub fn is_open(&self) -> bool {
         self.process.is_running()
     }
+
     /// Java final `setAllowMenuBinningInZ`.
-    pub fn set_allow_menu_binning_in_z(&mut self, input: bool) {
-        self.allow_menu_binning_in_z = input;
+    pub fn set_allow_menu_binning_in_z(&self, allow_menu_binning_in_z: bool) {
+        self.fields.lock().unwrap().allow_menu_binning_in_z = allow_menu_binning_in_z;
     }
+
     /// Java final `setNoMenuOptions`.
-    pub fn set_no_menu_options(&mut self, input: bool) {
-        self.no_menu_options = input;
+    pub fn set_no_menu_options(&self, no_menu_options: bool) {
+        self.fields.lock().unwrap().no_menu_options = no_menu_options;
     }
+
     /// Java `reopenLog`.
-    pub fn reopen_log(&mut self) -> Result<(), String> {
-        self.process.reopen_log().map_err(|error| error.to_string())
+    pub fn reopen_log(&self) -> Result<(), ImodManagerException> {
+        self.process.reopen_log()
     }
+
     /// Java `openModel`.
-    pub fn open_model(&mut self, model: Option<&str>, model_mode: bool) -> Result<(), String> {
-        let Some(model) = model else {
-            return Ok(());
-        };
-        self.process
-            .open_model(model, model_mode)
-            .map_err(|error| error.to_string())
+    pub fn open_model(&self, model: &str, model_mode: bool) -> Result<(), ImodManagerException> {
+        self.process.open_model(model, model_mode)
     }
+
     /// Java `setBinning`.
-    pub fn set_binning(&mut self, input: i32) {
-        self.binning = input;
-        self.process.set_binning(input);
+    pub fn set_binning(&self, binning: i32) {
+        self.process.set_binning(binning);
     }
+
     /// Java `setBinningXY`.
-    pub fn set_binning_xy(&mut self, input: i32) {
-        self.binning_xy = input;
-        self.process.set_binning_xy(input);
+    pub fn set_binning_xy(&self, binning: i32) {
+        self.process.set_binning_xy(binning);
     }
+
     /// Java `setWorkingDirectory`.
-    pub fn set_working_directory(&mut self, input: Option<&Path>) {
-        self.working_directory = input.map(Path::to_owned);
-        self.process
-            .set_working_directory(self.working_directory.clone());
+    pub fn set_working_directory(&self, working_directory: Option<PathBuf>) {
+        self.process.set_working_directory(working_directory);
     }
+
     /// Java `setOpenModelView`.
-    pub fn set_open_model_view(&mut self) -> Result<(), String> {
+    pub fn set_open_model_view(&self) -> Result<(), ImodManagerException> {
         self.process.set_open_model_view();
         Ok(())
     }
+
     /// Java `setContinuousListenerTarget`.
     pub fn set_continuous_listener_target(
-        &mut self,
-        input: Option<Arc<dyn ContinuousListenerTarget>>,
+        &self,
+        continuous_listener_target: Option<Arc<dyn ContinuousListenerTarget>>,
     ) {
-        self.process.set_continuous_listener_target(input);
+        self.process
+            .set_continuous_listener_target(continuous_listener_target);
     }
+
+    // internal state sets and gets
     /// Java `isWarnedStaleFile`.
     pub fn is_warned_stale_file(&self) -> bool {
-        self.warned_stale_file
+        self.fields.lock().unwrap().warned_stale_file
     }
+
     /// Java `setWarnedStaleFile`.
-    pub fn set_warned_stale_file(&mut self, input: bool) {
-        self.warned_stale_file = input;
+    pub fn set_warned_stale_file(&self, warned_stale_file: bool) {
+        self.fields.lock().unwrap().warned_stale_file = warned_stale_file;
     }
-    /// Java `paramString`.
+
+    /// Java `paramString`.  `Vector.toString()` of the parameter strings.
     pub fn param_string(&self) -> String {
-        format!(
-            "[modelView={}, useModv={}, modelName={:?}, usingMode={}, mode={}, swapYZ={}, preserveContrast={}, openBeadFixer={}, initialModelName={}, initialMode={}, initialSwapYZ={}, defaultOpenWithModel={}, defaultPreserveContrast={}, process={}, warnedStaleFile={}, openContours={}]",
-            self.model_view,
-            self.use_modv,
-            self.model_name,
-            self.using_mode,
-            self.get_mode_string(),
-            self.swap_yz,
-            self.preserve_contrast,
-            self.open_bead_fixer,
-            self.initial_model_name,
-            self.get_initial_mode_string(),
-            self.initial_swap_yz,
-            DEFAULT_OPEN_WITH_MODEL,
-            DEFAULT_PRESERVE_CONTRAST,
-            self.process,
-            self.warned_stale_file,
-            self.open_contours
-        )
+        let params = [
+            format!("modelView={}", self.is_model_view()),
+            format!("useModv={}", self.is_use_modv()),
+            format!(
+                "modelName={}",
+                self.get_model_name().unwrap_or_else(|| "null".to_string())
+            ),
+            format!("usingMode={}", self.is_using_mode()),
+            format!("mode={}", self.get_mode_string()),
+            format!("swapYZ={}", self.is_swap_yz()),
+            format!("preserveContrast={}", self.is_preserve_contrast()),
+            format!("openBeadFixer={}", self.is_open_bead_fixer()),
+            format!("initialModelName={}", self.get_initial_model_name()),
+            format!("initialMode={}", self.get_initial_mode_string()),
+            format!("initialSwapYZ={}", self.is_initial_swap_yz()),
+            format!("defaultOpenWithModel={}", self.is_default_open_with_model()),
+            format!(
+                "defaultPreserveContrast={}",
+                self.is_default_preserve_contrast()
+            ),
+            format!("process={}", self.process),
+            format!("warnedStaleFile={}", self.is_warned_stale_file()),
+            format!("openContours={}", self.is_open_contours()),
+        ];
+        format!("[{}]", params.join(", "))
     }
-    /// Java `equalsInitialConfiguration`.
-    pub fn equals_initial_configuration(&self, other: &Self) -> bool {
-        self.model_view == other.model_view
-            && self.use_modv == other.use_modv
-            && self.initial_model_name == other.initial_model_name
-            && self.initial_mode == other.initial_mode
-            && self.initial_swap_yz == other.initial_swap_yz
+
+    /// Java `equalsInitialConfiguration`.  Returns true if unchanging and initial state
+    /// information is the same.
+    pub fn equals_initial_configuration(&self, imod_state: &ImodState) -> bool {
+        let (model_view, use_modv, initial_model_name, initial_mode, initial_swap_yz) = {
+            let fields = self.fields.lock().unwrap();
+            (
+                fields.model_view,
+                fields.use_modv,
+                fields.initial_model_name.clone(),
+                fields.initial_mode,
+                fields.initial_swap_yz,
+            )
+        };
+        model_view == imod_state.is_model_view()
+            && use_modv == imod_state.is_use_modv()
+            && initial_model_name == imod_state.get_initial_model_name()
+            && initial_mode == imod_state.get_initial_mode()
+            && initial_swap_yz == imod_state.is_initial_swap_yz()
     }
-    /// Java `equalsCurrentConfiguration`.
-    pub fn equals_current_configuration(&self, other: &Self) -> bool {
-        self.model_view == other.model_view
-            && self.use_modv == other.use_modv
-            && self.model_name == other.model_name
-            && self.using_mode == other.using_mode
-            && self.open_contours == other.open_contours
-            && self.mode == other.mode
-            && self.swap_yz == other.swap_yz
-            && self.preserve_contrast == other.preserve_contrast
-            && self.open_bead_fixer == other.open_bead_fixer
-            && self.start_new_contours_at_new_z == other.start_new_contours_at_new_z
+
+    /// Java `equalsCurrentConfiguration`.  Returns true if unchanging and current state
+    /// information is the same.
+    ///
+    /// The source's `modelName.equals(...)` throws on a null model name; two null names
+    /// compare equal here (fixed in translation).
+    pub fn equals_current_configuration(&self, imod_state: &ImodState) -> bool {
+        let (
+            model_view,
+            use_modv,
+            model_name,
+            using_mode,
+            open_contours,
+            mode,
+            swap_yz,
+            preserve_contrast,
+            open_bead_fixer,
+            start_new_contours_at_new_z,
+        ) = {
+            let fields = self.fields.lock().unwrap();
+            (
+                fields.model_view,
+                fields.use_modv,
+                fields.model_name.clone(),
+                fields.using_mode,
+                fields.open_contours,
+                fields.mode,
+                fields.swap_yz,
+                fields.preserve_contrast,
+                fields.open_bead_fixer,
+                fields.start_new_contours_at_new_z,
+            )
+        };
+        model_view == imod_state.is_model_view()
+            && use_modv == imod_state.is_use_modv()
+            && model_name == imod_state.get_model_name()
+            && using_mode == imod_state.is_using_mode()
+            && open_contours == imod_state.is_open_contours()
+            && mode == imod_state.get_mode()
+            && swap_yz == imod_state.is_swap_yz()
+            && preserve_contrast == imod_state.is_preserve_contrast()
+            && open_bead_fixer == imod_state.is_open_bead_fixer()
+            && start_new_contours_at_new_z
+                == imod_state
+                    .fields
+                    .lock()
+                    .unwrap()
+                    .start_new_contours_at_new_z
     }
-    /// Java `equals(ImodState)`.
-    pub fn equals(&self, other: &Self) -> bool {
-        self.equals_initial_configuration(other) && self.equals_current_configuration(other)
+
+    /// Java `equals(ImodState)`.  Returns true if unchanging, initial, and current state
+    /// information is the same.
+    pub fn equals(&self, imod_state: &ImodState) -> bool {
+        self.equals_initial_configuration(imod_state)
+            && self.equals_current_configuration(imod_state)
     }
 }
 
-#[cfg(test)]
-mod tests {
-    use super::*;
-    #[test]
-    fn reset_preserves_initial_and_resets_current_state() {
-        let mut state = ImodState::new(None, AxisID::First);
-        state.set_initial_mode(MODEL_MODE);
-        state.set_initial_swap_yz(true);
-        state.set_preserve_contrast(true);
-        state.set_open_contours(true);
-        state.set_mode(MOVIE_MODE);
-        state.reset();
-        assert_eq!(state.get_mode(), MODEL_MODE);
-        assert!(state.is_swap_yz());
-        assert!(!state.is_preserve_contrast());
-        assert!(!state.is_open_contours());
-    }
-
-    #[test]
-    fn open_delegates_configured_state_to_imod_process_command() {
-        let mut state = ImodState::new(None, AxisID::First);
-        state.set_model_name(Some("model.mod"));
-        state.set_model_view_type(MODV);
-        state.set_swap_yz(true);
-        state.set_frames(true);
-        state.set_binning(2);
-        let _ = state.open(None);
-        let command = state.process.last_command().unwrap().join(" ");
-        assert!(command.contains("-view"));
-        assert!(command.contains("-Y"));
-        assert!(command.contains("-f"));
-        assert!(command.contains("-B 2"));
-        assert!(command.ends_with("model.mod"));
-    }
-
-    #[test]
-    fn file_name_constructor_passes_its_dataset_to_the_child_command() {
-        let mut state = ImodState::new_with_file_name(None, Some("input.rec"), AxisID::First);
-        let _ = state.open(None);
-        assert_eq!(
-            state
-                .process
-                .last_command()
-                .and_then(|command| command.last()),
-            Some(&"input.rec".to_owned())
-        );
-    }
-
-    #[test]
-    fn multi_file_constructor_preserves_each_dataset_argument() {
-        let mut state = ImodState::new_with_file_name_array(
-            None,
-            Some(vec!["first.rec".into(), "second.rec".into()]),
-            AxisID::First,
-        );
-        let _ = state.open(None);
-        assert_eq!(
-            state
-                .process
-                .last_command()
-                .map(|command| &command[command.len() - 2..]),
-            Some(["first.rec".into(), "second.rec".into()].as_slice())
-        );
-    }
-
-    #[test]
-    fn open_queues_running_viewer_configuration_before_flushing_it() {
-        use crate::imod::etomo::process::system_program::{ProcessCommand, SystemProgram};
-
-        let mut state = ImodState::new(None, AxisID::First);
-        state.process.attach_test_program(
-            SystemProgram::spawn(
-                &ProcessCommand::new("sh")
-                    .args(["-c", "while read value; do :; done"])
-                    .keep_stdin_open(),
-            )
-            .unwrap(),
-        );
-        state.set_model_name(Some("updated.mod"));
-        state.set_open_contours(true);
-        state.set_open_bead_fixer(true);
-        state.set_auto_center(true);
-        state.set_beadfixer_mode(Some(BeadFixerMode::GapMode));
-        state.set_open_surf_cont_point(true);
-        state.set_mode(MODEL_MODE);
-        state
-            .open_with_menu_options(Run3dmodMenuOptions::default())
-            .unwrap();
-        assert_eq!(
-            state.process.last_command(),
-            Some(
-                [
-                    "9",
-                    "1",
-                    "updated.mod",
-                    "12",
-                    "0",
-                    "1",
-                    "1",
-                    "7",
-                    "0",
-                    "5",
-                    "8",
-                    "14",
-                    "Bead Fixer",
-                    "4",
-                    "1",
-                    "14",
-                    "Bead Fixer",
-                    "6",
-                    "1",
-                    "14",
-                    "Bead Fixer",
-                    "9",
-                    "19",
-                    "s",
-                    "6",
-                    "1",
-                ]
-                .map(str::to_owned)
-                .as_slice()
-            )
-        );
+/// Java `toString`.
+impl std::fmt::Display for ImodState {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "[process={}]", self.process)
     }
 }

@@ -559,7 +559,9 @@ impl EtomoBoolean2 {
         if !self.is_use_in_script() {
             return;
         }
-        if !self.display_as_integer && !self.base.base.base.is() {
+        // `is()` dispatches to this class's `isNull()` override, which reads
+        // `getValue()` (the display value when nothing is set).
+        if !self.display_as_integer && !self.is() {
             script_command.delete_key(Some(&self.base.base.base.name));
         } else if self.display_as_integer {
             // Java `super.toString()`, which is `ConstEtomoNumber.toString()`, not this

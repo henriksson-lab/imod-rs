@@ -244,21 +244,8 @@ Usage:  submfg [options] command_file1 command_file2 ...
             let mut lognum: i64 = 1;
             for log in &loglist {
                 let logspl = log.split('-').collect::<Vec<_>>();
-                // `int(logspl[len(logspl) - 1])`: white space around, one
-                // sign, and single underscores between digits are accepted
-                let token = logspl[logspl.len() - 1].trim();
-                let (negative, body) = match token.strip_prefix('-') {
-                    Some(body) => (true, body),
-                    None => (false, token.strip_prefix('+').unwrap_or(token)),
-                };
-                if !body.is_empty()
-                    && !body.starts_with('_')
-                    && !body.ends_with('_')
-                    && !body.contains("__")
-                    && body.chars().all(|c| c.is_ascii_digit() || c == '_')
-                    && let Ok(value) = body.replace('_', "").parse::<i64>()
-                {
-                    let num = if negative { -value } else { value };
+                // `int(logspl[len(logspl) - 1])` inside a `try`
+                if let Some(num) = super::imodpy::py_int(logspl[logspl.len() - 1]) {
                     lognum = std::cmp::max(num + 1, lognum);
                 }
             }
@@ -355,8 +342,8 @@ Usage:  submfg [options] command_file1 command_file2 ...
             if dotime {
                 prnstr(
                     &format!(
-                        "{comname} {message}   in {:.2} sec",
-                        start_time.elapsed().as_secs_f64()
+                        "{comname} {message}   in {} sec",
+                        super::imodpy::py_fixed(start_time.elapsed().as_secs_f64(), 0, 2)
                     ),
                     "\n",
                     false,

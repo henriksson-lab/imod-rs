@@ -1,777 +1,1184 @@
 //! `IMOD/Etomo/src/etomo/ui/swing/LabeledTextField.java`.
 //!
-//! The `JPanel`, `JLabel`, `JTextField`, document, and listener calls in the
-//! Java unit are represented by their source-visible state.  Installing actual
-//! Swing listeners and painting colours remain a native GUI boundary; keeping
-//! that boundary explicit lets eTomo's field naming, checkpointing, formatting,
-//! validation, and highlight rules run unchanged in a Rust GUI backend.
-#![allow(dead_code)]
+//! A `JLabel` and a `JTextField` in a horizontal panel.  The text field names itself
+//! from the label (uitest `tf.` names); the field validates its text and keeps backup,
+//! default, checkpoint and field-highlight settings.  Sizes, fonts, alignment,
+//! backgrounds and mouse listeners are Swing layout/painting/events and are not
+//! modelled (`// Swing ...:` comments).  Java registers this object as the text field's
+//! `FocusListener` when a field highlight is first used; [`LabeledTextField::focus_lost`]
+//! is what that listener runs.
 
+use std::cell::{Cell, RefCell};
 use std::path::Path;
+use std::rc::Rc;
 
+use super::colors;
+use super::swing_component::SwingComponent;
+use super::tooltip_formatter;
+use super::ui_utilities;
 use crate::imod::etomo::etomo_director::ARGUMENTS;
+use crate::imod::etomo::jdk::{
+    ActionListener, Color, Dimension, DocumentListener, FocusEvent, FocusListener, JComponent,
+};
+use crate::imod::etomo::logic::autodoc_attribute_retriever;
 use crate::imod::etomo::logic::field_validator::FieldValidator;
-use crate::imod::etomo::logic::validation_set::ValidationSet as LogicValidationSet;
-use crate::imod::etomo::storage::autodoc::autodoc_tokenizer::SEPARATOR_CHAR;
+use crate::imod::etomo::logic::validation_set::ValidationSet;
+use crate::imod::etomo::storage::autodoc::autodoc_tokenizer::{DEFAULT_DELIMITER, SEPARATOR_CHAR};
+use crate::imod::etomo::storage::directive_def::DirectiveDef;
+use crate::imod::etomo::r#type::const_etomo_number::{
+    ConstEtomoNumber, Number, Type, java_lang_string_matches_whitespace, java_lang_string_trim,
+};
+use crate::imod::etomo::r#type::etomo_number::EtomoNumber;
+use crate::imod::etomo::r#type::ui_test_field_type;
+use crate::imod::etomo::ui::field::Field;
+use crate::imod::etomo::ui::field_displayer::FieldDisplayer;
+use crate::imod::etomo::ui::field_setting_interface::FieldSettingInterface;
 use crate::imod::etomo::ui::field_type::FieldType;
+use crate::imod::etomo::ui::field_validation_failed_exception::FieldValidationFailedException;
+use crate::imod::etomo::ui::text_field_interface::TextFieldInterface;
+use crate::imod::etomo::ui::text_field_setting::TextFieldSetting;
+use crate::imod::etomo::ui::ui_component::UIComponent;
 use crate::imod::etomo::util::utilities;
 
-use super::panel::Dimension;
-use super::ui_utilities::{Color, UiUtilities};
-
-/// Java `Colors.FIELD_HIGHLIGHT` as an explicit theme boundary.
-pub const FIELD_HIGHLIGHT: Color = Color {
-    red: 0,
-    green: 0,
-    blue: 255,
-};
-pub const BACKGROUND: Color = Color {
-    red: 255,
-    green: 255,
-    blue: 255,
-};
-pub const BLACK: Color = Color {
-    red: 0,
-    green: 0,
-    blue: 0,
-};
-
-/// Java `TextFieldSetting` state used by this source unit.  Its storage class
-/// has not yet become a separate translated module, so this is the exact
-/// text/value state at the `TextFieldSetting` dependency boundary.
-#[derive(Clone, Debug, Eq, PartialEq)]
-pub struct TextFieldSetting {
-    pub field_type: FieldType,
-    pub value: Option<String>,
-}
-
-impl TextFieldSetting {
-    pub fn new(field_type: FieldType) -> Self {
-        Self {
-            field_type,
-            value: None,
-        }
-    }
-    pub fn is_set(&self) -> bool {
-        self.value.is_some()
-    }
-    pub fn set(&mut self, value: impl Into<String>) {
-        self.value = Some(value.into());
-    }
-    pub fn reset(&mut self) {
-        self.value = None;
-    }
-    pub fn get_value(&self) -> Option<&str> {
-        self.value.as_deref()
-    }
-    pub fn equals(&self, value: &str) -> bool {
-        self.value.as_deref() == Some(value)
-    }
-    pub fn copy(&mut self, input: Option<&TextFieldSetting>) {
-        self.value = input.and_then(|input| input.value.clone());
-    }
-}
-
-/// Source data owned by Java `ValidationSet` at this unit's dependency boundary.
-#[derive(Clone, Debug, Default, PartialEq)]
-pub struct ValidationSet {
-    pub number_must_be_positive: bool,
-    pub minimum: Option<f64>,
-    pub maximum: Option<f64>,
-    pub parsable_string: bool,
-}
-
-/// Java `FieldValidationFailedException`.
-#[derive(Clone, Debug, Eq, PartialEq)]
-pub struct FieldValidationFailedException(pub String);
-
-impl std::fmt::Display for FieldValidationFailedException {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.write_str(&self.0)
-    }
-}
-impl std::error::Error for FieldValidationFailedException {}
-
-/// Java `LabeledTextField`, including the state held by its three Swing widgets.
-#[derive(Clone, Debug)]
+/// Java `LabeledTextField`.
 pub struct LabeledTextField {
-    pub field_type: FieldType,
-    pub location_descr: Option<String>,
-    pub max_array_size: Option<usize>,
-    pub debug: bool,
-    pub orig_text_foreground: Option<Color>,
-    pub orig_label_foreground: Option<Color>,
-    /// Java `DirectiveDef`; directive-default lookup is an explicit storage boundary.
-    pub directive_default_value: Option<String>,
-    pub max_decimal_places: Option<i32>,
-    pub backup: Option<TextFieldSetting>,
-    pub default_value: Option<TextFieldSetting>,
-    pub field_highlight: Option<TextFieldSetting>,
-    pub checkpoint_value: Option<TextFieldSetting>,
-    pub required: bool,
-    pub validation_set: Option<ValidationSet>,
-    pub unformatted_tooltip: Option<String>,
-    pub label: String,
-    pub text: String,
-    pub name: String,
-    pub action_command: String,
-    pub enabled: bool,
-    pub editable: bool,
-    pub visible: bool,
-    pub columns: i32,
-    pub alignment_x: f32,
-    pub horizontal_alignment_right: bool,
-    pub text_preferred_size: Option<Dimension>,
-    pub text_minimum_size: Option<Dimension>,
-    pub panel_preferred_size: Option<Dimension>,
-    pub tooltip: Option<String>,
-    pub text_foreground: Color,
-    pub label_foreground: Color,
-    pub background: Color,
-    /// Listener attachment is a native widget boundary, retained as counts.
-    pub action_listener_count: usize,
-    pub focus_listener_count: usize,
-    pub document_listener_count: usize,
-    pub mouse_listener_count: usize,
-}
-
-impl LabeledTextField {
-    /// Java private `LabeledTextField(FieldType,int,String,int,String)`.
-    pub fn new_with_max_array_size_and_gap(
-        field_type: FieldType,
-        max_array_size: i32,
-        tf_label: &str,
-        _hgap: i32,
-        location_descr: Option<&str>,
-    ) -> Self {
-        let mut field = Self {
-            field_type,
-            location_descr: location_descr.map(str::to_owned),
-            max_array_size: (max_array_size >= 0).then_some(max_array_size as usize),
-            debug: false,
-            orig_text_foreground: None,
-            orig_label_foreground: None,
-            directive_default_value: None,
-            max_decimal_places: None,
-            backup: None,
-            default_value: None,
-            field_highlight: None,
-            checkpoint_value: None,
-            required: false,
-            validation_set: None,
-            unformatted_tooltip: None,
-            label: String::new(),
-            text: String::new(),
-            name: String::new(),
-            action_command: tf_label.to_owned(),
-            enabled: true,
-            editable: true,
-            visible: true,
-            columns: field_type.get_columns(),
-            alignment_x: 0.5,
-            horizontal_alignment_right: field_type == FieldType::File,
-            text_preferred_size: None,
-            text_minimum_size: None,
-            panel_preferred_size: None,
-            tooltip: None,
-            text_foreground: BLACK,
-            label_foreground: BLACK,
-            background: BACKGROUND,
-            action_listener_count: 0,
-            focus_listener_count: 0,
-            document_listener_count: 0,
-            mouse_listener_count: 0,
-        };
-        field.set_label(tf_label);
-        field
-    }
-
-    /// Java `LabeledTextField(FieldType,String)`.
-    pub fn new(field_type: FieldType, tf_label: &str) -> Self {
-        Self::new_with_max_array_size_and_gap(field_type, -1, tf_label, 0, None)
-    }
-    /// Java `LabeledTextField(FieldType,int,String)`.
-    pub fn new_with_max_array_size(
-        field_type: FieldType,
-        max_array_size: i32,
-        tf_label: &str,
-    ) -> Self {
-        Self::new_with_max_array_size_and_gap(field_type, max_array_size, tf_label, 0, None)
-    }
-    /// Java package-private `(FieldType,String,String)` constructor.
-    pub fn new_with_location(field_type: FieldType, tf_label: &str, location_descr: &str) -> Self {
-        Self::new_with_max_array_size_and_gap(field_type, -1, tf_label, 0, Some(location_descr))
-    }
-    /// Java package-private `(FieldType,String,int)` constructor.
-    pub fn new_with_gap(field_type: FieldType, tf_label: &str, hgap: i32) -> Self {
-        Self::new_with_max_array_size_and_gap(field_type, -1, tf_label, hgap, None)
-    }
-    /// Java `getNumericInstance(String, EtomoNumber.Type)`; `floating_point` is DOUBLE.
-    pub fn get_numeric_instance(tf_label: &str, floating_point: bool) -> Self {
-        Self::new(
-            if floating_point {
-                FieldType::FloatingPoint
-            } else {
-                FieldType::Integer
-            },
-            tf_label,
-        )
-    }
-    /// Java `getNumericInstance(String)`.
-    pub fn get_integer_instance(tf_label: &str) -> Self {
-        Self::get_numeric_instance(tf_label, false)
-    }
-
-    pub fn set_max_decimal_places(&mut self, digits: i32) {
-        self.max_decimal_places = Some(digits);
-    }
-    /// Java `isDebug()`: field-local state ORs the director argument.
-    pub fn is_debug(&self) -> bool {
-        self.debug || ARGUMENTS.lock().unwrap().is_debug()
-    }
-    /// Java private `paramString()`.
-    pub fn param_string(&self) -> String {
-        format!("label={},textField={}", self.label, self.text)
-    }
-    /// Java `equals(Object)` at the native `JTextField` identity boundary.
-    pub fn equals_text_field_identity(
-        &self,
-        text_field_identity: usize,
-        self_identity: usize,
-    ) -> bool {
-        text_field_identity == self_identity
-    }
-    /// Java package-private `equals(Document)` at the native document boundary.
-    pub fn equals_document(
-        &self,
-        document_identity: usize,
-        text_field_document_identity: usize,
-    ) -> bool {
-        document_identity == text_field_document_identity
-    }
-    pub fn get_name(&self) -> &str {
-        &self.name
-    }
-    pub fn is_boolean(&self) -> bool {
-        false
-    }
-    pub fn is_text(&self) -> bool {
-        true
-    }
-    pub fn equals_selected_string_value(&self, value: Option<&str>) -> bool {
-        value.is_some_and(|value| !value.is_empty())
-    }
-    /// Java `setName(String)`.
-    pub fn set_name(&mut self, tf_label: &str) {
-        let name = utilities::convert_label_to_name(Some(tf_label), false).unwrap_or_default();
-        self.name = format!("tf{SEPARATOR_CHAR}{name}");
-    }
-    pub fn checkpoint(&mut self) {
-        self.checkpoint_value = Some(TextFieldSetting {
-            field_type: self.field_type,
-            value: Some(self.text.clone()),
-        });
-    }
-    pub fn checkpoint_value(&mut self, value: impl Into<String>) {
-        self.checkpoint_value = Some(TextFieldSetting {
-            field_type: self.field_type,
-            value: Some(value.into()),
-        });
-    }
-    pub fn backup(&mut self) {
-        self.backup = Some(TextFieldSetting {
-            field_type: self.field_type,
-            value: Some(self.text.clone()),
-        });
-    }
-    pub fn restore_from_backup(&mut self) {
-        if let Some(backup) = self.backup.as_mut()
-            && let Some(value) = backup.value.take()
-        {
-            self.set_text(&value);
-        }
-    }
-    /// `setDirectiveDef`; the `DirectiveDef` identity itself is an untranslated storage boundary.
-    pub fn set_directive_default_value(&mut self, value: Option<String>) {
-        self.directive_default_value = value;
-    }
-    #[allow(non_snake_case)]
-    /// Rust storage-boundary equivalent of Java `getDirectiveDef()`.
-    pub fn getDirectiveDef(&self) -> Option<&str> {
-        self.directive_default_value.as_deref()
-    }
-    pub fn use_default_value(&mut self) {
-        if self.directive_default_value.is_none() {
-            if let Some(default_value) = self.default_value.as_mut() {
-                default_value.reset();
-            }
-            return;
-        }
-        if self.default_value.is_none() {
-            self.default_value = Some(TextFieldSetting {
-                field_type: self.field_type,
-                value: self.directive_default_value.clone(),
-            });
-        }
-        if let Some(value) = self
-            .default_value
-            .as_ref()
-            .and_then(TextFieldSetting::get_value)
-            .map(str::to_owned)
-        {
-            self.set_text(&value);
-        }
-    }
-    pub fn equals_default_value(&self) -> bool {
-        self.default_value
-            .as_ref()
-            .is_some_and(|value| value.equals(&self.text))
-    }
-    pub fn equals_default_value_string(&self, value: &str) -> bool {
-        self.default_value
-            .as_ref()
-            .is_some_and(|setting| setting.equals(value))
-    }
-    pub fn set_checkpoint(&mut self, input: Option<&TextFieldSetting>) {
-        if input.is_some_and(TextFieldSetting::is_set) || self.checkpoint_value.is_some() {
-            let checkpoint = self
-                .checkpoint_value
-                .get_or_insert_with(|| TextFieldSetting::new(self.field_type));
-            checkpoint.copy(input);
-        }
-    }
-    pub fn get_checkpoint(&self) -> Option<&TextFieldSetting> {
-        self.checkpoint_value.as_ref()
-    }
-    pub fn reset_to_checkpoint(&mut self) {
-        if let Some(value) = self
-            .checkpoint_value
-            .as_ref()
-            .and_then(TextFieldSetting::get_value)
-            .map(str::to_owned)
-        {
-            self.set_text(&value);
-        }
-    }
-    pub fn is_field_highlight_set(&self) -> bool {
-        self.field_highlight
-            .as_ref()
-            .is_some_and(TextFieldSetting::is_set)
-    }
-    pub fn set_field_highlight(&mut self, value: &str) {
-        self.field_highlight = Some(TextFieldSetting {
-            field_type: self.field_type,
-            value: Some(value.into()),
-        });
-        self.focus_listener_count += 1;
-        self.update_field_highlight();
-    }
-    pub fn set_field_highlight_boolean(&mut self, _value: bool) {}
-    pub fn set_field_highlight_setting(&mut self, input: Option<&TextFieldSetting>) {
-        if input.is_some_and(TextFieldSetting::is_set) || self.field_highlight.is_some() {
-            let highlight = self
-                .field_highlight
-                .get_or_insert_with(|| TextFieldSetting::new(self.field_type));
-            highlight.copy(input);
-            self.update_field_highlight();
-        }
-    }
-    pub fn clear_field_highlight(&mut self) {
-        if self.is_field_highlight_set() {
-            self.field_highlight.as_mut().unwrap().reset();
-            self.update_field_highlight();
-        }
-    }
-    pub fn get_field_highlight(&self) -> Option<&TextFieldSetting> {
-        self.field_highlight.as_ref()
-    }
-    pub fn get_field_type(&self) -> FieldType {
-        self.field_type
-    }
-    pub fn equals_field_highlight(&self) -> bool {
-        self.field_highlight
-            .as_ref()
-            .is_some_and(|value| value.equals(&self.text))
-    }
-    pub fn equals_field_highlight_string(&self, value: &str) -> bool {
-        self.field_highlight
-            .as_ref()
-            .is_some_and(|setting| setting.equals(value))
-    }
-    pub fn focus_gained(&mut self) {}
-    pub fn focus_lost(&mut self) {
-        self.update_field_highlight();
-    }
-    /// Java `updateFieldHighlight`.
-    pub fn update_field_highlight(&mut self) {
-        if self.field_highlight.is_none() || !self.enabled {
-            return;
-        }
-        if self.equals_field_highlight() {
-            if self.orig_text_foreground.is_none() {
-                self.orig_text_foreground = Some(self.text_foreground);
-            }
-            if self.orig_label_foreground.is_none() {
-                self.orig_label_foreground = Some(self.label_foreground);
-            }
-            self.text_foreground = FIELD_HIGHLIGHT;
-            self.label_foreground = FIELD_HIGHLIGHT;
-        } else {
-            if let Some(color) = self.orig_text_foreground {
-                self.text_foreground = color;
-            }
-            if let Some(color) = self.orig_label_foreground {
-                self.label_foreground = color;
-            }
-        }
-    }
-    pub fn get_action_command(&self) -> &str {
-        &self.label
-    }
-    pub fn add_action_listener(&mut self) {
-        self.action_listener_count += 1;
-    }
-    pub fn add_focus_listener(&mut self) {
-        self.focus_listener_count += 1;
-    }
-    pub fn remove_focus_listener(&mut self) {
-        self.focus_listener_count = self.focus_listener_count.saturating_sub(1);
-    }
-    pub fn is_different_from_checkpoint_default(&self) -> bool {
-        self.is_different_from_checkpoint(false)
-    }
-    pub fn is_different_from_checkpoint(&self, always_check: bool) -> bool {
-        if !always_check && (!self.enabled || !self.visible) {
-            false
-        } else {
-            self.checkpoint_value
-                .as_ref()
-                .is_none_or(|value| !value.equals(&self.text))
-        }
-    }
-    pub fn clear(&mut self) {
-        self.text.clear();
-    }
-    pub fn set_value(&mut self, input: Option<&str>) {
-        self.set_text(input.unwrap_or_default());
-    }
-    pub fn set_value_boolean(&mut self, _value: bool) {}
-    pub fn is_selected(&self) -> bool {
-        false
-    }
-    /// Java `getUIComponent()`.
-    pub fn get_ui_component(&self) -> &Self {
-        self
-    }
-    /// Java `getComponent()` and `getContainer()` both expose Java's `panel`.
-    pub fn get_component(&self) -> &Self {
-        self
-    }
-    pub fn get_container(&self) -> &Self {
-        self
-    }
-    /// Java package-private `getField()` at the native `JTextField` boundary.
-    pub fn get_field(&self) -> &str {
-        &self.text
-    }
-    pub fn equals_text(&self, text: Option<&str>) -> bool {
-        match text {
-            Some(text) => self.text.trim() == text.trim(),
-            None => false,
-        }
-    }
-    pub fn set_highlight(&mut self, highlight: bool) {
-        self.background = if highlight {
-            Color {
-                red: 255,
-                green: 255,
-                blue: 0,
-            }
-        } else {
-            BACKGROUND
-        };
-    }
-    pub fn get_label(&self) -> &str {
-        &self.label
-    }
-    pub fn get_quoted_label(&self) -> String {
-        utilities::quote_label(Some(&self.label)).unwrap_or_default()
-    }
-    pub fn set_label(&mut self, label: &str) {
-        self.label = label.into();
-        self.set_name(label);
-    }
-    pub fn set_required(&mut self, required: bool) {
-        self.required = required;
-    }
-    pub fn set_validation_set(&mut self, input: Option<ValidationSet>) {
-        match (&mut self.validation_set, input) {
-            (None, input) => self.validation_set = input,
-            (Some(current), Some(input)) => *current = input,
-            (Some(current), None) => *current = ValidationSet::default(),
-        };
-    }
-    pub fn set_number_must_be_positive(&mut self, value: bool) {
-        self.validation_set
-            .get_or_insert_default()
-            .number_must_be_positive = value;
-    }
-    pub fn set_minimum(&mut self, value: f64) {
-        self.validation_set.get_or_insert_default().minimum = Some(value);
-    }
-    pub fn set_maximum(&mut self, value: f64) {
-        self.validation_set.get_or_insert_default().maximum = Some(value);
-    }
-    pub fn set_parsable_string(&mut self, value: bool) {
-        self.validation_set.get_or_insert_default().parsable_string = value;
-    }
-    pub fn is_required(&self) -> bool {
-        self.required && self.enabled
-    }
-    pub fn get_description(&self) -> String {
-        format!(
-            "{}{}",
-            self.get_quoted_label(),
-            self.location_descr
-                .as_ref()
-                .map(|value| format!(" in {value}"))
-                .unwrap_or_default()
-        )
-    }
-    /// Java `handleValidation(String, FieldDisplayer, FieldDisplayer)`.
-    /// FieldDisplayer notification is an explicit GUI boundary; this value is
-    /// the source's rejection path.
-    pub fn handle_validation(&self, _errmsg: &str) -> bool {
-        false
-    }
-    /// Java `getText(boolean, FieldDisplayer, FieldDisplayer)`; FieldDisplayer notification is a GUI boundary.
-    pub fn get_text_validated(
-        &self,
-        do_validation: bool,
-    ) -> Result<String, FieldValidationFailedException> {
-        if do_validation && self.enabled {
-            self.validate_text()?;
-        }
-        Ok(self.text.clone())
-    }
-    pub fn get_text(&self) -> String {
-        self.text.clone()
-    }
-    pub fn is_empty(&self) -> bool {
-        self.text
-            .chars()
-            .all(|c| matches!(c, ' ' | '\t' | '\n' | '\u{0b}' | '\u{0c}' | '\r'))
-    }
-    pub fn set_text_file(&mut self, file: &Path) {
-        self.text = utilities::java_io_file_get_absolute_path(&file.to_string_lossy());
-    }
-    pub fn set_text(&mut self, text: &str) {
-        self.text = Self::round_text(text, self.max_decimal_places);
-    }
-    pub fn set_text_number(&mut self, value: impl std::fmt::Display) {
-        self.set_text(&value.to_string());
-    }
-    pub fn set_non_empty_text(&mut self, text: Option<&str>) {
-        if let Some(text) = text.filter(|text| !text.is_empty()) {
-            self.set_text(text);
-        }
-    }
-    pub fn set_text_allow_empty(&mut self, text: Option<&str>, allow_empty: bool) {
-        if allow_empty || text.is_some_and(|text| !text.is_empty()) {
-            self.set_text(text.unwrap_or_default());
-        }
-    }
-    pub fn set_text_field_enabled(&mut self, enabled: bool) {
-        self.enabled = enabled;
-        if enabled {
-            self.update_field_highlight();
-        }
-    }
-    pub fn set_enabled(&mut self, enabled: bool) {
-        self.enabled = enabled;
-        if enabled {
-            self.update_field_highlight();
-        }
-    }
-    pub fn set_editable(&mut self, editable: bool) {
-        self.editable = editable;
-    }
-    pub fn is_enabled(&self) -> bool {
-        self.enabled
-    }
-    pub fn is_editable(&self) -> bool {
-        self.editable
-    }
-    pub fn is_visible(&self) -> bool {
-        self.visible
-    }
-    pub fn set_visible(&mut self, visible: bool) {
-        self.visible = visible;
-    }
-    pub fn set_debug(&mut self, debug: bool) {
-        self.debug = debug;
-    }
-    pub fn add_document_listener(&mut self) {
-        self.document_listener_count += 1;
-    }
-    pub fn set_text_preferred_size(&mut self, size: Dimension) {
-        self.text_preferred_size = Some(size);
-    }
-    pub fn set_preferred_width(&mut self, width: i32, user_font_size: Option<i32>) {
-        self.text_preferred_size = Some(UiUtilities::calc_new_text_field_size(
-            self.text_preferred_size,
-            width,
-            true,
-            user_font_size,
-        ));
-    }
-    pub fn set_text_preferred_width(&mut self, min_width: i32) {
-        let mut size = self.text_preferred_size.unwrap_or_default();
-        size.width = min_width;
-        self.text_preferred_size = Some(size);
-    }
-    pub fn set_minimum_width(&mut self, min_width: i32) {
-        let mut size = self.text_preferred_size.unwrap_or_default();
-        size.width = min_width;
-        self.text_minimum_size = Some(size);
-    }
-    pub fn get_label_preferred_size(&self) -> Dimension {
-        Dimension {
-            width: self.label.chars().count() as i32,
-            height: 1,
-        }
-    }
-    pub fn set_columns(&mut self, columns: i32) {
-        self.columns = columns;
-    }
-    pub fn set_alignment_x(&mut self, alignment: f32) {
-        self.alignment_x = alignment;
-    }
-    pub fn set_tool_tip_text(&mut self, text: Option<&str>) {
-        self.tooltip = text.map(str::to_owned);
-    }
-    pub fn set_unformatted_tooltip(&mut self, text: &str) -> String {
-        self.unformatted_tooltip = Some(text.into());
-        text.into()
-    }
-    pub fn has_unformatted_tooltip(&self) -> bool {
-        self.unformatted_tooltip.is_some()
-    }
-    pub fn use_unformatted_tooltip(
-        &mut self,
-        param_descr: Option<&str>,
-        directive_descr: Option<&str>,
-    ) {
-        let text = [
-            self.unformatted_tooltip.take(),
-            param_descr.map(str::to_owned),
-            directive_descr.map(str::to_owned),
-        ]
-        .into_iter()
-        .flatten()
-        .collect::<Vec<_>>()
-        .join(" ");
-        self.set_tool_tip_text(Some(&text));
-    }
-    pub fn set_tooltip(&mut self, tooltip: Option<&str>) {
-        if let Some(tooltip) = tooltip {
-            self.tooltip = Some(tooltip.into());
-        }
-    }
-    pub fn get_tooltip(&self) -> Option<&str> {
-        self.tooltip.as_deref()
-    }
-    pub fn add_mouse_listener(&mut self) {
-        self.mouse_listener_count += 3;
-    }
-
-    fn round_text(text: &str, max_decimal_places: Option<i32>) -> String {
-        let Some(digits) = max_decimal_places else {
-            return text.to_owned();
-        };
-        if digits < 0 {
-            return text.to_owned();
-        }
-        match text.parse::<f64>() {
-            Ok(value) => format!("{value:.precision$}", precision = digits as usize),
-            Err(_) => text.to_owned(),
-        }
-    }
-    /// Java `FieldValidator.validateText`, adapted from this widget's historical
-    /// storage-only validation set into the source-owned logic unit.
-    fn validate_text(&self) -> Result<(), FieldValidationFailedException> {
-        let logic_set = self.validation_set.as_ref().map(|set| {
-            let mut logic = LogicValidationSet::new(Some(self.field_type), None);
-            logic.set_number_must_be_positive(set.number_must_be_positive);
-            if let Some(value) = set.minimum {
-                logic.set_minimum(value);
-            }
-            if let Some(value) = set.maximum {
-                logic.set_maximum(value);
-            }
-            logic.set_parsable_string(set.parsable_string);
-            logic
-        });
-        FieldValidator::validate_text(
-            Some(&self.text),
-            Some(self.field_type),
-            self.max_array_size,
-            self.required,
-            false,
-            false,
-            logic_set.as_ref(),
-            false,
-        )
-        .map(|_| ())
-        .map_err(FieldValidationFailedException)
-    }
+    /// Java `panel`.
+    panel: Rc<JComponent>,
+    /// Java `label`.
+    label: Rc<JComponent>,
+    /// Java `textField`.
+    text_field: Rc<JComponent>,
+    /// Java `fieldType`.
+    field_type: FieldType,
+    /// Java `locationDescr`.
+    location_descr: Option<String>,
+    /// Java `maxArraySize`.  Only for validating fields with a field type of
+    /// FieldType.FLOATING_POINT_ARRAY and FieldType.INTEGER_ARRAY.
+    max_array_size: i32,
+    /// Java `debug`.
+    debug: Cell<bool>,
+    /// Java `origTextForeground`.
+    orig_text_foreground: Cell<Option<Color>>,
+    /// Java `origLabelForeground`.
+    orig_label_foreground: Cell<Option<Color>>,
+    /// Java `directiveDef`.
+    directive_def: Cell<Option<DirectiveDef>>,
+    /// Java `maxDecimalPlaces`.
+    max_decimal_places: RefCell<Option<EtomoNumber>>,
+    // Never reassign TextFieldSetting to null. If null means that they have never been
+    // used, less updating when checking the value of TextFieldSetting variables is
+    // required.
+    /// Java `backup`.
+    backup: RefCell<Option<Rc<TextFieldSetting>>>,
+    /// Java `defaultValue`.
+    default_value: RefCell<Option<Rc<TextFieldSetting>>>,
+    /// Java `fieldHighlight`.
+    field_highlight: RefCell<Option<Rc<TextFieldSetting>>>,
+    /// Java `checkpoint`.
+    checkpoint: RefCell<Option<Rc<TextFieldSetting>>>,
+    /// Java `required`.
+    required: Cell<bool>,
+    /// Java `validationSet`.  Java keeps the caller's object (shared); Rust keeps a copy.
+    validation_set: RefCell<Option<ValidationSet>>,
+    /// Java `overridableFieldDisplayer1`.
+    overridable_field_displayer1: RefCell<Option<Rc<dyn FieldDisplayer>>>,
+    /// Java `overridableFieldDisplayer2`.
+    overridable_field_displayer2: RefCell<Option<Rc<dyn FieldDisplayer>>>,
+    /// Java `unformattedTooltip`.
+    unformatted_tooltip: RefCell<Option<String>>,
+    /// `this`, for registering this object as the text field's `FocusListener`.
+    self_ref: std::rc::Weak<LabeledTextField>,
 }
 
 impl std::fmt::Display for LabeledTextField {
+    /// Java `toString()`.
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "[label:{}]", self.label)
+        write!(f, "[label:{}]", self.get_label())
     }
 }
 
-#[cfg(test)]
-mod tests {
-    use super::*;
-    #[test]
-    fn source_name_checkpoint_and_highlight_follow_text() {
-        let mut field = LabeledTextField::new(FieldType::FloatingPoint, "Pixel size:");
-        assert_eq!(field.name, "tf.pixel-size");
-        field.set_text("1.25");
-        field.checkpoint();
-        assert!(!field.is_different_from_checkpoint(true));
-        field.set_field_highlight("1.25");
-        assert_eq!(field.text_foreground, FIELD_HIGHLIGHT);
-        field.set_text("2");
-        field.focus_lost();
-        assert_eq!(field.text_foreground, BLACK);
+impl LabeledTextField {
+    /// Java private `paramString()` (no caller in the Java either).
+    #[allow(dead_code)]
+    fn param_string(&self) -> String {
+        format!(
+            "label={},textField={}",
+            self.label.get_text(),
+            self.text_field.get_text()
+        )
     }
-    #[test]
-    fn source_validation_obeys_required_array_and_range_state() {
-        // Java `FieldValidator` tests `!gtNElements(maxArraySize)`, where
-        // `gtNElements` means strictly less-than; a limit of 3 therefore
-        // admits at most two entries.
-        let mut field =
-            LabeledTextField::new_with_max_array_size(FieldType::IntegerArray, 3, "Values:");
-        field.set_required(true);
-        assert!(field.get_text_validated(true).is_err());
-        field.set_text("1, 2, 3");
-        assert!(field.get_text_validated(true).is_err());
-        field.set_text("1, 2");
-        field.set_minimum(2.0);
-        assert!(field.get_text_validated(true).is_err());
-        field.set_text("2, 3");
-        assert!(field.get_text_validated(true).is_ok());
+
+    /// Java `equals(Object)`: true when the object is the text field.
+    pub fn equals_object(&self, object: &Rc<JComponent>) -> bool {
+        Rc::ptr_eq(object, &self.text_field)
     }
-    #[test]
-    fn disabled_field_skips_validation_and_checkpoint_difference() {
-        let mut field = LabeledTextField::new(FieldType::Integer, "Bin:");
-        field.set_text("bad");
-        field.set_enabled(false);
-        assert!(field.get_text_validated(true).is_ok());
-        assert!(!field.is_different_from_checkpoint(false));
+
+    /// Java `equals(Document)`.  The stand-in's document is the text field.
+    pub fn equals_document(&self, document: &Rc<JComponent>) -> bool {
+        Rc::ptr_eq(document, &self.text_field)
+    }
+
+    /// Java private `LabeledTextField(FieldType, int, String, int, String)`.
+    fn new_field_type_int_string_int_string(
+        field_type: FieldType,
+        max_array_size: i32,
+        tf_label: Option<&str>,
+        hgap: i32,
+        location_descr: Option<&str>,
+    ) -> Rc<LabeledTextField> {
+        let field = Rc::new_cyclic(|self_ref| LabeledTextField {
+            self_ref: self_ref.clone(),
+            panel: JComponent::new_panel(),
+            label: JComponent::new_label(""),
+            text_field: JComponent::new_text_field(),
+            field_type,
+            location_descr: location_descr.map(str::to_owned),
+            max_array_size,
+            debug: Cell::new(false),
+            orig_text_foreground: Cell::new(None),
+            orig_label_foreground: Cell::new(None),
+            directive_def: Cell::new(None),
+            max_decimal_places: RefCell::new(None),
+            backup: RefCell::new(None),
+            default_value: RefCell::new(None),
+            field_highlight: RefCell::new(None),
+            checkpoint: RefCell::new(None),
+            required: Cell::new(false),
+            validation_set: RefCell::new(None),
+            overridable_field_displayer1: RefCell::new(None),
+            overridable_field_displayer2: RefCell::new(None),
+            unformatted_tooltip: RefCell::new(None),
+        });
+        // set label
+        field.set_label(tf_label);
+        // Swing layout: panel.setLayout(new BoxLayout(panel, BoxLayout.X_AXIS)).
+        field.panel.add(&field.label);
+        if hgap > 0 {
+            // Swing layout: panel.add(Box.createRigidArea(new Dimension(hgap, 0))).
+        }
+        field.panel.add(&field.text_field);
+        // Use the label as the action command. The <Enter> key triggers an action.
+        field.text_field.set_action_command(tf_label);
+        // Swing layout: set the maximum height of the text field box to twice the font
+        // size (the larger of the label's and the text field's), since it is not set by
+        // default.
+        if field_type == FieldType::File {
+            // Swing layout: textField.setHorizontalAlignment(JTextField.RIGHT).
+        }
+        field
+    }
+
+    /// Java `LabeledTextField(FieldType, String)`.
+    pub fn new_field_type_string(
+        field_type: FieldType,
+        tf_label: Option<&str>,
+    ) -> Rc<LabeledTextField> {
+        LabeledTextField::new_field_type_int_string_int_string(field_type, -1, tf_label, 0, None)
+    }
+
+    /// Java `LabeledTextField(FieldType, int, String)`.
+    pub fn new_field_type_int_string(
+        field_type: FieldType,
+        max_array_size: i32,
+        tf_label: Option<&str>,
+    ) -> Rc<LabeledTextField> {
+        LabeledTextField::new_field_type_int_string_int_string(
+            field_type,
+            max_array_size,
+            tf_label,
+            0,
+            None,
+        )
+    }
+
+    /// Java `LabeledTextField(FieldType, String, String)`.
+    pub fn new_field_type_string_string(
+        field_type: FieldType,
+        tf_label: Option<&str>,
+        location_descr: Option<&str>,
+    ) -> Rc<LabeledTextField> {
+        LabeledTextField::new_field_type_int_string_int_string(
+            field_type,
+            -1,
+            tf_label,
+            0,
+            location_descr,
+        )
+    }
+
+    /// Java `LabeledTextField(FieldType, String, int)`.
+    pub fn new_field_type_string_int(
+        field_type: FieldType,
+        tf_label: Option<&str>,
+        hgap: i32,
+    ) -> Rc<LabeledTextField> {
+        LabeledTextField::new_field_type_int_string_int_string(field_type, -1, tf_label, hgap, None)
+    }
+
+    /// Java static `getNumericInstance(String, EtomoNumber.Type)`.
+    pub fn get_numeric_instance_string_type(
+        tf_label: Option<&str>,
+        numeric_type: Type,
+    ) -> Rc<LabeledTextField> {
+        let mut field_type = FieldType::Integer;
+        if numeric_type == Type::Double {
+            field_type = FieldType::FloatingPoint;
+        }
+        LabeledTextField::new_field_type_int_string_int_string(field_type, -1, tf_label, 0, None)
+    }
+
+    /// Java static `getNumericInstance(String)`.
+    pub fn get_numeric_instance_string(tf_label: Option<&str>) -> Rc<LabeledTextField> {
+        LabeledTextField::get_numeric_instance_string_type(tf_label, Type::Integer)
+    }
+
+    /// Java `setMaxDecimalPlaces(int)`.
+    pub fn set_max_decimal_places(&self, digits: i32) {
+        let mut max_decimal_places = self.max_decimal_places.borrow_mut();
+        if max_decimal_places.is_none() {
+            *max_decimal_places = Some(EtomoNumber::new());
+        }
+        max_decimal_places.as_mut().unwrap().set_int(digits);
+    }
+
+    /// Java `setName(String)`.
+    pub fn set_name(&self, tf_label: Option<&str>) {
+        let field_type = &ui_test_field_type::TEXT_FIELD;
+        let name = utilities::convert_label_to_name(tf_label, field_type.is_unlimited_segments());
+        self.text_field.set_name(Some(&format!(
+            "{}{}{}",
+            field_type,
+            SEPARATOR_CHAR,
+            name.as_deref().unwrap_or("null")
+        )));
+        if ARGUMENTS.lock().unwrap().is_print_names() {
+            println!(
+                "{} {} ",
+                self.text_field.get_name().as_deref().unwrap_or("null"),
+                DEFAULT_DELIMITER
+            );
+        }
+    }
+
+    /// Java `checkpoint()`: saves the current text as the checkpoint.
+    pub fn checkpoint_void(&self) {
+        if self.checkpoint.borrow().is_none() {
+            *self.checkpoint.borrow_mut() =
+                Some(Rc::new(TextFieldSetting::new_field_type(self.field_type)));
+        }
+        let checkpoint = self.checkpoint.borrow().clone().unwrap();
+        checkpoint.set_string(self.get_text_void().as_deref());
+    }
+
+    /// Java `checkpoint(int)`: saves value as the checkpoint.
+    pub fn checkpoint_int(&self, value: i32) {
+        if self.checkpoint.borrow().is_none() {
+            *self.checkpoint.borrow_mut() =
+                Some(Rc::new(TextFieldSetting::new_field_type(self.field_type)));
+        }
+        let checkpoint = self.checkpoint.borrow().clone().unwrap();
+        checkpoint.set_int(value);
+    }
+
+    /// Java `checkpoint(ConstEtomoNumber)`: saves value as the checkpoint.
+    pub fn checkpoint_const_etomo_number(&self, value: Option<&ConstEtomoNumber>) {
+        if self.checkpoint.borrow().is_none() {
+            *self.checkpoint.borrow_mut() =
+                Some(Rc::new(TextFieldSetting::new_field_type(self.field_type)));
+        }
+        let checkpoint = self.checkpoint.borrow().clone().unwrap();
+        checkpoint.set_const_etomo_number(value);
+    }
+
+    /// Java `checkpoint(double)`: saves value as the checkpoint.
+    pub fn checkpoint_double(&self, value: f64) {
+        if self.checkpoint.borrow().is_none() {
+            *self.checkpoint.borrow_mut() =
+                Some(Rc::new(TextFieldSetting::new_field_type(self.field_type)));
+        }
+        let checkpoint = self.checkpoint.borrow().clone().unwrap();
+        checkpoint.set_double(value);
+    }
+
+    /// Java `checkpoint(String)`: saves value as the checkpoint.
+    pub fn checkpoint_string(&self, value: Option<&str>) {
+        if self.checkpoint.borrow().is_none() {
+            *self.checkpoint.borrow_mut() =
+                Some(Rc::new(TextFieldSetting::new_field_type(self.field_type)));
+        }
+        let checkpoint = self.checkpoint.borrow().clone().unwrap();
+        checkpoint.set_string(value);
+    }
+
+    /// Java `resetToCheckpoint()`.  Resets to the checkpoint value if it has been set.
+    pub fn reset_to_checkpoint(&self) {
+        let checkpoint = self.checkpoint.borrow().clone();
+        let Some(checkpoint) = checkpoint.filter(|checkpoint| checkpoint.is_set()) else {
+            return;
+        };
+        self.set_text_string(checkpoint.get_value().as_deref());
+    }
+
+    /// Java `getFieldType()`.
+    pub fn get_field_type(&self) -> FieldType {
+        self.field_type
+    }
+
+    // Java `getFont()`: fonts are not modelled.
+
+    /// Java `focusGained(FocusEvent)`.
+    pub fn focus_gained(&self) {}
+
+    /// Java `focusLost(FocusEvent)`.
+    pub fn focus_lost(&self) {
+        self.update_field_highlight();
+    }
+
+    /// Java `updateFieldHighlight()`.  If the field highlight is in use, use the field
+    /// highlight color on the foreground of the label and text field when the value
+    /// equals the field highlight value, saving the original foregrounds; otherwise
+    /// restore them.
+    pub fn update_field_highlight(&self) {
+        // To avoid constantly updating the foreground color, assuming that
+        // fieldHighlight is never reassigned to null
+        let field_highlight = self.field_highlight.borrow().clone();
+        let Some(field_highlight) = field_highlight else {
+            return;
+        };
+        if !self.text_field.is_enabled() {
+            return;
+        }
+        if field_highlight.is_set()
+            && field_highlight.equals_string(Some(&self.text_field.get_text()))
+        {
+            // save the original color
+            if self.orig_text_foreground.get().is_none() {
+                let mut orig = self.text_field.get_foreground();
+                if orig.is_none() {
+                    // Color.BLACK
+                    orig = Some((0, 0, 0));
+                }
+                self.orig_text_foreground.set(orig);
+            }
+            if self.orig_label_foreground.get().is_none() {
+                let mut orig = self.label.get_foreground();
+                if orig.is_none() {
+                    // Color.BLACK
+                    orig = Some((0, 0, 0));
+                }
+                self.orig_label_foreground.set(orig);
+            }
+            self.label.set_foreground(Some(colors::FIELD_HIGHLIGHT));
+            self.text_field
+                .set_foreground(Some(colors::FIELD_HIGHLIGHT));
+        } else {
+            if let Some(orig) = self.orig_text_foreground.get() {
+                self.text_field.set_foreground(Some(orig));
+            }
+            if let Some(orig) = self.orig_label_foreground.get() {
+                self.label.set_foreground(Some(orig));
+            }
+        }
+    }
+
+    /// Java `getActionCommand()`.
+    pub fn get_action_command(&self) -> String {
+        self.label.get_text()
+    }
+
+    /// Java `addActionListener(ActionListener)`.
+    pub fn add_action_listener(&self, listener: ActionListener) {
+        self.text_field.add_action_listener(listener);
+    }
+
+    /// Java `addFocusListener(FocusListener)`.
+    pub fn add_focus_listener(&self, listener: FocusListener) {
+        self.text_field.add_focus_listener(listener);
+    }
+
+    /// Java `removeFocusListener(FocusListener)`.
+    pub fn remove_focus_listener(&self, listener: &FocusListener) {
+        self.text_field.remove_focus_listener(listener);
+    }
+
+    /// `this` as a `FocusListener` (Java `textField.addFocusListener(this)`).
+    fn this_focus_listener(&self) -> FocusListener {
+        let this = self.self_ref.clone();
+        Rc::new(move |event: &FocusEvent| {
+            if let Some(this) = this.upgrade() {
+                if event.gained {
+                    this.focus_gained();
+                } else {
+                    this.focus_lost();
+                }
+            }
+        })
+    }
+
+    /// Java `isDifferentFromCheckpoint()`.  If the field is disabled then return false
+    /// because its value doesn't matter.  Returns true if the checkpoint has not been
+    /// done, otherwise compares the text with the checkpoint.
+    pub fn is_different_from_checkpoint_void(&self) -> bool {
+        self.is_different_from_checkpoint_boolean(false)
+    }
+
+    /// Java `isDifferentFromCheckpoint(boolean)`.  When alwaysCheck is false, return
+    /// false when the field is disabled or invisible.
+    pub fn is_different_from_checkpoint_boolean(&self, always_check: bool) -> bool {
+        if !always_check && (!self.text_field.is_enabled() || !self.text_field.is_visible()) {
+            return false;
+        }
+        let checkpoint = self.checkpoint.borrow().clone();
+        match checkpoint {
+            None => true,
+            Some(checkpoint) => !checkpoint.equals_string(self.get_text_void().as_deref()),
+        }
+    }
+
+    /// Java `equals(String)`.
+    pub fn equals_string(&self, that_text: Option<&str>) -> bool {
+        let text = self.get_text_void();
+        let Some(text) = text else {
+            return that_text.is_none();
+        };
+        let Some(that_text) = that_text else {
+            return false;
+        };
+        java_lang_string_trim(&text) == java_lang_string_trim(that_text)
+    }
+
+    /// Java `setHighlight(boolean)`.
+    pub fn set_highlight(&self, highlight: bool) {
+        if highlight {
+            // Swing painting: textField.setBackground(Colors.HIGHLIGHT_BACKGROUND).
+        } else {
+            // Swing painting: textField.setBackground(Colors.BACKGROUND).
+        }
+    }
+
+    /// Java `getField()`.
+    pub fn get_field(&self) -> Rc<JComponent> {
+        self.text_field.clone()
+    }
+
+    /// Java `getComponent()`.
+    pub fn get_component(&self) -> Rc<JComponent> {
+        self.panel.clone()
+    }
+
+    /// Java `getContainer()`.
+    pub fn get_container(&self) -> Rc<JComponent> {
+        self.panel.clone()
+    }
+
+    /// Java `getLabel()`.
+    pub fn get_label(&self) -> String {
+        self.label.get_text()
+    }
+
+    /// Java `setLabel(String)`.
+    pub fn set_label(&self, label: Option<&str>) {
+        self.label.set_text(label.unwrap_or(""));
+        self.set_name(label);
+    }
+
+    /// Java `setRequired(boolean)`.
+    pub fn set_required(&self, required: bool) {
+        self.required.set(required);
+    }
+
+    /// Java `setValidationSet(ValidationSet)`.
+    pub fn set_validation_set(&self, input: Option<&ValidationSet>) {
+        let mut validation_set = self.validation_set.borrow_mut();
+        match validation_set.as_mut() {
+            None => *validation_set = input.cloned(),
+            Some(validation_set) => {
+                if input.is_some() {
+                    validation_set.copy(input);
+                } else {
+                    validation_set.clear();
+                }
+            }
+        }
+    }
+
+    /// Java `setNumberMustBePositive(boolean)`.
+    pub fn set_number_must_be_positive(&self, input: bool) {
+        let mut validation_set = self.validation_set.borrow_mut();
+        if validation_set.is_none() {
+            *validation_set = Some(ValidationSet::new(Some(self.field_type), None));
+        }
+        validation_set
+            .as_mut()
+            .unwrap()
+            .set_number_must_be_positive(input);
+    }
+
+    /// Java `setMinimum(double)`.
+    pub fn set_minimum(&self, input: f64) {
+        let mut validation_set = self.validation_set.borrow_mut();
+        if validation_set.is_none() {
+            *validation_set = Some(ValidationSet::new(Some(self.field_type), None));
+        }
+        validation_set.as_mut().unwrap().set_minimum(input);
+    }
+
+    /// Java `setMaximum(double)`.
+    pub fn set_maximum(&self, input: f64) {
+        let mut validation_set = self.validation_set.borrow_mut();
+        if validation_set.is_none() {
+            *validation_set = Some(ValidationSet::new(Some(self.field_type), None));
+        }
+        validation_set.as_mut().unwrap().set_maximum(input);
+    }
+
+    /// Java `setParsableString(boolean)`.
+    pub fn set_parsable_string(&self, parsable_string: bool) {
+        let mut validation_set = self.validation_set.borrow_mut();
+        if validation_set.is_none() {
+            *validation_set = Some(ValidationSet::new(Some(self.field_type), None));
+        }
+        validation_set
+            .as_mut()
+            .unwrap()
+            .set_parsable_string(parsable_string);
+    }
+
+    /// Java `getText(boolean)`.
+    pub fn get_text_boolean(
+        &self,
+        do_validation: bool,
+    ) -> Result<Option<String>, FieldValidationFailedException> {
+        self.get_text_boolean_field_displayer_field_displayer(do_validation, None, None)
+    }
+
+    /// Java `setOverridableFieldDisplayers(FieldDisplayer, FieldDisplayer)`.
+    pub fn set_overridable_field_displayers(
+        &self,
+        field_displayer1: Option<Rc<dyn FieldDisplayer>>,
+        field_displayer2: Option<Rc<dyn FieldDisplayer>>,
+    ) {
+        *self.overridable_field_displayer1.borrow_mut() = field_displayer1;
+        *self.overridable_field_displayer2.borrow_mut() = field_displayer2;
+    }
+
+    /// Java `handleValidation(String, FieldDisplayer, FieldDisplayer)`.  Returns false
+    /// if invalid.
+    pub fn handle_validation(
+        &self,
+        errmsg: Option<&str>,
+        mut field_displayer1: Option<Rc<dyn FieldDisplayer>>,
+        mut field_displayer2: Option<Rc<dyn FieldDisplayer>>,
+    ) -> bool {
+        if field_displayer1.is_none() {
+            field_displayer1 = self.overridable_field_displayer1.borrow().clone();
+        }
+        if field_displayer2.is_none() {
+            field_displayer2 = self.overridable_field_displayer2.borrow().clone();
+        }
+        FieldValidator::handle_validation(
+            errmsg,
+            Some(self),
+            Some(&self.get_description()),
+            field_displayer1.as_deref(),
+            field_displayer2.as_deref(),
+        )
+    }
+
+    /// Java `setText(File)`.
+    pub fn set_text_file(&self, file: &Path) {
+        let absolute_path = std::path::absolute(file).unwrap_or_else(|_| file.to_path_buf());
+        self.text_field.set_text(&absolute_path.to_string_lossy());
+    }
+
+    /// Java `setText(ConstEtomoNumber)`.
+    pub fn set_text_const_etomo_number(&self, text: Option<&ConstEtomoNumber>) {
+        match text {
+            None => self.text_field.set_text(""),
+            Some(text) => {
+                let max_decimal_places = self.max_decimal_places.borrow();
+                self.text_field.set_text(
+                    &utilities::round_to_max_decimal_places(
+                        Some(text),
+                        max_decimal_places.as_deref(),
+                    )
+                    .unwrap_or_else(|| "null".to_string()),
+                );
+            }
+        }
+    }
+
+    /// Java `setText(Number)`.
+    pub fn set_text_number(&self, input: Option<Number>) {
+        match input {
+            None => self.text_field.set_text(""),
+            Some(input) => {
+                let text = utilities::round_to_max_decimal_places_number(
+                    Some(input),
+                    self.max_decimal_places.borrow().as_deref(),
+                );
+                self.text_field
+                    .set_text(&text.unwrap_or_else(|| "null".to_string()));
+            }
+        }
+    }
+
+    /// Java `setText(String)`.
+    pub fn set_text_string(&self, text: Option<&str>) {
+        let text = utilities::round_to_max_decimal_places_string(
+            text,
+            self.max_decimal_places.borrow().as_deref(),
+        );
+        // JTextField.setText(null) empties the field.
+        self.text_field.set_text(text.as_deref().unwrap_or(""));
+    }
+
+    /// Java `setNonEmptyText(String)`.  Set text if parameter is not empty.  Prevents a
+    /// value from being overridden by nothing.
+    pub fn set_non_empty_text(&self, text: Option<&str>) {
+        if text.is_some_and(|text| !text.is_empty()) {
+            self.set_text_string(text);
+        }
+    }
+
+    /// Java `setText(String, boolean)`.
+    pub fn set_text_string_boolean(&self, text: Option<&str>, allow_empty: bool) {
+        if allow_empty || text.is_some_and(|text| !text.is_empty()) {
+            self.set_text_string(text);
+        }
+    }
+
+    /// Java `setText(int)`.
+    pub fn set_text_int(&self, value: i32) {
+        // textField.setText(String.valueOf(value));
+        let text = utilities::round_to_max_decimal_places_number(
+            Some(Number::Integer(value)),
+            self.max_decimal_places.borrow().as_deref(),
+        );
+        self.text_field
+            .set_text(&text.unwrap_or_else(|| "null".to_string()));
+    }
+
+    /// Java `setText(long)`.
+    pub fn set_text_long(&self, value: i64) {
+        // textField.setText(String.valueOf(value));
+        let text = utilities::round_to_max_decimal_places_number(
+            Some(Number::Long(value)),
+            self.max_decimal_places.borrow().as_deref(),
+        );
+        self.text_field
+            .set_text(&text.unwrap_or_else(|| "null".to_string()));
+    }
+
+    /// Java `setText(double)`.
+    pub fn set_text_double(&self, value: f64) {
+        // textField.setText(Double.toString(value));
+        let text = utilities::round_to_max_decimal_places_number(
+            Some(Number::Double(value)),
+            self.max_decimal_places.borrow().as_deref(),
+        );
+        self.text_field
+            .set_text(&text.unwrap_or_else(|| "null".to_string()));
+    }
+
+    /// Java `setTextFieldEnabled(boolean)`.
+    pub fn set_text_field_enabled(&self, enabled: bool) {
+        self.text_field.set_enabled(enabled);
+        if enabled {
+            self.update_field_highlight();
+        }
+    }
+
+    /// Java `setEnabled(boolean)`.
+    pub fn set_enabled(&self, enabled: bool) {
+        self.text_field.set_enabled(enabled);
+        self.label.set_enabled(enabled);
+        if enabled {
+            self.update_field_highlight();
+        }
+    }
+
+    /// Java `setEditable(boolean)`.
+    pub fn set_editable(&self, editable: bool) {
+        // Label is not changed by editable status
+        self.text_field.set_editable(editable);
+    }
+
+    /// Java `isEditable()`.
+    pub fn is_editable(&self) -> bool {
+        self.text_field.is_editable()
+    }
+
+    /// Java `isVisible()`.
+    pub fn is_visible(&self) -> bool {
+        self.panel.is_visible()
+    }
+
+    /// Java `setVisible(boolean)`.
+    pub fn set_visible(&self, is_visible: bool) {
+        self.panel.set_visible(is_visible);
+    }
+
+    /// Java `setDebug(boolean)`.
+    pub fn set_debug(&self, debug: bool) {
+        self.debug.set(debug);
+    }
+
+    /// Java `addDocumentListener(DocumentListener)`.
+    pub fn add_document_listener(&self, listener: DocumentListener) {
+        self.text_field.add_document_listener(listener);
+    }
+
+    /// Java `setTextPreferredSize(Dimension)`.
+    pub fn set_text_preferred_size(&self, _size: Dimension) {
+        // Swing layout: textField.setPreferredSize(size); textField.setMaximumSize(size).
+    }
+
+    /// Java `setPreferredWidth(int)`.
+    pub fn set_preferred_width(&self, width: i32) {
+        // Swing layout: textField.getPreferredSize() is not modelled.
+        let _dim = ui_utilities::calc_new_text_field_size(None, width, true);
+        // Swing layout: textField.setPreferredSize(dim); textField.setMaximumSize(dim).
+    }
+
+    /// Java `setTextPreferredWidth(double)`.
+    pub fn set_text_preferred_width(&self, _min_width: f64) {
+        // Swing layout: prefSize = textField.getPreferredSize(); prefSize.setSize(minWidth,
+        // prefSize.getHeight()); textField.setPreferredSize(prefSize).
+    }
+
+    /// Java `setMinimumWidth(double)`.
+    pub fn set_minimum_width(&self, _min_width: f64) {
+        // Swing layout: prefSize = textField.getPreferredSize(); prefSize.setSize(minWidth,
+        // prefSize.getHeight()); textField.setMinimumSize(prefSize).
+    }
+
+    // Java: `setPreferredSize(Dimension)` and `setMaximumSize(Dimension)` are commented
+    // out in the source.
+
+    /// Java `getLabelPreferredSize()`.  Sizes are not modelled; zero is returned.
+    pub fn get_label_preferred_size(&self) -> Dimension {
+        // Swing layout: label.getPreferredSize().
+        Dimension {
+            width: 0,
+            height: 0,
+        }
+    }
+
+    /// Java `setColumns(int)`.
+    pub fn set_columns(&self, _columns: i32) {
+        // Swing layout: textField.setColumns(columns).
+    }
+
+    /// Java `setAlignmentX(float)`.
+    pub fn set_alignment_x(&self, _alignment: f32) {
+        // Swing layout: panel.setAlignmentX(alignment).
+    }
+
+    /// Java `addMouseListener(MouseListener)`.
+    pub fn add_mouse_listener(&self) {
+        // Swing mouse: panel, label and textField.addMouseListener(listener) - mouse
+        // events are not modelled.
+    }
+}
+
+impl Field for LabeledTextField {
+    /// Java `isDebug()`.
+    fn is_debug(&self) -> bool {
+        self.debug.get() || ARGUMENTS.lock().unwrap().is_debug()
+    }
+
+    /// Java `getName()`.
+    fn get_name(&self) -> Option<String> {
+        self.text_field.get_name()
+    }
+
+    /// Java `isBoolean()`.
+    fn is_boolean(&self) -> bool {
+        false
+    }
+
+    /// Java `isText()`.
+    fn is_text(&self) -> bool {
+        true
+    }
+
+    /// Java `equalsSelectedStringValue(String)`.  No true value is implemented so all
+    /// non-empty values are true.
+    fn equals_selected_string_value(&self, value: Option<&str>) -> bool {
+        value.is_some_and(|value| !value.is_empty())
+    }
+
+    /// Java `checkpoint()`.
+    fn checkpoint(&self) {
+        self.checkpoint_void();
+    }
+
+    /// Java `backup()`.  Saves the current text in backup.
+    fn backup(&self) {
+        if self.backup.borrow().is_none() {
+            *self.backup.borrow_mut() =
+                Some(Rc::new(TextFieldSetting::new_field_type(self.field_type)));
+        }
+        let backup = self.backup.borrow().clone().unwrap();
+        backup.set_string(self.get_text_void().as_deref());
+    }
+
+    /// Java `restoreFromBackup()`.  If the field was backed up, make the backup value
+    /// the displayed value, and turn off the back up.
+    fn restore_from_backup(&self) {
+        let backup = self.backup.borrow().clone();
+        if let Some(backup) = backup.filter(|backup| backup.is_set()) {
+            self.set_text_string(backup.get_value().as_deref());
+            backup.reset();
+        }
+    }
+
+    /// Java `setDirectiveDef(DirectiveDef)`.
+    fn set_directive_def(&self, directive_def: Option<DirectiveDef>) {
+        self.directive_def.set(directive_def);
+    }
+
+    /// Java `getDirectiveDef()`.
+    fn get_directive_def(&self) -> Option<DirectiveDef> {
+        self.directive_def.get()
+    }
+
+    /// Java `useDefaultValue()`.
+    fn use_default_value(&self) {
+        let Some(directive_def) = self.directive_def.get() else {
+            let default_value = self.default_value.borrow().clone();
+            if let Some(default_value) =
+                default_value.filter(|default_value| default_value.is_set())
+            {
+                default_value.reset();
+            }
+            return;
+        };
+        // only search for default value once
+        if self.default_value.borrow().is_none() {
+            let default_value = Rc::new(TextFieldSetting::new_field_type(self.field_type));
+            // TODO(unit): needs etomo/logic/AutodocAttributeRetriever.java -
+            // INSTANCE.getDefaultValue(DirectiveDef).
+            let value = autodoc_attribute_retriever::INSTANCE
+                .get_default_value(Some(directive_def.clone()));
+            if let Some(value) = value {
+                // if default value has been found, set it in the field setting
+                default_value.set_string(Some(&value));
+            }
+            *self.default_value.borrow_mut() = Some(default_value);
+        }
+        let default_value = self.default_value.borrow().clone().unwrap();
+        if default_value.is_set() {
+            self.set_text_string(default_value.get_value().as_deref());
+        }
+    }
+
+    /// Java `equalsDefaultValue()`.
+    fn equals_default_value_void(&self) -> bool {
+        let default_value = self.default_value.borrow().clone();
+        default_value.is_some_and(|default_value| {
+            default_value.is_set() && default_value.equals_string(self.get_text_void().as_deref())
+        })
+    }
+
+    /// Java `equalsDefaultValue(String)`.
+    fn equals_default_value_string(&self, value: Option<&str>) -> bool {
+        let default_value = self.default_value.borrow().clone();
+        default_value.is_some_and(|default_value| {
+            default_value.is_set() && default_value.equals_string(value)
+        })
+    }
+
+    /// Java `setCheckpoint(FieldSettingInterface)`.
+    fn set_checkpoint(&self, input: Option<&dyn FieldSettingInterface>) {
+        if self.checkpoint.borrow().is_none()
+            && input.is_some_and(|input| input.is_set() && input.is_text())
+        {
+            *self.checkpoint.borrow_mut() =
+                Some(Rc::new(TextFieldSetting::new_field_type(self.field_type)));
+        }
+        let checkpoint = self.checkpoint.borrow().clone();
+        if let Some(checkpoint) = checkpoint {
+            checkpoint.copy(input);
+        }
+    }
+
+    /// Java `getCheckpoint()`.
+    fn get_checkpoint(&self) -> Option<Rc<dyn FieldSettingInterface>> {
+        self.checkpoint
+            .borrow()
+            .clone()
+            .map(|checkpoint| checkpoint as Rc<dyn FieldSettingInterface>)
+    }
+
+    /// Java `isFieldHighlightSet()`.
+    fn is_field_highlight_set(&self) -> bool {
+        self.field_highlight
+            .borrow()
+            .as_ref()
+            .is_some_and(|field_highlight| field_highlight.is_set())
+    }
+
+    /// Java `setFieldHighlight(String)`.
+    fn set_field_highlight_string(&self, value: Option<&str>) {
+        if self.field_highlight.borrow().is_none() {
+            *self.field_highlight.borrow_mut() =
+                Some(Rc::new(TextFieldSetting::new_field_type(self.field_type)));
+            self.text_field
+                .add_focus_listener(self.this_focus_listener());
+        }
+        let field_highlight = self.field_highlight.borrow().clone().unwrap();
+        field_highlight.set_string(value);
+        self.update_field_highlight();
+    }
+
+    /// Java `setFieldHighlight(boolean)`.
+    fn set_field_highlight_boolean(&self, _value: bool) {}
+
+    /// Java `setFieldHighlight(FieldSettingInterface)`.
+    fn set_field_highlight_field_setting_interface(
+        &self,
+        input: Option<&dyn FieldSettingInterface>,
+    ) {
+        if self.field_highlight.borrow().is_none()
+            && input.is_some_and(|input| input.is_set() && input.is_text())
+        {
+            *self.field_highlight.borrow_mut() =
+                Some(Rc::new(TextFieldSetting::new_field_type(self.field_type)));
+            self.text_field
+                .add_focus_listener(self.this_focus_listener());
+        }
+        let field_highlight = self.field_highlight.borrow().clone();
+        if let Some(field_highlight) = field_highlight {
+            field_highlight.copy(input);
+            self.update_field_highlight();
+        }
+    }
+
+    /// Java `clearFieldHighlight()`.
+    fn clear_field_highlight(&self) {
+        let field_highlight = self.field_highlight.borrow().clone();
+        if let Some(field_highlight) =
+            field_highlight.filter(|field_highlight| field_highlight.is_set())
+        {
+            field_highlight.reset();
+            self.update_field_highlight();
+        }
+    }
+
+    /// Java `getFieldHighlight()`.
+    fn get_field_highlight(&self) -> Option<Rc<dyn FieldSettingInterface>> {
+        self.field_highlight
+            .borrow()
+            .clone()
+            .map(|field_highlight| field_highlight as Rc<dyn FieldSettingInterface>)
+    }
+
+    /// Java `equalsFieldHighlight()`.
+    fn equals_field_highlight_void(&self) -> bool {
+        let field_highlight = self.field_highlight.borrow().clone();
+        field_highlight.is_some_and(|field_highlight| {
+            field_highlight.is_set()
+                && field_highlight.equals_string(self.get_text_void().as_deref())
+        })
+    }
+
+    /// Java `equalsFieldHighlight(String)`.
+    fn equals_field_highlight_string(&self, value: Option<&str>) -> bool {
+        let field_highlight = self.field_highlight.borrow().clone();
+        field_highlight.is_some_and(|field_highlight| {
+            field_highlight.is_set() && field_highlight.equals_string(value)
+        })
+    }
+
+    /// Java `isDifferentFromCheckpoint(boolean)`.
+    fn is_different_from_checkpoint(&self, always_check: bool) -> bool {
+        self.is_different_from_checkpoint_boolean(always_check)
+    }
+
+    /// Java `clear()`.
+    fn clear(&self) {
+        self.text_field.set_text("");
+    }
+
+    /// Java `setValue(Field)`.
+    fn set_value_field(&self, input: Option<&dyn Field>) {
+        match input {
+            None => self.clear(),
+            Some(input) => self.set_text_string(input.get_text_void().as_deref()),
+        }
+    }
+
+    /// Java `setValue(String)`.
+    fn set_value_string(&self, value: Option<&str>) {
+        self.set_text_string(value);
+    }
+
+    /// Java `setValue(boolean)`.
+    fn set_value_boolean(&self, _value: bool) {}
+
+    /// Java `isSelected()`.
+    fn is_selected(&self) -> bool {
+        false
+    }
+
+    /// Java `getQuotedLabel()`.
+    fn get_quoted_label(&self) -> Option<String> {
+        utilities::quote_label(Some(&self.label.get_text()))
+    }
+
+    /// Java `isRequired()`.
+    fn is_required(&self) -> bool {
+        self.required.get() && self.text_field.is_enabled()
+    }
+
+    /// Java `getText(boolean, FieldDisplayer)`.
+    fn get_text_boolean_field_displayer(
+        &self,
+        do_validation: bool,
+        field_displayer1: Option<Rc<dyn FieldDisplayer>>,
+    ) -> Result<Option<String>, FieldValidationFailedException> {
+        self.get_text_boolean_field_displayer_field_displayer(do_validation, field_displayer1, None)
+    }
+
+    /// Java `getText(boolean, FieldDisplayer, FieldDisplayer)`.
+    fn get_text_boolean_field_displayer_field_displayer(
+        &self,
+        do_validation: bool,
+        mut field_displayer1: Option<Rc<dyn FieldDisplayer>>,
+        mut field_displayer2: Option<Rc<dyn FieldDisplayer>>,
+    ) -> Result<Option<String>, FieldValidationFailedException> {
+        let mut text = Some(self.text_field.get_text());
+        if self.debug.get() {
+            println!(
+                "doValidation:{},text:{},required:{}",
+                do_validation,
+                text.as_deref().unwrap_or("null"),
+                self.required.get()
+            );
+        }
+        if do_validation && self.text_field.is_enabled() {
+            if field_displayer1.is_none() {
+                field_displayer1 = self.overridable_field_displayer1.borrow().clone();
+            }
+            if field_displayer2.is_none() {
+                field_displayer2 = self.overridable_field_displayer2.borrow().clone();
+            }
+            let validation_set = self.validation_set.borrow().clone();
+            text = FieldValidator::validate_text_string_field_type_int_ui_component_string_boolean_boolean_boolean_validation_set_field_displayer_field_displayer(
+                text.as_deref(),
+                Some(self.field_type),
+                self.max_array_size,
+                Some(self),
+                Some(&self.get_description()),
+                self.required.get(),
+                false,
+                false,
+                validation_set.as_ref(),
+                field_displayer1.as_deref(),
+                field_displayer2.as_deref(),
+            )?;
+        }
+        Ok(text)
+    }
+
+    /// Java `getDescription()`.
+    fn get_description(&self) -> String {
+        self.get_quoted_label()
+            .unwrap_or_else(|| "null".to_string())
+            + &match &self.location_descr {
+                None => String::new(),
+                Some(location_descr) => " in ".to_string() + location_descr,
+            }
+    }
+
+    /// Java `getText()`: return text without validation.
+    fn get_text_void(&self) -> Option<String> {
+        self.get_text_boolean_field_displayer_field_displayer(false, None, None)
+            .unwrap_or(None)
+    }
+
+    /// Java `isEmpty()`.
+    fn is_empty(&self) -> bool {
+        java_lang_string_matches_whitespace(&self.text_field.get_text())
+    }
+
+    /// Java `isEnabled()`.
+    fn is_enabled(&self) -> bool {
+        self.text_field.is_enabled()
+    }
+
+    /// Java `setToolTipText(String)`.
+    fn set_tool_tip_text(&self, text: Option<&str>) {
+        let set_debug = self.debug.get() && !tooltip_formatter::INSTANCE.is_debug();
+        if set_debug {
+            tooltip_formatter::INSTANCE.set_debug(self.debug.get());
+        }
+        let tooltip = tooltip_formatter::INSTANCE.format(text);
+        if set_debug {
+            tooltip_formatter::INSTANCE.set_debug(false);
+        }
+        self.panel.set_tool_tip_text(tooltip.as_deref());
+        self.text_field.set_tool_tip_text(tooltip.as_deref());
+        self.label.set_tool_tip_text(tooltip.as_deref());
+    }
+
+    /// Java `setUnformattedTooltip(String)`.
+    fn set_unformatted_tooltip(&self, text: Option<&str>) -> Option<String> {
+        *self.unformatted_tooltip.borrow_mut() = text.map(str::to_owned);
+        self.unformatted_tooltip.borrow().clone()
+    }
+
+    /// Java `hasUnformattedTooltip()`.
+    fn has_unformatted_tooltip(&self) -> bool {
+        self.unformatted_tooltip.borrow().is_some()
+    }
+
+    /// Java synchronized `useUnformattedTooltip(String, String)`.
+    fn use_unformatted_tooltip(&self, param_descr: Option<&str>, directive_descr: Option<&str>) {
+        let unformatted_tooltip = self.unformatted_tooltip.borrow().clone();
+        self.set_tool_tip_text(
+            tooltip_formatter::INSTANCE
+                .build_tooltip(unformatted_tooltip.as_deref(), param_descr, directive_descr)
+                .as_deref(),
+        );
+        *self.unformatted_tooltip.borrow_mut() = None;
+    }
+
+    /// Java `setTooltip(Field)`.
+    fn set_tooltip(&self, field: Option<&dyn Field>) {
+        if let Some(field) = field {
+            let tooltip = field.get_tooltip();
+            self.panel.set_tool_tip_text(tooltip.as_deref());
+            self.text_field.set_tool_tip_text(tooltip.as_deref());
+            self.label.set_tool_tip_text(tooltip.as_deref());
+        }
+    }
+
+    /// Java `getTooltip()`.
+    fn get_tooltip(&self) -> Option<String> {
+        self.text_field.get_tool_tip_text()
+    }
+}
+
+impl TextFieldInterface for LabeledTextField {}
+
+impl UIComponent for LabeledTextField {
+    /// Java `getUIComponent()`.
+    fn get_ui_component(&self) -> &dyn SwingComponent {
+        self
+    }
+
+    /// Java `getComponent()`.
+    fn get_component(&self) -> Rc<JComponent> {
+        self.panel.clone()
+    }
+}
+
+impl SwingComponent for LabeledTextField {
+    /// Java `getComponent()`.
+    fn get_component(&self) -> Rc<JComponent> {
+        self.panel.clone()
     }
 }

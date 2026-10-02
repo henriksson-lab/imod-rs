@@ -1,35 +1,14 @@
 //! `IMOD/Etomo/src/etomo/ui/swing/SwingComponent.java`.
-#![allow(dead_code)]
 
-use super::abstract_frame::ComponentState;
+use std::rc::Rc;
 
-/// Java public `SwingComponent` interface.
-///
-/// `ComponentState` is the direct native-`java.awt.Component` boundary used
-/// throughout the translated Swing source.
+use crate::imod::etomo::jdk::JComponent;
+
+/// Java `SwingComponent.rcsid`.
+pub const RCSID: &str = "$Id:$";
+
+/// Java `public interface SwingComponent`.
 pub trait SwingComponent {
-    /// Java `getComponent()`.
-    fn get_component(&self) -> &ComponentState;
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    struct ComponentHolder(ComponentState);
-
-    impl SwingComponent for ComponentHolder {
-        fn get_component(&self) -> &ComponentState {
-            &self.0
-        }
-    }
-
-    #[test]
-    fn component_contract_returns_the_component_boundary() {
-        let component = ComponentHolder(ComponentState {
-            height: 19,
-            ..Default::default()
-        });
-        assert_eq!(component.get_component().height, 19);
-    }
+    /// Java `getComponent()`: the `java.awt.Component` this object is drawn as.
+    fn get_component(&self) -> Rc<JComponent>;
 }

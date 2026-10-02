@@ -1,0 +1,117 @@
+# imod-rs native golden manifest for fixtures/sortbeadsurfs; see fixtures/README.md.
+# Regenerate with fixtures/regen-golden.sh sortbeadsurfs; do not edit by hand.
+sha256 dbba603283e8d7fbc1f74ceaa637dea183b3c332e727204ce1871796cfb78204 2700 golden/afs.mod
+text 2 golden/afs.rc
+0
+
+text 283 golden/afs.stdout
+Picked a subarea size of    643 to divide area into   2 by   2 subareas
+Subarea  1  1 has    14 points
+Subarea  1  2 has    14 points
+Subarea  2  1 has    11 points
+Subarea  2  2 has    25 points
+Group 1 has    32 points
+Group 2 has    32 points
+
+ FORMATTED  new  file opened: o.txt
+
+sha256 b3d88447ae715090920eae0911f307479f363d47ad30de82a5f8cb966ae16d8c 1792 golden/afs.txt
+sha256 dbba603283e8d7fbc1f74ceaa637dea183b3c332e727204ce1871796cfb78204 2700 golden/already.mod
+text 2 golden/already.rc
+0
+
+text 50 golden/already.stdout
+Group 1 has    32 points
+Group 2 has    32 points
+
+text 2 golden/badparam.rc
+1
+
+text 76 golden/badparam.stdout
+
+ERROR: SORTBEADSURFS - Improper parameter setting for surface sort routine
+
+sha256 dbba603283e8d7fbc1f74ceaa637dea183b3c332e727204ce1871796cfb78204 2700 golden/check.mod
+text 2 golden/check.rc
+0
+
+text 0 golden/check.stdout
+
+sha256 dbba603283e8d7fbc1f74ceaa637dea183b3c332e727204ce1871796cfb78204 2700 golden/checkwrong.mod
+text 3 golden/checkwrong.rc
+32
+
+text 77 golden/checkwrong.stdout
+
+ERROR: SORTBEADSURFS - xyz.mod has    32 of    64 points in the wrong group
+
+sha256 f0c713b6741b61acdd147ab8ce5ec011b0a2af68b62bd0b9018e8c797830a131 2700 golden/flipped.mod
+text 2 golden/flipped.rc
+0
+
+text 50 golden/flipped.stdout
+Group 1 has    32 points
+Group 2 has    32 points
+
+text 2 golden/flipxtilt.rc
+1
+
+text 73 golden/flipxtilt.stdout
+
+ERROR: SORTBEADSURFS - X axis tilt cannot be applied to a flipped model
+
+sha256 5cf1307e9c4344f70c75774dc417063111f494f4b06645ad22af2201a9d6b6b7 1472 golden/majority.mod
+text 2 golden/majority.rc
+0
+
+text 50 golden/majority.stdout
+Group 1 has    32 points
+Group 2 has    32 points
+
+text 2 golden/noinput.rc
+0
+
+sha256 7a661e44bd7bd4a0733eee532f5d476db2a63ce08863c86c078490ee3fd3a9de 2478 golden/noinput.stdout
+sha256 ab582577a796a137d460ea53b9d66da59932f91ec8ebab53590c27ff05b31f90 2496 golden/one.mod
+text 2 golden/one.rc
+0
+
+text 50 golden/one.stdout
+Group 1 has    64 points
+Group 2 has     0 points
+
+sha256 dbba603283e8d7fbc1f74ceaa637dea183b3c332e727204ce1871796cfb78204 2700 golden/setparam.mod
+text 2 golden/setparam.rc
+0
+
+text 50 golden/setparam.stdout
+Group 1 has    32 points
+Group 2 has    32 points
+
+sha256 4afd90f08b8f03e330ea66a6cb6cc11378bc5312c7dc03ec8d8a47ca5b6b16ae 2700 golden/sizes.mod
+text 2 golden/sizes.rc
+0
+
+text 50 golden/sizes.stdout
+Group 1 has    32 points
+Group 2 has    32 points
+
+sha256 dbba603283e8d7fbc1f74ceaa637dea183b3c332e727204ce1871796cfb78204 2700 golden/subarea.mod
+text 2 golden/subarea.rc
+0
+
+text 174 golden/subarea.stdout
+Subarea  1  1 has    14 points
+Subarea  1  2 has    14 points
+Subarea  2  1 has    11 points
+Subarea  2  2 has    25 points
+Group 1 has    32 points
+Group 2 has    32 points
+
+text 2 golden/subpick.rc
+1
+
+text 65 golden/subpick.stdout
+
+ERROR: SORTBEADSURFS - You cannot enter both -subarea and -pick
+

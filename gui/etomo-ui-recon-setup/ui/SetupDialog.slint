@@ -24,16 +24,19 @@ import {
 // (`etomo/type/TiltAngleType.java`): EXTRACT, RANGE and FILE.  `pnlSource`
 // adds them in the order label, Extract, Specify, the angle row, File.
 component TiltAnglePanel inherits VerticalLayout {
+    // Wired: "#1" for axis A, "#2" for axis B (`AxisInfoPanel.occurrence`).
+    in property <string> occurrence;
     spacing: 2px;
     // `lExcludeViewsMsg`: empty until excludeviews has run.
     Text { text: ""; height: 0px; }
     RadioButton {
         text: "Extract tilt angles from raw stack header or mdoc file";
+        occurrence: root.occurrence;
         selected: true;
     }
     // `rbSpecify` is a `RadioEbutton`, a radio button that can show a warning
     // decoration; Slint has no such decoration, so a plain radio button.
-    RadioButton { text: "Specify the starting angle and step (degrees)"; }
+    RadioButton { text: "Specify the starting angle and step (degrees)"; occurrence: root.occurrence; }
     // `pnlAngle`, a BoxLayout.X_AXIS row.  Both fields start disabled because
     // `rbSpecify` is not selected.
     HorizontalLayout {
@@ -41,6 +44,7 @@ component TiltAnglePanel inherits VerticalLayout {
         alignment: start;
         LabeledTextField {
             label: "Starting angle:";
+            occurrence: root.occurrence;
             label-width: 100px;
             width: 190px;
             text: "";
@@ -48,13 +52,14 @@ component TiltAnglePanel inherits VerticalLayout {
         }
         LabeledTextField {
             label: "Increment:";
+            occurrence: root.occurrence;
             label-width: 70px;
             width: 160px;
             text: "";
             enabled: false;
         }
     }
-    RadioButton { text: "Tilt angles in existing rawtlt file"; }
+    RadioButton { text: "Tilt angles in existing rawtlt file"; occurrence: root.occurrence; }
 }
 
 // `pnlAxisInfoA` / `pnlAxisInfoB` of `createPerAxisInfoPanel`.  Both are built
@@ -62,27 +67,32 @@ component TiltAnglePanel inherits VerticalLayout {
 component AxisInfoPanel inherits BeveledBorder {
     in property <string> axis-title;
     in property <bool> enabled: true;
+    // Wired: "#1" for axis A, "#2" for axis B -- the Java builds both panels'
+    // widgets with the same labels.
+    in property <string> occurrence;
     title: root.axis-title;
     VerticalLayout {
         spacing: 3px;
-        TiltAnglePanel { }
+        TiltAnglePanel { occurrence: root.occurrence; }
         // `pnlTwodir`: cbTfTwodir, rbBidirectional, rbDoseSymmetric, "from",
         // tfTwodir, tfDoseSym, lTwodir.  `tfDoseSym` starts invisible and both
         // text fields and both radio buttons start disabled.
         HorizontalLayout {
             spacing: 0px;
             alignment: start;
-            CheckBox { text: "Series was"; checked: false; }
-            RadioButton { text: "bidirectional"; selected: true; enabled: false; }
-            RadioButton { text: "dose-symmetric"; selected: false; enabled: false; }
+            CheckBox { text: "Series was"; occurrence: root.occurrence; checked: false; }
+            RadioButton { text: "bidirectional"; occurrence: root.occurrence; selected: true; enabled: false; }
+            RadioButton { text: "dose-symmetric"; occurrence: root.occurrence; selected: false; enabled: false; }
             Rectangle { width: 10px; }
             Text { text: "from"; vertical-alignment: center; }
             Rectangle { width: 5px; }
-            TextField { width: 60px; text: ""; enabled: false; }
+            // `tfTwodir` / `tfBtwodir`, both named from "bidirectional".
+            TextField { width: 60px; label: "bidirectional" + root.occurrence; text: ""; enabled: false; }
             Text { text: " degrees"; vertical-alignment: center; }
         }
         LabeledTextField {
             label: "Exclude views: ";
+            occurrence: root.occurrence;
             label-width: 100px;
             text: "";
             enabled: root.enabled;
@@ -93,12 +103,14 @@ component AxisInfoPanel inherits BeveledBorder {
         Rectangle { height: 10px; }
         MultiLineButton {
             text: "View Raw Image Stack";
+            occurrence: root.occurrence;
             width: 200px;
             enabled: root.enabled;
         }
         // `pnlAdjustedFocus`: `cbAdjustedFocus.setEnabled(false)`.
         CheckBox {
             text: "Focus was adjusted between montage frames";
+            occurrence: root.occurrence;
             enabled: false;
         }
     }
@@ -262,9 +274,9 @@ export component SetupDialog inherits Rectangle {
         // ---- pnlPerAxisInfo ---------------------------------------------
         HorizontalLayout {
             spacing: 0px;
-            AxisInfoPanel { axis-title: "Axis A: "; }
+            AxisInfoPanel { axis-title: "Axis A: "; occurrence: "#1"; }
             // Axis B is disabled while "Single axis" is selected.
-            AxisInfoPanel { axis-title: "Axis B: "; enabled: false; }
+            AxisInfoPanel { axis-title: "Axis B: "; occurrence: "#2"; enabled: false; }
         }
 
         // ---- pnlExitButtons (ProcessDialog.java) -------------------------

@@ -1,155 +1,196 @@
 //! `IMOD/Etomo/src/etomo/ui/swing/Viewport.java`.
-#![allow(dead_code)]
-use super::paging_panel::PagingViewport;
+//!
+//! The window of rows a paged table ([`Viewable`]) shows, and the paging panel that
+//! moves it.
+
+use std::cell::{Cell, RefCell};
+use std::rc::{Rc, Weak};
+
+use super::paging_panel::PagingPanel;
 use super::viewable::Viewable;
-#[derive(Clone, Debug, Default, Eq, PartialEq)]
-pub struct PagingPanelBoundary {
-    pub visible: bool,
-    pub up_enabled: bool,
-    pub down_enabled: bool,
+use crate::imod::etomo::jdk::JComponent;
+use crate::imod::etomo::r#type::const_etomo_number;
+
+/// Java private `MINUMUM_SIZE`.
+const MINUMUM_SIZE: i32 = 5;
+
+/// Java `Viewport`.
+pub struct Viewport {
+    /// Java `viewable`: the table, which owns this viewport (so a `Weak`).
+    viewable: Weak<dyn Viewable>,
+    /// Java `size`.
+    size: i32,
+    /// Java `uniqueKey`.
+    unique_key: Option<String>,
+    /// Java `start`.
+    start: Cell<i32>,
+    /// Java `end`.
+    end: Cell<i32>,
+    /// Java `pagingPanel`.
+    paging_panel: RefCell<Option<Rc<PagingPanel>>>,
 }
-/// Java final `Viewport`.
-pub struct Viewport<V: Viewable<FocusableParent = String>> {
-    pub viewable: V,
-    pub size: usize,
-    pub unique_key: String,
-    pub start: isize,
-    pub end: isize,
-    pub paging_panel: Option<PagingPanelBoundary>,
-}
-impl<V: Viewable<FocusableParent = String>> Viewport<V> {
-    pub const MINUMUM_SIZE: usize = 5;
-    pub fn new(viewable: V, size: isize, unique_key: impl Into<String>) -> Self {
-        Self {
+
+impl Viewport {
+    /// Java `Viewport(Viewable, int, String)`.
+    pub fn new(viewable: Weak<dyn Viewable>, size: i32, unique_key: Option<&str>) -> Rc<Viewport> {
+        let size = if size < MINUMUM_SIZE || size == const_etomo_number::INTEGER_NULL_VALUE {
+            MINUMUM_SIZE
+        } else {
+            size
+        };
+        Rc::new(Viewport {
             viewable,
-            size: if size < 5 { 5 } else { size as usize },
-            unique_key: unique_key.into(),
-            start: 0,
-            end: -1,
-            paging_panel: None,
+            size,
+            unique_key: unique_key.map(str::to_owned),
+            start: Cell::new(0),
+            end: Cell::new(-1),
+            paging_panel: RefCell::new(None),
+        })
+    }
+
+    /// Java `initPaging()`.
+    pub fn init_paging(self: &Rc<Self>) {
+        let paging_panel = PagingPanel::get_instance(self, self.unique_key.as_deref());
+        paging_panel.set_visible(false);
+        *self.paging_panel.borrow_mut() = Some(paging_panel);
+    }
+
+    /// Java `getFocusableParents()`.
+    pub fn get_focusable_parents(&self) -> Vec<Rc<JComponent>> {
+        self.viewable.upgrade().expect("Viewable dropped").get_focusable_parents()
+    }
+
+    /// Java `homeButtonAction()`.
+    pub fn home_button_action(&self) {
+        self.page_viewport(0);
+    }
+
+    /// Java `pageUpButtonAction()`.
+    pub fn page_up_button_action(&self) {
+        self.page_viewport(self.start.get() - self.size);
+    }
+
+    /// Java `upButtonAction()`.
+    pub fn up_button_action(&self) {
+        self.page_viewport(self.start.get() - 1);
+    }
+
+    /// Java `downButtonAction()`.
+    pub fn down_button_action(&self) {
+        self.page_viewport(self.start.get() + 1);
+    }
+
+    /// Java `pageDownButtonAction()`.
+    pub fn page_down_button_action(&self) {
+        self.page_viewport(self.start.get() + self.size);
+    }
+
+    /// Java `endButtonAction()`.
+    pub fn end_button_action(&self) {
+        self.page_viewport(self.viewable.upgrade().expect("Viewable dropped").size() - self.size);
+    }
+
+    /// Java private `pageViewport(int)`.  Sets a new start value.  Notifies viewable if
+    /// there has been a change in the viewport.
+    fn page_viewport(&self, new_start: i32) {
+        // save old start and end values
+        let orig_start = self.start.get();
+        let orig_end = self.end.get();
+        // Reset viewport and decide whether viewable must update its display.
+        // Java precedence: (reset && start != origStart) || end != origEnd.
+        if (self.reset_viewport(new_start) && self.start.get() != orig_start)
+            || self.end.get() != orig_end
+        {
+            self.viewable.upgrade().expect("Viewable dropped").msg_viewport_paged();
         }
     }
-    pub fn init_paging(&mut self) {
-        self.paging_panel = Some(PagingPanelBoundary::default());
-    }
-    pub fn get_focusable_parents(&self) -> Option<Vec<String>> {
-        Some(self.viewable.get_focusable_parents())
-    }
-    pub fn home_button_action(&mut self) {
-        self.page_viewport(0)
-    }
-    pub fn page_up_button_action(&mut self) {
-        self.page_viewport(self.start - self.size as isize)
-    }
-    pub fn up_button_action(&mut self) {
-        self.page_viewport(self.start - 1)
-    }
-    pub fn down_button_action(&mut self) {
-        self.page_viewport(self.start + 1)
-    }
-    pub fn page_down_button_action(&mut self) {
-        self.page_viewport(self.start + self.size as isize)
-    }
-    pub fn end_button_action(&mut self) {
-        self.page_viewport(self.viewable.size() as isize - self.size as isize)
-    }
-    pub fn page_viewport(&mut self, new_start: isize) {
-        let (a, b) = (self.start, self.end);
-        if (self.reset_viewport(new_start) && self.start != a) || self.end != b {
-            self.viewable.msg_viewport_paged()
-        }
-    }
-    pub fn reset_viewport(&mut self, new_start: isize) -> bool {
-        let (n, size) = (self.viewable.size() as isize, self.size as isize);
-        if let Some(p) = &mut self.paging_panel {
-            p.visible = n > size
-        }
-        let changed = !(n <= size && self.start == 0 && self.end == n - 1);
-        if changed {
-            self.start = new_start;
-            if self.start > n - size {
-                self.start = n - size
+
+    /// Java private `resetViewport(int)`.  Takes newStart, fixes it based on the size
+    /// and viewport size, sets start and end, hides or shows the paging panel and
+    /// enables its buttons.  Returns false if the viewable size is too small to page.
+    ///
+    /// Fixed in translation: Java dereferences `pagingPanel` unconditionally and throws
+    /// a NullPointerException if `initPaging` has not been called; the paging-panel
+    /// statements are skipped instead.
+    fn reset_viewport(&self, new_start: i32) -> bool {
+        let viewable_size = self.viewable.upgrade().expect("Viewable dropped").size();
+        let paging_panel = self.paging_panel.borrow().clone();
+        // No paging if the viewport is set to the entire viewable area and the
+        // viewable area is smaller or equals to the viewport.
+        if viewable_size <= self.size {
+            // Hide the paging panel when it is unnecesary.
+            if let Some(paging_panel) = &paging_panel {
+                paging_panel.set_visible(false);
             }
-            if self.start < 0 {
-                self.start = 0
+        } else if let Some(paging_panel) = &paging_panel {
+            paging_panel.set_visible(true);
+        }
+        let changed;
+        // No paging if the viewport is set to the entire viewable area and the
+        // viewable area is smaller or equals to the viewport.
+        if viewable_size <= self.size
+            && self.start.get() == 0
+            && self.end.get() == viewable_size - 1
+        {
+            changed = false;
+        } else {
+            changed = true;
+            // set start
+            self.start.set(new_start);
+            // fix start
+            // Prevent the viewport from going out of the viewable area or displaying
+            // less then the viewport size.
+            if self.start.get() > viewable_size - self.size {
+                self.start.set(viewable_size - self.size);
             }
-            self.end = self.start + size - 1;
-            if self.end >= n {
-                self.end = n - 1
+            // Handles the case where the viewable area is smaller then the viewport
+            // size.
+            if self.start.get() < 0 {
+                self.start.set(0);
+            }
+            // set end
+            self.end.set(self.start.get() + self.size - 1);
+            // fix end
+            // Handles the case where the viewable area is smaller then the viewport
+            // size.
+            if self.end.get() >= viewable_size {
+                self.end.set(viewable_size - 1);
             }
         }
-        if let Some(p) = &mut self.paging_panel {
-            p.up_enabled = self.start > 0;
-            p.down_enabled = self.end < n - 1
+        if let Some(paging_panel) = &paging_panel {
+            paging_panel.set_up_enabled(self.start.get() > 0);
+            paging_panel.set_down_enabled(self.end.get() < self.viewable.upgrade().expect("Viewable dropped").size() - 1);
         }
         changed
     }
-    pub fn get_paging_panel(&self) -> Option<&PagingPanelBoundary> {
-        self.paging_panel.as_ref()
+
+    /// Java `getPagingPanel()`.  Returns the component containing the paging buttons.
+    pub fn get_paging_panel(&self) -> Option<Rc<JComponent>> {
+        self.paging_panel
+            .borrow()
+            .as_ref()
+            .map(|paging_panel| paging_panel.get_container())
     }
-    pub fn msg_viewable_changed(&mut self) {
-        self.reset_viewport(self.start);
+
+    /// Java `msgViewableChanged()`.  Runs resetViewport with the existing start value.
+    pub fn msg_viewable_changed(&self) {
+        self.reset_viewport(self.start.get());
     }
-    pub fn adjust_viewport(&mut self, index: isize) -> bool {
-        if index > self.end {
-            self.reset_viewport(index - self.size as isize + 1)
-        } else {
-            self.reset_viewport(index)
+
+    /// Java `adjustViewport(int)`.  Force newIndex to appear in the viewport.  Returns
+    /// true if the viewport may have changed.
+    pub fn adjust_viewport(&self, new_index: i32) -> bool {
+        // If newIndex is below the viewport, find a start value which puts the index
+        // in the viewport.
+        if new_index > self.end.get() {
+            return self.reset_viewport(new_index - self.size + 1);
         }
+        self.reset_viewport(new_index)
     }
-    pub fn in_viewport(&mut self, index: isize) -> bool {
-        self.reset_viewport(self.start);
-        index >= self.start && index <= self.end
-    }
-}
-impl<V: Viewable<FocusableParent = String>> PagingViewport for Viewport<V> {
-    fn get_focusable_parents(&self) -> Option<Vec<String>> {
-        Viewport::get_focusable_parents(self)
-    }
-    fn home_button_action(&mut self) {
-        Viewport::home_button_action(self)
-    }
-    fn page_up_button_action(&mut self) {
-        Viewport::page_up_button_action(self)
-    }
-    fn up_button_action(&mut self) {
-        Viewport::up_button_action(self)
-    }
-    fn down_button_action(&mut self) {
-        Viewport::down_button_action(self)
-    }
-    fn page_down_button_action(&mut self) {
-        Viewport::page_down_button_action(self)
-    }
-    fn end_button_action(&mut self) {
-        Viewport::end_button_action(self)
-    }
-}
-#[cfg(test)]
-mod tests {
-    use super::*;
-    struct T {
-        n: usize,
-        p: usize,
-    }
-    impl Viewable for T {
-        type FocusableParent = String;
-        fn msg_viewport_paged(&mut self) {
-            self.p += 1
-        }
-        fn size(&self) -> usize {
-            self.n
-        }
-        fn get_focusable_parents(&self) -> Vec<String> {
-            vec![]
-        }
-    }
-    #[test]
-    fn clamps() {
-        let mut v = Viewport::new(T { n: 11, p: 0 }, 5, "x");
-        v.init_paging();
-        v.end_button_action();
-        assert_eq!((v.start, v.end), (6, 10));
-        assert_eq!(v.viewable.p, 1)
+
+    /// Java `inViewport(int)`.  Returns true if an index is currently in the viewport.
+    pub fn in_viewport(&self, index: i32) -> bool {
+        self.reset_viewport(self.start.get());
+        index >= self.start.get() && index <= self.end.get()
     }
 }

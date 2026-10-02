@@ -100,6 +100,12 @@ impl OutputBufferManager {
         self.output_list.len()
     }
 
+    /// Every line of the primary list, not clearing it (`ProcessMessages`
+    /// reads an `OutputBufferManager` by `size()`/`get(i)`).
+    pub fn get_lines(&self) -> Vec<String> {
+        self.output_list.clone()
+    }
+
     pub fn get_line(&self, index: usize) -> Option<&str> {
         self.output_list.get(index).map(String::as_str)
     }

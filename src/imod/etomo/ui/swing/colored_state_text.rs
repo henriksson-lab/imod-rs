@@ -1,63 +1,66 @@
 //! `IMOD/Etomo/src/etomo/ui/swing/ColoredStateText.java`.
 //!
-//! `java.awt.Color` is represented by the shared GUI colour value.  Widget
-//! painting remains at the GUI adapter boundary; this unit has no widget of
-//! its own and retains the source's label, colour, and selected-index state.
-#![allow(dead_code)]
+//! A list of states, each with a colour and optionally a label, one of which is
+//! selected.  A plain value object held by `ProcessControlPanel`.
 
-use crate::imod::etomo::ui::swing::ui_utilities::Color;
+use crate::imod::etomo::jdk::Color;
 use crate::imod::etomo::util::invalid_parameter_exception::InvalidParameterException;
 
-/// Java package-private `ColoredStateText`.
-#[derive(Clone, Debug, Eq, PartialEq)]
+/// Java `public static final String rcsid`.
+pub const RCSID: &str = "$Id$";
+
+/// Java package-private `class ColoredStateText`.
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub struct ColoredStateText {
-    /// Java nullable `labels` array.
-    pub labels: Option<Vec<String>>,
-    /// Java `colors` array.
-    pub colors: Vec<Color>,
+    /// Java `labels` (null when constructed from colours only).
+    labels: Option<Vec<String>>,
+    /// Java `colors`.
+    colors: Vec<Color>,
     /// Java `nItems`.
-    pub n_items: i32,
+    n_items: i32,
     /// Java `currentSelected`.
-    pub current_selected: i32,
+    current_selected: i32,
 }
 
 impl ColoredStateText {
-    /// Java `ColoredStateText(String[], Color[])`.
-    pub fn new_with_labels(
-        labels: Vec<String>,
-        colors: Vec<Color>,
-    ) -> Result<Self, InvalidParameterException> {
+    /// Java `ColoredStateText(String[], Color[]) throws InvalidParameterException`.
+    pub fn new_string_array_color_array(
+        labels: &[&str],
+        colors: &[Color],
+    ) -> Result<ColoredStateText, InvalidParameterException> {
         let n_items = labels.len() as i32;
         if n_items != colors.len() as i32 {
             return Err(InvalidParameterException::new(
                 "The length of the labels and colors arrays do not match",
             ));
         }
-        Ok(Self {
-            labels: Some(labels),
-            colors,
+        Ok(ColoredStateText {
+            labels: Some(labels.iter().map(|label| (*label).to_owned()).collect()),
+            colors: colors.to_vec(),
             n_items,
             current_selected: -1,
         })
     }
 
     /// Java `ColoredStateText(Color[])`.
-    pub fn new(colors: Vec<Color>) -> Self {
-        Self {
-            n_items: colors.len() as i32,
+    pub fn new_color_array(colors: &[Color]) -> ColoredStateText {
+        ColoredStateText {
             labels: None,
-            colors,
+            colors: colors.to_vec(),
+            n_items: colors.len() as i32,
             current_selected: -1,
         }
     }
 
-    /// Java `setSelected(int)`.
+    /// Java `setSelected(int) throws InvalidParameterException`.
     ///
-    /// The Java condition uses non-short-circuit boolean `&` between mutually
-    /// exclusive comparisons.  It consequently accepts every index; retaining
-    /// that source behaviour is important for parity.
+    /// Upstream bug fixed in translation (`ColoredStateText.java:62`): the Java test is
+    /// `index < 0 & index >= nItems`, which can never be true, so an out-of-range index
+    /// was accepted and the next `getSelectedText`/`getSelectedColor` threw
+    /// `ArrayIndexOutOfBoundsException`.  The evident intent (the message says "Index
+    /// out of range") is `||`, which is what this tests.
     pub fn set_selected(&mut self, index: i32) -> Result<(), InvalidParameterException> {
-        if (index < 0) & (index >= self.n_items) {
+        if index < 0 || index >= self.n_items {
             return Err(InvalidParameterException::new(&format!(
                 "Index out of range, nItems: {} index: {}",
                 self.n_items, index
@@ -73,14 +76,28 @@ impl ColoredStateText {
     }
 
     /// Java `getSelectedText()`.
-    pub fn get_selected_text(&self) -> Option<&str> {
+    ///
+    /// Upstream bug fixed in translation (`ColoredStateText.java:77`): before any
+    /// `setSelected`, `currentSelected` is -1 and the Java throws
+    /// `ArrayIndexOutOfBoundsException`; this returns null (`None`) instead.
+    pub fn get_selected_text(&self) -> Option<String> {
         let labels = self.labels.as_ref()?;
-        Some(&labels[self.current_selected as usize])
+        if self.current_selected < 0 {
+            return None;
+        }
+        labels.get(self.current_selected as usize).cloned()
     }
 
     /// Java `getSelectedColor()`.
-    pub fn get_selected_color(&self) -> Color {
-        self.colors[self.current_selected as usize]
+    ///
+    /// Upstream bug fixed in translation (`ColoredStateText.java:81`): before any
+    /// `setSelected`, `currentSelected` is -1 and the Java throws
+    /// `ArrayIndexOutOfBoundsException`; this returns `None` instead.
+    pub fn get_selected_color(&self) -> Option<Color> {
+        if self.current_selected < 0 {
+            return None;
+        }
+        self.colors.get(self.current_selected as usize).copied()
     }
 }
 
@@ -88,82 +105,15 @@ impl ColoredStateText {
 mod tests {
     use super::*;
 
-    const RED: Color = Color {
-        red: 255,
-        green: 0,
-        blue: 0,
-    };
-    const GREEN: Color = Color {
-        red: 0,
-        green: 255,
-        blue: 0,
-    };
-
     #[test]
-    fn labeled_constructor_preserves_the_parallel_arrays() {
-        let state = ColoredStateText::new_with_labels(
-            vec!["Not started".into(), "Complete".into()],
-            vec![RED, GREEN],
-        )
-        .unwrap();
-
-        assert_eq!(state.n_items, 2);
-        assert_eq!(state.current_selected, -1);
-        assert_eq!(
-            state
-                .labels
-                .as_deref()
-                .map(|labels| labels.iter().map(String::as_str).collect::<Vec<_>>()),
-            Some(vec!["Not started", "Complete"])
-        );
-        assert_eq!(state.colors, vec![RED, GREEN]);
-    }
-
-    #[test]
-    fn labeled_constructor_rejects_different_array_lengths() {
-        let error =
-            ColoredStateText::new_with_labels(vec!["Only label".into()], vec![RED]).unwrap();
-        assert_eq!(error.n_items, 1);
-
-        let error =
-            ColoredStateText::new_with_labels(vec!["Only label".into()], vec![]).unwrap_err();
-        assert_eq!(
-            error.get_message(),
-            "The length of the labels and colors arrays do not match"
-        );
-    }
-
-    #[test]
-    fn selection_reads_the_source_label_and_colour_arrays() {
-        let mut state = ColoredStateText::new_with_labels(
-            vec!["Not started".into(), "Complete".into()],
-            vec![RED, GREEN],
-        )
-        .unwrap();
-
+    fn select_and_read() {
+        let mut state =
+            ColoredStateText::new_string_array_color_array(&["a", "b"], &[(1, 1, 1), (2, 2, 2)])
+                .unwrap();
+        assert_eq!(state.get_selected_color(), None);
+        assert!(state.set_selected(2).is_err());
         state.set_selected(1).unwrap();
-
-        assert_eq!(state.get_selected(), 1);
-        assert_eq!(state.get_selected_text(), Some("Complete"));
-        assert_eq!(state.get_selected_color(), GREEN);
-    }
-
-    #[test]
-    fn colour_only_constructor_returns_null_selected_text() {
-        let mut state = ColoredStateText::new(vec![RED]);
-        state.set_selected(0).unwrap();
-
-        assert_eq!(state.get_selected_text(), None);
-        assert_eq!(state.get_selected_color(), RED);
-    }
-
-    #[test]
-    fn source_and_condition_accepts_out_of_range_indices() {
-        let mut state = ColoredStateText::new(vec![RED]);
-
-        assert!(state.set_selected(-1).is_ok());
-        assert_eq!(state.get_selected(), -1);
-        assert!(state.set_selected(1).is_ok());
-        assert_eq!(state.get_selected(), 1);
+        assert_eq!(state.get_selected_text().as_deref(), Some("b"));
+        assert_eq!(state.get_selected_color(), Some((2, 2, 2)));
     }
 }

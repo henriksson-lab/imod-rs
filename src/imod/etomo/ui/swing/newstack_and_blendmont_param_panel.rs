@@ -1,409 +1,559 @@
 //! `IMOD/Etomo/src/etomo/ui/swing/NewstackAndBlendmontParamPanel.java`.
 //!
-//! Swing painting and the application/com-script/autodoc implementations are
-//! explicit boundaries.  The panel retains the controls, their construction
-//! order, listeners, and the exact parameter transfers owned by the Java unit.
-#![allow(dead_code)]
+//! Java `final class NewstackAndBlendmontParamPanel implements
+//! FiducialessParams`.  An EDT object: created as `Rc<Self>` by
+//! [`NewstackAndBlendmontParamPanel::get_instance`], every method takes
+//! `&self`, mutable state lives in `RefCell`.  The two listener classes
+//! (`NewstackAndBlendmontParamPanelActionListener`,
+//! `NewstackAndBlendmontBinningChangeListener`) are closures holding a weak
+//! reference to the panel.
 
-use super::check_box::CheckBox;
-use super::fiducialess_params::FiducialessParams;
-use super::labeled_spinner::LabeledSpinner;
-use super::labeled_text_field::{FieldValidationFailedException, LabeledTextField};
-use super::newstack_or_blendmont_panel::{BlendmontParam, MetaData, NewstParam};
-use super::spaced_panel::{SpacedPanel, Y_AXIS};
+use crate::imod::etomo::ui::field::Field;
+use std::cell::RefCell;
+use std::rc::{Rc, Weak};
+
+use crate::imod::etomo::application_manager::ApplicationManager;
+use crate::imod::etomo::base_manager::BaseManager;
+use crate::imod::etomo::comscript::blendmont_param::{BlendmontParam, ConvertError};
+use crate::imod::etomo::comscript::const_newst_param::ConstNewstParam;
+use crate::imod::etomo::comscript::fortran_input_syntax_exception::FortranInputSyntaxException;
+use crate::imod::etomo::comscript::newst_param::{self, NewstParam, SetSizeToOutputInXandYError};
+use crate::imod::etomo::jdk::{ActionListener, ChangeListener, JComponent};
+use crate::imod::etomo::process::imod_process::Run3dmodMenuOptions;
+use crate::imod::etomo::storage::autodoc::autodoc_factory;
+use crate::imod::etomo::storage::autodoc::read_only_autodoc::ReadOnlyAutodoc;
+use crate::imod::etomo::storage::log_file::LogFileError;
 use crate::imod::etomo::r#type::axis_id::AxisID;
+use crate::imod::etomo::r#type::const_etomo_number::{ConstEtomoNumber, Number};
+use crate::imod::etomo::r#type::const_meta_data::ConstMetaData;
 use crate::imod::etomo::r#type::dialog_type::DialogType;
+use crate::imod::etomo::r#type::etomo_autodoc;
+use crate::imod::etomo::r#type::etomo_number::EtomoNumber;
+use crate::imod::etomo::r#type::meta_data::MetaData;
 use crate::imod::etomo::r#type::view_type::ViewType;
 use crate::imod::etomo::ui::field_type::FieldType;
+use crate::imod::etomo::ui::field_validation_failed_exception::FieldValidationFailedException;
+use crate::imod::etomo::util::invalid_parameter_exception::InvalidParameterException;
 
+use super::blendmont_display::BlendmontDisplayException;
+use super::check_box::CheckBox;
+use super::deferred_3dmod_button::Deferred3dmodButton;
+use super::fiducialess_params::FiducialessParams;
+use super::label::Label;
+use super::labeled_spinner::LabeledSpinner;
+use super::labeled_text_field::LabeledTextField;
+use super::newstack_display::NewstackDisplayException;
+use super::process_control_panel;
+use super::spaced_panel::SpacedPanel;
+
+/// Java private static final `SIZE_TO_OUTPUT_IN_X_AND_Y_LABEL`.
 pub const SIZE_TO_OUTPUT_IN_X_AND_Y_LABEL: &str = "Size to output";
+/// Java package-private static final `BINNING_LABEL`.
 pub const BINNING_LABEL: &str = "Aligned image stack binning";
 
-/// Direct `AutodocFactory` lookup made by Java `setToolTipText`.
-pub trait NewstackAndBlendmontParamPanelAutodoc {
-    fn newstack_size_to_output_tooltip(&self, axis_id: AxisID) -> Option<String>;
-}
-
-/// GUI-boundary state for the two CTF notices and their insertion order.
-#[derive(Clone, Debug, Eq, PartialEq)]
-pub struct Ctf3dLabel {
-    pub text: &'static str,
-    pub complete_foreground: bool,
-    pub visible: bool,
-}
-
-/// Java final `NewstackAndBlendmontParamPanel`.
-#[derive(Clone, Debug)]
+/// Java `final class NewstackAndBlendmontParamPanel implements FiducialessParams`.
 pub struct NewstackAndBlendmontParamPanel {
-    pub pnl_root: SpacedPanel,
-    pub spin_binning: LabeledSpinner,
-    pub ltf_size_to_output_in_x_and_y: LabeledTextField,
-    pub ltf_rotation: LabeledTextField,
-    pub cb_fiducialess: CheckBox,
-    pub cb_use_linear_interpolation: CheckBox,
-    pub l_ctf3d1: Ctf3dLabel,
-    pub l_ctf3d2: Ctf3dLabel,
-    pub axis_id: AxisID,
-    pub dialog_type: DialogType,
-    /// The sole state exposed by Java `updateAdvanced`.
-    pub advanced: bool,
-    /// Absent precisely for montage data, as in the Java constructor.
-    pub cb_antialias_filter: Option<CheckBox>,
-    pub antialias_filter_value: Option<f64>,
-    pub action_listener_present: bool,
-    pub binning_change_listener_present: bool,
-}
+    /// Java private final `pnlRoot`.
+    pnl_root: Rc<SpacedPanel>,
+    /// Java private final `spinBinning`.
+    spin_binning: Rc<LabeledSpinner>,
+    /// Java private final `ltfSizeToOutputInXandY`.
+    ltf_size_to_output_in_xand_y: Rc<LabeledTextField>,
+    /// Java private final `ltfRotation`.
+    ltf_rotation: Rc<LabeledTextField>,
+    /// Java private final `cbFiducialess`.
+    cb_fiducialess: Rc<CheckBox>,
+    /// Java private final `cbUseLinearInterpolation`.
+    cb_use_linear_interpolation: Rc<CheckBox>,
+    /// Java private final `lCtf3d1` (a `Label`).
+    l_ctf3d1: Rc<Label>,
+    /// Java private final `lCtf3d2` (a `Label`).
+    l_ctf3d2: Rc<Label>,
 
-impl PartialEq for NewstackAndBlendmontParamPanel {
-    fn eq(&self, other: &Self) -> bool {
-        self.axis_id == other.axis_id
-            && self.dialog_type == other.dialog_type
-            && self.advanced == other.advanced
-            && self.spin_binning.get_value() == other.spin_binning.get_value()
-            && self.ltf_size_to_output_in_x_and_y.get_text()
-                == other.ltf_size_to_output_in_x_and_y.get_text()
-            && self.ltf_rotation.get_text() == other.ltf_rotation.get_text()
-            && self.cb_use_linear_interpolation.is_selected()
-                == other.cb_use_linear_interpolation.is_selected()
-            && self.cb_antialias_filter.as_ref().map(CheckBox::is_selected)
-                == other
-                    .cb_antialias_filter
-                    .as_ref()
-                    .map(CheckBox::is_selected)
-            && self.antialias_filter_value == other.antialias_filter_value
-    }
+    /// Java private final `axisID`.
+    axis_id: AxisID,
+    /// Java private final `manager`.
+    manager: &'static ApplicationManager,
+    /// Java private final `dialogType`.
+    dialog_type: DialogType,
+    /// Java private final `cbAntialiasFilter`; null (`None`) for a montage.
+    cb_antialias_filter: Option<Rc<CheckBox>>,
+    /// Java private final `antialiasFilterValue`; null (`None`) for a montage.
+    /// The Java object is final but mutable (`set`), hence the `RefCell`.
+    antialias_filter_value: Option<RefCell<EtomoNumber>>,
 }
 
 impl NewstackAndBlendmontParamPanel {
-    /// Java private constructor; manager metadata is reduced to its exact view
-    /// type read at construction.
-    pub fn new(axis_id: AxisID, dialog_type: DialogType, view_type: ViewType) -> Self {
-        Self {
-            pnl_root: SpacedPanel::get_instance_y_axis_padding(true),
-            spin_binning: LabeledSpinner::get_instance(&format!("{BINNING_LABEL}: "), 1, 1, 8, 1),
-            ltf_size_to_output_in_x_and_y: LabeledTextField::new(
-                FieldType::IntegerPair,
-                &format!("{SIZE_TO_OUTPUT_IN_X_AND_Y_LABEL} (X,Y - unbinned): "),
-            ),
-            ltf_rotation: LabeledTextField::new(FieldType::FloatingPoint, "Tilt axis rotation: "),
-            cb_fiducialess: CheckBox::new_with_text("Coarse alignment only"),
-            cb_use_linear_interpolation: CheckBox::new_with_text("Use linear interpolation"),
-            l_ctf3d1: Ctf3dLabel {
-                text: "No need to make stack if doing 3D CTF and using raw images - ",
-                complete_foreground: true,
-                visible: false,
-            },
-            l_ctf3d2: Ctf3dLabel {
-                text: "unless you want to check gold erasing with an aligned stack.",
-                complete_foreground: true,
-                visible: false,
-            },
-            axis_id,
-            dialog_type,
-            advanced: false,
-            cb_antialias_filter: (view_type != ViewType::Montage)
-                .then(|| CheckBox::new_with_text("Reduce size with antialiasing filter")),
-            antialias_filter_value: None,
-            action_listener_present: false,
-            binning_change_listener_present: false,
-        }
-    }
-
-    /// Java static `getInstance`.
-    pub fn get_instance<A: NewstackAndBlendmontParamPanelAutodoc>(
-        autodoc: &A,
+    /// Java private constructor `NewstackAndBlendmontParamPanel(ApplicationManager,
+    /// AxisID, DialogType)` (NewstackAndBlendmontParamPanel.java:71).
+    fn new(
+        manager: &'static ApplicationManager,
         axis_id: AxisID,
         dialog_type: DialogType,
-        view_type: ViewType,
-    ) -> Self {
-        let mut instance = Self::new(axis_id, dialog_type, view_type);
+    ) -> Rc<NewstackAndBlendmontParamPanel> {
+        // Field initializers, in declaration order.
+        let pnl_root = SpacedPanel::get_instance_boolean(true);
+        let spin_binning = LabeledSpinner::get_instance_string_int_int_int_int(
+            Some(&format!("{BINNING_LABEL}: ")),
+            1,
+            1,
+            8,
+            1,
+        );
+        let ltf_size_to_output_in_xand_y = LabeledTextField::new_field_type_string(
+            FieldType::IntegerPair,
+            Some(&format!(
+                "{SIZE_TO_OUTPUT_IN_X_AND_Y_LABEL} (X,Y - unbinned): "
+            )),
+        );
+        let ltf_rotation = LabeledTextField::new_field_type_string(
+            FieldType::FloatingPoint,
+            Some("Tilt axis rotation: "),
+        );
+        let cb_fiducialess = CheckBox::new_string(Some("Coarse alignment only"));
+        let cb_use_linear_interpolation = CheckBox::new_string(Some("Use linear interpolation"));
+        let l_ctf3d1 = Label::new_string(Some(
+            "No need to make stack if doing 3D CTF and using raw images - ",
+        ));
+        let l_ctf3d2 = Label::new_string(Some(
+            "unless you want to check gold erasing with an aligned stack.",
+        ));
+        // Constructor body.
+        let (cb_antialias_filter, antialias_filter_value) =
+            if manager.get_meta_data().get_view_type() != ViewType::Montage {
+                (
+                    Some(CheckBox::new_string(Some(
+                        "Reduce size with antialiasing filter",
+                    ))),
+                    Some(RefCell::new(EtomoNumber::new())),
+                )
+            } else {
+                (None, None)
+            };
+        Rc::new(NewstackAndBlendmontParamPanel {
+            pnl_root,
+            spin_binning,
+            ltf_size_to_output_in_xand_y,
+            ltf_rotation,
+            cb_fiducialess,
+            cb_use_linear_interpolation,
+            l_ctf3d1,
+            l_ctf3d2,
+            axis_id,
+            manager,
+            dialog_type,
+            cb_antialias_filter,
+            antialias_filter_value,
+        })
+    }
+
+    /// Java static `getInstance(ApplicationManager, AxisID, DialogType)`
+    /// (NewstackAndBlendmontParamPanel.java:86).
+    pub fn get_instance(
+        manager: &'static ApplicationManager,
+        axis_id: AxisID,
+        dialog_type: DialogType,
+    ) -> Rc<NewstackAndBlendmontParamPanel> {
+        let instance = NewstackAndBlendmontParamPanel::new(manager, axis_id, dialog_type);
         instance.create_panel();
         instance.add_listeners();
-        instance.set_tool_tip_text(autodoc);
+        instance.set_tool_tip_text();
         instance
     }
 
-    /// Java private `addListeners`.
-    pub fn add_listeners(&mut self) {
-        self.cb_fiducialess.add_action_listener();
-        self.spin_binning.add_change_listener();
-        self.action_listener_present = true;
-        self.binning_change_listener_present = true;
+    /// Java private `addListeners()` (NewstackAndBlendmontParamPanel.java:96).
+    fn add_listeners(self: &Rc<Self>) {
+        // NewstackAndBlendmontParamPanelActionListener
+        let adaptee: Weak<NewstackAndBlendmontParamPanel> = Rc::downgrade(self);
+        let action_listener: ActionListener = Rc::new(move |event| {
+            if let Some(adaptee) = adaptee.upgrade() {
+                adaptee.action(event.get_action_command().unwrap_or(""), None, None);
+            }
+        });
+        self.cb_fiducialess
+            .add_action_listener(Some(action_listener));
+        // NewstackAndBlendmontBinningChangeListener
+        let panel: Weak<NewstackAndBlendmontParamPanel> = Rc::downgrade(self);
+        let change_listener: ChangeListener = Rc::new(move |_event| {
+            if let Some(panel) = panel.upgrade() {
+                panel.update_enabled();
+            }
+        });
+        self.spin_binning.add_change_listener(change_listener);
     }
 
-    /// Java `getComponent`.
-    pub fn get_component(&self) -> &super::spaced_panel::JPanel {
+    /// Java `getComponent()` (NewstackAndBlendmontParamPanel.java:102).
+    pub fn get_component(&self) -> Rc<JComponent> {
         self.pnl_root.get_container()
     }
 
-    /// Java private `createPanel`.  Widget insertion itself stays at the
-    /// native Swing boundary; all source layout and ordering decisions remain.
-    pub fn create_panel(&mut self) {
-        self.pnl_root.set_box_layout(Y_AXIS);
-        self.pnl_root.set_component_alignment_x(0.0);
+    /// Java private `createPanel()` (NewstackAndBlendmontParamPanel.java:106).
+    fn create_panel(&self) {
+        // init
+        self.l_ctf3d1
+            .get_component()
+            .set_foreground(Some(process_control_panel::COLOR_COMPLETE));
+        self.l_ctf3d2
+            .get_component()
+            .set_foreground(Some(process_control_panel::COLOR_COMPLETE));
+        self.l_ctf3d1.set_visible(false);
+        self.l_ctf3d2.set_visible(false);
+        // Root panel
+        // Swing layout: pnlRoot BoxLayout Y_AXIS, component alignment LEFT.
+        self.pnl_root
+            .add_check_box(&self.cb_use_linear_interpolation);
+        let pnl_binning = JComponent::new_panel();
+        // Swing layout: pnlBinning BoxLayout X_AXIS, CENTER_ALIGNMENT.
+        pnl_binning.add(&self.spin_binning.get_container());
+        // Swing layout: horizontal glue.
+        self.pnl_root.add_j_panel(&pnl_binning);
+        if let Some(cb_antialias_filter) = &self.cb_antialias_filter {
+            self.pnl_root.add_check_box(cb_antialias_filter);
+        }
+        self.pnl_root.add_check_box(&self.cb_fiducialess);
+        self.pnl_root.add_labeled_text_field(&self.ltf_rotation);
+        self.pnl_root
+            .add_labeled_text_field(&self.ltf_size_to_output_in_xand_y);
+        // Swing layout: Box.createVerticalStrut(2).
+        self.pnl_root.add_j_label(&self.l_ctf3d1.get_component());
+        self.pnl_root.add_j_label(&self.l_ctf3d2.get_component());
+        // Swing layout: Box.createVerticalStrut(3).
+        // update
         self.update_fiducialess();
     }
 
-    /// Java `setVisible`.
-    pub fn set_visible(&mut self, visible: bool) {
+    /// Java `setVisible(boolean)` (NewstackAndBlendmontParamPanel.java:136).
+    pub fn set_visible(&self, visible: bool) {
         self.pnl_root.set_visible(visible);
     }
 
-    /// Java `setParameters(BlendmontParam)`.
-    pub fn set_blendmont_parameters(&mut self, blendmont_param: &BlendmontParam) {
+    /// Java `setParameters(BlendmontParam)` (NewstackAndBlendmontParamPanel.java:140).
+    pub fn set_parameters_blendmont_param(&self, blendmont_param: &BlendmontParam) {
         self.cb_use_linear_interpolation
-            .set_selected(blendmont_param.linear_interpolation);
+            .set_selected_boolean(blendmont_param.is_linear_interpolation());
     }
 
-    /// Java `setParameters(ConstNewstParam)`.
-    pub fn set_newst_parameters(&mut self, newst_param: &NewstParam) {
+    /// Java `setParameters(ConstNewstParam)` (NewstackAndBlendmontParamPanel.java:144).
+    pub fn set_parameters_const_newst_param(&self, newst_param: &dyn ConstNewstParam) {
         self.cb_use_linear_interpolation
-            .set_selected(newst_param.linear_interpolation);
-        if let Some(check_box) = &mut self.cb_antialias_filter {
-            let antialias_filter = newst_param.antialias_filter.is_some();
-            check_box.set_selected(antialias_filter);
+            .set_selected_boolean(newst_param.is_linear_interpolation());
+        if let Some(cb_antialias_filter) = &self.cb_antialias_filter {
+            let antialias_filter = !newst_param.is_antialias_filter_null();
+            cb_antialias_filter.set_selected_boolean(antialias_filter);
             if antialias_filter {
-                self.antialias_filter_value = newst_param.antialias_filter;
+                // antialiasFilterValue is non-null whenever cbAntialiasFilter is.
+                if let Some(antialias_filter_value) = &self.antialias_filter_value {
+                    antialias_filter_value
+                        .borrow_mut()
+                        .set_string(Some(&newst_param.get_antialias_filter()));
+                }
             }
         }
     }
 
-    /// Java `getParameters(MetaData)`.
-    pub fn get_meta_data_parameters(&self, meta_data: &mut MetaData) {
-        let index = self.axis_id.get_axis_of_extension() as usize;
-        meta_data.size_to_output_in_x_and_y[index] = self.ltf_size_to_output_in_x_and_y.get_text();
-        meta_data.stack_binning[index] = self.get_binning();
-        meta_data.antialias_filter[index] = self.antialias_filter_value;
+    /// Java `getParameters(MetaData) throws FortranInputSyntaxException`
+    /// (NewstackAndBlendmontParamPanel.java:162).  The Metadata values that
+    /// are from the setup dialog should not be overrided by this dialog unless
+    /// the Metadata values are empty.  Must save data from the two instances
+    /// under separate keys.
+    pub fn get_parameters_meta_data(
+        &self,
+        meta_data: &MetaData,
+    ) -> Result<(), FortranInputSyntaxException> {
+        meta_data.set_size_to_output_in_x_and_y(
+            self.axis_id,
+            self.ltf_size_to_output_in_xand_y.get_text_void().as_deref(),
+        )?;
+        meta_data.set_stack_binning_int(self.axis_id, self.get_binning());
+        let antialias_filter_value = self
+            .antialias_filter_value
+            .as_ref()
+            .map(|value| value.borrow());
+        meta_data.set_antialias_filter(
+            self.dialog_type,
+            self.axis_id,
+            antialias_filter_value.as_deref().map(|value| &**value),
+        );
+        Ok(())
     }
 
-    /// Java `getParameters(BlendmontParam, boolean)`.  Com-script conversion
-    /// is represented by the fields transferred into its direct boundary.
-    pub fn get_blendmont_parameters(
+    /// Java `getParameters(BlendmontParam, boolean) throws
+    /// FortranInputSyntaxException, InvalidParameterException, IOException`
+    /// (NewstackAndBlendmontParamPanel.java:168).
+    pub fn get_parameters_blendmont_param_boolean(
         &self,
         blendmont_param: &mut BlendmontParam,
         do_validation: bool,
-    ) -> bool {
-        let Ok(size) = self
-            .ltf_size_to_output_in_x_and_y
-            .get_text_validated(do_validation)
-        else {
-            return false;
+    ) -> Result<bool, BlendmontDisplayException> {
+        // try { ... } catch (FieldValidationFailedException e) { return false; }
+        blendmont_param.set_bin_by_factor_int(self.get_binning());
+        blendmont_param.set_linear_interpolation(self.cb_use_linear_interpolation.is_selected());
+        let size_to_output_in_xand_y = match self
+            .ltf_size_to_output_in_xand_y
+            .get_text_boolean(do_validation)
+        {
+            Ok(text) => text,
+            Err(_) => return Ok(false),
         };
-        blendmont_param.bin_by_factor = Some(self.get_binning());
-        blendmont_param.linear_interpolation = self.cb_use_linear_interpolation.is_selected();
-        blendmont_param.size_to_output_in_x_and_y = Some(size);
-        blendmont_param.fiducialess = self.cb_fiducialess.is_selected();
-        true
+        match blendmont_param.convert_to_starting_and_ending_xand_y(
+            size_to_output_in_xand_y.as_deref().unwrap_or(""),
+            self.manager
+                .get_meta_data()
+                .get_image_rotation(self.axis_id)
+                .get_double(),
+            Some(&self.ltf_size_to_output_in_xand_y.get_label()),
+        ) {
+            Ok(true) => {}
+            Ok(false) => return Ok(false),
+            Err(ConvertError::FortranInputSyntax(e)) => {
+                // catch (FortranInputSyntaxException e): printStackTrace, then
+                // rethrow with the label prefixed.
+                e.print_stack_trace();
+                return Err(BlendmontDisplayException::FortranInputSyntaxException(
+                    FortranInputSyntaxException::new(&format!(
+                        "{SIZE_TO_OUTPUT_IN_X_AND_Y_LABEL}:  {e}"
+                    )),
+                ));
+            }
+            // InvalidParameterException / IOException from reading the
+            // montage size propagate unchanged.
+            Err(ConvertError::MontagesizeRead(message)) => {
+                return Err(BlendmontDisplayException::InvalidParameterException(
+                    InvalidParameterException::new(&message),
+                ));
+            }
+        }
+        blendmont_param.set_fiducialess(self.cb_fiducialess.is_selected());
+        Ok(true)
     }
 
-    /// Java `getParameters(NewstParam, boolean)`.
-    pub fn get_newst_parameters(&self, newst_param: &mut NewstParam, do_validation: bool) -> bool {
-        let Ok(size) = self
-            .ltf_size_to_output_in_x_and_y
-            .get_text_validated(do_validation)
-        else {
-            return false;
-        };
+    /// Java `getParameters(NewstParam, boolean) throws
+    /// FortranInputSyntaxException, InvalidParameterException, IOException`
+    /// (NewstackAndBlendmontParamPanel.java:196).  Copy the newstack
+    /// parameters from the GUI to the NewstParam object.
+    pub fn get_parameters_newst_param_boolean(
+        &self,
+        newst_param: &mut NewstParam,
+        do_validation: bool,
+    ) -> Result<bool, NewstackDisplayException> {
+        // try { ... } catch (FieldValidationFailedException e) { return false; }
         let binning = self.get_binning();
-        newst_param.bin_by_factor = (binning > 1).then_some(binning);
-        if let Some(check_box) = &self.cb_antialias_filter {
-            newst_param.antialias_filter = check_box
-                .is_selected()
-                .then_some(self.antialias_filter_value.unwrap_or_default());
+        // Only explicitly write out the binning if its value is something other than
+        // the default of 1 to keep from cluttering up the com script
+        if binning > 1 {
+            newst_param.set_bin_by_factor(Some(Number::Integer(binning)));
+        } else {
+            newst_param.set_bin_by_factor(Some(Number::Integer(i32::MIN)));
         }
-        newst_param.linear_interpolation = self.cb_use_linear_interpolation.is_selected();
-        newst_param.size_to_output_in_x_and_y = Some(size);
-        true
+        // Save when field is disabled
+        // Upstream bug fixed in translation: NewstackAndBlendmontParamPanel.java:209
+        // dereferences `cbAntialiasFilter`, which the constructor leaves null
+        // for a montage, so this method throws a NullPointerException there.
+        // A missing checkbox reads as unchecked here (no antialias filter),
+        // which is what the montage panel displays.
+        let antialias_filter = self
+            .cb_antialias_filter
+            .as_ref()
+            .is_some_and(|cb_antialias_filter| cb_antialias_filter.is_selected());
+        newst_param.set_antialias_filter(antialias_filter);
+        if antialias_filter {
+            if let Some(antialias_filter_value) = &self.antialias_filter_value {
+                newst_param.set_antialias_filter_value(&antialias_filter_value.borrow());
+            }
+        }
+        newst_param.set_linear_interpolation(self.cb_use_linear_interpolation.is_selected());
+        let size_to_output_in_xand_y = match self
+            .ltf_size_to_output_in_xand_y
+            .get_text_boolean(do_validation)
+        {
+            Ok(text) => text,
+            Err(_) => return Ok(false),
+        };
+        match newst_param.set_size_to_output_in_xand_y(
+            size_to_output_in_xand_y.as_deref().unwrap_or(""),
+            self.get_binning(),
+            self.manager
+                .get_meta_data()
+                .get_image_rotation(self.axis_id)
+                .get_double(),
+            Some(&self.ltf_size_to_output_in_xand_y.get_label()),
+        ) {
+            Ok(result) => Ok(result),
+            Err(SetSizeToOutputInXandYError::FortranInputSyntax(e)) => {
+                Err(NewstackDisplayException::FortranInputSyntaxException(e))
+            }
+            // InvalidParameterException / IOException from reading the header.
+            Err(SetSizeToOutputInXandYError::HeaderRead(message)) => {
+                Err(NewstackDisplayException::InvalidParameterException(
+                    InvalidParameterException::new(&message),
+                ))
+            }
+        }
     }
 
-    /// Java `setParameters(ConstMetaData)`.
-    pub fn set_meta_data_parameters(&mut self, meta_data: &MetaData) {
-        let index = self.axis_id.get_axis_of_extension() as usize;
-        self.l_ctf3d1.visible = meta_data.ctf3d_setup_slab_thickness_in_nm_set;
-        self.l_ctf3d2.visible = meta_data.ctf3d_setup_slab_thickness_in_nm_set;
+    /// Java `setParameters(ConstMetaData)` (NewstackAndBlendmontParamPanel.java:225).
+    pub fn set_parameters_const_meta_data(&self, meta_data: &dyn ConstMetaData) {
+        let ctf3d = meta_data.is_ctf_3d_setup_slab_thickness_in_nm_set();
+        self.l_ctf3d1.set_visible(ctf3d);
+        self.l_ctf3d2.set_visible(ctf3d);
         self.spin_binning
-            .set_value_int(meta_data.stack_binning[index]);
-        if meta_data.antialias_filter[index].is_some() {
-            self.antialias_filter_value = meta_data.antialias_filter[index];
+            .set_value_int(meta_data.get_stack_binning(self.axis_id));
+        if !meta_data.is_antialias_filter_null(self.dialog_type, self.axis_id) {
+            // Upstream bug fixed in translation: NewstackAndBlendmontParamPanel.java:231
+            // calls `antialiasFilterValue.set(...)` unguarded, but the
+            // constructor leaves `antialiasFilterValue` null for a montage, so
+            // a montage dataset whose metadata carries an antialias value
+            // throws a NullPointerException.  The value is only stored when
+            // the field exists (the montage panel has nothing to show it in).
+            if let Some(antialias_filter_value) = &self.antialias_filter_value {
+                let value = meta_data.get_antialias_filter(self.dialog_type, self.axis_id);
+                antialias_filter_value
+                    .borrow_mut()
+                    .set_const_etomo_number(value.as_deref());
+            }
         }
-        self.ltf_size_to_output_in_x_and_y
-            .set_text(&meta_data.size_to_output_in_x_and_y[index]);
+        self.ltf_size_to_output_in_xand_y.set_text_string(Some(
+            &meta_data
+                .get_size_to_output_in_x_and_y(self.axis_id)
+                .to_string_default_is_blank(true),
+        ));
         self.update_fiducialess();
         self.update_enabled();
     }
 
-    /// Java `setFiducialessAlignment`.
-    pub fn set_fiducialess_alignment(&mut self, input: bool) {
-        self.cb_fiducialess.set_selected(input);
+    /// Java `setFiducialessAlignment(boolean)` (NewstackAndBlendmontParamPanel.java:239).
+    pub fn set_fiducialess_alignment(&self, input: bool) {
+        self.cb_fiducialess.set_selected_boolean(input);
         self.update_fiducialess();
     }
 
-    /// Java `setImageRotation`.
-    pub fn set_image_rotation(&mut self, input: impl Into<String>) {
-        self.ltf_rotation.set_text(&input.into());
+    /// Java `setImageRotation(String)` (NewstackAndBlendmontParamPanel.java:244).
+    pub fn set_image_rotation(&self, input: Option<&str>) {
+        self.ltf_rotation.set_text_string(input);
     }
 
-    /// Java `setBinning(ConstEtomoNumber)` at its number-value boundary.
-    pub fn set_binning(&mut self, binning: i32) {
-        self.spin_binning.set_value_int(binning);
+    /// Java `setBinning(ConstEtomoNumber)` (NewstackAndBlendmontParamPanel.java:248).
+    pub fn set_binning(&self, binning: &ConstEtomoNumber) {
+        self.spin_binning.set_value_const_etomo_number(binning);
         self.update_enabled();
     }
 
-    /// Java private `getBinning`.
-    pub fn get_binning(&self) -> i32 {
-        self.spin_binning.get_value()
+    /// Java private `getBinning()` (NewstackAndBlendmontParamPanel.java:253):
+    /// `((Integer) spinBinning.getValue()).intValue()`.
+    fn get_binning(&self) -> i32 {
+        self.spin_binning.get_value().int_value()
     }
 
-    /// Java private `updateEnabled`.
-    pub fn update_enabled(&mut self) {
-        if let Some(check_box) = &mut self.cb_antialias_filter {
-            check_box.set_enabled(self.spin_binning.get_value() > 1);
+    /// Java private `updateEnabled()` (NewstackAndBlendmontParamPanel.java:257).
+    fn update_enabled(&self) {
+        if let Some(cb_antialias_filter) = &self.cb_antialias_filter {
+            // `Number value = spinBinning.getValue(); value != null && ...`:
+            // the spinner's model always holds a value.
+            let value = self.spin_binning.get_value();
+            cb_antialias_filter.set_enabled(value.int_value() > 1);
         }
     }
 
-    /// Java interface `isFiducialess`.
-    pub fn is_fiducialess(&self) -> bool {
-        self.cb_fiducialess.is_selected()
-    }
-
-    /// Java private `updateFiducialess`.
-    pub fn update_fiducialess(&mut self) {
+    /// Java private `updateFiducialess()` (NewstackAndBlendmontParamPanel.java:269).
+    fn update_fiducialess(&self) {
         self.ltf_rotation
             .set_enabled(self.cb_fiducialess.is_selected());
     }
 
-    /// Java `updateAdvanced`.
-    pub fn update_advanced(&mut self, advanced: bool) {
-        self.advanced = advanced;
-        self.ltf_size_to_output_in_x_and_y.set_visible(advanced);
+    /// Java `updateAdvanced(boolean)` (NewstackAndBlendmontParamPanel.java:279).
+    pub fn update_advanced(&self, advanced: bool) {
+        self.ltf_size_to_output_in_xand_y.set_visible(advanced);
     }
 
-    /// Java `action(String, Deferred3dmodButton, Run3dmodMenuOptions)`.
-    pub fn action(&mut self, command: &str) {
-        if self.cb_fiducialess.get_action_command() == Some(command) {
+    /// Java `action(String, Deferred3dmodButton, Run3dmodMenuOptions)`
+    /// (NewstackAndBlendmontParamPanel.java:292).  Executes the action
+    /// associated with command.  Deferred3dmodButton is null if it comes from
+    /// the dialog's ActionListener.
+    pub fn action(
+        &self,
+        command: &str,
+        _deferred_3dmod_button: Option<Rc<dyn Deferred3dmodButton>>,
+        _run_3dmod_menu_options: Option<Run3dmodMenuOptions>,
+    ) {
+        if self.cb_fiducialess.get_action_command().as_deref() == Some(command) {
             self.update_fiducialess();
         }
     }
 
-    /// Native callback endpoint for Java
-    /// `NewstackAndBlendmontParamPanelActionListener.actionPerformed`.
-    #[allow(non_snake_case)]
-    pub fn actionPerformed(&mut self, command: &str) {
-        self.action(command);
-    }
-
-    /// Native callback endpoint for Java
-    /// `NewstackAndBlendmontBinningChangeListener.stateChanged`.
-    #[allow(non_snake_case)]
-    pub fn stateChanged(&mut self) {
-        self.update_enabled();
-    }
-
-    /// Java private `setToolTipText` with autodoc I/O retained as a direct boundary.
-    pub fn set_tool_tip_text<A: NewstackAndBlendmontParamPanelAutodoc>(&mut self, autodoc: &A) {
-        self.ltf_size_to_output_in_x_and_y.set_tool_tip_text(
-            autodoc
-                .newstack_size_to_output_tooltip(self.axis_id)
+    /// Java private `setToolTipText()` (NewstackAndBlendmontParamPanel.java:299).
+    fn set_tool_tip_text(&self) {
+        let manager: &'static dyn BaseManager = self.manager;
+        let autodoc: *mut crate::imod::etomo::storage::autodoc::autodoc::Autodoc = match unsafe {
+            autodoc_factory::get_instance(
+                Some(manager),
+                Some(autodoc_factory::NEWSTACK),
+                self.axis_id,
+                false,
+            )
+        } {
+            Ok(autodoc) => autodoc,
+            // catch (final LockException except) {}
+            Err(LogFileError::Lock(_)) => std::ptr::null_mut(),
+            // catch (final LogFileException | IOException except)
+            Err(except) => {
+                eprintln!("{except}");
+                std::ptr::null_mut()
+            }
+        };
+        if !autodoc.is_null() {
+            // `ltfSizeToOutputInXandY != null` is always true (final field).
+            let autodoc: *const dyn ReadOnlyAutodoc = autodoc;
+            self.ltf_size_to_output_in_xand_y.set_tool_tip_text(
+                unsafe {
+                    etomo_autodoc::get_tooltip(
+                        Some(&*autodoc),
+                        Some(newst_param::SIZE_TO_OUTPUT_IN_X_AND_Y),
+                    )
+                }
                 .as_deref(),
-        );
-        self.cb_use_linear_interpolation.set_tool_tip_text(Some(
-            "Make aligned stack with linear instead of cubic interpolation to  reduce noise.",
+            );
+        }
+        // `cbUseLinearInterpolation != null` is always true (final field).
+        self.cb_use_linear_interpolation
+            .set_tool_tip_text_string(Some(
+                "Make aligned stack with linear instead of cubic interpolation to  reduce noise.",
+            ));
+        self.spin_binning.set_tool_tip_text(Some(
+            "Set the binning for the aligned image stack and tomogram.  With a binned \
+             tomogram, all of the thickness, position, and size parameters in Tomogram \
+             Generation are still entered in unbinned pixels.",
         ));
-        self.spin_binning.set_tool_tip_text(Some("Set the binning for the aligned image stack and tomogram.  With a binned tomogram, all of the thickness, position, and size parameters in Tomogram Generation are still entered in unbinned pixels."));
         self.cb_fiducialess
-            .set_tool_tip_text(Some("Use cross-correlation alignment only."));
-        self.ltf_rotation.set_tool_tip_text(Some("Rotation angle of tilt axis for generating aligned stack from cross-correlation alignment only."));
-        if let Some(check_box) = &mut self.cb_antialias_filter {
-            check_box.set_tool_tip_text(Some("Use antialiased image reduction instead binning with the default filter in Newstack; useful for data from direct detection cameras."));
+            .set_tool_tip_text_string(Some("Use cross-correlation alignment only."));
+        self.ltf_rotation.set_tool_tip_text(Some(
+            "Rotation angle of tilt axis for generating aligned stack from \
+             cross-correlation alignment only.",
+        ));
+        if let Some(cb_antialias_filter) = &self.cb_antialias_filter {
+            cb_antialias_filter.set_tool_tip_text_string(Some(
+                "Use antialiased image reduction instead binning with the default filter \
+                 in Newstack; useful for data from direct detection cameras.",
+            ));
         }
     }
 }
 
 impl FiducialessParams for NewstackAndBlendmontParamPanel {
+    /// Java `isFiducialess()` (NewstackAndBlendmontParamPanel.java:265).
     fn is_fiducialess(&self) -> bool {
-        Self::is_fiducialess(self)
+        self.cb_fiducialess.is_selected()
     }
 
+    /// Java `getImageRotation(boolean) throws FieldValidationFailedException`
+    /// (NewstackAndBlendmontParamPanel.java:274).
     fn get_image_rotation(
         &self,
         do_validation: bool,
     ) -> Result<String, FieldValidationFailedException> {
-        self.ltf_rotation.get_text_validated(do_validation)
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    struct Autodoc;
-    impl NewstackAndBlendmontParamPanelAutodoc for Autodoc {
-        fn newstack_size_to_output_tooltip(&self, _: AxisID) -> Option<String> {
-            Some("size tooltip".into())
-        }
-    }
-
-    #[test]
-    fn construction_and_listeners_follow_java_branches() {
-        let panel = NewstackAndBlendmontParamPanel::get_instance(
-            &Autodoc,
-            AxisID::First,
-            DialogType::FinalAlignedStack,
-            ViewType::SingleView,
-        );
-        assert!(panel.cb_antialias_filter.is_some());
-        assert!(panel.action_listener_present && panel.binning_change_listener_present);
-        assert!(!panel.ltf_rotation.enabled);
-        let montage = NewstackAndBlendmontParamPanel::new(
-            AxisID::Only,
-            DialogType::FinalAlignedStack,
-            ViewType::Montage,
-        );
-        assert!(montage.cb_antialias_filter.is_none());
-    }
-
-    #[test]
-    fn parameter_and_control_transfers_preserve_source_rules() {
-        let mut panel = NewstackAndBlendmontParamPanel::new(
-            AxisID::First,
-            DialogType::FinalAlignedStack,
-            ViewType::SingleView,
-        );
-        panel.spin_binning.set_value_int(2);
-        panel.stateChanged();
-        panel.cb_use_linear_interpolation.set_selected(true);
-        panel.cb_fiducialess.set_selected(true);
-        let command = panel
-            .cb_fiducialess
-            .get_action_command()
-            .unwrap()
-            .to_owned();
-        panel.actionPerformed(&command);
-        panel.ltf_size_to_output_in_x_and_y.set_text("100,200");
-        let mut newst = NewstParam::default();
-        assert!(panel.get_newst_parameters(&mut newst, true));
-        assert_eq!(newst.bin_by_factor, Some(2));
-        assert!(newst.linear_interpolation);
-        assert!(panel.ltf_rotation.enabled);
-        assert!(
-            panel
-                .cb_antialias_filter
-                .as_ref()
-                .is_some_and(|value| value.check_box.enabled)
-        );
-    }
-
-    #[test]
-    fn implements_canonical_fiducialess_params_without_duplicate_state() {
-        let mut panel = NewstackAndBlendmontParamPanel::new(
-            AxisID::First,
-            DialogType::FinalAlignedStack,
-            ViewType::SingleView,
-        );
-        panel.set_fiducialess_alignment(true);
-        panel.set_image_rotation("-3.5");
-        let params: &dyn FiducialessParams = &panel;
-        assert!(params.is_fiducialess());
-        assert_eq!(params.get_image_rotation(true).unwrap(), "-3.5");
+        // The trait returns a String; a text field's text is never null.
+        Ok(self
+            .ltf_rotation
+            .get_text_boolean(do_validation)?
+            .unwrap_or_default())
     }
 }

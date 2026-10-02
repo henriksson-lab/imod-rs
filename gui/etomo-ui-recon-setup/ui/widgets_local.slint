@@ -3,7 +3,9 @@
 // the common crate: one component per Swing widget class in
 // `IMOD/Etomo/src/etomo/ui/swing`, named after that class.
 
-import { EtomoStyle } from "../../etomo-ui-common/ui/widgets.slint";
+import {
+    EtomoStyle, EtomoBridge, BridgedTextBox, BridgedButton, BridgedToggle, BridgedComboBox,
+} from "../../etomo-ui-common/ui/widgets.slint";
 
 // `EtchedBorder` (`EtchedBorder.java`): a titled etched group box.  A distinct
 // Swing class from `BeveledBorder`, which is all the common crate carries;
@@ -29,24 +31,40 @@ export component EtchedBorder inherits Rectangle {
 }
 
 // `TextField` (`TextField.java`): an entry box with no label of its own.
-export component TextField inherits Rectangle {
-    in property <string> text;
+// `label` is the Java `reference` the field is named from (`TextField.setName`,
+// "tf." + the converted reference); it is not drawn.
+export component TextField inherits BridgedTextBox {
+    kind: "tf";
+}
+
+// The folder button beside a file text field: `ScaledImage.OPEN_FILE` in the
+// Java; Slint has no image to point at here, so the glyph stands in for it.
+// Wired, it presses the button in the Swing panel of the field labelled
+// `label` (bridge kind "fbn").
+component FileButton inherits Rectangle {
+    in property <string> label;
     in property <bool> enabled: true;
+    width: EtomoStyle.field-height;
     height: EtomoStyle.field-height;
-    background: EtomoStyle.field-background;
+    background: EtomoStyle.panel;
     border-width: 1px;
     border-color: EtomoStyle.border;
     Text {
-        x: 3px;
-        text: root.text;
+        text: "[]";
+        horizontal-alignment: center;
         vertical-alignment: center;
-        color: root.enabled ? EtomoStyle.text : EtomoStyle.disabled-text;
+        color: area.shown-enabled ? EtomoStyle.text : EtomoStyle.disabled-text;
+    }
+    area := BridgedButton {
+        kind: "fbn";
+        label: root.label;
+        default-enabled: root.enabled;
     }
 }
 
 // `FileTextField` (`FileTextField.java`): label, entry box, folder button.
-// The Java button carries the `ScaledImage.OPEN_FILE` icon; Slint has no image
-// to point at here, so the glyph stands in for it.
+// The field is `new TextField(FIELD_TYPE, label, null)`, so it is named from
+// the label.
 export component FileTextField inherits HorizontalLayout {
     in property <string> label;
     in property <string> text;
@@ -57,21 +75,16 @@ export component FileTextField inherits HorizontalLayout {
         text: root.label;
         width: root.label-width;
         vertical-alignment: center;
-        color: root.enabled ? EtomoStyle.text : EtomoStyle.disabled-text;
+        color: field.shown-enabled ? EtomoStyle.text : EtomoStyle.disabled-text;
         font-size: EtomoStyle.font-size-pt * 1px;
     }
-    TextField {
+    field := BridgedTextBox {
+        kind: "tf";
+        label: root.label;
         text: root.text;
         enabled: root.enabled;
     }
-    Rectangle {
-        width: EtomoStyle.field-height;
-        height: EtomoStyle.field-height;
-        background: EtomoStyle.panel;
-        border-width: 1px;
-        border-color: EtomoStyle.border;
-        Text { text: "[]"; horizontal-alignment: center; vertical-alignment: center; }
-    }
+    FileButton { label: root.label; enabled: root.enabled; }
 }
 
 // `ButtonControlTextEfield` (`ButtonControlTextEfield.java`), as built by
@@ -88,25 +101,20 @@ export component ButtonControlTextEfield inherits HorizontalLayout {
         text: root.label;
         width: root.label-width;
         vertical-alignment: center;
-        color: root.enabled ? EtomoStyle.text : EtomoStyle.disabled-text;
+        color: field.shown-enabled ? EtomoStyle.text : EtomoStyle.disabled-text;
         font-size: EtomoStyle.font-size-pt * 1px;
     }
-    TextField {
+    field := BridgedTextBox {
+        kind: "tf";
+        label: root.label;
         text: root.text;
         enabled: root.enabled;
     }
-    Rectangle {
-        width: EtomoStyle.field-height;
-        height: EtomoStyle.field-height;
-        background: EtomoStyle.panel;
-        border-width: 1px;
-        border-color: EtomoStyle.border;
-        Text { text: "[]"; horizontal-alignment: center; vertical-alignment: center; }
-    }
+    FileButton { label: root.label; enabled: root.enabled; }
 }
 
-// `ComboBox` (`ComboBox.java`): label then a drop-down.  Static: the popup and
-// the item list are behaviour, so only the closed box is drawn.
+// `ComboBox` (`ComboBox.java`): label then a drop-down, named "cbb." + the
+// label.
 export component ComboBox inherits HorizontalLayout {
     in property <string> label;
     in property <string> text;
@@ -117,34 +125,20 @@ export component ComboBox inherits HorizontalLayout {
         text: root.label;
         width: root.label-width;
         vertical-alignment: center;
-        color: root.enabled ? EtomoStyle.text : EtomoStyle.disabled-text;
+        color: box.shown-enabled ? EtomoStyle.text : EtomoStyle.disabled-text;
         font-size: EtomoStyle.font-size-pt * 1px;
     }
-    Rectangle {
-        height: EtomoStyle.field-height;
-        background: EtomoStyle.field-background;
-        border-width: 1px;
-        border-color: EtomoStyle.border;
-        HorizontalLayout {
-            padding-left: 3px;
-            Text {
-                text: root.text;
-                vertical-alignment: center;
-                color: root.enabled ? EtomoStyle.text : EtomoStyle.disabled-text;
-            }
-            Rectangle {
-                width: 16px;
-                background: EtomoStyle.panel;
-                border-width: 1px;
-                border-color: EtomoStyle.border;
-                Text { text: "v"; horizontal-alignment: center; vertical-alignment: center; }
-            }
-        }
+    box := BridgedComboBox {
+        kind: "cbb";
+        label: root.label;
+        text: root.text;
+        enabled: root.enabled;
     }
 }
 
 // `CheckTextField` (`CheckTextField.java`): a check box that enables the entry
-// box beside it.
+// box beside it.  `setLabel` gives the check box the label as its text and
+// the text field the label as its name, so both are found from `text`.
 export component CheckTextField inherits HorizontalLayout {
     in property <string> text;
     in property <bool> checked;
@@ -162,27 +156,41 @@ export component CheckTextField inherits HorizontalLayout {
             background: EtomoStyle.field-background;
             border-width: 1px;
             border-color: EtomoStyle.border;
-            if root.checked: Text { text: "x"; horizontal-alignment: center; vertical-alignment: center; }
+            if toggle.checked: Text { text: "x"; horizontal-alignment: center; vertical-alignment: center; }
+        }
+        toggle := BridgedToggle {
+            kind: "cb";
+            label: root.text;
+            default-checked: root.checked;
+            default-enabled: root.enabled;
         }
     }
     Text {
         text: root.text;
         vertical-alignment: center;
-        color: root.enabled ? EtomoStyle.text : EtomoStyle.disabled-text;
+        color: toggle.shown-enabled ? EtomoStyle.text : EtomoStyle.disabled-text;
     }
     TextField {
         width: root.field-width;
+        label: root.text;
         text: root.field-text;
-        enabled: root.checked;
+        enabled: toggle.checked;
     }
 }
 
-// `ProgressPanel` (`ProgressPanel.java`): the task label above a `JProgressBar`.
+// `ProgressPanel` (`ProgressPanel.java`): the task label above a `JProgressBar`
+// (named `the-progress-bar-label` and `the-progress-bar`).
 export component ProgressPanel inherits VerticalLayout {
     in property <string> label: "No process";
+    property <string> shown-label: EtomoBridge.wired
+        ? EtomoBridge.text-value("raw", "the-progress-bar-label", root.label, EtomoBridge.generation)
+        : root.label;
+    property <float> shown-fraction: EtomoBridge.wired
+        ? EtomoBridge.text-value("pbf", "the-progress-bar", "0", EtomoBridge.generation).to-float()
+        : 0;
     spacing: 5px;
     Text {
-        text: root.label;
+        text: root.shown-label;
         color: EtomoStyle.text;
         font-size: EtomoStyle.font-size-pt * 1px;
     }
@@ -191,11 +199,19 @@ export component ProgressPanel inherits VerticalLayout {
         background: EtomoStyle.field-background;
         border-width: 1px;
         border-color: EtomoStyle.border;
+        Rectangle {
+            x: 1px;
+            y: 1px;
+            width: (parent.width - 2px) * (root.shown-fraction < 0 ? 0.33 : root.shown-fraction);
+            height: parent.height - 2px;
+            background: #6c8ebf;
+        }
     }
 }
 
 // `AxisProgressPanel` (`AxisProgressPanel.java`): the progress panel and its
-// `Kill Process` button.  `SetupDialog` starts it hidden.
+// `Kill Process` button (a `SimpleButton`, named "bn." + its text).
+// `SetupDialog` starts it hidden.
 export component AxisProgressPanel inherits HorizontalLayout {
     in property <string> label: "No process";
     spacing: 5px;
@@ -211,8 +227,13 @@ export component AxisProgressPanel inherits HorizontalLayout {
             text: "Kill Process";
             horizontal-alignment: center;
             vertical-alignment: center;
-            color: EtomoStyle.disabled-text;
+            color: kill.shown-enabled ? EtomoStyle.text : EtomoStyle.disabled-text;
             font-weight: 700;
+        }
+        kill := BridgedButton {
+            kind: "bn";
+            label: "Kill Process";
+            default-enabled: false;
         }
     }
 }

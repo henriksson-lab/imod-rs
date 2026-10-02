@@ -1,0 +1,3 @@
+# Cases whose output an upstream-bug fix changes (BUGS.md, runraptor)
+raw_mrc	raw .mrc stack: native compares the dotted extension with undotted standard types and skips xfmodel
+raw_blank	blank line after newstack -StandardInput in prenewst.com: native IndexError

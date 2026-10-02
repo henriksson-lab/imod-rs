@@ -1,55 +1,40 @@
 //! Translation of `IMOD/raptor/suitesparse/cs_ereach.c`.
 
-use super::Cs;
+use super::cs::{Cs, cs_csc, cs_mark, cs_marked};
 
-/// C `cs_ereach`: finds the Cholesky nonzero pattern for one column from an etree.
-pub fn cs_ereach(matrix: &Cs, column: usize, parent: &[Option<usize>]) -> Option<Vec<usize>> {
-    if !matrix.is_csc()
-        || column >= matrix.columns
-        || parent.len() < matrix.columns
-        || matrix.column_pointers.len() < matrix.columns + 1
-    {
-        return None;
+/// `cs_ereach(A, k, parent, s, w)`: find nonzero pattern of Cholesky
+/// L(k,1:k-1) using etree and triu(A(:,k)).
+pub fn cs_ereach(a: &Cs, k: i32, parent: &[i32], s: &mut [i32], w: &mut [i32]) -> i32 {
+    if !cs_csc(a) {
+        return -1;
     }
-    let mut marked = vec![false; matrix.columns];
-    marked[column] = true;
-    let mut pattern = Vec::new();
-    for entry in matrix.column_pointers[column]..matrix.column_pointers[column + 1] {
-        let mut node = *matrix.row_indices.get(entry)?;
-        if node > column {
-            continue;
+    let n = a.n;
+    let mut top = n;
+    let ap = &a.p;
+    let ai = &a.i;
+    cs_mark(w, k); // mark node k as visited
+    for p in ap[k as usize]..ap[k as usize + 1] {
+        let mut i = ai[p as usize]; // A(i,k) is nonzero
+        if i > k {
+            continue; // only use upper triangular part of A
         }
-        let mut path = Vec::new();
-        while !*marked.get(node)? {
-            path.push(node);
-            marked[node] = true;
-            node = parent[node]?;
+        let mut len = 0i32;
+        while !cs_marked(w, i) {
+            // traverse up etree
+            s[len as usize] = i; // L(k,i) is nonzero
+            len += 1;
+            cs_mark(w, i); // mark i as visited
+            i = parent[i as usize];
         }
-        for node in path {
-            pattern.push(node);
+        while len > 0 {
+            top -= 1;
+            len -= 1;
+            s[top as usize] = s[len as usize]; // push path onto stack
         }
     }
-    Some(pattern)
-}
-
-#[cfg(test)]
-mod tests {
-    use super::cs_ereach;
-    use crate::imod::raptor::suitesparse::Cs;
-    #[test]
-    fn ereach_returns_source_stack_order() {
-        let matrix = Cs {
-            nzmax: 3,
-            rows: 3,
-            columns: 3,
-            column_pointers: vec![0, 0, 0, 3],
-            row_indices: vec![0, 1, 2],
-            values: vec![1.; 3],
-            nz: -1,
-        };
-        assert_eq!(
-            cs_ereach(&matrix, 2, &[Some(1), Some(2), None]),
-            Some(vec![0, 1])
-        );
+    for p in top..n {
+        cs_mark(w, s[p as usize]); // unmark all nodes
     }
+    cs_mark(w, k); // unmark node k
+    top // s [top..n-1] contains pattern of L(k,:)
 }

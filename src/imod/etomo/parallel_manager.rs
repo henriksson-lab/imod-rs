@@ -102,13 +102,15 @@ impl ParallelManager {
             main_panel: None,
         }));
         INSTANCES.lock().unwrap().push(instance);
+        // Java `super()` (the BaseManager constructor) runs before the subclass
+        // creates its process manager.
+        instance.base_manager();
         assert!(
             instance
                 .process_mgr
                 .set(ParallelProcessManager::new(instance))
                 .is_ok()
         );
-        instance.base_manager();
         instance.create_state();
         // TODO(unit): ParallelMetaData, BaseScreenState,
         // ParallelState, MainParallelPanel, UIHarness, and EtomoDirector.  The source
@@ -525,19 +527,35 @@ impl BaseManager for ParallelManager {
     }
     /// Java `getBaseScreenState`.
     // TODO(unit): etomo/type/BaseScreenState.java.
-    fn get_base_screen_state(&self, axis_id: Option<AxisID>) -> Option<Infallible> {
+    fn get_base_screen_state(
+        &self,
+        axis_id: Option<AxisID>,
+    ) -> Option<&'static crate::imod::etomo::r#type::base_screen_state::BaseScreenState> {
         let _ = axis_id;
-        self.screen_state
+        match self.screen_state {
+            None => None,
+            Some(screen_state) => match screen_state {},
+        }
     }
     /// Java `getBaseState`.
     // TODO(unit): etomo/type/ParallelState.java.
-    fn get_base_state(&self) -> Option<Infallible> {
-        self.state
+    fn get_base_state(
+        &self,
+    ) -> Option<&'static dyn crate::imod::etomo::r#type::base_state::BaseState> {
+        match self.state {
+            None => None,
+            Some(state) => match state {},
+        }
     }
     /// Java `getMainPanel`.
     // TODO(unit): etomo/ui/swing/MainParallelPanel.java.
-    fn get_main_panel(&self) -> Option<Infallible> {
-        self.main_panel
+    fn get_main_panel(
+        &self,
+    ) -> Option<std::rc::Rc<dyn crate::imod::etomo::ui::swing::main_panel::MainPanelVirtual>> {
+        match self.main_panel {
+            None => None,
+            Some(main_panel) => match main_panel {},
+        }
     }
     /// Java `getFileSubdirectoryName`.
     fn get_file_subdirectory_name(&self) -> Option<String> {
@@ -545,27 +563,31 @@ impl BaseManager for ParallelManager {
     }
     /// Java `getStorables(int)`.
     // TODO(unit): ParallelMetaData, BaseScreenState and ParallelState.
-    fn get_storables_with_offset(&self, offset: i32) -> Option<Vec<Box<dyn Storable>>> {
+    fn get_storables_with_offset(&self, offset: i32) -> Option<Vec<Option<&'static dyn Storable>>> {
         let _ = offset;
         None
     }
     /// Java `getProcessManager` abstract-bridge implementation.
     // TODO(unit): represent BaseProcessManager as the common BaseManager return type;
     // `parallel_process_manager` above exposes this concrete source implementation.
-    fn get_process_manager(&self) -> Option<Infallible> {
+    fn get_process_manager(
+        &self,
+    ) -> Option<&'static crate::imod::etomo::process::base_process_manager::BaseProcessManager>
+    {
+        // TODO(unit): this manager's process manager is not constructed yet.
         None
     }
     /// Java `save`.
-    fn save(&self) -> bool {
-        let _ = self.save_super();
+    fn save(&'static self) -> Result<bool, crate::imod::etomo::storage::log_file::LogFileError> {
+        self.save_super()?;
         self.save_dialog();
-        true
+        Ok(true)
     }
     /// Java `exitProgram`.
-    fn exit_program(&self, axis_id: Option<AxisID>) -> bool {
+    fn exit_program(&'static self, axis_id: Option<AxisID>) -> bool {
         if self.exit_program_super(axis_id) {
             self.end_threads();
-            self.save_param_file();
+            let _ = self.save_param_file();
             true
         } else {
             false
@@ -575,16 +597,22 @@ impl BaseManager for ParallelManager {
     // TODO(unit): UIComponent, ProcessSeries.Process, ProcessResultDisplay,
     // ProcessSeries, ProcessDisplay and ProcessingMethod.
     fn start_next_process(
-        &self,
-        ui_component: Option<Infallible>,
-        axis_id: Option<AxisID>,
-        process: Option<Infallible>,
-        process_result_display: Option<Infallible>,
-        process_series: Option<Infallible>,
-        dialog_type: Option<Infallible>,
-        display: Option<Infallible>,
+        &'static self,
+        ui_component: Option<std::rc::Rc<dyn crate::imod::etomo::ui::UiComponent>>,
+        axis_id: AxisID,
+        process: &crate::imod::etomo::process_series::Process,
+        process_result_display: Option<
+            crate::imod::etomo::process::process_interface::ProcessResultDisplayRef,
+        >,
+        process_series: &crate::imod::etomo::process_series::ProcessSeriesHandle,
+        dialog_type: Option<DialogType>,
+        display: Option<
+            std::rc::Rc<dyn crate::imod::etomo::ui::swing::process_display::ProcessDisplay>,
+        >,
     ) -> bool {
-        let _ = (
+        // TODO(unit): this manager's own `startNextProcess` tasks are not translated
+        // yet; the base class's run first, as the Java override's `super` call does.
+        self.start_next_process_super(
             ui_component,
             axis_id,
             process,
@@ -592,8 +620,7 @@ impl BaseManager for ParallelManager {
             process_series,
             dialog_type,
             display,
-        );
-        false
+        )
     }
     /// Java `getName`.
     // TODO(unit): etomo/type/ParallelMetaData.java.
@@ -618,10 +645,13 @@ mod tests {
     use super::*;
     #[test]
     fn source_constants_and_null_dialog_guards_are_preserved() {
-        let manager = ParallelManager::new();
-        assert_eq!(manager.get_interface_type(), Some(InterfaceType::Pp));
-        assert!(!manager.can_snapshot());
-        assert_eq!(manager.get_file_subdirectory_name_parallel(), None);
-        assert!(!manager.set_new_param_file_from(None));
+        // Managers live on the event dispatch thread, as in Java.
+        crate::imod::etomo::util::event_queue::invoke_and_wait(|| {
+            let manager = ParallelManager::new();
+            assert_eq!(manager.get_interface_type(), Some(InterfaceType::Pp));
+            assert!(!manager.can_snapshot());
+            assert_eq!(manager.get_file_subdirectory_name_parallel(), None);
+            assert!(!manager.set_new_param_file_from(None));
+        });
     }
 }

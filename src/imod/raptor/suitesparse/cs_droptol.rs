@@ -1,13 +1,14 @@
 //! Translation of `IMOD/raptor/suitesparse/cs_droptol.c`.
-use super::Cs;
+
+use super::cs::Cs;
 use super::cs_fkeep::cs_fkeep;
 
-/// C static `cs_tol`.
-fn cs_tol(_i: usize, _j: usize, aij: f64, tolerance: f64) -> bool {
-    aij.abs() > tolerance
+/// `cs_tol(i, j, aij, tol)` (static).
+fn cs_tol(_i: i32, _j: i32, aij: f64, tol: &f64) -> i32 {
+    (aij.abs() > *tol) as i32
 }
 
-/// C `cs_droptol`: retains CSC entries whose absolute value exceeds `tolerance`.
-pub fn cs_droptol(matrix: &mut Cs, tolerance: f64) -> Option<usize> {
-    cs_fkeep(matrix, |i, j, value| cs_tol(i, j, value, tolerance))
+/// `cs_droptol(A, tol)`: keep all large entries.
+pub fn cs_droptol(a: &mut Cs, tol: f64) -> i32 {
+    cs_fkeep(a, &|i, j, aij| cs_tol(i, j, aij, &tol))
 }

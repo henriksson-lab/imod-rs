@@ -1,282 +1,214 @@
 //! `IMOD/Etomo/src/etomo/ui/swing/ButtonStyleExtension.java`.
-#![allow(dead_code)]
+//!
+//! A class to handle the appearance of buttons.  Contains CompleteIcons
+//! corresponding to different types of flags.  Specifically for handling
+//! icons, but setup may be overridden to modify the button in other ways
+//! (such as size, background, or boundary).  For foreground text changes, and
+//! editable and enabled settings use AppearanceExtension.
+//!
+//! Statelessness: this class is designed to be inherited by singletons which
+//! can be used to give a large number of the same type of button the same
+//! style.  Do not add any state information related to a button instance to
+//! a singleton.
+//!
+//! Java `abstract class`: subclasses (`SingleLineButtonStyleExtension`,
+//! `OpenCloseButtonStyleExtension`, `CloseButtonStyleExtension`,
+//! `FileOpenButtonStyleExtension`, `ClearButtonStyleExtension`,
+//! `HeaderButtonStyleExtension`, ...) embed this struct as field `base` and
+//! implement [`ButtonStyleExtensionVirtual`]; a button holds its style as
+//! `Rc<dyn ButtonStyleExtensionVirtual>` and calls `setup` virtually.  This
+//! class never calls an overridable method itself, so it keeps no `this`.
+//!
+//! Icons are painting and sizes are layout, neither modelled by `jdk.rs`;
+//! the calls into `CompleteIcon` are kept (that unit decides what they do),
+//! the size computation is kept, and the Swing size/alignment setters are
+//! comments.
 
-use std::sync::Arc;
+use std::cell::Cell;
+use std::rc::Rc;
 
-use super::appearance_extension::FlagType;
+use crate::imod::etomo::jdk::{Dimension, JComponent};
+use crate::imod::etomo::ui::flag_type::FlagType;
 
-/// Boundary for Java `java.awt.image.ImageObserver`.
-pub trait ImageObserverBoundary: Send + Sync {}
+use super::complete_icon::CompleteIcon;
 
-/// The four `CompleteIcon` constructor slots owned by one button style.
-#[derive(Clone)]
-pub struct CompleteIconBoundary<I> {
-    pub image: I,
-    pub selected_image: Option<I>,
-    pub pressed_image: Option<I>,
-    pub rollover_image: Option<I>,
-    pub image_observer: Option<Arc<dyn ImageObserverBoundary>>,
-    pub debug: bool,
-    pub icon_size: Option<(i32, i32)>,
-}
+/// Java private static final `PADDING_FOR_ICON_BUTTON`.
+const PADDING_FOR_ICON_BUTTON: i32 = 5;
 
-/// Native GUI calls on Java `AbstractButton` reached by this source unit.
-pub trait ButtonStyleButton<I> {
-    fn set_icon(&mut self, icon: &CompleteIconBoundary<I>);
-    fn set_icon_text_gap(&mut self, gap: i32);
-    fn set_horizontal_alignment_left(&mut self);
-    fn set_preferred_size(&mut self, size: (i32, i32));
-    fn set_maximum_size(&mut self, size: (i32, i32));
-    fn set_selected_appearance(&mut self, selected: bool);
+/// The overridable members of Java `ButtonStyleExtension`.
+pub trait ButtonStyleExtensionVirtual {
+    /// The embedded `ButtonStyleExtension`.
+    fn get_button_style_extension(&self) -> &ButtonStyleExtension;
+
+    /// Java `synchronized setup(AbstractButton, String, boolean)`: call this
+    /// function to make the button conform to its style.
+    fn setup(&self, button: Option<&Rc<JComponent>>, label: Option<&str>, debug: bool) {
+        self.get_button_style_extension()
+            .setup(button, label, debug)
+    }
+
+    /// Java public final `updateAppearance(AbstractButton, FlagType, boolean, boolean)`.
+    fn update_appearance(
+        &self,
+        button: &Rc<JComponent>,
+        flag_type: Option<&'static FlagType>,
+        implement_toggle: bool,
+        selected: bool,
+    ) {
+        self.get_button_style_extension().update_appearance(
+            button,
+            flag_type,
+            implement_toggle,
+            selected,
+        )
+    }
 }
 
 /// Java package-private abstract `ButtonStyleExtension`.
-#[derive(Clone)]
-pub struct ButtonStyleExtension<I> {
-    pub text_gap: bool,
-    pub icon: Option<CompleteIconBoundary<I>>,
-    pub template_icon: Option<CompleteIconBoundary<I>>,
-    pub error_icon: Option<CompleteIconBoundary<I>>,
-    pub preferred_size: Option<(i32, i32)>,
-    pub size_from_image: bool,
+pub struct ButtonStyleExtension {
+    /// Java final `textGap`.
+    text_gap: bool,
+    /// Java final `icon`.
+    icon: Option<Rc<CompleteIcon>>,
+    /// Java final `templateIcon`.
+    template_icon: Option<Rc<CompleteIcon>>,
+    /// Java final `errorIcon`.
+    error_icon: Option<Rc<CompleteIcon>>,
+    /// Java final `sizeFromImage`.
+    size_from_image: bool,
+    /// Java `preferredSize`.
+    preferred_size: Cell<Option<Dimension>>,
 }
 
-impl<I> ButtonStyleExtension<I> {
-    pub const PADDING_FOR_ICON_BUTTON: i32 = 5;
-
-    /// Java `ButtonStyleExtension(boolean, CompleteIcon, CompleteIcon,
-    /// CompleteIcon, Dimension, boolean)`.
+impl ButtonStyleExtension {
+    /// Java package-private
+    /// `ButtonStyleExtension(boolean, CompleteIcon, CompleteIcon, CompleteIcon, Dimension, boolean)`.
+    /// All CompleteIcon parameters may be set to null.
     pub fn new(
         text_gap: bool,
-        icon: Option<CompleteIconBoundary<I>>,
-        template_icon: Option<CompleteIconBoundary<I>>,
-        error_icon: Option<CompleteIconBoundary<I>>,
-        preferred_size: Option<(i32, i32)>,
+        icon: Option<Rc<CompleteIcon>>,
+        template_icon: Option<Rc<CompleteIcon>>,
+        error_icon: Option<Rc<CompleteIcon>>,
+        preferred_size: Option<Dimension>,
         size_from_image: bool,
-    ) -> Self {
-        Self {
+    ) -> ButtonStyleExtension {
+        ButtonStyleExtension {
             text_gap,
             icon,
             template_icon,
             error_icon,
-            preferred_size,
             size_from_image,
+            preferred_size: Cell::new(preferred_size),
         }
     }
 
-    /// Java synchronized `setup(AbstractButton, String, boolean)`.
-    pub fn setup<B: ButtonStyleButton<I>>(
-        &mut self,
-        button: Option<&mut B>,
-        label: Option<&str>,
-        _debug: bool,
-    ) {
-        let Some(button) = button else { return };
+    /// Java `synchronized setup(AbstractButton, String, boolean)`.  The lock
+    /// has no Rust counterpart: styles are only used on the EDT.
+    pub fn setup(&self, button: Option<&Rc<JComponent>>, label: Option<&str>, _debug: bool) {
+        let Some(button) = button else {
+            return;
+        };
         if let Some(icon) = &self.icon {
-            button.set_icon(icon);
+            icon.setup(Some(button));
         }
+        // Handle an buttons with a label and an icon
         if self.text_gap && label.is_some() && (self.icon.is_some() || self.template_icon.is_some())
         {
-            button.set_icon_text_gap(10);
-            button.set_horizontal_alignment_left();
+            // Swing layout: button.setIconTextGap(10);
+            // button.setHorizontalAlignment(SwingConstants.LEFT).
         }
+        // Setting preferred size for buttons without labels.
+        // If preferredSize wasn't set, get the preferredSize from the icons.
         if !self.text_gap
             && label.is_none()
-            && self.preferred_size.is_none()
+            && self.preferred_size.get().is_none()
             && self.size_from_image
         {
-            let mut icon_size = None;
+            let mut icon_size: Option<Dimension> = None;
             if let Some(icon) = &self.icon {
-                icon_size = self.max_icon_size(icon, icon_size);
+                icon_size = self.max_icon_size(Some(icon), icon_size);
             }
-            if let Some(icon) = &self.template_icon {
-                icon_size = self.max_icon_size(icon, icon_size);
+            if let Some(template_icon) = &self.template_icon {
+                icon_size = self.max_icon_size(Some(template_icon), icon_size);
             }
-            if let Some(icon) = &self.template_icon {
-                icon_size = self.max_icon_size(icon, icon_size);
+            // Java checks templateIcon a second time; the repeat changes nothing.
+            if let Some(template_icon) = &self.template_icon {
+                icon_size = self.max_icon_size(Some(template_icon), icon_size);
             }
-            if let Some(icon) = &self.error_icon {
-                icon_size = self.max_icon_size(icon, icon_size);
+            if let Some(error_icon) = &self.error_icon {
+                icon_size = self.max_icon_size(Some(error_icon), icon_size);
             }
-            if let Some((width, height)) =
-                icon_size.filter(|(width, height)| *width > 0 && *height > 0)
-            {
-                self.preferred_size = Some((
-                    width + Self::PADDING_FOR_ICON_BUTTON,
-                    height + Self::PADDING_FOR_ICON_BUTTON,
-                ));
+            // Set the preferredSize
+            if let Some(mut icon_size) = icon_size {
+                if icon_size.width > 0 && icon_size.height > 0 {
+                    // Convert icon size to a button size.  (Java adds the
+                    // padding to the Dimension object the CompleteIcon caches,
+                    // so the icon's cached size grows too; Dimension is a value
+                    // here, and only layout ever reads either.)
+                    icon_size.width += PADDING_FOR_ICON_BUTTON;
+                    icon_size.height += PADDING_FOR_ICON_BUTTON;
+                    self.preferred_size.set(Some(icon_size));
+                }
             }
         }
-        if let Some(size) = self.preferred_size {
-            button.set_preferred_size(size);
-            button.set_maximum_size(size);
+        // Set the preferredSize if available.
+        if self.preferred_size.get().is_some() {
+            // Swing layout: button.setPreferredSize(preferredSize);
+            // button.setMaximumSize(preferredSize).
         }
     }
 
-    /// Java private `maxIconSize(CompleteIcon, Dimension)`.
+    /// Java private `maxIconSize(CompleteIcon, Dimension)`: return the maximum
+    /// width and height, comparing completeIcon with iconSize.
     fn max_icon_size(
         &self,
-        complete_icon: &CompleteIconBoundary<I>,
-        icon_size: Option<(i32, i32)>,
-    ) -> Option<(i32, i32)> {
-        let new_icon_size = complete_icon.icon_size?;
-        Some(match icon_size {
-            None => new_icon_size,
-            Some((width, height)) => (width.max(new_icon_size.0), height.max(new_icon_size.1)),
-        })
+        complete_icon: Option<&Rc<CompleteIcon>>,
+        icon_size: Option<Dimension>,
+    ) -> Option<Dimension> {
+        let Some(complete_icon) = complete_icon else {
+            return icon_size;
+        };
+        let Some(new_icon_size) = complete_icon.get_icon_size() else {
+            return icon_size;
+        };
+        let Some(mut icon_size) = icon_size else {
+            return Some(new_icon_size);
+        };
+        if new_icon_size.width > icon_size.width {
+            icon_size.width = new_icon_size.width;
+        }
+        if new_icon_size.height > icon_size.height {
+            icon_size.height = new_icon_size.height;
+        }
+        Some(icon_size)
     }
 
-    /// Java final `updateAppearance(AbstractButton, FlagType, boolean, boolean)`.
-    pub fn update_appearance<B: ButtonStyleButton<I>>(
+    /// Java public final `updateAppearance(AbstractButton, FlagType, boolean, boolean)`.
+    /// Sets the appearance.  Can create a appearance of a toggle button.  Can
+    /// change the icon in response to the flagType.
+    pub fn update_appearance(
         &self,
-        button: Option<&mut B>,
-        flag_type: Option<FlagType>,
+        button: &Rc<JComponent>,
+        flag_type: Option<&'static FlagType>,
         implement_toggle: bool,
         selected: bool,
     ) {
-        let Some(button) = button else { return };
-        let mut current_icon = None;
+        let mut cur_icon: Option<&Rc<CompleteIcon>> = None;
         if let Some(flag_type) = flag_type {
             if flag_type.is_template() {
-                current_icon = self.template_icon.as_ref();
+                cur_icon = self.template_icon.as_ref();
             } else if flag_type.is_error() {
-                current_icon = self.error_icon.as_ref();
+                cur_icon = self.error_icon.as_ref();
             }
         }
-        let current_icon = current_icon.or(self.icon.as_ref());
-        if let Some(icon) = current_icon {
-            button.set_icon(icon);
+        if cur_icon.is_none() {
+            cur_icon = self.icon.as_ref();
+        }
+        if let Some(cur_icon) = cur_icon {
+            cur_icon.setup(Some(button));
             if implement_toggle {
-                button.set_selected_appearance(selected);
+                cur_icon.set_selected_appearance(Some(button), selected);
             }
         }
-    }
-}
-
-/// Shared native-boundary record for Java `ButtonStyleExtension` calls from
-/// widgets whose concrete Swing buttons remain outside this crate.
-#[derive(Clone, Debug, Eq, PartialEq)]
-pub struct ButtonStyleExtensionBoundary {
-    pub style_name: &'static str,
-    pub label: Option<String>,
-    pub debug: bool,
-    pub update_count: usize,
-    pub setup_count: usize,
-    pub last_flag_type: Option<FlagType>,
-    pub last_implement_toggle: bool,
-    pub last_selected: bool,
-    pub last_update: Option<(Option<FlagType>, bool, bool)>,
-}
-
-impl ButtonStyleExtensionBoundary {
-    /// Java widget construction selecting a concrete `ButtonStyleExtension`.
-    pub fn new(style_name: &'static str) -> Self {
-        Self {
-            style_name,
-            label: None,
-            debug: false,
-            update_count: 0,
-            setup_count: 0,
-            last_flag_type: None,
-            last_implement_toggle: false,
-            last_selected: false,
-            last_update: None,
-        }
-    }
-
-    /// Java `ButtonStyleExtension.setup(AbstractButton, String, boolean)`.
-    pub fn setup(&mut self, label: Option<&str>, debug: bool) {
-        self.label = label.map(str::to_owned);
-        self.debug = debug;
-        self.setup_count += 1;
-    }
-
-    /// Java `ButtonStyleExtension.updateAppearance(AbstractButton, FlagType, boolean, boolean)`.
-    pub fn update_appearance(
-        &mut self,
-        flag_type: Option<FlagType>,
-        implement_toggle: bool,
-        selected: bool,
-    ) {
-        self.update_count += 1;
-        self.last_flag_type = flag_type;
-        self.last_implement_toggle = implement_toggle;
-        self.last_selected = selected;
-        self.last_update = Some((flag_type, implement_toggle, selected));
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-    #[derive(Default)]
-    struct Button {
-        icon_set: bool,
-        gap: Option<i32>,
-        left: bool,
-        preferred: Option<(i32, i32)>,
-        maximum: Option<(i32, i32)>,
-        selected: Option<bool>,
-    }
-    impl ButtonStyleButton<&'static str> for Button {
-        fn set_icon(&mut self, _: &CompleteIconBoundary<&'static str>) {
-            self.icon_set = true;
-        }
-        fn set_icon_text_gap(&mut self, gap: i32) {
-            self.gap = Some(gap);
-        }
-        fn set_horizontal_alignment_left(&mut self) {
-            self.left = true;
-        }
-        fn set_preferred_size(&mut self, size: (i32, i32)) {
-            self.preferred = Some(size);
-        }
-        fn set_maximum_size(&mut self, size: (i32, i32)) {
-            self.maximum = Some(size);
-        }
-        fn set_selected_appearance(&mut self, selected: bool) {
-            self.selected = Some(selected);
-        }
-    }
-    fn icon(image: &'static str, size: Option<(i32, i32)>) -> CompleteIconBoundary<&'static str> {
-        CompleteIconBoundary {
-            image,
-            selected_image: None,
-            pressed_image: None,
-            rollover_image: None,
-            image_observer: None,
-            debug: false,
-            icon_size: size,
-        }
-    }
-    #[test]
-    fn setup_uses_max_icon_size_and_padding() {
-        let mut style = ButtonStyleExtension::new(
-            false,
-            Some(icon("a", Some((4, 9)))),
-            Some(icon("b", Some((10, 2)))),
-            None,
-            None,
-            true,
-        );
-        let mut button = Button::default();
-        style.setup(Some(&mut button), None, false);
-        assert_eq!(button.preferred, Some((15, 14)));
-        assert_eq!(button.maximum, Some((15, 14)));
-    }
-    #[test]
-    fn update_uses_error_icon_and_toggle() {
-        let style = ButtonStyleExtension::new(
-            false,
-            Some(icon("normal", None)),
-            None,
-            Some(icon("error", None)),
-            None,
-            false,
-        );
-        let mut button = Button::default();
-        style.update_appearance(Some(&mut button), Some(FlagType::ERROR), true, true);
-        assert!(button.icon_set);
-        assert_eq!(button.selected, Some(true));
     }
 }

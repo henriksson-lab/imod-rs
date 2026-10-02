@@ -8,7 +8,6 @@
 //! Python values: `PipGetFloat`/`PipGetTwoFloats` give doubles and `str()` of
 //! one is `repr` ([`py_str_float`]); `round()` rounds half to even.
 
-use super::batchruntomo::py_str_float;
 use super::comchanger::{Change, modify_for_change_list, process_change_options};
 use super::imodpy::{
     OptionValue, add_imod_bin_ignore_sighup, add_output_format_var_to_lines, dataset_filename,
@@ -16,6 +15,7 @@ use super::imodpy::{
     get_naming_style, make_backup_file, map_type_extension_to_style, option_value,
     os_path_splitext, read_text_file, run_goodframe, set_root_and_extension, write_text_file,
 };
+use super::imodpy::{py_fixed, py_float, py_int, py_int_of_float, py_round, py_str_float};
 use super::pip::{
     exit_error, pip_get_boolean, pip_get_err_no, pip_get_float, pip_get_in_out_file,
     pip_get_integer, pip_get_string, pip_get_two_floats, pip_read_or_parse_options,
@@ -242,7 +242,7 @@ pub fn makecomfile(arguments: &[OsString]) -> i32 {
     let name_error = |name: &str| -> ! {
         eprintln!("Traceback (most recent call last):");
         eprintln!("NameError: name '{name}' is not defined");
-        std::process::exit(1)
+        crate::imod::libcfshr::b3dutil::exit(1)
     };
     let rootname_value = || -> String {
         match &rootname {
@@ -367,6 +367,8 @@ pub fn makecomfile(arguments: &[OsString]) -> i32 {
             comlines.push(last_line);
         }
 
+        // finite: `nx`/`ny` are integer header sizes, divided by an integer
+        // binning of at least 1
         let xborder = (0.05 * nx + 0.5) as i32;
         let yborder = (0.05 * ny + 0.5) as i32;
         sedcom = vec![
@@ -513,7 +515,7 @@ pub fn makecomfile(arguments: &[OsString]) -> i32 {
             final_changes.push(
                 [
                     &prefix[..],
-                    &["SHIFT".to_owned(), format!("0. {yshift:.2}")],
+                    &["SHIFT".to_owned(), format!("0. {}", py_fixed(yshift, 0, 2))],
                 ]
                 .concat(),
             );
@@ -557,7 +559,7 @@ pub fn makecomfile(arguments: &[OsString]) -> i32 {
             .concat(),
             [
                 &prefix[..],
-                &["BeadSize".to_owned(), format!("{bead_size:.2}")],
+                &["BeadSize".to_owned(), py_fixed(bead_size, 0, 2)],
             ]
             .concat(),
         ];
@@ -605,7 +607,7 @@ pub fn makecomfile(arguments: &[OsString]) -> i32 {
         final_changes = vec![
             [
                 &prefix[..],
-                &["BetterRadius".to_owned(), format!("{:.2}", bead_size / 2.)],
+                &["BetterRadius".to_owned(), py_fixed(bead_size / 2., 0, 2)],
             ]
             .concat(),
         ];
@@ -682,12 +684,14 @@ pub fn makecomfile(arguments: &[OsString]) -> i32 {
 
     // REDUCEFILTVOL
     } else if reduce_filt {
-        let int_bin = binning_float.round_ties_even() as i64;
+        // `int(round(binning))` raises for a `-binning` of inf or nan (the
+        // entry is only checked with `<= 0`, which NaN passes)
+        let int_bin = py_int_of_float(py_round(binning_float));
         // `binning` stays a float unless it is integral, when it becomes the
         // string fmtstr('{:.1f}', binning)
         let mut binning_text = py_str_float(binning_float);
         if (int_bin as f64 - binning_float).abs() <= 0.001 {
-            binning_text = format!("{binning_float:.1}");
+            binning_text = py_fixed(binning_float, 0, 1);
         }
         let mut out_name = dataset_filename(".red###filt", None, None);
         out_name = out_name.replace("###", &binning_text);
@@ -701,7 +705,7 @@ pub fn makecomfile(arguments: &[OsString]) -> i32 {
         let replace = pip_get_float("ReplaceAboveAngle", -1.).unwrap_or(-1.);
         comlines = with_std(vec![format!("RootName {}", rootname_value())]);
         if replace >= 0. {
-            comlines.push(format!("ReplaceAboveAngle {replace:.2}"));
+            comlines.push(format!("ReplaceAboveAngle {}", py_fixed(replace, 0, 2)));
         }
         if Path::new(&format!("autofidseed{axislet}{com_ext}")).exists() {
             let afs_lines =
